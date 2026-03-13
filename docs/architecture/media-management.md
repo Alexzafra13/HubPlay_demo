@@ -2,7 +2,14 @@
 
 ## Overview
 
-The media management module handles: discovering media files, extracting metadata, organizing the library, and keeping everything in sync. It's the core of HubPlay — without it, there's nothing to stream.
+The media management module handles: discovering media files, extracting metadata, organizing the library, IPTV live TV, and keeping everything in sync. It's the core of HubPlay — without it, there's nothing to stream.
+
+### Supported Content Types
+| Type | Source | Metadata Provider |
+|------|--------|-------------------|
+| Movies | Local files | TMDb + Fanart.tv |
+| Series | Local files | TMDb + Fanart.tv |
+| TV en Directo (IPTV) | M3U/M3U8 lists | EPG (XMLTV) + logos from list |
 
 ---
 
@@ -32,8 +39,8 @@ The media management module handles: discovering media files, extracting metadat
 type Library struct {
     ID          uuid.UUID
     Name        string
-    ContentType ContentType  // Movies, TVShows, Music, Photos, Books
-    Paths       []string     // Physical directories to scan
+    ContentType ContentType  // Movies, TVShows, LiveTV
+    Paths       []string     // Physical directories (or M3U URL for LiveTV)
     ScanMode    ScanMode     // Auto, Manual, Scheduled
     CreatedAt   time.Time
     UpdatedAt   time.Time
@@ -43,9 +50,7 @@ type ContentType string
 const (
     ContentMovies  ContentType = "movies"
     ContentTV      ContentType = "tvshows"
-    ContentMusic   ContentType = "music"
-    ContentPhotos  ContentType = "photos"
-    ContentBooks   ContentType = "books"
+    ContentLiveTV  ContentType = "livetv"
 )
 ```
 
@@ -55,7 +60,7 @@ type MediaItem struct {
     ID            uuid.UUID
     LibraryID     uuid.UUID
     ParentID      *uuid.UUID     // nil for root items, set for episodes/tracks
-    Type          ItemType       // Movie, Series, Season, Episode, Album, Track, etc.
+    Type          ItemType       // Movie, Series, Season, Episode, Channel
     Title         string
     SortTitle     string
     OriginalTitle string
@@ -78,10 +83,7 @@ const (
     ItemSeries  ItemType = "series"
     ItemSeason  ItemType = "season"
     ItemEpisode ItemType = "episode"
-    ItemAlbum   ItemType = "album"
-    ItemTrack   ItemType = "track"
-    ItemPhoto   ItemType = "photo"
-    ItemBook    ItemType = "book"
+    ItemChannel ItemType = "channel"  // IPTV live channel
 )
 ```
 
@@ -227,11 +229,6 @@ type ResolvedItem struct {
     // TV-specific
     SeasonNumber  *int
     EpisodeNumber *int
-    // Music-specific
-    AlbumName     string
-    ArtistName    string
-    TrackNumber   *int
-    DiscNumber    *int
     // Multi-file support
     Parts         []string  // For split movies/episodes
 }
@@ -243,10 +240,6 @@ type ResolvedItem struct {
 |----------|----------|---------------|-------|
 | `MovieResolver` | 10 | Movies | Parses `Title (Year)/Title (Year).ext` pattern |
 | `TVResolver` | 10 | TVShows | Parses `Show/Season XX/Show - SxxExx - Title.ext` |
-| `MusicResolver` | 10 | Music | Reads ID3/Vorbis tags, falls back to `Artist/Album/Track.ext` |
-| `PhotoResolver` | 10 | Photos | Extracts EXIF data, organizes by date |
-| `BookResolver` | 10 | Books | Parses `Author/Title.ext` pattern |
-| `NFOResolver` | 5 | All | Reads `.nfo` sidecar files (Kodi compatibility) |
 | `MultiPartResolver` | 3 | Movies, TV | Groups `cd1/cd2`, `part1/part2` files |
 
 ### File Naming Patterns (examples)
@@ -265,11 +258,6 @@ type ResolvedItem struct {
 /tv/Breaking Bad/Specials/Breaking Bad - S00E01 - Special.mkv
 ```
 
-**Music:**
-```
-/music/Pink Floyd/The Dark Side of the Moon/01 - Speak to Me.flac
-/music/Pink Floyd/The Dark Side of the Moon/cover.jpg            → Album art
-```
 
 ---
 
@@ -318,13 +306,10 @@ type MetadataQuery struct {
 
 | Provider | Type | Priority | Source |
 |----------|------|----------|--------|
-| `EmbeddedTagProvider` | Local | 1 | ID3, Vorbis, EXIF |
-| `NFOProvider` | Local | 2 | `.nfo` sidecar files |
+| `EmbeddedTagProvider` | Local | 1 | Embedded video/audio tags |
 | `TMDbProvider` | Remote | 10 | TMDb API (movies, TV) |
-| `TVDbProvider` | Remote | 20 | TheTVDB API |
-| `MusicBrainzProvider` | Remote | 10 | MusicBrainz API (music) |
-| `FanartProvider` | Image | 10 | fanart.tv |
-| `TMDbImageProvider` | Image | 5 | TMDb images |
+| `FanartProvider` | Image | 5 | fanart.tv (logos, clearart, banners) |
+| `TMDbImageProvider` | Image | 10 | TMDb images (posters, backdrops) |
 
 ### Metadata Refresh Modes
 ```go
@@ -535,36 +520,134 @@ internal/
 │       ├── resolver.go     # Resolver interface + chain
 │       ├── movie.go        # Movie resolver
 │       ├── tv.go           # TV show resolver
-│       ├── music.go        # Music resolver
-│       ├── photo.go        # Photo resolver
-│       ├── book.go         # Book resolver
-│       ├── nfo.go          # NFO sidecar resolver
-│       └── multipart.go   # Multi-part file grouping
+│       └── multipart.go    # Multi-part file grouping
 ├── metadata/
 │   ├── manager.go          # MetadataManager orchestration
 │   ├── provider.go         # Provider interfaces
 │   └── providers/
-│       ├── embedded.go     # Embedded tags (ID3, EXIF)
-│       ├── nfo.go          # NFO file reader
+│       ├── embedded.go     # Embedded video/audio tags
 │       ├── tmdb.go         # TMDb API client
-│       ├── tvdb.go         # TheTVDB API client
-│       ├── musicbrainz.go  # MusicBrainz API client
-│       └── fanart.go       # Fanart.tv images
+│       └── fanart.go       # Fanart.tv images (logos, clearart, banners)
 ├── media/
 │   ├── item.go             # MediaItem domain type
 │   ├── stream.go           # MediaStream type
 │   └── analyzer.go         # FFprobe wrapper
+├── iptv/
+│   ├── manager.go          # IPTV channel manager + playlist refresh
+│   ├── m3u.go              # M3U/M3U8 parser
+│   ├── epg.go              # XMLTV EPG parser
+│   ├── proxy.go            # Stream proxy with reconnection
+│   └── channel.go          # Channel domain type
 ├── event/
 │   └── bus.go              # In-process event bus
 └── db/
     ├── item_repo.go        # ItemRepository (SQLite/PG)
     ├── metadata_repo.go    # MetadataRepository
-    └── library_repo.go     # LibraryRepository
+    ├── library_repo.go     # LibraryRepository
+    └── channel_repo.go     # ChannelRepository (IPTV)
 ```
 
 ---
 
-## 10. Configuration
+## 10. IPTV / Live TV Module
+
+### Overview
+Native IPTV support allows users to watch live TV channels within HubPlay. The user provides a M3U playlist URL (from legal IPTV providers or public free-to-air channels) and optionally an EPG (Electronic Program Guide) URL for the TV schedule.
+
+### Domain Types
+```go
+type Channel struct {
+    ID          uuid.UUID
+    LibraryID   uuid.UUID
+    Name        string
+    Number      int            // Channel number for sorting
+    Group       string         // Category: "Sports", "News", "Entertainment", etc.
+    LogoURL     string         // Channel logo from M3U metadata
+    StreamURL   string         // Source stream URL
+    Language    string
+    Country     string
+    IsActive    bool           // Whether the stream is currently reachable
+    AddedAt     time.Time
+}
+
+type EPGProgram struct {
+    ChannelID   uuid.UUID
+    Title       string
+    Description string
+    Start       time.Time
+    End         time.Time
+    Category    string
+    Icon        string         // Program thumbnail if available
+}
+```
+
+### M3U Parser
+Parses standard M3U/M3U8 playlists with extended attributes:
+```
+#EXTM3U
+#EXTINF:-1 tvg-id="la1" tvg-name="La 1" tvg-logo="https://..." group-title="Nacionales",La 1 HD
+http://stream-url/la1.m3u8
+```
+
+Extracts: channel name, logo URL, group/category, tvg-id (for EPG matching), language, stream URL.
+
+### EPG Parser (XMLTV)
+Parses XMLTV format — the standard for TV guide data:
+- Maps programs to channels via `tvg-id`
+- Stores current + upcoming programs (configurable window, default 48h)
+- Auto-refreshes on schedule (default every 12h)
+- Caches parsed data to avoid re-downloading on restart
+
+### Stream Proxy
+HubPlay proxies IPTV streams instead of sending the raw URL to clients:
+- **Why proxy?** Unified auth, CORS handling, stream health monitoring, and consistent player experience across all clients
+- **Reconnection:** If source stream drops, auto-retry with backoff (1s, 2s, 4s) before marking channel as temporarily unavailable
+- **No transcoding:** IPTV streams arrive pre-encoded, we just relay them. Client must support the codec (usually H.264/AAC — universally supported)
+- **Timeshift (future):** Buffer last N minutes for pause/rewind on live TV
+
+### Channel Manager
+```go
+type ChannelManager interface {
+    // Playlist management
+    LoadPlaylist(ctx context.Context, libraryID uuid.UUID, m3uURL string) error
+    RefreshPlaylist(ctx context.Context, libraryID uuid.UUID) error
+
+    // EPG
+    LoadEPG(ctx context.Context, libraryID uuid.UUID, epgURL string) error
+    GetCurrentProgram(ctx context.Context, channelID uuid.UUID) (*EPGProgram, error)
+    GetSchedule(ctx context.Context, channelID uuid.UUID, from, to time.Time) ([]EPGProgram, error)
+
+    // Channels
+    GetChannels(ctx context.Context, libraryID uuid.UUID, opts ListOptions) ([]Channel, int, error)
+    GetByGroup(ctx context.Context, libraryID uuid.UUID, group string) ([]Channel, error)
+    SetFavorite(ctx context.Context, userID, channelID uuid.UUID, fav bool) error
+
+    // Stream
+    ProxyStream(ctx context.Context, channelID uuid.UUID, w io.Writer) error
+}
+```
+
+### User Flow
+1. User creates library → type "TV en Directo"
+2. Enters M3U URL (and optionally EPG URL)
+3. HubPlay downloads and parses the playlist → channels appear organized by group
+4. User browses channels by category, sees current program from EPG
+5. Clicks a channel → stream starts via HubPlay proxy
+6. Playlist auto-refreshes periodically (default 24h) to pick up new channels
+
+### Events
+```go
+const (
+    EventChannelAdded   EventType = "channel.added"
+    EventChannelRemoved EventType = "channel.removed"
+    EventEPGUpdated     EventType = "epg.updated"
+    EventPlaylistRefreshed EventType = "playlist.refreshed"
+)
+```
+
+---
+
+## 11. Configuration
 
 ```yaml
 # hubplay.yaml
@@ -583,14 +666,20 @@ libraries:
       - /media/tv
     scan_mode: auto
 
+  - name: "TV en Directo"
+    type: livetv
+    m3u_url: "https://provider.com/playlist.m3u"
+    epg_url: "https://provider.com/epg.xml"    # Optional
+    refresh_interval: 24h
+
 metadata:
   language: "es"           # Preferred metadata language
   country: "ES"
   providers:
     tmdb:
       api_key: "${TMDB_API_KEY}"
-    tvdb:
-      api_key: "${TVDB_API_KEY}"
+    fanart:
+      api_key: "${FANART_API_KEY}"
 
 scanner:
   probe_workers: 4         # Concurrent FFprobe processes
