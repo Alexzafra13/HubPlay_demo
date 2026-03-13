@@ -214,11 +214,10 @@ func (r *ItemRepository) List(ctx context.Context, filter ItemFilter) ([]*Item, 
 		args = append(args, filter.Type)
 	}
 
-	// Text search (LIKE-based; FTS5 disabled due to wasm limitations)
+	// Full-text search via FTS5
 	if filter.Query != "" {
-		where += " AND (title LIKE ? OR original_title LIKE ?)"
-		q := "%" + filter.Query + "%"
-		args = append(args, q, q)
+		where += " AND rowid IN (SELECT rowid FROM items_fts WHERE items_fts MATCH ?)"
+		args = append(args, filter.Query+"*")
 	}
 
 	// Count

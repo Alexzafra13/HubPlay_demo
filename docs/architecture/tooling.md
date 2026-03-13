@@ -7,7 +7,7 @@
 | Library | Purpose | Why This One |
 |---------|---------|-------------|
 | `github.com/go-chi/chi/v5` | HTTP router + middleware | Lightweight, idiomatic Go, uses stdlib `net/http` directly, easy to debug |
-| `github.com/ncruces/go-sqlite3` | SQLite driver | Pure Go (WASM via wazero, no CGO). Mejor rendimiento en lecturas concurrentes que modernc (168k reads/sec vs 53k). Cross-compila fácil |
+| `internal/db/sqlitedriver` | SQLite driver (CGO) | Minimal in-project driver using system `libsqlite3`. Supports FTS5, triggers, and all SQLite features natively |
 | `github.com/golang-jwt/jwt/v5` | JWT tokens | Official library, well-maintained, no unnecessary deps |
 | `github.com/google/uuid` | UUIDs | Simple, reliable, from Google |
 | `github.com/fsnotify/fsnotify` | File system watcher | De facto standard in Go for file watching |
@@ -35,8 +35,9 @@
 | RabbitMQ / NATS | In-process event bus is sufficient. No need for external message broker |
 | GraphQL | REST is simpler and covers all our use cases |
 | Next.js / SSR | Static SPA embedded in Go binary is simpler than server-side rendering |
-| `go-sqlite3` (mattn, CGO) | Requiere compilador C, complica cross-compilation. ncruces/go-sqlite3 es pure Go (WASM) y más rápido en lecturas concurrentes |
-| `modernc.org/sqlite` | Transpilado C-to-Go, más lento que ncruces en lecturas concurrentes (53k vs 168k reads/sec). ncruces con WASM/wazero es mejor opción |
+| `mattn/go-sqlite3` | External dependency for CGO SQLite. Our minimal in-project driver is simpler and avoids the extra dependency |
+| `modernc.org/sqlite` | Pure Go (C-to-Go transpiled). Slower than native CGO and has a very large dependency tree |
+| `ncruces/go-sqlite3` | Pure Go (WASM). FTS5 triggers crash due to wasm memory limits. Not suitable for full-text search |
 | Email service | No email in the system. Admin manages users directly |
 
 ---
@@ -217,13 +218,13 @@ RUN pnpm build
 
 # Stage 2: Build Go backend (embeds frontend)
 FROM golang:1.22-alpine AS backend
-# No CGO needed — ncruces/go-sqlite3 uses WASM (wazero), pure Go
+# CGO enabled for native SQLite with FTS5 support
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 COPY --from=frontend /web/dist ./web/dist
-RUN CGO_ENABLED=0 go build -tags embed -ldflags "-s -w" -o hubplay ./cmd/hubplay
+RUN CGO_ENABLED=1 go build -tags embed -ldflags "-s -w" -o hubplay ./cmd/hubplay
 
 # Stage 3: Runtime — everything included
 FROM debian:bookworm-slim AS runtime
@@ -314,4 +315,4 @@ The final binary includes the React frontend via `go:embed`. Zero runtime depend
 | TMDb API key invalid/expired | No metadata for new items | Graceful degradation: items added without metadata, retry queue |
 | Corrupt/unreadable media files | Scanner fails on single file | Log error per file, continue scanning remaining files |
 | Very large libraries (100K+ items) | Slow scans, memory pressure | Incremental scanning via fingerprint, server-side pagination, streaming DB queries |
-| ncruces/go-sqlite3 memory usage | Mayor consumo de memoria que CGO por sandboxing WASM | Aceptable para un media server. A cambio: mejor rendimiento en lecturas concurrentes (168k reads/sec), cross-compilation trivial, sin CGO |
+| CGO required for SQLite | Cross-compilation needs C compiler for target platform | Acceptable trade-off: enables FTS5 full-text search and native SQLite performance. Docker multi-stage build handles this transparently |

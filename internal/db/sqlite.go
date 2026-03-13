@@ -8,8 +8,7 @@ import (
 
 	"github.com/pressly/goose/v3"
 
-	_ "github.com/ncruces/go-sqlite3/driver"
-	_ "github.com/ncruces/go-sqlite3/embed"
+	_ "hubplay/internal/db/sqlitedriver"
 )
 
 // Open creates and configures a SQLite database connection.
