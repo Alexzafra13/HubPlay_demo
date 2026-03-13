@@ -13,7 +13,6 @@ type User struct {
     ID            uuid.UUID
     Username      string
     DisplayName   string
-    Email         string        // Optional
     PasswordHash  string        // bcrypt
     AvatarPath    string        // Path in cache dir
     Role          UserRole
@@ -133,7 +132,6 @@ message AuthResponse {
   bool success = 1;
   string user_id = 2;
   string display_name = 3;
-  string email = 4;
 }
 ```
 
