@@ -205,86 +205,28 @@ journalctl -u hubplay -f
 
 ## 2. Configuration
 
-### Full Config Reference
+> **Full config reference →** [configuration.md](configuration.md)
+>
+> Schema completo de `hubplay.yaml` con comentarios inline, env var overrides, ejemplos por escenario (NAS, servidor dedicado, Docker+PostgreSQL, desarrollo), reglas de validación, hot-reload.
+
+### Quick Reference — Key Settings for Production
 
 ```yaml
-# /etc/hubplay/hubplay.yaml (or /config/hubplay.yaml in Docker)
-
 server:
-  bind: "0.0.0.0"                     # 127.0.0.1 if behind reverse proxy
+  bind: "127.0.0.1"               # Behind reverse proxy → localhost only
   port: 8096
-  base_url: ""                         # "/hubplay" if served under subpath
-  warn_no_tls: true
-  trusted_proxies:
-    - "127.0.0.1"
-    - "172.16.0.0/12"
+  trusted_proxies: ["127.0.0.1"]
 
 database:
-  driver: "sqlite"                     # sqlite | postgres
-  # SQLite (default)
-  path: "/config/hubplay.db"
-  # PostgreSQL (optional, for large deployments)
-  # driver: "postgres"
-  # dsn: "host=localhost dbname=hubplay user=hubplay password=secret sslmode=disable"
-
-auth:
-  jwt_secret: ""                       # Auto-generated on first run
-  bcrypt_cost: 12
-  access_token_ttl: "15m"
-  refresh_token_ttl: "720h"            # 30 days
-  max_sessions_per_user: 10
-  registration_enabled: false          # Admin creates users manually
+  driver: "sqlite"                 # or "postgres" for >10 users
 
 transcoding:
-  threads: 0                           # 0 = auto (use all cores)
-  hw_accel: ""                         # vaapi | qsv | nvenc | videotoolbox | ""
-  vaapi_device: "/dev/dri/renderD128"
-  cache_dir: "/cache/transcode"
-  cache_max_size_gb: 50                # Auto-cleanup oldest segments
-  temp_dir: "/tmp"
-  default_preset: "fast"               # ultrafast | fast | medium (quality vs speed)
-
-scanner:
-  schedule: "0 2 * * *"               # Cron: scan at 2 AM daily
-  watch_filesystem: true               # inotify for real-time detection
-  scan_on_startup: true
-  parallel_probes: 4                   # Concurrent FFprobe calls
-
-metadata:
-  tmdb_api_key: ""                     # Can also use TMDB_API_KEY env var
-  fanart_api_key: ""
-  language: "es"                       # Metadata language (ISO 639-1)
-  country: "ES"                        # For region-specific ratings/release dates
-
-iptv:
-  proxy_streams: true                  # Proxy through HubPlay for unified auth
-  epg_refresh_interval: "6h"
-  m3u_refresh_interval: "24h"
-
-federation:
-  enabled: false
-  display_name: "My HubPlay Server"
-  max_bandwidth_mbps: 50
-  max_concurrent_streams: 3
-
-plugins:
-  directory: "/config/plugins"
-  auto_update: false                   # Check for plugin updates but don't install
+  hw_accel: ""                     # auto-detect, or "vaapi" / "nvenc" / "qsv"
+  cache_max_size_gb: 50
 
 logging:
-  level: "info"                        # debug | info | warn | error
-  format: "json"                       # json | text (text for development)
-  log_ips: true
-  file: ""                             # Empty = stdout (Docker-friendly)
-  # file: "/var/log/hubplay/hubplay.log"  # For systemd setups
-
-rate_limit:
-  enabled: true
-  login_attempts: 5
-  global_rpm: 100
-
-cors:
-  allowed_origins: []                  # Empty = allow all (LAN). Set for public
+  level: "info"
+  format: "json"                   # Structured for log aggregators
 ```
 
 ### Environment Variable Overrides

@@ -159,54 +159,49 @@ func (h *ItemHandler) GetItem(w http.ResponseWriter, r *http.Request) {
 
 ## 4. Error → HTTP Mapping
 
+> **Full error code catalog →** [error-codes.md](error-codes.md)
+>
+> El catálogo completo de códigos de error, HTTP status, mensajes y acciones del cliente está en error-codes.md. Aquí se documenta el **mecanismo** de mapeo, no los códigos en sí.
+
+El handler layer convierte domain errors a API responses usando `handleServiceError`. Esta función es el **único punto** donde errores internos se traducen a HTTP:
+
 ```go
 // internal/api/errors.go
 func handleServiceError(w http.ResponseWriter, err error) {
-    switch {
-    case errors.Is(err, domain.ErrNotFound):
-        respondError(w, http.StatusNotFound, "NOT_FOUND", err.Error())
-
-    case errors.Is(err, domain.ErrAlreadyExists):
-        respondError(w, http.StatusConflict, "ALREADY_EXISTS", err.Error())
-
-    case errors.Is(err, domain.ErrUnauthorized), errors.Is(err, domain.ErrInvalidToken):
-        respondError(w, http.StatusUnauthorized, "UNAUTHORIZED", "authentication required")
-
-    case errors.Is(err, domain.ErrForbidden):
-        respondError(w, http.StatusForbidden, "FORBIDDEN", "insufficient permissions")
-
-    case errors.Is(err, domain.ErrValidation):
-        var valErr *domain.ValidationError
-        if errors.As(err, &valErr) {
-            respondJSON(w, http.StatusBadRequest, map[string]any{
-                "error":  "VALIDATION_ERROR",
-                "fields": valErr.Fields,
-            })
-            return
-        }
-        respondError(w, http.StatusBadRequest, "VALIDATION_ERROR", err.Error())
-
-    case errors.Is(err, domain.ErrTranscodeBusy):
-        w.Header().Set("Retry-After", "30")
-        respondError(w, http.StatusServiceUnavailable, "TRANSCODE_BUSY", "all transcode slots in use")
-
-    case errors.Is(err, domain.ErrAccountDisabled):
-        respondError(w, http.StatusForbidden, "ACCOUNT_DISABLED", "account is disabled")
-
-    default:
-        // Error inesperado — loguear internamente, no exponer al cliente
-        slog.Error("unhandled error", "error", err)
-        respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error")
-    }
+    status, apiErr := mapError(err)
+    respondJSON(w, status, map[string]any{"error": apiErr})
 }
+```
 
-func respondError(w http.ResponseWriter, status int, code, message string) {
-    respondJSON(w, status, map[string]string{
-        "error":   code,
-        "message": message,
-    })
-}
+La función `mapError` (definida en [error-codes.md](error-codes.md#go-error-mapping)) mapea cada domain error a un `(HTTP status, APIError)`. Reglas:
 
+| Domain Error | API Code | HTTP | Notes |
+|---|---|---|---|
+| `domain.ErrNotFound` | `ITEM_NOT_FOUND` / `LIBRARY_NOT_FOUND` / ... | 404 | El handler elige el code específico según contexto |
+| `domain.ErrAlreadyExists` | `USERNAME_TAKEN` / `LIBRARY_NAME_TAKEN` / ... | 409 | Idem — code específico por recurso |
+| `domain.ErrUnauthorized` | `INVALID_CREDENTIALS` / `TOKEN_EXPIRED` / ... | 401 | |
+| `domain.ErrForbidden` | `FORBIDDEN` / `LIBRARY_ACCESS_DENIED` | 403 | |
+| `domain.ErrValidation` | `VALIDATION_ERROR` | 400 | Incluye `details.fields` con errores por campo |
+| `domain.ErrTranscodeBusy` | `TRANSCODE_QUEUE_FULL` | 503 | Incluye `Retry-After: 30` header |
+| `domain.ErrAccountDisabled` | `ACCOUNT_DISABLED` | 403 | |
+| Cualquier otro error | `INTERNAL_ERROR` | 500 | Se loguea internamente, nunca se expone al cliente |
+
+### Principio clave
+
+**Domain errors nunca se exponen directamente al cliente.** El error wrapping añade contexto para debugging (visible en logs), pero el mensaje que recibe el cliente siempre es el definido en el catálogo de `APIError`, nunca el `err.Error()` interno.
+
+```go
+// ✅ Correcto: el cliente ve "Media item not found"
+// Los logs ven "querying item abc-123: sql: no rows in result set"
+
+// ❌ Incorrecto: nunca hacer esto
+respondError(w, 404, "NOT_FOUND", err.Error())
+// Expondría: "querying item abc-123: not found" → leak de información interna
+```
+
+### Response helpers
+
+```go
 func respondJSON(w http.ResponseWriter, status int, data any) {
     w.Header().Set("Content-Type", "application/json")
     w.WriteHeader(status)

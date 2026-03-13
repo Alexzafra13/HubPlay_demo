@@ -551,144 +551,16 @@ internal/
 
 ## 10. IPTV / Live TV Module
 
-### Overview
-Native IPTV support allows users to watch live TV channels within HubPlay. The user provides a M3U playlist URL (from legal IPTV providers or public free-to-air channels) and optionally an EPG (Electronic Program Guide) URL for the TV schedule.
+> **Full design document →** [live-tv-epg.md](live-tv-epg.md)
 
-### Domain Types
-```go
-type Channel struct {
-    ID          uuid.UUID
-    LibraryID   uuid.UUID
-    Name        string
-    Number      int            // Channel number for sorting
-    Group       string         // Category: "Sports", "News", "Entertainment", etc.
-    LogoURL     string         // Channel logo from M3U metadata
-    StreamURL   string         // Source stream URL
-    Language    string
-    Country     string
-    IsActive    bool           // Whether the stream is currently reachable
-    AddedAt     time.Time
-}
+M3U playlist parsing, XMLTV EPG, stream proxy with fan-out and reconnection, channel health monitoring, EPG ↔ channel matching. Este módulo tiene su propio doc dedicado porque su complejidad lo justifica.
 
-type EPGProgram struct {
-    ChannelID   uuid.UUID
-    Title       string
-    Description string
-    Start       time.Time
-    End         time.Time
-    Category    string
-    Icon        string         // Program thumbnail if available
-}
-```
-
-### M3U Parser
-Parses standard M3U/M3U8 playlists with extended attributes:
-```
-#EXTM3U
-#EXTINF:-1 tvg-id="la1" tvg-name="La 1" tvg-logo="https://..." group-title="Nacionales",La 1 HD
-http://stream-url/la1.m3u8
-```
-
-Extracts: channel name, logo URL, group/category, tvg-id (for EPG matching), language, stream URL.
-
-### EPG Parser (XMLTV)
-Parses XMLTV format — the standard for TV guide data:
-- Maps programs to channels via `tvg-id`
-- Stores current + upcoming programs (configurable window, default 48h)
-- Auto-refreshes on schedule (default every 12h)
-- Caches parsed data to avoid re-downloading on restart
-
-### Stream Proxy
-HubPlay proxies IPTV streams instead of sending the raw URL to clients:
-- **Why proxy?** Unified auth, CORS handling, stream health monitoring, and consistent player experience across all clients
-- **Reconnection:** If source stream drops, auto-retry with backoff (1s, 2s, 4s) before marking channel as temporarily unavailable
-- **No transcoding:** IPTV streams arrive pre-encoded, we just relay them. Client must support the codec (usually H.264/AAC — universally supported)
-- **Timeshift (future):** Buffer last N minutes for pause/rewind on live TV
-
-### Channel Manager
-```go
-type ChannelManager interface {
-    // Playlist management
-    LoadPlaylist(ctx context.Context, libraryID uuid.UUID, m3uURL string) error
-    RefreshPlaylist(ctx context.Context, libraryID uuid.UUID) error
-
-    // EPG
-    LoadEPG(ctx context.Context, libraryID uuid.UUID, epgURL string) error
-    GetCurrentProgram(ctx context.Context, channelID uuid.UUID) (*EPGProgram, error)
-    GetSchedule(ctx context.Context, channelID uuid.UUID, from, to time.Time) ([]EPGProgram, error)
-
-    // Channels
-    GetChannels(ctx context.Context, libraryID uuid.UUID, opts ListOptions) ([]Channel, int, error)
-    GetByGroup(ctx context.Context, libraryID uuid.UUID, group string) ([]Channel, error)
-    SetFavorite(ctx context.Context, userID, channelID uuid.UUID, fav bool) error
-
-    // Stream
-    ProxyStream(ctx context.Context, channelID uuid.UUID, w io.Writer) error
-}
-```
-
-### User Flow
-1. User creates library → type "TV en Directo"
-2. Enters M3U URL (and optionally EPG URL)
-3. HubPlay downloads and parses the playlist → channels appear organized by group
-4. User browses channels by category, sees current program from EPG
-5. Clicks a channel → stream starts via HubPlay proxy
-6. Playlist auto-refreshes periodically (default 24h) to pick up new channels
-
-### Events
-```go
-const (
-    EventChannelAdded   EventType = "channel.added"
-    EventChannelRemoved EventType = "channel.removed"
-    EventEPGUpdated     EventType = "epg.updated"
-    EventPlaylistRefreshed EventType = "playlist.refreshed"
-)
-```
+Domain types (Channel, EPGProgram) y el ChannelManager interface están definidos en [live-tv-epg.md](live-tv-epg.md).
 
 ---
 
 ## 11. Configuration
 
-```yaml
-# hubplay.yaml
-libraries:
-  - name: "Movies"
-    type: movies
-    paths:
-      - /media/movies
-      - /nas/movies
-    scan_mode: auto        # auto | manual | scheduled
-    scan_interval: 6h      # for scheduled mode
+> **Full configuration reference →** [configuration.md](configuration.md)
 
-  - name: "TV Shows"
-    type: tvshows
-    paths:
-      - /media/tv
-    scan_mode: auto
-
-  - name: "TV en Directo"
-    type: livetv
-    m3u_url: "https://provider.com/playlist.m3u"
-    epg_url: "https://provider.com/epg.xml"    # Optional
-    refresh_interval: 24h
-
-metadata:
-  language: "es"           # Preferred metadata language
-  country: "ES"
-  providers:
-    tmdb:
-      api_key: "${TMDB_API_KEY}"
-    fanart:
-      api_key: "${FANART_API_KEY}"
-
-scanner:
-  probe_workers: 4         # Concurrent FFprobe processes
-  ignore_patterns:
-    - "*.sample.*"
-    - "*.txt"
-    - ".DS_Store"
-
-cache:
-  path: "~/.hubplay/cache" # All generated content goes here
-  max_size: "10GB"
-```
+Schema completo de `hubplay.yaml`, variables de entorno, ejemplos por escenario (NAS, servidor dedicado, Docker, desarrollo).

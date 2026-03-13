@@ -254,7 +254,7 @@ Returns all home sections in a single request (avoids waterfall):
 // Request
 {
     "name": "Movies",
-    "content_type": "movie",           // movie | series | music | live_tv
+    "content_type": "movies",           // movies | tvshows | livetv
     "paths": ["/media/movies"],
     "language": "es",
     "metadata_providers": ["tmdb", "fanart"]
@@ -265,7 +265,7 @@ Returns all home sections in a single request (avoids waterfall):
     "data": {
         "id": "uuid",
         "name": "Movies",
-        "content_type": "movie",
+        "content_type": "movies",
         "paths": ["/media/movies"],
         "item_count": 0,
         "scan_status": "idle",
@@ -586,23 +586,106 @@ All subsequent segment/playlist requests include `?token=session-token`.
 
 ### `GET /ws` (requires JWT as query param or cookie)
 
-Real-time events pushed to connected clients:
+Real-time events pushed to connected clients.
 
 ```json
-// Server → Client
-{ "type": "library.scan.progress", "data": { "library_id": "uuid", "progress": 0.45 } }
-{ "type": "item.added", "data": { "id": "uuid", "type": "movie", "title": "..." } }
-{ "type": "transcode.progress", "data": { "session_id": "uuid", "fps": 45, "progress": 0.3 } }
-{ "type": "federation.peer.online", "data": { "peer_id": "uuid", "name": "Pedro's Server" } }
+// Server → Client message format
+{
+    "type": "item.added",
+    "data": { "id": "uuid", "type": "movie", "title": "Inception" },
+    "timestamp": "2026-03-13T10:15:00Z"
+}
 ```
 
-Event types:
-- `library.scan.started`, `library.scan.progress`, `library.scan.completed`
-- `item.added`, `item.updated`, `item.removed`
-- `metadata.updated`
-- `transcode.started`, `transcode.progress`, `transcode.completed`
-- `federation.peer.online`, `federation.peer.offline`
-- `plugin.status_changed`
+### Complete Event Catalog
+
+This is the **single source of truth** for all WebSocket events. Each module emits events through the in-process event bus; the WebSocket hub forwards them to connected clients.
+
+#### Library & Scanner
+
+| Event | Data | When |
+|---|---|---|
+| `library.created` | `{ library_id }` | New library added |
+| `library.deleted` | `{ library_id }` | Library removed |
+| `library.scan.started` | `{ library_id }` | Scan begins |
+| `library.scan.progress` | `{ library_id, phase, total, processed, current_file }` | Scan progress update (~1/s) |
+| `library.scan.completed` | `{ library_id, added, updated, removed, errors, duration }` | Scan finished |
+
+#### Media Items
+
+| Event | Data | When |
+|---|---|---|
+| `item.added` | `{ id, type, title, library_id }` | New item discovered by scanner |
+| `item.updated` | `{ id, type, title }` | Item file changed (re-analyzed) |
+| `item.removed` | `{ id, type, title }` | Item marked unavailable (file disappeared) |
+| `metadata.updated` | `{ item_id, provider }` | Metadata refreshed from TMDb/Fanart |
+
+#### Streaming & Transcoding
+
+| Event | Data | When |
+|---|---|---|
+| `transcode.started` | `{ session_id, item_id, user_id, profile }` | FFmpeg transcode begins |
+| `transcode.progress` | `{ session_id, fps, progress, speed }` | Transcode progress (~1/s) |
+| `transcode.completed` | `{ session_id }` | Transcode finished or client disconnected |
+
+#### IPTV / Live TV
+
+| Event | Data | When |
+|---|---|---|
+| `channel.added` | `{ id, name, group, library_id }` | New channel found in M3U |
+| `channel.removed` | `{ id, name }` | Channel removed from M3U |
+| `channel.unavailable` | `{ id, name, error }` | Stream source unreachable (after retries) |
+| `channel.restored` | `{ id, name }` | Previously unavailable channel is back |
+| `epg.updated` | `{ library_id, programs_count }` | EPG data refreshed from XMLTV |
+| `playlist.refreshed` | `{ library_id, added, removed, updated }` | M3U playlist re-downloaded and diffed |
+| `stream.live.started` | `{ channel_id, user_id }` | User started watching a live channel |
+| `stream.live.ended` | `{ channel_id, user_id, duration }` | User stopped watching |
+
+#### Federation
+
+| Event | Data | When |
+|---|---|---|
+| `federation.peer.online` | `{ peer_id, name }` | Linked peer came online |
+| `federation.peer.offline` | `{ peer_id, name }` | Linked peer went offline |
+| `federation.catalog.synced` | `{ peer_id, items_count }` | Remote catalog cache updated |
+
+#### Plugins
+
+| Event | Data | When |
+|---|---|---|
+| `plugin.started` | `{ name, version }` | Plugin process launched |
+| `plugin.stopped` | `{ name, reason }` | Plugin stopped (manual or crash) |
+| `plugin.status_changed` | `{ name, old_status, new_status }` | active → disabled, malfunctioned, etc. |
+
+#### System
+
+| Event | Data | When |
+|---|---|---|
+| `system.shutdown` | `{ reason }` | Server is shutting down (clients should reconnect) |
+
+### Client-Side Usage
+
+```typescript
+// React hook: react-use-websocket
+const { lastJsonMessage } = useWebSocket('/api/v1/ws?token=jwt', {
+  onMessage: (event) => {
+    const { type, data } = JSON.parse(event.data);
+    switch (type) {
+      case 'item.added':
+        queryClient.invalidateQueries(['items']);
+        break;
+      case 'epg.updated':
+        queryClient.invalidateQueries(['epg']);
+        break;
+      case 'library.scan.progress':
+        setScanProgress(data.progress);
+        break;
+    }
+  },
+  shouldReconnect: () => true,
+  reconnectInterval: 3000,
+});
+```
 
 ---
 
