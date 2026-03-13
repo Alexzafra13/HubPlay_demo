@@ -330,7 +330,18 @@ Full endpoint documentation: [API Reference →](api-reference.md) | [Error Code
 | Live TV | M3U/IPTV + XMLTV EPG | Standard formats, works with legal providers |
 
 ### Additional Documentation
+
+**Features:**
 - [API Reference](api-reference.md) — Full endpoint catalog with request/response examples
 - [Error Codes](error-codes.md) — Standardized error codes, client handling, retry strategy
 - [Security](security.md) — Threat model, auth, API security, TLS, plugin isolation
 - [Deployment & Production](deployment-production.md) — Docker, systemd, reverse proxy, backups, NAS, monitoring
+
+**Engineering:**
+- [Wiring & Lifecycle](wiring-lifecycle.md) — Dependency injection, initialization order, graceful shutdown
+- [Error Handling & Logging](error-handling.md) — Error types, wrapping strategy, structured logging with slog
+- [Testing Strategy](testing-strategy.md) — Test pyramid, patterns, fixtures, coverage goals
+- [sqlc Patterns](sqlc-patterns.md) — SQL code generation, repository wrappers, transactions
+- [Background Jobs](background-jobs.md) — Scheduler, work queues, periodic tasks
+- [CI/CD](ci-cd.md) — GitHub Actions pipeline, Goreleaser, Docker publishing
+- [Observability](observability.md) — Health checks, internal metrics, activity log
