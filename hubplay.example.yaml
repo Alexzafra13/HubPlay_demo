@@ -1,0 +1,27 @@
+server:
+  bind: "0.0.0.0"
+  port: 8096
+  base_url: ""
+  trusted_proxies:
+    - "127.0.0.1"
+    - "172.16.0.0/12"
+
+database:
+  driver: "sqlite"
+  path: "./hubplay.db"
+
+auth:
+  jwt_secret: ""             # Auto-generated on first run
+  bcrypt_cost: 12
+  access_token_ttl: "15m"
+  refresh_token_ttl: "720h"  # 30 days
+  max_sessions_per_user: 10
+
+logging:
+  level: "info"
+  format: "text"
+
+rate_limit:
+  enabled: true
+  login_attempts: 5
+  global_rpm: 100

@@ -1,0 +1,8 @@
+bin/
+hubplay
+*.db
+*.db-wal
+*.db-shm
+coverage.out
+coverage.html
+.env

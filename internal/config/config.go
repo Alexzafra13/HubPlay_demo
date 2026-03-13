@@ -1,0 +1,222 @@
+package config
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"net"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	"gopkg.in/yaml.v3"
+
+	"hubplay/internal/logging"
+)
+
+type Config struct {
+	Server    ServerConfig    `yaml:"server"`
+	Database  DatabaseConfig  `yaml:"database"`
+	Auth      AuthConfig      `yaml:"auth"`
+	Logging   logging.Config  `yaml:"logging"`
+	RateLimit RateLimitConfig `yaml:"rate_limit"`
+}
+
+type ServerConfig struct {
+	Bind           string   `yaml:"bind"`
+	Port           int      `yaml:"port"`
+	BaseURL        string   `yaml:"base_url"`
+	TrustedProxies []string `yaml:"trusted_proxies"`
+}
+
+func (s ServerConfig) Addr() string {
+	return net.JoinHostPort(s.Bind, strconv.Itoa(s.Port))
+}
+
+type DatabaseConfig struct {
+	Driver string `yaml:"driver"`
+	Path   string `yaml:"path"`
+	DSN    string `yaml:"dsn"`
+}
+
+type AuthConfig struct {
+	JWTSecret          string        `yaml:"jwt_secret"`
+	BCryptCost         int           `yaml:"bcrypt_cost"`
+	AccessTokenTTL     time.Duration `yaml:"access_token_ttl"`
+	RefreshTokenTTL    time.Duration `yaml:"refresh_token_ttl"`
+	MaxSessionsPerUser int           `yaml:"max_sessions_per_user"`
+}
+
+type RateLimitConfig struct {
+	Enabled       bool `yaml:"enabled"`
+	LoginAttempts int  `yaml:"login_attempts"`
+	GlobalRPM     int  `yaml:"global_rpm"`
+}
+
+// Load reads and parses the config file at path. Environment variables
+// in the form ${VAR} are expanded before parsing.
+func Load(path string) (*Config, error) {
+	cfg := defaults()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// No config file — use defaults and generate JWT secret
+			if cfg.Auth.JWTSecret == "" {
+				cfg.Auth.JWTSecret = generateSecret()
+			}
+			return cfg, nil
+		}
+		return nil, fmt.Errorf("reading config: %w", err)
+	}
+
+	// Expand environment variables (${TMDB_API_KEY} etc.)
+	data = []byte(os.ExpandEnv(string(data)))
+
+	if err := yaml.Unmarshal(data, cfg); err != nil {
+		return nil, fmt.Errorf("parsing config: %w", err)
+	}
+
+	// Apply env var overrides (HUBPLAY_SERVER_PORT etc.)
+	applyEnvOverrides(cfg)
+
+	// Generate JWT secret if not set
+	if cfg.Auth.JWTSecret == "" {
+		cfg.Auth.JWTSecret = generateSecret()
+	}
+
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid config: %w", err)
+	}
+
+	return cfg, nil
+}
+
+func (c *Config) Validate() error {
+	var errs []error
+
+	if c.Server.Port < 1 || c.Server.Port > 65535 {
+		errs = append(errs, fmt.Errorf("server.port must be 1-65535, got %d", c.Server.Port))
+	}
+	if c.Auth.BCryptCost < 10 || c.Auth.BCryptCost > 14 {
+		errs = append(errs, fmt.Errorf("auth.bcrypt_cost must be 10-14, got %d", c.Auth.BCryptCost))
+	}
+	if c.Auth.AccessTokenTTL < time.Minute {
+		errs = append(errs, fmt.Errorf("auth.access_token_ttl must be >= 1m"))
+	}
+	if c.Auth.RefreshTokenTTL < time.Hour {
+		errs = append(errs, fmt.Errorf("auth.refresh_token_ttl must be >= 1h"))
+	}
+
+	switch c.Database.Driver {
+	case "sqlite":
+		if c.Database.Path == "" {
+			errs = append(errs, fmt.Errorf("database.path must not be empty for sqlite"))
+		} else {
+			dir := filepath.Dir(c.Database.Path)
+			if dir != "." {
+				if _, err := os.Stat(dir); os.IsNotExist(err) {
+					errs = append(errs, fmt.Errorf("database.path directory %q does not exist", dir))
+				}
+			}
+		}
+	case "postgres":
+		if c.Database.DSN == "" {
+			errs = append(errs, fmt.Errorf("database.dsn must not be empty for postgres"))
+		}
+	default:
+		errs = append(errs, fmt.Errorf("database.driver must be 'sqlite' or 'postgres', got %q", c.Database.Driver))
+	}
+
+	return errors.Join(errs...)
+}
+
+func defaults() *Config {
+	return &Config{
+		Server: ServerConfig{
+			Bind:           "0.0.0.0",
+			Port:           8096,
+			TrustedProxies: []string{"127.0.0.1", "172.16.0.0/12"},
+		},
+		Database: DatabaseConfig{
+			Driver: "sqlite",
+			Path:   "./hubplay.db",
+		},
+		Auth: AuthConfig{
+			BCryptCost:         12,
+			AccessTokenTTL:     15 * time.Minute,
+			RefreshTokenTTL:    720 * time.Hour,
+			MaxSessionsPerUser: 10,
+		},
+		Logging: logging.Config{
+			Level:  "info",
+			Format: "text",
+			LogIPs: true,
+		},
+		RateLimit: RateLimitConfig{
+			Enabled:       true,
+			LoginAttempts: 5,
+			GlobalRPM:     100,
+		},
+	}
+}
+
+func generateSecret() string {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		panic("crypto/rand failed: " + err.Error())
+	}
+	return hex.EncodeToString(b)
+}
+
+func applyEnvOverrides(cfg *Config) {
+	if v := os.Getenv("HUBPLAY_SERVER_PORT"); v != "" {
+		if p, err := strconv.Atoi(v); err == nil {
+			cfg.Server.Port = p
+		}
+	}
+	if v := os.Getenv("HUBPLAY_SERVER_BIND"); v != "" {
+		cfg.Server.Bind = v
+	}
+	if v := os.Getenv("HUBPLAY_DATABASE_DRIVER"); v != "" {
+		cfg.Database.Driver = v
+	}
+	if v := os.Getenv("HUBPLAY_DATABASE_PATH"); v != "" {
+		cfg.Database.Path = v
+	}
+	if v := os.Getenv("HUBPLAY_DATABASE_DSN"); v != "" {
+		cfg.Database.DSN = v
+	}
+	if v := os.Getenv("HUBPLAY_AUTH_JWT_SECRET"); v != "" {
+		cfg.Auth.JWTSecret = v
+	}
+	if v := os.Getenv("HUBPLAY_AUTH_BCRYPT_COST"); v != "" {
+		if c, err := strconv.Atoi(v); err == nil {
+			cfg.Auth.BCryptCost = c
+		}
+	}
+	if v := os.Getenv("HUBPLAY_LOGGING_LEVEL"); v != "" {
+		cfg.Logging.Level = v
+	}
+	if v := os.Getenv("HUBPLAY_LOGGING_FORMAT"); v != "" {
+		cfg.Logging.Format = v
+	}
+	if v := os.Getenv("HUBPLAY_RATE_LIMIT_ENABLED"); v != "" {
+		cfg.RateLimit.Enabled = strings.EqualFold(v, "true")
+	}
+}
+
+// TestConfig returns a config suitable for tests.
+func TestConfig() *Config {
+	cfg := defaults()
+	cfg.Database.Path = ":memory:"
+	cfg.Auth.JWTSecret = "test-secret-do-not-use-in-production"
+	cfg.Auth.BCryptCost = 10
+	cfg.Logging.Level = "debug"
+	cfg.Logging.Format = "text"
+	cfg.RateLimit.Enabled = false
+	return cfg
+}
