@@ -60,20 +60,190 @@ React + TypeScript SPA embebida en el binario Go. Dark theme obligatorio. Diseñ
 
 ## 3. Design System
 
-### Theme
-- **Dark background**: `#0f0f1a` (main), `#1a1a2e` (cards/surfaces), `#16213e` (elevated)
-- **Text**: `#ffffff` (primary), `#a0a0b0` (secondary), `#6b6b80` (muted)
-- **Accent**: configurable, default `#6366f1` (indigo) for interactive elements
-- **Now Playing**: `#ef4444` (red) for live indicator, progress bars, "NOW" badges
-- **Success/Error**: `#22c55e` / `#ef4444`
+### Theme — CSS Custom Properties (easy to swap)
 
-### Typography
-- Sans-serif: Inter or system font stack
-- Title sizes: movie titles large, metadata secondary size
-- Monospace for technical info (codecs, bitrate) in admin views
+All colors are defined as **CSS custom properties** in `globals.css`. To change the entire look, swap one block of variables. The default theme is **Deep Blue**.
+
+```css
+/* web/src/styles/globals.css — Theme tokens */
+:root {
+  /* ============================================
+   * THEME: Deep Blue (default)
+   * Swap this block to change the entire palette.
+   * See docs/design/color-preview.html for all 4 options.
+   * ============================================ */
+
+  /* Backgrounds */
+  --color-bg-base:      #0a0e17;   /* Main background */
+  --color-bg-surface:   #0d1220;   /* Navbar, sidebar */
+  --color-bg-card:      #131a2b;   /* Cards, panels */
+  --color-bg-elevated:  #1a2340;   /* Posters, thumbnails, hover states */
+
+  /* Borders */
+  --color-border:       #1e2a45;
+
+  /* Text */
+  --color-text-primary: #f1f5f9;
+  --color-text-secondary: #94a3b8;
+  --color-text-muted:   #64748b;
+
+  /* Accent (interactive elements, brand) */
+  --color-accent:       #3b82f6;   /* Electric blue */
+  --color-accent-soft:  #1e3a5f;   /* Badge backgrounds */
+  --color-accent-light: #60a5fa;   /* Badge text, hover */
+
+  /* Semantic */
+  --color-success:      #22c55e;
+  --color-error:        #ef4444;
+  --color-warning:      #f59e0b;
+  --color-live:         #ef4444;   /* Live indicator */
+}
+```
+
+#### Alternative themes (copy-paste to swap)
+
+<details>
+<summary>Emerald Dark</summary>
+
+```css
+:root {
+  --color-bg-base:      #0a0f0d;
+  --color-bg-surface:   #0d1512;
+  --color-bg-card:      #131f1a;
+  --color-bg-elevated:  #1a2e25;
+  --color-border:       #1e3a2f;
+  --color-text-primary: #f0fdf4;
+  --color-text-secondary: #6ab89a;
+  --color-text-muted:   #4a7c5f;
+  --color-accent:       #10b981;
+  --color-accent-soft:  #064e3b;
+  --color-accent-light: #34d399;
+  --color-success:      #22c55e;
+  --color-error:        #ef4444;
+  --color-warning:      #f59e0b;
+  --color-live:         #ef4444;
+}
+```
+</details>
+
+<details>
+<summary>Purple Noir</summary>
+
+```css
+:root {
+  --color-bg-base:      #09090b;
+  --color-bg-surface:   #0f0f12;
+  --color-bg-card:      #18181b;
+  --color-bg-elevated:  #27272a;
+  --color-border:       #3f3f46;
+  --color-text-primary: #fafafa;
+  --color-text-secondary: #a1a1aa;
+  --color-text-muted:   #71717a;
+  --color-accent:       #a855f7;
+  --color-accent-soft:  #3b0764;
+  --color-accent-light: #c084fc;
+  --color-success:      #22c55e;
+  --color-error:        #ef4444;
+  --color-warning:      #f59e0b;
+  --color-live:         #ef4444;
+}
+```
+</details>
+
+<details>
+<summary>Warm Slate</summary>
+
+```css
+:root {
+  --color-bg-base:      #0c0a09;
+  --color-bg-surface:   #110e0d;
+  --color-bg-card:      #1c1917;
+  --color-bg-elevated:  #292524;
+  --color-border:       #44403c;
+  --color-text-primary: #fafaf9;
+  --color-text-secondary: #a8a29e;
+  --color-text-muted:   #78716c;
+  --color-accent:       #f59e0b;
+  --color-accent-soft:  #78350f;
+  --color-accent-light: #fbbf24;
+  --color-success:      #22c55e;
+  --color-error:        #ef4444;
+  --color-warning:      #fb923c;
+  --color-live:         #ef4444;
+}
+```
+</details>
+
+#### Tailwind v4 integration
+
+In `globals.css`, map CSS vars to Tailwind's `@theme` directive:
+
+```css
+@import "tailwindcss";
+
+@theme {
+  --color-bg-base:      var(--color-bg-base);
+  --color-bg-surface:   var(--color-bg-surface);
+  --color-bg-card:      var(--color-bg-card);
+  --color-bg-elevated:  var(--color-bg-elevated);
+  --color-border:       var(--color-border);
+  --color-text-primary: var(--color-text-primary);
+  --color-text-secondary: var(--color-text-secondary);
+  --color-accent:       var(--color-accent);
+  --color-accent-soft:  var(--color-accent-soft);
+  --color-accent-light: var(--color-accent-light);
+  --color-success:      var(--color-success);
+  --color-error:        var(--color-error);
+  --color-warning:      var(--color-warning);
+  --color-live:         var(--color-live);
+}
+```
+
+Then use in components: `bg-bg-card`, `text-text-primary`, `border-border`, `text-accent`, etc.
+
+### Typography — Plus Jakarta Sans
+
+| Role | Font | Weight | Size |
+|------|------|--------|------|
+| **Headings** (hero, movie title) | Plus Jakarta Sans | 700–800 (Bold/ExtraBold) | 24–48px |
+| **Subheadings** (section titles) | Plus Jakarta Sans | 600 (SemiBold) | 18–20px |
+| **Body** (descriptions, metadata) | Plus Jakarta Sans | 400 (Regular) | 14–16px |
+| **Small** (badges, timestamps, meta) | Plus Jakarta Sans | 500 (Medium) | 11–13px |
+| **Monospace** (codecs, bitrate, admin) | `JetBrains Mono` or system monospace | 400 | 13px |
+
+**Why Plus Jakarta Sans:**
+- Geometric sans-serif with warm, rounded character — similar to Disney+'s Avenir
+- Gives HubPlay a premium, distinctive identity without being eccentric
+- Excellent legibility on dark backgrounds (open letterforms, generous spacing)
+- Variable font with full weight range (200–800) + italics
+- Free, Google Fonts, no licensing issues
+
+**Installation (Google Fonts via CSS):**
+```html
+<!-- index.html -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,200..800;1,200..800&display=swap" rel="stylesheet">
+```
+
+```css
+/* globals.css */
+:root {
+  --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  font-weight: 400; /* slightly heavier on dark backgrounds */
+}
+```
+
+**Dark theme tip:** On dark backgrounds, text appears thinner than on light backgrounds. Use `font-weight: 400` as body default (not 300), and `font-weight: 500` for small text like badges and timestamps to maintain legibility.
 
 ### Cards
-- Rounded corners (`8px`)
+- Rounded corners (`8px` body, `12px` cards, `10px` buttons)
 - Subtle shadow on hover
 - Blurhash placeholder while images load
 - Poster ratio: 2:3 (movies), 16:9 (backdrops, episodes)
