@@ -57,10 +57,11 @@
 
 | Library | NPM Package | Purpose | Why |
 |---------|-------------|---------|-----|
-| Vidstack | `vidstack` | Video player completo | Modular, controles accesibles, soporta HLS/DASH/DRM. Usa hls.js internamente |
+| Vidstack | `vidstack` | Video player completo | Modular, controles accesibles, HLS/DASH/DRM. Nota: se fusiona con Video.js v10 en 2026 (Vidstack + Plyr + Video.js + Media Chrome → proyecto unificado) |
 | hls.js | `hls.js` | HLS streaming (bajo nivel) | Fallback directo si Vidstack no cubre un caso edge |
 | Shaka Player | `shaka-player` | DRM (Widevine/PlayReady/FairPlay) | Mantenido por Google, soporte DRM completo para contenido protegido |
-| JASSUB | `jassub` | Subtítulos ASS/SSA | Renderiza ASS/SSA con estilos complejos (anime, karaoke) vía libass compilado a WASM |
+| SubtitlesOctopus | `@jellyfin/libass-wasm` | Subtítulos ASS/SSA | libass compilado a WASM, renderiza estilos complejos (anime, karaoke). Fork mantenido por Jellyfin |
+| media-captions | `media-captions` | Subtítulos VTT/SRT | Parser ligero (~5KB) de WebVTT y SRT, integrado con Vidstack |
 
 ### EPG & Live TV
 
@@ -82,10 +83,13 @@
 
 | Library | NPM Package | Purpose | Why |
 |---------|-------------|---------|-----|
-| reconnecting-websocket | `reconnecting-websocket` | WebSocket con reconexión | Auto-reconnect con backoff exponencial. Sin overhead de Socket.io |
+| react-use-websocket | `react-use-websocket` | WebSocket (React hook) | Hook idiomático `useWebSocket` con auto-reconnect, heartbeat, message history. Mejor integración con React que reconnecting-websocket |
 | react-i18next | `react-i18next` | Internacionalización | Estándar, lazy loading de traducciones, pluralización. Permite español/inglés desde v1 |
-| Vitest | `vitest` | Testing | Integrado con Vite, API compatible Jest, rápido |
+| vite-plugin-pwa | `vite-plugin-pwa` | PWA support | Service worker, offline fallback, install prompt, precaching. Zero-config con Vite + Workbox |
+| Vitest | `vitest` | Unit/component testing | Integrado con Vite, API compatible Jest, rápido. Browser Mode para tests en navegador real |
 | Testing Library | `@testing-library/react` | Testing de componentes | Test como el usuario interactúa, no como se implementa |
+| Playwright | `@playwright/test` | E2E testing | Cross-browser (Chromium, Firefox, WebKit), auto-waiting, network interception |
+| MSW | `msw` | API mocking para tests | Mock Service Worker — intercepta requests a nivel de SW, realista para unit y E2E |
 
 ### What We're NOT Using (Frontend)
 
@@ -95,7 +99,7 @@
 | react-window / react-virtualized | TanStack Virtual es más moderno, headless, y flexible |
 | styled-components / CSS Modules | Tailwind es más rápido de iterar y genera bundles más pequeños |
 | Socket.io | Overhead innecesario. reconnecting-websocket + WebSocket nativo es suficiente |
-| Video.js | Legacy, pesado (~300KB). Vidstack es la alternativa moderna |
+| Video.js v8 | Legacy, pesado (~300KB). Vidstack es la alternativa moderna (y se fusionan en Video.js v10) |
 | Next.js / Remix | No necesitamos SSR. SPA embebida en Go es más simple |
 | Axios | fetch() nativo + TanStack Query es suficiente. Sin dependencia extra |
 | Material UI / Ant Design | Demasiado opinionated, difícil de customizar para un media player. Tailwind + componentes propios |

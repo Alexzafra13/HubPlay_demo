@@ -19,15 +19,18 @@ React + TypeScript SPA embebida en el binario Go. Dark theme obligatorio. Diseñ
 | Tailwind CSS v4 | `tailwindcss` | Styling (dark theme) |
 | Vidstack | `vidstack` | Video player (HLS/DASH/DRM) |
 | Shaka Player | `shaka-player` | DRM (Widevine/PlayReady) |
-| JASSUB | `jassub` | Subtítulos ASS/SSA (libass WASM) |
+| SubtitlesOctopus | `@jellyfin/libass-wasm` | Subtítulos ASS/SSA (libass WASM) |
 | Planby | `planby` | EPG timeline grid (virtual scrolling) |
 | TanStack Virtual | `@tanstack/react-virtual` | Virtual scrolling listas grandes |
 | Norigin Spatial Nav | `@noriginmedia/norigin-spatial-navigation` | Navegación TV/mando con flechas |
 | unlazy + react-blurhash | `unlazy`, `react-blurhash` | Lazy loading + BlurHash placeholders |
-| reconnecting-websocket | `reconnecting-websocket` | WebSocket con auto-reconnect |
+| react-use-websocket | `react-use-websocket` | WebSocket hook con auto-reconnect |
 | react-i18next | `react-i18next` | Internacionalización (ES/EN) |
 | React Hook Form | `react-hook-form` | Formularios admin/settings |
 | Vitest + Testing Library | `vitest`, `@testing-library/react` | Testing |
+| Playwright | `@playwright/test` | E2E testing cross-browser |
+| MSW | `msw` | API mocking para tests |
+| vite-plugin-pwa | `vite-plugin-pwa` | PWA: offline, install prompt |
 
 > Full rationale for each choice in [tooling.md](./tooling.md#frontend-dependencies)
 
