@@ -11,14 +11,16 @@ import (
 	"hubplay/internal/api/handlers"
 	"hubplay/internal/auth"
 	"hubplay/internal/config"
+	"hubplay/internal/library"
 	"hubplay/internal/user"
 )
 
 type Dependencies struct {
-	Auth   *auth.Service
-	Users  *user.Service
-	Config *config.Config
-	Logger *slog.Logger
+	Auth      *auth.Service
+	Users     *user.Service
+	Libraries *library.Service
+	Config    *config.Config
+	Logger    *slog.Logger
 }
 
 func NewRouter(deps Dependencies) http.Handler {
@@ -71,6 +73,39 @@ func NewRouter(deps Dependencies) http.Handler {
 				r.Get("/", userHandler.List)
 				r.Post("/", authHandler.Register)
 			})
+
+			// Libraries & Items (only if service is wired)
+			if deps.Libraries != nil {
+				libHandler := handlers.NewLibraryHandler(deps.Libraries, deps.Logger)
+				itemHandler := handlers.NewItemHandler(deps.Libraries, deps.Logger)
+
+				// Libraries
+				r.Get("/libraries", libHandler.List)
+				r.Route("/libraries/{id}", func(r chi.Router) {
+					r.Get("/", libHandler.Get)
+					r.Get("/items", libHandler.Items)
+
+					// Admin-only library management
+					r.Group(func(r chi.Router) {
+						r.Use(auth.RequireAdmin)
+						r.Put("/", libHandler.Update)
+						r.Delete("/", libHandler.Delete)
+						r.Post("/scan", libHandler.Scan)
+					})
+				})
+				r.Group(func(r chi.Router) {
+					r.Use(auth.RequireAdmin)
+					r.Post("/libraries", libHandler.Create)
+				})
+
+				// Items
+				r.Get("/items/latest", libHandler.LatestItems)
+				r.Get("/items/search", itemHandler.Search)
+				r.Route("/items/{id}", func(r chi.Router) {
+					r.Get("/", itemHandler.Get)
+					r.Get("/children", itemHandler.Children)
+				})
+			}
 		})
 	})
 
