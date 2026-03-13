@@ -9,22 +9,28 @@ CREATE VIRTUAL TABLE items_fts USING fts5(
     tokenize='unicode61 remove_diacritics 2'
 );
 
+-- +goose StatementBegin
 CREATE TRIGGER items_fts_insert AFTER INSERT ON items BEGIN
     INSERT INTO items_fts(rowid, title, original_title)
     VALUES (NEW.rowid, NEW.title, NEW.original_title);
 END;
+-- +goose StatementEnd
 
+-- +goose StatementBegin
 CREATE TRIGGER items_fts_delete AFTER DELETE ON items BEGIN
     INSERT INTO items_fts(items_fts, rowid, title, original_title)
     VALUES ('delete', OLD.rowid, OLD.title, OLD.original_title);
 END;
+-- +goose StatementEnd
 
+-- +goose StatementBegin
 CREATE TRIGGER items_fts_update AFTER UPDATE ON items BEGIN
     INSERT INTO items_fts(items_fts, rowid, title, original_title)
     VALUES ('delete', OLD.rowid, OLD.title, OLD.original_title);
     INSERT INTO items_fts(rowid, title, original_title)
     VALUES (NEW.rowid, NEW.title, NEW.original_title);
 END;
+-- +goose StatementEnd
 
 -- +goose Down
 DROP TRIGGER IF EXISTS items_fts_update;
