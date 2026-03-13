@@ -332,6 +332,7 @@ Full endpoint documentation: [API Reference →](api-reference.md) | [Error Code
 ### Additional Documentation
 
 **Features:**
+- [Setup Wizard](setup-wizard.md) — First-run wizard: admin account, libraries, remote access, FFmpeg detection
 - [API Reference](api-reference.md) — Full endpoint catalog with request/response examples
 - [Error Codes](error-codes.md) — Standardized error codes, client handling, retry strategy
 - [Security](security.md) — Threat model, auth, API security, TLS, plugin isolation
