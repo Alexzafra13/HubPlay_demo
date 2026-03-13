@@ -6,10 +6,26 @@ Guide for deploying HubPlay in real environments: Docker, native binary, systemd
 
 ## 1. Deployment Methods
 
-### Docker (Recommended)
+### Docker — Plug and Play (Recommended)
+
+**El objetivo**: `docker compose up -d` y listo. Sin instalar nada más. La imagen Docker incluye todo lo necesario:
+
+- FFmpeg completo (todos los codecs: H.264, HEVC, VP9, AV1, AAC, AC3, Opus, FLAC…)
+- Drivers VA-API (Intel/AMD) para transcoding por hardware
+- libass + fuentes para burn-in de subtítulos ASS/SSA/PGS
+- Certificados TLS para HTTPS saliente (TMDb, federación)
+- Timezone data para programación correcta del scanner
+- Frontend React embebido en el binario Go
 
 ```yaml
-# docker-compose.yml — production
+# docker-compose.yml — production (plug and play)
+#
+# Solo necesitas:
+# 1. Copiar este archivo
+# 2. Ajustar las rutas de /media a tus carpetas
+# 3. docker compose up -d
+# 4. Abrir http://localhost:8096
+
 services:
   hubplay:
     image: hubplay/hubplay:latest
@@ -17,15 +33,15 @@ services:
     ports:
       - "8096:8096"
     volumes:
-      - hubplay-config:/config               # hubplay.yaml + SQLite DB
-      - hubplay-cache:/cache                  # Transcoding cache, thumbnails, temp
-      - /media/movies:/media/movies:ro        # Media library (read-only)
-      - /media/tv:/media/tv:ro
-      - /media/music:/media/music:ro
+      - hubplay-config:/config               # hubplay.yaml + SQLite DB (auto-creados)
+      - hubplay-cache:/cache                  # Transcoding cache, thumbnails
+      - /media/movies:/media/movies:ro        # ← CAMBIA a tu ruta de películas
+      - /media/tv:/media/tv:ro               # ← CAMBIA a tu ruta de series
+      - /media/music:/media/music:ro         # ← CAMBIA a tu ruta de música (opcional)
     environment:
-      - HUBPLAY_CONFIG=/config/hubplay.yaml
-      - TMDB_API_KEY=${TMDB_API_KEY}
-      - FANART_API_KEY=${FANART_API_KEY}
+      - TMDB_API_KEY=${TMDB_API_KEY:-}       # Opcional: metadata automática
+      - FANART_API_KEY=${FANART_API_KEY:-}   # Opcional: artwork extra
+      - TZ=${TZ:-Europe/Madrid}              # Tu zona horaria
     restart: unless-stopped
     logging:
       driver: json-file
@@ -38,11 +54,49 @@ services:
     read_only: true
     tmpfs:
       - /tmp:size=2G                          # FFmpeg temp files during transcode
+    # Health check (ya incluido en la imagen, pero aquí por claridad)
+    healthcheck:
+      test: ["CMD", "hubplay", "health"]
+      interval: 30s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
 
 volumes:
-  hubplay-config:
-  hubplay-cache:
+  hubplay-config:    # Persiste config + DB entre actualizaciones
+  hubplay-cache:     # Cache de transcode (se puede borrar sin perder datos)
 ```
+
+### Primer arranque — qué pasa automáticamente
+
+```
+docker compose up -d
+  │
+  ├─ 1. Imagen descargada (~180MB, todo incluido)
+  ├─ 2. Volúmenes creados (config + cache)
+  ├─ 3. hubplay.yaml generado con defaults seguros
+  │     └─ JWT secret auto-generado (crypto/rand)
+  ├─ 4. SQLite DB creada + migrations ejecutadas
+  ├─ 5. FFmpeg detectado + HW acceleration probada
+  │     └─ Si hay GPU compatible → activada automáticamente
+  ├─ 6. Scanner listo (esperando a que configures libraries)
+  └─ 7. UI disponible en http://localhost:8096
+         └─ Setup wizard: crear usuario admin
+```
+
+### ¿Qué NO necesitas hacer?
+
+| Paso | ¿Necesario? | Por qué |
+|------|-------------|---------|
+| Instalar FFmpeg | No | Incluido en la imagen |
+| Configurar codecs | No | FFmpeg viene con todos compilados |
+| Instalar drivers GPU | No* | VA-API drivers incluidos para Intel/AMD |
+| Crear hubplay.yaml | No | Se auto-genera en primer arranque |
+| Crear la base de datos | No | SQLite se crea automáticamente |
+| Instalar fuentes para subtítulos | No | Noto + Liberation incluidas |
+| Configurar certificados TLS | No | CA certs incluidos para HTTPS saliente |
+
+*\*NVIDIA: usar variante `hubplay/hubplay:latest-nvidia` que incluye CUDA runtime*
 
 **Why named volumes over bind mounts?**
 - Portable (work on any Docker host without path issues)

@@ -139,20 +139,90 @@ make migrate-create   # Create new migration file
 
 ## Docker Build
 
+Plug-and-play: the image includes **everything** needed to run HubPlay. No external dependencies, no manual FFmpeg install, no additional setup. `docker compose up` and done.
+
 ```dockerfile
 # Multi-stage: frontend → backend → runtime
+# ============================================
+
+# Stage 1: Build React frontend
 FROM node:20-alpine AS frontend
-# npm ci && npm run build
+WORKDIR /web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY web/ ./
+RUN npm run build
 
+# Stage 2: Build Go backend (embeds frontend)
 FROM golang:1.22-alpine AS backend
-# Copy frontend build, go build with -tags embed
+RUN apk add --no-cache gcc musl-dev   # CGo needed for SQLite
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+COPY --from=frontend /web/dist ./web/dist
+RUN CGO_ENABLED=1 go build -tags embed -ldflags "-s -w" -o hubplay ./cmd/hubplay
 
+# Stage 3: Runtime — everything included
 FROM debian:bookworm-slim AS runtime
-# Copy binary + install ffmpeg
-# Minimal image: ~150MB with FFmpeg
+
+# FFmpeg (full build: all codecs, HW accel support, subtitle filters)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    # HW acceleration support
+    intel-media-va-driver-non-free \
+    mesa-va-drivers \
+    vainfo \
+    # Subtitle rendering (libass for ASS/SSA burn-in)
+    libass9 \
+    # Font rendering for subtitle burn-in
+    fonts-liberation \
+    fonts-noto-core \
+    fonts-noto-cjk \
+    # TLS for outbound HTTPS (TMDb, federation, plugins)
+    ca-certificates \
+    # Timezone data
+    tzdata \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user
+RUN groupadd -r hubplay && useradd -r -g hubplay -d /config -s /sbin/nologin hubplay
+
+# Copy binary
+COPY --from=backend /app/hubplay /usr/local/bin/hubplay
+
+# Default directories
+RUN mkdir -p /config /cache /tmp/hubplay && \
+    chown -R hubplay:hubplay /config /cache /tmp/hubplay
+
+USER hubplay
+WORKDIR /config
+
+EXPOSE 8096
+
+# Health check built into Docker
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+    CMD hubplay health || exit 1
+
+ENTRYPOINT ["hubplay"]
+CMD ["--config", "/config/hubplay.yaml"]
 ```
 
-The final binary includes the React frontend via `go:embed`. The Docker image only needs the binary + FFmpeg.
+### What's Included in the Image
+
+| Component | Why | Size Impact |
+|-----------|-----|-------------|
+| FFmpeg (full) | Transcoding, remuxing, media probing, thumbnail extraction | ~80MB |
+| VA-API drivers (Intel/AMD) | Hardware transcoding out of the box | ~15MB |
+| libass + fonts | Subtitle burn-in (ASS/SSA/PGS) with correct rendering | ~20MB |
+| CA certificates | HTTPS to TMDb, federation peers, plugin repos | ~1MB |
+| Timezone data | Correct scheduling (scanner cron, EPG times) | ~2MB |
+| HubPlay binary (with embedded frontend) | The app | ~25MB |
+| **Total image** | | **~180MB** |
+
+NVIDIA users: use `hubplay/hubplay:latest-nvidia` variant (adds CUDA + NVENC runtime libs, ~350MB).
+
+The final binary includes the React frontend via `go:embed`. Zero runtime dependencies beyond what the Docker image provides.
 
 ---
 

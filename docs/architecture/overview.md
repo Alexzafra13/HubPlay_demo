@@ -305,6 +305,8 @@ chmod +x hubplay
 /api/v1/search          → Global search
 ```
 
+Full endpoint documentation: [API Reference →](api-reference.md) | [Error Codes →](error-codes.md)
+
 ---
 
 ## Design Decisions Summary
@@ -322,6 +324,13 @@ chmod +x hubplay
 | Webhooks | HTTP POST with templates | Simple automation without writing plugins |
 | Auth | Local bcrypt + JWT | Stateless, scalable, plugin-extensible |
 | Config | YAML + env vars | Human-readable, 12-factor app compatible |
-| Deployment | Docker + native binary | Covers both Docker users and bare-metal installers |
+| Deployment | Docker plug-and-play + native binary | Docker image includes everything (FFmpeg, drivers, fonts). `docker compose up` and done |
+| Security | Self-hosted: bcrypt, JWT, rate limit, no phone-home | [Full design →](security.md) |
 | Media metadata | TMDb + Fanart.tv | Free, comprehensive, good API |
 | Live TV | M3U/IPTV + XMLTV EPG | Standard formats, works with legal providers |
+
+### Additional Documentation
+- [API Reference](api-reference.md) — Full endpoint catalog with request/response examples
+- [Error Codes](error-codes.md) — Standardized error codes, client handling, retry strategy
+- [Security](security.md) — Threat model, auth, API security, TLS, plugin isolation
+- [Deployment & Production](deployment-production.md) — Docker, systemd, reverse proxy, backups, NAS, monitoring
