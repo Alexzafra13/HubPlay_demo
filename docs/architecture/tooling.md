@@ -7,7 +7,7 @@
 | Library | Purpose | Why This One |
 |---------|---------|-------------|
 | `github.com/go-chi/chi/v5` | HTTP router + middleware | Lightweight, idiomatic Go, uses stdlib `net/http` directly, easy to debug |
-| `modernc.org/sqlite` | SQLite driver | Pure Go (no CGO), cross-compiles easily for all platforms |
+| `github.com/ncruces/go-sqlite3` | SQLite driver | Pure Go (WASM via wazero, no CGO). Mejor rendimiento en lecturas concurrentes que modernc (168k reads/sec vs 53k). Cross-compila fácil |
 | `github.com/golang-jwt/jwt/v5` | JWT tokens | Official library, well-maintained, no unnecessary deps |
 | `github.com/google/uuid` | UUIDs | Simple, reliable, from Google |
 | `github.com/fsnotify/fsnotify` | File system watcher | De facto standard in Go for file watching |
@@ -17,6 +17,7 @@
 | `github.com/gorilla/websocket` | WebSocket connections | Most used, stable, well-documented |
 | `google.golang.org/grpc` | Plugin communication | Industry standard RPC, language-agnostic |
 | `github.com/pressly/goose/v3` | Database migrations | Simple, supports raw SQL, embeddable in binary |
+| `github.com/sqlc-dev/sqlc` | SQL → Go code generation | Type-safe queries en compile-time, rendimiento near-raw database/sql, full SQL power (CTEs, window functions) |
 
 ### Optional (for PostgreSQL support)
 
@@ -28,13 +29,14 @@
 
 | Rejected | Why |
 |----------|-----|
-| GORM / Ent (ORM) | SQL directo is clearer and faster for SQLite. ORMs add abstraction we don't need |
+| GORM / Ent (ORM) | SQL directo con **sqlc** es más claro, rápido y type-safe. ORMs añaden abstracción innecesaria y son 30-50% más lentos |
 | Gin | More "magic" than chi, harder to debug. chi is more Go-idiomatic |
 | Redis | No distributed cache needed. In-memory Go maps are enough for a monolith |
 | RabbitMQ / NATS | In-process event bus is sufficient. No need for external message broker |
 | GraphQL | REST is simpler and covers all our use cases |
 | Next.js / SSR | Static SPA embedded in Go binary is simpler than server-side rendering |
-| `go-sqlite3` (CGO) | Requires C compiler, complicates cross-compilation. modernc.org/sqlite is pure Go |
+| `go-sqlite3` (mattn, CGO) | Requiere compilador C, complica cross-compilation. ncruces/go-sqlite3 es pure Go (WASM) y más rápido en lecturas concurrentes |
+| `modernc.org/sqlite` | Transpilado C-to-Go, más lento que ncruces en lecturas concurrentes (53k vs 168k reads/sec). ncruces con WASM/wazero es mejor opción |
 | Email service | No email in the system. Admin manages users directly |
 
 ---
@@ -57,11 +59,12 @@
 
 | Library | NPM Package | Purpose | Why |
 |---------|-------------|---------|-----|
-| Vidstack | `vidstack` | Video player completo | Modular, controles accesibles, HLS/DASH/DRM. Nota: se fusiona con Video.js v10 en 2026 (Vidstack + Plyr + Video.js + Media Chrome → proyecto unificado) |
-| hls.js | `hls.js` | HLS streaming (bajo nivel) | Fallback directo si Vidstack no cubre un caso edge |
-| Shaka Player | `shaka-player` | DRM (Widevine/PlayReady/FairPlay) | Mantenido por Google, soporte DRM completo para contenido protegido |
+| hls.js | `hls.js` | Motor HLS (engine) | ~15M descargas/semana, usado por Twitch/Twitter. Motor de streaming principal con ABR, buffer management, error recovery |
+| Controles custom | — | Player UI (React + Tailwind) | Control total del UX: trickplay, skip intro, mini-player, channel overlay. Sin dependencia de frameworks de player que pueden cambiar/morir |
+| Shaka Player | `shaka-player` | DRM (Widevine/PlayReady/FairPlay) | Mantenido por Google, soporte DRM completo para contenido protegido. Se usa SOLO cuando hay contenido con DRM |
 | SubtitlesOctopus | `@jellyfin/libass-wasm` | Subtítulos ASS/SSA | libass compilado a WASM, renderiza estilos complejos (anime, karaoke). Fork mantenido por Jellyfin |
-| media-captions | `media-captions` | Subtítulos VTT/SRT | Parser ligero (~5KB) de WebVTT y SRT, integrado con Vidstack |
+
+> **Decisión de player**: Se descartó Vidstack porque se está fusionando en Video.js v10 (beta marzo 2026, GA mediados 2026). Video.js v10 aún no está production-ready. Usar `hls.js` directamente + controles React propios da control total sin depender de un proyecto en transición. Cuando Video.js v10 sea GA y estable, se puede evaluar migración.
 
 ### EPG & Live TV
 
@@ -99,7 +102,9 @@
 | react-window / react-virtualized | TanStack Virtual es más moderno, headless, y flexible |
 | styled-components / CSS Modules | Tailwind es más rápido de iterar y genera bundles más pequeños |
 | Socket.io | Overhead innecesario. reconnecting-websocket + WebSocket nativo es suficiente |
-| Video.js v8 | Legacy, pesado (~300KB). Vidstack es la alternativa moderna (y se fusionan en Video.js v10) |
+| Vidstack | Se fusiona en Video.js v10 y será deprecated. Proyecto en transición, no apostar por API inestable |
+| Video.js v8 | Legacy, pesado (~300KB), sin mantenimiento activo (el equipo trabaja en v10) |
+| Video.js v10 | Beta desde marzo 2026, GA estimado mediados 2026. No production-ready aún. Evaluar post-GA |
 | Next.js / Remix | No necesitamos SSR. SPA embebida en Go es más simple |
 | Axios | fetch() nativo + TanStack Query es suficiente. Sin dependencia extra |
 | Material UI / Ant Design | Demasiado opinionated, difícil de customizar para un media player. Tailwind + componentes propios |
@@ -155,13 +160,13 @@ RUN npm run build
 
 # Stage 2: Build Go backend (embeds frontend)
 FROM golang:1.22-alpine AS backend
-RUN apk add --no-cache gcc musl-dev   # CGo needed for SQLite
+# No CGO needed — ncruces/go-sqlite3 uses WASM (wazero), pure Go
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 COPY --from=frontend /web/dist ./web/dist
-RUN CGO_ENABLED=1 go build -tags embed -ldflags "-s -w" -o hubplay ./cmd/hubplay
+RUN CGO_ENABLED=0 go build -tags embed -ldflags "-s -w" -o hubplay ./cmd/hubplay
 
 # Stage 3: Runtime — everything included
 FROM debian:bookworm-slim AS runtime
@@ -252,4 +257,4 @@ The final binary includes the React frontend via `go:embed`. Zero runtime depend
 | TMDb API key invalid/expired | No metadata for new items | Graceful degradation: items added without metadata, retry queue |
 | Corrupt/unreadable media files | Scanner fails on single file | Log error per file, continue scanning remaining files |
 | Very large libraries (100K+ items) | Slow scans, memory pressure | Incremental scanning via fingerprint, server-side pagination, streaming DB queries |
-| modernc.org/sqlite performance | Slightly slower than CGO version | Acceptable trade-off for build simplicity. Benchmarks show <10% difference for typical queries |
+| ncruces/go-sqlite3 memory usage | Mayor consumo de memoria que CGO por sandboxing WASM | Aceptable para un media server. A cambio: mejor rendimiento en lecturas concurrentes (168k reads/sec), cross-compilation trivial, sin CGO |

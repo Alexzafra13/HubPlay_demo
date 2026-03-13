@@ -11,7 +11,7 @@ A self-hosted media server for movies, TV shows, and live TV (IPTV). Written in 
 | Component | Technology | Why |
 |-----------|-----------|-----|
 | Backend | Go | Single binary, fast, great concurrency, cross-platform |
-| Web Frontend | React + TypeScript | Large ecosystem, hls.js for video, community contributors |
+| Web Frontend | React + TypeScript | Large ecosystem, hls.js + controles custom para video, community contributors |
 | Database | SQLite (default) | Zero config, single file, FTS5 for search |
 | Database (optional) | PostgreSQL | For large deployments with many concurrent users |
 | Transcoding | FFmpeg | Industry standard, hardware acceleration support |

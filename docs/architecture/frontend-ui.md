@@ -17,8 +17,8 @@ React + TypeScript SPA embebida en el binario Go. Dark theme obligatorio. Diseñ
 | TanStack Query | `@tanstack/react-query` | API data fetching + cache |
 | Zustand | `zustand` | Client state (player, auth, UI) |
 | Tailwind CSS v4 | `tailwindcss` | Styling (dark theme) |
-| Vidstack | `vidstack` | Video player (HLS/DASH/DRM) |
-| Shaka Player | `shaka-player` | DRM (Widevine/PlayReady) |
+| hls.js | `hls.js` | Motor HLS + controles custom React |
+| Shaka Player | `shaka-player` | DRM (Widevine/PlayReady) — solo contenido protegido |
 | SubtitlesOctopus | `@jellyfin/libass-wasm` | Subtítulos ASS/SSA (libass WASM) |
 | Planby | `planby` | EPG timeline grid (virtual scrolling) |
 | TanStack Virtual | `@tanstack/react-virtual` | Virtual scrolling listas grandes |
@@ -416,7 +416,7 @@ web/src/
 │   │   ├── MiniPlayer.tsx
 │   │   └── TopBar.tsx
 │   ├── player/
-│   │   ├── VideoPlayer.tsx       # hls.js wrapper
+│   │   ├── VideoPlayer.tsx       # hls.js engine + custom controls React/Tailwind
 │   │   ├── PlayerControls.tsx
 │   │   ├── SkipButton.tsx        # Skip intro/credits
 │   │   ├── TrickplayPreview.tsx
