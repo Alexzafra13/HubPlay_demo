@@ -111,7 +111,8 @@ Discovery → Validate manifest → Start process → gRPC handshake → Health 
     │
     ├─ Success → Register with appropriate manager (metadata, auth, etc.)
     │
-    └─ Failure → Log error, mark as "malfunctioned", continue without it
+    └─ Failure → Log error, auto-restart with backoff (1s→2s→4s→max 30s)
+                  After 5 consecutive failures → disable plugin, notify admin
 ```
 
 ```go
