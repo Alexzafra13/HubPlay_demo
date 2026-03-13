@@ -97,6 +97,15 @@ A self-hosted media server for movies, TV shows, and live TV (IPTV). Written in 
 - Webhooks for lightweight automation
 - [Full design →](plugins.md)
 
+### 6. Federation (Server-to-Server)
+- P2P linking between HubPlay instances via invite codes
+- Browse, stream, and download content from federated servers
+- Ed25519 key exchange for mutual authentication
+- Admin controls per peer: shared libraries, streaming, download permissions
+- Cached remote catalogs for offline browsing
+- No central service — fully decentralized
+- [Full design →](federation.md)
+
 ---
 
 ## Project Structure
@@ -183,6 +192,15 @@ hubplay/
 │   │   ├── loader.go
 │   │   ├── registry.go
 │   │   └── manifest.go
+│   ├── federation/
+│   │   ├── manager.go
+│   │   ├── peer.go
+│   │   ├── invite.go
+│   │   ├── catalog.go
+│   │   ├── proxy.go
+│   │   ├── download.go
+│   │   ├── crypto.go
+│   │   └── client.go
 │   ├── webhook/
 │   │   ├── dispatcher.go
 │   │   ├── config.go
@@ -282,6 +300,7 @@ chmod +x hubplay
 /api/v1/stream/*        → Streaming (HLS playlists, segments, direct)
 /api/v1/channels/*      → IPTV channels + EPG
 /api/v1/plugins/*       → Plugin management
+/api/v1/federation/*    → Peer management, remote catalog, federated streaming
 /api/v1/system/*        → Server info, settings, health
 /api/v1/search          → Global search
 ```
@@ -299,6 +318,7 @@ chmod +x hubplay
 | Frontend | React + TypeScript | Ecosystem, hls.js, community |
 | Streaming | HLS with FFmpeg | Industry standard, works on all devices |
 | Plugins | gRPC external processes | Language-agnostic, crash isolation, secure |
+| Federation | P2P with Ed25519 + JWT | No central service, fully decentralized, admin-controlled |
 | Webhooks | HTTP POST with templates | Simple automation without writing plugins |
 | Auth | Local bcrypt + JWT | Stateless, scalable, plugin-extensible |
 | Config | YAML + env vars | Human-readable, 12-factor app compatible |
