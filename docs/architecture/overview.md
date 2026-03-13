@@ -79,7 +79,7 @@ A self-hosted media server for movies, TV shows, and live TV (IPTV). Written in 
 - XMLTV EPG (electronic program guide)
 - Stream proxying with auto-reconnection
 - Channels organized by groups/categories
-- [Full design →](media-management.md#10-iptv--live-tv-module)
+- [Full design →](live-tv-epg.md) | [Domain types →](media-management.md#10-iptv--live-tv-module)
 
 ### 4. Users & Authentication
 - Local auth with bcrypt + JWT tokens
@@ -333,12 +333,15 @@ Full endpoint documentation: [API Reference →](api-reference.md) | [Error Code
 
 **Features:**
 - [Setup Wizard](setup-wizard.md) — First-run wizard: admin account, libraries, remote access, FFmpeg detection
+- [Live TV & EPG](live-tv-epg.md) — IPTV architecture: M3U parsing, XMLTV EPG, stream proxy, channel health
 - [API Reference](api-reference.md) — Full endpoint catalog with request/response examples
 - [Error Codes](error-codes.md) — Standardized error codes, client handling, retry strategy
 - [Security](security.md) — Threat model, auth, API security, TLS, plugin isolation
 - [Deployment & Production](deployment-production.md) — Docker, systemd, reverse proxy, backups, NAS, monitoring
+- [Configuration](configuration.md) — Full hubplay.yaml schema, env vars, examples per scenario
 
 **Engineering:**
+- [Project Structure](project-structure.md) — Directory map with one-line description per folder
 - [Wiring & Lifecycle](wiring-lifecycle.md) — Dependency injection, initialization order, graceful shutdown
 - [Error Handling & Logging](error-handling.md) — Error types, wrapping strategy, structured logging with slog
 - [Testing Strategy](testing-strategy.md) — Test pyramid, patterns, fixtures, coverage goals
@@ -346,3 +349,4 @@ Full endpoint documentation: [API Reference →](api-reference.md) | [Error Code
 - [Background Jobs](background-jobs.md) — Scheduler, work queues, periodic tasks
 - [CI/CD](ci-cd.md) — GitHub Actions pipeline, Goreleaser, Docker publishing
 - [Observability](observability.md) — Health checks, internal metrics, activity log
+- [Upgrade & Migration](upgrade-migration.md) — Versioning, DB migrations, rollback strategy

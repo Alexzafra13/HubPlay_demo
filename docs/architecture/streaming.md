@@ -213,6 +213,154 @@ Detection runs once at startup:
 2. For each, try a test encode to verify it actually works
 3. Cache results — used by FFmpegBuilder when constructing commands
 
+### Hardware Compatibility Matrix
+
+| GPU / Platform | API | Decode | Encode | Config Value | Docker Support |
+|---|---|---|---|---|---|
+| **Intel (6th gen+)** | VAAPI | H.264, HEVC, VP9, AV1¹ | H.264, HEVC, AV1¹ | `vaapi` | `--device /dev/dri:/dev/dri` |
+| **Intel (6th gen+)** | QSV | H.264, HEVC, VP9, AV1¹ | H.264, HEVC, AV1¹ | `qsv` | `--device /dev/dri:/dev/dri` |
+| **NVIDIA (GTX 10xx+)** | NVENC/NVDEC | H.264, HEVC, VP9², AV1³ | H.264, HEVC, AV1³ | `nvenc` | `--runtime=nvidia` + NVIDIA Container Toolkit |
+| **AMD (RX 400+)** | VAAPI | H.264, HEVC, VP9 | H.264, HEVC | `vaapi` | `--device /dev/dri:/dev/dri` |
+| **Apple Silicon** | VideoToolbox | H.264, HEVC, VP9 | H.264, HEVC | `videotoolbox` | N/A (native only) |
+| **Raspberry Pi 4/5** | V4L2 | H.264 | H.264 | `v4l2` | `--device /dev/video*` |
+
+¹ AV1: Intel Arc (Alchemist) o 14th gen+
+² VP9 decode: NVIDIA 10xx+ (decode only, no encode)
+³ AV1: NVIDIA RTX 40xx+ (Ada Lovelace)
+
+### Detection Flow
+
+```
+Startup
+  │
+  ├─ 1. Check ffmpeg -hwaccels → list available APIs
+  │
+  ├─ 2. For each API, attempt test encode:
+  │     ffmpeg -f lavfi -i testsrc=duration=1:size=320x240 \
+  │       -c:v h264_vaapi -frames:v 1 -f null -
+  │
+  ├─ 3. If test succeeds → add to available encoders
+  │     If test fails → skip, log warning
+  │
+  ├─ 4. Select best available:
+  │     User preference (config) > NVENC > QSV > VAAPI > VideoToolbox > Software
+  │
+  └─ 5. Log result:
+        [INFO] Hardware acceleration: vaapi (Intel HD Graphics 630)
+        [INFO] Available encoders: h264_vaapi, hevc_vaapi
+        [INFO] Available decoders: h264, hevc, vp9
+```
+
+### Fallback Strategy
+
+```
+Hardware encoder selected
+    │
+    ├─ Encode starts → success → use hardware
+    │
+    └─ Encode fails (driver crash, unsupported profile, OOM)
+         │
+         ├─ Log warning: "HW encode failed, falling back to software"
+         ├─ Kill failed FFmpeg process
+         ├─ Restart with software encoder (libx264/libx265)
+         └─ Mark this codec as "software-only" for this session
+              (don't retry HW for same profile until restart)
+```
+
+### FFmpeg Command Examples per GPU
+
+**Intel VAAPI:**
+```bash
+ffmpeg -hwaccel vaapi -hwaccel_output_format vaapi \
+  -vaapi_device /dev/dri/renderD128 \
+  -i input.mkv \
+  -c:v h264_vaapi -qp 23 \
+  -vf "scale_vaapi=w=1920:h=1080" \
+  -c:a aac -b:a 192k \
+  -f hls -hls_time 6 output/stream.m3u8
+```
+
+**Intel QSV:**
+```bash
+ffmpeg -hwaccel qsv -hwaccel_output_format qsv \
+  -i input.mkv \
+  -c:v h264_qsv -preset veryfast -global_quality 23 \
+  -vf "scale_qsv=w=1920:h=1080" \
+  -c:a aac -b:a 192k \
+  -f hls -hls_time 6 output/stream.m3u8
+```
+
+**NVIDIA NVENC:**
+```bash
+ffmpeg -hwaccel cuda -hwaccel_output_format cuda \
+  -i input.mkv \
+  -c:v h264_nvenc -preset p4 -cq 23 \
+  -vf "scale_cuda=w=1920:h=1080" \
+  -c:a aac -b:a 192k \
+  -f hls -hls_time 6 output/stream.m3u8
+```
+
+**macOS VideoToolbox:**
+```bash
+ffmpeg -hwaccel videotoolbox \
+  -i input.mkv \
+  -c:v h264_videotoolbox -q:v 60 \
+  -vf "scale=1920:1080" \
+  -c:a aac -b:a 192k \
+  -f hls -hls_time 6 output/stream.m3u8
+```
+
+**Software fallback (any platform):**
+```bash
+ffmpeg -i input.mkv \
+  -c:v libx264 -preset veryfast -crf 23 \
+  -vf "scale=1920:1080" \
+  -c:a aac -b:a 192k \
+  -f hls -hls_time 6 output/stream.m3u8
+```
+
+### Docker GPU Passthrough
+
+**Intel/AMD (VAAPI):**
+```yaml
+services:
+  hubplay:
+    image: hubplay/hubplay:latest
+    devices:
+      - /dev/dri:/dev/dri
+    environment:
+      - HUBPLAY_TRANSCODING_HW_ACCEL=vaapi
+```
+
+**NVIDIA (NVENC):**
+```yaml
+services:
+  hubplay:
+    image: hubplay/hubplay:latest-nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      - HUBPLAY_TRANSCODING_HW_ACCEL=nvenc
+```
+
+### Performance Comparison (1080p HEVC → 1080p H.264)
+
+| Method | Speed | CPU Usage | Quality | Power |
+|---|---|---|---|---|
+| Software (libx264 veryfast) | ~30 fps | 100% (all cores) | Good | 65–150W |
+| Intel QSV (i7-12700) | ~180 fps | ~5% | Good | ~15W |
+| Intel VAAPI (i7-12700) | ~150 fps | ~5% | Good | ~15W |
+| NVIDIA NVENC (RTX 3060) | ~250 fps | ~2% | Good+ | ~40W |
+| Apple VideoToolbox (M2) | ~120 fps | ~10% | Good | ~10W |
+| Raspberry Pi 4 (V4L2) | ~25 fps | ~80% | Acceptable | ~5W |
+
+> Speeds approximate, depend on source resolution, bitrate, and encoding settings.
+
 ---
 
 ## 4. HLS Adaptive Streaming
