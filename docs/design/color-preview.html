@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HubPlay — Color Palettes Preview</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: #111; color: #fff; }
+
+  h1 { text-align: center; padding: 40px 20px 10px; font-size: 28px; font-weight: 700; }
+  .subtitle { text-align: center; color: #888; margin-bottom: 40px; font-size: 14px; }
+
+  .palette-section {
+    max-width: 1200px;
+    margin: 0 auto 60px;
+    padding: 0 20px;
+  }
+
+  .palette-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #333;
+  }
+  .palette-header h2 { font-size: 24px; font-weight: 700; }
+  .palette-header .tag {
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .palette-header p { color: #999; font-size: 14px; }
+
+  /* ===================== THEME CONTAINERS ===================== */
+  .theme-container {
+    border-radius: 16px;
+    overflow: hidden;
+    border: 1px solid;
+  }
+
+  /* --- Navbar --- */
+  .navbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 24px;
+    border-bottom: 1px solid;
+  }
+  .navbar .logo { font-size: 20px; font-weight: 800; letter-spacing: -0.5px; }
+  .navbar .nav-links { display: flex; gap: 24px; font-size: 14px; }
+  .navbar .nav-links a { text-decoration: none; transition: color 0.2s; }
+  .navbar .nav-links a.active { font-weight: 600; }
+  .navbar .nav-right { display: flex; gap: 12px; align-items: center; }
+  .navbar .search-box {
+    padding: 6px 14px;
+    border-radius: 8px;
+    border: 1px solid;
+    font-size: 13px;
+    width: 200px;
+    outline: none;
+  }
+  .navbar .avatar {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 700;
+  }
+
+  /* --- Content area --- */
+  .content-area {
+    padding: 24px;
+  }
+  .section-title {
+    font-size: 18px;
+    font-weight: 700;
+    margin-bottom: 16px;
+  }
+
+  /* --- Poster Grid --- */
+  .poster-grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 16px;
+    margin-bottom: 32px;
+  }
+  .poster-card {
+    border-radius: 12px;
+    overflow: hidden;
+    transition: transform 0.2s, box-shadow 0.2s;
+    cursor: pointer;
+  }
+  .poster-card:hover {
+    transform: translateY(-4px);
+  }
+  .poster-img {
+    width: 100%;
+    aspect-ratio: 2/3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 40px;
+    position: relative;
+  }
+  .poster-img .badge {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .poster-img .progress-bar {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    border-radius: 0 0 0 0;
+  }
+  .poster-img .progress-fill {
+    height: 100%;
+    border-radius: 0;
+  }
+  .poster-info {
+    padding: 10px 12px;
+  }
+  .poster-info .title {
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .poster-info .meta {
+    font-size: 11px;
+    margin-top: 2px;
+  }
+  .poster-info .rating {
+    font-size: 11px;
+    margin-top: 4px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  /* --- Buttons Row --- */
+  .buttons-row {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 32px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .btn {
+    padding: 10px 20px;
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 600;
+    border: none;
+    cursor: pointer;
+    transition: opacity 0.2s;
+  }
+  .btn:hover { opacity: 0.85; }
+  .btn-outline {
+    background: transparent;
+    border: 1.5px solid;
+  }
+  .btn-ghost {
+    background: transparent;
+    border: none;
+  }
+  .badge-pill {
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .badge-live {
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+  }
+
+  /* --- Detail Hero --- */
+  .detail-hero {
+    display: flex;
+    gap: 24px;
+    margin-bottom: 32px;
+    padding: 24px;
+    border-radius: 12px;
+    border: 1px solid;
+  }
+  .detail-poster {
+    width: 140px;
+    aspect-ratio: 2/3;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 50px;
+    flex-shrink: 0;
+  }
+  .detail-info { flex: 1; }
+  .detail-info h3 { font-size: 24px; font-weight: 700; margin-bottom: 8px; }
+  .detail-info .detail-meta { font-size: 13px; margin-bottom: 12px; display: flex; gap: 12px; align-items: center; }
+  .detail-info .detail-meta .dot { width: 4px; height: 4px; border-radius: 50%; }
+  .detail-info .description { font-size: 14px; line-height: 1.6; margin-bottom: 16px; }
+  .detail-info .detail-actions { display: flex; gap: 12px; }
+
+  /* --- Color Swatches --- */
+  .swatches {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 24px;
+    padding-top: 16px;
+    border-top: 1px solid #333;
+  }
+  .swatch {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+  }
+  .swatch-color {
+    width: 48px;
+    height: 48px;
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+  .swatch-label {
+    font-size: 9px;
+    color: #888;
+    text-align: center;
+  }
+  .swatch-hex {
+    font-size: 10px;
+    font-family: monospace;
+  }
+
+  /* --- Sidebar player mini --- */
+  .now-playing {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    border-radius: 10px;
+    border: 1px solid;
+    margin-bottom: 24px;
+  }
+  .now-playing .np-thumb {
+    width: 48px; height: 32px;
+    border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px;
+  }
+  .now-playing .np-info { flex: 1; }
+  .now-playing .np-title { font-size: 13px; font-weight: 600; }
+  .now-playing .np-sub { font-size: 11px; }
+  .now-playing .np-progress {
+    width: 100%;
+    height: 3px;
+    border-radius: 2px;
+    margin-top: 4px;
+  }
+  .now-playing .np-progress-fill {
+    height: 100%;
+    border-radius: 2px;
+  }
+
+  /* Responsive */
+  @media (max-width: 900px) {
+    .poster-grid { grid-template-columns: repeat(3, 1fr); }
+  }
+</style>
+</head>
+<body>
+
+<h1>HubPlay — Color Palettes</h1>
+<p class="subtitle">Abre este archivo en tu navegador para ver las 4 opciones. Haz scroll para comparar.</p>
+
+<!-- ==================== DEEP BLUE ==================== -->
+<div class="palette-section">
+  <div class="palette-header">
+    <h2>1. Deep Blue</h2>
+    <span class="tag" style="background: #1e3a5f; color: #3b82f6;">Recommended</span>
+    <p>Navy oscuro + azul eléctrico. Profesional, moderno. Vibes Disney+ / HBO Max.</p>
+  </div>
+
+  <div class="theme-container" style="background: #0a0e17; border-color: #1e2a45;">
+    <!-- Navbar -->
+    <div class="navbar" style="background: #0d1220; border-color: #1e2a45;">
+      <div class="logo" style="color: #3b82f6;">HubPlay</div>
+      <div class="nav-links">
+        <a class="active" style="color: #f1f5f9;">Home</a>
+        <a style="color: #94a3b8;">Movies</a>
+        <a style="color: #94a3b8;">TV Shows</a>
+        <a style="color: #94a3b8;">Live TV</a>
+      </div>
+      <div class="nav-right">
+        <input class="search-box" placeholder="Search..." style="background: #131a2b; border-color: #1e2a45; color: #f1f5f9;">
+        <div class="avatar" style="background: #3b82f6; color: #fff;">A</div>
+      </div>
+    </div>
+
+    <div class="content-area">
+      <!-- Now Playing -->
+      <div class="now-playing" style="background: #131a2b; border-color: #1e2a45;">
+        <div class="np-thumb" style="background: #1a2340;">▶</div>
+        <div class="np-info">
+          <div class="np-title" style="color: #f1f5f9;">Dune: Part Two</div>
+          <div class="np-sub" style="color: #94a3b8;">1:23:45 / 2:46:00</div>
+          <div class="np-progress" style="background: #1e2a45;">
+            <div class="np-progress-fill" style="background: #3b82f6; width: 50%;"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Continue Watching -->
+      <div class="section-title" style="color: #f1f5f9;">Continue Watching</div>
+      <div class="poster-grid">
+        <div class="poster-card" style="background: #131a2b;">
+          <div class="poster-img" style="background: linear-gradient(135deg, #1a2340, #0d1220);">🎬
+            <div class="progress-bar" style="background: #1e2a45;"><div class="progress-fill" style="background: #3b82f6; width: 65%;"></div></div>
+          </div>
+          <div class="poster-info"><div class="title" style="color: #f1f5f9;">Inception</div><div class="meta" style="color: #94a3b8;">2010</div><div class="rating" style="color: #3b82f6;">★ 8.8</div></div>
+        </div>
+        <div class="poster-card" style="background: #131a2b;">
+          <div class="poster-img" style="background: linear-gradient(135deg, #1a2340, #0d1220);">📺
+            <div class="badge" style="background: #3b82f6; color: #fff;">S2 E5</div>
+            <div class="progress-bar" style="background: #1e2a45;"><div class="progress-fill" style="background: #3b82f6; width: 30%;"></div></div>
+          </div>
+          <div class="poster-info"><div class="title" style="color: #f1f5f9;">Severance</div><div class="meta" style="color: #94a3b8;">2022</div><div class="rating" style="color: #3b82f6;">★ 8.7</div></div>
+        </div>
+        <div class="poster-card" style="background: #131a2b;">
+          <div class="poster-img" style="background: linear-gradient(135deg, #1a2340, #0d1220);">🎬
+            <div class="badge" style="background: #22c55e; color: #fff;">✓</div>
+          </div>
+          <div class="poster-info"><div class="title" style="color: #f1f5f9;">Oppenheimer</div><div class="meta" style="color: #94a3b8;">2023</div><div class="rating" style="color: #3b82f6;">★ 8.3</div></div>
+        </div>
+        <div class="poster-card" style="background: #131a2b;">
+          <div class="poster-img" style="background: linear-gradient(135deg, #1a2340, #0d1220);">🎬</div>
+          <div class="poster-info"><div class="title" style="color: #f1f5f9;">The Batman</div><div class="meta" style="color: #94a3b8;">2022</div><div class="rating" style="color: #3b82f6;">★ 7.8</div></div>
+        </div>
+        <div class="poster-card" style="background: #131a2b;">
+          <div class="poster-img" style="background: linear-gradient(135deg, #1a2340, #0d1220);">📺
+            <div class="badge" style="background: #ef4444; color: #fff; animation: pulse 2s infinite;">LIVE</div>
+          </div>
+          <div class="poster-info"><div class="title" style="color: #f1f5f9;">BBC News</div><div class="meta" style="color: #94a3b8;">Live TV</div></div>
+        </div>
+        <div class="poster-card" style="background: #131a2b;">
+          <div class="poster-img" style="background: linear-gradient(135deg, #1a2340, #0d1220);">🎬
+            <div class="progress-bar" style="background: #1e2a45;"><div class="progress-fill" style="background: #3b82f6; width: 80%;"></div></div>
+          </div>
+          <div class="poster-info"><div class="title" style="color: #f1f5f9;">Interstellar</div><div class="meta" style="color: #94a3b8;">2014</div><div class="rating" style="color: #3b82f6;">★ 8.7</div></div>
+        </div>
+      </div>
+
+      <!-- Detail Hero -->
+      <div class="detail-hero" style="background: #131a2b; border-color: #1e2a45;">
+        <div class="detail-poster" style="background: linear-gradient(135deg, #1a2340, #0d1220);">🎬</div>
+        <div class="detail-info">
+          <h3 style="color: #f1f5f9;">Dune: Part Two</h3>
+          <div class="detail-meta">
+            <span style="color: #94a3b8;">2024</span>
+            <div class="dot" style="background: #475569;"></div>
+            <span style="color: #94a3b8;">2h 46m</span>
+            <div class="dot" style="background: #475569;"></div>
+            <span style="color: #3b82f6;">★ 8.5</span>
+            <span class="badge-pill" style="background: #1e3a5f; color: #60a5fa;">PG-13</span>
+          </div>
+          <p class="description" style="color: #94a3b8;">Paul Atreides unites with the Fremen while on a warpath of revenge against the conspirators who destroyed his family.</p>
+          <div class="detail-actions">
+            <button class="btn" style="background: #3b82f6; color: #fff;">▶ Play</button>
+            <button class="btn btn-outline" style="border-color: #3b82f6; color: #3b82f6;">♡ Favorite</button>
+            <button class="btn btn-ghost" style="color: #94a3b8;">⋮ More</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Buttons -->
+      <div class="buttons-row">
+        <button class="btn" style="background: #3b82f6; color: #fff;">Primary</button>
+        <button class="btn btn-outline" style="border-color: #3b82f6; color: #3b82f6;">Outline</button>
+        <button class="btn" style="background: #22c55e; color: #fff;">Success</button>
+        <button class="btn" style="background: #ef4444; color: #fff;">Error</button>
+        <button class="btn" style="background: #f59e0b; color: #000;">Warning</button>
+        <span class="badge-pill" style="background: #1e3a5f; color: #60a5fa;">Badge</span>
+        <span class="badge-pill badge-live" style="background: #ef4444; color: #fff;">● LIVE</span>
+        <span class="badge-pill" style="background: #22c55e20; color: #22c55e;">Watched</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== EMERALD DARK ==================== -->
+<div class="palette-section">
+  <div class="palette-header">
+    <h2>2. Emerald Dark</h2>
+    <span class="tag" style="background: #064e3b; color: #10b981;">Unique</span>
+    <p>Verde esmeralda sobre negro. Fresco, distintivo, identidad propia.</p>
+  </div>
+
+  <div class="theme-container" style="background: #0a0f0d; border-color: #1e3a2f;">
+    <div class="navbar" style="background: #0d1512; border-color: #1e3a2f;">
+      <div class="logo" style="color: #10b981;">HubPlay</div>
+      <div class="nav-links">
+        <a class="active" style="color: #f0fdf4;">Home</a>
+        <a style="color: #6ab89a;">Movies</a>
+        <a style="color: #6ab89a;">TV Shows</a>
+        <a style="color: #6ab89a;">Live TV</a>
+      </div>
+      <div class="nav-right">
+        <input class="search-box" placeholder="Search..." style="background: #131f1a; border-color: #1e3a2f; color: #f0fdf4;">
+        <div class="avatar" style="background: #10b981; color: #fff;">A</div>
+      </div>
+    </div>
+
+    <div class="content-area">
+      <div class="now-playing" style="background: #131f1a; border-color: #1e3a2f;">
+        <div class="np-thumb" style="background: #1a2e25;">▶</div>
+        <div class="np-info">
+          <div class="np-title" style="color: #f0fdf4;">Dune: Part Two</div>
+          <div class="np-sub" style="color: #6ab89a;">1:23:45 / 2:46:00</div>
+          <div class="np-progress" style="background: #1e3a2f;">
+            <div class="np-progress-fill" style="background: #10b981; width: 50%;"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-title" style="color: #f0fdf4;">Continue Watching</div>
+      <div class="poster-grid">
+        <div class="poster-card" style="background: #131f1a;">
+          <div class="poster-img" style="background: linear-gradient(135deg, #1a2e25, #0d1512);">🎬
+            <div class="progress-bar" style="background: #1e3a2f;"><div class="progress-fill" style="background: #10b981; width: 65%;"></div></div>
+          </div>
+          <div class="poster-info"><div class="title" style="color: #f0fdf4;">Inception</div><div class="meta" style="color: #6ab89a;">2010</div><div class="rating" style="color: #10b981;">★ 8.8</div></div>
+        </div>
+        <div class="poster-card" style="background: #131f1a;">
+          <div class="poster-img" style="background: linear-gradient(135deg, #1a2e25, #0d1512);">📺
+            <div class="badge" style="background: #10b981; color: #fff;">S2 E5</div>
+            <div class="progress-bar" style="background: #1e3a2f;"><div class="progress-fill" style="background: #10b981; width: 30%;"></div></div>
+          </div>
+          <div class="poster-info"><div class="title" style="color: #f0fdf4;">Severance</div><div class="meta" style="color: #6ab89a;">2022</div><div class="rating" style="color: #10b981;">★ 8.7</div></div>
+        </div>
+        <div class="poster-card" style="background: #131f1a;">
+          <div class="poster-img" style="background: linear-gradient(135deg, #1a2e25, #0d1512);">🎬
+            <div class="badge" style="background: #22c55e; color: #fff;">✓</div>
+          </div>
+          <div class="poster-info"><div class="title" style="color: #f0fdf4;">Oppenheimer</div><div class="meta" style="color: #6ab89a;">2023</div><div class="rating" style="color: #10b981;">★ 8.3</div></div>
+        </div>
+        <div class="poster-card" style="background: #131f1a;">
+          <div class="poster-img" style="background: linear-gradient(135deg, #1a2e25, #0d1512);">🎬</div>
+          <div class="poster-info"><div class="title" style="color: #f0fdf4;">The Batman</div><div class="meta" style="color: #6ab89a;">2022</div><div class="rating" style="color: #10b981;">★ 7.8</div></div>
+        </div>
+        <div class="poster-card" style="background: #131f1a;">
+          <div class="poster-img" style="background: linear-gradient(135deg, #1a2e25, #0d1512);">📺
+            <div class="badge" style="background: #ef4444; color: #fff; animation: pulse 2s infinite;">LIVE</div>
+          </div>
+          <div class="poster-info"><div class="title" style="color: #f0fdf4;">BBC News</div><div class="meta" style="color: #6ab89a;">Live TV</div></div>
+        </div>
+        <div class="poster-card" style="background: #131f1a;">
+          <div class="poster-img" style="background: linear-gradient(135deg, #1a2e25, #0d1512);">🎬
+            <div class="progress-bar" style="background: #1e3a2f;"><div class="progress-fill" style="background: #10b981; width: 80%;"></div></div>
+          </div>
+          <div class="poster-info"><div class="title" style="color: #f0fdf4;">Interstellar</div><div class="meta" style="color: #6ab89a;">2014</div><div class="rating" style="color: #10b981;">★ 8.7</div></div>
+        </div>
+      </div>
+
+      <div class="detail-hero" style="background: #131f1a; border-color: #1e3a2f;">
+        <div class="detail-poster" style="background: linear-gradient(135deg, #1a2e25, #0d1512);">🎬</div>
+        <div class="detail-info">
+          <h3 style="color: #f0fdf4;">Dune: Part Two</h3>
+          <div class="detail-meta">
+            <span style="color: #6ab89a;">2024</span>
+            <div class="dot" style="background: #4a7c5f;"></div>
+            <span style="color: #6ab89a;">2h 46m</span>
+            <div class="dot" style="background: #4a7c5f;"></div>
+            <span style="color: #10b981;">★ 8.5</span>
+            <span class="badge-pill" style="background: #064e3b; color: #34d399;">PG-13</span>
+          </div>
+          <p class="description" style="color: #6ab89a;">Paul Atreides unites with the Fremen while on a warpath of revenge against the conspirators who destroyed his family.</p>
+          <div class="detail-actions">
+            <button class="btn" style="background: #10b981; color: #fff;">▶ Play</button>
+            <button class="btn btn-outline" style="border-color: #10b981; color: #10b981;">♡ Favorite</button>
+            <button class="btn btn-ghost" style="color: #6ab89a;">⋮ More</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="buttons-row">
+        <button class="btn" style="background: #10b981; color: #fff;">Primary</button>
+        <button class="btn btn-outline" style="border-color: #10b981; color: #10b981;">Outline</button>
+        <button class="btn" style="background: #22c55e; color: #fff;">Success</button>
+        <button class="btn" style="background: #ef4444; color: #fff;">Error</button>
+        <button class="btn" style="background: #f59e0b; color: #000;">Warning</button>
+        <span class="badge-pill" style="background: #064e3b; color: #34d399;">Badge</span>
+        <span class="badge-pill badge-live" style="background: #ef4444; color: #fff;">● LIVE</span>
+        <span class="badge-pill" style="background: #22c55e20; color: #22c55e;">Watched</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== PURPLE NOIR ==================== -->
+<div class="palette-section">
+  <div class="palette-header">
+    <h2>3. Purple Noir</h2>
+    <span class="tag" style="background: #3b0764; color: #a855f7;">Bold</span>
+    <p>Negro puro + violeta. Premium, cinematográfico, atrevido.</p>
+  </div>
+
+  <div class="theme-container" style="background: #09090b; border-color: #3f3f46;">
+    <div class="navbar" style="background: #0f0f12; border-color: #3f3f46;">
+      <div class="logo" style="color: #a855f7;">HubPlay</div>
+      <div class="nav-links">
+        <a class="active" style="color: #fafafa;">Home</a>
+        <a style="color: #a1a1aa;">Movies</a>
+        <a style="color: #a1a1aa;">TV Shows</a>
+        <a style="color: #a1a1aa;">Live TV</a>
+      </div>
+      <div class="nav-right">
+        <input class="search-box" placeholder="Search..." style="background: #18181b; border-color: #3f3f46; color: #fafafa;">
+        <div class="avatar" style="background: #a855f7; color: #fff;">A</div>
+      </div>
+    </div>
+
+    <div class="content-area">
+      <div class="now-playing" style="background: #18181b; border-color: #3f3f46;">
+        <div class="np-thumb" style="background: #27272a;">▶</div>
+        <div class="np-info">
+          <div class="np-title" style="color: #fafafa;">Dune: Part Two</div>
+          <div class="np-sub" style="color: #a1a1aa;">1:23:45 / 2:46:00</div>
+          <div class="np-progress" style="background: #3f3f46;">
+            <div class="np-progress-fill" style="background: #a855f7; width: 50%;"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-title" style="color: #fafafa;">Continue Watching</div>
+      <div class="poster-grid">
+        <div class="poster-card" style="background: #18181b;">
+          <div class="poster-img" style="background: linear-gradient(135deg, #27272a, #18181b);">🎬
+            <div class="progress-bar" style="background: #3f3f46;"><div class="progress-fill" style="background: #a855f7; width: 65%;"></div></div>
+          </div>
+          <div class="poster-info"><div class="title" style="color: #fafafa;">Inception</div><div class="meta" style="color: #a1a1aa;">2010</div><div class="rating" style="color: #a855f7;">★ 8.8</div></div>
+        </div>
+        <div class="poster-card" style="background: #18181b;">
+          <div class="poster-img" style="background: linear-gradient(135deg, #27272a, #18181b);">📺
+            <div class="badge" style="background: #a855f7; color: #fff;">S2 E5</div>
+            <div class="progress-bar" style="background: #3f3f46;"><div class="progress-fill" style="background: #a855f7; width: 30%;"></div></div>
+          </div>
+          <div class="poster-info"><div class="title" style="color: #fafafa;">Severance</div><div class="meta" style="color: #a1a1aa;">2022</div><div class="rating" style="color: #a855f7;">★ 8.7</div></div>
+        </div>
+        <div class="poster-card" style="background: #18181b;">
+          <div class="poster-img" style="background: linear-gradient(135deg, #27272a, #18181b);">🎬
+            <div class="badge" style="background: #22c55e; color: #fff;">✓</div>
+          </div>
+          <div class="poster-info"><div class="title" style="color: #fafafa;">Oppenheimer</div><div class="meta" style="color: #a1a1aa;">2023</div><div class="rating" style="color: #a855f7;">★ 8.3</div></div>
+        </div>
+        <div class="poster-card" style="background: #18181b;">
+          <div class="poster-img" style="background: linear-gradient(135deg, #27272a, #18181b);">🎬</div>
+          <div class="poster-info"><div class="title" style="color: #fafafa;">The Batman</div><div class="meta" style="color: #a1a1aa;">2022</div><div class="rating" style="color: #a855f7;">★ 7.8</div></div>
+        </div>
+        <div class="poster-card" style="background: #18181b;">
+          <div class="poster-img" style="background: linear-gradient(135deg, #27272a, #18181b);">📺
+            <div class="badge" style="background: #ef4444; color: #fff; animation: pulse 2s infinite;">LIVE</div>
+          </div>
+          <div class="poster-info"><div class="title" style="color: #fafafa;">BBC News</div><div class="meta" style="color: #a1a1aa;">Live TV</div></div>
+        </div>
+        <div class="poster-card" style="background: #18181b;">
+          <div class="poster-img" style="background: linear-gradient(135deg, #27272a, #18181b);">🎬
+            <div class="progress-bar" style="background: #3f3f46;"><div class="progress-fill" style="background: #a855f7; width: 80%;"></div></div>
+          </div>
+          <div class="poster-info"><div class="title" style="color: #fafafa;">Interstellar</div><div class="meta" style="color: #a1a1aa;">2014</div><div class="rating" style="color: #a855f7;">★ 8.7</div></div>
+        </div>
+      </div>
+
+      <div class="detail-hero" style="background: #18181b; border-color: #3f3f46;">
+        <div class="detail-poster" style="background: linear-gradient(135deg, #27272a, #18181b);">🎬</div>
+        <div class="detail-info">
+          <h3 style="color: #fafafa;">Dune: Part Two</h3>
+          <div class="detail-meta">
+            <span style="color: #a1a1aa;">2024</span>
+            <div class="dot" style="background: #52525b;"></div>
+            <span style="color: #a1a1aa;">2h 46m</span>
+            <div class="dot" style="background: #52525b;"></div>
+            <span style="color: #a855f7;">★ 8.5</span>
+            <span class="badge-pill" style="background: #3b0764; color: #c084fc;">PG-13</span>
+          </div>
+          <p class="description" style="color: #a1a1aa;">Paul Atreides unites with the Fremen while on a warpath of revenge against the conspirators who destroyed his family.</p>
+          <div class="detail-actions">
+            <button class="btn" style="background: #a855f7; color: #fff;">▶ Play</button>
+            <button class="btn btn-outline" style="border-color: #a855f7; color: #a855f7;">♡ Favorite</button>
+            <button class="btn btn-ghost" style="color: #a1a1aa;">⋮ More</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="buttons-row">
+        <button class="btn" style="background: #a855f7; color: #fff;">Primary</button>
+        <button class="btn btn-outline" style="border-color: #a855f7; color: #a855f7;">Outline</button>
+        <button class="btn" style="background: #22c55e; color: #fff;">Success</button>
+        <button class="btn" style="background: #ef4444; color: #fff;">Error</button>
+        <button class="btn" style="background: #f59e0b; color: #000;">Warning</button>
+        <span class="badge-pill" style="background: #3b0764; color: #c084fc;">Badge</span>
+        <span class="badge-pill badge-live" style="background: #ef4444; color: #fff;">● LIVE</span>
+        <span class="badge-pill" style="background: #22c55e20; color: #22c55e;">Watched</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== WARM SLATE ==================== -->
+<div class="palette-section">
+  <div class="palette-header">
+    <h2>4. Warm Slate</h2>
+    <span class="tag" style="background: #78350f; color: #f59e0b;">Cinema</span>
+    <p>Gris cálido + ámbar/dorado. Elegante, clásico, sensación de cine.</p>
+  </div>
+
+  <div class="theme-container" style="background: #0c0a09; border-color: #44403c;">
+    <div class="navbar" style="background: #110e0d; border-color: #44403c;">
+      <div class="logo" style="color: #f59e0b;">HubPlay</div>
+      <div class="nav-links">
+        <a class="active" style="color: #fafaf9;">Home</a>
+        <a style="color: #a8a29e;">Movies</a>
+        <a style="color: #a8a29e;">TV Shows</a>
+        <a style="color: #a8a29e;">Live TV</a>
+      </div>
+      <div class="nav-right">
+        <input class="search-box" placeholder="Search..." style="background: #1c1917; border-color: #44403c; color: #fafaf9;">
+        <div class="avatar" style="background: #f59e0b; color: #000;">A</div>
+      </div>
+    </div>
+
+    <div class="content-area">
+      <div class="now-playing" style="background: #1c1917; border-color: #44403c;">
+        <div class="np-thumb" style="background: #292524;">▶</div>
+        <div class="np-info">
+          <div class="np-title" style="color: #fafaf9;">Dune: Part Two</div>
+          <div class="np-sub" style="color: #a8a29e;">1:23:45 / 2:46:00</div>
+          <div class="np-progress" style="background: #44403c;">
+            <div class="np-progress-fill" style="background: #f59e0b; width: 50%;"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-title" style="color: #fafaf9;">Continue Watching</div>
+      <div class="poster-grid">
+        <div class="poster-card" style="background: #1c1917;">
+          <div class="poster-img" style="background: linear-gradient(135deg, #292524, #1c1917);">🎬
+            <div class="progress-bar" style="background: #44403c;"><div class="progress-fill" style="background: #f59e0b; width: 65%;"></div></div>
+          </div>
+          <div class="poster-info"><div class="title" style="color: #fafaf9;">Inception</div><div class="meta" style="color: #a8a29e;">2010</div><div class="rating" style="color: #f59e0b;">★ 8.8</div></div>
+        </div>
+        <div class="poster-card" style="background: #1c1917;">
+          <div class="poster-img" style="background: linear-gradient(135deg, #292524, #1c1917);">📺
+            <div class="badge" style="background: #f59e0b; color: #000;">S2 E5</div>
+            <div class="progress-bar" style="background: #44403c;"><div class="progress-fill" style="background: #f59e0b; width: 30%;"></div></div>
+          </div>
+          <div class="poster-info"><div class="title" style="color: #fafaf9;">Severance</div><div class="meta" style="color: #a8a29e;">2022</div><div class="rating" style="color: #f59e0b;">★ 8.7</div></div>
+        </div>
+        <div class="poster-card" style="background: #1c1917;">
+          <div class="poster-img" style="background: linear-gradient(135deg, #292524, #1c1917);">🎬
+            <div class="badge" style="background: #22c55e; color: #fff;">✓</div>
+          </div>
+          <div class="poster-info"><div class="title" style="color: #fafaf9;">Oppenheimer</div><div class="meta" style="color: #a8a29e;">2023</div><div class="rating" style="color: #f59e0b;">★ 8.3</div></div>
+        </div>
+        <div class="poster-card" style="background: #1c1917;">
+          <div class="poster-img" style="background: linear-gradient(135deg, #292524, #1c1917);">🎬</div>
+          <div class="poster-info"><div class="title" style="color: #fafaf9;">The Batman</div><div class="meta" style="color: #a8a29e;">2022</div><div class="rating" style="color: #f59e0b;">★ 7.8</div></div>
+        </div>
+        <div class="poster-card" style="background: #1c1917;">
+          <div class="poster-img" style="background: linear-gradient(135deg, #292524, #1c1917);">📺
+            <div class="badge" style="background: #ef4444; color: #fff; animation: pulse 2s infinite;">LIVE</div>
+          </div>
+          <div class="poster-info"><div class="title" style="color: #fafaf9;">BBC News</div><div class="meta" style="color: #a8a29e;">Live TV</div></div>
+        </div>
+        <div class="poster-card" style="background: #1c1917;">
+          <div class="poster-img" style="background: linear-gradient(135deg, #292524, #1c1917);">🎬
+            <div class="progress-bar" style="background: #44403c;"><div class="progress-fill" style="background: #f59e0b; width: 80%;"></div></div>
+          </div>
+          <div class="poster-info"><div class="title" style="color: #fafaf9;">Interstellar</div><div class="meta" style="color: #a8a29e;">2014</div><div class="rating" style="color: #f59e0b;">★ 8.7</div></div>
+        </div>
+      </div>
+
+      <div class="detail-hero" style="background: #1c1917; border-color: #44403c;">
+        <div class="detail-poster" style="background: linear-gradient(135deg, #292524, #1c1917);">🎬</div>
+        <div class="detail-info">
+          <h3 style="color: #fafaf9;">Dune: Part Two</h3>
+          <div class="detail-meta">
+            <span style="color: #a8a29e;">2024</span>
+            <div class="dot" style="background: #57534e;"></div>
+            <span style="color: #a8a29e;">2h 46m</span>
+            <div class="dot" style="background: #57534e;"></div>
+            <span style="color: #f59e0b;">★ 8.5</span>
+            <span class="badge-pill" style="background: #78350f; color: #fbbf24;">PG-13</span>
+          </div>
+          <p class="description" style="color: #a8a29e;">Paul Atreides unites with the Fremen while on a warpath of revenge against the conspirators who destroyed his family.</p>
+          <div class="detail-actions">
+            <button class="btn" style="background: #f59e0b; color: #000;">▶ Play</button>
+            <button class="btn btn-outline" style="border-color: #f59e0b; color: #f59e0b;">♡ Favorite</button>
+            <button class="btn btn-ghost" style="color: #a8a29e;">⋮ More</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="buttons-row">
+        <button class="btn" style="background: #f59e0b; color: #000;">Primary</button>
+        <button class="btn btn-outline" style="border-color: #f59e0b; color: #f59e0b;">Outline</button>
+        <button class="btn" style="background: #22c55e; color: #fff;">Success</button>
+        <button class="btn" style="background: #ef4444; color: #fff;">Error</button>
+        <button class="btn" style="background: #fb923c; color: #000;">Warning</button>
+        <span class="badge-pill" style="background: #78350f; color: #fbbf24;">Badge</span>
+        <span class="badge-pill badge-live" style="background: #ef4444; color: #fff;">● LIVE</span>
+        <span class="badge-pill" style="background: #22c55e20; color: #22c55e;">Watched</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div style="text-align: center; padding: 40px; color: #666; font-size: 14px;">
+  <p>Scroll up to compare all 4 palettes. Each shows: navbar, now playing, poster grid, detail view, and buttons.</p>
+  <p>When real poster images replace the emoji placeholders, the color palette becomes a subtle backdrop that makes the content pop.</p>
+</div>
+
+</body>
+</html>
