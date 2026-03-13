@@ -8,18 +8,28 @@ React + TypeScript SPA embebida en el binario Go. Dark theme obligatorio. Diseñ
 
 ## 1. Tech Stack
 
-| Library | Purpose |
-|---------|---------|
-| React 18+ | UI framework |
-| TypeScript | Type safety |
-| Vite | Build tool + HMR |
-| React Router | SPA routing |
-| hls.js | HLS video playback |
-| TanStack Query | API data fetching + cache |
-| Tailwind CSS | Styling (dark theme) |
-| Planby | EPG timeline grid component (virtual scrolling) |
-| react-window | Virtual scrolling for large lists |
-| Zustand | Lightweight state management |
+| Library | NPM Package | Purpose |
+|---------|-------------|---------|
+| React 18+ | `react` | UI framework |
+| TypeScript | `typescript` | Type safety |
+| Vite | `vite` | Build tool + HMR |
+| React Router v7 | `react-router` | SPA routing |
+| TanStack Query | `@tanstack/react-query` | API data fetching + cache |
+| Zustand | `zustand` | Client state (player, auth, UI) |
+| Tailwind CSS v4 | `tailwindcss` | Styling (dark theme) |
+| Vidstack | `vidstack` | Video player (HLS/DASH/DRM) |
+| Shaka Player | `shaka-player` | DRM (Widevine/PlayReady) |
+| JASSUB | `jassub` | Subtítulos ASS/SSA (libass WASM) |
+| Planby | `planby` | EPG timeline grid (virtual scrolling) |
+| TanStack Virtual | `@tanstack/react-virtual` | Virtual scrolling listas grandes |
+| Norigin Spatial Nav | `@noriginmedia/norigin-spatial-navigation` | Navegación TV/mando con flechas |
+| unlazy + react-blurhash | `unlazy`, `react-blurhash` | Lazy loading + BlurHash placeholders |
+| reconnecting-websocket | `reconnecting-websocket` | WebSocket con auto-reconnect |
+| react-i18next | `react-i18next` | Internacionalización (ES/EN) |
+| React Hook Form | `react-hook-form` | Formularios admin/settings |
+| Vitest + Testing Library | `vitest`, `@testing-library/react` | Testing |
+
+> Full rationale for each choice in [tooling.md](./tooling.md#frontend-dependencies)
 
 ---
 

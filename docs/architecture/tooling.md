@@ -41,15 +41,64 @@
 
 ## Frontend Dependencies
 
-| Library | Purpose | Why |
-|---------|---------|-----|
-| Vite | Build tool | Fast, instant HMR, modern defaults |
-| TypeScript | Type safety | Catches bugs at compile time |
-| React 18+ | UI framework | Ecosystem, community, mature video player libs |
-| React Router | Navigation | SPA routing, standard for React |
-| hls.js | HLS video player | Plays HLS streams in browsers that don't support it natively |
-| TanStack Query | API data fetching | Automatic caching, refetch, loading states |
-| Tailwind CSS | Styling | Rapid prototyping, consistent design, small bundle |
+### Core
+
+| Library | NPM Package | Purpose | Why |
+|---------|-------------|---------|-----|
+| Vite | `vite` | Build tool + HMR | Instant HMR, fast builds, TypeScript nativo |
+| TypeScript | `typescript` | Type safety | Catches bugs at compile time |
+| React 18+ | `react` | UI framework | Ecosystem, community, mature video player libs |
+| React Router v7 | `react-router` | SPA routing | Type-safe routes, lazy loading de páginas |
+| TanStack Query | `@tanstack/react-query` | API data fetching + cache | ~5M descargas/semana, deduplicación, refetch en foco. Estándar de facto para server state |
+| Zustand | `zustand` | Client state management | ~1KB, sin boilerplate, sin Provider. Para estado del player, auth, UI prefs |
+| Tailwind CSS v4 | `tailwindcss` | Styling (dark theme) | Utility-first, `dark:` mode nativo, purge automático, el más rápido para iterar |
+
+### Video & Streaming
+
+| Library | NPM Package | Purpose | Why |
+|---------|-------------|---------|-----|
+| Vidstack | `vidstack` | Video player completo | Modular, controles accesibles, soporta HLS/DASH/DRM. Usa hls.js internamente |
+| hls.js | `hls.js` | HLS streaming (bajo nivel) | Fallback directo si Vidstack no cubre un caso edge |
+| Shaka Player | `shaka-player` | DRM (Widevine/PlayReady/FairPlay) | Mantenido por Google, soporte DRM completo para contenido protegido |
+| JASSUB | `jassub` | Subtítulos ASS/SSA | Renderiza ASS/SSA con estilos complejos (anime, karaoke) vía libass compilado a WASM |
+
+### EPG & Live TV
+
+| Library | NPM Package | Purpose | Why |
+|---------|-------------|---------|-----|
+| Planby | `planby` | EPG timeline grid | Único componente React maduro para guía EPG. Virtual scrolling, 10k+ eventos, usado por JW Player |
+| @noriginmedia/norigin-spatial-navigation | `@noriginmedia/norigin-spatial-navigation` | Navegación TV/mando | Navegación espacial con flechas tipo Smart TV. Usado en TVs reales (Tizen, webOS, Fire TV) |
+
+### UI & UX
+
+| Library | NPM Package | Purpose | Why |
+|---------|-------------|---------|-----|
+| TanStack Virtual | `@tanstack/react-virtual` | Virtual scrolling | Headless, 60fps, más flexible que react-window para layouts custom (channel grid, library) |
+| unlazy | `unlazy` | Lazy loading imágenes | Soporta BlurHash + ThumbHash, framework-agnostic, IntersectionObserver |
+| react-blurhash | `react-blurhash` | BlurHash placeholders | Componente React para decodificar y mostrar blurhash mientras carga la imagen real |
+| React Hook Form | `react-hook-form` | Formularios (admin/settings) | Rendimiento, validación con Zod, mínimos re-renders |
+
+### Infra & Utilidades
+
+| Library | NPM Package | Purpose | Why |
+|---------|-------------|---------|-----|
+| reconnecting-websocket | `reconnecting-websocket` | WebSocket con reconexión | Auto-reconnect con backoff exponencial. Sin overhead de Socket.io |
+| react-i18next | `react-i18next` | Internacionalización | Estándar, lazy loading de traducciones, pluralización. Permite español/inglés desde v1 |
+| Vitest | `vitest` | Testing | Integrado con Vite, API compatible Jest, rápido |
+| Testing Library | `@testing-library/react` | Testing de componentes | Test como el usuario interactúa, no como se implementa |
+
+### What We're NOT Using (Frontend)
+
+| Rejected | Why |
+|----------|-----|
+| Redux / Redux Toolkit | Demasiado boilerplate para nuestro caso. Zustand cubre todo con 1KB |
+| react-window / react-virtualized | TanStack Virtual es más moderno, headless, y flexible |
+| styled-components / CSS Modules | Tailwind es más rápido de iterar y genera bundles más pequeños |
+| Socket.io | Overhead innecesario. reconnecting-websocket + WebSocket nativo es suficiente |
+| Video.js | Legacy, pesado (~300KB). Vidstack es la alternativa moderna |
+| Next.js / Remix | No necesitamos SSR. SPA embebida en Go es más simple |
+| Axios | fetch() nativo + TanStack Query es suficiente. Sin dependencia extra |
+| Material UI / Ant Design | Demasiado opinionated, difícil de customizar para un media player. Tailwind + componentes propios |
 
 ---
 
