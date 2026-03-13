@@ -593,7 +593,7 @@ export default defineConfig({
     },
     {
       // Frontend Vite dev
-      command: "npm run dev",
+      command: "pnpm dev",
       port: 5173,
       reuseExistingServer: !process.env.CI,
     },
@@ -725,9 +725,9 @@ export function generateMockItems(count: number) {
 lint:        golangci-lint + eslint
 test-unit:   go test ./... -short (< 30s)
 test-integ:  go test ./... -tags=integration (< 2min)
-test-front:  npm run test (Vitest, < 1min)
-test-e2e:    npm run test:e2e (Playwright, < 5min)
-build:       go build + npm run build (verifica compilación)
+test-front:  pnpm test (Vitest, < 1min)
+test-e2e:    pnpm test:e2e (Playwright, < 5min)
+build:       go build + pnpm build (verifica compilación)
 ```
 
 Detalle completo del pipeline en [ci-cd.md](./ci-cd.md).

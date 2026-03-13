@@ -65,11 +65,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-      - run: cd web && npm ci --no-audit
-      - run: cd web && npm run lint
-      - run: cd web && npm run typecheck
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: corepack enable && corepack prepare pnpm@latest --activate
+      - run: cd web && pnpm install --frozen-lockfile
+      - run: cd web && pnpm lint
+      - run: cd web && pnpm typecheck
 
   test-backend:
     runs-on: ubuntu-latest
@@ -94,10 +95,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-      - run: cd web && npm ci --no-audit
-      - run: cd web && npm run test -- --reporter=verbose
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: corepack enable && corepack prepare pnpm@latest --activate
+      - run: cd web && pnpm install --frozen-lockfile
+      - run: cd web && pnpm test -- --reporter=verbose
 
   sqlc-check:
     runs-on: ubuntu-latest
@@ -121,10 +123,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-          cache-dependency-path: web/package-lock.json
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: corepack enable && corepack prepare pnpm@latest --activate
       - name: Build frontend
-        run: cd web && npm ci --no-audit && npm run build
+        run: cd web && pnpm install --frozen-lockfile && pnpm build
       - name: Build backend
         run: CGO_ENABLED=0 go build -tags embed -ldflags "-s -w" -o hubplay ./cmd/hubplay
       - name: Verify binary runs
@@ -145,14 +148,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      - run: corepack enable && corepack prepare pnpm@latest --activate
       - name: Install Playwright
-        run: cd web && npm ci && npx playwright install --with-deps chromium
+        run: cd web && pnpm install --frozen-lockfile && pnpm exec playwright install --with-deps chromium
       - name: Build backend
         run: |
-          cd web && npm run build
+          cd web && pnpm build
           CGO_ENABLED=0 go build -tags embed -o hubplay ./cmd/hubplay
       - name: Run E2E tests
-        run: cd web && npm run test:e2e
+        run: cd web && pnpm test:e2e
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
@@ -185,8 +189,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      - run: corepack enable && corepack prepare pnpm@latest --activate
       - name: Build frontend
-        run: cd web && npm ci --no-audit && npm run build
+        run: cd web && pnpm install --frozen-lockfile && pnpm build
       - uses: goreleaser/goreleaser-action@v6
         with:
           args: release --clean
@@ -314,19 +319,19 @@ dev:               ## Start dev environment (backend + frontend)
 	@echo "Starting backend (air)..."
 	air &
 	@echo "Starting frontend (vite)..."
-	cd web && npm run dev
+	cd web && pnpm dev
 
 build:             ## Production build
-	cd web && npm ci && npm run build
+	cd web && pnpm install --frozen-lockfile && pnpm build
 	CGO_ENABLED=0 go build -tags embed -ldflags "-s -w" -o hubplay ./cmd/hubplay
 
 test:              ## Run all tests
 	go test ./... -race -tags=integration
-	cd web && npm run test
+	cd web && pnpm test
 
 lint:              ## Lint everything
 	golangci-lint run
-	cd web && npm run lint && npm run typecheck
+	cd web && pnpm lint && pnpm typecheck
 
 sqlc:              ## Regenerate sqlc code
 	sqlc generate

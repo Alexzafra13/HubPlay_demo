@@ -41,6 +41,62 @@
 
 ---
 
+## Package Manager — pnpm
+
+| | npm | pnpm | Bun |
+|---|---|---|---|
+| **Install speed** | Baseline | ~2x faster | ~30x faster |
+| **Disk usage (10 React projects)** | 4.87 GB | 612 MB (-87%) | ~4.5 GB |
+| **Compatibility** | 100% | 99%+ | ~95% |
+| **Monorepo support** | Basic (workspaces) | Excellent (industry standard) | Basic |
+| **Lockfile** | `package-lock.json` | `pnpm-lock.yaml` (deterministic, readable) | `bun.lockb` (binary) |
+| **Used by** | Default everywhere | Vue, Svelte, Vite core team | Anthropic, startups |
+
+### Why pnpm for HubPlay
+
+1. **Disk efficiency**: Uses a content-addressable global store with hard links. Each unique package version is stored once on disk, shared across all projects. With HubPlay's heavy dependency tree (hls.js, shaka-player, planby, React, etc.), the savings are significant.
+
+2. **Vite/Tailwind compatibility**: Both Vite and Tailwind use pnpm internally. Zero risk of tooling conflicts.
+
+3. **Strict dependency resolution**: pnpm's `node_modules` structure prevents phantom dependencies (packages you can `import` but didn't declare in `package.json`). Catches bugs early.
+
+4. **Future-proof for monorepo**: If we later separate shared types, a design system, or a TV client into workspace packages, pnpm workspaces is the industry standard.
+
+5. **Same CLI**: Commands are identical to npm — `pnpm install`, `pnpm add react`, `pnpm dev`, `pnpm build`. Zero learning curve.
+
+### Why NOT Bun
+
+Bun is faster but has edge cases with some of our dependencies:
+- `shaka-player` (native WASM bindings)
+- `@jellyfin/libass-wasm` (WASM + worker threads)
+- `planby` (less-maintained, relies on specific module resolution)
+
+For a project with video/streaming dependencies, ecosystem safety matters more than install speed.
+
+### Why NOT npm
+
+npm works, but offers no advantage over pnpm. Slower installs, more disk usage, no strict resolution. The only benefit (ships with Node.js) is irrelevant since `pnpm` is a one-line install: `corepack enable && corepack prepare pnpm@latest --activate`.
+
+### Setup
+
+```bash
+# Node.js 18+ includes corepack
+corepack enable
+corepack prepare pnpm@latest --activate
+
+# Verify
+pnpm --version
+```
+
+The project pins the pnpm version in `package.json`:
+```json
+{
+  "packageManager": "pnpm@10.x"
+}
+```
+
+---
+
 ## Frontend Dependencies
 
 ### Core
@@ -129,7 +185,7 @@
 # Key Makefile targets
 make dev              # Start backend (air hot reload) + frontend (vite dev)
 make build            # Build frontend + embed in Go binary
-make build-frontend   # npm run build in web/
+make build-frontend   # pnpm build in web/
 make build-backend    # go build with embedded frontend (go:embed)
 make test             # go test ./... -race
 make lint             # golangci-lint run
@@ -152,11 +208,12 @@ Plug-and-play: the image includes **everything** needed to run HubPlay. No exter
 
 # Stage 1: Build React frontend
 FROM node:20-alpine AS frontend
+RUN corepack enable && corepack prepare pnpm@latest --activate
 WORKDIR /web
-COPY web/package.json web/package-lock.json ./
-RUN npm ci --no-audit --no-fund
+COPY web/package.json web/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
 COPY web/ ./
-RUN npm run build
+RUN pnpm build
 
 # Stage 2: Build Go backend (embeds frontend)
 FROM golang:1.22-alpine AS backend
