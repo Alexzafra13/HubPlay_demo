@@ -80,7 +80,7 @@ func (t *Transcoder) Start(sessionID, itemID, inputPath string, profile Profile,
 
 	if err := cmd.Start(); err != nil {
 		cancel()
-		os.RemoveAll(outputDir)
+		_ = os.RemoveAll(outputDir)
 		return nil, fmt.Errorf("starting ffmpeg: %w", err)
 	}
 
@@ -158,7 +158,7 @@ func (s *Session) Stop() {
 	case <-s.done:
 	case <-time.After(5 * time.Second):
 	}
-	os.RemoveAll(s.OutputDir)
+	_ = os.RemoveAll(s.OutputDir)
 }
 
 // ManifestPath returns the path to the HLS master playlist.

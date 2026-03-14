@@ -222,7 +222,9 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 func respondJSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(data)
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		slog.Error("failed to encode response", "error", err)
+	}
 }
 
 func respondError(w http.ResponseWriter, status int, code, message string) {

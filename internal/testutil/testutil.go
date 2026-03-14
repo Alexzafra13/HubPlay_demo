@@ -28,11 +28,11 @@ func NewTestDB(t *testing.T) *sql.DB {
 	}
 
 	if err := db.Migrate(database, hubplay.SQLiteMigrations, slog.Default()); err != nil {
-		database.Close()
+		_ = database.Close()
 		t.Fatalf("migrating test db: %v", err)
 	}
 
-	t.Cleanup(func() { database.Close() })
+	t.Cleanup(func() { _ = database.Close() })
 	return database
 }
 

@@ -105,7 +105,7 @@ func (r *UserRepository) List(ctx context.Context, limit, offset int) ([]*User, 
 	if err != nil {
 		return nil, 0, fmt.Errorf("list users: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	var users []*User
 	for rows.Next() {

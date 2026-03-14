@@ -52,7 +52,7 @@ func (r *ImageRepository) ListByItem(ctx context.Context, itemID string) ([]*Ima
 	if err != nil {
 		return nil, fmt.Errorf("list images: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	var images []*Image
 	for rows.Next() {

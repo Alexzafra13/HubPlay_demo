@@ -40,7 +40,7 @@ func (r *MediaStreamRepository) ReplaceForItem(ctx context.Context, itemID strin
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer tx.Rollback() //nolint:errcheck
 
 	if _, err := tx.ExecContext(ctx, `DELETE FROM media_streams WHERE item_id = ?`, itemID); err != nil {
 		return fmt.Errorf("delete old streams: %w", err)
@@ -77,7 +77,7 @@ func (r *MediaStreamRepository) ListByItem(ctx context.Context, itemID string) (
 	if err != nil {
 		return nil, fmt.Errorf("list streams: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	var streams []*MediaStream
 	for rows.Next() {

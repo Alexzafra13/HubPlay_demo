@@ -26,7 +26,7 @@ func Open(driver, path string, logger *slog.Logger) (*sql.DB, error) {
 	database.SetMaxOpenConns(4)
 
 	if err := database.Ping(); err != nil {
-		database.Close()
+		_ = database.Close()
 		return nil, fmt.Errorf("pinging sqlite: %w", err)
 	}
 
