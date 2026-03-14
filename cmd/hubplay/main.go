@@ -22,6 +22,7 @@ import (
 	"hubplay/internal/logging"
 	"hubplay/internal/probe"
 	"hubplay/internal/scanner"
+	"hubplay/internal/stream"
 	"hubplay/internal/user"
 )
 
@@ -76,13 +77,29 @@ func run(configPath string) error {
 	scnr := scanner.New(repos.Items, repos.MediaStreams, prober, eventBus, logger)
 	libraryService := library.NewService(repos.Libraries, repos.Items, repos.MediaStreams, repos.Images, scnr, logger)
 
+	// ═══ Phase 4b: Streaming ═══
+	streamManager := stream.NewManager(repos.Items, repos.MediaStreams, cfg.Streaming, logger)
+
+	// Detect hardware acceleration if enabled
+	if cfg.Streaming.HWAccel.Enabled {
+		hwResult := stream.DetectHWAccel(cfg.Streaming.HWAccel.Preferred, logger)
+		logger.Info("hardware acceleration",
+			"available", hwResult.Available,
+			"selected", hwResult.Selected,
+			"encoder", hwResult.Encoder,
+		)
+	}
+
 	// ═══ Phase 5: HTTP Server ═══
 	router := api.NewRouter(api.Dependencies{
-		Auth:      authService,
-		Users:     userService,
-		Libraries: libraryService,
-		Config:    cfg,
-		Logger:    logger,
+		Auth:          authService,
+		Users:         userService,
+		Libraries:     libraryService,
+		StreamManager: streamManager,
+		Items:         repos.Items,
+		MediaStreams:   repos.MediaStreams,
+		Config:        cfg,
+		Logger:        logger,
 	})
 
 	server := &http.Server{
@@ -103,10 +120,10 @@ func run(configPath string) error {
 	}()
 
 	// ═══ Phase 7: Wait for shutdown ═══
-	return waitForShutdown(ctx, cancel, server, database, logger)
+	return waitForShutdown(ctx, cancel, server, streamManager, database, logger)
 }
 
-func waitForShutdown(ctx context.Context, cancel context.CancelFunc, server *http.Server, database interface{ Close() error }, logger *slog.Logger) error {
+func waitForShutdown(ctx context.Context, cancel context.CancelFunc, server *http.Server, sm *stream.Manager, database interface{ Close() error }, logger *slog.Logger) error {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
@@ -127,6 +144,10 @@ func waitForShutdown(ctx context.Context, cancel context.CancelFunc, server *htt
 		logger.Error("HTTP server shutdown error", "error", err)
 	}
 	logger.Info("HTTP server stopped")
+
+	// Stop all streaming sessions
+	sm.Shutdown()
+	logger.Info("stream manager stopped")
 
 	// Cancel root context
 	cancel()

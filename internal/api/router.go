@@ -11,16 +11,21 @@ import (
 	"hubplay/internal/api/handlers"
 	"hubplay/internal/auth"
 	"hubplay/internal/config"
+	"hubplay/internal/db"
 	"hubplay/internal/library"
+	"hubplay/internal/stream"
 	"hubplay/internal/user"
 )
 
 type Dependencies struct {
-	Auth      *auth.Service
-	Users     *user.Service
-	Libraries *library.Service
-	Config    *config.Config
-	Logger    *slog.Logger
+	Auth           *auth.Service
+	Users          *user.Service
+	Libraries      *library.Service
+	StreamManager  *stream.Manager
+	Items          *db.ItemRepository
+	MediaStreams    *db.MediaStreamRepository
+	Config         *config.Config
+	Logger         *slog.Logger
 }
 
 func NewRouter(deps Dependencies) http.Handler {
@@ -73,6 +78,25 @@ func NewRouter(deps Dependencies) http.Handler {
 				r.Get("/", userHandler.List)
 				r.Post("/", authHandler.Register)
 			})
+
+			// Streaming
+			if deps.StreamManager != nil {
+				streamHandler := handlers.NewStreamHandler(
+					deps.StreamManager, deps.Items, deps.MediaStreams,
+					deps.Config.Server.BaseURL, deps.Logger,
+				)
+
+				r.Route("/stream/{itemId}", func(r chi.Router) {
+					r.Get("/info", streamHandler.Info)
+					r.Get("/master.m3u8", streamHandler.MasterPlaylist)
+					r.Get("/{quality}/index.m3u8", streamHandler.QualityPlaylist)
+					r.Get("/{quality}/{segment}", streamHandler.Segment)
+					r.Get("/direct", streamHandler.DirectPlay)
+					r.Delete("/session", streamHandler.StopSession)
+					r.Get("/subtitles", streamHandler.Subtitles)
+					r.Get("/subtitles/{trackIndex}", streamHandler.SubtitleTrack)
+				})
+			}
 
 			// Libraries & Items (only if service is wired)
 			if deps.Libraries != nil {
