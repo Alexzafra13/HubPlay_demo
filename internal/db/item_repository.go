@@ -80,10 +80,7 @@ func nullStr(s string) any {
 
 func (r *ItemRepository) GetByID(ctx context.Context, id string) (*Item, error) {
 	item := &Item{}
-	var parentID, originalTitle, path, container, fingerprint, contentRating sql.NullString
-	var seasonNum, episodeNum sql.NullInt32
-	var communityRating sql.NullFloat64
-	var premiereDate sql.NullTime
+	var n itemNullables
 
 	err := r.db.QueryRowContext(ctx,
 		`SELECT id, library_id, parent_id, type, title, sort_title, original_title,
@@ -91,10 +88,7 @@ func (r *ItemRepository) GetByID(ctx context.Context, id string) (*Item, error) 
 		        episode_number, community_rating, content_rating, premiere_date,
 		        added_at, updated_at, is_available
 		 FROM items WHERE id = ?`, id,
-	).Scan(&item.ID, &item.LibraryID, &parentID, &item.Type, &item.Title, &item.SortTitle,
-		&originalTitle, &item.Year, &path, &item.Size, &item.DurationTicks,
-		&container, &fingerprint, &seasonNum, &episodeNum, &communityRating,
-		&contentRating, &premiereDate, &item.AddedAt, &item.UpdatedAt, &item.IsAvailable)
+	).Scan(fullScanDests(item, &n)...)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("item %s: %w", id, domain.ErrNotFound)
 	}
@@ -102,35 +96,13 @@ func (r *ItemRepository) GetByID(ctx context.Context, id string) (*Item, error) 
 		return nil, fmt.Errorf("get item %s: %w", id, err)
 	}
 
-	item.ParentID = parentID.String
-	item.OriginalTitle = originalTitle.String
-	item.Path = path.String
-	item.Container = container.String
-	item.Fingerprint = fingerprint.String
-	item.ContentRating = contentRating.String
-	if seasonNum.Valid {
-		v := int(seasonNum.Int32)
-		item.SeasonNumber = &v
-	}
-	if episodeNum.Valid {
-		v := int(episodeNum.Int32)
-		item.EpisodeNumber = &v
-	}
-	if communityRating.Valid {
-		item.CommunityRating = &communityRating.Float64
-	}
-	if premiereDate.Valid {
-		item.PremiereDate = &premiereDate.Time
-	}
+	n.applyFull(item)
 	return item, nil
 }
 
 func (r *ItemRepository) GetByPath(ctx context.Context, path string) (*Item, error) {
 	item := &Item{}
-	var parentID, originalTitle, itemPath, container, fingerprint, contentRating sql.NullString
-	var seasonNum, episodeNum sql.NullInt32
-	var communityRating sql.NullFloat64
-	var premiereDate sql.NullTime
+	var n itemNullables
 
 	err := r.db.QueryRowContext(ctx,
 		`SELECT id, library_id, parent_id, type, title, sort_title, original_title,
@@ -138,10 +110,7 @@ func (r *ItemRepository) GetByPath(ctx context.Context, path string) (*Item, err
 		        episode_number, community_rating, content_rating, premiere_date,
 		        added_at, updated_at, is_available
 		 FROM items WHERE path = ?`, path,
-	).Scan(&item.ID, &item.LibraryID, &parentID, &item.Type, &item.Title, &item.SortTitle,
-		&originalTitle, &item.Year, &itemPath, &item.Size, &item.DurationTicks,
-		&container, &fingerprint, &seasonNum, &episodeNum, &communityRating,
-		&contentRating, &premiereDate, &item.AddedAt, &item.UpdatedAt, &item.IsAvailable)
+	).Scan(fullScanDests(item, &n)...)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("item path %q: %w", path, domain.ErrNotFound)
 	}
@@ -149,26 +118,7 @@ func (r *ItemRepository) GetByPath(ctx context.Context, path string) (*Item, err
 		return nil, fmt.Errorf("get item by path %q: %w", path, err)
 	}
 
-	item.ParentID = parentID.String
-	item.OriginalTitle = originalTitle.String
-	item.Path = itemPath.String
-	item.Container = container.String
-	item.Fingerprint = fingerprint.String
-	item.ContentRating = contentRating.String
-	if seasonNum.Valid {
-		v := int(seasonNum.Int32)
-		item.SeasonNumber = &v
-	}
-	if episodeNum.Valid {
-		v := int(episodeNum.Int32)
-		item.EpisodeNumber = &v
-	}
-	if communityRating.Valid {
-		item.CommunityRating = &communityRating.Float64
-	}
-	if premiereDate.Valid {
-		item.PremiereDate = &premiereDate.Time
-	}
+	n.applyFull(item)
 	return item, nil
 }
 
@@ -246,32 +196,11 @@ func (r *ItemRepository) List(ctx context.Context, filter ItemFilter) ([]*Item, 
 	var items []*Item
 	for rows.Next() {
 		item := &Item{}
-		var parentID, originalTitle, path, container sql.NullString
-		var seasonNum, episodeNum sql.NullInt32
-		var communityRating sql.NullFloat64
-
-		if err := rows.Scan(&item.ID, &item.LibraryID, &parentID, &item.Type, &item.Title,
-			&item.SortTitle, &originalTitle, &item.Year, &path, &item.Size, &item.DurationTicks,
-			&container, &seasonNum, &episodeNum, &communityRating,
-			&item.AddedAt, &item.UpdatedAt, &item.IsAvailable); err != nil {
+		var n itemNullables
+		if err := rows.Scan(listScanDests(item, &n)...); err != nil {
 			return nil, 0, fmt.Errorf("scan item: %w", err)
 		}
-
-		item.ParentID = parentID.String
-		item.OriginalTitle = originalTitle.String
-		item.Path = path.String
-		item.Container = container.String
-		if seasonNum.Valid {
-			v := int(seasonNum.Int32)
-			item.SeasonNumber = &v
-		}
-		if episodeNum.Valid {
-			v := int(episodeNum.Int32)
-			item.EpisodeNumber = &v
-		}
-		if communityRating.Valid {
-			item.CommunityRating = &communityRating.Float64
-		}
+		n.applyList(item)
 		items = append(items, item)
 	}
 	return items, total, rows.Err()
@@ -350,32 +279,11 @@ func (r *ItemRepository) GetChildren(ctx context.Context, parentID string) ([]*I
 	var items []*Item
 	for rows.Next() {
 		item := &Item{}
-		var parentIDN, originalTitle, path, container sql.NullString
-		var seasonNum, episodeNum sql.NullInt32
-		var communityRating sql.NullFloat64
-
-		if err := rows.Scan(&item.ID, &item.LibraryID, &parentIDN, &item.Type, &item.Title,
-			&item.SortTitle, &originalTitle, &item.Year, &path, &item.Size, &item.DurationTicks,
-			&container, &seasonNum, &episodeNum, &communityRating,
-			&item.AddedAt, &item.UpdatedAt, &item.IsAvailable); err != nil {
+		var n itemNullables
+		if err := rows.Scan(listScanDests(item, &n)...); err != nil {
 			return nil, fmt.Errorf("scan child item: %w", err)
 		}
-
-		item.ParentID = parentIDN.String
-		item.OriginalTitle = originalTitle.String
-		item.Path = path.String
-		item.Container = container.String
-		if seasonNum.Valid {
-			v := int(seasonNum.Int32)
-			item.SeasonNumber = &v
-		}
-		if episodeNum.Valid {
-			v := int(episodeNum.Int32)
-			item.EpisodeNumber = &v
-		}
-		if communityRating.Valid {
-			item.CommunityRating = &communityRating.Float64
-		}
+		n.applyList(item)
 		items = append(items, item)
 	}
 	return items, rows.Err()
