@@ -290,7 +290,7 @@ func (r *ItemRepository) GetChildren(ctx context.Context, parentID string) ([]*I
 }
 
 // LatestItems returns the most recently added items.
-func (r *ItemRepository) LatestItems(ctx context.Context, libraryID string, limit int) ([]*Item, error) {
+func (r *ItemRepository) LatestItems(ctx context.Context, libraryID string, itemType string, limit int) ([]*Item, error) {
 	if limit <= 0 {
 		limit = 20
 	}
@@ -303,6 +303,10 @@ func (r *ItemRepository) LatestItems(ctx context.Context, libraryID string, limi
 	if libraryID != "" {
 		where += " AND library_id = ?"
 		args = append(args, libraryID)
+	}
+	if itemType != "" {
+		where += " AND type = ?"
+		args = append(args, itemType)
 	}
 	args = append(args, limit)
 
