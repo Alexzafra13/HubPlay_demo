@@ -1,0 +1,68 @@
+# docker-compose.prod.yml — Production deployment for hubplay.duckdns.org
+#
+# Uso:
+#   1. Ejecutar setup-server.sh primero (obtiene certificado SSL)
+#   2. Ajustar rutas de /media abajo
+#   3. docker compose -f docker-compose.prod.yml up -d
+
+services:
+  hubplay:
+    build: ..
+    container_name: hubplay
+    ports:
+      - "127.0.0.1:8096:8096"   # Solo localhost — nginx hace de proxy
+    volumes:
+      - hubplay-config:/config
+      - hubplay-cache:/cache
+      # === MEDIA: ajusta estas rutas a tu servidor ===
+      - /media/movies:/media/movies:ro
+      - /media/tv:/media/tv:ro
+      # - /media/music:/media/music:ro
+    environment:
+      - TZ=Europe/Madrid
+      - HUBPLAY_SERVER_BIND=0.0.0.0
+      - HUBPLAY_SERVER_PORT=8096
+      - HUBPLAY_SERVER_TRUSTED_PROXIES=127.0.0.1
+      - HUBPLAY_LOGGING_LEVEL=info
+      - HUBPLAY_LOGGING_FORMAT=json
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8096/api/v1/health"]
+      interval: 30s
+      timeout: 3s
+      start_period: 15s
+      retries: 3
+    # GPU transcoding (descomentar si tienes Intel iGPU)
+    # devices:
+    #   - /dev/dri:/dev/dri
+
+  nginx:
+    image: nginx:alpine
+    container_name: hubplay-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/hubplay.conf:/etc/nginx/conf.d/default.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - /var/www/certbot:/var/www/certbot:ro
+    depends_on:
+      hubplay:
+        condition: service_healthy
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+
+volumes:
+  hubplay-config:
+  hubplay-cache:
