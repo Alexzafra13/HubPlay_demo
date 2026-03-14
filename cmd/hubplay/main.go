@@ -20,6 +20,7 @@ import (
 	"hubplay/internal/event"
 	"hubplay/internal/library"
 	"hubplay/internal/logging"
+	"hubplay/internal/iptv"
 	"hubplay/internal/probe"
 	"hubplay/internal/scanner"
 	"hubplay/internal/stream"
@@ -90,14 +91,21 @@ func run(configPath string) error {
 		)
 	}
 
+	// ═══ Phase 4c: IPTV ═══
+	iptvService := iptv.NewService(repos.Channels, repos.EPGPrograms, repos.Libraries, logger)
+	iptvProxy := iptv.NewStreamProxy(logger)
+
 	// ═══ Phase 5: HTTP Server ═══
 	router := api.NewRouter(api.Dependencies{
 		Auth:          authService,
 		Users:         userService,
 		Libraries:     libraryService,
 		StreamManager: streamManager,
+		IPTV:          iptvService,
+		IPTVProxy:     iptvProxy,
 		Items:         repos.Items,
 		MediaStreams:   repos.MediaStreams,
+		UserData:      repos.UserData,
 		Config:        cfg,
 		Logger:        logger,
 	})
@@ -120,10 +128,10 @@ func run(configPath string) error {
 	}()
 
 	// ═══ Phase 7: Wait for shutdown ═══
-	return waitForShutdown(ctx, cancel, server, streamManager, database, logger)
+	return waitForShutdown(ctx, cancel, server, streamManager, iptvService, iptvProxy, database, logger)
 }
 
-func waitForShutdown(ctx context.Context, cancel context.CancelFunc, server *http.Server, sm *stream.Manager, database interface{ Close() error }, logger *slog.Logger) error {
+func waitForShutdown(ctx context.Context, cancel context.CancelFunc, server *http.Server, sm *stream.Manager, iptvSvc *iptv.Service, iptvProxy *iptv.StreamProxy, database interface{ Close() error }, logger *slog.Logger) error {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
@@ -148,6 +156,11 @@ func waitForShutdown(ctx context.Context, cancel context.CancelFunc, server *htt
 	// Stop all streaming sessions
 	sm.Shutdown()
 	logger.Info("stream manager stopped")
+
+	// Stop IPTV
+	iptvProxy.Shutdown()
+	iptvSvc.Shutdown()
+	logger.Info("IPTV services stopped")
 
 	// Cancel root context
 	cancel()
