@@ -76,7 +76,7 @@ func NewRouter(deps Dependencies) http.Handler {
 
 		// Setup wizard (no auth for status, auth handled per-step)
 		if deps.SetupService != nil {
-			setupHandler := handlers.NewSetupHandler(deps.SetupService, deps.Auth, deps.Libraries, deps.Config, deps.Logger)
+			setupHandler := handlers.NewSetupHandler(deps.SetupService, deps.Auth, deps.Libraries, deps.Users, deps.Config, deps.Logger)
 
 			r.Get("/setup/status", setupHandler.Status)
 			r.Get("/setup/capabilities", setupHandler.Capabilities)

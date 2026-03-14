@@ -128,8 +128,21 @@ function HubPlayLogo() {
 
 // ─── Main Wizard ─────────────────────────────────────────────────────────────
 
-export default function SetupWizard() {
-  const [currentStep, setCurrentStep] = useState(0);
+const STEP_MAP: Record<string, number> = {
+  account: 0,
+  libraries: 1,
+  settings: 2,
+  complete: 3,
+};
+
+interface SetupWizardProps {
+  initialStep?: string;
+}
+
+export default function SetupWizard({ initialStep }: SetupWizardProps) {
+  const [currentStep, setCurrentStep] = useState(
+    initialStep ? (STEP_MAP[initialStep] ?? 0) : 0,
+  );
   const [setupData, setSetupData] = useState<SetupData>({});
 
   const goNext = useCallback(() => {

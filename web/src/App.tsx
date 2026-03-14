@@ -43,7 +43,7 @@ export function App() {
       <Route
         path="/setup/*"
         element={
-          needsSetup ? <SetupWizard /> : <Navigate to="/login" replace />
+          needsSetup ? <SetupWizard initialStep={setupStatus?.current_step} /> : <Navigate to="/login" replace />
         }
       />
 
