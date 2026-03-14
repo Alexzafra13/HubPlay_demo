@@ -12,6 +12,7 @@ import (
 	"hubplay/internal/auth"
 	"hubplay/internal/config"
 	"hubplay/internal/db"
+	"hubplay/internal/iptv"
 	"hubplay/internal/library"
 	"hubplay/internal/stream"
 	"hubplay/internal/user"
@@ -22,8 +23,11 @@ type Dependencies struct {
 	Users          *user.Service
 	Libraries      *library.Service
 	StreamManager  *stream.Manager
+	IPTV           *iptv.Service
+	IPTVProxy      *iptv.StreamProxy
 	Items          *db.ItemRepository
 	MediaStreams    *db.MediaStreamRepository
+	UserData       *db.UserDataRepository
 	Config         *config.Config
 	Logger         *slog.Logger
 }
@@ -79,6 +83,23 @@ func NewRouter(deps Dependencies) http.Handler {
 				r.Post("/", authHandler.Register)
 			})
 
+			// Watch Progress & User Engagement
+			if deps.UserData != nil {
+				progressHandler := handlers.NewProgressHandler(deps.UserData, deps.Logger)
+
+				r.Get("/me/continue-watching", progressHandler.ContinueWatching)
+				r.Get("/me/favorites", progressHandler.Favorites)
+				r.Get("/me/next-up", progressHandler.NextUp)
+
+				r.Route("/me/progress/{itemId}", func(r chi.Router) {
+					r.Get("/", progressHandler.GetProgress)
+					r.Put("/", progressHandler.UpdateProgress)
+					r.Post("/played", progressHandler.MarkPlayed)
+					r.Post("/unplayed", progressHandler.MarkUnplayed)
+					r.Post("/favorite", progressHandler.ToggleFavorite)
+				})
+			}
+
 			// Streaming
 			if deps.StreamManager != nil {
 				streamHandler := handlers.NewStreamHandler(
@@ -121,6 +142,33 @@ func NewRouter(deps Dependencies) http.Handler {
 					r.Use(auth.RequireAdmin)
 					r.Post("/libraries", libHandler.Create)
 				})
+
+				// IPTV channels (within library routes)
+				if deps.IPTV != nil {
+					iptvHandler := handlers.NewIPTVHandler(deps.IPTV, deps.IPTVProxy, deps.Logger)
+
+					r.Route("/libraries/{id}/channels", func(r chi.Router) {
+						r.Get("/", iptvHandler.ListChannels)
+						r.Get("/groups", iptvHandler.Groups)
+					})
+
+					r.Route("/channels/{channelId}", func(r chi.Router) {
+						r.Get("/", iptvHandler.GetChannel)
+						r.Get("/stream", iptvHandler.Stream)
+						r.Get("/schedule", iptvHandler.Schedule)
+					})
+
+					r.Get("/channels/schedule", iptvHandler.BulkSchedule)
+
+					// Admin IPTV operations
+					r.Group(func(r chi.Router) {
+						r.Use(auth.RequireAdmin)
+						r.Route("/libraries/{id}/iptv", func(r chi.Router) {
+							r.Post("/refresh-m3u", iptvHandler.RefreshM3U)
+							r.Post("/refresh-epg", iptvHandler.RefreshEPG)
+						})
+					})
+				}
 
 				// Items
 				r.Get("/items/latest", libHandler.LatestItems)
