@@ -138,13 +138,13 @@ const FolderBrowser: FC<FolderBrowserProps> = ({ isOpen, onClose, onSelect }) =>
               )}
 
               {/* Directories */}
-              {data.directories.length === 0 && (
+              {(!data.directories || data.directories.length === 0) && (
                 <div className="px-4 py-8 text-center text-sm text-text-muted">
                   No subdirectories found
                 </div>
               )}
 
-              {data.directories.map((dir) => (
+              {(data.directories ?? []).map((dir) => (
                 <button
                   key={dir.path}
                   onClick={() => handleNavigate(dir.path)}
