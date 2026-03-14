@@ -44,5 +44,10 @@ func NewTestRepos(t *testing.T) *db.Repositories {
 
 // NopLogger returns a logger that discards output.
 func NopLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(nil, nil))
+	return slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError + 1}))
+}
+
+// TestLogger returns a logger suitable for tests (discards below error).
+func TestLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError + 1}))
 }

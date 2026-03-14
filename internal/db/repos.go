@@ -13,6 +13,7 @@ type Repositories struct {
 	UserData     *UserDataRepository
 	Channels     *ChannelRepository
 	EPGPrograms  *EPGProgramRepository
+	Providers    *ProviderRepository
 }
 
 // NewRepositories creates all repositories from a database connection.
@@ -27,5 +28,6 @@ func NewRepositories(database *sql.DB) *Repositories {
 		UserData:     NewUserDataRepository(database),
 		Channels:     NewChannelRepository(database),
 		EPGPrograms:  NewEPGProgramRepository(database),
+		Providers:    NewProviderRepository(database),
 	}
 }
