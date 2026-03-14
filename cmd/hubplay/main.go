@@ -105,7 +105,7 @@ func run(configPath string) error {
 	_ = providerManager.Register(ctx, provider.NewOpenSubtitlesProvider())
 
 	// ═══ Phase 4e: Setup Service ═══
-	setupService := setup.NewService(cfg, logger)
+	setupService := setup.NewService(cfg, configPath, logger)
 
 	// ═══ Phase 5: HTTP Server ═══
 	webFS, _ := fs.Sub(hubplay.WebAssets, "web/dist")

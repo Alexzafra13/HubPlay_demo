@@ -95,7 +95,14 @@ export class ApiClient {
       return undefined as T;
     }
 
-    return (await response.json()) as T;
+    const json = await response.json();
+
+    // All API responses wrap payloads in {"data": ...}; unwrap automatically.
+    if (json && typeof json === 'object' && 'data' in json) {
+      return json.data as T;
+    }
+
+    return json as T;
   }
 
   // ─── Auth ─────────────────────────────────────────────────────────────
