@@ -8,7 +8,7 @@ import (
 
 	"github.com/pressly/goose/v3"
 
-	_ "hubplay/internal/db/sqlitedriver"
+	_ "modernc.org/sqlite"
 )
 
 // Open creates and configures a SQLite database connection.
@@ -17,8 +17,8 @@ func Open(driver, path string, logger *slog.Logger) (*sql.DB, error) {
 		return nil, fmt.Errorf("unsupported driver %q (only sqlite supported in v1)", driver)
 	}
 
-	dsn := path + "?_journal_mode=WAL&_busy_timeout=5000&_synchronous=NORMAL&_foreign_keys=ON"
-	database, err := sql.Open("sqlite3", dsn)
+	dsn := path + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(ON)"
+	database, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("opening sqlite: %w", err)
 	}

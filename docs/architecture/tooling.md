@@ -7,7 +7,7 @@
 | Library | Purpose | Why This One |
 |---------|---------|-------------|
 | `github.com/go-chi/chi/v5` | HTTP router + middleware | Lightweight, idiomatic Go, uses stdlib `net/http` directly, easy to debug |
-| `internal/db/sqlitedriver` | SQLite driver (CGO) | Minimal in-project driver using system `libsqlite3`. Supports FTS5, triggers, and all SQLite features natively |
+| `modernc.org/sqlite` | SQLite driver | Pure Go (C-to-Go transpiled), no CGO needed. Supports FTS5, triggers, and all SQLite features. Cross-compiles trivially |
 | `github.com/golang-jwt/jwt/v5` | JWT tokens | Official library, well-maintained, no unnecessary deps |
 | `github.com/google/uuid` | UUIDs | Simple, reliable, from Google |
 | `github.com/fsnotify/fsnotify` | File system watcher | De facto standard in Go for file watching |
@@ -35,9 +35,8 @@
 | RabbitMQ / NATS | In-process event bus is sufficient. No need for external message broker |
 | GraphQL | REST is simpler and covers all our use cases |
 | Next.js / SSR | Static SPA embedded in Go binary is simpler than server-side rendering |
-| `mattn/go-sqlite3` | External dependency for CGO SQLite. Our minimal in-project driver is simpler and avoids the extra dependency |
-| `modernc.org/sqlite` | Pure Go (C-to-Go transpiled). Slower than native CGO and has a very large dependency tree |
-| `ncruces/go-sqlite3` | Pure Go (WASM). FTS5 triggers crash due to wasm memory limits. Not suitable for full-text search |
+| `mattn/go-sqlite3` (CGO) | Requires C compiler, complicates cross-compilation. modernc.org/sqlite is pure Go with same features |
+| `ncruces/go-sqlite3` (WASM) | FTS5 triggers crash due to wasm memory limits. Not suitable for full-text search |
 | Email service | No email in the system. Admin manages users directly |
 
 ---
@@ -218,13 +217,13 @@ RUN pnpm build
 
 # Stage 2: Build Go backend (embeds frontend)
 FROM golang:1.22-alpine AS backend
-# CGO enabled for native SQLite with FTS5 support
+# No CGO needed — modernc.org/sqlite is pure Go with FTS5 support
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 COPY --from=frontend /web/dist ./web/dist
-RUN CGO_ENABLED=1 go build -tags embed -ldflags "-s -w" -o hubplay ./cmd/hubplay
+RUN CGO_ENABLED=0 go build -tags embed -ldflags "-s -w" -o hubplay ./cmd/hubplay
 
 # Stage 3: Runtime — everything included
 FROM debian:bookworm-slim AS runtime
@@ -315,4 +314,4 @@ The final binary includes the React frontend via `go:embed`. Zero runtime depend
 | TMDb API key invalid/expired | No metadata for new items | Graceful degradation: items added without metadata, retry queue |
 | Corrupt/unreadable media files | Scanner fails on single file | Log error per file, continue scanning remaining files |
 | Very large libraries (100K+ items) | Slow scans, memory pressure | Incremental scanning via fingerprint, server-side pagination, streaming DB queries |
-| CGO required for SQLite | Cross-compilation needs C compiler for target platform | Acceptable trade-off: enables FTS5 full-text search and native SQLite performance. Docker multi-stage build handles this transparently |
+| modernc.org/sqlite performance | Slightly slower than CGO native SQLite on concurrent reads | Acceptable for a media server. Pure Go trade-off: no CGO, trivial cross-compilation, FTS5 works perfectly |
