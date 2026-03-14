@@ -23,6 +23,22 @@ type Config struct {
 	Auth      AuthConfig      `yaml:"auth"`
 	Logging   logging.Config  `yaml:"logging"`
 	RateLimit RateLimitConfig `yaml:"rate_limit"`
+	Streaming StreamingConfig `yaml:"streaming"`
+}
+
+type StreamingConfig struct {
+	SegmentDuration      int       `yaml:"segment_duration"`       // seconds, default 6
+	MaxTranscodeSessions int       `yaml:"max_transcode_sessions"` // default 2
+	TranscodePreset      string    `yaml:"transcode_preset"`       // veryfast, fast, medium
+	DefaultAudioBitrate  string    `yaml:"default_audio_bitrate"`  // e.g. "192k"
+	CacheDir             string    `yaml:"cache_dir"`              // directory for transcode output
+	IdleTimeout          time.Duration `yaml:"idle_timeout"`       // cleanup idle sessions, default 5m
+	HWAccel              HWAccelConfig `yaml:"hardware_acceleration"`
+}
+
+type HWAccelConfig struct {
+	Enabled   bool   `yaml:"enabled"`
+	Preferred string `yaml:"preferred"` // auto, vaapi, qsv, nvenc, videotoolbox
 }
 
 type ServerConfig struct {
@@ -160,6 +176,18 @@ func defaults() *Config {
 			Enabled:       true,
 			LoginAttempts: 5,
 			GlobalRPM:     100,
+		},
+		Streaming: StreamingConfig{
+			SegmentDuration:      6,
+			MaxTranscodeSessions: 2,
+			TranscodePreset:      "veryfast",
+			DefaultAudioBitrate:  "192k",
+			CacheDir:             "",
+			IdleTimeout:          5 * time.Minute,
+			HWAccel: HWAccelConfig{
+				Enabled:   false,
+				Preferred: "auto",
+			},
 		},
 	}
 }
