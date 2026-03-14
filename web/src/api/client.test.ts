@@ -19,7 +19,7 @@ describe("ApiClient", () => {
   let client: ApiClient;
 
   beforeEach(() => {
-    client = new ApiClient("http://test");
+    client = new ApiClient("http://test/api/v1");
     localStorage.clear();
     vi.restoreAllMocks();
   });
@@ -32,7 +32,7 @@ describe("ApiClient", () => {
     await client.getHealth();
 
     expect(fetch).toHaveBeenCalledWith(
-      "http://test/api/health",
+      "http://test/api/v1/health",
       expect.objectContaining({
         method: "GET",
         headers: expect.objectContaining({
