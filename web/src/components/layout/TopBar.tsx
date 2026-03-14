@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, NavLink } from 'react-router';
 import { useAuthStore } from '@/store/auth';
 
 // ─── Props ──────────────────────────────────────────────────────────────────
@@ -122,6 +122,33 @@ export function TopBar({ title, onMenuClick }: TopBarProps) {
               </p>
               <p className="text-xs text-text-secondary truncate">{user?.role}</p>
             </div>
+            <NavLink
+              to="/settings"
+              onClick={() => setDropdownOpen(false)}
+              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-bg-elevated transition-colors"
+            >
+              <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="10" cy="10" r="3" />
+                <path d="M10 1.5v2M10 16.5v2M3.5 3.5l1.4 1.4M15.1 15.1l1.4 1.4M1.5 10h2M16.5 10h2M3.5 16.5l1.4-1.4M15.1 4.9l1.4-1.4" />
+              </svg>
+              Settings
+            </NavLink>
+            {user?.role === 'admin' && (
+              <NavLink
+                to="/admin/libraries"
+                onClick={() => setDropdownOpen(false)}
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-bg-elevated transition-colors"
+              >
+                <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="3" width="6" height="6" rx="1" />
+                  <rect x="11" y="3" width="6" height="6" rx="1" />
+                  <rect x="3" y="11" width="6" height="6" rx="1" />
+                  <rect x="11" y="11" width="6" height="6" rx="1" />
+                </svg>
+                Administration
+              </NavLink>
+            )}
+            <div className="border-t border-border" />
             <button
               onClick={handleLogout}
               className="w-full flex items-center gap-2 px-3 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-bg-elevated transition-colors"
