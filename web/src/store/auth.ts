@@ -11,8 +11,7 @@ interface AuthState {
   user: User | null
   accessToken: string | null
   refreshToken: string | null
-
-  readonly isAuthenticated: boolean
+  isAuthenticated: boolean
 
   setAuth: (user: User, accessToken: string, refreshToken: string) => void
   logout: () => void
@@ -20,21 +19,18 @@ interface AuthState {
   updateUser: (user: User) => void
 }
 
-export const useAuthStore = create<AuthState>()((set, get) => ({
+export const useAuthStore = create<AuthState>()((set) => ({
   user: null,
   accessToken: null,
   refreshToken: null,
-
-  get isAuthenticated(): boolean {
-    return get().user !== null && get().accessToken !== null
-  },
+  isAuthenticated: false,
 
   setAuth(user: User, accessToken: string, refreshToken: string) {
     localStorage.setItem(STORAGE_KEYS.accessToken, accessToken)
     localStorage.setItem(STORAGE_KEYS.refreshToken, refreshToken)
     localStorage.setItem(STORAGE_KEYS.user, JSON.stringify(user))
 
-    set({ user, accessToken, refreshToken })
+    set({ user, accessToken, refreshToken, isAuthenticated: true })
   },
 
   logout() {
@@ -42,7 +38,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     localStorage.removeItem(STORAGE_KEYS.refreshToken)
     localStorage.removeItem(STORAGE_KEYS.user)
 
-    set({ user: null, accessToken: null, refreshToken: null })
+    set({ user: null, accessToken: null, refreshToken: null, isAuthenticated: false })
   },
 
   loadFromStorage() {
@@ -53,7 +49,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     if (accessToken && refreshToken && userJson) {
       try {
         const user = JSON.parse(userJson) as User
-        set({ user, accessToken, refreshToken })
+        set({ user, accessToken, refreshToken, isAuthenticated: true })
       } catch {
         // Corrupted storage — clear everything
         localStorage.removeItem(STORAGE_KEYS.accessToken)
