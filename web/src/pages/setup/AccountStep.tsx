@@ -3,6 +3,8 @@ import type { FormEvent } from "react";
 import { useSetupCreateAdmin } from "@/api/hooks";
 import { useAuthStore } from "@/store/auth";
 import { Button, Input } from "@/components/common";
+import { ApiError } from "@/api/types";
+import { api } from "@/api/client";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -75,7 +77,23 @@ export default function AccountStep({ onNext, initialData }: AccountStepProps) {
             displayName: displayName.trim() || undefined,
           });
         },
-        onError(err) {
+        async onError(err) {
+          // Admin already exists — try logging in instead
+          if (err instanceof ApiError && err.code === "SETUP_COMPLETED") {
+            try {
+              const loginData = await api.login(username.trim(), password);
+              setAuth(loginData.user, loginData.access_token, loginData.refresh_token);
+              onNext({
+                username: username.trim(),
+                password,
+                displayName: displayName.trim() || undefined,
+              });
+              return;
+            } catch {
+              setServerError("Admin account already exists. Please enter the correct password to continue.");
+              return;
+            }
+          }
           setServerError(
             err.message || "Failed to create admin account. Please try again.",
           );
