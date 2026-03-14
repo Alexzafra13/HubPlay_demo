@@ -26,20 +26,16 @@ COPY --from=frontend /web/dist ./web/dist
 RUN CGO_ENABLED=0 go build -ldflags "-s -w" -o /hubplay ./cmd/hubplay
 
 # ═══════════════════════════════════════════
-# Stage 3: Runtime (Ubuntu for FFmpeg + HW accel)
+# Stage 3: Runtime (Alpine — lightweight)
 # ═══════════════════════════════════════════
-FROM ubuntu:24.04
+FROM alpine:3.21
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apk add --no-cache \
     ffmpeg \
     ca-certificates \
-    tzdata \
-    # Intel VAAPI (QSV)
-    intel-media-va-driver-non-free \
-    vainfo \
-    && rm -rf /var/lib/apt/lists/*
+    tzdata
 
-RUN useradd -r -s /bin/false hubplay
+RUN adduser -D -s /sbin/nologin hubplay
 
 COPY --from=backend /hubplay /usr/local/bin/hubplay
 
