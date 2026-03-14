@@ -23,11 +23,11 @@ dev:
 
 ## web: Build frontend for production
 web:
-	cd web && npm install && npm run build
+	cd web && pnpm install --frozen-lockfile && pnpm run build
 
 ## web-dev: Start frontend dev server with HMR
 web-dev:
-	cd web && npm run dev
+	cd web && pnpm run dev
 
 ## test: Run all tests
 test:
