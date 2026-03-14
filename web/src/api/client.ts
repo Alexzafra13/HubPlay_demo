@@ -148,7 +148,7 @@ export class ApiClient {
     password: string,
     displayName?: string,
   ): Promise<AuthResponse> {
-    const data = await this.request<AuthResponse>("POST", "/setup/admin", {
+    const data = await this.request<AuthResponse>("POST", "/auth/setup", {
       body: { username, password, display_name: displayName },
     });
     localStorage.setItem(TOKEN_KEY, data.access_token);
@@ -157,8 +157,8 @@ export class ApiClient {
   }
 
   async browseDirectories(path?: string): Promise<BrowseResponse> {
-    return this.request<BrowseResponse>("GET", "/setup/browse", {
-      params: path ? { path } : undefined,
+    return this.request<BrowseResponse>("POST", "/setup/browse", {
+      body: path ? { path } : {},
     });
   }
 
@@ -189,7 +189,7 @@ export class ApiClient {
   // ─── Users ────────────────────────────────────────────────────────────
 
   async getMe(): Promise<User> {
-    return this.request<User>("GET", "/users/me");
+    return this.request<User>("GET", "/me");
   }
 
   async getUsers(): Promise<User[]> {
@@ -246,8 +246,14 @@ export class ApiClient {
     offset?: number;
     limit?: number;
   }): Promise<PaginatedResponse<MediaItem>> {
-    return this.request<PaginatedResponse<MediaItem>>("GET", "/items", {
-      params: params as Record<string, string | number | boolean | undefined>,
+    const { library_id, ...rest } = params ?? {};
+    if (library_id) {
+      return this.request<PaginatedResponse<MediaItem>>("GET", `/libraries/${library_id}/items`, {
+        params: rest as Record<string, string | number | boolean | undefined>,
+      });
+    }
+    return this.request<PaginatedResponse<MediaItem>>("GET", "/items/latest", {
+      params: rest as Record<string, string | number | boolean | undefined>,
     });
   }
 
@@ -278,7 +284,7 @@ export class ApiClient {
   // ─── Progress / User Data ─────────────────────────────────────────────
 
   async getProgress(itemId: string): Promise<UserData> {
-    return this.request<UserData>("GET", `/items/${itemId}/progress`);
+    return this.request<UserData>("GET", `/me/progress/${itemId}`);
   }
 
   async updateProgress(
@@ -289,33 +295,33 @@ export class ApiClient {
       subtitle_stream_index?: number;
     },
   ): Promise<UserData> {
-    return this.request<UserData>("PUT", `/items/${itemId}/progress`, {
+    return this.request<UserData>("PUT", `/me/progress/${itemId}`, {
       body: data,
     });
   }
 
   async markPlayed(itemId: string): Promise<UserData> {
-    return this.request<UserData>("POST", `/items/${itemId}/played`);
+    return this.request<UserData>("POST", `/me/progress/${itemId}/played`);
   }
 
   async markUnplayed(itemId: string): Promise<UserData> {
-    return this.request<UserData>("DELETE", `/items/${itemId}/played`);
+    return this.request<UserData>("POST", `/me/progress/${itemId}/unplayed`);
   }
 
   async toggleFavorite(itemId: string): Promise<UserData> {
-    return this.request<UserData>("POST", `/items/${itemId}/favorite`);
+    return this.request<UserData>("POST", `/me/progress/${itemId}/favorite`);
   }
 
   async getContinueWatching(): Promise<MediaItem[]> {
-    return this.request<MediaItem[]>("GET", "/items/continue-watching");
+    return this.request<MediaItem[]>("GET", "/me/continue-watching");
   }
 
   async getNextUp(): Promise<MediaItem[]> {
-    return this.request<MediaItem[]>("GET", "/items/next-up");
+    return this.request<MediaItem[]>("GET", "/me/next-up");
   }
 
   async getFavorites(): Promise<MediaItem[]> {
-    return this.request<MediaItem[]>("GET", "/items/favorites");
+    return this.request<MediaItem[]>("GET", "/me/favorites");
   }
 
   // ─── Streaming ────────────────────────────────────────────────────────
@@ -344,9 +350,8 @@ export class ApiClient {
   // ─── Channels / Live TV ───────────────────────────────────────────────
 
   async getChannels(libraryId?: string): Promise<Channel[]> {
-    return this.request<Channel[]>("GET", "/channels", {
-      params: { library_id: libraryId },
-    });
+    if (!libraryId) return [];
+    return this.request<Channel[]>("GET", `/libraries/${libraryId}/channels`);
   }
 
   async getChannel(id: string): Promise<Channel> {
@@ -364,9 +369,8 @@ export class ApiClient {
   }
 
   async getChannelGroups(libraryId?: string): Promise<string[]> {
-    return this.request<string[]>("GET", "/channels/groups", {
-      params: { library_id: libraryId },
-    });
+    if (!libraryId) return [];
+    return this.request<string[]>("GET", `/libraries/${libraryId}/channels/groups`);
   }
 
   // ─── System ───────────────────────────────────────────────────────────
