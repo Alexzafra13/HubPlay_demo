@@ -36,15 +36,17 @@ type SystemCapabilities struct {
 
 // Service handles setup wizard logic.
 type Service struct {
-	config *config.Config
-	logger *slog.Logger
+	config     *config.Config
+	configPath string
+	logger     *slog.Logger
 }
 
 // NewService creates a new setup service.
-func NewService(cfg *config.Config, logger *slog.Logger) *Service {
+func NewService(cfg *config.Config, configPath string, logger *slog.Logger) *Service {
 	return &Service{
-		config: cfg,
-		logger: logger,
+		config:     cfg,
+		configPath: configPath,
+		logger:     logger,
 	}
 }
 
@@ -140,8 +142,7 @@ func (s *Service) CompleteSetup(startScan bool) error {
 		return fmt.Errorf("marshalling config: %w", err)
 	}
 
-	configPath := "hubplay.yaml"
-	if err := os.WriteFile(configPath, data, 0644); err != nil {
+	if err := os.WriteFile(s.configPath, data, 0644); err != nil {
 		return fmt.Errorf("writing config: %w", err)
 	}
 
