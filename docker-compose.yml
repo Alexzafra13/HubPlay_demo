@@ -1,0 +1,15 @@
+services:
+  hubplay:
+    build: .
+    container_name: hubplay
+    ports:
+      - "8096:8096"
+    volumes:
+      - ./config:/config
+      - ./cache:/cache
+      # Map your media folders here:
+      # - /path/to/movies:/media/movies:ro
+      # - /path/to/tv:/media/tv:ro
+    environment:
+      - TZ=Europe/Madrid
+    restart: unless-stopped

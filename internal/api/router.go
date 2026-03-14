@@ -1,8 +1,10 @@
 package api
 
 import (
+	"io/fs"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -15,6 +17,7 @@ import (
 	"hubplay/internal/iptv"
 	"hubplay/internal/library"
 	"hubplay/internal/provider"
+	"hubplay/internal/setup"
 	"hubplay/internal/stream"
 	"hubplay/internal/user"
 )
@@ -31,6 +34,8 @@ type Dependencies struct {
 	UserData       *db.UserDataRepository
 	Providers      *provider.Manager
 	ProviderRepo   *db.ProviderRepository
+	SetupService   *setup.Service
+	WebAssets      fs.FS
 	Config         *config.Config
 	Logger         *slog.Logger
 }
@@ -68,6 +73,18 @@ func NewRouter(deps Dependencies) http.Handler {
 
 		// Setup — create first admin (only works when no users exist)
 		r.Post("/auth/setup", authHandler.Setup)
+
+		// Setup wizard (no auth for status, auth handled per-step)
+		if deps.SetupService != nil {
+			setupHandler := handlers.NewSetupHandler(deps.SetupService, deps.Auth, deps.Libraries, deps.Config, deps.Logger)
+
+			r.Get("/setup/status", setupHandler.Status)
+			r.Get("/setup/capabilities", setupHandler.Capabilities)
+			r.Post("/setup/browse", setupHandler.Browse)
+			r.Post("/setup/libraries", setupHandler.CreateLibraries)
+			r.Post("/setup/settings", setupHandler.UpdateSettings)
+			r.Post("/setup/complete", setupHandler.Complete)
+		}
 
 		// Protected routes
 		r.Group(func(r chi.Router) {
@@ -200,6 +217,25 @@ func NewRouter(deps Dependencies) http.Handler {
 			}
 		})
 	})
+
+	// Serve embedded web frontend (SPA fallback)
+	if deps.WebAssets != nil {
+		fileServer := http.FileServer(http.FS(deps.WebAssets))
+		r.Get("/*", func(w http.ResponseWriter, r *http.Request) {
+			// Try to serve the exact file first (JS, CSS, images, etc.)
+			path := strings.TrimPrefix(r.URL.Path, "/")
+			if path == "" {
+				path = "index.html"
+			}
+			if _, err := fs.Stat(deps.WebAssets, path); err == nil {
+				fileServer.ServeHTTP(w, r)
+				return
+			}
+			// SPA fallback: serve index.html for all other routes
+			r.URL.Path = "/"
+			fileServer.ServeHTTP(w, r)
+		})
+	}
 
 	return r
 }

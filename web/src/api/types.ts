@@ -1,0 +1,223 @@
+// ─── User & Auth ────────────────────────────────────────────────────────────
+
+export interface User {
+  id: string;
+  username: string;
+  display_name: string;
+  role: string;
+  created_at: string;
+}
+
+export interface AuthResponse {
+  access_token: string;
+  refresh_token: string;
+  expires_in: number;
+  user: User;
+}
+
+export interface LoginRequest {
+  username: string;
+  password: string;
+}
+
+export interface RegisterRequest {
+  username: string;
+  password: string;
+  display_name?: string;
+}
+
+// ─── Libraries ──────────────────────────────────────────────────────────────
+
+export type ContentType = "movies" | "tvshows" | "livetv";
+
+export type ScanStatus = "idle" | "scanning" | "error";
+
+export interface Library {
+  id: string;
+  name: string;
+  content_type: ContentType;
+  paths: string[];
+  item_count: number;
+  scan_status: ScanStatus;
+  created_at: string;
+}
+
+export interface CreateLibraryRequest {
+  name: string;
+  content_type: ContentType;
+  paths: string[];
+}
+
+export interface UpdateLibraryRequest {
+  name?: string;
+  paths?: string[];
+}
+
+// ─── Media Items ────────────────────────────────────────────────────────────
+
+export type MediaType = "movie" | "series" | "season" | "episode";
+
+export interface MediaItem {
+  id: string;
+  type: MediaType;
+  title: string;
+  original_title: string | null;
+  year: number | null;
+  sort_title: string;
+  overview: string | null;
+  tagline: string | null;
+  genres: string[];
+  community_rating: number | null;
+  content_rating: string | null;
+  runtime_ticks: number | null;
+  premiere_date: string | null;
+  poster_url: string | null;
+  backdrop_url: string | null;
+  parent_id: string | null;
+  series_id: string | null;
+  season_number: number | null;
+  episode_number: number | null;
+  path: string | null;
+}
+
+export type StreamType = "video" | "audio" | "subtitle";
+
+export interface MediaStream {
+  index: number;
+  type: StreamType;
+  codec: string;
+  language: string | null;
+  title: string | null;
+  channels: number | null;
+  width: number | null;
+  height: number | null;
+  bitrate: number | null;
+  is_default: boolean;
+  is_forced: boolean;
+  hdr_type: string | null;
+}
+
+export interface Person {
+  name: string;
+  role: string;
+  type: string;
+  image_url: string | null;
+}
+
+export interface UserData {
+  progress: {
+    position_ticks: number;
+    percentage: number;
+    audio_stream_index: number | null;
+    subtitle_stream_index: number | null;
+  };
+  is_favorite: boolean;
+  played: boolean;
+  play_count: number;
+  last_played_at: string | null;
+}
+
+export interface ItemDetail extends MediaItem {
+  media_streams: MediaStream[];
+  people: Person[];
+  user_data: UserData | null;
+}
+
+// ─── Live TV ────────────────────────────────────────────────────────────────
+
+export interface Channel {
+  id: string;
+  name: string;
+  number: number;
+  logo_url: string | null;
+  group: string | null;
+  stream_url: string;
+  library_id: string;
+}
+
+export interface EPGProgram {
+  id: string;
+  channel_id: string;
+  title: string;
+  description: string | null;
+  start: string;
+  end: string;
+  category: string | null;
+  icon_url: string | null;
+}
+
+// ─── Streaming ──────────────────────────────────────────────────────────────
+
+export type PlaybackMethod = "direct_play" | "direct_stream" | "transcode";
+
+export interface StreamSession {
+  session_id: string;
+  session_token: string;
+  playback_method: PlaybackMethod;
+  master_playlist: string | null;
+  direct_url: string | null;
+}
+
+// ─── Generic Responses ──────────────────────────────────────────────────────
+
+export interface PaginatedResponse<T> {
+  items: T[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
+export interface HealthResponse {
+  status: string;
+  version: string;
+  uptime: number;
+  database: string;
+  ffmpeg: string;
+  active_streams: number;
+  active_transcodes: number;
+}
+
+export interface SetupStatus {
+  needs_setup: boolean;
+}
+
+export interface BrowseDirectory {
+  name: string;
+  path: string;
+}
+
+export interface BrowseResponse {
+  current: string;
+  parent: string;
+  directories: BrowseDirectory[];
+}
+
+export interface SystemCapabilities {
+  ffmpeg_path: string;
+  ffmpeg_found: boolean;
+  hw_accels: string[];
+}
+
+// ─── Errors ─────────────────────────────────────────────────────────────────
+
+export interface ApiErrorBody {
+  error: {
+    code: string;
+    message: string;
+    details?: Record<string, unknown>;
+  };
+}
+
+export class ApiError extends Error {
+  readonly status: number;
+  readonly code: string;
+  readonly details?: Record<string, unknown>;
+
+  constructor(status: number, body: ApiErrorBody) {
+    super(body.error.message);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = body.error.code;
+    this.details = body.error.details;
+  }
+}

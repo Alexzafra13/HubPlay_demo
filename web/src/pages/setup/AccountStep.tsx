@@ -1,0 +1,177 @@
+import { useState } from "react";
+import type { FormEvent } from "react";
+import { useSetupCreateAdmin } from "@/api/hooks";
+import { useAuthStore } from "@/store/auth";
+import { Button, Input } from "@/components/common";
+
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+interface AdminData {
+  username: string;
+  password: string;
+  displayName?: string;
+}
+
+interface AccountStepProps {
+  onNext: (data: AdminData) => void;
+  initialData?: AdminData;
+}
+
+// ─── Component ───────────────────────────────────────────────────────────────
+
+export default function AccountStep({ onNext, initialData }: AccountStepProps) {
+  const createAdmin = useSetupCreateAdmin();
+  const setAuth = useAuthStore((s) => s.setAuth);
+
+  const [username, setUsername] = useState(initialData?.username ?? "");
+  const [password, setPassword] = useState(initialData?.password ?? "");
+  const [confirmPassword, setConfirmPassword] = useState(
+    initialData?.password ?? "",
+  );
+  const [displayName, setDisplayName] = useState(
+    initialData?.displayName ?? "",
+  );
+
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [serverError, setServerError] = useState<string | null>(null);
+
+  function validate(): boolean {
+    const newErrors: Record<string, string> = {};
+
+    if (username.trim().length < 3) {
+      newErrors.username = "Username must be at least 3 characters";
+    }
+
+    if (password.length < 8) {
+      newErrors.password = "Password must be at least 8 characters";
+    }
+
+    if (password !== confirmPassword) {
+      newErrors.confirmPassword = "Passwords do not match";
+    }
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  }
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    setServerError(null);
+
+    if (!validate()) return;
+
+    createAdmin.mutate(
+      {
+        username: username.trim(),
+        password,
+        display_name: displayName.trim() || undefined,
+      },
+      {
+        onSuccess(data) {
+          setAuth(data.user, data.access_token, data.refresh_token);
+          onNext({
+            username: username.trim(),
+            password,
+            displayName: displayName.trim() || undefined,
+          });
+        },
+        onError(err) {
+          setServerError(
+            err.message || "Failed to create admin account. Please try again.",
+          );
+        },
+      },
+    );
+  }
+
+  return (
+    <div>
+      <div className="mb-6">
+        <h2 className="text-xl font-semibold text-text-primary">
+          Create Admin Account
+        </h2>
+        <p className="mt-1 text-sm text-text-secondary">
+          Set up the main administrator account for your server.
+        </p>
+      </div>
+
+      {/* Warning */}
+      <div className="mb-6 flex items-start gap-3 rounded-[--radius-md] bg-warning/10 px-4 py-3">
+        <svg
+          className="mt-0.5 h-5 w-5 shrink-0 text-warning"
+          viewBox="0 0 20 20"
+          fill="currentColor"
+        >
+          <path
+            fillRule="evenodd"
+            d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.168 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 9a1 1 0 100-2 1 1 0 000 2z"
+            clipRule="evenodd"
+          />
+        </svg>
+        <p className="text-sm text-warning">
+          This is the main administrator account. You can create additional users later.
+        </p>
+      </div>
+
+      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+        <Input
+          label="Username"
+          type="text"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          placeholder="admin"
+          autoComplete="username"
+          error={errors.username}
+          required
+        />
+
+        <Input
+          label="Display Name"
+          type="text"
+          value={displayName}
+          onChange={(e) => setDisplayName(e.target.value)}
+          placeholder="Optional"
+          hint="A friendly name shown in the UI"
+        />
+
+        <Input
+          label="Password"
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="Minimum 8 characters"
+          autoComplete="new-password"
+          error={errors.password}
+          required
+        />
+
+        <Input
+          label="Confirm Password"
+          type="password"
+          value={confirmPassword}
+          onChange={(e) => setConfirmPassword(e.target.value)}
+          placeholder="Re-enter password"
+          autoComplete="new-password"
+          error={errors.confirmPassword}
+          required
+        />
+
+        {serverError && (
+          <p className="rounded-[--radius-sm] bg-error/10 px-3 py-2 text-sm text-error">
+            {serverError}
+          </p>
+        )}
+
+        <div className="mt-2 flex justify-end">
+          <Button
+            type="submit"
+            size="lg"
+            isLoading={createAdmin.isPending}
+          >
+            Create Account & Continue
+          </Button>
+        </div>
+      </form>
+    </div>
+  );
+}
