@@ -108,8 +108,8 @@ func (s *Service) DetectCapabilities() *SystemCapabilities {
 	caps.FFmpegPath = ffmpegPath
 	caps.FFmpegFound = true
 
-	// Detect hardware accelerators
-	out, err := exec.Command("ffmpeg", "-hwaccels").CombinedOutput()
+	// Detect hardware accelerators (stdout only — stderr has the version banner)
+	out, err := exec.Command("ffmpeg", "-hwaccels").Output()
 	if err != nil {
 		s.logger.Warn("failed to query ffmpeg hardware accelerators", "error", err)
 		return caps
