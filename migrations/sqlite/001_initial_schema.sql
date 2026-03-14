@@ -283,14 +283,17 @@ CREATE INDEX idx_activity_user ON activity_log(user_id);
 CREATE INDEX idx_activity_type ON activity_log(type);
 CREATE INDEX idx_activity_date ON activity_log(created_at);
 
--- Plugins & Webhooks
-CREATE TABLE plugin_state (
-    name       TEXT PRIMARY KEY,
-    version    TEXT NOT NULL,
-    status     TEXT NOT NULL DEFAULT 'active',
-    provides   TEXT,
+-- Providers & Webhooks
+CREATE TABLE providers (
+    name        TEXT PRIMARY KEY,
+    type        TEXT NOT NULL DEFAULT 'metadata',
+    version     TEXT NOT NULL DEFAULT '1.0',
+    status      TEXT NOT NULL DEFAULT 'active',
+    priority    INTEGER NOT NULL DEFAULT 100,
     config_json TEXT,
-    installed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    api_key     TEXT,
+    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE webhook_configs (
@@ -322,7 +325,7 @@ CREATE INDEX idx_webhook_log_webhook ON webhook_log(webhook_id);
 -- +goose Down
 DROP TABLE IF EXISTS webhook_log;
 DROP TABLE IF EXISTS webhook_configs;
-DROP TABLE IF EXISTS plugin_state;
+DROP TABLE IF EXISTS providers;
 DROP TABLE IF EXISTS activity_log;
 DROP TABLE IF EXISTS user_data;
 DROP TABLE IF EXISTS epg_programs;

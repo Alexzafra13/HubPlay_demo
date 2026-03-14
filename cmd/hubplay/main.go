@@ -22,6 +22,7 @@ import (
 	"hubplay/internal/logging"
 	"hubplay/internal/iptv"
 	"hubplay/internal/probe"
+	"hubplay/internal/provider"
 	"hubplay/internal/scanner"
 	"hubplay/internal/stream"
 	"hubplay/internal/user"
@@ -95,6 +96,11 @@ func run(configPath string) error {
 	iptvService := iptv.NewService(repos.Channels, repos.EPGPrograms, repos.Libraries, logger)
 	iptvProxy := iptv.NewStreamProxy(logger)
 
+	// ═══ Phase 4d: Providers (TMDb, OpenSubtitles) ═══
+	providerManager := provider.NewManager(repos.Providers, logger)
+	_ = providerManager.Register(ctx, provider.NewTMDbProvider())
+	_ = providerManager.Register(ctx, provider.NewOpenSubtitlesProvider())
+
 	// ═══ Phase 5: HTTP Server ═══
 	router := api.NewRouter(api.Dependencies{
 		Auth:          authService,
@@ -106,6 +112,8 @@ func run(configPath string) error {
 		Items:         repos.Items,
 		MediaStreams:   repos.MediaStreams,
 		UserData:      repos.UserData,
+		Providers:     providerManager,
+		ProviderRepo:  repos.Providers,
 		Config:        cfg,
 		Logger:        logger,
 	})

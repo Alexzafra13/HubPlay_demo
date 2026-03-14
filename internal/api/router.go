@@ -14,6 +14,7 @@ import (
 	"hubplay/internal/db"
 	"hubplay/internal/iptv"
 	"hubplay/internal/library"
+	"hubplay/internal/provider"
 	"hubplay/internal/stream"
 	"hubplay/internal/user"
 )
@@ -28,6 +29,8 @@ type Dependencies struct {
 	Items          *db.ItemRepository
 	MediaStreams    *db.MediaStreamRepository
 	UserData       *db.UserDataRepository
+	Providers      *provider.Manager
+	ProviderRepo   *db.ProviderRepository
 	Config         *config.Config
 	Logger         *slog.Logger
 }
@@ -176,6 +179,23 @@ func NewRouter(deps Dependencies) http.Handler {
 				r.Route("/items/{id}", func(r chi.Router) {
 					r.Get("/", itemHandler.Get)
 					r.Get("/children", itemHandler.Children)
+				})
+			}
+
+			// Providers (metadata, images, subtitles)
+			if deps.Providers != nil {
+				providerHandler := handlers.NewProviderHandler(deps.Providers, deps.ProviderRepo, deps.Logger)
+
+				r.Get("/providers/search/metadata", providerHandler.SearchMetadata)
+				r.Get("/providers/metadata/{externalId}", providerHandler.GetMetadata)
+				r.Get("/providers/images", providerHandler.GetImages)
+				r.Get("/providers/search/subtitles", providerHandler.SearchSubtitles)
+
+				// Admin provider management
+				r.Group(func(r chi.Router) {
+					r.Use(auth.RequireAdmin)
+					r.Get("/providers", providerHandler.List)
+					r.Put("/providers/{name}", providerHandler.Update)
 				})
 			}
 		})
