@@ -68,7 +68,7 @@ func (s *Service) BrowseDirectories(path string) (*BrowseResult, error) {
 		return nil, fmt.Errorf("reading directory: %w", err)
 	}
 
-	var dirs []DirEntry
+	dirs := make([]DirEntry, 0)
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
