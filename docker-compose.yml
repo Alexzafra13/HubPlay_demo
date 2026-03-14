@@ -8,8 +8,7 @@ services:
       - ./config:/config
       - ./cache:/cache
       # Map your media folders here:
-      # - /path/to/movies:/media/movies:ro
-      # - /path/to/tv:/media/tv:ro
+      - /mnt/media:/mnt/media:ro
     environment:
       - TZ=Europe/Madrid
     restart: unless-stopped
