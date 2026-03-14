@@ -179,6 +179,7 @@ export interface HealthResponse {
 
 export interface SetupStatus {
   needs_setup: boolean;
+  current_step: "account" | "libraries" | "settings" | "complete" | "";
 }
 
 export interface BrowseDirectory {

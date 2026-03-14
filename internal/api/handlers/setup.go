@@ -9,12 +9,14 @@ import (
 	"hubplay/internal/config"
 	"hubplay/internal/library"
 	"hubplay/internal/setup"
+	"hubplay/internal/user"
 )
 
 type SetupHandler struct {
 	setup  *setup.Service
 	auth   *auth.Service
 	libs   *library.Service
+	users  *user.Service
 	config *config.Config
 	logger *slog.Logger
 }
@@ -23,6 +25,7 @@ func NewSetupHandler(
 	setupSvc *setup.Service,
 	authSvc *auth.Service,
 	libSvc *library.Service,
+	userSvc *user.Service,
 	cfg *config.Config,
 	logger *slog.Logger,
 ) *SetupHandler {
@@ -30,16 +33,53 @@ func NewSetupHandler(
 		setup:  setupSvc,
 		auth:   authSvc,
 		libs:   libSvc,
+		users:  userSvc,
 		config: cfg,
 		logger: logger,
 	}
 }
 
-// Status returns whether initial setup is needed.
+// Status returns setup state including the current step so the wizard
+// can resume from where it was interrupted (similar to Jellyfin's approach).
+// Steps: "account" → "libraries" → "settings" → "complete" → "" (done).
 func (h *SetupHandler) Status(w http.ResponseWriter, r *http.Request) {
+	needsSetup := h.setup.NeedsSetup(r.Context())
+
+	if !needsSetup {
+		respondJSON(w, http.StatusOK, map[string]any{
+			"data": map[string]any{
+				"needs_setup":  false,
+				"current_step": "",
+			},
+		})
+		return
+	}
+
+	// Determine which step the user is on based on actual state.
+	step := "account"
+
+	userCount, err := h.users.Count(r.Context())
+	if err != nil {
+		h.logger.Warn("setup status: failed to count users", "error", err)
+	}
+
+	if userCount > 0 {
+		step = "libraries"
+
+		libs, err := h.libs.List(r.Context())
+		if err != nil {
+			h.logger.Warn("setup status: failed to list libraries", "error", err)
+		}
+
+		if len(libs) > 0 {
+			step = "settings"
+		}
+	}
+
 	respondJSON(w, http.StatusOK, map[string]any{
 		"data": map[string]any{
-			"needs_setup": h.setup.NeedsSetup(r.Context()),
+			"needs_setup":  true,
+			"current_step": step,
 		},
 	})
 }
