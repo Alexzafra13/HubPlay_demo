@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -24,6 +25,7 @@ import (
 	"hubplay/internal/probe"
 	"hubplay/internal/provider"
 	"hubplay/internal/scanner"
+	"hubplay/internal/setup"
 	"hubplay/internal/stream"
 	"hubplay/internal/user"
 )
@@ -102,7 +104,12 @@ func run(configPath string) error {
 	_ = providerManager.Register(ctx, provider.NewTMDbProvider())
 	_ = providerManager.Register(ctx, provider.NewOpenSubtitlesProvider())
 
+	// ═══ Phase 4e: Setup Service ═══
+	setupService := setup.NewService(cfg, logger)
+
 	// ═══ Phase 5: HTTP Server ═══
+	webFS, _ := fs.Sub(hubplay.WebAssets, "web/dist")
+
 	router := api.NewRouter(api.Dependencies{
 		Auth:          authService,
 		Users:         userService,
@@ -115,6 +122,8 @@ func run(configPath string) error {
 		UserData:      repos.UserData,
 		Providers:     providerManager,
 		ProviderRepo:  repos.Providers,
+		SetupService:  setupService,
+		WebAssets:     webFS,
 		Config:        cfg,
 		Logger:        logger,
 	})

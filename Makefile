@@ -1,21 +1,33 @@
-.PHONY: build run dev test lint clean sqlc migrate
+.PHONY: build run dev test lint clean sqlc migrate web web-dev
 
 # Binary name
 BINARY=hubplay
 VERSION?=dev
 LDFLAGS=-ldflags "-X main.version=$(VERSION)"
 
-## build: Build the binary
-build:
+## build: Build frontend + backend binary
+build: web
+	go build $(LDFLAGS) -o bin/$(BINARY) ./cmd/hubplay
+
+## build-go: Build only Go backend (assumes web/dist exists)
+build-go:
 	go build $(LDFLAGS) -o bin/$(BINARY) ./cmd/hubplay
 
 ## run: Build and run
 run: build
 	./bin/$(BINARY) --config hubplay.example.yaml
 
-## dev: Run with hot-reload (requires air)
+## dev: Run Go backend with hot-reload (requires air)
 dev:
 	air -- --config hubplay.example.yaml
+
+## web: Build frontend for production
+web:
+	cd web && npm install && npm run build
+
+## web-dev: Start frontend dev server with HMR
+web-dev:
+	cd web && npm run dev
 
 ## test: Run all tests
 test:
@@ -40,7 +52,7 @@ sqlc-check:
 
 ## clean: Remove build artifacts
 clean:
-	rm -rf bin/ coverage.out coverage.html
+	rm -rf bin/ coverage.out coverage.html web/dist
 
 ## docker: Build Docker image
 docker:

@@ -18,12 +18,13 @@ import (
 )
 
 type Config struct {
-	Server    ServerConfig    `yaml:"server"`
-	Database  DatabaseConfig  `yaml:"database"`
-	Auth      AuthConfig      `yaml:"auth"`
-	Logging   logging.Config  `yaml:"logging"`
-	RateLimit RateLimitConfig `yaml:"rate_limit"`
-	Streaming StreamingConfig `yaml:"streaming"`
+	Server         ServerConfig    `yaml:"server"`
+	Database       DatabaseConfig  `yaml:"database"`
+	Auth           AuthConfig      `yaml:"auth"`
+	Logging        logging.Config  `yaml:"logging"`
+	RateLimit      RateLimitConfig `yaml:"rate_limit"`
+	Streaming      StreamingConfig `yaml:"streaming"`
+	SetupCompleted bool            `yaml:"setup_completed"`
 }
 
 type StreamingConfig struct {

@@ -1,8 +1,11 @@
 bin/
-hubplay
+/hubplay
 *.db
 *.db-wal
 *.db-shm
 coverage.out
 coverage.html
 .env
+
+# Frontend
+web/node_modules/
