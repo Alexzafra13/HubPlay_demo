@@ -12,6 +12,7 @@ import Series from "@/pages/Series";
 import ItemDetail from "@/pages/ItemDetail";
 import Search from "@/pages/Search";
 import LiveTV from "@/pages/LiveTV";
+import Settings from "@/pages/Settings";
 import NotFound from "@/pages/NotFound";
 import SetupWizard from "@/pages/setup/SetupWizard";
 import AdminLayout from "@/pages/admin/AdminLayout";
@@ -72,6 +73,7 @@ export function App() {
           <Route path="items/:id" element={<ItemDetail />} />
           <Route path="search" element={<Search />} />
           <Route path="live-tv" element={<LiveTV />} />
+          <Route path="settings" element={<Settings />} />
 
           {/* Admin routes */}
           <Route
