@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/go-chi/chi/v5"
+
 	"hubplay/internal/auth"
 	"hubplay/internal/user"
 )
@@ -76,4 +78,27 @@ func (h *UserHandler) List(w http.ResponseWriter, r *http.Request) {
 		"data":  items,
 		"total": total,
 	})
+}
+
+// Delete removes a user by ID (admin only).
+func (h *UserHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		respondError(w, http.StatusBadRequest, "BAD_REQUEST", "missing user id")
+		return
+	}
+
+	// Prevent self-deletion
+	claims := auth.GetClaims(r.Context())
+	if claims != nil && claims.UserID == id {
+		respondError(w, http.StatusBadRequest, "BAD_REQUEST", "cannot delete your own account")
+		return
+	}
+
+	if err := h.users.Delete(r.Context(), id); err != nil {
+		handleServiceError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }

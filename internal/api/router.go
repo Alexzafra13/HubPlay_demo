@@ -101,6 +101,7 @@ func NewRouter(deps Dependencies) http.Handler {
 				r.Use(auth.RequireAdmin)
 				r.Get("/", userHandler.List)
 				r.Post("/", authHandler.Register)
+				r.Delete("/{id}", userHandler.Delete)
 			})
 
 			// Watch Progress & User Engagement
