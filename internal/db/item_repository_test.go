@@ -260,6 +260,129 @@ func TestItemRepository_CountByLibrary(t *testing.T) {
 	}
 }
 
+func TestItemRepository_List_FTSSearch(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	libRepo := db.NewLibraryRepository(database)
+	repo := db.NewItemRepository(database)
+	seedLibraryForItems(t, libRepo)
+
+	repo.Create(context.Background(), newTestItem("m1", "lib-1", "The Matrix"))
+	repo.Create(context.Background(), newTestItem("m2", "lib-1", "Breaking Bad"))
+	repo.Create(context.Background(), newTestItem("m3", "lib-1", "The Matrix Reloaded"))
+
+	// Search for "matrix" should find 2 results
+	items, total, err := repo.List(context.Background(), db.ItemFilter{Query: "matrix"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if total != 2 {
+		t.Errorf("expected 2 results for 'matrix', got %d", total)
+	}
+	if len(items) != 2 {
+		t.Errorf("expected 2 items, got %d", len(items))
+	}
+}
+
+func TestItemRepository_List_FTSSearch_NoResults(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	libRepo := db.NewLibraryRepository(database)
+	repo := db.NewItemRepository(database)
+	seedLibraryForItems(t, libRepo)
+
+	repo.Create(context.Background(), newTestItem("m1", "lib-1", "The Matrix"))
+
+	items, total, err := repo.List(context.Background(), db.ItemFilter{Query: "nonexistent"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if total != 0 {
+		t.Errorf("expected 0 results, got %d", total)
+	}
+	if len(items) != 0 {
+		t.Errorf("expected 0 items, got %d", len(items))
+	}
+}
+
+func TestItemRepository_List_FTSSearch_PrefixMatch(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	libRepo := db.NewLibraryRepository(database)
+	repo := db.NewItemRepository(database)
+	seedLibraryForItems(t, libRepo)
+
+	repo.Create(context.Background(), newTestItem("m1", "lib-1", "Breaking Bad"))
+	repo.Create(context.Background(), newTestItem("m2", "lib-1", "Breakfast Club"))
+
+	// Prefix "break" should match both
+	items, total, err := repo.List(context.Background(), db.ItemFilter{Query: "break"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if total != 2 {
+		t.Errorf("expected 2 results for prefix 'break', got %d", total)
+	}
+	if len(items) != 2 {
+		t.Errorf("expected 2 items, got %d", len(items))
+	}
+}
+
+func TestItemRepository_List_FTSSearch_AfterUpdate(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	libRepo := db.NewLibraryRepository(database)
+	repo := db.NewItemRepository(database)
+	seedLibraryForItems(t, libRepo)
+
+	item := newTestItem("m1", "lib-1", "Old Title")
+	repo.Create(context.Background(), item)
+
+	// Should find with old title
+	items, _, _ := repo.List(context.Background(), db.ItemFilter{Query: "Old"})
+	if len(items) != 1 {
+		t.Fatalf("expected 1 result for 'Old', got %d", len(items))
+	}
+
+	// Update title
+	item.Title = "New Title"
+	item.SortTitle = "new title"
+	item.UpdatedAt = time.Now()
+	repo.Update(context.Background(), item)
+
+	// Old title should not match
+	items, _, _ = repo.List(context.Background(), db.ItemFilter{Query: "Old"})
+	if len(items) != 0 {
+		t.Errorf("expected 0 results for 'Old' after update, got %d", len(items))
+	}
+
+	// New title should match
+	items, _, _ = repo.List(context.Background(), db.ItemFilter{Query: "New"})
+	if len(items) != 1 {
+		t.Errorf("expected 1 result for 'New' after update, got %d", len(items))
+	}
+}
+
+func TestItemRepository_List_FTSSearch_AfterDelete(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	libRepo := db.NewLibraryRepository(database)
+	repo := db.NewItemRepository(database)
+	seedLibraryForItems(t, libRepo)
+
+	item := newTestItem("m1", "lib-1", "Delete Me")
+	repo.Create(context.Background(), item)
+
+	// Should find before delete
+	items, _, _ := repo.List(context.Background(), db.ItemFilter{Query: "Delete"})
+	if len(items) != 1 {
+		t.Fatalf("expected 1 result before delete, got %d", len(items))
+	}
+
+	repo.Delete(context.Background(), "m1")
+
+	// Should not find after delete
+	items, _, _ = repo.List(context.Background(), db.ItemFilter{Query: "Delete"})
+	if len(items) != 0 {
+		t.Errorf("expected 0 results after delete, got %d", len(items))
+	}
+}
+
 func TestItemRepository_LatestItems(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	libRepo := db.NewLibraryRepository(database)

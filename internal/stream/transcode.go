@@ -63,7 +63,7 @@ func (t *Transcoder) Start(sessionID, itemID, inputPath string, profile Profile,
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	args := buildFFmpegArgs(inputPath, outputDir, profile, startTime)
+	args := BuildFFmpegArgs(inputPath, outputDir, profile, startTime)
 	cmd := exec.CommandContext(ctx, t.ffmpeg, args...)
 	cmd.Dir = outputDir
 
@@ -171,7 +171,8 @@ func (s *Session) SegmentPath(index int) string {
 	return filepath.Join(s.OutputDir, fmt.Sprintf("segment%05d.ts", index))
 }
 
-func buildFFmpegArgs(input, outputDir string, profile Profile, startTime float64) []string {
+// BuildFFmpegArgs constructs FFmpeg arguments for HLS transcoding.
+func BuildFFmpegArgs(input, outputDir string, profile Profile, startTime float64) []string {
 	manifestPath := filepath.Join(outputDir, "stream.m3u8")
 	segmentPattern := filepath.Join(outputDir, "segment%05d.ts")
 
