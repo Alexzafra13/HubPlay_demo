@@ -14,7 +14,7 @@ RUN pnpm run build
 # ═══════════════════════════════════════════
 # Stage 2: Build backend
 # ═══════════════════════════════════════════
-FROM golang:1.22-bookworm AS backend
+FROM golang:1.24-bookworm AS backend
 
 WORKDIR /src
 COPY go.mod go.sum ./
