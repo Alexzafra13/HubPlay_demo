@@ -51,6 +51,7 @@ func run(configPath string) error {
 	}
 
 	logger := logging.New(cfg.Logging)
+	slog.SetDefault(logger)
 	clk := clock.New()
 
 	logger.Info("starting HubPlay", "version", version, "addr", cfg.Server.Addr())
