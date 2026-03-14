@@ -276,9 +276,10 @@ export class ApiClient {
   }
 
   async getLatestItems(libraryId?: string, limit?: number): Promise<MediaItem[]> {
-    return this.request<MediaItem[]>("GET", "/items/latest", {
+    const resp = await this.request<PaginatedResponse<MediaItem>>("GET", "/items/latest", {
       params: { library_id: libraryId, limit },
     });
+    return resp.items ?? [];
   }
 
   // ─── Progress / User Data ─────────────────────────────────────────────

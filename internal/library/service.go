@@ -212,8 +212,8 @@ func (s *Service) GetItemImages(ctx context.Context, itemID string) ([]*db.Image
 	return s.images.ListByItem(ctx, itemID)
 }
 
-func (s *Service) LatestItems(ctx context.Context, libraryID string, limit int) ([]*db.Item, error) {
-	return s.items.LatestItems(ctx, libraryID, limit)
+func (s *Service) LatestItems(ctx context.Context, libraryID string, itemType string, limit int) ([]*db.Item, error) {
+	return s.items.LatestItems(ctx, libraryID, itemType, limit)
 }
 
 func (s *Service) ItemCount(ctx context.Context, libraryID string) (int, error) {

@@ -148,16 +148,21 @@ func (h *LibraryHandler) Items(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondJSON(w, http.StatusOK, map[string]any{
-		"data":  data,
-		"total": total,
+		"data": map[string]any{
+			"items":  data,
+			"total":  total,
+			"offset": offset,
+			"limit":  limit,
+		},
 	})
 }
 
 func (h *LibraryHandler) LatestItems(w http.ResponseWriter, r *http.Request) {
 	libraryID := r.URL.Query().Get("library_id")
+	itemType := r.URL.Query().Get("type")
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 
-	items, err := h.lib.LatestItems(r.Context(), libraryID, limit)
+	items, err := h.lib.LatestItems(r.Context(), libraryID, itemType, limit)
 	if err != nil {
 		handleServiceError(w, err)
 		return
@@ -168,7 +173,14 @@ func (h *LibraryHandler) LatestItems(w http.ResponseWriter, r *http.Request) {
 		data[i] = itemSummaryResponse(item)
 	}
 
-	respondJSON(w, http.StatusOK, map[string]any{"data": data})
+	respondJSON(w, http.StatusOK, map[string]any{
+		"data": map[string]any{
+			"items":  data,
+			"total":  len(items),
+			"offset": 0,
+			"limit":  limit,
+		},
+	})
 }
 
 func libraryResponse(lib *db.Library) map[string]any {

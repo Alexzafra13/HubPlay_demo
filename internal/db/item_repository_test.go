@@ -447,7 +447,7 @@ func TestItemRepository_LatestItems(t *testing.T) {
 		}
 	}
 
-	items, err := repo.LatestItems(context.Background(), "lib-1", 2)
+	items, err := repo.LatestItems(context.Background(), "lib-1", "", 2)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
