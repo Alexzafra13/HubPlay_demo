@@ -66,8 +66,12 @@ func TestLibraryRepository_List(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	repo := db.NewLibraryRepository(database)
 
-	repo.Create(context.Background(), newTestLibrary("lib-a", "Anime"))
-	repo.Create(context.Background(), newTestLibrary("lib-m", "Movies"))
+	if err := repo.Create(context.Background(), newTestLibrary("lib-a", "Anime")); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Create(context.Background(), newTestLibrary("lib-m", "Movies")); err != nil {
+		t.Fatal(err)
+	}
 
 	libs, err := repo.List(context.Background())
 	if err != nil {
@@ -87,7 +91,9 @@ func TestLibraryRepository_Update(t *testing.T) {
 	repo := db.NewLibraryRepository(database)
 
 	lib := newTestLibrary("lib-1", "Movies")
-	repo.Create(context.Background(), lib)
+	if err := repo.Create(context.Background(), lib); err != nil {
+		t.Fatal(err)
+	}
 
 	lib.Name = "Updated Movies"
 	lib.Paths = []string{"/new/path"}
@@ -122,7 +128,9 @@ func TestLibraryRepository_Delete(t *testing.T) {
 	repo := db.NewLibraryRepository(database)
 
 	lib := newTestLibrary("lib-del", "Delete Me")
-	repo.Create(context.Background(), lib)
+	if err := repo.Create(context.Background(), lib); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := repo.Delete(context.Background(), "lib-del"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -150,17 +158,23 @@ func TestLibraryRepository_Access(t *testing.T) {
 	userRepo := db.NewUserRepository(database)
 
 	// Seed a user
-	userRepo.Create(context.Background(), &db.User{
+	if err := userRepo.Create(context.Background(), &db.User{
 		ID: "user-1", Username: "alice", DisplayName: "Alice",
 		PasswordHash: "$2a$10$fakehash", Role: "user", IsActive: true,
 		CreatedAt: time.Now(),
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	lib1 := newTestLibrary("lib-1", "Movies")
 	lib2 := newTestLibrary("lib-2", "Shows")
 	lib2.ContentType = "shows"
-	libRepo.Create(context.Background(), lib1)
-	libRepo.Create(context.Background(), lib2)
+	if err := libRepo.Create(context.Background(), lib1); err != nil {
+		t.Fatal(err)
+	}
+	if err := libRepo.Create(context.Background(), lib2); err != nil {
+		t.Fatal(err)
+	}
 
 	// No access restrictions: user sees all libraries
 	libs, err := libRepo.ListForUser(context.Background(), "user-1")

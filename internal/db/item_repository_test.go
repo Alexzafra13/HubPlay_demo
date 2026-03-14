@@ -14,10 +14,12 @@ import (
 func seedLibraryForItems(t *testing.T, repo *db.LibraryRepository) {
 	t.Helper()
 	now := time.Now()
-	repo.Create(context.Background(), &db.Library{
+	if err := repo.Create(context.Background(), &db.Library{
 		ID: "lib-1", Name: "Movies", ContentType: "movies", ScanMode: "auto",
 		ScanInterval: "6h", CreatedAt: now, UpdatedAt: now, Paths: []string{"/media"},
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func newTestItem(id, libraryID, title string) *db.Item {
@@ -82,7 +84,9 @@ func TestItemRepository_GetByPath(t *testing.T) {
 	seedLibraryForItems(t, libRepo)
 
 	item := newTestItem("item-p", "lib-1", "PathTest")
-	repo.Create(context.Background(), item)
+	if err := repo.Create(context.Background(), item); err != nil {
+		t.Fatal(err)
+	}
 
 	got, err := repo.GetByPath(context.Background(), item.Path)
 	if err != nil {
@@ -99,9 +103,15 @@ func TestItemRepository_List(t *testing.T) {
 	repo := db.NewItemRepository(database)
 	seedLibraryForItems(t, libRepo)
 
-	repo.Create(context.Background(), newTestItem("m1", "lib-1", "Alpha"))
-	repo.Create(context.Background(), newTestItem("m2", "lib-1", "Beta"))
-	repo.Create(context.Background(), newTestItem("m3", "lib-1", "Gamma"))
+	if err := repo.Create(context.Background(), newTestItem("m1", "lib-1", "Alpha")); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Create(context.Background(), newTestItem("m2", "lib-1", "Beta")); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Create(context.Background(), newTestItem("m3", "lib-1", "Gamma")); err != nil {
+		t.Fatal(err)
+	}
 
 	items, total, err := repo.List(context.Background(), db.ItemFilter{LibraryID: "lib-1", Limit: 2})
 	if err != nil {
@@ -127,12 +137,16 @@ func TestItemRepository_List_ByType(t *testing.T) {
 
 	movie := newTestItem("m1", "lib-1", "Movie1")
 	movie.Type = "movie"
-	repo.Create(context.Background(), movie)
+	if err := repo.Create(context.Background(), movie); err != nil {
+		t.Fatal(err)
+	}
 
 	series := newTestItem("s1", "lib-1", "Series1")
 	series.Type = "series"
 	series.Path = "/media/s1"
-	repo.Create(context.Background(), series)
+	if err := repo.Create(context.Background(), series); err != nil {
+		t.Fatal(err)
+	}
 
 	items, total, err := repo.List(context.Background(), db.ItemFilter{Type: "movie"})
 	if err != nil {
@@ -157,7 +171,9 @@ func TestItemRepository_Hierarchy(t *testing.T) {
 		ID: "series-1", LibraryID: "lib-1", Type: "series", Title: "Breaking Bad",
 		SortTitle: "breaking bad", AddedAt: time.Now(), UpdatedAt: time.Now(), IsAvailable: true,
 	}
-	repo.Create(context.Background(), series)
+	if err := repo.Create(context.Background(), series); err != nil {
+		t.Fatal(err)
+	}
 
 	season := &db.Item{
 		ID: "season-1", LibraryID: "lib-1", ParentID: "series-1", Type: "season",
@@ -166,7 +182,9 @@ func TestItemRepository_Hierarchy(t *testing.T) {
 	}
 	sn := 1
 	season.SeasonNumber = &sn
-	repo.Create(context.Background(), season)
+	if err := repo.Create(context.Background(), season); err != nil {
+		t.Fatal(err)
+	}
 
 	ep1 := &db.Item{
 		ID: "ep-1", LibraryID: "lib-1", ParentID: "season-1", Type: "episode",
@@ -175,7 +193,9 @@ func TestItemRepository_Hierarchy(t *testing.T) {
 	}
 	en := 1
 	ep1.EpisodeNumber = &en
-	repo.Create(context.Background(), ep1)
+	if err := repo.Create(context.Background(), ep1); err != nil {
+		t.Fatal(err)
+	}
 
 	ep2 := &db.Item{
 		ID: "ep-2", LibraryID: "lib-1", ParentID: "season-1", Type: "episode",
@@ -184,7 +204,9 @@ func TestItemRepository_Hierarchy(t *testing.T) {
 	}
 	en2 := 2
 	ep2.EpisodeNumber = &en2
-	repo.Create(context.Background(), ep2)
+	if err := repo.Create(context.Background(), ep2); err != nil {
+		t.Fatal(err)
+	}
 
 	// Get children of season
 	children, err := repo.GetChildren(context.Background(), "season-1")
@@ -207,7 +229,9 @@ func TestItemRepository_Update(t *testing.T) {
 	seedLibraryForItems(t, libRepo)
 
 	item := newTestItem("item-upd", "lib-1", "Old Title")
-	repo.Create(context.Background(), item)
+	if err := repo.Create(context.Background(), item); err != nil {
+		t.Fatal(err)
+	}
 
 	item.Title = "New Title"
 	item.SortTitle = "new title"
@@ -230,7 +254,9 @@ func TestItemRepository_Delete(t *testing.T) {
 	seedLibraryForItems(t, libRepo)
 
 	item := newTestItem("item-del", "lib-1", "Delete Me")
-	repo.Create(context.Background(), item)
+	if err := repo.Create(context.Background(), item); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := repo.Delete(context.Background(), "item-del"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -248,8 +274,12 @@ func TestItemRepository_CountByLibrary(t *testing.T) {
 	repo := db.NewItemRepository(database)
 	seedLibraryForItems(t, libRepo)
 
-	repo.Create(context.Background(), newTestItem("c1", "lib-1", "A"))
-	repo.Create(context.Background(), newTestItem("c2", "lib-1", "B"))
+	if err := repo.Create(context.Background(), newTestItem("c1", "lib-1", "A")); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Create(context.Background(), newTestItem("c2", "lib-1", "B")); err != nil {
+		t.Fatal(err)
+	}
 
 	count, err := repo.CountByLibrary(context.Background(), "lib-1")
 	if err != nil {
@@ -266,9 +296,15 @@ func TestItemRepository_List_FTSSearch(t *testing.T) {
 	repo := db.NewItemRepository(database)
 	seedLibraryForItems(t, libRepo)
 
-	repo.Create(context.Background(), newTestItem("m1", "lib-1", "The Matrix"))
-	repo.Create(context.Background(), newTestItem("m2", "lib-1", "Breaking Bad"))
-	repo.Create(context.Background(), newTestItem("m3", "lib-1", "The Matrix Reloaded"))
+	if err := repo.Create(context.Background(), newTestItem("m1", "lib-1", "The Matrix")); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Create(context.Background(), newTestItem("m2", "lib-1", "Breaking Bad")); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Create(context.Background(), newTestItem("m3", "lib-1", "The Matrix Reloaded")); err != nil {
+		t.Fatal(err)
+	}
 
 	// Search for "matrix" should find 2 results
 	items, total, err := repo.List(context.Background(), db.ItemFilter{Query: "matrix"})
@@ -289,7 +325,9 @@ func TestItemRepository_List_FTSSearch_NoResults(t *testing.T) {
 	repo := db.NewItemRepository(database)
 	seedLibraryForItems(t, libRepo)
 
-	repo.Create(context.Background(), newTestItem("m1", "lib-1", "The Matrix"))
+	if err := repo.Create(context.Background(), newTestItem("m1", "lib-1", "The Matrix")); err != nil {
+		t.Fatal(err)
+	}
 
 	items, total, err := repo.List(context.Background(), db.ItemFilter{Query: "nonexistent"})
 	if err != nil {
@@ -309,8 +347,12 @@ func TestItemRepository_List_FTSSearch_PrefixMatch(t *testing.T) {
 	repo := db.NewItemRepository(database)
 	seedLibraryForItems(t, libRepo)
 
-	repo.Create(context.Background(), newTestItem("m1", "lib-1", "Breaking Bad"))
-	repo.Create(context.Background(), newTestItem("m2", "lib-1", "Breakfast Club"))
+	if err := repo.Create(context.Background(), newTestItem("m1", "lib-1", "Breaking Bad")); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Create(context.Background(), newTestItem("m2", "lib-1", "Breakfast Club")); err != nil {
+		t.Fatal(err)
+	}
 
 	// Prefix "break" should match both
 	items, total, err := repo.List(context.Background(), db.ItemFilter{Query: "break"})
@@ -332,7 +374,9 @@ func TestItemRepository_List_FTSSearch_AfterUpdate(t *testing.T) {
 	seedLibraryForItems(t, libRepo)
 
 	item := newTestItem("m1", "lib-1", "Old Title")
-	repo.Create(context.Background(), item)
+	if err := repo.Create(context.Background(), item); err != nil {
+		t.Fatal(err)
+	}
 
 	// Should find with old title
 	items, _, _ := repo.List(context.Background(), db.ItemFilter{Query: "Old"})
@@ -344,7 +388,9 @@ func TestItemRepository_List_FTSSearch_AfterUpdate(t *testing.T) {
 	item.Title = "New Title"
 	item.SortTitle = "new title"
 	item.UpdatedAt = time.Now()
-	repo.Update(context.Background(), item)
+	if err := repo.Update(context.Background(), item); err != nil {
+		t.Fatal(err)
+	}
 
 	// Old title should not match
 	items, _, _ = repo.List(context.Background(), db.ItemFilter{Query: "Old"})
@@ -366,7 +412,9 @@ func TestItemRepository_List_FTSSearch_AfterDelete(t *testing.T) {
 	seedLibraryForItems(t, libRepo)
 
 	item := newTestItem("m1", "lib-1", "Delete Me")
-	repo.Create(context.Background(), item)
+	if err := repo.Create(context.Background(), item); err != nil {
+		t.Fatal(err)
+	}
 
 	// Should find before delete
 	items, _, _ := repo.List(context.Background(), db.ItemFilter{Query: "Delete"})
@@ -374,7 +422,9 @@ func TestItemRepository_List_FTSSearch_AfterDelete(t *testing.T) {
 		t.Fatalf("expected 1 result before delete, got %d", len(items))
 	}
 
-	repo.Delete(context.Background(), "m1")
+	if err := repo.Delete(context.Background(), "m1"); err != nil {
+		t.Fatal(err)
+	}
 
 	// Should not find after delete
 	items, _, _ = repo.List(context.Background(), db.ItemFilter{Query: "Delete"})
@@ -392,7 +442,9 @@ func TestItemRepository_LatestItems(t *testing.T) {
 	for i, title := range []string{"First", "Second", "Third"} {
 		item := newTestItem(title, "lib-1", title)
 		item.AddedAt = time.Now().Add(time.Duration(i) * time.Minute)
-		repo.Create(context.Background(), item)
+		if err := repo.Create(context.Background(), item); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	items, err := repo.LatestItems(context.Background(), "lib-1", 2)

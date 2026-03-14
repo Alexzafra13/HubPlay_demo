@@ -334,7 +334,7 @@ func fingerprint(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("open %q: %w", path, err)
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	h := sha256.New()
 	// Hash first 64KB for speed

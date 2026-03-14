@@ -241,7 +241,7 @@ func (r *ItemRepository) List(ctx context.Context, filter ItemFilter) ([]*Item, 
 	if err != nil {
 		return nil, 0, fmt.Errorf("list items: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	var items []*Item
 	for rows.Next() {
@@ -345,7 +345,7 @@ func (r *ItemRepository) GetChildren(ctx context.Context, parentID string) ([]*I
 	if err != nil {
 		return nil, fmt.Errorf("get children: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	var items []*Item
 	for rows.Next() {
@@ -407,7 +407,7 @@ func (r *ItemRepository) LatestItems(ctx context.Context, libraryID string, limi
 	if err != nil {
 		return nil, fmt.Errorf("latest items: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	var items []*Item
 	for rows.Next() {

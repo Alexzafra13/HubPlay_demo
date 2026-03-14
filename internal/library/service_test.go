@@ -109,12 +109,16 @@ func TestService_GetByID_NotFound(t *testing.T) {
 func TestService_List(t *testing.T) {
 	svc := newTestLibraryService(t)
 
-	svc.Create(context.Background(), library.CreateRequest{
+	if _, err := svc.Create(context.Background(), library.CreateRequest{
 		Name: "Movies", ContentType: "movies", Paths: []string{"/a"},
-	})
-	svc.Create(context.Background(), library.CreateRequest{
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Create(context.Background(), library.CreateRequest{
 		Name: "Shows", ContentType: "shows", Paths: []string{"/b"},
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	libs, err := svc.List(context.Background())
 	if err != nil {

@@ -57,7 +57,7 @@ func run(configPath string) error {
 	if err != nil {
 		return fmt.Errorf("opening database: %w", err)
 	}
-	defer database.Close()
+	defer database.Close() //nolint:errcheck
 
 	if err := db.Migrate(database, hubplay.SQLiteMigrations, logger); err != nil {
 		return fmt.Errorf("running migrations: %w", err)

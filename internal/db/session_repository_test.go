@@ -88,7 +88,9 @@ func TestSessionRepository_DeleteByID(t *testing.T) {
 		RefreshTokenHash: "hash-del", CreatedAt: now, LastActiveAt: now,
 		ExpiresAt: now.Add(time.Hour),
 	}
-	repo.Create(context.Background(), s)
+	if err := repo.Create(context.Background(), s); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := repo.DeleteByID(context.Background(), "session-del"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -112,7 +114,9 @@ func TestSessionRepository_DeleteByRefreshTokenHash(t *testing.T) {
 		RefreshTokenHash: "hash-to-delete", CreatedAt: now, LastActiveAt: now,
 		ExpiresAt: now.Add(time.Hour),
 	}
-	repo.Create(context.Background(), s)
+	if err := repo.Create(context.Background(), s); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := repo.DeleteByRefreshTokenHash(context.Background(), "hash-to-delete"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -137,7 +141,9 @@ func TestSessionRepository_ListByUser(t *testing.T) {
 			RefreshTokenHash: "hash-" + name, CreatedAt: now, LastActiveAt: now.Add(time.Duration(i) * time.Minute),
 			ExpiresAt: now.Add(time.Hour),
 		}
-		repo.Create(context.Background(), s)
+		if err := repo.Create(context.Background(), s); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	sessions, err := repo.ListByUser(context.Background(), "user-1")
@@ -174,7 +180,9 @@ func TestSessionRepository_CountByUser(t *testing.T) {
 		RefreshTokenHash: "hash1", CreatedAt: now, LastActiveAt: now,
 		ExpiresAt: now.Add(time.Hour),
 	}
-	repo.Create(context.Background(), s)
+	if err := repo.Create(context.Background(), s); err != nil {
+		t.Fatal(err)
+	}
 
 	count, err = repo.CountByUser(context.Background(), "user-1")
 	if err != nil {

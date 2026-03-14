@@ -50,7 +50,9 @@ func (a *testApp) do(t *testing.T, method, path string, body any, token string) 
 	t.Helper()
 	var buf bytes.Buffer
 	if body != nil {
-		json.NewEncoder(&buf).Encode(body)
+		if err := json.NewEncoder(&buf).Encode(body); err != nil {
+			t.Fatalf("encoding request body: %v", err)
+		}
 	}
 	req, err := http.NewRequest(method, a.server.URL+path, &buf)
 	if err != nil {
@@ -73,7 +75,7 @@ func (a *testApp) decode(t *testing.T, resp *http.Response) map[string]any {
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		t.Fatalf("decoding response: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	return result
 }
 
@@ -134,7 +136,7 @@ func TestSetup_FailsAfterFirstUser(t *testing.T) {
 	if resp.StatusCode != http.StatusForbidden {
 		t.Errorf("expected 403, got %d", resp.StatusCode)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 }
 
 // ─── Full Auth Flow ───
@@ -150,7 +152,7 @@ func TestAuthFlow_Setup_Login_Me_Refresh_Logout(t *testing.T) {
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("setup failed: %d", resp.StatusCode)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	// 2. Login
 	resp = app.do(t, "POST", "/api/v1/auth/login", map[string]string{
@@ -209,7 +211,7 @@ func TestAuthFlow_Setup_Login_Me_Refresh_Logout(t *testing.T) {
 	if resp.StatusCode != http.StatusNoContent {
 		t.Errorf("expected 204 for logout, got %d", resp.StatusCode)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	// 6. Refresh should fail after logout
 	resp = app.do(t, "POST", "/api/v1/auth/refresh", map[string]string{
@@ -218,7 +220,7 @@ func TestAuthFlow_Setup_Login_Me_Refresh_Logout(t *testing.T) {
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("expected 401 after logout, got %d", resp.StatusCode)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 }
 
 // ─── Auth Guard ───
@@ -229,7 +231,7 @@ func TestMe_RequiresAuth(t *testing.T) {
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("expected 401 without token, got %d", resp.StatusCode)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 }
 
 func TestMe_InvalidToken(t *testing.T) {
@@ -238,7 +240,7 @@ func TestMe_InvalidToken(t *testing.T) {
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("expected 401 with invalid token, got %d", resp.StatusCode)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 }
 
 // ─── Admin Guard ───
@@ -253,7 +255,7 @@ func TestUsers_RequiresAdmin(t *testing.T) {
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("setup failed: %d", resp.StatusCode)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	// Login as admin
 	resp = app.do(t, "POST", "/api/v1/auth/login", map[string]string{
@@ -270,7 +272,7 @@ func TestUsers_RequiresAdmin(t *testing.T) {
 		body := app.decode(t, resp)
 		t.Fatalf("expected 201 for user creation, got %d: %v", resp.StatusCode, body)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	// Login as regular user
 	resp = app.do(t, "POST", "/api/v1/auth/login", map[string]string{
@@ -284,14 +286,14 @@ func TestUsers_RequiresAdmin(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("admin should be able to list users, got %d", resp.StatusCode)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	// Regular user cannot list users
 	resp = app.do(t, "GET", "/api/v1/users", nil, userToken)
 	if resp.StatusCode != http.StatusForbidden {
 		t.Errorf("regular user should get 403, got %d", resp.StatusCode)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 }
 
 // ─── Login Validation ───
@@ -305,7 +307,7 @@ func TestLogin_BadPassword(t *testing.T) {
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("setup failed: %d", resp.StatusCode)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	resp = app.do(t, "POST", "/api/v1/auth/login", map[string]string{
 		"username": "admin", "password": "wrongpassword",
@@ -313,7 +315,7 @@ func TestLogin_BadPassword(t *testing.T) {
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("expected 401, got %d", resp.StatusCode)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 }
 
 func TestLogin_MissingFields(t *testing.T) {
@@ -326,7 +328,7 @@ func TestLogin_MissingFields(t *testing.T) {
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("expected 400, got %d", resp.StatusCode)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 }
 
 // ─── Setup Validation ───
@@ -350,7 +352,7 @@ func TestSetup_Validation(t *testing.T) {
 				body := app.decode(t, resp)
 				t.Errorf("expected %d, got %d: %v", tt.wantCode, resp.StatusCode, body)
 			} else {
-				resp.Body.Close()
+				_ = resp.Body.Close()
 			}
 		})
 	}

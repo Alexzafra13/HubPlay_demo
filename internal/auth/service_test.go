@@ -133,7 +133,9 @@ func TestService_Login_DisabledAccount(t *testing.T) {
 
 	// Disable the account
 	u.IsActive = false
-	userRepo.Update(context.Background(), u)
+	if err := userRepo.Update(context.Background(), u); err != nil {
+		t.Fatal(err)
+	}
 
 	_, err := svc.Login(context.Background(), "testuser", "password123", "Chrome", "dev-1", "127.0.0.1")
 	if !errors.Is(err, domain.ErrAccountDisabled) {

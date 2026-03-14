@@ -37,10 +37,12 @@ func newTestScanner(t *testing.T) (*Scanner, *db.ItemRepository, *db.MediaStream
 
 	// Seed library
 	now := time.Now()
-	libRepo.Create(context.Background(), &db.Library{
+	if err := libRepo.Create(context.Background(), &db.Library{
 		ID: "lib-test", Name: "Test", ContentType: "movies", ScanMode: "auto",
 		ScanInterval: "6h", CreatedAt: now, UpdatedAt: now, Paths: []string{"/dummy"},
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	prober := &mockProber{
 		result: &probe.Result{
@@ -186,7 +188,7 @@ func TestScanLibrary_RemovedFiles(t *testing.T) {
 	}
 
 	// Remove the file
-	os.Remove(f)
+	_ = os.Remove(f)
 
 	// Second scan — should mark as removed
 	result, _ = s.ScanLibrary(context.Background(), lib)

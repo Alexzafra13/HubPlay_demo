@@ -36,7 +36,7 @@ func (r *LibraryRepository) Create(ctx context.Context, lib *Library) error {
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer tx.Rollback() //nolint:errcheck
 
 	_, err = tx.ExecContext(ctx,
 		`INSERT INTO libraries (id, name, content_type, scan_mode, scan_interval, m3u_url, epg_url, refresh_interval, created_at, updated_at)
@@ -94,7 +94,7 @@ func (r *LibraryRepository) List(ctx context.Context) ([]*Library, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list libraries: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	var libs []*Library
 	for rows.Next() {
@@ -118,7 +118,7 @@ func (r *LibraryRepository) Update(ctx context.Context, lib *Library) error {
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer tx.Rollback() //nolint:errcheck
 
 	res, err := tx.ExecContext(ctx,
 		`UPDATE libraries SET name = ?, content_type = ?, scan_mode = ?, scan_interval = ?,
@@ -167,7 +167,7 @@ func (r *LibraryRepository) getPaths(ctx context.Context, libraryID string) ([]s
 	if err != nil {
 		return nil, fmt.Errorf("get library paths: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	var paths []string
 	for rows.Next() {
@@ -219,7 +219,7 @@ func (r *LibraryRepository) ListForUser(ctx context.Context, userID string) ([]*
 	if err != nil {
 		return nil, fmt.Errorf("list libraries for user: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	var libs []*Library
 	for rows.Next() {

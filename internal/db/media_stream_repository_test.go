@@ -12,15 +12,19 @@ import (
 func seedItemForStreams(t *testing.T, database *db.LibraryRepository, itemRepo *db.ItemRepository) {
 	t.Helper()
 	now := time.Now()
-	database.Create(context.Background(), &db.Library{
+	if err := database.Create(context.Background(), &db.Library{
 		ID: "lib-s", Name: "Movies", ContentType: "movies", ScanMode: "auto",
 		ScanInterval: "6h", CreatedAt: now, UpdatedAt: now, Paths: []string{"/media"},
-	})
-	itemRepo.Create(context.Background(), &db.Item{
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := itemRepo.Create(context.Background(), &db.Item{
 		ID: "item-s", LibraryID: "lib-s", Type: "movie", Title: "Test",
 		SortTitle: "test", Path: "/media/test.mkv",
 		AddedAt: now, UpdatedAt: now, IsAvailable: true,
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestMediaStreamRepository_ReplaceAndList(t *testing.T) {
@@ -77,15 +81,19 @@ func TestMediaStreamRepository_Replace_OverwritesPrevious(t *testing.T) {
 	seedItemForStreams(t, libRepo, itemRepo)
 
 	// First set
-	repo.ReplaceForItem(context.Background(), "item-s", []*db.MediaStream{
+	if err := repo.ReplaceForItem(context.Background(), "item-s", []*db.MediaStream{
 		{ItemID: "item-s", StreamIndex: 0, StreamType: "video", Codec: "h264"},
 		{ItemID: "item-s", StreamIndex: 1, StreamType: "audio", Codec: "aac"},
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	// Replace with new set
-	repo.ReplaceForItem(context.Background(), "item-s", []*db.MediaStream{
+	if err := repo.ReplaceForItem(context.Background(), "item-s", []*db.MediaStream{
 		{ItemID: "item-s", StreamIndex: 0, StreamType: "video", Codec: "hevc"},
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	got, _ := repo.ListByItem(context.Background(), "item-s")
 	if len(got) != 1 {
