@@ -108,7 +108,7 @@ export class ApiClient {
   // ─── Auth ─────────────────────────────────────────────────────────────
 
   async login(username: string, password: string): Promise<AuthResponse> {
-    const data = await this.request<AuthResponse>("POST", "/api/auth/login", {
+    const data = await this.request<AuthResponse>("POST", "/auth/login", {
       body: { username, password },
     });
     localStorage.setItem(TOKEN_KEY, data.access_token);
@@ -117,7 +117,7 @@ export class ApiClient {
   }
 
   async refresh(refreshToken: string): Promise<AuthResponse> {
-    const data = await this.request<AuthResponse>("POST", "/api/auth/refresh", {
+    const data = await this.request<AuthResponse>("POST", "/auth/refresh", {
       body: { refresh_token: refreshToken },
     });
     localStorage.setItem(TOKEN_KEY, data.access_token);
@@ -128,7 +128,7 @@ export class ApiClient {
   async logout(): Promise<void> {
     const refreshToken = localStorage.getItem(REFRESH_KEY);
     try {
-      await this.request<void>("POST", "/api/auth/logout", {
+      await this.request<void>("POST", "/auth/logout", {
         body: { refresh_token: refreshToken },
       });
     } finally {
@@ -140,7 +140,7 @@ export class ApiClient {
   // ─── Setup ────────────────────────────────────────────────────────────
 
   async getSetupStatus(): Promise<SetupStatus> {
-    return this.request<SetupStatus>("GET", "/api/setup/status");
+    return this.request<SetupStatus>("GET", "/setup/status");
   }
 
   async setupCreateAdmin(
@@ -148,7 +148,7 @@ export class ApiClient {
     password: string,
     displayName?: string,
   ): Promise<AuthResponse> {
-    const data = await this.request<AuthResponse>("POST", "/api/setup/admin", {
+    const data = await this.request<AuthResponse>("POST", "/setup/admin", {
       body: { username, password, display_name: displayName },
     });
     localStorage.setItem(TOKEN_KEY, data.access_token);
@@ -157,7 +157,7 @@ export class ApiClient {
   }
 
   async browseDirectories(path?: string): Promise<BrowseResponse> {
-    return this.request<BrowseResponse>("GET", "/api/setup/browse", {
+    return this.request<BrowseResponse>("GET", "/setup/browse", {
       params: path ? { path } : undefined,
     });
   }
@@ -165,35 +165,35 @@ export class ApiClient {
   async setupCreateLibraries(
     libraries: Array<{ name: string; content_type: string; paths: string[] }>,
   ): Promise<Library[]> {
-    return this.request<Library[]>("POST", "/api/setup/libraries", {
+    return this.request<Library[]>("POST", "/setup/libraries", {
       body: { libraries },
     });
   }
 
   async setupSettings(settings: Record<string, unknown>): Promise<void> {
-    return this.request<void>("POST", "/api/setup/settings", {
+    return this.request<void>("POST", "/setup/settings", {
       body: settings,
     });
   }
 
   async setupComplete(startScan = true): Promise<void> {
-    return this.request<void>("POST", "/api/setup/complete", {
+    return this.request<void>("POST", "/setup/complete", {
       body: { start_scan: startScan },
     });
   }
 
   async getSystemCapabilities(): Promise<SystemCapabilities> {
-    return this.request<SystemCapabilities>("GET", "/api/setup/capabilities");
+    return this.request<SystemCapabilities>("GET", "/setup/capabilities");
   }
 
   // ─── Users ────────────────────────────────────────────────────────────
 
   async getMe(): Promise<User> {
-    return this.request<User>("GET", "/api/users/me");
+    return this.request<User>("GET", "/users/me");
   }
 
   async getUsers(): Promise<User[]> {
-    return this.request<User[]>("GET", "/api/users");
+    return this.request<User[]>("GET", "/users");
   }
 
   async createUser(data: {
@@ -202,37 +202,37 @@ export class ApiClient {
     display_name?: string;
     role?: string;
   }): Promise<User> {
-    return this.request<User>("POST", "/api/users", { body: data });
+    return this.request<User>("POST", "/users", { body: data });
   }
 
   async deleteUser(id: string): Promise<void> {
-    return this.request<void>("DELETE", `/api/users/${id}`);
+    return this.request<void>("DELETE", `/users/${id}`);
   }
 
   // ─── Libraries ────────────────────────────────────────────────────────
 
   async getLibraries(): Promise<Library[]> {
-    return this.request<Library[]>("GET", "/api/libraries");
+    return this.request<Library[]>("GET", "/libraries");
   }
 
   async getLibrary(id: string): Promise<Library> {
-    return this.request<Library>("GET", `/api/libraries/${id}`);
+    return this.request<Library>("GET", `/libraries/${id}`);
   }
 
   async createLibrary(data: CreateLibraryRequest): Promise<Library> {
-    return this.request<Library>("POST", "/api/libraries", { body: data });
+    return this.request<Library>("POST", "/libraries", { body: data });
   }
 
   async updateLibrary(id: string, data: UpdateLibraryRequest): Promise<Library> {
-    return this.request<Library>("PUT", `/api/libraries/${id}`, { body: data });
+    return this.request<Library>("PUT", `/libraries/${id}`, { body: data });
   }
 
   async deleteLibrary(id: string): Promise<void> {
-    return this.request<void>("DELETE", `/api/libraries/${id}`);
+    return this.request<void>("DELETE", `/libraries/${id}`);
   }
 
   async scanLibrary(id: string): Promise<void> {
-    return this.request<void>("POST", `/api/libraries/${id}/scan`);
+    return this.request<void>("POST", `/libraries/${id}/scan`);
   }
 
   // ─── Items ────────────────────────────────────────────────────────────
@@ -246,17 +246,17 @@ export class ApiClient {
     offset?: number;
     limit?: number;
   }): Promise<PaginatedResponse<MediaItem>> {
-    return this.request<PaginatedResponse<MediaItem>>("GET", "/api/items", {
+    return this.request<PaginatedResponse<MediaItem>>("GET", "/items", {
       params: params as Record<string, string | number | boolean | undefined>,
     });
   }
 
   async getItem(id: string): Promise<ItemDetail> {
-    return this.request<ItemDetail>("GET", `/api/items/${id}`);
+    return this.request<ItemDetail>("GET", `/items/${id}`);
   }
 
   async getItemChildren(id: string): Promise<MediaItem[]> {
-    return this.request<MediaItem[]>("GET", `/api/items/${id}/children`);
+    return this.request<MediaItem[]>("GET", `/items/${id}/children`);
   }
 
   async searchItems(
@@ -264,13 +264,13 @@ export class ApiClient {
     type?: string,
     limit?: number,
   ): Promise<PaginatedResponse<MediaItem>> {
-    return this.request<PaginatedResponse<MediaItem>>("GET", "/api/items/search", {
+    return this.request<PaginatedResponse<MediaItem>>("GET", "/items/search", {
       params: { q, type, limit },
     });
   }
 
   async getLatestItems(libraryId?: string, limit?: number): Promise<MediaItem[]> {
-    return this.request<MediaItem[]>("GET", "/api/items/latest", {
+    return this.request<MediaItem[]>("GET", "/items/latest", {
       params: { library_id: libraryId, limit },
     });
   }
@@ -278,7 +278,7 @@ export class ApiClient {
   // ─── Progress / User Data ─────────────────────────────────────────────
 
   async getProgress(itemId: string): Promise<UserData> {
-    return this.request<UserData>("GET", `/api/items/${itemId}/progress`);
+    return this.request<UserData>("GET", `/items/${itemId}/progress`);
   }
 
   async updateProgress(
@@ -289,33 +289,33 @@ export class ApiClient {
       subtitle_stream_index?: number;
     },
   ): Promise<UserData> {
-    return this.request<UserData>("PUT", `/api/items/${itemId}/progress`, {
+    return this.request<UserData>("PUT", `/items/${itemId}/progress`, {
       body: data,
     });
   }
 
   async markPlayed(itemId: string): Promise<UserData> {
-    return this.request<UserData>("POST", `/api/items/${itemId}/played`);
+    return this.request<UserData>("POST", `/items/${itemId}/played`);
   }
 
   async markUnplayed(itemId: string): Promise<UserData> {
-    return this.request<UserData>("DELETE", `/api/items/${itemId}/played`);
+    return this.request<UserData>("DELETE", `/items/${itemId}/played`);
   }
 
   async toggleFavorite(itemId: string): Promise<UserData> {
-    return this.request<UserData>("POST", `/api/items/${itemId}/favorite`);
+    return this.request<UserData>("POST", `/items/${itemId}/favorite`);
   }
 
   async getContinueWatching(): Promise<MediaItem[]> {
-    return this.request<MediaItem[]>("GET", "/api/items/continue-watching");
+    return this.request<MediaItem[]>("GET", "/items/continue-watching");
   }
 
   async getNextUp(): Promise<MediaItem[]> {
-    return this.request<MediaItem[]>("GET", "/api/items/next-up");
+    return this.request<MediaItem[]>("GET", "/items/next-up");
   }
 
   async getFavorites(): Promise<MediaItem[]> {
-    return this.request<MediaItem[]>("GET", "/api/items/favorites");
+    return this.request<MediaItem[]>("GET", "/items/favorites");
   }
 
   // ─── Streaming ────────────────────────────────────────────────────────
@@ -329,7 +329,7 @@ export class ApiClient {
       max_video_bitrate?: number;
     },
   ): Promise<StreamSession> {
-    return this.request<StreamSession>("POST", `/api/stream/${itemId}`, {
+    return this.request<StreamSession>("POST", `/stream/${itemId}`, {
       body: data ?? {},
     });
   }
@@ -338,19 +338,19 @@ export class ApiClient {
     media_streams: import("./types").MediaStream[];
     playback_methods: string[];
   }> {
-    return this.request("GET", `/api/stream/${itemId}/info`);
+    return this.request("GET", `/stream/${itemId}/info`);
   }
 
   // ─── Channels / Live TV ───────────────────────────────────────────────
 
   async getChannels(libraryId?: string): Promise<Channel[]> {
-    return this.request<Channel[]>("GET", "/api/channels", {
+    return this.request<Channel[]>("GET", "/channels", {
       params: { library_id: libraryId },
     });
   }
 
   async getChannel(id: string): Promise<Channel> {
-    return this.request<Channel>("GET", `/api/channels/${id}`);
+    return this.request<Channel>("GET", `/channels/${id}`);
   }
 
   async getChannelSchedule(
@@ -358,13 +358,13 @@ export class ApiClient {
     from?: string,
     to?: string,
   ): Promise<EPGProgram[]> {
-    return this.request<EPGProgram[]>("GET", `/api/channels/${id}/schedule`, {
+    return this.request<EPGProgram[]>("GET", `/channels/${id}/schedule`, {
       params: { from, to },
     });
   }
 
   async getChannelGroups(libraryId?: string): Promise<string[]> {
-    return this.request<string[]>("GET", "/api/channels/groups", {
+    return this.request<string[]>("GET", "/channels/groups", {
       params: { library_id: libraryId },
     });
   }
@@ -372,8 +372,8 @@ export class ApiClient {
   // ─── System ───────────────────────────────────────────────────────────
 
   async getHealth(): Promise<HealthResponse> {
-    return this.request<HealthResponse>("GET", "/api/health");
+    return this.request<HealthResponse>("GET", "/health");
   }
 }
 
-export const api = new ApiClient();
+export const api = new ApiClient("/api/v1");
