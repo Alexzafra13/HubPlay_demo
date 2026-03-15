@@ -32,12 +32,19 @@ export type ContentType = "movies" | "tvshows" | "livetv";
 
 export type ScanStatus = "idle" | "scanning" | "error";
 
+export interface PathStatus {
+  path: string;
+  accessible: boolean;
+}
+
 export interface Library {
   id: string;
   name: string;
   content_type: ContentType;
   paths: string[];
+  path_status?: PathStatus[];
   item_count: number;
+  scan_mode: string;
   scan_status: ScanStatus;
   created_at: string;
 }

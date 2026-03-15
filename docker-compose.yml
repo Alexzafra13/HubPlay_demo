@@ -1,14 +1,21 @@
 services:
   hubplay:
     build: .
+    image: ghcr.io/alexzafra13/hubplay_demo:latest
     container_name: hubplay
     ports:
-      - "8096:8096"
+      - "8097:8096"
+    user: "1000:1000"
     volumes:
       - ./config:/config
       - ./cache:/cache
       # Map your media folders here:
-      - /mnt/media:/mnt/media:ro
+      - /mnt/media:/media:ro
     environment:
       - TZ=Europe/Madrid
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

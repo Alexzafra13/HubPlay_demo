@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"os"
 	"strconv"
 
 	"hubplay/internal/auth"
@@ -187,12 +188,23 @@ func (h *LibraryHandler) LatestItems(w http.ResponseWriter, r *http.Request) {
 }
 
 func libraryResponse(lib *db.Library) map[string]any {
+	// Check which paths are accessible
+	pathStatus := make([]map[string]any, len(lib.Paths))
+	for i, p := range lib.Paths {
+		_, err := os.Stat(p)
+		pathStatus[i] = map[string]any{
+			"path":       p,
+			"accessible": err == nil,
+		}
+	}
+
 	return map[string]any{
 		"id":           lib.ID,
 		"name":         lib.Name,
 		"content_type": lib.ContentType,
 		"scan_mode":    lib.ScanMode,
 		"paths":        lib.Paths,
+		"path_status":  pathStatus,
 		"created_at":   lib.CreatedAt,
 		"updated_at":   lib.UpdatedAt,
 	}
