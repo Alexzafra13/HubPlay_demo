@@ -172,17 +172,25 @@ func (s *Service) Logout(ctx context.Context, refreshToken string) error {
 }
 
 func (s *Service) createSession(ctx context.Context, user *db.User, deviceName, deviceID, ip string) (*AuthToken, error) {
-	// Enforce max sessions
+	// Clean up expired sessions first (for this user and globally)
+	if cleaned, err := s.sessions.DeleteExpired(ctx); err == nil && cleaned > 0 {
+		s.logger.Debug("cleaned expired sessions", "count", cleaned)
+	}
+
+	// Enforce max sessions per user
 	if s.cfg.MaxSessionsPerUser > 0 {
 		count, err := s.sessions.CountByUser(ctx, user.ID)
 		if err != nil {
 			return nil, fmt.Errorf("counting sessions: %w", err)
 		}
-		if count >= s.cfg.MaxSessionsPerUser {
-			// Evict oldest session to make room for the new one
+		// Evict oldest sessions until we're under the limit
+		for count >= s.cfg.MaxSessionsPerUser {
 			if err := s.sessions.DeleteOldestByUser(ctx, user.ID); err != nil {
 				s.logger.Warn("failed to evict oldest session", "user_id", user.ID, "error", err)
+				break
 			}
+			count--
+			s.logger.Info("evicted oldest session", "user_id", user.ID, "remaining", count)
 		}
 	}
 
