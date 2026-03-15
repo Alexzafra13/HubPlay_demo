@@ -15,6 +15,7 @@ interface VideoPlayerProps {
   directUrl: string | null;
   playbackMethod: string;
   startPosition?: number;
+  knownDuration?: number;
   title?: string;
   onClose: () => void;
 }
@@ -34,6 +35,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
   directUrl,
   playbackMethod,
   startPosition,
+  knownDuration,
   title,
   onClose,
 }) => {
@@ -177,7 +179,9 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
     const useHls = playbackMethod === "transcode" || playbackMethod === "direct_stream";
 
     if (useHls && masterPlaylistUrl) {
-      const url = `${masterPlaylistUrl}${masterPlaylistUrl.includes("?") ? "&" : "?"}token=${sessionToken}`;
+      const url = sessionToken
+        ? `${masterPlaylistUrl}${masterPlaylistUrl.includes("?") ? "&" : "?"}token=${sessionToken}`
+        : masterPlaylistUrl;
 
       if (Hls.isSupported()) {
         const hls = new Hls({
@@ -186,6 +190,10 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
           startPosition: startPosition ?? -1,
           xhrSetup: (xhr) => {
             xhr.withCredentials = false;
+            const accessToken = localStorage.getItem("hubplay_access_token");
+            if (accessToken) {
+              xhr.setRequestHeader("Authorization", `Bearer ${accessToken}`);
+            }
           },
         });
 
@@ -253,7 +261,11 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
         setError("HLS playback is not supported in this browser.");
       }
     } else if (playbackMethod === "direct_play" && directUrl) {
-      video.src = directUrl;
+      const accessToken = localStorage.getItem("hubplay_access_token");
+      const authUrl = accessToken
+        ? `${directUrl}${directUrl.includes("?") ? "&" : "?"}token=${accessToken}`
+        : directUrl;
+      video.src = authUrl;
       video.addEventListener("loadedmetadata", () => {
         video.play().catch(() => {});
       }, { once: true });
@@ -309,7 +321,13 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
 
     const onTimeUpdate = () => {
       setCurrentTime(video.currentTime);
-      setDuration(video.duration || 0);
+      const videoDur = video.duration;
+      // Prefer knownDuration (from item metadata) over HLS-reported duration,
+      // since HLS reports only the transcoded portion, not the full movie length.
+      const effectiveDuration = knownDuration && knownDuration > 0
+        ? knownDuration
+        : (videoDur && isFinite(videoDur) && videoDur > 0 ? videoDur : 0);
+      setDuration(effectiveDuration);
 
       // Buffered
       if (video.buffered.length > 0) {
@@ -319,7 +337,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
       // Sync to store
       store.getState().updateTime(
         video.currentTime,
-        video.duration || 0,
+        effectiveDuration,
         video.buffered.length > 0 ? video.buffered.end(video.buffered.length - 1) : 0,
       );
     };
@@ -349,7 +367,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
       video.removeEventListener("ended", onEnded);
       video.removeEventListener("error", onError);
     };
-  }, [itemId, showControls, store]);
+  }, [itemId, knownDuration, showControls, store]);
 
   // ─── Progress save interval ──────────────────────────────────────────────
 

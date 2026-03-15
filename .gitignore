@@ -6,6 +6,11 @@ bin/
 coverage.out
 coverage.html
 .env
+config/
 
 # Frontend
 web/node_modules/
+
+.claude
+
+/peliculas

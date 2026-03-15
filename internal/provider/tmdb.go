@@ -209,8 +209,14 @@ func (t *TMDbProvider) GetImages(ctx context.Context, externalIDs map[string]str
 		mediaType = "tv"
 	}
 
+	// Pass include_image_language to get preferred language + English + null (no-text) images
+	langCode := strings.Split(t.lang, "-")[0] // "en-US" → "en"
+	params := url.Values{
+		"include_image_language": {langCode + ",en,null"},
+	}
+
 	var raw tmdbImagesResponse
-	if err := t.get(ctx, fmt.Sprintf("/%s/%s/images", mediaType, tmdbID), url.Values{}, &raw); err != nil {
+	if err := t.get(ctx, fmt.Sprintf("/%s/%s/images", mediaType, tmdbID), params, &raw); err != nil {
 		return nil, err
 	}
 
@@ -223,7 +229,7 @@ func (t *TMDbProvider) GetImages(ctx context.Context, externalIDs map[string]str
 			Language: img.Language,
 			Width:    img.Width,
 			Height:   img.Height,
-			Score:    img.VoteAverage,
+			Score:    t.langScore(img, langCode),
 		})
 	}
 
@@ -234,7 +240,7 @@ func (t *TMDbProvider) GetImages(ctx context.Context, externalIDs map[string]str
 			Language: img.Language,
 			Width:    img.Width,
 			Height:   img.Height,
-			Score:    img.VoteAverage,
+			Score:    t.langScore(img, langCode),
 		})
 	}
 
@@ -245,11 +251,26 @@ func (t *TMDbProvider) GetImages(ctx context.Context, externalIDs map[string]str
 			Language: img.Language,
 			Width:    img.Width,
 			Height:   img.Height,
-			Score:    img.VoteAverage,
+			Score:    t.langScore(img, langCode),
 		})
 	}
 
 	return images, nil
+}
+
+// langScore boosts images that match the preferred language so they sort first.
+// Preferred language → +1000, language-neutral (no text) → +500, English fallback → +100.
+func (t *TMDbProvider) langScore(img tmdbImage, langCode string) float64 {
+	bonus := 0.0
+	switch {
+	case img.Language == langCode:
+		bonus = 1000
+	case img.Language == "" || img.Language == "xx":
+		bonus = 500
+	case img.Language == "en":
+		bonus = 100
+	}
+	return img.VoteAverage + bonus
 }
 
 // ──────────────────── HTTP helpers ────────────────────

@@ -4,10 +4,12 @@ import type { ContentType, Library } from "@/api/types";
 import {
   useLibraries,
   useCreateLibrary,
+  useUpdateLibrary,
   useScanLibrary,
   useDeleteLibrary,
 } from "@/api/hooks";
 import { Button, Badge, Modal, Input, Spinner, EmptyState } from "@/components/common";
+import { FolderBrowser } from "@/components/setup/FolderBrowser";
 
 const CONTENT_TYPES: { value: ContentType; label: string }[] = [
   { value: "movies", label: "Movies" },
@@ -42,16 +44,30 @@ function contentTypeBadge(type: string) {
 export default function LibrariesAdmin() {
   const { data: libraries, isLoading, error } = useLibraries();
   const createLibrary = useCreateLibrary();
+  const updateLibrary = useUpdateLibrary();
   const scanLibrary = useScanLibrary();
   const deleteLibrary = useDeleteLibrary();
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Library | null>(null);
+  const [editTarget, setEditTarget] = useState<Library | null>(null);
 
   // Add library form state
   const [newName, setNewName] = useState("");
   const [newType, setNewType] = useState<ContentType>("movies");
   const [newPath, setNewPath] = useState("");
+  const [showCreateBrowse, setShowCreateBrowse] = useState(false);
+
+  // Edit library form state
+  const [editName, setEditName] = useState("");
+  const [editPath, setEditPath] = useState("");
+  const [showEditBrowse, setShowEditBrowse] = useState(false);
+
+  function openEditModal(lib: Library) {
+    setEditTarget(lib);
+    setEditName(lib.name);
+    setEditPath(lib.paths[0] ?? "");
+  }
 
   function handleCreate(e: FormEvent) {
     e.preventDefault();
@@ -66,6 +82,21 @@ export default function LibrariesAdmin() {
           setNewType("movies");
           setNewPath("");
         },
+      },
+    );
+  }
+
+  function handleEdit(e: FormEvent) {
+    e.preventDefault();
+    if (!editTarget || !editName.trim() || !editPath.trim()) return;
+
+    updateLibrary.mutate(
+      {
+        id: editTarget.id,
+        data: { name: editName.trim(), paths: [editPath.trim()] },
+      },
+      {
+        onSuccess: () => setEditTarget(null),
       },
     );
   }
@@ -150,14 +181,33 @@ export default function LibrariesAdmin() {
                         size="sm"
                         isLoading={
                           scanLibrary.isPending &&
-                          scanLibrary.variables === lib.id
+                          scanLibrary.variables?.id === lib.id &&
+                          !scanLibrary.variables?.refreshMetadata
                         }
                         disabled={lib.scan_status === "scanning"}
-                        onClick={() => scanLibrary.mutate(lib.id)}
+                        onClick={() => scanLibrary.mutate({ id: lib.id })}
                       >
                         Scan
                       </Button>
-                      <Button variant="ghost" size="sm" disabled>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        isLoading={
+                          scanLibrary.isPending &&
+                          scanLibrary.variables?.id === lib.id &&
+                          !!scanLibrary.variables?.refreshMetadata
+                        }
+                        disabled={lib.scan_status === "scanning"}
+                        onClick={() => scanLibrary.mutate({ id: lib.id, refreshMetadata: true })}
+                        title="Re-fetch metadata and images from providers"
+                      >
+                        Refresh Metadata
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => openEditModal(lib)}
+                      >
                         Edit
                       </Button>
                       <Button
@@ -222,13 +272,24 @@ export default function LibrariesAdmin() {
             </select>
           </div>
 
-          <Input
-            label="Path"
-            placeholder="/media/movies"
-            value={newPath}
-            onChange={(e) => setNewPath(e.target.value)}
-            required
-          />
+          <div className="flex gap-2 items-end">
+            <div className="flex-1">
+              <Input
+                label="Path"
+                placeholder="/media/movies"
+                value={newPath}
+                onChange={(e) => setNewPath(e.target.value)}
+                required
+              />
+            </div>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setShowCreateBrowse(true)}
+            >
+              Browse
+            </Button>
+          </div>
 
           {createLibrary.error && (
             <p className="text-xs text-error">{createLibrary.error.message}</p>
@@ -244,6 +305,59 @@ export default function LibrariesAdmin() {
             </Button>
             <Button type="submit" isLoading={createLibrary.isPending}>
               Create
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Edit Library Modal */}
+      <Modal
+        isOpen={editTarget !== null}
+        onClose={() => setEditTarget(null)}
+        title="Edit Library"
+      >
+        <form onSubmit={handleEdit} className="flex flex-col gap-4">
+          <Input
+            label="Name"
+            placeholder="e.g. Movies"
+            value={editName}
+            onChange={(e) => setEditName(e.target.value)}
+            required
+          />
+
+          <div className="flex gap-2 items-end">
+            <div className="flex-1">
+              <Input
+                label="Path"
+                placeholder="/media/movies"
+                value={editPath}
+                onChange={(e) => setEditPath(e.target.value)}
+                required
+              />
+            </div>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setShowEditBrowse(true)}
+            >
+              Browse
+            </Button>
+          </div>
+
+          {updateLibrary.error && (
+            <p className="text-xs text-error">{updateLibrary.error.message}</p>
+          )}
+
+          <div className="flex justify-end gap-3 pt-2">
+            <Button
+              variant="secondary"
+              type="button"
+              onClick={() => setEditTarget(null)}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" isLoading={updateLibrary.isPending}>
+              Save
             </Button>
           </div>
         </form>
@@ -289,6 +403,27 @@ export default function LibrariesAdmin() {
           </div>
         </div>
       </Modal>
+
+      {/* Folder Browsers */}
+      <FolderBrowser
+        isOpen={showCreateBrowse}
+        onClose={() => setShowCreateBrowse(false)}
+        onSelect={(path) => {
+          setNewPath(path);
+          if (!newName.trim()) {
+            const segments = path.split("/").filter(Boolean);
+            setNewName(segments[segments.length - 1] ?? "");
+          }
+        }}
+        useAdmin
+      />
+
+      <FolderBrowser
+        isOpen={showEditBrowse}
+        onClose={() => setShowEditBrowse(false)}
+        onSelect={(path) => setEditPath(path)}
+        useAdmin
+      />
     </div>
   );
 }

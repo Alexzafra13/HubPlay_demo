@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -47,22 +48,45 @@ func (m *Manager) Register(ctx context.Context, p Provider) error {
 		return fmt.Errorf("load provider config %q: %w", name, err)
 	}
 
+	// Persist if not already in DB (do this before init so the provider
+	// appears in the admin UI even when it lacks an API key).
+	if cfg == nil {
+		providerType := resolveType(p)
+		cfg = &db.ProviderConfig{
+			Name:     name,
+			Type:     providerType,
+			Version:  "1.0",
+			Status:   "active",
+			Priority: 100,
+		}
+		if err := m.repo.Upsert(ctx, cfg); err != nil {
+			m.logger.Warn("failed to persist provider", "name", name, "error", err)
+		}
+	}
+
+	// Skip disabled providers
+	if cfg.Status == "disabled" {
+		m.logger.Info("provider disabled, skipping", "name", name)
+		return nil
+	}
+
 	// Build init config from persisted data
 	initCfg := make(map[string]string)
-	if cfg != nil {
-		initCfg["api_key"] = cfg.APIKey
-		initCfg["config_json"] = cfg.ConfigJSON
-
-		// Skip disabled providers
-		if cfg.Status == "disabled" {
-			m.logger.Info("provider disabled, skipping", "name", name)
-			return nil
+	initCfg["api_key"] = cfg.APIKey
+	initCfg["config_json"] = cfg.ConfigJSON
+	// Parse ConfigJSON and merge individual keys so providers can read them
+	if cfg.ConfigJSON != "" {
+		var parsed map[string]string
+		if err := json.Unmarshal([]byte(cfg.ConfigJSON), &parsed); err == nil {
+			for k, v := range parsed {
+				initCfg[k] = v
+			}
 		}
 	}
 
 	// Initialize
 	if err := p.Init(initCfg); err != nil {
-		m.logger.Warn("provider init failed", "name", name, "error", err)
+		m.logger.Warn("provider init failed (api key may be missing)", "name", name, "error", err)
 		return nil // Don't block startup for optional providers
 	}
 
@@ -77,20 +101,6 @@ func (m *Manager) Register(ctx context.Context, p Provider) error {
 	}
 	if sp, ok := p.(SubtitleProvider); ok {
 		m.subtitles = append(m.subtitles, sp)
-	}
-
-	// Persist if not already in DB
-	if cfg == nil {
-		providerType := resolveType(p)
-		if err := m.repo.Upsert(ctx, &db.ProviderConfig{
-			Name:     name,
-			Type:     providerType,
-			Version:  "1.0",
-			Status:   "active",
-			Priority: 100,
-		}); err != nil {
-			m.logger.Warn("failed to persist provider", "name", name, "error", err)
-		}
 	}
 
 	m.logger.Info("provider registered", "name", name)

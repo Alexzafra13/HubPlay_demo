@@ -149,7 +149,9 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 }
 
 // Scan triggers an async scan for a library. Returns immediately.
-func (s *Service) Scan(ctx context.Context, id string) error {
+// If refreshMetadata is true, all items will have their metadata and images
+// re-fetched from providers after the scan completes.
+func (s *Service) Scan(ctx context.Context, id string, refreshMetadata ...bool) error {
 	lib, err := s.libraries.GetByID(ctx, id)
 	if err != nil {
 		return err
@@ -163,6 +165,8 @@ func (s *Service) Scan(ctx context.Context, id string) error {
 	s.scanning[id] = true
 	s.mu.Unlock()
 
+	refresh := len(refreshMetadata) > 0 && refreshMetadata[0]
+
 	go func() {
 		defer func() {
 			s.mu.Lock()
@@ -170,10 +174,15 @@ func (s *Service) Scan(ctx context.Context, id string) error {
 			s.mu.Unlock()
 		}()
 
-		// Use a background context so scan isn't tied to the HTTP request
 		scanCtx := context.Background()
 		if _, err := s.scanner.ScanLibrary(scanCtx, lib); err != nil {
 			s.logger.Error("scan failed", "library_id", id, "error", err)
+		}
+
+		if refresh {
+			if err := s.scanner.RefreshMetadata(scanCtx, lib); err != nil {
+				s.logger.Error("metadata refresh failed", "library_id", id, "error", err)
+			}
 		}
 	}()
 

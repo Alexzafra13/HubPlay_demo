@@ -7,18 +7,20 @@ import (
 
 	"hubplay/internal/auth"
 	"hubplay/internal/config"
+	"hubplay/internal/db"
 	"hubplay/internal/library"
 	"hubplay/internal/setup"
 	"hubplay/internal/user"
 )
 
 type SetupHandler struct {
-	setup  *setup.Service
-	auth   *auth.Service
-	libs   *library.Service
-	users  *user.Service
-	config *config.Config
-	logger *slog.Logger
+	setup     *setup.Service
+	auth      *auth.Service
+	libs      *library.Service
+	users     *user.Service
+	providers *db.ProviderRepository
+	config    *config.Config
+	logger    *slog.Logger
 }
 
 func NewSetupHandler(
@@ -26,16 +28,18 @@ func NewSetupHandler(
 	authSvc *auth.Service,
 	libSvc *library.Service,
 	userSvc *user.Service,
+	providerRepo *db.ProviderRepository,
 	cfg *config.Config,
 	logger *slog.Logger,
 ) *SetupHandler {
 	return &SetupHandler{
-		setup:  setupSvc,
-		auth:   authSvc,
-		libs:   libSvc,
-		users:  userSvc,
-		config: cfg,
-		logger: logger,
+		setup:     setupSvc,
+		auth:      authSvc,
+		libs:      libSvc,
+		users:     userSvc,
+		providers: providerRepo,
+		config:    cfg,
+		logger:    logger,
 	}
 }
 
@@ -157,12 +161,35 @@ type updateSettingsRequest struct {
 }
 
 // UpdateSettings updates server settings during setup.
-// For MVP this logs the changes; full config persistence comes later.
 func (h *SetupHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 	var req updateSettingsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondError(w, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
 		return
+	}
+
+	// Persist TMDB API key if provided
+	if req.TMDbAPIKey != "" && h.providers != nil {
+		cfg, err := h.providers.GetByName(r.Context(), "tmdb")
+		if err != nil {
+			h.logger.Warn("setup: failed to get tmdb provider", "error", err)
+		}
+		if cfg == nil {
+			cfg = &db.ProviderConfig{
+				Name:     "tmdb",
+				Type:     "metadata",
+				Version:  "1.0",
+				Status:   "active",
+				Priority: 100,
+			}
+		}
+		cfg.APIKey = req.TMDbAPIKey
+		if err := h.providers.Upsert(r.Context(), cfg); err != nil {
+			h.logger.Error("setup: failed to save tmdb api key", "error", err)
+			respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to save TMDB API key")
+			return
+		}
+		h.logger.Info("setup: TMDB API key saved")
 	}
 
 	h.logger.Info("setup: settings updated",

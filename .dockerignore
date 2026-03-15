@@ -1,0 +1,12 @@
+peliculas/
+cache/
+config/
+*.db
+*.db-journal
+*.db-wal
+bin/
+coverage.*
+.git/
+node_modules/
+web/node_modules/
+web/dist/

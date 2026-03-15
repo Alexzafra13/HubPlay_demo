@@ -251,9 +251,9 @@ export default function Settings() {
                         size="sm"
                         isLoading={
                           scanLibrary.isPending &&
-                          scanLibrary.variables === lib.id
+                          scanLibrary.variables?.id === lib.id
                         }
-                        onClick={() => scanLibrary.mutate(lib.id)}
+                        onClick={() => scanLibrary.mutate({ id: lib.id })}
                       >
                         Scan Now
                       </Button>

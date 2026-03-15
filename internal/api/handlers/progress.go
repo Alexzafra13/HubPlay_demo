@@ -15,13 +15,15 @@ import (
 // ProgressHandler handles watch progress and user engagement endpoints.
 type ProgressHandler struct {
 	userData *db.UserDataRepository
+	images   *db.ImageRepository
 	logger   *slog.Logger
 }
 
 // NewProgressHandler creates a new progress handler.
-func NewProgressHandler(userData *db.UserDataRepository, logger *slog.Logger) *ProgressHandler {
+func NewProgressHandler(userData *db.UserDataRepository, images *db.ImageRepository, logger *slog.Logger) *ProgressHandler {
 	return &ProgressHandler{
 		userData: userData,
+		images:   images,
 		logger:   logger.With("module", "progress-handler"),
 	}
 }
@@ -200,9 +202,16 @@ func (h *ProgressHandler) ContinueWatching(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// Batch-fetch images for all items
+	itemIDs := make([]string, len(items))
+	for i, item := range items {
+		itemIDs[i] = item.ItemID
+	}
+	imageMap, _ := h.images.GetPrimaryURLs(r.Context(), itemIDs)
+
 	result := make([]map[string]any, 0, len(items))
 	for _, item := range items {
-		result = append(result, map[string]any{
+		entry := map[string]any{
 			"item_id":        item.ItemID,
 			"title":          item.Title,
 			"type":           item.Type,
@@ -210,7 +219,18 @@ func (h *ProgressHandler) ContinueWatching(w http.ResponseWriter, r *http.Reques
 			"duration_ticks": item.DurationTicks,
 			"last_played_at": item.LastPlayedAt,
 			"parent_id":      item.ParentID,
-		})
+			"poster_url":     nil,
+			"backdrop_url":   nil,
+		}
+		if urls, ok := imageMap[item.ItemID]; ok {
+			if u, ok := urls["primary"]; ok {
+				entry["poster_url"] = u
+			}
+			if u, ok := urls["backdrop"]; ok {
+				entry["backdrop_url"] = u
+			}
+		}
+		result = append(result, entry)
 	}
 
 	respondJSON(w, http.StatusOK, map[string]any{"data": result})
@@ -244,16 +264,34 @@ func (h *ProgressHandler) Favorites(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Batch-fetch images for all items
+	favIDs := make([]string, len(items))
+	for i, item := range items {
+		favIDs[i] = item.ItemID
+	}
+	favImageMap, _ := h.images.GetPrimaryURLs(r.Context(), favIDs)
+
 	result := make([]map[string]any, 0, len(items))
 	for _, item := range items {
-		result = append(result, map[string]any{
+		entry := map[string]any{
 			"item_id":        item.ItemID,
 			"title":          item.Title,
 			"type":           item.Type,
 			"year":           item.Year,
 			"duration_ticks": item.DurationTicks,
 			"favorited_at":   item.FavoritedAt,
-		})
+			"poster_url":     nil,
+			"backdrop_url":   nil,
+		}
+		if urls, ok := favImageMap[item.ItemID]; ok {
+			if u, ok := urls["primary"]; ok {
+				entry["poster_url"] = u
+			}
+			if u, ok := urls["backdrop"]; ok {
+				entry["backdrop_url"] = u
+			}
+		}
+		result = append(result, entry)
 	}
 
 	respondJSON(w, http.StatusOK, map[string]any{"data": result})

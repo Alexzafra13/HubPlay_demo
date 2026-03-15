@@ -38,12 +38,18 @@ func (h *ProviderHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	result := make([]map[string]any, 0, len(configs))
 	for _, c := range configs {
+		// Parse config JSON into a map for the frontend
+		cfgMap := make(map[string]string)
+		if c.ConfigJSON != "" {
+			_ = json.Unmarshal([]byte(c.ConfigJSON), &cfgMap)
+		}
 		result = append(result, map[string]any{
-			"name":       c.Name,
-			"type":       c.Type,
-			"status":     c.Status,
-			"priority":   c.Priority,
+			"name":        c.Name,
+			"type":        c.Type,
+			"status":      c.Status,
+			"priority":    c.Priority,
 			"has_api_key": c.APIKey != "",
+			"config":      cfgMap,
 		})
 	}
 
@@ -51,9 +57,10 @@ func (h *ProviderHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 type updateProviderRequest struct {
-	Status   *string `json:"status"`
-	APIKey   *string `json:"api_key"`
-	Priority *int    `json:"priority"`
+	Status   *string            `json:"status"`
+	APIKey   *string            `json:"api_key"`
+	Priority *int               `json:"priority"`
+	Config   map[string]string  `json:"config"`
 }
 
 // Update modifies a provider's configuration (API key, status, priority).
@@ -84,6 +91,18 @@ func (h *ProviderHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Priority != nil {
 		cfg.Priority = *req.Priority
+	}
+	if req.Config != nil {
+		// Merge config into existing ConfigJSON
+		existing := make(map[string]string)
+		if cfg.ConfigJSON != "" {
+			_ = json.Unmarshal([]byte(cfg.ConfigJSON), &existing)
+		}
+		for k, v := range req.Config {
+			existing[k] = v
+		}
+		raw, _ := json.Marshal(existing)
+		cfg.ConfigJSON = string(raw)
 	}
 
 	if err := h.repo.Upsert(r.Context(), cfg); err != nil {

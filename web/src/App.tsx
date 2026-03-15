@@ -19,6 +19,7 @@ import AdminLayout from "@/pages/admin/AdminLayout";
 import LibrariesAdmin from "@/pages/admin/LibrariesAdmin";
 import UsersAdmin from "@/pages/admin/UsersAdmin";
 import SystemAdmin from "@/pages/admin/SystemAdmin";
+import ProvidersAdmin from "@/pages/admin/ProvidersAdmin";
 
 export function App() {
   const loadFromStorage = useAuthStore((s) => s.loadFromStorage);
@@ -83,6 +84,7 @@ export function App() {
             <Route element={<AdminLayout />}>
               <Route index element={<Navigate to="libraries" replace />} />
               <Route path="libraries" element={<LibrariesAdmin />} />
+              <Route path="providers" element={<ProvidersAdmin />} />
               <Route path="users" element={<UsersAdmin />} />
               <Route path="system" element={<SystemAdmin />} />
             </Route>

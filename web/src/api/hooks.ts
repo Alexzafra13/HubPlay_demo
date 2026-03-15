@@ -208,6 +208,7 @@ export function useProviders() {
       status: string;
       priority: number;
       has_api_key: boolean;
+      config?: Record<string, string>;
     }>
   >({
     queryKey: queryKeys.providers,
@@ -220,7 +221,7 @@ export function useUpdateProvider() {
   return useMutation<
     { name: string; status: string; priority: number },
     Error,
-    { name: string; data: { api_key?: string; status?: string; priority?: number } }
+    { name: string; data: { api_key?: string; status?: string; priority?: number; config?: Record<string, string> } }
   >({
     mutationFn: ({ name, data }) => api.updateProvider(name, data),
     onSuccess: () => {
@@ -266,6 +267,17 @@ export function useBrowseDirectories(
   return useQuery<BrowseResponse>({
     queryKey: queryKeys.browseDirectories(path),
     queryFn: () => api.browseDirectories(path),
+    ...options,
+  });
+}
+
+export function useBrowseLibraryDirectories(
+  path?: string,
+  options?: Partial<UseQueryOptions<BrowseResponse>>,
+) {
+  return useQuery<BrowseResponse>({
+    queryKey: ["browse-library", path] as const,
+    queryFn: () => api.browseLibraryDirectories(path),
     ...options,
   });
 }
@@ -325,9 +337,9 @@ export function useDeleteLibrary() {
 
 export function useScanLibrary() {
   const queryClient = useQueryClient();
-  return useMutation<void, Error, string>({
-    mutationFn: (id) => api.scanLibrary(id),
-    onSuccess: (_data, id) => {
+  return useMutation<void, Error, { id: string; refreshMetadata?: boolean }>({
+    mutationFn: ({ id, refreshMetadata }) => api.scanLibrary(id, refreshMetadata),
+    onSuccess: (_data, { id }) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.library(id) });
       queryClient.invalidateQueries({ queryKey: queryKeys.libraries });
     },

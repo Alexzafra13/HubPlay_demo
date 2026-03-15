@@ -5,7 +5,9 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 
 	"hubplay/internal/auth"
 	"hubplay/internal/db"
@@ -116,12 +118,66 @@ func (h *LibraryHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 func (h *LibraryHandler) Scan(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if err := h.lib.Scan(r.Context(), id); err != nil {
+	refreshMeta := r.URL.Query().Get("refresh_metadata") == "true"
+	if err := h.lib.Scan(r.Context(), id, refreshMeta); err != nil {
 		handleServiceError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusAccepted, map[string]any{
 		"data": map[string]any{"status": "scanning", "library_id": id},
+	})
+}
+
+func (h *LibraryHandler) Browse(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Path string `json:"path"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
+		return
+	}
+	if req.Path == "" {
+		req.Path = "/"
+	}
+
+	absPath, err := filepath.Abs(req.Path)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "BROWSE_ERROR", "invalid path")
+		return
+	}
+
+	entries, err := os.ReadDir(absPath)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "BROWSE_ERROR", err.Error())
+		return
+	}
+
+	type dirEntry struct {
+		Name string `json:"name"`
+		Path string `json:"path"`
+	}
+	dirs := make([]dirEntry, 0)
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		dirs = append(dirs, dirEntry{
+			Name: entry.Name(),
+			Path: filepath.Join(absPath, entry.Name()),
+		})
+	}
+
+	parent := filepath.Dir(absPath)
+	if parent == absPath {
+		parent = ""
+	}
+
+	respondJSON(w, http.StatusOK, map[string]any{
+		"data": map[string]any{
+			"current":     absPath,
+			"parent":      parent,
+			"directories": dirs,
+		},
 	})
 }
 

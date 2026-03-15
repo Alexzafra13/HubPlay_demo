@@ -78,7 +78,7 @@ func NewRouter(deps Dependencies) http.Handler {
 
 		// Setup wizard (no auth for status, auth handled per-step)
 		if deps.SetupService != nil {
-			setupHandler := handlers.NewSetupHandler(deps.SetupService, deps.Auth, deps.Libraries, deps.Users, deps.Config, deps.Logger)
+			setupHandler := handlers.NewSetupHandler(deps.SetupService, deps.Auth, deps.Libraries, deps.Users, deps.ProviderRepo, deps.Config, deps.Logger)
 
 			r.Get("/setup/status", setupHandler.Status)
 			r.Get("/setup/capabilities", setupHandler.Capabilities)
@@ -108,7 +108,7 @@ func NewRouter(deps Dependencies) http.Handler {
 
 			// Watch Progress & User Engagement
 			if deps.UserData != nil {
-				progressHandler := handlers.NewProgressHandler(deps.UserData, deps.Logger)
+				progressHandler := handlers.NewProgressHandler(deps.UserData, deps.Images, deps.Logger)
 
 				r.Get("/me/continue-watching", progressHandler.ContinueWatching)
 				r.Get("/me/favorites", progressHandler.Favorites)
@@ -164,6 +164,7 @@ func NewRouter(deps Dependencies) http.Handler {
 				r.Group(func(r chi.Router) {
 					r.Use(auth.RequireAdmin)
 					r.Post("/libraries", libHandler.Create)
+					r.Post("/libraries/browse", libHandler.Browse)
 				})
 
 				// IPTV channels (within library routes)

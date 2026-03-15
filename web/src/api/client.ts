@@ -231,8 +231,15 @@ export class ApiClient {
     return this.request<void>("DELETE", `/libraries/${id}`);
   }
 
-  async scanLibrary(id: string): Promise<void> {
-    return this.request<void>("POST", `/libraries/${id}/scan`);
+  async scanLibrary(id: string, refreshMetadata?: boolean): Promise<void> {
+    const qs = refreshMetadata ? "?refresh_metadata=true" : "";
+    return this.request<void>("POST", `/libraries/${id}/scan${qs}`);
+  }
+
+  async browseLibraryDirectories(path?: string): Promise<BrowseResponse> {
+    return this.request<BrowseResponse>("POST", "/libraries/browse", {
+      body: path ? { path } : {},
+    });
   }
 
   // ─── Items ────────────────────────────────────────────────────────────
@@ -383,6 +390,7 @@ export class ApiClient {
       status: string;
       priority: number;
       has_api_key: boolean;
+      config?: Record<string, string>;
     }>
   > {
     return this.request("GET", "/providers");
@@ -390,7 +398,7 @@ export class ApiClient {
 
   async updateProvider(
     name: string,
-    data: { api_key?: string; status?: string; priority?: number },
+    data: { api_key?: string; status?: string; priority?: number; config?: Record<string, string> },
   ): Promise<{ name: string; status: string; priority: number }> {
     return this.request("PUT", `/providers/${name}`, { body: data });
   }

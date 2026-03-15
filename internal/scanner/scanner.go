@@ -192,6 +192,30 @@ func (s *Scanner) walkPath(ctx context.Context, lib *db.Library, root string, se
 	})
 }
 
+// RefreshMetadata re-fetches metadata and images for all items in a library.
+// It deletes existing images/metadata and re-enriches from providers.
+func (s *Scanner) RefreshMetadata(ctx context.Context, lib *db.Library) error {
+	items, _, err := s.items.List(ctx, db.ItemFilter{
+		LibraryID: lib.ID,
+		Limit:     100000,
+	})
+	if err != nil {
+		return fmt.Errorf("listing items for refresh: %w", err)
+	}
+
+	s.logger.Info("refreshing metadata for library", "library", lib.Name, "items", len(items))
+
+	for _, item := range items {
+		// Delete old images and metadata so enrichMetadata re-fetches them
+		_ = s.images.DeleteByItem(ctx, item.ID)
+		_ = s.metadata.Delete(ctx, item.ID)
+		s.enrichMetadata(ctx, item)
+	}
+
+	s.logger.Info("metadata refresh complete", "library", lib.Name, "items", len(items))
+	return nil
+}
+
 func (s *Scanner) processFile(ctx context.Context, lib *db.Library, path string, result *ScanResult) error {
 	// Check if item already exists
 	existing, err := s.items.GetByPath(ctx, path)
@@ -202,7 +226,10 @@ func (s *Scanner) processFile(ctx context.Context, lib *db.Library, path string,
 			return fpErr
 		}
 		if existing.Fingerprint == fp && existing.IsAvailable {
-			return nil // unchanged
+			// File unchanged — but re-enrich if metadata is missing
+			// (e.g. provider API key was added after initial scan)
+			s.enrichIfMissing(ctx, existing)
+			return nil
 		}
 		// File changed or was unavailable — re-probe and update
 		return s.updateItem(ctx, existing, path, fp, result)
@@ -361,6 +388,22 @@ func parseTitleYear(filename string) (string, int) {
 	}
 
 	return title, year
+}
+
+// enrichIfMissing re-runs metadata enrichment for existing items that lack
+// metadata (e.g. because the TMDB API key was not configured during the
+// initial scan).
+func (s *Scanner) enrichIfMissing(ctx context.Context, item *db.Item) {
+	if s.providers == nil {
+		return
+	}
+	// Check if this item already has images (poster) — if so, skip
+	imgs, err := s.images.ListByItem(ctx, item.ID)
+	if err == nil && len(imgs) > 0 {
+		return // already enriched
+	}
+	s.logger.Info("re-enriching item missing metadata", "title", item.Title, "id", item.ID)
+	s.enrichMetadata(ctx, item)
 }
 
 // enrichMetadata searches TMDB for the item and stores metadata + images.

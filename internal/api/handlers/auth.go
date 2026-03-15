@@ -6,9 +6,25 @@ import (
 	"net/http"
 
 	"hubplay/internal/auth"
+	"hubplay/internal/db"
 	"hubplay/internal/domain"
 	"hubplay/internal/user"
 )
+
+func authTokenResponse(token *auth.AuthToken, u *db.User) map[string]any {
+	return map[string]any{
+		"access_token":  token.AccessToken,
+		"refresh_token": token.RefreshToken,
+		"expires_at":    token.ExpiresAt,
+		"user": map[string]any{
+			"id":           u.ID,
+			"username":     u.Username,
+			"display_name": u.DisplayName,
+			"role":         u.Role,
+			"created_at":   u.CreatedAt,
+		},
+	}
+}
 
 type AuthHandler struct {
 	auth   *auth.Service
@@ -56,7 +72,13 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respondJSON(w, http.StatusOK, map[string]any{"data": token})
+	u, err := h.users.GetByID(r.Context(), token.UserID)
+	if err != nil {
+		handleServiceError(w, err)
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]any{"data": authTokenResponse(token, u)})
 }
 
 type refreshRequest struct {
@@ -81,7 +103,13 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respondJSON(w, http.StatusOK, map[string]any{"data": token})
+	u, err := h.users.GetByID(r.Context(), token.UserID)
+	if err != nil {
+		handleServiceError(w, err)
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]any{"data": authTokenResponse(token, u)})
 }
 
 type logoutRequest struct {
@@ -206,13 +234,13 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 
 	h.logger.Info("setup completed — admin user created", "username", u.Username)
 
-	respondJSON(w, http.StatusCreated, map[string]any{
-		"data": map[string]any{
-			"id":           u.ID,
-			"username":     u.Username,
-			"display_name": u.DisplayName,
-			"role":         u.Role,
-		},
-	})
+	// Auto-login the new admin user
+	token, err := h.auth.Login(r.Context(), req.Username, req.Password, r.UserAgent(), "setup", r.RemoteAddr)
+	if err != nil {
+		handleServiceError(w, err)
+		return
+	}
+
+	respondJSON(w, http.StatusCreated, map[string]any{"data": authTokenResponse(token, u)})
 }
 

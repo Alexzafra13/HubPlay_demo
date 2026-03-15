@@ -125,6 +125,7 @@ export interface UserData {
 }
 
 export interface ItemDetail extends MediaItem {
+  duration_ticks: number | null;
   media_streams: MediaStream[];
   people: Person[];
   user_data: UserData | null;

@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import type { FC } from "react";
-import { useBrowseDirectories } from "@/api/hooks";
+import { useBrowseDirectories, useBrowseLibraryDirectories } from "@/api/hooks";
 import { Modal } from "@/components/common/Modal";
 import { Button } from "@/components/common/Button";
 import { Spinner } from "@/components/common/Spinner";
@@ -9,14 +9,21 @@ interface FolderBrowserProps {
   isOpen: boolean;
   onClose: () => void;
   onSelect: (path: string) => void;
+  /** Use the authenticated admin browse endpoint instead of the setup one */
+  useAdmin?: boolean;
 }
 
-const FolderBrowser: FC<FolderBrowserProps> = ({ isOpen, onClose, onSelect }) => {
+const FolderBrowser: FC<FolderBrowserProps> = ({ isOpen, onClose, onSelect, useAdmin }) => {
   const [currentPath, setCurrentPath] = useState<string | undefined>(undefined);
 
-  const { data, isLoading, isError, error } = useBrowseDirectories(currentPath, {
-    enabled: isOpen,
+  const setupBrowse = useBrowseDirectories(currentPath, {
+    enabled: isOpen && !useAdmin,
   });
+  const adminBrowse = useBrowseLibraryDirectories(currentPath, {
+    enabled: isOpen && !!useAdmin,
+  });
+
+  const { data, isLoading, isError, error } = useAdmin ? adminBrowse : setupBrowse;
 
   const handleNavigate = useCallback((path: string) => {
     setCurrentPath(path);

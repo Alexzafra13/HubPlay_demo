@@ -2,6 +2,7 @@ import { NavLink, Outlet } from "react-router";
 
 const tabs = [
   { label: "Libraries", to: "/admin/libraries" },
+  { label: "Providers", to: "/admin/providers" },
   { label: "Users", to: "/admin/users" },
   { label: "System", to: "/admin/system" },
 ] as const;

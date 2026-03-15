@@ -1,0 +1,26 @@
+# docker-compose.dev.yml — Local development on Windows
+#
+# Uso:
+#   docker compose -f docker-compose.dev.yml up --build
+#
+services:
+  hubplay:
+    build: .
+    image: hubplay:dev
+    container_name: hubplay-dev
+    ports:
+      - "8097:8096"
+    volumes:
+      - ./config:/config
+      - ./cache:/cache
+      # Media local para pruebas
+      - ./peliculas:/media/peliculas:ro
+    environment:
+      - TZ=Europe/Madrid
+      - HUBPLAY_LOGGING_LEVEL=debug
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

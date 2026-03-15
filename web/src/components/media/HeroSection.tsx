@@ -68,7 +68,7 @@ const HeroSection: FC<HeroSectionProps> = ({ item, onPlay }) => {
             <Badge>{item.content_rating}</Badge>
           )}
 
-          {item.genres.map((genre) => (
+          {item.genres?.map((genre) => (
             <Badge key={genre}>{genre}</Badge>
           ))}
         </div>
