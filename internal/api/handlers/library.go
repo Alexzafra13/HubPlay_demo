@@ -60,7 +60,10 @@ func (h *LibraryHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	items := make([]map[string]any, len(libs))
 	for i, lib := range libs {
-		items[i] = libraryResponse(lib)
+		resp := libraryResponse(lib)
+		count, _ := h.lib.ItemCount(r.Context(), lib.ID)
+		resp["item_count"] = count
+		items[i] = resp
 	}
 
 	respondJSON(w, http.StatusOK, map[string]any{"data": items})
