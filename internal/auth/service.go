@@ -192,7 +192,7 @@ func (s *Service) RefreshToken(ctx context.Context, refreshToken string) (*AuthT
 
 	// Generate new access token (keep same refresh token + session)
 	accessToken, expiresAt, err := generateAccessToken(
-		s.cfg.JWTSecret, user.ID, user.Username, user.Role, s.cfg.AccessTokenTTL,
+		s.cfg.JWTSecret, user.ID, user.Username, user.Role, s.cfg.AccessTokenTTL, s.clock.Now(),
 	)
 	if err != nil {
 		return nil, err
@@ -252,7 +252,7 @@ func (s *Service) createSession(ctx context.Context, user *db.User, deviceName, 
 	}
 
 	accessToken, expiresAt, err := generateAccessToken(
-		s.cfg.JWTSecret, user.ID, user.Username, user.Role, s.cfg.AccessTokenTTL,
+		s.cfg.JWTSecret, user.ID, user.Username, user.Role, s.cfg.AccessTokenTTL, s.clock.Now(),
 	)
 	if err != nil {
 		return nil, err
