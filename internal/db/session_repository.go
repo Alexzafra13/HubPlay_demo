@@ -129,6 +129,15 @@ func (r *SessionRepository) DeleteOldestByUser(ctx context.Context, userID strin
 	return nil
 }
 
+// DeleteAllByUser removes all sessions for a user (e.g. on password change).
+func (r *SessionRepository) DeleteAllByUser(ctx context.Context, userID string) (int64, error) {
+	res, err := r.db.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, userID)
+	if err != nil {
+		return 0, fmt.Errorf("delete all user sessions: %w", err)
+	}
+	return res.RowsAffected()
+}
+
 func (r *SessionRepository) UpdateLastActive(ctx context.Context, id string, t time.Time) error {
 	_, err := r.db.ExecContext(ctx, `UPDATE sessions SET last_active_at = ? WHERE id = ?`, t, id)
 	if err != nil {

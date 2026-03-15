@@ -76,6 +76,7 @@ func run(configPath string) error {
 
 	// ═══ Phase 4: Core Services ═══
 	authService := auth.NewService(repos.Users, repos.Sessions, cfg.Auth, clk, logger)
+	authService.StartSessionCleaner(ctx)
 	userService := user.NewService(repos.Users, logger)
 
 	prober := probe.New()
@@ -153,10 +154,10 @@ func run(configPath string) error {
 	}()
 
 	// ═══ Phase 7: Wait for shutdown ═══
-	return waitForShutdown(ctx, cancel, server, streamManager, iptvService, iptvProxy, scanScheduler, database, logger)
+	return waitForShutdown(ctx, cancel, server, streamManager, iptvService, iptvProxy, scanScheduler, authService, database, logger)
 }
 
-func waitForShutdown(ctx context.Context, cancel context.CancelFunc, server *http.Server, sm *stream.Manager, iptvSvc *iptv.Service, iptvProxy *iptv.StreamProxy, scheduler *library.Scheduler, database interface{ Close() error }, logger *slog.Logger) error {
+func waitForShutdown(ctx context.Context, cancel context.CancelFunc, server *http.Server, sm *stream.Manager, iptvSvc *iptv.Service, iptvProxy *iptv.StreamProxy, scheduler *library.Scheduler, authSvc *auth.Service, database interface{ Close() error }, logger *slog.Logger) error {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
@@ -172,9 +173,11 @@ func waitForShutdown(ctx context.Context, cancel context.CancelFunc, server *htt
 
 	logger.Info("starting graceful shutdown...")
 
-	// Stop scheduler
+	// Stop background services
 	scheduler.Stop()
 	logger.Info("scan scheduler stopped")
+	authSvc.StopSessionCleaner()
+	logger.Info("session cleaner stopped")
 
 	// Stop HTTP server
 	if err := server.Shutdown(shutdownCtx); err != nil {

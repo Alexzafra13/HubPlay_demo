@@ -34,11 +34,13 @@ type RegisterRequest struct {
 }
 
 type Service struct {
-	users    *db.UserRepository
-	sessions *db.SessionRepository
-	cfg      config.AuthConfig
-	clock    clock.Clock
-	logger   *slog.Logger
+	users       *db.UserRepository
+	sessions    *db.SessionRepository
+	cfg         config.AuthConfig
+	clock       clock.Clock
+	logger      *slog.Logger
+	stopCh      chan struct{}
+	rateLimiter *loginRateLimiter
 }
 
 func NewService(
@@ -49,12 +51,46 @@ func NewService(
 	logger *slog.Logger,
 ) *Service {
 	return &Service{
-		users:    users,
-		sessions: sessions,
-		cfg:      cfg,
-		clock:    clk,
-		logger:   logger.With("module", "auth"),
+		users:       users,
+		sessions:    sessions,
+		cfg:         cfg,
+		clock:       clk,
+		logger:      logger.With("module", "auth"),
+		stopCh:      make(chan struct{}),
+		rateLimiter: newLoginRateLimiter(5, 15*time.Minute, 15*time.Minute), // 5 fails in 15min → locked 15min
 	}
+}
+
+// StartSessionCleaner starts a background goroutine that periodically
+// removes expired sessions from the database.
+func (s *Service) StartSessionCleaner(ctx context.Context) {
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+
+		// Run once immediately on startup
+		if cleaned, err := s.sessions.DeleteExpired(ctx); err == nil && cleaned > 0 {
+			s.logger.Info("startup: cleaned expired sessions", "count", cleaned)
+		}
+
+		for {
+			select {
+			case <-ticker.C:
+				if cleaned, err := s.sessions.DeleteExpired(ctx); err == nil && cleaned > 0 {
+					s.logger.Info("cleaned expired sessions", "count", cleaned)
+				}
+			case <-s.stopCh:
+				return
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+}
+
+// StopSessionCleaner stops the background session cleanup goroutine.
+func (s *Service) StopSessionCleaner() {
+	close(s.stopCh)
 }
 
 func (s *Service) Register(ctx context.Context, req RegisterRequest) (*db.User, error) {
@@ -87,9 +123,17 @@ func (s *Service) Register(ctx context.Context, req RegisterRequest) (*db.User, 
 }
 
 func (s *Service) Login(ctx context.Context, username, password, deviceName, deviceID, ip string) (*AuthToken, error) {
+	// Rate limit check (by username and by IP separately)
+	if s.rateLimiter.isLocked(username) || s.rateLimiter.isLocked("ip:"+ip) {
+		s.logger.Warn("login rate limited", "username", username, "ip", ip)
+		return nil, fmt.Errorf("too many failed attempts, try again later: %w", domain.ErrForbidden)
+	}
+
 	user, err := s.users.GetByUsername(ctx, username)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
+			s.rateLimiter.recordFailure(username)
+			s.rateLimiter.recordFailure("ip:" + ip)
 			return nil, fmt.Errorf("login: %w", domain.ErrInvalidPassword)
 		}
 		return nil, fmt.Errorf("login lookup: %w", err)
@@ -100,8 +144,15 @@ func (s *Service) Login(ctx context.Context, username, password, deviceName, dev
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
+		s.rateLimiter.recordFailure(username)
+		s.rateLimiter.recordFailure("ip:" + ip)
+		s.logger.Warn("failed login attempt", "username", username, "ip", ip)
 		return nil, fmt.Errorf("login: %w", domain.ErrInvalidPassword)
 	}
+
+	// Clear rate limit on success
+	s.rateLimiter.recordSuccess(username)
+	s.rateLimiter.recordSuccess("ip:" + ip)
 
 	token, err := s.createSession(ctx, user, deviceName, deviceID, ip)
 	if err != nil {
@@ -166,18 +217,24 @@ func (s *Service) ValidateToken(ctx context.Context, tokenStr string) (*Claims, 
 	return claims, nil
 }
 
+// InvalidateUserSessions removes all sessions for a user.
+// Call this on password change, account disable, or admin force-logout.
+func (s *Service) InvalidateUserSessions(ctx context.Context, userID string) error {
+	count, err := s.sessions.DeleteAllByUser(ctx, userID)
+	if err != nil {
+		return err
+	}
+	s.logger.Info("invalidated all user sessions", "user_id", userID, "count", count)
+	return nil
+}
+
 func (s *Service) Logout(ctx context.Context, refreshToken string) error {
 	tokenHash := hashToken(refreshToken)
 	return s.sessions.DeleteByRefreshTokenHash(ctx, tokenHash)
 }
 
 func (s *Service) createSession(ctx context.Context, user *db.User, deviceName, deviceID, ip string) (*AuthToken, error) {
-	// Clean up expired sessions first (for this user and globally)
-	if cleaned, err := s.sessions.DeleteExpired(ctx); err == nil && cleaned > 0 {
-		s.logger.Debug("cleaned expired sessions", "count", cleaned)
-	}
-
-	// Enforce max sessions per user
+	// Enforce max sessions per user (expired sessions cleaned by background job)
 	if s.cfg.MaxSessionsPerUser > 0 {
 		count, err := s.sessions.CountByUser(ctx, user.ID)
 		if err != nil {
