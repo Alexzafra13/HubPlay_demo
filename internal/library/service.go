@@ -79,6 +79,17 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*db.Library, e
 	}
 
 	s.logger.Info("library created", "id", lib.ID, "name", lib.Name, "type", lib.ContentType)
+
+	// Auto-scan the new library (like Jellyfin does on library creation)
+	if lib.ScanMode != "manual" {
+		go func() {
+			scanCtx := context.Background()
+			if _, err := s.scanner.ScanLibrary(scanCtx, lib); err != nil {
+				s.logger.Error("auto-scan after creation failed", "library_id", lib.ID, "error", err)
+			}
+		}()
+	}
+
 	return lib, nil
 }
 
@@ -218,6 +229,23 @@ func (s *Service) LatestItems(ctx context.Context, libraryID string, itemType st
 
 func (s *Service) ItemCount(ctx context.Context, libraryID string) (int, error) {
 	return s.items.CountByLibrary(ctx, libraryID)
+}
+
+// ScanAll triggers an async scan for all libraries with auto scan mode.
+func (s *Service) ScanAll(ctx context.Context) {
+	libs, err := s.libraries.List(ctx)
+	if err != nil {
+		s.logger.Error("failed to list libraries for scan-all", "error", err)
+		return
+	}
+	for _, lib := range libs {
+		if lib.ScanMode == "manual" {
+			continue
+		}
+		if err := s.Scan(ctx, lib.ID); err != nil {
+			s.logger.Warn("scan-all: skipping library", "id", lib.ID, "name", lib.Name, "error", err)
+		}
+	}
 }
 
 func validateCreateRequest(req CreateRequest) error {
