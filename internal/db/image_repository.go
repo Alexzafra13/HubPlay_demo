@@ -83,6 +83,58 @@ func (r *ImageRepository) GetPrimary(ctx context.Context, itemID, imgType string
 	return img, nil
 }
 
+// GetPrimaryURLs returns poster and backdrop URLs for a batch of item IDs.
+// Returns map[itemID]map[imageType]url.
+func (r *ImageRepository) GetPrimaryURLs(ctx context.Context, itemIDs []string) (map[string]map[string]string, error) {
+	if len(itemIDs) == 0 {
+		return nil, nil
+	}
+
+	placeholders := make([]string, len(itemIDs))
+	args := make([]any, len(itemIDs))
+	for i, id := range itemIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	query := fmt.Sprintf(
+		`SELECT item_id, type, path FROM images
+		 WHERE item_id IN (%s) AND is_primary = 1 AND type IN ('primary', 'backdrop')
+		 ORDER BY item_id, type`,
+		joinStrings(placeholders, ","),
+	)
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("get primary urls: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[string]map[string]string)
+	for rows.Next() {
+		var itemID, imgType, path string
+		if err := rows.Scan(&itemID, &imgType, &path); err != nil {
+			return nil, fmt.Errorf("scan primary url: %w", err)
+		}
+		if result[itemID] == nil {
+			result[itemID] = make(map[string]string)
+		}
+		result[itemID][imgType] = path
+	}
+	return result, rows.Err()
+}
+
+func joinStrings(s []string, sep string) string {
+	result := ""
+	for i, v := range s {
+		if i > 0 {
+			result += sep
+		}
+		result += v
+	}
+	return result
+}
+
 func (r *ImageRepository) DeleteByItem(ctx context.Context, itemID string) error {
 	_, err := r.db.ExecContext(ctx, `DELETE FROM images WHERE item_id = ?`, itemID)
 	if err != nil {

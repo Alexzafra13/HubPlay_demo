@@ -374,6 +374,27 @@ export class ApiClient {
     return this.request<string[]>("GET", `/libraries/${libraryId}/channels/groups`);
   }
 
+  // ─── Providers ──────────────────────────────────────────────────────
+
+  async getProviders(): Promise<
+    Array<{
+      name: string;
+      type: string;
+      status: string;
+      priority: number;
+      has_api_key: boolean;
+    }>
+  > {
+    return this.request("GET", "/providers");
+  }
+
+  async updateProvider(
+    name: string,
+    data: { api_key?: string; status?: string; priority?: number },
+  ): Promise<{ name: string; status: string; priority: number }> {
+    return this.request("PUT", `/providers/${name}`, { body: data });
+  }
+
   // ─── System ───────────────────────────────────────────────────────────
 
   async getHealth(): Promise<HealthResponse> {

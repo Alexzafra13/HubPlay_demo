@@ -31,6 +31,8 @@ type Dependencies struct {
 	IPTVProxy      *iptv.StreamProxy
 	Items          *db.ItemRepository
 	MediaStreams    *db.MediaStreamRepository
+	Images         *db.ImageRepository
+	Metadata       *db.MetadataRepository
 	UserData       *db.UserDataRepository
 	Providers      *provider.Manager
 	ProviderRepo   *db.ProviderRepository
@@ -142,8 +144,8 @@ func NewRouter(deps Dependencies) http.Handler {
 
 			// Libraries & Items (only if service is wired)
 			if deps.Libraries != nil {
-				libHandler := handlers.NewLibraryHandler(deps.Libraries, deps.Logger)
-				itemHandler := handlers.NewItemHandler(deps.Libraries, deps.Logger)
+				libHandler := handlers.NewLibraryHandler(deps.Libraries, deps.Images, deps.Metadata, deps.Logger)
+				itemHandler := handlers.NewItemHandler(deps.Libraries, deps.Images, deps.Metadata, deps.Logger)
 
 				// Libraries
 				r.Get("/libraries", libHandler.List)

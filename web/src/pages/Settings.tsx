@@ -1,11 +1,169 @@
+import { useState } from "react";
 import { useAuthStore } from "@/store/auth";
-import { useLibraries, useScanLibrary } from "@/api/hooks";
+import { useLibraries, useScanLibrary, useProviders, useUpdateProvider } from "@/api/hooks";
 import type { Library } from "@/api/types";
 import { Badge, Button, Spinner } from "@/components/common";
 
 function getPathAccessible(lib: Library, path: string): boolean | undefined {
   const status = lib.path_status?.find((ps) => ps.path === path);
   return status?.accessible;
+}
+
+function ProviderSettings() {
+  const { data: providers, isLoading } = useProviders();
+  const updateProvider = useUpdateProvider();
+  const [apiKeys, setApiKeys] = useState<Record<string, string>>({});
+  const [saved, setSaved] = useState<Record<string, boolean>>({});
+
+  const providerMeta: Record<string, { label: string; description: string; url: string }> = {
+    tmdb: {
+      label: "TMDB (The Movie Database)",
+      description: "Posters, backdrops, synopses, ratings, cast & crew",
+      url: "https://www.themoviedb.org/settings/api",
+    },
+    opensubtitles: {
+      label: "OpenSubtitles",
+      description: "Automatic subtitle downloads",
+      url: "https://www.opensubtitles.com/consumers",
+    },
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex justify-center py-8">
+        <Spinner />
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      {providers?.map((p) => {
+        const meta = providerMeta[p.name] ?? {
+          label: p.name,
+          description: p.type,
+          url: "",
+        };
+        const isSaved = saved[p.name];
+
+        return (
+          <div
+            key={p.name}
+            className="rounded-[--radius-lg] border border-border bg-bg-card p-4"
+          >
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <span className="font-medium text-text-primary">
+                  {meta.label}
+                </span>
+                <Badge
+                  variant={
+                    p.has_api_key && p.status === "active"
+                      ? "success"
+                      : "default"
+                  }
+                >
+                  {p.has_api_key ? "Configured" : "Not configured"}
+                </Badge>
+              </div>
+            </div>
+
+            <p className="text-xs text-text-muted mb-3">{meta.description}</p>
+
+            <div className="flex items-end gap-2">
+              <div className="flex-1">
+                <label
+                  htmlFor={`api-key-${p.name}`}
+                  className="block text-xs font-medium text-text-secondary mb-1"
+                >
+                  API Key
+                </label>
+                <input
+                  id={`api-key-${p.name}`}
+                  type="password"
+                  placeholder={p.has_api_key ? "••••••••••••" : "Enter API key"}
+                  value={apiKeys[p.name] ?? ""}
+                  onChange={(e) => {
+                    setApiKeys((prev) => ({
+                      ...prev,
+                      [p.name]: e.target.value,
+                    }));
+                    setSaved((prev) => ({ ...prev, [p.name]: false }));
+                  }}
+                  className="w-full rounded-md border border-border bg-bg-elevated px-3 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
+                />
+              </div>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={!apiKeys[p.name]}
+                isLoading={
+                  updateProvider.isPending &&
+                  (updateProvider.variables as { name: string })?.name ===
+                    p.name
+                }
+                onClick={() => {
+                  updateProvider.mutate(
+                    {
+                      name: p.name,
+                      data: {
+                        api_key: apiKeys[p.name],
+                        status: "active",
+                      },
+                    },
+                    {
+                      onSuccess: () => {
+                        setApiKeys((prev) => ({ ...prev, [p.name]: "" }));
+                        setSaved((prev) => ({ ...prev, [p.name]: true }));
+                        setTimeout(
+                          () =>
+                            setSaved((prev) => ({
+                              ...prev,
+                              [p.name]: false,
+                            })),
+                          3000,
+                        );
+                      },
+                    },
+                  );
+                }}
+              >
+                {isSaved ? "Saved!" : "Save"}
+              </Button>
+            </div>
+
+            {meta.url && (
+              <p className="mt-2 text-xs text-text-muted">
+                Get your API key at{" "}
+                <a
+                  href={meta.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-accent hover:underline"
+                >
+                  {new URL(meta.url).hostname}
+                </a>
+              </p>
+            )}
+          </div>
+        );
+      })}
+
+      {(!providers || providers.length === 0) && (
+        <div className="rounded-[--radius-lg] border border-border bg-bg-card p-6 text-center">
+          <p className="text-sm text-text-muted">No providers available.</p>
+        </div>
+      )}
+
+      <div className="rounded-md bg-accent/10 border border-accent/20 px-3 py-2">
+        <p className="text-xs text-text-secondary">
+          After saving a TMDB API key, run a library scan to fetch metadata,
+          posters, and backdrops for your media. New items will be automatically
+          enriched during future scans.
+        </p>
+      </div>
+    </div>
+  );
 }
 
 export default function Settings() {
@@ -44,6 +202,16 @@ export default function Settings() {
           </div>
         </div>
       </section>
+
+      {/* Metadata Providers (admin only) */}
+      {isAdmin && (
+        <section className="flex flex-col gap-4">
+          <h2 className="text-lg font-semibold text-text-primary">
+            Metadata Providers
+          </h2>
+          <ProviderSettings />
+        </section>
+      )}
 
       {/* Libraries Overview */}
       <section className="flex flex-col gap-4">

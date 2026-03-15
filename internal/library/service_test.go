@@ -29,7 +29,7 @@ func newTestLibraryService(t *testing.T) *library.Service {
 	repos := db.NewRepositories(database)
 	bus := event.NewBus(slog.Default())
 	prober := &mockProber{}
-	scnr := scanner.New(repos.Items, repos.MediaStreams, prober, bus, slog.Default())
+	scnr := scanner.New(repos.Items, repos.MediaStreams, repos.Metadata, repos.ExternalIDs, repos.Images, nil, prober, bus, slog.Default())
 	return library.NewService(repos.Libraries, repos.Items, repos.MediaStreams, repos.Images, scnr, slog.Default())
 }
 

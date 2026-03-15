@@ -41,6 +41,7 @@ export const queryKeys = {
   channel: (id: string) => ["channels", id] as const,
   channelSchedule: (id: string) => ["channels", id, "schedule"] as const,
   channelGroups: (libraryId?: string) => ["channels", "groups", libraryId] as const,
+  providers: ["providers"] as const,
   health: ["health"] as const,
   setupStatus: ["setup-status"] as const,
   systemCapabilities: ["system-capabilities"] as const,
@@ -196,6 +197,35 @@ export function useUsers(
     queryKey: queryKeys.users,
     queryFn: () => api.getUsers(),
     ...options,
+  });
+}
+
+export function useProviders() {
+  return useQuery<
+    Array<{
+      name: string;
+      type: string;
+      status: string;
+      priority: number;
+      has_api_key: boolean;
+    }>
+  >({
+    queryKey: queryKeys.providers,
+    queryFn: () => api.getProviders(),
+  });
+}
+
+export function useUpdateProvider() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    { name: string; status: string; priority: number },
+    Error,
+    { name: string; data: { api_key?: string; status?: string; priority?: number } }
+  >({
+    mutationFn: ({ name, data }) => api.updateProvider(name, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.providers });
+    },
   });
 }
 

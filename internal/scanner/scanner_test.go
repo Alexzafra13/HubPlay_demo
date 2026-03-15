@@ -58,7 +58,11 @@ func newTestScanner(t *testing.T) (*Scanner, *db.ItemRepository, *db.MediaStream
 		},
 	}
 
-	s := New(itemRepo, streamRepo, prober, bus, slog.Default())
+	metaRepo := db.NewMetadataRepository(database)
+	extIDRepo := db.NewExternalIDRepository(database)
+	imageRepo := db.NewImageRepository(database)
+
+	s := New(itemRepo, streamRepo, metaRepo, extIDRepo, imageRepo, nil, prober, bus, slog.Default())
 	return s, itemRepo, streamRepo
 }
 
