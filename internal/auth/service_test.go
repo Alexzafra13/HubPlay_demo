@@ -29,7 +29,7 @@ func newTestAuthService(t *testing.T) (*auth.Service, *db.UserRepository, *db.Se
 		MaxSessionsPerUser: 5,
 	}
 
-	clk := &clock.Mock{CurrentTime: time.Date(2026, 3, 13, 10, 0, 0, 0, time.UTC)}
+	clk := &clock.Mock{CurrentTime: time.Now().UTC()}
 
 	svc := auth.NewService(userRepo, sessionRepo, cfg, clk, slog.Default())
 	return svc, userRepo, sessionRepo

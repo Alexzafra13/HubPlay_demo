@@ -29,7 +29,7 @@ func newStreamTestApp(t *testing.T) *streamTestApp {
 	database := testutil.NewTestDB(t)
 	repos := db.NewRepositories(database)
 	cfg := config.TestConfig()
-	clk := &clock.Mock{CurrentTime: time.Date(2026, 3, 14, 10, 0, 0, 0, time.UTC)}
+	clk := &clock.Mock{CurrentTime: time.Now().UTC()}
 
 	authSvc := auth.NewService(repos.Users, repos.Sessions, cfg.Auth, clk, slog.Default())
 	userSvc := user.NewService(repos.Users, slog.Default())

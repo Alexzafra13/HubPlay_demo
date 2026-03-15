@@ -8,7 +8,7 @@ import (
 const testSecret = "test-secret-32-bytes-long-enough!"
 
 func TestGenerateAndValidateAccessToken(t *testing.T) {
-	token, expiresAt, err := generateAccessToken(testSecret, "user-123", "alex", "admin", 15*time.Minute)
+	token, expiresAt, err := generateAccessToken(testSecret, "user-123", "alex", "admin", 15*time.Minute, time.Now())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -37,7 +37,7 @@ func TestGenerateAndValidateAccessToken(t *testing.T) {
 
 func TestValidateAccessToken_Expired(t *testing.T) {
 	// Generate token that expired 1 minute ago
-	token, _, err := generateAccessToken(testSecret, "user-123", "alex", "user", -1*time.Minute)
+	token, _, err := generateAccessToken(testSecret, "user-123", "alex", "user", -1*time.Minute, time.Now())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -49,7 +49,7 @@ func TestValidateAccessToken_Expired(t *testing.T) {
 }
 
 func TestValidateAccessToken_WrongSecret(t *testing.T) {
-	token, _, err := generateAccessToken(testSecret, "user-123", "alex", "user", 15*time.Minute)
+	token, _, err := generateAccessToken(testSecret, "user-123", "alex", "user", 15*time.Minute, time.Now())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestValidateAccessToken_WrongSecret(t *testing.T) {
 }
 
 func TestValidateAccessToken_Tampered(t *testing.T) {
-	token, _, err := generateAccessToken(testSecret, "user-123", "alex", "user", 15*time.Minute)
+	token, _, err := generateAccessToken(testSecret, "user-123", "alex", "user", 15*time.Minute, time.Now())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
