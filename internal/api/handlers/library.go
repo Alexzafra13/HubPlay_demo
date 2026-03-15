@@ -15,12 +15,14 @@ import (
 )
 
 type LibraryHandler struct {
-	lib    *library.Service
-	logger *slog.Logger
+	lib      *library.Service
+	images   *db.ImageRepository
+	metadata *db.MetadataRepository
+	logger   *slog.Logger
 }
 
-func NewLibraryHandler(lib *library.Service, logger *slog.Logger) *LibraryHandler {
-	return &LibraryHandler{lib: lib, logger: logger}
+func NewLibraryHandler(lib *library.Service, images *db.ImageRepository, metadata *db.MetadataRepository, logger *slog.Logger) *LibraryHandler {
+	return &LibraryHandler{lib: lib, images: images, metadata: metadata, logger: logger}
 }
 
 func (h *LibraryHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -146,10 +148,7 @@ func (h *LibraryHandler) Items(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data := make([]map[string]any, len(items))
-	for i, item := range items {
-		data[i] = itemSummaryResponse(item)
-	}
+	data := h.enrichItemSummaries(r, items)
 
 	respondJSON(w, http.StatusOK, map[string]any{
 		"data": map[string]any{
@@ -172,10 +171,7 @@ func (h *LibraryHandler) LatestItems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data := make([]map[string]any, len(items))
-	for i, item := range items {
-		data[i] = itemSummaryResponse(item)
-	}
+	data := h.enrichItemSummaries(r, items)
 
 	respondJSON(w, http.StatusOK, map[string]any{
 		"data": map[string]any{
@@ -185,6 +181,43 @@ func (h *LibraryHandler) LatestItems(w http.ResponseWriter, r *http.Request) {
 			"limit":  limit,
 		},
 	})
+}
+
+// enrichItemSummaries adds poster_url, backdrop_url, and overview to item summaries.
+func (h *LibraryHandler) enrichItemSummaries(r *http.Request, items []*db.Item) []map[string]any {
+	data := make([]map[string]any, len(items))
+	for i, item := range items {
+		data[i] = itemSummaryResponse(item)
+	}
+
+	if h.images == nil || len(items) == 0 {
+		return data
+	}
+
+	// Batch fetch image URLs
+	itemIDs := make([]string, len(items))
+	for i, item := range items {
+		itemIDs[i] = item.ID
+	}
+
+	imageURLs, err := h.images.GetPrimaryURLs(r.Context(), itemIDs)
+	if err != nil {
+		h.logger.Warn("failed to fetch image URLs", "error", err)
+		return data
+	}
+
+	for i, item := range items {
+		if urls, ok := imageURLs[item.ID]; ok {
+			if poster, ok := urls["primary"]; ok {
+				data[i]["poster_url"] = poster
+			}
+			if backdrop, ok := urls["backdrop"]; ok {
+				data[i]["backdrop_url"] = backdrop
+			}
+		}
+	}
+
+	return data
 }
 
 func libraryResponse(lib *db.Library) map[string]any {

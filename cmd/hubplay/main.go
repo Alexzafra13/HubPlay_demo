@@ -79,7 +79,13 @@ func run(configPath string) error {
 	userService := user.NewService(repos.Users, logger)
 
 	prober := probe.New()
-	scnr := scanner.New(repos.Items, repos.MediaStreams, prober, eventBus, logger)
+
+	// ═══ Phase 4d: Providers (TMDb, OpenSubtitles) ═══
+	providerManager := provider.NewManager(repos.Providers, logger)
+	_ = providerManager.Register(ctx, provider.NewTMDbProvider())
+	_ = providerManager.Register(ctx, provider.NewOpenSubtitlesProvider())
+
+	scnr := scanner.New(repos.Items, repos.MediaStreams, repos.Metadata, repos.ExternalIDs, repos.Images, providerManager, prober, eventBus, logger)
 	libraryService := library.NewService(repos.Libraries, repos.Items, repos.MediaStreams, repos.Images, scnr, logger)
 
 	// ═══ Phase 4a: Library Scan Scheduler ═══
@@ -103,11 +109,6 @@ func run(configPath string) error {
 	iptvService := iptv.NewService(repos.Channels, repos.EPGPrograms, repos.Libraries, logger)
 	iptvProxy := iptv.NewStreamProxy(logger)
 
-	// ═══ Phase 4d: Providers (TMDb, OpenSubtitles) ═══
-	providerManager := provider.NewManager(repos.Providers, logger)
-	_ = providerManager.Register(ctx, provider.NewTMDbProvider())
-	_ = providerManager.Register(ctx, provider.NewOpenSubtitlesProvider())
-
 	// ═══ Phase 4e: Setup Service ═══
 	setupService := setup.NewService(cfg, configPath, logger)
 
@@ -123,6 +124,8 @@ func run(configPath string) error {
 		IPTVProxy:     iptvProxy,
 		Items:         repos.Items,
 		MediaStreams:   repos.MediaStreams,
+		Images:        repos.Images,
+		Metadata:      repos.Metadata,
 		UserData:      repos.UserData,
 		Providers:     providerManager,
 		ProviderRepo:  repos.Providers,

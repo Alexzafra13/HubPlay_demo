@@ -3,18 +3,22 @@ package scanner
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"hubplay/internal/db"
 	"hubplay/internal/event"
 	"hubplay/internal/probe"
+	"hubplay/internal/provider"
 
 	"github.com/google/uuid"
 )
@@ -37,20 +41,38 @@ func IsMediaFile(path string) bool {
 
 // Scanner walks library paths and creates/updates items in the database.
 type Scanner struct {
-	items   *db.ItemRepository
-	streams *db.MediaStreamRepository
-	prober  probe.Prober
-	bus     *event.Bus
-	logger  *slog.Logger
+	items       *db.ItemRepository
+	streams     *db.MediaStreamRepository
+	metadata    *db.MetadataRepository
+	externalIDs *db.ExternalIDRepository
+	images      *db.ImageRepository
+	providers   *provider.Manager
+	prober      probe.Prober
+	bus         *event.Bus
+	logger      *slog.Logger
 }
 
-func New(items *db.ItemRepository, streams *db.MediaStreamRepository, prober probe.Prober, bus *event.Bus, logger *slog.Logger) *Scanner {
+func New(
+	items *db.ItemRepository,
+	streams *db.MediaStreamRepository,
+	metadata *db.MetadataRepository,
+	externalIDs *db.ExternalIDRepository,
+	images *db.ImageRepository,
+	providers *provider.Manager,
+	prober probe.Prober,
+	bus *event.Bus,
+	logger *slog.Logger,
+) *Scanner {
 	return &Scanner{
-		items:   items,
-		streams: streams,
-		prober:  prober,
-		bus:     bus,
-		logger:  logger.With("module", "scanner"),
+		items:       items,
+		streams:     streams,
+		metadata:    metadata,
+		externalIDs: externalIDs,
+		images:      images,
+		providers:   providers,
+		prober:      prober,
+		bus:         bus,
+		logger:      logger.With("module", "scanner"),
 	}
 }
 
@@ -239,6 +261,9 @@ func (s *Scanner) createItem(ctx context.Context, lib *db.Library, path string, 
 		Data: map[string]any{"item_id": itemID, "title": title, "library_id": lib.ID},
 	})
 
+	// Fetch metadata from TMDB (best-effort, don't fail the scan)
+	s.enrichMetadata(ctx, item)
+
 	return nil
 }
 
@@ -307,6 +332,168 @@ func titleFromPath(path string) string {
 	base := filepath.Base(path)
 	ext := filepath.Ext(base)
 	return strings.TrimSuffix(base, ext)
+}
+
+// yearPattern matches (2023), [2023], or just 2023 in a filename.
+var yearPattern = regexp.MustCompile(`[\(\[\s]?((?:19|20)\d{2})[\)\]\s]?`)
+
+// parseTitleYear extracts a clean title and year from a filename.
+// Examples: "Transformers El despertar (2023)" -> ("Transformers El despertar", 2023)
+//           "Toy Story 3 [2010]" -> ("Toy Story 3", 2010)
+func parseTitleYear(filename string) (string, int) {
+	ext := filepath.Ext(filename)
+	name := strings.TrimSuffix(filepath.Base(filename), ext)
+
+	// Find the last year match (most likely the release year)
+	matches := yearPattern.FindAllStringSubmatchIndex(name, -1)
+	if len(matches) == 0 {
+		return name, 0
+	}
+
+	last := matches[len(matches)-1]
+	yearStr := name[last[2]:last[3]]
+	year, _ := strconv.Atoi(yearStr)
+
+	// Title is everything before the year match
+	title := strings.TrimSpace(name[:last[0]])
+	if title == "" {
+		title = name
+	}
+
+	return title, year
+}
+
+// enrichMetadata searches TMDB for the item and stores metadata + images.
+func (s *Scanner) enrichMetadata(ctx context.Context, item *db.Item) {
+	if s.providers == nil {
+		return
+	}
+
+	// Parse title and year from filename for better TMDB search
+	cleanTitle, year := parseTitleYear(item.Title)
+	if year == 0 {
+		year = item.Year
+	}
+
+	itemType := provider.ItemMovie
+	if item.Type == "episode" || item.Type == "series" {
+		itemType = provider.ItemSeries
+	}
+
+	// Search TMDB
+	results, err := s.providers.SearchMetadata(ctx, provider.SearchQuery{
+		Title:    cleanTitle,
+		Year:     year,
+		ItemType: itemType,
+	})
+	if err != nil || len(results) == 0 {
+		s.logger.Debug("no TMDB results", "title", cleanTitle, "year", year, "error", err)
+		return
+	}
+
+	best := results[0]
+
+	// Fetch full metadata
+	meta, err := s.providers.FetchMetadata(ctx, best.ExternalID, itemType)
+	if err != nil || meta == nil {
+		s.logger.Debug("TMDB metadata fetch failed", "id", best.ExternalID, "error", err)
+		return
+	}
+
+	// Update item fields
+	if meta.Title != "" {
+		item.OriginalTitle = meta.OriginalTitle
+	}
+	if meta.Year > 0 {
+		item.Year = meta.Year
+	}
+	if meta.Rating != nil {
+		item.CommunityRating = meta.Rating
+	}
+	if meta.ContentRating != "" {
+		item.ContentRating = meta.ContentRating
+	}
+	if meta.PremiereDate != nil {
+		item.PremiereDate = meta.PremiereDate
+	}
+	item.UpdatedAt = time.Now()
+	if err := s.items.Update(ctx, item); err != nil {
+		s.logger.Warn("failed to update item with metadata", "id", item.ID, "error", err)
+	}
+
+	// Store extended metadata
+	genresJSON, _ := json.Marshal(meta.Genres)
+	tagsJSON, _ := json.Marshal(meta.Tags)
+	if err := s.metadata.Upsert(ctx, &db.Metadata{
+		ItemID:     item.ID,
+		Overview:   meta.Overview,
+		Tagline:    meta.Tagline,
+		Studio:     meta.Studio,
+		GenresJSON: string(genresJSON),
+		TagsJSON:   string(tagsJSON),
+	}); err != nil {
+		s.logger.Warn("failed to store metadata", "id", item.ID, "error", err)
+	}
+
+	// Store external IDs
+	for prov, extID := range meta.ExternalIDs {
+		if err := s.externalIDs.Upsert(ctx, &db.ExternalID{
+			ItemID:     item.ID,
+			Provider:   prov,
+			ExternalID: extID,
+		}); err != nil {
+			s.logger.Warn("failed to store external id", "id", item.ID, "provider", prov, "error", err)
+		}
+	}
+
+	// Fetch and store images
+	if len(meta.ExternalIDs) > 0 {
+		images, err := s.providers.FetchImages(ctx, meta.ExternalIDs, itemType)
+		if err != nil {
+			s.logger.Debug("TMDB image fetch failed", "id", item.ID, "error", err)
+			return
+		}
+
+		posterStored := false
+		backdropStored := false
+		for _, img := range images {
+			if img.Type == "primary" && posterStored {
+				continue
+			}
+			if img.Type == "backdrop" && backdropStored {
+				continue
+			}
+
+			dbImg := &db.Image{
+				ID:        uuid.NewString(),
+				ItemID:    item.ID,
+				Type:      img.Type,
+				Path:      img.URL, // Store TMDB URL directly
+				Width:     img.Width,
+				Height:    img.Height,
+				Provider:  "tmdb",
+				IsPrimary: (img.Type == "primary" && !posterStored) || (img.Type == "backdrop" && !backdropStored),
+				AddedAt:   time.Now(),
+			}
+			if err := s.images.Create(ctx, dbImg); err != nil {
+				s.logger.Warn("failed to store image", "id", item.ID, "type", img.Type, "error", err)
+				continue
+			}
+
+			if img.Type == "primary" {
+				posterStored = true
+			}
+			if img.Type == "backdrop" {
+				backdropStored = true
+			}
+			// Only store first poster + first backdrop
+			if posterStored && backdropStored {
+				break
+			}
+		}
+	}
+
+	s.logger.Info("enriched metadata", "title", item.Title, "tmdb_id", best.ExternalID, "year", item.Year)
 }
 
 // itemTypeFromLibrary maps library content types to item types.

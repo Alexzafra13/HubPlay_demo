@@ -14,6 +14,8 @@ type Repositories struct {
 	Channels     *ChannelRepository
 	EPGPrograms  *EPGProgramRepository
 	Providers    *ProviderRepository
+	Metadata     *MetadataRepository
+	ExternalIDs  *ExternalIDRepository
 }
 
 // NewRepositories creates all repositories from a database connection.
@@ -29,5 +31,7 @@ func NewRepositories(database *sql.DB) *Repositories {
 		Channels:     NewChannelRepository(database),
 		EPGPrograms:  NewEPGProgramRepository(database),
 		Providers:    NewProviderRepository(database),
+		Metadata:     NewMetadataRepository(database),
+		ExternalIDs:  NewExternalIDRepository(database),
 	}
 }

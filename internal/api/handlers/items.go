@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -12,12 +13,14 @@ import (
 )
 
 type ItemHandler struct {
-	lib    *library.Service
-	logger *slog.Logger
+	lib      *library.Service
+	images   *db.ImageRepository
+	metadata *db.MetadataRepository
+	logger   *slog.Logger
 }
 
-func NewItemHandler(lib *library.Service, logger *slog.Logger) *ItemHandler {
-	return &ItemHandler{lib: lib, logger: logger}
+func NewItemHandler(lib *library.Service, images *db.ImageRepository, metadata *db.MetadataRepository, logger *slog.Logger) *ItemHandler {
+	return &ItemHandler{lib: lib, images: images, metadata: metadata, logger: logger}
 }
 
 func (h *ItemHandler) Get(w http.ResponseWriter, r *http.Request) {
@@ -40,7 +43,7 @@ func (h *ItemHandler) Get(w http.ResponseWriter, r *http.Request) {
 		resp["media_streams"] = streamData
 	}
 
-	// Include images
+	// Include images and set poster_url/backdrop_url
 	images, _ := h.lib.GetItemImages(r.Context(), id)
 	if len(images) > 0 {
 		imgData := make([]map[string]any, len(images))
@@ -48,6 +51,37 @@ func (h *ItemHandler) Get(w http.ResponseWriter, r *http.Request) {
 			imgData[i] = imageResponse(img)
 		}
 		resp["images"] = imgData
+
+		for _, img := range images {
+			if img.IsPrimary && img.Type == "primary" {
+				resp["poster_url"] = img.Path
+			}
+			if img.IsPrimary && img.Type == "backdrop" {
+				resp["backdrop_url"] = img.Path
+			}
+		}
+	}
+
+	// Include metadata (overview, tagline, genres)
+	if h.metadata != nil {
+		meta, err := h.metadata.GetByItemID(r.Context(), id)
+		if err == nil && meta != nil {
+			if meta.Overview != "" {
+				resp["overview"] = meta.Overview
+			}
+			if meta.Tagline != "" {
+				resp["tagline"] = meta.Tagline
+			}
+			if meta.GenresJSON != "" {
+				var genres []string
+				if err := json.Unmarshal([]byte(meta.GenresJSON), &genres); err == nil && len(genres) > 0 {
+					resp["genres"] = genres
+				}
+			}
+			if meta.Studio != "" {
+				resp["studio"] = meta.Studio
+			}
+		}
 	}
 
 	respondJSON(w, http.StatusOK, map[string]any{"data": resp})
@@ -92,6 +126,23 @@ func (h *ItemHandler) Search(w http.ResponseWriter, r *http.Request) {
 	data := make([]map[string]any, len(items))
 	for i, item := range items {
 		data[i] = itemSummaryResponse(item)
+	}
+
+	// Enrich with poster URLs
+	if h.images != nil && len(items) > 0 {
+		itemIDs := make([]string, len(items))
+		for i, item := range items {
+			itemIDs[i] = item.ID
+		}
+		if imageURLs, err := h.images.GetPrimaryURLs(r.Context(), itemIDs); err == nil {
+			for i, item := range items {
+				if urls, ok := imageURLs[item.ID]; ok {
+					if poster, ok := urls["primary"]; ok {
+						data[i]["poster_url"] = poster
+					}
+				}
+			}
+		}
 	}
 
 	respondJSON(w, http.StatusOK, map[string]any{
