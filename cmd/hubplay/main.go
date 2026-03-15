@@ -82,6 +82,10 @@ func run(configPath string) error {
 	scnr := scanner.New(repos.Items, repos.MediaStreams, prober, eventBus, logger)
 	libraryService := library.NewService(repos.Libraries, repos.Items, repos.MediaStreams, repos.Images, scnr, logger)
 
+	// ═══ Phase 4a: Library Scan Scheduler ═══
+	scanScheduler := library.NewScheduler(libraryService, logger)
+	scanScheduler.Start(ctx)
+
 	// ═══ Phase 4b: Streaming ═══
 	streamManager := stream.NewManager(repos.Items, repos.MediaStreams, cfg.Streaming, logger)
 
@@ -146,10 +150,10 @@ func run(configPath string) error {
 	}()
 
 	// ═══ Phase 7: Wait for shutdown ═══
-	return waitForShutdown(ctx, cancel, server, streamManager, iptvService, iptvProxy, database, logger)
+	return waitForShutdown(ctx, cancel, server, streamManager, iptvService, iptvProxy, scanScheduler, database, logger)
 }
 
-func waitForShutdown(ctx context.Context, cancel context.CancelFunc, server *http.Server, sm *stream.Manager, iptvSvc *iptv.Service, iptvProxy *iptv.StreamProxy, database interface{ Close() error }, logger *slog.Logger) error {
+func waitForShutdown(ctx context.Context, cancel context.CancelFunc, server *http.Server, sm *stream.Manager, iptvSvc *iptv.Service, iptvProxy *iptv.StreamProxy, scheduler *library.Scheduler, database interface{ Close() error }, logger *slog.Logger) error {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
@@ -164,6 +168,10 @@ func waitForShutdown(ctx context.Context, cancel context.CancelFunc, server *htt
 	defer shutdownCancel()
 
 	logger.Info("starting graceful shutdown...")
+
+	// Stop scheduler
+	scheduler.Stop()
+	logger.Info("scan scheduler stopped")
 
 	// Stop HTTP server
 	if err := server.Shutdown(shutdownCtx); err != nil {
