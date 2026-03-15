@@ -116,6 +116,19 @@ func (r *SessionRepository) DeleteExpired(ctx context.Context) (int64, error) {
 	return res.RowsAffected()
 }
 
+// DeleteOldestByUser deletes the oldest session for a user and returns how many were deleted.
+func (r *SessionRepository) DeleteOldestByUser(ctx context.Context, userID string) error {
+	_, err := r.db.ExecContext(ctx,
+		`DELETE FROM sessions WHERE id = (
+			SELECT id FROM sessions WHERE user_id = ? ORDER BY last_active_at ASC, created_at ASC LIMIT 1
+		)`, userID,
+	)
+	if err != nil {
+		return fmt.Errorf("delete oldest session: %w", err)
+	}
+	return nil
+}
+
 func (r *SessionRepository) UpdateLastActive(ctx context.Context, id string, t time.Time) error {
 	_, err := r.db.ExecContext(ctx, `UPDATE sessions SET last_active_at = ? WHERE id = ?`, t, id)
 	if err != nil {

@@ -179,8 +179,10 @@ func (s *Service) createSession(ctx context.Context, user *db.User, deviceName, 
 			return nil, fmt.Errorf("counting sessions: %w", err)
 		}
 		if count >= s.cfg.MaxSessionsPerUser {
-			// TODO: evict oldest session instead of rejecting
-			return nil, fmt.Errorf("max sessions reached: %w", domain.ErrConflict)
+			// Evict oldest session to make room for the new one
+			if err := s.sessions.DeleteOldestByUser(ctx, user.ID); err != nil {
+				s.logger.Warn("failed to evict oldest session", "user_id", user.ID, "error", err)
+			}
 		}
 	}
 
