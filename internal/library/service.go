@@ -83,7 +83,8 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*db.Library, e
 	// Auto-scan the new library (like Jellyfin does on library creation)
 	if lib.ScanMode != "manual" {
 		go func() {
-			scanCtx := context.Background()
+			scanCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+			defer cancel()
 			if _, err := s.scanner.ScanLibrary(scanCtx, lib); err != nil {
 				s.logger.Error("auto-scan after creation failed", "library_id", lib.ID, "error", err)
 			}
@@ -174,7 +175,8 @@ func (s *Service) Scan(ctx context.Context, id string, refreshMetadata ...bool) 
 			s.mu.Unlock()
 		}()
 
-		scanCtx := context.Background()
+		scanCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer cancel()
 		if _, err := s.scanner.ScanLibrary(scanCtx, lib); err != nil {
 			s.logger.Error("scan failed", "library_id", id, "error", err)
 		}

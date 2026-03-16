@@ -95,6 +95,43 @@ func (r *MetadataRepository) GetOverviewBatch(ctx context.Context, itemIDs []str
 	return result, rows.Err()
 }
 
+// GetMetadataBatch returns metadata for a batch of item IDs.
+func (r *MetadataRepository) GetMetadataBatch(ctx context.Context, itemIDs []string) (map[string]*Metadata, error) {
+	if len(itemIDs) == 0 {
+		return nil, nil
+	}
+
+	placeholders := make([]string, len(itemIDs))
+	args := make([]any, len(itemIDs))
+	for i, id := range itemIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	query := fmt.Sprintf(
+		`SELECT item_id, COALESCE(overview,''), COALESCE(tagline,''),
+		        COALESCE(studio,''), COALESCE(genres_json,''), COALESCE(tags_json,'')
+		 FROM metadata WHERE item_id IN (%s)`,
+		joinStrings(placeholders, ","),
+	)
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("get metadata batch: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[string]*Metadata)
+	for rows.Next() {
+		m := &Metadata{}
+		if err := rows.Scan(&m.ItemID, &m.Overview, &m.Tagline, &m.Studio, &m.GenresJSON, &m.TagsJSON); err != nil {
+			return nil, fmt.Errorf("scan metadata: %w", err)
+		}
+		result[m.ItemID] = m
+	}
+	return result, rows.Err()
+}
+
 func (r *MetadataRepository) Delete(ctx context.Context, itemID string) error {
 	_, err := r.db.ExecContext(ctx, `DELETE FROM metadata WHERE item_id = ?`, itemID)
 	return err

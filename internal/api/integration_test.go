@@ -110,8 +110,9 @@ func TestSetup_FirstAdmin(t *testing.T) {
 
 	body := app.decode(t, resp)
 	data := body["data"].(map[string]any)
-	if data["role"] != "admin" {
-		t.Errorf("expected role 'admin', got %v", data["role"])
+	user := data["user"].(map[string]any)
+	if user["role"] != "admin" {
+		t.Errorf("expected role 'admin', got %v", user["role"])
 	}
 }
 

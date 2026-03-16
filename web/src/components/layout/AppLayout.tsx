@@ -90,7 +90,7 @@ export function AppLayout({ title }: AppLayoutProps) {
       >
         <TopBar title={title} onMenuClick={toggleMobile} />
 
-        <main className="p-4 md:p-6">
+        <main className="px-4 pb-4 md:px-6 md:pb-6">
           <Outlet />
         </main>
       </div>

@@ -81,9 +81,10 @@ func run(configPath string) error {
 
 	prober := probe.New()
 
-	// ═══ Phase 4d: Providers (TMDb, OpenSubtitles) ═══
+	// ═══ Phase 4d: Providers (TMDb, Fanart.tv, OpenSubtitles) ═══
 	providerManager := provider.NewManager(repos.Providers, logger)
 	_ = providerManager.Register(ctx, provider.NewTMDbProvider())
+	_ = providerManager.Register(ctx, provider.NewFanartProvider())
 	_ = providerManager.Register(ctx, provider.NewOpenSubtitlesProvider())
 
 	scnr := scanner.New(repos.Items, repos.MediaStreams, repos.Metadata, repos.ExternalIDs, repos.Images, providerManager, prober, eventBus, logger)

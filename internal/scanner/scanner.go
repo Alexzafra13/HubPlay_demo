@@ -497,40 +497,45 @@ func (s *Scanner) enrichMetadata(ctx context.Context, item *db.Item) {
 			return
 		}
 
-		posterStored := false
-		backdropStored := false
+		stored := map[string]bool{}
 		for _, img := range images {
-			if img.Type == "primary" && posterStored {
-				continue
-			}
-			if img.Type == "backdrop" && backdropStored {
-				continue
+			// Store first of each key image type
+			switch img.Type {
+			case "primary", "backdrop", "logo":
+				if stored[img.Type] {
+					continue
+				}
+			default:
+				continue // skip other types for now
 			}
 
 			dbImg := &db.Image{
 				ID:        uuid.NewString(),
 				ItemID:    item.ID,
 				Type:      img.Type,
-				Path:      img.URL, // Store TMDB URL directly
+				Path:      img.URL,
 				Width:     img.Width,
 				Height:    img.Height,
-				Provider:  "tmdb",
-				IsPrimary: (img.Type == "primary" && !posterStored) || (img.Type == "backdrop" && !backdropStored),
+				Provider:  img.Type, // will be overwritten below
+				IsPrimary: !stored[img.Type],
 				AddedAt:   time.Now(),
+			}
+			// Detect provider from URL
+			switch {
+			case strings.Contains(img.URL, "fanart.tv"):
+				dbImg.Provider = "fanart"
+			case strings.Contains(img.URL, "tmdb.org"):
+				dbImg.Provider = "tmdb"
+			default:
+				dbImg.Provider = "unknown"
 			}
 			if err := s.images.Create(ctx, dbImg); err != nil {
 				s.logger.Warn("failed to store image", "id", item.ID, "type", img.Type, "error", err)
 				continue
 			}
 
-			if img.Type == "primary" {
-				posterStored = true
-			}
-			if img.Type == "backdrop" {
-				backdropStored = true
-			}
-			// Only store first poster + first backdrop
-			if posterStored && backdropStored {
+			stored[img.Type] = true
+			if stored["primary"] && stored["backdrop"] && stored["logo"] {
 				break
 			}
 		}

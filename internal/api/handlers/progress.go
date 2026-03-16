@@ -221,6 +221,7 @@ func (h *ProgressHandler) ContinueWatching(w http.ResponseWriter, r *http.Reques
 			"parent_id":      item.ParentID,
 			"poster_url":     nil,
 			"backdrop_url":   nil,
+			"logo_url":       nil,
 		}
 		if urls, ok := imageMap[item.ItemID]; ok {
 			if u, ok := urls["primary"]; ok {
@@ -228,6 +229,9 @@ func (h *ProgressHandler) ContinueWatching(w http.ResponseWriter, r *http.Reques
 			}
 			if u, ok := urls["backdrop"]; ok {
 				entry["backdrop_url"] = u
+			}
+			if u, ok := urls["logo"]; ok {
+				entry["logo_url"] = u
 			}
 		}
 		result = append(result, entry)

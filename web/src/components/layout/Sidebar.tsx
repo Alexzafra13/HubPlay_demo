@@ -165,11 +165,11 @@ export function Sidebar({ collapsed, onToggleCollapse }: SidebarProps) {
 
   return (
     <aside
-      className="fixed top-0 left-0 h-full bg-bg-surface border-r border-border flex flex-col z-40 transition-[width] duration-200"
+      className="fixed top-0 left-0 h-full bg-bg-base/80 backdrop-blur-xl border-r border-white/5 flex flex-col z-40 transition-[width] duration-200"
       style={{ width: collapsed ? 'var(--sidebar-collapsed-width)' : 'var(--sidebar-width)' }}
     >
       {/* Brand */}
-      <div className="flex items-center gap-2 px-4 h-14 border-b border-border flex-shrink-0">
+      <div className="flex items-center gap-2 px-4 h-14 border-b border-white/5 flex-shrink-0">
         <svg
           width="28"
           height="28"
@@ -195,7 +195,7 @@ export function Sidebar({ collapsed, onToggleCollapse }: SidebarProps) {
 
         {isAdmin && (
           <>
-            <div className="my-3 mx-3 border-t border-border" />
+            <div className="my-3 mx-3 border-t border-white/5" />
             {!collapsed && (
               <span className="px-3 text-xs font-semibold text-text-secondary uppercase tracking-wider">
                 Admin
@@ -211,7 +211,7 @@ export function Sidebar({ collapsed, onToggleCollapse }: SidebarProps) {
       </nav>
 
       {/* Bottom: User + Collapse Toggle */}
-      <div className="border-t border-border px-2 py-3 flex-shrink-0 space-y-2">
+      <div className="border-t border-white/5 px-2 py-3 flex-shrink-0 space-y-2">
         {/* User info */}
         <div className="flex items-center gap-2 px-2">
           <div className="w-8 h-8 rounded-full bg-accent/20 text-accent flex items-center justify-center text-xs font-bold flex-shrink-0">

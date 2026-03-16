@@ -99,7 +99,7 @@ func (r *ImageRepository) GetPrimaryURLs(ctx context.Context, itemIDs []string) 
 
 	query := fmt.Sprintf(
 		`SELECT item_id, type, path FROM images
-		 WHERE item_id IN (%s) AND is_primary = 1 AND type IN ('primary', 'backdrop')
+		 WHERE item_id IN (%s) AND is_primary = 1 AND type IN ('primary', 'backdrop', 'logo')
 		 ORDER BY item_id, type`,
 		joinStrings(placeholders, ","),
 	)

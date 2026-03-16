@@ -80,6 +80,7 @@ export interface MediaItem {
   premiere_date: string | null;
   poster_url: string | null;
   backdrop_url: string | null;
+  logo_url: string | null;
   parent_id: string | null;
   series_id: string | null;
   season_number: number | null;

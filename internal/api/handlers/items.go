@@ -59,6 +59,9 @@ func (h *ItemHandler) Get(w http.ResponseWriter, r *http.Request) {
 			if img.IsPrimary && img.Type == "backdrop" {
 				resp["backdrop_url"] = img.Path
 			}
+			if img.IsPrimary && img.Type == "logo" {
+				resp["logo_url"] = img.Path
+			}
 		}
 	}
 

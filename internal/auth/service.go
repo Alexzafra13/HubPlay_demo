@@ -159,7 +159,9 @@ func (s *Service) Login(ctx context.Context, username, password, deviceName, dev
 		return nil, err
 	}
 
-	_ = s.users.UpdateLastLogin(ctx, user.ID, s.clock.Now())
+	if err := s.users.UpdateLastLogin(ctx, user.ID, s.clock.Now()); err != nil {
+		s.logger.Warn("failed to update last login", "user_id", user.ID, "error", err)
+	}
 
 	s.logger.Info("user logged in", "user_id", user.ID, "username", user.Username, "device", deviceName)
 	return token, nil
@@ -177,7 +179,9 @@ func (s *Service) RefreshToken(ctx context.Context, refreshToken string) (*AuthT
 	}
 
 	if s.clock.Now().After(session.ExpiresAt) {
-		_ = s.sessions.DeleteByID(ctx, session.ID)
+		if delErr := s.sessions.DeleteByID(ctx, session.ID); delErr != nil {
+			s.logger.Warn("failed to delete expired session", "session_id", session.ID, "error", delErr)
+		}
 		return nil, fmt.Errorf("refresh: %w", domain.ErrTokenExpired)
 	}
 

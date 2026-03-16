@@ -6,14 +6,14 @@
 
 :root {
   /* Backgrounds */
-  --color-bg-base: #0a0e17;
-  --color-bg-surface: #0d1220;
-  --color-bg-card: #131a2b;
-  --color-bg-elevated: #1a2340;
+  --color-bg-base: #0a0a0a;
+  --color-bg-surface: #0e0e0e;
+  --color-bg-card: #161616;
+  --color-bg-elevated: #1e1e1e;
 
   /* Borders */
-  --color-border: #1e2a45;
-  --color-border-subtle: #151d33;
+  --color-border: #ffffff12;
+  --color-border-subtle: #ffffff08;
 
   /* Text */
   --color-text-primary: #f1f5f9;

@@ -56,7 +56,7 @@ export function TopBar({ title, onMenuClick }: TopBarProps) {
 
   return (
     <header
-      className="sticky top-0 z-30 bg-bg-surface border-b border-border flex items-center px-4 gap-4"
+      className="sticky top-0 z-30 bg-transparent flex items-center px-4 gap-4"
       style={{ height: 'var(--topbar-height)' }}
     >
       {/* Hamburger (mobile) */}

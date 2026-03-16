@@ -222,30 +222,21 @@ func (m *Manager) cleanupLoop() {
 func (m *Manager) cleanupIdle(maxIdle time.Duration) {
 	now := time.Now()
 	var toRemove []string
+	var toStop []*ManagedSession
 
 	m.mu.Lock()
 	for key, ms := range m.sessions {
 		if now.Sub(ms.LastAccessed) > maxIdle {
 			toRemove = append(toRemove, key)
+			toStop = append(toStop, ms)
+			delete(m.sessions, key)
 		}
-	}
-	for _, key := range toRemove {
-		delete(m.sessions, key)
 	}
 	m.mu.Unlock()
 
-	for _, key := range toRemove {
-		// Session already removed from map; stop the process
-		if ms, ok := m.sessions[key]; ok {
-			ms.Stop()
-		}
-		m.logger.Info("cleaned up idle session", "key", key)
-	}
-
-	// Also clean up the transcoder's own sessions
-	if len(toRemove) > 0 {
-		for _, key := range toRemove {
-			m.transcoder.Stop(key)
-		}
+	for i, ms := range toStop {
+		ms.Stop()
+		m.transcoder.Stop(toRemove[i])
+		m.logger.Info("cleaned up idle session", "key", toRemove[i])
 	}
 }

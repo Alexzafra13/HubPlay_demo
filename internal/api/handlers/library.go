@@ -239,36 +239,65 @@ func (h *LibraryHandler) LatestItems(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// enrichItemSummaries adds poster_url, backdrop_url, and overview to item summaries.
+// enrichItemSummaries adds poster_url, backdrop_url, overview, and genres to item summaries.
 func (h *LibraryHandler) enrichItemSummaries(r *http.Request, items []*db.Item) []map[string]any {
 	data := make([]map[string]any, len(items))
 	for i, item := range items {
 		data[i] = itemSummaryResponse(item)
 	}
 
-	if h.images == nil || len(items) == 0 {
+	if len(items) == 0 {
 		return data
 	}
 
-	// Batch fetch image URLs
 	itemIDs := make([]string, len(items))
 	for i, item := range items {
 		itemIDs[i] = item.ID
 	}
 
-	imageURLs, err := h.images.GetPrimaryURLs(r.Context(), itemIDs)
-	if err != nil {
-		h.logger.Warn("failed to fetch image URLs", "error", err)
-		return data
+	// Batch fetch image URLs
+	if h.images != nil {
+		imageURLs, err := h.images.GetPrimaryURLs(r.Context(), itemIDs)
+		if err != nil {
+			h.logger.Warn("failed to fetch image URLs", "error", err)
+		} else {
+			for i, item := range items {
+				if urls, ok := imageURLs[item.ID]; ok {
+					if poster, ok := urls["primary"]; ok {
+						data[i]["poster_url"] = poster
+					}
+					if backdrop, ok := urls["backdrop"]; ok {
+						data[i]["backdrop_url"] = backdrop
+					}
+					if logo, ok := urls["logo"]; ok {
+						data[i]["logo_url"] = logo
+					}
+				}
+			}
+		}
 	}
 
-	for i, item := range items {
-		if urls, ok := imageURLs[item.ID]; ok {
-			if poster, ok := urls["primary"]; ok {
-				data[i]["poster_url"] = poster
-			}
-			if backdrop, ok := urls["backdrop"]; ok {
-				data[i]["backdrop_url"] = backdrop
+	// Batch fetch metadata (overview, genres)
+	if h.metadata != nil {
+		metas, err := h.metadata.GetMetadataBatch(r.Context(), itemIDs)
+		if err != nil {
+			h.logger.Warn("failed to fetch metadata batch", "error", err)
+		} else {
+			for i, item := range items {
+				if m, ok := metas[item.ID]; ok {
+					if m.Overview != "" {
+						data[i]["overview"] = m.Overview
+					}
+					if m.Tagline != "" {
+						data[i]["tagline"] = m.Tagline
+					}
+					if m.GenresJSON != "" {
+						var genres []string
+						if err := json.Unmarshal([]byte(m.GenresJSON), &genres); err == nil {
+							data[i]["genres"] = genres
+						}
+					}
+				}
 			}
 		}
 	}
@@ -321,6 +350,9 @@ func itemSummaryResponse(item *db.Item) map[string]any {
 	}
 	if item.CommunityRating != nil {
 		resp["community_rating"] = *item.CommunityRating
+	}
+	if item.ContentRating != "" {
+		resp["content_rating"] = item.ContentRating
 	}
 	return resp
 }
