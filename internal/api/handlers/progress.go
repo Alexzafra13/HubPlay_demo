@@ -212,7 +212,8 @@ func (h *ProgressHandler) ContinueWatching(w http.ResponseWriter, r *http.Reques
 	result := make([]map[string]any, 0, len(items))
 	for _, item := range items {
 		entry := map[string]any{
-			"item_id":        item.ItemID,
+			"id":             item.ItemID,
+			"item_id":        item.ItemID, // backwards compat
 			"title":          item.Title,
 			"type":           item.Type,
 			"position_ticks": item.PositionTicks,
@@ -278,7 +279,8 @@ func (h *ProgressHandler) Favorites(w http.ResponseWriter, r *http.Request) {
 	result := make([]map[string]any, 0, len(items))
 	for _, item := range items {
 		entry := map[string]any{
-			"item_id":        item.ItemID,
+			"id":             item.ItemID,
+			"item_id":        item.ItemID, // backwards compat
 			"title":          item.Title,
 			"type":           item.Type,
 			"year":           item.Year,
@@ -326,7 +328,8 @@ func (h *ProgressHandler) NextUp(w http.ResponseWriter, r *http.Request) {
 	result := make([]map[string]any, 0, len(items))
 	for _, item := range items {
 		result = append(result, map[string]any{
-			"episode_id":     item.EpisodeID,
+			"id":             item.EpisodeID,
+			"episode_id":     item.EpisodeID, // backwards compat
 			"episode_title":  item.EpisodeTitle,
 			"season_number":  item.SeasonNumber,
 			"episode_number": item.EpisodeNumber,
