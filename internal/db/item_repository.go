@@ -42,6 +42,7 @@ type ItemFilter struct {
 	Offset    int
 	SortBy    string // sort_title, added_at, year
 	SortOrder string // asc, desc
+	Cursor    string // cursor for keyset pagination (item ID after which to fetch)
 }
 
 type ItemRepository struct {
@@ -170,11 +171,33 @@ func (r *ItemRepository) List(ctx context.Context, filter ItemFilter) ([]*Item, 
 		args = append(args, filter.Query+"*")
 	}
 
-	// Count
+	// Count (skip if cursor pagination to avoid expensive COUNT on large tables)
 	var total int
-	countSQL := "SELECT COUNT(*) FROM items " + where
-	if err := r.db.QueryRowContext(ctx, countSQL, args...).Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("count items: %w", err)
+	if filter.Cursor == "" {
+		countSQL := "SELECT COUNT(*) FROM items " + where
+		if err := r.db.QueryRowContext(ctx, countSQL, args...).Scan(&total); err != nil {
+			return nil, 0, fmt.Errorf("count items: %w", err)
+		}
+	}
+
+	// Cursor-based (keyset) pagination: more efficient for large datasets
+	if filter.Cursor != "" {
+		// Fetch the sort value of the cursor item for keyset comparison
+		var cursorSort string
+		var cursorID string
+		err := r.db.QueryRowContext(ctx,
+			fmt.Sprintf(`SELECT %s, id FROM items WHERE id = ?`, filter.SortBy),
+			filter.Cursor,
+		).Scan(&cursorSort, &cursorID)
+		if err == nil {
+			op := ">"
+			if filter.SortOrder == "desc" {
+				op = "<"
+			}
+			where += fmt.Sprintf(" AND (%s %s ? OR (%s = ? AND id > ?))",
+				filter.SortBy, op, filter.SortBy)
+			args = append(args, cursorSort, cursorSort, cursorID)
+		}
 	}
 
 	// Query
@@ -182,10 +205,14 @@ func (r *ItemRepository) List(ctx context.Context, filter ItemFilter) ([]*Item, 
 		`SELECT id, library_id, parent_id, type, title, sort_title, original_title,
 		        year, path, size, duration_ticks, container, season_number, episode_number,
 		        community_rating, added_at, updated_at, is_available
-		 FROM items %s ORDER BY %s %s LIMIT ? OFFSET ?`,
+		 FROM items %s ORDER BY %s %s, id ASC LIMIT ? OFFSET ?`,
 		where, filter.SortBy, filter.SortOrder,
 	)
-	args = append(args, filter.Limit, filter.Offset)
+	offset := filter.Offset
+	if filter.Cursor != "" {
+		offset = 0 // cursor pagination doesn't use offset
+	}
+	args = append(args, filter.Limit, offset)
 
 	rows, err := r.db.QueryContext(ctx, querySQL, args...)
 	if err != nil {

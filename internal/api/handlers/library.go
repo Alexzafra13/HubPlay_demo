@@ -189,6 +189,7 @@ func (h *LibraryHandler) Items(w http.ResponseWriter, r *http.Request) {
 	sortOrder := r.URL.Query().Get("sort_order")
 	itemType := r.URL.Query().Get("type")
 	parentID := r.URL.Query().Get("parent_id")
+	cursor := r.URL.Query().Get("cursor")
 
 	items, total, err := h.lib.ListItems(r.Context(), db.ItemFilter{
 		LibraryID: id,
@@ -198,6 +199,7 @@ func (h *LibraryHandler) Items(w http.ResponseWriter, r *http.Request) {
 		Offset:    offset,
 		SortBy:    sortBy,
 		SortOrder: sortOrder,
+		Cursor:    cursor,
 	})
 	if err != nil {
 		handleServiceError(w, err)
@@ -206,14 +208,18 @@ func (h *LibraryHandler) Items(w http.ResponseWriter, r *http.Request) {
 
 	data := h.enrichItemSummaries(r, items)
 
-	respondJSON(w, http.StatusOK, map[string]any{
-		"data": map[string]any{
-			"items":  data,
-			"total":  total,
-			"offset": offset,
-			"limit":  limit,
-		},
-	})
+	resp := map[string]any{
+		"items":  data,
+		"total":  total,
+		"offset": offset,
+		"limit":  limit,
+	}
+	// Return next_cursor for keyset pagination
+	if len(items) > 0 && len(items) == limit {
+		resp["next_cursor"] = items[len(items)-1].ID
+	}
+
+	respondJSON(w, http.StatusOK, map[string]any{"data": resp})
 }
 
 func (h *LibraryHandler) LatestItems(w http.ResponseWriter, r *http.Request) {

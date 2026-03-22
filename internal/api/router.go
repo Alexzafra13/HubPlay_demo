@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"hubplay/internal/auth"
 	"hubplay/internal/config"
 	"hubplay/internal/db"
+	"hubplay/internal/event"
 	"hubplay/internal/iptv"
 	"hubplay/internal/library"
 	"hubplay/internal/provider"
@@ -37,6 +39,9 @@ type Dependencies struct {
 	Providers      *provider.Manager
 	ProviderRepo   *db.ProviderRepository
 	SetupService   *setup.Service
+	EventBus       *event.Bus
+	Database       *sql.DB
+	Version        string
 	WebAssets      fs.FS
 	Config         *config.Config
 	Logger         *slog.Logger
@@ -62,7 +67,7 @@ func NewRouter(deps Dependencies) http.Handler {
 	// Handlers
 	authHandler := handlers.NewAuthHandler(deps.Auth, deps.Users, deps.Logger)
 	userHandler := handlers.NewUserHandler(deps.Users, deps.Logger)
-	healthHandler := handlers.NewHealthHandler()
+	healthHandler := handlers.NewHealthHandler(deps.Database, deps.StreamManager, deps.Version)
 
 	// Public routes
 	r.Route("/api/v1", func(r chi.Router) {
@@ -94,6 +99,12 @@ func NewRouter(deps Dependencies) http.Handler {
 
 			// Auth
 			r.Post("/auth/logout", authHandler.Logout)
+
+			// Server-Sent Events for real-time updates
+			if deps.EventBus != nil {
+				eventHandler := handlers.NewEventHandler(deps.EventBus, deps.Logger)
+				r.Get("/events", eventHandler.Stream)
+			}
 
 			// Current user
 			r.Get("/me", userHandler.Me)

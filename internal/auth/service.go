@@ -49,7 +49,25 @@ func NewService(
 	cfg config.AuthConfig,
 	clk clock.Clock,
 	logger *slog.Logger,
+	rlCfg ...config.RateLimitConfig,
 ) *Service {
+	// Use rate limit config if provided, otherwise sensible self-hosted defaults
+	maxFails := 10
+	window := 15 * time.Minute
+	lockout := 5 * time.Minute
+	if len(rlCfg) > 0 {
+		rl := rlCfg[0]
+		if rl.LoginAttempts > 0 {
+			maxFails = rl.LoginAttempts
+		}
+		if rl.LoginWindow > 0 {
+			window = rl.LoginWindow
+		}
+		if rl.LoginLockout > 0 {
+			lockout = rl.LoginLockout
+		}
+	}
+
 	return &Service{
 		users:       users,
 		sessions:    sessions,
@@ -57,7 +75,7 @@ func NewService(
 		clock:       clk,
 		logger:      logger.With("module", "auth"),
 		stopCh:      make(chan struct{}),
-		rateLimiter: newLoginRateLimiter(5, 15*time.Minute, 15*time.Minute), // 5 fails in 15min → locked 15min
+		rateLimiter: newLoginRateLimiter(maxFails, window, lockout),
 	}
 }
 
