@@ -34,10 +34,12 @@ func newTestApp(t *testing.T) *testApp {
 	userSvc := user.NewService(repos.Users, slog.Default())
 
 	router := api.NewRouter(api.Dependencies{
-		Auth:   authSvc,
-		Users:  userSvc,
-		Config: cfg,
-		Logger: slog.Default(),
+		Auth:     authSvc,
+		Users:    userSvc,
+		Database: database,
+		Version:  "test",
+		Config:   cfg,
+		Logger:   slog.Default(),
 	})
 
 	server := httptest.NewServer(router)

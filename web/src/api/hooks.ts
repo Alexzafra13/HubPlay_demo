@@ -1,5 +1,6 @@
 import {
   useQuery,
+  useInfiniteQuery,
   useMutation,
   useQueryClient,
   type UseQueryOptions,
@@ -99,6 +100,32 @@ export function useItems(
     queryKey: queryKeys.items(params as Record<string, unknown>),
     queryFn: () => api.getItems(params),
     ...options,
+  });
+}
+
+const PAGE_SIZE = 40;
+
+export function useInfiniteItems(
+  params?: {
+    library_id?: string;
+    type?: string;
+    sort_by?: string;
+    sort_order?: string;
+  },
+) {
+  return useInfiniteQuery<PaginatedResponse<MediaItem>>({
+    queryKey: ["items-infinite", params] as const,
+    queryFn: ({ pageParam }) =>
+      api.getItems({
+        ...params,
+        offset: (pageParam as number) * PAGE_SIZE,
+        limit: PAGE_SIZE,
+      }),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, _allPages, lastPageParam) => {
+      const loaded = ((lastPageParam as number) + 1) * PAGE_SIZE;
+      return loaded < lastPage.total ? (lastPageParam as number) + 1 : undefined;
+    },
   });
 }
 

@@ -42,6 +42,8 @@ func newStreamTestApp(t *testing.T) *streamTestApp {
 		StreamManager: streamMgr,
 		Items:         repos.Items,
 		MediaStreams:   repos.MediaStreams,
+		Database:      database,
+		Version:       "test",
 		Config:        cfg,
 		Logger:        slog.Default(),
 	})

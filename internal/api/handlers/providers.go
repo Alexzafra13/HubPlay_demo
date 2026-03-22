@@ -43,14 +43,18 @@ func (h *ProviderHandler) List(w http.ResponseWriter, r *http.Request) {
 		if c.ConfigJSON != "" {
 			_ = json.Unmarshal([]byte(c.ConfigJSON), &cfgMap)
 		}
-		result = append(result, map[string]any{
+		entry := map[string]any{
 			"name":        c.Name,
 			"type":        c.Type,
 			"status":      c.Status,
 			"priority":    c.Priority,
 			"has_api_key": c.APIKey != "",
 			"config":      cfgMap,
-		})
+		}
+		if c.APIKey != "" {
+			entry["api_key_masked"] = maskAPIKey(c.APIKey)
+		}
+		result = append(result, entry)
 	}
 
 	respondJSON(w, http.StatusOK, map[string]any{"data": result})
@@ -254,6 +258,18 @@ func (h *ProviderHandler) SearchSubtitles(w http.ResponseWriter, r *http.Request
 	}
 
 	respondJSON(w, http.StatusOK, map[string]any{"data": data})
+}
+
+// maskAPIKey returns a masked version of an API key for display.
+// Shows the first 4 and last 4 characters with asterisks in between.
+func maskAPIKey(key string) string {
+	if key == "" {
+		return ""
+	}
+	if len(key) <= 8 {
+		return "****"
+	}
+	return key[:4] + "****" + key[len(key)-4:]
 }
 
 func splitComma(s string) []string {

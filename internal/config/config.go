@@ -68,9 +68,12 @@ type AuthConfig struct {
 }
 
 type RateLimitConfig struct {
-	Enabled       bool `yaml:"enabled"`
-	LoginAttempts int  `yaml:"login_attempts"`
-	GlobalRPM     int  `yaml:"global_rpm"`
+	Enabled        bool          `yaml:"enabled"`
+	LoginAttempts  int           `yaml:"login_attempts"`
+	LoginWindow    time.Duration `yaml:"login_window"`
+	LoginLockout   time.Duration `yaml:"login_lockout"`
+	GlobalRPM      int           `yaml:"global_rpm"`
+	TrustedSubnets []string      `yaml:"trusted_subnets"` // subnets exempt from rate limiting (e.g. LAN)
 }
 
 // Load reads and parses the config file at path. Environment variables
@@ -174,9 +177,12 @@ func defaults() *Config {
 			LogIPs: true,
 		},
 		RateLimit: RateLimitConfig{
-			Enabled:       true,
-			LoginAttempts: 5,
-			GlobalRPM:     100,
+			Enabled:        true,
+			LoginAttempts:  10,
+			LoginWindow:    15 * time.Minute,
+			LoginLockout:   5 * time.Minute,
+			GlobalRPM:      0, // 0 = unlimited (self-hosted default)
+			TrustedSubnets: []string{"127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"},
 		},
 		Streaming: StreamingConfig{
 			SegmentDuration:      6,

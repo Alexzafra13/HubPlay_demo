@@ -75,7 +75,7 @@ func run(configPath string) error {
 	eventBus := event.NewBus(logger)
 
 	// ═══ Phase 4: Core Services ═══
-	authService := auth.NewService(repos.Users, repos.Sessions, cfg.Auth, clk, logger)
+	authService := auth.NewService(repos.Users, repos.Sessions, cfg.Auth, clk, logger, cfg.RateLimit)
 	authService.StartSessionCleaner(ctx)
 	userService := user.NewService(repos.Users, logger)
 
@@ -132,6 +132,9 @@ func run(configPath string) error {
 		Providers:     providerManager,
 		ProviderRepo:  repos.Providers,
 		SetupService:  setupService,
+		EventBus:      eventBus,
+		Database:      database,
+		Version:       version,
 		WebAssets:     webFS,
 		Config:        cfg,
 		Logger:        logger,

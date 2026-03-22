@@ -1,15 +1,21 @@
-import { useState, useMemo } from "react";
-import { useItems } from "@/api/hooks";
+import { useState, useMemo, useRef, useCallback, useEffect } from "react";
+import { useInfiniteItems } from "@/api/hooks";
 import { Input } from "@/components/common";
 import { MediaGrid } from "@/components/media";
+import { Spinner } from "@/components/common";
 import { sortItems, SORT_OPTIONS, type SortOption } from "@/utils/sort";
 
 export default function Movies() {
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortOption>("added");
 
-  const { data, isLoading } = useItems({ type: "movie", limit: 50 });
-  const items = data?.items ?? [];
+  const { data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } =
+    useInfiniteItems({ type: "movie" });
+
+  const items = useMemo(
+    () => data?.pages.flatMap((page) => page.items) ?? [],
+    [data],
+  );
 
   const filtered = useMemo(() => {
     let result = items;
@@ -23,6 +29,31 @@ export default function Movies() {
     }
     return sortItems(result, sort);
   }, [items, search, sort]);
+
+  // Infinite scroll observer
+  const observerRef = useRef<IntersectionObserver | null>(null);
+  const sentinelRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      if (observerRef.current) observerRef.current.disconnect();
+      if (!node || !hasNextPage || isFetchingNextPage) return;
+
+      observerRef.current = new IntersectionObserver(
+        (entries) => {
+          if (entries[0].isIntersecting && hasNextPage) {
+            fetchNextPage();
+          }
+        },
+        { rootMargin: "400px" },
+      );
+      observerRef.current.observe(node);
+    },
+    [hasNextPage, isFetchingNextPage, fetchNextPage],
+  );
+
+  // Cleanup observer on unmount
+  useEffect(() => {
+    return () => observerRef.current?.disconnect();
+  }, []);
 
   return (
     <div className="flex flex-col gap-6 px-6 py-8 sm:px-10">
@@ -65,6 +96,18 @@ export default function Movies() {
       </div>
 
       <MediaGrid items={filtered} loading={isLoading} emptyMessage="No movies found" />
+
+      {/* Infinite scroll sentinel */}
+      {!search.trim() && (
+        <>
+          <div ref={sentinelRef} className="h-1" />
+          {isFetchingNextPage && (
+            <div className="flex justify-center py-4">
+              <Spinner size="md" />
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
