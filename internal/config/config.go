@@ -78,13 +78,21 @@ type RateLimitConfig struct {
 
 // Load reads and parses the config file at path. Environment variables
 // in the form ${VAR} are expanded before parsing.
+// When no config file exists, defaults are used and the database path
+// is placed in the same directory as the config file (so Docker volumes work).
 func Load(path string) (*Config, error) {
 	cfg := defaults()
 
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			// No config file — use defaults and generate JWT secret
+			// No config file — use defaults and generate JWT secret.
+			// Place the database in the same directory as the config file
+			// so it lands inside the mounted volume (e.g. /config/).
+			configDir := filepath.Dir(path)
+			if configDir != "." {
+				cfg.Database.Path = filepath.Join(configDir, "hubplay.db")
+			}
 			if cfg.Auth.JWTSecret == "" {
 				cfg.Auth.JWTSecret = generateSecret()
 			}
