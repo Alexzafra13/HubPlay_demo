@@ -5,10 +5,12 @@ import type {
   CreateLibraryRequest,
   EPGProgram,
   HealthResponse,
+  ImportPublicIPTVResponse,
   ItemDetail,
   Library,
   MediaItem,
   PaginatedResponse,
+  PublicCountry,
   SetupStatus,
   StreamSession,
   SystemCapabilities,
@@ -379,6 +381,16 @@ export class ApiClient {
   async getChannelGroups(libraryId?: string): Promise<string[]> {
     if (!libraryId) return [];
     return this.request<string[]>("GET", `/libraries/${libraryId}/channels/groups`);
+  }
+
+  async getPublicCountries(): Promise<PublicCountry[]> {
+    return this.request<PublicCountry[]>("GET", "/iptv/public/countries");
+  }
+
+  async importPublicIPTV(country: string, name?: string): Promise<ImportPublicIPTVResponse> {
+    return this.request<ImportPublicIPTVResponse>("POST", "/iptv/public/import", {
+      body: { country, name },
+    });
   }
 
   // ─── Providers ──────────────────────────────────────────────────────

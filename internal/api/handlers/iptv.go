@@ -1,6 +1,11 @@
 package handlers
 
 import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -15,17 +20,19 @@ import (
 
 // IPTVHandler handles IPTV channel and EPG endpoints.
 type IPTVHandler struct {
-	svc    *iptv.Service
-	proxy  *iptv.StreamProxy
-	logger *slog.Logger
+	svc       *iptv.Service
+	proxy     *iptv.StreamProxy
+	libraries *db.LibraryRepository
+	logger    *slog.Logger
 }
 
 // NewIPTVHandler creates a new IPTV handler.
-func NewIPTVHandler(svc *iptv.Service, proxy *iptv.StreamProxy, logger *slog.Logger) *IPTVHandler {
+func NewIPTVHandler(svc *iptv.Service, proxy *iptv.StreamProxy, libraries *db.LibraryRepository, logger *slog.Logger) *IPTVHandler {
 	return &IPTVHandler{
-		svc:    svc,
-		proxy:  proxy,
-		logger: logger.With("module", "iptv-handler"),
+		svc:       svc,
+		proxy:     proxy,
+		libraries: libraries,
+		logger:    logger.With("module", "iptv-handler"),
 	}
 }
 
@@ -247,4 +254,88 @@ func programToJSON(p *db.EPGProgram) map[string]any {
 		"start_time":  p.StartTime,
 		"end_time":    p.EndTime,
 	}
+}
+
+// PublicCountries returns the list of countries with available public IPTV channels.
+func (h *IPTVHandler) PublicCountries(w http.ResponseWriter, r *http.Request) {
+	countries := iptv.PublicCountries()
+
+	result := make([]map[string]any, 0, len(countries))
+	for _, c := range countries {
+		result = append(result, map[string]any{
+			"code": c.Code,
+			"name": c.Name,
+			"flag": c.Flag,
+		})
+	}
+
+	respondJSON(w, http.StatusOK, map[string]any{"data": result})
+}
+
+// ImportPublicIPTV creates a livetv library for a country and triggers M3U import.
+func (h *IPTVHandler) ImportPublicIPTV(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Country string `json:"country"`
+		Name    string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "INVALID_BODY", "invalid request body")
+		return
+	}
+
+	country, ok := iptv.FindCountry(req.Country)
+	if !ok {
+		respondError(w, http.StatusBadRequest, "INVALID_COUNTRY", "unknown country code")
+		return
+	}
+
+	libraryName := req.Name
+	if libraryName == "" {
+		libraryName = fmt.Sprintf("Live TV - %s", country.Name)
+	}
+
+	now := time.Now()
+	lib := &db.Library{
+		ID:          generateLibraryID(),
+		Name:        libraryName,
+		ContentType: "livetv",
+		M3UURL:      country.M3UURL(),
+		ScanMode:    "auto",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+
+	if err := h.libraries.Create(r.Context(), lib); err != nil {
+		h.logger.Error("create public IPTV library", "error", err)
+		respondError(w, http.StatusInternalServerError, "CREATE_ERROR", "failed to create library")
+		return
+	}
+
+	// Trigger M3U refresh in background (use detached context)
+	libID := lib.ID
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		count, err := h.svc.RefreshM3U(ctx, libID)
+		if err != nil {
+			h.logger.Error("public IPTV M3U refresh failed", "library", libID, "error", err)
+			return
+		}
+		h.logger.Info("public IPTV imported", "library", libID, "country", req.Country, "channels", count)
+	}()
+
+	respondJSON(w, http.StatusCreated, map[string]any{
+		"data": map[string]any{
+			"library_id": lib.ID,
+			"name":       lib.Name,
+			"country":    req.Country,
+			"m3u_url":    lib.M3UURL,
+		},
+	})
+}
+
+func generateLibraryID() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
 }

@@ -130,6 +130,7 @@ func run(configPath string) error {
 		Metadata:      repos.Metadata,
 		UserData:      repos.UserData,
 		Providers:     providerManager,
+		LibraryRepo:   repos.Libraries,
 		ProviderRepo:  repos.Providers,
 		SetupService:  setupService,
 		EventBus:      eventBus,

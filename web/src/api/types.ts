@@ -155,6 +155,19 @@ export interface EPGProgram {
   icon_url: string | null;
 }
 
+export interface PublicCountry {
+  code: string;
+  name: string;
+  flag: string;
+}
+
+export interface ImportPublicIPTVResponse {
+  library_id: string;
+  name: string;
+  country: string;
+  m3u_url: string;
+}
+
 // ─── Streaming ──────────────────────────────────────────────────────────────
 
 export type PlaybackMethod = "direct_play" | "direct_stream" | "transcode";
