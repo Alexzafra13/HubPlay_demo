@@ -37,6 +37,7 @@ type Dependencies struct {
 	Metadata       *db.MetadataRepository
 	UserData       *db.UserDataRepository
 	Providers      *provider.Manager
+	LibraryRepo    *db.LibraryRepository
 	ProviderRepo   *db.ProviderRepository
 	SetupService   *setup.Service
 	EventBus       *event.Bus
@@ -180,7 +181,7 @@ func NewRouter(deps Dependencies) http.Handler {
 
 				// IPTV channels (within library routes)
 				if deps.IPTV != nil {
-					iptvHandler := handlers.NewIPTVHandler(deps.IPTV, deps.IPTVProxy, deps.Logger)
+					iptvHandler := handlers.NewIPTVHandler(deps.IPTV, deps.IPTVProxy, deps.LibraryRepo, deps.Logger)
 
 					r.Route("/libraries/{id}/channels", func(r chi.Router) {
 						r.Get("/", iptvHandler.ListChannels)
@@ -195,9 +196,13 @@ func NewRouter(deps Dependencies) http.Handler {
 
 					r.Get("/channels/schedule", iptvHandler.BulkSchedule)
 
+					// Public IPTV
+					r.Get("/iptv/public/countries", iptvHandler.PublicCountries)
+
 					// Admin IPTV operations
 					r.Group(func(r chi.Router) {
 						r.Use(auth.RequireAdmin)
+						r.Post("/iptv/public/import", iptvHandler.ImportPublicIPTV)
 						r.Route("/libraries/{id}/iptv", func(r chi.Router) {
 							r.Post("/refresh-m3u", iptvHandler.RefreshM3U)
 							r.Post("/refresh-epg", iptvHandler.RefreshEPG)

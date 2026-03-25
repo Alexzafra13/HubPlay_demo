@@ -12,10 +12,12 @@ import type {
   Channel,
   CreateLibraryRequest,
   HealthResponse,
+  ImportPublicIPTVResponse,
   ItemDetail,
   Library,
   MediaItem,
   PaginatedResponse,
+  PublicCountry,
   SetupStatus,
   SystemCapabilities,
   UpdateLibraryRequest,
@@ -42,6 +44,7 @@ export const queryKeys = {
   channel: (id: string) => ["channels", id] as const,
   channelSchedule: (id: string) => ["channels", id, "schedule"] as const,
   channelGroups: (libraryId?: string) => ["channels", "groups", libraryId] as const,
+  publicCountries: ["public-countries"] as const,
   providers: ["providers"] as const,
   health: ["health"] as const,
   setupStatus: ["setup-status"] as const,
@@ -214,6 +217,26 @@ export function useChannels(
     queryKey: queryKeys.channels(libraryId),
     queryFn: () => api.getChannels(libraryId),
     ...options,
+  });
+}
+
+export function usePublicCountries(
+  options?: Partial<UseQueryOptions<PublicCountry[]>>,
+) {
+  return useQuery<PublicCountry[]>({
+    queryKey: queryKeys.publicCountries,
+    queryFn: () => api.getPublicCountries(),
+    ...options,
+  });
+}
+
+export function useImportPublicIPTV() {
+  const queryClient = useQueryClient();
+  return useMutation<ImportPublicIPTVResponse, Error, { country: string; name?: string }>({
+    mutationFn: ({ country, name }) => api.importPublicIPTV(country, name),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.libraries });
+    },
   });
 }
 
