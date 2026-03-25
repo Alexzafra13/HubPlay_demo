@@ -66,15 +66,14 @@ func (b *Bus) Publish(e Event) {
 
 	for _, h := range handlers {
 		go func(handler Handler) {
-			defer func() {
-				if r := recover(); r != nil {
-					b.logger.Error("event handler panicked", "type", e.Type, "panic", r)
-				}
-			}()
-
 			done := make(chan struct{})
 			go func() {
 				defer close(done)
+				defer func() {
+					if r := recover(); r != nil {
+						b.logger.Error("event handler panicked", "type", e.Type, "panic", r)
+					}
+				}()
 				handler(e)
 			}()
 
