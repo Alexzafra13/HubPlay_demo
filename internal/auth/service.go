@@ -280,7 +280,10 @@ func (s *Service) createSession(ctx context.Context, user *db.User, deviceName, 
 		return nil, err
 	}
 
-	refreshToken := generateRefreshToken()
+	refreshToken, err := generateRefreshToken()
+	if err != nil {
+		return nil, err
+	}
 	now := s.clock.Now()
 
 	session := &db.Session{
@@ -308,10 +311,10 @@ func (s *Service) createSession(ctx context.Context, user *db.User, deviceName, 
 	}, nil
 }
 
-func generateRefreshToken() string {
+func generateRefreshToken() (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
-		panic("crypto/rand failed: " + err.Error())
+		return "", fmt.Errorf("generating refresh token: %w", err)
 	}
-	return hex.EncodeToString(b)
+	return hex.EncodeToString(b), nil
 }

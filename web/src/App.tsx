@@ -4,7 +4,7 @@ import { useAuthStore } from "@/store/auth";
 import { useSetupStatus } from "@/api/hooks";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { ProtectedRoute } from "@/components/layout/ProtectedRoute";
-import { Spinner } from "@/components/common";
+import { Spinner, ErrorBoundary } from "@/components/common";
 import Login from "@/pages/Login";
 
 // Lazy-loaded routes for code splitting
@@ -50,6 +50,7 @@ export function App() {
   const needsSetup = setupStatus?.needs_setup ?? false;
 
   return (
+    <ErrorBoundary>
     <Suspense fallback={<LazyFallback />}>
       <Routes>
         {/* Setup wizard — only accessible when setup is needed */}
@@ -107,5 +108,6 @@ export function App() {
         <Route path="*" element={<NotFound />} />
       </Routes>
     </Suspense>
+    </ErrorBoundary>
   );
 }

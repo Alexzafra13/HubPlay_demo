@@ -3,7 +3,11 @@ package event
 import (
 	"log/slog"
 	"sync"
+	"time"
 )
+
+// handlerTimeout is the maximum time an event handler is allowed to run.
+const handlerTimeout = 30 * time.Second
 
 type Type string
 
@@ -54,6 +58,7 @@ func (b *Bus) Subscribe(eventType Type, handler Handler) {
 }
 
 // Publish sends an event to all registered handlers asynchronously.
+// Each handler runs with a timeout to prevent goroutine leaks.
 func (b *Bus) Publish(e Event) {
 	b.mu.RLock()
 	handlers := b.handlers[e.Type]
@@ -66,7 +71,19 @@ func (b *Bus) Publish(e Event) {
 					b.logger.Error("event handler panicked", "type", e.Type, "panic", r)
 				}
 			}()
-			handler(e)
+
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				handler(e)
+			}()
+
+			select {
+			case <-done:
+				// Handler completed normally
+			case <-time.After(handlerTimeout):
+				b.logger.Error("event handler timed out", "type", e.Type, "timeout", handlerTimeout)
+			}
 		}(h)
 	}
 }

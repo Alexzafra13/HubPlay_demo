@@ -21,3 +21,5 @@ export type { ProgressBarProps, ProgressBarSize } from "./ProgressBar";
 
 export { Modal } from "./Modal";
 export type { ModalProps, ModalSize } from "./Modal";
+
+export { ErrorBoundary } from "./ErrorBoundary";

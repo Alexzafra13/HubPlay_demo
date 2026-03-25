@@ -146,9 +146,15 @@ func (h *LibraryHandler) Browse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Block access to sensitive system directories
+	if isSensitiveBrowsePath(absPath) {
+		respondError(w, http.StatusForbidden, "BROWSE_ERROR", "access denied: cannot browse system directories")
+		return
+	}
+
 	entries, err := os.ReadDir(absPath)
 	if err != nil {
-		respondError(w, http.StatusBadRequest, "BROWSE_ERROR", err.Error())
+		respondError(w, http.StatusBadRequest, "BROWSE_ERROR", "directory not found or not accessible")
 		return
 	}
 
@@ -361,4 +367,21 @@ func itemSummaryResponse(item *db.Item) map[string]any {
 		resp["content_rating"] = item.ContentRating
 	}
 	return resp
+}
+
+// sensitiveBrowsePaths are system directories that should not be browsable.
+var sensitiveBrowsePaths = []string{
+	"/etc", "/proc", "/sys", "/dev", "/boot", "/root",
+	"/var/run", "/var/log", "/run", "/sbin", "/usr/sbin",
+}
+
+// isSensitiveBrowsePath returns true if the path is inside a sensitive system directory.
+func isSensitiveBrowsePath(absPath string) bool {
+	cleaned := filepath.Clean(absPath)
+	for _, sp := range sensitiveBrowsePaths {
+		if cleaned == sp || strings.HasPrefix(cleaned, sp+"/") {
+			return true
+		}
+	}
+	return false
 }
