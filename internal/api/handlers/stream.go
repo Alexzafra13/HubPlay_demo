@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +18,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 )
+
+// validSegmentName matches only safe HLS segment filenames (e.g. segment00001.ts, stream.m3u8).
+var validSegmentName = regexp.MustCompile(`^(segment\d{5}\.ts|stream\.m3u8)$`)
 
 // StreamHandler serves media streams via HLS or direct play.
 type StreamHandler struct {
@@ -151,9 +155,15 @@ func (h *StreamHandler) Segment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate segment filename: must match expected pattern (e.g. segment00001.ts, stream.m3u8)
+	if !validSegmentName.MatchString(segmentFile) {
+		respondError(w, http.StatusBadRequest, "INVALID_SEGMENT", "invalid segment filename")
+		return
+	}
+
 	segmentPath := filepath.Join(ms.OutputDir, segmentFile)
 
-	// Validate segment filename to prevent path traversal
+	// Double-check: resolved path must stay within output directory
 	if filepath.Dir(segmentPath) != ms.OutputDir {
 		respondError(w, http.StatusBadRequest, "INVALID_SEGMENT", "invalid segment path")
 		return

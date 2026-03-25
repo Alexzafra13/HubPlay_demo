@@ -56,7 +56,7 @@ func NewRouter(deps Dependencies) http.Handler {
 	r.Use(RequestLogger(deps.Logger))
 	r.Use(middleware.Recoverer)
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"*"},
+		AllowedOrigins:   allowedOrigins(deps.Config),
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Authorization", "Content-Type"},
 		ExposedHeaders:   []string{"Retry-After"},
@@ -253,4 +253,20 @@ func NewRouter(deps Dependencies) http.Handler {
 	}
 
 	return r
+}
+
+// allowedOrigins builds the CORS origin list from config.
+// In production: only the configured BaseURL.
+// Always allows common local dev origins for the Vite dev server.
+func allowedOrigins(cfg *config.Config) []string {
+	origins := []string{
+		"http://localhost:5173",
+		"http://127.0.0.1:5173",
+		"http://localhost:8096",
+		"http://127.0.0.1:8096",
+	}
+	if cfg != nil && cfg.Server.BaseURL != "" {
+		origins = append(origins, strings.TrimRight(cfg.Server.BaseURL, "/"))
+	}
+	return origins
 }

@@ -95,19 +95,15 @@ func (s *Scanner) ScanLibrary(ctx context.Context, lib *db.Library) (*ScanResult
 		Data: map[string]any{"library_id": lib.ID, "library_name": lib.Name},
 	})
 
-	// Collect all existing paths for this library to detect removals
+	// Collect all existing paths for this library to detect removals.
+	// Uses paginated iteration to avoid loading everything into memory at once.
 	existingPaths := make(map[string]bool)
-	existingItems, _, err := s.items.List(ctx, db.ItemFilter{
-		LibraryID: lib.ID,
-		Limit:     100000, // get all
-	})
-	if err != nil {
-		return nil, fmt.Errorf("listing existing items: %w", err)
-	}
-	for _, item := range existingItems {
+	if err := s.iterateLibraryItems(ctx, lib.ID, func(item *db.Item) {
 		if item.Path != "" {
 			existingPaths[item.Path] = true
 		}
+	}); err != nil {
+		return nil, fmt.Errorf("listing existing items: %w", err)
 	}
 
 	// Walk each library path
@@ -166,6 +162,31 @@ func (s *Scanner) ScanLibrary(ctx context.Context, lib *db.Library) (*ScanResult
 	return result, nil
 }
 
+// iterateLibraryItems pages through all items in a library in batches,
+// calling fn for each item. This avoids loading the entire library into memory.
+func (s *Scanner) iterateLibraryItems(ctx context.Context, libraryID string, fn func(*db.Item)) error {
+	const pageSize = 500
+	offset := 0
+	for {
+		items, _, err := s.items.List(ctx, db.ItemFilter{
+			LibraryID: libraryID,
+			Limit:     pageSize,
+			Offset:    offset,
+		})
+		if err != nil {
+			return err
+		}
+		for _, item := range items {
+			fn(item)
+		}
+		if len(items) < pageSize {
+			break
+		}
+		offset += pageSize
+	}
+	return nil
+}
+
 func (s *Scanner) walkPath(ctx context.Context, lib *db.Library, root string, seenPaths map[string]bool, result *ScanResult) error {
 	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -195,24 +216,21 @@ func (s *Scanner) walkPath(ctx context.Context, lib *db.Library, root string, se
 // RefreshMetadata re-fetches metadata and images for all items in a library.
 // It deletes existing images/metadata and re-enriches from providers.
 func (s *Scanner) RefreshMetadata(ctx context.Context, lib *db.Library) error {
-	items, _, err := s.items.List(ctx, db.ItemFilter{
-		LibraryID: lib.ID,
-		Limit:     100000,
+	s.logger.Info("refreshing metadata for library", "library", lib.Name)
+
+	count := 0
+	err := s.iterateLibraryItems(ctx, lib.ID, func(item *db.Item) {
+		// Delete old images and metadata so enrichMetadata re-fetches them
+		_ = s.images.DeleteByItem(ctx, item.ID)
+		_ = s.metadata.Delete(ctx, item.ID)
+		s.enrichMetadata(ctx, item)
+		count++
 	})
 	if err != nil {
 		return fmt.Errorf("listing items for refresh: %w", err)
 	}
 
-	s.logger.Info("refreshing metadata for library", "library", lib.Name, "items", len(items))
-
-	for _, item := range items {
-		// Delete old images and metadata so enrichMetadata re-fetches them
-		_ = s.images.DeleteByItem(ctx, item.ID)
-		_ = s.metadata.Delete(ctx, item.ID)
-		s.enrichMetadata(ctx, item)
-	}
-
-	s.logger.Info("metadata refresh complete", "library", lib.Name, "items", len(items))
+	s.logger.Info("metadata refresh complete", "library", lib.Name, "items", count)
 	return nil
 }
 
