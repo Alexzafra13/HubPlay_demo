@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { useChannels, useLibraries, usePublicCountries, useImportPublicIPTV } from "@/api/hooks";
 import type { Channel, PublicCountry } from "@/api/types";
-import { Spinner, EmptyState } from "@/components/common";
+import { Spinner } from "@/components/common";
 
 export default function LiveTV() {
   const { data: libraries, isLoading: librariesLoading } = useLibraries();
@@ -144,7 +144,7 @@ export default function LiveTV() {
   );
 }
 
-function CountrySelector({ hasLibrary, libraryId }: { hasLibrary: boolean; libraryId?: string }) {
+function CountrySelector({ hasLibrary }: { hasLibrary: boolean; libraryId?: string }) {
   const { data: countries, isLoading } = usePublicCountries();
   const importMutation = useImportPublicIPTV();
   const [selectedCountry, setSelectedCountry] = useState<PublicCountry | null>(null);
