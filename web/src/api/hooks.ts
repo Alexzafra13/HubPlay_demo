@@ -348,7 +348,9 @@ export function useLogout() {
   const queryClient = useQueryClient();
   return useMutation<void, Error, void>({
     mutationFn: () => api.logout(),
-    onSuccess: () => {
+    onSettled: () => {
+      // Always clear cache and redirect, even if the API call fails.
+      // The user wants to log out regardless of server response.
       queryClient.clear();
     },
   });

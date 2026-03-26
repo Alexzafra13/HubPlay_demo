@@ -178,6 +178,7 @@ export class ApiClient {
     } finally {
       localStorage.removeItem(TOKEN_KEY);
       localStorage.removeItem(REFRESH_KEY);
+      localStorage.removeItem("hubplay_user");
     }
   }
 
