@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { Outlet } from 'react-router';
+import { Outlet, useLocation } from 'react-router';
 import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
 
@@ -33,6 +33,7 @@ export function AppLayout({ title }: AppLayoutProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const isMobile = useIsMobile();
+  const location = useLocation();
 
   const toggleCollapse = useCallback(() => {
     setCollapsed((prev) => !prev);
@@ -46,30 +47,45 @@ export function AppLayout({ title }: AppLayoutProps) {
     setMobileOpen(false);
   }, []);
 
-  // Close mobile sidebar when switching to desktop
+  // Close mobile drawer when switching to desktop
   useEffect(() => {
     if (!isMobile) {
       setMobileOpen(false);
     }
   }, [isMobile]);
 
+  // Close mobile drawer on navigation
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [location.pathname]);
+
   return (
     <div className="min-h-screen bg-bg-base font-sans">
-      {/* Mobile overlay */}
-      {mobileOpen && (
-        <div
-          className="fixed inset-0 z-30 bg-black/50 md:hidden"
-          onClick={closeMobile}
-        />
-      )}
-
-      {/* Sidebar: hidden on mobile unless mobileOpen */}
+      {/* Mobile drawer overlay */}
       <div
         className={[
-          'md:block',
-          mobileOpen ? 'block' : 'hidden',
+          'fixed inset-0 z-30 bg-black/60 backdrop-blur-sm transition-opacity duration-300 md:hidden',
+          mobileOpen ? 'opacity-100' : 'opacity-0 pointer-events-none',
+        ].join(' ')}
+        onClick={closeMobile}
+      />
+
+      {/* Mobile drawer */}
+      <div
+        className={[
+          'fixed top-0 left-0 h-full z-40 transition-transform duration-300 ease-out md:hidden',
+          mobileOpen ? 'translate-x-0' : '-translate-x-full',
         ].join(' ')}
       >
+        <Sidebar
+          collapsed={false}
+          onToggleCollapse={toggleCollapse}
+          onClose={closeMobile}
+        />
+      </div>
+
+      {/* Desktop sidebar */}
+      <div className="hidden md:block">
         <Sidebar
           collapsed={collapsed}
           onToggleCollapse={toggleCollapse}
