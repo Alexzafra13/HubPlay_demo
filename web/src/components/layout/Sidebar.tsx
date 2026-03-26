@@ -144,7 +144,7 @@ interface SidebarProps {
   onClose?: () => void;
 }
 
-export function Sidebar({ collapsed, onToggleCollapse }: SidebarProps) {
+export function Sidebar({ collapsed, onToggleCollapse, onClose }: SidebarProps) {
   const { user, logout } = useAuthStore();
   const navigate = useNavigate();
   const isAdmin = user?.role === 'admin';
@@ -182,6 +182,17 @@ export function Sidebar({ collapsed, onToggleCollapse }: SidebarProps) {
         </svg>
         {!collapsed && (
           <span className="text-lg font-bold text-text-primary tracking-tight">HubPlay</span>
+        )}
+        {onClose && (
+          <button
+            onClick={onClose}
+            className="ml-auto p-1.5 rounded-md text-text-secondary hover:text-text-primary hover:bg-bg-elevated transition-colors md:hidden"
+            aria-label="Close menu"
+          >
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+              <path d="M5 5l10 10M15 5L5 15" />
+            </svg>
+          </button>
         )}
       </div>
 
