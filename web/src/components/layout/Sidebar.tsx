@@ -165,7 +165,7 @@ export function Sidebar({ collapsed, onToggleCollapse, onClose }: SidebarProps) 
 
   return (
     <aside
-      className="fixed top-0 left-0 h-full bg-bg-base/80 backdrop-blur-xl border-r border-white/5 flex flex-col z-40 transition-[width] duration-200"
+      className="h-full bg-bg-base/80 backdrop-blur-xl border-r border-white/5 flex flex-col transition-[width] duration-200"
       style={{ width: collapsed ? 'var(--sidebar-collapsed-width)' : 'var(--sidebar-width)' }}
     >
       {/* Brand */}
