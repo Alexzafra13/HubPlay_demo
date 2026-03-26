@@ -578,16 +578,16 @@ func itemTypeFromLibrary(contentType string) string {
 
 // fingerprint computes a fast fingerprint of a file using size + first 64KB hash.
 func fingerprint(path string) (string, error) {
-	info, err := os.Stat(path)
-	if err != nil {
-		return "", fmt.Errorf("stat %q: %w", path, err)
-	}
-
 	f, err := os.Open(path)
 	if err != nil {
 		return "", fmt.Errorf("open %q: %w", path, err)
 	}
 	defer f.Close() //nolint:errcheck
+
+	info, err := f.Stat()
+	if err != nil {
+		return "", fmt.Errorf("stat %q: %w", path, err)
+	}
 
 	h := sha256.New()
 	// Hash first 64KB for speed

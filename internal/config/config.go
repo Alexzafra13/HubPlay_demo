@@ -2,6 +2,7 @@ package config
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -194,7 +195,7 @@ func defaults() *Config {
 		},
 		Streaming: StreamingConfig{
 			SegmentDuration:      6,
-			MaxTranscodeSessions: 2,
+			MaxTranscodeSessions: 4,
 			TranscodePreset:      "veryfast",
 			DefaultAudioBitrate:  "192k",
 			CacheDir:             "",
@@ -210,10 +211,12 @@ func defaults() *Config {
 func generateSecret() string {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
-		// Fallback: use a combination of time-based entropy.
+		// Fallback: combine multiple entropy sources and hash with SHA-256.
 		// This should never happen on a healthy system, but avoids crashing the server.
-		fallback := fmt.Sprintf("%x%x", time.Now().UnixNano(), time.Now().UnixNano())
-		return fallback
+		hostname, _ := os.Hostname()
+		entropy := fmt.Sprintf("%d:%d:%s:%d", time.Now().UnixNano(), os.Getpid(), hostname, time.Now().UnixNano())
+		hash := sha256.Sum256([]byte(entropy))
+		return hex.EncodeToString(hash[:])
 	}
 	return hex.EncodeToString(b)
 }

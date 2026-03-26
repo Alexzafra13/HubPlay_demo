@@ -4,6 +4,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"log/slog"
 	"time"
 )
 
@@ -90,13 +91,36 @@ func ParseXMLTV(r io.Reader) (*EPGData, error) {
 	}
 
 	// Parse programmes
+	skippedPrograms := 0
 	for _, p := range raw.Programmes {
 		start, err := parseXMLTVTime(p.Start)
 		if err != nil {
-			continue // Skip programs with unparseable times
+			skippedPrograms++
+			title := ""
+			if len(p.Title) > 0 {
+				title = p.Title[0].Text
+			}
+			slog.Warn("skipping XMLTV programme with unparseable start time",
+				"channel", p.Channel,
+				"title", title,
+				"start", p.Start,
+				"error", err,
+			)
+			continue
 		}
 		stop, err := parseXMLTVTime(p.Stop)
 		if err != nil {
+			skippedPrograms++
+			title := ""
+			if len(p.Title) > 0 {
+				title = p.Title[0].Text
+			}
+			slog.Warn("skipping XMLTV programme with unparseable stop time",
+				"channel", p.Channel,
+				"title", title,
+				"stop", p.Stop,
+				"error", err,
+			)
 			continue
 		}
 
@@ -119,6 +143,14 @@ func ParseXMLTV(r io.Reader) (*EPGData, error) {
 		}
 
 		data.Programs = append(data.Programs, prog)
+	}
+
+	if skippedPrograms > 0 {
+		slog.Warn("XMLTV parsing completed with skipped programmes",
+			"total", len(raw.Programmes),
+			"skipped", skippedPrograms,
+			"parsed", len(data.Programs),
+		)
 	}
 
 	return data, nil

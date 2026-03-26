@@ -23,7 +23,7 @@ func Open(driver, path string, logger *slog.Logger) (*sql.DB, error) {
 		return nil, fmt.Errorf("opening sqlite: %w", err)
 	}
 
-	database.SetMaxOpenConns(4)
+	database.SetMaxOpenConns(8)
 
 	if err := database.Ping(); err != nil {
 		_ = database.Close()

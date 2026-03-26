@@ -45,6 +45,9 @@ USER hubplay
 
 EXPOSE 8096
 
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+    CMD wget -qO /dev/null http://localhost:8096/api/v1/health || exit 1
+
 VOLUME ["/config", "/cache"]
 
 ENTRYPOINT ["hubplay"]
