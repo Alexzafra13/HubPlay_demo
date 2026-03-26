@@ -6,7 +6,7 @@ bin/
 coverage.out
 coverage.html
 .env
-config/
+/config/
 
 # Frontend
 web/node_modules/

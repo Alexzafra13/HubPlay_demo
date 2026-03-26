@@ -1,8 +1,50 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import Hls from "hls.js";
 import { useChannels, useLibraries, usePublicCountries, useImportPublicIPTV } from "@/api/hooks";
 import type { Channel, PublicCountry } from "@/api/types";
 import { Spinner } from "@/components/common";
+
+// ─── Country auto-detection ──────────────────────────────────────────────────
+
+function detectCountryCode(): string {
+  // Try timezone → country mapping for common timezones
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const tzCountry: Record<string, string> = {
+      "Europe/Madrid": "es", "Europe/London": "gb", "Europe/Paris": "fr",
+      "Europe/Berlin": "de", "Europe/Rome": "it", "Europe/Lisbon": "pt",
+      "Europe/Amsterdam": "nl", "Europe/Brussels": "be", "Europe/Zurich": "ch",
+      "Europe/Vienna": "at", "Europe/Warsaw": "pl", "Europe/Stockholm": "se",
+      "Europe/Oslo": "no", "Europe/Copenhagen": "dk", "Europe/Helsinki": "fi",
+      "Europe/Dublin": "ie", "Europe/Athens": "gr", "Europe/Bucharest": "ro",
+      "Europe/Prague": "cz", "Europe/Budapest": "hu", "Europe/Sofia": "bg",
+      "Europe/Zagreb": "hr", "Europe/Belgrade": "rs", "Europe/Istanbul": "tr",
+      "Europe/Moscow": "ru", "Europe/Kiev": "ua", "Europe/Minsk": "by",
+      "America/New_York": "us", "America/Chicago": "us", "America/Denver": "us",
+      "America/Los_Angeles": "us", "America/Mexico_City": "mx",
+      "America/Sao_Paulo": "br", "America/Argentina/Buenos_Aires": "ar",
+      "America/Bogota": "co", "America/Lima": "pe", "America/Santiago": "cl",
+      "America/Caracas": "ve", "America/Toronto": "ca", "America/Vancouver": "ca",
+      "Asia/Tokyo": "jp", "Asia/Shanghai": "cn", "Asia/Seoul": "kr",
+      "Asia/Kolkata": "in", "Asia/Bangkok": "th", "Asia/Singapore": "sg",
+      "Asia/Jakarta": "id", "Asia/Manila": "ph", "Asia/Taipei": "tw",
+      "Asia/Dubai": "ae", "Asia/Riyadh": "sa", "Asia/Tehran": "ir",
+      "Australia/Sydney": "au", "Pacific/Auckland": "nz",
+      "Africa/Cairo": "eg", "Africa/Lagos": "ng", "Africa/Johannesburg": "za",
+      "Atlantic/Canary": "es",
+    };
+    if (tzCountry[tz]) return tzCountry[tz];
+  } catch { /* ignore */ }
+
+  // Fallback: navigator.language
+  const lang = navigator.language || "";
+  const parts = lang.split("-");
+  if (parts.length >= 2) return parts[1].toLowerCase();
+
+  return "us";
+}
+
+// ─── Main Component ──────────────────────────────────────────────────────────
 
 export default function LiveTV() {
   const { data: libraries, isLoading: librariesLoading } = useLibraries();
@@ -14,25 +56,49 @@ export default function LiveTV() {
   const { data: channels, isLoading: channelsLoading } = useChannels(liveTvLibrary?.id);
   const [activeChannel, setActiveChannel] = useState<Channel | null>(null);
   const [search, setSearch] = useState("");
+  const [activeGroup, setActiveGroup] = useState<string | null>(null);
+  const heroRef = useRef<HTMLDivElement>(null);
 
-  const grouped = useMemo(() => {
+  // Group channels by category
+  const groups = useMemo(() => {
     if (!channels) return new Map<string, Channel[]>();
-    const filtered = search
-      ? channels.filter(
-          (ch) =>
-            ch.name.toLowerCase().includes(search.toLowerCase()) ||
-            (ch.group ?? "").toLowerCase().includes(search.toLowerCase()),
-        )
-      : channels;
     const map = new Map<string, Channel[]>();
-    for (const ch of filtered) {
-      const group = ch.group ?? "Uncategorized";
+    for (const ch of channels) {
+      const group = ch.group ?? "General";
       const list = map.get(group) ?? [];
       list.push(ch);
       map.set(group, list);
     }
     return map;
+  }, [channels]);
+
+  // Filtered channels for search
+  const searchResults = useMemo(() => {
+    if (!channels || !search) return [];
+    const q = search.toLowerCase();
+    return channels.filter(
+      (ch) =>
+        ch.name.toLowerCase().includes(q) ||
+        (ch.group ?? "").toLowerCase().includes(q),
+    );
   }, [channels, search]);
+
+  // Group names for tabs
+  const groupNames = useMemo(() => Array.from(groups.keys()), [groups]);
+
+  // Select first channel if none selected
+  useEffect(() => {
+    if (!activeChannel && channels && channels.length > 0) {
+      setActiveChannel(channels[0]);
+    }
+  }, [channels, activeChannel]);
+
+  // Scroll to hero when changing channel
+  const handleSelectChannel = useCallback((ch: Channel) => {
+    setActiveChannel(ch);
+    setSearch("");
+    heroRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
 
   const isLoading = librariesLoading || channelsLoading;
 
@@ -44,106 +110,246 @@ export default function LiveTV() {
     );
   }
 
-  // No livetv library or no channels — show country selector
+  // No livetv library or no channels — show country selector with auto-detect
   if (!liveTvLibrary || !channels || channels.length === 0) {
-    return <CountrySelector hasLibrary={!!liveTvLibrary} libraryId={liveTvLibrary?.id} />;
+    return <CountrySelector hasLibrary={!!liveTvLibrary} />;
   }
 
+  // Channels to display in the grid
+  const displayChannels = search
+    ? searchResults
+    : activeGroup
+      ? groups.get(activeGroup) ?? []
+      : channels;
+
   return (
-    <div className="flex flex-col gap-6 px-6 py-8 sm:px-10">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="text-2xl font-bold text-text-primary sm:text-3xl">
-          Live TV
-        </h1>
-        <input
-          type="text"
-          placeholder="Search channels..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="w-full max-w-xs rounded-[--radius-md] border border-border bg-bg-card px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none"
-        />
+    <div className="flex flex-col gap-0 -mx-4 -mt-2 md:-mx-6">
+      {/* ── Hero Player ────────────────────────────────────────────── */}
+      <div ref={heroRef} className="relative w-full aspect-video max-h-[65vh] bg-black overflow-hidden">
+        {activeChannel && <ChannelPlayer channel={activeChannel} />}
+
+        {/* Gradient overlay at bottom */}
+        <div className="absolute inset-x-0 bottom-0 h-32 bg-gradient-to-t from-bg-base to-transparent pointer-events-none" />
+
+        {/* Channel info overlay */}
+        {activeChannel && (
+          <div className="absolute left-0 bottom-0 right-0 p-4 md:p-8 pointer-events-none">
+            <div className="flex items-end gap-4">
+              {activeChannel.logo_url && (
+                <img
+                  src={activeChannel.logo_url}
+                  alt=""
+                  className="h-12 w-12 md:h-16 md:w-16 rounded-xl object-contain bg-white/10 backdrop-blur-sm p-1.5 shrink-0"
+                />
+              )}
+              <div className="min-w-0">
+                <h1 className="text-xl md:text-3xl font-bold text-white truncate drop-shadow-lg">
+                  {activeChannel.name}
+                </h1>
+                {activeChannel.group && (
+                  <p className="text-sm md:text-base text-white/70 mt-0.5 truncate">
+                    {activeChannel.group}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Video player */}
-      {activeChannel && (
-        <div className="flex flex-col gap-2">
-          <div className="aspect-video w-full max-w-4xl overflow-hidden rounded-[--radius-lg] bg-black">
-            <ChannelPlayer channel={activeChannel} />
-          </div>
-          <div className="flex items-center gap-3">
-            {activeChannel.logo_url && (
-              <img
-                src={activeChannel.logo_url}
-                alt=""
-                className="h-6 w-6 rounded object-contain bg-white p-0.5"
-              />
-            )}
-            <span className="text-sm font-medium text-text-primary">
-              {activeChannel.name}
-            </span>
-            <button
-              type="button"
-              onClick={() => setActiveChannel(null)}
-              className="text-xs text-text-muted hover:text-text-secondary transition-colors"
+      {/* ── Search + Category Tabs ─────────────────────────────────── */}
+      <div className="sticky top-[var(--topbar-height)] z-20 bg-bg-base/80 backdrop-blur-xl border-b border-white/5">
+        <div className="px-4 md:px-6 pt-3 pb-0">
+          {/* Search bar */}
+          <div className="relative mb-3">
+            <svg
+              width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor"
+              strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary pointer-events-none"
             >
-              Close player
-            </button>
+              <circle cx="8.5" cy="8.5" r="5" />
+              <path d="M12.5 12.5L17 17" />
+            </svg>
+            <input
+              type="text"
+              placeholder="Search channels..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-white/5 border border-white/10 text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30 transition-all"
+            />
           </div>
-        </div>
-      )}
 
-      {/* Channel groups */}
-      {Array.from(grouped.entries()).map(([group, groupChannels]) => (
-        <section key={group}>
-          <h2 className="mb-4 text-lg font-semibold text-text-primary">
-            {group}
-          </h2>
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3">
-            {groupChannels.map((channel) => (
+          {/* Category tabs - horizontal scroll */}
+          {!search && (
+            <div className="flex gap-1 overflow-x-auto pb-3 scrollbar-hide -mx-4 px-4 md:-mx-6 md:px-6">
               <button
-                key={channel.id}
                 type="button"
-                onClick={() => setActiveChannel(channel)}
+                onClick={() => setActiveGroup(null)}
                 className={[
-                  "flex items-center gap-3 rounded-[--radius-lg] border p-4 text-left transition-colors",
-                  activeChannel?.id === channel.id
-                    ? "border-accent bg-accent/10"
-                    : "border-border bg-bg-card hover:bg-bg-elevated",
+                  "shrink-0 px-4 py-1.5 rounded-full text-sm font-medium transition-all",
+                  activeGroup === null
+                    ? "bg-accent text-white shadow-lg shadow-accent/20"
+                    : "bg-white/5 text-text-secondary hover:bg-white/10 hover:text-text-primary",
                 ].join(" ")}
               >
-                {channel.logo_url ? (
-                  <img
-                    src={channel.logo_url}
-                    alt={channel.name}
-                    className="h-10 w-10 shrink-0 rounded-[--radius-md] object-contain bg-white p-1"
-                  />
-                ) : (
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[--radius-md] bg-bg-elevated text-sm font-bold text-text-muted">
-                    {channel.number}
-                  </div>
-                )}
-                <div className="flex flex-col overflow-hidden">
-                  <span className="truncate text-sm font-medium text-text-primary">
-                    {channel.name}
-                  </span>
-                  <span className="text-xs text-text-muted">
-                    Ch. {channel.number}
-                  </span>
-                </div>
+                All
               </button>
-            ))}
-          </div>
-        </section>
-      ))}
-
-      {grouped.size === 0 && search && (
-        <div className="py-12 text-center text-text-muted">
-          No channels match "{search}"
+              {groupNames.map((name) => (
+                <button
+                  key={name}
+                  type="button"
+                  onClick={() => setActiveGroup(name)}
+                  className={[
+                    "shrink-0 px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap",
+                    activeGroup === name
+                      ? "bg-accent text-white shadow-lg shadow-accent/20"
+                      : "bg-white/5 text-text-secondary hover:bg-white/10 hover:text-text-primary",
+                  ].join(" ")}
+                >
+                  {name}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
-      )}
+      </div>
+
+      {/* ── Channel Grid / Category Rows ──────────────────────────── */}
+      <div className="px-4 md:px-6 pb-8">
+        {search ? (
+          // Search results - grid
+          <>
+            <p className="text-sm text-text-muted py-4">
+              {searchResults.length} channel{searchResults.length !== 1 && "s"} found
+            </p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+              {searchResults.map((ch) => (
+                <ChannelCard
+                  key={ch.id}
+                  channel={ch}
+                  isActive={activeChannel?.id === ch.id}
+                  onClick={() => handleSelectChannel(ch)}
+                />
+              ))}
+            </div>
+          </>
+        ) : activeGroup ? (
+          // Single group - grid
+          <div className="pt-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+              {displayChannels.map((ch) => (
+                <ChannelCard
+                  key={ch.id}
+                  channel={ch}
+                  isActive={activeChannel?.id === ch.id}
+                  onClick={() => handleSelectChannel(ch)}
+                />
+              ))}
+            </div>
+          </div>
+        ) : (
+          // All groups - horizontal rows (Xiaomi TV+ style)
+          <div className="flex flex-col gap-6 pt-4">
+            {groupNames.map((groupName) => {
+              const groupChannels = groups.get(groupName) ?? [];
+              return (
+                <section key={groupName}>
+                  <div className="flex items-center justify-between mb-3">
+                    <h2 className="text-base md:text-lg font-semibold text-text-primary">
+                      {groupName}
+                    </h2>
+                    <button
+                      type="button"
+                      onClick={() => setActiveGroup(groupName)}
+                      className="text-xs text-text-muted hover:text-accent transition-colors"
+                    >
+                      See all
+                    </button>
+                  </div>
+                  <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide -mx-4 px-4 md:-mx-6 md:px-6">
+                    {groupChannels.map((ch) => (
+                      <div key={ch.id} className="shrink-0 w-36 md:w-44">
+                        <ChannelCard
+                          channel={ch}
+                          isActive={activeChannel?.id === ch.id}
+                          onClick={() => handleSelectChannel(ch)}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              );
+            })}
+          </div>
+        )}
+
+        {search && searchResults.length === 0 && (
+          <div className="py-16 text-center text-text-muted">
+            No channels match &ldquo;{search}&rdquo;
+          </div>
+        )}
+      </div>
     </div>
   );
 }
+
+// ─── Channel Card ────────────────────────────────────────────────────────────
+
+function ChannelCard({
+  channel,
+  isActive,
+  onClick,
+}: {
+  channel: Channel;
+  isActive: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={[
+        "group flex flex-col rounded-xl overflow-hidden transition-all duration-200",
+        isActive
+          ? "ring-2 ring-accent shadow-lg shadow-accent/10 scale-[1.02]"
+          : "hover:scale-[1.03] hover:shadow-lg hover:shadow-black/20",
+      ].join(" ")}
+    >
+      {/* Logo area */}
+      <div className={[
+        "aspect-video flex items-center justify-center relative",
+        isActive ? "bg-accent/10" : "bg-white/5 group-hover:bg-white/8",
+      ].join(" ")}>
+        {channel.logo_url ? (
+          <img
+            src={channel.logo_url}
+            alt={channel.name}
+            className="h-10 w-10 md:h-12 md:w-12 object-contain"
+            loading="lazy"
+          />
+        ) : (
+          <span className="text-2xl font-bold text-text-muted/50">
+            {channel.number}
+          </span>
+        )}
+        {isActive && (
+          <div className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+        )}
+      </div>
+      {/* Info */}
+      <div className="px-2.5 py-2 bg-white/[0.03] text-left">
+        <p className="text-xs md:text-sm font-medium text-text-primary truncate">
+          {channel.name}
+        </p>
+        <p className="text-[10px] md:text-xs text-text-muted truncate mt-0.5">
+          Ch. {channel.number}
+        </p>
+      </div>
+    </button>
+  );
+}
+
+// ─── Channel Player ──────────────────────────────────────────────────────────
 
 function ChannelPlayer({ channel }: { channel: Channel }) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -153,6 +359,7 @@ function ChannelPlayer({ channel }: { channel: Channel }) {
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
+    setError(null);
 
     const streamUrl = channel.stream_url;
 
@@ -189,11 +396,9 @@ function ChannelPlayer({ channel }: { channel: Channel }) {
         }
       });
     } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
-      // Native HLS (Safari)
       video.src = streamUrl;
       video.addEventListener("loadedmetadata", () => video.play().catch(() => {}), { once: true });
     } else {
-      // Try direct playback as fallback
       video.src = streamUrl;
       video.addEventListener("loadedmetadata", () => video.play().catch(() => {}), { once: true });
       video.addEventListener("error", () => setError("This channel format is not supported in your browser."), { once: true });
@@ -209,8 +414,15 @@ function ChannelPlayer({ channel }: { channel: Channel }) {
 
   if (error) {
     return (
-      <div className="flex h-full w-full items-center justify-center text-sm text-text-muted">
-        {error}
+      <div className="flex h-full w-full items-center justify-center bg-black">
+        <div className="text-center px-4">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" className="mx-auto mb-3 text-text-muted/50">
+            <rect x="2" y="4" width="20" height="14" rx="2" />
+            <path d="M7 22h10M12 18v4" />
+            <path d="M8 11l2 2 4-4" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <p className="text-sm text-text-muted">{error}</p>
+        </div>
       </div>
     );
   }
@@ -219,23 +431,38 @@ function ChannelPlayer({ channel }: { channel: Channel }) {
     <video
       ref={videoRef}
       controls
-      className="h-full w-full"
+      className="h-full w-full object-contain"
       playsInline
     />
   );
 }
 
-function CountrySelector({ hasLibrary }: { hasLibrary: boolean; libraryId?: string }) {
+// ─── Country Selector (with auto-detect) ─────────────────────────────────────
+
+function CountrySelector({ hasLibrary }: { hasLibrary: boolean }) {
   const { data: countries, isLoading } = usePublicCountries();
   const importMutation = useImportPublicIPTV();
   const [selectedCountry, setSelectedCountry] = useState<PublicCountry | null>(null);
   const [countrySearch, setCountrySearch] = useState("");
+  const [autoDetected, setAutoDetected] = useState(false);
+
+  // Auto-detect country on mount
+  useEffect(() => {
+    if (!countries || countries.length === 0 || autoDetected) return;
+    const code = detectCountryCode();
+    const match = countries.find((c) => c.code === code);
+    if (match) {
+      setSelectedCountry(match);
+    }
+    setAutoDetected(true);
+  }, [countries, autoDetected]);
 
   const filtered = useMemo(() => {
     if (!countries) return [];
     if (!countrySearch) return countries;
     return countries.filter((c) =>
-      c.name.toLowerCase().includes(countrySearch.toLowerCase()),
+      c.name.toLowerCase().includes(countrySearch.toLowerCase()) ||
+      c.code.toLowerCase().includes(countrySearch.toLowerCase()),
     );
   }, [countries, countrySearch]);
 
@@ -245,8 +472,6 @@ function CountrySelector({ hasLibrary }: { hasLibrary: boolean; libraryId?: stri
       { country: selectedCountry.code },
       {
         onSuccess: () => {
-          // Channels will load after library is created and M3U is refreshed.
-          // The page will re-render with the new library.
           window.location.reload();
         },
       },
@@ -254,38 +479,35 @@ function CountrySelector({ hasLibrary }: { hasLibrary: boolean; libraryId?: stri
   };
 
   return (
-    <div className="flex min-h-[60vh] items-center justify-center px-6">
+    <div className="flex min-h-[60vh] items-center justify-center px-4">
       <div className="w-full max-w-lg">
         <div className="mb-8 text-center">
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={1.5}
-            className="mx-auto mb-4 h-16 w-16 text-text-muted"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M6 20h12M6 4h12M4 8h16v8H4z"
-            />
-          </svg>
+          <div className="mx-auto mb-5 w-20 h-20 rounded-2xl bg-accent/10 flex items-center justify-center">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-accent">
+              <rect x="2" y="4" width="20" height="14" rx="2" />
+              <path d="M7 22h10M12 18v4" />
+            </svg>
+          </div>
           <h2 className="text-2xl font-bold text-text-primary">
-            {hasLibrary ? "No channels loaded yet" : "Set up Live TV"}
+            {hasLibrary ? "No channels loaded" : "Set up Live TV"}
           </h2>
-          <p className="mt-2 text-text-muted">
-            Choose a country to import free public IPTV channels.
-            Channels are provided by the iptv-org community project.
+          <p className="mt-2 text-sm text-text-muted max-w-sm mx-auto">
+            Import free public IPTV channels from the iptv-org community project.
+            {selectedCountry && !countrySearch && (
+              <span className="block mt-1 text-accent">
+                We detected you might be in {selectedCountry.flag} {selectedCountry.name}
+              </span>
+            )}
           </p>
         </div>
 
-        <div className="rounded-[--radius-lg] border border-border bg-bg-card p-6">
+        <div className="rounded-2xl border border-white/10 bg-white/[0.03] backdrop-blur-sm p-5">
           <input
             type="text"
             placeholder="Search countries..."
             value={countrySearch}
             onChange={(e) => setCountrySearch(e.target.value)}
-            className="mb-4 w-full rounded-[--radius-md] border border-border bg-bg-elevated px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none"
+            className="mb-4 w-full rounded-xl bg-white/5 border border-white/10 px-4 py-2.5 text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30 transition-all"
           />
 
           {isLoading ? (
@@ -293,20 +515,20 @@ function CountrySelector({ hasLibrary }: { hasLibrary: boolean; libraryId?: stri
               <Spinner size="md" />
             </div>
           ) : (
-            <div className="grid max-h-64 grid-cols-2 gap-2 overflow-y-auto sm:grid-cols-3">
+            <div className="grid max-h-60 grid-cols-2 gap-2 overflow-y-auto sm:grid-cols-3 pr-1">
               {filtered.map((country) => (
                 <button
                   key={country.code}
                   type="button"
                   onClick={() => setSelectedCountry(country)}
                   className={[
-                    "rounded-[--radius-md] border px-3 py-2 text-left text-sm transition-colors",
+                    "rounded-xl border px-3 py-2.5 text-left text-sm transition-all",
                     selectedCountry?.code === country.code
-                      ? "border-accent bg-accent/10 text-text-primary"
-                      : "border-border bg-bg-elevated text-text-secondary hover:bg-bg-card",
+                      ? "border-accent bg-accent/10 text-text-primary ring-1 ring-accent/30"
+                      : "border-white/10 bg-white/[0.02] text-text-secondary hover:bg-white/5 hover:text-text-primary",
                   ].join(" ")}
                 >
-                  <span className="mr-1.5 text-xs">{country.flag}</span>
+                  <span className="mr-1.5">{country.flag}</span>
                   {country.name}
                 </button>
               ))}
@@ -314,17 +536,23 @@ function CountrySelector({ hasLibrary }: { hasLibrary: boolean; libraryId?: stri
           )}
 
           {selectedCountry && (
-            <div className="mt-4 flex items-center justify-between">
-              <span className="text-sm text-text-secondary">
-                Selected: <strong>{selectedCountry.name}</strong>
+            <div className="mt-5 flex items-center justify-between gap-3">
+              <span className="text-sm text-text-secondary truncate">
+                {selectedCountry.flag} <strong>{selectedCountry.name}</strong>
               </span>
               <button
                 type="button"
                 onClick={handleImport}
                 disabled={importMutation.isPending}
-                className="rounded-[--radius-md] bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent/90 disabled:opacity-50"
+                className="shrink-0 rounded-xl bg-accent px-5 py-2.5 text-sm font-medium text-white transition-all hover:bg-accent/90 hover:shadow-lg hover:shadow-accent/20 disabled:opacity-50"
               >
-                {importMutation.isPending ? "Importing..." : "Import channels"}
+                {importMutation.isPending ? (
+                  <span className="flex items-center gap-2">
+                    <Spinner size="sm" /> Importing...
+                  </span>
+                ) : (
+                  "Import channels"
+                )}
               </button>
             </div>
           )}

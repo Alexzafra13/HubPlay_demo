@@ -4,10 +4,32 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
 )
+
+// allowedStreamSchemes defines the set of URL schemes considered safe for stream URLs.
+var allowedStreamSchemes = map[string]bool{
+	"http":  true,
+	"https": true,
+	"rtmp":  true,
+	"rtsp":  true,
+	"udp":   true,
+	"rtp":   true,
+}
+
+// isValidStreamURL checks whether a stream URL uses a safe, allowed scheme.
+// It rejects dangerous schemes like file://, javascript:, data:, etc.
+func isValidStreamURL(rawURL string) bool {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	scheme := strings.ToLower(parsed.Scheme)
+	return allowedStreamSchemes[scheme]
+}
 
 // M3UChannel represents a parsed channel entry from an M3U playlist.
 type M3UChannel struct {
@@ -67,7 +89,9 @@ func ParseM3U(r io.Reader) ([]M3UChannel, error) {
 		// This is a URL line
 		if current != nil {
 			current.StreamURL = line
-			channels = append(channels, *current)
+			if isValidStreamURL(line) {
+				channels = append(channels, *current)
+			}
 			current = nil
 		}
 	}

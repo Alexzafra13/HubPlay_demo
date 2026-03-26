@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useParams } from "react-router";
 import { useItem, useItemChildren } from "@/api/hooks";
 import { api } from "@/api/client";
@@ -19,23 +19,30 @@ export default function ItemDetail() {
     directUrl: string | null;
   } | null>(null);
   const [playError, setPlayError] = useState<string | null>(null);
+  const isPlayingRef = useRef(false);
+
+  const cleanupSession = useCallback(async (itemId: string) => {
+    try {
+      const token = localStorage.getItem("hubplay_access_token");
+      await fetch(`/api/v1/stream/${itemId}/session`, {
+        method: "DELETE",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+    } catch { /* best-effort cleanup */ }
+    isPlayingRef.current = false;
+  }, []);
 
   const handlePlay = useCallback(async () => {
     if (!id) return;
     setPlayError(null);
 
     try {
-      // Stop any existing transcode session so playback starts fresh
-      try {
-        const token = localStorage.getItem("hubplay_access_token");
-        await fetch(`/api/v1/stream/${id}/session`, {
-          method: "DELETE",
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-        });
-      } catch { /* ignore */ }
+      // Clean up any existing session before starting a new one
+      if (isPlayingRef.current) {
+        await cleanupSession(id);
+      }
 
       const info = await api.getStreamInfo(id);
-      // Backend returns PascalCase method (DirectPlay, DirectStream, Transcode)
       const rawMethod = (info as Record<string, unknown>).method as string ?? "";
       const methodMap: Record<string, PlaybackMethod> = {
         DirectPlay: "direct_play",
@@ -51,17 +58,21 @@ export default function ItemDetail() {
         ? `/api/v1/stream/${id}/direct`
         : null;
 
+      isPlayingRef.current = true;
       setPlayerInfo({ playbackMethod: method, masterPlaylistUrl: masterUrl, directUrl });
       setShowPlayer(true);
     } catch {
       setPlayError("Failed to start playback. Please try again.");
     }
-  }, [id]);
+  }, [id, cleanupSession]);
 
-  const handleClosePlayer = useCallback(() => {
+  const handleClosePlayer = useCallback(async () => {
     setShowPlayer(false);
     setPlayerInfo(null);
-  }, []);
+    if (id) {
+      await cleanupSession(id);
+    }
+  }, [id, cleanupSession]);
 
   if (isLoading) {
     return (
