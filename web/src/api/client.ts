@@ -78,6 +78,48 @@ export class ApiClient {
     });
 
     if (!response.ok) {
+      // If token expired, try to refresh once
+      if (response.status === 401 && path !== "/auth/refresh" && path !== "/auth/login") {
+        const refreshToken = localStorage.getItem(REFRESH_KEY);
+        if (refreshToken) {
+          try {
+            await this.refresh(refreshToken);
+            // Retry the original request with the new token
+            const retryHeaders = { ...headers };
+            const newToken = localStorage.getItem(TOKEN_KEY);
+            if (newToken) {
+              retryHeaders["Authorization"] = `Bearer ${newToken}`;
+            }
+            const retryResponse = await fetch(url, {
+              method,
+              headers: retryHeaders,
+              body: body !== undefined ? JSON.stringify(body) : undefined,
+            });
+            if (retryResponse.ok) {
+              if (retryResponse.status === 204) return undefined as T;
+              const retryJson = await retryResponse.json();
+              if (retryJson && typeof retryJson === "object" && "data" in retryJson) {
+                return retryJson.data as T;
+              }
+              return retryJson as T;
+            }
+          } catch {
+            // Refresh failed — clear auth and redirect to login
+            localStorage.removeItem(TOKEN_KEY);
+            localStorage.removeItem(REFRESH_KEY);
+            localStorage.removeItem("hubplay_user");
+            window.location.href = "/login";
+            throw new ApiError(401, { error: { code: "session_expired", message: "Session expired" } });
+          }
+        }
+        // No refresh token — redirect to login
+        localStorage.removeItem(TOKEN_KEY);
+        localStorage.removeItem(REFRESH_KEY);
+        localStorage.removeItem("hubplay_user");
+        window.location.href = "/login";
+        throw new ApiError(401, { error: { code: "session_expired", message: "Session expired" } });
+      }
+
       let errorBody: ApiErrorBody;
       try {
         errorBody = (await response.json()) as ApiErrorBody;
