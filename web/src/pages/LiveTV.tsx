@@ -1,4 +1,5 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
+import Hls from "hls.js";
 import { useChannels, useLibraries, usePublicCountries, useImportPublicIPTV } from "@/api/hooks";
 import type { Channel, PublicCountry } from "@/api/types";
 import { Spinner } from "@/components/common";
@@ -67,16 +68,16 @@ export default function LiveTV() {
       {activeChannel && (
         <div className="flex flex-col gap-2">
           <div className="aspect-video w-full max-w-4xl overflow-hidden rounded-[--radius-lg] bg-black">
-            <video
-              src={activeChannel.stream_url}
-              controls
-              autoPlay
-              className="h-full w-full"
-            >
-              Your browser does not support video playback.
-            </video>
+            <ChannelPlayer channel={activeChannel} />
           </div>
           <div className="flex items-center gap-3">
+            {activeChannel.logo_url && (
+              <img
+                src={activeChannel.logo_url}
+                alt=""
+                className="h-6 w-6 rounded object-contain bg-white p-0.5"
+              />
+            )}
             <span className="text-sm font-medium text-text-primary">
               {activeChannel.name}
             </span>
@@ -141,6 +142,86 @@ export default function LiveTV() {
         </div>
       )}
     </div>
+  );
+}
+
+function ChannelPlayer({ channel }: { channel: Channel }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const hlsRef = useRef<Hls | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const streamUrl = channel.stream_url;
+
+    if (Hls.isSupported()) {
+      const hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: false,
+        xhrSetup: (xhr) => {
+          const token = localStorage.getItem("hubplay_access_token");
+          if (token) {
+            xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+          }
+        },
+      });
+      hlsRef.current = hls;
+
+      hls.loadSource(streamUrl);
+      hls.attachMedia(video);
+
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        video.play().catch(() => {});
+      });
+
+      hls.on(Hls.Events.ERROR, (_event, data) => {
+        if (data.fatal) {
+          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+            hls.startLoad();
+          } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+            hls.recoverMediaError();
+          } else {
+            setError("This channel is currently unavailable.");
+            hls.destroy();
+          }
+        }
+      });
+    } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+      // Native HLS (Safari)
+      video.src = streamUrl;
+      video.addEventListener("loadedmetadata", () => video.play().catch(() => {}), { once: true });
+    } else {
+      // Try direct playback as fallback
+      video.src = streamUrl;
+      video.addEventListener("loadedmetadata", () => video.play().catch(() => {}), { once: true });
+      video.addEventListener("error", () => setError("This channel format is not supported in your browser."), { once: true });
+    }
+
+    return () => {
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+    };
+  }, [channel.stream_url]);
+
+  if (error) {
+    return (
+      <div className="flex h-full w-full items-center justify-center text-sm text-text-muted">
+        {error}
+      </div>
+    );
+  }
+
+  return (
+    <video
+      ref={videoRef}
+      controls
+      className="h-full w-full"
+      playsInline
+    />
   );
 }
 

@@ -56,13 +56,13 @@ export function TopBar({ title, onMenuClick }: TopBarProps) {
 
   return (
     <header
-      className="sticky top-0 z-30 bg-transparent flex items-center px-4 gap-4"
+      className="sticky top-0 z-30 flex items-center px-4 gap-3 bg-bg-base/70 backdrop-blur-xl border-b border-white/5 md:bg-transparent md:backdrop-blur-none md:border-b-0"
       style={{ height: 'var(--topbar-height)' }}
     >
       {/* Hamburger (mobile) */}
       <button
         onClick={onMenuClick}
-        className="md:hidden p-2 rounded-lg text-text-secondary hover:text-text-primary hover:bg-bg-elevated transition-colors"
+        className="md:hidden p-2 -ml-1 rounded-lg text-text-secondary hover:text-text-primary hover:bg-white/5 transition-colors"
         aria-label="Toggle menu"
       >
         <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
@@ -70,9 +70,24 @@ export function TopBar({ title, onMenuClick }: TopBarProps) {
         </svg>
       </button>
 
-      {/* Page Title */}
+      {/* Brand (mobile only) */}
+      <NavLink to="/" className="flex items-center gap-2 md:hidden">
+        <svg
+          width="24"
+          height="24"
+          viewBox="0 0 28 28"
+          fill="none"
+          className="text-accent"
+        >
+          <rect width="28" height="28" rx="6" fill="currentColor" fillOpacity="0.15" />
+          <path d="M10 7v14l12-7L10 7z" fill="currentColor" />
+        </svg>
+        <span className="text-base font-bold text-text-primary tracking-tight">HubPlay</span>
+      </NavLink>
+
+      {/* Page Title (desktop) */}
       {title && (
-        <h1 className="text-base font-semibold text-text-primary truncate">{title}</h1>
+        <h1 className="hidden md:block text-base font-semibold text-text-primary truncate">{title}</h1>
       )}
 
       <div className="flex-1" />
