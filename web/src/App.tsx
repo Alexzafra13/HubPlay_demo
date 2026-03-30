@@ -1,7 +1,8 @@
 import { useEffect, lazy, Suspense } from "react";
-import { Routes, Route, Navigate } from "react-router";
+import { Routes, Route, Navigate, useNavigate } from "react-router";
 import { useAuthStore } from "@/store/auth";
 import { useSetupStatus } from "@/api/hooks";
+import { api } from "@/api/client";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { ProtectedRoute } from "@/components/layout/ProtectedRoute";
 import { Spinner, ErrorBoundary } from "@/components/common";
@@ -33,11 +34,27 @@ function LazyFallback() {
 
 export function App() {
   const loadFromStorage = useAuthStore((s) => s.loadFromStorage);
+  const updateTokens = useAuthStore((s) => s.updateTokens);
+  const logout = useAuthStore((s) => s.logout);
+  const navigate = useNavigate();
   const { data: setupStatus, isLoading } = useSetupStatus();
 
   useEffect(() => {
     loadFromStorage();
   }, [loadFromStorage]);
+
+  // Wire ApiClient auth events to Zustand store + React Router
+  useEffect(() => {
+    api.setAuthListener({
+      onTokenRefresh: (accessToken, refreshToken) => {
+        updateTokens(accessToken, refreshToken);
+      },
+      onAuthFailure: () => {
+        logout();
+        navigate("/login", { replace: true });
+      },
+    });
+  }, [updateTokens, logout, navigate]);
 
   if (isLoading) {
     return (
