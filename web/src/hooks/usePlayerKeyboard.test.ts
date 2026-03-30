@@ -11,12 +11,12 @@ describe("usePlayerKeyboard", () => {
   let mockVideo: Partial<HTMLVideoElement>;
   let videoRef: RefObject<HTMLVideoElement | null>;
   let handlers: {
-    onTogglePlay: ReturnType<typeof vi.fn>;
-    onToggleFullscreen: ReturnType<typeof vi.fn>;
-    onToggleMute: ReturnType<typeof vi.fn>;
-    onVolumeChange: ReturnType<typeof vi.fn>;
-    onClose: ReturnType<typeof vi.fn>;
-    onActivity: ReturnType<typeof vi.fn>;
+    onTogglePlay: () => void;
+    onToggleFullscreen: () => void;
+    onToggleMute: () => void;
+    onVolumeChange: (v: number) => void;
+    onClose: () => void;
+    onActivity: () => void;
   };
 
   beforeEach(() => {

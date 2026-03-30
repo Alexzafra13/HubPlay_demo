@@ -19,8 +19,12 @@ describe("useProgressReporter", () => {
     vi.clearAllMocks();
     mockVideo = {
       currentTime: 42.5,
-      paused: false,
     };
+    Object.defineProperty(mockVideo, "paused", {
+      value: false,
+      writable: true,
+      configurable: true,
+    });
     videoRef = { current: mockVideo as HTMLVideoElement };
   });
 
@@ -39,7 +43,7 @@ describe("useProgressReporter", () => {
   });
 
   it("does not save progress when paused", () => {
-    mockVideo.paused = true;
+    Object.defineProperty(mockVideo, "paused", { value: true, writable: true, configurable: true });
     renderHook(() => useProgressReporter(videoRef, "item-1"));
 
     vi.advanceTimersByTime(10_000);
