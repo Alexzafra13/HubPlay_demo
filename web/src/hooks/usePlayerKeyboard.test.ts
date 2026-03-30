@@ -101,7 +101,7 @@ describe("usePlayerKeyboard", () => {
 
     fireKey("ArrowUp");
 
-    expect(handlers.onVolumeChange.mock.calls[0][0]).toBeCloseTo(0.85);
+    expect(vi.mocked(handlers.onVolumeChange).mock.calls[0][0]).toBeCloseTo(0.85);
   });
 
   it("ArrowDown decreases volume", () => {
@@ -109,7 +109,7 @@ describe("usePlayerKeyboard", () => {
 
     fireKey("ArrowDown");
 
-    expect(handlers.onVolumeChange.mock.calls[0][0]).toBeCloseTo(0.75);
+    expect(vi.mocked(handlers.onVolumeChange).mock.calls[0][0]).toBeCloseTo(0.75);
   });
 
   it("Escape calls onClose when not fullscreen", () => {
