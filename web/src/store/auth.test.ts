@@ -75,6 +75,23 @@ describe("useAuthStore", () => {
     expect(localStorage.getItem("hubplay_access_token")).toBeNull();
   });
 
+  it("updateTokens syncs tokens without touching user", () => {
+    useAuthStore.getState().setAuth(testUser, "old-at", "old-rt");
+
+    useAuthStore.getState().updateTokens("new-at", "new-rt");
+
+    const state = useAuthStore.getState();
+    expect(state.accessToken).toBe("new-at");
+    expect(state.refreshToken).toBe("new-rt");
+    expect(state.user).toEqual(testUser);
+    expect(state.isAuthenticated).toBe(true);
+
+    expect(localStorage.getItem("hubplay_access_token")).toBe("new-at");
+    expect(localStorage.getItem("hubplay_refresh_token")).toBe("new-rt");
+    // User unchanged in localStorage
+    expect(JSON.parse(localStorage.getItem("hubplay_user")!)).toEqual(testUser);
+  });
+
   it("updateUser updates user in state and localStorage", () => {
     useAuthStore.getState().setAuth(testUser, "a", "r");
 

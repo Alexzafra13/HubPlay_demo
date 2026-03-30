@@ -30,11 +30,22 @@ interface RequestOptions {
   headers?: Record<string, string>;
 }
 
+type AuthEventListener = {
+  onTokenRefresh?: (accessToken: string, refreshToken: string) => void;
+  onAuthFailure?: () => void;
+};
+
 export class ApiClient {
   private baseUrl: string;
+  private authListener: AuthEventListener = {};
 
   constructor(baseUrl = "") {
     this.baseUrl = baseUrl;
+  }
+
+  /** Register callbacks to sync auth state (e.g. Zustand store). */
+  setAuthListener(listener: AuthEventListener) {
+    this.authListener = listener;
   }
 
   // ─── Core request method ────────────────────────────────────────────────
@@ -104,19 +115,19 @@ export class ApiClient {
               return retryJson as T;
             }
           } catch {
-            // Refresh failed — clear auth and redirect to login
+            // Refresh failed — clear auth and notify listener
             localStorage.removeItem(TOKEN_KEY);
             localStorage.removeItem(REFRESH_KEY);
             localStorage.removeItem("hubplay_user");
-            window.location.href = "/login";
+            this.authListener.onAuthFailure?.();
             throw new ApiError(401, { error: { code: "session_expired", message: "Session expired" } });
           }
         }
-        // No refresh token — redirect to login
+        // No refresh token — clear auth and notify listener
         localStorage.removeItem(TOKEN_KEY);
         localStorage.removeItem(REFRESH_KEY);
         localStorage.removeItem("hubplay_user");
-        window.location.href = "/login";
+        this.authListener.onAuthFailure?.();
         throw new ApiError(401, { error: { code: "session_expired", message: "Session expired" } });
       }
 
@@ -166,6 +177,7 @@ export class ApiClient {
     });
     localStorage.setItem(TOKEN_KEY, data.access_token);
     localStorage.setItem(REFRESH_KEY, data.refresh_token);
+    this.authListener.onTokenRefresh?.(data.access_token, data.refresh_token);
     return data;
   }
 

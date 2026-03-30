@@ -101,6 +101,80 @@ describe("ApiClient", () => {
     expect(url).toContain("limit=10");
   });
 
+  it("calls onTokenRefresh listener after successful refresh", async () => {
+    localStorage.setItem("hubplay_access_token", "old-at");
+    localStorage.setItem("hubplay_refresh_token", "old-rt");
+
+    const authResp = {
+      access_token: "new-at",
+      refresh_token: "new-rt",
+      expires_in: 900,
+      user: { id: "1", username: "admin", display_name: "A", role: "admin", created_at: "" },
+    };
+    vi.stubGlobal("fetch", mockFetch(authResp));
+
+    const onTokenRefresh = vi.fn();
+    client.setAuthListener({ onTokenRefresh });
+
+    await client.refresh("old-rt");
+
+    expect(onTokenRefresh).toHaveBeenCalledWith("new-at", "new-rt");
+  });
+
+  it("calls onAuthFailure on 401 when refresh fails", async () => {
+    localStorage.setItem("hubplay_access_token", "at");
+    localStorage.setItem("hubplay_refresh_token", "rt");
+
+    // First call: 401, second call (refresh): also fails
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        statusText: "Unauthorized",
+        json: () => Promise.resolve({ error: { code: "expired", message: "Token expired" } }),
+      })
+      .mockRejectedValueOnce(new Error("refresh failed"));
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const onAuthFailure = vi.fn();
+    client.setAuthListener({ onAuthFailure });
+
+    await expect(client.getMe()).rejects.toThrow(ApiError);
+    expect(onAuthFailure).toHaveBeenCalledOnce();
+    expect(localStorage.getItem("hubplay_access_token")).toBeNull();
+  });
+
+  it("calls onAuthFailure on 401 with no refresh token", async () => {
+    localStorage.setItem("hubplay_access_token", "at");
+    // No refresh token set
+
+    vi.stubGlobal(
+      "fetch",
+      mockFetch({ error: { code: "expired", message: "Token expired" } }, 401, false),
+    );
+
+    const onAuthFailure = vi.fn();
+    client.setAuthListener({ onAuthFailure });
+
+    await expect(client.getMe()).rejects.toThrow(ApiError);
+    expect(onAuthFailure).toHaveBeenCalledOnce();
+  });
+
+  it("does not call onAuthFailure on non-401 errors", async () => {
+    vi.stubGlobal(
+      "fetch",
+      mockFetch({ error: { code: "not_found", message: "Not found" } }, 404, false),
+    );
+
+    const onAuthFailure = vi.fn();
+    client.setAuthListener({ onAuthFailure });
+
+    await expect(client.getItem("x")).rejects.toThrow(ApiError);
+    expect(onAuthFailure).not.toHaveBeenCalled();
+  });
+
   it("logout clears tokens even if API fails", async () => {
     localStorage.setItem("hubplay_access_token", "at");
     localStorage.setItem("hubplay_refresh_token", "rt");

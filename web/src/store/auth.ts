@@ -14,6 +14,7 @@ interface AuthState {
   isAuthenticated: boolean
 
   setAuth: (user: User, accessToken: string, refreshToken: string) => void
+  updateTokens: (accessToken: string, refreshToken: string) => void
   logout: () => void
   loadFromStorage: () => void
   updateUser: (user: User) => void
@@ -31,6 +32,12 @@ export const useAuthStore = create<AuthState>()((set) => ({
     localStorage.setItem(STORAGE_KEYS.user, JSON.stringify(user))
 
     set({ user, accessToken, refreshToken, isAuthenticated: true })
+  },
+
+  updateTokens(accessToken: string, refreshToken: string) {
+    localStorage.setItem(STORAGE_KEYS.accessToken, accessToken)
+    localStorage.setItem(STORAGE_KEYS.refreshToken, refreshToken)
+    set({ accessToken, refreshToken })
   },
 
   logout() {
