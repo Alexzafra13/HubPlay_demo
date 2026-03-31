@@ -366,13 +366,33 @@ function ChannelPlayer({ channel }: { channel: Channel }) {
 
     const streamUrl = channel.stream_url;
 
+    // Build an authenticated URL for the proxy endpoint using a query param
+    // so that both HLS.js and direct <video> playback can authenticate.
+    const token = localStorage.getItem("hubplay_access_token");
+    const authedUrl = token ? `${streamUrl}${streamUrl.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}` : streamUrl;
+
+    // Try HLS.js first — if the stream is not HLS, fall back to direct playback
+    function tryDirectPlayback() {
+      video.src = authedUrl;
+      video.load();
+      video.play().catch(() => {});
+
+      const onError = () => {
+        setError(t('liveTV.channelUnavailable'));
+      };
+      video.addEventListener("error", onError, { once: true });
+      return () => video.removeEventListener("error", onError);
+    }
+
+    let directCleanup: (() => void) | null = null;
+
     if (Hls.isSupported()) {
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
-        xhrSetup: (xhr) => {
-          const token = localStorage.getItem("hubplay_access_token");
-          if (token) {
+        xhrSetup: (xhr, url) => {
+          // Only send auth header to our own proxy, not to external segment servers
+          if (token && url.startsWith("/")) {
             xhr.setRequestHeader("Authorization", `Bearer ${token}`);
           }
         },
@@ -388,23 +408,22 @@ function ChannelPlayer({ channel }: { channel: Channel }) {
 
       hls.on(Hls.Events.ERROR, (_event, data) => {
         if (data.fatal) {
-          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-            hls.startLoad();
-          } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+          if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
             hls.recoverMediaError();
           } else {
-            setError(t('liveTV.channelUnavailable'));
+            // HLS failed (stream is probably raw TS, not HLS) — try direct playback
             hls.destroy();
+            hlsRef.current = null;
+            directCleanup = tryDirectPlayback();
           }
         }
       });
     } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
-      video.src = streamUrl;
+      // Safari native HLS
+      video.src = authedUrl;
       video.addEventListener("loadedmetadata", () => video.play().catch(() => {}), { once: true });
     } else {
-      video.src = streamUrl;
-      video.addEventListener("loadedmetadata", () => video.play().catch(() => {}), { once: true });
-      video.addEventListener("error", () => setError(t('liveTV.formatNotSupported')), { once: true });
+      directCleanup = tryDirectPlayback();
     }
 
     return () => {
@@ -412,8 +431,9 @@ function ChannelPlayer({ channel }: { channel: Channel }) {
         hlsRef.current.destroy();
         hlsRef.current = null;
       }
+      directCleanup?.();
     };
-  }, [channel.stream_url]);
+  }, [channel.stream_url, t]);
 
   if (error) {
     return (

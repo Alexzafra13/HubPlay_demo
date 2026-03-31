@@ -262,7 +262,7 @@ export default function Settings() {
                   </div>
 
                   <div className="flex flex-col gap-1.5">
-                    {lib.paths.map((p) => {
+                    {(lib.paths ?? []).map((p) => {
                       const accessible = getPathAccessible(lib, p);
                       return (
                         <div key={p} className="flex items-center gap-2">

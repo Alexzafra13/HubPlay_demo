@@ -68,7 +68,7 @@ export default function LibrariesAdmin() {
   function openEditModal(lib: Library) {
     setEditTarget(lib);
     setEditName(lib.name);
-    setEditPath(lib.paths[0] ?? "");
+    setEditPath((lib.paths ?? [])[0] ?? "");
   }
 
   function handleCreate(e: FormEvent) {
@@ -166,7 +166,7 @@ export default function LibrariesAdmin() {
                     </Badge>
                   </td>
                   <td className="px-4 py-3 text-text-secondary font-mono text-xs">
-                    {lib.paths.join(", ")}
+                    {(lib.paths ?? []).join(", ")}
                   </td>
                   <td className="px-4 py-3 text-right text-text-secondary tabular-nums">
                     {lib.item_count}
