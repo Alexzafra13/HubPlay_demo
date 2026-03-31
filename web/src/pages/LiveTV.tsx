@@ -372,11 +372,11 @@ function ChannelPlayer({ channel }: { channel: Channel }) {
       ? `${streamUrl}${streamUrl.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`
       : streamUrl;
 
-    // Timeout: if nothing loads in 15s, show error
+    // Timeout: if nothing loads in 20s, show error
     let playing = false;
     const timeout = setTimeout(() => {
       if (!playing) setError(t('liveTV.channelUnavailable'));
-    }, 15000);
+    }, 20000);
 
     const onPlaying = () => { playing = true; setLoading(false); clearTimeout(timeout); };
     video.addEventListener("playing", onPlaying);
@@ -392,6 +392,14 @@ function ChannelPlayer({ channel }: { channel: Channel }) {
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
+        maxBufferLength: 30,
+        maxMaxBufferLength: 60,
+        manifestLoadingMaxRetry: 3,
+        manifestLoadingRetryDelay: 1000,
+        levelLoadingMaxRetry: 4,
+        levelLoadingRetryDelay: 1000,
+        fragLoadingMaxRetry: 4,
+        fragLoadingRetryDelay: 1000,
         xhrSetup: (xhr, url) => {
           // All HLS requests now go through our proxy (URLs start with "/")
           if (token && url.startsWith("/")) {

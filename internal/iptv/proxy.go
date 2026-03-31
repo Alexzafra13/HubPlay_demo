@@ -42,7 +42,6 @@ func NewStreamProxy(logger *slog.Logger) *StreamProxy {
 }
 
 // ProxyStream streams an IPTV channel to the HTTP response writer.
-// It connects to the upstream URL and copies the response body to the client.
 func (p *StreamProxy) ProxyStream(ctx context.Context, w http.ResponseWriter, channelID, streamURL string) error {
 	p.mu.Lock()
 	if r, ok := p.relays[channelID]; ok {
@@ -71,7 +70,7 @@ func (p *StreamProxy) ProxyStream(ctx context.Context, w http.ResponseWriter, ch
 	return p.streamWithReconnect(ctx, w, channelID, streamURL)
 }
 
-// streamWithReconnect handles the upstream connection with exponential backoff reconnection.
+// streamWithReconnect handles upstream connection with exponential backoff reconnection.
 func (p *StreamProxy) streamWithReconnect(ctx context.Context, w http.ResponseWriter, channelID, streamURL string) error {
 	backoffs := []time.Duration{1 * time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second}
 	attempt := 0
@@ -103,20 +102,80 @@ func (p *StreamProxy) streamWithReconnect(ctx context.Context, w http.ResponseWr
 	}
 }
 
-// isHLSContent checks if the content type or URL indicates an HLS playlist.
-func isHLSContent(contentType, streamURL string) bool {
-	ct := strings.ToLower(contentType)
-	if strings.Contains(ct, "mpegurl") || strings.Contains(ct, "apple") {
-		return true
+// fetchUpstream performs an HTTP GET with proper headers for IPTV streams.
+// Returns the response and the final URL after any redirects.
+func (p *StreamProxy) fetchUpstream(ctx context.Context, targetURL string) (*http.Response, string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
+	if err != nil {
+		return nil, "", fmt.Errorf("create request: %w", err)
 	}
-	lower := strings.ToLower(streamURL)
-	return strings.HasSuffix(lower, ".m3u8") || strings.Contains(lower, ".m3u8?")
+
+	// Set headers that many IPTV CDNs expect
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "*/*")
+	req.Header.Set("Connection", "keep-alive")
+
+	// Set Referer from the origin of the URL (some CDNs check this)
+	if parsed, err := url.Parse(targetURL); err == nil {
+		req.Header.Set("Referer", parsed.Scheme+"://"+parsed.Host+"/")
+		req.Header.Set("Origin", parsed.Scheme+"://"+parsed.Host)
+	}
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return nil, "", fmt.Errorf("connect: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		_ = resp.Body.Close()
+		return nil, "", fmt.Errorf("upstream returned %d", resp.StatusCode)
+	}
+
+	// Get the final URL after redirects (Go's http.Client follows them automatically).
+	// This is crucial for resolving relative URLs in HLS playlists.
+	finalURL := targetURL
+	if resp.Request != nil && resp.Request.URL != nil {
+		finalURL = resp.Request.URL.String()
+	}
+
+	return resp, finalURL, nil
 }
 
-// hlsURLPattern matches URLs in m3u8 playlists (lines that are not comments and not empty).
-var hlsURLPattern = regexp.MustCompile(`(?i)(https?://[^\s\r\n]+)`)
+// looksLikeHLSPlaylist checks if the body content looks like an m3u8 playlist.
+func looksLikeHLSPlaylist(body []byte) bool {
+	// Check first 1KB for HLS markers
+	check := body
+	if len(check) > 1024 {
+		check = check[:1024]
+	}
+	return bytes.Contains(check, []byte("#EXTM3U")) ||
+		bytes.Contains(check, []byte("#EXT-X-")) ||
+		bytes.Contains(check, []byte("#EXTINF:"))
+}
+
+// isHLSContentType checks if the content type indicates an HLS playlist.
+func isHLSContentType(contentType string) bool {
+	ct := strings.ToLower(contentType)
+	return strings.Contains(ct, "mpegurl") ||
+		strings.Contains(ct, "apple.mpegurl") ||
+		strings.Contains(ct, "x-mpegurl")
+}
+
+// isHLSURL checks if the URL looks like an HLS playlist.
+func isHLSURL(streamURL string) bool {
+	lower := strings.ToLower(streamURL)
+	// Strip query params for extension check
+	if idx := strings.IndexByte(lower, '?'); idx >= 0 {
+		lower = lower[:idx]
+	}
+	return strings.HasSuffix(lower, ".m3u8") || strings.HasSuffix(lower, ".m3u")
+}
+
+// hlsURLPattern matches absolute URLs in m3u8 playlists.
+var hlsURLPattern = regexp.MustCompile(`(?i)(https?://[^\s\r\n"]+)`)
 
 // rewriteHLSPlaylist rewrites URLs in an m3u8 playlist to route through our proxy.
+// baseURL is the final URL of the playlist (after redirects) used to resolve relative paths.
 func rewriteHLSPlaylist(body []byte, baseURL, proxyPrefix string) []byte {
 	base, err := url.Parse(baseURL)
 	if err != nil {
@@ -129,22 +188,20 @@ func rewriteHLSPlaylist(body []byte, baseURL, proxyPrefix string) []byte {
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 
-		// Skip empty lines and comments (but check for URI= in EXT tags)
 		if trimmed == "" {
 			result = append(result, line)
 			continue
 		}
 
-		// Handle EXT-X-KEY, EXT-X-MAP, etc. with URI="..." attributes
+		// Handle EXT tags that may contain URIs
 		if strings.HasPrefix(trimmed, "#") {
 			rewritten := line
 			// First handle URI="..." attributes (may contain relative paths)
-			if strings.Contains(rewritten, "URI=\"") {
+			if strings.Contains(strings.ToUpper(rewritten), "URI=\"") {
 				rewritten = rewriteURIAttribute(rewritten, base, proxyPrefix)
 			}
-			// Then rewrite any remaining absolute URLs not inside URI=""
+			// Then rewrite any remaining absolute URLs
 			rewritten = hlsURLPattern.ReplaceAllStringFunc(rewritten, func(u string) string {
-				// Skip if already proxied
 				if strings.Contains(u, "/proxy?url=") {
 					return u
 				}
@@ -174,46 +231,74 @@ func resolveURL(base *url.URL, rawURL string) string {
 	return base.ResolveReference(ref).String()
 }
 
+// uriAttrPattern matches URI="value" in EXT tags (case-insensitive).
+var uriAttrPattern = regexp.MustCompile(`(?i)URI="([^"]+)"`)
+
 // rewriteURIAttribute rewrites URI="..." attributes in EXT tags.
 func rewriteURIAttribute(line string, base *url.URL, proxyPrefix string) string {
-	// Match URI="value"
-	re := regexp.MustCompile(`URI="([^"]+)"`)
-	return re.ReplaceAllStringFunc(line, func(match string) string {
-		// Extract the URI value
-		inner := match[5 : len(match)-1] // strip URI=" and "
+	return uriAttrPattern.ReplaceAllStringFunc(line, func(match string) string {
+		// Extract the URI value (skip 'URI="' prefix and '"' suffix)
+		inner := match[5 : len(match)-1]
 		if !strings.HasPrefix(inner, "http://") && !strings.HasPrefix(inner, "https://") {
 			inner = resolveURL(base, inner)
 		}
-		return `URI="` + proxyPrefix + url.QueryEscape(inner) + `"`
+		// Preserve original case of URI=
+		prefix := match[:4] // "URI=" (preserving case)
+		return prefix + `"` + proxyPrefix + url.QueryEscape(inner) + `"`
 	})
 }
 
-// streamOnceWithChannel connects to the upstream. For HLS content, it rewrites the playlist.
+// streamOnceWithChannel connects to upstream. For HLS content, rewrites the playlist.
 func (p *StreamProxy) streamOnceWithChannel(ctx context.Context, w http.ResponseWriter, channelID, streamURL string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, streamURL, nil)
+	resp, finalURL, err := p.fetchUpstream(ctx, streamURL)
 	if err != nil {
-		return fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("User-Agent", "HubPlay/1.0")
-
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("connect: %w", err)
+		return err
 	}
 	defer resp.Body.Close() //nolint:errcheck
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("upstream returned %d", resp.StatusCode)
-	}
 
 	ct := resp.Header.Get("Content-Type")
 	if ct == "" {
 		ct = "video/mp2t"
 	}
 
-	// If this is HLS content and we have a channel ID, rewrite the playlist
-	if channelID != "" && isHLSContent(ct, streamURL) {
-		return p.serveRewrittenPlaylist(ctx, w, resp, channelID, streamURL, ct)
+	// For HLS: detect by content-type, URL extension, or body content
+	if channelID != "" && (isHLSContentType(ct) || isHLSURL(finalURL)) {
+		return p.serveRewrittenPlaylist(w, resp, channelID, finalURL, ct)
+	}
+
+	// For streams with unknown content-type, peek at the body to check for HLS
+	if channelID != "" && (ct == "video/mp2t" || ct == "application/octet-stream" || ct == "text/plain" || ct == "binary/octet-stream") {
+		// Read a small amount to detect HLS
+		peek := make([]byte, 512)
+		n, peekErr := io.ReadAtLeast(resp.Body, peek, 1)
+		if peekErr != nil && peekErr != io.ErrUnexpectedEOF {
+			return fmt.Errorf("read upstream: %w", peekErr)
+		}
+		peek = peek[:n]
+
+		if looksLikeHLSPlaylist(peek) {
+			// Read the rest and serve as playlist
+			rest, err := io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024))
+			if err != nil {
+				return fmt.Errorf("read playlist: %w", err)
+			}
+			body := append(peek, rest...)
+			return p.serveRewrittenPlaylistBody(w, body, channelID, finalURL)
+		}
+
+		// Not HLS — write the peeked data and continue streaming
+		w.Header().Set("Content-Type", ct)
+		w.Header().Set("Cache-Control", "no-cache, no-store")
+		w.Header().Set("Connection", "keep-alive")
+
+		if _, writeErr := w.Write(peek); writeErr != nil {
+			return nil
+		}
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+
+		return p.pipeStream(w, resp.Body)
 	}
 
 	// Otherwise, pipe raw bytes (TS streams, segments, etc.)
@@ -221,14 +306,19 @@ func (p *StreamProxy) streamOnceWithChannel(ctx context.Context, w http.Response
 	w.Header().Set("Cache-Control", "no-cache, no-store")
 	w.Header().Set("Connection", "keep-alive")
 
+	return p.pipeStream(w, resp.Body)
+}
+
+// pipeStream copies data from reader to HTTP response with flushing.
+func (p *StreamProxy) pipeStream(w http.ResponseWriter, body io.Reader) error {
 	flusher, canFlush := w.(http.Flusher)
 	buf := make([]byte, 32*1024)
 
 	for {
-		n, readErr := resp.Body.Read(buf)
+		n, readErr := body.Read(buf)
 		if n > 0 {
 			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
-				return nil
+				return nil // Client disconnected
 			}
 			if canFlush {
 				flusher.Flush()
@@ -244,28 +334,38 @@ func (p *StreamProxy) streamOnceWithChannel(ctx context.Context, w http.Response
 }
 
 // serveRewrittenPlaylist reads the full m3u8 body, rewrites URLs, and serves it.
-func (p *StreamProxy) serveRewrittenPlaylist(_ context.Context, w http.ResponseWriter, resp *http.Response, channelID, streamURL, ct string) error {
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024)) // 2MB limit for playlists
+func (p *StreamProxy) serveRewrittenPlaylist(w http.ResponseWriter, resp *http.Response, channelID, finalURL, ct string) error {
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024))
 	if err != nil {
 		return fmt.Errorf("read playlist: %w", err)
 	}
 
-	// Check if it actually looks like an m3u8
-	if !bytes.Contains(body, []byte("#EXTM3U")) && !bytes.Contains(body, []byte("#EXT")) {
-		// Not actually a playlist, serve as-is
+	if !looksLikeHLSPlaylist(body) {
 		w.Header().Set("Content-Type", ct)
 		w.Header().Set("Cache-Control", "no-cache, no-store")
 		_, err = w.Write(body)
 		return err
 	}
 
+	return p.serveRewrittenPlaylistBody(w, body, channelID, finalURL)
+}
+
+// serveRewrittenPlaylistBody rewrites and serves an m3u8 playlist body.
+func (p *StreamProxy) serveRewrittenPlaylistBody(w http.ResponseWriter, body []byte, channelID, baseURL string) error {
 	proxyPrefix := "/api/v1/channels/" + channelID + "/proxy?url="
-	rewritten := rewriteHLSPlaylist(body, streamURL, proxyPrefix)
+	rewritten := rewriteHLSPlaylist(body, baseURL, proxyPrefix)
+
+	p.logger.Debug("serving rewritten HLS playlist",
+		"channel", channelID,
+		"baseURL", baseURL,
+		"bodyLen", len(body),
+		"rewrittenLen", len(rewritten),
+	)
 
 	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 	w.Header().Set("Cache-Control", "no-cache, no-store")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	_, err = w.Write(rewritten)
+	_, err := w.Write(rewritten)
 	return err
 }
 
@@ -285,47 +385,62 @@ func (p *StreamProxy) ProxyURL(ctx context.Context, w http.ResponseWriter, chann
 
 	p.logger.Debug("proxying URL", "channel", channelID, "url", upstream)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, upstream, nil)
+	resp, finalURL, err := p.fetchUpstream(ctx, upstream)
 	if err != nil {
-		return fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("User-Agent", "HubPlay/1.0")
-
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("fetch upstream: %w", err)
-	}
-	defer resp.Body.Close() //nolint:errcheck
-
-	if resp.StatusCode != http.StatusOK {
-		http.Error(w, "upstream error", resp.StatusCode)
+		p.logger.Warn("proxy URL fetch failed", "channel", channelID, "url", upstream, "error", err)
+		http.Error(w, "upstream error", http.StatusBadGateway)
 		return nil
 	}
+	defer resp.Body.Close() //nolint:errcheck
 
 	ct := resp.Header.Get("Content-Type")
 	if ct == "" {
 		ct = "video/mp2t"
 	}
 
-	// If this is a sub-playlist (m3u8), rewrite it too
-	if isHLSContent(ct, upstream) {
+	// Check if this is an HLS sub-playlist (by content-type or URL)
+	if isHLSContentType(ct) || isHLSURL(finalURL) {
 		body, err := io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024))
 		if err != nil {
 			return fmt.Errorf("read sub-playlist: %w", err)
 		}
-		if bytes.Contains(body, []byte("#EXTM3U")) || bytes.Contains(body, []byte("#EXT")) {
-			proxyPrefix := "/api/v1/channels/" + channelID + "/proxy?url="
-			rewritten := rewriteHLSPlaylist(body, upstream, proxyPrefix)
-			w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
-			w.Header().Set("Cache-Control", "no-cache, no-store")
-			w.Header().Set("Access-Control-Allow-Origin", "*")
-			_, err = w.Write(rewritten)
-			return err
+		if looksLikeHLSPlaylist(body) {
+			return p.serveRewrittenPlaylistBody(w, body, channelID, finalURL)
 		}
 		// Not a real playlist, serve raw
 		w.Header().Set("Content-Type", ct)
 		w.Header().Set("Cache-Control", "no-cache, no-store")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
 		_, err = w.Write(body)
+		return err
+	}
+
+	// For segments with ambiguous content-type, peek to check for HLS
+	if ct == "text/plain" || ct == "application/octet-stream" || ct == "binary/octet-stream" {
+		peek := make([]byte, 512)
+		n, peekErr := io.ReadAtLeast(resp.Body, peek, 1)
+		if peekErr != nil && peekErr != io.ErrUnexpectedEOF {
+			return fmt.Errorf("peek upstream: %w", peekErr)
+		}
+		peek = peek[:n]
+
+		if looksLikeHLSPlaylist(peek) {
+			rest, err := io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024))
+			if err != nil {
+				return fmt.Errorf("read sub-playlist: %w", err)
+			}
+			body := append(peek, rest...)
+			return p.serveRewrittenPlaylistBody(w, body, channelID, finalURL)
+		}
+
+		// Not a playlist — serve peeked data + rest
+		w.Header().Set("Content-Type", ct)
+		w.Header().Set("Cache-Control", "no-cache, no-store")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		if _, err := w.Write(peek); err != nil {
+			return nil
+		}
+		_, err = io.Copy(w, resp.Body)
 		return err
 	}
 
