@@ -244,10 +244,10 @@ export function Sidebar({ collapsed, onToggleCollapse, onClose }: SidebarProps) 
           </button>
         </div>
 
-        {/* Collapse toggle */}
+        {/* Collapse toggle (desktop only) */}
         <button
           onClick={onToggleCollapse}
-          className="w-full flex items-center justify-center p-2 rounded-lg text-text-secondary hover:text-text-primary hover:bg-bg-elevated transition-colors"
+          className="hidden md:flex w-full items-center justify-center p-2 rounded-lg text-text-secondary hover:text-text-primary hover:bg-bg-elevated transition-colors"
           title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
           {collapsed ? <IconChevronRight /> : <IconChevronLeft />}
