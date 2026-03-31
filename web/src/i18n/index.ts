@@ -1,18 +1,25 @@
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
+import LanguageDetector from 'i18next-browser-languagedetector';
 import en from './locales/en.json';
 import es from './locales/es.json';
 
-const savedLang = localStorage.getItem('hubplay_lang') || 'es';
-
-i18n.use(initReactI18next).init({
-  resources: {
-    en: { translation: en },
-    es: { translation: es },
-  },
-  lng: savedLang,
-  fallbackLng: 'en',
-  interpolation: { escapeValue: false },
-});
+i18n
+  .use(LanguageDetector)
+  .use(initReactI18next)
+  .init({
+    resources: {
+      en: { translation: en },
+      es: { translation: es },
+    },
+    fallbackLng: 'en',
+    supportedLngs: ['en', 'es'],
+    detection: {
+      order: ['localStorage', 'navigator'],
+      lookupLocalStorage: 'hubplay_lang',
+      caches: ['localStorage'],
+    },
+    interpolation: { escapeValue: false },
+  });
 
 export default i18n;
