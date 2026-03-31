@@ -24,6 +24,7 @@ export default function SettingsStep({
   onBack,
   initialData,
 }: SettingsStepProps) {
+  const { t } = useTranslation();
   const capabilities = useSystemCapabilities();
   const setupSettings = useSetupSettings();
 
@@ -78,10 +79,10 @@ export default function SettingsStep({
     <div>
       <div className="mb-6">
         <h2 className="text-xl font-semibold text-text-primary">
-          Server Settings
+          {t("setup.settings.title")}
         </h2>
         <p className="mt-1 text-sm text-text-secondary">
-          Configure optional settings. All of these can be changed later.
+          {t("setup.settings.description")}
         </p>
       </div>
 
@@ -89,30 +90,28 @@ export default function SettingsStep({
         {/* TMDb API Key */}
         <div className="rounded-[--radius-md] border border-border bg-bg-surface p-4">
           <h3 className="text-sm font-semibold text-text-primary mb-1">
-            Metadata Provider
+            {t("setup.settings.metadataProvider")}
           </h3>
           <p className="text-xs text-text-muted mb-3">
-            A TMDb API key enables automatic movie and TV show metadata,
-            posters, and descriptions.
+            {t("setup.settings.metadataDescription")}
           </p>
           <Input
-            label="TMDb API Key"
+            label={t("setup.settings.tmdbApiKey")}
             type="text"
             value={tmdbApiKey}
             onChange={(e) => setTmdbApiKey(e.target.value)}
-            placeholder="Enter your API key"
-            hint="Free at themoviedb.org — sign up and generate an API key in your account settings."
+            placeholder={t("setup.settings.tmdbPlaceholder")}
+            hint={t("setup.settings.tmdbHint")}
           />
         </div>
 
         {/* FFmpeg / Transcoding */}
         <div className="rounded-[--radius-md] border border-border bg-bg-surface p-4">
           <h3 className="text-sm font-semibold text-text-primary mb-1">
-            Transcoding
+            {t("setup.settings.transcoding")}
           </h3>
           <p className="text-xs text-text-muted mb-3">
-            FFmpeg is required for transcoding media to different formats and
-            quality levels.
+            {t("setup.settings.transcodingDescription")}
           </p>
 
           {capabilities.isLoading && (

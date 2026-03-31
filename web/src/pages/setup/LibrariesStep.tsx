@@ -312,19 +312,19 @@ export default function LibrariesStep({
         {/* Navigation buttons */}
         <div className="flex items-center justify-between pt-2">
           <Button type="button" variant="ghost" onClick={onBack}>
-            Back
+            {t("common.back")}
           </Button>
 
           <div className="flex items-center gap-3">
             <Button type="button" variant="ghost" onClick={handleSkip}>
-              Skip
+              {t("common.skip")}
             </Button>
             <Button
               type="submit"
               size="lg"
               isLoading={createLibraries.isPending}
             >
-              Save & Continue
+              {t("setup.libraries.saveAndContinue")}
             </Button>
           </div>
         </div>
