@@ -188,11 +188,6 @@ func rewriteURIAttribute(line string, base *url.URL, proxyPrefix string) string 
 	})
 }
 
-// streamOnce connects to the upstream and copies data until disconnected or cancelled.
-func (p *StreamProxy) streamOnce(ctx context.Context, w http.ResponseWriter, streamURL string) error {
-	return p.streamOnceWithChannel(ctx, w, "", streamURL)
-}
-
 // streamOnceWithChannel connects to the upstream. For HLS content, it rewrites the playlist.
 func (p *StreamProxy) streamOnceWithChannel(ctx context.Context, w http.ResponseWriter, channelID, streamURL string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, streamURL, nil)
