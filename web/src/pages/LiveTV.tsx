@@ -373,15 +373,15 @@ function ChannelPlayer({ channel }: { channel: Channel }) {
 
     // Try HLS.js first — if the stream is not HLS, fall back to direct playback
     function tryDirectPlayback() {
-      video.src = authedUrl;
-      video.load();
-      video.play().catch(() => {});
+      video!.src = authedUrl;
+      video!.load();
+      video!.play().catch(() => {});
 
       const onError = () => {
         setError(t('liveTV.channelUnavailable'));
       };
-      video.addEventListener("error", onError, { once: true });
-      return () => video.removeEventListener("error", onError);
+      video!.addEventListener("error", onError, { once: true });
+      return () => video!.removeEventListener("error", onError);
     }
 
     let directCleanup: (() => void) | null = null;
