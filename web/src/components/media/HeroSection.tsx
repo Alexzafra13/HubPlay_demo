@@ -15,6 +15,7 @@ function formatRating(rating: number): string {
 }
 
 const HeroSection: FC<HeroSectionProps> = ({ item, onPlay }) => {
+  const { t } = useTranslation();
   const [isFavorite, setIsFavorite] = useState(false);
 
   return (
@@ -91,7 +92,7 @@ const HeroSection: FC<HeroSectionProps> = ({ item, onPlay }) => {
             >
               <path d="M8 5v14l11-7z" />
             </svg>
-            Play
+            {t("common.play")}
           </Button>
 
           <button
