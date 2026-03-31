@@ -118,7 +118,7 @@ export default function SettingsStep({
             <div className="flex items-center gap-3 py-4">
               <Spinner size="sm" />
               <span className="text-sm text-text-secondary">
-                Detecting system capabilities...
+                {t("setup.settings.detecting")}
               </span>
             </div>
           )}
@@ -137,7 +137,7 @@ export default function SettingsStep({
                 />
               </svg>
               <span className="text-sm text-error">
-                Unable to detect system capabilities.
+                {t("setup.settings.detectionFailed")}
               </span>
             </div>
           )}
@@ -163,14 +163,14 @@ export default function SettingsStep({
                     </div>
                     <div>
                       <p className="text-sm font-medium text-text-primary">
-                        FFmpeg found
+                        {t("setup.settings.ffmpegFound")}
                       </p>
                       <p className="text-xs text-text-muted font-mono">
                         {ffmpegPath}
                       </p>
                     </div>
                     <Badge variant="success" className="ml-auto">
-                      Detected
+                      {t("setup.settings.detected")}
                     </Badge>
                   </>
                 ) : (
@@ -190,15 +190,14 @@ export default function SettingsStep({
                     </div>
                     <div>
                       <p className="text-sm font-medium text-text-primary">
-                        FFmpeg not found
+                        {t("setup.settings.ffmpegNotFound")}
                       </p>
                       <p className="text-xs text-text-muted">
-                        Transcoding will not be available. Install FFmpeg and
-                        restart the server.
+                        {t("setup.settings.ffmpegMissing")}
                       </p>
                     </div>
                     <Badge variant="warning" className="ml-auto">
-                      Missing
+                      {t("setup.settings.missing")}
                     </Badge>
                   </>
                 )}
@@ -208,7 +207,7 @@ export default function SettingsStep({
               {ffmpegFound && hwAccels.length > 0 && (
                 <div className="mt-2">
                   <p className="text-sm font-medium text-text-secondary mb-2">
-                    Hardware Acceleration
+                    {t("setup.settings.hwAcceleration")}
                   </p>
                   <div className="flex flex-col gap-2">
                     <label className="flex items-center gap-3 rounded-[--radius-sm] px-3 py-2 hover:bg-bg-elevated transition-colors cursor-pointer">
@@ -221,7 +220,7 @@ export default function SettingsStep({
                         className="text-accent focus:ring-accent"
                       />
                       <span className="text-sm text-text-primary">
-                        None (software encoding)
+                        {t("setup.settings.softwareEncoding")}
                       </span>
                     </label>
 
@@ -259,19 +258,19 @@ export default function SettingsStep({
         {/* Navigation buttons */}
         <div className="flex items-center justify-between pt-2">
           <Button type="button" variant="ghost" onClick={onBack}>
-            Back
+            {t("common.back")}
           </Button>
 
           <div className="flex items-center gap-3">
             <Button type="button" variant="ghost" onClick={handleSkip}>
-              Skip
+              {t("common.skip")}
             </Button>
             <Button
               type="submit"
               size="lg"
               isLoading={setupSettings.isPending}
             >
-              Save & Continue
+              {t("setup.settings.saveAndContinue")}
             </Button>
           </div>
         </div>
