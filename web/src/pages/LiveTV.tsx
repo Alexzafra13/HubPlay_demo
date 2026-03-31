@@ -373,11 +373,12 @@ function ChannelPlayer({ channel }: { channel: Channel }) {
       : streamUrl;
 
     // Timeout: if nothing loads in 15s, show error
+    let playing = false;
     const timeout = setTimeout(() => {
-      if (loading) setError(t('liveTV.channelUnavailable'));
+      if (!playing) setError(t('liveTV.channelUnavailable'));
     }, 15000);
 
-    const onPlaying = () => { setLoading(false); clearTimeout(timeout); };
+    const onPlaying = () => { playing = true; setLoading(false); clearTimeout(timeout); };
     video.addEventListener("playing", onPlaying);
 
     function startDirectPlayback() {
@@ -392,7 +393,7 @@ function ChannelPlayer({ channel }: { channel: Channel }) {
         enableWorker: true,
         lowLatencyMode: false,
         xhrSetup: (xhr, url) => {
-          // Only send auth header to our own proxy, not external servers
+          // All HLS requests now go through our proxy (URLs start with "/")
           if (token && url.startsWith("/")) {
             xhr.setRequestHeader("Authorization", `Bearer ${token}`);
           }
@@ -400,7 +401,8 @@ function ChannelPlayer({ channel }: { channel: Channel }) {
       });
       hlsRef.current = hls;
 
-      hls.loadSource(streamUrl);
+      // Use authed URL so the initial m3u8 fetch also passes auth
+      hls.loadSource(authedUrl);
       hls.attachMedia(video);
 
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
