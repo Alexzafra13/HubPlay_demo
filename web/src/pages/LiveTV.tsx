@@ -127,29 +127,29 @@ export default function LiveTV() {
   return (
     <div className="flex flex-col gap-0 -mx-4 -mt-2 md:-mx-6">
       {/* ── Hero Player ────────────────────────────────────────────── */}
-      <div ref={heroRef} className="relative w-full aspect-video max-h-[65vh] bg-black overflow-hidden">
+      <div ref={heroRef} className="relative w-full aspect-[16/9] max-h-[40vh] md:max-h-[65vh] bg-black overflow-hidden">
         {activeChannel && <ChannelPlayer channel={activeChannel} />}
 
         {/* Gradient overlay at bottom */}
-        <div className="absolute inset-x-0 bottom-0 h-32 bg-gradient-to-t from-bg-base to-transparent pointer-events-none" />
+        <div className="absolute inset-x-0 bottom-0 h-20 md:h-32 bg-gradient-to-t from-bg-base to-transparent pointer-events-none" />
 
         {/* Channel info overlay */}
         {activeChannel && (
-          <div className="absolute left-0 bottom-0 right-0 p-4 md:p-8 pointer-events-none">
-            <div className="flex items-end gap-4">
+          <div className="absolute left-0 bottom-0 right-0 p-3 md:p-8 pointer-events-none">
+            <div className="flex items-end gap-3">
               {activeChannel.logo_url && (
                 <img
                   src={activeChannel.logo_url}
                   alt=""
-                  className="h-12 w-12 md:h-16 md:w-16 rounded-xl object-contain bg-white/10 backdrop-blur-sm p-1.5 shrink-0"
+                  className="h-8 w-8 md:h-16 md:w-16 rounded-lg md:rounded-xl object-contain bg-white/10 backdrop-blur-sm p-1 md:p-1.5 shrink-0"
                 />
               )}
               <div className="min-w-0">
-                <h1 className="text-xl md:text-3xl font-bold text-white truncate drop-shadow-lg">
+                <h1 className="text-base md:text-3xl font-bold text-white truncate drop-shadow-lg">
                   {activeChannel.name}
                 </h1>
                 {activeChannel.group && (
-                  <p className="text-sm md:text-base text-white/70 mt-0.5 truncate">
+                  <p className="text-xs md:text-base text-white/70 truncate">
                     {activeChannel.group}
                   </p>
                 )}
@@ -224,7 +224,7 @@ export default function LiveTV() {
             <p className="text-sm text-text-muted py-4">
               {t('liveTV.channelsFound', { count: searchResults.length })}
             </p>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2">
               {searchResults.map((ch) => (
                 <ChannelCard
                   key={ch.id}
@@ -238,7 +238,7 @@ export default function LiveTV() {
         ) : activeGroup ? (
           // Single group - grid
           <div className="pt-4">
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2">
               {displayChannels.map((ch) => (
                 <ChannelCard
                   key={ch.id}
@@ -268,9 +268,9 @@ export default function LiveTV() {
                       {t('common.seeAll')}
                     </button>
                   </div>
-                  <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide -mx-4 px-4 md:-mx-6 md:px-6">
+                  <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide -mx-4 px-4 md:-mx-6 md:px-6">
                     {groupChannels.map((ch) => (
-                      <div key={ch.id} className="shrink-0 w-36 md:w-44">
+                      <div key={ch.id} className="shrink-0 w-48 md:w-56">
                         <ChannelCard
                           channel={ch}
                           isActive={activeChannel?.id === ch.id}
@@ -311,39 +311,39 @@ function ChannelCard({
       type="button"
       onClick={onClick}
       className={[
-        "group flex flex-col rounded-xl overflow-hidden transition-all duration-200",
+        "group flex items-center gap-2.5 rounded-lg p-2 transition-all duration-200 text-left w-full",
         isActive
-          ? "ring-2 ring-accent shadow-lg shadow-accent/10 scale-[1.02]"
-          : "hover:scale-[1.03] hover:shadow-lg hover:shadow-black/20",
+          ? "bg-accent/15 ring-1 ring-accent/40"
+          : "bg-white/[0.03] hover:bg-white/[0.07]",
       ].join(" ")}
     >
-      {/* Logo area */}
+      {/* Logo */}
       <div className={[
-        "aspect-video flex items-center justify-center relative",
-        isActive ? "bg-accent/10" : "bg-white/5 group-hover:bg-white/8",
+        "w-10 h-10 md:w-12 md:h-12 rounded-lg flex items-center justify-center shrink-0 relative",
+        isActive ? "bg-accent/10" : "bg-white/5",
       ].join(" ")}>
         {channel.logo_url ? (
           <img
             src={channel.logo_url}
             alt={channel.name}
-            className="h-10 w-10 md:h-12 md:w-12 object-contain"
+            className="w-7 h-7 md:w-8 md:h-8 object-contain"
             loading="lazy"
           />
         ) : (
-          <span className="text-2xl font-bold text-text-muted/50">
+          <span className="text-sm font-bold text-text-muted/50">
             {channel.number}
           </span>
         )}
         {isActive && (
-          <div className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+          <div className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-red-500 animate-pulse" />
         )}
       </div>
       {/* Info */}
-      <div className="px-2.5 py-2 bg-white/[0.03] text-left">
+      <div className="min-w-0 flex-1">
         <p className="text-xs md:text-sm font-medium text-text-primary truncate">
           {channel.name}
         </p>
-        <p className="text-[10px] md:text-xs text-text-muted truncate mt-0.5">
+        <p className="text-[10px] md:text-xs text-text-muted truncate">
           Ch. {channel.number}
         </p>
       </div>
@@ -358,40 +358,41 @@ function ChannelPlayer({ channel }: { channel: Channel }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
     setError(null);
+    setLoading(true);
 
     const streamUrl = channel.stream_url;
-
-    // Build an authenticated URL for the proxy endpoint using a query param
-    // so that both HLS.js and direct <video> playback can authenticate.
     const token = localStorage.getItem("hubplay_access_token");
-    const authedUrl = token ? `${streamUrl}${streamUrl.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}` : streamUrl;
+    const authedUrl = token
+      ? `${streamUrl}${streamUrl.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`
+      : streamUrl;
 
-    // Try HLS.js first — if the stream is not HLS, fall back to direct playback
-    function tryDirectPlayback() {
+    // Timeout: if nothing loads in 15s, show error
+    const timeout = setTimeout(() => {
+      if (loading) setError(t('liveTV.channelUnavailable'));
+    }, 15000);
+
+    const onPlaying = () => { setLoading(false); clearTimeout(timeout); };
+    video.addEventListener("playing", onPlaying);
+
+    function startDirectPlayback() {
       video!.src = authedUrl;
       video!.load();
       video!.play().catch(() => {});
-
-      const onError = () => {
-        setError(t('liveTV.channelUnavailable'));
-      };
-      video!.addEventListener("error", onError, { once: true });
-      return () => video!.removeEventListener("error", onError);
+      video!.addEventListener("error", () => setError(t('liveTV.channelUnavailable')), { once: true });
     }
-
-    let directCleanup: (() => void) | null = null;
 
     if (Hls.isSupported()) {
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
         xhrSetup: (xhr, url) => {
-          // Only send auth header to our own proxy, not to external segment servers
+          // Only send auth header to our own proxy, not external servers
           if (token && url.startsWith("/")) {
             xhr.setRequestHeader("Authorization", `Bearer ${token}`);
           }
@@ -411,52 +412,58 @@ function ChannelPlayer({ channel }: { channel: Channel }) {
           if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
             hls.recoverMediaError();
           } else {
-            // HLS failed (stream is probably raw TS, not HLS) — try direct playback
+            // HLS failed — fall back to direct <video> (works for raw TS via proxy)
             hls.destroy();
             hlsRef.current = null;
-            directCleanup = tryDirectPlayback();
+            startDirectPlayback();
           }
         }
       });
     } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
-      // Safari native HLS
+      // Safari/iOS native HLS support
       video.src = authedUrl;
-      video.addEventListener("loadedmetadata", () => video.play().catch(() => {}), { once: true });
+      video.load();
+      video.play().catch(() => {});
+      video.addEventListener("error", () => setError(t('liveTV.channelUnavailable')), { once: true });
     } else {
-      directCleanup = tryDirectPlayback();
+      startDirectPlayback();
     }
 
     return () => {
+      clearTimeout(timeout);
+      video.removeEventListener("playing", onPlaying);
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
       }
-      directCleanup?.();
     };
   }, [channel.stream_url, t]);
 
-  if (error) {
-    return (
-      <div className="flex h-full w-full items-center justify-center bg-black">
-        <div className="text-center px-4">
-          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" className="mx-auto mb-3 text-text-muted/50">
-            <rect x="2" y="4" width="20" height="14" rx="2" />
-            <path d="M7 22h10M12 18v4" />
-            <path d="M8 11l2 2 4-4" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          <p className="text-sm text-text-muted">{error}</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <video
-      ref={videoRef}
-      controls
-      className="h-full w-full object-contain"
-      playsInline
-    />
+    <div className="relative h-full w-full bg-black">
+      {loading && !error && (
+        <div className="absolute inset-0 flex items-center justify-center z-10">
+          <Spinner size="lg" />
+        </div>
+      )}
+      {error && (
+        <div className="absolute inset-0 flex items-center justify-center z-10">
+          <div className="text-center px-4">
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" className="mx-auto mb-2 text-text-muted/50">
+              <rect x="2" y="4" width="20" height="14" rx="2" />
+              <path d="M7 22h10M12 18v4" />
+            </svg>
+            <p className="text-xs text-text-muted">{error}</p>
+          </div>
+        </div>
+      )}
+      <video
+        ref={videoRef}
+        controls
+        className="h-full w-full object-contain"
+        playsInline
+      />
+    </div>
   );
 }
 
