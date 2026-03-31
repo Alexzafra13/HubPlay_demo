@@ -3,8 +3,10 @@ import type { FormEvent } from "react";
 import type { User } from "@/api/types";
 import { useUsers, useCreateUser, useDeleteUser, useMe } from "@/api/hooks";
 import { Button, Badge, Modal, Input, Spinner, EmptyState } from "@/components/common";
+import { useTranslation } from 'react-i18next';
 
 export default function UsersAdmin() {
+  const { t } = useTranslation();
   const { data: me } = useMe();
   const { data: users, isLoading, error } = useUsers();
   const createUser = useCreateUser();
@@ -71,7 +73,7 @@ export default function UsersAdmin() {
 
   if (error) {
     return (
-      <EmptyState title="Failed to load users" description={error.message} />
+      <EmptyState title={t('admin.users.failedToLoad')} description={error.message} />
     );
   }
 
@@ -79,8 +81,8 @@ export default function UsersAdmin() {
     <div className="flex flex-col gap-6">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-text-primary">Users</h2>
-        <Button onClick={() => setShowAddModal(true)}>Add User</Button>
+        <h2 className="text-lg font-semibold text-text-primary">{t('admin.users.title')}</h2>
+        <Button onClick={() => setShowAddModal(true)}>{t('admin.users.addUser')}</Button>
       </div>
 
       {/* Table */}
@@ -89,11 +91,11 @@ export default function UsersAdmin() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-bg-elevated text-left text-text-muted">
-                <th className="px-4 py-3 font-medium">Username</th>
-                <th className="px-4 py-3 font-medium">Display Name</th>
-                <th className="px-4 py-3 font-medium">Role</th>
-                <th className="px-4 py-3 font-medium">Created</th>
-                <th className="px-4 py-3 font-medium text-right">Actions</th>
+                <th className="px-4 py-3 font-medium">{t('admin.users.username')}</th>
+                <th className="px-4 py-3 font-medium">{t('admin.users.displayName')}</th>
+                <th className="px-4 py-3 font-medium">{t('admin.users.role')}</th>
+                <th className="px-4 py-3 font-medium">{t('admin.users.created')}</th>
+                <th className="px-4 py-3 font-medium text-right">{t('admin.users.actions')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -108,7 +110,7 @@ export default function UsersAdmin() {
                       {user.username}
                       {isSelf && (
                         <span className="ml-2 text-xs text-text-muted">
-                          (you)
+                          {t('admin.users.you')}
                         </span>
                       )}
                     </td>
@@ -133,7 +135,7 @@ export default function UsersAdmin() {
                           disabled={isSelf}
                           onClick={() => setDeleteTarget(user)}
                         >
-                          Delete
+                          {t('common.delete')}
                         </Button>
                       </div>
                     </td>
@@ -145,8 +147,8 @@ export default function UsersAdmin() {
         </div>
       ) : (
         <EmptyState
-          title="No users"
-          description="No user accounts found."
+          title={t('admin.users.noUsers')}
+          description={t('admin.users.noUsersHint')}
         />
       )}
 
@@ -154,29 +156,29 @@ export default function UsersAdmin() {
       <Modal
         isOpen={showAddModal}
         onClose={() => setShowAddModal(false)}
-        title="Add User"
+        title={t('admin.users.addUser')}
       >
         <form onSubmit={handleCreate} className="flex flex-col gap-4">
           <Input
-            label="Username"
-            placeholder="johndoe"
+            label={t('admin.users.username')}
+            placeholder={t('admin.users.usernamePlaceholder')}
             value={newUsername}
             onChange={(e) => setNewUsername(e.target.value)}
             required
           />
 
           <Input
-            label="Password"
+            label={t('admin.users.password')}
             type="password"
-            placeholder="Enter password"
+            placeholder={t('admin.users.passwordPlaceholder')}
             value={newPassword}
             onChange={(e) => setNewPassword(e.target.value)}
             required
           />
 
           <Input
-            label="Display Name"
-            placeholder="John Doe"
+            label={t('admin.users.displayName')}
+            placeholder={t('admin.users.displayNamePlaceholder')}
             value={newDisplayName}
             onChange={(e) => setNewDisplayName(e.target.value)}
           />
@@ -186,7 +188,7 @@ export default function UsersAdmin() {
               htmlFor="user-role"
               className="text-sm font-medium text-text-secondary"
             >
-              Role
+              {t('admin.users.role')}
             </label>
             <select
               id="user-role"
@@ -194,8 +196,8 @@ export default function UsersAdmin() {
               onChange={(e) => setNewRole(e.target.value)}
               className="w-full rounded-[--radius-md] bg-bg-card border border-border px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30"
             >
-              <option value="user">User</option>
-              <option value="admin">Admin</option>
+              <option value="user">{t('admin.users.roleUser')}</option>
+              <option value="admin">{t('admin.users.roleAdmin')}</option>
             </select>
           </div>
 
@@ -209,10 +211,10 @@ export default function UsersAdmin() {
               type="button"
               onClick={() => setShowAddModal(false)}
             >
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button type="submit" isLoading={createUser.isPending}>
-              Create
+              {t('common.create')}
             </Button>
           </div>
         </form>
@@ -222,16 +224,12 @@ export default function UsersAdmin() {
       <Modal
         isOpen={deleteTarget !== null}
         onClose={() => setDeleteTarget(null)}
-        title="Delete User"
+        title={t('admin.users.deleteUser')}
         size="sm"
       >
         <div className="flex flex-col gap-4">
           <p className="text-sm text-text-secondary">
-            Are you sure you want to delete user{" "}
-            <span className="font-semibold text-text-primary">
-              {deleteTarget?.username}
-            </span>
-            ? This action cannot be undone.
+            {t('admin.users.deleteConfirm', { name: deleteTarget?.username })}
           </p>
 
           {deleteUser.error && (
@@ -243,14 +241,14 @@ export default function UsersAdmin() {
               variant="secondary"
               onClick={() => setDeleteTarget(null)}
             >
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button
               variant="danger"
               isLoading={deleteUser.isPending}
               onClick={handleDelete}
             >
-              Delete
+              {t('common.delete')}
             </Button>
           </div>
         </div>

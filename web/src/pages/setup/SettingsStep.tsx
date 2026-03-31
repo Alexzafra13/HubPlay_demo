@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { useSystemCapabilities, useSetupSettings } from "@/api/hooks";
 import { Button, Input, Spinner, Badge } from "@/components/common";
 
@@ -23,6 +24,7 @@ export default function SettingsStep({
   onBack,
   initialData,
 }: SettingsStepProps) {
+  const { t } = useTranslation();
   const capabilities = useSystemCapabilities();
   const setupSettings = useSetupSettings();
 
@@ -77,10 +79,10 @@ export default function SettingsStep({
     <div>
       <div className="mb-6">
         <h2 className="text-xl font-semibold text-text-primary">
-          Server Settings
+          {t("setup.settings.title")}
         </h2>
         <p className="mt-1 text-sm text-text-secondary">
-          Configure optional settings. All of these can be changed later.
+          {t("setup.settings.description")}
         </p>
       </div>
 
@@ -88,37 +90,35 @@ export default function SettingsStep({
         {/* TMDb API Key */}
         <div className="rounded-[--radius-md] border border-border bg-bg-surface p-4">
           <h3 className="text-sm font-semibold text-text-primary mb-1">
-            Metadata Provider
+            {t("setup.settings.metadataProvider")}
           </h3>
           <p className="text-xs text-text-muted mb-3">
-            A TMDb API key enables automatic movie and TV show metadata,
-            posters, and descriptions.
+            {t("setup.settings.metadataDescription")}
           </p>
           <Input
-            label="TMDb API Key"
+            label={t("setup.settings.tmdbApiKey")}
             type="text"
             value={tmdbApiKey}
             onChange={(e) => setTmdbApiKey(e.target.value)}
-            placeholder="Enter your API key"
-            hint="Free at themoviedb.org — sign up and generate an API key in your account settings."
+            placeholder={t("setup.settings.tmdbPlaceholder")}
+            hint={t("setup.settings.tmdbHint")}
           />
         </div>
 
         {/* FFmpeg / Transcoding */}
         <div className="rounded-[--radius-md] border border-border bg-bg-surface p-4">
           <h3 className="text-sm font-semibold text-text-primary mb-1">
-            Transcoding
+            {t("setup.settings.transcoding")}
           </h3>
           <p className="text-xs text-text-muted mb-3">
-            FFmpeg is required for transcoding media to different formats and
-            quality levels.
+            {t("setup.settings.transcodingDescription")}
           </p>
 
           {capabilities.isLoading && (
             <div className="flex items-center gap-3 py-4">
               <Spinner size="sm" />
               <span className="text-sm text-text-secondary">
-                Detecting system capabilities...
+                {t("setup.settings.detecting")}
               </span>
             </div>
           )}
@@ -137,7 +137,7 @@ export default function SettingsStep({
                 />
               </svg>
               <span className="text-sm text-error">
-                Unable to detect system capabilities.
+                {t("setup.settings.detectionFailed")}
               </span>
             </div>
           )}
@@ -163,14 +163,14 @@ export default function SettingsStep({
                     </div>
                     <div>
                       <p className="text-sm font-medium text-text-primary">
-                        FFmpeg found
+                        {t("setup.settings.ffmpegFound")}
                       </p>
                       <p className="text-xs text-text-muted font-mono">
                         {ffmpegPath}
                       </p>
                     </div>
                     <Badge variant="success" className="ml-auto">
-                      Detected
+                      {t("setup.settings.detected")}
                     </Badge>
                   </>
                 ) : (
@@ -190,15 +190,14 @@ export default function SettingsStep({
                     </div>
                     <div>
                       <p className="text-sm font-medium text-text-primary">
-                        FFmpeg not found
+                        {t("setup.settings.ffmpegNotFound")}
                       </p>
                       <p className="text-xs text-text-muted">
-                        Transcoding will not be available. Install FFmpeg and
-                        restart the server.
+                        {t("setup.settings.ffmpegMissing")}
                       </p>
                     </div>
                     <Badge variant="warning" className="ml-auto">
-                      Missing
+                      {t("setup.settings.missing")}
                     </Badge>
                   </>
                 )}
@@ -208,7 +207,7 @@ export default function SettingsStep({
               {ffmpegFound && hwAccels.length > 0 && (
                 <div className="mt-2">
                   <p className="text-sm font-medium text-text-secondary mb-2">
-                    Hardware Acceleration
+                    {t("setup.settings.hwAcceleration")}
                   </p>
                   <div className="flex flex-col gap-2">
                     <label className="flex items-center gap-3 rounded-[--radius-sm] px-3 py-2 hover:bg-bg-elevated transition-colors cursor-pointer">
@@ -221,7 +220,7 @@ export default function SettingsStep({
                         className="text-accent focus:ring-accent"
                       />
                       <span className="text-sm text-text-primary">
-                        None (software encoding)
+                        {t("setup.settings.softwareEncoding")}
                       </span>
                     </label>
 
@@ -259,19 +258,19 @@ export default function SettingsStep({
         {/* Navigation buttons */}
         <div className="flex items-center justify-between pt-2">
           <Button type="button" variant="ghost" onClick={onBack}>
-            Back
+            {t("common.back")}
           </Button>
 
           <div className="flex items-center gap-3">
             <Button type="button" variant="ghost" onClick={handleSkip}>
-              Skip
+              {t("common.skip")}
             </Button>
             <Button
               type="submit"
               size="lg"
               isLoading={setupSettings.isPending}
             >
-              Save & Continue
+              {t("setup.settings.saveAndContinue")}
             </Button>
           </div>
         </div>

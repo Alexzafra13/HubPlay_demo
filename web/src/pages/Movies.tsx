@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { useInfiniteItems } from "@/api/hooks";
 import { Input } from "@/components/common";
 import { MediaGrid } from "@/components/media";
@@ -6,6 +7,7 @@ import { Spinner } from "@/components/common";
 import { sortItems, SORT_OPTIONS, type SortOption } from "@/utils/sort";
 
 export default function Movies() {
+  const { t } = useTranslation();
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortOption>("added");
 
@@ -58,14 +60,14 @@ export default function Movies() {
   return (
     <div className="flex flex-col gap-6 px-6 py-8 sm:px-10">
       <h1 className="text-2xl font-bold text-text-primary sm:text-3xl">
-        Movies
+        {t('movies.title')}
       </h1>
 
       {/* Toolbar */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
         <div className="flex-1">
           <Input
-            placeholder="Search movies..."
+            placeholder={t('movies.searchPlaceholder')}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             icon={
@@ -95,7 +97,7 @@ export default function Movies() {
         </select>
       </div>
 
-      <MediaGrid items={filtered} loading={isLoading} emptyMessage="No movies found" />
+      <MediaGrid items={filtered} loading={isLoading} emptyMessage={t('movies.noResults')} />
 
       {/* Infinite scroll sentinel */}
       {!search.trim() && (

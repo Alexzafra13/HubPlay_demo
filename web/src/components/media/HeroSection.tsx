@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { FC } from "react";
+import { useTranslation } from "react-i18next";
 import type { MediaItem } from "@/api/types";
 import { Button } from "@/components/common/Button";
 import { Badge } from "@/components/common/Badge";
@@ -14,6 +15,7 @@ function formatRating(rating: number): string {
 }
 
 const HeroSection: FC<HeroSectionProps> = ({ item, onPlay }) => {
+  const { t } = useTranslation();
   const [isFavorite, setIsFavorite] = useState(false);
 
   return (
@@ -90,7 +92,7 @@ const HeroSection: FC<HeroSectionProps> = ({ item, onPlay }) => {
             >
               <path d="M8 5v14l11-7z" />
             </svg>
-            Play
+            {t("common.play")}
           </Button>
 
           <button

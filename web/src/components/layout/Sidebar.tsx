@@ -1,5 +1,6 @@
 import { NavLink, useNavigate } from 'react-router';
 import type { ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useAuthStore } from '@/store/auth';
 
 // ─── Inline SVG Icons (20x20 viewBox, stroke-based) ────────────────────────
@@ -145,6 +146,7 @@ interface SidebarProps {
 }
 
 export function Sidebar({ collapsed, onToggleCollapse, onClose }: SidebarProps) {
+  const { t } = useTranslation();
   const { user, logout } = useAuthStore();
   const navigate = useNavigate();
   const isAdmin = user?.role === 'admin';
@@ -187,7 +189,7 @@ export function Sidebar({ collapsed, onToggleCollapse, onClose }: SidebarProps) 
           <button
             onClick={onClose}
             className="ml-auto p-1.5 rounded-md text-text-secondary hover:text-text-primary hover:bg-bg-elevated transition-colors md:hidden"
-            aria-label="Close menu"
+            aria-label={t('nav.closeMenu')}
           >
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
               <path d="M5 5l10 10M15 5L5 15" />
@@ -198,24 +200,24 @@ export function Sidebar({ collapsed, onToggleCollapse, onClose }: SidebarProps) 
 
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto px-2 py-3 space-y-1">
-        <NavItem to="/" icon={<IconHome />} label="Home" collapsed={collapsed} />
-        <NavItem to="/movies" icon={<IconFilm />} label="Movies" collapsed={collapsed} />
-        <NavItem to="/series" icon={<IconTv />} label="Series" collapsed={collapsed} />
-        <NavItem to="/live-tv" icon={<IconAntenna />} label="Live TV" collapsed={collapsed} />
-        <NavItem to="/search" icon={<IconSearch />} label="Search" collapsed={collapsed} />
+        <NavItem to="/" icon={<IconHome />} label={t('nav.home')} collapsed={collapsed} />
+        <NavItem to="/movies" icon={<IconFilm />} label={t('nav.movies')} collapsed={collapsed} />
+        <NavItem to="/series" icon={<IconTv />} label={t('nav.series')} collapsed={collapsed} />
+        <NavItem to="/live-tv" icon={<IconAntenna />} label={t('nav.liveTV')} collapsed={collapsed} />
+        <NavItem to="/search" icon={<IconSearch />} label={t('nav.search')} collapsed={collapsed} />
 
         {isAdmin && (
           <>
             <div className="my-3 mx-3 border-t border-white/5" />
             {!collapsed && (
               <span className="px-3 text-xs font-semibold text-text-secondary uppercase tracking-wider">
-                Admin
+                {t('nav.admin')}
               </span>
             )}
             <div className="mt-1 space-y-1">
-              <NavItem to="/admin/libraries" icon={<IconFolder />} label="Libraries" collapsed={collapsed} />
-              <NavItem to="/admin/users" icon={<IconUsers />} label="Users" collapsed={collapsed} />
-              <NavItem to="/admin/system" icon={<IconGear />} label="System" collapsed={collapsed} />
+              <NavItem to="/admin/libraries" icon={<IconFolder />} label={t('nav.libraries')} collapsed={collapsed} />
+              <NavItem to="/admin/users" icon={<IconUsers />} label={t('nav.users')} collapsed={collapsed} />
+              <NavItem to="/admin/system" icon={<IconGear />} label={t('nav.system')} collapsed={collapsed} />
             </div>
           </>
         )}
@@ -238,7 +240,7 @@ export function Sidebar({ collapsed, onToggleCollapse, onClose }: SidebarProps) 
           <button
             onClick={handleLogout}
             className="p-1.5 rounded-md text-text-secondary hover:text-text-primary hover:bg-bg-elevated transition-colors flex-shrink-0"
-            title="Log out"
+            title={t('common.logOut')}
           >
             <IconLogout />
           </button>
@@ -248,7 +250,7 @@ export function Sidebar({ collapsed, onToggleCollapse, onClose }: SidebarProps) 
         <button
           onClick={onToggleCollapse}
           className="hidden md:flex w-full items-center justify-center p-2 rounded-lg text-text-secondary hover:text-text-primary hover:bg-bg-elevated transition-colors"
-          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          title={collapsed ? t('nav.expandSidebar') : t('nav.collapseSidebar')}
         >
           {collapsed ? <IconChevronRight /> : <IconChevronLeft />}
         </button>

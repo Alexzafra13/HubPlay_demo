@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useProviders, useUpdateProvider } from "@/api/hooks";
 import { Badge, Spinner } from "@/components/common";
 import { Button } from "@/components/common/Button";
+import { useTranslation } from 'react-i18next';
 
 const LANGUAGES = [
   { code: "es-ES", label: "Español" },
@@ -26,24 +27,24 @@ const LANGUAGES = [
   { code: "hi-IN", label: "हिन्दी" },
 ];
 
-const PROVIDER_INFO: Record<string, { label: string; description: string; keyPlaceholder: string; docsUrl: string; hasLanguage: boolean }> = {
+const PROVIDER_INFO: Record<string, { label: string; descriptionKey: string; keyPlaceholder: string; docsUrl: string; hasLanguage: boolean }> = {
   tmdb: {
     label: "TMDb",
-    description: "The Movie Database — provides metadata, posters, backdrops, cast and crew information for movies and TV shows.",
+    descriptionKey: "admin.providers.tmdbDescription",
     keyPlaceholder: "Enter your TMDb API key (v3 auth)",
     docsUrl: "https://www.themoviedb.org/settings/api",
     hasLanguage: true,
   },
   fanart: {
     label: "Fanart.tv",
-    description: "High-quality fan art, logos, disc art, and additional artwork for movies and TV shows.",
+    descriptionKey: "admin.providers.fanartDescription",
     keyPlaceholder: "Enter your Fanart.tv API key",
     docsUrl: "https://fanart.tv/get-an-api-key/",
     hasLanguage: false,
   },
   opensubtitles: {
     label: "OpenSubtitles",
-    description: "Subtitles in multiple languages for movies and TV shows.",
+    descriptionKey: "admin.providers.opensubsDescription",
     keyPlaceholder: "Enter your OpenSubtitles API key",
     docsUrl: "https://www.opensubtitles.com/en/consumers",
     hasLanguage: false,
@@ -60,9 +61,10 @@ interface ProviderData {
 }
 
 function ProviderCard({ provider }: { provider: ProviderData }) {
+  const { t } = useTranslation();
   const info = PROVIDER_INFO[provider.name] ?? {
     label: provider.name,
-    description: `${provider.type} provider`,
+    descriptionKey: null,
     keyPlaceholder: "Enter API key",
     docsUrl: "",
     hasLanguage: false,
@@ -104,6 +106,10 @@ function ProviderCard({ provider }: { provider: ProviderData }) {
 
   const isActive = provider.status === "active";
 
+  const description = info.descriptionKey
+    ? t(info.descriptionKey)
+    : `${provider.type} provider`;
+
   return (
     <div className="flex flex-col gap-4 rounded-[--radius-lg] border border-border bg-bg-card p-6">
       {/* Header */}
@@ -114,13 +120,13 @@ function ProviderCard({ provider }: { provider: ProviderData }) {
               {info.label}
             </h3>
             <Badge variant={isActive ? "success" : "default"}>
-              {isActive ? "Active" : "Disabled"}
+              {isActive ? t('admin.providers.active') : t('admin.providers.disabled')}
             </Badge>
             {provider.has_api_key && (
-              <Badge>API Key Set</Badge>
+              <Badge>{t('admin.providers.apiKeySet')}</Badge>
             )}
           </div>
-          <p className="text-sm text-text-secondary">{info.description}</p>
+          <p className="text-sm text-text-secondary">{description}</p>
         </div>
 
         <button
@@ -146,7 +152,7 @@ function ProviderCard({ provider }: { provider: ProviderData }) {
       {/* API Key input */}
       <div className="flex flex-col gap-2">
         <label className="text-xs font-medium uppercase tracking-wider text-text-muted">
-          API Key
+          {t('admin.providers.apiKey')}
         </label>
         <div className="flex gap-2">
           <div className="relative flex-1">
@@ -168,7 +174,7 @@ function ProviderCard({ provider }: { provider: ProviderData }) {
               type="button"
               onClick={() => setShowKey(!showKey)}
               className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-text-muted hover:text-text-primary"
-              aria-label={showKey ? "Hide key" : "Show key"}
+              aria-label={showKey ? t('admin.providers.hideKey') : t('admin.providers.showKey')}
             >
               {showKey ? (
                 <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
@@ -187,7 +193,7 @@ function ProviderCard({ provider }: { provider: ProviderData }) {
             onClick={handleSaveKey}
             disabled={!apiKey.trim() || updateProvider.isPending}
           >
-            {updateProvider.isPending ? "Saving..." : "Save"}
+            {updateProvider.isPending ? t('common.saving') : t('common.save')}
           </Button>
         </div>
         {info.docsUrl && (
@@ -197,15 +203,15 @@ function ProviderCard({ provider }: { provider: ProviderData }) {
             rel="noopener noreferrer"
             className="text-xs text-accent hover:underline"
           >
-            Get an API key
+            {t('admin.providers.getApiKey')}
           </a>
         )}
         {saved && (
-          <span className="text-xs text-success">API key saved successfully.</span>
+          <span className="text-xs text-success">{t('admin.providers.apiKeySaved')}</span>
         )}
         {updateProvider.isError && (
           <span className="text-xs text-error">
-            Failed to save: {updateProvider.error?.message}
+            {t('admin.providers.saveFailed', { error: updateProvider.error?.message })}
           </span>
         )}
       </div>
@@ -214,10 +220,10 @@ function ProviderCard({ provider }: { provider: ProviderData }) {
       {info.hasLanguage && (
         <div className="flex flex-col gap-2">
           <label className="text-xs font-medium uppercase tracking-wider text-text-muted">
-            Preferred Language
+            {t('admin.providers.preferredLanguage')}
           </label>
           <p className="text-xs text-text-muted">
-            Metadata and artwork will be fetched in this language. Rescan libraries after changing.
+            {t('admin.providers.languageHint')}
           </p>
           <select
             value={currentLang}
@@ -237,6 +243,7 @@ function ProviderCard({ provider }: { provider: ProviderData }) {
 }
 
 export default function ProvidersAdmin() {
+  const { t } = useTranslation();
   const { data: providers, isLoading, error } = useProviders();
 
   if (isLoading) {
@@ -250,9 +257,9 @@ export default function ProvidersAdmin() {
   if (error) {
     return (
       <div className="flex flex-col items-center gap-3 py-16">
-        <Badge variant="error">Error</Badge>
+        <Badge variant="error">{t('admin.providers.error')}</Badge>
         <p className="text-sm text-text-muted">
-          {error.message ?? "Failed to load providers."}
+          {error.message}
         </p>
       </div>
     );
@@ -262,11 +269,10 @@ export default function ProvidersAdmin() {
     return (
       <div className="flex flex-col gap-4">
         <h2 className="text-lg font-semibold text-text-primary">
-          Metadata Providers
+          {t('admin.providers.title')}
         </h2>
         <p className="text-sm text-text-secondary">
-          No providers registered. Providers are registered automatically on server startup.
-          Make sure TMDb, Fanart.tv, or OpenSubtitles providers are enabled in the server configuration.
+          {t('admin.providers.noProviders')}
         </p>
       </div>
     );
@@ -276,11 +282,10 @@ export default function ProvidersAdmin() {
     <div className="flex flex-col gap-6">
       <div>
         <h2 className="text-lg font-semibold text-text-primary">
-          Metadata Providers
+          {t('admin.providers.title')}
         </h2>
         <p className="mt-1 text-sm text-text-secondary">
-          Configure API keys for metadata, artwork, and subtitle providers.
-          After adding a key, rescan your libraries to fetch metadata.
+          {t('admin.providers.description')}
         </p>
       </div>
 

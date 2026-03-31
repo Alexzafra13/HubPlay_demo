@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router";
+import { useTranslation } from "react-i18next";
 import { useSetupComplete } from "@/api/hooks";
 import { Button } from "@/components/common";
 import type { SetupData } from "./SetupWizard";
@@ -75,6 +76,7 @@ function SummaryItem({
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function CompleteStep({ setupData }: CompleteStepProps) {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const completeSetup = useSetupComplete();
 
@@ -119,10 +121,10 @@ export default function CompleteStep({ setupData }: CompleteStepProps) {
           </svg>
         </div>
         <h2 className="text-xl font-semibold text-text-primary">
-          You're all set!
+          {t("setup.complete.title")}
         </h2>
         <p className="mt-1 text-sm text-text-secondary">
-          Here's a summary of your configuration.
+          {t("setup.complete.subtitle")}
         </p>
       </div>
 
@@ -132,8 +134,8 @@ export default function CompleteStep({ setupData }: CompleteStepProps) {
           {/* Admin account */}
           <SummaryItem
             icon="check"
-            label="Admin Account"
-            value={setupData.user?.username ?? "Created"}
+            label={t("setup.complete.adminAccount")}
+            value={setupData.user?.username ?? t("setup.complete.created")}
             variant="success"
           />
 
@@ -155,10 +157,9 @@ export default function CompleteStep({ setupData }: CompleteStepProps) {
                   </svg>
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="text-xs text-text-muted">Media Libraries</p>
+                  <p className="text-xs text-text-muted">{t("setup.complete.mediaLibraries")}</p>
                   <p className="text-sm font-medium text-text-primary">
-                    {libraries.length}{" "}
-                    {libraries.length === 1 ? "library" : "libraries"} configured
+                    {t("setup.complete.librariesConfigured", { count: libraries.length })}
                   </p>
                 </div>
               </div>
@@ -186,8 +187,8 @@ export default function CompleteStep({ setupData }: CompleteStepProps) {
           ) : (
             <SummaryItem
               icon="info"
-              label="Media Libraries"
-              value="None added — you can add libraries later"
+              label={t("setup.complete.mediaLibraries")}
+              value={t("setup.complete.noneAdded")}
               variant="default"
             />
           )}
@@ -195,19 +196,19 @@ export default function CompleteStep({ setupData }: CompleteStepProps) {
           {/* TMDb */}
           <SummaryItem
             icon={hasTmdb ? "check" : "info"}
-            label="TMDb Metadata"
-            value={hasTmdb ? "API key configured" : "Not configured"}
+            label={t("setup.complete.tmdbMetadata")}
+            value={hasTmdb ? t("setup.complete.apiKeyConfigured") : t("settings.notConfigured")}
             variant={hasTmdb ? "success" : "default"}
           />
 
           {/* Transcoding */}
           <SummaryItem
             icon={hasHwAccel ? "check" : "info"}
-            label="Hardware Transcoding"
+            label={t("setup.complete.hwTranscoding")}
             value={
               hasHwAccel
-                ? `${settings!.hwAccel!.toUpperCase()} acceleration enabled`
-                : "Software encoding (default)"
+                ? t("setup.complete.accelEnabled", { accel: settings!.hwAccel!.toUpperCase() })
+                : t("setup.complete.softwareDefault")
             }
             variant={hasHwAccel ? "success" : "default"}
           />
@@ -225,10 +226,10 @@ export default function CompleteStep({ setupData }: CompleteStepProps) {
           />
           <div>
             <p className="text-sm font-medium text-text-primary">
-              Start scanning libraries now
+              {t("setup.complete.scanNow")}
             </p>
             <p className="text-xs text-text-muted">
-              This will begin indexing your media files in the background.
+              {t("setup.complete.scanDescription")}
             </p>
           </div>
         </label>
@@ -248,7 +249,7 @@ export default function CompleteStep({ setupData }: CompleteStepProps) {
           isLoading={completeSetup.isPending}
           className="min-w-[200px]"
         >
-          Finish Setup
+          {t("setup.complete.finishSetup")}
         </Button>
       </div>
     </div>
