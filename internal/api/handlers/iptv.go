@@ -140,6 +140,20 @@ func (h *IPTVHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// ProxyURL proxies an HLS segment or sub-playlist for a channel.
+func (h *IPTVHandler) ProxyURL(w http.ResponseWriter, r *http.Request) {
+	channelID := chi.URLParam(r, "channelId")
+	rawURL := r.URL.Query().Get("url")
+	if rawURL == "" {
+		respondError(w, http.StatusBadRequest, "MISSING_URL", "url parameter required")
+		return
+	}
+
+	if err := h.proxy.ProxyURL(r.Context(), w, channelID, rawURL); err != nil {
+		h.logger.Error("proxy URL error", "channel", channelID, "error", err)
+	}
+}
+
 // Schedule returns EPG schedule for a channel.
 func (h *IPTVHandler) Schedule(w http.ResponseWriter, r *http.Request) {
 	channelID := chi.URLParam(r, "channelId")

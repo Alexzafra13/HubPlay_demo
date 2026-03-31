@@ -191,6 +191,7 @@ func NewRouter(deps Dependencies) http.Handler {
 					r.Route("/channels/{channelId}", func(r chi.Router) {
 						r.Get("/", iptvHandler.GetChannel)
 						r.Get("/stream", iptvHandler.Stream)
+						r.Get("/proxy", iptvHandler.ProxyURL)
 						r.Get("/schedule", iptvHandler.Schedule)
 					})
 
