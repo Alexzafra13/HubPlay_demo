@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { useSystemCapabilities, useSetupSettings } from "@/api/hooks";
 import { Button, Input, Spinner, Badge } from "@/components/common";
 

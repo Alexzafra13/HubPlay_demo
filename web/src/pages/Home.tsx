@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { Link, useNavigate } from "react-router";
+import { useTranslation } from "react-i18next";
 import { useContinueWatching, useLatestItems, useNextUp } from "@/api/hooks";
 import type { MediaItem } from "@/api/types";
 import { Skeleton } from "@/components/common";
@@ -12,6 +13,7 @@ const HERO_INTERVAL = 8000;
 function HeroBanner({ items }: { items: MediaItem[] }) {
   const [activeIndex, setActiveIndex] = useState(0);
   const navigate = useNavigate();
+  const { t } = useTranslation();
 
   const heroItems = items.filter((i) => i.backdrop_url).slice(0, 5);
 
@@ -121,7 +123,7 @@ function HeroBanner({ items }: { items: MediaItem[] }) {
               <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M8 5v14l11-7z" />
               </svg>
-              Play
+              {t('common.play')}
             </button>
 
             <Link
@@ -139,7 +141,7 @@ function HeroBanner({ items }: { items: MediaItem[] }) {
                 <line x1="12" y1="16" x2="12" y2="12" />
                 <line x1="12" y1="8" x2="12.01" y2="8" />
               </svg>
-              More Info
+              {t('common.moreInfo')}
             </Link>
           </div>
 
@@ -177,7 +179,7 @@ function LandscapeCard({ item }: { item: MediaItem }) {
   return (
     <Link
       to={href}
-      className="group relative flex-shrink-0 w-[280px] sm:w-[320px] aspect-[16/9] overflow-hidden rounded-lg"
+      className="group relative flex-shrink-0 w-[280px] sm:w-[320px] aspect-[16/9] overflow-hidden rounded-md"
     >
       {image ? (
         <img
@@ -208,7 +210,7 @@ function LandscapeCard({ item }: { item: MediaItem }) {
       </div>
 
       {/* Hover glow */}
-      <div className="absolute inset-0 rounded-lg ring-1 ring-white/0 transition-all group-hover:ring-white/20" />
+      <div className="absolute inset-0 rounded-md ring-1 ring-white/0 transition-all group-hover:ring-white/20" />
     </Link>
   );
 }
@@ -230,7 +232,7 @@ function LandscapeSkeletonRow() {
         <div key={i} className="w-[280px] sm:w-[320px] shrink-0">
           <Skeleton
             variant="rectangular"
-            className="aspect-[16/9] w-full rounded-lg"
+            className="aspect-[16/9] w-full rounded-md"
           />
         </div>
       ))}
@@ -245,7 +247,7 @@ function EpisodeSkeletonRow() {
         <div key={i} className="w-[280px] shrink-0">
           <Skeleton
             variant="rectangular"
-            className="aspect-video w-full rounded-lg"
+            className="aspect-video w-full rounded-md"
           />
           <Skeleton variant="text" width="70%" className="mt-2" />
           <Skeleton variant="text" width="40%" className="mt-1" />
@@ -262,6 +264,7 @@ interface SectionProps {
 }
 
 function Section({ title, linkTo, children }: SectionProps) {
+  const { t } = useTranslation();
   return (
     <section className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
@@ -271,7 +274,7 @@ function Section({ title, linkTo, children }: SectionProps) {
             to={linkTo}
             className="text-xs text-white/40 hover:text-white/70 transition-colors"
           >
-            See All
+            {t('common.seeAll')}
           </Link>
         )}
       </div>
@@ -283,6 +286,7 @@ function Section({ title, linkTo, children }: SectionProps) {
 // ─── Home Page ────────────────────────────────────────────────────────────────
 
 export default function Home() {
+  const { t } = useTranslation();
   const continueWatching = useContinueWatching();
   const latestItems = useLatestItems();
   const nextUp = useNextUp();
@@ -303,13 +307,13 @@ export default function Home() {
         <svg className="h-12 w-12 text-white/20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
           <path d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
         </svg>
-        <p className="text-white/50">Failed to load content. Check your server connection.</p>
+        <p className="text-white/50">{t('home.failedToLoad')}</p>
         <button
           type="button"
           onClick={() => { continueWatching.refetch(); latestItems.refetch(); nextUp.refetch(); }}
           className="rounded-lg bg-white/10 px-5 py-2 text-sm font-medium text-white hover:bg-white/20 transition-colors"
         >
-          Retry
+          {t('common.retry')}
         </button>
       </div>
     );
@@ -330,7 +334,7 @@ export default function Home() {
       <div className="flex flex-col gap-10 px-8 pb-12 md:px-12">
         {/* Continue Watching */}
         {(continueWatching.isLoading || continueItems.length > 0) && (
-          <Section title="Continue Watching">
+          <Section title={t('home.continueWatching')}>
             {continueWatching.isLoading ? (
               <LandscapeSkeletonRow />
             ) : (
@@ -345,7 +349,7 @@ export default function Home() {
 
         {/* Recently Added */}
         {(latestItems.isLoading || latestList.length > 0) && (
-          <Section title="Recently Added">
+          <Section title={t('home.recentlyAdded')}>
             {latestItems.isLoading ? (
               <LandscapeSkeletonRow />
             ) : (
@@ -360,7 +364,7 @@ export default function Home() {
 
         {/* Next Up */}
         {(nextUp.isLoading || nextUpList.length > 0) && (
-          <Section title="Next Up" linkTo="/series">
+          <Section title={t('home.nextUp')} linkTo="/series">
             {nextUp.isLoading ? (
               <EpisodeSkeletonRow />
             ) : (

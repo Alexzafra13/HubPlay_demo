@@ -1,12 +1,14 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { useNavigate } from "react-router";
+import { useTranslation } from "react-i18next";
 import { useLogin } from "@/api/hooks";
 import { useAuthStore } from "@/store/auth";
 import { Button } from "@/components/common";
 import { Input } from "@/components/common";
 
 export default function Login() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const login = useLogin();
   const setAuth = useAuthStore((s) => s.setAuth);
@@ -27,7 +29,7 @@ export default function Login() {
           navigate("/");
         },
         onError(err) {
-          setError(err.message || "Login failed. Check your credentials.");
+          setError(err.message || t('login.loginFailed'));
         },
       },
     );
@@ -52,21 +54,21 @@ export default function Login() {
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <Input
-            label="Username"
+            label={t('login.username')}
             type="text"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
-            placeholder="Enter your username"
+            placeholder={t('login.usernamePlaceholder')}
             autoComplete="username"
             required
           />
 
           <Input
-            label="Password"
+            label={t('login.password')}
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            placeholder="Enter your password"
+            placeholder={t('login.passwordPlaceholder')}
             autoComplete="current-password"
             required
           />
@@ -84,7 +86,7 @@ export default function Login() {
             isLoading={login.isPending}
             className="mt-2"
           >
-            Sign In
+            {t('login.signIn')}
           </Button>
         </form>
       </div>

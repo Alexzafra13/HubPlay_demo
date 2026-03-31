@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react";
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import AccountStep from "./AccountStep";
 import LibrariesStep from "./LibrariesStep";
 import SettingsStep from "./SettingsStep";
@@ -32,19 +33,20 @@ export interface SetupData {
 
 // ─── Step Definitions ────────────────────────────────────────────────────────
 
-const STEPS = [
-  { label: "Admin Account", number: 1 },
-  { label: "Libraries", number: 2 },
-  { label: "Settings", number: 3 },
-  { label: "Complete", number: 4 },
+const STEP_KEYS = [
+  { key: "adminAccount", number: 1 },
+  { key: "libraries", number: 2 },
+  { key: "settings", number: 3 },
+  { key: "complete", number: 4 },
 ] as const;
 
 // ─── Step Indicator ──────────────────────────────────────────────────────────
 
 function StepIndicator({ currentStep }: { currentStep: number }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center justify-center gap-0">
-      {STEPS.map((step, index) => {
+      {STEP_KEYS.map((step, index) => {
         const isActive = currentStep === index;
         const isCompleted = currentStep > index;
 
@@ -94,7 +96,7 @@ function StepIndicator({ currentStep }: { currentStep: number }) {
                       : "text-text-muted",
                 ].join(" ")}
               >
-                {step.label}
+                {t(`setup.steps.${step.key}`)}
               </span>
             </div>
           </div>
@@ -146,7 +148,7 @@ export default function SetupWizard({ initialStep }: SetupWizardProps) {
   const [setupData, setSetupData] = useState<SetupData>({});
 
   const goNext = useCallback(() => {
-    setCurrentStep((s) => Math.min(s + 1, STEPS.length - 1));
+    setCurrentStep((s) => Math.min(s + 1, STEP_KEYS.length - 1));
   }, []);
 
   const goBack = useCallback(() => {

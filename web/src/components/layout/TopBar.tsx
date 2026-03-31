@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate, NavLink } from 'react-router';
+import { useTranslation } from 'react-i18next';
 import { useAuthStore } from '@/store/auth';
 
 // ─── Props ──────────────────────────────────────────────────────────────────
@@ -12,6 +13,7 @@ interface TopBarProps {
 // ─── TopBar ─────────────────────────────────────────────────────────────────
 
 export function TopBar({ title, onMenuClick }: TopBarProps) {
+  const { t } = useTranslation();
   const { user, logout } = useAuthStore();
   const navigate = useNavigate();
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -63,7 +65,7 @@ export function TopBar({ title, onMenuClick }: TopBarProps) {
       <button
         onClick={onMenuClick}
         className="md:hidden p-2 -ml-1 rounded-lg text-text-secondary hover:text-text-primary hover:bg-white/5 transition-colors"
-        aria-label="Toggle menu"
+        aria-label={t('nav.toggleMenu')}
       >
         <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
           <path d="M3 5h14M3 10h14M3 15h14" />
@@ -113,7 +115,7 @@ export function TopBar({ title, onMenuClick }: TopBarProps) {
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search..."
+            placeholder={t('topbar.searchPlaceholder')}
             className="w-48 pl-8 pr-3 py-1.5 rounded-lg bg-bg-base border border-border text-sm text-text-primary placeholder:text-text-secondary focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent transition-colors"
           />
         </div>
@@ -146,7 +148,7 @@ export function TopBar({ title, onMenuClick }: TopBarProps) {
                 <circle cx="10" cy="10" r="3" />
                 <path d="M10 1.5v2M10 16.5v2M3.5 3.5l1.4 1.4M15.1 15.1l1.4 1.4M1.5 10h2M16.5 10h2M3.5 16.5l1.4-1.4M15.1 4.9l1.4-1.4" />
               </svg>
-              Settings
+              {t('common.settings')}
             </NavLink>
             {user?.role === 'admin' && (
               <NavLink
@@ -160,7 +162,7 @@ export function TopBar({ title, onMenuClick }: TopBarProps) {
                   <rect x="3" y="11" width="6" height="6" rx="1" />
                   <rect x="11" y="11" width="6" height="6" rx="1" />
                 </svg>
-                Administration
+                {t('common.administration')}
               </NavLink>
             )}
             <div className="border-t border-border" />
@@ -172,7 +174,7 @@ export function TopBar({ title, onMenuClick }: TopBarProps) {
                 <path d="M7 17H4a1 1 0 01-1-1V4a1 1 0 011-1h3" />
                 <path d="M11 14l4-4-4-4M15 10H7" />
               </svg>
-              Log out
+              {t('common.logOut')}
             </button>
           </div>
         )}

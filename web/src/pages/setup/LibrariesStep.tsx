@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react";
 import type { FormEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { useSetupCreateLibraries } from "@/api/hooks";
 import { Button, Input } from "@/components/common";
 import { FolderBrowser } from "@/components/setup/FolderBrowser";
@@ -18,10 +19,10 @@ interface LibrariesStepProps {
   initialData?: LibraryEntry[];
 }
 
-const CONTENT_TYPES = [
-  { value: "movies", label: "Movies" },
-  { value: "tvshows", label: "TV Shows" },
-  { value: "livetv", label: "Live TV" },
+const CONTENT_TYPE_KEYS = [
+  { value: "movies", key: "movies" },
+  { value: "tvshows", key: "tvShows" },
+  { value: "livetv", key: "liveTv" },
 ] as const;
 
 function createEmptyEntry(): LibraryEntry {
@@ -35,6 +36,7 @@ export default function LibrariesStep({
   onBack,
   initialData,
 }: LibrariesStepProps) {
+  const { t } = useTranslation();
   const createLibraries = useSetupCreateLibraries();
 
   const [libraries, setLibraries] = useState<LibraryEntry[]>(
@@ -176,11 +178,10 @@ export default function LibrariesStep({
     <div>
       <div className="mb-6">
         <h2 className="text-xl font-semibold text-text-primary">
-          Add Media Libraries
+          {t("setup.libraries.title")}
         </h2>
         <p className="mt-1 text-sm text-text-secondary">
-          Tell HubPlay where your media files are stored. You can add more
-          libraries later.
+          {t("setup.libraries.description")}
         </p>
       </div>
 
@@ -198,7 +199,7 @@ export default function LibrariesStep({
                   type="button"
                   onClick={() => removeEntry(index)}
                   className="absolute top-3 right-3 p-1 rounded-[--radius-sm] text-text-muted hover:text-error hover:bg-error/10 transition-colors cursor-pointer"
-                  aria-label={`Remove library ${index + 1}`}
+                  aria-label={t("setup.libraries.removeLibrary", { index: index + 1 })}
                 >
                   <svg
                     className="h-4 w-4"
@@ -214,13 +215,13 @@ export default function LibrariesStep({
                 {/* Row 1: Name + Content Type */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <Input
-                    label="Library Name"
+                    label={t("setup.libraries.libraryName")}
                     type="text"
                     value={entry.name}
                     onChange={(e) =>
                       updateEntry(index, "name", e.target.value)
                     }
-                    placeholder="e.g. Movies"
+                    placeholder={t("setup.libraries.namePlaceholder")}
                     error={errors[`${index}.name`]}
                   />
 
@@ -229,7 +230,7 @@ export default function LibrariesStep({
                       htmlFor={`content-type-${index}`}
                       className="text-sm font-medium text-text-secondary"
                     >
-                      Content Type
+                      {t("setup.libraries.contentType")}
                     </label>
                     <select
                       id={`content-type-${index}`}
@@ -245,9 +246,9 @@ export default function LibrariesStep({
                         "cursor-pointer",
                       ].join(" ")}
                     >
-                      {CONTENT_TYPES.map((ct) => (
+                      {CONTENT_TYPE_KEYS.map((ct) => (
                         <option key={ct.value} value={ct.value}>
-                          {ct.label}
+                          {t(`setup.libraries.${ct.key}`)}
                         </option>
                       ))}
                     </select>
@@ -258,13 +259,13 @@ export default function LibrariesStep({
                 <div className="flex gap-2">
                   <div className="flex-1">
                     <Input
-                      label="Media Path"
+                      label={t("setup.libraries.mediaPath")}
                       type="text"
                       value={entry.path}
                       onChange={(e) =>
                         updateEntry(index, "path", e.target.value)
                       }
-                      placeholder="/media/movies"
+                      placeholder={t("setup.libraries.pathPlaceholder")}
                       error={errors[`${index}.path`]}
                     />
                   </div>
@@ -281,7 +282,7 @@ export default function LibrariesStep({
                       >
                         <path d="M3.75 3A1.75 1.75 0 002 4.75v3.26a3.235 3.235 0 011.75-.51h12.5c.644 0 1.245.188 1.75.51V6.75A1.75 1.75 0 0016.25 5h-4.836a.25.25 0 01-.177-.073L9.823 3.513A1.75 1.75 0 008.586 3H3.75zM3.75 9A1.75 1.75 0 002 10.75v4.5c0 .966.784 1.75 1.75 1.75h12.5A1.75 1.75 0 0018 15.25v-4.5A1.75 1.75 0 0016.25 9H3.75z" />
                       </svg>
-                      Browse
+                      {t("common.browse")}
                     </Button>
                   </div>
                 </div>
@@ -299,7 +300,7 @@ export default function LibrariesStep({
           <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
             <path d="M10.75 4.75a.75.75 0 00-1.5 0v4.5h-4.5a.75.75 0 000 1.5h4.5v4.5a.75.75 0 001.5 0v-4.5h4.5a.75.75 0 000-1.5h-4.5v-4.5z" />
           </svg>
-          Add another library
+          {t("setup.libraries.addAnother")}
         </button>
 
         {serverError && (

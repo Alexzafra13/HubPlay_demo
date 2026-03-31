@@ -1,10 +1,12 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useSearch } from "@/api/hooks";
 import { Input, EmptyState } from "@/components/common";
 import { MediaGrid } from "@/components/media";
 import { useDebounce } from "@/hooks/useDebounce";
 
 export default function Search() {
+  const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const debouncedQuery = useDebounce(query.trim(), 300);
 
@@ -14,11 +16,11 @@ export default function Search() {
   return (
     <div className="flex flex-col gap-6 px-6 py-8 sm:px-10">
       <h1 className="text-2xl font-bold text-text-primary sm:text-3xl">
-        Search
+        {t('search.title')}
       </h1>
 
       <Input
-        placeholder="Search for movies, series..."
+        placeholder={t('search.placeholder')}
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         autoFocus
@@ -38,8 +40,8 @@ export default function Search() {
 
       {!debouncedQuery ? (
         <EmptyState
-          title="Search for movies, series..."
-          description="Type in the search box above to find content."
+          title={t('search.emptyTitle')}
+          description={t('search.emptyDescription')}
           icon={
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
               <circle cx="11" cy="11" r="8" />
@@ -51,7 +53,7 @@ export default function Search() {
         <MediaGrid
           items={items}
           loading={isLoading}
-          emptyMessage={`No results for "${debouncedQuery}"`}
+          emptyMessage={t('search.noResults', { query: debouncedQuery })}
         />
       )}
     </div>

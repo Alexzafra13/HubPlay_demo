@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import Hls from "hls.js";
 import { useChannels, useLibraries, usePublicCountries, useImportPublicIPTV } from "@/api/hooks";
 import type { Channel, PublicCountry } from "@/api/types";
@@ -47,6 +48,7 @@ function detectCountryCode(): string {
 // ─── Main Component ──────────────────────────────────────────────────────────
 
 export default function LiveTV() {
+  const { t } = useTranslation();
   const { data: libraries, isLoading: librariesLoading } = useLibraries();
   const liveTvLibrary = useMemo(
     () => libraries?.find((l) => l.content_type === "livetv"),
@@ -172,7 +174,7 @@ export default function LiveTV() {
             </svg>
             <input
               type="text"
-              placeholder="Search channels..."
+              placeholder={t('liveTV.searchPlaceholder')}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-white/5 border border-white/10 text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30 transition-all"
@@ -192,7 +194,7 @@ export default function LiveTV() {
                     : "bg-white/5 text-text-secondary hover:bg-white/10 hover:text-text-primary",
                 ].join(" ")}
               >
-                All
+                {t('liveTV.all')}
               </button>
               {groupNames.map((name) => (
                 <button
@@ -220,7 +222,7 @@ export default function LiveTV() {
           // Search results - grid
           <>
             <p className="text-sm text-text-muted py-4">
-              {searchResults.length} channel{searchResults.length !== 1 && "s"} found
+              {t('liveTV.channelsFound', { count: searchResults.length })}
             </p>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
               {searchResults.map((ch) => (
@@ -263,7 +265,7 @@ export default function LiveTV() {
                       onClick={() => setActiveGroup(groupName)}
                       className="text-xs text-text-muted hover:text-accent transition-colors"
                     >
-                      See all
+                      {t('common.seeAll')}
                     </button>
                   </div>
                   <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide -mx-4 px-4 md:-mx-6 md:px-6">
@@ -285,7 +287,7 @@ export default function LiveTV() {
 
         {search && searchResults.length === 0 && (
           <div className="py-16 text-center text-text-muted">
-            No channels match &ldquo;{search}&rdquo;
+            {t('liveTV.noChannelsMatch', { search })}
           </div>
         )}
       </div>
@@ -352,6 +354,7 @@ function ChannelCard({
 // ─── Channel Player ──────────────────────────────────────────────────────────
 
 function ChannelPlayer({ channel }: { channel: Channel }) {
+  const { t } = useTranslation();
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -390,7 +393,7 @@ function ChannelPlayer({ channel }: { channel: Channel }) {
           } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
             hls.recoverMediaError();
           } else {
-            setError("This channel is currently unavailable.");
+            setError(t('liveTV.channelUnavailable'));
             hls.destroy();
           }
         }
@@ -401,7 +404,7 @@ function ChannelPlayer({ channel }: { channel: Channel }) {
     } else {
       video.src = streamUrl;
       video.addEventListener("loadedmetadata", () => video.play().catch(() => {}), { once: true });
-      video.addEventListener("error", () => setError("This channel format is not supported in your browser."), { once: true });
+      video.addEventListener("error", () => setError(t('liveTV.formatNotSupported')), { once: true });
     }
 
     return () => {
@@ -440,6 +443,7 @@ function ChannelPlayer({ channel }: { channel: Channel }) {
 // ─── Country Selector (with auto-detect) ─────────────────────────────────────
 
 function CountrySelector({ hasLibrary }: { hasLibrary: boolean }) {
+  const { t } = useTranslation();
   const { data: countries, isLoading } = usePublicCountries();
   const importMutation = useImportPublicIPTV();
   const [selectedCountry, setSelectedCountry] = useState<PublicCountry | null>(null);
@@ -489,13 +493,13 @@ function CountrySelector({ hasLibrary }: { hasLibrary: boolean }) {
             </svg>
           </div>
           <h2 className="text-2xl font-bold text-text-primary">
-            {hasLibrary ? "No channels loaded" : "Set up Live TV"}
+            {hasLibrary ? t('liveTV.noChannelsLoaded') : t('liveTV.setupLiveTV')}
           </h2>
           <p className="mt-2 text-sm text-text-muted max-w-sm mx-auto">
-            Import free public IPTV channels from the iptv-org community project.
+            {t('liveTV.importDescription')}
             {selectedCountry && !countrySearch && (
               <span className="block mt-1 text-accent">
-                We detected you might be in {selectedCountry.flag} {selectedCountry.name}
+                {t('liveTV.detectedCountry', { flag: selectedCountry.flag, country: selectedCountry.name })}
               </span>
             )}
           </p>
@@ -504,7 +508,7 @@ function CountrySelector({ hasLibrary }: { hasLibrary: boolean }) {
         <div className="rounded-2xl border border-white/10 bg-white/[0.03] backdrop-blur-sm p-5">
           <input
             type="text"
-            placeholder="Search countries..."
+            placeholder={t('liveTV.searchCountries')}
             value={countrySearch}
             onChange={(e) => setCountrySearch(e.target.value)}
             className="mb-4 w-full rounded-xl bg-white/5 border border-white/10 px-4 py-2.5 text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30 transition-all"
@@ -551,7 +555,7 @@ function CountrySelector({ hasLibrary }: { hasLibrary: boolean }) {
                     <Spinner size="sm" /> Importing...
                   </span>
                 ) : (
-                  "Import channels"
+                  t('liveTV.importChannels')
                 )}
               </button>
             </div>
@@ -559,7 +563,7 @@ function CountrySelector({ hasLibrary }: { hasLibrary: boolean }) {
 
           {importMutation.isError && (
             <p className="mt-3 text-sm text-red-400">
-              Failed to import channels. Please try again.
+              {t('liveTV.importFailed')}
             </p>
           )}
         </div>

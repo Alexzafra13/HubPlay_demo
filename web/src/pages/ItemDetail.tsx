@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef } from "react";
 import { useParams } from "react-router";
+import { useTranslation } from "react-i18next";
 import { useItem, useItemChildren } from "@/api/hooks";
 import { api } from "@/api/client";
 import type { MediaItem, PlaybackMethod } from "@/api/types";
@@ -8,6 +9,7 @@ import { HeroSection, MediaMeta, EpisodeCard } from "@/components/media";
 import { VideoPlayer } from "@/components/player";
 
 export default function ItemDetail() {
+  const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const { data: item, isLoading, isError } = useItem(id ?? "");
 
@@ -62,7 +64,7 @@ export default function ItemDetail() {
       setPlayerInfo({ playbackMethod: method, masterPlaylistUrl: masterUrl, directUrl });
       setShowPlayer(true);
     } catch {
-      setPlayError("Failed to start playback. Please try again.");
+      setPlayError(t('itemDetail.playbackError'));
     }
   }, [id, cleanupSession]);
 
@@ -86,8 +88,8 @@ export default function ItemDetail() {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
         <EmptyState
-          title="Item not found"
-          description="The item you're looking for doesn't exist or has been removed."
+          title={t('itemDetail.notFoundTitle')}
+          description={t('itemDetail.notFoundDescription')}
           icon={
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
               <path
@@ -135,7 +137,7 @@ export default function ItemDetail() {
         {item.overview && (
           <section>
             <h2 className="mb-3 text-lg font-semibold text-text-primary">
-              Overview
+              {t('itemDetail.overview')}
             </h2>
             <p className="max-w-3xl leading-relaxed text-text-secondary">
               {item.overview}
@@ -147,7 +149,7 @@ export default function ItemDetail() {
         {item.media_streams?.length > 0 && (
           <section>
             <h2 className="mb-3 text-lg font-semibold text-text-primary">
-              Media Info
+              {t('itemDetail.mediaInfo')}
             </h2>
             <MediaMeta streams={item.media_streams} />
           </section>
@@ -157,7 +159,7 @@ export default function ItemDetail() {
         {item.people?.length > 0 && (
           <section>
             <h2 className="mb-3 text-lg font-semibold text-text-primary">
-              Cast
+              {t('itemDetail.cast')}
             </h2>
             <div className="flex flex-wrap gap-3">
               {item.people.slice(0, 12).map((person) => (
@@ -192,6 +194,7 @@ export default function ItemDetail() {
 }
 
 function SeasonEpisodes({ seriesId }: { seriesId: string }) {
+  const { t } = useTranslation();
   const { data: children, isLoading } = useItemChildren(seriesId);
 
   if (isLoading) {
@@ -217,7 +220,7 @@ function SeasonEpisodes({ seriesId }: { seriesId: string }) {
   return (
     <section>
       <h2 className="mb-4 text-lg font-semibold text-text-primary">
-        Episodes
+        {t('itemDetail.episodes')}
       </h2>
       <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-4">
         {episodes.map((ep) => (
@@ -229,6 +232,7 @@ function SeasonEpisodes({ seriesId }: { seriesId: string }) {
 }
 
 function SeasonTabs({ seasons }: { seasons: MediaItem[] }) {
+  const { t } = useTranslation();
   const sorted = [...seasons].sort(
     (a, b) => (a.season_number ?? 0) - (b.season_number ?? 0),
   );
@@ -238,7 +242,7 @@ function SeasonTabs({ seasons }: { seasons: MediaItem[] }) {
   return (
     <section>
       <h2 className="mb-4 text-lg font-semibold text-text-primary">
-        Seasons
+        {t('itemDetail.seasons')}
       </h2>
 
       {/* Season tabs */}

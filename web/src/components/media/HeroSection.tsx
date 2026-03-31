@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { FC } from "react";
+import { useTranslation } from "react-i18next";
 import type { MediaItem } from "@/api/types";
 import { Button } from "@/components/common/Button";
 import { Badge } from "@/components/common/Badge";

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useAuthStore } from "@/store/auth";
 import { useLibraries, useScanLibrary, useProviders, useUpdateProvider } from "@/api/hooks";
 import type { Library } from "@/api/types";
@@ -10,6 +11,7 @@ function getPathAccessible(lib: Library, path: string): boolean | undefined {
 }
 
 function ProviderSettings() {
+  const { t } = useTranslation();
   const { data: providers, isLoading } = useProviders();
   const updateProvider = useUpdateProvider();
   const [apiKeys, setApiKeys] = useState<Record<string, string>>({});
@@ -63,7 +65,7 @@ function ProviderSettings() {
                       : "default"
                   }
                 >
-                  {p.has_api_key ? "Configured" : "Not configured"}
+                  {p.has_api_key ? t('settings.configured') : t('settings.notConfigured')}
                 </Badge>
               </div>
             </div>
@@ -76,7 +78,7 @@ function ProviderSettings() {
                   htmlFor={`api-key-${p.name}`}
                   className="block text-xs font-medium text-text-secondary mb-1"
                 >
-                  API Key
+                  {t('settings.apiKey')}
                 </label>
                 <input
                   id={`api-key-${p.name}`}
@@ -128,7 +130,7 @@ function ProviderSettings() {
                   );
                 }}
               >
-                {isSaved ? "Saved!" : "Save"}
+                {isSaved ? "OK" : t('common.save')}
               </Button>
             </div>
 
@@ -157,9 +159,7 @@ function ProviderSettings() {
 
       <div className="rounded-md bg-accent/10 border border-accent/20 px-3 py-2">
         <p className="text-xs text-text-secondary">
-          After saving a TMDB API key, run a library scan to fetch metadata,
-          posters, and backdrops for your media. New items will be automatically
-          enriched during future scans.
+          {t('settings.metadataHint')}
         </p>
       </div>
     </div>
@@ -167,6 +167,7 @@ function ProviderSettings() {
 }
 
 export default function Settings() {
+  const { t } = useTranslation();
   const { user } = useAuthStore();
   const isAdmin = user?.role === "admin";
   const { data: libraries, isLoading: libsLoading } = useLibraries();
@@ -175,27 +176,27 @@ export default function Settings() {
   return (
     <div className="flex flex-col gap-8 px-6 py-8 sm:px-10 max-w-4xl">
       <h1 className="text-2xl font-bold text-text-primary sm:text-3xl">
-        Settings
+        {t('settings.title')}
       </h1>
 
       {/* Account Info */}
       <section className="flex flex-col gap-4">
-        <h2 className="text-lg font-semibold text-text-primary">Account</h2>
+        <h2 className="text-lg font-semibold text-text-primary">{t('settings.account')}</h2>
         <div className="rounded-[--radius-lg] border border-border bg-bg-card divide-y divide-border">
           <div className="flex items-center justify-between px-4 py-3">
-            <span className="text-sm text-text-muted">Username</span>
+            <span className="text-sm text-text-muted">{t('settings.username')}</span>
             <span className="text-sm font-medium text-text-primary">
               {user?.username}
             </span>
           </div>
           <div className="flex items-center justify-between px-4 py-3">
-            <span className="text-sm text-text-muted">Display Name</span>
+            <span className="text-sm text-text-muted">{t('settings.displayName')}</span>
             <span className="text-sm font-medium text-text-primary">
               {user?.display_name || "\u2014"}
             </span>
           </div>
           <div className="flex items-center justify-between px-4 py-3">
-            <span className="text-sm text-text-muted">Role</span>
+            <span className="text-sm text-text-muted">{t('settings.role')}</span>
             <Badge variant={user?.role === "admin" ? "warning" : "default"}>
               {user?.role}
             </Badge>
@@ -207,7 +208,7 @@ export default function Settings() {
       {isAdmin && (
         <section className="flex flex-col gap-4">
           <h2 className="text-lg font-semibold text-text-primary">
-            Metadata Providers
+            {t('settings.metadataProviders')}
           </h2>
           <ProviderSettings />
         </section>
@@ -216,7 +217,7 @@ export default function Settings() {
       {/* Libraries Overview */}
       <section className="flex flex-col gap-4">
         <h2 className="text-lg font-semibold text-text-primary">
-          Media Libraries
+          {t('settings.mediaLibraries')}
         </h2>
 
         {libsLoading ? (
@@ -255,7 +256,7 @@ export default function Settings() {
                         }
                         onClick={() => scanLibrary.mutate({ id: lib.id })}
                       >
-                        Scan Now
+                        {t('settings.scanNow')}
                       </Button>
                     )}
                   </div>
@@ -321,7 +322,7 @@ export default function Settings() {
                           </code>
                           {accessible === false && (
                             <span className="text-xs text-red-400">
-                              Path not found
+                              {t('settings.pathNotFound')}
                             </span>
                           )}
                         </div>
@@ -341,10 +342,10 @@ export default function Settings() {
 
                   <div className="flex items-center gap-3 mt-3 pt-2 border-t border-border">
                     <span className="text-xs text-text-muted">
-                      {lib.item_count ?? 0} items
+                      {t('settings.items', { count: lib.item_count ?? 0 })}
                     </span>
                     <span className="text-xs text-text-muted">
-                      Scan mode: {lib.scan_mode ?? "manual"}
+                      {t('settings.scanMode', { mode: lib.scan_mode ?? "manual" })}
                     </span>
                   </div>
                 </div>
@@ -354,8 +355,8 @@ export default function Settings() {
         ) : (
           <div className="rounded-[--radius-lg] border border-border bg-bg-card p-6 text-center">
             <p className="text-sm text-text-muted">
-              No libraries configured.
-              {isAdmin && " Go to Administration to add one."}
+              {t('settings.noLibraries')}
+              {isAdmin && ` ${t('settings.goToAdmin')}`}
             </p>
           </div>
         )}

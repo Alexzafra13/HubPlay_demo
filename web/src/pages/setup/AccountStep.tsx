@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { useSetupCreateAdmin } from "@/api/hooks";
 import { useAuthStore } from "@/store/auth";
 import { Button, Input } from "@/components/common";
@@ -22,6 +23,7 @@ interface AccountStepProps {
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function AccountStep({ onNext, initialData }: AccountStepProps) {
+  const { t } = useTranslation();
   const createAdmin = useSetupCreateAdmin();
   const setAuth = useAuthStore((s) => s.setAuth);
 
@@ -41,15 +43,15 @@ export default function AccountStep({ onNext, initialData }: AccountStepProps) {
     const newErrors: Record<string, string> = {};
 
     if (username.trim().length < 3) {
-      newErrors.username = "Username must be at least 3 characters";
+      newErrors.username = t("setup.account.usernameMinLength");
     }
 
     if (password.length < 8) {
-      newErrors.password = "Password must be at least 8 characters";
+      newErrors.password = t("setup.account.passwordMinLength");
     }
 
     if (password !== confirmPassword) {
-      newErrors.confirmPassword = "Passwords do not match";
+      newErrors.confirmPassword = t("setup.account.passwordMismatch");
     }
 
     setErrors(newErrors);
@@ -90,7 +92,7 @@ export default function AccountStep({ onNext, initialData }: AccountStepProps) {
               });
               return;
             } catch {
-              setServerError("Admin account already exists. Please enter the correct password to continue.");
+              setServerError(t("setup.account.adminExists"));
               return;
             }
           }
@@ -106,10 +108,10 @@ export default function AccountStep({ onNext, initialData }: AccountStepProps) {
     <div>
       <div className="mb-6">
         <h2 className="text-xl font-semibold text-text-primary">
-          Create Admin Account
+          {t("setup.account.title")}
         </h2>
         <p className="mt-1 text-sm text-text-secondary">
-          Set up the main administrator account for your server.
+          {t("setup.account.description")}
         </p>
       </div>
 
@@ -127,48 +129,48 @@ export default function AccountStep({ onNext, initialData }: AccountStepProps) {
           />
         </svg>
         <p className="text-sm text-warning">
-          This is the main administrator account. You can create additional users later.
+          {t("setup.account.adminNote")}
         </p>
       </div>
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
         <Input
-          label="Username"
+          label={t("setup.account.username")}
           type="text"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
-          placeholder="admin"
+          placeholder={t("setup.account.usernamePlaceholder")}
           autoComplete="username"
           error={errors.username}
           required
         />
 
         <Input
-          label="Display Name"
+          label={t("setup.account.displayName")}
           type="text"
           value={displayName}
           onChange={(e) => setDisplayName(e.target.value)}
-          placeholder="Optional"
-          hint="A friendly name shown in the UI"
+          placeholder={t("setup.account.displayNamePlaceholder")}
+          hint={t("setup.account.displayNameHint")}
         />
 
         <Input
-          label="Password"
+          label={t("setup.account.password")}
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          placeholder="Minimum 8 characters"
+          placeholder={t("setup.account.passwordPlaceholder")}
           autoComplete="new-password"
           error={errors.password}
           required
         />
 
         <Input
-          label="Confirm Password"
+          label={t("setup.account.confirmPassword")}
           type="password"
           value={confirmPassword}
           onChange={(e) => setConfirmPassword(e.target.value)}
-          placeholder="Re-enter password"
+          placeholder={t("setup.account.confirmPlaceholder")}
           autoComplete="new-password"
           error={errors.confirmPassword}
           required
@@ -186,7 +188,7 @@ export default function AccountStep({ onNext, initialData }: AccountStepProps) {
             size="lg"
             isLoading={createAdmin.isPending}
           >
-            Create Account & Continue
+            {t("setup.account.submit")}
           </Button>
         </div>
       </form>

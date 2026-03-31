@@ -10,11 +10,12 @@ import {
 } from "@/api/hooks";
 import { Button, Badge, Modal, Input, Spinner, EmptyState } from "@/components/common";
 import { FolderBrowser } from "@/components/setup/FolderBrowser";
+import { useTranslation } from 'react-i18next';
 
-const CONTENT_TYPES: { value: ContentType; label: string }[] = [
-  { value: "movies", label: "Movies" },
-  { value: "tvshows", label: "TV Shows" },
-  { value: "livetv", label: "Live TV" },
+const CONTENT_TYPES: { value: ContentType; key: string }[] = [
+  { value: "movies", key: "contentTypes.movies" },
+  { value: "tvshows", key: "contentTypes.tvShows" },
+  { value: "livetv", key: "contentTypes.liveTV" },
 ];
 
 function scanStatusVariant(status: string) {
@@ -42,6 +43,7 @@ function contentTypeBadge(type: string) {
 }
 
 export default function LibrariesAdmin() {
+  const { t } = useTranslation();
   const { data: libraries, isLoading, error } = useLibraries();
   const createLibrary = useCreateLibrary();
   const updateLibrary = useUpdateLibrary();
@@ -119,7 +121,7 @@ export default function LibrariesAdmin() {
   if (error) {
     return (
       <EmptyState
-        title="Failed to load libraries"
+        title={t('admin.libraries.failedToLoad')}
         description={error.message}
       />
     );
@@ -130,9 +132,9 @@ export default function LibrariesAdmin() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold text-text-primary">
-          Media Libraries
+          {t('admin.libraries.title')}
         </h2>
-        <Button onClick={() => setShowAddModal(true)}>Add Library</Button>
+        <Button onClick={() => setShowAddModal(true)}>{t('admin.libraries.addLibrary')}</Button>
       </div>
 
       {/* Table */}
@@ -141,12 +143,12 @@ export default function LibrariesAdmin() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-bg-elevated text-left text-text-muted">
-                <th className="px-4 py-3 font-medium">Name</th>
-                <th className="px-4 py-3 font-medium">Type</th>
-                <th className="px-4 py-3 font-medium">Path</th>
-                <th className="px-4 py-3 font-medium text-right">Items</th>
-                <th className="px-4 py-3 font-medium">Scan Status</th>
-                <th className="px-4 py-3 font-medium text-right">Actions</th>
+                <th className="px-4 py-3 font-medium">{t('admin.libraries.name')}</th>
+                <th className="px-4 py-3 font-medium">{t('admin.libraries.type')}</th>
+                <th className="px-4 py-3 font-medium">{t('admin.libraries.path')}</th>
+                <th className="px-4 py-3 font-medium text-right">{t('admin.libraries.itemCount')}</th>
+                <th className="px-4 py-3 font-medium">{t('admin.libraries.scanStatus')}</th>
+                <th className="px-4 py-3 font-medium text-right">{t('admin.libraries.actions')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -187,7 +189,7 @@ export default function LibrariesAdmin() {
                         disabled={lib.scan_status === "scanning"}
                         onClick={() => scanLibrary.mutate({ id: lib.id })}
                       >
-                        Scan
+                        {t('admin.libraries.scan')}
                       </Button>
                       <Button
                         variant="secondary"
@@ -199,23 +201,23 @@ export default function LibrariesAdmin() {
                         }
                         disabled={lib.scan_status === "scanning"}
                         onClick={() => scanLibrary.mutate({ id: lib.id, refreshMetadata: true })}
-                        title="Re-fetch metadata and images from providers"
+                        title={t('admin.libraries.refreshMetadataTooltip')}
                       >
-                        Refresh Metadata
+                        {t('admin.libraries.refreshMetadata')}
                       </Button>
                       <Button
                         variant="ghost"
                         size="sm"
                         onClick={() => openEditModal(lib)}
                       >
-                        Edit
+                        {t('common.edit')}
                       </Button>
                       <Button
                         variant="danger"
                         size="sm"
                         onClick={() => setDeleteTarget(lib)}
                       >
-                        Delete
+                        {t('common.delete')}
                       </Button>
                     </div>
                   </td>
@@ -226,11 +228,11 @@ export default function LibrariesAdmin() {
         </div>
       ) : (
         <EmptyState
-          title="No libraries"
-          description="Add a media library to get started."
+          title={t('admin.libraries.noLibraries')}
+          description={t('admin.libraries.noLibrariesHint')}
           action={
             <Button onClick={() => setShowAddModal(true)}>
-              Add Library
+              {t('admin.libraries.addLibrary')}
             </Button>
           }
         />
@@ -240,12 +242,12 @@ export default function LibrariesAdmin() {
       <Modal
         isOpen={showAddModal}
         onClose={() => setShowAddModal(false)}
-        title="Add Library"
+        title={t('admin.libraries.addLibrary')}
       >
         <form onSubmit={handleCreate} className="flex flex-col gap-4">
           <Input
-            label="Name"
-            placeholder="e.g. Movies"
+            label={t('admin.libraries.name')}
+            placeholder={t('admin.libraries.namePlaceholder')}
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
             required
@@ -256,7 +258,7 @@ export default function LibrariesAdmin() {
               htmlFor="content-type"
               className="text-sm font-medium text-text-secondary"
             >
-              Content Type
+              {t('admin.libraries.contentType')}
             </label>
             <select
               id="content-type"
@@ -266,7 +268,7 @@ export default function LibrariesAdmin() {
             >
               {CONTENT_TYPES.map((ct) => (
                 <option key={ct.value} value={ct.value}>
-                  {ct.label}
+                  {t(ct.key)}
                 </option>
               ))}
             </select>
@@ -275,8 +277,8 @@ export default function LibrariesAdmin() {
           <div className="flex gap-2 items-end">
             <div className="flex-1">
               <Input
-                label="Path"
-                placeholder="/media/movies"
+                label={t('admin.libraries.path')}
+                placeholder={t('admin.libraries.pathPlaceholder')}
                 value={newPath}
                 onChange={(e) => setNewPath(e.target.value)}
                 required
@@ -287,7 +289,7 @@ export default function LibrariesAdmin() {
               variant="secondary"
               onClick={() => setShowCreateBrowse(true)}
             >
-              Browse
+              {t('common.browse')}
             </Button>
           </div>
 
@@ -301,10 +303,10 @@ export default function LibrariesAdmin() {
               type="button"
               onClick={() => setShowAddModal(false)}
             >
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button type="submit" isLoading={createLibrary.isPending}>
-              Create
+              {t('common.create')}
             </Button>
           </div>
         </form>
@@ -314,12 +316,12 @@ export default function LibrariesAdmin() {
       <Modal
         isOpen={editTarget !== null}
         onClose={() => setEditTarget(null)}
-        title="Edit Library"
+        title={t('admin.libraries.editLibrary')}
       >
         <form onSubmit={handleEdit} className="flex flex-col gap-4">
           <Input
-            label="Name"
-            placeholder="e.g. Movies"
+            label={t('admin.libraries.name')}
+            placeholder={t('admin.libraries.namePlaceholder')}
             value={editName}
             onChange={(e) => setEditName(e.target.value)}
             required
@@ -328,8 +330,8 @@ export default function LibrariesAdmin() {
           <div className="flex gap-2 items-end">
             <div className="flex-1">
               <Input
-                label="Path"
-                placeholder="/media/movies"
+                label={t('admin.libraries.path')}
+                placeholder={t('admin.libraries.pathPlaceholder')}
                 value={editPath}
                 onChange={(e) => setEditPath(e.target.value)}
                 required
@@ -340,7 +342,7 @@ export default function LibrariesAdmin() {
               variant="secondary"
               onClick={() => setShowEditBrowse(true)}
             >
-              Browse
+              {t('common.browse')}
             </Button>
           </div>
 
@@ -354,10 +356,10 @@ export default function LibrariesAdmin() {
               type="button"
               onClick={() => setEditTarget(null)}
             >
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button type="submit" isLoading={updateLibrary.isPending}>
-              Save
+              {t('common.save')}
             </Button>
           </div>
         </form>
@@ -367,17 +369,12 @@ export default function LibrariesAdmin() {
       <Modal
         isOpen={deleteTarget !== null}
         onClose={() => setDeleteTarget(null)}
-        title="Delete Library"
+        title={t('admin.libraries.deleteLibrary')}
         size="sm"
       >
         <div className="flex flex-col gap-4">
           <p className="text-sm text-text-secondary">
-            Are you sure you want to delete{" "}
-            <span className="font-semibold text-text-primary">
-              {deleteTarget?.name}
-            </span>
-            ? This will remove the library and all associated metadata. Media
-            files on disk will not be affected.
+            {t('admin.libraries.deleteConfirm', { name: deleteTarget?.name })}
           </p>
 
           {deleteLibrary.error && (
@@ -391,14 +388,14 @@ export default function LibrariesAdmin() {
               variant="secondary"
               onClick={() => setDeleteTarget(null)}
             >
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button
               variant="danger"
               isLoading={deleteLibrary.isPending}
               onClick={handleDelete}
             >
-              Delete
+              {t('common.delete')}
             </Button>
           </div>
         </div>
