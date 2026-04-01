@@ -78,7 +78,8 @@
     "mediaInfo": "Info del medio",
     "cast": "Reparto",
     "episodes": "Episodios",
-    "seasons": "Temporadas"
+    "seasons": "Temporadas",
+    "refreshMetadata": "Actualizar metadatos"
   },
   "liveTV": {
     "searchPlaceholder": "Buscar canales...",

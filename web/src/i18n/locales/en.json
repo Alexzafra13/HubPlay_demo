@@ -78,7 +78,8 @@
     "mediaInfo": "Media Info",
     "cast": "Cast",
     "episodes": "Episodes",
-    "seasons": "Seasons"
+    "seasons": "Seasons",
+    "refreshMetadata": "Refresh metadata"
   },
   "liveTV": {
     "searchPlaceholder": "Search channels...",
