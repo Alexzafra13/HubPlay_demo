@@ -29,12 +29,13 @@ type Config struct {
 }
 
 type StreamingConfig struct {
-	SegmentDuration      int       `yaml:"segment_duration"`       // seconds, default 6
-	MaxTranscodeSessions int       `yaml:"max_transcode_sessions"` // default 2
-	TranscodePreset      string    `yaml:"transcode_preset"`       // veryfast, fast, medium
-	DefaultAudioBitrate  string    `yaml:"default_audio_bitrate"`  // e.g. "192k"
-	CacheDir             string    `yaml:"cache_dir"`              // directory for transcode output
-	IdleTimeout          time.Duration `yaml:"idle_timeout"`       // cleanup idle sessions, default 5m
+	SegmentDuration      int           `yaml:"segment_duration"`       // seconds, default 6
+	MaxTranscodeSessions int           `yaml:"max_transcode_sessions"` // default 2
+	TranscodePreset      string        `yaml:"transcode_preset"`       // veryfast, fast, medium
+	DefaultAudioBitrate  string        `yaml:"default_audio_bitrate"`  // e.g. "192k"
+	CacheDir             string        `yaml:"cache_dir"`              // directory for transcode output
+	IdleTimeout          time.Duration `yaml:"idle_timeout"`           // cleanup idle sessions, default 5m
+	TranscodeTimeout     time.Duration `yaml:"transcode_timeout"`      // max duration per transcode, default 4h
 	HWAccel              HWAccelConfig `yaml:"hardware_acceleration"`
 }
 
@@ -200,6 +201,7 @@ func defaults() *Config {
 			DefaultAudioBitrate:  "192k",
 			CacheDir:             "",
 			IdleTimeout:          5 * time.Minute,
+			TranscodeTimeout:     4 * time.Hour,
 			HWAccel: HWAccelConfig{
 				Enabled:   false,
 				Preferred: "auto",

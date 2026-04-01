@@ -567,11 +567,8 @@ function ChannelPlayer({ channel }: { channel: Channel }) {
     video.removeAttribute("src");
     video.load();
 
-    const streamUrl = channel.stream_url;
-    const token = localStorage.getItem("hubplay_access_token");
-    const authedUrl = token
-      ? `${streamUrl}${streamUrl.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`
-      : streamUrl;
+    // Auth is handled via HTTP-only cookies for same-origin requests.
+    const authedUrl = channel.stream_url;
 
     let playing = false;
     const timeout = setTimeout(() => {
@@ -607,10 +604,8 @@ function ChannelPlayer({ channel }: { channel: Channel }) {
         fragLoadingRetryDelay: 1000,
         fragLoadingMaxRetryTimeout: 8000,
         xhrSetup: (xhr) => {
-          const accessToken = localStorage.getItem("hubplay_access_token");
-          if (accessToken) {
-            xhr.setRequestHeader("Authorization", `Bearer ${accessToken}`);
-          }
+          // Auth is handled via HTTP-only cookies.
+          xhr.withCredentials = true;
         },
       });
       hlsRef.current = hls;

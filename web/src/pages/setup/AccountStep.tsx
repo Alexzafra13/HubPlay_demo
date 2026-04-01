@@ -72,7 +72,7 @@ export default function AccountStep({ onNext, initialData }: AccountStepProps) {
       },
       {
         onSuccess(data) {
-          setAuth(data.user, data.access_token, data.refresh_token);
+          setAuth(data.user);
           onNext({
             username: username.trim(),
             password,
@@ -84,7 +84,7 @@ export default function AccountStep({ onNext, initialData }: AccountStepProps) {
           if (err instanceof ApiError && err.code === "SETUP_COMPLETED") {
             try {
               const loginData = await api.login(username.trim(), password);
-              setAuth(loginData.user, loginData.access_token, loginData.refresh_token);
+              setAuth(loginData.user);
               onNext({
                 username: username.trim(),
                 password,

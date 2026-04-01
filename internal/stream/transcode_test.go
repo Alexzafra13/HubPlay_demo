@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"hubplay/internal/stream"
 )
@@ -14,7 +15,7 @@ func newTestTranscoder(t *testing.T) *stream.Transcoder {
 	t.Helper()
 	dir := t.TempDir()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	return stream.NewTranscoder(dir, "ffmpeg", logger)
+	return stream.NewTranscoder(dir, "ffmpeg", 4*time.Hour, logger)
 }
 
 func TestNewTranscoder_DefaultFFmpeg(t *testing.T) {
@@ -60,7 +61,7 @@ func TestTranscoder_StopAll_Empty(t *testing.T) {
 func TestTranscoder_Start_InvalidFFmpeg(t *testing.T) {
 	dir := t.TempDir()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	tc := stream.NewTranscoder(dir, "/nonexistent/ffmpeg", logger)
+	tc := stream.NewTranscoder(dir, "/nonexistent/ffmpeg", 4*time.Hour, logger)
 
 	_, err := tc.Start("sess-1", "item-1", "/some/video.mkv", stream.DefaultProfile(), 0)
 	if err == nil {

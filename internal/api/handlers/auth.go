@@ -6,9 +6,15 @@ import (
 	"net/http"
 
 	"hubplay/internal/auth"
+	"hubplay/internal/config"
 	"hubplay/internal/db"
 	"hubplay/internal/domain"
 	"hubplay/internal/user"
+)
+
+const (
+	accessCookieName  = "hubplay_access"
+	refreshCookieName = "hubplay_refresh"
 )
 
 func authTokenResponse(token *auth.AuthToken, u *db.User) map[string]any {
@@ -27,17 +33,63 @@ func authTokenResponse(token *auth.AuthToken, u *db.User) map[string]any {
 }
 
 type AuthHandler struct {
-	auth   *auth.Service
-	users  *user.Service
-	logger *slog.Logger
+	auth    *auth.Service
+	users   *user.Service
+	authCfg config.AuthConfig
+	logger  *slog.Logger
 }
 
-func NewAuthHandler(authSvc *auth.Service, userSvc *user.Service, logger *slog.Logger) *AuthHandler {
+func NewAuthHandler(authSvc *auth.Service, userSvc *user.Service, authCfg config.AuthConfig, logger *slog.Logger) *AuthHandler {
 	return &AuthHandler{
-		auth:   authSvc,
-		users:  userSvc,
-		logger: logger,
+		auth:    authSvc,
+		users:   userSvc,
+		authCfg: authCfg,
+		logger:  logger,
 	}
+}
+
+// setAuthCookies sets HTTP-only cookies for access and refresh tokens.
+func setAuthCookies(w http.ResponseWriter, token *auth.AuthToken, accessTTL, refreshTTL int) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     accessCookieName,
+		Value:    token.AccessToken,
+		Path:     "/api/v1",
+		MaxAge:   accessTTL,
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteLaxMode,
+	})
+	http.SetCookie(w, &http.Cookie{
+		Name:     refreshCookieName,
+		Value:    token.RefreshToken,
+		Path:     "/api/v1/auth",
+		MaxAge:   refreshTTL,
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
+	})
+}
+
+// clearAuthCookies removes auth cookies by setting them expired.
+func clearAuthCookies(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     accessCookieName,
+		Value:    "",
+		Path:     "/api/v1",
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteLaxMode,
+	})
+	http.SetCookie(w, &http.Cookie{
+		Name:     refreshCookieName,
+		Value:    "",
+		Path:     "/api/v1/auth",
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
+	})
 }
 
 type loginRequest struct {
@@ -78,6 +130,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	setAuthCookies(w, token, int(h.authCfg.AccessTokenTTL.Seconds()), int(h.authCfg.RefreshTokenTTL.Seconds()))
 	respondJSON(w, http.StatusOK, map[string]any{"data": authTokenResponse(token, u)})
 }
 
@@ -90,6 +143,13 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondError(w, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
 		return
+	}
+
+	// Fall back to HTTP-only cookie if body is empty.
+	if req.RefreshToken == "" {
+		if c, err := r.Cookie(refreshCookieName); err == nil {
+			req.RefreshToken = c.Value
+		}
 	}
 
 	if req.RefreshToken == "" {
@@ -109,6 +169,7 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	setAuthCookies(w, token, int(h.authCfg.AccessTokenTTL.Seconds()), int(h.authCfg.RefreshTokenTTL.Seconds()))
 	respondJSON(w, http.StatusOK, map[string]any{"data": authTokenResponse(token, u)})
 }
 
@@ -119,8 +180,15 @@ type logoutRequest struct {
 func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	var req logoutRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
-		return
+		// Body may be empty when relying solely on cookies.
+		req = logoutRequest{}
+	}
+
+	// Fall back to HTTP-only cookie.
+	if req.RefreshToken == "" {
+		if c, err := r.Cookie(refreshCookieName); err == nil {
+			req.RefreshToken = c.Value
+		}
 	}
 
 	if req.RefreshToken == "" {
@@ -133,6 +201,7 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	clearAuthCookies(w)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -241,6 +310,7 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	setAuthCookies(w, token, int(h.authCfg.AccessTokenTTL.Seconds()), int(h.authCfg.RefreshTokenTTL.Seconds()))
 	respondJSON(w, http.StatusCreated, map[string]any{"data": authTokenResponse(token, u)})
 }
 

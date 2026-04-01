@@ -1,20 +1,13 @@
 import { create } from 'zustand'
 import type { User } from '@/api/types'
 
-const STORAGE_KEYS = {
-  accessToken: 'hubplay_access_token',
-  refreshToken: 'hubplay_refresh_token',
-  user: 'hubplay_user',
-} as const
+const USER_KEY = 'hubplay_user'
 
 interface AuthState {
   user: User | null
-  accessToken: string | null
-  refreshToken: string | null
   isAuthenticated: boolean
 
-  setAuth: (user: User, accessToken: string, refreshToken: string) => void
-  updateTokens: (accessToken: string, refreshToken: string) => void
+  setAuth: (user: User) => void
   logout: () => void
   loadFromStorage: () => void
   updateUser: (user: User) => void
@@ -22,52 +15,34 @@ interface AuthState {
 
 export const useAuthStore = create<AuthState>()((set) => ({
   user: null,
-  accessToken: null,
-  refreshToken: null,
   isAuthenticated: false,
 
-  setAuth(user: User, accessToken: string, refreshToken: string) {
-    localStorage.setItem(STORAGE_KEYS.accessToken, accessToken)
-    localStorage.setItem(STORAGE_KEYS.refreshToken, refreshToken)
-    localStorage.setItem(STORAGE_KEYS.user, JSON.stringify(user))
-
-    set({ user, accessToken, refreshToken, isAuthenticated: true })
-  },
-
-  updateTokens(accessToken: string, refreshToken: string) {
-    localStorage.setItem(STORAGE_KEYS.accessToken, accessToken)
-    localStorage.setItem(STORAGE_KEYS.refreshToken, refreshToken)
-    set({ accessToken, refreshToken })
+  setAuth(user: User) {
+    localStorage.setItem(USER_KEY, JSON.stringify(user))
+    set({ user, isAuthenticated: true })
   },
 
   logout() {
-    localStorage.removeItem(STORAGE_KEYS.accessToken)
-    localStorage.removeItem(STORAGE_KEYS.refreshToken)
-    localStorage.removeItem(STORAGE_KEYS.user)
-
-    set({ user: null, accessToken: null, refreshToken: null, isAuthenticated: false })
+    localStorage.removeItem(USER_KEY)
+    set({ user: null, isAuthenticated: false })
   },
 
   loadFromStorage() {
-    const accessToken = localStorage.getItem(STORAGE_KEYS.accessToken)
-    const refreshToken = localStorage.getItem(STORAGE_KEYS.refreshToken)
-    const userJson = localStorage.getItem(STORAGE_KEYS.user)
+    const userJson = localStorage.getItem(USER_KEY)
 
-    if (accessToken && refreshToken && userJson) {
+    if (userJson) {
       try {
         const user = JSON.parse(userJson) as User
-        set({ user, accessToken, refreshToken, isAuthenticated: true })
+        set({ user, isAuthenticated: true })
       } catch {
         // Corrupted storage — clear everything
-        localStorage.removeItem(STORAGE_KEYS.accessToken)
-        localStorage.removeItem(STORAGE_KEYS.refreshToken)
-        localStorage.removeItem(STORAGE_KEYS.user)
+        localStorage.removeItem(USER_KEY)
       }
     }
   },
 
   updateUser(user: User) {
-    localStorage.setItem(STORAGE_KEYS.user, JSON.stringify(user))
+    localStorage.setItem(USER_KEY, JSON.stringify(user))
     set({ user })
   },
 }))

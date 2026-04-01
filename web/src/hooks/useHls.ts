@@ -83,11 +83,8 @@ export function useHls({
           lowLatencyMode: false,
           startPosition: startPosition ?? -1,
           xhrSetup: (xhr) => {
-            xhr.withCredentials = false;
-            const accessToken = localStorage.getItem("hubplay_access_token");
-            if (accessToken) {
-              xhr.setRequestHeader("Authorization", `Bearer ${accessToken}`);
-            }
+            // Auth is handled via HTTP-only cookies.
+            xhr.withCredentials = true;
           },
         });
 
@@ -155,11 +152,8 @@ export function useHls({
         setError("HLS playback is not supported in this browser.");
       }
     } else if (playbackMethod === "direct_play" && directUrl) {
-      const accessToken = localStorage.getItem("hubplay_access_token");
-      const authUrl = accessToken
-        ? `${directUrl}${directUrl.includes("?") ? "&" : "?"}token=${accessToken}`
-        : directUrl;
-      video.src = authUrl;
+      // Auth is handled via HTTP-only cookies for same-origin requests.
+      video.src = directUrl;
       video.addEventListener(
         "loadedmetadata",
         () => {

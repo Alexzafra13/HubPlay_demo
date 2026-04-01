@@ -24,8 +24,7 @@ describe("ApiClient", () => {
     vi.restoreAllMocks();
   });
 
-  it("sends GET with auth header when token exists", async () => {
-    localStorage.setItem("hubplay_access_token", "my-token");
+  it("sends GET with credentials include", async () => {
     const fetch = mockFetch({ status: "ok" });
     vi.stubGlobal("fetch", fetch);
 
@@ -35,14 +34,12 @@ describe("ApiClient", () => {
       "http://test/api/v1/health",
       expect.objectContaining({
         method: "GET",
-        headers: expect.objectContaining({
-          Authorization: "Bearer my-token",
-        }),
+        credentials: "include",
       }),
     );
   });
 
-  it("sends GET without auth header when no token", async () => {
+  it("does not set Authorization header (cookies handle auth)", async () => {
     const fetch = mockFetch({ needs_setup: true });
     vi.stubGlobal("fetch", fetch);
 
@@ -52,7 +49,7 @@ describe("ApiClient", () => {
     expect(callHeaders.Authorization).toBeUndefined();
   });
 
-  it("login stores tokens in localStorage", async () => {
+  it("login returns auth data without storing tokens in localStorage", async () => {
     const authResp = {
       access_token: "at",
       refresh_token: "rt",
@@ -64,8 +61,9 @@ describe("ApiClient", () => {
     const result = await client.login("admin", "pass");
 
     expect(result.access_token).toBe("at");
-    expect(localStorage.getItem("hubplay_access_token")).toBe("at");
-    expect(localStorage.getItem("hubplay_refresh_token")).toBe("rt");
+    // Tokens should NOT be stored in localStorage
+    expect(localStorage.getItem("hubplay_access_token")).toBeNull();
+    expect(localStorage.getItem("hubplay_refresh_token")).toBeNull();
   });
 
   it("throws ApiError on non-ok response", async () => {
@@ -102,9 +100,6 @@ describe("ApiClient", () => {
   });
 
   it("calls onTokenRefresh listener after successful refresh", async () => {
-    localStorage.setItem("hubplay_access_token", "old-at");
-    localStorage.setItem("hubplay_refresh_token", "old-rt");
-
     const authResp = {
       access_token: "new-at",
       refresh_token: "new-rt",
@@ -116,15 +111,12 @@ describe("ApiClient", () => {
     const onTokenRefresh = vi.fn();
     client.setAuthListener({ onTokenRefresh });
 
-    await client.refresh("old-rt");
+    await client.refresh();
 
     expect(onTokenRefresh).toHaveBeenCalledWith("new-at", "new-rt");
   });
 
   it("calls onAuthFailure on 401 when refresh fails", async () => {
-    localStorage.setItem("hubplay_access_token", "at");
-    localStorage.setItem("hubplay_refresh_token", "rt");
-
     // First call: 401, second call (refresh): also fails
     const fetchMock = vi
       .fn()
@@ -143,17 +135,21 @@ describe("ApiClient", () => {
 
     await expect(client.getMe()).rejects.toThrow(ApiError);
     expect(onAuthFailure).toHaveBeenCalledOnce();
-    expect(localStorage.getItem("hubplay_access_token")).toBeNull();
   });
 
-  it("calls onAuthFailure on 401 with no refresh token", async () => {
-    localStorage.setItem("hubplay_access_token", "at");
-    // No refresh token set
+  it("calls onAuthFailure on 401 when no cookie-based refresh succeeds", async () => {
+    // 401 on initial request, refresh also fails with 401
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        statusText: "Unauthorized",
+        json: () => Promise.resolve({ error: { code: "expired", message: "Token expired" } }),
+      })
+      .mockRejectedValueOnce(new Error("refresh failed"));
 
-    vi.stubGlobal(
-      "fetch",
-      mockFetch({ error: { code: "expired", message: "Token expired" } }, 401, false),
-    );
+    vi.stubGlobal("fetch", fetchMock);
 
     const onAuthFailure = vi.fn();
     client.setAuthListener({ onAuthFailure });
@@ -175,9 +171,8 @@ describe("ApiClient", () => {
     expect(onAuthFailure).not.toHaveBeenCalled();
   });
 
-  it("logout clears tokens even if API fails", async () => {
-    localStorage.setItem("hubplay_access_token", "at");
-    localStorage.setItem("hubplay_refresh_token", "rt");
+  it("logout clears user from localStorage even if API fails", async () => {
+    localStorage.setItem("hubplay_user", '{"id":"1"}');
 
     vi.stubGlobal(
       "fetch",
@@ -185,7 +180,6 @@ describe("ApiClient", () => {
     );
 
     await expect(client.logout()).rejects.toThrow();
-    expect(localStorage.getItem("hubplay_access_token")).toBeNull();
-    expect(localStorage.getItem("hubplay_refresh_token")).toBeNull();
+    expect(localStorage.getItem("hubplay_user")).toBeNull();
   });
 });

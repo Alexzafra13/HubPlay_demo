@@ -48,7 +48,7 @@ func NewManager(
 
 	m := &Manager{
 		sessions:   make(map[string]*ManagedSession),
-		transcoder: NewTranscoder(cacheDir, "", logger),
+		transcoder: NewTranscoder(cacheDir, "", cfg.TranscodeTimeout, logger),
 		items:      items,
 		streams:    streams,
 		cfg:        cfg,
