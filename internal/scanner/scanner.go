@@ -188,6 +188,16 @@ func (s *Scanner) iterateLibraryItems(ctx context.Context, libraryID string, fn 
 }
 
 func (s *Scanner) walkPath(ctx context.Context, lib *db.Library, root string, seenPaths map[string]bool, result *ScanResult) error {
+	// Resolve the root to a real absolute path for symlink boundary checks.
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return fmt.Errorf("resolving library root %q: %w", root, err)
+	}
+	realRoot, err := filepath.EvalSymlinks(absRoot)
+	if err != nil {
+		return fmt.Errorf("resolving library root symlinks %q: %w", root, err)
+	}
+
 	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			s.logger.Warn("walk error", "path", path, "error", err)
@@ -200,6 +210,18 @@ func (s *Scanner) walkPath(ctx context.Context, lib *db.Library, root string, se
 			return nil
 		}
 		if !IsMediaFile(path) {
+			return nil
+		}
+
+		// Resolve symlinks to prevent path traversal attacks.
+		realPath, err := filepath.EvalSymlinks(path)
+		if err != nil {
+			s.logger.Warn("cannot resolve symlink, skipping", "path", path, "error", err)
+			return nil
+		}
+		if !strings.HasPrefix(realPath, realRoot+string(os.PathSeparator)) && realPath != realRoot {
+			s.logger.Warn("symlink target outside library root, skipping",
+				"path", path, "target", realPath, "root", realRoot)
 			return nil
 		}
 

@@ -34,7 +34,6 @@ function LazyFallback() {
 
 export function App() {
   const loadFromStorage = useAuthStore((s) => s.loadFromStorage);
-  const updateTokens = useAuthStore((s) => s.updateTokens);
   const logout = useAuthStore((s) => s.logout);
   const navigate = useNavigate();
   const { data: setupStatus, isLoading } = useSetupStatus();
@@ -46,15 +45,12 @@ export function App() {
   // Wire ApiClient auth events to Zustand store + React Router
   useEffect(() => {
     api.setAuthListener({
-      onTokenRefresh: (accessToken, refreshToken) => {
-        updateTokens(accessToken, refreshToken);
-      },
       onAuthFailure: () => {
         logout();
         navigate("/login", { replace: true });
       },
     });
-  }, [updateTokens, logout, navigate]);
+  }, [logout, navigate]);
 
   if (isLoading) {
     return (

@@ -68,7 +68,7 @@ func NewRouter(deps Dependencies) http.Handler {
 	}))
 
 	// Handlers
-	authHandler := handlers.NewAuthHandler(deps.Auth, deps.Users, deps.Logger)
+	authHandler := handlers.NewAuthHandler(deps.Auth, deps.Users, deps.Config.Auth, deps.Logger)
 	userHandler := handlers.NewUserHandler(deps.Users, deps.Logger)
 	healthHandler := handlers.NewHealthHandler(deps.Database, deps.StreamManager, deps.Version)
 

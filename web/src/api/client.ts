@@ -23,8 +23,7 @@ import type {
 } from "./types";
 import { ApiError } from "./types";
 
-const TOKEN_KEY = "hubplay_access_token";
-const REFRESH_KEY = "hubplay_refresh_token";
+const USER_KEY = "hubplay_user";
 
 interface RequestOptions {
   params?: Record<string, string | number | boolean | undefined>;
@@ -75,11 +74,6 @@ export class ApiClient {
     // Build headers
     const headers: Record<string, string> = { ...extraHeaders };
 
-    const token = localStorage.getItem(TOKEN_KEY);
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-    }
-
     if (body !== undefined && (method === "POST" || method === "PUT" || method === "PATCH")) {
       headers["Content-Type"] = "application/json";
     }
@@ -87,48 +81,38 @@ export class ApiClient {
     const response = await fetch(url, {
       method,
       headers,
+      credentials: "include",
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
 
     if (!response.ok) {
       // If token expired, try to refresh once
       if (response.status === 401 && path !== "/auth/refresh" && path !== "/auth/login") {
-        const refreshToken = localStorage.getItem(REFRESH_KEY);
-        if (refreshToken) {
-          try {
-            await this.refresh(refreshToken);
-            // Retry the original request with the new token
-            const retryHeaders = { ...headers };
-            const newToken = localStorage.getItem(TOKEN_KEY);
-            if (newToken) {
-              retryHeaders["Authorization"] = `Bearer ${newToken}`;
+        try {
+          await this.refresh();
+          // Retry the original request with the new cookie
+          const retryResponse = await fetch(url, {
+            method,
+            headers,
+            credentials: "include",
+            body: body !== undefined ? JSON.stringify(body) : undefined,
+          });
+          if (retryResponse.ok) {
+            if (retryResponse.status === 204) return undefined as T;
+            const retryJson = await retryResponse.json();
+            if (retryJson && typeof retryJson === "object" && "data" in retryJson) {
+              return retryJson.data as T;
             }
-            const retryResponse = await fetch(url, {
-              method,
-              headers: retryHeaders,
-              body: body !== undefined ? JSON.stringify(body) : undefined,
-            });
-            if (retryResponse.ok) {
-              if (retryResponse.status === 204) return undefined as T;
-              const retryJson = await retryResponse.json();
-              if (retryJson && typeof retryJson === "object" && "data" in retryJson) {
-                return retryJson.data as T;
-              }
-              return retryJson as T;
-            }
-          } catch {
-            // Refresh failed — clear auth and notify listener
-            localStorage.removeItem(TOKEN_KEY);
-            localStorage.removeItem(REFRESH_KEY);
-            localStorage.removeItem("hubplay_user");
-            this.authListener.onAuthFailure?.();
-            throw new ApiError(401, { error: { code: "session_expired", message: "Session expired" } });
+            return retryJson as T;
           }
+        } catch {
+          // Refresh failed — clear auth and notify listener
+          localStorage.removeItem(USER_KEY);
+          this.authListener.onAuthFailure?.();
+          throw new ApiError(401, { error: { code: "session_expired", message: "Session expired" } });
         }
-        // No refresh token — clear auth and notify listener
-        localStorage.removeItem(TOKEN_KEY);
-        localStorage.removeItem(REFRESH_KEY);
-        localStorage.removeItem("hubplay_user");
+        // Retry also failed — clear auth
+        localStorage.removeItem(USER_KEY);
         this.authListener.onAuthFailure?.();
         throw new ApiError(401, { error: { code: "session_expired", message: "Session expired" } });
       }
@@ -168,31 +152,28 @@ export class ApiClient {
     const data = await this.request<AuthResponse>("POST", "/auth/login", {
       body: { username, password },
     });
-    localStorage.setItem(TOKEN_KEY, data.access_token);
-    localStorage.setItem(REFRESH_KEY, data.refresh_token);
+    // Tokens are now set as HTTP-only cookies by the server.
+    // Only persist user info for UI state.
     return data;
   }
 
-  async refresh(refreshToken: string): Promise<AuthResponse> {
+  async refresh(): Promise<AuthResponse> {
+    // Refresh token is sent automatically via HTTP-only cookie.
     const data = await this.request<AuthResponse>("POST", "/auth/refresh", {
-      body: { refresh_token: refreshToken },
+      body: {},
     });
-    localStorage.setItem(TOKEN_KEY, data.access_token);
-    localStorage.setItem(REFRESH_KEY, data.refresh_token);
     this.authListener.onTokenRefresh?.(data.access_token, data.refresh_token);
     return data;
   }
 
   async logout(): Promise<void> {
-    const refreshToken = localStorage.getItem(REFRESH_KEY);
     try {
+      // Server reads refresh token from HTTP-only cookie.
       await this.request<void>("POST", "/auth/logout", {
-        body: { refresh_token: refreshToken },
+        body: {},
       });
     } finally {
-      localStorage.removeItem(TOKEN_KEY);
-      localStorage.removeItem(REFRESH_KEY);
-      localStorage.removeItem("hubplay_user");
+      localStorage.removeItem(USER_KEY);
     }
   }
 
@@ -210,8 +191,6 @@ export class ApiClient {
     const data = await this.request<AuthResponse>("POST", "/auth/setup", {
       body: { username, password, display_name: displayName },
     });
-    localStorage.setItem(TOKEN_KEY, data.access_token);
-    localStorage.setItem(REFRESH_KEY, data.refresh_token);
     return data;
   }
 
@@ -503,10 +482,9 @@ export class ApiClient {
     const formData = new FormData();
     formData.append("file", file);
 
-    const token = localStorage.getItem(TOKEN_KEY);
     const response = await fetch(`${this.baseUrl}/items/${itemId}/images/${type}/upload`, {
       method: "POST",
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      credentials: "include",
       body: formData,
     });
 

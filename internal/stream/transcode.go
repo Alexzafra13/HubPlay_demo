@@ -26,22 +26,27 @@ type Session struct {
 
 // Transcoder manages FFmpeg transcoding sessions.
 type Transcoder struct {
-	mu       sync.Mutex
-	sessions map[string]*Session // keyed by session ID
-	baseDir  string              // base directory for transcoded segments
-	ffmpeg   string              // path to ffmpeg binary
-	logger   *slog.Logger
+	mu               sync.Mutex
+	sessions         map[string]*Session // keyed by session ID
+	baseDir          string              // base directory for transcoded segments
+	ffmpeg           string              // path to ffmpeg binary
+	transcodeTimeout time.Duration       // max duration per transcode process
+	logger           *slog.Logger
 }
 
-func NewTranscoder(baseDir, ffmpegPath string, logger *slog.Logger) *Transcoder {
+func NewTranscoder(baseDir, ffmpegPath string, transcodeTimeout time.Duration, logger *slog.Logger) *Transcoder {
 	if ffmpegPath == "" {
 		ffmpegPath = "ffmpeg"
 	}
+	if transcodeTimeout <= 0 {
+		transcodeTimeout = 4 * time.Hour
+	}
 	return &Transcoder{
-		sessions: make(map[string]*Session),
-		baseDir:  baseDir,
-		ffmpeg:   ffmpegPath,
-		logger:   logger.With("module", "transcoder"),
+		sessions:         make(map[string]*Session),
+		baseDir:          baseDir,
+		ffmpeg:           ffmpegPath,
+		transcodeTimeout: transcodeTimeout,
+		logger:           logger.With("module", "transcoder"),
 	}
 }
 
@@ -61,7 +66,7 @@ func (t *Transcoder) Start(sessionID, itemID, inputPath string, profile Profile,
 		return nil, fmt.Errorf("creating output dir: %w", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), t.transcodeTimeout)
 
 	args := BuildFFmpegArgs(inputPath, outputDir, profile, startTime)
 	cmd := exec.CommandContext(ctx, t.ffmpeg, args...)

@@ -25,7 +25,7 @@ export default function Login() {
       { username, password },
       {
         onSuccess(data) {
-          setAuth(data.user, data.access_token, data.refresh_token);
+          setAuth(data.user);
           navigate("/");
         },
         onError(err) {

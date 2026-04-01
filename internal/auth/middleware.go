@@ -55,7 +55,11 @@ func extractToken(r *http.Request) string {
 			return strings.TrimPrefix(auth, "Bearer ")
 		}
 	}
-	// 2. Query param (for WebSocket)
+	// 2. HTTP-only cookie (secure web clients)
+	if c, err := r.Cookie("hubplay_access"); err == nil && c.Value != "" {
+		return c.Value
+	}
+	// 3. Query param (for WebSocket/SSE)
 	if token := r.URL.Query().Get("token"); token != "" {
 		return token
 	}

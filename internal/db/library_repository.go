@@ -103,14 +103,17 @@ func (r *LibraryRepository) List(ctx context.Context) ([]*Library, error) {
 			&lib.M3UURL, &lib.EPGURL, &lib.RefreshInterval, &lib.CreatedAt, &lib.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan library: %w", err)
 		}
-		paths, err := r.getPaths(ctx, lib.ID)
-		if err != nil {
-			return nil, err
-		}
-		lib.Paths = paths
 		libs = append(libs, lib)
 	}
-	return libs, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Batch-load all paths in a single query instead of N+1 queries.
+	if err := r.loadPaths(ctx, libs); err != nil {
+		return nil, err
+	}
+	return libs, nil
 }
 
 func (r *LibraryRepository) Update(ctx context.Context, lib *Library) error {
@@ -180,6 +183,39 @@ func (r *LibraryRepository) getPaths(ctx context.Context, libraryID string) ([]s
 	return paths, rows.Err()
 }
 
+// loadPaths fetches paths for all given libraries in a single query
+// and assigns them to the corresponding Library structs.
+func (r *LibraryRepository) loadPaths(ctx context.Context, libs []*Library) error {
+	if len(libs) == 0 {
+		return nil
+	}
+
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT library_id, path FROM library_paths ORDER BY library_id, path`,
+	)
+	if err != nil {
+		return fmt.Errorf("batch load library paths: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	pathsByLib := make(map[string][]string)
+	for rows.Next() {
+		var libID, path string
+		if err := rows.Scan(&libID, &path); err != nil {
+			return fmt.Errorf("scan library path: %w", err)
+		}
+		pathsByLib[libID] = append(pathsByLib[libID], path)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	for _, lib := range libs {
+		lib.Paths = pathsByLib[lib.ID]
+	}
+	return nil
+}
+
 // GrantAccess gives a user access to a library.
 func (r *LibraryRepository) GrantAccess(ctx context.Context, userID, libraryID string) error {
 	_, err := r.db.ExecContext(ctx,
@@ -228,12 +264,15 @@ func (r *LibraryRepository) ListForUser(ctx context.Context, userID string) ([]*
 			&lib.M3UURL, &lib.EPGURL, &lib.RefreshInterval, &lib.CreatedAt, &lib.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan library: %w", err)
 		}
-		paths, err := r.getPaths(ctx, lib.ID)
-		if err != nil {
-			return nil, err
-		}
-		lib.Paths = paths
 		libs = append(libs, lib)
 	}
-	return libs, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Batch-load all paths in a single query instead of N+1 queries.
+	if err := r.loadPaths(ctx, libs); err != nil {
+		return nil, err
+	}
+	return libs, nil
 }
