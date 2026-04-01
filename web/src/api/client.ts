@@ -433,6 +433,17 @@ export class ApiClient {
     });
   }
 
+  async getBulkSchedule(
+    channelIds: string[],
+    from?: string,
+    to?: string,
+  ): Promise<Record<string, EPGProgram[]>> {
+    if (channelIds.length === 0) return {};
+    return this.request<Record<string, EPGProgram[]>>("GET", "/channels/schedule", {
+      params: { channels: channelIds.join(","), from, to },
+    });
+  }
+
   async getChannelGroups(libraryId?: string): Promise<string[]> {
     if (!libraryId) return [];
     return this.request<string[]>("GET", `/libraries/${libraryId}/channels/groups`);

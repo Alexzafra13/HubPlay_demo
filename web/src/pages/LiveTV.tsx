@@ -1,14 +1,13 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import Hls from "hls.js";
-import { useChannels, useLibraries, usePublicCountries, useImportPublicIPTV } from "@/api/hooks";
-import type { Channel, PublicCountry } from "@/api/types";
+import { useChannels, useLibraries, usePublicCountries, useImportPublicIPTV, useBulkSchedule } from "@/api/hooks";
+import type { Channel, EPGProgram, PublicCountry } from "@/api/types";
 import { Spinner } from "@/components/common";
 
 // ─── Country auto-detection ──────────────────────────────────────────────────
 
 function detectCountryCode(): string {
-  // Try timezone → country mapping for common timezones
   try {
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
     const tzCountry: Record<string, string> = {
@@ -37,12 +36,44 @@ function detectCountryCode(): string {
     if (tzCountry[tz]) return tzCountry[tz];
   } catch { /* ignore */ }
 
-  // Fallback: navigator.language
   const lang = navigator.language || "";
   const parts = lang.split("-");
   if (parts.length >= 2) return parts[1].toLowerCase();
-
   return "us";
+}
+
+// ─── EPG Helpers ─────────────────────────────────────────────────────────────
+
+function getNowPlaying(programs: EPGProgram[] | undefined): EPGProgram | null {
+  if (!programs || programs.length === 0) return null;
+  const now = Date.now();
+  return programs.find(p =>
+    new Date(p.start_time).getTime() <= now &&
+    new Date(p.end_time).getTime() > now,
+  ) ?? null;
+}
+
+function getUpNext(programs: EPGProgram[] | undefined): EPGProgram | null {
+  if (!programs || programs.length === 0) return null;
+  const now = Date.now();
+  // Find the first program that starts after now
+  const sorted = [...programs].sort((a, b) =>
+    new Date(a.start_time).getTime() - new Date(b.start_time).getTime(),
+  );
+  return sorted.find(p => new Date(p.start_time).getTime() > now) ?? null;
+}
+
+function getProgramProgress(program: EPGProgram): number {
+  const now = Date.now();
+  const start = new Date(program.start_time).getTime();
+  const end = new Date(program.end_time).getTime();
+  const duration = end - start;
+  if (duration <= 0) return 0;
+  return Math.min(100, Math.max(0, ((now - start) / duration) * 100));
+}
+
+function formatTime(dateStr: string): string {
+  return new Date(dateStr).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
 // ─── Main Component ──────────────────────────────────────────────────────────
@@ -60,6 +91,10 @@ export default function LiveTV() {
   const [search, setSearch] = useState("");
   const [activeGroup, setActiveGroup] = useState<string | null>(null);
   const heroRef = useRef<HTMLDivElement>(null);
+
+  // Fetch EPG for all channels
+  const channelIds = useMemo(() => channels?.map(ch => ch.id) ?? [], [channels]);
+  const { data: scheduleData } = useBulkSchedule(channelIds);
 
   // Group channels by category
   const groups = useMemo(() => {
@@ -85,7 +120,6 @@ export default function LiveTV() {
     );
   }, [channels, search]);
 
-  // Group names for tabs
   const groupNames = useMemo(() => Array.from(groups.keys()), [groups]);
 
   // Select first channel if none selected
@@ -95,7 +129,6 @@ export default function LiveTV() {
     }
   }, [channels, activeChannel]);
 
-  // Scroll to hero when changing channel
   const handleSelectChannel = useCallback((ch: Channel) => {
     setActiveChannel(ch);
     setSearch("");
@@ -112,17 +145,20 @@ export default function LiveTV() {
     );
   }
 
-  // No livetv library or no channels — show country selector with auto-detect
   if (!liveTvLibrary || !channels || channels.length === 0) {
     return <CountrySelector hasLibrary={!!liveTvLibrary} />;
   }
 
-  // Channels to display in the grid
   const displayChannels = search
     ? searchResults
     : activeGroup
       ? groups.get(activeGroup) ?? []
       : channels;
+
+  // EPG for the active channel
+  const activePrograms = activeChannel ? scheduleData?.[activeChannel.id] : undefined;
+  const activeNowPlaying = getNowPlaying(activePrograms);
+  const activeUpNext = getUpNext(activePrograms);
 
   return (
     <div className="flex flex-col gap-0 -mx-4 -mt-2 md:-mx-6">
@@ -131,33 +167,75 @@ export default function LiveTV() {
         {activeChannel && <ChannelPlayer channel={activeChannel} />}
 
         {/* Gradient overlay at bottom */}
-        <div className="absolute inset-x-0 bottom-0 h-20 md:h-32 bg-gradient-to-t from-bg-base to-transparent pointer-events-none" />
+        <div className="absolute inset-x-0 bottom-0 h-24 md:h-40 bg-gradient-to-t from-bg-base via-bg-base/60 to-transparent pointer-events-none" />
 
-        {/* Channel info overlay */}
+        {/* Channel info overlay with EPG */}
         {activeChannel && (
           <div className="absolute left-0 bottom-0 right-0 p-3 md:p-8 pointer-events-none">
-            <div className="flex items-end gap-3">
+            <div className="flex items-end gap-3 md:gap-4">
               {activeChannel.logo_url && (
                 <img
                   src={activeChannel.logo_url}
                   alt=""
-                  className="h-8 w-8 md:h-16 md:w-16 rounded-lg md:rounded-xl object-contain bg-white/10 backdrop-blur-sm p-1 md:p-1.5 shrink-0"
+                  className="h-8 w-8 md:h-14 md:w-14 rounded-lg md:rounded-xl object-contain bg-white/10 backdrop-blur-sm p-1 md:p-1.5 shrink-0"
                 />
               )}
-              <div className="min-w-0">
-                <h1 className="text-base md:text-3xl font-bold text-white truncate drop-shadow-lg">
-                  {activeChannel.name}
-                </h1>
-                {activeChannel.group && (
-                  <p className="text-xs md:text-base text-white/70 truncate">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 mb-0.5">
+                  <h1 className="text-sm md:text-2xl font-bold text-white truncate drop-shadow-lg">
+                    {activeChannel.name}
+                  </h1>
+                  <span className="shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-500/90 text-[10px] md:text-xs font-bold text-white uppercase tracking-wider">
+                    <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                    {t('liveTV.live')}
+                  </span>
+                </div>
+
+                {/* Now Playing program info */}
+                {activeNowPlaying ? (
+                  <div className="space-y-1">
+                    <p className="text-xs md:text-sm text-white/80 truncate">
+                      <span className="text-white/50">{t('liveTV.nowPlaying')}:</span>{" "}
+                      {activeNowPlaying.title}
+                    </p>
+                    {/* Progress bar */}
+                    <div className="flex items-center gap-2 max-w-xs md:max-w-md">
+                      <div className="flex-1 h-1 rounded-full bg-white/20 overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-accent transition-all duration-1000"
+                          style={{ width: `${getProgramProgress(activeNowPlaying)}%` }}
+                        />
+                      </div>
+                      <span className="text-[10px] md:text-xs text-white/40 tabular-nums shrink-0">
+                        {formatTime(activeNowPlaying.end_time)}
+                      </span>
+                    </div>
+                    {/* Up next */}
+                    {activeUpNext && (
+                      <p className="text-[10px] md:text-xs text-white/40 truncate">
+                        {t('liveTV.upNext')}: {activeUpNext.title} {t('liveTV.at')} {formatTime(activeUpNext.start_time)}
+                      </p>
+                    )}
+                  </div>
+                ) : activeChannel.group ? (
+                  <p className="text-xs md:text-sm text-white/50 truncate">
                     {activeChannel.group}
                   </p>
-                )}
+                ) : null}
               </div>
             </div>
           </div>
         )}
       </div>
+
+      {/* ── Channel Strip (Zapping) ───────────────────────────────── */}
+      {channels.length > 1 && (
+        <ChannelStrip
+          channels={channels}
+          activeChannel={activeChannel}
+          onSelect={handleSelectChannel}
+        />
+      )}
 
       {/* ── Search + Category Tabs ─────────────────────────────────── */}
       <div className="sticky top-[var(--topbar-height)] z-20 bg-bg-base/80 backdrop-blur-xl border-b border-white/5">
@@ -219,7 +297,6 @@ export default function LiveTV() {
       {/* ── Channel Grid / Category Rows ──────────────────────────── */}
       <div className="px-4 md:px-6 pb-8">
         {search ? (
-          // Search results - grid
           <>
             <p className="text-sm text-text-muted py-4">
               {t('liveTV.channelsFound', { count: searchResults.length })}
@@ -230,13 +307,13 @@ export default function LiveTV() {
                   key={ch.id}
                   channel={ch}
                   isActive={activeChannel?.id === ch.id}
+                  nowPlaying={getNowPlaying(scheduleData?.[ch.id])}
                   onClick={() => handleSelectChannel(ch)}
                 />
               ))}
             </div>
           </>
         ) : activeGroup ? (
-          // Single group - grid
           <div className="pt-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2">
               {displayChannels.map((ch) => (
@@ -244,13 +321,13 @@ export default function LiveTV() {
                   key={ch.id}
                   channel={ch}
                   isActive={activeChannel?.id === ch.id}
+                  nowPlaying={getNowPlaying(scheduleData?.[ch.id])}
                   onClick={() => handleSelectChannel(ch)}
                 />
               ))}
             </div>
           </div>
         ) : (
-          // All groups - horizontal rows (Xiaomi TV+ style)
           <div className="flex flex-col gap-6 pt-4">
             {groupNames.map((groupName) => {
               const groupChannels = groups.get(groupName) ?? [];
@@ -270,10 +347,11 @@ export default function LiveTV() {
                   </div>
                   <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide -mx-4 px-4 md:-mx-6 md:px-6">
                     {groupChannels.map((ch) => (
-                      <div key={ch.id} className="shrink-0 w-48 md:w-56">
+                      <div key={ch.id} className="shrink-0 w-52 md:w-60">
                         <ChannelCard
                           channel={ch}
                           isActive={activeChannel?.id === ch.id}
+                          nowPlaying={getNowPlaying(scheduleData?.[ch.id])}
                           onClick={() => handleSelectChannel(ch)}
                         />
                       </div>
@@ -295,31 +373,117 @@ export default function LiveTV() {
   );
 }
 
+// ─── Channel Strip (Zapping) ────────────────────────────────────────────────
+
+function ChannelStrip({
+  channels,
+  activeChannel,
+  onSelect,
+}: {
+  channels: Channel[];
+  activeChannel: Channel | null;
+  onSelect: (ch: Channel) => void;
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const activeRef = useRef<HTMLButtonElement>(null);
+
+  // Auto-scroll to active channel
+  useEffect(() => {
+    if (activeRef.current && scrollRef.current) {
+      const container = scrollRef.current;
+      const el = activeRef.current;
+      const scrollLeft = el.offsetLeft - container.clientWidth / 2 + el.clientWidth / 2;
+      container.scrollTo({ left: scrollLeft, behavior: "smooth" });
+    }
+  }, [activeChannel?.id]);
+
+  return (
+    <div className="relative bg-bg-base/95 backdrop-blur-sm border-b border-white/5">
+      {/* Fade edges */}
+      <div className="absolute left-0 top-0 bottom-0 w-8 bg-gradient-to-r from-bg-base to-transparent z-10 pointer-events-none" />
+      <div className="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-bg-base to-transparent z-10 pointer-events-none" />
+
+      <div
+        ref={scrollRef}
+        className="flex items-center gap-1 overflow-x-auto scrollbar-hide py-2 px-6"
+      >
+        {channels.map((ch) => {
+          const isActive = activeChannel?.id === ch.id;
+          return (
+            <button
+              key={ch.id}
+              ref={isActive ? activeRef : null}
+              type="button"
+              onClick={() => onSelect(ch)}
+              title={ch.name}
+              className={[
+                "shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg transition-all duration-200",
+                isActive
+                  ? "bg-accent/15 ring-1 ring-accent/50 scale-105"
+                  : "bg-transparent hover:bg-white/5",
+              ].join(" ")}
+            >
+              {ch.logo_url ? (
+                <img
+                  src={ch.logo_url}
+                  alt=""
+                  className="w-6 h-6 object-contain rounded"
+                  loading="lazy"
+                />
+              ) : (
+                <span className={[
+                  "w-6 h-6 rounded flex items-center justify-center text-[10px] font-bold",
+                  isActive ? "bg-accent/20 text-accent" : "bg-white/5 text-text-muted",
+                ].join(" ")}>
+                  {ch.number}
+                </span>
+              )}
+              <span className={[
+                "text-xs font-medium truncate max-w-[80px]",
+                isActive ? "text-accent" : "text-text-secondary",
+              ].join(" ")}>
+                {ch.name}
+              </span>
+              {isActive && (
+                <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse shrink-0" />
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ─── Channel Card ────────────────────────────────────────────────────────────
 
 function ChannelCard({
   channel,
   isActive,
+  nowPlaying,
   onClick,
 }: {
   channel: Channel;
   isActive: boolean;
+  nowPlaying: EPGProgram | null;
   onClick: () => void;
 }) {
+  const progress = nowPlaying ? getProgramProgress(nowPlaying) : 0;
+
   return (
     <button
       type="button"
       onClick={onClick}
       className={[
-        "group flex items-center gap-2.5 rounded-lg p-2 transition-all duration-200 text-left w-full",
+        "group relative flex items-center gap-2.5 rounded-xl p-2.5 transition-all duration-200 text-left w-full overflow-hidden",
         isActive
-          ? "bg-accent/15 ring-1 ring-accent/40"
+          ? "bg-accent/10 ring-1 ring-accent/30"
           : "bg-white/[0.03] hover:bg-white/[0.07]",
       ].join(" ")}
     >
       {/* Logo */}
       <div className={[
-        "w-10 h-10 md:w-12 md:h-12 rounded-lg flex items-center justify-center shrink-0 relative",
+        "w-10 h-10 md:w-11 md:h-11 rounded-lg flex items-center justify-center shrink-0 relative",
         isActive ? "bg-accent/10" : "bg-white/5",
       ].join(" ")}>
         {channel.logo_url ? (
@@ -338,15 +502,42 @@ function ChannelCard({
           <div className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-red-500 animate-pulse" />
         )}
       </div>
+
       {/* Info */}
       <div className="min-w-0 flex-1">
-        <p className="text-xs md:text-sm font-medium text-text-primary truncate">
-          {channel.name}
-        </p>
-        <p className="text-[10px] md:text-xs text-text-muted truncate">
-          Ch. {channel.number}
-        </p>
+        <div className="flex items-center gap-1.5">
+          <p className="text-xs md:text-sm font-medium text-text-primary truncate">
+            {channel.name}
+          </p>
+          {isActive && (
+            <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+          )}
+        </div>
+
+        {/* Now playing or channel number */}
+        {nowPlaying ? (
+          <p className="text-[10px] md:text-xs text-text-muted truncate mt-0.5">
+            {nowPlaying.title}
+          </p>
+        ) : (
+          <p className="text-[10px] md:text-xs text-text-muted truncate mt-0.5">
+            Ch. {channel.number}{channel.group ? ` · ${channel.group}` : ""}
+          </p>
+        )}
       </div>
+
+      {/* EPG progress bar at bottom of card */}
+      {nowPlaying && (
+        <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white/5">
+          <div
+            className={[
+              "h-full rounded-r-full transition-all duration-1000",
+              isActive ? "bg-accent" : "bg-accent/50",
+            ].join(" ")}
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+      )}
     </button>
   );
 }
@@ -382,7 +573,6 @@ function ChannelPlayer({ channel }: { channel: Channel }) {
       ? `${streamUrl}${streamUrl.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`
       : streamUrl;
 
-    // Timeout: if nothing loads in 20s, show error
     let playing = false;
     const timeout = setTimeout(() => {
       if (!playing) setError(t('liveTV.channelUnavailable'));
@@ -417,8 +607,6 @@ function ChannelPlayer({ channel }: { channel: Channel }) {
         fragLoadingRetryDelay: 1000,
         fragLoadingMaxRetryTimeout: 8000,
         xhrSetup: (xhr) => {
-          // Always send auth header — HLS.js resolves URLs to absolute,
-          // so url.startsWith("/") would never match
           const accessToken = localStorage.getItem("hubplay_access_token");
           if (accessToken) {
             xhr.setRequestHeader("Authorization", `Bearer ${accessToken}`);
@@ -427,7 +615,6 @@ function ChannelPlayer({ channel }: { channel: Channel }) {
       });
       hlsRef.current = hls;
 
-      // Use authed URL so the initial m3u8 fetch also passes auth
       hls.loadSource(authedUrl);
       hls.attachMedia(video);
 
@@ -440,7 +627,6 @@ function ChannelPlayer({ channel }: { channel: Channel }) {
           if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
             hls.recoverMediaError();
           } else if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-            // Retry network errors up to 3 times before falling back
             if (networkRetryCount.current < 3) {
               networkRetryCount.current++;
               hls.startLoad();
@@ -450,7 +636,6 @@ function ChannelPlayer({ channel }: { channel: Channel }) {
               startDirectPlayback();
             }
           } else {
-            // HLS failed — fall back to direct <video> (works for raw TS via proxy)
             hls.destroy();
             hlsRef.current = null;
             startDirectPlayback();
@@ -458,7 +643,6 @@ function ChannelPlayer({ channel }: { channel: Channel }) {
         }
       });
     } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
-      // Safari/iOS native HLS support
       video.src = authedUrl;
       video.load();
       video.play().catch(() => {});
@@ -489,17 +673,18 @@ function ChannelPlayer({ channel }: { channel: Channel }) {
         </div>
       )}
       {error && (
-        <div className="absolute inset-0 flex items-center justify-center z-10">
+        <div className="absolute inset-0 flex items-center justify-center z-10 bg-black/60">
           <div className="text-center px-4">
-            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" className="mx-auto mb-2 text-text-muted/50">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" className="mx-auto mb-3 text-text-muted/40">
               <rect x="2" y="4" width="20" height="14" rx="2" />
               <path d="M7 22h10M12 18v4" />
+              <path d="M8 11l8 0M8 11l2-2M8 11l2 2" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
-            <p className="text-xs text-text-muted">{error}</p>
+            <p className="text-sm text-text-muted mb-3">{error}</p>
             <button
               type="button"
               onClick={loadChannel}
-              className="mt-3 px-4 py-1.5 rounded-lg bg-white/10 text-xs text-text-secondary hover:bg-white/20 hover:text-text-primary transition-all"
+              className="px-5 py-2 rounded-lg bg-accent/20 text-sm font-medium text-accent hover:bg-accent/30 transition-all"
             >
               {t('common.retry')}
             </button>
@@ -526,7 +711,6 @@ function CountrySelector({ hasLibrary }: { hasLibrary: boolean }) {
   const [countrySearch, setCountrySearch] = useState("");
   const [autoDetected, setAutoDetected] = useState(false);
 
-  // Auto-detect country on mount
   useEffect(() => {
     if (!countries || countries.length === 0 || autoDetected) return;
     const code = detectCountryCode();

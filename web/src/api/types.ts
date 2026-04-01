@@ -149,8 +149,8 @@ export interface EPGProgram {
   channel_id: string;
   title: string;
   description: string | null;
-  start: string;
-  end: string;
+  start_time: string;
+  end_time: string;
   category: string | null;
   icon_url: string | null;
 }

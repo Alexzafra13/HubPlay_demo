@@ -220,6 +220,20 @@ export function useChannels(
   });
 }
 
+export function useBulkSchedule(
+  channelIds: string[],
+  options?: Partial<UseQueryOptions<Record<string, import("./types").EPGProgram[]>>>,
+) {
+  return useQuery<Record<string, import("./types").EPGProgram[]>>({
+    queryKey: ["bulk-schedule", channelIds.slice(0, 10).join(",")] as const,
+    queryFn: () => api.getBulkSchedule(channelIds),
+    enabled: channelIds.length > 0,
+    staleTime: 2 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+    ...options,
+  });
+}
+
 export function usePublicCountries(
   options?: Partial<UseQueryOptions<PublicCountry[]>>,
 ) {
