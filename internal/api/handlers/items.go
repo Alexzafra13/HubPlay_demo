@@ -7,19 +7,18 @@ import (
 	"strconv"
 
 	"hubplay/internal/db"
-	"hubplay/internal/library"
 
 	"github.com/go-chi/chi/v5"
 )
 
 type ItemHandler struct {
-	lib      *library.Service
-	images   *db.ImageRepository
-	metadata *db.MetadataRepository
+	lib      LibraryService
+	images   ImageRepository
+	metadata MetadataRepository
 	logger   *slog.Logger
 }
 
-func NewItemHandler(lib *library.Service, images *db.ImageRepository, metadata *db.MetadataRepository, logger *slog.Logger) *ItemHandler {
+func NewItemHandler(lib LibraryService, images ImageRepository, metadata MetadataRepository, logger *slog.Logger) *ItemHandler {
 	return &ItemHandler{lib: lib, images: images, metadata: metadata, logger: logger}
 }
 

@@ -48,6 +48,12 @@ func GetClaims(ctx context.Context) *Claims {
 	return claims
 }
 
+// WithClaims returns a new context with the given claims attached.
+// This is useful for testing handlers that call GetClaims.
+func WithClaims(ctx context.Context, claims *Claims) context.Context {
+	return context.WithValue(ctx, claimsKey, claims)
+}
+
 func extractToken(r *http.Request) string {
 	// 1. Authorization: Bearer <token>
 	if auth := r.Header.Get("Authorization"); auth != "" {

@@ -20,14 +20,14 @@ import (
 
 // IPTVHandler handles IPTV channel and EPG endpoints.
 type IPTVHandler struct {
-	svc       *iptv.Service
-	proxy     *iptv.StreamProxy
-	libraries *db.LibraryRepository
+	svc       IPTVService
+	proxy     IPTVStreamProxyService
+	libraries LibraryRepository
 	logger    *slog.Logger
 }
 
 // NewIPTVHandler creates a new IPTV handler.
-func NewIPTVHandler(svc *iptv.Service, proxy *iptv.StreamProxy, libraries *db.LibraryRepository, logger *slog.Logger) *IPTVHandler {
+func NewIPTVHandler(svc IPTVService, proxy IPTVStreamProxyService, libraries LibraryRepository, logger *slog.Logger) *IPTVHandler {
 	return &IPTVHandler{
 		svc:       svc,
 		proxy:     proxy,

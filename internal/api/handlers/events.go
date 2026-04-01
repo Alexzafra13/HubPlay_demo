@@ -12,11 +12,11 @@ import (
 // EventHandler provides a Server-Sent Events (SSE) endpoint for real-time updates.
 // Clients connect via GET /api/v1/events and receive JSON events as they happen.
 type EventHandler struct {
-	bus    *event.Bus
+	bus    EventBusSubscriber
 	logger *slog.Logger
 }
 
-func NewEventHandler(bus *event.Bus, logger *slog.Logger) *EventHandler {
+func NewEventHandler(bus EventBusSubscriber, logger *slog.Logger) *EventHandler {
 	return &EventHandler{
 		bus:    bus,
 		logger: logger.With("module", "sse"),

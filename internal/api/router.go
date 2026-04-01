@@ -61,11 +61,12 @@ func NewRouter(deps Dependencies) http.Handler {
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   allowedOrigins(deps.Config),
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Authorization", "Content-Type"},
+		AllowedHeaders:   []string{"Authorization", "Content-Type", "X-CSRF-Token"},
 		ExposedHeaders:   []string{"Retry-After"},
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
+	r.Use(CSRFProtect)
 
 	// Handlers
 	authHandler := handlers.NewAuthHandler(deps.Auth, deps.Users, deps.Config.Auth, deps.Logger)

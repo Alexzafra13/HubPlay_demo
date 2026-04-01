@@ -8,15 +8,14 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"hubplay/internal/auth"
-	"hubplay/internal/user"
 )
 
 type UserHandler struct {
-	users  *user.Service
+	users  UserService
 	logger *slog.Logger
 }
 
-func NewUserHandler(users *user.Service, logger *slog.Logger) *UserHandler {
+func NewUserHandler(users UserService, logger *slog.Logger) *UserHandler {
 	return &UserHandler{
 		users:  users,
 		logger: logger,

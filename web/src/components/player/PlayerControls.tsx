@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { FC } from "react";
 import { TimeDisplay } from "./TimeDisplay";
 
@@ -141,7 +142,7 @@ const SeekBar: FC<{
   duration: number;
   buffered: number;
   onSeek: (time: number) => void;
-}> = ({ currentTime, duration, buffered, onSeek }) => {
+}> = memo(({ currentTime, duration, buffered, onSeek }) => {
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
   const bufferedPercent = duration > 0 ? (buffered / duration) * 100 : 0;
 
@@ -177,7 +178,9 @@ const SeekBar: FC<{
       </div>
     </div>
   );
-};
+});
+
+SeekBar.displayName = "SeekBar";
 
 // ─── Track selector dropdown ─────────────────────────────────────────────────
 

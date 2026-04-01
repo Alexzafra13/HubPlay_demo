@@ -6,18 +6,16 @@ import (
 	"os/exec"
 	"runtime"
 	"time"
-
-	"hubplay/internal/stream"
 )
 
 type HealthHandler struct {
 	db            *sql.DB
-	streamManager *stream.Manager
+	streamManager StreamManagerService
 	startedAt     time.Time
 	version       string
 }
 
-func NewHealthHandler(database *sql.DB, sm *stream.Manager, version string) *HealthHandler {
+func NewHealthHandler(database *sql.DB, sm StreamManagerService, version string) *HealthHandler {
 	return &HealthHandler{
 		db:            database,
 		streamManager: sm,
