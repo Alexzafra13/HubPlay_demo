@@ -8,7 +8,7 @@ export { MediaGrid } from "./MediaGrid";
 export type { MediaGridProps } from "./MediaGrid";
 
 export { HeroSection } from "./HeroSection";
-export type { HeroSectionProps } from "./HeroSection";
+export type { HeroSectionProps, HeroMenuItem } from "./HeroSection";
 
 export { MediaMeta } from "./MediaMeta";
 export type { MediaMetaProps } from "./MediaMeta";

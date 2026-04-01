@@ -1,12 +1,13 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
-import { useItem, useItemChildren, queryKeys } from "@/api/hooks";
+import { useItem, useItemChildren, useToggleFavorite, queryKeys } from "@/api/hooks";
 import { api } from "@/api/client";
 import type { MediaItem, PlaybackMethod } from "@/api/types";
 import { Spinner, EmptyState } from "@/components/common";
 import { HeroSection, MediaMeta, EpisodeCard } from "@/components/media";
+import type { HeroMenuItem } from "@/components/media/HeroSection";
 import { VideoPlayer } from "@/components/player";
 import { ImageManager } from "@/components/ImageManager";
 import { useAuthStore } from "@/store/auth";
@@ -19,6 +20,7 @@ export default function ItemDetail() {
   const isAdmin = user?.role === "admin";
 
   const queryClient = useQueryClient();
+  const toggleFavoriteMutation = useToggleFavorite();
 
   // Image manager state
   const [imageManagerOpen, setImageManagerOpen] = useState(false);
@@ -48,6 +50,66 @@ export default function ItemDetail() {
     }
   }, [siblings]);
 
+  // ─── Favorite state ─────────────────────────────────────────────────────
+
+  const isFavorite = item?.user_data?.is_favorite ?? false;
+
+  const handleToggleFavorite = useCallback(() => {
+    if (!id) return;
+    toggleFavoriteMutation.mutate(id);
+  }, [id, toggleFavoriteMutation]);
+
+  // ─── Kebab menu items ───────────────────────────────────────────────────
+
+  const menuItems = useMemo<HeroMenuItem[]>(() => {
+    const items: HeroMenuItem[] = [];
+
+    // Admin-only items
+    if (isAdmin && id) {
+      items.push({
+        label: t("imageManager.title"),
+        icon: (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0022.5 18.75V5.25A2.25 2.25 0 0020.25 3H3.75A2.25 2.25 0 001.5 5.25v13.5A2.25 2.25 0 003.75 21z" />
+          </svg>
+        ),
+        onClick: () => setImageManagerOpen(true),
+      });
+
+      items.push({
+        label: t("itemDetail.refreshMetadata"),
+        icon: (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182" />
+          </svg>
+        ),
+        onClick: () => {
+          // Re-fetch this item's metadata
+          queryClient.invalidateQueries({ queryKey: queryKeys.item(id!) });
+        },
+      });
+    }
+
+    // Media info (scroll to section)
+    if (item?.media_streams && item.media_streams.length > 0) {
+      items.push({
+        label: t("itemDetail.mediaInfo"),
+        icon: (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
+          </svg>
+        ),
+        onClick: () => {
+          document.getElementById("media-info-section")?.scrollIntoView({ behavior: "smooth" });
+        },
+      });
+    }
+
+    return items;
+  }, [isAdmin, id, item, t]);
+
+  // ─── Playback ───────────────────────────────────────────────────────────
+
   const cleanupSession = useCallback(async (itemId: string) => {
     try {
       const token = localStorage.getItem("hubplay_access_token");
@@ -64,7 +126,6 @@ export default function ItemDetail() {
     setPlayError(null);
 
     try {
-      // Clean up any existing session before starting a new one
       if (isPlayingRef.current) {
         await cleanupSession(id);
       }
@@ -92,7 +153,7 @@ export default function ItemDetail() {
     } catch {
       setPlayError(t('itemDetail.playbackError'));
     }
-  }, [id, cleanupSession]);
+  }, [id, cleanupSession, t]);
 
   // Prefetch next episode's item data when an episode starts playing
   useEffect(() => {
@@ -114,7 +175,6 @@ export default function ItemDetail() {
     const nextEp = idx >= 0 ? siblingEpisodes[idx + 1] : undefined;
     if (!nextEp) return;
 
-    // Auto-play next episode
     setPlayingItemId(nextEp.id);
     (async () => {
       try {
@@ -148,6 +208,8 @@ export default function ItemDetail() {
       await cleanupSession(playingItemId || id!);
     }
   }, [id, playingItemId, cleanupSession]);
+
+  // ─── Render ─────────────────────────────────────────────────────────────
 
   if (isLoading) {
     return (
@@ -198,24 +260,13 @@ export default function ItemDetail() {
         />
       )}
 
-      <div className="relative">
-        <HeroSection item={item} onPlay={handlePlay} />
-
-        {/* Edit Images button (admin only) */}
-        {isAdmin && (
-          <button
-            type="button"
-            onClick={() => setImageManagerOpen(true)}
-            className="absolute top-4 right-4 z-10 flex h-10 w-10 items-center justify-center rounded-full border border-border bg-bg-card/60 backdrop-blur-sm transition-colors hover:bg-bg-elevated cursor-pointer"
-            aria-label={t("imageManager.title")}
-            title={t("imageManager.title")}
-          >
-            <svg className="h-5 w-5 text-text-secondary" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0022.5 18.75V5.25A2.25 2.25 0 0020.25 3H3.75A2.25 2.25 0 001.5 5.25v13.5A2.25 2.25 0 003.75 21z" />
-            </svg>
-          </button>
-        )}
-      </div>
+      <HeroSection
+        item={item}
+        onPlay={handlePlay}
+        onToggleFavorite={handleToggleFavorite}
+        isFavorite={isFavorite}
+        menuItems={menuItems}
+      />
 
       {playError && (
         <div className="mx-6 mt-4 rounded-[--radius-md] bg-error/10 px-4 py-3 text-sm text-error sm:mx-10">
@@ -224,21 +275,9 @@ export default function ItemDetail() {
       )}
 
       <div className="flex flex-col gap-8 px-6 py-8 sm:px-10">
-        {/* Overview */}
-        {item.overview && (
-          <section>
-            <h2 className="mb-3 text-lg font-semibold text-text-primary">
-              {t('itemDetail.overview')}
-            </h2>
-            <p className="max-w-3xl leading-relaxed text-text-secondary">
-              {item.overview}
-            </p>
-          </section>
-        )}
-
         {/* Media info */}
         {item.media_streams?.length > 0 && (
-          <section>
+          <section id="media-info-section">
             <h2 className="mb-3 text-lg font-semibold text-text-primary">
               {t('itemDetail.mediaInfo')}
             </h2>
@@ -307,16 +346,13 @@ function SeasonEpisodes({ seriesId }: { seriesId: string }) {
 
   if (!children || children.length === 0) return null;
 
-  // Separate seasons from episodes
   const seasons = children.filter((c) => c.type === "season");
   const episodes = children.filter((c) => c.type === "episode");
 
-  // If we have seasons, show tabs. Otherwise show episodes directly.
   if (seasons.length > 0) {
     return <SeasonTabs seasons={seasons} />;
   }
 
-  // Direct episodes (flat series)
   return (
     <section>
       <h2 className="mb-4 text-lg font-semibold text-text-primary">
@@ -345,7 +381,6 @@ function SeasonTabs({ seasons }: { seasons: MediaItem[] }) {
         {t('itemDetail.seasons')}
       </h2>
 
-      {/* Season tabs */}
       <div className="mb-6 flex gap-2 overflow-x-auto pb-2">
         {sorted.map((season) => (
           <button
@@ -364,7 +399,6 @@ function SeasonTabs({ seasons }: { seasons: MediaItem[] }) {
         ))}
       </div>
 
-      {/* Episodes for selected season */}
       {isLoading ? (
         <div className="flex justify-center py-8">
           <Spinner size="md" />
