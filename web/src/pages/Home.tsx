@@ -179,38 +179,60 @@ function LandscapeCard({ item }: { item: MediaItem }) {
   return (
     <Link
       to={href}
-      className="group relative flex-shrink-0 w-[280px] sm:w-[320px] aspect-[16/9] overflow-hidden rounded-md"
+      className="group flex-shrink-0 w-[260px] sm:w-[300px] flex flex-col gap-2"
     >
-      {image ? (
-        <img
-          src={image}
-          alt={item.title}
-          loading="lazy"
-          className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-        />
-      ) : (
-        <div className="flex h-full w-full items-center justify-center bg-white/5">
-          <span className="text-2xl font-bold text-white/20">
-            {item.title.charAt(0)}
-          </span>
+      {/* Thumbnail */}
+      <div className="relative aspect-[16/9] overflow-hidden rounded-[--radius-md] bg-bg-elevated">
+        {image ? (
+          <img
+            src={image}
+            alt={item.title}
+            loading="lazy"
+            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-bg-elevated to-bg-card">
+            <span className="text-2xl font-bold text-text-muted">
+              {item.title.charAt(0)}
+            </span>
+          </div>
+        )}
+
+        {/* Hover play icon */}
+        <div className="absolute inset-0 flex items-center justify-center bg-black/0 transition-colors duration-200 group-hover:bg-black/30">
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/20 backdrop-blur-sm opacity-0 scale-90 transition-all duration-200 group-hover:opacity-100 group-hover:scale-100">
+            <svg className="h-5 w-5 text-white ml-0.5" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M8 5v14l11-7z" />
+            </svg>
+          </div>
         </div>
-      )}
 
-      {/* Gradient overlay — always visible */}
-      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
-
-      {/* Title overlay */}
-      <div className="absolute bottom-0 left-0 right-0 p-4">
-        <p className="text-sm font-semibold text-white line-clamp-1">
-          {item.title}
-        </p>
-        {item.year != null && !item.title.includes(String(item.year)) && (
-          <p className="text-xs text-white/50 mt-0.5">{item.year}</p>
+        {/* Rating badge */}
+        {item.community_rating != null && (
+          <div className="absolute top-2 right-2 flex items-center gap-1 rounded-[--radius-sm] bg-black/70 backdrop-blur-sm px-1.5 py-0.5 text-[11px] font-semibold text-white">
+            <svg className="h-2.5 w-2.5 text-warning" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+            </svg>
+            {item.community_rating.toFixed(1)}
+          </div>
         )}
       </div>
 
-      {/* Hover glow */}
-      <div className="absolute inset-0 rounded-md ring-1 ring-white/0 transition-all group-hover:ring-white/20" />
+      {/* Info below — clean, readable */}
+      <div className="flex flex-col gap-0.5 px-0.5">
+        <p className="text-sm font-medium text-text-primary truncate group-hover:text-white transition-colors">
+          {item.title}
+        </p>
+        <div className="flex items-center gap-1.5 text-xs text-text-muted">
+          {item.year != null && <span>{item.year}</span>}
+          {item.genres?.length > 0 && (
+            <>
+              {item.year != null && <span className="text-text-muted/40">·</span>}
+              <span className="truncate">{item.genres.slice(0, 2).join(", ")}</span>
+            </>
+          )}
+        </div>
+      </div>
     </Link>
   );
 }
