@@ -292,6 +292,31 @@
       "finishSetup": "Finalizar configuracion"
     }
   },
+  "imageManager": {
+    "title": "Gestionar imagenes",
+    "poster": "Poster",
+    "backdrop": "Fondo",
+    "logo": "Logo",
+    "banner": "Banner",
+    "currentImages": "Imagenes actuales",
+    "availableImages": "Disponibles de proveedores",
+    "noCurrentImages": "No hay imagenes de este tipo",
+    "noAvailableImages": "No hay imagenes disponibles de proveedores",
+    "noExternalIds": "No se encontraron IDs externos. Ejecuta un escaneo de biblioteca con metadatos habilitados primero.",
+    "upload": "Subir imagen",
+    "uploading": "Subiendo...",
+    "selecting": "Descargando...",
+    "setPrimary": "Establecer como principal",
+    "delete": "Eliminar",
+    "deleteConfirm": "Eliminar esta imagen?",
+    "primary": "Principal",
+    "resolution": "{{width}}\u00d7{{height}}",
+    "score": "Puntuacion: {{score}}",
+    "selectImage": "Usar esta imagen",
+    "uploadHint": "JPEG, PNG o WebP (max 10MB)",
+    "success": "Imagen actualizada correctamente",
+    "error": "Error al actualizar la imagen"
+  },
   "contentTypes": {
     "movies": "Peliculas",
     "tvShows": "Series",

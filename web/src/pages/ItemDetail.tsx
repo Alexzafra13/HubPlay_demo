@@ -7,11 +7,18 @@ import type { MediaItem, PlaybackMethod } from "@/api/types";
 import { Spinner, EmptyState } from "@/components/common";
 import { HeroSection, MediaMeta, EpisodeCard } from "@/components/media";
 import { VideoPlayer } from "@/components/player";
+import { ImageManager } from "@/components/ImageManager";
+import { useAuthStore } from "@/store/auth";
 
 export default function ItemDetail() {
   const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const { data: item, isLoading, isError } = useItem(id ?? "");
+  const user = useAuthStore((s) => s.user);
+  const isAdmin = user?.role === "admin";
+
+  // Image manager state
+  const [imageManagerOpen, setImageManagerOpen] = useState(false);
 
   // Player state
   const [showPlayer, setShowPlayer] = useState(false);
@@ -124,7 +131,24 @@ export default function ItemDetail() {
         />
       )}
 
-      <HeroSection item={item} onPlay={handlePlay} />
+      <div className="relative">
+        <HeroSection item={item} onPlay={handlePlay} />
+
+        {/* Edit Images button (admin only) */}
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={() => setImageManagerOpen(true)}
+            className="absolute top-4 right-4 z-10 flex h-10 w-10 items-center justify-center rounded-full border border-border bg-bg-card/60 backdrop-blur-sm transition-colors hover:bg-bg-elevated cursor-pointer"
+            aria-label={t("imageManager.title")}
+            title={t("imageManager.title")}
+          >
+            <svg className="h-5 w-5 text-text-secondary" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0022.5 18.75V5.25A2.25 2.25 0 0020.25 3H3.75A2.25 2.25 0 001.5 5.25v13.5A2.25 2.25 0 003.75 21z" />
+            </svg>
+          </button>
+        )}
+      </div>
 
       {playError && (
         <div className="mx-6 mt-4 rounded-[--radius-md] bg-error/10 px-4 py-3 text-sm text-error sm:mx-10">
@@ -189,6 +213,15 @@ export default function ItemDetail() {
         {/* Seasons & Episodes (for series) */}
         {item.type === "series" && <SeasonEpisodes seriesId={item.id} />}
       </div>
+
+      {/* Image Manager (admin only) */}
+      {isAdmin && id && (
+        <ImageManager
+          itemId={id}
+          isOpen={imageManagerOpen}
+          onClose={() => setImageManagerOpen(false)}
+        />
+      )}
     </div>
   );
 }

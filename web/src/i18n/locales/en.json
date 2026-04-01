@@ -292,6 +292,31 @@
       "finishSetup": "Finish Setup"
     }
   },
+  "imageManager": {
+    "title": "Manage Images",
+    "poster": "Poster",
+    "backdrop": "Backdrop",
+    "logo": "Logo",
+    "banner": "Banner",
+    "currentImages": "Current Images",
+    "availableImages": "Available from Providers",
+    "noCurrentImages": "No images of this type",
+    "noAvailableImages": "No images available from providers",
+    "noExternalIds": "No external IDs found. Run a library scan with metadata enabled first.",
+    "upload": "Upload Image",
+    "uploading": "Uploading...",
+    "selecting": "Downloading...",
+    "setPrimary": "Set as primary",
+    "delete": "Delete",
+    "deleteConfirm": "Delete this image?",
+    "primary": "Primary",
+    "resolution": "{{width}}\u00d7{{height}}",
+    "score": "Score: {{score}}",
+    "selectImage": "Use this image",
+    "uploadHint": "JPEG, PNG, or WebP (max 10MB)",
+    "success": "Image updated successfully",
+    "error": "Failed to update image"
+  },
   "contentTypes": {
     "movies": "Movies",
     "tvShows": "TV Shows",

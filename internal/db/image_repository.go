@@ -142,3 +142,50 @@ func (r *ImageRepository) DeleteByItem(ctx context.Context, itemID string) error
 	}
 	return nil
 }
+
+func (r *ImageRepository) DeleteByID(ctx context.Context, id string) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM images WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete image: %w", err)
+	}
+	return nil
+}
+
+func (r *ImageRepository) GetByID(ctx context.Context, id string) (*Image, error) {
+	img := &Image{}
+	err := r.db.QueryRowContext(ctx,
+		`SELECT id, item_id, type, path, COALESCE(width,0), COALESCE(height,0),
+		        COALESCE(blurhash,''), COALESCE(provider,''), is_primary, added_at
+		 FROM images WHERE id = ?`, id,
+	).Scan(&img.ID, &img.ItemID, &img.Type, &img.Path, &img.Width,
+		&img.Height, &img.Blurhash, &img.Provider, &img.IsPrimary, &img.AddedAt)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("image %s: %w", id, domain.ErrNotFound)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get image: %w", err)
+	}
+	return img, nil
+}
+
+func (r *ImageRepository) SetPrimary(ctx context.Context, itemID, imgType, imageID string) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	// Unset all primary flags for this item+type
+	_, err = tx.ExecContext(ctx, `UPDATE images SET is_primary = 0 WHERE item_id = ? AND type = ?`, itemID, imgType)
+	if err != nil {
+		return fmt.Errorf("unset primary: %w", err)
+	}
+
+	// Set the new primary
+	_, err = tx.ExecContext(ctx, `UPDATE images SET is_primary = 1 WHERE id = ? AND item_id = ? AND type = ?`, imageID, itemID, imgType)
+	if err != nil {
+		return fmt.Errorf("set primary: %w", err)
+	}
+
+	return tx.Commit()
+}
