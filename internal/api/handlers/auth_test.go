@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"hubplay/internal/auth"
 	"hubplay/internal/config"
@@ -106,8 +107,8 @@ func testLogger() *slog.Logger {
 
 func testAuthCfg() config.AuthConfig {
 	return config.AuthConfig{
-		AccessTokenTTL:  900,
-		RefreshTokenTTL: 604800,
+		AccessTokenTTL:  15 * time.Minute,
+		RefreshTokenTTL: 720 * time.Hour,
 	}
 }
 
@@ -155,12 +156,16 @@ func TestAuthHandler_Login_Success(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 
-	var resp map[string]any
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+	var envelope map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &envelope); err != nil {
 		t.Fatal(err)
 	}
-	if resp["access_token"] != "access-123" {
-		t.Errorf("expected access_token 'access-123', got %v", resp["access_token"])
+	data, ok := envelope["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected 'data' envelope, got %v", envelope)
+	}
+	if data["access_token"] != "access-123" {
+		t.Errorf("expected access_token 'access-123', got %v", data["access_token"])
 	}
 
 	// Verify auth cookies are set

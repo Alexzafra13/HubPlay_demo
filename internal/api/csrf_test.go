@@ -36,12 +36,29 @@ func TestCSRF_SafeMethodsPass(t *testing.T) {
 	}
 }
 
-func TestCSRF_MutatingWithoutToken(t *testing.T) {
+func TestCSRF_MutatingWithoutSessionCookieAllowed(t *testing.T) {
 	handler := CSRFProtect(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
+	// POST without auth cookie should pass (no session to protect)
 	req := httptest.NewRequest("POST", "/api/v1/auth/login", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200 (no session cookie), got %d", rr.Code)
+	}
+}
+
+func TestCSRF_MutatingWithSessionButNoToken(t *testing.T) {
+	handler := CSRFProtect(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// POST with auth session cookie but no CSRF token → 403
+	req := httptest.NewRequest("POST", "/api/v1/libraries", nil)
+	req.AddCookie(&http.Cookie{Name: "hubplay_access", Value: "some-jwt"})
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 
@@ -70,8 +87,9 @@ func TestCSRF_MutatingWithValidToken(t *testing.T) {
 		t.Fatal("no CSRF cookie set on GET")
 	}
 
-	// Now POST with matching cookie + header
-	postReq := httptest.NewRequest("POST", "/api/v1/auth/login", nil)
+	// Now POST with auth cookie + matching CSRF cookie + header
+	postReq := httptest.NewRequest("POST", "/api/v1/libraries", nil)
+	postReq.AddCookie(&http.Cookie{Name: "hubplay_access", Value: "some-jwt"})
 	postReq.AddCookie(&http.Cookie{Name: csrfCookieName, Value: csrfToken})
 	postReq.Header.Set(csrfHeaderName, csrfToken)
 
@@ -89,9 +107,25 @@ func TestCSRF_MismatchedTokenFails(t *testing.T) {
 	}))
 
 	req := httptest.NewRequest("POST", "/api/v1/test", nil)
+	req.AddCookie(&http.Cookie{Name: "hubplay_access", Value: "some-jwt"})
 	req.AddCookie(&http.Cookie{Name: csrfCookieName, Value: "real-token"})
 	req.Header.Set(csrfHeaderName, "wrong-token")
 
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("expected 403, got %d", rr.Code)
+	}
+}
+
+func TestCSRF_DeleteWithSessionRequiresToken(t *testing.T) {
+	handler := CSRFProtect(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("DELETE", "/api/v1/users/123", nil)
+	req.AddCookie(&http.Cookie{Name: "hubplay_access", Value: "some-jwt"})
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 
