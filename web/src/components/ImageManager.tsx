@@ -26,7 +26,12 @@ const IMAGE_TYPES = [
   { key: "backdrop", label: "imageManager.backdrop" },
   { key: "logo", label: "imageManager.logo" },
   { key: "banner", label: "imageManager.banner" },
+  { key: "thumb", label: "imageManager.thumb" },
 ] as const;
+
+function getAspectRatioClass(imageType: string): string {
+  return imageType === "primary" ? "aspect-[2/3]" : "aspect-video";
+}
 
 const ImageManager: FC<ImageManagerProps> = ({ itemId, isOpen, onClose }) => {
   const { t } = useTranslation();
@@ -241,6 +246,7 @@ const ImageManager: FC<ImageManagerProps> = ({ itemId, isOpen, onClose }) => {
                     image={img}
                     isDeleteConfirm={deleteConfirmId === img.id}
                     isMutating={isMutating}
+                    aspectRatioClass={getAspectRatioClass(activeTab)}
                     onSetPrimary={() => handleSetPrimary(img.id)}
                     onDeleteClick={() => setDeleteConfirmId(img.id)}
                     onDeleteConfirm={() => handleDelete(img.id)}
@@ -272,6 +278,7 @@ const ImageManager: FC<ImageManagerProps> = ({ itemId, isOpen, onClose }) => {
                     key={`${img.url}-${index}`}
                     image={img}
                     isSelecting={selectImage.isPending}
+                    aspectRatioClass={getAspectRatioClass(activeTab)}
                     onSelect={() => handleSelectImage(img)}
                     t={t}
                   />
@@ -292,6 +299,7 @@ interface CurrentImageCardProps {
   image: ImageInfo;
   isDeleteConfirm: boolean;
   isMutating: boolean;
+  aspectRatioClass: string;
   onSetPrimary: () => void;
   onDeleteClick: () => void;
   onDeleteConfirm: () => void;
@@ -303,6 +311,7 @@ const CurrentImageCard: FC<CurrentImageCardProps> = ({
   image,
   isDeleteConfirm,
   isMutating,
+  aspectRatioClass,
   onSetPrimary,
   onDeleteClick,
   onDeleteConfirm,
@@ -313,7 +322,7 @@ const CurrentImageCard: FC<CurrentImageCardProps> = ({
     <img
       src={image.path}
       alt={image.type}
-      className="w-full aspect-[2/3] object-cover"
+      className={`w-full ${aspectRatioClass} object-cover`}
       loading="lazy"
     />
 
@@ -367,6 +376,7 @@ const CurrentImageCard: FC<CurrentImageCardProps> = ({
 interface AvailableImageCardProps {
   image: AvailableImage;
   isSelecting: boolean;
+  aspectRatioClass: string;
   onSelect: () => void;
   t: (key: string, opts?: Record<string, unknown>) => string;
 }
@@ -374,6 +384,7 @@ interface AvailableImageCardProps {
 const AvailableImageCard: FC<AvailableImageCardProps> = ({
   image,
   isSelecting,
+  aspectRatioClass,
   onSelect,
   t,
 }) => (
@@ -381,7 +392,7 @@ const AvailableImageCard: FC<AvailableImageCardProps> = ({
     <img
       src={image.url}
       alt={image.type}
-      className="w-full aspect-[2/3] object-cover"
+      className={`w-full ${aspectRatioClass} object-cover`}
       loading="lazy"
     />
 

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import type { FormEvent } from "react";
 import type { ContentType, Library } from "@/api/types";
 import {
@@ -7,6 +7,7 @@ import {
   useUpdateLibrary,
   useScanLibrary,
   useDeleteLibrary,
+  useRefreshLibraryImages,
 } from "@/api/hooks";
 import { Button, Badge, Modal, Input, Spinner, EmptyState } from "@/components/common";
 import { FolderBrowser } from "@/components/setup/FolderBrowser";
@@ -49,8 +50,10 @@ export default function LibrariesAdmin() {
   const updateLibrary = useUpdateLibrary();
   const scanLibrary = useScanLibrary();
   const deleteLibrary = useDeleteLibrary();
+  const refreshImages = useRefreshLibraryImages();
 
   const [showAddModal, setShowAddModal] = useState(false);
+  const [refreshMessage, setRefreshMessage] = useState<{ type: "success" | "error"; text: string; libId: string } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Library | null>(null);
   const [editTarget, setEditTarget] = useState<Library | null>(null);
 
@@ -64,6 +67,13 @@ export default function LibrariesAdmin() {
   const [editName, setEditName] = useState("");
   const [editPath, setEditPath] = useState("");
   const [showEditBrowse, setShowEditBrowse] = useState(false);
+
+  // Auto-clear refresh message after 4 seconds
+  useEffect(() => {
+    if (!refreshMessage) return;
+    const timer = setTimeout(() => setRefreshMessage(null), 4000);
+    return () => clearTimeout(timer);
+  }, [refreshMessage]);
 
   function openEditModal(lib: Library) {
     setEditTarget(lib);
@@ -137,6 +147,20 @@ export default function LibrariesAdmin() {
         <Button onClick={() => setShowAddModal(true)}>{t('admin.libraries.addLibrary')}</Button>
       </div>
 
+      {/* Refresh images feedback */}
+      {refreshMessage && (
+        <div
+          className={[
+            "rounded-[--radius-md] px-4 py-2 text-sm",
+            refreshMessage.type === "success"
+              ? "bg-success/10 text-success"
+              : "bg-error/10 text-error",
+          ].join(" ")}
+        >
+          {refreshMessage.text}
+        </div>
+      )}
+
       {/* Table */}
       {libraries && libraries.length > 0 ? (
         <div className="overflow-x-auto rounded-[--radius-lg] border border-border">
@@ -204,6 +228,36 @@ export default function LibrariesAdmin() {
                         title={t('admin.libraries.refreshMetadataTooltip')}
                       >
                         {t('admin.libraries.refreshMetadata')}
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        isLoading={
+                          refreshImages.isPending &&
+                          refreshImages.variables?.libraryId === lib.id
+                        }
+                        disabled={lib.scan_status === "scanning"}
+                        onClick={() =>
+                          refreshImages.mutate(
+                            { libraryId: lib.id },
+                            {
+                              onSuccess: (data) =>
+                                setRefreshMessage({
+                                  type: "success",
+                                  text: t('admin.libraries.refreshImagesSuccess', { count: data.updated }),
+                                  libId: lib.id,
+                                }),
+                              onError: () =>
+                                setRefreshMessage({
+                                  type: "error",
+                                  text: t('admin.libraries.refreshImagesFailed'),
+                                  libId: lib.id,
+                                }),
+                            },
+                          )
+                        }
+                      >
+                        {t('admin.libraries.refreshImages')}
                       </Button>
                       <Button
                         variant="ghost"

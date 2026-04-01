@@ -529,6 +529,10 @@ export class ApiClient {
     return this.request<void>("DELETE", `/items/${itemId}/images/${imageId}`);
   }
 
+  async refreshLibraryImages(libraryId: string): Promise<{ updated: number }> {
+    return this.request<{ updated: number }>("POST", `/libraries/${libraryId}/images/refresh`);
+  }
+
   // ─── System ───────────────────────────────────────────────────────────
 
   async getHealth(): Promise<HealthResponse> {

@@ -102,6 +102,131 @@ func TestImageRepository_GetPrimary_NotFound(t *testing.T) {
 	}
 }
 
+func TestImageRepository_GetByID(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	libRepo := db.NewLibraryRepository(database)
+	itemRepo := db.NewItemRepository(database)
+	repo := db.NewImageRepository(database)
+	seedItemForImages(t, libRepo, itemRepo)
+
+	now := time.Now()
+	if err := repo.Create(context.Background(), &db.Image{
+		ID: "img-get", ItemID: "item-img", Type: "primary",
+		Path: "/images/get.jpg", Width: 640, Height: 960,
+		Blurhash: "LEHV6nWB2yk8", Provider: "tmdb",
+		IsPrimary: true, AddedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := repo.GetByID(context.Background(), "img-get")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.ID != "img-get" {
+		t.Errorf("expected ID img-get, got %q", got.ID)
+	}
+	if got.Width != 640 || got.Height != 960 {
+		t.Errorf("expected 640x960, got %dx%d", got.Width, got.Height)
+	}
+	if got.Blurhash != "LEHV6nWB2yk8" {
+		t.Errorf("expected blurhash LEHV6nWB2yk8, got %q", got.Blurhash)
+	}
+	if got.Provider != "tmdb" {
+		t.Errorf("expected provider tmdb, got %q", got.Provider)
+	}
+}
+
+func TestImageRepository_GetByID_NotFound(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	repo := db.NewImageRepository(database)
+
+	_, err := repo.GetByID(context.Background(), "nonexistent")
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestImageRepository_DeleteByID(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	libRepo := db.NewLibraryRepository(database)
+	itemRepo := db.NewItemRepository(database)
+	repo := db.NewImageRepository(database)
+	seedItemForImages(t, libRepo, itemRepo)
+
+	now := time.Now()
+	if err := repo.Create(context.Background(), &db.Image{
+		ID: "img-del1", ItemID: "item-img", Type: "primary",
+		Path: "/images/del1.jpg", AddedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Create(context.Background(), &db.Image{
+		ID: "img-del2", ItemID: "item-img", Type: "backdrop",
+		Path: "/images/del2.jpg", AddedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := repo.DeleteByID(context.Background(), "img-del1"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Only img-del2 should remain.
+	got, _ := repo.ListByItem(context.Background(), "item-img")
+	if len(got) != 1 {
+		t.Fatalf("expected 1 image after delete, got %d", len(got))
+	}
+	if got[0].ID != "img-del2" {
+		t.Errorf("expected img-del2 to remain, got %q", got[0].ID)
+	}
+}
+
+func TestImageRepository_SetPrimary(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	libRepo := db.NewLibraryRepository(database)
+	itemRepo := db.NewItemRepository(database)
+	repo := db.NewImageRepository(database)
+	seedItemForImages(t, libRepo, itemRepo)
+
+	now := time.Now()
+	if err := repo.Create(context.Background(), &db.Image{
+		ID: "img-sp1", ItemID: "item-img", Type: "primary",
+		Path: "/images/sp1.jpg", IsPrimary: true, AddedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Create(context.Background(), &db.Image{
+		ID: "img-sp2", ItemID: "item-img", Type: "primary",
+		Path: "/images/sp2.jpg", IsPrimary: false, AddedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Switch primary to img-sp2.
+	if err := repo.SetPrimary(context.Background(), "item-img", "primary", "img-sp2"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify img-sp2 is now primary.
+	got, err := repo.GetPrimary(context.Background(), "item-img", "primary")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.ID != "img-sp2" {
+		t.Errorf("expected img-sp2 as primary, got %q", got.ID)
+	}
+
+	// Verify img-sp1 is no longer primary.
+	img1, err := repo.GetByID(context.Background(), "img-sp1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if img1.IsPrimary {
+		t.Error("expected img-sp1 to no longer be primary")
+	}
+}
+
 func TestImageRepository_DeleteByItem(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	libRepo := db.NewLibraryRepository(database)

@@ -1,21 +1,28 @@
 package handlers
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"image"
+	_ "image/jpeg" // register JPEG decoder
+	_ "image/png"  // register PNG decoder
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"hubplay/internal/blurhash"
 	"hubplay/internal/db"
+	"hubplay/internal/imaging"
 	"hubplay/internal/provider"
 )
 
@@ -177,6 +184,9 @@ func (h *ImageHandler) Select(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Generate blurhash from the saved image data.
+	bhash := h.computeBlurhash(imgData)
+
 	// Create DB record
 	imgID := uuid.NewString()
 	img := &db.Image{
@@ -186,6 +196,7 @@ func (h *ImageHandler) Select(w http.ResponseWriter, r *http.Request) {
 		Path:      "/api/v1/images/file/" + imgID,
 		Width:     body.Width,
 		Height:    body.Height,
+		Blurhash:  bhash,
 		Provider:  "local",
 		IsPrimary: false,
 		AddedAt:   time.Now(),
@@ -257,12 +268,16 @@ func (h *ImageHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Generate blurhash from the uploaded image data.
+	bhash := h.computeBlurhash(imgData)
+
 	imgID := uuid.NewString()
 	img := &db.Image{
 		ID:        imgID,
 		ItemID:    itemID,
 		Type:      imgType,
 		Path:      "/api/v1/images/file/" + imgID,
+		Blurhash:  bhash,
 		Provider:  "upload",
 		IsPrimary: false,
 		AddedAt:   time.Now(),
@@ -343,7 +358,127 @@ func (h *ImageHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// RefreshImages fetches new images from providers for all items in a library.
+// Only image types that are not already present are added. Limited to 50 items per batch.
+func (h *ImageHandler) RefreshImages(w http.ResponseWriter, r *http.Request) {
+	libraryID := chi.URLParam(r, "id")
+
+	// Get items in the library (root items only, limited to 50).
+	items, _, err := h.items.List(r.Context(), db.ItemFilter{
+		LibraryID: libraryID,
+		Limit:     50,
+	})
+	if err != nil {
+		h.logger.Error("failed to list items for image refresh", "library", libraryID, "error", err)
+		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list items")
+		return
+	}
+
+	updated := 0
+	for _, item := range items {
+		// Get external IDs for this item.
+		extIDs, err := h.externalIDs.ListByItem(r.Context(), item.ID)
+		if err != nil || len(extIDs) == 0 {
+			continue
+		}
+
+		idMap := make(map[string]string, len(extIDs))
+		for _, e := range extIDs {
+			idMap[e.Provider] = e.ExternalID
+		}
+
+		// Determine item type for provider query.
+		itemType := provider.ItemMovie
+		switch item.Type {
+		case "series":
+			itemType = provider.ItemSeries
+		case "season":
+			itemType = provider.ItemSeason
+		case "episode":
+			itemType = provider.ItemEpisode
+		}
+
+		// Fetch available images from providers.
+		results, err := h.providers.FetchImages(r.Context(), idMap, itemType)
+		if err != nil || len(results) == 0 {
+			continue
+		}
+
+		// Get existing images for this item.
+		existing, err := h.images.ListByItem(r.Context(), item.ID)
+		if err != nil {
+			continue
+		}
+		existingTypes := make(map[string]bool, len(existing))
+		for _, img := range existing {
+			existingTypes[img.Type] = true
+		}
+
+		// Add missing image types (pick the highest-scored result per type).
+		bestByType := make(map[string]provider.ImageResult)
+		for _, img := range results {
+			if !isValidImageType(img.Type) {
+				continue
+			}
+			if existingTypes[img.Type] {
+				continue
+			}
+			if cur, ok := bestByType[img.Type]; !ok || img.Score > cur.Score {
+				bestByType[img.Type] = img
+			}
+		}
+
+		for imgType, best := range bestByType {
+			// Download the image.
+			imgData, contentType, err := h.downloadImage(best.URL)
+			if err != nil {
+				h.logger.Warn("refresh: failed to download image", "url", best.URL, "error", err)
+				continue
+			}
+
+			ext := extensionForContentType(contentType)
+			hash := sha256.Sum256(imgData)
+			filename := fmt.Sprintf("%s_%s%s", imgType, hex.EncodeToString(hash[:8]), ext)
+			localPath, err := h.saveImageFile(item.ID, filename, imgData)
+			if err != nil {
+				continue
+			}
+
+			bhash := h.computeBlurhash(imgData)
+
+			imgID := uuid.NewString()
+			dbImg := &db.Image{
+				ID:        imgID,
+				ItemID:    item.ID,
+				Type:      imgType,
+				Path:      "/api/v1/images/file/" + imgID,
+				Width:     best.Width,
+				Height:    best.Height,
+				Blurhash:  bhash,
+				Provider:  "refresh",
+				IsPrimary: true,
+				AddedAt:   time.Now(),
+			}
+
+			if err := h.images.Create(r.Context(), dbImg); err != nil {
+				os.Remove(localPath) //nolint:errcheck
+				continue
+			}
+
+			if err := h.images.SetPrimary(r.Context(), item.ID, imgType, imgID); err != nil {
+				h.logger.Warn("refresh: failed to set primary", "error", err)
+			}
+
+			h.writePathMapping(imgID, localPath)
+			updated++
+		}
+	}
+
+	respondJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"updated": updated}})
+}
+
 // ServeFile serves a locally stored image by its ID.
+// Supports an optional "w" query parameter for thumbnail generation (e.g. ?w=300).
 func (h *ImageHandler) ServeFile(w http.ResponseWriter, r *http.Request) {
 	imageID := chi.URLParam(r, "id")
 
@@ -362,6 +497,26 @@ func (h *ImageHandler) ServeFile(w http.ResponseWriter, r *http.Request) {
 		}
 		respondError(w, http.StatusNotFound, "NOT_FOUND", "image file not found")
 		return
+	}
+
+	// Check for thumbnail width request.
+	if wStr := r.URL.Query().Get("w"); wStr != "" {
+		maxWidth, err := strconv.Atoi(wStr)
+		if err == nil && maxWidth > 0 && maxWidth < 4096 {
+			thumbDir := filepath.Join(h.imageDir, ".thumbnails")
+			thumbPath := filepath.Join(thumbDir, fmt.Sprintf("%s_w%d%s", imageID, maxWidth, filepath.Ext(localPath)))
+			// Serve cached thumbnail if it exists.
+			if _, err := os.Stat(thumbPath); err != nil {
+				// Generate the thumbnail.
+				if genErr := imaging.GenerateThumbnail(localPath, thumbPath, maxWidth); genErr != nil {
+					h.logger.Warn("failed to generate thumbnail, serving original", "error", genErr)
+					http.ServeFile(w, r, localPath)
+					return
+				}
+			}
+			http.ServeFile(w, r, thumbPath)
+			return
+		}
 	}
 
 	http.ServeFile(w, r, localPath)
@@ -443,6 +598,17 @@ func isValidImageContentType(ct string) bool {
 		return true
 	}
 	return false
+}
+
+// computeBlurhash decodes the raw image bytes and produces a blurhash string.
+// Returns an empty string if the image cannot be decoded (e.g. WebP).
+func (h *ImageHandler) computeBlurhash(data []byte) string {
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		h.logger.Warn("failed to decode image for blurhash", "error", err)
+		return ""
+	}
+	return blurhash.Encode(4, 3, img)
 }
 
 func extensionForContentType(ct string) string {

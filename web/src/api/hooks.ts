@@ -415,6 +415,16 @@ export function useDeleteImage() {
   });
 }
 
+export function useRefreshLibraryImages() {
+  const queryClient = useQueryClient();
+  return useMutation<{ updated: number }, Error, { libraryId: string }>({
+    mutationFn: ({ libraryId }) => api.refreshLibraryImages(libraryId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["libraries"] });
+    },
+  });
+}
+
 // ─── Mutation Hooks ─────────────────────────────────────────────────────────
 
 export function useLogin() {

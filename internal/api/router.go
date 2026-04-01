@@ -174,6 +174,7 @@ func NewRouter(deps Dependencies) http.Handler {
 						r.Delete("/", libHandler.Delete)
 						r.Post("/scan", libHandler.Scan)
 					})
+
 				})
 				r.Group(func(r chi.Router) {
 					r.Use(auth.RequireAdmin)
@@ -239,6 +240,12 @@ func NewRouter(deps Dependencies) http.Handler {
 
 				// Serve local image files
 				r.Get("/images/file/{id}", imgHandler.ServeFile)
+
+				// Admin: batch refresh images for a library
+				r.Group(func(r chi.Router) {
+					r.Use(auth.RequireAdmin)
+					r.Post("/libraries/{id}/images/refresh", imgHandler.RefreshLibraryImages)
+				})
 			}
 
 			// Providers (metadata, images, subtitles)
