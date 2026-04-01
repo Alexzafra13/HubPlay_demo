@@ -71,7 +71,13 @@ func NewRouter(deps Dependencies) http.Handler {
 	// Handlers
 	authHandler := handlers.NewAuthHandler(deps.Auth, deps.Users, deps.Config.Auth, deps.Logger)
 	userHandler := handlers.NewUserHandler(deps.Users, deps.Logger)
-	healthHandler := handlers.NewHealthHandler(deps.Database, deps.StreamManager, deps.Version)
+
+	// Avoid wrapping a nil concrete pointer in a non-nil interface.
+	var streamSvc handlers.StreamManagerService
+	if deps.StreamManager != nil {
+		streamSvc = deps.StreamManager
+	}
+	healthHandler := handlers.NewHealthHandler(deps.Database, streamSvc, deps.Version)
 
 	// Public routes
 	r.Route("/api/v1", func(r chi.Router) {
