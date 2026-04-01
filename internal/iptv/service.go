@@ -239,7 +239,7 @@ func (s *Service) fetchURL(ctx context.Context, url string) (io.ReadCloser, erro
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
-	req.Header.Set("User-Agent", "HubPlay/1.0")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
