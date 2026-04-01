@@ -1,7 +1,8 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { useParams } from "react-router";
 import { useTranslation } from "react-i18next";
-import { useItem, useItemChildren } from "@/api/hooks";
+import { useQueryClient } from "@tanstack/react-query";
+import { useItem, useItemChildren, queryKeys } from "@/api/hooks";
 import { api } from "@/api/client";
 import type { MediaItem, PlaybackMethod } from "@/api/types";
 import { Spinner, EmptyState } from "@/components/common";
@@ -17,6 +18,8 @@ export default function ItemDetail() {
   const user = useAuthStore((s) => s.user);
   const isAdmin = user?.role === "admin";
 
+  const queryClient = useQueryClient();
+
   // Image manager state
   const [imageManagerOpen, setImageManagerOpen] = useState(false);
 
@@ -29,6 +32,21 @@ export default function ItemDetail() {
   } | null>(null);
   const [playError, setPlayError] = useState<string | null>(null);
   const isPlayingRef = useRef(false);
+
+  // Episode context for prefetching next episode
+  const [playingItemId, setPlayingItemId] = useState<string | null>(null);
+  const [siblingEpisodes, setSiblingEpisodes] = useState<MediaItem[]>([]);
+
+  // Fetch sibling episodes when the current item is an episode
+  const parentId = item?.parent_id;
+  const { data: siblings } = useItemChildren(parentId ?? "", { enabled: !!parentId && item?.type === "episode" });
+  useEffect(() => {
+    if (siblings && siblings.length > 0) {
+      const episodes = siblings.filter((s) => s.type === "episode")
+        .sort((a, b) => (a.episode_number ?? 0) - (b.episode_number ?? 0));
+      setSiblingEpisodes(episodes);
+    }
+  }, [siblings]);
 
   const cleanupSession = useCallback(async (itemId: string) => {
     try {
@@ -68,6 +86,7 @@ export default function ItemDetail() {
         : null;
 
       isPlayingRef.current = true;
+      setPlayingItemId(id);
       setPlayerInfo({ playbackMethod: method, masterPlaylistUrl: masterUrl, directUrl });
       setShowPlayer(true);
     } catch {
@@ -75,13 +94,60 @@ export default function ItemDetail() {
     }
   }, [id, cleanupSession]);
 
+  // Prefetch next episode's item data when an episode starts playing
+  useEffect(() => {
+    if (!playingItemId || siblingEpisodes.length === 0) return;
+    const idx = siblingEpisodes.findIndex((ep) => ep.id === playingItemId);
+    const nextEp = idx >= 0 ? siblingEpisodes[idx + 1] : undefined;
+    if (nextEp) {
+      queryClient.prefetchQuery({
+        queryKey: queryKeys.item(nextEp.id),
+        queryFn: () => api.getItem(nextEp.id),
+        staleTime: 5 * 60 * 1000,
+      });
+    }
+  }, [playingItemId, siblingEpisodes, queryClient]);
+
+  const handlePlayerEnded = useCallback(() => {
+    if (!playingItemId || siblingEpisodes.length === 0) return;
+    const idx = siblingEpisodes.findIndex((ep) => ep.id === playingItemId);
+    const nextEp = idx >= 0 ? siblingEpisodes[idx + 1] : undefined;
+    if (!nextEp) return;
+
+    // Auto-play next episode
+    setPlayingItemId(nextEp.id);
+    (async () => {
+      try {
+        if (isPlayingRef.current && playingItemId) {
+          await cleanupSession(playingItemId);
+        }
+        const info = await api.getStreamInfo(nextEp.id);
+        const rawMethod = (info as Record<string, unknown>).method as string ?? "";
+        const methodMap: Record<string, PlaybackMethod> = {
+          DirectPlay: "direct_play", DirectStream: "direct_stream", Transcode: "transcode",
+        };
+        const method: PlaybackMethod = methodMap[rawMethod] ?? "transcode";
+        isPlayingRef.current = true;
+        setPlayerInfo({
+          playbackMethod: method,
+          masterPlaylistUrl: method !== "direct_play" ? `/api/v1/stream/${nextEp.id}/master.m3u8` : null,
+          directUrl: method === "direct_play" ? `/api/v1/stream/${nextEp.id}/direct` : null,
+        });
+      } catch {
+        setShowPlayer(false);
+        setPlayerInfo(null);
+      }
+    })();
+  }, [playingItemId, siblingEpisodes, cleanupSession]);
+
   const handleClosePlayer = useCallback(async () => {
     setShowPlayer(false);
     setPlayerInfo(null);
-    if (id) {
-      await cleanupSession(id);
+    setPlayingItemId(null);
+    if (playingItemId || id) {
+      await cleanupSession(playingItemId || id!);
     }
-  }, [id, cleanupSession]);
+  }, [id, playingItemId, cleanupSession]);
 
   if (isLoading) {
     return (
@@ -114,9 +180,9 @@ export default function ItemDetail() {
   return (
     <div className="flex flex-col">
       {/* Video Player Overlay */}
-      {showPlayer && playerInfo && id && (
+      {showPlayer && playerInfo && (playingItemId || id) && (
         <VideoPlayer
-          itemId={id}
+          itemId={playingItemId || id!}
           sessionToken=""
           masterPlaylistUrl={playerInfo.masterPlaylistUrl}
           directUrl={playerInfo.directUrl}
@@ -128,6 +194,7 @@ export default function ItemDetail() {
               : undefined
           }
           onClose={handleClosePlayer}
+          onEnded={handlePlayerEnded}
         />
       )}
 

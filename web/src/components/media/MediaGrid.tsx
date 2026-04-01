@@ -1,3 +1,4 @@
+import { useRef, useState, useEffect, useCallback } from "react";
 import type { FC } from "react";
 import type { MediaItem } from "@/api/types";
 import { Skeleton } from "@/components/common/Skeleton";
@@ -11,12 +12,42 @@ interface MediaGridProps {
 }
 
 const SKELETON_COUNT = 8;
+const BATCH_SIZE = 40;
 
 const MediaGrid: FC<MediaGridProps> = ({
   items,
   loading,
   emptyMessage = "No items found",
 }) => {
+  const [visibleCount, setVisibleCount] = useState(BATCH_SIZE);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+
+  // Reset visible count when items change (e.g. navigation)
+  useEffect(() => {
+    setVisibleCount(BATCH_SIZE);
+  }, [items]);
+
+  // IntersectionObserver to load more items as user scrolls
+  const observerCallback = useCallback(
+    (entries: IntersectionObserverEntry[]) => {
+      if (entries[0]?.isIntersecting) {
+        setVisibleCount((prev) => Math.min(prev + BATCH_SIZE, items.length));
+      }
+    },
+    [items.length],
+  );
+
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel) return;
+
+    const observer = new IntersectionObserver(observerCallback, {
+      rootMargin: "400px",
+    });
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [observerCallback]);
+
   if (loading) {
     return (
       <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-4">
@@ -51,12 +82,19 @@ const MediaGrid: FC<MediaGridProps> = ({
     );
   }
 
+  const visible = items.slice(0, visibleCount);
+
   return (
-    <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-4">
-      {items.map((item) => (
-        <PosterCard key={item.id} item={item} />
-      ))}
-    </div>
+    <>
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-4">
+        {visible.map((item) => (
+          <PosterCard key={item.id} item={item} />
+        ))}
+      </div>
+      {visibleCount < items.length && (
+        <div ref={sentinelRef} className="h-1" aria-hidden="true" />
+      )}
+    </>
   );
 };
 

@@ -20,6 +20,7 @@ interface VideoPlayerProps {
   knownDuration?: number;
   title?: string;
   onClose: () => void;
+  onEnded?: () => void;
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -34,6 +35,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
   knownDuration,
   title,
   onClose,
+  onEnded: onEndedCallback,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -216,6 +218,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
       setIsPlaying(false);
       keepControlsVisible();
       api.markPlayed(itemId).catch(() => {});
+      onEndedCallback?.();
     };
 
     video.addEventListener("play", onPlay);
@@ -229,7 +232,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
       video.removeEventListener("timeupdate", onTimeUpdate);
       video.removeEventListener("ended", onEnded);
     };
-  }, [itemId, knownDuration, showControls, keepControlsVisible, updateTime]);
+  }, [itemId, knownDuration, showControls, keepControlsVisible, updateTime, onEndedCallback]);
 
   // ─── Fullscreen change listener ──────────────────────────────────────────
 

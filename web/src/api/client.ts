@@ -91,12 +91,28 @@ export class ApiClient {
       }
     }
 
-    const response = await fetch(url, {
-      method,
-      headers,
-      credentials: "include",
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
+    // Retry with exponential backoff for 5xx / network errors (up to 2 retries).
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- assigned inside loop before break
+    let response!: Response;
+    const maxRetries = 2;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        response = await fetch(url, {
+          method,
+          headers,
+          credentials: "include",
+          body: body !== undefined ? JSON.stringify(body) : undefined,
+        });
+        // Only retry on server errors for idempotent methods
+        const isRetryable = response.status >= 500 && (method === "GET" || method === "HEAD");
+        if (!isRetryable || attempt >= maxRetries) break;
+      } catch (err) {
+        // Network error — retry any method (request never reached server)
+        if (attempt >= maxRetries) throw err;
+      }
+      // Exponential backoff: 500ms, 1000ms
+      await new Promise((r) => setTimeout(r, 500 * Math.pow(2, attempt)));
+    }
 
     if (!response.ok) {
       // If token expired, try to refresh once
