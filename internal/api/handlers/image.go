@@ -499,6 +499,10 @@ func (h *ImageHandler) ServeFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Images are content-addressed by ID and rarely change.
+	// Cache aggressively with stale-while-revalidate for seamless background refresh.
+	w.Header().Set("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800")
+
 	// Check for thumbnail width request.
 	if wStr := r.URL.Query().Get("w"); wStr != "" {
 		maxWidth, err := strconv.Atoi(wStr)
