@@ -360,7 +360,7 @@ func (h *ImageHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 // RefreshImages fetches new images from providers for all items in a library.
 // Only image types that are not already present are added. Limited to 50 items per batch.
-func (h *ImageHandler) RefreshImages(w http.ResponseWriter, r *http.Request) {
+func (h *ImageHandler) RefreshLibraryImages(w http.ResponseWriter, r *http.Request) {
 	libraryID := chi.URLParam(r, "id")
 
 	// Get items in the library (root items only, limited to 50).
