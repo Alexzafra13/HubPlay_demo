@@ -20,10 +20,10 @@ const PosterCard: FC<PosterCardProps> = memo(({ item, progress, onClick }) => {
     <Link
       to={href}
       onClick={onClick}
-      className="group relative flex flex-col gap-2 outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg-card rounded-[--radius-lg]"
+      className="group flex flex-col outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg-card rounded-[--radius-lg]"
     >
       {/* Poster image */}
-      <div className="relative aspect-[2/3] overflow-hidden rounded-[--radius-lg] bg-bg-elevated transition-all duration-300 group-hover:scale-[1.03] group-hover:shadow-lg group-hover:shadow-accent/10">
+      <div className="relative aspect-[2/3] overflow-hidden rounded-[--radius-lg] bg-bg-elevated transition-transform duration-300 group-hover:scale-[1.03]">
         {item.poster_url ? (
           <img
             src={item.poster_url}
@@ -39,25 +39,28 @@ const PosterCard: FC<PosterCardProps> = memo(({ item, progress, onClick }) => {
           </div>
         )}
 
-        {/* Hover overlay */}
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/60 opacity-0 transition-opacity duration-300 group-hover:opacity-100">
-          {/* Play button */}
-          <div className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-white bg-white/10 backdrop-blur-sm">
+        {/* Hover: subtle play icon, no text overlay */}
+        <div className="absolute inset-0 flex items-center justify-center bg-black/0 transition-colors duration-200 group-hover:bg-black/30">
+          <div className="flex h-11 w-11 items-center justify-center rounded-full bg-white/20 backdrop-blur-sm opacity-0 scale-90 transition-all duration-200 group-hover:opacity-100 group-hover:scale-100">
             <svg
-              className="h-5 w-5 text-white"
+              className="h-5 w-5 text-white ml-0.5"
               viewBox="0 0 24 24"
               fill="currentColor"
             >
               <path d="M8 5v14l11-7z" />
             </svg>
           </div>
-          <p className="px-3 text-center text-sm font-semibold text-white">
-            {item.title}
-          </p>
-          {item.year != null && (
-            <p className="text-xs text-white/70">{item.year}</p>
-          )}
         </div>
+
+        {/* Rating badge — top right */}
+        {item.community_rating != null && (
+          <div className="absolute top-2 right-2 flex items-center gap-1 rounded-[--radius-sm] bg-black/70 backdrop-blur-sm px-1.5 py-0.5 text-[11px] font-semibold text-white">
+            <svg className="h-2.5 w-2.5 text-warning" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+            </svg>
+            {formatRating(item.community_rating)}
+          </div>
+        )}
 
         {/* Progress bar */}
         {progress != null && progress > 0 && (
@@ -70,24 +73,18 @@ const PosterCard: FC<PosterCardProps> = memo(({ item, progress, onClick }) => {
         )}
       </div>
 
-      {/* Info below poster */}
-      <div className="flex flex-col gap-0.5 px-0.5">
-        <p className="truncate text-sm font-medium text-text-primary">
+      {/* Info below — clean, no overlap */}
+      <div className="flex flex-col gap-0.5 pt-2 px-0.5">
+        <p className="truncate text-sm font-medium text-text-primary group-hover:text-white transition-colors">
           {item.title}
         </p>
-        <div className="flex items-center gap-2 text-xs text-text-muted">
+        <div className="flex items-center gap-1.5 text-xs text-text-muted">
           {item.year != null && <span>{item.year}</span>}
-          {item.community_rating != null && (
-            <span className="flex items-center gap-0.5">
-              <svg
-                className="h-3 w-3 text-warning"
-                viewBox="0 0 24 24"
-                fill="currentColor"
-              >
-                <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
-              </svg>
-              {formatRating(item.community_rating)}
-            </span>
+          {item.genres?.length > 0 && (
+            <>
+              {item.year != null && <span className="text-text-muted/40">·</span>}
+              <span className="truncate">{item.genres.slice(0, 2).join(", ")}</span>
+            </>
           )}
         </div>
       </div>
