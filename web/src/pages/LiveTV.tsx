@@ -416,10 +416,12 @@ function ChannelPlayer({ channel }: { channel: Channel }) {
         fragLoadingMaxRetry: 6,
         fragLoadingRetryDelay: 1000,
         fragLoadingMaxRetryTimeout: 8000,
-        xhrSetup: (xhr, url) => {
-          // All HLS requests now go through our proxy (URLs start with "/")
-          if (token && url.startsWith("/")) {
-            xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+        xhrSetup: (xhr) => {
+          // Always send auth header — HLS.js resolves URLs to absolute,
+          // so url.startsWith("/") would never match
+          const accessToken = localStorage.getItem("hubplay_access_token");
+          if (accessToken) {
+            xhr.setRequestHeader("Authorization", `Bearer ${accessToken}`);
           }
         },
       });
