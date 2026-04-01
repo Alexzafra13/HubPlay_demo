@@ -359,12 +359,22 @@ function ChannelPlayer({ channel }: { channel: Channel }) {
   const hlsRef = useRef<Hls | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const networkRetryCount = useRef(0);
 
-  useEffect(() => {
+  const loadChannel = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
     setError(null);
     setLoading(true);
+    networkRetryCount.current = 0;
+
+    // Clean up previous instance
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+      hlsRef.current = null;
+    }
+    video.removeAttribute("src");
+    video.load();
 
     const streamUrl = channel.stream_url;
     const token = localStorage.getItem("hubplay_access_token");
@@ -394,12 +404,18 @@ function ChannelPlayer({ channel }: { channel: Channel }) {
         lowLatencyMode: false,
         maxBufferLength: 30,
         maxMaxBufferLength: 60,
-        manifestLoadingMaxRetry: 3,
+        backBufferLength: 30,
+        liveSyncDurationCount: 3,
+        liveMaxLatencyDurationCount: 6,
+        manifestLoadingMaxRetry: 6,
         manifestLoadingRetryDelay: 1000,
-        levelLoadingMaxRetry: 4,
+        manifestLoadingMaxRetryTimeout: 8000,
+        levelLoadingMaxRetry: 6,
         levelLoadingRetryDelay: 1000,
-        fragLoadingMaxRetry: 4,
+        levelLoadingMaxRetryTimeout: 8000,
+        fragLoadingMaxRetry: 6,
         fragLoadingRetryDelay: 1000,
+        fragLoadingMaxRetryTimeout: 8000,
         xhrSetup: (xhr, url) => {
           // All HLS requests now go through our proxy (URLs start with "/")
           if (token && url.startsWith("/")) {
@@ -421,6 +437,16 @@ function ChannelPlayer({ channel }: { channel: Channel }) {
         if (data.fatal) {
           if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
             hls.recoverMediaError();
+          } else if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+            // Retry network errors up to 3 times before falling back
+            if (networkRetryCount.current < 3) {
+              networkRetryCount.current++;
+              hls.startLoad();
+            } else {
+              hls.destroy();
+              hlsRef.current = null;
+              startDirectPlayback();
+            }
           } else {
             // HLS failed — fall back to direct <video> (works for raw TS via proxy)
             hls.destroy();
@@ -449,6 +475,10 @@ function ChannelPlayer({ channel }: { channel: Channel }) {
     };
   }, [channel.stream_url, t]);
 
+  useEffect(() => {
+    return loadChannel();
+  }, [loadChannel]);
+
   return (
     <div className="relative h-full w-full bg-black">
       {loading && !error && (
@@ -464,6 +494,13 @@ function ChannelPlayer({ channel }: { channel: Channel }) {
               <path d="M7 22h10M12 18v4" />
             </svg>
             <p className="text-xs text-text-muted">{error}</p>
+            <button
+              type="button"
+              onClick={loadChannel}
+              className="mt-3 px-4 py-1.5 rounded-lg bg-white/10 text-xs text-text-secondary hover:bg-white/20 hover:text-text-primary transition-all"
+            >
+              {t('common.retry')}
+            </button>
           </div>
         </div>
       )}
