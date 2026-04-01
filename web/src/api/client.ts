@@ -1,10 +1,12 @@
 import type {
   AuthResponse,
+  AvailableImage,
   BrowseResponse,
   Channel,
   CreateLibraryRequest,
   EPGProgram,
   HealthResponse,
+  ImageInfo,
   ImportPublicIPTVResponse,
   ItemDetail,
   Library,
@@ -479,6 +481,56 @@ export class ApiClient {
     data: { api_key?: string; status?: string; priority?: number; config?: Record<string, string> },
   ): Promise<{ name: string; status: string; priority: number }> {
     return this.request("PUT", `/providers/${name}`, { body: data });
+  }
+
+  // ─── Images ────────────────────────────────────────────────────────────
+
+  async getItemImages(itemId: string): Promise<ImageInfo[]> {
+    return this.request<ImageInfo[]>("GET", `/items/${itemId}/images`);
+  }
+
+  async getAvailableImages(itemId: string, type?: string): Promise<AvailableImage[]> {
+    return this.request<AvailableImage[]>("GET", `/items/${itemId}/images/available`, {
+      params: { type },
+    });
+  }
+
+  async selectImage(itemId: string, type: string, data: { url: string; width: number; height: number }): Promise<ImageInfo> {
+    return this.request<ImageInfo>("PUT", `/items/${itemId}/images/${type}/select`, { body: data });
+  }
+
+  async uploadImage(itemId: string, type: string, file: File): Promise<ImageInfo> {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const token = localStorage.getItem(TOKEN_KEY);
+    const response = await fetch(`${this.baseUrl}/items/${itemId}/images/${type}/upload`, {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: formData,
+    });
+
+    if (!response.ok) {
+      throw new Error("Upload failed");
+    }
+
+    const json = await response.json();
+    if (json && typeof json === "object" && "data" in json) {
+      return json.data as ImageInfo;
+    }
+    return json as ImageInfo;
+  }
+
+  async setImagePrimary(itemId: string, imageId: string): Promise<ImageInfo> {
+    return this.request<ImageInfo>("PUT", `/items/${itemId}/images/${imageId}/primary`);
+  }
+
+  async deleteImage(itemId: string, imageId: string): Promise<void> {
+    return this.request<void>("DELETE", `/items/${itemId}/images/${imageId}`);
+  }
+
+  async refreshLibraryImages(libraryId: string): Promise<{ updated: number }> {
+    return this.request<{ updated: number }>("POST", `/libraries/${libraryId}/images/refresh`);
   }
 
   // ─── System ───────────────────────────────────────────────────────────

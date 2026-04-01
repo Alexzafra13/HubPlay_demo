@@ -222,6 +222,27 @@ export interface SystemCapabilities {
   hw_accels: string[];
 }
 
+// ─── Images ────────────────────────────────────────────────────────────────
+
+export interface ImageInfo {
+  id: string;
+  type: string;
+  path: string;
+  width?: number;
+  height?: number;
+  blurhash?: string;
+  is_primary: boolean;
+}
+
+export interface AvailableImage {
+  url: string;
+  type: string;
+  language: string;
+  width: number;
+  height: number;
+  score: number;
+}
+
 // ─── Errors ─────────────────────────────────────────────────────────────────
 
 export interface ApiErrorBody {

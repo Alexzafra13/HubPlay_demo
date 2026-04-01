@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -37,6 +38,7 @@ type Dependencies struct {
 	Metadata       *db.MetadataRepository
 	UserData       *db.UserDataRepository
 	Providers      *provider.Manager
+	ExternalIDs    *db.ExternalIDRepository
 	LibraryRepo    *db.LibraryRepository
 	ProviderRepo   *db.ProviderRepository
 	SetupService   *setup.Service
@@ -172,6 +174,7 @@ func NewRouter(deps Dependencies) http.Handler {
 						r.Delete("/", libHandler.Delete)
 						r.Post("/scan", libHandler.Scan)
 					})
+
 				})
 				r.Group(func(r chi.Router) {
 					r.Use(auth.RequireAdmin)
@@ -217,6 +220,31 @@ func NewRouter(deps Dependencies) http.Handler {
 				r.Route("/items/{id}", func(r chi.Router) {
 					r.Get("/", itemHandler.Get)
 					r.Get("/children", itemHandler.Children)
+				})
+			}
+
+			// Image management
+			if deps.Images != nil && deps.Providers != nil && deps.ExternalIDs != nil {
+				imageDir := filepath.Join(filepath.Dir(deps.Config.Database.Path), "images")
+				imgHandler := handlers.NewImageHandler(deps.Images, deps.ExternalIDs, deps.Items, deps.Providers, imageDir, deps.Logger)
+
+				// Image management (nested under items)
+				r.Route("/items/{id}/images", func(r chi.Router) {
+					r.Get("/", imgHandler.List)
+					r.Get("/available", imgHandler.Available)
+					r.Put("/{type}/select", imgHandler.Select)
+					r.Post("/{type}/upload", imgHandler.Upload)
+					r.Put("/{imageId}/primary", imgHandler.SetPrimary)
+					r.Delete("/{imageId}", imgHandler.Delete)
+				})
+
+				// Serve local image files
+				r.Get("/images/file/{id}", imgHandler.ServeFile)
+
+				// Admin: batch refresh images for a library
+				r.Group(func(r chi.Router) {
+					r.Use(auth.RequireAdmin)
+					r.Post("/libraries/{id}/images/refresh", imgHandler.RefreshLibraryImages)
 				})
 			}
 

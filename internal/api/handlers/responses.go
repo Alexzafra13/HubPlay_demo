@@ -23,6 +23,10 @@ func respondError(w http.ResponseWriter, status int, code, message string) {
 	})
 }
 
+func decodeJSON(r *http.Request, v any) error {
+	return json.NewDecoder(r.Body).Decode(v)
+}
+
 func handleServiceError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, domain.ErrNotFound):

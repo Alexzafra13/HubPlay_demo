@@ -8,10 +8,12 @@ import {
 import { api } from "./client";
 import type {
   AuthResponse,
+  AvailableImage,
   BrowseResponse,
   Channel,
   CreateLibraryRequest,
   HealthResponse,
+  ImageInfo,
   ImportPublicIPTVResponse,
   ItemDetail,
   Library,
@@ -45,6 +47,8 @@ export const queryKeys = {
   channelSchedule: (id: string) => ["channels", id, "schedule"] as const,
   channelGroups: (libraryId?: string) => ["channels", "groups", libraryId] as const,
   publicCountries: ["public-countries"] as const,
+  itemImages: (id: string) => ["items", id, "images"] as const,
+  availableImages: (id: string, type?: string) => ["items", id, "images", "available", type] as const,
   providers: ["providers"] as const,
   health: ["health"] as const,
   setupStatus: ["setup-status"] as const,
@@ -343,6 +347,81 @@ export function useBrowseLibraryDirectories(
     queryKey: ["browse-library", path] as const,
     queryFn: () => api.browseLibraryDirectories(path),
     ...options,
+  });
+}
+
+// ─── Image Hooks ───────────────────────────────────────────────────────────
+
+export function useItemImages(itemId: string, options?: Partial<UseQueryOptions<ImageInfo[]>>) {
+  return useQuery<ImageInfo[]>({
+    queryKey: queryKeys.itemImages(itemId),
+    queryFn: () => api.getItemImages(itemId),
+    enabled: !!itemId,
+    ...options,
+  });
+}
+
+export function useAvailableImages(itemId: string, type?: string, options?: Partial<UseQueryOptions<AvailableImage[]>>) {
+  return useQuery<AvailableImage[]>({
+    queryKey: queryKeys.availableImages(itemId, type),
+    queryFn: () => api.getAvailableImages(itemId, type),
+    enabled: !!itemId,
+    staleTime: 5 * 60 * 1000,
+    ...options,
+  });
+}
+
+export function useSelectImage() {
+  const queryClient = useQueryClient();
+  return useMutation<ImageInfo, Error, { itemId: string; type: string; url: string; width: number; height: number }>({
+    mutationFn: ({ itemId, type, ...data }) => api.selectImage(itemId, type, data),
+    onSuccess: (_data, { itemId }) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.itemImages(itemId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.item(itemId) });
+    },
+  });
+}
+
+export function useUploadImage() {
+  const queryClient = useQueryClient();
+  return useMutation<ImageInfo, Error, { itemId: string; type: string; file: File }>({
+    mutationFn: ({ itemId, type, file }) => api.uploadImage(itemId, type, file),
+    onSuccess: (_data, { itemId }) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.itemImages(itemId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.item(itemId) });
+    },
+  });
+}
+
+export function useSetImagePrimary() {
+  const queryClient = useQueryClient();
+  return useMutation<ImageInfo, Error, { itemId: string; imageId: string }>({
+    mutationFn: ({ itemId, imageId }) => api.setImagePrimary(itemId, imageId),
+    onSuccess: (_data, { itemId }) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.itemImages(itemId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.item(itemId) });
+    },
+  });
+}
+
+export function useDeleteImage() {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, { itemId: string; imageId: string }>({
+    mutationFn: ({ itemId, imageId }) => api.deleteImage(itemId, imageId),
+    onSuccess: (_data, { itemId }) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.itemImages(itemId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.item(itemId) });
+    },
+  });
+}
+
+export function useRefreshLibraryImages() {
+  const queryClient = useQueryClient();
+  return useMutation<{ updated: number }, Error, { libraryId: string }>({
+    mutationFn: ({ libraryId }) => api.refreshLibraryImages(libraryId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["libraries"] });
+    },
   });
 }
 
