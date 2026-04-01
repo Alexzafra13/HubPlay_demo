@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Link } from "react-router";
 import type { FC } from "react";
 import type { MediaItem } from "@/api/types";
@@ -12,7 +13,7 @@ function formatRating(rating: number): string {
   return rating.toFixed(1);
 }
 
-const PosterCard: FC<PosterCardProps> = ({ item, progress, onClick }) => {
+const PosterCard: FC<PosterCardProps> = memo(({ item, progress, onClick }) => {
   const href = item.type === "series" ? `/series/${item.id}` : `/movies/${item.id}`;
 
   return (
@@ -92,7 +93,9 @@ const PosterCard: FC<PosterCardProps> = ({ item, progress, onClick }) => {
       </div>
     </Link>
   );
-};
+});
+
+PosterCard.displayName = "PosterCard";
 
 export { PosterCard };
 export type { PosterCardProps };

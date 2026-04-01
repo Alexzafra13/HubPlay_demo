@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"hubplay/internal/auth"
-	"hubplay/internal/db"
 	"hubplay/internal/stream"
 
 	"github.com/go-chi/chi/v5"
@@ -24,18 +23,18 @@ var validSegmentName = regexp.MustCompile(`^(segment\d{5}\.ts|stream\.m3u8)$`)
 
 // StreamHandler serves media streams via HLS or direct play.
 type StreamHandler struct {
-	manager *stream.Manager
-	items   *db.ItemRepository
-	streams *db.MediaStreamRepository
+	manager StreamManagerService
+	items   ItemRepository
+	streams MediaStreamRepository
 	baseURL string
 	logger  *slog.Logger
 }
 
 // NewStreamHandler creates a new stream handler.
 func NewStreamHandler(
-	manager *stream.Manager,
-	items *db.ItemRepository,
-	streams *db.MediaStreamRepository,
+	manager StreamManagerService,
+	items ItemRepository,
+	streams MediaStreamRepository,
 	baseURL string,
 	logger *slog.Logger,
 ) *StreamHandler {

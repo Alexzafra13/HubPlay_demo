@@ -27,19 +27,19 @@ import (
 )
 
 type ImageHandler struct {
-	images      *db.ImageRepository
-	externalIDs *db.ExternalIDRepository
-	items       *db.ItemRepository
-	providers   *provider.Manager
+	images      ImageRepository
+	externalIDs ExternalIDRepository
+	items       ItemRepository
+	providers   ProviderManager
 	imageDir    string
 	logger      *slog.Logger
 }
 
 func NewImageHandler(
-	images *db.ImageRepository,
-	externalIDs *db.ExternalIDRepository,
-	items *db.ItemRepository,
-	providers *provider.Manager,
+	images ImageRepository,
+	externalIDs ExternalIDRepository,
+	items ItemRepository,
+	providers ProviderManager,
 	imageDir string,
 	logger *slog.Logger,
 ) *ImageHandler {

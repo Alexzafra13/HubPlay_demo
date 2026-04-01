@@ -9,7 +9,6 @@ import (
 	"hubplay/internal/config"
 	"hubplay/internal/db"
 	"hubplay/internal/domain"
-	"hubplay/internal/user"
 )
 
 const (
@@ -33,13 +32,13 @@ func authTokenResponse(token *auth.AuthToken, u *db.User) map[string]any {
 }
 
 type AuthHandler struct {
-	auth    *auth.Service
-	users   *user.Service
+	auth    AuthService
+	users   UserService
 	authCfg config.AuthConfig
 	logger  *slog.Logger
 }
 
-func NewAuthHandler(authSvc *auth.Service, userSvc *user.Service, authCfg config.AuthConfig, logger *slog.Logger) *AuthHandler {
+func NewAuthHandler(authSvc AuthService, userSvc UserService, authCfg config.AuthConfig, logger *slog.Logger) *AuthHandler {
 	return &AuthHandler{
 		auth:    authSvc,
 		users:   userSvc,

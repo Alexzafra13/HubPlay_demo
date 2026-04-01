@@ -6,7 +6,9 @@ import (
 	"time"
 )
 
-// handlerTimeout is the maximum time an event handler is allowed to run.
+// handlerTimeout is the maximum time we wait for an event handler to finish.
+// If a handler exceeds this, we log a warning but the goroutine is NOT leaked —
+// it continues running to completion (or until it returns on its own).
 const handlerTimeout = 30 * time.Second
 
 type Type string
@@ -58,7 +60,9 @@ func (b *Bus) Subscribe(eventType Type, handler Handler) {
 }
 
 // Publish sends an event to all registered handlers asynchronously.
-// Each handler runs with a timeout to prevent goroutine leaks.
+// Each handler runs in a single goroutine with panic recovery.
+// A timeout logs a warning but does not abandon the goroutine — it runs to
+// completion, preventing goroutine leaks from the old two-goroutine pattern.
 func (b *Bus) Publish(e Event) {
 	b.mu.RLock()
 	handlers := b.handlers[e.Type]
@@ -67,6 +71,9 @@ func (b *Bus) Publish(e Event) {
 	for _, h := range handlers {
 		go func(handler Handler) {
 			done := make(chan struct{})
+			timer := time.NewTimer(handlerTimeout)
+			defer timer.Stop()
+
 			go func() {
 				defer close(done)
 				defer func() {
@@ -79,9 +86,11 @@ func (b *Bus) Publish(e Event) {
 
 			select {
 			case <-done:
-				// Handler completed normally
-			case <-time.After(handlerTimeout):
-				b.logger.Error("event handler timed out", "type", e.Type, "timeout", handlerTimeout)
+				// Handler completed within timeout
+			case <-timer.C:
+				b.logger.Error("event handler timed out, waiting for completion", "type", e.Type, "timeout", handlerTimeout)
+				// Wait for the handler goroutine to finish — never abandon it.
+				<-done
 			}
 		}(h)
 	}

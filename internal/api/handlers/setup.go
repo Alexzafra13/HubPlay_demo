@@ -5,30 +5,27 @@ import (
 	"log/slog"
 	"net/http"
 
-	"hubplay/internal/auth"
 	"hubplay/internal/config"
 	"hubplay/internal/db"
 	"hubplay/internal/library"
-	"hubplay/internal/setup"
-	"hubplay/internal/user"
 )
 
 type SetupHandler struct {
-	setup     *setup.Service
-	auth      *auth.Service
-	libs      *library.Service
-	users     *user.Service
-	providers *db.ProviderRepository
+	setup     SetupService
+	auth      AuthService
+	libs      LibraryService
+	users     UserService
+	providers ProviderRepository
 	config    *config.Config
 	logger    *slog.Logger
 }
 
 func NewSetupHandler(
-	setupSvc *setup.Service,
-	authSvc *auth.Service,
-	libSvc *library.Service,
-	userSvc *user.Service,
-	providerRepo *db.ProviderRepository,
+	setupSvc SetupService,
+	authSvc AuthService,
+	libSvc LibraryService,
+	userSvc UserService,
+	providerRepo ProviderRepository,
 	cfg *config.Config,
 	logger *slog.Logger,
 ) *SetupHandler {

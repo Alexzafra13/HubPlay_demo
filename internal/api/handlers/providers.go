@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"strings"
 
-	"hubplay/internal/db"
 	"hubplay/internal/provider"
 
 	"github.com/go-chi/chi/v5"
@@ -14,13 +13,13 @@ import (
 
 // ProviderHandler handles provider management and metadata/image/subtitle lookups.
 type ProviderHandler struct {
-	manager *provider.Manager
-	repo    *db.ProviderRepository
+	manager ProviderManager
+	repo    ProviderRepository
 	logger  *slog.Logger
 }
 
 // NewProviderHandler creates a new provider handler.
-func NewProviderHandler(manager *provider.Manager, repo *db.ProviderRepository, logger *slog.Logger) *ProviderHandler {
+func NewProviderHandler(manager ProviderManager, repo ProviderRepository, logger *slog.Logger) *ProviderHandler {
 	return &ProviderHandler{
 		manager: manager,
 		repo:    repo,

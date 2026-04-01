@@ -17,13 +17,13 @@ import (
 )
 
 type LibraryHandler struct {
-	lib      *library.Service
-	images   *db.ImageRepository
-	metadata *db.MetadataRepository
+	lib      LibraryService
+	images   ImageRepository
+	metadata MetadataRepository
 	logger   *slog.Logger
 }
 
-func NewLibraryHandler(lib *library.Service, images *db.ImageRepository, metadata *db.MetadataRepository, logger *slog.Logger) *LibraryHandler {
+func NewLibraryHandler(lib LibraryService, images ImageRepository, metadata MetadataRepository, logger *slog.Logger) *LibraryHandler {
 	return &LibraryHandler{lib: lib, images: images, metadata: metadata, logger: logger}
 }
 

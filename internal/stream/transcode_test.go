@@ -21,7 +21,7 @@ func newTestTranscoder(t *testing.T) *stream.Transcoder {
 func TestNewTranscoder_DefaultFFmpeg(t *testing.T) {
 	dir := t.TempDir()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	tc := stream.NewTranscoder(dir, "", logger)
+	tc := stream.NewTranscoder(dir, "", 4*time.Hour, logger)
 	if tc == nil {
 		t.Fatal("expected non-nil transcoder")
 	}

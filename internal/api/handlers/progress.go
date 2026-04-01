@@ -7,20 +7,19 @@ import (
 	"strconv"
 
 	"hubplay/internal/auth"
-	"hubplay/internal/db"
 
 	"github.com/go-chi/chi/v5"
 )
 
 // ProgressHandler handles watch progress and user engagement endpoints.
 type ProgressHandler struct {
-	userData *db.UserDataRepository
-	images   *db.ImageRepository
+	userData UserDataRepository
+	images   ImageRepository
 	logger   *slog.Logger
 }
 
 // NewProgressHandler creates a new progress handler.
-func NewProgressHandler(userData *db.UserDataRepository, images *db.ImageRepository, logger *slog.Logger) *ProgressHandler {
+func NewProgressHandler(userData UserDataRepository, images ImageRepository, logger *slog.Logger) *ProgressHandler {
 	return &ProgressHandler{
 		userData: userData,
 		images:   images,

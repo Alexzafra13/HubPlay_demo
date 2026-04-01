@@ -25,6 +25,11 @@ import { ApiError } from "./types";
 
 const USER_KEY = "hubplay_user";
 
+function getCookie(name: string): string | undefined {
+  const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]) : undefined;
+}
+
 interface RequestOptions {
   params?: Record<string, string | number | boolean | undefined>;
   body?: unknown;
@@ -76,6 +81,14 @@ export class ApiClient {
 
     if (body !== undefined && (method === "POST" || method === "PUT" || method === "PATCH")) {
       headers["Content-Type"] = "application/json";
+    }
+
+    // Double-submit CSRF token (read from cookie set by the server)
+    if (method !== "GET" && method !== "HEAD" && method !== "OPTIONS") {
+      const csrfToken = getCookie("hubplay_csrf");
+      if (csrfToken) {
+        headers["X-CSRF-Token"] = csrfToken;
+      }
     }
 
     const response = await fetch(url, {
@@ -482,9 +495,16 @@ export class ApiClient {
     const formData = new FormData();
     formData.append("file", file);
 
+    const uploadHeaders: Record<string, string> = {};
+    const csrfToken = getCookie("hubplay_csrf");
+    if (csrfToken) {
+      uploadHeaders["X-CSRF-Token"] = csrfToken;
+    }
+
     const response = await fetch(`${this.baseUrl}/items/${itemId}/images/${type}/upload`, {
       method: "POST",
       credentials: "include",
+      headers: uploadHeaders,
       body: formData,
     });
 
