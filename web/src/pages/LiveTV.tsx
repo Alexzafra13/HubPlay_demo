@@ -185,7 +185,7 @@ export default function LiveTV() {
                   <h1 className="text-sm md:text-2xl font-bold text-white truncate drop-shadow-lg">
                     {activeChannel.name}
                   </h1>
-                  <span className="shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-500/90 text-[10px] md:text-xs font-bold text-white uppercase tracking-wider">
+                  <span className="shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded bg-live/90 text-[10px] md:text-xs font-bold text-white uppercase tracking-wider">
                     <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
                     {t('liveTV.live')}
                   </span>
@@ -445,7 +445,7 @@ function ChannelStrip({
                 {ch.name}
               </span>
               {isActive && (
-                <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse shrink-0" />
+                <span className="w-1.5 h-1.5 rounded-full bg-live animate-pulse shrink-0" />
               )}
             </button>
           );
@@ -499,7 +499,7 @@ function ChannelCard({
           </span>
         )}
         {isActive && (
-          <div className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+          <div className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-live animate-pulse" />
         )}
       </div>
 
@@ -510,7 +510,7 @@ function ChannelCard({
             {channel.name}
           </p>
           {isActive && (
-            <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+            <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-live animate-pulse" />
           )}
         </div>
 
@@ -817,7 +817,7 @@ function CountrySelector({ hasLibrary }: { hasLibrary: boolean }) {
           )}
 
           {importMutation.isError && (
-            <p className="mt-3 text-sm text-red-400">
+            <p className="mt-3 text-sm text-error">
               {t('liveTV.importFailed')}
             </p>
           )}

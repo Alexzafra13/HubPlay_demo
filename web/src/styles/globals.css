@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 /* ============================================
- * THEME: Deep Blue (default)
+ * THEME: HubPlay Teal
  * ============================================ */
 
 :root {
@@ -20,15 +20,16 @@
   --color-text-secondary: #94a3b8;
   --color-text-muted: #64748b;
 
-  /* Accent */
-  --color-accent: #3b82f6;
-  --color-accent-hover: #2563eb;
-  --color-accent-soft: #1e3a5f;
-  --color-accent-light: #60a5fa;
+  /* Accent — Teal */
+  --color-accent: #0d9488;
+  --color-accent-hover: #0f766e;
+  --color-accent-soft: #0d3d38;
+  --color-accent-light: #2dd4bf;
 
   /* Semantic */
   --color-success: #22c55e;
   --color-error: #ef4444;
+  --color-error-soft: rgba(239, 68, 68, 0.1);
   --color-warning: #f59e0b;
   --color-live: #ef4444;
 
@@ -68,6 +69,7 @@
   --color-accent-light: var(--color-accent-light);
   --color-success: var(--color-success);
   --color-error: var(--color-error);
+  --color-error-soft: var(--color-error-soft);
   --color-warning: var(--color-warning);
   --color-live: var(--color-live);
   --radius-sm: var(--radius-sm);

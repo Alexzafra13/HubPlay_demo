@@ -82,7 +82,7 @@ function HeroBanner({ items }: { items: MediaItem[] }) {
             {item.community_rating != null && (
               <span className="flex items-center gap-1 text-white/90">
                 <svg
-                  className="h-3.5 w-3.5 text-yellow-400"
+                  className="h-3.5 w-3.5 text-warning"
                   viewBox="0 0 24 24"
                   fill="currentColor"
                 >
