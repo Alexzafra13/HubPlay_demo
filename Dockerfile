@@ -1,29 +1,41 @@
 # ═══════════════════════════════════════════
 # Stage 1: Build frontend
 # ═══════════════════════════════════════════
-FROM node:22-slim AS frontend
+FROM node:22-alpine AS frontend
 
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN corepack enable && corepack prepare pnpm@9 --activate
 
 WORKDIR /web
 COPY web/package.json web/pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile
+RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile
 COPY web/ .
 RUN pnpm run build
 
 # ═══════════════════════════════════════════
 # Stage 2: Build backend
 # ═══════════════════════════════════════════
-FROM golang:1.24-bookworm AS backend
+FROM golang:1.24-alpine AS backend
 
 WORKDIR /src
-COPY go.mod go.sum ./
-RUN go mod download
 
-COPY . .
-# Inject built frontend into web/dist for go:embed
+# Download deps first (cached if go.mod/go.sum unchanged)
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
+
+# Copy only what the Go build needs
+COPY cmd/ cmd/
+COPY internal/ internal/
+COPY migrations/ migrations/
+COPY migrations.go ./
+
+# Inject built frontend for go:embed
 COPY --from=frontend /web/dist ./web/dist
-RUN CGO_ENABLED=0 go build -ldflags "-s -w" -o /hubplay ./cmd/hubplay
+
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /hubplay ./cmd/hubplay
 
 # ═══════════════════════════════════════════
 # Stage 3: Runtime (Alpine — lightweight)
