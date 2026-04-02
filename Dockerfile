@@ -68,8 +68,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     intel-opencl-icd \
     && rm -rf /var/lib/apt/lists/*
 
-RUN useradd -r -s /sbin/nologin hubplay && \
-    usermod -aG video,render hubplay
+RUN groupadd -f render && \
+    useradd -r -s /sbin/nologin -G video,render hubplay
 
 COPY --from=backend /hubplay /usr/local/bin/hubplay
 RUN mkdir -p /config /cache && chown hubplay:hubplay /config /cache
