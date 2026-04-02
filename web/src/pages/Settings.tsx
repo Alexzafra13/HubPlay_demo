@@ -235,7 +235,7 @@ export default function Settings() {
                   key={lib.id}
                   className={`rounded-[--radius-lg] border bg-bg-card p-4 ${
                     hasInaccessiblePaths
-                      ? "border-red-500/50"
+                      ? "border-error/50"
                       : "border-border"
                   }`}
                 >
@@ -276,7 +276,7 @@ export default function Settings() {
                               strokeWidth="1.5"
                               strokeLinecap="round"
                               strokeLinejoin="round"
-                              className="text-red-400 flex-shrink-0"
+                              className="text-error flex-shrink-0"
                             >
                               <circle cx="10" cy="10" r="8" />
                               <path d="M10 6v5M10 13.5v.5" />
@@ -291,7 +291,7 @@ export default function Settings() {
                               strokeWidth="1.5"
                               strokeLinecap="round"
                               strokeLinejoin="round"
-                              className="text-green-400 flex-shrink-0"
+                              className="text-success flex-shrink-0"
                             >
                               <circle cx="10" cy="10" r="8" />
                               <path d="M7 10l2 2 4-4" />
@@ -314,14 +314,14 @@ export default function Settings() {
                           <code
                             className={`text-xs font-mono ${
                               accessible === false
-                                ? "text-red-400"
+                                ? "text-error"
                                 : "text-text-secondary"
                             }`}
                           >
                             {p}
                           </code>
                           {accessible === false && (
-                            <span className="text-xs text-red-400">
+                            <span className="text-xs text-error">
                               {t('settings.pathNotFound')}
                             </span>
                           )}
@@ -331,8 +331,8 @@ export default function Settings() {
                   </div>
 
                   {hasInaccessiblePaths && isAdmin && (
-                    <div className="mt-3 rounded-md bg-red-500/10 border border-red-500/20 px-3 py-2">
-                      <p className="text-xs text-red-400">
+                    <div className="mt-3 rounded-md bg-error/10 border border-error/20 px-3 py-2">
+                      <p className="text-xs text-error">
                         One or more paths are not accessible. Check that the
                         volume is mounted correctly in docker-compose.yml and
                         that the path matches the container mount point.
