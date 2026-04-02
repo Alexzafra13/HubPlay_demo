@@ -291,7 +291,7 @@ export default function Settings() {
                               strokeWidth="1.5"
                               strokeLinecap="round"
                               strokeLinejoin="round"
-                              className="text-green-400 flex-shrink-0"
+                              className="text-success flex-shrink-0"
                             >
                               <circle cx="10" cy="10" r="8" />
                               <path d="M7 10l2 2 4-4" />
