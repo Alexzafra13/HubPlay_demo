@@ -3,7 +3,7 @@
 # ═══════════════════════════════════════════
 FROM node:22-alpine AS frontend
 
-RUN corepack enable && corepack prepare pnpm@9 --activate
+RUN corepack enable && corepack prepare pnpm@10 --activate
 
 WORKDIR /web
 COPY web/package.json web/pnpm-lock.yaml ./
@@ -16,6 +16,8 @@ RUN pnpm run build
 # Stage 2: Build backend
 # ═══════════════════════════════════════════
 FROM golang:1.24-alpine AS backend
+
+ARG VERSION=dev
 
 WORKDIR /src
 
@@ -34,14 +36,16 @@ COPY --from=frontend /web/dist ./web/dist
 
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /hubplay ./cmd/hubplay
+    CGO_ENABLED=0 go build -trimpath \
+      -ldflags "-s -w -X main.version=${VERSION}" \
+      -o /hubplay ./cmd/hubplay
 
 # ═══════════════════════════════════════════
 # Stage 3: Runtime — VAAPI + QSV hardware transcoding
 #
 #   docker build --target hwaccel -t hubplay:hwaccel .
 #
-# Pass GPU device at runtime:
+# Runtime:
 #   docker run --device /dev/dri:/dev/dri hubplay:hwaccel
 # ═══════════════════════════════════════════
 FROM ubuntu:24.04 AS hwaccel
@@ -70,6 +74,8 @@ RUN useradd -r -s /sbin/nologin hubplay && \
 COPY --from=backend /hubplay /usr/local/bin/hubplay
 RUN mkdir -p /config /cache && chown hubplay:hubplay /config /cache
 
+ENV HUBPLAY_STREAMING_CACHE_DIR=/cache
+
 USER hubplay
 EXPOSE 8096
 
@@ -96,6 +102,8 @@ RUN adduser -D -s /sbin/nologin hubplay
 
 COPY --from=backend /hubplay /usr/local/bin/hubplay
 RUN mkdir -p /config /cache && chown hubplay:hubplay /config /cache
+
+ENV HUBPLAY_STREAMING_CACHE_DIR=/cache
 
 USER hubplay
 EXPOSE 8096

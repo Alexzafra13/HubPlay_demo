@@ -5,7 +5,6 @@ services:
     container_name: hubplay
     ports:
       - "8097:8096"
-    user: "1000:1000"
     volumes:
       - ./config:/config
       - ./cache:/cache

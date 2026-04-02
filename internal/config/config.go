@@ -258,6 +258,9 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("HUBPLAY_RATE_LIMIT_ENABLED"); v != "" {
 		cfg.RateLimit.Enabled = strings.EqualFold(v, "true")
 	}
+	if v := os.Getenv("HUBPLAY_STREAMING_CACHE_DIR"); v != "" {
+		cfg.Streaming.CacheDir = v
+	}
 }
 
 // TestConfig returns a config suitable for tests.
