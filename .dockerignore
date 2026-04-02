@@ -24,3 +24,9 @@ coverage.*
 LICENSE
 Makefile
 docker-compose*.yml
+
+# Not needed in build
+deploy/
+docs/
+sqlc.yaml
+hubplay.example.yaml
