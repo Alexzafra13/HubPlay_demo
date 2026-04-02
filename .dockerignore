@@ -1,12 +1,26 @@
+# VCS
+.git/
+.gitignore
+
+# Build artifacts
+bin/
+web/dist/
+web/node_modules/
+node_modules/
+
+# Data / runtime
 peliculas/
 cache/
 config/
 *.db
 *.db-journal
 *.db-wal
-bin/
+
+# Dev / CI
 coverage.*
-.git/
-node_modules/
-web/node_modules/
-web/dist/
+.github/
+.vscode/
+*.md
+LICENSE
+Makefile
+docker-compose*.yml
