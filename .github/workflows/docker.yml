@@ -24,8 +24,10 @@ jobs:
         include:
           - target: ""
             suffix: ""
+            platforms: linux/amd64,linux/arm64
           - target: hwaccel
             suffix: -hwaccel
+            platforms: linux/amd64
 
     steps:
       - uses: actions/checkout@v4
@@ -71,7 +73,7 @@ jobs:
         with:
           context: .
           target: ${{ matrix.target || '' }}
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ matrix.platforms }}
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
