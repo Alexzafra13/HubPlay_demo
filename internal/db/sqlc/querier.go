@@ -10,17 +10,33 @@ import (
 )
 
 type Querier interface {
+	CountSessionsByUser(ctx context.Context, userID string) (int64, error)
+	// Auth sessions: one row per active login (refresh token lives here hashed).
+	//
+	// Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE sessions).
+	// Rotation/max-sessions policy lives in internal/auth/service.go.
+	CreateSession(ctx context.Context, arg CreateSessionParams) error
 	// JWT signing keys for rotation with overlap.
 	//
 	// Table schema lives in migrations/sqlite/004_jwt_signing_keys.sql.
 	// The repository (signing_key_repository.go) is a thin adapter around
 	// these queries. Rotation/overlap policy lives in internal/auth/keystore.go.
 	CreateSigningKey(ctx context.Context, arg CreateSigningKeyParams) error
+	DeleteAllSessionsByUser(ctx context.Context, userID string) (int64, error)
+	DeleteExpiredSessions(ctx context.Context) (int64, error)
+	// Subquery aliased to 's' because sqlc needs unambiguous column resolution
+	// when the same table appears twice in scope.
+	DeleteOldestSessionByUser(ctx context.Context, userID string) error
 	DeleteRetiredSigningKeysBefore(ctx context.Context, retiredAt sql.NullTime) (int64, error)
+	DeleteSession(ctx context.Context, id string) error
+	DeleteSessionByRefreshTokenHash(ctx context.Context, refreshTokenHash string) error
+	GetSessionByRefreshTokenHash(ctx context.Context, refreshTokenHash string) (Session, error)
 	GetSigningKey(ctx context.Context, id string) (JwtSigningKey, error)
 	ListActiveSigningKeys(ctx context.Context) ([]JwtSigningKey, error)
+	ListSessionsByUser(ctx context.Context, userID string) ([]Session, error)
 	ListSigningKeys(ctx context.Context) ([]JwtSigningKey, error)
 	SetSigningKeyRetiredAt(ctx context.Context, arg SetSigningKeyRetiredAtParams) (int64, error)
+	UpdateSessionLastActive(ctx context.Context, arg UpdateSessionLastActiveParams) error
 }
 
 var _ Querier = (*Queries)(nil)

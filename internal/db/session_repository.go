@@ -3,12 +3,17 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
+	"hubplay/internal/db/sqlc"
 	"hubplay/internal/domain"
 )
 
+// Session is the domain shape exposed to auth/. It keeps IPAddress as a plain
+// string (empty means "unknown") while the underlying column is nullable —
+// the conversion happens at the adapter boundary below.
 type Session struct {
 	ID               string
 	UserID           string
@@ -22,21 +27,25 @@ type Session struct {
 }
 
 type SessionRepository struct {
-	db *sql.DB
+	q *sqlc.Queries
 }
 
 func NewSessionRepository(database *sql.DB) *SessionRepository {
-	return &SessionRepository{db: database}
+	return &SessionRepository{q: sqlc.New(database)}
 }
 
 func (r *SessionRepository) Create(ctx context.Context, s *Session) error {
-	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO sessions (id, user_id, device_name, device_id, ip_address,
-		 refresh_token_hash, created_at, last_active_at, expires_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		s.ID, s.UserID, s.DeviceName, s.DeviceID, s.IPAddress,
-		s.RefreshTokenHash, s.CreatedAt, s.LastActiveAt, s.ExpiresAt,
-	)
+	err := r.q.CreateSession(ctx, sqlc.CreateSessionParams{
+		ID:               s.ID,
+		UserID:           s.UserID,
+		DeviceName:       s.DeviceName,
+		DeviceID:         s.DeviceID,
+		IpAddress:        nullableString(s.IPAddress),
+		RefreshTokenHash: s.RefreshTokenHash,
+		CreatedAt:        s.CreatedAt,
+		LastActiveAt:     s.LastActiveAt,
+		ExpiresAt:        s.ExpiresAt,
+	})
 	if err != nil {
 		return fmt.Errorf("create session: %w", err)
 	}
@@ -44,86 +53,67 @@ func (r *SessionRepository) Create(ctx context.Context, s *Session) error {
 }
 
 func (r *SessionRepository) GetByRefreshTokenHash(ctx context.Context, hash string) (*Session, error) {
-	s := &Session{}
-	err := r.db.QueryRowContext(ctx,
-		`SELECT id, user_id, device_name, device_id, ip_address,
-		 refresh_token_hash, created_at, last_active_at, expires_at
-		 FROM sessions WHERE refresh_token_hash = ?`, hash,
-	).Scan(&s.ID, &s.UserID, &s.DeviceName, &s.DeviceID, &s.IPAddress,
-		&s.RefreshTokenHash, &s.CreatedAt, &s.LastActiveAt, &s.ExpiresAt)
-	if err == sql.ErrNoRows {
+	row, err := r.q.GetSessionByRefreshTokenHash(ctx, hash)
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("session: %w", domain.ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get session: %w", err)
 	}
-	return s, nil
+	s := sessionFromRow(row)
+	return &s, nil
 }
 
 func (r *SessionRepository) DeleteByID(ctx context.Context, id string) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM sessions WHERE id = ?`, id)
-	if err != nil {
+	if err := r.q.DeleteSession(ctx, id); err != nil {
 		return fmt.Errorf("delete session: %w", err)
 	}
 	return nil
 }
 
 func (r *SessionRepository) DeleteByRefreshTokenHash(ctx context.Context, hash string) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM sessions WHERE refresh_token_hash = ?`, hash)
-	if err != nil {
+	if err := r.q.DeleteSessionByRefreshTokenHash(ctx, hash); err != nil {
 		return fmt.Errorf("delete session by token: %w", err)
 	}
 	return nil
 }
 
 func (r *SessionRepository) ListByUser(ctx context.Context, userID string) ([]*Session, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, user_id, device_name, device_id, ip_address,
-		 refresh_token_hash, created_at, last_active_at, expires_at
-		 FROM sessions WHERE user_id = ? ORDER BY last_active_at DESC`, userID,
-	)
+	rows, err := r.q.ListSessionsByUser(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("list sessions: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
-
-	var sessions []*Session
-	for rows.Next() {
-		s := &Session{}
-		if err := rows.Scan(&s.ID, &s.UserID, &s.DeviceName, &s.DeviceID, &s.IPAddress,
-			&s.RefreshTokenHash, &s.CreatedAt, &s.LastActiveAt, &s.ExpiresAt); err != nil {
-			return nil, fmt.Errorf("scan session: %w", err)
-		}
-		sessions = append(sessions, s)
+	if len(rows) == 0 {
+		return nil, nil
 	}
-	return sessions, rows.Err()
+	out := make([]*Session, len(rows))
+	for i, row := range rows {
+		s := sessionFromRow(row)
+		out[i] = &s
+	}
+	return out, nil
 }
 
 func (r *SessionRepository) CountByUser(ctx context.Context, userID string) (int, error) {
-	var count int
-	err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sessions WHERE user_id = ?`, userID).Scan(&count)
+	n, err := r.q.CountSessionsByUser(ctx, userID)
 	if err != nil {
 		return 0, fmt.Errorf("count sessions: %w", err)
 	}
-	return count, nil
+	return int(n), nil
 }
 
 func (r *SessionRepository) DeleteExpired(ctx context.Context) (int64, error) {
-	res, err := r.db.ExecContext(ctx, `DELETE FROM sessions WHERE expires_at < CURRENT_TIMESTAMP`)
+	n, err := r.q.DeleteExpiredSessions(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("delete expired sessions: %w", err)
 	}
-	return res.RowsAffected()
+	return n, nil
 }
 
-// DeleteOldestByUser deletes the oldest session for a user and returns how many were deleted.
+// DeleteOldestByUser deletes the single oldest session for a user (by
+// last_active_at, then created_at). No-op if the user has no sessions.
 func (r *SessionRepository) DeleteOldestByUser(ctx context.Context, userID string) error {
-	_, err := r.db.ExecContext(ctx,
-		`DELETE FROM sessions WHERE id = (
-			SELECT id FROM sessions WHERE user_id = ? ORDER BY last_active_at ASC, created_at ASC LIMIT 1
-		)`, userID,
-	)
-	if err != nil {
+	if err := r.q.DeleteOldestSessionByUser(ctx, userID); err != nil {
 		return fmt.Errorf("delete oldest session: %w", err)
 	}
 	return nil
@@ -131,17 +121,46 @@ func (r *SessionRepository) DeleteOldestByUser(ctx context.Context, userID strin
 
 // DeleteAllByUser removes all sessions for a user (e.g. on password change).
 func (r *SessionRepository) DeleteAllByUser(ctx context.Context, userID string) (int64, error) {
-	res, err := r.db.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, userID)
+	n, err := r.q.DeleteAllSessionsByUser(ctx, userID)
 	if err != nil {
 		return 0, fmt.Errorf("delete all user sessions: %w", err)
 	}
-	return res.RowsAffected()
+	return n, nil
 }
 
 func (r *SessionRepository) UpdateLastActive(ctx context.Context, id string, t time.Time) error {
-	_, err := r.db.ExecContext(ctx, `UPDATE sessions SET last_active_at = ? WHERE id = ?`, t, id)
+	err := r.q.UpdateSessionLastActive(ctx, sqlc.UpdateSessionLastActiveParams{
+		LastActiveAt: t,
+		ID:           id,
+	})
 	if err != nil {
 		return fmt.Errorf("update session last active: %w", err)
 	}
 	return nil
+}
+
+// sessionFromRow maps the sqlc row (IpAddress sql.NullString) to the domain
+// Session (IPAddress string). Invalid → "".
+func sessionFromRow(r sqlc.Session) Session {
+	return Session{
+		ID:               r.ID,
+		UserID:           r.UserID,
+		DeviceName:       r.DeviceName,
+		DeviceID:         r.DeviceID,
+		IPAddress:        r.IpAddress.String,
+		RefreshTokenHash: r.RefreshTokenHash,
+		CreatedAt:        r.CreatedAt,
+		LastActiveAt:     r.LastActiveAt,
+		ExpiresAt:        r.ExpiresAt,
+	}
+}
+
+// nullableString wraps a plain string for storage in a nullable TEXT column.
+// An empty string is stored as NULL, matching the column's nullable semantics
+// ("" means "unknown" in the domain, and NULL is its SQL equivalent).
+func nullableString(s string) sql.NullString {
+	if s == "" {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: s, Valid: true}
 }
