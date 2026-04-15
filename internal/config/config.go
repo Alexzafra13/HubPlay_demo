@@ -19,13 +19,23 @@ import (
 )
 
 type Config struct {
-	Server         ServerConfig    `yaml:"server"`
-	Database       DatabaseConfig  `yaml:"database"`
-	Auth           AuthConfig      `yaml:"auth"`
-	Logging        logging.Config  `yaml:"logging"`
-	RateLimit      RateLimitConfig `yaml:"rate_limit"`
-	Streaming      StreamingConfig `yaml:"streaming"`
-	SetupCompleted bool            `yaml:"setup_completed"`
+	Server         ServerConfig        `yaml:"server"`
+	Database       DatabaseConfig      `yaml:"database"`
+	Auth           AuthConfig          `yaml:"auth"`
+	Logging        logging.Config      `yaml:"logging"`
+	RateLimit      RateLimitConfig     `yaml:"rate_limit"`
+	Streaming      StreamingConfig     `yaml:"streaming"`
+	Observability  ObservabilityConfig `yaml:"observability"`
+	SetupCompleted bool                `yaml:"setup_completed"`
+}
+
+// ObservabilityConfig controls the Prometheus /metrics endpoint. Defaults are
+// applied in Load: metrics are enabled out of the box and exposed at /metrics.
+// Operators who do not want to expose them can set enabled: false; those who
+// want to move the path for reverse-proxy hygiene can override it.
+type ObservabilityConfig struct {
+	MetricsEnabled bool   `yaml:"metrics_enabled"`
+	MetricsPath    string `yaml:"metrics_path"`
 }
 
 type StreamingConfig struct {
@@ -118,6 +128,13 @@ func Load(path string) (*Config, error) {
 		cfg.Auth.JWTSecret = generateSecret()
 	}
 
+	// YAML merge can leave sub-structs half-populated (e.g. user set
+	// observability.metrics_enabled: true but omitted path). Fill gaps so
+	// every downstream consumer has a usable value.
+	if cfg.Observability.MetricsEnabled && cfg.Observability.MetricsPath == "" {
+		cfg.Observability.MetricsPath = "/metrics"
+	}
+
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
@@ -206,6 +223,10 @@ func defaults() *Config {
 				Enabled:   false,
 				Preferred: "auto",
 			},
+		},
+		Observability: ObservabilityConfig{
+			MetricsEnabled: true,
+			MetricsPath:    "/metrics",
 		},
 	}
 }

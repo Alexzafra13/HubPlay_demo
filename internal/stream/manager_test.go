@@ -211,7 +211,102 @@ func newTestManager(t *testing.T) *Manager {
 		cfg:        cfg,
 		logger:     logger.With("module", "stream-manager"),
 		stopClean:  make(chan struct{}),
+		metrics:    noopSink{},
 	}
+}
+
+// fakeSink records every metric call so tests can assert the manager hooks
+// fire on the expected paths without pulling Prometheus into this package.
+type fakeSink struct {
+	started int
+	busy    int
+	failed  int
+	active  []int
+}
+
+func (f *fakeSink) TranscodeStarted()         { f.started++ }
+func (f *fakeSink) TranscodeBusy()            { f.busy++ }
+func (f *fakeSink) TranscodeFailed()          { f.failed++ }
+func (f *fakeSink) SetActiveSessions(n int)   { f.active = append(f.active, n) }
+
+func TestManager_SetMetrics_InitialisesActiveGauge(t *testing.T) {
+	m := newTestManager(t)
+	defer m.Shutdown()
+
+	// Pre-populate so SetMetrics has something to report.
+	m.mu.Lock()
+	m.sessions["x"] = &ManagedSession{Session: &Session{ID: "x", done: closedChan()}}
+	m.mu.Unlock()
+
+	sink := &fakeSink{}
+	m.SetMetrics(sink)
+
+	if len(sink.active) == 0 || sink.active[len(sink.active)-1] != 1 {
+		t.Errorf("SetMetrics should seed the active-sessions gauge, got %v", sink.active)
+	}
+}
+
+func TestManager_StopSession_NotifiesMetrics(t *testing.T) {
+	m := newTestManager(t)
+	defer m.Shutdown()
+
+	sink := &fakeSink{}
+	m.SetMetrics(sink)
+
+	key := "user:item:720p"
+	m.mu.Lock()
+	m.sessions[key] = &ManagedSession{Session: &Session{ID: key, OutputDir: t.TempDir(), done: closedChan()}}
+	m.mu.Unlock()
+
+	m.StopSession(key)
+
+	// The last active value recorded should be 0 — the gauge must drain on
+	// stop or the dashboard lies forever after a session ends.
+	if len(sink.active) == 0 || sink.active[len(sink.active)-1] != 0 {
+		t.Errorf("StopSession should report active=0, got %v", sink.active)
+	}
+}
+
+func TestManager_CleanupIdle_NotifiesMetricsOnlyWhenSomethingRemoved(t *testing.T) {
+	m := newTestManager(t)
+	defer m.Shutdown()
+
+	sink := &fakeSink{}
+	m.SetMetrics(sink)
+	// Reset: SetMetrics already emitted an initial SetActiveSessions(0).
+	sink.active = nil
+
+	// Nothing to clean → no emission (prevents flood of identical zeros).
+	m.cleanupIdle(5 * time.Minute)
+	if len(sink.active) != 0 {
+		t.Errorf("cleanupIdle should not notify when no session removed: %v", sink.active)
+	}
+
+	// With a session to reap, the gauge should drop to 0 once.
+	m.mu.Lock()
+	m.sessions["old"] = &ManagedSession{
+		Session:      &Session{ID: "old", OutputDir: t.TempDir(), done: closedChan()},
+		LastAccessed: time.Now().Add(-1 * time.Hour),
+	}
+	m.mu.Unlock()
+	m.cleanupIdle(1 * time.Minute)
+
+	if len(sink.active) != 1 || sink.active[0] != 0 {
+		t.Errorf("cleanupIdle with removal should emit active=0, got %v", sink.active)
+	}
+}
+
+func TestManager_SetMetrics_NilIsNoOp(t *testing.T) {
+	m := newTestManager(t)
+	defer m.Shutdown()
+
+	// Calling with nil must keep the existing sink intact so production code
+	// that passes a possibly-nil sink does not blow the manager up.
+	m.SetMetrics(nil)
+
+	// The default noopSink must still be in place — StopSession must not
+	// panic on a nil metrics field.
+	m.StopSession("does-not-exist")
 }
 
 // closedChan returns a channel that's already closed (simulating a finished process).

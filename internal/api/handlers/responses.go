@@ -24,6 +24,25 @@ type errorPayload struct {
 	RequestID string         `json:"request_id,omitempty"`
 }
 
+// errorRecorder is the observability hook invoked for every rendered
+// AppError. It is overwritten via SetErrorRecorder at wiring time; tests and
+// the default path use the no-op to avoid a hard dependency on Prometheus
+// (and the import cycle that would come with it).
+var errorRecorder = func(code string) {}
+
+// SetErrorRecorder installs a function that will be called with the Code of
+// every AppError rendered by the handler package. Pass nil to disable.
+//
+// The recorder is called after the HTTP response has been written so a slow
+// metrics backend cannot delay client-facing latency.
+func SetErrorRecorder(fn func(code string)) {
+	if fn == nil {
+		errorRecorder = func(string) {}
+		return
+	}
+	errorRecorder = fn
+}
+
 func respondJSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -37,7 +56,9 @@ func decodeJSON(r *http.Request, v any) error {
 }
 
 // respondAppError writes an AppError as a JSON response, attaching the chi
-// request ID for correlation and setting Retry-After when present.
+// request ID for correlation and setting Retry-After when present. It also
+// notifies the observability hook (see SetErrorRecorder) so every rendered
+// error code shows up as a metric — no handler code needed on call sites.
 func respondAppError(w http.ResponseWriter, ctx context.Context, appErr *domain.AppError) {
 	if appErr.RetryAfter > 0 {
 		w.Header().Set("Retry-After", strconv.Itoa(int(appErr.RetryAfter.Seconds())))
@@ -51,6 +72,7 @@ func respondAppError(w http.ResponseWriter, ctx context.Context, appErr *domain.
 			RequestID: middleware.GetReqID(ctx),
 		},
 	})
+	errorRecorder(appErr.Code)
 }
 
 // respondError writes an ad-hoc error response. Prefer returning an AppError

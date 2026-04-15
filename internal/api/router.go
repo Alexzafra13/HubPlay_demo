@@ -19,6 +19,7 @@ import (
 	"hubplay/internal/event"
 	"hubplay/internal/iptv"
 	"hubplay/internal/library"
+	"hubplay/internal/observability"
 	"hubplay/internal/provider"
 	"hubplay/internal/setup"
 	"hubplay/internal/stream"
@@ -48,16 +49,33 @@ type Dependencies struct {
 	WebAssets      fs.FS
 	Config         *config.Config
 	Logger         *slog.Logger
+	Metrics        *observability.Metrics
 }
 
 func NewRouter(deps Dependencies) http.Handler {
 	r := chi.NewRouter()
 
-	// Middleware stack (order matters)
+	// Wire the observability hook into the handlers package so every rendered
+	// AppError gets counted. Kept out of NewRouter's return path so tests
+	// that never pass Metrics stay on the no-op recorder.
+	if deps.Metrics != nil {
+		handlers.SetErrorRecorder(func(code string) {
+			deps.Metrics.HTTPErrors.WithLabelValues(code).Inc()
+		})
+	}
+
+	// Middleware stack (order matters).
+	//
+	// Metrics goes after RequestID so traces and counters share the same id,
+	// and after Recoverer so a panic still records a 500 request. It must
+	// wrap the router so RoutePattern is populated by the time we read it.
 	r.Use(middleware.RealIP)
 	r.Use(middleware.RequestID)
 	r.Use(RequestLogger(deps.Logger))
 	r.Use(middleware.Recoverer)
+	if deps.Metrics != nil {
+		r.Use(deps.Metrics.MetricsMiddleware)
+	}
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   allowedOrigins(deps.Config),
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
@@ -67,6 +85,17 @@ func NewRouter(deps Dependencies) http.Handler {
 		MaxAge:           300,
 	}))
 	r.Use(CSRFProtect)
+
+	// Prometheus /metrics endpoint. Mounted outside /api/v1 because metrics
+	// scrapers expect a top-level path; kept unauthenticated by convention,
+	// operators are expected to protect it at the reverse proxy if desired.
+	if deps.Metrics != nil && deps.Config != nil && deps.Config.Observability.MetricsEnabled {
+		path := deps.Config.Observability.MetricsPath
+		if path == "" {
+			path = "/metrics"
+		}
+		r.Handle(path, deps.Metrics.Handler())
+	}
 
 	// Handlers
 	authHandler := handlers.NewAuthHandler(deps.Auth, deps.Users, deps.Config.Auth, deps.Logger)

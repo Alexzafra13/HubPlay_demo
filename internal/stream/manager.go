@@ -14,6 +14,26 @@ import (
 	"hubplay/internal/domain"
 )
 
+// MetricsSink is the minimal observability surface the Manager uses. Keeping
+// it local (instead of importing an observability package) avoids a package
+// cycle and lets tests pass a nil-safe sink without Prometheus in the mix.
+type MetricsSink interface {
+	TranscodeStarted()
+	TranscodeBusy()
+	TranscodeFailed()
+	SetActiveSessions(n int)
+}
+
+// noopSink is the default implementation used when no metrics are wired in.
+// Using a value type with empty methods lets the Manager call metrics.* on
+// every hot path without nil checks.
+type noopSink struct{}
+
+func (noopSink) TranscodeStarted()       {}
+func (noopSink) TranscodeBusy()          {}
+func (noopSink) TranscodeFailed()        {}
+func (noopSink) SetActiveSessions(n int) {}
+
 // Manager orchestrates streaming sessions (direct play, remux, and transcode).
 type Manager struct {
 	mu         sync.Mutex
@@ -24,6 +44,7 @@ type Manager struct {
 	cfg        config.StreamingConfig
 	logger     *slog.Logger
 	stopClean  chan struct{}
+	metrics    MetricsSink
 }
 
 // ManagedSession wraps a transcoding session with access tracking.
@@ -55,10 +76,24 @@ func NewManager(
 		cfg:        cfg,
 		logger:     logger.With("module", "stream-manager"),
 		stopClean:  make(chan struct{}),
+		metrics:    noopSink{},
 	}
 
 	go m.cleanupLoop()
 	return m
+}
+
+// SetMetrics wires an observability sink into the manager. Passing nil is a
+// no-op (the default noopSink stays in place) so callers never have to
+// short-circuit in production code.
+func (m *Manager) SetMetrics(sink MetricsSink) {
+	if sink == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.metrics = sink
+	m.metrics.SetActiveSessions(len(m.sessions))
 }
 
 // sessionKey builds a unique key for a user+item+profile combination.
@@ -82,6 +117,7 @@ func (m *Manager) StartSession(ctx context.Context, userID, itemID, profileName 
 	if m.cfg.MaxTranscodeSessions > 0 && len(m.sessions) >= m.cfg.MaxTranscodeSessions {
 		active := len(m.sessions)
 		m.mu.Unlock()
+		m.metrics.TranscodeBusy()
 		return nil, domain.NewTranscodeBusy(active, m.cfg.MaxTranscodeSessions)
 	}
 	m.mu.Unlock()
@@ -89,11 +125,13 @@ func (m *Manager) StartSession(ctx context.Context, userID, itemID, profileName 
 	// Fetch item and its streams
 	item, err := m.items.GetByID(ctx, itemID)
 	if err != nil {
+		m.metrics.TranscodeFailed()
 		return nil, fmt.Errorf("get item: %w", err)
 	}
 
 	mediaStreams, err := m.streams.ListByItem(ctx, itemID)
 	if err != nil {
+		m.metrics.TranscodeFailed()
 		return nil, fmt.Errorf("get streams: %w", err)
 	}
 
@@ -118,6 +156,7 @@ func (m *Manager) StartSession(ctx context.Context, userID, itemID, profileName 
 	// Start transcode/remux session
 	session, err := m.transcoder.Start(key, itemID, item.Path, decision.Profile, startTime)
 	if err != nil {
+		m.metrics.TranscodeFailed()
 		return nil, fmt.Errorf("start transcode: %w", err)
 	}
 
@@ -130,7 +169,11 @@ func (m *Manager) StartSession(ctx context.Context, userID, itemID, profileName 
 
 	m.mu.Lock()
 	m.sessions[key] = ms
+	active := len(m.sessions)
 	m.mu.Unlock()
+
+	m.metrics.TranscodeStarted()
+	m.metrics.SetActiveSessions(active)
 
 	m.logger.Info("session started",
 		"key", key,
@@ -157,10 +200,12 @@ func (m *Manager) StopSession(key string) {
 	if ok {
 		delete(m.sessions, key)
 	}
+	active := len(m.sessions)
 	m.mu.Unlock()
 
 	if ok {
 		ms.Stop()
+		m.metrics.SetActiveSessions(active)
 		m.logger.Info("session stopped", "key", key)
 	}
 }
@@ -198,6 +243,7 @@ func (m *Manager) Shutdown() {
 	for _, ms := range sessions {
 		ms.Stop()
 	}
+	m.metrics.SetActiveSessions(0)
 	m.logger.Info("stream manager shut down", "stopped_sessions", len(sessions))
 }
 
@@ -234,11 +280,16 @@ func (m *Manager) cleanupIdle(maxIdle time.Duration) {
 			delete(m.sessions, key)
 		}
 	}
+	active := len(m.sessions)
 	m.mu.Unlock()
 
 	for i, ms := range toStop {
 		ms.Stop()
 		m.transcoder.Stop(toRemove[i])
 		m.logger.Info("cleaned up idle session", "key", toRemove[i])
+	}
+
+	if len(toStop) > 0 {
+		m.metrics.SetActiveSessions(active)
 	}
 }

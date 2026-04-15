@@ -189,6 +189,44 @@ func TestHandleServiceError_OmitsRequestIDWhenAbsent(t *testing.T) {
 	}
 }
 
+func TestSetErrorRecorder_InvokedOnEveryAppError(t *testing.T) {
+	// The recorder hook is the single seam through which observability sees
+	// API errors. If respondAppError ever forgets to call it we lose the
+	// error-rate metric without any build failure. Lock that contract here.
+	var gotCodes []string
+	SetErrorRecorder(func(code string) { gotCodes = append(gotCodes, code) })
+	// Restore the no-op recorder for any later test in the package.
+	t.Cleanup(func() { SetErrorRecorder(nil) })
+
+	rr := httptest.NewRecorder()
+	r := newRequestWithID("req-metric")
+
+	handleServiceError(rr, r, domain.NewTranscodeBusy(1, 1))
+	handleServiceError(rr, r, domain.ErrNotFound)        // via sentinel fallback
+	handleServiceError(rr, r, errors.New("unexpected")) // 500 → INTERNAL_ERROR
+
+	want := []string{"STREAM_TRANSCODE_BUSY", "NOT_FOUND", "INTERNAL_ERROR"}
+	if len(gotCodes) != len(want) {
+		t.Fatalf("got %d codes, want %d: %v", len(gotCodes), len(want), gotCodes)
+	}
+	for i, c := range want {
+		if gotCodes[i] != c {
+			t.Errorf("codes[%d]: got %q, want %q", i, gotCodes[i], c)
+		}
+	}
+}
+
+func TestSetErrorRecorder_NilRestoresNoop(t *testing.T) {
+	// SetErrorRecorder(nil) must not crash subsequent responses; it should
+	// fall back to the no-op so partial deregistration is safe.
+	SetErrorRecorder(func(string) { t.Fatal("should have been replaced by noop") })
+	SetErrorRecorder(nil)
+
+	rr := httptest.NewRecorder()
+	r := newRequestWithID("req-nil")
+	handleServiceError(rr, r, domain.NewNotFound("thing"))
+}
+
 func TestRespondError_WritesAppErrorEnvelope(t *testing.T) {
 	// respondError is the ad-hoc helper used by handlers for input-shape
 	// errors; it must produce the same envelope as the AppError path so

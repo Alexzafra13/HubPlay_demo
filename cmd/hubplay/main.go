@@ -22,6 +22,7 @@ import (
 	"hubplay/internal/library"
 	"hubplay/internal/logging"
 	"hubplay/internal/iptv"
+	"hubplay/internal/observability"
 	"hubplay/internal/probe"
 	"hubplay/internal/provider"
 	"hubplay/internal/scanner"
@@ -74,6 +75,14 @@ func run(configPath string) error {
 	// ═══ Phase 3: Infrastructure ═══
 	eventBus := event.NewBus(logger)
 
+	// Observability: one registry shared by every collector. A construction
+	// error here is a programmer error (duplicate metric name) — fail fast
+	// so it shows up in CI, not in a production scrape.
+	metrics, err := observability.NewMetrics(version)
+	if err != nil {
+		return fmt.Errorf("initialising metrics: %w", err)
+	}
+
 	// ═══ Phase 4: Core Services ═══
 	authService := auth.NewService(repos.Users, repos.Sessions, cfg.Auth, clk, logger, cfg.RateLimit)
 	authService.StartSessionCleaner(ctx)
@@ -96,6 +105,7 @@ func run(configPath string) error {
 
 	// ═══ Phase 4b: Streaming ═══
 	streamManager := stream.NewManager(repos.Items, repos.MediaStreams, cfg.Streaming, logger)
+	streamManager.SetMetrics(observability.NewStreamSink(metrics))
 
 	// Detect hardware acceleration if enabled
 	if cfg.Streaming.HWAccel.Enabled {
@@ -140,6 +150,7 @@ func run(configPath string) error {
 		WebAssets:     webFS,
 		Config:        cfg,
 		Logger:        logger,
+		Metrics:       metrics,
 	})
 
 	server := &http.Server{
