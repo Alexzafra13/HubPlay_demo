@@ -43,7 +43,7 @@ func (h *IPTVHandler) ListChannels(w http.ResponseWriter, r *http.Request) {
 
 	channels, err := h.svc.GetChannels(r.Context(), libraryID, activeOnly)
 	if err != nil {
-		handleServiceError(w, err)
+		handleServiceError(w, r, err)
 		return
 	}
 
@@ -74,7 +74,7 @@ func (h *IPTVHandler) GetChannel(w http.ResponseWriter, r *http.Request) {
 
 	ch, err := h.svc.GetChannel(r.Context(), channelID)
 	if err != nil {
-		handleServiceError(w, err)
+		handleServiceError(w, r, err)
 		return
 	}
 
@@ -112,7 +112,7 @@ func (h *IPTVHandler) Groups(w http.ResponseWriter, r *http.Request) {
 
 	groups, err := h.svc.GetGroups(r.Context(), libraryID)
 	if err != nil {
-		handleServiceError(w, err)
+		handleServiceError(w, r, err)
 		return
 	}
 
@@ -125,12 +125,12 @@ func (h *IPTVHandler) Stream(w http.ResponseWriter, r *http.Request) {
 
 	ch, err := h.svc.GetChannel(r.Context(), channelID)
 	if err != nil {
-		handleServiceError(w, err)
+		handleServiceError(w, r, err)
 		return
 	}
 
 	if !ch.IsActive {
-		respondError(w, http.StatusNotFound, "CHANNEL_INACTIVE", "channel is not active")
+		respondError(w, r, http.StatusNotFound, "CHANNEL_INACTIVE", "channel is not active")
 		return
 	}
 
@@ -145,7 +145,7 @@ func (h *IPTVHandler) ProxyURL(w http.ResponseWriter, r *http.Request) {
 	channelID := chi.URLParam(r, "channelId")
 	rawURL := r.URL.Query().Get("url")
 	if rawURL == "" {
-		respondError(w, http.StatusBadRequest, "MISSING_URL", "url parameter required")
+		respondError(w, r, http.StatusBadRequest, "MISSING_URL", "url parameter required")
 		return
 	}
 
@@ -162,7 +162,7 @@ func (h *IPTVHandler) Schedule(w http.ResponseWriter, r *http.Request) {
 
 	programs, err := h.svc.GetSchedule(r.Context(), channelID, from, to)
 	if err != nil {
-		handleServiceError(w, err)
+		handleServiceError(w, r, err)
 		return
 	}
 
@@ -178,7 +178,7 @@ func (h *IPTVHandler) Schedule(w http.ResponseWriter, r *http.Request) {
 func (h *IPTVHandler) BulkSchedule(w http.ResponseWriter, r *http.Request) {
 	channelIDs := strings.Split(r.URL.Query().Get("channels"), ",")
 	if len(channelIDs) == 0 || (len(channelIDs) == 1 && channelIDs[0] == "") {
-		respondError(w, http.StatusBadRequest, "MISSING_CHANNELS", "channels parameter required")
+		respondError(w, r, http.StatusBadRequest, "MISSING_CHANNELS", "channels parameter required")
 		return
 	}
 
@@ -186,7 +186,7 @@ func (h *IPTVHandler) BulkSchedule(w http.ResponseWriter, r *http.Request) {
 
 	schedules, err := h.svc.GetBulkSchedule(r.Context(), channelIDs, from, to)
 	if err != nil {
-		handleServiceError(w, err)
+		handleServiceError(w, r, err)
 		return
 	}
 
@@ -208,8 +208,10 @@ func (h *IPTVHandler) RefreshM3U(w http.ResponseWriter, r *http.Request) {
 
 	count, err := h.svc.RefreshM3U(r.Context(), libraryID)
 	if err != nil {
+		// Log the raw error for operators; handleServiceError renders a safe
+		// typed AppError (or a generic 500) without leaking upstream messages.
 		h.logger.Error("M3U refresh failed", "library", libraryID, "error", err)
-		respondError(w, http.StatusInternalServerError, "REFRESH_ERROR", err.Error())
+		handleServiceError(w, r, err)
 		return
 	}
 
@@ -227,7 +229,7 @@ func (h *IPTVHandler) RefreshEPG(w http.ResponseWriter, r *http.Request) {
 	count, err := h.svc.RefreshEPG(r.Context(), libraryID)
 	if err != nil {
 		h.logger.Error("EPG refresh failed", "library", libraryID, "error", err)
-		respondError(w, http.StatusInternalServerError, "REFRESH_ERROR", err.Error())
+		handleServiceError(w, r, err)
 		return
 	}
 
@@ -296,13 +298,13 @@ func (h *IPTVHandler) ImportPublicIPTV(w http.ResponseWriter, r *http.Request) {
 		Name    string `json:"name"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, http.StatusBadRequest, "INVALID_BODY", "invalid request body")
+		respondError(w, r, http.StatusBadRequest, "INVALID_BODY", "invalid request body")
 		return
 	}
 
 	country, ok := iptv.FindCountry(req.Country)
 	if !ok {
-		respondError(w, http.StatusBadRequest, "INVALID_COUNTRY", "unknown country code")
+		respondError(w, r, http.StatusBadRequest, "INVALID_COUNTRY", "unknown country code")
 		return
 	}
 
@@ -324,7 +326,7 @@ func (h *IPTVHandler) ImportPublicIPTV(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.libraries.Create(r.Context(), lib); err != nil {
 		h.logger.Error("create public IPTV library", "error", err)
-		respondError(w, http.StatusInternalServerError, "CREATE_ERROR", "failed to create library")
+		respondError(w, r, http.StatusInternalServerError, "CREATE_ERROR", "failed to create library")
 		return
 	}
 

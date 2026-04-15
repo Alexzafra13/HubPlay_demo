@@ -101,12 +101,12 @@ type loginRequest struct {
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	var req loginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
+		respondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
 		return
 	}
 
 	if req.Username == "" || req.Password == "" {
-		respondError(w, http.StatusBadRequest, "VALIDATION_ERROR", "username and password are required")
+		respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "username and password are required")
 		return
 	}
 
@@ -119,13 +119,13 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 	token, err := h.auth.Login(r.Context(), req.Username, req.Password, req.DeviceName, req.DeviceID, r.RemoteAddr)
 	if err != nil {
-		handleServiceError(w, err)
+		handleServiceError(w, r, err)
 		return
 	}
 
 	u, err := h.users.GetByID(r.Context(), token.UserID)
 	if err != nil {
-		handleServiceError(w, err)
+		handleServiceError(w, r, err)
 		return
 	}
 
@@ -140,7 +140,7 @@ type refreshRequest struct {
 func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	var req refreshRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
+		respondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
 		return
 	}
 
@@ -152,19 +152,19 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.RefreshToken == "" {
-		respondError(w, http.StatusBadRequest, "VALIDATION_ERROR", "refresh_token is required")
+		respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "refresh_token is required")
 		return
 	}
 
 	token, err := h.auth.RefreshToken(r.Context(), req.RefreshToken)
 	if err != nil {
-		handleServiceError(w, err)
+		handleServiceError(w, r, err)
 		return
 	}
 
 	u, err := h.users.GetByID(r.Context(), token.UserID)
 	if err != nil {
-		handleServiceError(w, err)
+		handleServiceError(w, r, err)
 		return
 	}
 
@@ -191,12 +191,12 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.RefreshToken == "" {
-		respondError(w, http.StatusBadRequest, "VALIDATION_ERROR", "refresh_token is required")
+		respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "refresh_token is required")
 		return
 	}
 
 	if err := h.auth.Logout(r.Context(), req.RefreshToken); err != nil {
-		handleServiceError(w, err)
+		handleServiceError(w, r, err)
 		return
 	}
 
@@ -214,7 +214,7 @@ type registerRequest struct {
 func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	var req registerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
+		respondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
 		return
 	}
 
@@ -226,7 +226,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		fields["password"] = "must be at least 8 characters"
 	}
 	if len(fields) > 0 {
-		handleServiceError(w, domain.NewValidationError(fields))
+		handleServiceError(w, r, domain.NewValidationError(fields))
 		return
 	}
 
@@ -241,7 +241,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		Role:        req.Role,
 	})
 	if err != nil {
-		handleServiceError(w, err)
+		handleServiceError(w, r, err)
 		return
 	}
 
@@ -259,17 +259,17 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 	count, err := h.users.Count(r.Context())
 	if err != nil {
-		handleServiceError(w, err)
+		handleServiceError(w, r, err)
 		return
 	}
 	if count > 0 {
-		respondError(w, http.StatusForbidden, "SETUP_COMPLETED", "setup has already been completed")
+		respondError(w, r, http.StatusForbidden, "SETUP_COMPLETED", "setup has already been completed")
 		return
 	}
 
 	var req registerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
+		respondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
 		return
 	}
 
@@ -281,7 +281,7 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		fields["password"] = "must be at least 8 characters"
 	}
 	if len(fields) > 0 {
-		handleServiceError(w, domain.NewValidationError(fields))
+		handleServiceError(w, r, domain.NewValidationError(fields))
 		return
 	}
 
@@ -296,7 +296,7 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		Role:        "admin",
 	})
 	if err != nil {
-		handleServiceError(w, err)
+		handleServiceError(w, r, err)
 		return
 	}
 
@@ -305,7 +305,7 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 	// Auto-login the new admin user
 	token, err := h.auth.Login(r.Context(), req.Username, req.Password, r.UserAgent(), "setup", r.RemoteAddr)
 	if err != nil {
-		handleServiceError(w, err)
+		handleServiceError(w, r, err)
 		return
 	}
 

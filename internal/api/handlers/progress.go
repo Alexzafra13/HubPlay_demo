@@ -31,7 +31,7 @@ func NewProgressHandler(userData UserDataRepository, images ImageRepository, log
 func (h *ProgressHandler) GetProgress(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
 	if claims == nil {
-		respondError(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 		return
 	}
 
@@ -39,7 +39,7 @@ func (h *ProgressHandler) GetProgress(w http.ResponseWriter, r *http.Request) {
 	ud, err := h.userData.Get(r.Context(), claims.UserID, itemID)
 	if err != nil {
 		h.logger.Error("get progress", "error", err)
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get progress")
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get progress")
 		return
 	}
 
@@ -80,7 +80,7 @@ type updateProgressRequest struct {
 func (h *ProgressHandler) UpdateProgress(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
 	if claims == nil {
-		respondError(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 		return
 	}
 
@@ -88,7 +88,7 @@ func (h *ProgressHandler) UpdateProgress(w http.ResponseWriter, r *http.Request)
 
 	var req updateProgressRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, http.StatusBadRequest, "INVALID_BODY", "invalid request body")
+		respondError(w, r, http.StatusBadRequest, "INVALID_BODY", "invalid request body")
 		return
 	}
 
@@ -99,7 +99,7 @@ func (h *ProgressHandler) UpdateProgress(w http.ResponseWriter, r *http.Request)
 
 	if err := h.userData.UpdateProgress(r.Context(), claims.UserID, itemID, req.PositionTicks, completed); err != nil {
 		h.logger.Error("update progress", "error", err)
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to update progress")
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to update progress")
 		return
 	}
 
@@ -110,14 +110,14 @@ func (h *ProgressHandler) UpdateProgress(w http.ResponseWriter, r *http.Request)
 func (h *ProgressHandler) MarkPlayed(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
 	if claims == nil {
-		respondError(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 		return
 	}
 
 	itemID := chi.URLParam(r, "itemId")
 	if err := h.userData.MarkPlayed(r.Context(), claims.UserID, itemID); err != nil {
 		h.logger.Error("mark played", "error", err)
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to mark played")
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to mark played")
 		return
 	}
 
@@ -128,14 +128,14 @@ func (h *ProgressHandler) MarkPlayed(w http.ResponseWriter, r *http.Request) {
 func (h *ProgressHandler) MarkUnplayed(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
 	if claims == nil {
-		respondError(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 		return
 	}
 
 	itemID := chi.URLParam(r, "itemId")
 	if err := h.userData.Delete(r.Context(), claims.UserID, itemID); err != nil {
 		h.logger.Error("mark unplayed", "error", err)
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to mark unplayed")
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to mark unplayed")
 		return
 	}
 
@@ -146,7 +146,7 @@ func (h *ProgressHandler) MarkUnplayed(w http.ResponseWriter, r *http.Request) {
 func (h *ProgressHandler) ToggleFavorite(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
 	if claims == nil {
-		respondError(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 		return
 	}
 
@@ -156,7 +156,7 @@ func (h *ProgressHandler) ToggleFavorite(w http.ResponseWriter, r *http.Request)
 	ud, err := h.userData.Get(r.Context(), claims.UserID, itemID)
 	if err != nil {
 		h.logger.Error("get favorite state", "error", err)
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get favorite state")
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get favorite state")
 		return
 	}
 
@@ -167,7 +167,7 @@ func (h *ProgressHandler) ToggleFavorite(w http.ResponseWriter, r *http.Request)
 
 	if err := h.userData.SetFavorite(r.Context(), claims.UserID, itemID, newState); err != nil {
 		h.logger.Error("toggle favorite", "error", err)
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to toggle favorite")
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to toggle favorite")
 		return
 	}
 
@@ -183,7 +183,7 @@ func (h *ProgressHandler) ToggleFavorite(w http.ResponseWriter, r *http.Request)
 func (h *ProgressHandler) ContinueWatching(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
 	if claims == nil {
-		respondError(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 		return
 	}
 
@@ -197,7 +197,7 @@ func (h *ProgressHandler) ContinueWatching(w http.ResponseWriter, r *http.Reques
 	items, err := h.userData.ContinueWatching(r.Context(), claims.UserID, limit)
 	if err != nil {
 		h.logger.Error("continue watching", "error", err)
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get continue watching")
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get continue watching")
 		return
 	}
 
@@ -244,7 +244,7 @@ func (h *ProgressHandler) ContinueWatching(w http.ResponseWriter, r *http.Reques
 func (h *ProgressHandler) Favorites(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
 	if claims == nil {
-		respondError(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 		return
 	}
 
@@ -264,7 +264,7 @@ func (h *ProgressHandler) Favorites(w http.ResponseWriter, r *http.Request) {
 	items, err := h.userData.Favorites(r.Context(), claims.UserID, limit, offset)
 	if err != nil {
 		h.logger.Error("favorites", "error", err)
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get favorites")
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get favorites")
 		return
 	}
 
@@ -306,7 +306,7 @@ func (h *ProgressHandler) Favorites(w http.ResponseWriter, r *http.Request) {
 func (h *ProgressHandler) NextUp(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
 	if claims == nil {
-		respondError(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 		return
 	}
 
@@ -320,7 +320,7 @@ func (h *ProgressHandler) NextUp(w http.ResponseWriter, r *http.Request) {
 	items, err := h.userData.NextUp(r.Context(), claims.UserID, limit)
 	if err != nil {
 		h.logger.Error("next up", "error", err)
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get next up")
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get next up")
 		return
 	}
 

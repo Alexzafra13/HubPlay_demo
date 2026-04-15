@@ -26,7 +26,7 @@ func (h *ItemHandler) Get(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	item, err := h.lib.GetItem(r.Context(), id)
 	if err != nil {
-		handleServiceError(w, err)
+		handleServiceError(w, r, err)
 		return
 	}
 
@@ -93,7 +93,7 @@ func (h *ItemHandler) Children(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	children, err := h.lib.GetItemChildren(r.Context(), id)
 	if err != nil {
-		handleServiceError(w, err)
+		handleServiceError(w, r, err)
 		return
 	}
 
@@ -108,7 +108,7 @@ func (h *ItemHandler) Children(w http.ResponseWriter, r *http.Request) {
 func (h *ItemHandler) Search(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query().Get("q")
 	if query == "" {
-		respondError(w, http.StatusBadRequest, "VALIDATION_ERROR", "query parameter 'q' is required")
+		respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "query parameter 'q' is required")
 		return
 	}
 
@@ -121,7 +121,7 @@ func (h *ItemHandler) Search(w http.ResponseWriter, r *http.Request) {
 		Limit:     limit,
 	})
 	if err != nil {
-		handleServiceError(w, err)
+		handleServiceError(w, r, err)
 		return
 	}
 

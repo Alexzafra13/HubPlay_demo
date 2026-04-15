@@ -93,7 +93,7 @@ type browseRequest struct {
 func (h *SetupHandler) Browse(w http.ResponseWriter, r *http.Request) {
 	var req browseRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
+		respondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
 		return
 	}
 
@@ -103,8 +103,10 @@ func (h *SetupHandler) Browse(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.setup.BrowseDirectories(req.Path)
 	if err != nil {
+		// Details (raw error, requested path) stay in logs only; the client
+		// gets a stable code it can map to a UI-friendly message.
 		h.logger.Warn("browse directories failed", "path", req.Path, "error", err)
-		respondError(w, http.StatusBadRequest, "BROWSE_ERROR", err.Error())
+		respondError(w, r, http.StatusBadRequest, "BROWSE_ERROR", "cannot browse this directory")
 		return
 	}
 
@@ -125,12 +127,12 @@ type createLibraryEntry struct {
 func (h *SetupHandler) CreateLibraries(w http.ResponseWriter, r *http.Request) {
 	var req createLibrariesRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
+		respondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
 		return
 	}
 
 	if len(req.Libraries) == 0 {
-		respondError(w, http.StatusBadRequest, "VALIDATION_ERROR", "at least one library is required")
+		respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "at least one library is required")
 		return
 	}
 
@@ -142,7 +144,7 @@ func (h *SetupHandler) CreateLibraries(w http.ResponseWriter, r *http.Request) {
 			Paths:       lib.Paths,
 		})
 		if err != nil {
-			handleServiceError(w, err)
+			handleServiceError(w, r, err)
 			return
 		}
 		created = append(created, result)
@@ -161,7 +163,7 @@ type updateSettingsRequest struct {
 func (h *SetupHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 	var req updateSettingsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
+		respondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
 		return
 	}
 
@@ -183,7 +185,7 @@ func (h *SetupHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		cfg.APIKey = req.TMDbAPIKey
 		if err := h.providers.Upsert(r.Context(), cfg); err != nil {
 			h.logger.Error("setup: failed to save tmdb api key", "error", err)
-			respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to save TMDB API key")
+			respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to save TMDB API key")
 			return
 		}
 		h.logger.Info("setup: TMDB API key saved")
@@ -214,13 +216,13 @@ type completeRequest struct {
 func (h *SetupHandler) Complete(w http.ResponseWriter, r *http.Request) {
 	var req completeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
+		respondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
 		return
 	}
 
 	if err := h.setup.CompleteSetup(req.StartScan); err != nil {
 		h.logger.Error("failed to complete setup", "error", err)
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to complete setup")
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to complete setup")
 		return
 	}
 

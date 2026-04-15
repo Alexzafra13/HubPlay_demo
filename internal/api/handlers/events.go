@@ -27,7 +27,7 @@ func NewEventHandler(bus EventBusSubscriber, logger *slog.Logger) *EventHandler 
 func (h *EventHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		respondError(w, http.StatusInternalServerError, "SSE_NOT_SUPPORTED", "streaming not supported")
+		respondError(w, r, http.StatusInternalServerError, "SSE_NOT_SUPPORTED", "streaming not supported")
 		return
 	}
 

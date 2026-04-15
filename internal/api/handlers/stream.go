@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"hubplay/internal/auth"
+	"hubplay/internal/domain"
 	"hubplay/internal/stream"
 
 	"github.com/go-chi/chi/v5"
@@ -53,13 +54,13 @@ func (h *StreamHandler) Info(w http.ResponseWriter, r *http.Request) {
 
 	item, err := h.items.GetByID(r.Context(), itemID)
 	if err != nil {
-		handleServiceError(w, err)
+		handleServiceError(w, r, err)
 		return
 	}
 
 	mediaStreams, err := h.streams.ListByItem(r.Context(), itemID)
 	if err != nil {
-		handleServiceError(w, err)
+		handleServiceError(w, r, err)
 		return
 	}
 
@@ -84,7 +85,7 @@ func (h *StreamHandler) MasterPlaylist(w http.ResponseWriter, r *http.Request) {
 
 	// Verify item exists
 	if _, err := h.items.GetByID(r.Context(), itemID); err != nil {
-		handleServiceError(w, err)
+		handleServiceError(w, r, err)
 		return
 	}
 
@@ -104,7 +105,7 @@ func (h *StreamHandler) QualityPlaylist(w http.ResponseWriter, r *http.Request) 
 
 	claims := auth.GetClaims(r.Context())
 	if claims == nil {
-		respondError(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 		return
 	}
 
@@ -112,8 +113,10 @@ func (h *StreamHandler) QualityPlaylist(w http.ResponseWriter, r *http.Request) 
 
 	ms, err := h.manager.StartSession(r.Context(), claims.UserID, itemID, quality, startTime)
 	if err != nil {
+		// The manager returns typed AppErrors (e.g. TranscodeBusy) that
+		// handleServiceError renders without leaking internal messages.
 		h.logger.Error("failed to start session", "error", err)
-		respondError(w, http.StatusServiceUnavailable, "TRANSCODE_ERROR", err.Error())
+		handleServiceError(w, r, err)
 		return
 	}
 
@@ -126,7 +129,7 @@ func (h *StreamHandler) QualityPlaylist(w http.ResponseWriter, r *http.Request) 
 	// Wait for manifest to be generated (up to 10s)
 	manifestPath := ms.ManifestPath()
 	if err := waitForFile(manifestPath, 10*time.Second); err != nil {
-		respondError(w, http.StatusServiceUnavailable, "TRANSCODE_PENDING", "transcoding not ready yet")
+		handleServiceError(w, r, domain.NewTranscodePending())
 		return
 	}
 
@@ -143,20 +146,20 @@ func (h *StreamHandler) Segment(w http.ResponseWriter, r *http.Request) {
 
 	claims := auth.GetClaims(r.Context())
 	if claims == nil {
-		respondError(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 		return
 	}
 
 	key := claims.UserID + ":" + itemID + ":" + quality
 	ms, ok := h.manager.GetSession(key)
 	if !ok {
-		respondError(w, http.StatusNotFound, "SESSION_NOT_FOUND", "no active transcode session")
+		respondError(w, r, http.StatusNotFound, "SESSION_NOT_FOUND", "no active transcode session")
 		return
 	}
 
 	// Validate segment filename: must match expected pattern (e.g. segment00001.ts, stream.m3u8)
 	if !validSegmentName.MatchString(segmentFile) {
-		respondError(w, http.StatusBadRequest, "INVALID_SEGMENT", "invalid segment filename")
+		respondError(w, r, http.StatusBadRequest, "INVALID_SEGMENT", "invalid segment filename")
 		return
 	}
 
@@ -164,13 +167,13 @@ func (h *StreamHandler) Segment(w http.ResponseWriter, r *http.Request) {
 
 	// Double-check: resolved path must stay within output directory
 	if filepath.Dir(segmentPath) != ms.OutputDir {
-		respondError(w, http.StatusBadRequest, "INVALID_SEGMENT", "invalid segment path")
+		respondError(w, r, http.StatusBadRequest, "INVALID_SEGMENT", "invalid segment path")
 		return
 	}
 
 	// Wait for segment to appear (up to 30s, FFmpeg might still be encoding)
 	if err := waitForFile(segmentPath, 30*time.Second); err != nil {
-		respondError(w, http.StatusNotFound, "SEGMENT_NOT_FOUND", "segment not available")
+		respondError(w, r, http.StatusNotFound, "SEGMENT_NOT_FOUND", "segment not available")
 		return
 	}
 
@@ -185,12 +188,12 @@ func (h *StreamHandler) DirectPlay(w http.ResponseWriter, r *http.Request) {
 
 	item, err := h.items.GetByID(r.Context(), itemID)
 	if err != nil {
-		handleServiceError(w, err)
+		handleServiceError(w, r, err)
 		return
 	}
 
 	if item.Path == "" || !item.IsAvailable {
-		respondError(w, http.StatusNotFound, "FILE_NOT_FOUND", "media file not available")
+		respondError(w, r, http.StatusNotFound, "FILE_NOT_FOUND", "media file not available")
 		return
 	}
 
@@ -207,7 +210,7 @@ func (h *StreamHandler) StopSession(w http.ResponseWriter, r *http.Request) {
 
 	claims := auth.GetClaims(r.Context())
 	if claims == nil {
-		respondError(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 		return
 	}
 
@@ -263,7 +266,7 @@ func (h *StreamHandler) Subtitles(w http.ResponseWriter, r *http.Request) {
 
 	mediaStreams, err := h.streams.ListByItem(r.Context(), itemID)
 	if err != nil {
-		handleServiceError(w, err)
+		handleServiceError(w, r, err)
 		return
 	}
 
@@ -292,19 +295,19 @@ func (h *StreamHandler) SubtitleTrack(w http.ResponseWriter, r *http.Request) {
 
 	item, err := h.items.GetByID(r.Context(), itemID)
 	if err != nil {
-		handleServiceError(w, err)
+		handleServiceError(w, r, err)
 		return
 	}
 
 	if item.Path == "" {
-		respondError(w, http.StatusNotFound, "FILE_NOT_FOUND", "media file not available")
+		respondError(w, r, http.StatusNotFound, "FILE_NOT_FOUND", "media file not available")
 		return
 	}
 
 	vttData, err := stream.ExtractSubtitleVTT(r.Context(), item.Path, trackIndex)
 	if err != nil {
 		h.logger.Error("subtitle extraction failed", "error", err)
-		respondError(w, http.StatusInternalServerError, "SUBTITLE_ERROR", "failed to extract subtitle")
+		respondError(w, r, http.StatusInternalServerError, "SUBTITLE_ERROR", "failed to extract subtitle")
 		return
 	}
 

@@ -11,6 +11,7 @@ import (
 
 	"hubplay/internal/config"
 	"hubplay/internal/db"
+	"hubplay/internal/domain"
 )
 
 // Manager orchestrates streaming sessions (direct play, remux, and transcode).
@@ -79,8 +80,9 @@ func (m *Manager) StartSession(ctx context.Context, userID, itemID, profileName 
 
 	// Check concurrent limit
 	if m.cfg.MaxTranscodeSessions > 0 && len(m.sessions) >= m.cfg.MaxTranscodeSessions {
+		active := len(m.sessions)
 		m.mu.Unlock()
-		return nil, fmt.Errorf("max transcode sessions (%d) reached", m.cfg.MaxTranscodeSessions)
+		return nil, domain.NewTranscodeBusy(active, m.cfg.MaxTranscodeSessions)
 	}
 	m.mu.Unlock()
 

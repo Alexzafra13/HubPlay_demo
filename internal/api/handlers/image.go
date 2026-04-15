@@ -59,7 +59,7 @@ func (h *ImageHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	images, err := h.images.ListByItem(r.Context(), itemID)
 	if err != nil {
-		handleServiceError(w, err)
+		handleServiceError(w, r, err)
 		return
 	}
 
@@ -79,7 +79,7 @@ func (h *ImageHandler) Available(w http.ResponseWriter, r *http.Request) {
 	extIDs, err := h.externalIDs.ListByItem(r.Context(), itemID)
 	if err != nil {
 		h.logger.Error("failed to get external IDs", "item", itemID, "error", err)
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get external IDs")
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get external IDs")
 		return
 	}
 
@@ -97,7 +97,7 @@ func (h *ImageHandler) Available(w http.ResponseWriter, r *http.Request) {
 	// Determine item type
 	item, err := h.items.GetByID(r.Context(), itemID)
 	if err != nil {
-		handleServiceError(w, err)
+		handleServiceError(w, r, err)
 		return
 	}
 
@@ -115,7 +115,7 @@ func (h *ImageHandler) Available(w http.ResponseWriter, r *http.Request) {
 	results, err := h.providers.FetchImages(r.Context(), idMap, itemType)
 	if err != nil {
 		h.logger.Error("failed to fetch images from providers", "item", itemID, "error", err)
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch images from providers")
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch images from providers")
 		return
 	}
 
@@ -146,7 +146,7 @@ func (h *ImageHandler) Select(w http.ResponseWriter, r *http.Request) {
 	imgType := chi.URLParam(r, "type")
 
 	if !isValidImageType(imgType) {
-		respondError(w, http.StatusBadRequest, "VALIDATION_ERROR", "invalid image type")
+		respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "invalid image type")
 		return
 	}
 
@@ -156,12 +156,12 @@ func (h *ImageHandler) Select(w http.ResponseWriter, r *http.Request) {
 		Height int    `json:"height"`
 	}
 	if err := decodeJSON(r, &body); err != nil {
-		respondError(w, http.StatusBadRequest, "VALIDATION_ERROR", "invalid request body")
+		respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "invalid request body")
 		return
 	}
 
 	if body.URL == "" {
-		respondError(w, http.StatusBadRequest, "VALIDATION_ERROR", "url is required")
+		respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "url is required")
 		return
 	}
 
@@ -169,7 +169,7 @@ func (h *ImageHandler) Select(w http.ResponseWriter, r *http.Request) {
 	imgData, contentType, err := h.downloadImage(body.URL)
 	if err != nil {
 		h.logger.Error("failed to download image", "url", body.URL, "error", err)
-		respondError(w, http.StatusBadGateway, "DOWNLOAD_FAILED", "failed to download image")
+		respondError(w, r, http.StatusBadGateway, "DOWNLOAD_FAILED", "failed to download image")
 		return
 	}
 
@@ -180,7 +180,7 @@ func (h *ImageHandler) Select(w http.ResponseWriter, r *http.Request) {
 	localPath, err := h.saveImageFile(itemID, filename, imgData)
 	if err != nil {
 		h.logger.Error("failed to save image", "error", err)
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to save image")
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to save image")
 		return
 	}
 
@@ -205,7 +205,7 @@ func (h *ImageHandler) Select(w http.ResponseWriter, r *http.Request) {
 	if err := h.images.Create(r.Context(), img); err != nil {
 		os.Remove(localPath)
 		h.logger.Error("failed to create image record", "error", err)
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to save image record")
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to save image record")
 		return
 	}
 
@@ -227,19 +227,19 @@ func (h *ImageHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	imgType := chi.URLParam(r, "type")
 
 	if !isValidImageType(imgType) {
-		respondError(w, http.StatusBadRequest, "VALIDATION_ERROR", "invalid image type")
+		respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "invalid image type")
 		return
 	}
 
 	// 10 MB max
 	if err := r.ParseMultipartForm(10 << 20); err != nil {
-		respondError(w, http.StatusBadRequest, "VALIDATION_ERROR", "file too large (max 10MB)")
+		respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "file too large (max 10MB)")
 		return
 	}
 
 	file, header, err := r.FormFile("file")
 	if err != nil {
-		respondError(w, http.StatusBadRequest, "VALIDATION_ERROR", "file field is required")
+		respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "file field is required")
 		return
 	}
 	defer file.Close()
@@ -247,13 +247,13 @@ func (h *ImageHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	// Validate content type
 	contentType := header.Header.Get("Content-Type")
 	if !isValidImageContentType(contentType) {
-		respondError(w, http.StatusBadRequest, "VALIDATION_ERROR", "invalid file type (must be JPEG, PNG, or WebP)")
+		respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "invalid file type (must be JPEG, PNG, or WebP)")
 		return
 	}
 
 	imgData, err := io.ReadAll(file)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to read file")
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to read file")
 		return
 	}
 
@@ -264,7 +264,7 @@ func (h *ImageHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	localPath, err := h.saveImageFile(itemID, filename, imgData)
 	if err != nil {
 		h.logger.Error("failed to save uploaded image", "error", err)
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to save image")
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to save image")
 		return
 	}
 
@@ -286,7 +286,7 @@ func (h *ImageHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	if err := h.images.Create(r.Context(), img); err != nil {
 		os.Remove(localPath)
 		h.logger.Error("failed to create image record", "error", err)
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to save image record")
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to save image record")
 		return
 	}
 
@@ -308,18 +308,18 @@ func (h *ImageHandler) SetPrimary(w http.ResponseWriter, r *http.Request) {
 
 	img, err := h.images.GetByID(r.Context(), imageID)
 	if err != nil {
-		handleServiceError(w, err)
+		handleServiceError(w, r, err)
 		return
 	}
 
 	if img.ItemID != itemID {
-		respondError(w, http.StatusNotFound, "NOT_FOUND", "image not found for this item")
+		respondError(w, r, http.StatusNotFound, "NOT_FOUND", "image not found for this item")
 		return
 	}
 
 	if err := h.images.SetPrimary(r.Context(), itemID, img.Type, imageID); err != nil {
 		h.logger.Error("failed to set primary", "error", err)
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to set primary image")
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to set primary image")
 		return
 	}
 
@@ -334,12 +334,12 @@ func (h *ImageHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 	img, err := h.images.GetByID(r.Context(), imageID)
 	if err != nil {
-		handleServiceError(w, err)
+		handleServiceError(w, r, err)
 		return
 	}
 
 	if img.ItemID != itemID {
-		respondError(w, http.StatusNotFound, "NOT_FOUND", "image not found for this item")
+		respondError(w, r, http.StatusNotFound, "NOT_FOUND", "image not found for this item")
 		return
 	}
 
@@ -351,7 +351,7 @@ func (h *ImageHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.images.DeleteByID(r.Context(), imageID); err != nil {
 		h.logger.Error("failed to delete image", "error", err)
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to delete image")
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to delete image")
 		return
 	}
 
@@ -370,7 +370,7 @@ func (h *ImageHandler) RefreshLibraryImages(w http.ResponseWriter, r *http.Reque
 	})
 	if err != nil {
 		h.logger.Error("failed to list items for image refresh", "library", libraryID, "error", err)
-		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list items")
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list items")
 		return
 	}
 
@@ -487,7 +487,7 @@ func (h *ImageHandler) ServeFile(w http.ResponseWriter, r *http.Request) {
 		// Fallback: try to get the image from DB and check if path is a remote URL
 		img, err := h.images.GetByID(r.Context(), imageID)
 		if err != nil {
-			respondError(w, http.StatusNotFound, "NOT_FOUND", "image not found")
+			respondError(w, r, http.StatusNotFound, "NOT_FOUND", "image not found")
 			return
 		}
 		// If path starts with http, redirect to the remote URL
@@ -495,7 +495,7 @@ func (h *ImageHandler) ServeFile(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, img.Path, http.StatusTemporaryRedirect)
 			return
 		}
-		respondError(w, http.StatusNotFound, "NOT_FOUND", "image file not found")
+		respondError(w, r, http.StatusNotFound, "NOT_FOUND", "image file not found")
 		return
 	}
 

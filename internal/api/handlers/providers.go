@@ -31,7 +31,7 @@ func NewProviderHandler(manager ProviderManager, repo ProviderRepository, logger
 func (h *ProviderHandler) List(w http.ResponseWriter, r *http.Request) {
 	configs, err := h.repo.ListAll(r.Context())
 	if err != nil {
-		handleServiceError(w, err)
+		handleServiceError(w, r, err)
 		return
 	}
 
@@ -72,17 +72,17 @@ func (h *ProviderHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	var req updateProviderRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, http.StatusBadRequest, "INVALID_BODY", "invalid request body")
+		respondError(w, r, http.StatusBadRequest, "INVALID_BODY", "invalid request body")
 		return
 	}
 
 	cfg, err := h.repo.GetByName(r.Context(), name)
 	if err != nil {
-		handleServiceError(w, err)
+		handleServiceError(w, r, err)
 		return
 	}
 	if cfg == nil {
-		respondError(w, http.StatusNotFound, "NOT_FOUND", "provider not found")
+		respondError(w, r, http.StatusNotFound, "NOT_FOUND", "provider not found")
 		return
 	}
 
@@ -109,7 +109,7 @@ func (h *ProviderHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.repo.Upsert(r.Context(), cfg); err != nil {
-		handleServiceError(w, err)
+		handleServiceError(w, r, err)
 		return
 	}
 
@@ -126,7 +126,7 @@ func (h *ProviderHandler) Update(w http.ResponseWriter, r *http.Request) {
 func (h *ProviderHandler) SearchMetadata(w http.ResponseWriter, r *http.Request) {
 	title := r.URL.Query().Get("title")
 	if title == "" {
-		respondError(w, http.StatusBadRequest, "MISSING_TITLE", "title parameter required")
+		respondError(w, r, http.StatusBadRequest, "MISSING_TITLE", "title parameter required")
 		return
 	}
 
@@ -138,7 +138,7 @@ func (h *ProviderHandler) SearchMetadata(w http.ResponseWriter, r *http.Request)
 	results, err := h.manager.SearchMetadata(r.Context(), query)
 	if err != nil {
 		h.logger.Error("metadata search failed", "error", err)
-		respondError(w, http.StatusInternalServerError, "SEARCH_ERROR", "metadata search failed")
+		respondError(w, r, http.StatusInternalServerError, "SEARCH_ERROR", "metadata search failed")
 		return
 	}
 
@@ -167,7 +167,7 @@ func (h *ProviderHandler) GetMetadata(w http.ResponseWriter, r *http.Request) {
 	result, err := h.manager.FetchMetadata(r.Context(), externalID, itemType)
 	if err != nil {
 		h.logger.Error("metadata fetch failed", "error", err)
-		respondError(w, http.StatusNotFound, "NOT_FOUND", "metadata not found")
+		respondError(w, r, http.StatusNotFound, "NOT_FOUND", "metadata not found")
 		return
 	}
 
@@ -183,7 +183,7 @@ func (h *ProviderHandler) GetImages(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if len(externalIDs) == 0 {
-		respondError(w, http.StatusBadRequest, "MISSING_IDS", "at least one external ID required (tmdb, imdb, tvdb)")
+		respondError(w, r, http.StatusBadRequest, "MISSING_IDS", "at least one external ID required (tmdb, imdb, tvdb)")
 		return
 	}
 
@@ -195,7 +195,7 @@ func (h *ProviderHandler) GetImages(w http.ResponseWriter, r *http.Request) {
 	images, err := h.manager.FetchImages(r.Context(), externalIDs, itemType)
 	if err != nil {
 		h.logger.Error("image fetch failed", "error", err)
-		respondError(w, http.StatusInternalServerError, "FETCH_ERROR", "image fetch failed")
+		respondError(w, r, http.StatusInternalServerError, "FETCH_ERROR", "image fetch failed")
 		return
 	}
 
@@ -218,7 +218,7 @@ func (h *ProviderHandler) GetImages(w http.ResponseWriter, r *http.Request) {
 func (h *ProviderHandler) SearchSubtitles(w http.ResponseWriter, r *http.Request) {
 	title := r.URL.Query().Get("title")
 	if title == "" {
-		respondError(w, http.StatusBadRequest, "MISSING_TITLE", "title parameter required")
+		respondError(w, r, http.StatusBadRequest, "MISSING_TITLE", "title parameter required")
 		return
 	}
 
@@ -241,7 +241,7 @@ func (h *ProviderHandler) SearchSubtitles(w http.ResponseWriter, r *http.Request
 	results, err := h.manager.SearchSubtitles(r.Context(), query)
 	if err != nil {
 		h.logger.Error("subtitle search failed", "error", err)
-		respondError(w, http.StatusInternalServerError, "SEARCH_ERROR", "subtitle search failed")
+		respondError(w, r, http.StatusInternalServerError, "SEARCH_ERROR", "subtitle search failed")
 		return
 	}
 

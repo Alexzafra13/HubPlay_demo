@@ -30,13 +30,13 @@ func NewLibraryHandler(lib LibraryService, images ImageRepository, metadata Meta
 func (h *LibraryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var req library.CreateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
+		respondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
 		return
 	}
 
 	lib, err := h.lib.Create(r.Context(), req)
 	if err != nil {
-		handleServiceError(w, err)
+		handleServiceError(w, r, err)
 		return
 	}
 
@@ -54,12 +54,12 @@ func (h *LibraryHandler) List(w http.ResponseWriter, r *http.Request) {
 	} else if claims != nil {
 		libs, err = h.lib.ListForUser(r.Context(), claims.UserID)
 	} else {
-		respondError(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 		return
 	}
 
 	if err != nil {
-		handleServiceError(w, err)
+		handleServiceError(w, r, err)
 		return
 	}
 
@@ -78,7 +78,7 @@ func (h *LibraryHandler) Get(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	lib, err := h.lib.GetByID(r.Context(), id)
 	if err != nil {
-		handleServiceError(w, err)
+		handleServiceError(w, r, err)
 		return
 	}
 
@@ -94,13 +94,13 @@ func (h *LibraryHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	var req library.UpdateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
+		respondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
 		return
 	}
 
 	lib, err := h.lib.Update(r.Context(), id, req)
 	if err != nil {
-		handleServiceError(w, err)
+		handleServiceError(w, r, err)
 		return
 	}
 
@@ -110,7 +110,7 @@ func (h *LibraryHandler) Update(w http.ResponseWriter, r *http.Request) {
 func (h *LibraryHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if err := h.lib.Delete(r.Context(), id); err != nil {
-		handleServiceError(w, err)
+		handleServiceError(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -120,7 +120,7 @@ func (h *LibraryHandler) Scan(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	refreshMeta := r.URL.Query().Get("refresh_metadata") == "true"
 	if err := h.lib.Scan(r.Context(), id, refreshMeta); err != nil {
-		handleServiceError(w, err)
+		handleServiceError(w, r, err)
 		return
 	}
 	respondJSON(w, http.StatusAccepted, map[string]any{
@@ -133,7 +133,7 @@ func (h *LibraryHandler) Browse(w http.ResponseWriter, r *http.Request) {
 		Path string `json:"path"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
+		respondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
 		return
 	}
 	if req.Path == "" {
@@ -142,19 +142,19 @@ func (h *LibraryHandler) Browse(w http.ResponseWriter, r *http.Request) {
 
 	absPath, err := filepath.Abs(req.Path)
 	if err != nil {
-		respondError(w, http.StatusBadRequest, "BROWSE_ERROR", "invalid path")
+		respondError(w, r, http.StatusBadRequest, "BROWSE_ERROR", "invalid path")
 		return
 	}
 
 	// Block access to sensitive system directories
 	if isSensitiveBrowsePath(absPath) {
-		respondError(w, http.StatusForbidden, "BROWSE_ERROR", "access denied: cannot browse system directories")
+		respondError(w, r, http.StatusForbidden, "BROWSE_ERROR", "access denied: cannot browse system directories")
 		return
 	}
 
 	entries, err := os.ReadDir(absPath)
 	if err != nil {
-		respondError(w, http.StatusBadRequest, "BROWSE_ERROR", "directory not found or not accessible")
+		respondError(w, r, http.StatusBadRequest, "BROWSE_ERROR", "directory not found or not accessible")
 		return
 	}
 
@@ -208,7 +208,7 @@ func (h *LibraryHandler) Items(w http.ResponseWriter, r *http.Request) {
 		Cursor:    cursor,
 	})
 	if err != nil {
-		handleServiceError(w, err)
+		handleServiceError(w, r, err)
 		return
 	}
 
@@ -235,7 +235,7 @@ func (h *LibraryHandler) LatestItems(w http.ResponseWriter, r *http.Request) {
 
 	items, err := h.lib.LatestItems(r.Context(), libraryID, itemType, limit)
 	if err != nil {
-		handleServiceError(w, err)
+		handleServiceError(w, r, err)
 		return
 	}
 

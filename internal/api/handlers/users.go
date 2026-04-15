@@ -26,13 +26,13 @@ func NewUserHandler(users UserService, logger *slog.Logger) *UserHandler {
 func (h *UserHandler) Me(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
 	if claims == nil {
-		respondError(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 		return
 	}
 
 	u, err := h.users.GetByID(r.Context(), claims.UserID)
 	if err != nil {
-		handleServiceError(w, err)
+		handleServiceError(w, r, err)
 		return
 	}
 
@@ -56,7 +56,7 @@ func (h *UserHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	users, total, err := h.users.List(r.Context(), limit, offset)
 	if err != nil {
-		handleServiceError(w, err)
+		handleServiceError(w, r, err)
 		return
 	}
 
@@ -83,19 +83,19 @@ func (h *UserHandler) List(w http.ResponseWriter, r *http.Request) {
 func (h *UserHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if id == "" {
-		respondError(w, http.StatusBadRequest, "BAD_REQUEST", "missing user id")
+		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "missing user id")
 		return
 	}
 
 	// Prevent self-deletion
 	claims := auth.GetClaims(r.Context())
 	if claims != nil && claims.UserID == id {
-		respondError(w, http.StatusBadRequest, "BAD_REQUEST", "cannot delete your own account")
+		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "cannot delete your own account")
 		return
 	}
 
 	if err := h.users.Delete(r.Context(), id); err != nil {
-		handleServiceError(w, err)
+		handleServiceError(w, r, err)
 		return
 	}
 
