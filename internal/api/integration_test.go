@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -30,7 +31,16 @@ func newTestApp(t *testing.T) *testApp {
 	cfg := config.TestConfig()
 	clk := &clock.Mock{CurrentTime: time.Now().UTC()}
 
-	authSvc := auth.NewService(repos.Users, repos.Sessions, cfg.Auth, clk, slog.Default())
+	ctx := context.Background()
+	if _, err := auth.Bootstrap(ctx, repos.SigningKeys, clk, cfg.Auth.JWTSecret); err != nil {
+		t.Fatalf("bootstrap signing keys: %v", err)
+	}
+	keyStore, err := auth.NewKeyStore(ctx, repos.SigningKeys, clk)
+	if err != nil {
+		t.Fatalf("new keystore: %v", err)
+	}
+
+	authSvc := auth.NewService(repos.Users, repos.Sessions, keyStore, cfg.Auth, clk, slog.Default())
 	userSvc := user.NewService(repos.Users, slog.Default())
 
 	router := api.NewRouter(api.Dependencies{

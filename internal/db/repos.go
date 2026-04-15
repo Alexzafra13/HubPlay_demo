@@ -6,6 +6,7 @@ import "database/sql"
 type Repositories struct {
 	Users        *UserRepository
 	Sessions     *SessionRepository
+	SigningKeys  *SigningKeyRepository
 	Libraries    *LibraryRepository
 	Items        *ItemRepository
 	MediaStreams  *MediaStreamRepository
@@ -23,6 +24,7 @@ func NewRepositories(database *sql.DB) *Repositories {
 	return &Repositories{
 		Users:        NewUserRepository(database),
 		Sessions:     NewSessionRepository(database),
+		SigningKeys:  NewSigningKeyRepository(database),
 		Libraries:    NewLibraryRepository(database),
 		Items:        NewItemRepository(database),
 		MediaStreams:  NewMediaStreamRepository(database),

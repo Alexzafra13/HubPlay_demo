@@ -36,6 +36,7 @@ type RegisterRequest struct {
 type Service struct {
 	users       *db.UserRepository
 	sessions    *db.SessionRepository
+	keys        *KeyStore
 	cfg         config.AuthConfig
 	clock       clock.Clock
 	logger      *slog.Logger
@@ -43,9 +44,17 @@ type Service struct {
 	rateLimiter *loginRateLimiter
 }
 
+// KeyStoreOrNil returns the service's signing keystore. Exposed for the
+// admin handler and for observability; returns nil if the service was built
+// without one (tests that don't touch tokens).
+func (s *Service) KeyStoreOrNil() *KeyStore {
+	return s.keys
+}
+
 func NewService(
 	users *db.UserRepository,
 	sessions *db.SessionRepository,
+	keys *KeyStore,
 	cfg config.AuthConfig,
 	clk clock.Clock,
 	logger *slog.Logger,
@@ -71,6 +80,7 @@ func NewService(
 	return &Service{
 		users:       users,
 		sessions:    sessions,
+		keys:        keys,
 		cfg:         cfg,
 		clock:       clk,
 		logger:      logger.With("module", "auth"),
@@ -212,9 +222,15 @@ func (s *Service) RefreshToken(ctx context.Context, refreshToken string) (*AuthT
 		return nil, fmt.Errorf("refresh: %w", domain.ErrAccountDisabled)
 	}
 
-	// Generate new access token (keep same refresh token + session)
+	// Generate new access token (keep same refresh token + session) using
+	// the current primary key. Tokens signed with the previous primary (if
+	// rotation happened mid-session) still validate until that key is pruned.
+	primary, err := s.keys.Current()
+	if err != nil {
+		return nil, fmt.Errorf("refresh: %w", err)
+	}
 	accessToken, expiresAt, err := generateAccessToken(
-		s.cfg.JWTSecret, user.ID, user.Username, user.Role, s.cfg.AccessTokenTTL, s.clock.Now(),
+		primary, user.ID, user.Username, user.Role, s.cfg.AccessTokenTTL, s.clock.Now(),
 	)
 	if err != nil {
 		return nil, err
@@ -232,7 +248,9 @@ func (s *Service) RefreshToken(ctx context.Context, refreshToken string) (*AuthT
 }
 
 func (s *Service) ValidateToken(ctx context.Context, tokenStr string) (*Claims, error) {
-	claims, err := validateAccessToken(s.cfg.JWTSecret, tokenStr)
+	claims, err := validateAccessToken(func(kid string) (*db.SigningKey, error) {
+		return s.keys.Lookup(kid)
+	}, tokenStr)
 	if err != nil {
 		return nil, fmt.Errorf("validate: %w", domain.ErrInvalidToken)
 	}
@@ -273,8 +291,12 @@ func (s *Service) createSession(ctx context.Context, user *db.User, deviceName, 
 		}
 	}
 
+	primary, err := s.keys.Current()
+	if err != nil {
+		return nil, fmt.Errorf("createSession: %w", err)
+	}
 	accessToken, expiresAt, err := generateAccessToken(
-		s.cfg.JWTSecret, user.ID, user.Username, user.Role, s.cfg.AccessTokenTTL, s.clock.Now(),
+		primary, user.ID, user.Username, user.Role, s.cfg.AccessTokenTTL, s.clock.Now(),
 	)
 	if err != nil {
 		return nil, err

@@ -31,7 +31,16 @@ func newStreamTestApp(t *testing.T) *streamTestApp {
 	cfg := config.TestConfig()
 	clk := &clock.Mock{CurrentTime: time.Now().UTC()}
 
-	authSvc := auth.NewService(repos.Users, repos.Sessions, cfg.Auth, clk, slog.Default())
+	ctx := context.Background()
+	if _, err := auth.Bootstrap(ctx, repos.SigningKeys, clk, cfg.Auth.JWTSecret); err != nil {
+		t.Fatalf("bootstrap signing keys: %v", err)
+	}
+	keyStore, err := auth.NewKeyStore(ctx, repos.SigningKeys, clk)
+	if err != nil {
+		t.Fatalf("new keystore: %v", err)
+	}
+
+	authSvc := auth.NewService(repos.Users, repos.Sessions, keyStore, cfg.Auth, clk, slog.Default())
 	userSvc := user.NewService(repos.Users, slog.Default())
 	streamMgr := stream.NewManager(repos.Items, repos.MediaStreams, cfg.Streaming, slog.Default())
 	t.Cleanup(streamMgr.Shutdown)

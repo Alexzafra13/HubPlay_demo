@@ -84,7 +84,22 @@ func run(configPath string) error {
 	}
 
 	// ═══ Phase 4: Core Services ═══
-	authService := auth.NewService(repos.Users, repos.Sessions, cfg.Auth, clk, logger, cfg.RateLimit)
+	//
+	// JWT signing keys live in the DB so they survive restarts and can be
+	// rotated without editing config. On first boot (empty table) we seed
+	// the keystore with the config secret so any tokens that were issued
+	// before this upgrade keep validating; subsequent boots pick up existing
+	// keys verbatim.
+	if _, err := auth.Bootstrap(ctx, repos.SigningKeys, clk, cfg.Auth.JWTSecret); err != nil {
+		return fmt.Errorf("bootstrapping signing keys: %w", err)
+	}
+	keyStore, err := auth.NewKeyStore(ctx, repos.SigningKeys, clk)
+	if err != nil {
+		return fmt.Errorf("loading signing keys: %w", err)
+	}
+	logger.Info("signing keys loaded", "active", keyStore.ActiveCount(), "retired", keyStore.RetiredCount())
+
+	authService := auth.NewService(repos.Users, repos.Sessions, keyStore, cfg.Auth, clk, logger, cfg.RateLimit)
 	authService.StartSessionCleaner(ctx)
 	userService := user.NewService(repos.Users, logger)
 

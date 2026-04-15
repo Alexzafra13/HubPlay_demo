@@ -20,6 +20,7 @@ func newTestAuthService(t *testing.T) (*auth.Service, *db.UserRepository, *db.Se
 	database := testutil.NewTestDB(t)
 	userRepo := db.NewUserRepository(database)
 	sessionRepo := db.NewSessionRepository(database)
+	keyRepo := db.NewSigningKeyRepository(database)
 
 	cfg := config.AuthConfig{
 		JWTSecret:          "test-secret-32-bytes-long-enough!",
@@ -31,7 +32,19 @@ func newTestAuthService(t *testing.T) (*auth.Service, *db.UserRepository, *db.Se
 
 	clk := &clock.Mock{CurrentTime: time.Now().UTC()}
 
-	svc := auth.NewService(userRepo, sessionRepo, cfg, clk, slog.Default())
+	// Seed the keystore the same way main.go does: bootstrap from the config
+	// secret, then load. This keeps the test path identical to production
+	// and catches wiring bugs between Bootstrap and NewKeyStore.
+	ctx := context.Background()
+	if _, err := auth.Bootstrap(ctx, keyRepo, clk, cfg.JWTSecret); err != nil {
+		t.Fatalf("bootstrap keystore: %v", err)
+	}
+	keyStore, err := auth.NewKeyStore(ctx, keyRepo, clk)
+	if err != nil {
+		t.Fatalf("new keystore: %v", err)
+	}
+
+	svc := auth.NewService(userRepo, sessionRepo, keyStore, cfg, clk, slog.Default())
 	return svc, userRepo, sessionRepo
 }
 
