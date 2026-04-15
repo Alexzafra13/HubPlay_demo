@@ -59,6 +59,14 @@ func run(configPath string) error {
 
 	logger.Info("starting HubPlay", "version", version, "addr", cfg.Server.Addr())
 
+	// Preflight: validate external binaries and filesystem permissions
+	// before any service is built. Catching these here means "ffmpeg not
+	// installed" shows up as a clear boot error instead of an opaque 500
+	// during the first user's stream attempt.
+	if err := cfg.Preflight(logger); err != nil {
+		return fmt.Errorf("preflight checks failed:\n%w", err)
+	}
+
 	// ═══ Phase 2: Database ═══
 	database, err := db.Open(cfg.Database.Driver, cfg.Database.Path, logger)
 	if err != nil {

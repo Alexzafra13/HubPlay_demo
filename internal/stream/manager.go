@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -62,11 +60,10 @@ func NewManager(
 	cfg config.StreamingConfig,
 	logger *slog.Logger,
 ) *Manager {
-	cacheDir := cfg.CacheDir
-	if cacheDir == "" {
-		home, _ := os.UserHomeDir()
-		cacheDir = filepath.Join(home, ".hubplay", "cache", "transcode")
-	}
+	// Single source of truth for the cache directory — preflight checks
+	// use the same helper so "the cache dir" means the same thing in both
+	// places.
+	cacheDir := cfg.EffectiveCacheDir()
 
 	m := &Manager{
 		sessions:   make(map[string]*ManagedSession),
