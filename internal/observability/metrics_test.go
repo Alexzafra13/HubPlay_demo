@@ -136,3 +136,59 @@ func TestNewStreamSink_NilMetricsReturnsNil(t *testing.T) {
 		t.Error("NewStreamSink(nil) should return nil for caller to short-circuit")
 	}
 }
+
+// fakeKeyStoreCounts lets us feed controlled values to the GaugeFunc so the
+// test does not depend on a live keystore (covered by auth's own tests).
+type fakeKeyStoreCounts struct {
+	active  int
+	retired int
+}
+
+func (f *fakeKeyStoreCounts) ActiveCount() int  { return f.active }
+func (f *fakeKeyStoreCounts) RetiredCount() int { return f.retired }
+
+func TestRegisterKeyStoreGauges_ReadsLiveOnScrape(t *testing.T) {
+	// GaugeFunc is scraped on demand — bumping the counts must be visible
+	// in the next exposition without any extra work. That guarantees the
+	// metric cannot drift from the DB after a future refactor.
+	m, err := NewMetrics("v0")
+	if err != nil {
+		t.Fatalf("NewMetrics: %v", err)
+	}
+	counts := &fakeKeyStoreCounts{active: 1, retired: 0}
+	if err := RegisterKeyStoreGauges(m, counts); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	m.Handler().ServeHTTP(rr, req)
+	if !strings.Contains(rr.Body.String(), `hubplay_auth_signing_keys{state="active"} 1`) {
+		t.Errorf("first scrape missing active=1:\n%s", rr.Body.String())
+	}
+
+	counts.active = 2
+	counts.retired = 3
+	rr = httptest.NewRecorder()
+	m.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	body := rr.Body.String()
+	if !strings.Contains(body, `hubplay_auth_signing_keys{state="active"} 2`) {
+		t.Errorf("second scrape missing active=2:\n%s", body)
+	}
+	if !strings.Contains(body, `hubplay_auth_signing_keys{state="retired"} 3`) {
+		t.Errorf("second scrape missing retired=3:\n%s", body)
+	}
+}
+
+func TestRegisterKeyStoreGauges_NilInputsAreNoOp(t *testing.T) {
+	// Wiring paths may pass a nil Metrics (observability disabled) or a
+	// nil keystore (auth not yet constructed in some future refactor);
+	// neither should error.
+	if err := RegisterKeyStoreGauges(nil, &fakeKeyStoreCounts{}); err != nil {
+		t.Errorf("nil metrics: %v", err)
+	}
+	m, _ := NewMetrics("v0")
+	if err := RegisterKeyStoreGauges(m, nil); err != nil {
+		t.Errorf("nil counts: %v", err)
+	}
+}

@@ -37,6 +37,8 @@ type Metrics struct {
 
 	StreamActiveSessions  prometheus.Gauge
 	StreamTranscodeStarts *prometheus.CounterVec
+
+	AuthKeyRotations *prometheus.CounterVec
 }
 
 // NewMetrics creates and registers every collector. It returns an error if
@@ -97,6 +99,15 @@ func NewMetrics(version string) (*Metrics, error) {
 			// outcome: "started", "busy", "failed"
 			[]string{"outcome"},
 		),
+
+		AuthKeyRotations: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "hubplay_auth_key_rotations_total",
+				Help: "JWT signing key rotations, grouped by outcome.",
+			},
+			// outcome: "success", "error"
+			[]string{"outcome"},
+		),
 	}
 
 	// Register everything. Any failure (e.g. name collision in tests) is
@@ -108,6 +119,7 @@ func NewMetrics(version string) (*Metrics, error) {
 		m.HTTPErrors,
 		m.StreamActiveSessions,
 		m.StreamTranscodeStarts,
+		m.AuthKeyRotations,
 		// Also surface process + Go runtime metrics — free and universally
 		// useful (goroutines, gc pauses, fds).
 		collectors.NewGoCollector(),

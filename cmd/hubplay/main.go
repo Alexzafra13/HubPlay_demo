@@ -99,6 +99,12 @@ func run(configPath string) error {
 	}
 	logger.Info("signing keys loaded", "active", keyStore.ActiveCount(), "retired", keyStore.RetiredCount())
 
+	// Expose live keystore counts to Prometheus via GaugeFunc so the metric
+	// never drifts from the DB (see observability/auth.go for rationale).
+	if err := observability.RegisterKeyStoreGauges(metrics, keyStore); err != nil {
+		return fmt.Errorf("registering keystore gauges: %w", err)
+	}
+
 	authService := auth.NewService(repos.Users, repos.Sessions, keyStore, cfg.Auth, clk, logger, cfg.RateLimit)
 	authService.StartSessionCleaner(ctx)
 	userService := user.NewService(repos.Users, logger)

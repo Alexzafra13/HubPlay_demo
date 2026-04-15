@@ -156,6 +156,26 @@ func NewRouter(deps Dependencies) http.Handler {
 				r.Delete("/{id}", userHandler.Delete)
 			})
 
+			// Signing key lifecycle (admin only). Every route here is
+			// destructive — guarded at the group level so a single
+			// middleware change toggles access for all of them at once.
+			if ks := deps.Auth.KeyStoreOrNil(); ks != nil {
+				var observe func(outcome string)
+				if deps.Metrics != nil {
+					observe = func(outcome string) {
+						deps.Metrics.AuthKeyRotations.WithLabelValues(outcome).Inc()
+					}
+				}
+				adminAuth := handlers.NewAdminAuthHandler(ks, nil, observe, deps.Logger)
+
+				r.Route("/admin/auth/keys", func(r chi.Router) {
+					r.Use(auth.RequireAdmin)
+					r.Get("/", adminAuth.ListKeys)
+					r.Post("/rotate", adminAuth.Rotate)
+					r.Post("/prune", adminAuth.Prune)
+				})
+			}
+
 			// Watch Progress & User Engagement
 			if deps.UserData != nil {
 				progressHandler := handlers.NewProgressHandler(deps.UserData, deps.Images, deps.Logger)
