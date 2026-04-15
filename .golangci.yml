@@ -1,0 +1,11 @@
+# golangci-lint configuration.
+#
+# The default 60s timeout runs out on CI now that the module has grown
+# past 100 files; bumping to 5m gives plenty of headroom without
+# masking legitimately slow linters.
+#
+# Note: the linter version is pinned in .github/workflows/ci.yml
+# (golangci-lint-action.version) so this config has a known target.
+# Upgrading to v2+ requires migrating the config schema first.
+run:
+  timeout: 5m

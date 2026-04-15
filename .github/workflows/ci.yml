@@ -63,7 +63,10 @@ jobs:
 
       - uses: golangci/golangci-lint-action@v6
         with:
-          version: latest
+          # Pinned to avoid CI breaking on every upstream release. The
+          # matching .golangci.yml uses v1-style keys; bumping to v2+
+          # requires migrating the config first.
+          version: v1.64.8
 
   build:
     name: Build
