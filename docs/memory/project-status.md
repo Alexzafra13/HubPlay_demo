@@ -1,6 +1,6 @@
 # Estado del proyecto
 
-> Snapshot: **2026-04-15** · Rama: `claude/sqlc-sessions` · HEAD base: `7419d74`
+> Snapshot: **2026-04-15** · Rama: `claude/sqlc-providers` · HEAD base: `b8c7fa7`
 
 ## Resumen ejecutivo
 
@@ -36,9 +36,9 @@ cero fuera de `internal/db/`.
 | Tabla | Estado | Estrategia | Commit |
 |-------|--------|------------|--------|
 | `jwt_signing_keys` | ✅ | Alias (fields 1:1) | `7419d74` |
-| `sessions` | ✅ | Adapter + conversión null | (pendiente) |
-| `api_keys` | ⏳ | Adapter probablemente | — |
-| `providers` | ⏳ | — | — |
+| `sessions` | ✅ | Adapter (IPAddress nullable → string) | `c27a756` |
+| `api_keys` | 🪦 **zombie** | Tabla huérfana: sin repo ni callers. Borrar con migración 005 en commit aparte | — |
+| `providers` | ✅ | Adapter (config_json / api_key nullable, Priority int64→int). Reusa `nullableString()` | (pendiente) |
 | `webhook_configs`, `webhook_log` | ⏳ | — | — |
 | `users` | ⏳ | — | — |
 | `libraries`, `library_paths`, `library_access` | ⏳ | — | — |
@@ -85,9 +85,15 @@ Cleanup al final: borrar `scan_helpers.go` si queda huérfano, eliminar
 - **`-race` no en Windows** por el driver pure-Go. Para CI local en
   Windows usar `go test -count=1 ./...` sin el flag.
 
+## Deuda schema descubierta
+
+- **`api_keys` zombie**: tabla sin repo ni callers. Candidata a migración
+  005 que la droppee. Sin prisa.
+- **`webhook_configs`, `webhook_log`** (por verificar): si tampoco tienen
+  repo/handler, mismo tratamiento — son parte del diseño aspiracional
+  de `plugins.md` / webhooks que nunca se implementó.
+
 ## Próximo paso
 
-Migrar `api_keys` siguiendo el mismo patrón. Tabla pequeña (4–5 queries),
-uso limitado, validará que el adapter funcione con tipos adicionales
-(hay `last_used_at` nullable). Luego `providers` + `webhook_configs`
-que son de complejidad similar.
+Verificar si `webhook_configs` / `webhook_log` tienen consumidor real.
+Si no → saltar al grupo de `users` + `libraries`. Si sí → migrar.

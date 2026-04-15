@@ -27,16 +27,27 @@ type Querier interface {
 	// Subquery aliased to 's' because sqlc needs unambiguous column resolution
 	// when the same table appears twice in scope.
 	DeleteOldestSessionByUser(ctx context.Context, userID string) error
+	DeleteProvider(ctx context.Context, name string) error
 	DeleteRetiredSigningKeysBefore(ctx context.Context, retiredAt sql.NullTime) (int64, error)
 	DeleteSession(ctx context.Context, id string) error
 	DeleteSessionByRefreshTokenHash(ctx context.Context, refreshTokenHash string) error
+	GetProvider(ctx context.Context, name string) (Provider, error)
 	GetSessionByRefreshTokenHash(ctx context.Context, refreshTokenHash string) (Session, error)
 	GetSigningKey(ctx context.Context, id string) (JwtSigningKey, error)
+	ListActiveProviders(ctx context.Context) ([]Provider, error)
 	ListActiveSigningKeys(ctx context.Context) ([]JwtSigningKey, error)
+	ListProviders(ctx context.Context) ([]Provider, error)
+	ListProvidersByType(ctx context.Context, type_ string) ([]Provider, error)
 	ListSessionsByUser(ctx context.Context, userID string) ([]Session, error)
 	ListSigningKeys(ctx context.Context) ([]JwtSigningKey, error)
+	SetProviderStatus(ctx context.Context, arg SetProviderStatusParams) (int64, error)
 	SetSigningKeyRetiredAt(ctx context.Context, arg SetSigningKeyRetiredAtParams) (int64, error)
 	UpdateSessionLastActive(ctx context.Context, arg UpdateSessionLastActiveParams) error
+	// Provider configurations (TMDb, Fanart, OpenSubtitles, ...).
+	//
+	// Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE providers).
+	// Runtime registry + api-key sourcing lives in internal/provider/manager.go.
+	UpsertProvider(ctx context.Context, arg UpsertProviderParams) error
 }
 
 var _ Querier = (*Queries)(nil)
