@@ -3,7 +3,10 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+
+	"hubplay/internal/db/sqlc"
 )
 
 // ExternalID links an item to an external provider ID (tmdb, imdb, tvdb).
@@ -14,20 +17,19 @@ type ExternalID struct {
 }
 
 type ExternalIDRepository struct {
-	db *sql.DB
+	q *sqlc.Queries
 }
 
 func NewExternalIDRepository(database *sql.DB) *ExternalIDRepository {
-	return &ExternalIDRepository{db: database}
+	return &ExternalIDRepository{q: sqlc.New(database)}
 }
 
 func (r *ExternalIDRepository) Upsert(ctx context.Context, e *ExternalID) error {
-	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO external_ids (item_id, provider, external_id)
-		 VALUES (?, ?, ?)
-		 ON CONFLICT(item_id, provider) DO UPDATE SET external_id = excluded.external_id`,
-		e.ItemID, e.Provider, e.ExternalID,
-	)
+	err := r.q.UpsertExternalID(ctx, sqlc.UpsertExternalIDParams{
+		ItemID:     e.ItemID,
+		Provider:   e.Provider,
+		ExternalID: e.ExternalID,
+	})
 	if err != nil {
 		return fmt.Errorf("upsert external id: %w", err)
 	}
@@ -35,47 +37,52 @@ func (r *ExternalIDRepository) Upsert(ctx context.Context, e *ExternalID) error 
 }
 
 func (r *ExternalIDRepository) ListByItem(ctx context.Context, itemID string) ([]*ExternalID, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT item_id, provider, external_id FROM external_ids WHERE item_id = ?`, itemID,
-	)
+	rows, err := r.q.ListExternalIDsByItem(ctx, itemID)
 	if err != nil {
 		return nil, fmt.Errorf("list external ids: %w", err)
 	}
-	defer rows.Close()
-
-	var ids []*ExternalID
-	for rows.Next() {
-		e := &ExternalID{}
-		if err := rows.Scan(&e.ItemID, &e.Provider, &e.ExternalID); err != nil {
-			return nil, fmt.Errorf("scan external id: %w", err)
-		}
-		ids = append(ids, e)
-	}
-	return ids, rows.Err()
+	return externalIDsFromRows(rows), nil
 }
 
 func (r *ExternalIDRepository) GetByProvider(ctx context.Context, itemID, prov string) (*ExternalID, error) {
-	e := &ExternalID{}
-	err := r.db.QueryRowContext(ctx,
-		`SELECT item_id, provider, external_id FROM external_ids WHERE item_id = ? AND provider = ?`,
-		itemID, prov,
-	).Scan(&e.ItemID, &e.Provider, &e.ExternalID)
-	if err == sql.ErrNoRows {
+	row, err := r.q.GetExternalIDByProvider(ctx, sqlc.GetExternalIDByProviderParams{
+		ItemID:   itemID,
+		Provider: prov,
+	})
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get external id: %w", err)
 	}
-	return e, nil
+	e := externalIDFromRow(row)
+	return &e, nil
 }
 
 func (r *ExternalIDRepository) HasExternalID(ctx context.Context, itemID string) (bool, error) {
-	var count int
-	err := r.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM external_ids WHERE item_id = ?`, itemID,
-	).Scan(&count)
+	cnt, err := r.q.CountExternalIDsByItem(ctx, itemID)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("count external ids: %w", err)
 	}
-	return count > 0, nil
+	return cnt > 0, nil
+}
+
+func externalIDFromRow(r sqlc.ExternalID) ExternalID {
+	return ExternalID{
+		ItemID:     r.ItemID,
+		Provider:   r.Provider,
+		ExternalID: r.ExternalID,
+	}
+}
+
+func externalIDsFromRows(rows []sqlc.ExternalID) []*ExternalID {
+	if len(rows) == 0 {
+		return nil
+	}
+	out := make([]*ExternalID, len(rows))
+	for i, row := range rows {
+		e := externalIDFromRow(row)
+		out[i] = &e
+	}
+	return out
 }
