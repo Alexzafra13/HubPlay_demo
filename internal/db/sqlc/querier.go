@@ -14,6 +14,7 @@ type Querier interface {
 	CleanupOldPrograms(ctx context.Context, endTime time.Time) (int64, error)
 	ContinueWatching(ctx context.Context, arg ContinueWatchingParams) ([]ContinueWatchingRow, error)
 	CountExternalIDsByItem(ctx context.Context, itemID string) (int64, error)
+	CountItemsByLibrary(ctx context.Context, libraryID string) (int64, error)
 	CountSessionsByUser(ctx context.Context, userID string) (int64, error)
 	CountUsers(ctx context.Context) (int64, error)
 	// IPTV channels per library.
@@ -25,6 +26,11 @@ type Querier interface {
 	// Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE images).
 	// NOTE: GetPrimaryURLs uses dynamic IN() and remains raw SQL in the adapter.
 	CreateImage(ctx context.Context, arg CreateImageParams) error
+	// Items (movies, series, seasons, episodes, albums, etc.).
+	//
+	// Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE items).
+	// NOTE: List and LatestItems use dynamic WHERE/FTS/cursor and stay raw SQL.
+	CreateItem(ctx context.Context, arg CreateItemParams) error
 	// Auth sessions: one row per active login (refresh token lives here hashed).
 	//
 	// Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE sessions).
@@ -43,6 +49,8 @@ type Querier interface {
 	DeleteExpiredSessions(ctx context.Context) (int64, error)
 	DeleteImageByID(ctx context.Context, id string) error
 	DeleteImagesByItem(ctx context.Context, itemID string) error
+	DeleteItem(ctx context.Context, id string) (int64, error)
+	DeleteItemsByLibrary(ctx context.Context, libraryID string) error
 	DeleteLibrary(ctx context.Context, id string) (int64, error)
 	// Media stream tracks (video, audio, subtitle) per item.
 	//
@@ -63,6 +71,9 @@ type Querier interface {
 	GetChannelByID(ctx context.Context, id string) (GetChannelByIDRow, error)
 	GetExternalIDByProvider(ctx context.Context, arg GetExternalIDByProviderParams) (ExternalID, error)
 	GetImageByID(ctx context.Context, id string) (GetImageByIDRow, error)
+	GetItemByID(ctx context.Context, id string) (Item, error)
+	GetItemByPath(ctx context.Context, path sql.NullString) (Item, error)
+	GetItemChildren(ctx context.Context, parentID sql.NullString) ([]GetItemChildrenRow, error)
 	GetLibraryByID(ctx context.Context, id string) (GetLibraryByIDRow, error)
 	GetMetadataByItemID(ctx context.Context, itemID string) (GetMetadataByItemIDRow, error)
 	GetNowPlaying(ctx context.Context, arg GetNowPlayingParams) (GetNowPlayingRow, error)
@@ -115,6 +126,7 @@ type Querier interface {
 	SetProviderStatus(ctx context.Context, arg SetProviderStatusParams) (int64, error)
 	SetSigningKeyRetiredAt(ctx context.Context, arg SetSigningKeyRetiredAtParams) (int64, error)
 	UnsetPrimaryImages(ctx context.Context, arg UnsetPrimaryImagesParams) error
+	UpdateItem(ctx context.Context, arg UpdateItemParams) (int64, error)
 	UpdateLastLogin(ctx context.Context, arg UpdateLastLoginParams) error
 	UpdateLibrary(ctx context.Context, arg UpdateLibraryParams) (int64, error)
 	UpdateProgress(ctx context.Context, arg UpdateProgressParams) error

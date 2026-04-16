@@ -3,9 +3,11 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
+	"hubplay/internal/db/sqlc"
 	"hubplay/internal/domain"
 )
 
@@ -46,25 +48,38 @@ type ItemFilter struct {
 }
 
 type ItemRepository struct {
-	db *sql.DB
+	db *sql.DB // kept for List and LatestItems (dynamic WHERE/FTS/cursor)
+	q  *sqlc.Queries
 }
 
 func NewItemRepository(database *sql.DB) *ItemRepository {
-	return &ItemRepository{db: database}
+	return &ItemRepository{db: database, q: sqlc.New(database)}
 }
 
 func (r *ItemRepository) Create(ctx context.Context, item *Item) error {
-	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO items (id, library_id, parent_id, type, title, sort_title, original_title,
-		 year, path, size, duration_ticks, container, fingerprint, season_number, episode_number,
-		 community_rating, content_rating, premiere_date, added_at, updated_at, is_available)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		item.ID, item.LibraryID, nullStr(item.ParentID), item.Type, item.Title, item.SortTitle,
-		nullStr(item.OriginalTitle), item.Year, nullStr(item.Path), item.Size, item.DurationTicks,
-		nullStr(item.Container), nullStr(item.Fingerprint), item.SeasonNumber, item.EpisodeNumber,
-		item.CommunityRating, nullStr(item.ContentRating), item.PremiereDate,
-		item.AddedAt, item.UpdatedAt, item.IsAvailable,
-	)
+	err := r.q.CreateItem(ctx, sqlc.CreateItemParams{
+		ID:              item.ID,
+		LibraryID:       item.LibraryID,
+		ParentID:        nullableString(item.ParentID),
+		Type:            item.Type,
+		Title:           item.Title,
+		SortTitle:       item.SortTitle,
+		OriginalTitle:   nullableString(item.OriginalTitle),
+		Year:            sql.NullInt64{Int64: int64(item.Year), Valid: true},
+		Path:            nullableString(item.Path),
+		Size:            sql.NullInt64{Int64: item.Size, Valid: true},
+		DurationTicks:   sql.NullInt64{Int64: item.DurationTicks, Valid: true},
+		Container:       nullableString(item.Container),
+		Fingerprint:     nullableString(item.Fingerprint),
+		SeasonNumber:    nullableIntPtr(item.SeasonNumber),
+		EpisodeNumber:   nullableIntPtr(item.EpisodeNumber),
+		CommunityRating: nullableFloat64Ptr(item.CommunityRating),
+		ContentRating:   nullableString(item.ContentRating),
+		PremiereDate:    nullableTimePtr(item.PremiereDate),
+		AddedAt:         item.AddedAt,
+		UpdatedAt:       item.UpdatedAt,
+		IsAvailable:     item.IsAvailable,
+	})
 	if err != nil {
 		return fmt.Errorf("create item: %w", err)
 	}
@@ -80,47 +95,27 @@ func nullStr(s string) any {
 }
 
 func (r *ItemRepository) GetByID(ctx context.Context, id string) (*Item, error) {
-	item := &Item{}
-	var n itemNullables
-
-	err := r.db.QueryRowContext(ctx,
-		`SELECT id, library_id, parent_id, type, title, sort_title, original_title,
-		        year, path, size, duration_ticks, container, fingerprint, season_number,
-		        episode_number, community_rating, content_rating, premiere_date,
-		        added_at, updated_at, is_available
-		 FROM items WHERE id = ?`, id,
-	).Scan(fullScanDests(item, &n)...)
-	if err == sql.ErrNoRows {
+	row, err := r.q.GetItemByID(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("item %s: %w", id, domain.ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get item %s: %w", id, err)
 	}
-
-	n.applyFull(item)
-	return item, nil
+	item := itemFromSqlcModel(row)
+	return &item, nil
 }
 
 func (r *ItemRepository) GetByPath(ctx context.Context, path string) (*Item, error) {
-	item := &Item{}
-	var n itemNullables
-
-	err := r.db.QueryRowContext(ctx,
-		`SELECT id, library_id, parent_id, type, title, sort_title, original_title,
-		        year, path, size, duration_ticks, container, fingerprint, season_number,
-		        episode_number, community_rating, content_rating, premiere_date,
-		        added_at, updated_at, is_available
-		 FROM items WHERE path = ?`, path,
-	).Scan(fullScanDests(item, &n)...)
-	if err == sql.ErrNoRows {
+	row, err := r.q.GetItemByPath(ctx, sql.NullString{String: path, Valid: path != ""})
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("item path %q: %w", path, domain.ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get item by path %q: %w", path, err)
 	}
-
-	n.applyFull(item)
-	return item, nil
+	item := itemFromSqlcModel(row)
+	return &item, nil
 }
 
 func (r *ItemRepository) List(ctx context.Context, filter ItemFilter) ([]*Item, int, error) {
@@ -157,7 +152,6 @@ func (r *ItemRepository) List(ctx context.Context, filter ItemFilter) ([]*Item, 
 		where += " AND parent_id = ?"
 		args = append(args, filter.ParentID)
 	} else if filter.Type == "" {
-		// If no parent filter and no type filter, show root items only
 		where += " AND parent_id IS NULL"
 	}
 	if filter.Type != "" {
@@ -165,13 +159,11 @@ func (r *ItemRepository) List(ctx context.Context, filter ItemFilter) ([]*Item, 
 		args = append(args, filter.Type)
 	}
 
-	// Full-text search via FTS5
 	if filter.Query != "" {
 		where += " AND rowid IN (SELECT rowid FROM items_fts WHERE items_fts MATCH ?)"
 		args = append(args, filter.Query+"*")
 	}
 
-	// Count (skip if cursor pagination to avoid expensive COUNT on large tables)
 	var total int
 	if filter.Cursor == "" {
 		countSQL := "SELECT COUNT(*) FROM items " + where
@@ -180,9 +172,7 @@ func (r *ItemRepository) List(ctx context.Context, filter ItemFilter) ([]*Item, 
 		}
 	}
 
-	// Cursor-based (keyset) pagination: more efficient for large datasets
 	if filter.Cursor != "" {
-		// Fetch the sort value of the cursor item for keyset comparison
 		var cursorSort string
 		var cursorID string
 		err := r.db.QueryRowContext(ctx,
@@ -200,7 +190,6 @@ func (r *ItemRepository) List(ctx context.Context, filter ItemFilter) ([]*Item, 
 		}
 	}
 
-	// Query
 	querySQL := fmt.Sprintf(
 		`SELECT id, library_id, parent_id, type, title, sort_title, original_title,
 		        year, path, size, duration_ticks, container, season_number, episode_number,
@@ -210,7 +199,7 @@ func (r *ItemRepository) List(ctx context.Context, filter ItemFilter) ([]*Item, 
 	)
 	offset := filter.Offset
 	if filter.Cursor != "" {
-		offset = 0 // cursor pagination doesn't use offset
+		offset = 0
 	}
 	args = append(args, filter.Limit, offset)
 
@@ -234,22 +223,27 @@ func (r *ItemRepository) List(ctx context.Context, filter ItemFilter) ([]*Item, 
 }
 
 func (r *ItemRepository) Update(ctx context.Context, item *Item) error {
-	res, err := r.db.ExecContext(ctx,
-		`UPDATE items SET title = ?, sort_title = ?, original_title = ?,
-		        year = ?, size = ?, duration_ticks = ?, container = ?,
-		        fingerprint = ?, season_number = ?, episode_number = ?,
-		        community_rating = ?, content_rating = ?,
-		        premiere_date = ?, updated_at = ?, is_available = ?
-		 WHERE id = ?`,
-		item.Title, item.SortTitle, nullStr(item.OriginalTitle), item.Year, item.Size,
-		item.DurationTicks, nullStr(item.Container), nullStr(item.Fingerprint),
-		item.SeasonNumber, item.EpisodeNumber, item.CommunityRating,
-		nullStr(item.ContentRating), item.PremiereDate, item.UpdatedAt, item.IsAvailable, item.ID,
-	)
+	n, err := r.q.UpdateItem(ctx, sqlc.UpdateItemParams{
+		Title:           item.Title,
+		SortTitle:       item.SortTitle,
+		OriginalTitle:   nullableString(item.OriginalTitle),
+		Year:            sql.NullInt64{Int64: int64(item.Year), Valid: true},
+		Size:            sql.NullInt64{Int64: item.Size, Valid: true},
+		DurationTicks:   sql.NullInt64{Int64: item.DurationTicks, Valid: true},
+		Container:       nullableString(item.Container),
+		Fingerprint:     nullableString(item.Fingerprint),
+		SeasonNumber:    nullableIntPtr(item.SeasonNumber),
+		EpisodeNumber:   nullableIntPtr(item.EpisodeNumber),
+		CommunityRating: nullableFloat64Ptr(item.CommunityRating),
+		ContentRating:   nullableString(item.ContentRating),
+		PremiereDate:    nullableTimePtr(item.PremiereDate),
+		UpdatedAt:       item.UpdatedAt,
+		IsAvailable:     item.IsAvailable,
+		ID:              item.ID,
+	})
 	if err != nil {
 		return fmt.Errorf("update item: %w", err)
 	}
-	n, _ := res.RowsAffected()
 	if n == 0 {
 		return fmt.Errorf("item %s: %w", item.ID, domain.ErrNotFound)
 	}
@@ -257,66 +251,42 @@ func (r *ItemRepository) Update(ctx context.Context, item *Item) error {
 }
 
 func (r *ItemRepository) Delete(ctx context.Context, id string) error {
-	res, err := r.db.ExecContext(ctx, `DELETE FROM items WHERE id = ?`, id)
+	n, err := r.q.DeleteItem(ctx, id)
 	if err != nil {
 		return fmt.Errorf("delete item: %w", err)
 	}
-	n, _ := res.RowsAffected()
 	if n == 0 {
 		return fmt.Errorf("item %s: %w", id, domain.ErrNotFound)
 	}
 	return nil
 }
 
-// DeleteByLibrary removes all items in a library.
 func (r *ItemRepository) DeleteByLibrary(ctx context.Context, libraryID string) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM items WHERE library_id = ?`, libraryID)
+	err := r.q.DeleteItemsByLibrary(ctx, libraryID)
 	if err != nil {
 		return fmt.Errorf("delete items by library: %w", err)
 	}
 	return nil
 }
 
-// CountByLibrary returns the number of items in a library.
 func (r *ItemRepository) CountByLibrary(ctx context.Context, libraryID string) (int, error) {
-	var count int
-	err := r.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM items WHERE library_id = ?`, libraryID,
-	).Scan(&count)
+	cnt, err := r.q.CountItemsByLibrary(ctx, libraryID)
 	if err != nil {
 		return 0, fmt.Errorf("count items by library: %w", err)
 	}
-	return count, nil
+	return int(cnt), nil
 }
 
-// GetChildren returns direct children of an item.
 func (r *ItemRepository) GetChildren(ctx context.Context, parentID string) ([]*Item, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, library_id, parent_id, type, title, sort_title, original_title,
-		        year, path, size, duration_ticks, container, season_number, episode_number,
-		        community_rating, added_at, updated_at, is_available
-		 FROM items WHERE parent_id = ? ORDER BY COALESCE(season_number, 0), COALESCE(episode_number, 0), sort_title`,
-		parentID,
-	)
+	rows, err := r.q.GetItemChildren(ctx, sql.NullString{String: parentID, Valid: parentID != ""})
 	if err != nil {
 		return nil, fmt.Errorf("get children: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
-
-	var items []*Item
-	for rows.Next() {
-		item := &Item{}
-		var n itemNullables
-		if err := rows.Scan(listScanDests(item, &n)...); err != nil {
-			return nil, fmt.Errorf("scan child item: %w", err)
-		}
-		n.applyList(item)
-		items = append(items, item)
-	}
-	return items, rows.Err()
+	return itemsFromChildrenRows(rows), nil
 }
 
 // LatestItems returns the most recently added items.
+// Uses raw SQL because of dynamic WHERE clauses.
 func (r *ItemRepository) LatestItems(ctx context.Context, libraryID string, itemType string, limit int) ([]*Item, error) {
 	if limit <= 0 {
 		limit = 20
@@ -365,3 +335,92 @@ func (r *ItemRepository) LatestItems(ctx context.Context, libraryID string, item
 	return items, rows.Err()
 }
 
+// ── row mapping helpers ─────────────────────────────────────────────────
+
+func nullableFloat64Ptr(f *float64) sql.NullFloat64 {
+	if f == nil {
+		return sql.NullFloat64{}
+	}
+	return sql.NullFloat64{Float64: *f, Valid: true}
+}
+
+func itemFromSqlcModel(r sqlc.Item) Item {
+	item := Item{
+		ID:            r.ID,
+		LibraryID:     r.LibraryID,
+		ParentID:      r.ParentID.String,
+		Type:          r.Type,
+		Title:         r.Title,
+		SortTitle:     r.SortTitle,
+		OriginalTitle: r.OriginalTitle.String,
+		Year:          int(r.Year.Int64),
+		Path:          r.Path.String,
+		Size:          r.Size.Int64,
+		DurationTicks: r.DurationTicks.Int64,
+		Container:     r.Container.String,
+		Fingerprint:   r.Fingerprint.String,
+		ContentRating: r.ContentRating.String,
+		AddedAt:       r.AddedAt,
+		UpdatedAt:     r.UpdatedAt,
+		IsAvailable:   r.IsAvailable,
+	}
+	if r.SeasonNumber.Valid {
+		v := int(r.SeasonNumber.Int64)
+		item.SeasonNumber = &v
+	}
+	if r.EpisodeNumber.Valid {
+		v := int(r.EpisodeNumber.Int64)
+		item.EpisodeNumber = &v
+	}
+	if r.CommunityRating.Valid {
+		item.CommunityRating = &r.CommunityRating.Float64
+	}
+	if r.PremiereDate.Valid {
+		item.PremiereDate = &r.PremiereDate.Time
+	}
+	return item
+}
+
+func itemFromChildrenRow(r sqlc.GetItemChildrenRow) Item {
+	item := Item{
+		ID:            r.ID,
+		LibraryID:     r.LibraryID,
+		ParentID:      r.ParentID.String,
+		Type:          r.Type,
+		Title:         r.Title,
+		SortTitle:     r.SortTitle,
+		OriginalTitle: r.OriginalTitle.String,
+		Year:          int(r.Year.Int64),
+		Path:          r.Path.String,
+		Size:          r.Size.Int64,
+		DurationTicks: r.DurationTicks.Int64,
+		Container:     r.Container.String,
+		AddedAt:       r.AddedAt,
+		UpdatedAt:     r.UpdatedAt,
+		IsAvailable:   r.IsAvailable,
+	}
+	if r.SeasonNumber.Valid {
+		v := int(r.SeasonNumber.Int64)
+		item.SeasonNumber = &v
+	}
+	if r.EpisodeNumber.Valid {
+		v := int(r.EpisodeNumber.Int64)
+		item.EpisodeNumber = &v
+	}
+	if r.CommunityRating.Valid {
+		item.CommunityRating = &r.CommunityRating.Float64
+	}
+	return item
+}
+
+func itemsFromChildrenRows(rows []sqlc.GetItemChildrenRow) []*Item {
+	if len(rows) == 0 {
+		return nil
+	}
+	out := make([]*Item, len(rows))
+	for i, row := range rows {
+		item := itemFromChildrenRow(row)
+		out[i] = &item
+	}
+	return out
+}
