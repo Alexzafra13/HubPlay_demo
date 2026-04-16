@@ -3,53 +3,52 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
+
+	"hubplay/internal/db/sqlc"
 )
 
 // UserData holds a user's interaction data for a specific item.
 type UserData struct {
-	UserID             string
-	ItemID             string
-	PositionTicks      int64
-	PlayCount          int
-	Completed          bool
-	IsFavorite         bool
-	Liked              *bool // nil = no opinion
-	AudioStreamIndex   *int
+	UserID              string
+	ItemID              string
+	PositionTicks       int64
+	PlayCount           int
+	Completed           bool
+	IsFavorite          bool
+	Liked               *bool // nil = no opinion
+	AudioStreamIndex    *int
 	SubtitleStreamIndex *int
-	LastPlayedAt       *time.Time
-	UpdatedAt          time.Time
+	LastPlayedAt        *time.Time
+	UpdatedAt           time.Time
 }
 
 type UserDataRepository struct {
-	db *sql.DB
+	db *sql.DB // kept for NextUp (complex CTE with duplicate params)
+	q  *sqlc.Queries
 }
 
 func NewUserDataRepository(database *sql.DB) *UserDataRepository {
-	return &UserDataRepository{db: database}
+	return &UserDataRepository{db: database, q: sqlc.New(database)}
 }
 
 // Upsert creates or updates user data for an item.
 func (r *UserDataRepository) Upsert(ctx context.Context, ud *UserData) error {
-	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO user_data (user_id, item_id, position_ticks, play_count, completed,
-		 is_favorite, liked, audio_stream_index, subtitle_stream_index, last_played_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		 ON CONFLICT(user_id, item_id) DO UPDATE SET
-		   position_ticks = excluded.position_ticks,
-		   play_count = excluded.play_count,
-		   completed = excluded.completed,
-		   is_favorite = excluded.is_favorite,
-		   liked = excluded.liked,
-		   audio_stream_index = excluded.audio_stream_index,
-		   subtitle_stream_index = excluded.subtitle_stream_index,
-		   last_played_at = excluded.last_played_at,
-		   updated_at = excluded.updated_at`,
-		ud.UserID, ud.ItemID, ud.PositionTicks, ud.PlayCount, ud.Completed,
-		ud.IsFavorite, ud.Liked, ud.AudioStreamIndex, ud.SubtitleStreamIndex,
-		ud.LastPlayedAt, ud.UpdatedAt,
-	)
+	err := r.q.UpsertUserData(ctx, sqlc.UpsertUserDataParams{
+		UserID:              ud.UserID,
+		ItemID:              ud.ItemID,
+		PositionTicks:       sql.NullInt64{Int64: ud.PositionTicks, Valid: true},
+		PlayCount:           sql.NullInt64{Int64: int64(ud.PlayCount), Valid: true},
+		Completed:           sql.NullBool{Bool: ud.Completed, Valid: true},
+		IsFavorite:          sql.NullBool{Bool: ud.IsFavorite, Valid: true},
+		Liked:               nullableBoolPtr(ud.Liked),
+		AudioStreamIndex:    nullableIntPtr(ud.AudioStreamIndex),
+		SubtitleStreamIndex: nullableIntPtr(ud.SubtitleStreamIndex),
+		LastPlayedAt:        nullableTimePtr(ud.LastPlayedAt),
+		UpdatedAt:           ud.UpdatedAt,
+	})
 	if err != nil {
 		return fmt.Errorf("upsert user data: %w", err)
 	}
@@ -58,38 +57,31 @@ func (r *UserDataRepository) Upsert(ctx context.Context, ud *UserData) error {
 
 // Get returns user data for a specific user+item pair.
 func (r *UserDataRepository) Get(ctx context.Context, userID, itemID string) (*UserData, error) {
-	ud := &UserData{}
-	err := r.db.QueryRowContext(ctx,
-		`SELECT user_id, item_id, position_ticks, play_count, completed,
-		        is_favorite, liked, audio_stream_index, subtitle_stream_index,
-		        last_played_at, updated_at
-		 FROM user_data WHERE user_id = ? AND item_id = ?`, userID, itemID,
-	).Scan(&ud.UserID, &ud.ItemID, &ud.PositionTicks, &ud.PlayCount, &ud.Completed,
-		&ud.IsFavorite, &ud.Liked, &ud.AudioStreamIndex, &ud.SubtitleStreamIndex,
-		&ud.LastPlayedAt, &ud.UpdatedAt,
-	)
-	if err == sql.ErrNoRows {
-		return nil, nil // No data yet — not an error
+	row, err := r.q.GetUserData(ctx, sqlc.GetUserDataParams{
+		UserID: userID,
+		ItemID: itemID,
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get user data: %w", err)
 	}
-	return ud, nil
+	ud := userDataFromRow(row)
+	return &ud, nil
 }
 
 // UpdateProgress updates just the playback position and timestamps.
 func (r *UserDataRepository) UpdateProgress(ctx context.Context, userID, itemID string, positionTicks int64, completed bool) error {
 	now := time.Now()
-	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO user_data (user_id, item_id, position_ticks, completed, last_played_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?)
-		 ON CONFLICT(user_id, item_id) DO UPDATE SET
-		   position_ticks = excluded.position_ticks,
-		   completed = excluded.completed,
-		   last_played_at = excluded.last_played_at,
-		   updated_at = excluded.updated_at`,
-		userID, itemID, positionTicks, completed, now, now,
-	)
+	err := r.q.UpdateProgress(ctx, sqlc.UpdateProgressParams{
+		UserID:        userID,
+		ItemID:        itemID,
+		PositionTicks: sql.NullInt64{Int64: positionTicks, Valid: true},
+		Completed:     sql.NullBool{Bool: completed, Valid: true},
+		LastPlayedAt:  sql.NullTime{Time: now, Valid: true},
+		UpdatedAt:     now,
+	})
 	if err != nil {
 		return fmt.Errorf("update progress: %w", err)
 	}
@@ -99,17 +91,12 @@ func (r *UserDataRepository) UpdateProgress(ctx context.Context, userID, itemID 
 // MarkPlayed increments play count and marks completed.
 func (r *UserDataRepository) MarkPlayed(ctx context.Context, userID, itemID string) error {
 	now := time.Now()
-	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO user_data (user_id, item_id, play_count, completed, last_played_at, updated_at)
-		 VALUES (?, ?, 1, 1, ?, ?)
-		 ON CONFLICT(user_id, item_id) DO UPDATE SET
-		   play_count = user_data.play_count + 1,
-		   completed = 1,
-		   position_ticks = 0,
-		   last_played_at = excluded.last_played_at,
-		   updated_at = excluded.updated_at`,
-		userID, itemID, now, now,
-	)
+	err := r.q.MarkPlayed(ctx, sqlc.MarkPlayedParams{
+		UserID:       userID,
+		ItemID:       itemID,
+		LastPlayedAt: sql.NullTime{Time: now, Valid: true},
+		UpdatedAt:    now,
+	})
 	if err != nil {
 		return fmt.Errorf("mark played: %w", err)
 	}
@@ -119,14 +106,12 @@ func (r *UserDataRepository) MarkPlayed(ctx context.Context, userID, itemID stri
 // SetFavorite sets or unsets favorite for an item.
 func (r *UserDataRepository) SetFavorite(ctx context.Context, userID, itemID string, favorite bool) error {
 	now := time.Now()
-	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO user_data (user_id, item_id, is_favorite, updated_at)
-		 VALUES (?, ?, ?, ?)
-		 ON CONFLICT(user_id, item_id) DO UPDATE SET
-		   is_favorite = excluded.is_favorite,
-		   updated_at = excluded.updated_at`,
-		userID, itemID, favorite, now,
-	)
+	err := r.q.SetFavorite(ctx, sqlc.SetFavoriteParams{
+		UserID:     userID,
+		ItemID:     itemID,
+		IsFavorite: sql.NullBool{Bool: favorite, Valid: true},
+		UpdatedAt:  now,
+	})
 	if err != nil {
 		return fmt.Errorf("set favorite: %w", err)
 	}
@@ -138,33 +123,14 @@ func (r *UserDataRepository) ContinueWatching(ctx context.Context, userID string
 	if limit <= 0 {
 		limit = 20
 	}
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT ud.item_id, ud.position_ticks, ud.last_played_at,
-		        i.title, i.type, i.duration_ticks, COALESCE(i.parent_id, ''),
-		        COALESCE(i.container, '')
-		 FROM user_data ud
-		 JOIN items i ON i.id = ud.item_id
-		 WHERE ud.user_id = ? AND ud.completed = 0 AND ud.position_ticks > 0
-		   AND i.is_available = 1
-		 ORDER BY ud.last_played_at DESC
-		 LIMIT ?`, userID, limit,
-	)
+	rows, err := r.q.ContinueWatching(ctx, sqlc.ContinueWatchingParams{
+		UserID: userID,
+		Limit:  int64(limit),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("continue watching: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
-
-	var items []*ContinueWatchingItem
-	for rows.Next() {
-		item := &ContinueWatchingItem{}
-		if err := rows.Scan(&item.ItemID, &item.PositionTicks, &item.LastPlayedAt,
-			&item.Title, &item.Type, &item.DurationTicks, &item.ParentID,
-			&item.Container); err != nil {
-			return nil, fmt.Errorf("scan continue watching: %w", err)
-		}
-		items = append(items, item)
-	}
-	return items, rows.Err()
+	return continueWatchingFromRows(rows), nil
 }
 
 // ContinueWatchingItem is the result for continue watching queries.
@@ -184,31 +150,15 @@ func (r *UserDataRepository) Favorites(ctx context.Context, userID string, limit
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT ud.item_id, ud.updated_at,
-		        i.title, i.type, i.year, i.duration_ticks
-		 FROM user_data ud
-		 JOIN items i ON i.id = ud.item_id
-		 WHERE ud.user_id = ? AND ud.is_favorite = 1
-		   AND i.is_available = 1
-		 ORDER BY ud.updated_at DESC
-		 LIMIT ? OFFSET ?`, userID, limit, offset,
-	)
+	rows, err := r.q.ListFavorites(ctx, sqlc.ListFavoritesParams{
+		UserID: userID,
+		Limit:  int64(limit),
+		Offset: int64(offset),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("favorites: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
-
-	var items []*FavoriteItem
-	for rows.Next() {
-		item := &FavoriteItem{}
-		if err := rows.Scan(&item.ItemID, &item.FavoritedAt,
-			&item.Title, &item.Type, &item.Year, &item.DurationTicks); err != nil {
-			return nil, fmt.Errorf("scan favorite: %w", err)
-		}
-		items = append(items, item)
-	}
-	return items, rows.Err()
+	return favoritesFromRows(rows), nil
 }
 
 // FavoriteItem is the result for favorite queries.
@@ -222,13 +172,12 @@ type FavoriteItem struct {
 }
 
 // NextUp returns the next unwatched episode for each series the user is watching.
+// Uses raw SQL because the CTE references the same param twice and sqlc for
+// SQLite doesn't handle duplicate named params in subqueries.
 func (r *UserDataRepository) NextUp(ctx context.Context, userID string, limit int) ([]*NextUpItem, error) {
 	if limit <= 0 {
 		limit = 20
 	}
-	// Find next unwatched episode per series:
-	// 1. Get series where user has watched at least one episode
-	// 2. Find next episode after the last watched one
 	rows, err := r.db.QueryContext(ctx,
 		`WITH watched_episodes AS (
 		   SELECT i.id, i.parent_id AS season_id,
@@ -293,11 +242,104 @@ type NextUpItem struct {
 
 // Delete removes user data for a specific user+item pair.
 func (r *UserDataRepository) Delete(ctx context.Context, userID, itemID string) error {
-	_, err := r.db.ExecContext(ctx,
-		`DELETE FROM user_data WHERE user_id = ? AND item_id = ?`, userID, itemID,
-	)
+	err := r.q.DeleteUserData(ctx, sqlc.DeleteUserDataParams{
+		UserID: userID,
+		ItemID: itemID,
+	})
 	if err != nil {
 		return fmt.Errorf("delete user data: %w", err)
 	}
 	return nil
+}
+
+// ── row mapping helpers ─────────────────────────────────────────────────
+
+func nullableBoolPtr(b *bool) sql.NullBool {
+	if b == nil {
+		return sql.NullBool{}
+	}
+	return sql.NullBool{Bool: *b, Valid: true}
+}
+
+func nullableIntPtr(i *int) sql.NullInt64 {
+	if i == nil {
+		return sql.NullInt64{}
+	}
+	return sql.NullInt64{Int64: int64(*i), Valid: true}
+}
+
+func nullableTimePtr(t *time.Time) sql.NullTime {
+	if t == nil {
+		return sql.NullTime{}
+	}
+	return sql.NullTime{Time: *t, Valid: true}
+}
+
+func userDataFromRow(r sqlc.UserDatum) UserData {
+	ud := UserData{
+		UserID:        r.UserID,
+		ItemID:        r.ItemID,
+		PositionTicks: r.PositionTicks.Int64,
+		PlayCount:     int(r.PlayCount.Int64),
+		Completed:     r.Completed.Bool,
+		IsFavorite:    r.IsFavorite.Bool,
+		UpdatedAt:     r.UpdatedAt,
+	}
+	if r.Liked.Valid {
+		v := r.Liked.Bool
+		ud.Liked = &v
+	}
+	if r.AudioStreamIndex.Valid {
+		v := int(r.AudioStreamIndex.Int64)
+		ud.AudioStreamIndex = &v
+	}
+	if r.SubtitleStreamIndex.Valid {
+		v := int(r.SubtitleStreamIndex.Int64)
+		ud.SubtitleStreamIndex = &v
+	}
+	if r.LastPlayedAt.Valid {
+		ud.LastPlayedAt = &r.LastPlayedAt.Time
+	}
+	return ud
+}
+
+func continueWatchingFromRows(rows []sqlc.ContinueWatchingRow) []*ContinueWatchingItem {
+	if len(rows) == 0 {
+		return nil
+	}
+	out := make([]*ContinueWatchingItem, len(rows))
+	for i, r := range rows {
+		item := &ContinueWatchingItem{
+			ItemID:        r.ItemID,
+			PositionTicks: r.PositionTicks.Int64,
+			Title:         r.Title,
+			Type:          r.Type,
+			DurationTicks: r.DurationTicks.Int64,
+			ParentID:      r.ParentID,
+			Container:     r.Container,
+		}
+		if r.LastPlayedAt.Valid {
+			item.LastPlayedAt = &r.LastPlayedAt.Time
+		}
+		out[i] = item
+	}
+	return out
+}
+
+func favoritesFromRows(rows []sqlc.ListFavoritesRow) []*FavoriteItem {
+	if len(rows) == 0 {
+		return nil
+	}
+	out := make([]*FavoriteItem, len(rows))
+	for i, r := range rows {
+		out[i] = &FavoriteItem{
+			ItemID:        r.ItemID,
+			FavoritedAt:   r.UpdatedAt,
+			Title:         r.Title,
+			Type:          r.Type,
+			Year:          int(r.Year.Int64),
+			DurationTicks: r.DurationTicks.Int64,
+		}
+	}
+	return out
 }
