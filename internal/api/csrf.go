@@ -58,10 +58,9 @@ func CSRFProtect(next http.Handler) http.Handler {
 		// Validate: header must match cookie
 		headerToken := r.Header.Get(csrfHeaderName)
 		if headerToken == "" || headerToken != token {
-			http.Error(w,
-				`{"error":{"code":"CSRF_FAILED","message":"missing or invalid CSRF token"}}`,
-				http.StatusForbidden,
-			)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"error":{"code":"CSRF_FAILED","message":"missing or invalid CSRF token"}}`))
 			return
 		}
 

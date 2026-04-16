@@ -65,6 +65,9 @@ func TestCSRF_MutatingWithSessionButNoToken(t *testing.T) {
 	if rr.Code != http.StatusForbidden {
 		t.Errorf("expected 403, got %d", rr.Code)
 	}
+	if ct := rr.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("expected Content-Type application/json, got %q", ct)
+	}
 }
 
 func TestCSRF_MutatingWithValidToken(t *testing.T) {
