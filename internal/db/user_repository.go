@@ -3,9 +3,11 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
+	"hubplay/internal/db/sqlc"
 	"hubplay/internal/domain"
 )
 
@@ -23,61 +25,46 @@ type User struct {
 }
 
 type UserRepository struct {
-	db *sql.DB
+	q *sqlc.Queries
 }
 
 func NewUserRepository(database *sql.DB) *UserRepository {
-	return &UserRepository{db: database}
+	return &UserRepository{q: sqlc.New(database)}
 }
 
 func (r *UserRepository) GetByID(ctx context.Context, id string) (*User, error) {
-	u := &User{}
-	var lastLogin sql.NullTime
-	err := r.db.QueryRowContext(ctx,
-		`SELECT id, username, display_name, password_hash, COALESCE(avatar_path,''),
-		        role, is_active, max_sessions, created_at, last_login_at
-		 FROM users WHERE id = ?`, id,
-	).Scan(&u.ID, &u.Username, &u.DisplayName, &u.PasswordHash, &u.AvatarPath,
-		&u.Role, &u.IsActive, &u.MaxSessions, &u.CreatedAt, &lastLogin)
-	if err == sql.ErrNoRows {
+	row, err := r.q.GetUserByID(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("user %s: %w", id, domain.ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get user %s: %w", id, err)
 	}
-	if lastLogin.Valid {
-		u.LastLoginAt = &lastLogin.Time
-	}
-	return u, nil
+	u := userFromGetRow(row)
+	return &u, nil
 }
 
 func (r *UserRepository) GetByUsername(ctx context.Context, username string) (*User, error) {
-	u := &User{}
-	var lastLogin sql.NullTime
-	err := r.db.QueryRowContext(ctx,
-		`SELECT id, username, display_name, password_hash, COALESCE(avatar_path,''),
-		        role, is_active, max_sessions, created_at, last_login_at
-		 FROM users WHERE username = ?`, username,
-	).Scan(&u.ID, &u.Username, &u.DisplayName, &u.PasswordHash, &u.AvatarPath,
-		&u.Role, &u.IsActive, &u.MaxSessions, &u.CreatedAt, &lastLogin)
-	if err == sql.ErrNoRows {
+	row, err := r.q.GetUserByUsername(ctx, username)
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("user %q: %w", username, domain.ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get user by username %q: %w", username, err)
 	}
-	if lastLogin.Valid {
-		u.LastLoginAt = &lastLogin.Time
-	}
-	return u, nil
+	u := userFromGetByUsernameRow(row)
+	return &u, nil
 }
 
 func (r *UserRepository) Create(ctx context.Context, u *User) error {
-	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO users (id, username, display_name, password_hash, role, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		u.ID, u.Username, u.DisplayName, u.PasswordHash, u.Role, u.CreatedAt,
-	)
+	err := r.q.CreateUser(ctx, sqlc.CreateUserParams{
+		ID:           u.ID,
+		Username:     u.Username,
+		DisplayName:  u.DisplayName,
+		PasswordHash: u.PasswordHash,
+		Role:         u.Role,
+		CreatedAt:    u.CreatedAt,
+	})
 	if err != nil {
 		return fmt.Errorf("create user: %w", err)
 	}
@@ -85,7 +72,10 @@ func (r *UserRepository) Create(ctx context.Context, u *User) error {
 }
 
 func (r *UserRepository) UpdateLastLogin(ctx context.Context, id string, t time.Time) error {
-	_, err := r.db.ExecContext(ctx, `UPDATE users SET last_login_at = ? WHERE id = ?`, t, id)
+	err := r.q.UpdateLastLogin(ctx, sqlc.UpdateLastLoginParams{
+		LastLoginAt: sql.NullTime{Time: t, Valid: true},
+		ID:          id,
+	})
 	if err != nil {
 		return fmt.Errorf("update last login: %w", err)
 	}
@@ -93,49 +83,36 @@ func (r *UserRepository) UpdateLastLogin(ctx context.Context, id string, t time.
 }
 
 func (r *UserRepository) List(ctx context.Context, limit, offset int) ([]*User, int, error) {
-	var total int
-	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&total); err != nil {
+	cnt, err := r.q.CountUsers(ctx)
+	if err != nil {
 		return nil, 0, fmt.Errorf("count users: %w", err)
 	}
 
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, username, display_name, COALESCE(avatar_path,''), role, is_active, created_at, last_login_at
-		 FROM users ORDER BY username LIMIT ? OFFSET ?`, limit, offset,
-	)
+	rows, err := r.q.ListUsers(ctx, sqlc.ListUsersParams{
+		Limit:  int64(limit),
+		Offset: int64(offset),
+	})
 	if err != nil {
 		return nil, 0, fmt.Errorf("list users: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
-
-	var users []*User
-	for rows.Next() {
-		u := &User{}
-		var lastLogin sql.NullTime
-		if err := rows.Scan(&u.ID, &u.Username, &u.DisplayName, &u.AvatarPath,
-			&u.Role, &u.IsActive, &u.CreatedAt, &lastLogin); err != nil {
-			return nil, 0, fmt.Errorf("scan user: %w", err)
-		}
-		if lastLogin.Valid {
-			u.LastLoginAt = &lastLogin.Time
-		}
-		users = append(users, u)
-	}
-	return users, total, rows.Err()
+	return usersFromListRows(rows), int(cnt), nil
 }
 
 func (r *UserRepository) Count(ctx context.Context) (int, error) {
-	var count int
-	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&count); err != nil {
+	cnt, err := r.q.CountUsers(ctx)
+	if err != nil {
 		return 0, fmt.Errorf("count users: %w", err)
 	}
-	return count, nil
+	return int(cnt), nil
 }
 
 func (r *UserRepository) Update(ctx context.Context, u *User) error {
-	_, err := r.db.ExecContext(ctx,
-		`UPDATE users SET display_name = ?, role = ?, is_active = ? WHERE id = ?`,
-		u.DisplayName, u.Role, u.IsActive, u.ID,
-	)
+	err := r.q.UpdateUser(ctx, sqlc.UpdateUserParams{
+		DisplayName: u.DisplayName,
+		Role:        u.Role,
+		IsActive:    u.IsActive,
+		ID:          u.ID,
+	})
 	if err != nil {
 		return fmt.Errorf("update user: %w", err)
 	}
@@ -143,13 +120,76 @@ func (r *UserRepository) Update(ctx context.Context, u *User) error {
 }
 
 func (r *UserRepository) Delete(ctx context.Context, id string) error {
-	res, err := r.db.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, id)
+	n, err := r.q.DeleteUser(ctx, id)
 	if err != nil {
 		return fmt.Errorf("delete user: %w", err)
 	}
-	n, _ := res.RowsAffected()
 	if n == 0 {
 		return fmt.Errorf("user %s: %w", id, domain.ErrNotFound)
 	}
 	return nil
+}
+
+// ── row mapping helpers ─────────────────────────────────────────────────
+
+func nullTimeToPtr(nt sql.NullTime) *time.Time {
+	if !nt.Valid {
+		return nil
+	}
+	return &nt.Time
+}
+
+func userFromGetRow(r sqlc.GetUserByIDRow) User {
+	return User{
+		ID:           r.ID,
+		Username:     r.Username,
+		DisplayName:  r.DisplayName,
+		PasswordHash: r.PasswordHash,
+		AvatarPath:   r.AvatarPath,
+		Role:         r.Role,
+		IsActive:     r.IsActive,
+		MaxSessions:  int(r.MaxSessions),
+		CreatedAt:    r.CreatedAt,
+		LastLoginAt:  nullTimeToPtr(r.LastLoginAt),
+	}
+}
+
+func userFromGetByUsernameRow(r sqlc.GetUserByUsernameRow) User {
+	return User{
+		ID:           r.ID,
+		Username:     r.Username,
+		DisplayName:  r.DisplayName,
+		PasswordHash: r.PasswordHash,
+		AvatarPath:   r.AvatarPath,
+		Role:         r.Role,
+		IsActive:     r.IsActive,
+		MaxSessions:  int(r.MaxSessions),
+		CreatedAt:    r.CreatedAt,
+		LastLoginAt:  nullTimeToPtr(r.LastLoginAt),
+	}
+}
+
+func userFromListRow(r sqlc.ListUsersRow) User {
+	return User{
+		ID:          r.ID,
+		Username:    r.Username,
+		DisplayName: r.DisplayName,
+		AvatarPath:  r.AvatarPath,
+		Role:        r.Role,
+		IsActive:    r.IsActive,
+		CreatedAt:   r.CreatedAt,
+		LastLoginAt: nullTimeToPtr(r.LastLoginAt),
+	}
+}
+
+func usersFromListRows(rows []sqlc.ListUsersRow) []*User {
+	if len(rows) == 0 {
+		return nil
+	}
+	out := make([]*User, len(rows))
+	for i, row := range rows {
+		u := userFromListRow(row)
+		out[i] = &u
+	}
+	return out
 }
