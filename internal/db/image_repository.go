@@ -3,9 +3,11 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
+	"hubplay/internal/db/sqlc"
 	"hubplay/internal/domain"
 )
 
@@ -23,20 +25,27 @@ type Image struct {
 }
 
 type ImageRepository struct {
-	db *sql.DB
+	db *sql.DB // kept for GetPrimaryURLs (dynamic IN) and SetPrimary (tx)
+	q  *sqlc.Queries
 }
 
 func NewImageRepository(database *sql.DB) *ImageRepository {
-	return &ImageRepository{db: database}
+	return &ImageRepository{db: database, q: sqlc.New(database)}
 }
 
 func (r *ImageRepository) Create(ctx context.Context, img *Image) error {
-	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO images (id, item_id, type, path, width, height, blurhash, provider, is_primary, added_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		img.ID, img.ItemID, img.Type, img.Path, img.Width, img.Height,
-		img.Blurhash, img.Provider, img.IsPrimary, img.AddedAt,
-	)
+	err := r.q.CreateImage(ctx, sqlc.CreateImageParams{
+		ID:        img.ID,
+		ItemID:    img.ItemID,
+		Type:      img.Type,
+		Path:      img.Path,
+		Width:     nullableInt64(int64(img.Width)),
+		Height:    nullableInt64(int64(img.Height)),
+		Blurhash:  nullableString(img.Blurhash),
+		Provider:  nullableString(img.Provider),
+		IsPrimary: sql.NullBool{Bool: img.IsPrimary, Valid: true},
+		AddedAt:   img.AddedAt,
+	})
 	if err != nil {
 		return fmt.Errorf("create image: %w", err)
 	}
@@ -44,47 +53,30 @@ func (r *ImageRepository) Create(ctx context.Context, img *Image) error {
 }
 
 func (r *ImageRepository) ListByItem(ctx context.Context, itemID string) ([]*Image, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, item_id, type, path, COALESCE(width,0), COALESCE(height,0),
-		        COALESCE(blurhash,''), COALESCE(provider,''), is_primary, added_at
-		 FROM images WHERE item_id = ? ORDER BY is_primary DESC, type`, itemID,
-	)
+	rows, err := r.q.ListImagesByItem(ctx, itemID)
 	if err != nil {
 		return nil, fmt.Errorf("list images: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
-
-	var images []*Image
-	for rows.Next() {
-		img := &Image{}
-		if err := rows.Scan(&img.ID, &img.ItemID, &img.Type, &img.Path, &img.Width,
-			&img.Height, &img.Blurhash, &img.Provider, &img.IsPrimary, &img.AddedAt); err != nil {
-			return nil, fmt.Errorf("scan image: %w", err)
-		}
-		images = append(images, img)
-	}
-	return images, rows.Err()
+	return imagesFromListRows(rows), nil
 }
 
 func (r *ImageRepository) GetPrimary(ctx context.Context, itemID, imgType string) (*Image, error) {
-	img := &Image{}
-	err := r.db.QueryRowContext(ctx,
-		`SELECT id, item_id, type, path, COALESCE(width,0), COALESCE(height,0),
-		        COALESCE(blurhash,''), COALESCE(provider,''), is_primary, added_at
-		 FROM images WHERE item_id = ? AND type = ? AND is_primary = 1`, itemID, imgType,
-	).Scan(&img.ID, &img.ItemID, &img.Type, &img.Path, &img.Width,
-		&img.Height, &img.Blurhash, &img.Provider, &img.IsPrimary, &img.AddedAt)
-	if err == sql.ErrNoRows {
+	row, err := r.q.GetPrimaryImage(ctx, sqlc.GetPrimaryImageParams{
+		ItemID: itemID,
+		Type:   imgType,
+	})
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("image for %s/%s: %w", itemID, imgType, domain.ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get primary image: %w", err)
 	}
-	return img, nil
+	img := imageFromPrimaryRow(row)
+	return &img, nil
 }
 
 // GetPrimaryURLs returns poster and backdrop URLs for a batch of item IDs.
-// Returns map[itemID]map[imageType]url.
+// Uses raw SQL because sqlc doesn't support dynamic IN() on SQLite.
 func (r *ImageRepository) GetPrimaryURLs(ctx context.Context, itemIDs []string) (map[string]map[string]string, error) {
 	if len(itemIDs) == 0 {
 		return nil, nil
@@ -136,7 +128,7 @@ func joinStrings(s []string, sep string) string {
 }
 
 func (r *ImageRepository) DeleteByItem(ctx context.Context, itemID string) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM images WHERE item_id = ?`, itemID)
+	err := r.q.DeleteImagesByItem(ctx, itemID)
 	if err != nil {
 		return fmt.Errorf("delete images for item: %w", err)
 	}
@@ -144,7 +136,7 @@ func (r *ImageRepository) DeleteByItem(ctx context.Context, itemID string) error
 }
 
 func (r *ImageRepository) DeleteByID(ctx context.Context, id string) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM images WHERE id = ?`, id)
+	err := r.q.DeleteImageByID(ctx, id)
 	if err != nil {
 		return fmt.Errorf("delete image: %w", err)
 	}
@@ -152,20 +144,15 @@ func (r *ImageRepository) DeleteByID(ctx context.Context, id string) error {
 }
 
 func (r *ImageRepository) GetByID(ctx context.Context, id string) (*Image, error) {
-	img := &Image{}
-	err := r.db.QueryRowContext(ctx,
-		`SELECT id, item_id, type, path, COALESCE(width,0), COALESCE(height,0),
-		        COALESCE(blurhash,''), COALESCE(provider,''), is_primary, added_at
-		 FROM images WHERE id = ?`, id,
-	).Scan(&img.ID, &img.ItemID, &img.Type, &img.Path, &img.Width,
-		&img.Height, &img.Blurhash, &img.Provider, &img.IsPrimary, &img.AddedAt)
-	if err == sql.ErrNoRows {
+	row, err := r.q.GetImageByID(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("image %s: %w", id, domain.ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get image: %w", err)
 	}
-	return img, nil
+	img := imageFromGetRow(row)
+	return &img, nil
 }
 
 func (r *ImageRepository) SetPrimary(ctx context.Context, itemID, imgType, imageID string) error {
@@ -175,17 +162,81 @@ func (r *ImageRepository) SetPrimary(ctx context.Context, itemID, imgType, image
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	// Unset all primary flags for this item+type
-	_, err = tx.ExecContext(ctx, `UPDATE images SET is_primary = 0 WHERE item_id = ? AND type = ?`, itemID, imgType)
-	if err != nil {
+	qtx := r.q.WithTx(tx)
+
+	if err := qtx.UnsetPrimaryImages(ctx, sqlc.UnsetPrimaryImagesParams{
+		ItemID: itemID,
+		Type:   imgType,
+	}); err != nil {
 		return fmt.Errorf("unset primary: %w", err)
 	}
 
-	// Set the new primary
-	_, err = tx.ExecContext(ctx, `UPDATE images SET is_primary = 1 WHERE id = ? AND item_id = ? AND type = ?`, imageID, itemID, imgType)
-	if err != nil {
+	if err := qtx.SetImagePrimary(ctx, sqlc.SetImagePrimaryParams{
+		ID:     imageID,
+		ItemID: itemID,
+		Type:   imgType,
+	}); err != nil {
 		return fmt.Errorf("set primary: %w", err)
 	}
 
 	return tx.Commit()
+}
+
+// ── row mapping helpers ─────────────────────────────────────────────────
+
+func imageFromGetRow(r sqlc.GetImageByIDRow) Image {
+	return Image{
+		ID:        r.ID,
+		ItemID:    r.ItemID,
+		Type:      r.Type,
+		Path:      r.Path,
+		Width:     int(r.Width),
+		Height:    int(r.Height),
+		Blurhash:  r.Blurhash,
+		Provider:  r.Provider,
+		IsPrimary: r.IsPrimary.Bool,
+		AddedAt:   r.AddedAt,
+	}
+}
+
+func imageFromPrimaryRow(r sqlc.GetPrimaryImageRow) Image {
+	return Image{
+		ID:        r.ID,
+		ItemID:    r.ItemID,
+		Type:      r.Type,
+		Path:      r.Path,
+		Width:     int(r.Width),
+		Height:    int(r.Height),
+		Blurhash:  r.Blurhash,
+		Provider:  r.Provider,
+		IsPrimary: r.IsPrimary.Bool,
+		AddedAt:   r.AddedAt,
+	}
+}
+
+func imageFromListRow(r sqlc.ListImagesByItemRow) Image {
+	return Image{
+		ID:        r.ID,
+		ItemID:    r.ItemID,
+		Type:      r.Type,
+		Path:      r.Path,
+		Width:     int(r.Width),
+		Height:    int(r.Height),
+		Blurhash:  r.Blurhash,
+		Provider:  r.Provider,
+		IsPrimary: r.IsPrimary.Bool,
+		AddedAt:   r.AddedAt,
+	}
+}
+
+func imagesFromListRows(rows []sqlc.ListImagesByItemRow) []*Image {
+	if len(rows) == 0 {
+		return nil
+	}
+	out := make([]*Image, len(rows))
+	for i, row := range rows {
+		img := imageFromListRow(row)
+		out[i] = &img
+	}
+	return out
 }

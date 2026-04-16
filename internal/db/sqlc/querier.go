@@ -12,6 +12,7 @@ import (
 
 type Querier interface {
 	CleanupOldPrograms(ctx context.Context, endTime time.Time) (int64, error)
+	ContinueWatching(ctx context.Context, arg ContinueWatchingParams) ([]ContinueWatchingRow, error)
 	CountExternalIDsByItem(ctx context.Context, itemID string) (int64, error)
 	CountSessionsByUser(ctx context.Context, userID string) (int64, error)
 	CountUsers(ctx context.Context) (int64, error)
@@ -19,6 +20,11 @@ type Querier interface {
 	//
 	// Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE channels).
 	CreateChannel(ctx context.Context, arg CreateChannelParams) error
+	// Image assets (poster, backdrop, thumb, logo, banner) per item.
+	//
+	// Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE images).
+	// NOTE: GetPrimaryURLs uses dynamic IN() and remains raw SQL in the adapter.
+	CreateImage(ctx context.Context, arg CreateImageParams) error
 	// Auth sessions: one row per active login (refresh token lives here hashed).
 	//
 	// Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE sessions).
@@ -35,6 +41,9 @@ type Querier interface {
 	DeleteChannelsByLibrary(ctx context.Context, libraryID string) error
 	DeleteEPGProgramsByChannel(ctx context.Context, channelID string) error
 	DeleteExpiredSessions(ctx context.Context) (int64, error)
+	DeleteImageByID(ctx context.Context, id string) error
+	DeleteImagesByItem(ctx context.Context, itemID string) error
+	DeleteLibrary(ctx context.Context, id string) (int64, error)
 	// Media stream tracks (video, audio, subtitle) per item.
 	//
 	// Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE media_streams).
@@ -44,15 +53,20 @@ type Querier interface {
 	// Subquery aliased to 's' because sqlc needs unambiguous column resolution
 	// when the same table appears twice in scope.
 	DeleteOldestSessionByUser(ctx context.Context, userID string) error
+	DeletePathsByLibrary(ctx context.Context, libraryID string) error
 	DeleteProvider(ctx context.Context, name string) error
 	DeleteRetiredSigningKeysBefore(ctx context.Context, retiredAt sql.NullTime) (int64, error)
 	DeleteSession(ctx context.Context, id string) error
 	DeleteSessionByRefreshTokenHash(ctx context.Context, refreshTokenHash string) error
 	DeleteUser(ctx context.Context, id string) (int64, error)
+	DeleteUserData(ctx context.Context, arg DeleteUserDataParams) error
 	GetChannelByID(ctx context.Context, id string) (GetChannelByIDRow, error)
 	GetExternalIDByProvider(ctx context.Context, arg GetExternalIDByProviderParams) (ExternalID, error)
+	GetImageByID(ctx context.Context, id string) (GetImageByIDRow, error)
+	GetLibraryByID(ctx context.Context, id string) (GetLibraryByIDRow, error)
 	GetMetadataByItemID(ctx context.Context, itemID string) (GetMetadataByItemIDRow, error)
 	GetNowPlaying(ctx context.Context, arg GetNowPlayingParams) (GetNowPlayingRow, error)
+	GetPrimaryImage(ctx context.Context, arg GetPrimaryImageParams) (GetPrimaryImageRow, error)
 	GetProvider(ctx context.Context, name string) (Provider, error)
 	GetSessionByRefreshTokenHash(ctx context.Context, refreshTokenHash string) (Session, error)
 	GetSigningKey(ctx context.Context, id string) (JwtSigningKey, error)
@@ -61,29 +75,49 @@ type Querier interface {
 	// Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE users).
 	GetUserByID(ctx context.Context, id string) (GetUserByIDRow, error)
 	GetUserByUsername(ctx context.Context, username string) (GetUserByUsernameRow, error)
+	GetUserData(ctx context.Context, arg GetUserDataParams) (UserDatum, error)
+	GrantLibraryAccess(ctx context.Context, arg GrantLibraryAccessParams) error
 	// Electronic program guide entries per channel.
 	//
 	// Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE epg_programs).
 	// NOTE: BulkSchedule uses dynamic IN() and remains as raw SQL in the adapter.
 	InsertEPGProgram(ctx context.Context, arg InsertEPGProgramParams) error
+	// Library management (media libraries, paths, access control).
+	//
+	// Tables: libraries, library_paths, library_access.
+	InsertLibrary(ctx context.Context, arg InsertLibraryParams) error
+	InsertLibraryPath(ctx context.Context, arg InsertLibraryPathParams) error
 	InsertMediaStream(ctx context.Context, arg InsertMediaStreamParams) error
 	ListActiveChannelsByLibrary(ctx context.Context, libraryID string) ([]ListActiveChannelsByLibraryRow, error)
 	ListActiveProviders(ctx context.Context) ([]Provider, error)
 	ListActiveSigningKeys(ctx context.Context) ([]JwtSigningKey, error)
+	ListAllPaths(ctx context.Context) ([]LibraryPath, error)
 	ListChannelGroups(ctx context.Context, libraryID string) ([]sql.NullString, error)
 	ListChannelsByLibrary(ctx context.Context, libraryID string) ([]ListChannelsByLibraryRow, error)
 	ListExternalIDsByItem(ctx context.Context, itemID string) ([]ExternalID, error)
+	ListFavorites(ctx context.Context, arg ListFavoritesParams) ([]ListFavoritesRow, error)
+	ListImagesByItem(ctx context.Context, itemID string) ([]ListImagesByItemRow, error)
+	ListLibraries(ctx context.Context) ([]ListLibrariesRow, error)
+	ListLibrariesForUser(ctx context.Context, userID string) ([]ListLibrariesForUserRow, error)
 	ListMediaStreamsByItem(ctx context.Context, itemID string) ([]ListMediaStreamsByItemRow, error)
+	ListPathsByLibrary(ctx context.Context, libraryID string) ([]string, error)
 	ListProviders(ctx context.Context) ([]Provider, error)
 	ListProvidersByType(ctx context.Context, type_ string) ([]Provider, error)
 	ListSchedule(ctx context.Context, arg ListScheduleParams) ([]ListScheduleRow, error)
 	ListSessionsByUser(ctx context.Context, userID string) ([]Session, error)
 	ListSigningKeys(ctx context.Context) ([]JwtSigningKey, error)
 	ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUsersRow, error)
+	MarkPlayed(ctx context.Context, arg MarkPlayedParams) error
+	RevokeLibraryAccess(ctx context.Context, arg RevokeLibraryAccessParams) error
 	SetChannelActive(ctx context.Context, arg SetChannelActiveParams) (int64, error)
+	SetFavorite(ctx context.Context, arg SetFavoriteParams) error
+	SetImagePrimary(ctx context.Context, arg SetImagePrimaryParams) error
 	SetProviderStatus(ctx context.Context, arg SetProviderStatusParams) (int64, error)
 	SetSigningKeyRetiredAt(ctx context.Context, arg SetSigningKeyRetiredAtParams) (int64, error)
+	UnsetPrimaryImages(ctx context.Context, arg UnsetPrimaryImagesParams) error
 	UpdateLastLogin(ctx context.Context, arg UpdateLastLoginParams) error
+	UpdateLibrary(ctx context.Context, arg UpdateLibraryParams) (int64, error)
+	UpdateProgress(ctx context.Context, arg UpdateProgressParams) error
 	UpdateSessionLastActive(ctx context.Context, arg UpdateSessionLastActiveParams) error
 	UpdateUser(ctx context.Context, arg UpdateUserParams) error
 	// External ID mappings (tmdb, imdb, tvdb, ...) for items.
@@ -103,6 +137,11 @@ type Querier interface {
 	// Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE providers).
 	// Runtime registry + api-key sourcing lives in internal/provider/manager.go.
 	UpsertProvider(ctx context.Context, arg UpsertProviderParams) error
+	// Per-user per-item interaction data (progress, favorites, play history).
+	//
+	// Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE user_data).
+	// PK: (user_id, item_id).
+	UpsertUserData(ctx context.Context, arg UpsertUserDataParams) error
 }
 
 var _ Querier = (*Queries)(nil)
