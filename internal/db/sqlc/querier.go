@@ -7,12 +7,18 @@ package sqlc
 import (
 	"context"
 	"database/sql"
+	"time"
 )
 
 type Querier interface {
+	CleanupOldPrograms(ctx context.Context, endTime time.Time) (int64, error)
 	CountExternalIDsByItem(ctx context.Context, itemID string) (int64, error)
 	CountSessionsByUser(ctx context.Context, userID string) (int64, error)
 	CountUsers(ctx context.Context) (int64, error)
+	// IPTV channels per library.
+	//
+	// Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE channels).
+	CreateChannel(ctx context.Context, arg CreateChannelParams) error
 	// Auth sessions: one row per active login (refresh token lives here hashed).
 	//
 	// Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE sessions).
@@ -26,12 +32,15 @@ type Querier interface {
 	CreateSigningKey(ctx context.Context, arg CreateSigningKeyParams) error
 	CreateUser(ctx context.Context, arg CreateUserParams) error
 	DeleteAllSessionsByUser(ctx context.Context, userID string) (int64, error)
+	DeleteChannelsByLibrary(ctx context.Context, libraryID string) error
+	DeleteEPGProgramsByChannel(ctx context.Context, channelID string) error
 	DeleteExpiredSessions(ctx context.Context) (int64, error)
 	// Media stream tracks (video, audio, subtitle) per item.
 	//
 	// Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE media_streams).
 	// PK: (item_id, stream_index).
 	DeleteMediaStreamsByItem(ctx context.Context, itemID string) error
+	DeleteMetadata(ctx context.Context, itemID string) error
 	// Subquery aliased to 's' because sqlc needs unambiguous column resolution
 	// when the same table appears twice in scope.
 	DeleteOldestSessionByUser(ctx context.Context, userID string) error
@@ -40,7 +49,10 @@ type Querier interface {
 	DeleteSession(ctx context.Context, id string) error
 	DeleteSessionByRefreshTokenHash(ctx context.Context, refreshTokenHash string) error
 	DeleteUser(ctx context.Context, id string) (int64, error)
+	GetChannelByID(ctx context.Context, id string) (GetChannelByIDRow, error)
 	GetExternalIDByProvider(ctx context.Context, arg GetExternalIDByProviderParams) (ExternalID, error)
+	GetMetadataByItemID(ctx context.Context, itemID string) (GetMetadataByItemIDRow, error)
+	GetNowPlaying(ctx context.Context, arg GetNowPlayingParams) (GetNowPlayingRow, error)
 	GetProvider(ctx context.Context, name string) (Provider, error)
 	GetSessionByRefreshTokenHash(ctx context.Context, refreshTokenHash string) (Session, error)
 	GetSigningKey(ctx context.Context, id string) (JwtSigningKey, error)
@@ -49,16 +61,26 @@ type Querier interface {
 	// Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE users).
 	GetUserByID(ctx context.Context, id string) (GetUserByIDRow, error)
 	GetUserByUsername(ctx context.Context, username string) (GetUserByUsernameRow, error)
+	// Electronic program guide entries per channel.
+	//
+	// Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE epg_programs).
+	// NOTE: BulkSchedule uses dynamic IN() and remains as raw SQL in the adapter.
+	InsertEPGProgram(ctx context.Context, arg InsertEPGProgramParams) error
 	InsertMediaStream(ctx context.Context, arg InsertMediaStreamParams) error
+	ListActiveChannelsByLibrary(ctx context.Context, libraryID string) ([]ListActiveChannelsByLibraryRow, error)
 	ListActiveProviders(ctx context.Context) ([]Provider, error)
 	ListActiveSigningKeys(ctx context.Context) ([]JwtSigningKey, error)
+	ListChannelGroups(ctx context.Context, libraryID string) ([]sql.NullString, error)
+	ListChannelsByLibrary(ctx context.Context, libraryID string) ([]ListChannelsByLibraryRow, error)
 	ListExternalIDsByItem(ctx context.Context, itemID string) ([]ExternalID, error)
 	ListMediaStreamsByItem(ctx context.Context, itemID string) ([]ListMediaStreamsByItemRow, error)
 	ListProviders(ctx context.Context) ([]Provider, error)
 	ListProvidersByType(ctx context.Context, type_ string) ([]Provider, error)
+	ListSchedule(ctx context.Context, arg ListScheduleParams) ([]ListScheduleRow, error)
 	ListSessionsByUser(ctx context.Context, userID string) ([]Session, error)
 	ListSigningKeys(ctx context.Context) ([]JwtSigningKey, error)
 	ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUsersRow, error)
+	SetChannelActive(ctx context.Context, arg SetChannelActiveParams) (int64, error)
 	SetProviderStatus(ctx context.Context, arg SetProviderStatusParams) (int64, error)
 	SetSigningKeyRetiredAt(ctx context.Context, arg SetSigningKeyRetiredAtParams) (int64, error)
 	UpdateLastLogin(ctx context.Context, arg UpdateLastLoginParams) error
@@ -69,6 +91,13 @@ type Querier interface {
 	// Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE external_ids).
 	// PK: (item_id, provider).
 	UpsertExternalID(ctx context.Context, arg UpsertExternalIDParams) error
+	// Extended metadata for items (overview, tagline, genres, etc.).
+	//
+	// Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE metadata).
+	// PK: item_id.
+	// NOTE: Batch queries (GetOverviewBatch, GetMetadataBatch) use dynamic IN()
+	// and remain as raw SQL in the repository adapter.
+	UpsertMetadata(ctx context.Context, arg UpsertMetadataParams) error
 	// Provider configurations (TMDb, Fanart, OpenSubtitles, ...).
 	//
 	// Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE providers).

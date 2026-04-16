@@ -3,8 +3,11 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
+
+	"hubplay/internal/db/sqlc"
 )
 
 // Channel represents an IPTV channel.
@@ -25,21 +28,19 @@ type Channel struct {
 
 type ChannelRepository struct {
 	db *sql.DB
+	q  *sqlc.Queries
 }
 
 func NewChannelRepository(database *sql.DB) *ChannelRepository {
-	return &ChannelRepository{db: database}
+	return &ChannelRepository{db: database, q: sqlc.New(database)}
 }
+
+// ErrChannelNotFound is returned when a channel doesn't exist.
+var ErrChannelNotFound = fmt.Errorf("channel not found")
 
 // Create inserts a new channel.
 func (r *ChannelRepository) Create(ctx context.Context, ch *Channel) error {
-	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO channels (id, library_id, name, number, group_name, logo_url,
-		 stream_url, tvg_id, language, country, is_active, added_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		ch.ID, ch.LibraryID, ch.Name, ch.Number, ch.GroupName, ch.LogoURL,
-		ch.StreamURL, ch.TvgID, ch.Language, ch.Country, ch.IsActive, ch.AddedAt,
-	)
+	err := r.q.CreateChannel(ctx, channelToCreateParams(ch))
 	if err != nil {
 		return fmt.Errorf("create channel: %w", err)
 	}
@@ -48,56 +49,31 @@ func (r *ChannelRepository) Create(ctx context.Context, ch *Channel) error {
 
 // GetByID returns a channel by ID.
 func (r *ChannelRepository) GetByID(ctx context.Context, id string) (*Channel, error) {
-	ch := &Channel{}
-	err := r.db.QueryRowContext(ctx,
-		`SELECT id, library_id, name, number, COALESCE(group_name,''),
-		        COALESCE(logo_url,''), stream_url, COALESCE(tvg_id,''),
-		        COALESCE(language,''), COALESCE(country,''), is_active, added_at
-		 FROM channels WHERE id = ?`, id,
-	).Scan(&ch.ID, &ch.LibraryID, &ch.Name, &ch.Number, &ch.GroupName,
-		&ch.LogoURL, &ch.StreamURL, &ch.TvgID, &ch.Language, &ch.Country,
-		&ch.IsActive, &ch.AddedAt,
-	)
-	if err == sql.ErrNoRows {
+	row, err := r.q.GetChannelByID(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("channel %s: %w", id, ErrChannelNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get channel: %w", err)
 	}
-	return ch, nil
+	ch := channelFromGetRow(row)
+	return &ch, nil
 }
-
-// ErrChannelNotFound is returned when a channel doesn't exist.
-var ErrChannelNotFound = fmt.Errorf("channel not found")
 
 // ListByLibrary returns all channels in a library.
 func (r *ChannelRepository) ListByLibrary(ctx context.Context, libraryID string, activeOnly bool) ([]*Channel, error) {
-	query := `SELECT id, library_id, name, number, COALESCE(group_name,''),
-	                  COALESCE(logo_url,''), stream_url, COALESCE(tvg_id,''),
-	                  COALESCE(language,''), COALESCE(country,''), is_active, added_at
-	           FROM channels WHERE library_id = ?`
 	if activeOnly {
-		query += ` AND is_active = 1`
+		rows, err := r.q.ListActiveChannelsByLibrary(ctx, libraryID)
+		if err != nil {
+			return nil, fmt.Errorf("list channels: %w", err)
+		}
+		return channelsFromActiveRows(rows), nil
 	}
-	query += ` ORDER BY number, name`
-
-	rows, err := r.db.QueryContext(ctx, query, libraryID)
+	rows, err := r.q.ListChannelsByLibrary(ctx, libraryID)
 	if err != nil {
 		return nil, fmt.Errorf("list channels: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
-
-	var channels []*Channel
-	for rows.Next() {
-		ch := &Channel{}
-		if err := rows.Scan(&ch.ID, &ch.LibraryID, &ch.Name, &ch.Number, &ch.GroupName,
-			&ch.LogoURL, &ch.StreamURL, &ch.TvgID, &ch.Language, &ch.Country,
-			&ch.IsActive, &ch.AddedAt); err != nil {
-			return nil, fmt.Errorf("scan channel: %w", err)
-		}
-		channels = append(channels, ch)
-	}
-	return channels, rows.Err()
+	return channelsFromListRows(rows), nil
 }
 
 // ReplaceForLibrary deletes all channels in a library and inserts new ones (used during M3U refresh).
@@ -108,19 +84,14 @@ func (r *ChannelRepository) ReplaceForLibrary(ctx context.Context, libraryID str
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	if _, err := tx.ExecContext(ctx, `DELETE FROM channels WHERE library_id = ?`, libraryID); err != nil {
+	qtx := r.q.WithTx(tx)
+
+	if err := qtx.DeleteChannelsByLibrary(ctx, libraryID); err != nil {
 		return fmt.Errorf("delete old channels: %w", err)
 	}
 
 	for _, ch := range channels {
-		_, err := tx.ExecContext(ctx,
-			`INSERT INTO channels (id, library_id, name, number, group_name, logo_url,
-			 stream_url, tvg_id, language, country, is_active, added_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			ch.ID, ch.LibraryID, ch.Name, ch.Number, ch.GroupName, ch.LogoURL,
-			ch.StreamURL, ch.TvgID, ch.Language, ch.Country, ch.IsActive, ch.AddedAt,
-		)
-		if err != nil {
+		if err := qtx.CreateChannel(ctx, channelToCreateParams(ch)); err != nil {
 			return fmt.Errorf("insert channel %s: %w", ch.Name, err)
 		}
 	}
@@ -130,11 +101,13 @@ func (r *ChannelRepository) ReplaceForLibrary(ctx context.Context, libraryID str
 
 // SetActive enables or disables a channel.
 func (r *ChannelRepository) SetActive(ctx context.Context, id string, active bool) error {
-	res, err := r.db.ExecContext(ctx, `UPDATE channels SET is_active = ? WHERE id = ?`, active, id)
+	n, err := r.q.SetChannelActive(ctx, sqlc.SetChannelActiveParams{
+		IsActive: active,
+		ID:       id,
+	})
 	if err != nil {
 		return fmt.Errorf("set active: %w", err)
 	}
-	n, _ := res.RowsAffected()
 	if n == 0 {
 		return ErrChannelNotFound
 	}
@@ -143,23 +116,109 @@ func (r *ChannelRepository) SetActive(ctx context.Context, id string, active boo
 
 // Groups returns distinct group names for a library.
 func (r *ChannelRepository) Groups(ctx context.Context, libraryID string) ([]string, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT DISTINCT group_name FROM channels
-		 WHERE library_id = ? AND group_name != ''
-		 ORDER BY group_name`, libraryID,
-	)
+	rows, err := r.q.ListChannelGroups(ctx, libraryID)
 	if err != nil {
 		return nil, fmt.Errorf("list groups: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
-
-	var groups []string
-	for rows.Next() {
-		var g string
-		if err := rows.Scan(&g); err != nil {
-			return nil, fmt.Errorf("scan group: %w", err)
+	groups := make([]string, 0, len(rows))
+	for _, ns := range rows {
+		if ns.Valid {
+			groups = append(groups, ns.String)
 		}
-		groups = append(groups, g)
 	}
-	return groups, rows.Err()
+	return groups, nil
+}
+
+// ── row mapping helpers ─────────────────────────────────────────────────
+
+func channelToCreateParams(ch *Channel) sqlc.CreateChannelParams {
+	return sqlc.CreateChannelParams{
+		ID:        ch.ID,
+		LibraryID: ch.LibraryID,
+		Name:      ch.Name,
+		Number:    sql.NullInt64{Int64: int64(ch.Number), Valid: true},
+		GroupName: nullableString(ch.GroupName),
+		LogoUrl:   nullableString(ch.LogoURL),
+		StreamUrl: ch.StreamURL,
+		TvgID:     nullableString(ch.TvgID),
+		Language:  nullableString(ch.Language),
+		Country:   nullableString(ch.Country),
+		IsActive:  ch.IsActive,
+		AddedAt:   ch.AddedAt,
+	}
+}
+
+func channelFromGetRow(r sqlc.GetChannelByIDRow) Channel {
+	return Channel{
+		ID:        r.ID,
+		LibraryID: r.LibraryID,
+		Name:      r.Name,
+		Number:    int(r.Number.Int64),
+		GroupName: r.GroupName,
+		LogoURL:   r.LogoUrl,
+		StreamURL: r.StreamUrl,
+		TvgID:     r.TvgID,
+		Language:  r.Language,
+		Country:   r.Country,
+		IsActive:  r.IsActive,
+		AddedAt:   r.AddedAt,
+	}
+}
+
+func channelFromListRow(r sqlc.ListChannelsByLibraryRow) Channel {
+	return Channel{
+		ID:        r.ID,
+		LibraryID: r.LibraryID,
+		Name:      r.Name,
+		Number:    int(r.Number.Int64),
+		GroupName: r.GroupName,
+		LogoURL:   r.LogoUrl,
+		StreamURL: r.StreamUrl,
+		TvgID:     r.TvgID,
+		Language:  r.Language,
+		Country:   r.Country,
+		IsActive:  r.IsActive,
+		AddedAt:   r.AddedAt,
+	}
+}
+
+func channelFromActiveRow(r sqlc.ListActiveChannelsByLibraryRow) Channel {
+	return Channel{
+		ID:        r.ID,
+		LibraryID: r.LibraryID,
+		Name:      r.Name,
+		Number:    int(r.Number.Int64),
+		GroupName: r.GroupName,
+		LogoURL:   r.LogoUrl,
+		StreamURL: r.StreamUrl,
+		TvgID:     r.TvgID,
+		Language:  r.Language,
+		Country:   r.Country,
+		IsActive:  r.IsActive,
+		AddedAt:   r.AddedAt,
+	}
+}
+
+func channelsFromListRows(rows []sqlc.ListChannelsByLibraryRow) []*Channel {
+	if len(rows) == 0 {
+		return nil
+	}
+	out := make([]*Channel, len(rows))
+	for i, row := range rows {
+		ch := channelFromListRow(row)
+		out[i] = &ch
+	}
+	return out
+}
+
+func channelsFromActiveRows(rows []sqlc.ListActiveChannelsByLibraryRow) []*Channel {
+	if len(rows) == 0 {
+		return nil
+	}
+	out := make([]*Channel, len(rows))
+	for i, row := range rows {
+		ch := channelFromActiveRow(row)
+		out[i] = &ch
+	}
+	return out
 }
