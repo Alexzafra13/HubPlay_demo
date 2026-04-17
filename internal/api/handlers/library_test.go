@@ -29,16 +29,20 @@ import (
 // return zero values.
 
 type libFakeService struct {
-	createFn      func(ctx context.Context, req library.CreateRequest) (*db.Library, error)
-	getByIDFn     func(ctx context.Context, id string) (*db.Library, error)
-	listFn        func(ctx context.Context) ([]*db.Library, error)
-	listForUserFn func(ctx context.Context, userID string) ([]*db.Library, error)
-	updateFn      func(ctx context.Context, id string, req library.UpdateRequest) (*db.Library, error)
-	deleteFn      func(ctx context.Context, id string) error
-	scanFn        func(ctx context.Context, id string, refresh ...bool) error
-	listItemsFn   func(ctx context.Context, f db.ItemFilter) ([]*db.Item, int, error)
-	latestFn      func(ctx context.Context, libraryID, itemType string, limit int) ([]*db.Item, error)
-	itemCountFn   func(ctx context.Context, libraryID string) (int, error)
+	createFn        func(ctx context.Context, req library.CreateRequest) (*db.Library, error)
+	getByIDFn       func(ctx context.Context, id string) (*db.Library, error)
+	listFn          func(ctx context.Context) ([]*db.Library, error)
+	listForUserFn   func(ctx context.Context, userID string) ([]*db.Library, error)
+	updateFn        func(ctx context.Context, id string, req library.UpdateRequest) (*db.Library, error)
+	deleteFn        func(ctx context.Context, id string) error
+	scanFn          func(ctx context.Context, id string, refresh ...bool) error
+	listItemsFn     func(ctx context.Context, f db.ItemFilter) ([]*db.Item, int, error)
+	latestFn        func(ctx context.Context, libraryID, itemType string, limit int) ([]*db.Item, error)
+	itemCountFn     func(ctx context.Context, libraryID string) (int, error)
+	getItemFn       func(ctx context.Context, id string) (*db.Item, error)
+	getChildrenFn   func(ctx context.Context, id string) ([]*db.Item, error)
+	getStreamsFn    func(ctx context.Context, id string) ([]*db.MediaStream, error)
+	getItemImagesFn func(ctx context.Context, id string) ([]*db.Image, error)
 }
 
 func (s *libFakeService) Create(ctx context.Context, req library.CreateRequest) (*db.Library, error) {
@@ -103,14 +107,28 @@ func (s *libFakeService) ListItems(ctx context.Context, f db.ItemFilter) ([]*db.
 	return nil, 0, nil
 }
 
-func (s *libFakeService) GetItem(_ context.Context, _ string) (*db.Item, error) { return nil, nil }
-func (s *libFakeService) GetItemChildren(_ context.Context, _ string) ([]*db.Item, error) {
+func (s *libFakeService) GetItem(ctx context.Context, id string) (*db.Item, error) {
+	if s.getItemFn != nil {
+		return s.getItemFn(ctx, id)
+	}
+	return nil, domain.NewNotFound("item")
+}
+func (s *libFakeService) GetItemChildren(ctx context.Context, id string) ([]*db.Item, error) {
+	if s.getChildrenFn != nil {
+		return s.getChildrenFn(ctx, id)
+	}
 	return nil, nil
 }
-func (s *libFakeService) GetItemStreams(_ context.Context, _ string) ([]*db.MediaStream, error) {
+func (s *libFakeService) GetItemStreams(ctx context.Context, id string) ([]*db.MediaStream, error) {
+	if s.getStreamsFn != nil {
+		return s.getStreamsFn(ctx, id)
+	}
 	return nil, nil
 }
-func (s *libFakeService) GetItemImages(_ context.Context, _ string) ([]*db.Image, error) {
+func (s *libFakeService) GetItemImages(ctx context.Context, id string) ([]*db.Image, error) {
+	if s.getItemImagesFn != nil {
+		return s.getItemImagesFn(ctx, id)
+	}
 	return nil, nil
 }
 
