@@ -28,7 +28,7 @@ export function NowPlayingCard({
 
   return (
     <div
-      className="relative mx-4 -mt-6 overflow-hidden rounded-2xl border border-white/10 bg-bg-card/90 px-4 py-4 shadow-[0_10px_40px_-10px_rgba(0,0,0,0.8)] backdrop-blur-xl md:mx-6 md:-mt-10 md:px-6 md:py-5"
+      className="relative mx-4 mt-3 overflow-hidden rounded-2xl border border-white/10 bg-bg-card/90 px-4 py-4 shadow-lg shadow-black/30 backdrop-blur-xl md:mx-0 md:mt-4 md:px-6 md:py-5"
       aria-live="polite"
       aria-atomic="true"
     >

@@ -160,8 +160,21 @@ export function ChannelDetailPanel({
         className="scrollbar-hide flex-1 overflow-y-auto rounded-xl border border-white/5 bg-white/[0.02] p-2"
       >
         {sortedPrograms.length === 0 ? (
-          <div className="flex h-full items-center justify-center px-4 py-12 text-center text-sm italic text-text-muted">
-            {t("liveTV.noEPG")}
+          <div className="flex h-full flex-col items-center justify-center gap-3 px-6 py-10 text-center">
+            <div
+              className="flex h-12 w-12 items-center justify-center rounded-full bg-white/5 text-2xl"
+              aria-hidden="true"
+            >
+              📅
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-text-primary">
+                {t("liveTV.noEPGTitle")}
+              </p>
+              <p className="mt-1 text-xs text-text-muted">
+                {t("liveTV.noEPGHint")}
+              </p>
+            </div>
           </div>
         ) : (
           <div className="flex flex-col gap-1.5">

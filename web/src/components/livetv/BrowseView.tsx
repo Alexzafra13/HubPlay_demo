@@ -1,8 +1,10 @@
+import type { ReactNode } from "react";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import type { Channel, EPGProgram } from "@/api/types";
 import { CategoryChip } from "./CategoryChip";
 import { ChannelCard } from "./ChannelCard";
+import type { FeaturedSlide } from "./FeaturedHero";
 import { FeaturedHero } from "./FeaturedHero";
 import { parseCategory } from "./categoryHelpers";
 import { getNowPlaying, getUpNext } from "./epgHelpers";
@@ -56,21 +58,22 @@ export function BrowseView({
     [channels, scheduleByChannel],
   );
 
-  const featuredSlides = useMemo(() => {
-    // Prefer channels from varied categories to keep the hero interesting.
-    const byCategory = new Map<string, Channel>();
-    for (const c of liveNowChannels) {
+  const featuredSlides = useMemo<FeaturedSlide[]>(() => {
+    // Prefer channels from varied categories so the hero never loops over
+    // a monoculture. If we have EPG data, use currently-airing programmes;
+    // otherwise fall back to branded slides (logo + category) so the hero
+    // still feels populated when the iptv-org feed ships no EPG URL.
+    const byCategory = new Map<string, FeaturedSlide>();
+    const pool = liveNowChannels.length > 0 ? liveNowChannels : channels;
+    for (const c of pool) {
       const key = parseCategory(c.group).primary;
-      if (!byCategory.has(key)) byCategory.set(key, c);
+      if (byCategory.has(key)) continue;
+      const program = getNowPlaying(scheduleByChannel[c.id]);
+      byCategory.set(key, { channel: c, program });
       if (byCategory.size >= 6) break;
     }
-    return Array.from(byCategory.values())
-      .map((channel) => {
-        const program = getNowPlaying(scheduleByChannel[channel.id]);
-        return program ? { channel, program } : null;
-      })
-      .filter((s): s is { channel: Channel; program: EPGProgram } => s !== null);
-  }, [liveNowChannels, scheduleByChannel]);
+    return Array.from(byCategory.values());
+  }, [liveNowChannels, channels, scheduleByChannel]);
 
   const lastChannel = useMemo(
     () => channels.find((c) => c.id === lastChannelId) ?? null,
@@ -179,7 +182,7 @@ export function BrowseView({
               title={t("liveTV.searchResults")}
               count={searchResults.length}
             />
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:gap-5 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
               {searchResults.map((ch) => (
                 <div key={ch.id}>{renderChannelTile(ch)}</div>
               ))}
@@ -227,12 +230,15 @@ export function BrowseView({
             ))}
           </div>
 
-          {/* ── Continue watching ────────────────────────────── */}
+          {/* ── Continue watching ──────────────────────────────
+              When there's only one item (common case — most users rewatch
+              the same channel), we render it as a wide banner card so the
+              shelf doesn't look oddly empty. */}
           {lastChannel && (
             <section>
               <SectionHeader title={t("liveTV.continueWatching")} />
-              <div className="scrollbar-hide -mx-4 flex gap-3 overflow-x-auto px-4 pb-2 md:-mx-6 md:px-6">
-                <div className="w-44 shrink-0 sm:w-48 md:w-52">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <div className="sm:col-span-2 lg:col-span-1">
                   {renderChannelTile(lastChannel)}
                 </div>
               </div>
@@ -246,13 +252,11 @@ export function BrowseView({
                 title={t("liveTV.favorites")}
                 count={favoriteChannels.length}
               />
-              <div className="scrollbar-hide -mx-4 flex gap-3 overflow-x-auto px-4 pb-2 md:-mx-6 md:px-6">
+              <Shelf>
                 {favoriteChannels.map((ch) => (
-                  <div key={ch.id} className="w-44 shrink-0 sm:w-48 md:w-52">
-                    {renderChannelTile(ch)}
-                  </div>
+                  <ShelfItem key={ch.id}>{renderChannelTile(ch)}</ShelfItem>
                 ))}
-              </div>
+              </Shelf>
             </section>
           )}
 
@@ -264,13 +268,11 @@ export function BrowseView({
                 count={liveNowChannels.length}
                 pulse
               />
-              <div className="scrollbar-hide -mx-4 flex gap-3 overflow-x-auto px-4 pb-2 md:-mx-6 md:px-6">
+              <Shelf>
                 {liveNowChannels.slice(0, 20).map((ch) => (
-                  <div key={ch.id} className="w-44 shrink-0 sm:w-48 md:w-52">
-                    {renderChannelTile(ch)}
-                  </div>
+                  <ShelfItem key={ch.id}>{renderChannelTile(ch)}</ShelfItem>
                 ))}
-              </div>
+              </Shelf>
             </section>
           )}
 
@@ -284,18 +286,37 @@ export function BrowseView({
                   count={groupChannels.length}
                   onSeeAll={() => onCategoryChange(name)}
                 />
-                <div className="scrollbar-hide -mx-4 flex gap-3 overflow-x-auto px-4 pb-2 md:-mx-6 md:px-6">
+                <Shelf>
                   {groupChannels.map((ch) => (
-                    <div key={ch.id} className="w-44 shrink-0 sm:w-48 md:w-52">
-                      {renderChannelTile(ch)}
-                    </div>
+                    <ShelfItem key={ch.id}>{renderChannelTile(ch)}</ShelfItem>
                   ))}
-                </div>
+                </Shelf>
               </section>
             );
           })}
         </>
       )}
+    </div>
+  );
+}
+
+/**
+ * Horizontal, swipe-friendly shelf. Snaps to each tile so mobile fling
+ * gestures land cleanly and the last item never falls off at a fraction of
+ * a card width. Desktop users can still drag-scroll with pointer events.
+ */
+function Shelf({ children }: { children: ReactNode }) {
+  return (
+    <div className="scrollbar-hide -mx-4 flex snap-x snap-mandatory gap-4 overflow-x-auto px-4 pb-2 md:-mx-6 md:gap-5 md:px-6">
+      {children}
+    </div>
+  );
+}
+
+function ShelfItem({ children }: { children: ReactNode }) {
+  return (
+    <div className="w-48 shrink-0 snap-start sm:w-52 md:w-56 lg:w-60">
+      {children}
     </div>
   );
 }

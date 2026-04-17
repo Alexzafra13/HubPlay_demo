@@ -5,6 +5,13 @@
 
 const SEP_RE = /[;,/|]+/;
 
+// Placeholder values that real M3U feeds use when the author didn't classify
+// the channel — we collapse them all into a single "Otros" bucket so the
+// UI doesn't surface technical-looking strings like "Undefined".
+const UNCLASSIFIED_RE =
+  /^(undefined|uncategori[sz]ed|unknown|n\/?a|none|null|miscellaneous|misc|other|otros)$/i;
+const UNCLASSIFIED_KEY = "Otros";
+
 export interface ParsedCategory {
   primary: string; // canonical primary category ("News", "Movies"…)
   all: string[]; // every token, title-cased & deduped
@@ -19,11 +26,17 @@ function titleCase(s: string): string {
     .replace(/\b[\p{L}][\p{L}'’]*/gu, (w) => w[0].toLocaleUpperCase() + w.slice(1));
 }
 
+function normalizeToken(s: string): string {
+  const cased = titleCase(s);
+  if (!cased) return "";
+  return UNCLASSIFIED_RE.test(cased) ? UNCLASSIFIED_KEY : cased;
+}
+
 export function parseCategory(group: string | null | undefined): ParsedCategory {
-  if (!group) return { primary: "General", all: [], raw: null };
+  if (!group) return { primary: UNCLASSIFIED_KEY, all: [], raw: null };
   const parts = group
     .split(SEP_RE)
-    .map(titleCase)
+    .map(normalizeToken)
     .filter(Boolean);
   const seen = new Set<string>();
   const unique: string[] = [];
@@ -34,10 +47,18 @@ export function parseCategory(group: string | null | undefined): ParsedCategory 
     unique.push(p);
   }
   return {
-    primary: unique[0] ?? "General",
+    primary: unique[0] ?? UNCLASSIFIED_KEY,
     all: unique,
     raw: group,
   };
+}
+
+/**
+ * True when a category is the "unclassified" bucket — useful for sorting
+ * it to the end of the category rail regardless of channel count.
+ */
+export function isUnclassifiedCategory(name: string): boolean {
+  return name === UNCLASSIFIED_KEY;
 }
 
 // Visual metadata per category. We match against a set of normalized keywords
@@ -61,6 +82,15 @@ const FALLBACK: CategoryMeta = {
 };
 
 const CATEGORY_TABLE: Array<{ match: RegExp; meta: CategoryMeta }> = [
+  {
+    match: /^otros$/i,
+    meta: {
+      key: "otros",
+      icon: "🗂️",
+      tint: "bg-zinc-500/10 text-zinc-300",
+      accent: "bg-zinc-500/25 text-zinc-100 ring-zinc-400/40",
+    },
+  },
   {
     match: /news|noticia|info(rmaci[oó]n)?|actual/i,
     meta: {
