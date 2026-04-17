@@ -146,6 +146,10 @@ func (s *libFakeService) ItemCount(ctx context.Context, libraryID string) (int, 
 	return 0, nil
 }
 
+func (s *libFakeService) UserHasAccess(_ context.Context, _, _ string) (bool, error) {
+	return true, nil
+}
+
 // ─── Fake MetadataRepository ────────────────────────────────────────────────
 
 type libFakeMetadataRepo struct {

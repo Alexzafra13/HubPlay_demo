@@ -183,6 +183,28 @@ func (r *LibraryRepository) RevokeAccess(ctx context.Context, userID, libraryID 
 	return nil
 }
 
+// UserHasAccess reports whether userID is allowed to access libraryID under
+// the opt-in ACL model: the user has an explicit grant, OR no grants at all
+// exist for the library (public by default).
+//
+// Kept as raw SQL (not sqlc) because the library_id parameter appears twice
+// and sqlc's SQLite engine mishandles duplicate positional bindings for this
+// kind of branched EXISTS query — same limitation already documented for
+// NextUp in user_data_repository.go.
+func (r *LibraryRepository) UserHasAccess(ctx context.Context, userID, libraryID string) (bool, error) {
+	const query = `
+		SELECT CASE
+			WHEN EXISTS (SELECT 1 FROM library_access WHERE library_id = ? AND user_id = ?) THEN 1
+			WHEN NOT EXISTS (SELECT 1 FROM library_access WHERE library_id = ?)            THEN 1
+			ELSE 0
+		END`
+	var has int
+	if err := r.db.QueryRowContext(ctx, query, libraryID, userID, libraryID).Scan(&has); err != nil {
+		return false, fmt.Errorf("check library access: %w", err)
+	}
+	return has == 1, nil
+}
+
 // ListForUser returns libraries a user has access to. If empty, all are accessible.
 func (r *LibraryRepository) ListForUser(ctx context.Context, userID string) ([]*Library, error) {
 	rows, err := r.q.ListLibrariesForUser(ctx, userID)

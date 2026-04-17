@@ -13,6 +13,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"hubplay/internal/auth"
 	"hubplay/internal/db"
 	"hubplay/internal/testutil"
 )
@@ -142,11 +143,26 @@ func (r *iptvFakeLibraryRepo) Create(_ context.Context, lib *db.Library) error {
 	return nil
 }
 
+// iptvFakeAccess is the minimal LibraryAccessService fake used by the tests.
+// By default grants access to every library/user combination; tests that need
+// to exercise the deny path set a custom function via accessFn.
+type iptvFakeAccess struct {
+	accessFn func(userID, libraryID string) (bool, error)
+}
+
+func (a *iptvFakeAccess) UserHasAccess(_ context.Context, userID, libraryID string) (bool, error) {
+	if a.accessFn != nil {
+		return a.accessFn(userID, libraryID)
+	}
+	return true, nil
+}
+
 // Compile-time checks.
 var (
 	_ IPTVService            = (*iptvFakeService)(nil)
 	_ IPTVStreamProxyService = (*iptvFakeProxy)(nil)
 	_ LibraryRepository      = (*iptvFakeLibraryRepo)(nil)
+	_ LibraryAccessService   = (*iptvFakeAccess)(nil)
 )
 
 // ─── Env + helpers ──────────────────────────────────────────────────────────
@@ -156,6 +172,7 @@ type iptvTestEnv struct {
 	svc       *iptvFakeService
 	proxy     *iptvFakeProxy
 	libraries *iptvFakeLibraryRepo
+	access    *iptvFakeAccess
 	handler   *IPTVHandler
 	router    chi.Router
 }
@@ -167,8 +184,9 @@ func newIPTVTestEnv(t *testing.T) *iptvTestEnv {
 		svc:       newIPTVFakeService(),
 		proxy:     &iptvFakeProxy{},
 		libraries: &iptvFakeLibraryRepo{},
+		access:    &iptvFakeAccess{},
 	}
-	env.handler = NewIPTVHandler(env.svc, env.proxy, env.libraries, testutil.NopLogger())
+	env.handler = NewIPTVHandler(env.svc, env.proxy, env.libraries, env.access, testutil.NopLogger())
 
 	r := chi.NewRouter()
 	r.Route("/api/v1", func(r chi.Router) {
@@ -189,6 +207,12 @@ func newIPTVTestEnv(t *testing.T) *iptvTestEnv {
 }
 
 func (e *iptvTestEnv) do(method, path, body string) *httptest.ResponseRecorder {
+	return e.doAs(method, path, body, &auth.Claims{UserID: "u-admin", Role: "admin"})
+}
+
+// doAs issues a request with the given claims on the context. Pass nil for
+// unauthenticated; pass a non-admin Claims to exercise the per-library ACL.
+func (e *iptvTestEnv) doAs(method, path, body string, claims *auth.Claims) *httptest.ResponseRecorder {
 	e.t.Helper()
 	var req *http.Request
 	if body != "" {
@@ -196,6 +220,9 @@ func (e *iptvTestEnv) do(method, path, body string) *httptest.ResponseRecorder {
 		req.Header.Set("Content-Type", "application/json")
 	} else {
 		req = httptest.NewRequest(method, path, nil)
+	}
+	if claims != nil {
+		req = req.WithContext(auth.WithClaims(req.Context(), claims))
 	}
 	rr := httptest.NewRecorder()
 	e.router.ServeHTTP(rr, req)
@@ -330,6 +357,7 @@ func TestIPTVHandler_Stream_InactiveChannel_404(t *testing.T) {
 
 func TestIPTVHandler_ProxyURL_HappyPath(t *testing.T) {
 	env := newIPTVTestEnv(t)
+	env.svc.channelByID["c-1"] = &db.Channel{ID: "c-1", LibraryID: "lib-1", IsActive: true}
 	var gotURL string
 	env.proxy.urlFn = func(w http.ResponseWriter, _, url string) error {
 		gotURL = url
@@ -357,6 +385,7 @@ func TestIPTVHandler_ProxyURL_MissingURL_400(t *testing.T) {
 
 func TestIPTVHandler_Schedule_ShapesPrograms(t *testing.T) {
 	env := newIPTVTestEnv(t)
+	env.svc.channelByID["c-1"] = &db.Channel{ID: "c-1", LibraryID: "lib-1"}
 	env.svc.scheduleFn = func(_ context.Context, _ string, _, _ time.Time) ([]*db.EPGProgram, error) {
 		return []*db.EPGProgram{
 			{ID: "p-1", Title: "Show A", Category: "Drama"},
@@ -372,6 +401,7 @@ func TestIPTVHandler_Schedule_ShapesPrograms(t *testing.T) {
 
 func TestIPTVHandler_Schedule_ParsesTimeRangeHours(t *testing.T) {
 	env := newIPTVTestEnv(t)
+	env.svc.channelByID["c-1"] = &db.Channel{ID: "c-1", LibraryID: "lib-1"}
 	var gotFrom, gotTo time.Time
 	env.svc.scheduleFn = func(_ context.Context, _ string, from, to time.Time) ([]*db.EPGProgram, error) {
 		gotFrom, gotTo = from, to
@@ -390,6 +420,8 @@ func TestIPTVHandler_Schedule_ParsesTimeRangeHours(t *testing.T) {
 
 func TestIPTVHandler_BulkSchedule_HappyPath(t *testing.T) {
 	env := newIPTVTestEnv(t)
+	env.svc.channelByID["c-1"] = &db.Channel{ID: "c-1", LibraryID: "lib-1"}
+	env.svc.channelByID["c-2"] = &db.Channel{ID: "c-2", LibraryID: "lib-1"}
 	env.svc.bulkFn = func(_ context.Context, ids []string, _, _ time.Time) (map[string][]*db.EPGProgram, error) {
 		out := map[string][]*db.EPGProgram{}
 		for _, id := range ids {

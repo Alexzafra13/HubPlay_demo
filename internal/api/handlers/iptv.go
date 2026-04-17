@@ -12,7 +12,9 @@ import (
 	"strings"
 	"time"
 
+	"hubplay/internal/auth"
 	"hubplay/internal/db"
+	"hubplay/internal/domain"
 	"hubplay/internal/iptv"
 
 	"github.com/go-chi/chi/v5"
@@ -23,22 +25,55 @@ type IPTVHandler struct {
 	svc       IPTVService
 	proxy     IPTVStreamProxyService
 	libraries LibraryRepository
+	access    LibraryAccessService
 	logger    *slog.Logger
 }
 
 // NewIPTVHandler creates a new IPTV handler.
-func NewIPTVHandler(svc IPTVService, proxy IPTVStreamProxyService, libraries LibraryRepository, logger *slog.Logger) *IPTVHandler {
+func NewIPTVHandler(svc IPTVService, proxy IPTVStreamProxyService, libraries LibraryRepository, access LibraryAccessService, logger *slog.Logger) *IPTVHandler {
 	return &IPTVHandler{
 		svc:       svc,
 		proxy:     proxy,
 		libraries: libraries,
+		access:    access,
 		logger:    logger.With("module", "iptv-handler"),
 	}
+}
+
+// canAccessLibrary gates per-library access for the authenticated caller.
+// Admins pass unconditionally. Unauthenticated requests fail closed.
+// Errors in the ACL lookup fail closed too — the caller sees a generic 404.
+func (h *IPTVHandler) canAccessLibrary(r *http.Request, libraryID string) bool {
+	claims := auth.GetClaims(r.Context())
+	if claims == nil {
+		return false
+	}
+	if claims.Role == "admin" {
+		return true
+	}
+	ok, err := h.access.UserHasAccess(r.Context(), claims.UserID, libraryID)
+	if err != nil {
+		h.logger.Error("library access check failed",
+			"user", claims.UserID, "library", libraryID, "error", err)
+		return false
+	}
+	return ok
+}
+
+// denyForbidden writes a NOT_FOUND response (not 403) so an unauthorised
+// user can't distinguish "channel exists but you can't see it" from
+// "channel doesn't exist" — same treatment libraries already give.
+func (h *IPTVHandler) denyForbidden(w http.ResponseWriter, r *http.Request) {
+	respondAppError(w, r.Context(), domain.NewNotFound("channel"))
 }
 
 // ListChannels returns all channels for a library.
 func (h *IPTVHandler) ListChannels(w http.ResponseWriter, r *http.Request) {
 	libraryID := chi.URLParam(r, "id")
+	if !h.canAccessLibrary(r, libraryID) {
+		h.denyForbidden(w, r)
+		return
+	}
 	activeOnly := r.URL.Query().Get("active") != "false"
 
 	channels, err := h.svc.GetChannels(r.Context(), libraryID, activeOnly)
@@ -77,6 +112,10 @@ func (h *IPTVHandler) GetChannel(w http.ResponseWriter, r *http.Request) {
 		handleServiceError(w, r, err)
 		return
 	}
+	if !h.canAccessLibrary(r, ch.LibraryID) {
+		h.denyForbidden(w, r)
+		return
+	}
 
 	// Get now playing
 	nowPlaying, _ := h.svc.NowPlaying(r.Context(), channelID)
@@ -109,6 +148,10 @@ func (h *IPTVHandler) GetChannel(w http.ResponseWriter, r *http.Request) {
 // Groups returns channel group names for a library.
 func (h *IPTVHandler) Groups(w http.ResponseWriter, r *http.Request) {
 	libraryID := chi.URLParam(r, "id")
+	if !h.canAccessLibrary(r, libraryID) {
+		h.denyForbidden(w, r)
+		return
+	}
 
 	groups, err := h.svc.GetGroups(r.Context(), libraryID)
 	if err != nil {
@@ -126,6 +169,10 @@ func (h *IPTVHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	ch, err := h.svc.GetChannel(r.Context(), channelID)
 	if err != nil {
 		handleServiceError(w, r, err)
+		return
+	}
+	if !h.canAccessLibrary(r, ch.LibraryID) {
+		h.denyForbidden(w, r)
 		return
 	}
 
@@ -149,6 +196,19 @@ func (h *IPTVHandler) ProxyURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Authorisation: resolve the channel's library and check access. The
+	// proxy-itself validates the upstream URL against SSRF, but we must
+	// still confirm the caller owns the channel they're proxying through.
+	ch, err := h.svc.GetChannel(r.Context(), channelID)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	if !h.canAccessLibrary(r, ch.LibraryID) {
+		h.denyForbidden(w, r)
+		return
+	}
+
 	if err := h.proxy.ProxyURL(r.Context(), w, channelID, rawURL); err != nil {
 		h.logger.Error("proxy URL error", "channel", channelID, "error", err)
 	}
@@ -157,6 +217,16 @@ func (h *IPTVHandler) ProxyURL(w http.ResponseWriter, r *http.Request) {
 // Schedule returns EPG schedule for a channel.
 func (h *IPTVHandler) Schedule(w http.ResponseWriter, r *http.Request) {
 	channelID := chi.URLParam(r, "channelId")
+
+	ch, err := h.svc.GetChannel(r.Context(), channelID)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	if !h.canAccessLibrary(r, ch.LibraryID) {
+		h.denyForbidden(w, r)
+		return
+	}
 
 	from, to := parseTimeRange(r)
 
@@ -175,6 +245,10 @@ func (h *IPTVHandler) Schedule(w http.ResponseWriter, r *http.Request) {
 }
 
 // BulkSchedule returns EPG for multiple channels at once.
+//
+// Each channel is filtered individually through the ACL — inaccessible
+// channels are dropped silently (no error) so a single restricted channel
+// doesn't poison a bulk call for an otherwise-authorised user.
 func (h *IPTVHandler) BulkSchedule(w http.ResponseWriter, r *http.Request) {
 	channelIDs := strings.Split(r.URL.Query().Get("channels"), ",")
 	if len(channelIDs) == 0 || (len(channelIDs) == 1 && channelIDs[0] == "") {
@@ -182,9 +256,27 @@ func (h *IPTVHandler) BulkSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	allowed := make([]string, 0, len(channelIDs))
+	for _, id := range channelIDs {
+		if id == "" {
+			continue
+		}
+		ch, err := h.svc.GetChannel(r.Context(), id)
+		if err != nil {
+			continue // unknown channel — skip rather than bubble a 500
+		}
+		if h.canAccessLibrary(r, ch.LibraryID) {
+			allowed = append(allowed, id)
+		}
+	}
+	if len(allowed) == 0 {
+		respondJSON(w, http.StatusOK, map[string]any{"data": map[string]any{}})
+		return
+	}
+
 	from, to := parseTimeRange(r)
 
-	schedules, err := h.svc.GetBulkSchedule(r.Context(), channelIDs, from, to)
+	schedules, err := h.svc.GetBulkSchedule(r.Context(), allowed, from, to)
 	if err != nil {
 		handleServiceError(w, r, err)
 		return
@@ -203,8 +295,17 @@ func (h *IPTVHandler) BulkSchedule(w http.ResponseWriter, r *http.Request) {
 }
 
 // RefreshM3U triggers an M3U playlist refresh for a library.
+//
+// Already admin-only at the route level, but we also verify library access
+// defence-in-depth: admins can see every library regardless of the ACL, so
+// this check is effectively a documentation anchor today. It becomes
+// load-bearing the day a non-admin role gains access to refresh endpoints.
 func (h *IPTVHandler) RefreshM3U(w http.ResponseWriter, r *http.Request) {
 	libraryID := chi.URLParam(r, "id")
+	if !h.canAccessLibrary(r, libraryID) {
+		h.denyForbidden(w, r)
+		return
+	}
 
 	count, err := h.svc.RefreshM3U(r.Context(), libraryID)
 	if err != nil {
@@ -225,6 +326,10 @@ func (h *IPTVHandler) RefreshM3U(w http.ResponseWriter, r *http.Request) {
 // RefreshEPG triggers an EPG refresh for a library.
 func (h *IPTVHandler) RefreshEPG(w http.ResponseWriter, r *http.Request) {
 	libraryID := chi.URLParam(r, "id")
+	if !h.canAccessLibrary(r, libraryID) {
+		h.denyForbidden(w, r)
+		return
+	}
 
 	count, err := h.svc.RefreshEPG(r.Context(), libraryID)
 	if err != nil {

@@ -57,6 +57,14 @@ type LibraryService interface {
 	GetItemImages(ctx context.Context, itemID string) ([]*db.Image, error)
 	LatestItems(ctx context.Context, libraryID string, itemType string, limit int) ([]*db.Item, error)
 	ItemCount(ctx context.Context, libraryID string) (int, error)
+	UserHasAccess(ctx context.Context, userID, libraryID string) (bool, error)
+}
+
+// LibraryAccessService is the minimal surface the IPTV handler uses to gate
+// channel/EPG endpoints on per-library ACLs. Defined separately so tests can
+// fake just the one method without pulling in the fat LibraryService mock.
+type LibraryAccessService interface {
+	UserHasAccess(ctx context.Context, userID, libraryID string) (bool, error)
 }
 
 // ─── Stream manager ─────────────────────────────────────────────────────────

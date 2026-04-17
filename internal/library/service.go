@@ -106,6 +106,12 @@ func (s *Service) ListForUser(ctx context.Context, userID string) ([]*db.Library
 	return s.libraries.ListForUser(ctx, userID)
 }
 
+// UserHasAccess reports whether the user is allowed to access a library.
+// Delegates to the repository — see its doc comment for the ACL rule.
+func (s *Service) UserHasAccess(ctx context.Context, userID, libraryID string) (bool, error) {
+	return s.libraries.UserHasAccess(ctx, userID, libraryID)
+}
+
 type UpdateRequest struct {
 	Name        string   `json:"name"`
 	ContentType string   `json:"content_type"`

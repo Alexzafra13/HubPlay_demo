@@ -241,7 +241,7 @@ func NewRouter(deps Dependencies) http.Handler {
 
 				// IPTV channels (within library routes)
 				if deps.IPTV != nil {
-					iptvHandler := handlers.NewIPTVHandler(deps.IPTV, deps.IPTVProxy, deps.LibraryRepo, deps.Logger)
+					iptvHandler := handlers.NewIPTVHandler(deps.IPTV, deps.IPTVProxy, deps.LibraryRepo, deps.Libraries, deps.Logger)
 
 					r.Route("/libraries/{id}/channels", func(r chi.Router) {
 						r.Get("/", iptvHandler.ListChannels)
