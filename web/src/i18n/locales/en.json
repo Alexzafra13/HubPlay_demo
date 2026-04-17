@@ -100,7 +100,15 @@
     "detectedCountry": "We detected you might be in {{flag}} {{country}}",
     "searchCountries": "Search countries...",
     "importChannels": "Import channels",
-    "importFailed": "Failed to import channels. Please try again."
+    "importFailed": "Failed to import channels. Please try again.",
+    "importing": "Importing...",
+    "importSuccess": "Channels imported. Loading...",
+    "channel": "Channel",
+    "viewMode": "View mode",
+    "viewCarousel": "Carousel",
+    "viewGrid": "Guide",
+    "epgGridLabel": "Programme guide",
+    "noEPG": "No guide info"
   },
   "notFound": {
     "title": "404",

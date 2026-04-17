@@ -142,6 +142,7 @@ export interface Channel {
   group: string | null;
   stream_url: string;
   library_id: string;
+  is_active?: boolean;
 }
 
 export interface EPGProgram {

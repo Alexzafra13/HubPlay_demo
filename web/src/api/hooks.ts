@@ -228,8 +228,12 @@ export function useBulkSchedule(
   channelIds: string[],
   options?: Partial<UseQueryOptions<Record<string, import("./types").EPGProgram[]>>>,
 ) {
+  // Sort the id list before hashing it so cache hits work regardless of
+  // channel ordering. The previous implementation sliced to the first 10
+  // which caused stale cache hits on libraries larger than 10 channels.
+  const cacheKey = [...channelIds].sort().join(",");
   return useQuery<Record<string, import("./types").EPGProgram[]>>({
-    queryKey: ["bulk-schedule", channelIds.slice(0, 10).join(",")] as const,
+    queryKey: ["bulk-schedule", cacheKey] as const,
     queryFn: () => api.getBulkSchedule(channelIds),
     enabled: channelIds.length > 0,
     staleTime: 2 * 60 * 1000,
