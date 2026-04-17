@@ -5,9 +5,11 @@ import { ChannelLogo } from "./ChannelLogo";
 import { categoryMeta, parseCategory } from "./categoryHelpers";
 import { formatTime, getProgramProgress } from "./epgHelpers";
 
-interface FeaturedSlide {
+export interface FeaturedSlide {
   channel: Channel;
-  program: EPGProgram;
+  /** Current programme on the channel. Optional — when the EPG feed is
+   *  empty the hero still renders with just the channel branding. */
+  program?: EPGProgram | null;
 }
 
 interface FeaturedHeroProps {
@@ -19,12 +21,10 @@ interface FeaturedHeroProps {
 }
 
 /**
- * Rotating landing banner that previews currently-airing programmes on
- * a handful of channels. Cycling pauses while the user hovers so they
- * can read longer descriptions without the carousel jumping.
- *
- * If only one slide is provided, the rotation is effectively disabled
- * (and the navigation dots are hidden).
+ * Rotating landing banner that previews a handful of channels. When the
+ * EPG feed provides a "now airing" programme, we render the synopsis and
+ * progress bar; otherwise we fall back to channel branding only so the
+ * hero still feels alive even if the iptv-org feed ships no EPG.
  */
 export function FeaturedHero({
   slides,
@@ -34,10 +34,10 @@ export function FeaturedHero({
   const { t } = useTranslation();
   const [index, setIndex] = useState(0);
   const [paused, setPaused] = useState(false);
-  const [now, setNow] = useState(() => Date.now());
+  const [, setNow] = useState(() => Date.now());
 
-  // Clamp the index to the current slide count so a shrinking set (e.g.
-  // a programme just ended) can't leave us pointing past the end.
+  // Clamp the index so a shrinking slide set can't leave us pointing past
+  // the end (e.g. a programme just ended, dropping it out of the set).
   const safeIndex = slides.length > 0 ? index % slides.length : 0;
 
   useEffect(() => {
@@ -48,7 +48,8 @@ export function FeaturedHero({
     return () => window.clearInterval(id);
   }, [slides.length, paused, intervalMs]);
 
-  // Keep the progress bar current without re-rendering the parent.
+  // Keep the progress bar current so the hero feels live; we only care
+  // about re-rendering on each tick, not about the ms value itself.
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 30_000);
     return () => window.clearInterval(id);
@@ -60,18 +61,18 @@ export function FeaturedHero({
     const parsed = parseCategory(active.channel.group);
     return {
       parsed,
-      cat: categoryMeta(active.program.category ?? parsed.primary),
+      cat: categoryMeta(active.program?.category ?? parsed.primary),
     };
   }, [active]);
 
   if (!active || !meta) return null;
-  const progress = getProgramProgress(active.program);
-  void now; // progress depends on Date.now() inside the helper; `now` is the dependency.
+  const progress = active.program ? getProgramProgress(active.program) : 0;
+  const hasProgram = !!active.program;
 
   return (
     <div
       className={[
-        "relative overflow-hidden rounded-3xl border border-white/10",
+        "relative overflow-hidden rounded-3xl border border-white/10 min-h-[220px] md:min-h-[260px]",
         meta.cat.tint,
       ].join(" ")}
       onMouseEnter={() => setPaused(true)}
@@ -82,7 +83,6 @@ export function FeaturedHero({
       aria-roledescription="carousel"
       aria-label={t("liveTV.featured")}
     >
-      {/* Backdrop: channel logo as a large, blurred decorative element. */}
       <div
         className="pointer-events-none absolute inset-0 opacity-30"
         style={{
@@ -93,14 +93,14 @@ export function FeaturedHero({
       />
 
       <div className="relative flex flex-col gap-4 p-5 md:flex-row md:items-center md:gap-6 md:p-7">
-        {/* Big channel logo */}
+        {/* Channel logo slab */}
         <div className="flex shrink-0 items-center gap-3 md:gap-4">
-          <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-2xl bg-black/35 shadow-lg backdrop-blur-sm md:h-24 md:w-24">
+          <div className="flex h-24 w-24 shrink-0 items-center justify-center rounded-2xl bg-black/35 shadow-lg backdrop-blur-sm md:h-28 md:w-28">
             <ChannelLogo
               logoUrl={active.channel.logo_url}
               number={active.channel.number}
               name={active.channel.name}
-              sizeClassName="w-14 h-14 md:w-16 md:h-16"
+              sizeClassName="w-16 h-16 md:w-20 md:h-20"
               fallbackTextClassName="text-2xl md:text-3xl font-bold"
             />
           </div>
@@ -109,10 +109,16 @@ export function FeaturedHero({
         {/* Text block */}
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-white/80">
-            <span className="flex items-center gap-1 rounded-md bg-live/90 px-1.5 py-0.5 text-white shadow-sm">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
-              {t("liveTV.live")}
-            </span>
+            {hasProgram ? (
+              <span className="flex items-center gap-1 rounded-md bg-live/90 px-1.5 py-0.5 text-white shadow-sm">
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
+                {t("liveTV.live")}
+              </span>
+            ) : (
+              <span className="rounded-md border border-white/20 bg-black/30 px-1.5 py-0.5 text-white/80">
+                {t("liveTV.featured")}
+              </span>
+            )}
             <span className="tabular-nums">CH.{active.channel.number}</span>
             <span aria-hidden="true">·</span>
             <span className="truncate">{active.channel.name}</span>
@@ -124,37 +130,45 @@ export function FeaturedHero({
           </div>
 
           <h2 className="mt-2 line-clamp-2 text-xl font-bold text-text-primary md:text-2xl">
-            {active.program.title}
+            {active.program?.title ?? active.channel.name}
           </h2>
 
-          <p className="mt-1 text-xs tabular-nums text-text-secondary md:text-sm">
-            {formatTime(active.program.start_time)} —{" "}
-            {formatTime(active.program.end_time)}
-          </p>
+          {hasProgram ? (
+            <>
+              <p className="mt-1 text-xs tabular-nums text-text-secondary md:text-sm">
+                {formatTime(active.program!.start_time)} —{" "}
+                {formatTime(active.program!.end_time)}
+              </p>
 
-          {active.program.description && (
+              {active.program!.description && (
+                <p className="mt-2 line-clamp-2 text-sm text-text-secondary md:text-base">
+                  {active.program!.description}
+                </p>
+              )}
+
+              <div className="mt-3 flex items-center gap-2">
+                <div
+                  className="h-1 max-w-xs flex-1 overflow-hidden rounded-full bg-white/10"
+                  role="progressbar"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.round(progress)}
+                >
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-accent-light to-accent transition-all duration-1000"
+                    style={{ width: `${progress}%` }}
+                  />
+                </div>
+                <span className="text-[10px] tabular-nums text-text-muted">
+                  {Math.round(progress)}%
+                </span>
+              </div>
+            </>
+          ) : (
             <p className="mt-2 line-clamp-2 text-sm text-text-secondary md:text-base">
-              {active.program.description}
+              {t("liveTV.featuredFallbackDescription")}
             </p>
           )}
-
-          <div className="mt-3 flex items-center gap-2">
-            <div
-              className="h-1 max-w-xs flex-1 overflow-hidden rounded-full bg-white/10"
-              role="progressbar"
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={Math.round(progress)}
-            >
-              <div
-                className="h-full rounded-full bg-gradient-to-r from-accent-light to-accent transition-all duration-1000"
-                style={{ width: `${progress}%` }}
-              />
-            </div>
-            <span className="text-[10px] tabular-nums text-text-muted">
-              {Math.round(progress)}%
-            </span>
-          </div>
 
           <div className="mt-4 flex items-center gap-2">
             <button

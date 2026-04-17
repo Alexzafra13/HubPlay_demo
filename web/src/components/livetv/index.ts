@@ -13,7 +13,11 @@ export { NowPlayingCard } from "./NowPlayingCard";
 export { ProgramDetailPopover } from "./ProgramDetailPopover";
 export { ProgramListItem } from "./ProgramListItem";
 export { WatchingView } from "./WatchingView";
-export { categoryMeta, parseCategory } from "./categoryHelpers";
+export {
+  categoryMeta,
+  isUnclassifiedCategory,
+  parseCategory,
+} from "./categoryHelpers";
 export { detectCountryCode } from "./detectCountry";
 export {
   formatTime,

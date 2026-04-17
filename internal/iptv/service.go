@@ -94,14 +94,14 @@ func (s *Service) RefreshM3U(ctx context.Context, libraryID string) (int, error)
 	}
 	defer body.Close() //nolint:errcheck
 
-	m3uChannels, err := ParseM3U(body)
+	playlist, err := ParseM3U(body)
 	if err != nil {
 		return 0, fmt.Errorf("parse M3U: %w", err)
 	}
 
 	now := time.Now()
-	dbChannels := make([]*db.Channel, 0, len(m3uChannels))
-	for i, ch := range m3uChannels {
+	dbChannels := make([]*db.Channel, 0, len(playlist.Channels))
+	for i, ch := range playlist.Channels {
 		dbChannels = append(dbChannels, &db.Channel{
 			ID:        generateID(),
 			LibraryID: libraryID,
@@ -122,6 +122,25 @@ func (s *Service) RefreshM3U(ctx context.Context, libraryID string) (int, error)
 		return 0, fmt.Errorf("replace channels: %w", err)
 	}
 
+	// Persist any XMLTV URL the playlist advertised so the EPG refresher has
+	// something to fetch. We only overwrite when the library has no URL
+	// configured — an operator-set URL wins over whatever the feed suggests.
+	epgDiscovered := false
+	if playlist.EPGURL != "" && lib.EPGURL == "" {
+		lib.EPGURL = playlist.EPGURL
+		lib.UpdatedAt = now
+		if err := s.libraries.Update(ctx, lib); err != nil {
+			// Don't fail the whole refresh — the channels are already saved,
+			// and the EPG URL is nice-to-have. Log and move on.
+			s.logger.Warn("persist discovered EPG URL",
+				"library", libraryID, "epg_url", playlist.EPGURL, "error", err)
+		} else {
+			epgDiscovered = true
+			s.logger.Info("discovered EPG URL from playlist header",
+				"library", libraryID, "epg_url", playlist.EPGURL)
+		}
+	}
+
 	s.logger.Info("M3U refresh complete", "library", libraryID, "channels", len(dbChannels))
 	s.publish(event.Event{
 		Type: event.PlaylistRefreshed,
@@ -130,6 +149,22 @@ func (s *Service) RefreshM3U(ctx context.Context, libraryID string) (int, error)
 			"channels_count": len(dbChannels),
 		},
 	})
+
+	// Kick off an EPG refresh for newly-discovered URLs so the guide
+	// populates on the same import cycle. Fire-and-forget with a detached
+	// context: the import response should not block on a potentially-slow
+	// XMLTV download. Errors are logged inside RefreshEPG.
+	if epgDiscovered {
+		go func(id string) {
+			bg, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+			if _, err := s.RefreshEPG(bg, id); err != nil {
+				s.logger.Warn("auto-trigger EPG refresh after M3U import",
+					"library", id, "error", err)
+			}
+		}(libraryID)
+	}
+
 	return len(dbChannels), nil
 }
 

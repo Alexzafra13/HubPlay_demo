@@ -8,6 +8,7 @@ import {
   CountrySelector,
   EPGGrid,
   WatchingView,
+  isUnclassifiedCategory,
   parseCategory,
 } from "@/components/livetv";
 import { useChannelFavorites } from "@/hooks/useChannelFavorites";
@@ -74,12 +75,17 @@ export default function LiveTV() {
     return map;
   }, [channels]);
 
-  // Category order: sort by channel count descending; ties alphabetical.
+  // Category order: "Otros" always last; the rest by channel count desc
+  // with alphabetical tie-breaker. This keeps the meaningful buckets
+  // ("News", "Sports", …) at the front of the rail.
   const categoryNames = useMemo(() => {
     const entries = Array.from(channelsByCategory.entries());
-    entries.sort(
-      (a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]),
-    );
+    entries.sort((a, b) => {
+      const aOther = isUnclassifiedCategory(a[0]);
+      const bOther = isUnclassifiedCategory(b[0]);
+      if (aOther !== bOther) return aOther ? 1 : -1;
+      return b[1].length - a[1].length || a[0].localeCompare(b[0]);
+    });
     return entries.map(([name]) => name);
   }, [channelsByCategory]);
 

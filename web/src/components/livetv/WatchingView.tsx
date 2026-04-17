@@ -131,8 +131,6 @@ export function WatchingView({
                 <span className="animate-pulse">_</span>
               </div>
             )}
-
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-bg-base to-transparent md:hidden" />
           </div>
 
           <NowPlayingCard
