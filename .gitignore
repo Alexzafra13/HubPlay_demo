@@ -12,5 +12,7 @@ coverage.html
 web/node_modules/
 
 .claude
+.agents/
+skills-lock.json
 
 /peliculas
