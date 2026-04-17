@@ -18,6 +18,7 @@ import (
 	"github.com/google/uuid"
 
 	"hubplay/internal/db"
+	"hubplay/internal/domain"
 	"hubplay/internal/imaging"
 	"hubplay/internal/imaging/pathmap"
 	"hubplay/internal/provider"
@@ -343,7 +344,7 @@ func (h *ImageHandler) SetPrimary(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if img.ItemID != itemID {
-		respondError(w, r, http.StatusNotFound, "NOT_FOUND", "image not found for this item")
+		respondAppError(w, r.Context(), domain.NewNotFound("image"))
 		return
 	}
 
@@ -369,7 +370,7 @@ func (h *ImageHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if img.ItemID != itemID {
-		respondError(w, r, http.StatusNotFound, "NOT_FOUND", "image not found for this item")
+		respondAppError(w, r.Context(), domain.NewNotFound("image"))
 		return
 	}
 
@@ -526,7 +527,7 @@ func (h *ImageHandler) ServeFile(w http.ResponseWriter, r *http.Request) {
 		// Fallback: try to get the image from DB and check if path is a remote URL
 		img, err := h.images.GetByID(r.Context(), imageID)
 		if err != nil {
-			respondError(w, r, http.StatusNotFound, "NOT_FOUND", "image not found")
+			respondAppError(w, r.Context(), domain.NewNotFound("image"))
 			return
 		}
 		// If path starts with http, redirect to the remote URL

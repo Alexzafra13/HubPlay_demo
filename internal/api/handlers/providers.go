@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"hubplay/internal/domain"
 	"hubplay/internal/provider"
 
 	"github.com/go-chi/chi/v5"
@@ -82,7 +83,7 @@ func (h *ProviderHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if cfg == nil {
-		respondError(w, r, http.StatusNotFound, "NOT_FOUND", "provider not found")
+		respondAppError(w, r.Context(), domain.NewNotFound("provider"))
 		return
 	}
 
@@ -167,7 +168,7 @@ func (h *ProviderHandler) GetMetadata(w http.ResponseWriter, r *http.Request) {
 	result, err := h.manager.FetchMetadata(r.Context(), externalID, itemType)
 	if err != nil {
 		h.logger.Error("metadata fetch failed", "error", err)
-		respondError(w, r, http.StatusNotFound, "NOT_FOUND", "metadata not found")
+		respondAppError(w, r.Context(), domain.NewNotFound("metadata"))
 		return
 	}
 
