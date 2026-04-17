@@ -131,8 +131,10 @@ type UserDataRepository interface {
 }
 
 // EventBusSubscriber defines the event bus subscription needed by handlers.
+// Subscribe returns an unsubscribe function; handlers MUST call it when the
+// subscriber goes away (e.g. SSE client disconnect) to avoid handler leaks.
 type EventBusSubscriber interface {
-	Subscribe(eventType event.Type, handler event.Handler)
+	Subscribe(eventType event.Type, handler event.Handler) func()
 }
 
 // ─── Setup service ──────────────────────────────────────────────────────────

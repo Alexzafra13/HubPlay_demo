@@ -57,16 +57,26 @@ func (h *EventHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		event.PlaylistRefreshed,
 	}
 
+	// Collect unsubscribe funcs so we can detach every handler when the client
+	// disconnects. Without this, each SSE connection leaks 12 handlers into
+	// the bus for the lifetime of the process.
+	unsubs := make([]func(), 0, len(types))
 	for _, t := range types {
 		t := t
-		h.bus.Subscribe(t, func(e event.Event) {
+		unsub := h.bus.Subscribe(t, func(e event.Event) {
 			select {
 			case eventCh <- e:
 			default:
 				// Drop event if channel is full (slow client)
 			}
 		})
+		unsubs = append(unsubs, unsub)
 	}
+	defer func() {
+		for _, u := range unsubs {
+			u()
+		}
+	}()
 
 	h.logger.Info("SSE client connected", "remote_addr", r.RemoteAddr)
 

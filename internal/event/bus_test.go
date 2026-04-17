@@ -111,6 +111,78 @@ func TestBus_PanicRecovery(t *testing.T) {
 	}
 }
 
+func TestBus_Unsubscribe_RemovesHandler(t *testing.T) {
+	bus := NewBus(slog.Default())
+
+	var called int
+	var mu sync.Mutex
+	unsub := bus.Subscribe(ItemAdded, func(e Event) {
+		mu.Lock()
+		called++
+		mu.Unlock()
+	})
+
+	// One publish while subscribed → handler runs.
+	bus.Publish(Event{Type: ItemAdded})
+	time.Sleep(50 * time.Millisecond)
+
+	// Unsubscribe, then publish again → handler must NOT run.
+	unsub()
+	if bus.HandlerCount(ItemAdded) != 0 {
+		t.Fatalf("handler not removed: count=%d", bus.HandlerCount(ItemAdded))
+	}
+	bus.Publish(Event{Type: ItemAdded})
+	time.Sleep(50 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if called != 1 {
+		t.Errorf("handler called %d times after unsubscribe; want 1", called)
+	}
+}
+
+func TestBus_Unsubscribe_IsIdempotent(t *testing.T) {
+	bus := NewBus(slog.Default())
+	unsub := bus.Subscribe(ItemAdded, func(e Event) {})
+
+	unsub()
+	unsub() // must not panic or remove anything else
+
+	if bus.HandlerCount(ItemAdded) != 0 {
+		t.Fatalf("count: %d", bus.HandlerCount(ItemAdded))
+	}
+}
+
+func TestBus_Unsubscribe_DoesNotAffectOtherSubscribers(t *testing.T) {
+	bus := NewBus(slog.Default())
+
+	var aCalled, bCalled bool
+	var mu sync.Mutex
+	unsubA := bus.Subscribe(ItemAdded, func(e Event) {
+		mu.Lock()
+		aCalled = true
+		mu.Unlock()
+	})
+	bus.Subscribe(ItemAdded, func(e Event) {
+		mu.Lock()
+		bCalled = true
+		mu.Unlock()
+	})
+
+	unsubA()
+	bus.Publish(Event{Type: ItemAdded})
+	time.Sleep(50 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if aCalled {
+		t.Error("A was unsubscribed but still called")
+	}
+	if !bCalled {
+		t.Error("B should still be called")
+	}
+}
+
 func TestBus_DifferentEventTypes(t *testing.T) {
 	bus := NewBus(slog.Default())
 
