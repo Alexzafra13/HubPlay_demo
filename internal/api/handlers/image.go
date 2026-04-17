@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -143,6 +144,10 @@ func (h *ImageHandler) Select(w http.ResponseWriter, r *http.Request) {
 	itemID := chi.URLParam(r, "id")
 	imgType := chi.URLParam(r, "type")
 
+	if !imaging.IsSafePathSegment(itemID) {
+		respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "invalid item id")
+		return
+	}
 	if !imaging.IsValidKind(imgType) {
 		respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "invalid image type")
 		return
@@ -163,11 +168,16 @@ func (h *ImageHandler) Select(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Download the image
-	imgData, contentType, err := h.downloadImage(body.URL)
+	// Download the image through the SSRF-safe client (blocks loopback/private
+	// addresses, non-http(s) schemes, oversized bodies).
+	imgData, contentType, err := imaging.SafeGet(body.URL, imaging.MaxUploadBytes, 30*time.Second)
 	if err != nil {
 		h.logger.Error("failed to download image", "url", body.URL, "error", err)
 		respondError(w, r, http.StatusBadGateway, "DOWNLOAD_FAILED", "failed to download image")
+		return
+	}
+	if err := imaging.EnforceMaxPixels(imgData); err != nil {
+		respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "image dimensions too large")
 		return
 	}
 
@@ -220,10 +230,21 @@ func (h *ImageHandler) Select(w http.ResponseWriter, r *http.Request) {
 }
 
 // Upload handles multipart file upload for custom images.
+//
+// Security:
+//   - itemID is validated as a safe path segment (no traversal/separators).
+//   - The real MIME type is sniffed from the body bytes; the multipart
+//     Content-Type header is ignored for validation (clients can spoof it).
+//   - Image dimensions are bounded via imaging.EnforceMaxPixels to block
+//     decompression bombs before the blurhash/resize stages.
 func (h *ImageHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	itemID := chi.URLParam(r, "id")
 	imgType := chi.URLParam(r, "type")
 
+	if !imaging.IsSafePathSegment(itemID) {
+		respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "invalid item id")
+		return
+	}
 	if !imaging.IsValidKind(imgType) {
 		respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "invalid image type")
 		return
@@ -234,28 +255,40 @@ func (h *ImageHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	file, header, err := r.FormFile("file")
+	file, _, err := r.FormFile("file")
 	if err != nil {
 		respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "file field is required")
 		return
 	}
-	defer file.Close()
+	defer file.Close() //nolint:errcheck
 
-	// Validate content type
-	contentType := header.Header.Get("Content-Type")
-	if !imaging.IsValidContentType(contentType) {
-		respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "invalid file type (must be JPEG, PNG, or WebP)")
-		return
-	}
-
-	imgData, err := io.ReadAll(file)
+	// Cap the total read at MaxUploadBytes — ParseMultipartForm already limits
+	// the on-disk spill but the in-memory copy is unbounded by default.
+	imgData, err := io.ReadAll(io.LimitReader(file, imaging.MaxUploadBytes+1))
 	if err != nil {
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to read file")
 		return
 	}
+	if int64(len(imgData)) > imaging.MaxUploadBytes {
+		respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "file too large (max 10MB)")
+		return
+	}
 
-	// Save locally
-	ext := imaging.ExtensionForContentType(contentType)
+	// Sniff the real content type from the bytes, never trust the client header.
+	sniffed, _, _ := imaging.SniffContentType(bytes.NewReader(imgData))
+	if !imaging.IsValidContentType(sniffed) {
+		respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "invalid file type (must be JPEG, PNG, or WebP)")
+		return
+	}
+
+	// Reject oversized dimensions (decompression-bomb guard).
+	if err := imaging.EnforceMaxPixels(imgData); err != nil {
+		respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "image dimensions too large")
+		return
+	}
+
+	// Save locally.
+	ext := imaging.ExtensionForContentType(sniffed)
 	hash := sha256.Sum256(imgData)
 	filename := fmt.Sprintf("%s_%s%s", imgType, hex.EncodeToString(hash[:8]), ext)
 	localPath, err := h.saveImageFile(itemID, filename, imgData)
@@ -426,10 +459,14 @@ func (h *ImageHandler) RefreshLibraryImages(w http.ResponseWriter, r *http.Reque
 		}
 
 		for imgType, best := range bestByType {
-			// Download the image.
-			imgData, contentType, err := h.downloadImage(best.URL)
+			// Download via SSRF-safe client.
+			imgData, contentType, err := imaging.SafeGet(best.URL, imaging.MaxUploadBytes, 30*time.Second)
 			if err != nil {
 				h.logger.Warn("refresh: failed to download image", "url", best.URL, "error", err)
+				continue
+			}
+			if err := imaging.EnforceMaxPixels(imgData); err != nil {
+				h.logger.Warn("refresh: image too large", "url", best.URL, "error", err)
 				continue
 			}
 
@@ -476,6 +513,11 @@ func (h *ImageHandler) RefreshLibraryImages(w http.ResponseWriter, r *http.Reque
 
 // ServeFile serves a locally stored image by its ID.
 // Supports an optional "w" query parameter for thumbnail generation (e.g. ?w=300).
+//
+// Security:
+//   - readPathMapping enforces UUID-shaped imageIDs at the pathmap layer.
+//   - Before passing any path to http.ServeFile we verify that it resolves
+//     inside h.imageDir. Defense in depth against a poisoned mapping file.
 func (h *ImageHandler) ServeFile(w http.ResponseWriter, r *http.Request) {
 	imageID := chi.URLParam(r, "id")
 
@@ -496,6 +538,12 @@ func (h *ImageHandler) ServeFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !h.isUnderImageDir(localPath) {
+		h.logger.Warn("pathmap points outside imageDir — ignoring", "id", imageID, "path", localPath)
+		respondError(w, r, http.StatusNotFound, "NOT_FOUND", "image file not found")
+		return
+	}
+
 	// Images are content-addressed by ID and rarely change.
 	// Cache aggressively with stale-while-revalidate for seamless background refresh.
 	w.Header().Set("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800")
@@ -506,6 +554,12 @@ func (h *ImageHandler) ServeFile(w http.ResponseWriter, r *http.Request) {
 		if err == nil && maxWidth > 0 && maxWidth < 4096 {
 			thumbDir := filepath.Join(h.imageDir, ".thumbnails")
 			thumbPath := filepath.Join(thumbDir, fmt.Sprintf("%s_w%d%s", imageID, maxWidth, filepath.Ext(localPath)))
+			if !h.isUnderImageDir(thumbPath) {
+				// imageID was UUID-valid so this should not happen, but be safe.
+				h.logger.Warn("thumbnail path escaped imageDir", "id", imageID)
+				http.ServeFile(w, r, localPath)
+				return
+			}
 			// Serve cached thumbnail if it exists.
 			if _, err := os.Stat(thumbPath); err != nil {
 				// Generate the thumbnail.
@@ -523,32 +577,26 @@ func (h *ImageHandler) ServeFile(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, localPath)
 }
 
-// ── Helpers ──
-
-func (h *ImageHandler) downloadImage(url string) ([]byte, string, error) {
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Get(url) //nolint:gosec
+// isUnderImageDir reports whether p, after cleaning, has h.imageDir as an
+// ancestor. Compares absolute paths so relative/absolute mismatches don't
+// fool the check.
+func (h *ImageHandler) isUnderImageDir(p string) bool {
+	rootAbs, err := filepath.Abs(h.imageDir)
 	if err != nil {
-		return nil, "", fmt.Errorf("download: %w", err)
+		return false
 	}
-	defer resp.Body.Close() //nolint:errcheck
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, "", fmt.Errorf("download returned status %d", resp.StatusCode)
-	}
-
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 20<<20)) // 20MB max
+	pAbs, err := filepath.Abs(filepath.Clean(p))
 	if err != nil {
-		return nil, "", fmt.Errorf("read body: %w", err)
+		return false
 	}
-
-	ct := resp.Header.Get("Content-Type")
-	if ct == "" {
-		ct = http.DetectContentType(data)
+	rel, err := filepath.Rel(rootAbs, pAbs)
+	if err != nil {
+		return false
 	}
-
-	return data, ct, nil
+	return !strings.HasPrefix(rel, "..") && rel != ".."
 }
+
+// ── Helpers ──
 
 func (h *ImageHandler) saveImageFile(itemID, filename string, data []byte) (string, error) {
 	dir := filepath.Join(h.imageDir, itemID)

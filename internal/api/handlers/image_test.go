@@ -12,6 +12,7 @@ import (
 	"image/png"
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -24,6 +25,7 @@ import (
 
 	"hubplay/internal/db"
 	"hubplay/internal/domain"
+	"hubplay/internal/imaging"
 	"hubplay/internal/provider"
 	"hubplay/internal/testutil"
 )
@@ -599,6 +601,12 @@ func TestImageHandler_ServeFile_RemoteFallbackRedirect(t *testing.T) {
 // ─── Tests: RefreshLibraryImages ────────────────────────────────────────────
 
 func TestImageHandler_RefreshLibraryImages_AddsMissingTypes(t *testing.T) {
+	// Allow httptest.Server's 127.0.0.1 target through the SSRF guard for the
+	// duration of this test — restored in cleanup.
+	prev := imaging.BlockedIP
+	imaging.BlockedIP = func(net.IP) bool { return false }
+	t.Cleanup(func() { imaging.BlockedIP = prev })
+
 	env := newImageTestEnv(t)
 	env.items.byID["item-r1"] = &db.Item{ID: "item-r1", LibraryID: "lib-1", Type: "movie"}
 	env.externals.byItem["item-r1"] = []*db.ExternalID{{Provider: "tmdb", ExternalID: "100"}}
@@ -635,6 +643,117 @@ func TestImageHandler_RefreshLibraryImages_AddsMissingTypes(t *testing.T) {
 // Pure helpers moved to internal/imaging — see imaging/validators_test.go and
 // imaging/blurhash_test.go for the unit-level coverage. The characterization
 // tests above still exercise them end-to-end via Upload / Select.
+
+// ─── Security regression tests (Phase 4 hardening) ──────────────────────────
+
+// Upload must reject a multipart payload that claims image/jpeg in the part
+// header but has an HTML body — content-type sniffing, not client trust.
+func TestImageHandler_Upload_MIMESpoofRejected(t *testing.T) {
+	env := newImageTestEnv(t)
+	htmlPayload := []byte(`<!doctype html><html><body><script>pwn()</script></body></html>`)
+	body, ct := multipartUpload(t, "file", "evil.jpg", "image/jpeg", htmlPayload)
+
+	resp := env.do(http.MethodPost, "/api/v1/items/item-1/images/primary/upload", body, ct)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("mime spoof: got %d want 400, body: %s", resp.StatusCode, readAll(resp))
+	}
+}
+
+// Upload must reject a PNG whose IHDR advertises impossible dimensions.
+func TestImageHandler_Upload_DecompressionBombRejected(t *testing.T) {
+	env := newImageTestEnv(t)
+	// Reuse the forged-PNG helper idea inline: 50000x50000 IHDR claim.
+	bomb := forgedPNGIHDR(50000, 50000)
+	body, ct := multipartUpload(t, "file", "bomb.png", "image/png", bomb)
+
+	resp := env.do(http.MethodPost, "/api/v1/items/item-1/images/primary/upload", body, ct)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("bomb: got %d want 400, body: %s", resp.StatusCode, readAll(resp))
+	}
+}
+
+// Upload must reject a non-safe itemID before touching the filesystem.
+// We invoke the handler directly with a crafted URL param because chi's
+// routing layer normalizes ".." out of HTTP paths — so the in-handler guard
+// is only reachable via a programmatic call. Both layers (chi + handler)
+// combine as defense in depth.
+func TestImageHandler_Upload_TraversalItemIDRejected(t *testing.T) {
+	env := newImageTestEnv(t)
+	data := makeJPEG(t, 20, 20)
+	body, ct := multipartUpload(t, "file", "x.jpg", "image/jpeg", data)
+
+	req := httptest.NewRequest(http.MethodPost, "/x", body)
+	req.Header.Set("Content-Type", ct)
+	// Inject URL params manually (bypasses chi routing).
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", "../etc")
+	rctx.URLParams.Add("type", "primary")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	rr := httptest.NewRecorder()
+	env.handler.Upload(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("traversal itemID: got %d want 400, body: %s", rr.Code, rr.Body.String())
+	}
+	entries, _ := os.ReadDir(env.imageDir)
+	if len(entries) > 0 {
+		t.Fatalf("filesystem touched despite rejection: %v", entries)
+	}
+}
+
+// ServeFile must refuse non-UUID ids via pathmap's internal validation,
+// falling through to the DB lookup which returns NOT_FOUND.
+func TestImageHandler_ServeFile_TraversalIDReturns404(t *testing.T) {
+	env := newImageTestEnv(t)
+	resp := env.do(http.MethodGet, "/api/v1/images/file/..%2F..%2Fetc%2Fpasswd", nil, "")
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("traversal ID: got %d want 404", resp.StatusCode)
+	}
+}
+
+// Select must refuse URLs that resolve to loopback (SSRF defense).
+func TestImageHandler_Select_LoopbackURL_Blocked(t *testing.T) {
+	env := newImageTestEnv(t)
+	// A localhost target — default BlockedIP rejects this.
+	bodyJSON := strings.NewReader(`{"url":"http://127.0.0.1:1/x.jpg","width":0,"height":0}`)
+	resp := env.do(http.MethodPut, "/api/v1/items/item-1/images/primary/select", bodyJSON, "application/json")
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("ssrf: got %d want 502, body: %s", resp.StatusCode, readAll(resp))
+	}
+}
+
+// forgedPNGIHDR duplicates imaging/safety_test.go's helper so this test file
+// doesn't need to export internals.
+func forgedPNGIHDR(w, h uint32) []byte {
+	var out []byte
+	out = append(out, 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
+	out = append(out, 0x00, 0x00, 0x00, 13)
+	typeAndData := []byte{'I', 'H', 'D', 'R',
+		byte(w >> 24), byte(w >> 16), byte(w >> 8), byte(w),
+		byte(h >> 24), byte(h >> 16), byte(h >> 8), byte(h),
+		8, 2, 0, 0, 0}
+	out = append(out, typeAndData...)
+	crc := crc32IEEE(typeAndData)
+	out = append(out, byte(crc>>24), byte(crc>>16), byte(crc>>8), byte(crc))
+	return out
+}
+
+func crc32IEEE(b []byte) uint32 {
+	// Standalone IEEE CRC-32, polynomial 0xEDB88320. Self-contained so the
+	// test file doesn't pull in another import.
+	crc := uint32(0xFFFFFFFF)
+	for _, x := range b {
+		crc ^= uint32(x)
+		for i := 0; i < 8; i++ {
+			if crc&1 != 0 {
+				crc = (crc >> 1) ^ 0xEDB88320
+			} else {
+				crc >>= 1
+			}
+		}
+	}
+	return crc ^ 0xFFFFFFFF
+}
 
 // ─── Small utility used across tests ────────────────────────────────────────
 
