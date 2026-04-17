@@ -12,16 +12,16 @@ http://stream.example.com/bbc1
 #EXTINF:-1 tvg-id="bbc2" group-title="UK",BBC Two
 http://stream.example.com/bbc2
 `
-	channels, err := ParseM3U(strings.NewReader(input))
+	pl, err := ParseM3U(strings.NewReader(input))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if len(channels) != 2 {
-		t.Fatalf("expected 2 channels, got %d", len(channels))
+	if len(pl.Channels) != 2 {
+		t.Fatalf("expected 2 channels, got %d", len(pl.Channels))
 	}
 
-	ch := channels[0]
+	ch := pl.Channels[0]
 	if ch.Name != "BBC One HD" {
 		t.Errorf("name = %q, want BBC One HD", ch.Name)
 	}
@@ -47,16 +47,16 @@ func TestParseM3U_WithAttributes(t *testing.T) {
 #EXTINF:-1 tvg-id="canal1" tvg-language="Spanish" tvg-country="ES" channel-number="5",Canal 1
 http://stream.example.com/canal1
 `
-	channels, err := ParseM3U(strings.NewReader(input))
+	pl, err := ParseM3U(strings.NewReader(input))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if len(channels) != 1 {
-		t.Fatalf("expected 1 channel, got %d", len(channels))
+	if len(pl.Channels) != 1 {
+		t.Fatalf("expected 1 channel, got %d", len(pl.Channels))
 	}
 
-	ch := channels[0]
+	ch := pl.Channels[0]
 	if ch.Language != "Spanish" {
 		t.Errorf("language = %q, want Spanish", ch.Language)
 	}
@@ -71,12 +71,12 @@ http://stream.example.com/canal1
 func TestParseM3U_Empty(t *testing.T) {
 	input := `#EXTM3U
 `
-	channels, err := ParseM3U(strings.NewReader(input))
+	pl, err := ParseM3U(strings.NewReader(input))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(channels) != 0 {
-		t.Errorf("expected 0 channels, got %d", len(channels))
+	if len(pl.Channels) != 0 {
+		t.Errorf("expected 0 channels, got %d", len(pl.Channels))
 	}
 }
 
@@ -85,15 +85,15 @@ func TestParseM3U_NoHeader(t *testing.T) {
 	input := `#EXTINF:-1,Test Channel
 http://stream.example.com/test
 `
-	channels, err := ParseM3U(strings.NewReader(input))
+	pl, err := ParseM3U(strings.NewReader(input))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(channels) != 1 {
-		t.Fatalf("expected 1 channel, got %d", len(channels))
+	if len(pl.Channels) != 1 {
+		t.Fatalf("expected 1 channel, got %d", len(pl.Channels))
 	}
-	if channels[0].Name != "Test Channel" {
-		t.Errorf("name = %q, want Test Channel", channels[0].Name)
+	if pl.Channels[0].Name != "Test Channel" {
+		t.Errorf("name = %q, want Test Channel", pl.Channels[0].Name)
 	}
 }
 
@@ -106,11 +106,70 @@ http://stream.example.com/ch1
 #EXTINF:-1,Channel 2
 http://stream.example.com/ch2
 `
-	channels, err := ParseM3U(strings.NewReader(input))
+	pl, err := ParseM3U(strings.NewReader(input))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(channels) != 2 {
-		t.Fatalf("expected 2 channels, got %d", len(channels))
+	if len(pl.Channels) != 2 {
+		t.Fatalf("expected 2 channels, got %d", len(pl.Channels))
+	}
+}
+
+func TestParseM3U_ExtractsEPGURLFromHeader(t *testing.T) {
+	cases := []struct {
+		name   string
+		header string
+		want   string
+	}{
+		{
+			name:   "url-tvg",
+			header: `#EXTM3U url-tvg="https://iptv-org.github.io/epg/guides/es.xml"`,
+			want:   "https://iptv-org.github.io/epg/guides/es.xml",
+		},
+		{
+			name:   "x-tvg-url",
+			header: `#EXTM3U x-tvg-url="https://example.com/epg.xml"`,
+			want:   "https://example.com/epg.xml",
+		},
+		{
+			name:   "tvg-url",
+			header: `#EXTM3U tvg-url="http://example.com/guide.xml"`,
+			want:   "http://example.com/guide.xml",
+		},
+		{
+			name:   "comma-separated list keeps first",
+			header: `#EXTM3U url-tvg="https://example.com/a.xml,https://example.com/b.xml"`,
+			want:   "https://example.com/a.xml",
+		},
+		{
+			name:   "url-tvg wins over alternates",
+			header: `#EXTM3U x-tvg-url="https://alt.com/alt.xml" url-tvg="https://primary.com/guide.xml"`,
+			want:   "https://primary.com/guide.xml",
+		},
+		{
+			name:   "rejects javascript scheme",
+			header: `#EXTM3U url-tvg="javascript:alert(1)"`,
+			want:   "",
+		},
+		{
+			name:   "no attribute",
+			header: `#EXTM3U`,
+			want:   "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			input := tc.header + "\n" +
+				`#EXTINF:-1 tvg-id="c1",Channel 1` + "\n" +
+				"http://stream.example.com/c1\n"
+			pl, err := ParseM3U(strings.NewReader(input))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if pl.EPGURL != tc.want {
+				t.Errorf("EPGURL = %q, want %q", pl.EPGURL, tc.want)
+			}
+		})
 	}
 }

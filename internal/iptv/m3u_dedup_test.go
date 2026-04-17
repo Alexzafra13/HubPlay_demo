@@ -16,16 +16,16 @@ http://a/2
 #EXTINF:-1 tvg-id="bbc1" group-title="Sport",BBC One
 http://a/1-dup2
 `
-	channels, err := ParseM3U(strings.NewReader(input))
+	pl, err := ParseM3U(strings.NewReader(input))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(channels) != 2 {
-		t.Fatalf("expected 2 unique channels after dedup, got %d: %+v", len(channels), channels)
+	if len(pl.Channels) != 2 {
+		t.Fatalf("expected 2 unique channels after dedup, got %d: %+v", len(pl.Channels), pl.Channels)
 	}
 	// First occurrence wins: bbc1 should be in group UK, not News/Sport.
-	if channels[0].TvgID != "bbc1" || channels[0].GroupName != "UK" {
-		t.Errorf("first bbc1: got %+v, want UK group", channels[0])
+	if pl.Channels[0].TvgID != "bbc1" || pl.Channels[0].GroupName != "UK" {
+		t.Errorf("first bbc1: got %+v, want UK group", pl.Channels[0])
 	}
 }
 
@@ -39,12 +39,12 @@ http://a/y
 #EXTINF:-1 group-title="Custom",Channel C
 http://a/z
 `
-	channels, err := ParseM3U(strings.NewReader(input))
+	pl, err := ParseM3U(strings.NewReader(input))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(channels) != 3 {
-		t.Fatalf("entries without tvg-id should all be kept, got %d", len(channels))
+	if len(pl.Channels) != 3 {
+		t.Fatalf("entries without tvg-id should all be kept, got %d", len(pl.Channels))
 	}
 }
 
@@ -55,14 +55,14 @@ func TestParseM3U_StripsUTF8BOM(t *testing.T) {
 	input := "\xEF\xBB\xBF#EXTM3U\n" +
 		`#EXTINF:-1 tvg-id="c1",Channel 1` + "\n" +
 		"http://a/1\n"
-	channels, err := ParseM3U(strings.NewReader(input))
+	pl, err := ParseM3U(strings.NewReader(input))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(channels) != 1 {
-		t.Fatalf("expected 1 channel after BOM strip, got %d", len(channels))
+	if len(pl.Channels) != 1 {
+		t.Fatalf("expected 1 channel after BOM strip, got %d", len(pl.Channels))
 	}
-	if channels[0].Name != "Channel 1" {
-		t.Errorf("name: %q", channels[0].Name)
+	if pl.Channels[0].Name != "Channel 1" {
+		t.Errorf("name: %q", pl.Channels[0].Name)
 	}
 }
