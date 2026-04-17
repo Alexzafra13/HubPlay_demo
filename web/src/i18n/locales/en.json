@@ -108,7 +108,17 @@
     "viewCarousel": "Carousel",
     "viewGrid": "Guide",
     "epgGridLabel": "Programme guide",
-    "noEPG": "No guide info"
+    "noEPG": "No guide info",
+    "airingNow": "Airing now",
+    "watching": "Watching",
+    "programProgress": "Program progress",
+    "nowLabel": "Now",
+    "backToAll": "All categories",
+    "shiftBack": "Jump back two hours",
+    "shiftForward": "Jump forward two hours",
+    "primetime": "Prime time",
+    "watchChannel": "Watch channel",
+    "noDescription": "No description available for this program."
   },
   "notFound": {
     "title": "404",
