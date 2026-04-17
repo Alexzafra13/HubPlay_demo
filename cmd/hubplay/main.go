@@ -203,10 +203,10 @@ func run(configPath string) error {
 	}()
 
 	// ═══ Phase 7: Wait for shutdown ═══
-	return waitForShutdown(ctx, cancel, server, streamManager, iptvService, iptvProxy, scanScheduler, authService, database, logger)
+	return waitForShutdown(ctx, cancel, server, streamManager, iptvService, iptvProxy, scanScheduler, libraryService, authService, database, logger)
 }
 
-func waitForShutdown(ctx context.Context, cancel context.CancelFunc, server *http.Server, sm *stream.Manager, iptvSvc *iptv.Service, iptvProxy *iptv.StreamProxy, scheduler *library.Scheduler, authSvc *auth.Service, database interface{ Close() error }, logger *slog.Logger) error {
+func waitForShutdown(ctx context.Context, cancel context.CancelFunc, server *http.Server, sm *stream.Manager, iptvSvc *iptv.Service, iptvProxy *iptv.StreamProxy, scheduler *library.Scheduler, librarySvc *library.Service, authSvc *auth.Service, database interface{ Close() error }, logger *slog.Logger) error {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
@@ -242,6 +242,11 @@ func waitForShutdown(ctx context.Context, cancel context.CancelFunc, server *htt
 	iptvProxy.Shutdown()
 	iptvSvc.Shutdown()
 	logger.Info("IPTV services stopped")
+
+	// Drain in-flight auto-scan goroutines BEFORE closing the DB so they
+	// don't race on "sql: database is closed".
+	librarySvc.Shutdown()
+	logger.Info("library service stopped")
 
 	// Cancel root context
 	cancel()

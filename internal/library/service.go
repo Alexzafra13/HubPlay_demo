@@ -25,6 +25,15 @@ type Service struct {
 	// Track active scans to prevent concurrent scans of the same library
 	mu       sync.Mutex
 	scanning map[string]bool
+
+	// Background-goroutine lifecycle. bgCtx is cancelled by Shutdown, bgWG
+	// waits for every auto-scan / manual scan goroutine to unwind. Without
+	// this, a goroutine started by Create would keep hitting the (already
+	// closed) DB after the service owner tore down — the exact race the
+	// CI Test Backend was flaking on.
+	bgCtx    context.Context
+	bgCancel context.CancelFunc
+	bgWG     sync.WaitGroup
 }
 
 func NewService(
@@ -35,6 +44,7 @@ func NewService(
 	scnr *scanner.Scanner,
 	logger *slog.Logger,
 ) *Service {
+	bgCtx, bgCancel := context.WithCancel(context.Background())
 	return &Service{
 		libraries: libraries,
 		items:     items,
@@ -43,7 +53,18 @@ func NewService(
 		scanner:   scnr,
 		logger:    logger.With("module", "library"),
 		scanning:  make(map[string]bool),
+		bgCtx:     bgCtx,
+		bgCancel:  bgCancel,
 	}
+}
+
+// Shutdown cancels any in-flight background scans and blocks until every
+// goroutine started by this service has returned. Safe to call multiple
+// times. Call from the owning main.go before closing the DB handle, and
+// from tests via t.Cleanup to stop goroutines leaking across tests.
+func (s *Service) Shutdown() {
+	s.bgCancel()
+	s.bgWG.Wait()
 }
 
 type CreateRequest struct {
@@ -80,10 +101,14 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*db.Library, e
 
 	s.logger.Info("library created", "id", lib.ID, "name", lib.Name, "type", lib.ContentType)
 
-	// Auto-scan the new library (like Jellyfin does on library creation)
+	// Auto-scan the new library (like Jellyfin does on library creation).
+	// Inherits bgCtx so Shutdown can cancel in-flight scans; the WaitGroup
+	// lets Shutdown wait for the goroutine before returning.
 	if lib.ScanMode != "manual" {
+		s.bgWG.Add(1)
 		go func() {
-			scanCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+			defer s.bgWG.Done()
+			scanCtx, cancel := context.WithTimeout(s.bgCtx, 30*time.Minute)
 			defer cancel()
 			if _, err := s.scanner.ScanLibrary(scanCtx, lib); err != nil {
 				s.logger.Error("auto-scan after creation failed", "library_id", lib.ID, "error", err)
@@ -174,14 +199,16 @@ func (s *Service) Scan(ctx context.Context, id string, refreshMetadata ...bool) 
 
 	refresh := len(refreshMetadata) > 0 && refreshMetadata[0]
 
+	s.bgWG.Add(1)
 	go func() {
+		defer s.bgWG.Done()
 		defer func() {
 			s.mu.Lock()
 			delete(s.scanning, id)
 			s.mu.Unlock()
 		}()
 
-		scanCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		scanCtx, cancel := context.WithTimeout(s.bgCtx, 30*time.Minute)
 		defer cancel()
 		if _, err := s.scanner.ScanLibrary(scanCtx, lib); err != nil {
 			s.logger.Error("scan failed", "library_id", id, "error", err)
