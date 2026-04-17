@@ -1,13 +1,9 @@
 package handlers
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"image"
-	_ "image/jpeg" // register JPEG decoder
-	_ "image/png"  // register PNG decoder
 	"io"
 	"log/slog"
 	"net/http"
@@ -20,7 +16,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	"hubplay/internal/blurhash"
 	"hubplay/internal/db"
 	"hubplay/internal/imaging"
 	"hubplay/internal/provider"
@@ -145,7 +140,7 @@ func (h *ImageHandler) Select(w http.ResponseWriter, r *http.Request) {
 	itemID := chi.URLParam(r, "id")
 	imgType := chi.URLParam(r, "type")
 
-	if !isValidImageType(imgType) {
+	if !imaging.IsValidKind(imgType) {
 		respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "invalid image type")
 		return
 	}
@@ -174,7 +169,7 @@ func (h *ImageHandler) Select(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Save locally
-	ext := extensionForContentType(contentType)
+	ext := imaging.ExtensionForContentType(contentType)
 	hash := sha256.Sum256(imgData)
 	filename := fmt.Sprintf("%s_%s%s", imgType, hex.EncodeToString(hash[:8]), ext)
 	localPath, err := h.saveImageFile(itemID, filename, imgData)
@@ -185,7 +180,7 @@ func (h *ImageHandler) Select(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Generate blurhash from the saved image data.
-	bhash := h.computeBlurhash(imgData)
+	bhash := imaging.ComputeBlurhash(imgData, h.logger)
 
 	// Create DB record
 	imgID := uuid.NewString()
@@ -226,13 +221,12 @@ func (h *ImageHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	itemID := chi.URLParam(r, "id")
 	imgType := chi.URLParam(r, "type")
 
-	if !isValidImageType(imgType) {
+	if !imaging.IsValidKind(imgType) {
 		respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "invalid image type")
 		return
 	}
 
-	// 10 MB max
-	if err := r.ParseMultipartForm(10 << 20); err != nil {
+	if err := r.ParseMultipartForm(imaging.MaxUploadBytes); err != nil {
 		respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "file too large (max 10MB)")
 		return
 	}
@@ -246,7 +240,7 @@ func (h *ImageHandler) Upload(w http.ResponseWriter, r *http.Request) {
 
 	// Validate content type
 	contentType := header.Header.Get("Content-Type")
-	if !isValidImageContentType(contentType) {
+	if !imaging.IsValidContentType(contentType) {
 		respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "invalid file type (must be JPEG, PNG, or WebP)")
 		return
 	}
@@ -258,7 +252,7 @@ func (h *ImageHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Save locally
-	ext := extensionForContentType(contentType)
+	ext := imaging.ExtensionForContentType(contentType)
 	hash := sha256.Sum256(imgData)
 	filename := fmt.Sprintf("%s_%s%s", imgType, hex.EncodeToString(hash[:8]), ext)
 	localPath, err := h.saveImageFile(itemID, filename, imgData)
@@ -269,7 +263,7 @@ func (h *ImageHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Generate blurhash from the uploaded image data.
-	bhash := h.computeBlurhash(imgData)
+	bhash := imaging.ComputeBlurhash(imgData, h.logger)
 
 	imgID := uuid.NewString()
 	img := &db.Image{
@@ -417,7 +411,7 @@ func (h *ImageHandler) RefreshLibraryImages(w http.ResponseWriter, r *http.Reque
 		// Add missing image types (pick the highest-scored result per type).
 		bestByType := make(map[string]provider.ImageResult)
 		for _, img := range results {
-			if !isValidImageType(img.Type) {
+			if !imaging.IsValidKind(img.Type) {
 				continue
 			}
 			if existingTypes[img.Type] {
@@ -436,7 +430,7 @@ func (h *ImageHandler) RefreshLibraryImages(w http.ResponseWriter, r *http.Reque
 				continue
 			}
 
-			ext := extensionForContentType(contentType)
+			ext := imaging.ExtensionForContentType(contentType)
 			hash := sha256.Sum256(imgData)
 			filename := fmt.Sprintf("%s_%s%s", imgType, hex.EncodeToString(hash[:8]), ext)
 			localPath, err := h.saveImageFile(item.ID, filename, imgData)
@@ -444,7 +438,7 @@ func (h *ImageHandler) RefreshLibraryImages(w http.ResponseWriter, r *http.Reque
 				continue
 			}
 
-			bhash := h.computeBlurhash(imgData)
+			bhash := imaging.ComputeBlurhash(imgData, h.logger)
 
 			imgID := uuid.NewString()
 			dbImg := &db.Image{
@@ -586,42 +580,3 @@ func (h *ImageHandler) removePathMapping(imageID string) {
 	os.Remove(filepath.Join(h.imageDir, ".mappings", imageID)) //nolint:errcheck
 }
 
-func isValidImageType(t string) bool {
-	switch t {
-	case "primary", "backdrop", "logo", "thumb", "banner":
-		return true
-	}
-	return false
-}
-
-func isValidImageContentType(ct string) bool {
-	switch {
-	case strings.HasPrefix(ct, "image/jpeg"),
-		strings.HasPrefix(ct, "image/png"),
-		strings.HasPrefix(ct, "image/webp"):
-		return true
-	}
-	return false
-}
-
-// computeBlurhash decodes the raw image bytes and produces a blurhash string.
-// Returns an empty string if the image cannot be decoded (e.g. WebP).
-func (h *ImageHandler) computeBlurhash(data []byte) string {
-	img, _, err := image.Decode(bytes.NewReader(data))
-	if err != nil {
-		h.logger.Warn("failed to decode image for blurhash", "error", err)
-		return ""
-	}
-	return blurhash.Encode(4, 3, img)
-}
-
-func extensionForContentType(ct string) string {
-	switch {
-	case strings.Contains(ct, "png"):
-		return ".png"
-	case strings.Contains(ct, "webp"):
-		return ".webp"
-	default:
-		return ".jpg"
-	}
-}

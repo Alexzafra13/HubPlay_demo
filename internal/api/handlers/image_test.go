@@ -632,58 +632,9 @@ func TestImageHandler_RefreshLibraryImages_AddsMissingTypes(t *testing.T) {
 	}
 }
 
-// ─── Pure helper tests (anchor current behavior before moving them) ────────
-
-func TestIsValidImageType(t *testing.T) {
-	cases := map[string]bool{
-		"primary":  true,
-		"backdrop": true,
-		"logo":     true,
-		"thumb":    true,
-		"banner":   true,
-		"":         false,
-		"bogus":    false,
-		"PRIMARY":  false,
-	}
-	for in, want := range cases {
-		if got := isValidImageType(in); got != want {
-			t.Errorf("isValidImageType(%q) = %v want %v", in, got, want)
-		}
-	}
-}
-
-func TestIsValidImageContentType(t *testing.T) {
-	cases := map[string]bool{
-		"image/jpeg":              true,
-		"image/jpeg; charset=x":   true,
-		"image/png":               true,
-		"image/webp":              true,
-		"image/gif":               false,
-		"text/html":               false,
-		"application/octet-stream": false,
-		"":                        false,
-	}
-	for in, want := range cases {
-		if got := isValidImageContentType(in); got != want {
-			t.Errorf("isValidImageContentType(%q) = %v want %v", in, got, want)
-		}
-	}
-}
-
-func TestExtensionForContentType(t *testing.T) {
-	cases := map[string]string{
-		"image/jpeg": ".jpg",
-		"image/png":  ".png",
-		"image/webp": ".webp",
-		"image/gif":  ".jpg", // current default-case fallthrough
-		"":           ".jpg",
-	}
-	for in, want := range cases {
-		if got := extensionForContentType(in); got != want {
-			t.Errorf("extensionForContentType(%q) = %q want %q", in, got, want)
-		}
-	}
-}
+// Pure helpers moved to internal/imaging — see imaging/validators_test.go and
+// imaging/blurhash_test.go for the unit-level coverage. The characterization
+// tests above still exercise them end-to-end via Upload / Select.
 
 // ─── Small utility used across tests ────────────────────────────────────────
 
