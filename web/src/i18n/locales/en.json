@@ -118,7 +118,20 @@
     "shiftForward": "Jump forward two hours",
     "primetime": "Prime time",
     "watchChannel": "Watch channel",
-    "noDescription": "No description available for this program."
+    "noDescription": "No description available for this program.",
+    "addFavorite": "Add to favourites",
+    "removeFavorite": "Remove from favourites",
+    "favorites": "Favourites",
+    "continueWatching": "Continue watching",
+    "schedule": "Schedule",
+    "programsCount": "programs",
+    "openGuide": "Full guide",
+    "backToChannels": "Back to channels",
+    "tabPlayer": "Player",
+    "searchResults": "Search results",
+    "featured": "Featured channels",
+    "goToSlide": "Go to slide",
+    "guideTitle": "Programme guide"
   },
   "notFound": {
     "title": "404",

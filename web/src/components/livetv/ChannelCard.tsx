@@ -13,6 +13,57 @@ interface ChannelCardProps {
   /** Layout variant. `tile` = portrait-ish card (default for grids).
    *  `row` = horizontal list item (for search results, compact lists). */
   variant?: "tile" | "row";
+  /** Whether this channel is marked as favourite. Optional — omit to hide
+   *  the heart button entirely (e.g. inside the channel-strip rail). */
+  isFavorite?: boolean;
+  /** Called when the user toggles the favourite state. The card stops event
+   *  propagation so the parent's onClick doesn't fire. */
+  onToggleFavorite?: () => void;
+}
+
+function FavoriteButton({
+  isFavorite,
+  onToggle,
+  label,
+  className = "",
+}: {
+  isFavorite: boolean;
+  onToggle: () => void;
+  label: string;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onToggle();
+      }}
+      aria-label={label}
+      aria-pressed={isFavorite}
+      className={[
+        "inline-flex items-center justify-center rounded-full p-1.5 transition-all",
+        isFavorite
+          ? "bg-rose-500/90 text-white shadow-md shadow-rose-500/30 hover:bg-rose-500"
+          : "bg-black/40 text-white/80 backdrop-blur-sm hover:bg-black/60 hover:text-white",
+        className,
+      ].join(" ")}
+    >
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 24 24"
+        fill={isFavorite ? "currentColor" : "none"}
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+      </svg>
+    </button>
+  );
 }
 
 export function ChannelCard({
@@ -22,6 +73,8 @@ export function ChannelCard({
   upNext = null,
   onClick,
   variant = "tile",
+  isFavorite,
+  onToggleFavorite,
 }: ChannelCardProps) {
   const { t } = useTranslation();
   const parsed = parseCategory(channel.group);
@@ -30,6 +83,12 @@ export function ChannelCard({
   const ariaLabel = nowPlaying
     ? `${channel.name} — ${t("liveTV.nowPlaying")}: ${nowPlaying.title}`
     : channel.name;
+
+  const showFavorite =
+    typeof isFavorite === "boolean" && typeof onToggleFavorite === "function";
+  const favoriteLabel = isFavorite
+    ? t("liveTV.removeFavorite")
+    : t("liveTV.addFavorite");
 
   if (variant === "row") {
     return (
@@ -82,6 +141,15 @@ export function ChannelCard({
             </p>
           )}
         </div>
+
+        {showFavorite && (
+          <FavoriteButton
+            isFavorite={!!isFavorite}
+            onToggle={onToggleFavorite!}
+            label={favoriteLabel}
+            className="shrink-0"
+          />
+        )}
 
         {nowPlaying && (
           <div
@@ -155,6 +223,18 @@ export function ChannelCard({
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
             {t("liveTV.live")}
           </span>
+        )}
+
+        {/* Favourite toggle (bottom-left to stay clear of LIVE / watching
+            badges on the right). */}
+        {showFavorite && (
+          <div className="absolute bottom-2 left-2">
+            <FavoriteButton
+              isFavorite={!!isFavorite}
+              onToggle={onToggleFavorite!}
+              label={favoriteLabel}
+            />
+          </div>
         )}
 
         {/* now-active indicator */}

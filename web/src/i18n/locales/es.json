@@ -118,7 +118,20 @@
     "shiftForward": "Avanzar dos horas",
     "primetime": "Prime time",
     "watchChannel": "Ver canal",
-    "noDescription": "No hay descripcion disponible para este programa."
+    "noDescription": "No hay descripcion disponible para este programa.",
+    "addFavorite": "Anadir a favoritos",
+    "removeFavorite": "Quitar de favoritos",
+    "favorites": "Favoritos",
+    "continueWatching": "Seguir viendo",
+    "schedule": "Programacion",
+    "programsCount": "programas",
+    "openGuide": "Guia completa",
+    "backToChannels": "Volver a canales",
+    "tabPlayer": "Reproductor",
+    "searchResults": "Resultados de busqueda",
+    "featured": "Canales destacados",
+    "goToSlide": "Ir a la diapositiva",
+    "guideTitle": "Guia de programacion"
   },
   "notFound": {
     "title": "404",
