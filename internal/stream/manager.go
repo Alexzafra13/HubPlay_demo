@@ -10,6 +10,7 @@ import (
 	"hubplay/internal/config"
 	"hubplay/internal/db"
 	"hubplay/internal/domain"
+	"hubplay/internal/event"
 )
 
 // MetricsSink is the minimal observability surface the Manager uses. Keeping
@@ -43,6 +44,7 @@ type Manager struct {
 	logger     *slog.Logger
 	stopClean  chan struct{}
 	metrics    MetricsSink
+	bus        *event.Bus // optional; nil-safe
 }
 
 // ManagedSession wraps a transcoding session with access tracking.
@@ -91,6 +93,26 @@ func (m *Manager) SetMetrics(sink MetricsSink) {
 	defer m.mu.Unlock()
 	m.metrics = sink
 	m.metrics.SetActiveSessions(len(m.sessions))
+}
+
+// SetEventBus wires an event bus so the manager can publish lifecycle events
+// (TranscodeStarted / TranscodeCompleted). Passing nil disables publishing.
+// Follows the SetMetrics pattern so the constructor signature stays stable.
+func (m *Manager) SetEventBus(bus *event.Bus) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.bus = bus
+}
+
+// publish sends an event if a bus is wired. Reads m.bus under the mutex to
+// stay race-free with SetEventBus.
+func (m *Manager) publish(e event.Event) {
+	m.mu.Lock()
+	bus := m.bus
+	m.mu.Unlock()
+	if bus != nil {
+		bus.Publish(e)
+	}
 }
 
 // sessionKey builds a unique key for a user+item+profile combination.
@@ -172,6 +194,17 @@ func (m *Manager) StartSession(ctx context.Context, userID, itemID, profileName 
 	m.metrics.TranscodeStarted()
 	m.metrics.SetActiveSessions(active)
 
+	m.publish(event.Event{
+		Type: event.TranscodeStarted,
+		Data: map[string]any{
+			"session_id": key,
+			"user_id":    userID,
+			"item_id":    itemID,
+			"profile":    decision.Profile.Name,
+			"method":     string(decision.Method),
+		},
+	})
+
 	m.logger.Info("session started",
 		"key", key,
 		"method", decision.Method,
@@ -203,6 +236,14 @@ func (m *Manager) StopSession(key string) {
 	if ok {
 		ms.Stop()
 		m.metrics.SetActiveSessions(active)
+		m.publish(event.Event{
+			Type: event.TranscodeCompleted,
+			Data: map[string]any{
+				"session_id": key,
+				"user_id":    ms.UserID,
+				"item_id":    ms.ItemID,
+			},
+		})
 		m.logger.Info("session stopped", "key", key)
 	}
 }

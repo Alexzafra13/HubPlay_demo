@@ -16,6 +16,7 @@ import (
 	"hubplay/internal/config"
 	"hubplay/internal/db"
 	"hubplay/internal/domain"
+	"hubplay/internal/event"
 )
 
 type AuthToken struct {
@@ -42,6 +43,17 @@ type Service struct {
 	logger      *slog.Logger
 	stopCh      chan struct{}
 	rateLimiter *loginRateLimiter
+	bus         *event.Bus // optional; nil-safe
+}
+
+// SetEventBus wires an event bus so the service can publish UserLoggedIn /
+// UserLoggedOut events. Nil disables publishing. Follows the streams pattern.
+func (s *Service) SetEventBus(bus *event.Bus) { s.bus = bus }
+
+func (s *Service) publish(e event.Event) {
+	if s.bus != nil {
+		s.bus.Publish(e)
+	}
 }
 
 // KeyStoreOrNil returns the service's signing keystore. Exposed for the
@@ -192,6 +204,15 @@ func (s *Service) Login(ctx context.Context, username, password, deviceName, dev
 	}
 
 	s.logger.Info("user logged in", "user_id", user.ID, "username", user.Username, "device", deviceName)
+	s.publish(event.Event{
+		Type: event.UserLoggedIn,
+		Data: map[string]any{
+			"user_id":     user.ID,
+			"username":    user.Username,
+			"device_name": deviceName,
+			"ip":          ip,
+		},
+	})
 	return token, nil
 }
 
@@ -270,7 +291,23 @@ func (s *Service) InvalidateUserSessions(ctx context.Context, userID string) err
 
 func (s *Service) Logout(ctx context.Context, refreshToken string) error {
 	tokenHash := hashToken(refreshToken)
-	return s.sessions.DeleteByRefreshTokenHash(ctx, tokenHash)
+	// Look up the session first so we can publish a UserLoggedOut event with
+	// the user_id. A miss is not a hard error — the delete below will also
+	// no-op if the session is already gone.
+	session, lookupErr := s.sessions.GetByRefreshTokenHash(ctx, tokenHash)
+	if err := s.sessions.DeleteByRefreshTokenHash(ctx, tokenHash); err != nil {
+		return err
+	}
+	if lookupErr == nil && session != nil {
+		s.publish(event.Event{
+			Type: event.UserLoggedOut,
+			Data: map[string]any{
+				"user_id":    session.UserID,
+				"session_id": session.ID,
+			},
+		})
+	}
+	return nil
 }
 
 func (s *Service) createSession(ctx context.Context, user *db.User, deviceName, deviceID, ip string) (*AuthToken, error) {

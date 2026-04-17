@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"hubplay/internal/config"
+	"hubplay/internal/event"
 )
 
 func TestSessionKey(t *testing.T) {
@@ -314,4 +315,52 @@ func closedChan() chan struct{} {
 	ch := make(chan struct{})
 	close(ch)
 	return ch
+}
+
+// ─── Event publisher ─────────────────────────────────────────────────────────
+
+func TestManager_StopSession_PublishesTranscodeCompleted(t *testing.T) {
+	m := newTestManager(t)
+	defer m.Shutdown()
+
+	bus := eventNewBus()
+	m.SetEventBus(bus)
+
+	done := make(chan event.Event, 1)
+	bus.Subscribe(event.TranscodeCompleted, func(e event.Event) { done <- e })
+
+	key := "u:it:720p"
+	m.mu.Lock()
+	m.sessions[key] = &ManagedSession{
+		Session:      &Session{ID: key, OutputDir: t.TempDir(), done: closedChan()},
+		UserID:       "u",
+		LastAccessed: time.Now(),
+	}
+	m.sessions[key].ItemID = "it"
+	m.mu.Unlock()
+
+	m.StopSession(key)
+
+	select {
+	case e := <-done:
+		if e.Data["session_id"] != key || e.Data["user_id"] != "u" || e.Data["item_id"] != "it" {
+			t.Errorf("event payload: %+v", e.Data)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("TranscodeCompleted not published within 1s")
+	}
+}
+
+func TestManager_PublishIsNilSafeWithoutBus(t *testing.T) {
+	m := newTestManager(t)
+	defer m.Shutdown()
+
+	// Without SetEventBus the default bus is nil — publish must not panic.
+	m.publish(event.Event{Type: event.TranscodeStarted})
+}
+
+// Local helper so the test file's import of internal/event stays scoped to
+// this one spot.
+func eventNewBus() *event.Bus {
+	return event.NewBus(testLogger())
 }

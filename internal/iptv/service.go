@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"hubplay/internal/db"
+	"hubplay/internal/event"
 )
 
 // Service manages IPTV libraries: M3U import, EPG sync, channel operations.
@@ -27,6 +28,18 @@ type Service struct {
 
 	httpClient *http.Client
 	stopCh     chan struct{}
+
+	bus *event.Bus // optional; nil-safe
+}
+
+// SetEventBus wires an event bus so the service publishes PlaylistRefreshed
+// / EPGUpdated events at the end of the respective refresh. Nil-safe.
+func (s *Service) SetEventBus(bus *event.Bus) { s.bus = bus }
+
+func (s *Service) publish(e event.Event) {
+	if s.bus != nil {
+		s.bus.Publish(e)
+	}
 }
 
 // NewService creates a new IPTV service.
@@ -110,6 +123,13 @@ func (s *Service) RefreshM3U(ctx context.Context, libraryID string) (int, error)
 	}
 
 	s.logger.Info("M3U refresh complete", "library", libraryID, "channels", len(dbChannels))
+	s.publish(event.Event{
+		Type: event.PlaylistRefreshed,
+		Data: map[string]any{
+			"library_id":     libraryID,
+			"channels_count": len(dbChannels),
+		},
+	})
 	return len(dbChannels), nil
 }
 
@@ -184,6 +204,14 @@ func (s *Service) RefreshEPG(ctx context.Context, libraryID string) (int, error)
 	}
 
 	s.logger.Info("EPG refresh complete", "library", libraryID, "programs", totalPrograms, "channels_matched", len(programsByChannel))
+	s.publish(event.Event{
+		Type: event.EPGUpdated,
+		Data: map[string]any{
+			"library_id":       libraryID,
+			"programs_count":   totalPrograms,
+			"channels_matched": len(programsByChannel),
+		},
+	})
 	return totalPrograms, nil
 }
 

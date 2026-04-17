@@ -114,6 +114,7 @@ func run(configPath string) error {
 	}
 
 	authService := auth.NewService(repos.Users, repos.Sessions, keyStore, cfg.Auth, clk, logger, cfg.RateLimit)
+	authService.SetEventBus(eventBus)
 	authService.StartSessionCleaner(ctx)
 	userService := user.NewService(repos.Users, logger)
 
@@ -135,6 +136,7 @@ func run(configPath string) error {
 	// ═══ Phase 4b: Streaming ═══
 	streamManager := stream.NewManager(repos.Items, repos.MediaStreams, cfg.Streaming, logger)
 	streamManager.SetMetrics(observability.NewStreamSink(metrics))
+	streamManager.SetEventBus(eventBus)
 
 	// Detect hardware acceleration if enabled
 	if cfg.Streaming.HWAccel.Enabled {
@@ -148,6 +150,7 @@ func run(configPath string) error {
 
 	// ═══ Phase 4c: IPTV ═══
 	iptvService := iptv.NewService(repos.Channels, repos.EPGPrograms, repos.Libraries, logger)
+	iptvService.SetEventBus(eventBus)
 	iptvProxy := iptv.NewStreamProxy(logger)
 
 	// ═══ Phase 4e: Setup Service ═══
