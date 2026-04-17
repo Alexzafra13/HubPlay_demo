@@ -86,14 +86,6 @@ func (r *ItemRepository) Create(ctx context.Context, item *Item) error {
 	return nil
 }
 
-// nullStr returns nil (SQL NULL) for empty strings, keeping the value otherwise.
-func nullStr(s string) any {
-	if s == "" {
-		return nil
-	}
-	return s
-}
-
 func (r *ItemRepository) GetByID(ctx context.Context, id string) (*Item, error) {
 	row, err := r.q.GetItemByID(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
