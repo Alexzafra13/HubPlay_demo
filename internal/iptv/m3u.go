@@ -47,12 +47,33 @@ type M3UChannel struct {
 // attrPattern matches key="value" pairs in EXTINF lines.
 var attrPattern = regexp.MustCompile(`([a-zA-Z_-]+)="([^"]*)"`)
 
+// utf8BOM is the byte sequence that UTF-8-encoded files often carry at the
+// very start. Stripping it lets the header detector find "#EXTM3U".
+var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
+
 // ParseM3U parses an M3U/M3U8 playlist from a reader and returns the channels.
+//
+// Deduplicates by TvgID: if a playlist lists the same TvgID twice, only the
+// first occurrence is kept. Entries without a TvgID are never deduplicated
+// (there is nothing to key on — fall back to accepting them all, which is
+// the pre-fix behaviour). IPTV-org playlists are notorious for repeating the
+// same channel under different group categories.
+//
+// Strips a leading UTF-8 BOM so the #EXTM3U header check still matches on
+// files saved by Windows tools.
 func ParseM3U(r io.Reader) ([]M3UChannel, error) {
-	scanner := bufio.NewScanner(r)
+	br := bufio.NewReader(r)
+	// Peek at the first 3 bytes; discard a BOM if present.
+	if prefix, err := br.Peek(3); err == nil && len(prefix) == 3 &&
+		prefix[0] == utf8BOM[0] && prefix[1] == utf8BOM[1] && prefix[2] == utf8BOM[2] {
+		_, _ = br.Discard(3)
+	}
+
+	scanner := bufio.NewScanner(br)
 	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024) // 10MB max line
 
 	var channels []M3UChannel
+	seen := make(map[string]bool) // TvgIDs already kept
 	var current *M3UChannel
 	lineNum := 0
 	headerSeen := false
@@ -90,6 +111,13 @@ func ParseM3U(r io.Reader) ([]M3UChannel, error) {
 		if current != nil {
 			current.StreamURL = line
 			if isValidStreamURL(line) {
+				if current.TvgID != "" {
+					if seen[current.TvgID] {
+						current = nil
+						continue
+					}
+					seen[current.TvgID] = true
+				}
 				channels = append(channels, *current)
 			}
 			current = nil

@@ -3,9 +3,11 @@ package iptv
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -14,56 +16,138 @@ import (
 	"time"
 )
 
-// StreamProxy proxies IPTV streams to clients with shared relay support.
+// StreamProxy proxies IPTV streams to clients and counts concurrent listeners
+// per channel (for observability).
 type StreamProxy struct {
-	mu      sync.Mutex
-	relays  map[string]*relay // keyed by channel ID
-	logger  *slog.Logger
-	client  *http.Client
+	mu     sync.Mutex
+	relays map[string]*relay // keyed by channel ID
+	logger *slog.Logger
+	client *http.Client
 }
 
-// relay manages a shared upstream connection for a channel.
+// relay tracks how many concurrent clients are watching a channel. Kept as a
+// listener counter for ActiveRelays/observability; the upstream is NOT shared
+// — each client opens its own connection (trivial to reason about, matches
+// the behaviour of every HLS CDN we talk to).
 type relay struct {
 	channelID string
 	streamURL string
 	listeners int
-	cancel    context.CancelFunc
 }
 
-// NewStreamProxy creates a new stream proxy.
+// proxyTimeouts bounds upstream interactions so a dead CDN can't pin a
+// goroutine + socket indefinitely. Only the handshake/header phase uses a
+// wall-clock timeout; the body is read as long as the client stays connected
+// (streaming = long-lived by design, but stalls are caught by TCP keepalive
+// + the per-response ResponseHeaderTimeout).
+var proxyTimeouts = struct {
+	dial           time.Duration
+	tlsHandshake   time.Duration
+	responseHeader time.Duration
+	idleConn       time.Duration
+}{
+	dial:           10 * time.Second,
+	tlsHandshake:   10 * time.Second,
+	responseHeader: 20 * time.Second,
+	idleConn:       90 * time.Second,
+}
+
+// NewStreamProxy creates a new stream proxy with sane network timeouts.
 func NewStreamProxy(logger *slog.Logger) *StreamProxy {
+	transport := &http.Transport{
+		DialContext: (&net.Dialer{
+			Timeout:   proxyTimeouts.dial,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		TLSHandshakeTimeout:   proxyTimeouts.tlsHandshake,
+		ResponseHeaderTimeout: proxyTimeouts.responseHeader,
+		IdleConnTimeout:       proxyTimeouts.idleConn,
+		MaxIdleConnsPerHost:   4,
+		ForceAttemptHTTP2:     true,
+	}
 	return &StreamProxy{
 		relays: make(map[string]*relay),
 		logger: logger.With("module", "stream-proxy"),
 		client: &http.Client{
-			Timeout: 0, // No timeout for streaming
+			Transport: transport,
+			// No client-level timeout — it also clocks the body read, which
+			// would kill every stream after N seconds. Timeouts are at the
+			// transport level above.
 		},
 	}
 }
 
+// ErrUnsafeUpstream is returned when a proxy fetch target resolves to a
+// blocked address (loopback, link-local, RFC1918 private, multicast,
+// unspecified). Protects against SSRF from user-supplied proxy URLs and from
+// upstream CDNs that redirect to an internal address.
+var ErrUnsafeUpstream = errors.New("iptv: unsafe upstream address")
+
+// isSafeUpstream reports whether the given URL resolves entirely to
+// internet-routable addresses. Called before every upstream fetch. Follows
+// the same ruleset as imaging.BlockedIP (the image SafeGet helper).
+func isSafeUpstream(rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("%w: parse: %v", ErrUnsafeUpstream, err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("%w: scheme %q", ErrUnsafeUpstream, u.Scheme)
+	}
+	host := u.Hostname()
+	if host == "" {
+		return fmt.Errorf("%w: missing host", ErrUnsafeUpstream)
+	}
+	// If the host is a literal IP we can check it directly without a DNS
+	// lookup; literal IPv6 in URL is bracketed and Hostname() strips it.
+	if ip := net.ParseIP(host); ip != nil {
+		if blockedIP(ip) {
+			return fmt.Errorf("%w: %s", ErrUnsafeUpstream, ip)
+		}
+		return nil
+	}
+	// Hostname — resolve and check every returned address.
+	addrs, err := net.LookupIP(host)
+	if err != nil {
+		return fmt.Errorf("resolve %s: %w", host, err)
+	}
+	for _, ip := range addrs {
+		if blockedIP(ip) {
+			return fmt.Errorf("%w: %s → %s", ErrUnsafeUpstream, host, ip)
+		}
+	}
+	return nil
+}
+
+// blockedIP is overridable at test time so httptest.NewServer (on 127.0.0.1)
+// stays usable. Production path returns true for any address that must not
+// be reached from outbound fetches. Mirrors the logic in imaging.DefaultBlockedIP.
+var blockedIP = func(ip net.IP) bool {
+	return ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
+		ip.IsUnspecified() || ip.IsMulticast() || ip.IsInterfaceLocalMulticast() ||
+		ip.IsPrivate()
+}
+
 // ProxyStream streams an IPTV channel to the HTTP response writer.
+//
+// Each client opens its own upstream connection; the per-channel counter is
+// only used by ActiveRelays for observability. Previous versions kept a
+// shared context.CancelFunc on the relay but it was never plumbed into the
+// upstream fetch, so disconnects by the first listener would (harmlessly)
+// cancel a context nobody used. That dead code is gone.
 func (p *StreamProxy) ProxyStream(ctx context.Context, w http.ResponseWriter, channelID, streamURL string) error {
 	p.mu.Lock()
 	if r, ok := p.relays[channelID]; ok {
 		r.listeners++
-		p.mu.Unlock()
-		defer p.removeListener(channelID)
 	} else {
-		relayCtx, cancel := context.WithCancel(ctx)
 		p.relays[channelID] = &relay{
 			channelID: channelID,
 			streamURL: streamURL,
 			listeners: 1,
-			cancel:    cancel,
 		}
-		p.mu.Unlock()
-
-		defer func() {
-			cancel()
-			p.removeListener(channelID)
-		}()
-		_ = relayCtx // Used by cancel above
 	}
+	p.mu.Unlock()
+	defer p.removeListener(channelID)
 
 	p.logger.Info("proxying stream", "channel", channelID, "url", streamURL)
 
@@ -104,7 +188,15 @@ func (p *StreamProxy) streamWithReconnect(ctx context.Context, w http.ResponseWr
 
 // fetchUpstream performs an HTTP GET with proper headers for IPTV streams.
 // Returns the response and the final URL after any redirects.
+//
+// Security: every hop is validated against isSafeUpstream — the initial URL
+// AND every redirect target. Without the redirect check a malicious upstream
+// could 302 us to http://169.254.169.254/ (cloud metadata) or
+// http://127.0.0.1/admin (a local service) and bypass the initial guard.
 func (p *StreamProxy) fetchUpstream(ctx context.Context, targetURL string) (*http.Response, string, error) {
+	if err := isSafeUpstream(targetURL); err != nil {
+		return nil, "", err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
 	if err != nil {
 		return nil, "", fmt.Errorf("create request: %w", err)
@@ -121,7 +213,18 @@ func (p *StreamProxy) fetchUpstream(ctx context.Context, targetURL string) (*htt
 		req.Header.Set("Origin", parsed.Scheme+"://"+parsed.Host)
 	}
 
-	resp, err := p.client.Do(req)
+	// Route redirects through a validator so we don't follow a CDN into a
+	// private-range target. Uses the request-scoped client because the
+	// shared p.client has no redirect policy installed.
+	redirectingClient := *p.client
+	redirectingClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return errors.New("too many redirects")
+		}
+		return isSafeUpstream(req.URL.String())
+	}
+
+	resp, err := redirectingClient.Do(req)
 	if err != nil {
 		return nil, "", fmt.Errorf("connect: %w", err)
 	}
@@ -467,7 +570,6 @@ func (p *StreamProxy) removeListener(channelID string) {
 
 	r.listeners--
 	if r.listeners <= 0 {
-		r.cancel()
 		delete(p.relays, channelID)
 		p.logger.Info("relay closed (no listeners)", "channel", channelID)
 	}
@@ -480,11 +582,11 @@ func (p *StreamProxy) ActiveRelays() int {
 	return len(p.relays)
 }
 
-// Shutdown stops all active relays.
+// Shutdown drops the per-channel listener counters. Client request contexts
+// do the actual cancellation of in-flight streams — this is just map hygiene.
 func (p *StreamProxy) Shutdown() {
 	p.mu.Lock()
-	for id, r := range p.relays {
-		r.cancel()
+	for id := range p.relays {
 		delete(p.relays, id)
 	}
 	p.mu.Unlock()

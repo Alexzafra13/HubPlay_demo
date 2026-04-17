@@ -134,7 +134,24 @@ func (s *Service) RefreshM3U(ctx context.Context, libraryID string) (int, error)
 }
 
 // RefreshEPG downloads and parses an XMLTV EPG, updating program data.
+//
+// Uses the same per-library lock as RefreshM3U to stop two concurrent EPG
+// refreshes from racing inside ReplaceForChannel (last-writer-wins on every
+// channel, non-deterministically).
 func (s *Service) RefreshEPG(ctx context.Context, libraryID string) (int, error) {
+	s.mu.Lock()
+	if s.refreshes[libraryID] {
+		s.mu.Unlock()
+		return 0, fmt.Errorf("refresh already in progress for library %s", libraryID)
+	}
+	s.refreshes[libraryID] = true
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		delete(s.refreshes, libraryID)
+		s.mu.Unlock()
+	}()
+
 	lib, err := s.libraries.GetByID(ctx, libraryID)
 	if err != nil {
 		return 0, fmt.Errorf("get library: %w", err)
