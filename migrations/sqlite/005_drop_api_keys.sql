@@ -1,0 +1,14 @@
+-- +goose Up
+-- Drop the unused api_keys table.
+--
+-- Background: api_keys was introduced in 001_initial_schema.sql as part of the
+-- aspirational "API keys for third-party integrations" feature that was never
+-- implemented. The 2026-04-15 audit and subsequent sqlc migration confirmed
+-- the table has no repository, no sqlc queries, no handlers, and zero callers
+-- across the codebase. Verified again 2026-04-17 via `rg api_keys internal/
+-- cmd/` — no hits.
+--
+-- Dropping frees the table name if/when a real API-key feature lands. The
+-- migration uses IF EXISTS so it stays idempotent against hand-patched
+-- databases that may already be missing the table.
+DROP TABLE IF EXISTS api_keys;
