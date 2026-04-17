@@ -18,6 +18,7 @@ import (
 
 	"hubplay/internal/db"
 	"hubplay/internal/imaging"
+	"hubplay/internal/imaging/pathmap"
 	"hubplay/internal/provider"
 )
 
@@ -27,6 +28,7 @@ type ImageHandler struct {
 	items       ItemRepository
 	providers   ProviderManager
 	imageDir    string
+	pathmap     *pathmap.Store
 	logger      *slog.Logger
 }
 
@@ -44,6 +46,7 @@ func NewImageHandler(
 		items:       items,
 		providers:   providers,
 		imageDir:    imageDir,
+		pathmap:     pathmap.New(imageDir),
 		logger:      logger.With("handler", "images"),
 	}
 }
@@ -561,22 +564,27 @@ func (h *ImageHandler) saveImageFile(itemID, filename string, data []byte) (stri
 	return fullPath, nil
 }
 
-// Path mapping: store imageID -> local file path in a simple file.
+// writePathMapping logs at WARN on failure — the DB record is authoritative,
+// so a missing mapping only costs a fallback DB lookup on serve.
 func (h *ImageHandler) writePathMapping(imageID, localPath string) {
-	dir := filepath.Join(h.imageDir, ".mappings")
-	os.MkdirAll(dir, 0o755)             //nolint:errcheck
-	os.WriteFile(filepath.Join(dir, imageID), []byte(localPath), 0o644) //nolint:errcheck
+	if err := h.pathmap.Write(imageID, localPath); err != nil {
+		h.logger.Warn("pathmap write failed", "id", imageID, "error", err)
+	}
 }
 
+// readPathMapping returns the mapped path or "" when the mapping is missing
+// / invalid / unreadable. Callers fall back to the DB record in that case.
 func (h *ImageHandler) readPathMapping(imageID string) string {
-	data, err := os.ReadFile(filepath.Join(h.imageDir, ".mappings", imageID))
+	p, err := h.pathmap.Read(imageID)
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(string(data))
+	return p
 }
 
 func (h *ImageHandler) removePathMapping(imageID string) {
-	os.Remove(filepath.Join(h.imageDir, ".mappings", imageID)) //nolint:errcheck
+	if err := h.pathmap.Remove(imageID); err != nil {
+		h.logger.Warn("pathmap remove failed", "id", imageID, "error", err)
+	}
 }
 
