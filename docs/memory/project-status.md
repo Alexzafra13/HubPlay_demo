@@ -1,99 +1,92 @@
 # Estado del proyecto
 
-> Snapshot: **2026-04-15** · Rama: `claude/sqlc-providers` · HEAD base: `b8c7fa7`
+> Snapshot: **2026-04-17** · Rama: `main` · HEAD: `f07e031`
 
 ## Resumen ejecutivo
 
-Iteración en curso: **migración incremental a sqlc** según ADR-001 (ver
-`architecture-decisions.md`). Cada repo de `internal/db/` pasa a ser un
-adaptador delgado sobre `*sqlc.Queries`. Las interfaces consumidas por
-servicios arriba (`internal/auth/`, handlers, etc.) no cambian → ripple
-cero fuera de `internal/db/`.
+MVP funcional. Base backend estable: migración a sqlc completa, handlers principales
+con cobertura de tests, event bus con unsubscribe, imaging endurecido (MIME sniffing,
+SSRF, decompression-bomb guard, path traversal). Gap actual: frontend sin tests de
+páginas ni wizard; varios handlers backend aún sin tests.
 
-## Lo hecho hoy
+## Tamaño verificado
 
-1. **Auditoría exhaustiva** → `audit-2026-04-15.md`. 20 deudas priorizadas.
-2. **ADR-001 sqlc** → `architecture-decisions.md`. Driver `modernc.org/sqlite`
-   confirmado; `sqlx`/`ent`/`GORM` descartados con razón.
-3. **Piloto `signing_keys`** (commit `7419d74`, en `main`):
-   - 107 → 49 líneas de repo (-54%).
-   - Alias `type SigningKey = sqlc.JwtSigningKey` porque los campos
-     coincidían 1:1.
-   - Keystore, JWT y service intactos.
-4. **`sessions` migrada** (rama actual):
-   - 148 → ~140 líneas de repo, pero con la mitad del ruido y tipos
-     verificados por el compilador.
-   - Struct `db.Session` **conservado** (no alias) porque `ip_address`
-     es nullable en SQL y `IPAddress` es `string` en el dominio.
-   - Adapter con helpers `sessionFromRow()` y `nullableString()` — el
-     patrón que aplicaremos siempre que schema ↔ dominio no coincidan.
-   - 10 queries. `DeleteOldestSessionByUser` necesitó alias de tabla
-     (`sessions s`) por ambigüedad; anotado en el `.sql`.
-   - Tests de `auth`, `db`, `api`, `api/handlers` pasan.
+- **97** ficheros `.go` de producción · **53** `_test.go` (~55%)
+- **74** rutas HTTP (ver `internal/api/router.go`)
+- **12** test files en frontend (api client + algunos components + 3 hooks + 2 stores)
+- **Cero** `TODO`/`FIXME`/`HACK` en todo `internal/` o `web/src/`
+- `go test -race ./...` verde en 21 paquetes
 
-## Progreso de migración sqlc
+## Lo que está hecho
 
-| Tabla | Estado | Estrategia | Commit |
-|-------|--------|------------|--------|
-| `jwt_signing_keys` | ✅ | Alias (fields 1:1) | `7419d74` |
-| `sessions` | ✅ | Adapter (IPAddress nullable → string) | `c27a756` |
-| `api_keys` | 🪦 **zombie** | Tabla huérfana: sin repo ni callers. Borrar con migración 005 en commit aparte | — |
-| `providers` | ✅ | Adapter (config_json / api_key nullable, Priority int64→int). Reusa `nullableString()` | (pendiente) |
-| `webhook_configs`, `webhook_log` | ⏳ | — | — |
-| `users` | ⏳ | — | — |
-| `libraries`, `library_paths`, `library_access` | ⏳ | — | — |
-| `channels`, `epg_programs`, `media_segments`, `trickplay_info` | ⏳ | — | — |
-| `items` + familia (ancestor_ids, metadata, external_ids, people, item_people, item_values, item_value_map, media_streams, chapters) | ⏳ | Bloque grande, ir al final (FTS5 aquí) | — |
-| `images`, `user_data`, `activity_log` | ⏳ | — | — |
+### Backend
+- sqlc como única capa de queries (83 de 88 métodos; 5 raw SQL documentados:
+  dynamic IN(), FTS5+cursor, CTE con params duplicados)
+- `domain.AppError` con `.Kind` sentinel, `handleServiceError` mapea sentinel → HTTP
+- JWT keystore con rotación por `kid` + periodo de overlap
+- Observabilidad con registry propio por test (no DefaultRegisterer)
+- Preflight de arranque (ffmpeg, permisos, cache dir)
+- Event bus con panic-recovery, timeout de handler, y `Subscribe` que devuelve unsub
+- `internal/imaging/`:
+  - `validators.go` — IsValidKind, IsValidContentType, ExtensionForContentType, MaxUploadBytes
+  - `blurhash.go` — ComputeBlurhash(bytes, logger)
+  - `safety.go` — SniffContentType (body-based), EnforceMaxPixels (40 MP), SafeGet (SSRF-safe)
+  - `pathmap/pathmap.go` — imageID→path store con UUID validation y errores retornados
+- `internal/library/imagerefresh.go` — refresh batch de imágenes por library, extraído del handler HTTP
+- Migración 005 droppea tabla `api_keys` no usada
 
-Cleanup al final: borrar `scan_helpers.go` si queda huérfano, eliminar
-`nullStr()` duplicados, revisar import de `database/sql` en cada repo.
+### Handlers con tests de caracterización (5 de 15)
+- `admin_auth_test.go` (5 tests)
+- `auth_test.go` (6 tests)
+- `responses_test.go` (9 tests)
+- `image_test.go` (25 tests, incl. regresión de security — MIME spoof, bomb, traversal, SSRF)
+- `stream_test.go` (25 tests)
+- `progress_test.go` (20 tests)
+- `iptv_test.go` (23 tests)
+- `library_test.go` (21 tests)
 
-## Deuda técnica adicional descubierta al migrar
+### Frontend
+- 19 páginas, todas funcionales (Home, ItemDetail, LiveTV, Login, Movies, Series,
+  Search, Settings, NotFound, 4 pasos del wizard, 4 páginas admin)
+- i18n con `en` + `es` wired vía `i18next-browser-languagedetector`
+- Deps todas estables (React 19.2, Vite 7.3, TanStack Query 5.90, Zustand 5.0, TS 5.9)
 
-- **Makefile `test` usa `-race`**: no funciona en Windows sin CGO (el
-  driver elegido es puro Go por diseño). Split sugerido: `make test`
-  (portable) + `make test-race` (Linux/CGO para CI).
-- **`internal/stream/transcode_test.go:104`**: hardcodea `/tmp/...` y
-  compara contra `filepath.Join` → falla en Windows. Usar `filepath.ToSlash`
-  o `filepath.Join` para construir el expected.
+## Lo que falta
 
-## Verificado contra código
+### Tests
+- **Handlers backend sin tests**: `items.go` (247 L), `users.go` (103 L), `setup.go` (232 L),
+  `providers.go` (285 L), `events.go` (105 L), `health.go` (63 L). Patrón de fakes + httptest
+  ya probado en image/stream/progress/iptv/library_test.go.
+- **Frontend sin tests**: páginas, admin, setup wizard, ImageManager. Páginas admin mutan
+  estado — alta prioridad. Wizard es ruta crítica de primer arranque — alta prioridad.
+- Servicios con tests flojos: `scanner` (621 L / 1 test), `library/service.go` (369 L / 1 test).
 
-| Item | Estado | Ubicación |
-|------|--------|-----------|
-| Piloto signing_keys | ✅ | `internal/db/signing_key_repository.go`, `internal/db/queries/signing_keys.sql` |
-| Piloto sessions | ✅ | `internal/db/session_repository.go`, `internal/db/queries/sessions.sql` |
-| sqlc generado | ✅ | `internal/db/sqlc/` (db.go, models.go, querier.go, signing_keys.sql.go, sessions.sql.go) |
-| ADR-001 | ✅ | `docs/memory/architecture-decisions.md` |
+### Features (event types reservados pero sin publisher)
+- `TranscodeStarted`, `TranscodeCompleted` en `internal/stream/`
+- `ChannelAdded`, `ChannelRemoved`, `EPGUpdated`, `PlaylistRefreshed` en `internal/iptv/`
+- `MetadataUpdated` en `internal/library/` (tras refresh de metadata)
+- `UserLoggedIn`, `UserLoggedOut` en `internal/auth/`
 
-## Contexto crítico para la próxima sesión
+El SSE handler ya los escucha — sólo falta publicar.
 
-- **Regenerar sqlc** después de tocar `internal/db/queries/*.sql` **o**
-  `migrations/sqlite/*.sql`. Comando:
-  ```powershell
-  docker run --rm -v "${PWD}:/src" -w /src sqlc/sqlc generate
-  ```
-  (o `sqlc generate` si tienes el binario local).
-- **Dos patrones válidos** para migrar un repo — ver `conventions.md`:
-  1. **Type alias** cuando los campos `db.X` coincidan 1:1 con
-     `sqlc.X`. Ripple cero.
-  2. **Adapter con struct propio** cuando haya diferencia (nullable vs
-     not, casing, tipos). Ejemplo canónico: `session_repository.go`.
-- **Convención de ramas**: trabajar en rama con nombre `claude/...`,
-  fast-forward a `main` tras verificar build + tests.
-- **`-race` no en Windows** por el driver pure-Go. Para CI local en
-  Windows usar `go test -count=1 ./...` sin el flag.
+### API client frontend (endpoints backend sin wrapper)
+- `/admin/auth/keys` (list, rotate, prune) — admin UI no consume signing-key management
+- `/providers/search/metadata`, `/providers/metadata/{id}`, `/providers/images`, `/providers/search/subtitles`
+- `/libraries/{id}/iptv/refresh-m3u`, `.../refresh-epg`
+- `/events` (SSE) — no hay wrapper; se consume ad-hoc o no se consume
 
-## Deuda schema descubierta
+## Known issues
 
-- **`api_keys` zombie**: tabla sin repo ni callers. Candidata a migración
-  005 que la droppee. Sin prisa.
-- **`webhook_configs`, `webhook_log`** (por verificar): si tampoco tienen
-  repo/handler, mismo tratamiento — son parte del diseño aspiracional
-  de `plugins.md` / webhooks que nunca se implementó.
+- chi v5 devuelve 404/405 sin pasar por middleware → métricas Prometheus pierden
+  esas respuestas. Documentado, no resuelto.
+- Tests de `auth/domain/iptv/config/stream` fallan en Windows local por App Control
+  Policy bloqueando binarios de test. CI/Docker pasan. Solución: correr en Docker o WSL.
 
-## Próximo paso
+## Próximo paso sugerido
 
-Verificar si `webhook_configs` / `webhook_log` tienen consumidor real.
-Si no → saltar al grupo de `users` + `libraries`. Si sí → migrar.
+Tier siguiente tras tiers A+B (mergeados hoy):
+1. **Tests frontend del setup wizard** — ruta crítica de primer arranque, cero cobertura
+2. **Tests frontend de páginas admin** — mutan estado, riesgo alto
+3. **Wire publishers de event types reservados** — SSE ya los escucha, sólo falta emitir
+
+Orden: (2) da más cobertura con menos fakes que (1); (3) es feature-sized, en sesión aparte.

@@ -19,7 +19,7 @@
 - Estado: Zustand · Data: TanStack Query v5
 - Routing: react-router v7 (lazy routes)
 - Player: `hls.js`
-- i18n: i18next (solo `en` por ahora)
+- i18n: i18next con `en` + `es` configurados (`web/src/i18n/index.ts`)
 - Tests: Vitest + Testing Library + jsdom
 
 **Infra**
@@ -80,21 +80,25 @@ Config de ejemplo: `hubplay.example.yaml` (puerto 8096, SQLite local, JWT auto-g
 
 ---
 
-## Métricas rápidas (verificadas 2026-04-16)
+## Métricas rápidas (verificadas 2026-04-17)
 
-- **81** ficheros `.go` en `internal/` · **43** ficheros `_test.go` (~53%)
-- **12** test files en frontend (cobertura ~15% estimada)
+- **97** ficheros `.go` de producción en `internal/`+`cmd/` · **53** `_test.go` (~55%)
+- **12** test files en frontend (cobertura ~15% estimada — páginas y admin aún sin tests)
 - **26** docs de arquitectura en `docs/architecture/`
+- **74** rutas HTTP registradas en `internal/api/router.go`
+- Handlers con tests: image, stream, progress, iptv, library (5 de 15). Sin tests: items, users, setup, providers, events, health.
 
 ---
 
 ## Convenciones del proyecto
 
 - Errores: `domain.AppError` tipo rico con `.Kind` sentinel — compatible con `errors.Is()`. Ver ADR en `docs/memory/architecture-decisions.md`
-- Handlers: Handler → Service → Repository → DB. Repos usan sqlc-generated code (migración en curso)
+- Handlers: Handler → Service → Repository → DB. Repos usan sqlc-generated code (**migración completa** — 83 de 88 métodos vía sqlc; 5 quedan raw SQL por razones documentadas)
 - `main.go` arranca en fases: foundation → DB → infra → services → HTTP; shutdown graceful
 - Patrón anti-ciclo: cuando un paquete necesita observability, inyectar vía interface local (sink pattern). Nunca importar `observability` desde `stream`, `handlers`, etc.
 - sqlc adapter pattern: repos públicos son thin wrappers sobre `db/sqlc/*.sql.go`. Ver `docs/memory/conventions.md`
+- Event bus (`internal/event`): `Subscribe` devuelve `func()` para unsub — callers con ciclo de vida (SSE, jobs) **deben** llamarlo al terminar o filtran handlers
+- Imaging: pure helpers + pathmap + safety (SSRF-safe fetch, decompression-bomb guard) en `internal/imaging/`. `library.ImageRefresher` hace batch refresh de imágenes; el handler HTTP es un thin wrapper.
 - Commits cortos, descriptivos; PRs con contexto
 
 ---
