@@ -29,6 +29,7 @@ type ImageHandler struct {
 	externalIDs ExternalIDRepository
 	items       ItemRepository
 	providers   ProviderManager
+	refresher   ImageRefreshService
 	imageDir    string
 	pathmap     *pathmap.Store
 	logger      *slog.Logger
@@ -39,6 +40,7 @@ func NewImageHandler(
 	externalIDs ExternalIDRepository,
 	items ItemRepository,
 	providers ProviderManager,
+	refresher ImageRefreshService,
 	imageDir string,
 	logger *slog.Logger,
 ) *ImageHandler {
@@ -47,6 +49,7 @@ func NewImageHandler(
 		externalIDs: externalIDs,
 		items:       items,
 		providers:   providers,
+		refresher:   refresher,
 		imageDir:    imageDir,
 		pathmap:     pathmap.New(imageDir),
 		logger:      logger.With("handler", "images"),
@@ -389,124 +392,18 @@ func (h *ImageHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// RefreshImages fetches new images from providers for all items in a library.
-// Only image types that are not already present are added. Limited to 50 items per batch.
+// RefreshLibraryImages delegates to the library.ImageRefresher service; the
+// loop that used to live here (provider fetch, best-by-kind selection,
+// download, save, persist) is now a single service call so this handler
+// stays focused on HTTP-shaped concerns.
 func (h *ImageHandler) RefreshLibraryImages(w http.ResponseWriter, r *http.Request) {
 	libraryID := chi.URLParam(r, "id")
 
-	// Get items in the library (root items only, limited to 50).
-	items, _, err := h.items.List(r.Context(), db.ItemFilter{
-		LibraryID: libraryID,
-		Limit:     50,
-	})
+	updated, err := h.refresher.RefreshForLibrary(r.Context(), libraryID)
 	if err != nil {
-		h.logger.Error("failed to list items for image refresh", "library", libraryID, "error", err)
-		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list items")
+		h.logger.Error("image refresh failed", "library", libraryID, "error", err)
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to refresh images")
 		return
-	}
-
-	updated := 0
-	for _, item := range items {
-		// Get external IDs for this item.
-		extIDs, err := h.externalIDs.ListByItem(r.Context(), item.ID)
-		if err != nil || len(extIDs) == 0 {
-			continue
-		}
-
-		idMap := make(map[string]string, len(extIDs))
-		for _, e := range extIDs {
-			idMap[e.Provider] = e.ExternalID
-		}
-
-		// Determine item type for provider query.
-		itemType := provider.ItemMovie
-		switch item.Type {
-		case "series":
-			itemType = provider.ItemSeries
-		case "season":
-			itemType = provider.ItemSeason
-		case "episode":
-			itemType = provider.ItemEpisode
-		}
-
-		// Fetch available images from providers.
-		results, err := h.providers.FetchImages(r.Context(), idMap, itemType)
-		if err != nil || len(results) == 0 {
-			continue
-		}
-
-		// Get existing images for this item.
-		existing, err := h.images.ListByItem(r.Context(), item.ID)
-		if err != nil {
-			continue
-		}
-		existingTypes := make(map[string]bool, len(existing))
-		for _, img := range existing {
-			existingTypes[img.Type] = true
-		}
-
-		// Add missing image types (pick the highest-scored result per type).
-		bestByType := make(map[string]provider.ImageResult)
-		for _, img := range results {
-			if !imaging.IsValidKind(img.Type) {
-				continue
-			}
-			if existingTypes[img.Type] {
-				continue
-			}
-			if cur, ok := bestByType[img.Type]; !ok || img.Score > cur.Score {
-				bestByType[img.Type] = img
-			}
-		}
-
-		for imgType, best := range bestByType {
-			// Download via SSRF-safe client.
-			imgData, contentType, err := imaging.SafeGet(best.URL, imaging.MaxUploadBytes, 30*time.Second)
-			if err != nil {
-				h.logger.Warn("refresh: failed to download image", "url", best.URL, "error", err)
-				continue
-			}
-			if err := imaging.EnforceMaxPixels(imgData); err != nil {
-				h.logger.Warn("refresh: image too large", "url", best.URL, "error", err)
-				continue
-			}
-
-			ext := imaging.ExtensionForContentType(contentType)
-			hash := sha256.Sum256(imgData)
-			filename := fmt.Sprintf("%s_%s%s", imgType, hex.EncodeToString(hash[:8]), ext)
-			localPath, err := h.saveImageFile(item.ID, filename, imgData)
-			if err != nil {
-				continue
-			}
-
-			bhash := imaging.ComputeBlurhash(imgData, h.logger)
-
-			imgID := uuid.NewString()
-			dbImg := &db.Image{
-				ID:        imgID,
-				ItemID:    item.ID,
-				Type:      imgType,
-				Path:      "/api/v1/images/file/" + imgID,
-				Width:     best.Width,
-				Height:    best.Height,
-				Blurhash:  bhash,
-				Provider:  "refresh",
-				IsPrimary: true,
-				AddedAt:   time.Now(),
-			}
-
-			if err := h.images.Create(r.Context(), dbImg); err != nil {
-				os.Remove(localPath) //nolint:errcheck
-				continue
-			}
-
-			if err := h.images.SetPrimary(r.Context(), item.ID, imgType, imgID); err != nil {
-				h.logger.Warn("refresh: failed to set primary", "error", err)
-			}
-
-			h.writePathMapping(imgID, localPath)
-			updated++
-		}
 	}
 
 	respondJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"updated": updated}})

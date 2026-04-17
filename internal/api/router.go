@@ -17,6 +17,7 @@ import (
 	"hubplay/internal/config"
 	"hubplay/internal/db"
 	"hubplay/internal/event"
+	"hubplay/internal/imaging/pathmap"
 	"hubplay/internal/iptv"
 	"hubplay/internal/library"
 	"hubplay/internal/observability"
@@ -282,7 +283,14 @@ func NewRouter(deps Dependencies) http.Handler {
 			// Image management
 			if deps.Images != nil && deps.Providers != nil && deps.ExternalIDs != nil {
 				imageDir := filepath.Join(filepath.Dir(deps.Config.Database.Path), "images")
-				imgHandler := handlers.NewImageHandler(deps.Images, deps.ExternalIDs, deps.Items, deps.Providers, imageDir, deps.Logger)
+				imageRefresher := library.NewImageRefresher(
+					deps.Items, deps.ExternalIDs, deps.Images, deps.Providers,
+					pathmap.New(imageDir), imageDir, deps.Logger,
+				)
+				imgHandler := handlers.NewImageHandler(
+					deps.Images, deps.ExternalIDs, deps.Items, deps.Providers,
+					imageRefresher, imageDir, deps.Logger,
+				)
 
 				// Image management (nested under items)
 				r.Route("/items/{id}/images", func(r chi.Router) {

@@ -26,6 +26,8 @@ import (
 	"hubplay/internal/db"
 	"hubplay/internal/domain"
 	"hubplay/internal/imaging"
+	"hubplay/internal/imaging/pathmap"
+	"hubplay/internal/library"
 	"hubplay/internal/provider"
 	"hubplay/internal/testutil"
 )
@@ -183,7 +185,15 @@ func newImageTestEnv(t *testing.T) *imageTestEnv {
 		items:     &fakeItemRepo{byID: map[string]*db.Item{}},
 		providers: &fakeProviderManager{},
 	}
-	env.handler = NewImageHandler(env.images, env.externals, env.items, env.providers, imageDir, testutil.NopLogger())
+	// Build a real library.ImageRefresher over the same fakes so the
+	// end-to-end refresh path stays exercised by
+	// TestImageHandler_RefreshLibraryImages_AddsMissingTypes.
+	refresher := library.NewImageRefresher(
+		env.items, env.externals, env.images, env.providers,
+		pathmap.New(imageDir), imageDir, testutil.NopLogger(),
+	)
+	env.handler = NewImageHandler(env.images, env.externals, env.items, env.providers,
+		refresher, imageDir, testutil.NopLogger())
 
 	r := chi.NewRouter()
 	r.Route("/api/v1", func(r chi.Router) {

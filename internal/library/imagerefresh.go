@@ -1,0 +1,242 @@
+package library
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"time"
+
+	"github.com/google/uuid"
+
+	"hubplay/internal/db"
+	"hubplay/internal/imaging"
+	"hubplay/internal/imaging/pathmap"
+	"hubplay/internal/provider"
+)
+
+// ─── Collaborator interfaces ────────────────────────────────────────────────
+//
+// Defined here (not imported from handlers) to avoid an import cycle — handlers
+// depend on library, not the other way round. The concrete db.*Repository and
+// provider.Manager types satisfy these; the handler's fakes satisfy them too
+// via structural typing.
+
+// ImageRefresherItemRepo is the subset of item operations the refresher needs.
+type ImageRefresherItemRepo interface {
+	List(ctx context.Context, filter db.ItemFilter) ([]*db.Item, int, error)
+}
+
+// ImageRefresherExternalIDRepo is the subset for external-id lookup per item.
+type ImageRefresherExternalIDRepo interface {
+	ListByItem(ctx context.Context, itemID string) ([]*db.ExternalID, error)
+}
+
+// ImageRefresherImagesRepo is the subset of image-repository operations used.
+type ImageRefresherImagesRepo interface {
+	ListByItem(ctx context.Context, itemID string) ([]*db.Image, error)
+	Create(ctx context.Context, img *db.Image) error
+	SetPrimary(ctx context.Context, itemID, imgType, imageID string) error
+}
+
+// ImageRefresherProvider wraps the single provider call used by the refresher.
+type ImageRefresherProvider interface {
+	FetchImages(ctx context.Context, ids map[string]string, itemType provider.ItemType) ([]provider.ImageResult, error)
+}
+
+// ─── ImageRefresher ─────────────────────────────────────────────────────────
+
+// ImageRefresher pulls missing images from external providers for every item
+// in a library. Extracted out of the HTTP handler so the loop is testable
+// in isolation and the handler stays thin (ADR-005 anti-cycle — the handler
+// depends on a small ImageRefreshService interface, not this concrete type).
+type ImageRefresher struct {
+	items       ImageRefresherItemRepo
+	externalIDs ImageRefresherExternalIDRepo
+	images      ImageRefresherImagesRepo
+	providers   ImageRefresherProvider
+	pathmap     *pathmap.Store
+	imageDir    string
+	logger      *slog.Logger
+}
+
+// NewImageRefresher constructs an ImageRefresher. imageDir is the root for
+// on-disk storage (<imageDir>/<itemID>/filename); pathmap persists the
+// imageID → local-path mapping used at serve time.
+func NewImageRefresher(
+	items ImageRefresherItemRepo,
+	externalIDs ImageRefresherExternalIDRepo,
+	images ImageRefresherImagesRepo,
+	providers ImageRefresherProvider,
+	pm *pathmap.Store,
+	imageDir string,
+	logger *slog.Logger,
+) *ImageRefresher {
+	return &ImageRefresher{
+		items:       items,
+		externalIDs: externalIDs,
+		images:      images,
+		providers:   providers,
+		pathmap:     pm,
+		imageDir:    imageDir,
+		logger:      logger.With("module", "image-refresh"),
+	}
+}
+
+// RefreshForLibrary enumerates root items (max 50 per call) and for each one
+// fetches every image kind that isn't already stored. Downloads go through
+// imaging.SafeGet (SSRF-protected) and are rejected if dimensions exceed
+// imaging.MaxPixels. Returns the count of newly persisted images.
+//
+// The method is best-effort per item: a download, save, or DB failure for one
+// item is logged and skipped, not propagated. Only a failure to enumerate the
+// library's items surfaces as an error.
+func (r *ImageRefresher) RefreshForLibrary(ctx context.Context, libraryID string) (int, error) {
+	items, _, err := r.items.List(ctx, db.ItemFilter{
+		LibraryID: libraryID,
+		Limit:     50,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("list items: %w", err)
+	}
+
+	updated := 0
+	for _, item := range items {
+		updated += r.refreshForItem(ctx, item)
+	}
+	return updated, nil
+}
+
+// refreshForItem is the per-item loop extracted for readability. Errors are
+// logged and counted as zero updates — the caller keeps going.
+func (r *ImageRefresher) refreshForItem(ctx context.Context, item *db.Item) int {
+	extIDs, err := r.externalIDs.ListByItem(ctx, item.ID)
+	if err != nil || len(extIDs) == 0 {
+		return 0
+	}
+
+	idMap := make(map[string]string, len(extIDs))
+	for _, e := range extIDs {
+		idMap[e.Provider] = e.ExternalID
+	}
+
+	results, err := r.providers.FetchImages(ctx, idMap, itemTypeOf(item))
+	if err != nil || len(results) == 0 {
+		return 0
+	}
+
+	existing, err := r.images.ListByItem(ctx, item.ID)
+	if err != nil {
+		return 0
+	}
+	existingTypes := make(map[string]bool, len(existing))
+	for _, img := range existing {
+		existingTypes[img.Type] = true
+	}
+
+	// Pick the highest-scored candidate for each missing kind.
+	bestByType := make(map[string]provider.ImageResult)
+	for _, img := range results {
+		if !imaging.IsValidKind(img.Type) {
+			continue
+		}
+		if existingTypes[img.Type] {
+			continue
+		}
+		if cur, ok := bestByType[img.Type]; !ok || img.Score > cur.Score {
+			bestByType[img.Type] = img
+		}
+	}
+
+	added := 0
+	for imgType, best := range bestByType {
+		if r.downloadAndPersist(ctx, item.ID, imgType, best) {
+			added++
+		}
+	}
+	return added
+}
+
+// downloadAndPersist returns true if the image was successfully stored. A
+// false return means the caller should move on — every failure is logged
+// inline so the caller doesn't need to distinguish causes.
+func (r *ImageRefresher) downloadAndPersist(ctx context.Context, itemID, imgType string, best provider.ImageResult) bool {
+	imgData, contentType, err := imaging.SafeGet(best.URL, imaging.MaxUploadBytes, 30*time.Second)
+	if err != nil {
+		r.logger.Warn("refresh: failed to download image", "url", best.URL, "error", err)
+		return false
+	}
+	if err := imaging.EnforceMaxPixels(imgData); err != nil {
+		r.logger.Warn("refresh: image too large", "url", best.URL, "error", err)
+		return false
+	}
+
+	ext := imaging.ExtensionForContentType(contentType)
+	hash := sha256.Sum256(imgData)
+	filename := fmt.Sprintf("%s_%s%s", imgType, hex.EncodeToString(hash[:8]), ext)
+	localPath, err := r.saveImageFile(itemID, filename, imgData)
+	if err != nil {
+		return false
+	}
+
+	bhash := imaging.ComputeBlurhash(imgData, r.logger)
+
+	imgID := uuid.NewString()
+	dbImg := &db.Image{
+		ID:        imgID,
+		ItemID:    itemID,
+		Type:      imgType,
+		Path:      "/api/v1/images/file/" + imgID,
+		Width:     best.Width,
+		Height:    best.Height,
+		Blurhash:  bhash,
+		Provider:  "refresh",
+		IsPrimary: true,
+		AddedAt:   time.Now(),
+	}
+
+	if err := r.images.Create(ctx, dbImg); err != nil {
+		_ = os.Remove(localPath)
+		return false
+	}
+
+	if err := r.images.SetPrimary(ctx, itemID, imgType, imgID); err != nil {
+		r.logger.Warn("refresh: failed to set primary", "error", err)
+	}
+
+	if err := r.pathmap.Write(imgID, localPath); err != nil {
+		r.logger.Warn("refresh: pathmap write failed", "id", imgID, "error", err)
+	}
+	return true
+}
+
+// saveImageFile writes the bytes to <imageDir>/<itemID>/<filename>.
+func (r *ImageRefresher) saveImageFile(itemID, filename string, data []byte) (string, error) {
+	dir := filepath.Join(r.imageDir, itemID)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("create dir: %w", err)
+	}
+	fullPath := filepath.Join(dir, filename)
+	if err := os.WriteFile(fullPath, data, 0o644); err != nil {
+		return "", fmt.Errorf("write file: %w", err)
+	}
+	return fullPath, nil
+}
+
+// itemTypeOf maps the DB-level item type string onto the provider-level enum.
+// Unknown values default to Movie (matches the original handler behaviour).
+func itemTypeOf(item *db.Item) provider.ItemType {
+	switch item.Type {
+	case "series":
+		return provider.ItemSeries
+	case "season":
+		return provider.ItemSeason
+	case "episode":
+		return provider.ItemEpisode
+	default:
+		return provider.ItemMovie
+	}
+}

@@ -130,6 +130,13 @@ type UserDataRepository interface {
 	Delete(ctx context.Context, userID, itemID string) error
 }
 
+// ImageRefreshService runs the library-wide image refresh. Defined here so
+// handlers depend on an interface, not the concrete library.ImageRefresher —
+// keeps the handler layer's compile-time surface minimal and tests trivial.
+type ImageRefreshService interface {
+	RefreshForLibrary(ctx context.Context, libraryID string) (int, error)
+}
+
 // EventBusSubscriber defines the event bus subscription needed by handlers.
 // Subscribe returns an unsubscribe function; handlers MUST call it when the
 // subscriber goes away (e.g. SSE client disconnect) to avoid handler leaks.
