@@ -182,7 +182,7 @@ export function BrowseView({
               title={t("liveTV.searchResults")}
               count={searchResults.length}
             />
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:gap-5 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:gap-5 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7">
               {searchResults.map((ch) => (
                 <div key={ch.id}>{renderChannelTile(ch)}</div>
               ))}
@@ -197,7 +197,7 @@ export function BrowseView({
             onSeeAll={() => onCategoryChange(null)}
             seeAllLabel={t("liveTV.backToAll")}
           />
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:gap-5 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7">
             {displayCategoryChannels.map((ch) => (
               <div key={ch.id}>{renderChannelTile(ch)}</div>
             ))}
@@ -231,17 +231,16 @@ export function BrowseView({
           </div>
 
           {/* ── Continue watching ──────────────────────────────
-              When there's only one item (common case — most users rewatch
-              the same channel), we render it as a wide banner card so the
-              shelf doesn't look oddly empty. */}
+              Rendered with the same Shelf layout as the other sections so
+              spacing stays consistent and a single tile sits naturally on
+              the left rather than ballooning into empty grid columns on
+              wide (TV) displays. */}
           {lastChannel && (
             <section>
               <SectionHeader title={t("liveTV.continueWatching")} />
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                <div className="sm:col-span-2 lg:col-span-1">
-                  {renderChannelTile(lastChannel)}
-                </div>
-              </div>
+              <Shelf>
+                <ShelfItem>{renderChannelTile(lastChannel)}</ShelfItem>
+              </Shelf>
             </section>
           )}
 
@@ -301,21 +300,27 @@ export function BrowseView({
 }
 
 /**
- * Horizontal, swipe-friendly shelf. Snaps to each tile so mobile fling
- * gestures land cleanly and the last item never falls off at a fraction of
- * a card width. Desktop users can still drag-scroll with pointer events.
+ * Horizontal, swipe-friendly shelf. Snap-proximity (rather than mandatory)
+ * keeps fling gestures clean without forcing the trailing tile against the
+ * viewport edge — combined with scroll-padding so snap targets respect the
+ * inner padding instead of crashing into the gradient edges.
  */
 function Shelf({ children }: { children: ReactNode }) {
   return (
-    <div className="scrollbar-hide -mx-4 flex snap-x snap-mandatory gap-4 overflow-x-auto px-4 pb-2 md:-mx-6 md:gap-5 md:px-6">
+    <div
+      className="scrollbar-hide -mx-4 flex snap-x snap-proximity gap-4 overflow-x-auto px-4 pb-2 md:-mx-6 md:gap-5 md:px-6"
+      style={{ scrollPaddingInline: "1rem" }}
+    >
       {children}
     </div>
   );
 }
 
 function ShelfItem({ children }: { children: ReactNode }) {
+  // Tiles grow at xl/2xl so TV-sized displays get reasonable card density
+  // instead of pencil-thin columns floating in a sea of margin.
   return (
-    <div className="w-48 shrink-0 snap-start sm:w-52 md:w-56 lg:w-60">
+    <div className="w-48 shrink-0 snap-start sm:w-52 md:w-56 lg:w-60 xl:w-64 2xl:w-72">
       {children}
     </div>
   );
