@@ -134,12 +134,45 @@ export interface ItemDetail extends MediaItem {
 
 // ─── Live TV ────────────────────────────────────────────────────────────────
 
+/**
+ * Canonical channel category. Derived server-side from the raw M3U
+ * `group-title` via `iptv.Canonical` and kept in sync by both the
+ * Go constant set and this union. When adding a category here, add
+ * it to `internal/iptv/categories.go` too.
+ */
+export type ChannelCategory =
+  | "general"
+  | "news"
+  | "sports"
+  | "movies"
+  | "music"
+  | "entertainment"
+  | "kids"
+  | "culture"
+  | "documentaries"
+  | "international"
+  | "travel"
+  | "religion"
+  | "adult";
+
 export interface Channel {
   id: string;
   name: string;
   number: number;
+  /** Upstream logo URL from the M3U. May be missing, broken, or slow. */
   logo_url: string | null;
+  /** Raw M3U `group-title` — kept for operators and legacy clients. */
   group: string | null;
+  /** Same as `group` — preferred name going forward. */
+  group_name: string | null;
+  /** Canonical, UI-stable category the frontend keys off for chips and i18n. */
+  category: ChannelCategory;
+  /** 1–3 uppercase chars derived from the channel name — always populated. */
+  logo_initials: string;
+  /** `#RRGGBB` background of the fallback logo — deterministic per channel. */
+  logo_bg: string;
+  /** `#RRGGBB` foreground of the fallback logo (picked for contrast). */
+  logo_fg: string;
   stream_url: string;
   library_id: string;
   is_active?: boolean;

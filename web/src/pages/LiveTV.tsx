@@ -1,28 +1,45 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useLibraries, useChannels, useBulkSchedule } from "@/api/hooks";
-import type { Channel } from "@/api/types";
+import {
+  useAddChannelFavorite,
+  useBulkSchedule,
+  useChannelFavoriteIDs,
+  useChannels,
+  useLibraries,
+  useRemoveChannelFavorite,
+} from "@/api/hooks";
+import type { Channel, ChannelCategory } from "@/api/types";
 import { Spinner } from "@/components/common";
 import {
+  type CategoryFilter,
+  CategoryChips,
   ChannelCard,
-  ChannelPlayer,
-  ChannelStrip,
+  ChannelRail,
   CountrySelector,
   EPGGrid,
-  formatTime,
+  HeroMosaic,
+  type HeroTileData,
+  PlayerOverlay,
   getNowPlaying,
-  getProgramProgress,
   getUpNext,
 } from "@/components/livetv";
 
-// View modes: the carousel layout (default, mobile-friendly) or the
-// Plex/Jellyfin-style programme-guide grid.
-// Defined inside the file because it's used in exactly one place and moving
-// it to a separate file just to satisfy react-refresh/only-export-components
-// would be ceremony with no reader benefit.
-// eslint-disable-next-line react-refresh/only-export-components
-type ViewMode = "carousel" | "grid";
+type ViewTab = "discover" | "guide" | "favorites";
 
+/**
+ * LiveTV — Discover / Guide / Favorites.
+ *
+ * The page wraps everything in `[data-theme="tv"]` so components can use
+ * the TV-scoped tokens (`--tv-accent`, `--tv-bg-*`, etc.) without leaking
+ * outside. The three tabs live on one route — switching is local state
+ * because deep-linking to a tab isn't a product requirement yet; when it
+ * becomes one, lift `tab` to a search param.
+ *
+ * Channel selection opens a fullscreen player overlay rather than
+ * embedding a persistent hero player (the previous model). This matches
+ * the redesign's navigation flow: the mosaic stays the entry surface
+ * and the player is a modal that can be dismissed.
+ */
 export default function LiveTV() {
   const { t } = useTranslation();
   const { data: libraries, isLoading: librariesLoading } = useLibraries();
@@ -34,134 +51,125 @@ export default function LiveTV() {
     liveTvLibrary?.id,
   );
 
-  // Filter: inactive channels are surfaced by the backend but always fail on
-  // playback. Hide them from the UI to avoid dead clicks.
+  // Inactive channels 404 on playback — hide them rather than leave dead
+  // clicks in the mosaic.
   const channels = useMemo(
     () => (rawChannels ?? []).filter((c) => c.is_active !== false),
     [rawChannels],
   );
 
-  // Lazy init: pick the first available channel on mount. Avoids the
-  // set-inside-effect pattern the React Compiler plugin flags.
-  const [activeChannel, setActiveChannel] = useState<Channel | null>(
-    () => (rawChannels?.[0] ?? null),
-  );
-  const [search, setSearch] = useState("");
-  const [activeGroup, setActiveGroup] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<ViewMode>("carousel");
-  const [zapBuffer, setZapBuffer] = useState<string>(""); // digits buffered for number-entry zap
-  const heroRef = useRef<HTMLDivElement>(null);
-  const zapTimer = useRef<number | null>(null);
-
-  // EPG for all channels.
   const channelIds = useMemo(() => channels.map((c) => c.id), [channels]);
   const { data: scheduleData } = useBulkSchedule(channelIds);
   const scheduleByChannel = useMemo(() => scheduleData ?? {}, [scheduleData]);
 
-  // Groups by category.
-  const groups = useMemo(() => {
-    const map = new Map<string, Channel[]>();
-    for (const ch of channels) {
-      const group = ch.group ?? "General";
-      const list = map.get(group) ?? [];
-      list.push(ch);
-      map.set(group, list);
-    }
-    return map;
-  }, [channels]);
+  // ── Tabs + filters ────────────────────────────────────────────────
+  const [tab, setTab] = useState<ViewTab>("discover");
+  const [category, setCategory] = useState<CategoryFilter>("all");
+  const [search, setSearch] = useState("");
 
-  const groupNames = useMemo(() => Array.from(groups.keys()), [groups]);
+  // ── Player overlay ────────────────────────────────────────────────
+  const [playingChannel, setPlayingChannel] = useState<Channel | null>(null);
 
-  // Search filter.
-  const searchResults = useMemo(() => {
-    if (!search) return [];
-    const q = search.toLowerCase();
-    return channels.filter(
-      (ch) =>
-        ch.name.toLowerCase().includes(q) ||
-        (ch.group ?? "").toLowerCase().includes(q),
-    );
-  }, [channels, search]);
-
-  // If the channel list loads after the initial render (typical for
-  // React Query), set the first one. Still guarded against overwriting a
-  // user selection.
-  if (!activeChannel && channels.length > 0) {
-    // Intentional: this is a lazy-init guard, not an effect. Calling setState
-    // during render is valid when computing initial state from a derived
-    // value. React will re-render once and the condition will be false next
-    // time.
-    setActiveChannel(channels[0]);
-  }
-
-  const handleSelectChannel = useCallback((ch: Channel) => {
-    setActiveChannel(ch);
-    setSearch("");
-    heroRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, []);
-
-  // ── Keyboard zapping ───────────────────────────────────────────
-  // ArrowUp / ArrowDown: previous / next channel.
-  // Digits: buffer, jump to matching channel number after 1s of silence OR Enter.
+  // Close overlay on Escape. Placed here (not in the overlay) so the key
+  // listener stays paired with the state it mutates.
   useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      // Don't fight text inputs or textareas.
-      const target = e.target as HTMLElement | null;
-      if (
-        target &&
-        (target.tagName === "INPUT" ||
-          target.tagName === "TEXTAREA" ||
-          target.isContentEditable)
-      ) {
-        return;
-      }
-      if (channels.length === 0) return;
-      const idx = channels.findIndex((c) => c.id === activeChannel?.id);
-
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        const next = channels[(idx + 1 + channels.length) % channels.length];
-        setActiveChannel(next);
-        return;
-      }
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        const prev = channels[(idx - 1 + channels.length) % channels.length];
-        setActiveChannel(prev);
-        return;
-      }
-      if (e.key >= "0" && e.key <= "9") {
-        e.preventDefault();
-        setZapBuffer((prev) => prev + e.key);
-        if (zapTimer.current) window.clearTimeout(zapTimer.current);
-        zapTimer.current = window.setTimeout(() => {
-          setZapBuffer((num) => {
-            if (num) {
-              const n = parseInt(num, 10);
-              const match = channels.find((c) => c.number === n);
-              if (match) setActiveChannel(match);
-            }
-            return "";
-          });
-        }, 1000);
-        return;
-      }
-      if (e.key === "Enter" && zapBuffer) {
-        e.preventDefault();
-        const n = parseInt(zapBuffer, 10);
-        const match = channels.find((c) => c.number === n);
-        if (match) setActiveChannel(match);
-        setZapBuffer("");
-        if (zapTimer.current) window.clearTimeout(zapTimer.current);
-      }
-    }
+    if (!playingChannel) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPlayingChannel(null);
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [channels, activeChannel, zapBuffer]);
+  }, [playingChannel]);
 
-  const isLoading = librariesLoading || channelsLoading;
+  const openPlayer = useCallback((ch: Channel) => setPlayingChannel(ch), []);
+  const closePlayer = useCallback(() => setPlayingChannel(null), []);
 
-  if (isLoading) {
+  // ── Favorites ────────────────────────────────────────────────────
+  // The IDs query powers the ♥ state on every ChannelCard; we keep it
+  // as a Set for O(1) lookups inside render.
+  const { data: favoriteIDs } = useChannelFavoriteIDs();
+  const favoriteSet = useMemo(
+    () => new Set(favoriteIDs ?? []),
+    [favoriteIDs],
+  );
+  const addFavorite = useAddChannelFavorite();
+  const removeFavorite = useRemoveChannelFavorite();
+  const toggleFavorite = useCallback(
+    (channelId: string) => {
+      if (favoriteSet.has(channelId)) {
+        removeFavorite.mutate(channelId);
+      } else {
+        addFavorite.mutate(channelId);
+      }
+    },
+    [favoriteSet, addFavorite, removeFavorite],
+  );
+
+  // ── Derived: counts per category ─────────────────────────────────
+  const counts = useMemo<Record<CategoryFilter, number>>(() => {
+    const base: Record<CategoryFilter, number> = {
+      all: channels.length,
+      general: 0,
+      news: 0,
+      sports: 0,
+      movies: 0,
+      music: 0,
+      entertainment: 0,
+      kids: 0,
+      culture: 0,
+      documentaries: 0,
+      international: 0,
+      travel: 0,
+      religion: 0,
+      adult: 0,
+    };
+    for (const ch of channels) base[ch.category] += 1;
+    return base;
+  }, [channels]);
+
+  // ── Derived: filtered + grouped for Discover ─────────────────────
+  const filteredChannels = useMemo(() => {
+    let list = channels;
+    if (category !== "all") {
+      list = list.filter((c) => c.category === category);
+    }
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      list = list.filter(
+        (c) =>
+          c.name.toLowerCase().includes(q) ||
+          (c.group_name ?? "").toLowerCase().includes(q),
+      );
+    }
+    return list;
+  }, [channels, category, search]);
+
+  const channelsByCategory = useMemo(() => {
+    const byCat = new Map<ChannelCategory, Channel[]>();
+    for (const ch of filteredChannels) {
+      const list = byCat.get(ch.category) ?? [];
+      list.push(ch);
+      byCat.set(ch.category, list);
+    }
+    return byCat;
+  }, [filteredChannels]);
+
+  // Featured = up to 5 channels that currently have a known program on
+  // air, so the hero never looks empty on bootstrap. Falls back to the
+  // first 5 channels if no EPG has landed yet.
+  const featured = useMemo<HeroTileData[]>(() => {
+    const withProgram: HeroTileData[] = [];
+    for (const ch of filteredChannels) {
+      const np = getNowPlaying(scheduleByChannel[ch.id]);
+      if (np) withProgram.push({ channel: ch, nowPlaying: np });
+      if (withProgram.length === 5) break;
+    }
+    if (withProgram.length > 0) return withProgram;
+    return filteredChannels.slice(0, 5).map((c) => ({ channel: c }));
+  }, [filteredChannels, scheduleByChannel]);
+
+  // ── Loading + empty states ───────────────────────────────────────
+  if (librariesLoading || channelsLoading) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
         <Spinner size="lg" />
@@ -173,303 +181,357 @@ export default function LiveTV() {
     return <CountrySelector hasLibrary={!!liveTvLibrary} />;
   }
 
-  const displayChannels = search
-    ? searchResults
-    : activeGroup
-      ? (groups.get(activeGroup) ?? [])
-      : channels;
-
-  const activePrograms = activeChannel
-    ? scheduleByChannel[activeChannel.id]
-    : undefined;
-  const activeNowPlaying = getNowPlaying(activePrograms);
-  const activeUpNext = getUpNext(activePrograms);
+  // ── Active-channel pointer for EPGGrid (kept for the Guide tab) ───
+  const guideActiveChannel = playingChannel ?? channels[0] ?? null;
 
   return (
-    <div className="flex flex-col gap-0 -mx-4 -mt-2 md:-mx-6">
-      {/* ── Hero Player ────────────────────────────────────────────── */}
-      <div
-        ref={heroRef}
-        className="relative w-full aspect-[16/9] max-h-[40vh] md:max-h-[65vh] bg-black overflow-hidden"
-        aria-live="polite"
-        aria-atomic="true"
-        aria-label={activeChannel ? `Now watching ${activeChannel.name}` : undefined}
-      >
-        {activeChannel && <ChannelPlayer channel={activeChannel} />}
-        <div className="absolute inset-x-0 bottom-0 h-24 md:h-40 bg-gradient-to-t from-bg-base via-bg-base/60 to-transparent pointer-events-none" />
-        {activeChannel && (
-          <div className="absolute left-0 bottom-0 right-0 p-3 md:p-8 pointer-events-none">
-            <div className="flex items-end gap-3 md:gap-4">
-              {activeChannel.logo_url && (
-                <img
-                  src={activeChannel.logo_url}
-                  alt=""
-                  className="h-8 w-8 md:h-14 md:w-14 rounded-lg md:rounded-xl object-contain bg-white/10 backdrop-blur-sm p-1 md:p-1.5 shrink-0"
-                  onError={(e) => {
-                    e.currentTarget.style.display = "none";
-                  }}
-                />
-              )}
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2 mb-0.5">
-                  <h1 className="text-sm md:text-2xl font-bold text-white truncate drop-shadow-lg">
-                    {activeChannel.name}
-                  </h1>
-                  <span className="shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded bg-live/90 text-[10px] md:text-xs font-bold text-white uppercase tracking-wider">
-                    <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-                    {t("liveTV.live")}
-                  </span>
-                </div>
+    <section
+      data-theme="tv"
+      data-accent="lime"
+      className="-mx-4 -mt-2 flex flex-col gap-6 px-4 pb-10 pt-4 md:-mx-6 md:px-6"
+    >
+      <TopBar
+        tab={tab}
+        onTab={setTab}
+        search={search}
+        onSearch={setSearch}
+        totalChannels={channels.length}
+        liveNow={featured.length}
+      />
 
-                {activeNowPlaying ? (
-                  <div className="space-y-1">
-                    <p className="text-xs md:text-sm text-white/80 truncate">
-                      <span className="text-white/50">
-                        {t("liveTV.nowPlaying")}:
-                      </span>{" "}
-                      {activeNowPlaying.title}
-                    </p>
-                    <div className="flex items-center gap-2 max-w-xs md:max-w-md">
-                      <div
-                        className="flex-1 h-1 rounded-full bg-white/20 overflow-hidden"
-                        role="progressbar"
-                        aria-valuemin={0}
-                        aria-valuemax={100}
-                        aria-valuenow={Math.round(
-                          getProgramProgress(activeNowPlaying),
-                        )}
-                      >
-                        <div
-                          className="h-full rounded-full bg-accent transition-all duration-1000"
-                          style={{
-                            width: `${getProgramProgress(activeNowPlaying)}%`,
-                          }}
-                        />
-                      </div>
-                      <span className="text-[10px] md:text-xs text-white/40 tabular-nums shrink-0">
-                        {formatTime(activeNowPlaying.end_time)}
-                      </span>
-                    </div>
-                    {activeUpNext && (
-                      <p className="text-[10px] md:text-xs text-white/40 truncate">
-                        {t("liveTV.upNext")}: {activeUpNext.title}{" "}
-                        {t("liveTV.at")} {formatTime(activeUpNext.start_time)}
-                      </p>
-                    )}
-                  </div>
-                ) : activeChannel.group ? (
-                  <p className="text-xs md:text-sm text-white/50 truncate">
-                    {activeChannel.group}
-                  </p>
-                ) : null}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Channel number input hint when zapping */}
-        {zapBuffer && (
-          <div className="absolute top-4 right-4 bg-black/60 backdrop-blur-sm rounded-lg px-3 py-2 text-white text-2xl font-bold tabular-nums tracking-wider">
-            {zapBuffer}
-            <span className="animate-pulse">_</span>
-          </div>
-        )}
-      </div>
-
-      {/* ── Channel Strip (Zapping) ───────────────────────────────── */}
-      {channels.length > 1 && (
-        <ChannelStrip
-          channels={channels}
-          activeChannel={activeChannel}
-          onSelect={handleSelectChannel}
+      {tab === "discover" && (
+        <DiscoverView
+          featured={featured}
+          counts={counts}
+          category={category}
+          onCategoryChange={setCategory}
+          channelsByCategory={channelsByCategory}
+          scheduleByChannel={scheduleByChannel}
+          onOpen={openPlayer}
+          favoriteSet={favoriteSet}
+          onToggleFavorite={toggleFavorite}
+          t={t}
         />
       )}
 
-      {/* ── Search + Category Tabs + View Mode toggle ───────────────── */}
-      <div className="sticky top-[var(--topbar-height)] z-20 bg-bg-base/80 backdrop-blur-xl border-b border-white/5">
-        <div className="px-4 md:px-6 pt-3 pb-0">
-          <div className="flex items-center gap-2 mb-3">
-            <div className="relative flex-1">
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 20 20"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary pointer-events-none"
-              >
-                <circle cx="8.5" cy="8.5" r="5" />
-                <path d="M12.5 12.5L17 17" />
-              </svg>
-              <label className="sr-only" htmlFor="channel-search">
-                {t("liveTV.searchPlaceholder")}
-              </label>
-              <input
-                id="channel-search"
-                type="text"
-                placeholder={t("liveTV.searchPlaceholder")}
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-white/5 border border-white/10 text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30 transition-all"
-              />
-            </div>
+      {tab === "guide" && (
+        <EPGGrid
+          channels={filteredChannels.length > 0 ? filteredChannels : channels}
+          scheduleByChannel={scheduleByChannel}
+          activeChannelId={guideActiveChannel?.id}
+          onSelectChannel={openPlayer}
+        />
+      )}
 
-            {/* View mode toggle */}
-            <div
-              className="flex rounded-xl border border-white/10 overflow-hidden shrink-0"
-              role="tablist"
-              aria-label={t("liveTV.viewMode")}
+      {tab === "favorites" && (
+        <FavoritesView
+          channels={channels}
+          favoriteSet={favoriteSet}
+          scheduleByChannel={scheduleByChannel}
+          onOpen={openPlayer}
+          onToggleFavorite={toggleFavorite}
+          t={t}
+        />
+      )}
+
+      {playingChannel && (
+        <PlayerOverlay
+          channel={playingChannel}
+          allChannels={channels}
+          scheduleByChannel={scheduleByChannel}
+          isFavorite={favoriteSet.has(playingChannel.id)}
+          onToggleFavorite={() => toggleFavorite(playingChannel.id)}
+          onClose={closePlayer}
+          onSelectChannel={openPlayer}
+        />
+      )}
+    </section>
+  );
+}
+
+// ───────────────────────────────────────────────────────────────────
+// TopBar
+// ───────────────────────────────────────────────────────────────────
+
+interface TopBarProps {
+  tab: ViewTab;
+  onTab: (t: ViewTab) => void;
+  search: string;
+  onSearch: (s: string) => void;
+  totalChannels: number;
+  liveNow: number;
+}
+
+function TopBar({
+  tab,
+  onTab,
+  search,
+  onSearch,
+  totalChannels,
+  liveNow,
+}: TopBarProps) {
+  const { t } = useTranslation();
+  const tabs: { id: ViewTab; label: string }[] = [
+    {
+      id: "discover",
+      label: t("liveTV.tab.discover", { defaultValue: "Descubrir" }),
+    },
+    { id: "guide", label: t("liveTV.tab.guide", { defaultValue: "Guía" }) },
+    {
+      id: "favorites",
+      label: t("liveTV.tab.favorites", { defaultValue: "Favoritos" }),
+    },
+  ];
+
+  return (
+    <header className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+      <div>
+        <h1 className="flex items-center gap-2 text-xl font-bold text-tv-fg-0 md:text-2xl">
+          <span className="inline-flex h-2.5 w-2.5 animate-pulse rounded-full bg-tv-live shadow-[0_0_8px_var(--tv-live)]" />
+          {t("liveTV.title", { defaultValue: "TV en directo" })}
+        </h1>
+        <p className="mt-1 text-xs text-tv-fg-2">
+          <b className="text-tv-fg-1">{totalChannels}</b>{" "}
+          {t("liveTV.channels", { defaultValue: "canales" })} ·{" "}
+          <b className="text-tv-fg-1">{liveNow}</b>{" "}
+          {t("liveTV.liveNow", { defaultValue: "en vivo ahora" })}
+        </p>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <label className="relative flex items-center">
+          <span className="sr-only">{t("liveTV.searchPlaceholder")}</span>
+          <SearchIcon />
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => onSearch(e.target.value)}
+            placeholder={t("liveTV.searchPlaceholder", {
+              defaultValue: "Busca canales o programas…",
+            })}
+            className="w-72 rounded-full border border-tv-line bg-tv-bg-1 py-2 pl-9 pr-3 text-sm text-tv-fg-0 placeholder:text-tv-fg-3 focus:border-tv-accent focus:outline-none focus:ring-2 focus:ring-tv-accent/30"
+          />
+        </label>
+
+        <div
+          role="tablist"
+          aria-label={t("liveTV.viewMode", { defaultValue: "Vista" })}
+          className="flex items-center gap-1 rounded-full border border-tv-line bg-tv-bg-1 p-1"
+        >
+          {tabs.map((it) => (
+            <button
+              key={it.id}
+              role="tab"
+              aria-selected={tab === it.id}
+              type="button"
+              onClick={() => onTab(it.id)}
+              className={[
+                "rounded-full px-3 py-1 text-xs font-medium transition-colors",
+                tab === it.id
+                  ? "bg-tv-accent text-tv-accent-ink"
+                  : "text-tv-fg-1 hover:text-tv-fg-0",
+              ].join(" ")}
             >
-              <button
-                type="button"
-                role="tab"
-                aria-selected={viewMode === "carousel"}
-                onClick={() => setViewMode("carousel")}
-                className={[
-                  "px-3 py-2 text-xs font-medium transition-colors",
-                  viewMode === "carousel"
-                    ? "bg-accent/15 text-accent"
-                    : "bg-white/5 text-text-secondary hover:bg-white/10",
-                ].join(" ")}
-              >
-                {t("liveTV.viewCarousel")}
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={viewMode === "grid"}
-                onClick={() => setViewMode("grid")}
-                className={[
-                  "px-3 py-2 text-xs font-medium transition-colors",
-                  viewMode === "grid"
-                    ? "bg-accent/15 text-accent"
-                    : "bg-white/5 text-text-secondary hover:bg-white/10",
-                ].join(" ")}
-              >
-                {t("liveTV.viewGrid")}
-              </button>
-            </div>
-          </div>
-
-          {!search && viewMode === "carousel" && (
-            <div className="flex gap-1 overflow-x-auto pb-3 scrollbar-hide -mx-4 px-4 md:-mx-6 md:px-6">
-              <button
-                type="button"
-                onClick={() => setActiveGroup(null)}
-                className={[
-                  "shrink-0 px-4 py-1.5 rounded-full text-sm font-medium transition-all",
-                  activeGroup === null
-                    ? "bg-accent text-white shadow-lg shadow-accent/20"
-                    : "bg-white/5 text-text-secondary hover:bg-white/10 hover:text-text-primary",
-                ].join(" ")}
-              >
-                {t("liveTV.all")}
-              </button>
-              {groupNames.map((name) => (
-                <button
-                  key={name}
-                  type="button"
-                  onClick={() => setActiveGroup(name)}
-                  className={[
-                    "shrink-0 px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap",
-                    activeGroup === name
-                      ? "bg-accent text-white shadow-lg shadow-accent/20"
-                      : "bg-white/5 text-text-secondary hover:bg-white/10 hover:text-text-primary",
-                  ].join(" ")}
-                >
-                  {name}
-                </button>
-              ))}
-            </div>
-          )}
+              {it.label}
+            </button>
+          ))}
         </div>
       </div>
+    </header>
+  );
+}
 
-      {/* ── Main body: grid OR carousel ─────────────────────────── */}
-      <div className="px-4 md:px-6 pb-8 pt-4">
-        {viewMode === "grid" ? (
-          <EPGGrid
-            channels={channels}
-            scheduleByChannel={scheduleByChannel}
-            activeChannelId={activeChannel?.id}
-            onSelectChannel={handleSelectChannel}
-          />
-        ) : search ? (
-          <>
-            <p className="text-sm text-text-muted py-4">
-              {t("liveTV.channelsFound", { count: searchResults.length })}
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2">
-              {searchResults.map((ch) => (
-                <ChannelCard
-                  key={ch.id}
-                  channel={ch}
-                  isActive={activeChannel?.id === ch.id}
-                  nowPlaying={getNowPlaying(scheduleByChannel[ch.id])}
-                  onClick={() => handleSelectChannel(ch)}
-                />
-              ))}
-            </div>
-          </>
-        ) : activeGroup ? (
-          <div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2">
-              {displayChannels.map((ch) => (
-                <ChannelCard
-                  key={ch.id}
-                  channel={ch}
-                  isActive={activeChannel?.id === ch.id}
-                  nowPlaying={getNowPlaying(scheduleByChannel[ch.id])}
-                  onClick={() => handleSelectChannel(ch)}
-                />
-              ))}
-            </div>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-6">
-            {groupNames.map((groupName) => {
-              const groupChannels = groups.get(groupName) ?? [];
-              return (
-                <section key={groupName}>
-                  <div className="flex items-center justify-between mb-3">
-                    <h2 className="text-base md:text-lg font-semibold text-text-primary">
-                      {groupName}
-                    </h2>
-                    <button
-                      type="button"
-                      onClick={() => setActiveGroup(groupName)}
-                      className="text-xs text-text-muted hover:text-accent transition-colors"
-                    >
-                      {t("common.seeAll")}
-                    </button>
-                  </div>
-                  <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide -mx-4 px-4 md:-mx-6 md:px-6">
-                    {groupChannels.map((ch) => (
-                      <div key={ch.id} className="shrink-0 w-52 md:w-60">
-                        <ChannelCard
-                          channel={ch}
-                          isActive={activeChannel?.id === ch.id}
-                          nowPlaying={getNowPlaying(scheduleByChannel[ch.id])}
-                          onClick={() => handleSelectChannel(ch)}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </section>
-              );
-            })}
-          </div>
-        )}
+function SearchIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="absolute left-3 top-1/2 -translate-y-1/2 text-tv-fg-3"
+      aria-hidden="true"
+    >
+      <circle cx="8.5" cy="8.5" r="5" />
+      <path d="M12.5 12.5L17 17" />
+    </svg>
+  );
+}
 
-        {search && searchResults.length === 0 && (
-          <div className="py-16 text-center text-text-muted">
-            {t("liveTV.noChannelsMatch", { search })}
-          </div>
-        )}
-      </div>
+// ───────────────────────────────────────────────────────────────────
+// DiscoverView
+// ───────────────────────────────────────────────────────────────────
+
+interface DiscoverViewProps {
+  featured: HeroTileData[];
+  counts: Record<CategoryFilter, number>;
+  category: CategoryFilter;
+  onCategoryChange: (c: CategoryFilter) => void;
+  channelsByCategory: Map<ChannelCategory, Channel[]>;
+  scheduleByChannel: Record<string, import("@/api/types").EPGProgram[]>;
+  onOpen: (ch: Channel) => void;
+  favoriteSet: Set<string>;
+  onToggleFavorite: (channelId: string) => void;
+  t: ReturnType<typeof useTranslation>["t"];
+}
+
+function DiscoverView({
+  featured,
+  counts,
+  category,
+  onCategoryChange,
+  channelsByCategory,
+  scheduleByChannel,
+  onOpen,
+  favoriteSet,
+  onToggleFavorite,
+  t,
+}: DiscoverViewProps) {
+  // Rail ordering mirrors the chips' default order so what the user
+  // selects in chips and what they scroll past in rails feel consistent.
+  const railOrder: ChannelCategory[] = [
+    "news",
+    "sports",
+    "movies",
+    "music",
+    "documentaries",
+    "entertainment",
+    "kids",
+    "culture",
+    "international",
+    "travel",
+    "religion",
+    "general",
+    "adult",
+  ];
+
+  const visibleRails =
+    category === "all"
+      ? railOrder
+          .map((c) => [c, channelsByCategory.get(c) ?? []] as const)
+          .filter(([, list]) => list.length > 0)
+      : [[category, channelsByCategory.get(category) ?? []] as const];
+
+  return (
+    <div className="flex flex-col gap-8">
+      <HeroMosaic items={featured} onOpen={onOpen} />
+
+      <CategoryChips
+        counts={counts}
+        active={category}
+        onChange={onCategoryChange}
+      />
+
+      {visibleRails.length === 0 && (
+        <div className="rounded-tv-lg border border-dashed border-tv-line bg-tv-bg-1 p-10 text-center text-sm text-tv-fg-2">
+          {t("liveTV.noChannelsInCategory", {
+            defaultValue: "No hay canales en esta categoría.",
+          })}
+        </div>
+      )}
+
+      {visibleRails.map(([cat, list]) => (
+        <ChannelRail
+          key={cat}
+          title={t(`liveTV.category.${cat}`, {
+            defaultValue: capitalize(cat),
+          })}
+          count={list.length}
+          onSeeAll={
+            category === "all" ? () => onCategoryChange(cat) : undefined
+          }
+        >
+          {list.map((ch) => (
+            <ChannelCard
+              key={ch.id}
+              channel={ch}
+              nowPlaying={getNowPlaying(scheduleByChannel[ch.id])}
+              upNext={getUpNext(scheduleByChannel[ch.id])}
+              isFavorite={favoriteSet.has(ch.id)}
+              onClick={() => onOpen(ch)}
+              onToggleFavorite={() => onToggleFavorite(ch.id)}
+            />
+          ))}
+        </ChannelRail>
+      ))}
     </div>
   );
 }
+
+function capitalize(s: string) {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+// ───────────────────────────────────────────────────────────────────
+// FavoritesView
+// ───────────────────────────────────────────────────────────────────
+
+interface FavoritesViewProps {
+  channels: Channel[];
+  favoriteSet: Set<string>;
+  scheduleByChannel: Record<string, import("@/api/types").EPGProgram[]>;
+  onOpen: (ch: Channel) => void;
+  onToggleFavorite: (channelId: string) => void;
+  t: ReturnType<typeof useTranslation>["t"];
+}
+
+/**
+ * FavoritesView — renders the user's favorite channels as a responsive
+ * grid of ChannelCards. Derives the list from the current library's
+ * channels filtered through `favoriteSet` so stale favorites (channels
+ * removed by an M3U refresh) disappear automatically.
+ *
+ * We derive client-side rather than re-query the `/favorites/channels`
+ * endpoint because it lets the grid share the same Channel objects already
+ * loaded for Discover — keeping the cache tight and avoiding a second
+ * fetch when both tabs are visited in one session.
+ */
+function FavoritesView({
+  channels,
+  favoriteSet,
+  scheduleByChannel,
+  onOpen,
+  onToggleFavorite,
+  t,
+}: FavoritesViewProps) {
+  const favorites = useMemo(
+    () => channels.filter((c) => favoriteSet.has(c.id)),
+    [channels, favoriteSet],
+  );
+
+  if (favorites.length === 0) {
+    return (
+      <div className="flex min-h-[40vh] flex-col items-center justify-center gap-2 rounded-tv-lg border border-dashed border-tv-line bg-tv-bg-1 p-8 text-center text-sm text-tv-fg-2">
+        <div className="text-4xl" aria-hidden="true">
+          ♡
+        </div>
+        <p>
+          {t("liveTV.favoritesEmpty", {
+            defaultValue:
+              "Aún no tienes favoritos. Toca ♥ en cualquier canal para añadirlo.",
+          })}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+      {favorites.map((ch) => (
+        <ChannelCard
+          key={ch.id}
+          channel={ch}
+          nowPlaying={getNowPlaying(scheduleByChannel[ch.id])}
+          upNext={getUpNext(scheduleByChannel[ch.id])}
+          isFavorite
+          onClick={() => onOpen(ch)}
+          onToggleFavorite={() => onToggleFavorite(ch.id)}
+        />
+      ))}
+    </div>
+  );
+}
+

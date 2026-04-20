@@ -1,0 +1,142 @@
+/* ============================================================
+ * TV theme tokens — Live TV section
+ * ============================================================
+ *
+ * Scoped to [data-theme="tv"] so it coexists with the app's teal theme
+ * without leaking. Apply the attribute on the Live TV route root:
+ *
+ *     <section data-theme="tv" className="...">...</section>
+ *
+ * The `--tv-accent` indirection lets the in-app Tweaks panel swap accent
+ * live (lime → cyan → violet → amber) by rewriting a single variable,
+ * mirroring the prototype in /diseño/.
+ *
+ * Token families:
+ *   --tv-bg-{0..4}     backgrounds (darkest → elevated)
+ *   --tv-fg-{0..3}     foregrounds (brightest → muted)
+ *   --tv-line[-strong] hairlines
+ *   --tv-accent[-*]    current accent + tints
+ *   --tv-live[-soft]   live-status red
+ *   --tv-r-{xs..xl}    radii
+ *   --tv-shadow-lg     card/modal drop shadow
+ *
+ * Do NOT reference these tokens outside the TV section — use the app's
+ * globals.css tokens (--color-accent, --color-bg-*, etc.) elsewhere.
+ * ============================================================ */
+
+[data-theme="tv"] {
+  /* Backgrounds — darker and cooler than the app shell to frame video. */
+  --tv-bg-0: #0a0d0b;
+  --tv-bg-1: #10141a;
+  --tv-bg-2: #151a20;
+  --tv-bg-3: #1c222a;
+  --tv-bg-4: #242b36;
+
+  /* Hairlines — rgba so they composite over any bg level. */
+  --tv-line: rgba(255, 255, 255, 0.06);
+  --tv-line-strong: rgba(255, 255, 255, 0.12);
+
+  /* Text */
+  --tv-fg-0: #f4f6f5;
+  --tv-fg-1: #c7ccd2;
+  --tv-fg-2: #8a929d;
+  --tv-fg-3: #5b636e;
+
+  /* Accent palette — default is lime, Tweaks panel can swap via --tv-accent. */
+  --tv-lime: #b6f23c;
+  --tv-cyan: #5ee5e8;
+  --tv-violet: #c99bff;
+  --tv-amber: #ffb84a;
+
+  /* Per-accent ink (foreground used on solid accent fills for contrast). */
+  --tv-ink-lime: #0c1005;
+  --tv-ink-cyan: #02282a;
+  --tv-ink-violet: #1a0c33;
+  --tv-ink-amber: #3b1d00;
+
+  --tv-accent: var(--tv-lime);
+  --tv-accent-ink: var(--tv-ink-lime);
+  --tv-accent-soft: rgba(182, 242, 60, 0.12);
+  --tv-accent-strong: rgba(182, 242, 60, 0.22);
+
+  /* Live indicator red — shared across dots, badges, REC pills. */
+  --tv-live: #ff3b4d;
+  --tv-live-soft: #ff6b78;
+
+  /* Radii scale. */
+  --tv-r-xs: 6px;
+  --tv-r-sm: 10px;
+  --tv-r-md: 14px;
+  --tv-r-lg: 18px;
+  --tv-r-xl: 22px;
+
+  /* Elevation — single layered shadow for cards, overlays, player chrome. */
+  --tv-shadow-lg: 0 30px 60px -30px rgba(0, 0, 0, 0.8),
+    0 12px 24px -12px rgba(0, 0, 0, 0.5);
+
+  /* Section background + default foreground. */
+  background-color: var(--tv-bg-0);
+  color: var(--tv-fg-0);
+}
+
+/* ------------------------------------------------------------
+ * Accent variants — apply as a modifier attribute alongside the
+ * theme attribute, e.g. <section data-theme="tv" data-accent="cyan">.
+ * Only the tokens that change are overridden; the rest inherit.
+ * ------------------------------------------------------------ */
+
+[data-theme="tv"][data-accent="cyan"] {
+  --tv-accent: var(--tv-cyan);
+  --tv-accent-ink: var(--tv-ink-cyan);
+  --tv-accent-soft: rgba(94, 229, 232, 0.12);
+  --tv-accent-strong: rgba(94, 229, 232, 0.22);
+}
+
+[data-theme="tv"][data-accent="violet"] {
+  --tv-accent: var(--tv-violet);
+  --tv-accent-ink: var(--tv-ink-violet);
+  --tv-accent-soft: rgba(201, 155, 255, 0.12);
+  --tv-accent-strong: rgba(201, 155, 255, 0.22);
+}
+
+[data-theme="tv"][data-accent="amber"] {
+  --tv-accent: var(--tv-amber);
+  --tv-accent-ink: var(--tv-ink-amber);
+  --tv-accent-soft: rgba(255, 184, 74, 0.12);
+  --tv-accent-strong: rgba(255, 184, 74, 0.22);
+}
+
+/* ------------------------------------------------------------
+ * Tailwind v4 theme bridge — expose tokens as Tailwind utilities
+ * so components can write `bg-tv-bg-1`, `text-tv-fg-2`, `border-tv-line`,
+ * `rounded-tv-md`, `shadow-tv-lg`, `text-tv-accent`, etc.
+ *
+ * Scoped inside @theme so Tailwind's utility generator picks them up.
+ * ------------------------------------------------------------ */
+
+@theme {
+  --color-tv-bg-0: #0a0d0b;
+  --color-tv-bg-1: #10141a;
+  --color-tv-bg-2: #151a20;
+  --color-tv-bg-3: #1c222a;
+  --color-tv-bg-4: #242b36;
+  --color-tv-fg-0: #f4f6f5;
+  --color-tv-fg-1: #c7ccd2;
+  --color-tv-fg-2: #8a929d;
+  --color-tv-fg-3: #5b636e;
+  --color-tv-line: rgba(255, 255, 255, 0.06);
+  --color-tv-line-strong: rgba(255, 255, 255, 0.12);
+  --color-tv-live: #ff3b4d;
+  --color-tv-live-soft: #ff6b78;
+  --color-tv-accent: var(--tv-accent, #b6f23c);
+  --color-tv-accent-ink: var(--tv-accent-ink, #0c1005);
+
+  --radius-tv-xs: 6px;
+  --radius-tv-sm: 10px;
+  --radius-tv-md: 14px;
+  --radius-tv-lg: 18px;
+  --radius-tv-xl: 22px;
+
+  --shadow-tv-lg: 0 30px 60px -30px rgba(0, 0, 0, 0.8),
+    0 12px 24px -12px rgba(0, 0, 0, 0.5);
+}

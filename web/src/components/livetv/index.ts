@@ -1,9 +1,14 @@
+export { CategoryChips } from "./CategoryChips";
+export type { CategoryFilter } from "./CategoryChips";
 export { ChannelCard } from "./ChannelCard";
 export { ChannelLogo } from "./ChannelLogo";
 export { ChannelPlayer } from "./ChannelPlayer";
-export { ChannelStrip } from "./ChannelStrip";
+export { ChannelRail } from "./ChannelRail";
 export { CountrySelector } from "./CountrySelector";
 export { EPGGrid } from "./EPGGrid";
+export { HeroMosaic } from "./HeroMosaic";
+export type { HeroTileData } from "./HeroMosaic";
+export { PlayerOverlay } from "./PlayerOverlay";
 export { detectCountryCode } from "./detectCountry";
 export {
   formatTime,

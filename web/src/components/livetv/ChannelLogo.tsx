@@ -1,50 +1,61 @@
 import { useState } from "react";
 
 /**
- * ChannelLogo renders the channel's logo with a graceful fallback to the
- * channel number when the image fails to load OR is missing entirely.
+ * ChannelLogo renders a channel's upstream logo with a deterministic
+ * initial-letter fallback when the image is missing, broken, or slow to
+ * load. The fallback values (initials, bg, fg) are computed server-side
+ * in `iptv.DeriveLogoFallback` so the same channel always looks the same
+ * — across renders, sessions, and clients.
  *
- * Previously the channel grid rendered <img src={channel.logo_url}> with no
- * onError handler — a 404 left an empty slot. This component covers both
- * "no URL" and "URL present but dead".
+ * Sizing is driven from the outside via `className` so parents control
+ * their layout. The component only guarantees it fills the box, centers
+ * the fallback text, and falls back on error.
  */
 interface ChannelLogoProps {
   logoUrl?: string | null;
-  number: number;
+  initials: string;
+  bg: string;
+  fg: string;
   name: string;
-  sizeClassName: string; // e.g. "w-7 h-7"
-  fallbackTextClassName: string; // e.g. "text-sm font-bold"
-  alt?: string;
+  /** Tailwind classes for outer sizing + optional rounding, e.g. "w-10 h-10 rounded-lg". */
+  className?: string;
+  /** Font sizing for the initials text, e.g. "text-sm font-bold". */
+  textClassName?: string;
 }
 
 export function ChannelLogo({
   logoUrl,
-  number,
+  initials,
+  bg,
+  fg,
   name,
-  sizeClassName,
-  fallbackTextClassName,
-  alt,
+  className = "w-10 h-10 rounded-lg",
+  textClassName = "text-xs font-bold",
 }: ChannelLogoProps) {
   const [failed, setFailed] = useState(false);
-  const showImage = logoUrl && !failed;
+  const showImage = !!logoUrl && !failed;
 
-  if (showImage) {
-    return (
-      <img
-        src={logoUrl}
-        alt={alt ?? name}
-        className={`${sizeClassName} object-contain`}
-        loading="lazy"
-        onError={() => setFailed(true)}
-      />
-    );
-  }
+  // The background + initials always render — the <img> layers on top when
+  // available. On error the image hides itself and the fallback is already
+  // painted, so there's no flash / layout shift.
   return (
-    <span
-      className={`${sizeClassName} rounded flex items-center justify-center text-text-muted ${fallbackTextClassName}`}
+    <div
+      className={`relative flex items-center justify-center overflow-hidden ${className}`}
+      style={{ backgroundColor: bg, color: fg }}
       aria-label={name}
     >
-      {number || "?"}
-    </span>
+      <span className={textClassName} aria-hidden={showImage}>
+        {initials}
+      </span>
+      {showImage && (
+        <img
+          src={logoUrl}
+          alt=""
+          className="absolute inset-0 h-full w-full object-contain p-1"
+          loading="lazy"
+          onError={() => setFailed(true)}
+        />
+      )}
+    </div>
   );
 }

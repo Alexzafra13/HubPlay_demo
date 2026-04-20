@@ -45,6 +45,8 @@ export const queryKeys = {
   channels: (libraryId?: string) => ["channels", libraryId] as const,
   channel: (id: string) => ["channels", id] as const,
   channelSchedule: (id: string) => ["channels", id, "schedule"] as const,
+  channelFavoriteIDs: ["channel-favorites", "ids"] as const,
+  channelFavorites: ["channel-favorites", "list"] as const,
   channelGroups: (libraryId?: string) => ["channels", "groups", libraryId] as const,
   publicCountries: ["public-countries"] as const,
   itemImages: (id: string) => ["items", id, "images"] as const,
@@ -221,6 +223,95 @@ export function useChannels(
     queryKey: queryKeys.channels(libraryId),
     queryFn: () => api.getChannels(libraryId),
     ...options,
+  });
+}
+
+// ─── Channel favorites ────────────────────────────────────────────────
+//
+// Two queries because the frontend has two needs:
+//   - a Set of IDs for instant toggle feedback on ChannelCard ♥ buttons
+//     (cheap payload, invalidated on every mutation)
+//   - a full list of favorite Channels for the Favorites tab
+//     (heavier, same invalidation)
+//
+// Mutations optimistically update the IDs cache so the ♥ flips immediately,
+// and then invalidate both caches to reconcile with server state.
+
+export function useChannelFavoriteIDs(
+  options?: Partial<UseQueryOptions<string[]>>,
+) {
+  return useQuery<string[]>({
+    queryKey: queryKeys.channelFavoriteIDs,
+    queryFn: () => api.getChannelFavoriteIDs(),
+    staleTime: 60_000,
+    ...options,
+  });
+}
+
+export function useChannelFavorites(
+  options?: Partial<UseQueryOptions<Channel[]>>,
+) {
+  return useQuery<Channel[]>({
+    queryKey: queryKeys.channelFavorites,
+    queryFn: () => api.getChannelFavorites(),
+    staleTime: 60_000,
+    ...options,
+  });
+}
+
+export function useAddChannelFavorite() {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, string, { previous: string[] | undefined }>({
+    mutationFn: (channelId) => api.addChannelFavorite(channelId),
+    onMutate: async (channelId) => {
+      // Optimistic: assume success and flip the local ID set before the
+      // network round-trip lands. Keeps the ♥ responsive on slow links.
+      await queryClient.cancelQueries({ queryKey: queryKeys.channelFavoriteIDs });
+      const previous = queryClient.getQueryData<string[]>(
+        queryKeys.channelFavoriteIDs,
+      );
+      queryClient.setQueryData<string[]>(
+        queryKeys.channelFavoriteIDs,
+        (old) => (old?.includes(channelId) ? old : [channelId, ...(old ?? [])]),
+      );
+      return { previous };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.previous) {
+        queryClient.setQueryData(queryKeys.channelFavoriteIDs, ctx.previous);
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.channelFavoriteIDs });
+      queryClient.invalidateQueries({ queryKey: queryKeys.channelFavorites });
+    },
+  });
+}
+
+export function useRemoveChannelFavorite() {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, string, { previous: string[] | undefined }>({
+    mutationFn: (channelId) => api.removeChannelFavorite(channelId),
+    onMutate: async (channelId) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.channelFavoriteIDs });
+      const previous = queryClient.getQueryData<string[]>(
+        queryKeys.channelFavoriteIDs,
+      );
+      queryClient.setQueryData<string[]>(
+        queryKeys.channelFavoriteIDs,
+        (old) => (old ?? []).filter((id) => id !== channelId),
+      );
+      return { previous };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.previous) {
+        queryClient.setQueryData(queryKeys.channelFavoriteIDs, ctx.previous);
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.channelFavoriteIDs });
+      queryClient.invalidateQueries({ queryKey: queryKeys.channelFavorites });
+    },
   });
 }
 

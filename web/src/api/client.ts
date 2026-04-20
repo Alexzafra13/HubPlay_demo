@@ -429,6 +429,31 @@ export class ApiClient {
     return this.request<Channel[]>("GET", `/libraries/${libraryId}/channels`);
   }
 
+  // Channel favorites. Separate from `getFavorites()` above, which lists
+  // favorited *items* (movies/episodes) — channels live in their own table
+  // and have their own endpoint family.
+  async getChannelFavoriteIDs(): Promise<string[]> {
+    return this.request<string[]>("GET", "/favorites/channels/ids");
+  }
+
+  async getChannelFavorites(): Promise<Channel[]> {
+    return this.request<Channel[]>("GET", "/favorites/channels");
+  }
+
+  async addChannelFavorite(channelId: string): Promise<void> {
+    await this.request<{ channel_id: string; is_favorite: boolean }>(
+      "PUT",
+      `/favorites/channels/${channelId}`,
+    );
+  }
+
+  async removeChannelFavorite(channelId: string): Promise<void> {
+    await this.request<{ channel_id: string; is_favorite: boolean }>(
+      "DELETE",
+      `/favorites/channels/${channelId}`,
+    );
+  }
+
   async getChannel(id: string): Promise<Channel> {
     return this.request<Channel>("GET", `/channels/${id}`);
   }
