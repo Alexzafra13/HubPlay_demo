@@ -79,7 +79,10 @@ var categoryKeywords = []categoryKeyword{
 	}},
 
 	{CategoryNews, []string{
-		"news", "noticia", "notici", "informativ", "telediario", "24h", "24 horas",
+		// "informati" covers Spanish (informativo/informativos) AND Catalan
+		// (informatiu/informatius). "telediari" covers Spanish "telediario"
+		// and Catalan "telediari". "notici" covers noticia/noticias/notícies.
+		"news", "noticia", "notici", "informati", "telediari", "24h", "24 horas",
 		"rne", "cnn", "bbc news", "bbc world", "euronews", "al jazeera", "bloomberg",
 		"la sexta noticias", "antena 3 noticias", "sky news",
 	}},
