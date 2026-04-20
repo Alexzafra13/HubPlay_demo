@@ -157,6 +157,8 @@ export default function LiveTV() {
   // Featured = up to 5 channels that currently have a known program on
   // air, so the hero never looks empty on bootstrap. Falls back to the
   // first 5 channels if no EPG has landed yet.
+  // Featured = up to 5 channels for the hero mosaic; prefer ones with EPG
+  // so the tiles show real "Now on air" titles instead of empty chrome.
   const featured = useMemo<HeroTileData[]>(() => {
     const withProgram: HeroTileData[] = [];
     for (const ch of filteredChannels) {
@@ -167,6 +169,19 @@ export default function LiveTV() {
     if (withProgram.length > 0) return withProgram;
     return filteredChannels.slice(0, 5).map((c) => ({ channel: c }));
   }, [filteredChannels, scheduleByChannel]);
+
+  // Topbar counter: number of channels *actually broadcasting now* — in IPTV
+  // all active channels stream continuously, so this is simply the count of
+  // channels that also have an EPG "now on air" entry. If EPG hasn't been
+  // loaded yet (or isn't configured), it falls back to the total active count
+  // so the stat doesn't stay stuck at 0.
+  const liveNowCount = useMemo(() => {
+    let n = 0;
+    for (const ch of channels) {
+      if (getNowPlaying(scheduleByChannel[ch.id])) n++;
+    }
+    return n > 0 ? n : channels.length;
+  }, [channels, scheduleByChannel]);
 
   // ── Loading + empty states ───────────────────────────────────────
   if (librariesLoading || channelsLoading) {
@@ -196,7 +211,7 @@ export default function LiveTV() {
         search={search}
         onSearch={setSearch}
         totalChannels={channels.length}
-        liveNow={featured.length}
+        liveNow={liveNowCount}
       />
 
       {tab === "discover" && (
