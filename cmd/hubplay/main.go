@@ -127,7 +127,7 @@ func run(configPath string) error {
 	_ = providerManager.Register(ctx, provider.NewOpenSubtitlesProvider())
 
 	scnr := scanner.New(repos.Items, repos.MediaStreams, repos.Metadata, repos.ExternalIDs, repos.Images, providerManager, prober, eventBus, logger)
-	libraryService := library.NewService(repos.Libraries, repos.Items, repos.MediaStreams, repos.Images, scnr, logger)
+	libraryService := library.NewService(repos.Libraries, repos.Items, repos.MediaStreams, repos.Images, repos.Channels, scnr, logger)
 
 	// ═══ Phase 4a: Library Scan Scheduler ═══
 	scanScheduler := library.NewScheduler(libraryService, logger)

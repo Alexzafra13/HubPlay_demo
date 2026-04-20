@@ -19,6 +19,7 @@ type Service struct {
 	items     *db.ItemRepository
 	streams   *db.MediaStreamRepository
 	images    *db.ImageRepository
+	channels  *db.ChannelRepository
 	scanner   *scanner.Scanner
 	logger    *slog.Logger
 
@@ -41,6 +42,7 @@ func NewService(
 	items *db.ItemRepository,
 	streams *db.MediaStreamRepository,
 	images *db.ImageRepository,
+	channels *db.ChannelRepository,
 	scnr *scanner.Scanner,
 	logger *slog.Logger,
 ) *Service {
@@ -50,6 +52,7 @@ func NewService(
 		items:     items,
 		streams:   streams,
 		images:    images,
+		channels:  channels,
 		scanner:   scnr,
 		logger:    logger.With("module", "library"),
 		scanning:  make(map[string]bool),
@@ -296,6 +299,18 @@ func (s *Service) LatestItems(ctx context.Context, libraryID string, itemType st
 }
 
 func (s *Service) ItemCount(ctx context.Context, libraryID string) (int, error) {
+	// livetv libraries don't populate the `items` table — their catalog
+	// lives in `channels`. Dispatch so the admin UI shows a meaningful
+	// count for every library type without having to branch in the
+	// handler.
+	lib, err := s.libraries.GetByID(ctx, libraryID)
+	if err == nil && lib != nil && lib.ContentType == "livetv" && s.channels != nil {
+		chs, err := s.channels.ListByLibrary(ctx, libraryID, false)
+		if err != nil {
+			return 0, fmt.Errorf("count channels: %w", err)
+		}
+		return len(chs), nil
+	}
 	return s.items.CountByLibrary(ctx, libraryID)
 }
 
