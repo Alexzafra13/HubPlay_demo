@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -254,14 +255,39 @@ func (s *Service) RefreshEPG(ctx context.Context, libraryID string) (int, error)
 		return 0, fmt.Errorf("list channels: %w", err)
 	}
 
-	// Build tvg-id → channel ID map
+	// Build tvg-id → channel ID map and a multi-variant name map so an
+	// EPG source with different channel IDs / display-names than the
+	// M3U can still match by name. Common scenario: iptv-org M3U with
+	// tvg-ids like "3CatInfo.es@SD" paired with a Spanish community EPG
+	// (davidmuma, epg.pw) that uses readable names like "3CatInfo" or
+	// "La 1 HD". Without this the EPG loads but never joins — exactly
+	// the symptom users hit today.
 	tvgMap := make(map[string]string)
 	nameMap := make(map[string]string)
+	addName := func(name, id string) {
+		for _, v := range nameVariants(name) {
+			if _, exists := nameMap[v]; !exists {
+				nameMap[v] = id
+			}
+		}
+	}
 	for _, ch := range channels {
 		if ch.TvgID != "" {
 			tvgMap[ch.TvgID] = ch.ID
 		}
-		nameMap[strings.ToLower(ch.Name)] = ch.ID
+		addName(ch.Name, ch.ID)
+	}
+
+	// Build XMLTV id → list of candidate names (the channel's own ID plus
+	// every <display-name> alias). A program's ChannelID maps to one
+	// XMLTV channel record; we try all of that record's names against
+	// our nameMap when direct matches fail.
+	xmltvCandidates := make(map[string][]string, len(epgData.Channels))
+	for _, xch := range epgData.Channels {
+		names := make([]string, 0, 1+len(xch.DisplayNames))
+		names = append(names, xch.ID)
+		names = append(names, xch.DisplayNames...)
+		xmltvCandidates[xch.ID] = names
 	}
 
 	// Match EPG programs to channels and insert
@@ -269,7 +295,7 @@ func (s *Service) RefreshEPG(ctx context.Context, libraryID string) (int, error)
 	programsByChannel := make(map[string][]*db.EPGProgram)
 
 	for _, prog := range epgData.Programs {
-		channelID := matchChannel(prog.ChannelID, tvgMap, nameMap)
+		channelID := matchChannel(prog.ChannelID, xmltvCandidates[prog.ChannelID], tvgMap, nameMap)
 		if channelID == "" {
 			continue
 		}
@@ -374,16 +400,73 @@ func (s *Service) fetchURL(ctx context.Context, url string) (io.ReadCloser, erro
 }
 
 // matchChannel tries to match an EPG channel ID to a database channel.
-func matchChannel(epgChannelID string, tvgMap, nameMap map[string]string) string {
-	// Exact tvg-id match
+// matchChannel joins an XMLTV programme to one of our channels. Tries, in
+// order: exact tvg-id match, exact tvg-id match against any XMLTV
+// display-name alias, name-variant match against the programme's XMLTV
+// channel id, name-variant match against any display-name alias.
+//
+// The goal is to make free community EPGs (davidmuma, epg.pw, …) join up
+// with the iptv-org M3U even though their channel IDs don't align. Once
+// one variant matches we keep that binding — no scoring / "best match"
+// heuristic, because XMLTV display-name lists are curated enough that
+// any match is reliable.
+func matchChannel(epgChannelID string, xmltvDisplayNames []string, tvgMap, nameMap map[string]string) string {
+	// 1. Exact tvg-id on the incoming programme's channel ref.
 	if id, ok := tvgMap[epgChannelID]; ok {
 		return id
 	}
-	// Case-insensitive name match
-	if id, ok := nameMap[strings.ToLower(epgChannelID)]; ok {
-		return id
+	// 2. Some EPGs expose each channel's stream URL as tvg-id in their
+	//    M3U pair; try XMLTV display-names against tvgMap too.
+	for _, dn := range xmltvDisplayNames {
+		if id, ok := tvgMap[dn]; ok {
+			return id
+		}
+	}
+	// 3. Normalised-name match against the XMLTV channel id itself.
+	for _, v := range nameVariants(epgChannelID) {
+		if id, ok := nameMap[v]; ok {
+			return id
+		}
+	}
+	// 4. Normalised-name match against every display-name alias. This is
+	//    where davidmuma's `<display-name>La 1 HD</display-name>` hooks
+	//    into our channel.Name = "La 1 (1080p)" after stripping quality.
+	for _, dn := range xmltvDisplayNames {
+		for _, v := range nameVariants(dn) {
+			if id, ok := nameMap[v]; ok {
+				return id
+			}
+		}
 	}
 	return ""
+}
+
+// qualityRE matches the quality / resolution / bitrate suffixes that
+// iptv-org and other sources routinely append to channel names. Kept as
+// a list of alternations rather than a single regex so we can extend it
+// with provider-specific noise (e.g. "[Geo-blocked]", "[Not 24/7]").
+var qualityRE = regexp.MustCompile(
+	`(?i)\s*(?:\[[^\]]*\]|\([^)]*\)|\b(?:uhd|fhd|hd|sd|4k|8k|1080p?|720p?|576p?|480p?|360p?|240p?|backup|alt)\b)`,
+)
+
+// nameVariants returns a list of lowercased, accent-folded strings that
+// should all match the same channel. For "La 1 (1080p) [Geo-blocked]" it
+// yields ["la 1 (1080p) [geo-blocked]", "la 1"]. The fully-stripped
+// variant is what usually matches EPG display-names.
+func nameVariants(name string) []string {
+	base := strings.ToLower(strings.TrimSpace(name))
+	if base == "" {
+		return nil
+	}
+	folded := diacriticFolder.Replace(base)
+	variants := []string{folded}
+
+	stripped := strings.TrimSpace(qualityRE.ReplaceAllString(folded, " "))
+	stripped = strings.Join(strings.Fields(stripped), " ")
+	if stripped != "" && stripped != folded {
+		variants = append(variants, stripped)
+	}
+	return variants
 }
 
 func assignNumber(parsed, index int) int {

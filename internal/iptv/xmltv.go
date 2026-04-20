@@ -15,10 +15,16 @@ type EPGData struct {
 }
 
 // EPGChannel represents a channel definition from XMLTV.
+//
+// XMLTV files typically list multiple `<display-name>` entries per
+// channel — e.g. "La 1", "La 1 HD", "La 1.TV" — so a single playlist
+// can match against any of the aliases. We keep them all; the matcher
+// in service.go tries each variant before giving up.
 type EPGChannel struct {
-	ID   string
-	Name string
-	Icon string
+	ID           string
+	Name         string   // first display-name (kept for backwards-compat)
+	DisplayNames []string // all display-names, in source order
+	Icon         string
 }
 
 // EPGProgram represents a program entry from XMLTV.
@@ -83,6 +89,12 @@ func ParseXMLTV(r io.Reader) (*EPGData, error) {
 		epgCh := EPGChannel{ID: ch.ID}
 		if len(ch.DisplayName) > 0 {
 			epgCh.Name = ch.DisplayName[0].Text
+			epgCh.DisplayNames = make([]string, 0, len(ch.DisplayName))
+			for _, dn := range ch.DisplayName {
+				if dn.Text != "" {
+					epgCh.DisplayNames = append(epgCh.DisplayNames, dn.Text)
+				}
+			}
 		}
 		if len(ch.Icon) > 0 {
 			epgCh.Icon = ch.Icon[0].Src
