@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useQueries } from "@tanstack/react-query";
 import {
+  queryKeys,
   useAddChannelFavorite,
   useBulkSchedule,
   useChannelFavoriteIDs,
-  useChannels,
   useLibraries,
   useRemoveChannelFavorite,
 } from "@/api/hooks";
+import { api } from "@/api/client";
 import type { Channel, ChannelCategory } from "@/api/types";
 import { Spinner } from "@/components/common";
 import {
@@ -43,12 +45,31 @@ type ViewTab = "discover" | "guide" | "favorites";
 export default function LiveTV() {
   const { t } = useTranslation();
   const { data: libraries, isLoading: librariesLoading } = useLibraries();
-  const liveTvLibrary = useMemo(
-    () => libraries?.find((l) => l.content_type === "livetv"),
+
+  // Every livetv library the current user can see. Channels from all of
+  // them are merged into a single pool for the Discover/Guide surfaces —
+  // the admin can have multiple (one per country, one per provider…) and
+  // the viewer shouldn't care which library a channel came from.
+  const liveTvLibraries = useMemo(
+    () => (libraries ?? []).filter((l) => l.content_type === "livetv"),
     [libraries],
   );
-  const { data: rawChannels, isLoading: channelsLoading } = useChannels(
-    liveTvLibrary?.id,
+
+  // Parallel channel fetches — one query per library. `useQueries` returns
+  // the same shape as `useQuery` for each entry; we flatten `.data` into a
+  // single Channel[] below. Cache keys match `useChannels` so a library
+  // scan invalidation hits both hooks.
+  const channelQueries = useQueries({
+    queries: liveTvLibraries.map((lib) => ({
+      queryKey: queryKeys.channels(lib.id),
+      queryFn: () => api.getChannels(lib.id),
+    })),
+  });
+  const channelsLoading =
+    liveTvLibraries.length > 0 && channelQueries.some((q) => q.isLoading);
+  const rawChannels = useMemo<Channel[]>(
+    () => channelQueries.flatMap((q) => q.data ?? []),
+    [channelQueries],
   );
 
   // Inactive channels 404 on playback — hide them rather than leave dead
@@ -192,8 +213,8 @@ export default function LiveTV() {
     );
   }
 
-  if (!liveTvLibrary || channels.length === 0) {
-    return <CountrySelector hasLibrary={!!liveTvLibrary} />;
+  if (liveTvLibraries.length === 0 || channels.length === 0) {
+    return <CountrySelector hasLibrary={liveTvLibraries.length > 0} />;
   }
 
   // ── Active-channel pointer for EPGGrid (kept for the Guide tab) ───

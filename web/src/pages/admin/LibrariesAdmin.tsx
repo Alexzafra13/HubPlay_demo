@@ -10,6 +10,7 @@ import {
   useRefreshLibraryImages,
   useRefreshM3U,
   useRefreshEPG,
+  usePublicCountries,
 } from "@/api/hooks";
 import { Button, Badge, Modal, Input, Spinner, EmptyState } from "@/components/common";
 import { FolderBrowser } from "@/components/setup/FolderBrowser";
@@ -66,10 +67,27 @@ export default function LibrariesAdmin() {
   const [newType, setNewType] = useState<ContentType>("movies");
   const [newPath, setNewPath] = useState("");
   const [showCreateBrowse, setShowCreateBrowse] = useState(false);
+  // livetv-specific: "public" = iptv-org country picker, "custom" = paste URLs.
+  const [newLiveSource, setNewLiveSource] = useState<"public" | "custom">(
+    "public",
+  );
+  const [newCountry, setNewCountry] = useState("");
+  const [newM3UURL, setNewM3UURL] = useState("");
+  const [newEPGURL, setNewEPGURL] = useState("");
+
+  // Only fires the network request while the Add modal is open AND the user
+  // has picked livetv — avoids loading the 200-country list for every admin
+  // page view. Declared after the state hooks it depends on so TS's
+  // temporal-dead-zone check stays happy.
+  const publicCountries = usePublicCountries({
+    enabled: showAddModal && newType === "livetv" && newLiveSource === "public",
+  });
 
   // Edit library form state
   const [editName, setEditName] = useState("");
   const [editPath, setEditPath] = useState("");
+  const [editM3UURL, setEditM3UURL] = useState("");
+  const [editEPGURL, setEditEPGURL] = useState("");
   const [showEditBrowse, setShowEditBrowse] = useState(false);
 
   // Auto-clear refresh message after 4 seconds
@@ -83,20 +101,63 @@ export default function LibrariesAdmin() {
     setEditTarget(lib);
     setEditName(lib.name);
     setEditPath((lib.paths ?? [])[0] ?? "");
+    setEditM3UURL(lib.m3u_url ?? "");
+    setEditEPGURL(lib.epg_url ?? "");
+  }
+
+  function resetAddForm() {
+    setNewName("");
+    setNewType("movies");
+    setNewPath("");
+    setNewLiveSource("public");
+    setNewCountry("");
+    setNewM3UURL("");
+    setNewEPGURL("");
   }
 
   function handleCreate(e: FormEvent) {
     e.preventDefault();
-    if (!newName.trim() || !newPath.trim()) return;
+    if (!newName.trim()) return;
 
+    if (newType === "livetv") {
+      // Resolve the M3U URL depending on the chosen source.
+      let m3uURL = "";
+      if (newLiveSource === "public") {
+        if (!newCountry) return;
+        m3uURL = `https://iptv-org.github.io/iptv/countries/${newCountry}.m3u`;
+      } else {
+        if (!newM3UURL.trim()) return;
+        m3uURL = newM3UURL.trim();
+      }
+      createLibrary.mutate(
+        {
+          name: newName.trim(),
+          content_type: "livetv",
+          paths: [],
+          m3u_url: m3uURL,
+          epg_url: newEPGURL.trim() || undefined,
+        },
+        {
+          onSuccess: (lib) => {
+            setShowAddModal(false);
+            resetAddForm();
+            // Auto-trigger the first M3U refresh so the library isn't empty
+            // the moment the admin closes the modal.
+            refreshM3U.mutate(lib.id);
+          },
+        },
+      );
+      return;
+    }
+
+    // Non-livetv: path-based library.
+    if (!newPath.trim()) return;
     createLibrary.mutate(
       { name: newName.trim(), content_type: newType, paths: [newPath.trim()] },
       {
         onSuccess: () => {
           setShowAddModal(false);
-          setNewName("");
-          setNewType("movies");
-          setNewPath("");
+          resetAddForm();
         },
       },
     );
@@ -104,8 +165,28 @@ export default function LibrariesAdmin() {
 
   function handleEdit(e: FormEvent) {
     e.preventDefault();
-    if (!editTarget || !editName.trim() || !editPath.trim()) return;
+    if (!editTarget || !editName.trim()) return;
 
+    if (editTarget.content_type === "livetv") {
+      if (!editM3UURL.trim()) return;
+      updateLibrary.mutate(
+        {
+          id: editTarget.id,
+          data: {
+            name: editName.trim(),
+            m3u_url: editM3UURL.trim(),
+            // Explicit empty string clears; if the admin wants to preserve
+            // we still send the trimmed value (which is identical to current).
+            epg_url: editEPGURL.trim(),
+          },
+        },
+        { onSuccess: () => setEditTarget(null) },
+      );
+      return;
+    }
+
+    // Non-livetv: path edit.
+    if (!editPath.trim()) return;
     updateLibrary.mutate(
       {
         id: editTarget.id,
@@ -418,24 +499,134 @@ export default function LibrariesAdmin() {
             </select>
           </div>
 
-          <div className="flex gap-2 items-end">
-            <div className="flex-1">
+          {newType === "livetv" ? (
+            <>
+              {/* Source tabs — Público (iptv-org) vs Personalizada */}
+              <div
+                role="tablist"
+                aria-label={t('admin.libraries.livetvSource', {
+                  defaultValue: 'Fuente',
+                })}
+                className="flex gap-1 rounded-[--radius-md] border border-border bg-bg-surface p-1"
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={newLiveSource === "public"}
+                  onClick={() => setNewLiveSource("public")}
+                  className={[
+                    "flex-1 rounded-[--radius-sm] px-3 py-1.5 text-xs font-medium transition-colors",
+                    newLiveSource === "public"
+                      ? "bg-accent/15 text-accent"
+                      : "text-text-secondary hover:text-text-primary",
+                  ].join(" ")}
+                >
+                  {t('admin.libraries.livetvPublic', {
+                    defaultValue: 'Público (iptv-org)',
+                  })}
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={newLiveSource === "custom"}
+                  onClick={() => setNewLiveSource("custom")}
+                  className={[
+                    "flex-1 rounded-[--radius-sm] px-3 py-1.5 text-xs font-medium transition-colors",
+                    newLiveSource === "custom"
+                      ? "bg-accent/15 text-accent"
+                      : "text-text-secondary hover:text-text-primary",
+                  ].join(" ")}
+                >
+                  {t('admin.libraries.livetvCustom', {
+                    defaultValue: 'Personalizada',
+                  })}
+                </button>
+              </div>
+
+              {newLiveSource === "public" ? (
+                <div className="flex flex-col gap-1.5">
+                  <label
+                    htmlFor="livetv-country"
+                    className="text-sm font-medium text-text-secondary"
+                  >
+                    {t('admin.libraries.country', { defaultValue: 'País' })}
+                  </label>
+                  <select
+                    id="livetv-country"
+                    value={newCountry}
+                    onChange={(e) => setNewCountry(e.target.value)}
+                    required
+                    className="w-full rounded-[--radius-md] bg-bg-card border border-border px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30"
+                  >
+                    <option value="" disabled>
+                      {publicCountries.isLoading
+                        ? t('common.loading', { defaultValue: 'Cargando…' })
+                        : t('admin.libraries.pickCountry', {
+                            defaultValue: 'Elige un país…',
+                          })}
+                    </option>
+                    {(publicCountries.data ?? []).map((c) => (
+                      <option key={c.code} value={c.code}>
+                        {c.flag} {c.name}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[11px] text-text-muted">
+                    {t('admin.libraries.publicIPTVHint', {
+                      defaultValue:
+                        'Se usará la playlist del proyecto iptv-org para ese país.',
+                    })}
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <Input
+                    label={t('admin.libraries.m3uUrl', {
+                      defaultValue: 'URL M3U',
+                    })}
+                    placeholder="https://ejemplo.com/playlist.m3u"
+                    value={newM3UURL}
+                    onChange={(e) => setNewM3UURL(e.target.value)}
+                    required
+                  />
+                </>
+              )}
+
               <Input
-                label={t('admin.libraries.path')}
-                placeholder={t('admin.libraries.pathPlaceholder')}
-                value={newPath}
-                onChange={(e) => setNewPath(e.target.value)}
-                required
+                label={t('admin.libraries.epgUrl', {
+                  defaultValue: 'URL EPG (opcional)',
+                })}
+                placeholder="https://ejemplo.com/epg.xml"
+                value={newEPGURL}
+                onChange={(e) => setNewEPGURL(e.target.value)}
               />
+              <p className="-mt-2 text-[11px] text-text-muted">
+                {t('admin.libraries.epgURLHint', {
+                  defaultValue:
+                    'Si el M3U trae url-tvg en su cabecera, se auto-detecta.',
+                })}
+              </p>
+            </>
+          ) : (
+            <div className="flex gap-2 items-end">
+              <div className="flex-1">
+                <Input
+                  label={t('admin.libraries.path')}
+                  placeholder={t('admin.libraries.pathPlaceholder')}
+                  value={newPath}
+                  onChange={(e) => setNewPath(e.target.value)}
+                  required
+                />
+              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setShowCreateBrowse(true)}
+              >
+                {t('common.browse')}
+              </Button>
             </div>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => setShowCreateBrowse(true)}
-            >
-              {t('common.browse')}
-            </Button>
-          </div>
+          )}
 
           {createLibrary.error && (
             <p className="text-xs text-error">{createLibrary.error.message}</p>
@@ -471,24 +662,52 @@ export default function LibrariesAdmin() {
             required
           />
 
-          <div className="flex gap-2 items-end">
-            <div className="flex-1">
+          {editTarget?.content_type === "livetv" ? (
+            <>
               <Input
-                label={t('admin.libraries.path')}
-                placeholder={t('admin.libraries.pathPlaceholder')}
-                value={editPath}
-                onChange={(e) => setEditPath(e.target.value)}
+                label={t('admin.libraries.m3uUrl', {
+                  defaultValue: 'URL M3U',
+                })}
+                placeholder="https://ejemplo.com/playlist.m3u"
+                value={editM3UURL}
+                onChange={(e) => setEditM3UURL(e.target.value)}
                 required
               />
+              <Input
+                label={t('admin.libraries.epgUrl', {
+                  defaultValue: 'URL EPG (opcional)',
+                })}
+                placeholder="https://ejemplo.com/epg.xml"
+                value={editEPGURL}
+                onChange={(e) => setEditEPGURL(e.target.value)}
+              />
+              <p className="-mt-2 text-[11px] text-text-muted">
+                {t('admin.libraries.epgURLHint', {
+                  defaultValue:
+                    'Si el M3U trae url-tvg en su cabecera, se auto-detecta.',
+                })}
+              </p>
+            </>
+          ) : (
+            <div className="flex gap-2 items-end">
+              <div className="flex-1">
+                <Input
+                  label={t('admin.libraries.path')}
+                  placeholder={t('admin.libraries.pathPlaceholder')}
+                  value={editPath}
+                  onChange={(e) => setEditPath(e.target.value)}
+                  required
+                />
+              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setShowEditBrowse(true)}
+              >
+                {t('common.browse')}
+              </Button>
             </div>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => setShowEditBrowse(true)}
-            >
-              {t('common.browse')}
-            </Button>
-          </div>
+          )}
 
           {updateLibrary.error && (
             <p className="text-xs text-error">{updateLibrary.error.message}</p>

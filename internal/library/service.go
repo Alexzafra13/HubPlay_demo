@@ -69,9 +69,15 @@ func (s *Service) Shutdown() {
 
 type CreateRequest struct {
 	Name        string   `json:"name"`
-	ContentType string   `json:"content_type"` // movies, shows, music
+	ContentType string   `json:"content_type"` // movies, shows, music, livetv
 	Paths       []string `json:"paths"`
 	ScanMode    string   `json:"scan_mode"` // auto, manual
+
+	// IPTV-only (content_type == "livetv"). `M3UURL` is required for livetv;
+	// `EPGURL` is optional — if omitted, RefreshM3U will try to auto-discover
+	// an XMLTV URL from the playlist's `#EXTM3U url-tvg=...` header.
+	M3UURL string `json:"m3u_url,omitempty"`
+	EPGURL string `json:"epg_url,omitempty"`
 }
 
 func (s *Service) Create(ctx context.Context, req CreateRequest) (*db.Library, error) {
@@ -93,6 +99,8 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*db.Library, e
 		CreatedAt:    now,
 		UpdatedAt:    now,
 		Paths:        req.Paths,
+		M3UURL:       req.M3UURL,
+		EPGURL:       req.EPGURL,
 	}
 
 	if err := s.libraries.Create(ctx, lib); err != nil {
@@ -104,7 +112,11 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*db.Library, e
 	// Auto-scan the new library (like Jellyfin does on library creation).
 	// Inherits bgCtx so Shutdown can cancel in-flight scans; the WaitGroup
 	// lets Shutdown wait for the goroutine before returning.
-	if lib.ScanMode != "manual" {
+	//
+	// livetv libraries skip this — there are no filesystem paths to scan.
+	// The admin UI triggers the first `iptv/refresh-m3u` right after creation
+	// to populate channels, so nothing is lost by not scanning here.
+	if lib.ScanMode != "manual" && lib.ContentType != "livetv" {
 		s.bgWG.Add(1)
 		go func() {
 			defer s.bgWG.Done()
@@ -142,6 +154,12 @@ type UpdateRequest struct {
 	ContentType string   `json:"content_type"`
 	Paths       []string `json:"paths"`
 	ScanMode    string   `json:"scan_mode"`
+
+	// IPTV-only. Pointer so "omitted" (leave existing) is distinguishable
+	// from "empty string" (clear the value). json.Decode leaves these nil
+	// when the key isn't in the payload, matching that semantic.
+	M3UURL *string `json:"m3u_url,omitempty"`
+	EPGURL *string `json:"epg_url,omitempty"`
 }
 
 func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (*db.Library, error) {
@@ -161,6 +179,12 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (*db
 	}
 	if req.ScanMode != "" {
 		lib.ScanMode = req.ScanMode
+	}
+	if req.M3UURL != nil {
+		lib.M3UURL = *req.M3UURL
+	}
+	if req.EPGURL != nil {
+		lib.EPGURL = *req.EPGURL
 	}
 	lib.UpdatedAt = time.Now()
 
@@ -297,11 +321,24 @@ func validateCreateRequest(req CreateRequest) error {
 	if req.Name == "" {
 		fields["name"] = "is required"
 	}
-	validTypes := map[string]bool{"movies": true, "shows": true, "music": true}
-	if !validTypes[req.ContentType] {
-		fields["content_type"] = "must be movies, shows, or music"
+	// `livetv` is accepted here so the generic Create endpoint can be used
+	// for IPTV libraries (public country playlists via iptv-org or fully
+	// custom M3U URLs). Validation differs: livetv requires `m3u_url`;
+	// everything else requires at least one filesystem path.
+	validTypes := map[string]bool{
+		"movies": true,
+		"shows":  true,
+		"music":  true,
+		"livetv": true,
 	}
-	if len(req.Paths) == 0 {
+	if !validTypes[req.ContentType] {
+		fields["content_type"] = "must be movies, shows, music, or livetv"
+	}
+	if req.ContentType == "livetv" {
+		if req.M3UURL == "" {
+			fields["m3u_url"] = "is required for livetv libraries"
+		}
+	} else if len(req.Paths) == 0 {
 		fields["paths"] = "at least one path is required"
 	}
 	if len(fields) > 0 {

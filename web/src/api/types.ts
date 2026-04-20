@@ -56,12 +56,21 @@ export interface Library {
 export interface CreateLibraryRequest {
   name: string;
   content_type: ContentType;
+  /** Filesystem paths — required for movies/shows/music, empty for livetv. */
   paths: string[];
+  /** IPTV-only (content_type === "livetv"). Required when livetv is selected. */
+  m3u_url?: string;
+  /** IPTV-only. Optional: RefreshM3U auto-discovers XMLTV from the playlist header. */
+  epg_url?: string;
 }
 
 export interface UpdateLibraryRequest {
   name?: string;
   paths?: string[];
+  /** IPTV-only. Pass null/undefined to leave unchanged; empty string clears. */
+  m3u_url?: string;
+  /** IPTV-only. Same null-vs-empty semantics as m3u_url. */
+  epg_url?: string;
 }
 
 // ─── Media Items ────────────────────────────────────────────────────────────
