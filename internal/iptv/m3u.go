@@ -44,6 +44,17 @@ type M3UChannel struct {
 	Country   string
 }
 
+// Playlist is the full result of parsing an M3U file: the channel list plus
+// any playlist-level metadata we care about (currently just the XMLTV EPG
+// URL advertised in the #EXTM3U header).
+type Playlist struct {
+	Channels []M3UChannel
+	// EPGURL is the URL advertised by the playlist for fetching an XMLTV
+	// electronic programme guide. Empty if the playlist didn't publish one.
+	// Populated from `url-tvg`, `x-tvg-url`, or `tvg-url` on the #EXTM3U line.
+	EPGURL string
+}
+
 // attrPattern matches key="value" pairs in EXTINF lines.
 var attrPattern = regexp.MustCompile(`([a-zA-Z_-]+)="([^"]*)"`)
 
@@ -51,7 +62,8 @@ var attrPattern = regexp.MustCompile(`([a-zA-Z_-]+)="([^"]*)"`)
 // very start. Stripping it lets the header detector find "#EXTM3U".
 var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
 
-// ParseM3U parses an M3U/M3U8 playlist from a reader and returns the channels.
+// ParseM3U parses an M3U/M3U8 playlist from a reader and returns the parsed
+// playlist: channel list plus any playlist-level metadata (EPG URL).
 //
 // Deduplicates by TvgID: if a playlist lists the same TvgID twice, only the
 // first occurrence is kept. Entries without a TvgID are never deduplicated
@@ -61,7 +73,7 @@ var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
 //
 // Strips a leading UTF-8 BOM so the #EXTM3U header check still matches on
 // files saved by Windows tools.
-func ParseM3U(r io.Reader) ([]M3UChannel, error) {
+func ParseM3U(r io.Reader) (*Playlist, error) {
 	br := bufio.NewReader(r)
 	// Peek at the first 3 bytes; discard a BOM if present.
 	if prefix, err := br.Peek(3); err == nil && len(prefix) == 3 &&
@@ -72,7 +84,7 @@ func ParseM3U(r io.Reader) ([]M3UChannel, error) {
 	scanner := bufio.NewScanner(br)
 	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024) // 10MB max line
 
-	var channels []M3UChannel
+	playlist := &Playlist{}
 	seen := make(map[string]bool) // TvgIDs already kept
 	var current *M3UChannel
 	lineNum := 0
@@ -86,9 +98,12 @@ func ParseM3U(r io.Reader) ([]M3UChannel, error) {
 			continue
 		}
 
-		// First non-empty line should be #EXTM3U
+		// First non-empty line should be #EXTM3U. iptv-org and many other
+		// public feeds advertise their XMLTV URL right here as
+		// `url-tvg="…"` (and some tools use `x-tvg-url` or `tvg-url`).
 		if !headerSeen {
 			if strings.HasPrefix(line, "#EXTM3U") {
+				playlist.EPGURL = parseHeaderEPGURL(line)
 				headerSeen = true
 				continue
 			}
@@ -118,7 +133,7 @@ func ParseM3U(r io.Reader) ([]M3UChannel, error) {
 					}
 					seen[current.TvgID] = true
 				}
-				channels = append(channels, *current)
+				playlist.Channels = append(playlist.Channels, *current)
 			}
 			current = nil
 		}
@@ -128,7 +143,36 @@ func ParseM3U(r io.Reader) ([]M3UChannel, error) {
 		return nil, fmt.Errorf("reading M3U at line %d: %w", lineNum, err)
 	}
 
-	return channels, nil
+	return playlist, nil
+}
+
+// parseHeaderEPGURL extracts the XMLTV URL from the #EXTM3U header line.
+// Checks `url-tvg`, `x-tvg-url`, and `tvg-url` in that order — different
+// tools use different spellings for the same concept. A header may advertise
+// a comma-separated list of XMLTV URLs; we take the first entry since our
+// storage model keeps a single URL per library.
+func parseHeaderEPGURL(headerLine string) string {
+	matches := attrPattern.FindAllStringSubmatch(headerLine, -1)
+	preferred := []string{"url-tvg", "x-tvg-url", "tvg-url"}
+	found := make(map[string]string, len(preferred))
+	for _, m := range matches {
+		key := strings.ToLower(m[1])
+		found[key] = m[2]
+	}
+	for _, key := range preferred {
+		if val, ok := found[key]; ok && val != "" {
+			// Some feeds ship a comma-separated list of XMLTV URLs; we keep
+			// the first one since we store a single URL per library.
+			if idx := strings.Index(val, ","); idx != -1 {
+				val = val[:idx]
+			}
+			val = strings.TrimSpace(val)
+			if isValidStreamURL(val) {
+				return val
+			}
+		}
+	}
+	return ""
 }
 
 // parseExtInf parses an #EXTINF line into a channel.
