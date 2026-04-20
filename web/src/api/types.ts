@@ -175,6 +175,10 @@ export interface Channel {
   logo_fg: string;
   stream_url: string;
   library_id: string;
+  /** BCP-47 or raw M3U `tvg-language`. May be empty. */
+  language: string;
+  /** ISO-like country code from M3U (e.g. "ES"). May be empty. */
+  country: string;
   is_active?: boolean;
 }
 

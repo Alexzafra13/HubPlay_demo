@@ -11,6 +11,11 @@ import (
 )
 
 type Querier interface {
+	// Per-user IPTV channel favorites.
+	//
+	// Table schema: migrations/sqlite/006_channel_favorites.sql.
+	// PK: (user_id, channel_id).
+	AddChannelFavorite(ctx context.Context, arg AddChannelFavoriteParams) error
 	CleanupOldPrograms(ctx context.Context, endTime time.Time) (int64, error)
 	ContinueWatching(ctx context.Context, arg ContinueWatchingParams) ([]ContinueWatchingRow, error)
 	CountExternalIDsByItem(ctx context.Context, itemID string) (int64, error)
@@ -99,10 +104,13 @@ type Querier interface {
 	InsertLibrary(ctx context.Context, arg InsertLibraryParams) error
 	InsertLibraryPath(ctx context.Context, arg InsertLibraryPathParams) error
 	InsertMediaStream(ctx context.Context, arg InsertMediaStreamParams) error
+	IsChannelFavorite(ctx context.Context, arg IsChannelFavoriteParams) (int64, error)
 	ListActiveChannelsByLibrary(ctx context.Context, libraryID string) ([]ListActiveChannelsByLibraryRow, error)
 	ListActiveProviders(ctx context.Context) ([]Provider, error)
 	ListActiveSigningKeys(ctx context.Context) ([]JwtSigningKey, error)
 	ListAllPaths(ctx context.Context) ([]LibraryPath, error)
+	ListChannelFavorites(ctx context.Context, userID string) ([]ListChannelFavoritesRow, error)
+	ListChannelFavoritesWithChannel(ctx context.Context, userID string) ([]ListChannelFavoritesWithChannelRow, error)
 	ListChannelGroups(ctx context.Context, libraryID string) ([]sql.NullString, error)
 	ListChannelsByLibrary(ctx context.Context, libraryID string) ([]ListChannelsByLibraryRow, error)
 	ListExternalIDsByItem(ctx context.Context, itemID string) ([]ExternalID, error)
@@ -119,6 +127,7 @@ type Querier interface {
 	ListSigningKeys(ctx context.Context) ([]JwtSigningKey, error)
 	ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUsersRow, error)
 	MarkPlayed(ctx context.Context, arg MarkPlayedParams) error
+	RemoveChannelFavorite(ctx context.Context, arg RemoveChannelFavoriteParams) error
 	RevokeLibraryAccess(ctx context.Context, arg RevokeLibraryAccessParams) error
 	SetChannelActive(ctx context.Context, arg SetChannelActiveParams) (int64, error)
 	SetFavorite(ctx context.Context, arg SetFavoriteParams) error
