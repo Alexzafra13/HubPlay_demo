@@ -8,6 +8,8 @@ import {
   useScanLibrary,
   useDeleteLibrary,
   useRefreshLibraryImages,
+  useRefreshM3U,
+  useRefreshEPG,
 } from "@/api/hooks";
 import { Button, Badge, Modal, Input, Spinner, EmptyState } from "@/components/common";
 import { FolderBrowser } from "@/components/setup/FolderBrowser";
@@ -49,6 +51,8 @@ export default function LibrariesAdmin() {
   const createLibrary = useCreateLibrary();
   const updateLibrary = useUpdateLibrary();
   const scanLibrary = useScanLibrary();
+  const refreshM3U = useRefreshM3U();
+  const refreshEPG = useRefreshEPG();
   const deleteLibrary = useDeleteLibrary();
   const refreshImages = useRefreshLibraryImages();
 
@@ -202,63 +206,149 @@ export default function LibrariesAdmin() {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-2">
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        isLoading={
-                          scanLibrary.isPending &&
-                          scanLibrary.variables?.id === lib.id &&
-                          !scanLibrary.variables?.refreshMetadata
-                        }
-                        disabled={lib.scan_status === "scanning"}
-                        onClick={() => scanLibrary.mutate({ id: lib.id })}
-                      >
-                        {t('admin.libraries.scan')}
-                      </Button>
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        isLoading={
-                          scanLibrary.isPending &&
-                          scanLibrary.variables?.id === lib.id &&
-                          !!scanLibrary.variables?.refreshMetadata
-                        }
-                        disabled={lib.scan_status === "scanning"}
-                        onClick={() => scanLibrary.mutate({ id: lib.id, refreshMetadata: true })}
-                        title={t('admin.libraries.refreshMetadataTooltip')}
-                      >
-                        {t('admin.libraries.refreshMetadata')}
-                      </Button>
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        isLoading={
-                          refreshImages.isPending &&
-                          refreshImages.variables?.libraryId === lib.id
-                        }
-                        disabled={lib.scan_status === "scanning"}
-                        onClick={() =>
-                          refreshImages.mutate(
-                            { libraryId: lib.id },
-                            {
-                              onSuccess: (data) =>
-                                setRefreshMessage({
-                                  type: "success",
-                                  text: t('admin.libraries.refreshImagesSuccess', { count: data.updated }),
-                                  libId: lib.id,
-                                }),
-                              onError: () =>
-                                setRefreshMessage({
-                                  type: "error",
-                                  text: t('admin.libraries.refreshImagesFailed'),
-                                  libId: lib.id,
-                                }),
-                            },
-                          )
-                        }
-                      >
-                        {t('admin.libraries.refreshImages')}
-                      </Button>
+                      {lib.content_type === "livetv" ? (
+                        // ── Live TV row: refresh M3U + refresh EPG ──
+                        // Filesystem scan and metadata/image refresh don't
+                        // apply here; showing them would just yield dead
+                        // buttons, so we route to the IPTV-specific
+                        // actions instead.
+                        <>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            isLoading={
+                              refreshM3U.isPending && refreshM3U.variables === lib.id
+                            }
+                            onClick={() =>
+                              refreshM3U.mutate(lib.id, {
+                                onSuccess: (data) =>
+                                  setRefreshMessage({
+                                    type: "success",
+                                    text: t('admin.libraries.refreshM3USuccess', {
+                                      defaultValue: `{{count}} canales importados`,
+                                      count: data.channels_imported,
+                                    }),
+                                    libId: lib.id,
+                                  }),
+                                onError: () =>
+                                  setRefreshMessage({
+                                    type: "error",
+                                    text: t('admin.libraries.refreshM3UFailed', {
+                                      defaultValue: 'No se pudo refrescar el M3U.',
+                                    }),
+                                    libId: lib.id,
+                                  }),
+                              })
+                            }
+                            title={lib.m3u_url || undefined}
+                          >
+                            {t('admin.libraries.refreshM3U', {
+                              defaultValue: 'Actualizar canales',
+                            })}
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            isLoading={
+                              refreshEPG.isPending && refreshEPG.variables === lib.id
+                            }
+                            disabled={!lib.epg_url}
+                            onClick={() =>
+                              refreshEPG.mutate(lib.id, {
+                                onSuccess: (data) =>
+                                  setRefreshMessage({
+                                    type: "success",
+                                    text: t('admin.libraries.refreshEPGSuccess', {
+                                      defaultValue: `{{count}} programas importados`,
+                                      count: data.programs_imported,
+                                    }),
+                                    libId: lib.id,
+                                  }),
+                                onError: () =>
+                                  setRefreshMessage({
+                                    type: "error",
+                                    text: t('admin.libraries.refreshEPGFailed', {
+                                      defaultValue: 'No se pudo refrescar la guía EPG.',
+                                    }),
+                                    libId: lib.id,
+                                  }),
+                              })
+                            }
+                            title={
+                              lib.epg_url ||
+                              t('admin.libraries.noEPGURL', {
+                                defaultValue:
+                                  'No hay URL EPG configurada en esta biblioteca.',
+                              })
+                            }
+                          >
+                            {t('admin.libraries.refreshEPG', {
+                              defaultValue: 'Actualizar EPG',
+                            })}
+                          </Button>
+                        </>
+                      ) : (
+                        // ── Regular media library: scan + metadata + images ──
+                        <>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            isLoading={
+                              scanLibrary.isPending &&
+                              scanLibrary.variables?.id === lib.id &&
+                              !scanLibrary.variables?.refreshMetadata
+                            }
+                            disabled={lib.scan_status === "scanning"}
+                            onClick={() => scanLibrary.mutate({ id: lib.id })}
+                          >
+                            {t('admin.libraries.scan')}
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            isLoading={
+                              scanLibrary.isPending &&
+                              scanLibrary.variables?.id === lib.id &&
+                              !!scanLibrary.variables?.refreshMetadata
+                            }
+                            disabled={lib.scan_status === "scanning"}
+                            onClick={() => scanLibrary.mutate({ id: lib.id, refreshMetadata: true })}
+                            title={t('admin.libraries.refreshMetadataTooltip')}
+                          >
+                            {t('admin.libraries.refreshMetadata')}
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            isLoading={
+                              refreshImages.isPending &&
+                              refreshImages.variables?.libraryId === lib.id
+                            }
+                            disabled={lib.scan_status === "scanning"}
+                            onClick={() =>
+                              refreshImages.mutate(
+                                { libraryId: lib.id },
+                                {
+                                  onSuccess: (data) =>
+                                    setRefreshMessage({
+                                      type: "success",
+                                      text: t('admin.libraries.refreshImagesSuccess', { count: data.updated }),
+                                      libId: lib.id,
+                                    }),
+                                  onError: () =>
+                                    setRefreshMessage({
+                                      type: "error",
+                                      text: t('admin.libraries.refreshImagesFailed'),
+                                      libId: lib.id,
+                                    }),
+                                },
+                              )
+                            }
+                          >
+                            {t('admin.libraries.refreshImages')}
+                          </Button>
+                        </>
+                      )}
                       <Button
                         variant="ghost"
                         size="sm"

@@ -586,6 +586,37 @@ export function useScanLibrary() {
   });
 }
 
+// IPTV refresh mutations. Separate from useScanLibrary because filesystem
+// scan doesn't apply to livetv libraries — these hit /iptv/refresh-m3u and
+// /iptv/refresh-epg instead, and invalidate the channel + EPG caches so
+// the Live TV page reflects the refresh without a page reload.
+
+export function useRefreshM3U() {
+  const queryClient = useQueryClient();
+  return useMutation<{ channels_imported: number }, Error, string>({
+    mutationFn: (libraryId) => api.refreshM3U(libraryId),
+    onSuccess: (_data, libraryId) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.libraries });
+      queryClient.invalidateQueries({ queryKey: queryKeys.library(libraryId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.channels(libraryId) });
+      queryClient.invalidateQueries({ queryKey: ["bulk-schedule"] });
+    },
+  });
+}
+
+export function useRefreshEPG() {
+  const queryClient = useQueryClient();
+  return useMutation<{ programs_imported: number }, Error, string>({
+    mutationFn: (libraryId) => api.refreshEPG(libraryId),
+    onSuccess: () => {
+      // EPG refresh touches every channel's schedule; just invalidate the
+      // whole bulk-schedule keyspace rather than cherry-picking.
+      queryClient.invalidateQueries({ queryKey: ["bulk-schedule"] });
+      queryClient.invalidateQueries({ queryKey: ["channels"] });
+    },
+  });
+}
+
 export function useCreateUser() {
   const queryClient = useQueryClient();
   return useMutation<

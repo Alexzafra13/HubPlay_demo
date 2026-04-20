@@ -47,6 +47,10 @@ export interface Library {
   scan_mode: string;
   scan_status: ScanStatus;
   created_at: string;
+  /** IPTV-only: M3U playlist URL (empty for non-livetv libraries). */
+  m3u_url?: string;
+  /** IPTV-only: XMLTV EPG URL (empty when not configured). */
+  epg_url?: string;
 }
 
 export interface CreateLibraryRequest {

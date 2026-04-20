@@ -454,6 +454,22 @@ export class ApiClient {
     );
   }
 
+  // IPTV playlist / EPG refresh (admin-only). These are the correct
+  // "scan" actions for a livetv library — filesystem scan doesn't apply.
+  async refreshM3U(libraryId: string): Promise<{ channels_imported: number }> {
+    return this.request<{ channels_imported: number }>(
+      "POST",
+      `/libraries/${libraryId}/iptv/refresh-m3u`,
+    );
+  }
+
+  async refreshEPG(libraryId: string): Promise<{ programs_imported: number }> {
+    return this.request<{ programs_imported: number }>(
+      "POST",
+      `/libraries/${libraryId}/iptv/refresh-epg`,
+    );
+  }
+
   async getChannel(id: string): Promise<Channel> {
     return this.request<Channel>("GET", `/channels/${id}`);
   }

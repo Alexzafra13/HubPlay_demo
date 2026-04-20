@@ -337,6 +337,11 @@ func libraryResponse(lib *db.Library) map[string]any {
 		"path_status":  pathStatus,
 		"created_at":   lib.CreatedAt,
 		"updated_at":   lib.UpdatedAt,
+		// IPTV-specific fields — always present but empty for non-livetv
+		// libraries. Exposed so the admin UI can render the right actions
+		// (refresh M3U / refresh EPG) and show configuration at a glance.
+		"m3u_url": lib.M3UURL,
+		"epg_url": lib.EPGURL,
 	}
 }
 
