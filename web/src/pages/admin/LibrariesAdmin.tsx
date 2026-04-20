@@ -16,6 +16,95 @@ import { Button, Badge, Modal, Input, Spinner, EmptyState } from "@/components/c
 import { FolderBrowser } from "@/components/setup/FolderBrowser";
 import { useTranslation } from 'react-i18next';
 
+// ─── iptv-org catalogues ───────────────────────────────────────────────────
+//
+// Curated slugs + labels for the four URL families iptv-org publishes.
+// Countries come from the live API (usePublicCountries) because it's a
+// long tail that rotates; the other three are stable enough to hardcode.
+//
+// URL patterns:
+//   /iptv/countries/{code}.m3u     (code = ISO 3166-1 alpha-2, lowercase)
+//   /iptv/categories/{slug}.m3u
+//   /iptv/languages/{slug}.m3u     (slug = ISO 639-3)
+//   /iptv/regions/{slug}.m3u
+
+const IPTV_ORG_CATEGORIES: { code: string; name: string }[] = [
+  { code: "general", name: "General" },
+  { code: "news", name: "Informativos" },
+  { code: "sports", name: "Deportes" },
+  { code: "movies", name: "Películas" },
+  { code: "series", name: "Series" },
+  { code: "music", name: "Música" },
+  { code: "kids", name: "Infantiles" },
+  { code: "documentary", name: "Documentales" },
+  { code: "entertainment", name: "Entretenimiento" },
+  { code: "comedy", name: "Comedia" },
+  { code: "business", name: "Negocios" },
+  { code: "education", name: "Educación" },
+  { code: "lifestyle", name: "Estilo de vida" },
+  { code: "travel", name: "Viajes" },
+  { code: "weather", name: "Tiempo" },
+  { code: "science", name: "Ciencia" },
+  { code: "religious", name: "Religioso" },
+  { code: "shop", name: "Shopping" },
+  { code: "cooking", name: "Cocina" },
+  { code: "auto", name: "Motor" },
+  { code: "animation", name: "Animación" },
+  { code: "classic", name: "Clásicos" },
+  { code: "family", name: "Familiar" },
+  { code: "legislative", name: "Legislativo" },
+  { code: "outdoor", name: "Exterior" },
+  { code: "relax", name: "Relax" },
+  { code: "xxx", name: "Adultos" },
+];
+
+const IPTV_ORG_LANGUAGES: { code: string; name: string }[] = [
+  { code: "spa", name: "Español" },
+  { code: "cat", name: "Catalán" },
+  { code: "glg", name: "Gallego" },
+  { code: "eus", name: "Euskera" },
+  { code: "eng", name: "English" },
+  { code: "por", name: "Portugués" },
+  { code: "fra", name: "Français" },
+  { code: "deu", name: "Deutsch" },
+  { code: "ita", name: "Italiano" },
+  { code: "nld", name: "Nederlands" },
+  { code: "rus", name: "Русский" },
+  { code: "ara", name: "العربية" },
+  { code: "tur", name: "Türkçe" },
+  { code: "pol", name: "Polski" },
+  { code: "ell", name: "Ελληνικά" },
+  { code: "ron", name: "Română" },
+  { code: "ces", name: "Čeština" },
+  { code: "hun", name: "Magyar" },
+  { code: "swe", name: "Svenska" },
+  { code: "nor", name: "Norsk" },
+  { code: "dan", name: "Dansk" },
+  { code: "fin", name: "Suomi" },
+  { code: "ukr", name: "Українська" },
+  { code: "heb", name: "עברית" },
+  { code: "hin", name: "हिन्दी" },
+  { code: "cmn", name: "中文 (Mandarin)" },
+  { code: "jpn", name: "日本語" },
+  { code: "kor", name: "한국어" },
+  { code: "tha", name: "ภาษาไทย" },
+  { code: "vie", name: "Tiếng Việt" },
+];
+
+const IPTV_ORG_REGIONS: { code: string; name: string }[] = [
+  { code: "eur", name: "Europa" },
+  { code: "amer", name: "América" },
+  { code: "nam", name: "Norteamérica" },
+  { code: "latam", name: "Latinoamérica" },
+  { code: "afr", name: "África" },
+  { code: "asia", name: "Asia" },
+  { code: "seasia", name: "Sudeste Asiático" },
+  { code: "oce", name: "Oceanía" },
+  { code: "mena", name: "Oriente Medio y Norte de África" },
+  { code: "carib", name: "Caribe" },
+  { code: "nord", name: "Países Nórdicos" },
+];
+
 const CONTENT_TYPES: { value: ContentType; key: string }[] = [
   { value: "movies", key: "contentTypes.movies" },
   { value: "tvshows", key: "contentTypes.tvShows" },
@@ -46,6 +135,70 @@ function contentTypeBadge(type: string) {
   }
 }
 
+// FilteredSelect — a native <select> whose option list is narrowed by a text
+// filter provided from outside. Chose a native select over a custom combobox
+// because it's keyboard-accessible, mobile-friendly, and matches the rest of
+// the admin's visual language. The filter input lives in the parent so every
+// kind (country/category/language/region) can share one.
+function FilteredSelect({
+  id,
+  label,
+  value,
+  onChange,
+  filter,
+  loading,
+  options,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  filter: string;
+  loading?: boolean;
+  options: { code: string; name: string }[];
+}) {
+  const q = filter.trim().toLowerCase();
+  const filtered = q
+    ? options.filter(
+        (o) =>
+          o.name.toLowerCase().includes(q) ||
+          o.code.toLowerCase().includes(q),
+      )
+    : options;
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label
+        htmlFor={id}
+        className="text-sm font-medium text-text-secondary"
+      >
+        {label}
+        {q && (
+          <span className="ml-2 text-[10px] font-normal text-text-muted">
+            {filtered.length}/{options.length}
+          </span>
+        )}
+      </label>
+      <select
+        id={id}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        required
+        className="w-full rounded-[--radius-md] bg-bg-card border border-border px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30"
+      >
+        <option value="" disabled>
+          {loading ? "Cargando…" : "Elige una opción…"}
+        </option>
+        {filtered.map((o) => (
+          <option key={o.code} value={o.code}>
+            {o.name} ({o.code})
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 export default function LibrariesAdmin() {
   const { t } = useTranslation();
   const { data: libraries, isLoading, error } = useLibraries();
@@ -71,7 +224,16 @@ export default function LibrariesAdmin() {
   const [newLiveSource, setNewLiveSource] = useState<"public" | "custom">(
     "public",
   );
+  // iptv-org supports four URL families: countries/categories/languages/regions.
+  // Keeping one state per kind lets the user switch tabs without losing typed
+  // input, and the single search filter `newLiveFilter` scopes to whatever is
+  // currently active.
+  const [newLiveKind, setNewLiveKind] = useState<
+    "country" | "category" | "language" | "region"
+  >("country");
+  const [newLiveFilter, setNewLiveFilter] = useState("");
   const [newCountry, setNewCountry] = useState("");
+  const [newLivePick, setNewLivePick] = useState("");
   const [newM3UURL, setNewM3UURL] = useState("");
   const [newEPGURL, setNewEPGURL] = useState("");
 
@@ -110,7 +272,10 @@ export default function LibrariesAdmin() {
     setNewType("movies");
     setNewPath("");
     setNewLiveSource("public");
+    setNewLiveKind("country");
+    setNewLiveFilter("");
     setNewCountry("");
+    setNewLivePick("");
     setNewM3UURL("");
     setNewEPGURL("");
   }
@@ -123,8 +288,17 @@ export default function LibrariesAdmin() {
       // Resolve the M3U URL depending on the chosen source.
       let m3uURL = "";
       if (newLiveSource === "public") {
-        if (!newCountry) return;
-        m3uURL = `https://iptv-org.github.io/iptv/countries/${newCountry}.m3u`;
+        const pick = newLiveKind === "country" ? newCountry : newLivePick;
+        if (!pick) return;
+        // iptv-org URL family map. Countries are under /iptv/countries/ by
+        // ISO code; categories/languages/regions each have their own path.
+        const pathByKind: Record<typeof newLiveKind, string> = {
+          country: "countries",
+          category: "categories",
+          language: "languages",
+          region: "regions",
+        };
+        m3uURL = `https://iptv-org.github.io/iptv/${pathByKind[newLiveKind]}/${pick}.m3u`;
       } else {
         if (!newM3UURL.trim()) return;
         m3uURL = newM3UURL.trim();
@@ -544,37 +718,105 @@ export default function LibrariesAdmin() {
               </div>
 
               {newLiveSource === "public" ? (
-                <div className="flex flex-col gap-1.5">
-                  <label
-                    htmlFor="livetv-country"
-                    className="text-sm font-medium text-text-secondary"
+                <div className="flex flex-col gap-3">
+                  {/* Kind selector — iptv-org has 4 URL families */}
+                  <div
+                    role="tablist"
+                    aria-label="Tipo de lista"
+                    className="grid grid-cols-4 gap-1 rounded-[--radius-md] border border-border bg-bg-surface p-1 text-xs"
                   >
-                    {t('admin.libraries.country', { defaultValue: 'País' })}
-                  </label>
-                  <select
-                    id="livetv-country"
-                    value={newCountry}
-                    onChange={(e) => setNewCountry(e.target.value)}
-                    required
-                    className="w-full rounded-[--radius-md] bg-bg-card border border-border px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30"
-                  >
-                    <option value="" disabled>
-                      {publicCountries.isLoading
-                        ? t('common.loading', { defaultValue: 'Cargando…' })
-                        : t('admin.libraries.pickCountry', {
-                            defaultValue: 'Elige un país…',
-                          })}
-                    </option>
-                    {(publicCountries.data ?? []).map((c) => (
-                      <option key={c.code} value={c.code}>
-                        {c.flag} {c.name}
-                      </option>
+                    {(
+                      [
+                        { k: "country", label: "País" },
+                        { k: "category", label: "Categoría" },
+                        { k: "language", label: "Idioma" },
+                        { k: "region", label: "Región" },
+                      ] as const
+                    ).map(({ k, label }) => (
+                      <button
+                        key={k}
+                        type="button"
+                        role="tab"
+                        aria-selected={newLiveKind === k}
+                        onClick={() => {
+                          setNewLiveKind(k);
+                          setNewLiveFilter("");
+                          setNewCountry("");
+                          setNewLivePick("");
+                        }}
+                        className={[
+                          "rounded-[--radius-sm] px-2 py-1 font-medium transition-colors",
+                          newLiveKind === k
+                            ? "bg-accent/15 text-accent"
+                            : "text-text-secondary hover:text-text-primary",
+                        ].join(" ")}
+                      >
+                        {label}
+                      </button>
                     ))}
-                  </select>
+                  </div>
+
+                  {/* Live filter input — works across all four kinds. */}
+                  <Input
+                    label={t('admin.libraries.searchList', {
+                      defaultValue: 'Filtrar',
+                    })}
+                    placeholder={t('admin.libraries.searchListPlaceholder', {
+                      defaultValue: 'Escribe para filtrar…',
+                    })}
+                    value={newLiveFilter}
+                    onChange={(e) => setNewLiveFilter(e.target.value)}
+                  />
+
+                  {/* The actual picker. Separate branches keep each select's
+                      options and selected value independent — switching tabs
+                      doesn't wipe the filter but does reset the pick. */}
+                  {newLiveKind === "country" ? (
+                    <FilteredSelect
+                      id="livetv-country"
+                      label={t('admin.libraries.country', { defaultValue: 'País' })}
+                      value={newCountry}
+                      onChange={setNewCountry}
+                      filter={newLiveFilter}
+                      loading={publicCountries.isLoading}
+                      options={(publicCountries.data ?? []).map((c) => ({
+                        code: c.code,
+                        name: `${c.flag} ${c.name}`,
+                      }))}
+                    />
+                  ) : newLiveKind === "category" ? (
+                    <FilteredSelect
+                      id="livetv-category"
+                      label="Categoría"
+                      value={newLivePick}
+                      onChange={setNewLivePick}
+                      filter={newLiveFilter}
+                      options={IPTV_ORG_CATEGORIES}
+                    />
+                  ) : newLiveKind === "language" ? (
+                    <FilteredSelect
+                      id="livetv-language"
+                      label="Idioma"
+                      value={newLivePick}
+                      onChange={setNewLivePick}
+                      filter={newLiveFilter}
+                      options={IPTV_ORG_LANGUAGES}
+                    />
+                  ) : (
+                    <FilteredSelect
+                      id="livetv-region"
+                      label="Región"
+                      value={newLivePick}
+                      onChange={setNewLivePick}
+                      filter={newLiveFilter}
+                      options={IPTV_ORG_REGIONS}
+                    />
+                  )}
+
                   <p className="text-[11px] text-text-muted">
                     {t('admin.libraries.publicIPTVHint', {
                       defaultValue:
-                        'Se usará la playlist del proyecto iptv-org para ese país.',
+                        'Playlists públicas del proyecto iptv-org. Puedes añadir varias (p. ej. España + Francia + Deportes).',
                     })}
                   </p>
                 </div>

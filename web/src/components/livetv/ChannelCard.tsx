@@ -146,15 +146,25 @@ export function ChannelCard({
           />
         )}
 
-        {/* Top-left: channel number + LIVE pill */}
-        <div className="pointer-events-none absolute left-2 top-2 flex items-center gap-1.5">
+        {/* Top-left: channel number + LIVE pill (only when there's EPG data
+            so the badge means "actually broadcasting known content now",
+            not just "this stream exists"). Country tag appears to the
+            right when we know which country the channel is from. */}
+        <div className="pointer-events-none absolute left-2 top-2 flex max-w-[calc(100%-3rem)] items-center gap-1.5">
           <span className="rounded-tv-xs bg-black/50 px-1.5 py-0.5 font-mono text-[10px] font-semibold tracking-wider text-tv-fg-0 backdrop-blur">
             CH {channel.number}
           </span>
-          <span className="flex items-center gap-1 rounded-tv-xs bg-tv-live/90 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
-            Live
-          </span>
+          {nowPlaying && (
+            <span className="flex items-center gap-1 rounded-tv-xs bg-tv-live/90 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
+              Live
+            </span>
+          )}
+          {channel.country && (
+            <span className="truncate rounded-tv-xs bg-black/50 px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-tv-fg-1 backdrop-blur">
+              {channel.country}
+            </span>
+          )}
         </div>
 
         {/* Top-right: favorite heart */}

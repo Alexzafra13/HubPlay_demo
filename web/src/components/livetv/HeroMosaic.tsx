@@ -31,13 +31,21 @@ export function HeroMosaic({ items, onOpen }: HeroMosaicProps) {
   const [main, ...rest] = items;
   const sides = rest.slice(0, 4);
 
+  // Mirrors the /diseño/ prototype: a 3-column grid (1.4fr / 1fr / 1fr) with
+  // the main tile pinned to col 1 across both rows, and up to 4 side tiles
+  // flowing into the 2×2 block on the right.
+  //
+  // Earlier version used `grid-cols-12` with `col-span-5` sides, which only
+  // fit 2 sides per 2-row layout and spilled the rest into phantom rows 3-4
+  // (leaving a huge empty gradient under the main tile and pushing the
+  // rails below the fold).
   return (
-    <div className="grid grid-cols-1 gap-3 lg:grid-cols-12 lg:grid-rows-2">
+    <div className="grid grid-cols-1 gap-3 md:grid-cols-[1.4fr_1fr_1fr] md:grid-rows-2">
       <HeroTile
         data={main}
         variant="main"
         onOpen={onOpen}
-        className="lg:col-span-7 lg:row-span-2"
+        className="md:col-start-1 md:row-span-2"
       />
       {sides.map((item) => (
         <HeroTile
@@ -45,7 +53,6 @@ export function HeroMosaic({ items, onOpen }: HeroMosaicProps) {
           data={item}
           variant="side"
           onOpen={onOpen}
-          className="lg:col-span-5 lg:row-span-1 lg:odd:col-start-8 lg:even:col-start-8"
         />
       ))}
     </div>
@@ -74,7 +81,10 @@ function HeroTile({ data, variant, onOpen, className = "" }: HeroTileProps) {
       onClick={() => onOpen?.(channel)}
       className={[
         "group relative overflow-hidden rounded-tv-lg border border-tv-line text-left transition hover:border-tv-line-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tv-accent",
-        isMain ? "min-h-[260px] md:min-h-[360px]" : "min-h-[180px]",
+        // Heights tuned so the whole mosaic + chips + first rail stay
+        // above the fold on a 900 px laptop viewport. Main tile stays
+        // taller than sides to keep the "hero" feel.
+        isMain ? "min-h-[220px] md:min-h-[280px]" : "min-h-[130px]",
         className,
       ].join(" ")}
       aria-label={
@@ -87,16 +97,24 @@ function HeroTile({ data, variant, onOpen, className = "" }: HeroTileProps) {
         aria-hidden="true"
       />
 
-      {/* Top meta row */}
+      {/* Top meta row — LIVE only shows when we actually have EPG for
+          "now on air"; otherwise just the category tag is enough. */}
       <div className="absolute left-4 right-4 top-4 flex items-center gap-2">
-        <span className="flex items-center gap-1 rounded-tv-xs bg-tv-live/90 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider text-white">
-          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
-          Live
-        </span>
+        {nowPlaying && (
+          <span className="flex items-center gap-1 rounded-tv-xs bg-tv-live/90 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider text-white">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
+            Live
+          </span>
+        )}
         <span className="rounded-tv-xs bg-black/40 px-2 py-0.5 text-[11px] font-medium text-tv-fg-0 backdrop-blur">
           {channel.category.charAt(0).toUpperCase() +
             channel.category.slice(1)}
         </span>
+        {channel.country && (
+          <span className="rounded-tv-xs bg-black/40 px-2 py-0.5 font-mono text-[11px] font-semibold uppercase tracking-wider text-tv-fg-1 backdrop-blur">
+            {channel.country}
+          </span>
+        )}
       </div>
 
       {/* Bottom content */}
