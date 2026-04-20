@@ -8,6 +8,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"bufio"
+	"compress/gzip"
 	"regexp"
 	"strings"
 	"sync"
@@ -385,6 +387,10 @@ func (s *Service) fetchURL(ctx context.Context, url string) (io.ReadCloser, erro
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+	// Accept-Encoding: most EPG hosts publish a `.xml.gz` URL and expect
+	// the client to gunzip. Some also negotiate via Content-Encoding.
+	// We handle both: see maybeDecompress below.
+	req.Header.Set("Accept-Encoding", "gzip")
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
@@ -396,8 +402,68 @@ func (s *Service) fetchURL(ctx context.Context, url string) (io.ReadCloser, erro
 		return nil, fmt.Errorf("fetch %s: status %d", url, resp.StatusCode)
 	}
 
-	return resp.Body, nil
+	return maybeDecompress(resp.Body, resp.Header.Get("Content-Encoding"), url)
 }
+
+// maybeDecompress returns a reader that transparently gunzips the body when
+// it's gzipped. Detection uses three signals in order of reliability:
+//
+//  1. Content-Encoding header explicitly says "gzip" (standard HTTP).
+//  2. URL ends in ".gz" (common for static hosts serving pre-gzipped files
+//     with Content-Type: application/x-gzip and no Content-Encoding header —
+//     GitHub raw does exactly this).
+//  3. The first two bytes match the gzip magic (1f 8b). This catches hosts
+//     that mis-serve `.xml` URLs as gzip bytes.
+//
+// Falls back to the raw body if nothing matches — never blows up a refresh
+// because of detection uncertainty.
+func maybeDecompress(body io.ReadCloser, contentEncoding, url string) (io.ReadCloser, error) {
+	if strings.EqualFold(contentEncoding, "gzip") || strings.HasSuffix(strings.ToLower(url), ".gz") {
+		gz, err := gzip.NewReader(body)
+		if err != nil {
+			_ = body.Close()
+			return nil, fmt.Errorf("gunzip %s: %w", url, err)
+		}
+		return &gzipCloser{Reader: gz, underlying: body}, nil
+	}
+
+	// Sniff magic bytes as a last resort — wrap with a bufio peek that
+	// doesn't lose data.
+	br := bufio.NewReader(body)
+	peek, _ := br.Peek(2)
+	if len(peek) == 2 && peek[0] == 0x1f && peek[1] == 0x8b {
+		gz, err := gzip.NewReader(br)
+		if err != nil {
+			_ = body.Close()
+			return nil, fmt.Errorf("gunzip %s: %w", url, err)
+		}
+		return &gzipCloser{Reader: gz, underlying: body}, nil
+	}
+	return &bufferedCloser{Reader: br, underlying: body}, nil
+}
+
+// gzipCloser closes both the gzip reader and the underlying HTTP body.
+// The stdlib gzip.Reader doesn't chain Close() to its source.
+type gzipCloser struct {
+	io.Reader
+	underlying io.Closer
+}
+
+func (g *gzipCloser) Close() error {
+	if closer, ok := g.Reader.(io.Closer); ok {
+		_ = closer.Close()
+	}
+	return g.underlying.Close()
+}
+
+// bufferedCloser wraps a bufio.Reader so its Close() reaches the underlying
+// http.Response.Body.
+type bufferedCloser struct {
+	io.Reader
+	underlying io.Closer
+}
+
+func (b *bufferedCloser) Close() error { return b.underlying.Close() }
 
 // matchChannel tries to match an EPG channel ID to a database channel.
 // matchChannel joins an XMLTV programme to one of our channels. Tries, in
