@@ -35,6 +35,10 @@ type iptvFakeService struct {
 	refreshM3UErr   error
 	refreshEPGErr   error
 	refreshM3UCalls []string
+
+	// Per-user channel-favorites set, keyed by userID → set of channelIDs.
+	// Nil until the first write; methods lazily initialize.
+	favoritesByUser map[string]map[string]struct{}
 }
 
 func newIPTVFakeService() *iptvFakeService {
@@ -103,6 +107,65 @@ func (s *iptvFakeService) RefreshM3U(_ context.Context, libraryID string) (int, 
 
 func (s *iptvFakeService) RefreshEPG(_ context.Context, _ string) (int, error) {
 	return s.refreshEPGCount, s.refreshEPGErr
+}
+
+// ─── Favorites (fake) ───────────────────────────────────────────────────────
+//
+// Minimal in-memory map keyed by user: covers the handler contract without
+// needing a DB. Tests that exercise favorites populate `favoritesByUser`
+// directly or call the Add/Remove methods.
+
+func (s *iptvFakeService) AddFavorite(_ context.Context, userID, channelID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.favoritesByUser == nil {
+		s.favoritesByUser = map[string]map[string]struct{}{}
+	}
+	set, ok := s.favoritesByUser[userID]
+	if !ok {
+		set = map[string]struct{}{}
+		s.favoritesByUser[userID] = set
+	}
+	set[channelID] = struct{}{}
+	return nil
+}
+
+func (s *iptvFakeService) RemoveFavorite(_ context.Context, userID, channelID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if set, ok := s.favoritesByUser[userID]; ok {
+		delete(set, channelID)
+	}
+	return nil
+}
+
+func (s *iptvFakeService) IsFavorite(_ context.Context, userID, channelID string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.favoritesByUser[userID][channelID]
+	return ok, nil
+}
+
+func (s *iptvFakeService) ListFavoriteIDs(_ context.Context, userID string) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]string, 0, len(s.favoritesByUser[userID]))
+	for id := range s.favoritesByUser[userID] {
+		out = append(out, id)
+	}
+	return out, nil
+}
+
+func (s *iptvFakeService) ListFavoriteChannels(_ context.Context, userID string) ([]*db.Channel, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := []*db.Channel{}
+	for id := range s.favoritesByUser[userID] {
+		if ch, ok := s.channelByID[id]; ok && ch.IsActive {
+			out = append(out, ch)
+		}
+	}
+	return out, nil
 }
 
 // ─── Fake proxy ─────────────────────────────────────────────────────────────
@@ -275,6 +338,41 @@ func TestIPTVHandler_ListChannels_IncludeInactive(t *testing.T) {
 	data, _ := iptvDecodeData(t, rr).([]any)
 	if len(data) != 2 {
 		t.Fatalf("active=false: got %d want 2", len(data))
+	}
+}
+
+func TestIPTVHandler_ListChannels_DerivesCategoryAndLogoFallback(t *testing.T) {
+	env := newIPTVTestEnv(t)
+	env.svc.channels["lib-1"] = []*db.Channel{
+		{ID: "c-1", LibraryID: "lib-1", Name: "Real Madrid TV", GroupName: "Deportes HD", IsActive: true},
+	}
+	rr := env.do(http.MethodGet, "/api/v1/libraries/lib-1/channels", "")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: %d", rr.Code)
+	}
+	list, _ := iptvDecodeData(t, rr).([]any)
+	if len(list) != 1 {
+		t.Fatalf("expected 1 channel, got %d", len(list))
+	}
+	first, _ := list[0].(map[string]any)
+
+	// Canonical category derived from the raw group-title.
+	if first["category"] != "sports" {
+		t.Errorf("category: got %v want sports", first["category"])
+	}
+	// Raw group-title preserved for operators / legacy clients.
+	if first["group_name"] != "Deportes HD" {
+		t.Errorf("group_name: got %v want Deportes HD", first["group_name"])
+	}
+	// Logo fallback is always populated, even without an upstream logo_url.
+	if first["logo_initials"] != "RM" {
+		t.Errorf("logo_initials: got %v want RM", first["logo_initials"])
+	}
+	if bg, _ := first["logo_bg"].(string); len(bg) != 7 || bg[0] != '#' {
+		t.Errorf("logo_bg: got %v want #RRGGBB", first["logo_bg"])
+	}
+	if fg, _ := first["logo_fg"].(string); fg != "#ffffff" && fg != "#0a0d0b" {
+		t.Errorf("logo_fg: got %v want light or dark sentinel", first["logo_fg"])
 	}
 }
 

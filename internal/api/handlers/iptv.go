@@ -82,22 +82,9 @@ func (h *IPTVHandler) ListChannels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result := make([]map[string]any, 0, len(channels))
+	result := make([]channelDTO, 0, len(channels))
 	for _, ch := range channels {
-		result = append(result, map[string]any{
-			"id":         ch.ID,
-			"name":       ch.Name,
-			"number":     ch.Number,
-			"group":      ch.GroupName,
-			"group_name": ch.GroupName,
-			"logo_url":   ch.LogoURL,
-			"stream_url": "/api/v1/channels/" + ch.ID + "/stream",
-			"library_id": ch.LibraryID,
-			"tvg_id":     ch.TvgID,
-			"language":   ch.Language,
-			"country":    ch.Country,
-			"is_active":  ch.IsActive,
-		})
+		result = append(result, toChannelDTO(ch, "/api/v1/channels/"+ch.ID+"/stream"))
 	}
 
 	respondJSON(w, http.StatusOK, map[string]any{"data": result})
@@ -120,16 +107,25 @@ func (h *IPTVHandler) GetChannel(w http.ResponseWriter, r *http.Request) {
 	// Get now playing
 	nowPlaying, _ := h.svc.NowPlaying(r.Context(), channelID)
 
+	// Detail endpoint omits stream_url; clients hit /channels/{id}/stream directly.
+	dto := toChannelDTO(ch, "")
+
+	// Use a wrapping map so the now_playing extension lives outside the
+	// typed DTO — it's optional per-channel and specific to the detail view.
 	resp := map[string]any{
-		"id":         ch.ID,
-		"name":       ch.Name,
-		"number":     ch.Number,
-		"group_name": ch.GroupName,
-		"logo_url":   ch.LogoURL,
-		"tvg_id":     ch.TvgID,
-		"language":   ch.Language,
-		"country":    ch.Country,
-		"is_active":  ch.IsActive,
+		"id":            dto.ID,
+		"name":          dto.Name,
+		"number":        dto.Number,
+		"group_name":    dto.GroupName,
+		"category":      dto.Category,
+		"logo_url":      dto.LogoURL,
+		"logo_initials": dto.LogoInitials,
+		"logo_bg":       dto.LogoBg,
+		"logo_fg":       dto.LogoFg,
+		"tvg_id":        dto.TvgID,
+		"language":      dto.Language,
+		"country":       dto.Country,
+		"is_active":     dto.IsActive,
 	}
 
 	if nowPlaying != nil {
@@ -342,6 +338,118 @@ func (h *IPTVHandler) RefreshEPG(w http.ResponseWriter, r *http.Request) {
 		"data": map[string]any{
 			"programs_imported": count,
 		},
+	})
+}
+
+// ───────────────────────────────────────────────────────────────────
+// Channel favorites
+// ───────────────────────────────────────────────────────────────────
+//
+// Routes (registered in router.go):
+//   GET    /api/v1/favorites/channels         — list (full channel rows)
+//   GET    /api/v1/favorites/channels/ids     — list (just channel IDs)
+//   PUT    /api/v1/favorites/channels/{channelId}  — add
+//   DELETE /api/v1/favorites/channels/{channelId}  — remove
+//
+// Authorization: user is derived from JWT claims. Add/Remove additionally
+// verify the caller can access the channel's library (same ACL gate as
+// `canAccessLibrary` — consistent with the rest of the IPTV surface).
+
+// ListFavorites returns the caller's favorite channels as full channel DTOs.
+func (h *IPTVHandler) ListFavorites(w http.ResponseWriter, r *http.Request) {
+	claims := auth.GetClaims(r.Context())
+	if claims == nil {
+		respondAppError(w, r.Context(), domain.NewUnauthorized("auth required"))
+		return
+	}
+	channels, err := h.svc.ListFavoriteChannels(r.Context(), claims.UserID)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	result := make([]channelDTO, 0, len(channels))
+	for _, ch := range channels {
+		result = append(result, toChannelDTO(ch, "/api/v1/channels/"+ch.ID+"/stream"))
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"data": result})
+}
+
+// ListFavoriteIDs returns just the IDs — lighter payload used on page load
+// to hydrate the frontend's favorite set without re-shipping channel data
+// the client already has from ListChannels.
+func (h *IPTVHandler) ListFavoriteIDs(w http.ResponseWriter, r *http.Request) {
+	claims := auth.GetClaims(r.Context())
+	if claims == nil {
+		respondAppError(w, r.Context(), domain.NewUnauthorized("auth required"))
+		return
+	}
+	ids, err := h.svc.ListFavoriteIDs(r.Context(), claims.UserID)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"data": ids})
+}
+
+// AddFavorite marks a channel favorited by the caller. Idempotent.
+func (h *IPTVHandler) AddFavorite(w http.ResponseWriter, r *http.Request) {
+	claims := auth.GetClaims(r.Context())
+	if claims == nil {
+		respondAppError(w, r.Context(), domain.NewUnauthorized("auth required"))
+		return
+	}
+	channelID := chi.URLParam(r, "channelId")
+
+	// Look up the channel so we can verify the caller can access its library.
+	// Favoriting a channel from a library the user can't see would leak the
+	// existence of that library.
+	ch, err := h.svc.GetChannel(r.Context(), channelID)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	if !h.canAccessLibrary(r, ch.LibraryID) {
+		h.denyForbidden(w, r)
+		return
+	}
+
+	if err := h.svc.AddFavorite(r.Context(), claims.UserID, channelID); err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{
+		"data": map[string]any{"channel_id": channelID, "is_favorite": true},
+	})
+}
+
+// RemoveFavorite unmarks a channel. Idempotent — returns 200 even if the
+// channel wasn't favorited.
+func (h *IPTVHandler) RemoveFavorite(w http.ResponseWriter, r *http.Request) {
+	claims := auth.GetClaims(r.Context())
+	if claims == nil {
+		respondAppError(w, r.Context(), domain.NewUnauthorized("auth required"))
+		return
+	}
+	channelID := chi.URLParam(r, "channelId")
+
+	// ACL gate by channel's library. If the channel no longer exists (e.g.
+	// removed during an M3U refresh after it was favorited), skip the ACL
+	// check and still allow removal — the row is about to be cascaded out
+	// anyway, and failing here would leave stale rows in the table.
+	ch, err := h.svc.GetChannel(r.Context(), channelID)
+	if err == nil {
+		if !h.canAccessLibrary(r, ch.LibraryID) {
+			h.denyForbidden(w, r)
+			return
+		}
+	}
+
+	if err := h.svc.RemoveFavorite(r.Context(), claims.UserID, channelID); err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{
+		"data": map[string]any{"channel_id": channelID, "is_favorite": false},
 	})
 }
 

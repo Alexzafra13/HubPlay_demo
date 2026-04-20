@@ -89,6 +89,13 @@ type IPTVService interface {
 	NowPlaying(ctx context.Context, channelID string) (*db.EPGProgram, error)
 	RefreshM3U(ctx context.Context, libraryID string) (int, error)
 	RefreshEPG(ctx context.Context, libraryID string) (int, error)
+
+	// Channel favorites (per-user, persisted in user_channel_favorites).
+	AddFavorite(ctx context.Context, userID, channelID string) error
+	RemoveFavorite(ctx context.Context, userID, channelID string) error
+	IsFavorite(ctx context.Context, userID, channelID string) (bool, error)
+	ListFavoriteIDs(ctx context.Context, userID string) ([]string, error)
+	ListFavoriteChannels(ctx context.Context, userID string) ([]*db.Channel, error)
 }
 
 // IPTVStreamProxyService defines IPTV proxy operations needed by handlers.

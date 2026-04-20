@@ -257,6 +257,14 @@ func NewRouter(deps Dependencies) http.Handler {
 
 					r.Get("/channels/schedule", iptvHandler.BulkSchedule)
 
+					// Channel favorites (per-user, requires auth; no admin role).
+					r.Route("/favorites/channels", func(r chi.Router) {
+						r.Get("/", iptvHandler.ListFavorites)
+						r.Get("/ids", iptvHandler.ListFavoriteIDs)
+						r.Put("/{channelId}", iptvHandler.AddFavorite)
+						r.Delete("/{channelId}", iptvHandler.RemoveFavorite)
+					})
+
 					// Public IPTV
 					r.Get("/iptv/public/countries", iptvHandler.PublicCountries)
 
