@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,6 +36,29 @@ func TestFindEPGSource(t *testing.T) {
 	}
 	if _, ok := FindEPGSource("not-a-real-source"); ok {
 		t.Error("unknown id should return ok=false")
+	}
+}
+
+// TestPublicEPGSources_NoKnownBrokenURLs documents the URLs we already
+// know return 404 at upstream and that must never be added back to the
+// catalog. Previously we shipped guiaiptvmovistar.xml, tdtsat.xml and
+// the epg.pw endpoints — all confirmed 404 / 403 under real usage and
+// removed in the cleanup commit. This test keeps a regression guard so
+// a future accidental revert is caught at build time.
+func TestPublicEPGSources_NoKnownBrokenURLs(t *testing.T) {
+	t.Parallel()
+	banned := []string{
+		"guiaiptvmovistar.xml",
+		"tdtsat.xml",
+		"epg.pw/api/epg.xml.gz?lang=",
+	}
+	for _, src := range PublicEPGSources() {
+		for _, bad := range banned {
+			if strings.Contains(src.URL, bad) {
+				t.Errorf("catalog entry %q still uses banned URL fragment %q: %s",
+					src.ID, bad, src.URL)
+			}
+		}
 	}
 }
 

@@ -771,11 +771,18 @@ export function useRefreshEPG() {
   const queryClient = useQueryClient();
   return useMutation<{ programs_imported: number }, Error, string>({
     mutationFn: (libraryId) => api.refreshEPG(libraryId),
-    onSuccess: () => {
+    onSuccess: (_data, libraryId) => {
       // EPG refresh touches every channel's schedule; just invalidate the
       // whole bulk-schedule keyspace rather than cherry-picking.
       queryClient.invalidateQueries({ queryKey: ["bulk-schedule"] });
       queryClient.invalidateQueries({ queryKey: ["channels"] });
+      // Per-source status (last_refreshed_at / last_status / program count)
+      // is written by the backend during the refresh — the admin panel
+      // otherwise stays on "nunca refrescada" until a manual reload.
+      queryClient.invalidateQueries({ queryKey: queryKeys.libraryEPGSources(libraryId) });
+      // A successful refresh may have turned orphans into matched
+      // channels; refresh the "canales sin guía" list too.
+      queryClient.invalidateQueries({ queryKey: queryKeys.channelsWithoutEPG(libraryId) });
     },
   });
 }

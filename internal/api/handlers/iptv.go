@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -714,10 +715,17 @@ func (h *IPTVHandler) AddEPGSource(w http.ResponseWriter, r *http.Request) {
 	}
 	src, err := h.svc.AddEPGSource(r.Context(), libraryID, body.CatalogID, body.URL)
 	if err != nil {
-		// AddEPGSource returns plain errors for shape problems (unknown
-		// catalog id, missing fields) — surface them as 400 instead of
-		// leaking a generic 500. Database-level errors flow through the
-		// default handleServiceError path below.
+		// Duplicate URL is the expected failure mode when the admin
+		// re-adds a source (or the catalog entry for a URL they'd
+		// already pasted custom). Map to 409 + clean message so the
+		// UI can render "ya añadida" instead of a raw SQL error.
+		if errors.Is(err, db.ErrEPGSourceAlreadyAttached) {
+			respondError(w, r, http.StatusConflict, "ALREADY_ATTACHED",
+				"esa fuente EPG ya está añadida a esta biblioteca")
+			return
+		}
+		// Other errors from AddEPGSource are shape problems (unknown
+		// catalog id, missing fields) — surface them as 400.
 		if _, ok := err.(interface{ Kind() string }); !ok {
 			respondError(w, r, http.StatusBadRequest, "INVALID_SOURCE", err.Error())
 			return

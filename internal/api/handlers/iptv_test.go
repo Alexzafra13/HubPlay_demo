@@ -231,6 +231,13 @@ func (s *iptvFakeService) AddEPGSource(_ context.Context, libraryID, catalogID, 
 	if s.epgSources == nil {
 		s.epgSources = map[string][]*db.LibraryEPGSource{}
 	}
+	// Mirror the repo's UNIQUE(library_id, url) so handler-level
+	// tests can exercise the 409 mapping without a real DB.
+	for _, existing := range s.epgSources[libraryID] {
+		if existing.URL == src.URL {
+			return nil, db.ErrEPGSourceAlreadyAttached
+		}
+	}
 	s.epgSources[libraryID] = append(s.epgSources[libraryID], src)
 	return src, nil
 }
@@ -935,6 +942,27 @@ func TestIPTVHandler_ImportPublicIPTV_CreateError_500(t *testing.T) {
 }
 
 // ─── EPG catalog + sources ───────────────────────────────────────────────
+
+func TestIPTVHandler_AddEPGSource_Duplicate_409(t *testing.T) {
+	env := newIPTVTestEnv(t)
+	body := `{"url":"https://example/epg.xml"}`
+	first := env.do(http.MethodPost, "/api/v1/libraries/lib-1/epg-sources", body)
+	if first.Code != http.StatusCreated {
+		t.Fatalf("first add status: %d", first.Code)
+	}
+	second := env.do(http.MethodPost, "/api/v1/libraries/lib-1/epg-sources", body)
+	if second.Code != http.StatusConflict {
+		t.Fatalf("duplicate add status: got %d want 409, body=%s",
+			second.Code, second.Body.String())
+	}
+	// Ensure the error body carries our stable code so the frontend
+	// can branch on it if it ever needs to (current UI just shows
+	// the message).
+	if !strings.Contains(second.Body.String(), "ALREADY_ATTACHED") {
+		t.Errorf("duplicate response missing ALREADY_ATTACHED code: %s",
+			second.Body.String())
+	}
+}
 
 func TestIPTVHandler_EPGCatalog_Returns(t *testing.T) {
 	env := newIPTVTestEnv(t)
