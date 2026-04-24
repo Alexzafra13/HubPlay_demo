@@ -17,6 +17,8 @@ import type {
   HealthResponse,
   ImageInfo,
   ImportPublicIPTVResponse,
+  IPTVScheduledJob,
+  IPTVScheduledJobKind,
   ItemDetail,
   Library,
   LibraryEPGSource,
@@ -29,6 +31,7 @@ import type {
   SystemCapabilities,
   UnhealthyChannel,
   UpdateLibraryRequest,
+  UpsertScheduledJobRequest,
   User,
   UserData,
 } from "./types";
@@ -62,6 +65,8 @@ export const queryKeys = {
     ["unhealthy-channels", libraryId] as const,
   channelsWithoutEPG: (libraryId: string) =>
     ["channels-without-epg", libraryId] as const,
+  scheduledJobs: (libraryId: string) =>
+    ["iptv-scheduled-jobs", libraryId] as const,
   myPreferences: ["my-preferences"] as const,
   itemImages: (id: string) => ["items", id, "images"] as const,
   availableImages: (id: string, type?: string) => ["items", id, "images", "available", type] as const,
@@ -424,6 +429,93 @@ export function useReorderEPGSources(libraryId: string) {
       // The reorder endpoint returns the new list, so we can seed the
       // cache directly and skip an unnecessary round-trip.
       queryClient.setQueryData(queryKeys.libraryEPGSources(libraryId), data);
+    },
+  });
+}
+
+// ─── IPTV Scheduled Jobs ────────────────────────────────────────────────
+//
+// Automated refreshes (M3U + EPG). Read is gated by library ACL; all
+// mutations are admin-only at the route level. The list endpoint
+// always returns both kinds — persisted rows when they exist,
+// placeholders otherwise — so the UI can render a stable two-row
+// table without branching.
+
+export function useScheduledJobs(
+  libraryId: string,
+  options?: Partial<UseQueryOptions<IPTVScheduledJob[]>>,
+) {
+  return useQuery<IPTVScheduledJob[]>({
+    queryKey: queryKeys.scheduledJobs(libraryId),
+    queryFn: () => api.listScheduledJobs(libraryId),
+    enabled: !!libraryId,
+    ...options,
+  });
+}
+
+export function useUpsertScheduledJob(libraryId: string) {
+  const queryClient = useQueryClient();
+  return useMutation<
+    IPTVScheduledJob,
+    Error,
+    { kind: IPTVScheduledJobKind; data: UpsertScheduledJobRequest }
+  >({
+    mutationFn: ({ kind, data }) =>
+      api.upsertScheduledJob(libraryId, kind, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.scheduledJobs(libraryId),
+      });
+    },
+  });
+}
+
+export function useDeleteScheduledJob(libraryId: string) {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, IPTVScheduledJobKind>({
+    mutationFn: (kind) => api.deleteScheduledJob(libraryId, kind),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.scheduledJobs(libraryId),
+      });
+    },
+  });
+}
+
+export function useRunScheduledJobNow(libraryId: string) {
+  const queryClient = useQueryClient();
+  return useMutation<
+    IPTVScheduledJob | null,
+    Error,
+    IPTVScheduledJobKind
+  >({
+    mutationFn: (kind) => api.runScheduledJobNow(libraryId, kind),
+    onSuccess: (_data, kind) => {
+      // Always invalidate the schedule list so last_run_at refreshes.
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.scheduledJobs(libraryId),
+      });
+      // A manual run does the same work as the scheduled one, so
+      // piggy-back the cache invalidations from useRefreshM3U /
+      // useRefreshEPG — otherwise the UI would show stale data after
+      // "Run now" until the user navigates away and back.
+      if (kind === "m3u_refresh") {
+        queryClient.invalidateQueries({ queryKey: queryKeys.libraries });
+        queryClient.invalidateQueries({ queryKey: queryKeys.library(libraryId) });
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.channels(libraryId),
+        });
+        queryClient.invalidateQueries({ queryKey: ["bulk-schedule"] });
+      } else if (kind === "epg_refresh") {
+        queryClient.invalidateQueries({ queryKey: ["bulk-schedule"] });
+        queryClient.invalidateQueries({ queryKey: ["channels"] });
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.libraryEPGSources(libraryId),
+        });
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.channelsWithoutEPG(libraryId),
+        });
+      }
     },
   });
 }

@@ -10,6 +10,8 @@ import type {
   HealthResponse,
   ImageInfo,
   ImportPublicIPTVResponse,
+  IPTVScheduledJob,
+  IPTVScheduledJobKind,
   ItemDetail,
   Library,
   LibraryEPGSource,
@@ -23,6 +25,7 @@ import type {
   SystemCapabilities,
   UnhealthyChannel,
   UpdateLibraryRequest,
+  UpsertScheduledJobRequest,
   User,
   UserData,
   ApiErrorBody,
@@ -553,6 +556,49 @@ export class ApiClient {
       "PATCH",
       `/libraries/${libraryId}/epg-sources/reorder`,
       { body: { source_ids: sourceIds } },
+    );
+  }
+
+  // IPTV scheduled jobs (admin). List is readable with ACL; the
+  // mutations are admin-only at the route level.
+  async listScheduledJobs(libraryId: string): Promise<IPTVScheduledJob[]> {
+    return this.request<IPTVScheduledJob[]>(
+      "GET",
+      `/libraries/${libraryId}/schedule`,
+    );
+  }
+
+  async upsertScheduledJob(
+    libraryId: string,
+    kind: IPTVScheduledJobKind,
+    req: UpsertScheduledJobRequest,
+  ): Promise<IPTVScheduledJob> {
+    return this.request<IPTVScheduledJob>(
+      "PUT",
+      `/libraries/${libraryId}/schedule/${kind}`,
+      { body: req },
+    );
+  }
+
+  async deleteScheduledJob(
+    libraryId: string,
+    kind: IPTVScheduledJobKind,
+  ): Promise<void> {
+    await this.request<void>(
+      "DELETE",
+      `/libraries/${libraryId}/schedule/${kind}`,
+    );
+  }
+
+  async runScheduledJobNow(
+    libraryId: string,
+    kind: IPTVScheduledJobKind,
+  ): Promise<IPTVScheduledJob | null> {
+    // Handler returns 204 when no row exists yet — the client answers
+    // null so callers can refetch the list without special-casing.
+    return this.request<IPTVScheduledJob | null>(
+      "POST",
+      `/libraries/${libraryId}/schedule/${kind}/run`,
     );
   }
 

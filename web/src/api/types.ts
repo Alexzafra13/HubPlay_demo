@@ -289,6 +289,32 @@ export interface PatchChannelRequest {
 }
 
 /**
+ * IPTV scheduled job — one automated action per library.
+ *
+ * Mirrors the backend `iptv_scheduled_jobs` row. The list endpoint
+ * synthesises a placeholder with `enabled: false` for missing kinds so
+ * the UI always renders both rows; persisted rows come back with the
+ * real timestamps.
+ */
+export type IPTVScheduledJobKind = "m3u_refresh" | "epg_refresh";
+
+export interface IPTVScheduledJob {
+  library_id: string;
+  kind: IPTVScheduledJobKind;
+  interval_hours: number;
+  enabled: boolean;
+  last_run_at?: string;
+  last_status: "" | "ok" | "error";
+  last_error?: string;
+  last_duration_ms: number;
+}
+
+export interface UpsertScheduledJobRequest {
+  interval_hours: number;
+  enabled?: boolean;
+}
+
+/**
  * A channel with its opportunistic-probe health fields attached.
  *
  * Mirrors the backend `channelHealthDTO`: it's a regular Channel plus

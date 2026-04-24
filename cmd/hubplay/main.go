@@ -157,6 +157,13 @@ func run(configPath string) error {
 	// service so dead upstreams drop out of the user view.
 	iptvProxy.SetHealthReporter(iptvService)
 
+	// ═══ Phase 4d: IPTV Scheduler ═══
+	// Runs periodic M3U + EPG refreshes per configured schedule so the
+	// product no longer requires an admin to click "Refrescar" every
+	// morning. Sequential — see scheduler.go for why.
+	iptvScheduler := iptv.NewScheduler(repos.IPTVSchedules, iptvService, logger)
+	iptvScheduler.Start(ctx)
+
 	// ═══ Phase 4e: Setup Service ═══
 	setupService := setup.NewService(cfg, configPath, logger)
 
@@ -170,6 +177,8 @@ func run(configPath string) error {
 		StreamManager: streamManager,
 		IPTV:          iptvService,
 		IPTVProxy:     iptvProxy,
+		IPTVScheduler: iptvScheduler,
+		IPTVSchedules: repos.IPTVSchedules,
 		Items:         repos.Items,
 		MediaStreams:   repos.MediaStreams,
 		Images:        repos.Images,
@@ -208,10 +217,10 @@ func run(configPath string) error {
 	}()
 
 	// ═══ Phase 7: Wait for shutdown ═══
-	return waitForShutdown(ctx, cancel, server, streamManager, iptvService, iptvProxy, scanScheduler, libraryService, authService, database, logger)
+	return waitForShutdown(ctx, cancel, server, streamManager, iptvService, iptvProxy, iptvScheduler, scanScheduler, libraryService, authService, database, logger)
 }
 
-func waitForShutdown(ctx context.Context, cancel context.CancelFunc, server *http.Server, sm *stream.Manager, iptvSvc *iptv.Service, iptvProxy *iptv.StreamProxy, scheduler *library.Scheduler, librarySvc *library.Service, authSvc *auth.Service, database interface{ Close() error }, logger *slog.Logger) error {
+func waitForShutdown(ctx context.Context, cancel context.CancelFunc, server *http.Server, sm *stream.Manager, iptvSvc *iptv.Service, iptvProxy *iptv.StreamProxy, iptvSched *iptv.Scheduler, scheduler *library.Scheduler, librarySvc *library.Service, authSvc *auth.Service, database interface{ Close() error }, logger *slog.Logger) error {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
@@ -227,7 +236,11 @@ func waitForShutdown(ctx context.Context, cancel context.CancelFunc, server *htt
 
 	logger.Info("starting graceful shutdown...")
 
-	// Stop background services
+	// Stop background services. Stop the IPTV scheduler before the
+	// IPTV service itself so an in-flight refresh has a chance to
+	// finish recording its outcome against an open DB handle.
+	iptvSched.Stop()
+	logger.Info("iptv scheduler stopped")
 	scheduler.Stop()
 	logger.Info("scan scheduler stopped")
 	authSvc.StopSessionCleaner()

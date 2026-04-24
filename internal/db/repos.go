@@ -17,6 +17,7 @@ type Repositories struct {
 	EPGPrograms        *EPGProgramRepository
 	LibraryEPGSources  *LibraryEPGSourceRepository
 	ChannelOverrides   *ChannelOverrideRepository
+	IPTVSchedules      *IPTVScheduleRepository
 	UserPreferences    *UserPreferenceRepository
 	Providers          *ProviderRepository
 	Metadata           *MetadataRepository
@@ -39,6 +40,7 @@ func NewRepositories(database *sql.DB) *Repositories {
 		EPGPrograms:        NewEPGProgramRepository(database),
 		LibraryEPGSources:  NewLibraryEPGSourceRepository(database),
 		ChannelOverrides:   NewChannelOverrideRepository(database),
+		IPTVSchedules:      NewIPTVScheduleRepository(database),
 		UserPreferences:    NewUserPreferenceRepository(database),
 		Providers:          NewProviderRepository(database),
 		Metadata:           NewMetadataRepository(database),

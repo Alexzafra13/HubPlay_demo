@@ -1,6 +1,6 @@
 # Estado del proyecto
 
-> Snapshot: **2026-04-24** (matcher EPG agresivo: aliases + fuzzy Levenshtein + channel-number) · Rama: `claude/review-pending-tasks-9Vh6U` · **tests: verde · lint: 0**
+> Snapshot: **2026-04-24** (matcher EPG agresivo + scheduler IPTV con UI admin) · Rama: `claude/review-pending-tasks-9Vh6U` · **tests: verde · lint: 0**
 
 ---
 
@@ -10,8 +10,10 @@
 
 ### Lo que cerramos esta rama (`claude/review-pending-tasks-9Vh6U`)
 
-**Matcher EPG agresivo** — primera de las dos candidatas del anterior
-handoff. Sin cambios de schema, sin UI, solo backend.
+Dos commits limpios. Las dos candidatas del handoff anterior hechas.
+
+**Commit 1 — Matcher EPG agresivo**. Sin cambios de schema, sin UI,
+solo backend.
 
 Cambios en el algoritmo del matcher (antes: tvg-id exacto + name-
 variants con quality strip + accent fold):
@@ -57,7 +59,93 @@ Además (refactor limpieza, sin cambio de comportamiento):
   "Telecinco" NO matchea, "Teleciinco" (1 edit) SÍ, tie a dos canales
   devuelve empty.
 
-### 📊 Medición esperada
+**Commit 2 — Scheduler IPTV con UI admin**. Saca al producto de
+"herramienta manual" con botón Refrescar a servicio que se
+autosostiene.
+
+Backend:
+
+1. **Migración 011**: tabla `iptv_scheduled_jobs(library_id, kind,
+   interval_hours, enabled, last_run_at, last_status, last_error,
+   last_duration_ms, created_at, updated_at)` con PK compuesta
+   (library_id, kind) y CHECK de kind ∈ {m3u_refresh, epg_refresh}.
+   Índice parcial sobre `last_run_at WHERE enabled=1` para la query
+   del worker.
+2. **`db.IPTVScheduleRepository`** (raw SQL pattern): `ListByLibrary`
+   / `Get` / `Upsert` / `ListDue` / `RecordRun` / `Delete`.
+   - `Upsert` es `ON CONFLICT DO UPDATE` sobre interval_hours +
+     enabled + updated_at — preserva los last_* para que reconfigurar
+     no resetee el histórico.
+   - `ListDue` filtra por `enabled=1` en SQL, calcula due-ness en Go
+     (multi-format SQLite time coercion). Never-run rows (last_run_at
+     NULL) son siempre due en el próximo tick.
+   - `RecordRun` trunca last_error a 512 chars para que un stack
+     trace upstream no infle la tabla.
+3. **`iptv.Scheduler`** worker en su propio goroutine. Tick = 1 min
+   (responsivo al admin sin spam). runTimeout = 10 min por job.
+   Ejecuta secuencial (serializa intra-library vía el lock del
+   service y evita burst al CDN). Interface `jobRunner` inyectada →
+   tests con fake sin red.
+4. **Wire en `main.go`**: Phase 4d nuevo (después de IPTV service,
+   antes de Setup). Shutdown llama `iptvSched.Stop()` antes de
+   `iptvSvc.Shutdown()` para que el último run grabe su outcome antes
+   de cerrar la DB.
+5. **HTTP handlers** en `internal/api/handlers/iptv_schedule.go`:
+   - `GET /libraries/{id}/schedule` — lista las dos filas (M3U/EPG);
+     sintetiza placeholders `{enabled:false, interval:default}` para
+     kinds sin fila → la UI siempre pinta 2 filas.
+   - `PUT /libraries/{id}/schedule/{kind}` admin-only — valida
+     `interval_hours ∈ [1, 720]`; `enabled` pointer-like (omitir =
+     conservar actual) → el UI puede guardar solo el intervalo sin
+     cambiar el toggle.
+   - `DELETE /libraries/{id}/schedule/{kind}` admin-only.
+   - `POST /libraries/{id}/schedule/{kind}/run` admin-only — dispara
+     síncrono vía `Scheduler.RunNow` que **bypasea** enabled + due
+     (el botón funciona aunque la programación esté apagada).
+6. **ACL**: mismo patrón que los demás endpoints livetv
+   (library access → 404, admin bypasa).
+
+Frontend:
+
+7. **Tipos + client + hooks** (`web/src/api/{types,client,hooks}.ts`):
+   `IPTVScheduledJob`, `UpsertScheduledJobRequest`, métodos
+   `listScheduledJobs` / `upsertScheduledJob` / `deleteScheduledJob`
+   / `runScheduledJobNow`, y hooks React Query
+   `useScheduledJobs` / `useUpsertScheduledJob` /
+   `useDeleteScheduledJob` / `useRunScheduledJobNow` con invalidación
+   que refleja las mismas keys que `useRefreshM3U`/`useRefreshEPG`
+   — tras Run now la UI de canales/EPG se refresca sola.
+8. **`ScheduledJobsPanel`** nuevo en `web/src/components/admin/`.
+   Dos filas, cada una con toggle + dropdown (1/3/6/12/24/72/168 h)
+   + "Ejecutar ahora" + badge de status + línea "hace 3 h"
+   relativa. Sin estado local espurio — el dropdown lee
+   `job.interval_hours` directamente para respetar la regla
+   senior "no set-state-in-effect con Compiler" (el primer draft
+   tenía `useEffect → setState` para mirror optimista; lint lo
+   pilló, refactor a source-of-truth directa).
+9. **Tab nueva "Programación"** en `LivetvAdminPanel` entre
+   "Fuentes EPG" y "Sin guía". Siempre visible (el endpoint sinteti-
+   za filas). Badge count = nº jobs enabled; tone=warning si alguno
+   tiene `last_status === "error"`.
+
+Tests nuevos (todos verdes):
+
+- `internal/db/iptv_schedule_test.go` — 9 tests (upsert crea,
+  preserva last_*, get sentinel, list by library, list due: drops
+  disabled / respects interval / incluye never-run, rechazo de
+  interval inválido, trim de last_error > 512, delete idempotente).
+- `internal/iptv/scheduler_test.go` — 8 tests con fakeRunner
+  (tick ejecuta due / salta disabled / salta not-yet-due, record
+  failure, RunNow bypasea schedule + row-less, surface error,
+  Start/Stop corre loop, Stop es síncrono).
+- `internal/api/handlers/iptv_schedule_test.go` — 13 tests con
+  fakeScheduleRepo + fakeScheduleRunner (list sintetiza missing
+  kinds, deny sin access, upsert crea, invalid kind, out-of-range
+  interval, keeps enabled cuando se omite, unknown field rechaza,
+  delete happy, run-now happy, run-now surface error, run-now
+  sin row devuelve 204, run-now deny).
+
+### 📊 Medición pendiente (matcher EPG)
 
 El handoff anterior puso un target **52 → 150-200+** canales con EPG
 sobre davidmuma + iptv-org (268 canales ES). No se puede medir sin
@@ -83,19 +171,22 @@ los mismos mismatches observados.
 ### Estado al abrir sesión
 
 - `main` tiene PRs #81–#85 mergeados.
-- Rama actual `claude/review-pending-tasks-9Vh6U` con 1 commit encima
-  de main. Listo para PR.
+- Rama actual `claude/review-pending-tasks-9Vh6U` con **2 commits**
+  encima de main. Listo para PR (una vez medido el matcher).
 - Tests verdes: `pnpm test` 221/221 · `pnpm tsc --noEmit` · `pnpm
-  lint` 0 · `go test -race ./...` 21 paquetes · `golangci-lint
-  v1.64.8` exit 0.
+  lint` 0 · `pnpm build` ok · `go test -race ./...` 21 paquetes ·
+  `golangci-lint v1.64.8` exit 0.
 
 ### Checklist al abrir siguiente sesión
 
 - [ ] Refrescar EPG contra davidmuma y medir canales con EPG antes/
   después (52 era el baseline; target 150+).
-- [ ] Si hay ganancia clara → abrir PR y mergear.
-- [ ] Candidata 2 del anterior handoff: **scheduler UI M3U + EPG
-  refresh** (ver sección de "Lo que FALTA" de arcos anteriores).
+- [ ] Activar una programación (ej. EPG cada 6 h) en admin y dejarla
+  correr 6 h+ para verificar que el worker dispara y registra.
+- [ ] Si matcher + scheduler ambos funcionan → abrir PR y mergear.
+- [ ] Siguiente candidata: **"Continuar viendo"** en LiveTV (tabla
+  `channel_watch_history` + rail en Discover) o **modal de detalle
+  de programa** al clicar en el EPG grid.
 - [ ] Actualizar esta memoria.
 
 ---
@@ -870,10 +961,9 @@ Sin prisa. Candidatos ordenados por impacto.
 **Si foco = experiencia LiveTV**:
 1. ✅ **Matcher EPG más agresivo** — hecho en `claude/review-pending-
    tasks-9Vh6U`. Falta medir cobertura real contra davidmuma.
-2. **Scheduler UI M3U + EPG refresh** — candidata 2 del handoff
-   anterior. `scheduled_jobs(library_id, kind, interval_hours,
-   last_run_at, last_status, enabled)` + worker reutilizando el
-   patrón de `library.Scheduler`. Scope ~1 día.
+2. ✅ **Scheduler UI M3U + EPG refresh** — hecho en la misma rama.
+   Tabla `iptv_scheduled_jobs`, worker `iptv.Scheduler`, panel admin
+   `ScheduledJobsPanel`. Falta dejar correr 6 h+ en real para validar.
 3. **"Continuar viendo"** + tabla de historial.
 4. **Modal de detalle de programa** en EPG grid.
 5. **Streaming parser del XMLTV** (bomba memoria con feeds 2 GB).
