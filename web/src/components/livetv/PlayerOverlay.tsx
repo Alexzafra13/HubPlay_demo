@@ -4,12 +4,9 @@ import type { Channel, EPGProgram } from "@/api/types";
 import { useNowTick } from "@/hooks/useNowTick";
 import { ChannelLogo } from "./ChannelLogo";
 import { ChannelPlayer } from "./ChannelPlayer";
-import {
-  capitalize,
-  formatTime,
-  getNowPlaying,
-  getUpNext,
-} from "./epgHelpers";
+import { NowPlayingCard } from "./NowPlayingCard";
+import { OverlayHeader } from "./OverlayHeader";
+import { formatTime, getNowPlaying, getUpNext } from "./epgHelpers";
 
 interface PlayerOverlayProps {
   channel: Channel;
@@ -31,14 +28,14 @@ type SidePanelTab = "guide" | "similar";
  * PlayerOverlay — fullscreen live-TV player with a rich side panel.
  *
  * Layout:
- *   Header: close + channel identity + favorite toggle.
+ *   Header (OverlayHeader): close + channel identity + favorite toggle.
  *   Body:
  *     - Desktop (≥ lg): 2 columns — video left (flex-1), panel right (420 px).
  *     - Mobile: stacked — video on top (16:9), panel scrolls below.
  *
  * The side panel has two tabs:
- *   "Programación" — now-playing card + upcoming list (from the channel's EPG).
- *   "Canales similares" — other channels in the same canonical category.
+ *   "Programación" — NowPlayingCard + UpcomingList (from the channel's EPG).
+ *   "Canales similares" — SimilarGrid (other channels in the same canonical category).
  *
  * Keyboard: Escape closes (wired from the parent because the key handler
  * is a global effect that shouldn't live inside this component's lifecycle).
@@ -149,213 +146,6 @@ export function PlayerOverlay({
           </div>
         </aside>
       </div>
-    </div>
-  );
-}
-
-// ───────────────────────────────────────────────────────────────────
-// Header
-// ───────────────────────────────────────────────────────────────────
-
-interface OverlayHeaderProps {
-  channel: Channel;
-  isFavorite?: boolean;
-  onToggleFavorite?: () => void;
-  onClose: () => void;
-}
-
-function OverlayHeader({
-  channel,
-  isFavorite = false,
-  onToggleFavorite,
-  onClose,
-}: OverlayHeaderProps) {
-  const { t } = useTranslation();
-  return (
-    <header className="flex items-center gap-3 border-b border-tv-line bg-tv-bg-0/90 px-3 py-3 md:px-5">
-      <button
-        type="button"
-        onClick={onClose}
-        aria-label={t("common.close", { defaultValue: "Cerrar" })}
-        className="flex h-9 w-9 items-center justify-center rounded-full border border-tv-line text-tv-fg-1 transition-colors hover:bg-tv-bg-2 hover:text-tv-fg-0"
-      >
-        <svg
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden="true"
-        >
-          <line x1="19" y1="12" x2="5" y2="12" />
-          <polyline points="12 19 5 12 12 5" />
-        </svg>
-      </button>
-
-      <ChannelLogo
-        logoUrl={channel.logo_url}
-        initials={channel.logo_initials}
-        bg={channel.logo_bg}
-        fg={channel.logo_fg}
-        name={channel.name}
-        className="h-10 w-10 rounded-tv-sm"
-        textClassName="text-xs font-bold"
-      />
-
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <span className="font-mono text-[10px] uppercase tracking-widest text-tv-fg-3">
-            CH {channel.number}
-          </span>
-          <span className="truncate text-sm font-semibold text-tv-fg-0">
-            {channel.name}
-          </span>
-        </div>
-        <div className="mt-0.5 flex items-center gap-2">
-          <span className="flex items-center gap-1 rounded-tv-xs bg-tv-live/90 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
-            Live
-          </span>
-          <span className="text-[11px] text-tv-fg-2">
-            {capitalize(channel.category)}
-            {channel.country ? ` · ${channel.country.toUpperCase()}` : ""}
-          </span>
-        </div>
-      </div>
-
-      {onToggleFavorite && (
-        <button
-          type="button"
-          onClick={onToggleFavorite}
-          aria-label={
-            isFavorite
-              ? t("liveTV.removeFromFavorites", {
-                  defaultValue: "Quitar de favoritos",
-                })
-              : t("liveTV.addToFavorites", {
-                  defaultValue: "Añadir a favoritos",
-                })
-          }
-          aria-pressed={isFavorite}
-          className={[
-            "flex h-9 w-9 items-center justify-center rounded-full border border-tv-line transition-colors hover:bg-tv-bg-2",
-            isFavorite ? "text-tv-live" : "text-tv-fg-1",
-          ].join(" ")}
-        >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill={isFavorite ? "currentColor" : "none"}
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
-          </svg>
-        </button>
-      )}
-    </header>
-  );
-}
-
-// ───────────────────────────────────────────────────────────────────
-// Now playing card
-// ───────────────────────────────────────────────────────────────────
-
-interface NowPlayingCardProps {
-  channel: Channel;
-  nowPlaying: EPGProgram | null;
-  upNext: EPGProgram | null;
-  /** Ms-since-epoch from the parent's clock tick; used for progress math. */
-  now: number;
-}
-
-function NowPlayingCard({
-  channel,
-  nowPlaying,
-  upNext,
-  now,
-}: NowPlayingCardProps) {
-  const { t } = useTranslation();
-
-  if (!nowPlaying) {
-    return (
-      <div className="border-b border-tv-line p-4">
-        <div className="text-[11px] font-semibold uppercase tracking-widest text-tv-fg-3">
-          {t("liveTV.nowOnAir", { defaultValue: "Ahora en antena" })}
-        </div>
-        <div className="mt-2 text-sm text-tv-fg-2">
-          {t("liveTV.noEPG", { defaultValue: "Sin guía disponible" })} — {channel.name}
-        </div>
-      </div>
-    );
-  }
-
-  const start = new Date(nowPlaying.start_time).getTime();
-  const end = new Date(nowPlaying.end_time).getTime();
-  const durationMin = Math.max(1, Math.round((end - start) / 60_000));
-  const progress = Math.max(
-    0,
-    Math.min(1, (now - start) / Math.max(end - start, 1)),
-  );
-
-  return (
-    <div className="border-b border-tv-line p-4">
-      <div className="text-[11px] font-semibold uppercase tracking-widest text-tv-fg-3">
-        {t("liveTV.nowOnAir", { defaultValue: "Ahora en antena" })}
-      </div>
-      <h2 className="mt-1 text-lg font-semibold text-tv-fg-0">
-        {nowPlaying.title}
-      </h2>
-      {nowPlaying.description && (
-        <p className="mt-2 line-clamp-3 text-sm text-tv-fg-2">
-          {nowPlaying.description}
-        </p>
-      )}
-      <div className="mt-3 flex items-center gap-2 font-mono text-[11px] tabular-nums text-tv-fg-2">
-        <span>
-          {formatTime(nowPlaying.start_time)} –{" "}
-          {formatTime(nowPlaying.end_time)}
-        </span>
-        <span className="h-1 w-1 rounded-full bg-tv-fg-3" aria-hidden="true" />
-        <span>
-          {durationMin} {t("liveTV.min", { defaultValue: "min" })}
-        </span>
-        {nowPlaying.category && (
-          <>
-            <span
-              className="h-1 w-1 rounded-full bg-tv-fg-3"
-              aria-hidden="true"
-            />
-            <span>{nowPlaying.category}</span>
-          </>
-        )}
-      </div>
-
-      <div className="mt-3 h-1 overflow-hidden rounded-full bg-tv-bg-3">
-        <div
-          className="h-full rounded-full bg-tv-accent transition-[width] duration-1000"
-          style={{ width: `${progress * 100}%` }}
-        />
-      </div>
-
-      {upNext && (
-        <div className="mt-3 truncate text-[11px] text-tv-fg-3">
-          <span className="mr-1.5 uppercase tracking-widest">
-            {t("liveTV.upNextShort", { defaultValue: "Después" })}
-          </span>
-          <span className="font-mono tabular-nums text-tv-fg-2">
-            {formatTime(upNext.start_time)}
-          </span>
-          <span className="ml-2 text-tv-fg-1">{upNext.title}</span>
-        </div>
-      )}
     </div>
   );
 }
@@ -486,4 +276,3 @@ function TabButton({
     </button>
   );
 }
-

@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useTranslation } from "react-i18next";
 import { useQueries } from "@tanstack/react-query";
 import {
   queryKeys,
@@ -14,42 +13,33 @@ import type { Channel, ChannelCategory, UnhealthyChannel } from "@/api/types";
 import { Spinner } from "@/components/common";
 import {
   type CategoryFilter,
-  CategoryChips,
-  ChannelCard,
-  ChannelRail,
   CountrySelector,
+  DiscoverView,
   EPGGrid,
-  HeroSettings,
-  HeroSpotlight,
-  type HeroMode,
-  type HeroModeOption,
-  type HeroSpotlightItem,
+  FavoritesView,
+  LiveTvTopBar,
+  type ViewTab,
   PlayerOverlay,
-  capitalize,
   getNowPlaying,
-  getUpNext,
   useHeroSpotlight,
 } from "@/components/livetv";
-import { CHANNEL_CATEGORY_ORDER } from "@/components/livetv/categoryOrder";
-
-type ViewTab = "discover" | "guide" | "favorites";
 
 /**
- * LiveTV — Discover / Guide / Favorites.
+ * LiveTV — Discover / Guide / Favorites, wired.
  *
- * The page wraps everything in `[data-theme="tv"]` so components can use
- * the TV-scoped tokens (`--tv-accent`, `--tv-bg-*`, etc.) without leaking
- * outside. The three tabs live on one route — switching is local state
- * because deep-linking to a tab isn't a product requirement yet; when it
- * becomes one, lift `tab` to a search param.
+ * Responsibilities kept on this page:
+ *   - Fetch livetv libraries + channels + schedules + unhealthy list.
+ *   - Tab / category / search state.
+ *   - Player overlay state + Escape handler.
+ *   - Favorite toggle.
+ *   - Derive counts + filtered channels for the tabs.
  *
- * Channel selection opens a fullscreen player overlay rather than
- * embedding a persistent hero player (the previous model). This matches
- * the redesign's navigation flow: the mosaic stays the entry surface
- * and the player is a modal that can be dismissed.
+ * The three tab bodies (DiscoverView, EPGGrid, FavoritesView) are
+ * separate components under web/src/components/livetv/. The hero policy
+ * lives in useHeroSpotlight. Keeps the page focused on orchestration so
+ * changing a tab body doesn't bloat this file.
  */
 export default function LiveTV() {
-  const { t } = useTranslation();
   const { data: libraries, isLoading: librariesLoading } = useLibraries();
 
   // Every livetv library the current user can see. Channels from all of
@@ -198,8 +188,8 @@ export default function LiveTV() {
     return byCat;
   }, [filteredChannels]);
 
-  // Hero spotlight — preference, silent fallback chain and mode options
-  // live in the dedicated hook so this page stays focused on layout.
+  // Hero spotlight — preference, silent fallback and mode options live
+  // in the dedicated hook so this page stays focused on layout.
   const {
     items: heroItems,
     label: heroLabel,
@@ -246,7 +236,7 @@ export default function LiveTV() {
       data-accent="lime"
       className="-mx-4 -mt-2 flex flex-col gap-6 px-4 pb-10 pt-4 md:-mx-6 md:px-6"
     >
-      <TopBar
+      <LiveTvTopBar
         tab={tab}
         onTab={setTab}
         search={search}
@@ -271,7 +261,6 @@ export default function LiveTV() {
           favoriteSet={favoriteSet}
           onToggleFavorite={toggleFavorite}
           unhealthyChannels={unhealthyChannels}
-          t={t}
         />
       )}
 
@@ -291,7 +280,6 @@ export default function LiveTV() {
           scheduleByChannel={scheduleByChannel}
           onOpen={openPlayer}
           onToggleFavorite={toggleFavorite}
-          t={t}
         />
       )}
 
@@ -309,328 +297,3 @@ export default function LiveTV() {
     </section>
   );
 }
-
-// ───────────────────────────────────────────────────────────────────
-// TopBar
-// ───────────────────────────────────────────────────────────────────
-
-interface TopBarProps {
-  tab: ViewTab;
-  onTab: (t: ViewTab) => void;
-  search: string;
-  onSearch: (s: string) => void;
-  totalChannels: number;
-  liveNow: number;
-  heroMode: HeroMode;
-  heroModeOptions: HeroModeOption[];
-  onHeroModeChange: (mode: HeroMode) => void;
-}
-
-function TopBar({
-  tab,
-  onTab,
-  search,
-  onSearch,
-  totalChannels,
-  liveNow,
-  heroMode,
-  heroModeOptions,
-  onHeroModeChange,
-}: TopBarProps) {
-  const { t } = useTranslation();
-  const tabs: { id: ViewTab; label: string }[] = [
-    {
-      id: "discover",
-      label: t("liveTV.tab.discover", { defaultValue: "Descubrir" }),
-    },
-    { id: "guide", label: t("liveTV.tab.guide", { defaultValue: "Guía" }) },
-    {
-      id: "favorites",
-      label: t("liveTV.tab.favorites", { defaultValue: "Favoritos" }),
-    },
-  ];
-
-  return (
-    <header className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-      <div>
-        <h1 className="flex items-center gap-2 text-xl font-bold text-tv-fg-0 md:text-2xl">
-          <span className="inline-flex h-2.5 w-2.5 animate-pulse rounded-full bg-tv-live shadow-[0_0_8px_var(--tv-live)]" />
-          {t("liveTV.title", { defaultValue: "TV en directo" })}
-        </h1>
-        <p className="mt-1 text-xs text-tv-fg-2">
-          <b className="text-tv-fg-1">{totalChannels}</b>{" "}
-          {t("liveTV.channels", { defaultValue: "canales" })} ·{" "}
-          <b className="text-tv-fg-1">{liveNow}</b>{" "}
-          {t("liveTV.liveNow", { defaultValue: "en vivo ahora" })}
-        </p>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-3">
-        <label className="relative flex items-center">
-          <span className="sr-only">{t("liveTV.searchPlaceholder")}</span>
-          <SearchIcon />
-          <input
-            type="search"
-            value={search}
-            onChange={(e) => onSearch(e.target.value)}
-            placeholder={t("liveTV.searchPlaceholder", {
-              defaultValue: "Busca canales o programas…",
-            })}
-            className="w-72 rounded-full border border-tv-line bg-tv-bg-1 py-2 pl-9 pr-3 text-sm text-tv-fg-0 placeholder:text-tv-fg-3 focus:border-tv-accent focus:outline-none focus:ring-2 focus:ring-tv-accent/30"
-          />
-        </label>
-
-        <div
-          role="tablist"
-          aria-label={t("liveTV.viewMode", { defaultValue: "Vista" })}
-          className="flex items-center gap-1 rounded-full border border-tv-line bg-tv-bg-1 p-1"
-        >
-          {tabs.map((it) => (
-            <button
-              key={it.id}
-              role="tab"
-              aria-selected={tab === it.id}
-              type="button"
-              onClick={() => onTab(it.id)}
-              className={[
-                "rounded-full px-3 py-1 text-xs font-medium transition-colors",
-                tab === it.id
-                  ? "bg-tv-accent text-tv-accent-ink"
-                  : "text-tv-fg-1 hover:text-tv-fg-0",
-              ].join(" ")}
-            >
-              {it.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Hero view settings. Only relevant to the Discover surface,
-            so we hide it on the other tabs to avoid offering a control
-            whose effect isn't visible. Living here (not inside the hero
-            itself) keeps it reachable even when the viewer has hidden
-            the spotlight entirely — the previous in-hero gear
-            vanished with the hero, making "ocultar" a dead end. */}
-        {tab === "discover" ? (
-          <HeroSettings
-            mode={heroMode}
-            modeOptions={heroModeOptions}
-            onModeChange={onHeroModeChange}
-          />
-        ) : null}
-      </div>
-    </header>
-  );
-}
-
-function SearchIcon() {
-  return (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 20 20"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="absolute left-3 top-1/2 -translate-y-1/2 text-tv-fg-3"
-      aria-hidden="true"
-    >
-      <circle cx="8.5" cy="8.5" r="5" />
-      <path d="M12.5 12.5L17 17" />
-    </svg>
-  );
-}
-
-// ───────────────────────────────────────────────────────────────────
-// DiscoverView
-// ───────────────────────────────────────────────────────────────────
-
-interface DiscoverViewProps {
-  heroItems: HeroSpotlightItem[];
-  heroLabel: string;
-  counts: Record<CategoryFilter, number>;
-  category: CategoryFilter;
-  onCategoryChange: (c: CategoryFilter) => void;
-  channelsByCategory: Map<ChannelCategory, Channel[]>;
-  scheduleByChannel: Record<string, import("@/api/types").EPGProgram[]>;
-  onOpen: (ch: Channel) => void;
-  favoriteSet: Set<string>;
-  onToggleFavorite: (channelId: string) => void;
-  unhealthyChannels: UnhealthyChannel[];
-  t: ReturnType<typeof useTranslation>["t"];
-}
-
-function DiscoverView({
-  heroItems,
-  heroLabel,
-  counts,
-  category,
-  onCategoryChange,
-  channelsByCategory,
-  scheduleByChannel,
-  onOpen,
-  favoriteSet,
-  onToggleFavorite,
-  unhealthyChannels,
-  t,
-}: DiscoverViewProps) {
-  // Rail ordering mirrors the chips' canonical order (see categoryOrder.ts)
-  // so what the user selects in chips and what they scroll past in rails
-  // feel consistent.
-  const visibleRails =
-    category === "all"
-      ? CHANNEL_CATEGORY_ORDER
-          .map((c) => [c, channelsByCategory.get(c) ?? []] as const)
-          .filter(([, list]) => list.length > 0)
-      : [[category, channelsByCategory.get(category) ?? []] as const];
-
-  return (
-    <div className="flex flex-col gap-8">
-      <HeroSpotlight
-        items={heroItems}
-        label={heroLabel}
-        onOpen={onOpen}
-      />
-
-      <CategoryChips
-        counts={counts}
-        active={category}
-        onChange={onCategoryChange}
-      />
-
-      {visibleRails.length === 0 && (
-        <div className="rounded-tv-lg border border-dashed border-tv-line bg-tv-bg-1 p-10 text-center text-sm text-tv-fg-2">
-          {t("liveTV.noChannelsInCategory", {
-            defaultValue: "No hay canales en esta categoría.",
-          })}
-        </div>
-      )}
-
-      {visibleRails.map(([cat, list]) => (
-        <ChannelRail
-          key={cat}
-          title={t(`liveTV.category.${cat}`, {
-            defaultValue: capitalize(cat),
-          })}
-          count={list.length}
-          onSeeAll={
-            category === "all" ? () => onCategoryChange(cat) : undefined
-          }
-        >
-          {list.map((ch) => (
-            <ChannelCard
-              key={ch.id}
-              channel={ch}
-              nowPlaying={getNowPlaying(scheduleByChannel[ch.id])}
-              upNext={getUpNext(scheduleByChannel[ch.id])}
-              isFavorite={favoriteSet.has(ch.id)}
-              onClick={() => onOpen(ch)}
-              onToggleFavorite={() => onToggleFavorite(ch.id)}
-            />
-          ))}
-        </ChannelRail>
-      ))}
-
-      {/* "Apagados" — channels the health probe has flagged as failing.
-          The backend filters them out of the main channel list so
-          Discover stays clean, but we surface them here, dimmed, at
-          the bottom of the page. A click still tries to play (the
-          probe might be stale); the rail fades to near-nothing when
-          there's nothing to show, no hard empty state. */}
-      {unhealthyChannels.length > 0 && category === "all" ? (
-        <ChannelRail
-          title={t("liveTV.category.apagados", { defaultValue: "Apagados" })}
-          count={unhealthyChannels.length}
-          subtitle={t("liveTV.apagadosSubtitle", {
-            defaultValue:
-              "Canales con fallos recientes; reintenta, quizá hayan vuelto.",
-          })}
-        >
-          {unhealthyChannels.map((ch) => (
-            <ChannelCard
-              key={ch.id}
-              channel={ch}
-              isFavorite={favoriteSet.has(ch.id)}
-              onClick={() => onOpen(ch)}
-              onToggleFavorite={() => onToggleFavorite(ch.id)}
-              previewOnHover={false}
-              dimmed
-            />
-          ))}
-        </ChannelRail>
-      ) : null}
-    </div>
-  );
-}
-
-// ───────────────────────────────────────────────────────────────────
-// FavoritesView
-// ───────────────────────────────────────────────────────────────────
-
-interface FavoritesViewProps {
-  channels: Channel[];
-  favoriteSet: Set<string>;
-  scheduleByChannel: Record<string, import("@/api/types").EPGProgram[]>;
-  onOpen: (ch: Channel) => void;
-  onToggleFavorite: (channelId: string) => void;
-  t: ReturnType<typeof useTranslation>["t"];
-}
-
-/**
- * FavoritesView — renders the user's favorite channels as a responsive
- * grid of ChannelCards. Derives the list from the current library's
- * channels filtered through `favoriteSet` so stale favorites (channels
- * removed by an M3U refresh) disappear automatically.
- *
- * We derive client-side rather than re-query the `/favorites/channels`
- * endpoint because it lets the grid share the same Channel objects already
- * loaded for Discover — keeping the cache tight and avoiding a second
- * fetch when both tabs are visited in one session.
- */
-function FavoritesView({
-  channels,
-  favoriteSet,
-  scheduleByChannel,
-  onOpen,
-  onToggleFavorite,
-  t,
-}: FavoritesViewProps) {
-  const favorites = useMemo(
-    () => channels.filter((c) => favoriteSet.has(c.id)),
-    [channels, favoriteSet],
-  );
-
-  if (favorites.length === 0) {
-    return (
-      <div className="flex min-h-[40vh] flex-col items-center justify-center gap-2 rounded-tv-lg border border-dashed border-tv-line bg-tv-bg-1 p-8 text-center text-sm text-tv-fg-2">
-        <div className="text-4xl" aria-hidden="true">
-          ♡
-        </div>
-        <p>
-          {t("liveTV.favoritesEmpty", {
-            defaultValue:
-              "Aún no tienes favoritos. Toca ♥ en cualquier canal para añadirlo.",
-          })}
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-      {favorites.map((ch) => (
-        <ChannelCard
-          key={ch.id}
-          channel={ch}
-          nowPlaying={getNowPlaying(scheduleByChannel[ch.id])}
-          upNext={getUpNext(scheduleByChannel[ch.id])}
-          isFavorite
-          onClick={() => onOpen(ch)}
-          onToggleFavorite={() => onToggleFavorite(ch.id)}
-        />
-      ))}
-    </div>
-  );
-}
-
