@@ -27,10 +27,14 @@ export function useProgressReporter(
     return () => clearInterval(progressTimerRef.current);
   }, [videoRef, itemId]);
 
-  // Save final progress on unmount
+  // Save final progress on unmount. videoRef.current must be captured at
+  // effect-mount time (per react-hooks/exhaustive-deps) — by the time the
+  // cleanup runs, React may have already nulled the ref. Since the parent
+  // only creates the <video> once and passes the same ref for the
+  // component's lifetime, capturing at mount gives us the correct node.
   useEffect(() => {
+    const video = videoRef.current;
     return () => {
-      const video = videoRef.current;
       if (video && video.currentTime > 0) {
         api
           .updateProgress(itemId, {
@@ -39,6 +43,6 @@ export function useProgressReporter(
           .catch(() => {});
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- unmount-only; itemId is stable for the player's life
   }, []);
 }

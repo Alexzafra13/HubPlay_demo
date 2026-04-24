@@ -37,17 +37,18 @@ export default function ItemDetail() {
 
   // Episode context for prefetching next episode
   const [playingItemId, setPlayingItemId] = useState<string | null>(null);
-  const [siblingEpisodes, setSiblingEpisodes] = useState<MediaItem[]>([]);
 
-  // Fetch sibling episodes when the current item is an episode
+  // Fetch sibling episodes when the current item is an episode. The list is
+  // pure derivation — filter + sort — so it lives in a useMemo. Previously
+  // this was a state + effect that re-derived on every siblings change,
+  // which React 19 + Compiler flagged as a cascading render.
   const parentId = item?.parent_id;
   const { data: siblings } = useItemChildren(parentId ?? "", { enabled: !!parentId && item?.type === "episode" });
-  useEffect(() => {
-    if (siblings && siblings.length > 0) {
-      const episodes = siblings.filter((s) => s.type === "episode")
-        .sort((a, b) => (a.episode_number ?? 0) - (b.episode_number ?? 0));
-      setSiblingEpisodes(episodes);
-    }
+  const siblingEpisodes = useMemo<MediaItem[]>(() => {
+    if (!siblings || siblings.length === 0) return [];
+    return siblings
+      .filter((s) => s.type === "episode")
+      .sort((a, b) => (a.episode_number ?? 0) - (b.episode_number ?? 0));
   }, [siblings]);
 
   // ─── Favorite state ─────────────────────────────────────────────────────
@@ -60,8 +61,15 @@ export default function ItemDetail() {
   }, [id, toggleFavoriteMutation]);
 
   // ─── Kebab menu items ───────────────────────────────────────────────────
+  //
+  // Plain derivation rebuilt on every render. Used to be a useMemo with
+  // deps [isAdmin, id, item, t], but the compiler rejected the manual
+  // memoization because the body also reads `queryClient` (not in deps)
+  // — so it was always re-computing anyway. With React Compiler, the
+  // whole component gets auto-memoized; a manual wrapper only gets in
+  // its way.
 
-  const menuItems = useMemo<HeroMenuItem[]>(() => {
+  const menuItems: HeroMenuItem[] = (() => {
     const items: HeroMenuItem[] = [];
 
     // Admin-only items
@@ -106,7 +114,7 @@ export default function ItemDetail() {
     }
 
     return items;
-  }, [isAdmin, id, item, t]);
+  })();
 
   // ─── Playback ───────────────────────────────────────────────────────────
 

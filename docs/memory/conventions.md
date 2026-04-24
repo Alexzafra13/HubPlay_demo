@@ -343,3 +343,83 @@ const show = !!url && failedUrl !== url;
 Derivar `show` de props (url + failedUrl) en vez de usar
 `useEffect(() => setOk(true), [url])` evita el warning
 `react-hooks/set-state-in-effect` que el lint del proyecto enforzea.
+
+### React 19 + Compiler — patrones permitidos para no usar `useEffect`
+
+El proyecto enforza `react-hooks/set-state-in-effect` y
+`react-compiler/preserve-manual-memoization`. Bajo React 19 + Compiler
+estas reglas no son nits — `setState` dentro de `useEffect` produce
+re-renders en cascada reales (paint con valor stale, luego paint de
+la corrección). Patrones permitidos:
+
+- **Derivación pura** → `useMemo([deps])`. Si el valor es función
+  determinística de inputs, no es estado.
+- **Mirror de un store externo** (matchMedia, location, localStorage,
+  websocket, etc.) → `useSyncExternalStore`. Eliminado el efecto
+  por completo, sin race entre initial-state y subscribe.
+- **Reset de estado en cambio de prop** → `[prev, setPrev] = useState
+  (prop)` y comparar en render. Patrón canónico de React docs
+  ("Adjusting state on prop change"). Lint-clean.
+
+```tsx
+// ✅ Reset durante render
+const [visibleCount, setVisibleCount] = useState(BATCH_SIZE);
+const [prevItems, setPrevItems] = useState(items);
+if (prevItems !== items) {
+  setPrevItems(items);
+  setVisibleCount(BATCH_SIZE);
+}
+
+// ❌ Reset en efecto (cascading render bajo React 19)
+const [visibleCount, setVisibleCount] = useState(BATCH_SIZE);
+useEffect(() => {
+  setVisibleCount(BATCH_SIZE);
+}, [items]);
+```
+
+### React Compiler — no manual `useCallback` / `useMemo`
+
+Si el lint dice "Compilation Skipped: Existing memoization could not
+be preserved", **borra** el `useCallback` o `useMemo`. El compiler
+memoiza el componente entero gratis; un manual mal-depped es siempre
+peor que ninguno.
+
+Excepción única: el callback se pasa a un hook externo que **depende**
+de la identidad estable (ej. `useEffect` con el callback en deps,
+o un hook de terceros que documenta requerirlo). En el resto, fuera.
+
+### `useEffect` con cleanup que lee `ref.current`
+
+El linter `react-hooks/exhaustive-deps` flagea leer `ref.current` en
+el cleanup porque la ref puede haber cambiado. Capturar al inicio
+del efecto:
+
+```tsx
+// ✅
+useEffect(() => {
+  const node = videoRef.current;
+  return () => {
+    if (node && node.currentTime > 0) saveProgress(node);
+  };
+}, []);
+
+// ❌ — videoRef.current puede ser null o un nodo distinto al cleanup
+useEffect(() => {
+  return () => {
+    const node = videoRef.current;
+    if (node) saveProgress(node);
+  };
+}, []);
+```
+
+### Component-only files (Fast Refresh)
+
+`react-refresh/only-export-components` rompe HMR si un fichero
+exporta a la vez un componente y un helper / constante / hook /
+tipo (excepto types via `export type`, que sí se permiten).
+
+Reglas:
+- Helpers que solo usa el componente → no se exportan.
+- Helpers que usan varios componentes → fichero propio (`*.helpers.ts`).
+- Si una constante de UI se usa con un componente, mejor fichero aparte
+  (ej. `categoryOrder.ts` separado de `CategoryChips.tsx`).

@@ -98,7 +98,9 @@ export class ApiClient {
     }
 
     // Retry with exponential backoff for 5xx / network errors (up to 2 retries).
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- assigned inside loop before break
+    // Definite-assignment assertion (`!`): response is always assigned before
+    // the loop terminates (either `break` or `throw`), but TS can't prove it
+    // without inspecting the control flow.
     let response!: Response;
     const maxRetries = 2;
     for (let attempt = 0; ; attempt++) {

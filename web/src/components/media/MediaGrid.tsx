@@ -20,12 +20,17 @@ const MediaGrid: FC<MediaGridProps> = ({
   emptyMessage = "No items found",
 }) => {
   const [visibleCount, setVisibleCount] = useState(BATCH_SIZE);
-  const sentinelRef = useRef<HTMLDivElement>(null);
-
-  // Reset visible count when items change (e.g. navigation)
-  useEffect(() => {
+  // Track the items reference so we can reset visibleCount during render
+  // when the parent navigates to a different list. Resetting via useEffect
+  // caused a cascading render under React 19 + Compiler (flagged by
+  // react-hooks/set-state-in-effect) because the first paint still showed
+  // the previous batch before the effect fired.
+  const [prevItems, setPrevItems] = useState(items);
+  if (prevItems !== items) {
+    setPrevItems(items);
     setVisibleCount(BATCH_SIZE);
-  }, [items]);
+  }
+  const sentinelRef = useRef<HTMLDivElement>(null);
 
   // IntersectionObserver to load more items as user scrolls
   const observerCallback = useCallback(
