@@ -165,6 +165,65 @@ mockear sin exportar interfaces globales.
 
 ## Tests
 
+### Frontend — Vitest + Testing Library: gotchas descubiertos trabajando
+
+Tres patrones que reventaron la primera vez y merece la pena saber de
+antemano. Todos aplicados en `web/src/components/livetv/*.test.*`.
+
+**1. `user-event` + `vi.useFakeTimers` deadlockea con componentes que
+tienen `setTimeout` interno.** La cola interna de user-event usa
+`setTimeout(fn, 0)` para secuenciar eventos; bajo timers mock esa cola
+no avanza, el `await user.click(...)` nunca resuelve, el test expira a
+los 5 s. El caso que reventó: `ChannelCard` tiene un debounce de 250 ms
+en el hover. Fix: usar `fireEvent` síncrono, que dispara los mismos
+handlers DOM sin ceremonia async.
+
+```tsx
+// ✗ Se queda colgado con fake timers
+await user.click(screen.getByRole("button"));
+
+// ✓ Sincrónico, funciona con fake timers
+fireEvent.click(screen.getByRole("button"));
+```
+
+**2. `<img alt="">` decorativas quedan fuera del accessibility tree.**
+Por WAI-ARIA, una imagen con `alt=""` le dice al lector de pantalla
+"ignórame" — y Testing Library respeta ese contrato. `getByRole("img")`
+no las encuentra. Para tests que necesitan comprobar presencia/ausencia
+del `<img>` (como el regression test del fallback de logo), usar
+`container.querySelector("img")`.
+
+**3. `useTranslation()` + `defaultValue` funciona sin provider i18n en
+tests.** El codebase tiene la convención de siempre pasar
+`t("key", { defaultValue: "texto" })`. Cuando no hay i18n inicializado
+la key no se encuentra y react-i18next devuelve el `defaultValue`. Por
+eso los tests de livetv **no montan ningún provider** y los componentes
+renderizan el texto en español por defecto. Si un componente usa
+`t("key")` sin defaultValue, el test devuelve la string `"key"` tal cual
+— eso es señal de que hay que añadir el fallback, no inicializar i18n.
+
+### Frontend — Patrones de fixture
+
+- **Reloj fijo**: `const NOW = new Date("2026-04-24T12:00:00Z").getTime();`
+  + `vi.useFakeTimers()` + `vi.setSystemTime(NOW)` en `beforeEach`.
+  Cualquier `Date.now()` o `new Date()` dentro del componente lee el
+  instante mockeado, asserts deterministas.
+- **Factory con `Partial<T>` overrides**:
+
+  ```ts
+  function channel(overrides: Partial<Channel> = {}): Channel {
+    return { /* defaults */, ...overrides };
+  }
+  ```
+
+  Reduce boilerplate por test y deja los overrides visibles en el
+  callsite.
+- **Mockear hooks de API con `vi.mock`** en vez de levantar un
+  `QueryClientProvider` cuando el test es pura lógica. Ejemplo
+  canónico: `useHeroSpotlight.test.ts` mockea `useUserPreference` con
+  una tupla `[mode, setMode]` y testea la cadena de fallback sin
+  tocar red ni react-query.
+
 ### `-race` requiere CGO
 
 El driver `modernc.org/sqlite` es pure-Go por diseño (para binario único

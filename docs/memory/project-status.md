@@ -1,6 +1,191 @@
 # Estado del proyecto
 
-> Snapshot: **2026-04-24** (live-TV arc + simplify sweep) · Rama: `claude/review-memory-tv-code-8bjei` · **tests: verde**
+> Snapshot: **2026-04-24** (live-TV arc + simplify sweep + frontend coverage slice 1) · Rama: `claude/frontend-livetv-coverage` · **tests: verde**
+
+---
+
+## 👉 HANDOFF PARA LA PRÓXIMA SESIÓN
+
+> Leer esto ANTES que el resto del documento. Hay dos tracks pedidos,
+> ambos independientes y paralelizables. Elige el que prefieras y ataca.
+
+**Estado al abrir sesión**: asume que PR `claude/frontend-livetv-coverage`
+ya está mergeado a main (si no, mergéalo primero o trabaja sobre él).
+La base ya trae: los hooks `useNowTick`/`useHeroSpotlight`, los
+componentes split (`DiscoverView`, `FavoritesView`, `LiveTvTopBar`,
+`OverlayHeader`, `NowPlayingCard`), y 138 tests verdes.
+
+### TRACK A — Coverage slice 2 (componentes livetv restantes)
+
+**Objetivo**: cubrir los 4 componentes que quedaron sin tests en el
+slice 1. Mismo patrón exacto, debería ser ~1 día y +40-50 tests.
+
+**Fixtures reutilizables**: copia directamente de los tests que ya
+existen — todos usan el mismo shape de `channel(overrides)` factory
++ `program(id, startOffsetMin, durationMin, overrides)` + reloj fijo
+`const NOW = new Date("2026-04-24T12:00:00Z").getTime()` con
+`vi.useFakeTimers()` + `vi.setSystemTime(NOW)` en `beforeEach`.
+Ejemplo canónico: `web/src/components/livetv/NowPlayingCard.test.tsx`.
+
+Los tres gotchas ya aprendidos (en `conventions.md` sección "Frontend
+— Vitest + Testing Library"): **fireEvent en vez de user-event**,
+`container.querySelector("img")` para `<img alt="">`, y **no hace
+falta i18n provider** si el componente usa `defaultValue`.
+
+Componentes a cubrir y qué pinear en cada uno:
+
+- **`LiveTvTopBar.tsx`** (146 loc):
+  - Renderiza título + total channels + live-now count (aria labels).
+  - 3 tabs con `role="tab"` + `aria-selected`, wiring de `onTab`.
+  - Input de búsqueda dispara `onSearch` con el valor.
+  - `<HeroSettings>` solo aparece en la tab `discover` (no en guide /
+    favorites).
+  - Mockear `HeroSettings` con `vi.mock("./HeroSettings")` para no
+    arrastrar su lógica interna al test.
+
+- **`DiscoverView.tsx`** (136 loc):
+  - Con `category="all"`, los rails aparecen en el orden de
+    `CHANNEL_CATEGORY_ORDER` **saltando** categorías vacías.
+  - Con `category` específica, solo se renderiza ese rail.
+  - Rail `Apagados` solo aparece si hay unhealthy **Y** la category es
+    `"all"` (si hay unhealthy pero estamos filtrando por "sports", NO
+    debe verse).
+  - Empty state cuando `visibleRails.length === 0` (ninguna categoría
+    con canales).
+  - `onSeeAll` solo existe en modo `"all"` (cambiar a esa category en
+    el click).
+  - Mockear `HeroSpotlight` (ya tiene su propio test) para no mezclar.
+
+- **`HeroSpotlight.tsx`** (~210 loc):
+  - `items.length === 0` → renderiza null.
+  - 1 item: no hay dots, no auto-rotación (el `useEffect` con timer
+    respeta `items.length < 2`).
+  - 2+ items: dots con `role="tab"`, `aria-selected` en el activo, y
+    auto-rotación cada 12 s (anchor `ROTATE_MS`). Usa fake timers +
+    `vi.advanceTimersByTime(12_000)` para verificar rotación.
+  - Click en dot cambia `rawIdx` y el activo.
+  - Clamp: si `items` se reduce de 3 a 1, el render sigue funcionando
+    sin crash (re-render con `rawIdx >= items.length`).
+  - `useNowTick(30_000)` integrado — mock del hook NO es necesario si
+    usas fake timers, pero sí lo es si quieres forzar re-render
+    explícito. Alternativa: `vi.advanceTimersByTime(30_000)` y
+    `rerender()`.
+  - `StreamPreview` tiene HLS.js que en jsdom peta; **mockear**
+    `./StreamPreview` con `vi.mock` para evitar montarlo.
+
+- **`EPGGrid.tsx`** (430 loc, el más complejo):
+  - Header sticky con hour ruler (24 columnas).
+  - Renderiza una fila por canal, dentro programas que **caen en la
+    ventana** `windowStart..windowEnd` (descarta fuera-de-rango).
+  - `now-line` visible solo cuando `nowLineOffset` está entre 0 y
+    `TIMELINE_WIDTH`.
+  - Botón "Ahora · HH:MM" hace smooth-scroll al offset de ahora −120.
+  - Auto-scroll inicial solo una vez (`hasScrolledRef`). Re-ticks
+    NO re-scrollean.
+  - Click en una celda de programa llama `onSelect(channel)`.
+  - `activeChannelId` aplica clase + `aria-pressed="true"` a esa fila.
+  - Empty state cuando `channels.length === 0`.
+  - Programa con `start_time` tras `windowEnd` o `end_time` antes de
+    `windowStart` no se renderiza (devuelve null).
+
+**Criterio de "hecho"**: `pnpm test` sube de 138 a ≥180, `pnpm tsc
+--noEmit` verde, `pnpm build` verde, `pnpm lint` sin nuevos errors.
+
+### TRACK B — Setup wizard tests (ruta crítica 1er arranque)
+
+**Objetivo**: cubrir el flujo más importante del producto — la primera
+ejecución. Hoy tiene **0 tests**. Si esto se rompe, nadie usa el
+producto.
+
+**Ficheros**:
+```
+web/src/pages/setup/SetupWizard.tsx    235 loc  — orquestador
+web/src/pages/setup/AccountStep.tsx    197 loc  — crear admin
+web/src/pages/setup/LibrariesStep.tsx  341 loc  — elegir bibliotecas
+web/src/pages/setup/SettingsStep.tsx   280 loc  — TMDB key, hw accel
+web/src/pages/setup/CompleteStep.tsx   257 loc  — finalizar
+web/src/components/setup/FolderBrowser.tsx  195 loc
+```
+
+**Gotcha de entrada**: `FolderBrowser` está en la lista de
+pre-existing lint debt (`react-hooks/set-state-in-effect`). Si tocas
+ese fichero para testearlo, considera arreglar el lint a la vez — el
+patrón de fix ya está documentado (ver `CountrySelector` en el commit
+del lint burndown del ciclo anterior).
+
+**Qué pinear, por step**:
+
+- **`SetupWizard.tsx`** (orquestador — más fácil, empezar por aquí):
+  - `StepIndicator` marca activo/completed según `currentStep`.
+  - `initialStep` prop mapea a índice correcto (hay un `STEP_MAP` al
+    principio; verifica que un valor desconocido cae a 0).
+  - `goNext` avanza pero topa en `STEP_KEYS.length - 1` (4 steps,
+    índice 3 max).
+  - `goBack` retrocede pero topa en 0.
+  - `handleAccountNext` → persiste `setupData.user` y avanza.
+  - `handleLibrariesNext` → persiste `setupData.libraries` y avanza.
+  - `handleSettingsNext` → persiste `setupData.settings` y avanza.
+  - Mockear los 4 step components con `vi.mock` para aislar el
+    orquestador; cada mock expone los props recibidos para verificar
+    wiring (`onNext`, `onBack`, `initialData`).
+
+- **`AccountStep.tsx`**:
+  - Validación local: username < 3 chars → error, password < 8 →
+    error, confirm ≠ password → error. Cada uno con su key de
+    traducción (ver defaultValues).
+  - `createAdmin.mutate` NO se llama si `validate()` falla.
+  - `onSuccess` → `setAuth(user)` + `onNext({username, password, ...})`.
+  - Server error → aparece `serverError` string en UI.
+  - Mockear `useSetupCreateAdmin` con `vi.mock("@/api/hooks", ...)`
+    devolviendo un mutation stub (`mutate: vi.fn()`, `isPending: bool`,
+    etc. según API de TanStack Query v5).
+  - Mockear `useAuthStore` — hay precedente: `web/src/store/auth.test.ts`.
+
+- **`LibrariesStep.tsx`** (más largo, trae FolderBrowser):
+  - Permitir añadir/quitar entries (name + contentType + path).
+  - Validar que hay ≥ 1 biblioteca y que cada una tiene los 3 campos.
+  - `onNext(entries)` solo si la lista es válida.
+  - `onBack` dispara sin validar.
+  - El `FolderBrowser` dispara un callback `onSelect(path)`; mockear
+    para no montar la navegación real.
+
+- **`SettingsStep.tsx`**:
+  - Campos opcionales (TMDB key, hwAccel dropdown).
+  - `onNext({tmdbApiKey?, hwAccel?})` siempre pasa — no hay
+    validación obligatoria.
+  - `onBack` funciona.
+
+- **`CompleteStep.tsx`**:
+  - Resume lo creado.
+  - Botón "Start" que probablemente llama un mutation final
+    (revisar el fichero) y redirige. Mockear la mutation + el router.
+
+**Criterio de "hecho"**: los 5 ficheros del wizard cubiertos. Mínimo
+~25 tests. `SetupWizard` orquestador es el más valioso (guía todo el
+flujo), ataca ese primero.
+
+### Orden sugerido si haces ambos
+
+1. **Track A completo** (4 ficheros, +40-50 tests) → 1 commit → PR.
+2. Mergear PR A.
+3. **Track B completo** (5 ficheros, +25-30 tests) → 1 commit → PR.
+4. Actualizar esta memoria (retirar el handoff, añadir ciclo).
+
+Si prefieres paralelizar: A y B tocan directorios distintos
+(`components/livetv/` vs `pages/setup/`), no hay conflicto real.
+
+### Checklist al abrir sesión
+- [ ] Leer este handoff + el resto de `project-status.md`.
+- [ ] `git checkout main && git pull` — verifica que slice 1 está en.
+- [ ] Elegir track.
+- [ ] Crear rama `claude/frontend-coverage-slice-2` o
+  `claude/setup-wizard-tests`.
+- [ ] Atacar fichero por fichero, correr `pnpm test -- <fichero>`
+  frecuentemente.
+- [ ] Al acabar: `pnpm test` + `pnpm tsc --noEmit` + `pnpm build`
+  verdes, commit descriptivo, push, PR.
+
+---
 
 ## Resumen ejecutivo
 
@@ -25,7 +210,16 @@ roto de `ChannelCard` ya muestra las iniciales (antes dejaba el hueco), y la
 barra de progreso del `HeroSpotlight` se actualiza también con un solo item
 (antes quedaba congelada hasta que cambiaba `nowPlaying`). Extraídos tres
 hooks / módulos reutilizables: `useNowTick`, `useHeroSpotlight`,
-`livetv/categoryOrder`.
+`livetv/categoryOrder`. Mergeado en PR #81.
+
+Ciclo siguiente (`claude/frontend-livetv-coverage`, 1 commit): primera
+tajada del coverage-burndown frontend identificado en la senior review.
+**Vitest 74 → 138 tests (+64)** cubriendo los hooks y componentes
+recién partidos. Los 7 ficheros nuevos son todos <200 loc sin setup de
+i18n. Incluye **test de regresión** para el fix del logo roto de
+`ChannelCard`, blindado contra retrocesos. Abre PR con los 64 tests
++ la actualización de esta memoria + 3 patrones nuevos de testing en
+`conventions.md`.
 
 ## Tamaño verificado
 
@@ -36,7 +230,42 @@ hooks / módulos reutilizables: `useNowTick`, `useHeroSpotlight`,
 - `go test -race ./...` verde en 21 paquetes; `golangci-lint v1.64.8`: exit 0
 - Frontend: `pnpm build` + `pnpm test` (72/72) verdes
 
-## Simplify sweep (hoy, 2026-04-24, `claude/review-memory-tv-code-8bjei`)
+## Frontend coverage — slice 1 (`claude/frontend-livetv-coverage`)
+
+Primer paso del track de estabilidad. Cubre los hooks y componentes
+extraídos en PR #81, que al ser ya pequeños y SRP-estrictos hacen los
+tests triviales (~30 loc de media por test).
+
+Delta: **74 → 138 tests en Vitest** (+64), 7 ficheros nuevos <200 loc.
+
+| Fichero | Tests | Lo que pin-ea |
+|---|---|---|
+| `web/src/hooks/useNowTick.test.ts` | 6 | Tick inicial · re-tick boundary · interval custom · unmount limpia timer · intervalMs change resetea cadencia |
+| `web/src/components/livetv/epgHelpers.test.ts` | 17 | `getNowPlaying` (start inclusivo/end exclusivo) · `getUpNext` (contrato no-sort, confía en backend `ORDER BY start_time`) · `getProgramProgress` clamp 0..100 · `formatTime` · `capitalize` |
+| `web/src/components/livetv/useHeroSpotlight.test.ts` | 9 | Fallback silencioso favorites → live-now → newest · `off` honrado sin fallback · 6-item cap · live-now ordenado por channel number · `setMode` forward · mockea `useUserPreference` para aislar |
+| `web/src/components/livetv/ChannelCard.test.tsx` | 12 | Identity · EPG on-air / no-EPG · logo vs iniciales · **regression test del fix del logo roto** (fireEvent.error → avatar aparece) · favorite toggle aislado del card click · dimmed "Apagado" |
+| `web/src/components/livetv/FavoritesView.test.tsx` | 6 | Empty state · filtrado favoriteSet · stale-favorites dropped silently (post-M3U refresh) · wiring callbacks · EPG data pasa a las cards |
+| `web/src/components/livetv/OverlayHeader.test.tsx` | 7 | Identity + country uppercase · close wiring · heart condicional · aria-pressed refleja isFavorite · country opcional |
+| `web/src/components/livetv/NowPlayingCard.test.tsx` | 7 | No-EPG fallback · campos + duración + categoría · up-next condicional · barra de progreso driven-by-`now` prop (50% halfway, clamped 0/100) |
+
+**Patrones de test descubiertos** (ahora en `conventions.md`):
+
+1. `user-event` + `vi.useFakeTimers` **se bloquea** con componentes que
+   tienen `setTimeout` internos (el debounce de hover de `ChannelCard`
+   es el caso que reventó). El `userEvent.click` nunca resuelve
+   porque su cola interna no avanza. `fireEvent` síncrono ejercita
+   los mismos handlers sin deadlock.
+2. `<img alt="">` decorativas quedan **fuera del accessibility tree**
+   por WAI-ARIA — `getByRole("img")` no las encuentra. Para estos
+   casos usar `container.querySelector("img")`. Queda consistente con
+   que screen readers tampoco las anuncian.
+3. Componentes que usan `useTranslation()` con `defaultValue` en cada
+   key funcionan en tests **sin inicializar i18n**. Con el provider
+   ausente, `t("missing", {defaultValue: "X"})` devuelve "X". El
+   codebase lo usa por convención (ver cualquier componente livetv),
+   así que los tests no tienen que montar provider.
+
+## Simplify sweep (2026-04-24, `claude/review-memory-tv-code-8bjei` — PR #81)
 
 Review completa del paquete `internal/iptv` + `web/src/components/livetv` +
 `web/src/pages/LiveTV.tsx` contra la memoria de este arc. Un único commit
@@ -392,9 +621,11 @@ type Service struct {
 - `MetadataUpdated` — necesita hook en scanner o flujo de refresh dedicado
 
 ### Frontend general
-- Tests del setup wizard (0 cobertura, ruta crítica de primer arranque)
+- Tests del setup wizard (0 cobertura, ruta crítica de primer arranque).
 - Tests de páginas admin (mutan estado, 0 tests — los panels nuevos
-  `LivetvAdminPanel` + sub-paneles entran en este hueco)
+  `LivetvAdminPanel` + sub-paneles entran en este hueco).
+- Tests de componentes livetv restantes: `LiveTvTopBar`, `DiscoverView`,
+  `HeroSpotlight`, `EPGGrid`. Los 7 iniciales ya cubiertos en el slice 1.
 - Lint pre-existente `react-hooks/set-state-in-effect` en **4** ficheros:
   `AppLayout`, `MediaGrid`, `FolderBrowser`, `ItemDetail` (CountrySelector
   ya barrido). Bajo React 19 + Compiler son re-renders en cascada reales,
@@ -431,13 +662,14 @@ type Service struct {
 Sin prisa. Candidatos ordenados por impacto.
 
 **Si foco = estabilidad**:
-1. **Tests del setup wizard** — ruta crítica de primer arranque con 0
+1. ✅ **Slice 1 coverage hecho** (`claude/frontend-livetv-coverage`):
+   7 ficheros, +64 tests. Queda `LiveTvTopBar` / `DiscoverView` /
+   `HeroSpotlight` / `EPGGrid` — mismo patrón, ~1 día.
+2. **Tests del setup wizard** — ruta crítica de primer arranque con 0
    cobertura. Si se rompe, nadie llega a usar el producto.
-2. **Coverage frontend con los componentes recién partidos** —
-   `DiscoverView`, `FavoritesView`, `OverlayHeader`, `NowPlayingCard`,
-   `useHeroSpotlight`, `useNowTick`. Cada uno ~30 loc de test.
-3. **Burndown del lint debt restante** (4 ficheros).
-4. **Split de `library.Service`** siguiendo la receta del iptv.
+3. **Tests de páginas admin** (`LivetvAdminPanel` + sub-paneles).
+4. **Burndown del lint debt restante** (4 ficheros).
+5. **Split de `library.Service`** siguiendo la receta del iptv.
 
 **Si foco = experiencia LiveTV**:
 1. **Matcher EPG más agresivo** — sube cobertura 52/268 → 150-200+.
