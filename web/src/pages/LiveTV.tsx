@@ -8,7 +8,6 @@ import {
   useChannelFavoriteIDs,
   useLibraries,
   useRemoveChannelFavorite,
-  useUserPreference,
 } from "@/api/hooks";
 import { api } from "@/api/client";
 import type { Channel, ChannelCategory, UnhealthyChannel } from "@/api/types";
@@ -28,7 +27,9 @@ import {
   PlayerOverlay,
   getNowPlaying,
   getUpNext,
+  useHeroSpotlight,
 } from "@/components/livetv";
+import { CHANNEL_CATEGORY_ORDER } from "@/components/livetv/categoryOrder";
 
 type ViewTab = "discover" | "guide" | "favorites";
 
@@ -196,128 +197,15 @@ export default function LiveTV() {
     return byCat;
   }, [filteredChannels]);
 
-  // Hero mode — what signal fills the top-of-Discover spotlight.
-  // Persisted per-account in user_preferences so the choice follows
-  // the viewer across devices. Defaults to "favorites" (the most
-  // intentional personal signal). If a user opens Discover before
-  // marking any favorites, the hero surfaces an empty-state with the
-  // gear so they can switch to "live-now" or "newest" without
-  // feeling stuck.
-  const [heroMode, setHeroMode] = useUserPreference<HeroMode>(
-    "livetv.hero_mode",
-    "favorites",
-  );
-
-  // Compute a pool for each signal. Doing it up-front lets the
-  // auto-fallback below pick whichever one actually has content
-  // without recomputing.
-  const heroPools = useMemo(() => {
-    const favorites = channels.filter((c) => favoriteSet.has(c.id));
-    const liveNow = channels
-      .filter((c) => getNowPlaying(scheduleByChannel[c.id]))
-      .slice()
-      .sort((a, b) => a.number - b.number);
-    const newest = channels
-      .slice()
-      .sort((a, b) => (b.added_at ?? "").localeCompare(a.added_at ?? ""));
-    return { favorites, liveNow, newest };
-  }, [channels, favoriteSet, scheduleByChannel]);
-
-  // Resolve the actual mode rendered. If the user's preference is
-  // "off" we always honour it. Otherwise fall back silently through
-  // favorites → live-now → newest so a fresh account (no favorites
-  // yet) still lands on a populated spotlight — the previous empty
-  // "Tu favorito" card was a dead end for new users. The mode label
-  // (computed below) reflects what's actually on screen so nothing
-  // lies about what you're seeing.
-  const effectiveMode = useMemo<HeroMode>(() => {
-    if (heroMode === "off") return "off";
-    const order: HeroMode[] =
-      heroMode === "favorites"
-        ? ["favorites", "live-now", "newest"]
-        : heroMode === "live-now"
-          ? ["live-now", "favorites", "newest"]
-          : ["newest", "favorites", "live-now"];
-    for (const m of order) {
-      const pool =
-        m === "favorites"
-          ? heroPools.favorites
-          : m === "live-now"
-            ? heroPools.liveNow
-            : heroPools.newest;
-      if (pool.length > 0) return m;
-    }
-    return heroMode;
-  }, [heroMode, heroPools]);
-
-  const heroItems = useMemo<HeroSpotlightItem[]>(() => {
-    if (effectiveMode === "off") return [];
-    const pool =
-      effectiveMode === "favorites"
-        ? heroPools.favorites
-        : effectiveMode === "live-now"
-          ? heroPools.liveNow
-          : heroPools.newest;
-    return pool.slice(0, 6).map((c) => ({
-      channel: c,
-      nowPlaying: getNowPlaying(scheduleByChannel[c.id]),
-    }));
-  }, [effectiveMode, heroPools, scheduleByChannel]);
-
-  const heroLabel = useMemo(() => {
-    switch (effectiveMode) {
-      case "favorites":
-        return t("liveTV.hero.label.favorites", { defaultValue: "Tu favorito" });
-      case "live-now":
-        return t("liveTV.hero.label.liveNow", { defaultValue: "En directo ahora" });
-      case "newest":
-        return t("liveTV.hero.label.newest", { defaultValue: "Recién añadidos" });
-      default:
-        return "";
-    }
-  }, [effectiveMode, t]);
-
-  const heroModeOptions = useMemo<HeroModeOption[]>(
-    () => [
-      {
-        mode: "favorites",
-        label: t("liveTV.hero.option.favorites", {
-          defaultValue: "Mis favoritos",
-        }),
-        hint: t("liveTV.hero.option.favoritesHint", {
-          defaultValue: "Los canales con ♥, rotando.",
-        }),
-      },
-      {
-        mode: "live-now",
-        label: t("liveTV.hero.option.liveNow", {
-          defaultValue: "En vivo ahora",
-        }),
-        hint: t("liveTV.hero.option.liveNowHint", {
-          defaultValue: "Canales con programa EPG emitiendo ahora mismo.",
-        }),
-      },
-      {
-        mode: "newest",
-        label: t("liveTV.hero.option.newest", {
-          defaultValue: "Recién añadidos",
-        }),
-        hint: t("liveTV.hero.option.newestHint", {
-          defaultValue: "Los últimos canales que entraron en la biblioteca.",
-        }),
-      },
-      {
-        mode: "off",
-        label: t("liveTV.hero.option.off", {
-          defaultValue: "Ocultar destacado",
-        }),
-        hint: t("liveTV.hero.option.offHint", {
-          defaultValue: "Discover empieza directamente por las rails.",
-        }),
-      },
-    ],
-    [t],
-  );
+  // Hero spotlight — preference, silent fallback chain and mode options
+  // live in the dedicated hook so this page stays focused on layout.
+  const {
+    items: heroItems,
+    label: heroLabel,
+    mode: heroMode,
+    setMode: setHeroMode,
+    modeOptions: heroModeOptions,
+  } = useHeroSpotlight({ channels, scheduleByChannel, favoriteSet });
 
   // Topbar counter: number of channels *actually broadcasting now* — in IPTV
   // all active channels stream continuously, so this is simply the count of
@@ -346,7 +234,10 @@ export default function LiveTV() {
   }
 
   // ── Active-channel pointer for EPGGrid (kept for the Guide tab) ───
-  const guideActiveChannel = playingChannel ?? channels[0] ?? null;
+  // Fall back to the first visible row so the "active" highlight never
+  // points off-screen when the user has a filter or search applied.
+  const guideActiveChannel =
+    playingChannel ?? filteredChannels[0] ?? channels[0] ?? null;
 
   return (
     <section
@@ -385,7 +276,7 @@ export default function LiveTV() {
 
       {tab === "guide" && (
         <EPGGrid
-          channels={filteredChannels.length > 0 ? filteredChannels : channels}
+          channels={filteredChannels}
           scheduleByChannel={scheduleByChannel}
           activeChannelId={guideActiveChannel?.id}
           onSelectChannel={openPlayer}
@@ -583,27 +474,12 @@ function DiscoverView({
   unhealthyChannels,
   t,
 }: DiscoverViewProps) {
-  // Rail ordering mirrors the chips' default order so what the user
-  // selects in chips and what they scroll past in rails feel consistent.
-  const railOrder: ChannelCategory[] = [
-    "news",
-    "sports",
-    "movies",
-    "music",
-    "documentaries",
-    "entertainment",
-    "kids",
-    "culture",
-    "international",
-    "travel",
-    "religion",
-    "general",
-    "adult",
-  ];
-
+  // Rail ordering mirrors the chips' canonical order (see categoryOrder.ts)
+  // so what the user selects in chips and what they scroll past in rails
+  // feel consistent.
   const visibleRails =
     category === "all"
-      ? railOrder
+      ? CHANNEL_CATEGORY_ORDER
           .map((c) => [c, channelsByCategory.get(c) ?? []] as const)
           .filter(([, list]) => list.length > 0)
       : [[category, channelsByCategory.get(category) ?? []] as const];

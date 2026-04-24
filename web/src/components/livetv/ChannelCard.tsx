@@ -70,6 +70,15 @@ export function ChannelCard({
   // identity without fighting its neighbours.
   const thumbBg = `radial-gradient(circle at 50% 20%, ${channel.logo_bg}33 0%, transparent 55%), linear-gradient(180deg, var(--tv-bg-2) 0%, var(--tv-bg-1) 100%)`;
 
+  // Track logo-load failures per-URL so a broken upstream falls back to
+  // the initials avatar instead of leaving an empty gradient. We key on
+  // the URL itself (not a boolean) so a new channel whose logo happens
+  // to share the broken URL doesn't auto-hide, and so a fresh URL resets
+  // the state at render time — no setState-in-effect plumbing.
+  const [failedLogoUrl, setFailedLogoUrl] = useState<string | null>(null);
+  const showLogoImg =
+    !!channel.logo_url && failedLogoUrl !== channel.logo_url;
+
   // Hover-preview state. Debounced so a rapid cursor fly-by doesn't
   // spin up HLS; the 250 ms dwell is short enough that a deliberate
   // hover feels instant but a pass-through doesn't trigger.
@@ -136,15 +145,13 @@ export function ChannelCard({
 
         {/* Centered logo — primary visual when no preview is playing. */}
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-6">
-          {channel.logo_url ? (
+          {showLogoImg ? (
             <img
-              src={channel.logo_url}
+              src={channel.logo_url!}
               alt=""
               className="max-h-full max-w-full object-contain drop-shadow-[0_2px_8px_rgba(0,0,0,0.5)]"
               loading="lazy"
-              onError={(e) => {
-                e.currentTarget.style.display = "none";
-              }}
+              onError={() => setFailedLogoUrl(channel.logo_url ?? null)}
             />
           ) : (
             <ChannelLogo

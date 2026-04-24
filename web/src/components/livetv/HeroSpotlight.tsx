@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { Channel, EPGProgram } from "@/api/types";
+import { useNowTick } from "@/hooks/useNowTick";
 import { ChannelLogo } from "./ChannelLogo";
 import { StreamPreview } from "./StreamPreview";
 import { formatTime, getProgramProgress } from "./epgHelpers";
@@ -62,6 +63,11 @@ export function HeroSpotlight({ items, label, onOpen }: HeroSpotlightProps) {
     }, ROTATE_MS);
     return () => window.clearInterval(timer);
   }, [items.length]);
+
+  // Keep the progress bar advancing even when items.length < 2 (the
+  // rotation timer doesn't fire then, so without this tick the bar
+  // stayed frozen at mount position until nowPlaying changed).
+  useNowTick(30_000);
 
   if (items.length === 0) return null;
   const { channel, nowPlaying } = items[idx];

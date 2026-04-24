@@ -6,8 +6,6 @@ export { ChannelPlayer } from "./ChannelPlayer";
 export { ChannelRail } from "./ChannelRail";
 export { CountrySelector } from "./CountrySelector";
 export { EPGGrid } from "./EPGGrid";
-export { HeroMosaic } from "./HeroMosaic";
-export type { HeroTileData } from "./HeroMosaic";
 export { HeroSpotlight } from "./HeroSpotlight";
 export type { HeroSpotlightItem } from "./HeroSpotlight";
 export { HeroSettings } from "./HeroSettings";
@@ -15,6 +13,7 @@ export type { HeroMode, HeroModeOption } from "./HeroSettings";
 export { StreamPreview } from "./StreamPreview";
 export { PlayerOverlay } from "./PlayerOverlay";
 export { detectCountryCode } from "./detectCountry";
+export { useHeroSpotlight } from "./useHeroSpotlight";
 export {
   formatTime,
   getNowPlaying,

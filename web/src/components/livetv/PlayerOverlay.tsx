@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { Channel, EPGProgram } from "@/api/types";
+import { useNowTick } from "@/hooks/useNowTick";
 import { ChannelLogo } from "./ChannelLogo";
 import { ChannelPlayer } from "./ChannelPlayer";
 import { formatTime, getNowPlaying, getUpNext } from "./epgHelpers";
@@ -51,13 +52,9 @@ export function PlayerOverlay({
 
   // Clock tick — re-renders every 30 s so "what's on now" and the progress
   // bar on the now-playing card stay fresh. Matches the EPGGrid cadence.
-  // The state lives here (not inside child components) so child `useMemo`s
-  // stay pure-with-explicit-deps, which the React Compiler requires.
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const id = window.setInterval(() => setNow(Date.now()), 30_000);
-    return () => window.clearInterval(id);
-  }, []);
+  // Hoisted here (not in child components) so child `useMemo`s stay
+  // pure-with-explicit-deps, which the React Compiler requires.
+  const now = useNowTick(30_000);
 
   // Note: we don't auto-reset `tab` when the user picks a similar channel.
   // If they were on "Canales similares", landing there again is actually the

@@ -424,37 +424,25 @@ func (p *StreamProxy) streamOnceWithChannel(ctx context.Context, w http.Response
 	}
 
 	// For streams with unknown content-type, peek at the body to check for HLS
-	if channelID != "" && (ct == "video/mp2t" || ct == "application/octet-stream" || ct == "text/plain" || ct == "binary/octet-stream") {
-		// Read a small amount to detect HLS
-		peek := make([]byte, 512)
-		n, peekErr := io.ReadAtLeast(resp.Body, peek, 1)
-		if peekErr != nil && peekErr != io.ErrUnexpectedEOF {
+	if channelID != "" && isAmbiguousStreamCT(ct) {
+		peek, isHLS, peekErr := peekForHLS(resp.Body)
+		if peekErr != nil {
 			return fmt.Errorf("read upstream: %w", peekErr)
 		}
-		peek = peek[:n]
-
-		if looksLikeHLSPlaylist(peek) {
-			// Read the rest and serve as playlist
-			rest, err := io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024))
-			if err != nil {
-				return fmt.Errorf("read playlist: %w", err)
-			}
-			body := append(peek, rest...)
-			return p.serveRewrittenPlaylistBody(w, body, channelID, finalURL)
+		if isHLS {
+			return p.absorbAndRewriteHLS(w, peek, resp.Body, channelID, finalURL)
 		}
 
-		// Not HLS — write the peeked data and continue streaming
+		// Not HLS — write the peeked data and continue streaming.
 		w.Header().Set("Content-Type", ct)
 		w.Header().Set("Cache-Control", "no-cache, no-store")
 		w.Header().Set("Connection", "keep-alive")
-
 		if _, writeErr := w.Write(peek); writeErr != nil {
 			return nil
 		}
 		if flusher, ok := w.(http.Flusher); ok {
 			flusher.Flush()
 		}
-
 		return p.pipeStream(w, resp.Body)
 	}
 
@@ -464,6 +452,43 @@ func (p *StreamProxy) streamOnceWithChannel(ctx context.Context, w http.Response
 	w.Header().Set("Connection", "keep-alive")
 
 	return p.pipeStream(w, resp.Body)
+}
+
+// isAmbiguousStreamCT reports whether the Content-Type is generic enough
+// that we should peek at the body to decide if it's actually an HLS
+// playlist served under a non-HLS label (common on free IPTV CDNs).
+func isAmbiguousStreamCT(ct string) bool {
+	switch ct {
+	case "video/mp2t", "application/octet-stream", "text/plain", "binary/octet-stream":
+		return true
+	}
+	return false
+}
+
+// peekForHLS reads up to 512 bytes from body and reports whether those
+// bytes look like an HLS playlist. Returns the bytes consumed so the
+// caller can either keep reading (HLS path — concatenate with the rest)
+// or write them first then stream the remainder (raw path).
+func peekForHLS(body io.Reader) (peek []byte, isHLS bool, err error) {
+	buf := make([]byte, 512)
+	n, readErr := io.ReadAtLeast(body, buf, 1)
+	if readErr != nil && readErr != io.ErrUnexpectedEOF {
+		return nil, false, readErr
+	}
+	peek = buf[:n]
+	return peek, looksLikeHLSPlaylist(peek), nil
+}
+
+// absorbAndRewriteHLS reads the rest of the body, prepends any
+// already-peeked bytes, and serves the whole thing as a rewritten
+// HLS playlist.
+func (p *StreamProxy) absorbAndRewriteHLS(w http.ResponseWriter, head []byte, tail io.Reader, channelID, baseURL string) error {
+	rest, err := io.ReadAll(io.LimitReader(tail, 2*1024*1024))
+	if err != nil {
+		return fmt.Errorf("read playlist: %w", err)
+	}
+	body := append(head, rest...)
+	return p.serveRewrittenPlaylistBody(w, body, channelID, baseURL)
 }
 
 // pipeStream copies data from reader to HTTP response with flushing.
@@ -572,22 +597,17 @@ func (p *StreamProxy) ProxyURL(ctx context.Context, w http.ResponseWriter, chann
 		return err
 	}
 
-	// For segments with ambiguous content-type, peek to check for HLS
+	// For segments with ambiguous content-type, peek to check for HLS.
+	// The segment path treats `video/mp2t` as unambiguously non-HLS
+	// (a TS segment is the expected payload for that CT), so we reuse
+	// isAmbiguousStreamCT minus that entry via an inline check.
 	if ct == "text/plain" || ct == "application/octet-stream" || ct == "binary/octet-stream" {
-		peek := make([]byte, 512)
-		n, peekErr := io.ReadAtLeast(resp.Body, peek, 1)
-		if peekErr != nil && peekErr != io.ErrUnexpectedEOF {
+		peek, isHLS, peekErr := peekForHLS(resp.Body)
+		if peekErr != nil {
 			return fmt.Errorf("peek upstream: %w", peekErr)
 		}
-		peek = peek[:n]
-
-		if looksLikeHLSPlaylist(peek) {
-			rest, err := io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024))
-			if err != nil {
-				return fmt.Errorf("read sub-playlist: %w", err)
-			}
-			body := append(peek, rest...)
-			return p.serveRewrittenPlaylistBody(w, body, channelID, finalURL)
+		if isHLS {
+			return p.absorbAndRewriteHLS(w, peek, resp.Body, channelID, finalURL)
 		}
 
 		// Not a playlist — serve peeked data + rest

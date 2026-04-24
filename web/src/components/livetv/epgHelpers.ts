@@ -13,14 +13,19 @@ export function getNowPlaying(programs: EPGProgram[] | undefined): EPGProgram | 
   );
 }
 
-/** Returns the next upcoming program for a channel, or null. */
+/**
+ * Returns the next upcoming program for a channel, or null.
+ *
+ * Assumes `programs` arrives ordered by start_time — the backend's
+ * Schedule / BulkSchedule queries both end in `ORDER BY start_time`
+ * (internal/db/epg_repository.go). No re-sort here.
+ */
 export function getUpNext(programs: EPGProgram[] | undefined): EPGProgram | null {
   if (!programs || programs.length === 0) return null;
   const now = Date.now();
-  const sorted = [...programs].sort(
-    (a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime(),
+  return (
+    programs.find((p) => new Date(p.start_time).getTime() > now) ?? null
   );
-  return sorted.find((p) => new Date(p.start_time).getTime() > now) ?? null;
 }
 
 /** Percentage (0-100) of elapsed time in the program's window. */

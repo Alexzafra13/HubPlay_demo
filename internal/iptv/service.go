@@ -33,7 +33,6 @@ type Service struct {
 	refreshes map[string]bool // tracks ongoing refreshes by library ID
 
 	httpClient *http.Client
-	stopCh     chan struct{}
 
 	bus *event.Bus // optional; nil-safe
 }
@@ -70,7 +69,6 @@ func NewService(
 		httpClient: &http.Client{
 			Timeout: 60 * time.Second,
 		},
-		stopCh: make(chan struct{}),
 	}
 }
 
@@ -724,10 +722,12 @@ func (s *Service) CleanupOldPrograms(ctx context.Context) (int64, error) {
 	return s.epgPrograms.CleanupOld(ctx, before)
 }
 
-// Shutdown stops any background processes.
-func (s *Service) Shutdown() {
-	close(s.stopCh)
-}
+// Shutdown is a no-op today — the service has no owned background
+// goroutines. Kept as a symmetric counterpart to the other package
+// services (stream.Manager, auth.Service, library.Service) so main.go
+// keeps a consistent teardown order if long-running workers are added
+// here later (scheduled EPG refresh, catalog poller, …).
+func (s *Service) Shutdown() {}
 
 // fetchURL downloads content from a URL.
 func (s *Service) fetchURL(ctx context.Context, url string) (io.ReadCloser, error) {

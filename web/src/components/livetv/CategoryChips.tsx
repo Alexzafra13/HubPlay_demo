@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import type { ChannelCategory } from "@/api/types";
+import { CATEGORY_FILTER_ORDER } from "./categoryOrder";
 
 /**
  * "all" is a virtual filter that keeps every channel. It lives alongside
@@ -43,28 +44,11 @@ const categoryAccent: Record<CategoryFilter, string> = {
   adult: "#e74c3c",
 };
 
-const defaultOrder: CategoryFilter[] = [
-  "all",
-  "news",
-  "sports",
-  "movies",
-  "music",
-  "entertainment",
-  "documentaries",
-  "kids",
-  "culture",
-  "international",
-  "travel",
-  "religion",
-  "general",
-  "adult",
-];
-
 export function CategoryChips({
   counts,
   active,
   onChange,
-  order = defaultOrder,
+  order = CATEGORY_FILTER_ORDER,
 }: CategoryChipsProps) {
   const { t } = useTranslation();
 
