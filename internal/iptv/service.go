@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -18,6 +19,13 @@ import (
 	"hubplay/internal/event"
 )
 
+// ErrRefreshInProgress is returned by RefreshM3U / RefreshEPG when the
+// per-library refresh lock is already held. Exposed as a sentinel so
+// callers (scheduler, handlers) can distinguish "concurrent refresh"
+// from real upstream failures — the scheduler treats this as benign and
+// skips recording it as a job-level error.
+var ErrRefreshInProgress = errors.New("refresh already in progress")
+
 // Service manages IPTV libraries: M3U import, EPG sync, channel operations.
 //
 // The methods split across several service_*.go files by concern
@@ -26,13 +34,14 @@ import (
 // the same package, and keeping them on one Service means callers (the
 // HTTP handlers) inject a single dependency instead of six.
 type Service struct {
-	channels    *db.ChannelRepository
-	epgPrograms *db.EPGProgramRepository
-	libraries   *db.LibraryRepository
-	favorites   *db.ChannelFavoritesRepository
-	epgSources  *db.LibraryEPGSourceRepository
-	overrides   *db.ChannelOverrideRepository
-	logger      *slog.Logger
+	channels     *db.ChannelRepository
+	epgPrograms  *db.EPGProgramRepository
+	libraries    *db.LibraryRepository
+	favorites    *db.ChannelFavoritesRepository
+	epgSources   *db.LibraryEPGSourceRepository
+	overrides    *db.ChannelOverrideRepository
+	watchHistory *db.ChannelWatchHistoryRepository
+	logger       *slog.Logger
 
 	mu        sync.Mutex
 	refreshes map[string]bool // tracks ongoing refreshes by library ID
@@ -60,17 +69,19 @@ func NewService(
 	favorites *db.ChannelFavoritesRepository,
 	epgSources *db.LibraryEPGSourceRepository,
 	overrides *db.ChannelOverrideRepository,
+	watchHistory *db.ChannelWatchHistoryRepository,
 	logger *slog.Logger,
 ) *Service {
 	return &Service{
-		channels:    channels,
-		epgPrograms: epgPrograms,
-		libraries:   libraries,
-		favorites:   favorites,
-		epgSources:  epgSources,
-		overrides:   overrides,
-		logger:      logger.With("module", "iptv"),
-		refreshes:   make(map[string]bool),
+		channels:     channels,
+		epgPrograms:  epgPrograms,
+		libraries:    libraries,
+		favorites:    favorites,
+		epgSources:   epgSources,
+		overrides:    overrides,
+		watchHistory: watchHistory,
+		logger:       logger.With("module", "iptv"),
+		refreshes:    make(map[string]bool),
 		httpClient: &http.Client{
 			Timeout: 60 * time.Second,
 		},

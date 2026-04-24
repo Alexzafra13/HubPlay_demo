@@ -5,6 +5,7 @@ import {
   useAddChannelFavorite,
   useBulkSchedule,
   useChannelFavoriteIDs,
+  useContinueWatchingChannels,
   useLibraries,
   useRemoveChannelFavorite,
 } from "@/api/hooks";
@@ -95,6 +96,11 @@ export default function LiveTV() {
     () => unhealthyQueries.flatMap((q) => q.data ?? []),
     [unhealthyQueries],
   );
+
+  // "Continuar viendo" rail — per-user, populated by the beacon the
+  // ChannelPlayer fires on first play. The rail only shows up on the
+  // "all" category tab; DiscoverView handles the gating.
+  const { data: continueWatching = [] } = useContinueWatchingChannels();
 
   // ── Tabs + filters ────────────────────────────────────────────────
   const [tab, setTab] = useState<ViewTab>("discover");
@@ -261,6 +267,7 @@ export default function LiveTV() {
           favoriteSet={favoriteSet}
           onToggleFavorite={toggleFavorite}
           unhealthyChannels={unhealthyChannels}
+          continueWatching={continueWatching}
         />
       )}
 

@@ -18,6 +18,20 @@ interface UseLiveHlsOptions {
   streamUrl: string | null;
   unavailableMessage: string;
   timeoutMs?: number;
+  /**
+   * Called exactly once per streamUrl (not per resume / per re-attach)
+   * when playback actually starts producing frames. The "continue
+   * watching" beacon hangs off here — pause-and-resume must not bump
+   * the history timestamp (would trivially defeat the
+   * most-recent-first rail). Fires *after* the first `playing` event
+   * of a fresh attachment; subsequent plays against the same URL are
+   * no-ops even if the user pauses and resumes many times.
+   *
+   * StreamPreview (hover) uses hls.js directly without this hook, so
+   * plugging the beacon here naturally excludes preview playback —
+   * exactly the desired semantics.
+   */
+  onFirstPlay?: () => void;
 }
 
 interface UseLiveHlsReturn {
@@ -31,11 +45,19 @@ export function useLiveHls({
   streamUrl,
   unavailableMessage,
   timeoutMs = 20_000,
+  onFirstPlay,
 }: UseLiveHlsOptions): UseLiveHlsReturn {
   const hlsRef = useRef<Hls | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [reloadToken, setReloadToken] = useState(0);
+
+  // Keep onFirstPlay reference stable inside the effect without
+  // forcing the effect to re-run on every render (a fresh closure
+  // from the caller would otherwise tear down the HLS instance and
+  // fire the beacon again).
+  const onFirstPlayRef = useRef(onFirstPlay);
+  onFirstPlayRef.current = onFirstPlay;
 
   const reload = useCallback(() => setReloadToken((n) => n + 1), []);
 
@@ -55,6 +77,7 @@ export function useLiveHls({
     video.load();
 
     let playing = false;
+    let beaconFired = false;
     const unavailableTimer = window.setTimeout(() => {
       if (!playing) setError(unavailableMessage);
     }, timeoutMs);
@@ -62,6 +85,10 @@ export function useLiveHls({
       playing = true;
       setLoading(false);
       window.clearTimeout(unavailableTimer);
+      if (!beaconFired) {
+        beaconFired = true;
+        onFirstPlayRef.current?.();
+      }
     };
     video.addEventListener("playing", onPlaying);
 

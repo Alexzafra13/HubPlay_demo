@@ -119,6 +119,13 @@ type IPTVService interface {
 	// the next M3U refresh.
 	ListChannelsWithoutEPG(ctx context.Context, libraryID string) ([]*db.Channel, error)
 	SetChannelTvgID(ctx context.Context, channelID, tvgID string) error
+
+	// Continue watching — per-user recently-played channel rail.
+	// The beacon records (user, channel); the list query resolves to
+	// current channel rows via stream_url so entries survive M3U
+	// refresh cycles.
+	RecordWatch(ctx context.Context, userID, channelID string) (time.Time, error)
+	ListContinueWatching(ctx context.Context, userID string, limit int, accessibleLibraries map[string]bool) ([]*db.Channel, []time.Time, error)
 }
 
 // IPTVStreamProxyService defines IPTV proxy operations needed by handlers.
@@ -212,6 +219,10 @@ type ProviderRepository interface {
 // LibraryRepository defines library data access for handlers that need direct repo access.
 type LibraryRepository interface {
 	Create(ctx context.Context, lib *db.Library) error
+	// ListForUser returns every library the given user has explicit
+	// access to. Used by handlers that need to materialise the
+	// library-access set (e.g. continue-watching filter).
+	ListForUser(ctx context.Context, userID string) ([]*db.Library, error)
 }
 
 // ExternalIDRepository defines external ID data access.

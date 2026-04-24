@@ -34,6 +34,8 @@ type Dependencies struct {
 	StreamManager  *stream.Manager
 	IPTV           *iptv.Service
 	IPTVProxy      *iptv.StreamProxy
+	IPTVScheduler  *iptv.Scheduler
+	IPTVSchedules  *db.IPTVScheduleRepository
 	Items          *db.ItemRepository
 	MediaStreams    *db.MediaStreamRepository
 	Images         *db.ImageRepository
@@ -264,10 +266,15 @@ func NewRouter(deps Dependencies) http.Handler {
 						r.Get("/stream", iptvHandler.Stream)
 						r.Get("/proxy", iptvHandler.ProxyURL)
 						r.Get("/schedule", iptvHandler.Schedule)
+						r.Post("/watch", iptvHandler.RecordChannelWatch)
 					})
 
 					r.Get("/channels/schedule", iptvHandler.BulkSchedule)
 					r.Post("/channels/schedule", iptvHandler.BulkSchedule)
+
+					// Continue watching rail (per-user). GET only —
+					// the beacon is POST /channels/{id}/watch above.
+					r.Get("/me/channels/continue-watching", iptvHandler.ListContinueWatching)
 
 					// Channel favorites (per-user, requires auth; no admin role).
 					r.Route("/favorites/channels", func(r chi.Router) {
@@ -291,6 +298,17 @@ func NewRouter(deps Dependencies) http.Handler {
 					r.Get("/libraries/{id}/channels/unhealthy", iptvHandler.ListUnhealthyChannels)
 					r.Get("/libraries/{id}/channels/without-epg", iptvHandler.ListChannelsWithoutEPG)
 
+					// IPTV scheduled jobs (automated M3U + EPG refresh).
+					// Read: any user with library ACL (so the livetv panel
+					// can show schedule status). Mutations: admin-only, in
+					// the group below.
+					var iptvScheduleHandler *handlers.IPTVScheduleHandler
+					if deps.IPTVSchedules != nil && deps.IPTVScheduler != nil {
+						iptvScheduleHandler = handlers.NewIPTVScheduleHandler(
+							deps.IPTVSchedules, deps.IPTVScheduler, deps.Libraries, deps.Logger)
+						r.Get("/libraries/{id}/schedule", iptvScheduleHandler.List)
+					}
+
 					// Admin IPTV operations
 					r.Group(func(r chi.Router) {
 						r.Use(auth.RequireAdmin)
@@ -306,6 +324,11 @@ func NewRouter(deps Dependencies) http.Handler {
 							r.Post("/refresh-m3u", iptvHandler.RefreshM3U)
 							r.Post("/refresh-epg", iptvHandler.RefreshEPG)
 						})
+						if iptvScheduleHandler != nil {
+							r.Put("/libraries/{id}/schedule/{kind}", iptvScheduleHandler.Upsert)
+							r.Delete("/libraries/{id}/schedule/{kind}", iptvScheduleHandler.Delete)
+							r.Post("/libraries/{id}/schedule/{kind}/run", iptvScheduleHandler.RunNow)
+						}
 					})
 				}
 

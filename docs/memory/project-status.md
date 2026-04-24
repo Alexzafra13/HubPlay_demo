@@ -1,6 +1,6 @@
 # Estado del proyecto
 
-> Snapshot: **2026-04-24** (live-TV arc + simplify sweep + frontend coverage slice 1 + setup-wizard tests + livetv coverage slice 2 + lint debt cero + dist untracked) · Rama: `claude/review-project-tasks-f5Rdg` · **tests: verde · lint: 0**
+> Snapshot: **2026-04-24** (matcher EPG + scheduler IPTV + review fixes + continuar viendo) · Rama: `claude/review-pending-tasks-9Vh6U` · **tests: verde · lint: 0**
 
 ---
 
@@ -8,7 +8,381 @@
 
 > **Lee esto primero.** Resume qué cerramos, qué decidimos y qué toca.
 
-### Lo que cerramos esta rama (`claude/review-project-tasks-f5Rdg`)
+### Lo que cerramos esta rama (`claude/review-pending-tasks-9Vh6U`)
+
+Cuatro commits: las dos candidatas del handoff anterior + pass de
+fixes tras review senior + "Continuar viendo" en LiveTV.
+
+**Commit 1 — Matcher EPG agresivo**. Sin cambios de schema, sin UI,
+solo backend.
+
+Cambios en el algoritmo del matcher (antes: tvg-id exacto + name-
+variants con quality strip + accent fold):
+
+1. **Alias table curada** (`internal/iptv/epg_aliases.go`): 50+ entradas
+   normalizadas observadas en davidmuma vs iptv-org. Maps `"la uno" →
+   "la 1"`, `"tele cinco" → "telecinco"`, `"antena tres" → "antena 3"`,
+   `"movistar laliga" → "movistar la liga"`, etc. Aplicada
+   bidireccionalmente: al indexar hub channels se registra tanto la
+   variante original como su canonical, y al emparejar se alias-folds
+   cada display-name del XMLTV antes del lookup.
+2. **Channel-number match** — si el XMLTV trae un `<display-name>` que
+   es un entero y la M3U carga números de canal reales (no los
+   posicionales que pone `assignNumber` por defecto), bind por número.
+   Detecta posicionales con la heurística `channel.Number == i+1 ∀ i`
+   y salta limpiamente en ese caso. Además ignora números ambiguos
+   (mismo dial en dos canales).
+3. **Fuzzy Levenshtein** como último recurso — edit distance ≤ 3
+   absoluto y ≤ 15 % del string más largo, mínimo 5 runas. Pool = solo
+   la variante base (stripped) de cada canal. Empates entre dos
+   canales a la misma distancia **no bindean** (fail-closed). Cubre
+   typos ("Teleciinco"), elisiones ("Disovery Chanel").
+
+Además (refactor limpieza, sin cambio de comportamiento):
+
+4. **Extracción del matcher** a `internal/iptv/matcher.go`. `service_epg.go`
+   queda 90 líneas más corto y solo orquesta. El struct `channelIndex`
+   reemplaza los `(tvgMap, nameMap)` sueltos — ahora contiene también
+   el numberMap y el fuzzy pool.
+5. **Cache de resolución por XMLTV channel id** en `refreshOneSource`:
+   antes cada uno de los ~7 k programas llamaba a `matchChannel`.
+   Ahora se resuelve una vez por `<channel>` y el loop de programas es
+   un map lookup. Para feeds grandes (davidmuma trae ~300 canales, 7 k
+   programas) es ~300× menos trabajo del matcher.
+
+**Riesgos gestionados**:
+- Aliases solo se añaden cuando hemos visto el mismatch real contra
+  una fuente en uso. No añadir "por si acaso" — cada alias es una
+  oportunidad de falso match si otro canal aparece en el futuro.
+- Channel-number se desactiva en playlists posicionales (caso por
+  defecto en iptv-org sin `tvg-chno`). Solo ve dial reales.
+- Fuzzy exige 5+ runas y ≤15 % distancia. Testeado: "Cuatro" vs
+  "Telecinco" NO matchea, "Teleciinco" (1 edit) SÍ, tie a dos canales
+  devuelve empty.
+
+**Commit 2 — Scheduler IPTV con UI admin**. Saca al producto de
+"herramienta manual" con botón Refrescar a servicio que se
+autosostiene.
+
+Backend:
+
+1. **Migración 011**: tabla `iptv_scheduled_jobs(library_id, kind,
+   interval_hours, enabled, last_run_at, last_status, last_error,
+   last_duration_ms, created_at, updated_at)` con PK compuesta
+   (library_id, kind) y CHECK de kind ∈ {m3u_refresh, epg_refresh}.
+   Índice parcial sobre `last_run_at WHERE enabled=1` para la query
+   del worker.
+2. **`db.IPTVScheduleRepository`** (raw SQL pattern): `ListByLibrary`
+   / `Get` / `Upsert` / `ListDue` / `RecordRun` / `Delete`.
+   - `Upsert` es `ON CONFLICT DO UPDATE` sobre interval_hours +
+     enabled + updated_at — preserva los last_* para que reconfigurar
+     no resetee el histórico.
+   - `ListDue` filtra por `enabled=1` en SQL, calcula due-ness en Go
+     (multi-format SQLite time coercion). Never-run rows (last_run_at
+     NULL) son siempre due en el próximo tick.
+   - `RecordRun` trunca last_error a 512 chars para que un stack
+     trace upstream no infle la tabla.
+3. **`iptv.Scheduler`** worker en su propio goroutine. Tick = 1 min
+   (responsivo al admin sin spam). runTimeout = 10 min por job.
+   Ejecuta secuencial (serializa intra-library vía el lock del
+   service y evita burst al CDN). Interface `jobRunner` inyectada →
+   tests con fake sin red.
+4. **Wire en `main.go`**: Phase 4d nuevo (después de IPTV service,
+   antes de Setup). Shutdown llama `iptvSched.Stop()` antes de
+   `iptvSvc.Shutdown()` para que el último run grabe su outcome antes
+   de cerrar la DB.
+5. **HTTP handlers** en `internal/api/handlers/iptv_schedule.go`:
+   - `GET /libraries/{id}/schedule` — lista las dos filas (M3U/EPG);
+     sintetiza placeholders `{enabled:false, interval:default}` para
+     kinds sin fila → la UI siempre pinta 2 filas.
+   - `PUT /libraries/{id}/schedule/{kind}` admin-only — valida
+     `interval_hours ∈ [1, 720]`; `enabled` pointer-like (omitir =
+     conservar actual) → el UI puede guardar solo el intervalo sin
+     cambiar el toggle.
+   - `DELETE /libraries/{id}/schedule/{kind}` admin-only.
+   - `POST /libraries/{id}/schedule/{kind}/run` admin-only — dispara
+     síncrono vía `Scheduler.RunNow` que **bypasea** enabled + due
+     (el botón funciona aunque la programación esté apagada).
+6. **ACL**: mismo patrón que los demás endpoints livetv
+   (library access → 404, admin bypasa).
+
+Frontend:
+
+7. **Tipos + client + hooks** (`web/src/api/{types,client,hooks}.ts`):
+   `IPTVScheduledJob`, `UpsertScheduledJobRequest`, métodos
+   `listScheduledJobs` / `upsertScheduledJob` / `deleteScheduledJob`
+   / `runScheduledJobNow`, y hooks React Query
+   `useScheduledJobs` / `useUpsertScheduledJob` /
+   `useDeleteScheduledJob` / `useRunScheduledJobNow` con invalidación
+   que refleja las mismas keys que `useRefreshM3U`/`useRefreshEPG`
+   — tras Run now la UI de canales/EPG se refresca sola.
+8. **`ScheduledJobsPanel`** nuevo en `web/src/components/admin/`.
+   Dos filas, cada una con toggle + dropdown (1/3/6/12/24/72/168 h)
+   + "Ejecutar ahora" + badge de status + línea "hace 3 h"
+   relativa. Sin estado local espurio — el dropdown lee
+   `job.interval_hours` directamente para respetar la regla
+   senior "no set-state-in-effect con Compiler" (el primer draft
+   tenía `useEffect → setState` para mirror optimista; lint lo
+   pilló, refactor a source-of-truth directa).
+9. **Tab nueva "Programación"** en `LivetvAdminPanel` entre
+   "Fuentes EPG" y "Sin guía". Siempre visible (el endpoint sinteti-
+   za filas). Badge count = nº jobs enabled; tone=warning si alguno
+   tiene `last_status === "error"`.
+
+Tests nuevos (todos verdes):
+
+- `internal/db/iptv_schedule_test.go` — 9 tests (upsert crea,
+  preserva last_*, get sentinel, list by library, list due: drops
+  disabled / respects interval / incluye never-run, rechazo de
+  interval inválido, trim de last_error > 512, delete idempotente).
+- `internal/iptv/scheduler_test.go` — 8 tests con fakeRunner
+  (tick ejecuta due / salta disabled / salta not-yet-due, record
+  failure, RunNow bypasea schedule + row-less, surface error,
+  Start/Stop corre loop, Stop es síncrono).
+- `internal/api/handlers/iptv_schedule_test.go` — 13 tests con
+  fakeScheduleRepo + fakeScheduleRunner (list sintetiza missing
+  kinds, deny sin access, upsert crea, invalid kind, out-of-range
+  interval, keeps enabled cuando se omite, unknown field rechaza,
+  delete happy, run-now happy, run-now surface error, run-now
+  sin row devuelve 204, run-now deny).
+
+**Commit 3 — Fixes de review senior**. Un sub-agente revisó todo con
+ojos frescos. 1 blocker + 7 should-fix + 4 nits arreglados. Sin cambios
+de comportamiento visibles salvo el path de recuperación de panic.
+
+Blocker arreglado:
+
+- **Scheduler goroutine no muere silenciosamente en panic**
+  (`scheduler.go:runOne`). `defer/recover` convierte el panic en un
+  outcome "error" registrado y mantiene el goroutine vivo para el
+  siguiente tick. Antes: un panic en el XMLTV parser paraba TODOS los
+  refreshes programados hasta reiniciar el binario, sin log visible.
+  Cubierto por `TestScheduler_RunNowRecoversFromPanic` +
+  `TestScheduler_TickLoopSurvivesPanic`.
+
+Should-fix arreglados:
+
+- **`Stop(ctx)` respeta el deadline del caller**. `Start` envuelve el
+  ctx con un cancel propio; `Stop` recibe el `shutdownCtx` de main.go
+  y, si éste expira antes de que drene el run in-flight, fuerza
+  cancel del runCtx. Antes: `Stop()` podía bloquear hasta 10 min
+  (runTimeout) aunque el shutdownCtx fuera de 30 s — el supervisor
+  mandaba SIGKILL antes de drenar.
+- **`iptv.ErrRefreshInProgress` sentinel** en lugar de `fmt.Errorf`
+  opaco. `RefreshM3U` / `RefreshEPG` lo wrappean con `%w`. El
+  scheduler lo detecta con `errors.Is` y lo trata como benigno —
+  log info, NO actualiza `last_status`. Sin esto, una race entre
+  "Ejecutar ahora" y el tick grababa un `last_status="error"`
+  spurious sobre un refresh que en realidad había funcionado en el
+  otro path. Cubierto por `TestScheduler_ConcurrentRefreshIsBenign`.
+- **`canAccessLibrary` compartido** (`iptv_access.go` nuevo). Los dos
+  handlers (`IPTVHandler.canAccessLibrary`, `IPTVScheduleHandler
+  .canAccess`) delegan al helper de paquete. Antes eran dos copias
+  idénticas que podían drift-ear en wording o semántica.
+- **Fuzzy pruner byte-vs-rune**. `absDiff(len(cand), len(pool))`
+  comparaba longitudes en BYTES contra un budget rune-based; para
+  strings que sobreviven diacritic folding con chars multi-byte
+  ("Movistar Plus+", "3/24") el pruner podía saltarse matches
+  legítimos. Ahora `runeCount()` helper en todas las comparaciones.
+  Cubierto por nuevo caso "non-ASCII survives folding".
+- **CASCADE de `iptv_scheduled_jobs` pin-eado por test**
+  (`TestIPTVSchedule_CascadesOnLibraryDelete`). Borrar una biblioteca
+  debe limpiar sus schedule rows. Depende de `ON DELETE CASCADE` en
+  la migración **Y** de `PRAGMA foreign_keys=ON` en el DSN del
+  driver — ambas cosas pueden regresionar silenciosamente.
+- **Tab "Programación" no parpadea al cargar** (`LivetvAdminPanel
+  .tsx`). Antes `showSchedule={schedule.length > 0}` la hacía
+  aparecer tarde porque `schedule` arranca como `[]`. Ahora
+  `showSchedule={true}` — el backend sintetiza placeholders así que
+  la tab siempre tiene contenido estable.
+
+Nits liquidados:
+
+- `bestCand` muerto fuera de `fuzzyMatch`.
+- `var _ = errors.Is` dead-anchor reemplazado por un test real
+  (`TestFakeRepo_GetMissingReturnsSentinel`).
+- `tickOnce` + `setTickInterval` movidos a `export_test.go` (Go solo
+  los compila durante `go test`, invisibles al binario).
+- Comentario de coste O(N × fuzzy) en el path de programmes huérfanas
+  de `refreshOneSource`.
+
+Tests nuevos de este commit (6 casos): `RunNowRecoversFromPanic`,
+`TickLoopSurvivesPanic`, `ConcurrentRefreshIsBenign`,
+`CascadesOnLibraryDelete`, "non-ASCII survives folding",
+`FakeRepo_GetMissingReturnsSentinel`.
+
+**Commit 4 — "Continuar viendo" en LiveTV**. Feature completa
+(schema + backend + frontend + beacon + rail), 18 tests nuevos.
+
+Decisión clave de schema:
+
+1. **Migración 012 `channel_watch_history(user_id, stream_url,
+   last_watched_at)`** con PK compuesta. Se keyea por **stream_url**,
+   NO por channel_id, porque los channel UUIDs se regeneran en cada
+   M3U refresh (lección aprendida de `channel_overrides`, migración
+   009). Sin esto el rail se vaciaría cada mañana tras el refresh
+   programado. El JOIN del read path resuelve por stream_url contra
+   la tabla `channels` actual → entradas sobreviven refreshes y,
+   bonus, orphans (URL retirada del playlist) reaparecen si la URL
+   vuelve más tarde. Índice dedicado sobre
+   `(user_id, last_watched_at DESC)` para el ORDER BY del rail.
+
+Backend:
+
+2. **`db.ChannelWatchHistoryRepository`** (raw SQL):
+   `RecordByStreamURL` (upsert), `ListChannelsByUser` (JOIN con
+   is_active=1 + dedupe stream_url entre libraries), `DeleteByStreamURL`.
+3. **`iptv.Service`**: `RecordWatch(userID, channelID)` busca el
+   stream_url y upserta; `ListContinueWatching(userID, limit,
+   accessibleLibraries map[string]bool)` con filtro ACL (admin pasa
+   `nil`, usuario pasa su set de libraries).
+4. **HTTP endpoints** en `IPTVHandler`:
+   - `POST /channels/{id}/watch` — beacon del player. Requiere ACL
+     (verifica que el usuario puede ver la biblioteca del canal para
+     evitar leak de existencia). Devuelve `{channel_id, last_watched_at}`.
+   - `GET /me/channels/continue-watching?limit=N` — rail. Límite
+     default 10, cap 20. Admin bypasa ACL; usuario filtra vía
+     `libraries.ListForUser`.
+5. Nueva entrada en la interface `LibraryRepository` del paquete
+   handlers (`ListForUser`) para materializar el access set.
+
+Frontend:
+
+6. **Beacon en `useLiveHls`**: nueva prop opcional `onFirstPlay`.
+   Se dispara exactamente UNA vez por streamUrl cuando el primer
+   frame juega (flag `beaconFired` local al effect). Pause+resume
+   NO re-disparan. **No afecta a `StreamPreview`** que usa hls.js
+   directo sin el hook → el hover preview no contamina el historial.
+   `onFirstPlay` se pasa vía ref para no tear-down el HLS en
+   re-renders del caller.
+7. **`ChannelPlayer`** llama al beacon vía
+   `useRecordChannelWatch().mutate(channelId)` con `onError` que
+   loga a consola y sigue — fallos del beacon son no-fatales.
+8. **Rail "Continuar viendo"** en `DiscoverView` entre los chips y
+   los rails de categoría. Solo aparece en `category === "all"`
+   (scoping a una categoría rompería el filtro del usuario) y solo
+   si `continueWatching.length > 0`.
+9. **React Query**: `queryKeys.continueWatchingChannels` nuevo,
+   `useContinueWatchingChannels(limit)` con `staleTime: 60s`,
+   `useRecordChannelWatch()` invalida la key tras éxito (el canal
+   salta al top del rail sin recargar).
+
+Tests nuevos (todos verdes, 18 casos):
+
+- `internal/db/channel_watch_history_test.go` — 9 tests (upsert
+  idempotente, orden por recency, respeto de limit, filtro
+  is_active=1, limit=0 → vacío, aislamiento por usuario, **survives
+  M3U refresh** (contrato principal: re-joins tras ReplaceForLibrary
+  y orphan re-aparece cuando URL vuelve), cascade on user delete,
+  dedupe cross-libraries, delete idempotente).
+- `internal/api/handlers/iptv_watch_test.go` — 6 tests
+  (beacon happy path, 401 sin auth, 404 deny por ACL, 404 race
+  post-delete, list happy, list filtra por access, admin salta
+  filtro, cap de limit 20, default limit 10, 401 en list).
+- `web/src/components/livetv/DiscoverView.test.tsx` — 3 tests
+  (rail aparece encima en category='all', oculto en categoría
+  específica, oculto cuando vacío).
+
+**Impacto UX**: el usuario abre LiveTV → ve encima de las
+categorías un rail con los N canales que ha visto últimamente
+(cualquier dispositivo, gracias a que el historial vive en DB).
+Cambia de canal y el siguiente aparece al principio del rail sin
+recarga. Sobrevive M3U refreshes programados (sin el fix de
+stream_url el rail moriría cada día).
+
+### 📊 Medición pendiente (matcher EPG)
+
+El handoff anterior puso un target **52 → 150-200+** canales con EPG
+sobre davidmuma + iptv-org (268 canales ES). No se puede medir sin
+ejecutar contra la DB real; lo mide el operador en la siguiente
+sesión refrescando EPG desde admin. Los tests de regresión verifican
+los tres paths nuevos (aliases, number, fuzzy) con casos extraídos de
+los mismos mismatches observados.
+
+### Cómo extender el matcher más tarde
+
+- **Añadir aliases**: solo desde pares observados. Cada entrada en
+  `epg_aliases.go` tiene un comentario implícito — "visto en davidmuma
+  vs iptv-org 2026-04". Si un alias se añade "por si acaso" y luego
+  causa un falso positivo, difícil de desambiguar.
+- **Promover a tabla DB**: si aparece demanda de aliases per-library o
+  edición desde admin, la shape ya está (alias → canonical). Crear
+  migración `011_epg_name_aliases.sql` con dos columnas + PK
+  compuesta, y cargarlos en `channelIndex` igual que los del código.
+- **Fuzzy más agresivo**: subir el umbral a 20 % es la primera palanca
+  (ya probamos 15 % aquí, conservador). Añadir tokenización + drop de
+  un set de stop-tokens ("canal", "tv", "channel") es el siguiente.
+
+### Estado al abrir sesión
+
+- `main` tiene PRs #81–#85 mergeados.
+- Rama actual `claude/review-pending-tasks-9Vh6U` con **4 commits**
+  encima de main (matcher + scheduler + review-fixes + continuar-
+  viendo). Listo para PR una vez validado en DB real.
+- Tests verdes: `pnpm test` **224/224** · `pnpm tsc --noEmit` · `pnpm
+  lint` 0 · `pnpm build` ok · `go test -race ./...` 21 paquetes ·
+  `golangci-lint v1.64.8` exit 0.
+
+### Checklist al abrir siguiente sesión
+
+- [ ] Refrescar EPG contra davidmuma y medir canales con EPG antes/
+  después (52 era el baseline; target 150+).
+- [ ] Activar una programación (ej. EPG cada 6 h) en admin y dejarla
+  correr 6 h+ para verificar que el worker dispara y registra.
+- [ ] Abrir reproducciones de canal y verificar que el rail
+  "Continuar viendo" aparece en Discover con los canales vistos
+  (en varios navegadores / dispositivos para validar la parte
+  cross-device).
+- [ ] Forzar un M3U refresh y verificar que el rail sigue poblado
+  (no se vacía — contrato clave del stream_url-as-key).
+- [ ] Si todo funciona → abrir PR y mergear.
+- [ ] Siguiente candidata: **modal de detalle de programa** al
+  clicar en el EPG grid, **streaming parser XMLTV** (bomba memoria
+  con feeds 2 GB), o **split de `library.Service`** (deuda
+  estructural — ya hay precedente con `iptv.Service`).
+- [ ] Actualizar esta memoria.
+
+### 🎓 Patrones senior reforzados en este ciclo
+
+Para el siguiente arquitecto, reglas aprendidas en este pass de
+revisión. Añadir a `conventions.md` si reinciden:
+
+1. **Goroutines de fondo SIEMPRE con `defer recover()`** en el nivel
+   donde llaman a código third-party-ish (HTTP clients, parsers, SQL
+   contra datos no-trust). Sin ello un panic mata el worker para
+   siempre sin log visible. El patrón aquí: `defer func() { if r :=
+   recover(); r != nil { runErr = fmt.Errorf("panic: %v", r); log...
+   }; recordOutcome() }()`.
+2. **`Stop()` debe aceptar `context.Context`** cuando lleva estado
+   in-flight que puede bloquear. La alternativa ("espera hasta el
+   runTimeout interno") rompe el contrato de graceful shutdown: el
+   supervisor mata el proceso antes de drenar. El patrón: `Start`
+   wraps ctx con un cancel, `Stop(ctx)` hace select entre doneCh y
+   ctx.Done() + cancela el root si necesario.
+3. **Sentinels de error sobre fmt.Errorf** cuando el caller puede
+   querer discriminar. `ErrRefreshInProgress` aquí es el ejemplo:
+   sin él, el scheduler no podía saber si un error era benigno o
+   real. Pattern: `var ErrFoo = errors.New(...)` + `fmt.Errorf("ctx:
+   %w", ErrFoo)` + `errors.Is(err, ErrFoo)` en el caller.
+4. **Len() en strings con multi-byte**: si la función trabaja con
+   rune-based thresholds (distancias de edición, límites de
+   caracteres, etc.), TODAS las comparaciones de longitud deben ir
+   en runas. Mezclar `len(s)` (bytes) con `len([]rune(s))` (runes)
+   es un bug silencioso en ASCII, visible solo cuando aparece un
+   "+" o "/". Usar un `runeCount` local helper para que sea obvio.
+5. **Test hooks van en `export_test.go`**. Go solo compila archivos
+   `_test.go` durante `go test`, así que un método `TestOnly*`
+   exportado ahí es invisible al binario de producción. Evita
+   dudar "¿puedo llamar a esto desde fuera?" cuando lees el código.
+6. **CASCADE del schema debe tener su propio test**. No asumir que
+   `ON DELETE CASCADE` funciona — depende del driver Y de
+   `PRAGMA foreign_keys=ON` Y del DSN. modernc.org/sqlite los respeta
+   cuando están pragma-ON, pero cualquier cambio en
+   `internal/db/sqlite.go` puede apagarlo sin test lo pille.
+
+---
+
+## Ciclo anterior (`claude/review-project-tasks-f5Rdg`)
 
 Cinco commits limpios, sin cambios de comportamiento:
 
@@ -716,11 +1090,11 @@ type Service struct {
 
 ### IPTV backend
 - XMLTV streaming parser (bomba memoria con feeds de 2GB; `xmltv.go:70-76`)
-- Matcher más agresivo para subir cobertura EPG: tabla de alias conocidos,
-  matching por channel number cuando ambos lo tienen, Levenshtein fuzzy
-  con threshold. Hoy es tvg-id + display-name variants + quality strip +
-  accent fold — suficiente para ~52/268 con davidmuma, pero escalaría
-  a 70-80% con el refuerzo
+- ~~Matcher más agresivo para subir cobertura EPG~~: ✅ hecho en
+  `claude/review-pending-tasks-9Vh6U`. Alias table + channel-number
+  match (con guardas de posicional + ambigüedad) + Levenshtein fuzzy
+  como último recurso. Ver handoff arriba. Falta medir cobertura
+  real ante/después contra davidmuma.
 
 ### Event bus (3 tipos reservados sin publisher)
 - `ChannelAdded`/`ChannelRemoved` — requiere descomponer `ReplaceForLibrary`
@@ -776,7 +1150,16 @@ Sin prisa. Candidatos ordenados por impacto.
 5. **Split de `library.Service`** siguiendo la receta del iptv.
 
 **Si foco = experiencia LiveTV**:
-1. **Matcher EPG más agresivo** — sube cobertura 52/268 → 150-200+.
-2. **"Continuar viendo"** + tabla de historial.
-3. **Modal de detalle de programa** en EPG grid.
-4. **Streaming parser del XMLTV** (bomba memoria con feeds 2 GB).
+1. ✅ **Matcher EPG más agresivo** — hecho en `claude/review-pending-
+   tasks-9Vh6U`. Falta medir cobertura real contra davidmuma.
+2. ✅ **Scheduler UI M3U + EPG refresh** — hecho en la misma rama.
+   Tabla `iptv_scheduled_jobs`, worker `iptv.Scheduler`, panel admin
+   `ScheduledJobsPanel`. Falta dejar correr 6 h+ en real para validar.
+3. ✅ **"Continuar viendo"** — hecho en la misma rama. Tabla
+   `channel_watch_history` keyeada por stream_url, beacon en
+   `useLiveHls.onFirstPlay`, rail en Discover. Falta validar
+   cross-device en real.
+4. **Modal de detalle de programa** en EPG grid.
+5. **Streaming parser del XMLTV** (bomba memoria con feeds 2 GB).
+6. **Override manual de channel number / group** — extender
+   `channel_overrides` con `number`/`group` opcionales.

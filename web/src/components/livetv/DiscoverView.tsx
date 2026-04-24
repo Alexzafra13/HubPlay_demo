@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
 import type {
   Channel,
   ChannelCategory,
+  ContinueWatchingChannel,
   EPGProgram,
   UnhealthyChannel,
 } from "@/api/types";
@@ -24,6 +25,7 @@ interface DiscoverViewProps {
   favoriteSet: Set<string>;
   onToggleFavorite: (channelId: string) => void;
   unhealthyChannels: UnhealthyChannel[];
+  continueWatching: ContinueWatchingChannel[];
 }
 
 /**
@@ -50,6 +52,7 @@ export function DiscoverView({
   favoriteSet,
   onToggleFavorite,
   unhealthyChannels,
+  continueWatching,
 }: DiscoverViewProps) {
   const { t } = useTranslation();
 
@@ -60,6 +63,12 @@ export function DiscoverView({
         ).filter(([, list]) => list.length > 0)
       : [[category, channelsByCategory.get(category) ?? []] as const];
 
+  // Continue-watching only renders on the "all" tab. Scoping it to a
+  // single category (e.g. "sports") would surface channels outside
+  // that filter, which defeats the chip selection.
+  const showContinueWatching =
+    category === "all" && continueWatching.length > 0;
+
   return (
     <div className="flex flex-col gap-8">
       <HeroSpotlight items={heroItems} label={heroLabel} onOpen={onOpen} />
@@ -69,6 +78,27 @@ export function DiscoverView({
         active={category}
         onChange={onCategoryChange}
       />
+
+      {showContinueWatching ? (
+        <ChannelRail
+          title={t("liveTV.continueWatching", {
+            defaultValue: "Continuar viendo",
+          })}
+          count={continueWatching.length}
+        >
+          {continueWatching.map((ch) => (
+            <ChannelCard
+              key={ch.id}
+              channel={ch}
+              nowPlaying={getNowPlaying(scheduleByChannel[ch.id])}
+              upNext={getUpNext(scheduleByChannel[ch.id])}
+              isFavorite={favoriteSet.has(ch.id)}
+              onClick={() => onOpen(ch)}
+              onToggleFavorite={() => onToggleFavorite(ch.id)}
+            />
+          ))}
+        </ChannelRail>
+      ) : null}
 
       {visibleRails.length === 0 && (
         <div className="rounded-tv-lg border border-dashed border-tv-line bg-tv-bg-1 p-10 text-center text-sm text-tv-fg-2">

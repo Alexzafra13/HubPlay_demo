@@ -41,24 +41,11 @@ func NewIPTVHandler(svc IPTVService, proxy IPTVStreamProxyService, libraries Lib
 	}
 }
 
-// canAccessLibrary gates per-library access for the authenticated caller.
-// Admins pass unconditionally. Unauthenticated requests fail closed.
-// Errors in the ACL lookup fail closed too — the caller sees a generic 404.
+// canAccessLibrary delegates to the package-level helper. Thin wrapper
+// kept so the rest of this file still reads as `h.canAccessLibrary(r,
+// id)` — mechanical diff from the pre-extraction version.
 func (h *IPTVHandler) canAccessLibrary(r *http.Request, libraryID string) bool {
-	claims := auth.GetClaims(r.Context())
-	if claims == nil {
-		return false
-	}
-	if claims.Role == "admin" {
-		return true
-	}
-	ok, err := h.access.UserHasAccess(r.Context(), claims.UserID, libraryID)
-	if err != nil {
-		h.logger.Error("library access check failed",
-			"user", claims.UserID, "library", libraryID, "error", err)
-		return false
-	}
-	return ok
+	return canAccessLibrary(r, h.access, h.logger, libraryID)
 }
 
 // denyForbidden writes a NOT_FOUND response (not 403) so an unauthorised
@@ -970,6 +957,136 @@ func (h *IPTVHandler) EnableChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ───────────────────────────────────────────────────────────────────
+// Continue watching
+// ───────────────────────────────────────────────────────────────────
+//
+// Routes:
+//   POST /api/v1/channels/{channelId}/watch            — beacon
+//   GET  /api/v1/me/channels/continue-watching?limit=N — rail
+//
+// The beacon is a fire-and-forget signal from the player: "user is
+// actually watching channel X right now". The list endpoint reads
+// back the top-N most recent, filtered by the caller's library ACL
+// (admins see everything). Limit is capped at 20 to bound payload.
+
+const continueWatchingMaxLimit = 20
+const continueWatchingDefaultLimit = 10
+
+// RecordChannelWatch receives the player beacon. Admin-or-user gated:
+// any authenticated user can record their own history, but they must
+// have library access to the channel — otherwise the endpoint would
+// leak channel existence via "can I insert a row against this id?".
+func (h *IPTVHandler) RecordChannelWatch(w http.ResponseWriter, r *http.Request) {
+	claims := auth.GetClaims(r.Context())
+	if claims == nil {
+		respondAppError(w, r.Context(), domain.NewUnauthorized("auth required"))
+		return
+	}
+	channelID := chi.URLParam(r, "channelId")
+
+	ch, err := h.svc.GetChannel(r.Context(), channelID)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	if !h.canAccessLibrary(r, ch.LibraryID) {
+		h.denyForbidden(w, r)
+		return
+	}
+
+	ts, err := h.svc.RecordWatch(r.Context(), claims.UserID, channelID)
+	if err != nil {
+		if errors.Is(err, db.ErrChannelNotFound) {
+			h.denyForbidden(w, r)
+			return
+		}
+		handleServiceError(w, r, err)
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{
+		"data": map[string]any{
+			"channel_id":      channelID,
+			"last_watched_at": ts.UTC().Format(time.RFC3339),
+		},
+	})
+}
+
+// ListContinueWatching returns the caller's most recently watched
+// channels, newest first. Limit defaults to 10 and is capped at 20.
+//
+// ACL: admins see everything, non-admin users see only channels in
+// libraries they have access to. The filter is applied in the service
+// via accessibleLibraries (nil = admin bypass).
+func (h *IPTVHandler) ListContinueWatching(w http.ResponseWriter, r *http.Request) {
+	claims := auth.GetClaims(r.Context())
+	if claims == nil {
+		respondAppError(w, r.Context(), domain.NewUnauthorized("auth required"))
+		return
+	}
+
+	limit := continueWatchingDefaultLimit
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	if limit > continueWatchingMaxLimit {
+		limit = continueWatchingMaxLimit
+	}
+
+	// accessibleLibraries==nil signals "no filter" (admin bypass).
+	// For regular users we materialise the ACL set once and pass it
+	// through. Empty map means "deny everything" and correctly
+	// produces an empty rail.
+	var accessible map[string]bool
+	if claims.Role != "admin" {
+		libs, err := h.libraries.ListForUser(r.Context(), claims.UserID)
+		if err != nil {
+			h.logger.Error("list user libraries for continue-watching",
+				"user", claims.UserID, "error", err)
+			handleServiceError(w, r, err)
+			return
+		}
+		accessible = make(map[string]bool, len(libs))
+		for _, lib := range libs {
+			accessible[lib.ID] = true
+		}
+	}
+
+	channels, watched, err := h.svc.ListContinueWatching(r.Context(), claims.UserID, limit, accessible)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	result := make([]map[string]any, 0, len(channels))
+	for i, ch := range channels {
+		dto := toChannelDTO(ch, "/api/v1/channels/"+ch.ID+"/stream")
+		row := map[string]any{
+			"id":              dto.ID,
+			"name":            dto.Name,
+			"number":          dto.Number,
+			"group":           dto.Group,
+			"group_name":      dto.GroupName,
+			"category":        dto.Category,
+			"logo_url":        dto.LogoURL,
+			"logo_initials":   dto.LogoInitials,
+			"logo_bg":         dto.LogoBg,
+			"logo_fg":         dto.LogoFg,
+			"stream_url":      dto.StreamURL,
+			"library_id":      dto.LibraryID,
+			"tvg_id":          dto.TvgID,
+			"language":        dto.Language,
+			"country":         dto.Country,
+			"is_active":       dto.IsActive,
+			"added_at":        dto.AddedAt,
+			"last_watched_at": watched[i].UTC().Format(time.RFC3339),
+		}
+		result = append(result, row)
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"data": result})
 }
 
 // channelHealthDTO shapes a channel with its health fields. Built on

@@ -3,15 +3,17 @@ import { useTranslation } from "react-i18next";
 import {
   useChannelsWithoutEPG,
   useLibraryEPGSources,
+  useScheduledJobs,
   useUnhealthyChannels,
 } from "@/api/hooks";
 import type { LibraryEPGSource } from "@/api/types";
 import { ChannelsWithoutEPGPanel } from "./ChannelsWithoutEPGPanel";
 import { EPGSourcesPanel } from "./EPGSourcesPanel";
+import { ScheduledJobsPanel } from "./ScheduledJobsPanel";
 import { UnhealthyChannelsPanel } from "./UnhealthyChannelsPanel";
 
 type HealthStatus = "ok" | "warning" | "critical" | "pending";
-type TabKey = "sources" | "without-epg" | "unhealthy";
+type TabKey = "sources" | "without-epg" | "unhealthy" | "schedule";
 
 interface HealthReport {
   status: HealthStatus;
@@ -45,6 +47,7 @@ export function LivetvAdminPanel({
   const { data: sources = [] } = useLibraryEPGSources(libraryId);
   const { data: unhealthy = [] } = useUnhealthyChannels(libraryId);
   const { data: withoutEPG = [] } = useChannelsWithoutEPG(libraryId);
+  const { data: schedule = [] } = useScheduledJobs(libraryId);
 
   const health = useMemo<HealthReport>(
     () => computeHealth(t, totalChannels, sources, unhealthy.length),
@@ -100,6 +103,14 @@ export function LivetvAdminPanel({
         sourcesHaveErrors={sources.some((s) => s.last_status === "error")}
         withoutEPGCount={withoutEPG.length}
         unhealthyCount={unhealthy.length}
+        scheduleEnabledCount={schedule.filter((j) => j.enabled).length}
+        scheduleHasErrors={schedule.some((j) => j.last_status === "error")}
+        // Always shown: the GET /schedule endpoint synthesises two
+        // placeholder rows for libraries without schedules so the tab
+        // has stable content from first paint. Gating on schedule.length
+        // here would make the tab appear after the initial fetch, which
+        // flickers the tab bar on load.
+        showSchedule={true}
       />
 
       <div
@@ -117,6 +128,9 @@ export function LivetvAdminPanel({
         {tab === "unhealthy" && unhealthy.length > 0 ? (
           <UnhealthyChannelsPanel libraryId={libraryId} />
         ) : null}
+        {tab === "schedule" ? (
+          <ScheduledJobsPanel libraryId={libraryId} />
+        ) : null}
       </div>
     </div>
   );
@@ -132,6 +146,9 @@ interface TabBarProps {
   sourcesHaveErrors: boolean;
   withoutEPGCount: number;
   unhealthyCount: number;
+  scheduleEnabledCount: number;
+  scheduleHasErrors: boolean;
+  showSchedule: boolean;
 }
 
 /**
@@ -152,6 +169,9 @@ function TabBar({
   sourcesHaveErrors,
   withoutEPGCount,
   unhealthyCount,
+  scheduleEnabledCount,
+  scheduleHasErrors,
+  showSchedule,
 }: TabBarProps) {
   const { t } = useTranslation();
   const tabsRef = useRef<Array<HTMLButtonElement | null>>([]);
@@ -169,6 +189,13 @@ function TabBar({
       count: sourcesCount,
       tone: sourcesHaveErrors ? "warning" : "default",
       show: true,
+    },
+    {
+      key: "schedule",
+      label: t("admin.livetv.tabs.schedule", { defaultValue: "Programación" }),
+      count: scheduleEnabledCount,
+      tone: scheduleHasErrors ? "warning" : "default",
+      show: showSchedule,
     },
     {
       key: "without-epg",
