@@ -104,6 +104,15 @@ type IPTVService interface {
 	AddEPGSource(ctx context.Context, libraryID, catalogID, customURL string) (*db.LibraryEPGSource, error)
 	RemoveEPGSource(ctx context.Context, libraryID, sourceID string) error
 	ReorderEPGSources(ctx context.Context, libraryID string, orderedIDs []string) error
+
+	// Channel health — admin surface for the opportunistic probe
+	// data the stream proxy records. SetChannelActive already exists;
+	// the admin UI pairs it with ResetChannelHealth so an operator
+	// can either permanently disable a dead channel or clear its
+	// counter if they know it's actually working.
+	ListUnhealthyChannels(ctx context.Context, libraryID string, threshold int) ([]*db.Channel, error)
+	SetChannelActive(ctx context.Context, id string, active bool) error
+	ResetChannelHealth(ctx context.Context, channelID string) error
 }
 
 // IPTVStreamProxyService defines IPTV proxy operations needed by handlers.

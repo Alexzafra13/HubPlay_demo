@@ -774,6 +774,127 @@ func (h *IPTVHandler) ReorderEPGSources(w http.ResponseWriter, r *http.Request) 
 	respondJSON(w, http.StatusOK, map[string]any{"data": epgSourcesToJSON(sources)})
 }
 
+// ── Channel health endpoints ─────────────────────────────────────
+//
+// GET /api/v1/libraries/{id}/channels/unhealthy   (auth + ACL)
+// POST /api/v1/channels/{channelId}/reset-health  (admin)
+// POST /api/v1/channels/{channelId}/disable       (admin)
+//
+// Read path is gated by the same per-library ACL as the channel list.
+// Write paths are admin-only at the route level (router.go).
+
+// ListUnhealthyChannels returns channels whose probe-failure count is
+// above the threshold. Optional `?threshold=N` query param; default
+// is the repo constant.
+func (h *IPTVHandler) ListUnhealthyChannels(w http.ResponseWriter, r *http.Request) {
+	libraryID := chi.URLParam(r, "id")
+	if !h.canAccessLibrary(r, libraryID) {
+		h.denyForbidden(w, r)
+		return
+	}
+	threshold := 0 // 0 = let repo pick its default
+	if v := r.URL.Query().Get("threshold"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			threshold = n
+		}
+	}
+	channels, err := h.svc.ListUnhealthyChannels(r.Context(), libraryID, threshold)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	out := make([]map[string]any, 0, len(channels))
+	for _, ch := range channels {
+		out = append(out, channelHealthDTO(ch))
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"data": out})
+}
+
+// ResetChannelHealth clears the failure counter so the channel is
+// visible again in the user list. Doesn't probe — the operator is
+// asserting the channel works.
+func (h *IPTVHandler) ResetChannelHealth(w http.ResponseWriter, r *http.Request) {
+	channelID := chi.URLParam(r, "channelId")
+	ch, err := h.svc.GetChannel(r.Context(), channelID)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	if !h.canAccessLibrary(r, ch.LibraryID) {
+		h.denyForbidden(w, r)
+		return
+	}
+	if err := h.svc.ResetChannelHealth(r.Context(), channelID); err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// DisableChannel permanently hides a channel from the user list by
+// flipping is_active. Idempotent.
+func (h *IPTVHandler) DisableChannel(w http.ResponseWriter, r *http.Request) {
+	channelID := chi.URLParam(r, "channelId")
+	ch, err := h.svc.GetChannel(r.Context(), channelID)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	if !h.canAccessLibrary(r, ch.LibraryID) {
+		h.denyForbidden(w, r)
+		return
+	}
+	if err := h.svc.SetChannelActive(r.Context(), channelID, false); err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// EnableChannel is the mirror image — lets the admin re-enable a
+// channel that was manually disabled.
+func (h *IPTVHandler) EnableChannel(w http.ResponseWriter, r *http.Request) {
+	channelID := chi.URLParam(r, "channelId")
+	ch, err := h.svc.GetChannel(r.Context(), channelID)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	if !h.canAccessLibrary(r, ch.LibraryID) {
+		h.denyForbidden(w, r)
+		return
+	}
+	if err := h.svc.SetChannelActive(r.Context(), channelID, true); err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// channelHealthDTO shapes a channel with its health fields for the
+// admin UI. The regular channel DTO (iptv_dto.go) stays lean and
+// omits these columns to avoid payload bloat on the hot list path.
+func channelHealthDTO(ch *db.Channel) map[string]any {
+	var lastProbe any
+	if !ch.LastProbeAt.IsZero() {
+		lastProbe = ch.LastProbeAt
+	}
+	return map[string]any{
+		"id":                   ch.ID,
+		"library_id":           ch.LibraryID,
+		"name":                 ch.Name,
+		"number":               ch.Number,
+		"group_name":           ch.GroupName,
+		"logo_url":             ch.LogoURL,
+		"tvg_id":               ch.TvgID,
+		"is_active":            ch.IsActive,
+		"last_probe_at":        lastProbe,
+		"last_probe_status":    ch.LastProbeStatus,
+		"last_probe_error":     ch.LastProbeError,
+		"consecutive_failures": ch.ConsecutiveFailures,
+	}
+}
+
 func epgSourcesToJSON(sources []*db.LibraryEPGSource) []map[string]any {
 	out := make([]map[string]any, 0, len(sources))
 	for _, s := range sources {

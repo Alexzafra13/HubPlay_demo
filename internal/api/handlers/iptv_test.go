@@ -45,6 +45,16 @@ type iptvFakeService struct {
 	// EPG source fixtures, keyed by libraryID.
 	epgSources map[string][]*db.LibraryEPGSource
 	epgCatalog []iptv.PublicEPGSource
+
+	// Channel health fixtures, keyed by libraryID. Tests append Channel
+	// pointers with the health fields set; ListUnhealthyChannels filters
+	// on consecutive_failures >= threshold.
+	unhealthyByLibrary map[string][]*db.Channel
+	resetHealthCalls   []string
+	setActiveCalls     []struct {
+		ID     string
+		Active bool
+	}
 }
 
 func newIPTVFakeService() *iptvFakeService {
@@ -231,6 +241,43 @@ func (s *iptvFakeService) RemoveEPGSource(_ context.Context, libraryID, sourceID
 	return errors.New("not found")
 }
 
+// ─── Channel health (fake) ──────────────────────────────────────────────────
+
+func (s *iptvFakeService) ListUnhealthyChannels(_ context.Context, libraryID string, threshold int) ([]*db.Channel, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if threshold <= 0 {
+		threshold = db.UnhealthyThreshold
+	}
+	out := []*db.Channel{}
+	for _, ch := range s.unhealthyByLibrary[libraryID] {
+		if ch.ConsecutiveFailures >= threshold {
+			out = append(out, ch)
+		}
+	}
+	return out, nil
+}
+
+func (s *iptvFakeService) SetChannelActive(_ context.Context, id string, active bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.setActiveCalls = append(s.setActiveCalls, struct {
+		ID     string
+		Active bool
+	}{id, active})
+	if ch, ok := s.channelByID[id]; ok {
+		ch.IsActive = active
+	}
+	return nil
+}
+
+func (s *iptvFakeService) ResetChannelHealth(_ context.Context, channelID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.resetHealthCalls = append(s.resetHealthCalls, channelID)
+	return nil
+}
+
 func (s *iptvFakeService) ReorderEPGSources(_ context.Context, libraryID string, orderedIDs []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -357,6 +404,10 @@ func newIPTVTestEnv(t *testing.T) *iptvTestEnv {
 		r.Post("/libraries/{id}/epg-sources", env.handler.AddEPGSource)
 		r.Delete("/libraries/{id}/epg-sources/{sourceId}", env.handler.RemoveEPGSource)
 		r.Patch("/libraries/{id}/epg-sources/reorder", env.handler.ReorderEPGSources)
+		r.Get("/libraries/{id}/channels/unhealthy", env.handler.ListUnhealthyChannels)
+		r.Post("/channels/{channelId}/reset-health", env.handler.ResetChannelHealth)
+		r.Post("/channels/{channelId}/disable", env.handler.DisableChannel)
+		r.Post("/channels/{channelId}/enable", env.handler.EnableChannel)
 	})
 	env.router = r
 	return env
@@ -929,6 +980,92 @@ func TestIPTVHandler_RemoveEPGSource_Works(t *testing.T) {
 	data, _ := iptvDecodeData(t, listRR).([]any)
 	if len(data) != 0 {
 		t.Errorf("expected empty after delete, got %d", len(data))
+	}
+}
+
+// ─── Channel health ──────────────────────────────────────────────────────
+
+func TestIPTVHandler_ListUnhealthy_FiltersByThreshold(t *testing.T) {
+	env := newIPTVTestEnv(t)
+	env.svc.unhealthyByLibrary = map[string][]*db.Channel{
+		"lib-1": {
+			{ID: "c-dead", LibraryID: "lib-1", Name: "Dead", ConsecutiveFailures: 5},
+			{ID: "c-flaky", LibraryID: "lib-1", Name: "Flaky", ConsecutiveFailures: 3},
+			{ID: "c-ok", LibraryID: "lib-1", Name: "OK", ConsecutiveFailures: 1},
+		},
+	}
+	rr := env.do(http.MethodGet, "/api/v1/libraries/lib-1/channels/unhealthy", "")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: %d", rr.Code)
+	}
+	data, _ := iptvDecodeData(t, rr).([]any)
+	// Default threshold (3) should exclude c-ok but include c-flaky and c-dead.
+	if len(data) != 2 {
+		t.Fatalf("expected 2 unhealthy, got %d: %v", len(data), data)
+	}
+}
+
+func TestIPTVHandler_ListUnhealthy_CustomThreshold(t *testing.T) {
+	env := newIPTVTestEnv(t)
+	env.svc.unhealthyByLibrary = map[string][]*db.Channel{
+		"lib-1": {
+			{ID: "c-dead", LibraryID: "lib-1", Name: "Dead", ConsecutiveFailures: 5},
+			{ID: "c-flaky", LibraryID: "lib-1", Name: "Flaky", ConsecutiveFailures: 3},
+		},
+	}
+	rr := env.do(http.MethodGet, "/api/v1/libraries/lib-1/channels/unhealthy?threshold=5", "")
+	data, _ := iptvDecodeData(t, rr).([]any)
+	if len(data) != 1 {
+		t.Fatalf("threshold=5 should leave just c-dead, got %d", len(data))
+	}
+}
+
+func TestIPTVHandler_ResetChannelHealth_Works(t *testing.T) {
+	env := newIPTVTestEnv(t)
+	env.svc.channelByID["c-1"] = &db.Channel{ID: "c-1", LibraryID: "lib-1"}
+	rr := env.do(http.MethodPost, "/api/v1/channels/c-1/reset-health", "")
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status: %d", rr.Code)
+	}
+	if len(env.svc.resetHealthCalls) != 1 || env.svc.resetHealthCalls[0] != "c-1" {
+		t.Errorf("reset not recorded: %v", env.svc.resetHealthCalls)
+	}
+}
+
+func TestIPTVHandler_DisableChannel_Works(t *testing.T) {
+	env := newIPTVTestEnv(t)
+	env.svc.channelByID["c-1"] = &db.Channel{ID: "c-1", LibraryID: "lib-1"}
+	rr := env.do(http.MethodPost, "/api/v1/channels/c-1/disable", "")
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status: %d", rr.Code)
+	}
+	if len(env.svc.setActiveCalls) != 1 ||
+		env.svc.setActiveCalls[0].ID != "c-1" ||
+		env.svc.setActiveCalls[0].Active {
+		t.Errorf("disable not recorded: %v", env.svc.setActiveCalls)
+	}
+}
+
+func TestIPTVHandler_EnableChannel_Works(t *testing.T) {
+	env := newIPTVTestEnv(t)
+	env.svc.channelByID["c-1"] = &db.Channel{ID: "c-1", LibraryID: "lib-1"}
+	rr := env.do(http.MethodPost, "/api/v1/channels/c-1/enable", "")
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status: %d", rr.Code)
+	}
+	if len(env.svc.setActiveCalls) != 1 ||
+		!env.svc.setActiveCalls[0].Active {
+		t.Errorf("enable not recorded: %v", env.svc.setActiveCalls)
+	}
+}
+
+func TestIPTVHandler_ResetChannelHealth_InaccessibleLibrary_404(t *testing.T) {
+	env := newIPTVTestEnv(t)
+	env.svc.channelByID["c-secret"] = &db.Channel{ID: "c-secret", LibraryID: "lib-restricted"}
+	env.access.accessFn = func(_, libraryID string) (bool, error) { return libraryID == "lib-ok", nil }
+	rr := env.doAs(http.MethodPost, "/api/v1/channels/c-secret/reset-health", "", iptvUserClaims())
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 on ACL deny, got %d", rr.Code)
 	}
 }
 

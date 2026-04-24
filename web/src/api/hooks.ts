@@ -25,6 +25,7 @@ import type {
   PublicEPGSource,
   SetupStatus,
   SystemCapabilities,
+  UnhealthyChannel,
   UpdateLibraryRequest,
   User,
   UserData,
@@ -55,6 +56,8 @@ export const queryKeys = {
   epgCatalog: ["epg-catalog"] as const,
   libraryEPGSources: (libraryId: string) =>
     ["library-epg-sources", libraryId] as const,
+  unhealthyChannels: (libraryId: string) =>
+    ["unhealthy-channels", libraryId] as const,
   itemImages: (id: string) => ["items", id, "images"] as const,
   availableImages: (id: string, type?: string) => ["items", id, "images", "available", type] as const,
   providers: ["providers"] as const,
@@ -416,6 +419,60 @@ export function useReorderEPGSources(libraryId: string) {
       // The reorder endpoint returns the new list, so we can seed the
       // cache directly and skip an unnecessary round-trip.
       queryClient.setQueryData(queryKeys.libraryEPGSources(libraryId), data);
+    },
+  });
+}
+
+// ─── Channel Health ─────────────────────────────────────────────────────
+//
+// Admin-only surface over the opportunistic probe data. The list polls
+// so the badge updates as viewers try channels; actions (reset / disable
+// / enable) invalidate both the health list AND the regular channel list
+// (a newly-enabled channel reappears there, a disabled one vanishes).
+
+export function useUnhealthyChannels(
+  libraryId: string,
+  options?: Partial<UseQueryOptions<UnhealthyChannel[]>>,
+) {
+  return useQuery<UnhealthyChannel[]>({
+    queryKey: queryKeys.unhealthyChannels(libraryId),
+    queryFn: () => api.listUnhealthyChannels(libraryId),
+    enabled: !!libraryId,
+    // Poll every 30s so the admin sees live signal without hammering.
+    refetchInterval: 30_000,
+    ...options,
+  });
+}
+
+export function useResetChannelHealth(libraryId: string) {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, string>({
+    mutationFn: (channelId) => api.resetChannelHealth(channelId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.unhealthyChannels(libraryId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.channels(libraryId) });
+    },
+  });
+}
+
+export function useDisableChannel(libraryId: string) {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, string>({
+    mutationFn: (channelId) => api.disableChannel(channelId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.unhealthyChannels(libraryId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.channels(libraryId) });
+    },
+  });
+}
+
+export function useEnableChannel(libraryId: string) {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, string>({
+    mutationFn: (channelId) => api.enableChannel(channelId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.unhealthyChannels(libraryId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.channels(libraryId) });
     },
   });
 }

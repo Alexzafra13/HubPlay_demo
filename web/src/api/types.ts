@@ -261,6 +261,28 @@ export interface AddEPGSourceRequest {
   url?: string;
 }
 
+/**
+ * A channel with its opportunistic-probe health fields attached.
+ *
+ * Surfaced by `GET /libraries/:id/channels/unhealthy`. The regular
+ * channel list uses the slimmer `Channel` shape on purpose — only the
+ * admin view cares about failure metadata.
+ */
+export interface UnhealthyChannel {
+  id: string;
+  library_id: string;
+  name: string;
+  number: number;
+  group_name: string;
+  logo_url: string;
+  tvg_id: string;
+  is_active: boolean;
+  last_probe_at: string | null;
+  last_probe_status: "" | "ok" | "error";
+  last_probe_error: string;
+  consecutive_failures: number;
+}
+
 // ─── Streaming ──────────────────────────────────────────────────────────────
 
 export type PlaybackMethod = "direct_play" | "direct_stream" | "transcode";

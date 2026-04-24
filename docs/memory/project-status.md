@@ -76,6 +76,31 @@ dedup M3U), LiveTV partido en 8 ficheros con **EPG grid real** estilo Plex.
    nuevo `EPGSourcesPanel` en LibrariesAdmin con dropdown del catálogo,
    input de URL custom y reorder vía botones ↑/↓ accesibles por teclado.
    Cubierto por tests (repo + service + handler + catalog lookup).
+9. **Health-check oportunista de canales** (estilo Plex): el proxy
+   IPTV graba cada intento de conectar al master playlist contra la
+   fila del canal. Éxito → resetea contador; fallo → incremento
+   atómico. Cancelaciones del cliente (usuario cierra pestaña) se
+   filtran explícitamente y NO cuentan — la DB solo refleja fallos
+   reales de upstream. Nueva migración `008_channel_health.sql` añade
+   columnas `last_probe_at`, `last_probe_status`, `last_probe_error`,
+   `consecutive_failures` a `channels` más un índice parcial sobre
+   `(library_id, consecutive_failures) WHERE consecutive_failures > 0`.
+   El handler de canales del usuario llama a `ListHealthyByLibrary`
+   que excluye canales con ≥ `UnhealthyThreshold` (=3) fallos
+   consecutivos; el cliente normal no ve canales rotos. Endpoints
+   admin nuevos: `GET /libraries/{id}/channels/unhealthy[?threshold=N]`,
+   `POST /channels/{id}/reset-health`, `POST /channels/{id}/disable`,
+   `POST /channels/{id}/enable`. Interfaz `iptv.ChannelHealthReporter`
+   (nil-safe) desacopla proxy↔DB; implementada en `iptv.Service` con
+   timeout 2s para que la escritura DB no bloquee el hot path.
+   Componente `UnhealthyChannelsPanel` en LibrariesAdmin muestra el
+   panel solo si hay problemas (cero ruido si la biblioteca está
+   sana); poll 30s; acciones "Marcar OK" (reset counter) y
+   "Desactivar" (flip is_active). Tests: repo (atomic +1 concurrente,
+   trim error largo, filtro threshold, reset, ListHealthy esconde
+   desactivados+unhealthy), proxy (nil reporter, éxito, fallo,
+   cancelación del cliente ignorada, DeadlineExceeded cuenta),
+   handler (threshold custom, ACL deny, cada acción).
 
 **Impacto operativo**: importar davidmuma ya funciona end-to-end.
 Poner la URL XMLTV (o .gz) en el campo *EPG URL* de la biblioteca

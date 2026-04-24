@@ -19,6 +19,7 @@ import type {
   SetupStatus,
   StreamSession,
   SystemCapabilities,
+  UnhealthyChannel,
   UpdateLibraryRequest,
   User,
   UserData,
@@ -549,6 +550,29 @@ export class ApiClient {
       `/libraries/${libraryId}/epg-sources/reorder`,
       { body: { source_ids: sourceIds } },
     );
+  }
+
+  async listUnhealthyChannels(
+    libraryId: string,
+    threshold?: number,
+  ): Promise<UnhealthyChannel[]> {
+    return this.request<UnhealthyChannel[]>(
+      "GET",
+      `/libraries/${libraryId}/channels/unhealthy`,
+      threshold ? { params: { threshold } } : undefined,
+    );
+  }
+
+  async resetChannelHealth(channelId: string): Promise<void> {
+    await this.request<void>("POST", `/channels/${channelId}/reset-health`);
+  }
+
+  async disableChannel(channelId: string): Promise<void> {
+    await this.request<void>("POST", `/channels/${channelId}/disable`);
+  }
+
+  async enableChannel(channelId: string): Promise<void> {
+    await this.request<void>("POST", `/channels/${channelId}/enable`);
   }
 
   async importPublicIPTV(country: string, name?: string): Promise<ImportPublicIPTVResponse> {
