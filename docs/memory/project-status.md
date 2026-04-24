@@ -1,14 +1,22 @@
 # Estado del proyecto
 
-> Snapshot: **2026-04-24** · Rama: `claude/review-tv-programming-bWTim` · **tests: verde**
+> Snapshot: **2026-04-24** (live-TV arc) · Rama: `claude/review-tv-programming-bWTim` · **tests: verde**
 
 ## Resumen ejecutivo
 
 MVP funcional con backend maduro y frontend refactorizado. Sqlc completa, 15/15
 handlers backend con tests, IPTV hardened (SSRF, timeouts, ACL por biblioteca,
-dedup M3U), LiveTV partido en 8 ficheros con **EPG grid real** estilo Plex.
-Último commit arregla el ciclo de vida de goroutines en `library.Service`
-(flake de CI + hazard de producción al apagar mid-scan).
+dedup M3U), LiveTV partido en 10+ ficheros con **EPG grid real** estilo Plex.
+
+Arco de trabajo de esta rama — la parte de LiveTV de "funciona" a "producto":
+importador davidmuma robusto (fix 414 + UTC scan), EPG **multi-fuente con
+catálogo curado** (prioridad + merge + per-source status), **health-check
+oportunista** de canales (apagados auto-ocultos del user, surface para admin),
+**edición manual de tvg-id** con overrides persistentes entre M3U refreshes,
+**admin polish** (panel unificado con status dot + stats strip + tabs), y
+**Discover rediseñado** (tarjetas limpias, rail Apagados, hero personalizable
+con auto-preview HLS + persistencia multi-dispositivo). 14 commits, todos con
+tests + lint + go race verde.
 
 ## Tamaño verificado
 
@@ -124,6 +132,71 @@ dedup M3U), LiveTV partido en 8 ficheros con **EPG grid real** estilo Plex.
     real contra httptest, clearing elimina la fila persistente, orphans
     detectados correctamente), handler (happy path, empty=clear,
     missing=no-op, invalid JSON 400, ACL deny 404, trim whitespace).
+11. **Catálogo EPG verificado + 409 duplicados + invalidación refresh**
+    (`36f36c4`): el catálogo inicial shippeaba URLs a ojo — `guiaiptvmovistar.xml`
+    y `tdtsat.xml` no existen en davidmuma; todas las `epg.pw/api/epg.xml.gz?lang=*`
+    daban 404 (URL scheme inventado). Ahora el catálogo es 5 entradas
+    davidmuma HEAD-verificadas contra upstream (`guiatv.xml.gz`,
+    `guiaiptv.xml`, `guiatv_plex.xml.gz`, `guiafanart.xml.gz`,
+    `tiviepg.xml`); internacional queda a URL personalizada. Test
+    `NoKnownBrokenURLs` impide que vuelvan a colarse por accidente.
+    Además: `ErrEPGSourceAlreadyAttached` sentinel en el repo + 409
+    Conflict + mensaje limpio (antes salía el `UNIQUE constraint
+    failed` crudo de SQLite). Y `useRefreshEPG` invalida ahora
+    `libraryEPGSources` + `channelsWithoutEPG` para que tras "Refrescar
+    EPG" las badges se actualicen y los canales recién emparejados
+    salgan del panel de huérfanos, sin recargar.
+12. **Panel admin livetv unificado** (`1548dd6` + `381d5d6`): los tres
+    paneles apilados (fuentes EPG + sin guía + con problemas) se comen
+    la pantalla en cualquier biblioteca real. Primero hice el panel
+    "sin guía" colapsable con búsqueda + paginación (20 filas inicial,
+    "Mostrar más" de 40 en 40, filtro por número/nombre/tvg-id/grupo).
+    Luego el refactor final: los tres paneles pasan a ser "tab bodies"
+    dentro de un solo contenedor `LivetvAdminPanel` con header de
+    status (dot 🟢/🟡/🔴/⚪ agregado de todas las señales), stats strip
+    (`268 canales · EPG 52 (19%) ▓░ · 3 con problemas · 211 sin guía`
+    con mini barra de cobertura), y pestañas que solo aparecen cuando
+    tienen contenido. Tab por defecto auto-selecciona la más
+    problemática. Full WAI-ARIA tabs pattern (← → Home End,
+    aria-selected/controls/labelledby).
+13. **Visual: tarjetas más limpias + rail "Apagados"** (`5f713ad` +
+    `5baeae5`). Dos problemas reportados por el usuario:
+    - Cards pintaban `logo_bg` a 67-100% opacidad → cada rail era un
+      arcoíris. Ahora backdrop neutral oscuro con un radial suave de
+      la marca al 20% — hint de identidad sin que compita.
+    - La card envolvía thumbnail + info en una sola caja con borde,
+      estilo "boxed". Ahora el borde rodeado vive solo en el
+      thumbnail (el poster es la card visualmente); nombre / "Ahora"
+      / up-next caen debajo como texto sobre el fondo de la página.
+      Estilo YouTube/Netflix/Plex. La barra de progreso EPG pasa a
+      una línea fina al borde inferior del poster.
+    - Rail "Apagados" al final de Discover: tarjetas grises + badge
+      "Apagado" (en lugar de LIVE), sin hover preview (no quemar
+      bandwidth en canales que creemos muertos), click sigue
+      funcionando (admin puede probar si volvió). Solo aparece con
+      filtro "Todos". `UnhealthyChannel` extiende `Channel` para que
+      pase al mismo `ChannelCard` con un flag `dimmed`.
+14. **Hero personalizable por cuenta** (`5baeae5` + `ebbc64d`): el
+    mosaico de 5 tiles aleatorios se sustituye por un `HeroSpotlight`
+    de 1 tile grande con **auto-preview muted HLS** en el mount
+    (landing feel-alive). Label claro arriba ("Tu favorito" / "En
+    directo ahora" / "Recién añadidos"). Carousel dots cuando hay
+    más de 1. Señal elegible por el usuario desde una rueda que
+    vive **en la TopBar** (no dentro del hero — los 3 bugs que el
+    usuario encontró: hero vacío con favoritos 0, dropdown clipeado
+    por la aspect-ratio del poster, "Ocultar" como trampa sin vuelta).
+    Auto-fallback silencioso: si favoritos está vacío, resuelve a
+    live-now; si también, a newest. Label reflejando lo que está
+    realmente en pantalla. Persistencia multi-dispositivo vía nueva
+    tabla `user_preferences(user_id, key, value)` — migración 010 +
+    `/api/v1/me/preferences[/{key}]` scoped a la sesión (sin lectura
+    cruzada) + hook frontend `useUserPreference<T>(key, default)` con
+    optimistic cache update + JSON encode/decode. `HoverPreview` del
+    card se promueve a `StreamPreview` compartido con el hero.
+    `pointer-events-none` en el `<video>` fija un bug de dwell que
+    cancelaba el preview al entrar el cursor sobre el video. Tests:
+    repo user_preferences (upsert, isolation por usuario, delete
+    idempotente).
 
 **Impacto operativo**: importar davidmuma ya funciona end-to-end.
 Poner la URL XMLTV (o .gz) en el campo *EPG URL* de la biblioteca
@@ -195,16 +268,22 @@ type Service struct {
 ## Lo que falta (no bloqueante)
 
 ### Frontend Live TV
-- Favoritos / último canal visto
-- Modal de detalles de programa al clicar en el EPG grid (requiere feature
-  de grabación/recordatorio para ser útil)
+- **"Continuar viendo"** — último canal visto requiere tracking backend
+  (tabla `channel_watch_history(user_id, channel_id, last_watched_at,
+  seconds_watched)`). Cuando exista, se añade rail en Discover por
+  encima de los de categoría (Fase 2 del plan Plex-max)
+- Modal de detalles de programa al clicar en el EPG grid
 - Virtualización de filas del EPG (flat DOM aguanta ~200 canales bien)
+- Búsqueda unificada de canales + programas
+- Grid EPG con colores por categoría + filtros
 
 ### IPTV backend
 - XMLTV streaming parser (bomba memoria con feeds de 2GB; `xmltv.go:70-76`)
-- Warning al importar EPG sin timezone offset (asumido UTC silenciosamente)
-- Counter de huérfanos EPG (programas sin canal matching se descartan sin log)
-- Healthcheck de iptv-org URLs
+- Matcher más agresivo para subir cobertura EPG: tabla de alias conocidos,
+  matching por channel number cuando ambos lo tienen, Levenshtein fuzzy
+  con threshold. Hoy es tvg-id + display-name variants + quality strip +
+  accent fold — suficiente para ~52/268 con davidmuma, pero escalaría
+  a 70-80% con el refuerzo
 
 ### Event bus (3 tipos reservados sin publisher)
 - `ChannelAdded`/`ChannelRemoved` — requiere descomponer `ReplaceForLibrary`
@@ -212,20 +291,29 @@ type Service struct {
 
 ### Frontend general
 - Tests del setup wizard (0 cobertura, ruta crítica de primer arranque)
-- Tests de páginas admin (mutan estado, 0 tests)
-- Wrappers en `ApiClient` para rutas sin cubrir: admin keys, provider search,
-  IPTV refresh
-- i18n español: keys añadidos, falta traducir strings pendientes
+- Tests de páginas admin (mutan estado, 0 tests — los panels nuevos
+  `LivetvAdminPanel` + sub-paneles entran en este hueco)
+- Warnings pre-existentes de `react-hooks/set-state-in-effect` en
+  `AppLayout`, `CountrySelector`, `MediaGrid`, `FolderBrowser`, `ItemDetail`
+  — ninguno de mi código nuevo, pero conviene barrerlos
 
 ## Próximo paso sugerido
 
-Sin prisa. Candidatos ordenados por impacto:
+Sin prisa. Candidatos ordenados por impacto sobre la experiencia live-TV:
 
-1. **Tests del setup wizard** — ruta crítica de primer arranque, 0 cobertura.
-   El patrón ya está probado en los tests de handler backend.
-2. **Streaming parser del XMLTV** — único problema IPTV pendiente con impacto
-   real en producción (feeds de 2GB petan servidores pequeños).
-3. **Favoritos / último canal en LiveTV** — reusar el patrón `continue_watching`
-   de películas.
-4. **Wrappers ApiClient faltantes** — necesario antes de añadir admin UI
-   para gestión de claves JWT.
+1. **Matcher EPG más agresivo** — mayor multiplicador de valor ahora mismo:
+   subir la cobertura de 52/268 a 150-200+ hace que los 5 rails por
+   categoría + el hero "live-now" se llenen de contenido real sin que el
+   admin tenga que mapear a mano.
+2. **"Continuar viendo" + tabla de historial** — desbloquea el rail
+   personalizado de Discover y el modo hero "más vistos". Migración +
+   service tracking via el proxy (ya existe el hook en `streamOnceWithChannel`
+   para el health-check; reusar).
+3. **Modal de detalle de programa** en EPG grid — click en celda → modal
+   con título/descripción/franja/canal/"Ver ahora". Cierra la experiencia
+   Plex-like.
+4. **Streaming parser del XMLTV** — único problema IPTV pendiente con impacto
+   real en producción (feeds de 2GB petan servidores pequeños). davidmuma
+   está en ~30MB así que no es urgente hoy.
+5. **Tests del setup wizard + páginas admin** — deuda de cobertura, no
+   bloqueante pero pendiente.
