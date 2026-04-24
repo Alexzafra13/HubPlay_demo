@@ -238,8 +238,11 @@ func waitForShutdown(ctx context.Context, cancel context.CancelFunc, server *htt
 
 	// Stop background services. Stop the IPTV scheduler before the
 	// IPTV service itself so an in-flight refresh has a chance to
-	// finish recording its outcome against an open DB handle.
-	iptvSched.Stop()
+	// finish recording its outcome against an open DB handle. The
+	// shutdownCtx bounds the wait — if a run is stuck past the
+	// supervisor deadline the scheduler cancels its in-flight ctx
+	// rather than block the whole shutdown.
+	iptvSched.Stop(shutdownCtx)
 	logger.Info("iptv scheduler stopped")
 	scheduler.Stop()
 	logger.Info("scan scheduler stopped")

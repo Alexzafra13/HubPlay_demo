@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -17,6 +18,13 @@ import (
 	"hubplay/internal/db"
 	"hubplay/internal/event"
 )
+
+// ErrRefreshInProgress is returned by RefreshM3U / RefreshEPG when the
+// per-library refresh lock is already held. Exposed as a sentinel so
+// callers (scheduler, handlers) can distinguish "concurrent refresh"
+// from real upstream failures — the scheduler treats this as benign and
+// skips recording it as a job-level error.
+var ErrRefreshInProgress = errors.New("refresh already in progress")
 
 // Service manages IPTV libraries: M3U import, EPG sync, channel operations.
 //

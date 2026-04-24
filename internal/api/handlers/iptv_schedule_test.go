@@ -394,6 +394,12 @@ var _ IPTVScheduleRunner = (*fakeScheduleRunner)(nil)
 // Ensure the fake repo matches the handler's expected surface.
 var _ IPTVScheduleRepository = (*fakeScheduleRepo)(nil)
 
-// Anchor the errors import so lint doesn't complain if future edits
-// drop the explicit sentinel check.
-var _ = errors.Is
+// Ensure the fake repo's Get path surfaces the sentinel the handler
+// relies on to distinguish "not configured yet" from real errors.
+func TestFakeRepo_GetMissingReturnsSentinel(t *testing.T) {
+	repo := newFakeScheduleRepo()
+	_, err := repo.Get(context.Background(), "lib-a", db.IPTVJobKindM3URefresh)
+	if !errors.Is(err, db.ErrIPTVScheduledJobNotFound) {
+		t.Errorf("expected ErrIPTVScheduledJobNotFound, got %v", err)
+	}
+}

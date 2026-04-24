@@ -19,7 +19,7 @@ func (s *Service) RefreshM3U(ctx context.Context, libraryID string) (int, error)
 	s.mu.Lock()
 	if s.refreshes[libraryID] {
 		s.mu.Unlock()
-		return 0, fmt.Errorf("refresh already in progress for library %s", libraryID)
+		return 0, fmt.Errorf("library %s: %w", libraryID, ErrRefreshInProgress)
 	}
 	s.refreshes[libraryID] = true
 	s.mu.Unlock()

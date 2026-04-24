@@ -43,7 +43,7 @@ func (s *Service) RefreshEPG(ctx context.Context, libraryID string) (int, error)
 	s.mu.Lock()
 	if s.refreshes[libraryID] {
 		s.mu.Unlock()
-		return 0, fmt.Errorf("refresh already in progress for library %s", libraryID)
+		return 0, fmt.Errorf("library %s: %w", libraryID, ErrRefreshInProgress)
 	}
 	s.refreshes[libraryID] = true
 	s.mu.Unlock()
@@ -207,6 +207,14 @@ func (s *Service) refreshOneSource(
 			// Programme references a channel id that wasn't declared
 			// in a <channel> block — resolve with the id alone and
 			// memoise so repeats don't re-match.
+			//
+			// Worst case: a broken XMLTV dump with thousands of unique
+			// undeclared channel IDs forces one matchChannel call
+			// per-id. Bounded by `len(libraryChannels) * N_unique_ids`
+			// and fuzzy's O(pool) cost — still fast (~ms for the
+			// davidmuma shape, ~s even for a pathological 10k-channel
+			// dump). The memoisation keeps repeated programmes
+			// against the same orphan id free.
 			channelID = matchChannel(prog.ChannelID, nil, idx)
 			resolved[prog.ChannelID] = channelID
 		}

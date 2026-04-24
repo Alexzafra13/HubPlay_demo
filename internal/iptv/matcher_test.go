@@ -247,6 +247,21 @@ func TestMatchChannel_FuzzyFallback(t *testing.T) {
 		}
 	})
 
+	t.Run("non-ASCII survives folding and still matches fuzzy", func(t *testing.T) {
+		// "Movistar Plus+" keeps the "+" after diacritic folding (it's
+		// not in the folder table), so both sides carry multi-byte
+		// history. The byte-length pruner would miscompute the
+		// budget; the rune-based pruner lets this through. Typo in
+		// the EPG payload → 1-edit distance, should match.
+		mpIdx := indexFrom(
+			&db.Channel{ID: "ch-mp", Name: "Movistar Plus+"},
+		)
+		got := matchChannel("movistar.plus+", []string{"Movistar Pluz+"}, mpIdx)
+		if got != "ch-mp" {
+			t.Errorf("got %q, want ch-mp via fuzzy over multi-byte", got)
+		}
+	})
+
 	t.Run("tie between two close channels refuses to guess", func(t *testing.T) {
 		// "ABCDEFGH" equidistant from "ABCDEFGX" and "ABCDEFGY" — same
 		// distance (1) to two different ids. Matcher refuses.

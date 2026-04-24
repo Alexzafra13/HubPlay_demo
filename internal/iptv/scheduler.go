@@ -7,6 +7,7 @@ package iptv
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -47,6 +48,12 @@ type Scheduler struct {
 	stopCh chan struct{}
 	doneCh chan struct{}
 
+	// rootCancel is the CancelFunc paired with the context the loop
+	// derived from Start's ctx. Stop uses it as a last-resort lever
+	// when the caller's shutdown deadline fires before the in-flight
+	// run finishes naturally. Nil until Start runs.
+	rootCancel context.CancelFunc
+
 	// now abstracts time.Now for tests. Always UTC via
 	// time.Now().UTC() in production.
 	now func() time.Time
@@ -67,18 +74,39 @@ func NewScheduler(repo *db.IPTVScheduleRepository, runner jobRunner, logger *slo
 }
 
 // Start launches the polling goroutine. Does not block. Call Stop to
-// drain before the process exits.
+// drain before the process exits. The context is wrapped with a cancel
+// function so Stop can force-unblock a stalled run when the caller's
+// shutdown deadline fires.
 func (s *Scheduler) Start(ctx context.Context) {
 	s.logger.Info("iptv scheduler started", "tick_interval", s.tickInterval)
-	go s.loop(ctx)
+	rootCtx, cancel := context.WithCancel(ctx)
+	s.rootCancel = cancel
+	go s.loop(rootCtx)
 }
 
-// Stop signals the loop to drain and waits until it finishes the
-// currently-running job, if any. Bounded by the runTimeout of the
-// active run — shutdown won't hang forever even if an upstream stalls.
-func (s *Scheduler) Stop() {
+// Stop signals the loop to drain and waits until the current run (if
+// any) finishes. The context bounds the wait: passing a deadline
+// shorter than runTimeout cancels the in-flight runCtx so the goroutine
+// returns promptly even when upstreams are stalled. Callers during
+// graceful shutdown should pass the shutdownCtx so the supervisor
+// deadline is honoured end-to-end.
+func (s *Scheduler) Stop(ctx context.Context) {
 	close(s.stopCh)
-	<-s.doneCh
+	select {
+	case <-s.doneCh:
+	case <-ctx.Done():
+		// Propagate to any in-flight runCtx by cancelling the loop's
+		// root context so the runner path unblocks. Then give the
+		// goroutine a short grace to record outcome + exit; we still
+		// return even if it can't.
+		s.logger.Warn("iptv scheduler stop deadline reached, forcing cancel")
+		s.rootCancel()
+		select {
+		case <-s.doneCh:
+		case <-time.After(2 * time.Second):
+			s.logger.Error("iptv scheduler did not drain within grace period")
+		}
+	}
 	s.logger.Info("iptv scheduler stopped")
 }
 
@@ -146,12 +174,31 @@ func (s *Scheduler) RunNow(ctx context.Context, libraryID, kind string) error {
 // persists the outcome. Returns the run error (nil on success) so the
 // RunNow caller can surface it to the HTTP client; ticker-driven runs
 // ignore the return because they already logged.
-func (s *Scheduler) runOne(ctx context.Context, job *db.IPTVScheduledJob) error {
+//
+// Panic safety: the runner executes third-party-ish code (XMLTV parser
+// on user-supplied feeds, HTTP clients, etc.). A panic in that path
+// must not kill the scheduler goroutine — it would silently stop every
+// future refresh. defer/recover converts it into a recorded error so
+// the admin sees "error: panic: …" instead of discovering days later
+// that nothing ran. The surrounding duration + RecordRun still happen
+// via the named return + cleanup pattern below.
+func (s *Scheduler) runOne(ctx context.Context, job *db.IPTVScheduledJob) (runErr error) {
 	runCtx, cancel := context.WithTimeout(ctx, s.runTimeout)
 	defer cancel()
 
 	startedAt := s.now()
-	var runErr error
+	defer func() {
+		if r := recover(); r != nil {
+			// Turn the panic into a recorded error and keep the
+			// goroutine alive. Log loudly so the admin's next
+			// look at the logs surfaces the cause.
+			runErr = fmt.Errorf("panic: %v", r)
+			s.logger.Error("iptv scheduled job panicked",
+				"library", job.LibraryID, "kind", job.Kind, "panic", r)
+		}
+		duration := s.now().Sub(startedAt)
+		s.recordOutcome(ctx, job, runErr, duration, startedAt)
+	}()
 
 	switch job.Kind {
 	case db.IPTVJobKindM3URefresh:
@@ -161,8 +208,29 @@ func (s *Scheduler) runOne(ctx context.Context, job *db.IPTVScheduledJob) error 
 	default:
 		runErr = fmt.Errorf("unknown iptv job kind %q", job.Kind)
 	}
+	return runErr
+}
 
-	duration := s.now().Sub(startedAt)
+// recordOutcome logs and persists a single run's result. Split out of
+// runOne so the defer that handles panic + normal return can share one
+// code path. ErrRefreshInProgress is benign (the per-library lock
+// fired because an admin clicked "Run now" at the same moment the
+// ticker dispatched, or vice versa) — log at info and still record a
+// successful last_run_at so the UI doesn't show a spurious error badge,
+// but skip updating last_status so the previous real outcome wins.
+func (s *Scheduler) recordOutcome(
+	ctx context.Context,
+	job *db.IPTVScheduledJob,
+	runErr error,
+	duration time.Duration,
+	startedAt time.Time,
+) {
+	if errors.Is(runErr, ErrRefreshInProgress) {
+		s.logger.Info("iptv scheduled job skipped (concurrent refresh)",
+			"library", job.LibraryID, "kind", job.Kind)
+		return
+	}
+
 	status := "ok"
 	errMsg := ""
 	if runErr != nil {
@@ -184,18 +252,7 @@ func (s *Scheduler) runOne(ctx context.Context, job *db.IPTVScheduledJob) error 
 		s.logger.Error("record iptv job run",
 			"library", job.LibraryID, "kind", job.Kind, "error", recErr)
 	}
-	return runErr
 }
-
-// ── Test hooks ────────────────────────────────────────────────────
-
-// tickOnce runs exactly one polling pass. Used by tests to avoid
-// sleeping for tickInterval; production uses the internal loop.
-func (s *Scheduler) tickOnce(ctx context.Context) { s.tick(ctx) }
-
-// setTickInterval lets tests speed up the loop. Harmless in
-// production (nothing calls it) but not part of the stable API.
-func (s *Scheduler) setTickInterval(d time.Duration) { s.tickInterval = d }
 
 // Compile-time guarantee that *iptv.Service satisfies jobRunner.
 var _ jobRunner = (*Service)(nil)

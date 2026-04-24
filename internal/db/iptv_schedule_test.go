@@ -285,6 +285,41 @@ func TestIPTVSchedule_RecordRunTrimsLongError(t *testing.T) {
 	}
 }
 
+func TestIPTVSchedule_CascadesOnLibraryDelete(t *testing.T) {
+	// Migration 011 declares ON DELETE CASCADE on library_id and the
+	// SQLite driver's DSN pragmas foreign_keys=ON. Pin that contract —
+	// an accidental regression in either place would orphan schedule
+	// rows that the worker would then try to run for gone libraries.
+	repos := testutil.NewTestRepos(t)
+	createTestLibrary(t, repos, "lib-a")
+	ctx := context.Background()
+
+	for _, kind := range []string{db.IPTVJobKindM3URefresh, db.IPTVJobKindEPGRefresh} {
+		if err := repos.IPTVSchedules.Upsert(ctx, &db.IPTVScheduledJob{
+			LibraryID: "lib-a", Kind: kind, IntervalHours: 6, Enabled: true,
+		}); err != nil {
+			t.Fatalf("upsert %s: %v", kind, err)
+		}
+	}
+	// Sanity: rows exist.
+	rows, err := repos.IPTVSchedules.ListByLibrary(ctx, "lib-a")
+	if err != nil || len(rows) != 2 {
+		t.Fatalf("pre-delete list: %v %d", err, len(rows))
+	}
+
+	if err := repos.Libraries.Delete(ctx, "lib-a"); err != nil {
+		t.Fatalf("delete library: %v", err)
+	}
+
+	rows, err = repos.IPTVSchedules.ListByLibrary(ctx, "lib-a")
+	if err != nil {
+		t.Fatalf("post-delete list: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Errorf("expected cascade to remove rows, got %d", len(rows))
+	}
+}
+
 func TestIPTVSchedule_DeleteIsIdempotent(t *testing.T) {
 	repos := testutil.NewTestRepos(t)
 	createTestLibrary(t, repos, "lib-a")

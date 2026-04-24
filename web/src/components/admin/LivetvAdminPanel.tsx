@@ -105,7 +105,12 @@ export function LivetvAdminPanel({
         unhealthyCount={unhealthy.length}
         scheduleEnabledCount={schedule.filter((j) => j.enabled).length}
         scheduleHasErrors={schedule.some((j) => j.last_status === "error")}
-        showSchedule={schedule.length > 0}
+        // Always shown: the GET /schedule endpoint synthesises two
+        // placeholder rows for libraries without schedules so the tab
+        // has stable content from first paint. Gating on schedule.length
+        // here would make the tab appear after the initial fetch, which
+        // flickers the tab bar on load.
+        showSchedule={true}
       />
 
       <div

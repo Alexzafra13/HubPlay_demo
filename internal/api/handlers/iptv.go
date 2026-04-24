@@ -41,24 +41,11 @@ func NewIPTVHandler(svc IPTVService, proxy IPTVStreamProxyService, libraries Lib
 	}
 }
 
-// canAccessLibrary gates per-library access for the authenticated caller.
-// Admins pass unconditionally. Unauthenticated requests fail closed.
-// Errors in the ACL lookup fail closed too — the caller sees a generic 404.
+// canAccessLibrary delegates to the package-level helper. Thin wrapper
+// kept so the rest of this file still reads as `h.canAccessLibrary(r,
+// id)` — mechanical diff from the pre-extraction version.
 func (h *IPTVHandler) canAccessLibrary(r *http.Request, libraryID string) bool {
-	claims := auth.GetClaims(r.Context())
-	if claims == nil {
-		return false
-	}
-	if claims.Role == "admin" {
-		return true
-	}
-	ok, err := h.access.UserHasAccess(r.Context(), claims.UserID, libraryID)
-	if err != nil {
-		h.logger.Error("library access check failed",
-			"user", claims.UserID, "library", libraryID, "error", err)
-		return false
-	}
-	return ok
+	return canAccessLibrary(r, h.access, h.logger, libraryID)
 }
 
 // denyForbidden writes a NOT_FOUND response (not 403) so an unauthorised

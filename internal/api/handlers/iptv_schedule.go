@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"time"
 
-	"hubplay/internal/auth"
 	"hubplay/internal/db"
 
 	"github.com/go-chi/chi/v5"
@@ -257,20 +256,7 @@ func (h *IPTVScheduleHandler) RunNow(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *IPTVScheduleHandler) canAccess(r *http.Request, libraryID string) bool {
-	claims := auth.GetClaims(r.Context())
-	if claims == nil {
-		return false
-	}
-	if claims.Role == "admin" {
-		return true
-	}
-	ok, err := h.access.UserHasAccess(r.Context(), claims.UserID, libraryID)
-	if err != nil {
-		h.logger.Error("library access check failed",
-			"user", claims.UserID, "library", libraryID, "error", err)
-		return false
-	}
-	return ok
+	return canAccessLibrary(r, h.access, h.logger, libraryID)
 }
 
 func isValidJobKind(kind string) bool {

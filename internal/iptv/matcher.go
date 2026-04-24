@@ -28,9 +28,16 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"hubplay/internal/db"
 )
+
+// runeCount is utf8.RuneCountInString. Kept as a local alias so the
+// length-vs-byte distinction in the fuzzy path reads explicitly —
+// `len(s)` elsewhere in this file is always a byte count on purpose
+// (e.g. the map key sizing), so mixing them would be a subtle bug.
+func runeCount(s string) int { return utf8.RuneCountInString(s) }
 
 // channelIndex is the read-side lookup table the matcher walks.
 // Built once per library at the start of a refresh (all XMLTV
@@ -122,7 +129,7 @@ func buildChannelIndex(channels []*db.Channel) *channelIndex {
 			continue
 		}
 		base := variants[len(variants)-1]
-		if len([]rune(base)) < 5 {
+		if runeCount(base) < 5 {
 			continue
 		}
 		if _, seen := idx.nameMap[base]; seen {
@@ -241,19 +248,22 @@ func fuzzyMatch(epgChannelID string, xmltvDisplayNames []string, idx *channelInd
 
 	bestID := ""
 	bestDist := -1
-	bestCand := ""
 	ambiguous := false
 	for _, cand := range candidates {
 		// Too short → Levenshtein is too permissive. 5 runes is
 		// enough to meaningfully reject vs accept.
-		if len([]rune(cand)) < 5 {
+		if runeCount(cand) < 5 {
 			continue
 		}
 		for i, pool := range idx.fuzzyPool {
-			// Length-based pruning: if the length delta already
-			// exceeds our distance budget for the shorter side,
-			// they cannot satisfy the ratio test.
-			if absDiff(len(cand), len(pool)) > maxFuzzyDistance(cand, pool) {
+			// Length-based pruning: if the rune-delta already
+			// exceeds our distance budget for the longer side,
+			// they cannot satisfy the ratio test. Use rune
+			// counts on both sides — the budget is rune-based
+			// so a byte-length comparison would skip legitimate
+			// matches on names with multi-byte chars surviving
+			// diacritic folding (e.g. "Movistar Plus+").
+			if absDiff(runeCount(cand), runeCount(pool)) > maxFuzzyDistance(cand, pool) {
 				continue
 			}
 			d := levenshtein(cand, pool)
@@ -263,7 +273,6 @@ func fuzzyMatch(epgChannelID string, xmltvDisplayNames []string, idx *channelInd
 			if bestDist == -1 || d < bestDist {
 				bestDist = d
 				bestID = idx.fuzzyIDs[i]
-				bestCand = cand
 				ambiguous = false
 			} else if d == bestDist && idx.fuzzyIDs[i] != bestID {
 				// Two different channels equally close — refuse
@@ -275,13 +284,14 @@ func fuzzyMatch(epgChannelID string, xmltvDisplayNames []string, idx *channelInd
 	if ambiguous {
 		return ""
 	}
-	_ = bestCand
 	return bestID
 }
 
 // acceptFuzzy enforces the Levenshtein threshold: distance must
 // be ≤ 15 % of the longer string, and ≤ 3 edits in absolute
-// terms. Strings shorter than 5 runes bail earlier.
+// terms. Strings shorter than 5 runes are rejected by the caller
+// before reaching here — the check below is belt-and-braces so an
+// accidental caller-side change doesn't widen matching silently.
 func acceptFuzzy(a, b string, d int) bool {
 	if d == 0 {
 		// Exact would have matched earlier via nameMap; reaching
@@ -289,8 +299,8 @@ func acceptFuzzy(a, b string, d int) bool {
 		// (e.g. dedupe collision). Accept it.
 		return true
 	}
-	longer := len([]rune(a))
-	if l := len([]rune(b)); l > longer {
+	longer := runeCount(a)
+	if l := runeCount(b); l > longer {
 		longer = l
 	}
 	if longer < 5 {
@@ -307,8 +317,8 @@ func acceptFuzzy(a, b string, d int) bool {
 // pruner uses. Matches acceptFuzzy: 15 % of the longer side or
 // 3, whichever is lower.
 func maxFuzzyDistance(a, b string) int {
-	longer := len([]rune(a))
-	if l := len([]rune(b)); l > longer {
+	longer := runeCount(a)
+	if l := runeCount(b); l > longer {
 		longer = l
 	}
 	budget := longer * 15 / 100
