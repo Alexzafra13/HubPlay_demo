@@ -10,7 +10,7 @@ import {
   useRemoveChannelFavorite,
 } from "@/api/hooks";
 import { api } from "@/api/client";
-import type { Channel, ChannelCategory } from "@/api/types";
+import type { Channel, ChannelCategory, UnhealthyChannel } from "@/api/types";
 import { Spinner } from "@/components/common";
 import {
   type CategoryFilter,
@@ -82,6 +82,23 @@ export default function LiveTV() {
   const channelIds = useMemo(() => channels.map((c) => c.id), [channels]);
   const { data: scheduleData } = useBulkSchedule(channelIds);
   const scheduleByChannel = useMemo(() => scheduleData ?? {}, [scheduleData]);
+
+  // Unhealthy channels per library. The backend filters these out of the
+  // main channel list (ListHealthyByLibrary) so Discover stays clean, but
+  // we still want to surface them — dimmed — in a dedicated "Apagados"
+  // rail so the viewer knows the channel exists and the admin can tell
+  // at a glance what's currently off the air without jumping to the
+  // admin page.
+  const unhealthyQueries = useQueries({
+    queries: liveTvLibraries.map((lib) => ({
+      queryKey: queryKeys.unhealthyChannels(lib.id),
+      queryFn: () => api.listUnhealthyChannels(lib.id),
+    })),
+  });
+  const unhealthyChannels = useMemo<UnhealthyChannel[]>(
+    () => unhealthyQueries.flatMap((q) => q.data ?? []),
+    [unhealthyQueries],
+  );
 
   // ── Tabs + filters ────────────────────────────────────────────────
   const [tab, setTab] = useState<ViewTab>("discover");
@@ -246,6 +263,7 @@ export default function LiveTV() {
           onOpen={openPlayer}
           favoriteSet={favoriteSet}
           onToggleFavorite={toggleFavorite}
+          unhealthyChannels={unhealthyChannels}
           t={t}
         />
       )}
@@ -411,6 +429,7 @@ interface DiscoverViewProps {
   onOpen: (ch: Channel) => void;
   favoriteSet: Set<string>;
   onToggleFavorite: (channelId: string) => void;
+  unhealthyChannels: UnhealthyChannel[];
   t: ReturnType<typeof useTranslation>["t"];
 }
 
@@ -424,6 +443,7 @@ function DiscoverView({
   onOpen,
   favoriteSet,
   onToggleFavorite,
+  unhealthyChannels,
   t,
 }: DiscoverViewProps) {
   // Rail ordering mirrors the chips' default order so what the user
@@ -493,6 +513,35 @@ function DiscoverView({
           ))}
         </ChannelRail>
       ))}
+
+      {/* "Apagados" — channels the health probe has flagged as failing.
+          The backend filters them out of the main channel list so
+          Discover stays clean, but we surface them here, dimmed, at
+          the bottom of the page. A click still tries to play (the
+          probe might be stale); the rail fades to near-nothing when
+          there's nothing to show, no hard empty state. */}
+      {unhealthyChannels.length > 0 && category === "all" ? (
+        <ChannelRail
+          title={t("liveTV.category.apagados", { defaultValue: "Apagados" })}
+          count={unhealthyChannels.length}
+          subtitle={t("liveTV.apagadosSubtitle", {
+            defaultValue:
+              "Canales con fallos recientes; reintenta, quizá hayan vuelto.",
+          })}
+        >
+          {unhealthyChannels.map((ch) => (
+            <ChannelCard
+              key={ch.id}
+              channel={ch}
+              isFavorite={favoriteSet.has(ch.id)}
+              onClick={() => onOpen(ch)}
+              onToggleFavorite={() => onToggleFavorite(ch.id)}
+              previewOnHover={false}
+              dimmed
+            />
+          ))}
+        </ChannelRail>
+      ) : null}
     </div>
   );
 }

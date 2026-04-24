@@ -18,6 +18,14 @@ interface ChannelCardProps {
    * forever. Set to false to disable previews entirely (faster, zero cost).
    */
   previewOnHover?: boolean;
+  /**
+   * Renders the card in a "the channel is off the air" treatment: low
+   * opacity, desaturated logo, an "Apagado" badge where LIVE usually
+   * sits, no hover preview, no EPG overlay. Keep the click handler
+   * working — the admin may want to test if the upstream came back
+   * without first clearing the health counter from the admin panel.
+   */
+  dimmed?: boolean;
 }
 
 /**
@@ -50,12 +58,20 @@ export function ChannelCard({
   onClick,
   onToggleFavorite,
   previewOnHover = true,
+  dimmed = false,
 }: ChannelCardProps) {
   const progress = nowPlaying ? getProgramProgress(nowPlaying) : 0;
 
-  // Backdrop gradient: biased toward the channel's logo hue so cards still
-  // read as distinct even before the real logo image resolves.
-  const thumbBg = `linear-gradient(135deg, ${channel.logo_bg}aa 0%, var(--tv-bg-2) 120%)`;
+  // Thumbnail backdrop.
+  //
+  // Earlier versions painted the full card with the channel's brand colour
+  // at high opacity, which turned every rail into a rainbow: five cards
+  // side by side screamed five different hues and the page lost visual
+  // cohesion. The mix below keeps a neutral dark base (matches the rest
+  // of the UI chrome) with a subtle radial of the channel's colour at the
+  // top, enough to give each tile a hint of identity without competing
+  // with its neighbours for attention.
+  const thumbBg = `radial-gradient(circle at 50% 20%, ${channel.logo_bg}33 0%, transparent 55%), linear-gradient(180deg, var(--tv-bg-2) 0%, var(--tv-bg-1) 100%)`;
 
   // Hover-preview state -------------------------------------------------
   // `armed` is flipped on after the debounce fires; `<video>` mounts only
@@ -79,7 +95,9 @@ export function ChannelCard({
   useEffect(() => () => clearTimers(), []);
 
   const handleMouseEnter = () => {
-    if (!previewOnHover) return;
+    // Dimmed = channel is flagged off-the-air. Don't burn bandwidth
+    // loading a hover preview that's almost certainly going to fail.
+    if (!previewOnHover || dimmed) return;
     clearTimers();
     // 500 ms dwell before arming — filters rapid cursor pass-throughs.
     hoverTimer.current = window.setTimeout(() => {
@@ -100,9 +118,22 @@ export function ChannelCard({
       onClick={onClick}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
-      className="group flex w-full flex-col overflow-hidden rounded-tv-md border border-tv-line bg-tv-bg-1 text-left transition hover:-translate-y-0.5 hover:border-tv-line-strong hover:shadow-tv-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tv-accent"
+      className={[
+        "group flex w-full flex-col overflow-hidden rounded-tv-md border border-tv-line bg-tv-bg-1 text-left transition hover:-translate-y-0.5 hover:border-tv-line-strong hover:shadow-tv-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tv-accent",
+        // Apagado treatment: drops the whole tile to ~55% opacity and
+        // desaturates the interior imagery. Kept as a CSS class (not a
+        // compound inline style) so hover still lifts the tile a touch
+        // and gives feedback that the click is live.
+        dimmed && "opacity-60 grayscale hover:opacity-90",
+      ]
+        .filter(Boolean)
+        .join(" ")}
       aria-label={
-        nowPlaying ? `${channel.name} — ${nowPlaying.title}` : channel.name
+        dimmed
+          ? `${channel.name} — apagado`
+          : nowPlaying
+            ? `${channel.name} — ${nowPlaying.title}`
+            : channel.name
       }
     >
       {/* Thumbnail ---------------------------------------------------- */}
@@ -146,20 +177,25 @@ export function ChannelCard({
           />
         )}
 
-        {/* Top-left: channel number + LIVE pill (only when there's EPG data
-            so the badge means "actually broadcasting known content now",
-            not just "this stream exists"). Country tag appears to the
-            right when we know which country the channel is from. */}
+        {/* Top-left badges. Order: CH number → state pill → country.
+            LIVE only renders when we actually have EPG "now on air" so
+            the badge carries meaning. Apagado replaces LIVE when the
+            health counter has flagged the channel — one pill at a time
+            keeps the glance-parsing clean. */}
         <div className="pointer-events-none absolute left-2 top-2 flex max-w-[calc(100%-3rem)] items-center gap-1.5">
           <span className="rounded-tv-xs bg-black/50 px-1.5 py-0.5 font-mono text-[10px] font-semibold tracking-wider text-tv-fg-0 backdrop-blur">
             CH {channel.number}
           </span>
-          {nowPlaying && (
+          {dimmed ? (
+            <span className="flex items-center gap-1 rounded-tv-xs bg-black/70 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-tv-fg-1 backdrop-blur">
+              Apagado
+            </span>
+          ) : nowPlaying ? (
             <span className="flex items-center gap-1 rounded-tv-xs bg-tv-live/90 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
               <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
               Live
             </span>
-          )}
+          ) : null}
           {channel.country && (
             <span className="truncate rounded-tv-xs bg-black/50 px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-tv-fg-1 backdrop-blur">
               {channel.country}
@@ -204,7 +240,11 @@ export function ChannelCard({
         </div>
 
         <div className="truncate text-xs text-tv-fg-2">
-          {nowPlaying ? (
+          {dimmed ? (
+            <span className="text-tv-fg-3">
+              Canal apagado · reintenta más tarde
+            </span>
+          ) : nowPlaying ? (
             <>
               <span className="mr-1.5 uppercase tracking-wider text-tv-fg-3">
                 Ahora

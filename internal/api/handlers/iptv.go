@@ -972,23 +972,39 @@ func (h *IPTVHandler) EnableChannel(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// channelHealthDTO shapes a channel with its health fields for the
-// admin UI. The regular channel DTO (iptv_dto.go) stays lean and
-// omits these columns to avoid payload bloat on the hot list path.
+// channelHealthDTO shapes a channel with its health fields. Built on
+// top of the regular `toChannelDTO` so the frontend can feed these
+// rows into the same `ChannelCard` component as normal channels with
+// just a `dimmed` flag flipped on — no parallel shape, no copy-paste
+// of derivation logic.
+//
+// The stream_url is still populated: the "Apagados" rail in Discover
+// lets viewers try the channel anyway (a click doesn't commit to a
+// belief the channel is dead; the proxy records another failure if
+// it still is, and resets the counter on first success).
 func channelHealthDTO(ch *db.Channel) map[string]any {
+	base := toChannelDTO(ch, "/api/v1/channels/"+ch.ID+"/stream")
 	var lastProbe any
 	if !ch.LastProbeAt.IsZero() {
 		lastProbe = ch.LastProbeAt
 	}
 	return map[string]any{
-		"id":                   ch.ID,
-		"library_id":           ch.LibraryID,
-		"name":                 ch.Name,
-		"number":               ch.Number,
-		"group_name":           ch.GroupName,
-		"logo_url":             ch.LogoURL,
-		"tvg_id":               ch.TvgID,
-		"is_active":            ch.IsActive,
+		"id":                   base.ID,
+		"name":                 base.Name,
+		"number":               base.Number,
+		"group":                base.Group,
+		"group_name":           base.GroupName,
+		"category":             base.Category,
+		"logo_url":             base.LogoURL,
+		"logo_initials":        base.LogoInitials,
+		"logo_bg":              base.LogoBg,
+		"logo_fg":              base.LogoFg,
+		"stream_url":           base.StreamURL,
+		"library_id":           base.LibraryID,
+		"tvg_id":               base.TvgID,
+		"language":             base.Language,
+		"country":              base.Country,
+		"is_active":            base.IsActive,
 		"last_probe_at":        lastProbe,
 		"last_probe_status":    ch.LastProbeStatus,
 		"last_probe_error":     ch.LastProbeError,
