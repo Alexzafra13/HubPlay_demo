@@ -113,6 +113,12 @@ type IPTVService interface {
 	ListUnhealthyChannels(ctx context.Context, libraryID string, threshold int) ([]*db.Channel, error)
 	SetChannelActive(ctx context.Context, id string, active bool) error
 	ResetChannelHealth(ctx context.Context, channelID string) error
+
+	// Manual channel editing — surfaced as the "canales sin guía"
+	// admin panel. The override layer makes SetChannelTvgID survive
+	// the next M3U refresh.
+	ListChannelsWithoutEPG(ctx context.Context, libraryID string) ([]*db.Channel, error)
+	SetChannelTvgID(ctx context.Context, channelID, tvgID string) error
 }
 
 // IPTVStreamProxyService defines IPTV proxy operations needed by handlers.

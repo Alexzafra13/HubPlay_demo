@@ -262,6 +262,29 @@ export interface AddEPGSourceRequest {
 }
 
 /**
+ * A channel the EPG refresher did not match against any source.
+ * Returned by `GET /libraries/:id/channels/without-epg`. The admin
+ * UI uses this to let operators fix `tvg_id` by hand.
+ */
+export interface ChannelWithoutEPG {
+  id: string;
+  library_id: string;
+  name: string;
+  number: number;
+  group_name: string;
+  logo_url: string;
+  tvg_id: string;
+  is_active: boolean;
+}
+
+/** PATCH /channels/:id accepts partial edits. tvg_id is pointer-like
+ * in JSON: omit the field to keep existing, pass empty string to
+ * clear both the column AND the persistent override. */
+export interface PatchChannelRequest {
+  tvg_id?: string;
+}
+
+/**
  * A channel with its opportunistic-probe health fields attached.
  *
  * Surfaced by `GET /libraries/:id/channels/unhealthy`. The regular

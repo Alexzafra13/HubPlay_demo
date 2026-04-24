@@ -55,6 +55,13 @@ type iptvFakeService struct {
 		ID     string
 		Active bool
 	}
+
+	// Channels-without-EPG fixtures + edit capture.
+	withoutEPGByLibrary map[string][]*db.Channel
+	tvgIDEdits          []struct {
+		ChannelID string
+		TvgID     string
+	}
 }
 
 func newIPTVFakeService() *iptvFakeService {
@@ -271,6 +278,27 @@ func (s *iptvFakeService) SetChannelActive(_ context.Context, id string, active 
 	return nil
 }
 
+func (s *iptvFakeService) ListChannelsWithoutEPG(_ context.Context, libraryID string) ([]*db.Channel, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := []*db.Channel{}
+	out = append(out, s.withoutEPGByLibrary[libraryID]...)
+	return out, nil
+}
+
+func (s *iptvFakeService) SetChannelTvgID(_ context.Context, channelID, tvgID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tvgIDEdits = append(s.tvgIDEdits, struct {
+		ChannelID string
+		TvgID     string
+	}{channelID, tvgID})
+	if ch, ok := s.channelByID[channelID]; ok {
+		ch.TvgID = tvgID
+	}
+	return nil
+}
+
 func (s *iptvFakeService) ResetChannelHealth(_ context.Context, channelID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -408,6 +436,8 @@ func newIPTVTestEnv(t *testing.T) *iptvTestEnv {
 		r.Post("/channels/{channelId}/reset-health", env.handler.ResetChannelHealth)
 		r.Post("/channels/{channelId}/disable", env.handler.DisableChannel)
 		r.Post("/channels/{channelId}/enable", env.handler.EnableChannel)
+		r.Get("/libraries/{id}/channels/without-epg", env.handler.ListChannelsWithoutEPG)
+		r.Patch("/channels/{channelId}", env.handler.PatchChannel)
 	})
 	env.router = r
 	return env
@@ -1066,6 +1096,102 @@ func TestIPTVHandler_ResetChannelHealth_InaccessibleLibrary_404(t *testing.T) {
 	rr := env.doAs(http.MethodPost, "/api/v1/channels/c-secret/reset-health", "", iptvUserClaims())
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 on ACL deny, got %d", rr.Code)
+	}
+}
+
+// ─── Channels without EPG + PATCH ────────────────────────────────────
+
+func TestIPTVHandler_ListChannelsWithoutEPG(t *testing.T) {
+	env := newIPTVTestEnv(t)
+	env.svc.withoutEPGByLibrary = map[string][]*db.Channel{
+		"lib-1": {
+			{ID: "c-orphan-1", LibraryID: "lib-1", Name: "Orphan 1", TvgID: ""},
+			{ID: "c-orphan-2", LibraryID: "lib-1", Name: "Orphan 2", TvgID: "wrong.id"},
+		},
+	}
+	rr := env.do(http.MethodGet, "/api/v1/libraries/lib-1/channels/without-epg", "")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: %d", rr.Code)
+	}
+	data, _ := iptvDecodeData(t, rr).([]any)
+	if len(data) != 2 {
+		t.Fatalf("expected 2, got %d", len(data))
+	}
+}
+
+func TestIPTVHandler_PatchChannel_SetsTvgID(t *testing.T) {
+	env := newIPTVTestEnv(t)
+	env.svc.channelByID["c-1"] = &db.Channel{
+		ID: "c-1", LibraryID: "lib-1", Name: "La 1", TvgID: "",
+	}
+	rr := env.do(http.MethodPatch, "/api/v1/channels/c-1", `{"tvg_id":"La1.ES"}`)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	if len(env.svc.tvgIDEdits) != 1 || env.svc.tvgIDEdits[0].TvgID != "La1.ES" {
+		t.Errorf("edit not recorded: %v", env.svc.tvgIDEdits)
+	}
+	data, _ := iptvDecodeData(t, rr).(map[string]any)
+	if data["tvg_id"] != "La1.ES" {
+		t.Errorf("response tvg_id = %v, want La1.ES", data["tvg_id"])
+	}
+}
+
+func TestIPTVHandler_PatchChannel_EmptyTvgID_Clears(t *testing.T) {
+	env := newIPTVTestEnv(t)
+	env.svc.channelByID["c-1"] = &db.Channel{
+		ID: "c-1", LibraryID: "lib-1", Name: "La 1", TvgID: "old.id",
+	}
+	rr := env.do(http.MethodPatch, "/api/v1/channels/c-1", `{"tvg_id":""}`)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: %d", rr.Code)
+	}
+	if len(env.svc.tvgIDEdits) != 1 || env.svc.tvgIDEdits[0].TvgID != "" {
+		t.Errorf("empty tvg_id should still hit service: %v", env.svc.tvgIDEdits)
+	}
+}
+
+func TestIPTVHandler_PatchChannel_OmittedTvgID_NoOp(t *testing.T) {
+	env := newIPTVTestEnv(t)
+	env.svc.channelByID["c-1"] = &db.Channel{ID: "c-1", LibraryID: "lib-1"}
+	rr := env.do(http.MethodPatch, "/api/v1/channels/c-1", `{}`)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: %d", rr.Code)
+	}
+	if len(env.svc.tvgIDEdits) != 0 {
+		t.Errorf("omitted tvg_id should not touch service: %v", env.svc.tvgIDEdits)
+	}
+}
+
+func TestIPTVHandler_PatchChannel_InvalidBody_400(t *testing.T) {
+	env := newIPTVTestEnv(t)
+	env.svc.channelByID["c-1"] = &db.Channel{ID: "c-1", LibraryID: "lib-1"}
+	rr := env.do(http.MethodPatch, "/api/v1/channels/c-1", `{bad`)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status: %d", rr.Code)
+	}
+}
+
+func TestIPTVHandler_PatchChannel_ACLDeny_404(t *testing.T) {
+	env := newIPTVTestEnv(t)
+	env.svc.channelByID["c-secret"] = &db.Channel{ID: "c-secret", LibraryID: "lib-restricted"}
+	env.access.accessFn = func(_, libraryID string) (bool, error) { return libraryID == "lib-ok", nil }
+	rr := env.doAs(http.MethodPatch, "/api/v1/channels/c-secret",
+		`{"tvg_id":"X"}`, iptvUserClaims())
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status: %d, want 404", rr.Code)
+	}
+}
+
+func TestIPTVHandler_PatchChannel_TrimsSpaces(t *testing.T) {
+	env := newIPTVTestEnv(t)
+	env.svc.channelByID["c-1"] = &db.Channel{ID: "c-1", LibraryID: "lib-1"}
+	rr := env.do(http.MethodPatch, "/api/v1/channels/c-1", `{"tvg_id":"  La1.ES  "}`)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: %d", rr.Code)
+	}
+	if env.svc.tvgIDEdits[0].TvgID != "La1.ES" {
+		t.Errorf("expected trimmed value, got %q", env.svc.tvgIDEdits[0].TvgID)
 	}
 }
 

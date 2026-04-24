@@ -26,6 +26,7 @@ type Service struct {
 	libraries   *db.LibraryRepository
 	favorites   *db.ChannelFavoritesRepository
 	epgSources  *db.LibraryEPGSourceRepository
+	overrides   *db.ChannelOverrideRepository
 	logger      *slog.Logger
 
 	mu        sync.Mutex
@@ -54,6 +55,7 @@ func NewService(
 	libraries *db.LibraryRepository,
 	favorites *db.ChannelFavoritesRepository,
 	epgSources *db.LibraryEPGSourceRepository,
+	overrides *db.ChannelOverrideRepository,
 	logger *slog.Logger,
 ) *Service {
 	return &Service{
@@ -62,6 +64,7 @@ func NewService(
 		libraries:   libraries,
 		favorites:   favorites,
 		epgSources:  epgSources,
+		overrides:   overrides,
 		logger:      logger.With("module", "iptv"),
 		refreshes:   make(map[string]bool),
 		httpClient: &http.Client{
@@ -165,6 +168,25 @@ func (s *Service) RefreshM3U(ctx context.Context, libraryID string) (int, error)
 
 	if err := s.channels.ReplaceForLibrary(ctx, libraryID, dbChannels); err != nil {
 		return 0, fmt.Errorf("replace channels: %w", err)
+	}
+
+	// Re-apply hand-edited channel fields (currently tvg_id) that the
+	// admin configured via PATCH /channels/{id}. The overrides table is
+	// keyed by stream URL so the fresh channel rows inherited from the
+	// M3U get their operator-intent restored. Orphaned overrides (URL
+	// dropped from the playlist) are a no-op and stay in the table in
+	// case the URL returns later.
+	if s.overrides != nil {
+		if n, err := s.overrides.ApplyToLibrary(ctx, libraryID); err != nil {
+			// A failure here shouldn't roll back the M3U refresh —
+			// channels are saved, overrides just didn't reapply. Logged
+			// loudly so the admin notices.
+			s.logger.Error("apply channel overrides post-import",
+				"library", libraryID, "error", err)
+		} else if n > 0 {
+			s.logger.Info("reapplied channel overrides",
+				"library", libraryID, "count", n)
+		}
 	}
 
 	// Persist any XMLTV URL the playlist advertised so the EPG refresher has
@@ -536,6 +558,60 @@ func sanitiseProbeError(err error) string {
 		msg = strings.TrimPrefix(msg, prefix)
 	}
 	return msg
+}
+
+// ── Manual channel editing (admin) ─────────────────────────────────
+//
+// Surface for the "canales sin guía" panel. The admin patches a
+// channel's tvg_id to force a match against a specific XMLTV entry
+// (e.g. davidmuma uses "La 1 HD" where the iptv-org M3U has
+// "La1.es@SD"). The change is applied immediately to `channels` AND
+// persisted to `channel_overrides` so it survives the next M3U refresh.
+
+// ChannelWithoutEPGWindow is how far forward the "does this channel
+// have a guide" check looks. 24h matches the default guide window on
+// the user side.
+const ChannelWithoutEPGWindow = 24 * time.Hour
+
+// ListChannelsWithoutEPG returns active channels in the library that
+// have no programmes overlapping the next ChannelWithoutEPGWindow.
+// Admin-only use: surfaces the long tail of channels that the EPG
+// match didn't cover.
+func (s *Service) ListChannelsWithoutEPG(ctx context.Context, libraryID string) ([]*db.Channel, error) {
+	now := time.Now().UTC()
+	return s.channels.ListWithoutEPGByLibrary(ctx, libraryID,
+		now.Add(-2*time.Hour), now.Add(ChannelWithoutEPGWindow))
+}
+
+// SetChannelTvgID updates one channel's tvg_id in place and records
+// the edit in the overrides table so it replays on the next M3U
+// refresh. Passing an empty tvgID clears both the column and the
+// override row (the admin wants "use no tvg_id, let name matching
+// carry the load").
+func (s *Service) SetChannelTvgID(ctx context.Context, channelID, tvgID string) error {
+	ch, err := s.channels.GetByID(ctx, channelID)
+	if err != nil {
+		return fmt.Errorf("get channel: %w", err)
+	}
+	if err := s.channels.UpdateTvgID(ctx, channelID, tvgID); err != nil {
+		return fmt.Errorf("update tvg_id: %w", err)
+	}
+	if s.overrides == nil {
+		return nil
+	}
+	if tvgID == "" {
+		// Clear the persistent override so a future M3U refresh doesn't
+		// resurrect a value the admin just removed.
+		if err := s.overrides.Delete(ctx, ch.LibraryID, ch.StreamURL); err != nil {
+			return fmt.Errorf("clear override: %w", err)
+		}
+		return nil
+	}
+	return s.overrides.Upsert(ctx, &db.ChannelOverride{
+		LibraryID: ch.LibraryID,
+		StreamURL: ch.StreamURL,
+		TvgID:     tvgID,
+	})
 }
 
 // ListUnhealthyChannels returns channels whose consecutive-failure

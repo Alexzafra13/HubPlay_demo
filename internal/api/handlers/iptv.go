@@ -774,6 +774,99 @@ func (h *IPTVHandler) ReorderEPGSources(w http.ResponseWriter, r *http.Request) 
 	respondJSON(w, http.StatusOK, map[string]any{"data": epgSourcesToJSON(sources)})
 }
 
+// ── Channels without EPG + manual edit ───────────────────────────
+//
+// GET  /api/v1/libraries/{id}/channels/without-epg   (auth + ACL)
+// PATCH /api/v1/channels/{channelId}                  (admin)
+//
+// The list endpoint flags channels that no XMLTV source matched for
+// the next ~24h. The PATCH lets the admin fix the mismatch by
+// correcting tvg_id by hand; the override persists across M3U
+// refreshes via the channel_overrides table.
+
+// ListChannelsWithoutEPG returns active channels with no programmes
+// in the default guide window.
+func (h *IPTVHandler) ListChannelsWithoutEPG(w http.ResponseWriter, r *http.Request) {
+	libraryID := chi.URLParam(r, "id")
+	if !h.canAccessLibrary(r, libraryID) {
+		h.denyForbidden(w, r)
+		return
+	}
+	channels, err := h.svc.ListChannelsWithoutEPG(r.Context(), libraryID)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	out := make([]map[string]any, 0, len(channels))
+	for _, ch := range channels {
+		out = append(out, channelWithoutEPGDTO(ch))
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"data": out})
+}
+
+type patchChannelRequest struct {
+	TvgID *string `json:"tvg_id,omitempty"` // pointer so missing != empty
+}
+
+// PatchChannel accepts admin edits to a single channel. Currently
+// only `tvg_id` is mutable — other fields are derived from the M3U
+// and would be wiped on the next refresh anyway.
+//
+// A nil TvgID means "field not present in request" (leave alone);
+// an explicit "" means "clear tvg_id AND the persistent override".
+func (h *IPTVHandler) PatchChannel(w http.ResponseWriter, r *http.Request) {
+	channelID := chi.URLParam(r, "channelId")
+	ch, err := h.svc.GetChannel(r.Context(), channelID)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	if !h.canAccessLibrary(r, ch.LibraryID) {
+		h.denyForbidden(w, r)
+		return
+	}
+
+	var body patchChannelRequest
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8*1024))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&body); err != nil {
+		respondError(w, r, http.StatusBadRequest, "INVALID_BODY", "invalid JSON body")
+		return
+	}
+
+	if body.TvgID != nil {
+		if err := h.svc.SetChannelTvgID(r.Context(), channelID, strings.TrimSpace(*body.TvgID)); err != nil {
+			handleServiceError(w, r, err)
+			return
+		}
+	}
+
+	// Return the post-edit channel so the UI can skip a follow-up GET.
+	updated, err := h.svc.GetChannel(r.Context(), channelID)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"data": channelWithoutEPGDTO(updated)})
+}
+
+// channelWithoutEPGDTO shapes the row so the UI gets the minimum
+// needed to render "canal sin guía": identity + current tvg_id +
+// the display-name variants that might help the admin pick the
+// right override value.
+func channelWithoutEPGDTO(ch *db.Channel) map[string]any {
+	return map[string]any{
+		"id":         ch.ID,
+		"library_id": ch.LibraryID,
+		"name":       ch.Name,
+		"number":     ch.Number,
+		"group_name": ch.GroupName,
+		"logo_url":   ch.LogoURL,
+		"tvg_id":     ch.TvgID,
+		"is_active":  ch.IsActive,
+	}
+}
+
 // ── Channel health endpoints ─────────────────────────────────────
 //
 // GET /api/v1/libraries/{id}/channels/unhealthy   (auth + ACL)

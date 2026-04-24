@@ -4,6 +4,7 @@ import type {
   AvailableImage,
   BrowseResponse,
   Channel,
+  ChannelWithoutEPG,
   CreateLibraryRequest,
   EPGProgram,
   HealthResponse,
@@ -14,6 +15,7 @@ import type {
   LibraryEPGSource,
   MediaItem,
   PaginatedResponse,
+  PatchChannelRequest,
   PublicCountry,
   PublicEPGSource,
   SetupStatus,
@@ -573,6 +575,24 @@ export class ApiClient {
 
   async enableChannel(channelId: string): Promise<void> {
     await this.request<void>("POST", `/channels/${channelId}/enable`);
+  }
+
+  async listChannelsWithoutEPG(libraryId: string): Promise<ChannelWithoutEPG[]> {
+    return this.request<ChannelWithoutEPG[]>(
+      "GET",
+      `/libraries/${libraryId}/channels/without-epg`,
+    );
+  }
+
+  async patchChannel(
+    channelId: string,
+    req: PatchChannelRequest,
+  ): Promise<ChannelWithoutEPG> {
+    return this.request<ChannelWithoutEPG>(
+      "PATCH",
+      `/channels/${channelId}`,
+      { body: req },
+    );
   }
 
   async importPublicIPTV(country: string, name?: string): Promise<ImportPublicIPTVResponse> {

@@ -278,6 +278,7 @@ func NewRouter(deps Dependencies) http.Handler {
 					// same library ACL as the channel list; the mutation
 					// endpoints live under the admin group below.
 					r.Get("/libraries/{id}/channels/unhealthy", iptvHandler.ListUnhealthyChannels)
+					r.Get("/libraries/{id}/channels/without-epg", iptvHandler.ListChannelsWithoutEPG)
 
 					// Admin IPTV operations
 					r.Group(func(r chi.Router) {
@@ -289,6 +290,7 @@ func NewRouter(deps Dependencies) http.Handler {
 						r.Post("/channels/{channelId}/reset-health", iptvHandler.ResetChannelHealth)
 						r.Post("/channels/{channelId}/disable", iptvHandler.DisableChannel)
 						r.Post("/channels/{channelId}/enable", iptvHandler.EnableChannel)
+						r.Patch("/channels/{channelId}", iptvHandler.PatchChannel)
 						r.Route("/libraries/{id}/iptv", func(r chi.Router) {
 							r.Post("/refresh-m3u", iptvHandler.RefreshM3U)
 							r.Post("/refresh-epg", iptvHandler.RefreshEPG)

@@ -1,5 +1,6 @@
 import { Fragment, useState, useEffect } from "react";
 import type { FormEvent } from "react";
+import { ChannelsWithoutEPGPanel } from "@/components/admin/ChannelsWithoutEPGPanel";
 import { EPGSourcesPanel } from "@/components/admin/EPGSourcesPanel";
 import { UnhealthyChannelsPanel } from "@/components/admin/UnhealthyChannelsPanel";
 import type { ContentType, Library } from "@/api/types";
@@ -628,6 +629,7 @@ export default function LibrariesAdmin() {
                     <td colSpan={6} className="px-4 py-3 space-y-3">
                       <EPGSourcesPanel libraryId={lib.id} />
                       <UnhealthyChannelsPanel libraryId={lib.id} />
+                      <ChannelsWithoutEPGPanel libraryId={lib.id} />
                     </td>
                   </tr>
                 ) : null}

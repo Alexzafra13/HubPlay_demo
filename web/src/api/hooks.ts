@@ -12,6 +12,7 @@ import type {
   AvailableImage,
   BrowseResponse,
   Channel,
+  ChannelWithoutEPG,
   CreateLibraryRequest,
   HealthResponse,
   ImageInfo,
@@ -21,6 +22,7 @@ import type {
   LibraryEPGSource,
   MediaItem,
   PaginatedResponse,
+  PatchChannelRequest,
   PublicCountry,
   PublicEPGSource,
   SetupStatus,
@@ -58,6 +60,8 @@ export const queryKeys = {
     ["library-epg-sources", libraryId] as const,
   unhealthyChannels: (libraryId: string) =>
     ["unhealthy-channels", libraryId] as const,
+  channelsWithoutEPG: (libraryId: string) =>
+    ["channels-without-epg", libraryId] as const,
   itemImages: (id: string) => ["items", id, "images"] as const,
   availableImages: (id: string, type?: string) => ["items", id, "images", "available", type] as const,
   providers: ["providers"] as const,
@@ -472,6 +476,41 @@ export function useEnableChannel(libraryId: string) {
     mutationFn: (channelId) => api.enableChannel(channelId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.unhealthyChannels(libraryId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.channels(libraryId) });
+    },
+  });
+}
+
+// ─── Channels without EPG ───────────────────────────────────────────────
+//
+// Admin surface that pairs with the "canales sin guía" panel. The
+// list comes from the backend filtered to active channels with no
+// programmes in the 24h window. Editing `tvg_id` via PATCH invalidates
+// both this list and the library channel list so the UI refreshes
+// right away (the orphan disappears once the next EPG refresh matches it).
+
+export function useChannelsWithoutEPG(
+  libraryId: string,
+  options?: Partial<UseQueryOptions<ChannelWithoutEPG[]>>,
+) {
+  return useQuery<ChannelWithoutEPG[]>({
+    queryKey: queryKeys.channelsWithoutEPG(libraryId),
+    queryFn: () => api.listChannelsWithoutEPG(libraryId),
+    enabled: !!libraryId,
+    ...options,
+  });
+}
+
+export function usePatchChannel(libraryId: string) {
+  const queryClient = useQueryClient();
+  return useMutation<
+    ChannelWithoutEPG,
+    Error,
+    { channelId: string; patch: PatchChannelRequest }
+  >({
+    mutationFn: ({ channelId, patch }) => api.patchChannel(channelId, patch),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.channelsWithoutEPG(libraryId) });
       queryClient.invalidateQueries({ queryKey: queryKeys.channels(libraryId) });
     },
   });

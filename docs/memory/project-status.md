@@ -101,6 +101,29 @@ dedup M3U), LiveTV partido en 8 ficheros con **EPG grid real** estilo Plex.
    desactivados+unhealthy), proxy (nil reporter, éxito, fallo,
    cancelación del cliente ignorada, DeadlineExceeded cuenta),
    handler (threshold custom, ACL deny, cada acción).
+10. **Edición manual de tvg-id + panel "canales sin guía"**: los IDs
+    de canal son UUIDs aleatorios que se regeneran en cada M3U
+    refresh, por lo que cualquier edición del admin se perdería
+    inevitablemente. Solución: tabla nueva `channel_overrides(library_id,
+    stream_url, tvg_id)` (migración 009) keyed por el atributo más
+    estable del canal — el stream URL. Ciclo: admin hace
+    `PATCH /channels/{id}` → `service.SetChannelTvgID` hace UPDATE en
+    `channels` (cambio inmediato) + UPSERT en `channel_overrides` (por
+    stream_url) → siguiente M3U refresh corre `ReplaceForLibrary` (wipe)
+    y luego un nuevo hook `overrides.ApplyToLibrary(libraryID)` reaplica
+    los overrides en una transacción. Overrides huérfanos (stream_url
+    ya no en el playlist) son no-op y se quedan en la tabla esperando
+    a que la URL vuelva. Endpoints nuevos:
+    `GET /libraries/{id}/channels/without-epg` (LEFT ANTI-JOIN contra
+    epg_programs en ventana -2h..+24h) y `PATCH /channels/{channelId}`
+    admin-only con `{tvg_id}` opcional (string vacía limpia override y
+    columna). Componente `ChannelsWithoutEPGPanel` con edición inline;
+    solo aparece si hay orphans. Tests: repo (upsert replaza, apply
+    rewritea en 1 tx, orphan no-op, delete idempotente, listar
+    without-EPG), service end-to-end (override sobrevive un refresh M3U
+    real contra httptest, clearing elimina la fila persistente, orphans
+    detectados correctamente), handler (happy path, empty=clear,
+    missing=no-op, invalid JSON 400, ACL deny 404, trim whitespace).
 
 **Impacto operativo**: importar davidmuma ya funciona end-to-end.
 Poner la URL XMLTV (o .gz) en el campo *EPG URL* de la biblioteca
