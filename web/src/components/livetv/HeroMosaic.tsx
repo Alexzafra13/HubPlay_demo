@@ -71,9 +71,14 @@ function HeroTile({ data, variant, onOpen, className = "" }: HeroTileProps) {
   const isMain = variant === "main";
   const progress = nowPlaying ? getProgramProgress(nowPlaying) : 0;
 
-  // Gradient derived from the channel's deterministic logo color — gives
-  // every tile a distinct visual identity without needing real artwork.
-  const bg = `linear-gradient(135deg, ${channel.logo_bg} 0%, var(--tv-bg-1) 120%)`;
+  // Backdrop.
+  //
+  // Previous version used the full `logo_bg` at 100% opacity which turned
+  // the hero mosaic into a clash of five unrelated hues. Now a deep
+  // neutral base with a soft top-corner bloom of the channel colour: the
+  // mosaic reads as one surface, and each tile keeps a whisper of brand
+  // identity without shouting over the others.
+  const bg = `radial-gradient(circle at 20% 0%, ${channel.logo_bg}55 0%, transparent 60%), linear-gradient(180deg, var(--tv-bg-2) 0%, var(--tv-bg-0) 100%)`;
 
   return (
     <button

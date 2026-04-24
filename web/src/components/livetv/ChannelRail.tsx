@@ -4,6 +4,9 @@ import { useTranslation } from "react-i18next";
 interface ChannelRailProps {
   title: string;
   count?: number;
+  /** Optional one-liner under the title. Used by the "Apagados" rail to
+   * explain its treatment without overloading the header with chrome. */
+  subtitle?: string;
   /** When provided, shows a "Ver todo" action that calls this. */
   onSeeAll?: () => void;
   /** Channel cards (or other items) to render in the scrolling track. */
@@ -23,6 +26,7 @@ interface ChannelRailProps {
 export function ChannelRail({
   title,
   count,
+  subtitle,
   onSeeAll,
   children,
 }: ChannelRailProps) {
@@ -38,17 +42,22 @@ export function ChannelRail({
 
   return (
     <section className="flex flex-col gap-3">
-      <header className="flex items-center justify-between">
-        <h2 className="flex items-center gap-2 text-base font-semibold text-tv-fg-0">
-          {title}
-          {count !== undefined && (
-            <span className="rounded-full bg-tv-bg-2 px-2 py-0.5 font-mono text-[10px] font-medium tabular-nums text-tv-fg-2">
-              {count}
-            </span>
-          )}
-        </h2>
+      <header className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="flex items-center gap-2 text-base font-semibold text-tv-fg-0">
+            {title}
+            {count !== undefined && (
+              <span className="rounded-full bg-tv-bg-2 px-2 py-0.5 font-mono text-[10px] font-medium tabular-nums text-tv-fg-2">
+                {count}
+              </span>
+            )}
+          </h2>
+          {subtitle ? (
+            <p className="mt-0.5 text-xs text-tv-fg-3">{subtitle}</p>
+          ) : null}
+        </div>
 
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 shrink-0">
           {onSeeAll && (
             <button
               type="button"
