@@ -30,5 +30,5 @@ const TimeDisplay: FC<TimeDisplayProps> = ({ currentTime, duration }) => {
   );
 };
 
-export { TimeDisplay, formatTime };
+export { TimeDisplay };
 export type { TimeDisplayProps };
