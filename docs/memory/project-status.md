@@ -1,6 +1,6 @@
 # Estado del proyecto
 
-> Snapshot: **2026-04-24** (matcher EPG + scheduler IPTV + review fixes + continuar viendo) · Rama: `claude/review-pending-tasks-9Vh6U` · **tests: verde · lint: 0**
+> Snapshot: **2026-04-24** (matcher EPG + scheduler IPTV + review fixes + continuar viendo + program detail modal) · Rama: `claude/review-pending-tasks-9Vh6U` · **tests: verde · lint: 0**
 
 ---
 
@@ -10,8 +10,9 @@
 
 ### Lo que cerramos esta rama (`claude/review-pending-tasks-9Vh6U`)
 
-Cuatro commits: las dos candidatas del handoff anterior + pass de
-fixes tras review senior + "Continuar viendo" en LiveTV.
+Cinco commits: las dos candidatas del handoff anterior + pass de
+fixes tras review senior + "Continuar viendo" en LiveTV +
+ProgramDetailModal en el EPG grid.
 
 **Commit 1 — Matcher EPG agresivo**. Sin cambios de schema, sin UI,
 solo backend.
@@ -290,6 +291,50 @@ Cambia de canal y el siguiente aparece al principio del rail sin
 recarga. Sobrevive M3U refreshes programados (sin el fix de
 stream_url el rail moriría cada día).
 
+**Commit 5 — ProgramDetailModal en EPG grid**. UI-only, sin backend
+nuevo (los datos del programa ya viajan en `getBulkSchedule`).
+
+1. **EPGGrid**: nueva prop opcional `onSelectProgram(channel,
+   program)`. Cuando se proporciona, clicar una celda de programa
+   abre el modal en lugar de zappear directo. La celda sticky del
+   canal (izquierda) sigue siendo "click → reproducir" — split de
+   afordancias claro: programa = detalle, canal = acción inmediata.
+   Sin la prop, fallback al comportamiento legacy (back-compat
+   total con tests existentes).
+2. **`ProgramDetailModal`** nuevo en `web/src/components/livetv/`.
+   Reusa el `Modal` común (portal + Escape + body lock + ARIA
+   `role="dialog"` con `aria-label=título`). Layout:
+   - Strip identidad: nombre del canal · hora inicio–fin · duración
+     en minutos · badge de categoría · pill EN VIVO si aplica.
+   - Sinopsis con `whitespace-pre-line` para preservar saltos.
+     Fallback "Sin sinopsis disponible" en italic muted.
+   - Lista "A continuación" con hasta 3 entradas siguientes en el
+     mismo canal (oculta cuando vacía).
+   - Footer: botón "Cerrar" (ghost) + "Ver canal ahora" (primary).
+     El botón se deshabilita con texto "Ya terminó" para programas
+     pasados.
+3. **LiveTV.tsx** wire-up: estado `detail: {channel, program} | null`,
+   `openProgramDetail` desde `EPGGrid.onSelectProgram`, `onWatch`
+   cierra modal Y abre player en una sola callback (evita flicker).
+   Up-next se computa inline filtrando `scheduleByChannel` por
+   `start_time >= program.end_time` y slice 3.
+4. **Pureza Compiler**: `Date.now()` directo en render dispara el
+   lint `react-hooks/purity` — el modal usa `useNowTick(60_000)`
+   (cadencia de minuto basta para flip live/past en boundaries).
+
+Tests nuevos (todos verdes, 14 casos):
+
+- `web/src/components/livetv/ProgramDetailModal.test.tsx` — 12
+  tests: cerrado devuelve null, defensive null-program, render de
+  título/canal/duración/categoría, EN VIVO solo en directo,
+  descripción con line-breaks, fallback de sinopsis, up-next
+  visible cuando hay entradas, oculto cuando vacío, onWatch
+  dispara, botón disabled para terminados, onClose dispara.
+- `web/src/components/livetv/EPGGrid.test.tsx` — 2 tests nuevos:
+  `onSelectProgram` preferido cuando se proporciona (no llama a
+  `onSelectChannel`), celda sticky aún reproduce directamente
+  cuando ambos handlers están presentes.
+
 ### 📊 Medición pendiente (matcher EPG)
 
 El handoff anterior puso un target **52 → 150-200+** canales con EPG
@@ -316,10 +361,11 @@ los mismos mismatches observados.
 ### Estado al abrir sesión
 
 - `main` tiene PRs #81–#85 mergeados.
-- Rama actual `claude/review-pending-tasks-9Vh6U` con **4 commits**
+- Rama actual `claude/review-pending-tasks-9Vh6U` con **5 commits**
   encima de main (matcher + scheduler + review-fixes + continuar-
-  viendo). Listo para PR una vez validado en DB real.
-- Tests verdes: `pnpm test` **224/224** · `pnpm tsc --noEmit` · `pnpm
+  viendo + program-detail-modal). Listo para PR una vez validado en
+  DB real.
+- Tests verdes: `pnpm test` **238/238** · `pnpm tsc --noEmit` · `pnpm
   lint` 0 · `pnpm build` ok · `go test -race ./...` 21 paquetes ·
   `golangci-lint v1.64.8` exit 0.
 
@@ -335,11 +381,15 @@ los mismos mismatches observados.
   cross-device).
 - [ ] Forzar un M3U refresh y verificar que el rail sigue poblado
   (no se vacía — contrato clave del stream_url-as-key).
+- [ ] Abrir el EPG grid y clicar una celda de programa para
+  verificar que aparece el ProgramDetailModal con sinopsis +
+  up-next, y que "Ver canal ahora" pasa al player limpiamente.
 - [ ] Si todo funciona → abrir PR y mergear.
-- [ ] Siguiente candidata: **modal de detalle de programa** al
-  clicar en el EPG grid, **streaming parser XMLTV** (bomba memoria
-  con feeds 2 GB), o **split de `library.Service`** (deuda
-  estructural — ya hay precedente con `iptv.Service`).
+- [ ] Siguiente candidata: **streaming parser XMLTV** (bomba
+  memoria con feeds 2 GB) o **split de `library.Service`** (deuda
+  estructural — ya hay precedente con `iptv.Service`) o
+  **override manual de channel number/group** (extender
+  `channel_overrides` con columnas opcionales `number` y `group`).
 - [ ] Actualizar esta memoria.
 
 ### 🎓 Patrones senior reforzados en este ciclo
@@ -1159,7 +1209,11 @@ Sin prisa. Candidatos ordenados por impacto.
    `channel_watch_history` keyeada por stream_url, beacon en
    `useLiveHls.onFirstPlay`, rail en Discover. Falta validar
    cross-device en real.
-4. **Modal de detalle de programa** en EPG grid.
+4. ✅ **Modal de detalle de programa** en EPG grid — hecho en la
+   misma rama. `ProgramDetailModal` reusa el `Modal` común, dispara
+   desde `EPGGrid.onSelectProgram`, muestra sinopsis + up-next.
 5. **Streaming parser del XMLTV** (bomba memoria con feeds 2 GB).
 6. **Override manual de channel number / group** — extender
    `channel_overrides` con `number`/`group` opcionales.
+7. **Split de `library.Service`** — deuda estructural; aplicar la
+   misma receta `service_*.go` que se usó con `iptv.Service`.

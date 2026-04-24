@@ -158,6 +158,8 @@ describe("EPGGrid", () => {
   });
 
   it("clicking a programme cell calls onSelectChannel with its channel", () => {
+    // Back-compat path: when onSelectProgram is omitted, the legacy
+    // "click anywhere → play channel" UX is preserved.
     const onSelect = vi.fn();
     const ch = channel("c1");
     const live = program("p1", -5, 60, { title: "Telediario" });
@@ -176,6 +178,59 @@ describe("EPGGrid", () => {
       }),
     );
     expect(onSelect).toHaveBeenCalledWith(ch);
+  });
+
+  it("clicking a programme cell prefers onSelectProgram when provided", () => {
+    // New path: when both handlers are provided, the programme cell
+    // surfaces the programme detail (modal entry) and the sticky
+    // channel cell stays as the direct-play affordance.
+    const onSelectChannel = vi.fn();
+    const onSelectProgram = vi.fn();
+    const ch = channel("c1");
+    const live = program("p1", -5, 60, { title: "Telediario" });
+
+    render(
+      <EPGGrid
+        channels={[ch]}
+        scheduleByChannel={{ c1: [live] }}
+        onSelectChannel={onSelectChannel}
+        onSelectProgram={onSelectProgram}
+        autoScrollToNow={false}
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: /Telediario en C1/,
+      }),
+    );
+    expect(onSelectProgram).toHaveBeenCalledTimes(1);
+    expect(onSelectProgram).toHaveBeenCalledWith(ch, live);
+    // Channel callback NOT fired — the modal will fire it on its
+    // own "Ver canal ahora" path.
+    expect(onSelectChannel).not.toHaveBeenCalled();
+  });
+
+  it("with onSelectProgram set, the sticky channel cell still plays directly", () => {
+    // Verifies the affordance split: sticky cell = direct play,
+    // programme cell = detail modal.
+    const onSelectChannel = vi.fn();
+    const onSelectProgram = vi.fn();
+    const ch = channel("c1");
+    const { container } = render(
+      <EPGGrid
+        channels={[ch]}
+        scheduleByChannel={{}}
+        onSelectChannel={onSelectChannel}
+        onSelectProgram={onSelectProgram}
+        autoScrollToNow={false}
+      />,
+    );
+    const stickyCell = container.querySelector(
+      'button[aria-pressed="false"]',
+    ) as HTMLButtonElement;
+    fireEvent.click(stickyCell);
+    expect(onSelectChannel).toHaveBeenCalledWith(ch);
+    expect(onSelectProgram).not.toHaveBeenCalled();
   });
 
   it("clicking the sticky channel cell also calls onSelectChannel", () => {
