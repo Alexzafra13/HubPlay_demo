@@ -20,6 +20,7 @@ import {
   ChannelRail,
   CountrySelector,
   EPGGrid,
+  HeroSettings,
   HeroSpotlight,
   type HeroMode,
   type HeroModeOption,
@@ -207,34 +208,64 @@ export default function LiveTV() {
     "favorites",
   );
 
-  const heroItems = useMemo<HeroSpotlightItem[]>(() => {
-    if (heroMode === "off") return [];
-    let pool: Channel[] = [];
-    if (heroMode === "favorites") {
-      pool = channels.filter((c) => favoriteSet.has(c.id));
-    } else if (heroMode === "live-now") {
-      // Channels currently airing a known programme, sorted by number
-      // so the result is stable and the first slide is always CH 1
-      // when possible (predictable entry point on load).
-      pool = channels
-        .filter((c) => getNowPlaying(scheduleByChannel[c.id]))
-        .slice()
-        .sort((a, b) => a.number - b.number);
-    } else if (heroMode === "newest") {
-      pool = channels
-        .slice()
-        .sort((a, b) =>
-          (b.added_at ?? "").localeCompare(a.added_at ?? ""),
-        );
+  // Compute a pool for each signal. Doing it up-front lets the
+  // auto-fallback below pick whichever one actually has content
+  // without recomputing.
+  const heroPools = useMemo(() => {
+    const favorites = channels.filter((c) => favoriteSet.has(c.id));
+    const liveNow = channels
+      .filter((c) => getNowPlaying(scheduleByChannel[c.id]))
+      .slice()
+      .sort((a, b) => a.number - b.number);
+    const newest = channels
+      .slice()
+      .sort((a, b) => (b.added_at ?? "").localeCompare(a.added_at ?? ""));
+    return { favorites, liveNow, newest };
+  }, [channels, favoriteSet, scheduleByChannel]);
+
+  // Resolve the actual mode rendered. If the user's preference is
+  // "off" we always honour it. Otherwise fall back silently through
+  // favorites → live-now → newest so a fresh account (no favorites
+  // yet) still lands on a populated spotlight — the previous empty
+  // "Tu favorito" card was a dead end for new users. The mode label
+  // (computed below) reflects what's actually on screen so nothing
+  // lies about what you're seeing.
+  const effectiveMode = useMemo<HeroMode>(() => {
+    if (heroMode === "off") return "off";
+    const order: HeroMode[] =
+      heroMode === "favorites"
+        ? ["favorites", "live-now", "newest"]
+        : heroMode === "live-now"
+          ? ["live-now", "favorites", "newest"]
+          : ["newest", "favorites", "live-now"];
+    for (const m of order) {
+      const pool =
+        m === "favorites"
+          ? heroPools.favorites
+          : m === "live-now"
+            ? heroPools.liveNow
+            : heroPools.newest;
+      if (pool.length > 0) return m;
     }
+    return heroMode;
+  }, [heroMode, heroPools]);
+
+  const heroItems = useMemo<HeroSpotlightItem[]>(() => {
+    if (effectiveMode === "off") return [];
+    const pool =
+      effectiveMode === "favorites"
+        ? heroPools.favorites
+        : effectiveMode === "live-now"
+          ? heroPools.liveNow
+          : heroPools.newest;
     return pool.slice(0, 6).map((c) => ({
       channel: c,
       nowPlaying: getNowPlaying(scheduleByChannel[c.id]),
     }));
-  }, [heroMode, channels, favoriteSet, scheduleByChannel]);
+  }, [effectiveMode, heroPools, scheduleByChannel]);
 
   const heroLabel = useMemo(() => {
-    switch (heroMode) {
+    switch (effectiveMode) {
       case "favorites":
         return t("liveTV.hero.label.favorites", { defaultValue: "Tu favorito" });
       case "live-now":
@@ -244,7 +275,7 @@ export default function LiveTV() {
       default:
         return "";
     }
-  }, [heroMode, t]);
+  }, [effectiveMode, t]);
 
   const heroModeOptions = useMemo<HeroModeOption[]>(
     () => [
@@ -330,15 +361,15 @@ export default function LiveTV() {
         onSearch={setSearch}
         totalChannels={channels.length}
         liveNow={liveNowCount}
+        heroMode={heroMode}
+        heroModeOptions={heroModeOptions}
+        onHeroModeChange={setHeroMode}
       />
 
       {tab === "discover" && (
         <DiscoverView
           heroItems={heroItems}
           heroLabel={heroLabel}
-          heroMode={heroMode}
-          heroModeOptions={heroModeOptions}
-          onHeroModeChange={setHeroMode}
           counts={counts}
           category={category}
           onCategoryChange={setCategory}
@@ -398,6 +429,9 @@ interface TopBarProps {
   onSearch: (s: string) => void;
   totalChannels: number;
   liveNow: number;
+  heroMode: HeroMode;
+  heroModeOptions: HeroModeOption[];
+  onHeroModeChange: (mode: HeroMode) => void;
 }
 
 function TopBar({
@@ -407,6 +441,9 @@ function TopBar({
   onSearch,
   totalChannels,
   liveNow,
+  heroMode,
+  heroModeOptions,
+  onHeroModeChange,
 }: TopBarProps) {
   const { t } = useTranslation();
   const tabs: { id: ViewTab; label: string }[] = [
@@ -474,6 +511,20 @@ function TopBar({
             </button>
           ))}
         </div>
+
+        {/* Hero view settings. Only relevant to the Discover surface,
+            so we hide it on the other tabs to avoid offering a control
+            whose effect isn't visible. Living here (not inside the hero
+            itself) keeps it reachable even when the viewer has hidden
+            the spotlight entirely — the previous in-hero gear
+            vanished with the hero, making "ocultar" a dead end. */}
+        {tab === "discover" ? (
+          <HeroSettings
+            mode={heroMode}
+            modeOptions={heroModeOptions}
+            onModeChange={onHeroModeChange}
+          />
+        ) : null}
       </div>
     </header>
   );
@@ -506,9 +557,6 @@ function SearchIcon() {
 interface DiscoverViewProps {
   heroItems: HeroSpotlightItem[];
   heroLabel: string;
-  heroMode: HeroMode;
-  heroModeOptions: HeroModeOption[];
-  onHeroModeChange: (mode: HeroMode) => void;
   counts: Record<CategoryFilter, number>;
   category: CategoryFilter;
   onCategoryChange: (c: CategoryFilter) => void;
@@ -524,9 +572,6 @@ interface DiscoverViewProps {
 function DiscoverView({
   heroItems,
   heroLabel,
-  heroMode,
-  heroModeOptions,
-  onHeroModeChange,
   counts,
   category,
   onCategoryChange,
@@ -568,9 +613,6 @@ function DiscoverView({
       <HeroSpotlight
         items={heroItems}
         label={heroLabel}
-        mode={heroMode}
-        modeOptions={heroModeOptions}
-        onModeChange={onHeroModeChange}
         onOpen={onOpen}
       />
 
