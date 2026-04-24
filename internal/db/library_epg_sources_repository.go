@@ -5,8 +5,16 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
+
+// ErrEPGSourceAlreadyAttached signals that an admin tried to add an
+// EPG source whose URL is already configured for the library. Exposed
+// as a sentinel so the handler layer can translate it into a clean
+// 409 Conflict — previously the raw "UNIQUE constraint failed" SQLite
+// error bubbled all the way to the user.
+var ErrEPGSourceAlreadyAttached = errors.New("epg source with that url already attached")
 
 // LibraryEPGSource is one configured XMLTV provider attached to a
 // livetv library. Priority is "lower first": the refresher processes
@@ -134,9 +142,28 @@ func (r *LibraryEPGSourceRepository) Create(ctx context.Context, src *LibraryEPG
 		 VALUES (?, ?, ?, ?, ?, ?)`,
 		src.ID, src.LibraryID, catalogID, src.URL, src.Priority, src.CreatedAt)
 	if err != nil {
+		// modernc.org/sqlite doesn't ship typed error values for
+		// constraint failures; the message is stable ("UNIQUE
+		// constraint failed: library_epg_sources.library_id, ...url")
+		// so a substring match is the pragmatic check.
+		if isUniqueConstraintError(err) {
+			return ErrEPGSourceAlreadyAttached
+		}
 		return fmt.Errorf("insert epg source: %w", err)
 	}
 	return nil
+}
+
+// isUniqueConstraintError detects SQLite UNIQUE constraint violations
+// regardless of the driver's error shape. Kept at the file level so
+// we can reuse it from the other inserts that hit the same table.
+func isUniqueConstraintError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "UNIQUE constraint failed") ||
+		strings.Contains(msg, "constraint failed: UNIQUE")
 }
 
 // Delete removes a source. CASCADE on `libraries(id)` already covers
