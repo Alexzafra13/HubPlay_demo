@@ -1,6 +1,6 @@
 # Estado del proyecto
 
-> Snapshot: **2026-04-24** (live-TV arc + simplify sweep) · Rama: `claude/review-memory-tv-code-8bjei` · **tests: verde**
+> Snapshot: **2026-04-24** (live-TV arc + simplify sweep + frontend coverage slice 1) · Rama: `claude/frontend-livetv-coverage` · **tests: verde**
 
 ## Resumen ejecutivo
 
@@ -25,7 +25,16 @@ roto de `ChannelCard` ya muestra las iniciales (antes dejaba el hueco), y la
 barra de progreso del `HeroSpotlight` se actualiza también con un solo item
 (antes quedaba congelada hasta que cambiaba `nowPlaying`). Extraídos tres
 hooks / módulos reutilizables: `useNowTick`, `useHeroSpotlight`,
-`livetv/categoryOrder`.
+`livetv/categoryOrder`. Mergeado en PR #81.
+
+Ciclo siguiente (`claude/frontend-livetv-coverage`, 1 commit): primera
+tajada del coverage-burndown frontend identificado en la senior review.
+**Vitest 74 → 138 tests (+64)** cubriendo los hooks y componentes
+recién partidos. Los 7 ficheros nuevos son todos <200 loc sin setup de
+i18n. Incluye **test de regresión** para el fix del logo roto de
+`ChannelCard`, blindado contra retrocesos. Abre PR con los 64 tests
++ la actualización de esta memoria + 3 patrones nuevos de testing en
+`conventions.md`.
 
 ## Tamaño verificado
 
@@ -36,7 +45,42 @@ hooks / módulos reutilizables: `useNowTick`, `useHeroSpotlight`,
 - `go test -race ./...` verde en 21 paquetes; `golangci-lint v1.64.8`: exit 0
 - Frontend: `pnpm build` + `pnpm test` (72/72) verdes
 
-## Simplify sweep (hoy, 2026-04-24, `claude/review-memory-tv-code-8bjei`)
+## Frontend coverage — slice 1 (`claude/frontend-livetv-coverage`)
+
+Primer paso del track de estabilidad. Cubre los hooks y componentes
+extraídos en PR #81, que al ser ya pequeños y SRP-estrictos hacen los
+tests triviales (~30 loc de media por test).
+
+Delta: **74 → 138 tests en Vitest** (+64), 7 ficheros nuevos <200 loc.
+
+| Fichero | Tests | Lo que pin-ea |
+|---|---|---|
+| `web/src/hooks/useNowTick.test.ts` | 6 | Tick inicial · re-tick boundary · interval custom · unmount limpia timer · intervalMs change resetea cadencia |
+| `web/src/components/livetv/epgHelpers.test.ts` | 17 | `getNowPlaying` (start inclusivo/end exclusivo) · `getUpNext` (contrato no-sort, confía en backend `ORDER BY start_time`) · `getProgramProgress` clamp 0..100 · `formatTime` · `capitalize` |
+| `web/src/components/livetv/useHeroSpotlight.test.ts` | 9 | Fallback silencioso favorites → live-now → newest · `off` honrado sin fallback · 6-item cap · live-now ordenado por channel number · `setMode` forward · mockea `useUserPreference` para aislar |
+| `web/src/components/livetv/ChannelCard.test.tsx` | 12 | Identity · EPG on-air / no-EPG · logo vs iniciales · **regression test del fix del logo roto** (fireEvent.error → avatar aparece) · favorite toggle aislado del card click · dimmed "Apagado" |
+| `web/src/components/livetv/FavoritesView.test.tsx` | 6 | Empty state · filtrado favoriteSet · stale-favorites dropped silently (post-M3U refresh) · wiring callbacks · EPG data pasa a las cards |
+| `web/src/components/livetv/OverlayHeader.test.tsx` | 7 | Identity + country uppercase · close wiring · heart condicional · aria-pressed refleja isFavorite · country opcional |
+| `web/src/components/livetv/NowPlayingCard.test.tsx` | 7 | No-EPG fallback · campos + duración + categoría · up-next condicional · barra de progreso driven-by-`now` prop (50% halfway, clamped 0/100) |
+
+**Patrones de test descubiertos** (ahora en `conventions.md`):
+
+1. `user-event` + `vi.useFakeTimers` **se bloquea** con componentes que
+   tienen `setTimeout` internos (el debounce de hover de `ChannelCard`
+   es el caso que reventó). El `userEvent.click` nunca resuelve
+   porque su cola interna no avanza. `fireEvent` síncrono ejercita
+   los mismos handlers sin deadlock.
+2. `<img alt="">` decorativas quedan **fuera del accessibility tree**
+   por WAI-ARIA — `getByRole("img")` no las encuentra. Para estos
+   casos usar `container.querySelector("img")`. Queda consistente con
+   que screen readers tampoco las anuncian.
+3. Componentes que usan `useTranslation()` con `defaultValue` en cada
+   key funcionan en tests **sin inicializar i18n**. Con el provider
+   ausente, `t("missing", {defaultValue: "X"})` devuelve "X". El
+   codebase lo usa por convención (ver cualquier componente livetv),
+   así que los tests no tienen que montar provider.
+
+## Simplify sweep (2026-04-24, `claude/review-memory-tv-code-8bjei` — PR #81)
 
 Review completa del paquete `internal/iptv` + `web/src/components/livetv` +
 `web/src/pages/LiveTV.tsx` contra la memoria de este arc. Un único commit
@@ -392,9 +436,11 @@ type Service struct {
 - `MetadataUpdated` — necesita hook en scanner o flujo de refresh dedicado
 
 ### Frontend general
-- Tests del setup wizard (0 cobertura, ruta crítica de primer arranque)
+- Tests del setup wizard (0 cobertura, ruta crítica de primer arranque).
 - Tests de páginas admin (mutan estado, 0 tests — los panels nuevos
-  `LivetvAdminPanel` + sub-paneles entran en este hueco)
+  `LivetvAdminPanel` + sub-paneles entran en este hueco).
+- Tests de componentes livetv restantes: `LiveTvTopBar`, `DiscoverView`,
+  `HeroSpotlight`, `EPGGrid`. Los 7 iniciales ya cubiertos en el slice 1.
 - Lint pre-existente `react-hooks/set-state-in-effect` en **4** ficheros:
   `AppLayout`, `MediaGrid`, `FolderBrowser`, `ItemDetail` (CountrySelector
   ya barrido). Bajo React 19 + Compiler son re-renders en cascada reales,
@@ -431,13 +477,14 @@ type Service struct {
 Sin prisa. Candidatos ordenados por impacto.
 
 **Si foco = estabilidad**:
-1. **Tests del setup wizard** — ruta crítica de primer arranque con 0
+1. ✅ **Slice 1 coverage hecho** (`claude/frontend-livetv-coverage`):
+   7 ficheros, +64 tests. Queda `LiveTvTopBar` / `DiscoverView` /
+   `HeroSpotlight` / `EPGGrid` — mismo patrón, ~1 día.
+2. **Tests del setup wizard** — ruta crítica de primer arranque con 0
    cobertura. Si se rompe, nadie llega a usar el producto.
-2. **Coverage frontend con los componentes recién partidos** —
-   `DiscoverView`, `FavoritesView`, `OverlayHeader`, `NowPlayingCard`,
-   `useHeroSpotlight`, `useNowTick`. Cada uno ~30 loc de test.
-3. **Burndown del lint debt restante** (4 ficheros).
-4. **Split de `library.Service`** siguiendo la receta del iptv.
+3. **Tests de páginas admin** (`LivetvAdminPanel` + sub-paneles).
+4. **Burndown del lint debt restante** (4 ficheros).
+5. **Split de `library.Service`** siguiendo la receta del iptv.
 
 **Si foco = experiencia LiveTV**:
 1. **Matcher EPG más agresivo** — sube cobertura 52/268 → 150-200+.
