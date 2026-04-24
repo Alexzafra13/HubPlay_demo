@@ -1,16 +1,20 @@
 # Estado del proyecto
 
-> Snapshot: **2026-04-24** (live-TV arc + simplify sweep + frontend coverage slice 1 + setup-wizard tests + livetv coverage slice 2) · Rama: `claude/review-project-tasks-f5Rdg` · **tests: verde**
+> Snapshot: **2026-04-24** (live-TV arc + simplify sweep + frontend coverage slice 1 + setup-wizard tests + livetv coverage slice 2 + lint debt cero) · Rama: `claude/review-project-tasks-f5Rdg` · **tests: verde · lint: 0**
 
 ---
 
 ## 👉 HANDOFF PARA LA PRÓXIMA SESIÓN
 
-> **Ambos tracks del handoff anterior ✅ hechos en esta sesión**.
-> Vitest **138 → 221** tests (+83), 9 ficheros de test nuevos, sin
-> tocar código de producción. `pnpm tsc --noEmit` + `pnpm build`
-> verdes; `pnpm lint` sin regresiones (14 problemas pre-existentes
-> idénticos antes/después).
+> **Tres entregables cerrados en esta rama**:
+>
+> 1. Track B (setup wizard tests): +48 tests, 5 ficheros.
+> 2. Track A (livetv slice 2): +35 tests, 4 ficheros.
+> 3. **Lint debt cero**: de 14 problemas (10 errors + 4 warnings) a
+>    **0 problemas**. 7 ficheros tocados, sin cambio de comportamiento.
+>
+> Vitest **138 → 221** tests (+83). `pnpm tsc --noEmit` + `pnpm build`
+> + `pnpm lint` los tres en verde.
 >
 > - Track B (setup wizard): +48 tests · 5 ficheros ·
 >   `SetupWizard.test.tsx` (7), `AccountStep.test.tsx` (9),
@@ -24,15 +28,16 @@
 > 1. Tests de **páginas admin** — `LibrariesAdmin` + sub-paneles
 >    (`LivetvAdminPanel`, `EPGSourcesPanel`, `UnhealthyChannelsPanel`,
 >    `ChannelsWithoutEPGPanel`) son cero-cobertura y mutan estado real.
-> 2. **Lint burndown restante** — 4 ficheros con `set-state-in-effect`:
->    `AppLayout`, `MediaGrid`, `FolderBrowser`, `ItemDetail`. Patrón
->    de fix canónico en `CountrySelector` (memoización + fallback,
->    sin effect→setState).
-> 3. **Split de `library.Service`** siguiendo la receta que se aplicó
+>    Ahora arrancan desde una base lint-limpia, sin re-renders en
+>    cascada que enmascaren bugs en los tests.
+> 2. **Split de `library.Service`** siguiendo la receta que se aplicó
 >    a `iptv.Service` (8 ficheros `service_*.go` sobre el mismo
 >    struct, API pública intacta).
-> 4. Si foco = experiencia LiveTV: **matcher EPG más agresivo** —
+> 3. Si foco = experiencia LiveTV: **matcher EPG más agresivo** —
 >    sube cobertura 52/268 → 150-200+.
+> 4. Sacar `web/dist/` del tracking — `.gitignore` + build en CI +
+>    embed vía tag. ~0.5 día. Los chunks rehasheados en cada build
+>    son el ruido más visible en los PRs hoy.
 >
 > Los detalles originales del handoff de los dos tracks se conservan
 > abajo para referencia histórica.
@@ -256,7 +261,45 @@ i18n. Incluye **test de regresión** para el fix del logo roto de
 - **~29** test files en frontend (añadidos `livetv/` + 5 wizard + 4 slice-2)
 - **Cero** `TODO`/`FIXME`/`HACK`
 - `go test -race ./...` verde en 21 paquetes; `golangci-lint v1.64.8`: exit 0
-- Frontend: `pnpm build` + `pnpm test` (221/221) verdes, `pnpm tsc --noEmit` verde
+- Frontend: `pnpm build` + `pnpm test` (221/221) + `pnpm lint` + `pnpm tsc --noEmit` los cuatro en verde
+
+## Lint debt cero (`claude/review-project-tasks-f5Rdg`)
+
+De **14 problemas (10 errors + 4 warnings) → 0**. Sin cambios de
+comportamiento, todos refactors a patrones canónicos React 19 +
+Compiler. Cada fichero se verificó con `eslint <ruta>` antes de
+seguir, y `pnpm test` + `pnpm tsc` siguieron en verde tras cada cambio.
+
+| Fichero | Problemas | Patrón aplicado |
+|---|---|---|
+| `web/src/components/media/MediaGrid.tsx` | 1× set-state-in-effect | "Reset on prop change" durante render: `[prevItems, setPrevItems]` + comparar y `setVisibleCount(BATCH_SIZE)` antes del primer paint, en vez de `useEffect → setState`. |
+| `web/src/components/layout/AppLayout.tsx` | 3× set-state-in-effect | (a) `useIsMobile` reescrito con `useSyncExternalStore` (matchMedia → React sin efecto). (b) Cierre del drawer en cambio de viewport/ruta vía clave de reset comparada en render (`prev !== curr → setMobileOpen(false)`). Bonus: tres `useCallback` huérfanos eliminados — el compiler memoiza solo. |
+| `web/src/components/setup/FolderBrowser.tsx` | 2× preserve-manual-memoization + 1 dep warning | Eliminados los `useCallback` que el compiler logueaba como "Compilation Skipped" porque las deps `data?.parent` / `data?.current` no incluían `data`. Sin manual-memo el compiler memoiza la función entera del componente. |
+| `web/src/pages/ItemDetail.tsx` | 1× set-state-in-effect + 2× preserve-manual-memoization + 1 dep warning | (a) `siblingEpisodes` ya no es `useState + useEffect`, sino `useMemo([siblings])` — derivación pura. (b) `menuItems` deja de envolverse en `useMemo`: las deps no listaban `queryClient` y el compiler skipeaba el memo, así que el manual era ruido. Con compiler activo, el componente se memoiza completo. |
+| `web/src/components/player/TimeDisplay.tsx` | 1× react-refresh/only-export-components | `formatTime` deja de re-exportarse del fichero del componente — nadie lo importa fuera y la mezcla rompía Fast Refresh. Se quita también del barrel (`components/player/index.ts`). |
+| `web/src/hooks/useProgressReporter.ts` | 1× ref-in-cleanup warning | `videoRef.current` se captura **dentro** del efecto (`const video = videoRef.current` antes del `return () => {...}`); el closure usa la variable local. La función la rige el patrón canónico que recomienda el propio mensaje del linter. |
+| `web/src/api/client.ts` | 1× unused eslint-disable | El comment `// eslint-disable-next-line @typescript-eslint/no-non-null-assertion` apuntaba a `let response!: Response` — pero `!:` es definite-assignment, no non-null access; la regla nunca disparaba. Sustituido por un comentario que explica por qué TS necesita la aserción. |
+
+**Reglas senior asentadas para el ciclo siguiente**:
+
+1. **No memoización manual con React Compiler activo**. Si la lint
+   dice "Compilation Skipped: Existing memoization could not be
+   preserved", el `useCallback` / `useMemo` se borra; no se intenta
+   "arreglar las deps". El compiler memoiza el componente entero
+   gratis y un manual mal-depped es siempre peor que ninguno.
+2. **`set-state-in-effect` se trata como bug, no nit**. Bajo React 19
+   produce cascading re-renders reales (paint con valor stale, luego
+   paint de la corrección). Patrones permitidos:
+   - Derivación pura → `useMemo`.
+   - Mirror de un store externo → `useSyncExternalStore`.
+   - Reset de estado en cambio de prop → `[prev, setPrev]` + comparar
+     en render (React docs "Adjusting state on prop change").
+3. **`useEffect` con cleanup que lee `ref.current`**: capturar al
+   inicio del efecto, no en el cleanup (el linter tiene razón aquí
+   incluso cuando "parece que funciona").
+4. **Mezclar component + helper exports** rompe Fast Refresh. Helpers
+   van a su propio fichero o se mantienen privados. Si un helper se
+   usa en sólo un componente, no se exporta.
 
 ## Livetv coverage — slice 2 (`claude/review-project-tasks-f5Rdg`)
 
@@ -736,13 +779,10 @@ type Service struct {
 - Tests del setup wizard (0 cobertura, ruta crítica de primer arranque).
 - Tests de páginas admin (mutan estado, 0 tests — los panels nuevos
   `LivetvAdminPanel` + sub-paneles entran en este hueco).
-- Tests de componentes livetv restantes: `LiveTvTopBar`, `DiscoverView`,
-  `HeroSpotlight`, `EPGGrid`. Los 7 iniciales ya cubiertos en el slice 1.
-- Lint pre-existente `react-hooks/set-state-in-effect` en **4** ficheros:
-  `AppLayout`, `MediaGrid`, `FolderBrowser`, `ItemDetail` (CountrySelector
-  ya barrido). Bajo React 19 + Compiler son re-renders en cascada reales,
-  no nits. Patrón de fix aplicado en CountrySelector: derivar con
-  `useMemo` + `user pick ?? auto`, sin effect → setState.
+- Tests de componentes livetv restantes: ✅ slice 2 completo
+  (`LiveTvTopBar`, `DiscoverView`, `HeroSpotlight`, `EPGGrid`).
+- Lint pre-existente: ✅ liquidado (14 → 0 en esta misma rama, ver
+  sección "Lint debt cero" arriba).
 
 ### Arquitectura / deuda estructural (senior review 2026-04-24)
 - **`library.Service`**: por auditar. Probablemente misma forma god-service
@@ -777,10 +817,9 @@ Sin prisa. Candidatos ordenados por impacto.
 1. ✅ **Slice 1 coverage hecho** (`claude/frontend-livetv-coverage`):
    7 ficheros, +64 tests. Queda `LiveTvTopBar` / `DiscoverView` /
    `HeroSpotlight` / `EPGGrid` — mismo patrón, ~1 día.
-2. **Tests del setup wizard** — ruta crítica de primer arranque con 0
-   cobertura. Si se rompe, nadie llega a usar el producto.
+2. ✅ **Tests del setup wizard** — hechos esta rama (+48).
 3. **Tests de páginas admin** (`LivetvAdminPanel` + sub-paneles).
-4. **Burndown del lint debt restante** (4 ficheros).
+4. ✅ **Lint debt** — liquidado a cero esta rama.
 5. **Split de `library.Service`** siguiendo la receta del iptv.
 
 **Si foco = experiencia LiveTV**:
