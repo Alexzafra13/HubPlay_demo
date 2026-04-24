@@ -233,3 +233,54 @@ Si un diseño no tiene una línea de código detrás, **no va ahí** — va a
 
 No cifras de LOC, no nombre de rama activa, no estado de sprint. Eso
 envejece muy rápido y se mueve a `docs/memory/project-status.md`.
+
+---
+
+## Frontend — patrones detectados en livetv
+
+### Re-render periódico → `useNowTick(ms)`
+
+Cualquier componente que muestre datos derivados de `Date.now()`
+(barra de progreso, línea "ahora", filtrado "próximos X") necesita
+re-renderizar cada cierto tiempo sin que el caller tenga que
+instanciar su propio `setInterval`. El hook vive en
+`web/src/hooks/useNowTick.ts` y se usa en `EPGGrid`, `PlayerOverlay` y
+`HeroSpotlight`. Default 30 s: suficiente para granularidad de minutos
+sin re-renders innecesarios.
+
+**Regla**: nunca `getProgramProgress(x)` o similar en el render sin un
+`useNowTick` arriba del árbol — si no, la barra se congela.
+
+### Política "qué ver en el hero" → hook, no componente
+
+`HeroSpotlight` es presentacional puro. Toda la lógica de "qué señal
+se prioriza, cómo caer si está vacía, qué texto poner arriba" vive en
+`useHeroSpotlight` (`web/src/components/livetv/useHeroSpotlight.ts`).
+Así la policy es testeable sin tocar layout y si mañana añadimos una
+nueva señal ("más vistos", "continuar viendo") no hay que tocar el
+componente visual.
+
+### Una sola fuente de verdad para listas de UI
+
+Si una lista ordenada aparece en dos sitios (chips + rails,
+sidebar + dropdown, …) extraer a un módulo dedicado con un array
+exportado. Patrón aplicado en `web/src/components/livetv/categoryOrder.ts`
+para el orden de las 13 categorías de canal. Antes duplicado entre
+`LiveTV.tsx:railOrder` y `CategoryChips.tsx:defaultOrder`: cambiar el
+orden obligaba a tocar los dos y era fácil que divergieran.
+
+### Fallback de `<img>` con `onError` → URL-keyed state
+
+Esconder el `<img>` con `e.currentTarget.style.display = "none"` en
+`onError` sólo funciona si el contenido de fallback se renderiza **a
+la vez**, no en la rama opuesta de un ternario. Patrón robusto:
+
+```tsx
+const [failedUrl, setFailedUrl] = useState<string | null>(null);
+const show = !!url && failedUrl !== url;
+// show ? <img src={url} onError={() => setFailedUrl(url)} /> : <Fallback />
+```
+
+Derivar `show` de props (url + failedUrl) en vez de usar
+`useEffect(() => setOk(true), [url])` evita el warning
+`react-hooks/set-state-in-effect` que el lint del proyecto enforzea.

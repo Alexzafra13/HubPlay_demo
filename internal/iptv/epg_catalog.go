@@ -20,7 +20,7 @@ type PublicEPGSource struct {
 	URL         string   `json:"url"`
 }
 
-// PublicEPGSources returns the verified catalog.
+// publicEPGSources is the verified catalog.
 //
 // Every URL here was HEAD-checked against upstream at the time the
 // entry landed. If you add more, do the same: a catalog that ships
@@ -30,58 +30,65 @@ type PublicEPGSource struct {
 // being ready-to-use.
 //
 // International coverage deliberately omitted in this iteration
-// because the epg.pw and iptv-org URLs I originally shipped either
+// because the epg.pw and iptv-org URLs originally shipped either
 // 404 or require API keys we can't verify. Adding a wrong URL is
 // worse than an empty row; operators can still paste any XMLTV
 // endpoint they trust through the "URL personalizada" field.
+//
+// Kept as a package-level var (not a function) so the handler and
+// service don't re-allocate on every catalog lookup. The slice is
+// never mutated after init; callers receive a shared, read-only view.
+var publicEPGSources = []PublicEPGSource{
+	{
+		ID:          "davidmuma-guiatv",
+		Name:        "davidmuma — Guía TV (España)",
+		Description: "TDT y cadenas IPTV españolas. Comprimida (.gz), actualización diaria.",
+		Language:    "es",
+		Countries:   []string{"es"},
+		URL:         "https://raw.githubusercontent.com/davidmuma/EPG_dobleM/master/guiatv.xml.gz",
+	},
+	{
+		ID:          "davidmuma-guiaiptv",
+		Name:        "davidmuma — Guía IPTV amplia (España)",
+		Description: "Variante amplia con más cadenas IPTV (deportes, cine, autonómicas).",
+		Language:    "es",
+		Countries:   []string{"es"},
+		URL:         "https://raw.githubusercontent.com/davidmuma/EPG_dobleM/master/guiaiptv.xml",
+	},
+	{
+		ID:          "davidmuma-guiatv-plex",
+		Name:        "davidmuma — Guía TV optimizada (España)",
+		Description: "Variante del mismo autor optimizada para clientes tipo Plex / Jellyfin; incluye metadatos extra.",
+		Language:    "es",
+		Countries:   []string{"es"},
+		URL:         "https://raw.githubusercontent.com/davidmuma/EPG_dobleM/master/guiatv_plex.xml.gz",
+	},
+	{
+		ID:          "davidmuma-guiafanart",
+		Name:        "davidmuma — Guía con Fanart (España)",
+		Description: "Igual que guiatv pero con imágenes de fondo enriquecidas desde Fanart.tv.",
+		Language:    "es",
+		Countries:   []string{"es"},
+		URL:         "https://raw.githubusercontent.com/davidmuma/EPG_dobleM/master/guiafanart.xml.gz",
+	},
+	{
+		ID:          "davidmuma-tiviepg",
+		Name:        "davidmuma — TiviEPG (España)",
+		Description: "Guía alternativa ligera del mismo autor; útil como fallback cuando guiatv tarda en refrescar.",
+		Language:    "es",
+		Countries:   []string{"es"},
+		URL:         "https://raw.githubusercontent.com/davidmuma/EPG_dobleM/master/tiviepg.xml",
+	},
+}
+
+// PublicEPGSources returns the verified catalog.
 func PublicEPGSources() []PublicEPGSource {
-	return []PublicEPGSource{
-		{
-			ID:          "davidmuma-guiatv",
-			Name:        "davidmuma — Guía TV (España)",
-			Description: "TDT y cadenas IPTV españolas. Comprimida (.gz), actualización diaria.",
-			Language:    "es",
-			Countries:   []string{"es"},
-			URL:         "https://raw.githubusercontent.com/davidmuma/EPG_dobleM/master/guiatv.xml.gz",
-		},
-		{
-			ID:          "davidmuma-guiaiptv",
-			Name:        "davidmuma — Guía IPTV amplia (España)",
-			Description: "Variante amplia con más cadenas IPTV (deportes, cine, autonómicas).",
-			Language:    "es",
-			Countries:   []string{"es"},
-			URL:         "https://raw.githubusercontent.com/davidmuma/EPG_dobleM/master/guiaiptv.xml",
-		},
-		{
-			ID:          "davidmuma-guiatv-plex",
-			Name:        "davidmuma — Guía TV optimizada (España)",
-			Description: "Variante del mismo autor optimizada para clientes tipo Plex / Jellyfin; incluye metadatos extra.",
-			Language:    "es",
-			Countries:   []string{"es"},
-			URL:         "https://raw.githubusercontent.com/davidmuma/EPG_dobleM/master/guiatv_plex.xml.gz",
-		},
-		{
-			ID:          "davidmuma-guiafanart",
-			Name:        "davidmuma — Guía con Fanart (España)",
-			Description: "Igual que guiatv pero con imágenes de fondo enriquecidas desde Fanart.tv.",
-			Language:    "es",
-			Countries:   []string{"es"},
-			URL:         "https://raw.githubusercontent.com/davidmuma/EPG_dobleM/master/guiafanart.xml.gz",
-		},
-		{
-			ID:          "davidmuma-tiviepg",
-			Name:        "davidmuma — TiviEPG (España)",
-			Description: "Guía alternativa ligera del mismo autor; útil como fallback cuando guiatv tarda en refrescar.",
-			Language:    "es",
-			Countries:   []string{"es"},
-			URL:         "https://raw.githubusercontent.com/davidmuma/EPG_dobleM/master/tiviepg.xml",
-		},
-	}
+	return publicEPGSources
 }
 
 // FindEPGSource looks up a curated source by id.
 func FindEPGSource(id string) (PublicEPGSource, bool) {
-	for _, src := range PublicEPGSources() {
+	for _, src := range publicEPGSources {
 		if src.ID == id {
 			return src, true
 		}

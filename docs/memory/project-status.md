@@ -1,6 +1,6 @@
 # Estado del proyecto
 
-> Snapshot: **2026-04-24** (live-TV arc) · Rama: `claude/review-tv-programming-bWTim` · **tests: verde**
+> Snapshot: **2026-04-24** (live-TV arc + simplify sweep) · Rama: `claude/review-memory-tv-code-8bjei` · **tests: verde**
 
 ## Resumen ejecutivo
 
@@ -18,6 +18,15 @@ oportunista** de canales (apagados auto-ocultos del user, surface para admin),
 con auto-preview HLS + persistencia multi-dispositivo). 14 commits, todos con
 tests + lint + go race verde.
 
+Ciclo de cierre (`claude/review-memory-tv-code-8bjei`, 1 commit + 1 follow-up):
+revisión de código contra la memoria del arc, **−400 loc netas** con cero
+cambios de comportamiento y **dos bugs arreglados**: el fallback del logo
+roto de `ChannelCard` ya muestra las iniciales (antes dejaba el hueco), y la
+barra de progreso del `HeroSpotlight` se actualiza también con un solo item
+(antes quedaba congelada hasta que cambiaba `nowPlaying`). Extraídos tres
+hooks / módulos reutilizables: `useNowTick`, `useHeroSpotlight`,
+`livetv/categoryOrder`.
+
 ## Tamaño verificado
 
 - **~100** ficheros `.go` de producción · **~60** `_test.go`
@@ -27,7 +36,100 @@ tests + lint + go race verde.
 - `go test -race ./...` verde en 21 paquetes; `golangci-lint v1.64.8`: exit 0
 - Frontend: `pnpm build` + `pnpm test` (72/72) verdes
 
-## Último ciclo de trabajo (hoy, 2026-04-24)
+## Simplify sweep (hoy, 2026-04-24, `claude/review-memory-tv-code-8bjei`)
+
+Review completa del paquete `internal/iptv` + `web/src/components/livetv` +
+`web/src/pages/LiveTV.tsx` contra la memoria de este arc. Un único commit
+grande con 9 cambios ordenados por impacto:
+
+1. **`HeroMosaic.tsx` borrado** (−182 loc): reemplazado por `HeroSpotlight`
+   en `5baeae5`, quedaba exportado en el barrel sin que nada lo importara.
+2. **`stopCh` eliminado de `iptv.Service`**: creado, cerrado por `Shutdown`
+   y nunca seleccionado. `Shutdown()` queda como no-op documentado para no
+   romper el patrón simétrico con los otros servicios.
+3. **HLS en `proxy.go` deduplicado**: extraídos `peekForHLS`,
+   `absorbAndRewriteHLS`, `isAmbiguousStreamCT`. `ProxyStream` y `ProxyURL`
+   usan los mismos primitivos; un fix futuro ya no se puede aplicar a solo
+   uno de los dos paths (`pipeStream` con flush vs `io.Copy`, ACAO, health
+   reporting siguen siendo diferentes a propósito).
+4. **`useNowTick(ms)` hook nuevo** (`web/src/hooks/useNowTick.ts`): colapsa
+   tres `setInterval → setState(Date.now())` idénticos en `EPGGrid`,
+   `PlayerOverlay` y `HeroSpotlight`. **Bug colateral arreglado**: la barra
+   de progreso del hero se congelaba con `items.length < 2` (el timer de
+   auto-rotate no disparaba).
+5. **Fallback real del logo en `ChannelCard`**: `onError` ponía
+   `display: none` al `<img>` y las iniciales vivían en la rama opuesta del
+   ternario — el resultado era un hueco sobre el gradient. Ahora se trackea
+   `failedLogoUrl` y se muestra `<ChannelLogo>`. Estado derivado de props
+   para evitar `setState-in-effect`.
+6. **`useHeroSpotlight` extraído**: la preferencia + el fallback silencioso
+   `favorites → live-now → newest` + las opciones del menú vivían en
+   `LiveTV.tsx` (~130 loc). Ahora en `web/src/components/livetv/
+   useHeroSpotlight.ts`. `LiveTV.tsx` baja de **763 a ~600 loc**.
+7. **`getUpNext` simplificado**: quitada la ordenación cliente-side
+   (`[...programs].sort`). El backend ya devuelve `ORDER BY start_time` en
+   `internal/db/epg_repository.go:118,198`.
+8. **`livetv/categoryOrder.ts`**: orden canónico de categorías en un único
+   sitio. Antes duplicado entre `LiveTV.tsx:railOrder` y
+   `CategoryChips.tsx:defaultOrder`.
+9. **Guide tab ya no traga búsquedas sin resultado**: `channels={filteredChannels
+   .length > 0 ? filteredChannels : channels}` era un silent fallback que
+   mostraba TODOS los canales cuando la búsqueda no matcheaba nada. Ahora
+   pasa `filteredChannels` y `EPGGrid` muestra su empty state.
+
+Follow-up del mismo día (mismo ciclo, commit aparte):
+- **`PublicEPGSources()` → `var publicEPGSources`**: la función devolvía un
+  slice nuevo en cada llamada. Ahora variable de paquete, read-only por
+  convención, zero-alloc en el hot path del handler del catálogo.
+- **`capitalize(s)` compartido en `epgHelpers.ts`**: antes duplicado en
+  `LiveTV.tsx` y `PlayerOverlay.tsx`.
+
+Split por concern (commit siguiente):
+
+**Backend — `internal/iptv/service.go` (904 loc → 8 ficheros)**:
+```
+service.go              struct + NewService + Shutdown + fetchURL + maybeDecompress + generateID/assignNumber
+service_favorites.go    Add/Remove/Is/ListIDs/ListChannels
+service_m3u.go          RefreshM3U + overrides re-apply + EPG auto-trigger
+service_epg.go          RefreshEPG + refreshOneSource + buildChannelLookups + matchChannel + nameVariants + qualityRE + GetSchedule/BulkSchedule/NowPlaying + CleanupOldPrograms
+service_channels.go     GetChannels/GetChannel/GetGroups/SetChannelActive
+service_health.go       RecordProbe* + sanitiseProbeError + ListUnhealthy + ResetHealth
+service_overrides.go    ChannelWithoutEPGWindow + ListChannelsWithoutEPG + SetChannelTvgID
+service_epg_sources.go  List/Add/Remove/Reorder + PublicEPGCatalog
+```
+Go permite métodos sobre `*Service` repartidos en varios ficheros del
+mismo paquete, así que la API pública no cambia. Callers intactos.
+El mayor nuevo es 346 loc (service_epg.go, coherente: refresh + query +
+matcher), el menor 40 (service_channels.go).
+
+**Frontend — containers partidos**:
+```
+LiveTV.tsx                763 → 299 loc (solo orquestación)
+PlayerOverlay.tsx         485 → 278 loc (layout + primitivas)
+components/livetv/
+  LiveTvTopBar.tsx    new  título + counts + search + tabs + hero gear
+  DiscoverView.tsx    new  hero + chips + rails + "Apagados"
+  FavoritesView.tsx   new  grid derivado de favoriteSet
+  OverlayHeader.tsx   new  close + identity + favorite toggle
+  NowPlayingCard.tsx  new  "Ahora en antena" + progress + up-next
+```
+Cada fichero nuevo 70–146 loc, SRP estricto, testeable sin montar
+páginas enteras. Barrel `components/livetv/index.ts` re-exporta.
+
+Extra follow-up:
+- **`CountrySelector` lint-limpio**: antes `useEffect → setState` para
+  hidratar la auto-detección de país, lo que el `react-hooks/set-state-
+  in-effect` del proyecto señala como cascading render bajo React 19.
+  Refactor: `autoDetectedCountry = useMemo(...)` + `selectedCountry =
+  userPicked ?? autoDetectedCountry`. Sin effect, el click del usuario
+  sigue ganando. Queda 10 errors / 4 warnings de lint (todos en
+  `AppLayout`, `MediaGrid`, `FolderBrowser`, `ItemDetail` — zonas que
+  no son livetv).
+
+**Verificación total del ciclo**: `go test -race ./...` 21/21 verde ·
+`pnpm test` 74/74 · `pnpm build` ok · `pnpm lint` −1 error vs HEAD.
+
+## Último ciclo de trabajo (2026-04-24, live-TV arc)
 
 1. **Fix 414 en EPG bulk schedule** — el usuario importó 7008 programas
    desde davidmuma/EPG_dobleM y todas las tarjetas mostraban "sin guía".
@@ -293,27 +395,52 @@ type Service struct {
 - Tests del setup wizard (0 cobertura, ruta crítica de primer arranque)
 - Tests de páginas admin (mutan estado, 0 tests — los panels nuevos
   `LivetvAdminPanel` + sub-paneles entran en este hueco)
-- Warnings pre-existentes de `react-hooks/set-state-in-effect` en
-  `AppLayout`, `CountrySelector`, `MediaGrid`, `FolderBrowser`, `ItemDetail`
-  — ninguno de mi código nuevo, pero conviene barrerlos
+- Lint pre-existente `react-hooks/set-state-in-effect` en **4** ficheros:
+  `AppLayout`, `MediaGrid`, `FolderBrowser`, `ItemDetail` (CountrySelector
+  ya barrido). Bajo React 19 + Compiler son re-renders en cascada reales,
+  no nits. Patrón de fix aplicado en CountrySelector: derivar con
+  `useMemo` + `user pick ?? auto`, sin effect → setState.
+
+### Arquitectura / deuda estructural (senior review 2026-04-24)
+- **`library.Service`**: por auditar. Probablemente misma forma god-service
+  que tenía `iptv.Service` (scan + schedule + metadata + image refresh en
+  un struct). Aplicar la misma receta de split por ficheros
+  (`service_*.go` sobre el mismo struct).
+- **`internal/api/handlers/`** — si crece a 15+ ficheros sueltos, partir
+  en subpaquetes por dominio. Hoy no urgente: foco en tests.
+- **`web/dist/` tracked en git**: PRs ruidosos cada build. Alternativa:
+  `.gitignore` + CI build + embed vía tag. ~0.5 día.
+
+### Escalado / producción real
+- **IPTV proxy 1:1 upstream-por-viewer**. Límite práctico ~100 concurrentes
+  por canal; un viral tumba el CDN free con bans. Fan-out relay pendiente.
+- **Circuit breaker en proxy** — retries infinitos contra upstreams
+  caídos. Operacional más que funcional.
+- **E2E tests** (Playwright) — cero hoy. Para media-server la secuencia
+  play → transcode/direct → stream tiene tres seams; unit tests no los
+  cubren.
+
+### Ops (fuera de repo puro, pero parte de "producción real")
+- Rate-limit: verificar scope (por-IP, por-user, por-endpoint).
+- Backup automatizado de SQLite (WAL copy).
+- Rotación JWT signing key ejercitada end-to-end.
+- Dashboards Prometheus / alertas.
 
 ## Próximo paso sugerido
 
-Sin prisa. Candidatos ordenados por impacto sobre la experiencia live-TV:
+Sin prisa. Candidatos ordenados por impacto.
 
-1. **Matcher EPG más agresivo** — mayor multiplicador de valor ahora mismo:
-   subir la cobertura de 52/268 a 150-200+ hace que los 5 rails por
-   categoría + el hero "live-now" se llenen de contenido real sin que el
-   admin tenga que mapear a mano.
-2. **"Continuar viendo" + tabla de historial** — desbloquea el rail
-   personalizado de Discover y el modo hero "más vistos". Migración +
-   service tracking via el proxy (ya existe el hook en `streamOnceWithChannel`
-   para el health-check; reusar).
-3. **Modal de detalle de programa** en EPG grid — click en celda → modal
-   con título/descripción/franja/canal/"Ver ahora". Cierra la experiencia
-   Plex-like.
-4. **Streaming parser del XMLTV** — único problema IPTV pendiente con impacto
-   real en producción (feeds de 2GB petan servidores pequeños). davidmuma
-   está en ~30MB así que no es urgente hoy.
-5. **Tests del setup wizard + páginas admin** — deuda de cobertura, no
-   bloqueante pero pendiente.
+**Si foco = estabilidad**:
+1. **Tests del setup wizard** — ruta crítica de primer arranque con 0
+   cobertura. Si se rompe, nadie llega a usar el producto.
+2. **Coverage frontend con los componentes recién partidos** —
+   `DiscoverView`, `FavoritesView`, `OverlayHeader`, `NowPlayingCard`,
+   `useHeroSpotlight`, `useNowTick`. Cada uno ~30 loc de test.
+3. **Burndown del lint debt restante** (4 ficheros).
+4. **Split de `library.Service`** siguiendo la receta del iptv.
+
+**Si foco = experiencia LiveTV**:
+1. **Matcher EPG más agresivo** — sube cobertura 52/268 → 150-200+.
+2. **"Continuar viendo"** + tabla de historial.
+3. **Modal de detalle de programa** en EPG grid.
+4. **Streaming parser del XMLTV** (bomba memoria con feeds 2 GB).

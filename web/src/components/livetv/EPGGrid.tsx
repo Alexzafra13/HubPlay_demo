@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import type { Channel, EPGProgram } from "@/api/types";
+import { useNowTick } from "@/hooks/useNowTick";
 import { ChannelLogo } from "./ChannelLogo";
 
 /**
@@ -55,15 +56,10 @@ export function EPGGrid({
 }: EPGGridProps) {
   const { t } = useTranslation();
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [now, setNow] = useState(() => Date.now());
-
-  // Re-tick every 30 s: smooth enough for the now-line to creep without
-  // jumping, cheap enough to ignore. Minute granularity is fine visually
-  // but 30 s hides the ragged edge when a programme ends mid-view.
-  useEffect(() => {
-    const id = window.setInterval(() => setNow(Date.now()), 30_000);
-    return () => window.clearInterval(id);
-  }, []);
+  // 30 s cadence: smooth enough for the now-line to creep without jumping,
+  // cheap enough to ignore. Minute granularity is fine visually but 30 s
+  // hides the ragged edge when a programme ends mid-view.
+  const now = useNowTick(30_000);
 
   // Window anchored at midnight local. The grid spans 24 h; whatever day
   // the user is looking at is determined by the scroll position, not by
