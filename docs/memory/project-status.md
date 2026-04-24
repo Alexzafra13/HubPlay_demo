@@ -48,6 +48,18 @@ dedup M3U), LiveTV partido en 8 ficheros con **EPG grid real** estilo Plex.
    espuria "canal  sur" además de la colapsada "canal sur", que nunca
    emparejaba nada real. Ahora el folding normaliza whitespace en la
    variante base también.
+7. **Fix runtime 500 en `BulkSchedule`** (descubierto por el usuario
+   contra un container real): modernc.org/sqlite serializa `time.Time`
+   con Location nombrada usando `time.Time.String()` — por ejemplo
+   `"2026-04-24 12:00:00 +0200 +0200"`. El Scan por defecto del driver
+   no es capaz de deserializar ese formato. Afecta a todos los feeds
+   XMLTV que traen offset (davidmuma, iptv-org, epg.pw). Fix en dos
+   capas: (a) `ReplaceForChannel` normaliza a UTC antes de insertar
+   vía sqlc, y (b) `BulkSchedule` / `Schedule` / `NowPlaying` leen con
+   SQL crudo + `coerceSQLiteTime`, helper que acepta tanto
+   `time.Time` como strings (`RFC3339` y el legado Go-stringer), de
+   modo que bases de datos pre-fix siguen leyéndose. Tests cubren el
+   roundtrip XMLTV exacto + legacy row sembrada con INSERT crudo.
 
 **Impacto operativo**: importar davidmuma ya funciona end-to-end.
 Poner la URL XMLTV (o .gz) en el campo *EPG URL* de la biblioteca

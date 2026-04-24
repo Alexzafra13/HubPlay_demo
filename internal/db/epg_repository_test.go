@@ -220,6 +220,103 @@ func TestEPG_BulkSchedule_LargeList(t *testing.T) {
 	}
 }
 
+// TestEPG_XMLTVTimeRoundtrip covers the runtime bug the user hit in
+// their Docker deployment: programs parsed from davidmuma's XMLTV
+// carry a named timezone (+0200 for CET), which modernc.org/sqlite
+// persisted via time.Time.String() — "2026-04-24 12:00:00 +0200 +0200"
+// — a format the driver's default Scan path can't deserialise. The
+// repository now normalises all times to UTC before insert, and every
+// read coerces whatever the driver hands us.
+func TestEPG_XMLTVTimeRoundtrip(t *testing.T) {
+	repo, _, _ := setupEPGTest(t)
+	ctx := context.Background()
+
+	// Shape mirrors internal/iptv/xmltv.go parseXMLTVTime output.
+	start, err := time.Parse("20060102150405 -0700", "20260424120000 +0200")
+	if err != nil {
+		t.Fatalf("parse start: %v", err)
+	}
+	end, err := time.Parse("20060102150405 -0700", "20260424130000 +0200")
+	if err != nil {
+		t.Fatalf("parse end: %v", err)
+	}
+
+	prog := &db.EPGProgram{
+		ID: "p-xmltv", ChannelID: "ch-epg-1", Title: "Telediario",
+		StartTime: start, EndTime: end,
+	}
+	if err := repo.ReplaceForChannel(ctx, "ch-epg-1", []*db.EPGProgram{prog}); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	// BulkSchedule round-trip — the path the frontend hits.
+	bulk, err := repo.BulkSchedule(ctx,
+		[]string{"ch-epg-1"}, start.Add(-1*time.Hour), end.Add(1*time.Hour))
+	if err != nil {
+		t.Fatalf("bulk: %v", err)
+	}
+	if len(bulk["ch-epg-1"]) != 1 {
+		t.Fatalf("bulk rows = %d, want 1", len(bulk["ch-epg-1"]))
+	}
+	if !bulk["ch-epg-1"][0].StartTime.Equal(start) {
+		t.Errorf("bulk start = %v, want equal to %v", bulk["ch-epg-1"][0].StartTime, start)
+	}
+
+	// Single-channel Schedule and NowPlaying — same storage, would hit
+	// the same bug if the adapter still used sqlc-generated scans.
+	sched, err := repo.Schedule(ctx, "ch-epg-1", start.Add(-1*time.Hour), end.Add(1*time.Hour))
+	if err != nil {
+		t.Fatalf("schedule: %v", err)
+	}
+	if len(sched) != 1 || !sched[0].EndTime.Equal(end) {
+		t.Fatalf("schedule unexpected: %v", sched)
+	}
+}
+
+// TestEPG_CoerceSQLiteTime_LegacyString asserts the scanner handles
+// rows still persisted in the Go-stringer format by older builds. The
+// scenario: a user upgrades, has EPG rows from the pre-UTC-fix build,
+// opens the guide before running "Refresh EPG". Those reads must not 500.
+func TestEPG_CoerceSQLiteTime_LegacyString(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	repos := db.NewRepositories(database)
+	ctx := context.Background()
+
+	now := time.Now()
+	_ = repos.Libraries.Create(ctx, &db.Library{
+		ID: "lib-legacy", Name: "L", ContentType: "livetv",
+		CreatedAt: now, UpdatedAt: now,
+	})
+	_ = repos.Channels.Create(ctx, makeChannel("ch-legacy", "lib-legacy", "L", 1, true))
+
+	// Plant a row with the exact legacy text form a pre-fix build
+	// would have written when the driver's time encoder fell through
+	// to fmt.Sprint. This bypasses the UTC-normalising ReplaceForChannel
+	// so we can reproduce the legacy shape deterministically.
+	_, err := database.ExecContext(ctx, `INSERT INTO epg_programs
+		(id, channel_id, title, description, category, icon_url, start_time, end_time)
+		VALUES ('p-legacy', 'ch-legacy', 'Legacy', '', '', '',
+		        '2026-04-24 10:00:00 +0000 UTC', '2026-04-24 11:00:00 +0000 UTC')`)
+	if err != nil {
+		t.Fatalf("seed legacy: %v", err)
+	}
+
+	bulk, err := repos.EPGPrograms.BulkSchedule(ctx,
+		[]string{"ch-legacy"},
+		time.Date(2026, 4, 24, 9, 0, 0, 0, time.UTC),
+		time.Date(2026, 4, 24, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("bulk: %v", err)
+	}
+	if len(bulk["ch-legacy"]) != 1 {
+		t.Fatalf("legacy row not parsed: %v", bulk)
+	}
+	want := time.Date(2026, 4, 24, 10, 0, 0, 0, time.UTC)
+	if !bulk["ch-legacy"][0].StartTime.Equal(want) {
+		t.Errorf("parsed legacy start = %v, want %v", bulk["ch-legacy"][0].StartTime, want)
+	}
+}
+
 // TestEPG_BulkSchedule_DedupesDuplicateIDs guards against the same
 // channel id landing in two different chunks and doubling up in the
 // merged map.
