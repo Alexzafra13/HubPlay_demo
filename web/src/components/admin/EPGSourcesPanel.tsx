@@ -106,24 +106,21 @@ export function EPGSourcesPanel({ libraryId }: { libraryId: string }) {
   }
 
   return (
-    <div className="border border-border rounded-lg p-4 bg-bg-elevated/50 space-y-3">
+    <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <h4 className="text-sm font-semibold text-text-primary">
-          {t("admin.epg.title", { defaultValue: "Fuentes EPG" })}
-        </h4>
-        <span className="text-xs text-text-secondary">
+        <p className="text-xs text-text-secondary">
           {t("admin.epg.priorityHint", {
             defaultValue:
               "Prioridad: la primera fuente gana cuando varias cubren el mismo canal.",
           })}
-        </span>
+        </p>
       </div>
 
       {sources.length === 0 ? (
         <p className="text-sm text-text-secondary">
           {t("admin.epg.empty", {
             defaultValue:
-              "No hay fuentes EPG configuradas. Añade una del catálogo o pega una URL XMLTV.",
+              "Aún no hay fuentes EPG. Añade una del catálogo o pega una URL XMLTV para que la guía aparezca en la app.",
           })}
         </p>
       ) : (

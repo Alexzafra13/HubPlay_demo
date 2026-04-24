@@ -205,10 +205,8 @@ func (s *iptvFakeService) PublicEPGCatalog() []iptv.PublicEPGSource {
 func (s *iptvFakeService) ListEPGSources(_ context.Context, libraryID string) ([]*db.LibraryEPGSource, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := []*db.LibraryEPGSource{}
-	for _, src := range s.epgSources[libraryID] {
-		out = append(out, src)
-	}
+	out := make([]*db.LibraryEPGSource, 0, len(s.epgSources[libraryID]))
+	out = append(out, s.epgSources[libraryID]...)
 	return out, nil
 }
 
