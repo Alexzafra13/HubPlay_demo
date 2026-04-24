@@ -41,6 +41,10 @@ type channelDTO struct {
 	Language  string `json:"language"`
 	Country   string `json:"country"`
 	IsActive  bool   `json:"is_active"`
+	// AddedAt is when the channel first landed in the library. The
+	// frontend sorts by it for the "recién añadidos" hero mode; the
+	// wire shape is the raw RFC3339 string so JS can parse directly.
+	AddedAt string `json:"added_at,omitempty"`
 }
 
 // toChannelDTO projects a db.Channel onto the wire shape. `streamPath` is
@@ -55,6 +59,10 @@ func toChannelDTO(ch *db.Channel, streamPath string) channelDTO {
 		return channelDTO{}
 	}
 	logo := iptv.DeriveLogoFallback(ch.Name)
+	var addedAt string
+	if !ch.AddedAt.IsZero() {
+		addedAt = ch.AddedAt.UTC().Format("2006-01-02T15:04:05Z")
+	}
 	return channelDTO{
 		ID:           ch.ID,
 		Name:         ch.Name,
@@ -72,5 +80,6 @@ func toChannelDTO(ch *db.Channel, streamPath string) channelDTO {
 		Language:     ch.Language,
 		Country:      ch.Country,
 		IsActive:     ch.IsActive,
+		AddedAt:      addedAt,
 	}
 }
