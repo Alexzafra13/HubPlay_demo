@@ -11,8 +11,5 @@ coverage.html
 # Frontend
 web/node_modules/
 
-.claude
-.agents/
-skills-lock.json
 
 /peliculas
