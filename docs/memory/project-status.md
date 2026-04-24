@@ -1,6 +1,6 @@
 # Estado del proyecto
 
-> Snapshot: **2026-04-24** (live-TV arc + simplify sweep + frontend coverage slice 1 + setup-wizard tests + livetv coverage slice 2 + lint debt cero + dist untracked) · Rama: `claude/review-project-tasks-f5Rdg` · **tests: verde · lint: 0**
+> Snapshot: **2026-04-24** (matcher EPG agresivo: aliases + fuzzy Levenshtein + channel-number) · Rama: `claude/review-pending-tasks-9Vh6U` · **tests: verde · lint: 0**
 
 ---
 
@@ -8,7 +8,99 @@
 
 > **Lee esto primero.** Resume qué cerramos, qué decidimos y qué toca.
 
-### Lo que cerramos esta rama (`claude/review-project-tasks-f5Rdg`)
+### Lo que cerramos esta rama (`claude/review-pending-tasks-9Vh6U`)
+
+**Matcher EPG agresivo** — primera de las dos candidatas del anterior
+handoff. Sin cambios de schema, sin UI, solo backend.
+
+Cambios en el algoritmo del matcher (antes: tvg-id exacto + name-
+variants con quality strip + accent fold):
+
+1. **Alias table curada** (`internal/iptv/epg_aliases.go`): 50+ entradas
+   normalizadas observadas en davidmuma vs iptv-org. Maps `"la uno" →
+   "la 1"`, `"tele cinco" → "telecinco"`, `"antena tres" → "antena 3"`,
+   `"movistar laliga" → "movistar la liga"`, etc. Aplicada
+   bidireccionalmente: al indexar hub channels se registra tanto la
+   variante original como su canonical, y al emparejar se alias-folds
+   cada display-name del XMLTV antes del lookup.
+2. **Channel-number match** — si el XMLTV trae un `<display-name>` que
+   es un entero y la M3U carga números de canal reales (no los
+   posicionales que pone `assignNumber` por defecto), bind por número.
+   Detecta posicionales con la heurística `channel.Number == i+1 ∀ i`
+   y salta limpiamente en ese caso. Además ignora números ambiguos
+   (mismo dial en dos canales).
+3. **Fuzzy Levenshtein** como último recurso — edit distance ≤ 3
+   absoluto y ≤ 15 % del string más largo, mínimo 5 runas. Pool = solo
+   la variante base (stripped) de cada canal. Empates entre dos
+   canales a la misma distancia **no bindean** (fail-closed). Cubre
+   typos ("Teleciinco"), elisiones ("Disovery Chanel").
+
+Además (refactor limpieza, sin cambio de comportamiento):
+
+4. **Extracción del matcher** a `internal/iptv/matcher.go`. `service_epg.go`
+   queda 90 líneas más corto y solo orquesta. El struct `channelIndex`
+   reemplaza los `(tvgMap, nameMap)` sueltos — ahora contiene también
+   el numberMap y el fuzzy pool.
+5. **Cache de resolución por XMLTV channel id** en `refreshOneSource`:
+   antes cada uno de los ~7 k programas llamaba a `matchChannel`.
+   Ahora se resuelve una vez por `<channel>` y el loop de programas es
+   un map lookup. Para feeds grandes (davidmuma trae ~300 canales, 7 k
+   programas) es ~300× menos trabajo del matcher.
+
+**Riesgos gestionados**:
+- Aliases solo se añaden cuando hemos visto el mismatch real contra
+  una fuente en uso. No añadir "por si acaso" — cada alias es una
+  oportunidad de falso match si otro canal aparece en el futuro.
+- Channel-number se desactiva en playlists posicionales (caso por
+  defecto en iptv-org sin `tvg-chno`). Solo ve dial reales.
+- Fuzzy exige 5+ runas y ≤15 % distancia. Testeado: "Cuatro" vs
+  "Telecinco" NO matchea, "Teleciinco" (1 edit) SÍ, tie a dos canales
+  devuelve empty.
+
+### 📊 Medición esperada
+
+El handoff anterior puso un target **52 → 150-200+** canales con EPG
+sobre davidmuma + iptv-org (268 canales ES). No se puede medir sin
+ejecutar contra la DB real; lo mide el operador en la siguiente
+sesión refrescando EPG desde admin. Los tests de regresión verifican
+los tres paths nuevos (aliases, number, fuzzy) con casos extraídos de
+los mismos mismatches observados.
+
+### Cómo extender el matcher más tarde
+
+- **Añadir aliases**: solo desde pares observados. Cada entrada en
+  `epg_aliases.go` tiene un comentario implícito — "visto en davidmuma
+  vs iptv-org 2026-04". Si un alias se añade "por si acaso" y luego
+  causa un falso positivo, difícil de desambiguar.
+- **Promover a tabla DB**: si aparece demanda de aliases per-library o
+  edición desde admin, la shape ya está (alias → canonical). Crear
+  migración `011_epg_name_aliases.sql` con dos columnas + PK
+  compuesta, y cargarlos en `channelIndex` igual que los del código.
+- **Fuzzy más agresivo**: subir el umbral a 20 % es la primera palanca
+  (ya probamos 15 % aquí, conservador). Añadir tokenización + drop de
+  un set de stop-tokens ("canal", "tv", "channel") es el siguiente.
+
+### Estado al abrir sesión
+
+- `main` tiene PRs #81–#85 mergeados.
+- Rama actual `claude/review-pending-tasks-9Vh6U` con 1 commit encima
+  de main. Listo para PR.
+- Tests verdes: `pnpm test` 221/221 · `pnpm tsc --noEmit` · `pnpm
+  lint` 0 · `go test -race ./...` 21 paquetes · `golangci-lint
+  v1.64.8` exit 0.
+
+### Checklist al abrir siguiente sesión
+
+- [ ] Refrescar EPG contra davidmuma y medir canales con EPG antes/
+  después (52 era el baseline; target 150+).
+- [ ] Si hay ganancia clara → abrir PR y mergear.
+- [ ] Candidata 2 del anterior handoff: **scheduler UI M3U + EPG
+  refresh** (ver sección de "Lo que FALTA" de arcos anteriores).
+- [ ] Actualizar esta memoria.
+
+---
+
+## Ciclo anterior (`claude/review-project-tasks-f5Rdg`)
 
 Cinco commits limpios, sin cambios de comportamiento:
 
@@ -716,11 +808,11 @@ type Service struct {
 
 ### IPTV backend
 - XMLTV streaming parser (bomba memoria con feeds de 2GB; `xmltv.go:70-76`)
-- Matcher más agresivo para subir cobertura EPG: tabla de alias conocidos,
-  matching por channel number cuando ambos lo tienen, Levenshtein fuzzy
-  con threshold. Hoy es tvg-id + display-name variants + quality strip +
-  accent fold — suficiente para ~52/268 con davidmuma, pero escalaría
-  a 70-80% con el refuerzo
+- ~~Matcher más agresivo para subir cobertura EPG~~: ✅ hecho en
+  `claude/review-pending-tasks-9Vh6U`. Alias table + channel-number
+  match (con guardas de posicional + ambigüedad) + Levenshtein fuzzy
+  como último recurso. Ver handoff arriba. Falta medir cobertura
+  real ante/después contra davidmuma.
 
 ### Event bus (3 tipos reservados sin publisher)
 - `ChannelAdded`/`ChannelRemoved` — requiere descomponer `ReplaceForLibrary`
@@ -776,7 +868,12 @@ Sin prisa. Candidatos ordenados por impacto.
 5. **Split de `library.Service`** siguiendo la receta del iptv.
 
 **Si foco = experiencia LiveTV**:
-1. **Matcher EPG más agresivo** — sube cobertura 52/268 → 150-200+.
-2. **"Continuar viendo"** + tabla de historial.
-3. **Modal de detalle de programa** en EPG grid.
-4. **Streaming parser del XMLTV** (bomba memoria con feeds 2 GB).
+1. ✅ **Matcher EPG más agresivo** — hecho en `claude/review-pending-
+   tasks-9Vh6U`. Falta medir cobertura real contra davidmuma.
+2. **Scheduler UI M3U + EPG refresh** — candidata 2 del handoff
+   anterior. `scheduled_jobs(library_id, kind, interval_hours,
+   last_run_at, last_status, enabled)` + worker reutilizando el
+   patrón de `library.Scheduler`. Scope ~1 día.
+3. **"Continuar viendo"** + tabla de historial.
+4. **Modal de detalle de programa** en EPG grid.
+5. **Streaming parser del XMLTV** (bomba memoria con feeds 2 GB).
