@@ -52,7 +52,9 @@ sqlc-check:
 
 ## clean: Remove build artifacts
 clean:
-	rm -rf bin/ coverage.out coverage.html web/dist
+	rm -rf bin/ coverage.out coverage.html
+	# Preserve web/dist/.gitkeep so the go:embed directive keeps compiling.
+	find web/dist -mindepth 1 ! -name '.gitkeep' -delete 2>/dev/null || true
 
 ## docker: Build Docker image
 docker:

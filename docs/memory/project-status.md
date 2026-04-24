@@ -1,17 +1,21 @@
 # Estado del proyecto
 
-> Snapshot: **2026-04-24** (live-TV arc + simplify sweep + frontend coverage slice 1 + setup-wizard tests + livetv coverage slice 2 + lint debt cero) · Rama: `claude/review-project-tasks-f5Rdg` · **tests: verde · lint: 0**
+> Snapshot: **2026-04-24** (live-TV arc + simplify sweep + frontend coverage slice 1 + setup-wizard tests + livetv coverage slice 2 + lint debt cero + dist untracked) · Rama: `claude/review-project-tasks-f5Rdg` · **tests: verde · lint: 0**
 
 ---
 
 ## 👉 HANDOFF PARA LA PRÓXIMA SESIÓN
 
-> **Tres entregables cerrados en esta rama**:
+> **Cuatro entregables cerrados en esta rama**:
 >
 > 1. Track B (setup wizard tests): +48 tests, 5 ficheros.
 > 2. Track A (livetv slice 2): +35 tests, 4 ficheros.
 > 3. **Lint debt cero**: de 14 problemas (10 errors + 4 warnings) a
 >    **0 problemas**. 7 ficheros tocados, sin cambio de comportamiento.
+> 4. **`web/dist/` fuera de git**: sentinel `.gitkeep` + .gitignore +
+>    plugin Vite + Makefile clean-preserving. Los PRs ya no traen 18
+>    chunks rehasheados cada vez. `go:embed all:web/dist` sigue
+>    compilando desde fresh clone.
 >
 > Vitest **138 → 221** tests (+83). `pnpm tsc --noEmit` + `pnpm build`
 > + `pnpm lint` los tres en verde.
@@ -35,9 +39,6 @@
 >    struct, API pública intacta).
 > 3. Si foco = experiencia LiveTV: **matcher EPG más agresivo** —
 >    sube cobertura 52/268 → 150-200+.
-> 4. Sacar `web/dist/` del tracking — `.gitignore` + build en CI +
->    embed vía tag. ~0.5 día. Los chunks rehasheados en cada build
->    son el ruido más visible en los PRs hoy.
 >
 > Los detalles originales del handoff de los dos tracks se conservan
 > abajo para referencia histórica.
@@ -791,8 +792,10 @@ type Service struct {
   (`service_*.go` sobre el mismo struct).
 - **`internal/api/handlers/`** — si crece a 15+ ficheros sueltos, partir
   en subpaquetes por dominio. Hoy no urgente: foco en tests.
-- **`web/dist/` tracked en git**: PRs ruidosos cada build. Alternativa:
-  `.gitignore` + CI build + embed vía tag. ~0.5 día.
+- ~~`web/dist/` tracked en git~~ — ✅ liquidado en esta rama (commit
+  `chore(build): stop tracking web/dist build output`). Sentinel
+  `.gitkeep` + `.gitignore` + plugin Vite `preserveGitkeep` en
+  `closeBundle` + Makefile `clean` que preserva el sentinel.
 
 ### Escalado / producción real
 - **IPTV proxy 1:1 upstream-por-viewer**. Límite práctico ~100 concurrentes

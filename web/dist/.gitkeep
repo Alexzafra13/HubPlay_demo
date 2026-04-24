@@ -1,0 +1,2 @@
+# Sentinel — keeps web/dist/ tracked so go:embed compiles on a fresh
+# clone. Rebuild real assets with `pnpm build` or `make web`.
