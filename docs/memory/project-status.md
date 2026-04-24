@@ -1,6 +1,6 @@
 # Estado del proyecto
 
-> Snapshot: **2026-04-24** (matcher EPG + scheduler IPTV + review fixes + continuar viendo + program detail modal) · Rama: `claude/review-pending-tasks-9Vh6U` · **tests: verde · lint: 0**
+> Snapshot: **2026-04-24** (matcher EPG + scheduler IPTV + review fixes + continuar viendo + program detail modal + streaming XMLTV parser) · Rama: `claude/review-pending-tasks-9Vh6U` · **tests: verde · lint: 0**
 
 ---
 
@@ -10,9 +10,9 @@
 
 ### Lo que cerramos esta rama (`claude/review-pending-tasks-9Vh6U`)
 
-Cinco commits: las dos candidatas del handoff anterior + pass de
+Seis commits: las dos candidatas del handoff anterior + pass de
 fixes tras review senior + "Continuar viendo" en LiveTV +
-ProgramDetailModal en el EPG grid.
+ProgramDetailModal en el EPG grid + streaming XMLTV parser.
 
 **Commit 1 — Matcher EPG agresivo**. Sin cambios de schema, sin UI,
 solo backend.
@@ -335,6 +335,81 @@ Tests nuevos (todos verdes, 14 casos):
   `onSelectChannel`), celda sticky aún reproduce directamente
   cuando ambos handlers están presentes.
 
+**Commit 6 — Streaming XMLTV parser**. Backend-only, sin cambio de
+comportamiento; reduce el peak de memoria del refresh EPG.
+
+El problema: `ParseXMLTV` hacía `decoder.Decode(&raw)` sobre un
+struct con `[]xmlTVChannel + []xmlTVProgramme`. Para un feed
+davidmuma (200 MB descomprimido) el peak era ~250 MB en el árbol
+parseado mantenido entero en memoria. Para el escenario hipotético
+"feed XMLTV de 2 GB" eso son ~2.5 GB → OOM en cualquier máquina
+sensata.
+
+La solución: un parser tokenizado que **dispara cada `<channel>` y
+`<programme>` por callback** al verlos pasar. La memoria pico
+ahora la dictan (a) el array de display-names de los `<channel>`
+acumulados (~KB × pocos miles = MB) y (b) los programmes
+**emparejados** (orphans se descartan in-line sin acumularse).
+
+Cambios:
+
+1. **`ParseXMLTVStream(r, handler)`** nuevo en
+   `internal/iptv/xmltv.go`. `xml.Decoder.Token()` + `DecodeElement`
+   por elemento. Handler interface mínima:
+   ```go
+   type EPGStreamHandler interface {
+       OnChannel(EPGChannel) error
+       OnProgramme(EPGProgram) error
+   }
+   ```
+   Devuelve `(skipped int, err error)`. Errores del handler abortan
+   el parse — verificado por test que cuenta cuántos elementos se
+   despachan antes de bailar. Programmes con `start`/`stop` no
+   parseable se descartan con log warn (mismo contrato que el
+   eager).
+2. **`ParseXMLTV` sigue existiendo** como wrapper conveniente que
+   colecciona todo en un `EPGData`. Tests existentes (3) intactos.
+   Documentado como "para tests + feeds cortos"; runtime usa la
+   versión streaming.
+3. **`refreshOneSource`** refactorizado al streaming path. Nuevo
+   tipo `matchHandler` privado en `service_epg.go` que:
+   - En `OnChannel`: bufferea `xmltv id → display-names` (no
+     pre-resuelve — para feeds grandes esto serían miles de fuzzy
+     walks antes del primer programme).
+   - En `OnProgramme`: cold-start arma el resolved cache una vez
+     (mismo coste que el eager); luego cada programme es un map
+     lookup; orphans incrementan contador y se descartan; matches
+     con channel ya owned por una fuente de mayor prioridad se
+     descartan; resto se acumula en `out[channelID]`.
+   - Lazy resolve para programmes con channel-id no declarado en
+     `<channel>` block — memoiza igual que antes.
+
+   El comportamiento observable es **idéntico**: mismas filas
+   persistidas, mismo orden de prioridad entre fuentes, mismas
+   métricas. Solo cambia el peak de RAM durante el parse.
+
+Tests nuevos (8 casos en `xmltv_test.go`):
+
+- Streaming en orden (canales antes que programmes, primer
+  programme dispara el cold-start).
+- Skipping de tiempos no parseables + contador correcto.
+- Handler error aborta antes de drenar el documento (verificado:
+  segundo `<channel>` no se despacha).
+- XML malformado surface como error.
+- **`StreamsLargeFeedWithoutBuffering`**: genera 50.000 programmes,
+  los lee a través de un `boundedAllocReader` (chunks de 4 KB) y
+  asserta count + último título. Test implícito de memoria — bajo
+  `-race` no se le va la olla.
+- Charset declarado desconocido (ej. ISO-8859-1) pasa transparente.
+- `<display-name/>` vacíos se filtran del slice.
+- `ParseXMLTV` (eager) y `ParseXMLTVStream` (vía collector
+  handler) producen el MISMO resultado — pin para que las dos
+  superficies no driften.
+
+**Impacto operativo**: el refresh EPG contra davidmuma debe ahora
+peakear en ~10-20 MB en lugar de ~250 MB. El feed hipotético de
+2 GB pasa de OOM seguro a un refresh viable.
+
 ### 📊 Medición pendiente (matcher EPG)
 
 El handoff anterior puso un target **52 → 150-200+** canales con EPG
@@ -361,10 +436,10 @@ los mismos mismatches observados.
 ### Estado al abrir sesión
 
 - `main` tiene PRs #81–#85 mergeados.
-- Rama actual `claude/review-pending-tasks-9Vh6U` con **5 commits**
+- Rama actual `claude/review-pending-tasks-9Vh6U` con **6 commits**
   encima de main (matcher + scheduler + review-fixes + continuar-
-  viendo + program-detail-modal). Listo para PR una vez validado en
-  DB real.
+  viendo + program-detail-modal + streaming-xmltv). Listo para PR
+  una vez validado en DB real.
 - Tests verdes: `pnpm test` **238/238** · `pnpm tsc --noEmit` · `pnpm
   lint` 0 · `pnpm build` ok · `go test -race ./...` 21 paquetes ·
   `golangci-lint v1.64.8` exit 0.
@@ -385,8 +460,7 @@ los mismos mismatches observados.
   verificar que aparece el ProgramDetailModal con sinopsis +
   up-next, y que "Ver canal ahora" pasa al player limpiamente.
 - [ ] Si todo funciona → abrir PR y mergear.
-- [ ] Siguiente candidata: **streaming parser XMLTV** (bomba
-  memoria con feeds 2 GB) o **split de `library.Service`** (deuda
+- [ ] Siguiente candidata: **split de `library.Service`** (deuda
   estructural — ya hay precedente con `iptv.Service`) o
   **override manual de channel number/group** (extender
   `channel_overrides` con columnas opcionales `number` y `group`).
@@ -1139,7 +1213,9 @@ type Service struct {
 - Grid EPG con colores por categoría + filtros
 
 ### IPTV backend
-- XMLTV streaming parser (bomba memoria con feeds de 2GB; `xmltv.go:70-76`)
+- ~~XMLTV streaming parser~~ ✅ hecho en `claude/review-pending-
+  tasks-9Vh6U` (`ParseXMLTVStream` + `matchHandler`). Peak baja de
+  ~250 MB a ~10-20 MB en davidmuma.
 - ~~Matcher más agresivo para subir cobertura EPG~~: ✅ hecho en
   `claude/review-pending-tasks-9Vh6U`. Alias table + channel-number
   match (con guardas de posicional + ambigüedad) + Levenshtein fuzzy
@@ -1212,7 +1288,11 @@ Sin prisa. Candidatos ordenados por impacto.
 4. ✅ **Modal de detalle de programa** en EPG grid — hecho en la
    misma rama. `ProgramDetailModal` reusa el `Modal` común, dispara
    desde `EPGGrid.onSelectProgram`, muestra sinopsis + up-next.
-5. **Streaming parser del XMLTV** (bomba memoria con feeds 2 GB).
+5. ✅ **Streaming parser del XMLTV** — hecho en la misma rama.
+   `ParseXMLTVStream` con handler interface; `refreshOneSource`
+   refactorizado para no materializar el feed entero en memoria.
+   Peak de RAM en el refresh baja de ~250 MB → ~10-20 MB para
+   davidmuma.
 6. **Override manual de channel number / group** — extender
    `channel_overrides` con `number`/`group` opcionales.
 7. **Split de `library.Service`** — deuda estructural; aplicar la
