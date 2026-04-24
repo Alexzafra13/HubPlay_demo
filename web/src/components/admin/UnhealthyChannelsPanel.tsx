@@ -30,25 +30,20 @@ export function UnhealthyChannelsPanel({ libraryId }: { libraryId: string }) {
   const disableChannel = useDisableChannel(libraryId);
 
   if (isLoading || channels.length === 0) {
-    return null; // Render nothing if nothing's broken — keep the admin UI calm.
+    // The parent hides this panel entirely when there's nothing to
+    // report; rendering null is a safety net for the transient loading
+    // state without flashing empty chrome.
+    return null;
   }
 
   return (
-    <div className="border border-warning/40 rounded-lg p-4 bg-warning/5 space-y-3">
-      <div className="flex items-center justify-between">
-        <h4 className="text-sm font-semibold text-text-primary">
-          {t("admin.health.title", {
-            defaultValue: "Canales con problemas ({{count}})",
-            count: channels.length,
-          })}
-        </h4>
-        <span className="text-xs text-text-secondary">
-          {t("admin.health.hiddenHint", {
-            defaultValue:
-              "Ocultos automáticamente de la vista de usuario tras 3 fallos consecutivos.",
-          })}
-        </span>
-      </div>
+    <div className="space-y-3">
+      <p className="text-xs text-text-secondary">
+        {t("admin.health.hiddenHint", {
+          defaultValue:
+            "Ocultos automáticamente de la vista de usuario tras 3 fallos consecutivos. Márcalos como OK cuando los arregles o desactívalos si siguen muertos.",
+        })}
+      </p>
       <ol className="space-y-2" aria-label={t("admin.health.listLabel", {
         defaultValue: "Canales con fallos recientes",
       })}>

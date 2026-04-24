@@ -16,29 +16,23 @@ const INITIAL_VISIBLE = 20;
 const PAGE_INCREMENT = 40;
 
 /**
- * ChannelsWithoutEPGPanel — shows every active channel in the library
- * that no EPG source managed to match. The admin can hand-fix the
- * tvg_id inline; the override layer on the backend makes the edit
- * survive future M3U refreshes.
+ * ChannelsWithoutEPGPanel — lists every active channel in the library
+ * that no EPG source managed to match. Inline editor sets `tvg_id`;
+ * the override layer on the backend makes the edit survive future M3U
+ * refreshes.
  *
- * UX choices:
- *  - Collapsed by default. A library with 200 orphans would otherwise
- *    push the rest of the page out of view every time the admin opens
- *    LibrariesAdmin. Expanding is one click; the count lives in the
- *    header so it's visible even when the body is hidden.
- *  - Search by name / number / tvg-id. The long-tail orphan list is
- *    hard to scan by eye; filtering is the primary navigation tool.
- *  - Pagination via "Mostrar más" rather than scroll virtualization.
- *    Simpler code, keyboard-friendly, and a typical admin workflow
- *    (fix a handful per session) doesn't need to see the full list.
+ * Renders as tab body inside LivetvAdminPanel. The outer
+ * collapse-by-default wrapper lives there (the tab itself IS the
+ * collapse — clicking the tab switches to this surface). Search +
+ * pagination controls remain here because they're the long-tail
+ * navigation for libraries with hundreds of orphans.
  *
- * Hidden entirely when the library has nothing to report.
+ * Hidden by the parent when the list is empty.
  */
 export function ChannelsWithoutEPGPanel({ libraryId }: { libraryId: string }) {
   const { t } = useTranslation();
   const { data: channels = [], isLoading } = useChannelsWithoutEPG(libraryId);
 
-  const [expanded, setExpanded] = useState(false);
   const [search, setSearch] = useState("");
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE);
 
@@ -59,96 +53,69 @@ export function ChannelsWithoutEPGPanel({ libraryId }: { libraryId: string }) {
   if (isLoading || channels.length === 0) return null;
 
   return (
-    <div className="border border-border rounded-lg bg-bg-elevated/50">
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        aria-expanded={expanded}
-        aria-controls={`without-epg-${libraryId}`}
-        className="w-full flex items-center justify-between p-4 hover:bg-bg-elevated transition-colors rounded-lg"
-      >
-        <div className="flex items-center gap-3">
-          <span className="text-text-secondary text-xs" aria-hidden="true">
-            {expanded ? "▼" : "▶"}
-          </span>
-          <h4 className="text-sm font-semibold text-text-primary">
-            {t("admin.withoutEPG.title", {
-              defaultValue: "Canales sin guía ({{count}})",
-              count: channels.length,
-            })}
-          </h4>
-        </div>
-        <span className="text-xs text-text-secondary">
-          {t("admin.withoutEPG.hint", {
-            defaultValue:
-              "Corrige el tvg-id para emparejarlo con una entrada del XMLTV.",
+    <div className="space-y-3">
+      <p className="text-xs text-text-secondary">
+        {t("admin.withoutEPG.hint", {
+          defaultValue:
+            "Corrige el tvg-id para emparejarlo con una entrada del XMLTV. La edición se conserva tras refrescar el M3U.",
+        })}
+      </p>
+      <div className="flex items-center gap-2">
+        <input
+          type="search"
+          value={search}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setVisibleCount(INITIAL_VISIBLE);
+          }}
+          placeholder={t("admin.withoutEPG.searchPlaceholder", {
+            defaultValue: "Buscar por número, nombre o grupo…",
+          })}
+          className="flex-1 px-3 py-2 text-sm bg-bg-card border border-border rounded"
+          aria-label={t("admin.withoutEPG.searchLabel", {
+            defaultValue: "Filtrar canales sin guía",
+          })}
+        />
+        <span className="text-xs text-text-secondary tabular-nums shrink-0">
+          {t("admin.withoutEPG.counter", {
+            defaultValue: "{{shown}} de {{total}}",
+            shown: Math.min(visibleCount, filtered.length),
+            total: filtered.length,
           })}
         </span>
-      </button>
+      </div>
 
-      {expanded ? (
-        <div
-          id={`without-epg-${libraryId}`}
-          className="px-4 pb-4 space-y-3 border-t border-border"
+      {filtered.length === 0 ? (
+        <p className="text-sm text-text-secondary text-center py-4">
+          {t("admin.withoutEPG.noMatches", {
+            defaultValue: "Ningún canal coincide con la búsqueda.",
+          })}
+        </p>
+      ) : (
+        <ol
+          className="space-y-2"
+          aria-label={t("admin.withoutEPG.listLabel", {
+            defaultValue: "Canales sin guía EPG",
+          })}
         >
-          <div className="flex items-center gap-2 pt-3">
-            <input
-              type="search"
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                setVisibleCount(INITIAL_VISIBLE);
-              }}
-              placeholder={t("admin.withoutEPG.searchPlaceholder", {
-                defaultValue: "Buscar por número, nombre o grupo…",
-              })}
-              className="flex-1 px-3 py-2 text-sm bg-bg-card border border-border rounded"
-              aria-label={t("admin.withoutEPG.searchLabel", {
-                defaultValue: "Filtrar canales sin guía",
-              })}
-            />
-            <span className="text-xs text-text-secondary tabular-nums shrink-0">
-              {t("admin.withoutEPG.counter", {
-                defaultValue: "{{shown}} de {{total}}",
-                shown: Math.min(visibleCount, filtered.length),
-                total: filtered.length,
-              })}
-            </span>
-          </div>
+          {visible.map((ch) => (
+            <OrphanRow key={ch.id} channel={ch} libraryId={libraryId} />
+          ))}
+        </ol>
+      )}
 
-          {filtered.length === 0 ? (
-            <p className="text-sm text-text-secondary text-center py-4">
-              {t("admin.withoutEPG.noMatches", {
-                defaultValue: "Ningún canal coincide con la búsqueda.",
-              })}
-            </p>
-          ) : (
-            <ol
-              className="space-y-2"
-              aria-label={t("admin.withoutEPG.listLabel", {
-                defaultValue: "Canales sin guía EPG",
-              })}
-            >
-              {visible.map((ch) => (
-                <OrphanRow key={ch.id} channel={ch} libraryId={libraryId} />
-              ))}
-            </ol>
-          )}
-
-          {hasMore ? (
-            <div className="flex justify-center pt-1">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setVisibleCount((n) => n + PAGE_INCREMENT)}
-              >
-                {t("admin.withoutEPG.showMore", {
-                  defaultValue: "Mostrar más ({{remaining}})",
-                  remaining: filtered.length - visible.length,
-                })}
-              </Button>
-            </div>
-          ) : null}
+      {hasMore ? (
+        <div className="flex justify-center pt-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setVisibleCount((n) => n + PAGE_INCREMENT)}
+          >
+            {t("admin.withoutEPG.showMore", {
+              defaultValue: "Mostrar más ({{remaining}})",
+              remaining: filtered.length - visible.length,
+            })}
+          </Button>
         </div>
       ) : null}
     </div>
