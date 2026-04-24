@@ -60,6 +60,70 @@ dedup M3U), LiveTV partido en 8 ficheros con **EPG grid real** estilo Plex.
    `time.Time` como strings (`RFC3339` y el legado Go-stringer), de
    modo que bases de datos pre-fix siguen leyéndose. Tests cubren el
    roundtrip XMLTV exacto + legacy row sembrada con INSERT crudo.
+8. **Multi-fuente EPG + catálogo curado**: una biblioteca livetv puede
+   tener N proveedores XMLTV en orden de prioridad; el refresher los
+   recorre y mergea "primera fuente gana por canal" (davidmuma lleva
+   las grandes, epg.pw rellena los 216 canales huérfanos). Si una
+   fuente 404ea, el refresh sigue con las demás — cada fuente persiste
+   `last_status`, `last_error`, `last_program_count`, `last_channel_count`
+   para que la UI del admin muestre badges "✓ 3200 programas" / "✗ 404".
+   Nueva migración `007_library_epg_sources.sql` con FK + UNIQUE(library,
+   url); migra el antiguo `libraries.epg_url` a una fila priority-0.
+   Nuevo `internal/iptv/epg_catalog.go` con 10 fuentes curadas
+   (davidmuma x4, epg.pw x6 multi-idioma). Endpoints nuevos:
+   `GET /iptv/epg-catalog`, `GET /libraries/{id}/epg-sources` (viewer
+   con ACL), `POST` / `DELETE` / `PATCH .../reorder` admin-only. Panel
+   nuevo `EPGSourcesPanel` en LibrariesAdmin con dropdown del catálogo,
+   input de URL custom y reorder vía botones ↑/↓ accesibles por teclado.
+   Cubierto por tests (repo + service + handler + catalog lookup).
+9. **Health-check oportunista de canales** (estilo Plex): el proxy
+   IPTV graba cada intento de conectar al master playlist contra la
+   fila del canal. Éxito → resetea contador; fallo → incremento
+   atómico. Cancelaciones del cliente (usuario cierra pestaña) se
+   filtran explícitamente y NO cuentan — la DB solo refleja fallos
+   reales de upstream. Nueva migración `008_channel_health.sql` añade
+   columnas `last_probe_at`, `last_probe_status`, `last_probe_error`,
+   `consecutive_failures` a `channels` más un índice parcial sobre
+   `(library_id, consecutive_failures) WHERE consecutive_failures > 0`.
+   El handler de canales del usuario llama a `ListHealthyByLibrary`
+   que excluye canales con ≥ `UnhealthyThreshold` (=3) fallos
+   consecutivos; el cliente normal no ve canales rotos. Endpoints
+   admin nuevos: `GET /libraries/{id}/channels/unhealthy[?threshold=N]`,
+   `POST /channels/{id}/reset-health`, `POST /channels/{id}/disable`,
+   `POST /channels/{id}/enable`. Interfaz `iptv.ChannelHealthReporter`
+   (nil-safe) desacopla proxy↔DB; implementada en `iptv.Service` con
+   timeout 2s para que la escritura DB no bloquee el hot path.
+   Componente `UnhealthyChannelsPanel` en LibrariesAdmin muestra el
+   panel solo si hay problemas (cero ruido si la biblioteca está
+   sana); poll 30s; acciones "Marcar OK" (reset counter) y
+   "Desactivar" (flip is_active). Tests: repo (atomic +1 concurrente,
+   trim error largo, filtro threshold, reset, ListHealthy esconde
+   desactivados+unhealthy), proxy (nil reporter, éxito, fallo,
+   cancelación del cliente ignorada, DeadlineExceeded cuenta),
+   handler (threshold custom, ACL deny, cada acción).
+10. **Edición manual de tvg-id + panel "canales sin guía"**: los IDs
+    de canal son UUIDs aleatorios que se regeneran en cada M3U
+    refresh, por lo que cualquier edición del admin se perdería
+    inevitablemente. Solución: tabla nueva `channel_overrides(library_id,
+    stream_url, tvg_id)` (migración 009) keyed por el atributo más
+    estable del canal — el stream URL. Ciclo: admin hace
+    `PATCH /channels/{id}` → `service.SetChannelTvgID` hace UPDATE en
+    `channels` (cambio inmediato) + UPSERT en `channel_overrides` (por
+    stream_url) → siguiente M3U refresh corre `ReplaceForLibrary` (wipe)
+    y luego un nuevo hook `overrides.ApplyToLibrary(libraryID)` reaplica
+    los overrides en una transacción. Overrides huérfanos (stream_url
+    ya no en el playlist) son no-op y se quedan en la tabla esperando
+    a que la URL vuelva. Endpoints nuevos:
+    `GET /libraries/{id}/channels/without-epg` (LEFT ANTI-JOIN contra
+    epg_programs en ventana -2h..+24h) y `PATCH /channels/{channelId}`
+    admin-only con `{tvg_id}` opcional (string vacía limpia override y
+    columna). Componente `ChannelsWithoutEPGPanel` con edición inline;
+    solo aparece si hay orphans. Tests: repo (upsert replaza, apply
+    rewritea en 1 tx, orphan no-op, delete idempotente, listar
+    without-EPG), service end-to-end (override sobrevive un refresh M3U
+    real contra httptest, clearing elimina la fila persistente, orphans
+    detectados correctamente), handler (happy path, empty=clear,
+    missing=no-op, invalid JSON 400, ACL deny 404, trim whitespace).
 
 **Impacto operativo**: importar davidmuma ya funciona end-to-end.
 Poner la URL XMLTV (o .gz) en el campo *EPG URL* de la biblioteca

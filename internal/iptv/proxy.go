@@ -16,13 +16,35 @@ import (
 	"time"
 )
 
+// ChannelHealthReporter lets the proxy flag upstream outcomes without
+// pulling the DB layer into this package. Nil-safe at the call sites:
+// a proxy constructed without a reporter simply doesn't record health
+// (tests that don't care can pass nil; main.go always wires the real
+// one).
+//
+// Success/failure are routed here from the proxy; the implementation
+// is expected to persist quickly (single-row UPDATE) so the hot path
+// isn't stalled.
+type ChannelHealthReporter interface {
+	RecordProbeSuccess(ctx context.Context, channelID string)
+	RecordProbeFailure(ctx context.Context, channelID string, err error)
+}
+
 // StreamProxy proxies IPTV streams to clients and counts concurrent listeners
 // per channel (for observability).
 type StreamProxy struct {
-	mu     sync.Mutex
-	relays map[string]*relay // keyed by channel ID
-	logger *slog.Logger
-	client *http.Client
+	mu       sync.Mutex
+	relays   map[string]*relay // keyed by channel ID
+	logger   *slog.Logger
+	client   *http.Client
+	reporter ChannelHealthReporter
+}
+
+// SetHealthReporter wires the reporter after construction so main.go
+// can build the proxy before the IPTV service exists (the reporter
+// lives on the service). Nil is allowed and turns health tracking off.
+func (p *StreamProxy) SetHealthReporter(reporter ChannelHealthReporter) {
+	p.reporter = reporter
 }
 
 // relay tracks how many concurrent clients are watching a channel. Kept as a
@@ -75,6 +97,33 @@ func NewStreamProxy(logger *slog.Logger) *StreamProxy {
 			// transport level above.
 		},
 	}
+}
+
+// reportOutcome records a proxy attempt against the channel's health.
+// Client-initiated cancellations are filtered out: if the user hit
+// stop / closed the tab, the upstream wasn't necessarily broken, and
+// counting that as a failure would pile bogus counts on every channel
+// every time a viewer clicks away. The fetchCtx is the context passed
+// to the fetch; ctx.Err() distinguishes "cancelled" (don't record)
+// from other failures.
+func (p *StreamProxy) reportOutcome(ctx, fetchCtx context.Context, channelID string, err error) {
+	if p.reporter == nil || channelID == "" {
+		return
+	}
+	if err == nil {
+		p.reporter.RecordProbeSuccess(ctx, channelID)
+		return
+	}
+	// Client disconnect / explicit cancellation should not pollute the
+	// health counter. If the fetch context was cancelled because the
+	// REQUEST context was cancelled (the viewer navigated away) we
+	// swallow the outcome.
+	if errors.Is(err, context.Canceled) || errors.Is(fetchCtx.Err(), context.Canceled) {
+		return
+	}
+	// A DeadlineExceeded we DO count — it means upstream took longer
+	// than our transport timeout, which is a real operational issue.
+	p.reporter.RecordProbeFailure(ctx, channelID, err)
 }
 
 // ErrUnsafeUpstream is returned when a proxy fetch target resolves to a
@@ -354,6 +403,11 @@ func rewriteURIAttribute(line string, base *url.URL, proxyPrefix string) string 
 // streamOnceWithChannel connects to upstream. For HLS content, rewrites the playlist.
 func (p *StreamProxy) streamOnceWithChannel(ctx context.Context, w http.ResponseWriter, channelID, streamURL string) error {
 	resp, finalURL, err := p.fetchUpstream(ctx, streamURL)
+	// Record the outcome against the channel's health. Only this path
+	// reports — ProxyURL (HLS segments) fires dozens of times per minute
+	// and would flood the DB; the master playlist fetch is the one-shot
+	// signal that matters for "is this upstream reachable".
+	p.reportOutcome(context.Background(), ctx, channelID, err)
 	if err != nil {
 		return err
 	}

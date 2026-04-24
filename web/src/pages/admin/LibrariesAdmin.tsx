@@ -1,5 +1,8 @@
-import { useState, useEffect } from "react";
+import { Fragment, useState, useEffect } from "react";
 import type { FormEvent } from "react";
+import { ChannelsWithoutEPGPanel } from "@/components/admin/ChannelsWithoutEPGPanel";
+import { EPGSourcesPanel } from "@/components/admin/EPGSourcesPanel";
+import { UnhealthyChannelsPanel } from "@/components/admin/UnhealthyChannelsPanel";
 import type { ContentType, Library } from "@/api/types";
 import {
   useLibraries,
@@ -436,8 +439,8 @@ export default function LibrariesAdmin() {
             </thead>
             <tbody className="divide-y divide-border">
               {libraries.map((lib) => (
+                <Fragment key={lib.id}>
                 <tr
-                  key={lib.id}
                   className="bg-bg-card hover:bg-bg-elevated transition-colors"
                 >
                   <td className="px-4 py-3 font-medium text-text-primary">
@@ -621,6 +624,16 @@ export default function LibrariesAdmin() {
                     </div>
                   </td>
                 </tr>
+                {lib.content_type === "livetv" ? (
+                  <tr className="bg-bg-card/50">
+                    <td colSpan={6} className="px-4 py-3 space-y-3">
+                      <EPGSourcesPanel libraryId={lib.id} />
+                      <UnhealthyChannelsPanel libraryId={lib.id} />
+                      <ChannelsWithoutEPGPanel libraryId={lib.id} />
+                    </td>
+                  </tr>
+                ) : null}
+                </Fragment>
               ))}
             </tbody>
           </table>

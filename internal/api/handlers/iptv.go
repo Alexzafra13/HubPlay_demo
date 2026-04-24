@@ -646,3 +646,372 @@ func generateLibraryID() string {
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
 }
+
+// ── EPG source management endpoints ──────────────────────────────
+//
+// GET  /api/v1/iptv/epg-catalog                          (auth user)
+// GET  /api/v1/libraries/{id}/epg-sources                (auth + ACL)
+// POST /api/v1/libraries/{id}/epg-sources                (admin)
+// DELETE /api/v1/libraries/{id}/epg-sources/{sourceId}   (admin)
+// PATCH  /api/v1/libraries/{id}/epg-sources/reorder      (admin)
+//
+// The catalog endpoint is intentionally viewer-accessible: the shape
+// is public data (provider names + URLs) and exposing it to the
+// frontend keeps the admin dropdown code identical across roles.
+
+// EPGCatalog returns the curated EPG provider list.
+func (h *IPTVHandler) EPGCatalog(w http.ResponseWriter, r *http.Request) {
+	catalog := h.svc.PublicEPGCatalog()
+	out := make([]map[string]any, 0, len(catalog))
+	for _, src := range catalog {
+		out = append(out, map[string]any{
+			"id":          src.ID,
+			"name":        src.Name,
+			"description": src.Description,
+			"language":    src.Language,
+			"countries":   src.Countries,
+			"url":         src.URL,
+		})
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"data": out})
+}
+
+// ListEPGSources returns the EPG providers attached to a library.
+// Gated by the library ACL — the EPG source list leaks URL info we'd
+// rather keep library-private.
+func (h *IPTVHandler) ListEPGSources(w http.ResponseWriter, r *http.Request) {
+	libraryID := chi.URLParam(r, "id")
+	if !h.canAccessLibrary(r, libraryID) {
+		h.denyForbidden(w, r)
+		return
+	}
+	sources, err := h.svc.ListEPGSources(r.Context(), libraryID)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"data": epgSourcesToJSON(sources)})
+}
+
+type addEPGSourceRequest struct {
+	CatalogID string `json:"catalog_id"`
+	URL       string `json:"url"`
+}
+
+// AddEPGSource attaches a new provider. Admin-only at the route level.
+func (h *IPTVHandler) AddEPGSource(w http.ResponseWriter, r *http.Request) {
+	libraryID := chi.URLParam(r, "id")
+	if !h.canAccessLibrary(r, libraryID) {
+		h.denyForbidden(w, r)
+		return
+	}
+	var body addEPGSourceRequest
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8*1024))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&body); err != nil {
+		respondError(w, r, http.StatusBadRequest, "INVALID_BODY", "invalid JSON body")
+		return
+	}
+	src, err := h.svc.AddEPGSource(r.Context(), libraryID, body.CatalogID, body.URL)
+	if err != nil {
+		// AddEPGSource returns plain errors for shape problems (unknown
+		// catalog id, missing fields) — surface them as 400 instead of
+		// leaking a generic 500. Database-level errors flow through the
+		// default handleServiceError path below.
+		if _, ok := err.(interface{ Kind() string }); !ok {
+			respondError(w, r, http.StatusBadRequest, "INVALID_SOURCE", err.Error())
+			return
+		}
+		handleServiceError(w, r, err)
+		return
+	}
+	respondJSON(w, http.StatusCreated, map[string]any{"data": epgSourceToJSON(src)})
+}
+
+// RemoveEPGSource deletes one provider from the library.
+func (h *IPTVHandler) RemoveEPGSource(w http.ResponseWriter, r *http.Request) {
+	libraryID := chi.URLParam(r, "id")
+	sourceID := chi.URLParam(r, "sourceId")
+	if !h.canAccessLibrary(r, libraryID) {
+		h.denyForbidden(w, r)
+		return
+	}
+	if err := h.svc.RemoveEPGSource(r.Context(), libraryID, sourceID); err != nil {
+		respondError(w, r, http.StatusNotFound, "NOT_FOUND", err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+type reorderEPGSourcesRequest struct {
+	SourceIDs []string `json:"source_ids"`
+}
+
+// ReorderEPGSources rewrites every source's priority. Body is the
+// full ordered id list.
+func (h *IPTVHandler) ReorderEPGSources(w http.ResponseWriter, r *http.Request) {
+	libraryID := chi.URLParam(r, "id")
+	if !h.canAccessLibrary(r, libraryID) {
+		h.denyForbidden(w, r)
+		return
+	}
+	var body reorderEPGSourcesRequest
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16*1024))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&body); err != nil {
+		respondError(w, r, http.StatusBadRequest, "INVALID_BODY", "invalid JSON body")
+		return
+	}
+	if err := h.svc.ReorderEPGSources(r.Context(), libraryID, body.SourceIDs); err != nil {
+		respondError(w, r, http.StatusBadRequest, "INVALID_ORDER", err.Error())
+		return
+	}
+	sources, err := h.svc.ListEPGSources(r.Context(), libraryID)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"data": epgSourcesToJSON(sources)})
+}
+
+// ── Channels without EPG + manual edit ───────────────────────────
+//
+// GET  /api/v1/libraries/{id}/channels/without-epg   (auth + ACL)
+// PATCH /api/v1/channels/{channelId}                  (admin)
+//
+// The list endpoint flags channels that no XMLTV source matched for
+// the next ~24h. The PATCH lets the admin fix the mismatch by
+// correcting tvg_id by hand; the override persists across M3U
+// refreshes via the channel_overrides table.
+
+// ListChannelsWithoutEPG returns active channels with no programmes
+// in the default guide window.
+func (h *IPTVHandler) ListChannelsWithoutEPG(w http.ResponseWriter, r *http.Request) {
+	libraryID := chi.URLParam(r, "id")
+	if !h.canAccessLibrary(r, libraryID) {
+		h.denyForbidden(w, r)
+		return
+	}
+	channels, err := h.svc.ListChannelsWithoutEPG(r.Context(), libraryID)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	out := make([]map[string]any, 0, len(channels))
+	for _, ch := range channels {
+		out = append(out, channelWithoutEPGDTO(ch))
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"data": out})
+}
+
+type patchChannelRequest struct {
+	TvgID *string `json:"tvg_id,omitempty"` // pointer so missing != empty
+}
+
+// PatchChannel accepts admin edits to a single channel. Currently
+// only `tvg_id` is mutable — other fields are derived from the M3U
+// and would be wiped on the next refresh anyway.
+//
+// A nil TvgID means "field not present in request" (leave alone);
+// an explicit "" means "clear tvg_id AND the persistent override".
+func (h *IPTVHandler) PatchChannel(w http.ResponseWriter, r *http.Request) {
+	channelID := chi.URLParam(r, "channelId")
+	ch, err := h.svc.GetChannel(r.Context(), channelID)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	if !h.canAccessLibrary(r, ch.LibraryID) {
+		h.denyForbidden(w, r)
+		return
+	}
+
+	var body patchChannelRequest
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8*1024))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&body); err != nil {
+		respondError(w, r, http.StatusBadRequest, "INVALID_BODY", "invalid JSON body")
+		return
+	}
+
+	if body.TvgID != nil {
+		if err := h.svc.SetChannelTvgID(r.Context(), channelID, strings.TrimSpace(*body.TvgID)); err != nil {
+			handleServiceError(w, r, err)
+			return
+		}
+	}
+
+	// Return the post-edit channel so the UI can skip a follow-up GET.
+	updated, err := h.svc.GetChannel(r.Context(), channelID)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"data": channelWithoutEPGDTO(updated)})
+}
+
+// channelWithoutEPGDTO shapes the row so the UI gets the minimum
+// needed to render "canal sin guía": identity + current tvg_id +
+// the display-name variants that might help the admin pick the
+// right override value.
+func channelWithoutEPGDTO(ch *db.Channel) map[string]any {
+	return map[string]any{
+		"id":         ch.ID,
+		"library_id": ch.LibraryID,
+		"name":       ch.Name,
+		"number":     ch.Number,
+		"group_name": ch.GroupName,
+		"logo_url":   ch.LogoURL,
+		"tvg_id":     ch.TvgID,
+		"is_active":  ch.IsActive,
+	}
+}
+
+// ── Channel health endpoints ─────────────────────────────────────
+//
+// GET /api/v1/libraries/{id}/channels/unhealthy   (auth + ACL)
+// POST /api/v1/channels/{channelId}/reset-health  (admin)
+// POST /api/v1/channels/{channelId}/disable       (admin)
+//
+// Read path is gated by the same per-library ACL as the channel list.
+// Write paths are admin-only at the route level (router.go).
+
+// ListUnhealthyChannels returns channels whose probe-failure count is
+// above the threshold. Optional `?threshold=N` query param; default
+// is the repo constant.
+func (h *IPTVHandler) ListUnhealthyChannels(w http.ResponseWriter, r *http.Request) {
+	libraryID := chi.URLParam(r, "id")
+	if !h.canAccessLibrary(r, libraryID) {
+		h.denyForbidden(w, r)
+		return
+	}
+	threshold := 0 // 0 = let repo pick its default
+	if v := r.URL.Query().Get("threshold"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			threshold = n
+		}
+	}
+	channels, err := h.svc.ListUnhealthyChannels(r.Context(), libraryID, threshold)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	out := make([]map[string]any, 0, len(channels))
+	for _, ch := range channels {
+		out = append(out, channelHealthDTO(ch))
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"data": out})
+}
+
+// ResetChannelHealth clears the failure counter so the channel is
+// visible again in the user list. Doesn't probe — the operator is
+// asserting the channel works.
+func (h *IPTVHandler) ResetChannelHealth(w http.ResponseWriter, r *http.Request) {
+	channelID := chi.URLParam(r, "channelId")
+	ch, err := h.svc.GetChannel(r.Context(), channelID)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	if !h.canAccessLibrary(r, ch.LibraryID) {
+		h.denyForbidden(w, r)
+		return
+	}
+	if err := h.svc.ResetChannelHealth(r.Context(), channelID); err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// DisableChannel permanently hides a channel from the user list by
+// flipping is_active. Idempotent.
+func (h *IPTVHandler) DisableChannel(w http.ResponseWriter, r *http.Request) {
+	channelID := chi.URLParam(r, "channelId")
+	ch, err := h.svc.GetChannel(r.Context(), channelID)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	if !h.canAccessLibrary(r, ch.LibraryID) {
+		h.denyForbidden(w, r)
+		return
+	}
+	if err := h.svc.SetChannelActive(r.Context(), channelID, false); err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// EnableChannel is the mirror image — lets the admin re-enable a
+// channel that was manually disabled.
+func (h *IPTVHandler) EnableChannel(w http.ResponseWriter, r *http.Request) {
+	channelID := chi.URLParam(r, "channelId")
+	ch, err := h.svc.GetChannel(r.Context(), channelID)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	if !h.canAccessLibrary(r, ch.LibraryID) {
+		h.denyForbidden(w, r)
+		return
+	}
+	if err := h.svc.SetChannelActive(r.Context(), channelID, true); err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// channelHealthDTO shapes a channel with its health fields for the
+// admin UI. The regular channel DTO (iptv_dto.go) stays lean and
+// omits these columns to avoid payload bloat on the hot list path.
+func channelHealthDTO(ch *db.Channel) map[string]any {
+	var lastProbe any
+	if !ch.LastProbeAt.IsZero() {
+		lastProbe = ch.LastProbeAt
+	}
+	return map[string]any{
+		"id":                   ch.ID,
+		"library_id":           ch.LibraryID,
+		"name":                 ch.Name,
+		"number":               ch.Number,
+		"group_name":           ch.GroupName,
+		"logo_url":             ch.LogoURL,
+		"tvg_id":               ch.TvgID,
+		"is_active":            ch.IsActive,
+		"last_probe_at":        lastProbe,
+		"last_probe_status":    ch.LastProbeStatus,
+		"last_probe_error":     ch.LastProbeError,
+		"consecutive_failures": ch.ConsecutiveFailures,
+	}
+}
+
+func epgSourcesToJSON(sources []*db.LibraryEPGSource) []map[string]any {
+	out := make([]map[string]any, 0, len(sources))
+	for _, s := range sources {
+		out = append(out, epgSourceToJSON(s))
+	}
+	return out
+}
+
+func epgSourceToJSON(s *db.LibraryEPGSource) map[string]any {
+	var lastRefreshed any
+	if !s.LastRefreshedAt.IsZero() {
+		lastRefreshed = s.LastRefreshedAt
+	}
+	return map[string]any{
+		"id":                 s.ID,
+		"library_id":         s.LibraryID,
+		"catalog_id":         s.CatalogID,
+		"url":                s.URL,
+		"priority":           s.Priority,
+		"last_refreshed_at":  lastRefreshed,
+		"last_status":        s.LastStatus,
+		"last_error":         s.LastError,
+		"last_program_count": s.LastProgramCount,
+		"last_channel_count": s.LastChannelCount,
+		"created_at":         s.CreatedAt,
+	}
+}

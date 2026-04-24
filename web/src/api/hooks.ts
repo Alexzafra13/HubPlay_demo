@@ -7,21 +7,27 @@ import {
 } from "@tanstack/react-query";
 import { api } from "./client";
 import type {
+  AddEPGSourceRequest,
   AuthResponse,
   AvailableImage,
   BrowseResponse,
   Channel,
+  ChannelWithoutEPG,
   CreateLibraryRequest,
   HealthResponse,
   ImageInfo,
   ImportPublicIPTVResponse,
   ItemDetail,
   Library,
+  LibraryEPGSource,
   MediaItem,
   PaginatedResponse,
+  PatchChannelRequest,
   PublicCountry,
+  PublicEPGSource,
   SetupStatus,
   SystemCapabilities,
+  UnhealthyChannel,
   UpdateLibraryRequest,
   User,
   UserData,
@@ -49,6 +55,13 @@ export const queryKeys = {
   channelFavorites: ["channel-favorites", "list"] as const,
   channelGroups: (libraryId?: string) => ["channels", "groups", libraryId] as const,
   publicCountries: ["public-countries"] as const,
+  epgCatalog: ["epg-catalog"] as const,
+  libraryEPGSources: (libraryId: string) =>
+    ["library-epg-sources", libraryId] as const,
+  unhealthyChannels: (libraryId: string) =>
+    ["unhealthy-channels", libraryId] as const,
+  channelsWithoutEPG: (libraryId: string) =>
+    ["channels-without-epg", libraryId] as const,
   itemImages: (id: string) => ["items", id, "images"] as const,
   availableImages: (id: string, type?: string) => ["items", id, "images", "available", type] as const,
   providers: ["providers"] as const,
@@ -349,6 +362,156 @@ export function useImportPublicIPTV() {
     mutationFn: ({ country, name }) => api.importPublicIPTV(country, name),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.libraries });
+    },
+  });
+}
+
+// ─── EPG Sources ────────────────────────────────────────────────────────
+//
+// The catalog is static data shipped with the binary — fetch once, cache
+// forever. The per-library source list mutates on add/remove/reorder; we
+// invalidate surgically so the admin UI updates without a full refetch.
+
+export function useEPGCatalog(
+  options?: Partial<UseQueryOptions<PublicEPGSource[]>>,
+) {
+  return useQuery<PublicEPGSource[]>({
+    queryKey: queryKeys.epgCatalog,
+    queryFn: () => api.getEPGCatalog(),
+    staleTime: Infinity, // Catalog is static per-binary; no need to refetch.
+    ...options,
+  });
+}
+
+export function useLibraryEPGSources(
+  libraryId: string,
+  options?: Partial<UseQueryOptions<LibraryEPGSource[]>>,
+) {
+  return useQuery<LibraryEPGSource[]>({
+    queryKey: queryKeys.libraryEPGSources(libraryId),
+    queryFn: () => api.listEPGSources(libraryId),
+    enabled: !!libraryId,
+    ...options,
+  });
+}
+
+export function useAddEPGSource(libraryId: string) {
+  const queryClient = useQueryClient();
+  return useMutation<LibraryEPGSource, Error, AddEPGSourceRequest>({
+    mutationFn: (req) => api.addEPGSource(libraryId, req),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.libraryEPGSources(libraryId) });
+    },
+  });
+}
+
+export function useRemoveEPGSource(libraryId: string) {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, string>({
+    mutationFn: (sourceId) => api.removeEPGSource(libraryId, sourceId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.libraryEPGSources(libraryId) });
+    },
+  });
+}
+
+export function useReorderEPGSources(libraryId: string) {
+  const queryClient = useQueryClient();
+  return useMutation<LibraryEPGSource[], Error, string[]>({
+    mutationFn: (sourceIds) => api.reorderEPGSources(libraryId, sourceIds),
+    onSuccess: (data) => {
+      // The reorder endpoint returns the new list, so we can seed the
+      // cache directly and skip an unnecessary round-trip.
+      queryClient.setQueryData(queryKeys.libraryEPGSources(libraryId), data);
+    },
+  });
+}
+
+// ─── Channel Health ─────────────────────────────────────────────────────
+//
+// Admin-only surface over the opportunistic probe data. The list polls
+// so the badge updates as viewers try channels; actions (reset / disable
+// / enable) invalidate both the health list AND the regular channel list
+// (a newly-enabled channel reappears there, a disabled one vanishes).
+
+export function useUnhealthyChannels(
+  libraryId: string,
+  options?: Partial<UseQueryOptions<UnhealthyChannel[]>>,
+) {
+  return useQuery<UnhealthyChannel[]>({
+    queryKey: queryKeys.unhealthyChannels(libraryId),
+    queryFn: () => api.listUnhealthyChannels(libraryId),
+    enabled: !!libraryId,
+    // Poll every 30s so the admin sees live signal without hammering.
+    refetchInterval: 30_000,
+    ...options,
+  });
+}
+
+export function useResetChannelHealth(libraryId: string) {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, string>({
+    mutationFn: (channelId) => api.resetChannelHealth(channelId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.unhealthyChannels(libraryId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.channels(libraryId) });
+    },
+  });
+}
+
+export function useDisableChannel(libraryId: string) {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, string>({
+    mutationFn: (channelId) => api.disableChannel(channelId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.unhealthyChannels(libraryId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.channels(libraryId) });
+    },
+  });
+}
+
+export function useEnableChannel(libraryId: string) {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, string>({
+    mutationFn: (channelId) => api.enableChannel(channelId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.unhealthyChannels(libraryId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.channels(libraryId) });
+    },
+  });
+}
+
+// ─── Channels without EPG ───────────────────────────────────────────────
+//
+// Admin surface that pairs with the "canales sin guía" panel. The
+// list comes from the backend filtered to active channels with no
+// programmes in the 24h window. Editing `tvg_id` via PATCH invalidates
+// both this list and the library channel list so the UI refreshes
+// right away (the orphan disappears once the next EPG refresh matches it).
+
+export function useChannelsWithoutEPG(
+  libraryId: string,
+  options?: Partial<UseQueryOptions<ChannelWithoutEPG[]>>,
+) {
+  return useQuery<ChannelWithoutEPG[]>({
+    queryKey: queryKeys.channelsWithoutEPG(libraryId),
+    queryFn: () => api.listChannelsWithoutEPG(libraryId),
+    enabled: !!libraryId,
+    ...options,
+  });
+}
+
+export function usePatchChannel(libraryId: string) {
+  const queryClient = useQueryClient();
+  return useMutation<
+    ChannelWithoutEPG,
+    Error,
+    { channelId: string; patch: PatchChannelRequest }
+  >({
+    mutationFn: ({ channelId, patch }) => api.patchChannel(channelId, patch),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.channelsWithoutEPG(libraryId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.channels(libraryId) });
     },
   });
 }

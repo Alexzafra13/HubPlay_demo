@@ -1,8 +1,10 @@
 import type {
+  AddEPGSourceRequest,
   AuthResponse,
   AvailableImage,
   BrowseResponse,
   Channel,
+  ChannelWithoutEPG,
   CreateLibraryRequest,
   EPGProgram,
   HealthResponse,
@@ -10,12 +12,16 @@ import type {
   ImportPublicIPTVResponse,
   ItemDetail,
   Library,
+  LibraryEPGSource,
   MediaItem,
   PaginatedResponse,
+  PatchChannelRequest,
   PublicCountry,
+  PublicEPGSource,
   SetupStatus,
   StreamSession,
   SystemCapabilities,
+  UnhealthyChannel,
   UpdateLibraryRequest,
   User,
   UserData,
@@ -506,6 +512,87 @@ export class ApiClient {
 
   async getPublicCountries(): Promise<PublicCountry[]> {
     return this.request<PublicCountry[]>("GET", "/iptv/public/countries");
+  }
+
+  async getEPGCatalog(): Promise<PublicEPGSource[]> {
+    return this.request<PublicEPGSource[]>("GET", "/iptv/epg-catalog");
+  }
+
+  async listEPGSources(libraryId: string): Promise<LibraryEPGSource[]> {
+    return this.request<LibraryEPGSource[]>(
+      "GET",
+      `/libraries/${libraryId}/epg-sources`,
+    );
+  }
+
+  async addEPGSource(
+    libraryId: string,
+    req: AddEPGSourceRequest,
+  ): Promise<LibraryEPGSource> {
+    return this.request<LibraryEPGSource>(
+      "POST",
+      `/libraries/${libraryId}/epg-sources`,
+      { body: req },
+    );
+  }
+
+  async removeEPGSource(libraryId: string, sourceId: string): Promise<void> {
+    await this.request<void>(
+      "DELETE",
+      `/libraries/${libraryId}/epg-sources/${sourceId}`,
+    );
+  }
+
+  async reorderEPGSources(
+    libraryId: string,
+    sourceIds: string[],
+  ): Promise<LibraryEPGSource[]> {
+    return this.request<LibraryEPGSource[]>(
+      "PATCH",
+      `/libraries/${libraryId}/epg-sources/reorder`,
+      { body: { source_ids: sourceIds } },
+    );
+  }
+
+  async listUnhealthyChannels(
+    libraryId: string,
+    threshold?: number,
+  ): Promise<UnhealthyChannel[]> {
+    return this.request<UnhealthyChannel[]>(
+      "GET",
+      `/libraries/${libraryId}/channels/unhealthy`,
+      threshold ? { params: { threshold } } : undefined,
+    );
+  }
+
+  async resetChannelHealth(channelId: string): Promise<void> {
+    await this.request<void>("POST", `/channels/${channelId}/reset-health`);
+  }
+
+  async disableChannel(channelId: string): Promise<void> {
+    await this.request<void>("POST", `/channels/${channelId}/disable`);
+  }
+
+  async enableChannel(channelId: string): Promise<void> {
+    await this.request<void>("POST", `/channels/${channelId}/enable`);
+  }
+
+  async listChannelsWithoutEPG(libraryId: string): Promise<ChannelWithoutEPG[]> {
+    return this.request<ChannelWithoutEPG[]>(
+      "GET",
+      `/libraries/${libraryId}/channels/without-epg`,
+    );
+  }
+
+  async patchChannel(
+    channelId: string,
+    req: PatchChannelRequest,
+  ): Promise<ChannelWithoutEPG> {
+    return this.request<ChannelWithoutEPG>(
+      "PATCH",
+      `/channels/${channelId}`,
+      { body: req },
+    );
   }
 
   async importPublicIPTV(country: string, name?: string): Promise<ImportPublicIPTVResponse> {

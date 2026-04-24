@@ -219,6 +219,93 @@ export interface ImportPublicIPTVResponse {
   m3u_url: string;
 }
 
+/**
+ * A curated, well-known XMLTV feed the backend ships with. Mirrors
+ * `internal/iptv/PublicEPGSource` — the admin UI renders this list in the
+ * "Añadir fuente EPG" dropdown so operators don't have to memorise URLs.
+ */
+export interface PublicEPGSource {
+  id: string;
+  name: string;
+  description: string;
+  language: string;
+  countries: string[];
+  url: string;
+}
+
+/**
+ * One EPG provider attached to a livetv library. Priority is "lower first";
+ * the refresher processes sources in ascending priority order and a channel
+ * covered by priority 0 is not overwritten by priority 1.
+ *
+ * `catalog_id` is empty for custom URLs the admin pasted directly.
+ * `last_*` fields are populated by the refresher after each run — the UI
+ * uses them to flag broken sources with a status badge.
+ */
+export interface LibraryEPGSource {
+  id: string;
+  library_id: string;
+  catalog_id: string;
+  url: string;
+  priority: number;
+  last_refreshed_at: string | null;
+  last_status: "" | "ok" | "error";
+  last_error: string;
+  last_program_count: number;
+  last_channel_count: number;
+  created_at: string;
+}
+
+export interface AddEPGSourceRequest {
+  catalog_id?: string;
+  url?: string;
+}
+
+/**
+ * A channel the EPG refresher did not match against any source.
+ * Returned by `GET /libraries/:id/channels/without-epg`. The admin
+ * UI uses this to let operators fix `tvg_id` by hand.
+ */
+export interface ChannelWithoutEPG {
+  id: string;
+  library_id: string;
+  name: string;
+  number: number;
+  group_name: string;
+  logo_url: string;
+  tvg_id: string;
+  is_active: boolean;
+}
+
+/** PATCH /channels/:id accepts partial edits. tvg_id is pointer-like
+ * in JSON: omit the field to keep existing, pass empty string to
+ * clear both the column AND the persistent override. */
+export interface PatchChannelRequest {
+  tvg_id?: string;
+}
+
+/**
+ * A channel with its opportunistic-probe health fields attached.
+ *
+ * Surfaced by `GET /libraries/:id/channels/unhealthy`. The regular
+ * channel list uses the slimmer `Channel` shape on purpose — only the
+ * admin view cares about failure metadata.
+ */
+export interface UnhealthyChannel {
+  id: string;
+  library_id: string;
+  name: string;
+  number: number;
+  group_name: string;
+  logo_url: string;
+  tvg_id: string;
+  is_active: boolean;
+  last_probe_at: string | null;
+  last_probe_status: "" | "ok" | "error";
+  last_probe_error: string;
+  consecutive_failures: number;
+}
+
 // ─── Streaming ──────────────────────────────────────────────────────────────
 
 export type PlaybackMethod = "direct_play" | "direct_stream" | "transcode";

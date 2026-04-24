@@ -149,9 +149,13 @@ func run(configPath string) error {
 	}
 
 	// ═══ Phase 4c: IPTV ═══
-	iptvService := iptv.NewService(repos.Channels, repos.EPGPrograms, repos.Libraries, repos.ChannelFavorites, logger)
+	iptvService := iptv.NewService(repos.Channels, repos.EPGPrograms, repos.Libraries, repos.ChannelFavorites, repos.LibraryEPGSources, repos.ChannelOverrides, logger)
 	iptvService.SetEventBus(eventBus)
 	iptvProxy := iptv.NewStreamProxy(logger)
+	// Wire health reporting now that both pieces exist. The proxy
+	// records probe outcomes against the channel repo through the
+	// service so dead upstreams drop out of the user view.
+	iptvProxy.SetHealthReporter(iptvService)
 
 	// ═══ Phase 4e: Setup Service ═══
 	setupService := setup.NewService(cfg, configPath, logger)

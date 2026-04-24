@@ -268,11 +268,29 @@ func NewRouter(deps Dependencies) http.Handler {
 
 					// Public IPTV
 					r.Get("/iptv/public/countries", iptvHandler.PublicCountries)
+					r.Get("/iptv/epg-catalog", iptvHandler.EPGCatalog)
+
+					// Per-library EPG source list (read: user with library ACL;
+					// mutations: admin-only, below).
+					r.Get("/libraries/{id}/epg-sources", iptvHandler.ListEPGSources)
+
+					// Unhealthy-channels admin surface: read is gated by the
+					// same library ACL as the channel list; the mutation
+					// endpoints live under the admin group below.
+					r.Get("/libraries/{id}/channels/unhealthy", iptvHandler.ListUnhealthyChannels)
+					r.Get("/libraries/{id}/channels/without-epg", iptvHandler.ListChannelsWithoutEPG)
 
 					// Admin IPTV operations
 					r.Group(func(r chi.Router) {
 						r.Use(auth.RequireAdmin)
 						r.Post("/iptv/public/import", iptvHandler.ImportPublicIPTV)
+						r.Post("/libraries/{id}/epg-sources", iptvHandler.AddEPGSource)
+						r.Delete("/libraries/{id}/epg-sources/{sourceId}", iptvHandler.RemoveEPGSource)
+						r.Patch("/libraries/{id}/epg-sources/reorder", iptvHandler.ReorderEPGSources)
+						r.Post("/channels/{channelId}/reset-health", iptvHandler.ResetChannelHealth)
+						r.Post("/channels/{channelId}/disable", iptvHandler.DisableChannel)
+						r.Post("/channels/{channelId}/enable", iptvHandler.EnableChannel)
+						r.Patch("/channels/{channelId}", iptvHandler.PatchChannel)
 						r.Route("/libraries/{id}/iptv", func(r chi.Router) {
 							r.Post("/refresh-m3u", iptvHandler.RefreshM3U)
 							r.Post("/refresh-epg", iptvHandler.RefreshEPG)
