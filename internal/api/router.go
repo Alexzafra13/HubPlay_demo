@@ -39,6 +39,7 @@ type Dependencies struct {
 	Images         *db.ImageRepository
 	Metadata       *db.MetadataRepository
 	UserData       *db.UserDataRepository
+	UserPreferences *db.UserPreferenceRepository
 	Providers      *provider.Manager
 	ExternalIDs    *db.ExternalIDRepository
 	LibraryRepo    *db.LibraryRepository
@@ -148,6 +149,16 @@ func NewRouter(deps Dependencies) http.Handler {
 
 			// Current user
 			r.Get("/me", userHandler.Me)
+
+			// Per-user preferences (hero mode, theme overrides, etc.)
+			// Authenticated; the handler derives userID from claims so
+			// there's no path param to tamper with.
+			if deps.UserPreferences != nil {
+				prefsHandler := handlers.NewPreferencesHandler(deps.UserPreferences, deps.Logger)
+				r.Get("/me/preferences", prefsHandler.ListMine)
+				r.Put("/me/preferences/{key}", prefsHandler.SetMine)
+				r.Delete("/me/preferences/{key}", prefsHandler.DeleteMine)
+			}
 
 			// Users (admin only)
 			r.Route("/users", func(r chi.Router) {

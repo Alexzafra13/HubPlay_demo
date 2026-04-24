@@ -193,6 +193,10 @@ export interface Channel {
   /** ISO-like country code from M3U (e.g. "ES"). May be empty. */
   country: string;
   is_active?: boolean;
+  /** When the channel first landed in the library. RFC3339 UTC. May
+   * be absent on older DTOs; the hero "newest" mode just sorts absent
+   * values to the end. */
+  added_at?: string;
 }
 
 export interface EPGProgram {

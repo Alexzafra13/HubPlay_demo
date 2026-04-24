@@ -577,6 +577,18 @@ export class ApiClient {
     await this.request<void>("POST", `/channels/${channelId}/enable`);
   }
 
+  async getMyPreferences(): Promise<Record<string, string>> {
+    return this.request<Record<string, string>>("GET", "/me/preferences");
+  }
+
+  async setMyPreference(key: string, value: string): Promise<void> {
+    await this.request<void>(
+      "PUT",
+      `/me/preferences/${encodeURIComponent(key)}`,
+      { body: { value } },
+    );
+  }
+
   async listChannelsWithoutEPG(libraryId: string): Promise<ChannelWithoutEPG[]> {
     return this.request<ChannelWithoutEPG[]>(
       "GET",

@@ -1005,6 +1005,7 @@ func channelHealthDTO(ch *db.Channel) map[string]any {
 		"language":             base.Language,
 		"country":              base.Country,
 		"is_active":            base.IsActive,
+		"added_at":             base.AddedAt,
 		"last_probe_at":        lastProbe,
 		"last_probe_status":    ch.LastProbeStatus,
 		"last_probe_error":     ch.LastProbeError,

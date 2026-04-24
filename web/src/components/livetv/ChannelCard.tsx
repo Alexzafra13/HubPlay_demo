@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import Hls from "hls.js";
 import type { Channel, EPGProgram } from "@/api/types";
 import { ChannelLogo } from "./ChannelLogo";
+import { StreamPreview } from "./StreamPreview";
 import { formatTime, getProgramProgress } from "./epgHelpers";
 
 interface ChannelCardProps {
@@ -12,18 +12,17 @@ interface ChannelCardProps {
   onClick?: () => void;
   onToggleFavorite?: () => void;
   /**
-   * When true (default), hovering the card for 500 ms attaches a muted HLS
-   * preview of the live stream over the thumbnail. Auto-stops after 15 s
-   * even if the cursor stays put, so an idle hover doesn't burn bandwidth
-   * forever. Set to false to disable previews entirely (faster, zero cost).
+   * When true (default), hovering the card for ~250 ms attaches a muted
+   * HLS preview of the live stream over the thumbnail. Auto-stops after
+   * 15 s even if the cursor stays put, so an idle hover doesn't burn
+   * bandwidth forever. Set to false to disable previews entirely.
    */
   previewOnHover?: boolean;
   /**
    * Renders the card in a "the channel is off the air" treatment: low
    * opacity, desaturated logo, an "Apagado" badge where LIVE usually
-   * sits, no hover preview, no EPG overlay. Keep the click handler
-   * working — the admin may want to test if the upstream came back
-   * without first clearing the health counter from the admin panel.
+   * sits, no hover preview. Click still works so the admin can probe
+   * if the upstream came back.
    */
   dimmed?: boolean;
 }
@@ -31,24 +30,28 @@ interface ChannelCardProps {
 /**
  * ChannelCard — the unit of the Live TV "Discover" rails.
  *
- * Thumbnail layout:
- *   - Backdrop: a gradient tinted by the channel's deterministic logo color
- *     (cheap, stable visual identity even when the real logo is missing).
- *   - Foreground: the real `logo_url` centered, large. Falls back to
- *     initials-on-color via ChannelLogo when the image is missing or
- *     404s — no layout shift either way.
- *   - On hover (opt-in via `previewOnHover`): a muted `<video>` fades in
- *     over the logo with a real HLS preview of the channel. Capped at 15 s.
+ * Layout deliberately separates the "poster" (the thumbnail, which is
+ * the visual card) from the metadata (text on the page background
+ * below). Earlier versions wrapped both in one bordered container
+ * which produced a busy, "boxed-in" look — every card shouted
+ * "I'M A TILE". Stripping the outer wrapper makes the rails read
+ * like YouTube / Netflix / Plex: the poster carries the weight, the
+ * text is quiet support.
  *
- * Overlays (always on top of the thumbnail):
- *   - Top-left:  channel number + LIVE pill
- *   - Top-right: favorite toggle (if `onToggleFavorite` provided)
+ * Thumbnail:
+ *   - Dark neutral backdrop with a subtle radial of the channel's
+ *     brand colour at the top; logo centred.
+ *   - On hover (opt-in via `previewOnHover`): a muted `<video>` fades
+ *     in over the logo with a real HLS preview. Capped at 15 s.
+ *   - Overlays: CH number + state pill (Live / Apagado) top-left,
+ *     favorite heart top-right.
+ *   - Bottom of the thumbnail: a thin progress bar for the EPG
+ *     "now on air" remaining time (hidden when no EPG).
  *
- * Body (below the thumbnail):
- *   - Name (bold)
- *   - "Ahora {title}" from nowPlaying, or "Sin guía disponible"
- *   - EPG progress bar
- *   - Up-next time + title
+ * Body (below thumbnail, on page background):
+ *   - Channel name.
+ *   - "Ahora {title}" / "Sin guía disponible" / "Apagado".
+ *   - Up-next line (time + title) when EPG has it.
  */
 export function ChannelCard({
   channel,
@@ -62,21 +65,14 @@ export function ChannelCard({
 }: ChannelCardProps) {
   const progress = nowPlaying ? getProgramProgress(nowPlaying) : 0;
 
-  // Thumbnail backdrop.
-  //
-  // Earlier versions painted the full card with the channel's brand colour
-  // at high opacity, which turned every rail into a rainbow: five cards
-  // side by side screamed five different hues and the page lost visual
-  // cohesion. The mix below keeps a neutral dark base (matches the rest
-  // of the UI chrome) with a subtle radial of the channel's colour at the
-  // top, enough to give each tile a hint of identity without competing
-  // with its neighbours for attention.
+  // Thumbnail backdrop — neutral dark base with a whisper of the
+  // channel's brand colour at the top so each tile keeps a hint of
+  // identity without fighting its neighbours.
   const thumbBg = `radial-gradient(circle at 50% 20%, ${channel.logo_bg}33 0%, transparent 55%), linear-gradient(180deg, var(--tv-bg-2) 0%, var(--tv-bg-1) 100%)`;
 
-  // Hover-preview state -------------------------------------------------
-  // `armed` is flipped on after the debounce fires; `<video>` mounts only
-  // when `armed` is true, so no HLS traffic starts until the user actually
-  // dwells on the card.
+  // Hover-preview state. Debounced so a rapid cursor fly-by doesn't
+  // spin up HLS; the 250 ms dwell is short enough that a deliberate
+  // hover feels instant but a pass-through doesn't trigger.
   const [armed, setArmed] = useState(false);
   const hoverTimer = useRef<number | null>(null);
   const autoStopTimer = useRef<number | null>(null);
@@ -95,16 +91,12 @@ export function ChannelCard({
   useEffect(() => () => clearTimers(), []);
 
   const handleMouseEnter = () => {
-    // Dimmed = channel is flagged off-the-air. Don't burn bandwidth
-    // loading a hover preview that's almost certainly going to fail.
     if (!previewOnHover || dimmed) return;
     clearTimers();
-    // 500 ms dwell before arming — filters rapid cursor pass-throughs.
     hoverTimer.current = window.setTimeout(() => {
       setArmed(true);
-      // Absolute safety net: 15 s max preview per hover session.
       autoStopTimer.current = window.setTimeout(() => setArmed(false), 15_000);
-    }, 500);
+    }, 250);
   };
 
   const handleMouseLeave = () => {
@@ -119,12 +111,8 @@ export function ChannelCard({
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
       className={[
-        "group flex w-full flex-col overflow-hidden rounded-tv-md border border-tv-line bg-tv-bg-1 text-left transition hover:-translate-y-0.5 hover:border-tv-line-strong hover:shadow-tv-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tv-accent",
-        // Apagado treatment: drops the whole tile to ~55% opacity and
-        // desaturates the interior imagery. Kept as a CSS class (not a
-        // compound inline style) so hover still lifts the tile a touch
-        // and gives feedback that the click is live.
-        dimmed && "opacity-60 grayscale hover:opacity-90",
+        "group flex w-full flex-col gap-2 text-left focus-visible:outline-none",
+        dimmed ? "opacity-60 grayscale hover:opacity-90 transition" : "",
       ]
         .filter(Boolean)
         .join(" ")}
@@ -136,12 +124,18 @@ export function ChannelCard({
             : channel.name
       }
     >
-      {/* Thumbnail ---------------------------------------------------- */}
-      <div className="relative aspect-[16/9] w-full overflow-hidden">
-        <div className="absolute inset-0" style={{ background: thumbBg }} />
+      {/* Poster thumbnail — the visual card.
+          Border + rounded corners + overflow-hidden live here (not on
+          the outer button) so only the poster looks like a tile; the
+          text below sits on the page background. */}
+      <div className="relative aspect-[16/9] w-full overflow-hidden rounded-tv-md border border-tv-line bg-tv-bg-1 transition group-hover:-translate-y-0.5 group-hover:border-tv-line-strong group-hover:shadow-tv-lg group-focus-visible:ring-2 group-focus-visible:ring-tv-accent">
+        <div
+          className="pointer-events-none absolute inset-0"
+          style={{ background: thumbBg }}
+        />
 
         {/* Centered logo — primary visual when no preview is playing. */}
-        <div className="absolute inset-0 flex items-center justify-center p-6">
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-6">
           {channel.logo_url ? (
             <img
               src={channel.logo_url}
@@ -149,8 +143,6 @@ export function ChannelCard({
               className="max-h-full max-w-full object-contain drop-shadow-[0_2px_8px_rgba(0,0,0,0.5)]"
               loading="lazy"
               onError={(e) => {
-                // Hide the broken image; the initials fallback underneath
-                // (rendered below as a sibling) becomes visible instead.
                 e.currentTarget.style.display = "none";
               }}
             />
@@ -167,27 +159,20 @@ export function ChannelCard({
           )}
         </div>
 
-        {/* Hover preview (mounts only when armed). */}
-        {armed && (
-          <HoverPreview
-            streamUrl={channel.stream_url}
-            onUnmount={() => {
-              /* noop */
-            }}
-          />
-        )}
+        {/* Hover preview (mounts only when armed). pointer-events-none
+            on the <video> lets mouse events fall through to the
+            button — without it the cursor would "leave" the button
+            as soon as the video loads and the preview would instantly
+            cancel. */}
+        {armed && <StreamPreview streamUrl={channel.stream_url} />}
 
-        {/* Top-left badges. Order: CH number → state pill → country.
-            LIVE only renders when we actually have EPG "now on air" so
-            the badge carries meaning. Apagado replaces LIVE when the
-            health counter has flagged the channel — one pill at a time
-            keeps the glance-parsing clean. */}
+        {/* Top-left badges. Order: CH number → state pill → country. */}
         <div className="pointer-events-none absolute left-2 top-2 flex max-w-[calc(100%-3rem)] items-center gap-1.5">
           <span className="rounded-tv-xs bg-black/50 px-1.5 py-0.5 font-mono text-[10px] font-semibold tracking-wider text-tv-fg-0 backdrop-blur">
             CH {channel.number}
           </span>
           {dimmed ? (
-            <span className="flex items-center gap-1 rounded-tv-xs bg-black/70 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-tv-fg-1 backdrop-blur">
+            <span className="rounded-tv-xs bg-black/70 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-tv-fg-1 backdrop-blur">
               Apagado
             </span>
           ) : nowPlaying ? (
@@ -231,10 +216,25 @@ export function ChannelCard({
             <HeartIcon filled={isFavorite} />
           </span>
         )}
+
+        {/* Progress bar, thin, hugging the bottom of the poster. Inside
+            the thumbnail (not below) so the text region stays clean
+            prose. Only renders when EPG knows how far along we are. */}
+        {nowPlaying && !dimmed ? (
+          <div
+            className="pointer-events-none absolute inset-x-0 bottom-0 h-0.5 bg-black/40"
+            aria-hidden="true"
+          >
+            <div
+              className="h-full bg-tv-accent transition-[width] duration-1000"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+        ) : null}
       </div>
 
-      {/* Body --------------------------------------------------------- */}
-      <div className="flex flex-col gap-1.5 px-3 pb-3 pt-3">
+      {/* Body — page-background text, no wrapper. */}
+      <div className="flex min-w-0 flex-col gap-0.5 px-0.5">
         <div className="truncate text-sm font-semibold text-tv-fg-0">
           {channel.name}
         </div>
@@ -256,100 +256,19 @@ export function ChannelCard({
           )}
         </div>
 
-        {/* Progress */}
-        <div className="h-1 w-full overflow-hidden rounded-full bg-tv-bg-3">
-          <div
-            className="h-full rounded-full bg-tv-accent transition-[width] duration-1000"
-            style={{ width: `${progress}%` }}
-          />
-        </div>
-
-        {/* Up next */}
-        <div className="truncate text-[11px] text-tv-fg-3">
-          {upNext ? (
-            <>
-              <span className="mr-1.5 font-mono tabular-nums text-tv-fg-2">
-                {formatTime(upNext.start_time)}
-              </span>
-              {upNext.title}
-            </>
-          ) : (
-            <span>&nbsp;</span>
-          )}
-        </div>
+        {upNext && !dimmed ? (
+          <div className="truncate text-[11px] text-tv-fg-3">
+            <span className="mr-1.5 font-mono tabular-nums text-tv-fg-2">
+              {formatTime(upNext.start_time)}
+            </span>
+            {upNext.title}
+          </div>
+        ) : null}
       </div>
     </button>
   );
 }
 
-// ───────────────────────────────────────────────────────────────────
-// HoverPreview
-// ───────────────────────────────────────────────────────────────────
-//
-// Dedicated lightweight HLS attacher for the card hover preview. Distinct
-// from `useLiveHls` — no loading chrome, no error UI, silent failure. Uses
-// a tiny buffer (≤ 8 s) so a short hover doesn't pull minutes of segments,
-// and runs muted/playsInline so iOS Safari accepts the autoplay.
-
-interface HoverPreviewProps {
-  streamUrl: string;
-  onUnmount: () => void;
-}
-
-function HoverPreview({ streamUrl, onUnmount }: HoverPreviewProps) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-
-    let hls: Hls | null = null;
-    if (Hls.isSupported()) {
-      hls = new Hls({
-        enableWorker: true,
-        lowLatencyMode: false,
-        maxBufferLength: 8,
-        maxMaxBufferLength: 10,
-        backBufferLength: 0,
-        // Silent network retry — short budget, no UI feedback.
-        manifestLoadingMaxRetry: 1,
-        levelLoadingMaxRetry: 1,
-        fragLoadingMaxRetry: 1,
-        xhrSetup: (xhr) => {
-          xhr.withCredentials = true;
-        },
-      });
-      hls.loadSource(streamUrl);
-      hls.attachMedia(video);
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        video.play().catch(() => {});
-      });
-      hls.on(Hls.Events.ERROR, (_event, data) => {
-        if (data.fatal) hls?.destroy();
-      });
-    } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
-      video.src = streamUrl;
-      video.play().catch(() => {});
-    }
-
-    return () => {
-      if (hls) hls.destroy();
-      video.removeAttribute("src");
-      video.load();
-      onUnmount();
-    };
-  }, [streamUrl, onUnmount]);
-
-  return (
-    <video
-      ref={videoRef}
-      muted
-      playsInline
-      autoPlay
-      className="absolute inset-0 h-full w-full object-cover"
-    />
-  );
-}
 
 function HeartIcon({ filled }: { filled: boolean }) {
   return (

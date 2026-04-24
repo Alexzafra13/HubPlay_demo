@@ -8,6 +8,7 @@ import {
   useChannelFavoriteIDs,
   useLibraries,
   useRemoveChannelFavorite,
+  useUserPreference,
 } from "@/api/hooks";
 import { api } from "@/api/client";
 import type { Channel, ChannelCategory, UnhealthyChannel } from "@/api/types";
@@ -19,8 +20,10 @@ import {
   ChannelRail,
   CountrySelector,
   EPGGrid,
-  HeroMosaic,
-  type HeroTileData,
+  HeroSpotlight,
+  type HeroMode,
+  type HeroModeOption,
+  type HeroSpotlightItem,
   PlayerOverlay,
   getNowPlaying,
   getUpNext,
@@ -192,21 +195,98 @@ export default function LiveTV() {
     return byCat;
   }, [filteredChannels]);
 
-  // Featured = up to 5 channels that currently have a known program on
-  // air, so the hero never looks empty on bootstrap. Falls back to the
-  // first 5 channels if no EPG has landed yet.
-  // Featured = up to 5 channels for the hero mosaic; prefer ones with EPG
-  // so the tiles show real "Now on air" titles instead of empty chrome.
-  const featured = useMemo<HeroTileData[]>(() => {
-    const withProgram: HeroTileData[] = [];
-    for (const ch of filteredChannels) {
-      const np = getNowPlaying(scheduleByChannel[ch.id]);
-      if (np) withProgram.push({ channel: ch, nowPlaying: np });
-      if (withProgram.length === 5) break;
+  // Hero mode — what signal fills the top-of-Discover spotlight.
+  // Persisted per-account in user_preferences so the choice follows
+  // the viewer across devices. Defaults to "favorites" (the most
+  // intentional personal signal). If a user opens Discover before
+  // marking any favorites, the hero surfaces an empty-state with the
+  // gear so they can switch to "live-now" or "newest" without
+  // feeling stuck.
+  const [heroMode, setHeroMode] = useUserPreference<HeroMode>(
+    "livetv.hero_mode",
+    "favorites",
+  );
+
+  const heroItems = useMemo<HeroSpotlightItem[]>(() => {
+    if (heroMode === "off") return [];
+    let pool: Channel[] = [];
+    if (heroMode === "favorites") {
+      pool = channels.filter((c) => favoriteSet.has(c.id));
+    } else if (heroMode === "live-now") {
+      // Channels currently airing a known programme, sorted by number
+      // so the result is stable and the first slide is always CH 1
+      // when possible (predictable entry point on load).
+      pool = channels
+        .filter((c) => getNowPlaying(scheduleByChannel[c.id]))
+        .slice()
+        .sort((a, b) => a.number - b.number);
+    } else if (heroMode === "newest") {
+      pool = channels
+        .slice()
+        .sort((a, b) =>
+          (b.added_at ?? "").localeCompare(a.added_at ?? ""),
+        );
     }
-    if (withProgram.length > 0) return withProgram;
-    return filteredChannels.slice(0, 5).map((c) => ({ channel: c }));
-  }, [filteredChannels, scheduleByChannel]);
+    return pool.slice(0, 6).map((c) => ({
+      channel: c,
+      nowPlaying: getNowPlaying(scheduleByChannel[c.id]),
+    }));
+  }, [heroMode, channels, favoriteSet, scheduleByChannel]);
+
+  const heroLabel = useMemo(() => {
+    switch (heroMode) {
+      case "favorites":
+        return t("liveTV.hero.label.favorites", { defaultValue: "Tu favorito" });
+      case "live-now":
+        return t("liveTV.hero.label.liveNow", { defaultValue: "En directo ahora" });
+      case "newest":
+        return t("liveTV.hero.label.newest", { defaultValue: "Recién añadidos" });
+      default:
+        return "";
+    }
+  }, [heroMode, t]);
+
+  const heroModeOptions = useMemo<HeroModeOption[]>(
+    () => [
+      {
+        mode: "favorites",
+        label: t("liveTV.hero.option.favorites", {
+          defaultValue: "Mis favoritos",
+        }),
+        hint: t("liveTV.hero.option.favoritesHint", {
+          defaultValue: "Los canales con ♥, rotando.",
+        }),
+      },
+      {
+        mode: "live-now",
+        label: t("liveTV.hero.option.liveNow", {
+          defaultValue: "En vivo ahora",
+        }),
+        hint: t("liveTV.hero.option.liveNowHint", {
+          defaultValue: "Canales con programa EPG emitiendo ahora mismo.",
+        }),
+      },
+      {
+        mode: "newest",
+        label: t("liveTV.hero.option.newest", {
+          defaultValue: "Recién añadidos",
+        }),
+        hint: t("liveTV.hero.option.newestHint", {
+          defaultValue: "Los últimos canales que entraron en la biblioteca.",
+        }),
+      },
+      {
+        mode: "off",
+        label: t("liveTV.hero.option.off", {
+          defaultValue: "Ocultar destacado",
+        }),
+        hint: t("liveTV.hero.option.offHint", {
+          defaultValue: "Discover empieza directamente por las rails.",
+        }),
+      },
+    ],
+    [t],
+  );
 
   // Topbar counter: number of channels *actually broadcasting now* — in IPTV
   // all active channels stream continuously, so this is simply the count of
@@ -254,7 +334,11 @@ export default function LiveTV() {
 
       {tab === "discover" && (
         <DiscoverView
-          featured={featured}
+          heroItems={heroItems}
+          heroLabel={heroLabel}
+          heroMode={heroMode}
+          heroModeOptions={heroModeOptions}
+          onHeroModeChange={setHeroMode}
           counts={counts}
           category={category}
           onCategoryChange={setCategory}
@@ -420,7 +504,11 @@ function SearchIcon() {
 // ───────────────────────────────────────────────────────────────────
 
 interface DiscoverViewProps {
-  featured: HeroTileData[];
+  heroItems: HeroSpotlightItem[];
+  heroLabel: string;
+  heroMode: HeroMode;
+  heroModeOptions: HeroModeOption[];
+  onHeroModeChange: (mode: HeroMode) => void;
   counts: Record<CategoryFilter, number>;
   category: CategoryFilter;
   onCategoryChange: (c: CategoryFilter) => void;
@@ -434,7 +522,11 @@ interface DiscoverViewProps {
 }
 
 function DiscoverView({
-  featured,
+  heroItems,
+  heroLabel,
+  heroMode,
+  heroModeOptions,
+  onHeroModeChange,
   counts,
   category,
   onCategoryChange,
@@ -473,7 +565,14 @@ function DiscoverView({
 
   return (
     <div className="flex flex-col gap-8">
-      <HeroMosaic items={featured} onOpen={onOpen} />
+      <HeroSpotlight
+        items={heroItems}
+        label={heroLabel}
+        mode={heroMode}
+        modeOptions={heroModeOptions}
+        onModeChange={onHeroModeChange}
+        onOpen={onOpen}
+      />
 
       <CategoryChips
         counts={counts}
