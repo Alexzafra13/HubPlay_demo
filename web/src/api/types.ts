@@ -219,6 +219,48 @@ export interface ImportPublicIPTVResponse {
   m3u_url: string;
 }
 
+/**
+ * A curated, well-known XMLTV feed the backend ships with. Mirrors
+ * `internal/iptv/PublicEPGSource` — the admin UI renders this list in the
+ * "Añadir fuente EPG" dropdown so operators don't have to memorise URLs.
+ */
+export interface PublicEPGSource {
+  id: string;
+  name: string;
+  description: string;
+  language: string;
+  countries: string[];
+  url: string;
+}
+
+/**
+ * One EPG provider attached to a livetv library. Priority is "lower first";
+ * the refresher processes sources in ascending priority order and a channel
+ * covered by priority 0 is not overwritten by priority 1.
+ *
+ * `catalog_id` is empty for custom URLs the admin pasted directly.
+ * `last_*` fields are populated by the refresher after each run — the UI
+ * uses them to flag broken sources with a status badge.
+ */
+export interface LibraryEPGSource {
+  id: string;
+  library_id: string;
+  catalog_id: string;
+  url: string;
+  priority: number;
+  last_refreshed_at: string | null;
+  last_status: "" | "ok" | "error";
+  last_error: string;
+  last_program_count: number;
+  last_channel_count: number;
+  created_at: string;
+}
+
+export interface AddEPGSourceRequest {
+  catalog_id?: string;
+  url?: string;
+}
+
 // ─── Streaming ──────────────────────────────────────────────────────────────
 
 export type PlaybackMethod = "direct_play" | "direct_stream" | "transcode";

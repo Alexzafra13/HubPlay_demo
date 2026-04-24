@@ -60,6 +60,22 @@ dedup M3U), LiveTV partido en 8 ficheros con **EPG grid real** estilo Plex.
    `time.Time` como strings (`RFC3339` y el legado Go-stringer), de
    modo que bases de datos pre-fix siguen leyéndose. Tests cubren el
    roundtrip XMLTV exacto + legacy row sembrada con INSERT crudo.
+8. **Multi-fuente EPG + catálogo curado**: una biblioteca livetv puede
+   tener N proveedores XMLTV en orden de prioridad; el refresher los
+   recorre y mergea "primera fuente gana por canal" (davidmuma lleva
+   las grandes, epg.pw rellena los 216 canales huérfanos). Si una
+   fuente 404ea, el refresh sigue con las demás — cada fuente persiste
+   `last_status`, `last_error`, `last_program_count`, `last_channel_count`
+   para que la UI del admin muestre badges "✓ 3200 programas" / "✗ 404".
+   Nueva migración `007_library_epg_sources.sql` con FK + UNIQUE(library,
+   url); migra el antiguo `libraries.epg_url` a una fila priority-0.
+   Nuevo `internal/iptv/epg_catalog.go` con 10 fuentes curadas
+   (davidmuma x4, epg.pw x6 multi-idioma). Endpoints nuevos:
+   `GET /iptv/epg-catalog`, `GET /libraries/{id}/epg-sources` (viewer
+   con ACL), `POST` / `DELETE` / `PATCH .../reorder` admin-only. Panel
+   nuevo `EPGSourcesPanel` en LibrariesAdmin con dropdown del catálogo,
+   input de URL custom y reorder vía botones ↑/↓ accesibles por teclado.
+   Cubierto por tests (repo + service + handler + catalog lookup).
 
 **Impacto operativo**: importar davidmuma ya funciona end-to-end.
 Poner la URL XMLTV (o .gz) en el campo *EPG URL* de la biblioteca

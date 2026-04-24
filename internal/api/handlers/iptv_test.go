@@ -16,6 +16,7 @@ import (
 
 	"hubplay/internal/auth"
 	"hubplay/internal/db"
+	"hubplay/internal/iptv"
 	"hubplay/internal/testutil"
 )
 
@@ -40,6 +41,10 @@ type iptvFakeService struct {
 	// Per-user channel-favorites set, keyed by userID → set of channelIDs.
 	// Nil until the first write; methods lazily initialize.
 	favoritesByUser map[string]map[string]struct{}
+
+	// EPG source fixtures, keyed by libraryID.
+	epgSources map[string][]*db.LibraryEPGSource
+	epgCatalog []iptv.PublicEPGSource
 }
 
 func newIPTVFakeService() *iptvFakeService {
@@ -169,6 +174,87 @@ func (s *iptvFakeService) ListFavoriteChannels(_ context.Context, userID string)
 	return out, nil
 }
 
+// ─── EPG catalog & sources (fake) ───────────────────────────────────────────
+
+func (s *iptvFakeService) PublicEPGCatalog() []iptv.PublicEPGSource {
+	if s.epgCatalog != nil {
+		return s.epgCatalog
+	}
+	return []iptv.PublicEPGSource{
+		{ID: "davidmuma-guiatv", Name: "davidmuma", Language: "es", URL: "http://example/guiatv.xml"},
+	}
+}
+
+func (s *iptvFakeService) ListEPGSources(_ context.Context, libraryID string) ([]*db.LibraryEPGSource, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := []*db.LibraryEPGSource{}
+	for _, src := range s.epgSources[libraryID] {
+		out = append(out, src)
+	}
+	return out, nil
+}
+
+func (s *iptvFakeService) AddEPGSource(_ context.Context, libraryID, catalogID, customURL string) (*db.LibraryEPGSource, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if catalogID == "" && customURL == "" {
+		return nil, errors.New("either catalog_id or url required")
+	}
+	src := &db.LibraryEPGSource{
+		ID:        "src-" + fmt.Sprintf("%d", len(s.epgSources[libraryID])+1),
+		LibraryID: libraryID,
+		CatalogID: catalogID,
+		URL:       customURL,
+		Priority:  len(s.epgSources[libraryID]),
+	}
+	if catalogID != "" {
+		src.URL = "http://catalog/" + catalogID + ".xml"
+	}
+	if s.epgSources == nil {
+		s.epgSources = map[string][]*db.LibraryEPGSource{}
+	}
+	s.epgSources[libraryID] = append(s.epgSources[libraryID], src)
+	return src, nil
+}
+
+func (s *iptvFakeService) RemoveEPGSource(_ context.Context, libraryID, sourceID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	list := s.epgSources[libraryID]
+	for i, src := range list {
+		if src.ID == sourceID {
+			s.epgSources[libraryID] = append(list[:i], list[i+1:]...)
+			return nil
+		}
+	}
+	return errors.New("not found")
+}
+
+func (s *iptvFakeService) ReorderEPGSources(_ context.Context, libraryID string, orderedIDs []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	list := s.epgSources[libraryID]
+	if len(orderedIDs) != len(list) {
+		return errors.New("mismatched id list")
+	}
+	byID := map[string]*db.LibraryEPGSource{}
+	for _, src := range list {
+		byID[src.ID] = src
+	}
+	out := make([]*db.LibraryEPGSource, 0, len(orderedIDs))
+	for i, id := range orderedIDs {
+		src, ok := byID[id]
+		if !ok {
+			return errors.New("unknown id")
+		}
+		src.Priority = i
+		out = append(out, src)
+	}
+	s.epgSources[libraryID] = out
+	return nil
+}
+
 // ─── Fake proxy ─────────────────────────────────────────────────────────────
 
 type iptvFakeProxy struct {
@@ -266,6 +352,11 @@ func newIPTVTestEnv(t *testing.T) *iptvTestEnv {
 		r.Post("/iptv/schedule", env.handler.BulkSchedule)
 		r.Get("/iptv/public/countries", env.handler.PublicCountries)
 		r.Post("/iptv/public/import", env.handler.ImportPublicIPTV)
+		r.Get("/iptv/epg-catalog", env.handler.EPGCatalog)
+		r.Get("/libraries/{id}/epg-sources", env.handler.ListEPGSources)
+		r.Post("/libraries/{id}/epg-sources", env.handler.AddEPGSource)
+		r.Delete("/libraries/{id}/epg-sources/{sourceId}", env.handler.RemoveEPGSource)
+		r.Patch("/libraries/{id}/epg-sources/reorder", env.handler.ReorderEPGSources)
 	})
 	env.router = r
 	return env
@@ -759,5 +850,106 @@ func TestIPTVHandler_ImportPublicIPTV_CreateError_500(t *testing.T) {
 	rr := env.do(http.MethodPost, "/api/v1/iptv/public/import", `{"country":"us"}`)
 	if rr.Code != http.StatusInternalServerError {
 		t.Fatalf("status: %d", rr.Code)
+	}
+}
+
+// ─── EPG catalog + sources ───────────────────────────────────────────────
+
+func TestIPTVHandler_EPGCatalog_Returns(t *testing.T) {
+	env := newIPTVTestEnv(t)
+	env.svc.epgCatalog = []iptv.PublicEPGSource{
+		{ID: "test-src", Name: "Test", Language: "es", URL: "http://example/x.xml"},
+	}
+	rr := env.do(http.MethodGet, "/api/v1/iptv/epg-catalog", "")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: %d", rr.Code)
+	}
+	data, _ := iptvDecodeData(t, rr).([]any)
+	if len(data) != 1 {
+		t.Fatalf("catalog size: %d", len(data))
+	}
+}
+
+func TestIPTVHandler_AddEPGSource_CatalogID(t *testing.T) {
+	env := newIPTVTestEnv(t)
+	rr := env.do(http.MethodPost, "/api/v1/libraries/lib-1/epg-sources",
+		`{"catalog_id":"davidmuma-guiatv"}`)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status: %d, body=%s", rr.Code, rr.Body.String())
+	}
+	data, _ := iptvDecodeData(t, rr).(map[string]any)
+	if data["catalog_id"] != "davidmuma-guiatv" {
+		t.Errorf("catalog_id: %v", data["catalog_id"])
+	}
+}
+
+func TestIPTVHandler_AddEPGSource_MissingFields_400(t *testing.T) {
+	env := newIPTVTestEnv(t)
+	rr := env.do(http.MethodPost, "/api/v1/libraries/lib-1/epg-sources", `{}`)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status: %d", rr.Code)
+	}
+}
+
+func TestIPTVHandler_AddEPGSource_InvalidJSON_400(t *testing.T) {
+	env := newIPTVTestEnv(t)
+	rr := env.do(http.MethodPost, "/api/v1/libraries/lib-1/epg-sources", `{bad`)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status: %d", rr.Code)
+	}
+}
+
+func TestIPTVHandler_ListEPGSources_Empty(t *testing.T) {
+	env := newIPTVTestEnv(t)
+	rr := env.do(http.MethodGet, "/api/v1/libraries/lib-1/epg-sources", "")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: %d", rr.Code)
+	}
+	data, _ := iptvDecodeData(t, rr).([]any)
+	if len(data) != 0 {
+		t.Errorf("expected empty, got %d", len(data))
+	}
+}
+
+func TestIPTVHandler_RemoveEPGSource_Works(t *testing.T) {
+	env := newIPTVTestEnv(t)
+	addRR := env.do(http.MethodPost, "/api/v1/libraries/lib-1/epg-sources",
+		`{"url":"http://x/y.xml"}`)
+	if addRR.Code != http.StatusCreated {
+		t.Fatalf("add status: %d", addRR.Code)
+	}
+	added, _ := iptvDecodeData(t, addRR).(map[string]any)
+	sourceID, _ := added["id"].(string)
+
+	delRR := env.do(http.MethodDelete, "/api/v1/libraries/lib-1/epg-sources/"+sourceID, "")
+	if delRR.Code != http.StatusNoContent {
+		t.Fatalf("delete status: %d", delRR.Code)
+	}
+	listRR := env.do(http.MethodGet, "/api/v1/libraries/lib-1/epg-sources", "")
+	data, _ := iptvDecodeData(t, listRR).([]any)
+	if len(data) != 0 {
+		t.Errorf("expected empty after delete, got %d", len(data))
+	}
+}
+
+func TestIPTVHandler_ReorderEPGSources_Works(t *testing.T) {
+	env := newIPTVTestEnv(t)
+	a, _ := iptvDecodeData(t, env.do(http.MethodPost, "/api/v1/libraries/lib-1/epg-sources",
+		`{"url":"http://x/a.xml"}`)).(map[string]any)
+	b, _ := iptvDecodeData(t, env.do(http.MethodPost, "/api/v1/libraries/lib-1/epg-sources",
+		`{"url":"http://x/b.xml"}`)).(map[string]any)
+
+	aID, _ := a["id"].(string)
+	bID, _ := b["id"].(string)
+
+	body := fmt.Sprintf(`{"source_ids":["%s","%s"]}`, bID, aID)
+	rr := env.do(http.MethodPatch, "/api/v1/libraries/lib-1/epg-sources/reorder", body)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("reorder status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	data, _ := iptvDecodeData(t, rr).([]any)
+	first, _ := data[0].(map[string]any)
+	if first["id"] != bID {
+		t.Errorf("first id after reorder = %v, want %s", first["id"], bID)
 	}
 }

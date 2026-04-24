@@ -268,11 +268,19 @@ func NewRouter(deps Dependencies) http.Handler {
 
 					// Public IPTV
 					r.Get("/iptv/public/countries", iptvHandler.PublicCountries)
+					r.Get("/iptv/epg-catalog", iptvHandler.EPGCatalog)
+
+					// Per-library EPG source list (read: user with library ACL;
+					// mutations: admin-only, below).
+					r.Get("/libraries/{id}/epg-sources", iptvHandler.ListEPGSources)
 
 					// Admin IPTV operations
 					r.Group(func(r chi.Router) {
 						r.Use(auth.RequireAdmin)
 						r.Post("/iptv/public/import", iptvHandler.ImportPublicIPTV)
+						r.Post("/libraries/{id}/epg-sources", iptvHandler.AddEPGSource)
+						r.Delete("/libraries/{id}/epg-sources/{sourceId}", iptvHandler.RemoveEPGSource)
+						r.Patch("/libraries/{id}/epg-sources/reorder", iptvHandler.ReorderEPGSources)
 						r.Route("/libraries/{id}/iptv", func(r chi.Router) {
 							r.Post("/refresh-m3u", iptvHandler.RefreshM3U)
 							r.Post("/refresh-epg", iptvHandler.RefreshEPG)

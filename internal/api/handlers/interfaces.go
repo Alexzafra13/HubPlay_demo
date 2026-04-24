@@ -8,6 +8,7 @@ import (
 	"hubplay/internal/auth"
 	"hubplay/internal/db"
 	"hubplay/internal/event"
+	"hubplay/internal/iptv"
 	"hubplay/internal/library"
 	"hubplay/internal/provider"
 	"hubplay/internal/scanner"
@@ -96,6 +97,13 @@ type IPTVService interface {
 	IsFavorite(ctx context.Context, userID, channelID string) (bool, error)
 	ListFavoriteIDs(ctx context.Context, userID string) ([]string, error)
 	ListFavoriteChannels(ctx context.Context, userID string) ([]*db.Channel, error)
+
+	// EPG sources (per-library, multi-provider config).
+	PublicEPGCatalog() []iptv.PublicEPGSource
+	ListEPGSources(ctx context.Context, libraryID string) ([]*db.LibraryEPGSource, error)
+	AddEPGSource(ctx context.Context, libraryID, catalogID, customURL string) (*db.LibraryEPGSource, error)
+	RemoveEPGSource(ctx context.Context, libraryID, sourceID string) error
+	ReorderEPGSources(ctx context.Context, libraryID string, orderedIDs []string) error
 }
 
 // IPTVStreamProxyService defines IPTV proxy operations needed by handlers.

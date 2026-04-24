@@ -25,6 +25,7 @@ type Service struct {
 	epgPrograms *db.EPGProgramRepository
 	libraries   *db.LibraryRepository
 	favorites   *db.ChannelFavoritesRepository
+	epgSources  *db.LibraryEPGSourceRepository
 	logger      *slog.Logger
 
 	mu        sync.Mutex
@@ -52,6 +53,7 @@ func NewService(
 	epgPrograms *db.EPGProgramRepository,
 	libraries *db.LibraryRepository,
 	favorites *db.ChannelFavoritesRepository,
+	epgSources *db.LibraryEPGSourceRepository,
 	logger *slog.Logger,
 ) *Service {
 	return &Service{
@@ -59,6 +61,7 @@ func NewService(
 		epgPrograms: epgPrograms,
 		libraries:   libraries,
 		favorites:   favorites,
+		epgSources:  epgSources,
 		logger:      logger.With("module", "iptv"),
 		refreshes:   make(map[string]bool),
 		httpClient: &http.Client{
@@ -210,11 +213,32 @@ func (s *Service) RefreshM3U(ctx context.Context, libraryID string) (int, error)
 	return len(dbChannels), nil
 }
 
-// RefreshEPG downloads and parses an XMLTV EPG, updating program data.
+// RefreshEPG downloads every configured XMLTV source for a library,
+// merges them by priority, and replaces the persisted EPG.
 //
-// Uses the same per-library lock as RefreshM3U to stop two concurrent EPG
-// refreshes from racing inside ReplaceForChannel (last-writer-wins on every
-// channel, non-deterministically).
+// Merge semantics: sources are processed in ascending priority order.
+// The first source that matches a channel OWNS that channel — lower-
+// priority sources may not overwrite its programmes. Channels the
+// first source doesn't cover are still available to the next one.
+// Concretely: point priority 0 at davidmuma for cadenas grandes, point
+// priority 1 at epg.pw for the long tail, and every channel gets the
+// best guide either can provide without fighting the other.
+//
+// Error handling is per-source: a 404 on davidmuma no longer aborts
+// the whole refresh; it's recorded against that source and epg.pw
+// still runs. The function only returns an error if every source
+// failed (so the admin sees an "all sources broken" signal rather
+// than a silent partial).
+//
+// Back-compat: if the library has no rows in library_epg_sources but
+// the legacy `libraries.epg_url` is set, we treat that column as a
+// single implicit priority-0 custom source. Migration 007 already
+// copies the column into the table on upgrade, so this path only
+// triggers for libraries created on an older build that never wrote
+// the column itself.
+//
+// Uses the same per-library lock as RefreshM3U to stop two concurrent
+// EPG refreshes from racing inside ReplaceForChannel.
 func (s *Service) RefreshEPG(ctx context.Context, libraryID string) (int, error) {
 	s.mu.Lock()
 	if s.refreshes[libraryID] {
@@ -234,56 +258,155 @@ func (s *Service) RefreshEPG(ctx context.Context, libraryID string) (int, error)
 		return 0, fmt.Errorf("get library: %w", err)
 	}
 
-	if lib.EPGURL == "" {
-		return 0, fmt.Errorf("library %s has no EPG URL configured", libraryID)
+	sources, err := s.epgSources.ListByLibrary(ctx, libraryID)
+	if err != nil {
+		return 0, fmt.Errorf("list epg sources: %w", err)
+	}
+	if len(sources) == 0 && lib.EPGURL != "" {
+		// Legacy single-URL library: synthesise a transient source so
+		// the merge path still runs. We do NOT persist this row —
+		// migration 007 does that on upgrade. Only in-memory fallback
+		// to cover "operator edits the column directly after upgrade".
+		sources = []*db.LibraryEPGSource{{
+			ID: "", LibraryID: libraryID, URL: lib.EPGURL, Priority: 0,
+		}}
+	}
+	if len(sources) == 0 {
+		return 0, fmt.Errorf("library %s has no EPG sources configured", libraryID)
 	}
 
-	s.logger.Info("refreshing EPG", "library", libraryID, "url", lib.EPGURL)
-
-	body, err := s.fetchURL(ctx, lib.EPGURL)
+	channels, err := s.channels.ListByLibrary(ctx, libraryID, false)
 	if err != nil {
-		return 0, fmt.Errorf("fetch EPG: %w", err)
+		return 0, fmt.Errorf("list channels: %w", err)
+	}
+	tvgMap, nameMap := buildChannelLookups(channels)
+
+	// Merge accumulators — persist once at the end so a per-source
+	// failure doesn't leave the DB half-populated.
+	ownedByChannel := make(map[string][]*db.EPGProgram)
+	totalOrphans := 0
+	workedCount := 0
+
+	for _, src := range sources {
+		progs, matched, orphans, fetchErr := s.refreshOneSource(ctx, src, tvgMap, nameMap, ownedByChannel)
+		totalOrphans += orphans
+		if fetchErr != nil {
+			s.logger.Warn("EPG source failed",
+				"library", libraryID, "url", src.URL, "error", fetchErr)
+			if src.ID != "" {
+				if rerr := s.epgSources.RecordRefresh(ctx, src.ID, "error", fetchErr.Error(), 0, 0); rerr != nil {
+					s.logger.Error("record source error", "source", src.ID, "error", rerr)
+				}
+			}
+			continue
+		}
+		workedCount++
+
+		for chID, list := range progs {
+			ownedByChannel[chID] = list
+		}
+		progCount := 0
+		for _, list := range progs {
+			progCount += len(list)
+		}
+		if src.ID != "" {
+			if rerr := s.epgSources.RecordRefresh(ctx, src.ID, "ok", "", progCount, matched); rerr != nil {
+				s.logger.Error("record source ok", "source", src.ID, "error", rerr)
+			}
+		}
+		s.logger.Info("EPG source loaded",
+			"library", libraryID, "url", src.URL,
+			"programs", progCount, "channels_matched", matched)
+	}
+
+	if workedCount == 0 {
+		return 0, fmt.Errorf("all EPG sources failed for library %s", libraryID)
+	}
+
+	// Persist the merged EPG. One ReplaceForChannel per covered channel
+	// — channels not present in any source keep their previous data
+	// (safer than blanking them whenever a single source hiccups).
+	totalPrograms := 0
+	for channelID, programs := range ownedByChannel {
+		if err := s.epgPrograms.ReplaceForChannel(ctx, channelID, programs); err != nil {
+			s.logger.Error("replace EPG programs", "channel", channelID, "error", err)
+			continue
+		}
+		totalPrograms += len(programs)
+	}
+
+	s.logger.Info("EPG refresh complete",
+		"library", libraryID,
+		"programs", totalPrograms,
+		"channels_matched", len(ownedByChannel),
+		"orphan_programs", totalOrphans,
+		"sources_ok", workedCount,
+		"sources_total", len(sources))
+	s.publish(event.Event{
+		Type: event.EPGUpdated,
+		Data: map[string]any{
+			"library_id":       libraryID,
+			"programs_count":   totalPrograms,
+			"channels_matched": len(ownedByChannel),
+			"orphan_programs":  totalOrphans,
+			"sources_ok":       workedCount,
+			"sources_total":    len(sources),
+		},
+	})
+	return totalPrograms, nil
+}
+
+// buildChannelLookups prepares the tvg-id and normalised-name maps
+// the XMLTV matcher walks on every programme. Extracted from the old
+// RefreshEPG so the multi-source loop can reuse them without rebuilding
+// per source.
+//
+// Common scenario addressed: iptv-org M3U with tvg-ids like
+// "3CatInfo.es@SD" paired with a Spanish community EPG (davidmuma,
+// epg.pw) that uses readable names like "3CatInfo" or "La 1 HD".
+// Without the name map the EPG loads but never joins.
+func buildChannelLookups(channels []*db.Channel) (tvgMap, nameMap map[string]string) {
+	tvgMap = make(map[string]string, len(channels))
+	nameMap = make(map[string]string, len(channels)*2)
+	for _, ch := range channels {
+		if ch.TvgID != "" {
+			tvgMap[ch.TvgID] = ch.ID
+		}
+		for _, v := range nameVariants(ch.Name) {
+			if _, exists := nameMap[v]; !exists {
+				nameMap[v] = ch.ID
+			}
+		}
+	}
+	return tvgMap, nameMap
+}
+
+// refreshOneSource fetches a single XMLTV URL and matches its
+// programmes against the channel lookups. Programmes for channels
+// already owned by a higher-priority source are skipped so the merge
+// caller can just assign into ownedByChannel without worrying about
+// precedence.
+//
+// Returns: the per-channel program map this source contributes, the
+// number of channels matched, the number of orphan programmes (no
+// channel match), and any fetch/parse error.
+func (s *Service) refreshOneSource(
+	ctx context.Context,
+	src *db.LibraryEPGSource,
+	tvgMap, nameMap map[string]string,
+	alreadyOwned map[string][]*db.EPGProgram,
+) (map[string][]*db.EPGProgram, int, int, error) {
+	body, err := s.fetchURL(ctx, src.URL)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("fetch EPG: %w", err)
 	}
 	defer body.Close() //nolint:errcheck
 
 	epgData, err := ParseXMLTV(body)
 	if err != nil {
-		return 0, fmt.Errorf("parse XMLTV: %w", err)
+		return nil, 0, 0, fmt.Errorf("parse XMLTV: %w", err)
 	}
 
-	// Get channels for this library to match EPG data
-	channels, err := s.channels.ListByLibrary(ctx, libraryID, false)
-	if err != nil {
-		return 0, fmt.Errorf("list channels: %w", err)
-	}
-
-	// Build tvg-id → channel ID map and a multi-variant name map so an
-	// EPG source with different channel IDs / display-names than the
-	// M3U can still match by name. Common scenario: iptv-org M3U with
-	// tvg-ids like "3CatInfo.es@SD" paired with a Spanish community EPG
-	// (davidmuma, epg.pw) that uses readable names like "3CatInfo" or
-	// "La 1 HD". Without this the EPG loads but never joins — exactly
-	// the symptom users hit today.
-	tvgMap := make(map[string]string)
-	nameMap := make(map[string]string)
-	addName := func(name, id string) {
-		for _, v := range nameVariants(name) {
-			if _, exists := nameMap[v]; !exists {
-				nameMap[v] = id
-			}
-		}
-	}
-	for _, ch := range channels {
-		if ch.TvgID != "" {
-			tvgMap[ch.TvgID] = ch.ID
-		}
-		addName(ch.Name, ch.ID)
-	}
-
-	// Build XMLTV id → list of candidate names (the channel's own ID plus
-	// every <display-name> alias). A program's ChannelID maps to one
-	// XMLTV channel record; we try all of that record's names against
-	// our nameMap when direct matches fail.
 	xmltvCandidates := make(map[string][]string, len(epgData.Channels))
 	for _, xch := range epgData.Channels {
 		names := make([]string, 0, 1+len(xch.DisplayNames))
@@ -292,17 +415,19 @@ func (s *Service) RefreshEPG(ctx context.Context, libraryID string) (int, error)
 		xmltvCandidates[xch.ID] = names
 	}
 
-	// Match EPG programs to channels and insert
-	totalPrograms := 0
-	programsByChannel := make(map[string][]*db.EPGProgram)
-
+	out := make(map[string][]*db.EPGProgram)
+	orphans := 0
 	for _, prog := range epgData.Programs {
 		channelID := matchChannel(prog.ChannelID, xmltvCandidates[prog.ChannelID], tvgMap, nameMap)
 		if channelID == "" {
+			orphans++
 			continue
 		}
-
-		programsByChannel[channelID] = append(programsByChannel[channelID], &db.EPGProgram{
+		if _, owned := alreadyOwned[channelID]; owned {
+			// A higher-priority source already covered this channel.
+			continue
+		}
+		out[channelID] = append(out[channelID], &db.EPGProgram{
 			ID:          generateID(),
 			ChannelID:   channelID,
 			Title:       prog.Title,
@@ -313,25 +438,7 @@ func (s *Service) RefreshEPG(ctx context.Context, libraryID string) (int, error)
 			EndTime:     prog.Stop,
 		})
 	}
-
-	for channelID, programs := range programsByChannel {
-		if err := s.epgPrograms.ReplaceForChannel(ctx, channelID, programs); err != nil {
-			s.logger.Error("replace EPG programs", "channel", channelID, "error", err)
-			continue
-		}
-		totalPrograms += len(programs)
-	}
-
-	s.logger.Info("EPG refresh complete", "library", libraryID, "programs", totalPrograms, "channels_matched", len(programsByChannel))
-	s.publish(event.Event{
-		Type: event.EPGUpdated,
-		Data: map[string]any{
-			"library_id":       libraryID,
-			"programs_count":   totalPrograms,
-			"channels_matched": len(programsByChannel),
-		},
-	})
-	return totalPrograms, nil
+	return out, len(out), orphans, nil
 }
 
 // GetChannels returns channels for a library.
@@ -367,6 +474,96 @@ func (s *Service) NowPlaying(ctx context.Context, channelID string) (*db.EPGProg
 // SetChannelActive enables or disables a channel.
 func (s *Service) SetChannelActive(ctx context.Context, id string, active bool) error {
 	return s.channels.SetActive(ctx, id, active)
+}
+
+// ── EPG source management ─────────────────────────────────────────
+//
+// Admin-facing surface for the multi-provider EPG model. The handler
+// layer gates these behind the admin role; the service itself only
+// validates shape and catalog integrity.
+
+// ListEPGSources returns the EPG providers configured for a library,
+// ordered by priority ascending (the order the refresher processes
+// them in). Empty slice if the library has none.
+func (s *Service) ListEPGSources(ctx context.Context, libraryID string) ([]*db.LibraryEPGSource, error) {
+	return s.epgSources.ListByLibrary(ctx, libraryID)
+}
+
+// AddEPGSource attaches a new provider to a library. Either catalogID
+// or url must be non-empty; when both are set the catalog entry's URL
+// wins and the caller's `url` is ignored (prevents drift where the
+// admin pastes a stale URL for a known catalog entry).
+func (s *Service) AddEPGSource(ctx context.Context, libraryID, catalogID, customURL string) (*db.LibraryEPGSource, error) {
+	if _, err := s.libraries.GetByID(ctx, libraryID); err != nil {
+		return nil, fmt.Errorf("get library: %w", err)
+	}
+
+	src := &db.LibraryEPGSource{
+		ID:        generateID(),
+		LibraryID: libraryID,
+	}
+	if catalogID != "" {
+		entry, ok := FindEPGSource(catalogID)
+		if !ok {
+			return nil, fmt.Errorf("unknown catalog EPG source %q", catalogID)
+		}
+		src.CatalogID = catalogID
+		src.URL = entry.URL
+	} else {
+		if customURL == "" {
+			return nil, fmt.Errorf("either catalog_id or url is required")
+		}
+		src.URL = customURL
+	}
+
+	if err := s.epgSources.Create(ctx, src); err != nil {
+		return nil, err
+	}
+	return src, nil
+}
+
+// RemoveEPGSource deletes one provider by id. Does not purge any EPG
+// programmes the source contributed — that happens on the next
+// RefreshEPG when the merge runs without it.
+func (s *Service) RemoveEPGSource(ctx context.Context, libraryID, sourceID string) error {
+	src, err := s.epgSources.GetByID(ctx, sourceID)
+	if err != nil {
+		return fmt.Errorf("get source: %w", err)
+	}
+	if src == nil || src.LibraryID != libraryID {
+		return fmt.Errorf("source %s not found in library %s", sourceID, libraryID)
+	}
+	return s.epgSources.Delete(ctx, sourceID)
+}
+
+// ReorderEPGSources rewrites every source's priority to match the
+// order the caller provides. The list must contain exactly the ids
+// currently attached to the library — no adds, no removes. Anything
+// else is rejected to avoid partial writes.
+func (s *Service) ReorderEPGSources(ctx context.Context, libraryID string, orderedIDs []string) error {
+	current, err := s.epgSources.ListByLibrary(ctx, libraryID)
+	if err != nil {
+		return fmt.Errorf("list sources: %w", err)
+	}
+	if len(orderedIDs) != len(current) {
+		return fmt.Errorf("reorder list has %d ids, library has %d sources", len(orderedIDs), len(current))
+	}
+	seen := make(map[string]bool, len(current))
+	for _, c := range current {
+		seen[c.ID] = true
+	}
+	for _, id := range orderedIDs {
+		if !seen[id] {
+			return fmt.Errorf("source %s is not attached to library %s", id, libraryID)
+		}
+	}
+	return s.epgSources.UpdatePriorities(ctx, libraryID, orderedIDs)
+}
+
+// PublicEPGCatalog exposes the curated catalog to the API layer so
+// the admin UI can render a dropdown without duplicating the list.
+func (s *Service) PublicEPGCatalog() []PublicEPGSource {
+	return PublicEPGSources()
 }
 
 // CleanupOldPrograms removes EPG data older than the given duration.

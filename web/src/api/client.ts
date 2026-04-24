@@ -1,4 +1,5 @@
 import type {
+  AddEPGSourceRequest,
   AuthResponse,
   AvailableImage,
   BrowseResponse,
@@ -10,9 +11,11 @@ import type {
   ImportPublicIPTVResponse,
   ItemDetail,
   Library,
+  LibraryEPGSource,
   MediaItem,
   PaginatedResponse,
   PublicCountry,
+  PublicEPGSource,
   SetupStatus,
   StreamSession,
   SystemCapabilities,
@@ -506,6 +509,46 @@ export class ApiClient {
 
   async getPublicCountries(): Promise<PublicCountry[]> {
     return this.request<PublicCountry[]>("GET", "/iptv/public/countries");
+  }
+
+  async getEPGCatalog(): Promise<PublicEPGSource[]> {
+    return this.request<PublicEPGSource[]>("GET", "/iptv/epg-catalog");
+  }
+
+  async listEPGSources(libraryId: string): Promise<LibraryEPGSource[]> {
+    return this.request<LibraryEPGSource[]>(
+      "GET",
+      `/libraries/${libraryId}/epg-sources`,
+    );
+  }
+
+  async addEPGSource(
+    libraryId: string,
+    req: AddEPGSourceRequest,
+  ): Promise<LibraryEPGSource> {
+    return this.request<LibraryEPGSource>(
+      "POST",
+      `/libraries/${libraryId}/epg-sources`,
+      { body: req },
+    );
+  }
+
+  async removeEPGSource(libraryId: string, sourceId: string): Promise<void> {
+    await this.request<void>(
+      "DELETE",
+      `/libraries/${libraryId}/epg-sources/${sourceId}`,
+    );
+  }
+
+  async reorderEPGSources(
+    libraryId: string,
+    sourceIds: string[],
+  ): Promise<LibraryEPGSource[]> {
+    return this.request<LibraryEPGSource[]>(
+      "PATCH",
+      `/libraries/${libraryId}/epg-sources/reorder`,
+      { body: { source_ids: sourceIds } },
+    );
   }
 
   async importPublicIPTV(country: string, name?: string): Promise<ImportPublicIPTVResponse> {

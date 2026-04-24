@@ -149,7 +149,7 @@ func run(configPath string) error {
 	}
 
 	// ═══ Phase 4c: IPTV ═══
-	iptvService := iptv.NewService(repos.Channels, repos.EPGPrograms, repos.Libraries, repos.ChannelFavorites, logger)
+	iptvService := iptv.NewService(repos.Channels, repos.EPGPrograms, repos.Libraries, repos.ChannelFavorites, repos.LibraryEPGSources, logger)
 	iptvService.SetEventBus(eventBus)
 	iptvProxy := iptv.NewStreamProxy(logger)
 
