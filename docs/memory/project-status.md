@@ -1,23 +1,41 @@
 # Estado del proyecto
 
-> Snapshot: **2026-04-24** (live-TV arc + simplify sweep + frontend coverage slice 1 + setup-wizard tests) · Rama: `claude/review-project-tasks-f5Rdg` · **tests: verde**
+> Snapshot: **2026-04-24** (live-TV arc + simplify sweep + frontend coverage slice 1 + setup-wizard tests + livetv coverage slice 2) · Rama: `claude/review-project-tasks-f5Rdg` · **tests: verde**
 
 ---
 
 ## 👉 HANDOFF PARA LA PRÓXIMA SESIÓN
 
-> Track B (setup wizard tests) ✅ hecho en esta sesión: **+48 tests**,
-> los 5 ficheros del wizard cubiertos (SetupWizard/Account/Libraries/
-> Settings/Complete). Vitest 138 → 186, tsc + build verdes, lint sin
-> regresiones (14 problemas pre-existentes idénticos antes/después).
+> **Ambos tracks del handoff anterior ✅ hechos en esta sesión**.
+> Vitest **138 → 221** tests (+83), 9 ficheros de test nuevos, sin
+> tocar código de producción. `pnpm tsc --noEmit` + `pnpm build`
+> verdes; `pnpm lint` sin regresiones (14 problemas pre-existentes
+> idénticos antes/después).
 >
-> **Pendiente principal ahora mismo**: Track A — slice 2 de coverage
-> LiveTV (`LiveTvTopBar`, `DiscoverView`, `HeroSpotlight`, `EPGGrid`).
-> Sigue aplicando. El resto del handoff original se conserva abajo
-> para referencia.
+> - Track B (setup wizard): +48 tests · 5 ficheros ·
+>   `SetupWizard.test.tsx` (7), `AccountStep.test.tsx` (9),
+>   `LibrariesStep.test.tsx` (12), `SettingsStep.test.tsx` (10),
+>   `CompleteStep.test.tsx` (10).
+> - Track A (livetv slice 2): +35 tests · 4 ficheros ·
+>   `LiveTvTopBar.test.tsx` (6), `DiscoverView.test.tsx` (7),
+>   `HeroSpotlight.test.tsx` (10), `EPGGrid.test.tsx` (12).
 >
-> Leer esto ANTES que el resto del documento. Hay dos tracks pedidos,
-> ambos independientes y paralelizables. Elige el que prefieras y ataca.
+> **Próximos candidatos** (ordenados por impacto, elige libremente):
+> 1. Tests de **páginas admin** — `LibrariesAdmin` + sub-paneles
+>    (`LivetvAdminPanel`, `EPGSourcesPanel`, `UnhealthyChannelsPanel`,
+>    `ChannelsWithoutEPGPanel`) son cero-cobertura y mutan estado real.
+> 2. **Lint burndown restante** — 4 ficheros con `set-state-in-effect`:
+>    `AppLayout`, `MediaGrid`, `FolderBrowser`, `ItemDetail`. Patrón
+>    de fix canónico en `CountrySelector` (memoización + fallback,
+>    sin effect→setState).
+> 3. **Split de `library.Service`** siguiendo la receta que se aplicó
+>    a `iptv.Service` (8 ficheros `service_*.go` sobre el mismo
+>    struct, API pública intacta).
+> 4. Si foco = experiencia LiveTV: **matcher EPG más agresivo** —
+>    sube cobertura 52/268 → 150-200+.
+>
+> Los detalles originales del handoff de los dos tracks se conservan
+> abajo para referencia histórica.
 
 **Estado al abrir sesión**: asume que PR `claude/frontend-livetv-coverage`
 ya está mergeado a main (si no, mergéalo primero o trabaja sobre él).
@@ -235,14 +253,54 @@ i18n. Incluye **test de regresión** para el fix del logo roto de
 
 - **~100** ficheros `.go` de producción · **~60** `_test.go`
 - **74** rutas HTTP (ver `internal/api/router.go`)
-- **~25** test files en frontend (añadidos `livetv/` + 5 del wizard)
+- **~29** test files en frontend (añadidos `livetv/` + 5 wizard + 4 slice-2)
 - **Cero** `TODO`/`FIXME`/`HACK`
 - `go test -race ./...` verde en 21 paquetes; `golangci-lint v1.64.8`: exit 0
-- Frontend: `pnpm build` + `pnpm test` (186/186) verdes, `pnpm tsc --noEmit` verde
+- Frontend: `pnpm build` + `pnpm test` (221/221) verdes, `pnpm tsc --noEmit` verde
+
+## Livetv coverage — slice 2 (`claude/review-project-tasks-f5Rdg`)
+
+Segunda tajada del track de estabilidad — cubre los 4 componentes
+livetv que quedaron fuera del slice 1. Todos los tests aislan el
+componente bajo prueba mockeando dependencias problemáticas
+(`StreamPreview` por HLS en jsdom, `ChannelCard`/`HeroSpotlight` por
+tamaño, `HeroSettings` por su propio estado interno).
+
+Delta: **186 → 221 tests en Vitest** (+35), 4 ficheros nuevos.
+
+| Fichero | Tests | Lo que pin-ea |
+|---|---|---|
+| `web/src/components/livetv/LiveTvTopBar.test.tsx` | 6 | Counts (total/live) desde props · 3 tabs con `role=tab` + `aria-selected` único · wiring onTab/onSearch · HeroSettings **solo** en tab `discover` (oculto en guide/favorites) · forward de heroMode + onHeroModeChange |
+| `web/src/components/livetv/DiscoverView.test.tsx` | 7 | Rails en orden `CHANNEL_CATEGORY_ORDER` saltando vacíos · filtro por categoría renderiza solo ese rail · **"Apagados" solo con unhealthy && category==='all'** (no en filtro específico, no sin unhealthy) · empty state cuando no hay rails · onOpen forward · heroItems + heroLabel a HeroSpotlight |
+| `web/src/components/livetv/HeroSpotlight.test.tsx` | 10 | `items.length===0` → null · 1 item sin dots, sin auto-rotate · 2+ items con dots `role=tab` + aria-selected · click-dot cambia activo · **auto-rotate 12 s wrap-around** (vi.advanceTimersByTime) · no-rotate con 1 item · click tile → onOpen(channel activo) · StreamPreview `key={channel.id}` remonta entre slides · **clamp** sobrevive shrinking items · LIVE pill condicional a nowPlaying |
+| `web/src/components/livetv/EPGGrid.test.tsx` | 12 | 24 columnas en ruler + 1 corner · 1 row por channel · empty state · programas fuera de ventana (past/future) descartados · placeholder "sin guía" cuando `programs.length===0` · click programa + click sticky cell llaman onSelectChannel · `activeChannelId` → `aria-pressed="true"` exactamente en esa row · "Ahora · HH:MM" con reloj fake · **auto-scrollTo solo en mount**, re-ticks no re-scrollean · botón "Ahora" smooth-scroll · `autoScrollToNow=false` no invoca scrollTo |
+
+**Patrones de test adicionales aprendidos en slice 2**:
+
+1. **`role="gridcell"` tapa el rol implícito "button"**. `EPGGrid` pone
+   `role="gridcell"` en los `<button>` de la celda de canal; `getByRole
+   ("button")` no los encuentra. Para estos casos usar
+   `container.querySelector('button[aria-pressed]')` — el selector
+   CSS va al DOM crudo sin pasar por el ARIA role resolver.
+2. **`HTMLElement.prototype.scrollTo` se stubea a nivel de prototype**
+   antes del render para capturar llamadas del ref interno. Más
+   limpio que mockear `useRef` o esperar al efecto. Siempre restaurar
+   el original en `finally` para no contaminar otros tests.
+3. **Nombres en `ChannelLogo` aparecen 2x** (aria-label del wrapper +
+   div visible) — `getByText` falla con "multiple elements". Usar
+   `getAllByText("name").length > 0` o `container.querySelectorAll`
+   para contar rows.
+4. **`vi.advanceTimersByTime` dentro de `act()`** para que React
+   procese los setState del timer y re-renderice antes de aserr. Sin
+   `act()` el dot nuevo no está marcado `aria-selected` cuando
+   leemos.
+
+## Setup wizard coverage (`claude/review-project-tasks-f5Rdg`)
 
 ## Setup wizard coverage (`claude/review-project-tasks-f5Rdg`)
 
 Ruta crítica del primer arranque — antes 0 tests, ahora **+48**
+(mismo ciclo que el slice 2 de livetv).
 cubriendo los 5 ficheros del wizard. Aísla el orquestador del resto
 mockeando los 4 step components (`vi.mock`) para testar sólo
 transiciones + persistencia de `setupData`; cada step se testea
