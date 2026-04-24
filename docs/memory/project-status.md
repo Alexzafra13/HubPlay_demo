@@ -1,6 +1,6 @@
 # Estado del proyecto
 
-> Snapshot: **2026-04-24** (matcher EPG agresivo + scheduler IPTV con UI admin + senior review fixes) · Rama: `claude/review-pending-tasks-9Vh6U` · **tests: verde · lint: 0**
+> Snapshot: **2026-04-24** (matcher EPG + scheduler IPTV + review fixes + continuar viendo) · Rama: `claude/review-pending-tasks-9Vh6U` · **tests: verde · lint: 0**
 
 ---
 
@@ -10,8 +10,8 @@
 
 ### Lo que cerramos esta rama (`claude/review-pending-tasks-9Vh6U`)
 
-Tres commits: las dos candidatas del handoff anterior + un pass de
-fixes tras review senior.
+Cuatro commits: las dos candidatas del handoff anterior + pass de
+fixes tras review senior + "Continuar viendo" en LiveTV.
 
 **Commit 1 — Matcher EPG agresivo**. Sin cambios de schema, sin UI,
 solo backend.
@@ -211,6 +211,85 @@ Tests nuevos de este commit (6 casos): `RunNowRecoversFromPanic`,
 `CascadesOnLibraryDelete`, "non-ASCII survives folding",
 `FakeRepo_GetMissingReturnsSentinel`.
 
+**Commit 4 — "Continuar viendo" en LiveTV**. Feature completa
+(schema + backend + frontend + beacon + rail), 18 tests nuevos.
+
+Decisión clave de schema:
+
+1. **Migración 012 `channel_watch_history(user_id, stream_url,
+   last_watched_at)`** con PK compuesta. Se keyea por **stream_url**,
+   NO por channel_id, porque los channel UUIDs se regeneran en cada
+   M3U refresh (lección aprendida de `channel_overrides`, migración
+   009). Sin esto el rail se vaciaría cada mañana tras el refresh
+   programado. El JOIN del read path resuelve por stream_url contra
+   la tabla `channels` actual → entradas sobreviven refreshes y,
+   bonus, orphans (URL retirada del playlist) reaparecen si la URL
+   vuelve más tarde. Índice dedicado sobre
+   `(user_id, last_watched_at DESC)` para el ORDER BY del rail.
+
+Backend:
+
+2. **`db.ChannelWatchHistoryRepository`** (raw SQL):
+   `RecordByStreamURL` (upsert), `ListChannelsByUser` (JOIN con
+   is_active=1 + dedupe stream_url entre libraries), `DeleteByStreamURL`.
+3. **`iptv.Service`**: `RecordWatch(userID, channelID)` busca el
+   stream_url y upserta; `ListContinueWatching(userID, limit,
+   accessibleLibraries map[string]bool)` con filtro ACL (admin pasa
+   `nil`, usuario pasa su set de libraries).
+4. **HTTP endpoints** en `IPTVHandler`:
+   - `POST /channels/{id}/watch` — beacon del player. Requiere ACL
+     (verifica que el usuario puede ver la biblioteca del canal para
+     evitar leak de existencia). Devuelve `{channel_id, last_watched_at}`.
+   - `GET /me/channels/continue-watching?limit=N` — rail. Límite
+     default 10, cap 20. Admin bypasa ACL; usuario filtra vía
+     `libraries.ListForUser`.
+5. Nueva entrada en la interface `LibraryRepository` del paquete
+   handlers (`ListForUser`) para materializar el access set.
+
+Frontend:
+
+6. **Beacon en `useLiveHls`**: nueva prop opcional `onFirstPlay`.
+   Se dispara exactamente UNA vez por streamUrl cuando el primer
+   frame juega (flag `beaconFired` local al effect). Pause+resume
+   NO re-disparan. **No afecta a `StreamPreview`** que usa hls.js
+   directo sin el hook → el hover preview no contamina el historial.
+   `onFirstPlay` se pasa vía ref para no tear-down el HLS en
+   re-renders del caller.
+7. **`ChannelPlayer`** llama al beacon vía
+   `useRecordChannelWatch().mutate(channelId)` con `onError` que
+   loga a consola y sigue — fallos del beacon son no-fatales.
+8. **Rail "Continuar viendo"** en `DiscoverView` entre los chips y
+   los rails de categoría. Solo aparece en `category === "all"`
+   (scoping a una categoría rompería el filtro del usuario) y solo
+   si `continueWatching.length > 0`.
+9. **React Query**: `queryKeys.continueWatchingChannels` nuevo,
+   `useContinueWatchingChannels(limit)` con `staleTime: 60s`,
+   `useRecordChannelWatch()` invalida la key tras éxito (el canal
+   salta al top del rail sin recargar).
+
+Tests nuevos (todos verdes, 18 casos):
+
+- `internal/db/channel_watch_history_test.go` — 9 tests (upsert
+  idempotente, orden por recency, respeto de limit, filtro
+  is_active=1, limit=0 → vacío, aislamiento por usuario, **survives
+  M3U refresh** (contrato principal: re-joins tras ReplaceForLibrary
+  y orphan re-aparece cuando URL vuelve), cascade on user delete,
+  dedupe cross-libraries, delete idempotente).
+- `internal/api/handlers/iptv_watch_test.go` — 6 tests
+  (beacon happy path, 401 sin auth, 404 deny por ACL, 404 race
+  post-delete, list happy, list filtra por access, admin salta
+  filtro, cap de limit 20, default limit 10, 401 en list).
+- `web/src/components/livetv/DiscoverView.test.tsx` — 3 tests
+  (rail aparece encima en category='all', oculto en categoría
+  específica, oculto cuando vacío).
+
+**Impacto UX**: el usuario abre LiveTV → ve encima de las
+categorías un rail con los N canales que ha visto últimamente
+(cualquier dispositivo, gracias a que el historial vive en DB).
+Cambia de canal y el siguiente aparece al principio del rail sin
+recarga. Sobrevive M3U refreshes programados (sin el fix de
+stream_url el rail moriría cada día).
+
 ### 📊 Medición pendiente (matcher EPG)
 
 El handoff anterior puso un target **52 → 150-200+** canales con EPG
@@ -237,10 +316,10 @@ los mismos mismatches observados.
 ### Estado al abrir sesión
 
 - `main` tiene PRs #81–#85 mergeados.
-- Rama actual `claude/review-pending-tasks-9Vh6U` con **3 commits**
-  encima de main (matcher + scheduler + review-fixes). Listo para PR
-  una vez validado en una DB real.
-- Tests verdes: `pnpm test` 221/221 · `pnpm tsc --noEmit` · `pnpm
+- Rama actual `claude/review-pending-tasks-9Vh6U` con **4 commits**
+  encima de main (matcher + scheduler + review-fixes + continuar-
+  viendo). Listo para PR una vez validado en DB real.
+- Tests verdes: `pnpm test` **224/224** · `pnpm tsc --noEmit` · `pnpm
   lint` 0 · `pnpm build` ok · `go test -race ./...` 21 paquetes ·
   `golangci-lint v1.64.8` exit 0.
 
@@ -250,10 +329,17 @@ los mismos mismatches observados.
   después (52 era el baseline; target 150+).
 - [ ] Activar una programación (ej. EPG cada 6 h) en admin y dejarla
   correr 6 h+ para verificar que el worker dispara y registra.
-- [ ] Si matcher + scheduler ambos funcionan → abrir PR y mergear.
-- [ ] Siguiente candidata: **"Continuar viendo"** en LiveTV (tabla
-  `channel_watch_history` + rail en Discover) o **modal de detalle
-  de programa** al clicar en el EPG grid.
+- [ ] Abrir reproducciones de canal y verificar que el rail
+  "Continuar viendo" aparece en Discover con los canales vistos
+  (en varios navegadores / dispositivos para validar la parte
+  cross-device).
+- [ ] Forzar un M3U refresh y verificar que el rail sigue poblado
+  (no se vacía — contrato clave del stream_url-as-key).
+- [ ] Si todo funciona → abrir PR y mergear.
+- [ ] Siguiente candidata: **modal de detalle de programa** al
+  clicar en el EPG grid, **streaming parser XMLTV** (bomba memoria
+  con feeds 2 GB), o **split de `library.Service`** (deuda
+  estructural — ya hay precedente con `iptv.Service`).
 - [ ] Actualizar esta memoria.
 
 ### 🎓 Patrones senior reforzados en este ciclo
@@ -1069,6 +1155,11 @@ Sin prisa. Candidatos ordenados por impacto.
 2. ✅ **Scheduler UI M3U + EPG refresh** — hecho en la misma rama.
    Tabla `iptv_scheduled_jobs`, worker `iptv.Scheduler`, panel admin
    `ScheduledJobsPanel`. Falta dejar correr 6 h+ en real para validar.
-3. **"Continuar viendo"** + tabla de historial.
+3. ✅ **"Continuar viendo"** — hecho en la misma rama. Tabla
+   `channel_watch_history` keyeada por stream_url, beacon en
+   `useLiveHls.onFirstPlay`, rail en Discover. Falta validar
+   cross-device en real.
 4. **Modal de detalle de programa** en EPG grid.
 5. **Streaming parser del XMLTV** (bomba memoria con feeds 2 GB).
+6. **Override manual de channel number / group** — extender
+   `channel_overrides` con `number`/`group` opcionales.

@@ -266,10 +266,15 @@ func NewRouter(deps Dependencies) http.Handler {
 						r.Get("/stream", iptvHandler.Stream)
 						r.Get("/proxy", iptvHandler.ProxyURL)
 						r.Get("/schedule", iptvHandler.Schedule)
+						r.Post("/watch", iptvHandler.RecordChannelWatch)
 					})
 
 					r.Get("/channels/schedule", iptvHandler.BulkSchedule)
 					r.Post("/channels/schedule", iptvHandler.BulkSchedule)
+
+					// Continue watching rail (per-user). GET only —
+					// the beacon is POST /channels/{id}/watch above.
+					r.Get("/me/channels/continue-watching", iptvHandler.ListContinueWatching)
 
 					// Channel favorites (per-user, requires auth; no admin role).
 					r.Route("/favorites/channels", func(r chi.Router) {

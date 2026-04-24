@@ -98,6 +98,7 @@ func newEPGTestService(t *testing.T) (*Service, *db.Repositories, string) {
 
 	svc := NewService(repos.Channels, repos.EPGPrograms, repos.Libraries,
 		repos.ChannelFavorites, repos.LibraryEPGSources, repos.ChannelOverrides,
+		repos.ChannelWatchHistory,
 		slog.New(slog.NewTextHandler(new(discard), nil)))
 	return svc, repos, libID
 }
@@ -370,6 +371,7 @@ func TestRefreshEPG_LegacyEPGURLFallback(t *testing.T) {
 
 	svc := NewService(repos.Channels, repos.EPGPrograms, repos.Libraries,
 		repos.ChannelFavorites, repos.LibraryEPGSources, repos.ChannelOverrides,
+		repos.ChannelWatchHistory,
 		slog.New(slog.NewTextHandler(new(discard), nil)))
 
 	total, err := svc.RefreshEPG(ctx, libID)

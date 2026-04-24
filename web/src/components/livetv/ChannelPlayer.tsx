@@ -1,5 +1,6 @@
-import { useRef } from "react";
+import { useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
+import { useRecordChannelWatch } from "@/api/hooks";
 import type { Channel } from "@/api/types";
 import { Spinner } from "@/components/common";
 import { useLiveHls } from "@/hooks/useLiveHls";
@@ -11,10 +12,30 @@ interface ChannelPlayerProps {
 export function ChannelPlayer({ channel }: ChannelPlayerProps) {
   const { t } = useTranslation();
   const videoRef = useRef<HTMLVideoElement>(null);
+  const recordWatch = useRecordChannelWatch();
+
+  // Beacon: fired exactly once per streamUrl when the first frame
+  // actually plays (useLiveHls guarantees first-play-only — see
+  // onFirstPlay contract). Failures swallowed: the rail simply won't
+  // update on this view. The channel id is captured in the closure
+  // at render time so re-renders against a new channel get a fresh
+  // beacon automatically; useLiveHls tears down + re-attaches on
+  // streamUrl change and re-arms its beacon flag.
+  const channelId = channel.id;
+  const onFirstPlay = useCallback(() => {
+    recordWatch.mutate(channelId, {
+      onError: (err) => {
+        // Non-fatal — log for devtools visibility, nothing else.
+        console.warn("[continue-watching] beacon failed:", err);
+      },
+    });
+  }, [channelId, recordWatch]);
+
   const { error, loading, reload } = useLiveHls({
     videoRef,
     streamUrl: channel.stream_url,
     unavailableMessage: t("liveTV.channelUnavailable"),
+    onFirstPlay,
   });
 
   return (

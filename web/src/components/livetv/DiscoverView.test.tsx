@@ -4,6 +4,7 @@ import { DiscoverView } from "./DiscoverView";
 import type {
   Channel,
   ChannelCategory,
+  ContinueWatchingChannel,
   UnhealthyChannel,
 } from "@/api/types";
 import type { CategoryFilter } from "./CategoryChips";
@@ -90,6 +91,16 @@ function channel(
   };
 }
 
+function continueWatching(
+  id: string,
+  cat: ChannelCategory,
+): ContinueWatchingChannel {
+  return {
+    ...channel(id, cat),
+    last_watched_at: "2026-04-24T11:30:00Z",
+  };
+}
+
 function unhealthy(id: string): UnhealthyChannel {
   return {
     ...channel(id, "general"),
@@ -148,6 +159,7 @@ describe("DiscoverView", () => {
         favoriteSet={new Set()}
         onToggleFavorite={vi.fn()}
         unhealthyChannels={[]}
+        continueWatching={[]}
       />,
     );
 
@@ -178,6 +190,7 @@ describe("DiscoverView", () => {
         favoriteSet={new Set()}
         onToggleFavorite={vi.fn()}
         unhealthyChannels={[]}
+        continueWatching={[]}
       />,
     );
 
@@ -208,6 +221,7 @@ describe("DiscoverView", () => {
         favoriteSet={new Set()}
         onToggleFavorite={vi.fn()}
         unhealthyChannels={unhealthyList}
+        continueWatching={[]}
       />,
     );
     const dimmed = screen
@@ -230,6 +244,7 @@ describe("DiscoverView", () => {
         favoriteSet={new Set()}
         onToggleFavorite={vi.fn()}
         unhealthyChannels={unhealthyList}
+        continueWatching={[]}
       />,
     );
     const dimmedAfter = screen
@@ -257,6 +272,7 @@ describe("DiscoverView", () => {
         favoriteSet={new Set()}
         onToggleFavorite={vi.fn()}
         unhealthyChannels={[]}
+        continueWatching={[]}
       />,
     );
     const dimmed = screen
@@ -279,6 +295,7 @@ describe("DiscoverView", () => {
         favoriteSet={new Set()}
         onToggleFavorite={vi.fn()}
         unhealthyChannels={[]}
+        continueWatching={[]}
       />,
     );
     expect(screen.getByText(/No hay canales en esta categoría/i)).toBeInTheDocument();
@@ -302,6 +319,7 @@ describe("DiscoverView", () => {
         favoriteSet={new Set()}
         onToggleFavorite={vi.fn()}
         unhealthyChannels={[]}
+        continueWatching={[]}
       />,
     );
     fireEvent.click(screen.getByTestId("card"));
@@ -325,10 +343,99 @@ describe("DiscoverView", () => {
         favoriteSet={new Set()}
         onToggleFavorite={vi.fn()}
         unhealthyChannels={[]}
+        continueWatching={[]}
       />,
     );
     const hero = screen.getByTestId("hero");
     expect(hero).toHaveAttribute("data-count", "2");
     expect(hero).toHaveTextContent("Tu favorito");
+  });
+
+  // ── Continue watching rail ────────────────────────────────────────
+
+  it("Continuar viendo rail renders above category rails when entries exist and category='all'", () => {
+    const byCat = new Map<ChannelCategory, Channel[]>([
+      ["news", [channel("n1", "news")]],
+    ]);
+    render(
+      <DiscoverView
+        heroItems={[]}
+        heroLabel="Hero"
+        counts={makeCounts()}
+        category="all"
+        onCategoryChange={vi.fn()}
+        channelsByCategory={byCat}
+        scheduleByChannel={{}}
+        onOpen={vi.fn()}
+        favoriteSet={new Set()}
+        onToggleFavorite={vi.fn()}
+        unhealthyChannels={[]}
+        continueWatching={[
+          continueWatching("cw1", "sports"),
+          continueWatching("cw2", "movies"),
+        ]}
+      />,
+    );
+    const cards = screen.getAllByTestId("card");
+    // Expect order: cw1, cw2 (continue-watching rail), then n1
+    // (news category rail). The rail slot is above the categories.
+    expect(cards.map((c) => c.getAttribute("data-channel"))).toEqual([
+      "cw1",
+      "cw2",
+      "n1",
+    ]);
+  });
+
+  it("Continuar viendo rail is hidden on a specific category tab even with entries", () => {
+    // Rail is scoped to category='all' so the filter chips don't get
+    // overridden by a surprise rail full of other categories.
+    const byCat = new Map<ChannelCategory, Channel[]>([
+      ["news", [channel("n1", "news")]],
+    ]);
+    render(
+      <DiscoverView
+        heroItems={[]}
+        heroLabel="Hero"
+        counts={makeCounts()}
+        category="news"
+        onCategoryChange={vi.fn()}
+        channelsByCategory={byCat}
+        scheduleByChannel={{}}
+        onOpen={vi.fn()}
+        favoriteSet={new Set()}
+        onToggleFavorite={vi.fn()}
+        unhealthyChannels={[]}
+        continueWatching={[continueWatching("cw1", "sports")]}
+      />,
+    );
+    const ids = screen
+      .getAllByTestId("card")
+      .map((c) => c.getAttribute("data-channel"));
+    expect(ids).not.toContain("cw1");
+    expect(ids).toContain("n1");
+  });
+
+  it("Continuar viendo rail is hidden when empty", () => {
+    const byCat = new Map<ChannelCategory, Channel[]>([
+      ["news", [channel("n1", "news")]],
+    ]);
+    render(
+      <DiscoverView
+        heroItems={[]}
+        heroLabel="Hero"
+        counts={makeCounts()}
+        category="all"
+        onCategoryChange={vi.fn()}
+        channelsByCategory={byCat}
+        scheduleByChannel={{}}
+        onOpen={vi.fn()}
+        favoriteSet={new Set()}
+        onToggleFavorite={vi.fn()}
+        unhealthyChannels={[]}
+        continueWatching={[]}
+      />,
+    );
+    // "Continuar viendo" text must not appear as a rail heading.
+    expect(screen.queryByText(/continuar viendo/i)).toBeNull();
   });
 });

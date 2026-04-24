@@ -289,6 +289,16 @@ export interface PatchChannelRequest {
 }
 
 /**
+ * Channel augmented with the timestamp of the caller's most recent
+ * playback. Returned by `/me/channels/continue-watching`. Extends
+ * Channel so the existing ChannelCard can render it without a
+ * parallel component path.
+ */
+export type ContinueWatchingChannel = Channel & {
+  last_watched_at: string;
+};
+
+/**
  * IPTV scheduled job — one automated action per library.
  *
  * Mirrors the backend `iptv_scheduled_jobs` row. The list endpoint

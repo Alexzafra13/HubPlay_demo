@@ -13,6 +13,7 @@ import type {
   BrowseResponse,
   Channel,
   ChannelWithoutEPG,
+  ContinueWatchingChannel,
   CreateLibraryRequest,
   HealthResponse,
   ImageInfo,
@@ -67,6 +68,7 @@ export const queryKeys = {
     ["channels-without-epg", libraryId] as const,
   scheduledJobs: (libraryId: string) =>
     ["iptv-scheduled-jobs", libraryId] as const,
+  continueWatchingChannels: ["continue-watching-channels"] as const,
   myPreferences: ["my-preferences"] as const,
   itemImages: (id: string) => ["items", id, "images"] as const,
   availableImages: (id: string, type?: string) => ["items", id, "images", "available", type] as const,
@@ -517,6 +519,47 @@ export function useRunScheduledJobNow(libraryId: string) {
         });
       }
     },
+  });
+}
+
+// ─── Continue Watching (livetv rail) ───────────────────────────────────
+//
+// The beacon fires from useLiveHls on first play. The rail on Discover
+// polls a short cache so a user who watches a channel on device A sees
+// it update at the top of the rail on device B within the staleTime
+// window — useful for the "same household, different TVs" case.
+
+export function useContinueWatchingChannels(
+  limit?: number,
+  options?: Partial<UseQueryOptions<ContinueWatchingChannel[]>>,
+) {
+  return useQuery<ContinueWatchingChannel[]>({
+    queryKey: queryKeys.continueWatchingChannels,
+    queryFn: () => api.listContinueWatchingChannels(limit),
+    // Short stale time so the rail stays fresh without polling: the
+    // beacon invalidation below is the primary freshness driver.
+    staleTime: 60_000,
+    ...options,
+  });
+}
+
+export function useRecordChannelWatch() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    { channel_id: string; last_watched_at: string },
+    Error,
+    string
+  >({
+    mutationFn: (channelId) => api.recordChannelWatch(channelId),
+    onSuccess: () => {
+      // The rail shifts: freshly-watched channel jumps to the top.
+      // Invalidate so the next Discover render pulls the updated list.
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.continueWatchingChannels,
+      });
+    },
+    // Beacon failures are non-fatal UX events. Let the caller swallow
+    // them silently — the rail just won't update this time around.
   });
 }
 

@@ -62,6 +62,14 @@ type iptvFakeService struct {
 		ChannelID string
 		TvgID     string
 	}
+
+	// Watch-history fixtures + capture.
+	watchedByUser    map[string][]*db.Channel
+	recordWatchCalls []struct {
+		UserID    string
+		ChannelID string
+	}
+	recordWatchErr error
 }
 
 func newIPTVFakeService() *iptvFakeService {
@@ -311,6 +319,56 @@ func (s *iptvFakeService) ResetChannelHealth(_ context.Context, channelID string
 	return nil
 }
 
+func (s *iptvFakeService) RecordWatch(_ context.Context, userID, channelID string) (time.Time, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.recordWatchErr != nil {
+		return time.Time{}, s.recordWatchErr
+	}
+	s.recordWatchCalls = append(s.recordWatchCalls, struct {
+		UserID    string
+		ChannelID string
+	}{userID, channelID})
+	if s.watchedByUser == nil {
+		s.watchedByUser = map[string][]*db.Channel{}
+	}
+	ch, ok := s.channelByID[channelID]
+	if !ok {
+		return time.Time{}, errors.New("channel not found")
+	}
+	// Put the freshly-watched channel at the head of the user's list.
+	existing := s.watchedByUser[userID]
+	filtered := make([]*db.Channel, 0, len(existing)+1)
+	filtered = append(filtered, ch)
+	for _, c := range existing {
+		if c.ID != channelID {
+			filtered = append(filtered, c)
+		}
+	}
+	s.watchedByUser[userID] = filtered
+	ts := time.Now().UTC()
+	return ts, nil
+}
+
+func (s *iptvFakeService) ListContinueWatching(_ context.Context, userID string, limit int, accessible map[string]bool) ([]*db.Channel, []time.Time, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entries := s.watchedByUser[userID]
+	var channels []*db.Channel
+	var watched []time.Time
+	for _, ch := range entries {
+		if accessible != nil && !accessible[ch.LibraryID] {
+			continue
+		}
+		channels = append(channels, ch)
+		watched = append(watched, time.Now().UTC())
+		if len(channels) >= limit {
+			break
+		}
+	}
+	return channels, watched, nil
+}
+
 func (s *iptvFakeService) ReorderEPGSources(_ context.Context, libraryID string, orderedIDs []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -358,11 +416,21 @@ func (p *iptvFakeProxy) ProxyURL(_ context.Context, w http.ResponseWriter, chann
 	return nil
 }
 
-// ─── Fake LibraryRepository (handler only calls Create) ─────────────────────
+// ─── Fake LibraryRepository ────────────────────────────────────────────────
+//
+// Implements Create (unchanged) plus ListForUser for the handlers
+// that need to materialise the per-user library-access set (e.g.
+// continue-watching filter).
 
 type iptvFakeLibraryRepo struct {
-	created []*db.Library
-	createErr error
+	created       []*db.Library
+	createErr     error
+	librariesByID map[string]*db.Library
+	// userAccess: if nil the ListForUser fallback returns every
+	// library in librariesByID (admin behaviour). A populated map
+	// keys a userID to the set of library IDs they can see.
+	userAccess map[string]map[string]bool
+	listErr    error
 }
 
 func (r *iptvFakeLibraryRepo) Create(_ context.Context, lib *db.Library) error {
@@ -370,7 +438,32 @@ func (r *iptvFakeLibraryRepo) Create(_ context.Context, lib *db.Library) error {
 		return r.createErr
 	}
 	r.created = append(r.created, lib)
+	if r.librariesByID == nil {
+		r.librariesByID = map[string]*db.Library{}
+	}
+	r.librariesByID[lib.ID] = lib
 	return nil
+}
+
+func (r *iptvFakeLibraryRepo) ListForUser(_ context.Context, userID string) ([]*db.Library, error) {
+	if r.listErr != nil {
+		return nil, r.listErr
+	}
+	if r.userAccess == nil {
+		out := make([]*db.Library, 0, len(r.librariesByID))
+		for _, lib := range r.librariesByID {
+			out = append(out, lib)
+		}
+		return out, nil
+	}
+	set := r.userAccess[userID]
+	out := make([]*db.Library, 0, len(set))
+	for id := range set {
+		if lib, ok := r.librariesByID[id]; ok {
+			out = append(out, lib)
+		}
+	}
+	return out, nil
 }
 
 // iptvFakeAccess is the minimal LibraryAccessService fake used by the tests.
@@ -443,6 +536,8 @@ func newIPTVTestEnv(t *testing.T) *iptvTestEnv {
 		r.Post("/channels/{channelId}/enable", env.handler.EnableChannel)
 		r.Get("/libraries/{id}/channels/without-epg", env.handler.ListChannelsWithoutEPG)
 		r.Patch("/channels/{channelId}", env.handler.PatchChannel)
+		r.Post("/channels/{channelId}/watch", env.handler.RecordChannelWatch)
+		r.Get("/me/channels/continue-watching", env.handler.ListContinueWatching)
 	})
 	env.router = r
 	return env

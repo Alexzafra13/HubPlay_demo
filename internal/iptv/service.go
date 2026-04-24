@@ -34,13 +34,14 @@ var ErrRefreshInProgress = errors.New("refresh already in progress")
 // the same package, and keeping them on one Service means callers (the
 // HTTP handlers) inject a single dependency instead of six.
 type Service struct {
-	channels    *db.ChannelRepository
-	epgPrograms *db.EPGProgramRepository
-	libraries   *db.LibraryRepository
-	favorites   *db.ChannelFavoritesRepository
-	epgSources  *db.LibraryEPGSourceRepository
-	overrides   *db.ChannelOverrideRepository
-	logger      *slog.Logger
+	channels     *db.ChannelRepository
+	epgPrograms  *db.EPGProgramRepository
+	libraries    *db.LibraryRepository
+	favorites    *db.ChannelFavoritesRepository
+	epgSources   *db.LibraryEPGSourceRepository
+	overrides    *db.ChannelOverrideRepository
+	watchHistory *db.ChannelWatchHistoryRepository
+	logger       *slog.Logger
 
 	mu        sync.Mutex
 	refreshes map[string]bool // tracks ongoing refreshes by library ID
@@ -68,17 +69,19 @@ func NewService(
 	favorites *db.ChannelFavoritesRepository,
 	epgSources *db.LibraryEPGSourceRepository,
 	overrides *db.ChannelOverrideRepository,
+	watchHistory *db.ChannelWatchHistoryRepository,
 	logger *slog.Logger,
 ) *Service {
 	return &Service{
-		channels:    channels,
-		epgPrograms: epgPrograms,
-		libraries:   libraries,
-		favorites:   favorites,
-		epgSources:  epgSources,
-		overrides:   overrides,
-		logger:      logger.With("module", "iptv"),
-		refreshes:   make(map[string]bool),
+		channels:     channels,
+		epgPrograms:  epgPrograms,
+		libraries:    libraries,
+		favorites:    favorites,
+		epgSources:   epgSources,
+		overrides:    overrides,
+		watchHistory: watchHistory,
+		logger:       logger.With("module", "iptv"),
+		refreshes:    make(map[string]bool),
 		httpClient: &http.Client{
 			Timeout: 60 * time.Second,
 		},

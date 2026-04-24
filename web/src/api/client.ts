@@ -5,6 +5,7 @@ import type {
   BrowseResponse,
   Channel,
   ChannelWithoutEPG,
+  ContinueWatchingChannel,
   CreateLibraryRequest,
   EPGProgram,
   HealthResponse,
@@ -599,6 +600,28 @@ export class ApiClient {
     return this.request<IPTVScheduledJob | null>(
       "POST",
       `/libraries/${libraryId}/schedule/${kind}/run`,
+    );
+  }
+
+  // Continue-watching: beacon fired by the live player on first-play
+  // + rail query for Discover. Failures on the beacon are non-fatal;
+  // the caller logs and moves on.
+  async recordChannelWatch(
+    channelId: string,
+  ): Promise<{ channel_id: string; last_watched_at: string }> {
+    return this.request<{ channel_id: string; last_watched_at: string }>(
+      "POST",
+      `/channels/${channelId}/watch`,
+    );
+  }
+
+  async listContinueWatchingChannels(
+    limit?: number,
+  ): Promise<ContinueWatchingChannel[]> {
+    return this.request<ContinueWatchingChannel[]>(
+      "GET",
+      "/me/channels/continue-watching",
+      limit ? { params: { limit } } : undefined,
     );
   }
 
