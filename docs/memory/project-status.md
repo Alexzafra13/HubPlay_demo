@@ -1,11 +1,21 @@
 # Estado del proyecto
 
-> Snapshot: **2026-04-24** (live-TV arc + simplify sweep + frontend coverage slice 1) · Rama: `claude/frontend-livetv-coverage` · **tests: verde**
+> Snapshot: **2026-04-24** (live-TV arc + simplify sweep + frontend coverage slice 1 + setup-wizard tests) · Rama: `claude/review-project-tasks-f5Rdg` · **tests: verde**
 
 ---
 
 ## 👉 HANDOFF PARA LA PRÓXIMA SESIÓN
 
+> Track B (setup wizard tests) ✅ hecho en esta sesión: **+48 tests**,
+> los 5 ficheros del wizard cubiertos (SetupWizard/Account/Libraries/
+> Settings/Complete). Vitest 138 → 186, tsc + build verdes, lint sin
+> regresiones (14 problemas pre-existentes idénticos antes/después).
+>
+> **Pendiente principal ahora mismo**: Track A — slice 2 de coverage
+> LiveTV (`LiveTvTopBar`, `DiscoverView`, `HeroSpotlight`, `EPGGrid`).
+> Sigue aplicando. El resto del handoff original se conserva abajo
+> para referencia.
+>
 > Leer esto ANTES que el resto del documento. Hay dos tracks pedidos,
 > ambos independientes y paralelizables. Elige el que prefieras y ataca.
 
@@ -225,10 +235,54 @@ i18n. Incluye **test de regresión** para el fix del logo roto de
 
 - **~100** ficheros `.go` de producción · **~60** `_test.go`
 - **74** rutas HTTP (ver `internal/api/router.go`)
-- **~20** test files en frontend (añadidos `livetv/` components)
+- **~25** test files en frontend (añadidos `livetv/` + 5 del wizard)
 - **Cero** `TODO`/`FIXME`/`HACK`
 - `go test -race ./...` verde en 21 paquetes; `golangci-lint v1.64.8`: exit 0
-- Frontend: `pnpm build` + `pnpm test` (72/72) verdes
+- Frontend: `pnpm build` + `pnpm test` (186/186) verdes, `pnpm tsc --noEmit` verde
+
+## Setup wizard coverage (`claude/review-project-tasks-f5Rdg`)
+
+Ruta crítica del primer arranque — antes 0 tests, ahora **+48**
+cubriendo los 5 ficheros del wizard. Aísla el orquestador del resto
+mockeando los 4 step components (`vi.mock`) para testar sólo
+transiciones + persistencia de `setupData`; cada step se testea
+contra mocks de `@/api/hooks` y `@/store/auth` para desacoplar de red.
+
+Delta: **138 → 186 tests en Vitest** (+48), 5 ficheros nuevos.
+
+| Fichero | Tests | Lo que pin-ea |
+|---|---|---|
+| `web/src/pages/setup/SetupWizard.test.tsx` | 7 | `initialStep` mapping + fallback step 0 · transición completa 0→3 con persistencia de data · back re-hydrata user en Account · step indicator refleja currentStep |
+| `web/src/pages/setup/AccountStep.test.tsx` | 9 | Validación (username<3, password<8, mismatch) bloquea mutate · submit normaliza trim + displayName undefined · onSuccess setAuth + onNext · **fallback login SETUP_COMPLETED** (happy + bad password → adminExists copy) · server error surface · hydratación initialData |
+| `web/src/pages/setup/LibrariesStep.test.tsx` | 12 | 1 entry por defecto (sin remove) · skip con rows vacías → onNext([]) sin mutate · validación per-field (name sin path → error) · mutation payload con `content_type` + `paths[]` · onSuccess forward al snake-case interno · FolderBrowser mockeado (open + pick-path auto-fill name, NO overwrite si name existe) · add/remove rows idempotente (identifica por `select[id^="content-type-"]` porque Input genera id duplicado desde label) |
+| `web/src/pages/setup/SettingsStep.test.tsx` | 10 | No-op skip (onNext(empty) sin mutate) · Skip button · TMDB key trim + payload solo con fields presentes · ffmpeg-missing badge · radio options solo si `ffmpeg_found && hw_accels.length` · hw_accel selection en mutation · server error surface |
+| `web/src/pages/setup/CompleteStep.test.tsx` | 10 | Summary muestra user + libraries con path · "None added" cuando no hay libraries + checkbox oculto · scan checkbox checked por defecto · toggle forward false · `useSetupComplete.mutate(scanFlag)` · onSuccess navigate("/") · onError surface + NO navigate · hw_accel uppercase · software default |
+
+**Patrones de test nuevos descubiertos** (añadir a `conventions.md`
+si reincide en otros forms):
+
+1. **setServerError tras `onError` necesita `findByText`, no
+   `getByText`**. Llamar `handlers.onError(...)` directamente (fuera
+   de un user event) no envuelve el `setState` en `act()` de React
+   18/19, así que la aserción corre antes del re-render. `findByText`
+   espera el siguiente tick y pasa.
+2. **`<Input>` genera `id = label.toLowerCase().replace(/\s+/g,"-")`**
+   — cuando un formulario repite rows con el mismo label (ej.
+   LibrariesStep), dos `<input>` acaban con el mismo `id` y
+   `<label htmlFor>` solo apunta al primero. `getAllByLabelText`
+   devuelve N-1 matches. Workaround: identificar rows por un atributo
+   único (ej. `select[id^="content-type-${idx}"]` que sí es index-ed)
+   y leer el sibling `<input placeholder^="...">`.
+3. **Mock de `react-router`**: `vi.mock("react-router", () => ({
+   useNavigate: () => navigateMock }))`. No hace falta envolver en
+   `<MemoryRouter>` si solo se usa `useNavigate` — el mock corta la
+   dependencia.
+4. **`@/i18n` se importa al inicio del test file** para inicializar
+   i18next con el bundle `en.json`. Así los keys resuelven a strings
+   reales y los asserts son legibles (`/Password must be at least 8/`
+   en vez del path crudo). Patrón opuesto al de los componentes
+   livetv (que usan `defaultValue` inline), más apropiado aquí porque
+   el wizard no lo hace.
 
 ## Frontend coverage — slice 1 (`claude/frontend-livetv-coverage`)
 
