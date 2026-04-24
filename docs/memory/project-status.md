@@ -6,218 +6,168 @@
 
 ## 👉 HANDOFF PARA LA PRÓXIMA SESIÓN
 
-> **Cuatro entregables cerrados en esta rama**:
->
-> 1. Track B (setup wizard tests): +48 tests, 5 ficheros.
-> 2. Track A (livetv slice 2): +35 tests, 4 ficheros.
-> 3. **Lint debt cero**: de 14 problemas (10 errors + 4 warnings) a
->    **0 problemas**. 7 ficheros tocados, sin cambio de comportamiento.
-> 4. **`web/dist/` fuera de git**: sentinel `.gitkeep` + .gitignore +
->    plugin Vite + Makefile clean-preserving. Los PRs ya no traen 18
->    chunks rehasheados cada vez. `go:embed all:web/dist` sigue
->    compilando desde fresh clone.
->
-> Vitest **138 → 221** tests (+83). `pnpm tsc --noEmit` + `pnpm build`
-> + `pnpm lint` los tres en verde.
->
-> - Track B (setup wizard): +48 tests · 5 ficheros ·
->   `SetupWizard.test.tsx` (7), `AccountStep.test.tsx` (9),
->   `LibrariesStep.test.tsx` (12), `SettingsStep.test.tsx` (10),
->   `CompleteStep.test.tsx` (10).
-> - Track A (livetv slice 2): +35 tests · 4 ficheros ·
->   `LiveTvTopBar.test.tsx` (6), `DiscoverView.test.tsx` (7),
->   `HeroSpotlight.test.tsx` (10), `EPGGrid.test.tsx` (12).
->
-> **Próximos candidatos** (ordenados por impacto, elige libremente):
-> 1. Tests de **páginas admin** — `LibrariesAdmin` + sub-paneles
->    (`LivetvAdminPanel`, `EPGSourcesPanel`, `UnhealthyChannelsPanel`,
->    `ChannelsWithoutEPGPanel`) son cero-cobertura y mutan estado real.
->    Ahora arrancan desde una base lint-limpia, sin re-renders en
->    cascada que enmascaren bugs en los tests.
-> 2. **Split de `library.Service`** siguiendo la receta que se aplicó
->    a `iptv.Service` (8 ficheros `service_*.go` sobre el mismo
->    struct, API pública intacta).
-> 3. Si foco = experiencia LiveTV: **matcher EPG más agresivo** —
->    sube cobertura 52/268 → 150-200+.
->
-> Los detalles originales del handoff de los dos tracks se conservan
-> abajo para referencia histórica.
+> **Lee esto primero.** Resume qué cerramos, qué decidimos y qué toca.
 
-**Estado al abrir sesión**: asume que PR `claude/frontend-livetv-coverage`
-ya está mergeado a main (si no, mergéalo primero o trabaja sobre él).
-La base ya trae: los hooks `useNowTick`/`useHeroSpotlight`, los
-componentes split (`DiscoverView`, `FavoritesView`, `LiveTvTopBar`,
-`OverlayHeader`, `NowPlayingCard`), y 138 tests verdes.
+### Lo que cerramos esta rama (`claude/review-project-tasks-f5Rdg`)
 
-### TRACK A — Coverage slice 2 (componentes livetv restantes)
+Cinco commits limpios, sin cambios de comportamiento:
 
-**Objetivo**: cubrir los 4 componentes que quedaron sin tests en el
-slice 1. Mismo patrón exacto, debería ser ~1 día y +40-50 tests.
+1. **Setup wizard tests**: +48 tests sobre la ruta crítica de primer
+   arranque (`SetupWizard`, `AccountStep`, `LibrariesStep`,
+   `SettingsStep`, `CompleteStep`). Antes 0 cobertura.
+2. **LiveTV coverage slice 2**: +35 tests sobre los 4 componentes que
+   quedaron fuera del slice 1 (`LiveTvTopBar`, `DiscoverView`,
+   `HeroSpotlight`, `EPGGrid`).
+3. **Lint debt cero**: de **14 problemas → 0**. 7 ficheros tocados,
+   todos refactors a patrones canónicos React 19 + Compiler
+   (`useSyncExternalStore`, `useMemo` para derivación, reset durante
+   render, drop manual `useCallback`/`useMemo` cuando el compiler
+   skipeaba el memo). Ver sección "Lint debt cero" abajo.
+4. **`web/dist/` fuera de git**: sentinel `.gitkeep` + `.gitignore` +
+   plugin Vite `preserveGitkeep` en `closeBundle` + Makefile `clean`
+   que preserva el sentinel. `go:embed all:web/dist` sigue
+   compilando desde fresh clone.
 
-**Fixtures reutilizables**: copia directamente de los tests que ya
-existen — todos usan el mismo shape de `channel(overrides)` factory
-+ `program(id, startOffsetMin, durationMin, overrides)` + reloj fijo
-`const NOW = new Date("2026-04-24T12:00:00Z").getTime()` con
-`vi.useFakeTimers()` + `vi.setSystemTime(NOW)` en `beforeEach`.
-Ejemplo canónico: `web/src/components/livetv/NowPlayingCard.test.tsx`.
+**Verificación final**: Vitest **138 → 221** tests (+83). `pnpm tsc
+--noEmit` · `pnpm build` · `pnpm lint` · `go test -race ./...` los
+cuatro en verde.
 
-Los tres gotchas ya aprendidos (en `conventions.md` sección "Frontend
-— Vitest + Testing Library"): **fireEvent en vez de user-event**,
-`container.querySelector("img")` para `<img alt="">`, y **no hace
-falta i18n provider** si el componente usa `defaultValue`.
+### 🎯 Decisión senior asentada — léela antes de planificar
 
-Componentes a cubrir y qué pinear en cada uno:
+**No más tests sobre superficies que van a cambiar.** El producto no
+está terminado. Tests sobre admin panels que van a crecer es deuda
+garantizada — se reescriben cuando añades scheduler, dashboard, etc.
 
-- **`LiveTvTopBar.tsx`** (146 loc):
-  - Renderiza título + total channels + live-now count (aria labels).
-  - 3 tabs con `role="tab"` + `aria-selected`, wiring de `onTab`.
-  - Input de búsqueda dispara `onSearch` con el valor.
-  - `<HeroSettings>` solo aparece en la tab `discover` (no en guide /
-    favorites).
-  - Mockear `HeroSettings` con `vi.mock("./HeroSettings")` para no
-    arrastrar su lógica interna al test.
+**La regla**: test lo que ya no va a cambiar. Los tests que hemos
+metido (player hooks, wizard, livetv components refactorizados) son
+estables. Los admin panels NO: les falta scheduler, dashboard,
+logs. Esos se testan cuando el producto pare de moverse.
 
-- **`DiscoverView.tsx`** (136 loc):
-  - Con `category="all"`, los rails aparecen en el orden de
-    `CHANNEL_CATEGORY_ORDER` **saltando** categorías vacías.
-  - Con `category` específica, solo se renderiza ese rail.
-  - Rail `Apagados` solo aparece si hay unhealthy **Y** la category es
-    `"all"` (si hay unhealthy pero estamos filtrando por "sports", NO
-    debe verse).
-  - Empty state cuando `visibleRails.length === 0` (ninguna categoría
-    con canales).
-  - `onSeeAll` solo existe en modo `"all"` (cambiar a esa category en
-    el click).
-  - Mockear `HeroSpotlight` (ya tiene su propio test) para no mezclar.
+### 📊 Análisis de gap vs Plex / Jellyfin (foco LiveTV)
 
-- **`HeroSpotlight.tsx`** (~210 loc):
-  - `items.length === 0` → renderiza null.
-  - 1 item: no hay dots, no auto-rotación (el `useEffect` con timer
-    respeta `items.length < 2`).
-  - 2+ items: dots con `role="tab"`, `aria-selected` en el activo, y
-    auto-rotación cada 12 s (anchor `ROTATE_MS`). Usa fake timers +
-    `vi.advanceTimersByTime(12_000)` para verificar rotación.
-  - Click en dot cambia `rawIdx` y el activo.
-  - Clamp: si `items` se reduce de 3 a 1, el render sigue funcionando
-    sin crash (re-render con `rawIdx >= items.length`).
-  - `useNowTick(30_000)` integrado — mock del hook NO es necesario si
-    usas fake timers, pero sí lo es si quieres forzar re-render
-    explícito. Alternativa: `vi.advanceTimersByTime(30_000)` y
-    `rerender()`.
-  - `StreamPreview` tiene HLS.js que en jsdom peta; **mockear**
-    `./StreamPreview` con `vi.mock` para evitar montarlo.
+**Lo que YA tiene HubPlay, sólido**:
+- M3U source + refresh manual
+- EPG multi-fuente con catálogo curado (prioridad + merge)
+- Health-check oportunista (canales apagados auto-ocultos)
+- Override manual de tvg-id persistente entre refreshes
+- Panel admin unificado con status dot + stats strip + tabs
+  (`LivetvAdminPanel` + 4 sub-paneles)
+- Hero personalizable por cuenta con spotlight auto-preview HLS
+- Discover con rails + categorías + rail "Apagados"
+- EPG grid tipo Plex (24h ruler, now-line, auto-scroll one-shot)
+- Favoritos + per-user preferences persistentes
 
-- **`EPGGrid.tsx`** (430 loc, el más complejo):
-  - Header sticky con hour ruler (24 columnas).
-  - Renderiza una fila por canal, dentro programas que **caen en la
-    ventana** `windowStart..windowEnd` (descarta fuera-de-rango).
-  - `now-line` visible solo cuando `nowLineOffset` está entre 0 y
-    `TIMELINE_WIDTH`.
-  - Botón "Ahora · HH:MM" hace smooth-scroll al offset de ahora −120.
-  - Auto-scroll inicial solo una vez (`hasScrolledRef`). Re-ticks
-    NO re-scrollean.
-  - Click en una celda de programa llama `onSelect(channel)`.
-  - `activeChannelId` aplica clase + `aria-pressed="true"` a esa fila.
-  - Empty state cuando `channels.length === 0`.
-  - Programa con `start_time` tras `windowEnd` o `end_time` antes de
-    `windowStart` no se renderiza (devuelve null).
+**Lo que FALTA, por impacto real**:
 
-**Criterio de "hecho"**: `pnpm test` sube de 138 a ≥180, `pnpm tsc
---noEmit` verde, `pnpm build` verde, `pnpm lint` sin nuevos errors.
+1. **Matcher EPG más agresivo** ← el problema más visible del producto
+   - Cobertura hoy: **52/268 canales** con davidmuma. El usuario ve
+     "sin guía" en 4 de cada 5 canales. Es lo que más se nota en los
+     primeros 30 segundos de uso.
+   - Hoy: tvg-id exacto + display-name variants + quality strip +
+     accent fold (en `internal/iptv/service_epg.go`: `nameVariants`,
+     `matchChannel`, `qualityRE`).
+   - Añadir: (a) tabla de alias conocidos (`epg_name_aliases`: `alias
+     → canonical_name`), (b) match por channel number cuando ambos
+     feeds lo traen, (c) Levenshtein fuzzy con threshold configurable.
+   - Target: **52 → 150-200+ canales** con EPG.
+   - Scope: ~1 día. Solo backend, sin tocar UI, sin churn de tests
+     frontend.
 
-### TRACK B — Setup wizard tests (ruta crítica 1er arranque)
+2. **Scheduler UI M3U + EPG refresh** ← lo que separa herramienta de servicio
+   - Hoy todo es botón manual ("Refrescar" en admin). Sin esto el
+     producto no se autosostiene — un usuario real no abre admin
+     cada mañana.
+   - Tabla nueva `scheduled_jobs(library_id, kind, interval_hours,
+     last_run_at, last_status, enabled)`.
+   - Worker: goroutine periódica en `library.Scheduler` (ya existe
+     para auto-scan, reutilizar el patrón). Ver
+     `internal/library/scheduler.go` para la forma.
+   - UI: panel admin con dropdown interval + timestamp última
+     ejecución + botón "Run now".
+   - Scope: ~1 día.
 
-**Objetivo**: cubrir el flujo más importante del producto — la primera
-ejecución. Hoy tiene **0 tests**. Si esto se rompe, nadie usa el
-producto.
+3. **"Continuar viendo" en LiveTV**
+   - Requiere tabla `channel_watch_history(user_id, channel_id,
+     last_watched_at, seconds_watched)`.
+   - Rail nuevo en Discover encima de las categorías.
+   - Fase 2 del plan Plex-max. No bloqueante.
 
-**Ficheros**:
-```
-web/src/pages/setup/SetupWizard.tsx    235 loc  — orquestador
-web/src/pages/setup/AccountStep.tsx    197 loc  — crear admin
-web/src/pages/setup/LibrariesStep.tsx  341 loc  — elegir bibliotecas
-web/src/pages/setup/SettingsStep.tsx   280 loc  — TMDB key, hw accel
-web/src/pages/setup/CompleteStep.tsx   257 loc  — finalizar
-web/src/components/setup/FolderBrowser.tsx  195 loc
-```
+4. **Activity / sessions dashboard** (universal, no solo LiveTV)
+   - "Quién está viendo qué ahora". Plex Dashboard.
+   - Backend ya expone sesiones vía SSE, hay que agregar.
+   - Útil para el admin pero no lo echa de menos el usuario final.
 
-**Gotcha de entrada**: `FolderBrowser` está en la lista de
-pre-existing lint debt (`react-hooks/set-state-in-effect`). Si tocas
-ese fichero para testearlo, considera arreglar el lint a la vez — el
-patrón de fix ya está documentado (ver `CountrySelector` en el commit
-del lint burndown del ciclo anterior).
+5. **Logs viewer**
+   - Debug hoy es `docker logs` / `journalctl`. No es bloqueador
+     para usuarios.
 
-**Qué pinear, por step**:
+6. **Override manual de channel number / group**
+   - Hoy el M3U manda. El admin no puede re-ordenar.
+   - Patrón: extender la tabla `channel_overrides` (ya existe para
+     `tvg_id`) con `number` y `group` opcionales.
 
-- **`SetupWizard.tsx`** (orquestador — más fácil, empezar por aquí):
-  - `StepIndicator` marca activo/completed según `currentStep`.
-  - `initialStep` prop mapea a índice correcto (hay un `STEP_MAP` al
-    principio; verifica que un valor desconocido cae a 0).
-  - `goNext` avanza pero topa en `STEP_KEYS.length - 1` (4 steps,
-    índice 3 max).
-  - `goBack` retrocede pero topa en 0.
-  - `handleAccountNext` → persiste `setupData.user` y avanza.
-  - `handleLibrariesNext` → persiste `setupData.libraries` y avanza.
-  - `handleSettingsNext` → persiste `setupData.settings` y avanza.
-  - Mockear los 4 step components con `vi.mock` para aislar el
-    orquestador; cada mock expone los props recibidos para verificar
-    wiring (`onNext`, `onBack`, `initialData`).
+7. **Timeshift / DVR** ← Plex lo tiene. Scope enorme. Post-MVP.
 
-- **`AccountStep.tsx`**:
-  - Validación local: username < 3 chars → error, password < 8 →
-    error, confirm ≠ password → error. Cada uno con su key de
-    traducción (ver defaultValues).
-  - `createAdmin.mutate` NO se llama si `validate()` falla.
-  - `onSuccess` → `setAuth(user)` + `onNext({username, password, ...})`.
-  - Server error → aparece `serverError` string en UI.
-  - Mockear `useSetupCreateAdmin` con `vi.mock("@/api/hooks", ...)`
-    devolviendo un mutation stub (`mutate: vi.fn()`, `isPending: bool`,
-    etc. según API de TanStack Query v5).
-  - Mockear `useAuthStore` — hay precedente: `web/src/store/auth.test.ts`.
+**Lo que NO pondría esfuerzo ahora** (over-engineering para
+self-host personal):
+- Plugins catalog (Jellyfin)
+- Webhooks / notifications
+- Parental controls multi-usuario
+- Device management UI / revocación por dispositivo
+- E2E tests Playwright (no hay usuarios reales todavía)
 
-- **`LibrariesStep.tsx`** (más largo, trae FolderBrowser):
-  - Permitir añadir/quitar entries (name + contentType + path).
-  - Validar que hay ≥ 1 biblioteca y que cada una tiene los 3 campos.
-  - `onNext(entries)` solo si la lista es válida.
-  - `onBack` dispara sin validar.
-  - El `FolderBrowser` dispara un callback `onSelect(path)`; mockear
-    para no montar la navegación real.
+### 🚀 Recomendación de próxima sesión
 
-- **`SettingsStep.tsx`**:
-  - Campos opcionales (TMDB key, hwAccel dropdown).
-  - `onNext({tmdbApiKey?, hwAccel?})` siempre pasa — no hay
-    validación obligatoria.
-  - `onBack` funciona.
+**Elige UNA cosa, no tres**. Scope discipline.
 
-- **`CompleteStep.tsx`**:
-  - Resume lo creado.
-  - Botón "Start" que probablemente llama un mutation final
-    (revisar el fichero) y redirige. Mockear la mutation + el router.
+**Default recommendation — matcher EPG agresivo** (#1 arriba):
+- Máximo impacto visible (EPG 19% → 60-75% cobertura).
+- Solo backend, sin tocar UI, sin churn de tests.
+- Scope contenido: 1 día bien enfocado.
+- Se mide objetivamente: cuenta canales con programas en ventana
+  -2h..+24h antes/después contra la misma URL de davidmuma.
 
-**Criterio de "hecho"**: los 5 ficheros del wizard cubiertos. Mínimo
-~25 tests. `SetupWizard` orquestador es el más valioso (guía todo el
-flujo), ataca ese primero.
+**Alternativa si prefieres producto visible — scheduler UI** (#2):
+- Saca al producto del modo "herramienta manual".
+- Toca backend + UI admin. Bien de scope para 1 día.
+- Patrón ya probado en `library.Scheduler` (auto-scan existente).
 
-### Orden sugerido si haces ambos
+**Lo que NO haría en la siguiente sesión** (decidido):
+- Tests de admin panels — prematuro, se reescribirían.
+- Split de `library.Service` — nice-to-have, no bloquea nada.
+- E2E tests — demasiado pronto.
+- IPTV fan-out relay — solo cuando lleguen usuarios reales.
 
-1. **Track A completo** (4 ficheros, +40-50 tests) → 1 commit → PR.
-2. Mergear PR A.
-3. **Track B completo** (5 ficheros, +25-30 tests) → 1 commit → PR.
-4. Actualizar esta memoria (retirar el handoff, añadir ciclo).
+### Estado al abrir sesión
 
-Si prefieres paralelizar: A y B tocan directorios distintos
-(`components/livetv/` vs `pages/setup/`), no hay conflicto real.
+- `main` tiene PRs #81 (simplify + LiveTV split) + #82 (coverage
+  slice 1) mergeados.
+- Rama actual `claude/review-project-tasks-f5Rdg` lleva **5 commits
+  encima de main, no hay PR abierto**. Decidir al abrir:
+  - Opción A: abrir PR y mergear a main antes de empezar.
+  - Opción B: trabajar encima de ella si la nueva tarea es continuación
+    directa (no lo es — los 4 entregables de esta rama ya están
+    auto-contenidos).
+  - Recomendado: **abrir PR, mergear, rama nueva** para la siguiente
+    tarea.
+- Todos los tests verdes al final: `pnpm test` 221/221 · `pnpm tsc
+  --noEmit` · `pnpm build` · `pnpm lint` 0 · `go test -race ./...`
+  21 paquetes.
+- No hay cambios sin commitear.
 
-### Checklist al abrir sesión
-- [ ] Leer este handoff + el resto de `project-status.md`.
-- [ ] `git checkout main && git pull` — verifica que slice 1 está en.
-- [ ] Elegir track.
-- [ ] Crear rama `claude/frontend-coverage-slice-2` o
-  `claude/setup-wizard-tests`.
-- [ ] Atacar fichero por fichero, correr `pnpm test -- <fichero>`
-  frecuentemente.
-- [ ] Al acabar: `pnpm test` + `pnpm tsc --noEmit` + `pnpm build`
-  verdes, commit descriptivo, push, PR.
+### Checklist al abrir siguiente sesión
+
+- [ ] Leer este handoff entero.
+- [ ] `git checkout main && git pull` (tras mergear PR de esta rama).
+- [ ] Elegir UNA tarea del recomendado (matcher EPG o scheduler UI).
+- [ ] Rama nueva `claude/<nombre-descriptivo>`.
+- [ ] Ver las "reglas senior asentadas" en la sección "Lint debt
+  cero" abajo — especialmente "no memoización manual" y "no
+  set-state-in-effect". También las de `conventions.md` (React 19 +
+  Compiler, ref capture, fast-refresh).
+- [ ] Al acabar: `pnpm test` + `pnpm tsc` + `pnpm build` + `pnpm lint`
+  + `go test -race ./...` verdes. Commit descriptivo. Push. PR.
+- [ ] Actualizar esta memoria con el ciclo hecho.
 
 ---
 
