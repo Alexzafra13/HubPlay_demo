@@ -1,6 +1,6 @@
 # Estado del proyecto
 
-> Snapshot: **2026-04-24** (live-TV arc) · Rama: `claude/review-tv-programming-bWTim` · **tests: verde**
+> Snapshot: **2026-04-24** (live-TV arc + simplify sweep) · Rama: `claude/review-memory-tv-code-8bjei` · **tests: verde**
 
 ## Resumen ejecutivo
 
@@ -18,6 +18,15 @@ oportunista** de canales (apagados auto-ocultos del user, surface para admin),
 con auto-preview HLS + persistencia multi-dispositivo). 14 commits, todos con
 tests + lint + go race verde.
 
+Ciclo de cierre (`claude/review-memory-tv-code-8bjei`, 1 commit + 1 follow-up):
+revisión de código contra la memoria del arc, **−400 loc netas** con cero
+cambios de comportamiento y **dos bugs arreglados**: el fallback del logo
+roto de `ChannelCard` ya muestra las iniciales (antes dejaba el hueco), y la
+barra de progreso del `HeroSpotlight` se actualiza también con un solo item
+(antes quedaba congelada hasta que cambiaba `nowPlaying`). Extraídos tres
+hooks / módulos reutilizables: `useNowTick`, `useHeroSpotlight`,
+`livetv/categoryOrder`.
+
 ## Tamaño verificado
 
 - **~100** ficheros `.go` de producción · **~60** `_test.go`
@@ -27,7 +36,60 @@ tests + lint + go race verde.
 - `go test -race ./...` verde en 21 paquetes; `golangci-lint v1.64.8`: exit 0
 - Frontend: `pnpm build` + `pnpm test` (72/72) verdes
 
-## Último ciclo de trabajo (hoy, 2026-04-24)
+## Simplify sweep (hoy, 2026-04-24, `claude/review-memory-tv-code-8bjei`)
+
+Review completa del paquete `internal/iptv` + `web/src/components/livetv` +
+`web/src/pages/LiveTV.tsx` contra la memoria de este arc. Un único commit
+grande con 9 cambios ordenados por impacto:
+
+1. **`HeroMosaic.tsx` borrado** (−182 loc): reemplazado por `HeroSpotlight`
+   en `5baeae5`, quedaba exportado en el barrel sin que nada lo importara.
+2. **`stopCh` eliminado de `iptv.Service`**: creado, cerrado por `Shutdown`
+   y nunca seleccionado. `Shutdown()` queda como no-op documentado para no
+   romper el patrón simétrico con los otros servicios.
+3. **HLS en `proxy.go` deduplicado**: extraídos `peekForHLS`,
+   `absorbAndRewriteHLS`, `isAmbiguousStreamCT`. `ProxyStream` y `ProxyURL`
+   usan los mismos primitivos; un fix futuro ya no se puede aplicar a solo
+   uno de los dos paths (`pipeStream` con flush vs `io.Copy`, ACAO, health
+   reporting siguen siendo diferentes a propósito).
+4. **`useNowTick(ms)` hook nuevo** (`web/src/hooks/useNowTick.ts`): colapsa
+   tres `setInterval → setState(Date.now())` idénticos en `EPGGrid`,
+   `PlayerOverlay` y `HeroSpotlight`. **Bug colateral arreglado**: la barra
+   de progreso del hero se congelaba con `items.length < 2` (el timer de
+   auto-rotate no disparaba).
+5. **Fallback real del logo en `ChannelCard`**: `onError` ponía
+   `display: none` al `<img>` y las iniciales vivían en la rama opuesta del
+   ternario — el resultado era un hueco sobre el gradient. Ahora se trackea
+   `failedLogoUrl` y se muestra `<ChannelLogo>`. Estado derivado de props
+   para evitar `setState-in-effect`.
+6. **`useHeroSpotlight` extraído**: la preferencia + el fallback silencioso
+   `favorites → live-now → newest` + las opciones del menú vivían en
+   `LiveTV.tsx` (~130 loc). Ahora en `web/src/components/livetv/
+   useHeroSpotlight.ts`. `LiveTV.tsx` baja de **763 a ~600 loc**.
+7. **`getUpNext` simplificado**: quitada la ordenación cliente-side
+   (`[...programs].sort`). El backend ya devuelve `ORDER BY start_time` en
+   `internal/db/epg_repository.go:118,198`.
+8. **`livetv/categoryOrder.ts`**: orden canónico de categorías en un único
+   sitio. Antes duplicado entre `LiveTV.tsx:railOrder` y
+   `CategoryChips.tsx:defaultOrder`.
+9. **Guide tab ya no traga búsquedas sin resultado**: `channels={filteredChannels
+   .length > 0 ? filteredChannels : channels}` era un silent fallback que
+   mostraba TODOS los canales cuando la búsqueda no matcheaba nada. Ahora
+   pasa `filteredChannels` y `EPGGrid` muestra su empty state.
+
+Follow-up del mismo día (mismo ciclo, commit aparte):
+- **`PublicEPGSources()` → `var publicEPGSources`**: la función devolvía un
+  slice nuevo en cada llamada. Ahora variable de paquete, read-only por
+  convención, zero-alloc en el hot path del handler del catálogo.
+- **`capitalize(s)` compartido en `epgHelpers.ts`**: antes duplicado en
+  `LiveTV.tsx` y `PlayerOverlay.tsx`.
+
+**Verificación**: `go test -race ./...` 21/21 verde · `pnpm test` 74/74 ·
+`pnpm build` ok · `pnpm lint` sin regresiones vs HEAD (los 11 errors + 4
+warnings que quedan son deuda pre-existente en `AppLayout`, `CountrySelector`,
+`MediaGrid`, `FolderBrowser`, `ItemDetail` — ya apuntada abajo).
+
+## Último ciclo de trabajo (2026-04-24, live-TV arc)
 
 1. **Fix 414 en EPG bulk schedule** — el usuario importó 7008 programas
    desde davidmuma/EPG_dobleM y todas las tarjetas mostraban "sin guía".

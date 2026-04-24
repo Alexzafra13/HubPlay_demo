@@ -25,6 +25,7 @@ import {
   type HeroModeOption,
   type HeroSpotlightItem,
   PlayerOverlay,
+  capitalize,
   getNowPlaying,
   getUpNext,
   useHeroSpotlight,
@@ -561,10 +562,6 @@ function DiscoverView({
       ) : null}
     </div>
   );
-}
-
-function capitalize(s: string) {
-  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 // ───────────────────────────────────────────────────────────────────

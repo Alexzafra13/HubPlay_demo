@@ -45,3 +45,12 @@ export function formatTime(dateStr: string): string {
     minute: "2-digit",
   });
 }
+
+/**
+ * Capitalise the first letter of a non-empty string. Fallback used by
+ * the Live TV surfaces when an i18n key is missing; proper translations
+ * (CategoryChips.defaultLabel) win when available.
+ */
+export function capitalize(s: string): string {
+  return s.length === 0 ? s : s.charAt(0).toUpperCase() + s.slice(1);
+}

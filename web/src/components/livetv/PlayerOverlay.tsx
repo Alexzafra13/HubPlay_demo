@@ -4,7 +4,12 @@ import type { Channel, EPGProgram } from "@/api/types";
 import { useNowTick } from "@/hooks/useNowTick";
 import { ChannelLogo } from "./ChannelLogo";
 import { ChannelPlayer } from "./ChannelPlayer";
-import { formatTime, getNowPlaying, getUpNext } from "./epgHelpers";
+import {
+  capitalize,
+  formatTime,
+  getNowPlaying,
+  getUpNext,
+} from "./epgHelpers";
 
 interface PlayerOverlayProps {
   channel: Channel;
@@ -482,6 +487,3 @@ function TabButton({
   );
 }
 
-function capitalize(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1);
-}

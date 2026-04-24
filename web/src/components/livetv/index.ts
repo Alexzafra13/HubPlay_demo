@@ -15,6 +15,7 @@ export { PlayerOverlay } from "./PlayerOverlay";
 export { detectCountryCode } from "./detectCountry";
 export { useHeroSpotlight } from "./useHeroSpotlight";
 export {
+  capitalize,
   formatTime,
   getNowPlaying,
   getProgramProgress,
