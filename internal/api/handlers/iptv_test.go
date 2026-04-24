@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -262,6 +263,7 @@ func newIPTVTestEnv(t *testing.T) *iptvTestEnv {
 		r.Get("/channels/{channelId}/proxy", env.handler.ProxyURL)
 		r.Get("/channels/{channelId}/schedule", env.handler.Schedule)
 		r.Get("/iptv/schedule", env.handler.BulkSchedule)
+		r.Post("/iptv/schedule", env.handler.BulkSchedule)
 		r.Get("/iptv/public/countries", env.handler.PublicCountries)
 		r.Post("/iptv/public/import", env.handler.ImportPublicIPTV)
 	})
@@ -537,6 +539,99 @@ func TestIPTVHandler_BulkSchedule_HappyPath(t *testing.T) {
 func TestIPTVHandler_BulkSchedule_MissingChannels_400(t *testing.T) {
 	env := newIPTVTestEnv(t)
 	rr := env.do(http.MethodGet, "/api/v1/iptv/schedule", "")
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status: got %d want 400", rr.Code)
+	}
+}
+
+func TestIPTVHandler_BulkSchedule_POST_HappyPath(t *testing.T) {
+	env := newIPTVTestEnv(t)
+	env.svc.channelByID["c-1"] = &db.Channel{ID: "c-1", LibraryID: "lib-1"}
+	env.svc.channelByID["c-2"] = &db.Channel{ID: "c-2", LibraryID: "lib-1"}
+	env.svc.bulkFn = func(_ context.Context, ids []string, _, _ time.Time) (map[string][]*db.EPGProgram, error) {
+		out := map[string][]*db.EPGProgram{}
+		for _, id := range ids {
+			out[id] = []*db.EPGProgram{{ID: "p-" + id, Title: "T-" + id}}
+		}
+		return out, nil
+	}
+	rr := env.do(http.MethodPost, "/api/v1/iptv/schedule",
+		`{"channels":["c-1","c-2"]}`)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: got %d want 200", rr.Code)
+	}
+	data, _ := iptvDecodeData(t, rr).(map[string]any)
+	if len(data) != 2 || data["c-1"] == nil || data["c-2"] == nil {
+		t.Fatalf("bulk shape: %v", data)
+	}
+}
+
+func TestIPTVHandler_BulkSchedule_POST_LargeList(t *testing.T) {
+	// 2,000 channels comfortably exceeds any URL-length limit and
+	// forces the repo-level chunker to kick in. The handler path has
+	// to route all of them to the service in one call.
+	env := newIPTVTestEnv(t)
+	ids := make([]string, 2000)
+	for i := range ids {
+		id := fmt.Sprintf("c-%04d", i)
+		ids[i] = id
+		env.svc.channelByID[id] = &db.Channel{ID: id, LibraryID: "lib-1"}
+	}
+	var gotIDs []string
+	env.svc.bulkFn = func(_ context.Context, in []string, _, _ time.Time) (map[string][]*db.EPGProgram, error) {
+		gotIDs = in
+		return map[string][]*db.EPGProgram{}, nil
+	}
+
+	body, err := json.Marshal(map[string]any{"channels": ids})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	rr := env.do(http.MethodPost, "/api/v1/iptv/schedule", string(body))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: got %d want 200, body=%s", rr.Code, rr.Body.String())
+	}
+	if len(gotIDs) != len(ids) {
+		t.Fatalf("service got %d ids, want %d", len(gotIDs), len(ids))
+	}
+}
+
+func TestIPTVHandler_BulkSchedule_POST_MissingChannels_400(t *testing.T) {
+	env := newIPTVTestEnv(t)
+	rr := env.do(http.MethodPost, "/api/v1/iptv/schedule", `{"channels":[]}`)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status: got %d want 400", rr.Code)
+	}
+}
+
+func TestIPTVHandler_BulkSchedule_POST_InvalidBody_400(t *testing.T) {
+	env := newIPTVTestEnv(t)
+	rr := env.do(http.MethodPost, "/api/v1/iptv/schedule", `{not json`)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status: got %d want 400", rr.Code)
+	}
+}
+
+func TestIPTVHandler_BulkSchedule_POST_TooManyChannels_400(t *testing.T) {
+	env := newIPTVTestEnv(t)
+	ids := make([]string, 5001)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("c-%d", i)
+	}
+	body, err := json.Marshal(map[string]any{"channels": ids})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	rr := env.do(http.MethodPost, "/api/v1/iptv/schedule", string(body))
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status: got %d want 400", rr.Code)
+	}
+}
+
+func TestIPTVHandler_BulkSchedule_POST_UnknownField_400(t *testing.T) {
+	env := newIPTVTestEnv(t)
+	rr := env.do(http.MethodPost, "/api/v1/iptv/schedule",
+		`{"channels":["c-1"],"foo":"bar"}`)
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("status: got %d want 400", rr.Code)
 	}

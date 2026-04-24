@@ -1,6 +1,6 @@
 # Estado del proyecto
 
-> Snapshot: **2026-04-17** · Rama: `main` · HEAD: `3e90af9` · **CI: verde**
+> Snapshot: **2026-04-24** · Rama: `claude/review-tv-programming-bWTim` · **tests: verde**
 
 ## Resumen ejecutivo
 
@@ -19,7 +19,44 @@ dedup M3U), LiveTV partido en 8 ficheros con **EPG grid real** estilo Plex.
 - `go test -race ./...` verde en 21 paquetes; `golangci-lint v1.64.8`: exit 0
 - Frontend: `pnpm build` + `pnpm test` (72/72) verdes
 
-## Último ciclo de trabajo (hoy, 2026-04-17)
+## Último ciclo de trabajo (hoy, 2026-04-24)
+
+1. **Fix 414 en EPG bulk schedule** — el usuario importó 7008 programas
+   desde davidmuma/EPG_dobleM y todas las tarjetas mostraban "sin guía".
+   Causa: `useBulkSchedule` serializa TODOS los channel IDs en el query
+   string; una biblioteca con ~260 canales produce una URL de ~9 KB que
+   nginx rechaza con 414 antes de llegar a Go. Los programas ya estaban
+   en la DB — el fallo era puro transporte.
+2. **POST /api/v1/channels/schedule** — el handler `BulkSchedule` acepta
+   ahora GET (compat) y POST con body JSON `{channels, from, to}`. Body
+   limitado a 1 MiB con `MaxBytesReader`, `DisallowUnknownFields` para
+   rechazar payloads malformados, tope de 5000 canales por request.
+3. **Chunker en `EPGProgramRepository.BulkSchedule`** — el IN() dinámico
+   se parte en bloques de 500 ids antes de pegar a SQLite (default
+   `SQLITE_LIMIT_VARIABLE_NUMBER=999`). Dedupe previo para que un id
+   repetido no duplique filas al mergear chunks. Tests con 1200 canales
+   verifican que ningún row se pierde en los bordes.
+4. **Frontend `getBulkSchedule` a POST** — siempre. Más simple y robusto
+   que una heurística por tamaño. Tests añadidos al `client.test.ts`
+   validan la shape del request y el short-circuit con lista vacía.
+5. **nginx `large_client_header_buffers 8 32k`** — defensa en
+   profundidad. El POST ya evita el 414, pero subir el buffer previene
+   regresiones si alguien añade un endpoint GET con listas grandes en
+   el futuro.
+6. **Fix bug en `nameVariants`** (pre-existente en 7d95d1e): nombres
+   con whitespace doble ("  Canal  Sur  ") generaban una variante
+   espuria "canal  sur" además de la colapsada "canal sur", que nunca
+   emparejaba nada real. Ahora el folding normaliza whitespace en la
+   variante base también.
+
+**Impacto operativo**: importar davidmuma ya funciona end-to-end.
+Poner la URL XMLTV (o .gz) en el campo *EPG URL* de la biblioteca
+livetv y darle a "Refrescar EPG". El matcher fuzzy (tvg-id → display-
+name con quality strip + accent fold) junta los programas con los
+canales correctos. El frontend carga la guía sin 414 hasta ~5000
+canales por request.
+
+## Ciclo anterior (2026-04-17)
 
 1. **Auditoría IPTV** — detectados 5 problemas en backend y desajuste UX en frontend
 2. **Tier 1 seguridad backend** (`85263d8`): SSRF proxy, timeouts transport,
@@ -62,6 +99,22 @@ type Service struct {
 
 `main.go` los llama en orden de dependencia antes de cerrar DB. Tests usan
 `t.Cleanup(svc.Shutdown)` para LIFO: Shutdown → DB close → TempDir rm.
+
+## Bulk EPG — contrato del endpoint
+
+`GET /api/v1/channels/schedule?channels=a,b,c&from=…&to=…` y
+`POST /api/v1/channels/schedule` con body
+```json
+{ "channels": ["a","b","c"], "from": "-2", "to": "24" }
+```
+
+- `from`/`to` aceptan RFC3339 o entero (horas). Default: -2h..+24h.
+- ACL por canal: cada id se valida individualmente contra
+  `library_access`; canales no accesibles se ignoran silenciosamente.
+  Admin bypasa.
+- Dedup + chunk internos: el repo corta en bloques de 500 ids antes del
+  IN() de SQLite. Tope de 5000 canales por request (400 si se excede).
+- Frontend siempre POST — el GET queda para curl / back-compat.
 
 ## Lo que falta (no bloqueante)
 

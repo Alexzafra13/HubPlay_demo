@@ -519,12 +519,18 @@ var qualityRE = regexp.MustCompile(
 // should all match the same channel. For "La 1 (1080p) [Geo-blocked]" it
 // yields ["la 1 (1080p) [geo-blocked]", "la 1"]. The fully-stripped
 // variant is what usually matches EPG display-names.
+//
+// Whitespace is always collapsed in both variants: iptv-org feeds
+// routinely carry doubled or trailing spaces ("  Canal  Sur  "), and
+// treating those as distinct from the cleaned form would create a
+// spurious second variant that never matches anything real.
 func nameVariants(name string) []string {
 	base := strings.ToLower(strings.TrimSpace(name))
 	if base == "" {
 		return nil
 	}
 	folded := diacriticFolder.Replace(base)
+	folded = strings.Join(strings.Fields(folded), " ")
 	variants := []string{folded}
 
 	stripped := strings.TrimSpace(qualityRE.ReplaceAllString(folded, " "))

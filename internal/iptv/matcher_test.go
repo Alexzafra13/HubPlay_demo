@@ -14,7 +14,7 @@ func TestNameVariants(t *testing.T) {
 		{"Movistar Plus+ FHD", []string{"movistar plus+ fhd", "movistar plus+"}},
 		{"ESPN", []string{"espn"}},                             // no stripping, single variant
 		{"", nil},                                              // empty input
-		{"  Canal  Sur  ", []string{"canal  sur"}},             // trim + lowercased; no quality → single variant
+		{"  Canal  Sur  ", []string{"canal sur"}},              // trim + lowercased + whitespace collapsed
 	}
 	for _, tc := range cases {
 		t.Run(tc.in, func(t *testing.T) {

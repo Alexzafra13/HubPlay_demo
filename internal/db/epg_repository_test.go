@@ -2,6 +2,7 @@ package db_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -165,6 +166,80 @@ func TestEPG_BulkSchedule(t *testing.T) {
 	}
 	if len(empty) != 0 {
 		t.Error("expected empty map for empty channel list")
+	}
+}
+
+// TestEPG_BulkSchedule_LargeList exercises the repo-level chunker: we
+// push more than a single chunk's worth of channel IDs through the
+// IN() clause and verify every seeded program surfaces. Catches any
+// regression where the chunker drops a boundary row or re-queries the
+// same chunk twice.
+func TestEPG_BulkSchedule_LargeList(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	repos := db.NewRepositories(database)
+	ctx := context.Background()
+
+	libID := "lib-epg-large"
+	now := time.Now()
+	_ = repos.Libraries.Create(ctx, &db.Library{
+		ID: libID, Name: "Large", ContentType: "livetv",
+		CreatedAt: now, UpdatedAt: now,
+	})
+
+	// 1,200 channels comfortably exceeds the 500-chunk size, so the
+	// chunker has to run at least three iterations.
+	const total = 1200
+	ids := make([]string, total)
+	for i := 0; i < total; i++ {
+		id := fmt.Sprintf("ch-big-%04d", i)
+		ids[i] = id
+		if err := repos.Channels.Create(ctx, makeChannel(id, libID, "C"+id, i+1, true)); err != nil {
+			t.Fatalf("create channel %s: %v", id, err)
+		}
+		prog := makeProgram("p-"+id, id, "T-"+id, now.Add(-30*time.Minute), now.Add(30*time.Minute))
+		if err := repos.EPGPrograms.ReplaceForChannel(ctx, id, []*db.EPGProgram{prog}); err != nil {
+			t.Fatalf("seed epg %s: %v", id, err)
+		}
+	}
+
+	got, err := repos.EPGPrograms.BulkSchedule(ctx, ids, now.Add(-time.Hour), now.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("bulk schedule: %v", err)
+	}
+	if len(got) != total {
+		t.Fatalf("channels returned = %d, want %d", len(got), total)
+	}
+	for _, id := range ids {
+		progs, ok := got[id]
+		if !ok {
+			t.Fatalf("channel %s missing from bulk result", id)
+		}
+		if len(progs) != 1 || progs[0].Title != "T-"+id {
+			t.Fatalf("channel %s programs = %v", id, progs)
+		}
+	}
+}
+
+// TestEPG_BulkSchedule_DedupesDuplicateIDs guards against the same
+// channel id landing in two different chunks and doubling up in the
+// merged map.
+func TestEPG_BulkSchedule_DedupesDuplicateIDs(t *testing.T) {
+	repo, _, _ := setupEPGTest(t)
+	ctx := context.Background()
+
+	now := time.Now()
+	_ = repo.ReplaceForChannel(ctx, "ch-epg-1", []*db.EPGProgram{
+		makeProgram("p1", "ch-epg-1", "Show", now.Add(-1*time.Hour), now.Add(1*time.Hour)),
+	})
+
+	got, err := repo.BulkSchedule(ctx,
+		[]string{"ch-epg-1", "ch-epg-1", "ch-epg-1"},
+		now.Add(-2*time.Hour), now.Add(2*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got["ch-epg-1"]) != 1 {
+		t.Fatalf("duplicate ids produced %d rows, want 1", len(got["ch-epg-1"]))
 	}
 }
 
