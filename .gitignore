@@ -11,5 +11,12 @@ coverage.html
 # Frontend
 web/node_modules/
 
+# Vite build output. The directory is tracked (via web/dist/.gitkeep) so
+# the `go:embed all:web/dist` directive in migrations.go compiles on a
+# fresh clone. Only build artifacts are ignored; rebuild with
+# `pnpm build` or `make web` to regenerate.
+web/dist/*
+!web/dist/.gitkeep
+
 
 /peliculas
