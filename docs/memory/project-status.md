@@ -1,6 +1,6 @@
 # Estado del proyecto
 
-> Snapshot: **2026-04-24** (matcher EPG agresivo + scheduler IPTV con UI admin) · Rama: `claude/review-pending-tasks-9Vh6U` · **tests: verde · lint: 0**
+> Snapshot: **2026-04-24** (matcher EPG agresivo + scheduler IPTV con UI admin + senior review fixes) · Rama: `claude/review-pending-tasks-9Vh6U` · **tests: verde · lint: 0**
 
 ---
 
@@ -10,7 +10,8 @@
 
 ### Lo que cerramos esta rama (`claude/review-pending-tasks-9Vh6U`)
 
-Dos commits limpios. Las dos candidatas del handoff anterior hechas.
+Tres commits: las dos candidatas del handoff anterior + un pass de
+fixes tras review senior.
 
 **Commit 1 — Matcher EPG agresivo**. Sin cambios de schema, sin UI,
 solo backend.
@@ -145,6 +146,71 @@ Tests nuevos (todos verdes):
   delete happy, run-now happy, run-now surface error, run-now
   sin row devuelve 204, run-now deny).
 
+**Commit 3 — Fixes de review senior**. Un sub-agente revisó todo con
+ojos frescos. 1 blocker + 7 should-fix + 4 nits arreglados. Sin cambios
+de comportamiento visibles salvo el path de recuperación de panic.
+
+Blocker arreglado:
+
+- **Scheduler goroutine no muere silenciosamente en panic**
+  (`scheduler.go:runOne`). `defer/recover` convierte el panic en un
+  outcome "error" registrado y mantiene el goroutine vivo para el
+  siguiente tick. Antes: un panic en el XMLTV parser paraba TODOS los
+  refreshes programados hasta reiniciar el binario, sin log visible.
+  Cubierto por `TestScheduler_RunNowRecoversFromPanic` +
+  `TestScheduler_TickLoopSurvivesPanic`.
+
+Should-fix arreglados:
+
+- **`Stop(ctx)` respeta el deadline del caller**. `Start` envuelve el
+  ctx con un cancel propio; `Stop` recibe el `shutdownCtx` de main.go
+  y, si éste expira antes de que drene el run in-flight, fuerza
+  cancel del runCtx. Antes: `Stop()` podía bloquear hasta 10 min
+  (runTimeout) aunque el shutdownCtx fuera de 30 s — el supervisor
+  mandaba SIGKILL antes de drenar.
+- **`iptv.ErrRefreshInProgress` sentinel** en lugar de `fmt.Errorf`
+  opaco. `RefreshM3U` / `RefreshEPG` lo wrappean con `%w`. El
+  scheduler lo detecta con `errors.Is` y lo trata como benigno —
+  log info, NO actualiza `last_status`. Sin esto, una race entre
+  "Ejecutar ahora" y el tick grababa un `last_status="error"`
+  spurious sobre un refresh que en realidad había funcionado en el
+  otro path. Cubierto por `TestScheduler_ConcurrentRefreshIsBenign`.
+- **`canAccessLibrary` compartido** (`iptv_access.go` nuevo). Los dos
+  handlers (`IPTVHandler.canAccessLibrary`, `IPTVScheduleHandler
+  .canAccess`) delegan al helper de paquete. Antes eran dos copias
+  idénticas que podían drift-ear en wording o semántica.
+- **Fuzzy pruner byte-vs-rune**. `absDiff(len(cand), len(pool))`
+  comparaba longitudes en BYTES contra un budget rune-based; para
+  strings que sobreviven diacritic folding con chars multi-byte
+  ("Movistar Plus+", "3/24") el pruner podía saltarse matches
+  legítimos. Ahora `runeCount()` helper en todas las comparaciones.
+  Cubierto por nuevo caso "non-ASCII survives folding".
+- **CASCADE de `iptv_scheduled_jobs` pin-eado por test**
+  (`TestIPTVSchedule_CascadesOnLibraryDelete`). Borrar una biblioteca
+  debe limpiar sus schedule rows. Depende de `ON DELETE CASCADE` en
+  la migración **Y** de `PRAGMA foreign_keys=ON` en el DSN del
+  driver — ambas cosas pueden regresionar silenciosamente.
+- **Tab "Programación" no parpadea al cargar** (`LivetvAdminPanel
+  .tsx`). Antes `showSchedule={schedule.length > 0}` la hacía
+  aparecer tarde porque `schedule` arranca como `[]`. Ahora
+  `showSchedule={true}` — el backend sintetiza placeholders así que
+  la tab siempre tiene contenido estable.
+
+Nits liquidados:
+
+- `bestCand` muerto fuera de `fuzzyMatch`.
+- `var _ = errors.Is` dead-anchor reemplazado por un test real
+  (`TestFakeRepo_GetMissingReturnsSentinel`).
+- `tickOnce` + `setTickInterval` movidos a `export_test.go` (Go solo
+  los compila durante `go test`, invisibles al binario).
+- Comentario de coste O(N × fuzzy) en el path de programmes huérfanas
+  de `refreshOneSource`.
+
+Tests nuevos de este commit (6 casos): `RunNowRecoversFromPanic`,
+`TickLoopSurvivesPanic`, `ConcurrentRefreshIsBenign`,
+`CascadesOnLibraryDelete`, "non-ASCII survives folding",
+`FakeRepo_GetMissingReturnsSentinel`.
+
 ### 📊 Medición pendiente (matcher EPG)
 
 El handoff anterior puso un target **52 → 150-200+** canales con EPG
@@ -171,8 +237,9 @@ los mismos mismatches observados.
 ### Estado al abrir sesión
 
 - `main` tiene PRs #81–#85 mergeados.
-- Rama actual `claude/review-pending-tasks-9Vh6U` con **2 commits**
-  encima de main. Listo para PR (una vez medido el matcher).
+- Rama actual `claude/review-pending-tasks-9Vh6U` con **3 commits**
+  encima de main (matcher + scheduler + review-fixes). Listo para PR
+  una vez validado en una DB real.
 - Tests verdes: `pnpm test` 221/221 · `pnpm tsc --noEmit` · `pnpm
   lint` 0 · `pnpm build` ok · `go test -race ./...` 21 paquetes ·
   `golangci-lint v1.64.8` exit 0.
@@ -188,6 +255,44 @@ los mismos mismatches observados.
   `channel_watch_history` + rail en Discover) o **modal de detalle
   de programa** al clicar en el EPG grid.
 - [ ] Actualizar esta memoria.
+
+### 🎓 Patrones senior reforzados en este ciclo
+
+Para el siguiente arquitecto, reglas aprendidas en este pass de
+revisión. Añadir a `conventions.md` si reinciden:
+
+1. **Goroutines de fondo SIEMPRE con `defer recover()`** en el nivel
+   donde llaman a código third-party-ish (HTTP clients, parsers, SQL
+   contra datos no-trust). Sin ello un panic mata el worker para
+   siempre sin log visible. El patrón aquí: `defer func() { if r :=
+   recover(); r != nil { runErr = fmt.Errorf("panic: %v", r); log...
+   }; recordOutcome() }()`.
+2. **`Stop()` debe aceptar `context.Context`** cuando lleva estado
+   in-flight que puede bloquear. La alternativa ("espera hasta el
+   runTimeout interno") rompe el contrato de graceful shutdown: el
+   supervisor mata el proceso antes de drenar. El patrón: `Start`
+   wraps ctx con un cancel, `Stop(ctx)` hace select entre doneCh y
+   ctx.Done() + cancela el root si necesario.
+3. **Sentinels de error sobre fmt.Errorf** cuando el caller puede
+   querer discriminar. `ErrRefreshInProgress` aquí es el ejemplo:
+   sin él, el scheduler no podía saber si un error era benigno o
+   real. Pattern: `var ErrFoo = errors.New(...)` + `fmt.Errorf("ctx:
+   %w", ErrFoo)` + `errors.Is(err, ErrFoo)` en el caller.
+4. **Len() en strings con multi-byte**: si la función trabaja con
+   rune-based thresholds (distancias de edición, límites de
+   caracteres, etc.), TODAS las comparaciones de longitud deben ir
+   en runas. Mezclar `len(s)` (bytes) con `len([]rune(s))` (runes)
+   es un bug silencioso en ASCII, visible solo cuando aparece un
+   "+" o "/". Usar un `runeCount` local helper para que sea obvio.
+5. **Test hooks van en `export_test.go`**. Go solo compila archivos
+   `_test.go` durante `go test`, así que un método `TestOnly*`
+   exportado ahí es invisible al binario de producción. Evita
+   dudar "¿puedo llamar a esto desde fuera?" cuando lees el código.
+6. **CASCADE del schema debe tener su propio test**. No asumir que
+   `ON DELETE CASCADE` funciona — depende del driver Y de
+   `PRAGMA foreign_keys=ON` Y del DSN. modernc.org/sqlite los respeta
+   cuando están pragma-ON, pero cualquier cambio en
+   `internal/db/sqlite.go` puede apagarlo sin test lo pille.
 
 ---
 
