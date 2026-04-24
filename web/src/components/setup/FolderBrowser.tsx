@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState } from "react";
 import type { FC } from "react";
 import { useBrowseDirectories, useBrowseLibraryDirectories } from "@/api/hooks";
 import { Modal } from "@/components/common/Modal";
@@ -25,22 +25,24 @@ const FolderBrowser: FC<FolderBrowserProps> = ({ isOpen, onClose, onSelect, useA
 
   const { data, isLoading, isError, error } = useAdmin ? adminBrowse : setupBrowse;
 
-  const handleNavigate = useCallback((path: string) => {
-    setCurrentPath(path);
-  }, []);
+  // Handlers are plain functions. Manual useCallback used to wrap these,
+  // but its dep array (`data?.parent`, `data?.current`) couldn't be
+  // preserved by React Compiler because the body reads `data` directly —
+  // the compiler logs "Compilation Skipped" and falls back to no memo
+  // at all. Letting the compiler memoize the whole component gives us
+  // stable references without any manual wiring.
+  const handleNavigate = (path: string) => setCurrentPath(path);
 
-  const handleGoUp = useCallback(() => {
-    if (data?.parent) {
-      setCurrentPath(data.parent);
-    }
-  }, [data?.parent]);
+  const handleGoUp = () => {
+    if (data?.parent) setCurrentPath(data.parent);
+  };
 
-  const handleSelect = useCallback(() => {
+  const handleSelect = () => {
     if (data?.current) {
       onSelect(data.current);
       onClose();
     }
-  }, [data?.current, onSelect, onClose]);
+  };
 
   // Build breadcrumb segments from current path
   const breadcrumbs = data?.current

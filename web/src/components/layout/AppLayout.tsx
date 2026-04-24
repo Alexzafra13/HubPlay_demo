@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import { Outlet, useLocation } from 'react-router';
 import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
@@ -11,20 +11,24 @@ interface AppLayoutProps {
 
 // ─── Responsive Hook ────────────────────────────────────────────────────────
 
+/**
+ * useIsMobile subscribes to a `matchMedia` query via useSyncExternalStore,
+ * which is the React-18+ canonical way to mirror browser state into React
+ * without an effect. This avoids the cascading render `setState-in-effect`
+ * produced (initial state from innerWidth, effect then reconciles with
+ * matchMedia).
+ */
 function useIsMobile(breakpoint = 768) {
-  const [isMobile, setIsMobile] = useState(
-    typeof window !== 'undefined' ? window.innerWidth < breakpoint : false,
+  const query = `(max-width: ${breakpoint - 1}px)`;
+  return useSyncExternalStore(
+    (onChange) => {
+      const mql = window.matchMedia(query);
+      mql.addEventListener('change', onChange);
+      return () => mql.removeEventListener('change', onChange);
+    },
+    () => window.matchMedia(query).matches,
+    () => false, // SSR fallback — we're a mobile-last client app.
   );
-
-  useEffect(() => {
-    const mql = window.matchMedia(`(max-width: ${breakpoint - 1}px)`);
-    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
-    mql.addEventListener('change', handler);
-    setIsMobile(mql.matches);
-    return () => mql.removeEventListener('change', handler);
-  }, [breakpoint]);
-
-  return isMobile;
 }
 
 // ─── AppLayout ──────────────────────────────────────────────────────────────
@@ -35,29 +39,25 @@ export function AppLayout({ title }: AppLayoutProps) {
   const isMobile = useIsMobile();
   const location = useLocation();
 
-  const toggleCollapse = useCallback(() => {
-    setCollapsed((prev) => !prev);
-  }, []);
+  // Force-close the mobile drawer whenever we leave the mobile viewport or
+  // navigate to a new route. Done via the React-docs "reset on prop change"
+  // pattern (track the last seen values, compare during render) instead of
+  // useEffect + setState, which fires a second render after the first paint.
+  const [lastResetKey, setLastResetKey] = useState({
+    pathname: location.pathname,
+    isMobile,
+  });
+  if (
+    lastResetKey.pathname !== location.pathname ||
+    lastResetKey.isMobile !== isMobile
+  ) {
+    setLastResetKey({ pathname: location.pathname, isMobile });
+    if (mobileOpen) setMobileOpen(false);
+  }
 
-  const toggleMobile = useCallback(() => {
-    setMobileOpen((prev) => !prev);
-  }, []);
-
-  const closeMobile = useCallback(() => {
-    setMobileOpen(false);
-  }, []);
-
-  // Close mobile drawer when switching to desktop
-  useEffect(() => {
-    if (!isMobile) {
-      setMobileOpen(false);
-    }
-  }, [isMobile]);
-
-  // Close mobile drawer on navigation
-  useEffect(() => {
-    setMobileOpen(false);
-  }, [location.pathname]);
+  const toggleCollapse = () => setCollapsed((prev) => !prev);
+  const toggleMobile = () => setMobileOpen((prev) => !prev);
+  const closeMobile = () => setMobileOpen(false);
 
   return (
     <div className="min-h-screen bg-bg-base font-sans">
