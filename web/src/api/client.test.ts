@@ -182,4 +182,32 @@ describe("ApiClient", () => {
     await expect(client.logout()).rejects.toThrow();
     expect(localStorage.getItem("hubplay_user")).toBeNull();
   });
+
+  it("getBulkSchedule sends channels via POST body, not GET query", async () => {
+    // A library with hundreds of channels produces a query string long
+    // enough to hit a 414 at common reverse-proxy defaults; switching
+    // to POST moves the payload into the body and sidesteps it.
+    const fetch = mockFetch({ data: { "c-1": [], "c-2": [] } });
+    vi.stubGlobal("fetch", fetch);
+
+    await client.getBulkSchedule(["c-1", "c-2"]);
+
+    const [url, init] = fetch.mock.calls[0];
+    expect(url).toBe("http://test/api/v1/channels/schedule");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual({
+      channels: ["c-1", "c-2"],
+      from: undefined,
+      to: undefined,
+    });
+  });
+
+  it("getBulkSchedule short-circuits on empty channel list (no fetch)", async () => {
+    const fetch = mockFetch({});
+    vi.stubGlobal("fetch", fetch);
+
+    const result = await client.getBulkSchedule([]);
+    expect(result).toEqual({});
+    expect(fetch).not.toHaveBeenCalled();
+  });
 });

@@ -490,8 +490,12 @@ export class ApiClient {
     to?: string,
   ): Promise<Record<string, EPGProgram[]>> {
     if (channelIds.length === 0) return {};
-    return this.request<Record<string, EPGProgram[]>>("GET", "/channels/schedule", {
-      params: { channels: channelIds.join(","), from, to },
+    // POST (not GET): a library with ~250 channels already produces a
+    // URL long enough to trip a 414 at common reverse-proxy defaults.
+    // The backend accepts both transports; the body form scales to
+    // thousands of channels without worrying about header limits.
+    return this.request<Record<string, EPGProgram[]>>("POST", "/channels/schedule", {
+      body: { channels: channelIds, from, to },
     });
   }
 

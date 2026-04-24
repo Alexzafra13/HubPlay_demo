@@ -95,13 +95,47 @@ func (r *EPGProgramRepository) Schedule(ctx context.Context, channelID string, f
 	return epgsFromScheduleRows(rows), nil
 }
 
+// bulkScheduleChunkSize caps how many channel IDs go into a single IN()
+// clause. SQLite's default SQLITE_LIMIT_VARIABLE_NUMBER is 999 (older
+// builds) or 32k (modern); 500 leaves plenty of headroom for the two
+// time bounds plus whatever variants the driver binds underneath. Live
+// TV libraries with thousands of channels (davidmuma, iptv-org full
+// country dumps) get split into chunks transparently.
+const bulkScheduleChunkSize = 500
+
 // BulkSchedule returns programs for multiple channels within a time range.
 // Uses raw SQL because sqlc doesn't support dynamic IN() on SQLite.
+//
+// Large channel lists are chunked internally so callers don't have to
+// care about the SQLite variable limit.
 func (r *EPGProgramRepository) BulkSchedule(ctx context.Context, channelIDs []string, from, to time.Time) (map[string][]*EPGProgram, error) {
+	result := make(map[string][]*EPGProgram)
 	if len(channelIDs) == 0 {
-		return make(map[string][]*EPGProgram), nil
+		return result, nil
 	}
 
+	// Dedupe to avoid a duplicated id landing in two different chunks
+	// and double-counting rows in the merged map.
+	ids := dedupeStrings(channelIDs)
+
+	for start := 0; start < len(ids); start += bulkScheduleChunkSize {
+		end := start + bulkScheduleChunkSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+		if err := r.bulkScheduleChunk(ctx, ids[start:end], from, to, result); err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
+}
+
+func (r *EPGProgramRepository) bulkScheduleChunk(
+	ctx context.Context,
+	channelIDs []string,
+	from, to time.Time,
+	result map[string][]*EPGProgram,
+) error {
 	placeholders := "?"
 	args := []any{from, to}
 	for i, id := range channelIDs {
@@ -119,20 +153,35 @@ func (r *EPGProgramRepository) BulkSchedule(ctx context.Context, channelIDs []st
 		 ORDER BY channel_id, start_time`, args...,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("bulk schedule: %w", err)
+		return fmt.Errorf("bulk schedule: %w", err)
 	}
 	defer rows.Close() //nolint:errcheck
 
-	result := make(map[string][]*EPGProgram)
 	for rows.Next() {
 		p := &EPGProgram{}
 		if err := rows.Scan(&p.ID, &p.ChannelID, &p.Title, &p.Description, &p.Category,
 			&p.IconURL, &p.StartTime, &p.EndTime); err != nil {
-			return nil, fmt.Errorf("scan program: %w", err)
+			return fmt.Errorf("scan program: %w", err)
 		}
 		result[p.ChannelID] = append(result[p.ChannelID], p)
 	}
-	return result, rows.Err()
+	return rows.Err()
+}
+
+func dedupeStrings(in []string) []string {
+	if len(in) < 2 {
+		return in
+	}
+	seen := make(map[string]struct{}, len(in))
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	return out
 }
 
 // CleanupOld removes programs that ended before the given time.
