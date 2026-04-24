@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -19,17 +19,22 @@ export function CountrySelector({ hasLibrary }: CountrySelectorProps) {
   const queryClient = useQueryClient();
   const { data: countries, isLoading } = usePublicCountries();
   const importMutation = useImportPublicIPTV();
-  const [selectedCountry, setSelectedCountry] = useState<PublicCountry | null>(null);
+  // User's explicit pick, if any. Null means "fall back to the auto-
+  // detected country" — we compute that derivation below. Tracking the
+  // two separately means we don't need a useEffect → setState to
+  // hydrate the default selection (the lint rightly objects to that
+  // under React 19 + Compiler), yet a click still overrides the
+  // guess immediately.
+  const [userPicked, setUserPicked] = useState<PublicCountry | null>(null);
   const [countrySearch, setCountrySearch] = useState("");
-  const [autoDetected, setAutoDetected] = useState(false);
 
-  useEffect(() => {
-    if (!countries || countries.length === 0 || autoDetected) return;
+  const autoDetectedCountry = useMemo(() => {
+    if (!countries || countries.length === 0) return null;
     const code = detectCountryCode();
-    const match = countries.find((c) => c.code === code);
-    if (match) setSelectedCountry(match);
-    setAutoDetected(true);
-  }, [countries, autoDetected]);
+    return countries.find((c) => c.code === code) ?? null;
+  }, [countries]);
+
+  const selectedCountry = userPicked ?? autoDetectedCountry;
 
   const filtered = useMemo(() => {
     if (!countries) return [];
@@ -116,7 +121,7 @@ export function CountrySelector({ hasLibrary }: CountrySelectorProps) {
                 <button
                   key={country.code}
                   type="button"
-                  onClick={() => setSelectedCountry(country)}
+                  onClick={() => setUserPicked(country)}
                   aria-pressed={selectedCountry?.code === country.code}
                   className={[
                     "rounded-xl border px-3 py-2.5 text-left text-sm transition-all",
