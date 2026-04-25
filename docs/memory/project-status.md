@@ -508,7 +508,7 @@ los mismos mismatches observados.
 - ADR-001 reaffirmado con reglas duras (ver
   `architecture-decisions.md`). 0 raw repos post-ADR.
 
-### Checklist al abrir siguiente sesión
+### Checklist de validación (requiere DB real)
 
 - [ ] Refrescar EPG contra davidmuma y medir canales con EPG antes/
   después (52 era el baseline; target 150+).
@@ -516,19 +516,89 @@ los mismos mismatches observados.
   correr 6 h+ para verificar que el worker dispara y registra.
 - [ ] Abrir reproducciones de canal y verificar que el rail
   "Continuar viendo" aparece en Discover con los canales vistos
-  (en varios navegadores / dispositivos para validar la parte
-  cross-device).
+  (en varios navegadores / dispositivos para validar cross-device).
 - [ ] Forzar un M3U refresh y verificar que el rail sigue poblado
   (no se vacía — contrato clave del stream_url-as-key).
 - [ ] Abrir el EPG grid y clicar una celda de programa para
   verificar que aparece el ProgramDetailModal con sinopsis +
   up-next, y que "Ver canal ahora" pasa al player limpiamente.
 - [ ] Si todo funciona → abrir PR y mergear.
-- [ ] Siguiente candidata: **split de `library.Service`** (deuda
-  estructural — ya hay precedente con `iptv.Service`) o
-  **override manual de channel number/group** (extender
-  `channel_overrides` con columnas opcionales `number` y `group`).
-- [ ] Actualizar esta memoria.
+
+### 🔍 Review senior holístico (2026-04-25)
+
+Tras los 6 commits de feature, se lanzó un sub-agente con instrucciones
+de revisión arquitectónica de alto nivel sobre el proyecto entero
+(CLAUDE.md + memorias + ADRs + código actual). Veredicto cruzado con
+mi propio read interno. Las conclusiones que cambian la dirección
+del proyecto:
+
+**Lo que está aguantando bien (decisiones que envejecen mejor que en
+su momento)**:
+- AppError + sentinels + `errors.Is`. El nuevo `ErrRefreshInProgress`
+  encajó día 1 porque el patrón ya estaba.
+- stream_url como identidad estable de canal (mig 009 channel_overrides,
+  internalizada en mig 012 channel_watch_history con regression test).
+- Sink-pattern / interface-on-the-consumer (signingKeys, MetricsSink,
+  jobRunner). Mantiene el grafo de paquetes acíclico.
+- `useSyncExternalStore` + "no setState in useEffect" enforcement.
+
+**Lo que está derivando (predicciones concretas)**:
+- ~~Constructor de `iptv.Service` explotando — 8 deps, próxima
+  feature sería 9. Split-por-fichero es camuflaje, el constructor es
+  la verdad. Seam real: playback-time (channels + watch + favorites)
+  vs operator-time (m3u + epg + schedules + sources + overrides).~~
+  *Diferido — la siguiente feature decide si tirar.*
+- **`internal/api/handlers/iptv.go` con 1.159 líneas** — más grande
+  que el service que le sirve. Próximo refactor inevitable; el
+  precedente está en `iptv_schedule.go` y `iptv_access.go` ya
+  extraídos.
+- ~~sqlc/raw drift produciría incidente de runtime~~ ✅ **resuelto en
+  commit 7**. Los 4 raw repos migrados, ADR-001 reaffirmado con
+  reglas duras.
+
+**Lo que rompería con 50 usuarios**:
+- Proxy IPTV sin circuit breaker → upstream caído reintentado infinito.
+- SQLite sin backup → un fallo de disco termina la reputación.
+- Scheduler secuencial entre libraries (acceptable hoy con 1-2 libs).
+- JWT rotation sin path ejercitado.
+
+### 🚀 Recomendación priorizada (orden definitivo del review)
+
+**Paga primero**:
+1. **Circuit breaker en IPTV proxy / single-flight en EPG fetches**
+   — 1 día. Para el sangrado contra CDNs caídas. Pago día 1.
+2. **SQLite backup automatizado (WAL copy)** — 0.5 días. Asegura
+   el activo más crítico. Goodwill infinito tras el primer fallo.
+3. ✅ **sqlc sweep** — hecho en commit 7.
+
+**Higiene visible**:
+4. **Split `internal/api/handlers/iptv.go`** (1.159 líneas) por
+   dominio — extracción incremental tipo `iptv_schedule.go`.
+   0.5-1 día.
+5. **Split de `library.Service`** — pure refactor con playbook ya
+   probado en `iptv.Service`.
+
+**Features**:
+6. **Activity / sessions dashboard** — bus ya emite eventos, falta
+   agregador. UX admin tangible.
+7. **Override manual channel number/group** — **deferido per
+   review**. Extiende `channel_overrides` (la tabla que se aprendió
+   recientemente a no fiar). Esperar a que stream_url esté
+   battle-tested en producción.
+
+### Checklist al abrir siguiente sesión
+
+- [ ] Validar primero los 5 puntos del checklist de validación
+  arriba si tienes DB real en mano. Si no la tienes, salta esto.
+- [ ] Si validación OK → abrir PR `claude/review-pending-tasks-9Vh6U`
+  → main y mergear (7 commits limpios listos).
+- [ ] Decidir UNA candidata del bloque "Paga primero" o "Higiene
+  visible". Recomendado: **circuit breaker en IPTV proxy** (#1).
+- [ ] Rama nueva `claude/<descriptive>`.
+- [ ] Reglas senior asentadas que el ciclo siguiente debe respetar
+  (ver patrones en sección "Patrones senior reforzados" abajo + ADR-001
+  reaffirmation).
+- [ ] Al cerrar: actualizar esta memoria con el nuevo ciclo.
 
 ### 🎓 Patrones senior reforzados en este ciclo
 
@@ -1328,36 +1398,43 @@ type Service struct {
 
 ## Próximo paso sugerido
 
-Sin prisa. Candidatos ordenados por impacto.
+> **Orden definitivo** tras el review senior holístico de 2026-04-25.
+> El handoff arriba (sección "🚀 Recomendación priorizada") tiene el
+> contexto completo; aquí solo el resumen ejecutivo.
 
-**Si foco = estabilidad**:
-1. ✅ **Slice 1 coverage hecho** (`claude/frontend-livetv-coverage`):
-   7 ficheros, +64 tests. Queda `LiveTvTopBar` / `DiscoverView` /
-   `HeroSpotlight` / `EPGGrid` — mismo patrón, ~1 día.
-2. ✅ **Tests del setup wizard** — hechos esta rama (+48).
-3. **Tests de páginas admin** (`LivetvAdminPanel` + sub-paneles).
-4. ✅ **Lint debt** — liquidado a cero esta rama.
-5. **Split de `library.Service`** siguiendo la receta del iptv.
+**Pagar primero** (operacional, alto impacto, bajo scope):
+1. **Circuit breaker en IPTV proxy / single-flight EPG fetches** —
+   1 día. Para el sangrado contra CDNs caídas. Mi voto si me
+   obligas a uno.
+2. **SQLite backup automatizado (WAL copy)** — 0.5 días. Asegura
+   el activo más crítico ante fallo de disco.
+3. ✅ **sqlc sweep** — hecho en commit 7. ADR-001 reaffirmed.
 
-**Si foco = experiencia LiveTV**:
-1. ✅ **Matcher EPG más agresivo** — hecho en `claude/review-pending-
-   tasks-9Vh6U`. Falta medir cobertura real contra davidmuma.
-2. ✅ **Scheduler UI M3U + EPG refresh** — hecho en la misma rama.
-   Tabla `iptv_scheduled_jobs`, worker `iptv.Scheduler`, panel admin
-   `ScheduledJobsPanel`. Falta dejar correr 6 h+ en real para validar.
-3. ✅ **"Continuar viendo"** — hecho en la misma rama. Tabla
-   `channel_watch_history` keyeada por stream_url, beacon en
-   `useLiveHls.onFirstPlay`, rail en Discover. Falta validar
-   cross-device en real.
-4. ✅ **Modal de detalle de programa** en EPG grid — hecho en la
-   misma rama. `ProgramDetailModal` reusa el `Modal` común, dispara
-   desde `EPGGrid.onSelectProgram`, muestra sinopsis + up-next.
-5. ✅ **Streaming parser del XMLTV** — hecho en la misma rama.
-   `ParseXMLTVStream` con handler interface; `refreshOneSource`
-   refactorizado para no materializar el feed entero en memoria.
-   Peak de RAM en el refresh baja de ~250 MB → ~10-20 MB para
-   davidmuma.
-6. **Override manual de channel number / group** — extender
-   `channel_overrides` con `number`/`group` opcionales.
-7. **Split de `library.Service`** — deuda estructural; aplicar la
-   misma receta `service_*.go` que se usó con `iptv.Service`.
+**Higiene visible** (paga deuda, mejora velocidad futura):
+4. **Split `internal/api/handlers/iptv.go`** (1.159 líneas) por
+   dominio — extracción incremental tipo `iptv_schedule.go` /
+   `iptv_access.go` ya hechas. 0.5-1 día.
+5. **Split de `library.Service`** — pure refactor con playbook ya
+   probado en `iptv.Service`. 1 día.
+
+**Features pendientes** (orden por valor):
+6. **Activity / sessions dashboard** — bus ya emite eventos, falta
+   agregador. UX admin tangible.
+7. **Override manual channel number / group** — **deferido per
+   review**. Extiende `channel_overrides` (la tabla que se aprendió
+   recientemente a no fiar; el patrón stream_url necesita
+   battle-test en producción antes de la 3ª migración).
+
+**Hechos en esta rama (`claude/review-pending-tasks-9Vh6U`)**:
+- ✅ Matcher EPG agresivo (commit 1). Falta medir cobertura real.
+- ✅ Scheduler IPTV con UI admin (commit 2). Falta dejar correr 6 h+.
+- ✅ Fixes review senior — panic recovery, Stop(ctx),
+  ErrRefreshInProgress, fuzzy byte-vs-rune, CASCADE test (commit 3).
+- ✅ Continuar viendo en LiveTV — tabla `channel_watch_history`
+  keyeada por stream_url, beacon en `useLiveHls.onFirstPlay`, rail
+  en Discover (commit 4). Falta validar cross-device.
+- ✅ ProgramDetailModal en EPG grid (commit 5).
+- ✅ Streaming XMLTV parser — `ParseXMLTVStream`, refresh peak
+  ~250 MB → ~10-20 MB (commit 6).
+- ✅ sqlc sweep — 4 raw repos migrados, ADR-001 reaffirmed
+  (commit 7).
