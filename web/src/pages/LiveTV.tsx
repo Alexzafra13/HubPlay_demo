@@ -170,6 +170,7 @@ export default function LiveTV() {
   const counts = useMemo<Record<CategoryFilter, number>>(() => {
     const base: Record<CategoryFilter, number> = {
       all: channels.length,
+      "no-signal": 0,
       general: 0,
       news: 0,
       sports: 0,
@@ -184,14 +185,27 @@ export default function LiveTV() {
       religion: 0,
       adult: 0,
     };
-    for (const ch of channels) base[ch.category] += 1;
+    for (const ch of channels) {
+      base[ch.category] += 1;
+      // "no-signal" is virtual — counts every channel currently
+      // failing (degraded or dead). Server hides truly-dead channels
+      // so this is mostly the degraded set, which is the actionable
+      // bucket the user sees on the chip.
+      if (ch.health_status === "degraded" || ch.health_status === "dead") {
+        base["no-signal"] += 1;
+      }
+    }
     return base;
   }, [channels]);
 
   // ── Derived: filtered + grouped for Discover ─────────────────────
   const filteredChannels = useMemo(() => {
     let list = channels;
-    if (category !== "all") {
+    if (category === "no-signal") {
+      list = list.filter(
+        (c) => c.health_status === "degraded" || c.health_status === "dead",
+      );
+    } else if (category !== "all") {
       list = list.filter((c) => c.category === category);
     }
     if (search.trim()) {

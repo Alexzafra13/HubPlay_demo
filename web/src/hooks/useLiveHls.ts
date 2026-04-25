@@ -32,6 +32,22 @@ interface UseLiveHlsOptions {
    * exactly the desired semantics.
    */
   onFirstPlay?: () => void;
+  /**
+   * Called when hls.js gives up on a fatal error (after retries) and
+   * we fall back to native playback or surface the error to the user.
+   * Used to fire the playback-failure beacon so the channel-health
+   * system can see client-side dead-stream signal that the proxy
+   * can't observe (manifest 200 OK + dead segments).
+   *
+   * Fired at most once per streamUrl — repeated fatal events on the
+   * same attachment are suppressed so a flapping player can't
+   * rapid-fire the beacon. Kind is the broad bucket the backend
+   * accepts; native `<video>` errors map to "unknown".
+   */
+  onFatalError?: (
+    kind: "manifest" | "network" | "media" | "timeout" | "unknown",
+    details?: string,
+  ) => void;
 }
 
 interface UseLiveHlsReturn {
@@ -46,6 +62,7 @@ export function useLiveHls({
   unavailableMessage,
   timeoutMs = 20_000,
   onFirstPlay,
+  onFatalError,
 }: UseLiveHlsOptions): UseLiveHlsReturn {
   const hlsRef = useRef<Hls | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -58,6 +75,8 @@ export function useLiveHls({
   // fire the beacon again).
   const onFirstPlayRef = useRef(onFirstPlay);
   onFirstPlayRef.current = onFirstPlay;
+  const onFatalErrorRef = useRef(onFatalError);
+  onFatalErrorRef.current = onFatalError;
 
   const reload = useCallback(() => setReloadToken((n) => n + 1), []);
 
@@ -78,8 +97,24 @@ export function useLiveHls({
 
     let playing = false;
     let beaconFired = false;
+    let fatalReported = false;
+    const reportFatal = (
+      kind: "manifest" | "network" | "media" | "timeout" | "unknown",
+      details?: string,
+    ) => {
+      if (fatalReported) return;
+      fatalReported = true;
+      try {
+        onFatalErrorRef.current?.(kind, details);
+      } catch {
+        // Beacon must never break playback fallback.
+      }
+    };
     const unavailableTimer = window.setTimeout(() => {
-      if (!playing) setError(unavailableMessage);
+      if (!playing) {
+        setError(unavailableMessage);
+        reportFatal("timeout", `no first frame in ${timeoutMs}ms`);
+      }
     }, timeoutMs);
     const onPlaying = () => {
       playing = true;
@@ -96,7 +131,10 @@ export function useLiveHls({
       video.src = streamUrl;
       video.load();
       video.play().catch(() => {});
-      const onErr = () => setError(unavailableMessage);
+      const onErr = () => {
+        setError(unavailableMessage);
+        reportFatal("unknown", "native <video> error after hls.js fallback");
+      };
       video.addEventListener("error", onErr, { once: true });
     };
 
@@ -144,6 +182,21 @@ export function useLiveHls({
             return;
           }
         }
+        // Map hls.js fatal type → server kind. We classify before
+        // tearing down so the beacon goes out before native fallback
+        // potentially overwrites the failure with a different one.
+        // MEDIA_ERROR is handled with recoverMediaError() above, so by
+        // the time we reach this point data.type is NETWORK_ERROR or one
+        // of the OTHER_ERROR variants — no live media branch to map.
+        const kind: "manifest" | "network" | "unknown" =
+          data.type === Hls.ErrorTypes.NETWORK_ERROR
+            ? data.details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR ||
+              data.details === Hls.ErrorDetails.MANIFEST_LOAD_TIMEOUT ||
+              data.details === Hls.ErrorDetails.MANIFEST_PARSING_ERROR
+              ? "manifest"
+              : "network"
+            : "unknown";
+        reportFatal(kind, String(data.details ?? data.type ?? "fatal"));
         hls.destroy();
         hlsRef.current = null;
         startNative();
@@ -152,7 +205,10 @@ export function useLiveHls({
       video.src = streamUrl;
       video.load();
       video.play().catch(() => {});
-      const onErr = () => setError(unavailableMessage);
+      const onErr = () => {
+        setError(unavailableMessage);
+        reportFatal("unknown", "native Safari HLS error");
+      };
       video.addEventListener("error", onErr, { once: true });
     } else {
       startNative();

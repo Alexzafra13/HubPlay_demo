@@ -3,11 +3,14 @@ import type { ChannelCategory } from "@/api/types";
 import { CATEGORY_FILTER_ORDER } from "./categoryOrder";
 
 /**
- * "all" is a virtual filter that keeps every channel. It lives alongside
- * the backend's canonical `ChannelCategory` values so the chips bar can
- * model "show everything" without a separate flag.
+ * "all" is a virtual filter that keeps every channel. "no-signal" is
+ * also virtual — it cuts across categories and surfaces channels that
+ * the health pipeline has flagged as degraded (1–2 consecutive
+ * failures). Truly-dead channels (≥3) are hidden by the server, so
+ * "no-signal" is mostly a "channels currently failing on someone's
+ * device but not yet retired" filter.
  */
-export type CategoryFilter = ChannelCategory | "all";
+export type CategoryFilter = ChannelCategory | "all" | "no-signal";
 
 interface CategoryChipsProps {
   /** Category → count, as computed from the loaded channel list. */
@@ -29,6 +32,7 @@ interface CategoryChipsProps {
  */
 const categoryAccent: Record<CategoryFilter, string> = {
   all: "var(--tv-accent)",
+  "no-signal": "#9ca3af",
   general: "#7aa2ff",
   news: "#ff6b78",
   sports: "#6be2a8",
@@ -60,6 +64,9 @@ export function CategoryChips({
     >
       {order.map((cat) => {
         const count = counts[cat] ?? 0;
+        // "all" is always shown; every other chip (real category or
+        // virtual filter like "no-signal") is hidden when empty so
+        // libraries with healthy channels don't carry a useless chip.
         if (cat !== "all" && count === 0) return null;
 
         const isActive = active === cat;
@@ -110,6 +117,8 @@ function defaultLabel(cat: CategoryFilter): string {
   switch (cat) {
     case "all":
       return "Todos";
+    case "no-signal":
+      return "Sin señal";
     case "general":
       return "General";
     case "news":

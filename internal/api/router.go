@@ -267,6 +267,7 @@ func NewRouter(deps Dependencies) http.Handler {
 						r.Get("/proxy", iptvHandler.ProxyURL)
 						r.Get("/schedule", iptvHandler.Schedule)
 						r.Post("/watch", iptvHandler.RecordChannelWatch)
+						r.Post("/playback-failure", iptvHandler.RecordPlaybackFailure)
 					})
 
 					r.Get("/channels/schedule", iptvHandler.BulkSchedule)

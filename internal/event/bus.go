@@ -33,6 +33,11 @@ const (
 	ChannelRemoved       Type = "channel.removed"
 	EPGUpdated           Type = "epg.updated"
 	PlaylistRefreshed    Type = "playlist.refreshed"
+	// ChannelHealthChanged is published when a channel transitions
+	// between health buckets (ok / degraded / dead). Emitted only on
+	// transition — not on every probe — so subscribers (admin SSE
+	// stream) get push notifications without flooding on every tick.
+	ChannelHealthChanged Type = "channel.health.changed"
 	UserLoggedIn         Type = "user.logged_in"
 	UserLoggedOut        Type = "user.logged_out"
 )

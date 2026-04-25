@@ -24,8 +24,14 @@ export const CHANNEL_CATEGORY_ORDER: ChannelCategory[] = [
   "adult",
 ];
 
-/** Same order with "all" prepended, for CategoryChips. */
+/**
+ * Same order with virtual filters prepended, for CategoryChips.
+ * "no-signal" sits right after "all" so an operator scanning the
+ * library can spot health degradation at a glance — and it self-hides
+ * when empty, so the bar stays clean on healthy libraries.
+ */
 export const CATEGORY_FILTER_ORDER: CategoryFilter[] = [
   "all",
+  "no-signal",
   ...CHANNEL_CATEGORY_ORDER,
 ];

@@ -46,14 +46,43 @@ type Service struct {
 	mu        sync.Mutex
 	refreshes map[string]bool // tracks ongoing refreshes by library ID
 
+	// healthMu guards lastKnownBucket. Kept separate from `mu` so a
+	// long-running M3U refresh doesn't block per-probe health writes.
+	healthMu sync.Mutex
+	// lastKnownBucket maps channelID → last published health bucket
+	// ("ok" / "degraded" / "dead"). Used to gate ChannelHealthChanged
+	// events so we publish only on real transitions, not on every
+	// probe tick. In-memory only — on restart we re-emit on the first
+	// probe per channel, which is what an admin actually wants.
+	lastKnownBucket map[string]string
+
 	httpClient *http.Client
 
 	bus *event.Bus // optional; nil-safe
+
+	// proberWorker is wired post-construction (the worker depends on
+	// the service for the ChannelHealthReporter interface, so we'd
+	// otherwise have a circular dep at construction time). Nil-safe:
+	// service methods that auto-trigger a probe (RefreshM3U) check
+	// before calling.
+	proberWorker proberRunner
+}
+
+// proberRunner is the minimal capability surface the service needs
+// from a prober worker. Defined on the consumer side (sink pattern)
+// so the *Service has no dependency on the worker's internals.
+type proberRunner interface {
+	ProbeNow(ctx context.Context, libraryID string) (ProbeSummary, error)
 }
 
 // SetEventBus wires an event bus so the service publishes PlaylistRefreshed
 // / EPGUpdated events at the end of the respective refresh. Nil-safe.
 func (s *Service) SetEventBus(bus *event.Bus) { s.bus = bus }
+
+// SetProberWorker wires the active prober worker. Optional: a service
+// without one still works, it just won't auto-probe channels after an
+// M3U refresh — the periodic worker tick will catch them eventually.
+func (s *Service) SetProberWorker(w proberRunner) { s.proberWorker = w }
 
 func (s *Service) publish(e event.Event) {
 	if s.bus != nil {
@@ -80,8 +109,9 @@ func NewService(
 		epgSources:   epgSources,
 		overrides:    overrides,
 		watchHistory: watchHistory,
-		logger:       logger.With("module", "iptv"),
-		refreshes:    make(map[string]bool),
+		logger:          logger.With("module", "iptv"),
+		refreshes:       make(map[string]bool),
+		lastKnownBucket: make(map[string]string),
 		httpClient: &http.Client{
 			Timeout: 60 * time.Second,
 		},

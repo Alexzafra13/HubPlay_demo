@@ -1,5 +1,6 @@
 import { useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
+import { api } from "@/api/client";
 import { useRecordChannelWatch } from "@/api/hooks";
 import type { Channel } from "@/api/types";
 import { Spinner } from "@/components/common";
@@ -31,11 +32,30 @@ export function ChannelPlayer({ channel }: ChannelPlayerProps) {
     });
   }, [channelId, recordWatch]);
 
+  // Fatal-error beacon: fired at most once per stream attachment from
+  // useLiveHls when hls.js gives up. Forwards the failure into the
+  // channel-health pipeline so client-side dead-stream signal joins
+  // the same `consecutive_failures` counter the proxy already drives.
+  // Failures here are non-fatal — the player UI already shows the
+  // user the stream failed; the beacon is pure telemetry.
+  const onFatalError = useCallback(
+    (
+      kind: "manifest" | "network" | "media" | "timeout" | "unknown",
+      details?: string,
+    ) => {
+      api.reportPlaybackFailure(channelId, kind, details).catch((err) => {
+        console.warn("[playback-failure] beacon failed:", err);
+      });
+    },
+    [channelId],
+  );
+
   const { error, loading, reload } = useLiveHls({
     videoRef,
     streamUrl: channel.stream_url,
     unavailableMessage: t("liveTV.channelUnavailable"),
     onFirstPlay,
+    onFatalError,
   });
 
   return (
