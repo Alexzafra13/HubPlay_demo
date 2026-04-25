@@ -114,6 +114,7 @@ function unhealthy(id: string): UnhealthyChannel {
 function makeCounts(): Record<CategoryFilter, number> {
   return {
     all: 0,
+    "no-signal": 0,
     general: 0,
     news: 0,
     sports: 0,

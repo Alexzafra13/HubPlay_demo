@@ -56,8 +56,12 @@ export function DiscoverView({
 }: DiscoverViewProps) {
   const { t } = useTranslation();
 
+  // "all" and "no-signal" are virtual filters that span every category —
+  // the parent already filtered `channelsByCategory` for us in the
+  // "no-signal" case, so both render as a list of category rails. A
+  // concrete category renders a single rail.
   const visibleRails =
-    category === "all"
+    category === "all" || category === "no-signal"
       ? CHANNEL_CATEGORY_ORDER.map(
           (c) => [c, channelsByCategory.get(c) ?? []] as const,
         ).filter(([, list]) => list.length > 0)

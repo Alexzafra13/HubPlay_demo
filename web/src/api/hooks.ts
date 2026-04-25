@@ -578,8 +578,10 @@ export function useUnhealthyChannels(
     queryKey: queryKeys.unhealthyChannels(libraryId),
     queryFn: () => api.listUnhealthyChannels(libraryId),
     enabled: !!libraryId,
-    // Poll every 30s so the admin sees live signal without hammering.
-    refetchInterval: 30_000,
+    // No polling: admin pages mount useEventStream("channel.health.changed")
+    // which invalidates this query on the SSE push. The 30s background
+    // refetch we ran before turned into a steady stream of empty
+    // responses — push is cheaper and more responsive.
     ...options,
   });
 }

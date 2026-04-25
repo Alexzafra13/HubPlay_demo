@@ -44,6 +44,16 @@ interface RequestOptions {
   params?: Record<string, string | number | boolean | undefined>;
   body?: unknown;
   headers?: Record<string, string>;
+  /**
+   * When true, sets `keepalive: true` on the underlying fetch so the
+   * request survives page unload, navigation, or component teardown.
+   * Use for "fire-and-forget" telemetry (playback-failure beacon,
+   * progress on stream end, etc.) where we genuinely don't care about
+   * the response and absolutely don't want the user closing the player
+   * to drop the signal. Note: keepalive payloads are capped at 64 KB
+   * by the spec, so reserve this for tiny JSON.
+   */
+  keepalive?: boolean;
 }
 
 type AuthEventListener = {
@@ -71,7 +81,7 @@ export class ApiClient {
     path: string,
     options: RequestOptions = {},
   ): Promise<T> {
-    const { params, body, headers: extraHeaders } = options;
+    const { params, body, headers: extraHeaders, keepalive } = options;
 
     // Build URL with query params
     let url = `${this.baseUrl}${path}`;
@@ -114,6 +124,7 @@ export class ApiClient {
           headers,
           credentials: "include",
           body: body !== undefined ? JSON.stringify(body) : undefined,
+          keepalive,
         });
         // Only retry on server errors for idempotent methods
         const isRetryable = response.status >= 500 && (method === "GET" || method === "HEAD");
@@ -137,6 +148,7 @@ export class ApiClient {
             headers,
             credentials: "include",
             body: body !== undefined ? JSON.stringify(body) : undefined,
+            keepalive,
           });
           if (retryResponse.ok) {
             if (retryResponse.status === 204) return undefined as T;
@@ -612,6 +624,35 @@ export class ApiClient {
     return this.request<{ channel_id: string; last_watched_at: string }>(
       "POST",
       `/channels/${channelId}/watch`,
+    );
+  }
+
+  // Playback-failure beacon: fired by the live player when hls.js
+  // raises a fatal error. The server forwards this into the same
+  // channel-health pipeline the proxy uses, so a flapping client
+  // contributes to the dead-channel signal alongside the active
+  // prober. Failures here are non-fatal — the player has already
+  // failed, the beacon is just telemetry.
+  async reportPlaybackFailure(
+    channelId: string,
+    kind: "manifest" | "network" | "media" | "timeout" | "unknown",
+    details?: string,
+  ): Promise<{
+    channel_id: string;
+    recorded: boolean;
+    consecutive_failures?: number;
+    health_status?: "ok" | "degraded" | "dead";
+    unhealthy_threshold?: number;
+    reason?: string;
+  }> {
+    return this.request(
+      "POST",
+      `/channels/${channelId}/playback-failure`,
+      // keepalive so the beacon survives the user immediately
+      // changing the channel, closing the modal, or even the tab —
+      // the player is the most likely place for "I'm leaving NOW"
+      // teardown to race the request.
+      { body: { kind, details }, keepalive: true },
     );
   }
 

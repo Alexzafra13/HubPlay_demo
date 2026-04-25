@@ -125,6 +125,8 @@
       "similar": "Similar channels"
     },
     "category": {
+      "all": "All",
+      "no-signal": "No signal",
       "general": "General",
       "news": "News",
       "sports": "Sports",

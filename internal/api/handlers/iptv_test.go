@@ -70,6 +70,12 @@ type iptvFakeService struct {
 		ChannelID string
 	}
 	recordWatchErr error
+
+	// Playback-failure beacon capture.
+	recordProbeFailureCalls []struct {
+		ChannelID string
+		Err       error
+	}
 }
 
 func newIPTVFakeService() *iptvFakeService {
@@ -319,6 +325,21 @@ func (s *iptvFakeService) ResetChannelHealth(_ context.Context, channelID string
 	return nil
 }
 
+// RecordProbeFailure captures synthetic failures forwarded by the
+// playback-failure beacon and lets tests drive the consecutive-
+// failures counter on the fake channel row.
+func (s *iptvFakeService) RecordProbeFailure(_ context.Context, channelID string, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.recordProbeFailureCalls = append(s.recordProbeFailureCalls, struct {
+		ChannelID string
+		Err       error
+	}{channelID, err})
+	if ch, ok := s.channelByID[channelID]; ok {
+		ch.ConsecutiveFailures++
+	}
+}
+
 func (s *iptvFakeService) RecordWatch(_ context.Context, userID, channelID string) (time.Time, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -537,6 +558,7 @@ func newIPTVTestEnv(t *testing.T) *iptvTestEnv {
 		r.Get("/libraries/{id}/channels/without-epg", env.handler.ListChannelsWithoutEPG)
 		r.Patch("/channels/{channelId}", env.handler.PatchChannel)
 		r.Post("/channels/{channelId}/watch", env.handler.RecordChannelWatch)
+		r.Post("/channels/{channelId}/playback-failure", env.handler.RecordPlaybackFailure)
 		r.Get("/me/channels/continue-watching", env.handler.ListContinueWatching)
 	})
 	env.router = r

@@ -45,6 +45,16 @@ type channelDTO struct {
 	// frontend sorts by it for the "recién añadidos" hero mode; the
 	// wire shape is the raw RFC3339 string so JS can parse directly.
 	AddedAt string `json:"added_at,omitempty"`
+
+	// HealthStatus is the user-visible classification derived from
+	// the underlying probe counters. One of:
+	//   "ok"       — healthy or never failed
+	//   "degraded" — 1..N-1 consecutive failures (still surfaced)
+	//   "dead"     — >= UnhealthyThreshold consecutive failures
+	// The frontend uses this to drive the "Sin señal" category and
+	// the small status pill on a channel tile. Always present; never
+	// omitted from the wire so client code can rely on the field.
+	HealthStatus string `json:"health_status"`
 }
 
 // toChannelDTO projects a db.Channel onto the wire shape. `streamPath` is
@@ -81,5 +91,25 @@ func toChannelDTO(ch *db.Channel, streamPath string) channelDTO {
 		Country:      ch.Country,
 		IsActive:     ch.IsActive,
 		AddedAt:      addedAt,
+		HealthStatus: deriveHealthStatus(ch),
+	}
+}
+
+// deriveHealthStatus converts the raw probe counter into the
+// three-bucket status the frontend renders. Centralising this here
+// (vs in the SQL or in JS) keeps a single source of truth — bumping
+// db.UnhealthyThreshold flips the wire bucket atomically and the UI
+// follows without a separate change.
+func deriveHealthStatus(ch *db.Channel) string {
+	if ch == nil {
+		return "ok"
+	}
+	switch {
+	case ch.ConsecutiveFailures >= db.UnhealthyThreshold:
+		return "dead"
+	case ch.ConsecutiveFailures > 0:
+		return "degraded"
+	default:
+		return "ok"
 	}
 }

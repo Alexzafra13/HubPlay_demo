@@ -113,6 +113,10 @@ type IPTVService interface {
 	ListUnhealthyChannels(ctx context.Context, libraryID string, threshold int) ([]*db.Channel, error)
 	SetChannelActive(ctx context.Context, id string, active bool) error
 	ResetChannelHealth(ctx context.Context, channelID string) error
+	// RecordProbeFailure is the same hook the proxy uses; the player
+	// beacon endpoint forwards client-side fatal errors here so any
+	// failure source bumps the same `consecutive_failures` counter.
+	RecordProbeFailure(ctx context.Context, channelID string, err error)
 
 	// Manual channel editing — surfaced as the "canales sin guía"
 	// admin panel. The override layer makes SetChannelTvgID survive

@@ -197,6 +197,17 @@ export interface Channel {
    * be absent on older DTOs; the hero "newest" mode just sorts absent
    * values to the end. */
   added_at?: string;
+  /**
+   * Health bucket derived from `consecutive_failures` against the
+   * server's UnhealthyThreshold (3).
+   * - "ok"        → 0 consecutive failures
+   * - "degraded"  → 1–2 (failing but still listed for the user)
+   * - "dead"      → ≥3 (server hides these from the main list, but
+   *                    the playback-failure beacon may surface them
+   *                    transiently in cached client state)
+   * Absent on legacy DTOs — treat as "ok".
+   */
+  health_status?: "ok" | "degraded" | "dead";
 }
 
 export interface EPGProgram {

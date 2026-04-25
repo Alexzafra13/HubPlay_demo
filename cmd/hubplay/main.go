@@ -164,6 +164,16 @@ func run(configPath string) error {
 	iptvScheduler := iptv.NewScheduler(repos.IPTVSchedules, iptvService, logger)
 	iptvScheduler.Start(ctx)
 
+	// Active stream prober: walks every livetv library every few hours
+	// and records a probe outcome against each channel via the same
+	// ChannelHealthReporter the proxy uses. Catches dead upstreams on
+	// channels nobody happens to be watching, so the user-facing list
+	// auto-hides them before a viewer clicks a dead tile.
+	iptvProber := iptv.NewProber(nil, iptvService)
+	iptvProberWorker := iptv.NewProberWorker(iptvProber, repos.Libraries, repos.Channels, logger)
+	iptvProberWorker.Start(ctx)
+	iptvService.SetProberWorker(iptvProberWorker)
+
 	// ═══ Phase 4e: Setup Service ═══
 	setupService := setup.NewService(cfg, configPath, logger)
 
@@ -217,10 +227,10 @@ func run(configPath string) error {
 	}()
 
 	// ═══ Phase 7: Wait for shutdown ═══
-	return waitForShutdown(ctx, cancel, server, streamManager, iptvService, iptvProxy, iptvScheduler, scanScheduler, libraryService, authService, database, logger)
+	return waitForShutdown(ctx, cancel, server, streamManager, iptvService, iptvProxy, iptvScheduler, iptvProberWorker, scanScheduler, libraryService, authService, database, logger)
 }
 
-func waitForShutdown(ctx context.Context, cancel context.CancelFunc, server *http.Server, sm *stream.Manager, iptvSvc *iptv.Service, iptvProxy *iptv.StreamProxy, iptvSched *iptv.Scheduler, scheduler *library.Scheduler, librarySvc *library.Service, authSvc *auth.Service, database interface{ Close() error }, logger *slog.Logger) error {
+func waitForShutdown(ctx context.Context, cancel context.CancelFunc, server *http.Server, sm *stream.Manager, iptvSvc *iptv.Service, iptvProxy *iptv.StreamProxy, iptvSched *iptv.Scheduler, iptvProber *iptv.ProberWorker, scheduler *library.Scheduler, librarySvc *library.Service, authSvc *auth.Service, database interface{ Close() error }, logger *slog.Logger) error {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
@@ -244,6 +254,10 @@ func waitForShutdown(ctx context.Context, cancel context.CancelFunc, server *htt
 	// rather than block the whole shutdown.
 	iptvSched.Stop(shutdownCtx)
 	logger.Info("iptv scheduler stopped")
+	if err := iptvProber.Stop(shutdownCtx); err != nil {
+		logger.Warn("iptv prober stop", "error", err)
+	}
+	logger.Info("iptv prober stopped")
 	scheduler.Stop()
 	logger.Info("scan scheduler stopped")
 	authSvc.StopSessionCleaner()

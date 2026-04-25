@@ -182,6 +182,14 @@ export function ChannelCard({
             <span className="rounded-tv-xs bg-black/70 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-tv-fg-1 backdrop-blur">
               Apagado
             </span>
+          ) : channel.health_status === "dead" ? (
+            <span className="rounded-tv-xs bg-red-600/85 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white backdrop-blur">
+              Sin señal
+            </span>
+          ) : channel.health_status === "degraded" ? (
+            <span className="rounded-tv-xs bg-amber-500/85 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-black backdrop-blur">
+              Inestable
+            </span>
           ) : nowPlaying ? (
             <span className="flex items-center gap-1 rounded-tv-xs bg-tv-live/90 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
               <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />

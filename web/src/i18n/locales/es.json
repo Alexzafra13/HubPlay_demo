@@ -125,6 +125,8 @@
       "similar": "Canales similares"
     },
     "category": {
+      "all": "Todos",
+      "no-signal": "Sin señal",
       "general": "General",
       "news": "Informativos",
       "sports": "Deportes",

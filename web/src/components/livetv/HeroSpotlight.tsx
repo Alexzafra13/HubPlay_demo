@@ -83,7 +83,7 @@ export function HeroSpotlight({ items, label, onOpen }: HeroSpotlightProps) {
       <button
         type="button"
         onClick={() => onOpen?.(channel)}
-        className="group relative block aspect-[21/9] w-full overflow-hidden rounded-tv-lg border border-tv-line text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tv-accent md:aspect-[24/9]"
+        className="group relative block aspect-[21/9] w-full max-h-[420px] overflow-hidden rounded-tv-lg border border-tv-line text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tv-accent md:aspect-[32/9]"
         aria-label={
           nowPlaying
             ? `${channel.name} — ${nowPlaying.title}`

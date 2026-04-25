@@ -570,6 +570,21 @@ func (p *StreamProxy) ProxyURL(ctx context.Context, w http.ResponseWriter, chann
 	resp, finalURL, err := p.fetchUpstream(ctx, upstream)
 	if err != nil {
 		p.logger.Warn("proxy URL fetch failed", "channel", channelID, "url", upstream, "error", err)
+		// Flag the channel for the health system. Without this, a
+		// channel whose master playlist works but whose variants fail
+		// upstream (Pluto stitcher with bad embedPartner, expired
+		// session tokens, geo-blocked CDN edges …) keeps showing as
+		// "ok" forever because ProxyStream never re-runs after the
+		// initial handshake. We do NOT record success on the happy
+		// path of this handler — segment 200s don't prove the channel
+		// is healthy, and counting them would let a flaky variant
+		// reset the counter between failures. The prober's next pass
+		// is the canonical "healthy again" signal.
+		// Skip ctx-cancel — that's the user changing channel, not
+		// upstream rot, and counting it would punish zapping.
+		if !errors.Is(ctx.Err(), context.Canceled) && p.reporter != nil {
+			p.reporter.RecordProbeFailure(ctx, channelID, err)
+		}
 		http.Error(w, "upstream error", http.StatusBadGateway)
 		return nil
 	}

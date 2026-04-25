@@ -55,6 +55,7 @@ func (h *EventHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		event.ChannelRemoved,
 		event.EPGUpdated,
 		event.PlaylistRefreshed,
+		event.ChannelHealthChanged,
 	}
 
 	// Collect unsubscribe funcs so we can detach every handler when the client

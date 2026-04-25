@@ -136,5 +136,21 @@ func (s *Service) RefreshM3U(ctx context.Context, libraryID string) (int, error)
 		}(libraryID)
 	}
 
+	// Trigger an active probe of the freshly-imported channels in
+	// the background so dead upstreams move to the "Sin señal"
+	// bucket without waiting for the periodic worker tick. Detached
+	// ctx because probing hundreds of channels takes longer than
+	// the HTTP refresh response should.
+	if s.proberWorker != nil {
+		go func(id string) {
+			bg, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+			defer cancel()
+			if _, err := s.proberWorker.ProbeNow(bg, id); err != nil {
+				s.logger.Warn("auto-probe after M3U import",
+					"library", id, "error", err)
+			}
+		}(libraryID)
+	}
+
 	return len(dbChannels), nil
 }
