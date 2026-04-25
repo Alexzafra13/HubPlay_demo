@@ -1,6 +1,6 @@
 # Estado del proyecto
 
-> Snapshot: **2026-04-24** (matcher EPG + scheduler IPTV + review fixes + continuar viendo + program detail modal + streaming XMLTV parser) · Rama: `claude/review-pending-tasks-9Vh6U` · **tests: verde · lint: 0**
+> Snapshot: **2026-04-25** (matcher EPG + scheduler IPTV + review fixes + continuar viendo + program detail modal + streaming XMLTV + sqlc sweep) · Rama: `claude/review-pending-tasks-9Vh6U` · **tests: verde · lint: 0**
 
 ---
 
@@ -10,9 +10,9 @@
 
 ### Lo que cerramos esta rama (`claude/review-pending-tasks-9Vh6U`)
 
-Seis commits: las dos candidatas del handoff anterior + pass de
-fixes tras review senior + "Continuar viendo" en LiveTV +
-ProgramDetailModal en el EPG grid + streaming XMLTV parser.
+Siete commits. Los seis features previos + un sqlc sweep que paga
+deuda estructural identificada en el review senior holístico
+(ver `architecture-decisions.md` ADR-001 reaffirmation).
 
 **Commit 1 — Matcher EPG agresivo**. Sin cambios de schema, sin UI,
 solo backend.
@@ -410,6 +410,68 @@ Tests nuevos (8 casos en `xmltv_test.go`):
 peakear en ~10-20 MB en lugar de ~250 MB. El feed hipotético de
 2 GB pasa de OOM seguro a un refresh viable.
 
+**Commit 7 — sqlc sweep**. Pure refactor; cero cambio user-facing.
+Cierra deuda estructural identificada por el review senior
+holístico (`docs/memory/architecture-decisions.md` ADR-001
+reaffirmation).
+
+El problema: ADR-001 (2026-04-15) estableció sqlc como capa única
+de queries, y los 16 repos heredados se migraron. Pero las 4
+tablas añadidas en branches posteriores
+(`library_epg_sources` 007, `channel_overrides` 009,
+`iptv_scheduled_jobs` 011, `channel_watch_history` 012) volvieron a
+escribirse en raw SQL. Cada repo nuevo citaba el precedente
+anterior como justificación; el patrón se propagó. El review
+predijo: "rename de columna → sqlc no-op para el repo raw → tests
+verdes en fixture → runtime falla en producción".
+
+Cambios:
+1. **4 query files nuevos** en `internal/db/queries/`:
+   `library_epg_sources.sql`, `channel_overrides.sql`,
+   `iptv_scheduled_jobs.sql`, `channel_watch_history.sql`. Las
+   queries son las mismas que estaban inline en los repos raw.
+2. **`make sqlc` regenera** los 4 nuevos `*_repository.sql.go`
+   en `internal/db/sqlc/` + actualiza `models.go` + `querier.go`.
+3. **Los 4 repos `*_repository.go`** se reescriben como
+   adaptadores delgados sobre `*sqlc.Queries`. Public API idéntica
+   — los tests existentes (43 casos en total entre los 4) pasan
+   sin tocar una línea.
+4. **ADR-001 reaffirmed** con reglas duras:
+   - Toda tabla nueva exige query file + repo adaptador. Cero
+     `r.db.QueryContext` directo en repos nuevos.
+   - Excepción explícita y documentada per-método si raw es
+     necesario. NO precedente.
+   - `make sqlc` corre antes de cualquier PR que toque schema o
+     queries.
+   - Caracteres non-ASCII rompen el parser de sqlc v1.29: queries
+     en ASCII puro (em-dashes, ∈, … incluidos en las palabras
+     prohibidas).
+   - `COALESCE(MAX(x), -1)` para agregados no-tipables; el repo
+     hace el cast a int64 y normaliza "-1 → no rows yet". Patrón
+     reusable, documentado en `library_epg_sources_repository.go`.
+
+Tres bugs aprendidos durante el sweep (todos en el ADR):
+- **Unicode en comentarios SQL**: el em-dash y `∈` rompían
+  silenciosamente la tokenización del parser de sqlc 1.29.0,
+  produciendo strings SQL truncadas. Sustituidos por ASCII.
+- **`MAX()` returns `interface{}`**: sqlc no infiere el tipo de
+  agregados sin alias o cast explícito. Workaround: `COALESCE`
+  para garantizar valor + cast manual en el repo.
+- **`sql.NullString` para columnas nullable que el caller siempre
+  rellena**: el `RecordRefresh` de epg_sources pasa `String, Valid:
+  s != ""` para que sqlc acepte. La alternativa es rellenar la
+  query con `sqlc.narg` pero rompe la simplicidad del param struct.
+
+**Impacto operativo**: cero cambio runtime. Lo que gana es
+type-safety: el día que alguien renombra `last_refreshed_at` a
+`last_refresh_at`, `go build ./...` falla en `internal/db/` antes
+de empaquetar el binario. El compound debt del review está pagado.
+
+Tests existentes (43 casos entre los 4 repos) pasan sin
+modificación. Eso es la prueba más fuerte de que la migración
+preservó comportamiento — la public API, los sentinels de error,
+los CASCADE checks, todos siguen verdes.
+
 ### 📊 Medición pendiente (matcher EPG)
 
 El handoff anterior puso un target **52 → 150-200+** canales con EPG
@@ -436,13 +498,15 @@ los mismos mismatches observados.
 ### Estado al abrir sesión
 
 - `main` tiene PRs #81–#85 mergeados.
-- Rama actual `claude/review-pending-tasks-9Vh6U` con **6 commits**
+- Rama actual `claude/review-pending-tasks-9Vh6U` con **7 commits**
   encima de main (matcher + scheduler + review-fixes + continuar-
-  viendo + program-detail-modal + streaming-xmltv). Listo para PR
-  una vez validado en DB real.
+  viendo + program-detail-modal + streaming-xmltv + sqlc-sweep).
+  Listo para PR una vez validado en DB real.
 - Tests verdes: `pnpm test` **238/238** · `pnpm tsc --noEmit` · `pnpm
   lint` 0 · `pnpm build` ok · `go test -race ./...` 21 paquetes ·
   `golangci-lint v1.64.8` exit 0.
+- ADR-001 reaffirmado con reglas duras (ver
+  `architecture-decisions.md`). 0 raw repos post-ADR.
 
 ### Checklist al abrir siguiente sesión
 

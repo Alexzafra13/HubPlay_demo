@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"hubplay/internal/db/sqlc"
 )
 
 // ChannelOverride captures a hand-edited field that must survive an
@@ -22,13 +24,16 @@ type ChannelOverride struct {
 
 // ChannelOverrideRepository persists manual channel edits separately
 // from the `channels` table so a DELETE+INSERT import pass leaves
-// operator intent intact.
+// operator intent intact. Sqlc-generated queries for everything except
+// ApplyToLibrary, which still owns the multi-row transaction (sqlc
+// generates per-row primitives; the txn boundary is the repo's job).
 type ChannelOverrideRepository struct {
 	db *sql.DB
+	q  *sqlc.Queries
 }
 
 func NewChannelOverrideRepository(database *sql.DB) *ChannelOverrideRepository {
-	return &ChannelOverrideRepository{db: database}
+	return &ChannelOverrideRepository{db: database, q: sqlc.New(database)}
 }
 
 // Upsert records an override. Idempotent: re-running with the same
@@ -39,24 +44,23 @@ func (r *ChannelOverrideRepository) Upsert(ctx context.Context, o *ChannelOverri
 		o.CreatedAt = now
 	}
 	o.UpdatedAt = now
-	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO channel_overrides (library_id, stream_url, tvg_id, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?)
-		 ON CONFLICT(library_id, stream_url) DO UPDATE SET
-		    tvg_id     = excluded.tvg_id,
-		    updated_at = excluded.updated_at`,
-		o.LibraryID, o.StreamURL, o.TvgID, o.CreatedAt, o.UpdatedAt)
-	if err != nil {
+	if err := r.q.UpsertChannelOverride(ctx, sqlc.UpsertChannelOverrideParams{
+		LibraryID: o.LibraryID,
+		StreamUrl: o.StreamURL,
+		TvgID:     o.TvgID,
+		CreatedAt: o.CreatedAt,
+		UpdatedAt: o.UpdatedAt,
+	}); err != nil {
 		return fmt.Errorf("upsert channel override: %w", err)
 	}
 	return nil
 }
 
-// Delete clears an override by its PK.
+// Delete clears an override by its PK. Idempotent.
 func (r *ChannelOverrideRepository) Delete(ctx context.Context, libraryID, streamURL string) error {
-	if _, err := r.db.ExecContext(ctx,
-		`DELETE FROM channel_overrides WHERE library_id = ? AND stream_url = ?`,
-		libraryID, streamURL); err != nil {
+	if err := r.q.DeleteChannelOverride(ctx, sqlc.DeleteChannelOverrideParams{
+		LibraryID: libraryID, StreamUrl: streamURL,
+	}); err != nil {
 		return fmt.Errorf("delete channel override: %w", err)
 	}
 	return nil
@@ -66,20 +70,22 @@ func (r *ChannelOverrideRepository) Delete(ctx context.Context, libraryID, strea
 // row doesn't exist so callers can pattern-match that without having
 // to sniff for sql.ErrNoRows.
 func (r *ChannelOverrideRepository) Get(ctx context.Context, libraryID, streamURL string) (*ChannelOverride, error) {
-	row := r.db.QueryRowContext(ctx,
-		`SELECT library_id, stream_url, tvg_id, created_at, updated_at
-		 FROM channel_overrides
-		 WHERE library_id = ? AND stream_url = ?`,
-		libraryID, streamURL)
-	o := &ChannelOverride{}
-	err := row.Scan(&o.LibraryID, &o.StreamURL, &o.TvgID, &o.CreatedAt, &o.UpdatedAt)
+	row, err := r.q.GetChannelOverride(ctx, sqlc.GetChannelOverrideParams{
+		LibraryID: libraryID, StreamUrl: streamURL,
+	})
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get channel override: %w", err)
 	}
-	return o, nil
+	return &ChannelOverride{
+		LibraryID: row.LibraryID,
+		StreamURL: row.StreamUrl,
+		TvgID:     row.TvgID,
+		CreatedAt: row.CreatedAt,
+		UpdatedAt: row.UpdatedAt,
+	}, nil
 }
 
 // ApplyToLibrary is the post-import hook: for every override tied to
@@ -96,41 +102,25 @@ func (r *ChannelOverrideRepository) ApplyToLibrary(ctx context.Context, libraryI
 		return 0, fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck
+	qtx := r.q.WithTx(tx)
 
-	rows, err := tx.QueryContext(ctx,
-		`SELECT stream_url, tvg_id FROM channel_overrides WHERE library_id = ?`,
-		libraryID)
+	overrides, err := qtx.ListChannelOverridesByLibrary(ctx, libraryID)
 	if err != nil {
 		return 0, fmt.Errorf("read overrides: %w", err)
 	}
-	type pair struct {
-		streamURL string
-		tvgID     string
-	}
-	var overrides []pair
-	for rows.Next() {
-		var p pair
-		if err := rows.Scan(&p.streamURL, &p.tvgID); err != nil {
-			_ = rows.Close()
-			return 0, fmt.Errorf("scan override: %w", err)
-		}
-		overrides = append(overrides, p)
-	}
-	_ = rows.Close()
-	if err := rows.Err(); err != nil {
-		return 0, fmt.Errorf("iterate overrides: %w", err)
-	}
-
 	applied := 0
-	for _, p := range overrides {
-		res, err := tx.ExecContext(ctx,
-			`UPDATE channels SET tvg_id = ?
-			 WHERE library_id = ? AND stream_url = ?`,
-			p.tvgID, libraryID, p.streamURL)
+	for _, ov := range overrides {
+		// channels.tvg_id is nullable in the schema; sqlc renders the
+		// param as sql.NullString. We always have a value here (the
+		// upsert side normalises empty → string) so just wrap.
+		n, err := qtx.ApplyChannelOverride(ctx, sqlc.ApplyChannelOverrideParams{
+			TvgID:     sql.NullString{String: ov.TvgID, Valid: true},
+			LibraryID: libraryID,
+			StreamUrl: ov.StreamUrl,
+		})
 		if err != nil {
 			return 0, fmt.Errorf("apply override: %w", err)
 		}
-		n, _ := res.RowsAffected()
 		applied += int(n)
 	}
 	if err := tx.Commit(); err != nil {

@@ -95,3 +95,51 @@ Cada fase mantiene la interfaz consumida por servicios estable → no hay cambio
 - [sqlc docs](https://docs.sqlc.dev/)
 - `sqlc.yaml` en raíz del repo
 - `internal/db/queries/signing_keys.sql` (piloto)
+
+### Reaffirmation 2026-04-25 — sqlc sweep + reglas duras
+
+Tras el ADR original migramos los 16 repos heredados a sqlc, pero las
+4 tablas nuevas que aparecieron en branches posteriores
+(`library_epg_sources` mig 007, `channel_overrides` mig 009,
+`iptv_scheduled_jobs` mig 011, `channel_watch_history` mig 012)
+volvieron a escribirse en raw SQL. El comentario inline ("the sqlc
+adapter isn't regenerated as part of this change") justificaba un
+atajo individual, pero el patrón se propagó: cada nueva tabla seguía
+el precedente raw. El review senior de 2026-04-25 lo identifica como
+el debt-compound oculto más serio del proyecto — una predicción
+concreta: "alguien renombra una columna en `iptv_scheduled_jobs`,
+ejecuta `make sqlc` (no-op para el repo raw), tests pasan en
+fixtures, runtime falla en producción".
+
+Estado tras el sweep (commit `<<this-commit>>`):
+- Las 4 tablas tienen su `internal/db/queries/<tabla>.sql`.
+- Los 4 repos son ahora adaptadores delgados sobre `*sqlc.Queries`,
+  con la misma interface pública que antes (cero cambio en callers).
+- Tests existentes pasan sin modificación.
+- Quedan 0 raw repos post-ADR.
+
+Reglas duras a partir de aquí (a la vista en este ADR para que el
+próximo PR las cumpla sin debate):
+
+1. **Toda tabla nueva exige su query file en `internal/db/queries/`
+   y su repo como adaptador sqlc.** No se aceptan `r.db.QueryContext`
+   crudos en repos nuevos.
+2. **Excepción explícita y documentada**, NO precedente. Si un repo
+   necesita raw SQL (TX multi-paso, EXPLAIN, FTS5 dinámico), se
+   añade un comentario al método indicando exactamente por qué sqlc
+   no aplica AHÍ — y solo ahí.
+3. **`make sqlc` corre antes de cada PR que toque schema o
+   queries.** El target ya existe; el desarrollador es responsable
+   de regenerar y commitear `internal/db/sqlc/`.
+4. **Caracteres no-ASCII en query files rompen el parser de sqlc
+   v1.29** (em-dashes, ∈, …). Mantener queries y comentarios en
+   ASCII puro. Bug aprendido durante el sweep.
+5. **`COALESCE(MAX(x), -1)` en agregados** que sqlc no puede
+   tipar — el wrapper devuelve `interface{}`, el repo casts a
+   int64 y normaliza el sentinel "-1 → no rows yet". Documentado
+   en `library_epg_sources_repository.go` para que el patrón sea
+   reusable.
+
+Sentinel-to-AppError mapping sigue siendo job del repo
+(`ErrEPGSourceAlreadyAttached`, `ErrIPTVScheduledJobNotFound`,
+`ErrChannelNotFound`). sqlc no lo hace por nosotros.

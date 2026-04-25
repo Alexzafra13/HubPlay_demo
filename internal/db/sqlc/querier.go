@@ -16,6 +16,10 @@ type Querier interface {
 	// Table schema: migrations/sqlite/006_channel_favorites.sql.
 	// PK: (user_id, channel_id).
 	AddChannelFavorite(ctx context.Context, arg AddChannelFavoriteParams) error
+	// ApplyChannelOverride is the per-row hook the post-import pass uses.
+	// Returns rows affected so the caller can count "actually applied"
+	// vs orphan (stream_url no longer in playlist).
+	ApplyChannelOverride(ctx context.Context, arg ApplyChannelOverrideParams) (int64, error)
 	CleanupOldPrograms(ctx context.Context, endTime time.Time) (int64, error)
 	ContinueWatching(ctx context.Context, arg ContinueWatchingParams) ([]ContinueWatchingRow, error)
 	CountExternalIDsByItem(ctx context.Context, itemID string) (int64, error)
@@ -36,6 +40,7 @@ type Querier interface {
 	// Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE items).
 	// NOTE: List and LatestItems use dynamic WHERE/FTS/cursor and stay raw SQL.
 	CreateItem(ctx context.Context, arg CreateItemParams) error
+	CreateLibraryEPGSource(ctx context.Context, arg CreateLibraryEPGSourceParams) error
 	// Auth sessions: one row per active login (refresh token lives here hashed).
 	//
 	// Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE sessions).
@@ -49,14 +54,18 @@ type Querier interface {
 	CreateSigningKey(ctx context.Context, arg CreateSigningKeyParams) error
 	CreateUser(ctx context.Context, arg CreateUserParams) error
 	DeleteAllSessionsByUser(ctx context.Context, userID string) (int64, error)
+	DeleteChannelOverride(ctx context.Context, arg DeleteChannelOverrideParams) error
+	DeleteChannelWatch(ctx context.Context, arg DeleteChannelWatchParams) error
 	DeleteChannelsByLibrary(ctx context.Context, libraryID string) error
 	DeleteEPGProgramsByChannel(ctx context.Context, channelID string) error
 	DeleteExpiredSessions(ctx context.Context) (int64, error)
+	DeleteIPTVScheduledJob(ctx context.Context, arg DeleteIPTVScheduledJobParams) error
 	DeleteImageByID(ctx context.Context, id string) error
 	DeleteImagesByItem(ctx context.Context, itemID string) error
 	DeleteItem(ctx context.Context, id string) (int64, error)
 	DeleteItemsByLibrary(ctx context.Context, libraryID string) error
 	DeleteLibrary(ctx context.Context, id string) (int64, error)
+	DeleteLibraryEPGSource(ctx context.Context, id string) error
 	// Media stream tracks (video, audio, subtitle) per item.
 	//
 	// Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE media_streams).
@@ -74,12 +83,15 @@ type Querier interface {
 	DeleteUser(ctx context.Context, id string) (int64, error)
 	DeleteUserData(ctx context.Context, arg DeleteUserDataParams) error
 	GetChannelByID(ctx context.Context, id string) (GetChannelByIDRow, error)
+	GetChannelOverride(ctx context.Context, arg GetChannelOverrideParams) (ChannelOverride, error)
 	GetExternalIDByProvider(ctx context.Context, arg GetExternalIDByProviderParams) (ExternalID, error)
+	GetIPTVScheduledJob(ctx context.Context, arg GetIPTVScheduledJobParams) (IptvScheduledJob, error)
 	GetImageByID(ctx context.Context, id string) (GetImageByIDRow, error)
 	GetItemByID(ctx context.Context, id string) (Item, error)
 	GetItemByPath(ctx context.Context, path sql.NullString) (Item, error)
 	GetItemChildren(ctx context.Context, parentID sql.NullString) ([]GetItemChildrenRow, error)
 	GetLibraryByID(ctx context.Context, id string) (GetLibraryByIDRow, error)
+	GetLibraryEPGSourceByID(ctx context.Context, id string) (GetLibraryEPGSourceByIDRow, error)
 	GetMetadataByItemID(ctx context.Context, itemID string) (GetMetadataByItemIDRow, error)
 	GetNowPlaying(ctx context.Context, arg GetNowPlayingParams) (GetNowPlayingRow, error)
 	GetPrimaryImage(ctx context.Context, arg GetPrimaryImageParams) (GetPrimaryImageRow, error)
@@ -112,12 +124,54 @@ type Querier interface {
 	ListChannelFavorites(ctx context.Context, userID string) ([]ListChannelFavoritesRow, error)
 	ListChannelFavoritesWithChannel(ctx context.Context, userID string) ([]ListChannelFavoritesWithChannelRow, error)
 	ListChannelGroups(ctx context.Context, libraryID string) ([]sql.NullString, error)
+	ListChannelOverridesByLibrary(ctx context.Context, libraryID string) ([]ListChannelOverridesByLibraryRow, error)
+	// ListChannelWatchHistoryByUser joins onto active channels in
+	// recency order. Filters applied in SQL so the handler cannot
+	// accidentally bypass them: c.is_active = 1 (deactivated channels
+	// drop off the rail), and orphan history rows (stream_url no longer
+	// in any playlist) are joined out naturally.
+	//
+	// limit is doubled at the call site to absorb stream_url duplicates
+	// across libraries; the repo dedupes in Go.
+	ListChannelWatchHistoryByUser(ctx context.Context, arg ListChannelWatchHistoryByUserParams) ([]ListChannelWatchHistoryByUserRow, error)
 	ListChannelsByLibrary(ctx context.Context, libraryID string) ([]ListChannelsByLibraryRow, error)
+	// Workers hot query. Filtered by enabled in SQL; due-ness is
+	// computed in Go (see ListDue) because date arithmetic on the
+	// multi-format-tolerant column would invite the same Scan problem
+	// we work around elsewhere.
+	ListEnabledIPTVScheduledJobs(ctx context.Context) ([]IptvScheduledJob, error)
 	ListExternalIDsByItem(ctx context.Context, itemID string) ([]ExternalID, error)
 	ListFavorites(ctx context.Context, arg ListFavoritesParams) ([]ListFavoritesRow, error)
+	// Scheduled IPTV jobs (per-library M3U + EPG refresh automation).
+	//
+	// Table schema: migrations/sqlite/011_iptv_scheduled_jobs.sql.
+	// Composite PK: (library_id, kind in {'m3u_refresh','epg_refresh'}).
+	//
+	// Time handling: callers MUST normalise time.Time values to UTC
+	// before passing them in (see iptv_schedule_repository.go). The
+	// modernc.org/sqlite driver serialises time.Time with named-zone
+	// locations using a format the default Scan cannot parse, so we
+	// treat UTC-on-write as a hard contract. Reads land into stdlib
+	// time.Time / sql.NullTime without coerceSQLiteTime needing to
+	// intervene.
+	ListIPTVScheduledJobsByLibrary(ctx context.Context, libraryID string) ([]IptvScheduledJob, error)
 	ListImagesByItem(ctx context.Context, itemID string) ([]ListImagesByItemRow, error)
 	ListLibraries(ctx context.Context) ([]ListLibrariesRow, error)
 	ListLibrariesForUser(ctx context.Context, userID string) ([]ListLibrariesForUserRow, error)
+	// Per-library EPG source list (multi-provider XMLTV configuration).
+	//
+	// Table schema: migrations/sqlite/007_library_epg_sources.sql.
+	// PK: (id). UNIQUE on (library_id, url) so a duplicate add raises a
+	// detectable constraint failure that the repo maps to
+	// ErrEPGSourceAlreadyAttached.
+	//
+	// COALESCE columns: catalog_id, last_refreshed_at, last_status and
+	// last_error are all nullable in storage. Reading them back with
+	// COALESCE keeps the consumer code free of NullString / NullTime
+	// branching except for last_refreshed_at, which still needs zero-
+	// value detection (we cannot tell "never refreshed" from an empty
+	// string). Falling back to sql.NullTime there.
+	ListLibraryEPGSourcesByLibrary(ctx context.Context, libraryID string) ([]ListLibraryEPGSourcesByLibraryRow, error)
 	ListMediaStreamsByItem(ctx context.Context, itemID string) ([]ListMediaStreamsByItemRow, error)
 	ListPathsByLibrary(ctx context.Context, libraryID string) ([]string, error)
 	ListProviders(ctx context.Context) ([]Provider, error)
@@ -127,6 +181,22 @@ type Querier interface {
 	ListSigningKeys(ctx context.Context) ([]JwtSigningKey, error)
 	ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUsersRow, error)
 	MarkPlayed(ctx context.Context, arg MarkPlayedParams) error
+	// The default-priority slot for a freshly-added source: one past the
+	// current max, so it runs last and can be reordered from the UI.
+	// COALESCE returns -1 for "no rows yet" so the repo can lift it to 0
+	// without splitting NullInt branches.
+	NextLibraryEPGSourcePriority(ctx context.Context, libraryID string) (interface{}, error)
+	// Per-user "continue watching" history for LiveTV channels.
+	//
+	// Table schema: migrations/sqlite/012_channel_watch_history.sql.
+	// Composite PK: (user_id, stream_url).
+	//
+	// Keyed by stream_url so the rail survives M3U refreshes (channel
+	// UUIDs regenerate). The list query joins back to `channels` by
+	// stream_url at read time.
+	RecordChannelWatch(ctx context.Context, arg RecordChannelWatchParams) error
+	RecordIPTVScheduledJobRun(ctx context.Context, arg RecordIPTVScheduledJobRunParams) error
+	RecordLibraryEPGSourceRefresh(ctx context.Context, arg RecordLibraryEPGSourceRefreshParams) error
 	RemoveChannelFavorite(ctx context.Context, arg RemoveChannelFavoriteParams) error
 	RevokeLibraryAccess(ctx context.Context, arg RevokeLibraryAccessParams) error
 	SetChannelActive(ctx context.Context, arg SetChannelActiveParams) (int64, error)
@@ -138,14 +208,25 @@ type Querier interface {
 	UpdateItem(ctx context.Context, arg UpdateItemParams) (int64, error)
 	UpdateLastLogin(ctx context.Context, arg UpdateLastLoginParams) error
 	UpdateLibrary(ctx context.Context, arg UpdateLibraryParams) (int64, error)
+	UpdateLibraryEPGSourcePriority(ctx context.Context, arg UpdateLibraryEPGSourcePriorityParams) error
 	UpdateProgress(ctx context.Context, arg UpdateProgressParams) error
 	UpdateSessionLastActive(ctx context.Context, arg UpdateSessionLastActiveParams) error
 	UpdateUser(ctx context.Context, arg UpdateUserParams) error
+	// Manual channel edits keyed by stream URL so they survive an M3U
+	// refresh (channel UUIDs are regenerated on every import).
+	//
+	// Table schema: migrations/sqlite/009_channel_overrides.sql.
+	// Composite PK: (library_id, stream_url).
+	UpsertChannelOverride(ctx context.Context, arg UpsertChannelOverrideParams) error
 	// External ID mappings (tmdb, imdb, tvdb, ...) for items.
 	//
 	// Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE external_ids).
 	// PK: (item_id, provider).
 	UpsertExternalID(ctx context.Context, arg UpsertExternalIDParams) error
+	// Preserves last_* fields by design: only the configuration
+	// (interval_hours / enabled) and updated_at change. The history
+	// (last_run_at, last_status, ...) survives reconfiguration.
+	UpsertIPTVScheduledJob(ctx context.Context, arg UpsertIPTVScheduledJobParams) error
 	// Extended metadata for items (overview, tagline, genres, etc.).
 	//
 	// Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE metadata).
