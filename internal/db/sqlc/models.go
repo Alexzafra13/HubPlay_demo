@@ -25,28 +25,37 @@ type AncestorID struct {
 	AncestorID string `json:"ancestor_id"`
 }
 
-type ApiKey struct {
-	ID        string       `json:"id"`
-	Name      string       `json:"name"`
-	KeyHash   string       `json:"key_hash"`
-	CreatedBy string       `json:"created_by"`
-	CreatedAt time.Time    `json:"created_at"`
-	LastUsed  sql.NullTime `json:"last_used"`
+type Channel struct {
+	ID                  string         `json:"id"`
+	LibraryID           string         `json:"library_id"`
+	Name                string         `json:"name"`
+	Number              sql.NullInt64  `json:"number"`
+	GroupName           sql.NullString `json:"group_name"`
+	LogoUrl             sql.NullString `json:"logo_url"`
+	StreamUrl           string         `json:"stream_url"`
+	TvgID               sql.NullString `json:"tvg_id"`
+	Language            sql.NullString `json:"language"`
+	Country             sql.NullString `json:"country"`
+	IsActive            bool           `json:"is_active"`
+	AddedAt             time.Time      `json:"added_at"`
+	LastProbeAt         sql.NullTime   `json:"last_probe_at"`
+	LastProbeStatus     string         `json:"last_probe_status"`
+	LastProbeError      string         `json:"last_probe_error"`
+	ConsecutiveFailures int64          `json:"consecutive_failures"`
 }
 
-type Channel struct {
-	ID        string         `json:"id"`
-	LibraryID string         `json:"library_id"`
-	Name      string         `json:"name"`
-	Number    sql.NullInt64  `json:"number"`
-	GroupName sql.NullString `json:"group_name"`
-	LogoUrl   sql.NullString `json:"logo_url"`
-	StreamUrl string         `json:"stream_url"`
-	TvgID     sql.NullString `json:"tvg_id"`
-	Language  sql.NullString `json:"language"`
-	Country   sql.NullString `json:"country"`
-	IsActive  bool           `json:"is_active"`
-	AddedAt   time.Time      `json:"added_at"`
+type ChannelOverride struct {
+	LibraryID string    `json:"library_id"`
+	StreamUrl string    `json:"stream_url"`
+	TvgID     string    `json:"tvg_id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type ChannelWatchHistory struct {
+	UserID        string    `json:"user_id"`
+	StreamUrl     string    `json:"stream_url"`
+	LastWatchedAt time.Time `json:"last_watched_at"`
 }
 
 type Chapter struct {
@@ -85,6 +94,19 @@ type Image struct {
 	Provider  sql.NullString `json:"provider"`
 	IsPrimary sql.NullBool   `json:"is_primary"`
 	AddedAt   time.Time      `json:"added_at"`
+}
+
+type IptvScheduledJob struct {
+	LibraryID      string       `json:"library_id"`
+	Kind           string       `json:"kind"`
+	IntervalHours  int64        `json:"interval_hours"`
+	Enabled        bool         `json:"enabled"`
+	LastRunAt      sql.NullTime `json:"last_run_at"`
+	LastStatus     string       `json:"last_status"`
+	LastError      string       `json:"last_error"`
+	LastDurationMs int64        `json:"last_duration_ms"`
+	CreatedAt      time.Time    `json:"created_at"`
+	UpdatedAt      time.Time    `json:"updated_at"`
 }
 
 type Item struct {
@@ -159,6 +181,20 @@ type Library struct {
 type LibraryAccess struct {
 	UserID    string `json:"user_id"`
 	LibraryID string `json:"library_id"`
+}
+
+type LibraryEpgSource struct {
+	ID               string         `json:"id"`
+	LibraryID        string         `json:"library_id"`
+	CatalogID        sql.NullString `json:"catalog_id"`
+	Url              string         `json:"url"`
+	Priority         int64          `json:"priority"`
+	LastRefreshedAt  sql.NullTime   `json:"last_refreshed_at"`
+	LastStatus       sql.NullString `json:"last_status"`
+	LastError        sql.NullString `json:"last_error"`
+	LastProgramCount int64          `json:"last_program_count"`
+	LastChannelCount int64          `json:"last_channel_count"`
+	CreatedAt        time.Time      `json:"created_at"`
 }
 
 type LibraryPath struct {
@@ -264,6 +300,12 @@ type User struct {
 	LastLoginAt         sql.NullTime   `json:"last_login_at"`
 }
 
+type UserChannelFavorite struct {
+	UserID    string    `json:"user_id"`
+	ChannelID string    `json:"channel_id"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 type UserDatum struct {
 	UserID              string        `json:"user_id"`
 	ItemID              string        `json:"item_id"`
@@ -276,6 +318,13 @@ type UserDatum struct {
 	SubtitleStreamIndex sql.NullInt64 `json:"subtitle_stream_index"`
 	LastPlayedAt        sql.NullTime  `json:"last_played_at"`
 	UpdatedAt           time.Time     `json:"updated_at"`
+}
+
+type UserPreference struct {
+	UserID    string    `json:"user_id"`
+	Key       string    `json:"key"`
+	Value     string    `json:"value"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type WebhookConfig struct {

@@ -1,6 +1,6 @@
 # Estado del proyecto
 
-> Snapshot: **2026-04-24** (matcher EPG + scheduler IPTV + review fixes + continuar viendo) · Rama: `claude/review-pending-tasks-9Vh6U` · **tests: verde · lint: 0**
+> Snapshot: **2026-04-25** (matcher EPG + scheduler IPTV + review fixes + continuar viendo + program detail modal + streaming XMLTV + sqlc sweep) · Rama: `claude/review-pending-tasks-9Vh6U` · **tests: verde · lint: 0**
 
 ---
 
@@ -10,8 +10,9 @@
 
 ### Lo que cerramos esta rama (`claude/review-pending-tasks-9Vh6U`)
 
-Cuatro commits: las dos candidatas del handoff anterior + pass de
-fixes tras review senior + "Continuar viendo" en LiveTV.
+Siete commits. Los seis features previos + un sqlc sweep que paga
+deuda estructural identificada en el review senior holístico
+(ver `architecture-decisions.md` ADR-001 reaffirmation).
 
 **Commit 1 — Matcher EPG agresivo**. Sin cambios de schema, sin UI,
 solo backend.
@@ -290,6 +291,187 @@ Cambia de canal y el siguiente aparece al principio del rail sin
 recarga. Sobrevive M3U refreshes programados (sin el fix de
 stream_url el rail moriría cada día).
 
+**Commit 5 — ProgramDetailModal en EPG grid**. UI-only, sin backend
+nuevo (los datos del programa ya viajan en `getBulkSchedule`).
+
+1. **EPGGrid**: nueva prop opcional `onSelectProgram(channel,
+   program)`. Cuando se proporciona, clicar una celda de programa
+   abre el modal en lugar de zappear directo. La celda sticky del
+   canal (izquierda) sigue siendo "click → reproducir" — split de
+   afordancias claro: programa = detalle, canal = acción inmediata.
+   Sin la prop, fallback al comportamiento legacy (back-compat
+   total con tests existentes).
+2. **`ProgramDetailModal`** nuevo en `web/src/components/livetv/`.
+   Reusa el `Modal` común (portal + Escape + body lock + ARIA
+   `role="dialog"` con `aria-label=título`). Layout:
+   - Strip identidad: nombre del canal · hora inicio–fin · duración
+     en minutos · badge de categoría · pill EN VIVO si aplica.
+   - Sinopsis con `whitespace-pre-line` para preservar saltos.
+     Fallback "Sin sinopsis disponible" en italic muted.
+   - Lista "A continuación" con hasta 3 entradas siguientes en el
+     mismo canal (oculta cuando vacía).
+   - Footer: botón "Cerrar" (ghost) + "Ver canal ahora" (primary).
+     El botón se deshabilita con texto "Ya terminó" para programas
+     pasados.
+3. **LiveTV.tsx** wire-up: estado `detail: {channel, program} | null`,
+   `openProgramDetail` desde `EPGGrid.onSelectProgram`, `onWatch`
+   cierra modal Y abre player en una sola callback (evita flicker).
+   Up-next se computa inline filtrando `scheduleByChannel` por
+   `start_time >= program.end_time` y slice 3.
+4. **Pureza Compiler**: `Date.now()` directo en render dispara el
+   lint `react-hooks/purity` — el modal usa `useNowTick(60_000)`
+   (cadencia de minuto basta para flip live/past en boundaries).
+
+Tests nuevos (todos verdes, 14 casos):
+
+- `web/src/components/livetv/ProgramDetailModal.test.tsx` — 12
+  tests: cerrado devuelve null, defensive null-program, render de
+  título/canal/duración/categoría, EN VIVO solo en directo,
+  descripción con line-breaks, fallback de sinopsis, up-next
+  visible cuando hay entradas, oculto cuando vacío, onWatch
+  dispara, botón disabled para terminados, onClose dispara.
+- `web/src/components/livetv/EPGGrid.test.tsx` — 2 tests nuevos:
+  `onSelectProgram` preferido cuando se proporciona (no llama a
+  `onSelectChannel`), celda sticky aún reproduce directamente
+  cuando ambos handlers están presentes.
+
+**Commit 6 — Streaming XMLTV parser**. Backend-only, sin cambio de
+comportamiento; reduce el peak de memoria del refresh EPG.
+
+El problema: `ParseXMLTV` hacía `decoder.Decode(&raw)` sobre un
+struct con `[]xmlTVChannel + []xmlTVProgramme`. Para un feed
+davidmuma (200 MB descomprimido) el peak era ~250 MB en el árbol
+parseado mantenido entero en memoria. Para el escenario hipotético
+"feed XMLTV de 2 GB" eso son ~2.5 GB → OOM en cualquier máquina
+sensata.
+
+La solución: un parser tokenizado que **dispara cada `<channel>` y
+`<programme>` por callback** al verlos pasar. La memoria pico
+ahora la dictan (a) el array de display-names de los `<channel>`
+acumulados (~KB × pocos miles = MB) y (b) los programmes
+**emparejados** (orphans se descartan in-line sin acumularse).
+
+Cambios:
+
+1. **`ParseXMLTVStream(r, handler)`** nuevo en
+   `internal/iptv/xmltv.go`. `xml.Decoder.Token()` + `DecodeElement`
+   por elemento. Handler interface mínima:
+   ```go
+   type EPGStreamHandler interface {
+       OnChannel(EPGChannel) error
+       OnProgramme(EPGProgram) error
+   }
+   ```
+   Devuelve `(skipped int, err error)`. Errores del handler abortan
+   el parse — verificado por test que cuenta cuántos elementos se
+   despachan antes de bailar. Programmes con `start`/`stop` no
+   parseable se descartan con log warn (mismo contrato que el
+   eager).
+2. **`ParseXMLTV` sigue existiendo** como wrapper conveniente que
+   colecciona todo en un `EPGData`. Tests existentes (3) intactos.
+   Documentado como "para tests + feeds cortos"; runtime usa la
+   versión streaming.
+3. **`refreshOneSource`** refactorizado al streaming path. Nuevo
+   tipo `matchHandler` privado en `service_epg.go` que:
+   - En `OnChannel`: bufferea `xmltv id → display-names` (no
+     pre-resuelve — para feeds grandes esto serían miles de fuzzy
+     walks antes del primer programme).
+   - En `OnProgramme`: cold-start arma el resolved cache una vez
+     (mismo coste que el eager); luego cada programme es un map
+     lookup; orphans incrementan contador y se descartan; matches
+     con channel ya owned por una fuente de mayor prioridad se
+     descartan; resto se acumula en `out[channelID]`.
+   - Lazy resolve para programmes con channel-id no declarado en
+     `<channel>` block — memoiza igual que antes.
+
+   El comportamiento observable es **idéntico**: mismas filas
+   persistidas, mismo orden de prioridad entre fuentes, mismas
+   métricas. Solo cambia el peak de RAM durante el parse.
+
+Tests nuevos (8 casos en `xmltv_test.go`):
+
+- Streaming en orden (canales antes que programmes, primer
+  programme dispara el cold-start).
+- Skipping de tiempos no parseables + contador correcto.
+- Handler error aborta antes de drenar el documento (verificado:
+  segundo `<channel>` no se despacha).
+- XML malformado surface como error.
+- **`StreamsLargeFeedWithoutBuffering`**: genera 50.000 programmes,
+  los lee a través de un `boundedAllocReader` (chunks de 4 KB) y
+  asserta count + último título. Test implícito de memoria — bajo
+  `-race` no se le va la olla.
+- Charset declarado desconocido (ej. ISO-8859-1) pasa transparente.
+- `<display-name/>` vacíos se filtran del slice.
+- `ParseXMLTV` (eager) y `ParseXMLTVStream` (vía collector
+  handler) producen el MISMO resultado — pin para que las dos
+  superficies no driften.
+
+**Impacto operativo**: el refresh EPG contra davidmuma debe ahora
+peakear en ~10-20 MB en lugar de ~250 MB. El feed hipotético de
+2 GB pasa de OOM seguro a un refresh viable.
+
+**Commit 7 — sqlc sweep**. Pure refactor; cero cambio user-facing.
+Cierra deuda estructural identificada por el review senior
+holístico (`docs/memory/architecture-decisions.md` ADR-001
+reaffirmation).
+
+El problema: ADR-001 (2026-04-15) estableció sqlc como capa única
+de queries, y los 16 repos heredados se migraron. Pero las 4
+tablas añadidas en branches posteriores
+(`library_epg_sources` 007, `channel_overrides` 009,
+`iptv_scheduled_jobs` 011, `channel_watch_history` 012) volvieron a
+escribirse en raw SQL. Cada repo nuevo citaba el precedente
+anterior como justificación; el patrón se propagó. El review
+predijo: "rename de columna → sqlc no-op para el repo raw → tests
+verdes en fixture → runtime falla en producción".
+
+Cambios:
+1. **4 query files nuevos** en `internal/db/queries/`:
+   `library_epg_sources.sql`, `channel_overrides.sql`,
+   `iptv_scheduled_jobs.sql`, `channel_watch_history.sql`. Las
+   queries son las mismas que estaban inline en los repos raw.
+2. **`make sqlc` regenera** los 4 nuevos `*_repository.sql.go`
+   en `internal/db/sqlc/` + actualiza `models.go` + `querier.go`.
+3. **Los 4 repos `*_repository.go`** se reescriben como
+   adaptadores delgados sobre `*sqlc.Queries`. Public API idéntica
+   — los tests existentes (43 casos en total entre los 4) pasan
+   sin tocar una línea.
+4. **ADR-001 reaffirmed** con reglas duras:
+   - Toda tabla nueva exige query file + repo adaptador. Cero
+     `r.db.QueryContext` directo en repos nuevos.
+   - Excepción explícita y documentada per-método si raw es
+     necesario. NO precedente.
+   - `make sqlc` corre antes de cualquier PR que toque schema o
+     queries.
+   - Caracteres non-ASCII rompen el parser de sqlc v1.29: queries
+     en ASCII puro (em-dashes, ∈, … incluidos en las palabras
+     prohibidas).
+   - `COALESCE(MAX(x), -1)` para agregados no-tipables; el repo
+     hace el cast a int64 y normaliza "-1 → no rows yet". Patrón
+     reusable, documentado en `library_epg_sources_repository.go`.
+
+Tres bugs aprendidos durante el sweep (todos en el ADR):
+- **Unicode en comentarios SQL**: el em-dash y `∈` rompían
+  silenciosamente la tokenización del parser de sqlc 1.29.0,
+  produciendo strings SQL truncadas. Sustituidos por ASCII.
+- **`MAX()` returns `interface{}`**: sqlc no infiere el tipo de
+  agregados sin alias o cast explícito. Workaround: `COALESCE`
+  para garantizar valor + cast manual en el repo.
+- **`sql.NullString` para columnas nullable que el caller siempre
+  rellena**: el `RecordRefresh` de epg_sources pasa `String, Valid:
+  s != ""` para que sqlc acepte. La alternativa es rellenar la
+  query con `sqlc.narg` pero rompe la simplicidad del param struct.
+
+**Impacto operativo**: cero cambio runtime. Lo que gana es
+type-safety: el día que alguien renombra `last_refreshed_at` a
+`last_refresh_at`, `go build ./...` falla en `internal/db/` antes
+de empaquetar el binario. El compound debt del review está pagado.
+
+Tests existentes (43 casos entre los 4 repos) pasan sin
+modificación. Eso es la prueba más fuerte de que la migración
+preservó comportamiento — la public API, los sentinels de error,
+los CASCADE checks, todos siguen verdes.
+
 ### 📊 Medición pendiente (matcher EPG)
 
 El handoff anterior puso un target **52 → 150-200+** canales con EPG
@@ -316,14 +498,17 @@ los mismos mismatches observados.
 ### Estado al abrir sesión
 
 - `main` tiene PRs #81–#85 mergeados.
-- Rama actual `claude/review-pending-tasks-9Vh6U` con **4 commits**
+- Rama actual `claude/review-pending-tasks-9Vh6U` con **7 commits**
   encima de main (matcher + scheduler + review-fixes + continuar-
-  viendo). Listo para PR una vez validado en DB real.
-- Tests verdes: `pnpm test` **224/224** · `pnpm tsc --noEmit` · `pnpm
+  viendo + program-detail-modal + streaming-xmltv + sqlc-sweep).
+  Listo para PR una vez validado en DB real.
+- Tests verdes: `pnpm test` **238/238** · `pnpm tsc --noEmit` · `pnpm
   lint` 0 · `pnpm build` ok · `go test -race ./...` 21 paquetes ·
   `golangci-lint v1.64.8` exit 0.
+- ADR-001 reaffirmado con reglas duras (ver
+  `architecture-decisions.md`). 0 raw repos post-ADR.
 
-### Checklist al abrir siguiente sesión
+### Checklist de validación (requiere DB real)
 
 - [ ] Refrescar EPG contra davidmuma y medir canales con EPG antes/
   después (52 era el baseline; target 150+).
@@ -331,16 +516,89 @@ los mismos mismatches observados.
   correr 6 h+ para verificar que el worker dispara y registra.
 - [ ] Abrir reproducciones de canal y verificar que el rail
   "Continuar viendo" aparece en Discover con los canales vistos
-  (en varios navegadores / dispositivos para validar la parte
-  cross-device).
+  (en varios navegadores / dispositivos para validar cross-device).
 - [ ] Forzar un M3U refresh y verificar que el rail sigue poblado
   (no se vacía — contrato clave del stream_url-as-key).
+- [ ] Abrir el EPG grid y clicar una celda de programa para
+  verificar que aparece el ProgramDetailModal con sinopsis +
+  up-next, y que "Ver canal ahora" pasa al player limpiamente.
 - [ ] Si todo funciona → abrir PR y mergear.
-- [ ] Siguiente candidata: **modal de detalle de programa** al
-  clicar en el EPG grid, **streaming parser XMLTV** (bomba memoria
-  con feeds 2 GB), o **split de `library.Service`** (deuda
-  estructural — ya hay precedente con `iptv.Service`).
-- [ ] Actualizar esta memoria.
+
+### 🔍 Review senior holístico (2026-04-25)
+
+Tras los 6 commits de feature, se lanzó un sub-agente con instrucciones
+de revisión arquitectónica de alto nivel sobre el proyecto entero
+(CLAUDE.md + memorias + ADRs + código actual). Veredicto cruzado con
+mi propio read interno. Las conclusiones que cambian la dirección
+del proyecto:
+
+**Lo que está aguantando bien (decisiones que envejecen mejor que en
+su momento)**:
+- AppError + sentinels + `errors.Is`. El nuevo `ErrRefreshInProgress`
+  encajó día 1 porque el patrón ya estaba.
+- stream_url como identidad estable de canal (mig 009 channel_overrides,
+  internalizada en mig 012 channel_watch_history con regression test).
+- Sink-pattern / interface-on-the-consumer (signingKeys, MetricsSink,
+  jobRunner). Mantiene el grafo de paquetes acíclico.
+- `useSyncExternalStore` + "no setState in useEffect" enforcement.
+
+**Lo que está derivando (predicciones concretas)**:
+- ~~Constructor de `iptv.Service` explotando — 8 deps, próxima
+  feature sería 9. Split-por-fichero es camuflaje, el constructor es
+  la verdad. Seam real: playback-time (channels + watch + favorites)
+  vs operator-time (m3u + epg + schedules + sources + overrides).~~
+  *Diferido — la siguiente feature decide si tirar.*
+- **`internal/api/handlers/iptv.go` con 1.159 líneas** — más grande
+  que el service que le sirve. Próximo refactor inevitable; el
+  precedente está en `iptv_schedule.go` y `iptv_access.go` ya
+  extraídos.
+- ~~sqlc/raw drift produciría incidente de runtime~~ ✅ **resuelto en
+  commit 7**. Los 4 raw repos migrados, ADR-001 reaffirmado con
+  reglas duras.
+
+**Lo que rompería con 50 usuarios**:
+- Proxy IPTV sin circuit breaker → upstream caído reintentado infinito.
+- SQLite sin backup → un fallo de disco termina la reputación.
+- Scheduler secuencial entre libraries (acceptable hoy con 1-2 libs).
+- JWT rotation sin path ejercitado.
+
+### 🚀 Recomendación priorizada (orden definitivo del review)
+
+**Paga primero**:
+1. **Circuit breaker en IPTV proxy / single-flight en EPG fetches**
+   — 1 día. Para el sangrado contra CDNs caídas. Pago día 1.
+2. **SQLite backup automatizado (WAL copy)** — 0.5 días. Asegura
+   el activo más crítico. Goodwill infinito tras el primer fallo.
+3. ✅ **sqlc sweep** — hecho en commit 7.
+
+**Higiene visible**:
+4. **Split `internal/api/handlers/iptv.go`** (1.159 líneas) por
+   dominio — extracción incremental tipo `iptv_schedule.go`.
+   0.5-1 día.
+5. **Split de `library.Service`** — pure refactor con playbook ya
+   probado en `iptv.Service`.
+
+**Features**:
+6. **Activity / sessions dashboard** — bus ya emite eventos, falta
+   agregador. UX admin tangible.
+7. **Override manual channel number/group** — **deferido per
+   review**. Extiende `channel_overrides` (la tabla que se aprendió
+   recientemente a no fiar). Esperar a que stream_url esté
+   battle-tested en producción.
+
+### Checklist al abrir siguiente sesión
+
+- [ ] Validar primero los 5 puntos del checklist de validación
+  arriba si tienes DB real en mano. Si no la tienes, salta esto.
+- [ ] Si validación OK → abrir PR `claude/review-pending-tasks-9Vh6U`
+  → main y mergear (7 commits limpios listos).
+- [ ] Decidir UNA candidata del bloque "Paga primero" o "Higiene
+  visible". Recomendado: **circuit breaker en IPTV proxy** (#1).
+- [ ] Rama nueva `claude/<descriptive>`.
+- [ ] Reglas senior asentadas que el ciclo siguiente debe respetar
+  (ver patrones en sección "Patrones senior reforzados" abajo + ADR-001
+  reaffirmation).
+- [ ] Al cerrar: actualizar esta memoria con el nuevo ciclo.
 
 ### 🎓 Patrones senior reforzados en este ciclo
 
@@ -1089,7 +1347,9 @@ type Service struct {
 - Grid EPG con colores por categoría + filtros
 
 ### IPTV backend
-- XMLTV streaming parser (bomba memoria con feeds de 2GB; `xmltv.go:70-76`)
+- ~~XMLTV streaming parser~~ ✅ hecho en `claude/review-pending-
+  tasks-9Vh6U` (`ParseXMLTVStream` + `matchHandler`). Peak baja de
+  ~250 MB a ~10-20 MB en davidmuma.
 - ~~Matcher más agresivo para subir cobertura EPG~~: ✅ hecho en
   `claude/review-pending-tasks-9Vh6U`. Alias table + channel-number
   match (con guardas de posicional + ambigüedad) + Levenshtein fuzzy
@@ -1138,28 +1398,43 @@ type Service struct {
 
 ## Próximo paso sugerido
 
-Sin prisa. Candidatos ordenados por impacto.
+> **Orden definitivo** tras el review senior holístico de 2026-04-25.
+> El handoff arriba (sección "🚀 Recomendación priorizada") tiene el
+> contexto completo; aquí solo el resumen ejecutivo.
 
-**Si foco = estabilidad**:
-1. ✅ **Slice 1 coverage hecho** (`claude/frontend-livetv-coverage`):
-   7 ficheros, +64 tests. Queda `LiveTvTopBar` / `DiscoverView` /
-   `HeroSpotlight` / `EPGGrid` — mismo patrón, ~1 día.
-2. ✅ **Tests del setup wizard** — hechos esta rama (+48).
-3. **Tests de páginas admin** (`LivetvAdminPanel` + sub-paneles).
-4. ✅ **Lint debt** — liquidado a cero esta rama.
-5. **Split de `library.Service`** siguiendo la receta del iptv.
+**Pagar primero** (operacional, alto impacto, bajo scope):
+1. **Circuit breaker en IPTV proxy / single-flight EPG fetches** —
+   1 día. Para el sangrado contra CDNs caídas. Mi voto si me
+   obligas a uno.
+2. **SQLite backup automatizado (WAL copy)** — 0.5 días. Asegura
+   el activo más crítico ante fallo de disco.
+3. ✅ **sqlc sweep** — hecho en commit 7. ADR-001 reaffirmed.
 
-**Si foco = experiencia LiveTV**:
-1. ✅ **Matcher EPG más agresivo** — hecho en `claude/review-pending-
-   tasks-9Vh6U`. Falta medir cobertura real contra davidmuma.
-2. ✅ **Scheduler UI M3U + EPG refresh** — hecho en la misma rama.
-   Tabla `iptv_scheduled_jobs`, worker `iptv.Scheduler`, panel admin
-   `ScheduledJobsPanel`. Falta dejar correr 6 h+ en real para validar.
-3. ✅ **"Continuar viendo"** — hecho en la misma rama. Tabla
-   `channel_watch_history` keyeada por stream_url, beacon en
-   `useLiveHls.onFirstPlay`, rail en Discover. Falta validar
-   cross-device en real.
-4. **Modal de detalle de programa** en EPG grid.
-5. **Streaming parser del XMLTV** (bomba memoria con feeds 2 GB).
-6. **Override manual de channel number / group** — extender
-   `channel_overrides` con `number`/`group` opcionales.
+**Higiene visible** (paga deuda, mejora velocidad futura):
+4. **Split `internal/api/handlers/iptv.go`** (1.159 líneas) por
+   dominio — extracción incremental tipo `iptv_schedule.go` /
+   `iptv_access.go` ya hechas. 0.5-1 día.
+5. **Split de `library.Service`** — pure refactor con playbook ya
+   probado en `iptv.Service`. 1 día.
+
+**Features pendientes** (orden por valor):
+6. **Activity / sessions dashboard** — bus ya emite eventos, falta
+   agregador. UX admin tangible.
+7. **Override manual channel number / group** — **deferido per
+   review**. Extiende `channel_overrides` (la tabla que se aprendió
+   recientemente a no fiar; el patrón stream_url necesita
+   battle-test en producción antes de la 3ª migración).
+
+**Hechos en esta rama (`claude/review-pending-tasks-9Vh6U`)**:
+- ✅ Matcher EPG agresivo (commit 1). Falta medir cobertura real.
+- ✅ Scheduler IPTV con UI admin (commit 2). Falta dejar correr 6 h+.
+- ✅ Fixes review senior — panic recovery, Stop(ctx),
+  ErrRefreshInProgress, fuzzy byte-vs-rune, CASCADE test (commit 3).
+- ✅ Continuar viendo en LiveTV — tabla `channel_watch_history`
+  keyeada por stream_url, beacon en `useLiveHls.onFirstPlay`, rail
+  en Discover (commit 4). Falta validar cross-device.
+- ✅ ProgramDetailModal en EPG grid (commit 5).
+- ✅ Streaming XMLTV parser — `ParseXMLTVStream`, refresh peak
+  ~250 MB → ~10-20 MB (commit 6).
+- ✅ sqlc sweep — 4 raw repos migrados, ADR-001 reaffirmed
+  (commit 7).

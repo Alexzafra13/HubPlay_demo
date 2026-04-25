@@ -182,62 +182,101 @@ func (s *Service) refreshOneSource(
 	}
 	defer body.Close() //nolint:errcheck
 
-	epgData, err := ParseXMLTV(body)
-	if err != nil {
+	// Streaming parse: never holds the full feed in memory. The
+	// matchHandler buffers <channel> defs for the resolution
+	// cache (small, ~few thousand × KB) and dispatches programmes
+	// one at a time, dropping orphans without keeping their
+	// payload. Memory cap is therefore O(matched programmes ×
+	// programme size), not O(feed size).
+	mh := newMatchHandler(idx, alreadyOwned)
+	if _, err := ParseXMLTVStream(body, mh); err != nil {
 		return nil, 0, 0, fmt.Errorf("parse XMLTV: %w", err)
 	}
+	return mh.out, len(mh.out), mh.orphans, nil
+}
 
-	// Pre-compute <channel>-level resolution so programme iteration is a
-	// map lookup. Non-matches cache as "" so we don't re-try every time.
-	resolved := make(map[string]string, len(epgData.Channels))
-	xmltvCandidates := make(map[string][]string, len(epgData.Channels))
-	for _, xch := range epgData.Channels {
-		names := make([]string, 0, 1+len(xch.DisplayNames))
-		names = append(names, xch.ID)
-		names = append(names, xch.DisplayNames...)
-		xmltvCandidates[xch.ID] = names
-		resolved[xch.ID] = matchChannel(xch.ID, names, idx)
+// matchHandler is the EPGStreamHandler used by refreshOneSource. It
+// owns the resolution cache + per-channel programme accumulator so
+// the parser can stay memory-bounded.
+//
+// First-programme cold start: when the first <programme> arrives, we
+// walk every accumulated <channel> through matchChannel once and
+// build the cache. Programmes referencing channel ids that weren't
+// declared in a <channel> block fall through to a lazy match that
+// memoises into the same cache.
+type matchHandler struct {
+	idx          *channelIndex
+	alreadyOwned map[string][]*db.EPGProgram
+	candidates   map[string][]string // xmltv channel id → display-name aliases
+	resolved     map[string]string   // xmltv channel id → hub channel id ("" = no match)
+	cacheArmed   bool
+	out          map[string][]*db.EPGProgram
+	orphans      int
+}
+
+func newMatchHandler(idx *channelIndex, alreadyOwned map[string][]*db.EPGProgram) *matchHandler {
+	return &matchHandler{
+		idx:          idx,
+		alreadyOwned: alreadyOwned,
+		candidates:   make(map[string][]string),
+		resolved:     make(map[string]string),
+		out:          make(map[string][]*db.EPGProgram),
+	}
+}
+
+func (m *matchHandler) OnChannel(ch EPGChannel) error {
+	names := make([]string, 0, 1+len(ch.DisplayNames))
+	names = append(names, ch.ID)
+	names = append(names, ch.DisplayNames...)
+	m.candidates[ch.ID] = names
+	// Don't pre-resolve here — for very large feeds this would do
+	// thousands of fuzzy walks before the first programme arrives.
+	// The cold-start path below batches it on first programme so we
+	// still pay it once, but only if the feed actually has any
+	// programmes (not all do).
+	return nil
+}
+
+func (m *matchHandler) OnProgramme(p EPGProgram) error {
+	if !m.cacheArmed {
+		// Cold-start: resolve every declared XMLTV channel id once.
+		// Same optimisation as the eager parser had; keeping the same
+		// cost profile means the matcher's per-source budget doesn't
+		// change with this refactor.
+		for id, names := range m.candidates {
+			m.resolved[id] = matchChannel(id, names, m.idx)
+		}
+		m.cacheArmed = true
 	}
 
-	out := make(map[string][]*db.EPGProgram)
-	orphans := 0
-	for _, prog := range epgData.Programs {
-		channelID, cached := resolved[prog.ChannelID]
-		if !cached {
-			// Programme references a channel id that wasn't declared
-			// in a <channel> block — resolve with the id alone and
-			// memoise so repeats don't re-match.
-			//
-			// Worst case: a broken XMLTV dump with thousands of unique
-			// undeclared channel IDs forces one matchChannel call
-			// per-id. Bounded by `len(libraryChannels) * N_unique_ids`
-			// and fuzzy's O(pool) cost — still fast (~ms for the
-			// davidmuma shape, ~s even for a pathological 10k-channel
-			// dump). The memoisation keeps repeated programmes
-			// against the same orphan id free.
-			channelID = matchChannel(prog.ChannelID, nil, idx)
-			resolved[prog.ChannelID] = channelID
-		}
-		if channelID == "" {
-			orphans++
-			continue
-		}
-		if _, owned := alreadyOwned[channelID]; owned {
-			// A higher-priority source already covered this channel.
-			continue
-		}
-		out[channelID] = append(out[channelID], &db.EPGProgram{
-			ID:          generateID(),
-			ChannelID:   channelID,
-			Title:       prog.Title,
-			Description: prog.Description,
-			Category:    prog.Category,
-			IconURL:     prog.IconURL,
-			StartTime:   prog.Start,
-			EndTime:     prog.Stop,
-		})
+	channelID, cached := m.resolved[p.ChannelID]
+	if !cached {
+		// Programme references a channel id that wasn't declared in
+		// a <channel> block. Resolve with the id alone and memoise.
+		// Bounded by the number of distinct undeclared ids; fuzzy's
+		// O(pool) cost stays in-budget for any sane feed.
+		channelID = matchChannel(p.ChannelID, nil, m.idx)
+		m.resolved[p.ChannelID] = channelID
 	}
-	return out, len(out), orphans, nil
+	if channelID == "" {
+		m.orphans++
+		return nil
+	}
+	if _, owned := m.alreadyOwned[channelID]; owned {
+		// A higher-priority source already covered this channel.
+		return nil
+	}
+	m.out[channelID] = append(m.out[channelID], &db.EPGProgram{
+		ID:          generateID(),
+		ChannelID:   channelID,
+		Title:       p.Title,
+		Description: p.Description,
+		Category:    p.Category,
+		IconURL:     p.IconURL,
+		StartTime:   p.Start,
+		EndTime:     p.Stop,
+	})
+	return nil
 }
 
 // ── EPG query surface (read-side) ─────────────────────────────────

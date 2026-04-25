@@ -43,6 +43,16 @@ interface EPGGridProps {
   scheduleByChannel: Record<string, EPGProgram[]>;
   activeChannelId?: string;
   onSelectChannel: (ch: Channel) => void;
+  /**
+   * Optional handler fired when the user clicks a programme block
+   * (NOT the sticky channel cell on the left). When omitted the
+   * grid falls back to onSelectChannel — preserves the pre-modal
+   * "click anywhere on the row → play channel" UX.
+   *
+   * Wired by LiveTV.tsx to open ProgramDetailModal so the user can
+   * read sinopsis / up-next before committing to a zap.
+   */
+  onSelectProgram?: (channel: Channel, program: EPGProgram) => void;
   /** Centre the grid on "now" when first rendered. Defaults to true. */
   autoScrollToNow?: boolean;
 }
@@ -52,6 +62,7 @@ export function EPGGrid({
   scheduleByChannel,
   activeChannelId,
   onSelectChannel,
+  onSelectProgram,
   autoScrollToNow = true,
 }: EPGGridProps) {
   const { t } = useTranslation();
@@ -198,6 +209,7 @@ export function EPGGrid({
                 now={now}
                 isActive={channel.id === activeChannelId}
                 onSelect={onSelectChannel}
+                onSelectProgram={onSelectProgram}
                 noEpgLabel={t("liveTV.noEPG", {
                   defaultValue: "Sin guía disponible",
                 })}
@@ -245,6 +257,7 @@ interface ChannelRowProps {
   now: number;
   isActive: boolean;
   onSelect: (ch: Channel) => void;
+  onSelectProgram?: (channel: Channel, program: EPGProgram) => void;
   noEpgLabel: string;
 }
 
@@ -256,6 +269,7 @@ function ChannelRow({
   now,
   isActive,
   onSelect,
+  onSelectProgram,
   noEpgLabel,
 }: ChannelRowProps) {
   return (
@@ -322,7 +336,15 @@ function ChannelRow({
               windowStart={windowStart}
               windowEnd={windowEnd}
               now={now}
-              onSelect={() => onSelect(channel)}
+              // Programme-block clicks open the detail modal when a
+              // handler is provided; without one we fall back to the
+              // legacy "click anywhere → play channel" behaviour so
+              // existing tests + the channel-only-mode still work.
+              onSelect={
+                onSelectProgram
+                  ? () => onSelectProgram(channel, p)
+                  : () => onSelect(channel)
+              }
               channelName={channel.name}
             />
           ))

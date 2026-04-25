@@ -10,7 +10,12 @@ import {
   useRemoveChannelFavorite,
 } from "@/api/hooks";
 import { api } from "@/api/client";
-import type { Channel, ChannelCategory, UnhealthyChannel } from "@/api/types";
+import type {
+  Channel,
+  ChannelCategory,
+  EPGProgram,
+  UnhealthyChannel,
+} from "@/api/types";
 import { Spinner } from "@/components/common";
 import {
   type CategoryFilter,
@@ -21,6 +26,7 @@ import {
   LiveTvTopBar,
   type ViewTab,
   PlayerOverlay,
+  ProgramDetailModal,
   getNowPlaying,
   useHeroSpotlight,
 } from "@/components/livetv";
@@ -123,6 +129,21 @@ export default function LiveTV() {
 
   const openPlayer = useCallback((ch: Channel) => setPlayingChannel(ch), []);
   const closePlayer = useCallback(() => setPlayingChannel(null), []);
+
+  // ── Program detail modal ─────────────────────────────────────────
+  // Opened from EPGGrid by clicking a programme cell; closes when
+  // the user dismisses or clicks "Ver canal ahora" (which also opens
+  // the player). Keeping both pieces of state independent so the
+  // modal close-out animates separately from the overlay open.
+  const [detail, setDetail] = useState<{
+    channel: Channel;
+    program: EPGProgram;
+  } | null>(null);
+  const openProgramDetail = useCallback(
+    (ch: Channel, p: EPGProgram) => setDetail({ channel: ch, program: p }),
+    [],
+  );
+  const closeProgramDetail = useCallback(() => setDetail(null), []);
 
   // ── Favorites ────────────────────────────────────────────────────
   // The IDs query powers the ♥ state on every ChannelCard; we keep it
@@ -277,6 +298,7 @@ export default function LiveTV() {
           scheduleByChannel={scheduleByChannel}
           activeChannelId={guideActiveChannel?.id}
           onSelectChannel={openPlayer}
+          onSelectProgram={openProgramDetail}
         />
       )}
 
@@ -301,6 +323,34 @@ export default function LiveTV() {
           onSelectChannel={openPlayer}
         />
       )}
+
+      <ProgramDetailModal
+        isOpen={detail !== null}
+        onClose={closeProgramDetail}
+        program={detail?.program ?? null}
+        channel={detail?.channel ?? null}
+        // Up-next list: programmes on the same channel that start
+        // AFTER the selected one ends, capped at 3. The schedule
+        // cache is already ordered by start_time on the backend
+        // (`ORDER BY start_time ASC`), so we don't re-sort here.
+        upNext={
+          detail
+            ? (scheduleByChannel[detail.channel.id] ?? [])
+                .filter(
+                  (p) =>
+                    new Date(p.start_time).getTime() >=
+                    new Date(detail.program.end_time).getTime(),
+                )
+                .slice(0, 3)
+            : []
+        }
+        onWatch={() => {
+          if (!detail) return;
+          const ch = detail.channel;
+          closeProgramDetail();
+          openPlayer(ch);
+        }}
+      />
     </section>
   );
 }

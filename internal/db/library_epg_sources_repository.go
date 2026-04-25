@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"hubplay/internal/db/sqlc"
 )
 
 // ErrEPGSourceAlreadyAttached signals that an admin tried to add an
@@ -40,18 +42,16 @@ type LibraryEPGSource struct {
 }
 
 // LibraryEPGSourceRepository persists the per-library list of EPG
-// providers. The raw SQL is on purpose: at the time this file was
-// added the sqlc generator hadn't been re-run for the new 007_
-// migration, and keeping the adapter self-contained means a fresh
-// clone doesn't need `make sqlc` to build. The next sqlc regen pass
-// can replace the bodies with the generated querier without touching
-// callers.
+// providers. Sqlc-generated queries handle the per-row scan; this
+// adapter projects the optional columns into the domain shape and
+// owns the priority-on-insert + UNIQUE-conflict semantics.
 type LibraryEPGSourceRepository struct {
 	db *sql.DB
+	q  *sqlc.Queries
 }
 
 func NewLibraryEPGSourceRepository(database *sql.DB) *LibraryEPGSourceRepository {
-	return &LibraryEPGSourceRepository{db: database}
+	return &LibraryEPGSourceRepository{db: database, q: sqlc.New(database)}
 }
 
 // ListByLibrary returns every source for a library in priority order
@@ -59,61 +59,30 @@ func NewLibraryEPGSourceRepository(database *sql.DB) *LibraryEPGSourceRepository
 // sources configured — the service layer decides how to handle that
 // (e.g. fall back to `libraries.epg_url` for backwards compat).
 func (r *LibraryEPGSourceRepository) ListByLibrary(ctx context.Context, libraryID string) ([]*LibraryEPGSource, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, library_id, COALESCE(catalog_id,''), url, priority,
-		        COALESCE(last_refreshed_at, ''), COALESCE(last_status,''),
-		        COALESCE(last_error,''), last_program_count, last_channel_count, created_at
-		 FROM library_epg_sources
-		 WHERE library_id = ?
-		 ORDER BY priority ASC, created_at ASC`, libraryID)
+	rows, err := r.q.ListLibraryEPGSourcesByLibrary(ctx, libraryID)
 	if err != nil {
 		return nil, fmt.Errorf("list epg sources: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
-
-	var out []*LibraryEPGSource
-	for rows.Next() {
-		src := &LibraryEPGSource{}
-		var lastRefreshRaw any
-		if err := rows.Scan(&src.ID, &src.LibraryID, &src.CatalogID, &src.URL, &src.Priority,
-			&lastRefreshRaw, &src.LastStatus, &src.LastError,
-			&src.LastProgramCount, &src.LastChannelCount, &src.CreatedAt); err != nil {
-			return nil, fmt.Errorf("scan epg source: %w", err)
-		}
-		// last_refreshed_at uses the same modernc.org/sqlite coercion
-		// story as epg_programs.start_time — see coerceSQLiteTime.
-		if src.LastRefreshedAt, err = coerceSQLiteTime(lastRefreshRaw); err != nil {
-			return nil, fmt.Errorf("parse last_refreshed_at: %w", err)
-		}
-		out = append(out, src)
+	out := make([]*LibraryEPGSource, 0, len(rows))
+	for _, row := range rows {
+		src := epgSourceFromList(row)
+		out = append(out, &src)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // GetByID is used by the DELETE / UPDATE handlers to load a row and
 // verify the caller actually has access to its library.
 func (r *LibraryEPGSourceRepository) GetByID(ctx context.Context, id string) (*LibraryEPGSource, error) {
-	row := r.db.QueryRowContext(ctx,
-		`SELECT id, library_id, COALESCE(catalog_id,''), url, priority,
-		        COALESCE(last_refreshed_at, ''), COALESCE(last_status,''),
-		        COALESCE(last_error,''), last_program_count, last_channel_count, created_at
-		 FROM library_epg_sources WHERE id = ?`, id)
-
-	src := &LibraryEPGSource{}
-	var lastRefreshRaw any
-	err := row.Scan(&src.ID, &src.LibraryID, &src.CatalogID, &src.URL, &src.Priority,
-		&lastRefreshRaw, &src.LastStatus, &src.LastError,
-		&src.LastProgramCount, &src.LastChannelCount, &src.CreatedAt)
+	row, err := r.q.GetLibraryEPGSourceByID(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get epg source: %w", err)
 	}
-	if src.LastRefreshedAt, err = coerceSQLiteTime(lastRefreshRaw); err != nil {
-		return nil, fmt.Errorf("parse last_refreshed_at: %w", err)
-	}
-	return src, nil
+	src := epgSourceFromGet(row)
+	return &src, nil
 }
 
 // Create inserts a new source. Priority defaults to one past the
@@ -121,26 +90,30 @@ func (r *LibraryEPGSourceRepository) GetByID(ctx context.Context, id string) (*L
 // and can be reordered from the UI if needed.
 func (r *LibraryEPGSourceRepository) Create(ctx context.Context, src *LibraryEPGSource) error {
 	if src.Priority == 0 {
-		var maxPrio sql.NullInt64
-		if err := r.db.QueryRowContext(ctx,
-			`SELECT MAX(priority) FROM library_epg_sources WHERE library_id = ?`,
-			src.LibraryID).Scan(&maxPrio); err != nil {
+		raw, err := r.q.NextLibraryEPGSourcePriority(ctx, src.LibraryID)
+		if err != nil {
 			return fmt.Errorf("compute next priority: %w", err)
 		}
-		if maxPrio.Valid {
-			src.Priority = int(maxPrio.Int64) + 1
+		// COALESCE(MAX(priority), -1) returns -1 when the library has
+		// no sources yet → the new row goes to priority 0. sqlc
+		// surfaces it as interface{} (untyped MAX); the value is an
+		// int64 in practice.
+		if v, ok := raw.(int64); ok && v >= 0 {
+			src.Priority = int(v) + 1
 		}
 	}
 	if src.CreatedAt.IsZero() {
 		src.CreatedAt = time.Now().UTC()
 	}
-	catalogID := sql.NullString{String: src.CatalogID, Valid: src.CatalogID != ""}
 
-	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO library_epg_sources
-		 (id, library_id, catalog_id, url, priority, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		src.ID, src.LibraryID, catalogID, src.URL, src.Priority, src.CreatedAt)
+	err := r.q.CreateLibraryEPGSource(ctx, sqlc.CreateLibraryEPGSourceParams{
+		ID:        src.ID,
+		LibraryID: src.LibraryID,
+		CatalogID: sql.NullString{String: src.CatalogID, Valid: src.CatalogID != ""},
+		Url:       src.URL,
+		Priority:  int64(src.Priority),
+		CreatedAt: src.CreatedAt,
+	})
 	if err != nil {
 		// modernc.org/sqlite doesn't ship typed error values for
 		// constraint failures; the message is stable ("UNIQUE
@@ -170,8 +143,7 @@ func isUniqueConstraintError(err error) bool {
 // the library-deletion case; this is for the admin "remove provider"
 // button.
 func (r *LibraryEPGSourceRepository) Delete(ctx context.Context, id string) error {
-	if _, err := r.db.ExecContext(ctx,
-		`DELETE FROM library_epg_sources WHERE id = ?`, id); err != nil {
+	if err := r.q.DeleteLibraryEPGSource(ctx, id); err != nil {
 		return fmt.Errorf("delete epg source: %w", err)
 	}
 	return nil
@@ -187,16 +159,11 @@ func (r *LibraryEPGSourceRepository) UpdatePriorities(ctx context.Context, libra
 		return fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck
-
-	stmt, err := tx.PrepareContext(ctx,
-		`UPDATE library_epg_sources SET priority = ? WHERE id = ? AND library_id = ?`)
-	if err != nil {
-		return fmt.Errorf("prepare update: %w", err)
-	}
-	defer stmt.Close() //nolint:errcheck
-
+	qtx := r.q.WithTx(tx)
 	for i, id := range orderedIDs {
-		if _, err := stmt.ExecContext(ctx, i, id, libraryID); err != nil {
+		if err := qtx.UpdateLibraryEPGSourcePriority(ctx, sqlc.UpdateLibraryEPGSourcePriorityParams{
+			Priority: int64(i), ID: id, LibraryID: libraryID,
+		}); err != nil {
 			return fmt.Errorf("update priority for %s: %w", id, err)
 		}
 	}
@@ -205,24 +172,64 @@ func (r *LibraryEPGSourceRepository) UpdatePriorities(ctx context.Context, libra
 
 // RecordRefresh persists the per-source status after a refresh pass.
 // Called from RefreshEPG once the source has finished (whether ok or
-// error) so the admin UI can show "davidmuma: ❌ 404 / epg.pw: ✅ 3200".
+// error) so the admin UI can show "davidmuma: 404 / epg.pw: 3200".
 func (r *LibraryEPGSourceRepository) RecordRefresh(
 	ctx context.Context,
 	id, status, errMsg string,
 	programs, channels int,
 ) error {
 	now := time.Now().UTC()
-	_, err := r.db.ExecContext(ctx,
-		`UPDATE library_epg_sources SET
-		    last_refreshed_at  = ?,
-		    last_status        = ?,
-		    last_error         = ?,
-		    last_program_count = ?,
-		    last_channel_count = ?
-		 WHERE id = ?`,
-		now, status, errMsg, programs, channels, id)
-	if err != nil {
+	if err := r.q.RecordLibraryEPGSourceRefresh(ctx, sqlc.RecordLibraryEPGSourceRefreshParams{
+		LastRefreshedAt:  sql.NullTime{Time: now, Valid: true},
+		LastStatus:       sql.NullString{String: status, Valid: status != ""},
+		LastError:        sql.NullString{String: errMsg, Valid: errMsg != ""},
+		LastProgramCount: int64(programs),
+		LastChannelCount: int64(channels),
+		ID:               id,
+	}); err != nil {
 		return fmt.Errorf("record refresh: %w", err)
 	}
 	return nil
+}
+
+// epgSourceFromList projects the list-row shape into the domain
+// struct. Same column projection as the GET path; kept separate
+// because sqlc generates one type per query.
+func epgSourceFromList(row sqlc.ListLibraryEPGSourcesByLibraryRow) LibraryEPGSource {
+	src := LibraryEPGSource{
+		ID:               row.ID,
+		LibraryID:        row.LibraryID,
+		CatalogID:        row.CatalogID,
+		URL:              row.Url,
+		Priority:         int(row.Priority),
+		LastStatus:       row.LastStatus,
+		LastError:        row.LastError,
+		LastProgramCount: int(row.LastProgramCount),
+		LastChannelCount: int(row.LastChannelCount),
+		CreatedAt:        row.CreatedAt,
+	}
+	if row.LastRefreshedAt.Valid {
+		src.LastRefreshedAt = row.LastRefreshedAt.Time
+	}
+	return src
+}
+
+// epgSourceFromGet projects the get-row shape into the domain struct.
+func epgSourceFromGet(row sqlc.GetLibraryEPGSourceByIDRow) LibraryEPGSource {
+	src := LibraryEPGSource{
+		ID:               row.ID,
+		LibraryID:        row.LibraryID,
+		CatalogID:        row.CatalogID,
+		URL:              row.Url,
+		Priority:         int(row.Priority),
+		LastStatus:       row.LastStatus,
+		LastError:        row.LastError,
+		LastProgramCount: int(row.LastProgramCount),
+		LastChannelCount: int(row.LastChannelCount),
+		CreatedAt:        row.CreatedAt,
+	}
+	if row.LastRefreshedAt.Valid {
+		src.LastRefreshedAt = row.LastRefreshedAt.Time
+	}
+	return src
 }

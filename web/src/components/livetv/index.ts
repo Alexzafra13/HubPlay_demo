@@ -16,6 +16,7 @@ export { LiveTvTopBar } from "./LiveTvTopBar";
 export type { ViewTab } from "./LiveTvTopBar";
 export { StreamPreview } from "./StreamPreview";
 export { PlayerOverlay } from "./PlayerOverlay";
+export { ProgramDetailModal } from "./ProgramDetailModal";
 export { detectCountryCode } from "./detectCountry";
 export { useHeroSpotlight } from "./useHeroSpotlight";
 export {
