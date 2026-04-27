@@ -113,7 +113,12 @@ func NewService(
 		refreshes:       make(map[string]bool),
 		lastKnownBucket: make(map[string]string),
 		httpClient: &http.Client{
-			Timeout: 60 * time.Second,
+			// 5 min ceiling: large M3U providers (e.g. MEGAOTT,
+			// 8k+ channels) can take 1–2 min to stream the full
+			// playlist over a residential connection. 60s used to
+			// trip on these. Matches the upstream-refresh ctx
+			// budget used elsewhere in this package.
+			Timeout: 5 * time.Minute,
 		},
 	}
 }

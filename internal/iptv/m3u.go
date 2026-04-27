@@ -2,6 +2,7 @@ package iptv
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -73,21 +74,68 @@ var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
 //
 // Strips a leading UTF-8 BOM so the #EXTM3U header check still matches on
 // files saved by Windows tools.
+//
+// This is a thin wrapper over ParseM3UStream that accumulates every
+// emitted channel into a slice. Suitable for small playlists and tests;
+// for large feeds (Xtream-Codes M3U_PLUS catalogs with VOD can run into
+// hundreds of thousands of entries) prefer ParseM3UStream so the caller
+// can filter or persist incrementally without holding the whole list
+// in memory.
 func ParseM3U(r io.Reader) (*Playlist, error) {
+	playlist := &Playlist{}
+	epgURL, _, err := ParseM3UStream(r, func(ch M3UChannel) error {
+		playlist.Channels = append(playlist.Channels, ch)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	playlist.EPGURL = epgURL
+	return playlist, nil
+}
+
+// ParseM3UStream parses an M3U/M3U8 stream and invokes onChannel for
+// every fully-formed channel entry (EXTINF + URL pair) it sees. The
+// callback runs synchronously on the parser goroutine — keep it
+// non-blocking, or buffer through a goroutine if expensive work is
+// needed.
+//
+// Returns the URL advertised on the #EXTM3U header (url-tvg / x-tvg-url
+// / tvg-url, may be empty), the number of source lines processed, and
+// any scanner error. A non-nil error from onChannel aborts parsing and
+// is returned wrapped — useful so callers can short-circuit on context
+// cancellation or DB write failure.
+//
+// Memory profile: O(1) — no slice accumulation. The largest live
+// allocation is the bufio.Scanner buffer (10MB max line, see below).
+//
+// Tolerance: TvgID dedup, BOM skipping, and #EXTM3U-optional behaviour
+// are preserved verbatim from ParseM3U so swapping the implementation
+// is a no-op for existing callers.
+func ParseM3UStream(r io.Reader, onChannel func(M3UChannel) error) (epgURL string, lineNum int, err error) {
 	br := bufio.NewReader(r)
 	// Peek at the first 3 bytes; discard a BOM if present.
-	if prefix, err := br.Peek(3); err == nil && len(prefix) == 3 &&
+	if prefix, perr := br.Peek(3); perr == nil && len(prefix) == 3 &&
 		prefix[0] == utf8BOM[0] && prefix[1] == utf8BOM[1] && prefix[2] == utf8BOM[2] {
 		_, _ = br.Discard(3)
+	}
+
+	// Sniff first non-whitespace byte. If it is "<" we are looking at
+	// HTML / XML / SOAP — almost certainly an error page from the IPTV
+	// provider (account suspended, IP blocked, rate-limit, captive
+	// portal). Without this guard the scanner would happily walk the
+	// whole HTML and report "0 channels imported", which makes the
+	// real failure invisible to the operator. Returning ErrNotM3U lets
+	// the service layer translate this into a useful UI message.
+	if first, perr := peekFirstNonSpace(br); perr == nil && first == '<' {
+		return "", 0, ErrNotM3U
 	}
 
 	scanner := bufio.NewScanner(br)
 	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024) // 10MB max line
 
-	playlist := &Playlist{}
 	seen := make(map[string]bool) // TvgIDs already kept
 	var current *M3UChannel
-	lineNum := 0
 	headerSeen := false
 
 	for scanner.Scan() {
@@ -103,7 +151,7 @@ func ParseM3U(r io.Reader) (*Playlist, error) {
 		// `url-tvg="…"` (and some tools use `x-tvg-url` or `tvg-url`).
 		if !headerSeen {
 			if strings.HasPrefix(line, "#EXTM3U") {
-				playlist.EPGURL = parseHeaderEPGURL(line)
+				epgURL = parseHeaderEPGURL(line)
 				headerSeen = true
 				continue
 			}
@@ -133,17 +181,61 @@ func ParseM3U(r io.Reader) (*Playlist, error) {
 					}
 					seen[current.TvgID] = true
 				}
-				playlist.Channels = append(playlist.Channels, *current)
+				if cbErr := onChannel(*current); cbErr != nil {
+					return epgURL, lineNum, fmt.Errorf("onChannel at line %d: %w", lineNum, cbErr)
+				}
 			}
 			current = nil
 		}
 	}
 
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("reading M3U at line %d: %w", lineNum, err)
+	if scanErr := scanner.Err(); scanErr != nil {
+		return epgURL, lineNum, fmt.Errorf("reading M3U at line %d: %w", lineNum, scanErr)
 	}
 
-	return playlist, nil
+	return epgURL, lineNum, nil
+}
+
+// vodGroupTokens are case-insensitive substrings that, when present in
+// an M3U entry's group-title, mark it as VOD (movies / series / box
+// office) rather than a live channel. Tuned for Xtream-Codes feeds
+// whose M3U_PLUS export bundles live + VOD into a single playlist.
+var vodGroupTokens = []string{
+	"vod", "movies", "movie", "películas", "peliculas", "pelis",
+	"cinema", "films", "series", "shows", "tv shows", "kids vod",
+	"adult", "adultos", "xxx",
+}
+
+// IsVODChannel returns true when the entry looks like Video-On-Demand
+// (a movie or a series episode) rather than a live channel.
+//
+// Heuristics, in priority order:
+//  1. Stream URL path contains the Xtream-Codes VOD path segments
+//     (`/movie/` or `/series/`). This is the strongest signal — Xtream
+//     servers serve those endpoints exclusively for VOD.
+//  2. Group-title contains a known VOD token (movies, series, vod,
+//     películas, etc., case-insensitive).
+//
+// We deliberately err on the side of *under-filtering* — a false
+// negative (a movie classified as live) is harmless beyond list
+// clutter, while a false positive (a real channel skipped) loses
+// content. If a feed uses a non-obvious group-title naming scheme,
+// the user can still see the entry; conversely a Xtream URL is
+// near-impossible to confuse.
+func IsVODChannel(ch M3UChannel) bool {
+	if u := strings.ToLower(ch.StreamURL); u != "" {
+		if strings.Contains(u, "/movie/") || strings.Contains(u, "/series/") {
+			return true
+		}
+	}
+	if g := strings.ToLower(ch.GroupName); g != "" {
+		for _, token := range vodGroupTokens {
+			if strings.Contains(g, token) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // parseHeaderEPGURL extracts the XMLTV URL from the #EXTM3U header line.
@@ -215,4 +307,32 @@ func parseExtInf(line string) M3UChannel {
 	}
 
 	return ch
+}
+
+// ErrNotM3U signals that the body the parser was handed is not a
+// playlist at all — typically an HTML error page from the IPTV
+// provider (account suspended, IP blocked by court order in ES, captive
+// portal, rate-limit, etc.). The service layer maps it to a friendly
+// admin-facing message rather than the misleading "0 channels".
+var ErrNotM3U = errors.New("response is not an M3U playlist (got HTML/other)")
+
+// peekFirstNonSpace reads ahead in the buffered reader until it finds a
+// non-whitespace byte and returns it without consuming. We bound the
+// scan to avoid pathological inputs (mostly-whitespace headers); 4 KB
+// is more than enough for any real-world preamble.
+func peekFirstNonSpace(br *bufio.Reader) (byte, error) {
+	const maxScan = 4096
+	prefix, err := br.Peek(maxScan)
+	if err != nil && err != io.EOF && len(prefix) == 0 {
+		return 0, err
+	}
+	for _, b := range prefix {
+		switch b {
+		case ' ', '\t', '\r', '\n':
+			continue
+		default:
+			return b, nil
+		}
+	}
+	return 0, io.EOF
 }

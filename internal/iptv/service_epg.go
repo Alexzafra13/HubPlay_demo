@@ -6,6 +6,7 @@ package iptv
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -190,6 +191,19 @@ func (s *Service) refreshOneSource(
 	// programme size), not O(feed size).
 	mh := newMatchHandler(idx, alreadyOwned)
 	if _, err := ParseXMLTVStream(body, mh); err != nil {
+		// Provider returned HTML / non-XMLTV content — same failure
+		// shape as the M3U side (account suspended, IP blocked by
+		// LaLiga/Movistar court order in ES, captive portal,
+		// rate-limit). Surface a useful hint instead of a generic
+		// XML decode error.
+		if errors.Is(err, ErrNotXMLTV) {
+			s.logger.Error("EPG source did not return an XMLTV document",
+				"hint", "HTML/error page received")
+			return nil, 0, 0, fmt.Errorf("the EPG URL returned an HTML page, not XMLTV — "+
+				"likely causes: account suspended, IP blocked (LaLiga/Movistar court "+
+				"order in Spain), bad credentials, or rate-limit. Verify the URL in a "+
+				"browser. Underlying: %w", err)
+		}
 		return nil, 0, 0, fmt.Errorf("parse XMLTV: %w", err)
 	}
 	return mh.out, len(mh.out), mh.orphans, nil
