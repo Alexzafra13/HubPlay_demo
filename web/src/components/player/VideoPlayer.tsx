@@ -7,6 +7,7 @@ import { useHls } from "@/hooks/useHls";
 import { useControlsVisibility } from "@/hooks/useControlsVisibility";
 import { usePlayerKeyboard } from "@/hooks/usePlayerKeyboard";
 import { useProgressReporter } from "@/hooks/useProgressReporter";
+import { useTrickplay } from "@/hooks/useTrickplay";
 import { PlayerControls } from "./PlayerControls";
 import { UpNextOverlay, type UpNextInfo } from "./UpNextOverlay";
 import { ExternalSubsModal } from "./ExternalSubsModal";
@@ -121,6 +122,13 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
   } = useControlsVisibility(isPlaying);
 
   useProgressReporter(videoRef, itemId);
+
+  // Trickplay: fetched once per item. The first hit on the backend
+  // triggers ffmpeg generation (5-30 s); during that window the
+  // SeekBar gracefully renders without preview, then snaps in once
+  // `available` flips true. No retry needed — the user is on the
+  // same item for the entire session.
+  const trickplay = useTrickplay(itemId);
 
   // ─── Sync volume/mute from store to video element ──────────────────────────
 
@@ -441,6 +449,10 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
           onSubtitleTrackChange={setSubtitleTrack}
           onQualityChange={setQuality}
           onSearchExternalSubs={() => setExternalSubsModalOpen(true)}
+          trickplay={trickplay.available && trickplay.manifest ? {
+            manifest: trickplay.manifest,
+            spriteURL: trickplay.spriteURL,
+          } : undefined}
           onClose={handleClose}
           title={title}
         />

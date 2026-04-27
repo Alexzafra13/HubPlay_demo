@@ -1,7 +1,8 @@
-import { memo } from "react";
+import { memo, useRef, useState } from "react";
 import type { FC } from "react";
 import { useTranslation } from "react-i18next";
 import { TimeDisplay } from "./TimeDisplay";
+import type { TrickplayManifest } from "@/hooks/useTrickplay";
 
 interface AudioTrack {
   id: number;
@@ -31,6 +32,11 @@ interface ChapterMarker {
   title: string;
 }
 
+interface TrickplayProps {
+  manifest: TrickplayManifest;
+  spriteURL: string;
+}
+
 interface PlayerControlsProps {
   isPlaying: boolean;
   currentTime: number;
@@ -46,6 +52,10 @@ interface PlayerControlsProps {
   // bar renders unchanged. When present, each entry becomes a 2-px
   // tick on the bar; hovering reveals the title.
   chapters?: ChapterMarker[];
+  // Trickplay (preview thumbnails). When provided, the SeekBar
+  // shows a sub-image of the sprite at the cursor position on
+  // hover. Absent = legacy bar (no preview tooltip).
+  trickplay?: TrickplayProps;
   currentAudioTrack: number;
   currentSubtitleTrack: number;
   /** -1 = auto / ABR. */
@@ -179,14 +189,57 @@ const SeekBar: FC<{
   duration: number;
   buffered: number;
   chapters?: ChapterMarker[];
+  trickplay?: TrickplayProps;
   onSeek: (time: number) => void;
-}> = memo(({ currentTime, duration, buffered, chapters, onSeek }) => {
+}> = memo(({ currentTime, duration, buffered, chapters, trickplay, onSeek }) => {
   const { t } = useTranslation();
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
   const bufferedPercent = duration > 0 ? (buffered / duration) * 100 : 0;
 
+  // Hover state for the trickplay preview tooltip. The two pieces:
+  // the time at the cursor (formatted) and the X position of the
+  // tooltip clamped to stay inside the bar. We track them on the
+  // container `<div>`'s mouse events and render an absolutely-
+  // positioned preview above the bar when both are populated.
+  const trackRef = useRef<HTMLDivElement | null>(null);
+  const [hoverTime, setHoverTime] = useState<number | null>(null);
+  const [hoverX, setHoverX] = useState(0);
+  const [trackWidth, setTrackWidth] = useState(0);
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!trickplay || duration <= 0) return;
+    const rect = trackRef.current?.getBoundingClientRect();
+    if (!rect || rect.width <= 0) return;
+    const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    setHoverTime(ratio * duration);
+    setHoverX(e.clientX - rect.left);
+    setTrackWidth(rect.width);
+  };
+
+  const handleMouseLeave = () => {
+    setHoverTime(null);
+  };
+
   return (
-    <div className="group/seek relative flex-1 flex items-center h-6 cursor-pointer">
+    <div
+      ref={trackRef}
+      className="group/seek relative flex-1 flex items-center h-6 cursor-pointer"
+      onMouseMove={handleMouseMove}
+      onMouseLeave={handleMouseLeave}
+    >
+      {/* Trickplay preview tooltip. Positioned above the bar, clamped
+          inside the track width so the right edge of a 320 px thumb
+          on a 30 px bar doesn't overflow the player. */}
+      {trickplay && hoverTime != null && (
+        <TrickplayTooltip
+          manifest={trickplay.manifest}
+          spriteURL={trickplay.spriteURL}
+          time={hoverTime}
+          cursorX={hoverX}
+          trackWidth={trackWidth}
+        />
+      )}
+
       <input
         type="range"
         min={0}
@@ -239,6 +292,79 @@ const SeekBar: FC<{
 });
 
 SeekBar.displayName = "SeekBar";
+
+// ─── Trickplay tooltip ─────────────────────────────────────────────────────
+
+/**
+ * Renders a single thumbnail at hover time, plus a small time label.
+ * The math is the inverse of `imaging.GenerateTrickplay`: given a
+ * time in seconds, find which sub-image of the sprite covers it and
+ * shift `background-position` to that cell.
+ *
+ * Position rules:
+ *   - Centered on cursor X by default.
+ *   - Clamped to stay inside the track width so the right/left edges
+ *     don't bleed past the player chrome.
+ *   - Sits above the track (bottom anchored), with a small gap so
+ *     the seek thumb (visible on hover) doesn't overlap the
+ *     thumbnail's bottom edge.
+ */
+const TrickplayTooltip: FC<{
+  manifest: TrickplayManifest;
+  spriteURL: string;
+  time: number;
+  cursorX: number;
+  trackWidth: number;
+}> = ({ manifest, spriteURL, time, cursorX, trackWidth }) => {
+  const idx = Math.min(
+    manifest.total - 1,
+    Math.max(0, Math.floor(time / Math.max(1, manifest.interval_sec))),
+  );
+  const col = idx % manifest.columns;
+  const row = Math.floor(idx / manifest.columns);
+  const tw = manifest.thumb_width;
+  const th = manifest.thumb_height;
+
+  // Center on cursor, then clamp so the tooltip box stays inside the
+  // track. The 8 px margin is just visual breathing room.
+  const half = tw / 2;
+  let left = cursorX - half;
+  if (left < 8) left = 8;
+  if (left + tw > trackWidth - 8) left = trackWidth - tw - 8;
+
+  return (
+    <div
+      className="absolute bottom-full mb-3 pointer-events-none flex flex-col items-center"
+      style={{ left, width: tw }}
+      aria-hidden="true"
+    >
+      <div
+        className="rounded-[--radius-md] border border-border shadow-lg shadow-black/50 overflow-hidden bg-black"
+        style={{
+          width: tw,
+          height: th,
+          backgroundImage: `url(${spriteURL})`,
+          backgroundPosition: `-${col * tw}px -${row * th}px`,
+          backgroundSize: `${manifest.columns * tw}px ${manifest.rows * th}px`,
+          backgroundRepeat: "no-repeat",
+        }}
+      />
+      <span className="mt-1 px-1.5 py-0.5 rounded bg-black/80 text-[11px] font-medium text-white tabular-nums">
+        {formatHMS(time)}
+      </span>
+    </div>
+  );
+};
+
+function formatHMS(s: number): string {
+  if (!isFinite(s) || s < 0) return "0:00";
+  const total = Math.floor(s);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const sec = total % 60;
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${m}:${pad(sec)}`;
+}
 
 // ─── Track selector dropdown ─────────────────────────────────────────────────
 
@@ -358,6 +484,7 @@ const PlayerControls: FC<PlayerControlsProps> = ({
   subtitleTracks,
   qualityLevels = [],
   chapters,
+  trickplay,
   currentAudioTrack,
   currentSubtitleTrack,
   currentQuality = -1,
@@ -423,6 +550,7 @@ const PlayerControls: FC<PlayerControlsProps> = ({
           duration={duration}
           buffered={buffered}
           chapters={chapters}
+          trickplay={trickplay}
           onSeek={onSeek}
         />
 
