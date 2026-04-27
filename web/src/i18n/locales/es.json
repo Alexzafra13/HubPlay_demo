@@ -64,6 +64,12 @@
     "watched": "Visto",
     "inProgress": "En curso"
   },
+  "upNext": {
+    "title": "A continuacion",
+    "label": "A continuacion",
+    "playIn": "Reproducir en {{seconds}}s",
+    "cancel": "Cancelar reproduccion automatica"
+  },
   "series": {
     "title": "Series",
     "searchPlaceholder": "Buscar series...",

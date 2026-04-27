@@ -64,6 +64,12 @@
     "watched": "Watched",
     "inProgress": "In progress"
   },
+  "upNext": {
+    "title": "Up next",
+    "label": "Up next",
+    "playIn": "Play in {{seconds}}s",
+    "cancel": "Cancel auto-play"
+  },
   "series": {
     "title": "Series",
     "searchPlaceholder": "Search series...",

@@ -163,19 +163,35 @@ export default function ItemDetail() {
     }
   }, [id, cleanupSession, t]);
 
-  // Prefetch next episode's item data when an episode starts playing
-  useEffect(() => {
-    if (!playingItemId || siblingEpisodes.length === 0) return;
+  // Next episode lookup. Used both to prefetch its item data when the
+  // current episode starts playing (warmer cache for the auto-advance
+  // round-trip) and to feed the up-next overlay so it knows what to
+  // promote when the current video ends.
+  const nextEpisode = useMemo<MediaItem | undefined>(() => {
+    if (!playingItemId || siblingEpisodes.length === 0) return undefined;
     const idx = siblingEpisodes.findIndex((ep) => ep.id === playingItemId);
-    const nextEp = idx >= 0 ? siblingEpisodes[idx + 1] : undefined;
-    if (nextEp) {
-      queryClient.prefetchQuery({
-        queryKey: queryKeys.item(nextEp.id),
-        queryFn: () => api.getItem(nextEp.id),
-        staleTime: 5 * 60 * 1000,
-      });
-    }
-  }, [playingItemId, siblingEpisodes, queryClient]);
+    return idx >= 0 ? siblingEpisodes[idx + 1] : undefined;
+  }, [playingItemId, siblingEpisodes]);
+
+  useEffect(() => {
+    if (!nextEpisode) return;
+    queryClient.prefetchQuery({
+      queryKey: queryKeys.item(nextEpisode.id),
+      queryFn: () => api.getItem(nextEpisode.id),
+      staleTime: 5 * 60 * 1000,
+    });
+  }, [nextEpisode, queryClient]);
+
+  const nextUpInfo = useMemo(() => {
+    if (!nextEpisode) return undefined;
+    return {
+      title: nextEpisode.title,
+      seasonNumber: nextEpisode.season_number,
+      episodeNumber: nextEpisode.episode_number,
+      posterUrl: nextEpisode.poster_url,
+      backdropUrl: nextEpisode.backdrop_url,
+    };
+  }, [nextEpisode]);
 
   const handlePlayerEnded = useCallback(() => {
     if (!playingItemId || siblingEpisodes.length === 0) return;
@@ -263,6 +279,7 @@ export default function ItemDetail() {
               ? item.duration_ticks / 10_000_000
               : undefined
           }
+          nextUp={nextUpInfo}
           onClose={handleClosePlayer}
           onEnded={handlePlayerEnded}
         />
