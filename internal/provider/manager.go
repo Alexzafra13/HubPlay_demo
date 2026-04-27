@@ -164,6 +164,17 @@ func (m *Manager) FetchImages(ctx context.Context, externalIDs map[string]string
 			m.logger.Warn("image fetch failed", "provider", p.Name(), "error", err)
 			continue
 		}
+		// Stamp the source on every result here rather than make each
+		// provider implementation set it. The aggregator already knows
+		// which provider just spoke, so `Source = p.Name()` is the
+		// single point of truth — implementations can't forget to set
+		// it and callers downstream don't have to URL-sniff.
+		name := p.Name()
+		for i := range images {
+			if images[i].Source == "" {
+				images[i].Source = name
+			}
+		}
 		allImages = append(allImages, images...)
 	}
 

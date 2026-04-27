@@ -623,6 +623,15 @@ func (s *Scanner) fetchAndStoreImages(ctx context.Context, itemID string, extern
 		}
 
 		imgID := uuid.NewString()
+		// Provider name comes straight from the Manager-stamped
+		// `Source` field on the result — no URL sniffing. Falls back
+		// to "unknown" only if a future provider implementation forgets
+		// to surface its name through the manager (today neither
+		// TMDb nor Fanart can hit this branch).
+		providerName := best.Source
+		if providerName == "" {
+			providerName = "unknown"
+		}
 		dbImg := &db.Image{
 			ID:        imgID,
 			ItemID:    itemID,
@@ -631,7 +640,7 @@ func (s *Scanner) fetchAndStoreImages(ctx context.Context, itemID string, extern
 			Width:     best.Width,
 			Height:    best.Height,
 			Blurhash:  ing.Blurhash,
-			Provider:  providerFromURL(best.URL),
+			Provider:  providerName,
 			IsPrimary: true,
 			AddedAt:   time.Now(),
 		}
@@ -646,21 +655,6 @@ func (s *Scanner) fetchAndStoreImages(ctx context.Context, itemID string, extern
 	}
 }
 
-// providerFromURL maps the host of a fetched image URL onto the
-// provider name we record in the DB. The provider package doesn't
-// publish this on ImageResult yet, so we sniff from the URL — the
-// substring match is conservative (only exact known hosts; everything
-// else lands as "unknown" which the admin UI surfaces as "external").
-func providerFromURL(url string) string {
-	switch {
-	case strings.Contains(url, "fanart.tv"):
-		return "fanart"
-	case strings.Contains(url, "tmdb.org"):
-		return "tmdb"
-	default:
-		return "unknown"
-	}
-}
 
 // itemTypeFromLibrary maps library content types to item types.
 func itemTypeFromLibrary(contentType string) string {

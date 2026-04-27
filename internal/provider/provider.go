@@ -86,6 +86,13 @@ type ImageResult struct {
 	Width    int
 	Height   int
 	Score    float64 // quality/relevance 0-1
+	// Source provider name ("tmdb", "fanart", ...) — set by the
+	// implementation that produced the result. The aggregator
+	// (`Manager.FetchImages`) does not sort or merge by Source, but
+	// the persistence layer (scanner, refresher) records it on
+	// `db.Image.provider` so the admin UI can filter by source and
+	// surface bad providers without sniffing the URL.
+	Source string
 }
 
 // ImageProvider can fetch images for media items.

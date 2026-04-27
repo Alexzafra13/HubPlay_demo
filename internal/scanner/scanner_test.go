@@ -376,11 +376,15 @@ func TestFetchAndStoreImages_PersistsLocalPathNotURL(t *testing.T) {
 
 	// Inject the stub. The constructor took *provider.Manager (nil
 	// here) but the field is the interface; tests can swap directly.
+	// `Source` is what the production Manager.FetchImages stamps onto
+	// every result; the scanner trusts it as-is on the DB row. The
+	// stub mirrors that contract so the test exercises the real
+	// path, not a sniff fallback.
 	s.providers = &stubProvider{images: []provider.ImageResult{
-		{Type: "primary", URL: srv.URL + "/poster.png", Width: 4, Height: 4, Score: 100},
-		{Type: "primary", URL: srv.URL + "/loser.png", Width: 4, Height: 4, Score: 1}, // lower score — must be skipped
-		{Type: "backdrop", URL: srv.URL + "/backdrop.png", Width: 4, Height: 4, Score: 50},
-		{Type: "thumb", URL: srv.URL + "/thumb.png"}, // unknown kind — must be ignored
+		{Type: "primary", URL: srv.URL + "/poster.png", Source: "tmdb", Width: 4, Height: 4, Score: 100},
+		{Type: "primary", URL: srv.URL + "/loser.png", Source: "tmdb", Width: 4, Height: 4, Score: 1}, // lower score — must be skipped
+		{Type: "backdrop", URL: srv.URL + "/backdrop.png", Source: "fanart", Width: 4, Height: 4, Score: 50},
+		{Type: "thumb", URL: srv.URL + "/thumb.png", Source: "fanart"}, // unknown kind — must be ignored
 	}}
 
 	// Drive the image-ingest path directly so we don't have to build
@@ -408,6 +412,13 @@ func TestFetchAndStoreImages_PersistsLocalPathNotURL(t *testing.T) {
 		}
 		if strings.HasPrefix(img.Path, "http") {
 			t.Errorf("image %s leaked an upstream URL: %q", img.ID, img.Path)
+		}
+		// CONTRACT: provider name comes from the Manager-stamped Source,
+		// not a URL substring sniff. Both stubs above set it explicitly,
+		// so an "unknown" landing here would mean the scanner regressed
+		// to the legacy URL-based heuristic.
+		if img.Provider != "tmdb" && img.Provider != "fanart" {
+			t.Errorf("image %s has unexpected provider %q (expected tmdb or fanart)", img.ID, img.Provider)
 		}
 		// The pathmap entry must point at a real file on disk, under
 		// the configured imageDir.
