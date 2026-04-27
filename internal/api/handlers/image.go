@@ -477,17 +477,10 @@ func (h *ImageHandler) ServeFile(w http.ResponseWriter, r *http.Request) {
 
 	localPath := h.readPathMapping(imageID)
 	if localPath == "" {
-		// Fallback: try to get the image from DB and check if path is a remote URL
-		img, err := h.images.GetByID(r.Context(), imageID)
-		if err != nil {
-			respondAppError(w, r.Context(), domain.NewNotFound("image"))
-			return
-		}
-		// If path starts with http, redirect to the remote URL
-		if strings.HasPrefix(img.Path, "http") {
-			http.Redirect(w, r, img.Path, http.StatusTemporaryRedirect)
-			return
-		}
+		// No path-mapping entry → no on-disk file. Every image since
+		// the scanner-downloads-artwork commit lives at a local
+		// path; an empty pathmap result means the caller asked for
+		// something that doesn't exist (or never finished writing).
 		respondError(w, r, http.StatusNotFound, "NOT_FOUND", "image file not found")
 		return
 	}

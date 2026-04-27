@@ -312,19 +312,8 @@ func (s *Scanner) processFile(ctx context.Context, lib *db.Library, libRoot, pat
 			return fpErr
 		}
 		if existing.Fingerprint == fp && existing.IsAvailable {
-			// File unchanged. Two side-effects worth running anyway:
-			//
-			// 1. Re-enrich if metadata is missing (e.g. provider API
-			//    key was added after initial scan).
-			// 2. Backfill the show hierarchy for episode rows that
-			//    lack a parent. Required for libraries scanned with
-			//    pre-hierarchy code; without this the user would have
-			//    to delete + recreate the library to see /series.
-			if existing.Type == "episode" && existing.ParentID == "" && lib.ContentType == "shows" {
-				if err := s.backfillShowHierarchy(ctx, lib, libRoot, existing, cache); err != nil {
-					s.logger.Warn("failed to backfill show hierarchy", "item_id", existing.ID, "error", err)
-				}
-			}
+			// File unchanged — re-enrich if metadata is missing
+			// (e.g. provider API key was added after initial scan).
 			s.enrichIfMissing(ctx, existing)
 			return nil
 		}

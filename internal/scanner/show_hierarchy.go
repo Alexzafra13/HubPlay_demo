@@ -90,66 +90,6 @@ func (s *Scanner) ensureSeriesRow(ctx context.Context, lib *db.Library, cache *s
 	return id, nil
 }
 
-// backfillShowHierarchy attaches an existing parent-less episode row
-// to the series + season parents the scanner now expects. The whole
-// flow piggy-backs on the same ParseEpisode + ensure*Row helpers used
-// for fresh inserts; the only extra step is `items.Update` so the
-// existing row picks up the new parent + S/E numbers in place.
-//
-// Why this matters: the user reported `/series` empty after re-scanning
-// a library that had been scanned BEFORE the hierarchy code landed.
-// `processFile` short-circuits to `enrichIfMissing` when the fingerprint
-// matches, never reaching `createItem` where the new logic lives — so
-// legacy rows would stay parent-less forever without this backfill.
-//
-// Safe to call repeatedly: ParseEpisode is pure, ensure*Row consult
-// the cache before inserting, and Update is a no-op when the row is
-// already correct.
-func (s *Scanner) backfillShowHierarchy(ctx context.Context, lib *db.Library, libRoot string, item *db.Item, cache *showCache) error {
-	match := ParseEpisode(libRoot, item.Path)
-	if !match.OK {
-		// Path doesn't fit the standard layout; we'd rather leave the
-		// row visible (with no parent) than guess wrong.
-		return nil
-	}
-	seriesID, err := s.ensureSeriesRow(ctx, lib, cache, match.SeriesName)
-	if err != nil {
-		return fmt.Errorf("ensure series: %w", err)
-	}
-	seasonID, err := s.ensureSeasonRow(ctx, lib, cache, seriesID, match.SeasonNumber)
-	if err != nil {
-		return fmt.Errorf("ensure season: %w", err)
-	}
-
-	sn := match.SeasonNumber
-	en := match.EpisodeNumber
-	item.SeasonNumber = &sn
-	item.EpisodeNumber = &en
-	if match.EpisodeTitle != "" && item.Title == "" {
-		// Don't overwrite a title the matcher / TMDb pass already set;
-		// only fill in the parsed title when nothing better is present.
-		item.Title = match.EpisodeTitle
-		item.SortTitle = strings.ToLower(match.EpisodeTitle)
-	}
-	item.UpdatedAt = time.Now()
-	// Item.Update doesn't propagate parent_id (re-parenting is rare
-	// elsewhere in the codebase). The dedicated SetParent endpoint is
-	// the only path that does — call it BEFORE the regular Update so
-	// a partial failure leaves the parent change visible (if Update
-	// fails after, the user still sees the show in /series).
-	if err := s.items.SetParent(ctx, item.ID, seasonID); err != nil {
-		return fmt.Errorf("set parent: %w", err)
-	}
-	item.ParentID = seasonID
-	if err := s.items.Update(ctx, item); err != nil {
-		return fmt.Errorf("update episode row: %w", err)
-	}
-	s.logger.Info("backfilled show hierarchy",
-		"item_id", item.ID, "series", match.SeriesName,
-		"season", match.SeasonNumber, "episode", match.EpisodeNumber)
-	return nil
-}
-
 // ensureSeasonRow does the same for a season under a given series.
 // Title defaults to "Season N" — the metadata pass can override it
 // later if the matcher has a friendlier name from TMDb.

@@ -242,39 +242,6 @@ func (r *ItemRepository) Update(ctx context.Context, item *Item) error {
 	return nil
 }
 
-// SetParent assigns / re-assigns the `parent_id` of an existing row.
-// `Update` deliberately doesn't include parent_id (re-parenting an
-// item is rare and risky enough to require an explicit method). The
-// scanner's show-hierarchy backfill is the one place that needs it:
-// legacy episode rows scanned before the hierarchy code landed had
-// `parent_id = ""`; the backfill walks each one and points it at its
-// freshly-created season row.
-//
-// Empty `parentID` clears the link (back to root). Zero rows
-// affected returns `domain.ErrNotFound` so the caller can distinguish
-// "didn't run" from "ran with no effect".
-func (r *ItemRepository) SetParent(ctx context.Context, id, parentID string) error {
-	var nullable sql.NullString
-	if parentID != "" {
-		nullable = sql.NullString{String: parentID, Valid: true}
-	}
-	res, err := r.db.ExecContext(ctx,
-		`UPDATE items SET parent_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-		nullable, id,
-	)
-	if err != nil {
-		return fmt.Errorf("set parent: %w", err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("set parent rows: %w", err)
-	}
-	if n == 0 {
-		return fmt.Errorf("item %s: %w", id, domain.ErrNotFound)
-	}
-	return nil
-}
-
 func (r *ItemRepository) Delete(ctx context.Context, id string) error {
 	n, err := r.q.DeleteItem(ctx, id)
 	if err != nil {
