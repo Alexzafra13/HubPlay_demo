@@ -131,11 +131,22 @@ func (s *Scanner) ScanLibrary(ctx context.Context, lib *db.Library) (*ScanResult
 	})
 
 	// Collect all existing paths for this library to detect removals.
-	// Uses paginated iteration to avoid loading everything into memory at once.
+	// Same pass populates the show-hierarchy cache (series + season
+	// rows that already exist) so the scan doesn't re-create them
+	// for each episode it walks.
 	existingPaths := make(map[string]bool)
+	cache := newShowCache()
 	if err := s.iterateLibraryItems(ctx, lib.ID, func(item *db.Item) {
 		if item.Path != "" {
 			existingPaths[item.Path] = true
+		}
+		switch item.Type {
+		case "series":
+			cache.rememberSeries(item.Title, item.ID)
+		case "season":
+			if item.ParentID != "" && item.SeasonNumber != nil {
+				cache.rememberSeason(item.ParentID, *item.SeasonNumber, item.ID)
+			}
 		}
 	}); err != nil {
 		return nil, fmt.Errorf("listing existing items: %w", err)
@@ -144,7 +155,7 @@ func (s *Scanner) ScanLibrary(ctx context.Context, lib *db.Library) (*ScanResult
 	// Walk each library path
 	seenPaths := make(map[string]bool)
 	for _, libPath := range lib.Paths {
-		if err := s.walkPath(ctx, lib, libPath, seenPaths, result); err != nil {
+		if err := s.walkPath(ctx, lib, libPath, seenPaths, cache, result); err != nil {
 			s.logger.Error("error walking path", "path", libPath, "error", err)
 			result.Errors++
 		}
@@ -222,7 +233,7 @@ func (s *Scanner) iterateLibraryItems(ctx context.Context, libraryID string, fn 
 	return nil
 }
 
-func (s *Scanner) walkPath(ctx context.Context, lib *db.Library, root string, seenPaths map[string]bool, result *ScanResult) error {
+func (s *Scanner) walkPath(ctx context.Context, lib *db.Library, root string, seenPaths map[string]bool, cache *showCache, result *ScanResult) error {
 	// Resolve the root to a real absolute path for symlink boundary checks.
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
@@ -262,7 +273,7 @@ func (s *Scanner) walkPath(ctx context.Context, lib *db.Library, root string, se
 
 		seenPaths[path] = true
 
-		if err := s.processFile(ctx, lib, path, result); err != nil {
+		if err := s.processFile(ctx, lib, root, path, cache, result); err != nil {
 			s.logger.Warn("error processing file", "path", path, "error", err)
 			result.Errors++
 		}
@@ -291,7 +302,7 @@ func (s *Scanner) RefreshMetadata(ctx context.Context, lib *db.Library) error {
 	return nil
 }
 
-func (s *Scanner) processFile(ctx context.Context, lib *db.Library, path string, result *ScanResult) error {
+func (s *Scanner) processFile(ctx context.Context, lib *db.Library, libRoot, path string, cache *showCache, result *ScanResult) error {
 	// Check if item already exists
 	existing, err := s.items.GetByPath(ctx, path)
 	if err == nil {
@@ -311,10 +322,10 @@ func (s *Scanner) processFile(ctx context.Context, lib *db.Library, path string,
 	}
 
 	// New file — probe and create
-	return s.createItem(ctx, lib, path, result)
+	return s.createItem(ctx, lib, libRoot, path, cache, result)
 }
 
-func (s *Scanner) createItem(ctx context.Context, lib *db.Library, path string, result *ScanResult) error {
+func (s *Scanner) createItem(ctx context.Context, lib *db.Library, libRoot, path string, cache *showCache, result *ScanResult) error {
 	probeResult, err := s.prober.Probe(ctx, path)
 	if err != nil {
 		return fmt.Errorf("probing %q: %w", path, err)
@@ -328,13 +339,54 @@ func (s *Scanner) createItem(ctx context.Context, lib *db.Library, path string, 
 	now := time.Now()
 	title := titleFromPath(path)
 	itemID := uuid.NewString()
+	itemType := itemTypeFromLibrary(lib.ContentType)
+
+	// For shows libraries, build the series → season → episode
+	// hierarchy. Each episode points at its season via parent_id;
+	// the series_id link is implicit (episode → season.parent_id →
+	// series). The series + season rows are created lazily on first
+	// encounter and cached for the rest of the scan.
+	var (
+		parentID      string
+		seasonNumber  *int
+		episodeNumber *int
+	)
+	if itemType == "episode" {
+		match := ParseEpisode(libRoot, path)
+		if match.OK {
+			sID, err := s.ensureSeriesRow(ctx, lib, cache, match.SeriesName)
+			if err != nil {
+				s.logger.Warn("failed to ensure series row", "series", match.SeriesName, "error", err)
+			} else {
+				seasonID, err := s.ensureSeasonRow(ctx, lib, cache, sID, match.SeasonNumber)
+				if err != nil {
+					s.logger.Warn("failed to ensure season row", "series", match.SeriesName, "season", match.SeasonNumber, "error", err)
+				} else {
+					parentID = seasonID
+					sn := match.SeasonNumber
+					en := match.EpisodeNumber
+					seasonNumber = &sn
+					episodeNumber = &en
+					if match.EpisodeTitle != "" {
+						title = match.EpisodeTitle
+					}
+				}
+			}
+		}
+		// `match.OK == false` (flat layout): the episode lands as a
+		// type=episode row with no parent. Deliberate — better to
+		// keep the file visible somewhere than drop it on the floor.
+	}
 
 	item := &db.Item{
 		ID:            itemID,
 		LibraryID:     lib.ID,
-		Type:          itemTypeFromLibrary(lib.ContentType),
+		ParentID:      parentID,
+		Type:          itemType,
 		Title:         title,
 		SortTitle:     strings.ToLower(title),
+		SeasonNumber:  seasonNumber,
+		EpisodeNumber: episodeNumber,
 		Path:          path,
 		Size:          probeResult.Format.Size,
 		DurationTicks: probe.DurationTicks(probeResult.Format.Duration),
