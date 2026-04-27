@@ -38,6 +38,7 @@ type ImageRefresherImagesRepo interface {
 	ListByItem(ctx context.Context, itemID string) ([]*db.Image, error)
 	Create(ctx context.Context, img *db.Image) error
 	SetPrimary(ctx context.Context, itemID, imgType, imageID string) error
+	HasLockedForKind(ctx context.Context, itemID, kind string) (bool, error)
 }
 
 // ImageRefresherProvider wraps the single provider call used by the refresher.
@@ -136,12 +137,22 @@ func (r *ImageRefresher) refreshForItem(ctx context.Context, item *db.Item) int 
 	}
 
 	// Pick the highest-scored candidate for each missing kind.
+	// Skip kinds the user has locked: a manual choice (uploaded
+	// custom poster, picked a specific candidate) survives every
+	// refresh until the admin explicitly unlocks. Without this guard
+	// the next scheduled refresh silently clobbers curation work.
 	bestByType := make(map[string]provider.ImageResult)
 	for _, img := range results {
 		if !imaging.IsValidKind(img.Type) {
 			continue
 		}
 		if existingTypes[img.Type] {
+			continue
+		}
+		if locked, err := r.images.HasLockedForKind(ctx, item.ID, img.Type); err != nil {
+			r.logger.Warn("refresh: lock check failed", "item_id", item.ID, "kind", img.Type, "error", err)
+			continue
+		} else if locked {
 			continue
 		}
 		if cur, ok := bestByType[img.Type]; !ok || img.Score > cur.Score {

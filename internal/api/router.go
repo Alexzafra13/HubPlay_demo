@@ -362,6 +362,7 @@ func NewRouter(deps Dependencies) http.Handler {
 					r.Put("/{type}/select", imgHandler.Select)
 					r.Post("/{type}/upload", imgHandler.Upload)
 					r.Put("/{imageId}/primary", imgHandler.SetPrimary)
+					r.Put("/{imageId}/lock", imgHandler.SetLocked)
 					r.Delete("/{imageId}", imgHandler.Delete)
 				})
 

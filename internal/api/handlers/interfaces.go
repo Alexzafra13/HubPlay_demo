@@ -157,6 +157,7 @@ type ImageRepository interface {
 	ListByItem(ctx context.Context, itemID string) ([]*db.Image, error)
 	Create(ctx context.Context, img *db.Image) error
 	SetPrimary(ctx context.Context, itemID, imgType, imageID string) error
+	SetLocked(ctx context.Context, imageID string, locked bool) error
 	GetByID(ctx context.Context, id string) (*db.Image, error)
 	DeleteByID(ctx context.Context, id string) error
 }

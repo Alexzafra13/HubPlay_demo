@@ -344,6 +344,7 @@ func imageResponse(img *db.Image) map[string]any {
 		"type":       img.Type,
 		"path":       img.Path,
 		"is_primary": img.IsPrimary,
+		"is_locked":  img.IsLocked,
 	}
 	if img.Width > 0 {
 		resp["width"] = img.Width

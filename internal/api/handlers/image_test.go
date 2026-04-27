@@ -105,6 +105,28 @@ func (r *fakeImageRepo) DeleteByID(_ context.Context, id string) error {
 	return nil
 }
 
+func (r *fakeImageRepo) SetLocked(_ context.Context, id string, locked bool) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	img, ok := r.images[id]
+	if !ok {
+		return domain.NewNotFound("image")
+	}
+	img.IsLocked = locked
+	return nil
+}
+
+func (r *fakeImageRepo) HasLockedForKind(_ context.Context, itemID, kind string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, img := range r.images {
+		if img.ItemID == itemID && img.Type == kind && img.IsLocked {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 type fakeExternalIDRepo struct {
 	byItem map[string][]*db.ExternalID
 }

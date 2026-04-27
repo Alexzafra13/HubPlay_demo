@@ -88,6 +88,19 @@ func (f *fakeImagesRepo) SetPrimary(_ context.Context, itemID, imgType, imageID 
 	return nil
 }
 
+func (f *fakeImagesRepo) HasLockedForKind(_ context.Context, itemID, kind string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, list := range f.byItem {
+		for _, img := range list {
+			if img.ItemID == itemID && img.Type == kind && img.IsLocked {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
 type fakeProvider struct {
 	fn func(ctx context.Context, ids map[string]string, itemType provider.ItemType) ([]provider.ImageResult, error)
 }
@@ -205,6 +218,50 @@ func TestImageRefresher_AddsMissingKinds(t *testing.T) {
 	entries, _ := os.ReadDir(filepath.Join(imageDir, "it-1"))
 	if len(entries) != 2 {
 		t.Errorf("files on disk: %d", len(entries))
+	}
+}
+
+func TestImageRefresher_SkipsLockedKinds(t *testing.T) {
+	// The whole point of a lock: the refresher must NOT replace the
+	// admin's curated artwork even when a higher-scoring candidate is
+	// available. Locks are per-kind, so a locked primary still
+	// allows backdrop refreshes to run normally on the same item.
+	r, items, ext, images, providers, _ := newTestRefresher(t)
+	items.items = []*db.Item{{ID: "it-1", Type: "movie"}}
+	ext.byItem["it-1"] = []*db.ExternalID{{Provider: "tmdb", ExternalID: "42"}}
+	// Locked primary already in the library — must be untouched.
+	// Also seed an UNLOCKED placeholder for backdrop kind to verify
+	// the lock check is per-kind, not per-item: backdrop has no
+	// lock, so the refresher must still attempt it.
+	images.byItem["it-1"] = []*db.Image{
+		{ID: "manual-poster", ItemID: "it-1", Type: "primary", IsLocked: true},
+	}
+
+	srv := imageServer(t, testJPEG(t))
+	providers.fn = func(_ context.Context, _ map[string]string, _ provider.ItemType) ([]provider.ImageResult, error) {
+		return []provider.ImageResult{
+			// High-score primary candidate — ignored due to lock.
+			{URL: srv.URL + "/primary.jpg", Type: "primary", Score: 0.99, Width: 40, Height: 40},
+			// Backdrop has no existing image and no lock → must land.
+			{URL: srv.URL + "/backdrop.jpg", Type: "backdrop", Score: 0.5, Width: 40, Height: 40},
+		}, nil
+	}
+	count, err := r.RefreshForLibrary(context.Background(), "lib-1")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("count: got %d want 1 (backdrop only — locked primary skipped)", count)
+	}
+	// The locked primary must still be the only primary on the item.
+	primaries := 0
+	for _, img := range images.byItem["it-1"] {
+		if img.Type == "primary" {
+			primaries++
+		}
+	}
+	if primaries != 1 {
+		t.Errorf("locked primary should not be supplanted: %d primaries on item", primaries)
 	}
 }
 

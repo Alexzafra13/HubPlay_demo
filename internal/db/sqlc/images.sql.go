@@ -13,8 +13,8 @@ import (
 
 const createImage = `-- name: CreateImage :exec
 
-INSERT INTO images (id, item_id, type, path, width, height, blurhash, provider, is_primary, added_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO images (id, item_id, type, path, width, height, blurhash, provider, is_primary, is_locked, added_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateImageParams struct {
@@ -27,12 +27,14 @@ type CreateImageParams struct {
 	Blurhash  sql.NullString `json:"blurhash"`
 	Provider  sql.NullString `json:"provider"`
 	IsPrimary sql.NullBool   `json:"is_primary"`
+	IsLocked  sql.NullBool   `json:"is_locked"`
 	AddedAt   time.Time      `json:"added_at"`
 }
 
 // Image assets (poster, backdrop, thumb, logo, banner) per item.
 //
-// Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE images).
+// Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE images)
+// + migration 013_image_lock.sql (is_locked column).
 // NOTE: GetPrimaryURLs uses dynamic IN() and remains raw SQL in the adapter.
 func (q *Queries) CreateImage(ctx context.Context, arg CreateImageParams) error {
 	_, err := q.db.ExecContext(ctx, createImage,
@@ -45,6 +47,7 @@ func (q *Queries) CreateImage(ctx context.Context, arg CreateImageParams) error 
 		arg.Blurhash,
 		arg.Provider,
 		arg.IsPrimary,
+		arg.IsLocked,
 		arg.AddedAt,
 	)
 	return err
@@ -71,7 +74,7 @@ func (q *Queries) DeleteImagesByItem(ctx context.Context, itemID string) error {
 const getImageByID = `-- name: GetImageByID :one
 SELECT id, item_id, type, path, COALESCE(width, 0) AS width, COALESCE(height, 0) AS height,
        COALESCE(blurhash, '') AS blurhash, COALESCE(provider, '') AS provider,
-       is_primary, added_at
+       is_primary, is_locked, added_at
 FROM images
 WHERE id = ?
 `
@@ -86,6 +89,7 @@ type GetImageByIDRow struct {
 	Blurhash  string       `json:"blurhash"`
 	Provider  string       `json:"provider"`
 	IsPrimary sql.NullBool `json:"is_primary"`
+	IsLocked  sql.NullBool `json:"is_locked"`
 	AddedAt   time.Time    `json:"added_at"`
 }
 
@@ -102,6 +106,7 @@ func (q *Queries) GetImageByID(ctx context.Context, id string) (GetImageByIDRow,
 		&i.Blurhash,
 		&i.Provider,
 		&i.IsPrimary,
+		&i.IsLocked,
 		&i.AddedAt,
 	)
 	return i, err
@@ -110,7 +115,7 @@ func (q *Queries) GetImageByID(ctx context.Context, id string) (GetImageByIDRow,
 const getPrimaryImage = `-- name: GetPrimaryImage :one
 SELECT id, item_id, type, path, COALESCE(width, 0) AS width, COALESCE(height, 0) AS height,
        COALESCE(blurhash, '') AS blurhash, COALESCE(provider, '') AS provider,
-       is_primary, added_at
+       is_primary, is_locked, added_at
 FROM images
 WHERE item_id = ? AND type = ? AND is_primary = 1
 `
@@ -130,6 +135,7 @@ type GetPrimaryImageRow struct {
 	Blurhash  string       `json:"blurhash"`
 	Provider  string       `json:"provider"`
 	IsPrimary sql.NullBool `json:"is_primary"`
+	IsLocked  sql.NullBool `json:"is_locked"`
 	AddedAt   time.Time    `json:"added_at"`
 }
 
@@ -146,15 +152,33 @@ func (q *Queries) GetPrimaryImage(ctx context.Context, arg GetPrimaryImageParams
 		&i.Blurhash,
 		&i.Provider,
 		&i.IsPrimary,
+		&i.IsLocked,
 		&i.AddedAt,
 	)
 	return i, err
 }
 
+const hasLockedImageForKind = `-- name: HasLockedImageForKind :one
+SELECT COUNT(*) > 0 AS has_lock FROM images
+WHERE item_id = ? AND type = ? AND is_locked = 1
+`
+
+type HasLockedImageForKindParams struct {
+	ItemID string `json:"item_id"`
+	Type   string `json:"type"`
+}
+
+func (q *Queries) HasLockedImageForKind(ctx context.Context, arg HasLockedImageForKindParams) (bool, error) {
+	row := q.db.QueryRowContext(ctx, hasLockedImageForKind, arg.ItemID, arg.Type)
+	var hasLock bool
+	err := row.Scan(&hasLock)
+	return hasLock, err
+}
+
 const listImagesByItem = `-- name: ListImagesByItem :many
 SELECT id, item_id, type, path, COALESCE(width, 0) AS width, COALESCE(height, 0) AS height,
        COALESCE(blurhash, '') AS blurhash, COALESCE(provider, '') AS provider,
-       is_primary, added_at
+       is_primary, is_locked, added_at
 FROM images
 WHERE item_id = ?
 ORDER BY is_primary DESC, type
@@ -170,6 +194,7 @@ type ListImagesByItemRow struct {
 	Blurhash  string       `json:"blurhash"`
 	Provider  string       `json:"provider"`
 	IsPrimary sql.NullBool `json:"is_primary"`
+	IsLocked  sql.NullBool `json:"is_locked"`
 	AddedAt   time.Time    `json:"added_at"`
 }
 
@@ -192,6 +217,7 @@ func (q *Queries) ListImagesByItem(ctx context.Context, itemID string) ([]ListIm
 			&i.Blurhash,
 			&i.Provider,
 			&i.IsPrimary,
+			&i.IsLocked,
 			&i.AddedAt,
 		); err != nil {
 			return nil, err
@@ -205,6 +231,20 @@ func (q *Queries) ListImagesByItem(ctx context.Context, itemID string) ([]ListIm
 		return nil, err
 	}
 	return items, nil
+}
+
+const setImageLocked = `-- name: SetImageLocked :exec
+UPDATE images SET is_locked = ? WHERE id = ?
+`
+
+type SetImageLockedParams struct {
+	IsLocked sql.NullBool `json:"is_locked"`
+	ID       string       `json:"id"`
+}
+
+func (q *Queries) SetImageLocked(ctx context.Context, arg SetImageLockedParams) error {
+	_, err := q.db.ExecContext(ctx, setImageLocked, arg.IsLocked, arg.ID)
+	return err
 }
 
 const setImagePrimary = `-- name: SetImagePrimary :exec
