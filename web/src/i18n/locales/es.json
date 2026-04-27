@@ -239,10 +239,42 @@
   "admin": {
     "title": "Administracion",
     "tabs": {
+      "dashboard": "Inicio",
       "libraries": "Bibliotecas",
       "providers": "Proveedores",
       "users": "Usuarios",
       "system": "Sistema"
+    },
+    "dashboard": {
+      "title": "Inicio",
+      "uptimeLabel": "Activo desde hace",
+      "viewSystemDetails": "Ver detalles del sistema →",
+      "nowPlaying": "Reproduciendo ahora",
+      "nowPlayingComingSoon": "Próximamente: sesiones en vivo",
+      "nowPlayingComingSoonHint": "Aquí verás cada reproducción activa — usuario, contenido, dispositivo, bitrate — con un botón para cortar la sesión.",
+      "inventory": "Inventario",
+      "inventoryEmpty": "Aún no hay bibliotecas",
+      "inventoryEmptyHint": "Añade tu primera biblioteca para empezar a escanear películas, series o TV en vivo.",
+      "inventoryTotal": "Items totales",
+      "inventoryLibrariesCaption": "en {{count, number}} bibliotecas",
+      "quickActions": "Acciones rápidas",
+      "actionGoToLibraries": "Gestionar bibliotecas",
+      "actionGoToAdvanced": "Herramientas avanzadas",
+      "unreachable": "No se pudo cargar el panel"
+    },
+    "activity": {
+      "sessions": "Sesiones activas",
+      "sessionsComingSoon": "Próximamente: panel de sesiones",
+      "sessionsComingSoonHint": "Lista en tiempo real de quién está conectado y qué reproduce.",
+      "tasks": "Tareas programadas",
+      "tasksComingSoon": "Próximamente: panel de tareas",
+      "tasksComingSoonHint": "Vista unificada de cada job programado (refresh M3U, EPG, escaneo de bibliotecas) con run-now y último ejecutado.",
+      "logs": "Logs del servidor",
+      "logsComingSoon": "Próximamente: visor de logs",
+      "logsComingSoonHint": "Lee las últimas líneas del log del servidor sin salir del panel admin."
+    },
+    "advanced": {
+      "warning": "Las acciones de esta sección afectan a todos los usuarios. Procede con cuidado."
     },
     "libraries": {
       "title": "Bibliotecas de medios",
@@ -313,6 +345,12 @@
       "failedToLoad": "Error al cargar los usuarios"
     },
     "system": {
+      "tabs": {
+        "status": "Estado",
+        "activity": "Actividad",
+        "advanced": "Avanzado",
+        "aria": "Sub-secciones del sistema"
+      },
       "title": "Vista general del sistema",
       "updated": "Actualizado {{time}}",
       "unreachable": "Inalcanzable",
@@ -351,6 +389,20 @@
       "sectionStreaming": "Streaming",
       "sectionRuntime": "Runtime",
       "sectionStorage": "Almacenamiento",
+      "sectionLibraries": "Bibliotecas",
+      "bindAddress": "Dirección de escucha",
+      "baseURL": "URL pública",
+      "baseURLEmpty": "Sin configurar (define server.base_url en hubplay.yaml).",
+      "serverTime": "Hora del servidor",
+      "timezone": "Zona horaria",
+      "hwAccelDisabledLabel": "Deshabilitada",
+      "hwAccelDisabledHint": "Activa hardware_acceleration.enabled en hubplay.yaml para detectar aceleradores.",
+      "hwAccelNoneHint": "No se detectó acelerador hardware — cae a libx264.",
+      "totalLibraries": "Total de bibliotecas",
+      "totalItems": "{{count, number}} items en total",
+      "libraryBucketHint": "{{count, number}} bibliotecas",
+      "cacheEmptyImages": "{{path}} — se llena al escanear bibliotecas.",
+      "cacheEmptyTranscodes": "{{path}} — se llena la primera vez que algo se transcodifica.",
       "refreshing": "Actualizando…",
       "refresh": "Actualizar ahora"
     },

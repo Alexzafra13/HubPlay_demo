@@ -1,7 +1,12 @@
 import { NavLink, Outlet } from "react-router";
 import { useTranslation } from 'react-i18next';
 
+// Top-level admin tabs. "Dashboard" goes first because it's the landing —
+// the at-a-glance overview that mirrors what Plex puts under Status.
+// Existing per-domain tabs (Libraries / Providers / Users) keep their
+// order; System stays last because it's the deepest-detail tab.
 const tabs = [
+  { key: "admin.tabs.dashboard", to: "/admin/dashboard" },
   { key: "admin.tabs.libraries", to: "/admin/libraries" },
   { key: "admin.tabs.providers", to: "/admin/providers" },
   { key: "admin.tabs.users", to: "/admin/users" },

@@ -239,10 +239,42 @@
   "admin": {
     "title": "Administration",
     "tabs": {
+      "dashboard": "Dashboard",
       "libraries": "Libraries",
       "providers": "Providers",
       "users": "Users",
       "system": "System"
+    },
+    "dashboard": {
+      "title": "Dashboard",
+      "uptimeLabel": "Uptime",
+      "viewSystemDetails": "View system details →",
+      "nowPlaying": "Now playing",
+      "nowPlayingComingSoon": "Live sessions coming soon",
+      "nowPlayingComingSoonHint": "This panel will list every active stream — user, content, device, bandwidth — with a button to stop a session.",
+      "inventory": "Inventory",
+      "inventoryEmpty": "No libraries yet",
+      "inventoryEmptyHint": "Add your first library to start scanning movies, series or live TV.",
+      "inventoryTotal": "Total items",
+      "inventoryLibrariesCaption": "across {{count, number}} libraries",
+      "quickActions": "Quick actions",
+      "actionGoToLibraries": "Manage libraries",
+      "actionGoToAdvanced": "Advanced tools",
+      "unreachable": "Unable to load dashboard"
+    },
+    "activity": {
+      "sessions": "Active sessions",
+      "sessionsComingSoon": "Sessions panel coming soon",
+      "sessionsComingSoonHint": "Real-time list of every viewer connected to the server.",
+      "tasks": "Scheduled tasks",
+      "tasksComingSoon": "Tasks panel coming soon",
+      "tasksComingSoonHint": "Unified view of every cron job (M3U refresh, EPG, library scans) with run-now and last-run timestamps.",
+      "logs": "Server logs",
+      "logsComingSoon": "Logs viewer coming soon",
+      "logsComingSoonHint": "Tail the last server log lines without leaving the admin."
+    },
+    "advanced": {
+      "warning": "Actions in this section affect every user. Proceed with care."
     },
     "libraries": {
       "title": "Media Libraries",
@@ -313,6 +345,12 @@
       "failedToLoad": "Failed to load users"
     },
     "system": {
+      "tabs": {
+        "status": "Status",
+        "activity": "Activity",
+        "advanced": "Advanced",
+        "aria": "System sub-sections"
+      },
       "title": "System Overview",
       "updated": "Updated {{time}}",
       "unreachable": "Unreachable",
@@ -351,6 +389,20 @@
       "sectionStreaming": "Streaming",
       "sectionRuntime": "Runtime",
       "sectionStorage": "Storage",
+      "sectionLibraries": "Libraries",
+      "bindAddress": "Listen address",
+      "baseURL": "Public URL",
+      "baseURLEmpty": "Not configured (set server.base_url in hubplay.yaml).",
+      "serverTime": "Server time",
+      "timezone": "Timezone",
+      "hwAccelDisabledLabel": "Disabled",
+      "hwAccelDisabledHint": "Enable hardware_acceleration.enabled in hubplay.yaml to detect accelerators.",
+      "hwAccelNoneHint": "No hardware accelerator detected — falling back to libx264.",
+      "totalLibraries": "Total libraries",
+      "totalItems": "{{count, number}} items in total",
+      "libraryBucketHint": "{{count, number}} libraries",
+      "cacheEmptyImages": "{{path}} — fills as you scan libraries.",
+      "cacheEmptyTranscodes": "{{path}} — fills the first time something transcodes.",
       "refreshing": "Refreshing…",
       "refresh": "Refresh now"
     },
