@@ -191,6 +191,54 @@ escaneada.**
 
 ---
 
+## Commit `33c9f9c` — i18n del player + sort dropdown
+
+**Necesitas cambiar el idioma a `es` (selector de la app o
+`localStorage.setItem("hubplay_lang","es")` + reload).**
+
+### Player en español
+- [ ] Reproduce algo. En el bottom bar:
+  - [ ] Hover el icono de audio → label "Audio" (igual en ambos
+    idiomas, sin sorpresa).
+  - [ ] Hover el icono de subtítulos → label **"Subtitulos"**, opción
+    "Off" se llama **"Ninguno"**.
+  - [ ] Hover el icono de calidad (si hay >1 nivel) → label
+    **"Calidad"**, "Auto" igual.
+- [ ] Inspecciona `aria-label` del botón Play/Pause central →
+  "Reproducir" / "Pausa" según estado.
+- [ ] `aria-label` del botón fullscreen → "Pantalla completa" /
+  "Salir de pantalla completa".
+- [ ] `aria-label` del botón mute → "Silenciar" / "Activar sonido".
+- [ ] `aria-label` del botón Back (flecha izquierda arriba) →
+  "Atras".
+
+### Sort dropdown en español
+- [ ] En `/movies` o `/series`, abre el dropdown de orden:
+  - [ ] **"Titulo"**, **"Ano"**, **"Anadidos recientemente"**,
+    **"Valoracion"** (en ese orden).
+- [ ] `aria-label` del select → "Ordenar por".
+
+### Player en inglés (regresión)
+- [ ] Cambia a `en`. Confirma que todo lo de arriba pasa a "Audio /
+  Subtitles / Off / Play / Pause / Fullscreen / Exit fullscreen /
+  Mute / Unmute / Back / Title / Year / Recently Added / Rating /
+  Sort by".
+
+---
+
+## Commit `c7120a7` — tests de MediaGrid + ItemDetail
+
+**No tiene UI; lo verifica el suite.**
+
+- [ ] `cd web && pnpm test` → 274/274 verde.
+- [ ] `cd web && pnpm exec tsc --noEmit` → 0 errores.
+
+Si rompes algo en `MediaGrid.tsx` (cambiar virtualización a
+setState-in-effect, p.ej.) los tests fallan. Si rompes el flow de
+favorito o el menú admin/user en `ItemDetail.tsx`, también.
+
+---
+
 ## Smoke tests transversales
 
 ### Backend
