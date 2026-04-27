@@ -19,13 +19,23 @@ FROM user_data ud
 JOIN items i ON i.id = ud.item_id
 WHERE ud.user_id = ? AND ud.completed = 0 AND ud.position_ticks > 0
   AND i.is_available = 1
+  AND NOT (
+    i.duration_ticks > 0
+    AND ud.position_ticks * 100 >= i.duration_ticks * 90
+  )
+  AND NOT (
+    ud.last_played_at < ?
+    AND i.duration_ticks > 0
+    AND ud.position_ticks * 2 < i.duration_ticks
+  )
 ORDER BY ud.last_played_at DESC
 LIMIT ?
 `
 
 type ContinueWatchingParams struct {
-	UserID string `json:"user_id"`
-	Limit  int64  `json:"limit"`
+	UserID             string       `json:"user_id"`
+	AbandonedThreshold sql.NullTime `json:"abandoned_threshold"`
+	Limit              int64        `json:"limit"`
 }
 
 type ContinueWatchingRow struct {
@@ -40,7 +50,7 @@ type ContinueWatchingRow struct {
 }
 
 func (q *Queries) ContinueWatching(ctx context.Context, arg ContinueWatchingParams) ([]ContinueWatchingRow, error) {
-	rows, err := q.db.QueryContext(ctx, continueWatching, arg.UserID, arg.Limit)
+	rows, err := q.db.QueryContext(ctx, continueWatching, arg.UserID, arg.AbandonedThreshold, arg.Limit)
 	if err != nil {
 		return nil, err
 	}

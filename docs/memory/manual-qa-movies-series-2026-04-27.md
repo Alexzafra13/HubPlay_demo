@@ -306,6 +306,62 @@ verificarlo es DB + filesystem, no UI.**
 
 ---
 
+## Commit `6bbbb64` — provider name correcto en DB
+
+- [ ] Lanza un scan que toque imágenes nuevas.
+- [ ] `sqlite3 <db> 'SELECT DISTINCT provider FROM images'`
+- [ ] Esperado: solo `tmdb`, `fanart` y/o `upload`. **NO** debería
+  aparecer `unknown` salvo que TMDb/Fanart cambien de dominio.
+  Antes podía aparecer si el matcher de URL se quedaba corto.
+
+---
+
+## Commit `e27e60b` — thumbnails se limpian al borrar imagen
+
+- [ ] Sube una imagen manual desde el ImageManager admin.
+- [ ] Pide variantes en el navegador:
+  ```
+  /api/v1/images/file/<id>?w=300
+  /api/v1/images/file/<id>?w=600
+  ```
+- [ ] Comprueba que existen en `<imageDir>/.thumbnails/<id>_w300.jpg`
+  y `<id>_w600.jpg`.
+- [ ] DELETE `/api/v1/items/<itemId>/images/<id>` (vía UI admin
+  "borrar imagen").
+- [ ] Comprueba que **TODOS** los thumbnails de ese `<id>` han
+  desaparecido. Otras thumbnails (otras imágenes, otros widths) no
+  deben verse afectadas.
+
+---
+
+## Commit `(B-5.2)` — Continue Watching filtra abandoned + near-complete
+
+**Visible en `/` (Home).**
+
+- [ ] Reproduce una película hasta el ~95% y para. Vuelve a Home →
+  **NO** debería aparecer en Continue Watching (el query la
+  considera "near-complete" — el usuario casi seguro la terminó).
+  Antes, aparecía indefinidamente hasta marcarla manualmente.
+- [ ] Reproduce otra peli a un 20% y vuelve un mes después (o
+  fuerza la fecha de `last_played_at` en DB para simular):
+  ```bash
+  sqlite3 <db> "UPDATE user_data SET last_played_at = datetime('now', '-45 days') WHERE item_id = '<id>'"
+  ```
+  Recarga `/` → la peli abandonada **debe desaparecer** del rail.
+- [ ] Reproduce una peli al 65 % y "déjala" 45 días → **debe seguir
+  apareciendo** (>50 %, esfuerzo invertido reconocido).
+- [ ] Items con duración desconocida (`duration_ticks = 0`) se
+  mantienen siempre — no podemos razonar sobre progreso sin
+  duración, así que se preferimos surfacearlos a hacerlos
+  desaparecer.
+
+**Cambio de rail esperado en una librería real**: el Continue Watching
+de un usuario activo cae de ~30 entradas zombi a ~3-5 reales. Si no
+notas diferencia, probablemente es porque tu DB de prueba no tiene
+suficiente historial — tira `MarkPlayed` de cosas viejas o reinicia.
+
+---
+
 ## Smoke tests transversales
 
 ### Backend

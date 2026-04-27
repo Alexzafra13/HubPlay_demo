@@ -170,6 +170,127 @@ func TestUserData_ContinueWatching(t *testing.T) {
 	}
 }
 
+// ContinueWatching's filtered shape — near-complete and abandoned
+// items are dropped instead of polluting the rail.
+
+func TestUserData_ContinueWatching_DropsNearComplete(t *testing.T) {
+	repo, _ := setupUserDataTest(t)
+	ctx := context.Background()
+
+	// movie-1 duration = 72e9. Position 65e9 ≈ 90.3 %, must be
+	// classified as "effectively done" and excluded from the rail
+	// even though `completed = 0`.
+	now := time.Now()
+	if err := repo.Upsert(ctx, &db.UserData{
+		UserID: "user-1", ItemID: "movie-1",
+		PositionTicks: 65_000_000_000, Completed: false,
+		LastPlayedAt: &now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// movie-2 duration = 54e9. Position 27e9 = 50 %, recent play —
+	// the canonical "in progress, came back yesterday" case.
+	if err := repo.Upsert(ctx, &db.UserData{
+		UserID: "user-1", ItemID: "movie-2",
+		PositionTicks: 27_000_000_000, Completed: false,
+		LastPlayedAt: &now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	items, err := repo.ContinueWatching(ctx, "user-1", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item (only movie-2 — movie-1 is near-complete), got %d", len(items))
+	}
+	if items[0].ItemID != "movie-2" {
+		t.Errorf("item = %s, want movie-2", items[0].ItemID)
+	}
+}
+
+func TestUserData_ContinueWatching_DropsAbandoned(t *testing.T) {
+	repo, _ := setupUserDataTest(t)
+	ctx := context.Background()
+
+	now := time.Now()
+	old := now.Add(-45 * 24 * time.Hour) // > AbandonedAfter (30d)
+
+	// Old play, <50 % progress: abandoned. movie-1 duration 72e9,
+	// position 10e9 ≈ 13 %, last played 45 days ago. Drop.
+	if err := repo.Upsert(ctx, &db.UserData{
+		UserID: "user-1", ItemID: "movie-1",
+		PositionTicks: 10_000_000_000, Completed: false,
+		LastPlayedAt: &old, UpdatedAt: old,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Old play, >50 % progress: NOT abandoned — the user invested
+	// real time, the rail keeps it. movie-2 duration 54e9, position
+	// 35e9 ≈ 65 %, also 45 days old.
+	if err := repo.Upsert(ctx, &db.UserData{
+		UserID: "user-1", ItemID: "movie-2",
+		PositionTicks: 35_000_000_000, Completed: false,
+		LastPlayedAt: &old, UpdatedAt: old,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	items, err := repo.ContinueWatching(ctx, "user-1", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item (movie-2 — movie-1 abandoned at 13%%), got %d", len(items))
+	}
+	if items[0].ItemID != "movie-2" {
+		t.Errorf("item = %s, want movie-2", items[0].ItemID)
+	}
+}
+
+func TestUserData_ContinueWatching_KeepsItemsWithUnknownDuration(t *testing.T) {
+	// duration_ticks = 0 means "we couldn't probe this file" — both
+	// the near-complete and abandoned filters require a known duration
+	// to reason about progress. Without one, the rail surfaces the
+	// item rather than silently swallow it: better to nag the user
+	// than vanish content.
+	repo, items := setupUserDataTest(t)
+	ctx := context.Background()
+	now := time.Now()
+	old := now.Add(-90 * 24 * time.Hour) // way past AbandonedAfter
+
+	// Patch movie-2 to have unknown duration. Item.Update doesn't
+	// exist as a public surface, so we go through the repository's
+	// existing patch path: a fresh row with duration_ticks=0.
+	if err := items.Update(ctx, &db.Item{
+		ID: "movie-2", LibraryID: "lib-ud", Type: "movie", Title: "Movie 2",
+		SortTitle: "movie 2", DurationTicks: 0, Container: "mkv",
+		AddedAt: now, UpdatedAt: now, IsAvailable: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Even with old timestamp + tiny position, the item must remain
+	// because the filters bail out when duration is unknown.
+	if err := repo.Upsert(ctx, &db.UserData{
+		UserID: "user-1", ItemID: "movie-2",
+		PositionTicks: 1_000_000, Completed: false,
+		LastPlayedAt: &old, UpdatedAt: old,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := repo.ContinueWatching(ctx, "user-1", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].ItemID != "movie-2" {
+		t.Errorf("unknown-duration item should survive both filters, got %+v", rows)
+	}
+}
+
 func TestUserData_Delete(t *testing.T) {
 	repo, _ := setupUserDataTest(t)
 	ctx := context.Background()

@@ -166,14 +166,37 @@ func (r *UserDataRepository) SetFavorite(ctx context.Context, userID, itemID str
 	return nil
 }
 
-// ContinueWatching returns items that the user started but hasn't completed, ordered by last played.
+// AbandonedAfter is the inactivity window past which a partly-watched
+// item drops out of "Continue Watching" (when the user got less than
+// halfway in). 30 days is the rule of thumb Plex/Jellyfin both lean
+// toward; exposed as a package-level var so a future config option or
+// per-user setting can override without churning every call site.
+var AbandonedAfter = 30 * 24 * time.Hour
+
+// ContinueWatching returns items the user started but hasn't completed,
+// ordered by last played. Drops two classes of noise the naive query
+// keeps:
+//
+//   - Near-complete (>=90 % watched). The user almost certainly
+//     finished and never explicitly marked played; surfacing it as
+//     "in progress" is wrong by both Plex/Jellyfin convention and by
+//     reality.
+//   - Abandoned (last play older than AbandonedAfter AND <50 %
+//     watched). The user moved on; the rail should not keep nagging
+//     about the same start-of-S1E1 forever.
+//
+// Items with unknown duration (`duration_ticks = 0`) are kept — we
+// can't reason about progress without it, so leaving them visible is
+// the safe default.
 func (r *UserDataRepository) ContinueWatching(ctx context.Context, userID string, limit int) ([]*ContinueWatchingItem, error) {
 	if limit <= 0 {
 		limit = 20
 	}
+	abandonedThreshold := time.Now().Add(-AbandonedAfter)
 	rows, err := r.q.ContinueWatching(ctx, sqlc.ContinueWatchingParams{
-		UserID: userID,
-		Limit:  int64(limit),
+		UserID:             userID,
+		AbandonedThreshold: sql.NullTime{Time: abandonedThreshold, Valid: true},
+		Limit:              int64(limit),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("continue watching: %w", err)
