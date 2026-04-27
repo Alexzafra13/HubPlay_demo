@@ -24,10 +24,14 @@ type TMDbProvider struct {
 	lang   string // ISO 639-1 language code
 }
 
-// NewTMDbProvider creates a new TMDb provider.
+// NewTMDbProvider creates a new TMDb provider with caching + backoff
+// wired into its HTTP transport. Every TMDb response is keyed by URL
+// and cached for 7 days; 429s and 5xxs are retried with backoff that
+// honours `Retry-After`. Tests can still swap `client` for an
+// httptest.Server client to bypass the cache.
 func NewTMDbProvider() *TMDbProvider {
 	return &TMDbProvider{
-		client: &http.Client{Timeout: 15 * time.Second},
+		client: newCachingClient(15*time.Second, 7*24*time.Hour),
 		lang:   "en-US",
 	}
 }

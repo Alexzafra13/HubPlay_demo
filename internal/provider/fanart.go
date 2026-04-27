@@ -19,10 +19,14 @@ type FanartProvider struct {
 	client    *http.Client
 }
 
-// NewFanartProvider creates a new Fanart.tv provider.
+// NewFanartProvider creates a new Fanart.tv provider with caching +
+// backoff wired into its HTTP transport. See NewTMDbProvider for the
+// rationale; the Fanart contract is the same (free tier rate-limited,
+// data rarely changes per item, scans hit the same IDs over and over
+// across re-runs).
 func NewFanartProvider() *FanartProvider {
 	return &FanartProvider{
-		client: &http.Client{Timeout: 15 * time.Second},
+		client: newCachingClient(15*time.Second, 7*24*time.Hour),
 	}
 }
 
