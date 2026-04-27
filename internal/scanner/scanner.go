@@ -17,6 +17,8 @@ import (
 
 	"hubplay/internal/db"
 	"hubplay/internal/event"
+	"hubplay/internal/imaging"
+	"hubplay/internal/imaging/pathmap"
 	"hubplay/internal/probe"
 	"hubplay/internal/provider"
 
@@ -39,16 +41,35 @@ func IsMediaFile(path string) bool {
 	return mediaExtensions[ext]
 }
 
+// providerFetcher is the slice of provider.Manager the scanner actually
+// uses. Defined as an interface so a test can swap it out without
+// constructing a full Manager + provider registration cycle (the same
+// pattern ImageRefresher uses for ImageRefresherProvider).
+type providerFetcher interface {
+	SearchMetadata(ctx context.Context, query provider.SearchQuery) ([]provider.SearchResult, error)
+	FetchMetadata(ctx context.Context, externalID string, itemType provider.ItemType) (*provider.MetadataResult, error)
+	FetchImages(ctx context.Context, ids map[string]string, itemType provider.ItemType) ([]provider.ImageResult, error)
+}
+
 // Scanner walks library paths and creates/updates items in the database.
+//
+// `imageDir` and `pathmap` are optional; when both are wired the scanner
+// downloads provider artwork to local storage during enrichment instead
+// of persisting remote URLs. When either is nil (e.g. older test
+// environments) image enrichment is skipped silently — never persists
+// remote URLs that would leak the user's IP to TMDb on every poster
+// view.
 type Scanner struct {
 	items       *db.ItemRepository
 	streams     *db.MediaStreamRepository
 	metadata    *db.MetadataRepository
 	externalIDs *db.ExternalIDRepository
 	images      *db.ImageRepository
-	providers   *provider.Manager
+	providers   providerFetcher
 	prober      probe.Prober
 	bus         *event.Bus
+	imageDir    string
+	pathmap     *pathmap.Store
 	logger      *slog.Logger
 }
 
@@ -61,17 +82,28 @@ func New(
 	providers *provider.Manager,
 	prober probe.Prober,
 	bus *event.Bus,
+	imageDir string,
+	pm *pathmap.Store,
 	logger *slog.Logger,
 ) *Scanner {
+	// `providers` is typed as the concrete *provider.Manager in the
+	// public API to keep the wiring in main.go obvious; internally we
+	// store it under a small interface so tests can fake it.
+	var pf providerFetcher
+	if providers != nil {
+		pf = providers
+	}
 	return &Scanner{
 		items:       items,
 		streams:     streams,
 		metadata:    metadata,
 		externalIDs: externalIDs,
 		images:      images,
-		providers:   providers,
+		providers:   pf,
 		prober:      prober,
 		bus:         bus,
+		imageDir:    imageDir,
+		pathmap:     pm,
 		logger:      logger.With("module", "scanner"),
 	}
 }
@@ -529,59 +561,105 @@ func (s *Scanner) enrichMetadata(ctx context.Context, item *db.Item) {
 		}
 	}
 
-	// Fetch and store images
-	if len(meta.ExternalIDs) > 0 {
-		images, err := s.providers.FetchImages(ctx, meta.ExternalIDs, itemType)
-		if err != nil {
-			s.logger.Debug("TMDB image fetch failed", "id", item.ID, "error", err)
-			return
-		}
-
-		stored := map[string]bool{}
-		for _, img := range images {
-			// Store first of each key image type
-			switch img.Type {
-			case "primary", "backdrop", "logo":
-				if stored[img.Type] {
-					continue
-				}
-			default:
-				continue // skip other types for now
-			}
-
-			dbImg := &db.Image{
-				ID:        uuid.NewString(),
-				ItemID:    item.ID,
-				Type:      img.Type,
-				Path:      img.URL,
-				Width:     img.Width,
-				Height:    img.Height,
-				Provider:  img.Type, // will be overwritten below
-				IsPrimary: !stored[img.Type],
-				AddedAt:   time.Now(),
-			}
-			// Detect provider from URL
-			switch {
-			case strings.Contains(img.URL, "fanart.tv"):
-				dbImg.Provider = "fanart"
-			case strings.Contains(img.URL, "tmdb.org"):
-				dbImg.Provider = "tmdb"
-			default:
-				dbImg.Provider = "unknown"
-			}
-			if err := s.images.Create(ctx, dbImg); err != nil {
-				s.logger.Warn("failed to store image", "id", item.ID, "type", img.Type, "error", err)
-				continue
-			}
-
-			stored[img.Type] = true
-			if stored["primary"] && stored["backdrop"] && stored["logo"] {
-				break
-			}
-		}
+	// Fetch and store images. The scanner downloads each candidate to
+	// local storage and records `/api/v1/images/file/{id}` as the
+	// path — never the upstream URL. Persisting remote URLs would
+	// leak the user's IP/User-Agent to TMDb on every poster view and
+	// break the library the day TMDb is unreachable.
+	//
+	// imageDir + pathmap are optional dependencies: tests that don't
+	// exercise the artwork pipeline can construct a Scanner without
+	// them, and image enrichment is skipped silently rather than
+	// falling back to URL persistence.
+	if len(meta.ExternalIDs) > 0 && s.imageDir != "" && s.pathmap != nil {
+		s.fetchAndStoreImages(ctx, item.ID, meta.ExternalIDs, itemType)
 	}
 
 	s.logger.Info("enriched metadata", "title", item.Title, "tmdb_id", best.ExternalID, "year", item.Year)
+}
+
+// fetchAndStoreImages picks the highest-scored candidate for each kind
+// (primary, backdrop, logo) the providers return, downloads it via
+// imaging.IngestRemoteImage (SSRF + size + blurhash + atomic write),
+// and persists a db.Image row pointing at the local file.
+//
+// Errors per image are logged and skipped — losing one poster is
+// strictly better than failing the whole scan. The first stored image
+// of each kind becomes that kind's primary; subsequent items of the
+// same kind in the same call are dropped.
+func (s *Scanner) fetchAndStoreImages(ctx context.Context, itemID string, externalIDs map[string]string, itemType provider.ItemType) {
+	results, err := s.providers.FetchImages(ctx, externalIDs, itemType)
+	if err != nil {
+		s.logger.Debug("provider image fetch failed", "id", itemID, "error", err)
+		return
+	}
+	if len(results) == 0 {
+		return
+	}
+
+	// Pick the best-scored candidate per kind so the scanner doesn't
+	// settle for whatever happened to come first in the merged
+	// provider response. Mirrors the selection logic ImageRefresher
+	// already uses for manual refreshes — same input shape, same
+	// ranking, so re-runs are stable.
+	bestByKind := make(map[string]provider.ImageResult)
+	for _, img := range results {
+		switch img.Type {
+		case "primary", "backdrop", "logo":
+		default:
+			continue
+		}
+		if cur, ok := bestByKind[img.Type]; !ok || img.Score > cur.Score {
+			bestByKind[img.Type] = img
+		}
+	}
+
+	dir := filepath.Join(s.imageDir, itemID)
+	for kind, best := range bestByKind {
+		ing, err := imaging.IngestRemoteImage(dir, kind, best.URL, s.logger)
+		if err != nil {
+			s.logger.Warn("scanner: image ingest failed", "id", itemID, "kind", kind, "error", err)
+			continue
+		}
+
+		imgID := uuid.NewString()
+		dbImg := &db.Image{
+			ID:        imgID,
+			ItemID:    itemID,
+			Type:      kind,
+			Path:      "/api/v1/images/file/" + imgID,
+			Width:     best.Width,
+			Height:    best.Height,
+			Blurhash:  ing.Blurhash,
+			Provider:  providerFromURL(best.URL),
+			IsPrimary: true,
+			AddedAt:   time.Now(),
+		}
+		if err := s.images.Create(ctx, dbImg); err != nil {
+			s.logger.Warn("scanner: failed to store image row", "id", itemID, "kind", kind, "error", err)
+			_ = os.Remove(ing.LocalPath)
+			continue
+		}
+		if err := s.pathmap.Write(imgID, ing.LocalPath); err != nil {
+			s.logger.Warn("scanner: pathmap write failed", "id", imgID, "error", err)
+		}
+	}
+}
+
+// providerFromURL maps the host of a fetched image URL onto the
+// provider name we record in the DB. The provider package doesn't
+// publish this on ImageResult yet, so we sniff from the URL — the
+// substring match is conservative (only exact known hosts; everything
+// else lands as "unknown" which the admin UI surfaces as "external").
+func providerFromURL(url string) string {
+	switch {
+	case strings.Contains(url, "fanart.tv"):
+		return "fanart"
+	case strings.Contains(url, "tmdb.org"):
+		return "tmdb"
+	default:
+		return "unknown"
+	}
 }
 
 // itemTypeFromLibrary maps library content types to item types.

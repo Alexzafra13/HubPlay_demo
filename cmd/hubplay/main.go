@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"hubplay/internal/config"
 	"hubplay/internal/db"
 	"hubplay/internal/event"
+	"hubplay/internal/imaging/pathmap"
 	"hubplay/internal/library"
 	"hubplay/internal/logging"
 	"hubplay/internal/iptv"
@@ -126,7 +128,15 @@ func run(configPath string) error {
 	_ = providerManager.Register(ctx, provider.NewFanartProvider())
 	_ = providerManager.Register(ctx, provider.NewOpenSubtitlesProvider())
 
-	scnr := scanner.New(repos.Items, repos.MediaStreams, repos.Metadata, repos.ExternalIDs, repos.Images, providerManager, prober, eventBus, logger)
+	// Image storage shared with the HTTP image handler/refresher: the
+	// scanner downloads every poster/backdrop here so re-scans and
+	// admin refreshes write to the same root. Path-mapping is plain
+	// filesystem state, so it's safe to instantiate independent
+	// `pathmap.Store`s pointing at the same directory.
+	imageDir := filepath.Join(filepath.Dir(cfg.Database.Path), "images")
+	scannerPathmap := pathmap.New(imageDir)
+
+	scnr := scanner.New(repos.Items, repos.MediaStreams, repos.Metadata, repos.ExternalIDs, repos.Images, providerManager, prober, eventBus, imageDir, scannerPathmap, logger)
 	libraryService := library.NewService(repos.Libraries, repos.Items, repos.MediaStreams, repos.Images, repos.Channels, scnr, logger)
 
 	// ═══ Phase 4a: Library Scan Scheduler ═══
