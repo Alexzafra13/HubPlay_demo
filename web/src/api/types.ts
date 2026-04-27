@@ -28,7 +28,16 @@ export interface RegisterRequest {
 
 // ─── Libraries ──────────────────────────────────────────────────────────────
 
-export type ContentType = "movies" | "tvshows" | "livetv";
+/**
+ * Library content type. Backend canonicalises any `tvshows` alias
+ * the older clients might send to `shows` at the API boundary, but
+ * everywhere downstream — DB rows, scanner, sort helpers, the
+ * admin filters by content_type — uses the canonical name. Keep
+ * this type aligned with what the server actually stores so any
+ * `lib.content_type === "shows"` comparison works without a
+ * widening cast.
+ */
+export type ContentType = "movies" | "shows" | "livetv";
 
 export type ScanStatus = "idle" | "scanning" | "error";
 

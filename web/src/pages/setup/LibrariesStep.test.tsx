@@ -102,7 +102,7 @@ describe("LibrariesStep", () => {
       target: { value: "My Movies" },
     });
     fireEvent.change(screen.getByLabelText(/Content Type/i), {
-      target: { value: "tvshows" },
+      target: { value: "shows" },
     });
     fireEvent.change(screen.getByLabelText(/Media Path/i), {
       target: { value: "/mnt/shows" },
@@ -112,7 +112,7 @@ describe("LibrariesStep", () => {
     expect(mutateMock).toHaveBeenCalledTimes(1);
     const [payload] = mutateMock.mock.calls[0];
     expect(payload).toEqual([
-      { name: "My Movies", content_type: "tvshows", paths: ["/mnt/shows"] },
+      { name: "My Movies", content_type: "shows", paths: ["/mnt/shows"] },
     ]);
   });
 

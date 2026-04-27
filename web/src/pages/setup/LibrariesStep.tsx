@@ -21,7 +21,7 @@ interface LibrariesStepProps {
 
 const CONTENT_TYPE_KEYS = [
   { value: "movies", key: "movies" },
-  { value: "tvshows", key: "tvShows" },
+  { value: "shows", key: "tvShows" },
   { value: "livetv", key: "liveTv" },
 ] as const;
 
