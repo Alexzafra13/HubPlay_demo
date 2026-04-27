@@ -1,8 +1,60 @@
 # Estado del proyecto
 
-> Snapshot: **2026-04-27** (movies/series review senior — 35 commits) · Rama: `claude/review-movies-series-feature-9npZH` · **tests: backend `-race` 100% verde · frontend 289/289 · tsc -b 0**
+> Snapshot: **2026-04-27** (movies/series review senior — 35 commits + admin IA reorg en `main` + responsive admin móvil) · Rama: `claude/review-movies-series-feature-9npZH` · **tests: backend `-race` 100% verde · frontend 289/289 · tsc -b 0**
 >
 > **🎯 Próximo gran hito (post-merge de esta rama)**: app nativa **Kotlin para Android TV**. Toda decisión técnica de aquí en adelante se mide contra "¿facilita o estorba la app TV?".
+
+---
+
+## 🩹 Hot-fix sesión tarde 2026-04-27 — responsive admin
+
+Mientras yo trabajaba en esta rama, otra rama paralela
+(`claude/adoring-taussig-b7e4ed`) hizo merge a `main` con un **rework
+mayor del panel de admin**:
+
+- Reorg IA: nueva pestaña Dashboard (landing), `/admin/system` partido
+  en sub-pestañas `status` / `activity` / `advanced`.
+- `SystemAdmin.tsx` **eliminado**, sustituido por
+  `pages/admin/system/SystemStatus.tsx` con un endpoint nuevo
+  `/admin/system/stats` (richer: bind_address, base_url,
+  ffmpeg.hw_accel_enabled, library inventory, signing-keys UI).
+- `internal/api/handlers/system.go` nuevo (con tests), antiguo
+  `/health` se queda como sonda básica.
+
+**Consecuencia para mi sesión**: dos commits que había hecho hoy
+sobre la rama feature quedaron obsoletos antes de pushear:
+
+- ❌ `9fd47c1 fix(admin): align SystemAdmin with real /health contract` →
+  editaba `SystemAdmin.tsx`, archivo borrado en main. **Descartado**.
+- 🟡 `f870c0a fix(admin): responsive layout for mobile viewports` →
+  parte sobre `LibrariesAdmin.tsx` seguía siendo válida; parte sobre
+  `AdminLayout.tsx` chocaba con la pestaña Dashboard nueva.
+  **Re-aplicado** sobre la versión actual de main.
+
+**Lo que terminó en main como hot-fix móvil** (1 commit):
+
+- Header de Bibliotecas envuelve en pantallas estrechas (el botón
+  "Agregar biblioteca" no se sale del viewport).
+- Filas de biblioteca apilan info → acciones en móvil; los 3-5
+  botones (Escanear / Actualizar metadatos / Actualizar imágenes /
+  Editar / Eliminar) hacen wrap en lugar de cortarse.
+- Tabs del admin con scroll horizontal contenido vía `-mx-4` +
+  `overflow-x-auto`, así los 5 tabs (Dashboard, Bibliotecas,
+  Proveedores, Usuarios, Sistema) no fuerzan ancho de página.
+
+### Lección registrada (process)
+
+Antes de aplicar fixes en una rama vieja, **siempre `git fetch
+origin main` + `git log origin/main..HEAD`** primero. Hoy escribí
+~150 LOC contra un `SystemAdmin.tsx` que ya no existía. No catastrófico
+porque pausé antes de pushear, pero coste de tiempo evitable.
+
+### Estado del scanner self-healing (`2f963f8`)
+
+Ya está en `origin/main` (es el merge-base). Series sin metadata se
+re-enriquecen en cada scan automáticamente. `enrichMetadata` ahora
+salta `episode`/`season` para no quemar cuota TMDb cuando admin
+toca "Actualizar metadatos" sobre una librería de shows.
 
 ---
 

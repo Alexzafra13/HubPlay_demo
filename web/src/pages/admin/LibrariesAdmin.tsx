@@ -491,12 +491,12 @@ export default function LibrariesAdmin() {
         key={lib.id}
         className="rounded-[--radius-lg] border border-border bg-bg-card overflow-hidden"
       >
-        <div className="flex items-start gap-4 px-4 py-3">
+        <div className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-start sm:gap-4">
           <div className="min-w-0 flex-1">
             <h3 className="font-medium text-text-primary truncate">
               {lib.name}
             </h3>
-            <div className="mt-1 flex items-center gap-2 text-xs text-text-muted min-w-0">
+            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-text-muted min-w-0">
               <span className="shrink-0">
                 <span className="tabular-nums text-text-secondary">
                   {lib.item_count}
@@ -509,7 +509,7 @@ export default function LibrariesAdmin() {
                 <>
                   <span aria-hidden className="h-0.5 w-0.5 rounded-full bg-border shrink-0" />
                   <span
-                    className="font-mono truncate"
+                    className="font-mono truncate max-w-full"
                     title={originTitle(lib)}
                   >
                     {originLabel(lib)}
@@ -526,7 +526,11 @@ export default function LibrariesAdmin() {
               )}
             </div>
           </div>
-          <div className="flex items-center gap-1 shrink-0">
+          {/* Mobile (default): actions wrap onto a new line below the
+              name and break across rows on narrow screens. The vertical
+              separator is hidden on mobile because once buttons wrap, a
+              1px line in the middle of a row reads as visual noise. */}
+          <div className="flex flex-wrap items-center gap-1 sm:shrink-0">
             {lib.content_type === "livetv" ? (
               // ── Live TV row: refresh M3U + refresh EPG ──
               // Filesystem scan and metadata/image refresh don't apply
@@ -669,7 +673,7 @@ export default function LibrariesAdmin() {
                 </Button>
               </>
             )}
-            <span aria-hidden className="mx-1 h-5 w-px bg-border" />
+            <span aria-hidden className="mx-1 hidden h-5 w-px bg-border sm:inline-block" />
             <Button
               variant="ghost"
               size="sm"
@@ -701,12 +705,15 @@ export default function LibrariesAdmin() {
 
   return (
     <div className="flex flex-col gap-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-text-primary">
+      {/* Header — wraps on narrow viewports so the "Add library" button
+          stays visible instead of being pushed off the right edge. */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="min-w-0 flex-1 text-lg font-semibold text-text-primary">
           {t('admin.libraries.title')}
         </h2>
-        <Button onClick={() => setShowAddModal(true)}>{t('admin.libraries.addLibrary')}</Button>
+        <Button className="shrink-0" onClick={() => setShowAddModal(true)}>
+          {t('admin.libraries.addLibrary')}
+        </Button>
       </div>
 
       {/* Refresh images feedback */}
