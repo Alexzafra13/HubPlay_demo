@@ -247,6 +247,134 @@ func TestScanLibrary_EmptyDir(t *testing.T) {
 	}
 }
 
+func TestScanLibrary_ShowsBuildsHierarchy(t *testing.T) {
+	// Reported by user: a Series library accepted creation but the
+	// /series page stayed empty because the scanner only created
+	// rows of type=episode — never the parent series + season rows.
+	// This test pins the hierarchy: one series row per series dir,
+	// one season row per season dir, episodes link via parent_id.
+	s, itemRepo, _ := newTestScanner(t)
+
+	// Build a small Plex-style tree:
+	//   <root>/Breaking Bad/Season 01/S01E01.mkv
+	//   <root>/Breaking Bad/Season 01/S01E02.mkv
+	//   <root>/Breaking Bad/Season 02/S02E01.mkv
+	//   <root>/The Office/Season 03/S03E05.mkv
+	root := t.TempDir()
+	for _, p := range []string{
+		"Breaking Bad/Season 01/Breaking.Bad.S01E01.Pilot.mkv",
+		"Breaking Bad/Season 01/Breaking.Bad.S01E02.Cat.mkv",
+		"Breaking Bad/Season 02/Breaking.Bad.S02E01.Seven.mkv",
+		"The Office/Season 03/The.Office.S03E05.Initiation.mkv",
+	} {
+		full := filepath.Join(root, p)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		createFile(t, full, "x")
+	}
+
+	lib := &db.Library{
+		ID: "lib-test", Name: "Test", ContentType: "shows",
+		Paths: []string{root},
+	}
+	r, err := s.ScanLibrary(context.Background(), lib)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	// `result.Added` counts processed FILES (not all DB rows), so 4
+	// — the parent series + season rows are infrastructure created
+	// transparently as a side-effect of episode ingestion.
+	if r.Added != 4 {
+		t.Errorf("added (file count): got %d want 4 episodes", r.Added)
+	}
+
+	// Series rows: one per top-level dir.
+	series, _, _ := itemRepo.List(context.Background(), db.ItemFilter{
+		LibraryID: "lib-test", Type: "series", Limit: 100,
+	})
+	titles := make(map[string]bool, len(series))
+	for _, sr := range series {
+		titles[sr.Title] = true
+	}
+	for _, want := range []string{"Breaking Bad", "The Office"} {
+		if !titles[want] {
+			t.Errorf("missing series row %q (got %v)", want, titles)
+		}
+	}
+
+	// Season rows: each scoped to its series via parent_id.
+	for _, sr := range series {
+		seasons, _, _ := itemRepo.List(context.Background(), db.ItemFilter{
+			LibraryID: "lib-test", Type: "season", ParentID: sr.ID, Limit: 10,
+		})
+		if sr.Title == "Breaking Bad" && len(seasons) != 2 {
+			t.Errorf("Breaking Bad seasons: got %d want 2", len(seasons))
+		}
+		if sr.Title == "The Office" && len(seasons) != 1 {
+			t.Errorf("The Office seasons: got %d want 1", len(seasons))
+		}
+	}
+
+	// Episodes carry season + episode numbers AND link to a season
+	// via parent_id (the bug being fixed: previously parent_id was
+	// always empty for shows).
+	episodes, _, _ := itemRepo.List(context.Background(), db.ItemFilter{
+		LibraryID: "lib-test", Type: "episode", Limit: 100,
+	})
+	if len(episodes) != 4 {
+		t.Fatalf("episodes: got %d want 4", len(episodes))
+	}
+	for _, ep := range episodes {
+		if ep.ParentID == "" {
+			t.Errorf("episode %q has empty parent_id (must point to season)", ep.Title)
+		}
+		if ep.SeasonNumber == nil || ep.EpisodeNumber == nil {
+			t.Errorf("episode %q missing S/E numbers: season=%v episode=%v",
+				ep.Title, ep.SeasonNumber, ep.EpisodeNumber)
+		}
+	}
+}
+
+func TestScanLibrary_ShowsRescanIsIdempotent(t *testing.T) {
+	// Re-scanning the same shows tree must NOT create duplicate
+	// series / season rows. The cache pre-populates from the DB on
+	// the second scan, so the ensure*Row helpers find existing rows
+	// and return their ids instead of inserting.
+	s, itemRepo, _ := newTestScanner(t)
+	root := t.TempDir()
+	full := filepath.Join(root, "Breaking Bad", "Season 01", "S01E01.mkv")
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	createFile(t, full, "x")
+
+	lib := &db.Library{
+		ID: "lib-test", Name: "Test", ContentType: "shows",
+		Paths: []string{root},
+	}
+	if _, err := s.ScanLibrary(context.Background(), lib); err != nil {
+		t.Fatal(err)
+	}
+
+	// Second scan with no changes: must add 0 rows.
+	r2, err := s.ScanLibrary(context.Background(), lib)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r2.Added != 0 {
+		t.Errorf("re-scan should be idempotent, added %d rows", r2.Added)
+	}
+
+	// Sanity: still exactly 1 series + 1 season + 1 episode.
+	series, _, _ := itemRepo.List(context.Background(), db.ItemFilter{
+		LibraryID: "lib-test", Type: "series", Limit: 10,
+	})
+	if len(series) != 1 {
+		t.Errorf("series count after rescan: got %d want 1", len(series))
+	}
+}
+
 func TestScanLibrary_Idempotent(t *testing.T) {
 	s, _, _ := newTestScanner(t)
 
