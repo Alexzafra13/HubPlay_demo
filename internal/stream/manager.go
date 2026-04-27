@@ -45,6 +45,11 @@ type Manager struct {
 	stopClean  chan struct{}
 	metrics    MetricsSink
 	bus        *event.Bus // optional; nil-safe
+	// hwAccel is the snapshot of accelerator detection done at startup.
+	// Cached here so the admin /system/stats endpoint can read it without
+	// re-running ffmpeg on every poll. Zero value means "no detection
+	// performed" (HWAccel.Enabled = false in config).
+	hwAccel HWAccelResult
 }
 
 // ManagedSession wraps a transcoding session with access tracking.
@@ -75,8 +80,9 @@ func NewManager(
 	// configured "force software" deployment.
 	hwAccel := HWAccelNone
 	encoder := "libx264"
+	hwResult := HWAccelResult{Selected: HWAccelNone, Encoder: "libx264"}
 	if cfg.HWAccel.Enabled {
-		hwResult := DetectHWAccel(cfg.HWAccel.Preferred, logger)
+		hwResult = DetectHWAccel(cfg.HWAccel.Preferred, logger)
 		hwAccel = hwResult.Selected
 		encoder = hwResult.Encoder
 	}
@@ -90,6 +96,7 @@ func NewManager(
 		logger:     logger.With("module", "stream-manager"),
 		stopClean:  make(chan struct{}),
 		metrics:    noopSink{},
+		hwAccel:    hwResult,
 	}
 
 	go m.cleanupLoop()
@@ -278,6 +285,25 @@ func (m *Manager) ActiveSessions() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return len(m.sessions)
+}
+
+// MaxTranscodeSessions returns the configured concurrent transcode cap (0
+// means unlimited). Read by admin endpoints to render "X of Y in use".
+func (m *Manager) MaxTranscodeSessions() int {
+	return m.cfg.MaxTranscodeSessions
+}
+
+// HWAccelInfo returns the accelerator snapshot computed at construction.
+// Zero-value when HW acceleration is disabled in config.
+func (m *Manager) HWAccelInfo() HWAccelResult {
+	return m.hwAccel
+}
+
+// CacheDir returns the resolved transcode cache directory. Useful for the
+// admin storage panel — same value the manager passes to the transcoder so
+// the operator sees what's actually in use, not a stale config value.
+func (m *Manager) CacheDir() string {
+	return m.cfg.EffectiveCacheDir()
 }
 
 // Shutdown stops all sessions and the cleanup loop.
