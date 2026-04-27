@@ -239,6 +239,73 @@ favorito o el menú admin/user en `ItemDetail.tsx`, también.
 
 ---
 
+## Commit `06bde24` — scanner descarga imágenes al disco
+
+**El fix arquitectónico más relevante de la rama. La forma de
+verificarlo es DB + filesystem, no UI.**
+
+### Pre-condición
+- Setup limpio (DB nueva, sin imágenes previas) o al menos una
+  librería nueva con TMDb configurado y al menos una película que
+  el matcher reconozca.
+- Identifica el directorio donde HubPlay guarda imágenes:
+  `<dirname-del-database>/images`. Por defecto: `~/.hubplay/images`
+  o donde apunte `database.path` en `hubplay.yaml`.
+
+### Comportamiento esperado tras el scan
+- [ ] Lanza un scan completo (admin → Bibliotecas → Escanear).
+- [ ] Inspecciona la tabla `images` en SQLite:
+  ```bash
+  sqlite3 <ruta-db> 'SELECT id, type, path, provider, blurhash IS NOT NULL FROM images LIMIT 10'
+  ```
+  - **`path`** debe ser de la forma `/api/v1/images/file/<uuid>`,
+    **NUNCA** una URL `https://image.tmdb.org/...` o `https://assets.fanart.tv/...`.
+  - **`provider`** debe ser `tmdb` o `fanart` (no `unknown` salvo
+    proveedor nuevo no reconocido).
+  - **`blurhash`** debe estar presente para JPEG/PNG (TMDb posters);
+    puede estar vacío para WebP (logos de Fanart) — eso es deuda P1
+    documentada, no este commit.
+- [ ] Inspecciona `<imageDir>/`:
+  ```bash
+  ls -la <imageDir>/
+  ```
+  - Hay subdirectorio `<itemID>/` por cada item con imágenes.
+  - Dentro de cada uno, ficheros con la forma
+    `primary_<16hex>.jpg`, `backdrop_<16hex>.jpg`, `logo_<16hex>.png`.
+  - Hay subdirectorio `.mappings/` con un fichero por imagen
+    (UUID = nombre, contenido = path local absoluto).
+  - **NO** debe quedar ningún fichero `.tmp` (síntoma de write
+    no atómico interrumpido).
+
+### Comportamiento del navegador
+- [ ] Abre `/movies` con DevTools → Network → Img.
+- [ ] Cada poster cargado debe ser un GET a `/api/v1/images/file/<uuid>`
+  desde el mismo origen (HubPlay), **NO** un 307 redirect a
+  `image.tmdb.org`.
+- [ ] Tira la conectividad externa (modo avión, o `iptables -A
+  OUTPUT -d image.tmdb.org -j DROP` si te animas) y recarga
+  `/movies`. **Los posters siguen cargando** (vienen de disco).
+  Antes de este commit, todos romperían.
+
+### Atomicidad de uploads
+- [ ] Sube una imagen manual desde el ImageManager admin.
+- [ ] Mientras está en vuelo, mata el server (`kill -9` al PID).
+- [ ] Re-arranca y comprueba que **no** queda un `.tmp` en
+  `<imageDir>/<itemID>/` ni un fichero corrupto.
+
+### Refresh manual
+- [ ] POST `/api/v1/libraries/<id>/images/refresh` (50 items por
+  llamada). Comprueba que sigue funcionando idéntico que antes —
+  el refresher ahora va a través del mismo helper que el scanner.
+
+### Tests automáticos
+- [ ] `go test -race ./...` → verde.
+- [ ] En particular `TestFetchAndStoreImages_PersistsLocalPathNotURL`
+  es el guard de regresión: si alguien introduce un nuevo path
+  `http://...` en la tabla images, este test falla.
+
+---
+
 ## Smoke tests transversales
 
 ### Backend
