@@ -176,6 +176,9 @@ func (p *fakeProviderManager) FetchImages(ctx context.Context, ids map[string]st
 func (p *fakeProviderManager) SearchSubtitles(_ context.Context, _ provider.SubtitleQuery) ([]provider.SubtitleResult, error) {
 	return nil, nil
 }
+func (p *fakeProviderManager) DownloadSubtitle(_ context.Context, _, _ string) ([]byte, error) {
+	return nil, nil
+}
 
 // ─── Test server wiring ─────────────────────────────────────────────────────
 

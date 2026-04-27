@@ -221,6 +221,7 @@ type ProviderManager interface {
 	FetchMetadata(ctx context.Context, externalID string, itemType provider.ItemType) (*provider.MetadataResult, error)
 	FetchImages(ctx context.Context, externalIDs map[string]string, itemType provider.ItemType) ([]provider.ImageResult, error)
 	SearchSubtitles(ctx context.Context, query provider.SubtitleQuery) ([]provider.SubtitleResult, error)
+	DownloadSubtitle(ctx context.Context, sourceName, fileID string) ([]byte, error)
 }
 
 // ProviderRepository defines provider config data access.

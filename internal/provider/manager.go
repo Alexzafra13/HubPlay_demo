@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -185,6 +186,32 @@ func (m *Manager) FetchImages(ctx context.Context, externalIDs map[string]string
 
 	return allImages, nil
 }
+
+// DownloadSubtitle locates the named provider and downloads the
+// subtitle bytes for the given file ID. The bytes returned are in
+// whatever format the provider serves (typically SRT, sometimes ASS) —
+// callers that need WebVTT for the browser should pipe through
+// `stream.ConvertSubtitleToVTT`.
+//
+// Returns ErrUnknownProvider when `sourceName` doesn't match a
+// registered subtitle provider, so the HTTP layer can map to a 404
+// instead of an opaque 500.
+func (m *Manager) DownloadSubtitle(ctx context.Context, sourceName, fileID string) ([]byte, error) {
+	m.mu.RLock()
+	providers := m.subtitles
+	m.mu.RUnlock()
+	for _, p := range providers {
+		if p.Name() != sourceName {
+			continue
+		}
+		return p.Download(ctx, fileID)
+	}
+	return nil, fmt.Errorf("%w: %s", ErrUnknownProvider, sourceName)
+}
+
+// ErrUnknownProvider is returned by Download* when the requested
+// source isn't a registered provider.
+var ErrUnknownProvider = errors.New("unknown provider")
 
 // SearchSubtitles queries all subtitle providers.
 func (m *Manager) SearchSubtitles(ctx context.Context, query SubtitleQuery) ([]SubtitleResult, error) {

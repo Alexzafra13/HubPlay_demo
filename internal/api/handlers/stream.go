@@ -14,6 +14,7 @@ import (
 
 	"hubplay/internal/auth"
 	"hubplay/internal/domain"
+	"hubplay/internal/provider"
 	"hubplay/internal/stream"
 
 	"github.com/go-chi/chi/v5"
@@ -24,27 +25,38 @@ var validSegmentName = regexp.MustCompile(`^(segment\d{5}\.ts|stream\.m3u8)$`)
 
 // StreamHandler serves media streams via HLS or direct play.
 type StreamHandler struct {
-	manager StreamManagerService
-	items   ItemRepository
-	streams MediaStreamRepository
-	baseURL string
-	logger  *slog.Logger
+	manager     StreamManagerService
+	items       ItemRepository
+	streams     MediaStreamRepository
+	externalIDs ExternalIDRepository
+	providers   ProviderManager
+	baseURL     string
+	logger      *slog.Logger
 }
 
 // NewStreamHandler creates a new stream handler.
+//
+// `externalIDs` and `providers` are optional — when nil, the external
+// subtitle endpoints return 503 instead of 500. Older test envs and
+// installs without OpenSubtitles configured keep working without
+// rewiring.
 func NewStreamHandler(
 	manager StreamManagerService,
 	items ItemRepository,
 	streams MediaStreamRepository,
+	externalIDs ExternalIDRepository,
+	providers ProviderManager,
 	baseURL string,
 	logger *slog.Logger,
 ) *StreamHandler {
 	return &StreamHandler{
-		manager: manager,
-		items:   items,
-		streams: streams,
-		baseURL: strings.TrimRight(baseURL, "/"),
-		logger:  logger.With("module", "stream-handler"),
+		manager:     manager,
+		items:       items,
+		streams:     streams,
+		externalIDs: externalIDs,
+		providers:   providers,
+		baseURL:     strings.TrimRight(baseURL, "/"),
+		logger:      logger.With("module", "stream-handler"),
 	}
 }
 
@@ -286,6 +298,136 @@ func (h *StreamHandler) Subtitles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondJSON(w, http.StatusOK, map[string]any{"data": subs})
+}
+
+// SearchExternalSubtitles queries every registered subtitle provider
+// for matches against the given item. Languages can be filtered via
+// the `lang` query param (comma-separated ISO codes, e.g. `en,es`);
+// no filter returns whatever the provider considers default.
+//
+// 503 when providers / external IDs aren't wired, 404 when the item
+// doesn't exist. Returns whatever the providers return — empty list
+// is a valid response (no matches), not an error.
+func (h *StreamHandler) SearchExternalSubtitles(w http.ResponseWriter, r *http.Request) {
+	if h.providers == nil || h.externalIDs == nil {
+		respondError(w, r, http.StatusServiceUnavailable, "PROVIDERS_UNAVAILABLE",
+			"external subtitle providers are not configured")
+		return
+	}
+	itemID := chi.URLParam(r, "itemId")
+
+	item, err := h.items.GetByID(r.Context(), itemID)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+
+	extIDs, err := h.externalIDs.ListByItem(r.Context(), itemID)
+	if err != nil {
+		h.logger.Warn("list external ids", "item_id", itemID, "error", err)
+	}
+	idMap := make(map[string]string, len(extIDs))
+	for _, e := range extIDs {
+		idMap[e.Provider] = e.ExternalID
+	}
+
+	var langs []string
+	if l := r.URL.Query().Get("lang"); l != "" {
+		langs = strings.Split(l, ",")
+	}
+
+	query := provider.SubtitleQuery{
+		Title:       item.Title,
+		Year:        item.Year,
+		ExternalIDs: idMap,
+		Languages:   langs,
+		ItemType:    subtitleItemType(item.Type),
+	}
+	if item.SeasonNumber != nil {
+		query.SeasonNumber = item.SeasonNumber
+	}
+	if item.EpisodeNumber != nil {
+		query.EpisodeNumber = item.EpisodeNumber
+	}
+
+	results, err := h.providers.SearchSubtitles(r.Context(), query)
+	if err != nil {
+		h.logger.Warn("search subtitles", "item_id", itemID, "error", err)
+		respondError(w, r, http.StatusBadGateway, "PROVIDER_ERROR",
+			"subtitle provider lookup failed")
+		return
+	}
+
+	out := make([]map[string]any, len(results))
+	for i, r := range results {
+		out[i] = map[string]any{
+			"source":    r.Source,
+			"file_id":   r.URL, // OpenSubtitles uses the URL slot for fileID
+			"language":  r.Language,
+			"format":    r.Format,
+			"score":     r.Score,
+		}
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"data": out})
+}
+
+// DownloadExternalSubtitle pulls bytes from the named provider, runs
+// them through ffmpeg to coerce the output to WebVTT (the only format
+// every browser's `<track>` reliably handles), and serves the result.
+// The query param `source` selects the provider (`opensubtitles`,
+// `subscene`, …); `file_id` is whatever opaque handle that provider
+// uses — for OpenSubtitles it's the integer file ID returned by the
+// search endpoint above.
+//
+// Currently no on-disk cache: the player picks one external sub per
+// session and the browser caches the VTT after the first hit. Once
+// repeat-hit traffic is observed in the wild, a per-(item, file_id)
+// cache under `<dataDir>/subtitles/` is the obvious next step.
+func (h *StreamHandler) DownloadExternalSubtitle(w http.ResponseWriter, r *http.Request) {
+	if h.providers == nil {
+		respondError(w, r, http.StatusServiceUnavailable, "PROVIDERS_UNAVAILABLE",
+			"external subtitle providers are not configured")
+		return
+	}
+	source := r.URL.Query().Get("source")
+	fileID := chi.URLParam(r, "fileId")
+	if source == "" || fileID == "" {
+		respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST",
+			"source query param and file_id path param are required")
+		return
+	}
+
+	raw, err := h.providers.DownloadSubtitle(r.Context(), source, fileID)
+	if err != nil {
+		h.logger.Warn("download subtitle", "source", source, "file_id", fileID, "error", err)
+		respondError(w, r, http.StatusBadGateway, "PROVIDER_ERROR", "subtitle download failed")
+		return
+	}
+
+	vtt, err := stream.ConvertSubtitleToVTT(r.Context(), raw)
+	if err != nil {
+		h.logger.Warn("convert subtitle", "source", source, "file_id", fileID, "error", err)
+		respondError(w, r, http.StatusBadGateway, "CONVERSION_FAILED", "failed to convert subtitle to vtt")
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/vtt; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800")
+	_, _ = w.Write(vtt)
+}
+
+// subtitleItemType maps the DB-level item type onto the provider-level
+// enum the SubtitleQuery expects. Unknown values fall through to
+// Movie, matching the metadata fetch behaviour upstream.
+func subtitleItemType(t string) provider.ItemType {
+	switch t {
+	case "series", "season":
+		return provider.ItemSeries
+	case "episode":
+		return provider.ItemEpisode
+	default:
+		return provider.ItemMovie
+	}
 }
 
 // SubtitleTrack extracts and serves a subtitle track as WebVTT.

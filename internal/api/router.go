@@ -212,6 +212,7 @@ func NewRouter(deps Dependencies) http.Handler {
 			if deps.StreamManager != nil {
 				streamHandler := handlers.NewStreamHandler(
 					deps.StreamManager, deps.Items, deps.MediaStreams,
+					deps.ExternalIDs, deps.Providers,
 					deps.Config.Server.BaseURL, deps.Logger,
 				)
 
@@ -224,6 +225,12 @@ func NewRouter(deps Dependencies) http.Handler {
 					r.Delete("/session", streamHandler.StopSession)
 					r.Get("/subtitles", streamHandler.Subtitles)
 					r.Get("/subtitles/{trackIndex}", streamHandler.SubtitleTrack)
+					// External subtitle providers (OpenSubtitles, ...).
+					// Search returns candidates; the download endpoint
+					// pipes the SRT/ASS through ffmpeg → WebVTT and
+					// serves it for the player's <track> element.
+					r.Get("/subtitles/external", streamHandler.SearchExternalSubtitles)
+					r.Get("/subtitles/external/{fileId}", streamHandler.DownloadExternalSubtitle)
 				})
 			}
 
