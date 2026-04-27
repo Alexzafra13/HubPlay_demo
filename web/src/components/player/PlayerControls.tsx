@@ -58,6 +58,10 @@ interface PlayerControlsProps {
   onAudioTrackChange: (id: number) => void;
   onSubtitleTrackChange: (id: number) => void;
   onQualityChange?: (id: number) => void;
+  /** Optional: when provided, renders a "search online subs" button
+   *  next to the subtitle selector. The parent owns the modal and
+   *  the resulting `<track>` injection. */
+  onSearchExternalSubs?: () => void;
   onClose: () => void;
   title?: string;
 }
@@ -365,6 +369,7 @@ const PlayerControls: FC<PlayerControlsProps> = ({
   onAudioTrackChange,
   onSubtitleTrackChange,
   onQualityChange,
+  onSearchExternalSubs,
   onClose,
   title,
 }) => {
@@ -464,6 +469,26 @@ const PlayerControls: FC<PlayerControlsProps> = ({
             offLabel={t("playerControls.subtitlesOff")}
             onSelect={onSubtitleTrackChange}
           />
+
+          {/* Search online subtitles. Sibling to the subs selector
+              rather than nested inside it: opening a modal from a
+              hover-revealed dropdown is fragile (the dropdown closes
+              the moment focus moves), so the affordance is a
+              dedicated button. */}
+          {onSearchExternalSubs && (
+            <button
+              type="button"
+              onClick={onSearchExternalSubs}
+              aria-label={t("playerControls.subtitlesExternal")}
+              title={t("playerControls.subtitlesExternal")}
+              className="p-1.5 rounded-[--radius-sm] text-white/80 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+            >
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <circle cx="11" cy="11" r="7" />
+                <path d="M21 21l-4.35-4.35" strokeLinecap="round" />
+              </svg>
+            </button>
+          )}
 
           {/* Quality (HLS levels only — direct play has no ladder) */}
           {qualityLevels.length > 1 && onQualityChange && (

@@ -76,6 +76,7 @@
     "audio": "Audio",
     "subtitles": "Subtitles",
     "subtitlesOff": "Off",
+    "subtitlesExternal": "Search online subtitles",
     "play": "Play",
     "pause": "Pause",
     "back": "Back",
@@ -87,6 +88,13 @@
     "exitFullscreen": "Exit fullscreen",
     "closePlayer": "Close Player",
     "trackFallback": "Track {{n}}"
+  },
+  "externalSubs": {
+    "title": "Online subtitles",
+    "noResults": "No subtitles found",
+    "searchFailed": "Search failed. Try another language.",
+    "providersDisabled": "Subtitle providers are not configured.",
+    "score": "Score {{score}}"
   },
   "sort": {
     "by": "Sort by",

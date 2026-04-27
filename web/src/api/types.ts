@@ -153,6 +153,17 @@ export interface Chapter {
   image_path?: string;
 }
 
+// One candidate from an external subtitle provider (OpenSubtitles
+// today). The `file_id` is opaque — pass it back to the download
+// endpoint along with `source` to fetch the actual VTT.
+export interface ExternalSubtitleResult {
+  source: string;     // "opensubtitles", ...
+  file_id: string;    // opaque handle for the download endpoint
+  language: string;   // ISO 639-1 (en, es, fr, ...)
+  format: string;     // "srt" | "ass" — the source format before conversion
+  score: number;      // provider-specific quality / popularity score
+}
+
 export interface ItemDetail extends MediaItem {
   duration_ticks: number | null;
   media_streams: MediaStream[];

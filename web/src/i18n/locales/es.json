@@ -76,6 +76,7 @@
     "audio": "Audio",
     "subtitles": "Subtitulos",
     "subtitlesOff": "Ninguno",
+    "subtitlesExternal": "Buscar subtitulos online",
     "play": "Reproducir",
     "pause": "Pausa",
     "back": "Atras",
@@ -87,6 +88,13 @@
     "exitFullscreen": "Salir de pantalla completa",
     "closePlayer": "Cerrar reproductor",
     "trackFallback": "Pista {{n}}"
+  },
+  "externalSubs": {
+    "title": "Subtitulos online",
+    "noResults": "No se encontraron subtitulos",
+    "searchFailed": "Busqueda fallida. Prueba otro idioma.",
+    "providersDisabled": "Los proveedores de subtitulos no estan configurados.",
+    "score": "Puntuacion {{score}}"
   },
   "sort": {
     "by": "Ordenar por",

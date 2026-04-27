@@ -30,6 +30,7 @@ import type {
   User,
   UserData,
   ApiErrorBody,
+  ExternalSubtitleResult,
 } from "./types";
 import { ApiError } from "./types";
 
@@ -444,6 +445,26 @@ export class ApiClient {
     playback_methods: string[];
   }> {
     return this.request("GET", `/stream/${itemId}/info`);
+  }
+
+  // ─── External subtitles (OpenSubtitles, …) ────────────────────────────
+  //
+  // The search endpoint returns candidates from every registered subtitle
+  // provider. The download endpoint isn't fronted here because the
+  // browser hits it directly via a `<track>` element — same-origin
+  // cookies carry auth, no need for a JS fetch.
+  async searchExternalSubtitles(itemId: string, langs?: string[]): Promise<ExternalSubtitleResult[]> {
+    const params = langs && langs.length > 0 ? { lang: langs.join(",") } : undefined;
+    return this.request<ExternalSubtitleResult[]>("GET", `/stream/${itemId}/subtitles/external`, { params });
+  }
+
+  /**
+   * Builds the URL for an external subtitle so a `<track>` element can
+   * fetch it directly. No JS fetch — the browser handles auth via
+   * same-origin cookies, which is exactly the auth model this app uses.
+   */
+  externalSubtitleURL(itemId: string, source: string, fileID: string): string {
+    return `${this.baseUrl}/stream/${itemId}/subtitles/external/${encodeURIComponent(fileID)}?source=${encodeURIComponent(source)}`;
   }
 
   // ─── Channels / Live TV ───────────────────────────────────────────────

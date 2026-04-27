@@ -9,6 +9,8 @@ import { usePlayerKeyboard } from "@/hooks/usePlayerKeyboard";
 import { useProgressReporter } from "@/hooks/useProgressReporter";
 import { PlayerControls } from "./PlayerControls";
 import { UpNextOverlay, type UpNextInfo } from "./UpNextOverlay";
+import { ExternalSubsModal } from "./ExternalSubsModal";
+import type { ExternalSubtitleResult } from "@/api/types";
 
 // ─── Props ───────────────────────────────────────────────────────────────────
 
@@ -80,6 +82,13 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
   // onEndedCallback so the parent only sees the auto-advance signal
   // when the user actually consents (or the timer runs out).
   const [upNextActive, setUpNextActive] = useState(false);
+  // External subs picker (OpenSubtitles, ...). Modal is opened from
+  // the PlayerControls subtitle dropdown; the picked result becomes
+  // a sibling `<track>` on the <video> below. Only one external sub
+  // active at a time — picking a new one replaces the previous track
+  // entirely.
+  const [externalSubsModalOpen, setExternalSubsModalOpen] = useState(false);
+  const [activeExternalSub, setActiveExternalSub] = useState<ExternalSubtitleResult | null>(null);
 
   // ─── Hooks ─────────────────────────────────────────────────────────────────
 
@@ -285,6 +294,46 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
     setUpNextActive(false);
   }, []);
 
+  // External subs lifecycle.
+  // - Opening the modal is a single setter; closing too.
+  // - Picking a result: stash it as state so the JSX renders a fresh
+  //   <track>. Suppress any HLS subtitle that might be active so the
+  //   two systems don't race over which cues to show.
+  const handleExternalSubPicked = useCallback(
+    (pick: ExternalSubtitleResult) => {
+      setActiveExternalSub(pick);
+      setExternalSubsModalOpen(false);
+      setSubtitleTrack(-1); // disable any HLS sub
+    },
+    [setSubtitleTrack],
+  );
+
+  // After a new external <track> mounts the browser keeps its mode
+  // at "disabled" by default. We force it to "showing" once it's
+  // actually in the DOM. Keying on the active sub identity guarantees
+  // the effect re-runs when the user picks a different one.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !activeExternalSub) return;
+    // The DOM may not have applied the new <track> on the first
+    // microtask; wait one rAF before flipping the mode.
+    const rafID = window.requestAnimationFrame(() => {
+      const tracks = Array.from(video.textTracks);
+      // The external track is the one whose label starts with
+      // "External:" — set inside the JSX below.
+      const target = tracks.find((t) => t.label.startsWith("External:"));
+      if (target) target.mode = "showing";
+      // Suppress any other text tracks the user didn't ask for so we
+      // don't end up double-rendering cues from an HLS sub.
+      for (const t of tracks) {
+        if (t !== target && t.mode === "showing") {
+          t.mode = "disabled";
+        }
+      }
+    });
+    return () => window.cancelAnimationFrame(rafID);
+  }, [activeExternalSub]);
+
   // ─── Fullscreen change listener ──────────────────────────────────────────
 
   useEffect(() => {
@@ -307,7 +356,13 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
       onMouseLeave={handleMouseLeave}
       onClick={togglePlayPause}
     >
-      {/* Video element */}
+      {/* Video element. External subtitles ride as a child <track>:
+          the browser decodes the WebVTT and renders cues natively, so
+          we don't have to plumb anything through hls.js. The label
+          prefix ("External:") is the discriminator used by the
+          textTracks effect above to enable the right one when a new
+          pick lands. crossOrigin is left unset because the endpoint
+          is same-origin (cookie auth flows automatically). */}
       <video
         ref={videoRef}
         className="absolute inset-0 w-full h-full object-contain"
@@ -317,7 +372,17 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
           e.stopPropagation();
           handleToggleFullscreen();
         }}
-      />
+      >
+        {activeExternalSub && (
+          <track
+            key={`${activeExternalSub.source}:${activeExternalSub.file_id}`}
+            kind="subtitles"
+            srcLang={activeExternalSub.language}
+            label={`External:${activeExternalSub.language}`}
+            src={api.externalSubtitleURL(itemId, activeExternalSub.source, activeExternalSub.file_id)}
+          />
+        )}
+      </video>
 
       {/* Error overlay */}
       {error && (
@@ -375,10 +440,23 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
           onAudioTrackChange={setAudioTrack}
           onSubtitleTrackChange={setSubtitleTrack}
           onQualityChange={setQuality}
+          onSearchExternalSubs={() => setExternalSubsModalOpen(true)}
           onClose={handleClose}
           title={title}
         />
       </div>
+
+      {/* External subs picker. Mounted at the player root so it
+          covers controls but its own click-to-close (via backdrop)
+          doesn't accidentally pause the video. The picked result
+          flows into a sibling <track> on the <video> via state. */}
+      {externalSubsModalOpen && (
+        <ExternalSubsModal
+          itemId={itemId}
+          onSelect={handleExternalSubPicked}
+          onClose={() => setExternalSubsModalOpen(false)}
+        />
+      )}
 
       {/* Up-next overlay — sits above the controls when active so the
           user's first focus target is the auto-advance prompt rather
