@@ -1,5 +1,6 @@
 import { memo } from "react";
 import type { FC } from "react";
+import { useTranslation } from "react-i18next";
 import { TimeDisplay } from "./TimeDisplay";
 
 interface AudioTrack {
@@ -14,6 +15,13 @@ interface SubtitleTrack {
   lang: string;
 }
 
+interface QualityLevel {
+  id: number;
+  height: number;
+  bitrate: number;
+  label: string;
+}
+
 interface PlayerControlsProps {
   isPlaying: boolean;
   currentTime: number;
@@ -24,8 +32,11 @@ interface PlayerControlsProps {
   isFullscreen: boolean;
   audioTracks: AudioTrack[];
   subtitleTracks: SubtitleTrack[];
+  qualityLevels?: QualityLevel[];
   currentAudioTrack: number;
   currentSubtitleTrack: number;
+  /** -1 = auto / ABR. */
+  currentQuality?: number;
   onPlayPause: () => void;
   onSeek: (time: number) => void;
   onVolumeChange: (volume: number) => void;
@@ -33,6 +44,7 @@ interface PlayerControlsProps {
   onToggleFullscreen: () => void;
   onAudioTrackChange: (id: number) => void;
   onSubtitleTrackChange: (id: number) => void;
+  onQualityChange?: (id: number) => void;
   onClose: () => void;
   title?: string;
 }
@@ -135,6 +147,14 @@ function SubtitleIcon() {
   );
 }
 
+function QualityIcon() {
+  return (
+    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-9.46 14.5l-3.04-3.04 1.41-1.41 1.63 1.62 4.13-4.12 1.41 1.41-5.54 5.54z" />
+    </svg>
+  );
+}
+
 // ─── Seek bar ────────────────────────────────────────────────────────────────
 
 const SeekBar: FC<{
@@ -143,6 +163,7 @@ const SeekBar: FC<{
   buffered: number;
   onSeek: (time: number) => void;
 }> = memo(({ currentTime, duration, buffered, onSeek }) => {
+  const { t } = useTranslation();
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
   const bufferedPercent = duration > 0 ? (buffered / duration) * 100 : 0;
 
@@ -156,7 +177,7 @@ const SeekBar: FC<{
         value={currentTime}
         onChange={(e) => onSeek(Number(e.target.value))}
         className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-        aria-label="Seek"
+        aria-label={t("playerControls.seek")}
       />
       {/* Track background */}
       <div className="relative w-full h-1 group-hover/seek:h-1.5 bg-white/20 rounded-full transition-all duration-150">
@@ -192,7 +213,13 @@ const TrackSelector: FC<{
   offLabel?: string;
   onSelect: (id: number) => void;
 }> = ({ icon: Icon, label, tracks, currentTrack, offLabel, onSelect }) => {
+  const { t } = useTranslation();
   if (tracks.length === 0 && !offLabel) return null;
+  // The fallback label used when a track has neither name nor lang.
+  // The locale provides the "Track N" / "Pista N" shape; the index
+  // is interpolated as `n` so each language can word-order it
+  // freely.
+  const trackLabel = (id: number) => t("playerControls.trackFallback", { n: id + 1 });
 
   return (
     <div className="relative group/track">
@@ -231,7 +258,7 @@ const TrackSelector: FC<{
                   : "text-text-primary hover:bg-bg-elevated",
               ].join(" ")}
             >
-              {track.name || track.lang || `Track ${track.id + 1}`}
+              {track.name || track.lang || trackLabel(track.id)}
             </button>
           ))}
         </div>
@@ -248,6 +275,7 @@ const VolumeControl: FC<{
   onVolumeChange: (v: number) => void;
   onToggleMute: () => void;
 }> = ({ volume, isMuted, onVolumeChange, onToggleMute }) => {
+  const { t } = useTranslation();
   const VIcon = isMuted || volume === 0
     ? VolumeMutedIcon
     : volume < 0.5
@@ -259,7 +287,7 @@ const VolumeControl: FC<{
       <button
         onClick={onToggleMute}
         className="p-1.5 rounded-[--radius-sm] text-white/80 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
-        aria-label={isMuted ? "Unmute" : "Mute"}
+        aria-label={isMuted ? t("playerControls.unmute") : t("playerControls.mute")}
       >
         <VIcon />
       </button>
@@ -272,7 +300,7 @@ const VolumeControl: FC<{
           value={isMuted ? 0 : volume}
           onChange={(e) => onVolumeChange(Number(e.target.value))}
           className="w-20 h-1 accent-accent cursor-pointer"
-          aria-label="Volume"
+          aria-label={t("playerControls.volume")}
         />
       </div>
     </div>
@@ -291,8 +319,10 @@ const PlayerControls: FC<PlayerControlsProps> = ({
   isFullscreen,
   audioTracks,
   subtitleTracks,
+  qualityLevels = [],
   currentAudioTrack,
   currentSubtitleTrack,
+  currentQuality = -1,
   onPlayPause,
   onSeek,
   onVolumeChange,
@@ -300,9 +330,19 @@ const PlayerControls: FC<PlayerControlsProps> = ({
   onToggleFullscreen,
   onAudioTrackChange,
   onSubtitleTrackChange,
+  onQualityChange,
   onClose,
   title,
 }) => {
+  const { t } = useTranslation();
+  // Quality picker only earns its place when the player has more
+  // than one rung to choose from. With a single level the dropdown
+  // would be a UI lie ("Auto / 1080p" → both pick the same stream).
+  const qualityTracks = qualityLevels.map((l) => ({
+    id: l.id,
+    name: l.label,
+    lang: "",
+  }));
   return (
     <div className="absolute inset-0 flex flex-col justify-between z-10">
       {/* Gradient overlays for readability */}
@@ -314,7 +354,7 @@ const PlayerControls: FC<PlayerControlsProps> = ({
         <button
           onClick={onClose}
           className="p-2 rounded-full text-white/80 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
-          aria-label="Back"
+          aria-label={t("playerControls.back")}
         >
           <BackIcon />
         </button>
@@ -330,7 +370,7 @@ const PlayerControls: FC<PlayerControlsProps> = ({
         <button
           onClick={onPlayPause}
           className="p-4 rounded-full text-white/90 hover:text-white bg-black/30 hover:bg-black/50 backdrop-blur-sm transition-all duration-200 cursor-pointer"
-          aria-label={isPlaying ? "Pause" : "Play"}
+          aria-label={isPlaying ? t("playerControls.pause") : t("playerControls.play")}
         >
           {isPlaying ? <LargePauseIcon /> : <LargePlayIcon />}
         </button>
@@ -352,7 +392,7 @@ const PlayerControls: FC<PlayerControlsProps> = ({
           <button
             onClick={onPlayPause}
             className="p-1.5 rounded-[--radius-sm] text-white/80 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
-            aria-label={isPlaying ? "Pause" : "Play"}
+            aria-label={isPlaying ? t("playerControls.pause") : t("playerControls.play")}
           >
             {isPlaying ? <PauseIcon /> : <PlayIcon />}
           </button>
@@ -374,7 +414,7 @@ const PlayerControls: FC<PlayerControlsProps> = ({
           {/* Audio tracks */}
           <TrackSelector
             icon={AudioIcon}
-            label="Audio"
+            label={t("playerControls.audio")}
             tracks={audioTracks}
             currentTrack={currentAudioTrack}
             onSelect={onAudioTrackChange}
@@ -383,18 +423,30 @@ const PlayerControls: FC<PlayerControlsProps> = ({
           {/* Subtitle tracks */}
           <TrackSelector
             icon={SubtitleIcon}
-            label="Subtitles"
+            label={t("playerControls.subtitles")}
             tracks={subtitleTracks}
             currentTrack={currentSubtitleTrack}
-            offLabel="Off"
+            offLabel={t("playerControls.subtitlesOff")}
             onSelect={onSubtitleTrackChange}
           />
+
+          {/* Quality (HLS levels only — direct play has no ladder) */}
+          {qualityLevels.length > 1 && onQualityChange && (
+            <TrackSelector
+              icon={QualityIcon}
+              label={t("playerControls.quality")}
+              tracks={qualityTracks}
+              currentTrack={currentQuality}
+              offLabel={t("playerControls.qualityAuto")}
+              onSelect={onQualityChange}
+            />
+          )}
 
           {/* Fullscreen */}
           <button
             onClick={onToggleFullscreen}
             className="p-1.5 rounded-[--radius-sm] text-white/80 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
-            aria-label={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+            aria-label={isFullscreen ? t("playerControls.exitFullscreen") : t("playerControls.fullscreen")}
           >
             {isFullscreen ? <ExitFullscreenIcon /> : <FullscreenIcon />}
           </button>

@@ -71,6 +71,54 @@ func (r *UserDataRepository) Get(ctx context.Context, userID, itemID string) (*U
 	return &ud, nil
 }
 
+// GetBatch returns user data for the given user across a batch of item IDs,
+// keyed by item_id. Items with no row are simply absent from the map (the
+// caller treats that as "no progress yet"). Uses raw SQL because sqlc for
+// SQLite doesn't support dynamic IN().
+func (r *UserDataRepository) GetBatch(ctx context.Context, userID string, itemIDs []string) (map[string]*UserData, error) {
+	if userID == "" || len(itemIDs) == 0 {
+		return nil, nil
+	}
+
+	placeholders := make([]string, len(itemIDs))
+	args := make([]any, 0, len(itemIDs)+1)
+	args = append(args, userID)
+	for i, id := range itemIDs {
+		placeholders[i] = "?"
+		args = append(args, id)
+	}
+
+	query := fmt.Sprintf(
+		`SELECT user_id, item_id, position_ticks, play_count, completed,
+		        is_favorite, liked, audio_stream_index, subtitle_stream_index,
+		        last_played_at, updated_at
+		 FROM user_data
+		 WHERE user_id = ? AND item_id IN (%s)`,
+		joinStrings(placeholders, ","),
+	)
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("get user data batch: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	out := make(map[string]*UserData, len(itemIDs))
+	for rows.Next() {
+		var row sqlc.UserDatum
+		if err := rows.Scan(
+			&row.UserID, &row.ItemID, &row.PositionTicks, &row.PlayCount, &row.Completed,
+			&row.IsFavorite, &row.Liked, &row.AudioStreamIndex, &row.SubtitleStreamIndex,
+			&row.LastPlayedAt, &row.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan user data batch: %w", err)
+		}
+		ud := userDataFromRow(row)
+		out[row.ItemID] = &ud
+	}
+	return out, rows.Err()
+}
+
 // UpdateProgress updates just the playback position and timestamps.
 func (r *UserDataRepository) UpdateProgress(ctx context.Context, userID, itemID string, positionTicks int64, completed bool) error {
 	now := time.Now()

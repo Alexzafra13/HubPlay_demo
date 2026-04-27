@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"hubplay/internal/auth"
 	"hubplay/internal/db"
 	"hubplay/internal/domain"
 	"hubplay/internal/testutil"
@@ -22,9 +23,10 @@ type itemTestEnv struct {
 	t       *testing.T
 	svc     *libFakeService
 	images  *fakeImageRepo
-	meta    *libFakeMetadataRepo
-	handler *ItemHandler
-	router  chi.Router
+	meta     *libFakeMetadataRepo
+	userData *progressFakeUserData
+	handler  *ItemHandler
+	router   chi.Router
 }
 
 func newItemTestEnv(t *testing.T) *itemTestEnv {
@@ -35,7 +37,8 @@ func newItemTestEnv(t *testing.T) *itemTestEnv {
 		images: newFakeImageRepo(),
 		meta:   &libFakeMetadataRepo{byID: map[string]*db.Metadata{}},
 	}
-	env.handler = NewItemHandler(env.svc, env.images, env.meta, testutil.NopLogger())
+	env.userData = newProgressFakeUserData()
+	env.handler = NewItemHandler(env.svc, env.images, env.meta, env.userData, testutil.NopLogger())
 
 	r := chi.NewRouter()
 	r.Route("/api/v1/items", func(r chi.Router) {
@@ -52,6 +55,17 @@ func newItemTestEnv(t *testing.T) *itemTestEnv {
 func (e *itemTestEnv) do(method, path string) *httptest.ResponseRecorder {
 	e.t.Helper()
 	req := httptest.NewRequest(method, path, nil)
+	rr := httptest.NewRecorder()
+	e.router.ServeHTTP(rr, req)
+	return rr
+}
+
+func (e *itemTestEnv) doWithClaims(method, path string, claims *auth.Claims) *httptest.ResponseRecorder {
+	e.t.Helper()
+	req := httptest.NewRequest(method, path, nil)
+	if claims != nil {
+		req = req.WithContext(auth.WithClaims(req.Context(), claims))
+	}
 	rr := httptest.NewRecorder()
 	e.router.ServeHTTP(rr, req)
 	return rr
@@ -165,6 +179,47 @@ func TestItemHandler_Get_AttachesMetadata(t *testing.T) {
 	genres, _ := data["genres"].([]any)
 	if len(genres) != 2 {
 		t.Errorf("genres: %v", data["genres"])
+	}
+}
+
+func TestItemHandler_Get_IncludesUserDataWhenAuthenticated(t *testing.T) {
+	env := newItemTestEnv(t)
+	env.svc.getItemFn = func(_ context.Context, id string) (*db.Item, error) {
+		return &db.Item{ID: id, Type: "movie", Title: "Foo", DurationTicks: 1_000}, nil
+	}
+	env.userData.data["u-2:it-1"] = &db.UserData{
+		UserID: "u-2", ItemID: "it-1", PositionTicks: 500, IsFavorite: true,
+	}
+
+	rr := env.doWithClaims(http.MethodGet, "/api/v1/items/it-1/", &auth.Claims{UserID: "u-2", Role: "user"})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: %d", rr.Code)
+	}
+	data, _ := itemDecodeData(t, rr).(map[string]any)
+	ud, ok := data["user_data"].(map[string]any)
+	if !ok {
+		t.Fatalf("user_data missing: %v", data)
+	}
+	if ud["is_favorite"] != true {
+		t.Errorf("is_favorite: %v", ud["is_favorite"])
+	}
+	prog, _ := ud["progress"].(map[string]any)
+	if prog["percentage"] != 50.0 {
+		t.Errorf("percentage: %v", prog["percentage"])
+	}
+}
+
+func TestItemHandler_Get_OmitsUserDataWhenAnonymous(t *testing.T) {
+	env := newItemTestEnv(t)
+	env.svc.getItemFn = func(_ context.Context, id string) (*db.Item, error) {
+		return &db.Item{ID: id, Title: "Foo"}, nil
+	}
+	env.userData.data["u-2:it-1"] = &db.UserData{UserID: "u-2", ItemID: "it-1", IsFavorite: true}
+
+	rr := env.do(http.MethodGet, "/api/v1/items/it-1/")
+	data, _ := itemDecodeData(t, rr).(map[string]any)
+	if _, present := data["user_data"]; present {
+		t.Errorf("anonymous response should not include user_data: %v", data["user_data"])
 	}
 }
 

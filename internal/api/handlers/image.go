@@ -503,7 +503,11 @@ func (h *ImageHandler) saveImageFile(itemID, filename string, data []byte) (stri
 	}
 
 	fullPath := filepath.Join(dir, filename)
-	if err := os.WriteFile(fullPath, data, 0o644); err != nil {
+	// Atomic write — if the request is interrupted mid-flight (server
+	// crash, disk-full), the destination is either absent or fully
+	// written. Without this, an aborted upload could leave a truncated
+	// JPEG that ServeFile would happily hand back to the next caller.
+	if err := imaging.AtomicWriteFile(fullPath, data, 0o644); err != nil {
 		return "", fmt.Errorf("write file: %w", err)
 	}
 

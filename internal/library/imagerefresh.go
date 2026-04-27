@@ -2,8 +2,6 @@ package library
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"os"
@@ -163,26 +161,19 @@ func (r *ImageRefresher) refreshForItem(ctx context.Context, item *db.Item) int 
 // downloadAndPersist returns true if the image was successfully stored. A
 // false return means the caller should move on — every failure is logged
 // inline so the caller doesn't need to distinguish causes.
+//
+// All disk + network work is delegated to imaging.IngestRemoteImage so the
+// scanner and the refresher land bytes through identical code paths
+// (atomic writes, blurhash, SSRF-safe downloads). The only thing that
+// stays per-caller is what we record in the DB and the path-mapping
+// table.
 func (r *ImageRefresher) downloadAndPersist(ctx context.Context, itemID, imgType string, best provider.ImageResult) bool {
-	imgData, contentType, err := imaging.SafeGet(best.URL, imaging.MaxUploadBytes, 30*time.Second)
+	dir := filepath.Join(r.imageDir, itemID)
+	ing, err := imaging.IngestRemoteImage(dir, imgType, best.URL, r.logger)
 	if err != nil {
-		r.logger.Warn("refresh: failed to download image", "url", best.URL, "error", err)
+		r.logger.Warn("refresh: ingest failed", "url", best.URL, "error", err)
 		return false
 	}
-	if err := imaging.EnforceMaxPixels(imgData); err != nil {
-		r.logger.Warn("refresh: image too large", "url", best.URL, "error", err)
-		return false
-	}
-
-	ext := imaging.ExtensionForContentType(contentType)
-	hash := sha256.Sum256(imgData)
-	filename := fmt.Sprintf("%s_%s%s", imgType, hex.EncodeToString(hash[:8]), ext)
-	localPath, err := r.saveImageFile(itemID, filename, imgData)
-	if err != nil {
-		return false
-	}
-
-	bhash := imaging.ComputeBlurhash(imgData, r.logger)
 
 	imgID := uuid.NewString()
 	dbImg := &db.Image{
@@ -192,14 +183,16 @@ func (r *ImageRefresher) downloadAndPersist(ctx context.Context, itemID, imgType
 		Path:      "/api/v1/images/file/" + imgID,
 		Width:     best.Width,
 		Height:    best.Height,
-		Blurhash:  bhash,
+		Blurhash:  ing.Blurhash,
 		Provider:  "refresh",
 		IsPrimary: true,
 		AddedAt:   time.Now(),
 	}
 
 	if err := r.images.Create(ctx, dbImg); err != nil {
-		_ = os.Remove(localPath)
+		// DB rejected the row; back out the on-disk file so we don't
+		// leak storage behind a record that no longer exists.
+		_ = os.Remove(ing.LocalPath)
 		return false
 	}
 
@@ -207,23 +200,10 @@ func (r *ImageRefresher) downloadAndPersist(ctx context.Context, itemID, imgType
 		r.logger.Warn("refresh: failed to set primary", "error", err)
 	}
 
-	if err := r.pathmap.Write(imgID, localPath); err != nil {
+	if err := r.pathmap.Write(imgID, ing.LocalPath); err != nil {
 		r.logger.Warn("refresh: pathmap write failed", "id", imgID, "error", err)
 	}
 	return true
-}
-
-// saveImageFile writes the bytes to <imageDir>/<itemID>/<filename>.
-func (r *ImageRefresher) saveImageFile(itemID, filename string, data []byte) (string, error) {
-	dir := filepath.Join(r.imageDir, itemID)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", fmt.Errorf("create dir: %w", err)
-	}
-	fullPath := filepath.Join(dir, filename)
-	if err := os.WriteFile(fullPath, data, 0o644); err != nil {
-		return "", fmt.Errorf("write file: %w", err)
-	}
-	return fullPath, nil
 }
 
 // itemTypeOf maps the DB-level item type string onto the provider-level enum.

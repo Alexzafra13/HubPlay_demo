@@ -20,11 +20,12 @@ type LibraryHandler struct {
 	lib      LibraryService
 	images   ImageRepository
 	metadata MetadataRepository
+	userData UserDataRepository
 	logger   *slog.Logger
 }
 
-func NewLibraryHandler(lib LibraryService, images ImageRepository, metadata MetadataRepository, logger *slog.Logger) *LibraryHandler {
-	return &LibraryHandler{lib: lib, images: images, metadata: metadata, logger: logger}
+func NewLibraryHandler(lib LibraryService, images ImageRepository, metadata MetadataRepository, userData UserDataRepository, logger *slog.Logger) *LibraryHandler {
+	return &LibraryHandler{lib: lib, images: images, metadata: metadata, userData: userData, logger: logger}
 }
 
 func (h *LibraryHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -308,6 +309,25 @@ func (h *LibraryHandler) enrichItemSummaries(r *http.Request, items []*db.Item) 
 						if err := json.Unmarshal([]byte(m.GenresJSON), &genres); err == nil {
 							data[i]["genres"] = genres
 						}
+					}
+				}
+			}
+		}
+	}
+
+	// Batch fetch per-user state (watched/in-progress/favorite). Only when
+	// authenticated; anonymous endpoints (none today, but defensive) skip
+	// silently. Failure is logged, not fatal — the listing still renders
+	// without badges instead of 500ing.
+	if h.userData != nil {
+		if claims := auth.GetClaims(r.Context()); claims != nil {
+			userDataByID, err := h.userData.GetBatch(r.Context(), claims.UserID, itemIDs)
+			if err != nil {
+				h.logger.Warn("failed to fetch user data batch", "error", err)
+			} else if len(userDataByID) > 0 {
+				for i, item := range items {
+					if ud, ok := userDataByID[item.ID]; ok {
+						data[i]["user_data"] = userDataResponse(ud, item.DurationTicks)
 					}
 				}
 			}

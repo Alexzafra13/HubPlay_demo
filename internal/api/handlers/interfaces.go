@@ -170,6 +170,7 @@ type MetadataRepository interface {
 // UserDataRepository defines user data access needed by handlers.
 type UserDataRepository interface {
 	Get(ctx context.Context, userID, itemID string) (*db.UserData, error)
+	GetBatch(ctx context.Context, userID string, itemIDs []string) (map[string]*db.UserData, error)
 	UpdateProgress(ctx context.Context, userID, itemID string, positionTicks int64, completed bool) error
 	MarkPlayed(ctx context.Context, userID, itemID string) error
 	SetFavorite(ctx context.Context, userID, itemID string, favorite bool) error

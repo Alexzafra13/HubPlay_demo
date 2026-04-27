@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"hubplay/internal/auth"
 	"hubplay/internal/db"
 
 	"github.com/go-chi/chi/v5"
@@ -15,11 +16,12 @@ type ItemHandler struct {
 	lib      LibraryService
 	images   ImageRepository
 	metadata MetadataRepository
+	userData UserDataRepository
 	logger   *slog.Logger
 }
 
-func NewItemHandler(lib LibraryService, images ImageRepository, metadata MetadataRepository, logger *slog.Logger) *ItemHandler {
-	return &ItemHandler{lib: lib, images: images, metadata: metadata, logger: logger}
+func NewItemHandler(lib LibraryService, images ImageRepository, metadata MetadataRepository, userData UserDataRepository, logger *slog.Logger) *ItemHandler {
+	return &ItemHandler{lib: lib, images: images, metadata: metadata, userData: userData, logger: logger}
 }
 
 func (h *ItemHandler) Get(w http.ResponseWriter, r *http.Request) {
@@ -31,6 +33,20 @@ func (h *ItemHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := itemDetailResponse(item)
+
+	// Per-user state (favorite, watched, resume position) — only when
+	// authenticated. Not fatal: if it fails, log and skip rather than
+	// fail the whole detail response.
+	if h.userData != nil {
+		if claims := auth.GetClaims(r.Context()); claims != nil {
+			ud, err := h.userData.Get(r.Context(), claims.UserID, id)
+			if err != nil {
+				h.logger.Warn("get user data", "item_id", id, "error", err)
+			} else if ud != nil {
+				resp["user_data"] = userDataResponse(ud, item.DurationTicks)
+			}
+		}
+	}
 
 	// Include streams
 	streams, _ := h.lib.GetItemStreams(r.Context(), id)
@@ -147,6 +163,25 @@ func (h *ItemHandler) Search(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Per-user state for the search results (watched/in-progress badges).
+	if h.userData != nil && len(items) > 0 {
+		if claims := auth.GetClaims(r.Context()); claims != nil {
+			itemIDs := make([]string, len(items))
+			for i, item := range items {
+				itemIDs[i] = item.ID
+			}
+			if userDataByID, err := h.userData.GetBatch(r.Context(), claims.UserID, itemIDs); err != nil {
+				h.logger.Warn("get user data batch", "error", err)
+			} else if len(userDataByID) > 0 {
+				for i, item := range items {
+					if ud, ok := userDataByID[item.ID]; ok {
+						data[i]["user_data"] = userDataResponse(ud, item.DurationTicks)
+					}
+				}
+			}
+		}
+	}
+
 	respondJSON(w, http.StatusOK, map[string]any{
 		"data":  data,
 		"total": total,
@@ -225,6 +260,45 @@ func streamResponse(s *db.MediaStream) map[string]any {
 	}
 	if s.Title != "" {
 		resp["title"] = s.Title
+	}
+	return resp
+}
+
+// userDataResponse renders a UserData row in the canonical client shape:
+//
+//	{
+//	  progress: { position_ticks, percentage, audio_stream_index, subtitle_stream_index },
+//	  is_favorite, played, play_count, last_played_at,
+//	}
+//
+// `percentage` is computed server-side so every client (web, future native)
+// shows the same value, and is clamped to [0, 100] so badly-clamped position
+// data (e.g. resume past EOF after a re-encode) can't render >100% UI.
+func userDataResponse(ud *db.UserData, durationTicks int64) map[string]any {
+	if ud == nil {
+		return nil
+	}
+	var pct float64
+	if durationTicks > 0 {
+		pct = float64(ud.PositionTicks) / float64(durationTicks) * 100
+		if pct < 0 {
+			pct = 0
+		}
+		if pct > 100 {
+			pct = 100
+		}
+	}
+	resp := map[string]any{
+		"progress": map[string]any{
+			"position_ticks":        ud.PositionTicks,
+			"percentage":            pct,
+			"audio_stream_index":    ud.AudioStreamIndex,
+			"subtitle_stream_index": ud.SubtitleStreamIndex,
+		},
+		"is_favorite":    ud.IsFavorite,
+		"played":         ud.Completed,
+		"play_count":     ud.PlayCount,
+		"last_played_at": ud.LastPlayedAt,
 	}
 	return resp
 }

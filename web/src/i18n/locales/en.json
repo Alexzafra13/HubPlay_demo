@@ -19,7 +19,9 @@
     "goHome": "Go Home",
     "logOut": "Log out",
     "settings": "Settings",
-    "administration": "Administration"
+    "administration": "Administration",
+    "sortBy": "Sort by",
+    "moreOptions": "More options"
   },
   "nav": {
     "home": "Home",
@@ -58,6 +60,41 @@
     "searchPlaceholder": "Search movies...",
     "noResults": "No movies found"
   },
+  "posterCard": {
+    "watched": "Watched",
+    "inProgress": "In progress"
+  },
+  "upNext": {
+    "title": "Up next",
+    "label": "Up next",
+    "playIn": "Play in {{seconds}}s",
+    "cancel": "Cancel auto-play"
+  },
+  "playerControls": {
+    "quality": "Quality",
+    "qualityAuto": "Auto",
+    "audio": "Audio",
+    "subtitles": "Subtitles",
+    "subtitlesOff": "Off",
+    "play": "Play",
+    "pause": "Pause",
+    "back": "Back",
+    "mute": "Mute",
+    "unmute": "Unmute",
+    "volume": "Volume",
+    "seek": "Seek",
+    "fullscreen": "Fullscreen",
+    "exitFullscreen": "Exit fullscreen",
+    "closePlayer": "Close Player",
+    "trackFallback": "Track {{n}}"
+  },
+  "sort": {
+    "by": "Sort by",
+    "title": "Title",
+    "year": "Year",
+    "added": "Recently Added",
+    "rating": "Rating"
+  },
   "series": {
     "title": "Series",
     "searchPlaceholder": "Search series...",
@@ -79,7 +116,9 @@
     "cast": "Cast",
     "episodes": "Episodes",
     "seasons": "Seasons",
-    "refreshMetadata": "Refresh metadata"
+    "refreshMetadata": "Refresh metadata",
+    "addToFavorites": "Add to favorites",
+    "removeFromFavorites": "Remove from favorites"
   },
   "liveTV": {
     "title": "Live TV",

@@ -58,6 +58,22 @@ func (r *progressFakeUserData) Get(_ context.Context, userID, itemID string) (*d
 	return &cp, nil
 }
 
+func (r *progressFakeUserData) GetBatch(_ context.Context, userID string, itemIDs []string) (map[string]*db.UserData, error) {
+	if r.failGet {
+		return nil, errors.New("boom")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make(map[string]*db.UserData, len(itemIDs))
+	for _, id := range itemIDs {
+		if ud, ok := r.data[keyUD(userID, id)]; ok {
+			cp := *ud
+			out[id] = &cp
+		}
+	}
+	return out, nil
+}
+
 func (r *progressFakeUserData) UpdateProgress(_ context.Context, userID, itemID string, pos int64, completed bool) error {
 	if r.failUpdate {
 		return errors.New("boom")

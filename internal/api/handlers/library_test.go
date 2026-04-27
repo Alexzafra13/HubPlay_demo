@@ -182,23 +182,25 @@ var (
 // ─── Env ────────────────────────────────────────────────────────────────────
 
 type libTestEnv struct {
-	t       *testing.T
-	svc     *libFakeService
-	images  *fakeImageRepo // reused from image_test.go
-	meta    *libFakeMetadataRepo
-	handler *LibraryHandler
-	router  chi.Router
+	t        *testing.T
+	svc      *libFakeService
+	images   *fakeImageRepo // reused from image_test.go
+	meta     *libFakeMetadataRepo
+	userData *progressFakeUserData
+	handler  *LibraryHandler
+	router   chi.Router
 }
 
 func newLibTestEnv(t *testing.T) *libTestEnv {
 	t.Helper()
 	env := &libTestEnv{
-		t:      t,
-		svc:    &libFakeService{},
-		images: newFakeImageRepo(),
-		meta:   &libFakeMetadataRepo{byID: map[string]*db.Metadata{}},
+		t:        t,
+		svc:      &libFakeService{},
+		images:   newFakeImageRepo(),
+		meta:     &libFakeMetadataRepo{byID: map[string]*db.Metadata{}},
+		userData: newProgressFakeUserData(),
 	}
-	env.handler = NewLibraryHandler(env.svc, env.images, env.meta, testutil.NopLogger())
+	env.handler = NewLibraryHandler(env.svc, env.images, env.meta, env.userData, testutil.NopLogger())
 
 	r := chi.NewRouter()
 	r.Route("/api/v1", func(r chi.Router) {
@@ -568,6 +570,86 @@ func TestLibraryHandler_Items_EnrichesWithMetadata(t *testing.T) {
 	genres, _ := entry["genres"].([]any)
 	if len(genres) != 2 {
 		t.Errorf("genres: %v", entry["genres"])
+	}
+}
+
+func TestLibraryHandler_Items_IncludesUserDataWhenAuthenticated(t *testing.T) {
+	env := newLibTestEnv(t)
+	env.svc.listItemsFn = func(_ context.Context, _ db.ItemFilter) ([]*db.Item, int, error) {
+		return []*db.Item{
+			{ID: "it-1", Title: "Watched", DurationTicks: 1_000},
+			{ID: "it-2", Title: "InProgress", DurationTicks: 1_000},
+			{ID: "it-3", Title: "Untouched", DurationTicks: 1_000},
+		}, 3, nil
+	}
+	// Seed per-user state for u-2 (the userClaims fixture).
+	env.userData.data["u-2:it-1"] = &db.UserData{
+		UserID: "u-2", ItemID: "it-1", Completed: true, PlayCount: 1, PositionTicks: 1_000,
+	}
+	env.userData.data["u-2:it-2"] = &db.UserData{
+		UserID: "u-2", ItemID: "it-2", PositionTicks: 250, IsFavorite: true,
+	}
+
+	rr := env.do(http.MethodGet, "/api/v1/libraries/lib-1/items?limit=10", "", userClaims())
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: %d, body: %s", rr.Code, rr.Body.String())
+	}
+
+	data, _ := libDecodeData(t, rr).(map[string]any)
+	items, _ := data["items"].([]any)
+	if len(items) != 3 {
+		t.Fatalf("items: got %d want 3", len(items))
+	}
+
+	// it-1: watched at 100%
+	got1, _ := items[0].(map[string]any)
+	ud1, ok := got1["user_data"].(map[string]any)
+	if !ok {
+		t.Fatalf("it-1 missing user_data: %v", got1)
+	}
+	if ud1["played"] != true {
+		t.Errorf("it-1 played: %v", ud1["played"])
+	}
+	prog1, _ := ud1["progress"].(map[string]any)
+	if prog1["percentage"] != 100.0 {
+		t.Errorf("it-1 percentage: %v", prog1["percentage"])
+	}
+
+	// it-2: in progress at 25%, favorite
+	got2, _ := items[1].(map[string]any)
+	ud2, _ := got2["user_data"].(map[string]any)
+	if ud2["is_favorite"] != true {
+		t.Errorf("it-2 is_favorite: %v", ud2["is_favorite"])
+	}
+	prog2, _ := ud2["progress"].(map[string]any)
+	if prog2["percentage"] != 25.0 {
+		t.Errorf("it-2 percentage: %v", prog2["percentage"])
+	}
+
+	// it-3: no row → user_data must be absent (not null) so the JSON
+	// payload stays compact.
+	got3, _ := items[2].(map[string]any)
+	if _, present := got3["user_data"]; present {
+		t.Errorf("it-3 should not have user_data, got: %v", got3["user_data"])
+	}
+}
+
+func TestLibraryHandler_Items_OmitsUserDataWhenAnonymous(t *testing.T) {
+	env := newLibTestEnv(t)
+	env.svc.listItemsFn = func(_ context.Context, _ db.ItemFilter) ([]*db.Item, int, error) {
+		return []*db.Item{{ID: "it-1", DurationTicks: 1_000}}, 1, nil
+	}
+	env.userData.data["u-2:it-1"] = &db.UserData{UserID: "u-2", ItemID: "it-1", Completed: true}
+
+	// No claims attached — this exercises the listing endpoint pre-auth
+	// (chi route exists, real wiring requires middleware) and asserts we
+	// don't leak another user's state to anonymous callers.
+	rr := env.do(http.MethodGet, "/api/v1/libraries/lib-1/items?limit=10", "", nil)
+	data, _ := libDecodeData(t, rr).(map[string]any)
+	items, _ := data["items"].([]any)
+	got, _ := items[0].(map[string]any)
+	if _, present := got["user_data"]; present {
+		t.Errorf("anonymous response should not include user_data: %v", got)
 	}
 }
 
