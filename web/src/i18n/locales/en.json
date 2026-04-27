@@ -72,7 +72,27 @@
   },
   "playerControls": {
     "quality": "Quality",
-    "qualityAuto": "Auto"
+    "qualityAuto": "Auto",
+    "audio": "Audio",
+    "subtitles": "Subtitles",
+    "subtitlesOff": "Off",
+    "play": "Play",
+    "pause": "Pause",
+    "back": "Back",
+    "mute": "Mute",
+    "unmute": "Unmute",
+    "volume": "Volume",
+    "seek": "Seek",
+    "fullscreen": "Fullscreen",
+    "exitFullscreen": "Exit fullscreen",
+    "closePlayer": "Close Player"
+  },
+  "sort": {
+    "by": "Sort by",
+    "title": "Title",
+    "year": "Year",
+    "added": "Recently Added",
+    "rating": "Rating"
   },
   "series": {
     "title": "Series",

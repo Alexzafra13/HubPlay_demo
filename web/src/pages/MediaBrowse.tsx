@@ -96,11 +96,11 @@ export default function MediaBrowse({ type }: MediaBrowseProps) {
           value={sort}
           onChange={(e) => setSort(e.target.value as SortOption)}
           className="rounded-[--radius-md] border border-border bg-bg-card px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
-          aria-label={t("common.sortBy", { defaultValue: "Sort by" })}
+          aria-label={t("sort.by")}
         >
           {SORT_OPTIONS.map((opt) => (
             <option key={opt.value} value={opt.value}>
-              {opt.label}
+              {t(opt.labelKey)}
             </option>
           ))}
         </select>

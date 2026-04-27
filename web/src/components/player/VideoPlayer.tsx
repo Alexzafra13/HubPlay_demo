@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import type { FC } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "@/api/client";
 import { usePlayerStore } from "@/store/player";
 import { useHls } from "@/hooks/useHls";
@@ -47,6 +48,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
   onClose,
   onEnded: onEndedCallback,
 }) => {
+  const { t } = useTranslation();
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const seekedToStartRef = useRef(false);
@@ -328,7 +330,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
               }}
               className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-[--radius-md] text-sm text-white transition-colors cursor-pointer"
             >
-              Close Player
+              {t("playerControls.closePlayer")}
             </button>
           </div>
         </div>

@@ -2,11 +2,16 @@ import type { MediaItem } from "@/api/types";
 
 export type SortOption = "title" | "year" | "added" | "rating";
 
-export const SORT_OPTIONS: { value: SortOption; label: string }[] = [
-  { value: "title", label: "Title" },
-  { value: "year", label: "Year" },
-  { value: "added", label: "Recently Added" },
-  { value: "rating", label: "Rating" },
+/**
+ * Sort options as (value, i18n key) pairs. The label is resolved at
+ * render time via i18next so the dropdown follows the active locale.
+ * Keep the order stable — it doubles as the dropdown order.
+ */
+export const SORT_OPTIONS: { value: SortOption; labelKey: string }[] = [
+  { value: "title", labelKey: "sort.title" },
+  { value: "year", labelKey: "sort.year" },
+  { value: "added", labelKey: "sort.added" },
+  { value: "rating", labelKey: "sort.rating" },
 ];
 
 export function sortItems(items: MediaItem[], sort: SortOption): MediaItem[] {

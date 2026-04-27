@@ -72,7 +72,27 @@
   },
   "playerControls": {
     "quality": "Calidad",
-    "qualityAuto": "Auto"
+    "qualityAuto": "Auto",
+    "audio": "Audio",
+    "subtitles": "Subtitulos",
+    "subtitlesOff": "Ninguno",
+    "play": "Reproducir",
+    "pause": "Pausa",
+    "back": "Atras",
+    "mute": "Silenciar",
+    "unmute": "Activar sonido",
+    "volume": "Volumen",
+    "seek": "Buscar",
+    "fullscreen": "Pantalla completa",
+    "exitFullscreen": "Salir de pantalla completa",
+    "closePlayer": "Cerrar reproductor"
+  },
+  "sort": {
+    "by": "Ordenar por",
+    "title": "Titulo",
+    "year": "Ano",
+    "added": "Anadidos recientemente",
+    "rating": "Valoracion"
   },
   "series": {
     "title": "Series",
