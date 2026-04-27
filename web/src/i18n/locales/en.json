@@ -103,6 +103,19 @@
     "added": "Recently Added",
     "rating": "Rating"
   },
+  "filters": {
+    "title": "Filters",
+    "genre": "Genre",
+    "year": "Year",
+    "rating": "Min rating",
+    "from": "From",
+    "to": "To",
+    "any": "Any",
+    "clear": "Clear",
+    "clearAll": "Clear all filters",
+    "noGenres": "No genres available yet — finish a scan to populate.",
+    "genreCount": "{{count}} items"
+  },
   "series": {
     "title": "Series",
     "searchPlaceholder": "Search series...",

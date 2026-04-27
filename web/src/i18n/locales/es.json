@@ -103,6 +103,19 @@
     "added": "Anadidos recientemente",
     "rating": "Valoracion"
   },
+  "filters": {
+    "title": "Filtros",
+    "genre": "Genero",
+    "year": "Ano",
+    "rating": "Valoracion minima",
+    "from": "Desde",
+    "to": "Hasta",
+    "any": "Cualquiera",
+    "clear": "Limpiar",
+    "clearAll": "Limpiar todos los filtros",
+    "noGenres": "Aun no hay generos — termina un escaneo para llenarlos.",
+    "genreCount": "{{count}} elementos"
+  },
   "series": {
     "title": "Series",
     "searchPlaceholder": "Buscar series...",
