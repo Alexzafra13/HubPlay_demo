@@ -237,7 +237,12 @@ func NewRouter(deps Dependencies) http.Handler {
 			// Libraries & Items (only if service is wired)
 			if deps.Libraries != nil {
 				libHandler := handlers.NewLibraryHandler(deps.Libraries, deps.Images, deps.Metadata, deps.UserData, deps.Logger)
-				itemHandler := handlers.NewItemHandler(deps.Libraries, deps.Images, deps.Metadata, deps.UserData, deps.Chapters, deps.Logger)
+				// Trickplay sprites land under <imageDir>/trickplay/ —
+				// reusing the image-storage root keeps the on-disk
+				// layout clustered (one tree the operator can backup,
+				// rsync, or `du` to size the cache).
+				trickplayDir := filepath.Join(filepath.Dir(deps.Config.Database.Path), "images", "trickplay")
+				itemHandler := handlers.NewItemHandler(deps.Libraries, deps.Images, deps.Metadata, deps.UserData, deps.Chapters, trickplayDir, deps.Logger)
 
 				// Libraries
 				r.Get("/libraries", libHandler.List)
@@ -347,6 +352,11 @@ func NewRouter(deps Dependencies) http.Handler {
 				r.Route("/items/{id}", func(r chi.Router) {
 					r.Get("/", itemHandler.Get)
 					r.Get("/children", itemHandler.Children)
+					// Trickplay (seek-bar thumbnail previews). The
+					// first hit triggers ffmpeg generation; both
+					// endpoints serve from disk on subsequent hits.
+					r.Get("/trickplay.json", itemHandler.TrickplayManifest)
+					r.Get("/trickplay.png", itemHandler.TrickplaySprite)
 				})
 			}
 

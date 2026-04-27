@@ -55,7 +55,10 @@ func newItemTestEnv(t *testing.T) *itemTestEnv {
 	}
 	env.userData = newProgressFakeUserData()
 	env.chapters = newFakeChapterRepo()
-	env.handler = NewItemHandler(env.svc, env.images, env.meta, env.userData, env.chapters, testutil.NopLogger())
+	// trickplayDir empty — the existing tests don't exercise the
+	// trickplay endpoints, so the handlers short-circuit to 503 via
+	// their nil-guard. New trickplay tests wire a temp dir locally.
+	env.handler = NewItemHandler(env.svc, env.images, env.meta, env.userData, env.chapters, "", testutil.NopLogger())
 
 	r := chi.NewRouter()
 	r.Route("/api/v1/items", func(r chi.Router) {
@@ -63,6 +66,8 @@ func newItemTestEnv(t *testing.T) *itemTestEnv {
 		r.Route("/{id}", func(r chi.Router) {
 			r.Get("/", env.handler.Get)
 			r.Get("/children", env.handler.Children)
+			r.Get("/trickplay.json", env.handler.TrickplayManifest)
+			r.Get("/trickplay.png", env.handler.TrickplaySprite)
 		})
 	})
 	env.router = r
@@ -285,6 +290,23 @@ func TestItemHandler_Get_OmitsChaptersWhenAbsent(t *testing.T) {
 	data, _ := itemDecodeData(t, rr).(map[string]any)
 	if _, present := data["chapters"]; present {
 		t.Errorf("expected chapters key to be absent, got: %v", data["chapters"])
+	}
+}
+
+func TestItemHandler_TrickplayManifest_DisabledReturns503(t *testing.T) {
+	// trickplayDir is "" by default in newItemTestEnv (matches a
+	// deployment that hasn't enabled the feature). Both endpoints
+	// must report a clear 503 + machine-readable code so the player
+	// can fall back to a no-thumbnail seek bar without a confusing
+	// 500.
+	env := newItemTestEnv(t)
+	rr := env.do(http.MethodGet, "/api/v1/items/it-1/trickplay.json")
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("manifest: status %d, want 503", rr.Code)
+	}
+	rr = env.do(http.MethodGet, "/api/v1/items/it-1/trickplay.png")
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("sprite: status %d, want 503", rr.Code)
 	}
 }
 
