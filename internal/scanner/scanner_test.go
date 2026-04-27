@@ -77,7 +77,11 @@ func newTestScanner(t *testing.T) (*Scanner, *db.ItemRepository, *db.MediaStream
 	// imageDir + pathmap are nil for tests that don't exercise the
 	// artwork pipeline; the scanner skips image enrichment when either
 	// is absent.
-	s := New(itemRepo, streamRepo, metaRepo, extIDRepo, imageRepo, nil, prober, bus, "", nil, slog.Default())
+	// chapters repo is real (not nil) because we want the persistence
+	// path covered by the new TestScanLibrary_PersistsChapters test
+	// without spinning up another fixture.
+	chaptersRepo := db.NewChapterRepository(database)
+	s := New(itemRepo, streamRepo, metaRepo, extIDRepo, imageRepo, chaptersRepo, nil, prober, bus, "", nil, slog.Default())
 	return s, itemRepo, streamRepo
 }
 
@@ -371,7 +375,8 @@ func TestFetchAndStoreImages_PersistsLocalPathNotURL(t *testing.T) {
 	prober := &mockProber{result: &probe.Result{}}
 	s := New(itemRepo, db.NewMediaStreamRepository(database),
 		db.NewMetadataRepository(database), db.NewExternalIDRepository(database),
-		imgRepo, nil /* providers — overridden below */, prober, bus,
+		imgRepo, db.NewChapterRepository(database),
+		nil /* providers — overridden below */, prober, bus,
 		imageDir, pm, slog.Default())
 
 	// Inject the stub. The constructor took *provider.Manager (nil
@@ -461,7 +466,8 @@ func TestFetchAndStoreImages_SkippedWhenImageDirEmpty(t *testing.T) {
 	}}
 	s := New(itemRepo, db.NewMediaStreamRepository(database),
 		db.NewMetadataRepository(database), db.NewExternalIDRepository(database),
-		imgRepo, nil, prober, bus, "", nil, slog.Default())
+		imgRepo, db.NewChapterRepository(database),
+		nil, prober, bus, "", nil, slog.Default())
 	s.providers = stub
 
 	// Re-run a minimal version of the enrichItemWithMetadata image

@@ -193,6 +193,18 @@ export default function ItemDetail() {
     };
   }, [nextEpisode]);
 
+  // Convert backend ticks → seconds at this boundary so the player
+  // and SeekBar stay unit-agnostic (they only know about seconds,
+  // matching `<video>.currentTime`). 10_000_000 ticks per second is
+  // the constant used everywhere else in the codebase.
+  const chapterMarkers = useMemo(() => {
+    if (!item?.chapters || item.chapters.length === 0) return undefined;
+    return item.chapters.map((c) => ({
+      startSeconds: c.start_ticks / 10_000_000,
+      title: c.title,
+    }));
+  }, [item?.chapters]);
+
   const handlePlayerEnded = useCallback(() => {
     if (!playingItemId || siblingEpisodes.length === 0) return;
     const idx = siblingEpisodes.findIndex((ep) => ep.id === playingItemId);
@@ -280,6 +292,7 @@ export default function ItemDetail() {
               : undefined
           }
           nextUp={nextUpInfo}
+          chapters={chapterMarkers}
           onClose={handleClosePlayer}
           onEnded={handlePlayerEnded}
         />

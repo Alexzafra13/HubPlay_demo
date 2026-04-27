@@ -65,6 +65,7 @@ type Scanner struct {
 	metadata    *db.MetadataRepository
 	externalIDs *db.ExternalIDRepository
 	images      *db.ImageRepository
+	chapters    *db.ChapterRepository
 	providers   providerFetcher
 	prober      probe.Prober
 	bus         *event.Bus
@@ -79,6 +80,7 @@ func New(
 	metadata *db.MetadataRepository,
 	externalIDs *db.ExternalIDRepository,
 	images *db.ImageRepository,
+	chapters *db.ChapterRepository,
 	providers *provider.Manager,
 	prober probe.Prober,
 	bus *event.Bus,
@@ -99,6 +101,7 @@ func New(
 		metadata:    metadata,
 		externalIDs: externalIDs,
 		images:      images,
+		chapters:    chapters,
 		providers:   pf,
 		prober:      prober,
 		bus:         bus,
@@ -354,6 +357,14 @@ func (s *Scanner) createItem(ctx context.Context, lib *db.Library, path string, 
 		}
 	}
 
+	// Store chapters. Optional dependency — older test environments
+	// build a Scanner without one and skip the persistence silently.
+	if s.chapters != nil && len(probeResult.Chapters) > 0 {
+		if err := s.chapters.Replace(ctx, itemID, probeResultToChapters(probeResult)); err != nil {
+			s.logger.Warn("failed to store chapters", "item_id", itemID, "error", err)
+		}
+	}
+
 	result.Added++
 	s.bus.Publish(event.Event{
 		Type: event.ItemAdded,
@@ -390,6 +401,16 @@ func (s *Scanner) updateItem(ctx context.Context, item *db.Item, path, fp string
 		}
 	}
 
+	// Re-derive chapters: a re-encode may have shifted markers, and
+	// `Replace` clears the old set transactionally before inserting,
+	// so a probe with zero chapters intentionally clears any stale
+	// markers from a previous version of the file.
+	if s.chapters != nil {
+		if err := s.chapters.Replace(ctx, item.ID, probeResultToChapters(probeResult)); err != nil {
+			s.logger.Warn("failed to update chapters", "item_id", item.ID, "error", err)
+		}
+	}
+
 	result.Updated++
 	s.bus.Publish(event.Event{
 		Type: event.ItemUpdated,
@@ -397,6 +418,26 @@ func (s *Scanner) updateItem(ctx context.Context, item *db.Item, path, fp string
 	})
 
 	return nil
+}
+
+// probeResultToChapters converts the probe-time Chapter slice to the
+// DB shape (item_id-keyed, ticks instead of time.Duration). Returns
+// nil for an empty input so the caller can pass it straight to
+// Replace without a length check — Replace's transactional
+// clear-then-insert handles the empty case.
+func probeResultToChapters(pr *probe.Result) []db.Chapter {
+	if len(pr.Chapters) == 0 {
+		return nil
+	}
+	out := make([]db.Chapter, len(pr.Chapters))
+	for i, c := range pr.Chapters {
+		out[i] = db.Chapter{
+			StartTicks: probe.DurationTicks(c.Start),
+			EndTicks:   probe.DurationTicks(c.End),
+			Title:      c.Title,
+		}
+	}
+	return out
 }
 
 func probeResultToStreams(itemID string, pr *probe.Result) []*db.MediaStream {

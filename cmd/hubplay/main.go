@@ -136,7 +136,7 @@ func run(configPath string) error {
 	imageDir := filepath.Join(filepath.Dir(cfg.Database.Path), "images")
 	scannerPathmap := pathmap.New(imageDir)
 
-	scnr := scanner.New(repos.Items, repos.MediaStreams, repos.Metadata, repos.ExternalIDs, repos.Images, providerManager, prober, eventBus, imageDir, scannerPathmap, logger)
+	scnr := scanner.New(repos.Items, repos.MediaStreams, repos.Metadata, repos.ExternalIDs, repos.Images, repos.Chapters, providerManager, prober, eventBus, imageDir, scannerPathmap, logger)
 	libraryService := library.NewService(repos.Libraries, repos.Items, repos.MediaStreams, repos.Images, repos.Channels, scnr, logger)
 
 	// ═══ Phase 4a: Library Scan Scheduler ═══
@@ -204,6 +204,7 @@ func run(configPath string) error {
 		Images:        repos.Images,
 		Metadata:      repos.Metadata,
 		UserData:        repos.UserData,
+		Chapters:        repos.Chapters,
 		UserPreferences: repos.UserPreferences,
 		Providers:     providerManager,
 		ExternalIDs:   repos.ExternalIDs,

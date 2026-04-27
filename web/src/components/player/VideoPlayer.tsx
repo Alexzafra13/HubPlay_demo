@@ -29,6 +29,13 @@ interface VideoPlayerProps {
    * (Plex/Netflix behaviour).
    */
   nextUp?: UpNextInfo;
+  /**
+   * Chapter markers to render as ticks on the seek bar. Each entry's
+   * `startSeconds` is the chapter start in seconds (the parent does
+   * the ticks → seconds conversion so VideoPlayer doesn't have to
+   * know about the backend tick convention).
+   */
+  chapters?: Array<{ startSeconds: number; title: string }>;
   onClose: () => void;
   onEnded?: () => void;
 }
@@ -45,6 +52,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
   knownDuration,
   title,
   nextUp,
+  chapters,
   onClose,
   onEnded: onEndedCallback,
 }) => {
@@ -355,6 +363,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
           audioTracks={audioTracks}
           subtitleTracks={subtitleTracks}
           qualityLevels={qualityLevels}
+          chapters={chapters}
           currentAudioTrack={currentAudioTrack}
           currentSubtitleTrack={currentSubtitleTrack}
           currentQuality={currentQuality}

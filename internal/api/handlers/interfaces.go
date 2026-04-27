@@ -167,6 +167,14 @@ type MetadataRepository interface {
 	GetMetadataBatch(ctx context.Context, itemIDs []string) (map[string]*db.Metadata, error)
 }
 
+// ChapterRepository defines chapter data access needed by handlers.
+// Optional dep: when nil, the item-detail handler simply omits the
+// `chapters` field — older test environments and bare deployments
+// keep working without one wired.
+type ChapterRepository interface {
+	ListByItem(ctx context.Context, itemID string) ([]*db.Chapter, error)
+}
+
 // UserDataRepository defines user data access needed by handlers.
 type UserDataRepository interface {
 	Get(ctx context.Context, userID, itemID string) (*db.UserData, error)

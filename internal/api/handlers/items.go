@@ -17,11 +17,12 @@ type ItemHandler struct {
 	images   ImageRepository
 	metadata MetadataRepository
 	userData UserDataRepository
+	chapters ChapterRepository
 	logger   *slog.Logger
 }
 
-func NewItemHandler(lib LibraryService, images ImageRepository, metadata MetadataRepository, userData UserDataRepository, logger *slog.Logger) *ItemHandler {
-	return &ItemHandler{lib: lib, images: images, metadata: metadata, userData: userData, logger: logger}
+func NewItemHandler(lib LibraryService, images ImageRepository, metadata MetadataRepository, userData UserDataRepository, chapters ChapterRepository, logger *slog.Logger) *ItemHandler {
+	return &ItemHandler{lib: lib, images: images, metadata: metadata, userData: userData, chapters: chapters, logger: logger}
 }
 
 func (h *ItemHandler) Get(w http.ResponseWriter, r *http.Request) {
@@ -99,6 +100,23 @@ func (h *ItemHandler) Get(w http.ResponseWriter, r *http.Request) {
 			if meta.Studio != "" {
 				resp["studio"] = meta.Studio
 			}
+		}
+	}
+
+	// Chapters drive the seek-bar tick marks and the (future) skip-
+	// intro affordance. Optional: a chapter-less file (most non-Blu-ray
+	// rips) returns a nil slice and the JSON omits the field — clients
+	// can treat absence and empty array identically.
+	if h.chapters != nil {
+		ch, err := h.chapters.ListByItem(r.Context(), id)
+		if err != nil {
+			h.logger.Warn("list chapters", "item_id", id, "error", err)
+		} else if len(ch) > 0 {
+			out := make([]map[string]any, len(ch))
+			for i, c := range ch {
+				out[i] = chapterResponse(c)
+			}
+			resp["chapters"] = out
 		}
 	}
 
@@ -301,6 +319,23 @@ func userDataResponse(ud *db.UserData, durationTicks int64) map[string]any {
 		"last_played_at": ud.LastPlayedAt,
 	}
 	return resp
+}
+
+// chapterResponse is the wire shape for one timeline marker. `title`
+// is always emitted (empty string when unknown) so clients can render
+// either "Chapter 3" placeholder or the real name without a presence
+// check; `image_path` is omitted when absent — Plex-style chapter
+// thumbnails (BIF) aren't generated yet.
+func chapterResponse(c *db.Chapter) map[string]any {
+	r := map[string]any{
+		"start_ticks": c.StartTicks,
+		"end_ticks":   c.EndTicks,
+		"title":       c.Title,
+	}
+	if c.ImagePath != "" {
+		r["image_path"] = c.ImagePath
+	}
+	return r
 }
 
 func imageResponse(img *db.Image) map[string]any {

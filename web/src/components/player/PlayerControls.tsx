@@ -22,6 +22,15 @@ interface QualityLevel {
   label: string;
 }
 
+// One chapter marker on the seek bar. `startSeconds` is duration-in-
+// seconds (already converted from ticks at the call site) so SeekBar
+// stays unit-agnostic and doesn't need to know about the 10-million-
+// ticks-per-second backend convention.
+interface ChapterMarker {
+  startSeconds: number;
+  title: string;
+}
+
 interface PlayerControlsProps {
   isPlaying: boolean;
   currentTime: number;
@@ -33,6 +42,10 @@ interface PlayerControlsProps {
   audioTracks: AudioTrack[];
   subtitleTracks: SubtitleTrack[];
   qualityLevels?: QualityLevel[];
+  // Seek bar chapter markers. Optional — when absent or empty the
+  // bar renders unchanged. When present, each entry becomes a 2-px
+  // tick on the bar; hovering reveals the title.
+  chapters?: ChapterMarker[];
   currentAudioTrack: number;
   currentSubtitleTrack: number;
   /** -1 = auto / ABR. */
@@ -161,8 +174,9 @@ const SeekBar: FC<{
   currentTime: number;
   duration: number;
   buffered: number;
+  chapters?: ChapterMarker[];
   onSeek: (time: number) => void;
-}> = memo(({ currentTime, duration, buffered, onSeek }) => {
+}> = memo(({ currentTime, duration, buffered, chapters, onSeek }) => {
   const { t } = useTranslation();
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
   const bufferedPercent = duration > 0 ? (buffered / duration) * 100 : 0;
@@ -191,6 +205,25 @@ const SeekBar: FC<{
           className="absolute inset-y-0 left-0 bg-accent rounded-full"
           style={{ width: `${progress}%` }}
         />
+        {/* Chapter markers — 2px white ticks at each chapter start.
+            Skipping the 0-second marker (no UI value: the bar itself
+            starts there) and any marker that lands past the end
+            (defensive: a re-encode that shrunk the file shouldn't
+            paint ticks off the visible bar). The `<title>` SVG-style
+            attribute is honoured by the browser as a hover tooltip. */}
+        {duration > 0 && chapters?.map((c, i) => {
+          if (c.startSeconds <= 0 || c.startSeconds >= duration) return null;
+          const left = (c.startSeconds / duration) * 100;
+          return (
+            <div
+              key={i}
+              className="absolute top-1/2 -translate-y-1/2 h-2 w-0.5 bg-white/80 pointer-events-auto"
+              style={{ left: `${left}%` }}
+              title={c.title || `Chapter ${i + 1}`}
+              aria-hidden="true"
+            />
+          );
+        })}
         {/* Thumb */}
         <div
           className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 h-3 w-3 bg-accent rounded-full opacity-0 group-hover/seek:opacity-100 transition-opacity duration-150"
@@ -320,6 +353,7 @@ const PlayerControls: FC<PlayerControlsProps> = ({
   audioTracks,
   subtitleTracks,
   qualityLevels = [],
+  chapters,
   currentAudioTrack,
   currentSubtitleTrack,
   currentQuality = -1,
@@ -383,6 +417,7 @@ const PlayerControls: FC<PlayerControlsProps> = ({
           currentTime={currentTime}
           duration={duration}
           buffered={buffered}
+          chapters={chapters}
           onSeek={onSeek}
         />
 

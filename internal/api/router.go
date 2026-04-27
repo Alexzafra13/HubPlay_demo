@@ -41,6 +41,7 @@ type Dependencies struct {
 	Images         *db.ImageRepository
 	Metadata       *db.MetadataRepository
 	UserData       *db.UserDataRepository
+	Chapters       *db.ChapterRepository
 	UserPreferences *db.UserPreferenceRepository
 	Providers      *provider.Manager
 	ExternalIDs    *db.ExternalIDRepository
@@ -229,7 +230,7 @@ func NewRouter(deps Dependencies) http.Handler {
 			// Libraries & Items (only if service is wired)
 			if deps.Libraries != nil {
 				libHandler := handlers.NewLibraryHandler(deps.Libraries, deps.Images, deps.Metadata, deps.UserData, deps.Logger)
-				itemHandler := handlers.NewItemHandler(deps.Libraries, deps.Images, deps.Metadata, deps.UserData, deps.Logger)
+				itemHandler := handlers.NewItemHandler(deps.Libraries, deps.Images, deps.Metadata, deps.UserData, deps.Chapters, deps.Logger)
 
 				// Libraries
 				r.Get("/libraries", libHandler.List)
