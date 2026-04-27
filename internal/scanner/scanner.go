@@ -208,27 +208,41 @@ func (s *Scanner) ScanLibrary(ctx context.Context, lib *db.Library) (*ScanResult
 	return result, nil
 }
 
-// iterateLibraryItems pages through all items in a library in batches,
-// calling fn for each item. This avoids loading the entire library into memory.
+// iterateLibraryItems pages through every item in a library — series,
+// season, episode, movie — calling fn for each. The default
+// `db.ItemFilter` projects to root items only (parent_id IS NULL),
+// which used to silently miss every season + episode in shows
+// libraries; we explicitly enumerate by type so the iteration
+// returns the full graph.
+//
+// Pagination uses the actual returned slice length to detect the
+// last page, NOT the requested pageSize — `db.ItemFilter.List`
+// caps Limit at 100 internally, so requesting 500 returns 100, and
+// a `len < requested` check would always fire after the first batch
+// (the bug that caused libraries with >100 items to lose cache
+// entries on re-scan).
 func (s *Scanner) iterateLibraryItems(ctx context.Context, libraryID string, fn func(*db.Item)) error {
-	const pageSize = 500
-	offset := 0
-	for {
-		items, _, err := s.items.List(ctx, db.ItemFilter{
-			LibraryID: libraryID,
-			Limit:     pageSize,
-			Offset:    offset,
-		})
-		if err != nil {
-			return err
+	const pageSize = 100 // matches the upper bound enforced by ItemFilter.
+	for _, t := range []string{"series", "season", "episode", "movie", "audio"} {
+		offset := 0
+		for {
+			items, _, err := s.items.List(ctx, db.ItemFilter{
+				LibraryID: libraryID,
+				Type:      t,
+				Limit:     pageSize,
+				Offset:    offset,
+			})
+			if err != nil {
+				return err
+			}
+			for _, item := range items {
+				fn(item)
+			}
+			if len(items) < pageSize {
+				break
+			}
+			offset += pageSize
 		}
-		for _, item := range items {
-			fn(item)
-		}
-		if len(items) < pageSize {
-			break
-		}
-		offset += pageSize
 	}
 	return nil
 }
@@ -423,8 +437,20 @@ func (s *Scanner) createItem(ctx context.Context, lib *db.Library, libRoot, path
 		Data: map[string]any{"item_id": itemID, "title": title, "library_id": lib.ID},
 	})
 
-	// Fetch metadata from TMDB (best-effort, don't fail the scan)
-	s.enrichMetadata(ctx, item)
+	// Metadata + image fetching:
+	//   - Episodes inherit visuals from their series — the series-
+	//     level enrichment in `ensureSeriesRow` already pulled the
+	//     show's poster + backdrop + logo. Searching TMDb again
+	//     per-episode with a butchered title ("Breaking.Bad.S01E01")
+	//     never finds a match and just burns rate-limit budget.
+	//     Future iteration: episode-level metadata via TMDb's
+	//     `/tv/{id}/season/{n}/episode/{m}` endpoint, keyed off the
+	//     series' external_ids.
+	//   - Movies + audio go through enrichMetadata as before; for
+	//     them the item title IS the searchable name.
+	if itemType != "episode" {
+		s.enrichMetadata(ctx, item)
+	}
 
 	return nil
 }

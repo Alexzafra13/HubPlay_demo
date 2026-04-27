@@ -61,6 +61,25 @@ func seasonKey(seriesID string, seasonNum int) string {
 // in-memory cache lookup most of the time — only the very first
 // encounter per series during the scan (or after a fresh server
 // boot) writes to the DB.
+//
+// On the new-row branch this ALSO triggers metadata + image
+// enrichment for the series. Why here and not at the episode level:
+//
+//   - The user sees `/series` first; it needs the poster + backdrop
+//     to look like a real library, not a wall of placeholder letters.
+//   - Per-episode TMDb search runs N times per series and butchers
+//     the title (`Breaking.Bad.S01E01.Pilot` → no match). Series-
+//     level search runs ONCE per series with the clean dir name
+//     (`Breaking Bad`) and the matcher actually finds it.
+//   - The image refresher iterates over series rows (parent_id IS
+//     NULL filter) and looks up `external_ids` per item. Without
+//     series-level enrichment those external_ids stay empty and the
+//     "Refresh images" admin button reports "0 actualizadas" — the
+//     exact symptom the user hit.
+//
+// Enrichment is best-effort: provider down / no API key / no match
+// all leave the row in DB without metadata, and a future scan can
+// retry via the `RefreshMetadata` admin endpoint.
 func (s *Scanner) ensureSeriesRow(ctx context.Context, lib *db.Library, cache *showCache, seriesName string) (string, error) {
 	cache.mu.Lock()
 	if id, ok := cache.series[seriesName]; ok {
@@ -87,6 +106,11 @@ func (s *Scanner) ensureSeriesRow(ctx context.Context, lib *db.Library, cache *s
 	cache.mu.Lock()
 	cache.series[seriesName] = id
 	cache.mu.Unlock()
+
+	// Series-level metadata + images. Best-effort, never blocks the
+	// scan — the series row exists either way; missing artwork is
+	// recoverable via the manual refresh button.
+	s.enrichMetadata(ctx, item)
 	return id, nil
 }
 

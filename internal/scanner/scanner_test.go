@@ -366,12 +366,85 @@ func TestScanLibrary_ShowsRescanIsIdempotent(t *testing.T) {
 		t.Errorf("re-scan should be idempotent, added %d rows", r2.Added)
 	}
 
-	// Sanity: still exactly 1 series + 1 season + 1 episode.
+	// Sanity: still exactly 1 series + 1 season + 1 episode. The
+	// season check is the regression guard for the
+	// `iterateLibraryItems` filter bug — it used to default to
+	// `parent_id IS NULL`, which silently excluded every season +
+	// episode from the cache pre-population pass. On re-scan the
+	// season cache was empty → ensureSeasonRow → fresh INSERT →
+	// duplicate season rows for every existing show.
 	series, _, _ := itemRepo.List(context.Background(), db.ItemFilter{
 		LibraryID: "lib-test", Type: "series", Limit: 10,
 	})
 	if len(series) != 1 {
 		t.Errorf("series count after rescan: got %d want 1", len(series))
+	}
+	seasons, _, _ := itemRepo.List(context.Background(), db.ItemFilter{
+		LibraryID: "lib-test", Type: "season", ParentID: series[0].ID, Limit: 10,
+	})
+	if len(seasons) != 1 {
+		t.Errorf("season count after rescan: got %d want 1 (duplicate seasons = cache pre-pop bug)", len(seasons))
+	}
+	episodes, _, _ := itemRepo.List(context.Background(), db.ItemFilter{
+		LibraryID: "lib-test", Type: "episode", Limit: 10,
+	})
+	if len(episodes) != 1 {
+		t.Errorf("episode count after rescan: got %d want 1", len(episodes))
+	}
+}
+
+func TestScanLibrary_ShowsRescanWithMultipleSeasons(t *testing.T) {
+	// Reported by user: tras escanear una librería con varias series y
+	// temporadas, /series mostraba duplicados de cada serie. Esa
+	// versión del test mantiene los rows de series cacheadas pero
+	// también verifica seasons + episodes para que el bug del filtro
+	// `parent_id IS NULL` en iterateLibraryItems no vuelva a colarse.
+	s, itemRepo, _ := newTestScanner(t)
+	root := t.TempDir()
+	for _, p := range []string{
+		"The Boys/Season 01/the.boys.s01e01.mkv",
+		"The Boys/Season 01/the.boys.s01e02.mkv",
+		"The Boys/Season 02/the.boys.s02e01.mkv",
+		"Stranger Things/Season 01/st.s01e01.mkv",
+		"Stranger Things/Season 01/st.s01e02.mkv",
+	} {
+		full := filepath.Join(root, p)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		createFile(t, full, "x")
+	}
+	lib := &db.Library{
+		ID: "lib-test", Name: "Test", ContentType: "shows",
+		Paths: []string{root},
+	}
+
+	// First scan creates the hierarchy.
+	if _, err := s.ScanLibrary(context.Background(), lib); err != nil {
+		t.Fatal(err)
+	}
+	// Second scan (no FS changes) must be a no-op at every level.
+	if _, err := s.ScanLibrary(context.Background(), lib); err != nil {
+		t.Fatal(err)
+	}
+
+	// Each assert below would have failed before the fix (every
+	// re-scan added a new copy of every season because cache.season
+	// was empty).
+	got := func(t string) int {
+		items, _, _ := itemRepo.List(context.Background(), db.ItemFilter{
+			LibraryID: "lib-test", Type: t, Limit: 100,
+		})
+		return len(items)
+	}
+	if got("series") != 2 {
+		t.Errorf("series rows: got %d want 2", got("series"))
+	}
+	if got("season") != 3 {
+		t.Errorf("season rows: got %d want 3 (1 per Season N dir)", got("season"))
+	}
+	if got("episode") != 5 {
+		t.Errorf("episode rows: got %d want 5", got("episode"))
 	}
 }
 
