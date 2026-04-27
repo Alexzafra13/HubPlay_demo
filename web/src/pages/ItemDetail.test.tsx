@@ -104,12 +104,14 @@ function makeUserData(overrides: Partial<UserData> = {}): UserData {
 }
 
 function makeItemDetail(overrides: Partial<ItemDetailT> = {}): ItemDetailT {
+  // No `user_data: null` key here — the field is now optional
+  // (matches what the backend serializes: key omitted, never null).
+  // Tests that need a populated user_data pass it via overrides.
   return {
     ...makeMediaItem(),
     duration_ticks: 18_000_000_000,
     media_streams: [],
     people: [],
-    user_data: null,
     ...overrides,
   };
 }
