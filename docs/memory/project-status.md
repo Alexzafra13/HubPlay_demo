@@ -1,6 +1,6 @@
 # Estado del proyecto
 
-> Snapshot: **2026-04-25** (matcher EPG + scheduler IPTV + review fixes + continuar viendo + program detail modal + streaming XMLTV + sqlc sweep) · Rama: `claude/review-pending-tasks-9Vh6U` · **tests: verde · lint: 0**
+> Snapshot: **2026-04-27** (live-tv UX rework: pestaña Ahora + mini-player con PiP + scroll infinito + chunking bulk-EPG + admin panels regroup + IPTV streaming parser/HTML guard) · Rama: `claude/iptv-channel-health` · **tests: 245 verdes · tsc: 0**
 
 ---
 
@@ -8,7 +8,174 @@
 
 > **Lee esto primero.** Resume qué cerramos, qué decidimos y qué toca.
 
-### Lo que cerramos esta rama (`claude/review-pending-tasks-9Vh6U`)
+### Lo que cerramos esta sesión (rama `claude/iptv-channel-health`)
+
+Tres commits sobre la rama de health (continúa donde se quedó la
+sesión del 25-abr). El alcance creció a un rework completo del
+surface `/live-tv` para que escalase a librerías de 22 000+ canales
+con un proveedor IPTV real cargado.
+
+**Commit 1 (`7ff5743`) — IPTV resilience backend**. Lo dejado
+pendiente del 25-abr ya commiteado:
+1. `ParseM3UStream(r, onChannel)` — parser por callback en
+   `internal/iptv/m3u.go`. El eager `ParseM3U` queda como wrapper
+   thin. Permite filtrar/persistir incrementalmente catálogos
+   M3U_PLUS de Xtream con cientos de miles de entradas sin tener
+   toda la lista en memoria.
+2. `ErrNotXMLTV` en `internal/iptv/xmltv.go` — sniff de los primeros
+   bytes para detectar prelude HTML. Antes el parser fallaba con un
+   "0 programs imported" silencioso cuando el upstream devolvía una
+   página de error (cuenta suspendida, IP bloqueada por orden
+   judicial ES, captive portal, rate-limit). Ahora el service-layer
+   mapea ese sentinel a un mensaje claro para el admin.
+
+**Commit 2 (`b76cc37`) — admin UI redesign**.
+- `LibrariesAdmin`: lista plana → tres bloques colapsables coloreados
+  por content_type (Películas amber, Series cyan, TV en vivo red).
+  El header colapsable es la banda entera; chevron + count chip;
+  reemplaza el intento previo de stripe 3px por card que era
+  invisible a esta densidad.
+- `LivetvAdminPanel`: default tab pinneado a "Fuentes EPG" en vez
+  de "Con problemas". El admin abre el panel a configurar EPG /
+  inspeccionar M3U; los unhealthy ya tienen su banner propio
+  arriba, lanzar la pestaña "fuego" como default era redundante.
+- `UnhealthyChannelsPanel`: añadido search + load-more. Era el único
+  panel que renderizaba la lista entera sin paginación;
+  `ChannelsWithoutEPGPanel` ya tenía ese pattern.
+
+**Commit 3 (`8be0ad6`) — `/live-tv` rework**. El cuerpo de la
+sesión, ~24 archivos. Cambios estructurales:
+
+1. **Pestaña "Ahora" como default** (`LiveNowView` nueva). Mosaico
+   vertical de canales con EPG-confirmed programa actual, ordenado
+   por: Favoritos / **Termina pronto** ⭐ / Empieza pronto / Nombre.
+   Filtro por chips (counts scoped a live-now, no a la librería) +
+   search del TopBar global que también busca en programa actual
+   ("telediario" encuentra al canal aunque no se llame así).
+2. **Player persistence** — Zustand store `liveTvPlayer` montado al
+   nivel de `AppLayout` con `<MiniPlayer>` corner-pinned. Esc /
+   back-button collapse al mini (audio sigue, sobrevives a `/movies`,
+   `/admin`, etc.). Click → expand de vuelta. X → stop real. PiP
+   nativo en `<OverlayHeader>` vía `requestPictureInPicture()`.
+   Atajos teclado ↑/↓ para zapear (surf list seedeado por el
+   surface caller).
+3. **Hero editorial** (`HeroSpotlight`). Carrusel + dots + auto-
+   rotate + autoplay HLS competing → 1 canal estático con backdrop
+   gradient + StreamPreview lazy-mount tras 800ms que respeta
+   `prefers-reduced-motion`. Inmediacy se mueve a la pestaña Ahora.
+   Mode "off" ya no se evapora silencioso → DiscoverView muestra
+   un hint "El destacado está oculto · Mostrar".
+4. **Header dinámico** por tab en `LiveTvTopBar`. Antes mentía:
+   "169 canales · 45 en directo" mientras la pestaña Ahora sólo
+   mostraba 45.
+5. **TopBarSlot fix de re-render loop** — el bug que silenciosamente
+   tragaba clicks de la sidebar desde `/live-tv`. Causa: contexto
+   único cuyo valor cambiaba en cada render, refiraba el effect del
+   page-consumer, generaba JSX nuevo, infinito. Solución: dos
+   contextos (`SetContentContext` writer estable + `ContentContext`
+   reader). El page que registra ya no se re-renderiza cuando
+   cambia el content; sólo el TopBar.
+6. **Escala** (esto es lo que hizo navegable la lib de 22 905):
+   - `usePagedItems<T>(all, step=60)` — IntersectionObserver +
+     sentinel + reset-on-input vía "compare during render". DOM
+     queda bounded a unos cientos de cards aunque la lista tenga
+     decenas de miles.
+   - `api.getBulkSchedule` chunkea en lotes de **1000** canales
+     (el backend tiene cap 5000 → `TOO_MANY_CHANNELS`). Paralelo,
+     mergea por `Object.assign`. El user vio spam de 400s con su
+     librería real.
+   - Search debounce 200 ms en `LiveNowView` para que typing no
+     barra 22 k entradas por tecla.
+   - Rails de Discover capadas a 30 cards; el título del rail es
+     ahora clickable (= "Ver todo") y lleva al grid vertical
+     paginado de esa categoría.
+
+7. **Pulido**: progress bar en `ChannelCard` 2→3 px en accent teal;
+   dedup now/next (Steins;Gate marathon style → muestra "Termina
+   HH:MM" cuando coinciden); logo dimmed con `saturate(.9)` +
+   max-h reducido para que el brand del provider no domine; chips
+   con underline animado L→R por hover (motion-reduce skip);
+   chip activo nunca se esconde aunque su count sea 0 (filtro
+   fantasma fix); skeleton silhouette en lugar de Spinner; stub
+   `matchMedia` en `test/setup.ts` para `usePrefersReducedMotion`.
+
+### Decisiones senior tomadas (registrar en architecture-decisions)
+
+- **Hero editorial vs live wall** → editorial. Inmediacy vive en su
+  propia pestaña (Ahora), no en el hero. La razón: tres motions
+  competing (rotate + autoplay + progress) burning attention y
+  bandwidth.
+- **Player state global, video element local**. El store
+  `liveTvPlayer` orquesta canal + expanded + surf list, pero el
+  `<video>` y la instancia de hls.js viven dentro de
+  `<ChannelPlayer>` y se remontan al cambiar entre overlay ↔ mini.
+  Aceptamos el ≤1 s de re-buffer para evitar el coste arquitectural
+  de portalear un video element entre dos subtrees con HLS in-flight.
+- **Paginación en lugar de virtualización (react-window) por ahora**.
+  Para 22-100 k canales con scroll vertical normal, sentinel +
+  IntersectionObserver da el mismo resultado sin añadir
+  dependencia. Si llega 100k+ o lag vuelve, virtualizar es el step.
+- **Bulk EPG sigue trayendo todos los canales (con chunking)** en
+  vez de fetch lazy por viewport. Deuda consciente: con 22 k
+  canales son ~23 requests paralelas y ~10 MB JSON desperdiciados
+  porque sólo verás EPG de los 60 visibles. Solución correcta:
+  IntersectionObserver dispara fetch del schedule del canal cuando
+  entra en viewport. Media tarde de trabajo. **Próxima sesión.**
+
+### Estado de operación / problema externo
+
+Usuario tiene cargados 22 905 canales de un provider IPTV (`pdmkibyg.
+xiagdns.com` → CNAME `neo.paixif.com` → 149.18.45.189). El backend
+no consigue conectar al upstream (`context canceled` <300 ms,
+`STATUS=000` en curl directo). Confirmado **bloqueo a nivel de ISP**
+(misma raíz que S173 del 25-abr — España bloquea IPTVs paid por
+orden judicial). Diagnóstico verificado:
+- DNS resuelve OK
+- TCP 80 falla instantáneamente (RST inmediato)
+- Streams públicos (cloudfront, streamingconnect.tv, goienamedia.eus)
+  siguen funcionando
+
+No es bug del código. Solución del usuario: VPN sólo para el
+contenedor, o cambiar de provider. **Posible mejora UX para próxima
+sesión**: banner global cuando >X% de `onFatalError` apunten al
+mismo dominio upstream → "Detectados muchos fallos. ¿Bloqueo del
+ISP? Prueba con VPN."
+
+### Cola priorizada para la siguiente sesión
+
+1. **Banner detector de bloqueo ISP** (1 h). Métrica simple en el
+   store o en un hook: si los últimos 5 fallos de stream cuentan ≥3
+   veces el mismo upstream host, mostrar aviso con info y enlace.
+2. **Lazy EPG por viewport** (½ tarde). Reemplaza el bulk schedule
+   global de 22 k canales por fetches por canal cuando entran en
+   viewport. Cambia ~10 MB de tráfico desperdiciado por ~50 KB
+   reales mostrados.
+3. **Surf list dinámico** (30 min). Hoy `openPlayer(ch, channels)`
+   pasa la lista entera. Cuando el usuario está en "Ahora ·
+   Informativos" debería surfear sólo informativos. Cada vista
+   (LiveNow, Discover, Favorites) llama a `setSurfList` en su
+   useEffect.
+4. **Alquilar atajos de teclado faltantes** (espacio play/pause, M
+   mute, F fullscreen, C captions). El `<video controls>` nativo
+   ya los expone con foco; con foco fuera del video no funcionan.
+   Hace falta wire en `PlayerOverlay` con `videoRef`.
+5. **Tab order / focus management** (½ tarde, ya en cola desde
+   antes). `inert` o `aria-hidden` en cards off-screen del rail
+   para que Tab no recorra el infierno.
+
+### Lo que NO he tocado a propósito (visión, semanas no horas)
+
+- **"Watch now" como home global** (no sólo de live-tv).
+- **Personalización por comportamiento** del hero / orden, en lugar
+  del menú Mode actual.
+- **Memoización fina de re-renders** por `useNowTick(30s)`. Hay que
+  profilear con DevTools antes de tocar nada.
+
+---
+
+## 👉 HANDOFF DE SESIONES ANTERIORES
+
+### Rama anterior (`claude/review-pending-tasks-9Vh6U`)
 
 Siete commits. Los seis features previos + un sqlc sweep que paga
 deuda estructural identificada en el review senior holístico
