@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Link, useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import { useContinueWatching, useLatestItems, useNextUp } from "@/api/hooks";
 import type { MediaItem } from "@/api/types";
 import { Skeleton } from "@/components/common";
 import { EpisodeCard } from "@/components/media";
+import { WatchTonightTile, pickWatchTonight } from "@/components/media/WatchTonightTile";
 
 // ─── Hero Banner ──────────────────────────────────────────────────────────────
 
@@ -320,6 +321,14 @@ export default function Home() {
   // Hero candidates: prefer continue watching, then latest items
   const heroItems = [...continueItems, ...latestList];
 
+  // Watch Tonight pick. Memo'd so the heuristic doesn't re-run on
+  // every keystroke / re-render — the inputs are query results that
+  // change only when react-query invalidates them.
+  const watchTonight = useMemo(
+    () => pickWatchTonight(continueItems, latestList, Date.now()),
+    [continueItems, latestList],
+  );
+
   const isLoading = continueWatching.isLoading && latestItems.isLoading;
   const hasError = continueWatching.isError || latestItems.isError || nextUp.isError;
 
@@ -354,6 +363,13 @@ export default function Home() {
 
       {/* Content rows */}
       <div className="flex flex-col gap-10 px-8 pb-12 md:px-12">
+        {/* Watch Tonight — single curated pick. Lives above the rails
+            so it's the first decision the user is offered after the
+            hero, before they have to choose from a wall of options. */}
+        {watchTonight && (
+          <WatchTonightTile pick={watchTonight} />
+        )}
+
         {/* Continue Watching */}
         {(continueWatching.isLoading || continueItems.length > 0) && (
           <Section title={t('home.continueWatching')}>

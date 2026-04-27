@@ -47,6 +47,15 @@
     "nextUp": "Next Up",
     "failedToLoad": "Failed to load content. Check your server connection."
   },
+  "watchTonight": {
+    "tonight": "For tonight",
+    "resume": "Pick up where you left off",
+    "resumeAt": "Resume from {{time}}",
+    "playAction": "Play",
+    "resumeAction": "Resume",
+    "resumeLabel": "Resume",
+    "recommendedLabel": "Recommended for tonight"
+  },
   "login": {
     "username": "Username",
     "password": "Password",

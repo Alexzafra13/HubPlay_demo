@@ -47,6 +47,15 @@
     "nextUp": "Siguiente",
     "failedToLoad": "Error al cargar el contenido. Comprueba la conexion del servidor."
   },
+  "watchTonight": {
+    "tonight": "Para esta noche",
+    "resume": "Continua donde lo dejaste",
+    "resumeAt": "Reanudar desde {{time}}",
+    "playAction": "Reproducir",
+    "resumeAction": "Reanudar",
+    "resumeLabel": "Reanudar",
+    "recommendedLabel": "Recomendado para esta noche"
+  },
   "login": {
     "username": "Usuario",
     "password": "Contrasena",
