@@ -1,7 +1,18 @@
 import { Link } from "react-router";
 import { useTranslation } from "react-i18next";
 import { useSystemStats } from "@/api/hooks";
+import type { SystemStats } from "@/api/types";
 import { Badge, Spinner, EmptyState } from "@/components/common";
+
+// Friendly labels for the canonical content_type vocabulary, mirrored
+// from SystemStatus. Kept duplicated to avoid importing across the
+// dashboard ↔ system-sub-tabs boundary; if a third caller appears,
+// lift to web/src/utils.
+const CONTENT_TYPE_LABELS: Record<string, string> = {
+  movies: "contentTypes.movies",
+  shows: "contentTypes.tvShows",
+  livetv: "contentTypes.liveTV",
+};
 
 // formatUptime — Plex-style "12d 3h 7m". Shared with SystemStatus; kept
 // duplicated here to avoid importing from a sibling page just for one
@@ -100,13 +111,11 @@ export default function DashboardAdmin() {
         />
       </Section>
 
-      {/* Inventory — filled in by Phase A2 (libraries section in
-          systemStats). */}
+      {/* Inventory — backed by the libraries section of /admin/system/stats.
+          Always rendered (even with zero libraries) so a fresh install
+          shows the empty state instead of a missing block. */}
       <Section title={t("admin.dashboard.inventory")}>
-        <EmptyState
-          title={t("admin.dashboard.inventoryComingSoon")}
-          description={t("admin.dashboard.inventoryComingSoonHint")}
-        />
+        <Inventory stats={stats} />
       </Section>
 
       {/* Quick actions — filled in by phases E/G. Today shows a single
@@ -139,5 +148,67 @@ function Section({ title, children }: { title: string; children: React.ReactNode
       </h3>
       {children}
     </section>
+  );
+}
+
+// Inventory — compact "how big is the catalogue?" rollup. Each card
+// shows the item count for one content type with a small caption for
+// the number of libraries inside. Empty state for fresh installs
+// nudges the user toward adding their first library.
+function Inventory({ stats }: { stats: SystemStats }) {
+  const { t } = useTranslation();
+  const l = stats.libraries;
+
+  if (l.total === 0) {
+    return (
+      <EmptyState
+        title={t("admin.dashboard.inventoryEmpty")}
+        description={t("admin.dashboard.inventoryEmptyHint")}
+        action={
+          <Link
+            to="/admin/libraries"
+            className="rounded-[--radius-md] bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover"
+          >
+            {t("admin.dashboard.actionGoToLibraries")}
+          </Link>
+        }
+      />
+    );
+  }
+
+  return (
+    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="flex flex-col gap-1 rounded-[--radius-lg] border border-border bg-bg-card p-5">
+        <span className="text-xs font-medium uppercase tracking-wider text-text-muted">
+          {t("admin.dashboard.inventoryTotal")}
+        </span>
+        <span className="text-2xl font-semibold text-text-primary tabular-nums">
+          {l.items_total.toLocaleString()}
+        </span>
+        <span className="text-xs text-text-muted">
+          {t("admin.dashboard.inventoryLibrariesCaption", { count: l.total })}
+        </span>
+      </div>
+      {l.by_type.map((bucket) => {
+        const labelKey = CONTENT_TYPE_LABELS[bucket.content_type];
+        const heading = labelKey ? t(labelKey) : bucket.content_type;
+        return (
+          <div
+            key={bucket.content_type}
+            className="flex flex-col gap-1 rounded-[--radius-lg] border border-border bg-bg-card p-5"
+          >
+            <span className="text-xs font-medium uppercase tracking-wider text-text-muted">
+              {heading}
+            </span>
+            <span className="text-2xl font-semibold text-text-primary tabular-nums">
+              {bucket.items.toLocaleString()}
+            </span>
+            <span className="text-xs text-text-muted">
+              {t("admin.system.libraryBucketHint", { count: bucket.count })}
+            </span>
+          </div>
+        );
+      })}
+    </div>
   );
 }

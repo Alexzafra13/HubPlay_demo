@@ -439,6 +439,7 @@ export interface SystemStats {
   runtime: SystemRuntimeStats;
   streaming: SystemStreamingStats;
   storage: SystemStorageStats;
+  libraries: SystemLibraryStats;
 }
 
 export interface SystemServerStats {
@@ -446,6 +447,12 @@ export interface SystemServerStats {
   go_version: string;
   started_at: string;
   uptime_seconds: number;
+  bind_address: string;
+  base_url: string;
+  /** ISO timestamp of the server's clock at the moment of the snapshot. */
+  server_time: string;
+  /** IANA timezone name the server's runtime uses. */
+  timezone: string;
 }
 
 export interface SystemDatabaseStats {
@@ -458,9 +465,31 @@ export interface SystemDatabaseStats {
 export interface SystemFFmpegStats {
   found: boolean;
   path: string;
+  /**
+   * Reflects the operator's `hardware_acceleration.enabled` config.
+   * When false, no accelerator detection has been run; the panel shows
+   * an actionable hint pointing at the right config key instead of a
+   * confusing "no accelerators detected" badge.
+   */
+  hw_accel_enabled: boolean;
   hw_accels_available: string[];
   hw_accel_selected: string;
   hw_accel_encoder: string;
+}
+
+export interface SystemLibraryStats {
+  total: number;
+  items_total: number;
+  by_type: SystemLibraryTypeStats[];
+}
+
+export interface SystemLibraryTypeStats {
+  /** "movies" | "shows" | "livetv" — same vocabulary as Library.content_type. */
+  content_type: string;
+  /** Number of libraries of this content type. */
+  count: number;
+  /** Total items across libraries of this content type. */
+  items: number;
 }
 
 export interface SystemRuntimeStats {

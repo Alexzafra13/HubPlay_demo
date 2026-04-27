@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -10,6 +12,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"hubplay/internal/db"
 	"hubplay/internal/stream"
 	"hubplay/internal/testutil"
 )
@@ -18,18 +21,46 @@ import (
 // Kept local to system_test.go so it doesn't collide with the streaming
 // fakes that live next to stream_test.go.
 type fakeSystemStreams struct {
-	active   int
-	max      int
-	hwResult stream.HWAccelResult
-	cacheDir string
+	active     int
+	max        int
+	hwEnabled  bool
+	hwResult   stream.HWAccelResult
+	cacheDir   string
 }
 
 func (f *fakeSystemStreams) ActiveSessions() int                  { return f.active }
 func (f *fakeSystemStreams) MaxTranscodeSessions() int            { return f.max }
 func (f *fakeSystemStreams) HWAccelInfo() stream.HWAccelResult    { return f.hwResult }
+func (f *fakeSystemStreams) HWAccelEnabled() bool                 { return f.hwEnabled }
 func (f *fakeSystemStreams) CacheDir() string                     { return f.cacheDir }
 
 var _ SystemStatsProvider = (*fakeSystemStreams)(nil)
+
+// fakeSystemLibs is a LibraryStatsProvider stub. counts is keyed by
+// library ID; missing IDs return 0 so the inventory rollup degrades
+// cleanly when a single library can't be counted.
+type fakeSystemLibs struct {
+	libs   []*db.Library
+	counts map[string]int
+	listErr error
+	countErr map[string]error
+}
+
+func (f *fakeSystemLibs) List(_ context.Context) ([]*db.Library, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	return f.libs, nil
+}
+
+func (f *fakeSystemLibs) ItemCount(_ context.Context, libraryID string) (int, error) {
+	if err := f.countErr[libraryID]; err != nil {
+		return 0, err
+	}
+	return f.counts[libraryID], nil
+}
+
+var _ LibraryStatsProvider = (*fakeSystemLibs)(nil)
 
 func newQuietLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -44,6 +75,9 @@ type systemStatsResponse struct {
 			Version       string `json:"version"`
 			GoVersion     string `json:"go_version"`
 			UptimeSeconds int64  `json:"uptime_seconds"`
+			BindAddress   string `json:"bind_address"`
+			BaseURL       string `json:"base_url"`
+			Timezone      string `json:"timezone"`
 		} `json:"server"`
 		Database struct {
 			OK        bool   `json:"ok"`
@@ -54,6 +88,7 @@ type systemStatsResponse struct {
 		FFmpeg struct {
 			Found             bool     `json:"found"`
 			Path              string   `json:"path"`
+			HWAccelEnabled    bool     `json:"hw_accel_enabled"`
 			HWAccelsAvailable []string `json:"hw_accels_available"`
 			HWAccelSelected   string   `json:"hw_accel_selected"`
 		} `json:"ffmpeg"`
@@ -72,6 +107,15 @@ type systemStatsResponse struct {
 			TranscodeCachePath  string `json:"transcode_cache_path"`
 			TranscodeCacheBytes int64  `json:"transcode_cache_bytes"`
 		} `json:"storage"`
+		Libraries struct {
+			Total      int `json:"total"`
+			ItemsTotal int `json:"items_total"`
+			ByType     []struct {
+				ContentType string `json:"content_type"`
+				Count       int    `json:"count"`
+				Items       int    `json:"items"`
+			} `json:"by_type"`
+		} `json:"libraries"`
 	} `json:"data"`
 }
 
@@ -87,8 +131,9 @@ func decodeStats(t *testing.T, body io.Reader) systemStatsResponse {
 func TestSystemHandler_Stats_ReportsServerAndRuntime(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	streams := &fakeSystemStreams{
-		active: 2,
-		max:    8,
+		active:    2,
+		max:       8,
+		hwEnabled: true,
 		hwResult: stream.HWAccelResult{
 			Available: []stream.HWAccelType{stream.HWAccelVAAPI, stream.HWAccelQSV},
 			Selected:  stream.HWAccelVAAPI,
@@ -104,7 +149,16 @@ func TestSystemHandler_Stats_ReportsServerAndRuntime(t *testing.T) {
 		t.Fatalf("seed db file: %v", err)
 	}
 
-	h := NewSystemHandler(database, streams, imageDir, dbPath, "test-9.9.9", newQuietLogger())
+	h := NewSystemHandler(SystemHandlerConfig{
+		DB:          database,
+		Streams:     streams,
+		ImageDir:    imageDir,
+		DBPath:      dbPath,
+		BindAddress: "0.0.0.0:8096",
+		BaseURL:     "https://hubplay.example.com",
+		Version:     "test-9.9.9",
+		Logger:      newQuietLogger(),
+	})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/system/stats", nil)
 	rr := httptest.NewRecorder()
@@ -151,13 +205,29 @@ func TestSystemHandler_Stats_ReportsServerAndRuntime(t *testing.T) {
 	if out.Data.Runtime.CPUCount <= 0 {
 		t.Errorf("cpu_count should be > 0, got %d", out.Data.Runtime.CPUCount)
 	}
+	if out.Data.Server.BindAddress != "0.0.0.0:8096" {
+		t.Errorf("bind_address: %q", out.Data.Server.BindAddress)
+	}
+	if out.Data.Server.BaseURL != "https://hubplay.example.com" {
+		t.Errorf("base_url: %q", out.Data.Server.BaseURL)
+	}
+	if out.Data.Server.Timezone == "" {
+		t.Errorf("timezone should be populated")
+	}
+	if !out.Data.FFmpeg.HWAccelEnabled {
+		t.Errorf("hw_accel_enabled should mirror the streams provider's flag")
+	}
 }
 
 func TestSystemHandler_Stats_ReportsDBError(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	_ = database.Close() // induce a Ping() error.
 
-	h := NewSystemHandler(database, nil, "", "", "v", newQuietLogger())
+	h := NewSystemHandler(SystemHandlerConfig{
+		DB:      database,
+		Version: "v",
+		Logger:  newQuietLogger(),
+	})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/system/stats", nil)
 	rr := httptest.NewRecorder()
@@ -177,7 +247,11 @@ func TestSystemHandler_Stats_ReportsDBError(t *testing.T) {
 
 func TestSystemHandler_Stats_NilStreams_ZeroEverything(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	h := NewSystemHandler(database, nil, "", "", "v", newQuietLogger())
+	h := NewSystemHandler(SystemHandlerConfig{
+		DB:      database,
+		Version: "v",
+		Logger:  newQuietLogger(),
+	})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/system/stats", nil)
 	rr := httptest.NewRecorder()
@@ -213,7 +287,12 @@ func TestSystemHandler_Stats_DirSizeWalksImageDir(t *testing.T) {
 		t.Fatalf("write b: %v", err)
 	}
 
-	h := NewSystemHandler(database, nil, imageDir, "", "v", newQuietLogger())
+	h := NewSystemHandler(SystemHandlerConfig{
+		DB:       database,
+		ImageDir: imageDir,
+		Version:  "v",
+		Logger:   newQuietLogger(),
+	})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/system/stats", nil)
 	rr := httptest.NewRecorder()
@@ -229,7 +308,12 @@ func TestSystemHandler_Stats_MissingImageDir_ZeroBytes(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	// Deliberately point at a non-existent path. dirSizeOrZero must
 	// swallow ErrNotExist and return 0 (typical first-boot scenario).
-	h := NewSystemHandler(database, nil, filepath.Join(t.TempDir(), "does-not-exist"), "", "v", newQuietLogger())
+	h := NewSystemHandler(SystemHandlerConfig{
+		DB:       database,
+		ImageDir: filepath.Join(t.TempDir(), "does-not-exist"),
+		Version:  "v",
+		Logger:   newQuietLogger(),
+	})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/system/stats", nil)
 	rr := httptest.NewRecorder()
@@ -241,5 +325,102 @@ func TestSystemHandler_Stats_MissingImageDir_ZeroBytes(t *testing.T) {
 	out := decodeStats(t, rr.Body)
 	if out.Data.Storage.ImageDirBytes != 0 {
 		t.Errorf("missing dir should yield 0 bytes, got %d", out.Data.Storage.ImageDirBytes)
+	}
+}
+
+func TestSystemHandler_Stats_LibrariesRollup(t *testing.T) {
+	database := testutil.NewTestDB(t)
+
+	libs := &fakeSystemLibs{
+		libs: []*db.Library{
+			{ID: "a", ContentType: "movies"},
+			{ID: "b", ContentType: "movies"},
+			{ID: "c", ContentType: "shows"},
+			{ID: "d", ContentType: "livetv"},
+		},
+		counts: map[string]int{
+			"a": 120,
+			"b": 80,
+			"c": 30,
+			"d": 240,
+		},
+	}
+
+	h := NewSystemHandler(SystemHandlerConfig{
+		DB:        database,
+		Libraries: libs,
+		Version:   "v",
+		Logger:    newQuietLogger(),
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/system/stats", nil)
+	rr := httptest.NewRecorder()
+	h.Stats(rr, req)
+
+	out := decodeStats(t, rr.Body)
+	if out.Data.Libraries.Total != 4 {
+		t.Errorf("libraries.total: %d want 4", out.Data.Libraries.Total)
+	}
+	if out.Data.Libraries.ItemsTotal != 470 {
+		t.Errorf("libraries.items_total: %d want 470", out.Data.Libraries.ItemsTotal)
+	}
+	if len(out.Data.Libraries.ByType) != 3 {
+		t.Fatalf("libraries.by_type: want 3 buckets, got %d", len(out.Data.Libraries.ByType))
+	}
+
+	// Sorted alphabetically: livetv, movies, shows.
+	wantOrder := []string{"livetv", "movies", "shows"}
+	for i, want := range wantOrder {
+		if out.Data.Libraries.ByType[i].ContentType != want {
+			t.Errorf("by_type[%d].content_type: %q want %q", i, out.Data.Libraries.ByType[i].ContentType, want)
+		}
+	}
+
+	// Movies bucket should aggregate both libraries.
+	for _, b := range out.Data.Libraries.ByType {
+		if b.ContentType == "movies" {
+			if b.Count != 2 || b.Items != 200 {
+				t.Errorf("movies bucket: count=%d items=%d, want 2/200", b.Count, b.Items)
+			}
+		}
+	}
+}
+
+func TestSystemHandler_Stats_LibrariesRollup_SkipsCountErrors(t *testing.T) {
+	// One library's ItemCount fails — the rollup should still report the
+	// other ones cleanly and never 500 the panel.
+	database := testutil.NewTestDB(t)
+
+	libs := &fakeSystemLibs{
+		libs: []*db.Library{
+			{ID: "ok", ContentType: "movies"},
+			{ID: "broken", ContentType: "movies"},
+		},
+		counts: map[string]int{"ok": 50},
+		countErr: map[string]error{
+			"broken": errors.New("simulated counter error"),
+		},
+	}
+
+	h := NewSystemHandler(SystemHandlerConfig{
+		DB:        database,
+		Libraries: libs,
+		Version:   "v",
+		Logger:    newQuietLogger(),
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/system/stats", nil)
+	rr := httptest.NewRecorder()
+	h.Stats(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("partial-failure rollup must still 200, got %d", rr.Code)
+	}
+	out := decodeStats(t, rr.Body)
+	if out.Data.Libraries.Total != 2 {
+		t.Errorf("total libs counted regardless of count error: got %d want 2", out.Data.Libraries.Total)
+	}
+	if out.Data.Libraries.ItemsTotal != 50 {
+		t.Errorf("only the working library contributes items: got %d want 50", out.Data.Libraries.ItemsTotal)
 	}
 }

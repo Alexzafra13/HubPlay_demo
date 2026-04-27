@@ -199,13 +199,31 @@ func NewRouter(deps Dependencies) http.Handler {
 				if deps.StreamManager != nil {
 					sysStreams = deps.StreamManager
 				}
+				var sysLibs handlers.LibraryStatsProvider
+				if deps.Libraries != nil {
+					sysLibs = deps.Libraries
+				}
 				dbPath := ""
 				imageDir := ""
+				bindAddress := ""
+				baseURL := ""
 				if deps.Config != nil {
 					dbPath = deps.Config.Database.Path
 					imageDir = filepath.Join(filepath.Dir(deps.Config.Database.Path), "images")
+					bindAddress = deps.Config.Server.Addr()
+					baseURL = deps.Config.Server.BaseURL
 				}
-				sysHandler := handlers.NewSystemHandler(deps.Database, sysStreams, imageDir, dbPath, deps.Version, deps.Logger)
+				sysHandler := handlers.NewSystemHandler(handlers.SystemHandlerConfig{
+					DB:          deps.Database,
+					Streams:     sysStreams,
+					Libraries:   sysLibs,
+					ImageDir:    imageDir,
+					DBPath:      dbPath,
+					BindAddress: bindAddress,
+					BaseURL:     baseURL,
+					Version:     deps.Version,
+					Logger:      deps.Logger,
+				})
 				r.Route("/admin/system", func(r chi.Router) {
 					r.Use(auth.RequireAdmin)
 					r.Get("/stats", sysHandler.Stats)

@@ -8,6 +8,15 @@ import { useTranslation } from "react-i18next";
 // the backend (image cache + transcode cache are filesystem walks).
 const REFETCH_MS = 30_000;
 
+// Friendly labels for the canonical content_type vocabulary. Anything we
+// haven't named falls back to the raw value so a future "music" library
+// renders as "music" instead of disappearing.
+const CONTENT_TYPE_LABELS: Record<string, string> = {
+  movies: "contentTypes.movies",
+  shows: "contentTypes.tvShows",
+  livetv: "contentTypes.liveTV",
+};
+
 // formatUptime turns seconds into a Plex-style "12d 3h 7m" string.
 // Days/hours collapse silently when zero so short uptimes don't show "0d".
 function formatUptime(seconds: number): string {
@@ -23,9 +32,9 @@ function formatUptime(seconds: number): string {
   return parts.join(" ");
 }
 
-// formatBytes — short human-readable size. We never need fractional KiB so
-// the rounding rule is "drop decimals below MiB, one decimal from MiB up".
-// Returns "—" for zero so missing/empty caches read clearly.
+// formatBytes — short human-readable size. Returns "—" for zero so
+// missing/empty caches read clearly. Sub-MiB is integer; MiB+ is one
+// decimal — the panel is at-a-glance, not a forensic tool.
 function formatBytes(n: number): string {
   if (!n || n <= 0) return "—";
   const units = ["B", "KiB", "MiB", "GiB", "TiB"];
@@ -36,6 +45,14 @@ function formatBytes(n: number): string {
     i++;
   }
   return i <= 1 ? `${Math.round(v)} ${units[i]}` : `${v.toFixed(1)} ${units[i]}`;
+}
+
+// formatServerTime — local time only, no date (the date is implied by the
+// 30s polling cadence). The TZ tag is rendered separately in the hint.
+function formatServerTime(iso: string): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return d.toLocaleTimeString();
 }
 
 interface StatCardProps {
@@ -81,9 +98,12 @@ function Section({ title, children }: SectionProps) {
 // SystemStatus — "what's going on with my server right now" at a glance.
 // Lives at /admin/system/status as the default sub-tab inside the System
 // page. Mirrors what Plex puts under Status > Dashboard: the server's
-// identity and a real-time health snapshot. Destructive actions
-// (signing-key rotation, backup, force-logout, etc.) live in the sibling
-// "advanced" sub-tab so the eye doesn't land on them by accident.
+// identity and a real-time health snapshot.
+//
+// Intentionally drops the Go-runtime power-user fields that the previous
+// iteration showed (goroutines, GC pause, go_version, OS/arch). They are
+// useful for debugging but noise for an admin who just wants to know
+// the server is alive.
 export default function SystemStatus() {
   const { t } = useTranslation();
   const {
@@ -141,6 +161,10 @@ export default function SystemStatus() {
       <Section title={t("admin.system.sectionStorage")}>
         <StorageCards stats={stats} />
       </Section>
+
+      <Section title={t("admin.system.sectionLibraries")}>
+        <LibraryCards stats={stats} />
+      </Section>
     </div>
   );
 }
@@ -156,9 +180,8 @@ function SystemHeader({ stats, dataUpdatedAt, isFetching, onRefresh }: HeaderPro
   const { t } = useTranslation();
 
   // Aggregate "is everything green?" — single traffic light. DB ping +
-  // FFmpeg detection are the two components an admin checks first when
-  // anything misbehaves; weighting them equally surfaces the symptom
-  // immediately.
+  // FFmpeg detection are the two an admin checks first when anything
+  // misbehaves; weighting them equally surfaces the symptom immediately.
   const dbOk = stats.database.ok;
   const ffmpegOk = stats.ffmpeg.found;
   const allHealthy = dbOk && ffmpegOk;
@@ -200,16 +223,37 @@ function ServerCards({ stats }: { stats: SystemStats }) {
   const dbOk = stats.database.ok;
   const ffmpegOk = stats.ffmpeg.found;
 
+  // BaseURL hint: when empty the operator hasn't set server.base_url —
+  // surface that as actionable copy so the admin knows what to edit
+  // instead of seeing a confusing blank value.
+  const baseURLValue = stats.server.base_url || "—";
+  const baseURLHint = stats.server.base_url
+    ? undefined
+    : t("admin.system.baseURLEmpty");
+
   return (
     <>
       <StatCard
         label={t("admin.system.version")}
         value={stats.server.version || "—"}
-        hint={stats.server.go_version}
       />
       <StatCard
         label={t("admin.system.uptime")}
         value={<span className="tabular-nums">{formatUptime(stats.server.uptime_seconds)}</span>}
+      />
+      <StatCard
+        label={t("admin.system.bindAddress")}
+        value={<span className="font-mono text-sm">{stats.server.bind_address || "—"}</span>}
+      />
+      <StatCard
+        label={t("admin.system.baseURL")}
+        value={<span className="font-mono text-sm">{baseURLValue}</span>}
+        hint={baseURLHint}
+      />
+      <StatCard
+        label={t("admin.system.serverTime")}
+        value={<span className="tabular-nums">{formatServerTime(stats.server.server_time)}</span>}
+        hint={`${t("admin.system.timezone")}: ${stats.server.timezone}`}
       />
       <StatCard
         label={t("admin.system.database")}
@@ -243,12 +287,27 @@ function StreamingCards({ stats }: { stats: SystemStats }) {
       ? t("admin.system.transcodeSlots", { active, max })
       : t("admin.system.transcodeUnlimited", { active });
 
-  // hw_accel_selected is the canonical wire string ("vaapi", "nvenc", "none").
+  // HW accel: three distinct states surfaced here.
+  //  1) Disabled in config         → actionable "enable in config" hint
+  //  2) Enabled but none detected  → "Software (libx264)" + Available "—"
+  //  3) Enabled and selected       → uppercase ID + encoder hint
   const selected = stats.ffmpeg.hw_accel_selected;
-  const accelLabel =
-    !selected || selected === "none"
-      ? t("admin.system.hwAccelNone")
-      : selected.toUpperCase();
+  const enabled = stats.ffmpeg.hw_accel_enabled;
+  let accelLabel: string;
+  let accelHint: string | undefined;
+  if (!enabled) {
+    accelLabel = t("admin.system.hwAccelDisabledLabel");
+    accelHint = t("admin.system.hwAccelDisabledHint");
+  } else if (!selected || selected === "none") {
+    accelLabel = t("admin.system.hwAccelNone");
+    accelHint = t("admin.system.hwAccelNoneHint");
+  } else {
+    accelLabel = selected.toUpperCase();
+    accelHint = stats.ffmpeg.hw_accel_encoder
+      ? `${t("admin.system.hwAccelEncoder")}: ${stats.ffmpeg.hw_accel_encoder}`
+      : undefined;
+  }
+
   const availableLabel =
     stats.ffmpeg.hw_accels_available.length > 0
       ? stats.ffmpeg.hw_accels_available.map((a) => a.toUpperCase()).join(", ")
@@ -264,11 +323,7 @@ function StreamingCards({ stats }: { stats: SystemStats }) {
       <StatCard
         label={t("admin.system.hwAccelSelected")}
         value={accelLabel}
-        hint={
-          stats.ffmpeg.hw_accel_encoder && selected !== "none"
-            ? `${t("admin.system.hwAccelEncoder")}: ${stats.ffmpeg.hw_accel_encoder}`
-            : undefined
-        }
+        hint={accelHint}
       />
       <StatCard
         label={t("admin.system.hwAccelAvailable")}
@@ -281,6 +336,10 @@ function StreamingCards({ stats }: { stats: SystemStats }) {
 function RuntimeCards({ stats }: { stats: SystemStats }) {
   const { t } = useTranslation();
   const r = stats.runtime;
+  // Intentionally slimmed down vs the previous iteration. The fields
+  // dropped (goroutines, GC pause, go_version, OS/arch) are still
+  // returned by the backend so a power user can curl them; they don't
+  // belong on the default admin view.
   return (
     <>
       <StatCard
@@ -289,14 +348,8 @@ function RuntimeCards({ stats }: { stats: SystemStats }) {
         hint={`${t("admin.system.memorySys")}: ${r.memory_sys_mb} MiB`}
       />
       <StatCard
-        label={t("admin.system.goroutines")}
-        value={<span className="tabular-nums">{r.goroutines}</span>}
-        hint={`${t("admin.system.gcPause")}: ${r.gc_pause_ms} ms`}
-      />
-      <StatCard
         label={t("admin.system.cpuCount")}
         value={<span className="tabular-nums">{r.cpu_count}</span>}
-        hint={`${t("admin.system.platform")}: ${r.os}/${r.arch}`}
       />
     </>
   );
@@ -305,23 +358,58 @@ function RuntimeCards({ stats }: { stats: SystemStats }) {
 function StorageCards({ stats }: { stats: SystemStats }) {
   const { t } = useTranslation();
   const s = stats.storage;
+  // Cache hint: when the size is zero, instead of just showing "—" we
+  // explain why (no scans yet, no transcodes yet). Avoids the "is this
+  // broken?" confusion on a fresh install.
+  const imageHint = s.image_dir_bytes > 0 ? s.image_dir_path : t("admin.system.cacheEmptyImages", { path: s.image_dir_path });
+  const transcodeHint = s.transcode_cache_bytes > 0 ? s.transcode_cache_path : t("admin.system.cacheEmptyTranscodes", { path: s.transcode_cache_path });
+
   return (
     <>
       <StatCard
         label={t("admin.system.imageDir")}
         value={<span className="tabular-nums">{formatBytes(s.image_dir_bytes)}</span>}
-        hint={s.image_dir_path}
+        hint={imageHint}
       />
       <StatCard
         label={t("admin.system.transcodeCache")}
         value={<span className="tabular-nums">{formatBytes(s.transcode_cache_bytes)}</span>}
-        hint={s.transcode_cache_path}
+        hint={transcodeHint}
       />
       <StatCard
         label={t("admin.system.databaseSize")}
         value={<span className="tabular-nums">{formatBytes(stats.database.size_bytes)}</span>}
         hint={stats.database.path}
       />
+    </>
+  );
+}
+
+function LibraryCards({ stats }: { stats: SystemStats }) {
+  const { t } = useTranslation();
+  const l = stats.libraries;
+
+  // Total + per-type rollup. Backend already sorts by_type alphabetically
+  // so the card order is stable across renders.
+  return (
+    <>
+      <StatCard
+        label={t("admin.system.totalLibraries")}
+        value={<span className="tabular-nums">{l.total}</span>}
+        hint={t("admin.system.totalItems", { count: l.items_total })}
+      />
+      {l.by_type.map((bucket) => {
+        const labelKey = CONTENT_TYPE_LABELS[bucket.content_type];
+        const heading = labelKey ? t(labelKey) : bucket.content_type;
+        return (
+          <StatCard
+            key={bucket.content_type}
+            label={heading}
+            value={<span className="tabular-nums">{bucket.items}</span>}
+            hint={t("admin.system.libraryBucketHint", { count: bucket.count })}
+          />
+        );
+      })}
     </>
   );
 }

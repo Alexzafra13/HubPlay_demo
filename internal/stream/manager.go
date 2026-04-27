@@ -299,6 +299,14 @@ func (m *Manager) HWAccelInfo() HWAccelResult {
 	return m.hwAccel
 }
 
+// HWAccelEnabled reports whether the operator turned HW acceleration on
+// in config. Distinct from HWAccelInfo() because "enabled but no
+// accelerators detected" is a different (and actionable) state from
+// "disabled in config" — the admin panel renders different copy for each.
+func (m *Manager) HWAccelEnabled() bool {
+	return m.cfg.HWAccel.Enabled
+}
+
 // CacheDir returns the resolved transcode cache directory. Useful for the
 // admin storage panel — same value the manager passes to the transcoder so
 // the operator sees what's actually in use, not a stale config value.
