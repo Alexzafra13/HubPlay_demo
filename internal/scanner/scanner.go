@@ -312,8 +312,8 @@ func (s *Scanner) processFile(ctx context.Context, lib *db.Library, libRoot, pat
 			return fpErr
 		}
 		if existing.Fingerprint == fp && existing.IsAvailable {
-			// File unchanged — but re-enrich if metadata is missing
-			// (e.g. provider API key was added after initial scan)
+			// File unchanged — re-enrich if metadata is missing
+			// (e.g. provider API key was added after initial scan).
 			s.enrichIfMissing(ctx, existing)
 			return nil
 		}

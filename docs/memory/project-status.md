@@ -1,10 +1,201 @@
 # Estado del proyecto
 
-> Snapshot: **2026-04-27** (live-tv UX rework: pestaña Ahora + mini-player con PiP + scroll infinito + chunking bulk-EPG + admin panels regroup + IPTV streaming parser/HTML guard) · Rama: `claude/iptv-channel-health` · **tests: 245 verdes · tsc: 0**
+> Snapshot: **2026-04-27** (movies/series review senior — 33 commits) · Rama: `claude/review-movies-series-feature-9npZH` · **tests: backend `-race` 100% verde · frontend 289/289 · tsc -b 0**
 
 ---
 
 ## 👉 HANDOFF PARA LA PRÓXIMA SESIÓN
+
+> **Lee esto primero.** Resume qué cerramos, qué decidimos y qué toca.
+
+### Lo que cerramos esta sesión (rama `claude/review-movies-series-feature-9npZH`)
+
+**33 commits** sobre la rama. Empezó como un *senior code review* del
+surface Movies / Series y derivó en un rework profundo del flujo
+end-to-end más dos bugs críticos que el usuario reportó al probar.
+
+#### Bloque A — Bugs catastróficos cerrados
+
+1. **`06bde24` — scanner persistía URLs remotas**. El scanner guardaba
+   `db.Image.path = img.URL` (URL TMDb cruda) en lugar de descargar a
+   disco. Cada vez que el navegador pedía un poster, hacía `307` →
+   `image.tmdb.org`. Privacy regression (filtra IP del usuario en cada
+   vista) + fragilidad operacional (TMDb cae → todos los posters se
+   rompen). Ahora el scanner usa `imaging.IngestRemoteImage` (mismo path
+   que `ImageRefresher`): SafeGet + EnforceMaxPixels + blurhash + atomic
+   write a `<imageDir>/<itemID>/<kind>_<hash16>.<ext>`. Path persistido =
+   `/api/v1/images/file/{id}` siempre. **Test de regresión duro**:
+   `TestFetchAndStoreImages_PersistsLocalPathNotURL`.
+
+2. **`56d18af` + `93c643e` — librería de Series 400 + admin invisible**.
+   Cross-stack mismatch: el web client mandaba `content_type: "tvshows"`
+   pero el backend validaba contra `"shows"` (`internal/library/service.go:343`).
+   Cada test pasaba aislado porque solo verificaba su propio stack.
+   Fix: backend acepta el alias **y** canonicaliza a `"shows"`; frontend
+   alineado al canónico (`api/types.ts`, `LibrariesAdmin.tsx`,
+   `LibrariesStep.tsx` + tests). El alias queda como red de seguridad.
+
+3. **`79c319e` — `/series` vacío**. El scanner solo creaba filas
+   `type=episode`, una por fichero, sin construir la jerarquía padre.
+   La query de `/series` filtraba por `type='series'` → 0 resultados.
+   Implementé el patrón Plex/Jellyfin: `<libRoot>/<Serie>/<Season N>/<file>`.
+   `internal/scanner/show_parser.go` (parser puro, ~25 tests) extrae
+   `{SeriesName, SeasonNumber, EpisodeNumber, EpisodeTitle}` del path.
+   `internal/scanner/show_hierarchy.go` (cache pre-poblado desde la DB
+   en cada `ScanLibrary`) hace lazy-create de filas series + season +
+   las cachea para el resto del scan. Idempotente: re-scan = 0 filas
+   nuevas. Soporta dirs en 4 idiomas (Season/Temporada/Saison/Staffel),
+   formatos `SxxExx` / `NxN` / `S01.E05`.
+
+#### Bloque B — Foundation arquitectónica
+
+| Commit | Tema |
+|---|---|
+| `697734c` | Dedupe Movies/Series → `pages/MediaBrowse.tsx` genérico (115 líneas duplicadas → 5 wrappers) |
+| `eb7795e` | `user_data` per-item en listings (backend + frontend, 4 tests). Antes el favorito siempre aparecía vacío en detail |
+| `bb8dc17` | TMDb/Fanart con cache (LRU 10k entries, 7d TTL) + backoff (Retry-After + jitter) + single-flight. 12 tests |
+| `06bde24` | Scanner descarga imágenes (B-A.1 arriba) + atomic writes |
+| `e27e60b` | Thumbnails se reapan al borrar imagen (cleanup glob) |
+| `bcc8fb7` | `is_locked` flag para imágenes — manual override sobrevive refresh (Plex parity). Migración 013 |
+| `4eb7b70` | Continue Watching filtra **near-complete (≥90%)** y **abandoned (>30d + <50%)**. Migración del SQL en `user_data.sql` |
+| `6bbbb64` | `provider.ImageResult.Source` se rellena en el Manager (no más URL sniffing) |
+
+#### Bloque C — Features visibles
+
+| Commit | Tema |
+|---|---|
+| `07fd29f` | Up Next overlay con countdown 5s antes del auto-advance |
+| `6d904db` | Quality picker en player (Auto/1080p/720p/...) cableado a hls.js levels |
+| `33c9f9c` | i18n del player (15 strings hardcoded → keys en/es) |
+| `75eee70` | Capítulos: `ffprobe -show_chapters` → DB → API → marcas en seek bar |
+| `782d233` | Endpoint `GET /stream/{id}/subtitles/external` + download (OpenSubtitles wired) |
+| `2b823e9` | HW accel autodetect ya **se usa**; antes se loggeaba y descartaba. Wired a transcoder |
+| `0f26fb0` | Trickplay backend: lazy generation por item, sprite + manifest, mutex per-item |
+| `444e7b6` | UI para subtítulos online (modal con búsqueda multi-idioma + `<track>` dinámico) |
+| `024586e` | Trickplay UI: miniatura sigue el cursor en seek bar + label HMS |
+| `6981a9c` | Filtros género/año/rating en MediaBrowse (panel + badge "(N)") |
+| `3dda6dc` | "Watch Tonight" tile en Home: 1 pick curado en lugar de 12 rails (resume si <14d, recomendado si no) |
+| `465298c` | Audio picker enriquecido ("English · TrueHD 7.1" en vez de solo "English") |
+
+#### Bloque D — Tests añadidos
+
+- Backend: `+~30 tests` netos. Cobertura nueva en `imaging/`,
+  `provider/` (cache transport), `library/` (image refresher con lock),
+  `scanner/` (jerarquía shows + parser), `db/` (continue-watching
+  filtros), `api/handlers/` (chapters, items lock, trickplay 503).
+- Frontend: `245 → 289 tests` (37 ficheros). Cobertura nueva en
+  `MediaGrid`, `ItemDetail`, `PosterCard`, `UpNextOverlay`,
+  `PlayerControls`, `MediaBrowseFilters`, `WatchTonightTile`.
+
+### Estado de operación
+
+- **Working tree limpio**, push hecho. La rama está lista para review
+  externo / merge.
+- **El usuario aún no ha probado todo**. La sesión incluyó dos bugs
+  destapados al probar a mitad de camino (los que están arriba en
+  Bloque A.2 y A.3) — es muy probable que un test funcional con
+  contenido real destape uno o dos más.
+- **QA checklist completo**: `manual-qa-movies-series-2026-04-27.md`
+  cubre los 33 commits con paths exactos, comandos curl, queries SQL.
+  Lectura obligada antes de tirar el server por primera vez.
+
+### Decisiones senior tomadas (registradas en architecture-decisions)
+
+- **ADR-002**: Imágenes descargadas siempre en disco. URL remota nunca
+  se sirve al cliente.
+- **ADR-003**: `is_locked` per-image, no per-item. Auto-set en cualquier
+  acción manual (upload + select). El refresher gate es per-kind.
+- **ADR-004**: Continue Watching filtra near-complete (≥90%) +
+  abandoned (>30d ∧ <50%). Items sin duración bypassan los filtros.
+- **ADR-005**: Show hierarchy se construye desde estructura de dirs
+  (Plex convention). No metadata → no jerarquía. Cache in-memory
+  por scan.
+- **ADR-006**: HW accel input flag (`-hwaccel <kind>`) sin
+  `-hwaccel_output_format`. Frames bajan a RAM tras decode, escalan
+  en SW, encoder HW reuploadeа. Tradeoff: más CPU que pipeline puro
+  on-device a cambio de no rewriting el filter graph.
+
+### Cola priorizada para la siguiente sesión
+
+#### Prioridad 0 — bloqueante operacional
+
+1. **Validación del usuario**. Bloqueante real: la sesión añadió 33
+   commits sin que tú los hayas probado en hardware. Sigue el QA
+   checklist. Si destapa bugs, se priorizan sobre todo lo demás.
+
+#### Prioridad 1 — quick wins de alto valor / esfuerzo bajo
+
+2. **Blurhash en `<PosterCard>`** (~30 min). Backend lo emite hace
+   semanas, frontend nunca lo consume. CSS background con el blurhash
+   decodificado mientras el JPG carga. Mejora LCP percibido.
+3. **WebP blurhash backend** (~1h). Hoy `imaging/blurhash.go` solo
+   decodifica JPEG/PNG. Logos de Fanart vienen en WebP → silently
+   empty. Importar `golang.org/x/image/webp` y decodificar.
+4. **"Nuevo desde tu última sesión" en Home** (~½ día). Tabla
+   `user_last_seen_at`, query `items WHERE added_at > user.last_seen_at`,
+   pequeño rail. Plex no lo tiene per-user.
+5. **Provider priority configurable** (~½ día). Campo `priority` ya
+   existe en `db.ProviderConfig`. Falta UI admin (drag-to-reorder) +
+   ordenar `m.images` por priority en `Manager.Register`.
+6. **Person/cast clickable** (~1 día). Backend ya guarda `people` con
+   roles. Frontend convierte cast en `<Link to="/people/:id">`, página
+   nueva con la filmografía.
+
+#### Prioridad 2 — durable foundation que mueve la aguja
+
+7. **Subtitle styling per-user** (~3 días). Tabla
+   `user_subtitle_prefs(user_id, font, size_pct, color, outline,
+   position_y)`. Render via CSS `::cue`. Plex web es horrible aquí —
+   diferenciador real.
+8. **Smart collections con DSL** (~1 semana). "Películas que viste hace
+   >2 años y querrías revisar", "Series abandonadas en S1E1". DSL
+   simple SQL-shaped (`rating >= 8 AND last_played_at < '2024-01-01'`).
+9. **Capability negotiation real para audio** (~½ día backend + ½ día
+   frontend). El cliente envía `MediaCapabilities.decodingInfo()` →
+   server skip-transcoder cuando el codec es decodificable nativamente.
+   Hoy el picker enriquece labels pero todo audio sigue transcodeándose.
+10. **Scope sweep tests para páginas no cubiertas** (½ día cada una).
+    `Home.test.tsx`, `Movies.test.tsx`, `Series.test.tsx`,
+    `VideoPlayer.test.tsx`, `EpisodeCard.test.tsx`. Las dos primeras
+    son críticas — son el primer surface del usuario.
+
+#### Prioridad 3 — diferenciadores estratégicos (semanas, no días)
+
+11. **Privacy stack completo** (B-1): modo offline puro (NFO-only),
+    egress allowlist, CSP estricto cliente-side, opcional bind a
+    interface VPN para outbound. ~1 semana spread.
+12. **Watch-together** (B-3.2): WebSocket-based sync sessions
+    (leader-followers, ±200ms drift correction). ~1 semana, alto
+    impacto emocional.
+13. **Intro skip detection**: audio fingerprinting cross-episode.
+    ~2 semanas. Feature signature.
+14. **Multi-version del mismo título**: 4K + 1080p agrupados, picker
+    en detail. Schema lo soporta hoy; UI/scanner no agrupan.
+15. **Priority enrichment queue + fsnotify**: scan que no bloquea
+    visibilidad. Items aparecen instantáneos, metadata llena
+    progresivamente vía SSE. ~1 semana.
+
+### Lo que NO hicimos (y por qué)
+
+- **Family/kids profiles** — el usuario lo excluyó explícitamente.
+- **Modo offline puro** — el usuario lo excluyó explícitamente.
+- **Apps nativas iOS/Android** — fuera de alcance (PWA + AirPlay/Cast
+  cubre el 90% sin coste de mantener tres apps).
+- **AI-generated metadata** — filtra datos al exterior, anti-marca para
+  un producto self-hosted.
+- **DRM/Widevine** — fuera de alcance.
+
+### Métricas
+
+- **Backend**: 100+ ficheros Go en producción. Tests `-race` verdes en
+  todos los paquetes. ~75 routes HTTP en `router.go`.
+- **Frontend**: 289 tests en 37 ficheros. Cobertura ~25% (estimado;
+  mucho más alta que el ~15% inicial).
+- **DB**: 13 migraciones. Última: `013_image_lock.sql`.
+
+---
+
+## 👉 HANDOFF DE SESIONES ANTERIORES
 
 > **Lee esto primero.** Resume qué cerramos, qué decidimos y qué toca.
 

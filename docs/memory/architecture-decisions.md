@@ -143,3 +143,344 @@ próximo PR las cumpla sin debate):
 Sentinel-to-AppError mapping sigue siendo job del repo
 (`ErrEPGSourceAlreadyAttached`, `ErrIPTVScheduledJobNotFound`,
 `ErrChannelNotFound`). sqlc no lo hace por nosotros.
+
+---
+
+## ADR-002 — Imágenes: descarga a disco siempre, URL remota nunca al cliente
+
+- **Fecha**: 2026-04-27
+- **Estado**: Aceptado
+- **Supersede**: —
+- **Contexto de descubrimiento**: Auditoría del pipeline de imágenes durante el review senior de movies/series.
+
+### Contexto
+
+El scanner persistía `db.Image.path = img.URL` (URL TMDb cruda) en lugar
+de descargar el binario al disco. El handler `ServeFile` aceptaba paths
+HTTP y respondía con `307` al cliente, así cada vista de poster era un
+round-trip browser → HubPlay → TMDb.
+
+Implicaciones:
+- **Privacidad**: cada poster filtra la IP / User-Agent del cliente al
+  proveedor externo. Para una app self-hosted "como Plex" eso traiciona
+  el modelo mental del usuario.
+- **Disponibilidad**: si TMDb cae o rate-limita, todos los posters
+  rompen. España bloquea ciertos hosts vía orden judicial; el problema
+  no es hipotético.
+- **Cache + backoff layer (ADR del cache transport TMDb/Fanart) es
+  inservible aquí**: ese RoundTripper solo cubre llamadas server-side,
+  no los redirects que sigue el navegador.
+
+### Decisión
+
+**Toda imagen que va a la DB pasa antes por disco.** El campo
+`db.Image.path` siempre tiene la forma `/api/v1/images/file/{id}`,
+nunca un URL externo.
+
+Implementación:
+1. `internal/imaging/IngestRemoteImage(dir, kind, url, logger)` es la
+   única vía de entrada. Runs SafeGet (SSRF + size + content-type),
+   `EnforceMaxPixels`, `ComputeBlurhash`, escribe atómico
+   (`AtomicWriteFile = write-tmp + rename`).
+2. **Scanner** y `ImageRefresher` ambos usan este helper. Un cambio
+   futuro en el pipeline solo se hace una vez.
+3. Test de regresión `TestFetchAndStoreImages_PersistsLocalPathNotURL`
+   falla si alguien re-introduce un `Path` con `http://`.
+4. El handler `ServeFile` redirige a URL externo solo si el path
+   empieza con "http" — esto queda como **fallback de migración**
+   para datos pre-existentes, no como contrato vivo. Una migración
+   futura podría limpiar esos paths legacy.
+
+### Consecuencias
+
+- Scan más lento (descarga sincrónica de imágenes nuevas), pero
+  scaning ya era I/O-bound. El delta es ~10-15s por 3000 items con
+  cache+backoff transport. Aceptable.
+- Disk usage crece con la librería. Bound por `MaxUploadBytes` (10 MB
+  por imagen) × items × kinds. Para una librería de 5000 películas con
+  primary + backdrop + logo eso es ~1.5 GB upper bound; en la práctica
+  ~300 MB. Plex tira más.
+- Atomic writes evitan el clásico "fichero corrupto si crash en mitad
+  de escritura". El `.tmp` queda solo si rename falla, y la próxima
+  ingest lo sobrescribe.
+
+### Alternativas descartadas
+
+- **Mantener URLs remotos como fallback "lazy"**: descartado. El
+  contrato "URL siempre apunta a HubPlay" simplifica todo el resto
+  de la pila (cache headers, blurhash placeholder, dedup futuro).
+
+---
+
+## ADR-003 — Image lock: per-image, auto-set en cualquier acción manual
+
+- **Fecha**: 2026-04-27
+- **Estado**: Aceptado
+- **Supersede**: —
+- **Migración**: `migrations/sqlite/013_image_lock.sql`
+
+### Contexto
+
+Sin un mecanismo de "lock", cualquier refresh (manual o programado)
+sobrescribía la curación del admin. El flow era:
+1. Admin sube poster custom o elige uno específico de TMDb candidates.
+2. Scheduler / next-scan / manual refresh corre.
+3. ImageRefresher decide "no tengo nada para esta kind" → descarga
+   nueva candidata top-scored → la marca primary → la del admin queda
+   no-primary y eventualmente se borra.
+
+Plex y Jellyfin ambos resuelven esto con un flag "lock" per-imagen.
+
+### Decisión
+
+**Flag `is_locked` en `images` (default 0).** Tres reglas:
+
+1. **Auto-lock en cualquier acción manual**: tanto Upload como Select
+   (de candidatos) marcan la fila resultante con `is_locked = true`.
+   El admin que CHOOSES algo está expresando voluntad explícita de
+   curación.
+2. **Refresher gate per-kind, no per-item**: si existe **alguna**
+   imagen locked para `(item, kind="primary")`, el refresher salta
+   "primary" para ese ítem. Otras kinds (backdrop, logo) siguen
+   refrescándose. Per-kind preserva el caso "tengo el poster que
+   quiero pero el backdrop puede actualizarse".
+3. **Toggle endpoint público**: `PUT /items/{id}/images/{imageId}/lock`
+   con `{locked: bool}`. El admin puede liberar el lock cuando quiera
+   permitir el refresh otra vez.
+
+Schema (migración 013):
+```sql
+ALTER TABLE images ADD COLUMN is_locked BOOLEAN NOT NULL DEFAULT 0;
+CREATE INDEX idx_images_item_type_locked ON images(item_id, type, is_locked);
+```
+
+El índice es la pata caliente: el refresher consulta
+`HasLockedImageForKind(item_id, kind)` para cada `(item, kind)` en el
+batch. Sin índice, full-scan por consulta.
+
+### Consecuencias
+
+- Un admin que quiere "que se actualice todo" tiene que des-lockear
+  manualmente. Tradeoff aceptable: el caso común es "que no se
+  actualice lo que yo elegí".
+- Tests verifican el contrato: `TestImageRefresher_SkipsLockedKinds`
+  pin tanto el skip de la kind locked **como** el flujo normal en
+  otra kind del mismo item.
+
+### Alternativas descartadas
+
+- **Lock per-item** (un solo flag que bloquea todas las kinds):
+  rechazado. El usuario que sube un poster custom raramente quiere
+  bloquear también backdrop y logo — esos pueden mejorar con un
+  refresh.
+- **Lock implícito por provider** (provider `local`/`upload` siempre
+  inmune al refresher): rechazado por ser frágil. El admin que hace
+  Select de un candidate TMDb también está manualmente eligiendo, y
+  con lock implícito no quedaría protegido.
+
+---
+
+## ADR-004 — Continue Watching filtra near-complete y abandoned
+
+- **Fecha**: 2026-04-27
+- **Estado**: Aceptado
+
+### Contexto
+
+El SQL original de Continue Watching era literal:
+```sql
+WHERE ud.completed = 0 AND ud.position_ticks > 0 AND i.is_available = 1
+```
+
+Resultado tras 6+ meses de uso real: rail de 30+ "zombies" — episodios
+medio vistos hace dos años, películas paradas a falta de 2 minutos pero
+nunca marcadas como vistas, intentos abandonados de la S1E1 de tres
+series distintas. La señal real ("¿qué estoy viendo ahora?") quedaba
+sepultada bajo el ruido.
+
+Plex y Jellyfin ambos tienen heurísticas similares; ninguno las
+documenta bien.
+
+### Decisión
+
+Dos filtros adicionales en el SQL, ambos integer-safe (sin floats):
+
+1. **Near-complete drop**: `position_ticks * 100 >= duration_ticks * 90`.
+   Si vimos ≥90% del runtime, asumimos que terminamos. El último 5-10%
+   son créditos / outro que el usuario suele saltar; nunca llegan a
+   `completed = 1`.
+
+2. **Abandoned drop**: `last_played_at < threshold AND
+   position_ticks * 2 < duration_ticks`. El threshold se pasa como
+   parámetro desde Go (`db.AbandonedAfter = 30 * 24h` por defecto,
+   var package-level para futura config / per-user). Si pasaron 30
+   días Y vimos <50%, el usuario pasó página.
+
+3. **Items con `duration_ticks = 0` bypassan ambos filtros**. Sin
+   duración no podemos razonar sobre progreso; preferimos surfacearlo
+   a hacerlo desaparecer silente.
+
+Implementación: query en `internal/db/queries/user_data.sql` (sqlc
+hand-edited a `sqlc/user_data.sql.go` porque el binario sqlc no está
+en el build env, pero la forma es idéntica al regen).
+
+### Consecuencias
+
+- En cuenta real con historial denso: el rail pasa de ~30 zombies a
+  ~3-5 reales sin ninguna acción del usuario.
+- Los thresholds (90%, 30d, 50%) no son configurables por usuario hoy.
+  `AbandonedAfter` se puede sobrescribir desde main.go como package-
+  level var; la mitad-de-progreso y el 90% están hardcoded en SQL.
+- Tres tests dedicados: drop near-complete, drop abandoned, keep
+  unknown-duration. Las constantes son visibles desde Go.
+
+### Alternativas descartadas
+
+- **Filtro client-side**: rechazado. Cargaríamos al cliente filas que
+  el server tendría que devolver en el rail Y que después el cliente
+  esconde — ancho de banda inútil, peor scrolling.
+- **Heurísticas más complejas** (¿es serie? ¿hace cuánto vio el último
+  episodio? ¿es viernes?): rechazado por ahora — añade ruido
+  diagnóstico ("¿por qué no aparece esto?") sin valor demostrable
+  hasta que tengamos datos de uso.
+
+---
+
+## ADR-005 — Show hierarchy: derivada de estructura de directorios
+
+- **Fecha**: 2026-04-27
+- **Estado**: Aceptado
+
+### Contexto
+
+El scanner procesaba shows como ficheros sueltos: una fila
+`type=episode` por `.mkv`, sin parent. La query de `/series` filtra
+`type='series'` → 0 resultados. El usuario intentó usar la app y vio
+una pantalla vacía.
+
+Plex / Jellyfin / Kodi todos derivan jerarquía del filesystem
+(convención de facto):
+```
+<libRoot>/<Series Name>/<Season N>/<file>.ext
+```
+
+### Decisión
+
+**El scanner detecta jerarquía desde el path del fichero.**
+
+1. **Parser puro** (`internal/scanner/show_parser.go`):
+   - Extrae `{SeriesName, SeasonNumber, EpisodeNumber, EpisodeTitle, OK}`
+     del path.
+   - Reconoce `SxxExx`, `NxN`, `S01.E05`, dirs en 4 idiomas
+     (Season/Temporada/Saison/Staffel) + `S01` / `Season01` corto.
+   - Cuando dir tiene número de season y filename solo el de episode
+     (`Season 03/05.mkv`), combina los dos.
+   - Cuando ambos están y discrepan (Doctor Who 2005 numerado por año
+     en filename pero por temporada real en dir), **el dir gana** —
+     fuente más estable.
+   - `OK = false` cuando el path no encaja (file en raíz, layout
+     extraño): el caller crea la fila episode sin parent. Mejor
+     surfacear sin jerarquía que perder el fichero.
+
+2. **Cache pre-poblado por scan** (`internal/scanner/show_hierarchy.go`):
+   - `showCache` mantiene los IDs de series + season ya conocidos.
+   - Al inicio de `ScanLibrary`, la pasada de
+     `iterateLibraryItems` (que ya existía para detectar removidos)
+     siembra el cache desde filas existentes en DB.
+   - Durante el walk, `ensureSeriesRow` y `ensureSeasonRow` consultan
+     el cache — solo escriben a DB en miss. Re-scan idempotente: 0
+     queries de inserción.
+   - Mutex defensivo aunque ScanLibrary sea single-threaded (libs
+     paralelas tienen caches separados, pero el patrón es free).
+
+3. **`db.Item.ParentID` linka**. No hay `series_id` propio en
+   `db.Item` — la relación es:
+   `episode.parent_id = season.id`,
+   `season.parent_id = series.id`,
+   `series.parent_id = ""`.
+   El handler reconstruye la cadena cuando un cliente la pide.
+
+### Consecuencias
+
+- Una librería con flat layout (todos los ficheros en raíz) crea
+  episodios sin parent. No hay /series para esa librería.
+  Workaround: re-organizar manualmente a `<root>/<Show>/<Season N>/...`.
+- La detección **no consulta TMDb**. Eso es deliberado: el scanner
+  inicial es offline-friendly. El `MetadataMatcher` (paso siguiente
+  del pipeline) puede mejorar el `Title` después.
+- 25+ casos de test cubren los formatos comunes. Patrones nuevos
+  (release scenes con tags raros) caerán por defecto al lado seguro
+  (`OK = false` → fichero sin parent).
+
+### Alternativas descartadas
+
+- **Parsing por TMDb match**: rechazado. Acopla creación de filas a
+  disponibilidad de internet + API key configurada. Plex tiene
+  exactamente este problema y produce librerías rotas en setup
+  inicial.
+- **Series-id explícito en `db.Item`** (en vez de derivar via parent
+  chain): rechazado. Duplica información que ya está en el grafo.
+  La query "todos los episodios de esta serie" vive en SQL con un
+  JOIN doble — tolerable.
+
+---
+
+## ADR-006 — HW accel: input-side `-hwaccel` sin `-hwaccel_output_format`
+
+- **Fecha**: 2026-04-27
+- **Estado**: Aceptado
+
+### Contexto
+
+`stream.DetectHWAccel` ya probaba VAAPI / NVENC / QSV / VideoToolbox al
+arranque y verificaba con un frame de prueba. Pero el resultado se
+loggeaba en main.go y se descartaba — el transcoder seguía usando
+`libx264`. Cualquier máquina con GPU tenía 0% utilización durante
+transcodes.
+
+Wire correcto requiere decidir qué tan agresivo se va con el
+hardware path.
+
+### Decisión
+
+**Encoder swap + input-side `-hwaccel <kind>` para VAAPI/QSV/NVENC.
+NO `-hwaccel_output_format`. NO `-vf scale_xxx` HW-specific.**
+
+```
+ffmpeg -hwaccel cuda -i input.mkv -c:v h264_nvenc -vf scale=W:H:... ...
+```
+
+Versus el "modo agresivo":
+```
+ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i input.mkv \
+  -vf scale_cuda=W:H -c:v h264_nvenc ...
+```
+
+El segundo es más rápido (frames nunca tocan RAM del sistema) pero
+exige rewriting el filter graph entero por backend HW. El primero
+deja los frames bajar a RAM tras decode, escala con el filter SW
+existente, y el encoder HW reuploadeа antes de codificar.
+
+VideoToolbox **no recibe `-hwaccel`** (Apple solo provee encoder, no
+decoder pipeline declarable así).
+
+### Consecuencias
+
+- Speedup real en máquinas con GPU: típicamente 2-3× vs libx264, no
+  el 5-8× del modo agresivo. CPU baja del 100% al 20-30%, lo que ya
+  resuelve el caso "el ventilador parece un secador".
+- Filter graph se mantiene idéntico al SW path → mantenibilidad +
+  testeabilidad. Tres tests pin la concatenación de args por
+  encoder.
+- El "modo agresivo" queda como follow-up cuando alguien tenga
+  apetito por el rewrite.
+
+### Alternativas descartadas
+
+- **Modo agresivo desde el inicio**: rechazado. ~200 LOC de filter
+  por backend × 4 backends = 800 LOC de mantener, con bugs sutiles
+  (formato de pixel post-decode varía, el `format=nv12` antes de
+  hwupload depende del backend).
+- **Solo encoder swap, sin `-hwaccel`**: rechazado. El decode SW de
+  HEVC 10-bit es CPU-pesado; no aprovechar NVDEC / QSV decode es
+  dejar la mitad del beneficio sobre la mesa.

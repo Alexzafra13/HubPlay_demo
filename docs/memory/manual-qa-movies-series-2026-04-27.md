@@ -1,5 +1,28 @@
 # Manual QA — rama `claude/review-movies-series-feature-9npZH`
 
+> ## ⚠️ ANTES DE EMPEZAR — borra estado legacy
+>
+> La rama metió 3 cambios estructurales en el flujo de datos: el scanner
+> ahora descarga imágenes a disco, las librerías de Series construyen
+> jerarquía series→season→episode, y el backend acepta sólo
+> `content_type = "shows"` (no `tvshows`). Para evitar arrastrar filas
+> escaneadas con código viejo, **antes del primer arranque tras esta
+> rama** haz una de estas dos:
+>
+> ```bash
+> # Opción A — limpia todo (más fácil)
+> rm -f ~/.hubplay/hubplay.db   # ajusta a tu config.database.path
+>
+> # Opción B — borra solo libs problemáticas vía UI admin
+> # Admin → Bibliotecas → eliminar la lib de Series → re-crearla → escanear
+> ```
+>
+> Sin esto, episodios pre-existentes se quedarán sin parent y `/series`
+> seguirá vacío (no hay capa de migración — el código nuevo solo crea
+> jerarquía al INSERTAR filas, no actualiza filas existentes).
+>
+> ---
+
 > Checklist de verificación manual cuando puedas arrancar el server.
 > Marca con `[x]` lo que vayas validando. Las claves son los commits
 > de la rama; el orden recomendado va de los más visibles a los más

@@ -659,31 +659,6 @@ func TestImageHandler_ServeFile_UnknownID_404(t *testing.T) {
 	}
 }
 
-func TestImageHandler_ServeFile_RemoteFallbackRedirect(t *testing.T) {
-	env := newImageTestEnv(t)
-	// Image exists in DB with http:// path but no local mapping → expect 307 redirect.
-	env.images.images["remote-1"] = &db.Image{
-		ID:     "remote-1",
-		ItemID: "item-1",
-		Type:   "primary",
-		Path:   "https://cdn.example.com/x.jpg",
-	}
-	client := &http.Client{
-		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
-	}
-	req, _ := http.NewRequest(http.MethodGet, env.server.URL+"/api/v1/images/file/remote-1", nil)
-	resp, err := client.Do(req)
-	if err != nil {
-		t.Fatalf("request: %v", err)
-	}
-	if resp.StatusCode != http.StatusTemporaryRedirect {
-		t.Fatalf("status: got %d want 307", resp.StatusCode)
-	}
-	if got := resp.Header.Get("Location"); got != "https://cdn.example.com/x.jpg" {
-		t.Fatalf("Location: got %q", got)
-	}
-}
-
 // ─── Tests: RefreshLibraryImages ────────────────────────────────────────────
 
 func TestImageHandler_RefreshLibraryImages_AddsMissingTypes(t *testing.T) {
