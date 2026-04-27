@@ -39,6 +39,14 @@ interface VideoPlayerProps {
    * know about the backend tick convention).
    */
   chapters?: Array<{ startSeconds: number; title: string }>;
+  /**
+   * Audio MediaStream rows from the DB (already filtered to
+   * type === "audio"). Used to enrich the audio track picker labels
+   * with codec + channel count ("English · TrueHD 7.1") instead of
+   * the bare `name` hls.js exposes ("English"). Optional — without
+   * it the picker falls back to the bare name.
+   */
+  audioStreams?: import("@/api/types").MediaStream[];
   onClose: () => void;
   onEnded?: () => void;
 }
@@ -56,6 +64,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
   title,
   nextUp,
   chapters,
+  audioStreams,
   onClose,
   onEnded: onEndedCallback,
 }) => {
@@ -434,6 +443,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
           isMuted={isMuted}
           isFullscreen={isFullscreen}
           audioTracks={audioTracks}
+          audioStreams={audioStreams}
           subtitleTracks={subtitleTracks}
           qualityLevels={qualityLevels}
           chapters={chapters}

@@ -293,6 +293,7 @@ export default function ItemDetail() {
           }
           nextUp={nextUpInfo}
           chapters={chapterMarkers}
+          audioStreams={item.media_streams?.filter((s) => s.type === "audio")}
           onClose={handleClosePlayer}
           onEnded={handlePlayerEnded}
         />
