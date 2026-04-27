@@ -14,6 +14,13 @@ export interface SubtitleTrack {
   lang: string;
 }
 
+export interface QualityLevel {
+  id: number;        // index into hls.levels
+  height: number;    // 1080, 720, ...
+  bitrate: number;   // bits/sec
+  label: string;     // "1080p", "720p", "Source"
+}
+
 interface UseHlsOptions {
   videoRef: RefObject<HTMLVideoElement | null>;
   masterPlaylistUrl: string | null;
@@ -27,10 +34,14 @@ interface UseHlsReturn {
   error: string | null;
   audioTracks: AudioTrack[];
   subtitleTracks: SubtitleTrack[];
+  qualityLevels: QualityLevel[];
   currentAudioTrack: number;
   currentSubtitleTrack: number;
+  /** -1 = auto (ABR). Otherwise an index into qualityLevels. */
+  currentQuality: number;
   setAudioTrack: (id: number) => void;
   setSubtitleTrack: (id: number) => void;
+  setQuality: (id: number) => void;
 }
 
 export function useHls({
@@ -46,8 +57,13 @@ export function useHls({
   const [error, setError] = useState<string | null>(null);
   const [audioTracks, setAudioTracks] = useState<AudioTrack[]>([]);
   const [subtitleTracks, setSubtitleTracks] = useState<SubtitleTrack[]>([]);
+  const [qualityLevels, setQualityLevels] = useState<QualityLevel[]>([]);
   const [currentAudioTrack, setCurrentAudioTrack] = useState(0);
   const [currentSubtitleTrack, setCurrentSubtitleTrack] = useState(-1);
+  // hls.js convention: -1 means ABR / auto. We expose the same value
+  // so the UI doesn't have to translate between "Auto" and a magic
+  // index — selecting "Auto" sets it back to -1.
+  const [currentQuality, setCurrentQuality] = useState(-1);
 
   const setAudioTrackCb = useCallback((id: number) => {
     const hls = hlsRef.current;
@@ -63,6 +79,17 @@ export function useHls({
       hls.subtitleTrack = id;
       setCurrentSubtitleTrack(id);
     }
+  }, []);
+
+  const setQualityCb = useCallback((id: number) => {
+    const hls = hlsRef.current;
+    if (!hls) return;
+    // hls.js: writing -1 to currentLevel re-enables ABR; any
+    // non-negative value pins the player to that ladder rung. The
+    // local mirror is updated optimistically; LEVEL_SWITCHED will
+    // refine to the actual level the engine settled on.
+    hls.currentLevel = id;
+    setCurrentQuality(id);
   }, []);
 
   useEffect(() => {
@@ -100,7 +127,34 @@ export function useHls({
           }));
           setAudioTracks(aTracks);
           setCurrentAudioTrack(hls.audioTrack);
+
+          // Quality ladder. We expose the levels exactly once (the
+          // master playlist is parsed before the first segment plays)
+          // and rely on LEVEL_SWITCHED to keep currentQuality in sync
+          // when ABR or the user moves between rungs.
+          const levels: QualityLevel[] = hls.levels.map((l, idx) => ({
+            id: idx,
+            height: l.height,
+            bitrate: l.bitrate,
+            label: l.height > 0 ? `${l.height}p` : `${Math.round(l.bitrate / 1000)} kbps`,
+          }));
+          setQualityLevels(levels);
+          setCurrentQuality(hls.currentLevel); // -1 unless the engine pre-pinned
+
           video.play().catch(() => {});
+        });
+
+        hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => {
+          // Mirror hls.js's "we are now on level N" event. Note that
+          // even in ABR mode (currentLevel = -1) the engine still
+          // emits this with the concrete level it picked. We keep
+          // the user's selection (-1 = auto) by reading it back from
+          // hls.autoLevelEnabled rather than trusting data.level.
+          if (hls.autoLevelEnabled) {
+            setCurrentQuality(-1);
+          } else {
+            setCurrentQuality(data.level);
+          }
         });
 
         hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, () => {
@@ -179,9 +233,12 @@ export function useHls({
     error,
     audioTracks,
     subtitleTracks,
+    qualityLevels,
     currentAudioTrack,
     currentSubtitleTrack,
+    currentQuality,
     setAudioTrack: setAudioTrackCb,
     setSubtitleTrack: setSubtitleTrackCb,
+    setQuality: setQualityCb,
   };
 }

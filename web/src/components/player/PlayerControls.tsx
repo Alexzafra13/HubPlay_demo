@@ -1,5 +1,6 @@
 import { memo } from "react";
 import type { FC } from "react";
+import { useTranslation } from "react-i18next";
 import { TimeDisplay } from "./TimeDisplay";
 
 interface AudioTrack {
@@ -14,6 +15,13 @@ interface SubtitleTrack {
   lang: string;
 }
 
+interface QualityLevel {
+  id: number;
+  height: number;
+  bitrate: number;
+  label: string;
+}
+
 interface PlayerControlsProps {
   isPlaying: boolean;
   currentTime: number;
@@ -24,8 +32,11 @@ interface PlayerControlsProps {
   isFullscreen: boolean;
   audioTracks: AudioTrack[];
   subtitleTracks: SubtitleTrack[];
+  qualityLevels?: QualityLevel[];
   currentAudioTrack: number;
   currentSubtitleTrack: number;
+  /** -1 = auto / ABR. */
+  currentQuality?: number;
   onPlayPause: () => void;
   onSeek: (time: number) => void;
   onVolumeChange: (volume: number) => void;
@@ -33,6 +44,7 @@ interface PlayerControlsProps {
   onToggleFullscreen: () => void;
   onAudioTrackChange: (id: number) => void;
   onSubtitleTrackChange: (id: number) => void;
+  onQualityChange?: (id: number) => void;
   onClose: () => void;
   title?: string;
 }
@@ -131,6 +143,14 @@ function SubtitleIcon() {
   return (
     <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
       <path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4V6h16v12zM6 10h2v2H6v-2zm0 4h8v2H6v-2zm10 0h2v2h-2v-2zm-6-4h8v2h-8v-2z" />
+    </svg>
+  );
+}
+
+function QualityIcon() {
+  return (
+    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-9.46 14.5l-3.04-3.04 1.41-1.41 1.63 1.62 4.13-4.12 1.41 1.41-5.54 5.54z" />
     </svg>
   );
 }
@@ -291,8 +311,10 @@ const PlayerControls: FC<PlayerControlsProps> = ({
   isFullscreen,
   audioTracks,
   subtitleTracks,
+  qualityLevels = [],
   currentAudioTrack,
   currentSubtitleTrack,
+  currentQuality = -1,
   onPlayPause,
   onSeek,
   onVolumeChange,
@@ -300,9 +322,19 @@ const PlayerControls: FC<PlayerControlsProps> = ({
   onToggleFullscreen,
   onAudioTrackChange,
   onSubtitleTrackChange,
+  onQualityChange,
   onClose,
   title,
 }) => {
+  const { t } = useTranslation();
+  // Quality picker only earns its place when the player has more
+  // than one rung to choose from. With a single level the dropdown
+  // would be a UI lie ("Auto / 1080p" → both pick the same stream).
+  const qualityTracks = qualityLevels.map((l) => ({
+    id: l.id,
+    name: l.label,
+    lang: "",
+  }));
   return (
     <div className="absolute inset-0 flex flex-col justify-between z-10">
       {/* Gradient overlays for readability */}
@@ -389,6 +421,18 @@ const PlayerControls: FC<PlayerControlsProps> = ({
             offLabel="Off"
             onSelect={onSubtitleTrackChange}
           />
+
+          {/* Quality (HLS levels only — direct play has no ladder) */}
+          {qualityLevels.length > 1 && onQualityChange && (
+            <TrackSelector
+              icon={QualityIcon}
+              label={t("playerControls.quality")}
+              tracks={qualityTracks}
+              currentTrack={currentQuality}
+              offLabel={t("playerControls.qualityAuto")}
+              onSelect={onQualityChange}
+            />
+          )}
 
           {/* Fullscreen */}
           <button

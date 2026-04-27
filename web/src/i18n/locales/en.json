@@ -70,6 +70,10 @@
     "playIn": "Play in {{seconds}}s",
     "cancel": "Cancel auto-play"
   },
+  "playerControls": {
+    "quality": "Quality",
+    "qualityAuto": "Auto"
+  },
   "series": {
     "title": "Series",
     "searchPlaceholder": "Search series...",

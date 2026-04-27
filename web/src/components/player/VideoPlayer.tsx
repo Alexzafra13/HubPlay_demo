@@ -77,10 +77,13 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
     error,
     audioTracks,
     subtitleTracks,
+    qualityLevels,
     currentAudioTrack,
     currentSubtitleTrack,
+    currentQuality,
     setAudioTrack,
     setSubtitleTrack,
+    setQuality,
   } = useHls({
     videoRef,
     masterPlaylistUrl,
@@ -349,8 +352,10 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
           isFullscreen={isFullscreen}
           audioTracks={audioTracks}
           subtitleTracks={subtitleTracks}
+          qualityLevels={qualityLevels}
           currentAudioTrack={currentAudioTrack}
           currentSubtitleTrack={currentSubtitleTrack}
+          currentQuality={currentQuality}
           onPlayPause={togglePlayPause}
           onSeek={handleSeek}
           onVolumeChange={handleVolumeChange}
@@ -358,6 +363,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
           onToggleFullscreen={handleToggleFullscreen}
           onAudioTrackChange={setAudioTrack}
           onSubtitleTrackChange={setSubtitleTrack}
+          onQualityChange={setQuality}
           onClose={handleClose}
           title={title}
         />

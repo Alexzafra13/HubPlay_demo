@@ -70,6 +70,10 @@
     "playIn": "Reproducir en {{seconds}}s",
     "cancel": "Cancelar reproduccion automatica"
   },
+  "playerControls": {
+    "quality": "Calidad",
+    "qualityAuto": "Auto"
+  },
   "series": {
     "title": "Series",
     "searchPlaceholder": "Buscar series...",
