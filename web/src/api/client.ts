@@ -870,28 +870,27 @@ export class ApiClient {
   // Rich admin-only system snapshot. Backed by /admin/system/stats —
   // separate from /health because that one has to stay tiny for ops
   // tooling (Docker healthcheck, k8s liveness) while the panel can grow.
+  //
+  // Note: request<T> auto-unwraps the {"data": ...} envelope, so we
+  // type T as the inner payload, not the envelope.
   async getSystemStats(): Promise<SystemStats> {
-    const r = await this.request<{ data: SystemStats }>("GET", "/admin/system/stats");
-    return r.data;
+    return this.request<SystemStats>("GET", "/admin/system/stats");
   }
 
   // ─── Admin: signing keys ──────────────────────────────────────────────
 
   async listAuthKeys(): Promise<AuthKey[]> {
-    const r = await this.request<{ data: AuthKey[] }>("GET", "/admin/auth/keys");
-    return r.data;
+    return this.request<AuthKey[]>("GET", "/admin/auth/keys");
   }
 
   async rotateAuthKey(overlapSeconds?: number): Promise<RotateAuthKeyResponse> {
     const body = overlapSeconds === undefined ? undefined : { overlap_seconds: overlapSeconds };
-    const r = await this.request<{ data: RotateAuthKeyResponse }>("POST", "/admin/auth/keys/rotate", { body });
-    return r.data;
+    return this.request<RotateAuthKeyResponse>("POST", "/admin/auth/keys/rotate", { body });
   }
 
   async pruneAuthKeys(beforeSeconds?: number): Promise<{ pruned: number }> {
     const body = beforeSeconds === undefined ? undefined : { before_seconds: beforeSeconds };
-    const r = await this.request<{ data: { pruned: number } }>("POST", "/admin/auth/keys/prune", { body });
-    return r.data;
+    return this.request<{ pruned: number }>("POST", "/admin/auth/keys/prune", { body });
   }
 }
 
