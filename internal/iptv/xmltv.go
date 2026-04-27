@@ -19,12 +19,21 @@ package iptv
 // upstream.
 
 import (
+	"bufio"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"time"
 )
+
+// ErrNotXMLTV signals that the body the parser was handed is not an
+// XMLTV document — typically an HTML error page from the EPG provider
+// (account suspended, IP blocked by court order in ES, captive portal,
+// rate-limit, etc.). The service layer maps it to a friendly admin-
+// facing message instead of a generic XML decode error.
+var ErrNotXMLTV = errors.New("response is not an XMLTV document (got HTML/other)")
 
 // EPGData represents parsed EPG data from an XMLTV file. Returned by
 // the eager ParseXMLTV; the streaming path produces these elements
@@ -114,7 +123,19 @@ type xmlTVIcon struct {
 // tags). Does NOT abort on element-level decode failures — those are
 // reported via the handler-style log + skip path.
 func ParseXMLTVStream(r io.Reader, h EPGStreamHandler) (skippedPrograms int, err error) {
-	dec := xml.NewDecoder(r)
+	// Sniff first non-whitespace byte. If it is "<" *not* followed by
+	// "?xml" or an XML element, we are looking at HTML — almost
+	// certainly an error page from the EPG provider (same failure
+	// mode as the M3U side: account suspended, IP blocked, captive
+	// portal, rate-limit). XMLTV documents legitimately start with
+	// "<" too, so we look a bit further to distinguish "<!DOCTYPE
+	// html" / "<html" from a real XML preamble.
+	br := bufio.NewReaderSize(r, 4096)
+	if isHTML, perr := looksLikeHTML(br); perr == nil && isHTML {
+		return 0, ErrNotXMLTV
+	}
+
+	dec := xml.NewDecoder(br)
 	dec.CharsetReader = func(_ string, in io.Reader) (io.Reader, error) {
 		// Accept any charset declaration. Real-world XMLTV feeds
 		// occasionally claim "ISO-8859-1" but ship UTF-8; the Go
@@ -268,4 +289,72 @@ func parseXMLTVTime(s string) (time.Time, error) {
 		return t, nil
 	}
 	return time.Time{}, fmt.Errorf("invalid XMLTV time: %q", s)
+}
+
+// looksLikeHTML peeks at the head of the buffered reader (without
+// consuming) and returns true if the body looks like an HTML/error
+// page rather than an XMLTV document. We can't just check for "<"
+// because real XMLTV starts with "<?xml" or "<tv". Bytes are not
+// consumed — the xml.Decoder still sees the full stream.
+func looksLikeHTML(br *bufio.Reader) (bool, error) {
+	const maxScan = 512
+	prefix, err := br.Peek(maxScan)
+	if err != nil && err != io.EOF && len(prefix) == 0 {
+		return false, err
+	}
+	// Skip leading whitespace.
+	i := 0
+	for i < len(prefix) {
+		switch prefix[i] {
+		case ' ', '\t', '\r', '\n':
+			i++
+			continue
+		}
+		break
+	}
+	rest := prefix[i:]
+	if len(rest) == 0 || rest[0] != '<' {
+		// Not starting with '<' at all — let the xml decoder produce
+		// its own error. Common case: empty body.
+		return false, nil
+	}
+	// Lower-cased view for prefix matching.
+	head := bytes_toLowerASCII(rest, 32)
+	htmlSignals := []string{"<!doctype html", "<html", "<head", "<body", "<script", "<meta"}
+	for _, s := range htmlSignals {
+		if hasPrefix(head, s) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// bytes_toLowerASCII returns the first n bytes of b lower-cased
+// (ASCII-only). Avoids pulling in bytes.ToLower on a slice we don't
+// need to copy in full.
+func bytes_toLowerASCII(b []byte, n int) []byte {
+	if n > len(b) {
+		n = len(b)
+	}
+	out := make([]byte, n)
+	for i := 0; i < n; i++ {
+		c := b[i]
+		if c >= 'A' && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		out[i] = c
+	}
+	return out
+}
+
+func hasPrefix(b []byte, p string) bool {
+	if len(b) < len(p) {
+		return false
+	}
+	for i := 0; i < len(p); i++ {
+		if b[i] != p[i] {
+			return false
+		}
+	}
+	return true
 }

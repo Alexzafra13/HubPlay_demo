@@ -58,18 +58,20 @@ export function CategoryChips({
 
   return (
     <div
-      className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      className="flex gap-2 overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       role="tablist"
       aria-label={t("liveTV.categoriesAria", { defaultValue: "Categorías" })}
     >
       {order.map((cat) => {
         const count = counts[cat] ?? 0;
-        // "all" is always shown; every other chip (real category or
-        // virtual filter like "no-signal") is hidden when empty so
-        // libraries with healthy channels don't carry a useless chip.
-        if (cat !== "all" && count === 0) return null;
-
         const isActive = active === cat;
+        // Hide empty chips so the bar stays tight on libraries that
+        // only carry a subset of categories — UNLESS this is the
+        // currently active filter. If we hid the active chip, the
+        // user would be stuck on a "ghost" filter with no way to
+        // deselect it from the bar (only "Todos" stays visible).
+        if (cat !== "all" && count === 0 && !isActive) return null;
+        const swatch = categoryAccent[cat];
         return (
           <button
             key={cat}
@@ -77,19 +79,30 @@ export function CategoryChips({
             role="tab"
             aria-selected={isActive}
             onClick={() => onChange(cat)}
+            // The `::after` pseudo is a left-anchored 2px bar that draws
+            // from scaleX(0) → 1 on hover. Origin-left + transform keeps
+            // the animation compositor-only (no layout). Each chip carries
+            // its own swatch via the --chip-swatch CSS var so the bar
+            // matches the dot colour.
             className={[
-              "flex shrink-0 items-center gap-2 rounded-full border px-3.5 py-1.5 text-xs font-medium transition-colors",
+              "group relative flex shrink-0 items-center gap-2 overflow-hidden rounded-full border px-3.5 py-1.5 text-xs font-medium transition-colors",
+              // Animated underline on hover. `motion-reduce:` disables
+              // the transition + leaves the bar at its current position
+              // for users who asked for less motion.
+              "after:pointer-events-none after:absolute after:inset-x-3 after:bottom-1 after:h-[2px] after:origin-left after:scale-x-0 after:rounded-full after:bg-[var(--chip-swatch,var(--color-accent))] after:transition-transform after:duration-300 hover:after:scale-x-100",
+              "motion-reduce:after:transition-none motion-reduce:hover:after:scale-x-0",
               isActive
-                ? "border-tv-accent/60 bg-tv-accent/[0.12] text-tv-fg-0"
-                : "border-tv-line bg-tv-bg-1 text-tv-fg-1 hover:bg-tv-bg-2",
+                ? "border-accent/60 bg-accent-soft text-tv-fg-0 after:scale-x-100 after:bg-accent"
+                : "border-tv-line bg-tv-bg-1 text-tv-fg-1 hover:bg-tv-bg-2 hover:text-tv-fg-0",
             ].join(" ")}
+            style={{ ["--chip-swatch" as string]: swatch }}
           >
             <span
               className="h-1.5 w-1.5 rounded-full"
               style={{
-                backgroundColor: categoryAccent[cat],
+                backgroundColor: swatch,
                 boxShadow:
-                  cat === "all" ? `0 0 6px ${categoryAccent[cat]}` : undefined,
+                  cat === "all" ? `0 0 6px ${swatch}` : undefined,
               }}
               aria-hidden="true"
             />

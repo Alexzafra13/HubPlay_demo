@@ -1,4 +1,4 @@
-import { Fragment, useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import type { FormEvent } from "react";
 import { LivetvAdminPanel } from "@/components/admin/LivetvAdminPanel";
 import type { ContentType, Library } from "@/api/types";
@@ -123,17 +123,86 @@ function scanStatusVariant(status: string) {
   }
 }
 
-function contentTypeBadge(type: string) {
-  switch (type) {
-    case "movies":
-      return "default" as const;
-    case "tvshows":
-      return "default" as const;
-    case "livetv":
-      return "live" as const;
-    default:
-      return "default" as const;
+// Section descriptors for the libraries page. Movies / Series / Live TV
+// each get their own coloured collapsible header so the three categories
+// are obvious at a glance — amber for movies, cyan for series, red for
+// livetv (palette pulled from globals.css). Each section is a button: the
+// admin can fold sections they don't care about right now (e.g. collapse
+// "Películas" while wiring EPG sources for Live TV).
+const LIBRARY_SECTIONS: {
+  type: ContentType;
+  labelKey: string;
+  // Tailwind classes baked into the descriptor so we never compose colour
+  // tokens by string concat (Tailwind v4's JIT can't see those).
+  headerClass: string;
+  dotClass: string;
+  textClass: string;
+}[] = [
+  {
+    type: "movies",
+    labelKey: "contentTypes.movies",
+    headerClass: "bg-warning/5 border-warning/30 hover:bg-warning/10",
+    dotClass: "bg-warning",
+    textClass: "text-warning",
+  },
+  {
+    type: "tvshows",
+    labelKey: "contentTypes.tvShows",
+    headerClass: "bg-accent-light/5 border-accent-light/30 hover:bg-accent-light/10",
+    dotClass: "bg-accent-light",
+    textClass: "text-accent-light",
+  },
+  {
+    type: "livetv",
+    labelKey: "contentTypes.liveTV",
+    headerClass: "bg-live/5 border-live/30 hover:bg-live/10",
+    dotClass: "bg-live",
+    textClass: "text-live",
+  },
+];
+
+// Inline chevron — points right when collapsed, rotates 90° when open.
+// 14px is the visual weight that pairs with our 11–13px section labels.
+function SectionChevron({ open }: { open: boolean }) {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={[
+        "shrink-0 transition-transform duration-150",
+        open ? "rotate-90" : "",
+      ].join(" ")}
+      aria-hidden
+    >
+      <polyline points="7 4 13 10 7 16" />
+    </svg>
+  );
+}
+
+// originLabel returns the secondary identity of a library: the M3U host
+// for IPTV, the first filesystem path for media. Truncated on purpose —
+// the full value lives in the tooltip (originTitle).
+function originLabel(lib: Library): string {
+  if (lib.content_type === "livetv") {
+    if (!lib.m3u_url) return "";
+    try {
+      return new URL(lib.m3u_url).host;
+    } catch {
+      return lib.m3u_url;
+    }
   }
+  return (lib.paths ?? [])[0] ?? "";
+}
+
+function originTitle(lib: Library): string {
+  if (lib.content_type === "livetv") return lib.m3u_url ?? "";
+  return (lib.paths ?? []).join(", ");
 }
 
 // FilteredSelect — a native <select> whose option list is narrowed by a text
@@ -215,6 +284,20 @@ export default function LibrariesAdmin() {
   const [refreshMessage, setRefreshMessage] = useState<{ type: "success" | "error"; text: string; libId: string } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Library | null>(null);
   const [editTarget, setEditTarget] = useState<Library | null>(null);
+  // Sections are open by default; the admin can collapse the ones they
+  // aren't actively touching. Set instead of object so the toggle stays
+  // a one-liner and order doesn't matter.
+  const [collapsedSections, setCollapsedSections] = useState<Set<ContentType>>(
+    () => new Set(),
+  );
+  function toggleSection(type: ContentType) {
+    setCollapsedSections((prev) => {
+      const next = new Set(prev);
+      if (next.has(type)) next.delete(type);
+      else next.add(type);
+      return next;
+    });
+  }
 
   // Add library form state
   const [newName, setNewName] = useState("");
@@ -397,6 +480,225 @@ export default function LibrariesAdmin() {
     );
   }
 
+  // renderLibraryCard renders a single library row inside its section.
+  // Defined as a closure so every section reuses the same card body
+  // without prop-drilling all the mutation hooks. The card itself is
+  // intentionally neutral — section heading carries the type identity,
+  // so the card only needs name + meta + actions.
+  function renderLibraryCard(lib: Library) {
+    return (
+      <li
+        key={lib.id}
+        className="rounded-[--radius-lg] border border-border bg-bg-card overflow-hidden"
+      >
+        <div className="flex items-start gap-4 px-4 py-3">
+          <div className="min-w-0 flex-1">
+            <h3 className="font-medium text-text-primary truncate">
+              {lib.name}
+            </h3>
+            <div className="mt-1 flex items-center gap-2 text-xs text-text-muted min-w-0">
+              <span className="shrink-0">
+                <span className="tabular-nums text-text-secondary">
+                  {lib.item_count}
+                </span>{" "}
+                {lib.content_type === "livetv"
+                  ? t('admin.libraries.channelsLower', { defaultValue: 'canales' })
+                  : t('admin.libraries.itemsLower', { defaultValue: 'elementos' })}
+              </span>
+              {originLabel(lib) && (
+                <>
+                  <span aria-hidden className="h-0.5 w-0.5 rounded-full bg-border shrink-0" />
+                  <span
+                    className="font-mono truncate"
+                    title={originTitle(lib)}
+                  >
+                    {originLabel(lib)}
+                  </span>
+                </>
+              )}
+              {lib.content_type !== "livetv" && lib.scan_status && (
+                <>
+                  <span aria-hidden className="h-0.5 w-0.5 rounded-full bg-border shrink-0" />
+                  <Badge variant={scanStatusVariant(lib.scan_status)}>
+                    {lib.scan_status}
+                  </Badge>
+                </>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            {lib.content_type === "livetv" ? (
+              // ── Live TV row: refresh M3U + refresh EPG ──
+              // Filesystem scan and metadata/image refresh don't apply
+              // here; showing them would just yield dead buttons, so
+              // we route to the IPTV-specific actions instead.
+              <>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  isLoading={
+                    refreshM3U.isPending && refreshM3U.variables === lib.id
+                  }
+                  onClick={() =>
+                    refreshM3U.mutate(lib.id, {
+                      onSuccess: (data) =>
+                        setRefreshMessage({
+                          type: "success",
+                          text: t('admin.libraries.refreshM3USuccess', {
+                            defaultValue: `{{count}} canales importados`,
+                            count: data.channels_imported,
+                          }),
+                          libId: lib.id,
+                        }),
+                      onError: () =>
+                        setRefreshMessage({
+                          type: "error",
+                          text: t('admin.libraries.refreshM3UFailed', {
+                            defaultValue: 'No se pudo refrescar el M3U.',
+                          }),
+                          libId: lib.id,
+                        }),
+                    })
+                  }
+                  title={lib.m3u_url || undefined}
+                >
+                  {t('admin.libraries.refreshM3U', {
+                    defaultValue: 'Actualizar canales',
+                  })}
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  isLoading={
+                    refreshEPG.isPending && refreshEPG.variables === lib.id
+                  }
+                  disabled={!lib.epg_url}
+                  onClick={() =>
+                    refreshEPG.mutate(lib.id, {
+                      onSuccess: (data) =>
+                        setRefreshMessage({
+                          type: "success",
+                          text: t('admin.libraries.refreshEPGSuccess', {
+                            defaultValue: `{{count}} programas importados`,
+                            count: data.programs_imported,
+                          }),
+                          libId: lib.id,
+                        }),
+                      onError: () =>
+                        setRefreshMessage({
+                          type: "error",
+                          text: t('admin.libraries.refreshEPGFailed', {
+                            defaultValue: 'No se pudo refrescar la guía EPG.',
+                          }),
+                          libId: lib.id,
+                        }),
+                    })
+                  }
+                  title={
+                    lib.epg_url ||
+                    t('admin.libraries.noEPGURL', {
+                      defaultValue:
+                        'No hay URL EPG configurada en esta biblioteca.',
+                    })
+                  }
+                >
+                  {t('admin.libraries.refreshEPG', {
+                    defaultValue: 'Actualizar EPG',
+                  })}
+                </Button>
+              </>
+            ) : (
+              // ── Regular media library: scan + metadata + images ──
+              <>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  isLoading={
+                    scanLibrary.isPending &&
+                    scanLibrary.variables?.id === lib.id &&
+                    !scanLibrary.variables?.refreshMetadata
+                  }
+                  disabled={lib.scan_status === "scanning"}
+                  onClick={() => scanLibrary.mutate({ id: lib.id })}
+                >
+                  {t('admin.libraries.scan')}
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  isLoading={
+                    scanLibrary.isPending &&
+                    scanLibrary.variables?.id === lib.id &&
+                    !!scanLibrary.variables?.refreshMetadata
+                  }
+                  disabled={lib.scan_status === "scanning"}
+                  onClick={() => scanLibrary.mutate({ id: lib.id, refreshMetadata: true })}
+                  title={t('admin.libraries.refreshMetadataTooltip')}
+                >
+                  {t('admin.libraries.refreshMetadata')}
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  isLoading={
+                    refreshImages.isPending &&
+                    refreshImages.variables?.libraryId === lib.id
+                  }
+                  disabled={lib.scan_status === "scanning"}
+                  onClick={() =>
+                    refreshImages.mutate(
+                      { libraryId: lib.id },
+                      {
+                        onSuccess: (data) =>
+                          setRefreshMessage({
+                            type: "success",
+                            text: t('admin.libraries.refreshImagesSuccess', { count: data.updated }),
+                            libId: lib.id,
+                          }),
+                        onError: () =>
+                          setRefreshMessage({
+                            type: "error",
+                            text: t('admin.libraries.refreshImagesFailed'),
+                            libId: lib.id,
+                          }),
+                      },
+                    )
+                  }
+                >
+                  {t('admin.libraries.refreshImages')}
+                </Button>
+              </>
+            )}
+            <span aria-hidden className="mx-1 h-5 w-px bg-border" />
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => openEditModal(lib)}
+            >
+              {t('common.edit')}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-text-muted hover:text-error"
+              onClick={() => setDeleteTarget(lib)}
+            >
+              {t('common.delete')}
+            </Button>
+          </div>
+        </div>
+        {lib.content_type === "livetv" && (
+          <div className="border-t border-border bg-bg-card/40 px-4 py-3">
+            <LivetvAdminPanel
+              libraryId={lib.id}
+              totalChannels={lib.item_count}
+            />
+          </div>
+        )}
+      </li>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-6">
       {/* Header */}
@@ -421,221 +723,57 @@ export default function LibrariesAdmin() {
         </div>
       )}
 
-      {/* Table */}
+      {/* Libraries grouped by content type. Each section is a coloured
+          collapsible panel — amber for Películas, cyan for Series, red
+          for TV en vivo. Click the header to fold a section out of the
+          way; useful when one category dominates (a Spanish IPTV admin
+          may have 3 livetv libraries and only 1 movies library). Empty
+          sections are skipped entirely. */}
       {libraries && libraries.length > 0 ? (
-        <div className="overflow-x-auto rounded-[--radius-lg] border border-border">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border bg-bg-elevated text-left text-text-muted">
-                <th className="px-4 py-3 font-medium">{t('admin.libraries.name')}</th>
-                <th className="px-4 py-3 font-medium">{t('admin.libraries.type')}</th>
-                <th className="px-4 py-3 font-medium">{t('admin.libraries.path')}</th>
-                <th className="px-4 py-3 font-medium text-right">{t('admin.libraries.itemCount')}</th>
-                <th className="px-4 py-3 font-medium">{t('admin.libraries.scanStatus')}</th>
-                <th className="px-4 py-3 font-medium text-right">{t('admin.libraries.actions')}</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {libraries.map((lib) => (
-                <Fragment key={lib.id}>
-                <tr
-                  className="bg-bg-card hover:bg-bg-elevated transition-colors"
+        <div className="flex flex-col gap-4">
+          {LIBRARY_SECTIONS.map(({ type, labelKey, headerClass, dotClass, textClass }) => {
+            const libs = libraries.filter((l) => l.content_type === type);
+            if (libs.length === 0) return null;
+            const isOpen = !collapsedSections.has(type);
+            return (
+              <section key={type} className="flex flex-col">
+                <button
+                  type="button"
+                  onClick={() => toggleSection(type)}
+                  aria-expanded={isOpen}
+                  className={[
+                    "flex items-center gap-3 px-3.5 py-2.5 rounded-[--radius-md] border text-left transition-colors",
+                    headerClass,
+                    isOpen ? "rounded-b-none" : "",
+                  ].join(" ")}
                 >
-                  <td className="px-4 py-3 font-medium text-text-primary">
-                    {lib.name}
-                  </td>
-                  <td className="px-4 py-3">
-                    <Badge variant={contentTypeBadge(lib.content_type)}>
-                      {lib.content_type}
-                    </Badge>
-                  </td>
-                  <td className="px-4 py-3 text-text-secondary font-mono text-xs">
-                    {(lib.paths ?? []).join(", ")}
-                  </td>
-                  <td className="px-4 py-3 text-right text-text-secondary tabular-nums">
-                    {lib.item_count}
-                  </td>
-                  <td className="px-4 py-3">
-                    <Badge variant={scanStatusVariant(lib.scan_status)}>
-                      {lib.scan_status}
-                    </Badge>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center justify-end gap-2">
-                      {lib.content_type === "livetv" ? (
-                        // ── Live TV row: refresh M3U + refresh EPG ──
-                        // Filesystem scan and metadata/image refresh don't
-                        // apply here; showing them would just yield dead
-                        // buttons, so we route to the IPTV-specific
-                        // actions instead.
-                        <>
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            isLoading={
-                              refreshM3U.isPending && refreshM3U.variables === lib.id
-                            }
-                            onClick={() =>
-                              refreshM3U.mutate(lib.id, {
-                                onSuccess: (data) =>
-                                  setRefreshMessage({
-                                    type: "success",
-                                    text: t('admin.libraries.refreshM3USuccess', {
-                                      defaultValue: `{{count}} canales importados`,
-                                      count: data.channels_imported,
-                                    }),
-                                    libId: lib.id,
-                                  }),
-                                onError: () =>
-                                  setRefreshMessage({
-                                    type: "error",
-                                    text: t('admin.libraries.refreshM3UFailed', {
-                                      defaultValue: 'No se pudo refrescar el M3U.',
-                                    }),
-                                    libId: lib.id,
-                                  }),
-                              })
-                            }
-                            title={lib.m3u_url || undefined}
-                          >
-                            {t('admin.libraries.refreshM3U', {
-                              defaultValue: 'Actualizar canales',
-                            })}
-                          </Button>
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            isLoading={
-                              refreshEPG.isPending && refreshEPG.variables === lib.id
-                            }
-                            disabled={!lib.epg_url}
-                            onClick={() =>
-                              refreshEPG.mutate(lib.id, {
-                                onSuccess: (data) =>
-                                  setRefreshMessage({
-                                    type: "success",
-                                    text: t('admin.libraries.refreshEPGSuccess', {
-                                      defaultValue: `{{count}} programas importados`,
-                                      count: data.programs_imported,
-                                    }),
-                                    libId: lib.id,
-                                  }),
-                                onError: () =>
-                                  setRefreshMessage({
-                                    type: "error",
-                                    text: t('admin.libraries.refreshEPGFailed', {
-                                      defaultValue: 'No se pudo refrescar la guía EPG.',
-                                    }),
-                                    libId: lib.id,
-                                  }),
-                              })
-                            }
-                            title={
-                              lib.epg_url ||
-                              t('admin.libraries.noEPGURL', {
-                                defaultValue:
-                                  'No hay URL EPG configurada en esta biblioteca.',
-                              })
-                            }
-                          >
-                            {t('admin.libraries.refreshEPG', {
-                              defaultValue: 'Actualizar EPG',
-                            })}
-                          </Button>
-                        </>
-                      ) : (
-                        // ── Regular media library: scan + metadata + images ──
-                        <>
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            isLoading={
-                              scanLibrary.isPending &&
-                              scanLibrary.variables?.id === lib.id &&
-                              !scanLibrary.variables?.refreshMetadata
-                            }
-                            disabled={lib.scan_status === "scanning"}
-                            onClick={() => scanLibrary.mutate({ id: lib.id })}
-                          >
-                            {t('admin.libraries.scan')}
-                          </Button>
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            isLoading={
-                              scanLibrary.isPending &&
-                              scanLibrary.variables?.id === lib.id &&
-                              !!scanLibrary.variables?.refreshMetadata
-                            }
-                            disabled={lib.scan_status === "scanning"}
-                            onClick={() => scanLibrary.mutate({ id: lib.id, refreshMetadata: true })}
-                            title={t('admin.libraries.refreshMetadataTooltip')}
-                          >
-                            {t('admin.libraries.refreshMetadata')}
-                          </Button>
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            isLoading={
-                              refreshImages.isPending &&
-                              refreshImages.variables?.libraryId === lib.id
-                            }
-                            disabled={lib.scan_status === "scanning"}
-                            onClick={() =>
-                              refreshImages.mutate(
-                                { libraryId: lib.id },
-                                {
-                                  onSuccess: (data) =>
-                                    setRefreshMessage({
-                                      type: "success",
-                                      text: t('admin.libraries.refreshImagesSuccess', { count: data.updated }),
-                                      libId: lib.id,
-                                    }),
-                                  onError: () =>
-                                    setRefreshMessage({
-                                      type: "error",
-                                      text: t('admin.libraries.refreshImagesFailed'),
-                                      libId: lib.id,
-                                    }),
-                                },
-                              )
-                            }
-                          >
-                            {t('admin.libraries.refreshImages')}
-                          </Button>
-                        </>
-                      )}
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => openEditModal(lib)}
-                      >
-                        {t('common.edit')}
-                      </Button>
-                      <Button
-                        variant="danger"
-                        size="sm"
-                        onClick={() => setDeleteTarget(lib)}
-                      >
-                        {t('common.delete')}
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-                {lib.content_type === "livetv" ? (
-                  <tr className="bg-bg-card/50">
-                    <td colSpan={6} className="px-4 py-3">
-                      <LivetvAdminPanel
-                        libraryId={lib.id}
-                        totalChannels={lib.item_count}
-                      />
-                    </td>
-                  </tr>
-                ) : null}
-                </Fragment>
-              ))}
-            </tbody>
-          </table>
+                  <span className={textClass}>
+                    <SectionChevron open={isOpen} />
+                  </span>
+                  <span
+                    aria-hidden
+                    className={["h-2 w-2 rounded-full", dotClass].join(" ")}
+                  />
+                  <span
+                    className={[
+                      "text-[13px] font-semibold tracking-wider uppercase",
+                      textClass,
+                    ].join(" ")}
+                  >
+                    {t(labelKey)}
+                  </span>
+                  <span className="text-xs text-text-muted tabular-nums">
+                    {libs.length}
+                  </span>
+                </button>
+                {isOpen && (
+                  <ul className="flex flex-col gap-2 p-2 rounded-b-[--radius-md] border border-t-0 border-border bg-bg-base/40">
+                    {libs.map((lib) => renderLibraryCard(lib))}
+                  </ul>
+                )}
+              </section>
+            );
+          })}
         </div>
       ) : (
         <EmptyState

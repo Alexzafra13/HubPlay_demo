@@ -210,4 +210,47 @@ describe("ApiClient", () => {
     expect(result).toEqual({});
     expect(fetch).not.toHaveBeenCalled();
   });
+
+  it("getBulkSchedule chunks oversized lists into 1000-channel batches and merges results", async () => {
+    // Backends commonly cap bulk requests around 5000 channels; libraries
+    // larger than that used to crash the page with TOO_MANY_CHANNELS.
+    // The client now splits into batches of 1000 and merges the responses
+    // — this test pins both the batch size and the merge contract.
+    const ids = Array.from({ length: 2500 }, (_, i) => `c-${i}`);
+    let callIdx = 0;
+    const fetch = vi.fn().mockImplementation(async () => {
+      // Each batch returns a disjoint slice of channels; we use the
+      // call index to emit a different keyspace per batch so the merge
+      // can be validated.
+      const slice = ids.slice(callIdx * 1000, (callIdx + 1) * 1000);
+      callIdx++;
+      const data: Record<string, unknown[]> = {};
+      for (const id of slice) data[id] = [];
+      return {
+        ok: true,
+        status: 200,
+        headers: new Headers({ "Content-Type": "application/json" }),
+        json: async () => ({ data }),
+      };
+    });
+    vi.stubGlobal("fetch", fetch);
+
+    const result = await client.getBulkSchedule(ids);
+
+    // 2500 ids → 3 batches (1000, 1000, 500). All channels present.
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(Object.keys(result)).toHaveLength(2500);
+    expect(result["c-0"]).toEqual([]);
+    expect(result["c-2499"]).toEqual([]);
+
+    // Verify the request bodies are properly disjoint slices.
+    const bodies = fetch.mock.calls.map((c) =>
+      JSON.parse((c[1] as RequestInit).body as string),
+    );
+    expect(bodies[0].channels).toHaveLength(1000);
+    expect(bodies[1].channels).toHaveLength(1000);
+    expect(bodies[2].channels).toHaveLength(500);
+    expect(bodies[0].channels[0]).toBe("c-0");
+    expect(bodies[2].channels[499]).toBe("c-2499");
+  });
 });

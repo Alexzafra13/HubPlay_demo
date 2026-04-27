@@ -44,14 +44,43 @@ export function ChannelRail({
     <section className="flex flex-col gap-3">
       <header className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h2 className="flex items-center gap-2 text-base font-semibold text-tv-fg-0">
-            {title}
-            {count !== undefined && (
-              <span className="rounded-full bg-tv-bg-2 px-2 py-0.5 font-mono text-[10px] font-medium tabular-nums text-tv-fg-2">
-                {count}
-              </span>
-            )}
-          </h2>
+          {/* When `onSeeAll` is wired the whole heading becomes the
+              same affordance as the "Ver todo" button on the right —
+              the user expects "click the section title to drill in".
+              We keep both: the title for natural reading + the explicit
+              CTA for users who scan the right edge. The pill count
+              tags along inside so the click target is generous. */}
+          {onSeeAll ? (
+            <button
+              type="button"
+              onClick={onSeeAll}
+              className="group/title flex max-w-full items-center gap-2 text-left"
+            >
+              <h2 className="flex items-center gap-2 truncate text-base font-semibold text-tv-fg-0 transition-colors group-hover/title:text-tv-accent">
+                <span className="truncate">{title}</span>
+                {count !== undefined && (
+                  <span className="shrink-0 rounded-full bg-tv-bg-2 px-2 py-0.5 font-mono text-[10px] font-medium tabular-nums text-tv-fg-2">
+                    {count}
+                  </span>
+                )}
+                <span
+                  aria-hidden="true"
+                  className="text-tv-fg-3 opacity-0 transition-opacity group-hover/title:opacity-100"
+                >
+                  →
+                </span>
+              </h2>
+            </button>
+          ) : (
+            <h2 className="flex items-center gap-2 text-base font-semibold text-tv-fg-0">
+              {title}
+              {count !== undefined && (
+                <span className="rounded-full bg-tv-bg-2 px-2 py-0.5 font-mono text-[10px] font-medium tabular-nums text-tv-fg-2">
+                  {count}
+                </span>
+              )}
+            </h2>
+          )}
           {subtitle ? (
             <p className="mt-0.5 text-xs text-tv-fg-3">{subtitle}</p>
           ) : null}

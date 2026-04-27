@@ -84,6 +84,15 @@ export function OverlayHeader({
         </div>
       </div>
 
+      {/* Picture-in-Picture — pops the live <video> into the browser's
+          native floating window so the user can keep watching while
+          they switch to another tab/app. We find the <video> by DOM
+          query (the only one inside the overlay) rather than threading
+          a ref through ChannelPlayer; the overlay is a single,
+          well-scoped subtree so the lookup is unambiguous. Hidden when
+          the API isn't available (Firefox without flag, iOS Safari). */}
+      <PiPButton />
+
       {onToggleFavorite && (
         <button
           type="button"
@@ -119,5 +128,62 @@ export function OverlayHeader({
         </button>
       )}
     </header>
+  );
+}
+
+/**
+ * PiPButton — toggles native Picture-in-Picture on the overlay's
+ * `<video>` element. Returns null when the browser doesn't support PiP
+ * (or the document already exited PiP and there's no video to attach).
+ *
+ * The DOM lookup `document.querySelector('video')` is intentional: we
+ * accept that there's only one video in flight at a time on this page
+ * (the overlay is exclusive), so threading a ref from ChannelPlayer up
+ * here would be more architectural cost than it saves.
+ */
+function PiPButton() {
+  const supported =
+    typeof document !== "undefined" &&
+    "pictureInPictureEnabled" in document &&
+    document.pictureInPictureEnabled;
+  if (!supported) return null;
+  const onClick = async () => {
+    try {
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture();
+        return;
+      }
+      const video = document.querySelector("video");
+      if (video && !video.disablePictureInPicture) {
+        await video.requestPictureInPicture();
+      }
+    } catch {
+      // Pre-flight failures (no video, user gesture missing, etc.) are
+      // non-fatal — silently no-op rather than throwing in the user's
+      // face.
+    }
+  };
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label="Picture in picture"
+      className="flex h-9 w-9 items-center justify-center rounded-full border border-tv-line text-tv-fg-1 transition-colors hover:bg-tv-bg-2 hover:text-tv-fg-0"
+    >
+      <svg
+        width="16"
+        height="16"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <rect x="2" y="4" width="20" height="16" rx="2" />
+        <rect x="12" y="11" width="8" height="6" rx="1" fill="currentColor" />
+      </svg>
+    </button>
   );
 }

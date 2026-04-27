@@ -7,6 +7,7 @@ package iptv
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -46,19 +47,27 @@ func (s *Service) RefreshM3U(ctx context.Context, libraryID string) (int, error)
 	}
 	defer body.Close() //nolint:errcheck
 
-	playlist, err := ParseM3U(body)
-	if err != nil {
-		return 0, fmt.Errorf("parse M3U: %w", err)
-	}
-
+	// Streaming parse: emit each entry through a callback so we can
+	// filter VOD on the fly and never hold the whole playlist in
+	// memory. Xtream-Codes "M3U_PLUS" exports bundle live + movies +
+	// series and routinely run into hundreds of thousands of entries.
 	now := time.Now()
-	dbChannels := make([]*db.Channel, 0, len(playlist.Channels))
-	for i, ch := range playlist.Channels {
+	var (
+		dbChannels []*db.Channel
+		index      int
+		vodSkipped int
+	)
+	playlistEPGURL, parsedLines, parseErr := ParseM3UStream(body, func(ch M3UChannel) error {
+		if IsVODChannel(ch) {
+			vodSkipped++
+			return nil
+		}
+		index++
 		dbChannels = append(dbChannels, &db.Channel{
 			ID:        generateID(),
 			LibraryID: libraryID,
 			Name:      ch.Name,
-			Number:    assignNumber(ch.Number, i+1),
+			Number:    assignNumber(ch.Number, index),
 			GroupName: ch.GroupName,
 			LogoURL:   ch.LogoURL,
 			StreamURL: ch.StreamURL,
@@ -68,6 +77,38 @@ func (s *Service) RefreshM3U(ctx context.Context, libraryID string) (int, error)
 			IsActive:  true,
 			AddedAt:   now,
 		})
+		return nil
+	})
+	// Tolerate truncated downloads: large IPTV providers periodically
+	// drop the connection mid-stream. If we already have a usable
+	// count of live channels, prefer to commit them rather than lose
+	// the whole import on a transport hiccup.
+	if parseErr != nil {
+		// Provider returned HTML / non-playlist content. Surface a
+		// human-readable hint instead of the misleading "0 channels"
+		// the caller would otherwise see — this is the single most
+		// common failure mode for self-hosted IPTV (account suspended,
+		// court-ordered IP block in ES, rate-limit, captive portal).
+		if errors.Is(parseErr, ErrNotM3U) {
+			s.logger.Error("M3U source did not return a playlist",
+				"library", libraryID, "url", lib.M3UURL, "hint", "HTML/error page received")
+			return 0, fmt.Errorf("the M3U URL returned an HTML page, not a playlist — "+
+				"likely causes: account suspended, IP blocked (LaLiga/Movistar court "+
+				"order in Spain), bad credentials, or rate-limit. Verify the URL in a "+
+				"browser. Underlying: %w", parseErr)
+		}
+		const minUsable = 50
+		if len(dbChannels) >= minUsable {
+			s.logger.Warn("M3U parse truncated; importing what we got",
+				"library", libraryID, "lines", parsedLines,
+				"channels", len(dbChannels), "vod_skipped", vodSkipped, "error", parseErr)
+		} else {
+			return 0, fmt.Errorf("parse M3U: %w", parseErr)
+		}
+	} else {
+		s.logger.Info("M3U parse complete",
+			"library", libraryID, "lines", parsedLines,
+			"channels", len(dbChannels), "vod_skipped", vodSkipped)
 	}
 
 	if err := s.channels.ReplaceForLibrary(ctx, libraryID, dbChannels); err != nil {
@@ -97,18 +138,18 @@ func (s *Service) RefreshM3U(ctx context.Context, libraryID string) (int, error)
 	// something to fetch. We only overwrite when the library has no URL
 	// configured — an operator-set URL wins over whatever the feed suggests.
 	epgDiscovered := false
-	if playlist.EPGURL != "" && lib.EPGURL == "" {
-		lib.EPGURL = playlist.EPGURL
+	if playlistEPGURL != "" && lib.EPGURL == "" {
+		lib.EPGURL = playlistEPGURL
 		lib.UpdatedAt = now
 		if err := s.libraries.Update(ctx, lib); err != nil {
 			// Don't fail the whole refresh — the channels are already saved,
 			// and the EPG URL is nice-to-have. Log and move on.
 			s.logger.Warn("persist discovered EPG URL",
-				"library", libraryID, "epg_url", playlist.EPGURL, "error", err)
+				"library", libraryID, "epg_url", playlistEPGURL, "error", err)
 		} else {
 			epgDiscovered = true
 			s.logger.Info("discovered EPG URL from playlist header",
-				"library", libraryID, "epg_url", playlist.EPGURL)
+				"library", libraryID, "epg_url", playlistEPGURL)
 		}
 	}
 

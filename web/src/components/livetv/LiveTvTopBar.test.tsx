@@ -59,10 +59,13 @@ describe("LiveTvTopBar", () => {
     expect(screen.getByText("19")).toBeInTheDocument();
   });
 
-  it("renders three tabs with role=tab and marks the active one aria-selected", () => {
+  it("renders four tabs with role=tab and marks the active one aria-selected", () => {
     renderBar({ tab: "guide" });
     const tabs = screen.getAllByRole("tab");
-    expect(tabs).toHaveLength(3);
+    // Now / Descubrir / Guía / Favoritos. "Ahora" was promoted to a
+    // first-class tab so the default landing answers "what to put on?"
+    // directly instead of routing the user through editorial Discover.
+    expect(tabs).toHaveLength(4);
 
     const selected = tabs.filter((t) => t.getAttribute("aria-selected") === "true");
     expect(selected).toHaveLength(1);

@@ -103,7 +103,10 @@ export function LivetvAdminPanel({
   // The override state lets a click win — default is only the initial
   // guess, not a recurring nag.
   const [tabOverride, setTabOverride] = useState<TabKey | null>(null);
-  const defaultTab: TabKey = unhealthy.length > 0 ? "unhealthy" : "sources";
+  // Always land on "sources" — the operator opens the panel mainly to
+  // wire EPGs and inspect the M3U, not to firefight unhealthy channels
+  // (those have their own coloured "Atención" banner above the tabs).
+  const defaultTab: TabKey = "sources";
   const tab = tabOverride ?? defaultTab;
 
   const epgCoveragePct =

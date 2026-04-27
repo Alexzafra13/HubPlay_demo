@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useNavigate, NavLink } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { useAuthStore } from '@/store/auth';
+import { useTopBarSlotContent } from './TopBarSlot';
 
 // ─── Props ──────────────────────────────────────────────────────────────────
 
@@ -19,6 +20,8 @@ export function TopBar({ title, onMenuClick }: TopBarProps) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const slotContent = useTopBarSlotContent();
+  const scrolled = useScrolledPast(8);
 
   const initials = user?.display_name
     ? user.display_name
@@ -58,7 +61,13 @@ export function TopBar({ title, onMenuClick }: TopBarProps) {
 
   return (
     <header
-      className="sticky top-0 z-30 flex items-center px-4 gap-3 bg-bg-base/70 backdrop-blur-xl border-b border-white/5 md:bg-transparent md:backdrop-blur-none md:border-b-0"
+      className={[
+        'sticky top-0 z-30 flex items-center px-4 gap-3',
+        'transition-[background-color,backdrop-filter,border-color] duration-200',
+        scrolled
+          ? 'bg-bg-base/70 backdrop-blur-xl border-b border-white/5'
+          : 'bg-bg-base/70 backdrop-blur-xl border-b border-white/5 md:bg-transparent md:backdrop-blur-none md:border-b-0',
+      ].join(' ')}
       style={{ height: 'var(--topbar-height)' }}
     >
       {/* Hamburger (mobile) */}
@@ -94,32 +103,36 @@ export function TopBar({ title, onMenuClick }: TopBarProps) {
 
       <div className="flex-1" />
 
-      {/* Search */}
-      <form onSubmit={handleSearch} className="hidden sm:flex items-center">
-        <div className="relative">
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 20 20"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-secondary pointer-events-none"
-          >
-            <circle cx="8.5" cy="8.5" r="5" />
-            <path d="M12.5 12.5L17 17" />
-          </svg>
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder={t('topbar.searchPlaceholder')}
-            className="w-48 pl-8 pr-3 py-1.5 rounded-lg bg-bg-base border border-border text-sm text-text-primary placeholder:text-text-secondary focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent transition-colors"
-          />
-        </div>
-      </form>
+      {/* Page-injected controls (LiveTV tabs+search, future page filters)
+          take precedence over the global search. Falls back to the
+          global search when no page registers content via useTopBarSlot. */}
+      {slotContent ?? (
+        <form onSubmit={handleSearch} className="hidden sm:flex items-center">
+          <div className="relative">
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 20 20"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-secondary pointer-events-none"
+            >
+              <circle cx="8.5" cy="8.5" r="5" />
+              <path d="M12.5 12.5L17 17" />
+            </svg>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={t('topbar.searchPlaceholder')}
+              className="w-48 pl-8 pr-3 py-1.5 rounded-lg bg-bg-base border border-border text-sm text-text-primary placeholder:text-text-secondary focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent transition-colors"
+            />
+          </div>
+        </form>
+      )}
 
       {/* User Avatar Dropdown */}
       <div className="relative" ref={dropdownRef}>
@@ -181,4 +194,38 @@ export function TopBar({ title, onMenuClick }: TopBarProps) {
       </div>
     </header>
   );
+}
+
+/**
+ * useScrolledPast — returns true once `window.scrollY` exceeds `threshold`.
+ *
+ * The app uses window-level scrolling (no inner scroll container in
+ * AppLayout), so we listen on `window`. Throttled with rAF — every native
+ * `scroll` event schedules at most one read+setState per animation frame,
+ * which is what avoids the layout-thrash spiral that happens if you call
+ * setState directly in the listener.
+ *
+ * SSR-safe lazy initializer (typeof window) so the bundle can import this
+ * file in non-browser contexts (tests, future SSR) without crashing.
+ */
+function useScrolledPast(threshold: number): boolean {
+  const [scrolled, setScrolled] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.scrollY > threshold;
+  });
+  useEffect(() => {
+    let ticking = false;
+    const onScroll = () => {
+      if (ticking) return;
+      ticking = true;
+      window.requestAnimationFrame(() => {
+        setScrolled(window.scrollY > threshold);
+        ticking = false;
+      });
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+    return () => window.removeEventListener('scroll', onScroll);
+  }, [threshold]);
+  return scrolled;
 }

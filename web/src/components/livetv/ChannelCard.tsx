@@ -143,13 +143,20 @@ export function ChannelCard({
           style={{ background: thumbBg }}
         />
 
-        {/* Centered logo — primary visual when no preview is playing. */}
+        {/* Centered logo — primary visual when no preview is playing.
+            Capped at 55% / 60% of the thumbnail so the surrounding
+            neutral gradient breathes; lets every card share the same
+            silhouette regardless of whether the channel ships a
+            transparent SVG or a brand-coloured PNG. The slight
+            saturate(0.9) brightness(0.95) damps the loudest IPTV
+            logos so the lineup reads as HubPlay's, not a billboard
+            of every provider. */}
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-6">
           {showLogoImg ? (
             <img
               src={channel.logo_url!}
               alt=""
-              className="max-h-full max-w-full object-contain drop-shadow-[0_2px_8px_rgba(0,0,0,0.5)]"
+              className="max-h-[55%] max-w-[65%] object-contain drop-shadow-[0_2px_10px_rgba(0,0,0,0.6)] [filter:saturate(0.9)_brightness(0.95)]"
               loading="lazy"
               onError={() => setFailedLogoUrl(channel.logo_url ?? null)}
             />
@@ -232,16 +239,18 @@ export function ChannelCard({
           </span>
         )}
 
-        {/* Progress bar, thin, hugging the bottom of the poster. Inside
-            the thumbnail (not below) so the text region stays clean
-            prose. Only renders when EPG knows how far along we are. */}
+        {/* Progress bar, hugging the bottom of the poster. Bumped from
+            2 px to 3 px so it actually reads in a 6-column grid, and
+            switched to the app's teal accent so it matches every
+            other progress affordance (hero, sidebar selection). Only
+            renders when EPG knows how far along we are. */}
         {nowPlaying && !dimmed ? (
           <div
-            className="pointer-events-none absolute inset-x-0 bottom-0 h-0.5 bg-black/40"
+            className="pointer-events-none absolute inset-x-0 bottom-0 h-[3px] bg-black/50"
             aria-hidden="true"
           >
             <div
-              className="h-full bg-tv-accent transition-[width] duration-1000"
+              className="h-full bg-accent transition-[width] duration-1000 motion-reduce:transition-none"
               style={{ width: `${progress}%` }}
             />
           </div>
@@ -271,14 +280,44 @@ export function ChannelCard({
           )}
         </div>
 
-        {upNext && !dimmed ? (
-          <div className="truncate text-[11px] text-tv-fg-3">
-            <span className="mr-1.5 font-mono tabular-nums text-tv-fg-2">
-              {formatTime(upNext.start_time)}
-            </span>
-            {upNext.title}
-          </div>
-        ) : null}
+        {/* Up-next line — only renders when EPG has a distinct next
+            programme. We dedupe against the current title (some
+            channels publish the same EPG title back-to-back for long
+            blocks like marathons or news rolls) because pinta two
+            identical lines was visually confusing. When there is no
+            distinct next, we show the current programme's end time
+            instead so the user gets a temporal cue ("termina 22:30")
+            without a redundant title. */}
+        {!dimmed ? (() => {
+          const sameAsNow =
+            upNext && nowPlaying && upNext.title === nowPlaying.title;
+          if (upNext && !sameAsNow) {
+            return (
+              <div className="truncate text-[11px] text-tv-fg-3">
+                <span className="mr-1.5 uppercase tracking-wider text-tv-fg-3">
+                  Después
+                </span>
+                <span className="mr-1.5 font-mono tabular-nums text-tv-fg-2">
+                  {formatTime(upNext.start_time)}
+                </span>
+                {upNext.title}
+              </div>
+            );
+          }
+          if (nowPlaying) {
+            return (
+              <div className="truncate text-[11px] text-tv-fg-3">
+                <span className="mr-1.5 uppercase tracking-wider text-tv-fg-3">
+                  Termina
+                </span>
+                <span className="font-mono tabular-nums text-tv-fg-2">
+                  {formatTime(nowPlaying.end_time)}
+                </span>
+              </div>
+            );
+          }
+          return null;
+        })() : null}
       </div>
     </button>
   );

@@ -184,6 +184,8 @@
       "type": "Tipo",
       "path": "Ruta",
       "itemCount": "Elementos",
+      "itemsLower": "elementos",
+      "channelsLower": "canales",
       "scanStatus": "Estado de escaneo",
       "actions": "Acciones",
       "scan": "Escanear",
