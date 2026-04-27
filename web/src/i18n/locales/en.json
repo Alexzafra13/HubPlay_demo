@@ -239,10 +239,40 @@
   "admin": {
     "title": "Administration",
     "tabs": {
+      "dashboard": "Dashboard",
       "libraries": "Libraries",
       "providers": "Providers",
       "users": "Users",
       "system": "System"
+    },
+    "dashboard": {
+      "title": "Dashboard",
+      "uptimeLabel": "Uptime",
+      "viewSystemDetails": "View system details →",
+      "nowPlaying": "Now playing",
+      "nowPlayingComingSoon": "Live sessions coming soon",
+      "nowPlayingComingSoonHint": "This panel will list every active stream — user, content, device, bandwidth — with a button to stop a session.",
+      "inventory": "Inventory",
+      "inventoryComingSoon": "Library rollup coming soon",
+      "inventoryComingSoonHint": "A summary of items per library type (movies, series, live TV) so you can size your collection at a glance.",
+      "quickActions": "Quick actions",
+      "actionGoToLibraries": "Manage libraries",
+      "actionGoToAdvanced": "Advanced tools",
+      "unreachable": "Unable to load dashboard"
+    },
+    "activity": {
+      "sessions": "Active sessions",
+      "sessionsComingSoon": "Sessions panel coming soon",
+      "sessionsComingSoonHint": "Real-time list of every viewer connected to the server.",
+      "tasks": "Scheduled tasks",
+      "tasksComingSoon": "Tasks panel coming soon",
+      "tasksComingSoonHint": "Unified view of every cron job (M3U refresh, EPG, library scans) with run-now and last-run timestamps.",
+      "logs": "Server logs",
+      "logsComingSoon": "Logs viewer coming soon",
+      "logsComingSoonHint": "Tail the last server log lines without leaving the admin."
+    },
+    "advanced": {
+      "warning": "Actions in this section affect every user. Proceed with care."
     },
     "libraries": {
       "title": "Media Libraries",
@@ -313,6 +343,12 @@
       "failedToLoad": "Failed to load users"
     },
     "system": {
+      "tabs": {
+        "status": "Status",
+        "activity": "Activity",
+        "advanced": "Advanced",
+        "aria": "System sub-sections"
+      },
       "title": "System Overview",
       "updated": "Updated {{time}}",
       "unreachable": "Unreachable",

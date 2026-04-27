@@ -239,10 +239,40 @@
   "admin": {
     "title": "Administracion",
     "tabs": {
+      "dashboard": "Inicio",
       "libraries": "Bibliotecas",
       "providers": "Proveedores",
       "users": "Usuarios",
       "system": "Sistema"
+    },
+    "dashboard": {
+      "title": "Inicio",
+      "uptimeLabel": "Activo desde hace",
+      "viewSystemDetails": "Ver detalles del sistema →",
+      "nowPlaying": "Reproduciendo ahora",
+      "nowPlayingComingSoon": "Próximamente: sesiones en vivo",
+      "nowPlayingComingSoonHint": "Aquí verás cada reproducción activa — usuario, contenido, dispositivo, bitrate — con un botón para cortar la sesión.",
+      "inventory": "Inventario",
+      "inventoryComingSoon": "Próximamente: resumen del catálogo",
+      "inventoryComingSoonHint": "Un resumen por tipo de biblioteca (películas, series, TV en vivo) para tener el tamaño del catálogo a un vistazo.",
+      "quickActions": "Acciones rápidas",
+      "actionGoToLibraries": "Gestionar bibliotecas",
+      "actionGoToAdvanced": "Herramientas avanzadas",
+      "unreachable": "No se pudo cargar el panel"
+    },
+    "activity": {
+      "sessions": "Sesiones activas",
+      "sessionsComingSoon": "Próximamente: panel de sesiones",
+      "sessionsComingSoonHint": "Lista en tiempo real de quién está conectado y qué reproduce.",
+      "tasks": "Tareas programadas",
+      "tasksComingSoon": "Próximamente: panel de tareas",
+      "tasksComingSoonHint": "Vista unificada de cada job programado (refresh M3U, EPG, escaneo de bibliotecas) con run-now y último ejecutado.",
+      "logs": "Logs del servidor",
+      "logsComingSoon": "Próximamente: visor de logs",
+      "logsComingSoonHint": "Lee las últimas líneas del log del servidor sin salir del panel admin."
+    },
+    "advanced": {
+      "warning": "Las acciones de esta sección afectan a todos los usuarios. Procede con cuidado."
     },
     "libraries": {
       "title": "Bibliotecas de medios",
@@ -313,6 +343,12 @@
       "failedToLoad": "Error al cargar los usuarios"
     },
     "system": {
+      "tabs": {
+        "status": "Estado",
+        "activity": "Actividad",
+        "advanced": "Avanzado",
+        "aria": "Sub-secciones del sistema"
+      },
       "title": "Vista general del sistema",
       "updated": "Actualizado {{time}}",
       "unreachable": "Inalcanzable",

@@ -2,11 +2,10 @@ import { useSystemStats } from "@/api/hooks";
 import type { SystemStats } from "@/api/types";
 import { Badge, Spinner, Button, EmptyState } from "@/components/common";
 import { useTranslation } from "react-i18next";
-import { AuthKeysPanel } from "@/components/admin/AuthKeysPanel";
 
-// Refresh cadence for the live stats. 30s matches the old behaviour and is
-// frequent enough to feel live without flooding the dir-walk on the
-// backend (image cache + transcode cache).
+// Refresh cadence for the live stats. 30s matches the original behaviour
+// and is frequent enough to feel live without flooding the dir-walk on
+// the backend (image cache + transcode cache are filesystem walks).
 const REFETCH_MS = 30_000;
 
 // formatUptime turns seconds into a Plex-style "12d 3h 7m" string.
@@ -79,13 +78,13 @@ function Section({ title, children }: SectionProps) {
   );
 }
 
-// SystemAdmin — "what's going on with my server" at a glance. Mirrors what
-// Plex puts in Status > Dashboard: live status badges, uptime, FFmpeg
-// detection, hardware acceleration, transcode load, runtime memory, and
-// on-disk cache footprints. The signing-key panel lives at the bottom
-// since it's a destructive admin action that should not be the first
-// thing the eye lands on.
-export default function SystemAdmin() {
+// SystemStatus — "what's going on with my server right now" at a glance.
+// Lives at /admin/system/status as the default sub-tab inside the System
+// page. Mirrors what Plex puts under Status > Dashboard: the server's
+// identity and a real-time health snapshot. Destructive actions
+// (signing-key rotation, backup, force-logout, etc.) live in the sibling
+// "advanced" sub-tab so the eye doesn't land on them by accident.
+export default function SystemStatus() {
   const { t } = useTranslation();
   const {
     data: stats,
@@ -142,8 +141,6 @@ export default function SystemAdmin() {
       <Section title={t("admin.system.sectionStorage")}>
         <StorageCards stats={stats} />
       </Section>
-
-      <AuthKeysPanel />
     </div>
   );
 }
@@ -158,10 +155,10 @@ interface HeaderProps {
 function SystemHeader({ stats, dataUpdatedAt, isFetching, onRefresh }: HeaderProps) {
   const { t } = useTranslation();
 
-  // Aggregate "is everything green?" — the badge in the page header is a
-  // single traffic light. DB ping is the most failure-prone of the three;
-  // FFmpeg missing is fatal for transcode but not for direct play, so we
-  // weight it equally with DB to surface the symptom early.
+  // Aggregate "is everything green?" — single traffic light. DB ping +
+  // FFmpeg detection are the two components an admin checks first when
+  // anything misbehaves; weighting them equally surfaces the symptom
+  // immediately.
   const dbOk = stats.database.ok;
   const ffmpegOk = stats.ffmpeg.found;
   const allHealthy = dbOk && ffmpegOk;
@@ -247,8 +244,6 @@ function StreamingCards({ stats }: { stats: SystemStats }) {
       : t("admin.system.transcodeUnlimited", { active });
 
   // hw_accel_selected is the canonical wire string ("vaapi", "nvenc", "none").
-  // We translate "none" to a friendlier label; everything else is an
-  // identifier admins recognise, so we render it as-is in uppercase.
   const selected = stats.ffmpeg.hw_accel_selected;
   const accelLabel =
     !selected || selected === "none"

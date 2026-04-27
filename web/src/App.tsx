@@ -19,10 +19,14 @@ const Settings = lazy(() => import("@/pages/Settings"));
 const NotFound = lazy(() => import("@/pages/NotFound"));
 const SetupWizard = lazy(() => import("@/pages/setup/SetupWizard"));
 const AdminLayout = lazy(() => import("@/pages/admin/AdminLayout"));
+const DashboardAdmin = lazy(() => import("@/pages/admin/DashboardAdmin"));
 const LibrariesAdmin = lazy(() => import("@/pages/admin/LibrariesAdmin"));
 const UsersAdmin = lazy(() => import("@/pages/admin/UsersAdmin"));
-const SystemAdmin = lazy(() => import("@/pages/admin/SystemAdmin"));
 const ProvidersAdmin = lazy(() => import("@/pages/admin/ProvidersAdmin"));
+const SystemLayout = lazy(() => import("@/pages/admin/system/SystemLayout"));
+const SystemStatus = lazy(() => import("@/pages/admin/system/SystemStatus"));
+const SystemActivity = lazy(() => import("@/pages/admin/system/SystemActivity"));
+const SystemAdvanced = lazy(() => import("@/pages/admin/system/SystemAdvanced"));
 
 function LazyFallback() {
   return (
@@ -101,17 +105,29 @@ export function App() {
             <Route path="live-tv" element={<LiveTV />} />
             <Route path="settings" element={<Settings />} />
 
-            {/* Admin routes */}
+            {/* Admin routes.
+                /admin              → Dashboard (landing).
+                /admin/libraries    → existing per-domain pages.
+                /admin/system/*     → nested sub-tabs (status / activity /
+                                      advanced) under one outlet so the
+                                      "System" tab can group server detail
+                                      without overflowing into siblings. */}
             <Route
               path="admin"
               element={<ProtectedRoute adminOnly />}
             >
               <Route element={<AdminLayout />}>
-                <Route index element={<Navigate to="libraries" replace />} />
+                <Route index element={<Navigate to="dashboard" replace />} />
+                <Route path="dashboard" element={<DashboardAdmin />} />
                 <Route path="libraries" element={<LibrariesAdmin />} />
                 <Route path="providers" element={<ProvidersAdmin />} />
                 <Route path="users" element={<UsersAdmin />} />
-                <Route path="system" element={<SystemAdmin />} />
+                <Route path="system" element={<SystemLayout />}>
+                  <Route index element={<Navigate to="status" replace />} />
+                  <Route path="status" element={<SystemStatus />} />
+                  <Route path="activity" element={<SystemActivity />} />
+                  <Route path="advanced" element={<SystemAdvanced />} />
+                </Route>
               </Route>
             </Route>
           </Route>
