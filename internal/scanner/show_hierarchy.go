@@ -18,6 +18,13 @@ import (
 // at the start of the scan (same pass as `existingPaths`), then
 // extended in-place as the walker discovers new series.
 //
+// `checkedEnrichment` is the per-scan dedupe for the self-healing
+// metadata path: when a series row exists in DB but has no metadata
+// yet (because the previous scan ran without TMDb configured, or
+// the matcher missed), we want to retry on the next scan. Without
+// this map we'd run that retry once per episode of the series — a
+// 100-episode show would burn 100 image-list lookups for no reason.
+//
 // Concurrency: ScanLibrary runs on a single goroutine per library
 // today, but the Service.Scan layer can fire two scans for two
 // different libraries in parallel. Each gets its own cache instance
@@ -25,15 +32,17 @@ import (
 // with the iteration callback (which is ALSO single-threaded today
 // but cheap to harden).
 type showCache struct {
-	mu     sync.Mutex
-	series map[string]string // seriesName → series item id
-	season map[string]string // "<seriesID>|<seasonNum>" → season item id
+	mu                sync.Mutex
+	series            map[string]string // seriesName → series item id
+	season            map[string]string // "<seriesID>|<seasonNum>" → season item id
+	checkedEnrichment map[string]bool   // series item id → already checked-or-enriched this scan
 }
 
 func newShowCache() *showCache {
 	return &showCache{
-		series: make(map[string]string),
-		season: make(map[string]string),
+		series:            make(map[string]string),
+		season:            make(map[string]string),
+		checkedEnrichment: make(map[string]bool),
 	}
 }
 
@@ -57,33 +66,37 @@ func seasonKey(seriesID string, seasonNum int) string {
 }
 
 // ensureSeriesRow returns the id of the series row matching this
-// name, creating one if it doesn't exist yet for the library. Pure
-// in-memory cache lookup most of the time — only the very first
-// encounter per series during the scan (or after a fresh server
-// boot) writes to the DB.
+// name, creating one if it doesn't exist yet for the library, AND
+// triggers metadata enrichment when it's missing (whether the row
+// is brand new or pre-existing without metadata). Self-healing: a
+// library scanned without TMDb configured will fill in posters
+// automatically the next time it scans with TMDb available — no
+// admin action required.
 //
-// On the new-row branch this ALSO triggers metadata + image
-// enrichment for the series. Why here and not at the episode level:
+// Why metadata lives at the series level, not per-episode:
 //
 //   - The user sees `/series` first; it needs the poster + backdrop
 //     to look like a real library, not a wall of placeholder letters.
-//   - Per-episode TMDb search runs N times per series and butchers
-//     the title (`Breaking.Bad.S01E01.Pilot` → no match). Series-
-//     level search runs ONCE per series with the clean dir name
-//     (`Breaking Bad`) and the matcher actually finds it.
-//   - The image refresher iterates over series rows (parent_id IS
-//     NULL filter) and looks up `external_ids` per item. Without
-//     series-level enrichment those external_ids stay empty and the
-//     "Refresh images" admin button reports "0 actualizadas" — the
-//     exact symptom the user hit.
+//   - Per-episode TMDb search butchers the title
+//     (`Breaking.Bad.S01E01.Pilot` → no match). Series-level search
+//     uses the clean dir name (`Breaking Bad`) which the matcher
+//     actually finds.
+//   - The image refresher iterates root items (parent_id IS NULL =
+//     series + movies) and looks up external_ids per item. Without
+//     series-level enrichment external_ids stay empty and the
+//     "Refresh images" button reports "0 actualizadas".
 //
 // Enrichment is best-effort: provider down / no API key / no match
-// all leave the row in DB without metadata, and a future scan can
-// retry via the `RefreshMetadata` admin endpoint.
+// leave the row visible in DB without metadata, and the NEXT scan
+// retries automatically.
 func (s *Scanner) ensureSeriesRow(ctx context.Context, lib *db.Library, cache *showCache, seriesName string) (string, error) {
 	cache.mu.Lock()
 	if id, ok := cache.series[seriesName]; ok {
+		alreadyChecked := cache.checkedEnrichment[id]
 		cache.mu.Unlock()
+		if !alreadyChecked {
+			s.checkAndEnrichSeries(ctx, cache, id)
+		}
 		return id, nil
 	}
 	cache.mu.Unlock()
@@ -105,13 +118,27 @@ func (s *Scanner) ensureSeriesRow(ctx context.Context, lib *db.Library, cache *s
 	}
 	cache.mu.Lock()
 	cache.series[seriesName] = id
+	cache.checkedEnrichment[id] = true
 	cache.mu.Unlock()
 
-	// Series-level metadata + images. Best-effort, never blocks the
-	// scan — the series row exists either way; missing artwork is
-	// recoverable via the manual refresh button.
 	s.enrichMetadata(ctx, item)
 	return id, nil
+}
+
+// checkAndEnrichSeries runs at most once per series per scan. The
+// shape of the check is "does this series already have any image?"
+// — `enrichIfMissing` does that bookkeeping internally, so we just
+// need the GetByID + the cache flag. With a 100-episode show, this
+// goes from "100 enrichIfMissing calls per scan" to "1 per scan".
+func (s *Scanner) checkAndEnrichSeries(ctx context.Context, cache *showCache, seriesID string) {
+	cache.mu.Lock()
+	cache.checkedEnrichment[seriesID] = true
+	cache.mu.Unlock()
+	item, err := s.items.GetByID(ctx, seriesID)
+	if err != nil || item == nil {
+		return
+	}
+	s.enrichIfMissing(ctx, item)
 }
 
 // ensureSeasonRow does the same for a season under a given series.

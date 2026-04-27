@@ -598,8 +598,19 @@ func (s *Scanner) enrichIfMissing(ctx context.Context, item *db.Item) {
 }
 
 // enrichMetadata searches TMDB for the item and stores metadata + images.
+//
+// Only series and movies hit TMDb. Episodes and seasons are intentionally
+// skipped: their titles are noisy ("Pilot", "Breaking.Bad.S01E01.Pilot",
+// "Season 1") and a per-episode lookup of a 100-episode show would burn
+// 100 search calls for results we never display — the UI shows series
+// posters, not episode posters. RefreshMetadata iterates every row in
+// the library, so this guard is what keeps the admin "Refresh metadata"
+// button from melting the TMDb quota.
 func (s *Scanner) enrichMetadata(ctx context.Context, item *db.Item) {
 	if s.providers == nil {
+		return
+	}
+	if item.Type == "episode" || item.Type == "season" {
 		return
 	}
 
