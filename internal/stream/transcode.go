@@ -31,21 +31,35 @@ type Transcoder struct {
 	baseDir          string              // base directory for transcoded segments
 	ffmpeg           string              // path to ffmpeg binary
 	transcodeTimeout time.Duration       // max duration per transcode process
-	logger           *slog.Logger
+	// hwAccel is the detected hardware acceleration kind (vaapi,
+	// nvenc, …) chosen at startup. Empty / HWAccelNone means software
+	// encode via libx264. The transcoder doesn't re-detect; this is
+	// set once and read on every session.
+	hwAccel HWAccelType
+	encoder string // ffmpeg encoder name, e.g. "h264_nvenc" or "libx264"
+	logger  *slog.Logger
 }
 
-func NewTranscoder(baseDir, ffmpegPath string, transcodeTimeout time.Duration, logger *slog.Logger) *Transcoder {
+// NewTranscoder constructs a transcoder. Pass `HWAccelNone` and an
+// empty `encoder` to force software encoding (libx264); pass the
+// values from `DetectHWAccel` to use the platform's accelerator.
+func NewTranscoder(baseDir, ffmpegPath string, transcodeTimeout time.Duration, hwAccel HWAccelType, encoder string, logger *slog.Logger) *Transcoder {
 	if ffmpegPath == "" {
 		ffmpegPath = "ffmpeg"
 	}
 	if transcodeTimeout <= 0 {
 		transcodeTimeout = 4 * time.Hour
 	}
+	if encoder == "" {
+		encoder = "libx264"
+	}
 	return &Transcoder{
 		sessions:         make(map[string]*Session),
 		baseDir:          baseDir,
 		ffmpeg:           ffmpegPath,
 		transcodeTimeout: transcodeTimeout,
+		hwAccel:          hwAccel,
+		encoder:          encoder,
 		logger:           logger.With("module", "transcoder"),
 	}
 }
@@ -68,7 +82,7 @@ func (t *Transcoder) Start(sessionID, itemID, inputPath string, profile Profile,
 
 	ctx, cancel := context.WithTimeout(context.Background(), t.transcodeTimeout)
 
-	args := BuildFFmpegArgs(inputPath, outputDir, profile, startTime)
+	args := BuildFFmpegArgs(inputPath, outputDir, profile, startTime, t.hwAccel, t.encoder)
 	cmd := exec.CommandContext(ctx, t.ffmpeg, args...)
 	cmd.Dir = outputDir
 
@@ -177,7 +191,19 @@ func (s *Session) SegmentPath(index int) string {
 }
 
 // BuildFFmpegArgs constructs FFmpeg arguments for HLS transcoding.
-func BuildFFmpegArgs(input, outputDir string, profile Profile, startTime float64) []string {
+//
+// `hwAccel` selects the input-side acceleration (decode + frame
+// transfer) and `encoder` selects the output encoder. Pass
+// `HWAccelNone, "libx264"` for the software path. The hardware paths
+// don't change the video filter chain — frames are downloaded to
+// system memory after decode, scaled in software, then uploaded by
+// the encoder. That's slower than a fully-on-device pipeline (vaapi
+// scale_vaapi etc.) but works without rewriting the filter graph and
+// matches what Plex/Jellyfin do for "general purpose" HW transcoding.
+func BuildFFmpegArgs(input, outputDir string, profile Profile, startTime float64, hwAccel HWAccelType, encoder string) []string {
+	if encoder == "" {
+		encoder = "libx264"
+	}
 	manifestPath := filepath.Join(outputDir, "stream.m3u8")
 	segmentPattern := filepath.Join(outputDir, "segment%05d.ts")
 
@@ -185,6 +211,11 @@ func BuildFFmpegArgs(input, outputDir string, profile Profile, startTime float64
 		"-hide_banner",
 		"-loglevel", "warning",
 	}
+
+	// Hardware-accelerated decode flags go BEFORE -i. Skipped for
+	// libx264 / VideoToolbox (the latter only provides an encoder,
+	// no decoder pipeline worth declaring here).
+	args = append(args, hwAccelInputArgs(hwAccel)...)
 
 	// Seek if needed
 	if startTime > 0 {
@@ -197,10 +228,18 @@ func BuildFFmpegArgs(input, outputDir string, profile Profile, startTime float64
 	if profile.Name == "original" {
 		args = append(args, "-c:v", "copy")
 	} else {
+		// Encoder-specific tuning. libx264 wants -preset/-tune; the
+		// hardware encoders use their own preset names (ffmpeg
+		// happily ignores libx264 flags it doesn't understand, but
+		// we keep this clean by gating per encoder).
+		args = append(args, "-c:v", encoder)
+		if encoder == "libx264" {
+			args = append(args,
+				"-preset", "veryfast",
+				"-tune", "zerolatency",
+			)
+		}
 		args = append(args,
-			"-c:v", "libx264",
-			"-preset", "veryfast",
-			"-tune", "zerolatency",
 			"-b:v", profile.VideoBitrate,
 			"-maxrate", profile.VideoBitrate,
 			"-bufsize", profile.VideoBitrate,

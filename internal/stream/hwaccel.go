@@ -134,6 +134,35 @@ func accelToEncoder(accel HWAccelType) string {
 	}
 }
 
+// hwAccelInputArgs returns the ffmpeg input-side flags for a given
+// acceleration kind. These go before `-i` and tell ffmpeg to use
+// the GPU/iGPU decoder. Empty slice means software decode (no flags).
+//
+// We intentionally don't set `-hwaccel_output_format` so frames stay
+// downloadable to system memory — that lets the existing software
+// filter chain (`scale=...,pad=...`) keep working unchanged. A fully
+// on-device pipeline would need scale_vaapi / scale_cuda / scale_qsv
+// and a per-format `-vf hwupload`, which is the next iteration.
+func hwAccelInputArgs(accel HWAccelType) []string {
+	switch accel {
+	case HWAccelVAAPI:
+		return []string{"-hwaccel", "vaapi"}
+	case HWAccelQSV:
+		return []string{"-hwaccel", "qsv"}
+	case HWAccelNVENC:
+		// NVENC's encoder works without `-hwaccel cuda`, but adding
+		// it lets ffmpeg pick the NVDEC decoder for the read side
+		// when the input codec is supported (h264, hevc, …),
+		// halving CPU usage during transcode.
+		return []string{"-hwaccel", "cuda"}
+	case HWAccelVideoToolbox:
+		// VT only provides the encoder; no input flag needed.
+		return nil
+	default:
+		return nil
+	}
+}
+
 func verifyEncoder(encoder string, logger *slog.Logger) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

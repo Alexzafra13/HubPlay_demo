@@ -148,15 +148,11 @@ func run(configPath string) error {
 	streamManager.SetMetrics(observability.NewStreamSink(metrics))
 	streamManager.SetEventBus(eventBus)
 
-	// Detect hardware acceleration if enabled
-	if cfg.Streaming.HWAccel.Enabled {
-		hwResult := stream.DetectHWAccel(cfg.Streaming.HWAccel.Preferred, logger)
-		logger.Info("hardware acceleration",
-			"available", hwResult.Available,
-			"selected", hwResult.Selected,
-			"encoder", hwResult.Encoder,
-		)
-	}
+	// Hardware acceleration detection happens inside `stream.NewManager`
+	// when `cfg.Streaming.HWAccel.Enabled` is true — the result both
+	// gets logged there and threaded into the transcoder. Detecting
+	// twice (here + there) was the prior shape; the result was logged
+	// here and silently discarded, leaving every transcode on libx264.
 
 	// ═══ Phase 4c: IPTV ═══
 	iptvService := iptv.NewService(repos.Channels, repos.EPGPrograms, repos.Libraries, repos.ChannelFavorites, repos.LibraryEPGSources, repos.ChannelOverrides, repos.ChannelWatchHistory, logger)

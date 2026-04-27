@@ -208,7 +208,9 @@ func newTestManager(t *testing.T) *Manager {
 
 	return &Manager{
 		sessions:   make(map[string]*ManagedSession),
-		transcoder: NewTranscoder(t.TempDir(), "", 4*time.Hour, logger),
+		// HWAccelNone + libx264 — software path, matches what the
+		// existing tests assumed before HW accel detection was wired.
+		transcoder: NewTranscoder(t.TempDir(), "", 4*time.Hour, HWAccelNone, "libx264", logger),
 		cfg:        cfg,
 		logger:     logger.With("module", "stream-manager"),
 		stopClean:  make(chan struct{}),
