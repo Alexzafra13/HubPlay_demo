@@ -24,6 +24,9 @@ import type {
   SetupStatus,
   StreamSession,
   SystemCapabilities,
+  SystemStats,
+  AuthKey,
+  RotateAuthKeyResponse,
   UnhealthyChannel,
   UpdateLibraryRequest,
   UpsertScheduledJobRequest,
@@ -862,6 +865,33 @@ export class ApiClient {
 
   async getHealth(): Promise<HealthResponse> {
     return this.request<HealthResponse>("GET", "/health");
+  }
+
+  // Rich admin-only system snapshot. Backed by /admin/system/stats —
+  // separate from /health because that one has to stay tiny for ops
+  // tooling (Docker healthcheck, k8s liveness) while the panel can grow.
+  async getSystemStats(): Promise<SystemStats> {
+    const r = await this.request<{ data: SystemStats }>("GET", "/admin/system/stats");
+    return r.data;
+  }
+
+  // ─── Admin: signing keys ──────────────────────────────────────────────
+
+  async listAuthKeys(): Promise<AuthKey[]> {
+    const r = await this.request<{ data: AuthKey[] }>("GET", "/admin/auth/keys");
+    return r.data;
+  }
+
+  async rotateAuthKey(overlapSeconds?: number): Promise<RotateAuthKeyResponse> {
+    const body = overlapSeconds === undefined ? undefined : { overlap_seconds: overlapSeconds };
+    const r = await this.request<{ data: RotateAuthKeyResponse }>("POST", "/admin/auth/keys/rotate", { body });
+    return r.data;
+  }
+
+  async pruneAuthKeys(beforeSeconds?: number): Promise<{ pruned: number }> {
+    const body = beforeSeconds === undefined ? undefined : { before_seconds: beforeSeconds };
+    const r = await this.request<{ data: { pruned: number } }>("POST", "/admin/auth/keys/prune", { body });
+    return r.data;
   }
 }
 

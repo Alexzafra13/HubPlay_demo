@@ -16,6 +16,9 @@ import type {
   ContinueWatchingChannel,
   CreateLibraryRequest,
   HealthResponse,
+  SystemStats,
+  AuthKey,
+  RotateAuthKeyResponse,
   ImageInfo,
   ImportPublicIPTVResponse,
   IPTVScheduledJob,
@@ -74,6 +77,8 @@ export const queryKeys = {
   availableImages: (id: string, type?: string) => ["items", id, "images", "available", type] as const,
   providers: ["providers"] as const,
   health: ["health"] as const,
+  systemStats: ["system-stats"] as const,
+  authKeys: ["auth-keys"] as const,
   setupStatus: ["setup-status"] as const,
   systemCapabilities: ["system-capabilities"] as const,
   browseDirectories: (path?: string) => ["browse", path] as const,
@@ -701,6 +706,54 @@ export function useHealth(
     queryKey: queryKeys.health,
     queryFn: () => api.getHealth(),
     ...options,
+  });
+}
+
+// Rich admin-only system stats. Polled by the System admin page; defaults
+// to no auto-refresh so the caller decides the cadence (the page passes
+// refetchInterval to keep the data live without flicker).
+export function useSystemStats(
+  options?: Partial<UseQueryOptions<SystemStats>>,
+) {
+  return useQuery<SystemStats>({
+    queryKey: queryKeys.systemStats,
+    queryFn: () => api.getSystemStats(),
+    ...options,
+  });
+}
+
+// Signing-key management for the admin panel.
+//
+// The list query is light (in-memory snapshot) so we let it refetch on
+// focus, but it's not on a timer — rotations are admin-driven, not
+// automatic, so polling adds no value.
+export function useAuthKeys(
+  options?: Partial<UseQueryOptions<AuthKey[]>>,
+) {
+  return useQuery<AuthKey[]>({
+    queryKey: queryKeys.authKeys,
+    queryFn: () => api.listAuthKeys(),
+    ...options,
+  });
+}
+
+export function useRotateAuthKey() {
+  const queryClient = useQueryClient();
+  return useMutation<RotateAuthKeyResponse, Error, { overlapSeconds?: number } | void>({
+    mutationFn: (vars) => api.rotateAuthKey(vars?.overlapSeconds),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.authKeys });
+    },
+  });
+}
+
+export function usePruneAuthKeys() {
+  const queryClient = useQueryClient();
+  return useMutation<{ pruned: number }, Error, { beforeSeconds?: number } | void>({
+    mutationFn: (vars) => api.pruneAuthKeys(vars?.beforeSeconds),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.authKeys });
+    },
   });
 }
 

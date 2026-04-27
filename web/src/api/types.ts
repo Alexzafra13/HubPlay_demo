@@ -425,6 +425,82 @@ export interface HealthResponse {
   active_transcodes: number;
 }
 
+// ─── Admin: System stats ───────────────────────────────────────────────────
+//
+// Wire shape of GET /admin/system/stats. Separate from HealthResponse —
+// /health is the public liveness probe, this is the admin panel data and
+// is allowed to evolve. Keep these interfaces aligned with internal/api/
+// handlers/system.go.
+
+export interface SystemStats {
+  server: SystemServerStats;
+  database: SystemDatabaseStats;
+  ffmpeg: SystemFFmpegStats;
+  runtime: SystemRuntimeStats;
+  streaming: SystemStreamingStats;
+  storage: SystemStorageStats;
+}
+
+export interface SystemServerStats {
+  version: string;
+  go_version: string;
+  started_at: string;
+  uptime_seconds: number;
+}
+
+export interface SystemDatabaseStats {
+  ok: boolean;
+  error?: string;
+  path?: string;
+  size_bytes: number;
+}
+
+export interface SystemFFmpegStats {
+  found: boolean;
+  path: string;
+  hw_accels_available: string[];
+  hw_accel_selected: string;
+  hw_accel_encoder: string;
+}
+
+export interface SystemRuntimeStats {
+  goroutines: number;
+  memory_alloc_mb: number;
+  memory_sys_mb: number;
+  gc_pause_ms: number;
+  num_gc: number;
+  cpu_count: number;
+  os: string;
+  arch: string;
+}
+
+export interface SystemStreamingStats {
+  transcode_sessions_active: number;
+  transcode_sessions_max: number;
+}
+
+export interface SystemStorageStats {
+  image_dir_path?: string;
+  image_dir_bytes: number;
+  transcode_cache_path?: string;
+  transcode_cache_bytes: number;
+}
+
+// ─── Admin: signing keys ───────────────────────────────────────────────────
+
+export interface AuthKey {
+  id: string;
+  created_at: string;
+  retired_at?: string;
+  is_primary: boolean;
+}
+
+export interface RotateAuthKeyResponse {
+  id: string;
+  created_at: string;
+  overlap_seconds: number;
+}
+
 export interface SetupStatus {
   needs_setup: boolean;
   current_step: "account" | "libraries" | "settings" | "complete" | "";

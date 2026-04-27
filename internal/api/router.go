@@ -191,6 +191,27 @@ func NewRouter(deps Dependencies) http.Handler {
 				})
 			}
 
+			// Rich system stats (admin only). Public /health stays minimal
+			// for liveness probes; this endpoint backs the React admin
+			// "System" panel and can grow without breaking ops tooling.
+			{
+				var sysStreams handlers.SystemStatsProvider
+				if deps.StreamManager != nil {
+					sysStreams = deps.StreamManager
+				}
+				dbPath := ""
+				imageDir := ""
+				if deps.Config != nil {
+					dbPath = deps.Config.Database.Path
+					imageDir = filepath.Join(filepath.Dir(deps.Config.Database.Path), "images")
+				}
+				sysHandler := handlers.NewSystemHandler(deps.Database, sysStreams, imageDir, dbPath, deps.Version, deps.Logger)
+				r.Route("/admin/system", func(r chi.Router) {
+					r.Use(auth.RequireAdmin)
+					r.Get("/stats", sysHandler.Stats)
+				})
+			}
+
 			// Watch Progress & User Engagement
 			if deps.UserData != nil {
 				progressHandler := handlers.NewProgressHandler(deps.UserData, deps.Images, deps.Logger)
