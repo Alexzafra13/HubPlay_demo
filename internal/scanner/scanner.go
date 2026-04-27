@@ -437,8 +437,20 @@ func (s *Scanner) createItem(ctx context.Context, lib *db.Library, libRoot, path
 		Data: map[string]any{"item_id": itemID, "title": title, "library_id": lib.ID},
 	})
 
-	// Fetch metadata from TMDB (best-effort, don't fail the scan)
-	s.enrichMetadata(ctx, item)
+	// Metadata + image fetching:
+	//   - Episodes inherit visuals from their series — the series-
+	//     level enrichment in `ensureSeriesRow` already pulled the
+	//     show's poster + backdrop + logo. Searching TMDb again
+	//     per-episode with a butchered title ("Breaking.Bad.S01E01")
+	//     never finds a match and just burns rate-limit budget.
+	//     Future iteration: episode-level metadata via TMDb's
+	//     `/tv/{id}/season/{n}/episode/{m}` endpoint, keyed off the
+	//     series' external_ids.
+	//   - Movies + audio go through enrichMetadata as before; for
+	//     them the item title IS the searchable name.
+	if itemType != "episode" {
+		s.enrichMetadata(ctx, item)
+	}
 
 	return nil
 }
