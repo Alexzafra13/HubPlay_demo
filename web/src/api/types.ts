@@ -99,6 +99,11 @@ export interface MediaItem {
   season_number: number | null;
   episode_number: number | null;
   path: string | null;
+  // Per-user state. Only present when the listing endpoint sees an
+  // authenticated request — anonymous responses omit the key entirely
+  // so it stays `undefined` rather than `null`. Used to render the
+  // "watched" check and the in-progress bar on poster/episode cards.
+  user_data?: UserData;
 }
 
 export type StreamType = "video" | "audio" | "subtitle";

@@ -1,10 +1,18 @@
 import { memo } from "react";
 import { Link } from "react-router";
 import type { FC } from "react";
+import { useTranslation } from "react-i18next";
 import type { MediaItem } from "@/api/types";
 
 interface PosterCardProps {
   item: MediaItem;
+  /**
+   * Optional explicit progress override (0..100). When omitted, the
+   * card derives progress from `item.user_data.progress.percentage`.
+   * Callers that already have a separate progress source (e.g. the
+   * "Continue watching" rail joined against another query) pass it
+   * explicitly to avoid round-tripping through the item.
+   */
   progress?: number;
   onClick?: () => void;
 }
@@ -14,7 +22,16 @@ function formatRating(rating: number): string {
 }
 
 const PosterCard: FC<PosterCardProps> = memo(({ item, progress, onClick }) => {
+  const { t } = useTranslation();
   const href = item.type === "series" ? `/series/${item.id}` : `/movies/${item.id}`;
+
+  const ud = item.user_data;
+  const watched = ud?.played === true;
+  // The progress bar should only show partial state. If the item is
+  // already played, the check overlay communicates state; rendering
+  // both at once is visual noise.
+  const effectiveProgress =
+    progress ?? (!watched ? ud?.progress?.percentage : undefined);
 
   return (
     <Link
@@ -62,12 +79,34 @@ const PosterCard: FC<PosterCardProps> = memo(({ item, progress, onClick }) => {
           </div>
         )}
 
+        {/* Watched badge — top left. Mutually exclusive with the progress
+            bar below: once played we only show the check; resuming wipes
+            ud.played server-side via mark-unplayed. */}
+        {watched && (
+          <div
+            className="absolute top-2 left-2 flex h-6 w-6 items-center justify-center rounded-full bg-accent text-white shadow-md shadow-black/40"
+            aria-label={t("posterCard.watched", { defaultValue: "Watched" })}
+            title={t("posterCard.watched", { defaultValue: "Watched" })}
+          >
+            <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+        )}
+
         {/* Progress bar */}
-        {progress != null && progress > 0 && (
-          <div className="absolute bottom-0 left-0 right-0 h-1 bg-black/40">
+        {effectiveProgress != null && effectiveProgress > 0 && (
+          <div
+            className="absolute bottom-0 left-0 right-0 h-1 bg-black/40"
+            role="progressbar"
+            aria-valuenow={Math.round(effectiveProgress)}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-label={t("posterCard.inProgress", { defaultValue: "In progress" })}
+          >
             <div
               className="h-full bg-accent transition-all duration-300"
-              style={{ width: `${Math.min(100, Math.max(0, progress))}%` }}
+              style={{ width: `${Math.min(100, Math.max(0, effectiveProgress))}%` }}
             />
           </div>
         )}
