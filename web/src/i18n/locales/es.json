@@ -85,7 +85,8 @@
     "seek": "Buscar",
     "fullscreen": "Pantalla completa",
     "exitFullscreen": "Salir de pantalla completa",
-    "closePlayer": "Cerrar reproductor"
+    "closePlayer": "Cerrar reproductor",
+    "trackFallback": "Pista {{n}}"
   },
   "sort": {
     "by": "Ordenar por",

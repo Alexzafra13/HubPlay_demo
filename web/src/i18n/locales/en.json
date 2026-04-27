@@ -85,7 +85,8 @@
     "seek": "Seek",
     "fullscreen": "Fullscreen",
     "exitFullscreen": "Exit fullscreen",
-    "closePlayer": "Close Player"
+    "closePlayer": "Close Player",
+    "trackFallback": "Track {{n}}"
   },
   "sort": {
     "by": "Sort by",

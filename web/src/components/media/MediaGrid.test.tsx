@@ -25,11 +25,9 @@ class MockIntersectionObserver implements IntersectionObserver {
   root: Element | Document | null = null;
   rootMargin = "";
   thresholds: ReadonlyArray<number> = [];
-  private cb: IntersectionObserverCallback;
   private record: FakeObserver;
 
   constructor(cb: IntersectionObserverCallback, options?: IntersectionObserverInit) {
-    this.cb = cb;
     this.record = { callback: cb, options, observed: [], disconnected: false };
     observers.push(this.record);
   }
@@ -111,12 +109,13 @@ function renderGrid(items: MediaItem[], loading = false, emptyMessage?: string) 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 describe("MediaGrid", () => {
-  it("renders skeleton placeholders when loading", () => {
+  it("renders SKELETON_COUNT (8) skeleton placeholders when loading", () => {
     const { container } = renderGrid([], true);
-    // The skeleton variant uses the project's <Skeleton /> primitive;
-    // assert by counting role-less placeholders inside the grid.
+    // Match the SKELETON_COUNT constant in MediaGrid exactly. A loose
+    // ">= 8" would silently swallow regressions where someone bumps
+    // the count without updating the contract.
     const skeletons = container.querySelectorAll(".aspect-\\[2\\/3\\]");
-    expect(skeletons.length).toBeGreaterThanOrEqual(8);
+    expect(skeletons).toHaveLength(8);
   });
 
   it("renders the empty state when not loading and no items", () => {
@@ -141,22 +140,13 @@ describe("MediaGrid", () => {
     expect(screen.getAllByRole("link")).toHaveLength(120);
   });
 
-  it("hides the sentinel once all items are visible", () => {
-    const { container, rerender } = render(
-      <MemoryRouter>
-        <MediaGrid items={makeItems(30)} loading={false} />
-      </MemoryRouter>,
-    );
-    // 30 items < BATCH_SIZE, so the sentinel never mounts.
-    rerender(
-      <MemoryRouter>
-        <MediaGrid items={makeItems(30)} loading={false} />
-      </MemoryRouter>,
-    );
-    // The sentinel is the only [aria-hidden] inside the grid; when
-    // missing, querySelectorAll returns nothing.
-    const sentinels = container.querySelectorAll('[aria-hidden="true"]');
-    expect(sentinels.length).toBe(0);
+  it("does not mount the sentinel when items < BATCH_SIZE", () => {
+    // 30 items < BATCH_SIZE (40), so all fit in the first slice and
+    // the sentinel never needs to render. The sentinel is the only
+    // [aria-hidden] in the grid subtree, so its absence is the
+    // assertion.
+    const { container } = renderGrid(makeItems(30));
+    expect(container.querySelectorAll('[aria-hidden="true"]')).toHaveLength(0);
   });
 
   it("resets visibleCount when the items reference changes (new search/filter)", () => {

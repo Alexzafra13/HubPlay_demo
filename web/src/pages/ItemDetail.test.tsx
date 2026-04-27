@@ -10,16 +10,27 @@ import type { ItemDetail as ItemDetailT, MediaItem, UserData } from "@/api/types
 // VideoPlayer transitively imports hls.js; mocking it with a no-op
 // keeps this test from spinning up a real video element. ImageManager
 // pulls in the admin dialog tree (heavy + irrelevant here).
+//
+// We use `importActual` so the rest of the @/components/player barrel
+// (PlayerControls, TimeDisplay, types) is still real — otherwise any
+// future import via the same barrel returns `undefined` and the test
+// crashes far from the cause.
 
-vi.mock("@/components/player", () => ({
-  VideoPlayer: ({ title, onClose, onEnded }: { title?: string; onClose: () => void; onEnded?: () => void }) => (
-    <div data-testid="video-player">
-      <span>{title}</span>
-      <button onClick={onClose}>close-player</button>
-      <button onClick={() => onEnded?.()}>fire-ended</button>
-    </div>
-  ),
-}));
+vi.mock("@/components/player", async () => {
+  const actual = await vi.importActual<typeof import("@/components/player")>(
+    "@/components/player",
+  );
+  return {
+    ...actual,
+    VideoPlayer: ({ title, onClose, onEnded }: { title?: string; onClose: () => void; onEnded?: () => void }) => (
+      <div data-testid="video-player">
+        <span>{title}</span>
+        <button onClick={onClose}>close-player</button>
+        <button onClick={() => onEnded?.()}>fire-ended</button>
+      </div>
+    ),
+  };
+});
 
 vi.mock("@/components/ImageManager", () => ({
   ImageManager: () => null,
@@ -139,10 +150,10 @@ describe("ItemDetail", () => {
   it("renders a spinner while the item loads", () => {
     apiMock.getItem.mockImplementation(() => new Promise(() => {})); // never resolves
     renderItemDetail("ep-1");
-    // The Spinner uses role="status" via aria; fall back to class lookup
-    // since our project's Spinner doesn't export a role. The presence
-    // of the loading wrapper is enough.
-    expect(document.querySelector(".animate-spin")).toBeTruthy();
+    // Spinner exposes role="status"; query by role rather than the
+    // tailwind class so a future swap of the spinner implementation
+    // doesn't break the test.
+    expect(screen.getByRole("status")).toBeInTheDocument();
   });
 
   it("renders the not-found state when the item query errors", async () => {

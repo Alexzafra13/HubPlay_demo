@@ -216,9 +216,10 @@ const TrackSelector: FC<{
   const { t } = useTranslation();
   if (tracks.length === 0 && !offLabel) return null;
   // The fallback label used when a track has neither name nor lang.
-  // Pulled out of JSX so the i18n key isn't reached for every render
-  // and so the lint rule for hooks-per-component still applies.
-  const trackLabel = (id: number) => t("playerControls.trackFallback", { defaultValue: `Track ${id + 1}` });
+  // The locale provides the "Track N" / "Pista N" shape; the index
+  // is interpolated as `n` so each language can word-order it
+  // freely.
+  const trackLabel = (id: number) => t("playerControls.trackFallback", { n: id + 1 });
 
   return (
     <div className="relative group/track">
