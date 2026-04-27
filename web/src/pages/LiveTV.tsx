@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router";
 import { useQueries } from "@tanstack/react-query";
+import { useLiveTvPlayer } from "@/store/liveTvPlayer";
 import {
   queryKeys,
   useAddChannelFavorite,
@@ -16,13 +18,15 @@ import type {
   EPGProgram,
   UnhealthyChannel,
 } from "@/api/types";
-import { Spinner } from "@/components/common";
 import {
   type CategoryFilter,
   CountrySelector,
   DiscoverView,
   EPGGrid,
   FavoritesView,
+  LiveNowView,
+  type LiveNowSort,
+  LiveTvSkeleton,
   LiveTvTopBar,
   type ViewTab,
   PlayerOverlay,
@@ -108,27 +112,99 @@ export default function LiveTV() {
   // "all" category tab; DiscoverView handles the gating.
   const { data: continueWatching = [] } = useContinueWatchingChannels();
 
-  // ── Tabs + filters ────────────────────────────────────────────────
-  const [tab, setTab] = useState<ViewTab>("discover");
-  const [category, setCategory] = useState<CategoryFilter>("all");
-  const [search, setSearch] = useState("");
+  // ── Tabs + filters (URL-backed) ───────────────────────────────────
+  // The page's filter state lives in `?tab&cat&q=` so deep-links survive
+  // a refresh, the browser Back button works as the user expects, and
+  // links are shareable. Defaults are the canonical empty state and
+  // are kept out of the URL (we delete the param) so the bar stays
+  // tidy when the user is on Discover/Todos/no-search.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = (searchParams.get("tab") as ViewTab) ?? "now";
+  const category = (searchParams.get("cat") as CategoryFilter) ?? "all";
+  const search = searchParams.get("q") ?? "";
+  const sort = (searchParams.get("sort") as LiveNowSort) ?? "favorites";
 
-  // ── Player overlay ────────────────────────────────────────────────
-  const [playingChannel, setPlayingChannel] = useState<Channel | null>(null);
+  const updateParam = useCallback(
+    (key: string, value: string, defaultValue: string) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (value === defaultValue || value === "") next.delete(key);
+          else next.set(key, value);
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+  const setTab = useCallback(
+    (next: ViewTab) => updateParam("tab", next, "now"),
+    [updateParam],
+  );
+  const setCategory = useCallback(
+    (next: CategoryFilter) => updateParam("cat", next, "all"),
+    [updateParam],
+  );
+  const setSearch = useCallback(
+    (next: string) => updateParam("q", next, ""),
+    [updateParam],
+  );
+  const setSort = useCallback(
+    (next: LiveNowSort) => updateParam("sort", next, "favorites"),
+    [updateParam],
+  );
 
-  // Close overlay on Escape. Placed here (not in the overlay) so the key
-  // listener stays paired with the state it mutates.
+  // ── Player overlay (lives in the global LiveTV player store so it
+  //    survives navigation as a corner mini-player) ────────────────
+  const playingChannel = useLiveTvPlayer((s) => s.channel);
+  const overlayExpanded = useLiveTvPlayer((s) => s.expanded);
+  const openPlayerStore = useLiveTvPlayer((s) => s.open);
+  const collapsePlayer = useLiveTvPlayer((s) => s.collapse);
+  const surfNext = useLiveTvPlayer((s) => s.surfNext);
+  const surfPrev = useLiveTvPlayer((s) => s.surfPrev);
+
+  // Esc collapses the overlay to the corner mini-player (audio keeps
+  // going) — explicit "stop" lives on the mini-player's X button.
   useEffect(() => {
-    if (!playingChannel) return;
+    if (!playingChannel || !overlayExpanded) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setPlayingChannel(null);
+      if (e.key === "Escape") collapsePlayer();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [playingChannel]);
+  }, [playingChannel, overlayExpanded, collapsePlayer]);
 
-  const openPlayer = useCallback((ch: Channel) => setPlayingChannel(ch), []);
-  const closePlayer = useCallback(() => setPlayingChannel(null), []);
+  // Channel surfing keyboard — ↑/↓ walks `surfList` (which the page
+  // keeps in sync with the user's currently-visible filtered list, see
+  // the effect below). Only active while the overlay is up; the corner
+  // mini-player intentionally doesn't surf so a user navigating other
+  // pages doesn't accidentally switch channels.
+  useEffect(() => {
+    if (!playingChannel || !overlayExpanded) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        surfNext();
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        surfPrev();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [playingChannel, overlayExpanded, surfNext, surfPrev]);
+
+  // Helper used by every "click a channel card" path on this page.
+  // Seeds the surf list with whichever subset is currently visible to
+  // the user so ↑/↓ matches what they're actually browsing.
+  const openPlayer = useCallback(
+    (ch: Channel, surfList?: Channel[]) => {
+      openPlayerStore(ch, surfList ?? channels);
+    },
+    [openPlayerStore, channels],
+  );
+  const closePlayer = collapsePlayer;
 
   // ── Program detail modal ─────────────────────────────────────────
   // Opened from EPGGrid by clicking a programme cell; closes when
@@ -239,6 +315,52 @@ export default function LiveTV() {
     modeOptions: heroModeOptions,
   } = useHeroSpotlight({ channels, scheduleByChannel, favoriteSet });
 
+  // ── "Ahora en directo" rail ──────────────────────────────────────
+  // Independent of the hero — surfaces every channel that has an EPG
+  // entry currently broadcasting, capped at a manageable rail length.
+  // Favourites bubble to the front so the user's anchor channels don't
+  // get buried; ties break by channel number for a stable order.
+  // Capped at 18 because beyond that the rail becomes a wall the user
+  // can't really scan; the dedicated "Guía" tab is the right place for
+  // exhaustive listings.
+  const liveNowChannels = useMemo(() => {
+    return channels
+      .filter((c) => getNowPlaying(scheduleByChannel[c.id]))
+      .sort((a, b) => {
+        const aFav = favoriteSet.has(a.id) ? 0 : 1;
+        const bFav = favoriteSet.has(b.id) ? 0 : 1;
+        return aFav - bFav || a.number - b.number;
+      });
+  }, [channels, scheduleByChannel, favoriteSet]);
+
+  // Counts per category — scoped to live-now channels only — so the
+  // chip pills on the "Ahora" tab read "how many channels in this
+  // category are on right now", not "how many total". The total
+  // counts already live in `counts` (used by DiscoverView).
+  const liveNowCounts = useMemo<Record<CategoryFilter, number>>(() => {
+    const base: Record<CategoryFilter, number> = {
+      all: liveNowChannels.length,
+      "no-signal": 0,
+      general: 0,
+      news: 0,
+      sports: 0,
+      movies: 0,
+      music: 0,
+      entertainment: 0,
+      kids: 0,
+      culture: 0,
+      documentaries: 0,
+      international: 0,
+      travel: 0,
+      religion: 0,
+      adult: 0,
+    };
+    for (const ch of liveNowChannels) {
+      base[ch.category] += 1;
+    }
+    return base;
+  }, [liveNowChannels]);
+
   // Topbar counter: number of channels *actually broadcasting now* — in IPTV
   // all active channels stream continuously, so this is simply the count of
   // channels that also have an EPG "now on air" entry. If EPG hasn't been
@@ -253,12 +375,11 @@ export default function LiveTV() {
   }, [channels, scheduleByChannel]);
 
   // ── Loading + empty states ───────────────────────────────────────
+  // Skeleton (vs. centred Spinner) so the user gets a silhouette of
+  // the final layout straight away — perceived performance is much
+  // better when the page chrome is visible during fetch.
   if (librariesLoading || channelsLoading) {
-    return (
-      <div className="flex min-h-[60vh] items-center justify-center">
-        <Spinner size="lg" />
-      </div>
-    );
+    return <LiveTvSkeleton />;
   }
 
   if (liveTvLibraries.length === 0 || channels.length === 0) {
@@ -271,11 +392,35 @@ export default function LiveTV() {
   const guideActiveChannel =
     playingChannel ?? filteredChannels[0] ?? channels[0] ?? null;
 
+  // Header overlay for the hero — page title + counters. Lifted into
+  // the hero so the spotlight hugs the TopBar instead of sitting under
+  // a separate stripe; reused on the discover tab only (the other tabs
+  // still get the inline title from LiveTvTopBar).
+  const heroHeaderOverlay = (
+    <div>
+      <h1 className="flex items-center gap-2 text-xl font-bold text-tv-fg-0 drop-shadow-md md:text-2xl">
+        <span className="inline-flex h-2.5 w-2.5 animate-pulse rounded-full bg-tv-live shadow-[0_0_8px_var(--tv-live)]" />
+        TV en directo
+      </h1>
+      <p className="mt-1 text-xs text-tv-fg-1 drop-shadow">
+        <b className="text-tv-fg-0">{channels.length}</b> canales ·{" "}
+        <b className="text-tv-fg-0">{liveNowCount}</b> en vivo ahora
+      </p>
+    </div>
+  );
+
   return (
     <section
       data-theme="tv"
       data-accent="lime"
-      className="-mx-4 -mt-2 flex flex-col gap-6 px-4 pb-10 pt-4 md:-mx-6 md:px-6"
+      // Small top breathing room (pt-3) so the hero feels close to the
+      // global TopBar without looking sliced off at the top edge —
+      // flush-zero looked cropped against the bar's frosted glass.
+      // The hero keeps its rounded corners (no flushTop) for the same
+      // reason: a soft-edged card framed by a few px of bg reads as
+      // intentional whereas hard square corners under the bar read as
+      // overflow.
+      className="-mx-4 flex flex-col gap-6 px-4 pb-10 pt-3 md:-mx-6 md:px-6"
     >
       <LiveTvTopBar
         tab={tab}
@@ -303,6 +448,25 @@ export default function LiveTV() {
           onToggleFavorite={toggleFavorite}
           unhealthyChannels={unhealthyChannels}
           continueWatching={continueWatching}
+          heroHeaderOverlay={heroHeaderOverlay}
+          heroMode={heroMode}
+          onHeroModeChange={setHeroMode}
+        />
+      )}
+
+      {tab === "now" && (
+        <LiveNowView
+          channels={liveNowChannels}
+          scheduleByChannel={scheduleByChannel}
+          category={category}
+          onCategoryChange={setCategory}
+          counts={liveNowCounts}
+          search={search}
+          sort={sort}
+          onSortChange={setSort}
+          onOpen={openPlayer}
+          favoriteSet={favoriteSet}
+          onToggleFavorite={toggleFavorite}
         />
       )}
 
@@ -326,7 +490,7 @@ export default function LiveTV() {
         />
       )}
 
-      {playingChannel && (
+      {playingChannel && overlayExpanded && (
         <PlayerOverlay
           channel={playingChannel}
           allChannels={channels}

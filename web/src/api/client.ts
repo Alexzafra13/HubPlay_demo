@@ -514,13 +514,47 @@ export class ApiClient {
     to?: string,
   ): Promise<Record<string, EPGProgram[]>> {
     if (channelIds.length === 0) return {};
-    // POST (not GET): a library with ~250 channels already produces a
-    // URL long enough to trip a 414 at common reverse-proxy defaults.
-    // The backend accepts both transports; the body form scales to
-    // thousands of channels without worrying about header limits.
-    return this.request<Record<string, EPGProgram[]>>("POST", "/channels/schedule", {
-      body: { channels: channelIds, from, to },
-    });
+
+    // Chunk into batches well under the backend cap of 5000 channels
+    // per request. The cap exists to bound memory + DB cost on a
+    // single roundtrip; chunking on the client lets us serve libraries
+    // of any size without hitting the wall AND parallelises the
+    // database work since each batch hits an independent connection.
+    //
+    // Batch size of 1000 is a deliberate compromise:
+    //   - Big enough to keep roundtrip overhead low (1 request per
+    //     thousand channels, not per channel).
+    //   - Small enough that a single failure recovers cheaply and the
+    //     payload stays well below the 1 MiB body cap (1000 × ~36-byte
+    //     UUID = 36 KiB, plus framing).
+    //   - Below the backend cap (5000) by 5x so we never get a
+    //     TOO_MANY_CHANNELS even if the cap is later tightened.
+    const BATCH_SIZE = 1000;
+    if (channelIds.length <= BATCH_SIZE) {
+      return this.request<Record<string, EPGProgram[]>>(
+        "POST",
+        "/channels/schedule",
+        { body: { channels: channelIds, from, to } },
+      );
+    }
+
+    const batches: string[][] = [];
+    for (let i = 0; i < channelIds.length; i += BATCH_SIZE) {
+      batches.push(channelIds.slice(i, i + BATCH_SIZE));
+    }
+    const results = await Promise.all(
+      batches.map((batch) =>
+        this.request<Record<string, EPGProgram[]>>(
+          "POST",
+          "/channels/schedule",
+          { body: { channels: batch, from, to } },
+        ),
+      ),
+    );
+    // Merge batch responses. Channel ids never repeat across batches
+    // (we sliced them disjoint), so a flat assign is correct — no
+    // dedup needed.
+    return Object.assign({}, ...results);
   }
 
   async getChannelGroups(libraryId?: string): Promise<string[]> {

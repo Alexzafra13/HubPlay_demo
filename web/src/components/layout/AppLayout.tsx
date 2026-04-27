@@ -2,6 +2,8 @@ import { useState, useSyncExternalStore } from 'react';
 import { Outlet, useLocation } from 'react-router';
 import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
+import { TopBarSlotProvider } from './TopBarSlot';
+import { MiniPlayer } from '@/components/livetv/MiniPlayer';
 
 // ─── Props ──────────────────────────────────────────────────────────────────
 
@@ -60,6 +62,7 @@ export function AppLayout({ title }: AppLayoutProps) {
   const closeMobile = () => setMobileOpen(false);
 
   return (
+    <TopBarSlotProvider>
     <div className="min-h-screen bg-bg-base font-sans">
       {/* Mobile drawer overlay */}
       <div
@@ -109,6 +112,12 @@ export function AppLayout({ title }: AppLayoutProps) {
           <Outlet />
         </main>
       </div>
+
+      {/* Mini-player — fixed bottom-right, lives at the shell level so
+          it survives navigation between routes. Renders nothing when
+          either nothing is playing or the full overlay is up. */}
+      <MiniPlayer />
     </div>
+    </TopBarSlotProvider>
   );
 }
