@@ -147,7 +147,11 @@ export interface ItemDetail extends MediaItem {
   duration_ticks: number | null;
   media_streams: MediaStream[];
   people: Person[];
-  user_data: UserData | null;
+  // Inherited from MediaItem (optional). Re-listed in this interface
+  // for documentation only — the backend omits the key entirely when
+  // the request is unauthenticated or no row exists, so it parses as
+  // `undefined`, never `null`. Keeping the same shape on both
+  // interfaces lets `ItemDetail extends MediaItem` stay covariant.
 }
 
 // ─── Live TV ────────────────────────────────────────────────────────────────
