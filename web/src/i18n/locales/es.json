@@ -47,6 +47,15 @@
     "nextUp": "Siguiente",
     "failedToLoad": "Error al cargar el contenido. Comprueba la conexion del servidor."
   },
+  "watchTonight": {
+    "tonight": "Para esta noche",
+    "resume": "Continua donde lo dejaste",
+    "resumeAt": "Reanudar desde {{time}}",
+    "playAction": "Reproducir",
+    "resumeAction": "Reanudar",
+    "resumeLabel": "Reanudar",
+    "recommendedLabel": "Recomendado para esta noche"
+  },
   "login": {
     "username": "Usuario",
     "password": "Contrasena",
@@ -76,6 +85,7 @@
     "audio": "Audio",
     "subtitles": "Subtitulos",
     "subtitlesOff": "Ninguno",
+    "subtitlesExternal": "Buscar subtitulos online",
     "play": "Reproducir",
     "pause": "Pausa",
     "back": "Atras",
@@ -88,12 +98,32 @@
     "closePlayer": "Cerrar reproductor",
     "trackFallback": "Pista {{n}}"
   },
+  "externalSubs": {
+    "title": "Subtitulos online",
+    "noResults": "No se encontraron subtitulos",
+    "searchFailed": "Busqueda fallida. Prueba otro idioma.",
+    "providersDisabled": "Los proveedores de subtitulos no estan configurados.",
+    "score": "Puntuacion {{score}}"
+  },
   "sort": {
     "by": "Ordenar por",
     "title": "Titulo",
     "year": "Ano",
     "added": "Anadidos recientemente",
     "rating": "Valoracion"
+  },
+  "filters": {
+    "title": "Filtros",
+    "genre": "Genero",
+    "year": "Ano",
+    "rating": "Valoracion minima",
+    "from": "Desde",
+    "to": "Hasta",
+    "any": "Cualquiera",
+    "clear": "Limpiar",
+    "clearAll": "Limpiar todos los filtros",
+    "noGenres": "Aun no hay generos — termina un escaneo para llenarlos.",
+    "genreCount": "{{count}} elementos"
   },
   "series": {
     "title": "Series",

@@ -108,7 +108,7 @@ const IPTV_ORG_REGIONS: { code: string; name: string }[] = [
 
 const CONTENT_TYPES: { value: ContentType; key: string }[] = [
   { value: "movies", key: "contentTypes.movies" },
-  { value: "tvshows", key: "contentTypes.tvShows" },
+  { value: "shows", key: "contentTypes.tvShows" },
   { value: "livetv", key: "contentTypes.liveTV" },
 ];
 
@@ -146,7 +146,7 @@ const LIBRARY_SECTIONS: {
     textClass: "text-warning",
   },
   {
-    type: "tvshows",
+    type: "shows",
     labelKey: "contentTypes.tvShows",
     headerClass: "bg-accent-light/5 border-accent-light/30 hover:bg-accent-light/10",
     dotClass: "bg-accent-light",

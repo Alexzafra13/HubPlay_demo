@@ -501,6 +501,98 @@ hubplay.yaml + un GPU con encoder soportado.**
 
 ---
 
+## Commit `444e7b6` — UI de subs externos (OpenSubtitles)
+
+**Necesita OpenSubtitles configurado en admin → Providers.**
+
+- [ ] Reproduce cualquier película o episodio.
+- [ ] En el bottom bar del player, junto al icono de subtítulos, debe
+  aparecer un **icono de lupa**. Click → modal flotante.
+- [ ] Modal muestra chips de idioma (ES/EN/FR/DE/IT/PT). Toggle uno y
+  la búsqueda se relanza tras 250 ms.
+- [ ] Lista de candidatos con `[ES] opensubtitles · SRT · Score 7.5`.
+  Click en uno descarga + convierte a VTT y los subs se ven sobre
+  el vídeo.
+- [ ] Esc cierra el modal sin elegir nada.
+- [ ] Sin OpenSubtitles configurado → mensaje claro "providers no
+  configurados" en lugar de error opaco.
+
+---
+
+## Commit `024586e` — Vista previa al hover (trickplay)
+
+- [ ] Reproduce cualquier película. Pasa el ratón por la barra de
+  tiempo.
+- [ ] Primera vez con un vídeo nuevo: 5-30 s sin preview mientras
+  ffmpeg genera el sprite (en background). Después aparece la
+  miniatura instantáneamente.
+- [ ] La miniatura sigue al cursor, **se queda dentro de los bordes**
+  del player (no se sale por izquierda/derecha).
+- [ ] Bajo la miniatura aparece el tiempo en formato `0:42:18`.
+- [ ] En vídeos cortos (~5 min) la barra entera se cubre con
+  miniaturas; en largas (~2 h) cada celda son 10 s.
+
+---
+
+## Commit `6981a9c` — Filtros género / año / rating
+
+- [ ] En `/movies` o `/series`, junto a Sort, aparece botón
+  **"Filters"**.
+- [ ] Click → panel se despliega con tres bloques:
+  - Chips de género ordenados por frecuencia (los más comunes
+    primero, máx 20).
+  - Inputs de año Desde/Hasta con placeholders del rango real de
+    tu librería.
+  - Slider de valoración mínima (0–10 en pasos de 0.5).
+- [ ] Toggle un género → grid filtra al instante. Multi-select
+  funciona como OR (cualquiera).
+- [ ] Inputs año → solo títulos en el rango. Items sin año NO se
+  filtran (los mantenemos visibles).
+- [ ] Slider rating ≥ 7.5 → solo items por encima. Items sin
+  valoración NO se filtran.
+- [ ] Cuando hay filtros activos, el botón muestra **badge `(N)`** en
+  accent.
+- [ ] "Clear all filters" abajo del panel limpia todo.
+
+---
+
+## Commit `3dda6dc` — Tarjeta "Watch Tonight" en Home
+
+- [ ] Abre `/`. Justo debajo del hero rotativo, ves una tarjeta
+  ancha (21:9) con backdrop, título grande y botón Play/Resume.
+- [ ] Si tienes un item en progreso reciente (< 14 días), la
+  tarjeta dice **"PICK UP WHERE YOU LEFT OFF"** y muestra el tiempo
+  para reanudar.
+- [ ] Si no, dice **"FOR TONIGHT"** con el item recién añadido de
+  mejor rating.
+- [ ] Si no hay items con backdrop, la tarjeta NO se muestra (mejor
+  ocultar que mostrar algo desnudo).
+- [ ] Click en la tarjeta navega al detalle del item.
+
+---
+
+## Commit `465298c` — Picker de audio enriquecido (codec + canales)
+
+**Necesita un fichero con varias pistas de audio (Blu-ray rip
+típicamente).**
+
+- [ ] Reproduce un archivo MKV con múltiples pistas de audio.
+- [ ] Hover el icono de audio en el bottom bar → dropdown.
+- [ ] Cada pista muestra ahora `Idioma · Codec Canales`. Por ejemplo:
+  - `English · TrueHD 7.1`
+  - `English · AAC Stereo`
+  - `Spanish · DTS-HD 7.1`
+- [ ] Sin esto, todas las pistas en español decían solo "Spanish" sin
+  posibilidad de distinguirlas. Ahora son visiblemente distintas.
+
+> Nota: el "passthrough" real de Atmos/TrueHD (que el sonido lossless
+> llegue al receptor sin recompresión) NO es posible en navegador web
+> hoy — Plex y Jellyfin tampoco pueden. Las etiquetas enriquecidas
+> sirven al menos como señal "para esta pista usa un cliente nativo"
+> a usuarios con setups de audio serios.
+
+---
+
 ## Smoke tests transversales
 
 ### Backend

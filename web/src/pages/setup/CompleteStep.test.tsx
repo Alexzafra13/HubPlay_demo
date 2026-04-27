@@ -50,7 +50,7 @@ describe("CompleteStep", () => {
         setupData={{
           libraries: [
             { name: "Movies", contentType: "movies", path: "/mnt/movies" },
-            { name: "Shows", contentType: "tvshows", path: "/mnt/shows" },
+            { name: "Shows", contentType: "shows", path: "/mnt/shows" },
           ],
         }}
       />,

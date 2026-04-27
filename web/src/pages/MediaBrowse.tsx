@@ -3,6 +3,13 @@ import { useTranslation } from "react-i18next";
 import { useInfiniteItems } from "@/api/hooks";
 import { Input, Spinner } from "@/components/common";
 import { MediaGrid } from "@/components/media";
+import {
+  MediaBrowseFilters,
+  applyFilters,
+  activeFilterCount,
+  emptyFilters,
+  type BrowseFiltersState,
+} from "@/components/media/MediaBrowseFilters";
 import { sortItems, SORT_OPTIONS, type SortOption } from "@/utils/sort";
 
 export type BrowseType = "movie" | "series";
@@ -21,6 +28,8 @@ export default function MediaBrowse({ type }: MediaBrowseProps) {
   const ns = I18N_NS[type];
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortOption>("added");
+  const [filters, setFilters] = useState<BrowseFiltersState>(emptyFilters);
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const { data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } =
     useInfiniteItems({ type });
@@ -40,8 +49,11 @@ export default function MediaBrowse({ type }: MediaBrowseProps) {
           (item.original_title?.toLowerCase().includes(q) ?? false),
       );
     }
+    result = applyFilters(result, filters);
     return sortItems(result, sort);
-  }, [items, search, sort]);
+  }, [items, search, sort, filters]);
+
+  const filterCount = activeFilterCount(filters);
 
   const observerRef = useRef<IntersectionObserver | null>(null);
   const sentinelRef = useCallback(
@@ -104,7 +116,32 @@ export default function MediaBrowse({ type }: MediaBrowseProps) {
             </option>
           ))}
         </select>
+        <button
+          type="button"
+          onClick={() => setFiltersOpen((o) => !o)}
+          aria-expanded={filtersOpen}
+          aria-controls="media-browse-filters"
+          className={[
+            "rounded-[--radius-md] border px-3 py-2 text-sm transition-colors cursor-pointer",
+            filterCount > 0
+              ? "border-accent bg-accent/10 text-accent"
+              : "border-border bg-bg-card text-text-primary hover:bg-bg-elevated",
+          ].join(" ")}
+        >
+          {t("filters.title")}
+          {filterCount > 0 && (
+            <span className="ml-1.5 inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-white">
+              {filterCount}
+            </span>
+          )}
+        </button>
       </div>
+
+      {filtersOpen && (
+        <div id="media-browse-filters">
+          <MediaBrowseFilters items={items} state={filters} onChange={setFilters} />
+        </div>
+      )}
 
       <MediaGrid
         items={filtered}

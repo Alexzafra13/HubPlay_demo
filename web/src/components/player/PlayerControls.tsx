@@ -1,7 +1,8 @@
-import { memo } from "react";
+import { memo, useRef, useState } from "react";
 import type { FC } from "react";
 import { useTranslation } from "react-i18next";
 import { TimeDisplay } from "./TimeDisplay";
+import type { TrickplayManifest } from "@/hooks/useTrickplay";
 
 interface AudioTrack {
   id: number;
@@ -22,6 +23,17 @@ interface QualityLevel {
   label: string;
 }
 
+// Subset of `api.MediaStream` the picker actually needs. We re-state
+// it here instead of importing the API type so PlayerControls stays
+// independent of the wire shape (it's a pure-render component).
+interface AudioStreamInfo {
+  index: number;
+  codec: string;
+  language: string | null;
+  title: string | null;
+  channels: number | null;
+}
+
 // One chapter marker on the seek bar. `startSeconds` is duration-in-
 // seconds (already converted from ticks at the call site) so SeekBar
 // stays unit-agnostic and doesn't need to know about the 10-million-
@@ -29,6 +41,11 @@ interface QualityLevel {
 interface ChapterMarker {
   startSeconds: number;
   title: string;
+}
+
+interface TrickplayProps {
+  manifest: TrickplayManifest;
+  spriteURL: string;
 }
 
 interface PlayerControlsProps {
@@ -40,12 +57,24 @@ interface PlayerControlsProps {
   isMuted: boolean;
   isFullscreen: boolean;
   audioTracks: AudioTrack[];
+  /**
+   * DB-side audio MediaStreams (same item, different source). Cross-
+   * referenced with `audioTracks` to enrich each picker entry with
+   * codec + channel count ("English · TrueHD 7.1") — the bare
+   * hls.js name ("English") hides the difference between a stereo
+   * AAC track and the lossless 7.1 sibling on the same release.
+   */
+  audioStreams?: AudioStreamInfo[];
   subtitleTracks: SubtitleTrack[];
   qualityLevels?: QualityLevel[];
   // Seek bar chapter markers. Optional — when absent or empty the
   // bar renders unchanged. When present, each entry becomes a 2-px
   // tick on the bar; hovering reveals the title.
   chapters?: ChapterMarker[];
+  // Trickplay (preview thumbnails). When provided, the SeekBar
+  // shows a sub-image of the sprite at the cursor position on
+  // hover. Absent = legacy bar (no preview tooltip).
+  trickplay?: TrickplayProps;
   currentAudioTrack: number;
   currentSubtitleTrack: number;
   /** -1 = auto / ABR. */
@@ -58,6 +87,10 @@ interface PlayerControlsProps {
   onAudioTrackChange: (id: number) => void;
   onSubtitleTrackChange: (id: number) => void;
   onQualityChange?: (id: number) => void;
+  /** Optional: when provided, renders a "search online subs" button
+   *  next to the subtitle selector. The parent owns the modal and
+   *  the resulting `<track>` injection. */
+  onSearchExternalSubs?: () => void;
   onClose: () => void;
   title?: string;
 }
@@ -175,14 +208,57 @@ const SeekBar: FC<{
   duration: number;
   buffered: number;
   chapters?: ChapterMarker[];
+  trickplay?: TrickplayProps;
   onSeek: (time: number) => void;
-}> = memo(({ currentTime, duration, buffered, chapters, onSeek }) => {
+}> = memo(({ currentTime, duration, buffered, chapters, trickplay, onSeek }) => {
   const { t } = useTranslation();
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
   const bufferedPercent = duration > 0 ? (buffered / duration) * 100 : 0;
 
+  // Hover state for the trickplay preview tooltip. The two pieces:
+  // the time at the cursor (formatted) and the X position of the
+  // tooltip clamped to stay inside the bar. We track them on the
+  // container `<div>`'s mouse events and render an absolutely-
+  // positioned preview above the bar when both are populated.
+  const trackRef = useRef<HTMLDivElement | null>(null);
+  const [hoverTime, setHoverTime] = useState<number | null>(null);
+  const [hoverX, setHoverX] = useState(0);
+  const [trackWidth, setTrackWidth] = useState(0);
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!trickplay || duration <= 0) return;
+    const rect = trackRef.current?.getBoundingClientRect();
+    if (!rect || rect.width <= 0) return;
+    const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    setHoverTime(ratio * duration);
+    setHoverX(e.clientX - rect.left);
+    setTrackWidth(rect.width);
+  };
+
+  const handleMouseLeave = () => {
+    setHoverTime(null);
+  };
+
   return (
-    <div className="group/seek relative flex-1 flex items-center h-6 cursor-pointer">
+    <div
+      ref={trackRef}
+      className="group/seek relative flex-1 flex items-center h-6 cursor-pointer"
+      onMouseMove={handleMouseMove}
+      onMouseLeave={handleMouseLeave}
+    >
+      {/* Trickplay preview tooltip. Positioned above the bar, clamped
+          inside the track width so the right edge of a 320 px thumb
+          on a 30 px bar doesn't overflow the player. */}
+      {trickplay && hoverTime != null && (
+        <TrickplayTooltip
+          manifest={trickplay.manifest}
+          spriteURL={trickplay.spriteURL}
+          time={hoverTime}
+          cursorX={hoverX}
+          trackWidth={trackWidth}
+        />
+      )}
+
       <input
         type="range"
         min={0}
@@ -235,6 +311,193 @@ const SeekBar: FC<{
 });
 
 SeekBar.displayName = "SeekBar";
+
+// ─── Trickplay tooltip ─────────────────────────────────────────────────────
+
+/**
+ * Renders a single thumbnail at hover time, plus a small time label.
+ * The math is the inverse of `imaging.GenerateTrickplay`: given a
+ * time in seconds, find which sub-image of the sprite covers it and
+ * shift `background-position` to that cell.
+ *
+ * Position rules:
+ *   - Centered on cursor X by default.
+ *   - Clamped to stay inside the track width so the right/left edges
+ *     don't bleed past the player chrome.
+ *   - Sits above the track (bottom anchored), with a small gap so
+ *     the seek thumb (visible on hover) doesn't overlap the
+ *     thumbnail's bottom edge.
+ */
+const TrickplayTooltip: FC<{
+  manifest: TrickplayManifest;
+  spriteURL: string;
+  time: number;
+  cursorX: number;
+  trackWidth: number;
+}> = ({ manifest, spriteURL, time, cursorX, trackWidth }) => {
+  const idx = Math.min(
+    manifest.total - 1,
+    Math.max(0, Math.floor(time / Math.max(1, manifest.interval_sec))),
+  );
+  const col = idx % manifest.columns;
+  const row = Math.floor(idx / manifest.columns);
+  const tw = manifest.thumb_width;
+  const th = manifest.thumb_height;
+
+  // Center on cursor, then clamp so the tooltip box stays inside the
+  // track. The 8 px margin is just visual breathing room.
+  const half = tw / 2;
+  let left = cursorX - half;
+  if (left < 8) left = 8;
+  if (left + tw > trackWidth - 8) left = trackWidth - tw - 8;
+
+  return (
+    <div
+      className="absolute bottom-full mb-3 pointer-events-none flex flex-col items-center"
+      style={{ left, width: tw }}
+      aria-hidden="true"
+    >
+      <div
+        className="rounded-[--radius-md] border border-border shadow-lg shadow-black/50 overflow-hidden bg-black"
+        style={{
+          width: tw,
+          height: th,
+          backgroundImage: `url(${spriteURL})`,
+          backgroundPosition: `-${col * tw}px -${row * th}px`,
+          backgroundSize: `${manifest.columns * tw}px ${manifest.rows * th}px`,
+          backgroundRepeat: "no-repeat",
+        }}
+      />
+      <span className="mt-1 px-1.5 py-0.5 rounded bg-black/80 text-[11px] font-medium text-white tabular-nums">
+        {formatHMS(time)}
+      </span>
+    </div>
+  );
+};
+
+function formatHMS(s: number): string {
+  if (!isFinite(s) || s < 0) return "0:00";
+  const total = Math.floor(s);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const sec = total % 60;
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${m}:${pad(sec)}`;
+}
+
+// Map a channel count to the human label users expect on a release
+// — "5.1" reads instantly, "channels: 6" doesn't. Anything weird
+// (mono with > 8 ch, missing data) falls through to the raw number
+// so the picker never lies about what's actually on the file.
+function channelLabel(ch: number | null): string {
+  if (ch == null || ch <= 0) return "";
+  switch (ch) {
+    case 1:
+      return "Mono";
+    case 2:
+      return "Stereo";
+    case 6:
+      return "5.1";
+    case 7:
+      return "6.1";
+    case 8:
+      return "7.1";
+    default:
+      return `${ch}ch`;
+  }
+}
+
+// Pretty-print a codec name for the picker. ffprobe spits out terse
+// identifiers ("ac3", "eac3", "truehd"); the user expects the
+// marketing names they see on the release ("AC3", "Atmos / TrueHD").
+function codecLabel(codec: string): string {
+  switch (codec.toLowerCase()) {
+    case "aac":
+      return "AAC";
+    case "ac3":
+      return "AC3";
+    case "eac3":
+      return "EAC3";
+    case "dts":
+      return "DTS";
+    case "dts-hd":
+    case "dts_hd":
+    case "dca":
+      return "DTS-HD";
+    case "truehd":
+      return "TrueHD";
+    case "flac":
+      return "FLAC";
+    case "opus":
+      return "Opus";
+    case "mp3":
+      return "MP3";
+    case "vorbis":
+      return "Vorbis";
+    default:
+      return codec.toUpperCase();
+  }
+}
+
+/**
+ * Cross-references the bare hls.js audio tracks against the DB-side
+ * MediaStream rows to produce a richer picker label.
+ *
+ * Match strategy:
+ *   1. Within each language code, pair tracks in the order they
+ *      appear. So if the file has [eng-AAC, eng-TrueHD] and hls.js
+ *      reports [eng#1, eng#2], they line up 1↔1. Order from the
+ *      DB matches ffprobe's stream ordering, which the muxer
+ *      preserves into the HLS manifest.
+ *   2. If no DB stream matches the language, the original hls.js
+ *      label survives — better partial enrichment than wrong.
+ *
+ * Result label shape: "English · TrueHD 7.1" or "Spanish · AAC Stereo".
+ * Falls back to just the codec when the bare name is missing.
+ */
+function enrichAudioTracks(
+  hlsTracks: AudioTrack[],
+  dbStreams: AudioStreamInfo[],
+): AudioTrack[] {
+  if (hlsTracks.length === 0) return hlsTracks;
+
+  // Index DB streams by language code, preserving file order.
+  const byLang = new Map<string, AudioStreamInfo[]>();
+  for (const s of dbStreams) {
+    const k = (s.language ?? "").toLowerCase();
+    const arr = byLang.get(k) ?? [];
+    arr.push(s);
+    byLang.set(k, arr);
+  }
+
+  // Cursor per language so we pop in order.
+  const cursors = new Map<string, number>();
+
+  return hlsTracks.map((track) => {
+    const langKey = (track.lang ?? "").toLowerCase();
+    const candidates = byLang.get(langKey);
+    if (!candidates || candidates.length === 0) return track;
+
+    const cursor = cursors.get(langKey) ?? 0;
+    cursors.set(langKey, cursor + 1);
+    const stream = candidates[cursor];
+    if (!stream) return track;
+
+    const parts: string[] = [];
+    if (track.name) parts.push(track.name);
+    else if (track.lang) parts.push(track.lang.toUpperCase());
+
+    const codec = codecLabel(stream.codec);
+    const ch = channelLabel(stream.channels);
+    const detail = ch ? `${codec} ${ch}` : codec;
+    if (detail) parts.push(detail);
+
+    return {
+      ...track,
+      name: parts.join(" · "),
+    };
+  });
+}
 
 // ─── Track selector dropdown ─────────────────────────────────────────────────
 
@@ -351,9 +614,11 @@ const PlayerControls: FC<PlayerControlsProps> = ({
   isMuted,
   isFullscreen,
   audioTracks,
+  audioStreams,
   subtitleTracks,
   qualityLevels = [],
   chapters,
+  trickplay,
   currentAudioTrack,
   currentSubtitleTrack,
   currentQuality = -1,
@@ -365,6 +630,7 @@ const PlayerControls: FC<PlayerControlsProps> = ({
   onAudioTrackChange,
   onSubtitleTrackChange,
   onQualityChange,
+  onSearchExternalSubs,
   onClose,
   title,
 }) => {
@@ -377,6 +643,17 @@ const PlayerControls: FC<PlayerControlsProps> = ({
     name: l.label,
     lang: "",
   }));
+
+  // Enrich the audio picker labels with codec + channel info from the
+  // DB-side stream list (bare hls.js names are just "English" /
+  // "Spanish"; the user can't tell a stereo AAC from a 7.1 TrueHD
+  // sibling without it). Match by language because hls.js doesn't
+  // expose the original file's stream index — and within a language
+  // we match by position so two Spanish tracks (DTS-MA, AAC) map
+  // 1↔1 instead of both showing the same enriched label.
+  const enrichedAudioTracks = audioStreams && audioStreams.length > 0
+    ? enrichAudioTracks(audioTracks, audioStreams)
+    : audioTracks;
   return (
     <div className="absolute inset-0 flex flex-col justify-between z-10">
       {/* Gradient overlays for readability */}
@@ -418,6 +695,7 @@ const PlayerControls: FC<PlayerControlsProps> = ({
           duration={duration}
           buffered={buffered}
           chapters={chapters}
+          trickplay={trickplay}
           onSeek={onSeek}
         />
 
@@ -450,7 +728,7 @@ const PlayerControls: FC<PlayerControlsProps> = ({
           <TrackSelector
             icon={AudioIcon}
             label={t("playerControls.audio")}
-            tracks={audioTracks}
+            tracks={enrichedAudioTracks}
             currentTrack={currentAudioTrack}
             onSelect={onAudioTrackChange}
           />
@@ -464,6 +742,26 @@ const PlayerControls: FC<PlayerControlsProps> = ({
             offLabel={t("playerControls.subtitlesOff")}
             onSelect={onSubtitleTrackChange}
           />
+
+          {/* Search online subtitles. Sibling to the subs selector
+              rather than nested inside it: opening a modal from a
+              hover-revealed dropdown is fragile (the dropdown closes
+              the moment focus moves), so the affordance is a
+              dedicated button. */}
+          {onSearchExternalSubs && (
+            <button
+              type="button"
+              onClick={onSearchExternalSubs}
+              aria-label={t("playerControls.subtitlesExternal")}
+              title={t("playerControls.subtitlesExternal")}
+              className="p-1.5 rounded-[--radius-sm] text-white/80 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+            >
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <circle cx="11" cy="11" r="7" />
+                <path d="M21 21l-4.35-4.35" strokeLinecap="round" />
+              </svg>
+            </button>
+          )}
 
           {/* Quality (HLS levels only — direct play has no ladder) */}
           {qualityLevels.length > 1 && onQualityChange && (

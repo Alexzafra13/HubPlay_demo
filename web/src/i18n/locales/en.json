@@ -47,6 +47,15 @@
     "nextUp": "Next Up",
     "failedToLoad": "Failed to load content. Check your server connection."
   },
+  "watchTonight": {
+    "tonight": "For tonight",
+    "resume": "Pick up where you left off",
+    "resumeAt": "Resume from {{time}}",
+    "playAction": "Play",
+    "resumeAction": "Resume",
+    "resumeLabel": "Resume",
+    "recommendedLabel": "Recommended for tonight"
+  },
   "login": {
     "username": "Username",
     "password": "Password",
@@ -76,6 +85,7 @@
     "audio": "Audio",
     "subtitles": "Subtitles",
     "subtitlesOff": "Off",
+    "subtitlesExternal": "Search online subtitles",
     "play": "Play",
     "pause": "Pause",
     "back": "Back",
@@ -88,12 +98,32 @@
     "closePlayer": "Close Player",
     "trackFallback": "Track {{n}}"
   },
+  "externalSubs": {
+    "title": "Online subtitles",
+    "noResults": "No subtitles found",
+    "searchFailed": "Search failed. Try another language.",
+    "providersDisabled": "Subtitle providers are not configured.",
+    "score": "Score {{score}}"
+  },
   "sort": {
     "by": "Sort by",
     "title": "Title",
     "year": "Year",
     "added": "Recently Added",
     "rating": "Rating"
+  },
+  "filters": {
+    "title": "Filters",
+    "genre": "Genre",
+    "year": "Year",
+    "rating": "Min rating",
+    "from": "From",
+    "to": "To",
+    "any": "Any",
+    "clear": "Clear",
+    "clearAll": "Clear all filters",
+    "noGenres": "No genres available yet — finish a scan to populate.",
+    "genreCount": "{{count}} items"
   },
   "series": {
     "title": "Series",

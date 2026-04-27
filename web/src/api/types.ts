@@ -28,7 +28,16 @@ export interface RegisterRequest {
 
 // ─── Libraries ──────────────────────────────────────────────────────────────
 
-export type ContentType = "movies" | "tvshows" | "livetv";
+/**
+ * Library content type. Backend canonicalises any `tvshows` alias
+ * the older clients might send to `shows` at the API boundary, but
+ * everywhere downstream — DB rows, scanner, sort helpers, the
+ * admin filters by content_type — uses the canonical name. Keep
+ * this type aligned with what the server actually stores so any
+ * `lib.content_type === "shows"` comparison works without a
+ * widening cast.
+ */
+export type ContentType = "movies" | "shows" | "livetv";
 
 export type ScanStatus = "idle" | "scanning" | "error";
 
@@ -151,6 +160,17 @@ export interface Chapter {
   // present, omits the key otherwise — `undefined` means "no
   // pre-rendered preview", not an error.
   image_path?: string;
+}
+
+// One candidate from an external subtitle provider (OpenSubtitles
+// today). The `file_id` is opaque — pass it back to the download
+// endpoint along with `source` to fetch the actual VTT.
+export interface ExternalSubtitleResult {
+  source: string;     // "opensubtitles", ...
+  file_id: string;    // opaque handle for the download endpoint
+  language: string;   // ISO 639-1 (en, es, fr, ...)
+  format: string;     // "srt" | "ass" — the source format before conversion
+  score: number;      // provider-specific quality / popularity score
 }
 
 export interface ItemDetail extends MediaItem {
