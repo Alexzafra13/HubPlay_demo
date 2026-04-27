@@ -184,6 +184,8 @@
       "type": "Type",
       "path": "Path",
       "itemCount": "Items",
+      "itemsLower": "items",
+      "channelsLower": "channels",
       "scanStatus": "Scan Status",
       "actions": "Actions",
       "scan": "Scan",
