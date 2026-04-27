@@ -377,10 +377,22 @@ func (h *ImageHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Delete local file if it exists
+	// Delete local file if it exists, plus any cached thumbnails the
+	// width-resizer generated on demand (`<imageDir>/.thumbnails/<id>_wN.<ext>`).
+	// Without this the resizer leaks ~1-N files per resolution that were
+	// asked for and never cleaned — bounded growth in practice but real
+	// disk waste on long-lived installs that delete & re-upload artwork.
 	if localPath := h.readPathMapping(imageID); localPath != "" {
-		os.Remove(localPath)
+		_ = os.Remove(localPath)
 		h.removePathMapping(imageID)
+	}
+	thumbPattern := filepath.Join(h.imageDir, ".thumbnails", imageID+"_w*")
+	if matches, err := filepath.Glob(thumbPattern); err == nil {
+		for _, m := range matches {
+			if h.isUnderImageDir(m) {
+				_ = os.Remove(m)
+			}
+		}
 	}
 
 	if err := h.images.DeleteByID(r.Context(), imageID); err != nil {
