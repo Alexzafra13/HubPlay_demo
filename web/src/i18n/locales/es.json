@@ -19,7 +19,9 @@
     "goHome": "Ir al inicio",
     "logOut": "Cerrar sesion",
     "settings": "Ajustes",
-    "administration": "Administracion"
+    "administration": "Administracion",
+    "sortBy": "Ordenar por",
+    "moreOptions": "Mas opciones"
   },
   "nav": {
     "home": "Inicio",
@@ -58,6 +60,10 @@
     "searchPlaceholder": "Buscar peliculas...",
     "noResults": "No se encontraron peliculas"
   },
+  "posterCard": {
+    "watched": "Visto",
+    "inProgress": "En curso"
+  },
   "series": {
     "title": "Series",
     "searchPlaceholder": "Buscar series...",
@@ -79,7 +85,9 @@
     "cast": "Reparto",
     "episodes": "Episodios",
     "seasons": "Temporadas",
-    "refreshMetadata": "Actualizar metadatos"
+    "refreshMetadata": "Actualizar metadatos",
+    "addToFavorites": "Anadir a favoritos",
+    "removeFromFavorites": "Quitar de favoritos"
   },
   "liveTV": {
     "title": "TV en directo",

@@ -19,7 +19,9 @@
     "goHome": "Go Home",
     "logOut": "Log out",
     "settings": "Settings",
-    "administration": "Administration"
+    "administration": "Administration",
+    "sortBy": "Sort by",
+    "moreOptions": "More options"
   },
   "nav": {
     "home": "Home",
@@ -58,6 +60,10 @@
     "searchPlaceholder": "Search movies...",
     "noResults": "No movies found"
   },
+  "posterCard": {
+    "watched": "Watched",
+    "inProgress": "In progress"
+  },
   "series": {
     "title": "Series",
     "searchPlaceholder": "Search series...",
@@ -79,7 +85,9 @@
     "cast": "Cast",
     "episodes": "Episodes",
     "seasons": "Seasons",
-    "refreshMetadata": "Refresh metadata"
+    "refreshMetadata": "Refresh metadata",
+    "addToFavorites": "Add to favorites",
+    "removeFromFavorites": "Remove from favorites"
   },
   "liveTV": {
     "title": "Live TV",

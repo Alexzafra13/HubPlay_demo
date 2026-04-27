@@ -39,6 +39,7 @@ function formatRuntime(ticks: number | null | undefined): string | null {
 // ─── Kebab menu ─────────────────────────────────────────────────────────────
 
 const KebabMenu: FC<{ items: HeroMenuItem[] }> = ({ items }) => {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -70,7 +71,7 @@ const KebabMenu: FC<{ items: HeroMenuItem[] }> = ({ items }) => {
         type="button"
         onClick={() => setOpen((o) => !o)}
         className="flex h-10 w-10 items-center justify-center rounded-full border border-border bg-bg-card/60 backdrop-blur-sm transition-colors hover:bg-bg-elevated cursor-pointer"
-        aria-label="More options"
+        aria-label={t("common.moreOptions")}
         aria-expanded={open}
       >
         <svg className="h-5 w-5 text-text-secondary" viewBox="0 0 24 24" fill="currentColor">
@@ -230,7 +231,11 @@ const HeroSection: FC<HeroSectionProps> = ({
               type="button"
               onClick={onToggleFavorite}
               className="flex h-10 w-10 items-center justify-center rounded-full border border-border bg-bg-card/60 backdrop-blur-sm transition-colors hover:bg-bg-elevated cursor-pointer"
-              aria-label={isFavorite ? "Remove from favorites" : "Add to favorites"}
+              aria-label={
+                isFavorite
+                  ? t("itemDetail.removeFromFavorites")
+                  : t("itemDetail.addToFavorites")
+              }
             >
               <svg
                 className={`h-5 w-5 transition-colors ${isFavorite ? "text-error fill-error" : "text-text-secondary"}`}
