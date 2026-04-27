@@ -67,9 +67,23 @@ func NewManager(
 	// places.
 	cacheDir := cfg.EffectiveCacheDir()
 
+	// Detect hardware acceleration once at construction. Detection is
+	// fast (< 50 ms on a warm system) and the result is read on every
+	// transcode session, so doing it inline here keeps the wiring at
+	// a single point. When `Enabled = false` we skip detection
+	// entirely and fall back to libx264 — matches a deliberately-
+	// configured "force software" deployment.
+	hwAccel := HWAccelNone
+	encoder := "libx264"
+	if cfg.HWAccel.Enabled {
+		hwResult := DetectHWAccel(cfg.HWAccel.Preferred, logger)
+		hwAccel = hwResult.Selected
+		encoder = hwResult.Encoder
+	}
+
 	m := &Manager{
 		sessions:   make(map[string]*ManagedSession),
-		transcoder: NewTranscoder(cacheDir, "", cfg.TranscodeTimeout, logger),
+		transcoder: NewTranscoder(cacheDir, "", cfg.TranscodeTimeout, hwAccel, encoder, logger),
 		items:      items,
 		streams:    streams,
 		cfg:        cfg,

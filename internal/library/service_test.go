@@ -29,7 +29,7 @@ func newTestLibraryService(t *testing.T) *library.Service {
 	repos := db.NewRepositories(database)
 	bus := event.NewBus(slog.Default())
 	prober := &mockProber{}
-	scnr := scanner.New(repos.Items, repos.MediaStreams, repos.Metadata, repos.ExternalIDs, repos.Images, nil, prober, bus, "", nil, slog.Default())
+	scnr := scanner.New(repos.Items, repos.MediaStreams, repos.Metadata, repos.ExternalIDs, repos.Images, repos.Chapters, nil, prober, bus, "", nil, slog.Default())
 	svc := library.NewService(repos.Libraries, repos.Items, repos.MediaStreams, repos.Images, repos.Channels, scnr, slog.Default())
 	// Cancel in-flight auto-scan goroutines BEFORE the DB teardown fires,
 	// otherwise the goroutine races the "sql: database is closed" error and
@@ -63,6 +63,27 @@ func TestService_Create(t *testing.T) {
 	}
 	if len(lib.Paths) != 1 {
 		t.Errorf("expected 1 path, got %d", len(lib.Paths))
+	}
+}
+
+func TestService_Create_AcceptsTvshowsAlias_NormalisesToShows(t *testing.T) {
+	// Regression for the cross-stack mismatch: the web client (admin
+	// UI + setup wizard) sends `tvshows`, the scanner / repos /
+	// queries are wired against `shows`. Without the canonicalisation
+	// in Create the user gets a 400 the moment they try to add a
+	// series library — the bug had been latent for ages because each
+	// stack only tested its own side.
+	svc := newTestLibraryService(t)
+	lib, err := svc.Create(context.Background(), library.CreateRequest{
+		Name:        "Series",
+		ContentType: "tvshows",
+		Paths:       []string{"/media/series"},
+	})
+	if err != nil {
+		t.Fatalf("expected tvshows to be accepted as alias: %v", err)
+	}
+	if lib.ContentType != "shows" {
+		t.Errorf("content_type should canonicalise to 'shows', got %q", lib.ContentType)
 	}
 }
 

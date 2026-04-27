@@ -143,10 +143,24 @@ export interface UserData {
   last_played_at: string | null;
 }
 
+export interface Chapter {
+  start_ticks: number;
+  end_ticks: number;
+  title: string;
+  // Future: BIF-style chapter thumbnails. Backend emits the URL when
+  // present, omits the key otherwise — `undefined` means "no
+  // pre-rendered preview", not an error.
+  image_path?: string;
+}
+
 export interface ItemDetail extends MediaItem {
   duration_ticks: number | null;
   media_streams: MediaStream[];
   people: Person[];
+  // Optional: backend omits `chapters` entirely when the file has no
+  // markers (most non-Blu-ray rips). Empty and absent are equivalent
+  // for clients.
+  chapters?: Chapter[];
   // Inherited from MediaItem (optional). Re-listed in this interface
   // for documentation only — the backend omits the key entirely when
   // the request is unauthenticated or no row exists, so it parses as

@@ -211,7 +211,12 @@ func (h *ImageHandler) Select(w http.ResponseWriter, r *http.Request) {
 		Blurhash:  bhash,
 		Provider:  "local",
 		IsPrimary: false,
-		AddedAt:   time.Now(),
+		// Manual pick from the candidates list — the admin's choice is
+		// authoritative, so future refreshes must skip this kind until
+		// the admin explicitly unlocks. Plex/Jellyfin both auto-lock on
+		// any manual selection for the same reason.
+		IsLocked: true,
+		AddedAt:  time.Now(),
 	}
 
 	if err := h.images.Create(r.Context(), img); err != nil {
@@ -314,7 +319,10 @@ func (h *ImageHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		Blurhash:  bhash,
 		Provider:  "upload",
 		IsPrimary: false,
-		AddedAt:   time.Now(),
+		// Same lock-on-manual rule as Select: an uploaded image
+		// reflects deliberate curation, never re-fetch.
+		IsLocked: true,
+		AddedAt:  time.Now(),
 	}
 
 	if err := h.images.Create(r.Context(), img); err != nil {
@@ -332,6 +340,42 @@ func (h *ImageHandler) Upload(w http.ResponseWriter, r *http.Request) {
 
 	h.writePathMapping(imgID, localPath)
 
+	respondJSON(w, http.StatusOK, map[string]any{"data": imageResponse(img)})
+}
+
+// SetLocked toggles the manual-override lock on an image. The flag is
+// honoured by the ImageRefresher (skips kinds with any locked image)
+// so admins can pin curated artwork without the next refresh
+// silently overwriting it. Body shape: `{"locked": true|false}`.
+func (h *ImageHandler) SetLocked(w http.ResponseWriter, r *http.Request) {
+	itemID := chi.URLParam(r, "id")
+	imageID := chi.URLParam(r, "imageId")
+
+	img, err := h.images.GetByID(r.Context(), imageID)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	if img.ItemID != itemID {
+		respondAppError(w, r.Context(), domain.NewNotFound("image"))
+		return
+	}
+
+	var body struct {
+		Locked bool `json:"locked"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		respondError(w, r, http.StatusBadRequest, "INVALID_BODY", "invalid request body")
+		return
+	}
+
+	if err := h.images.SetLocked(r.Context(), imageID, body.Locked); err != nil {
+		h.logger.Error("failed to set lock", "error", err)
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to set lock")
+		return
+	}
+
+	img.IsLocked = body.Locked
 	respondJSON(w, http.StatusOK, map[string]any{"data": imageResponse(img)})
 }
 
@@ -377,10 +421,22 @@ func (h *ImageHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Delete local file if it exists
+	// Delete local file if it exists, plus any cached thumbnails the
+	// width-resizer generated on demand (`<imageDir>/.thumbnails/<id>_wN.<ext>`).
+	// Without this the resizer leaks ~1-N files per resolution that were
+	// asked for and never cleaned — bounded growth in practice but real
+	// disk waste on long-lived installs that delete & re-upload artwork.
 	if localPath := h.readPathMapping(imageID); localPath != "" {
-		os.Remove(localPath)
+		_ = os.Remove(localPath)
 		h.removePathMapping(imageID)
+	}
+	thumbPattern := filepath.Join(h.imageDir, ".thumbnails", imageID+"_w*")
+	if matches, err := filepath.Glob(thumbPattern); err == nil {
+		for _, m := range matches {
+			if h.isUnderImageDir(m) {
+				_ = os.Remove(m)
+			}
+		}
 	}
 
 	if err := h.images.DeleteByID(r.Context(), imageID); err != nil {

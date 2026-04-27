@@ -13,8 +13,19 @@ import (
 
 // Result contains the parsed output from ffprobe.
 type Result struct {
-	Format  Format
-	Streams []Stream
+	Format   Format
+	Streams  []Stream
+	Chapters []Chapter
+}
+
+// Chapter is one named segment of a media file's playback timeline.
+// Start/End are absolute durations from the file origin; Title may be
+// empty when ffprobe didn't find a `tags.title` (common for chapters
+// generated automatically by Handbrake/MakeMKV vs. authored ones).
+type Chapter struct {
+	Start time.Duration
+	End   time.Duration
+	Title string
 }
 
 type Format struct {
@@ -80,6 +91,7 @@ func (f *FFprobe) Probe(ctx context.Context, path string) (*Result, error) {
 		"-print_format", "json",
 		"-show_format",
 		"-show_streams",
+		"-show_chapters",
 		path,
 	)
 
@@ -93,8 +105,15 @@ func (f *FFprobe) Probe(ctx context.Context, path string) (*Result, error) {
 
 // ffprobeOutput maps the JSON structure from ffprobe.
 type ffprobeOutput struct {
-	Format  ffprobeFormat   `json:"format"`
-	Streams []ffprobeStream `json:"streams"`
+	Format   ffprobeFormat    `json:"format"`
+	Streams  []ffprobeStream  `json:"streams"`
+	Chapters []ffprobeChapter `json:"chapters"`
+}
+
+type ffprobeChapter struct {
+	StartTime string         `json:"start_time"`
+	EndTime   string         `json:"end_time"`
+	Tags      map[string]any `json:"tags"`
 }
 
 type ffprobeFormat struct {
@@ -177,6 +196,28 @@ func parseOutput(data []byte) (*Result, error) {
 		}
 
 		result.Streams = append(result.Streams, stream)
+	}
+
+	// Chapters. ffprobe emits start_time / end_time as decimal seconds
+	// strings (`"42.000000"`); a parse failure on either side drops the
+	// chapter rather than the whole probe — better to lose one marker
+	// than the entire stream metadata.
+	for _, c := range raw.Chapters {
+		start, err1 := strconv.ParseFloat(c.StartTime, 64)
+		end, err2 := strconv.ParseFloat(c.EndTime, 64)
+		if err1 != nil || err2 != nil {
+			continue
+		}
+		ch := Chapter{
+			Start: time.Duration(start * float64(time.Second)),
+			End:   time.Duration(end * float64(time.Second)),
+		}
+		if c.Tags != nil {
+			if t, ok := c.Tags["title"].(string); ok {
+				ch.Title = t
+			}
+		}
+		result.Chapters = append(result.Chapters, ch)
 	}
 
 	return result, nil

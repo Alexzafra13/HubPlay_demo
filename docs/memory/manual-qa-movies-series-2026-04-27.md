@@ -306,6 +306,201 @@ verificarlo es DB + filesystem, no UI.**
 
 ---
 
+## Commit `6bbbb64` — provider name correcto en DB
+
+- [ ] Lanza un scan que toque imágenes nuevas.
+- [ ] `sqlite3 <db> 'SELECT DISTINCT provider FROM images'`
+- [ ] Esperado: solo `tmdb`, `fanart` y/o `upload`. **NO** debería
+  aparecer `unknown` salvo que TMDb/Fanart cambien de dominio.
+  Antes podía aparecer si el matcher de URL se quedaba corto.
+
+---
+
+## Commit `e27e60b` — thumbnails se limpian al borrar imagen
+
+- [ ] Sube una imagen manual desde el ImageManager admin.
+- [ ] Pide variantes en el navegador:
+  ```
+  /api/v1/images/file/<id>?w=300
+  /api/v1/images/file/<id>?w=600
+  ```
+- [ ] Comprueba que existen en `<imageDir>/.thumbnails/<id>_w300.jpg`
+  y `<id>_w600.jpg`.
+- [ ] DELETE `/api/v1/items/<itemId>/images/<id>` (vía UI admin
+  "borrar imagen").
+- [ ] Comprueba que **TODOS** los thumbnails de ese `<id>` han
+  desaparecido. Otras thumbnails (otras imágenes, otros widths) no
+  deben verse afectadas.
+
+---
+
+## Commit `(B-5.2)` — Continue Watching filtra abandoned + near-complete
+
+**Visible en `/` (Home).**
+
+- [ ] Reproduce una película hasta el ~95% y para. Vuelve a Home →
+  **NO** debería aparecer en Continue Watching (el query la
+  considera "near-complete" — el usuario casi seguro la terminó).
+  Antes, aparecía indefinidamente hasta marcarla manualmente.
+- [ ] Reproduce otra peli a un 20% y vuelve un mes después (o
+  fuerza la fecha de `last_played_at` en DB para simular):
+  ```bash
+  sqlite3 <db> "UPDATE user_data SET last_played_at = datetime('now', '-45 days') WHERE item_id = '<id>'"
+  ```
+  Recarga `/` → la peli abandonada **debe desaparecer** del rail.
+- [ ] Reproduce una peli al 65 % y "déjala" 45 días → **debe seguir
+  apareciendo** (>50 %, esfuerzo invertido reconocido).
+- [ ] Items con duración desconocida (`duration_ticks = 0`) se
+  mantienen siempre — no podemos razonar sobre progreso sin
+  duración, así que se preferimos surfacearlos a hacerlos
+  desaparecer.
+
+**Cambio de rail esperado en una librería real**: el Continue Watching
+de un usuario activo cae de ~30 entradas zombi a ~3-5 reales. Si no
+notas diferencia, probablemente es porque tu DB de prueba no tiene
+suficiente historial — tira `MarkPlayed` de cosas viejas o reinicia.
+
+---
+
+## Commit `56d18af` — bug fix: librería de Series 400
+
+**Esto era TU bug reportado en mitad de sesión.**
+
+- [ ] Admin → Bibliotecas → Crear nueva → tipo **Series**, ruta válida.
+- [ ] Debe **crearse sin error** (antes: 400 Bad Request).
+- [ ] En SQLite: `SELECT content_type FROM libraries WHERE name='...'`.
+  Debe ser `shows` (canonical), no `tvshows`.
+
+---
+
+## Commit `75eee70` — capítulos en seek bar
+
+**Necesita un fichero MKV con capítulos (la mayoría de Blu-ray rips).**
+
+- [ ] Tras escanear, en SQLite:
+  ```bash
+  sqlite3 <db> "SELECT item_id, start_ticks/10000000 AS sec, title FROM chapters LIMIT 10"
+  ```
+  Debe haber filas con timestamps + títulos para cada item con
+  capítulos.
+- [ ] En `GET /api/v1/items/<id>` el JSON debe incluir
+  `"chapters": [{"start_ticks":..., "end_ticks":..., "title":...}]`
+  cuando los hay; ausente cuando no.
+- [ ] Reproduce un episodio/peli con capítulos. En el seek bar
+  deberías ver **rayitas blancas verticales** en cada inicio de
+  capítulo. Hover de la rayita → tooltip con el título.
+- [ ] Re-escaneo no duplica capítulos (la repo hace
+  `Replace` clear-then-insert).
+
+---
+
+## Commit `bcc8fb7` — `is_locked`: manual override sobrevive refresh
+
+- [ ] Sube una imagen manual o haz Select de un candidato TMDb desde
+  el ImageManager admin.
+- [ ] `sqlite3 <db> "SELECT id, type, is_locked FROM images WHERE
+  item_id='<id>'"` → la imagen recién subida tiene `is_locked = 1`.
+- [ ] Lanza un refresh: `curl -X POST -H "Authorization: Bearer ..."
+  http://localhost:8096/api/v1/libraries/<id>/images/refresh`.
+- [ ] La imagen locked **NO** debe ser sustituida (otras kinds
+  -backdrop, logo- sí pueden refrescar).
+- [ ] Toggle del lock vía API:
+  ```bash
+  curl -X PUT -H "Authorization: Bearer ..." -H "Content-Type: application/json" \
+    http://localhost:8096/api/v1/items/<itemId>/images/<imageId>/lock \
+    -d '{"locked": false}'
+  ```
+- [ ] Tras unlock, el siguiente refresh ya puede sustituirla.
+
+---
+
+## Commit `782d233` — External subs on-demand (OpenSubtitles)
+
+**Solo backend. UI viene en commit posterior.**
+
+Pre-condición: configura OpenSubtitles en admin → Providers con tu
+API key (registro gratis en opensubtitles.com).
+
+- [ ] Buscar candidatos:
+  ```bash
+  curl -H "Authorization: Bearer ..." \
+    "http://localhost:8096/api/v1/stream/<itemId>/subtitles/external?lang=es,en"
+  ```
+  Debe devolver `{"data": [{"source": "opensubtitles", "file_id":
+  "...", "language": "es", ...}, ...]}`. Lista vacía = no hay match
+  (no es error).
+- [ ] Descargar uno como WebVTT:
+  ```bash
+  curl -o sub.vtt "http://localhost:8096/api/v1/stream/<itemId>/subtitles/external/<fileID>?source=opensubtitles"
+  cat sub.vtt | head
+  ```
+  Debería empezar por `WEBVTT` y tener cues con timestamps `HH:MM:SS.mmm`.
+- [ ] Sin providers configurados → 503 PROVIDERS_UNAVAILABLE en lugar
+  de 500 opaco.
+
+---
+
+## Commit `2b823e9` — HW accel se USA realmente (no solo se detecta)
+
+**Necesita `cfg.streaming.hardware_acceleration.enabled: true` en
+hubplay.yaml + un GPU con encoder soportado.**
+
+- [ ] Al arrancar el server, log debería mostrar:
+  ```
+  hardware acceleration enabled type=nvenc encoder=h264_nvenc
+  ```
+  (o vaapi/qsv/videotoolbox según tu hardware).
+- [ ] Reproduce algo que entre en transcode (cliente sin códec, o
+  fuerza profile no-original).
+- [ ] `nvidia-smi` (o `intel_gpu_top`/`radeontop`) debería mostrar
+  utilización de GPU mientras el transcode corre. Antes era 0%
+  porque la detección se descartaba.
+- [ ] `ps -ef | grep ffmpeg` mientras corre → la línea de comandos
+  debe contener `-c:v h264_nvenc` (o equivalente) y `-hwaccel cuda`
+  (o vaapi/qsv) **antes** de `-i`.
+- [ ] Fallback: si pones `enabled: false` → vuelve a `libx264`. Sin
+  regresión.
+
+---
+
+## Commit `0f26fb0` — Trickplay (seek-bar thumbnails)
+
+**Solo backend. UI viene en commit posterior.**
+
+- [ ] Trigger generación al pedir el manifest:
+  ```bash
+  curl -H "Authorization: Bearer ..." -o manifest.json \
+    http://localhost:8096/api/v1/items/<itemId>/trickplay.json
+  cat manifest.json
+  ```
+  Primera llamada: tarda 5-30s (ffmpeg generando). Segunda llamada:
+  instantáneo (sirve de cache).
+- [ ] El manifest debe tener forma:
+  ```json
+  {
+    "interval_sec": 10,
+    "thumb_width": 320,
+    "thumb_height": 180,
+    "columns": 10,
+    "rows": 10,
+    "total": 100
+  }
+  ```
+- [ ] Descarga el sprite y míralo:
+  ```bash
+  curl -H "Authorization: Bearer ..." -o sprite.png \
+    http://localhost:8096/api/v1/items/<itemId>/trickplay.png
+  feh sprite.png  # o cualquier visor
+  ```
+  Debe ser una grilla 10x10 con miniaturas del vídeo.
+- [ ] Inspecciona disco: `<imageDir>/trickplay/<itemId>/sprite.png` y
+  `manifest.json` deben existir.
+- [ ] Concurrencia: dos curls simultáneos al `trickplay.json` por el
+  MISMO item → solo se lanza UN proceso ffmpeg (per-item mutex). No
+  debería haber dos `ffmpeg` en `ps -ef` para el mismo item.
+
+---
+
 ## Smoke tests transversales
 
 ### Backend

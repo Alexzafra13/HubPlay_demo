@@ -1,13 +1,19 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
+	"sync"
 
 	"hubplay/internal/auth"
 	"hubplay/internal/db"
+	"hubplay/internal/imaging"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -17,11 +23,24 @@ type ItemHandler struct {
 	images   ImageRepository
 	metadata MetadataRepository
 	userData UserDataRepository
-	logger   *slog.Logger
+	chapters ChapterRepository
+	// trickplayDir is the root for generated trickplay sprites
+	// (`<dir>/<itemID>/sprite.png` + `manifest.json`). Empty disables
+	// the feature; the endpoint returns 503 in that case.
+	trickplayDir string
+	// trickplayLocks serialises generation per item so a second hover
+	// while the first is still running waits instead of double-spawning
+	// ffmpeg. The map grows by one entry per item that's ever been
+	// generated; bounded by library size, fine in practice.
+	trickplayLocks sync.Map
+	logger         *slog.Logger
 }
 
-func NewItemHandler(lib LibraryService, images ImageRepository, metadata MetadataRepository, userData UserDataRepository, logger *slog.Logger) *ItemHandler {
-	return &ItemHandler{lib: lib, images: images, metadata: metadata, userData: userData, logger: logger}
+func NewItemHandler(lib LibraryService, images ImageRepository, metadata MetadataRepository, userData UserDataRepository, chapters ChapterRepository, trickplayDir string, logger *slog.Logger) *ItemHandler {
+	return &ItemHandler{
+		lib: lib, images: images, metadata: metadata, userData: userData,
+		chapters: chapters, trickplayDir: trickplayDir, logger: logger,
+	}
 }
 
 func (h *ItemHandler) Get(w http.ResponseWriter, r *http.Request) {
@@ -102,7 +121,119 @@ func (h *ItemHandler) Get(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Chapters drive the seek-bar tick marks and the (future) skip-
+	// intro affordance. Optional: a chapter-less file (most non-Blu-ray
+	// rips) returns a nil slice and the JSON omits the field — clients
+	// can treat absence and empty array identically.
+	if h.chapters != nil {
+		ch, err := h.chapters.ListByItem(r.Context(), id)
+		if err != nil {
+			h.logger.Warn("list chapters", "item_id", id, "error", err)
+		} else if len(ch) > 0 {
+			out := make([]map[string]any, len(ch))
+			for i, c := range ch {
+				out[i] = chapterResponse(c)
+			}
+			resp["chapters"] = out
+		}
+	}
+
 	respondJSON(w, http.StatusOK, map[string]any{"data": resp})
+}
+
+// TrickplayManifest serves (and lazily generates) the sprite-sheet
+// manifest for an item. The manifest tells the client how to compute
+// which sub-image of the sprite covers a given playback time. See
+// `imaging.TrickplayManifest` for the fields' precise contract.
+//
+// Generation is on-demand: the first hit triggers a synchronous
+// ffmpeg run (one-shot, ~5–30 s for a 2 h movie), subsequent hits
+// serve the cached file. A per-item mutex prevents two concurrent
+// hovers from spawning duplicate ffmpeg processes.
+func (h *ItemHandler) TrickplayManifest(w http.ResponseWriter, r *http.Request) {
+	if h.trickplayDir == "" {
+		respondError(w, r, http.StatusServiceUnavailable, "TRICKPLAY_DISABLED",
+			"trickplay generation is not configured")
+		return
+	}
+	id := chi.URLParam(r, "id")
+	itemDir, err := h.ensureTrickplay(r.Context(), id)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800")
+	http.ServeFile(w, r, filepath.Join(itemDir, "manifest.json"))
+}
+
+// TrickplaySprite serves the sprite PNG. Same lazy-generate-on-first-
+// hit semantics as the manifest endpoint above. Browsers cache the
+// PNG aggressively (the sprite is content-addressable per item — same
+// runtime + same params produces byte-identical output), so the
+// hover-scroll experience after the first miss is a single fetch
+// per item per long-term cache window.
+func (h *ItemHandler) TrickplaySprite(w http.ResponseWriter, r *http.Request) {
+	if h.trickplayDir == "" {
+		respondError(w, r, http.StatusServiceUnavailable, "TRICKPLAY_DISABLED",
+			"trickplay generation is not configured")
+		return
+	}
+	id := chi.URLParam(r, "id")
+	itemDir, err := h.ensureTrickplay(r.Context(), id)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800")
+	http.ServeFile(w, r, filepath.Join(itemDir, "sprite.png"))
+}
+
+// ensureTrickplay returns the per-item directory containing
+// `sprite.png` + `manifest.json`, generating them via ffmpeg on first
+// call. Per-item locking prevents concurrent generation; once the
+// files exist the subsequent calls are O(stat).
+func (h *ItemHandler) ensureTrickplay(ctx context.Context, itemID string) (string, error) {
+	itemDir := filepath.Join(h.trickplayDir, itemID)
+	spritePath := filepath.Join(itemDir, "sprite.png")
+	manifestPath := filepath.Join(itemDir, "manifest.json")
+
+	// Fast path: both files already cached.
+	if _, err := os.Stat(spritePath); err == nil {
+		if _, err := os.Stat(manifestPath); err == nil {
+			return itemDir, nil
+		}
+	}
+
+	// Per-item mutex. Two concurrent first-hits collapse to one
+	// ffmpeg process; the loser blocks until the winner publishes
+	// the files and then returns from the fast path on retry below.
+	mu, _ := h.trickplayLocks.LoadOrStore(itemID, &sync.Mutex{})
+	lock := mu.(*sync.Mutex)
+	lock.Lock()
+	defer lock.Unlock()
+
+	// Re-check under the lock — the previous holder may have just
+	// finished writing.
+	if _, err := os.Stat(spritePath); err == nil {
+		if _, err := os.Stat(manifestPath); err == nil {
+			return itemDir, nil
+		}
+	}
+
+	item, err := h.lib.GetItem(ctx, itemID)
+	if err != nil {
+		return "", err
+	}
+	if item.Path == "" {
+		return "", errors.New("item has no playable file path")
+	}
+
+	if _, err := imaging.GenerateTrickplayWithDeadline(ctx, item.Path, itemDir, imaging.TrickplayParams{}, 0); err != nil {
+		h.logger.Warn("trickplay generation failed", "item_id", itemID, "error", err)
+		return "", err
+	}
+	return itemDir, nil
 }
 
 func (h *ItemHandler) Children(w http.ResponseWriter, r *http.Request) {
@@ -303,12 +434,30 @@ func userDataResponse(ud *db.UserData, durationTicks int64) map[string]any {
 	return resp
 }
 
+// chapterResponse is the wire shape for one timeline marker. `title`
+// is always emitted (empty string when unknown) so clients can render
+// either "Chapter 3" placeholder or the real name without a presence
+// check; `image_path` is omitted when absent — Plex-style chapter
+// thumbnails (BIF) aren't generated yet.
+func chapterResponse(c *db.Chapter) map[string]any {
+	r := map[string]any{
+		"start_ticks": c.StartTicks,
+		"end_ticks":   c.EndTicks,
+		"title":       c.Title,
+	}
+	if c.ImagePath != "" {
+		r["image_path"] = c.ImagePath
+	}
+	return r
+}
+
 func imageResponse(img *db.Image) map[string]any {
 	resp := map[string]any{
 		"id":         img.ID,
 		"type":       img.Type,
 		"path":       img.Path,
 		"is_primary": img.IsPrimary,
+		"is_locked":  img.IsLocked,
 	}
 	if img.Width > 0 {
 		resp["width"] = img.Width

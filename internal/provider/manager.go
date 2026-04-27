@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -164,6 +165,17 @@ func (m *Manager) FetchImages(ctx context.Context, externalIDs map[string]string
 			m.logger.Warn("image fetch failed", "provider", p.Name(), "error", err)
 			continue
 		}
+		// Stamp the source on every result here rather than make each
+		// provider implementation set it. The aggregator already knows
+		// which provider just spoke, so `Source = p.Name()` is the
+		// single point of truth — implementations can't forget to set
+		// it and callers downstream don't have to URL-sniff.
+		name := p.Name()
+		for i := range images {
+			if images[i].Source == "" {
+				images[i].Source = name
+			}
+		}
 		allImages = append(allImages, images...)
 	}
 
@@ -174,6 +186,32 @@ func (m *Manager) FetchImages(ctx context.Context, externalIDs map[string]string
 
 	return allImages, nil
 }
+
+// DownloadSubtitle locates the named provider and downloads the
+// subtitle bytes for the given file ID. The bytes returned are in
+// whatever format the provider serves (typically SRT, sometimes ASS) —
+// callers that need WebVTT for the browser should pipe through
+// `stream.ConvertSubtitleToVTT`.
+//
+// Returns ErrUnknownProvider when `sourceName` doesn't match a
+// registered subtitle provider, so the HTTP layer can map to a 404
+// instead of an opaque 500.
+func (m *Manager) DownloadSubtitle(ctx context.Context, sourceName, fileID string) ([]byte, error) {
+	m.mu.RLock()
+	providers := m.subtitles
+	m.mu.RUnlock()
+	for _, p := range providers {
+		if p.Name() != sourceName {
+			continue
+		}
+		return p.Download(ctx, fileID)
+	}
+	return nil, fmt.Errorf("%w: %s", ErrUnknownProvider, sourceName)
+}
+
+// ErrUnknownProvider is returned by Download* when the requested
+// source isn't a registered provider.
+var ErrUnknownProvider = errors.New("unknown provider")
 
 // SearchSubtitles queries all subtitle providers.
 func (m *Manager) SearchSubtitles(ctx context.Context, query SubtitleQuery) ([]SubtitleResult, error) {

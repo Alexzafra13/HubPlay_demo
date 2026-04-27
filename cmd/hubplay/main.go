@@ -136,7 +136,7 @@ func run(configPath string) error {
 	imageDir := filepath.Join(filepath.Dir(cfg.Database.Path), "images")
 	scannerPathmap := pathmap.New(imageDir)
 
-	scnr := scanner.New(repos.Items, repos.MediaStreams, repos.Metadata, repos.ExternalIDs, repos.Images, providerManager, prober, eventBus, imageDir, scannerPathmap, logger)
+	scnr := scanner.New(repos.Items, repos.MediaStreams, repos.Metadata, repos.ExternalIDs, repos.Images, repos.Chapters, providerManager, prober, eventBus, imageDir, scannerPathmap, logger)
 	libraryService := library.NewService(repos.Libraries, repos.Items, repos.MediaStreams, repos.Images, repos.Channels, scnr, logger)
 
 	// ═══ Phase 4a: Library Scan Scheduler ═══
@@ -148,15 +148,11 @@ func run(configPath string) error {
 	streamManager.SetMetrics(observability.NewStreamSink(metrics))
 	streamManager.SetEventBus(eventBus)
 
-	// Detect hardware acceleration if enabled
-	if cfg.Streaming.HWAccel.Enabled {
-		hwResult := stream.DetectHWAccel(cfg.Streaming.HWAccel.Preferred, logger)
-		logger.Info("hardware acceleration",
-			"available", hwResult.Available,
-			"selected", hwResult.Selected,
-			"encoder", hwResult.Encoder,
-		)
-	}
+	// Hardware acceleration detection happens inside `stream.NewManager`
+	// when `cfg.Streaming.HWAccel.Enabled` is true — the result both
+	// gets logged there and threaded into the transcoder. Detecting
+	// twice (here + there) was the prior shape; the result was logged
+	// here and silently discarded, leaving every transcode on libx264.
 
 	// ═══ Phase 4c: IPTV ═══
 	iptvService := iptv.NewService(repos.Channels, repos.EPGPrograms, repos.Libraries, repos.ChannelFavorites, repos.LibraryEPGSources, repos.ChannelOverrides, repos.ChannelWatchHistory, logger)
@@ -204,6 +200,7 @@ func run(configPath string) error {
 		Images:        repos.Images,
 		Metadata:      repos.Metadata,
 		UserData:        repos.UserData,
+		Chapters:        repos.Chapters,
 		UserPreferences: repos.UserPreferences,
 		Providers:     providerManager,
 		ExternalIDs:   repos.ExternalIDs,

@@ -84,6 +84,11 @@ type CreateRequest struct {
 }
 
 func (s *Service) Create(ctx context.Context, req CreateRequest) (*db.Library, error) {
+	// Canonicalise content_type aliases BEFORE validation + persistence.
+	// `req` is a value copy here, so the in-place mutation only affects
+	// this caller's downstream use; the validator sees and the row
+	// stores the canonical name.
+	req.ContentType = canonicalContentType(req.ContentType)
 	if err := validateCreateRequest(req); err != nil {
 		return nil, err
 	}
@@ -175,7 +180,10 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (*db
 		lib.Name = req.Name
 	}
 	if req.ContentType != "" {
-		lib.ContentType = req.ContentType
+		// Same canonicalisation as Create — the web client sends
+		// `tvshows`, internals use `shows`. Without this the admin
+		// "edit library" flow trips the same 400 the create flow did.
+		lib.ContentType = canonicalContentType(req.ContentType)
 	}
 	if req.Paths != nil {
 		lib.Paths = req.Paths
@@ -360,4 +368,17 @@ func validateCreateRequest(req CreateRequest) error {
 		return domain.NewValidationError(fields)
 	}
 	return nil
+}
+
+// canonicalContentType normalises web-client aliases to the canonical
+// name used by the scanner, repos and queries. The web client (admin
+// + setup wizard) historically sent `tvshows`, while everything
+// downstream was wired against `shows`; the alias is preserved at the
+// API boundary and translated here so the rest of the system doesn't
+// have to know.
+func canonicalContentType(t string) string {
+	if t == "tvshows" {
+		return "shows"
+	}
+	return t
 }

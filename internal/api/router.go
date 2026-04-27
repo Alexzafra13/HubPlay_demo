@@ -41,6 +41,7 @@ type Dependencies struct {
 	Images         *db.ImageRepository
 	Metadata       *db.MetadataRepository
 	UserData       *db.UserDataRepository
+	Chapters       *db.ChapterRepository
 	UserPreferences *db.UserPreferenceRepository
 	Providers      *provider.Manager
 	ExternalIDs    *db.ExternalIDRepository
@@ -211,6 +212,7 @@ func NewRouter(deps Dependencies) http.Handler {
 			if deps.StreamManager != nil {
 				streamHandler := handlers.NewStreamHandler(
 					deps.StreamManager, deps.Items, deps.MediaStreams,
+					deps.ExternalIDs, deps.Providers,
 					deps.Config.Server.BaseURL, deps.Logger,
 				)
 
@@ -223,13 +225,24 @@ func NewRouter(deps Dependencies) http.Handler {
 					r.Delete("/session", streamHandler.StopSession)
 					r.Get("/subtitles", streamHandler.Subtitles)
 					r.Get("/subtitles/{trackIndex}", streamHandler.SubtitleTrack)
+					// External subtitle providers (OpenSubtitles, ...).
+					// Search returns candidates; the download endpoint
+					// pipes the SRT/ASS through ffmpeg → WebVTT and
+					// serves it for the player's <track> element.
+					r.Get("/subtitles/external", streamHandler.SearchExternalSubtitles)
+					r.Get("/subtitles/external/{fileId}", streamHandler.DownloadExternalSubtitle)
 				})
 			}
 
 			// Libraries & Items (only if service is wired)
 			if deps.Libraries != nil {
 				libHandler := handlers.NewLibraryHandler(deps.Libraries, deps.Images, deps.Metadata, deps.UserData, deps.Logger)
-				itemHandler := handlers.NewItemHandler(deps.Libraries, deps.Images, deps.Metadata, deps.UserData, deps.Logger)
+				// Trickplay sprites land under <imageDir>/trickplay/ —
+				// reusing the image-storage root keeps the on-disk
+				// layout clustered (one tree the operator can backup,
+				// rsync, or `du` to size the cache).
+				trickplayDir := filepath.Join(filepath.Dir(deps.Config.Database.Path), "images", "trickplay")
+				itemHandler := handlers.NewItemHandler(deps.Libraries, deps.Images, deps.Metadata, deps.UserData, deps.Chapters, trickplayDir, deps.Logger)
 
 				// Libraries
 				r.Get("/libraries", libHandler.List)
@@ -339,6 +352,11 @@ func NewRouter(deps Dependencies) http.Handler {
 				r.Route("/items/{id}", func(r chi.Router) {
 					r.Get("/", itemHandler.Get)
 					r.Get("/children", itemHandler.Children)
+					// Trickplay (seek-bar thumbnail previews). The
+					// first hit triggers ffmpeg generation; both
+					// endpoints serve from disk on subsequent hits.
+					r.Get("/trickplay.json", itemHandler.TrickplayManifest)
+					r.Get("/trickplay.png", itemHandler.TrickplaySprite)
 				})
 			}
 
@@ -361,6 +379,7 @@ func NewRouter(deps Dependencies) http.Handler {
 					r.Put("/{type}/select", imgHandler.Select)
 					r.Post("/{type}/upload", imgHandler.Upload)
 					r.Put("/{imageId}/primary", imgHandler.SetPrimary)
+					r.Put("/{imageId}/lock", imgHandler.SetLocked)
 					r.Delete("/{imageId}", imgHandler.Delete)
 				})
 

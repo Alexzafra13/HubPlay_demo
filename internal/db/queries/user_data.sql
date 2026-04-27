@@ -55,6 +55,16 @@ ON CONFLICT(user_id, item_id) DO UPDATE SET
 DELETE FROM user_data WHERE user_id = ? AND item_id = ?;
 
 -- name: ContinueWatching :many
+-- Two extra filters vs. the obvious "started but not completed" rail:
+--   1. Near-complete drop: position >= 90% of duration. Treat as
+--      effectively done — the user almost certainly finished and the
+--      rail showing it as in-progress is noise.
+--   2. Abandoned drop: last_played_at older than the caller-supplied
+--      threshold AND position < 50%. The user moved on; the rail
+--      should not keep nagging about the same start-of-S1E1 forever.
+-- Both checks are integer-safe (ticks * 100 / 90 and ticks * 2 / 1)
+-- and both require a known duration; rows with duration_ticks = 0
+-- are kept (we can't reason about progress without it).
 SELECT ud.item_id, ud.position_ticks, ud.last_played_at,
        i.title, i.type, i.duration_ticks, COALESCE(i.parent_id, '') AS parent_id,
        COALESCE(i.container, '') AS container
@@ -62,6 +72,15 @@ FROM user_data ud
 JOIN items i ON i.id = ud.item_id
 WHERE ud.user_id = ? AND ud.completed = 0 AND ud.position_ticks > 0
   AND i.is_available = 1
+  AND NOT (
+    i.duration_ticks > 0
+    AND ud.position_ticks * 100 >= i.duration_ticks * 90
+  )
+  AND NOT (
+    ud.last_played_at < ?
+    AND i.duration_ticks > 0
+    AND ud.position_ticks * 2 < i.duration_ticks
+  )
 ORDER BY ud.last_played_at DESC
 LIMIT ?;
 

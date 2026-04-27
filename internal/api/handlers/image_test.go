@@ -105,6 +105,28 @@ func (r *fakeImageRepo) DeleteByID(_ context.Context, id string) error {
 	return nil
 }
 
+func (r *fakeImageRepo) SetLocked(_ context.Context, id string, locked bool) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	img, ok := r.images[id]
+	if !ok {
+		return domain.NewNotFound("image")
+	}
+	img.IsLocked = locked
+	return nil
+}
+
+func (r *fakeImageRepo) HasLockedForKind(_ context.Context, itemID, kind string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, img := range r.images {
+		if img.ItemID == itemID && img.Type == kind && img.IsLocked {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 type fakeExternalIDRepo struct {
 	byItem map[string][]*db.ExternalID
 }
@@ -152,6 +174,9 @@ func (p *fakeProviderManager) FetchImages(ctx context.Context, ids map[string]st
 	return nil, nil
 }
 func (p *fakeProviderManager) SearchSubtitles(_ context.Context, _ provider.SubtitleQuery) ([]provider.SubtitleResult, error) {
+	return nil, nil
+}
+func (p *fakeProviderManager) DownloadSubtitle(_ context.Context, _, _ string) ([]byte, error) {
 	return nil, nil
 }
 
@@ -513,6 +538,57 @@ func TestImageHandler_Delete_RemovesRecordAndMapping(t *testing.T) {
 	// Path mapping file removed.
 	if _, err := os.Stat(filepath.Join(env.imageDir, ".mappings", id)); !os.IsNotExist(err) {
 		t.Fatalf("mapping file not removed: err=%v", err)
+	}
+}
+
+func TestImageHandler_Delete_RemovesCachedThumbnails(t *testing.T) {
+	// The serve handler generates `<imageDir>/.thumbnails/<id>_wN.<ext>`
+	// on demand when the client requests a sized variant. Delete must
+	// reap those siblings too, otherwise long-lived servers leak
+	// thumbnails for every since-deleted image.
+	env := newImageTestEnv(t)
+	data := makeJPEG(t, 20, 20)
+	body, ct := multipartUpload(t, "file", "x.jpg", "image/jpeg", data)
+	resp := env.do(http.MethodPost, "/api/v1/items/item-T/images/primary/upload", body, ct)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("upload: %d %s", resp.StatusCode, readAll(resp))
+	}
+	id := decodeDataEnvelope(t, resp)["data"].(map[string]any)["id"].(string)
+
+	// Pre-seed a couple of thumbnail-shaped files. We don't go through
+	// the resizer on purpose — the test wants to assert the cleanup
+	// glob matches the documented filename pattern, not whatever the
+	// real resizer produces (which would couple this test to ffmpeg).
+	thumbDir := filepath.Join(env.imageDir, ".thumbnails")
+	if err := os.MkdirAll(thumbDir, 0o755); err != nil {
+		t.Fatalf("mkdir thumbs: %v", err)
+	}
+	thumbs := []string{
+		filepath.Join(thumbDir, id+"_w300.jpg"),
+		filepath.Join(thumbDir, id+"_w600.jpg"),
+		// Different image's thumb — must NOT be removed.
+		filepath.Join(thumbDir, "other-id_w300.jpg"),
+	}
+	for _, p := range thumbs {
+		if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	del := env.do(http.MethodDelete, "/api/v1/items/item-T/images/"+id, nil, "")
+	if del.StatusCode != http.StatusNoContent {
+		t.Fatalf("delete: got %d want 204", del.StatusCode)
+	}
+
+	for _, p := range thumbs[:2] {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Errorf("thumbnail %q should have been removed: err=%v", p, err)
+		}
+	}
+	// Other image's thumbnail untouched — the glob only matches the
+	// deleted ID's prefix.
+	if _, err := os.Stat(thumbs[2]); err != nil {
+		t.Errorf("unrelated thumbnail %q got swept: %v", thumbs[2], err)
 	}
 }
 

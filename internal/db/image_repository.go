@@ -21,7 +21,13 @@ type Image struct {
 	Blurhash  string
 	Provider  string
 	IsPrimary bool
-	AddedAt   time.Time
+	// IsLocked guards a manual choice (admin uploaded a custom poster
+	// or picked a specific candidate) from being overwritten by a
+	// scheduled or scanner-triggered refresh. Plex and Jellyfin both
+	// expose this as "lock". Default is false — refreshes work as
+	// before until the admin explicitly locks something.
+	IsLocked bool
+	AddedAt  time.Time
 }
 
 type ImageRepository struct {
@@ -44,12 +50,44 @@ func (r *ImageRepository) Create(ctx context.Context, img *Image) error {
 		Blurhash:  nullableString(img.Blurhash),
 		Provider:  nullableString(img.Provider),
 		IsPrimary: sql.NullBool{Bool: img.IsPrimary, Valid: true},
+		IsLocked:  sql.NullBool{Bool: img.IsLocked, Valid: true},
 		AddedAt:   img.AddedAt,
 	})
 	if err != nil {
 		return fmt.Errorf("create image: %w", err)
 	}
 	return nil
+}
+
+// SetLocked toggles the manual-override lock on an image. Locked
+// images are skipped by ImageRefresher (per kind, not per row — the
+// idea is "this poster stays, don't try to download a new one") so
+// admins can curate their library without the next refresh
+// clobbering their picks.
+func (r *ImageRepository) SetLocked(ctx context.Context, imageID string, locked bool) error {
+	if err := r.q.SetImageLocked(ctx, sqlc.SetImageLockedParams{
+		ID:       imageID,
+		IsLocked: sql.NullBool{Bool: locked, Valid: true},
+	}); err != nil {
+		return fmt.Errorf("set image locked: %w", err)
+	}
+	return nil
+}
+
+// HasLockedForKind reports whether the (item, kind) pair has any
+// locked image. The refresher consults this before downloading a
+// new candidate — a single lock on (item, "primary") prevents the
+// poster from being touched, but other kinds (backdrop, logo) can
+// still refresh freely.
+func (r *ImageRepository) HasLockedForKind(ctx context.Context, itemID, kind string) (bool, error) {
+	has, err := r.q.HasLockedImageForKind(ctx, sqlc.HasLockedImageForKindParams{
+		ItemID: itemID,
+		Type:   kind,
+	})
+	if err != nil {
+		return false, fmt.Errorf("has locked for kind: %w", err)
+	}
+	return has, nil
 }
 
 func (r *ImageRepository) ListByItem(ctx context.Context, itemID string) ([]*Image, error) {
@@ -195,6 +233,7 @@ func imageFromGetRow(r sqlc.GetImageByIDRow) Image {
 		Blurhash:  r.Blurhash,
 		Provider:  r.Provider,
 		IsPrimary: r.IsPrimary.Bool,
+		IsLocked:  r.IsLocked.Bool,
 		AddedAt:   r.AddedAt,
 	}
 }
@@ -210,6 +249,7 @@ func imageFromPrimaryRow(r sqlc.GetPrimaryImageRow) Image {
 		Blurhash:  r.Blurhash,
 		Provider:  r.Provider,
 		IsPrimary: r.IsPrimary.Bool,
+		IsLocked:  r.IsLocked.Bool,
 		AddedAt:   r.AddedAt,
 	}
 }
@@ -225,6 +265,7 @@ func imageFromListRow(r sqlc.ListImagesByItemRow) Image {
 		Blurhash:  r.Blurhash,
 		Provider:  r.Provider,
 		IsPrimary: r.IsPrimary.Bool,
+		IsLocked:  r.IsLocked.Bool,
 		AddedAt:   r.AddedAt,
 	}
 }

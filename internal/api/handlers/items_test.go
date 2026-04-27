@@ -20,13 +20,29 @@ import (
 // fakeImageRepo from image_test.go (all in the same test package).
 
 type itemTestEnv struct {
-	t       *testing.T
-	svc     *libFakeService
-	images  *fakeImageRepo
+	t        *testing.T
+	svc      *libFakeService
+	images   *fakeImageRepo
 	meta     *libFakeMetadataRepo
 	userData *progressFakeUserData
+	chapters *fakeChapterRepo
 	handler  *ItemHandler
 	router   chi.Router
+}
+
+// fakeChapterRepo is a minimal in-memory ChapterRepository fake for
+// the handler tests. The repo interface only needs ListByItem so the
+// fake can stay this small.
+type fakeChapterRepo struct {
+	byItem map[string][]*db.Chapter
+}
+
+func newFakeChapterRepo() *fakeChapterRepo {
+	return &fakeChapterRepo{byItem: map[string][]*db.Chapter{}}
+}
+
+func (r *fakeChapterRepo) ListByItem(_ context.Context, itemID string) ([]*db.Chapter, error) {
+	return r.byItem[itemID], nil
 }
 
 func newItemTestEnv(t *testing.T) *itemTestEnv {
@@ -38,7 +54,11 @@ func newItemTestEnv(t *testing.T) *itemTestEnv {
 		meta:   &libFakeMetadataRepo{byID: map[string]*db.Metadata{}},
 	}
 	env.userData = newProgressFakeUserData()
-	env.handler = NewItemHandler(env.svc, env.images, env.meta, env.userData, testutil.NopLogger())
+	env.chapters = newFakeChapterRepo()
+	// trickplayDir empty — the existing tests don't exercise the
+	// trickplay endpoints, so the handlers short-circuit to 503 via
+	// their nil-guard. New trickplay tests wire a temp dir locally.
+	env.handler = NewItemHandler(env.svc, env.images, env.meta, env.userData, env.chapters, "", testutil.NopLogger())
 
 	r := chi.NewRouter()
 	r.Route("/api/v1/items", func(r chi.Router) {
@@ -46,6 +66,8 @@ func newItemTestEnv(t *testing.T) *itemTestEnv {
 		r.Route("/{id}", func(r chi.Router) {
 			r.Get("/", env.handler.Get)
 			r.Get("/children", env.handler.Children)
+			r.Get("/trickplay.json", env.handler.TrickplayManifest)
+			r.Get("/trickplay.png", env.handler.TrickplaySprite)
 		})
 	})
 	env.router = r
@@ -220,6 +242,71 @@ func TestItemHandler_Get_OmitsUserDataWhenAnonymous(t *testing.T) {
 	data, _ := itemDecodeData(t, rr).(map[string]any)
 	if _, present := data["user_data"]; present {
 		t.Errorf("anonymous response should not include user_data: %v", data["user_data"])
+	}
+}
+
+func TestItemHandler_Get_IncludesChapters(t *testing.T) {
+	env := newItemTestEnv(t)
+	env.svc.getItemFn = func(_ context.Context, id string) (*db.Item, error) {
+		return &db.Item{ID: id, Type: "movie", Title: "Foo", DurationTicks: 60_000_000_000}, nil
+	}
+	env.chapters.byItem["it-1"] = []*db.Chapter{
+		{ItemID: "it-1", StartTicks: 0, EndTicks: 30_000_000_000, Title: "Cold Open"},
+		{ItemID: "it-1", StartTicks: 30_000_000_000, EndTicks: 60_000_000_000, Title: ""},
+	}
+
+	rr := env.do(http.MethodGet, "/api/v1/items/it-1/")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: %d", rr.Code)
+	}
+	data, _ := itemDecodeData(t, rr).(map[string]any)
+	chapters, ok := data["chapters"].([]any)
+	if !ok {
+		t.Fatalf("chapters missing or wrong type: %v", data["chapters"])
+	}
+	if len(chapters) != 2 {
+		t.Fatalf("chapters: got %d want 2", len(chapters))
+	}
+	first, _ := chapters[0].(map[string]any)
+	if first["title"] != "Cold Open" || first["start_ticks"] != float64(0) {
+		t.Errorf("first chapter shape: %v", first)
+	}
+	// Second chapter has empty title — must still be emitted as empty
+	// string so clients don't have to guard `undefined` vs "".
+	second, _ := chapters[1].(map[string]any)
+	if second["title"] != "" {
+		t.Errorf("second chapter title: %v", second["title"])
+	}
+}
+
+func TestItemHandler_Get_OmitsChaptersWhenAbsent(t *testing.T) {
+	env := newItemTestEnv(t)
+	env.svc.getItemFn = func(_ context.Context, id string) (*db.Item, error) {
+		return &db.Item{ID: id, Title: "Foo"}, nil
+	}
+	// No chapters seeded; handler should omit the key entirely so
+	// the JSON stays compact rather than `"chapters": []`.
+	rr := env.do(http.MethodGet, "/api/v1/items/it-1/")
+	data, _ := itemDecodeData(t, rr).(map[string]any)
+	if _, present := data["chapters"]; present {
+		t.Errorf("expected chapters key to be absent, got: %v", data["chapters"])
+	}
+}
+
+func TestItemHandler_TrickplayManifest_DisabledReturns503(t *testing.T) {
+	// trickplayDir is "" by default in newItemTestEnv (matches a
+	// deployment that hasn't enabled the feature). Both endpoints
+	// must report a clear 503 + machine-readable code so the player
+	// can fall back to a no-thumbnail seek bar without a confusing
+	// 500.
+	env := newItemTestEnv(t)
+	rr := env.do(http.MethodGet, "/api/v1/items/it-1/trickplay.json")
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("manifest: status %d, want 503", rr.Code)
+	}
+	rr = env.do(http.MethodGet, "/api/v1/items/it-1/trickplay.png")
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("sprite: status %d, want 503", rr.Code)
 	}
 }
 

@@ -157,6 +157,7 @@ type ImageRepository interface {
 	ListByItem(ctx context.Context, itemID string) ([]*db.Image, error)
 	Create(ctx context.Context, img *db.Image) error
 	SetPrimary(ctx context.Context, itemID, imgType, imageID string) error
+	SetLocked(ctx context.Context, imageID string, locked bool) error
 	GetByID(ctx context.Context, id string) (*db.Image, error)
 	DeleteByID(ctx context.Context, id string) error
 }
@@ -165,6 +166,14 @@ type ImageRepository interface {
 type MetadataRepository interface {
 	GetByItemID(ctx context.Context, itemID string) (*db.Metadata, error)
 	GetMetadataBatch(ctx context.Context, itemIDs []string) (map[string]*db.Metadata, error)
+}
+
+// ChapterRepository defines chapter data access needed by handlers.
+// Optional dep: when nil, the item-detail handler simply omits the
+// `chapters` field — older test environments and bare deployments
+// keep working without one wired.
+type ChapterRepository interface {
+	ListByItem(ctx context.Context, itemID string) ([]*db.Chapter, error)
 }
 
 // UserDataRepository defines user data access needed by handlers.
@@ -212,6 +221,7 @@ type ProviderManager interface {
 	FetchMetadata(ctx context.Context, externalID string, itemType provider.ItemType) (*provider.MetadataResult, error)
 	FetchImages(ctx context.Context, externalIDs map[string]string, itemType provider.ItemType) ([]provider.ImageResult, error)
 	SearchSubtitles(ctx context.Context, query provider.SubtitleQuery) ([]provider.SubtitleResult, error)
+	DownloadSubtitle(ctx context.Context, sourceName, fileID string) ([]byte, error)
 }
 
 // ProviderRepository defines provider config data access.
