@@ -7,13 +7,17 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"hubplay/internal/clock"
 )
 
 // ChannelHealthReporter lets the proxy flag upstream outcomes without
@@ -38,6 +42,7 @@ type StreamProxy struct {
 	logger   *slog.Logger
 	client   *http.Client
 	reporter ChannelHealthReporter
+	breaker  *channelBreaker
 }
 
 // SetHealthReporter wires the reporter after construction so main.go
@@ -88,8 +93,9 @@ func NewStreamProxy(logger *slog.Logger) *StreamProxy {
 		ForceAttemptHTTP2:     true,
 	}
 	return &StreamProxy{
-		relays: make(map[string]*relay),
-		logger: logger.With("module", "stream-proxy"),
+		relays:  make(map[string]*relay),
+		logger:  logger.With("module", "stream-proxy"),
+		breaker: newChannelBreaker(clock.New()),
 		client: &http.Client{
 			Transport: transport,
 			// No client-level timeout — it also clocks the body read, which
@@ -97,6 +103,47 @@ func NewStreamProxy(logger *slog.Logger) *StreamProxy {
 			// transport level above.
 		},
 	}
+}
+
+// ErrCircuitOpen is returned by the proxy when the per-channel
+// circuit breaker is open and refusing further upstream attempts.
+// Wrapped by a CircuitOpenError that carries the remaining cooldown.
+var ErrCircuitOpen = errors.New("iptv: circuit open")
+
+// CircuitOpenError carries the channel and remaining cooldown so the
+// HTTP layer can render a Retry-After header.
+type CircuitOpenError struct {
+	ChannelID  string
+	RetryAfter time.Duration
+}
+
+func (e *CircuitOpenError) Error() string {
+	return fmt.Sprintf("circuit open for channel %s, retry in %s",
+		e.ChannelID, e.RetryAfter.Round(time.Second))
+}
+
+func (e *CircuitOpenError) Unwrap() error { return ErrCircuitOpen }
+
+// writeCircuitOpenResponse renders a 503 with Retry-After. Only safe
+// to call before any other body has been written to w.
+func writeCircuitOpenResponse(w http.ResponseWriter, retryAfter time.Duration) {
+	secs := int(math.Ceil(retryAfter.Seconds()))
+	if secs < 1 {
+		secs = 1
+	}
+	w.Header().Set("Retry-After", strconv.Itoa(secs))
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusServiceUnavailable)
+	_, _ = io.WriteString(w, "upstream unavailable, retry later\n")
+}
+
+// BreakerState exposes the per-channel breaker state for observability
+// (admin dashboard). Returns ("closed", 0) for unknown channels.
+func (p *StreamProxy) BreakerState(channelID string) (string, time.Duration) {
+	if p.breaker == nil {
+		return "closed", 0
+	}
+	return p.breaker.State(channelID)
 }
 
 // reportOutcome records a proxy attempt against the channel's health.
@@ -107,23 +154,32 @@ func NewStreamProxy(logger *slog.Logger) *StreamProxy {
 // to the fetch; ctx.Err() distinguishes "cancelled" (don't record)
 // from other failures.
 func (p *StreamProxy) reportOutcome(ctx, fetchCtx context.Context, channelID string, err error) {
-	if p.reporter == nil || channelID == "" {
+	if channelID == "" {
 		return
 	}
 	if err == nil {
-		p.reporter.RecordProbeSuccess(ctx, channelID)
+		// Tick the circuit breaker before the DB-backed reporter so a
+		// freshly recovered channel closes its breaker even if the
+		// reporter is nil (tests) or slow.
+		p.breaker.RecordSuccess(channelID)
+		if p.reporter != nil {
+			p.reporter.RecordProbeSuccess(ctx, channelID)
+		}
 		return
 	}
 	// Client disconnect / explicit cancellation should not pollute the
-	// health counter. If the fetch context was cancelled because the
-	// REQUEST context was cancelled (the viewer navigated away) we
-	// swallow the outcome.
+	// health counter NOR the breaker. If the fetch context was cancelled
+	// because the REQUEST context was cancelled (the viewer navigated
+	// away) we swallow the outcome — counting it would punish zapping.
 	if errors.Is(err, context.Canceled) || errors.Is(fetchCtx.Err(), context.Canceled) {
 		return
 	}
 	// A DeadlineExceeded we DO count — it means upstream took longer
 	// than our transport timeout, which is a real operational issue.
-	p.reporter.RecordProbeFailure(ctx, channelID, err)
+	p.breaker.RecordFailure(channelID)
+	if p.reporter != nil {
+		p.reporter.RecordProbeFailure(ctx, channelID, err)
+	}
 }
 
 // ErrUnsafeUpstream is returned when a proxy fetch target resolves to a
@@ -185,6 +241,16 @@ var blockedIP = func(ip net.IP) bool {
 // upstream fetch, so disconnects by the first listener would (harmlessly)
 // cancel a context nobody used. That dead code is gone.
 func (p *StreamProxy) ProxyStream(ctx context.Context, w http.ResponseWriter, channelID, streamURL string) error {
+	// Circuit breaker gate. If a channel has been failing upstream
+	// repeatedly, refuse THIS request fast (503 + Retry-After) instead
+	// of opening yet another doomed connection. With 100 concurrent
+	// viewers on a dead CDN, this is the difference between 100 retry
+	// loops hammering the upstream and 100 immediate 503s.
+	if allowed, retryAfter := p.breaker.Allow(channelID); !allowed {
+		writeCircuitOpenResponse(w, retryAfter)
+		return &CircuitOpenError{ChannelID: channelID, RetryAfter: retryAfter}
+	}
+
 	p.mu.Lock()
 	if r, ok := p.relays[channelID]; ok {
 		r.listeners++
@@ -554,6 +620,14 @@ func (p *StreamProxy) serveRewrittenPlaylistBody(w http.ResponseWriter, body []b
 // ProxyURL fetches an arbitrary upstream URL and pipes the response to the client.
 // Used for proxying HLS segments and sub-playlists.
 func (p *StreamProxy) ProxyURL(ctx context.Context, w http.ResponseWriter, channelID, rawURL string) error {
+	// Circuit breaker gate — same logic as ProxyStream. Segment
+	// fetches fire dozens of times per minute per viewer; on a dead
+	// CDN this saves the most network noise.
+	if allowed, retryAfter := p.breaker.Allow(channelID); !allowed {
+		writeCircuitOpenResponse(w, retryAfter)
+		return &CircuitOpenError{ChannelID: channelID, RetryAfter: retryAfter}
+	}
+
 	upstream, err := url.QueryUnescape(rawURL)
 	if err != nil {
 		return fmt.Errorf("invalid url: %w", err)
@@ -582,13 +656,29 @@ func (p *StreamProxy) ProxyURL(ctx context.Context, w http.ResponseWriter, chann
 		// is the canonical "healthy again" signal.
 		// Skip ctx-cancel — that's the user changing channel, not
 		// upstream rot, and counting it would punish zapping.
-		if !errors.Is(ctx.Err(), context.Canceled) && p.reporter != nil {
-			p.reporter.RecordProbeFailure(ctx, channelID, err)
+		if !errors.Is(ctx.Err(), context.Canceled) {
+			// Breaker tracks segment-level failures: a fetch that
+			// reaches the network and 5xx's means the URL is dead
+			// right now, regardless of whether we tag the channel
+			// as "unhealthy" in the DB (the prober owns that).
+			p.breaker.RecordFailure(channelID)
+			if p.reporter != nil {
+				p.reporter.RecordProbeFailure(ctx, channelID, err)
+			}
 		}
 		http.Error(w, "upstream error", http.StatusBadGateway)
 		return nil
 	}
 	defer resp.Body.Close() //nolint:errcheck
+
+	// Segment 200 is a valid "URL is up right now" signal for the
+	// breaker, even though the DB-backed prober deliberately
+	// IGNORES these (it owns the per-channel health bit and
+	// segment-level resets would mask flaky variants between
+	// failures). The breaker has different semantics: it gates
+	// upstream attempts, not health reporting, so recovery should
+	// be observed at the earliest reachability evidence.
+	p.breaker.RecordSuccess(channelID)
 
 	ct := resp.Header.Get("Content-Type")
 	if ct == "" {
