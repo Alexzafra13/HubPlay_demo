@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strconv"
@@ -233,6 +234,88 @@ func (h *IPTVHandler) HLSManifest(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Pragma", "no-cache")
 	w.Header().Set("Expires", "0")
 	_, _ = w.Write(body)
+}
+
+// ChannelLogo serves the cached upstream logo for a channel through
+// a same-origin URL. The frontend always renders <img> against this
+// endpoint so a strict img-src CSP doesn't have to whitelist every
+// random image-host the M3U happens to use, and no upstream host
+// gets to track the user.
+//
+// 404 is the right status for "no logo to show" — empty upstream
+// URL, fetch failure, SSRF rejection, non-image response. The React
+// `<ChannelCard>` has an onError handler that swaps to the
+// initials/colour avatar, so the UI degrades gracefully without
+// any extra client wiring.
+func (h *IPTVHandler) ChannelLogo(w http.ResponseWriter, r *http.Request) {
+	if h.logoCache == nil {
+		respondError(w, r, http.StatusNotFound, "NO_LOGO", "logo cache disabled")
+		return
+	}
+	channelID := chi.URLParam(r, "channelId")
+
+	ch, err := h.svc.GetChannel(r.Context(), channelID)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	if !h.canAccessLibrary(r, ch.LibraryID) {
+		h.denyForbidden(w, r)
+		return
+	}
+	if ch.LogoURL == "" {
+		respondError(w, r, http.StatusNotFound, "NO_LOGO", "channel has no upstream logo")
+		return
+	}
+
+	path, err := h.logoCache.Path(r.Context(), ch.LogoURL)
+	if err != nil {
+		// Fetch / SSRF / decode failures collapse to 404 by design:
+		// the frontend's onError fallback is the right answer for
+		// every "no logo to show" condition. The cache logs at
+		// debug, so operators still have visibility.
+		respondError(w, r, http.StatusNotFound, "LOGO_UNAVAILABLE", "could not fetch upstream logo")
+		return
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		h.logger.Error("logo cache read", "channel", channelID, "path", path, "error", err)
+		respondError(w, r, http.StatusInternalServerError, "LOGO_READ_FAILED", "could not read cached logo")
+		return
+	}
+	defer f.Close() //nolint:errcheck
+
+	info, err := f.Stat()
+	if err != nil {
+		h.logger.Error("logo cache stat", "channel", channelID, "path", path, "error", err)
+		respondError(w, r, http.StatusInternalServerError, "LOGO_STAT_FAILED", "")
+		return
+	}
+
+	// Sniff content-type from the first 512 bytes, then rewind.
+	// We can't trust the upstream Content-Type (some hosts mis-tag
+	// PNGs as octet-stream) and storing the type alongside the
+	// cache file would mean a sidecar metadata format we'd have to
+	// maintain. Reading 512 bytes is cheaper than that, and
+	// http.ServeContent picks up from there.
+	var head [512]byte
+	n, _ := f.Read(head[:])
+	contentType := http.DetectContentType(head[:n])
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		h.logger.Error("logo cache seek", "channel", channelID, "error", err)
+		respondError(w, r, http.StatusInternalServerError, "LOGO_SEEK_FAILED", "")
+		return
+	}
+
+	w.Header().Set("Content-Type", contentType)
+	// max-age=86400 is a day; channel logos are extremely stable in
+	// practice (branding assets, not live data) and a stale logo is
+	// the cheapest possible bug. ServeContent honours
+	// If-Modified-Since for conditional requests, so the actual
+	// bytes are usually only sent once per browser cache lifetime.
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	http.ServeContent(w, r, "", info.ModTime(), f)
 }
 
 // HLSSegment serves one MPEG-TS segment file from the channel's

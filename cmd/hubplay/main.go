@@ -195,6 +195,21 @@ func run(configPath string) error {
 			"max_sessions", cfg.IPTV.Transmux.MaxSessions)
 	}
 
+	// Channel logo cache. Mirrors upstream `tvg-logo` URLs to disk
+	// so the frontend can load them from a same-origin URL without
+	// loosening the img-src CSP, and external hosts don't get to
+	// track the user. Construction failure is non-fatal: the
+	// handler treats nil as "logo cache disabled" and the React UI
+	// falls back to the existing initials/colour avatar.
+	var iptvLogoCache *iptv.LogoCache
+	logoCacheDir := filepath.Join(cfg.Streaming.EffectiveCacheDir(), "iptv-logos")
+	if lc, err := iptv.NewLogoCache(logoCacheDir, logger); err != nil {
+		logger.Warn("iptv logo cache disabled", "error", err)
+	} else {
+		iptvLogoCache = lc
+		logger.Info("iptv logo cache enabled", "cache_dir", logoCacheDir)
+	}
+
 	// ═══ Phase 4d: IPTV Scheduler ═══
 	// Runs periodic M3U + EPG refreshes per configured schedule so the
 	// product no longer requires an admin to click "Refrescar" every
@@ -226,6 +241,7 @@ func run(configPath string) error {
 		IPTV:          iptvService,
 		IPTVProxy:     iptvProxy,
 		IPTVTransmux:  iptvTransmux,
+		IPTVLogoCache: iptvLogoCache,
 		IPTVScheduler: iptvScheduler,
 		IPTVSchedules: repos.IPTVSchedules,
 		Items:         repos.Items,

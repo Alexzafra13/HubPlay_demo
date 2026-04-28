@@ -29,6 +29,7 @@ import (
 	"net/http"
 
 	"hubplay/internal/domain"
+	"hubplay/internal/iptv"
 )
 
 // IPTVHandler handles IPTV channel and EPG endpoints. Methods live in
@@ -36,22 +37,28 @@ import (
 type IPTVHandler struct {
 	svc       IPTVService
 	proxy     IPTVStreamProxyService
-	transmux  IPTVTransmuxer // optional; nil disables MPEG-TS → HLS transmux
+	transmux  IPTVTransmuxer  // optional; nil disables MPEG-TS → HLS transmux
+	logoCache *iptv.LogoCache // optional; nil falls back to upstream URLs in DTO
 	libraries LibraryRepository
 	access    LibraryAccessService
 	logger    *slog.Logger
 }
 
-// NewIPTVHandler creates a new IPTV handler. `transmux` is optional —
-// pass nil to disable on-the-fly MPEG-TS → HLS conversion (tests, or
-// platforms without ffmpeg). When nil, non-HLS upstreams fall back to
-// the raw passthrough proxy with the same player-side incompatibility
-// it has today.
-func NewIPTVHandler(svc IPTVService, proxy IPTVStreamProxyService, transmux IPTVTransmuxer, libraries LibraryRepository, access LibraryAccessService, logger *slog.Logger) *IPTVHandler {
+// NewIPTVHandler creates a new IPTV handler. `transmux` and `logoCache`
+// are optional:
+//   - nil transmux: non-HLS upstreams fall back to the raw passthrough
+//     proxy (browsers can't play raw MPEG-TS, so this is a degraded
+//     state — kept for tests + platforms without ffmpeg).
+//   - nil logoCache: the channel DTO surfaces the upstream `tvg-logo`
+//     URL verbatim. With a strict CSP the browser blocks third-party
+//     image loads and the existing initials/colour fallback in the
+//     React component kicks in.
+func NewIPTVHandler(svc IPTVService, proxy IPTVStreamProxyService, transmux IPTVTransmuxer, logoCache *iptv.LogoCache, libraries LibraryRepository, access LibraryAccessService, logger *slog.Logger) *IPTVHandler {
 	return &IPTVHandler{
 		svc:       svc,
 		proxy:     proxy,
 		transmux:  transmux,
+		logoCache: logoCache,
 		libraries: libraries,
 		access:    access,
 		logger:    logger.With("module", "iptv-handler"),

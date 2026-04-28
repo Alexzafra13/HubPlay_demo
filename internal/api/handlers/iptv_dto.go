@@ -80,7 +80,7 @@ func toChannelDTO(ch *db.Channel, streamPath string) channelDTO {
 		Group:        ch.GroupName,
 		GroupName:    ch.GroupName,
 		Category:     string(iptv.Canonical(ch.GroupName)),
-		LogoURL:      ch.LogoURL,
+		LogoURL:      logoProxyURL(ch),
 		LogoInitials: logo.Initials,
 		LogoBg:       logo.Background,
 		LogoFg:       logo.Foreground,
@@ -93,6 +93,24 @@ func toChannelDTO(ch *db.Channel, streamPath string) channelDTO {
 		AddedAt:      addedAt,
 		HealthStatus: deriveHealthStatus(ch),
 	}
+}
+
+// logoProxyURL maps a channel's stored upstream logo URL to the
+// same-origin endpoint that fetches + caches + serves it. Empty
+// when the channel has no upstream logo (the frontend renders the
+// initials/colour fallback).
+//
+// Always returning the proxy URL — instead of the upstream — is what
+// keeps a strict img-src CSP enforceable: the browser only ever
+// loads images from `self`. The endpoint itself returns 404 when
+// the upstream is unfetchable, and the React `onError` handler
+// flips back to initials, so the UI degrades gracefully without
+// the caller having to coordinate.
+func logoProxyURL(ch *db.Channel) string {
+	if ch == nil || ch.LogoURL == "" {
+		return ""
+	}
+	return "/api/v1/channels/" + ch.ID + "/logo"
 }
 
 // deriveHealthStatus converts the raw probe counter into the
