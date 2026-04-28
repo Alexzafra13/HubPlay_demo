@@ -1,6 +1,74 @@
 # Estado del proyecto
 
-> Snapshot: **2026-04-28 (final)** — refactor SRP completo (7 ficheros gigantes troceados, incl. iptv.go) + audit de duplicación (1 fix real, codebase ~90% limpio) · Rama: `claude/modest-vaughan-2535e4` (mergeada a `main`) · **tests: backend verde · frontend 290/290 · tsc -b 0**
+> Snapshot: **2026-04-28 (peer-review pass)** — refactor SRP completo + 5 followups del review senior (granularity, helpers, contract test del barrel) · Rama: `claude/review-project-docs-kxeLz` · **tests: backend verde · frontend 296/296 (+6) · tsc -b 0**
+
+---
+
+## 🔎 Sesión 2026-04-28 (peer-review followups) — `7e32c41`
+
+Pase de peer-review senior sobre el refactor SRP de la rama. De
+ocho findings, **cinco** se aceptaron y se ejecutaron; los otros
+tres (useFavoriteMutation "over-generalised", usePlayback
+interface "too wide", LibraryCard mutation hooks) los marcó el
+propio reviewer como "defensible" — quedan as-is.
+
+### Lo que entró (1 commit, 10 ficheros, +385 / −206)
+
+1. **`librariesAdmin/constants.ts` → granularity**: mezclaba
+   tablas de datos (catálogos iptv-org) con helpers React-coupled
+   (`originLabel`/`originTitle`/`scanStatusVariant`). Helpers
+   movidos a `helpers.ts` sibling. `constants.ts` ahora **pure
+   data**, `helpers.ts` **pure functions** — un futuro port que
+   sólo quiera los slugs no tiene que leer past tres funciones de
+   UI.
+
+2. **`hooks/iptv-admin.ts` (238 líneas, el mayor) → split en 3
+   sub-dominios** bajo el mismo barrel:
+   - `iptv-admin.ts` — refresh + public-IPTV import
+   - `iptv-sources.ts` — EPG source CRUD + catalogue
+   - `iptv-jobs.ts` — scheduled M3U/EPG jobs
+
+   `hooks.ts` re-exporta los 3 → **0 call-sites tocados**.
+
+3. **`hooks/channels.ts` — comentario inline de intencionalidad**:
+   el resto de los per-domain files separan queries de mutations,
+   pero éste las junta a propósito (las mutations invalidan
+   `queryKeys.channelFavorite{IDs,s}` definidas en el mismo
+   fichero, y `useFavoriteMutation` toca la cache de IDs
+   directamente). Documentado para que el próximo lector no
+   "arregle" lo que no está roto.
+
+4. **`persistManualImage` — test unitario directo**: el helper
+   que respalda Select + Upload sólo se ejercitaba vía HTTP-level
+   integration tests. Nuevo test en `image_test.go` (+65 líneas)
+   ancla los **9 pasos** (file on disk, IsLocked, SetPrimary
+   promotion, blurhash, pathmap entry, response Path) → una
+   regresión que pierda un paso falla local en vez de en prod.
+
+5. **`hooks.ts` barrel — contract test**: 90 líneas nuevas en
+   `hooks.test.ts` que importan una muestra representativa desde
+   `@/api/hooks` y asertan que cada uno es función. Protege ~50
+   call-sites del SPA contra "olvidé un re-export" PRs.
+
+### Métricas
+
+- Frontend tests: **290 → 296** (+6 del barrel test).
+- Backend tests: nuevo `TestPersistManualImage` verde.
+- `tsc -b` 0 errores · preview reload limpio.
+- **Ficheros >800 líneas en src/ frontend**: 4 → 0 (sigue).
+- **Ficheros >1000 líneas en handlers backend**: 1 → 0 (sigue).
+- Mayor hook file ahora: `media.ts` ≈ 200 líneas (sano).
+
+### Lo que NO entró del review (judgement calls)
+
+- `useFavoriteMutation` "over-generalised" para 2 callers — el
+  reviewer mismo flag "defensible". Si aparece un 3er caso se
+  reabre.
+- `usePlayback` interface "too wide" para su single caller — la
+  superficie refleja el state-machine real del overlay; estrechar
+  por estrechar oculta la verdad.
+- `LibraryCard` mutation hooks → `useLibraryMutations` —
+  abstracción prematura para 2 callers que ya están legibles.
 
 ---
 
