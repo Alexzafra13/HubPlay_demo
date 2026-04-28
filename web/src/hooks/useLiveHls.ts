@@ -139,14 +139,28 @@ export function useLiveHls({
     };
 
     if (Hls.isSupported()) {
+      // Buffering values tuned for live IPTV transmux (segments are
+      // 2 s after the backend tuning). Larger numbers trade live
+      // latency for resilience to upstream jitter — Xtream providers
+      // often deliver MPEG-TS in uneven bursts, and the player has
+      // to ride that out without falling behind the manifest window.
+      //   maxBufferLength=60 / maxMaxBufferLength=120: pre-load up to
+      //     2 minutes ahead so a 10-second upstream blip doesn't
+      //     drain the buffer.
+      //   liveSyncDurationCount=4 (× 2 s segments = 8 s behind edge):
+      //     a touch more lag than the hls.js default (3) for steadier
+      //     playback against jittery upstreams.
+      //   liveMaxLatencyDurationCount=12 (× 2 s = 24 s): twice as
+      //     much room before hls.js force-jumps to the live edge,
+      //     which is what the user sees as a visible "skip".
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
-        maxBufferLength: 30,
-        maxMaxBufferLength: 60,
+        maxBufferLength: 60,
+        maxMaxBufferLength: 120,
         backBufferLength: 30,
-        liveSyncDurationCount: 3,
-        liveMaxLatencyDurationCount: 6,
+        liveSyncDurationCount: 4,
+        liveMaxLatencyDurationCount: 12,
         manifestLoadingMaxRetry: 6,
         manifestLoadingRetryDelay: 1000,
         manifestLoadingMaxRetryTimeout: 8000,

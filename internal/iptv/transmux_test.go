@@ -367,8 +367,11 @@ func TestBuildTransmuxFFmpegArgs_ContainsCriticalFlags(t *testing.T) {
 	for _, want := range []string{
 		"-c copy",
 		"-f hls",
-		"-hls_time 4",
+		"-hls_time 2",
+		"-hls_list_size 10",
 		"-hls_flags delete_segments+independent_segments+omit_endlist+program_date_time",
+		"-rtbufsize 50M",
+		"-max_delay 5000000",
 		"-reconnect 1",
 		"-rw_timeout 10000000",
 		"http://up/x",

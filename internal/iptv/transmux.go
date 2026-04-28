@@ -578,6 +578,25 @@ func clearWorkDir(dir string) error {
 // blipping for a few seconds) recovers without ffmpeg exiting; the
 // session manager only re-spawns on a hard exit.
 //
+// Buffering choices (tuned against real Xtream traffic where the
+// provider delivers MPEG-TS in uneven bursts):
+//   - `-rtbufsize 50M` lets ffmpeg absorb upstream jitter instead of
+//     dropping packets when input arrives faster than it can mux
+//     out. Cost: ~50 MB RAM per active session.
+//   - `-max_delay 5000000` (5 s) gives the demuxer slack for
+//     reordered packets — alternative is "non-monotonic DTS" warnings
+//     and occasional segment dropouts on noisy providers.
+//
+// HLS window choices (tuned for live, smooth playback over Xtream):
+//   - `hls_time 2` — smaller segments halve buffer-underrun recovery
+//     time and reduce live latency. Cost: 2× more segment files
+//     on disk (still trivial at `hls_list_size 10`).
+//   - `hls_list_size 10` — 20 s window of segments visible to the
+//     player. The player has more segments to walk before falling
+//     behind the window and being forced to "jump to live edge",
+//     which is the visible stutter we saw against the user's
+//     xiagdns provider.
+//
 // `omit_endlist` keeps the manifest live (no #EXT-X-ENDLIST) so
 // hls.js treats it as a sliding window. `delete_segments` keeps disk
 // usage bounded at `hls_list_size` segments. `independent_segments`
@@ -588,6 +607,8 @@ func buildTransmuxFFmpegArgs(upstreamURL, workDir string) []string {
 		"-loglevel", "warning",
 		"-nostdin",
 		"-fflags", "+genpts+discardcorrupt",
+		"-rtbufsize", "50M",
+		"-max_delay", "5000000",
 		"-reconnect", "1",
 		"-reconnect_at_eof", "1",
 		"-reconnect_streamed", "1",
@@ -599,8 +620,8 @@ func buildTransmuxFFmpegArgs(upstreamURL, workDir string) []string {
 		"-c", "copy",
 		"-bsf:v", "h264_mp4toannexb",
 		"-f", "hls",
-		"-hls_time", "4",
-		"-hls_list_size", "6",
+		"-hls_time", "2",
+		"-hls_list_size", "10",
 		"-hls_flags", "delete_segments+independent_segments+omit_endlist+program_date_time",
 		"-hls_segment_type", "mpegts",
 		"-hls_segment_filename", filepath.Join(workDir, "seg-%05d.ts"),
