@@ -5,9 +5,16 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"hubplay/internal/event"
 )
+
+// sseKeepaliveInterval keeps an idle SSE stream below the typical
+// reverse-proxy idle cutoff (nginx default = 60s). Comment lines are
+// invisible to EventSource consumers but reset the proxy idle timer.
+// 25s leaves comfortable margin against jittery 30s upstream caps too.
+const sseKeepaliveInterval = 25 * time.Second
 
 // EventHandler provides a Server-Sent Events (SSE) endpoint for real-time updates.
 // Clients connect via GET /api/v1/events and receive JSON events as they happen.
@@ -55,6 +62,7 @@ func (h *EventHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		event.ChannelRemoved,
 		event.EPGUpdated,
 		event.PlaylistRefreshed,
+		event.PlaylistRefreshFailed,
 		event.ChannelHealthChanged,
 	}
 
@@ -81,15 +89,31 @@ func (h *EventHandler) Stream(w http.ResponseWriter, r *http.Request) {
 
 	h.logger.Info("SSE client connected", "remote_addr", r.RemoteAddr)
 
-	// Send keepalive comment
+	// Initial keepalive comment doubles as a "connection ready"
+	// signal for the browser EventSource: anything we write before
+	// it forces the headers to flush.
 	fmt.Fprintf(w, ": connected\n\n")
 	flusher.Flush()
+
+	keepalive := time.NewTicker(sseKeepaliveInterval)
+	defer keepalive.Stop()
 
 	for {
 		select {
 		case <-r.Context().Done():
 			h.logger.Info("SSE client disconnected", "remote_addr", r.RemoteAddr)
 			return
+
+		case <-keepalive.C:
+			// Comment frames keep proxies happy without surfacing
+			// anything to the EventSource API. A failed write here
+			// means the client is gone — let the next ctx.Done()
+			// tick clean up rather than panicking on a half-closed
+			// writer.
+			if _, err := fmt.Fprint(w, ": ping\n\n"); err != nil {
+				continue
+			}
+			flusher.Flush()
 
 		case evt := <-eventCh:
 			data, err := json.Marshal(map[string]any{

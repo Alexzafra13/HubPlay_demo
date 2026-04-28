@@ -34,6 +34,11 @@ const (
 	ChannelRemoved       Type = "channel.removed"
 	EPGUpdated           Type = "epg.updated"
 	PlaylistRefreshed    Type = "playlist.refreshed"
+	// PlaylistRefreshFailed is published when an async M3U import gives
+	// up. The handler returns 202 immediately, so the SSE stream is the
+	// only signal the admin UI has that the import didn't reach DB —
+	// otherwise the spinner stays forever.
+	PlaylistRefreshFailed Type = "playlist.refresh_failed"
 	// ChannelHealthChanged is published when a channel transitions
 	// between health buckets (ok / degraded / dead). Emitted only on
 	// transition — not on every probe — so subscribers (admin SSE

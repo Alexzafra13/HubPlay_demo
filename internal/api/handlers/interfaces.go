@@ -98,6 +98,13 @@ type IPTVService interface {
 	GetBulkSchedule(ctx context.Context, channelIDs []string, from, to time.Time) (map[string][]*db.EPGProgram, error)
 	NowPlaying(ctx context.Context, channelID string) (*db.EPGProgram, error)
 	RefreshM3U(ctx context.Context, libraryID string) (int, error)
+	// TryAcquireRefresh + RunRefreshM3U + PublishRefreshFailed split
+	// the M3U refresh so the HTTP handler can return 202 immediately
+	// and run the actual import in a goroutine that survives client
+	// disconnect / nginx proxy_read_timeout. See iptv_admin.go.
+	TryAcquireRefresh(libraryID string) (func(), error)
+	RunRefreshM3U(ctx context.Context, libraryID string) (int, error)
+	PublishRefreshFailed(libraryID string, err error)
 	RefreshEPG(ctx context.Context, libraryID string) (int, error)
 	PreflightCheck(ctx context.Context, m3uURL string, tlsInsecure bool) iptv.PreflightResult
 

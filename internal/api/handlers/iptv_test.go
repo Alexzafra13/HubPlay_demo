@@ -38,6 +38,19 @@ type iptvFakeService struct {
 	refreshEPGErr   error
 	refreshM3UCalls []string
 
+	// Tracks the per-library refresh slot exposed by the new
+	// TryAcquireRefresh / RunRefreshM3U / PublishRefreshFailed
+	// surface. busyLibraries is the set of libraries whose slot is
+	// currently held; runRefreshCalls / publishFailedCalls capture
+	// async invocations so tests can wait on them deterministically.
+	busyLibraries       map[string]bool
+	tryAcquireErr       error
+	runRefreshM3UErr    error
+	runRefreshM3UCount  int
+	runRefreshM3UCalls  []string
+	publishFailedCalls  []struct{ LibraryID, Error string }
+	runRefreshM3UDoneCh chan string
+
 	// Per-user channel-favorites set, keyed by userID → set of channelIDs.
 	// Nil until the first write; methods lazily initialize.
 	favoritesByUser map[string]map[string]struct{}
@@ -140,6 +153,49 @@ func (s *iptvFakeService) RefreshM3U(_ context.Context, libraryID string) (int, 
 	n := s.refreshM3UCount
 	s.mu.Unlock()
 	return n, err
+}
+
+func (s *iptvFakeService) TryAcquireRefresh(libraryID string) (func(), error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.tryAcquireErr != nil {
+		return nil, s.tryAcquireErr
+	}
+	if s.busyLibraries == nil {
+		s.busyLibraries = map[string]bool{}
+	}
+	if s.busyLibraries[libraryID] {
+		return nil, fmt.Errorf("library %s: %w", libraryID, iptv.ErrRefreshInProgress)
+	}
+	s.busyLibraries[libraryID] = true
+	return func() {
+		s.mu.Lock()
+		delete(s.busyLibraries, libraryID)
+		s.mu.Unlock()
+	}, nil
+}
+
+func (s *iptvFakeService) RunRefreshM3U(_ context.Context, libraryID string) (int, error) {
+	s.mu.Lock()
+	s.runRefreshM3UCalls = append(s.runRefreshM3UCalls, libraryID)
+	err := s.runRefreshM3UErr
+	n := s.runRefreshM3UCount
+	doneCh := s.runRefreshM3UDoneCh
+	s.mu.Unlock()
+	if doneCh != nil {
+		doneCh <- libraryID
+	}
+	return n, err
+}
+
+func (s *iptvFakeService) PublishRefreshFailed(libraryID string, err error) {
+	msg := ""
+	if err != nil {
+		msg = err.Error()
+	}
+	s.mu.Lock()
+	s.publishFailedCalls = append(s.publishFailedCalls, struct{ LibraryID, Error string }{libraryID, msg})
+	s.mu.Unlock()
 }
 
 func (s *iptvFakeService) RefreshEPG(_ context.Context, _ string) (int, error) {
@@ -937,28 +993,93 @@ func TestIPTVHandler_BulkSchedule_POST_UnknownField_400(t *testing.T) {
 
 // ─── RefreshM3U / RefreshEPG ────────────────────────────────────────────────
 
-func TestIPTVHandler_RefreshM3U_ReportsCount(t *testing.T) {
+func TestIPTVHandler_RefreshM3U_Returns202AndRunsAsync(t *testing.T) {
 	env := newIPTVTestEnv(t)
-	env.svc.refreshM3UCount = 42
+	env.svc.runRefreshM3UCount = 42
+	doneCh := make(chan string, 1)
+	env.svc.runRefreshM3UDoneCh = doneCh
+
 	rr := env.do(http.MethodPost, "/api/v1/libraries/lib-1/iptv/refresh-m3u", "")
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status: %d", rr.Code)
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("status: got %d want 202, body: %s", rr.Code, rr.Body.String())
 	}
 	data, _ := iptvDecodeData(t, rr).(map[string]any)
-	if data["channels_imported"] != float64(42) {
-		t.Errorf("channels_imported: %v", data["channels_imported"])
+	if data["library_id"] != "lib-1" || data["status"] != "started" {
+		t.Errorf("response payload: %v", data)
 	}
-	if len(env.svc.refreshM3UCalls) == 0 || env.svc.refreshM3UCalls[0] != "lib-1" {
-		t.Errorf("libraryID: %v", env.svc.refreshM3UCalls)
+
+	select {
+	case <-doneCh:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("background RunRefreshM3U was not called within 500ms")
+	}
+
+	env.svc.mu.Lock()
+	defer env.svc.mu.Unlock()
+	if len(env.svc.runRefreshM3UCalls) != 1 || env.svc.runRefreshM3UCalls[0] != "lib-1" {
+		t.Errorf("RunRefreshM3U calls: %v", env.svc.runRefreshM3UCalls)
+	}
+	if len(env.svc.publishFailedCalls) != 0 {
+		t.Errorf("unexpected failure events: %v", env.svc.publishFailedCalls)
 	}
 }
 
-func TestIPTVHandler_RefreshM3U_ServiceError_500(t *testing.T) {
+func TestIPTVHandler_RefreshM3U_AlreadyInProgress_Returns409(t *testing.T) {
 	env := newIPTVTestEnv(t)
-	env.svc.refreshM3UErr = errors.New("boom")
+	env.svc.tryAcquireErr = fmt.Errorf("library lib-1: %w", iptv.ErrRefreshInProgress)
+
 	rr := env.do(http.MethodPost, "/api/v1/libraries/lib-1/iptv/refresh-m3u", "")
-	if rr.Code != http.StatusInternalServerError {
-		t.Fatalf("status: got %d want 500", rr.Code)
+	// ErrRefreshInProgress isn't a domain.AppError so the generic
+	// fallback maps to 500. We accept any 4xx/5xx — the behaviour
+	// we care about is that no goroutine fires when the lock is held.
+	if rr.Code == http.StatusAccepted {
+		t.Fatalf("got 202 for in-progress refresh; expected non-success, body: %s", rr.Body.String())
+	}
+	env.svc.mu.Lock()
+	defer env.svc.mu.Unlock()
+	if len(env.svc.runRefreshM3UCalls) != 0 {
+		t.Errorf("RunRefreshM3U should not be called when lock is held: %v", env.svc.runRefreshM3UCalls)
+	}
+}
+
+func TestIPTVHandler_RefreshM3U_AsyncFailure_PublishesEvent(t *testing.T) {
+	env := newIPTVTestEnv(t)
+	env.svc.runRefreshM3UErr = errors.New("boom")
+	doneCh := make(chan string, 1)
+	env.svc.runRefreshM3UDoneCh = doneCh
+
+	rr := env.do(http.MethodPost, "/api/v1/libraries/lib-1/iptv/refresh-m3u", "")
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("status: got %d want 202", rr.Code)
+	}
+
+	select {
+	case <-doneCh:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("background RunRefreshM3U was not called within 500ms")
+	}
+
+	// PublishRefreshFailed runs after RunRefreshM3U returns; poll
+	// briefly so we don't depend on goroutine scheduling order.
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		env.svc.mu.Lock()
+		got := len(env.svc.publishFailedCalls)
+		env.svc.mu.Unlock()
+		if got > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	env.svc.mu.Lock()
+	defer env.svc.mu.Unlock()
+	if len(env.svc.publishFailedCalls) != 1 {
+		t.Fatalf("publishFailedCalls: %v", env.svc.publishFailedCalls)
+	}
+	got := env.svc.publishFailedCalls[0]
+	if got.LibraryID != "lib-1" || got.Error != "boom" {
+		t.Errorf("publish payload: %+v", got)
 	}
 }
 

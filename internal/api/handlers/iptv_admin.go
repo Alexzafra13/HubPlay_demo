@@ -41,7 +41,23 @@ func (h *IPTVHandler) PreflightM3U(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, result)
 }
 
+// refreshM3UAsyncTimeout caps the detached import context. Picked
+// against the real-world ceiling we've seen with ~98k-line Xtream
+// M3U_PLUS feeds (parse + filter + DB transaction), with margin for
+// degraded provider links. Long enough that a slow upstream finishes;
+// short enough that a hung fetch eventually frees the per-library
+// slot instead of blocking refreshes forever.
+const refreshM3UAsyncTimeout = 10 * time.Minute
+
 // RefreshM3U triggers an M3U playlist refresh for a library.
+//
+// Returns 202 Accepted: the actual import runs in a detached goroutine
+// because large M3U_PLUS feeds (Xtream-Codes, ~98k lines) routinely
+// exceed the nginx proxy_read_timeout (default 60s) and the request
+// context cancellation tears down the DB transaction mid-write,
+// dropping every parsed channel. Detaching the import lifts that
+// limit and survives client disconnect; completion is signalled
+// through SSE (`playlist.refreshed` / `playlist.refresh_failed`).
 //
 // Already admin-only at the route level, but we also verify library access
 // defence-in-depth: admins can see every library regardless of the ACL, so
@@ -54,18 +70,33 @@ func (h *IPTVHandler) RefreshM3U(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	count, err := h.svc.RefreshM3U(r.Context(), libraryID)
+	// Acquire the per-library refresh slot synchronously so a
+	// concurrent click gets an immediate 409 instead of two
+	// goroutines racing into the same lock.
+	release, err := h.svc.TryAcquireRefresh(libraryID)
 	if err != nil {
-		// Log the raw error for operators; handleServiceError renders a safe
-		// typed AppError (or a generic 500) without leaking upstream messages.
-		h.logger.Error("M3U refresh failed", "library", libraryID, "error", err)
+		h.logger.Info("M3U refresh skipped: already in progress", "library", libraryID)
 		handleServiceError(w, r, err)
 		return
 	}
 
-	respondJSON(w, http.StatusOK, map[string]any{
+	go func() {
+		defer release()
+		ctx, cancel := context.WithTimeout(context.Background(), refreshM3UAsyncTimeout)
+		defer cancel()
+		count, err := h.svc.RunRefreshM3U(ctx, libraryID)
+		if err != nil {
+			h.logger.Error("M3U refresh failed", "library", libraryID, "error", err)
+			h.svc.PublishRefreshFailed(libraryID, err)
+			return
+		}
+		h.logger.Info("M3U refresh complete (async)", "library", libraryID, "channels", count)
+	}()
+
+	respondJSON(w, http.StatusAccepted, map[string]any{
 		"data": map[string]any{
-			"channels_imported": count,
+			"library_id": libraryID,
+			"status":     "started",
 		},
 	})
 }

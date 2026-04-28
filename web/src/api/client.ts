@@ -561,8 +561,17 @@ export class ApiClient {
 
   // IPTV playlist / EPG refresh (admin-only). These are the correct
   // "scan" actions for a livetv library — filesystem scan doesn't apply.
-  async refreshM3U(libraryId: string): Promise<{ channels_imported: number }> {
-    return this.request<{ channels_imported: number }>(
+  //
+  // refreshM3U returns 202 Accepted: the import runs detached on the
+  // server because large M3U_PLUS feeds blow past the nginx
+  // proxy_read_timeout, and a request-bound context cancellation
+  // would tear down the DB transaction mid-write. Completion is
+  // signalled through SSE (`playlist.refreshed` /
+  // `playlist.refresh_failed`); the mutation hook awaits that event.
+  async refreshM3U(
+    libraryId: string,
+  ): Promise<{ library_id: string; status: string }> {
+    return this.request<{ library_id: string; status: string }>(
       "POST",
       `/libraries/${libraryId}/iptv/refresh-m3u`,
     );

@@ -16,21 +16,68 @@ import (
 	"hubplay/internal/event"
 )
 
-// RefreshM3U downloads and parses an M3U playlist, replacing channels for the library.
-func (s *Service) RefreshM3U(ctx context.Context, libraryID string) (int, error) {
+// TryAcquireRefresh reserves the per-library refresh slot synchronously
+// and returns a release function the caller MUST defer. Returns
+// ErrRefreshInProgress immediately if the slot is already held.
+//
+// Exposed so the HTTP handler can answer "is this kicking off or
+// already running?" before deciding between 202 Accepted and 409
+// Conflict, then continue the import in a goroutine that outlives the
+// request — see iptv_admin.go RefreshM3U for the use site.
+func (s *Service) TryAcquireRefresh(libraryID string) (func(), error) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.refreshes[libraryID] {
-		s.mu.Unlock()
-		return 0, fmt.Errorf("library %s: %w", libraryID, ErrRefreshInProgress)
+		return nil, fmt.Errorf("library %s: %w", libraryID, ErrRefreshInProgress)
 	}
 	s.refreshes[libraryID] = true
-	s.mu.Unlock()
-	defer func() {
+	return func() {
 		s.mu.Lock()
 		delete(s.refreshes, libraryID)
 		s.mu.Unlock()
-	}()
+	}, nil
+}
 
+// RefreshM3U downloads and parses an M3U playlist, replacing channels for the library.
+//
+// Synchronous variant: acquires the lock, runs the import, releases.
+// Used by the scheduler and the public-IPTV import path. The HTTP
+// handler uses TryAcquireRefresh + RunRefreshM3U directly so it can
+// 202-and-detach instead of holding the request open for minutes.
+func (s *Service) RefreshM3U(ctx context.Context, libraryID string) (int, error) {
+	release, err := s.TryAcquireRefresh(libraryID)
+	if err != nil {
+		return 0, err
+	}
+	defer release()
+	return s.RunRefreshM3U(ctx, libraryID)
+}
+
+// PublishRefreshFailed emits a playlist.refresh_failed SSE event so
+// the admin UI can clear the spinner / show a toast when an async
+// import gives up. The error message is forwarded verbatim — callers
+// upstream of this method are responsible for not leaking provider
+// secrets (the M3U URL itself never appears in domain errors).
+func (s *Service) PublishRefreshFailed(libraryID string, err error) {
+	msg := ""
+	if err != nil {
+		msg = err.Error()
+	}
+	s.publish(event.Event{
+		Type: event.PlaylistRefreshFailed,
+		Data: map[string]any{
+			"library_id": libraryID,
+			"error":      msg,
+		},
+	})
+}
+
+// RunRefreshM3U performs the actual import. Caller is responsible for
+// acquiring + releasing the per-library lock via TryAcquireRefresh.
+// Exported (vs. RefreshM3U which is the lock-and-run wrapper) so the
+// HTTP handler can drive the lock lifecycle from the request goroutine
+// while the import runs detached.
+func (s *Service) RunRefreshM3U(ctx context.Context, libraryID string) (int, error) {
 	lib, err := s.libraries.GetByID(ctx, libraryID)
 	if err != nil {
 		return 0, fmt.Errorf("get library: %w", err)
