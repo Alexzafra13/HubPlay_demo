@@ -38,6 +38,10 @@ type Metrics struct {
 	StreamActiveSessions  prometheus.Gauge
 	StreamTranscodeStarts *prometheus.CounterVec
 
+	IPTVTransmuxStarts        *prometheus.CounterVec
+	IPTVTransmuxDecodeMode    *prometheus.CounterVec
+	IPTVTransmuxReencodePromo prometheus.Counter
+
 	AuthKeyRotations *prometheus.CounterVec
 }
 
@@ -100,6 +104,29 @@ func NewMetrics(version string) (*Metrics, error) {
 			[]string{"outcome"},
 		),
 
+		IPTVTransmuxStarts: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "hubplay_iptv_transmux_starts_total",
+				Help: "IPTV transmux spawn attempts grouped by outcome (ok, crash, gate_denied, busy).",
+			},
+			[]string{"outcome"},
+		),
+
+		IPTVTransmuxDecodeMode: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "hubplay_iptv_transmux_decode_mode_total",
+				Help: "Decode mode chosen for each spawned transmux session (direct, reencode).",
+			},
+			[]string{"mode"},
+		),
+
+		IPTVTransmuxReencodePromo: prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Name: "hubplay_iptv_transmux_reencode_promotions_total",
+				Help: "Channels auto-promoted from `-c copy` to re-encode after a codec-related crash.",
+			},
+		),
+
 		AuthKeyRotations: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "hubplay_auth_key_rotations_total",
@@ -119,6 +146,9 @@ func NewMetrics(version string) (*Metrics, error) {
 		m.HTTPErrors,
 		m.StreamActiveSessions,
 		m.StreamTranscodeStarts,
+		m.IPTVTransmuxStarts,
+		m.IPTVTransmuxDecodeMode,
+		m.IPTVTransmuxReencodePromo,
 		m.AuthKeyRotations,
 		// Also surface process + Go runtime metrics — free and universally
 		// useful (goroutines, gc pauses, fds).

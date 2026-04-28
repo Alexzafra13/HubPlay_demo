@@ -52,14 +52,17 @@ package iptv
 //    higher-level circuit breaker (proxy.go) take over.
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -79,6 +82,77 @@ var ErrSessionNotFound = errors.New("iptv-transmux: no session")
 // any segment. Usually means the upstream is dead or the codec is
 // not transmux-compatible (would need re-encode).
 var ErrTransmuxFailed = errors.New("iptv-transmux: session failed before ready")
+
+// ChannelGate is the per-channel circuit-breaker contract shared by
+// the stream proxy and the transmux session manager. Both planes
+// punch the same gate so a series of failures on either path triggers
+// the cooldown for all subsequent attempts on either path.
+//
+// Implementations must be goroutine-safe and cheap to call; Allow is
+// invoked on every viewer attempt and Record* on every outcome. The
+// concrete implementation lives in circuit_breaker.go (channelBreaker);
+// the interface is exposed here so transmux can take it without
+// importing the proxy struct.
+type ChannelGate interface {
+	Allow(channelID string) (bool, time.Duration)
+	RecordSuccess(channelID string)
+	RecordFailure(channelID string)
+}
+
+// defaultTransmuxUserAgent is the UA we send upstream when the caller
+// doesn't override it. Many Xtream Codes panels gate on UA and serve
+// either an HTML error page or a different codec to the default
+// `Lavf/<version>` ffmpeg sends, which manifests downstream as the
+// dreaded "Invalid data found when processing input" / exit status 8.
+// Mirroring the prober's UA keeps both planes consistent.
+const defaultTransmuxUserAgent = "VLC/3.0.20 LibVLC/3.0.20"
+
+// ffmpegStderrTailLines is how many of ffmpeg's stderr lines we keep
+// in memory per session. Sized to capture the cluster of warnings +
+// the actual fatal error line that ffmpeg prints right before exiting
+// (typically <20 lines on a real failure) without growing unbounded
+// for sessions that log warnings continuously over hours.
+const ffmpegStderrTailLines = 64
+
+// decodeMode describes how ffmpeg should turn the upstream MPEG-TS into
+// the HLS sliding window we serve. Most sane Xtream feeds work with
+// `direct` (`-c copy`), which is near-zero CPU. A subset (HEVC main10,
+// AC3 audio in some PMTs, codecs that don't survive the
+// `h264_mp4toannexb` bitstream filter) crash ffmpeg with cryptic
+// "Invalid data" / "codec not currently supported" errors before the
+// first segment, even when the upstream is reachable. For those
+// channels we transparently fall back to `reencode` on the next
+// attempt, swallowing the CPU hit so the user sees video instead of
+// a 502.
+type decodeMode int
+
+const (
+	decodeModeDirect decodeMode = iota
+	decodeModeReencode
+)
+
+func (m decodeMode) String() string {
+	if m == decodeModeReencode {
+		return "reencode"
+	}
+	return "direct"
+}
+
+// decodeModeFallbackTTL is how long a channel stays pinned in
+// `reencode` mode after an auto-promotion. After the window the
+// manager retries `direct` so a recovered upstream (codec change,
+// provider fix, …) reverts to the cheap path automatically.
+const decodeModeFallbackTTL = 1 * time.Hour
+
+// TransmuxMetrics is the optional metrics sink that lets the
+// observability package count starts by outcome and decode mode
+// without pulling Prometheus into this package. Nil-tolerant at all
+// call sites.
+type TransmuxMetrics interface {
+	IncStarts(outcome string)        // ok, crash, gate_denied, busy
+	IncDecodeMode(mode string)       // direct, reencode
+	IncReencodePromotions()          // sticky flips after a copy-mode crash
+}
 
 // segmentNamePattern matches the segment names ffmpeg writes with the
 // `seg-%05d.ts` filename template we pass it. Used to validate
@@ -128,6 +202,38 @@ type TransmuxManagerConfig struct {
 	// ReaperInterval controls how often the idle reaper sweeps. Must
 	// be much smaller than IdleTimeout. Default 5 s.
 	ReaperInterval time.Duration
+
+	// UserAgent is sent to upstream by ffmpeg's HTTP demuxer. Empty
+	// means use defaultTransmuxUserAgent. Override only when a
+	// specific provider needs a different fingerprint.
+	UserAgent string
+
+	// Gate is the optional per-channel circuit breaker. When set, the
+	// manager refuses GetOrStart with a wrapped CircuitOpenError if
+	// Allow returns false, and records success/failure of each spawn
+	// so the breaker state stays in sync with the proxy plane.
+	Gate ChannelGate
+
+	// Reporter is the optional channel-health sink. Mirrors what the
+	// stream proxy does: success when the session reaches first
+	// segment, failure when ffmpeg exits before producing one. Lets a
+	// transmux-only failure show up as "unhealthy" in the admin UI
+	// without the prober having to discover it on its next pass.
+	Reporter ChannelHealthReporter
+
+	// Metrics is the optional Prometheus sink. When set, the manager
+	// counts spawn outcomes and decode-mode picks so dashboards can
+	// show "channel X has been re-encoding for 3 hours" without
+	// scraping the DB. Nil-safe.
+	Metrics TransmuxMetrics
+
+	// EnableReencodeFallback toggles the auto-promotion to reencode
+	// on a copy-mode crash. Default true; settable to false for
+	// deployments running on a CPU-starved box where the user prefers
+	// to see "channel offline" rather than risk a dozen 720p re-encode
+	// pipelines suddenly running. Off-by-default would surprise users
+	// who came in expecting Plex/Jellyfin parity.
+	EnableReencodeFallback *bool
 }
 
 // TransmuxManager owns and orchestrates per-channel ffmpeg sessions.
@@ -139,9 +245,23 @@ type TransmuxManager struct {
 	mu       sync.Mutex
 	sessions map[string]*TransmuxSession // keyed by channel ID
 
+	// decodeMode caches per-channel auto-promotion to reencode after
+	// a copy-mode failure. Read on every spawn, written on every
+	// failure-before-ready. Bounded only by the number of channels
+	// the operator has played × TTL — small enough that we never
+	// bother evicting (entries naturally roll off as TTL expires
+	// during the next attempt).
+	decodeModeMu sync.Mutex
+	decodeMode   map[string]decodeModeEntry
+
 	stop     chan struct{}
 	stopOnce sync.Once
 	stopped  chan struct{}
+}
+
+type decodeModeEntry struct {
+	mode      decodeMode
+	expiresAt time.Time
 }
 
 // TransmuxSession is one active ffmpeg process serving one channel
@@ -159,6 +279,24 @@ type TransmuxSession struct {
 
 	ready     chan struct{} // closed when first segment file is observable
 	readyOnce sync.Once
+
+	// mode is the decodeMode this session was spawned in (`direct` for
+	// `-c copy`, `reencode` for `-c:v libx264 -c:a aac`). Captured at
+	// spawn so the post-exit logic knows whether a crash means
+	// "promote to reencode" or "we already tried reencode, give up".
+	mode decodeMode
+
+	// outcomeOnce ensures the breaker / reporter see exactly one
+	// success XOR failure per spawn attempt. Without it, a session
+	// that produces a segment then crashes minutes later would record
+	// success then failure, double-counting.
+	outcomeOnce sync.Once
+
+	// stderrTail is the bounded ring of recent ffmpeg stderr lines.
+	// Drained on exit so the operator log includes the actual reason
+	// ffmpeg died ("Connection refused", "401 Unauthorized", …) and
+	// not just "exit status 8".
+	stderrTail *stderrRing
 
 	// lastTouchUnixNano is read by the reaper without holding the
 	// manager lock. Stored as int64 so atomic reads/writes are cheap
@@ -196,16 +334,77 @@ func NewTransmuxManager(cfg TransmuxManagerConfig, logger *slog.Logger) *Transmu
 		// can rely on this fallback.
 		cfg.CacheDir = filepath.Join(os.TempDir(), "hubplay-iptv-hls")
 	}
+	if cfg.UserAgent == "" {
+		cfg.UserAgent = defaultTransmuxUserAgent
+	}
 
 	m := &TransmuxManager{
-		cfg:      cfg,
-		logger:   logger.With("module", "iptv-transmux"),
-		sessions: make(map[string]*TransmuxSession),
-		stop:     make(chan struct{}),
-		stopped:  make(chan struct{}),
+		cfg:        cfg,
+		logger:     logger.With("module", "iptv-transmux"),
+		sessions:   make(map[string]*TransmuxSession),
+		decodeMode: make(map[string]decodeModeEntry),
+		stop:       make(chan struct{}),
+		stopped:    make(chan struct{}),
 	}
 	go m.reapLoop()
 	return m
+}
+
+// reencodeFallbackEnabled returns whether the manager should auto-promote
+// to reencode after a copy-mode crash. Defaults to true so the feature
+// works out of the box; callers that want to opt out set
+// EnableReencodeFallback to a *bool pointing at false.
+func (m *TransmuxManager) reencodeFallbackEnabled() bool {
+	if m.cfg.EnableReencodeFallback == nil {
+		return true
+	}
+	return *m.cfg.EnableReencodeFallback
+}
+
+// pickDecodeMode returns the cached fallback for a channel, defaulting
+// to direct. Expired entries are silently evicted on read so the map
+// stays small without a sweeper goroutine.
+func (m *TransmuxManager) pickDecodeMode(channelID string) decodeMode {
+	if !m.reencodeFallbackEnabled() {
+		return decodeModeDirect
+	}
+	m.decodeModeMu.Lock()
+	defer m.decodeModeMu.Unlock()
+	e, ok := m.decodeMode[channelID]
+	if !ok {
+		return decodeModeDirect
+	}
+	if time.Now().After(e.expiresAt) {
+		delete(m.decodeMode, channelID)
+		return decodeModeDirect
+	}
+	return e.mode
+}
+
+// promoteToReencode pins a channel in reencode mode for
+// decodeModeFallbackTTL. Idempotent: re-promotions reset the TTL but
+// don't double-count, and reencode → reencode logs nothing new.
+func (m *TransmuxManager) promoteToReencode(channelID string) {
+	if !m.reencodeFallbackEnabled() {
+		return
+	}
+	m.decodeModeMu.Lock()
+	prev, hadEntry := m.decodeMode[channelID]
+	m.decodeMode[channelID] = decodeModeEntry{
+		mode:      decodeModeReencode,
+		expiresAt: time.Now().Add(decodeModeFallbackTTL),
+	}
+	wasReencode := hadEntry && prev.mode == decodeModeReencode
+	m.decodeModeMu.Unlock()
+	if wasReencode {
+		return
+	}
+	m.logger.Info("transmux promoted to reencode",
+		"channel", channelID,
+		"ttl", decodeModeFallbackTTL)
+	if m.cfg.Metrics != nil {
+		m.cfg.Metrics.IncReencodePromotions()
+	}
 }
 
 // GetOrStart returns the live session for channelID, spawning a new
@@ -213,6 +412,12 @@ func NewTransmuxManager(cfg TransmuxManagerConfig, logger *slog.Logger) *Transmu
 // segment (bounded by ReadyTimeout). Calling this concurrently with
 // the same channel ID coalesces into a single spawn — the second
 // caller waits on the same Ready signal.
+//
+// If a circuit-breaker gate is configured and the channel is in
+// cooldown, returns a *CircuitOpenError without spawning. This is the
+// load-bearing protection against the fork-bomb scenario where a dead
+// upstream causes the player to retry the manifest every second and
+// every retry spawned a fresh ffmpeg process that died in 200 ms.
 func (m *TransmuxManager) GetOrStart(ctx context.Context, channelID, upstreamURL string) (*TransmuxSession, error) {
 	if channelID == "" {
 		return nil, fmt.Errorf("iptv-transmux: empty channel ID")
@@ -224,21 +429,85 @@ func (m *TransmuxManager) GetOrStart(ctx context.Context, channelID, upstreamURL
 	m.mu.Lock()
 	if s, ok := m.sessions[channelID]; ok && !s.stopped.Load() {
 		// Existing session: bump touch + wait on its ready channel.
+		// Skip the gate — an already-running session means we already
+		// proved the upstream is reachable; no point fast-failing live
+		// viewers because of stale failure history.
 		s.lastTouchUnixNano.Store(time.Now().UnixNano())
 		m.mu.Unlock()
 		return m.waitReady(ctx, s)
 	}
+	if m.cfg.Gate != nil {
+		if allowed, retryAfter := m.cfg.Gate.Allow(channelID); !allowed {
+			m.mu.Unlock()
+			if m.cfg.Metrics != nil {
+				m.cfg.Metrics.IncStarts("gate_denied")
+			}
+			return nil, &CircuitOpenError{ChannelID: channelID, RetryAfter: retryAfter}
+		}
+	}
 	if len(m.sessions) >= m.cfg.MaxSessions {
 		m.mu.Unlock()
+		if m.cfg.Metrics != nil {
+			m.cfg.Metrics.IncStarts("busy")
+		}
 		return nil, ErrTooManySessions
 	}
 
 	s, err := m.startLocked(channelID, upstreamURL)
 	m.mu.Unlock()
 	if err != nil {
+		// Failure to even spawn ffmpeg counts against the breaker so
+		// repeated config / fs / fork errors trip the cooldown.
+		m.recordFailure(s, channelID, err)
 		return nil, err
 	}
 	return m.waitReady(ctx, s)
+}
+
+// recordFailure routes a single failure outcome to the gate + reporter
+// at most once per session. Safe to call with a nil session (covers
+// the path where startLocked failed before producing one).
+func (m *TransmuxManager) recordFailure(s *TransmuxSession, channelID string, err error) {
+	once := func() {
+		if m.cfg.Gate != nil {
+			m.cfg.Gate.RecordFailure(channelID)
+		}
+		if m.cfg.Reporter != nil {
+			// Use a fresh, bounded context: the original request ctx is
+			// usually cancelled by the time we get here, and the
+			// reporter's UPDATE shouldn't be tied to a viewer's session.
+			rctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			m.cfg.Reporter.RecordProbeFailure(rctx, channelID, err)
+		}
+	}
+	if s == nil {
+		once()
+		return
+	}
+	s.outcomeOnce.Do(once)
+}
+
+// recordSuccess routes a single success outcome to the gate + reporter.
+// Idempotent on the session via outcomeOnce so repeat ready signals
+// (during long-lived sessions) don't double-tick.
+func (m *TransmuxManager) recordSuccess(s *TransmuxSession, channelID string) {
+	if s == nil {
+		return
+	}
+	s.outcomeOnce.Do(func() {
+		if m.cfg.Gate != nil {
+			m.cfg.Gate.RecordSuccess(channelID)
+		}
+		if m.cfg.Reporter != nil {
+			rctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			m.cfg.Reporter.RecordProbeSuccess(rctx, channelID)
+		}
+		if m.cfg.Metrics != nil {
+			m.cfg.Metrics.IncStarts("ok")
+		}
+	})
 }
 
 // startLocked must be called with m.mu held. It spawns ffmpeg, wires
@@ -256,16 +525,31 @@ func (m *TransmuxManager) startLocked(channelID, upstreamURL string) (*TransmuxS
 		m.logger.Warn("clear work dir", "channel", channelID, "error", err)
 	}
 
+	mode := m.pickDecodeMode(channelID)
 	ctx, cancel := context.WithCancel(context.Background())
-	args := buildTransmuxFFmpegArgs(upstreamURL, workDir)
+	args := buildTransmuxFFmpegArgsForMode(upstreamURL, workDir, m.cfg.UserAgent, mode)
 	cmd := exec.CommandContext(ctx, m.cfg.FFmpegPath, args...)
 	cmd.Dir = workDir
+	if m.cfg.Metrics != nil {
+		m.cfg.Metrics.IncDecodeMode(mode.String())
+	}
 	// Detach from parent terminal — we never want ffmpeg to read
 	// stdin or attach to a controlling TTY (it does both by default
 	// in some builds, which can wedge a server with no TTY).
 	cmd.Stdin = nil
-	// stderr captured by the kernel via inherited file descriptor;
-	// ffmpeg is configured `-loglevel warning` so volume is bounded.
+
+	// Capture stderr through a pipe so we can both ring-buffer the
+	// last N lines (for the exit log) and tee them back to the
+	// container log at debug volume. Without this, "exit status 8"
+	// is opaque — operators have to docker exec ffmpeg by hand to
+	// reproduce. The ring is intentionally small (~64 lines): ffmpeg's
+	// fatal message is always within the last few lines before exit.
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		cancel()
+		_ = os.RemoveAll(workDir)
+		return nil, fmt.Errorf("iptv-transmux: stderr pipe: %w", err)
+	}
 
 	session := &TransmuxSession{
 		ChannelID:   channelID,
@@ -276,14 +560,22 @@ func (m *TransmuxManager) startLocked(channelID, upstreamURL string) (*TransmuxS
 		cancel:      cancel,
 		done:        make(chan struct{}),
 		ready:       make(chan struct{}),
+		stderrTail:  newStderrRing(ffmpegStderrTailLines),
+		mode:        mode,
 	}
 	session.lastTouchUnixNano.Store(time.Now().UnixNano())
 
 	if err := cmd.Start(); err != nil {
 		cancel()
+		_ = stderrPipe.Close()
 		_ = os.RemoveAll(workDir)
 		return nil, fmt.Errorf("iptv-transmux: start ffmpeg: %w", err)
 	}
+
+	// Drain stderr in a goroutine. The reader exits when the pipe is
+	// closed (which happens automatically when ffmpeg exits), so we
+	// don't need explicit teardown.
+	go session.stderrTail.consume(stderrPipe)
 
 	m.sessions[channelID] = session
 	m.logger.Info("transmux session started",
@@ -303,13 +595,50 @@ func (m *TransmuxManager) startLocked(channelID, upstreamURL string) (*TransmuxS
 }
 
 // processWatcher waits for ffmpeg to exit, then evicts the session.
+//
+// Outcome routing: if the session never produced a segment, the spawn
+// counts as a failure for the breaker + health reporter. If it did,
+// the success was already recorded by readyWatcher and we only log.
+// outcomeOnce on the session ensures we don't double-record either way.
 func (m *TransmuxManager) processWatcher(s *TransmuxSession) {
 	defer close(s.done)
 	err := s.cmd.Wait()
-	if err != nil {
+	stderrTail := s.stderrTail.String()
+	wasReady := isReady(s)
+	switch {
+	case err != nil && !wasReady:
+		// Spawn never reached first segment. This is the case the
+		// breaker exists for — repeat occurrences trip the cooldown.
+		m.logger.Info("transmux ffmpeg exited before first segment",
+			"channel", s.ChannelID,
+			"mode", s.mode.String(),
+			"error", err,
+			"ffmpeg_stderr_tail", stderrTail)
+		m.recordFailure(s, s.ChannelID, fmt.Errorf("ffmpeg exit before ready: %w (stderr: %s)", err, stderrTail))
+		if m.cfg.Metrics != nil {
+			m.cfg.Metrics.IncStarts("crash")
+		}
+		// If the crash happened in direct (-c copy) mode AND the
+		// stderr looks codec-related (so we believe the upstream is
+		// reachable but ffmpeg can't repackage it), pin the channel
+		// in reencode mode so the next attempt transparently
+		// transcodes. We deliberately don't promote on every crash:
+		// a TCP-level "Connection refused" should NOT cause us to
+		// burn CPU on the next retry — for that the breaker is the
+		// right tool, not reencode.
+		if s.mode == decodeModeDirect && looksLikeCodecError(stderrTail) {
+			m.promoteToReencode(s.ChannelID)
+		}
+	case err != nil:
+		// Late crash after the session served at least one segment.
+		// The first-segment success already counted; treat the late
+		// exit as informational so a single mid-stream blip doesn't
+		// reopen the breaker against a working channel.
 		m.logger.Info("transmux ffmpeg exited",
-			"channel", s.ChannelID, "error", err)
-	} else {
+			"channel", s.ChannelID,
+			"error", err,
+			"ffmpeg_stderr_tail", stderrTail)
+	default:
 		m.logger.Info("transmux ffmpeg exited cleanly", "channel", s.ChannelID)
 	}
 	m.evict(s)
@@ -341,6 +670,7 @@ func (m *TransmuxManager) readyWatcher(s *TransmuxSession) {
 		case <-ticker.C:
 			if hasSegment(s.WorkDir) {
 				s.readyOnce.Do(func() { close(s.ready) })
+				m.recordSuccess(s, s.ChannelID)
 				return
 			}
 		}
@@ -569,56 +899,146 @@ func clearWorkDir(dir string) error {
 	return nil
 }
 
-// buildTransmuxFFmpegArgs constructs the argv for the live
-// MPEG-TS → HLS transmux pipeline. `-c copy` is the load-bearing
-// choice: we never re-encode, so CPU usage is dominated by mux/demux
-// and stays trivially low even at 1080p.
+// stderrRing is a goroutine-safe FIFO of the last N stderr lines from
+// ffmpeg. We use it instead of a full buffer because a session that
+// runs for hours produces tens of thousands of warning lines and the
+// only one operators ever care about is the fatal one right before
+// exit. Newline-delimited; binary garbage is silently truncated.
+type stderrRing struct {
+	mu    sync.Mutex
+	lines []string
+	max   int
+}
+
+func newStderrRing(max int) *stderrRing {
+	if max <= 0 {
+		max = 16
+	}
+	return &stderrRing{max: max, lines: make([]string, 0, max)}
+}
+
+// consume reads from r line-by-line until EOF, keeping the last `max`
+// lines. Lines longer than 4 KiB are truncated to keep ffmpeg's
+// occasional megabyte-long debug spew from blowing up RAM. Binary on
+// stderr (rare; ffmpeg only emits it with -loglevel debug) is best-
+// effort decoded as UTF-8 bytes; bufio.Scanner will return whatever
+// bytes precede the next \n.
+func (r *stderrRing) consume(rd io.Reader) {
+	scanner := bufio.NewScanner(rd)
+	// 4 KiB buffer per line covers every ffmpeg warning we've ever
+	// seen in production; the ring will rotate before they'd matter.
+	scanner.Buffer(make([]byte, 4096), 4096)
+	for scanner.Scan() {
+		r.push(scanner.Text())
+	}
+	// Scanner errors (e.g. closed pipe on shutdown) are intentionally
+	// ignored — losing the last line of a torn-down session is fine.
+}
+
+func (r *stderrRing) push(line string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.lines) >= r.max {
+		// Drop the oldest line (FIFO). Slice trick: re-use the backing
+		// array by shifting in place rather than allocating.
+		copy(r.lines, r.lines[1:])
+		r.lines = r.lines[:len(r.lines)-1]
+	}
+	r.lines = append(r.lines, line)
+}
+
+// String returns the accumulated tail joined by " | ". Empty when the
+// session has not produced any stderr (ffmpeg is silent at -loglevel
+// warning unless something goes wrong).
+func (r *stderrRing) String() string {
+	if r == nil {
+		return ""
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.lines) == 0 {
+		return ""
+	}
+	return strings.Join(r.lines, " | ")
+}
+
+// codecErrorPattern matches the stderr fragments ffmpeg emits when a
+// `-c copy` pipeline can't repackage the upstream — typically a codec
+// the H264 bitstream filter rejects, an audio profile that won't fit
+// the destination container, or a missing PMT entry. Matched on the
+// captured stderr tail so we promote to reencode mode only when the
+// upstream is reachable enough to negotiate codecs.
 //
-// Reconnection flags are set so a flaky upstream (Xtream provider
-// blipping for a few seconds) recovers without ffmpeg exiting; the
-// session manager only re-spawns on a hard exit.
+// Patterns are kept conservative: we'd rather miss a few promotion
+// opportunities than burn CPU re-encoding a TCP-refused dead host.
+// The breaker handles the latter cleanly already.
+var codecErrorPattern = regexp.MustCompile(
+	`(?i)(invalid data found|could not find codec parameters|h264_mp4toannexb|hevc.*not.*supported|non-monotonic dts.*aborting|stream specifier.*matches no streams|codec not currently supported|" hevc"| ac3 |eac3|hevc_mp4toannexb|invalid nal unit size)`,
+)
+
+// looksLikeCodecError reports whether the captured stderr tail
+// resembles a codec-incompatibility crash (vs. a network / auth
+// problem). Empty tail returns false — we never promote on no
+// evidence.
+func looksLikeCodecError(stderrTail string) bool {
+	if stderrTail == "" {
+		return false
+	}
+	return codecErrorPattern.MatchString(stderrTail)
+}
+
+// buildTransmuxFFmpegArgs constructs the argv for the default direct
+// (`-c copy`) pipeline. Thin wrapper around the mode-aware variant so
+// callers / tests that only care about the fast path don't thread an
+// extra parameter.
+func buildTransmuxFFmpegArgs(upstreamURL, workDir, userAgent string) []string {
+	return buildTransmuxFFmpegArgsForMode(upstreamURL, workDir, userAgent, decodeModeDirect)
+}
+
+// buildTransmuxFFmpegArgsForMode dispatches to the mode-specific argv
+// builder. `direct` is the cheap path (`-c copy`, near-zero CPU);
+// `reencode` is the codec-rescue path that turns whatever the upstream
+// sends into H.264 + AAC at the lowest CPU preset.
 //
-// Buffering choices (tuned against real Xtream traffic where the
-// provider delivers MPEG-TS in uneven bursts):
-//   - `-rtbufsize 50M` lets ffmpeg absorb upstream jitter instead of
-//     dropping packets when input arrives faster than it can mux
-//     out. Cost: ~50 MB RAM per active session.
-//   - `-max_delay 5000000` (5 s) gives the demuxer slack for
-//     reordered packets — alternative is "non-monotonic DTS" warnings
-//     and occasional segment dropouts on noisy providers.
+// Common flags (input shaping, reconnection, HLS window) live in
+// commonTransmuxArgs / hlsOutputArgs so the two modes diverge only on
+// the codec section, which is the actually-different decision.
+func buildTransmuxFFmpegArgsForMode(upstreamURL, workDir, userAgent string, mode decodeMode) []string {
+	if mode == decodeModeReencode {
+		return buildReencodeArgs(upstreamURL, workDir, userAgent)
+	}
+	return buildDirectArgs(upstreamURL, workDir, userAgent)
+}
+
+// commonTransmuxArgs returns the input-side ffmpeg flags shared by
+// both decode modes (input URL, reconnection, buffering, UA).
 //
-// HLS window choices (tuned for live, smooth playback over Xtream):
-//   - `hls_time 2` — smaller segments halve buffer-underrun recovery
-//     time and reduce live latency.
-//   - `hls_list_size 20` — 40 s window of segments visible to the
-//     player. Sized to absorb a real-world 10-second client stall
-//     (background-tab throttling, transient network blip) without
-//     the player falling out of the manifest window. Apple's HLS
-//     spec recommends list_size ≥ 6 × target_duration; we land at
-//     20× because operator latency tolerance for live IPTV is high.
-//   - `hls_delete_threshold 5` — keep 5 extra segments on disk past
-//     the playlist tail. A client whose manifest parse cycle is
-//     slightly behind can still fetch the segment it asked for
-//     instead of getting 404. Without this flag `delete_segments`
-//     deletes immediately on rotation, which races slow clients.
+// Reconnection: `-reconnect_at_eof 1` + `-reconnect_streamed 1` make
+// a flaky upstream recover without ffmpeg exiting; the session manager
+// only re-spawns on a hard exit.
 //
-// `+temp_file` writes each segment to `.tmp` first and atomically
-// renames into place when ffmpeg is done. Without it, Go's
-// `http.ServeFile` can serve a partially-written `.ts` mid-write,
-// triggering `bufferStalledError` in hls.js — which then compounds
-// into a fall-behind. Zero downside: rename is atomic on every
-// filesystem we run on.
+// Buffering: `-rtbufsize 50M` absorbs upstream jitter (~50 MB RAM per
+// active session) so we don't drop packets when input arrives faster
+// than the muxer can drain. `-max_delay 5000000` (5 s) gives the
+// demuxer slack for reordered packets — without it, noisy providers
+// produce "non-monotonic DTS" warnings and segment dropouts.
 //
-// `omit_endlist` keeps the manifest live (no #EXT-X-ENDLIST) so
-// hls.js treats it as a sliding window. `delete_segments` keeps disk
-// usage bounded. `independent_segments` is the right hint for
-// sliding-window live HLS.
-func buildTransmuxFFmpegArgs(upstreamURL, workDir string) []string {
+// `-user_agent` matters more than it looks. Many Xtream Codes panels
+// gate on UA: with the default `Lavf/<version>` ffmpeg sends they
+// return an HTML error page (decoded as "Invalid data" → exit 8) or
+// a codec profile that doesn't survive `-c copy`. Mirroring the
+// prober's `VLC/3.0.20` UA is the same workaround every IPTV player
+// ships.
+func commonTransmuxArgs(upstreamURL, workDir, userAgent string) []string {
+	if userAgent == "" {
+		userAgent = defaultTransmuxUserAgent
+	}
 	return []string{
 		"-hide_banner",
 		"-loglevel", "warning",
 		"-nostdin",
 		"-fflags", "+genpts+discardcorrupt",
+		"-user_agent", userAgent,
 		"-rtbufsize", "50M",
 		"-max_delay", "5000000",
 		"-reconnect", "1",
@@ -627,10 +1047,28 @@ func buildTransmuxFFmpegArgs(upstreamURL, workDir string) []string {
 		"-reconnect_delay_max", "5",
 		"-rw_timeout", "10000000", // 10 s I/O timeout in microseconds
 		"-i", upstreamURL,
-		"-map", "0:v:0",
-		"-map", "0:a:0?",
-		"-c", "copy",
-		"-bsf:v", "h264_mp4toannexb",
+	}
+}
+
+// hlsOutputArgs returns the ffmpeg flags that select the HLS muxer +
+// sliding-window settings, identical for both decode modes.
+//
+// HLS window choices (tuned for live Xtream playback):
+//   - `hls_time 2` — short segments halve buffer-underrun recovery
+//     time and reduce live latency.
+//   - `hls_list_size 20` — 40 s manifest window absorbs the
+//     ~10 s background-tab stalls Chrome / Firefox produce without
+//     the player falling out of range.
+//   - `hls_delete_threshold 5` — keep 5 extra segments past the tail
+//     so a slow client whose manifest parse cycle is behind can still
+//     fetch what it asked for instead of getting 404.
+//   - `+temp_file` flag writes each segment to `.tmp` first and
+//     atomically renames into place. Without it, http.ServeFile can
+//     serve a partially-written `.ts`, triggering bufferStalledError.
+//   - `omit_endlist` keeps the manifest live (no EXT-X-ENDLIST).
+//     `delete_segments` keeps disk usage bounded.
+func hlsOutputArgs(workDir string) []string {
+	return []string{
 		"-f", "hls",
 		"-hls_time", "2",
 		"-hls_list_size", "20",
@@ -641,6 +1079,50 @@ func buildTransmuxFFmpegArgs(upstreamURL, workDir string) []string {
 		"-hls_allow_cache", "0",
 		filepath.Join(workDir, "index.m3u8"),
 	}
+}
+
+func buildDirectArgs(upstreamURL, workDir, userAgent string) []string {
+	args := commonTransmuxArgs(upstreamURL, workDir, userAgent)
+	args = append(args,
+		"-map", "0:v:0",
+		"-map", "0:a:0?",
+		"-c", "copy",
+		"-bsf:v", "h264_mp4toannexb",
+	)
+	return append(args, hlsOutputArgs(workDir)...)
+}
+
+// buildReencodeArgs is the codec-rescue path for upstreams whose
+// codec / container combination doesn't survive `-c copy`. We still
+// pass through audio when it's already AAC (cheap) and only fall
+// back to libx264 video re-encode (the part that actually costs CPU).
+// The preset is veryfast / tune zerolatency, which is the standard
+// Jellyfin / Threadfin trade-off: ~5-15% of one core for 1080p H.264
+// → H.264 transcode, more for HEVC → H.264. Sufficient for one
+// concurrent viewer on a small VPS.
+func buildReencodeArgs(upstreamURL, workDir, userAgent string) []string {
+	args := commonTransmuxArgs(upstreamURL, workDir, userAgent)
+	args = append(args,
+		"-map", "0:v:0",
+		"-map", "0:a:0?",
+		"-c:v", "libx264",
+		"-preset", "veryfast",
+		"-tune", "zerolatency",
+		"-pix_fmt", "yuv420p",
+		"-profile:v", "main",
+		"-level", "4.0",
+		"-x264-params", "keyint=48:min-keyint=48:scenecut=0",
+		"-g", "48",
+		"-sc_threshold", "0",
+		// Audio: re-encode to AAC stereo. Most Xtream feeds carry
+		// AAC LC already which would survive `-c:a copy`, but mixing
+		// copy + transcode video produces a/v desync for a few seconds
+		// at startup; AAC re-encode is cheap (~1% CPU) and avoids it.
+		"-c:a", "aac",
+		"-ac", "2",
+		"-b:a", "128k",
+	)
+	return append(args, hlsOutputArgs(workDir)...)
 }
 
 // ManifestPath returns the absolute path to the live HLS manifest

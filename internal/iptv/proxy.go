@@ -146,6 +146,22 @@ func (p *StreamProxy) BreakerState(channelID string) (string, time.Duration) {
 	return p.breaker.State(channelID)
 }
 
+// Breaker returns the per-channel circuit breaker as a ChannelGate so
+// callers in the same wiring (notably the TransmuxManager) can punch
+// the same gate this proxy uses. Returning the interface (not the
+// unexported *channelBreaker) keeps the cross-package contract clean
+// and lets main.go wire one breaker instance into both planes:
+// failures recorded by the transmux session manager visibly close the
+// breaker for subsequent proxy attempts on the same channel, and vice
+// versa, so a dead upstream stops getting hammered from either entry
+// point.
+func (p *StreamProxy) Breaker() ChannelGate {
+	if p.breaker == nil {
+		return nil
+	}
+	return p.breaker
+}
+
 // reportOutcome records a proxy attempt against the channel's health.
 // Client-initiated cancellations are filtered out: if the user hit
 // stop / closed the tab, the upstream wasn't necessarily broken, and
