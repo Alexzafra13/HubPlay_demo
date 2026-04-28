@@ -286,6 +286,14 @@ func (s *Service) GetItemChildren(ctx context.Context, id string) ([]*db.Item, e
 	return s.items.GetChildren(ctx, id)
 }
 
+// GetItemChildCounts is a thin pass-through to the items repo. Lives
+// on the service layer purely so the handler depends on the
+// LibraryService interface (testable via the existing mock) instead
+// of reaching into *db.ItemRepository directly.
+func (s *Service) GetItemChildCounts(ctx context.Context, parentIDs []string) (map[string]int, error) {
+	return s.items.ChildCountsByParents(ctx, parentIDs)
+}
+
 func (s *Service) GetItemStreams(ctx context.Context, itemID string) ([]*db.MediaStream, error) {
 	return s.streams.ListByItem(ctx, itemID)
 }

@@ -15,6 +15,7 @@ services:
       - ./cache:/cache
       # Media local para pruebas
       - ./peliculas:/media/peliculas:ro
+      - ./series:/media/series:ro
     environment:
       - TZ=Europe/Madrid
       - HUBPLAY_LOGGING_LEVEL=debug

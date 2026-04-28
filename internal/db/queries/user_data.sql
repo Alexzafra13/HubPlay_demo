@@ -67,9 +67,13 @@ DELETE FROM user_data WHERE user_id = ? AND item_id = ?;
 -- are kept (we can't reason about progress without it).
 SELECT ud.item_id, ud.position_ticks, ud.last_played_at,
        i.title, i.type, i.duration_ticks, COALESCE(i.parent_id, '') AS parent_id,
-       COALESCE(i.container, '') AS container
+       COALESCE(i.container, '') AS container,
+       COALESCE(i.season_number, 0) AS season_number,
+       COALESCE(i.episode_number, 0) AS episode_number,
+       COALESCE(season.parent_id, '') AS series_id
 FROM user_data ud
 JOIN items i ON i.id = ud.item_id
+LEFT JOIN items season ON season.id = i.parent_id
 WHERE ud.user_id = ? AND ud.completed = 0 AND ud.position_ticks > 0
   AND i.is_available = 1
   AND NOT (

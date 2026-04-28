@@ -25,8 +25,8 @@ function formatDuration(ticks: number | null): string | null {
 
 const EpisodeCard: FC<EpisodeCardProps> = ({ item, progress, onClick }) => {
   const episodeCode = formatEpisodeCode(item.season_number, item.episode_number);
-  const duration = formatDuration(item.runtime_ticks);
-  const href = `/episodes/${item.id}`;
+  const duration = formatDuration(item.duration_ticks);
+  const href = `/items/${item.id}`;
 
   return (
     <Link

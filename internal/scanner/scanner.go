@@ -49,6 +49,8 @@ type providerFetcher interface {
 	SearchMetadata(ctx context.Context, query provider.SearchQuery) ([]provider.SearchResult, error)
 	FetchMetadata(ctx context.Context, externalID string, itemType provider.ItemType) (*provider.MetadataResult, error)
 	FetchImages(ctx context.Context, ids map[string]string, itemType provider.ItemType) ([]provider.ImageResult, error)
+	FetchEpisodeMetadata(ctx context.Context, showExternalID string, seasonNumber, episodeNumber int) (*provider.EpisodeMetadataResult, error)
+	FetchSeasonMetadata(ctx context.Context, showExternalID string, seasonNumber int) (*provider.SeasonMetadataResult, error)
 }
 
 // Scanner walks library paths and creates/updates items in the database.
@@ -136,6 +138,13 @@ func (s *Scanner) ScanLibrary(ctx context.Context, lib *db.Library) (*ScanResult
 	// for each episode it walks.
 	existingPaths := make(map[string]bool)
 	cache := newShowCache()
+	// Collect existing season rows here so we can run a self-healing
+	// enrichment pass *after* iteration completes — episodes are
+	// enriched lazily via processFile→enrichIfMissing, but seasons are
+	// aggregate rows with no file path, so processFile never visits
+	// them. Without this sweep a season row created on a previous
+	// (TMDb-less) scan would stay poster-less forever.
+	var existingSeasons []*db.Item
 	if err := s.iterateLibraryItems(ctx, lib.ID, func(item *db.Item) {
 		if item.Path != "" {
 			existingPaths[item.Path] = true
@@ -146,6 +155,11 @@ func (s *Scanner) ScanLibrary(ctx context.Context, lib *db.Library) (*ScanResult
 		case "season":
 			if item.ParentID != "" && item.SeasonNumber != nil {
 				cache.rememberSeason(item.ParentID, *item.SeasonNumber, item.ID)
+				// Snapshot — sweep runs below, after the walker has
+				// had a chance to enrich the parent series (which is
+				// what holds the tmdb id we need).
+				copy := *item
+				existingSeasons = append(existingSeasons, &copy)
 			}
 		}
 	}); err != nil {
@@ -159,6 +173,15 @@ func (s *Scanner) ScanLibrary(ctx context.Context, lib *db.Library) (*ScanResult
 			s.logger.Error("error walking path", "path", libPath, "error", err)
 			result.Errors++
 		}
+	}
+
+	// Self-heal seasons that pre-existed without metadata. enrichIfMissing
+	// is a no-op when the row already has images, so this re-pass is cheap
+	// for fully-enriched libraries. Critical for users who scanned without
+	// TMDb configured or before the season-enrichment code shipped — the
+	// SeasonGrid card needs the poster/title/rating that this populates.
+	for _, season := range existingSeasons {
+		s.enrichIfMissing(ctx, season)
 	}
 
 	// Mark missing files as unavailable
@@ -297,15 +320,43 @@ func (s *Scanner) walkPath(ctx context.Context, lib *db.Library, root string, se
 
 // RefreshMetadata re-fetches metadata and images for all items in a library.
 // It deletes existing images/metadata and re-enriches from providers.
+//
+// Dispatch by item type matters: enrichMetadata only handles movies and
+// series (TMDb search by title). Episodes need enrichEpisode (TMDb
+// /tv/.../season/N/episode/M, keyed off the parent series' tmdb id);
+// seasons need enrichSeason (TMDb /tv/.../season/N). Without the
+// dispatch, RefreshMetadata wipes episode/season images + overviews
+// and never restores them — the previous behaviour, which is why a
+// "Refrescar metadatos" run left the SeasonDetail page with no stills
+// and no synopses on episode rows.
+//
+// Iteration order: iterateLibraryItems already walks
+// series → season → episode → movie → audio (see scanner.go), which
+// means series/external_ids land first; by the time we hit a season
+// or episode the parent's tmdb id is fresh in the database.
 func (s *Scanner) RefreshMetadata(ctx context.Context, lib *db.Library) error {
 	s.logger.Info("refreshing metadata for library", "library", lib.Name)
 
 	count := 0
 	err := s.iterateLibraryItems(ctx, lib.ID, func(item *db.Item) {
-		// Delete old images and metadata so enrichMetadata re-fetches them
+		// Delete old images and metadata so the enrichment call below
+		// repopulates them. Best-effort — a failed delete still lets
+		// enrichment overwrite via Upsert.
 		_ = s.images.DeleteByItem(ctx, item.ID)
 		_ = s.metadata.Delete(ctx, item.ID)
-		s.enrichMetadata(ctx, item)
+
+		switch item.Type {
+		case "episode":
+			if item.SeasonNumber != nil && item.EpisodeNumber != nil && item.ParentID != "" {
+				s.enrichEpisode(ctx, item, item.ParentID, *item.SeasonNumber, *item.EpisodeNumber)
+			}
+		case "season":
+			if item.SeasonNumber != nil && item.ParentID != "" {
+				s.enrichSeason(ctx, item, item.ParentID, *item.SeasonNumber)
+			}
+		default:
+			s.enrichMetadata(ctx, item)
+		}
 		count++
 	})
 	if err != nil {
@@ -438,17 +489,18 @@ func (s *Scanner) createItem(ctx context.Context, lib *db.Library, libRoot, path
 	})
 
 	// Metadata + image fetching:
-	//   - Episodes inherit visuals from their series — the series-
-	//     level enrichment in `ensureSeriesRow` already pulled the
-	//     show's poster + backdrop + logo. Searching TMDb again
-	//     per-episode with a butchered title ("Breaking.Bad.S01E01")
-	//     never finds a match and just burns rate-limit budget.
-	//     Future iteration: episode-level metadata via TMDb's
-	//     `/tv/{id}/season/{n}/episode/{m}` endpoint, keyed off the
-	//     series' external_ids.
-	//   - Movies + audio go through enrichMetadata as before; for
-	//     them the item title IS the searchable name.
-	if itemType != "episode" {
+	//   - Movies, series and audio go through enrichMetadata —
+	//     for them the item title IS the searchable name.
+	//   - Episodes use a different path: enrichMetadata's TMDb search
+	//     would butcher the title ("Breaking.Bad.S01E01") and never
+	//     match. Instead we look up the parent series' tmdb id and
+	//     query /tv/{id}/season/{n}/episode/{m} directly — clean
+	//     overview, still image and air-date with one call.
+	if itemType == "episode" {
+		if seasonNumber != nil && episodeNumber != nil && parentID != "" {
+			s.enrichEpisode(ctx, item, parentID, *seasonNumber, *episodeNumber)
+		}
+	} else {
 		s.enrichMetadata(ctx, item)
 	}
 
@@ -583,18 +635,30 @@ func parseTitleYear(filename string) (string, int) {
 
 // enrichIfMissing re-runs metadata enrichment for existing items that lack
 // metadata (e.g. because the TMDB API key was not configured during the
-// initial scan).
+// initial scan, or because the parent series wasn't enriched yet at the
+// time the episode was first inserted).
 func (s *Scanner) enrichIfMissing(ctx context.Context, item *db.Item) {
 	if s.providers == nil {
 		return
 	}
-	// Check if this item already has images (poster) — if so, skip
+	// Check if this item already has images (poster/still) — if so, skip
 	imgs, err := s.images.ListByItem(ctx, item.ID)
 	if err == nil && len(imgs) > 0 {
 		return // already enriched
 	}
 	s.logger.Info("re-enriching item missing metadata", "title", item.Title, "id", item.ID)
-	s.enrichMetadata(ctx, item)
+	switch item.Type {
+	case "episode":
+		if item.SeasonNumber != nil && item.EpisodeNumber != nil && item.ParentID != "" {
+			s.enrichEpisode(ctx, item, item.ParentID, *item.SeasonNumber, *item.EpisodeNumber)
+		}
+	case "season":
+		if item.SeasonNumber != nil && item.ParentID != "" {
+			s.enrichSeason(ctx, item, item.ParentID, *item.SeasonNumber)
+		}
+	default:
+		s.enrichMetadata(ctx, item)
+	}
 }
 
 // enrichMetadata searches TMDB for the item and stores metadata + images.
@@ -666,16 +730,20 @@ func (s *Scanner) enrichMetadata(ctx context.Context, item *db.Item) {
 		s.logger.Warn("failed to update item with metadata", "id", item.ID, "error", err)
 	}
 
-	// Store extended metadata
+	// Store extended metadata. Trailer key + site come straight from
+	// the same TMDb call (videos appended) so we don't pay a second
+	// round-trip per item just to get the YouTube id.
 	genresJSON, _ := json.Marshal(meta.Genres)
 	tagsJSON, _ := json.Marshal(meta.Tags)
 	if err := s.metadata.Upsert(ctx, &db.Metadata{
-		ItemID:     item.ID,
-		Overview:   meta.Overview,
-		Tagline:    meta.Tagline,
-		Studio:     meta.Studio,
-		GenresJSON: string(genresJSON),
-		TagsJSON:   string(tagsJSON),
+		ItemID:      item.ID,
+		Overview:    meta.Overview,
+		Tagline:     meta.Tagline,
+		Studio:      meta.Studio,
+		GenresJSON:  string(genresJSON),
+		TagsJSON:    string(tagsJSON),
+		TrailerKey:  meta.TrailerKey,
+		TrailerSite: meta.TrailerSite,
 	}); err != nil {
 		s.logger.Warn("failed to store metadata", "id", item.ID, "error", err)
 	}
@@ -763,16 +831,18 @@ func (s *Scanner) fetchAndStoreImages(ctx context.Context, itemID string, extern
 			providerName = "unknown"
 		}
 		dbImg := &db.Image{
-			ID:        imgID,
-			ItemID:    itemID,
-			Type:      kind,
-			Path:      "/api/v1/images/file/" + imgID,
-			Width:     best.Width,
-			Height:    best.Height,
-			Blurhash:  ing.Blurhash,
-			Provider:  providerName,
-			IsPrimary: true,
-			AddedAt:   time.Now(),
+			ID:                 imgID,
+			ItemID:             itemID,
+			Type:               kind,
+			Path:               "/api/v1/images/file/" + imgID,
+			Width:              best.Width,
+			Height:             best.Height,
+			Blurhash:           ing.Blurhash,
+			Provider:           providerName,
+			IsPrimary:          true,
+			AddedAt:            time.Now(),
+			DominantColor:      ing.DominantColor,
+			DominantColorMuted: ing.DominantColorMuted,
 		}
 		if err := s.images.Create(ctx, dbImg); err != nil {
 			s.logger.Warn("scanner: failed to store image row", "id", itemID, "kind", kind, "error", err)
@@ -785,6 +855,239 @@ func (s *Scanner) fetchAndStoreImages(ctx context.Context, itemID string, extern
 	}
 }
 
+
+// enrichSeason fetches per-season metadata (clean title, overview,
+// premiere date, rating, poster) from the configured provider via the
+// parent series' TMDb id. Same best-effort discipline as enrichEpisode:
+// missing series tmdb id, no provider, or a TMDb 404 leaves the row
+// untouched and the next scan retries via checkAndEnrichSeason.
+//
+// Title overwrite policy: we always replace the placeholder "Season N"
+// with whatever TMDb returns, including back to "Season N" when that's
+// the canonical title — this fixes the user-visible "Season 1 / Season
+// 1" duplicate label in shows where the placeholder slipped through
+// without the TMDb id at first scan.
+func (s *Scanner) enrichSeason(ctx context.Context, item *db.Item, seriesID string, seasonNum int) {
+	if s.providers == nil || s.externalIDs == nil {
+		return
+	}
+	extIDs, err := s.externalIDs.ListByItem(ctx, seriesID)
+	if err != nil {
+		s.logger.Debug("season enrich: series external_ids lookup failed", "series_id", seriesID, "error", err)
+		return
+	}
+	var tmdbID string
+	for _, e := range extIDs {
+		if e.Provider == "tmdb" {
+			tmdbID = e.ExternalID
+			break
+		}
+	}
+	if tmdbID == "" {
+		return
+	}
+
+	meta, err := s.providers.FetchSeasonMetadata(ctx, tmdbID, seasonNum)
+	if err != nil || meta == nil {
+		s.logger.Debug("season enrich: provider returned nothing", "tmdb_id", tmdbID, "season", seasonNum, "error", err)
+		return
+	}
+
+	if meta.Title != "" {
+		item.Title = meta.Title
+		item.SortTitle = strings.ToLower(meta.Title)
+	}
+	if meta.Rating != nil {
+		item.CommunityRating = meta.Rating
+	}
+	if meta.PremiereDate != nil {
+		item.PremiereDate = meta.PremiereDate
+		item.Year = meta.PremiereDate.Year()
+	}
+	item.UpdatedAt = time.Now()
+	if err := s.items.Update(ctx, item); err != nil {
+		s.logger.Warn("update season with metadata", "id", item.ID, "error", err)
+	}
+
+	if meta.Overview != "" {
+		if err := s.metadata.Upsert(ctx, &db.Metadata{
+			ItemID:   item.ID,
+			Overview: meta.Overview,
+		}); err != nil {
+			s.logger.Warn("store season metadata", "id", item.ID, "error", err)
+		}
+	}
+
+	if meta.PosterURL != "" && s.imageDir != "" && s.pathmap != nil {
+		s.fetchAndStoreSeasonPoster(ctx, item.ID, meta.PosterURL)
+	}
+
+	s.logger.Info("enriched season metadata", "title", item.Title, "id", item.ID, "tmdb_show", tmdbID, "season", seasonNum, "episodes_known", meta.EpisodeCount)
+}
+
+// fetchAndStoreSeasonPoster ingests one TMDb season poster URL into the
+// local image store and writes a single primary `primary` (poster) row
+// for the season. Mirrors fetchAndStoreEpisodeStill — same SSRF / size /
+// blurhash pipeline, different `Type` and target item.
+func (s *Scanner) fetchAndStoreSeasonPoster(ctx context.Context, itemID, posterURL string) {
+	dir := filepath.Join(s.imageDir, itemID)
+	ing, err := imaging.IngestRemoteImage(dir, "primary", posterURL, s.logger)
+	if err != nil {
+		s.logger.Warn("scanner: season poster ingest failed", "id", itemID, "error", err)
+		return
+	}
+
+	imgID := uuid.NewString()
+	dbImg := &db.Image{
+		ID:                 imgID,
+		ItemID:             itemID,
+		Type:               "primary",
+		Path:               "/api/v1/images/file/" + imgID,
+		Blurhash:           ing.Blurhash,
+		Provider:           "tmdb",
+		IsPrimary:          true,
+		AddedAt:            time.Now(),
+		DominantColor:      ing.DominantColor,
+		DominantColorMuted: ing.DominantColorMuted,
+	}
+	if err := s.images.Create(ctx, dbImg); err != nil {
+		s.logger.Warn("scanner: failed to store season poster row", "id", itemID, "error", err)
+		_ = os.Remove(ing.LocalPath)
+		return
+	}
+	if err := s.pathmap.Write(imgID, ing.LocalPath); err != nil {
+		s.logger.Warn("scanner: pathmap write failed (season poster)", "id", imgID, "error", err)
+	}
+}
+
+// enrichEpisode fetches per-episode metadata (overview, air date, rating,
+// runtime, still image) from the configured provider via the parent
+// series' TMDb id. Best-effort: missing series tmdb id, missing provider,
+// or a 404 from TMDb leave the row visible without metadata, and the
+// next scan re-tries automatically (enrichIfMissing keys off the absence
+// of any image row, just like the series path).
+//
+// `seasonItemID` is the season row that owns the episode; we climb one
+// link up to the series to read its external_ids. The walker already
+// hands us this id when the show-hierarchy match succeeded.
+func (s *Scanner) enrichEpisode(ctx context.Context, item *db.Item, seasonItemID string, seasonNum, episodeNum int) {
+	if s.providers == nil || s.externalIDs == nil {
+		return
+	}
+	season, err := s.items.GetByID(ctx, seasonItemID)
+	if err != nil || season == nil || season.ParentID == "" {
+		return
+	}
+	seriesID := season.ParentID
+
+	extIDs, err := s.externalIDs.ListByItem(ctx, seriesID)
+	if err != nil {
+		s.logger.Debug("episode enrich: series external_ids lookup failed", "series_id", seriesID, "error", err)
+		return
+	}
+	var tmdbID string
+	for _, e := range extIDs {
+		if e.Provider == "tmdb" {
+			tmdbID = e.ExternalID
+			break
+		}
+	}
+	if tmdbID == "" {
+		// Series wasn't enriched yet (no TMDb match or API key absent
+		// at series-creation time). The next scan will retry once the
+		// series picks up its tmdb id.
+		return
+	}
+
+	meta, err := s.providers.FetchEpisodeMetadata(ctx, tmdbID, seasonNum, episodeNum)
+	if err != nil || meta == nil {
+		s.logger.Debug("episode enrich: provider returned nothing", "tmdb_id", tmdbID, "season", seasonNum, "episode", episodeNum, "error", err)
+		return
+	}
+
+	// Update item fields. Title swap is conditional: TMDb's title is
+	// usually cleaner than the file-derived one ("S01E01" → "Pilot"),
+	// but we don't want to overwrite a name the user might have curated.
+	// The file-derived title only sticks when it isn't a generic
+	// SxxExx code.
+	if meta.Title != "" {
+		item.Title = meta.Title
+		item.SortTitle = strings.ToLower(meta.Title)
+	}
+	if meta.Rating != nil {
+		item.CommunityRating = meta.Rating
+	}
+	if meta.PremiereDate != nil {
+		item.PremiereDate = meta.PremiereDate
+		item.Year = meta.PremiereDate.Year()
+	}
+	// RuntimeMinutes from TMDb is rarely accurate enough to overwrite
+	// the probe-derived DurationTicks (TMDb rounds to whole minutes,
+	// the probe knows the file to the millisecond). We only fill it
+	// when the probe didn't get a duration at all — better than zero.
+	if item.DurationTicks == 0 && meta.RuntimeMinutes > 0 {
+		item.DurationTicks = int64(meta.RuntimeMinutes) * 60 * 10_000_000
+	}
+	item.UpdatedAt = time.Now()
+	if err := s.items.Update(ctx, item); err != nil {
+		s.logger.Warn("update episode with metadata", "id", item.ID, "error", err)
+	}
+
+	if meta.Overview != "" {
+		if err := s.metadata.Upsert(ctx, &db.Metadata{
+			ItemID:   item.ID,
+			Overview: meta.Overview,
+		}); err != nil {
+			s.logger.Warn("store episode metadata", "id", item.ID, "error", err)
+		}
+	}
+
+	// Persist the still as the episode's "backdrop" so the existing
+	// item-detail handler (which keys off type=backdrop for the hero
+	// image) renders it without any client-side knowledge of episode
+	// vs. series visuals. SSRF + size + blurhash all flow through the
+	// same imaging.IngestRemoteImage path the series enrichment uses.
+	if meta.StillURL != "" && s.imageDir != "" && s.pathmap != nil {
+		s.fetchAndStoreEpisodeStill(ctx, item.ID, meta.StillURL)
+	}
+
+	s.logger.Info("enriched episode metadata", "title", item.Title, "id", item.ID, "tmdb_show", tmdbID, "season", seasonNum, "episode", episodeNum)
+}
+
+// fetchAndStoreEpisodeStill ingests one TMDb still URL into the local
+// image store and writes a single primary `backdrop` row for the episode.
+// Single-image counterpart to fetchAndStoreImages — episodes don't have
+// posters or logos on TMDb, so we skip the per-kind selection loop.
+func (s *Scanner) fetchAndStoreEpisodeStill(ctx context.Context, itemID, stillURL string) {
+	dir := filepath.Join(s.imageDir, itemID)
+	ing, err := imaging.IngestRemoteImage(dir, "backdrop", stillURL, s.logger)
+	if err != nil {
+		s.logger.Warn("scanner: episode still ingest failed", "id", itemID, "error", err)
+		return
+	}
+
+	imgID := uuid.NewString()
+	dbImg := &db.Image{
+		ID:                 imgID,
+		ItemID:             itemID,
+		Type:               "backdrop",
+		Path:               "/api/v1/images/file/" + imgID,
+		Blurhash:           ing.Blurhash,
+		Provider:           "tmdb",
+		IsPrimary:          true,
+		AddedAt:            time.Now(),
+		DominantColor:      ing.DominantColor,
+		DominantColorMuted: ing.DominantColorMuted,
+	}
+	if err := s.images.Create(ctx, dbImg); err != nil {
+		s.logger.Warn("scanner: failed to store episode still row", "id", itemID, "error", err)
+		_ = os.Remove(ing.LocalPath)
+		return
+	}
+	if err := s.pathmap.Write(imgID, ing.LocalPath); err != nil {
+		s.logger.Warn("scanner: pathmap write failed (episode still)", "id", imgID, "error", err)
+	}
+}
 
 // itemTypeFromLibrary maps library content types to item types.
 func itemTypeFromLibrary(contentType string) string {

@@ -73,7 +73,7 @@ function makeMediaItem(overrides: Partial<MediaItem> = {}): MediaItem {
     genres: [],
     community_rating: null,
     content_rating: null,
-    runtime_ticks: null,
+    duration_ticks: null,
     premiere_date: null,
     poster_url: null,
     backdrop_url: null,
@@ -168,7 +168,10 @@ describe("ItemDetail", () => {
     apiMock.getItem.mockResolvedValue(makeItemDetail({ id: "ep-1", title: "Pilot" }));
     apiMock.getItemChildren.mockResolvedValue([]);
     renderItemDetail("ep-1");
-    expect(await screen.findByRole("heading", { name: "Pilot" })).toBeInTheDocument();
+    // Episodes render as "S01E01 · Pilot" so the show context lands in the
+    // accessible name; substring-match keeps the assertion focused on the
+    // title without coupling to the SxxExx prefix layout.
+    expect(await screen.findByRole("heading", { name: /Pilot/ })).toBeInTheDocument();
   });
 
   it("reflects user_data.is_favorite in the hero favorite button", async () => {

@@ -5,27 +5,33 @@
 -- NOTE: GetPrimaryURLs uses dynamic IN() and remains raw SQL in the adapter.
 
 -- name: CreateImage :exec
-INSERT INTO images (id, item_id, type, path, width, height, blurhash, provider, is_primary, is_locked, added_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT INTO images (id, item_id, type, path, width, height, blurhash, provider, is_primary, is_locked, added_at, dominant_color, dominant_color_muted)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: GetImageByID :one
 SELECT id, item_id, type, path, COALESCE(width, 0) AS width, COALESCE(height, 0) AS height,
        COALESCE(blurhash, '') AS blurhash, COALESCE(provider, '') AS provider,
-       is_primary, is_locked, added_at
+       is_primary, is_locked, added_at,
+       COALESCE(dominant_color, '') AS dominant_color,
+       COALESCE(dominant_color_muted, '') AS dominant_color_muted
 FROM images
 WHERE id = ?;
 
 -- name: GetPrimaryImage :one
 SELECT id, item_id, type, path, COALESCE(width, 0) AS width, COALESCE(height, 0) AS height,
        COALESCE(blurhash, '') AS blurhash, COALESCE(provider, '') AS provider,
-       is_primary, is_locked, added_at
+       is_primary, is_locked, added_at,
+       COALESCE(dominant_color, '') AS dominant_color,
+       COALESCE(dominant_color_muted, '') AS dominant_color_muted
 FROM images
 WHERE item_id = ? AND type = ? AND is_primary = 1;
 
 -- name: ListImagesByItem :many
 SELECT id, item_id, type, path, COALESCE(width, 0) AS width, COALESCE(height, 0) AS height,
        COALESCE(blurhash, '') AS blurhash, COALESCE(provider, '') AS provider,
-       is_primary, is_locked, added_at
+       is_primary, is_locked, added_at,
+       COALESCE(dominant_color, '') AS dominant_color,
+       COALESCE(dominant_color_muted, '') AS dominant_color_muted
 FROM images
 WHERE item_id = ?
 ORDER BY is_primary DESC, type;

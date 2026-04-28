@@ -188,16 +188,18 @@ func (r *ImageRefresher) downloadAndPersist(ctx context.Context, itemID, imgType
 
 	imgID := uuid.NewString()
 	dbImg := &db.Image{
-		ID:        imgID,
-		ItemID:    itemID,
-		Type:      imgType,
-		Path:      "/api/v1/images/file/" + imgID,
-		Width:     best.Width,
-		Height:    best.Height,
-		Blurhash:  ing.Blurhash,
-		Provider:  "refresh",
-		IsPrimary: true,
-		AddedAt:   time.Now(),
+		ID:                 imgID,
+		ItemID:             itemID,
+		Type:               imgType,
+		Path:               "/api/v1/images/file/" + imgID,
+		Width:              best.Width,
+		Height:             best.Height,
+		Blurhash:           ing.Blurhash,
+		Provider:           "refresh",
+		IsPrimary:          true,
+		AddedAt:            time.Now(),
+		DominantColor:      ing.DominantColor,
+		DominantColorMuted: ing.DominantColorMuted,
 	}
 
 	if err := r.images.Create(ctx, dbImg); err != nil {

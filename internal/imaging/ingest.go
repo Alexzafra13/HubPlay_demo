@@ -34,6 +34,12 @@ type IngestedImage struct {
 	// the same kind from colliding; the full hash is exposed so future
 	// dedup work has a stable key without re-hashing.
 	SHA256 string
+	// Pre-computed dominant + dark-muted colours formatted as CSS
+	// rgb() strings. Empty when extraction failed or the format wasn't
+	// decodable — mirrors the Blurhash field's "" sentinel so callers
+	// don't need a separate present/absent check.
+	DominantColor      string
+	DominantColorMuted string
 }
 
 // IngestRemoteImage fetches `url`, runs it through the same SSRF +
@@ -74,12 +80,15 @@ func IngestRemoteImage(dir, kind, url string, logger *slog.Logger) (*IngestedIma
 		return nil, fmt.Errorf("write file: %w", err)
 	}
 
+	vibrant, muted := ExtractDominantColors(data, logger)
 	return &IngestedImage{
-		LocalPath:   fullPath,
-		Filename:    filename,
-		ContentType: contentType,
-		Blurhash:    ComputeBlurhash(data, logger),
-		SHA256:      hashHex,
+		LocalPath:          fullPath,
+		Filename:           filename,
+		ContentType:        contentType,
+		Blurhash:           ComputeBlurhash(data, logger),
+		SHA256:             hashHex,
+		DominantColor:      vibrant,
+		DominantColorMuted: muted,
 	}, nil
 }
 

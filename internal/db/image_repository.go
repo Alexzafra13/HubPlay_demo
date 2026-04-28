@@ -28,6 +28,12 @@ type Image struct {
 	// before until the admin explicitly locks something.
 	IsLocked bool
 	AddedAt  time.Time
+	// DominantColor / DominantColorMuted are pre-computed CSS rgb()
+	// strings extracted at ingest time. Empty when extraction failed
+	// (non-decodable formats, undecidable palette) — clients fall back
+	// to runtime extraction or a static colour in that case.
+	DominantColor      string
+	DominantColorMuted string
 }
 
 type ImageRepository struct {
@@ -41,17 +47,19 @@ func NewImageRepository(database *sql.DB) *ImageRepository {
 
 func (r *ImageRepository) Create(ctx context.Context, img *Image) error {
 	err := r.q.CreateImage(ctx, sqlc.CreateImageParams{
-		ID:        img.ID,
-		ItemID:    img.ItemID,
-		Type:      img.Type,
-		Path:      img.Path,
-		Width:     nullableInt64(int64(img.Width)),
-		Height:    nullableInt64(int64(img.Height)),
-		Blurhash:  nullableString(img.Blurhash),
-		Provider:  nullableString(img.Provider),
-		IsPrimary: sql.NullBool{Bool: img.IsPrimary, Valid: true},
-		IsLocked:  sql.NullBool{Bool: img.IsLocked, Valid: true},
-		AddedAt:   img.AddedAt,
+		ID:                 img.ID,
+		ItemID:             img.ItemID,
+		Type:               img.Type,
+		Path:               img.Path,
+		Width:              nullableInt64(int64(img.Width)),
+		Height:             nullableInt64(int64(img.Height)),
+		Blurhash:           nullableString(img.Blurhash),
+		Provider:           nullableString(img.Provider),
+		IsPrimary:          sql.NullBool{Bool: img.IsPrimary, Valid: true},
+		IsLocked:           sql.NullBool{Bool: img.IsLocked, Valid: true},
+		AddedAt:            img.AddedAt,
+		DominantColor:      img.DominantColor,
+		DominantColorMuted: img.DominantColorMuted,
 	})
 	if err != nil {
 		return fmt.Errorf("create image: %w", err)
@@ -224,49 +232,55 @@ func (r *ImageRepository) SetPrimary(ctx context.Context, itemID, imgType, image
 
 func imageFromGetRow(r sqlc.GetImageByIDRow) Image {
 	return Image{
-		ID:        r.ID,
-		ItemID:    r.ItemID,
-		Type:      r.Type,
-		Path:      r.Path,
-		Width:     int(r.Width),
-		Height:    int(r.Height),
-		Blurhash:  r.Blurhash,
-		Provider:  r.Provider,
-		IsPrimary: r.IsPrimary.Bool,
-		IsLocked:  r.IsLocked.Bool,
-		AddedAt:   r.AddedAt,
+		ID:                 r.ID,
+		ItemID:             r.ItemID,
+		Type:               r.Type,
+		Path:               r.Path,
+		Width:              int(r.Width),
+		Height:             int(r.Height),
+		Blurhash:           r.Blurhash,
+		Provider:           r.Provider,
+		IsPrimary:          r.IsPrimary.Bool,
+		IsLocked:           r.IsLocked.Bool,
+		AddedAt:            r.AddedAt,
+		DominantColor:      r.DominantColor,
+		DominantColorMuted: r.DominantColorMuted,
 	}
 }
 
 func imageFromPrimaryRow(r sqlc.GetPrimaryImageRow) Image {
 	return Image{
-		ID:        r.ID,
-		ItemID:    r.ItemID,
-		Type:      r.Type,
-		Path:      r.Path,
-		Width:     int(r.Width),
-		Height:    int(r.Height),
-		Blurhash:  r.Blurhash,
-		Provider:  r.Provider,
-		IsPrimary: r.IsPrimary.Bool,
-		IsLocked:  r.IsLocked.Bool,
-		AddedAt:   r.AddedAt,
+		ID:                 r.ID,
+		ItemID:             r.ItemID,
+		Type:               r.Type,
+		Path:               r.Path,
+		Width:              int(r.Width),
+		Height:             int(r.Height),
+		Blurhash:           r.Blurhash,
+		Provider:           r.Provider,
+		IsPrimary:          r.IsPrimary.Bool,
+		IsLocked:           r.IsLocked.Bool,
+		AddedAt:            r.AddedAt,
+		DominantColor:      r.DominantColor,
+		DominantColorMuted: r.DominantColorMuted,
 	}
 }
 
 func imageFromListRow(r sqlc.ListImagesByItemRow) Image {
 	return Image{
-		ID:        r.ID,
-		ItemID:    r.ItemID,
-		Type:      r.Type,
-		Path:      r.Path,
-		Width:     int(r.Width),
-		Height:    int(r.Height),
-		Blurhash:  r.Blurhash,
-		Provider:  r.Provider,
-		IsPrimary: r.IsPrimary.Bool,
-		IsLocked:  r.IsLocked.Bool,
-		AddedAt:   r.AddedAt,
+		ID:                 r.ID,
+		ItemID:             r.ItemID,
+		Type:               r.Type,
+		Path:               r.Path,
+		Width:              int(r.Width),
+		Height:             int(r.Height),
+		Blurhash:           r.Blurhash,
+		Provider:           r.Provider,
+		IsPrimary:          r.IsPrimary.Bool,
+		IsLocked:           r.IsLocked.Bool,
+		AddedAt:            r.AddedAt,
+		DominantColor:      r.DominantColor,
+		DominantColorMuted: r.DominantColorMuted,
 	}
 }
 

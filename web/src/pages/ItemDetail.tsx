@@ -1,23 +1,40 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
-import { useParams } from "react-router";
+import { useParams, useNavigate, Link } from "react-router";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { useItem, useItemChildren, useToggleFavorite, queryKeys } from "@/api/hooks";
 import { api } from "@/api/client";
 import type { MediaItem, PlaybackMethod } from "@/api/types";
 import { Spinner, EmptyState } from "@/components/common";
-import { HeroSection, MediaMeta, EpisodeCard } from "@/components/media";
+import { HeroSection, SeriesHero, MediaMeta, EpisodeCard, EpisodeRow } from "@/components/media";
 import type { HeroMenuItem } from "@/components/media/HeroSection";
 import { VideoPlayer } from "@/components/player";
 import { ImageManager } from "@/components/ImageManager";
 import { useAuthStore } from "@/store/auth";
+import { useResumeTarget } from "@/hooks/useSeriesResumeTarget";
 
 export default function ItemDetail() {
   const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const { data: item, isLoading, isError } = useItem(id ?? "");
   const user = useAuthStore((s) => s.user);
   const isAdmin = user?.role === "admin";
+  const isSeries = item?.type === "series";
+  const isSeason = item?.type === "season";
+  // Both series and season pages render the SeriesHero — the layout
+  // (full-bleed backdrop + poster column) works for both. The
+  // distinguishing scope drives where Play resumes from.
+  const heroScope: "series" | "season" | null =
+    isSeries ? "series" : isSeason ? "season" : null;
+
+  // Resume target — drives the smart Play button label ("Reproducir"
+  // vs "Seguir viendo S01E03") and where the click lands. Inert when
+  // the page isn't a series/season.
+  const resumeTarget = useResumeTarget(
+    heroScope ?? "series",
+    heroScope && id ? id : null,
+  );
 
   const queryClient = useQueryClient();
   const toggleFavoriteMutation = useToggleFavorite();
@@ -129,16 +146,22 @@ export default function ItemDetail() {
     isPlayingRef.current = false;
   }, []);
 
-  const handlePlay = useCallback(async () => {
-    if (!id) return;
+  // handlePlay accepts an optional override targetId so the season
+  // detail page can fire the inline player against ANY of its episodes
+  // (clicking an EpisodeRow), not just the page's own item. Default is
+  // the URL id, which preserves the original "Play this item" semantics
+  // movies and direct-played episodes rely on.
+  const handlePlay = useCallback(async (targetId?: string) => {
+    const playId = targetId ?? id;
+    if (!playId) return;
     setPlayError(null);
 
     try {
-      if (isPlayingRef.current) {
-        await cleanupSession(id);
+      if (isPlayingRef.current && playingItemId) {
+        await cleanupSession(playingItemId);
       }
 
-      const info = await api.getStreamInfo(id);
+      const info = await api.getStreamInfo(playId);
       const rawMethod = (info as Record<string, unknown>).method as string ?? "";
       const methodMap: Record<string, PlaybackMethod> = {
         DirectPlay: "direct_play",
@@ -148,20 +171,20 @@ export default function ItemDetail() {
       const method: PlaybackMethod = methodMap[rawMethod] ?? "transcode";
 
       const masterUrl = method !== "direct_play"
-        ? `/api/v1/stream/${id}/master.m3u8`
+        ? `/api/v1/stream/${playId}/master.m3u8`
         : null;
       const directUrl = method === "direct_play"
-        ? `/api/v1/stream/${id}/direct`
+        ? `/api/v1/stream/${playId}/direct`
         : null;
 
       isPlayingRef.current = true;
-      setPlayingItemId(id);
+      setPlayingItemId(playId);
       setPlayerInfo({ playbackMethod: method, masterPlaylistUrl: masterUrl, directUrl });
       setShowPlayer(true);
     } catch {
       setPlayError(t('itemDetail.playbackError'));
     }
-  }, [id, cleanupSession, t]);
+  }, [id, playingItemId, cleanupSession, t]);
 
   // Next episode lookup. Used both to prefetch its item data when the
   // current episode starts playing (warmer cache for the auto-advance
@@ -299,13 +322,42 @@ export default function ItemDetail() {
         />
       )}
 
-      <HeroSection
-        item={item}
-        onPlay={handlePlay}
-        onToggleFavorite={handleToggleFavorite}
-        isFavorite={isFavorite}
-        menuItems={menuItems}
-      />
+      {heroScope ? (
+        <SeriesHero
+          item={item}
+          resumeMode={resumeTarget.mode}
+          // Hero button stays a clean "Reproducir" regardless of
+          // resume state — Plex / Netflix put the explicit "Sigue
+          // viendo" affordance in its own panel below the hero
+          // (see <ContinueWatchingPanel>) so the primary CTA above
+          // the fold reads consistently. The button still resolves
+          // to the same target the panel would (resume → next-up →
+          // start), it just doesn't shout SXXEYY at the user.
+          resumeLabel={t("common.play")}
+          resumeProgressPercent={null}
+          onPlay={() => {
+            if (!resumeTarget.episode) return;
+            if (heroScope === "season") {
+              handlePlay(resumeTarget.episode.id);
+              return;
+            }
+            // series scope: navigate so the episode's own surface
+            // picks up audio tracks / next-up state.
+            navigate(`/items/${resumeTarget.episode.id}`);
+          }}
+          onToggleFavorite={handleToggleFavorite}
+          isFavorite={isFavorite}
+          menuItems={menuItems}
+        />
+      ) : (
+        <HeroSection
+          item={item}
+          onPlay={handlePlay}
+          onToggleFavorite={handleToggleFavorite}
+          isFavorite={isFavorite}
+          menuItems={menuItems}
+        />
+      )}
 
       {playError && (
         <div className="mx-6 mt-4 rounded-[--radius-md] bg-error/10 px-4 py-3 text-sm text-error sm:mx-10">
@@ -355,8 +407,55 @@ export default function ItemDetail() {
           </section>
         )}
 
+        {/* "Sigue viendo" panel — surfaces the resume-target episode
+            as a one-row Jellyfin-style card with progress bar +
+            synopsis. Lives below the hero (Netflix / Plex pattern)
+            instead of squashing the affordance into the main button.
+            Only renders when the user actually has progress on this
+            entity — cold-start users see "Reproducir" in the hero
+            and the seasons grid right below, no panel noise. */}
+        {heroScope &&
+          resumeTarget.mode === "resume" &&
+          resumeTarget.episode && (
+            <section>
+              <h2 className="mb-3 text-lg font-semibold text-text-primary">
+                {t("itemDetail.continueWatching")}
+              </h2>
+              <EpisodeRow
+                item={resumeTarget.episode}
+                onPlay={(epId) => {
+                  // On the season page we play inline; on the series
+                  // page we navigate so the VideoPlayer's title +
+                  // up-next prefetch use the episode's own context
+                  // instead of the series shell's.
+                  if (heroScope === "season") {
+                    handlePlay(epId);
+                  } else {
+                    navigate(`/items/${epId}`);
+                  }
+                }}
+              />
+            </section>
+          )}
+
         {/* Seasons & Episodes (for series) */}
+        {/* Series view shows the season grid only — episodes live on
+            their own season-detail page. Season view shows the flat
+            episode list directly under the hero. */}
         {item.type === "series" && <SeasonEpisodes seriesId={item.id} />}
+        {item.type === "season" && (
+          <section>
+            <h2 className="mb-4 text-lg font-semibold text-text-primary">
+              {t("itemDetail.episodes")}
+            </h2>
+            {/* Episode rows fire inline play through handlePlay so the
+                user never leaves the season page. The VideoPlayer
+                overlay at the top of this component renders over
+                whatever is selected — same UX as Jellyfin's "play
+                from this row" affordance. */}
+            <SeasonEpisodeList seasonId={item.id} onPlay={handlePlay} />
+          </section>
+        )}
       </div>
 
       {/* Image Manager (admin only) */}
@@ -389,7 +488,7 @@ function SeasonEpisodes({ seriesId }: { seriesId: string }) {
   const episodes = children.filter((c) => c.type === "episode");
 
   if (seasons.length > 0) {
-    return <SeasonTabs seasons={seasons} />;
+    return <SeasonGrid seasons={seasons} />;
   }
 
   return (
@@ -406,49 +505,132 @@ function SeasonEpisodes({ seriesId }: { seriesId: string }) {
   );
 }
 
-function SeasonTabs({ seasons }: { seasons: MediaItem[] }) {
+function SeasonGrid({ seasons }: { seasons: MediaItem[] }) {
   const { t } = useTranslation();
-  const sorted = [...seasons].sort(
-    (a, b) => (a.season_number ?? 0) - (b.season_number ?? 0),
+  const sorted = useMemo(
+    () => [...seasons].sort((a, b) => (a.season_number ?? 0) - (b.season_number ?? 0)),
+    [seasons],
   );
-  const [activeSeason, setActiveSeason] = useState(sorted[0]?.id ?? "");
-  const { data: episodes, isLoading } = useItemChildren(activeSeason);
 
   return (
     <section>
       <h2 className="mb-4 text-lg font-semibold text-text-primary">
-        {t('itemDetail.seasons')}
+        {t("itemDetail.seasons")}
       </h2>
 
-      <div className="mb-6 flex gap-2 overflow-x-auto pb-2">
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4 sm:grid-cols-[repeat(auto-fill,minmax(180px,1fr))]">
         {sorted.map((season) => (
-          <button
-            key={season.id}
-            type="button"
-            onClick={() => setActiveSeason(season.id)}
-            className={[
-              "shrink-0 rounded-[--radius-md] px-4 py-2 text-sm font-medium transition-colors",
-              activeSeason === season.id
-                ? "bg-accent text-white"
-                : "bg-bg-elevated text-text-secondary hover:text-text-primary hover:bg-bg-card",
-            ].join(" ")}
-          >
-            {season.title}
-          </button>
+          <SeasonCard key={season.id} season={season} />
         ))}
       </div>
-
-      {isLoading ? (
-        <div className="flex justify-center py-8">
-          <Spinner size="md" />
-        </div>
-      ) : (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-4">
-          {(episodes ?? []).map((ep) => (
-            <EpisodeCard key={ep.id} item={ep} />
-          ))}
-        </div>
-      )}
     </section>
+  );
+}
+
+interface SeasonCardProps {
+  season: MediaItem;
+}
+
+function SeasonCard({ season }: SeasonCardProps) {
+  const { t } = useTranslation();
+  const year = season.year ?? (season.premiere_date ? new Date(season.premiere_date).getFullYear() : null);
+  const rating = season.community_rating;
+  const epCount = season.episode_count;
+
+  return (
+    <Link
+      to={`/items/${season.id}`}
+      className={[
+        "group flex flex-col gap-2 text-left outline-none rounded-[--radius-lg] transition-transform",
+        "focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg-card",
+      ].join(" ")}
+    >
+      <div
+        className={[
+          "relative aspect-[2/3] overflow-hidden rounded-[--radius-lg] bg-bg-elevated transition-all duration-300",
+          "ring-1 ring-transparent group-hover:ring-border group-hover:shadow-lg",
+        ].join(" ")}
+      >
+        {season.poster_url ? (
+          <img
+            src={season.poster_url}
+            alt={season.title}
+            loading="lazy"
+            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-bg-card to-bg-elevated">
+            <span className="text-2xl font-bold text-text-muted">
+              {season.season_number != null
+                ? `S${String(season.season_number).padStart(2, "0")}`
+                : season.title}
+            </span>
+          </div>
+        )}
+
+        {rating != null && (
+          <div className="absolute top-2 right-2 flex items-center gap-1 rounded-full bg-black/70 px-2 py-1 text-xs font-semibold text-warning backdrop-blur-sm">
+            <svg className="h-3 w-3" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+            </svg>
+            {rating.toFixed(1)}
+          </div>
+        )}
+      </div>
+
+      <div className="flex flex-col gap-0.5 px-0.5">
+        <p className="truncate text-sm font-medium text-text-primary">
+          {season.title}
+        </p>
+        <div className="flex items-center gap-2 text-xs text-text-muted">
+          {year != null && <span>{year}</span>}
+          {epCount != null && (
+            <span>
+              {t("itemDetail.episodeCount", { count: epCount })}
+            </span>
+          )}
+        </div>
+      </div>
+    </Link>
+  );
+}
+
+function SeasonEpisodeList({
+  seasonId,
+  onPlay,
+}: {
+  seasonId: string;
+  onPlay?: (itemId: string) => void;
+}) {
+  const { data: episodes, isLoading } = useItemChildren(seasonId);
+
+  if (isLoading) {
+    return (
+      <div className="flex justify-center py-8">
+        <Spinner size="md" />
+      </div>
+    );
+  }
+
+  // When an onPlay handler is wired (season detail surface) we render
+  // the rich Jellyfin-style EpisodeRow with synopsis + end time +
+  // inline-play. Without it (legacy callers) we fall back to the
+  // compact EpisodeCard which still navigates via Link.
+  if (onPlay) {
+    return (
+      <div className="flex flex-col gap-2">
+        {(episodes ?? []).map((ep) => (
+          <EpisodeRow key={ep.id} item={ep} onPlay={onPlay} />
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-4">
+      {(episodes ?? []).map((ep) => (
+        <EpisodeCard key={ep.id} item={ep} />
+      ))}
+    </div>
   );
 }

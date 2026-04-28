@@ -1,6 +1,244 @@
 # Estado del proyecto
 
-> Snapshot: **2026-04-27** (movies/series review senior — 35 commits + admin IA reorg en `main` + responsive admin móvil) · Rama: `claude/review-movies-series-feature-9npZH` · **tests: backend `-race` 100% verde · frontend 289/289 · tsc -b 0**
+> Snapshot: **2026-04-28** (series detail UX overhaul — episode/season/trailer enrichment + Plex/Netflix-style hero) · Rama: `claude/episode-metadata` (mergeada a `main`) · **tests: backend `-race` 100% verde · frontend 289/289 · tsc -b 0**
+
+---
+
+## 🎬 Sesión 2026-04-27 → 2026-04-28 — series detail UX completo
+
+Trabajo continuo sobre la rama `claude/episode-metadata`. Punto de
+partida: la página de detalle de serie estaba feísima (hero negro,
+year=0, episodios sin still, sin sinopsis) por una decisión heredada
+del scanner que **saltaba enrichment de episodios y temporadas a
+propósito** para no quemar cuota TMDb. Esta sesión arregla esa
+herencia y construye encima un detail page nivel Plex/Netflix.
+
+### Backend (cambios densos)
+
+**Provider layer — capabilities opcionales nuevas**
+- `EpisodeMetadataProvider` interface + `EpisodeMetadataResult` con
+  `Title/Overview/PremiereDate/Rating/RuntimeMinutes/StillURL/GuestStars`.
+- `SeasonMetadataProvider` interface + `SeasonMetadataResult` con
+  `Title/Overview/PremiereDate/Rating/EpisodeCount/PosterURL`.
+- TMDb implementa ambas: `GetEpisodeMetadata` golpea
+  `/tv/{id}/season/{n}/episode/{m}`, `GetSeasonMetadata` golpea
+  `/tv/{id}/season/{n}`. Ambas cacheadas 7 días vía el `httpcache` que
+  ya existía.
+- `Manager.FetchEpisodeMetadata` / `FetchSeasonMetadata` itera
+  proveedores que satisfagan la capability. Sin proveedor → `(nil, nil)`,
+  callers tratan absence como "sin datos".
+
+**Provider layer — trailers**
+- `MetadataResult` extendido con `TrailerKey/TrailerSite`.
+- `tmdb.GetMetadata` ahora pide `append_to_response=credits,external_ids,videos`
+  (mismo round-trip, sin coste extra).
+- `pickTrailer()` rankea: `+100 official, +50 Trailer, +20 Teaser, +10 Clip`.
+  Filtra a YouTube/Vimeo (frontend solo embed los dos).
+
+**Scanner — self-healing total**
+- `enrichEpisode(item, seasonItemID, seasonNum, episodeNum)`: climb
+  episode→season→series, lookup tmdb_id de la serie en `external_ids`,
+  llamar al provider, persistir overview en metadata + actualizar
+  item (title/year/rating/premiere_date), descargar still como
+  `backdrop` primary del episodio.
+- `enrichSeason(item, seriesID, seasonNum)`: lookup tmdb_id, persistir
+  overview + clean title (TMDb friendly name vs "Season N"),
+  descargar poster como `primary` del season.
+- `ensureSeasonRow` ahora llama `enrichSeason` síncrono al crear (vía
+  cache miss) y `checkAndEnrichSeason` al cache hit (mismo patrón
+  one-per-scan que series ya tenía).
+- `enrichIfMissing` extendido: switch por type → `episode`/`season`/
+  default. Auto-healing en re-scans cuando faltan imágenes.
+- **Bug crítico arreglado**: `processFile` solo visita ARCHIVOS;
+  seasons (filas agregadas, sin path) nunca se enriquecían en re-scans.
+  Fix: `ScanLibrary` colecciona seasons existentes en pre-load, hace un
+  sweep `enrichIfMissing(season)` tras el walk.
+- `RefreshMetadata` antes borraba imágenes+overview de TODOS y solo
+  re-enriquecía movies/series → episodios/seasons quedaban vacíos.
+  Ahora dispatcha por type. Iteration order (`series→season→episode`)
+  garantiza que el tmdb id del padre está fresco cuando llegan los hijos.
+- Test: `TestEnrichEpisode_PersistsOverviewAndStill`,
+  `TestEnrichEpisode_NoTMDbIDOnSeries`,
+  `TestEnrichSeason_PersistsMetadataAndPoster`.
+
+**Scanner — colores dominantes pre-computados**
+- Migración `014_image_dominant_colors`: añade `dominant_color` y
+  `dominant_color_muted` a `images` (TEXT NOT NULL DEFAULT '').
+- `imaging.ExtractDominantColors(data, logger) (vibrant, muted string)`
+  — algoritmo propio (~100 líneas, sin nuevas deps): muestreo grid 32×32
+  → buckets 16³ → scoring por saturación×count y oscuridad×count.
+  Devuelve "rgb(r, g, b)" para inyectar en CSS vars directamente.
+- `IngestRemoteImage` ahora popula los campos automáticamente; el
+  upload admin (image.go) y refresh (imagerefresh.go) también.
+- Persistido en row de `images`; expuesto via `imageResponse` en API
+  + atajo `backdrop_colors: { vibrant, muted }` en item-detail
+  (preferencia backdrop, fallback poster).
+
+**Scanner — trailer de TMDb**
+- Migración `015_metadata_trailer`: añade `trailer_key/trailer_site`
+  a `metadata`.
+- `enrichMetadata` persiste `meta.TrailerKey/TrailerSite` en el upsert
+  de metadata.
+- API expone `trailer: { key, site }` en item-detail cuando ambos
+  campos están presentes (par tuple).
+
+**API — handlers y dedupes**
+- `Children` handler:
+  - **Dedupe seasons duplicadas** por `(parent_id, season_number)`:
+    cuando hay > 1, conserva la que tiene más hijos (canonical) vía
+    `db.ItemRepository.ChildCountsByParents` (batch SQL nuevo, una
+    sola query). El huérfano queda en DB pero oculto del SeasonGrid.
+  - Inyecta `backdrop_url`/`poster_url` por niño (batch via
+    `GetPrimaryURLs`) → SeasonGrid + EpisodeRow tienen sus stills
+    desde el primer paint.
+  - Inyecta `episode_count` para seasons (batch via `ChildCountsByParents`).
+  - Inyecta `overview` por niño (batch via `GetMetadataBatch`).
+- `attachSeriesContext` refactorizado: extraído `attachSeriesContextFromSeries`
+  reutilizable; episodios suben dos niveles, seasons un nivel solo.
+  Ambos heredan `series_id/title/poster_url/backdrop_url/logo_url` y
+  `backdrop_colors` cuando el item no tiene los suyos. Genres también
+  se heredan.
+- `itemSummaryResponse` + `itemDetailResponse` omiten `year` cuando es 0
+  (Go zero-value se filtraba como `"year": 0` y la UI renderizaba "0"
+  literal).
+- **Continue-watching enriquecido**: SQL extendido con
+  `season_number`, `episode_number` y `series_id` (vía
+  `LEFT JOIN items season ON season.id = i.parent_id`).
+  `ContinueWatchingItem` y handler response también — el frontend
+  ya puede hacer match por scope.
+
+**LibraryService extension**
+- `GetItemChildCounts(parentIDs) (map[string]int, error)` añadido a
+  la interface + implementado en `library.Service` (thin pass-through
+  a `db.ItemRepository.ChildCountsByParents`).
+
+### Frontend — overhaul completo del detail page
+
+**Hooks nuevos**
+- `useVibrantColors(imageUrl)`: extrae paleta vibrante + dark-muted
+  vía `node-vibrant` (lazy dynamic import, ~12kb en chunk separado).
+  Cacheada por URL en módulo. Solo se activa como **fallback** cuando
+  la imagen no tiene colores pre-computados del backend (rows ingresadas
+  antes de la migración 014).
+- `useResumeTarget(scope, id)`: scope `"series"` o `"season"`. Filtra
+  `useContinueWatching` y `useNextUp` por `series_id` o `parent_id`
+  según scope. Cold-start fallback: para series escoge primera
+  temporada, para season escoge primer episodio. Returns
+  `{ mode: "resume"|"next-up"|"start"|"none", episode, seasonNumber,
+  episodeNumber, progressPercent }`.
+- `useSeriesResumeTarget` mantenido como alias deprecated (back-compat).
+
+**Componentes nuevos**
+- `SeriesHero`: hero full-bleed (`-mx-4 md:-mx-6` + `marginTop:
+  calc(var(--topbar-height) * -1)`) → backdrop llega al borde superior
+  detrás del topbar. TopBar global ya hacía glass-on-scroll
+  (transparent en scrollY=0 desktop, `bg-bg-base/70 backdrop-blur-xl`
+  al scrollear).
+  - Backdrop falls-through: `item.backdrop_url ?? item.series_backdrop_url ?? item.poster_url`.
+  - Color gradient izquierdo via CSS vars `--hero-c1/--hero-c2`
+    alimentadas por `backdrop_colors` (backend) o `useVibrantColors`
+    (fallback).
+  - Layout vertical en columna izquierda: poster centrado
+    (`h-[240px] sm:[280px] lg:[340px]`) + título + meta row (year o
+    fecha completa para episodios) + overview clamped + botones.
+  - **Botón "Reproducir" siempre limpio** (no muta a "Seguir viendo
+    SXXEYY"). El "Seguir viendo" pasa a panel separado debajo.
+  - Reusado para series Y season pages — mismo layout, diferente scope.
+- `HeroTrailer` (subcomponente de SeriesHero):
+  - Two-stage reveal: `loaded` flips a 2.5s (iframe carga oculto),
+    `revealed` flips a 3.7s (fade-in). Total ~3.7s — evita que el
+    play-overlay inicial de YouTube se cuele.
+  - URL: `youtube-nocookie.com/embed/{key}?autoplay=1&mute=1&controls=0&loop=1&playlist={key}&modestbranding=1&playsinline=1&rel=0&iv_load_policy=3&disablekb=1`.
+  - Iframe sized con `aspect-ratio: 16/9` + `width: 100%` +
+    `minWidth: calc(100% * 16/9)` → cubre la franja sin letterbox de
+    YouTube en heroes 16:7.
+  - Mask `linear-gradient(to right, transparent 0%/25%, black 55%/100%)`
+    → fade hacia el gradient izquierdo, sin corte vertical.
+  - Botón "Saltar avance" abajo-derecha cuando está revealed.
+- `EpisodeRow` (Jellyfin-style): horizontal layout, still 16:9
+  izquierda + meta column derecha. Muestra: badge SXXEYY, título,
+  fecha emisión, duración, rating, **"Termina a las HH:MM"** computado
+  client-side, sinopsis clamp 2 líneas, hover-play overlay, barra de
+  progreso si hay user_data.progress < 95%. Click → `onPlay(item.id)`
+  (no navegación).
+
+**Componentes refactorizados**
+- `SeasonGrid`: cards de poster (2:3) reemplazan los tabs de texto.
+  Cada card: poster, título, year, episode count, badge rating.
+  Click → navega a `/items/<season-id>` (página propia de temporada).
+  Fix colateral del "Season 1 / Season 1" duplicado vía dedupe en
+  backend.
+- `HeroSection`: para episodios (y seasons) cae a `series_backdrop_url`,
+  `series_poster_url`, `series_logo_url` cuando faltan los propios.
+  `isSubItem = episode || season`.
+- `EpisodeCard`: link `/items/<id>` (antes `/episodes/<id>` que no
+  existía como ruta — bug del frontend 404). Lee `duration_ticks`
+  (antes leía `runtime_ticks` que el backend nunca emitía — bug
+  silencioso meses).
+- `MediaBrowse`: usa `useTopBarSlot` para portalear search/sort/filters
+  al topbar global → un solo buscador en pantalla (antes había dos:
+  global del topbar y página). Caratulas más grandes:
+  `minmax(180px → 200px sm → 220px lg)` (antes 150px fijo).
+
+**Página `ItemDetail` reorganizada**
+- Series page: SeriesHero + opcional panel "Seguir viendo" + SeasonGrid
+  (sin episodios inline — viven en la página de su temporada).
+- Season page: SeriesHero (mismo layout, hereda backdrop de la serie)
+  + opcional panel "Seguir viendo" + lista de EpisodeRow inline.
+  Click episode → `handlePlay(episodeID)` lanza el VideoPlayer overlay
+  en la misma página (cero navegación).
+- Movies / episodes: HeroSection clásico sin cambios.
+- `handlePlay(targetId?)` refactorizado para aceptar id opcional →
+  un solo handler sirve series page (default = page id) y season page
+  (override = episode id).
+
+**Tipos y i18n**
+- `MediaItem` extendido: `series_title`, `series_*_url`,
+  `backdrop_colors`, `episode_count`, `trailer`, `duration_ticks`
+  (renombrado desde `runtime_ticks` para alinear con backend).
+- i18n keys nuevas: `continueWatching`, `endsAt`, `episodeCount_one/_other`,
+  `trailer`, `dismissTrailer`. Es: "Seguir viendo", "Termina a las HH:MM",
+  "Saltar avance".
+
+### sqlc — manual-edit policy
+
+`sqlc/sqlc:latest` (incluyendo `:1.27.0` y `:1.25.0` probadas) tiene un
+**bug que se come el `?` final de `LIMIT ?`/`OFFSET ?`** cuando regenera
+desde el SQL → la query rompe en runtime con "incomplete input".
+Restaurado el sqlc gen anterior desde HEAD; los nuevos campos
+(`dominant_color`, `dominant_color_muted`, `trailer_key`, `trailer_site`,
+`season_number`, `episode_number`, `series_id` para continue-watching)
+se aplican a mano sobre `internal/db/sqlc/*.sql.go` con un comentario
+señalando la migration de origen. Las queries `.sql` también se actualizan
+para que un futuro `sqlc generate` (cuando arreglen) refleje el shape
+real.
+
+### Verificado al cierre
+
+- **Backend**: `go build ./... && go test ./...` 100% verde (sin -race
+  por ahora — tiempos en este Windows lo hacen lento).
+- **Frontend**: `pnpm tsc --noEmit` clean · 289/289 tests pasan ·
+  bundle nuevo añade `node-vibrant` en chunk separado.
+- **Live**: container `hubplay-dev` healthy; auto-rescan de la librería
+  Daredevil dejó el flujo end-to-end funcionando: episodios con stills
+  + sinopsis, season con poster + rating, hero con trailer Netflix-style,
+  panel "Seguir viendo" reactivo a progreso real.
+
+### Limitaciones conocidas
+
+- **Trailer per-season** no existe (TMDb no expone videos a nivel de
+  season de forma fiable). El SeasonHero hereda el trailer de la serie.
+  Solución futura: job ffmpeg en scan que extrae 30s del propio archivo
+  (rama planificada `claude/local-trailers`). Privacy-pure y per-episodio.
+- **YouTube embed** (incluso con `youtube-nocookie.com`) carga ~600KB
+  de player JS. Self-host del clip eliminaría toda telemetría +
+  reduciría bundle a 0KB extra (HTML5 `<video>` nativo).
+- Hueco visual a la derecha del trailer en pantallas extra-anchas
+  (>2200px): el aspect-ratio 16:9 del iframe puede dejar bandas si
+  la franja-hero supera ese ratio. Aceptable para resoluciones típicas
+  (≤ 1920px); aspect-ratio sizing es la solución estándar Netflix-style.
+
+---
 >
 > **🎯 Próximo gran hito (post-merge de esta rama)**: app nativa **Kotlin para Android TV**. Toda decisión técnica de aquí en adelante se mide contra "¿facilita o estorba la app TV?".
 

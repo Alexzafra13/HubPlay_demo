@@ -214,6 +214,17 @@ type ContinueWatchingItem struct {
 	DurationTicks int64
 	ParentID      string
 	Container     string
+	// SeasonNumber + EpisodeNumber pinpoint the episode inside its
+	// show — needed for the "Sigue viendo S01E03" panel label.
+	// 0 means "not an episode" or "missing", which the frontend
+	// treats as absent (panel shows just the title).
+	SeasonNumber  int
+	EpisodeNumber int
+	// SeriesID is the show this episode belongs to, derived via
+	// `episode → season → series` in SQL. Empty when the row is a
+	// movie or an orphaned episode without a parent chain. The
+	// useResumeTarget hook keys series-scope matching off this field.
+	SeriesID string
 }
 
 // Favorites returns items marked as favorite by the user.
@@ -388,6 +399,9 @@ func continueWatchingFromRows(rows []sqlc.ContinueWatchingRow) []*ContinueWatchi
 			DurationTicks: r.DurationTicks.Int64,
 			ParentID:      r.ParentID,
 			Container:     r.Container,
+			SeasonNumber:  int(r.SeasonNumber),
+			EpisodeNumber: int(r.EpisodeNumber),
+			SeriesID:      r.SeriesID,
 		}
 		if r.LastPlayedAt.Valid {
 			item.LastPlayedAt = &r.LastPlayedAt.Time

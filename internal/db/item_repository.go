@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"hubplay/internal/db/sqlc"
@@ -267,6 +268,45 @@ func (r *ItemRepository) CountByLibrary(ctx context.Context, libraryID string) (
 		return 0, fmt.Errorf("count items by library: %w", err)
 	}
 	return int(cnt), nil
+}
+
+// ChildCountsByParents returns a `parent_id → direct-child count` map
+// in one round-trip. Used by the Children handler to dedupe duplicate
+// season rows (same series + season_number) by preferring the one
+// that actually has episodes attached. Raw SQL because sqlc has no
+// shorthand for `IN (?, ?, ?)` with a dynamic length and we already
+// keep `r.db` around for List/LatestItems.
+//
+// Returns an empty map for an empty input slice — caller doesn't need
+// a length guard.
+func (r *ItemRepository) ChildCountsByParents(ctx context.Context, parentIDs []string) (map[string]int, error) {
+	out := make(map[string]int, len(parentIDs))
+	if len(parentIDs) == 0 {
+		return out, nil
+	}
+	placeholders := strings.Repeat("?,", len(parentIDs))
+	placeholders = placeholders[:len(placeholders)-1]
+	args := make([]any, len(parentIDs))
+	for i, id := range parentIDs {
+		args[i] = id
+	}
+	q := "SELECT parent_id, COUNT(*) FROM items WHERE parent_id IN (" + placeholders + ") GROUP BY parent_id"
+	rows, err := r.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("child counts: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+	for rows.Next() {
+		var pid sql.NullString
+		var n int
+		if err := rows.Scan(&pid, &n); err != nil {
+			return nil, fmt.Errorf("scan child count: %w", err)
+		}
+		if pid.Valid {
+			out[pid.String] = n
+		}
+	}
+	return out, rows.Err()
 }
 
 func (r *ItemRepository) GetChildren(ctx context.Context, parentID string) ([]*Item, error) {

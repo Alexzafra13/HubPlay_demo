@@ -14,9 +14,13 @@ import (
 const continueWatching = `-- name: ContinueWatching :many
 SELECT ud.item_id, ud.position_ticks, ud.last_played_at,
        i.title, i.type, i.duration_ticks, COALESCE(i.parent_id, '') AS parent_id,
-       COALESCE(i.container, '') AS container
+       COALESCE(i.container, '') AS container,
+       COALESCE(i.season_number, 0) AS season_number,
+       COALESCE(i.episode_number, 0) AS episode_number,
+       COALESCE(season.parent_id, '') AS series_id
 FROM user_data ud
 JOIN items i ON i.id = ud.item_id
+LEFT JOIN items season ON season.id = i.parent_id
 WHERE ud.user_id = ? AND ud.completed = 0 AND ud.position_ticks > 0
   AND i.is_available = 1
   AND NOT (
@@ -47,6 +51,9 @@ type ContinueWatchingRow struct {
 	DurationTicks sql.NullInt64 `json:"duration_ticks"`
 	ParentID      string        `json:"parent_id"`
 	Container     string        `json:"container"`
+	SeasonNumber  int64         `json:"season_number"`
+	EpisodeNumber int64         `json:"episode_number"`
+	SeriesID      string        `json:"series_id"`
 }
 
 func (q *Queries) ContinueWatching(ctx context.Context, arg ContinueWatchingParams) ([]ContinueWatchingRow, error) {
@@ -67,6 +74,9 @@ func (q *Queries) ContinueWatching(ctx context.Context, arg ContinueWatchingPara
 			&i.DurationTicks,
 			&i.ParentID,
 			&i.Container,
+			&i.SeasonNumber,
+			&i.EpisodeNumber,
+			&i.SeriesID,
 		); err != nil {
 			return nil, err
 		}

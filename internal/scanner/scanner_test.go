@@ -496,7 +496,9 @@ func createFile(t *testing.T, path, content string) {
 // suite seeds the item + external IDs directly and exercises only the
 // image-ingest path.
 type stubProvider struct {
-	images []provider.ImageResult
+	images  []provider.ImageResult
+	episode *provider.EpisodeMetadataResult
+	season  *provider.SeasonMetadataResult
 }
 
 func (s *stubProvider) SearchMetadata(_ context.Context, _ provider.SearchQuery) ([]provider.SearchResult, error) {
@@ -507,6 +509,12 @@ func (s *stubProvider) FetchMetadata(_ context.Context, _ string, _ provider.Ite
 }
 func (s *stubProvider) FetchImages(_ context.Context, _ map[string]string, _ provider.ItemType) ([]provider.ImageResult, error) {
 	return s.images, nil
+}
+func (s *stubProvider) FetchEpisodeMetadata(_ context.Context, _ string, _, _ int) (*provider.EpisodeMetadataResult, error) {
+	return s.episode, nil
+}
+func (s *stubProvider) FetchSeasonMetadata(_ context.Context, _ string, _ int) (*provider.SeasonMetadataResult, error) {
+	return s.season, nil
 }
 
 func makeTinyPNG(t *testing.T) []byte {
@@ -640,6 +648,355 @@ func TestFetchAndStoreImages_PersistsLocalPathNotURL(t *testing.T) {
 			t.Errorf("local file missing: %v", err)
 		}
 	}
+}
+
+// TestEnrichEpisode_PersistsOverviewAndStill pins the per-episode
+// enrichment contract: given a series row whose external_ids carry a
+// TMDb id, the scanner must call the provider with that id, write the
+// returned overview into the metadata table, fold air-date / rating /
+// cleaned title into the item row, and ingest the still as a primary
+// `backdrop` image attached to the EPISODE (not the series).
+//
+// The bug this test guards against is the empty-episode hero — every
+// field below is one the UI tried to render and got nothing, so a
+// missing metadata.Upsert or missing image row regresses the page to
+// "Media hora en el cielo · 0".
+func TestEnrichEpisode_PersistsOverviewAndStill(t *testing.T) {
+	prevBlocked := imaging.BlockedIP
+	imaging.BlockedIP = func(ip net.IP) bool {
+		if ip.IsLoopback() {
+			return false
+		}
+		return prevBlocked(ip)
+	}
+	t.Cleanup(func() { imaging.BlockedIP = prevBlocked })
+
+	pngBody := makeTinyPNG(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(pngBody)
+	}))
+	t.Cleanup(srv.Close)
+
+	database := testutil.NewTestDB(t)
+	libRepo := db.NewLibraryRepository(database)
+	itemRepo := db.NewItemRepository(database)
+	imgRepo := db.NewImageRepository(database)
+	metaRepo := db.NewMetadataRepository(database)
+	extRepo := db.NewExternalIDRepository(database)
+
+	now := time.Now()
+	if err := libRepo.Create(context.Background(), &db.Library{
+		ID: "lib-shows", Name: "Shows", ContentType: "shows", ScanMode: "auto",
+		ScanInterval: "6h", CreatedAt: now, UpdatedAt: now, Paths: []string{"/dummy"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	seriesID := "series-1"
+	if err := itemRepo.Create(context.Background(), &db.Item{
+		ID: seriesID, LibraryID: "lib-shows", Type: "series", Title: "Daredevil",
+		AddedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := extRepo.Upsert(context.Background(), &db.ExternalID{
+		ItemID: seriesID, Provider: "tmdb", ExternalID: "12345",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	seasonID := "season-1"
+	seasonNum := 1
+	if err := itemRepo.Create(context.Background(), &db.Item{
+		ID: seasonID, LibraryID: "lib-shows", ParentID: seriesID, Type: "season",
+		Title: "Season 1", SeasonNumber: &seasonNum, AddedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	episodeID := "ep-1"
+	episodeNum := 1
+	if err := itemRepo.Create(context.Background(), &db.Item{
+		ID: episodeID, LibraryID: "lib-shows", ParentID: seasonID, Type: "episode",
+		Title: "S01E01", SeasonNumber: &seasonNum, EpisodeNumber: &episodeNum,
+		AddedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	imageDir := t.TempDir()
+	pm := pathmap.New(imageDir)
+	bus := event.NewBus(slog.Default())
+	prober := &mockProber{result: &probe.Result{}}
+	s := New(itemRepo, db.NewMediaStreamRepository(database), metaRepo, extRepo,
+		imgRepo, db.NewChapterRepository(database),
+		nil, prober, bus, imageDir, pm, slog.Default())
+
+	rating := 8.4
+	premiere, _ := time.Parse("2006-01-02", "2025-03-04")
+	s.providers = &stubProvider{episode: &provider.EpisodeMetadataResult{
+		Title:          "Media hora en el cielo",
+		Overview:       "Matt Murdock vuelve a Nueva York.",
+		PremiereDate:   &premiere,
+		Rating:         &rating,
+		RuntimeMinutes: 0, // probe wins when set; left blank here on purpose
+		StillURL:       srv.URL + "/still.png",
+	}}
+
+	episode, err := itemRepo.GetByID(context.Background(), episodeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.enrichEpisode(context.Background(), episode, seasonID, seasonNum, episodeNum)
+
+	// Item row updates: title, year, rating must reflect the provider
+	// result; runtime is left untouched (probe-wins policy).
+	got, err := itemRepo.GetByID(context.Background(), episodeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Title != "Media hora en el cielo" {
+		t.Errorf("title not refreshed: %q", got.Title)
+	}
+	if got.Year != 2025 {
+		t.Errorf("year from premiere date: got %d, want 2025", got.Year)
+	}
+	if got.CommunityRating == nil || *got.CommunityRating != 8.4 {
+		t.Errorf("community rating: got %v, want 8.4", got.CommunityRating)
+	}
+
+	// Metadata row carries the overview so the detail handler can
+	// render it without a separate provider hop.
+	meta, err := metaRepo.GetByItemID(context.Background(), episodeID)
+	if err != nil {
+		t.Fatalf("metadata: %v", err)
+	}
+	if meta == nil || meta.Overview != "Matt Murdock vuelve a Nueva York." {
+		t.Errorf("overview not persisted: %+v", meta)
+	}
+
+	// Still landed as a primary backdrop on the EPISODE row.
+	imgs, err := imgRepo.ListByItem(context.Background(), episodeID)
+	if err != nil {
+		t.Fatalf("list images: %v", err)
+	}
+	if len(imgs) != 1 || imgs[0].Type != "backdrop" || !imgs[0].IsPrimary {
+		t.Fatalf("expected one primary backdrop on episode, got %+v", imgs)
+	}
+	if !strings.HasPrefix(imgs[0].Path, "/api/v1/images/file/") {
+		t.Errorf("image path leaked upstream URL: %q", imgs[0].Path)
+	}
+}
+
+// TestEnrichEpisode_NoTMDbIDOnSeries pins the failure-mode contract:
+// when the parent series has no tmdb external id (e.g. enriched without
+// API key, or no match found), enrichEpisode must be a no-op — no
+// provider call, no metadata row, no image row. The next scan retries.
+func TestEnrichEpisode_NoTMDbIDOnSeries(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	libRepo := db.NewLibraryRepository(database)
+	itemRepo := db.NewItemRepository(database)
+	imgRepo := db.NewImageRepository(database)
+	metaRepo := db.NewMetadataRepository(database)
+	extRepo := db.NewExternalIDRepository(database)
+
+	now := time.Now()
+	_ = libRepo.Create(context.Background(), &db.Library{
+		ID: "lib-shows", Name: "Shows", ContentType: "shows", ScanMode: "auto",
+		ScanInterval: "6h", CreatedAt: now, UpdatedAt: now, Paths: []string{"/dummy"},
+	})
+
+	seriesID := "series-1"
+	_ = itemRepo.Create(context.Background(), &db.Item{
+		ID: seriesID, LibraryID: "lib-shows", Type: "series", Title: "X",
+		AddedAt: now, UpdatedAt: now,
+	})
+	// No external_id row for the series — the case under test.
+
+	seasonID := "season-1"
+	seasonNum := 1
+	_ = itemRepo.Create(context.Background(), &db.Item{
+		ID: seasonID, LibraryID: "lib-shows", ParentID: seriesID, Type: "season",
+		Title: "Season 1", SeasonNumber: &seasonNum, AddedAt: now, UpdatedAt: now,
+	})
+
+	episodeID := "ep-1"
+	episodeNum := 1
+	_ = itemRepo.Create(context.Background(), &db.Item{
+		ID: episodeID, LibraryID: "lib-shows", ParentID: seasonID, Type: "episode",
+		Title: "Pilot", SeasonNumber: &seasonNum, EpisodeNumber: &episodeNum,
+		AddedAt: now, UpdatedAt: now,
+	})
+
+	bus := event.NewBus(slog.Default())
+	prober := &mockProber{result: &probe.Result{}}
+	s := New(itemRepo, db.NewMediaStreamRepository(database), metaRepo, extRepo,
+		imgRepo, db.NewChapterRepository(database),
+		nil, prober, bus, t.TempDir(), pathmap.New(t.TempDir()), slog.Default())
+
+	called := false
+	s.providers = &stubProviderTrackingCalls{onEpisode: func() { called = true }}
+
+	episode, _ := itemRepo.GetByID(context.Background(), episodeID)
+	s.enrichEpisode(context.Background(), episode, seasonID, seasonNum, episodeNum)
+
+	if called {
+		t.Error("provider was called even though series has no tmdb id")
+	}
+	imgs, _ := imgRepo.ListByItem(context.Background(), episodeID)
+	if len(imgs) != 0 {
+		t.Errorf("no images expected; got %d", len(imgs))
+	}
+}
+
+// TestEnrichSeason_PersistsMetadataAndPoster pins the per-season
+// enrichment contract: given a series whose external_ids carry a TMDb
+// id, the scanner must overwrite the placeholder "Season N" title with
+// the TMDb-friendly name, persist overview + air-date + rating onto
+// the season row, and ingest the season poster as a primary `primary`
+// image attached to the season (not the series).
+//
+// The bug this guards is the "Season 1 / Season 1" double-tab the
+// frontend used to show — without TMDb, two seasons with the same
+// number rendered identically; with this enrichment they pick up
+// distinct names ("Specials", "The Final Chapter") and posters.
+func TestEnrichSeason_PersistsMetadataAndPoster(t *testing.T) {
+	prevBlocked := imaging.BlockedIP
+	imaging.BlockedIP = func(ip net.IP) bool {
+		if ip.IsLoopback() {
+			return false
+		}
+		return prevBlocked(ip)
+	}
+	t.Cleanup(func() { imaging.BlockedIP = prevBlocked })
+
+	pngBody := makeTinyPNG(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(pngBody)
+	}))
+	t.Cleanup(srv.Close)
+
+	database := testutil.NewTestDB(t)
+	libRepo := db.NewLibraryRepository(database)
+	itemRepo := db.NewItemRepository(database)
+	imgRepo := db.NewImageRepository(database)
+	metaRepo := db.NewMetadataRepository(database)
+	extRepo := db.NewExternalIDRepository(database)
+
+	now := time.Now()
+	if err := libRepo.Create(context.Background(), &db.Library{
+		ID: "lib-shows", Name: "Shows", ContentType: "shows", ScanMode: "auto",
+		ScanInterval: "6h", CreatedAt: now, UpdatedAt: now, Paths: []string{"/dummy"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	seriesID := "series-1"
+	if err := itemRepo.Create(context.Background(), &db.Item{
+		ID: seriesID, LibraryID: "lib-shows", Type: "series", Title: "Daredevil",
+		AddedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := extRepo.Upsert(context.Background(), &db.ExternalID{
+		ItemID: seriesID, Provider: "tmdb", ExternalID: "12345",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	seasonID := "season-1"
+	seasonNum := 1
+	if err := itemRepo.Create(context.Background(), &db.Item{
+		ID: seasonID, LibraryID: "lib-shows", ParentID: seriesID, Type: "season",
+		Title: "Season 1", SortTitle: "season 1", SeasonNumber: &seasonNum,
+		AddedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	imageDir := t.TempDir()
+	pm := pathmap.New(imageDir)
+	bus := event.NewBus(slog.Default())
+	prober := &mockProber{result: &probe.Result{}}
+	s := New(itemRepo, db.NewMediaStreamRepository(database), metaRepo, extRepo,
+		imgRepo, db.NewChapterRepository(database),
+		nil, prober, bus, imageDir, pm, slog.Default())
+
+	rating := 8.7
+	premiere, _ := time.Parse("2006-01-02", "2025-03-04")
+	s.providers = &stubProvider{season: &provider.SeasonMetadataResult{
+		Title:        "Born Again",
+		Overview:     "La temporada de regreso de Matt Murdock.",
+		PremiereDate: &premiere,
+		Rating:       &rating,
+		EpisodeCount: 9,
+		PosterURL:    srv.URL + "/poster.png",
+	}}
+
+	season, err := itemRepo.GetByID(context.Background(), seasonID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.enrichSeason(context.Background(), season, seriesID, seasonNum)
+
+	got, err := itemRepo.GetByID(context.Background(), seasonID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Title != "Born Again" {
+		t.Errorf("title not refreshed from TMDb: %q", got.Title)
+	}
+	if got.Year != 2025 {
+		t.Errorf("year from premiere date: got %d, want 2025", got.Year)
+	}
+	if got.CommunityRating == nil || *got.CommunityRating != 8.7 {
+		t.Errorf("community rating: got %v, want 8.7", got.CommunityRating)
+	}
+
+	meta, err := metaRepo.GetByItemID(context.Background(), seasonID)
+	if err != nil || meta == nil || meta.Overview == "" {
+		t.Fatalf("overview not persisted: %+v err=%v", meta, err)
+	}
+
+	imgs, err := imgRepo.ListByItem(context.Background(), seasonID)
+	if err != nil {
+		t.Fatalf("list images: %v", err)
+	}
+	if len(imgs) != 1 || imgs[0].Type != "primary" || !imgs[0].IsPrimary {
+		t.Fatalf("expected one primary poster on season, got %+v", imgs)
+	}
+	if !strings.HasPrefix(imgs[0].Path, "/api/v1/images/file/") {
+		t.Errorf("image path leaked upstream URL: %q", imgs[0].Path)
+	}
+}
+
+// stubProviderTrackingCalls is a minimal stub for the no-tmdb-id test —
+// records whether FetchEpisodeMetadata was reached. The scanner must
+// short-circuit before that point when the parent series carries no
+// external id, so the recorder stays false on the happy path.
+type stubProviderTrackingCalls struct {
+	onEpisode func()
+}
+
+func (s *stubProviderTrackingCalls) SearchMetadata(_ context.Context, _ provider.SearchQuery) ([]provider.SearchResult, error) {
+	return nil, nil
+}
+func (s *stubProviderTrackingCalls) FetchMetadata(_ context.Context, _ string, _ provider.ItemType) (*provider.MetadataResult, error) {
+	return nil, nil
+}
+func (s *stubProviderTrackingCalls) FetchImages(_ context.Context, _ map[string]string, _ provider.ItemType) ([]provider.ImageResult, error) {
+	return nil, nil
+}
+func (s *stubProviderTrackingCalls) FetchEpisodeMetadata(_ context.Context, _ string, _, _ int) (*provider.EpisodeMetadataResult, error) {
+	if s.onEpisode != nil {
+		s.onEpisode()
+	}
+	return nil, nil
+}
+func (s *stubProviderTrackingCalls) FetchSeasonMetadata(_ context.Context, _ string, _ int) (*provider.SeasonMetadataResult, error) {
+	return nil, nil
 }
 
 func TestFetchAndStoreImages_SkippedWhenImageDirEmpty(t *testing.T) {

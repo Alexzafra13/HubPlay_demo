@@ -98,15 +98,41 @@ export interface MediaItem {
   genres: string[];
   community_rating: number | null;
   content_rating: string | null;
-  runtime_ticks: number | null;
+  duration_ticks: number | null;
   premiere_date: string | null;
   poster_url: string | null;
   backdrop_url: string | null;
   logo_url: string | null;
   parent_id: string | null;
   series_id: string | null;
+  // Episode-only enrichment: when this item is an episode, the
+  // backend folds in the parent series' breadcrumb + visual fallbacks
+  // so the detail page can render a polished hero without the client
+  // having to climb episode → season → series itself. Absent on
+  // non-episodes and on episodes whose hierarchy lookup failed.
+  series_title?: string;
+  series_poster_url?: string;
+  series_backdrop_url?: string;
+  series_logo_url?: string;
+  // Pre-computed dominant + dark-muted colours of the primary backdrop
+  // (or poster, when no backdrop exists), formatted as CSS rgb()
+  // strings. The SeriesHero gradient consumes these on first paint —
+  // when absent (older rows scanned before extraction shipped), the
+  // hook falls back to runtime `node-vibrant` extraction.
+  backdrop_colors?: { vibrant?: string; muted?: string };
+  // Best-matched trailer for the SeriesHero pre-play overlay. Picked
+  // at scan time (TMDb /videos), embedded muted with autoplay so the
+  // hero plays a Netflix-style preview a couple of seconds after the
+  // user lands on the page. `key` is platform-specific; `site` selects
+  // the embed URL ("YouTube" or "Vimeo"). Absent when no trailer was
+  // available — in that case the hero just shows the static backdrop.
+  trailer?: { key: string; site: string };
   season_number: number | null;
   episode_number: number | null;
+  // Season-only: number of direct episode children. The Children
+  // endpoint folds it into the season summary so the SeasonGrid card
+  // can render "9 episodios" without an extra round-trip per season.
+  episode_count?: number;
   path: string | null;
   // Per-user state. Only present when the listing endpoint sees an
   // authenticated request — anonymous responses omit the key entirely
@@ -174,7 +200,6 @@ export interface ExternalSubtitleResult {
 }
 
 export interface ItemDetail extends MediaItem {
-  duration_ticks: number | null;
   media_streams: MediaStream[];
   people: Person[];
   // Optional: backend omits `chapters` entirely when the file has no

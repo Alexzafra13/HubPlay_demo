@@ -54,6 +54,11 @@ type LibraryService interface {
 	ListItems(ctx context.Context, filter db.ItemFilter) ([]*db.Item, int, error)
 	GetItem(ctx context.Context, id string) (*db.Item, error)
 	GetItemChildren(ctx context.Context, id string) ([]*db.Item, error)
+	// GetItemChildCounts returns how many direct children each parent
+	// id has in one round-trip. Used by the Children handler to dedupe
+	// duplicate season rows: when two seasons share the same series +
+	// season_number, the one with episodes attached wins.
+	GetItemChildCounts(ctx context.Context, parentIDs []string) (map[string]int, error)
 	GetItemStreams(ctx context.Context, itemID string) ([]*db.MediaStream, error)
 	GetItemImages(ctx context.Context, itemID string) ([]*db.Image, error)
 	LatestItems(ctx context.Context, libraryID string, itemType string, limit int) ([]*db.Item, error)

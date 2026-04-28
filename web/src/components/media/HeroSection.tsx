@@ -120,21 +120,45 @@ const HeroSection: FC<HeroSectionProps> = ({
   menuItems = [],
 }) => {
   const { t } = useTranslation();
-  const duration = formatRuntime(item.runtime_ticks);
+  const duration = formatRuntime(item.duration_ticks);
+
+  // Episodes and seasons carry limited visuals on their own (episodes
+  // get a still, seasons get a poster, neither gets a backdrop). The
+  // backend folds the parent series' artwork into `series_*_url` so
+  // the hero falls back through this chain instead of rendering an
+  // empty black slab. `isSubItem` is the "this row inherits from a
+  // parent series" check; movies + series themselves never inherit.
+  const isEpisode = item.type === "episode";
+  const isSubItem = isEpisode || item.type === "season";
+  const backdropUrl =
+    item.backdrop_url ?? (isSubItem ? item.series_backdrop_url : undefined);
+  const posterUrl = isEpisode
+    ? item.series_poster_url ?? item.poster_url ?? undefined
+    : item.poster_url ?? undefined;
+  const logoUrl = isSubItem
+    ? item.series_logo_url ?? item.logo_url ?? undefined
+    : item.logo_url ?? undefined;
+
+  // Episode title rendering: "S01E01 · Pilot" or just the title when
+  // numbering is missing. Series title rides above as a small anchor.
+  const episodeCode =
+    isEpisode && item.season_number != null && item.episode_number != null
+      ? `S${String(item.season_number).padStart(2, "0")}E${String(item.episode_number).padStart(2, "0")}`
+      : null;
 
   return (
     <section className="relative flex w-full items-end overflow-hidden min-h-[55vh] sm:min-h-[60vh] lg:min-h-[70vh]">
       {/* Backdrop image */}
-      {item.backdrop_url ? (
+      {backdropUrl ? (
         <img
-          src={item.backdrop_url}
+          src={backdropUrl}
           alt=""
           loading="eager"
           className="absolute inset-0 h-full w-full object-cover"
         />
-      ) : item.poster_url ? (
+      ) : posterUrl ? (
         <img
-          src={item.poster_url}
+          src={posterUrl}
           alt=""
           loading="eager"
           className="absolute inset-0 h-full w-full object-cover blur-2xl scale-110"
@@ -149,11 +173,15 @@ const HeroSection: FC<HeroSectionProps> = ({
 
       {/* Content */}
       <div className="relative z-10 flex w-full items-end gap-6 px-6 pb-8 pt-32 sm:px-10 sm:pb-10 lg:gap-8 lg:pb-12">
-        {/* Poster — hidden on mobile, visible from md up */}
-        {item.poster_url && (
+        {/* Poster — hidden on mobile, visible from md up.
+            Suppressed for episodes: showing the show's vertical poster
+            next to a horizontal episode still felt redundant (the show
+            is already named in the breadcrumb above the title) and
+            visually clashed — the still IS the episode's identity. */}
+        {posterUrl && !isEpisode && (
           <div className="hidden md:block shrink-0">
             <img
-              src={item.poster_url}
+              src={posterUrl}
               alt={item.title}
               className="h-[280px] lg:h-[340px] w-auto rounded-[--radius-lg] shadow-2xl shadow-black/50 object-cover"
             />
@@ -162,24 +190,56 @@ const HeroSection: FC<HeroSectionProps> = ({
 
         {/* Info column */}
         <div className="flex flex-1 flex-col gap-3 sm:gap-4 min-w-0">
-          {/* Logo or title */}
-          {item.logo_url ? (
+          {/* Series breadcrumb — episodes only. Anchors the page to
+              "what show is this?" before the episode title takes over. */}
+          {isEpisode && item.series_title && (
+            <p className="text-sm font-semibold uppercase tracking-wider text-text-muted">
+              {item.series_title}
+            </p>
+          )}
+
+          {/* Logo or title.
+              For episodes we keep the title as text even when a series logo
+              exists — a logo from the show would mis-anchor the hero ("which
+              episode am I on?"). The breadcrumb above already shows the show. */}
+          {!isEpisode && logoUrl ? (
             <img
-              src={item.logo_url}
+              src={logoUrl}
               alt={item.title}
               className="max-h-[60px] sm:max-h-[80px] lg:max-h-[100px] w-auto max-w-[70%] object-contain object-left drop-shadow-lg"
             />
           ) : (
             <h1 className="text-3xl font-bold text-text-primary sm:text-4xl lg:text-5xl drop-shadow-lg">
-              {item.title}
+              {episodeCode ? (
+                <>
+                  <span className="text-text-secondary">{episodeCode}</span>
+                  <span className="px-2 text-text-muted">·</span>
+                  {item.title}
+                </>
+              ) : (
+                item.title
+              )}
             </h1>
           )}
 
           {/* Meta row */}
           <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-sm text-text-secondary">
-            {item.year != null && (
+            {/* Episodes: prefer the full air date — "12 Mar 2025" reads
+                more meaningfully than the bare year on the per-episode
+                page. Movies and series keep the year-only line. The
+                Date(...).toLocaleDateString call is intentionally
+                locale-aware so es / en users get their native format. */}
+            {isEpisode && item.premiere_date ? (
+              <span className="font-medium">
+                {new Date(item.premiere_date).toLocaleDateString(undefined, {
+                  day: "numeric",
+                  month: "short",
+                  year: "numeric",
+                })}
+              </span>
+            ) : item.year != null ? (
               <span className="font-medium">{item.year}</span>
-            )}
+            ) : null}
 
             {item.community_rating != null && (
               <Badge variant="warning">

@@ -18,7 +18,7 @@ function makeItem(overrides: Partial<MediaItem> = {}): MediaItem {
     genres: [],
     community_rating: null,
     content_rating: null,
-    runtime_ticks: null,
+    duration_ticks: null,
     premiere_date: null,
     poster_url: null,
     backdrop_url: null,

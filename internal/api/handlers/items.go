@@ -77,7 +77,11 @@ func (h *ItemHandler) Get(w http.ResponseWriter, r *http.Request) {
 		resp["media_streams"] = streamData
 	}
 
-	// Include images and set poster_url/backdrop_url
+	// Include images and set poster_url/backdrop_url + the pre-computed
+	// dominant-colour palette for the SeriesHero gradient. We surface
+	// the backdrop's palette as `backdrop_colors` (with poster as a
+	// fallback when there's no backdrop), so the frontend gradient
+	// paints on first render with no client-side image decode.
 	images, _ := h.lib.GetItemImages(r.Context(), id)
 	if len(images) > 0 {
 		imgData := make([]map[string]any, len(images))
@@ -86,16 +90,36 @@ func (h *ItemHandler) Get(w http.ResponseWriter, r *http.Request) {
 		}
 		resp["images"] = imgData
 
+		var (
+			backdropColors map[string]any
+			posterColors   map[string]any
+		)
 		for _, img := range images {
-			if img.IsPrimary && img.Type == "primary" {
+			if !img.IsPrimary {
+				continue
+			}
+			switch img.Type {
+			case "primary":
 				resp["poster_url"] = img.Path
-			}
-			if img.IsPrimary && img.Type == "backdrop" {
+				if img.DominantColor != "" || img.DominantColorMuted != "" {
+					posterColors = paletteResponse(img.DominantColor, img.DominantColorMuted)
+				}
+			case "backdrop":
 				resp["backdrop_url"] = img.Path
-			}
-			if img.IsPrimary && img.Type == "logo" {
+				if img.DominantColor != "" || img.DominantColorMuted != "" {
+					backdropColors = paletteResponse(img.DominantColor, img.DominantColorMuted)
+				}
+			case "logo":
 				resp["logo_url"] = img.Path
 			}
+		}
+		// Backdrop wins when present; falls back to poster so
+		// poster-only items (movies without a downloaded backdrop)
+		// still drive a colourful gradient on the detail page.
+		if backdropColors != nil {
+			resp["backdrop_colors"] = backdropColors
+		} else if posterColors != nil {
+			resp["backdrop_colors"] = posterColors
 		}
 	}
 
@@ -118,6 +142,16 @@ func (h *ItemHandler) Get(w http.ResponseWriter, r *http.Request) {
 			if meta.Studio != "" {
 				resp["studio"] = meta.Studio
 			}
+			// Trailer is two fields paired together — both must be
+			// present for a valid embed URL. Keep them out of the
+			// response when either is empty so the frontend's
+			// nullable check is a single key, not a tuple.
+			if meta.TrailerKey != "" && meta.TrailerSite != "" {
+				resp["trailer"] = map[string]any{
+					"key":  meta.TrailerKey,
+					"site": meta.TrailerSite,
+				}
+			}
 		}
 	}
 
@@ -138,7 +172,168 @@ func (h *ItemHandler) Get(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Episode and season pages both need a "what show is this?" anchor
+	// and the show's backdrop as a fallback hero image. Episodes climb
+	// episode → season → series; seasons climb season → series. Both
+	// surface `series_title` + `series_*_url` so the renderer doesn't
+	// have to know the relationship depth.
+	switch item.Type {
+	case "episode":
+		if item.ParentID != "" {
+			h.attachSeriesContext(r.Context(), resp, item.ParentID)
+		}
+	case "season":
+		if item.ParentID != "" {
+			h.attachSeriesContextFromSeries(r.Context(), resp, item.ParentID)
+		}
+	}
+
 	respondJSON(w, http.StatusOK, map[string]any{"data": resp})
+}
+
+// dedupeSeasons collapses duplicate season rows (same parent + season
+// number) down to the one with the most direct children. Returns the
+// input slice unchanged when there are no duplicates — common case
+// stays cheap (one map allocation, no DB calls).
+//
+// Conservative on error: a failing batch count returns the input as-is
+// rather than dropping rows we can't compare. The user sees the
+// pre-existing duplicate behaviour, which is no worse than today.
+func dedupeSeasons(ctx context.Context, lib LibraryService, children []*db.Item) []*db.Item {
+	type key struct {
+		parent string
+		num    int
+	}
+	groups := make(map[key][]*db.Item)
+	for _, c := range children {
+		if c.Type != "season" || c.SeasonNumber == nil {
+			continue
+		}
+		k := key{c.ParentID, *c.SeasonNumber}
+		groups[k] = append(groups[k], c)
+	}
+
+	hasDupe := false
+	var dupeIDs []string
+	for _, g := range groups {
+		if len(g) > 1 {
+			hasDupe = true
+			for _, item := range g {
+				dupeIDs = append(dupeIDs, item.ID)
+			}
+		}
+	}
+	if !hasDupe {
+		return children
+	}
+
+	counts, err := lib.GetItemChildCounts(ctx, dupeIDs)
+	if err != nil {
+		return children
+	}
+
+	// Build the set of season IDs to drop: in each duplicate group,
+	// keep the one with the highest child count (ties broken by
+	// earliest creation — first slot wins, which matches the order
+	// GetChildren returns).
+	drop := make(map[string]bool)
+	for _, g := range groups {
+		if len(g) <= 1 {
+			continue
+		}
+		bestIdx := 0
+		bestCount := counts[g[0].ID]
+		for i := 1; i < len(g); i++ {
+			if counts[g[i].ID] > bestCount {
+				bestIdx = i
+				bestCount = counts[g[i].ID]
+			}
+		}
+		for i, item := range g {
+			if i != bestIdx {
+				drop[item.ID] = true
+			}
+		}
+	}
+
+	out := make([]*db.Item, 0, len(children))
+	for _, c := range children {
+		if drop[c.ID] {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
+// attachSeriesContext walks episode → season → series and folds the show's
+// breadcrumb fields and (when the episode has none) image URLs into the
+// detail response. Best-effort: any DB error along the way leaves resp
+// untouched — the page still renders, just with the bare episode data
+// the caller already had.
+func (h *ItemHandler) attachSeriesContext(ctx context.Context, resp map[string]any, seasonID string) {
+	season, err := h.lib.GetItem(ctx, seasonID)
+	if err != nil || season == nil || season.ParentID == "" {
+		return
+	}
+	h.attachSeriesContextFromSeries(ctx, resp, season.ParentID)
+}
+
+// attachSeriesContextFromSeries is the inner half of attachSeriesContext:
+// given the series id directly, populate the breadcrumb + image fallbacks.
+// Lifted out so the season-detail page (one hop closer to the series than
+// an episode) can reuse the same enrichment without doing the
+// episode→season climb that would dead-end immediately.
+func (h *ItemHandler) attachSeriesContextFromSeries(ctx context.Context, resp map[string]any, seriesID string) {
+	series, err := h.lib.GetItem(ctx, seriesID)
+	if err != nil || series == nil {
+		return
+	}
+	resp["series_id"] = series.ID
+	resp["series_title"] = series.Title
+
+	// Pull the series' primary images so the episode/season page can
+	// fall back to them when its own still / poster is missing. Same
+	// wire shape as `poster_url` / `backdrop_url` / `logo_url` — the
+	// client treats `series_*` as the "use this if my own is empty"
+	// alternative. Also fold the series' backdrop palette into
+	// `backdrop_colors` when the current item has no palette of its
+	// own (typical for season rows: TMDb gives them a poster but no
+	// backdrop, so the gradient leans on the series).
+	seriesImgs, err := h.lib.GetItemImages(ctx, series.ID)
+	if err != nil {
+		return
+	}
+	_, hasBackdropColors := resp["backdrop_colors"]
+	for _, img := range seriesImgs {
+		if !img.IsPrimary {
+			continue
+		}
+		switch img.Type {
+		case "primary":
+			resp["series_poster_url"] = img.Path
+		case "backdrop":
+			resp["series_backdrop_url"] = img.Path
+			if !hasBackdropColors && (img.DominantColor != "" || img.DominantColorMuted != "") {
+				resp["backdrop_colors"] = paletteResponse(img.DominantColor, img.DominantColorMuted)
+			}
+		case "logo":
+			resp["series_logo_url"] = img.Path
+		}
+	}
+
+	// Inherit genres for episodes/seasons that lack their own metadata
+	// row — genres are stored on the series, but the hero needs them
+	// for the meta line. Only inherit when the item-level lookup
+	// produced nothing.
+	if _, hasGenres := resp["genres"]; !hasGenres && h.metadata != nil {
+		if meta, err := h.metadata.GetByItemID(ctx, series.ID); err == nil && meta != nil && meta.GenresJSON != "" {
+			var genres []string
+			if err := json.Unmarshal([]byte(meta.GenresJSON), &genres); err == nil && len(genres) > 0 {
+				resp["genres"] = genres
+			}
+		}
+	}
 }
 
 // TrickplayManifest serves (and lazily generates) the sprite-sheet
@@ -244,9 +439,89 @@ func (h *ItemHandler) Children(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Dedupe duplicate season rows. Older scans (before show-hierarchy
+	// caching was robust) sometimes left two rows with the same parent
+	// + season_number. The canonical one is the season that actually
+	// has episodes attached — that's what we keep. The orphan stays in
+	// the DB (cleanup is a separate operation) but is hidden from the
+	// SeasonGrid so the user doesn't see "Season 1 / Season 1".
+	children = dedupeSeasons(r.Context(), h.lib, children)
+
 	data := make([]map[string]any, len(children))
 	for i, item := range children {
 		data[i] = itemSummaryResponse(item)
+	}
+
+	// Episode-list previews: the cards rendered above each episode use
+	// `backdrop_url` (the per-episode still) as the thumbnail and fall
+	// back to `poster_url`. The summary response intentionally stays
+	// image-free, so fold in BOTH primaries via one batched query —
+	// avoids N+1 lookups when a season has 22 episodes.
+	if h.images != nil && len(children) > 0 {
+		itemIDs := make([]string, len(children))
+		for i, item := range children {
+			itemIDs[i] = item.ID
+		}
+		if imageURLs, err := h.images.GetPrimaryURLs(r.Context(), itemIDs); err == nil {
+			for i, item := range children {
+				urls, ok := imageURLs[item.ID]
+				if !ok {
+					continue
+				}
+				if backdrop, ok := urls["backdrop"]; ok {
+					data[i]["backdrop_url"] = backdrop
+				}
+				if poster, ok := urls["primary"]; ok {
+					data[i]["poster_url"] = poster
+				}
+			}
+		}
+	}
+
+	// Episode counts on season cards. The SeasonGrid renders "9 eps"
+	// next to the title; computing it here avoids an N+1 from the
+	// frontend prefetching each season's children purely for a count.
+	// Skipped when no seasons are present so movies/episodes don't
+	// pay the extra query.
+	var seasonIDs []string
+	for _, item := range children {
+		if item.Type == "season" {
+			seasonIDs = append(seasonIDs, item.ID)
+		}
+	}
+	if len(seasonIDs) > 0 {
+		if counts, err := h.lib.GetItemChildCounts(r.Context(), seasonIDs); err == nil {
+			for i, item := range children {
+				if item.Type != "season" {
+					continue
+				}
+				if n, ok := counts[item.ID]; ok {
+					data[i]["episode_count"] = n
+				}
+			}
+		}
+	}
+
+	// Per-item metadata (overview etc.) for season cards. Same batch
+	// pattern the search handler uses; folds in `overview` so the
+	// SeasonGrid hover/expanded state can preview it without hitting
+	// the per-item detail endpoint.
+	if h.metadata != nil && len(children) > 0 {
+		itemIDs := make([]string, len(children))
+		for i, item := range children {
+			itemIDs[i] = item.ID
+		}
+		if metaByID, err := h.metadata.GetMetadataBatch(r.Context(), itemIDs); err == nil {
+			for i, item := range children {
+				meta, ok := metaByID[item.ID]
+				if !ok || meta == nil {
+					continue
+				}
+				if meta.Overview != "" {
+					data[i]["overview"] = meta.Overview
+				}
+			}
+		}
 	}
 
 	respondJSON(w, http.StatusOK, map[string]any{"data": data})
@@ -326,7 +601,6 @@ func itemDetailResponse(item *db.Item) map[string]any {
 		"type":           item.Type,
 		"title":          item.Title,
 		"sort_title":     item.SortTitle,
-		"year":           item.Year,
 		"path":           item.Path,
 		"size":           item.Size,
 		"duration_ticks": item.DurationTicks,
@@ -334,6 +608,12 @@ func itemDetailResponse(item *db.Item) map[string]any {
 		"is_available":   item.IsAvailable,
 		"added_at":       item.AddedAt,
 		"updated_at":     item.UpdatedAt,
+	}
+	// `year` is omitted when zero so clients can render absence cleanly
+	// (the previous shape leaked Go's int zero-value as `"year": 0`,
+	// which the UI rendered literally — see the empty-episode hero).
+	if item.Year > 0 {
+		resp["year"] = item.Year
 	}
 	if item.ParentID != "" {
 		resp["parent_id"] = item.ParentID
@@ -465,6 +745,27 @@ func imageResponse(img *db.Image) map[string]any {
 	}
 	if img.Blurhash != "" {
 		resp["blurhash"] = img.Blurhash
+	}
+	if img.DominantColor != "" {
+		resp["dominant_color"] = img.DominantColor
+	}
+	if img.DominantColorMuted != "" {
+		resp["dominant_color_muted"] = img.DominantColorMuted
+	}
+	return resp
+}
+
+// paletteResponse renders the pre-computed dominant + muted colours in
+// the wire shape the frontend expects: `{ vibrant, muted }`. Either
+// field may be absent (extraction couldn't classify a swatch in that
+// role); the consumer treats absence the same as missing palette.
+func paletteResponse(vibrant, muted string) map[string]any {
+	resp := map[string]any{}
+	if vibrant != "" {
+		resp["vibrant"] = vibrant
+	}
+	if muted != "" {
+		resp["muted"] = muted
 	}
 	return resp
 }

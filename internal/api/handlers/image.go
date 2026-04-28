@@ -196,8 +196,9 @@ func (h *ImageHandler) Select(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate blurhash from the saved image data.
+	// Generate blurhash + dominant colours from the saved image data.
 	bhash := imaging.ComputeBlurhash(imgData, h.logger)
+	vibrant, muted := imaging.ExtractDominantColors(imgData, h.logger)
 
 	// Create DB record
 	imgID := uuid.NewString()
@@ -215,8 +216,10 @@ func (h *ImageHandler) Select(w http.ResponseWriter, r *http.Request) {
 		// authoritative, so future refreshes must skip this kind until
 		// the admin explicitly unlocks. Plex/Jellyfin both auto-lock on
 		// any manual selection for the same reason.
-		IsLocked: true,
-		AddedAt:  time.Now(),
+		IsLocked:           true,
+		AddedAt:            time.Now(),
+		DominantColor:      vibrant,
+		DominantColorMuted: muted,
 	}
 
 	if err := h.images.Create(r.Context(), img); err != nil {
@@ -307,8 +310,9 @@ func (h *ImageHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate blurhash from the uploaded image data.
+	// Generate blurhash + dominant colours from the uploaded image data.
 	bhash := imaging.ComputeBlurhash(imgData, h.logger)
+	vibrant, muted := imaging.ExtractDominantColors(imgData, h.logger)
 
 	imgID := uuid.NewString()
 	img := &db.Image{
@@ -321,8 +325,10 @@ func (h *ImageHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		IsPrimary: false,
 		// Same lock-on-manual rule as Select: an uploaded image
 		// reflects deliberate curation, never re-fetch.
-		IsLocked: true,
-		AddedAt:  time.Now(),
+		IsLocked:           true,
+		AddedAt:            time.Now(),
+		DominantColor:      vibrant,
+		DominantColorMuted: muted,
 	}
 
 	if err := h.images.Create(r.Context(), img); err != nil {

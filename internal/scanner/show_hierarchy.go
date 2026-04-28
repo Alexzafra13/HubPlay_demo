@@ -32,17 +32,19 @@ import (
 // with the iteration callback (which is ALSO single-threaded today
 // but cheap to harden).
 type showCache struct {
-	mu                sync.Mutex
-	series            map[string]string // seriesName → series item id
-	season            map[string]string // "<seriesID>|<seasonNum>" → season item id
-	checkedEnrichment map[string]bool   // series item id → already checked-or-enriched this scan
+	mu                      sync.Mutex
+	series                  map[string]string // seriesName → series item id
+	season                  map[string]string // "<seriesID>|<seasonNum>" → season item id
+	checkedEnrichment       map[string]bool   // series item id → already checked-or-enriched this scan
+	checkedSeasonEnrichment map[string]bool   // season item id → already checked-or-enriched this scan
 }
 
 func newShowCache() *showCache {
 	return &showCache{
-		series:            make(map[string]string),
-		season:            make(map[string]string),
-		checkedEnrichment: make(map[string]bool),
+		series:                  make(map[string]string),
+		season:                  make(map[string]string),
+		checkedEnrichment:       make(map[string]bool),
+		checkedSeasonEnrichment: make(map[string]bool),
 	}
 }
 
@@ -142,13 +144,19 @@ func (s *Scanner) checkAndEnrichSeries(ctx context.Context, cache *showCache, se
 }
 
 // ensureSeasonRow does the same for a season under a given series.
-// Title defaults to "Season N" — the metadata pass can override it
-// later if the matcher has a friendlier name from TMDb.
+// Title defaults to "Season N" — TMDb enrichment overrides it on the
+// same call when an api key is configured (friendlier names like
+// "Specials" or "The Final Chapter"), and a separate self-healing pass
+// catches seasons created on a previous TMDb-less scan.
 func (s *Scanner) ensureSeasonRow(ctx context.Context, lib *db.Library, cache *showCache, seriesID string, seasonNum int) (string, error) {
 	key := seasonKey(seriesID, seasonNum)
 	cache.mu.Lock()
 	if id, ok := cache.season[key]; ok {
+		alreadyChecked := cache.checkedSeasonEnrichment[id]
 		cache.mu.Unlock()
+		if !alreadyChecked {
+			s.checkAndEnrichSeason(ctx, cache, id, seriesID, seasonNum)
+		}
 		return id, nil
 	}
 	cache.mu.Unlock()
@@ -174,6 +182,35 @@ func (s *Scanner) ensureSeasonRow(ctx context.Context, lib *db.Library, cache *s
 	}
 	cache.mu.Lock()
 	cache.season[key] = id
+	cache.checkedSeasonEnrichment[id] = true
 	cache.mu.Unlock()
+
+	// Synchronous enrichment on first creation: TMDb gives us a clean
+	// season title, overview, premiere date, rating and poster — all
+	// for one cached HTTP call. The handler reads these straight off
+	// the item row + the season's primary image, so the new SeasonGrid
+	// renders properly on the very first page hit after a scan.
+	s.enrichSeason(ctx, item, seriesID, seasonNum)
 	return id, nil
+}
+
+// checkAndEnrichSeason mirrors checkAndEnrichSeries: at most one
+// enrichment attempt per season per scan. Without this guard a 22-
+// episode season would re-fetch its TMDb metadata 22 times — once per
+// ensureSeasonRow call from the walker.
+func (s *Scanner) checkAndEnrichSeason(ctx context.Context, cache *showCache, seasonID, seriesID string, seasonNum int) {
+	cache.mu.Lock()
+	cache.checkedSeasonEnrichment[seasonID] = true
+	cache.mu.Unlock()
+	item, err := s.items.GetByID(ctx, seasonID)
+	if err != nil || item == nil {
+		return
+	}
+	// Only re-enrich when the season is still missing its visuals —
+	// any image presence is the cheap "already enriched" check.
+	imgs, err := s.images.ListByItem(ctx, seasonID)
+	if err == nil && len(imgs) > 0 {
+		return
+	}
+	s.enrichSeason(ctx, item, seriesID, seasonNum)
 }

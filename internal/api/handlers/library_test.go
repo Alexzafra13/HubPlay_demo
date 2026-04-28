@@ -119,6 +119,9 @@ func (s *libFakeService) GetItemChildren(ctx context.Context, id string) ([]*db.
 	}
 	return nil, nil
 }
+func (s *libFakeService) GetItemChildCounts(_ context.Context, _ []string) (map[string]int, error) {
+	return map[string]int{}, nil
+}
 func (s *libFakeService) GetItemStreams(ctx context.Context, id string) ([]*db.MediaStream, error) {
 	if s.getStreamsFn != nil {
 		return s.getStreamsFn(ctx, id)

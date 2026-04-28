@@ -22,18 +22,22 @@ func (q *Queries) DeleteMetadata(ctx context.Context, itemID string) error {
 const getMetadataByItemID = `-- name: GetMetadataByItemID :one
 SELECT item_id, COALESCE(overview, '') AS overview, COALESCE(tagline, '') AS tagline,
        COALESCE(studio, '') AS studio, COALESCE(genres_json, '') AS genres_json,
-       COALESCE(tags_json, '') AS tags_json
+       COALESCE(tags_json, '') AS tags_json,
+       COALESCE(trailer_key, '') AS trailer_key,
+       COALESCE(trailer_site, '') AS trailer_site
 FROM metadata
 WHERE item_id = ?
 `
 
 type GetMetadataByItemIDRow struct {
-	ItemID     string `json:"item_id"`
-	Overview   string `json:"overview"`
-	Tagline    string `json:"tagline"`
-	Studio     string `json:"studio"`
-	GenresJson string `json:"genres_json"`
-	TagsJson   string `json:"tags_json"`
+	ItemID      string `json:"item_id"`
+	Overview    string `json:"overview"`
+	Tagline     string `json:"tagline"`
+	Studio      string `json:"studio"`
+	GenresJson  string `json:"genres_json"`
+	TagsJson    string `json:"tags_json"`
+	TrailerKey  string `json:"trailer_key"`
+	TrailerSite string `json:"trailer_site"`
 }
 
 func (q *Queries) GetMetadataByItemID(ctx context.Context, itemID string) (GetMetadataByItemIDRow, error) {
@@ -46,34 +50,41 @@ func (q *Queries) GetMetadataByItemID(ctx context.Context, itemID string) (GetMe
 		&i.Studio,
 		&i.GenresJson,
 		&i.TagsJson,
+		&i.TrailerKey,
+		&i.TrailerSite,
 	)
 	return i, err
 }
 
 const upsertMetadata = `-- name: UpsertMetadata :exec
 
-INSERT INTO metadata (item_id, overview, tagline, studio, genres_json, tags_json)
-VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO metadata (item_id, overview, tagline, studio, genres_json, tags_json, trailer_key, trailer_site)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(item_id) DO UPDATE SET
     overview = excluded.overview,
     tagline = excluded.tagline,
     studio = excluded.studio,
     genres_json = excluded.genres_json,
-    tags_json = excluded.tags_json
+    tags_json = excluded.tags_json,
+    trailer_key = excluded.trailer_key,
+    trailer_site = excluded.trailer_site
 `
 
 type UpsertMetadataParams struct {
-	ItemID     string         `json:"item_id"`
-	Overview   sql.NullString `json:"overview"`
-	Tagline    sql.NullString `json:"tagline"`
-	Studio     sql.NullString `json:"studio"`
-	GenresJson sql.NullString `json:"genres_json"`
-	TagsJson   sql.NullString `json:"tags_json"`
+	ItemID      string         `json:"item_id"`
+	Overview    sql.NullString `json:"overview"`
+	Tagline     sql.NullString `json:"tagline"`
+	Studio      sql.NullString `json:"studio"`
+	GenresJson  sql.NullString `json:"genres_json"`
+	TagsJson    sql.NullString `json:"tags_json"`
+	TrailerKey  string         `json:"trailer_key"`
+	TrailerSite string         `json:"trailer_site"`
 }
 
 // Extended metadata for items (overview, tagline, genres, etc.).
 //
 // Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE metadata).
+// + migration 015_metadata_trailer.sql (trailer_key/_site columns).
 // PK: item_id.
 // NOTE: Batch queries (GetOverviewBatch, GetMetadataBatch) use dynamic IN()
 // and remain as raw SQL in the repository adapter.
@@ -85,6 +96,8 @@ func (q *Queries) UpsertMetadata(ctx context.Context, arg UpsertMetadataParams) 
 		arg.Studio,
 		arg.GenresJson,
 		arg.TagsJson,
+		arg.TrailerKey,
+		arg.TrailerSite,
 	)
 	return err
 }

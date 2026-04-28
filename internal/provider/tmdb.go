@@ -105,7 +105,7 @@ func (t *TMDbProvider) GetMetadata(ctx context.Context, externalID string, itemT
 
 	params := url.Values{
 		"language":           {t.lang},
-		"append_to_response": {"credits,external_ids"},
+		"append_to_response": {"credits,external_ids,videos"},
 	}
 
 	var detail tmdbDetail
@@ -197,7 +197,164 @@ func (t *TMDbProvider) GetMetadata(ctx context.Context, externalID string, itemT
 		}
 	}
 
+	// Trailer pick: rank the videos response so an official YouTube
+	// trailer wins over a teaser, and an unofficial trailer beats
+	// nothing. Same heuristic Plex / Jellyfin apply on their hero
+	// pre-play pickers — callers can store the (key, site) tuple and
+	// embed without a second TMDb hop.
+	if best := pickTrailer(detail.Videos.Results); best != nil {
+		result.TrailerKey = best.Key
+		result.TrailerSite = best.Site
+	}
+
 	return result, nil
+}
+
+// GetEpisodeMetadata fetches per-episode details from TMDb's
+// /tv/{id}/season/{n}/episode/{m} endpoint. Returns nil when TMDb
+// answers 404 (the underlying `get` helper already swallows 404 into
+// (nil, nil) leaving the response struct zero-valued — the ID==0 check
+// distinguishes "not found" from "found but the episode is brand new").
+func (t *TMDbProvider) GetEpisodeMetadata(ctx context.Context, showExternalID string, seasonNumber, episodeNumber int) (*EpisodeMetadataResult, error) {
+	if showExternalID == "" || seasonNumber < 0 || episodeNumber <= 0 {
+		return nil, nil
+	}
+
+	params := url.Values{
+		"language": {t.lang},
+	}
+
+	var detail tmdbEpisodeDetail
+	endpoint := fmt.Sprintf("/tv/%s/season/%d/episode/%d", showExternalID, seasonNumber, episodeNumber)
+	if err := t.get(ctx, endpoint, params, &detail); err != nil {
+		return nil, err
+	}
+	if detail.ID == 0 {
+		// 404 path — get() returns nil on 404 without decoding, so the
+		// struct is zero-valued.
+		return nil, nil
+	}
+
+	result := &EpisodeMetadataResult{
+		Title:          detail.Name,
+		Overview:       detail.Overview,
+		RuntimeMinutes: detail.Runtime,
+	}
+	if detail.AirDate != "" {
+		if pd, err := time.Parse("2006-01-02", detail.AirDate); err == nil {
+			result.PremiereDate = &pd
+		}
+	}
+	if detail.VoteAverage > 0 {
+		r := detail.VoteAverage
+		result.Rating = &r
+	}
+	if detail.StillPath != "" {
+		result.StillURL = tmdbImageURL + "original" + detail.StillPath
+	}
+	for _, gs := range detail.GuestStars {
+		if len(result.GuestStars) >= 20 {
+			break
+		}
+		p := Person{
+			Name:      gs.Name,
+			Role:      "actor",
+			Character: gs.Character,
+			Order:     gs.Order,
+		}
+		if gs.ProfilePath != "" {
+			p.ThumbURL = tmdbImageURL + "w185" + gs.ProfilePath
+		}
+		result.GuestStars = append(result.GuestStars, p)
+	}
+	return result, nil
+}
+
+// GetSeasonMetadata fetches per-season details from TMDb's
+// /tv/{id}/season/{n} endpoint. Returns nil when TMDb 404s (the
+// underlying `get` swallows 404 into nil-without-decode, so the
+// resulting struct is zero-valued — Name+EpisodeCount==0 distinguishes
+// "not found" from "found but empty").
+func (t *TMDbProvider) GetSeasonMetadata(ctx context.Context, showExternalID string, seasonNumber int) (*SeasonMetadataResult, error) {
+	if showExternalID == "" || seasonNumber < 0 {
+		return nil, nil
+	}
+
+	params := url.Values{
+		"language": {t.lang},
+	}
+
+	var detail tmdbSeasonDetail
+	endpoint := fmt.Sprintf("/tv/%s/season/%d", showExternalID, seasonNumber)
+	if err := t.get(ctx, endpoint, params, &detail); err != nil {
+		return nil, err
+	}
+	if detail.ID == 0 && detail.Name == "" {
+		return nil, nil
+	}
+
+	result := &SeasonMetadataResult{
+		Title:        detail.Name,
+		Overview:     detail.Overview,
+		EpisodeCount: len(detail.Episodes),
+	}
+	if detail.AirDate != "" {
+		if pd, err := time.Parse("2006-01-02", detail.AirDate); err == nil {
+			result.PremiereDate = &pd
+		}
+	}
+	if detail.VoteAverage > 0 {
+		r := detail.VoteAverage
+		result.Rating = &r
+	}
+	if detail.PosterPath != "" {
+		result.PosterURL = tmdbImageURL + "original" + detail.PosterPath
+	}
+	return result, nil
+}
+
+// pickTrailer scores TMDb video entries and returns the most preview-
+// worthy one, or nil when nothing usable is present. Sites other than
+// YouTube and Vimeo are filtered out because the SeriesHero only
+// embeds those two — adding more later means extending this list and
+// the frontend's URL builder together.
+//
+// Score breakdown (highest wins):
+//   +100 official    — first-party publish
+//   +50  type=Trailer  vs. Teaser/Clip/Featurette
+//   +20  type=Teaser
+//   +10  type=Clip
+//   matches the language preference: small bonus so a Spanish
+//   trailer wins over a generic English one when both are available.
+func pickTrailer(vids []tmdbVideo) *tmdbVideo {
+	if len(vids) == 0 {
+		return nil
+	}
+	bestScore := -1
+	var best *tmdbVideo
+	for i := range vids {
+		v := &vids[i]
+		if v.Site != "YouTube" && v.Site != "Vimeo" {
+			continue
+		}
+		score := 0
+		if v.Official {
+			score += 100
+		}
+		switch v.Type {
+		case "Trailer":
+			score += 50
+		case "Teaser":
+			score += 20
+		case "Clip":
+			score += 10
+		}
+		if score > bestScore {
+			bestScore = score
+			best = v
+		}
+	}
+	return best
 }
 
 // ──────────────────── ImageProvider ────────────────────
@@ -358,6 +515,45 @@ type tmdbDetail struct {
 		IMDBID string `json:"imdb_id"`
 		TVDBID int    `json:"tvdb_id"`
 	} `json:"external_ids"`
+	Videos struct {
+		Results []tmdbVideo `json:"results"`
+	} `json:"videos"`
+}
+
+type tmdbVideo struct {
+	Key      string `json:"key"`      // platform-specific id ("dQw4w9WgXcQ" for YouTube)
+	Site     string `json:"site"`     // "YouTube" / "Vimeo"
+	Type     string `json:"type"`     // "Trailer" / "Teaser" / "Clip" / "Featurette"
+	Official bool   `json:"official"`
+	Name     string `json:"name"`
+}
+
+type tmdbSeasonDetail struct {
+	ID          int     `json:"id"`
+	Name        string  `json:"name"`
+	Overview    string  `json:"overview"`
+	AirDate     string  `json:"air_date"`
+	PosterPath  string  `json:"poster_path"`
+	VoteAverage float64 `json:"vote_average"`
+	Episodes    []struct {
+		ID int `json:"id"`
+	} `json:"episodes"`
+}
+
+type tmdbEpisodeDetail struct {
+	ID          int     `json:"id"`
+	Name        string  `json:"name"`
+	Overview    string  `json:"overview"`
+	AirDate     string  `json:"air_date"`
+	StillPath   string  `json:"still_path"`
+	VoteAverage float64 `json:"vote_average"`
+	Runtime     int     `json:"runtime"` // minutes
+	GuestStars  []struct {
+		Name        string `json:"name"`
+		Character   string `json:"character"`
+		ProfilePath string `json:"profile_path"`
+		Order       int    `json:"order"`
+	} `json:"guest_stars"`
 }
 
 type tmdbImagesResponse struct {

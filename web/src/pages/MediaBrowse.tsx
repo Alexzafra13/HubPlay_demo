@@ -1,8 +1,9 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useInfiniteItems } from "@/api/hooks";
-import { Input, Spinner } from "@/components/common";
+import { Spinner } from "@/components/common";
 import { MediaGrid } from "@/components/media";
+import { useTopBarSlot } from "@/components/layout/TopBarSlot";
 import {
   MediaBrowseFilters,
   applyFilters,
@@ -78,64 +79,36 @@ export default function MediaBrowse({ type }: MediaBrowseProps) {
     return () => observerRef.current?.disconnect();
   }, []);
 
+  // Browse controls — a compact search + sort + filters trio that the
+  // global TopBar hoists in via TopBarSlot. Same component is rendered
+  // inline as a fallback when no slot provider is present (unit tests,
+  // any future shell without a global TopBar).
+  const controls = (
+    <BrowseControls
+      ns={ns}
+      search={search}
+      onSearchChange={setSearch}
+      sort={sort}
+      onSortChange={setSort}
+      filterCount={filterCount}
+      filtersOpen={filtersOpen}
+      onToggleFilters={() => setFiltersOpen((o) => !o)}
+    />
+  );
+  const slotActive = useTopBarSlot(controls);
+
   return (
     <div className="flex flex-col gap-6 px-6 py-8 sm:px-10">
-      <h1 className="text-2xl font-bold text-text-primary sm:text-3xl">
-        {t(`${ns}.title`)}
-      </h1>
-
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-        <div className="flex-1">
-          <Input
-            placeholder={t(`${ns}.searchPlaceholder`)}
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            icon={
-              <svg
-                className="h-4 w-4"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={2}
-              >
-                <circle cx="11" cy="11" r="8" />
-                <path d="M21 21l-4.35-4.35" />
-              </svg>
-            }
-          />
-        </div>
-        <select
-          value={sort}
-          onChange={(e) => setSort(e.target.value as SortOption)}
-          className="rounded-[--radius-md] border border-border bg-bg-card px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
-          aria-label={t("sort.by")}
-        >
-          {SORT_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {t(opt.labelKey)}
-            </option>
-          ))}
-        </select>
-        <button
-          type="button"
-          onClick={() => setFiltersOpen((o) => !o)}
-          aria-expanded={filtersOpen}
-          aria-controls="media-browse-filters"
-          className={[
-            "rounded-[--radius-md] border px-3 py-2 text-sm transition-colors cursor-pointer",
-            filterCount > 0
-              ? "border-accent bg-accent/10 text-accent"
-              : "border-border bg-bg-card text-text-primary hover:bg-bg-elevated",
-          ].join(" ")}
-        >
-          {t("filters.title")}
-          {filterCount > 0 && (
-            <span className="ml-1.5 inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-white">
-              {filterCount}
-            </span>
-          )}
-        </button>
+      <div className="flex items-center justify-between gap-4">
+        <h1 className="text-2xl font-bold text-text-primary sm:text-3xl">
+          {t(`${ns}.title`)}
+        </h1>
       </div>
+
+      {/* Inline-controls fallback for environments without a TopBar
+          provider — keeps the page usable in standalone tests / future
+          shells while the slot path stays the production default. */}
+      {!slotActive && <div>{controls}</div>}
 
       {filtersOpen && (
         <div id="media-browse-filters">
@@ -159,6 +132,94 @@ export default function MediaBrowse({ type }: MediaBrowseProps) {
           )}
         </>
       )}
+    </div>
+  );
+}
+
+interface BrowseControlsProps {
+  ns: "movies" | "series";
+  search: string;
+  onSearchChange: (value: string) => void;
+  sort: SortOption;
+  onSortChange: (value: SortOption) => void;
+  filterCount: number;
+  filtersOpen: boolean;
+  onToggleFilters: () => void;
+}
+
+// Compact horizontal control strip designed to fit in the global
+// TopBar's right-aligned slot. Same primitives as the previous
+// in-page bar (input + select + filters button) but sized down so
+// they don't push the avatar off-screen.
+function BrowseControls({
+  ns,
+  search,
+  onSearchChange,
+  sort,
+  onSortChange,
+  filterCount,
+  filtersOpen,
+  onToggleFilters,
+}: BrowseControlsProps) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex items-center gap-2">
+      <div className="relative">
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 20 20"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-secondary pointer-events-none"
+          aria-hidden="true"
+        >
+          <circle cx="8.5" cy="8.5" r="5" />
+          <path d="M12.5 12.5L17 17" />
+        </svg>
+        <input
+          type="search"
+          value={search}
+          onChange={(e) => onSearchChange(e.target.value)}
+          placeholder={t(`${ns}.searchPlaceholder`)}
+          className="hidden sm:block w-44 md:w-56 lg:w-64 pl-8 pr-3 py-1.5 rounded-lg bg-bg-base border border-border text-sm text-text-primary placeholder:text-text-secondary focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent transition-colors"
+          aria-label={t(`${ns}.searchPlaceholder`)}
+        />
+      </div>
+      <select
+        value={sort}
+        onChange={(e) => onSortChange(e.target.value as SortOption)}
+        className="rounded-lg bg-bg-base border border-border px-2 py-1.5 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
+        aria-label={t("sort.by")}
+      >
+        {SORT_OPTIONS.map((opt) => (
+          <option key={opt.value} value={opt.value}>
+            {t(opt.labelKey)}
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        onClick={onToggleFilters}
+        aria-expanded={filtersOpen}
+        aria-controls="media-browse-filters"
+        className={[
+          "rounded-lg border px-2.5 py-1.5 text-sm transition-colors cursor-pointer",
+          filterCount > 0
+            ? "border-accent bg-accent/10 text-accent"
+            : "border-border bg-bg-base text-text-primary hover:bg-bg-elevated",
+        ].join(" ")}
+      >
+        {t("filters.title")}
+        {filterCount > 0 && (
+          <span className="ml-1.5 inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-white">
+            {filterCount}
+          </span>
+        )}
+      </button>
     </div>
   );
 }

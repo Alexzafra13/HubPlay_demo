@@ -13,28 +13,31 @@ import (
 
 const createImage = `-- name: CreateImage :exec
 
-INSERT INTO images (id, item_id, type, path, width, height, blurhash, provider, is_primary, is_locked, added_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO images (id, item_id, type, path, width, height, blurhash, provider, is_primary, is_locked, added_at, dominant_color, dominant_color_muted)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateImageParams struct {
-	ID        string         `json:"id"`
-	ItemID    string         `json:"item_id"`
-	Type      string         `json:"type"`
-	Path      string         `json:"path"`
-	Width     sql.NullInt64  `json:"width"`
-	Height    sql.NullInt64  `json:"height"`
-	Blurhash  sql.NullString `json:"blurhash"`
-	Provider  sql.NullString `json:"provider"`
-	IsPrimary sql.NullBool   `json:"is_primary"`
-	IsLocked  sql.NullBool   `json:"is_locked"`
-	AddedAt   time.Time      `json:"added_at"`
+	ID                 string         `json:"id"`
+	ItemID             string         `json:"item_id"`
+	Type               string         `json:"type"`
+	Path               string         `json:"path"`
+	Width              sql.NullInt64  `json:"width"`
+	Height             sql.NullInt64  `json:"height"`
+	Blurhash           sql.NullString `json:"blurhash"`
+	Provider           sql.NullString `json:"provider"`
+	IsPrimary          sql.NullBool   `json:"is_primary"`
+	IsLocked           sql.NullBool   `json:"is_locked"`
+	AddedAt            time.Time      `json:"added_at"`
+	DominantColor      string         `json:"dominant_color"`
+	DominantColorMuted string         `json:"dominant_color_muted"`
 }
 
 // Image assets (poster, backdrop, thumb, logo, banner) per item.
 //
 // Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE images)
 // + migration 013_image_lock.sql (is_locked column).
+// + migration 014_image_dominant_colors.sql (dominant_color/_muted columns).
 // NOTE: GetPrimaryURLs uses dynamic IN() and remains raw SQL in the adapter.
 func (q *Queries) CreateImage(ctx context.Context, arg CreateImageParams) error {
 	_, err := q.db.ExecContext(ctx, createImage,
@@ -49,6 +52,8 @@ func (q *Queries) CreateImage(ctx context.Context, arg CreateImageParams) error 
 		arg.IsPrimary,
 		arg.IsLocked,
 		arg.AddedAt,
+		arg.DominantColor,
+		arg.DominantColorMuted,
 	)
 	return err
 }
@@ -74,23 +79,27 @@ func (q *Queries) DeleteImagesByItem(ctx context.Context, itemID string) error {
 const getImageByID = `-- name: GetImageByID :one
 SELECT id, item_id, type, path, COALESCE(width, 0) AS width, COALESCE(height, 0) AS height,
        COALESCE(blurhash, '') AS blurhash, COALESCE(provider, '') AS provider,
-       is_primary, is_locked, added_at
+       is_primary, is_locked, added_at,
+       COALESCE(dominant_color, '') AS dominant_color,
+       COALESCE(dominant_color_muted, '') AS dominant_color_muted
 FROM images
 WHERE id = ?
 `
 
 type GetImageByIDRow struct {
-	ID        string       `json:"id"`
-	ItemID    string       `json:"item_id"`
-	Type      string       `json:"type"`
-	Path      string       `json:"path"`
-	Width     int64        `json:"width"`
-	Height    int64        `json:"height"`
-	Blurhash  string       `json:"blurhash"`
-	Provider  string       `json:"provider"`
-	IsPrimary sql.NullBool `json:"is_primary"`
-	IsLocked  sql.NullBool `json:"is_locked"`
-	AddedAt   time.Time    `json:"added_at"`
+	ID                 string       `json:"id"`
+	ItemID             string       `json:"item_id"`
+	Type               string       `json:"type"`
+	Path               string       `json:"path"`
+	Width              int64        `json:"width"`
+	Height             int64        `json:"height"`
+	Blurhash           string       `json:"blurhash"`
+	Provider           string       `json:"provider"`
+	IsPrimary          sql.NullBool `json:"is_primary"`
+	IsLocked           sql.NullBool `json:"is_locked"`
+	AddedAt            time.Time    `json:"added_at"`
+	DominantColor      string       `json:"dominant_color"`
+	DominantColorMuted string       `json:"dominant_color_muted"`
 }
 
 func (q *Queries) GetImageByID(ctx context.Context, id string) (GetImageByIDRow, error) {
@@ -108,6 +117,8 @@ func (q *Queries) GetImageByID(ctx context.Context, id string) (GetImageByIDRow,
 		&i.IsPrimary,
 		&i.IsLocked,
 		&i.AddedAt,
+		&i.DominantColor,
+		&i.DominantColorMuted,
 	)
 	return i, err
 }
@@ -115,7 +126,9 @@ func (q *Queries) GetImageByID(ctx context.Context, id string) (GetImageByIDRow,
 const getPrimaryImage = `-- name: GetPrimaryImage :one
 SELECT id, item_id, type, path, COALESCE(width, 0) AS width, COALESCE(height, 0) AS height,
        COALESCE(blurhash, '') AS blurhash, COALESCE(provider, '') AS provider,
-       is_primary, is_locked, added_at
+       is_primary, is_locked, added_at,
+       COALESCE(dominant_color, '') AS dominant_color,
+       COALESCE(dominant_color_muted, '') AS dominant_color_muted
 FROM images
 WHERE item_id = ? AND type = ? AND is_primary = 1
 `
@@ -126,17 +139,19 @@ type GetPrimaryImageParams struct {
 }
 
 type GetPrimaryImageRow struct {
-	ID        string       `json:"id"`
-	ItemID    string       `json:"item_id"`
-	Type      string       `json:"type"`
-	Path      string       `json:"path"`
-	Width     int64        `json:"width"`
-	Height    int64        `json:"height"`
-	Blurhash  string       `json:"blurhash"`
-	Provider  string       `json:"provider"`
-	IsPrimary sql.NullBool `json:"is_primary"`
-	IsLocked  sql.NullBool `json:"is_locked"`
-	AddedAt   time.Time    `json:"added_at"`
+	ID                 string       `json:"id"`
+	ItemID             string       `json:"item_id"`
+	Type               string       `json:"type"`
+	Path               string       `json:"path"`
+	Width              int64        `json:"width"`
+	Height             int64        `json:"height"`
+	Blurhash           string       `json:"blurhash"`
+	Provider           string       `json:"provider"`
+	IsPrimary          sql.NullBool `json:"is_primary"`
+	IsLocked           sql.NullBool `json:"is_locked"`
+	AddedAt            time.Time    `json:"added_at"`
+	DominantColor      string       `json:"dominant_color"`
+	DominantColorMuted string       `json:"dominant_color_muted"`
 }
 
 func (q *Queries) GetPrimaryImage(ctx context.Context, arg GetPrimaryImageParams) (GetPrimaryImageRow, error) {
@@ -154,6 +169,8 @@ func (q *Queries) GetPrimaryImage(ctx context.Context, arg GetPrimaryImageParams
 		&i.IsPrimary,
 		&i.IsLocked,
 		&i.AddedAt,
+		&i.DominantColor,
+		&i.DominantColorMuted,
 	)
 	return i, err
 }
@@ -178,24 +195,28 @@ func (q *Queries) HasLockedImageForKind(ctx context.Context, arg HasLockedImageF
 const listImagesByItem = `-- name: ListImagesByItem :many
 SELECT id, item_id, type, path, COALESCE(width, 0) AS width, COALESCE(height, 0) AS height,
        COALESCE(blurhash, '') AS blurhash, COALESCE(provider, '') AS provider,
-       is_primary, is_locked, added_at
+       is_primary, is_locked, added_at,
+       COALESCE(dominant_color, '') AS dominant_color,
+       COALESCE(dominant_color_muted, '') AS dominant_color_muted
 FROM images
 WHERE item_id = ?
 ORDER BY is_primary DESC, type
 `
 
 type ListImagesByItemRow struct {
-	ID        string       `json:"id"`
-	ItemID    string       `json:"item_id"`
-	Type      string       `json:"type"`
-	Path      string       `json:"path"`
-	Width     int64        `json:"width"`
-	Height    int64        `json:"height"`
-	Blurhash  string       `json:"blurhash"`
-	Provider  string       `json:"provider"`
-	IsPrimary sql.NullBool `json:"is_primary"`
-	IsLocked  sql.NullBool `json:"is_locked"`
-	AddedAt   time.Time    `json:"added_at"`
+	ID                 string       `json:"id"`
+	ItemID             string       `json:"item_id"`
+	Type               string       `json:"type"`
+	Path               string       `json:"path"`
+	Width              int64        `json:"width"`
+	Height             int64        `json:"height"`
+	Blurhash           string       `json:"blurhash"`
+	Provider           string       `json:"provider"`
+	IsPrimary          sql.NullBool `json:"is_primary"`
+	IsLocked           sql.NullBool `json:"is_locked"`
+	AddedAt            time.Time    `json:"added_at"`
+	DominantColor      string       `json:"dominant_color"`
+	DominantColorMuted string       `json:"dominant_color_muted"`
 }
 
 func (q *Queries) ListImagesByItem(ctx context.Context, itemID string) ([]ListImagesByItemRow, error) {
@@ -219,6 +240,8 @@ func (q *Queries) ListImagesByItem(ctx context.Context, itemID string) ([]ListIm
 			&i.IsPrimary,
 			&i.IsLocked,
 			&i.AddedAt,
+			&i.DominantColor,
+			&i.DominantColorMuted,
 		); err != nil {
 			return nil, err
 		}

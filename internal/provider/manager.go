@@ -152,6 +152,59 @@ func (m *Manager) FetchMetadata(ctx context.Context, externalID string, itemType
 	return nil, fmt.Errorf("no provider returned metadata for %q", externalID)
 }
 
+// FetchEpisodeMetadata returns per-episode details from the first registered
+// metadata provider that implements EpisodeMetadataProvider AND yields a
+// non-nil result. Returns (nil, nil) when no provider can resolve the
+// episode — callers treat that the same as "no episode metadata available".
+func (m *Manager) FetchEpisodeMetadata(ctx context.Context, showExternalID string, seasonNumber, episodeNumber int) (*EpisodeMetadataResult, error) {
+	m.mu.RLock()
+	providers := m.metadata
+	m.mu.RUnlock()
+
+	for _, mp := range providers {
+		ep, ok := mp.(EpisodeMetadataProvider)
+		if !ok {
+			continue
+		}
+		result, err := ep.GetEpisodeMetadata(ctx, showExternalID, seasonNumber, episodeNumber)
+		if err != nil {
+			m.logger.Warn("episode metadata fetch failed", "provider", mp.Name(), "error", err)
+			continue
+		}
+		if result != nil {
+			return result, nil
+		}
+	}
+	return nil, nil
+}
+
+// FetchSeasonMetadata returns per-season details from the first registered
+// metadata provider that implements SeasonMetadataProvider AND yields a
+// non-nil result. Returns (nil, nil) when no provider can resolve the
+// season — same "no result is not an error" contract as the episode
+// counterpart, so the scanner can branch on the result alone.
+func (m *Manager) FetchSeasonMetadata(ctx context.Context, showExternalID string, seasonNumber int) (*SeasonMetadataResult, error) {
+	m.mu.RLock()
+	providers := m.metadata
+	m.mu.RUnlock()
+
+	for _, mp := range providers {
+		sp, ok := mp.(SeasonMetadataProvider)
+		if !ok {
+			continue
+		}
+		result, err := sp.GetSeasonMetadata(ctx, showExternalID, seasonNumber)
+		if err != nil {
+			m.logger.Warn("season metadata fetch failed", "provider", mp.Name(), "error", err)
+			continue
+		}
+		if result != nil {
+			return result, nil
+		}
+	}
+	return nil, nil
+}
+
 // FetchImages gets images from all image providers and merges results.
 func (m *Manager) FetchImages(ctx context.Context, externalIDs map[string]string, itemType ItemType) ([]ImageResult, error) {
 	m.mu.RLock()

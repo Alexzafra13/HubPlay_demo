@@ -371,10 +371,12 @@ func itemSummaryResponse(item *db.Item) map[string]any {
 		"library_id":     item.LibraryID,
 		"type":           item.Type,
 		"title":          item.Title,
-		"year":           item.Year,
 		"duration_ticks": item.DurationTicks,
 		"is_available":   item.IsAvailable,
 		"added_at":       item.AddedAt,
+	}
+	if item.Year > 0 {
+		resp["year"] = item.Year
 	}
 	if item.ParentID != "" {
 		resp["parent_id"] = item.ParentID
@@ -390,6 +392,9 @@ func itemSummaryResponse(item *db.Item) map[string]any {
 	}
 	if item.ContentRating != "" {
 		resp["content_rating"] = item.ContentRating
+	}
+	if item.PremiereDate != nil {
+		resp["premiere_date"] = item.PremiereDate
 	}
 	return resp
 }

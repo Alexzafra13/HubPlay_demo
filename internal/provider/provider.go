@@ -47,6 +47,13 @@ type MetadataResult struct {
 	Tags          []string
 	People        []Person
 	ExternalIDs   map[string]string // e.g. {"imdb": "tt1234567", "tmdb": "550"}
+	// TrailerKey + TrailerSite identify the best-matched preview clip
+	// for the item (typically a YouTube key from TMDb's `/videos`
+	// endpoint). Empty when no provider returned a trailer — callers
+	// treat absence as "no trailer available, leave the static
+	// backdrop alone".
+	TrailerKey  string
+	TrailerSite string
 }
 
 // Person represents a cast/crew member.
@@ -65,6 +72,49 @@ type MetadataProvider interface {
 	Search(ctx context.Context, query SearchQuery) ([]SearchResult, error)
 	// GetMetadata fetches full metadata for a specific external ID.
 	GetMetadata(ctx context.Context, externalID string, itemType ItemType) (*MetadataResult, error)
+}
+
+// EpisodeMetadataResult is the per-episode data returned by an episode-aware
+// metadata provider. Distinct from MetadataResult because episodes have a
+// "still" image (a frame from the episode) instead of poster/backdrop, plus
+// an inherent (season, episode) tuple addressing inside their parent show.
+type EpisodeMetadataResult struct {
+	Title          string
+	Overview       string
+	PremiereDate   *time.Time
+	Rating         *float64
+	RuntimeMinutes int      // 0 when unknown
+	StillURL       string   // optional — episode-specific frame
+	GuestStars     []Person // capped to ~20 by the implementation
+}
+
+// EpisodeMetadataProvider is implemented by metadata providers that can fetch
+// per-episode details given the show's external ID and a (season, episode)
+// pair. Optional capability — providers that only know movies/series simply
+// don't satisfy this interface and the manager skips them.
+type EpisodeMetadataProvider interface {
+	GetEpisodeMetadata(ctx context.Context, showExternalID string, seasonNumber, episodeNumber int) (*EpisodeMetadataResult, error)
+}
+
+// SeasonMetadataResult is the per-season data returned by a season-aware
+// metadata provider. Lives next to EpisodeMetadataResult because the
+// season is the natural unit between series (whole-show metadata) and
+// episode (per-instalment frame + synopsis).
+type SeasonMetadataResult struct {
+	Title        string  // TMDb's friendly season name when set ("Season 1", "Specials", "The Final Chapter")
+	Overview     string  // season-level synopsis
+	PremiereDate *time.Time
+	Rating       *float64 // aggregate audience rating for the season
+	EpisodeCount int      // number of episodes TMDb knows about (informational)
+	PosterURL    string   // optional — distinct per-season poster
+}
+
+// SeasonMetadataProvider is the season counterpart to
+// EpisodeMetadataProvider. Optional capability: providers that don't
+// implement it simply yield no season-level enrichment and the row
+// keeps its scanner-derived "Season N" placeholder.
+type SeasonMetadataProvider interface {
+	GetSeasonMetadata(ctx context.Context, showExternalID string, seasonNumber int) (*SeasonMetadataResult, error)
 }
 
 // SearchResult is a single match from a metadata search.
