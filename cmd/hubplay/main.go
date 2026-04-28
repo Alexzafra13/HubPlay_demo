@@ -185,7 +185,11 @@ func run(configPath string) error {
 			ReadyTimeout: cfg.IPTV.Transmux.ReadyTimeout,
 			Gate:         iptvProxy.Breaker(),
 			Reporter:     iptvService,
+			Metrics:      observability.NewIPTVTransmuxSink(metrics),
 		}, logger)
+		if err := observability.RegisterIPTVTransmuxGauges(metrics, iptvTransmux); err != nil {
+			return fmt.Errorf("register iptv transmux gauges: %w", err)
+		}
 		logger.Info("iptv transmux enabled",
 			"cache_dir", transmuxCacheDir,
 			"max_sessions", cfg.IPTV.Transmux.MaxSessions)
