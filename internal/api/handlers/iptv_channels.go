@@ -188,7 +188,19 @@ func (h *IPTVHandler) HLSManifest(w http.ResponseWriter, r *http.Request) {
 
 	sess, err := h.transmux.GetOrStart(r.Context(), channelID, ch.StreamURL)
 	if err != nil {
+		var coe *iptv.CircuitOpenError
 		switch {
+		case errors.As(err, &coe):
+			// Breaker tripped after repeated failures — fast-fail with
+			// 503 + Retry-After so the player backs off instead of
+			// driving another doomed ffmpeg spawn cycle.
+			retry := int(coe.RetryAfter.Seconds())
+			if retry < 1 {
+				retry = 1
+			}
+			w.Header().Set("Retry-After", strconv.Itoa(retry))
+			respondError(w, r, http.StatusServiceUnavailable, "CIRCUIT_OPEN",
+				"channel is in cooldown after repeated upstream failures; retry shortly")
 		case errors.Is(err, iptv.ErrTooManySessions):
 			// 503 with Retry-After lets the player do its own retry
 			// after the reaper has freed an idle slot.

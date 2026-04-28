@@ -1,18 +1,58 @@
 package iptv
 
 import (
+	"bytes"
 	"context"
 	"errors"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
+
+// fakeGate is a deterministic ChannelGate for tests. Allow toggles via
+// allow; calls to RecordSuccess / RecordFailure are counted so tests
+// can assert the manager wired the gate at the right places.
+type fakeGate struct {
+	allow      atomic.Bool
+	retryAfter time.Duration
+	successes  atomic.Int64
+	failures   atomic.Int64
+}
+
+func newFakeGate(allowed bool) *fakeGate {
+	g := &fakeGate{}
+	g.allow.Store(allowed)
+	return g
+}
+
+func (g *fakeGate) Allow(_ string) (bool, time.Duration) {
+	if g.allow.Load() {
+		return true, 0
+	}
+	return false, g.retryAfter
+}
+
+func (g *fakeGate) RecordSuccess(_ string) { g.successes.Add(1) }
+func (g *fakeGate) RecordFailure(_ string) { g.failures.Add(1) }
+
+// countingReporter counts calls to RecordProbeSuccess / RecordProbeFailure
+// so tests can assert the manager mirrored the gate state into the
+// channel-health pipeline.
+type countingReporter struct {
+	successes atomic.Int64
+	failures  atomic.Int64
+}
+
+func (r *countingReporter) RecordProbeSuccess(_ context.Context, _ string) { r.successes.Add(1) }
+func (r *countingReporter) RecordProbeFailure(_ context.Context, _ string, _ error) {
+	r.failures.Add(1)
+}
 
 // fakeFFmpeg writes a minimal "I produced a segment" workload so the
 // transmux manager can be exercised without depending on real ffmpeg
@@ -26,6 +66,8 @@ import (
 //     hung upstream that never produces output).
 //   - "crash":  exit 1 immediately (simulates ffmpeg failing on a
 //     bad codec or unreachable URL).
+//   - "stderr_crash": write a recognisable error line to stderr then
+//     exit 1, used to assert stderr capture surfaces in the log.
 //
 // The script parses the `-hls_segment_filename` and the trailing
 // manifest path argument from the argv we feed it from
@@ -65,6 +107,12 @@ if [ "$mode" = "crash" ]; then
   exit 1
 fi
 
+if [ "$mode" = "stderr_crash" ]; then
+  printf '[tcp @ 0x12345] Connection to tcp://example.test:80 failed: Connection refused\n' >&2
+  printf '[in#0 @ 0x67890] Error opening input: Connection refused\n' >&2
+  exit 1
+fi
+
 if [ -z "$manifest_path" ] || [ -z "$seg_template" ]; then
   echo "fake-ffmpeg: missing manifest or segment template" >&2
   exit 2
@@ -101,6 +149,18 @@ while true; do sleep 1; done
 // no good reason — production IdleTimeout is 30 s.
 func newTestManager(t *testing.T, mode string, idle time.Duration) *TransmuxManager {
 	t.Helper()
+	m, _ := newTestManagerWithOpts(t, mode, idle, TransmuxManagerConfig{})
+	return m
+}
+
+// newTestManagerWithOpts is the extension hook for tests that need to
+// inject a Gate, Reporter, or capture log output. `extra` is merged
+// over the standard fake-ffmpeg defaults; only the fields the caller
+// sets take effect. Returns the manager + a *bytes.Buffer that
+// captures log output so assertions can grep for stderr_tail / pid /
+// channel.
+func newTestManagerWithOpts(t *testing.T, mode string, idle time.Duration, extra TransmuxManagerConfig) (*TransmuxManager, *bytes.Buffer) {
+	t.Helper()
 	if idle <= 0 {
 		idle = 2 * time.Second
 	}
@@ -112,12 +172,16 @@ func newTestManager(t *testing.T, mode string, idle time.Duration) *TransmuxMana
 		IdleTimeout:    idle,
 		ReadyTimeout:   2 * time.Second,
 		ReaperInterval: 50 * time.Millisecond,
+		Gate:           extra.Gate,
+		Reporter:       extra.Reporter,
+		UserAgent:      extra.UserAgent,
 	}
 	if mode != "" {
 		t.Setenv("FAKE_FFMPEG_MODE", mode)
 	}
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return NewTransmuxManager(cfg, logger)
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	return NewTransmuxManager(cfg, logger), &buf
 }
 
 func TestTransmuxManager_GetOrStart_SpawnsAndBecomesReady(t *testing.T) {
@@ -362,7 +426,7 @@ func TestIsValidSegmentName(t *testing.T) {
 }
 
 func TestBuildTransmuxFFmpegArgs_ContainsCriticalFlags(t *testing.T) {
-	args := buildTransmuxFFmpegArgs("http://up/x", "/work")
+	args := buildTransmuxFFmpegArgs("http://up/x", "/work", "")
 	joined := strings.Join(args, " ")
 	for _, want := range []string{
 		"-c copy",
@@ -375,6 +439,7 @@ func TestBuildTransmuxFFmpegArgs_ContainsCriticalFlags(t *testing.T) {
 		"-max_delay 5000000",
 		"-reconnect 1",
 		"-rw_timeout 10000000",
+		"-user_agent " + defaultTransmuxUserAgent,
 		"http://up/x",
 		"/work/index.m3u8",
 		"/work/seg-%05d.ts",
@@ -382,5 +447,163 @@ func TestBuildTransmuxFFmpegArgs_ContainsCriticalFlags(t *testing.T) {
 		if !strings.Contains(joined, want) {
 			t.Errorf("missing flag/value %q in argv: %s", want, joined)
 		}
+	}
+}
+
+func TestBuildTransmuxFFmpegArgs_HonoursCustomUserAgent(t *testing.T) {
+	args := buildTransmuxFFmpegArgs("http://up/x", "/work", "My/UA 1.0")
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "-user_agent My/UA 1.0") {
+		t.Errorf("custom UA not in argv: %s", joined)
+	}
+	if strings.Contains(joined, defaultTransmuxUserAgent) {
+		t.Errorf("default UA leaked when custom one was provided: %s", joined)
+	}
+}
+
+// Gate integration: when the breaker says no, GetOrStart must refuse
+// without spawning ffmpeg. This is the load-bearing fix that stops
+// the doomed-spawn loop a dead Xtream upstream produced before.
+func TestTransmuxManager_GetOrStart_RefusedByGate(t *testing.T) {
+	gate := newFakeGate(false)
+	gate.retryAfter = 12 * time.Second
+	m, _ := newTestManagerWithOpts(t, "ok", 0, TransmuxManagerConfig{Gate: gate})
+	t.Cleanup(m.Shutdown)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	_, err := m.GetOrStart(ctx, "ch-blocked", "http://upstream/blocked")
+	var coe *CircuitOpenError
+	if !errors.As(err, &coe) {
+		t.Fatalf("expected *CircuitOpenError, got %v", err)
+	}
+	if coe.RetryAfter != 12*time.Second {
+		t.Errorf("RetryAfter: got %s want 12s", coe.RetryAfter)
+	}
+	if got := m.ActiveSessions(); got != 0 {
+		t.Errorf("expected no session spawned when gate denies, got %d", got)
+	}
+	// CircuitOpenError must unwrap to ErrCircuitOpen so generic
+	// errors.Is checks at the handler boundary keep working.
+	if !errors.Is(err, ErrCircuitOpen) {
+		t.Errorf("CircuitOpenError must unwrap to ErrCircuitOpen, got %v", err)
+	}
+}
+
+// Successful spawn must record success on both gate and reporter so a
+// recovered upstream resets the breaker counters and the channel
+// shows healthy in the admin dashboard without waiting for the
+// next prober pass.
+func TestTransmuxManager_GetOrStart_RecordsSuccessOnReady(t *testing.T) {
+	gate := newFakeGate(true)
+	rep := &countingReporter{}
+	m, _ := newTestManagerWithOpts(t, "ok", 0, TransmuxManagerConfig{Gate: gate, Reporter: rep})
+	t.Cleanup(m.Shutdown)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := m.GetOrStart(ctx, "ch-good", "http://upstream/good"); err != nil {
+		t.Fatalf("GetOrStart: %v", err)
+	}
+	// Allow the readyWatcher's tick (250ms) plus a generous margin to
+	// fire recordSuccess. The success path runs concurrently with
+	// GetOrStart's return, so we poll briefly.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if gate.successes.Load() == 1 && rep.successes.Load() == 1 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got := gate.successes.Load(); got != 1 {
+		t.Errorf("gate.successes: got %d want 1", got)
+	}
+	if got := rep.successes.Load(); got != 1 {
+		t.Errorf("reporter.successes: got %d want 1", got)
+	}
+	if got := gate.failures.Load(); got != 0 {
+		t.Errorf("gate.failures: got %d want 0", got)
+	}
+}
+
+// ffmpeg crash before first segment must record exactly one failure
+// on gate + reporter. After breakerThreshold consecutive failures the
+// real channelBreaker would open the circuit; here we use the fake to
+// observe the call count directly without depending on internal
+// breaker thresholds.
+func TestTransmuxManager_GetOrStart_RecordsFailureOnCrash(t *testing.T) {
+	gate := newFakeGate(true)
+	rep := &countingReporter{}
+	m, _ := newTestManagerWithOpts(t, "crash", 0, TransmuxManagerConfig{Gate: gate, Reporter: rep})
+	t.Cleanup(m.Shutdown)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := m.GetOrStart(ctx, "ch-bad", "http://upstream/bad")
+	if !errors.Is(err, ErrTransmuxFailed) {
+		t.Fatalf("expected ErrTransmuxFailed, got %v", err)
+	}
+	// processWatcher records failure asynchronously after Wait()
+	// returns; poll briefly so we don't race the goroutine.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if gate.failures.Load() >= 1 && rep.failures.Load() >= 1 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got := gate.failures.Load(); got != 1 {
+		t.Errorf("gate.failures: got %d want 1", got)
+	}
+	if got := rep.failures.Load(); got != 1 {
+		t.Errorf("reporter.failures: got %d want 1", got)
+	}
+	if got := gate.successes.Load(); got != 0 {
+		t.Errorf("gate.successes: got %d want 0", got)
+	}
+}
+
+// Stderr capture: when ffmpeg dies before producing a segment, the
+// exit log must include the tail of ffmpeg's stderr. This is the line
+// that previously read just `error="exit status 1"` and forced
+// operators to docker-exec ffmpeg manually to see why.
+func TestTransmuxManager_FFmpegStderrSurfacedOnCrash(t *testing.T) {
+	m, logBuf := newTestManagerWithOpts(t, "stderr_crash", 0, TransmuxManagerConfig{})
+	t.Cleanup(m.Shutdown)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, _ = m.GetOrStart(ctx, "ch-stderr", "http://upstream/stderr")
+	// processWatcher logs after Wait() returns; poll the buffer.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(logBuf.String(), "Connection refused") {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	got := logBuf.String()
+	if !strings.Contains(got, "ffmpeg_stderr_tail") {
+		t.Errorf("expected ffmpeg_stderr_tail key in log, got: %s", got)
+	}
+	if !strings.Contains(got, "Connection refused") {
+		t.Errorf("expected captured stderr to surface 'Connection refused', got: %s", got)
+	}
+}
+
+// Ring buffer behaviour: lines beyond capacity drop the oldest.
+func TestStderrRing_BoundedFIFO(t *testing.T) {
+	r := newStderrRing(3)
+	for i := 0; i < 5; i++ {
+		r.push("line-" + string(rune('a'+i)))
+	}
+	got := r.String()
+	want := "line-c | line-d | line-e"
+	if got != want {
+		t.Errorf("ring tail: got %q want %q", got, want)
 	}
 }

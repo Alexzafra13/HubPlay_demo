@@ -173,11 +173,18 @@ func run(configPath string) error {
 	var iptvTransmux *iptv.TransmuxManager
 	if cfg.IPTV.Transmux.Enabled {
 		transmuxCacheDir := filepath.Join(cfg.Streaming.EffectiveCacheDir(), "iptv-hls")
+		// Share the proxy's circuit breaker with the transmux manager
+		// so failures on either plane (HLS proxy or MPEG-TS transmux)
+		// trip the same per-channel cooldown. Without this, a dead
+		// Xtream upstream produced a fork-bomb of failed ffmpeg spawns
+		// every time the player retried the manifest.
 		iptvTransmux = iptv.NewTransmuxManager(iptv.TransmuxManagerConfig{
 			CacheDir:     transmuxCacheDir,
 			MaxSessions:  cfg.IPTV.Transmux.MaxSessions,
 			IdleTimeout:  cfg.IPTV.Transmux.IdleTimeout,
 			ReadyTimeout: cfg.IPTV.Transmux.ReadyTimeout,
+			Gate:         iptvProxy.Breaker(),
+			Reporter:     iptvService,
 		}, logger)
 		logger.Info("iptv transmux enabled",
 			"cache_dir", transmuxCacheDir,

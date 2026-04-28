@@ -52,14 +52,17 @@ package iptv
 //    higher-level circuit breaker (proxy.go) take over.
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -79,6 +82,37 @@ var ErrSessionNotFound = errors.New("iptv-transmux: no session")
 // any segment. Usually means the upstream is dead or the codec is
 // not transmux-compatible (would need re-encode).
 var ErrTransmuxFailed = errors.New("iptv-transmux: session failed before ready")
+
+// ChannelGate is the per-channel circuit-breaker contract shared by
+// the stream proxy and the transmux session manager. Both planes
+// punch the same gate so a series of failures on either path triggers
+// the cooldown for all subsequent attempts on either path.
+//
+// Implementations must be goroutine-safe and cheap to call; Allow is
+// invoked on every viewer attempt and Record* on every outcome. The
+// concrete implementation lives in circuit_breaker.go (channelBreaker);
+// the interface is exposed here so transmux can take it without
+// importing the proxy struct.
+type ChannelGate interface {
+	Allow(channelID string) (bool, time.Duration)
+	RecordSuccess(channelID string)
+	RecordFailure(channelID string)
+}
+
+// defaultTransmuxUserAgent is the UA we send upstream when the caller
+// doesn't override it. Many Xtream Codes panels gate on UA and serve
+// either an HTML error page or a different codec to the default
+// `Lavf/<version>` ffmpeg sends, which manifests downstream as the
+// dreaded "Invalid data found when processing input" / exit status 8.
+// Mirroring the prober's UA keeps both planes consistent.
+const defaultTransmuxUserAgent = "VLC/3.0.20 LibVLC/3.0.20"
+
+// ffmpegStderrTailLines is how many of ffmpeg's stderr lines we keep
+// in memory per session. Sized to capture the cluster of warnings +
+// the actual fatal error line that ffmpeg prints right before exiting
+// (typically <20 lines on a real failure) without growing unbounded
+// for sessions that log warnings continuously over hours.
+const ffmpegStderrTailLines = 64
 
 // segmentNamePattern matches the segment names ffmpeg writes with the
 // `seg-%05d.ts` filename template we pass it. Used to validate
@@ -128,6 +162,24 @@ type TransmuxManagerConfig struct {
 	// ReaperInterval controls how often the idle reaper sweeps. Must
 	// be much smaller than IdleTimeout. Default 5 s.
 	ReaperInterval time.Duration
+
+	// UserAgent is sent to upstream by ffmpeg's HTTP demuxer. Empty
+	// means use defaultTransmuxUserAgent. Override only when a
+	// specific provider needs a different fingerprint.
+	UserAgent string
+
+	// Gate is the optional per-channel circuit breaker. When set, the
+	// manager refuses GetOrStart with a wrapped CircuitOpenError if
+	// Allow returns false, and records success/failure of each spawn
+	// so the breaker state stays in sync with the proxy plane.
+	Gate ChannelGate
+
+	// Reporter is the optional channel-health sink. Mirrors what the
+	// stream proxy does: success when the session reaches first
+	// segment, failure when ffmpeg exits before producing one. Lets a
+	// transmux-only failure show up as "unhealthy" in the admin UI
+	// without the prober having to discover it on its next pass.
+	Reporter ChannelHealthReporter
 }
 
 // TransmuxManager owns and orchestrates per-channel ffmpeg sessions.
@@ -159,6 +211,18 @@ type TransmuxSession struct {
 
 	ready     chan struct{} // closed when first segment file is observable
 	readyOnce sync.Once
+
+	// outcomeOnce ensures the breaker / reporter see exactly one
+	// success XOR failure per spawn attempt. Without it, a session
+	// that produces a segment then crashes minutes later would record
+	// success then failure, double-counting.
+	outcomeOnce sync.Once
+
+	// stderrTail is the bounded ring of recent ffmpeg stderr lines.
+	// Drained on exit so the operator log includes the actual reason
+	// ffmpeg died ("Connection refused", "401 Unauthorized", …) and
+	// not just "exit status 8".
+	stderrTail *stderrRing
 
 	// lastTouchUnixNano is read by the reaper without holding the
 	// manager lock. Stored as int64 so atomic reads/writes are cheap
@@ -196,6 +260,9 @@ func NewTransmuxManager(cfg TransmuxManagerConfig, logger *slog.Logger) *Transmu
 		// can rely on this fallback.
 		cfg.CacheDir = filepath.Join(os.TempDir(), "hubplay-iptv-hls")
 	}
+	if cfg.UserAgent == "" {
+		cfg.UserAgent = defaultTransmuxUserAgent
+	}
 
 	m := &TransmuxManager{
 		cfg:      cfg,
@@ -213,6 +280,12 @@ func NewTransmuxManager(cfg TransmuxManagerConfig, logger *slog.Logger) *Transmu
 // segment (bounded by ReadyTimeout). Calling this concurrently with
 // the same channel ID coalesces into a single spawn — the second
 // caller waits on the same Ready signal.
+//
+// If a circuit-breaker gate is configured and the channel is in
+// cooldown, returns a *CircuitOpenError without spawning. This is the
+// load-bearing protection against the fork-bomb scenario where a dead
+// upstream causes the player to retry the manifest every second and
+// every retry spawned a fresh ffmpeg process that died in 200 ms.
 func (m *TransmuxManager) GetOrStart(ctx context.Context, channelID, upstreamURL string) (*TransmuxSession, error) {
 	if channelID == "" {
 		return nil, fmt.Errorf("iptv-transmux: empty channel ID")
@@ -224,9 +297,18 @@ func (m *TransmuxManager) GetOrStart(ctx context.Context, channelID, upstreamURL
 	m.mu.Lock()
 	if s, ok := m.sessions[channelID]; ok && !s.stopped.Load() {
 		// Existing session: bump touch + wait on its ready channel.
+		// Skip the gate — an already-running session means we already
+		// proved the upstream is reachable; no point fast-failing live
+		// viewers because of stale failure history.
 		s.lastTouchUnixNano.Store(time.Now().UnixNano())
 		m.mu.Unlock()
 		return m.waitReady(ctx, s)
+	}
+	if m.cfg.Gate != nil {
+		if allowed, retryAfter := m.cfg.Gate.Allow(channelID); !allowed {
+			m.mu.Unlock()
+			return nil, &CircuitOpenError{ChannelID: channelID, RetryAfter: retryAfter}
+		}
 	}
 	if len(m.sessions) >= m.cfg.MaxSessions {
 		m.mu.Unlock()
@@ -236,9 +318,55 @@ func (m *TransmuxManager) GetOrStart(ctx context.Context, channelID, upstreamURL
 	s, err := m.startLocked(channelID, upstreamURL)
 	m.mu.Unlock()
 	if err != nil {
+		// Failure to even spawn ffmpeg counts against the breaker so
+		// repeated config / fs / fork errors trip the cooldown.
+		m.recordFailure(s, channelID, err)
 		return nil, err
 	}
 	return m.waitReady(ctx, s)
+}
+
+// recordFailure routes a single failure outcome to the gate + reporter
+// at most once per session. Safe to call with a nil session (covers
+// the path where startLocked failed before producing one).
+func (m *TransmuxManager) recordFailure(s *TransmuxSession, channelID string, err error) {
+	once := func() {
+		if m.cfg.Gate != nil {
+			m.cfg.Gate.RecordFailure(channelID)
+		}
+		if m.cfg.Reporter != nil {
+			// Use a fresh, bounded context: the original request ctx is
+			// usually cancelled by the time we get here, and the
+			// reporter's UPDATE shouldn't be tied to a viewer's session.
+			rctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			m.cfg.Reporter.RecordProbeFailure(rctx, channelID, err)
+		}
+	}
+	if s == nil {
+		once()
+		return
+	}
+	s.outcomeOnce.Do(once)
+}
+
+// recordSuccess routes a single success outcome to the gate + reporter.
+// Idempotent on the session via outcomeOnce so repeat ready signals
+// (during long-lived sessions) don't double-tick.
+func (m *TransmuxManager) recordSuccess(s *TransmuxSession, channelID string) {
+	if s == nil {
+		return
+	}
+	s.outcomeOnce.Do(func() {
+		if m.cfg.Gate != nil {
+			m.cfg.Gate.RecordSuccess(channelID)
+		}
+		if m.cfg.Reporter != nil {
+			rctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			m.cfg.Reporter.RecordProbeSuccess(rctx, channelID)
+		}
+	})
 }
 
 // startLocked must be called with m.mu held. It spawns ffmpeg, wires
@@ -257,15 +385,26 @@ func (m *TransmuxManager) startLocked(channelID, upstreamURL string) (*TransmuxS
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	args := buildTransmuxFFmpegArgs(upstreamURL, workDir)
+	args := buildTransmuxFFmpegArgs(upstreamURL, workDir, m.cfg.UserAgent)
 	cmd := exec.CommandContext(ctx, m.cfg.FFmpegPath, args...)
 	cmd.Dir = workDir
 	// Detach from parent terminal — we never want ffmpeg to read
 	// stdin or attach to a controlling TTY (it does both by default
 	// in some builds, which can wedge a server with no TTY).
 	cmd.Stdin = nil
-	// stderr captured by the kernel via inherited file descriptor;
-	// ffmpeg is configured `-loglevel warning` so volume is bounded.
+
+	// Capture stderr through a pipe so we can both ring-buffer the
+	// last N lines (for the exit log) and tee them back to the
+	// container log at debug volume. Without this, "exit status 8"
+	// is opaque — operators have to docker exec ffmpeg by hand to
+	// reproduce. The ring is intentionally small (~64 lines): ffmpeg's
+	// fatal message is always within the last few lines before exit.
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		cancel()
+		_ = os.RemoveAll(workDir)
+		return nil, fmt.Errorf("iptv-transmux: stderr pipe: %w", err)
+	}
 
 	session := &TransmuxSession{
 		ChannelID:   channelID,
@@ -276,14 +415,21 @@ func (m *TransmuxManager) startLocked(channelID, upstreamURL string) (*TransmuxS
 		cancel:      cancel,
 		done:        make(chan struct{}),
 		ready:       make(chan struct{}),
+		stderrTail:  newStderrRing(ffmpegStderrTailLines),
 	}
 	session.lastTouchUnixNano.Store(time.Now().UnixNano())
 
 	if err := cmd.Start(); err != nil {
 		cancel()
+		_ = stderrPipe.Close()
 		_ = os.RemoveAll(workDir)
 		return nil, fmt.Errorf("iptv-transmux: start ffmpeg: %w", err)
 	}
+
+	// Drain stderr in a goroutine. The reader exits when the pipe is
+	// closed (which happens automatically when ffmpeg exits), so we
+	// don't need explicit teardown.
+	go session.stderrTail.consume(stderrPipe)
 
 	m.sessions[channelID] = session
 	m.logger.Info("transmux session started",
@@ -303,13 +449,35 @@ func (m *TransmuxManager) startLocked(channelID, upstreamURL string) (*TransmuxS
 }
 
 // processWatcher waits for ffmpeg to exit, then evicts the session.
+//
+// Outcome routing: if the session never produced a segment, the spawn
+// counts as a failure for the breaker + health reporter. If it did,
+// the success was already recorded by readyWatcher and we only log.
+// outcomeOnce on the session ensures we don't double-record either way.
 func (m *TransmuxManager) processWatcher(s *TransmuxSession) {
 	defer close(s.done)
 	err := s.cmd.Wait()
-	if err != nil {
+	stderrTail := s.stderrTail.String()
+	wasReady := isReady(s)
+	switch {
+	case err != nil && !wasReady:
+		// Spawn never reached first segment. This is the case the
+		// breaker exists for — repeat occurrences trip the cooldown.
+		m.logger.Info("transmux ffmpeg exited before first segment",
+			"channel", s.ChannelID,
+			"error", err,
+			"ffmpeg_stderr_tail", stderrTail)
+		m.recordFailure(s, s.ChannelID, fmt.Errorf("ffmpeg exit before ready: %w (stderr: %s)", err, stderrTail))
+	case err != nil:
+		// Late crash after the session served at least one segment.
+		// The first-segment success already counted; treat the late
+		// exit as informational so a single mid-stream blip doesn't
+		// reopen the breaker against a working channel.
 		m.logger.Info("transmux ffmpeg exited",
-			"channel", s.ChannelID, "error", err)
-	} else {
+			"channel", s.ChannelID,
+			"error", err,
+			"ffmpeg_stderr_tail", stderrTail)
+	default:
 		m.logger.Info("transmux ffmpeg exited cleanly", "channel", s.ChannelID)
 	}
 	m.evict(s)
@@ -341,6 +509,7 @@ func (m *TransmuxManager) readyWatcher(s *TransmuxSession) {
 		case <-ticker.C:
 			if hasSegment(s.WorkDir) {
 				s.readyOnce.Do(func() { close(s.ready) })
+				m.recordSuccess(s, s.ChannelID)
 				return
 			}
 		}
@@ -569,6 +738,69 @@ func clearWorkDir(dir string) error {
 	return nil
 }
 
+// stderrRing is a goroutine-safe FIFO of the last N stderr lines from
+// ffmpeg. We use it instead of a full buffer because a session that
+// runs for hours produces tens of thousands of warning lines and the
+// only one operators ever care about is the fatal one right before
+// exit. Newline-delimited; binary garbage is silently truncated.
+type stderrRing struct {
+	mu    sync.Mutex
+	lines []string
+	max   int
+}
+
+func newStderrRing(max int) *stderrRing {
+	if max <= 0 {
+		max = 16
+	}
+	return &stderrRing{max: max, lines: make([]string, 0, max)}
+}
+
+// consume reads from r line-by-line until EOF, keeping the last `max`
+// lines. Lines longer than 4 KiB are truncated to keep ffmpeg's
+// occasional megabyte-long debug spew from blowing up RAM. Binary on
+// stderr (rare; ffmpeg only emits it with -loglevel debug) is best-
+// effort decoded as UTF-8 bytes; bufio.Scanner will return whatever
+// bytes precede the next \n.
+func (r *stderrRing) consume(rd io.Reader) {
+	scanner := bufio.NewScanner(rd)
+	// 4 KiB buffer per line covers every ffmpeg warning we've ever
+	// seen in production; the ring will rotate before they'd matter.
+	scanner.Buffer(make([]byte, 4096), 4096)
+	for scanner.Scan() {
+		r.push(scanner.Text())
+	}
+	// Scanner errors (e.g. closed pipe on shutdown) are intentionally
+	// ignored — losing the last line of a torn-down session is fine.
+}
+
+func (r *stderrRing) push(line string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.lines) >= r.max {
+		// Drop the oldest line (FIFO). Slice trick: re-use the backing
+		// array by shifting in place rather than allocating.
+		copy(r.lines, r.lines[1:])
+		r.lines = r.lines[:len(r.lines)-1]
+	}
+	r.lines = append(r.lines, line)
+}
+
+// String returns the accumulated tail joined by " | ". Empty when the
+// session has not produced any stderr (ffmpeg is silent at -loglevel
+// warning unless something goes wrong).
+func (r *stderrRing) String() string {
+	if r == nil {
+		return ""
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.lines) == 0 {
+		return ""
+	}
+	return strings.Join(r.lines, " | ")
+}
+
 // buildTransmuxFFmpegArgs constructs the argv for the live
 // MPEG-TS → HLS transmux pipeline. `-c copy` is the load-bearing
 // choice: we never re-encode, so CPU usage is dominated by mux/demux
@@ -613,12 +845,23 @@ func clearWorkDir(dir string) error {
 // hls.js treats it as a sliding window. `delete_segments` keeps disk
 // usage bounded. `independent_segments` is the right hint for
 // sliding-window live HLS.
-func buildTransmuxFFmpegArgs(upstreamURL, workDir string) []string {
+//
+// `-user_agent` matters more than it looks. Many Xtream Codes panels
+// gate on UA: with the default `Lavf/<version>` ffmpeg sends, the
+// upstream returns either an HTML error page (decoded by ffmpeg as
+// "Invalid data found when processing input" → exit 8) or a different
+// codec profile that doesn't survive `-c copy`. Mirroring the prober's
+// `VLC/3.0.20` UA is the same workaround every IPTV player ships.
+func buildTransmuxFFmpegArgs(upstreamURL, workDir, userAgent string) []string {
+	if userAgent == "" {
+		userAgent = defaultTransmuxUserAgent
+	}
 	return []string{
 		"-hide_banner",
 		"-loglevel", "warning",
 		"-nostdin",
 		"-fflags", "+genpts+discardcorrupt",
+		"-user_agent", userAgent,
 		"-rtbufsize", "50M",
 		"-max_delay", "5000000",
 		"-reconnect", "1",
