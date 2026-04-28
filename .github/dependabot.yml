@@ -1,0 +1,56 @@
+# Dependabot — weekly dependency updates.
+#
+# Three ecosystems live in this repo:
+#   - go.mod / go.sum at the root (Go backend).
+#   - web/package.json (pnpm-managed React frontend).
+#   - .github/workflows/ (action versions).
+#
+# Each ecosystem has its own update cadence and PR limits so a quiet
+# week doesn't get drowned out by an avalanche of patch bumps and a
+# busy week stays merge-able by one human.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    # Group all patch + minor updates into one PR per week. Majors get
+    # their own PR each so we never miss a deliberate-review version
+    # bump in the noise.
+    groups:
+      go-deps:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      web-deps:
+        update-types:
+          - minor
+          - patch
+    # React 19 + Vite 7 + Tailwind v4 are intentional pins; major bumps
+    # are owner-decisions, not automated PRs.
+    ignore:
+      - dependency-name: react
+        update-types: [version-update:semver-major]
+      - dependency-name: react-dom
+        update-types: [version-update:semver-major]
+      - dependency-name: vite
+        update-types: [version-update:semver-major]
+      - dependency-name: tailwindcss
+        update-types: [version-update:semver-major]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
