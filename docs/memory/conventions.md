@@ -508,3 +508,51 @@ async refresh() {
 
 Aplica a cualquier dedup pattern, mutex de promise, slot in-flight
 en un cliente HTTP, etc.
+
+---
+
+## Cuándo trocear un fichero gordo (y cuándo NO)
+
+Aprendido durante el refactor SRP del 2026-04-28 (late PM). Antes de
+hacer split de un fichero grande, revisar la siguiente checklist —
+cumplir 1 punto NO es suficiente, hace falta combinar varios:
+
+**Trocear cuando**:
+- El fichero mezcla responsabilidades conceptualmente independientes
+  (auth + media + IPTV en `hooks.ts`; form state + modal lifecycle +
+  per-row card + iptv-org catalogues en `LibrariesAdmin.tsx`).
+- Hay copy-paste activo entre dos funciones (Select + Upload en
+  `image.go` con los mismos 9 pasos).
+- Una "regla de negocio" vive en una capa equivocada (`dedupeSeasons`
+  era lógica de items domain dentro de un handler).
+- Decoraciones inline (icons SVG, slug catalogues hardcoded) ocupan
+  >100 líneas y no son la responsabilidad del fichero.
+
+**NO trocear cuando**:
+- El fichero es largo pero cohesivo y cada función justifica su
+  tamaño por dominio (`scanner.go` 1126 líneas: enrichment de movies/
+  series/episodes/seasons + filesystem walk + image fetch — separar
+  empeora navegación porque las funciones se llaman entre sí).
+- Sería un split por "tamaño" sin criterio (`api/client.ts` 953
+  líneas: una sola responsabilidad clara, método/línea limpio).
+- Habría que inventar abstracciones nuevas (interfaces, layers, DI
+  containers) sólo para justificar el split. El criterio es
+  relocalizar lo que ya existe, no añadir indirecciones.
+
+### Reglas técnicas del split
+
+1. **Mantener back-compat de imports**. Re-exportar desde el fichero
+   original como barrel; los call sites NO deben editarse en el
+   mismo PR.
+2. **Tests verdes tras cada commit**, no al final. Permite revert
+   granular.
+3. **Cero abstracciones nuevas**. Si después del split necesitas
+   inyectar algo o crear una interfaz, el split estaba mal pensado;
+   reabsorbe y vuelve a planear.
+4. **Carpetas en camelCase** que matchee el page padre (`itemDetail/`
+   bajo `pages/ItemDetail.tsx`, `librariesAdmin/` bajo
+   `pages/admin/LibrariesAdmin.tsx`). Hace obvio quién es el dueño
+   sin abrir los ficheros.
+5. **Cada fichero <300 líneas** como heurística. Encima de eso, el
+   IDE empieza a costarse navegar; debajo, mover cosas a más
+   ficheros añade fricción sin ganancia.

@@ -1,6 +1,95 @@
 # Estado del proyecto
 
-> Snapshot: **2026-04-28 (PM)** — auditoría senior + remediación completa (15 commits) · Rama: `claude/modest-vaughan-2535e4` (mergeada a `main`) · **tests: backend verde excepto Windows-specific skipped · frontend 290/290 · tsc -b 0 · docker rebuild requerido para que los cambios entren en producción**
+> Snapshot: **2026-04-28 (late PM)** — refactor SRP/responsabilidades: 6 ficheros gigantes troceados sin sobre-ingeniería · Rama: `claude/modest-vaughan-2535e4` · **tests: backend verde · frontend 290/290 · tsc -b 0**
+
+---
+
+## 🪓 Sesión 2026-04-28 (late PM) — refactor SRP de los ficheros gordos
+
+Audit posterior a la sesión de seguridad/correctness (audit-2026-04-28.md):
+4 auditores buscaron código spaghetti, responsabilidades mezcladas y
+dependencias ocultas. Los 6 ficheros más largos del repo se trocearon
+sin añadir abstracciones nuevas — sólo relocalización a ficheros con
+responsabilidad única.
+
+### Resumen ratio antes/después
+
+| Fichero | Antes | Después | Δ |
+|---|---|---|---|
+| `web/src/api/hooks.ts` | 1174 | 23 (barrel) | −98% |
+| `web/src/pages/admin/LibrariesAdmin.tsx` | 1188 | 219 | −82% |
+| `web/src/pages/ItemDetail.tsx` | 636 | 352 | −45% |
+| `web/src/components/player/PlayerControls.tsx` | 793 | 585 | −26% |
+| `internal/api/handlers/items.go` | 771 | 698 | −10% |
+| `internal/api/handlers/image.go` | 595 | ~similar (dedupe interna) | net 0 |
+
+### Cambios (6 commits)
+
+1. **`ca02687`** PlayerControls: extracción de 13 icons SVG → `icons.tsx`
+   y 3 helpers de audio (codecLabel, channelLabel, enrichAudioTracks)
+   → `audioTracks.ts`. Lo segundo gana testabilidad sin React render.
+
+2. **`e6369dd`** items handler: `dedupeSeasons` (lógica de items
+   domain) movida del handler al `LibraryService` con test E2E real
+   en `library/service_test.go`. La regla "qué fila gana cuando hay
+   duplicados de seasons" ahora vive donde corresponde.
+
+3. **`99cfe9d`** hooks.ts: junk-drawer de 1174 líneas split en 12
+   ficheros por dominio bajo `web/src/api/hooks/` (auth, setup,
+   users, media, progress, channels, iptv-admin, channel-health,
+   providers, system, images, preferences) + `queryKeys.ts`
+   centralizado. `hooks.ts` queda como barrel re-export de 23 líneas
+   para back-compat de imports existentes.
+
+4. **`d0fe2e2`** ItemDetail: `usePlayback` hook (overlay state machine
+   completo: showPlayer/playerInfo/playingItemId/playError + handlers
+   handlePlay/handlePlayerEnded/handleClosePlayer + next-up prefetch +
+   session DELETE en close/retarget) → `pages/itemDetail/usePlayback.ts`.
+   Componentes de season (`SeasonEpisodes`/`SeasonGrid`/`SeasonCard`/
+   `SeasonEpisodeList`) → `pages/itemDetail/season.tsx`.
+
+5. **`2773130`** LibrariesAdmin: 1188 → 219 líneas. Split en 6 ficheros
+   bajo `pages/admin/librariesAdmin/`:
+   - `constants.ts` (catálogos iptv-org, LIBRARY_SECTIONS, helpers)
+   - `SectionChevron.tsx` (icono)
+   - `FilteredSelect.tsx` (select con filtro)
+   - `LibraryCard.tsx` (row + sus mutation hooks propios)
+   - `LibraryFormModal.tsx` (modal Add con todos los livetv branches)
+   - `LibraryEditModal.tsx` (modal Edit con hidratación desde target)
+
+6. **`0264cd8`** image handler: `Select` + `Upload` eran copy-paste de
+   los mismos 9 pasos. Extraídos a `persistManualImage` helper. El
+   flujo "guardar imagen manual" vive en un solo sitio; añadir un
+   paso (pre-resize, thumbnail bake, …) es one-diff en vez de two-
+   diffs siempre desincronizadas.
+
+### Skipped intencionalmente (no es over-engineering)
+
+- **`errorRecorder` global → DI**: el auditor lo flageó como hidden
+  dep (test blindness). Verificado: ningún test del codebase asierta
+  sobre métricas, así que la "ceguera" es teórica, no funcional. Para
+  self-hosted single-tenant el global pattern es claro y simple. Skip.
+- **`internal/api/handlers/iptv.go`** (1159 líneas): 4 sub-responsabilidades
+  detectadas pero el auditor lo marcó 🟡 ("rompible cuando moleste").
+  Hoy nadie iterando en él. Si entra feature nuevo se trocea.
+- **`internal/scanner/scanner.go`** (1126 líneas): 🟢 según auditor —
+  largo pero cohesivo, cada función justifica tamaño por dominio.
+- **Tests frontend de hooks críticos** (useLiveHls/useTrickplay/
+  useEventStream): seguía pendiente de la sesión anterior, sigue
+  pendiente.
+
+### Anti-patrones evitados durante el refactor
+
+1. **No se introdujo ningún wrapper / abstraction layer nuevo**.
+   Cada split fue extraer función/componente/hook que YA existía
+   pegado a una bola de barro a su propio fichero con responsabilidad
+   única. Cero `IService` interfaces de moda.
+2. **Cada split mantuvo back-compat de imports existentes** (barrel
+   re-export en hooks.ts). Cero touchpoints de call sites en otros
+   ficheros — el blast radius por commit fue 0 fuera del directorio
+   tocado.
+3. **Tests verde tras cada commit**, no al final. Permite revert
+   granular si algo se tuerce en producción.
 
 ---
 
