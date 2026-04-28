@@ -1029,11 +1029,24 @@ func TestIPTVHandler_RefreshM3U_AlreadyInProgress_Returns409(t *testing.T) {
 	env.svc.tryAcquireErr = fmt.Errorf("library lib-1: %w", iptv.ErrRefreshInProgress)
 
 	rr := env.do(http.MethodPost, "/api/v1/libraries/lib-1/iptv/refresh-m3u", "")
-	// ErrRefreshInProgress isn't a domain.AppError so the generic
-	// fallback maps to 500. We accept any 4xx/5xx — the behaviour
-	// we care about is that no goroutine fires when the lock is held.
-	if rr.Code == http.StatusAccepted {
-		t.Fatalf("got 202 for in-progress refresh; expected non-success, body: %s", rr.Body.String())
+	// 409 + structured body is the contract the frontend relies on to
+	// distinguish "join the in-flight refresh via SSE" from a hard
+	// failure. A regression here would land back on the old 500 path
+	// and revive the spurious error toast on legitimate races.
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("status: got %d want 409, body: %s", rr.Code, rr.Body.String())
+	}
+	var body struct {
+		Data struct {
+			LibraryID string `json:"library_id"`
+			Status    string `json:"status"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body.Data.LibraryID != "lib-1" || body.Data.Status != "in_progress" {
+		t.Fatalf("body data: got %+v", body.Data)
 	}
 	env.svc.mu.Lock()
 	defer env.svc.mu.Unlock()

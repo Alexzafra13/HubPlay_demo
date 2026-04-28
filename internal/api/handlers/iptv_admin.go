@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -75,7 +76,22 @@ func (h *IPTVHandler) RefreshM3U(w http.ResponseWriter, r *http.Request) {
 	// goroutines racing into the same lock.
 	release, err := h.svc.TryAcquireRefresh(libraryID)
 	if err != nil {
-		h.logger.Info("M3U refresh skipped: already in progress", "library", libraryID)
+		// ErrRefreshInProgress is a benign race (admin double-clicked,
+		// scheduler tick raced a manual refresh, frontend reconnected
+		// mid-import): respond 409 with structured body so the client
+		// can join the in-flight import via SSE instead of treating it
+		// as a hard failure. Anything else is unexpected and routes
+		// through the generic 500 handler.
+		if errors.Is(err, iptv.ErrRefreshInProgress) {
+			h.logger.Info("M3U refresh skipped: already in progress", "library", libraryID)
+			respondJSON(w, http.StatusConflict, map[string]any{
+				"data": map[string]any{
+					"library_id": libraryID,
+					"status":     "in_progress",
+				},
+			})
+			return
+		}
 		handleServiceError(w, r, err)
 		return
 	}

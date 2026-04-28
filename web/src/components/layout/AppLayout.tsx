@@ -4,6 +4,7 @@ import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
 import { TopBarSlotProvider } from './TopBarSlot';
 import { MiniPlayer } from '@/components/livetv/MiniPlayer';
+import { usePlaylistRefreshEvents } from '@/hooks/usePlaylistRefreshEvents';
 
 // ─── Props ──────────────────────────────────────────────────────────────────
 
@@ -36,6 +37,12 @@ function useIsMobile(breakpoint = 768) {
 // ─── AppLayout ──────────────────────────────────────────────────────────────
 
 export function AppLayout({ title }: AppLayoutProps) {
+  // App-wide listener for IPTV M3U refresh completion. Mounted here so
+  // every authenticated route picks up backend invalidations regardless
+  // of which page kicked off the import (or whether the kick came from
+  // the scheduler with no UI at all). See hook docstring for rationale.
+  usePlaylistRefreshEvents();
+
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const isMobile = useIsMobile();

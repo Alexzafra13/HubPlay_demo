@@ -21,3 +21,11 @@ web/dist/*
 
 /peliculas
 /series
+
+# Runtime cache (VOD transcode segments, IPTV HLS transmux work dirs).
+# Created by docker-compose volume mount; never tracked.
+/cache/
+
+# pnpm local store materialised when CI / Docker runs `pnpm install`
+# inside the repo with no shared global store.
+web/.pnpm-store/

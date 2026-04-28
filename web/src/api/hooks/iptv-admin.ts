@@ -15,10 +15,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseQueryOptions } from "@tanstack/react-query";
 import { api } from "../client";
 import { queryKeys } from "../queryKeys";
-import type {
-  ImportPublicIPTVResponse,
-  PreflightResult,
-  PublicCountry,
+import {
+  ApiError,
+  type ImportPublicIPTVResponse,
+  type PreflightResult,
+  type PublicCountry,
 } from "../types";
 
 export function usePublicCountries(
@@ -162,10 +163,21 @@ export function useRefreshM3U() {
             source.addEventListener("playlist.refresh_failed", onFailed);
 
             // Fire the POST after both listeners are attached. If
-            // the 202 itself fails (auth, 409 already-running, ...)
-            // we reject early and clean up.
+            // the 202 itself fails (auth, network, server error...)
+            // we reject early and clean up. The 409 case is special:
+            // a refresh is already in flight (admin double-clicked,
+            // scheduler raced a manual click, page reloaded mid-import).
+            // The SSE listener is already armed for `playlist.refreshed`
+            // / `playlist.refresh_failed`, so we just keep waiting
+            // instead of rejecting — the spinner stays on, and the
+            // mutation resolves with whichever outcome the in-flight
+            // import produces. This is what makes double-clicks and
+            // reloads non-destructive.
             api.refreshM3U(libraryId).catch((err) => {
               if (settled) return;
+              if (err instanceof ApiError && err.status === 409) {
+                return;
+              }
               cleanup();
               reject(err);
             });
