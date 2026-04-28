@@ -484,3 +484,168 @@ decoder pipeline declarable así).
 - **Solo encoder swap, sin `-hwaccel`**: rechazado. El decode SW de
   HEVC 10-bit es CPU-pesado; no aprovechar NVDEC / QSV decode es
   dejar la mitad del beneficio sobre la mesa.
+
+---
+
+## ADR-007 — Security headers como middleware compartido (no nginx-only)
+
+- **Fecha**: 2026-04-28
+- **Estado**: Aceptado
+
+### Contexto
+
+El servidor de producción detrás de nginx (`deploy/nginx/hubplay.conf`)
+ya emitía X-Frame-Options, X-Content-Type-Options, Referrer-Policy y
+HSTS. La opción "barata" era dejarlo todo ahí y no tocar el binario
+Go. Pero `make dev` y `make web-dev` arrancan el binary directo en LAN
+sin nginx delante; cualquier deployment que prescinda del proxy
+(Tailscale, Cloudflare Tunnel, port-forward casero) corre **sin un
+solo header de seguridad**. La instalación typical de un usuario
+self-hosted no es la nuestra con nginx — es Tailscale + binary
+directo.
+
+CSP además no estaba en ningún lado, ni en nginx — porque construir
+una whitelist correcta requiere conocer qué hosts externos cargan
+imágenes (TMDb, Fanart, YouTube ytimg) y qué dominios embebimos
+(YouTube nocookie, Vimeo, Google Fonts). Ese conocimiento vive en el
+código del SPA, no en la config del proxy.
+
+### Decisión
+
+Middleware Go en `internal/api/security_headers.go` que emite el
+juego completo (CSP/X-Frame/X-Content-Type/Referrer/CORP) en cada
+respuesta del API y del SPA bundle. Se monta antes de CORS para que
+los preflights también lleven los headers.
+
+HSTS es **condicional sobre TLS real**: `r.TLS != nil` o
+`X-Forwarded-Proto: https`. Nunca sobre HTTP plain LAN — los
+browsers lo ignoran ahí pero el log queda más limpio sin él.
+
+CSP se mantiene en el binary, NO se duplica en nginx, porque la
+fuente de verdad sobre "qué hosts externos cargo" es el frontend.
+
+### Consecuencias
+
+- Cobertura uniforme: cualquier deployment está protegido sin
+  depender del proxy. Tests propios en `security_headers_test.go`
+  pin la presencia de los headers críticos.
+- CSP estrecha por defecto. Añadir un host externo nuevo (CDN, embed
+  platform) significa tocar `security_headers.go` — explícito por
+  diseño. La alternativa "permitir todo" sería un blanket `*` que
+  invalida el sentido de tener CSP.
+- Nginx sigue añadiendo X-Frame/HSTS/etc. — defensa-en-profundidad,
+  no conflicto. Browsers toman el header del proxy o del backend
+  indistintamente.
+
+### Alternativas descartadas
+
+- **Solo nginx**: rechazada. Tailscale / Cloudflare Tunnel / dev mode
+  quedan sin headers — y son la mayoría de instalaciones.
+- **CSP en nginx**: rechazada. La whitelist de hosts externos vive
+  en el frontend; mantenerla en dos sitios garantiza divergencia.
+- **CSP report-only**: rechazada. Self-hosted single-tenant no tiene
+  un endpoint de reportes, y sin enforce el header no compra nada.
+
+---
+
+## ADR-008 — Event bus: política "no recover de handlers que cuelgan"
+
+- **Fecha**: 2026-04-28
+- **Estado**: Aceptado, supersede política implícita previa
+
+### Contexto
+
+`internal/event/bus.go` antes envolvía cada handler en dos
+goroutines: una externa con `select { <-done / <-timer.C }` y una
+interna corriendo el handler. En timeout, la externa hacía `<-done`
+incondicional — esperando indefinidamente a la interna. El comentario
+decía "the goroutine is NOT leaked". En la práctica, eso es leak
+disfrazado: si el handler nunca retorna, dos goroutines viven para
+siempre.
+
+Hoy nadie subscribe con un handler bloqueante (el SSE handler usa
+`select { case eventCh <- e: default: drop }`), así que no hay leak
+activo. Pero el patrón es frágil: el primer subscriber bloqueante
+que entre rompe la garantía.
+
+### Decisión
+
+Una sola goroutine por handler con `recover` para panics. Watchdog
+separado que loggea una vez si excede `slowHandlerThreshold` (30s) y
+**siempre sale** — sin esperar al `done`. Si un handler cuelga
+indefinidamente, leakea exactamente UNA goroutine (la del handler);
+el bus no intenta abortar código de caller arbitrario porque no hay
+forma segura de hacerlo.
+
+Comentario explícito en `Publish`: "subscribers are responsible for
+not blocking inside their handler". Es un contrato, no una sugerencia.
+
+### Consecuencias
+
+- Garantía clara: dispatch jamás bloquea sobre el handler. Watchdog
+  tampoco — siempre sale. Nuevo subscriber bloqueante leakea su
+  propia goroutine pero no la del bus.
+- El test suite existente (panic recovery, multiple subscribers,
+  unsubscribe idempotente, type isolation) sigue pasando sin cambios.
+- Se gana simplicidad: una capa de goroutine en vez de dos.
+
+### Alternativas descartadas
+
+- **`context.Context` por handler con cancel**: rechazada. Go no
+  permite cancelar goroutines arbitrarias; un handler que ignora el
+  ctx queda igual de colgado. Solo añade complejidad de API.
+- **Restringir Subscribe a handlers no-bloqueantes vía type system**:
+  imposible; cualquier `func(Event)` es una closure arbitraria.
+  Comentario + revisión de PR es la única defensa real.
+
+---
+
+## ADR-009 — Refresh dedup en cliente, no en servidor
+
+- **Fecha**: 2026-04-28
+- **Estado**: Aceptado
+
+### Contexto
+
+Discover y otras pantallas disparan ~5 queries en paralelo. Cuando la
+cookie de access ha expirado, las cinco reciben 401 simultáneamente y
+las cinco llaman a `ApiClient.refresh()`. El servidor es idempotente
+(`internal/auth/service.go` no rota el refresh token), así que las
+cinco cookies regrabadas son iguales — pero hay desperdicio (5 round-
+trips, 5 writes a `last_active`, 5 onAuthFailure si el refresh falla
+disparando 5 navegaciones a /login en el mismo tick).
+
+Dos sitios donde se puede deduplicar:
+
+1. **Servidor**: cache de "refresh in flight per session" → primera
+   llama hace el trabajo, las demás reciben la misma respuesta.
+2. **Cliente**: `ApiClient` cachea la promise in-flight → primera
+   llama dispara el fetch, las demás `await` la misma promise.
+
+### Decisión
+
+**Dedup en cliente.** En `web/src/api/client.ts`, `ApiClient.refresh()`
+guarda la promise in-flight en `this.refreshInFlight`. Llamadas
+posteriores devuelven la misma. Slot se limpia con `.then(clear,
+clear)` (no `.finally(clear)`, que crea una promise que mirror la
+rejection y vitest la flagea como unhandled).
+
+### Consecuencias
+
+- Una llamada de red en lugar de N por refresh oportunista. Listener
+  `onTokenRefresh` se invoca exactamente una vez. Failure-path llama a
+  `onAuthFailure` exactamente una vez también — el usuario aterriza
+  en /login una vez en lugar de N.
+- Server-side queda intocado: simple, idempotente, sin estado nuevo.
+  Si un cliente legacy no deduplica, el servidor sigue manejando los
+  N requests sin corrupción.
+
+### Alternativas descartadas
+
+- **Dedup en servidor**: rechazada. Requiere lock per-session +
+  cache de respuestas in-flight + invalidación correcta. Para self-
+  hosted single-tenant es over-engineering.
+- **Cliente dispara una sola query principal y deja que las otras
+  esperen**: rechazada. Acopla TanStack Query a la mecánica de
+  refresh; cualquier caller fuera de Query (websocket reconnect,
+  beacon) quedaría sin protección.

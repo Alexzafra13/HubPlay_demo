@@ -423,3 +423,88 @@ Reglas:
 - Helpers que usan varios componentes → fichero propio (`*.helpers.ts`).
 - Si una constante de UI se usa con un componente, mejor fichero aparte
   (ej. `categoryOrder.ts` separado de `CategoryChips.tsx`).
+
+---
+
+## Linter gate (`gosec`)
+
+CI corre `golangci-lint` con `gosec` activado, pero filtrado a
+**HIGH severity + HIGH confidence**. El nivel medium se audita
+manualmente cada cuatrimestre, no en CI, porque es ruido neto:
+
+- 27 findings medium en el snapshot 2026-04-28; 21 son falsos
+  positivos por sanitización vía `pathmap` (G304/G703) o allowlist
+  estática de columnas SQL en repos como `item_repository.go`
+  (G201). gosec no rastrea valores así.
+- Los 6 que quedan (G118 goroutines detached, G120 form parsing en
+  upload de imagen, G124 cookie attrs, G705 XSS taint, G710 open
+  redirect en stream/info) son decisiones contextuales del self-
+  hosted single-tenant. Cada uno merece un `#nosec` razonado, no un
+  fix automático.
+
+`.golangci.yml` excluye explícitamente G104, G304 y G703 con
+comentario sobre el porqué. Cualquier nueva exclusión va con
+justificación inline, no silenciosa.
+
+---
+
+## Iframe externos: lazy gates antes del load
+
+YouTube / Vimeo iframes cuestan ~700 KB de player JS + ~6 cross-
+origin connections cada vez que se montan. Un hero trailer no debe
+cargar el iframe **on mount** — debe cargarlo cuando los gates de
+a11y, network y visibilidad lo permiten.
+
+Patrón aplicado en `web/src/components/media/SeriesHero.tsx`:
+
+1. **`shouldSkipTrailer()` al mount** → si `prefers-reduced-motion`,
+   `connection.saveData`, `connection.effectiveType ∈ {slow-2g, 2g}`
+   o `sessionStorage["hubplay:trailers-dismissed"]`, render null. No
+   hay iframe.
+2. **`IntersectionObserver` con threshold 0.25** → solo se inicia el
+   timer de carga cuando el hero entra en viewport. Disconnect al
+   primer hit (no se reinicia).
+3. **`<link rel="preconnect">`** dropeado al document.head durante
+   la espera (2.5s), removido en cleanup. Reduce TTFB ~150 ms.
+4. **`<iframe>` montado solo después del flip** (no parked en
+   `about:blank`) → ahorra layout cost y wiring del iframe parent-
+   frame messaging.
+
+Replicar este patrón si entra otro embed externo (X.com, Twitch,
+SoundCloud, etc.). La regla es "cero peso de red por embed cuando el
+usuario no quiere o no ha visto el embed".
+
+---
+
+## Async cleanup en Promises
+
+`.finally(cleanup)` crea una promise nueva que **mirror la rejection**
+de la original. Si nadie observa esa promise, vitest (y Node) la
+flagean como unhandled rejection.
+
+Ocurre cuando se usa `.finally()` para side-effects de cleanup sobre
+una promise que se devuelve a otro caller:
+
+```ts
+// ❌ — la rejection del .finally(...) no la captura nadie
+async refresh() {
+  const inflight = this.doRefresh();
+  this.refreshInFlight = inflight;
+  inflight.finally(() => { this.refreshInFlight = null; });
+  return inflight;  // caller captura inflight, pero no el .finally
+}
+```
+
+```ts
+// ✅ — handlers explícitos no propagan rejection a la chain
+async refresh() {
+  const inflight = this.doRefresh();
+  this.refreshInFlight = inflight;
+  const clear = () => { this.refreshInFlight = null; };
+  inflight.then(clear, clear);
+  return inflight;
+}
+```
+
+Aplica a cualquier dedup pattern, mutex de promise, slot in-flight
+en un cliente HTTP, etc.

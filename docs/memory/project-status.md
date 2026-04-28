@@ -1,6 +1,67 @@
 # Estado del proyecto
 
-> Snapshot: **2026-04-28** (series detail UX overhaul — episode/season/trailer enrichment + Plex/Netflix-style hero) · Rama: `claude/episode-metadata` (mergeada a `main`) · **tests: backend `-race` 100% verde · frontend 289/289 · tsc -b 0**
+> Snapshot: **2026-04-28 (PM)** — auditoría senior + remediación completa (15 commits) · Rama: `claude/modest-vaughan-2535e4` (mergeada a `main`) · **tests: backend verde excepto Windows-specific skipped · frontend 290/290 · tsc -b 0 · docker rebuild requerido para que los cambios entren en producción**
+
+---
+
+## 🛡️ Sesión 2026-04-28 (PM) — auditoría senior + remediación
+
+Auditoría completa del codebase con 4 auditores LLM en paralelo
+(security backend / arquitectura Go / frontend / infra) seguida de
+remediación priorizada. Threat model asumido: **self-hosted single-
+tenant tipo Plex/Jellyfin** — los límites y TTLs reflejan ese contexto,
+no SaaS multi-cliente.
+
+Detalle completo en [`audit-2026-04-28.md`](audit-2026-04-28.md). Highlights:
+
+### Lo que entró (15 commits, todos en `main`)
+
+**Seguridad HTTP** — `internal/api/security_headers.go` middleware con
+CSP estricta (whitelist explícita TMDb/Fanart/YouTube/Vimeo/Google
+Fonts), X-Frame-Options DENY, X-Content-Type-Options nosniff,
+Referrer-Policy strict-origin-when-cross-origin, CORP same-origin, y
+HSTS condicional sobre TLS real. Tests propios. Verificado e2e con
+binary local en `:8098` antes del merge.
+
+**Frontend correctness** — `ApiClient.refresh()` deduplica concurrentes
+(5 queries paralelas con cookie expirada → 1 fetch + 1 onAuthFailure
+en vez de N); `useProgressReporter` cierra con `keepalive: true` para
+no perder los últimos 10 s al navegar; staleTime default 5 min → 60 s;
+HeroTrailer respeta `prefers-reduced-motion`, `connection.saveData`,
+viewport visibility y `sessionStorage` de dismiss antes de cargar el
+iframe de YouTube (~700 KB ahorrados en cada vista de serie de un
+usuario que no quiere trailer).
+
+**Hardening** — ffmpeg input wrapped en `file:` protocol; nginx mount
+narrow de letsencrypt (sólo `live/<domain>` y `archive/<domain>`);
+nginx gzip + rate-limits suaves (login 5 r/m, API 10 r/s burst=20,
+stream sin límite); `.golangci.yml` con `gosec` HIGH/HIGH (codebase
+ya pasaba 0 issues a ese nivel).
+
+**Calidad / CI** — Dependabot semanal agrupado para go/npm/actions;
+Trivy scan en `docker.yml` con SARIF a la pestaña Security; permisos
+GH Actions `contents: read` por defecto; `Modal` con focus trap; test
+Unix-only de `/etc` skipeado en Windows.
+
+### Lo que NO entró y por qué (deuda intencional)
+
+- CSRF binding a sesión — para self-hosted single-tenant, la ventana
+  de exfil del token actual no justifica la complejidad de session
+  state + rotación coordinada.
+- Refresh TTL 30d → 7d — Plex/Jellyfin dejan tokens indefinidos; lo
+  crítico es que estén hasheados (verificado, ya estaba bien).
+- gosec medium-severity sweep — 27 findings, mayoritariamente falsos
+  positivos por sanitización vía `pathmap`/allowlist. Merece PR
+  dedicado con `#nosec` razonados, no un drive-by.
+- Tests frontend de `useLiveHls` / `useTrickplay` / `useEventStream` —
+  pendiente para próxima sesión.
+
+### Hallazgos del audit que NO eran reales
+
+Cuatro claims de los auditores LLM que se desmontaron al abrir el
+código (refresh ya hasheado, SSE no leak, useLogout ya hace `clear()`,
+scanner ya respeta ctx). Documentados en `audit-2026-04-28.md §3` para
+que la próxima sesión no los persiga.
 
 ---
 
