@@ -36,11 +36,16 @@ linters-settings:
     #   G104 — overlaps with errcheck (already on by default).
     #   G304 — file path tainted; pathmap + filepath.Clean make this
     #          a false positive on every call site.
-    #   G703 — alias of G304 from the taint-analysis path; same reason.
+    #
+    # G703 (taint analysis alias of G304) and G115 (integer overflow)
+    # are NOT excluded here even though they would also be false-positive
+    # noise — the version of gosec bundled with golangci-lint v1.64.8
+    # doesn't know those rules yet, and listing unknown IDs makes
+    # `golangci-lint config verify` reject the file. Re-add them when
+    # the linter version pin in .github/workflows/ci.yml moves up.
     excludes:
       - G104
       - G304
-      - G703
     severity: high
     confidence: high
 

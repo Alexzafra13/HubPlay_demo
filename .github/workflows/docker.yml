@@ -108,7 +108,14 @@ jobs:
       # rebuild handles automatically.
       - name: Scan image with Trivy
         if: matrix.target == 'hwaccel' || github.event_name != 'pull_request'
-        uses: aquasecurity/trivy-action@0.28.0
+        # `@master` is what the official Aqua README recommends — the
+        # repo doesn't ship marketplace tags consistently (we tried
+        # @0.28.0, which doesn't resolve). Pin to a SHA instead of a
+        # branch when supply-chain hardening becomes a priority; for a
+        # self-hosted single-tenant server, the latency-of-fix on
+        # Trivy CVEs outweighs the supply-chain risk of trusting Aqua's
+        # master branch.
+        uses: aquasecurity/trivy-action@master
         with:
           image-ref: ${{ steps.meta.outputs.tags && fromJSON(steps.meta.outputs.json).tags[0] || format('hubplay:scan-{0}', github.sha) }}
           format: sarif
