@@ -180,6 +180,18 @@ func TestBuildFFmpegArgs_HWAccel_VideoToolbox_NoInputHwaccelFlag(t *testing.T) {
 	assertNotContains(t, args, "-hwaccel")
 }
 
+// TestBuildFFmpegArgs_InputUsesFileProtocol pins the `file:` prefix
+// in front of -i. Without it, ffmpeg parses any input that begins
+// with a dash as a flag — a real risk for filenames like
+// "-loglevel.mp4" or paths that some weirdly creative scanner might
+// produce. With the prefix the path is always treated verbatim.
+func TestBuildFFmpegArgs_InputUsesFileProtocol(t *testing.T) {
+	args := stream.BuildFFmpegArgs("/path/to/input.mkv", "/out",
+		stream.Profiles["720p"], 0, stream.HWAccelNone, "libx264")
+	assertContains(t, args, "-i", "file:/path/to/input.mkv")
+	assertNotContains(t, args, "/path/to/input.mkv") // raw path must NOT appear after -i
+}
+
 // assertContains checks that key and value appear consecutively in args.
 func assertContains(t *testing.T, args []string, key, value string) {
 	t.Helper()

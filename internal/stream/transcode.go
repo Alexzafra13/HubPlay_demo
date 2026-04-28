@@ -222,7 +222,15 @@ func BuildFFmpegArgs(input, outputDir string, profile Profile, startTime float64
 		args = append(args, "-ss", strconv.FormatFloat(startTime, 'f', 3, 64))
 	}
 
-	args = append(args, "-i", input)
+	// Prefix the input with `file:` so ffmpeg parses it as a local
+	// filename even if the path itself begins with `-`. Without the
+	// prefix a media file named e.g. `-loglevel.mp4` (perfectly legal
+	// on most filesystems) would be interpreted as the start of a new
+	// flag and break or, worse, take effect. The scanner produces
+	// absolute paths so this normally can't happen, but the cost of
+	// the prefix is one extra word in the args list and the upside is
+	// that we never have to think about it again.
+	args = append(args, "-i", "file:"+input)
 
 	// Video encoding
 	if profile.Name == "original" {
