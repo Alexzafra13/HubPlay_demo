@@ -68,6 +68,24 @@ type AuthEventListener = {
 export class ApiClient {
   private baseUrl: string;
   private authListener: AuthEventListener = {};
+  /**
+   * In-flight refresh promise, used to coalesce concurrent refreshes.
+   *
+   * When the access token has just expired and the page mounts several
+   * queries at once, every one of them hits 401 and would otherwise
+   * fire its own `/auth/refresh`. The server is idempotent — it keeps
+   * the same refresh token and just mints a new access cookie — so the
+   * extra round-trips aren't a correctness issue, but they:
+   *   - waste bandwidth and DB writes (each refresh updates last_active),
+   *   - produce N overwriting Set-Cookie responses that race the
+   *     subsequent retries,
+   *   - fan out into N onAuthFailure callbacks if the refresh fails,
+   *     bouncing the user to /login N times.
+   *
+   * Holding the in-flight promise here means every caller awaits the
+   * same network request and observes the same outcome.
+   */
+  private refreshInFlight: Promise<AuthResponse> | null = null;
 
   constructor(baseUrl = "") {
     this.baseUrl = baseUrl;
@@ -215,6 +233,36 @@ export class ApiClient {
   }
 
   async refresh(): Promise<AuthResponse> {
+    // Coalesce concurrent refreshes. Whichever caller arrives first
+    // installs a single in-flight promise; every later caller awaits it
+    // and observes the same outcome (success cookies, or the same
+    // failure that triggers a single onAuthFailure). The promise is
+    // cleared as soon as it settles so the *next* genuine 401 a few
+    // minutes later starts a fresh request rather than reusing a
+    // resolved one.
+    if (this.refreshInFlight) {
+      return this.refreshInFlight;
+    }
+    const inflight = this.doRefresh();
+    this.refreshInFlight = inflight;
+    // Clear the slot once the promise settles. We attach BOTH handlers
+    // (success and failure) instead of `.finally()` because a bare
+    // `.finally()` returns a new promise that mirrors inflight's
+    // rejection — and since no caller awaits that mirror, vitest
+    // (and Node) flag it as an unhandled rejection on every failed
+    // refresh. With explicit handlers the chain ends here and the
+    // original `inflight` rejection is delivered only to whoever
+    // awaited `refresh()`.
+    const clear = () => {
+      if (this.refreshInFlight === inflight) {
+        this.refreshInFlight = null;
+      }
+    };
+    inflight.then(clear, clear);
+    return inflight;
+  }
+
+  private async doRefresh(): Promise<AuthResponse> {
     // Refresh token is sent automatically via HTTP-only cookie.
     const data = await this.request<AuthResponse>("POST", "/auth/refresh", {
       body: {},

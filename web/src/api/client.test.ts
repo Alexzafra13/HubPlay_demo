@@ -116,6 +116,70 @@ describe("ApiClient", () => {
     expect(onTokenRefresh).toHaveBeenCalledWith("new-at", "new-rt");
   });
 
+  it("coalesces concurrent refresh calls into a single network request", async () => {
+    const authResp = {
+      access_token: "new-at",
+      refresh_token: "new-rt",
+      expires_in: 900,
+      user: { id: "1", username: "admin", display_name: "A", role: "admin", created_at: "" },
+    };
+
+    // Stall the response so multiple callers pile onto the same in-flight
+    // promise before any of them resolves.
+    let resolveFetch!: (value: unknown) => void;
+    const fetchMock = vi.fn().mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveFetch = resolve;
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const onTokenRefresh = vi.fn();
+    client.setAuthListener({ onTokenRefresh });
+
+    // Fire five concurrent refreshes BEFORE the network call completes.
+    const promises = [
+      client.refresh(),
+      client.refresh(),
+      client.refresh(),
+      client.refresh(),
+      client.refresh(),
+    ];
+
+    // Exactly one fetch should have been issued.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // Now release the response and check every caller observed it.
+    resolveFetch({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve(authResp),
+    });
+
+    const results = await Promise.all(promises);
+    expect(results).toHaveLength(5);
+    for (const r of results) {
+      expect(r.access_token).toBe("new-at");
+    }
+
+    // Listener fired exactly once even though five callers awaited.
+    expect(onTokenRefresh).toHaveBeenCalledTimes(1);
+
+    // After settling, a fresh refresh starts a new network call.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve(authResp),
+      }),
+    );
+    await client.refresh();
+    // The second listener call comes from the post-settlement refresh.
+    expect(onTokenRefresh).toHaveBeenCalledTimes(2);
+  });
+
   it("calls onAuthFailure on 401 when refresh fails", async () => {
     // First call: 401, second call (refresh): also fails
     const fetchMock = vi
