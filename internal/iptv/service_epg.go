@@ -89,7 +89,7 @@ func (s *Service) RefreshEPG(ctx context.Context, libraryID string) (int, error)
 	workedCount := 0
 
 	for _, src := range sources {
-		progs, matched, orphans, fetchErr := s.refreshOneSource(ctx, src, idx, ownedByChannel)
+		progs, matched, orphans, fetchErr := s.refreshOneSource(ctx, src, idx, ownedByChannel, lib.TLSInsecure)
 		totalOrphans += orphans
 		if fetchErr != nil {
 			s.logger.Warn("EPG source failed",
@@ -176,8 +176,9 @@ func (s *Service) refreshOneSource(
 	src *db.LibraryEPGSource,
 	idx *channelIndex,
 	alreadyOwned map[string][]*db.EPGProgram,
+	tlsInsecure bool,
 ) (map[string][]*db.EPGProgram, int, int, error) {
-	body, err := s.fetchURL(ctx, src.URL)
+	body, err := s.fetchURL(ctx, src.URL, tlsInsecure)
 	if err != nil {
 		return nil, 0, 0, fmt.Errorf("fetch EPG: %w", err)
 	}

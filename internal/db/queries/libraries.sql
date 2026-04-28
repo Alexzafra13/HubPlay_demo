@@ -4,8 +4,8 @@
 
 -- name: InsertLibrary :exec
 INSERT INTO libraries (id, name, content_type, scan_mode, scan_interval,
-    m3u_url, epg_url, refresh_interval, language_filter, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    m3u_url, epg_url, refresh_interval, language_filter, tls_insecure, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: InsertLibraryPath :exec
 INSERT INTO library_paths (library_id, path) VALUES (?, ?);
@@ -14,7 +14,7 @@ INSERT INTO library_paths (library_id, path) VALUES (?, ?);
 SELECT id, name, content_type, scan_mode, COALESCE(scan_interval, '6h') AS scan_interval,
        COALESCE(m3u_url, '') AS m3u_url, COALESCE(epg_url, '') AS epg_url,
        COALESCE(refresh_interval, '24h') AS refresh_interval,
-       language_filter,
+       language_filter, tls_insecure,
        created_at, updated_at
 FROM libraries
 WHERE id = ?;
@@ -23,14 +23,15 @@ WHERE id = ?;
 SELECT id, name, content_type, scan_mode, COALESCE(scan_interval, '6h') AS scan_interval,
        COALESCE(m3u_url, '') AS m3u_url, COALESCE(epg_url, '') AS epg_url,
        COALESCE(refresh_interval, '24h') AS refresh_interval,
-       language_filter,
+       language_filter, tls_insecure,
        created_at, updated_at
 FROM libraries
 ORDER BY name;
 
 -- name: UpdateLibrary :execrows
 UPDATE libraries SET name = ?, content_type = ?, scan_mode = ?, scan_interval = ?,
-       m3u_url = ?, epg_url = ?, refresh_interval = ?, language_filter = ?, updated_at = ?
+       m3u_url = ?, epg_url = ?, refresh_interval = ?, language_filter = ?,
+       tls_insecure = ?, updated_at = ?
 WHERE id = ?;
 
 -- name: DeleteLibrary :execrows
@@ -57,7 +58,7 @@ SELECT l.id, l.name, l.content_type, l.scan_mode,
        COALESCE(l.m3u_url, '') AS m3u_url,
        COALESCE(l.epg_url, '') AS epg_url,
        COALESCE(l.refresh_interval, '24h') AS refresh_interval,
-       l.language_filter,
+       l.language_filter, l.tls_insecure,
        l.created_at, l.updated_at
 FROM libraries l
 LEFT JOIN library_access la ON la.library_id = l.id AND la.user_id = ?

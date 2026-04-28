@@ -42,7 +42,7 @@ func (s *Service) RefreshM3U(ctx context.Context, libraryID string) (int, error)
 
 	s.logger.Info("refreshing M3U playlist", "library", libraryID, "url", lib.M3UURL)
 
-	body, err := s.fetchURL(ctx, lib.M3UURL)
+	body, err := s.fetchURL(ctx, lib.M3UURL, lib.TLSInsecure)
 	if err != nil {
 		return 0, fmt.Errorf("fetch M3U: %w", err)
 	}

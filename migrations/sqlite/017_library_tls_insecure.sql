@@ -1,0 +1,19 @@
+-- +goose Up
+-- Lets an operator opt a single IPTV library out of TLS certificate
+-- validation when fetching the M3U playlist or its associated XMLTV
+-- EPG sources. Off by default — explicit, per-library, so a typo
+-- can't suddenly weaken every fetch the server makes.
+--
+-- Why this exists: providers in the IPTV space routinely ship
+-- expired Let's Encrypt certs (90-day rotation forgotten),
+-- self-signed certs, or hostnames that don't match the cert. A
+-- strict-only client refuses to talk to them, the user sees an
+-- empty channel list and has no obvious recourse. Threadfin /
+-- xTeVe / Tuliprox / Dispatcharr all expose the same toggle for
+-- the same reason — this column is the same idea ported here.
+--
+-- Scope: the flag ONLY changes the HTTP client used to fetch the
+-- M3U / EPG documents. The stream proxy keeps strict verification
+-- on (clients trust HubPlay to deliver verified bytes; weakening
+-- the chain there would be worse than no toggle at all).
+ALTER TABLE libraries ADD COLUMN tls_insecure INTEGER NOT NULL DEFAULT 0;

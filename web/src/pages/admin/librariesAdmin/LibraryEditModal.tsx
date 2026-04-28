@@ -12,6 +12,7 @@ import { FolderBrowser } from "@/components/setup/FolderBrowser";
 import { useUpdateLibrary } from "@/api/hooks";
 import type { Library } from "@/api/types";
 import { LanguageMultiSelect } from "./LanguageMultiSelect";
+import { TLSInsecureToggle } from "./TLSInsecureToggle";
 
 interface LibraryEditModalProps {
   target: Library | null;
@@ -27,6 +28,7 @@ export function LibraryEditModal({ target, onClose }: LibraryEditModalProps) {
   const [m3uURL, setM3UURL] = useState("");
   const [epgURL, setEPGURL] = useState("");
   const [languageFilter, setLanguageFilter] = useState<string[]>([]);
+  const [tlsInsecure, setTLSInsecure] = useState(false);
   const [showBrowse, setShowBrowse] = useState(false);
 
   // Hydrate from target on each open. `target` is the source of truth;
@@ -38,6 +40,7 @@ export function LibraryEditModal({ target, onClose }: LibraryEditModalProps) {
     setM3UURL(target.m3u_url ?? "");
     setEPGURL(target.epg_url ?? "");
     setLanguageFilter(target.language_filter ?? []);
+    setTLSInsecure(target.tls_insecure ?? false);
   }, [target]);
 
   function handleSubmit(e: FormEvent) {
@@ -60,6 +63,7 @@ export function LibraryEditModal({ target, onClose }: LibraryEditModalProps) {
             // "leave as-is" and an empty array as "clear filter". We
             // want explicit, so we always provide it.
             language_filter: languageFilter,
+            tls_insecure: tlsInsecure,
           },
         },
         { onSuccess: onClose },
@@ -117,6 +121,11 @@ export function LibraryEditModal({ target, onClose }: LibraryEditModalProps) {
               <LanguageMultiSelect
                 value={languageFilter}
                 onChange={setLanguageFilter}
+              />
+
+              <TLSInsecureToggle
+                value={tlsInsecure}
+                onChange={setTLSInsecure}
               />
             </>
           ) : (

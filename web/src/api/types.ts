@@ -68,6 +68,14 @@ export interface Library {
    * `length === 0`.
    */
   language_filter: string[];
+  /**
+   * IPTV-only: when true, the M3U / EPG fetcher skips TLS
+   * certificate verification for THIS library only. Used for
+   * providers shipping expired Let's Encrypt or self-signed certs.
+   * Off by default. Has no effect on the stream proxy (which keeps
+   * strict verification regardless).
+   */
+  tls_insecure: boolean;
 }
 
 export interface CreateLibraryRequest {
@@ -84,6 +92,11 @@ export interface CreateLibraryRequest {
    * / undefined means no filter.
    */
   language_filter?: string[];
+  /**
+   * IPTV-only. Skip TLS verification when fetching M3U / EPG.
+   * Defaults to false on the server when omitted.
+   */
+  tls_insecure?: boolean;
 }
 
 export interface UpdateLibraryRequest {
@@ -98,6 +111,8 @@ export interface UpdateLibraryRequest {
    * filter (no language filtering at import). Non-empty = replace.
    */
   language_filter?: string[];
+  /** IPTV-only. undefined = leave unchanged. */
+  tls_insecure?: boolean;
 }
 
 // ─── Media Items ────────────────────────────────────────────────────────────

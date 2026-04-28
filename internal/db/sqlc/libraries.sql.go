@@ -36,7 +36,7 @@ const getLibraryByID = `-- name: GetLibraryByID :one
 SELECT id, name, content_type, scan_mode, COALESCE(scan_interval, '6h') AS scan_interval,
        COALESCE(m3u_url, '') AS m3u_url, COALESCE(epg_url, '') AS epg_url,
        COALESCE(refresh_interval, '24h') AS refresh_interval,
-       language_filter,
+       language_filter, tls_insecure,
        created_at, updated_at
 FROM libraries
 WHERE id = ?
@@ -52,6 +52,7 @@ type GetLibraryByIDRow struct {
 	EpgUrl          string    `json:"epg_url"`
 	RefreshInterval string    `json:"refresh_interval"`
 	LanguageFilter  string    `json:"language_filter"`
+	TlsInsecure     int64     `json:"tls_insecure"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
 }
@@ -69,6 +70,7 @@ func (q *Queries) GetLibraryByID(ctx context.Context, id string) (GetLibraryByID
 		&i.EpgUrl,
 		&i.RefreshInterval,
 		&i.LanguageFilter,
+		&i.TlsInsecure,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -92,8 +94,8 @@ func (q *Queries) GrantLibraryAccess(ctx context.Context, arg GrantLibraryAccess
 const insertLibrary = `-- name: InsertLibrary :exec
 
 INSERT INTO libraries (id, name, content_type, scan_mode, scan_interval,
-    m3u_url, epg_url, refresh_interval, language_filter, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    m3u_url, epg_url, refresh_interval, language_filter, tls_insecure, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type InsertLibraryParams struct {
@@ -106,6 +108,7 @@ type InsertLibraryParams struct {
 	EpgUrl          sql.NullString `json:"epg_url"`
 	RefreshInterval sql.NullString `json:"refresh_interval"`
 	LanguageFilter  string         `json:"language_filter"`
+	TlsInsecure     int64          `json:"tls_insecure"`
 	CreatedAt       time.Time      `json:"created_at"`
 	UpdatedAt       time.Time      `json:"updated_at"`
 }
@@ -124,6 +127,7 @@ func (q *Queries) InsertLibrary(ctx context.Context, arg InsertLibraryParams) er
 		arg.EpgUrl,
 		arg.RefreshInterval,
 		arg.LanguageFilter,
+		arg.TlsInsecure,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -175,7 +179,7 @@ const listLibraries = `-- name: ListLibraries :many
 SELECT id, name, content_type, scan_mode, COALESCE(scan_interval, '6h') AS scan_interval,
        COALESCE(m3u_url, '') AS m3u_url, COALESCE(epg_url, '') AS epg_url,
        COALESCE(refresh_interval, '24h') AS refresh_interval,
-       language_filter,
+       language_filter, tls_insecure,
        created_at, updated_at
 FROM libraries
 ORDER BY name
@@ -191,6 +195,7 @@ type ListLibrariesRow struct {
 	EpgUrl          string    `json:"epg_url"`
 	RefreshInterval string    `json:"refresh_interval"`
 	LanguageFilter  string    `json:"language_filter"`
+	TlsInsecure     int64     `json:"tls_insecure"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
 }
@@ -214,6 +219,7 @@ func (q *Queries) ListLibraries(ctx context.Context) ([]ListLibrariesRow, error)
 			&i.EpgUrl,
 			&i.RefreshInterval,
 			&i.LanguageFilter,
+			&i.TlsInsecure,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -236,7 +242,7 @@ SELECT l.id, l.name, l.content_type, l.scan_mode,
        COALESCE(l.m3u_url, '') AS m3u_url,
        COALESCE(l.epg_url, '') AS epg_url,
        COALESCE(l.refresh_interval, '24h') AS refresh_interval,
-       l.language_filter,
+       l.language_filter, l.tls_insecure,
        l.created_at, l.updated_at
 FROM libraries l
 LEFT JOIN library_access la ON la.library_id = l.id AND la.user_id = ?
@@ -255,6 +261,7 @@ type ListLibrariesForUserRow struct {
 	EpgUrl          string    `json:"epg_url"`
 	RefreshInterval string    `json:"refresh_interval"`
 	LanguageFilter  string    `json:"language_filter"`
+	TlsInsecure     int64     `json:"tls_insecure"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
 }
@@ -278,6 +285,7 @@ func (q *Queries) ListLibrariesForUser(ctx context.Context, userID string) ([]Li
 			&i.EpgUrl,
 			&i.RefreshInterval,
 			&i.LanguageFilter,
+			&i.TlsInsecure,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -337,7 +345,8 @@ func (q *Queries) RevokeLibraryAccess(ctx context.Context, arg RevokeLibraryAcce
 
 const updateLibrary = `-- name: UpdateLibrary :execrows
 UPDATE libraries SET name = ?, content_type = ?, scan_mode = ?, scan_interval = ?,
-       m3u_url = ?, epg_url = ?, refresh_interval = ?, language_filter = ?, updated_at = ?
+       m3u_url = ?, epg_url = ?, refresh_interval = ?, language_filter = ?,
+       tls_insecure = ?, updated_at = ?
 WHERE id = ?
 `
 
@@ -350,6 +359,7 @@ type UpdateLibraryParams struct {
 	EpgUrl          sql.NullString `json:"epg_url"`
 	RefreshInterval sql.NullString `json:"refresh_interval"`
 	LanguageFilter  string         `json:"language_filter"`
+	TlsInsecure     int64          `json:"tls_insecure"`
 	UpdatedAt       time.Time      `json:"updated_at"`
 	ID              string         `json:"id"`
 }
@@ -364,6 +374,7 @@ func (q *Queries) UpdateLibrary(ctx context.Context, arg UpdateLibraryParams) (i
 		arg.EpgUrl,
 		arg.RefreshInterval,
 		arg.LanguageFilter,
+		arg.TlsInsecure,
 		arg.UpdatedAt,
 		arg.ID,
 	)

@@ -363,6 +363,7 @@ func libraryResponse(lib *db.Library) map[string]any {
 		"m3u_url":         lib.M3UURL,
 		"epg_url":         lib.EPGURL,
 		"language_filter": splitLanguageFilter(lib.LanguageFilter),
+		"tls_insecure":    lib.TLSInsecure,
 	}
 }
 

@@ -15,6 +15,7 @@ import { useCreateLibrary, useRefreshM3U, usePublicCountries } from "@/api/hooks
 import type { ContentType, Library } from "@/api/types";
 import { FilteredSelect } from "./FilteredSelect";
 import { LanguageMultiSelect } from "./LanguageMultiSelect";
+import { TLSInsecureToggle } from "./TLSInsecureToggle";
 import {
   CONTENT_TYPES,
   IPTV_ORG_CATEGORIES,
@@ -53,6 +54,7 @@ export function LibraryFormModal({ isOpen, onClose, onCreated }: LibraryFormModa
   const [m3uURL, setM3UURL] = useState("");
   const [epgURL, setEPGURL] = useState("");
   const [languageFilter, setLanguageFilter] = useState<string[]>([]);
+  const [tlsInsecure, setTLSInsecure] = useState(false);
 
   // Only fires the network request while the Add modal is open AND the user
   // has picked livetv — avoids loading the 200-country list for every admin
@@ -76,6 +78,7 @@ export function LibraryFormModal({ isOpen, onClose, onCreated }: LibraryFormModa
     setM3UURL("");
     setEPGURL("");
     setLanguageFilter([]);
+    setTLSInsecure(false);
   }, [isOpen]);
 
   function handleSubmit(e: FormEvent) {
@@ -101,6 +104,7 @@ export function LibraryFormModal({ isOpen, onClose, onCreated }: LibraryFormModa
           m3u_url: resolvedM3U,
           epg_url: epgURL.trim() || undefined,
           language_filter: languageFilter.length > 0 ? languageFilter : undefined,
+          tls_insecure: tlsInsecure || undefined,
         },
         {
           onSuccess: (lib) => {
@@ -319,6 +323,11 @@ export function LibraryFormModal({ isOpen, onClose, onCreated }: LibraryFormModa
               <LanguageMultiSelect
                 value={languageFilter}
                 onChange={setLanguageFilter}
+              />
+
+              <TLSInsecureToggle
+                value={tlsInsecure}
+                onChange={setTLSInsecure}
               />
             </>
           ) : (

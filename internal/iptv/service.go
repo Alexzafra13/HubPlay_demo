@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -57,6 +58,13 @@ type Service struct {
 	lastKnownBucket map[string]string
 
 	httpClient *http.Client
+
+	// httpInsecureClient is built lazily the first time a library
+	// with TLSInsecure=true triggers a fetch. Cached so repeat
+	// refreshes don't pay the transport-construction cost. Guarded
+	// by httpInsecureOnce.
+	httpInsecureClient *http.Client
+	httpInsecureOnce   sync.Once
 
 	bus *event.Bus // optional; nil-safe
 
@@ -137,7 +145,14 @@ func (s *Service) Shutdown() {}
 // layered: header → URL suffix → magic-byte sniff.
 
 // fetchURL downloads content from a URL.
-func (s *Service) fetchURL(ctx context.Context, url string) (io.ReadCloser, error) {
+//
+// `tlsInsecure` opts THIS fetch out of TLS certificate verification.
+// Reserved for IPTV providers that ship expired or self-signed certs
+// (extremely common in the space — the same toggle exists in
+// Threadfin/xTeVe/Tuliprox). The flag only affects the HTTPS
+// handshake performed here; the stream proxy keeps strict
+// verification regardless. Off by default.
+func (s *Service) fetchURL(ctx context.Context, url string, tlsInsecure bool) (io.ReadCloser, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
@@ -148,7 +163,14 @@ func (s *Service) fetchURL(ctx context.Context, url string) (io.ReadCloser, erro
 	// We handle both: see maybeDecompress below.
 	req.Header.Set("Accept-Encoding", "gzip")
 
-	resp, err := s.httpClient.Do(req)
+	client := s.httpClient
+	if tlsInsecure {
+		client = s.insecureFetchClient()
+		s.logger.Warn("fetching with TLS verification disabled",
+			"url", url,
+			"hint", "library has tls_insecure=1 — only use for trusted providers with bad certs")
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetch %s: %w", url, err)
 	}
@@ -159,6 +181,25 @@ func (s *Service) fetchURL(ctx context.Context, url string) (io.ReadCloser, erro
 	}
 
 	return maybeDecompress(resp.Body, resp.Header.Get("Content-Encoding"), url)
+}
+
+// insecureFetchClient lazily builds (and caches) an HTTP client whose
+// transport accepts any server certificate. Same timeout budget as
+// the strict client because IPTV M3U exports can be slow (5 min) but
+// shouldn't hang forever.
+func (s *Service) insecureFetchClient() *http.Client {
+	s.httpInsecureOnce.Do(func() {
+		// gosec G402: deliberately disabling TLS verification. Scope
+		// is per-library and gated by the operator-set tls_insecure
+		// flag — the column comment explains the trade-off.
+		s.httpInsecureClient = &http.Client{
+			Timeout: 5 * time.Minute,
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec
+			},
+		}
+	})
+	return s.httpInsecureClient
 }
 
 // maybeDecompress returns a reader that transparently gunzips the body when

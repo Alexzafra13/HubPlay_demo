@@ -26,6 +26,15 @@ type Library struct {
 	// codes. Empty string means "no filter" — every channel imports.
 	// See iptv.MatchesLanguageFilter for the matching heuristics.
 	LanguageFilter  string
+	// TLSInsecure, when true, makes the M3U / EPG fetcher skip TLS
+	// certificate verification for THIS library's HTTPS URLs. Off by
+	// default. Per-library so a typo can't weaken every fetch the
+	// server makes; only the playlist/EPG fetch path honours the
+	// flag — the stream proxy keeps strict verification regardless.
+	// Provided to handle the IPTV reality that many providers ship
+	// expired Let's Encrypt or self-signed certs (every comparable
+	// tool — Threadfin, xTeVe, Tuliprox — exposes the same toggle).
+	TLSInsecure     bool
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 	Paths           []string // populated by GetByID/List
@@ -59,6 +68,7 @@ func (r *LibraryRepository) Create(ctx context.Context, lib *Library) error {
 		EpgUrl:          nullableString(lib.EPGURL),
 		RefreshInterval: nullableString(lib.RefreshInterval),
 		LanguageFilter:  lib.LanguageFilter,
+		TlsInsecure:     boolToInt64(lib.TLSInsecure),
 		CreatedAt:       lib.CreatedAt,
 		UpdatedAt:       lib.UpdatedAt,
 	})
@@ -130,6 +140,7 @@ func (r *LibraryRepository) Update(ctx context.Context, lib *Library) error {
 		EpgUrl:          nullableString(lib.EPGURL),
 		RefreshInterval: nullableString(lib.RefreshInterval),
 		LanguageFilter:  lib.LanguageFilter,
+		TlsInsecure:     boolToInt64(lib.TLSInsecure),
 		UpdatedAt:       lib.UpdatedAt,
 		ID:              lib.ID,
 	})
@@ -264,6 +275,7 @@ func libraryFromGetRow(r sqlc.GetLibraryByIDRow) Library {
 		EPGURL:          r.EpgUrl,
 		RefreshInterval: r.RefreshInterval,
 		LanguageFilter:  r.LanguageFilter,
+		TLSInsecure:     r.TlsInsecure != 0,
 		CreatedAt:       r.CreatedAt,
 		UpdatedAt:       r.UpdatedAt,
 	}
@@ -280,6 +292,7 @@ func libraryFromListRow(r sqlc.ListLibrariesRow) Library {
 		EPGURL:          r.EpgUrl,
 		RefreshInterval: r.RefreshInterval,
 		LanguageFilter:  r.LanguageFilter,
+		TLSInsecure:     r.TlsInsecure != 0,
 		CreatedAt:       r.CreatedAt,
 		UpdatedAt:       r.UpdatedAt,
 	}
@@ -296,9 +309,20 @@ func libraryFromForUserRow(r sqlc.ListLibrariesForUserRow) Library {
 		EPGURL:          r.EpgUrl,
 		RefreshInterval: r.RefreshInterval,
 		LanguageFilter:  r.LanguageFilter,
+		TLSInsecure:     r.TlsInsecure != 0,
 		CreatedAt:       r.CreatedAt,
 		UpdatedAt:       r.UpdatedAt,
 	}
+}
+
+// boolToInt64 maps a Go bool to the SQLite-friendly 0/1 the schema
+// stores in tls_insecure (the only boolean column not modelled as
+// NUMERIC nullable). Kept here so future toggles can reuse it.
+func boolToInt64(b bool) int64 {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 func librariesFromListRows(rows []sqlc.ListLibrariesRow) []*Library {

@@ -126,6 +126,13 @@ type CreateRequest struct {
 	// no filter — every channel imports. See iptv.MatchesLanguageFilter
 	// for the matching rules. Persisted as comma-separated.
 	LanguageFilter []string `json:"language_filter,omitempty"`
+
+	// TLSInsecure, when true, makes the M3U / EPG fetcher skip TLS
+	// certificate verification for THIS library's HTTPS URLs. Used
+	// for IPTV providers that ship expired Let's Encrypt or self-
+	// signed certs. See db.Library.TLSInsecure for the security
+	// caveat.
+	TLSInsecure bool `json:"tls_insecure,omitempty"`
 }
 
 func (s *Service) Create(ctx context.Context, req CreateRequest) (*db.Library, error) {
@@ -150,6 +157,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*db.Library, e
 		M3UURL:         req.M3UURL,
 		EPGURL:         req.EPGURL,
 		LanguageFilter: normaliseLanguageFilter(req.LanguageFilter),
+		TLSInsecure:    req.TLSInsecure,
 	}
 
 	if err := s.libraries.Create(ctx, lib); err != nil {
@@ -215,6 +223,9 @@ type UpdateRequest struct {
 	// in or out without forcing the caller to round-trip the existing
 	// value.
 	LanguageFilter *[]string `json:"language_filter,omitempty"`
+
+	// TLSInsecure: nil = leave as-is, true / false = explicit toggle.
+	TLSInsecure *bool `json:"tls_insecure,omitempty"`
 }
 
 func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (*db.Library, error) {
@@ -243,6 +254,9 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (*db
 	}
 	if req.LanguageFilter != nil {
 		lib.LanguageFilter = normaliseLanguageFilter(*req.LanguageFilter)
+	}
+	if req.TLSInsecure != nil {
+		lib.TLSInsecure = *req.TLSInsecure
 	}
 	lib.UpdatedAt = time.Now()
 
