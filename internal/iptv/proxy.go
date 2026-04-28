@@ -389,6 +389,13 @@ func isHLSURL(streamURL string) bool {
 	return strings.HasSuffix(lower, ".m3u8") || strings.HasSuffix(lower, ".m3u")
 }
 
+// IsHLSURL is the exported view of isHLSURL for code outside the
+// proxy that needs the same dispatch decision (the channel-stream
+// handler uses it to choose between proxy passthrough and HLS
+// transmux). Keeping the lowercase form private inside the proxy
+// preserves the existing internal call sites unchanged.
+func IsHLSURL(streamURL string) bool { return isHLSURL(streamURL) }
+
 // hlsURLPattern matches absolute URLs in m3u8 playlists.
 var hlsURLPattern = regexp.MustCompile(`(?i)(https?://[^\s\r\n"]+)`)
 

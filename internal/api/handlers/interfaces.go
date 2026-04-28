@@ -155,6 +155,23 @@ type IPTVStreamProxyService interface {
 	ProxyURL(ctx context.Context, w http.ResponseWriter, channelID, rawURL string) error
 }
 
+// IPTVTransmuxer is the minimum surface the channel-stream handler
+// needs from the live MPEG-TS → HLS session manager. The handler
+// imports iptv anyway, but expressing the dependency as an interface
+// here lets tests inject a fake without spinning real ffmpeg
+// processes — and keeps the handler from accidentally reaching for
+// internal manager state.
+type IPTVTransmuxer interface {
+	// GetOrStart returns a live session for the channel, spawning a
+	// new ffmpeg process if necessary. Blocks until the session has
+	// produced its first segment or the manager-side timeout elapses.
+	GetOrStart(ctx context.Context, channelID, upstreamURL string) (*iptv.TransmuxSession, error)
+	// Touch records that a viewer is still consuming the session,
+	// preventing the idle reaper from killing it. Returns
+	// iptv.ErrSessionNotFound when the session has expired.
+	Touch(channelID string) (*iptv.TransmuxSession, error)
+}
+
 // ─── Repository interfaces ──────────────────────────────────────────────────
 
 // ItemRepository defines item data access needed by handlers.

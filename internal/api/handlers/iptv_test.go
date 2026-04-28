@@ -590,7 +590,10 @@ func newIPTVTestEnv(t *testing.T) *iptvTestEnv {
 		libraries: &iptvFakeLibraryRepo{},
 		access:    &iptvFakeAccess{},
 	}
-	env.handler = NewIPTVHandler(env.svc, env.proxy, env.libraries, env.access, testutil.NopLogger())
+	// transmux is nil in tests: the existing tests cover passthrough
+	// proxy / refresh / EPG / favorites paths only. Transmux-specific
+	// behaviour is covered by transmux_test.go in the iptv package.
+	env.handler = NewIPTVHandler(env.svc, env.proxy, nil, env.libraries, env.access, testutil.NopLogger())
 
 	r := chi.NewRouter()
 	r.Route("/api/v1", func(r chi.Router) {

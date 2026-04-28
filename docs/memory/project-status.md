@@ -1,6 +1,289 @@
 # Estado del proyecto
 
-> Snapshot: **2026-04-28 (M3U import async)** — el refresh manual de M3U se desacopla del request HTTP: handler 202 + import en goroutine + completion por SSE. Cierra el bug en prod donde listas Xtream M3U_PLUS de ~98k líneas perdían los 1k+ canales ya parseados al cancelarse `r.Context()` por el `proxy_read_timeout` default de nginx (60s). Rama: `claude/fix-m3u-import-timeout-iFKpE` · **tests: backend verde con `-race` · frontend 296/296 · tsc clean**
+> Snapshot: **2026-04-28 (IPTV transmux + import event-driven)** — dos fixes de robustez para el flujo IPTV completo. (1) El listener SSE de `playlist.refreshed` se promociona a global (`AppLayout`) y el endpoint de refresh devuelve 409 estructurado; cualquier import en curso invalida queries automáticamente, sobreviviendo a navegación, recargas y al scheduler corriendo sin UI. (2) Nuevo `TransmuxManager` con sesiones ffmpeg `-c copy -f hls` por canal, compartidas entre viewers, idle-reaper, cap por config: el handler `/channels/{id}/stream` redirige automáticamente upstreams MPEG-TS (Xtream Codes) a `/channels/{id}/hls/index.m3u8` para que cualquier player web pueda consumirlos. **tests: backend verde con `-race` (incluye 11 nuevos del transmux) · frontend 296/296 · tsc clean**
+
+---
+
+## 📡 Sesión 2026-04-28 tarde (IPTV transmux + import event-driven) — 2 commits
+
+Sesión de tarde, dos problemas reales detectados al probar la lib
+`tv - movistar` (Xtream M3U_PLUS de 2.6M líneas → 1.073 canales TV en
+vivo) en `pdmkibyg.xiagdns.com`:
+
+1. **Tras importar, los canales no aparecían en LiveTV.** El usuario tenía
+   que recargar manualmente.
+2. **Al pinchar "Reproducir" en cualquier canal de esa lib, el player
+   se quedaba en spinner / fallaba.**
+
+### Diagnóstico
+
+#### Problema 1 — Import event drop
+
+`useRefreshM3U` (web/src/api/hooks/iptv-admin.ts) abre un EventSource
+local antes del POST y resuelve con el evento SSE `playlist.refreshed`.
+Si el modal o componente que lo dispara se desmonta antes de que termine
+el import (88s en una lista grande), el cleanup cierra el EventSource
+y el `invalidateQueries` jamás se ejecuta. Con la lista de movistar:
+
+```
+17:49:04  POST /iptv/refresh-m3u → 202 (import async arranca)
+17:49:35  SSE client desconecta (usuario navega a LiveTV)
+17:49:31, 37, 44  3 reintentos manuales → 500 (refresh in progress)
+17:50:32  M3U parse complete channels=1073 + emite playlist.refreshed
+17:50:50  Pero ya nadie escucha el evento → cache stale
+```
+
+Tres bugs concatenados:
+
+- **`ErrRefreshInProgress` mapeado a 500** — caía en el default de
+  `handleServiceError` porque no es `*domain.AppError`. Cliente lo
+  trataba como error real, mostraba toast.
+- **Mutación rechazaba en 500** — el reintento manual del usuario
+  rompía la mutación inicial que estaba esperando el SSE.
+- **Cero listener global** — `playlist.refreshed` solo era escuchado
+  por la mutación local. Sin mutación viva, evento perdido. Tampoco
+  invalidaba caches el flujo "scheduler corre refresh sin UI".
+
+#### Problema 2 — MPEG-TS sobre HTTP no es reproducible en navegador
+
+Las dos libs guardan formatos distintos en `channels.stream_url`:
+
+```
+Cat TV (funciona):  https://.../master.m3u8        ← HLS, hls.js OK
+movistar (falla):   http://.../N83HL55L/.../30935  ← MPEG-TS crudo ❌
+```
+
+`internal/iptv/proxy.go` ya detecta HLS (Content-Type, sufijo URL,
+sniff) y reescribe la playlist correctamente. Para todo lo demás cae
+en `pipeStream` — passthrough binario. El navegador recibe MPEG-TS
+crudo, que ni `hls.js` ni `<video>` nativo pueden decodificar:
+
+```
+proxy 200 OK bytes=17786364 → context canceled (player se rinde)
+POST /playback-failure (beacon de error del cliente)
+```
+
+Es exactamente lo que Jellyfin/Plex/Tvheadend resuelven con un
+transmux ffmpeg en tiempo real (`-c copy -f hls`).
+
+### Solución 1 — Import event-driven robusto
+
+**Backend** (`internal/api/handlers/iptv_admin.go:78`):
+
+`ErrRefreshInProgress` deja de pasar por `handleServiceError`. El
+handler responde directamente:
+
+```go
+if errors.Is(err, iptv.ErrRefreshInProgress) {
+    respondJSON(w, http.StatusConflict, map[string]any{
+        "data": map[string]any{
+            "library_id": libraryID,
+            "status":     "in_progress",
+        },
+    })
+    return
+}
+```
+
+**Frontend mutación** (`web/src/api/hooks/iptv-admin.ts:166`):
+
+El 409 deja de propagarse como error. La mutación sigue escuchando
+SSE como si nada — la lógica es "alguien (yo, otra pestaña, el
+scheduler) ya está importando esto, espera el mismo evento":
+
+```ts
+api.refreshM3U(libraryId).catch((err) => {
+  if (settled) return;
+  if (err instanceof ApiError && err.status === 409) return; // join
+  cleanup();
+  reject(err);
+});
+```
+
+**Frontend listener global** (nuevo
+`web/src/hooks/usePlaylistRefreshEvents.ts` montado en
+`web/src/components/layout/AppLayout.tsx`):
+
+```ts
+useEventStream("playlist.refreshed", (raw) => {
+  const libId = JSON.parse(raw).data?.library_id;
+  qc.invalidateQueries({ queryKey: queryKeys.channels(libId) });
+  qc.invalidateQueries({ queryKey: queryKeys.libraries });
+  qc.invalidateQueries({ queryKey: queryKeys.unhealthyChannels(libId) });
+  qc.invalidateQueries({ queryKey: queryKeys.channelsWithoutEPG(libId) });
+  qc.invalidateQueries({ queryKey: queryKeys.libraryEPGSources(libId) });
+  qc.invalidateQueries({ queryKey: ["bulk-schedule"] });
+});
+```
+
+Mismo tratamiento para `playlist.refresh_failed` (log devtools, no
+invalidar). El listener vive mientras el usuario está autenticado;
+unauthenticated `/login` y `/setup` no lo necesitan.
+
+### Solución 2 — Live MPEG-TS → HLS transmux
+
+Pieza nueva `internal/iptv/transmux.go` (`TransmuxManager` +
+`TransmuxSession`). Decisiones de diseño:
+
+- **1 sesión por canal compartida**. Cinco usuarios mismo canal = 1
+  ffmpeg, 1 conexión upstream. Indexado por `channel_id`. Crítico
+  porque providers Xtream rate-limitan por cuenta.
+- **Lazy spawn, idle reap**. Sesión arranca al primer GET de manifest;
+  reaper la mata tras `IdleTimeout` sin segment requests.
+- **Bounded**. `MaxSessions` cap por config. 503 con `Retry-After` si
+  se llega.
+- **Ready signal**. `GetOrStart` bloquea hasta que ffmpeg escribe el
+  primer segmento (timeout `ReadyTimeout`). Sin esto, el primer GET
+  del player encontraría manifest vacío.
+- **Reaper salta sesiones aún arrancando** (sin segment todavía) — un
+  bug detectado por test, sin esto el reaper killaba spawns lentos.
+- **Failure isolation**. ffmpeg crash → session evicta del map; el
+  siguiente GET re-spawnea. No se hace retry-loop interno; se delega
+  al circuit breaker existente del proxy.
+
+ffmpeg argv (`buildTransmuxFFmpegArgs`):
+
+```
+-fflags +genpts+discardcorrupt
+-reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 -reconnect_delay_max 5
+-rw_timeout 10000000           # 10s I/O timeout
+-i {upstream}
+-map 0:v:0 -map 0:a:0?
+-c copy                        # transmux puro, no re-encode
+-bsf:v h264_mp4toannexb        # AnnexB para HLS
+-f hls -hls_time 4 -hls_list_size 6
+-hls_flags delete_segments+independent_segments+omit_endlist+program_date_time
+-hls_segment_filename {workDir}/seg-%05d.ts
+{workDir}/index.m3u8
+```
+
+**Dispatch** en `iptv_channels.go:Stream`:
+
+```go
+if h.transmux != nil && !iptv.IsHLSURL(ch.StreamURL) {
+    http.Redirect(w, r, "/api/v1/channels/"+channelID+"/hls/index.m3u8", 302)
+    return
+}
+// ... else passthrough proxy ...
+```
+
+`isHLSURL` se exporta como `IsHLSURL` para reuso desde el handler sin
+mover lógica.
+
+**Endpoints nuevos** (en `/api/v1/channels/{id}/`):
+
+- `GET /hls/index.m3u8` → arranca/obtiene sesión, espera primer segmento,
+  sirve manifest con `Cache-Control: no-cache`.
+- `GET /hls/{segment}` → valida nombre contra regex `seg-\d{5,6}\.ts`
+  (path traversal guard), `Touch()` la sesión, sirve fichero con
+  `Content-Type: video/mp2t`.
+
+Códigos de estado mapeados:
+
+- `200` — manifest/segmento OK.
+- `404 NO_TRANSMUX_SESSION` — sesión expirada (player recarga manifest →
+  respawn → reproducción se resume).
+- `502 TRANSMUX_FAILED` — ffmpeg muere antes de producir segmento
+  (canal muerto / codec no copy-compatible).
+- `503 TRANSMUX_BUSY + Retry-After: 5` — `MaxSessions` alcanzado.
+- `400 INVALID_SEGMENT` — nombre de segmento no matchea regex.
+- `501 TRANSMUX_DISABLED` — opt-out por config.
+
+**Config nueva** (`internal/config/config.go`):
+
+```yaml
+iptv:
+  transmux:
+    enabled: true                # default
+    max_sessions: 10
+    idle_timeout: 30s
+    ready_timeout: 15s
+```
+
+Cache dir = `<streaming.cache_dir>/iptv-hls/<channel-id>/`. Reusa el
+volumen de transcode VOD para no inventar otro mount point.
+
+**Wiring** (`cmd/hubplay/main.go`):
+
+```go
+if cfg.IPTV.Transmux.Enabled {
+    iptvTransmux = iptv.NewTransmuxManager(...)
+}
+// ...
+deps.IPTVTransmux = iptvTransmux  // nil-safe en handler
+// shutdown:
+if iptvTransmux != nil { iptvTransmux.Shutdown() }
+```
+
+### Tests
+
+11 nuevos en `internal/iptv/transmux_test.go` con un fake-ffmpeg
+shell shim (modos `ok` / `noseg` / `crash`). Cubre:
+
+- Spawn + ready signal en upstream sano.
+- **Coalescing**: 5 callers concurrentes mismo canal = 1 PID ffmpeg.
+- `MaxSessions` cap → `ErrTooManySessions`.
+- Idle reaper mata sesión sin Touch.
+- Touch periódico mantiene viva.
+- ffmpeg crash → `ErrTransmuxFailed` + evict.
+- No-segment timeout → `ErrTransmuxFailed`.
+- `Shutdown` idempotente, mata todo.
+- Validación nombre de segmento (path traversal).
+- ffmpeg argv contiene flags críticos.
+
+Test de regresión backend tightened: `RefreshM3U_AlreadyInProgress`
+ahora afirma 409 + body estructurado, no solo "no es 202".
+
+### Verificación en producción
+
+Container `hubplay-dev` reconstruido y probado contra la lib movistar
+real. Logs después de pulsar Reproducir en un canal:
+
+```
+seg-00021.ts ... seg-00049.ts → todos 200 OK, 2-3 MB/seg
+manifest cada 2s → 200 OK, 634 bytes
+0 errores, 0 "context canceled", 0 "stream proxy error"
+```
+
+49 segmentos consecutivos servidos = ~3 minutos de TV en directo
+sostenida. Reproductor sin spinner.
+
+### Limitaciones conocidas
+
+- **`-c copy` requiere codec compatible**. Providers Xtream casi
+  siempre sirven H.264/AAC, pero un canal con codec exótico (HEVC sin
+  HLS, AC-3, etc.) fallaría con `TRANSMUX_FAILED`. Solución futura:
+  detectar el error de ffmpeg en stderr y fallback a re-encode con
+  el `internal/stream/hwaccel` ya existente. No urgente; añadir cuando
+  surja un canal real que falle.
+- **`MaxSessions = 10` puede ser bajo** para Plex/Jellyfin
+  multi-usuario. Operador puede subirlo en config. Por canal, no
+  multiusuario, así que 10 ≈ 10 canales distintos simultáneos.
+- **Frontend no muestra estado "spawning"**: el primer GET del
+  manifest puede tardar 3-5s en responder. Hoy se ve como spinner
+  normal de carga; aceptable para v1.
+- **Sin métricas**. `iptv_transmux_active`, `iptv_transmux_spawn_total`
+  serían útiles en grafana. Añadir si surge necesidad operativa.
+
+### Archivos tocados
+
+```
+M  cmd/hubplay/main.go                          (wire + shutdown)
+M  internal/api/handlers/interfaces.go          (IPTVTransmuxer)
+M  internal/api/handlers/iptv.go                (handler field)
+M  internal/api/handlers/iptv_admin.go          (409 estructurado)
+M  internal/api/handlers/iptv_channels.go       (Stream redirect + HLSManifest + HLSSegment)
+M  internal/api/handlers/iptv_test.go           (assertion 409 + nil transmux)
+M  internal/api/router.go                       (Dependencies + routes)
+M  internal/config/config.go                    (IPTVConfig)
+M  internal/iptv/proxy.go                       (export IsHLSURL)
+A  internal/iptv/transmux.go                    (manager + session, ~530 LOC)
+A  internal/iptv/transmux_test.go               (11 tests, fake-ffmpeg shim)
+M  web/src/api/hooks/iptv-admin.ts              (tolera 409)
+M  web/src/components/layout/AppLayout.tsx      (mount listener)
+A  web/src/hooks/usePlaylistRefreshEvents.ts    (listener SSE global)
+M  .gitignore                                   (cache/, web/.pnpm-store/)
+```
 
 ---
 

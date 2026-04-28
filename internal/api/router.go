@@ -34,6 +34,7 @@ type Dependencies struct {
 	StreamManager  *stream.Manager
 	IPTV           *iptv.Service
 	IPTVProxy      *iptv.StreamProxy
+	IPTVTransmux   *iptv.TransmuxManager
 	IPTVScheduler  *iptv.Scheduler
 	IPTVSchedules  *db.IPTVScheduleRepository
 	Items          *db.ItemRepository
@@ -311,7 +312,11 @@ func NewRouter(deps Dependencies) http.Handler {
 
 				// IPTV channels (within library routes)
 				if deps.IPTV != nil {
-					iptvHandler := handlers.NewIPTVHandler(deps.IPTV, deps.IPTVProxy, deps.LibraryRepo, deps.Libraries, deps.Logger)
+					// Pass deps.IPTVTransmux as-is — when nil the handler
+					// falls back to the raw passthrough proxy, which is
+					// the correct degraded-but-functional behaviour for
+					// HLS-only deployments without ffmpeg.
+					iptvHandler := handlers.NewIPTVHandler(deps.IPTV, deps.IPTVProxy, deps.IPTVTransmux, deps.LibraryRepo, deps.Libraries, deps.Logger)
 
 					r.Route("/libraries/{id}/channels", func(r chi.Router) {
 						r.Get("/", iptvHandler.ListChannels)
@@ -325,6 +330,15 @@ func NewRouter(deps Dependencies) http.Handler {
 						r.Get("/schedule", iptvHandler.Schedule)
 						r.Post("/watch", iptvHandler.RecordChannelWatch)
 						r.Post("/playback-failure", iptvHandler.RecordPlaybackFailure)
+						// HLS transmux endpoints. The Stream handler 302s
+						// here when the upstream is MPEG-TS (Xtream Codes,
+						// raw TS-over-HTTP). The manifest spawns / re-uses
+						// the per-channel ffmpeg session; segments are
+						// served from the session's work dir. Both 404
+						// gracefully when no session exists so hls.js
+						// recovers via a manifest reload.
+						r.Get("/hls/index.m3u8", iptvHandler.HLSManifest)
+						r.Get("/hls/{segment}", iptvHandler.HLSSegment)
 					})
 
 					r.Get("/channels/schedule", iptvHandler.BulkSchedule)

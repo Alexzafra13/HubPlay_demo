@@ -163,6 +163,27 @@ func run(configPath string) error {
 	// service so dead upstreams drop out of the user view.
 	iptvProxy.SetHealthReporter(iptvService)
 
+	// Live MPEG-TS → HLS transmux. Required for Xtream Codes /
+	// raw-TS providers (most non-public IPTV today). Optional: if
+	// disabled in config, the channel-stream handler falls back to
+	// the raw passthrough proxy and only HLS providers play in the
+	// browser. The work dir is rooted under the streaming cache dir
+	// so a single volume mount covers both VOD transcoding and live
+	// transmux output.
+	var iptvTransmux *iptv.TransmuxManager
+	if cfg.IPTV.Transmux.Enabled {
+		transmuxCacheDir := filepath.Join(cfg.Streaming.EffectiveCacheDir(), "iptv-hls")
+		iptvTransmux = iptv.NewTransmuxManager(iptv.TransmuxManagerConfig{
+			CacheDir:     transmuxCacheDir,
+			MaxSessions:  cfg.IPTV.Transmux.MaxSessions,
+			IdleTimeout:  cfg.IPTV.Transmux.IdleTimeout,
+			ReadyTimeout: cfg.IPTV.Transmux.ReadyTimeout,
+		}, logger)
+		logger.Info("iptv transmux enabled",
+			"cache_dir", transmuxCacheDir,
+			"max_sessions", cfg.IPTV.Transmux.MaxSessions)
+	}
+
 	// ═══ Phase 4d: IPTV Scheduler ═══
 	// Runs periodic M3U + EPG refreshes per configured schedule so the
 	// product no longer requires an admin to click "Refrescar" every
@@ -193,6 +214,7 @@ func run(configPath string) error {
 		StreamManager: streamManager,
 		IPTV:          iptvService,
 		IPTVProxy:     iptvProxy,
+		IPTVTransmux:  iptvTransmux,
 		IPTVScheduler: iptvScheduler,
 		IPTVSchedules: repos.IPTVSchedules,
 		Items:         repos.Items,
@@ -234,10 +256,10 @@ func run(configPath string) error {
 	}()
 
 	// ═══ Phase 7: Wait for shutdown ═══
-	return waitForShutdown(ctx, cancel, server, streamManager, iptvService, iptvProxy, iptvScheduler, iptvProberWorker, scanScheduler, libraryService, authService, database, logger)
+	return waitForShutdown(ctx, cancel, server, streamManager, iptvService, iptvProxy, iptvTransmux, iptvScheduler, iptvProberWorker, scanScheduler, libraryService, authService, database, logger)
 }
 
-func waitForShutdown(ctx context.Context, cancel context.CancelFunc, server *http.Server, sm *stream.Manager, iptvSvc *iptv.Service, iptvProxy *iptv.StreamProxy, iptvSched *iptv.Scheduler, iptvProber *iptv.ProberWorker, scheduler *library.Scheduler, librarySvc *library.Service, authSvc *auth.Service, database interface{ Close() error }, logger *slog.Logger) error {
+func waitForShutdown(ctx context.Context, cancel context.CancelFunc, server *http.Server, sm *stream.Manager, iptvSvc *iptv.Service, iptvProxy *iptv.StreamProxy, iptvTransmux *iptv.TransmuxManager, iptvSched *iptv.Scheduler, iptvProber *iptv.ProberWorker, scheduler *library.Scheduler, librarySvc *library.Service, authSvc *auth.Service, database interface{ Close() error }, logger *slog.Logger) error {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
@@ -282,6 +304,9 @@ func waitForShutdown(ctx context.Context, cancel context.CancelFunc, server *htt
 
 	// Stop IPTV
 	iptvProxy.Shutdown()
+	if iptvTransmux != nil {
+		iptvTransmux.Shutdown()
+	}
 	iptvSvc.Shutdown()
 	logger.Info("IPTV services stopped")
 

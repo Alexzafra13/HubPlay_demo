@@ -25,8 +25,45 @@ type Config struct {
 	Logging        logging.Config      `yaml:"logging"`
 	RateLimit      RateLimitConfig     `yaml:"rate_limit"`
 	Streaming      StreamingConfig     `yaml:"streaming"`
+	IPTV           IPTVConfig          `yaml:"iptv"`
 	Observability  ObservabilityConfig `yaml:"observability"`
 	SetupCompleted bool                `yaml:"setup_completed"`
+}
+
+// IPTVConfig groups runtime knobs for the IPTV subsystem. Only
+// transmux is exposed today; other subsystems (proxy timeouts,
+// scheduler intervals) are still hard-coded in their respective
+// packages and will move here when they need operator-facing tuning.
+type IPTVConfig struct {
+	Transmux IPTVTransmuxConfig `yaml:"transmux"`
+}
+
+// IPTVTransmuxConfig controls the live MPEG-TS → HLS transmux
+// session manager (internal/iptv/transmux.go). Defaults are
+// production-sane for a single-host self-hosted deployment.
+type IPTVTransmuxConfig struct {
+	// Enabled gates the entire transmux subsystem. When false, the
+	// channel-stream handler falls back to the raw passthrough proxy
+	// and MPEG-TS upstreams break in browsers (HLS upstreams keep
+	// working). Default true.
+	Enabled bool `yaml:"enabled"`
+
+	// MaxSessions caps simultaneous ffmpeg processes. One session is
+	// shared by all viewers of the same channel, so a household of 5
+	// watching different channels needs 5 sessions. Default 10.
+	MaxSessions int `yaml:"max_sessions"`
+
+	// IdleTimeout is how long a session stays alive with no segment
+	// requests before the reaper kills it. Lower trades faster
+	// cleanup for more spawn churn on rapid channel-zap. Default 30s.
+	IdleTimeout time.Duration `yaml:"idle_timeout"`
+
+	// ReadyTimeout is how long the manifest handler waits for ffmpeg
+	// to produce its first segment before declaring the session
+	// failed. Default 15s — bigger than typical first-segment latency
+	// (3-5s) for healthy upstreams; bounded so dead providers don't
+	// hang the player UI. Default 15s.
+	ReadyTimeout time.Duration `yaml:"ready_timeout"`
 }
 
 // ObservabilityConfig controls the Prometheus /metrics endpoint. Defaults are
@@ -222,6 +259,14 @@ func defaults() *Config {
 			HWAccel: HWAccelConfig{
 				Enabled:   false,
 				Preferred: "auto",
+			},
+		},
+		IPTV: IPTVConfig{
+			Transmux: IPTVTransmuxConfig{
+				Enabled:      true,
+				MaxSessions:  10,
+				IdleTimeout:  30 * time.Second,
+				ReadyTimeout: 15 * time.Second,
 			},
 		},
 		Observability: ObservabilityConfig{

@@ -36,16 +36,22 @@ import (
 type IPTVHandler struct {
 	svc       IPTVService
 	proxy     IPTVStreamProxyService
+	transmux  IPTVTransmuxer // optional; nil disables MPEG-TS → HLS transmux
 	libraries LibraryRepository
 	access    LibraryAccessService
 	logger    *slog.Logger
 }
 
-// NewIPTVHandler creates a new IPTV handler.
-func NewIPTVHandler(svc IPTVService, proxy IPTVStreamProxyService, libraries LibraryRepository, access LibraryAccessService, logger *slog.Logger) *IPTVHandler {
+// NewIPTVHandler creates a new IPTV handler. `transmux` is optional —
+// pass nil to disable on-the-fly MPEG-TS → HLS conversion (tests, or
+// platforms without ffmpeg). When nil, non-HLS upstreams fall back to
+// the raw passthrough proxy with the same player-side incompatibility
+// it has today.
+func NewIPTVHandler(svc IPTVService, proxy IPTVStreamProxyService, transmux IPTVTransmuxer, libraries LibraryRepository, access LibraryAccessService, logger *slog.Logger) *IPTVHandler {
 	return &IPTVHandler{
 		svc:       svc,
 		proxy:     proxy,
+		transmux:  transmux,
 		libraries: libraries,
 		access:    access,
 		logger:    logger.With("module", "iptv-handler"),

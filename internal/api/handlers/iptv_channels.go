@@ -2,8 +2,10 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -11,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"hubplay/internal/db"
+	"hubplay/internal/iptv"
 )
 
 // ListChannels returns all channels for a library.
@@ -105,6 +108,21 @@ func (h *IPTVHandler) Groups(w http.ResponseWriter, r *http.Request) {
 }
 
 // Stream proxies a live IPTV stream to the client.
+//
+// Format dispatch:
+//   - HLS upstream (`*.m3u8`) → existing passthrough proxy. The browser
+//     player consumes the manifest directly and we just rewrite segment
+//     URLs through `/proxy?url=` so auth + the upstream rewriter still
+//     apply.
+//   - Anything else (typically Xtream Codes raw MPEG-TS over HTTP) →
+//     302 redirect to the per-channel HLS transmux endpoint. ffmpeg
+//     repackages the MPEG-TS into an HLS sliding window the browser can
+//     play, with `-c copy` so CPU stays low.
+//
+// Falling back to the passthrough proxy when transmux is not configured
+// preserves today's behaviour for deployments without ffmpeg — those
+// users keep the broken-on-MPEG-TS state we shipped before transmux,
+// but at least HLS providers continue to work.
 func (h *IPTVHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	channelID := chi.URLParam(r, "channelId")
 
@@ -123,10 +141,129 @@ func (h *IPTVHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// If the upstream URL doesn't look like HLS and a transmux
+	// manager is wired, redirect the player to the transmux entry
+	// point. The 302 is cheap (one round-trip) and keeps the format
+	// decision out of the proxy code path, which means HLS upstreams
+	// keep their existing zero-buffer behaviour.
+	if h.transmux != nil && !iptv.IsHLSURL(ch.StreamURL) {
+		http.Redirect(w, r, "/api/v1/channels/"+channelID+"/hls/index.m3u8", http.StatusFound)
+		return
+	}
+
 	if err := h.proxy.ProxyStream(r.Context(), w, channelID, ch.StreamURL); err != nil {
 		h.logger.Error("stream proxy error", "channel", channelID, "error", err)
 		// Don't write error — response may already be partially written
 	}
+}
+
+// HLSManifest serves the live HLS playlist produced by the per-channel
+// transmux session, spawning ffmpeg if no session is running. The
+// returned manifest references segment files served by HLSSegment.
+//
+// Cache headers force every reload: the manifest is a live sliding
+// window and any client-side cache breaks the player's ability to see
+// new segments.
+func (h *IPTVHandler) HLSManifest(w http.ResponseWriter, r *http.Request) {
+	if h.transmux == nil {
+		respondError(w, r, http.StatusNotImplemented, "TRANSMUX_DISABLED",
+			"live transmux is not enabled on this server")
+		return
+	}
+	channelID := chi.URLParam(r, "channelId")
+
+	ch, err := h.svc.GetChannel(r.Context(), channelID)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	if !h.canAccessLibrary(r, ch.LibraryID) {
+		h.denyForbidden(w, r)
+		return
+	}
+	if !ch.IsActive {
+		respondError(w, r, http.StatusNotFound, "CHANNEL_INACTIVE", "channel is not active")
+		return
+	}
+
+	sess, err := h.transmux.GetOrStart(r.Context(), channelID, ch.StreamURL)
+	if err != nil {
+		switch {
+		case errors.Is(err, iptv.ErrTooManySessions):
+			// 503 with Retry-After lets the player do its own retry
+			// after the reaper has freed an idle slot.
+			w.Header().Set("Retry-After", "5")
+			respondError(w, r, http.StatusServiceUnavailable, "TRANSMUX_BUSY",
+				"server is at maximum simultaneous transmux sessions; retry shortly")
+		case errors.Is(err, iptv.ErrTransmuxFailed):
+			respondError(w, r, http.StatusBadGateway, "TRANSMUX_FAILED",
+				"upstream stream could not be transmuxed; channel may be offline or use an unsupported codec")
+		case errors.Is(err, r.Context().Err()):
+			// Client gave up — no response needed.
+		default:
+			h.logger.Error("transmux GetOrStart", "channel", channelID, "error", err)
+			respondError(w, r, http.StatusInternalServerError, "TRANSMUX_ERROR",
+				"failed to start transmux session")
+		}
+		return
+	}
+
+	body, err := os.ReadFile(sess.ManifestPath())
+	if err != nil {
+		h.logger.Error("transmux read manifest", "channel", channelID, "error", err)
+		respondError(w, r, http.StatusInternalServerError, "MANIFEST_UNAVAILABLE",
+			"transmux manifest is not yet available")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
+	_, _ = w.Write(body)
+}
+
+// HLSSegment serves one MPEG-TS segment file from the channel's
+// transmux session. Each request bumps the session's last-touch so
+// the idle reaper keeps the session alive while the player is
+// consuming segments at the live edge.
+//
+// 404 is the right answer when the session has expired (e.g. user
+// paused for 60+ s and we reaped it): hls.js handles it by reloading
+// the manifest, which respawns the session and resumes playback.
+func (h *IPTVHandler) HLSSegment(w http.ResponseWriter, r *http.Request) {
+	if h.transmux == nil {
+		respondError(w, r, http.StatusNotImplemented, "TRANSMUX_DISABLED",
+			"live transmux is not enabled on this server")
+		return
+	}
+	channelID := chi.URLParam(r, "channelId")
+	segment := chi.URLParam(r, "segment")
+
+	if !iptv.IsValidSegmentName(segment) {
+		// Path traversal guard: ffmpeg only writes seg-NNNNN.ts and
+		// anything else is either an attack or stale state from a
+		// player using a manifest that no longer matches the session.
+		respondError(w, r, http.StatusBadRequest, "INVALID_SEGMENT",
+			"segment name does not match the expected pattern")
+		return
+	}
+
+	// We don't recheck library ACL on every segment fetch — the
+	// player only ever sees a segment URL after a successful manifest
+	// fetch, which already enforces ACL. Adding a per-segment DB hit
+	// would 6× the database load on a busy live channel for no real
+	// security gain.
+	sess, err := h.transmux.Touch(channelID)
+	if err != nil {
+		respondError(w, r, http.StatusNotFound, "NO_TRANSMUX_SESSION",
+			"transmux session has expired; reload the manifest to resume")
+		return
+	}
+
+	w.Header().Set("Content-Type", "video/mp2t")
+	w.Header().Set("Cache-Control", "public, max-age=10")
+	http.ServeFile(w, r, sess.SegmentPath(segment))
 }
 
 // ProxyURL proxies an HLS segment or sub-playlist for a channel.
