@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import type { FC, ReactNode } from "react";
 
@@ -18,6 +18,24 @@ const sizeStyles: Record<ModalSize, string> = {
   lg: "max-w-2xl",
 };
 
+// Selectors that the WAI-ARIA practices guide considers reasonable to
+// move focus into. Anything with tabindex="-1" is excluded — those
+// nodes are programmatically focusable but not part of the Tab cycle.
+const FOCUSABLE_SELECTOR = [
+  "button:not([disabled])",
+  "[href]",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  "[tabindex]:not([tabindex='-1'])",
+].join(",");
+
+function focusableWithin(root: HTMLElement): HTMLElement[] {
+  return Array.from(
+    root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+  ).filter((el) => !el.hasAttribute("aria-hidden"));
+}
+
 const Modal: FC<ModalProps> = ({
   isOpen,
   onClose,
@@ -25,22 +43,79 @@ const Modal: FC<ModalProps> = ({
   children,
   size = "md",
 }) => {
-  const handleEscape = useCallback(
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+      // Focus trap: keep Tab + Shift+Tab cycling inside the dialog so
+      // keyboard users can't accidentally land on the page underneath
+      // (which is aria-hidden but still has its DOM intact). Without
+      // this, Tab from the last button escapes the modal entirely.
+      if (e.key !== "Tab") return;
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+      const focusables = focusableWithin(dialog);
+      if (focusables.length === 0) {
+        // Nothing to tab to — pin focus on the dialog itself.
+        e.preventDefault();
+        dialog.focus();
+        return;
+      }
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      if (e.shiftKey) {
+        if (active === first || !dialog.contains(active)) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else {
+        if (active === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
     },
     [onClose],
   );
 
+  // Body scroll lock + key handler. Tied to isOpen so the rest of the
+  // page is responsive again the moment the modal closes.
   useEffect(() => {
     if (!isOpen) return;
-    document.addEventListener("keydown", handleEscape);
+    document.addEventListener("keydown", handleKeyDown);
     document.body.style.overflow = "hidden";
     return () => {
-      document.removeEventListener("keydown", handleEscape);
+      document.removeEventListener("keydown", handleKeyDown);
       document.body.style.overflow = "";
     };
-  }, [isOpen, handleEscape]);
+  }, [isOpen, handleKeyDown]);
+
+  // On open: remember the element that had focus, then move focus into
+  // the dialog. On close: restore focus to the trigger so the keyboard
+  // user lands back where they came from. The cleanup runs even if
+  // isOpen flips false mid-mount.
+  useEffect(() => {
+    if (!isOpen) return;
+    const previousActive = document.activeElement as HTMLElement | null;
+    // Defer the focus call by a tick so the dialog DOM is mounted and
+    // the children have settled — focusing too early lands on the
+    // dialog wrapper instead of the first interactive element.
+    const t = window.setTimeout(() => {
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+      const focusables = focusableWithin(dialog);
+      (focusables[0] ?? dialog).focus();
+    }, 0);
+    return () => {
+      window.clearTimeout(t);
+      previousActive?.focus?.();
+    };
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -55,11 +130,15 @@ const Modal: FC<ModalProps> = ({
 
       {/* Dialog */}
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label={title}
+        // tabIndex=-1 so the dialog itself can receive focus as a
+        // last-resort fallback when no interactive children exist.
+        tabIndex={-1}
         className={[
-          "relative w-full rounded-[--radius-lg]",
+          "relative w-full rounded-[--radius-lg] outline-none",
           "bg-bg-card border border-border shadow-2xl",
           "animate-fade-in",
           sizeStyles[size],
