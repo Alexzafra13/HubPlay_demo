@@ -191,81 +191,6 @@ func (h *ItemHandler) Get(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]any{"data": resp})
 }
 
-// dedupeSeasons collapses duplicate season rows (same parent + season
-// number) down to the one with the most direct children. Returns the
-// input slice unchanged when there are no duplicates — common case
-// stays cheap (one map allocation, no DB calls).
-//
-// Conservative on error: a failing batch count returns the input as-is
-// rather than dropping rows we can't compare. The user sees the
-// pre-existing duplicate behaviour, which is no worse than today.
-func dedupeSeasons(ctx context.Context, lib LibraryService, children []*db.Item) []*db.Item {
-	type key struct {
-		parent string
-		num    int
-	}
-	groups := make(map[key][]*db.Item)
-	for _, c := range children {
-		if c.Type != "season" || c.SeasonNumber == nil {
-			continue
-		}
-		k := key{c.ParentID, *c.SeasonNumber}
-		groups[k] = append(groups[k], c)
-	}
-
-	hasDupe := false
-	var dupeIDs []string
-	for _, g := range groups {
-		if len(g) > 1 {
-			hasDupe = true
-			for _, item := range g {
-				dupeIDs = append(dupeIDs, item.ID)
-			}
-		}
-	}
-	if !hasDupe {
-		return children
-	}
-
-	counts, err := lib.GetItemChildCounts(ctx, dupeIDs)
-	if err != nil {
-		return children
-	}
-
-	// Build the set of season IDs to drop: in each duplicate group,
-	// keep the one with the highest child count (ties broken by
-	// earliest creation — first slot wins, which matches the order
-	// GetChildren returns).
-	drop := make(map[string]bool)
-	for _, g := range groups {
-		if len(g) <= 1 {
-			continue
-		}
-		bestIdx := 0
-		bestCount := counts[g[0].ID]
-		for i := 1; i < len(g); i++ {
-			if counts[g[i].ID] > bestCount {
-				bestIdx = i
-				bestCount = counts[g[i].ID]
-			}
-		}
-		for i, item := range g {
-			if i != bestIdx {
-				drop[item.ID] = true
-			}
-		}
-	}
-
-	out := make([]*db.Item, 0, len(children))
-	for _, c := range children {
-		if drop[c.ID] {
-			continue
-		}
-		out = append(out, c)
-	}
-	return out
-}
-
 // attachSeriesContext walks episode → season → series and folds the show's
 // breadcrumb fields and (when the episode has none) image URLs into the
 // detail response. Best-effort: any DB error along the way leaves resp
@@ -445,7 +370,7 @@ func (h *ItemHandler) Children(w http.ResponseWriter, r *http.Request) {
 	// has episodes attached — that's what we keep. The orphan stays in
 	// the DB (cleanup is a separate operation) but is hidden from the
 	// SeasonGrid so the user doesn't see "Season 1 / Season 1".
-	children = dedupeSeasons(r.Context(), h.lib, children)
+	children = h.lib.DedupeSeasonsByChildCount(r.Context(), children)
 
 	data := make([]map[string]any, len(children))
 	for i, item := range children {

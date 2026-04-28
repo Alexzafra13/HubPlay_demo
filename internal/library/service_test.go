@@ -195,3 +195,85 @@ func TestService_ItemCount(t *testing.T) {
 		t.Errorf("expected 0 items, got %d", count)
 	}
 }
+
+// TestService_DedupeSeasonsByChildCount pins the dedupe contract:
+// for every (parent_id, season_number) group with > 1 row, keep the
+// one with the most direct children; non-season rows pass through;
+// non-duplicates are returned unchanged. The dedupe used to live in
+// the Children handler — now it's owned by the items domain.
+func TestService_DedupeSeasonsByChildCount(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	repos := db.NewRepositories(database)
+	bus := event.NewBus(slog.Default())
+	scnr := scanner.New(repos.Items, repos.MediaStreams, repos.Metadata,
+		repos.ExternalIDs, repos.Images, repos.Chapters, nil,
+		&mockProber{}, bus, "", nil, slog.Default())
+	svc := library.NewService(repos.Libraries, repos.Items, repos.MediaStreams,
+		repos.Images, repos.Channels, scnr, slog.Default())
+	t.Cleanup(svc.Shutdown)
+	ctx := context.Background()
+
+	lib, err := svc.Create(ctx, library.CreateRequest{
+		Name: "Shows", ContentType: "shows", Paths: []string{"/tv"},
+	})
+	if err != nil {
+		t.Fatalf("create lib: %v", err)
+	}
+
+	insert := func(item *db.Item) *db.Item {
+		t.Helper()
+		if err := repos.Items.Create(ctx, item); err != nil {
+			t.Fatalf("insert %s: %v", item.ID, err)
+		}
+		return item
+	}
+
+	one := 1
+	series := insert(&db.Item{ID: "series-1", LibraryID: lib.ID, Type: "series", Title: "Show"})
+	loser := insert(&db.Item{
+		ID: "season-loser", LibraryID: lib.ID, ParentID: series.ID,
+		Type: "season", Title: "Season 1", SeasonNumber: &one,
+	})
+	winner := insert(&db.Item{
+		ID: "season-winner", LibraryID: lib.ID, ParentID: series.ID,
+		Type: "season", Title: "Season 1", SeasonNumber: &one,
+	})
+	soloSeries := insert(&db.Item{ID: "series-2", LibraryID: lib.ID, Type: "series", Title: "Other"})
+	soloSeason := insert(&db.Item{
+		ID: "season-solo", LibraryID: lib.ID, ParentID: soloSeries.ID,
+		Type: "season", Title: "Season 1", SeasonNumber: &one,
+	})
+	movie := insert(&db.Item{ID: "movie-1", LibraryID: lib.ID, Type: "movie", Title: "Film"})
+
+	// 3 episodes under winner, 1 under loser.
+	for i := 0; i < 3; i++ {
+		ep := i + 1
+		insert(&db.Item{
+			ID: "ep-w-" + string(rune('a'+i)), LibraryID: lib.ID,
+			ParentID: winner.ID, Type: "episode", Title: "ep",
+			SeasonNumber: &one, EpisodeNumber: &ep,
+		})
+	}
+	insert(&db.Item{
+		ID: "ep-l-1", LibraryID: lib.ID, ParentID: loser.ID,
+		Type: "episode", Title: "ep", SeasonNumber: &one, EpisodeNumber: &one,
+	})
+
+	in := []*db.Item{loser, winner, soloSeason, movie}
+	out := svc.DedupeSeasonsByChildCount(ctx, in)
+
+	if len(out) != 3 {
+		t.Fatalf("expected 3 rows after dedupe (winner + soloSeason + movie), got %d", len(out))
+	}
+	for _, item := range out {
+		if item.ID == loser.ID {
+			t.Errorf("loser season-loser was kept; expected to be dropped")
+		}
+	}
+	// Non-duplicate path returns the same slice (identity is fine).
+	none := []*db.Item{soloSeason, movie}
+	out2 := svc.DedupeSeasonsByChildCount(ctx, none)
+	if len(out2) != 2 {
+		t.Errorf("non-duplicate input lost rows: got %d, want 2", len(out2))
+	}
+}
