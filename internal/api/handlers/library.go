@@ -360,9 +360,28 @@ func libraryResponse(lib *db.Library) map[string]any {
 		// IPTV-specific fields — always present but empty for non-livetv
 		// libraries. Exposed so the admin UI can render the right actions
 		// (refresh M3U / refresh EPG) and show configuration at a glance.
-		"m3u_url": lib.M3UURL,
-		"epg_url": lib.EPGURL,
+		"m3u_url":         lib.M3UURL,
+		"epg_url":         lib.EPGURL,
+		"language_filter": splitLanguageFilter(lib.LanguageFilter),
 	}
+}
+
+// splitLanguageFilter inverts library.normaliseLanguageFilter for the
+// wire: the column stores "es,en" and the JSON contract is a string
+// array. Empty column → empty array (never null) so the frontend can
+// dispatch on `length === 0` without optional-chaining.
+func splitLanguageFilter(stored string) []string {
+	if stored == "" {
+		return []string{}
+	}
+	parts := strings.Split(stored, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func itemSummaryResponse(item *db.Item) map[string]any {

@@ -60,6 +60,14 @@ export interface Library {
   m3u_url?: string;
   /** IPTV-only: XMLTV EPG URL (empty when not configured). */
   epg_url?: string;
+  /**
+   * IPTV-only: ISO 639-1 lowercase codes the M3U import keeps (e.g.
+   * ["es", "en"]). Empty array means "no filter, import every
+   * channel" — matches the historical default. The backend always
+   * returns an array (never null) so consumers can dispatch on
+   * `length === 0`.
+   */
+  language_filter: string[];
 }
 
 export interface CreateLibraryRequest {
@@ -71,6 +79,11 @@ export interface CreateLibraryRequest {
   m3u_url?: string;
   /** IPTV-only. Optional: RefreshM3U auto-discovers XMLTV from the playlist header. */
   epg_url?: string;
+  /**
+   * IPTV-only. Optional: ISO 639-1 codes to keep at import time. Empty
+   * / undefined means no filter.
+   */
+  language_filter?: string[];
 }
 
 export interface UpdateLibraryRequest {
@@ -80,6 +93,11 @@ export interface UpdateLibraryRequest {
   m3u_url?: string;
   /** IPTV-only. Same null-vs-empty semantics as m3u_url. */
   epg_url?: string;
+  /**
+   * IPTV-only. undefined = leave unchanged. Empty array = clear the
+   * filter (no language filtering at import). Non-empty = replace.
+   */
+  language_filter?: string[];
 }
 
 // ─── Media Items ────────────────────────────────────────────────────────────

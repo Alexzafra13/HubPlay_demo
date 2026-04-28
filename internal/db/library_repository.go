@@ -20,6 +20,12 @@ type Library struct {
 	M3UURL          string
 	EPGURL          string
 	RefreshInterval string
+	// LanguageFilter is a comma-separated list of ISO 639-1 lowercase
+	// codes (e.g. "es,en"). When non-empty, M3U import drops every
+	// channel whose language signals don't match any of the listed
+	// codes. Empty string means "no filter" — every channel imports.
+	// See iptv.MatchesLanguageFilter for the matching heuristics.
+	LanguageFilter  string
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 	Paths           []string // populated by GetByID/List
@@ -52,6 +58,7 @@ func (r *LibraryRepository) Create(ctx context.Context, lib *Library) error {
 		M3uUrl:          nullableString(lib.M3UURL),
 		EpgUrl:          nullableString(lib.EPGURL),
 		RefreshInterval: nullableString(lib.RefreshInterval),
+		LanguageFilter:  lib.LanguageFilter,
 		CreatedAt:       lib.CreatedAt,
 		UpdatedAt:       lib.UpdatedAt,
 	})
@@ -122,6 +129,7 @@ func (r *LibraryRepository) Update(ctx context.Context, lib *Library) error {
 		M3uUrl:          nullableString(lib.M3UURL),
 		EpgUrl:          nullableString(lib.EPGURL),
 		RefreshInterval: nullableString(lib.RefreshInterval),
+		LanguageFilter:  lib.LanguageFilter,
 		UpdatedAt:       lib.UpdatedAt,
 		ID:              lib.ID,
 	})
@@ -255,6 +263,7 @@ func libraryFromGetRow(r sqlc.GetLibraryByIDRow) Library {
 		M3UURL:          r.M3uUrl,
 		EPGURL:          r.EpgUrl,
 		RefreshInterval: r.RefreshInterval,
+		LanguageFilter:  r.LanguageFilter,
 		CreatedAt:       r.CreatedAt,
 		UpdatedAt:       r.UpdatedAt,
 	}
@@ -270,6 +279,7 @@ func libraryFromListRow(r sqlc.ListLibrariesRow) Library {
 		M3UURL:          r.M3uUrl,
 		EPGURL:          r.EpgUrl,
 		RefreshInterval: r.RefreshInterval,
+		LanguageFilter:  r.LanguageFilter,
 		CreatedAt:       r.CreatedAt,
 		UpdatedAt:       r.UpdatedAt,
 	}
@@ -285,6 +295,7 @@ func libraryFromForUserRow(r sqlc.ListLibrariesForUserRow) Library {
 		M3UURL:          r.M3uUrl,
 		EPGURL:          r.EpgUrl,
 		RefreshInterval: r.RefreshInterval,
+		LanguageFilter:  r.LanguageFilter,
 		CreatedAt:       r.CreatedAt,
 		UpdatedAt:       r.UpdatedAt,
 	}

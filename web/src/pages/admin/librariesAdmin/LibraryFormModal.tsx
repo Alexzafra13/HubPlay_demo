@@ -14,6 +14,7 @@ import { FolderBrowser } from "@/components/setup/FolderBrowser";
 import { useCreateLibrary, useRefreshM3U, usePublicCountries } from "@/api/hooks";
 import type { ContentType, Library } from "@/api/types";
 import { FilteredSelect } from "./FilteredSelect";
+import { LanguageMultiSelect } from "./LanguageMultiSelect";
 import {
   CONTENT_TYPES,
   IPTV_ORG_CATEGORIES,
@@ -51,6 +52,7 @@ export function LibraryFormModal({ isOpen, onClose, onCreated }: LibraryFormModa
   const [livePick, setLivePick] = useState("");
   const [m3uURL, setM3UURL] = useState("");
   const [epgURL, setEPGURL] = useState("");
+  const [languageFilter, setLanguageFilter] = useState<string[]>([]);
 
   // Only fires the network request while the Add modal is open AND the user
   // has picked livetv — avoids loading the 200-country list for every admin
@@ -73,6 +75,7 @@ export function LibraryFormModal({ isOpen, onClose, onCreated }: LibraryFormModa
     setLivePick("");
     setM3UURL("");
     setEPGURL("");
+    setLanguageFilter([]);
   }, [isOpen]);
 
   function handleSubmit(e: FormEvent) {
@@ -97,6 +100,7 @@ export function LibraryFormModal({ isOpen, onClose, onCreated }: LibraryFormModa
           paths: [],
           m3u_url: resolvedM3U,
           epg_url: epgURL.trim() || undefined,
+          language_filter: languageFilter.length > 0 ? languageFilter : undefined,
         },
         {
           onSuccess: (lib) => {
@@ -311,6 +315,11 @@ export function LibraryFormModal({ isOpen, onClose, onCreated }: LibraryFormModa
                   defaultValue: "Si el M3U trae url-tvg en su cabecera, se auto-detecta.",
                 })}
               </p>
+
+              <LanguageMultiSelect
+                value={languageFilter}
+                onChange={setLanguageFilter}
+              />
             </>
           ) : (
             <div className="flex gap-2 items-end">

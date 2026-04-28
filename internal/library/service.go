@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,6 +14,44 @@ import (
 
 	"github.com/google/uuid"
 )
+
+// normaliseLanguageFilter trims, lower-cases and de-duplicates the
+// language codes coming from a CreateRequest / UpdateRequest payload,
+// then joins them with "," for storage in libraries.language_filter.
+// Non-ISO-shaped tokens (anything other than 2–3 letters) are dropped
+// — keeps the column free of typos and "español" -style human inputs
+// while still accepting the rare 3-letter ISO 639-2 code.
+func normaliseLanguageFilter(codes []string) string {
+	if len(codes) == 0 {
+		return ""
+	}
+	seen := make(map[string]struct{}, len(codes))
+	out := make([]string, 0, len(codes))
+	for _, raw := range codes {
+		c := strings.ToLower(strings.TrimSpace(raw))
+		if c == "" {
+			continue
+		}
+		if l := len(c); l < 2 || l > 3 {
+			continue
+		}
+		for _, r := range c {
+			if r < 'a' || r > 'z' {
+				c = ""
+				break
+			}
+		}
+		if c == "" {
+			continue
+		}
+		if _, dup := seen[c]; dup {
+			continue
+		}
+		seen[c] = struct{}{}
+		out = append(out, c)
+	}
+	return strings.Join(out, ",")
+}
 
 type Service struct {
 	libraries *db.LibraryRepository
@@ -81,6 +120,12 @@ type CreateRequest struct {
 	// an XMLTV URL from the playlist's `#EXTM3U url-tvg=...` header.
 	M3UURL string `json:"m3u_url,omitempty"`
 	EPGURL string `json:"epg_url,omitempty"`
+
+	// LanguageFilter is the set of ISO 639-1 lowercase codes (e.g.
+	// ["es", "en"]) the M3U import should keep. Empty / nil means
+	// no filter — every channel imports. See iptv.MatchesLanguageFilter
+	// for the matching rules. Persisted as comma-separated.
+	LanguageFilter []string `json:"language_filter,omitempty"`
 }
 
 func (s *Service) Create(ctx context.Context, req CreateRequest) (*db.Library, error) {
@@ -94,16 +139,17 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*db.Library, e
 
 	now := time.Now()
 	lib := &db.Library{
-		ID:           uuid.NewString(),
-		Name:         req.Name,
-		ContentType:  req.ContentType,
-		ScanMode:     req.ScanMode,
-		ScanInterval: "6h",
-		CreatedAt:    now,
-		UpdatedAt:    now,
-		Paths:        req.Paths,
-		M3UURL:       req.M3UURL,
-		EPGURL:       req.EPGURL,
+		ID:             uuid.NewString(),
+		Name:           req.Name,
+		ContentType:    req.ContentType,
+		ScanMode:       req.ScanMode,
+		ScanInterval:   "6h",
+		CreatedAt:      now,
+		UpdatedAt:      now,
+		Paths:          req.Paths,
+		M3UURL:         req.M3UURL,
+		EPGURL:         req.EPGURL,
+		LanguageFilter: normaliseLanguageFilter(req.LanguageFilter),
 	}
 
 	if err := s.libraries.Create(ctx, lib); err != nil {
@@ -163,6 +209,12 @@ type UpdateRequest struct {
 	// when the key isn't in the payload, matching that semantic.
 	M3UURL *string `json:"m3u_url,omitempty"`
 	EPGURL *string `json:"epg_url,omitempty"`
+
+	// LanguageFilter follows the same "nil = leave as-is, present-and-
+	// empty = clear all" semantic. *[]string lets a PATCH request opt
+	// in or out without forcing the caller to round-trip the existing
+	// value.
+	LanguageFilter *[]string `json:"language_filter,omitempty"`
 }
 
 func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (*db.Library, error) {
@@ -188,6 +240,9 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (*db
 	}
 	if req.EPGURL != nil {
 		lib.EPGURL = *req.EPGURL
+	}
+	if req.LanguageFilter != nil {
+		lib.LanguageFilter = normaliseLanguageFilter(*req.LanguageFilter)
 	}
 	lib.UpdatedAt = time.Now()
 

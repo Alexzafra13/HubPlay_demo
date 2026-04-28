@@ -11,6 +11,7 @@ import { Button, Input, Modal } from "@/components/common";
 import { FolderBrowser } from "@/components/setup/FolderBrowser";
 import { useUpdateLibrary } from "@/api/hooks";
 import type { Library } from "@/api/types";
+import { LanguageMultiSelect } from "./LanguageMultiSelect";
 
 interface LibraryEditModalProps {
   target: Library | null;
@@ -25,6 +26,7 @@ export function LibraryEditModal({ target, onClose }: LibraryEditModalProps) {
   const [path, setPath] = useState("");
   const [m3uURL, setM3UURL] = useState("");
   const [epgURL, setEPGURL] = useState("");
+  const [languageFilter, setLanguageFilter] = useState<string[]>([]);
   const [showBrowse, setShowBrowse] = useState(false);
 
   // Hydrate from target on each open. `target` is the source of truth;
@@ -35,6 +37,7 @@ export function LibraryEditModal({ target, onClose }: LibraryEditModalProps) {
     setPath((target.paths ?? [])[0] ?? "");
     setM3UURL(target.m3u_url ?? "");
     setEPGURL(target.epg_url ?? "");
+    setLanguageFilter(target.language_filter ?? []);
   }, [target]);
 
   function handleSubmit(e: FormEvent) {
@@ -53,6 +56,10 @@ export function LibraryEditModal({ target, onClose }: LibraryEditModalProps) {
             // preserve we still send the trimmed value (which is
             // identical to current).
             epg_url: epgURL.trim(),
+            // Always send the array — the backend treats undefined as
+            // "leave as-is" and an empty array as "clear filter". We
+            // want explicit, so we always provide it.
+            language_filter: languageFilter,
           },
         },
         { onSuccess: onClose },
@@ -106,6 +113,11 @@ export function LibraryEditModal({ target, onClose }: LibraryEditModalProps) {
                   defaultValue: "Si el M3U trae url-tvg en su cabecera, se auto-detecta.",
                 })}
               </p>
+
+              <LanguageMultiSelect
+                value={languageFilter}
+                onChange={setLanguageFilter}
+              />
             </>
           ) : (
             <div className="flex gap-2 items-end">

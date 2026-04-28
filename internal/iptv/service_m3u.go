@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"hubplay/internal/db"
@@ -48,18 +49,28 @@ func (s *Service) RefreshM3U(ctx context.Context, libraryID string) (int, error)
 	defer body.Close() //nolint:errcheck
 
 	// Streaming parse: emit each entry through a callback so we can
-	// filter VOD on the fly and never hold the whole playlist in
-	// memory. Xtream-Codes "M3U_PLUS" exports bundle live + movies +
-	// series and routinely run into hundreds of thousands of entries.
+	// filter VOD + language on the fly and never hold the whole
+	// playlist in memory. Xtream-Codes "M3U_PLUS" exports bundle live
+	// + movies + series and routinely run into hundreds of thousands
+	// of entries.
 	now := time.Now()
 	var (
-		dbChannels []*db.Channel
-		index      int
-		vodSkipped int
+		dbChannels      []*db.Channel
+		index           int
+		vodSkipped      int
+		languageSkipped int
 	)
+	allowedLangs := parseLanguageFilter(lib.LanguageFilter)
 	playlistEPGURL, parsedLines, parseErr := ParseM3UStream(body, func(ch M3UChannel) error {
 		if IsVODChannel(ch) {
 			vodSkipped++
+			return nil
+		}
+		// Language filter — applied AFTER VOD so the operator-visible
+		// "vod_skipped" stat reflects the same denominator regardless
+		// of language config. Empty allowlist = no filter.
+		if !MatchesLanguageFilter(ch, allowedLangs) {
+			languageSkipped++
 			return nil
 		}
 		index++
@@ -101,14 +112,16 @@ func (s *Service) RefreshM3U(ctx context.Context, libraryID string) (int, error)
 		if len(dbChannels) >= minUsable {
 			s.logger.Warn("M3U parse truncated; importing what we got",
 				"library", libraryID, "lines", parsedLines,
-				"channels", len(dbChannels), "vod_skipped", vodSkipped, "error", parseErr)
+				"channels", len(dbChannels), "vod_skipped", vodSkipped,
+				"language_skipped", languageSkipped, "error", parseErr)
 		} else {
 			return 0, fmt.Errorf("parse M3U: %w", parseErr)
 		}
 	} else {
 		s.logger.Info("M3U parse complete",
 			"library", libraryID, "lines", parsedLines,
-			"channels", len(dbChannels), "vod_skipped", vodSkipped)
+			"channels", len(dbChannels), "vod_skipped", vodSkipped,
+			"language_skipped", languageSkipped)
 	}
 
 	if err := s.channels.ReplaceForLibrary(ctx, libraryID, dbChannels); err != nil {
@@ -194,4 +207,22 @@ func (s *Service) RefreshM3U(ctx context.Context, libraryID string) (int, error)
 	}
 
 	return len(dbChannels), nil
+}
+
+// parseLanguageFilter splits the comma-separated column value into
+// the slice MatchesLanguageFilter expects. The library service
+// already normalises codes to lowercase ISO on write, so this is a
+// straight split + skip-empty.
+func parseLanguageFilter(stored string) []string {
+	if stored == "" {
+		return nil
+	}
+	parts := strings.Split(stored, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

@@ -1,0 +1,21 @@
+-- +goose Up
+-- Lets an operator restrict which channels survive an M3U import to a
+-- chosen set of languages. Stored as a comma-separated list of
+-- ISO 639-1 lowercase codes (e.g. "es,en"). Empty means "no filter"
+-- — every channel is imported, matching the historical behaviour
+-- before this column existed.
+--
+-- The filter is applied at import time, NOT at query time: rows that
+-- don't match never hit the channels table. Re-importing after
+-- changing the filter (manually or via the scheduler) brings any
+-- newly-included or newly-excluded channels into sync. This matches
+-- the Threadfin/xTeVe pattern of "clean the source before storing"
+-- and avoids the cost of filtering 20 k+ rows on every list query.
+--
+-- Why a single TEXT column instead of a join table:
+--   - The filter is a small set (typically 1–3 codes), not a
+--     reference to other entities.
+--   - We never query "find libraries that allow language X"; the
+--     filter is only read when refreshing one library at a time.
+--   - Avoiding a side table keeps the libraries domain self-contained.
+ALTER TABLE libraries ADD COLUMN language_filter TEXT NOT NULL DEFAULT '';
