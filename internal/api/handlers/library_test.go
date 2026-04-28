@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -464,6 +465,14 @@ func TestLibraryHandler_Browse_InvalidJSON_400(t *testing.T) {
 }
 
 func TestLibraryHandler_Browse_SensitivePath_403(t *testing.T) {
+	// The sensitive-path allowlist (internal/api/handlers/library.go:404)
+	// is Unix-only — `/etc`, `/proc`, `/sys`, `/root` etc. all resolve
+	// to `C:\etc` on Windows, which then trips the dir-not-found path
+	// instead of the deny path. Skip on non-Unix; the deny logic is
+	// covered by the path-prefix check itself, which is host-agnostic.
+	if runtime.GOOS == "windows" {
+		t.Skip("sensitive-path list is Unix-only; not meaningful on Windows")
+	}
 	env := newLibTestEnv(t)
 	rr := env.do(http.MethodPost, "/api/v1/libraries/browse", `{"path":"/etc"}`, nil)
 	if rr.Code != http.StatusForbidden {
