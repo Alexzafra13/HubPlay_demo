@@ -589,18 +589,30 @@ func clearWorkDir(dir string) error {
 //
 // HLS window choices (tuned for live, smooth playback over Xtream):
 //   - `hls_time 2` — smaller segments halve buffer-underrun recovery
-//     time and reduce live latency. Cost: 2× more segment files
-//     on disk (still trivial at `hls_list_size 10`).
-//   - `hls_list_size 10` — 20 s window of segments visible to the
-//     player. The player has more segments to walk before falling
-//     behind the window and being forced to "jump to live edge",
-//     which is the visible stutter we saw against the user's
-//     xiagdns provider.
+//     time and reduce live latency.
+//   - `hls_list_size 20` — 40 s window of segments visible to the
+//     player. Sized to absorb a real-world 10-second client stall
+//     (background-tab throttling, transient network blip) without
+//     the player falling out of the manifest window. Apple's HLS
+//     spec recommends list_size ≥ 6 × target_duration; we land at
+//     20× because operator latency tolerance for live IPTV is high.
+//   - `hls_delete_threshold 5` — keep 5 extra segments on disk past
+//     the playlist tail. A client whose manifest parse cycle is
+//     slightly behind can still fetch the segment it asked for
+//     instead of getting 404. Without this flag `delete_segments`
+//     deletes immediately on rotation, which races slow clients.
+//
+// `+temp_file` writes each segment to `.tmp` first and atomically
+// renames into place when ffmpeg is done. Without it, Go's
+// `http.ServeFile` can serve a partially-written `.ts` mid-write,
+// triggering `bufferStalledError` in hls.js — which then compounds
+// into a fall-behind. Zero downside: rename is atomic on every
+// filesystem we run on.
 //
 // `omit_endlist` keeps the manifest live (no #EXT-X-ENDLIST) so
 // hls.js treats it as a sliding window. `delete_segments` keeps disk
-// usage bounded at `hls_list_size` segments. `independent_segments`
-// is the right hint for sliding-window live HLS.
+// usage bounded. `independent_segments` is the right hint for
+// sliding-window live HLS.
 func buildTransmuxFFmpegArgs(upstreamURL, workDir string) []string {
 	return []string{
 		"-hide_banner",
@@ -621,8 +633,9 @@ func buildTransmuxFFmpegArgs(upstreamURL, workDir string) []string {
 		"-bsf:v", "h264_mp4toannexb",
 		"-f", "hls",
 		"-hls_time", "2",
-		"-hls_list_size", "10",
-		"-hls_flags", "delete_segments+independent_segments+omit_endlist+program_date_time",
+		"-hls_list_size", "20",
+		"-hls_delete_threshold", "5",
+		"-hls_flags", "delete_segments+independent_segments+omit_endlist+program_date_time+temp_file",
 		"-hls_segment_type", "mpegts",
 		"-hls_segment_filename", filepath.Join(workDir, "seg-%05d.ts"),
 		"-hls_allow_cache", "0",

@@ -65,6 +65,9 @@ export function useLiveHls({
   onFatalError,
 }: UseLiveHlsOptions): UseLiveHlsReturn {
   const hlsRef = useRef<Hls | null>(null);
+  // Visibility listener handle: stored so the cleanup path can detach
+  // it without holding the closure alive across re-attaches.
+  const visibilityListenerRef = useRef<(() => void) | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [reloadToken, setReloadToken] = useState(0);
@@ -140,27 +143,36 @@ export function useLiveHls({
 
     if (Hls.isSupported()) {
       // Buffering values tuned for live IPTV transmux (segments are
-      // 2 s after the backend tuning). Larger numbers trade live
-      // latency for resilience to upstream jitter — Xtream providers
-      // often deliver MPEG-TS in uneven bursts, and the player has
-      // to ride that out without falling behind the manifest window.
+      // 2 s after the backend tuning).
       //   maxBufferLength=60 / maxMaxBufferLength=120: pre-load up to
       //     2 minutes ahead so a 10-second upstream blip doesn't
       //     drain the buffer.
-      //   liveSyncDurationCount=4 (× 2 s segments = 8 s behind edge):
-      //     a touch more lag than the hls.js default (3) for steadier
-      //     playback against jittery upstreams.
-      //   liveMaxLatencyDurationCount=12 (× 2 s = 24 s): twice as
-      //     much room before hls.js force-jumps to the live edge,
-      //     which is what the user sees as a visible "skip".
+      //   liveSyncDurationCount=3 (× 2 s = 6 s behind edge): close
+      //     enough to live for fast catch-up. We rely on
+      //     maxLiveSyncPlaybackRate (below) to recover smoothly
+      //     instead of leaving extra slack here.
+      //   liveMaxLatencyDurationCount=10 (× 2 s = 20 s): the player
+      //     attempts gradual catch-up first; only beyond this it
+      //     force-jumps to live edge (the visible "skip").
+      //   maxLiveSyncPlaybackRate=1.5: the load-bearing recovery
+      //     setting. When the player falls behind, hls.js speeds up
+      //     playback to 1.5× until caught up — barely perceptible,
+      //     and dramatically better than the alternative of skipping
+      //     6 segments at once.
+      //   nudgeMaxRetry=10: how many times the player nudges past a
+      //     stuck buffer before giving up. Default 3 is too eager to
+      //     surrender on Xtream feeds with sporadic glitches.
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
         maxBufferLength: 60,
         maxMaxBufferLength: 120,
         backBufferLength: 30,
-        liveSyncDurationCount: 4,
-        liveMaxLatencyDurationCount: 12,
+        liveSyncDurationCount: 3,
+        liveMaxLatencyDurationCount: 10,
+        maxLiveSyncPlaybackRate: 1.5,
+        nudgeMaxRetry: 10,
+        nudgeOffset: 0.2,
         manifestLoadingMaxRetry: 6,
         manifestLoadingRetryDelay: 1000,
         manifestLoadingMaxRetryTimeout: 8000,
@@ -178,6 +190,30 @@ export function useLiveHls({
       hlsRef.current = hls;
       hls.loadSource(streamUrl);
       hls.attachMedia(video);
+
+      // Visibility-driven load pause is the cleanest fix for the
+      // background-tab stall pattern that real-traffic logs caught:
+      // when the tab goes to background, Chrome/Firefox throttle
+      // setTimeout/setInterval to 1 Hz, which breaks hls.js's
+      // segment-fetch scheduler. The player falls behind the manifest
+      // window and force-skips when the tab returns. Stopping the
+      // load on hide and resuming with `startLoad(-1)` (live edge)
+      // on show eliminates the symptom entirely — same approach
+      // Plex Web uses for its live channels.
+      const onVisibilityChange = () => {
+        if (!hlsRef.current) return;
+        if (document.hidden) {
+          hlsRef.current.stopLoad();
+        } else {
+          // -1 = resume from live edge, not from where we paused.
+          // For live IPTV the right thing is "show me what's airing
+          // right now"; restoring buffered position would just
+          // recreate the fall-behind window the pause prevented.
+          hlsRef.current.startLoad(-1);
+        }
+      };
+      document.addEventListener("visibilitychange", onVisibilityChange);
+      visibilityListenerRef.current = onVisibilityChange;
 
       let networkRetries = 0;
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
@@ -231,6 +267,13 @@ export function useLiveHls({
     return () => {
       window.clearTimeout(unavailableTimer);
       video.removeEventListener("playing", onPlaying);
+      if (visibilityListenerRef.current) {
+        document.removeEventListener(
+          "visibilitychange",
+          visibilityListenerRef.current,
+        );
+        visibilityListenerRef.current = null;
+      }
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
