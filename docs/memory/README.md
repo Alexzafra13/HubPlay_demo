@@ -22,6 +22,10 @@ complementa con contexto, decisiones y pendientes.
   Consecuencias → Alternativas) de las decisiones no triviales ya tomadas.
 - `conventions.md` — patrones del codebase descubiertos al trabajar:
   anti-ciclos, helpers de test, gotchas, reglas de dependencia entre paquetes.
+- `archive/` — sesiones antiguas que ya no aportan al entrypoint de sesión.
+  No se lee al inicio; sólo cuando hace falta arqueología sobre una decisión
+  vieja. Cada fichero cubre un rango temporal cerrado
+  (p.ej. `2026-pre-04-28.md`).
 
 ## Política de actualización
 
@@ -45,3 +49,11 @@ complementa con contexto, decisiones y pendientes.
 - Duplicados de `docs/architecture/` — si ya está documentado allí, se enlaza.
 - Especulación sobre futuro no comprometido. Si no está en el roadmap real o
   en un issue, no va.
+
+## Política de archivo
+
+`project-status.md` es el entrypoint de cada sesión nueva. Cuando crece
+demasiado (>~50 KB) y las sesiones más viejas dejan de ser relevantes para
+el estado actual, se mueven a `archive/<rango>.md` con un puntero al final
+del fichero activo. **Nunca se borra contenido**: sólo se reubica. La regla:
+si llevas más de dos semanas sin necesitar leer una sesión, archívala.
