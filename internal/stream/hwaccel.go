@@ -134,7 +134,7 @@ func accelToEncoder(accel HWAccelType) string {
 	}
 }
 
-// hwAccelInputArgs returns the ffmpeg input-side flags for a given
+// HWAccelInputArgs returns the ffmpeg input-side flags for a given
 // acceleration kind. These go before `-i` and tell ffmpeg to use
 // the GPU/iGPU decoder. Empty slice means software decode (no flags).
 //
@@ -143,7 +143,12 @@ func accelToEncoder(accel HWAccelType) string {
 // filter chain (`scale=...,pad=...`) keep working unchanged. A fully
 // on-device pipeline would need scale_vaapi / scale_cuda / scale_qsv
 // and a per-format `-vf hwupload`, which is the next iteration.
-func hwAccelInputArgs(accel HWAccelType) []string {
+//
+// Exported because the iptv transmux re-encode fallback (used when
+// `-c copy` can't repackage the upstream codec) needs the same
+// decode-side flags as the VOD transcoder. Owning the canonical
+// mapping in one place keeps NVDEC / VAAPI quirks from drifting.
+func HWAccelInputArgs(accel HWAccelType) []string {
 	switch accel {
 	case HWAccelVAAPI:
 		return []string{"-hwaccel", "vaapi"}

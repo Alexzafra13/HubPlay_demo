@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -787,8 +788,10 @@ func TestLooksLikeCodecError(t *testing.T) {
 	}
 }
 
-func TestBuildReencodeArgs_ContainsTranscodeFlags(t *testing.T) {
-	args := buildReencodeArgs("http://up/x", "/work", "")
+func TestBuildReencodeArgs_LibX264_Default(t *testing.T) {
+	// Empty encoder + empty hwAccel = software path. Must produce
+	// the libx264 tuning flags and zero `-hwaccel` flags.
+	args := buildReencodeArgs("http://up/x", "/work", "", "", nil)
 	joined := strings.Join(args, " ")
 	for _, want := range []string{
 		"-c:v libx264",
@@ -797,6 +800,7 @@ func TestBuildReencodeArgs_ContainsTranscodeFlags(t *testing.T) {
 		"-c:a aac",
 		"-f hls",
 		"-user_agent " + defaultTransmuxUserAgent,
+		"-x264-params keyint=48:min-keyint=48:scenecut=0",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("missing %q in reencode argv: %s", want, joined)
@@ -804,6 +808,150 @@ func TestBuildReencodeArgs_ContainsTranscodeFlags(t *testing.T) {
 	}
 	if strings.Contains(joined, " -c copy ") {
 		t.Errorf("reencode argv must NOT contain -c copy: %s", joined)
+	}
+	if strings.Contains(joined, "-hwaccel ") {
+		t.Errorf("software encode must NOT include -hwaccel: %s", joined)
+	}
+}
+
+func TestBuildReencodeArgs_NVENC_AddsHWAccelAndPreset(t *testing.T) {
+	args := buildReencodeArgs(
+		"http://up/x", "/work", "",
+		"h264_nvenc",
+		[]string{"-hwaccel", "cuda"},
+	)
+	joined := strings.Join(args, " ")
+	for _, want := range []string{
+		"-hwaccel cuda",
+		"-c:v h264_nvenc",
+		"-preset p4",
+		"-tune ll",
+		"-rc cbr",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("missing %q in nvenc argv: %s", want, joined)
+		}
+	}
+	// libx264-specific flags must NOT leak to the hardware path.
+	for _, leak := range []string{
+		"-c:v libx264",
+		"-x264-params",
+		"-tune zerolatency",
+	} {
+		if strings.Contains(joined, leak) {
+			t.Errorf("libx264 flag %q leaked into nvenc argv: %s", leak, joined)
+		}
+	}
+	// -hwaccel must come BEFORE -i so the decoder runs on the GPU.
+	hwaccelIdx := strings.Index(joined, "-hwaccel ")
+	inputIdx := strings.Index(joined, "-i ")
+	if hwaccelIdx < 0 || inputIdx < 0 || hwaccelIdx > inputIdx {
+		t.Errorf("-hwaccel must precede -i; argv=%s", joined)
+	}
+}
+
+func TestBuildReencodeArgs_VAAPI_PerEncoderTuning(t *testing.T) {
+	args := buildReencodeArgs(
+		"http://up/x", "/work", "",
+		"h264_vaapi",
+		[]string{"-hwaccel", "vaapi"},
+	)
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "-hwaccel vaapi") {
+		t.Errorf("missing -hwaccel vaapi: %s", joined)
+	}
+	if !strings.Contains(joined, "-c:v h264_vaapi") {
+		t.Errorf("missing -c:v h264_vaapi: %s", joined)
+	}
+	if !strings.Contains(joined, "-quality 4") {
+		t.Errorf("missing VAAPI quality flag: %s", joined)
+	}
+	if strings.Contains(joined, "-x264-params") {
+		t.Errorf("libx264-specific -x264-params leaked: %s", joined)
+	}
+}
+
+func TestInsertBeforeInput_PlacesFlagsCorrectly(t *testing.T) {
+	args := []string{"-hide_banner", "-loglevel", "warning", "-i", "http://x"}
+	got := insertBeforeInput(args, []string{"-hwaccel", "cuda"})
+	want := []string{"-hide_banner", "-loglevel", "warning", "-hwaccel", "cuda", "-i", "http://x"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("insertBeforeInput: got %v want %v", got, want)
+	}
+}
+
+func TestInsertBeforeInput_EmptyExtraIsNoop(t *testing.T) {
+	args := []string{"-i", "http://x"}
+	got := insertBeforeInput(args, nil)
+	if !reflect.DeepEqual(got, args) {
+		t.Errorf("expected no-op for nil extra: got %v", got)
+	}
+}
+
+func TestTransmuxManager_RefusesNewReencodeSpawnAtCap(t *testing.T) {
+	// Cap reencode at 1; pin two distinct channels into reencode mode
+	// via the sticky cache (decodeModeReencode + a non-expired entry).
+	// The first GetOrStart succeeds, the second hits the cap.
+	m, _ := newTestManagerWithOpts(t, "ok", 0, TransmuxManagerConfig{
+		MaxReencodeSessions: 1,
+	})
+	t.Cleanup(m.Shutdown)
+
+	// Force reencode mode for both channels.
+	now := time.Now()
+	m.decodeModeMu.Lock()
+	m.decodeMode["ch-a"] = decodeModeEntry{mode: decodeModeReencode, expiresAt: now.Add(decodeModeFallbackTTL)}
+	m.decodeMode["ch-b"] = decodeModeEntry{mode: decodeModeReencode, expiresAt: now.Add(decodeModeFallbackTTL)}
+	m.decodeModeMu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := m.GetOrStart(ctx, "ch-a", "http://upstream/a"); err != nil {
+		t.Fatalf("first reencode spawn: %v", err)
+	}
+	if got := m.ActiveReencodeSessions(); got != 1 {
+		t.Fatalf("ActiveReencodeSessions: got %d want 1", got)
+	}
+
+	_, err := m.GetOrStart(ctx, "ch-b", "http://upstream/b")
+	if !errors.Is(err, ErrTooManyReencodeSessions) {
+		t.Fatalf("expected ErrTooManyReencodeSessions, got %v", err)
+	}
+	// Direct sessions still admitted on top of the reencode cap.
+	if _, err := m.GetOrStart(ctx, "ch-direct", "http://upstream/d"); err != nil {
+		t.Fatalf("direct spawn after reencode cap should still pass: %v", err)
+	}
+}
+
+func TestNewTransmuxManager_DefaultsReencodeCap(t *testing.T) {
+	// Bypass newTestManagerWithOpts (which hardcodes MaxSessions=3)
+	// to verify the half-of-MaxSessions defaulting behaviour with a
+	// clean config.
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	m := NewTransmuxManager(TransmuxManagerConfig{
+		CacheDir:    t.TempDir(),
+		FFmpegPath:  fakeFFmpeg(t),
+		MaxSessions: 8,
+	}, logger)
+	t.Cleanup(m.Shutdown)
+	if got := m.cfg.MaxReencodeSessions; got != 4 {
+		t.Errorf("default reencode cap: got %d want 4 (half of MaxSessions=8)", got)
+	}
+}
+
+func TestNewTransmuxManager_DefaultsReencodeCap_FloorAtOne(t *testing.T) {
+	// MaxSessions=1 → floor(1/2)=0; the floor logic must round up to
+	// 1 so the reencode path isn't fully disabled by a small cap.
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	m := NewTransmuxManager(TransmuxManagerConfig{
+		CacheDir:    t.TempDir(),
+		FFmpegPath:  fakeFFmpeg(t),
+		MaxSessions: 1,
+	}, logger)
+	t.Cleanup(m.Shutdown)
+	if got := m.cfg.MaxReencodeSessions; got != 1 {
+		t.Errorf("floor: got %d want 1", got)
 	}
 }
 

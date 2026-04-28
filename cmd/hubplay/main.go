@@ -178,21 +178,34 @@ func run(configPath string) error {
 		// trip the same per-channel cooldown. Without this, a dead
 		// Xtream upstream produced a fork-bomb of failed ffmpeg spawns
 		// every time the player retried the manifest.
+		//
+		// Hwaccel reuse: same encoder + decode flags the VOD
+		// transcoder picked at boot. If the host has VAAPI / NVENC
+		// available, the reencode fallback runs there too — for HEVC
+		// → H.264 transcode that's often a 5-10× CPU win, which is
+		// what makes the fallback affordable on low-spec hosts.
+		hwInfo := streamManager.HWAccelInfo()
 		iptvTransmux = iptv.NewTransmuxManager(iptv.TransmuxManagerConfig{
-			CacheDir:     transmuxCacheDir,
-			MaxSessions:  cfg.IPTV.Transmux.MaxSessions,
-			IdleTimeout:  cfg.IPTV.Transmux.IdleTimeout,
-			ReadyTimeout: cfg.IPTV.Transmux.ReadyTimeout,
-			Gate:         iptvProxy.Breaker(),
-			Reporter:     iptvService,
-			Metrics:      observability.NewIPTVTransmuxSink(metrics),
+			CacheDir:                 transmuxCacheDir,
+			MaxSessions:              cfg.IPTV.Transmux.MaxSessions,
+			MaxReencodeSessions:      cfg.IPTV.Transmux.MaxReencodeSessions,
+			IdleTimeout:              cfg.IPTV.Transmux.IdleTimeout,
+			ReadyTimeout:             cfg.IPTV.Transmux.ReadyTimeout,
+			Gate:                     iptvProxy.Breaker(),
+			Reporter:                 iptvService,
+			Metrics:                  observability.NewIPTVTransmuxSink(metrics),
+			ReencodeEncoder:          hwInfo.Encoder,
+			ReencodeHWAccelInputArgs: stream.HWAccelInputArgs(hwInfo.Selected),
 		}, logger)
 		if err := observability.RegisterIPTVTransmuxGauges(metrics, iptvTransmux); err != nil {
 			return fmt.Errorf("register iptv transmux gauges: %w", err)
 		}
 		logger.Info("iptv transmux enabled",
 			"cache_dir", transmuxCacheDir,
-			"max_sessions", cfg.IPTV.Transmux.MaxSessions)
+			"max_sessions", cfg.IPTV.Transmux.MaxSessions,
+			"max_reencode_sessions", iptvTransmux.MaxReencodeSessions(),
+			"reencode_encoder", hwInfo.Encoder,
+			"hwaccel", hwInfo.Selected)
 	}
 
 	// Channel logo cache. Mirrors upstream `tvg-logo` URLs to disk

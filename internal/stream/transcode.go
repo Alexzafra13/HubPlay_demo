@@ -215,7 +215,7 @@ func BuildFFmpegArgs(input, outputDir string, profile Profile, startTime float64
 	// Hardware-accelerated decode flags go BEFORE -i. Skipped for
 	// libx264 / VideoToolbox (the latter only provides an encoder,
 	// no decoder pipeline worth declaring here).
-	args = append(args, hwAccelInputArgs(hwAccel)...)
+	args = append(args, HWAccelInputArgs(hwAccel)...)
 
 	// Seek if needed
 	if startTime > 0 {

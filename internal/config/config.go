@@ -53,6 +53,13 @@ type IPTVTransmuxConfig struct {
 	// watching different channels needs 5 sessions. Default 10.
 	MaxSessions int `yaml:"max_sessions"`
 
+	// MaxReencodeSessions caps how many active sessions can run in
+	// re-encode mode (the codec-rescue path). Reencode is the only
+	// path that costs real CPU / GPU, so capping it separately
+	// prevents a codec-crash storm from saturating every encoder
+	// slot. Zero = default to MaxSessions/2 (with a floor of 1).
+	MaxReencodeSessions int `yaml:"max_reencode_sessions"`
+
 	// IdleTimeout is how long a session stays alive with no segment
 	// requests before the reaper kills it. Lower trades faster
 	// cleanup for more spawn churn on rapid channel-zap. Default 30s.
@@ -263,10 +270,11 @@ func defaults() *Config {
 		},
 		IPTV: IPTVConfig{
 			Transmux: IPTVTransmuxConfig{
-				Enabled:      true,
-				MaxSessions:  10,
-				IdleTimeout:  30 * time.Second,
-				ReadyTimeout: 15 * time.Second,
+				Enabled:             true,
+				MaxSessions:         10,
+				MaxReencodeSessions: 0, // 0 = derive from MaxSessions in transmux mgr
+				IdleTimeout:         30 * time.Second,
+				ReadyTimeout:        15 * time.Second,
 			},
 		},
 		Observability: ObservabilityConfig{
