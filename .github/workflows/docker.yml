@@ -11,6 +11,11 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
+# Default least-privilege scope. The build job below escalates explicitly
+# to packages:write to push the image to GHCR.
+permissions:
+  contents: read
+
 jobs:
   docker:
     name: Build & Push

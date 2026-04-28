@@ -5,6 +5,11 @@ on:
     branches: ["*"]
   pull_request:
 
+# Default least-privilege scope. Each job below inherits this and can
+# escalate explicitly if it ever needs to (e.g. release uploads).
+permissions:
+  contents: read
+
 jobs:
   test-frontend:
     name: Test Frontend
