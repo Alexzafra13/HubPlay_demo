@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go version:*)",
+      "Bash(go build:*)",
+      "Bash(go test:*)",
+      "Bash(go vet:*)",
+      "Bash(npm install:*)",
+      "Bash(npx tsc:*)",
+      "Bash(docker compose:*)",
+      "Bash(docker ps:*)",
+      "WebSearch"
+    ]
+  }
+}
