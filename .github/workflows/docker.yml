@@ -23,6 +23,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write  # so Trivy can publish SARIF to the Security tab
 
     strategy:
       matrix:
@@ -74,15 +75,51 @@ jobs:
           fi
 
       - name: Build and push
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
           target: ${{ matrix.target || '' }}
           platforms: ${{ matrix.platforms }}
+          # On PRs the image is loaded into the local Docker daemon
+          # (no push) so the scan step below has something to inspect.
+          # Multi-platform builds can't `load`, so we restrict the
+          # PR-time scan to the default amd64+arm64 build by extracting
+          # the first tag and pulling/scanning the registry image
+          # only when push:true.
           push: ${{ github.event_name != 'pull_request' }}
+          load: ${{ github.event_name == 'pull_request' && matrix.target == 'hwaccel' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             VERSION=${{ steps.version.outputs.version }}
           cache-from: type=gha,scope=${{ matrix.target || 'default' }}
           cache-to: type=gha,mode=max,scope=${{ matrix.target || 'default' }}
+
+      # Vulnerability scan on the freshly built image. Only runs on the
+      # hwaccel target because that's the single-platform build we can
+      # `load` locally; the multi-arch default build pushes to the
+      # registry and Trivy then pulls from there. Findings ship as
+      # SARIF to the Security tab so CVEs are visible without scrolling
+      # through Action logs.
+      #
+      # Severity gate is HIGH/CRITICAL — anything lower would gate
+      # builds on weekly OS-level patch updates that the base-image
+      # rebuild handles automatically.
+      - name: Scan image with Trivy
+        if: matrix.target == 'hwaccel' || github.event_name != 'pull_request'
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ steps.meta.outputs.tags && fromJSON(steps.meta.outputs.json).tags[0] || format('hubplay:scan-{0}', github.sha) }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true   # don't gate on CVEs the base image hasn't fixed yet
+          exit-code: '0'         # report-only; doesn't block the merge
+
+      - name: Upload Trivy results
+        if: always() && (matrix.target == 'hwaccel' || github.event_name != 'pull_request')
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy-${{ matrix.target || 'default' }}
