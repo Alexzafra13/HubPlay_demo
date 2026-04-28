@@ -185,58 +185,12 @@ func (h *ImageHandler) Select(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Save locally
-	ext := imaging.ExtensionForContentType(contentType)
-	hash := sha256.Sum256(imgData)
-	filename := fmt.Sprintf("%s_%s%s", imgType, hex.EncodeToString(hash[:8]), ext)
-	localPath, err := h.saveImageFile(itemID, filename, imgData)
+	img, err := h.persistManualImage(r, itemID, imgType, imgData, contentType, "local", body.Width, body.Height)
 	if err != nil {
-		h.logger.Error("failed to save image", "error", err)
+		h.logger.Error("failed to persist selected image", "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to save image")
 		return
 	}
-
-	// Generate blurhash + dominant colours from the saved image data.
-	bhash := imaging.ComputeBlurhash(imgData, h.logger)
-	vibrant, muted := imaging.ExtractDominantColors(imgData, h.logger)
-
-	// Create DB record
-	imgID := uuid.NewString()
-	img := &db.Image{
-		ID:        imgID,
-		ItemID:    itemID,
-		Type:      imgType,
-		Path:      "/api/v1/images/file/" + imgID,
-		Width:     body.Width,
-		Height:    body.Height,
-		Blurhash:  bhash,
-		Provider:  "local",
-		IsPrimary: false,
-		// Manual pick from the candidates list — the admin's choice is
-		// authoritative, so future refreshes must skip this kind until
-		// the admin explicitly unlocks. Plex/Jellyfin both auto-lock on
-		// any manual selection for the same reason.
-		IsLocked:           true,
-		AddedAt:            time.Now(),
-		DominantColor:      vibrant,
-		DominantColorMuted: muted,
-	}
-
-	if err := h.images.Create(r.Context(), img); err != nil {
-		os.Remove(localPath)
-		h.logger.Error("failed to create image record", "error", err)
-		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to save image record")
-		return
-	}
-
-	// Set as primary
-	if err := h.images.SetPrimary(r.Context(), itemID, imgType, imgID); err != nil {
-		h.logger.Error("failed to set primary", "error", err)
-	}
-	img.IsPrimary = true
-
-	// Store the local file path mapping
-	h.writePathMapping(imgID, localPath)
 
 	respondJSON(w, http.StatusOK, map[string]any{"data": imageResponse(img)})
 }
@@ -299,52 +253,15 @@ func (h *ImageHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Save locally.
-	ext := imaging.ExtensionForContentType(sniffed)
-	hash := sha256.Sum256(imgData)
-	filename := fmt.Sprintf("%s_%s%s", imgType, hex.EncodeToString(hash[:8]), ext)
-	localPath, err := h.saveImageFile(itemID, filename, imgData)
+	// Width/height are 0 — the imaging pipeline doesn't need them and the
+	// upload endpoint doesn't ask the client for dimensions (the file
+	// IS the source of truth, decoding it would be redundant work).
+	img, err := h.persistManualImage(r, itemID, imgType, imgData, sniffed, "upload", 0, 0)
 	if err != nil {
-		h.logger.Error("failed to save uploaded image", "error", err)
+		h.logger.Error("failed to persist uploaded image", "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to save image")
 		return
 	}
-
-	// Generate blurhash + dominant colours from the uploaded image data.
-	bhash := imaging.ComputeBlurhash(imgData, h.logger)
-	vibrant, muted := imaging.ExtractDominantColors(imgData, h.logger)
-
-	imgID := uuid.NewString()
-	img := &db.Image{
-		ID:        imgID,
-		ItemID:    itemID,
-		Type:      imgType,
-		Path:      "/api/v1/images/file/" + imgID,
-		Blurhash:  bhash,
-		Provider:  "upload",
-		IsPrimary: false,
-		// Same lock-on-manual rule as Select: an uploaded image
-		// reflects deliberate curation, never re-fetch.
-		IsLocked:           true,
-		AddedAt:            time.Now(),
-		DominantColor:      vibrant,
-		DominantColorMuted: muted,
-	}
-
-	if err := h.images.Create(r.Context(), img); err != nil {
-		os.Remove(localPath)
-		h.logger.Error("failed to create image record", "error", err)
-		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to save image record")
-		return
-	}
-
-	// Set as primary
-	if err := h.images.SetPrimary(r.Context(), itemID, imgType, imgID); err != nil {
-		h.logger.Error("failed to set primary", "error", err)
-	}
-	img.IsPrimary = true
-
-	h.writePathMapping(imgID, localPath)
 
 	respondJSON(w, http.StatusOK, map[string]any{"data": imageResponse(img)})
 }
@@ -567,6 +484,88 @@ func (h *ImageHandler) saveImageFile(itemID, filename string, data []byte) (stri
 	}
 
 	return fullPath, nil
+}
+
+// persistManualImage is the shared tail of `Select` and `Upload`: once
+// the bytes have been validated (size + content-type + dimensions),
+// both flows do the exact same nine steps to put the image on disk
+// and into the DB. This helper owns those steps so the two callers
+// can't drift.
+//
+// Steps:
+//   1. Compose the on-disk filename from {kind}_{8-byte sha256}{ext}.
+//   2. Atomic write to {imageDir}/{itemID}/{filename}.
+//   3. Compute blurhash.
+//   4. Compute dominant colour pair.
+//   5. Insert the DB row with IsLocked = true (manual selection).
+//   6. If insert fails, remove the file (rollback).
+//   7. Promote the row to primary for its kind.
+//   8. Write the pathmap entry so /images/file/<id> can serve it.
+//   9. Return the populated `*db.Image` so the caller can build the
+//      JSON response.
+//
+// The (width, height) pair is optional (0 = unknown) — Select gets it
+// from the request body, Upload leaves it unset and the imaging
+// pipeline (blurhash / colour extract) doesn't need it.
+func (h *ImageHandler) persistManualImage(
+	r *http.Request,
+	itemID, kind string,
+	data []byte,
+	contentType, providerTag string,
+	width, height int,
+) (*db.Image, error) {
+	ext := imaging.ExtensionForContentType(contentType)
+	hash := sha256.Sum256(data)
+	filename := fmt.Sprintf("%s_%s%s", kind, hex.EncodeToString(hash[:8]), ext)
+
+	localPath, err := h.saveImageFile(itemID, filename, data)
+	if err != nil {
+		return nil, fmt.Errorf("save file: %w", err)
+	}
+
+	bhash := imaging.ComputeBlurhash(data, h.logger)
+	vibrant, muted := imaging.ExtractDominantColors(data, h.logger)
+
+	imgID := uuid.NewString()
+	img := &db.Image{
+		ID:        imgID,
+		ItemID:    itemID,
+		Type:      kind,
+		Path:      "/api/v1/images/file/" + imgID,
+		Width:     width,
+		Height:    height,
+		Blurhash:  bhash,
+		Provider:  providerTag,
+		IsPrimary: false,
+		// Manual pick (Select from candidates / Upload from disk):
+		// the admin's choice is authoritative, so future refreshes
+		// must skip this kind until the admin explicitly unlocks.
+		// Plex/Jellyfin both auto-lock on any manual selection for
+		// the same reason.
+		IsLocked:           true,
+		AddedAt:            time.Now(),
+		DominantColor:      vibrant,
+		DominantColorMuted: muted,
+	}
+
+	if err := h.images.Create(r.Context(), img); err != nil {
+		// Rollback the on-disk artefact so we don't leave an orphan
+		// file the admin can't see in the UI.
+		_ = os.Remove(localPath)
+		return nil, fmt.Errorf("create image record: %w", err)
+	}
+
+	if err := h.images.SetPrimary(r.Context(), itemID, kind, imgID); err != nil {
+		// SetPrimary failure is logged but not fatal: the row exists
+		// and the admin can re-promote manually. Returning an error
+		// here would force a rollback of an already-valid DB record.
+		h.logger.Error("failed to set primary", "image_id", imgID, "error", err)
+	} else {
+		img.IsPrimary = true
+	}
+
+	h.writePathMapping(imgID, localPath)
+	return img, nil
 }
 
 // writePathMapping logs at WARN on failure — the DB record is authoritative,
