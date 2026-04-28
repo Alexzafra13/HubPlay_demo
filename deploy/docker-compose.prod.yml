@@ -51,7 +51,14 @@ services:
       - "443:443"
     volumes:
       - ./nginx/hubplay.conf:/etc/nginx/conf.d/default.conf:ro
-      - /etc/letsencrypt:/etc/letsencrypt:ro
+      # Mount only the cert material we actually need. The full
+      # /etc/letsencrypt tree contains private keys for every domain
+      # certbot has ever issued on this host plus account credentials;
+      # exposing it whole — even read-only — means a future nginx RCE
+      # leaks every other domain's keys. The two paths below are the
+      # only ones nginx reads to serve hubplay.
+      - /etc/letsencrypt/live/hubplay.duckdns.org:/etc/letsencrypt/live/hubplay.duckdns.org:ro
+      - /etc/letsencrypt/archive/hubplay.duckdns.org:/etc/letsencrypt/archive/hubplay.duckdns.org:ro
       - /var/www/certbot:/var/www/certbot:ro
     depends_on:
       hubplay:
