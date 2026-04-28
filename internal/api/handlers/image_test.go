@@ -824,6 +824,71 @@ func readAll(resp *http.Response) string {
 	return strings.TrimSpace(string(b))
 }
 
+// TestImageHandler_persistManualImage_HappyPath pins the contract of
+// the shared persistence helper that Select and Upload both call. The
+// integration tests above exercise the helper through HTTP, but those
+// tests would still pass if a future refactor accidentally dropped one
+// of the helper's nine steps. This test calls the helper directly so
+// each step's effect (file on disk, DB row, IsLocked, IsPrimary,
+// pathmap entry, response Path) is asserted independently.
+func TestImageHandler_persistManualImage_HappyPath(t *testing.T) {
+	env := newImageTestEnv(t)
+	data := makeJPEG(t, 32, 32)
+
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	img, err := env.handler.persistManualImage(req, "item-mp", "primary", data, "image/jpeg", "upload", 100, 200)
+	if err != nil {
+		t.Fatalf("persistManualImage: %v", err)
+	}
+	if img == nil {
+		t.Fatal("nil image returned")
+	}
+
+	// 1) File written to disk under <imageDir>/<itemID>/
+	entries, err := os.ReadDir(filepath.Join(env.imageDir, "item-mp"))
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("expected 1 file on disk, got entries=%d err=%v", len(entries), err)
+	}
+
+	// 2) DB row was created with the right shape.
+	stored, ok := env.images.images[img.ID]
+	if !ok {
+		t.Fatalf("image %q not stored", img.ID)
+	}
+	// 3) IsLocked = true (manual selection lock).
+	if !stored.IsLocked {
+		t.Error("expected IsLocked=true (manual pick)")
+	}
+	// 4) Provider tag flowed through.
+	if stored.Provider != "upload" {
+		t.Errorf("provider: got %q want %q", stored.Provider, "upload")
+	}
+	// 5) Width / height preserved from the call.
+	if stored.Width != 100 || stored.Height != 200 {
+		t.Errorf("dimensions: got %dx%d want 100x200", stored.Width, stored.Height)
+	}
+	// 6) Path is the API URL, not the on-disk path (clients hit the
+	// resolver endpoint, never the local FS).
+	wantPath := "/api/v1/images/file/" + img.ID
+	if stored.Path != wantPath {
+		t.Errorf("Path: got %q want %q", stored.Path, wantPath)
+	}
+	// 7) IsPrimary flipped to true via SetPrimary (the helper does
+	// this best-effort; the in-memory fake never errors).
+	if !img.IsPrimary {
+		t.Error("expected IsPrimary=true after promotion")
+	}
+	// 8) Blurhash + dominant colours were computed from the bytes.
+	if stored.Blurhash == "" {
+		t.Error("expected non-empty blurhash for a decodable JPEG")
+	}
+	// 9) Pathmap entry exists so /images/file/<id> can resolve.
+	mapped, err := env.handler.pathmap.Read(img.ID)
+	if err != nil || mapped == "" {
+		t.Errorf("pathmap entry missing: err=%v mapped=%q", err, mapped)
+	}
+}
+
 // Defensive: ensure our fakes really satisfy the package interfaces at compile time.
 var (
 	_ ImageRepository      = (*fakeImageRepo)(nil)

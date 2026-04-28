@@ -21,7 +21,7 @@ import {
 } from "@/api/hooks";
 import { LivetvAdminPanel } from "@/components/admin/LivetvAdminPanel";
 import type { Library } from "@/api/types";
-import { originLabel, originTitle, scanStatusVariant } from "./constants";
+import { originLabel, originTitle, scanStatusVariant } from "./helpers";
 
 export interface RefreshMessage {
   type: "success" | "error";

@@ -1,5 +1,13 @@
 // Channel queries + favorites + bulk schedule + the watch-rail beacon.
 //
+// Why queries and mutations live in the same file (the rest of the
+// `hooks/` directory keeps them in separate modules): every mutation
+// here invalidates a `queryKeys.channels(...)` or `queryKeys.channel
+// Favorite{IDs,s}` query that's also defined in this file, and the
+// optimistic-update helper `useFavoriteMutation` reaches into the IDs
+// cache directly. Splitting them would mean reading two files to
+// trace any single ♥ click — same domain, same caches, same module.
+//
 // Two favorite queries (IDs vs full list): the IDs cache backs the ♥
 // toggle on every ChannelCard for instant feedback, the list cache
 // is what the Favorites tab renders. Both invalidate together on

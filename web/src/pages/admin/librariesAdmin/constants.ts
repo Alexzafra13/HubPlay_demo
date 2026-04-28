@@ -1,6 +1,5 @@
-// Static catalogues + helpers used by the LibrariesAdmin page and its
-// sub-components. Pulled out of the page file so the page itself can
-// stay focused on composition.
+// Static catalogues used by the LibrariesAdmin page and its
+// sub-components. Pure data — pure functions live in `./helpers.ts`.
 //
 // IPTV_ORG_* tables come from the iptv-org playlist project. Countries
 // are loaded live (it's a long tail that rotates); the other three are
@@ -12,7 +11,7 @@
 //   /iptv/languages/{slug}.m3u     (slug = ISO 639-3)
 //   /iptv/regions/{slug}.m3u
 
-import type { ContentType, Library } from "@/api/types";
+import type { ContentType } from "@/api/types";
 
 export const IPTV_ORG_CATEGORIES: { code: string; name: string }[] = [
   { code: "general", name: "General" },
@@ -110,17 +109,6 @@ export const IPTV_ORG_PATH_BY_KIND: Record<LiveKind, string> = {
   region: "regions",
 };
 
-export function scanStatusVariant(status: string) {
-  switch (status) {
-    case "scanning":
-      return "warning" as const;
-    case "error":
-      return "error" as const;
-    default:
-      return "success" as const;
-  }
-}
-
 // Section descriptors for the libraries page. Movies / Series / Live TV
 // each get their own coloured collapsible header so the three categories
 // are obvious at a glance — amber for movies, cyan for series, red for
@@ -157,22 +145,3 @@ export const LIBRARY_SECTIONS: {
   },
 ];
 
-// originLabel returns the secondary identity of a library: the M3U host
-// for IPTV, the first filesystem path for media. Truncated on purpose —
-// the full value lives in the tooltip (originTitle).
-export function originLabel(lib: Library): string {
-  if (lib.content_type === "livetv") {
-    if (!lib.m3u_url) return "";
-    try {
-      return new URL(lib.m3u_url).host;
-    } catch {
-      return lib.m3u_url;
-    }
-  }
-  return (lib.paths ?? [])[0] ?? "";
-}
-
-export function originTitle(lib: Library): string {
-  if (lib.content_type === "livetv") return lib.m3u_url ?? "";
-  return (lib.paths ?? []).join(", ");
-}

@@ -16,6 +16,8 @@ export * from "./hooks/media";
 export * from "./hooks/progress";
 export * from "./hooks/channels";
 export * from "./hooks/iptv-admin";
+export * from "./hooks/iptv-sources";
+export * from "./hooks/iptv-jobs";
 export * from "./hooks/channel-health";
 export * from "./hooks/providers";
 export * from "./hooks/system";
