@@ -1,6 +1,138 @@
 # Estado del proyecto
 
-> Snapshot: **2026-04-28 (huge-list resilience)** — circuit breaker per-canal + filtro de idioma al import + TLS-skip toggle + preflight check para listas IPTV grandes/rotas. Rama: `claude/iptv-circuit-breaker` (mergeada a `main`) · **tests: backend verde · frontend 296/296 · tsc -b 0**
+> Snapshot: **2026-04-28 (M3U import async)** — el refresh manual de M3U se desacopla del request HTTP: handler 202 + import en goroutine + completion por SSE. Cierra el bug en prod donde listas Xtream M3U_PLUS de ~98k líneas perdían los 1k+ canales ya parseados al cancelarse `r.Context()` por el `proxy_read_timeout` default de nginx (60s). Rama: `claude/fix-m3u-import-timeout-iFKpE` · **tests: backend verde con `-race` · frontend 296/296 · tsc clean**
+
+---
+
+## 🛰️ Sesión 2026-04-28 (M3U import async) — 1 commit
+
+Caso real reportado por el usuario al probar en producción la rama
+`huge-list resilience` sobre su provider `pdmkibyg.xiagdns.com`. Logs:
+
+```
+17:11:36  refreshing M3U playlist library=43115037-…
+17:12:36  M3U parse truncated; importing what we got lines=97988
+          channels=1073 vod_skipped=23331 language_skipped=21821
+          error="reading M3U at line 97988: context canceled"
+17:12:36  ERROR replace channels: begin tx: context canceled
+17:12:36  POST /…/iptv/refresh-m3u → 500   duration_ms=60003
+```
+
+### Diagnóstico
+
+Cadena causal exacta:
+
+1. La lista filtra a 1.073 canales después de descartar 23.331 VOD +
+   21.821 idiomas no-`es` (filtros que vienen de `5bf1ba7`). Aun así,
+   bajar el body de 331 MB + parsear streaming pasa de los 60s.
+2. **`deploy/nginx/hubplay.conf:142`** (`location /`) no override-aba
+   `proxy_read_timeout` → default nginx 60s. A los 60s exactos
+   (`duration_ms=60003`) nginx cierra la conexión upstream.
+3. El `http.Server` cancela `r.Context()`. El `bufio.Scanner` dentro
+   de `ParseM3UStream` aborta a media línea con `context canceled`,
+   pero **los 1.073 canales ya están acumulados en `dbChannels`**.
+4. El código tolerante de `service_m3u.go:111` (≥50 canales =
+   "importamos lo que tengamos") pasa al siguiente paso.
+5. `s.channels.ReplaceForLibrary(ctx, …)` llama a
+   `r.db.BeginTx(ctx, nil)` con el **mismo ctx ya muerto**. El begin
+   falla en seco → handler devuelve 500 → **0 canales en DB**.
+
+Segundo disparador idéntico aunque amplíes nginx: si el cliente
+cierra la pestaña a media importación, `r.Context()` también cancela
+y el `BeginTx` se cae igual.
+
+### Fix (`ad6b61f`) — 9 ficheros, +396 / −29
+
+**Backend — split del refresh en lock + work + signal**
+
+- `internal/iptv/service_m3u.go`: nuevos
+  `Service.TryAcquireRefresh(libraryID) (release func(), error)` y
+  `Service.RunRefreshM3U(ctx, libraryID) (int, error)`. El antiguo
+  `RefreshM3U(ctx, libraryID)` ahora es wrapper síncrono (mantiene
+  compat con scheduler + import público); el handler usa los dos
+  primitivos por separado.
+- `Service.PublishRefreshFailed(libraryID, err)` emite el nuevo
+  evento `playlist.refresh_failed` para que la SSE entregue el
+  desenlace cuando la goroutine no es el request.
+- `internal/event/bus.go`: constante
+  `PlaylistRefreshFailed Type = "playlist.refresh_failed"`.
+
+**Backend — handler 202**
+
+- `internal/api/handlers/iptv_admin.go RefreshM3U`:
+  1. Adquiere el slot síncronamente con `TryAcquireRefresh` (lock
+     ocupado → 409 inmediato, sin TOCTOU).
+  2. Lanza goroutine: `ctx, cancel := context.WithTimeout(
+     context.Background(), 10 * time.Minute)`. Llama a
+     `RunRefreshM3U`. Si falla, `PublishRefreshFailed`.
+  3. Responde **202 Accepted** con `{ library_id, status: "started" }`.
+- El timeout de 10 min se eligió contra el ceiling real de Xtream
+  M3U_PLUS (~2 min de fetch + parse + tx); margen para upstreams
+  degradados sin que un fetch colgado bloquee el slot per-library
+  para siempre.
+
+**Backend — SSE keepalive**
+
+- `internal/api/handlers/events.go`: ticker de **25s** envía `: ping\n\n`
+  (comment frame, invisible al EventSource API, resetea el idle
+  timer del proxy). nginx default = 60s; 25s deja margen frente a
+  cutoffs de 30s también. Sin esto el SSE moría cada 60s y el browser
+  reconectaba perdiendo eventos en la ventana de gap.
+
+**Frontend — la mutation espera al evento**
+
+- `web/src/api/hooks/iptv-admin.ts useRefreshM3U`: la `mutationFn`
+  abre `EventSource("/api/v1/events")` ANTES del POST (evita perder
+  el evento si el import es muy rápido), lanza
+  `api.refreshM3U(libraryId)` (202), y devuelve la promise que
+  resuelve con `{ channels_imported }` cuando llega
+  `playlist.refreshed` con `library_id` matching, o rechaza con el
+  mensaje del backend cuando llega `playlist.refresh_failed`.
+  Timeout local: **11 min** (1 min más que el backend, así un fallo
+  limpio gana la carrera al timeout local).
+- Cleanup paranoico: `removeEventListener` + `source.close()` en
+  resolve / reject / timeout / `finally` defensivo.
+- **El spinner del `LibraryCard` ahora refleja progreso real** —
+  `isPending` queda `true` durante todo el import, no se apaga al
+  202.
+
+**Nginx — defensa en profundidad**
+
+- `deploy/nginx/hubplay.conf`: `proxy_read_timeout 5m` y
+  `proxy_send_timeout 5m` añadidos al `location /`. No bloqueante
+  (el SSE keepalive cubre el caso); útil si en el futuro alguien
+  monta un endpoint largo sin async.
+
+### Tests
+
+- 3 tests nuevos en `iptv_test.go`:
+  - `Returns202AndRunsAsync` — happy path: 202 inmediato, goroutine
+    invoca `RunRefreshM3U` con el library_id correcto, sin
+    publicación de fallo.
+  - `AlreadyInProgress_Returns409` — `TryAcquireRefresh` devuelve
+    `ErrRefreshInProgress`; ninguna goroutine arranca.
+  - `AsyncFailure_PublishesEvent` — `RunRefreshM3U` falla; espera
+    a que `PublishRefreshFailed` se llame con el error
+    forwardeado.
+- Suite Go completa verde con `-race`. Frontend 296/296.
+
+### Notas de diseño
+
+- **Por qué no aumentar solo nginx**: aunque ampliar
+  `proxy_read_timeout` a 10m hubiera enmascarado el síntoma del
+  timeout, el fix no resuelve el segundo disparador (cliente cierra
+  pestaña). Detachar el contexto era inevitable. Una vez detachado
+  el ctx, devolver 202 es gratis y mejor UX.
+- **Por qué reusar el event bus + SSE existente** en vez de un
+  endpoint de polling: ya hay infraestructura SSE (`useEventStream`
+  en frontend, `event.Bus` en backend) para `channel.health.changed`
+  y `library.scan.*`. Añadir un evento más cuesta una constante.
+- **`RefreshM3U` síncrono se mantiene** porque scheduler
+  (`internal/iptv/scheduler.go`) y `ImportPublicIPTV` ya viven en
+  goroutines suyas con su propio ctx; no pagan el coste del split.
+- TOCTOU evitado: el lock se adquiere síncronamente en el handler,
+  la goroutine sólo lo libera. Dos clicks rápidos no producen dos
+  goroutines.
 
 ---
 
