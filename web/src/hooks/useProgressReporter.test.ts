@@ -68,7 +68,7 @@ describe("useProgressReporter", () => {
     expect(api.updateProgress).toHaveBeenCalledTimes(3);
   });
 
-  it("saves final progress on unmount", () => {
+  it("saves final progress on unmount with keepalive so it survives navigation", () => {
     const { unmount } = renderHook(() =>
       useProgressReporter(videoRef, "item-1"),
     );
@@ -76,9 +76,15 @@ describe("useProgressReporter", () => {
     vi.clearAllMocks();
     unmount();
 
-    expect(api.updateProgress).toHaveBeenCalledWith("item-1", {
-      position_ticks: Math.floor(42.5 * 10_000_000),
-    });
+    // Final position is reported with keepalive: true so the browser
+    // commits the request even if the user is closing the tab. Without
+    // it, navigating away from the player aborts the in-flight fetch
+    // and the last 10 seconds of watch progress get lost.
+    expect(api.updateProgress).toHaveBeenCalledWith(
+      "item-1",
+      { position_ticks: Math.floor(42.5 * 10_000_000) },
+      { keepalive: true },
+    );
   });
 
   it("does not save on unmount when currentTime is 0", () => {

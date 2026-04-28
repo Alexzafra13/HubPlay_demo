@@ -32,14 +32,25 @@ export function useProgressReporter(
   // cleanup runs, React may have already nulled the ref. Since the parent
   // only creates the <video> once and passes the same ref for the
   // component's lifetime, capturing at mount gives us the correct node.
+  //
+  // `keepalive: true` is what makes this race-proof. Without it, the user
+  // closing the tab (or React unmounting because of navigation) aborts
+  // the in-flight fetch and the final position is lost. With it, the
+  // browser commits the request to the network stack and lets it ride
+  // out independently of the page's lifecycle. Payload is < 200 bytes,
+  // well under the 64 KiB keepalive cap.
   useEffect(() => {
     const video = videoRef.current;
     return () => {
       if (video && video.currentTime > 0) {
         api
-          .updateProgress(itemId, {
-            position_ticks: Math.floor(video.currentTime * TICKS_PER_SECOND),
-          })
+          .updateProgress(
+            itemId,
+            {
+              position_ticks: Math.floor(video.currentTime * TICKS_PER_SECOND),
+            },
+            { keepalive: true },
+          )
           .catch(() => {});
       }
     };

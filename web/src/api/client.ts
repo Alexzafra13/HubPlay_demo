@@ -445,9 +445,17 @@ export class ApiClient {
       audio_stream_index?: number;
       subtitle_stream_index?: number;
     },
+    /**
+     * Pass `{ keepalive: true }` from teardown paths (player unmount,
+     * tab close) so the browser commits the request even after the
+     * page is gone. Spec caps keepalive payloads at 64 KiB; the body
+     * here is well under 1 KiB so it's always safe.
+     */
+    options: { keepalive?: boolean } = {},
   ): Promise<UserData> {
     return this.request<UserData>("PUT", `/me/progress/${itemId}`, {
       body: data,
+      keepalive: options.keepalive,
     });
   }
 
