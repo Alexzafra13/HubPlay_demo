@@ -6,10 +6,11 @@ import (
 	"time"
 )
 
-// handlerTimeout is the maximum time we wait for an event handler to finish.
-// If a handler exceeds this, we log a warning but the goroutine is NOT leaked —
-// it continues running to completion (or until it returns on its own).
-const handlerTimeout = 30 * time.Second
+// slowHandlerThreshold is purely a watchdog for logs. A handler that exceeds
+// it gets a warning logged once; the dispatch goroutine still completes when
+// the handler returns. Handlers that hang forever leak exactly one goroutine
+// each — that is a bug in the handler, not something the bus can recover from.
+const slowHandlerThreshold = 30 * time.Second
 
 type Type string
 
@@ -97,9 +98,18 @@ func (b *Bus) Subscribe(eventType Type, handler Handler) func() {
 }
 
 // Publish sends an event to all registered handlers asynchronously.
-// Each handler runs in a single goroutine with panic recovery.
-// A timeout logs a warning but does not abandon the goroutine — it runs to
-// completion, preventing goroutine leaks from the old two-goroutine pattern.
+//
+// Each handler runs in its own goroutine with panic recovery. A separate
+// watchdog logs a warning if the handler runs longer than slowHandlerThreshold,
+// but never blocks the dispatch goroutine — when the handler returns, both
+// goroutines unwind cleanly.
+//
+// Subscribers are responsible for not blocking inside their handler. The
+// in-tree SSE handler does a non-blocking channel send (drops on backpressure);
+// any future subscriber must follow the same rule. A handler that hangs
+// indefinitely leaks one goroutine per Publish call, and the bus deliberately
+// does not try to recover from that — there is no safe way to abort arbitrary
+// caller code.
 func (b *Bus) Publish(e Event) {
 	b.mu.RLock()
 	subs := append([]subscription(nil), b.handlers[e.Type]...)
@@ -108,27 +118,30 @@ func (b *Bus) Publish(e Event) {
 	for _, s := range subs {
 		go func(handler Handler) {
 			done := make(chan struct{})
-			timer := time.NewTimer(handlerTimeout)
-			defer timer.Stop()
 
+			// Watchdog. Emits at most one warning per slow handler call and
+			// always exits — even if the handler itself hangs forever. No
+			// blocking on the dispatch path; no leaked watchdog goroutines.
 			go func() {
-				defer close(done)
-				defer func() {
-					if r := recover(); r != nil {
-						b.logger.Error("event handler panicked", "type", e.Type, "panic", r)
-					}
-				}()
-				handler(e)
+				timer := time.NewTimer(slowHandlerThreshold)
+				defer timer.Stop()
+				select {
+				case <-done:
+				case <-timer.C:
+					b.logger.Warn("event handler slow",
+						"type", e.Type,
+						"threshold", slowHandlerThreshold)
+				}
 			}()
 
-			select {
-			case <-done:
-				// Handler completed within timeout
-			case <-timer.C:
-				b.logger.Error("event handler timed out, waiting for completion", "type", e.Type, "timeout", handlerTimeout)
-				// Wait for the handler goroutine to finish — never abandon it.
-				<-done
-			}
+			defer close(done)
+			defer func() {
+				if r := recover(); r != nil {
+					b.logger.Error("event handler panicked",
+						"type", e.Type, "panic", r)
+				}
+			}()
+			handler(e)
 		}(s.fn)
 	}
 }
