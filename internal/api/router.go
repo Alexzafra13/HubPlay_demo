@@ -78,6 +78,11 @@ func NewRouter(deps Dependencies) http.Handler {
 	r.Use(middleware.RequestID)
 	r.Use(RequestLogger(deps.Logger))
 	r.Use(middleware.Recoverer)
+	// Security response headers (CSP, X-Frame-Options, HSTS, …). Placed
+	// after Recoverer so even a 500 from a panicking handler still ships
+	// with the headers; placed before CORS so the same headers apply to
+	// preflight responses without CORS overwriting them.
+	r.Use(SecurityHeaders())
 	if deps.Metrics != nil {
 		r.Use(deps.Metrics.MetricsMiddleware)
 	}
