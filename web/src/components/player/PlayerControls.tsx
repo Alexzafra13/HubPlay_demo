@@ -3,12 +3,26 @@ import type { FC } from "react";
 import { useTranslation } from "react-i18next";
 import { TimeDisplay } from "./TimeDisplay";
 import type { TrickplayManifest } from "@/hooks/useTrickplay";
-
-interface AudioTrack {
-  id: number;
-  name: string;
-  lang: string;
-}
+import {
+  AudioIcon,
+  BackIcon,
+  ExitFullscreenIcon,
+  FullscreenIcon,
+  LargePauseIcon,
+  LargePlayIcon,
+  PauseIcon,
+  PlayIcon,
+  QualityIcon,
+  SubtitleIcon,
+  VolumeHighIcon,
+  VolumeLowIcon,
+  VolumeMutedIcon,
+} from "./icons";
+import {
+  enrichAudioTracks,
+  type AudioStreamInfo,
+  type AudioTrack,
+} from "./audioTracks";
 
 interface SubtitleTrack {
   id: number;
@@ -21,17 +35,6 @@ interface QualityLevel {
   height: number;
   bitrate: number;
   label: string;
-}
-
-// Subset of `api.MediaStream` the picker actually needs. We re-state
-// it here instead of importing the API type so PlayerControls stays
-// independent of the wire shape (it's a pure-render component).
-interface AudioStreamInfo {
-  index: number;
-  codec: string;
-  language: string | null;
-  title: string | null;
-  channels: number | null;
 }
 
 // One chapter marker on the seek bar. `startSeconds` is duration-in-
@@ -95,111 +98,9 @@ interface PlayerControlsProps {
   title?: string;
 }
 
-// ─── Icon helpers ────────────────────────────────────────────────────────────
-
-function PlayIcon() {
-  return (
-    <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M8 5.14v14l11-7-11-7z" />
-    </svg>
-  );
-}
-
-function PauseIcon() {
-  return (
-    <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
-    </svg>
-  );
-}
-
-function LargePlayIcon() {
-  return (
-    <svg className="h-16 w-16" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M8 5.14v14l11-7-11-7z" />
-    </svg>
-  );
-}
-
-function LargePauseIcon() {
-  return (
-    <svg className="h-16 w-16" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
-    </svg>
-  );
-}
-
-function VolumeHighIcon() {
-  return (
-    <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
-    </svg>
-  );
-}
-
-function VolumeMutedIcon() {
-  return (
-    <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z" />
-    </svg>
-  );
-}
-
-function VolumeLowIcon() {
-  return (
-    <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M7 9v6h4l5 5V4l-5 5H7z" />
-    </svg>
-  );
-}
-
-function FullscreenIcon() {
-  return (
-    <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" />
-    </svg>
-  );
-}
-
-function ExitFullscreenIcon() {
-  return (
-    <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z" />
-    </svg>
-  );
-}
-
-function BackIcon() {
-  return (
-    <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z" />
-    </svg>
-  );
-}
-
-function AudioIcon() {
-  return (
-    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M12 3v9.28c-.47-.17-.97-.28-1.5-.28C8.01 12 6 14.01 6 16.5S8.01 21 10.5 21c2.31 0 4.2-1.75 4.45-4H15V6h4V3h-7z" />
-    </svg>
-  );
-}
-
-function SubtitleIcon() {
-  return (
-    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4V6h16v12zM6 10h2v2H6v-2zm0 4h8v2H6v-2zm10 0h2v2h-2v-2zm-6-4h8v2h-8v-2z" />
-    </svg>
-  );
-}
-
-function QualityIcon() {
-  return (
-    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-9.46 14.5l-3.04-3.04 1.41-1.41 1.63 1.62 4.13-4.12 1.41 1.41-5.54 5.54z" />
-    </svg>
-  );
-}
+// Icons live in `./icons.tsx`; audio enrichment helpers in
+// `./audioTracks.ts`. Kept out of this file so it stays a pure
+// presentation component (composition + props mapping).
 
 // ─── Seek bar ────────────────────────────────────────────────────────────────
 
@@ -385,119 +286,10 @@ function formatHMS(s: number): string {
   return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${m}:${pad(sec)}`;
 }
 
-// Map a channel count to the human label users expect on a release
-// — "5.1" reads instantly, "channels: 6" doesn't. Anything weird
-// (mono with > 8 ch, missing data) falls through to the raw number
-// so the picker never lies about what's actually on the file.
-function channelLabel(ch: number | null): string {
-  if (ch == null || ch <= 0) return "";
-  switch (ch) {
-    case 1:
-      return "Mono";
-    case 2:
-      return "Stereo";
-    case 6:
-      return "5.1";
-    case 7:
-      return "6.1";
-    case 8:
-      return "7.1";
-    default:
-      return `${ch}ch`;
-  }
-}
-
-// Pretty-print a codec name for the picker. ffprobe spits out terse
-// identifiers ("ac3", "eac3", "truehd"); the user expects the
-// marketing names they see on the release ("AC3", "Atmos / TrueHD").
-function codecLabel(codec: string): string {
-  switch (codec.toLowerCase()) {
-    case "aac":
-      return "AAC";
-    case "ac3":
-      return "AC3";
-    case "eac3":
-      return "EAC3";
-    case "dts":
-      return "DTS";
-    case "dts-hd":
-    case "dts_hd":
-    case "dca":
-      return "DTS-HD";
-    case "truehd":
-      return "TrueHD";
-    case "flac":
-      return "FLAC";
-    case "opus":
-      return "Opus";
-    case "mp3":
-      return "MP3";
-    case "vorbis":
-      return "Vorbis";
-    default:
-      return codec.toUpperCase();
-  }
-}
-
-/**
- * Cross-references the bare hls.js audio tracks against the DB-side
- * MediaStream rows to produce a richer picker label.
- *
- * Match strategy:
- *   1. Within each language code, pair tracks in the order they
- *      appear. So if the file has [eng-AAC, eng-TrueHD] and hls.js
- *      reports [eng#1, eng#2], they line up 1↔1. Order from the
- *      DB matches ffprobe's stream ordering, which the muxer
- *      preserves into the HLS manifest.
- *   2. If no DB stream matches the language, the original hls.js
- *      label survives — better partial enrichment than wrong.
- *
- * Result label shape: "English · TrueHD 7.1" or "Spanish · AAC Stereo".
- * Falls back to just the codec when the bare name is missing.
- */
-function enrichAudioTracks(
-  hlsTracks: AudioTrack[],
-  dbStreams: AudioStreamInfo[],
-): AudioTrack[] {
-  if (hlsTracks.length === 0) return hlsTracks;
-
-  // Index DB streams by language code, preserving file order.
-  const byLang = new Map<string, AudioStreamInfo[]>();
-  for (const s of dbStreams) {
-    const k = (s.language ?? "").toLowerCase();
-    const arr = byLang.get(k) ?? [];
-    arr.push(s);
-    byLang.set(k, arr);
-  }
-
-  // Cursor per language so we pop in order.
-  const cursors = new Map<string, number>();
-
-  return hlsTracks.map((track) => {
-    const langKey = (track.lang ?? "").toLowerCase();
-    const candidates = byLang.get(langKey);
-    if (!candidates || candidates.length === 0) return track;
-
-    const cursor = cursors.get(langKey) ?? 0;
-    cursors.set(langKey, cursor + 1);
-    const stream = candidates[cursor];
-    if (!stream) return track;
-
-    const parts: string[] = [];
-    if (track.name) parts.push(track.name);
-    else if (track.lang) parts.push(track.lang.toUpperCase());
-
-    const codec = codecLabel(stream.codec);
-    const ch = channelLabel(stream.channels);
-    const detail = ch ? `${codec} ${ch}` : codec;
-    if (detail) parts.push(detail);
-
-    return {
-      ...track,
-      name: parts.join(" · "),
-    };
-  });
-}
+// channelLabel + codecLabel + enrichAudioTracks live in
+// `./audioTracks.ts` so the logic is unit-testable without rendering
+// React. PlayerControls just imports `enrichAudioTracks` and lets the
+// helper own the (codec × channel) → label mapping.
 
 // ─── Track selector dropdown ─────────────────────────────────────────────────
 
