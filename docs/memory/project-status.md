@@ -1,6 +1,160 @@
 # Estado del proyecto
 
-> Snapshot: **2026-04-28 (peer-review pass)** — refactor SRP completo + 5 followups del review senior (granularity, helpers, contract test del barrel) · Rama: `claude/review-project-docs-kxeLz` · **tests: backend verde · frontend 296/296 (+6) · tsc -b 0**
+> Snapshot: **2026-04-28 (huge-list resilience)** — circuit breaker per-canal + filtro de idioma al import + TLS-skip toggle + preflight check para listas IPTV grandes/rotas. Rama: `claude/iptv-circuit-breaker` (mergeada a `main`) · **tests: backend verde · frontend 296/296 · tsc -b 0**
+
+---
+
+## 🛰️ Sesión 2026-04-28 (huge-list resilience) — 4 commits
+
+Sesión de bloque "que las listas IPTV de 20k+ canales no rompan
+HubPlay". Se persiguió un caso real (lista xiagdns 331 MB con
+~20k canales que no cargaba), y por el camino se detectaron y
+arreglaron varios huecos de robustez/UX que afectan a TODO
+operador con un provider IPTV serio.
+
+### Investigación previa al código
+
+Se comparó HubPlay contra Plex / Jellyfin / Threadfin / xTeVe /
+Tuliprox / Dispatcharr (vía web research) para no reinventar peor
+de lo que ya existe. Hallazgos relevantes:
+
+- **Plex** tiene límite hardcoded de **~480 canales**. Por encima
+  exige filtrar.
+- **Jellyfin** no filtra nada nativo (issue #835 abierto desde 2017);
+  solución oficial = poner Threadfin delante.
+- **Threadfin/xTeVe** filtra por group-title regex y poco más.
+- **Tuliprox** tiene una DSL boolean expressiva — más potente, más
+  curva de aprendizaje. **No copiada** porque 95% de usuarios solo
+  quieren "español".
+
+Conclusión: HubPlay puede plantarse cómodamente al nivel de
+Threadfin (mejor en filtro de idioma porque combinamos 4 señales)
+sin la complejidad de Tuliprox.
+
+### Lo que entró
+
+**`eba4f82`** — **Circuit breaker per-canal en StreamProxy**.
+Sin breaker, una CDN caída + 100 viewers = 100 retry loops en
+paralelo machacando upstream muerto. Ahora: 5 fallos consecutivos
+por canal → open 30s; siguientes peticiones 503 + Retry-After SIN
+tocar la red. Half-open admite UN trial; éxito cierra, fallo
+re-abre con cooldown × 2 (cap 5 min). Trial-timeout (30s) protege
+contra probes que no resuelven. Key: `channelID` (descartadas
+per-URL = explosión en segments, per-host = injusto en CDN
+compartida). Memoria acotada vía `Prune()` (closed + 0 fallos +
+10 min idle). Tests: `circuit_breaker_test.go` (9) +
+`proxy_breaker_test.go` (4) con httptest end-to-end.
+
+**`5bf1ba7`** — **Filtro de idioma al import M3U**.
+- Migración 016: columna `libraries.language_filter TEXT` (CSV de
+  ISO 639-1, vacío = no filtro = comportamiento histórico).
+- `iptv.MatchesLanguageFilter` cascada de 4 heurísticas en orden de
+  fiabilidad:
+  1. `tvg-language` (ISO o nombre humano "Spanish")
+  2. `tvg-country` → idioma dominante (mx/ar/co/cl/...→ es;
+     us/uk/au/ie → en) — multi-language countries (ch/ca/be) NO
+     en la tabla (deny only when sure).
+  3. `group-title` keyword anclado a límites de palabra (sin falsos
+     positivos en "best" de "best of HD")
+  4. Prefijo en nombre: `[ES]` / `(en)` / `ES |` / `DE -` / `pt:`
+- Regla "no signal → allow" (no se descarta lo que no se puede
+  clasificar — feeds sin metadata pasan).
+- UI: chip multi-select de 12 idiomas comunes + free-text (cualquier
+  2-3 letras ISO).
+- 16 unit tests cubriendo cada heurística + cascada + sin-señal +
+  multi-allow.
+
+**`d16efc4`** — **Toggle `tls_insecure` per-library**.
+- Migración 017: columna `libraries.tls_insecure INTEGER` (0/1, off
+  por defecto).
+- IPTV providers en el wild (sobre todo Spain con LaLiga/Movistar
+  cambiando hosts) cuelgan certs caducados / self-signed. Strict
+  Go client refusa → "no carga" sin recurso obvio.
+- HTTP client lazy + cached (`Service.insecureFetchClient`) con
+  `TLSClientConfig.InsecureSkipVerify=true`. Per-fetch: el flag
+  llega como param a `fetchURL`. **El stream proxy mantiene
+  verificación estricta** — clients confían en HubPlay para
+  servir bytes verificados; weakening ahí sería peor que no tener
+  toggle.
+- Backend logea `Warn` en cada fetch con flag activo (auditable).
+- Frontend: card amarillo cuando active + warning text que cambia
+  según estado (off "actívalo solo si confías…", on "⚠ las
+  descargas aceptarán cualquier cert…").
+- 4 tests con `httptest.NewTLSServer` (cert auto-firmado) que
+  verifican: strict default falla, flag ON pasa, toggle en runtime
+  threading correcto, cached client estable + strict NO tiene
+  InsecureSkipVerify.
+
+**`<preflight>`** — **Preflight check al guardar library**.
+- Caso real: el provider del usuario tarda 60-90s en empezar a
+  enviar bytes (genera M3U de 331 MB on-demand). HubPlay aguanta
+  5min → import funciona, pero la UI da spinner silencioso 3-5
+  min. Indistinguible de "está roto".
+- `Service.PreflightCheck(ctx, url, tlsInsecure)` con budget de
+  12s. Devuelve verdict tipado:
+  - `ok` — HTTP 200 + body shape M3U-like
+  - `slow` — TCP conecta pero no responde en budget (típico del
+    caso del usuario; mensaje: "guarda y espera, el import tiene
+    timeout 5 min")
+  - `html` — el provider devolvió HTML (cuenta suspendida, IP
+    bloqueada por LaLiga, captive portal)
+  - `auth` — 401/403
+  - `not_found` — 404
+  - `tls` — cert error (sugiere activar tls_insecure)
+  - `dns` — host no resuelve (URL mala o ISP bloqueando)
+  - `connect` — TCP refused
+  - `empty` — 200 OK pero body vacío
+  - `invalid_url` / `unknown` — catch-all
+- Body sniff: lee primeros 4 KB tolerante a `io.ErrUnexpectedEOF`
+  (algunos providers mienten en Content-Length).
+- Endpoint: `POST /api/v1/iptv/preflight` admin-gated (request
+  body es URL arbitraria → SSRF-adjacent si fuera público).
+- UI: botón "Probar conexión" en LibraryFormModal + LibraryEditModal.
+  Verdict inline con tono colour-coded (verde/amarillo/rojo) +
+  HTTP status + bytes anunciados + body hint truncado.
+- 11 tests (`preflight_test.go`) cubriendo cada verdict.
+
+### Métricas
+
+- **+~1500 líneas Go** (backend) + **+~600 líneas TSX** (frontend)
+- Tests nuevos: **40 backend** (9+4 breaker, 16 lang, 4 TLS, 11
+  preflight) + frontend 296/296 estable.
+- 4 commits. Branch: `claude/iptv-circuit-breaker` → main.
+
+### Caso del usuario (cierre del bloque)
+
+El provider `pdmkibyg.xiagdns.com`:
+- DNS OK, TCP OK
+- `/get.php?type=m3u_plus` **SÍ funciona** pero tarda ~90s en
+  primer byte y devuelve **331 MB**
+- `/get.php?type=m3u` (basic) cuelga indefinidamente
+- `player_api.php` responde rápido con JSON (categorías
+  `VIP / AR / EN / ES...`)
+
+Workflow recomendado al usuario: pegar URL `m3u_plus`, activar
+filtro de idioma `["es"]` (su provider tiene group-titles
+`AR / EN / VIP / etc.` muy estructuradas → matcher acierta perfecto),
+darle a "Probar conexión" → verdict será `slow` con mensaje
+"guarda y espera 1-2 min", clickar Crear, esperar el import. Sin
+sorpresas.
+
+### Lo que NO entró (deuda explicada)
+
+- **Single-flight EPG fetches**: la pieza B de la tarea original
+  del review. Diferida porque el streaming-XMLTV parser ya bajó
+  el pico de memoria de 250 MB a ~10-20 MB; compartir body entre
+  dos refreshes simultáneos exige bufferear o tempfile spool, lo
+  que devuelve la deuda. El lock per-library ya cubre el caso "la
+  misma library refrescada dos veces"; el caso restante "dos libs
+  con la misma URL EPG" es bajo y se difiere.
+- **Xtream API nativo** (`player_api.php` paginado): considerado
+  pero descartado para esta sesión. El provider del usuario SÍ
+  sirve M3U_plus, así que el path actual le sirve. Sería slice 2
+  cuando aparezca un provider que SOLO tenga `player_api.php`.
+- **Frontend virtualization** (la lista de canales con .map de
+  20k entradas que choca al render): conocido, en TODO en
+  `EPGGrid.tsx:26`. Mitigado por el filtro de idioma (de 20k →
+  3-5k típico). Slice independiente — irá con `@tanstack/react-virtual`.
 
 ---
 

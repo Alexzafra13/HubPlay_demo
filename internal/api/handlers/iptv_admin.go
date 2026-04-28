@@ -15,6 +15,32 @@ import (
 	"hubplay/internal/iptv"
 )
 
+// PreflightM3U probes an M3U URL on the operator's behalf so the
+// admin UI can show "this is fine" / "provider is hung" / "got HTML
+// instead of a playlist" before they commit a save. Bounded to ~12s
+// — see iptv.PreflightCheck for the verdict taxonomy.
+//
+// Admin-only because the request body comes verbatim from the
+// caller and a public endpoint would let any unauthenticated user
+// turn the server into a generic HTTP probe (SSRF-adjacent).
+func (h *IPTVHandler) PreflightM3U(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		M3UURL      string `json:"m3u_url"`
+		TLSInsecure bool   `json:"tls_insecure"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, r, http.StatusBadRequest, "INVALID_BODY", "invalid JSON body")
+		return
+	}
+	if req.M3UURL == "" {
+		respondError(w, r, http.StatusBadRequest, "MISSING_URL", "m3u_url is required")
+		return
+	}
+
+	result := h.svc.PreflightCheck(r.Context(), req.M3UURL, req.TLSInsecure)
+	respondJSON(w, http.StatusOK, result)
+}
+
 // RefreshM3U triggers an M3U playlist refresh for a library.
 //
 // Already admin-only at the route level, but we also verify library access

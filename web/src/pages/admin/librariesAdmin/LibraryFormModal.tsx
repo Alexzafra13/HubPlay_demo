@@ -15,6 +15,7 @@ import { useCreateLibrary, useRefreshM3U, usePublicCountries } from "@/api/hooks
 import type { ContentType, Library } from "@/api/types";
 import { FilteredSelect } from "./FilteredSelect";
 import { LanguageMultiSelect } from "./LanguageMultiSelect";
+import { PreflightButton } from "./PreflightButton";
 import { TLSInsecureToggle } from "./TLSInsecureToggle";
 import {
   CONTENT_TYPES,
@@ -329,6 +330,13 @@ export function LibraryFormModal({ isOpen, onClose, onCreated }: LibraryFormModa
                 value={tlsInsecure}
                 onChange={setTLSInsecure}
               />
+
+              {liveSource === "custom" && (
+                <PreflightButton
+                  m3uURL={m3uURL}
+                  tlsInsecure={tlsInsecure}
+                />
+              )}
             </>
           ) : (
             <div className="flex gap-2 items-end">

@@ -19,6 +19,7 @@ import type {
   MediaItem,
   PaginatedResponse,
   PatchChannelRequest,
+  PreflightResult,
   PublicCountry,
   PublicEPGSource,
   SetupStatus,
@@ -572,6 +573,19 @@ export class ApiClient {
       "POST",
       `/libraries/${libraryId}/iptv/refresh-epg`,
     );
+  }
+
+  // Preflight probe for an M3U URL — used by the library Add/Edit
+  // modals' "Test connection" button so the admin gets a verdict in
+  // ~12s instead of clicking Save and waiting up to 5 min in silence.
+  // Admin-only on the backend.
+  async preflightM3U(input: {
+    m3u_url: string;
+    tls_insecure: boolean;
+  }): Promise<PreflightResult> {
+    return this.request<PreflightResult>("POST", "/iptv/preflight", {
+      body: input,
+    });
   }
 
   async getChannel(id: string): Promise<Channel> {

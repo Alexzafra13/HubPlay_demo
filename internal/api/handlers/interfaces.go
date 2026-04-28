@@ -99,6 +99,7 @@ type IPTVService interface {
 	NowPlaying(ctx context.Context, channelID string) (*db.EPGProgram, error)
 	RefreshM3U(ctx context.Context, libraryID string) (int, error)
 	RefreshEPG(ctx context.Context, libraryID string) (int, error)
+	PreflightCheck(ctx context.Context, m3uURL string, tlsInsecure bool) iptv.PreflightResult
 
 	// Channel favorites (per-user, persisted in user_channel_favorites).
 	AddFavorite(ctx context.Context, userID, channelID string) error

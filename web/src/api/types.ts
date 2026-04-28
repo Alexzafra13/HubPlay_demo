@@ -99,6 +99,51 @@ export interface CreateLibraryRequest {
   tls_insecure?: boolean;
 }
 
+/**
+ * Verdict returned by the M3U preflight probe. Stable string union
+ * so the UI can dispatch icons / colours / messages on the value.
+ *
+ *   ok          — playlist looks valid, safe to save
+ *   slow        — TCP connected but no response in 12 s; likely
+ *                 still works (provider generating big list), save
+ *                 anyway and wait
+ *   empty       — 200 OK but body is empty (account has no channels)
+ *   html        — got HTML error page instead of M3U (account
+ *                 suspended, IP blocked, captive portal)
+ *   auth        — 401 / 403 (credentials rejected)
+ *   not_found   — 404 (URL wrong)
+ *   tls         — certificate / handshake error (suggest TLS toggle)
+ *   dns         — host not resolvable (URL typo or ISP block)
+ *   connect     — TCP refused (server down)
+ *   invalid_url — URL parse error / wrong scheme
+ *   unknown     — catch-all so the UI never gets a missing field
+ */
+export type PreflightStatus =
+  | "ok"
+  | "slow"
+  | "empty"
+  | "html"
+  | "auth"
+  | "not_found"
+  | "tls"
+  | "dns"
+  | "connect"
+  | "invalid_url"
+  | "unknown";
+
+export interface PreflightResult {
+  status: PreflightStatus;
+  http_status?: number;
+  /** Bytes the upstream advertised in Content-Length, when present. */
+  content_length?: number;
+  /** First non-blank line of the body, truncated. Useful to debug
+   *  HTML error pages without round-tripping the whole response. */
+  body_hint?: string;
+  elapsed_ms: number;
+  /** Spanish operator-facing message, ready to render verbatim. */
+  message: string;
+}
+
 export interface UpdateLibraryRequest {
   name?: string;
   paths?: string[];

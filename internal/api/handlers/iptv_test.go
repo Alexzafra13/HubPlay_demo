@@ -146,6 +146,10 @@ func (s *iptvFakeService) RefreshEPG(_ context.Context, _ string) (int, error) {
 	return s.refreshEPGCount, s.refreshEPGErr
 }
 
+func (s *iptvFakeService) PreflightCheck(_ context.Context, m3uURL string, _ bool) iptv.PreflightResult {
+	return iptv.PreflightResult{Status: iptv.PreflightOK, Message: "fake ok", BodyHint: m3uURL}
+}
+
 // ─── Favorites (fake) ───────────────────────────────────────────────────────
 //
 // Minimal in-memory map keyed by user: covers the handler contract without

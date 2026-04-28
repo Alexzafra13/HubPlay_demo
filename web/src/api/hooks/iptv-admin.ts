@@ -15,7 +15,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseQueryOptions } from "@tanstack/react-query";
 import { api } from "../client";
 import { queryKeys } from "../queryKeys";
-import type { ImportPublicIPTVResponse, PublicCountry } from "../types";
+import type {
+  ImportPublicIPTVResponse,
+  PreflightResult,
+  PublicCountry,
+} from "../types";
 
 export function usePublicCountries(
   options?: Partial<UseQueryOptions<PublicCountry[]>>,
@@ -38,6 +42,24 @@ export function useImportPublicIPTV() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.libraries });
     },
+  });
+}
+
+/**
+ * Probe an M3U URL for reachability + format BEFORE saving the
+ * library. Returns within ~12 s with a verdict. Used by the
+ * "Test connection" button in the library Add/Edit modals.
+ *
+ * Not invalidating any cache — preflight is read-only and should
+ * never affect what the rest of the app sees.
+ */
+export function usePreflightM3U() {
+  return useMutation<
+    PreflightResult,
+    Error,
+    { m3u_url: string; tls_insecure: boolean }
+  >({
+    mutationFn: (input) => api.preflightM3U(input),
   });
 }
 

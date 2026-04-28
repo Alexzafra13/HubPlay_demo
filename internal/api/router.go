@@ -370,6 +370,7 @@ func NewRouter(deps Dependencies) http.Handler {
 					// Admin IPTV operations
 					r.Group(func(r chi.Router) {
 						r.Use(auth.RequireAdmin)
+						r.Post("/iptv/preflight", iptvHandler.PreflightM3U)
 						r.Post("/iptv/public/import", iptvHandler.ImportPublicIPTV)
 						r.Post("/libraries/{id}/epg-sources", iptvHandler.AddEPGSource)
 						r.Delete("/libraries/{id}/epg-sources/{sourceId}", iptvHandler.RemoveEPGSource)

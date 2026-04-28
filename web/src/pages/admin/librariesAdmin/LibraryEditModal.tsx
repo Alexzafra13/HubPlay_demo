@@ -12,6 +12,7 @@ import { FolderBrowser } from "@/components/setup/FolderBrowser";
 import { useUpdateLibrary } from "@/api/hooks";
 import type { Library } from "@/api/types";
 import { LanguageMultiSelect } from "./LanguageMultiSelect";
+import { PreflightButton } from "./PreflightButton";
 import { TLSInsecureToggle } from "./TLSInsecureToggle";
 
 interface LibraryEditModalProps {
@@ -126,6 +127,11 @@ export function LibraryEditModal({ target, onClose }: LibraryEditModalProps) {
               <TLSInsecureToggle
                 value={tlsInsecure}
                 onChange={setTLSInsecure}
+              />
+
+              <PreflightButton
+                m3uURL={m3uURL}
+                tlsInsecure={tlsInsecure}
               />
             </>
           ) : (
