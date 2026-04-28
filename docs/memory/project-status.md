@@ -1,6 +1,78 @@
 # Estado del proyecto
 
-> Snapshot: **2026-04-28 (late PM)** — refactor SRP/responsabilidades: 6 ficheros gigantes troceados sin sobre-ingeniería · Rama: `claude/modest-vaughan-2535e4` · **tests: backend verde · frontend 290/290 · tsc -b 0**
+> Snapshot: **2026-04-28 (final)** — refactor SRP completo (7 ficheros gigantes troceados, incl. iptv.go) + audit de duplicación (1 fix real, codebase ~90% limpio) · Rama: `claude/modest-vaughan-2535e4` (mergeada a `main`) · **tests: backend verde · frontend 290/290 · tsc -b 0**
+
+---
+
+## 🧹 Sesión 2026-04-28 (final) — iptv split + audit duplicación
+
+Cierre del refactor SRP iniciado en la sesión "late PM" (sección
+inferior).
+
+### Lo que entró
+
+**`b31614b`** — `internal/api/handlers/iptv.go` partido de **1159 → 67
+líneas** (shell con struct + constructor + 2 helpers compartidos). El
+resto distribuido en 5 ficheros nuevos:
+
+| Fichero | Líneas | Contenido |
+|---|---|---|
+| `iptv_channels.go` | 347 | List/Get/Groups/Stream/ProxyURL/Schedule/BulkSchedule + parse helpers |
+| `iptv_favorites.go` | 253 | Favorites + RecordChannelWatch + ListContinueWatching |
+| `iptv_health.go` | 245 | unhealthy / without-EPG / disable / enable + DTOs |
+| `iptv_epg.go` | 173 | EPG-source CRUD + catalog |
+| `iptv_admin.go` | 151 | RefreshM3U/EPG + PublicCountries + ImportPublicIPTV |
+
+Esto completa la convención que ya existía en el repo (`iptv_access.go`,
+`iptv_dto.go`, `iptv_schedule.go`, `iptv_playback_failure.go` ya estaban
+extraídos).
+
+**Audit de duplicación real (post-split)**: agente cazó copy-paste real
+en backend + frontend. Hallazgo: **1 caso** real de 78% overlap entre
+`useAddChannelFavorite` y `useRemoveChannelFavorite` en
+`web/src/api/hooks/channels.ts`. Resuelto con factory
+`useFavoriteMutation(apiCall, apply)` que las dos hooks invocan con
+una línea cada una.
+
+Resto del codebase confirmado limpio:
+- Patrón `canAccessLibrary + denyForbidden` repetido ~25 veces en
+  iptv_*.go pero son 4 líneas idiomáticas — un wrapper `requireAccess`
+  ahorraría 3 líneas/llamada a costa de oscurecer la lógica. Skip.
+- `LibraryFormModal` vs `LibraryEditModal` (~120 líneas comunes en
+  layout) divergen en lógica (Add tiene 9 vars de estado + reset on
+  open; Edit tiene 4 + hidratación desde target). Co-incidencia visual
+  legítima, no copy-paste real. Skip.
+- DTOs (`toChannelDTO`, `programToJSON`, `channelHealthDTO`,
+  `channelWithoutEPGDTO`) ya bien separados, cada uno con shape
+  específico. Limpio.
+
+### Métricas finales del refactor SRP completo (sesiones de hoy)
+
+| Fichero | Antes | Después | Δ |
+|---|---|---|---|
+| `web/src/api/hooks.ts` | 1174 | 23 (barrel) | −98% |
+| `internal/api/handlers/iptv.go` | 1159 | 67 (shell) | −94% |
+| `web/src/pages/admin/LibrariesAdmin.tsx` | 1188 | 219 | −82% |
+| `web/src/pages/ItemDetail.tsx` | 636 | 352 | −45% |
+| `web/src/components/player/PlayerControls.tsx` | 793 | 585 | −26% |
+| `internal/api/handlers/items.go` | 771 | 698 | −10% |
+| `internal/api/handlers/image.go` | 595 | similar (dedupe interna) | net 0 |
+
+**Ficheros >800 líneas en src/ del frontend**: 4 → 0.
+**Ficheros >1000 líneas en handlers backend**: 1 → 0.
+
+### Lo que NO se tocó (decisión deliberada, regla "Process vs Group")
+
+- `internal/scanner/scanner.go` (1126) — Process cohesivo: cada
+  función llama a la siguiente. Romperlo empeora la lectura linear.
+- `internal/iptv/proxy.go` (682) — HLS rewriting + relay tracking,
+  dominio coherente.
+- `internal/provider/tmdb.go` (586) — adapter puro, una responsabilidad.
+
+La regla está documentada en
+[`conventions.md`](conventions.md#cuándo-trocear-un-fichero-gordo-y-cuándo-no):
+**Process** (cadena de calls) vs **Group** (handlers independientes).
+Sólo se parten Groups.
 
 ---
 

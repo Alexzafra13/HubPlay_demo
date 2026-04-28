@@ -46,20 +46,32 @@ export function useChannelFavorites(
   });
 }
 
-export function useAddChannelFavorite() {
+// useFavoriteMutation factors out the optimistic-update plumbing
+// shared by add and remove: same query keys, same rollback context,
+// same settled-invalidation. Only the API call and the local-set
+// transform differ.
+//
+// Why a factory rather than two hooks: 80% of the body is identical,
+// and the "what changes" part (one line each) reads more clearly when
+// you see `apply: (ids, id) => [id, ...]` next to its remove sibling
+// than when both flows are typed out in full.
+function useFavoriteMutation(
+  apiCall: (channelId: string) => Promise<void>,
+  apply: (ids: string[], channelId: string) => string[],
+) {
   const queryClient = useQueryClient();
   return useMutation<void, Error, string, { previous: string[] | undefined }>({
-    mutationFn: (channelId) => api.addChannelFavorite(channelId),
+    mutationFn: apiCall,
     onMutate: async (channelId) => {
-      // Optimistic: assume success and flip the local ID set before the
-      // network round-trip lands. Keeps the ♥ responsive on slow links.
+      // Optimistic: flip the local ID set before the network round-trip
+      // lands so the ♥ stays responsive on slow links.
       await queryClient.cancelQueries({ queryKey: queryKeys.channelFavoriteIDs });
       const previous = queryClient.getQueryData<string[]>(
         queryKeys.channelFavoriteIDs,
       );
       queryClient.setQueryData<string[]>(
         queryKeys.channelFavoriteIDs,
-        (old) => (old?.includes(channelId) ? old : [channelId, ...(old ?? [])]),
+        (old) => apply(old ?? [], channelId),
       );
       return { previous };
     },
@@ -75,31 +87,18 @@ export function useAddChannelFavorite() {
   });
 }
 
+export function useAddChannelFavorite() {
+  return useFavoriteMutation(
+    (channelId) => api.addChannelFavorite(channelId),
+    (ids, channelId) => (ids.includes(channelId) ? ids : [channelId, ...ids]),
+  );
+}
+
 export function useRemoveChannelFavorite() {
-  const queryClient = useQueryClient();
-  return useMutation<void, Error, string, { previous: string[] | undefined }>({
-    mutationFn: (channelId) => api.removeChannelFavorite(channelId),
-    onMutate: async (channelId) => {
-      await queryClient.cancelQueries({ queryKey: queryKeys.channelFavoriteIDs });
-      const previous = queryClient.getQueryData<string[]>(
-        queryKeys.channelFavoriteIDs,
-      );
-      queryClient.setQueryData<string[]>(
-        queryKeys.channelFavoriteIDs,
-        (old) => (old ?? []).filter((id) => id !== channelId),
-      );
-      return { previous };
-    },
-    onError: (_err, _vars, ctx) => {
-      if (ctx?.previous) {
-        queryClient.setQueryData(queryKeys.channelFavoriteIDs, ctx.previous);
-      }
-    },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.channelFavoriteIDs });
-      queryClient.invalidateQueries({ queryKey: queryKeys.channelFavorites });
-    },
-  });
+  return useFavoriteMutation(
+    (channelId) => api.removeChannelFavorite(channelId),
+    (ids, channelId) => ids.filter((id) => id !== channelId),
+  );
 }
 
 // ─── Bulk schedule (EPG payload for the Live TV grid) ──────────────────────
