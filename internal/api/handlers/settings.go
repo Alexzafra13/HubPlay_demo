@@ -29,10 +29,11 @@ import (
 //     app_settings overrides the YAML default; deleting the row reverts
 //     to the YAML default.
 type SettingsHandler struct {
-	settings       *db.SettingsRepository
-	baseURLDefault string
-	hwAccelDefault config.HWAccelConfig
-	logger         *slog.Logger
+	settings         *db.SettingsRepository
+	baseURLDefault   string
+	hwAccelDefault   config.HWAccelConfig
+	hwAccelDetected  []string
+	logger           *slog.Logger
 }
 
 // SettingsHandlerConfig is the named-arg shape for the constructor —
@@ -42,15 +43,26 @@ type SettingsHandlerConfig struct {
 	Settings       *db.SettingsRepository
 	BaseURLDefault string
 	HWAccelDefault config.HWAccelConfig
-	Logger         *slog.Logger
+	// HWAccelDetected is the list of accelerator backends the boot-time
+	// detector actually saw working on the host (e.g. ["vaapi", "qsv"]).
+	// The descriptor for hardware_acceleration.preferred filters its
+	// AllowedValues against this list so the UI only offers choices
+	// that have a chance of working — the operator can't flip nvenc on
+	// a host with no NVIDIA GPU and crash the next transcode.
+	// Empty / nil means "detector saw nothing" (or wasn't wired); in
+	// that case the panel only offers "auto", which still maps to the
+	// software fallback at the stream layer.
+	HWAccelDetected []string
+	Logger          *slog.Logger
 }
 
 func NewSettingsHandler(cfg SettingsHandlerConfig) *SettingsHandler {
 	return &SettingsHandler{
-		settings:       cfg.Settings,
-		baseURLDefault: cfg.BaseURLDefault,
-		hwAccelDefault: cfg.HWAccelDefault,
-		logger:         cfg.Logger.With("module", "settings-handler"),
+		settings:        cfg.Settings,
+		baseURLDefault:  cfg.BaseURLDefault,
+		hwAccelDefault:  cfg.HWAccelDefault,
+		hwAccelDetected: append([]string(nil), cfg.HWAccelDetected...),
+		logger:          cfg.Logger.With("module", "settings-handler"),
 	}
 }
 
@@ -64,11 +76,44 @@ const (
 	settingHWAccelPreferred = "hardware_acceleration.preferred"
 )
 
-// hwAccelChoices is the set of values accepted for the preferred
-// accelerator. "auto" tells the detector to pick the best available
-// at the host. Mirrors the values recognised by stream.DetectHWAccel
-// — keep in sync; the validator below rejects everything else.
+// hwAccelChoices is the master set of values the *validator* accepts
+// for the preferred accelerator. "auto" tells the detector to pick the
+// best available at the host. Mirrors the values recognised by
+// stream.DetectHWAccel — keep in sync.
+//
+// Note: the panel's UI advertises a *narrower* list, filtered by what
+// the boot detector actually saw on the host (see allowedHWAccelChoices).
+// We deliberately keep the validator broad so an operator who knows
+// what they're doing can still set, say, `nvenc` from a CLI / scripted
+// API call when the detector failed silently — without having to touch
+// YAML. The cost of that flexibility is a single misconfigured value
+// surfacing at next transcode; the gain is the panel never *forces* a
+// choice when the detector is wrong.
 var hwAccelChoices = []string{"auto", "vaapi", "qsv", "nvenc", "videotoolbox"}
+
+// allowedHWAccelChoices returns the subset of hwAccelChoices the panel
+// should advertise to the admin. Always includes "auto" (works
+// regardless of host capability — falls back to software) and the
+// currently-effective preferred value (so an admin who already has
+// a value set in YAML or in app_settings can see + reset it, even if
+// the detector now reports the host can't run it). Otherwise restricts
+// to what the detector actually saw working at boot.
+func (h *SettingsHandler) allowedHWAccelChoices(currentEffective string) []string {
+	keep := map[string]struct{}{"auto": {}}
+	for _, d := range h.hwAccelDetected {
+		keep[d] = struct{}{}
+	}
+	if currentEffective != "" {
+		keep[currentEffective] = struct{}{}
+	}
+	out := make([]string, 0, len(keep))
+	for _, c := range hwAccelChoices {
+		if _, ok := keep[c]; ok {
+			out = append(out, c)
+		}
+	}
+	return out
+}
 
 // settingDescriptor pairs a key with a validator + a hint for the UI.
 // The hint is rendered next to the input so the admin knows what the
@@ -115,7 +160,11 @@ func (h *SettingsHandler) Update(w http.ResponseWriter, r *http.Request) {
 		Key   string `json:"key"`
 		Value string `json:"value"`
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 4096) // a base URL has no excuse to be 4 KiB
+	// 16 KiB is comfortable headroom over today's keys (the longest
+	// value is a base URL that won't realistically exceed 256 bytes)
+	// without locking us out of future runtime-editable settings that
+	// might carry a small JSON blob — e.g. an enrichment provider order.
+	r.Body = http.MaxBytesReader(w, r.Body, 16*1024)
 	defer r.Body.Close()                          //nolint:errcheck
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
@@ -207,7 +256,10 @@ func (h *SettingsHandler) describeAll(ctx context.Context) ([]settingDescriptor,
 			Default:       hwPreferredDefault,
 			RestartNeeded: true,
 			Hint:          "Preferred accelerator backend; \"auto\" lets the detector pick.",
-			AllowedValues: hwAccelChoices,
+			// AllowedValues filled below once the effective value is
+			// known — the list filters by what the boot-time detector
+			// saw on the host so the panel can't offer (e.g.) nvenc
+			// when no NVIDIA GPU is present.
 		},
 	}
 	for i := range rows {
@@ -220,6 +272,15 @@ func (h *SettingsHandler) describeAll(ctx context.Context) ([]settingDescriptor,
 			rows[i].Effective = rows[i].Default
 		default:
 			return nil, err
+		}
+	}
+	// AllowedValues for the preferred-accelerator row is built last
+	// because it depends on the effective value (which has to include
+	// itself in the list so the admin isn't locked out of seeing the
+	// current choice when the detector report shrinks).
+	for i := range rows {
+		if rows[i].Key == settingHWAccelPreferred {
+			rows[i].AllowedValues = h.allowedHWAccelChoices(rows[i].Effective)
 		}
 	}
 	return rows, nil
