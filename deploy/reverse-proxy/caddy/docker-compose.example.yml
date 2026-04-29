@@ -1,0 +1,46 @@
+# Caddy en Docker — opción contenedorizada equivalente al setup nativo.
+#
+# Uso:
+#   1. Ajusta el volumen de Caddyfile para apuntar a tu Caddyfile real.
+#   2. Asegura que la red `hubplay-net` existe O cambia esta override
+#      para usar host networking si tu HubPlay también está en host
+#      mode (no recomendado).
+#   3. docker compose up -d
+#
+# Caddy guarda sus certificados en /data — el volumen persistente los
+# preserva entre `docker compose down/up`. Los certificados son del host
+# concreto que los emitió, así que NO los copies entre máquinas.
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: hubplay-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3 (QUIC). Mejor latencia, opcional.
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - hubplay-net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:2019/config/"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  caddy_data:
+  caddy_config:
+
+networks:
+  hubplay-net:
+    external: true   # debe existir por tu docker-compose.prod.yml de hubplay

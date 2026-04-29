@@ -1,0 +1,73 @@
+# Traefik labels para HubPlay — overlay para tu docker-compose.prod.yml.
+#
+# Asume que ya corres una instancia de Traefik en el mismo Docker host
+# con HTTPS auto-cert (Let's Encrypt o equivalente) y un certResolver
+# llamado `letsencrypt`. Si tu certResolver tiene otro nombre, cambia
+# `letsencrypt` por el tuyo en las labels más abajo.
+#
+# Uso:
+#   docker compose -f docker-compose.prod.yml -f traefik-override.yml up -d
+#
+# El servicio de nginx del compose original queda OUT — Traefik hace
+# de reverse-proxy en su lugar.
+
+services:
+  hubplay:
+    labels:
+      # Activa Traefik para este servicio.
+      - "traefik.enable=true"
+
+      # Router HTTPS principal.
+      - "traefik.http.routers.hubplay.rule=Host(`hubplay.example.com`)"
+      - "traefik.http.routers.hubplay.entrypoints=websecure"
+      - "traefik.http.routers.hubplay.tls=true"
+      - "traefik.http.routers.hubplay.tls.certresolver=letsencrypt"
+      - "traefik.http.services.hubplay.loadbalancer.server.port=8096"
+
+      # SSE friendly: flush_interval 100ms para que /me/events,
+      # /events, y /peer/events flujen events sin acumularse en el
+      # buffer de Traefik.
+      - "traefik.http.services.hubplay.loadbalancer.responseforwarding.flushInterval=100ms"
+
+      # Middleware: security headers — espejo del setup nginx/Caddy.
+      - "traefik.http.middlewares.hubplay-headers.headers.stsSeconds=63072000"
+      - "traefik.http.middlewares.hubplay-headers.headers.stsIncludeSubdomains=true"
+      - "traefik.http.middlewares.hubplay-headers.headers.frameDeny=true"
+      - "traefik.http.middlewares.hubplay-headers.headers.contentTypeNosniff=true"
+      - "traefik.http.middlewares.hubplay-headers.headers.referrerPolicy=strict-origin-when-cross-origin"
+      - "traefik.http.middlewares.hubplay-headers.headers.customResponseHeaders.Vary=X-Hubplay-Client-Capabilities"
+
+      # Middleware: rate limit en /api/v1/auth/login y /api/v1/auth/refresh
+      # — equivalente a la zona hubplay_login del nginx original.
+      - "traefik.http.middlewares.hubplay-loginlimit.ratelimit.average=5"
+      - "traefik.http.middlewares.hubplay-loginlimit.ratelimit.period=1m"
+      - "traefik.http.middlewares.hubplay-loginlimit.ratelimit.burst=3"
+
+      # Router específico para login con rate limit.
+      - "traefik.http.routers.hubplay-login.rule=Host(`hubplay.example.com`) && PathPrefix(`/api/v1/auth/`)"
+      - "traefik.http.routers.hubplay-login.entrypoints=websecure"
+      - "traefik.http.routers.hubplay-login.tls=true"
+      - "traefik.http.routers.hubplay-login.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.hubplay-login.middlewares=hubplay-headers,hubplay-loginlimit"
+      - "traefik.http.routers.hubplay-login.priority=100"   # > que el router default
+
+      # Router default — security headers solamente, sin rate limit
+      # WAN extra. La aplicación hace per-peer token buckets a nivel app
+      # para /api/v1/peer/.
+      - "traefik.http.routers.hubplay.middlewares=hubplay-headers"
+
+      # Network — debe coincidir con la red donde corre tu Traefik.
+      - "traefik.docker.network=traefik_proxy"
+
+    networks:
+      - traefik_proxy
+      - default
+
+  # Desactivar nginx del compose original — Traefik lo reemplaza.
+  nginx:
+    profiles:
+      - disabled
+
+networks:
+  traefik_proxy:
+    external: true

@@ -1,0 +1,98 @@
+# /etc/caddy/Caddyfile — turnkey HTTPS for HubPlay
+#
+# Caddy auto-provisions Let's Encrypt certificates and renews them in
+# the background. No certbot, no renewal hooks, no scheduler — Caddy
+# keeps the cert fresh while it runs.
+#
+# Usage:
+#   1. Replace `hubplay.example.com` and `admin@example.com` below.
+#   2. Make sure your domain's A/AAAA record points to this host.
+#   3. Make sure ports 80 and 443 are reachable from the public internet
+#      (forwarded on your router, not blocked by ISP).
+#   4. sudo systemctl reload caddy   (or `caddy reload` if running ad-hoc)
+#
+# For CGNAT / no-public-IP setups, see:
+#   deploy/reverse-proxy/cloudflare-tunnel/
+#   deploy/reverse-proxy/tailscale/
+
+{
+	email admin@example.com
+}
+
+hubplay.example.com {
+	# Reverse-proxy to the HubPlay backend on localhost:8096. Caddy
+	# handles WebSocket upgrades and SSE keepalive correctly by default
+	# — no extra configuration required.
+	reverse_proxy 127.0.0.1:8096 {
+		# Disable response buffering: SSE endpoints (/me/events,
+		# /events, /peer/events) need events flushed to the client
+		# the moment they're emitted.
+		flush_interval -1
+
+		# Long timeouts. Federation download endpoints stream multi-GB
+		# files; the default 30s read timeout would kill them mid-transfer.
+		# These timeouts are per-request — non-streaming requests close
+		# normally on completion, so the high ceiling is harmless.
+		transport http {
+			read_timeout            24h
+			write_timeout           1h
+			response_header_timeout 30s
+		}
+	}
+
+	# Compression on text payloads. Caddy auto-detects pre-encoded media
+	# (HLS .ts segments, image binaries) and correctly skips them — gzip
+	# would burn CPU for nothing on already-compressed bytes.
+	encode gzip zstd
+
+	# Security headers — same set the nginx config uses.
+	header {
+		Strict-Transport-Security "max-age=63072000; includeSubDomains"
+		X-Frame-Options            "SAMEORIGIN"
+		X-Content-Type-Options     "nosniff"
+		Referrer-Policy            "strict-origin-when-cross-origin"
+
+		# Tells browsers + caches that responses vary by capabilities header.
+		# Required so a cache doesn't serve a transcoded variant to an HEVC-
+		# capable client (or vice versa) just because the path matches.
+		Vary "X-Hubplay-Client-Capabilities"
+
+		# Reduce server fingerprint surface. Caddy adds Server: caddy by
+		# default; strip it.
+		-Server
+	}
+
+	# WAN-level rate limiting:
+	#
+	# Caddy core has no built-in rate limiter. The Go server already
+	# rate-limits per-account login (internal/auth/service.go) and the
+	# federation feature does per-peer token buckets at app layer.
+	#
+	# If you want extra WAN-level rate limiting on top, install the
+	# caddy-ratelimit plugin and uncomment:
+	#
+	#     rate_limit {
+	#         zone hubplay_api {
+	#             match path /api/v1/*
+	#             key   {remote_host}
+	#             events 600
+	#             window 1m
+	#         }
+	#         zone hubplay_login {
+	#             match path /api/v1/auth/*
+	#             key    {remote_host}
+	#             events 5
+	#             window 1m
+	#         }
+	#     }
+	#
+	# For most home setups the in-app limiter is sufficient.
+
+	log {
+		output file /var/log/caddy/hubplay.log {
+			roll_size 10mb
+			roll_keep 5
+		}
+		format json
+	}
+}
