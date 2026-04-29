@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"hubplay/internal/auth"
+	"hubplay/internal/event"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -15,16 +16,38 @@ import (
 type ProgressHandler struct {
 	userData UserDataRepository
 	images   ImageRepository
+	bus      EventBusPublisher
 	logger   *slog.Logger
 }
 
-// NewProgressHandler creates a new progress handler.
-func NewProgressHandler(userData UserDataRepository, images ImageRepository, logger *slog.Logger) *ProgressHandler {
+// NewProgressHandler creates a new progress handler. The bus is
+// optional — pass nil in test rigs that don't care about cross-device
+// sync; the handler skips Publish calls cleanly in that case.
+func NewProgressHandler(userData UserDataRepository, images ImageRepository, bus EventBusPublisher, logger *slog.Logger) *ProgressHandler {
 	return &ProgressHandler{
 		userData: userData,
 		images:   images,
+		bus:      bus,
 		logger:   logger.With("module", "progress-handler"),
 	}
+}
+
+// publish fans out a user-scoped event to the bus. The /me/events SSE
+// endpoint reads `user_id` from Data and only forwards events to that
+// user's connected clients — other users on the same server never see
+// these. nil-bus is a no-op so test rigs without a bus stay simple.
+func (h *ProgressHandler) publish(t event.Type, userID, itemID string, extra map[string]any) {
+	if h.bus == nil {
+		return
+	}
+	data := map[string]any{
+		"user_id": userID,
+		"item_id": itemID,
+	}
+	for k, v := range extra {
+		data[k] = v
+	}
+	h.bus.Publish(event.Event{Type: t, Data: data})
 }
 
 // GetProgress returns the user's data for a specific item.
@@ -102,6 +125,10 @@ func (h *ProgressHandler) UpdateProgress(w http.ResponseWriter, r *http.Request)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to update progress")
 		return
 	}
+	h.publish(event.ProgressUpdated, claims.UserID, itemID, map[string]any{
+		"position_ticks": req.PositionTicks,
+		"completed":      completed,
+	})
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -120,6 +147,10 @@ func (h *ProgressHandler) MarkPlayed(w http.ResponseWriter, r *http.Request) {
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to mark played")
 		return
 	}
+	h.publish(event.PlayedToggled, claims.UserID, itemID, map[string]any{
+		"played":    true,
+		"completed": true,
+	})
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -138,6 +169,10 @@ func (h *ProgressHandler) MarkUnplayed(w http.ResponseWriter, r *http.Request) {
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to mark unplayed")
 		return
 	}
+	h.publish(event.PlayedToggled, claims.UserID, itemID, map[string]any{
+		"played":    false,
+		"completed": false,
+	})
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -170,6 +205,9 @@ func (h *ProgressHandler) ToggleFavorite(w http.ResponseWriter, r *http.Request)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to toggle favorite")
 		return
 	}
+	h.publish(event.FavoriteToggled, claims.UserID, itemID, map[string]any{
+		"is_favorite": newState,
+	})
 
 	respondJSON(w, http.StatusOK, map[string]any{
 		"data": map[string]any{

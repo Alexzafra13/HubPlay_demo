@@ -15,6 +15,7 @@ import (
 
 	"hubplay/internal/auth"
 	"hubplay/internal/db"
+	"hubplay/internal/event"
 	"hubplay/internal/testutil"
 )
 
@@ -180,7 +181,9 @@ func newProgressTestEnv(t *testing.T) *progressTestEnv {
 		userData: newProgressFakeUserData(),
 		images:   newFakeImageRepo(),
 	}
-	env.handler = NewProgressHandler(env.userData, env.images, testutil.NopLogger())
+	// nil bus — these tests don't assert event publishing; the
+	// dedicated me_events_test.go covers that path.
+	env.handler = NewProgressHandler(env.userData, env.images, nil, testutil.NopLogger())
 
 	r := chi.NewRouter()
 	r.Route("/api/v1/me", func(r chi.Router) {
@@ -528,6 +531,125 @@ func TestProgressHandler_NextUp_Unauthenticated(t *testing.T) {
 	env := newProgressTestEnv(t)
 	rr := env.do(http.MethodGet, "/api/v1/me/next-up", "", nil)
 	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("status: %d", rr.Code)
+	}
+}
+
+// ─── Bus publication ────────────────────────────────────────────────────────
+//
+// Verifies the four mutating endpoints emit user-scoped events with
+// the right type + Data payload. The cross-device sync depends on
+// these — losing a publish call here would break "I started on the
+// laptop, my phone catches up" without obvious failure.
+
+type recordingBus struct {
+	events []event.Event
+}
+
+func (b *recordingBus) Publish(e event.Event) {
+	b.events = append(b.events, e)
+}
+
+func newProgressTestEnvWithBus(t *testing.T) (*progressTestEnv, *recordingBus) {
+	t.Helper()
+	bus := &recordingBus{}
+	env := &progressTestEnv{
+		t:        t,
+		userData: newProgressFakeUserData(),
+		images:   newFakeImageRepo(),
+	}
+	env.handler = NewProgressHandler(env.userData, env.images, bus, testutil.NopLogger())
+
+	r := chi.NewRouter()
+	r.Route("/api/v1/me", func(r chi.Router) {
+		r.Put("/progress/{itemId}", env.handler.UpdateProgress)
+		r.Post("/progress/{itemId}/played", env.handler.MarkPlayed)
+		r.Delete("/progress/{itemId}/played", env.handler.MarkUnplayed)
+		r.Post("/favorite/{itemId}", env.handler.ToggleFavorite)
+	})
+	env.router = r
+	return env, bus
+}
+
+func TestProgressHandler_UpdateProgress_PublishesEvent(t *testing.T) {
+	env, bus := newProgressTestEnvWithBus(t)
+	rr := env.do(http.MethodPut, "/api/v1/me/progress/it-1",
+		`{"position_ticks": 12345}`, defaultClaims())
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status: %d", rr.Code)
+	}
+	if len(bus.events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(bus.events))
+	}
+	e := bus.events[0]
+	if e.Type != event.ProgressUpdated {
+		t.Errorf("type: %s", e.Type)
+	}
+	if e.Data["user_id"] != "user-1" || e.Data["item_id"] != "it-1" {
+		t.Errorf("scope fields: %+v", e.Data)
+	}
+	if e.Data["position_ticks"] != int64(12345) {
+		t.Errorf("position_ticks: %v", e.Data["position_ticks"])
+	}
+}
+
+func TestProgressHandler_MarkPlayed_PublishesEvent(t *testing.T) {
+	env, bus := newProgressTestEnvWithBus(t)
+	rr := env.do(http.MethodPost, "/api/v1/me/progress/it-2/played", "", defaultClaims())
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status: %d", rr.Code)
+	}
+	if len(bus.events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(bus.events))
+	}
+	e := bus.events[0]
+	if e.Type != event.PlayedToggled {
+		t.Errorf("type: %s", e.Type)
+	}
+	if e.Data["played"] != true {
+		t.Errorf("played: %v", e.Data["played"])
+	}
+}
+
+func TestProgressHandler_MarkUnplayed_PublishesPlayedFalse(t *testing.T) {
+	env, bus := newProgressTestEnvWithBus(t)
+	rr := env.do(http.MethodDelete, "/api/v1/me/progress/it-3/played", "", defaultClaims())
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status: %d", rr.Code)
+	}
+	if len(bus.events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(bus.events))
+	}
+	if bus.events[0].Data["played"] != false {
+		t.Errorf("expected played=false: %+v", bus.events[0].Data)
+	}
+}
+
+func TestProgressHandler_ToggleFavorite_PublishesEvent(t *testing.T) {
+	env, bus := newProgressTestEnvWithBus(t)
+	rr := env.do(http.MethodPost, "/api/v1/me/favorite/it-4", "", defaultClaims())
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: %d", rr.Code)
+	}
+	if len(bus.events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(bus.events))
+	}
+	e := bus.events[0]
+	if e.Type != event.FavoriteToggled {
+		t.Errorf("type: %s", e.Type)
+	}
+	if e.Data["is_favorite"] != true {
+		t.Errorf("is_favorite: %v", e.Data["is_favorite"])
+	}
+}
+
+// nil bus must not panic. Test rigs that don't care about publication
+// pass nil; the publish() helper short-circuits.
+func TestProgressHandler_NilBus_NoOpPublish(t *testing.T) {
+	env := newProgressTestEnv(t) // nil bus
+	rr := env.do(http.MethodPut, "/api/v1/me/progress/it-x",
+		`{"position_ticks": 1}`, defaultClaims())
+	if rr.Code != http.StatusNoContent {
 		t.Fatalf("status: %d", rr.Code)
 	}
 }
