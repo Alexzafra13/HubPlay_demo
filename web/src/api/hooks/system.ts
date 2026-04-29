@@ -13,6 +13,7 @@ import type {
   AuthKey,
   HealthResponse,
   RotateAuthKeyResponse,
+  SystemSettingsResponse,
   SystemStats,
 } from "../types";
 
@@ -32,6 +33,47 @@ export function useSystemStats(options?: Partial<UseQueryOptions<SystemStats>>) 
     queryKey: queryKeys.systemStats,
     queryFn: () => api.getSystemStats(),
     ...options,
+  });
+}
+
+// Runtime settings (server.base_url, hardware_acceleration.*) editable
+// from the System panel. Mutations invalidate both the settings query
+// and the stats one — `effective base_url` lives in stats too, and we
+// want a save to make the new value visible without waiting on the
+// 30 s stats refetch.
+export function useSystemSettings(
+  options?: Partial<UseQueryOptions<SystemSettingsResponse>>,
+) {
+  return useQuery<SystemSettingsResponse>({
+    queryKey: queryKeys.systemSettings,
+    queryFn: () => api.getSystemSettings(),
+    ...options,
+  });
+}
+
+export function useUpdateSystemSetting() {
+  const qc = useQueryClient();
+  return useMutation<
+    SystemSettingsResponse,
+    Error,
+    { key: string; value: string }
+  >({
+    mutationFn: ({ key, value }) => api.updateSystemSetting(key, value),
+    onSuccess: (data) => {
+      qc.setQueryData(queryKeys.systemSettings, data);
+      qc.invalidateQueries({ queryKey: queryKeys.systemStats });
+    },
+  });
+}
+
+export function useResetSystemSetting() {
+  const qc = useQueryClient();
+  return useMutation<SystemSettingsResponse, Error, { key: string }>({
+    mutationFn: ({ key }) => api.resetSystemSetting(key),
+    onSuccess: (data) => {
+      qc.setQueryData(queryKeys.systemSettings, data);
+      qc.invalidateQueries({ queryKey: queryKeys.systemStats });
+    },
   });
 }
 

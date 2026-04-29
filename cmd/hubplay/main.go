@@ -144,15 +144,24 @@ func run(configPath string) error {
 	scanScheduler.Start(ctx)
 
 	// ═══ Phase 4b: Streaming ═══
-	streamManager := stream.NewManager(repos.Items, repos.MediaStreams, cfg.Streaming, logger)
+	//
+	// Apply runtime overrides from app_settings BEFORE constructing the
+	// stream manager. The detector runs once at NewManager() time and
+	// the choice is captured for the lifetime of the process — that's
+	// why hardware_acceleration toggles in the admin UI carry a
+	// "restart to apply" hint. Reading the DB here keeps a single
+	// authority chain: YAML default → DB override → effective config
+	// the rest of the code sees, with no second source of truth.
+	streamingCfg := cfg.Streaming
+	if v, err := repos.Settings.Get(ctx, "hardware_acceleration.enabled"); err == nil {
+		streamingCfg.HWAccel.Enabled = v == "true"
+	}
+	if v, err := repos.Settings.Get(ctx, "hardware_acceleration.preferred"); err == nil && v != "" {
+		streamingCfg.HWAccel.Preferred = v
+	}
+	streamManager := stream.NewManager(repos.Items, repos.MediaStreams, streamingCfg, logger)
 	streamManager.SetMetrics(observability.NewStreamSink(metrics))
 	streamManager.SetEventBus(eventBus)
-
-	// Hardware acceleration detection happens inside `stream.NewManager`
-	// when `cfg.Streaming.HWAccel.Enabled` is true — the result both
-	// gets logged there and threaded into the transcoder. Detecting
-	// twice (here + there) was the prior shape; the result was logged
-	// here and silently discarded, leaving every transcode on libx264.
 
 	// ═══ Phase 4c: IPTV ═══
 	iptvService := iptv.NewService(repos.Channels, repos.EPGPrograms, repos.Libraries, repos.ChannelFavorites, repos.LibraryEPGSources, repos.ChannelOverrides, repos.ChannelWatchHistory, logger)
@@ -268,6 +277,7 @@ func run(configPath string) error {
 		ExternalIDs:   repos.ExternalIDs,
 		LibraryRepo:   repos.Libraries,
 		ProviderRepo:  repos.Providers,
+		Settings:      repos.Settings,
 		SetupService:  setupService,
 		EventBus:      eventBus,
 		Database:      database,

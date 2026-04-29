@@ -49,6 +49,7 @@ export const queryKeys = {
   providers: ["providers"] as const,
   health: ["health"] as const,
   systemStats: ["system-stats"] as const,
+  systemSettings: ["system-settings"] as const,
   authKeys: ["auth-keys"] as const,
   setupStatus: ["setup-status"] as const,
   systemCapabilities: ["system-capabilities"] as const,

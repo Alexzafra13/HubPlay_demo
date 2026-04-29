@@ -633,6 +633,26 @@ export interface RotateAuthKeyResponse {
   overlap_seconds: number;
 }
 
+// SystemSetting describes one row in the runtime settings allowlist
+// (server.base_url, hardware_acceleration.enabled, …). Backend layers
+// the YAML default under any DB override; the UI shows `effective`,
+// flags `override` so the operator knows whether the value came from
+// app_settings, and surfaces `restart_needed` for keys (HWAccel) that
+// require a container restart to take effect.
+export interface SystemSetting {
+  key: string;
+  default: string;
+  effective: string;
+  override: boolean;
+  restart_needed: boolean;
+  hint: string;
+  allowed_values?: string[];
+}
+
+export interface SystemSettingsResponse {
+  settings: SystemSetting[];
+}
+
 export interface SetupStatus {
   needs_setup: boolean;
   current_step: "account" | "libraries" | "settings" | "complete" | "";

@@ -396,14 +396,37 @@
       "sectionRuntime": "Runtime",
       "sectionStorage": "Storage",
       "sectionLibraries": "Libraries",
+      "sectionSettings": "Settings",
       "bindAddress": "Listen address",
       "baseURL": "Public URL",
-      "baseURLEmpty": "Not configured (set server.base_url in hubplay.yaml).",
+      "baseURLUnset": "Not configured — set it below in Settings.",
       "serverTime": "Server time",
       "timezone": "Timezone",
       "hwAccelDisabledLabel": "Disabled",
-      "hwAccelDisabledHint": "Enable hardware_acceleration.enabled in hubplay.yaml to detect accelerators.",
+      "hwAccelDisabledPointer": "Enable it below in Settings (requires restart).",
       "hwAccelNoneHint": "No hardware accelerator detected — falling back to libx264.",
+      "save": "Save",
+      "resetToDefault": "Reset",
+      "overrideBadge": "Custom",
+      "defaultBadge": "Default",
+      "currentDefault": "Default: {{value}}",
+      "restartHint": "Restart to apply.",
+      "unset": "(unset)",
+      "settingsLoadFailed": "Could not load settings.",
+      "settings": {
+        "serverBaseURL": {
+          "label": "Public URL",
+          "hint": "Absolute http(s) URL clients reach the server at. Used for absolute links + CORS."
+        },
+        "hwAccelEnabled": {
+          "label": "Hardware acceleration",
+          "hint": "Use a GPU encoder when one is detected on the host."
+        },
+        "hwAccelPreferred": {
+          "label": "Preferred accelerator",
+          "hint": "Auto picks the best available; pin to one to override the detector."
+        }
+      },
       "totalLibraries": "Total libraries",
       "totalItems": "{{count, number}} items in total",
       "libraryBucketHint": "{{count, number}} libraries",

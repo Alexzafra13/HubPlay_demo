@@ -119,7 +119,7 @@ func newStreamTestEnv(t *testing.T) *streamTestEnv {
 	// the external-subtitle endpoints, so the new handlers short-
 	// circuit to 503 via their nil-guard. Tests that need them wire
 	// fakes locally.
-	env.handler = NewStreamHandler(env.manager, env.items, env.streams, nil, nil, "http://test", testutil.NopLogger())
+	env.handler = NewStreamHandler(env.manager, env.items, env.streams, nil, nil, nil, "http://test", testutil.NopLogger())
 
 	r := chi.NewRouter()
 	r.Route("/api/v1/stream/{itemId}", func(r chi.Router) {

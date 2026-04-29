@@ -24,6 +24,7 @@ type Repositories struct {
 	Metadata           *MetadataRepository
 	ExternalIDs        *ExternalIDRepository
 	Chapters           *ChapterRepository
+	Settings           *SettingsRepository
 }
 
 // NewRepositories creates all repositories from a database connection.
@@ -49,5 +50,6 @@ func NewRepositories(database *sql.DB) *Repositories {
 		Metadata:           NewMetadataRepository(database),
 		ExternalIDs:        NewExternalIDRepository(database),
 		Chapters:           NewChapterRepository(database),
+		Settings:           NewSettingsRepository(database),
 	}
 }
