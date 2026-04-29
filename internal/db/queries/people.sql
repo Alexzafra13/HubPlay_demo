@@ -60,3 +60,25 @@ FROM item_people ip
 JOIN people p ON p.id = ip.person_id
 WHERE ip.item_id = ?
 ORDER BY ip.sort_order ASC, p.name ASC;
+
+-- Filmography: every movie + series this person has a direct credit
+-- on. Episode-level credits drop through for now (parent series
+-- usually carries the same person at the top level — TMDb is
+-- consistent there). Sorted newest-first; rows for the same item
+-- but different role (e.g. actor + writer on the same movie) are
+-- returned both — the caller dedupes keeping the lowest sort_order.
+-- name: ListFilmographyByPerson :many
+SELECT
+    i.id AS item_id,
+    i.type,
+    i.title,
+    i.year,
+    ip.role,
+    COALESCE(ip.character_name, '') AS character_name,
+    COALESCE(ip.sort_order, 0) AS sort_order
+FROM item_people ip
+JOIN items i ON i.id = ip.item_id
+WHERE ip.person_id = ?
+  AND i.type IN ('movie', 'series')
+  AND i.is_available = 1
+ORDER BY COALESCE(i.year, 0) DESC, i.title ASC, ip.sort_order ASC;

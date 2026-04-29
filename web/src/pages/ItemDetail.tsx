@@ -15,13 +15,14 @@ import { usePlayback } from "./itemDetail/usePlayback";
 import { SeasonEpisodes, SeasonEpisodeList } from "./itemDetail/season";
 import type { Person } from "@/api/types";
 
-// CastChip renders one entry of the cast/crew strip. The avatar
-// slot prefers a real profile photo (image_url) and falls back to
-// an initial-letter chip on either absent URL or `onError` from a
-// failed image load. We key the photo's "did it fail" state on the
-// URL itself so swapping props (e.g. parent re-fetches the item
-// and a new url comes in) re-tries the load instead of inheriting
-// the previous failure.
+// CastChip renders one entry of the cast/crew strip in the Plex style:
+// a generous circular avatar stacked over the name and the
+// character/role line. No card chrome around it — the avatar IS the
+// frame, and the surrounding hero/page tint reads through. Failed
+// photo loads (broken URL, 404 from the people thumb endpoint) flip
+// to an initial-letter placeholder via `onError`; the failure state
+// keys off the URL so a re-fetch with a new URL retries instead of
+// inheriting the previous failure.
 function CastChip({ person }: { person: Person }) {
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const showImage = !!person.image_url && failedUrl !== person.image_url;
@@ -31,8 +32,8 @@ function CastChip({ person }: { person: Person }) {
   const subtitle = person.character || person.role;
 
   return (
-    <div className="flex items-center gap-2 rounded-[--radius-md] bg-bg-elevated px-3 py-2">
-      <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-bg-card text-xs font-bold text-text-muted">
+    <div className="flex w-[120px] flex-col items-center gap-2 text-center">
+      <div className="flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-full bg-bg-elevated text-xl font-bold text-text-muted ring-1 ring-border/40 sm:h-28 sm:w-28">
         {showImage ? (
           <img
             src={person.image_url}
@@ -45,12 +46,14 @@ function CastChip({ person }: { person: Person }) {
           person.name.charAt(0)
         )}
       </div>
-      <div className="flex flex-col">
-        <span className="text-sm font-medium text-text-primary">
+      <div className="flex flex-col gap-0.5">
+        <span className="line-clamp-2 text-sm font-medium leading-snug text-text-primary">
           {person.name}
         </span>
         {subtitle && (
-          <span className="text-xs text-text-muted">{subtitle}</span>
+          <span className="line-clamp-2 text-xs leading-snug text-text-muted">
+            {subtitle}
+          </span>
         )}
       </div>
     </div>
@@ -265,28 +268,90 @@ export default function ItemDetail() {
     );
   }
 
-  // Premium color-bleed: pick the show's muted dominant colour, mix it
-  // into bg-base at low intensity, and apply that tint to the whole
-  // detail page. The first attempt at this used a top-down gradient
-  // which produced visible seams where the hero's own bottom-fade-to-
-  // bg-base met the wrapper's gradient stops. The fix is to use a
-  // single solid colour for the entire wrapper AND publish it as a
-  // CSS variable (`--detail-tint`) so SeriesHero's bottom fade can
-  // target the exact same colour — the hero blends into the page
-  // tint with no abrupt transition. When no palette is available
-  // (older items, extraction failed) the wrapper falls back to plain
-  // bg-base via the CSS var's default.
+  // Premium colour-bleed — PS3-XMB style "ambient aurora". Each
+  // detail page tints the entire viewport with a layered background
+  // built from the cover's dominant palette: a flat tint base, plus
+  // two large soft radial blobs (vibrant in the upper-left, muted
+  // in the lower-right) that read as drifting clouds of colour
+  // rather than a single flat wash. Each page therefore feels
+  // personalised by its cover art without ever leaving the
+  // self-hosted dark aesthetic.
+  //
+  // Why a fixed full-viewport layer and not a `backgroundColor` on
+  // the wrapper: a wrapper-level background only paints inside the
+  // AppLayout content gutters and creates a visibly different
+  // colour band against AppLayout's own bg-base — read as a
+  // "displaced container" around the seasons grid (the user has
+  // flagged that twice). Painting on a `position: fixed, inset-0,
+  // -z-10` layer makes the tint the page canvas itself: edge-to-
+  // edge of the viewport, behind every sibling, unmounts cleanly
+  // when the user navigates away.
+  //
+  // The CSS variable `--detail-tint` is also published on the
+  // wrapper so the hero's bottom-fade gradient targets the exact
+  // base colour the canvas paints in (no visible seam between hero
+  // and the rest of the page).
   const palette = item.backdrop_colors;
   const tintSeed = palette?.muted ?? palette?.vibrant;
-  const detailStyle: CSSProperties | undefined = tintSeed
-    ? {
-        ['--detail-tint' as string]: `color-mix(in srgb, ${tintSeed} 14%, rgb(8 12 16))`,
-        backgroundColor: 'var(--detail-tint)',
-      }
+  const tintBase = tintSeed
+    ? `color-mix(in srgb, ${tintSeed} 14%, rgb(8 12 16))`
+    : null;
+  const detailStyle: CSSProperties | undefined = tintBase
+    ? { ['--detail-tint' as string]: tintBase }
     : undefined;
+  // Layered radial-gradient stack for the ambient aurora background.
+  // Built ONLY when the item has a palette — otherwise the page
+  // falls through to plain bg-base and reads exactly like the rest
+  // of the app. Each blob is tuned for low intensity (≤30%) so the
+  // foreground content (titles, badges, seasons grid) keeps
+  // unambiguous contrast against the canvas; intentionally kept
+  // static rather than animated, both to respect the user's reduce-
+  // motion preference by default and to avoid the GPU cost of an
+  // always-painting full-viewport composite.
+  const auroraBackground = (() => {
+    if (!tintBase) return undefined;
+    const vibrant = palette?.vibrant;
+    const muted = palette?.muted;
+    const layers: string[] = [];
+    if (vibrant) {
+      layers.push(
+        `radial-gradient(ellipse 80% 60% at 15% 10%, color-mix(in srgb, ${vibrant} 28%, transparent) 0%, transparent 60%)`,
+      );
+    }
+    if (muted) {
+      layers.push(
+        `radial-gradient(ellipse 70% 70% at 85% 90%, color-mix(in srgb, ${muted} 26%, transparent) 0%, transparent 65%)`,
+      );
+    }
+    if (vibrant || muted) {
+      const accent = vibrant ?? muted!;
+      layers.push(
+        `radial-gradient(circle 35% at 50% 50%, color-mix(in srgb, ${accent} 12%, transparent) 0%, transparent 70%)`,
+      );
+    }
+    return {
+      backgroundColor: tintBase,
+      backgroundImage: layers.join(", "),
+    };
+  })();
 
   return (
     <div className="flex flex-col" style={detailStyle}>
+      {/* Page-wide ambient-aurora canvas — fixed, full viewport,
+          behind every other layer. Layered radial gradients give
+          the surface a PS3-XMB-style cloud-of-colour quality: the
+          page reads as personalised by the cover art rather than
+          a flat tint. Only mounts when we actually have a palette;
+          otherwise the body's bg-base shows through and the page
+          looks identical to the rest of the app. */}
+      {auroraBackground && (
+        <div
+          aria-hidden="true"
+          className="fixed inset-0 -z-10"
+          style={auroraBackground}
+        />
+      )}
+
       {/* Video Player Overlay */}
       {showPlayer && playerInfo && (playingItemId || id) && (
         <VideoPlayer

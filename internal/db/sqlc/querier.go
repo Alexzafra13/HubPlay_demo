@@ -189,6 +189,13 @@ type Querier interface {
 	// sort_order so TMDb's "billing position" ranking surfaces directly
 	// to the UI without a client-side sort.
 	ListItemPeople(ctx context.Context, itemID string) ([]ListItemPeopleRow, error)
+	// Filmography: every movie + series this person has a direct credit
+	// on. Episode-level credits drop through for now (parent series
+	// usually carries the same person at the top level — TMDb is
+	// consistent there). Sorted newest-first; rows for the same item
+	// but different role (e.g. actor + writer on the same movie) are
+	// returned both — the caller dedupes keeping the lowest sort_order.
+	ListFilmographyByPerson(ctx context.Context, personID string) ([]ListFilmographyByPersonRow, error)
 	ListProviders(ctx context.Context) ([]Provider, error)
 	ListProvidersByType(ctx context.Context, type_ string) ([]Provider, error)
 	ListSchedule(ctx context.Context, arg ListScheduleParams) ([]ListScheduleRow, error)

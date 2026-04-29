@@ -7,6 +7,7 @@ package sqlc
 
 import (
 	"context"
+	"database/sql"
 )
 
 const createPerson = `-- name: CreatePerson :exec
@@ -153,6 +154,70 @@ func (q *Queries) ListItemPeople(ctx context.Context, itemID string) ([]ListItem
 			&i.Name,
 			&i.PersonType,
 			&i.ThumbPath,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listFilmographyByPerson = `-- name: ListFilmographyByPerson :many
+SELECT
+    i.id AS item_id,
+    i.type,
+    i.title,
+    i.year,
+    ip.role,
+    COALESCE(ip.character_name, '') AS character_name,
+    COALESCE(ip.sort_order, 0) AS sort_order
+FROM item_people ip
+JOIN items i ON i.id = ip.item_id
+WHERE ip.person_id = ?
+  AND i.type IN ('movie', 'series')
+  AND i.is_available = 1
+ORDER BY COALESCE(i.year, 0) DESC, i.title ASC, ip.sort_order ASC
+`
+
+type ListFilmographyByPersonRow struct {
+	ItemID        string        `json:"item_id"`
+	Type          string        `json:"type"`
+	Title         string        `json:"title"`
+	Year          sql.NullInt64 `json:"year"`
+	Role          string        `json:"role"`
+	CharacterName string        `json:"character_name"`
+	SortOrder     int64         `json:"sort_order"`
+}
+
+// Filmography: every movie + series this person has a direct credit
+// on. Episode-level credits drop through for now (parent series
+// usually carries the same person at the top level — TMDb is
+// consistent there). Sorted newest-first; rows for the same item
+// but different role (e.g. actor + writer on the same movie) are
+// returned both — the caller dedupes keeping the lowest sort_order.
+func (q *Queries) ListFilmographyByPerson(ctx context.Context, personID string) ([]ListFilmographyByPersonRow, error) {
+	rows, err := q.db.QueryContext(ctx, listFilmographyByPerson, personID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListFilmographyByPersonRow
+	for rows.Next() {
+		var i ListFilmographyByPersonRow
+		if err := rows.Scan(
+			&i.ItemID,
+			&i.Type,
+			&i.Title,
+			&i.Year,
+			&i.Role,
+			&i.CharacterName,
+			&i.SortOrder,
 		); err != nil {
 			return nil, err
 		}
