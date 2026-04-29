@@ -129,8 +129,12 @@ func TestEnforceMaxPixels_RejectsOversizedPNG(t *testing.T) {
 }
 
 func TestEnforceMaxPixels_NonImageAccepted(t *testing.T) {
-	// WebP / unknown formats can't be decoded by the std lib; we let them
-	// through and rely on content-type + size limits upstream.
+	// Unknown formats (animated GIF, AVIF, BMP, …) skip the bomb check
+	// and rely on content-type + size limits upstream. The fixture is
+	// a malformed RIFF header that even the WebP decoder rejects, so
+	// we exercise the "DecodeConfig errored, accept anyway" branch.
+	// Note: a *valid* WebP header is now decoded by the registered
+	// x/image/webp decoder — see TestComputeBlurhash_* for that path.
 	if err := EnforceMaxPixels([]byte("RIFFxxxxWEBPVP8 ...")); err != nil {
 		t.Fatalf("unsupported format should not error: %v", err)
 	}

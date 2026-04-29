@@ -15,6 +15,7 @@ import type {
   IPTVScheduledJobKind,
   ItemDetail,
   Library,
+  PersonDetail,
   LibraryEPGSource,
   MediaItem,
   PaginatedResponse,
@@ -38,6 +39,7 @@ import type {
   ExternalSubtitleResult,
 } from "./types";
 import { ApiError } from "./types";
+import { getClientCapabilitiesHeader } from "./clientCapabilities";
 
 const USER_KEY = "hubplay_user";
 
@@ -125,6 +127,18 @@ export class ApiClient {
 
     if (body !== undefined && (method === "POST" || method === "PUT" || method === "PATCH")) {
       headers["Content-Type"] = "application/json";
+    }
+
+    // Declare the browser's codec/container capabilities so the server's
+    // playback waterfall (DirectPlay → DirectStream → Transcode) can
+    // pick the cheapest path that this client can actually decode. The
+    // value is cached after the first probe so this is a string concat
+    // per request, not an MSE probe per request. Returns null in SSR /
+    // pre-MSE environments — server falls back to its conservative web
+    // defaults in that case, which is the previous behaviour exactly.
+    const caps = getClientCapabilitiesHeader();
+    if (caps) {
+      headers["X-Hubplay-Client-Capabilities"] = caps;
     }
 
     // Double-submit CSRF token (read from cookie set by the server)
@@ -415,6 +429,10 @@ export class ApiClient {
 
   async getItemChildren(id: string): Promise<MediaItem[]> {
     return this.request<MediaItem[]>("GET", `/items/${id}/children`);
+  }
+
+  async getPerson(id: string): Promise<PersonDetail> {
+    return this.request<PersonDetail>("GET", `/people/${id}`);
   }
 
   async searchItems(

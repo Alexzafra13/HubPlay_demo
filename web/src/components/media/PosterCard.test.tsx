@@ -114,4 +114,31 @@ describe("PosterCard", () => {
     const bar = screen.getByRole("progressbar");
     expect(bar).toHaveAttribute("aria-valuenow", "75");
   });
+
+  it("renders a BlurHash canvas placeholder when poster_blurhash is present", () => {
+    const { container } = renderCard(
+      makeItem({
+        poster_url: "https://example/poster.jpg",
+        // Real-shape BlurHash from the blurhash repo's example fixtures.
+        // The component validates before decoding so a malformed value
+        // would silently no-op; we want the canvas to actually mount.
+        poster_blurhash: "LEHV6nWB2yk8pyo0adR*.7kCMdnj",
+      }),
+    );
+    // The placeholder layer renders as a <canvas aria-hidden="true">
+    // sitting absolutely behind the real <img>. Until the image loads,
+    // both coexist; once <img> fires onLoad the canvas conditionally
+    // unmounts. In jsdom the image never actually decodes, so the
+    // canvas should still be present at the time of assertion.
+    const canvas = container.querySelector('canvas[aria-hidden="true"]');
+    expect(canvas).not.toBeNull();
+  });
+
+  it("does not render the BlurHash canvas when poster_blurhash is absent", () => {
+    const { container } = renderCard(
+      makeItem({ poster_url: "https://example/poster.jpg" }),
+    );
+    const canvas = container.querySelector('canvas[aria-hidden="true"]');
+    expect(canvas).toBeNull();
+  });
 });

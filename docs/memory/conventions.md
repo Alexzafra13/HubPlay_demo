@@ -894,3 +894,80 @@ añadir columna en `images`, exponer en `PrimaryImageRef`, ampliar
 el wire shape `backdrop_colors`. **Sin** ampliar el fallback
 runtime salvo que sea visualmente esencial (cada nuevo swatch
 runtime es CPU + memoria por item).
+
+## Frontend type-checking: `pnpm run build` antes de pushear, no sólo `tsc --noEmit`
+
+CI Dockerfile corre `tsc -b && vite build` (incremental project
+build) en el stage frontend; eso es **más estricto** que el
+`tsc --noEmit` que muchos refactors lanzan local. Ejemplo concreto
+(PR #121, mergeado con CI roto):
+
+`useDetailMenu.tsx` accedía a `item.media_streams` con `item`
+tipado como `MediaItem`. `media_streams` vive en `ItemDetail`
+(que extiende `MediaItem`). `tsc --noEmit` lo dejó pasar localmente
+— probablemente por widening implícito en un union — pero el
+`tsc -b` del CI escupió `TS2339: Property 'media_streams' does
+not exist on type 'MediaItem'` y el build de Docker `hwaccel`
+falló entero.
+
+**Regla**: cualquier refactor que toque tipos plumbed entre
+páginas/hooks/components, antes del push:
+
+```bash
+cd web && pnpm run build      # replica el step CI exactamente
+```
+
+NO sólo `pnpm exec tsc --noEmit`. Si `pnpm run build` pasa,
+el Docker frontend stage también pasa (ambos ejecutan la misma
+secuencia `tsc -b && vite build`).
+
+**Cuándo basta con `tsc --noEmit`**: cambios puramente de runtime
+sin tocar shape de tipos exportados (props nuevos en componentes
+internos, lógica condicional, refactors que mueven código sin
+cambiar signaturas). El proyecto build incremental sólo
+re-typechecks lo afectado, así que estos casos son baratos
+incluso de re-correr; el riesgo de divergencia mode local↔CI
+está en los que cruzan boundaries entre fichero-tipo y
+fichero-consumidor.
+
+## `go get` puede subir el `go` directive — pin manual antes de pushear
+
+Cuando `go get foo/bar` añade una dep cuyo propio `go.mod`
+declara una toolchain más alta que la nuestra, **el toolchain Go
+local sube nuestro `go` directive al techo del de la dep**. Si la
+imagen CI corre una versión por debajo, `go mod download` revienta
+con `go: go.mod requires go >= X.Y.Z`.
+
+Ejemplo concreto (esta misma sesión, dos veces):
+
+1. `go get golang.org/x/image/webp` → añade `golang.org/x/image
+   v0.39.0`, que requiere `go 1.25`. Mi toolchain local (1.25.0)
+   bumpeó automáticamente el `go` directive del proyecto.
+2. CI usa Go 1.24.13 → fail al `go mod download`.
+
+**Regla**: tras cualquier `go get`, **inspeccionar `go.mod`** y
+si el directive subió, decidir explícito:
+
+   a) Bajar la dep a una versión compatible con CLAUDE.md's Go
+      target (lookup las release notes de la dep para el último
+      tag pre-bump):
+      ```bash
+      go get foo/bar@vX.Y.Z          # versión compatible
+      ```
+   b) O actualizar Dockerfile + GitHub Actions a la nueva
+      toolchain, **y** subir CLAUDE.md.
+
+Y **siempre**:
+```bash
+go mod tidy -go=1.24.7   # pin explícito al directive del proyecto
+```
+
+`-go=` evita que un futuro `go mod tidy` re-eleve silenciosamente.
+
+**Verificación local fiable**: el comando que CI ejecuta es
+`go mod download` en una imagen fresca con Go 1.24. Una forma
+rápida sin Docker es:
+```bash
+GOTOOLCHAIN=go1.24.7 go mod download && go build ./...
+```
+Si pasa con `GOTOOLCHAIN` forzado, CI también pasará.

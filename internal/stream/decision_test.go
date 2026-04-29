@@ -13,7 +13,7 @@ func TestDecide_DirectPlay_MP4_H264_AAC(t *testing.T) {
 		{StreamType: "audio", Codec: "aac", IsDefault: true},
 	}
 
-	d := Decide(item, streams, "")
+	d := Decide(item, streams, nil, "")
 	if d.Method != MethodDirectPlay {
 		t.Errorf("expected DirectPlay, got %s", d.Method)
 	}
@@ -26,7 +26,7 @@ func TestDecide_DirectStream_MKV_H264_AAC(t *testing.T) {
 		{StreamType: "audio", Codec: "aac", IsDefault: true},
 	}
 
-	d := Decide(item, streams, "")
+	d := Decide(item, streams, nil, "")
 	if d.Method != MethodDirectStream {
 		t.Errorf("expected DirectStream, got %s", d.Method)
 	}
@@ -42,7 +42,7 @@ func TestDecide_Transcode_HEVC(t *testing.T) {
 		{StreamType: "audio", Codec: "aac", IsDefault: true},
 	}
 
-	d := Decide(item, streams, "")
+	d := Decide(item, streams, nil, "")
 	if d.Method != MethodTranscode {
 		t.Errorf("expected Transcode, got %s", d.Method)
 	}
@@ -55,7 +55,7 @@ func TestDecide_Transcode_IncompatibleAudio(t *testing.T) {
 		{StreamType: "audio", Codec: "dts", IsDefault: true},
 	}
 
-	d := Decide(item, streams, "")
+	d := Decide(item, streams, nil, "")
 	if d.Method != MethodTranscode {
 		t.Errorf("expected Transcode, got %s", d.Method)
 	}
@@ -68,7 +68,7 @@ func TestDecide_DirectPlay_WebM_VP9_Opus(t *testing.T) {
 		{StreamType: "audio", Codec: "opus", IsDefault: true},
 	}
 
-	d := Decide(item, streams, "")
+	d := Decide(item, streams, nil, "")
 	if d.Method != MethodDirectPlay {
 		t.Errorf("expected DirectPlay, got %s", d.Method)
 	}
@@ -81,7 +81,7 @@ func TestDecide_RequestedProfile(t *testing.T) {
 		{StreamType: "audio", Codec: "dts", IsDefault: true},
 	}
 
-	d := Decide(item, streams, "480p")
+	d := Decide(item, streams, nil, "480p")
 	if d.Method != MethodTranscode {
 		t.Errorf("expected Transcode, got %s", d.Method)
 	}
@@ -92,7 +92,7 @@ func TestDecide_RequestedProfile(t *testing.T) {
 
 func TestDecide_NoStreams(t *testing.T) {
 	item := &db.Item{Container: "mp4"}
-	d := Decide(item, nil, "")
+	d := Decide(item, nil, nil, "")
 	if d.Method != MethodTranscode {
 		t.Errorf("expected Transcode for no streams, got %s", d.Method)
 	}
@@ -105,7 +105,7 @@ func TestDecide_AudioOnly(t *testing.T) {
 	}
 
 	// No video stream → falls back to transcode
-	d := Decide(item, streams, "")
+	d := Decide(item, streams, nil, "")
 	if d.Method != MethodTranscode {
 		t.Errorf("expected Transcode for audio-only, got %s", d.Method)
 	}

@@ -1,9 +1,10 @@
-import { memo } from "react";
+import { memo, useState } from "react";
 import { Link } from "react-router";
 import type { FC } from "react";
 import { useTranslation } from "react-i18next";
 import type { MediaItem } from "@/api/types";
 import { thumb } from "@/utils/imageUrl";
+import { BlurhashPlaceholder } from "@/components/common/BlurhashPlaceholder";
 
 // DOM size of a poster card on lg screens is ~220px wide; double for
 // HiDPI / Retina so the served file still has detail under 2x scale.
@@ -38,27 +39,49 @@ const PosterCard: FC<PosterCardProps> = memo(({ item, progress, onClick }) => {
   const effectiveProgress =
     progress ?? (!watched ? ud?.progress?.percentage : undefined);
 
+  // Track when the real <img> finishes decoding so the BlurHash layer
+  // fades out. Default true (already-loaded) when there's no blurhash
+  // to fade — the conditional render below means the layer never
+  // mounts, so the flag is irrelevant; we only flip it for the cases
+  // it matters.
+  const [imageLoaded, setImageLoaded] = useState(false);
+
   return (
     <Link
       to={href}
       onClick={onClick}
       className="group flex flex-col outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg-card rounded-[--radius-lg]"
     >
-      {/* Poster image. The wrapper is tinted with the precomputed
-          dominant colour (server-side at ingest time) so the card
-          never flashes grey before the real image decodes. The <img>
-          paints over it once loaded; on missing colour we keep the
-          old neutral elevated tone via the Tailwind class. */}
+      {/* Poster image stack:
+          1. The wrapper is tinted with the precomputed dominant colour
+             (server-side at ingest time) so the card never flashes
+             grey before anything paints.
+          2. If the row carries `poster_blurhash`, render a tiny canvas
+             on top of the tint that decodes the BlurHash to a 32×32
+             low-frequency preview — readable enough to recognise the
+             poster before the real <img> decodes. Compounded across a
+             30-card grid this is a perceptible LCP win.
+          3. The real <img> paints over both once it finishes decoding,
+             at which point we fade the BlurHash canvas out instead of
+             cutting it abruptly. */}
       <div
         className="relative aspect-[2/3] overflow-hidden rounded-[--radius-lg] bg-bg-elevated transition-transform duration-300 group-hover:scale-[1.03]"
         style={item.poster_color ? { backgroundColor: item.poster_color } : undefined}
       >
+        {item.poster_blurhash && !imageLoaded && (
+          <BlurhashPlaceholder
+            hash={item.poster_blurhash}
+            className="absolute inset-0 h-full w-full object-cover transition-opacity duration-300"
+          />
+        )}
         {item.poster_url ? (
           <img
             src={thumb(item.poster_url, POSTER_THUMB_WIDTH) ?? item.poster_url}
             alt={`${item.title} poster`}
             loading="lazy"
-            className="h-full w-full object-cover"
+            decoding="async"
+            onLoad={() => setImageLoaded(true)}
+            className="relative h-full w-full object-cover"
           />
         ) : (
           <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-bg-elevated to-bg-card">

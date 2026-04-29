@@ -20,6 +20,7 @@ export const queryKeys = {
   items: (params?: Record<string, unknown>) => ["items", params] as const,
   item: (id: string) => ["items", id] as const,
   itemChildren: (id: string) => ["items", id, "children"] as const,
+  person: (id: string) => ["people", id] as const,
   search: (q: string) => ["search", q] as const,
   latestItems: (libraryId?: string) => ["items", "latest", libraryId] as const,
   continueWatching: ["continue-watching"] as const,

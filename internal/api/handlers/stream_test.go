@@ -26,7 +26,7 @@ import (
 
 type fakeStreamManager struct {
 	mu             sync.Mutex
-	startSessionFn func(ctx context.Context, userID, itemID, profileName string, startTime float64) (*stream.ManagedSession, error)
+	startSessionFn func(ctx context.Context, userID, itemID, profileName string, caps *stream.Capabilities, startTime float64) (*stream.ManagedSession, error)
 	sessions       map[string]*stream.ManagedSession
 	stopped        map[string]bool
 }
@@ -38,9 +38,9 @@ func newFakeStreamManager() *fakeStreamManager {
 	}
 }
 
-func (m *fakeStreamManager) StartSession(ctx context.Context, userID, itemID, profileName string, startTime float64) (*stream.ManagedSession, error) {
+func (m *fakeStreamManager) StartSession(ctx context.Context, userID, itemID, profileName string, caps *stream.Capabilities, startTime float64) (*stream.ManagedSession, error) {
 	if m.startSessionFn != nil {
-		return m.startSessionFn(ctx, userID, itemID, profileName, startTime)
+		return m.startSessionFn(ctx, userID, itemID, profileName, caps, startTime)
 	}
 	return nil, errors.New("not configured")
 }
@@ -250,7 +250,7 @@ func TestStreamHandler_QualityPlaylist_Unauthenticated(t *testing.T) {
 
 func TestStreamHandler_QualityPlaylist_DirectPlayRedirect(t *testing.T) {
 	env := newStreamTestEnv(t)
-	env.manager.startSessionFn = func(_ context.Context, _, _, _ string, _ float64) (*stream.ManagedSession, error) {
+	env.manager.startSessionFn = func(_ context.Context, _, _, _ string, _ *stream.Capabilities, _ float64) (*stream.ManagedSession, error) {
 		return &stream.ManagedSession{
 			Session:  &stream.Session{OutputDir: ""},
 			Decision: stream.PlaybackDecision{Method: stream.MethodDirectPlay},
@@ -274,7 +274,7 @@ func TestStreamHandler_QualityPlaylist_ManifestServed(t *testing.T) {
 	if err := os.WriteFile(manifestPath, []byte("#EXTM3U\n"), 0o644); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
-	env.manager.startSessionFn = func(_ context.Context, _, _, _ string, _ float64) (*stream.ManagedSession, error) {
+	env.manager.startSessionFn = func(_ context.Context, _, _, _ string, _ *stream.Capabilities, _ float64) (*stream.ManagedSession, error) {
 		return &stream.ManagedSession{
 			Session:  &stream.Session{OutputDir: dir},
 			Decision: stream.PlaybackDecision{Method: stream.MethodTranscode},
@@ -292,7 +292,7 @@ func TestStreamHandler_QualityPlaylist_ManifestServed(t *testing.T) {
 
 func TestStreamHandler_QualityPlaylist_ManagerError(t *testing.T) {
 	env := newStreamTestEnv(t)
-	env.manager.startSessionFn = func(_ context.Context, _, _, _ string, _ float64) (*stream.ManagedSession, error) {
+	env.manager.startSessionFn = func(_ context.Context, _, _, _ string, _ *stream.Capabilities, _ float64) (*stream.ManagedSession, error) {
 		return nil, domain.NewTranscodeBusy(3, 3)
 	}
 	rr := env.doWithClaims(http.MethodGet, "/api/v1/stream/item-1/720p/stream.m3u8",

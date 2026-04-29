@@ -13,6 +13,7 @@ const Home = lazy(() => import("@/pages/Home"));
 const Movies = lazy(() => import("@/pages/Movies"));
 const Series = lazy(() => import("@/pages/Series"));
 const ItemDetail = lazy(() => import("@/pages/ItemDetail"));
+const PersonDetail = lazy(() => import("@/pages/PersonDetail"));
 const Search = lazy(() => import("@/pages/Search"));
 const LiveTV = lazy(() => import("@/pages/LiveTV"));
 const Settings = lazy(() => import("@/pages/Settings"));
@@ -106,6 +107,7 @@ export function App() {
             <Route path="movies/:id" element={<ItemDetail />} />
             <Route path="series/:id" element={<ItemDetail />} />
             <Route path="items/:id" element={<ItemDetail />} />
+            <Route path="people/:id" element={<PersonDetail />} />
             <Route path="search" element={<Search />} />
             <Route path="live-tv" element={<LiveTV />} />
             <Route path="settings" element={<Settings />} />

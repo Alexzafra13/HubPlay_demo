@@ -86,16 +86,22 @@ func TestSession_ManifestPath(t *testing.T) {
 }
 
 func TestSession_SegmentPath(t *testing.T) {
-	s := &stream.Session{OutputDir: "/tmp/sessions/abc"}
+	// Build the OutputDir + expected paths through filepath.Join so the
+	// assertions match what SegmentPath actually emits — production
+	// code uses filepath.Join, which yields backslashes on Windows
+	// and forward slashes on POSIX. The previous hard-coded "/tmp/..."
+	// strings passed on Linux CI but failed locally on Windows.
+	outDir := filepath.Join(string(filepath.Separator)+"tmp", "sessions", "abc")
+	s := &stream.Session{OutputDir: outDir}
 
 	tests := []struct {
 		index    int
 		expected string
 	}{
-		{0, "/tmp/sessions/abc/segment00000.ts"},
-		{1, "/tmp/sessions/abc/segment00001.ts"},
-		{99, "/tmp/sessions/abc/segment00099.ts"},
-		{12345, "/tmp/sessions/abc/segment12345.ts"},
+		{0, filepath.Join(outDir, "segment00000.ts")},
+		{1, filepath.Join(outDir, "segment00001.ts")},
+		{99, filepath.Join(outDir, "segment00099.ts")},
+		{12345, filepath.Join(outDir, "segment12345.ts")},
 	}
 
 	for _, tt := range tests {

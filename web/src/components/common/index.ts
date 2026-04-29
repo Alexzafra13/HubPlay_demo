@@ -23,3 +23,6 @@ export { Modal } from "./Modal";
 export type { ModalProps, ModalSize } from "./Modal";
 
 export { ErrorBoundary } from "./ErrorBoundary";
+
+export { BlurhashPlaceholder } from "./BlurhashPlaceholder";
+export type { BlurhashPlaceholderProps } from "./BlurhashPlaceholder";
