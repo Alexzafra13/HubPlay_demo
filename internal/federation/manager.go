@@ -174,6 +174,39 @@ func (m *Manager) NowUTC() time.Time {
 	return m.clock.Now().UTC()
 }
 
+// SetAdvertisedURL updates the URL this server advertises in its
+// public ServerInfo. Called from the admin settings flow when the
+// operator changes their domain (or moves behind a Tailscale endpoint),
+// and also at startup once the bind address is known. Concurrency-safe
+// because PublicServerInfo() reads cfg fields under the manager mutex
+// — but cfg writes are intentionally serialised at process boot, so
+// dynamic updates are admin-driven and rare.
+func (m *Manager) SetAdvertisedURL(url string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.cfg.AdvertisedURL = url
+}
+
+// IssuePeerToken mints a fresh outbound peer JWT from THIS server to
+// the named audience peer. Used by Phase 3+ outbound clients (catalog
+// browse, stream session start, etc.) to authenticate themselves on
+// the remote.
+//
+// Returns ErrPeerNotFound if `audiencePeerID` isn't a paired peer in
+// our registry, so callers can short-circuit before bothering with
+// the HTTP roundtrip.
+func (m *Manager) IssuePeerToken(audiencePeerID string) (string, error) {
+	peer, err := m.repo.GetPeerByID(context.Background(), audiencePeerID)
+	if err != nil {
+		return "", err
+	}
+	if peer == nil || peer.Status != PeerPaired {
+		return "", domain.ErrPeerNotFound
+	}
+	id := m.identity.Current()
+	return IssuePeerToken(m.clock, id.PrivateKey, id.ServerUUID, peer.ServerUUID)
+}
+
 // PublicServerInfo renders the ServerInfo this server advertises on
 // GET /federation/info. Called frequently — the result is read-only
 // and cheap to assemble.
