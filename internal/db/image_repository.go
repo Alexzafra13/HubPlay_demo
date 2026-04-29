@@ -121,9 +121,23 @@ func (r *ImageRepository) GetPrimary(ctx context.Context, itemID, imgType string
 	return &img, nil
 }
 
-// GetPrimaryURLs returns poster and backdrop URLs for a batch of item IDs.
-// Uses raw SQL because sqlc doesn't support dynamic IN() on SQLite.
-func (r *ImageRepository) GetPrimaryURLs(ctx context.Context, itemIDs []string) (map[string]map[string]string, error) {
+// PrimaryImageRef is the per-(item,type) payload returned by
+// GetPrimaryURLs. Path is always set; the rest are best-effort fields
+// populated at ingest time and may be empty for older rows or formats
+// the extractor couldn't classify. Clients use them as cheap loading
+// placeholders (solid colour fill, blurhash decode) before the real
+// image arrives.
+type PrimaryImageRef struct {
+	Path               string
+	Blurhash           string
+	DominantColor      string
+	DominantColorMuted string
+}
+
+// GetPrimaryURLs returns the primary poster/backdrop/logo refs for a
+// batch of item IDs. Uses raw SQL because sqlc doesn't support
+// dynamic IN() on SQLite.
+func (r *ImageRepository) GetPrimaryURLs(ctx context.Context, itemIDs []string) (map[string]map[string]PrimaryImageRef, error) {
 	if len(itemIDs) == 0 {
 		return nil, nil
 	}
@@ -136,7 +150,7 @@ func (r *ImageRepository) GetPrimaryURLs(ctx context.Context, itemIDs []string) 
 	}
 
 	query := fmt.Sprintf(
-		`SELECT item_id, type, path FROM images
+		`SELECT item_id, type, path, blurhash, dominant_color, dominant_color_muted FROM images
 		 WHERE item_id IN (%s) AND is_primary = 1 AND type IN ('primary', 'backdrop', 'logo')
 		 ORDER BY item_id, type`,
 		joinStrings(placeholders, ","),
@@ -148,16 +162,22 @@ func (r *ImageRepository) GetPrimaryURLs(ctx context.Context, itemIDs []string) 
 	}
 	defer rows.Close()
 
-	result := make(map[string]map[string]string)
+	result := make(map[string]map[string]PrimaryImageRef)
 	for rows.Next() {
-		var itemID, imgType, path string
-		if err := rows.Scan(&itemID, &imgType, &path); err != nil {
+		var itemID, imgType, path, dominant, dominantMuted string
+		var blurhash sql.NullString
+		if err := rows.Scan(&itemID, &imgType, &path, &blurhash, &dominant, &dominantMuted); err != nil {
 			return nil, fmt.Errorf("scan primary url: %w", err)
 		}
 		if result[itemID] == nil {
-			result[itemID] = make(map[string]string)
+			result[itemID] = make(map[string]PrimaryImageRef)
 		}
-		result[itemID][imgType] = path
+		result[itemID][imgType] = PrimaryImageRef{
+			Path:               path,
+			Blurhash:           blurhash.String,
+			DominantColor:      dominant,
+			DominantColorMuted: dominantMuted,
+		}
 	}
 	return result, rows.Err()
 }

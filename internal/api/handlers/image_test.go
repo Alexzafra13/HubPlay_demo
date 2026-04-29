@@ -46,8 +46,8 @@ func newFakeImageRepo() *fakeImageRepo {
 	return &fakeImageRepo{images: map[string]*db.Image{}}
 }
 
-func (r *fakeImageRepo) GetPrimaryURLs(_ context.Context, _ []string) (map[string]map[string]string, error) {
-	return map[string]map[string]string{}, nil
+func (r *fakeImageRepo) GetPrimaryURLs(_ context.Context, _ []string) (map[string]map[string]db.PrimaryImageRef, error) {
+	return map[string]map[string]db.PrimaryImageRef{}, nil
 }
 
 func (r *fakeImageRepo) ListByItem(_ context.Context, itemID string) ([]*db.Image, error) {

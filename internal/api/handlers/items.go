@@ -394,10 +394,11 @@ func (h *ItemHandler) Children(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 				if backdrop, ok := urls["backdrop"]; ok {
-					data[i]["backdrop_url"] = backdrop
+					data[i]["backdrop_url"] = backdrop.Path
 				}
 				if poster, ok := urls["primary"]; ok {
-					data[i]["poster_url"] = poster
+					data[i]["poster_url"] = poster.Path
+					attachPosterPlaceholder(data[i], poster)
 				}
 			}
 		}
@@ -487,7 +488,8 @@ func (h *ItemHandler) Search(w http.ResponseWriter, r *http.Request) {
 			for i, item := range items {
 				if urls, ok := imageURLs[item.ID]; ok {
 					if poster, ok := urls["primary"]; ok {
-						data[i]["poster_url"] = poster
+						data[i]["poster_url"] = poster.Path
+						attachPosterPlaceholder(data[i], poster)
 					}
 				}
 			}
@@ -693,4 +695,21 @@ func paletteResponse(vibrant, muted string) map[string]any {
 		resp["muted"] = muted
 	}
 	return resp
+}
+
+// attachPosterPlaceholder folds the cheap loading-placeholder fields
+// for the poster image into a listing entry. PosterCard renders the
+// solid colour as background while the real <img> decodes, so cards
+// don't pop from grey to image. Callers pass the primary-typed
+// PrimaryImageRef they pulled from images.GetPrimaryURLs.
+func attachPosterPlaceholder(entry map[string]any, ref db.PrimaryImageRef) {
+	if ref.DominantColor != "" {
+		entry["poster_color"] = ref.DominantColor
+	}
+	if ref.DominantColorMuted != "" {
+		entry["poster_color_muted"] = ref.DominantColorMuted
+	}
+	if ref.Blurhash != "" {
+		entry["poster_blurhash"] = ref.Blurhash
+	}
 }

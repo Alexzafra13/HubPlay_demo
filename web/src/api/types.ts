@@ -181,6 +181,16 @@ export interface MediaItem {
   poster_url: string | null;
   backdrop_url: string | null;
   logo_url: string | null;
+  // Cheap loading-placeholder data for the primary poster, computed
+  // server-side at image-ingest time. PosterCard paints `poster_color`
+  // as the card background while the real <img> decodes so cards never
+  // pop from grey to image. `poster_blurhash` is the canonical
+  // BlurHash string for future client-side decoding; the web client
+  // only consumes the colour today, but the field is on the wire so
+  // native clients can use it without another round-trip.
+  poster_color?: string;
+  poster_color_muted?: string;
+  poster_blurhash?: string;
   parent_id: string | null;
   series_id: string | null;
   // Episode-only enrichment: when this item is an episode, the

@@ -237,13 +237,14 @@ func (h *ProgressHandler) ContinueWatching(w http.ResponseWriter, r *http.Reques
 		}
 		if urls, ok := imageMap[item.ItemID]; ok {
 			if u, ok := urls["primary"]; ok {
-				entry["poster_url"] = u
+				entry["poster_url"] = u.Path
+				attachPosterPlaceholder(entry, u)
 			}
 			if u, ok := urls["backdrop"]; ok {
-				entry["backdrop_url"] = u
+				entry["backdrop_url"] = u.Path
 			}
 			if u, ok := urls["logo"]; ok {
-				entry["logo_url"] = u
+				entry["logo_url"] = u.Path
 			}
 		}
 		result = append(result, entry)
@@ -302,10 +303,11 @@ func (h *ProgressHandler) Favorites(w http.ResponseWriter, r *http.Request) {
 		}
 		if urls, ok := favImageMap[item.ItemID]; ok {
 			if u, ok := urls["primary"]; ok {
-				entry["poster_url"] = u
+				entry["poster_url"] = u.Path
+				attachPosterPlaceholder(entry, u)
 			}
 			if u, ok := urls["backdrop"]; ok {
-				entry["backdrop_url"] = u
+				entry["backdrop_url"] = u.Path
 			}
 		}
 		result = append(result, entry)
