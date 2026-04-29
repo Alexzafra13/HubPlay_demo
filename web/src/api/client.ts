@@ -954,6 +954,30 @@ export class ApiClient {
     return this.request<void>("DELETE", `/admin/peers/${peerID}/shares/${shareID}`);
   }
 
+  // ─── User-facing federation (Phase 4) ──────────────────────────────────
+
+  async listMyPeers(): Promise<import("./types").FederationConnectedPeer[]> {
+    return this.request("GET", "/me/peers");
+  }
+
+  async browsePeerLibraries(peerID: string): Promise<import("./types").FederationRemoteLibrary[]> {
+    return this.request("GET", `/me/peers/${peerID}/libraries`);
+  }
+
+  async browsePeerItems(
+    peerID: string,
+    libraryID: string,
+    opts: { offset?: number; limit?: number } = {},
+  ): Promise<import("./types").FederationRemoteItemsResponse> {
+    return this.request("GET", `/me/peers/${peerID}/libraries/${libraryID}/items`, {
+      params: { offset: opts.offset, limit: opts.limit },
+    });
+  }
+
+  async refreshPeerLibrary(peerID: string, libraryID: string): Promise<void> {
+    return this.request<void>("POST", `/me/peers/${peerID}/libraries/${libraryID}/refresh`);
+  }
+
   // ─── Images ────────────────────────────────────────────────────────────
 
   async getItemImages(itemId: string): Promise<ImageInfo[]> {

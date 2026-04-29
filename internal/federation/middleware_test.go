@@ -28,6 +28,12 @@ type inMemoryFedRepo struct {
 	shares  []*LibraryShare
 	libs    []*SharedLibrary
 	items   map[string][]*SharedItem // library_id → items
+	cache   map[string]cacheEntry    // (peer_id|library_id) → entry
+}
+
+type cacheEntry struct {
+	items    []*SharedItem
+	cachedAt time.Time
 }
 
 func (r *inMemoryFedRepo) GetIdentity(_ context.Context) (*Identity, error) {
@@ -193,6 +199,40 @@ func (r *inMemoryFedRepo) ListSharedLibrariesForPeer(_ context.Context, peerID s
 		}
 	}
 	return out, nil
+}
+func (r *inMemoryFedRepo) UpsertCachedItems(_ context.Context, peerID, libraryID string, items []*SharedItem, at time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.cache == nil {
+		r.cache = make(map[string]cacheEntry)
+	}
+	cp := make([]*SharedItem, len(items))
+	copy(cp, items)
+	r.cache[peerID+"|"+libraryID] = cacheEntry{items: cp, cachedAt: at}
+	return nil
+}
+func (r *inMemoryFedRepo) ListCachedItems(_ context.Context, peerID, libraryID string, offset, limit int) ([]*SharedItem, int, time.Time, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	entry, ok := r.cache[peerID+"|"+libraryID]
+	if !ok {
+		return []*SharedItem{}, 0, time.Time{}, nil
+	}
+	total := len(entry.items)
+	if offset >= total {
+		return []*SharedItem{}, total, entry.cachedAt, nil
+	}
+	end := offset + limit
+	if end > total || limit <= 0 {
+		end = total
+	}
+	return entry.items[offset:end], total, entry.cachedAt, nil
+}
+func (r *inMemoryFedRepo) PurgeCachedItemsForLibrary(_ context.Context, peerID, libraryID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.cache, peerID+"|"+libraryID)
+	return nil
 }
 func (r *inMemoryFedRepo) ListSharedItems(_ context.Context, peerID, libraryID string, offset, limit int) ([]*SharedItem, int, error) {
 	r.mu.Lock()

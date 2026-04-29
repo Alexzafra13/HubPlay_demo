@@ -25,6 +25,9 @@ const LibrariesAdmin = lazy(() => import("@/pages/admin/LibrariesAdmin"));
 const UsersAdmin = lazy(() => import("@/pages/admin/UsersAdmin"));
 const ProvidersAdmin = lazy(() => import("@/pages/admin/ProvidersAdmin"));
 const FederationAdmin = lazy(() => import("@/pages/admin/FederationAdmin"));
+const PeersPage = lazy(() => import("@/pages/PeersPage"));
+const PeerLibrariesPage = lazy(() => import("@/pages/PeerLibrariesPage"));
+const PeerLibraryItemsPage = lazy(() => import("@/pages/PeerLibraryItemsPage"));
 const SystemLayout = lazy(() => import("@/pages/admin/system/SystemLayout"));
 const SystemStatus = lazy(() => import("@/pages/admin/system/SystemStatus"));
 const SystemActivity = lazy(() => import("@/pages/admin/system/SystemActivity"));
@@ -111,6 +114,9 @@ export function App() {
             <Route path="people/:id" element={<PersonDetail />} />
             <Route path="search" element={<Search />} />
             <Route path="live-tv" element={<LiveTV />} />
+            <Route path="peers" element={<PeersPage />} />
+            <Route path="peers/:peerId" element={<PeerLibrariesPage />} />
+            <Route path="peers/:peerId/libraries/:libraryId" element={<PeerLibraryItemsPage />} />
             <Route path="settings" element={<Settings />} />
 
             {/* Admin routes.

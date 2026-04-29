@@ -8,9 +8,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../client";
 import { queryKeys } from "../queryKeys";
 import type {
+  FederationConnectedPeer,
   FederationInvite,
   FederationLibraryShare,
   FederationPeer,
+  FederationRemoteItemsResponse,
+  FederationRemoteLibrary,
   FederationServerInfo,
 } from "../types";
 
@@ -128,6 +131,53 @@ export function useDeletePeerShare(peerID: string) {
     mutationFn: (shareID) => api.deletePeerShare(peerID, shareID),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.federationPeerShares(peerID) });
+    },
+  });
+}
+
+// ─── User-facing browsing (Phase 4) ────────────────────────────────
+
+// useMyPeers — paired peers visible to the current user.
+export function useMyPeers() {
+  return useQuery<FederationConnectedPeer[]>({
+    queryKey: queryKeys.myPeers,
+    queryFn: () => api.listMyPeers(),
+  });
+}
+
+// usePeerLibraries — libraries a specific peer has shared with us.
+// Live every time (no cache layer for libraries — it's a small list).
+export function usePeerLibraries(peerID: string, enabled = true) {
+  return useQuery<FederationRemoteLibrary[]>({
+    queryKey: queryKeys.myPeerLibraries(peerID),
+    queryFn: () => api.browsePeerLibraries(peerID),
+    enabled: enabled && Boolean(peerID),
+  });
+}
+
+// usePeerItems — paginated items in a peer's library. Reads through
+// the catalog cache server-side; the response carries a from_cache
+// flag the UI uses for the freshness badge.
+export function usePeerItems(peerID: string, libraryID: string, offset = 0, limit = 50) {
+  return useQuery<FederationRemoteItemsResponse>({
+    queryKey: queryKeys.myPeerItems(peerID, libraryID, offset),
+    queryFn: () => api.browsePeerItems(peerID, libraryID, { offset, limit }),
+    enabled: Boolean(peerID && libraryID),
+  });
+}
+
+// useRefreshPeerLibrary — admin "force refresh" button. Purges the
+// cache for (peer, library) so the next browse forces a live fetch.
+export function useRefreshPeerLibrary(peerID: string, libraryID: string) {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, void>({
+    mutationFn: () => api.refreshPeerLibrary(peerID, libraryID),
+    onSuccess: () => {
+      // Invalidate any cached pages for this library so the next view
+      // re-fetches.
+      queryClient.invalidateQueries({
+        queryKey: ["me", "peers", peerID, "libraries", libraryID, "items"],
+      });
     },
   });
 }

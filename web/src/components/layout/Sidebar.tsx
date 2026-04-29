@@ -204,6 +204,7 @@ export function Sidebar({ collapsed, onToggleCollapse, onClose }: SidebarProps) 
         <NavItem to="/movies" icon={<IconFilm />} label={t('nav.movies')} collapsed={collapsed} />
         <NavItem to="/series" icon={<IconTv />} label={t('nav.series')} collapsed={collapsed} />
         <NavItem to="/live-tv" icon={<IconAntenna />} label={t('nav.liveTV')} collapsed={collapsed} />
+        <NavItem to="/peers" icon={<IconUsers />} label={t('nav.peers')} collapsed={collapsed} />
         <NavItem to="/search" icon={<IconSearch />} label={t('nav.search')} collapsed={collapsed} />
 
         {isAdmin && (

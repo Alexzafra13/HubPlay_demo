@@ -33,6 +33,7 @@
     "libraries": "Libraries",
     "users": "Users",
     "system": "System",
+    "peers": "Connected servers",
     "expandSidebar": "Expand sidebar",
     "collapseSidebar": "Collapse sidebar",
     "toggleMenu": "Toggle menu",
@@ -46,6 +47,35 @@
     "recentlyAdded": "Recently Added",
     "nextUp": "Next Up",
     "failedToLoad": "Failed to load content. Check your server connection."
+  },
+  "peers": {
+    "title": "Connected servers",
+    "subtitle": "HubPlay servers paired with yours. Click one to browse the libraries they've shared with you.",
+    "emptyHint": "You haven't paired any HubPlay server yet. Head to Admin → Federation to generate or accept an invite.",
+    "statusPaired": "Paired",
+    "backToList": "Connected servers",
+    "backToLibraries": "Libraries",
+    "unknownPeer": "Server",
+    "unknownLibrary": "Library",
+    "librariesSubtitle": "Libraries the admin of this server has chosen to share with you.",
+    "noShares": "This server hasn't shared any library with you yet. Ask their admin to grant access from their federation panel.",
+    "scope": {
+      "play": "Play",
+      "download": "Download",
+      "livetv": "Live TV"
+    },
+    "itemCount_one": "{{count}} title",
+    "itemCount_other": "{{count}} titles",
+    "itemCount": "{{count}} titles",
+    "emptyLibrary": "No titles visible. The remote admin may have removed the browse scope, or the library is empty.",
+    "cached": "Cached",
+    "cacheHint": "You're seeing locally cached content because the peer is not reachable right now. Refresh when it comes back online.",
+    "refresh": "Refresh",
+    "refreshing": "Refreshing…",
+    "prev": "Previous",
+    "next": "Next",
+    "pageOf": "Page {{current}} of {{total}}",
+    "unreachable": "Couldn't reach the peer: {{error}}"
   },
   "watchTonight": {
     "tonight": "For tonight",

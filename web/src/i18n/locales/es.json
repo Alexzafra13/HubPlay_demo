@@ -33,6 +33,7 @@
     "libraries": "Bibliotecas",
     "users": "Usuarios",
     "system": "Sistema",
+    "peers": "Servidores conectados",
     "expandSidebar": "Expandir barra lateral",
     "collapseSidebar": "Contraer barra lateral",
     "toggleMenu": "Alternar menu",
@@ -46,6 +47,35 @@
     "recentlyAdded": "Agregados recientemente",
     "nextUp": "Siguiente",
     "failedToLoad": "Error al cargar el contenido. Comprueba la conexion del servidor."
+  },
+  "peers": {
+    "title": "Servidores conectados",
+    "subtitle": "Servidores HubPlay emparejados con el tuyo. Pulsa uno para ver las bibliotecas que te ha compartido.",
+    "emptyHint": "Aún no has emparejado tu HubPlay con ningún otro servidor. Ve a Admin → Federación para generar un invite o aceptar uno de un amigo.",
+    "statusPaired": "Emparejado",
+    "backToList": "Servidores conectados",
+    "backToLibraries": "Bibliotecas",
+    "unknownPeer": "Servidor",
+    "unknownLibrary": "Biblioteca",
+    "librariesSubtitle": "Bibliotecas que el admin de este servidor ha decidido compartir contigo.",
+    "noShares": "Este servidor no te ha compartido ninguna biblioteca todavía. Pídele al admin que te dé acceso desde su panel de federación.",
+    "scope": {
+      "play": "Reproducir",
+      "download": "Descargar",
+      "livetv": "Live TV"
+    },
+    "itemCount_one": "{{count}} título",
+    "itemCount_other": "{{count}} títulos",
+    "itemCount": "{{count}} títulos",
+    "emptyLibrary": "No hay títulos visibles. Puede que el admin remoto haya quitado el scope de browse o que la biblioteca esté vacía.",
+    "cached": "En caché",
+    "cacheHint": "Estás viendo contenido cacheado localmente porque el peer no responde ahora mismo. Refresca cuando vuelva online.",
+    "refresh": "Refrescar",
+    "refreshing": "Refrescando…",
+    "prev": "Anterior",
+    "next": "Siguiente",
+    "pageOf": "Página {{current}} de {{total}}",
+    "unreachable": "No se ha podido contactar con el peer: {{error}}"
   },
   "watchTonight": {
     "tonight": "Para esta noche",

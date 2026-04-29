@@ -237,6 +237,20 @@ func NewRouter(deps Dependencies) http.Handler {
 					r.Post("/prune", adminAuth.Prune)
 				})
 
+				// User-facing federation surface — any auth'd user
+				// can browse what the admin has shared with paired
+				// peers (Phase 4). Server uses peer JWTs internally;
+				// the user only ever holds their normal session token.
+				if deps.Federation != nil {
+					mePeers := handlers.NewMePeersHandler(deps.Federation, deps.Logger)
+					r.Route("/me/peers", func(r chi.Router) {
+						r.Get("/", mePeers.ListMyPeers)
+						r.Get("/{peerID}/libraries", mePeers.BrowsePeerLibraries)
+						r.Get("/{peerID}/libraries/{libraryID}/items", mePeers.BrowsePeerItems)
+						r.Post("/{peerID}/libraries/{libraryID}/refresh", mePeers.RefreshPeerLibrary)
+					})
+				}
+
 				// Federation admin surface — invite generation, peer
 				// pairing, peer listing, peer revocation.
 				if deps.Federation != nil {
