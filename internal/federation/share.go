@@ -1,6 +1,8 @@
 package federation
 
-import "time"
+import (
+	"time"
+)
 
 // LibraryShare is an admin's deliberate opt-in: "this peer can see
 // THIS library with THESE scopes". The presence of a row says "yes
@@ -61,4 +63,14 @@ type SharedItem struct {
 	Title    string `json:"title"`
 	Year     int    `json:"year,omitempty"`
 	Overview string `json:"overview,omitempty"`
+}
+
+// CachedItem extends SharedItem with the peer + library it belongs
+// to and a cached_at timestamp. Stored in federation_item_cache for
+// offline-friendly browsing.
+type CachedItem struct {
+	PeerID    string
+	LibraryID string
+	Item      SharedItem
+	CachedAt  time.Time
 }

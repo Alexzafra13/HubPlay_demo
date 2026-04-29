@@ -47,6 +47,11 @@ type Repo interface {
 	ListSharesByPeer(ctx context.Context, peerID string) ([]*LibraryShare, error)
 	ListSharedLibrariesForPeer(ctx context.Context, peerID string) ([]*SharedLibrary, error)
 	ListSharedItems(ctx context.Context, peerID, libraryID string, offset, limit int) ([]*SharedItem, int, error)
+
+	// Catalog cache (Phase 4+).
+	UpsertCachedItems(ctx context.Context, peerID, libraryID string, items []*SharedItem, at time.Time) error
+	ListCachedItems(ctx context.Context, peerID, libraryID string, offset, limit int) ([]*SharedItem, int, time.Time, error)
+	PurgeCachedItemsForLibrary(ctx context.Context, peerID, libraryID string) error
 }
 
 // EventBus is the slice of internal/event the Manager publishes to.
@@ -580,7 +585,85 @@ func (m *Manager) ListSharedItems(ctx context.Context, peerID, libraryID string,
 }
 
 // ────────────────────────────────────────────────────────────────────
-// Peer CRUD
+// Remote browsing (Phase 4) — user-facing surface that proxies to
+// peer endpoints + caches results for offline-friendly browsing.
+// ────────────────────────────────────────────────────────────────────
+
+// cacheStaleThreshold — beyond this we kick a background refresh.
+// 1h matches "user expects fresh-ish but not real-time" — they
+// already saw a peer add titles when they opened the app earlier.
+const cacheStaleThreshold = time.Hour
+
+// BrowsePeerLibraries returns the libraries a peer has shared with us.
+// Always live — libraries are a small list, no caching needed.
+func (m *Manager) BrowsePeerLibraries(ctx context.Context, peerID string) ([]*SharedLibrary, error) {
+	libs, err := m.FetchPeerLibraries(ctx, peerID)
+	if err != nil {
+		return nil, err
+	}
+	if libs == nil {
+		libs = []*SharedLibrary{}
+	}
+	return libs, nil
+}
+
+// BrowsePeerItems returns paginated items for a peer's library with
+// a read-through cache. Strategy:
+//
+//   1. Check cache age. If fresh (< staleThreshold), serve from cache.
+//   2. If stale or empty, attempt live fetch. On success, write to
+//      cache then serve.
+//   3. If live fetch fails AND we have any cache, serve stale cache
+//      with a "stale" indicator so the user sees content rather than
+//      a broken page when the peer is offline.
+//
+// Returns items, total, and a fromCache flag the API layer can pass
+// through so the UI shows the right freshness badge.
+func (m *Manager) BrowsePeerItems(ctx context.Context, peerID, libraryID string, offset, limit int) ([]*SharedItem, int, bool, error) {
+	cached, cachedTotal, cachedAt, cacheErr := m.repo.ListCachedItems(ctx, peerID, libraryID, offset, limit)
+	if cacheErr != nil {
+		m.logger.Warn("cache read failed, falling back to live",
+			"peer_id", peerID, "err", cacheErr)
+	}
+
+	now := m.clock.Now()
+	cacheFresh := cacheErr == nil && len(cached) > 0 && now.Sub(cachedAt) < cacheStaleThreshold
+
+	if cacheFresh {
+		return cached, cachedTotal, true, nil
+	}
+
+	live, liveTotal, liveErr := m.FetchPeerItems(ctx, peerID, libraryID, offset, limit)
+	if liveErr == nil {
+		// Persist to cache only when offset=0 so the cached snapshot
+		// is a coherent first-page view. Phase 7+ extends this to a
+		// background full-catalog walk.
+		if offset == 0 && len(live) > 0 {
+			if err := m.repo.UpsertCachedItems(ctx, peerID, libraryID, live, now); err != nil {
+				m.logger.Warn("cache write failed", "peer_id", peerID, "err", err)
+			}
+		}
+		return live, liveTotal, false, nil
+	}
+
+	// Live failed — serve stale cache if any.
+	if cacheErr == nil && len(cached) > 0 {
+		m.logger.Info("serving stale cache (peer offline)",
+			"peer_id", peerID, "age", now.Sub(cachedAt), "live_err", liveErr)
+		return cached, cachedTotal, true, nil
+	}
+
+	return nil, 0, false, liveErr
+}
+
+// PurgeCache clears cached items for (peer, library) — wired to the
+// admin "force refresh" button and called when a peer is revoked.
+func (m *Manager) PurgeCache(ctx context.Context, peerID, libraryID string) error {
+	return m.repo.PurgeCachedItemsForLibrary(ctx, peerID, libraryID)
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Peer revocation
 // ────────────────────────────────────────────────────────────────────
 
 // RevokePeer terminates a peer relationship. The row remains for

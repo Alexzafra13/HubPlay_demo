@@ -1,0 +1,154 @@
+import { useState } from "react";
+import { Link, useParams } from "react-router";
+import { useTranslation } from "react-i18next";
+import {
+  useMyPeers,
+  usePeerItems,
+  usePeerLibraries,
+  useRefreshPeerLibrary,
+} from "@/api/hooks/federation";
+import { Spinner } from "@/components/common";
+import { Button } from "@/components/common/Button";
+
+const PAGE_SIZE = 50;
+
+// PeerLibraryItemsPage — /peers/:peerId/libraries/:libraryId
+//
+// Lists items in a peer's shared library. Server-side pagination.
+// from_cache flag drives a "cached / offline" badge so the user
+// knows when they're seeing stale content because the peer is down.
+export default function PeerLibraryItemsPage() {
+  const { t } = useTranslation();
+  const { peerId = "", libraryId = "" } = useParams();
+  const [page, setPage] = useState(0);
+
+  const peers = useMyPeers();
+  const libraries = usePeerLibraries(peerId);
+  const items = usePeerItems(peerId, libraryId, page * PAGE_SIZE, PAGE_SIZE);
+  const refresh = useRefreshPeerLibrary(peerId, libraryId);
+
+  const peer = peers.data?.find((p) => p.id === peerId);
+  const library = libraries.data?.find((l) => l.id === libraryId);
+
+  if (items.isLoading) {
+    return <Spinner />;
+  }
+  if (items.error) {
+    return (
+      <div className="p-6">
+        <p className="rounded border border-danger/40 bg-danger/5 p-3 text-sm text-danger">
+          {t("peers.unreachable", { error: String(items.error) })}
+        </p>
+        <Link
+          to={`/peers/${peerId}`}
+          className="mt-4 inline-block text-sm text-accent hover:underline"
+        >
+          ← {t("peers.backToLibraries")}
+        </Link>
+      </div>
+    );
+  }
+
+  const data = items.data;
+  const itemList = data?.items ?? [];
+  const total = data?.total ?? 0;
+  const fromCache = data?.from_cache ?? false;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  return (
+    <div className="p-6 sm:p-10">
+      <Link
+        to={`/peers/${peerId}`}
+        className="text-sm text-accent hover:underline"
+      >
+        ← {t("peers.backToLibraries")}
+      </Link>
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-text-primary">
+            {library?.name ?? t("peers.unknownLibrary")}
+          </h1>
+          <p className="text-sm text-text-muted">
+            {peer?.name} · {t("peers.itemCount", { count: total })}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          {fromCache && (
+            <span
+              className="rounded bg-yellow-500/10 px-2 py-1 text-xs text-yellow-500"
+              title={t("peers.cacheHint")}
+            >
+              {t("peers.cached")}
+            </span>
+          )}
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => refresh.mutate()}
+            disabled={refresh.isPending}
+          >
+            {refresh.isPending ? t("peers.refreshing") : t("peers.refresh")}
+          </Button>
+        </div>
+      </div>
+
+      {itemList.length === 0 ? (
+        <p className="mt-6 rounded-lg border border-dashed border-border bg-bg-elevated p-6 text-center text-sm text-text-muted">
+          {t("peers.emptyLibrary")}
+        </p>
+      ) : (
+        <ul className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {itemList.map((item) => (
+            <li
+              key={item.id}
+              className="rounded-lg border border-border bg-bg-elevated p-4"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <h3 className="truncate font-semibold text-text-primary">
+                    {item.title}
+                  </h3>
+                  {item.year ? (
+                    <p className="text-xs text-text-muted">{item.year}</p>
+                  ) : null}
+                </div>
+                <span className="shrink-0 rounded bg-bg-base px-2 py-0.5 text-xs text-text-muted">
+                  {item.type}
+                </span>
+              </div>
+              {item.overview && (
+                <p className="mt-2 line-clamp-3 text-xs text-text-muted">
+                  {item.overview}
+                </p>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {totalPages > 1 && (
+        <div className="mt-6 flex items-center justify-between gap-3">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => setPage((p) => Math.max(0, p - 1))}
+            disabled={page === 0}
+          >
+            ← {t("peers.prev")}
+          </Button>
+          <span className="text-xs text-text-muted">
+            {t("peers.pageOf", { current: page + 1, total: totalPages })}
+          </span>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+            disabled={page >= totalPages - 1}
+          >
+            {t("peers.next")} →
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}

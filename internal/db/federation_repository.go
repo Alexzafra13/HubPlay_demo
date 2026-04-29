@@ -605,6 +605,118 @@ func scanLibraryShare(row rowScanner) (*federation.LibraryShare, error) {
 	return &s, nil
 }
 
+// ─── catalog cache (Phase 4) ────────────────────────────────────────
+
+// UpsertCachedItems writes a batch of items to the cache for a given
+// (peer, library). Replaces any prior rows for that pair to keep the
+// cache coherent — partial overwrites would leak deleted items in
+// stale form forever.
+//
+// Implementation: DELETE existing rows for (peer, library), then
+// INSERT the new batch in a single transaction so concurrent reads
+// see either the old set or the new set, never half-merged.
+func (r *FederationRepository) UpsertCachedItems(ctx context.Context, peerID, libraryID string, items []*federation.SharedItem, at time.Time) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin cache upsert tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM federation_item_cache
+		 WHERE peer_id = ? AND library_id = ?
+	`, peerID, libraryID); err != nil {
+		return fmt.Errorf("clear cache: %w", err)
+	}
+
+	stmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO federation_item_cache
+		    (peer_id, library_id, remote_id, type, title, year, overview, cached_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`)
+	if err != nil {
+		return fmt.Errorf("prepare cache insert: %w", err)
+	}
+	defer stmt.Close()
+
+	for _, it := range items {
+		if _, err := stmt.ExecContext(ctx, peerID, libraryID, it.ID, it.Type,
+			it.Title, it.Year, nullableString(it.Overview), at); err != nil {
+			return fmt.Errorf("insert cached item %s: %w", it.ID, err)
+		}
+	}
+	return tx.Commit()
+}
+
+// ListCachedItems reads from the cache. Returns items + total count
+// (unpaginated total — UI needs it for pagination) + the freshest
+// cached_at across rows.
+//
+// Empty result is NOT an error — it just means cache is cold.
+func (r *FederationRepository) ListCachedItems(ctx context.Context, peerID, libraryID string, offset, limit int) ([]*federation.SharedItem, int, time.Time, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	var total int
+	var newestCachedAt sql.NullTime
+	err := r.db.QueryRowContext(ctx, `
+		SELECT COUNT(*), MAX(cached_at)
+		  FROM federation_item_cache
+		 WHERE peer_id = ? AND library_id = ?
+	`, peerID, libraryID).Scan(&total, &newestCachedAt)
+	if err != nil {
+		return nil, 0, time.Time{}, fmt.Errorf("count cached items: %w", err)
+	}
+	if total == 0 {
+		return []*federation.SharedItem{}, 0, time.Time{}, nil
+	}
+
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT remote_id, type, title, COALESCE(year, 0), COALESCE(overview, '')
+		  FROM federation_item_cache
+		 WHERE peer_id = ? AND library_id = ?
+		 ORDER BY title COLLATE NOCASE ASC
+		 LIMIT ? OFFSET ?
+	`, peerID, libraryID, limit, offset)
+	if err != nil {
+		return nil, 0, time.Time{}, fmt.Errorf("list cached items: %w", err)
+	}
+	defer rows.Close()
+
+	out := []*federation.SharedItem{}
+	for rows.Next() {
+		var it federation.SharedItem
+		if err := rows.Scan(&it.ID, &it.Type, &it.Title, &it.Year, &it.Overview); err != nil {
+			return nil, 0, time.Time{}, fmt.Errorf("scan cached item: %w", err)
+		}
+		out = append(out, &it)
+	}
+	cachedAt := time.Time{}
+	if newestCachedAt.Valid {
+		cachedAt = newestCachedAt.Time
+	}
+	return out, total, cachedAt, rows.Err()
+}
+
+// PurgeCachedItemsForLibrary clears cache for a peer's library.
+// Called from admin "force refresh" UI; also useful when a peer is
+// revoked (their cached items are stale + referenced by a peer that
+// can no longer be queried).
+func (r *FederationRepository) PurgeCachedItemsForLibrary(ctx context.Context, peerID, libraryID string) error {
+	_, err := r.db.ExecContext(ctx, `
+		DELETE FROM federation_item_cache
+		 WHERE peer_id = ? AND library_id = ?
+	`, peerID, libraryID)
+	if err != nil {
+		return fmt.Errorf("purge cache: %w", err)
+	}
+	return nil
+}
+
 // PruneAuditBefore deletes audit rows older than the cutoff.
 // Returns the number of rows removed. Called from a background
 // pruner (Phase 7+); for now it's a no-op without a caller.

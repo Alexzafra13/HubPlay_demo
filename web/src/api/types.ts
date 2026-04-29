@@ -57,6 +57,51 @@ export interface FederationLibraryShare {
   created_at: string;
 }
 
+// User-facing peer summary — what /api/v1/me/peers returns. Slim
+// shape: no audit details, no public_key bytes (the user has no use
+// for them; admins do). Only paired peers appear here.
+export interface FederationConnectedPeer {
+  id: string;
+  server_uuid: string;
+  name: string;
+  base_url: string;
+  status: "paired";
+  fingerprint: string;
+}
+
+// Library exposed by a peer to us. The `scopes` reflect what the
+// peer's admin has GRANTED us — useful so the UI can show / hide
+// affordances (e.g. "Download" button only when can_download).
+export interface FederationRemoteLibrary {
+  id: string;
+  name: string;
+  content_type: string;
+  scopes: {
+    can_browse: boolean;
+    can_play: boolean;
+    can_download: boolean;
+    can_livetv: boolean;
+  };
+}
+
+// One item in a peer's library catalog.
+export interface FederationRemoteItem {
+  id: string;
+  type: string;
+  title: string;
+  year?: number;
+  overview?: string;
+}
+
+// Paginated response for items + cache freshness flag. The UI shows
+// a "cached / offline" badge when from_cache is true AND the peer is
+// known to be offline (or browsing took the stale-fallback path).
+export interface FederationRemoteItemsResponse {
+  items: FederationRemoteItem[];
+  total: number;
+  from_cache: boolean;
+}
+
 // ─── User & Auth ────────────────────────────────────────────────────────────
 
 export interface User {

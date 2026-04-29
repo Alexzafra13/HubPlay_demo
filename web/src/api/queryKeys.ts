@@ -52,6 +52,10 @@ export const queryKeys = {
   federationPeers: ["federation", "peers"] as const,
   federationInvites: ["federation", "invites"] as const,
   federationPeerShares: (peerID: string) => ["federation", "peers", peerID, "shares"] as const,
+  myPeers: ["me", "peers"] as const,
+  myPeerLibraries: (peerID: string) => ["me", "peers", peerID, "libraries"] as const,
+  myPeerItems: (peerID: string, libraryID: string, offset: number) =>
+    ["me", "peers", peerID, "libraries", libraryID, "items", offset] as const,
   health: ["health"] as const,
   systemStats: ["system-stats"] as const,
   systemSettings: ["system-settings"] as const,
