@@ -76,11 +76,34 @@ func (s *Service) RefreshEPG(ctx context.Context, libraryID string) (int, error)
 		return 0, fmt.Errorf("library %s has no EPG sources configured", libraryID)
 	}
 
-	channels, err := s.channels.ListByLibrary(ctx, libraryID, false)
+	// Cross-library matching: build the channel index from EVERY
+	// livetv channel on the instance, not just the library that
+	// owns the EPG sources. The realistic operator setup is "one
+	// M3U for cable, one for IPTV provider, but only one set of
+	// EPG XML sources": with per-library indexes, the second
+	// library would show "Sin guía" on every card it could
+	// otherwise match by name / tvg-id.
+	//
+	// Safety: matchChannel still returns at most one channel id per
+	// XMLTV channel (the closest match by the same priority order:
+	// tvg-id → name variants → fuzzy). The persistence loop later
+	// only ReplaceForChannel's channels we matched, so libraries
+	// that didn't match anything keep whatever EPG they already
+	// had — no surprise wipes.
+	channels, err := s.channels.ListLivetvChannels(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("list channels: %w", err)
+		return 0, fmt.Errorf("list livetv channels: %w", err)
 	}
 	idx := buildChannelIndex(channels)
+	// Channel-id → library-id lookup so the persistence loop below
+	// can attribute each replaced program back to a library, and the
+	// summary log lists "how many channels in library X did this
+	// refresh cover". Load-bearing for the "is my EPG actually
+	// reaching the channels I expect" debugging loop.
+	channelLib := make(map[string]string, len(channels))
+	for _, c := range channels {
+		channelLib[c.ID] = c.LibraryID
+	}
 
 	// Merge accumulators — persist once at the end so a per-source
 	// failure doesn't leave the DB half-populated.
@@ -128,18 +151,32 @@ func (s *Service) RefreshEPG(ctx context.Context, libraryID string) (int, error)
 	// — channels not present in any source keep their previous data
 	// (safer than blanking them whenever a single source hiccups).
 	totalPrograms := 0
+	matchedByLib := make(map[string]int)
 	for channelID, programs := range ownedByChannel {
 		if err := s.epgPrograms.ReplaceForChannel(ctx, channelID, programs); err != nil {
 			s.logger.Error("replace EPG programs", "channel", channelID, "error", err)
 			continue
 		}
 		totalPrograms += len(programs)
+		matchedByLib[channelLib[channelID]]++
 	}
 
+	// Count cross-library matches (channels in a library other than
+	// the one whose sources were just refreshed). This is the metric
+	// that proves the cross-library matching is doing real work; if
+	// it's always 0, the operator's M3Us don't share tvg-id / names.
+	crossLibMatches := 0
+	for libID, count := range matchedByLib {
+		if libID != libraryID {
+			crossLibMatches += count
+		}
+	}
 	s.logger.Info("EPG refresh complete",
 		"library", libraryID,
 		"programs", totalPrograms,
 		"channels_matched", len(ownedByChannel),
+		"channels_matched_by_lib", matchedByLib,
+		"channels_matched_cross_library", crossLibMatches,
 		"orphan_programs", totalOrphans,
 		"sources_ok", workedCount,
 		"sources_total", len(sources))

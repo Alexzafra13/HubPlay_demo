@@ -89,6 +89,46 @@ func (r *ChannelRepository) ListByLibrary(ctx context.Context, libraryID string,
 	return channelsFromListRows(rows), nil
 }
 
+// ListLivetvChannels returns every channel that lives in a livetv-
+// type library, across the whole instance. Used by the EPG matcher
+// to build a global channel index: a single XMLTV source attached to
+// one library can then resolve programs against channels in OTHER
+// libraries by name / tvg-id, which is what most operators expect
+// when they have one M3U for "Cat TV" and another for "Movistar"
+// but only configure EPG sources on one.
+//
+// Raw SQL because sqlc would need a JOIN-with-WHERE generator and the
+// project keeps a small allow-list of raw queries (5 today) for
+// exactly this kind of cross-table read.
+func (r *ChannelRepository) ListLivetvChannels(ctx context.Context) ([]*Channel, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT c.id, c.library_id, c.name, COALESCE(c.number, 0), COALESCE(c.group_name,''),
+		        COALESCE(c.logo_url,''), c.stream_url, COALESCE(c.tvg_id,''),
+		        COALESCE(c.language,''), COALESCE(c.country,''), c.is_active, c.added_at
+		 FROM channels c
+		 INNER JOIN libraries l ON l.id = c.library_id
+		 WHERE l.content_type = 'livetv'
+		 ORDER BY c.library_id, COALESCE(c.number, 999999), c.name`)
+	if err != nil {
+		return nil, fmt.Errorf("list livetv channels: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	var out []*Channel
+	for rows.Next() {
+		var c Channel
+		if err := rows.Scan(
+			&c.ID, &c.LibraryID, &c.Name, &c.Number, &c.GroupName,
+			&c.LogoURL, &c.StreamURL, &c.TvgID,
+			&c.Language, &c.Country, &c.IsActive, &c.AddedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan channel: %w", err)
+		}
+		out = append(out, &c)
+	}
+	return out, rows.Err()
+}
+
 // ReplaceForLibrary deletes all channels in a library and inserts new ones (used during M3U refresh).
 func (r *ChannelRepository) ReplaceForLibrary(ctx context.Context, libraryID string, channels []*Channel) error {
 	tx, err := r.db.BeginTx(ctx, nil)

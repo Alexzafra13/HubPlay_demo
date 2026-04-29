@@ -183,3 +183,80 @@ func TestChannel_Groups(t *testing.T) {
 		t.Errorf("groups = %v, want [News Sports]", groups)
 	}
 }
+
+func TestChannel_ListLivetvChannels_FiltersOutNonLivetvLibraries(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	repos := db.NewRepositories(database)
+	ctx := context.Background()
+	now := time.Now()
+
+	// Two livetv libraries + one non-livetv (movies). The non-livetv
+	// library's channels (if any leaked in) must NOT appear in the
+	// global EPG matcher's view.
+	_ = repos.Libraries.Create(ctx, &db.Library{
+		ID: "lib-iptv-a", Name: "IPTV A", ContentType: "livetv",
+		CreatedAt: now, UpdatedAt: now,
+	})
+	_ = repos.Libraries.Create(ctx, &db.Library{
+		ID: "lib-iptv-b", Name: "IPTV B", ContentType: "livetv",
+		CreatedAt: now, UpdatedAt: now,
+	})
+	_ = repos.Libraries.Create(ctx, &db.Library{
+		ID: "lib-movies", Name: "Movies", ContentType: "movies",
+		CreatedAt: now, UpdatedAt: now,
+	})
+
+	if err := repos.Channels.Create(ctx, makeChannel("a-1", "lib-iptv-a", "Antena 3", 1, true)); err != nil {
+		t.Fatal(err)
+	}
+	if err := repos.Channels.Create(ctx, makeChannel("b-1", "lib-iptv-b", "Antena 3 HD", 1, true)); err != nil {
+		t.Fatal(err)
+	}
+	if err := repos.Channels.Create(ctx, makeChannel("b-2", "lib-iptv-b", "Cuatro", 2, true)); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := repos.Channels.ListLivetvChannels(ctx)
+	if err != nil {
+		t.Fatalf("ListLivetvChannels: %v", err)
+	}
+	if len(got) != 3 {
+		t.Errorf("got %d channels across livetv libs, want 3", len(got))
+	}
+
+	// Library distribution check — both livetv libs must be
+	// represented; movies library MUST NOT appear.
+	byLib := make(map[string]int)
+	for _, c := range got {
+		byLib[c.LibraryID]++
+		if c.LibraryID == "lib-movies" {
+			t.Errorf("non-livetv library leaked: %s", c.ID)
+		}
+	}
+	if byLib["lib-iptv-a"] != 1 {
+		t.Errorf("lib-iptv-a count: got %d want 1", byLib["lib-iptv-a"])
+	}
+	if byLib["lib-iptv-b"] != 2 {
+		t.Errorf("lib-iptv-b count: got %d want 2", byLib["lib-iptv-b"])
+	}
+}
+
+func TestChannel_ListLivetvChannels_EmptyWhenNoLivetv(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	repos := db.NewRepositories(database)
+	ctx := context.Background()
+	now := time.Now()
+
+	_ = repos.Libraries.Create(ctx, &db.Library{
+		ID: "lib-movies", Name: "Movies", ContentType: "movies",
+		CreatedAt: now, UpdatedAt: now,
+	})
+
+	got, err := repos.Channels.ListLivetvChannels(ctx)
+	if err != nil {
+		t.Fatalf("ListLivetvChannels: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("expected 0 livetv channels with no livetv libraries; got %d", len(got))
+	}
+}
