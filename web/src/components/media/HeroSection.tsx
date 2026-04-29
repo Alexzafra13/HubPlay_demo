@@ -4,6 +4,13 @@ import { useTranslation } from "react-i18next";
 import type { MediaItem } from "@/api/types";
 import { Button } from "@/components/common/Button";
 import { Badge } from "@/components/common/Badge";
+import { thumb } from "@/utils/imageUrl";
+
+// Hero backdrops and posters live on a large surface; serve a
+// bandwidth-efficient resized variant rather than the full-resolution
+// ingest. 1280 covers retina laptops; 720 covers the inline poster.
+const HERO_BACKDROP_WIDTH = 1280;
+const HERO_POSTER_WIDTH = 720;
 
 // ─── Menu item type ─────────────────────────────────────────────────────────
 
@@ -151,14 +158,14 @@ const HeroSection: FC<HeroSectionProps> = ({
       {/* Backdrop image */}
       {backdropUrl ? (
         <img
-          src={backdropUrl}
+          src={thumb(backdropUrl, HERO_BACKDROP_WIDTH) ?? backdropUrl}
           alt=""
           loading="eager"
           className="absolute inset-0 h-full w-full object-cover"
         />
       ) : posterUrl ? (
         <img
-          src={posterUrl}
+          src={thumb(posterUrl, HERO_POSTER_WIDTH) ?? posterUrl}
           alt=""
           loading="eager"
           className="absolute inset-0 h-full w-full object-cover blur-2xl scale-110"
@@ -167,9 +174,26 @@ const HeroSection: FC<HeroSectionProps> = ({
         <div className="absolute inset-0 bg-gradient-to-br from-bg-elevated to-bg-card" />
       )}
 
-      {/* Gradient overlays — bottom fade + left vignette */}
-      <div className="absolute inset-0 bg-gradient-to-t from-bg-base via-bg-base/70 to-transparent" />
-      <div className="absolute inset-0 bg-gradient-to-r from-bg-base/80 via-transparent to-transparent" />
+      {/* Gradient overlays — bottom fade + left vignette.
+          Both target `--detail-tint` (published by the ItemDetail
+          wrapper from the item's dominant palette) instead of
+          bg-base, so the hero blends into the page tint with no
+          visible seam. The CSS-var fallback keeps the prior look
+          when the wrapper has no palette to publish. */}
+      <div
+        className="absolute inset-0"
+        style={{
+          background:
+            "linear-gradient(to top, var(--detail-tint, rgb(8 12 16)) 0%, color-mix(in srgb, var(--detail-tint, rgb(8 12 16)) 70%, transparent) 35%, transparent 80%)",
+        }}
+      />
+      <div
+        className="absolute inset-0"
+        style={{
+          background:
+            "linear-gradient(to right, color-mix(in srgb, var(--detail-tint, rgb(8 12 16)) 80%, transparent) 0%, transparent 55%)",
+        }}
+      />
 
       {/* Content */}
       <div className="relative z-10 flex w-full items-end gap-6 px-6 pb-8 pt-32 sm:px-10 sm:pb-10 lg:gap-8 lg:pb-12">
@@ -181,7 +205,7 @@ const HeroSection: FC<HeroSectionProps> = ({
         {posterUrl && !isEpisode && (
           <div className="hidden md:block shrink-0">
             <img
-              src={posterUrl}
+              src={thumb(posterUrl, HERO_POSTER_WIDTH) ?? posterUrl}
               alt={item.title}
               className="h-[280px] lg:h-[340px] w-auto rounded-[--radius-lg] shadow-2xl shadow-black/50 object-cover"
             />
@@ -220,6 +244,16 @@ const HeroSection: FC<HeroSectionProps> = ({
                 item.title
               )}
             </h1>
+          )}
+
+          {/* Tagline — italic line under the title, same convention as
+              the series hero. Suppressed on episodes (TMDb rarely
+              ships them per-episode and they read as noise next to
+              the breadcrumb + episode-code line above). */}
+          {!isEpisode && item.tagline && (
+            <p className="-mt-1 max-w-2xl text-sm italic text-text-secondary/90 drop-shadow-md">
+              {item.tagline}
+            </p>
           )}
 
           {/* Meta row */}
@@ -265,6 +299,12 @@ const HeroSection: FC<HeroSectionProps> = ({
             {item.genres?.map((genre) => (
               <Badge key={genre}>{genre}</Badge>
             ))}
+
+            {/* Studio / network — soft attribution after the
+                taxonomy badges, same pattern as the series hero. */}
+            {item.studio && (
+              <span className="text-xs text-text-muted">· {item.studio}</span>
+            )}
           </div>
 
           {/* Overview — larger on desktop */}
