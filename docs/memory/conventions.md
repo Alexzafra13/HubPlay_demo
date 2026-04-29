@@ -781,3 +781,116 @@ schema (es key-value).
 **Cuándo NO añadir aquí**: bootstrap secrets, paths críticos
 (database.path, cache_dir), bind/port. Esos cambian-requieren-restart
 de forma destructiva (file handles, listeners), no preferencias.
+
+---
+
+## Page-canvas pattern: `<div fixed inset-0 -z-10>` para fondos por-ruta
+
+Si una ruta quiere pintar un fondo viewport-completo distinto del
+`bg-base` global (gradient, aurora, blur, etc.), **no** lo pinta
+en su wrapper React — lo monta como una capa hermana fixed:
+
+```tsx
+return (
+  <div className="flex flex-col">
+    {bg && (
+      <div
+        aria-hidden="true"
+        className="fixed inset-0 -z-10"
+        style={{ background: bg }}
+      />
+    )}
+    {/* ...page content... */}
+  </div>
+);
+```
+
+**Por qué fixed-inset-0 y no `backgroundColor` en el wrapper**:
+el wrapper sólo paint-alcanza dentro de los gutters de AppLayout.
+Esto crea un seam visible contra el `bg-base` que pinta los lados
+de la página y se lee como "container desplazado" — el usuario lo
+flagged dos veces antes de ver este patrón. La capa fixed escapa
+del flow y cubre viewport edge-to-edge, sin importar qué paddings
+tenga el layout.
+
+**El `-z-10` es real**: la capa va detrás de TODO contenido normal
+(que está en z-auto / z-0). Pero requiere que **NINGÚN ancestro**
+pinte un background opaco encima — concretamente:
+
+- `AppLayout.tsx` ya **NO** lleva `bg-bg-base` en su wrapper. El
+  body lo carga global desde `styles/globals.css`. Si se reañade,
+  cualquier capa fixed `-z-10` se vuelve invisible. Documentado
+  en el comment del wrapper de AppLayout.
+- Sidebar y TopBar pintan sus propios `bg-bg-base/80` con `backdrop-blur`
+  — eso es OK porque son áreas explícitas, no un wash global.
+
+**Para pintar varios colores no-uniformes** (caso aurora): apilar
+`radial-gradient` en el `backgroundImage` con `color-mix(in srgb,
+${rgb} N%, transparent)` para fade-out suave. Cada blob vale
+~30-60% mix; la suma reads como ambiente, no como "círculos de
+color". Ver `web/src/pages/ItemDetail.tsx::auroraBackground`.
+
+**Cuando NO usar este patrón**:
+- Backgrounds que dependen del contenido (bg que sigue al scroll
+  del item) — usa `<section>` normal con su propio bg.
+- Animated bg con coste de paint constante — el patrón fixed
+  pinta una vez y se queda; animar requiere o `transform` en el
+  layer (cheap) o repintar el bg cada frame (caro).
+- Rutas dentro de overlays/modales — el portal no tiene un
+  contenedor cuyo `-z-10` tenga sentido geométrico.
+
+---
+
+## Paleta de colores precomputada (vibrant + muted) en imágenes
+
+Cualquier UI que quiera "que se vea el color del poster" en runtime
+**no** debe correr `node-vibrant` ni Color Thief en el frontend
+como path principal — el backend ya extrajo dos swatches al
+ingestar la imagen y los entrega en el wire.
+
+**Backend** — `internal/imaging/colors.go::ExtractDominantColors`,
+llamado desde `IngestRemoteImage`:
+
+1. Decodifica con std-lib decoders (PNG/JPEG/GIF que `image.Decode`
+   ya tiene registrados; webp y otros devuelven `("","")` y el
+   frontend cae al runtime fallback).
+2. Sample grid `step = max_dim / 32` → ~1024 lecturas, coste O(1)
+   sin importar tamaño.
+3. Bucket cubo RGB 16×16×16 (4096 bins). Cada bin acumula sum + count.
+4. Score por bin sobre HSL:
+   - `vibrant = saturation × count` con `L ∈ [0.20, 0.80]`
+   - `muted = (1 − saturation/2) × count` con `L ≤ 0.40`
+5. Persiste como strings `rgb(R, G, B)` en
+   `images.dominant_color` + `images.dominant_color_muted`.
+
+**Wire**:
+- `db.PrimaryImageRef` carga ambos campos.
+- `/items/{id}` los expone como `backdrop_colors: { vibrant, muted }`.
+- `GetPrimaryURLs` (batch) los devuelve por item para placeholders
+  de listing cards.
+
+**Frontend**:
+- Path principal: `item.backdrop_colors.vibrant/muted` directos del
+  wire — sin decode, sin fetch extra, paintable en first render.
+- Fallback runtime: `useVibrantColors(url)` corre `node-vibrant`
+  via dynamic import (lazy chunk) sólo cuando `backdrop_colors` es
+  null/empty (items pre-extracción shipping). Hook es no-op cuando
+  `url === null` para que páginas con paleta backend no fetcheen
+  nada.
+
+**Cuándo NO usar el fallback runtime**:
+- Capas viewport-canvas como la aurora: pagar un decode JS por
+  paint es absurdo. Si el item no tiene paleta backend, la aurora
+  simplemente no se monta y la página queda con el `bg-base`
+  global. Eso es la behaviour correcta — la página queda como
+  cualquier otra ruta.
+- Cards en grids grandes: corres N decodes JS para 30 cards. Mata.
+  Usa `attachPosterPlaceholder` que ya consume el path principal
+  del wire.
+
+**Si añades una variante nueva** (ej. `dark_vibrant`): seguir el
+mismo patrón en `colors.go` (un tercer ganador con sus thresholds),
+añadir columna en `images`, exponer en `PrimaryImageRef`, ampliar
+el wire shape `backdrop_colors`. **Sin** ampliar el fallback
+runtime salvo que sea visualmente esencial (cada nuevo swatch
+runtime es CPU + memoria por item).
