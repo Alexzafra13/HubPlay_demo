@@ -27,6 +27,7 @@ type itemTestEnv struct {
 	userData *progressFakeUserData
 	chapters *fakeChapterRepo
 	extIDs   *fakeExternalIDsRepo
+	people   *fakePeopleForItems
 	handler  *ItemHandler
 	router   chi.Router
 }
@@ -42,6 +43,21 @@ func newFakeExternalIDsRepo() *fakeExternalIDsRepo {
 }
 
 func (r *fakeExternalIDsRepo) ListByItem(_ context.Context, itemID string) ([]*db.ExternalID, error) {
+	return r.byItem[itemID], nil
+}
+
+// fakePeopleForItems satisfies PeopleRepoForItems. Cast/crew lists
+// per item id; absent entries return nil (handler renders no people
+// section then).
+type fakePeopleForItems struct {
+	byItem map[string][]*db.ItemPersonCredit
+}
+
+func newFakePeopleForItems() *fakePeopleForItems {
+	return &fakePeopleForItems{byItem: map[string][]*db.ItemPersonCredit{}}
+}
+
+func (r *fakePeopleForItems) ListByItem(_ context.Context, itemID string) ([]*db.ItemPersonCredit, error) {
 	return r.byItem[itemID], nil
 }
 
@@ -71,10 +87,11 @@ func newItemTestEnv(t *testing.T) *itemTestEnv {
 	env.userData = newProgressFakeUserData()
 	env.chapters = newFakeChapterRepo()
 	env.extIDs = newFakeExternalIDsRepo()
+	env.people = newFakePeopleForItems()
 	// trickplayDir empty — the existing tests don't exercise the
 	// trickplay endpoints, so the handlers short-circuit to 503 via
 	// their nil-guard. New trickplay tests wire a temp dir locally.
-	env.handler = NewItemHandler(env.svc, env.images, env.meta, env.userData, env.chapters, env.extIDs, "", testutil.NopLogger())
+	env.handler = NewItemHandler(env.svc, env.images, env.meta, env.userData, env.chapters, env.extIDs, env.people, "", testutil.NopLogger())
 
 	r := chi.NewRouter()
 	r.Route("/api/v1/items", func(r chi.Router) {
@@ -258,6 +275,47 @@ func TestItemHandler_Get_OmitsUserDataWhenAnonymous(t *testing.T) {
 	data, _ := itemDecodeData(t, rr).(map[string]any)
 	if _, present := data["user_data"]; present {
 		t.Errorf("anonymous response should not include user_data: %v", data["user_data"])
+	}
+}
+
+func TestItemHandler_Get_IncludesPeopleWithPhotos(t *testing.T) {
+	env := newItemTestEnv(t)
+	env.svc.getItemFn = func(_ context.Context, id string) (*db.Item, error) {
+		return &db.Item{ID: id, Type: "movie", Title: "Foo"}, nil
+	}
+	env.people.byItem["it-1"] = []*db.ItemPersonCredit{
+		{PersonID: "p-1", Name: "Alice Actor", Role: "actor",
+			CharacterName: "Hero", ThumbPath: "/img/.people/p-1/profile.jpg",
+			SortOrder: 0},
+		{PersonID: "p-2", Name: "Bob Director", Role: "director",
+			CharacterName: "", ThumbPath: "", SortOrder: 0},
+	}
+
+	rr := env.do(http.MethodGet, "/api/v1/items/it-1/")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: %d", rr.Code)
+	}
+	data, _ := itemDecodeData(t, rr).(map[string]any)
+	people, ok := data["people"].([]any)
+	if !ok || len(people) != 2 {
+		t.Fatalf("people missing or wrong shape: %v", data["people"])
+	}
+	first, _ := people[0].(map[string]any)
+	if first["name"] != "Alice Actor" || first["character"] != "Hero" {
+		t.Errorf("first entry: %v", first)
+	}
+	// Photo URL is a stable backend route, NOT the local fs path.
+	if first["image_url"] != "/api/v1/people/p-1/thumb" {
+		t.Errorf("first entry image_url: %v", first["image_url"])
+	}
+	second, _ := people[1].(map[string]any)
+	// Crew entry without character — character key should be absent.
+	if _, present := second["character"]; present {
+		t.Errorf("crew entry should omit character key, got %v", second)
+	}
+	// Empty thumb_path means no image_url emitted.
+	if _, present := second["image_url"]; present {
+		t.Errorf("entry without thumb should omit image_url, got %v", second)
 	}
 }
 

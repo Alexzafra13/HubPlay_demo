@@ -25,6 +25,7 @@ type ItemHandler struct {
 	userData    UserDataRepository
 	chapters    ChapterRepository
 	externalIDs ExternalIDsRepository
+	people      PeopleRepoForItems
 	// trickplayDir is the root for generated trickplay sprites
 	// (`<dir>/<itemID>/sprite.png` + `manifest.json`). Empty disables
 	// the feature; the endpoint returns 503 in that case.
@@ -37,10 +38,10 @@ type ItemHandler struct {
 	logger         *slog.Logger
 }
 
-func NewItemHandler(lib LibraryService, images ImageRepository, metadata MetadataRepository, userData UserDataRepository, chapters ChapterRepository, externalIDs ExternalIDsRepository, trickplayDir string, logger *slog.Logger) *ItemHandler {
+func NewItemHandler(lib LibraryService, images ImageRepository, metadata MetadataRepository, userData UserDataRepository, chapters ChapterRepository, externalIDs ExternalIDsRepository, people PeopleRepoForItems, trickplayDir string, logger *slog.Logger) *ItemHandler {
 	return &ItemHandler{
 		lib: lib, images: images, metadata: metadata, userData: userData,
-		chapters: chapters, externalIDs: externalIDs,
+		chapters: chapters, externalIDs: externalIDs, people: people,
 		trickplayDir: trickplayDir, logger: logger,
 	}
 }
@@ -171,6 +172,36 @@ func (h *ItemHandler) Get(w http.ResponseWriter, r *http.Request) {
 				out[i] = chapterResponse(c)
 			}
 			resp["chapters"] = out
+		}
+	}
+
+	// Cast / crew. Each row is rendered as a chip on the detail page;
+	// `image_url` points at the per-person thumb endpoint when a
+	// profile photo was downloaded, null otherwise so the client
+	// renders an initial-letter placeholder instead. Best-effort:
+	// any error logs and the response goes out without people.
+	if h.people != nil {
+		credits, err := h.people.ListByItem(r.Context(), id)
+		if err != nil {
+			h.logger.Warn("list item people", "item_id", id, "error", err)
+		} else if len(credits) > 0 {
+			peopleData := make([]map[string]any, len(credits))
+			for i, c := range credits {
+				entry := map[string]any{
+					"id":         c.PersonID,
+					"name":       c.Name,
+					"role":       c.Role,
+					"sort_order": c.SortOrder,
+				}
+				if c.CharacterName != "" {
+					entry["character"] = c.CharacterName
+				}
+				if c.ThumbPath != "" {
+					entry["image_url"] = "/api/v1/people/" + c.PersonID + "/thumb"
+				}
+				peopleData[i] = entry
+			}
+			resp["people"] = peopleData
 		}
 	}
 

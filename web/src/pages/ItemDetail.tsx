@@ -13,6 +13,49 @@ import { useAuthStore } from "@/store/auth";
 import { useResumeTarget } from "@/hooks/useSeriesResumeTarget";
 import { usePlayback } from "./itemDetail/usePlayback";
 import { SeasonEpisodes, SeasonEpisodeList } from "./itemDetail/season";
+import type { Person } from "@/api/types";
+
+// CastChip renders one entry of the cast/crew strip. The avatar
+// slot prefers a real profile photo (image_url) and falls back to
+// an initial-letter chip on either absent URL or `onError` from a
+// failed image load. We key the photo's "did it fail" state on the
+// URL itself so swapping props (e.g. parent re-fetches the item
+// and a new url comes in) re-tries the load instead of inheriting
+// the previous failure.
+function CastChip({ person }: { person: Person }) {
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const showImage = !!person.image_url && failedUrl !== person.image_url;
+  // Actor entries put the character name on the second line; crew
+  // entries (director, writer, producer) put the role label there
+  // because the role IS the descriptor for them.
+  const subtitle = person.character || person.role;
+
+  return (
+    <div className="flex items-center gap-2 rounded-[--radius-md] bg-bg-elevated px-3 py-2">
+      <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-bg-card text-xs font-bold text-text-muted">
+        {showImage ? (
+          <img
+            src={person.image_url}
+            alt={person.name}
+            loading="lazy"
+            className="h-full w-full object-cover"
+            onError={() => setFailedUrl(person.image_url ?? null)}
+          />
+        ) : (
+          person.name.charAt(0)
+        )}
+      </div>
+      <div className="flex flex-col">
+        <span className="text-sm font-medium text-text-primary">
+          {person.name}
+        </span>
+        {subtitle && (
+          <span className="text-xs text-text-muted">{subtitle}</span>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export default function ItemDetail() {
   const { t } = useTranslation();
@@ -320,32 +363,21 @@ export default function ItemDetail() {
           </section>
         )}
 
-        {/* Cast */}
-        {item.people?.length > 0 && (
+        {/* Cast / crew. The chip stays the same shape whether or not
+            we have a profile photo — the avatar slot either renders
+            an <img> with onError fallback to the initial chip, or
+            jumps straight to the initial chip when image_url is
+            absent. Limited to the first 12 entries server-side
+            ordering (TMDb billing position) so the most-recognised
+            faces lead. */}
+        {item.people && item.people.length > 0 && (
           <section>
             <h2 className="mb-3 text-lg font-semibold text-text-primary">
               {t('itemDetail.cast')}
             </h2>
             <div className="flex flex-wrap gap-3">
               {item.people.slice(0, 12).map((person) => (
-                <div
-                  key={`${person.name}-${person.role}`}
-                  className="flex items-center gap-2 rounded-[--radius-md] bg-bg-elevated px-3 py-2"
-                >
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-bg-card text-xs font-bold text-text-muted">
-                    {person.name.charAt(0)}
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-sm font-medium text-text-primary">
-                      {person.name}
-                    </span>
-                    {person.role && (
-                      <span className="text-xs text-text-muted">
-                        {person.role}
-                      </span>
-                    )}
-                  </div>
-                </div>
+                <CastChip key={person.id} person={person} />
               ))}
             </div>
           </section>

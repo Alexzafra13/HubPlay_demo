@@ -44,6 +44,7 @@ type Dependencies struct {
 	Metadata       *db.MetadataRepository
 	UserData       *db.UserDataRepository
 	Chapters       *db.ChapterRepository
+	People         *db.PeopleRepository
 	UserPreferences *db.UserPreferenceRepository
 	Providers      *provider.Manager
 	ExternalIDs    *db.ExternalIDRepository
@@ -301,7 +302,7 @@ func NewRouter(deps Dependencies) http.Handler {
 				// layout clustered (one tree the operator can backup,
 				// rsync, or `du` to size the cache).
 				trickplayDir := filepath.Join(filepath.Dir(deps.Config.Database.Path), "images", "trickplay")
-				itemHandler := handlers.NewItemHandler(deps.Libraries, deps.Images, deps.Metadata, deps.UserData, deps.Chapters, deps.ExternalIDs, trickplayDir, deps.Logger)
+				itemHandler := handlers.NewItemHandler(deps.Libraries, deps.Images, deps.Metadata, deps.UserData, deps.Chapters, deps.ExternalIDs, deps.People, trickplayDir, deps.Logger)
 
 				// Libraries
 				r.Get("/libraries", libHandler.List)
@@ -464,6 +465,16 @@ func NewRouter(deps Dependencies) http.Handler {
 
 				// Serve local image files
 				r.Get("/images/file/{id}", imgHandler.ServeFile)
+
+				// Serve cast/crew profile photos. Sits next to the
+				// regular image endpoint so the cache + auth context
+				// match exactly. People IDs are uuids; the handler
+				// validates the resolved on-disk path stays inside
+				// imageDir before serving.
+				if deps.People != nil {
+					peopleHandler := handlers.NewPeopleHandler(deps.People, imageDir, deps.Logger)
+					r.Get("/people/{id}/thumb", peopleHandler.Thumb)
+				}
 
 				// Admin: batch refresh images for a library
 				r.Group(func(r chi.Router) {
