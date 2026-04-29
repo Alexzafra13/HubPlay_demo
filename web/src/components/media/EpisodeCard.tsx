@@ -1,6 +1,11 @@
 import { Link } from "react-router";
 import type { FC } from "react";
 import type { MediaItem } from "@/api/types";
+import { thumb } from "@/utils/imageUrl";
+
+// Episode thumbs are 16:9; cards are ~280-360px wide on most grids.
+// 720 covers HiDPI without requesting the full 1280-1920px backdrop.
+const EPISODE_THUMB_WIDTH = 720;
 
 interface EpisodeCardProps {
   item: MediaItem;
@@ -38,7 +43,10 @@ const EpisodeCard: FC<EpisodeCardProps> = ({ item, progress, onClick }) => {
       <div className="relative aspect-video overflow-hidden rounded-[--radius-lg] bg-bg-elevated transition-all duration-300 group-hover:shadow-lg group-hover:shadow-accent/10">
         {item.backdrop_url ?? item.poster_url ? (
           <img
-            src={(item.backdrop_url ?? item.poster_url)!}
+            src={
+              thumb(item.backdrop_url ?? item.poster_url, EPISODE_THUMB_WIDTH) ??
+              (item.backdrop_url ?? item.poster_url)!
+            }
             alt={`${item.title} thumbnail`}
             loading="lazy"
             className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"

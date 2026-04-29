@@ -323,6 +323,21 @@ type NextUpItem struct {
 }
 
 // Delete removes user data for a specific user+item pair.
+// SeriesEpisodeProgress reports total + watched episode counts for a
+// single series for one user. Used by the series detail page hero to
+// render "Has visto X de Y episodios". Returns (0, 0) for a series
+// with no episodes — caller decides whether to render anything.
+func (r *UserDataRepository) SeriesEpisodeProgress(ctx context.Context, userID, seriesID string) (total, watched int, err error) {
+	row, qerr := r.q.SeriesEpisodeProgress(ctx, sqlc.SeriesEpisodeProgressParams{
+		UserID:   userID,
+		SeriesID: seriesID,
+	})
+	if qerr != nil {
+		return 0, 0, fmt.Errorf("series episode progress: %w", qerr)
+	}
+	return int(row.TotalEpisodes), int(row.WatchedEpisodes), nil
+}
+
 func (r *UserDataRepository) Delete(ctx context.Context, userID, itemID string) error {
 	err := r.q.DeleteUserData(ctx, sqlc.DeleteUserDataParams{
 		UserID: userID,

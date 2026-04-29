@@ -191,6 +191,17 @@ export interface MediaItem {
   poster_color?: string;
   poster_color_muted?: string;
   poster_blurhash?: string;
+  // Studio / network that produced the show (e.g. "HBO", "Disney+").
+  // Backend pulls it from the metadata table when available; absent
+  // for items without a TMDb match. Rendered next to the meta badges
+  // on the series hero so the page reads more like Plex / Jellyfin.
+  studio?: string;
+  // Series-only: aggregate of how many episodes the authenticated user
+  // has watched out of the total under this show. Computed server-side
+  // in the GetItem handler and only present for authenticated calls
+  // against a series — absent on movies / seasons / episodes and on
+  // anonymous responses. The hero renders "Has visto X de Y" when set.
+  episode_progress?: { total: number; watched: number };
   parent_id: string | null;
   series_id: string | null;
   // Episode-only enrichment: when this item is an episode, the

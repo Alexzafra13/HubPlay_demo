@@ -143,6 +143,22 @@ func run(configPath string) error {
 	scanScheduler := library.NewScheduler(libraryService, logger)
 	scanScheduler.Start(ctx)
 
+	// ═══ Phase 4a-bis: Image Refresh Scheduler ═══
+	//
+	// The scan scheduler reacts to filesystem changes (new files appear in
+	// a library); image freshness is a different signal — TMDb periodically
+	// publishes better artwork for shows that already exist on disk, and
+	// without a periodic sweep nothing ever updates them. Weekly is
+	// sufficient: provider art doesn't change daily, and locked images
+	// (admin curation) are skipped per-kind by the refresher itself
+	// (ADR-003) so curation work is never overwritten.
+	imageRefresher := library.NewImageRefresher(
+		repos.Items, repos.ExternalIDs, repos.Images, providerManager,
+		scannerPathmap, imageDir, logger,
+	)
+	imageRefreshScheduler := library.NewImageRefreshScheduler(repos.Libraries, imageRefresher, logger)
+	imageRefreshScheduler.Start(ctx)
+
 	// ═══ Phase 4b: Streaming ═══
 	//
 	// Apply runtime overrides from app_settings BEFORE constructing the
@@ -306,10 +322,10 @@ func run(configPath string) error {
 	}()
 
 	// ═══ Phase 7: Wait for shutdown ═══
-	return waitForShutdown(ctx, cancel, server, streamManager, iptvService, iptvProxy, iptvTransmux, iptvScheduler, iptvProberWorker, scanScheduler, libraryService, authService, database, logger)
+	return waitForShutdown(ctx, cancel, server, streamManager, iptvService, iptvProxy, iptvTransmux, iptvScheduler, iptvProberWorker, scanScheduler, imageRefreshScheduler, libraryService, authService, database, logger)
 }
 
-func waitForShutdown(ctx context.Context, cancel context.CancelFunc, server *http.Server, sm *stream.Manager, iptvSvc *iptv.Service, iptvProxy *iptv.StreamProxy, iptvTransmux *iptv.TransmuxManager, iptvSched *iptv.Scheduler, iptvProber *iptv.ProberWorker, scheduler *library.Scheduler, librarySvc *library.Service, authSvc *auth.Service, database interface{ Close() error }, logger *slog.Logger) error {
+func waitForShutdown(ctx context.Context, cancel context.CancelFunc, server *http.Server, sm *stream.Manager, iptvSvc *iptv.Service, iptvProxy *iptv.StreamProxy, iptvTransmux *iptv.TransmuxManager, iptvSched *iptv.Scheduler, iptvProber *iptv.ProberWorker, scheduler *library.Scheduler, imageRefreshSched *library.ImageRefreshScheduler, librarySvc *library.Service, authSvc *auth.Service, database interface{ Close() error }, logger *slog.Logger) error {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
@@ -339,6 +355,8 @@ func waitForShutdown(ctx context.Context, cancel context.CancelFunc, server *htt
 	logger.Info("iptv prober stopped")
 	scheduler.Stop()
 	logger.Info("scan scheduler stopped")
+	imageRefreshSched.Stop()
+	logger.Info("image refresh scheduler stopped")
 	authSvc.StopSessionCleaner()
 	logger.Info("session cleaner stopped")
 

@@ -3,6 +3,11 @@ import { Link } from "react-router";
 import type { FC } from "react";
 import { useTranslation } from "react-i18next";
 import type { MediaItem } from "@/api/types";
+import { thumb } from "@/utils/imageUrl";
+
+// DOM size of a poster card on lg screens is ~220px wide; double for
+// HiDPI / Retina so the served file still has detail under 2x scale.
+const POSTER_THUMB_WIDTH = 480;
 
 interface PosterCardProps {
   item: MediaItem;
@@ -50,7 +55,7 @@ const PosterCard: FC<PosterCardProps> = memo(({ item, progress, onClick }) => {
       >
         {item.poster_url ? (
           <img
-            src={item.poster_url}
+            src={thumb(item.poster_url, POSTER_THUMB_WIDTH) ?? item.poster_url}
             alt={`${item.title} poster`}
             loading="lazy"
             className="h-full w-full object-cover"

@@ -215,6 +215,7 @@ type UserDataRepository interface {
 	ContinueWatching(ctx context.Context, userID string, limit int) ([]*db.ContinueWatchingItem, error)
 	Favorites(ctx context.Context, userID string, limit, offset int) ([]*db.FavoriteItem, error)
 	NextUp(ctx context.Context, userID string, limit int) ([]*db.NextUpItem, error)
+	SeriesEpisodeProgress(ctx context.Context, userID, seriesID string) (total, watched int, err error)
 	Delete(ctx context.Context, userID, itemID string) error
 }
 

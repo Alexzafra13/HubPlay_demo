@@ -303,3 +303,80 @@ func TestUserData_Delete(t *testing.T) {
 		t.Error("expected nil after delete")
 	}
 }
+
+func TestUserData_SeriesEpisodeProgress(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	repos := db.NewRepositories(database)
+	ctx := context.Background()
+	now := time.Now()
+
+	_ = repos.Users.Create(ctx, &db.User{
+		ID: "user-1", Username: "testuser", PasswordHash: "hash",
+		Role: "user", CreatedAt: now, IsActive: true,
+	})
+	_ = repos.Libraries.Create(ctx, &db.Library{
+		ID: "lib-shows", Name: "Shows", ContentType: "shows",
+		CreatedAt: now, UpdatedAt: now,
+	})
+
+	// series → 2 seasons, each with 3 episodes (6 episodes total).
+	_ = repos.Items.Create(ctx, &db.Item{
+		ID: "series-1", LibraryID: "lib-shows", Type: "series",
+		Title: "Show", SortTitle: "show", AddedAt: now, UpdatedAt: now, IsAvailable: true,
+	})
+	for s := 1; s <= 2; s++ {
+		seasonID := "season-" + string(rune('0'+s))
+		seasonNum := s
+		_ = repos.Items.Create(ctx, &db.Item{
+			ID: seasonID, LibraryID: "lib-shows", Type: "season",
+			ParentID: "series-1", SeasonNumber: &seasonNum,
+			Title: "Season " + string(rune('0'+s)), SortTitle: "season",
+			AddedAt: now, UpdatedAt: now, IsAvailable: true,
+		})
+		for e := 1; e <= 3; e++ {
+			epNum := e
+			_ = repos.Items.Create(ctx, &db.Item{
+				ID: seasonID + "-ep-" + string(rune('0'+e)),
+				LibraryID: "lib-shows", Type: "episode",
+				ParentID: seasonID,
+				SeasonNumber: &seasonNum, EpisodeNumber: &epNum,
+				Title: "Episode", SortTitle: "ep",
+				DurationTicks: 18000000000,
+				AddedAt: now, UpdatedAt: now, IsAvailable: true,
+			})
+		}
+	}
+
+	// Cold start: no user_data rows yet.
+	total, watched, err := repos.UserData.SeriesEpisodeProgress(ctx, "user-1", "series-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 6 || watched != 0 {
+		t.Errorf("cold start: want (6, 0), got (%d, %d)", total, watched)
+	}
+
+	// Mark 4 episodes watched.
+	for _, id := range []string{"season-1-ep-1", "season-1-ep-2", "season-2-ep-1", "season-2-ep-3"} {
+		if err := repos.UserData.MarkPlayed(ctx, "user-1", id); err != nil {
+			t.Fatalf("MarkPlayed(%s): %v", id, err)
+		}
+	}
+
+	total, watched, err = repos.UserData.SeriesEpisodeProgress(ctx, "user-1", "series-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 6 || watched != 4 {
+		t.Errorf("after marks: want (6, 4), got (%d, %d)", total, watched)
+	}
+
+	// A different user observes the same total but their own watched count.
+	total, watched, err = repos.UserData.SeriesEpisodeProgress(ctx, "user-other", "series-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 6 || watched != 0 {
+		t.Errorf("other user: want (6, 0), got (%d, %d)", total, watched)
+	}
+}

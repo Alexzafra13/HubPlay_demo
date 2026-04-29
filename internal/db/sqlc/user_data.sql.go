@@ -308,6 +308,38 @@ type UpsertUserDataParams struct {
 	UpdatedAt           time.Time     `json:"updated_at"`
 }
 
+const seriesEpisodeProgress = `-- name: SeriesEpisodeProgress :one
+SELECT
+    COUNT(e.id) AS total_episodes,
+    COUNT(CASE WHEN ud.completed = 1 THEN 1 END) AS watched_episodes
+FROM items s
+JOIN items e ON e.parent_id = s.id AND e.type = 'episode'
+LEFT JOIN user_data ud ON ud.user_id = ? AND ud.item_id = e.id
+WHERE s.parent_id = ? AND s.type = 'season'
+`
+
+type SeriesEpisodeProgressParams struct {
+	UserID   string `json:"user_id"`
+	SeriesID string `json:"series_id"`
+}
+
+type SeriesEpisodeProgressRow struct {
+	TotalEpisodes   int64 `json:"total_episodes"`
+	WatchedEpisodes int64 `json:"watched_episodes"`
+}
+
+// Aggregate "X of Y episodes watched" for a single series.
+// The grid is series -> seasons -> episodes via parent_id; LEFT JOIN
+// on user_data so episodes the user has never touched count as
+// unwatched without forcing an INNER row to exist. Both columns come
+// back as plain integers; SQLite COUNT() is well-typed for sqlc.
+func (q *Queries) SeriesEpisodeProgress(ctx context.Context, arg SeriesEpisodeProgressParams) (SeriesEpisodeProgressRow, error) {
+	row := q.db.QueryRowContext(ctx, seriesEpisodeProgress, arg.UserID, arg.SeriesID)
+	var i SeriesEpisodeProgressRow
+	err := row.Scan(&i.TotalEpisodes, &i.WatchedEpisodes)
+	return i, err
+}
+
 // Per-user per-item interaction data (progress, favorites, play history).
 //
 // Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE user_data).
