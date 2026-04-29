@@ -258,7 +258,59 @@
       "libraries": "Bibliotecas",
       "providers": "Proveedores",
       "users": "Usuarios",
+      "federation": "Federación",
       "system": "Sistema"
+    },
+    "federation": {
+      "title": "Servidores conectados",
+      "subtitle": "Empareja tu HubPlay con el de un amigo para compartir bibliotecas y canales de TV con permisos. Cada servidor mantiene su autonomía — el emparejamiento es de igual a igual y revocable en cualquier momento.",
+      "copy": "Copiar",
+      "copied": "Copiado",
+      "identity": {
+        "heading": "Mi servidor",
+        "name": "Nombre",
+        "serverUuid": "UUID del servidor",
+        "fingerprint": "Huella (fingerprint)",
+        "fingerprintHint": "Lee esta huella en voz alta o pásala por chat al admin del otro servidor. La huella debe coincidir exactamente con la que él vea al hacer probe a tu URL — esa coincidencia es la garantía de que no hay un MITM en el medio.",
+        "words": "Palabras de confirmación",
+        "wordsHint": "Lista corta para confirmación oral. Útil cuando estás al teléfono y el chat tiene problemas: 'mi huella empieza con aardvark, barbados…'."
+      },
+      "invite": {
+        "heading": "Generar invite",
+        "description": "Crea un código de un solo uso (válido 24h) y compártelo por canal seguro con el admin del otro servidor. Él lo pegará en su panel para emparejar.",
+        "generate": "Generar nuevo invite",
+        "generating": "Generando…",
+        "expiresAt": "Expira: {{when}}"
+      },
+      "accept": {
+        "heading": "Emparejar con otro servidor",
+        "description": "Si has recibido un invite de otro admin, aquí lo aceptas. Primero introduce la URL de su servidor y haz Probe — verás su huella. Confírmala con el otro admin antes de pulsar Emparejar.",
+        "urlLabel": "URL del servidor remoto",
+        "codeLabel": "Código de invite",
+        "probe": "Probe (obtener huella)",
+        "probing": "Conectando…",
+        "foundServer": "Servidor encontrado: {{name}}",
+        "confirm": "Confirmo que esta huella coincide con la que el admin del otro servidor me ha leído / pasado",
+        "pair": "Emparejar",
+        "pairing": "Emparejando…"
+      },
+      "peers": {
+        "heading": "Servidores emparejados",
+        "empty": "No hay servidores emparejados todavía. Genera un invite o pega uno arriba para empezar.",
+        "revoke": "Revocar",
+        "revokeConfirm": "¿Revocar el emparejamiento con {{name}}? Todas las sesiones futuras serán rechazadas y el peer tendrá que rehacer el handshake si queréis volver a conectaros.",
+        "col": {
+          "name": "Nombre",
+          "status": "Estado",
+          "fingerprint": "Huella",
+          "url": "URL"
+        },
+        "status": {
+          "pending": "Pendiente",
+          "paired": "Emparejado",
+          "revoked": "Revocado"
+        }
+      }
     },
     "dashboard": {
       "title": "Inicio",

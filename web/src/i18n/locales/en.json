@@ -258,7 +258,59 @@
       "libraries": "Libraries",
       "providers": "Providers",
       "users": "Users",
+      "federation": "Federation",
       "system": "System"
+    },
+    "federation": {
+      "title": "Connected servers",
+      "subtitle": "Pair your HubPlay with a friend's so you can share libraries and TV channels with admin-controlled scopes. Each server stays sovereign — pairing is peer-to-peer and revocable any time.",
+      "copy": "Copy",
+      "copied": "Copied",
+      "identity": {
+        "heading": "My server",
+        "name": "Name",
+        "serverUuid": "Server UUID",
+        "fingerprint": "Fingerprint",
+        "fingerprintHint": "Read this fingerprint to the other server's admin out of band (chat, voice). It must match exactly what they see when they probe your URL — that match is the guarantee there's no MITM in between.",
+        "words": "Confirmation words",
+        "wordsHint": "Short word list for voice confirmation. Useful on the phone when chat is unreliable: 'my fingerprint starts with aardvark, barbados…'."
+      },
+      "invite": {
+        "heading": "Generate invite",
+        "description": "Mint a one-shot code (24h validity) and share it with the other admin via a secure channel. They will paste it into their UI to complete the handshake.",
+        "generate": "Generate new invite",
+        "generating": "Generating…",
+        "expiresAt": "Expires: {{when}}"
+      },
+      "accept": {
+        "heading": "Pair with another server",
+        "description": "If another admin has sent you an invite, accept it here. First enter their server URL and click Probe — you'll see their fingerprint. Confirm it matches what they told you BEFORE clicking Pair.",
+        "urlLabel": "Remote server URL",
+        "codeLabel": "Invite code",
+        "probe": "Probe (fetch fingerprint)",
+        "probing": "Connecting…",
+        "foundServer": "Found server: {{name}}",
+        "confirm": "I confirm this fingerprint matches the one the other admin read or sent me",
+        "pair": "Pair",
+        "pairing": "Pairing…"
+      },
+      "peers": {
+        "heading": "Paired servers",
+        "empty": "No paired servers yet. Generate an invite or paste one above to get started.",
+        "revoke": "Revoke",
+        "revokeConfirm": "Revoke pairing with {{name}}? All future sessions will be rejected and the peer will need to re-handshake if you want to reconnect.",
+        "col": {
+          "name": "Name",
+          "status": "Status",
+          "fingerprint": "Fingerprint",
+          "url": "URL"
+        },
+        "status": {
+          "pending": "Pending",
+          "paired": "Paired",
+          "revoked": "Revoked"
+        }
+      }
     },
     "dashboard": {
       "title": "Dashboard",

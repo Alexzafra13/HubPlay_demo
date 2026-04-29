@@ -10,6 +10,7 @@ const tabs = [
   { key: "admin.tabs.libraries", to: "/admin/libraries" },
   { key: "admin.tabs.providers", to: "/admin/providers" },
   { key: "admin.tabs.users", to: "/admin/users" },
+  { key: "admin.tabs.federation", to: "/admin/federation" },
   { key: "admin.tabs.system", to: "/admin/system" },
 ] as const;
 
