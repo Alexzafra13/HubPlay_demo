@@ -1,3 +1,45 @@
+// ─── Federation ─────────────────────────────────────────────────────────────
+
+// ServerInfo describes a HubPlay server's public identity. Returned both
+// by GET /federation/info (the local server's own info) and by the admin
+// probe endpoint when fetching a remote's identity. The pubkey + fingerprint
+// are non-secret by design — the corresponding Ed25519 private key never
+// leaves the server. Admins compare fingerprints out-of-band before pairing.
+export interface FederationServerInfo {
+  server_uuid: string;
+  name: string;
+  version: string;
+  public_key: string;            // base64
+  pubkey_fingerprint: string;    // "a8f3:k2m9:x4p1:c7e2"
+  pubkey_words: string[];        // 4 short words for voice confirmation
+  supported_scopes: string[];
+  advertised_url: string;
+  admin_contact?: string;
+}
+
+export type FederationPeerStatus = "pending" | "paired" | "revoked";
+
+export interface FederationPeer {
+  id: string;
+  server_uuid: string;
+  name: string;
+  base_url: string;
+  status: FederationPeerStatus;
+  fingerprint: string;
+  public_key: string;
+  created_at: string;
+  paired_at?: string;
+  last_seen_at?: string;
+  last_seen_status_code?: number;
+  revoked_at?: string;
+}
+
+export interface FederationInvite {
+  id: string;
+  code: string;
+  expires_at: string;
+}
+
 // ─── User & Auth ────────────────────────────────────────────────────────────
 
 export interface User {

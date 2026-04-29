@@ -48,6 +48,9 @@ export const queryKeys = {
   availableImages: (id: string, type?: string) =>
     ["items", id, "images", "available", type] as const,
   providers: ["providers"] as const,
+  federationIdentity: ["federation", "identity"] as const,
+  federationPeers: ["federation", "peers"] as const,
+  federationInvites: ["federation", "invites"] as const,
   health: ["health"] as const,
   systemStats: ["system-stats"] as const,
   systemSettings: ["system-settings"] as const,

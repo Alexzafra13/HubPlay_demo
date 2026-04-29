@@ -30,8 +30,18 @@ var (
 	ErrUnsupportedCodec = errors.New("unsupported codec")
 
 	// Federation
-	ErrPeerOffline      = errors.New("peer offline")
-	ErrPeerUnauthorized = errors.New("peer not authorized")
+	ErrPeerOffline           = errors.New("peer offline")
+	ErrPeerUnauthorized      = errors.New("peer not authorized")
+	ErrPeerNotFound          = errors.New("peer not found")
+	ErrPeerKeyMismatch       = errors.New("peer public key mismatch")
+	ErrPeerScopeInsufficient = errors.New("peer scope insufficient")
+	ErrPeerRateLimited       = errors.New("peer rate limited")
+	ErrPeerRevoked           = errors.New("peer revoked")
+	ErrInviteNotFound        = errors.New("invite not found")
+	ErrInviteExpired         = errors.New("invite expired")
+	ErrInviteAlreadyUsed     = errors.New("invite already used")
+	ErrInviteInvalidFormat   = errors.New("invite invalid format")
+	ErrServerIdentityMissing = errors.New("server identity not initialised")
 
 	// Plugin
 	ErrPluginCrashed = errors.New("plugin crashed")

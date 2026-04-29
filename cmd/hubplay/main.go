@@ -20,6 +20,7 @@ import (
 	"hubplay/internal/config"
 	"hubplay/internal/db"
 	"hubplay/internal/event"
+	"hubplay/internal/federation"
 	"hubplay/internal/imaging/pathmap"
 	"hubplay/internal/library"
 	"hubplay/internal/logging"
@@ -271,6 +272,28 @@ func run(configPath string) error {
 	// ═══ Phase 5: HTTP Server ═══
 	webFS, _ := fs.Sub(hubplay.WebAssets, "web/dist")
 
+	// Federation: load-or-create this server's Ed25519 identity and wire
+	// the manager. Failures here are non-fatal — federation is opt-in;
+	// if init fails we run with Federation=nil and the routes are skipped
+	// (the router checks deps.Federation != nil). The admin sees the
+	// federation surface unavailable; everything else keeps working.
+	federationRepo := db.NewFederationRepository(database)
+	federationCfg := federation.DefaultConfig()
+	federationCfg.AdvertisedURL = cfg.Server.BaseURL
+	federationCfg.Version = version
+	if _, err := federation.LoadOrCreate(ctx, federationRepo, clk, "HubPlay Server"); err != nil {
+		logger.Error("federation: identity load/create failed; federation disabled", "err", err)
+	}
+	federationManager, err := federation.NewManager(ctx, federationCfg, federationRepo, clk, logger, eventBus)
+	if err != nil {
+		logger.Error("federation: manager init failed; federation disabled", "err", err)
+		federationManager = nil
+	} else {
+		logger.Info("federation: manager initialised",
+			"server_uuid", federationManager.PublicServerInfo().ServerUUID,
+			"fingerprint", federationManager.PublicServerInfo().PubkeyFingerprint)
+	}
+
 	router := api.NewRouter(api.Dependencies{
 		Auth:          authService,
 		Users:         userService,
@@ -297,6 +320,7 @@ func run(configPath string) error {
 		Settings:      repos.Settings,
 		SetupService:  setupService,
 		EventBus:      eventBus,
+		Federation:    federationManager,
 		Database:      database,
 		Version:       version,
 		WebAssets:     webFS,

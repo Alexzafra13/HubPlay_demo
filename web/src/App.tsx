@@ -24,6 +24,7 @@ const DashboardAdmin = lazy(() => import("@/pages/admin/DashboardAdmin"));
 const LibrariesAdmin = lazy(() => import("@/pages/admin/LibrariesAdmin"));
 const UsersAdmin = lazy(() => import("@/pages/admin/UsersAdmin"));
 const ProvidersAdmin = lazy(() => import("@/pages/admin/ProvidersAdmin"));
+const FederationAdmin = lazy(() => import("@/pages/admin/FederationAdmin"));
 const SystemLayout = lazy(() => import("@/pages/admin/system/SystemLayout"));
 const SystemStatus = lazy(() => import("@/pages/admin/system/SystemStatus"));
 const SystemActivity = lazy(() => import("@/pages/admin/system/SystemActivity"));
@@ -129,6 +130,7 @@ export function App() {
                 <Route path="libraries" element={<LibrariesAdmin />} />
                 <Route path="providers" element={<ProvidersAdmin />} />
                 <Route path="users" element={<UsersAdmin />} />
+                <Route path="federation" element={<FederationAdmin />} />
                 <Route path="system" element={<SystemLayout />}>
                   <Route index element={<Navigate to="status" replace />} />
                   <Route path="status" element={<SystemStatus />} />

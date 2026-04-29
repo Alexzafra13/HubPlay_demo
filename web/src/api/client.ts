@@ -903,6 +903,36 @@ export class ApiClient {
     return this.request("PUT", `/providers/${name}`, { body: data });
   }
 
+  // ─── Federation (server peering) ──────────────────────────────────────
+
+  async getServerIdentity(): Promise<import("./types").FederationServerInfo> {
+    return this.request("GET", "/admin/peers/identity");
+  }
+
+  async listPeers(): Promise<import("./types").FederationPeer[]> {
+    return this.request("GET", "/admin/peers");
+  }
+
+  async revokePeer(id: string): Promise<void> {
+    return this.request<void>("DELETE", `/admin/peers/${id}`);
+  }
+
+  async probePeer(baseURL: string): Promise<import("./types").FederationServerInfo> {
+    return this.request("POST", "/admin/peers/probe", { body: { base_url: baseURL } });
+  }
+
+  async acceptInvite(baseURL: string, code: string): Promise<import("./types").FederationPeer> {
+    return this.request("POST", "/admin/peers/accept", { body: { base_url: baseURL, code } });
+  }
+
+  async listInvites(): Promise<import("./types").FederationInvite[]> {
+    return this.request("GET", "/admin/peers/invites");
+  }
+
+  async generateInvite(): Promise<import("./types").FederationInvite> {
+    return this.request("POST", "/admin/peers/invites", { body: {} });
+  }
+
   // ─── Images ────────────────────────────────────────────────────────────
 
   async getItemImages(itemId: string): Promise<ImageInfo[]> {

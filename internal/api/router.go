@@ -17,6 +17,7 @@ import (
 	"hubplay/internal/config"
 	"hubplay/internal/db"
 	"hubplay/internal/event"
+	"hubplay/internal/federation"
 	"hubplay/internal/imaging/pathmap"
 	"hubplay/internal/iptv"
 	"hubplay/internal/library"
@@ -53,6 +54,7 @@ type Dependencies struct {
 	Settings       *db.SettingsRepository
 	SetupService   *setup.Service
 	EventBus       *event.Bus
+	Federation     *federation.Manager
 	Database       *sql.DB
 	Version        string
 	WebAssets      fs.FS
@@ -146,6 +148,15 @@ func NewRouter(deps Dependencies) http.Handler {
 			r.Post("/setup/complete", setupHandler.Complete)
 		}
 
+		// Federation public surface (no auth — handshake authenticates by
+		// invite code; subsequent peer-to-peer calls use Ed25519-signed
+		// JWTs validated in their own middleware, Phase 2).
+		if deps.Federation != nil {
+			pubFed := handlers.NewFederationPublicHandler(deps.Federation, deps.Logger)
+			r.Get("/federation/info", pubFed.ServerInfo)
+			r.Post("/peer/handshake", pubFed.Handshake)
+		}
+
 		// Protected routes
 		r.Group(func(r chi.Router) {
 			r.Use(deps.Auth.Middleware)
@@ -204,6 +215,25 @@ func NewRouter(deps Dependencies) http.Handler {
 					r.Post("/rotate", adminAuth.Rotate)
 					r.Post("/prune", adminAuth.Prune)
 				})
+
+				// Federation admin surface — invite generation, peer
+				// pairing, peer listing, peer revocation.
+				if deps.Federation != nil {
+					adminFed := handlers.NewFederationAdminHandler(deps.Federation, deps.Logger)
+					r.Route("/admin/peers", func(r chi.Router) {
+						r.Use(auth.RequireAdmin)
+						r.Get("/", adminFed.ListPeers)
+						r.Get("/identity", adminFed.GetServerIdentity)
+						r.Post("/probe", adminFed.ProbePeer)
+						r.Post("/accept", adminFed.AcceptInvite)
+						r.Get("/{id}", adminFed.GetPeer)
+						r.Delete("/{id}", adminFed.RevokePeer)
+						r.Route("/invites", func(r chi.Router) {
+							r.Get("/", adminFed.ListActiveInvites)
+							r.Post("/", adminFed.GenerateInvite)
+						})
+					})
+				}
 			}
 
 			// Rich system stats (admin only). Public /health stays minimal
