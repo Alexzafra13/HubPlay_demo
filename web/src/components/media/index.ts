@@ -18,3 +18,5 @@ export type { SeriesHeroProps } from "./SeriesHero";
 
 export { MediaMeta } from "./MediaMeta";
 export type { MediaMetaProps } from "./MediaMeta";
+
+export { CastChip } from "./CastChip";
