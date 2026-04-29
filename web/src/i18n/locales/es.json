@@ -298,6 +298,8 @@
         "heading": "Servidores emparejados",
         "empty": "No hay servidores emparejados todavía. Genera un invite o pega uno arriba para empezar.",
         "revoke": "Revocar",
+        "manageShares": "Compartir bibliotecas",
+        "collapseShares": "Cerrar",
         "revokeConfirm": "¿Revocar el emparejamiento con {{name}}? Todas las sesiones futuras serán rechazadas y el peer tendrá que rehacer el handshake si queréis volver a conectaros.",
         "col": {
           "name": "Nombre",
@@ -309,6 +311,18 @@
           "pending": "Pendiente",
           "paired": "Emparejado",
           "revoked": "Revocado"
+        }
+      },
+      "shares": {
+        "heading": "Bibliotecas compartidas con {{name}}",
+        "hint": "Marca \"Compartida\" para que el peer pueda ver y reproducir esa biblioteca. Los scopes adicionales (Reproducir / Descargar / Live TV) se pueden ajustar por biblioteca. Los cambios se guardan automáticamente.",
+        "noLibraries": "No tienes bibliotecas locales todavía. Crea una en la pestaña Bibliotecas antes de compartir.",
+        "col": {
+          "library": "Biblioteca",
+          "shared": "Compartida",
+          "play": "Reproducir",
+          "download": "Descargar",
+          "livetv": "Live TV"
         }
       }
     },

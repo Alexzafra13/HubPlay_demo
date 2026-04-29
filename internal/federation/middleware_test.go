@@ -25,6 +25,9 @@ type inMemoryFedRepo struct {
 	peers   []*Peer
 	audit   []*AuditEntry
 	invites []*Invite
+	shares  []*LibraryShare
+	libs    []*SharedLibrary
+	items   map[string][]*SharedItem // library_id → items
 }
 
 func (r *inMemoryFedRepo) GetIdentity(_ context.Context) (*Identity, error) {
@@ -118,6 +121,103 @@ func (r *inMemoryFedRepo) ListPeers(_ context.Context) ([]*Peer, error) {
 	cp := make([]*Peer, len(r.peers))
 	copy(cp, r.peers)
 	return cp, nil
+}
+
+func (r *inMemoryFedRepo) UpsertLibraryShare(_ context.Context, s *LibraryShare) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i, existing := range r.shares {
+		if existing.PeerID == s.PeerID && existing.LibraryID == s.LibraryID {
+			r.shares[i] = s
+			return nil
+		}
+	}
+	r.shares = append(r.shares, s)
+	return nil
+}
+func (r *inMemoryFedRepo) DeleteLibraryShare(_ context.Context, peerID, shareID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := r.shares[:0]
+	for _, s := range r.shares {
+		if s.PeerID == peerID && s.ID == shareID {
+			continue
+		}
+		out = append(out, s)
+	}
+	r.shares = out
+	return nil
+}
+func (r *inMemoryFedRepo) GetLibraryShare(_ context.Context, peerID, libraryID string) (*LibraryShare, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, s := range r.shares {
+		if s.PeerID == peerID && s.LibraryID == libraryID {
+			return s, nil
+		}
+	}
+	return nil, nil
+}
+func (r *inMemoryFedRepo) ListSharesByPeer(_ context.Context, peerID string) ([]*LibraryShare, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := []*LibraryShare{}
+	for _, s := range r.shares {
+		if s.PeerID == peerID {
+			out = append(out, s)
+		}
+	}
+	return out, nil
+}
+func (r *inMemoryFedRepo) ListSharedLibrariesForPeer(_ context.Context, peerID string) ([]*SharedLibrary, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := []*SharedLibrary{}
+	// JOIN-equivalent: only return libraries this peer has a share for.
+	for _, s := range r.shares {
+		if s.PeerID != peerID {
+			continue
+		}
+		for _, lib := range r.libs {
+			if lib.ID == s.LibraryID {
+				cp := *lib
+				cp.Scopes = ShareScopes{
+					CanBrowse:   s.CanBrowse,
+					CanPlay:     s.CanPlay,
+					CanDownload: s.CanDownload,
+					CanLiveTV:   s.CanLiveTV,
+				}
+				out = append(out, &cp)
+				break
+			}
+		}
+	}
+	return out, nil
+}
+func (r *inMemoryFedRepo) ListSharedItems(_ context.Context, peerID, libraryID string, offset, limit int) ([]*SharedItem, int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	// Defence in depth: confirm share exists + can_browse.
+	visible := false
+	for _, s := range r.shares {
+		if s.PeerID == peerID && s.LibraryID == libraryID && s.CanBrowse {
+			visible = true
+			break
+		}
+	}
+	if !visible {
+		return []*SharedItem{}, 0, nil
+	}
+	all := r.items[libraryID]
+	total := len(all)
+	if offset >= total {
+		return []*SharedItem{}, total, nil
+	}
+	end := offset + limit
+	if end > total || limit <= 0 {
+		end = total
+	}
+	return all[offset:end], total, nil
 }
 
 // setupManagerWithPeer creates a manager pre-paired with one peer

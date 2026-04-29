@@ -9,6 +9,7 @@ import { api } from "../client";
 import { queryKeys } from "../queryKeys";
 import type {
   FederationInvite,
+  FederationLibraryShare,
   FederationPeer,
   FederationServerInfo,
 } from "../types";
@@ -77,6 +78,56 @@ export function useRevokePeer() {
     mutationFn: (id) => api.revokePeer(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.federationPeers });
+    },
+  });
+}
+
+// usePeerShares lists every library share row attached to a peer.
+// Powers the per-peer expansion panel in FederationAdmin.
+export function usePeerShares(peerID: string, enabled = true) {
+  return useQuery<FederationLibraryShare[]>({
+    queryKey: queryKeys.federationPeerShares(peerID),
+    queryFn: () => api.listPeerShares(peerID),
+    enabled: enabled && Boolean(peerID),
+  });
+}
+
+// useCreatePeerShare upserts a share — idempotent on (peer, library).
+// On success invalidates the per-peer shares query so the UI reflects
+// the new scope set immediately.
+export function useCreatePeerShare(peerID: string) {
+  const queryClient = useQueryClient();
+  return useMutation<
+    FederationLibraryShare,
+    Error,
+    {
+      libraryID: string;
+      canBrowse: boolean;
+      canPlay: boolean;
+      canDownload: boolean;
+      canLiveTV: boolean;
+    }
+  >({
+    mutationFn: (vars) =>
+      api.createPeerShare(peerID, {
+        library_id: vars.libraryID,
+        can_browse: vars.canBrowse,
+        can_play: vars.canPlay,
+        can_download: vars.canDownload,
+        can_livetv: vars.canLiveTV,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.federationPeerShares(peerID) });
+    },
+  });
+}
+
+export function useDeletePeerShare(peerID: string) {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, string>({
+    mutationFn: (shareID) => api.deletePeerShare(peerID, shareID),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.federationPeerShares(peerID) });
     },
   });
 }

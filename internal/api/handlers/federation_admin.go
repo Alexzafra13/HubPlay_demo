@@ -193,6 +193,123 @@ func (h *FederationAdminHandler) GetPeer(w http.ResponseWriter, r *http.Request)
 	respondJSON(w, http.StatusOK, map[string]any{"data": peerToWire(p)})
 }
 
+// ─── Library shares ─────────────────────────────────────────────────
+
+type shareLibraryRequest struct {
+	LibraryID   string `json:"library_id"`
+	CanBrowse   bool   `json:"can_browse"`
+	CanPlay     bool   `json:"can_play"`
+	CanDownload bool   `json:"can_download"`
+	CanLiveTV   bool   `json:"can_livetv"`
+}
+
+// ListShares returns every share row for a peer. Powers the per-peer
+// expansion panel in the admin UI.
+func (h *FederationAdminHandler) ListShares(w http.ResponseWriter, r *http.Request) {
+	peerID := chi.URLParam(r, "id")
+	if peerID == "" {
+		respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "id required")
+		return
+	}
+	shares, err := h.mgr.ListSharesByPeer(r.Context(), peerID)
+	if err != nil {
+		h.logger.Error("federation: list shares", "err", err)
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list shares")
+		return
+	}
+	out := make([]shareWire, 0, len(shares))
+	for _, s := range shares {
+		out = append(out, shareToWire(s))
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"data": out})
+}
+
+// CreateShare opts a library into being visible to a peer with the
+// given scopes. Idempotent — re-calling with different scopes
+// updates the existing row.
+func (h *FederationAdminHandler) CreateShare(w http.ResponseWriter, r *http.Request) {
+	peerID := chi.URLParam(r, "id")
+	if peerID == "" {
+		respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "peer id required")
+		return
+	}
+	claims := auth.GetClaims(r.Context())
+	if claims == nil {
+		respondError(w, r, http.StatusUnauthorized, "AUTH_REQUIRED", "unauthenticated")
+		return
+	}
+	var req shareLibraryRequest
+	if err := decodeJSON(r, &req); err != nil {
+		respondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
+		return
+	}
+	req.LibraryID = strings.TrimSpace(req.LibraryID)
+	if req.LibraryID == "" {
+		respondError(w, r, http.StatusBadRequest, "FEDERATION_LIBRARY_REQUIRED", "library_id required")
+		return
+	}
+	share, err := h.mgr.ShareLibrary(r.Context(), peerID, req.LibraryID, claims.UserID, federation.ShareScopes{
+		CanBrowse:   req.CanBrowse,
+		CanPlay:     req.CanPlay,
+		CanDownload: req.CanDownload,
+		CanLiveTV:   req.CanLiveTV,
+	})
+	if err != nil {
+		status, code := http.StatusInternalServerError, "INTERNAL_ERROR"
+		switch {
+		case errors.Is(err, domain.ErrPeerNotFound):
+			status, code = http.StatusNotFound, "PEER_NOT_FOUND"
+		case errors.Is(err, domain.ErrPeerUnauthorized):
+			status, code = http.StatusForbidden, "PEER_NOT_PAIRED"
+		}
+		h.logger.Warn("federation: share library failed", "err", err)
+		respondError(w, r, status, code, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusCreated, map[string]any{"data": shareToWire(share)})
+}
+
+// DeleteShare removes a single share. Idempotent — missing share
+// is treated as success because the desired state is already true.
+func (h *FederationAdminHandler) DeleteShare(w http.ResponseWriter, r *http.Request) {
+	peerID := chi.URLParam(r, "id")
+	shareID := chi.URLParam(r, "shareID")
+	if peerID == "" || shareID == "" {
+		respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "peer id and share id required")
+		return
+	}
+	if err := h.mgr.UnshareLibrary(r.Context(), peerID, shareID); err != nil {
+		h.logger.Error("federation: unshare library", "err", err)
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to unshare")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+type shareWire struct {
+	ID          string `json:"id"`
+	PeerID      string `json:"peer_id"`
+	LibraryID   string `json:"library_id"`
+	CanBrowse   bool   `json:"can_browse"`
+	CanPlay     bool   `json:"can_play"`
+	CanDownload bool   `json:"can_download"`
+	CanLiveTV   bool   `json:"can_livetv"`
+	CreatedAt   string `json:"created_at"`
+}
+
+func shareToWire(s *federation.LibraryShare) shareWire {
+	return shareWire{
+		ID:          s.ID,
+		PeerID:      s.PeerID,
+		LibraryID:   s.LibraryID,
+		CanBrowse:   s.CanBrowse,
+		CanPlay:     s.CanPlay,
+		CanDownload: s.CanDownload,
+		CanLiveTV:   s.CanLiveTV,
+		CreatedAt:   s.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+	}
+}
+
 // RevokePeer terminates a peer. 204 on success, 404 on unknown id.
 func (h *FederationAdminHandler) RevokePeer(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")

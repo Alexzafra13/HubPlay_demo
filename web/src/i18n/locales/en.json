@@ -298,6 +298,8 @@
         "heading": "Paired servers",
         "empty": "No paired servers yet. Generate an invite or paste one above to get started.",
         "revoke": "Revoke",
+        "manageShares": "Manage shares",
+        "collapseShares": "Collapse",
         "revokeConfirm": "Revoke pairing with {{name}}? All future sessions will be rejected and the peer will need to re-handshake if you want to reconnect.",
         "col": {
           "name": "Name",
@@ -309,6 +311,18 @@
           "pending": "Pending",
           "paired": "Paired",
           "revoked": "Revoked"
+        }
+      },
+      "shares": {
+        "heading": "Libraries shared with {{name}}",
+        "hint": "Tick \"Shared\" to let the peer see and play that library. The extra scopes (Play / Download / Live TV) can be tuned per library. Changes save automatically.",
+        "noLibraries": "You have no local libraries yet. Create one under the Libraries tab before sharing.",
+        "col": {
+          "library": "Library",
+          "shared": "Shared",
+          "play": "Play",
+          "download": "Download",
+          "livetv": "Live TV"
         }
       }
     },

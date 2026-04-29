@@ -933,6 +933,27 @@ export class ApiClient {
     return this.request("POST", "/admin/peers/invites", { body: {} });
   }
 
+  async listPeerShares(peerID: string): Promise<import("./types").FederationLibraryShare[]> {
+    return this.request("GET", `/admin/peers/${peerID}/shares`);
+  }
+
+  async createPeerShare(
+    peerID: string,
+    data: {
+      library_id: string;
+      can_browse: boolean;
+      can_play: boolean;
+      can_download: boolean;
+      can_livetv: boolean;
+    },
+  ): Promise<import("./types").FederationLibraryShare> {
+    return this.request("POST", `/admin/peers/${peerID}/shares`, { body: data });
+  }
+
+  async deletePeerShare(peerID: string, shareID: string): Promise<void> {
+    return this.request<void>("DELETE", `/admin/peers/${peerID}/shares/${shareID}`);
+  }
+
   // ─── Images ────────────────────────────────────────────────────────────
 
   async getItemImages(itemId: string): Promise<ImageInfo[]> {
