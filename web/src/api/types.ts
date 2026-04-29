@@ -202,6 +202,13 @@ export interface MediaItem {
   // against a series — absent on movies / seasons / episodes and on
   // anonymous responses. The hero renders "Has visto X de Y" when set.
   episode_progress?: { total: number; watched: number };
+  // External provider IDs keyed by provider name (imdb, tmdb, tvdb,
+  // wikidata, ...). Surfaced from the item's external_ids table; the
+  // detail page uses them to render "Open in IMDb" / "Open in TMDb"
+  // entries in the kebab menu when present. Absent when no external
+  // ids are stored — matches the current scanner output for items
+  // that didn't get a TMDb match.
+  external_ids?: Record<string, string>;
   parent_id: string | null;
   series_id: string | null;
   // Episode-only enrichment: when this item is an episode, the

@@ -19,11 +19,12 @@ import (
 )
 
 type ItemHandler struct {
-	lib      LibraryService
-	images   ImageRepository
-	metadata MetadataRepository
-	userData UserDataRepository
-	chapters ChapterRepository
+	lib         LibraryService
+	images      ImageRepository
+	metadata    MetadataRepository
+	userData    UserDataRepository
+	chapters    ChapterRepository
+	externalIDs ExternalIDsRepository
 	// trickplayDir is the root for generated trickplay sprites
 	// (`<dir>/<itemID>/sprite.png` + `manifest.json`). Empty disables
 	// the feature; the endpoint returns 503 in that case.
@@ -36,10 +37,11 @@ type ItemHandler struct {
 	logger         *slog.Logger
 }
 
-func NewItemHandler(lib LibraryService, images ImageRepository, metadata MetadataRepository, userData UserDataRepository, chapters ChapterRepository, trickplayDir string, logger *slog.Logger) *ItemHandler {
+func NewItemHandler(lib LibraryService, images ImageRepository, metadata MetadataRepository, userData UserDataRepository, chapters ChapterRepository, externalIDs ExternalIDsRepository, trickplayDir string, logger *slog.Logger) *ItemHandler {
 	return &ItemHandler{
 		lib: lib, images: images, metadata: metadata, userData: userData,
-		chapters: chapters, trickplayDir: trickplayDir, logger: logger,
+		chapters: chapters, externalIDs: externalIDs,
+		trickplayDir: trickplayDir, logger: logger,
 	}
 }
 
@@ -169,6 +171,20 @@ func (h *ItemHandler) Get(w http.ResponseWriter, r *http.Request) {
 				out[i] = chapterResponse(c)
 			}
 			resp["chapters"] = out
+		}
+	}
+
+	// External provider IDs (IMDb / TMDb / TVDB / ...). Surfaced as a
+	// flat string-string map keyed by provider name so the client can
+	// build "Open in IMDb" links without having to know the provider
+	// list at build time. Best-effort: any DB error logs and skips.
+	if h.externalIDs != nil {
+		if extIDs, err := h.externalIDs.ListByItem(r.Context(), id); err == nil && len(extIDs) > 0 {
+			ids := make(map[string]string, len(extIDs))
+			for _, e := range extIDs {
+				ids[e.Provider] = e.ExternalID
+			}
+			resp["external_ids"] = ids
 		}
 	}
 
