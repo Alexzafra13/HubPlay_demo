@@ -15,13 +15,14 @@ import { usePlayback } from "./itemDetail/usePlayback";
 import { SeasonEpisodes, SeasonEpisodeList } from "./itemDetail/season";
 import type { Person } from "@/api/types";
 
-// CastChip renders one entry of the cast/crew strip. The avatar
-// slot prefers a real profile photo (image_url) and falls back to
-// an initial-letter chip on either absent URL or `onError` from a
-// failed image load. We key the photo's "did it fail" state on the
-// URL itself so swapping props (e.g. parent re-fetches the item
-// and a new url comes in) re-tries the load instead of inheriting
-// the previous failure.
+// CastChip renders one entry of the cast/crew strip in the Plex style:
+// a generous circular avatar stacked over the name and the
+// character/role line. No card chrome around it — the avatar IS the
+// frame, and the surrounding hero/page tint reads through. Failed
+// photo loads (broken URL, 404 from the people thumb endpoint) flip
+// to an initial-letter placeholder via `onError`; the failure state
+// keys off the URL so a re-fetch with a new URL retries instead of
+// inheriting the previous failure.
 function CastChip({ person }: { person: Person }) {
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const showImage = !!person.image_url && failedUrl !== person.image_url;
@@ -31,8 +32,8 @@ function CastChip({ person }: { person: Person }) {
   const subtitle = person.character || person.role;
 
   return (
-    <div className="flex items-center gap-2 rounded-[--radius-md] bg-bg-elevated px-3 py-2">
-      <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-bg-card text-xs font-bold text-text-muted">
+    <div className="flex w-[120px] flex-col items-center gap-2 text-center">
+      <div className="flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-full bg-bg-elevated text-xl font-bold text-text-muted ring-1 ring-border/40 sm:h-28 sm:w-28">
         {showImage ? (
           <img
             src={person.image_url}
@@ -45,12 +46,14 @@ function CastChip({ person }: { person: Person }) {
           person.name.charAt(0)
         )}
       </div>
-      <div className="flex flex-col">
-        <span className="text-sm font-medium text-text-primary">
+      <div className="flex flex-col gap-0.5">
+        <span className="line-clamp-2 text-sm font-medium leading-snug text-text-primary">
           {person.name}
         </span>
         {subtitle && (
-          <span className="text-xs text-text-muted">{subtitle}</span>
+          <span className="line-clamp-2 text-xs leading-snug text-text-muted">
+            {subtitle}
+          </span>
         )}
       </div>
     </div>
@@ -265,23 +268,23 @@ export default function ItemDetail() {
     );
   }
 
-  // Premium color-bleed: pick the show's muted dominant colour, mix it
-  // into bg-base at low intensity, and apply that tint to the whole
-  // detail page. The first attempt at this used a top-down gradient
-  // which produced visible seams where the hero's own bottom-fade-to-
-  // bg-base met the wrapper's gradient stops. The fix is to use a
-  // single solid colour for the entire wrapper AND publish it as a
-  // CSS variable (`--detail-tint`) so SeriesHero's bottom fade can
-  // target the exact same colour — the hero blends into the page
-  // tint with no abrupt transition. When no palette is available
-  // (older items, extraction failed) the wrapper falls back to plain
-  // bg-base via the CSS var's default.
+  // Hero bottom-fade target: pick the show's muted dominant colour,
+  // mix it into bg-base at low intensity, and publish it as a CSS
+  // variable so the hero's bottom-fade gradient blends smoothly into
+  // the rest of the page. Earlier revisions also painted this colour
+  // as the wrapper's `backgroundColor`, which made the entire detail
+  // page slightly off from AppLayout's bg-base — and on the series
+  // page the seam between that tint and the seasons grid below read
+  // as "displaced container" rather than a continuous canvas. The
+  // fix is to keep the variable defined (so the fade still targets a
+  // tint-aware colour) but stop painting it page-wide. AppLayout's
+  // bg-base shows through; the hero alone carries the colour
+  // identity, exactly the way Plex / Jellyfin do it.
   const palette = item.backdrop_colors;
   const tintSeed = palette?.muted ?? palette?.vibrant;
   const detailStyle: CSSProperties | undefined = tintSeed
     ? {
         ['--detail-tint' as string]: `color-mix(in srgb, ${tintSeed} 14%, rgb(8 12 16))`,
-        backgroundColor: 'var(--detail-tint)',
       }
     : undefined;
 

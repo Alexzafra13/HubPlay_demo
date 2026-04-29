@@ -114,6 +114,55 @@ func (r *PeopleRepository) ReplaceItemPeople(ctx context.Context, itemID string,
 	return nil
 }
 
+// FilmographyEntry is one row of a person's filmography: a movie or
+// series the person has a direct credit on, plus the role/character
+// that surfaced for them in that title. Year is optional (provider
+// may not have a release year for very-old or in-progress titles).
+type FilmographyEntry struct {
+	ItemID        string
+	Type          string
+	Title         string
+	Year          int
+	Role          string
+	CharacterName string
+	SortOrder     int
+}
+
+// ListFilmographyByPerson returns the deduped, sorted filmography for
+// a person — one row per (movie | series) the person has a credit on.
+// When the same person has multiple credits on the same title (e.g.
+// directed AND wrote the same movie), only the row with the lowest
+// sort_order is kept; that's almost always the most prominent role
+// (TMDb pads writer/producer credits with high sort_order values).
+func (r *PeopleRepository) ListFilmographyByPerson(ctx context.Context, personID string) ([]*FilmographyEntry, error) {
+	rows, err := r.q.ListFilmographyByPerson(ctx, personID)
+	if err != nil {
+		return nil, fmt.Errorf("list filmography: %w", err)
+	}
+	out := make([]*FilmographyEntry, 0, len(rows))
+	seen := make(map[string]struct{}, len(rows))
+	for _, row := range rows {
+		if _, ok := seen[row.ItemID]; ok {
+			continue
+		}
+		seen[row.ItemID] = struct{}{}
+		year := 0
+		if row.Year.Valid {
+			year = int(row.Year.Int64)
+		}
+		out = append(out, &FilmographyEntry{
+			ItemID:        row.ItemID,
+			Type:          row.Type,
+			Title:         row.Title,
+			Year:          year,
+			Role:          row.Role,
+			CharacterName: row.CharacterName,
+			SortOrder:     int(row.SortOrder),
+		})
+	}
+	return out, nil
+}
+
 func (r *PeopleRepository) ListByItem(ctx context.Context, itemID string) ([]*ItemPersonCredit, error) {
 	rows, err := r.q.ListItemPeople(ctx, itemID)
 	if err != nil {
