@@ -1,12 +1,97 @@
 # Estado del proyecto
 
-> Snapshot: **2026-04-29 noche (review-de-review + runtime settings)** — pase de auto-review sobre el IPTV hardening (5 bugs latentes + split de transmux.go), cerrada la deuda histórica de tests frontend de los 3 hooks pendientes (useEventStream / useTrickplay / useLiveHls), migración 018 con UNIQUE indexes parciales para series/seasons (red de seguridad estructural, sin recovery code en el scanner — Torvalds-simple), y arquitectura nueva de **runtime settings** con `app_settings` overlay sobre YAML que mata los dos prompts "edita hubplay.yaml" del panel admin (server.base_url + hardware_acceleration.* ahora editables desde la UI, whitelist hardcoded). **tests: backend verde con `-race` (incluye 6 regression tests nuevos del transmux + 6 del settings repo + 7 del settings handler) · frontend 327/327 · tsc clean**.
+> Snapshot: **2026-04-29 día → tarde → noche, dos sesiones encadenadas de detail-UX premium** — bloque A `015ThedLMwhsx5ittdmtxSN4` (8 commits del "premium detail UX" pass: cast/crew end-to-end con fotos, IMDb/TMDb deep links, weekly image refresh scheduler, watched-count agregado, hero treatments) y bloque B `claude/review-project-resume-3V6Mr` (4 commits unificando hero movies↔series + aurora ambiental PS3-XMB como page canvas + fixes iterativos sobre fotos del usuario). Foundation lista para `/people/{id}` (SQL `ListFilmographyByPerson` + repo, sin handler aún). **tests: backend verde · frontend 336/336 · tsc clean**.
 
-Cuatro commits en `claude/review-project-sgAr2`:
-- `a21204c` IPTV transmux post-review hardening
-- `8a723c0` tests frontend de hooks
-- `0779e4e` UNIQUE indexes + dedupe defensivo show hierarchy
-- `b1a84da` runtime-editable settings (kill the "edit yaml" prompts)
+Trabajo activo en `claude/review-project-resume-3V6Mr`:
+- `39698ce` ui(detail): unify movie hero with series layout + Plex-style cast strip
+- `99fd307` ui(detail): PS3-XMB ambient aurora as page canvas
+- `7000ec9` ui(detail): make ambient aurora actually visible + smoother hero seam
+- `10afab3` ui(detail): sharp hero backdrop, no clipped Play button, vibrant aurora, fix duplicate "Sigue viendo"
+
+---
+
+## 🎨 Sesión 2026-04-29 tarde-noche (rama `claude/review-project-resume-3V6Mr`) — 4 commits
+
+Iteración guiada por capturas de usuario. Tres rondas de feedback in-the-loop: (1) "el hero series está roto, container desplazado", (2) "el hero **bueno** era el de series, las películas deberían igualarse", (3) "ahora aurora demasiado soso, backdrop pixelado, botón se corta, sigue viendo duplica". Cada ronda cerró con commit + push. Cierra con la **paleta de colores explicada** y memoria actualizada.
+
+### Commit 1 — `39698ce` unify hero + Plex-style cast
+
+Antes: `HeroSection` (movies) tenía layout poster-izq + info-flex anclado al bottom; `SeriesHero` (series/season) tenía contenido apretado en columna izquierda max-w-md, dejando el 60% de la banda como backdrop puro. Visualmente eran dos surfaces distintos. Plus el `ItemDetail` wrapper pintaba `--detail-tint` como `backgroundColor`, creando seam con AppLayout en los lados de la página = "container desplazado raro" alrededor de Temporadas.
+
+Cambios:
+- **Pivote tras malentendido**: primer pase intenté unificar moviendo SeriesHero al layout poster-bajo de HeroSection; el usuario corrigió "el bueno era series, no movies". Reverted SeriesHero al layout original; reescribí HeroSection adoptándolo (full-bleed band + columna izquierda con poster + título + meta + buttons). Episode breadcrumb + S01E03 prefix preservados. Kebab menu pop a `left-0` (la columna está en izquierda).
+- **`CastChip` estilo Plex**: avatar circular 96-112 px con ring border, nombre + personaje en texto limpio centrado debajo, sin tarjeta envolvente. El usuario explícitamente "me gusta más como lo hace plex con un círculo del avatar y el nombre en limpio".
+- **Wrapper `ItemDetail` deja de pintar `--detail-tint` como `backgroundColor`**: la CSS-var sigue definida (la usa el bottom-fade del hero como target) pero el wrapper queda transparente. Mata el container desplazado.
+- **Foundation `ListFilmographyByPerson`**: SQL en `internal/db/queries/people.sql` + sqlc stub a mano (ADR-004) + repo method dedupe-por-item con min(sort_order). Handler/ruta no enchufados — coste 0 hoy, sesión próxima `/people/{id}` es puramente aditiva. Episode-level credits drop through (TMDb ya tiene cast a nivel de show en el 95% de casos).
+
+### Commit 2 — `99fd307` ambient aurora PS3-style
+
+Usuario: "el tinte para cuando salia la lista de temporadas en series si me gustaba como sensacion premium que cogia el color y cada pagina era personal de peliculas, pero claro estaba mal hecho". Quiere el efecto, sin el bug.
+
+Solución arquitectural: en vez de pintar el wrapper, render `<div fixed inset-0 -z-10>` como capa canvas viewport-completo detrás de todo. Tres `radial-gradient` apilados:
+- vibrant blob 80% × 60% en (15%, 10%) — cubre el hero left side
+- muted blob 70% × 70% en (85%, 90%) — cubre seasons grid + cast
+- halo central 35% radio en (50%, 50%) — soft tonal balance
+
+Cada página de detalle pinta su propia personalidad sin animación (respeta reduce-motion por defecto, sin coste de GPU paint constante).
+
+### Commit 3 — `7000ec9` aurora actually visible + softer seam
+
+Foto del usuario: aurora invisible, hero "se corta". Diagnóstico:
+
+- **AppLayout pintaba `bg-bg-base` en su wrapper**. El body ya tiene `bg-bg-base` global en `styles/globals.css`. La duplicación tapaba la capa fixed `-z-10` de la aurora. Da igual subir intensidades — invisible mientras el AppLayout no fuera transparente. **Fix**: quitado `bg-bg-base` del wrapper de AppLayout (el body se encarga). Ningún otro page se rompe porque el body cubre el viewport igual.
+- **Bottom-fade `h-32` cliff**: 128 px de fade sobre un hero de 600-720 px lee como seam horizontal. Subido a `h-48 lg:h-56` (192-224 px).
+- **Intensidades subidas**: 28% / 26% / 12% → 45% / 40% / 18% (vibrant / muted / halo).
+
+### Commit 4 — `10afab3` sharp backdrop + clipped button + duplicate panel + soso aurora
+
+Cuarta foto, cuatro síntomas distintos:
+
+- **Backdrop pixelado en movies**: `thumb(url, 1280)` pedía variant 1280-wide al backend que el browser luego upscaling-a-1920 mostraba blando. Backdrop ahora sirve URL original (sin `?w=`). El poster mantiene `thumb(url, 720)` — es pequeño, vale la pena el ahorro de ancho de banda.
+- **Botón Reproducir cortado**: el inner div del hero tenía `max-h-[720px]`. Cuando el contenido (logo + tagline + meta + watched-count + overview + buttons) excedía ese techo, las acciones se clippeaban. Removed. `min-h` se queda para que el hero no colapse.
+- **"Sigue viendo" duplicado**: el panel de resume-target episode renderizaba en BOTH series y season pages. En la página de season ya está la lista completa de episodios con `EpisodeRow` mostrando progreso por fila — surface el mismo affordance dos veces (panel + list row) era ruido visual. Ahora condicionado a `heroScope === "series"`.
+- **Aurora soso**: el blob inferior-derecho (donde scrollea el usuario más) se sembraba con `muted` — desaturado por definición. Cambiado a usar `vibrant` en ambos blobs principales (60% upper-left, 50% lower-right), `muted` queda como counter-blob central a 28%. Foreground contrast preservado por el corte del mix.
+
+### Cómo funciona la extracción de colores (preguntado por el usuario al cierre)
+
+Pipeline en dos pasos, sin SaaS:
+
+**Backend** — `internal/imaging/colors.go::ExtractDominantColors`, corre cuando `IngestRemoteImage` baja la imagen al disco:
+1. Decodifica con std-lib decoders (mismos que blurhash).
+2. Muestrea ~1024 px en grid `step = max_dim / 32` (coste O(1) por imagen).
+3. Bucketea en cubo RGB 16×16×16 (4096 bins, cada uno acumula r/g/b sum + count).
+4. Por bucket calcula L y S del HSL y puntúa dos ganadores:
+   - `vibrant = saturation × count`, restricted L ∈ [0.20, 0.80] (excluye blown highlights y jet black)
+   - `muted = (1 − saturation/2) × count`, restricted L ≤ 0.40 (oscuro pero legible)
+5. Persiste como strings `rgb(R, G, B)` en columnas `images.dominant_color` + `images.dominant_color_muted`.
+
+Returns `("", "")` cuando el decoder no entiende la imagen (mismo contrato que `ComputeBlurhash`).
+
+**Wire**: `db.PrimaryImageRef` carga ambos campos. `/items/{id}` los expone como `backdrop_colors: { vibrant, muted }`. `GetPrimaryURLs` los devuelve por item para que `PosterCard` pinte placeholder mientras decodifica.
+
+**Frontend**:
+- Path principal: `item.backdrop_colors.vibrant/muted` directos del wire.
+- Fallback (`useVibrantColors`): para items pre-extracción, corre `node-vibrant` sobre los bytes de la imagen via dynamic import. Lazy chunk separado.
+- La aurora del wrapper **solo** usa el path principal (no fallback runtime) para que el viewport-canvas paint sea barato.
+
+Se extrae siempre del **backdrop**, no del poster — el backdrop es lo que pinta colorida la mayoría de la página.
+
+---
+
+## 🎬 Sesión 2026-04-29 día (sesión `015ThedLMwhsx5ittdmtxSN4` "premium detail UX") — 8 commits
+
+Sesión sobre rama de catch-up (PRs ya mergeados a main), no documentada en su momento. Bloque temático: pulir todo el detail surface al nivel "premium" antes del pivot a Kotlin TV.
+
+| Commit | Tema |
+|---|---|
+| `699d63e` | fix: nil-safe SettingsRepository + drop now-dead DedupeSeasonsByChildCount (los UNIQUE indexes 018 ya garantizan invariante) |
+| `49d853e` | poster placeholder colour, hero crop, page tint, kill 401 cold-start noise (auth bootstrap real con `bootstrap()` que hace refresh antes de protected queries) |
+| `b5988d7` | drop ItemDetail tint gradient + restore SeriesHero height (primer intento de fix del seam — fallido, el fix definitivo llegó en sesión `claude/review-project-resume-3V6Mr`) |
+| `2f2cfed` | thumbnails ?w= en cards, tagline+studio en SeriesHero, **watched-count agregado en series** (`SeriesEpisodeProgress` query con JOIN parent_id 2-niveles), **weekly image refresh scheduler** en `library.ImageRefreshScheduler` |
+| `e07fe4e` | series: tint de página coordinado con hero (`--detail-tint`), button breathing |
+| `6b2996f` | movies: port hero premium desde series (parity primer intento — el unificado real fue en sesión siguiente) |
+| `bed03a2` | detail: external_ids → deep links IMDb/TMDb en kebab del hero |
+| `bd64951` | **detail: cast/crew end-to-end con fotos** — tablas `people`/`item_people` ya estaban en el schema desde la migración 001 pero nadie leía/escribía. Wired pipeline completa: `db.PeopleRepository` (4 ops + dedupe by name), `scanner.syncPeople` baja photo via `IngestRemoteImage` con SSRF guard, handler `GET /api/v1/people/{id}/thumb` (path-traversal validado), wire `/items/{id}` incluye `people: [{id, name, role, character?, image_url?, sort_order}]`. Frontend: `CastChip` con avatar real + onError fallback a inicial. Foundation para `/people/{id}` (la id ya viaja en el wire). |
 
 ---
 
