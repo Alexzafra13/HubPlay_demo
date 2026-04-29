@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useAuthStore } from "./auth";
+import { api } from "@/api/client";
 import type { User } from "@/api/types";
 
 const testUser: User = {
@@ -15,14 +16,17 @@ describe("useAuthStore", () => {
     useAuthStore.setState({
       user: null,
       isAuthenticated: false,
+      bootstrapped: false,
     });
     localStorage.clear();
+    vi.restoreAllMocks();
   });
 
-  it("starts unauthenticated", () => {
+  it("starts unauthenticated and unbootstrapped", () => {
     const state = useAuthStore.getState();
     expect(state.user).toBeNull();
     expect(state.isAuthenticated).toBe(false);
+    expect(state.bootstrapped).toBe(false);
   });
 
   it("setAuth stores user in state and localStorage", () => {
@@ -31,6 +35,7 @@ describe("useAuthStore", () => {
     const state = useAuthStore.getState();
     expect(state.user).toEqual(testUser);
     expect(state.isAuthenticated).toBe(true);
+    expect(state.bootstrapped).toBe(true);
 
     expect(JSON.parse(localStorage.getItem("hubplay_user")!)).toEqual(
       testUser,
@@ -50,23 +55,51 @@ describe("useAuthStore", () => {
     expect(localStorage.getItem("hubplay_user")).toBeNull();
   });
 
-  it("loadFromStorage restores state", () => {
+  it("bootstrap restores user and refreshes the access cookie", async () => {
     localStorage.setItem("hubplay_user", JSON.stringify(testUser));
+    const refreshSpy = vi
+      .spyOn(api, "refresh")
+      .mockResolvedValue({} as never);
 
-    useAuthStore.getState().loadFromStorage();
+    await useAuthStore.getState().bootstrap();
 
     const state = useAuthStore.getState();
     expect(state.user).toEqual(testUser);
     expect(state.isAuthenticated).toBe(true);
+    expect(state.bootstrapped).toBe(true);
+    expect(refreshSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("loadFromStorage handles corrupted JSON", () => {
+  it("bootstrap with corrupted JSON marks bootstrapped without authenticating", async () => {
     localStorage.setItem("hubplay_user", "not-json");
 
-    useAuthStore.getState().loadFromStorage();
+    await useAuthStore.getState().bootstrap();
 
-    expect(useAuthStore.getState().user).toBeNull();
+    const state = useAuthStore.getState();
+    expect(state.user).toBeNull();
+    expect(state.isAuthenticated).toBe(false);
+    expect(state.bootstrapped).toBe(true);
     expect(localStorage.getItem("hubplay_user")).toBeNull();
+  });
+
+  it("bootstrap clears state when refresh rejects (expired session)", async () => {
+    localStorage.setItem("hubplay_user", JSON.stringify(testUser));
+    vi.spyOn(api, "refresh").mockRejectedValue(new Error("expired"));
+
+    await useAuthStore.getState().bootstrap();
+
+    const state = useAuthStore.getState();
+    expect(state.user).toBeNull();
+    expect(state.isAuthenticated).toBe(false);
+    expect(state.bootstrapped).toBe(true);
+    expect(localStorage.getItem("hubplay_user")).toBeNull();
+  });
+
+  it("bootstrap is idempotent", async () => {
+    const refreshSpy = vi.spyOn(api, "refresh");
+    await useAuthStore.getState().bootstrap();
+    await useAuthStore.getState().bootstrap();
+    expect(refreshSpy).not.toHaveBeenCalled();
   });
 
   it("updateUser updates user in state and localStorage", () => {

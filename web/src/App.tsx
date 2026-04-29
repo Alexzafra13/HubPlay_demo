@@ -37,14 +37,19 @@ function LazyFallback() {
 }
 
 export function App() {
-  const loadFromStorage = useAuthStore((s) => s.loadFromStorage);
+  const bootstrap = useAuthStore((s) => s.bootstrap);
+  const bootstrapped = useAuthStore((s) => s.bootstrapped);
   const logout = useAuthStore((s) => s.logout);
   const navigate = useNavigate();
   const { data: setupStatus, isLoading } = useSetupStatus();
 
+  // Bootstrap once: hydrate from localStorage and refresh the access
+  // cookie BEFORE any protected query fires, so a returning user
+  // never produces the "401 on every initial query → silent retry"
+  // sequence that previously polluted the dev console.
   useEffect(() => {
-    loadFromStorage();
-  }, [loadFromStorage]);
+    void bootstrap();
+  }, [bootstrap]);
 
   // Wire ApiClient auth events to Zustand store + React Router
   useEffect(() => {
@@ -56,7 +61,7 @@ export function App() {
     });
   }, [logout, navigate]);
 
-  if (isLoading) {
+  if (isLoading || !bootstrapped) {
     return (
       <div className="flex h-dvh items-center justify-center">
         <Spinner size="lg" />

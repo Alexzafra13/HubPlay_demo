@@ -277,13 +277,14 @@ func (h *LibraryHandler) enrichItemSummaries(r *http.Request, items []*db.Item) 
 			for i, item := range items {
 				if urls, ok := imageURLs[item.ID]; ok {
 					if poster, ok := urls["primary"]; ok {
-						data[i]["poster_url"] = poster
+						data[i]["poster_url"] = poster.Path
+						attachPosterPlaceholder(data[i], poster)
 					}
 					if backdrop, ok := urls["backdrop"]; ok {
-						data[i]["backdrop_url"] = backdrop
+						data[i]["backdrop_url"] = backdrop.Path
 					}
 					if logo, ok := urls["logo"]; ok {
-						data[i]["logo_url"] = logo
+						data[i]["logo_url"] = logo.Path
 					}
 				}
 			}

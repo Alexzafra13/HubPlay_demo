@@ -182,7 +182,7 @@ type MediaStreamRepository interface {
 
 // ImageRepository defines image data access needed by handlers.
 type ImageRepository interface {
-	GetPrimaryURLs(ctx context.Context, itemIDs []string) (map[string]map[string]string, error)
+	GetPrimaryURLs(ctx context.Context, itemIDs []string) (map[string]map[string]db.PrimaryImageRef, error)
 	ListByItem(ctx context.Context, itemID string) ([]*db.Image, error)
 	Create(ctx context.Context, img *db.Image) error
 	SetPrimary(ctx context.Context, itemID, imgType, imageID string) error

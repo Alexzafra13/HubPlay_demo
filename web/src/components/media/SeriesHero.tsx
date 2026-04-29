@@ -115,14 +115,23 @@ const SeriesHero: FC<SeriesHeroProps> = ({
           stays visible above the fold on a typical 1080p viewport
           (~960px usable after browser chrome). Aspect-ratio is dropped
           deliberately: at 16:8 the hero stretched to ~850px on wide
-          monitors and pushed everything off-screen. */}
-      <div className="relative min-h-[500px] sm:min-h-[560px] lg:min-h-[620px] max-h-[680px]">
+          monitors and pushed everything off-screen.
+
+          Heights are slightly tighter than 16:8 so the backdrop is
+          less aggressively cropped: at the previous 620px ceiling
+          on a 1920x1080 promo backdrop, `object-cover` zoomed the
+          image enough that actor faces in the upper third got
+          clipped. The combination of a slightly shorter band and
+          `object-position: right top` (instead of right-centre)
+          keeps heads in frame across most TMDb backdrops. */}
+      <div className="relative min-h-[440px] sm:min-h-[500px] lg:min-h-[560px] max-h-[640px]">
         {heroBackdropUrl ? (
           <img
             src={heroBackdropUrl}
             alt=""
             loading="eager"
-            className="absolute inset-0 h-full w-full object-cover object-right"
+            className="absolute inset-0 h-full w-full object-cover"
+            style={{ objectPosition: "right top" }}
           />
         ) : (
           <div className="absolute inset-0 bg-gradient-to-br from-bg-elevated to-bg-card" />

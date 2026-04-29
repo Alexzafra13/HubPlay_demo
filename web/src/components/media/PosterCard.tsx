@@ -39,8 +39,15 @@ const PosterCard: FC<PosterCardProps> = memo(({ item, progress, onClick }) => {
       onClick={onClick}
       className="group flex flex-col outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg-card rounded-[--radius-lg]"
     >
-      {/* Poster image */}
-      <div className="relative aspect-[2/3] overflow-hidden rounded-[--radius-lg] bg-bg-elevated transition-transform duration-300 group-hover:scale-[1.03]">
+      {/* Poster image. The wrapper is tinted with the precomputed
+          dominant colour (server-side at ingest time) so the card
+          never flashes grey before the real image decodes. The <img>
+          paints over it once loaded; on missing colour we keep the
+          old neutral elevated tone via the Tailwind class. */}
+      <div
+        className="relative aspect-[2/3] overflow-hidden rounded-[--radius-lg] bg-bg-elevated transition-transform duration-300 group-hover:scale-[1.03]"
+        style={item.poster_color ? { backgroundColor: item.poster_color } : undefined}
+      >
         {item.poster_url ? (
           <img
             src={item.poster_url}
