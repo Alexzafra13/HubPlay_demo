@@ -458,8 +458,17 @@ func TestIsValidSegmentName(t *testing.T) {
 }
 
 func TestBuildTransmuxFFmpegArgs_ContainsCriticalFlags(t *testing.T) {
-	args := buildTransmuxFFmpegArgs("http://up/x", "/work", "")
+	// Use filepath.Join for the workdir so the assertions match what
+	// buildTransmuxFFmpegArgs actually emits — production code goes
+	// through filepath.Join too, which yields backslash separators on
+	// Windows and forward slashes on POSIX. Hard-coding "/work/index.m3u8"
+	// passed on Linux CI but failed locally on Windows where the joined
+	// path is "\work\index.m3u8".
+	workDir := filepath.Join(string(filepath.Separator)+"work", "")
+	args := buildTransmuxFFmpegArgs("http://up/x", workDir, "")
 	joined := strings.Join(args, " ")
+	indexPath := filepath.Join(workDir, "index.m3u8")
+	segPath := filepath.Join(workDir, "seg-%05d.ts")
 	for _, want := range []string{
 		"-c copy",
 		"-f hls",
@@ -473,8 +482,8 @@ func TestBuildTransmuxFFmpegArgs_ContainsCriticalFlags(t *testing.T) {
 		"-rw_timeout 10000000",
 		"-user_agent " + defaultTransmuxUserAgent,
 		"http://up/x",
-		"/work/index.m3u8",
-		"/work/seg-%05d.ts",
+		indexPath,
+		segPath,
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("missing flag/value %q in argv: %s", want, joined)
