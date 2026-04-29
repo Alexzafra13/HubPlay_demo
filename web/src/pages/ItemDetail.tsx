@@ -268,28 +268,90 @@ export default function ItemDetail() {
     );
   }
 
-  // Hero bottom-fade target: pick the show's muted dominant colour,
-  // mix it into bg-base at low intensity, and publish it as a CSS
-  // variable so the hero's bottom-fade gradient blends smoothly into
-  // the rest of the page. Earlier revisions also painted this colour
-  // as the wrapper's `backgroundColor`, which made the entire detail
-  // page slightly off from AppLayout's bg-base — and on the series
-  // page the seam between that tint and the seasons grid below read
-  // as "displaced container" rather than a continuous canvas. The
-  // fix is to keep the variable defined (so the fade still targets a
-  // tint-aware colour) but stop painting it page-wide. AppLayout's
-  // bg-base shows through; the hero alone carries the colour
-  // identity, exactly the way Plex / Jellyfin do it.
+  // Premium colour-bleed — PS3-XMB style "ambient aurora". Each
+  // detail page tints the entire viewport with a layered background
+  // built from the cover's dominant palette: a flat tint base, plus
+  // two large soft radial blobs (vibrant in the upper-left, muted
+  // in the lower-right) that read as drifting clouds of colour
+  // rather than a single flat wash. Each page therefore feels
+  // personalised by its cover art without ever leaving the
+  // self-hosted dark aesthetic.
+  //
+  // Why a fixed full-viewport layer and not a `backgroundColor` on
+  // the wrapper: a wrapper-level background only paints inside the
+  // AppLayout content gutters and creates a visibly different
+  // colour band against AppLayout's own bg-base — read as a
+  // "displaced container" around the seasons grid (the user has
+  // flagged that twice). Painting on a `position: fixed, inset-0,
+  // -z-10` layer makes the tint the page canvas itself: edge-to-
+  // edge of the viewport, behind every sibling, unmounts cleanly
+  // when the user navigates away.
+  //
+  // The CSS variable `--detail-tint` is also published on the
+  // wrapper so the hero's bottom-fade gradient targets the exact
+  // base colour the canvas paints in (no visible seam between hero
+  // and the rest of the page).
   const palette = item.backdrop_colors;
   const tintSeed = palette?.muted ?? palette?.vibrant;
-  const detailStyle: CSSProperties | undefined = tintSeed
-    ? {
-        ['--detail-tint' as string]: `color-mix(in srgb, ${tintSeed} 14%, rgb(8 12 16))`,
-      }
+  const tintBase = tintSeed
+    ? `color-mix(in srgb, ${tintSeed} 14%, rgb(8 12 16))`
+    : null;
+  const detailStyle: CSSProperties | undefined = tintBase
+    ? { ['--detail-tint' as string]: tintBase }
     : undefined;
+  // Layered radial-gradient stack for the ambient aurora background.
+  // Built ONLY when the item has a palette — otherwise the page
+  // falls through to plain bg-base and reads exactly like the rest
+  // of the app. Each blob is tuned for low intensity (≤30%) so the
+  // foreground content (titles, badges, seasons grid) keeps
+  // unambiguous contrast against the canvas; intentionally kept
+  // static rather than animated, both to respect the user's reduce-
+  // motion preference by default and to avoid the GPU cost of an
+  // always-painting full-viewport composite.
+  const auroraBackground = (() => {
+    if (!tintBase) return undefined;
+    const vibrant = palette?.vibrant;
+    const muted = palette?.muted;
+    const layers: string[] = [];
+    if (vibrant) {
+      layers.push(
+        `radial-gradient(ellipse 80% 60% at 15% 10%, color-mix(in srgb, ${vibrant} 28%, transparent) 0%, transparent 60%)`,
+      );
+    }
+    if (muted) {
+      layers.push(
+        `radial-gradient(ellipse 70% 70% at 85% 90%, color-mix(in srgb, ${muted} 26%, transparent) 0%, transparent 65%)`,
+      );
+    }
+    if (vibrant || muted) {
+      const accent = vibrant ?? muted!;
+      layers.push(
+        `radial-gradient(circle 35% at 50% 50%, color-mix(in srgb, ${accent} 12%, transparent) 0%, transparent 70%)`,
+      );
+    }
+    return {
+      backgroundColor: tintBase,
+      backgroundImage: layers.join(", "),
+    };
+  })();
 
   return (
     <div className="flex flex-col" style={detailStyle}>
+      {/* Page-wide ambient-aurora canvas — fixed, full viewport,
+          behind every other layer. Layered radial gradients give
+          the surface a PS3-XMB-style cloud-of-colour quality: the
+          page reads as personalised by the cover art rather than
+          a flat tint. Only mounts when we actually have a palette;
+          otherwise the body's bg-base shows through and the page
+          looks identical to the rest of the app. */}
+      {auroraBackground && (
+        <div
+          aria-hidden="true"
+          className="fixed inset-0 -z-10"
+          style={auroraBackground}
+        />
+      )}
+
       {/* Video Player Overlay */}
       {showPlayer && playerInfo && (playingItemId || id) && (
         <VideoPlayer
