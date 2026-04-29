@@ -197,6 +197,14 @@ type MetadataRepository interface {
 	GetMetadataBatch(ctx context.Context, itemIDs []string) (map[string]*db.Metadata, error)
 }
 
+// ExternalIDsRepository defines the per-item external-id lookup
+// needed by the items handler. Used to surface IMDb / TMDb / TVDB
+// links in the detail response so the client can render "Open in
+// IMDb" / "Open in TMDb" affordances without a second round-trip.
+type ExternalIDsRepository interface {
+	ListByItem(ctx context.Context, itemID string) ([]*db.ExternalID, error)
+}
+
 // ChapterRepository defines chapter data access needed by handlers.
 // Optional dep: when nil, the item-detail handler simply omits the
 // `chapters` field — older test environments and bare deployments

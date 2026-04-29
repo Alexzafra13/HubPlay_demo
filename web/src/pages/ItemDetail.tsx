@@ -134,6 +134,49 @@ export default function ItemDetail() {
       });
     }
 
+    // External-provider deep links. We only render the entries we know
+    // how to URL-build, so an unknown provider key in the wire (e.g.
+    // a future "wikidata") is silently ignored rather than emitting a
+    // dead "Open in wikidata" row pointing nowhere. Series prefer the
+    // tv subpath on TMDb; movies/episodes use /movie/. Episodes don't
+    // get their own IMDb deep-link surface — TMDb folds them under the
+    // show — so we suppress per-episode rows when the id matches a
+    // show-level id from the series above (best-effort).
+    if (item?.external_ids) {
+      const ids = item.external_ids;
+      const tmdbType: "tv" | "movie" =
+        item.type === "series" || item.type === "season" || item.type === "episode"
+          ? "tv"
+          : "movie";
+
+      if (ids.imdb) {
+        items.push({
+          label: t("itemDetail.openInIMDb", { defaultValue: "Ver en IMDb" }),
+          icon: (
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+            </svg>
+          ),
+          onClick: () => {
+            window.open(`https://www.imdb.com/title/${ids.imdb}/`, "_blank", "noopener,noreferrer");
+          },
+        });
+      }
+      if (ids.tmdb) {
+        items.push({
+          label: t("itemDetail.openInTMDb", { defaultValue: "Ver en TMDb" }),
+          icon: (
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+            </svg>
+          ),
+          onClick: () => {
+            window.open(`https://www.themoviedb.org/${tmdbType}/${ids.tmdb}`, "_blank", "noopener,noreferrer");
+          },
+        });
+      }
+    }
+
     return items;
   })();
 

@@ -26,8 +26,23 @@ type itemTestEnv struct {
 	meta     *libFakeMetadataRepo
 	userData *progressFakeUserData
 	chapters *fakeChapterRepo
+	extIDs   *fakeExternalIDsRepo
 	handler  *ItemHandler
 	router   chi.Router
+}
+
+// fakeExternalIDsRepo is a minimal in-memory ExternalIDsRepository
+// fake. Tests stash a list of provider/external-id pairs per item.
+type fakeExternalIDsRepo struct {
+	byItem map[string][]*db.ExternalID
+}
+
+func newFakeExternalIDsRepo() *fakeExternalIDsRepo {
+	return &fakeExternalIDsRepo{byItem: map[string][]*db.ExternalID{}}
+}
+
+func (r *fakeExternalIDsRepo) ListByItem(_ context.Context, itemID string) ([]*db.ExternalID, error) {
+	return r.byItem[itemID], nil
 }
 
 // fakeChapterRepo is a minimal in-memory ChapterRepository fake for
@@ -55,10 +70,11 @@ func newItemTestEnv(t *testing.T) *itemTestEnv {
 	}
 	env.userData = newProgressFakeUserData()
 	env.chapters = newFakeChapterRepo()
+	env.extIDs = newFakeExternalIDsRepo()
 	// trickplayDir empty — the existing tests don't exercise the
 	// trickplay endpoints, so the handlers short-circuit to 503 via
 	// their nil-guard. New trickplay tests wire a temp dir locally.
-	env.handler = NewItemHandler(env.svc, env.images, env.meta, env.userData, env.chapters, "", testutil.NopLogger())
+	env.handler = NewItemHandler(env.svc, env.images, env.meta, env.userData, env.chapters, env.extIDs, "", testutil.NopLogger())
 
 	r := chi.NewRouter()
 	r.Route("/api/v1/items", func(r chi.Router) {
@@ -242,6 +258,46 @@ func TestItemHandler_Get_OmitsUserDataWhenAnonymous(t *testing.T) {
 	data, _ := itemDecodeData(t, rr).(map[string]any)
 	if _, present := data["user_data"]; present {
 		t.Errorf("anonymous response should not include user_data: %v", data["user_data"])
+	}
+}
+
+func TestItemHandler_Get_IncludesExternalIDs(t *testing.T) {
+	env := newItemTestEnv(t)
+	env.svc.getItemFn = func(_ context.Context, id string) (*db.Item, error) {
+		return &db.Item{ID: id, Type: "movie", Title: "Foo"}, nil
+	}
+	env.extIDs.byItem["it-1"] = []*db.ExternalID{
+		{ItemID: "it-1", Provider: "imdb", ExternalID: "tt1234567"},
+		{ItemID: "it-1", Provider: "tmdb", ExternalID: "550"},
+	}
+
+	rr := env.do(http.MethodGet, "/api/v1/items/it-1/")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: %d", rr.Code)
+	}
+	data, _ := itemDecodeData(t, rr).(map[string]any)
+	ids, ok := data["external_ids"].(map[string]any)
+	if !ok {
+		t.Fatalf("external_ids missing or wrong type: %v", data["external_ids"])
+	}
+	if ids["imdb"] != "tt1234567" || ids["tmdb"] != "550" {
+		t.Errorf("external_ids shape: %v", ids)
+	}
+}
+
+func TestItemHandler_Get_OmitsExternalIDsWhenAbsent(t *testing.T) {
+	env := newItemTestEnv(t)
+	env.svc.getItemFn = func(_ context.Context, id string) (*db.Item, error) {
+		return &db.Item{ID: id, Type: "movie", Title: "Foo"}, nil
+	}
+
+	rr := env.do(http.MethodGet, "/api/v1/items/it-1/")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: %d", rr.Code)
+	}
+	data, _ := itemDecodeData(t, rr).(map[string]any)
+	if _, present := data["external_ids"]; present {
+		t.Errorf("external_ids should be absent when none stored, got %v", data["external_ids"])
 	}
 }
 
