@@ -46,6 +46,31 @@ const (
 	ChannelHealthChanged Type = "channel.health.changed"
 	UserLoggedIn         Type = "user.logged_in"
 	UserLoggedOut        Type = "user.logged_out"
+
+	// ── User watch state — published by ProgressHandler so other
+	// devices owned by the SAME user can sync their UI without polling.
+	// `Data` carries:
+	//
+	//   user_id        — string, MUST be filtered against the authed
+	//                    user before fan-out (the per-user SSE
+	//                    endpoint does this).
+	//   item_id        — string.
+	//   position_ticks — int64 (ProgressUpdated only). Backend ticks =
+	//                    seconds × 10_000_000.
+	//   completed      — bool (ProgressUpdated, PlayedToggled).
+	//   played         — bool (PlayedToggled — true on mark-played,
+	//                    false on mark-unplayed).
+	//   is_favorite    — bool (FavoriteToggled).
+	//
+	// Why three types instead of one "user_data.changed": the frontend
+	// invalidates DIFFERENT queries depending on which thing changed
+	// (progress hits Continue Watching; played hits Up Next +
+	// Continue Watching; favorite hits Favorites). Splitting at the
+	// type level lets each subscriber listen only for what it cares
+	// about and keeps the wire payload small.
+	ProgressUpdated  Type = "user.progress.updated"
+	PlayedToggled    Type = "user.played.toggled"
+	FavoriteToggled  Type = "user.favorite.toggled"
 )
 
 type Event struct {

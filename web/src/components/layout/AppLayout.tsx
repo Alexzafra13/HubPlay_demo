@@ -5,6 +5,7 @@ import { TopBar } from './TopBar';
 import { TopBarSlotProvider } from './TopBarSlot';
 import { MiniPlayer } from '@/components/livetv/MiniPlayer';
 import { usePlaylistRefreshEvents } from '@/hooks/usePlaylistRefreshEvents';
+import { useUserDataSync } from '@/hooks/useUserDataSync';
 
 // ─── Props ──────────────────────────────────────────────────────────────────
 
@@ -42,6 +43,12 @@ export function AppLayout({ title }: AppLayoutProps) {
   // of which page kicked off the import (or whether the kick came from
   // the scheduler with no UI at all). See hook docstring for rationale.
   usePlaylistRefreshEvents();
+
+  // Cross-device watch state sync — when the same user updates progress
+  // / favourites / played on another device, the SSE stream tells us
+  // and we invalidate the right TanStack queries so the UI catches up.
+  // Mounts at the shell so it works regardless of the active route.
+  useUserDataSync();
 
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);

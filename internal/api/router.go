@@ -157,6 +157,12 @@ func NewRouter(deps Dependencies) http.Handler {
 			if deps.EventBus != nil {
 				eventHandler := handlers.NewEventHandler(deps.EventBus, deps.Logger)
 				r.Get("/events", eventHandler.Stream)
+
+				// User-scoped SSE: cross-device sync of watch progress,
+				// played, favourites. The handler filters by claims.UserID
+				// so other users on the same server never see these events.
+				meEventsHandler := handlers.NewMeEventsHandler(deps.EventBus, deps.Logger)
+				r.Get("/me/events", meEventsHandler.Stream)
 			}
 
 			// Current user
@@ -265,7 +271,7 @@ func NewRouter(deps Dependencies) http.Handler {
 
 			// Watch Progress & User Engagement
 			if deps.UserData != nil {
-				progressHandler := handlers.NewProgressHandler(deps.UserData, deps.Images, deps.Logger)
+				progressHandler := handlers.NewProgressHandler(deps.UserData, deps.Images, deps.EventBus, deps.Logger)
 
 				r.Get("/me/continue-watching", progressHandler.ContinueWatching)
 				r.Get("/me/favorites", progressHandler.Favorites)

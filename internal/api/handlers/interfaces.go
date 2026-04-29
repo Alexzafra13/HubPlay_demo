@@ -247,6 +247,13 @@ type EventBusSubscriber interface {
 	Subscribe(eventType event.Type, handler event.Handler) func()
 }
 
+// EventBusPublisher is the publish-only side of the bus, used by
+// handlers that emit events but never consume them (progress handler
+// fans out user-scoped events to other clients of the same user).
+type EventBusPublisher interface {
+	Publish(e event.Event)
+}
+
 // ─── Setup service ──────────────────────────────────────────────────────────
 
 // SetupService defines setup wizard operations needed by handlers.
