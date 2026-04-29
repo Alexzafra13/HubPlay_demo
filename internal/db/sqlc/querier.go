@@ -52,6 +52,7 @@ type Querier interface {
 	// The repository (signing_key_repository.go) is a thin adapter around
 	// these queries. Rotation/overlap policy lives in internal/auth/keystore.go.
 	CreateSigningKey(ctx context.Context, arg CreateSigningKeyParams) error
+	CreatePerson(ctx context.Context, arg CreatePersonParams) error
 	CreateUser(ctx context.Context, arg CreateUserParams) error
 	DeleteAllSessionsByUser(ctx context.Context, userID string) (int64, error)
 	DeleteChannelOverride(ctx context.Context, arg DeleteChannelOverrideParams) error
@@ -62,6 +63,12 @@ type Querier interface {
 	DeleteIPTVScheduledJob(ctx context.Context, arg DeleteIPTVScheduledJobParams) error
 	DeleteImageByID(ctx context.Context, id string) error
 	DeleteImagesByItem(ctx context.Context, itemID string) error
+	// Clear an item's existing cast/crew before re-inserting. Avoids
+	// having to diff the new list against the old one — re-scans cost a
+	// few writes per item rather than a comparison pass. The composite
+	// PK on item_people means simple DELETE WHERE item_id = ? is the
+	// whole story.
+	DeleteItemPeople(ctx context.Context, itemID string) error
 	DeleteItem(ctx context.Context, id string) (int64, error)
 	DeleteItemsByLibrary(ctx context.Context, libraryID string) error
 	DeleteLibrary(ctx context.Context, id string) (int64, error)
@@ -93,6 +100,8 @@ type Querier interface {
 	GetLibraryByID(ctx context.Context, id string) (GetLibraryByIDRow, error)
 	GetLibraryEPGSourceByID(ctx context.Context, id string) (GetLibraryEPGSourceByIDRow, error)
 	GetMetadataByItemID(ctx context.Context, itemID string) (GetMetadataByItemIDRow, error)
+	GetPersonByID(ctx context.Context, id string) (GetPersonByIDRow, error)
+	GetPersonByName(ctx context.Context, name string) (GetPersonByNameRow, error)
 	GetNowPlaying(ctx context.Context, arg GetNowPlayingParams) (GetNowPlayingRow, error)
 	GetPrimaryImage(ctx context.Context, arg GetPrimaryImageParams) (GetPrimaryImageRow, error)
 	GetProvider(ctx context.Context, name string) (Provider, error)
@@ -110,6 +119,7 @@ type Querier interface {
 	// Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE epg_programs).
 	// NOTE: BulkSchedule uses dynamic IN() and remains as raw SQL in the adapter.
 	InsertEPGProgram(ctx context.Context, arg InsertEPGProgramParams) error
+	InsertItemPerson(ctx context.Context, arg InsertItemPersonParams) error
 	// Library management (media libraries, paths, access control).
 	//
 	// Tables: libraries, library_paths, library_access.
@@ -174,6 +184,11 @@ type Querier interface {
 	ListLibraryEPGSourcesByLibrary(ctx context.Context, libraryID string) ([]ListLibraryEPGSourcesByLibraryRow, error)
 	ListMediaStreamsByItem(ctx context.Context, itemID string) ([]ListMediaStreamsByItemRow, error)
 	ListPathsByLibrary(ctx context.Context, libraryID string) ([]string, error)
+	// Returns the cast/crew rows for an item joined with the person
+	// record so the caller gets one struct per row. Ordered by
+	// sort_order so TMDb's "billing position" ranking surfaces directly
+	// to the UI without a client-side sort.
+	ListItemPeople(ctx context.Context, itemID string) ([]ListItemPeopleRow, error)
 	ListProviders(ctx context.Context) ([]Provider, error)
 	ListProvidersByType(ctx context.Context, type_ string) ([]Provider, error)
 	ListSchedule(ctx context.Context, arg ListScheduleParams) ([]ListScheduleRow, error)
@@ -203,6 +218,7 @@ type Querier interface {
 	SetFavorite(ctx context.Context, arg SetFavoriteParams) error
 	SetImagePrimary(ctx context.Context, arg SetImagePrimaryParams) error
 	SetProviderStatus(ctx context.Context, arg SetProviderStatusParams) (int64, error)
+	SetPersonThumbPath(ctx context.Context, arg SetPersonThumbPathParams) error
 	SetSigningKeyRetiredAt(ctx context.Context, arg SetSigningKeyRetiredAtParams) (int64, error)
 	// Aggregate "X of Y episodes watched" for a single series.
 	// The grid is series -> seasons -> episodes via parent_id; LEFT JOIN

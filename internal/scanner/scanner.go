@@ -68,6 +68,7 @@ type Scanner struct {
 	externalIDs *db.ExternalIDRepository
 	images      *db.ImageRepository
 	chapters    *db.ChapterRepository
+	people      *db.PeopleRepository
 	providers   providerFetcher
 	prober      probe.Prober
 	bus         *event.Bus
@@ -83,6 +84,7 @@ func New(
 	externalIDs *db.ExternalIDRepository,
 	images *db.ImageRepository,
 	chapters *db.ChapterRepository,
+	people *db.PeopleRepository,
 	providers *provider.Manager,
 	prober probe.Prober,
 	bus *event.Bus,
@@ -104,6 +106,7 @@ func New(
 		externalIDs: externalIDs,
 		images:      images,
 		chapters:    chapters,
+		people:      people,
 		providers:   pf,
 		prober:      prober,
 		bus:         bus,
@@ -759,6 +762,10 @@ func (s *Scanner) enrichMetadata(ctx context.Context, item *db.Item) {
 		}
 	}
 
+	// Persist cast/crew. Best-effort like every other enrichment step;
+	// failures inside syncPeople are logged but never stop the scan.
+	s.syncPeople(ctx, item.ID, meta.People)
+
 	// Fetch and store images. The scanner downloads each candidate to
 	// local storage and records `/api/v1/images/file/{id}` as the
 	// path — never the upstream URL. Persisting remote URLs would
@@ -1123,4 +1130,64 @@ func fingerprint(path string) (string, error) {
 	}
 
 	return fmt.Sprintf("%d:%x", info.Size(), h.Sum(nil)[:16]), nil
+}
+
+// syncPeople persists the cast/crew the metadata provider returned
+// for an item. Idempotent: existing item_people rows are wiped before
+// re-insert so re-scans pick up cast changes (e.g. an episode's
+// guest-star list updating in TMDb) without leaving stale rows.
+//
+// Photos: people are deduplicated by name, so the FIRST item that
+// surfaces a person triggers the profile photo download. Subsequent
+// items reuse the existing row and skip the network. Failed photo
+// downloads are logged and swallowed — the cast row still gets
+// persisted with an empty thumb_path so the UI can fall back to the
+// initial-letter chip.
+//
+// People are stored under <imageDir>/.people/<personID>/ — the dot
+// prefix keeps them out of regular per-item directories during
+// listing, and the per-person subdir means delete-by-person is a
+// single os.RemoveAll.
+func (s *Scanner) syncPeople(ctx context.Context, itemID string, people []provider.Person) {
+	if s.people == nil || len(people) == 0 {
+		return
+	}
+
+	credits := make([]db.ItemPersonCredit, 0, len(people))
+	for _, p := range people {
+		if p.Name == "" {
+			continue
+		}
+		personID, created, err := s.people.EnsureByName(ctx, p.Name, p.Role)
+		if err != nil {
+			s.logger.Warn("person upsert failed", "name", p.Name, "error", err)
+			continue
+		}
+		// Photo download: only for newly created people, and only when
+		// the provider supplied a URL. The IngestRemoteImage helper
+		// runs the same SSRF / max-bytes / atomic-write pipeline used
+		// by item posters so we don't re-implement safety here.
+		if created && p.ThumbURL != "" && s.imageDir != "" {
+			dir := filepath.Join(s.imageDir, ".people", personID)
+			if ing, err := imaging.IngestRemoteImage(dir, "profile", p.ThumbURL, s.logger); err == nil {
+				if err := s.people.SetThumbPath(ctx, personID, ing.LocalPath); err != nil {
+					s.logger.Warn("person thumb path save failed", "id", personID, "error", err)
+				}
+			} else {
+				s.logger.Debug("person thumb download failed", "name", p.Name, "url", p.ThumbURL, "error", err)
+			}
+		}
+		credits = append(credits, db.ItemPersonCredit{
+			PersonID:      personID,
+			Role:          p.Role,
+			CharacterName: p.Character,
+			SortOrder:     p.Order,
+		})
+	}
+	if len(credits) == 0 {
+		return
+	}
+	if err := s.people.ReplaceItemPeople(ctx, itemID, credits); err != nil {
+		s.logger.Warn("replace item people failed", "item_id", itemID, "error", err)
+	}
 }

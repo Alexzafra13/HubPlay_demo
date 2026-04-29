@@ -81,7 +81,7 @@ func newTestScanner(t *testing.T) (*Scanner, *db.ItemRepository, *db.MediaStream
 	// path covered by the new TestScanLibrary_PersistsChapters test
 	// without spinning up another fixture.
 	chaptersRepo := db.NewChapterRepository(database)
-	s := New(itemRepo, streamRepo, metaRepo, extIDRepo, imageRepo, chaptersRepo, nil, prober, bus, "", nil, slog.Default())
+	s := New(itemRepo, streamRepo, metaRepo, extIDRepo, imageRepo, chaptersRepo, db.NewPeopleRepository(database), nil, prober, bus, "", nil, slog.Default())
 	return s, itemRepo, streamRepo
 }
 
@@ -584,7 +584,7 @@ func TestFetchAndStoreImages_PersistsLocalPathNotURL(t *testing.T) {
 	prober := &mockProber{result: &probe.Result{}}
 	s := New(itemRepo, db.NewMediaStreamRepository(database),
 		db.NewMetadataRepository(database), db.NewExternalIDRepository(database),
-		imgRepo, db.NewChapterRepository(database),
+		imgRepo, db.NewChapterRepository(database), db.NewPeopleRepository(database),
 		nil /* providers — overridden below */, prober, bus,
 		imageDir, pm, slog.Default())
 
@@ -730,7 +730,7 @@ func TestEnrichEpisode_PersistsOverviewAndStill(t *testing.T) {
 	bus := event.NewBus(slog.Default())
 	prober := &mockProber{result: &probe.Result{}}
 	s := New(itemRepo, db.NewMediaStreamRepository(database), metaRepo, extRepo,
-		imgRepo, db.NewChapterRepository(database),
+		imgRepo, db.NewChapterRepository(database), db.NewPeopleRepository(database),
 		nil, prober, bus, imageDir, pm, slog.Default())
 
 	rating := 8.4
@@ -832,7 +832,7 @@ func TestEnrichEpisode_NoTMDbIDOnSeries(t *testing.T) {
 	bus := event.NewBus(slog.Default())
 	prober := &mockProber{result: &probe.Result{}}
 	s := New(itemRepo, db.NewMediaStreamRepository(database), metaRepo, extRepo,
-		imgRepo, db.NewChapterRepository(database),
+		imgRepo, db.NewChapterRepository(database), db.NewPeopleRepository(database),
 		nil, prober, bus, t.TempDir(), pathmap.New(t.TempDir()), slog.Default())
 
 	called := false
@@ -921,7 +921,7 @@ func TestEnrichSeason_PersistsMetadataAndPoster(t *testing.T) {
 	bus := event.NewBus(slog.Default())
 	prober := &mockProber{result: &probe.Result{}}
 	s := New(itemRepo, db.NewMediaStreamRepository(database), metaRepo, extRepo,
-		imgRepo, db.NewChapterRepository(database),
+		imgRepo, db.NewChapterRepository(database), db.NewPeopleRepository(database),
 		nil, prober, bus, imageDir, pm, slog.Default())
 
 	rating := 8.7
@@ -1024,7 +1024,7 @@ func TestFetchAndStoreImages_SkippedWhenImageDirEmpty(t *testing.T) {
 	}}
 	s := New(itemRepo, db.NewMediaStreamRepository(database),
 		db.NewMetadataRepository(database), db.NewExternalIDRepository(database),
-		imgRepo, db.NewChapterRepository(database),
+		imgRepo, db.NewChapterRepository(database), db.NewPeopleRepository(database),
 		nil, prober, bus, "", nil, slog.Default())
 	s.providers = stub
 

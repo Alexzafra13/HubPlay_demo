@@ -265,10 +265,19 @@ export interface MediaStream {
 }
 
 export interface Person {
+  // Stable id — uuid. Used by /people/{id}/thumb (handled
+  // server-side) and the upcoming person detail page route.
+  id: string;
   name: string;
   role: string;
-  type: string;
-  image_url: string | null;
+  // Character name for actors ("Wanda Maximoff"). Empty for crew
+  // (director, writer) where the role IS the character.
+  character?: string;
+  // Profile photo URL pointing at /api/v1/people/{id}/thumb when the
+  // scanner persisted a photo. Absent when the provider didn't ship
+  // one or download failed — UI falls back to an initial-letter chip.
+  image_url?: string;
+  sort_order: number;
 }
 
 export interface UserData {
@@ -307,7 +316,10 @@ export interface ExternalSubtitleResult {
 
 export interface ItemDetail extends MediaItem {
   media_streams: MediaStream[];
-  people: Person[];
+  // Cast / crew. Server omits the key entirely when no rows are
+  // stored, so the field is optional on the wire side too. Detail
+  // page guards on `?.length > 0` already; absent === empty list.
+  people?: Person[];
   // Optional: backend omits `chapters` entirely when the file has no
   // markers (most non-Blu-ray rips). Empty and absent are equivalent
   // for clients.

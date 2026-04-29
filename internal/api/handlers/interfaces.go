@@ -205,6 +205,12 @@ type ExternalIDsRepository interface {
 	ListByItem(ctx context.Context, itemID string) ([]*db.ExternalID, error)
 }
 
+// PeopleRepoForItems is the per-item people lookup used by the
+// items handler to fold cast/crew into the detail response.
+type PeopleRepoForItems interface {
+	ListByItem(ctx context.Context, itemID string) ([]*db.ItemPersonCredit, error)
+}
+
 // ChapterRepository defines chapter data access needed by handlers.
 // Optional dep: when nil, the item-detail handler simply omits the
 // `chapters` field — older test environments and bare deployments
