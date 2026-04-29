@@ -70,7 +70,15 @@ export function AppLayout({ title }: AppLayoutProps) {
 
   return (
     <TopBarSlotProvider>
-    <div className="min-h-screen bg-bg-base font-sans">
+    {/*
+     * No `bg-bg-base` on this wrapper — the body has it globally
+     * (see styles/globals.css). Painting it again here would cover
+     * any fixed-positioned z<0 backdrop a route renders (e.g.
+     * ItemDetail's ambient-aurora canvas), since the static wrapper
+     * paints in z=auto over the negative-z siblings. Keeping the
+     * layout transparent lets per-route backgrounds show through.
+     */}
+    <div className="min-h-screen font-sans">
       {/* Mobile drawer overlay */}
       <div
         className={[

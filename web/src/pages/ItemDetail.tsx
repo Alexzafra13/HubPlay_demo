@@ -315,18 +315,18 @@ export default function ItemDetail() {
     const layers: string[] = [];
     if (vibrant) {
       layers.push(
-        `radial-gradient(ellipse 80% 60% at 15% 10%, color-mix(in srgb, ${vibrant} 28%, transparent) 0%, transparent 60%)`,
+        `radial-gradient(ellipse 90% 70% at 15% 5%, color-mix(in srgb, ${vibrant} 45%, transparent) 0%, transparent 65%)`,
       );
     }
     if (muted) {
       layers.push(
-        `radial-gradient(ellipse 70% 70% at 85% 90%, color-mix(in srgb, ${muted} 26%, transparent) 0%, transparent 65%)`,
+        `radial-gradient(ellipse 80% 80% at 90% 95%, color-mix(in srgb, ${muted} 40%, transparent) 0%, transparent 70%)`,
       );
     }
     if (vibrant || muted) {
       const accent = vibrant ?? muted!;
       layers.push(
-        `radial-gradient(circle 35% at 50% 50%, color-mix(in srgb, ${accent} 12%, transparent) 0%, transparent 70%)`,
+        `radial-gradient(circle 45% at 50% 60%, color-mix(in srgb, ${accent} 18%, transparent) 0%, transparent 75%)`,
       );
     }
     return {

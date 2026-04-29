@@ -172,7 +172,7 @@ const SeriesHero: FC<SeriesHeroProps> = ({
             than before so the transition is gradual rather than
             cliff-edge. */}
         <div
-          className="absolute inset-x-0 bottom-0 h-32"
+          className="absolute inset-x-0 bottom-0 h-48 lg:h-56"
           style={{
             background:
               "linear-gradient(to bottom, transparent, var(--detail-tint, rgb(8 12 16)))",
