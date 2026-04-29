@@ -1,6 +1,62 @@
 # Estado del proyecto
 
-> Snapshot: **2026-04-28 (IPTV transmux + import event-driven)** — dos fixes de robustez para el flujo IPTV completo. (1) El listener SSE de `playlist.refreshed` se promociona a global (`AppLayout`) y el endpoint de refresh devuelve 409 estructurado; cualquier import en curso invalida queries automáticamente, sobreviviendo a navegación, recargas y al scheduler corriendo sin UI. (2) Nuevo `TransmuxManager` con sesiones ffmpeg `-c copy -f hls` por canal, compartidas entre viewers, idle-reaper, cap por config: el handler `/channels/{id}/stream` redirige automáticamente upstreams MPEG-TS (Xtream Codes) a `/channels/{id}/hls/index.m3u8` para que cualquier player web pueda consumirlos. **tests: backend verde con `-race` (incluye 11 nuevos del transmux) · frontend 296/296 · tsc clean**
+> Snapshot: **2026-04-29 (IPTV hardening completo)** — tras shippear el transmux MPEG-TS→HLS, dos noches de iteración real contra el provider del usuario (`pdmkibyg.xiagdns.com`) cerraron todos los huecos operativos del flujo IPTV: tuning de buffers, recuperación gradual frente a stalls de pestaña, escritura atómica de segmentos, integración con el circuit breaker, captura de stderr, UA de VLC, fallback automático a re-encode con cap separado y aceleración por hardware, proxy/caché de logos para CSP-compliance, y matching cross-library del EPG (una fuente cubre todas las librerías livetv del instance). **tests: backend verde con `-race` · frontend 296/296 · tsc clean**
+
+---
+
+## 🛡️ Sesión 2026-04-28 noche → 2026-04-29 (IPTV hardening completo) — 7 commits
+
+Empieza con un usuario reportando "se corta" en su provider Xtream y termina con todo el flujo IPTV listo para producción real. Ningún commit es un feature nuevo grande — son los pequeños refinamientos que separan "demo técnica" de "producto self-hosted".
+
+### Commits en orden
+
+1. **`2be58eb` — Buffer tuning para Xtream**. Real-traffic trace mostró bursty downloads + skip ocasional sobre la ventana del manifest. ffmpeg: `hls_time 4→2`, `hls_list_size 6→10`, `+rtbufsize 50M`, `+max_delay 5000000`. hls.js: `maxBufferLength 30→60`, `maxMaxBufferLength 60→120`, `liveSyncDurationCount 3→4`, `liveMaxLatencyDurationCount 6→12`. Sólo más generoso, no cambio de régimen.
+
+2. **`357a334` — Recovery production-grade**. Logs post-tuning mostraban gaps de ~10s sin requests del browser → text-book Chrome/Firefox background-tab throttling. Cambios:
+   - **Visibility API**: `document.addEventListener("visibilitychange")` → en hidden, `hls.stopLoad()`; en visible, `hls.startLoad(-1)` (resume desde live edge). Elimina el síntoma raíz, no lo recupera.
+   - **`maxLiveSyncPlaybackRate: 1.5`**: cuando hls.js detecta retraso, acelera 1.5× en vez de saltar. Imperceptible al oído.
+   - **`hls_list_size 10→20` + `hls_delete_threshold 5`**: 40s de ventana absorbe el stall.
+   - **`+temp_file` en hls_flags**: rename atómico — Go's `http.ServeFile` no lockea, sin esto serviría segmentos parciales.
+   - **`nudgeMaxRetry 3→10`**: más reintentos antes de rendirse en buffer atascado.
+
+3. **`1bdac6e` — Circuit breaker + stderr + VLC UA** *(commit del usuario)*. Tres mejoras de fiabilidad después de probar contra un provider muy flaky:
+   - Circuit breaker compartido entre proxy y transmux planes vía `ChannelGate`. Antes el transmux no tenía breaker y un canal muerto producía fork-bomb de ffmpegs.
+   - Captura ring-buffered de stderr (64 líneas) por sesión.
+   - `User-Agent: VLC/3.0.20` consistente con el prober (muchos paneles Xtream filtran por UA).
+
+4. **`ce9f51a` — Re-encode fallback automático + métricas Prometheus** *(commit del usuario)*. Codec rescue para upstreams que `-c copy` no traga (HEVC main10, AC3 raros):
+   - `decodeMode` enum (`direct` / `reencode`) con TTL de 1 hora. Self-healing: tras el TTL retorna a `direct` automáticamente.
+   - `looksLikeCodecError()` clasifica stderr — diferenciación real, no por exit code.
+   - `EnableReencodeFallback` opt-in (default true) por config.
+   - `TransmuxMetrics` interface (sink pattern): `IncStarts(outcome)`, `IncDecodeMode(mode)`, `IncReencodePromotions()`.
+
+5. **`1a5f2a2` — Proxy + caché de logos de canales**. Usuario reportó violaciones CSP en consola: M3U logos desde hosts random (`lo1.in`, `i.imgur.com`, `i.ibb.co`...) y `img-src` sólo permitía `tmdb` + `fanart`.
+   - `internal/iptv/logo_cache.go`: cache content-addressed (`sha256[:16]`) bajo `<cache_dir>/iptv-logos/`. Reusa `imaging.SafeGet` (SSRF + size + timeout). Sniff por `http.DetectContentType` rechaza HTML mis-tagged.
+   - `GET /api/v1/channels/{id}/logo` ACL-checked + `Cache-Control: public, max-age=86400`. 404 → frontend cae al avatar de iniciales por `onError` existente.
+   - `iptv_dto.logoProxyURL(ch)`: la URL en el DTO pasa a same-origin. CSP queda restrictivo, hosts externos dejan de trackear.
+
+6. **`12867fb` — Hardware-accel para el reencode fallback**. `ce9f51a` shipeó con `libx264` software. Tienes `internal/stream/hwaccel.go` ya con detección VAAPI/NVENC/QSV/VideoToolbox para VOD. Wiring:
+   - `stream.HWAccelInputArgs` exportado.
+   - `TransmuxManagerConfig` gana `ReencodeEncoder` + `ReencodeHWAccelInputArgs` (rellenados desde `streamManager.HWAccelInfo()`).
+   - `encoderTuningArgs(encoder)` con flags específicos: libx264 (veryfast/zerolatency), h264_nvenc (p4/ll/cbr), h264_vaapi (quality 4), h264_qsv (veryfast/look_ahead 0), h264_videotoolbox (allow_sw 0/realtime 1).
+   - **`MaxReencodeSessions` cap separado** del global (default `MaxSessions/2`, floor 1).
+   - 5-10× CPU saving en HEVC→H.264 cuando hwaccel disponible.
+
+7. **`d470a34` — Cross-library EPG matching**. Real data del usuario: 1.073 canales movistar sin EPG (0 sources configuradas), pero matchearían contra la fuente XMLTV configurada en Cat TV. Cobertura visible ~26%; con cross-library debería subir a ~70%.
+   - `ChannelRepository.ListLivetvChannels()` (raw SQL, JOIN libraries WHERE content_type='livetv').
+   - `service_epg.go RefreshEPG`: el `channelIndex` se construye desde TODOS los canales livetv del instance, no sólo la lib del refresh.
+   - Persistencia inalterada: `ReplaceForChannel` sólo dispara para canales matched → libs no matched conservan su EPG previa.
+   - Logs: `channels_matched_by_lib` (map), `channels_matched_cross_library` (count fuera de la lib source).
+   - 0 colisiones tvg-id cross-library en datos del usuario verificadas → cambio safe.
+
+### Estado funcional al cerrar la sesión
+
+- **Reproducción IPTV TS**: funcionando en provider real (49+ segmentos servidos sin errores en pruebas).
+- **Recovery frente a stalls**: cubre background-tab + jitter del provider.
+- **Codec rescue**: HEVC/AC3 entran en reencode automáticamente, con hwaccel cuando esté.
+- **CSP**: queda restrictivo; logos servidos same-origin.
+- **EPG coverage**: cross-library matching activo; un click en "Refrescar EPG" en Cat TV cubre movistar también.
+- **Observabilidad**: stderr capturado, métricas por outcome / decode_mode / reencode promotions.
 
 ---
 
