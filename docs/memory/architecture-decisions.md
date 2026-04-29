@@ -649,3 +649,137 @@ rejection y vitest la flagea como unhandled).
   esperen**: rechazada. Acopla TanStack Query a la mecánica de
   refresh; cualquier caller fuera de Query (websocket reconnect,
   beacon) quedaría sin protección.
+
+---
+
+## ADR-010 — Configuración runtime: YAML para boot, `app_settings` para preferencias
+
+- **Fecha**: 2026-04-29
+- **Estado**: Aceptado
+- **Contexto de descubrimiento**: Sesión 2026-04-29 noche (commit `b1a84da`)
+
+### Contexto
+
+El panel `/admin/system` mostraba dos cards diciendo literalmente "Sin configurar (define `server.base_url` en `hubplay.yaml`)" y "Activa `hardware_acceleration.enabled` en `hubplay.yaml`". Para un producto self-hosted estilo Plex / Jellyfin / Sonarr, pedirle al admin SSH-earse y editar un fichero es una abstracción rota — la UI prometía ser el panel de control y luego derivaba al usuario a un editor de texto.
+
+Las opciones eran:
+
+1. **Quick win parcial**: cambiar default de `hardware_acceleration.enabled` a `true` (autodetect ya existe). Quita un prompt sin código nuevo, deja `base_url` como estaba.
+2. **Solución completa**: tabla `app_settings` con overlay sobre YAML, endpoints admin, UI editable. Cierra los dos prompts y deja la arquitectura abierta.
+
+El usuario invocó Torvalds explícitamente: si el defecto es arquitectural, parchearlo a la mitad es peor que no parchear — la mitad lleva a parches futuros para los mismos casos.
+
+### Decisión
+
+Splitear la configuración en dos capas con autoridad clara:
+
+```
+YAML / env (boot-time, immutable):
+  server.bind, server.port, database.path, streaming.cache_dir,
+  auth bootstrap secret. Cualquier cosa que requiera reinicio
+  porque cambiarla invalidaría listeners ya bound, file handles,
+  signing keys, etc.
+
+app_settings (runtime-mutable, admin-editable desde el panel):
+  server.base_url, hardware_acceleration.enabled,
+  hardware_acceleration.preferred. Preferencias del operador que
+  nunca debieron requerir SSH al host.
+```
+
+Authority chain en lectura:
+
+```
+app_settings row (si existe) → YAML / env value (fallback) → effective
+```
+
+Componentes:
+
+- **Migración 019** crea la tabla `app_settings(key TEXT PK, value TEXT, updated_at)`. Schema mínimo; los valores son strings raw, validados en el handler boundary.
+- **`internal/db/settings_repository.go`**: `Get / GetOr / Set / Delete / All`. Sin tipos de dominio.
+- **`internal/api/handlers/settings.go`**: `GET / PUT / DELETE /admin/system/settings`. **Whitelist hardcoded**, NO un KV genérico — un const + un caso en `validateSettingValue` por cada nueva key editable. Validación normaliza el valor (trim, lower-case bool variants, strip trailing slash de URLs) antes de persistir.
+- **Handlers que leen runtime values** (System, Stream) reciben un `SettingsReader` interface y consultan `GetOr(ctx, key, yamlFallback)` al servir la request. Sin `Runtime` overlay struct, sin caching layer, sin goroutine que vigile cambios. Una SQLite point query por hit, invisible en perfil.
+- **HWAccel se aplica al boot**: `cmd/hubplay/main.go` lee del settings repo justo antes de construir el `streamManager`. La UI muestra "Reinicia para aplicar" cuando hay override pendiente. El detector tiene estado capturado al boot; replicarlo en runtime sería ruido.
+- **BaseURL es runtime**: `effectiveBaseURL(ctx)` en cada request del System y Stream handler. Save en panel → próximo request lo usa.
+
+### Consecuencias
+
+**Positivas**
+
+- El operador edita configuración runtime desde la UI, no desde un editor de texto en otra ventana.
+- Una sola autoridad por valor (DB > YAML), sin segunda fuente de verdad.
+- Whitelist hardcoded protege contra "modificar cualquier setting" — ni siquiera con admin auth se puede tocar lo que no debería ser runtime-editable.
+- Añadir un cuarto setting es: const en `settings.go` + caso en `validateSettingValue` + par i18n + (opcional) `allowed_values` en el descriptor. Sin scaffolding nuevo.
+- El YAML sigue siendo source-of-truth para los valores boot-time; cualquier deploy nuevo arranca con el comportamiento del YAML por defecto.
+
+**Negativas / trade-offs**
+
+- HWAccel requiere reinicio para aplicar cambios. La UI lo dice claramente; el detector se llama una sola vez al boot por diseño y replicarlo runtime no merece la pena.
+- Una SQLite query extra por request en handlers que leen runtime values. Negligible (puntual, índice por PK).
+- La tabla `app_settings` es un acoplamiento entre repo y handler — el handler conoce las keys hardcoded. Pero esto es a propósito: la whitelist es la red de seguridad.
+
+### Alternativas descartadas
+
+- **Mantener YAML único + flippar defaults útiles** (camino A): rechazado. Resuelve la mitad del problema para `hwaccel` pero deja `base_url` con el mismo prompt; la abstracción seguía rota.
+- **Endpoint KV genérico (`PUT /settings/:any-key`)**: rechazado. El gate de la whitelist es lo que hace seguro este patrón en un producto self-hosted donde el admin auth es la única barrera.
+- **`Runtime` struct overlay** (`Runtime` que envuelve `Config + SettingsReader`): rechazado. Una capa de indirección sin función — los handlers consumen `SettingsReader` directamente y se enteran del fallback en una línea.
+- **Hot-reload de HWAccel** (re-detect cuando el toggle cambia): rechazado. El `stream.Manager` captura el resultado del detector en su estado. Mutarlo runtime obliga a sincronizar el transcoder y las sesiones activas; mucho riesgo para un beneficio marginal frente a un mensaje "Reinicia para aplicar".
+- **Bus de eventos "settings changed"** que invalide caches: rechazado. No hay caches que invalidar — los handlers leen del repo en cada request.
+
+---
+
+## ADR-011 — Show hierarchy: UNIQUE partial indexes, sin recovery code en el scanner
+
+- **Fecha**: 2026-04-29
+- **Estado**: Aceptado
+- **Supersede**: parte del enfoque "dedupe en read-time" de ADR-005
+
+### Contexto
+
+El usuario reportó series duplicadas en el rail. Análisis del schema `items`:
+
+- PK es `id` (uuid), no hay UNIQUE constraint en `(library_id, type, title)` para series ni en `(parent_id, season_number)` para seasons.
+- `internal/scanner/show_hierarchy.go` tiene un `showCache` per-scan que evita dups en condiciones normales, pero la key del map es title-exact. Cualquier diferencia (case, whitespace, accents, una mejora del path-parser entre versiones) → cache miss → row nuevo → dup.
+- Cuando ya hay dups en DB, el seeding del cache (`rememberSeries(title, id)` por cada existing row) machaca el id anterior en el map; las filas anteriores quedan huérfanas para siempre.
+- Para seasons existía dedupe en read-time (`DedupeSeasonsByChildCount` en `library/service.go`), para series no había equivalente — por eso aparecían dos veces en el rail.
+
+El usuario verificó empíricamente con un wipe + rescan que el scanner actual **no recreaba dups** en su workflow. El bug era residuo histórico, no una regresión activa. Pero el schema lo permitía estructuralmente, y cualquier futura regresión o cambio del path-parser podía recrear el problema sin ninguna alarma.
+
+### Decisión
+
+Migración 019 hace **dos cosas**, ambas estructurales y sin código en el scanner:
+
+1. **Cleanup defensivo**: para cada grupo de dups en `(library_id, 'series', title)` y `(parent_id, 'season', season_number)`, elige canónico = `MIN(id)` (determinista, lex order de uuids). Re-parenta los hijos de las no-canónicas a la canónica antes de borrar las demás. No-op en una DB ya limpia.
+
+2. **UNIQUE INDEX parciales**:
+   - `uniq_series_per_library ON items(library_id, title) WHERE type = 'series'`
+   - `uniq_season_per_series ON items(parent_id, season_number) WHERE type = 'season' AND season_number IS NOT NULL`
+
+   Filtrados por `type` para que movies / episodes / audio no participen — en episodes es legal tener varios files con el mismo `episode_number` (variantes de calidad), y movies pueden compartir título entre libraries.
+
+**Lo que NO se hizo deliberadamente**:
+
+- No se introdujo `ErrItemConflict` tipado en el repo.
+- No se añadieron `FindSeriesByTitle` / `FindSeasonByNumber` helpers.
+- No se añadieron recovery branches en `ensureSeriesRow` / `ensureSeasonRow` que capturen UNIQUE conflict y resuelvan via re-fetch.
+
+Esa última pieza era atractiva como "defensa en profundidad" pero violaba Torvalds-simple aplicado consistentemente: el usuario ya había verificado que el scanner no genera dups; añadir silent-recovery code defendía escenarios hipotéticos y, peor aún, **disimularía un bug futuro real** en vez de exponerlo. Si la migración alguna vez salta en producción será porque el scanner regresionó (cambio de path-parser, race nuevo, lo que sea), y queremos que falle ruidosamente con `UNIQUE constraint failed: items.title` para enterarnos, no recuperar implícitamente.
+
+### Consecuencias
+
+**Positivas**
+
+- Imposible estructuralmente que vuelvan a coexistir dos series con `(library_id, title)` igual o dos seasons con `(parent_id, season_number)` igual. La invariante está en el schema, no en código que se puede regresionar.
+- Cualquier DB upgradeada con dups históricos se limpia automáticamente al aplicar la migración. Sin acción del operador.
+- `DedupeSeasonsByChildCount` queda como red de seguridad puramente defensiva — tras la migración no debería tener nada que dedupar.
+
+**Negativas / trade-offs**
+
+- Si en el futuro un cambio del scanner introduce dups (cache key incorrecta, race), el scan falla con un error opaco para el usuario final. **Esto es exactamente lo que queremos** — fail loud, fix root cause — pero requiere que los operadores sepan interpretar `UNIQUE constraint failed: items.title` como "el scanner tiene un bug, no toques mi DB".
+- La cleanup pass en la migración usa `MIN(id)` como canónico (lex order de uuid4), no "row con más hijos". En el caso patológico esto puede preservar la fila menos completa; el re-parenting de hijos lo compensa. Decisión consciente: simplicidad > optimización del canónico.
+
+### Alternativas descartadas
+
+- **Dedupe en read-time para series** (espejo del season pattern): rechazado. Hide-not-fix, además de pagar el coste en cada GET. La migración estructural lo cierra una sola vez.
+- **`ErrItemConflict` + recovery en el scanner**: rechazado. Defendía edge cases (case/whitespace/accents drift) que el usuario verificó empíricamente que no ocurren en su workflow. Si alguna vez ocurriera, queremos saberlo, no taparlo.
+- **Migración separada para cleanup, otra para UNIQUE**: rechazado. La cleanup es no-op si no hay dups; combinarlas es atómico (tx única de goose) y el operador sólo ve "se aplicó la migración 019".
+- **Backfill `external_id` o `tmdb_id` como discriminator** en lugar de title: rechazado. El title viene del filesystem y muchos series no tienen tmdb_id matched aún (TMDb deshabilitado, no match). El title es el único campo siempre presente; las dos heurísticas son ortogonales pero el title es el primario.

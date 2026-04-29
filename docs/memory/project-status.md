@@ -1,6 +1,120 @@
 # Estado del proyecto
 
-> Snapshot: **2026-04-29 (IPTV hardening completo)** — tras shippear el transmux MPEG-TS→HLS, dos noches de iteración real contra el provider del usuario (`pdmkibyg.xiagdns.com`) cerraron todos los huecos operativos del flujo IPTV: tuning de buffers, recuperación gradual frente a stalls de pestaña, escritura atómica de segmentos, integración con el circuit breaker, captura de stderr, UA de VLC, fallback automático a re-encode con cap separado y aceleración por hardware, proxy/caché de logos para CSP-compliance, y matching cross-library del EPG (una fuente cubre todas las librerías livetv del instance). **tests: backend verde con `-race` · frontend 296/296 · tsc clean**
+> Snapshot: **2026-04-29 noche (review-de-review + runtime settings)** — pase de auto-review sobre el IPTV hardening (5 bugs latentes + split de transmux.go), cerrada la deuda histórica de tests frontend de los 3 hooks pendientes (useEventStream / useTrickplay / useLiveHls), migración 018 con UNIQUE indexes parciales para series/seasons (red de seguridad estructural, sin recovery code en el scanner — Torvalds-simple), y arquitectura nueva de **runtime settings** con `app_settings` overlay sobre YAML que mata los dos prompts "edita hubplay.yaml" del panel admin (server.base_url + hardware_acceleration.* ahora editables desde la UI, whitelist hardcoded). **tests: backend verde con `-race` (incluye 6 regression tests nuevos del transmux + 6 del settings repo + 7 del settings handler) · frontend 327/327 · tsc clean**.
+
+Cuatro commits en `claude/review-project-sgAr2`:
+- `a21204c` IPTV transmux post-review hardening
+- `8a723c0` tests frontend de hooks
+- `0779e4e` UNIQUE indexes + dedupe defensivo show hierarchy
+- `b1a84da` runtime-editable settings (kill the "edit yaml" prompts)
+
+---
+
+## 🧹 Sesión 2026-04-29 noche (post-review hardening + settings runtime) — 4 commits
+
+Sesión orientada a "lo que hicimos ayer, ¿es realmente sólido?". Empieza con un peer-review sobre el IPTV hardening (no del usuario — propio, como siguiente capa de tamiz) y termina con la pieza arquitectural más importante de la rama: dejar de pedirle al usuario que edite YAML.
+
+### Commit 1 — `a21204c` IPTV transmux post-review hardening (5 bugs + split)
+
+Auto-review del trabajo del 28→29 detectó **5 bugs reales latentes** y un techo de mantenibilidad:
+
+- **B1 stderr drain race en `processWatcher`**: `cmd.Wait()` no espera al goroutine consumer del `StderrPipe()`. El stdlib lo dice explícitamente. Resultado: la cola de `stderrTail` puede no incluir la línea fatal que ffmpeg emite justo antes de exit. Eso rompía silenciosamente la decisión de auto-promoción a reencode (`looksLikeCodecError` decidía sobre cola incompleta) y truncaba el log al peor momento. **Fix**: `stderrRing.wait()` que bloquea hasta que `consume` retorna; processWatcher sincroniza antes de leer `String()`.
+
+- **B2 scanner buffer 4 KiB causaba deadlock potencial**: `bufio.Scanner.Buffer(_, 4096)` aborta con `ErrTooLong` en cualquier línea >4 KiB (debug builds, full TLS chains). El consumer salía, la pipe del kernel se llenaba, ffmpeg bloqueaba en write hasta que `-rw_timeout` (10s) lo mataba. **Fix**: bump a 64 KiB + `io.Copy(io.Discard, rd)` de drenaje fallback al salir el scanner. Comentario "binary garbage is silently truncated" era falso, corregido.
+
+- **B3 race entre `evict` y respawn por mismo `WorkDir`**: evict soltaba el lock antes de `os.RemoveAll(WorkDir)`. Mientras, otro `GetOrStart` para el mismo canal podía entrar, hacer `MkdirAll` en el mismo path, y luego el RemoveAll del primer evict se cargaba la dir nueva. **Fix**: `<cacheDir>/<channelID>/<startNanos>/` versionado por spawn. evict sólo borra ese subdir; el padre se limpia best-effort vía `os.Remove` (ENOTEMPTY se ignora). `clearWorkDir` borrado (innecesario con dirs nuevas siempre).
+
+- **B4 doc lie en `iptv.go:52-55`**: el comentario decía "nil logoCache surfaces upstream URL" pero `logoProxyURL` siempre reescribe al proxy. Test `iptv_dto_test.go:51-68` ancla esa conducta. **Fix**: alinear comentario con la realidad (404 + React onError fallback a iniciales). No tocar el código — funciona, el comentario mentía.
+
+- **M3 zombie sessions**: el reaper saltaba sesiones no-ready, pero ffmpeg con upstream que envía 1 byte cada 8s evade `-rw_timeout` y la sesión queda en el mapa indefinidamente, bloqueando un slot de `MaxSessions`. **Fix**: `startupGraceMultiplier = 2`, después de `2× ReadyTimeout` el reaper force-terminate la sesión y registra failure en el breaker (chronic offenders entran en cooldown).
+
+- **M2 spawn_error metric**: pre-spawn fails (mkdir, fork, pipe) no incrementaban ningún counter en el sink de Prometheus. **Fix**: `IncStarts("spawn_error")` distinto de `crash` (upstream).
+
+- **M1 split de `transmux.go`**: 1451 → 1052 líneas. Sin abstracciones nuevas, sólo relocalización:
+  - `transmux_args.go` (287) — argv builders + encoder tuning + `defaultTransmuxUserAgent`
+  - `transmux_codec_classify.go` (35) — `codecErrorPattern` + `looksLikeCodecError`
+  - `transmux_stderr.go` (116) — `stderrRing` con la nueva `wait()` barrier
+
+**Tests nuevos** (6 regression):
+- `TestStderrRing_WaitBlocksUntilConsumeReturns` (B1)
+- `TestStderrRing_WaitNilSafe` (B1, defensivo)
+- `TestStderrRing_DrainsAfterOverlongLine` (B2)
+- `TestTransmuxManager_ReapsStartupZombies` (M3)
+- `TestTransmuxManager_PerSpawnVersionedWorkDir` (B3)
+- `TestTransmuxManager_PreSpawnFailureCountsAsSpawnError` (M2)
+
+### Commit 2 — `8a723c0` tests frontend de useEventStream / useTrickplay / useLiveHls (+31 tests)
+
+Deuda arrastrada desde múltiples sesiones. 31 tests nuevos:
+- **useEventStream (7)**: stub global `EventSource`, verifica open/close lifecycle, dispatch del tipo correcto, no churn al re-render con closure nueva (el ref-stash optimization), swap al cambiar tipo.
+- **useTrickplay (8)**: empty itemId no-op, tolera envelope `{data: ...}` y bare manifest, 503 / network error → `available=false` silencioso, abort en unmount, encode del itemId.
+- **useLiveHls (16)**: mock de `hls.js` vía `vi.hoisted` (FakeHls), null url/ref no-ops, onFirstPlay una sola vez, timeout fallback con `onFatalError("timeout")`, retry 3 network errors antes de rendirse, classify manifest errors, onFatalError fires once per stream URL, streamUrl change destruye instancia previa, unmount limpia visibilitychange listener, document.hidden flip → stopLoad/startLoad(-1), reload() force-reattach, ref-stash con onFirstPlay.
+
+296 → 327 tests, suite verde.
+
+### Commit 3 — `0779e4e` migración 018 UNIQUE partial indexes para show hierarchy
+
+**Diagnóstico**: el usuario reportó series duplicadas. Análisis del código:
+- Schema `items` no tiene UNIQUE constraint en (library_id, type, title); el cache `showCache` en `internal/scanner/show_hierarchy.go` evita dups en condiciones normales pero la key es title-exact (case/whitespace/accent miss → cache miss → dup).
+- Cuando ya hay dups en DB, el seeding pasa `rememberSeries(title, id)` por cada uno y la última gana en el map; las anteriores quedan huérfanas para siempre.
+- Para seasons ya había `DedupeSeasonsByChildCount` (read-time dedupe en `library/service.go`), para series no había equivalente — por eso aparecían duplicadas en el rail.
+
+**Lo que se hizo**: el usuario verificó empíricamente que un wipe (`DELETE FROM items WHERE type IN ('series','season','episode')` con `PRAGMA foreign_keys = ON`) + rescan **no recreaba duplicados**. Confirmó que el bug era residuo histórico, no regresión activa.
+
+**El fix**: migración 018 con (a) pasada de cleanup defensiva — re-parenta hijos de no-canónicos al canónico (MIN(id)), borra los demás; no-op en DB ya limpia. (b) **UNIQUE INDEX parciales**:
+- `uniq_series_per_library ON items(library_id, title) WHERE type='series'`
+- `uniq_season_per_series ON items(parent_id, season_number) WHERE type='season' AND season_number IS NOT NULL`
+
+**Lo que NO se hizo (y por qué)** — Torvalds-simple aplicado consistentemente: sin `ErrItemConflict` tipado, sin `FindSeriesByTitle/FindSeasonByNumber` helpers, sin recovery branches en el scanner. El usuario verificó que el scanner actual no genera dups; añadir silent-recovery code defendería escenarios hipotéticos. Si la migración alguna vez "salta" en el futuro será porque hay un bug real, y queremos que falle ruidosamente (`UNIQUE constraint failed: items.title`) en vez de papelera.
+
+### Commit 4 — `b1a84da` runtime-editable settings (kill the "edit yaml" prompts)
+
+**Disparador**: el usuario miró el panel /admin/system y vio dos cards diciendo "Sin configurar (define server.base_url en hubplay.yaml)" y "Activa hardware_acceleration.enabled en hubplay.yaml". Su feedback: *"no quiero que el usuario tenga esa responsabilidad en el yaml, debería poder hacerse en el panel"*. Razón Torvalds: una abstracción que pide al admin SSH-ear y editar un fichero está rota.
+
+**Decisión arquitectural** (ver ADR-010):
+
+| Capa | Qué vive ahí | Inmutable? |
+|---|---|---|
+| YAML / env | server.bind, server.port, database.path, streaming.cache_dir, auth bootstrap secret | sí (boot-time) |
+| `app_settings` (DB) | server.base_url, hardware_acceleration.enabled, hardware_acceleration.preferred | no (runtime overlay) |
+
+Authority chain: `app_settings` row → YAML default → effective. Sin Runtime overlay struct, sin caching layer, sin goroutine watching changes. Handlers que necesitan un valor reciben `SettingsReader` (interfaz pequeña, sólo `GetOr`) y consultan al servir la request. Una SQLite point query por hit en `/admin/system/stats`, invisible en perfil.
+
+**Surface nuevo**:
+- Migración 019: `app_settings(key TEXT PK, value TEXT, updated_at)`.
+- `internal/db/settings_repository.go` con `Get/GetOr/Set/Delete/All`. Sin tipos de dominio — strings raw, validados arriba en el handler.
+- `internal/api/handlers/settings.go` con `GET/PUT/DELETE /admin/system/settings`. **Whitelist hardcoded** (no es un KV genérico). Una key nueva entra con un const + un caso en el switch del validator + un par de strings i18n.
+- HWAccel se aplica al boot: `cmd/hubplay/main.go` lee del settings repo justo antes de `stream.NewManager`. La UI dice "Reinicia para aplicar" cuando hay override pendiente. **Sin re-detección runtime** (el detector tiene estado capturado, replicarlo es ruido).
+- BaseURL es runtime: `SystemHandler.effectiveBaseURL(ctx)` y `StreamHandler.effectiveBaseURL(ctx)` consultan el settings repo en cada request. Save en panel → próximo request lo ve.
+
+**Frontend**:
+- `useSystemSettings`, `useUpdateSystemSetting`, `useResetSystemSetting` hooks; mutations invalidan `systemStats` para que el panel refresque al instante.
+- `web/src/pages/admin/system/SystemSettingsSection.tsx` — sección nueva al final del System page. Per-row Save + Reset, dirty-state pinning del Save, badge `Custom`/`Default`, restart-needed hint inline. `<input>` para texto libre, `<select>` para enum (driven por `allowed_values` del backend).
+- Borrados los strings i18n `baseURLEmpty` y `hwAccelDisabledHint` que pedían editar yaml. Reemplazados por `baseURLUnset` y `hwAccelDisabledPointer` que apuntan a la sección editable.
+
+**Tests** (13 nuevos):
+- 6 settings_repository_test (GetOr fallback, Set upsert, Delete reset, etc.)
+- 7 settings_test del handler (whitelist gate, validation per-key, normalisation, reset, defaults)
+
+### Estado al cierre
+
+- Backend Go: `go test -race ./...` verde.
+- Frontend: 41 test files, 327 tests, todos verde. tsc clean.
+- Migraciones: 18 + 19 = 19 en total (017 → 019).
+- `transmux.go` 1451 → 1052 líneas (extracción a 3 ficheros sibling).
+- 4 commits limpios en la rama, listos para PR a `main` cuando el usuario diga.
+
+### Lo que el usuario tiene que hacer al desplegar
+
+- Wipe ya aplicado de su DB (manual). La migración 019 no hace nada en su DB ya limpia; `app_settings` arranca vacío y todo cae al YAML default.
+- Tras pull de la nueva imagen, el panel /admin/system tendrá la sección "Configuración" al final con tres tarjetas editables. El YAML sigue funcionando como fallback; el operador puede ignorar el panel si quiere.
+
+### Próximos hitos candidatos (no en este sprint)
+
+- **App nativa Kotlin para Android TV** sigue siendo el gran post-merge.
+- Virtualización de `EPGGrid` con `@tanstack/react-virtual` (deuda agendada conscientemente).
+- Single-flight EPG fetches (deferida; lock per-library cubre el caso común).
+- Cuarto setting runtime cuando aparezca un caso real — añadir es trivial (whitelist + i18n).
 
 ---
 

@@ -556,3 +556,228 @@ cumplir 1 punto NO es suficiente, hace falta combinar varios:
 5. **Cada fichero <300 líneas** como heurística. Encima de eso, el
    IDE empieza a costarse navegar; debajo, mover cosas a más
    ficheros añade fricción sin ganancia.
+
+---
+
+## Disciplina Torvalds-simple — empírico > especulativo
+
+> "Lo simple es más fácil de mantener. Lo complejo introduce más
+> errores. Si algo no se puede explicar de forma sencilla,
+> probablemente está mal diseñado."
+
+Patrón consolidado durante la sesión 2026-04-29 noche y aplicado en
+los 4 commits de esa sesión. La regla operativa:
+
+- **Bug latente verificado** (peer-review encuentra una race real,
+  un buffer que puede deadlockear, una migración que falta) → fix
+  inmediato.
+- **Edge case especulativo** (cache miss por title-case mismatch,
+  pre-spawn fail por permisos) → **NO se añade código defensivo**
+  hasta que se observe en producción. La estructura (UNIQUE index,
+  threshold del breaker) atrapa el síntoma; el operador investiga
+  la causa raíz cuando aparece.
+
+### Heurísticas concretas
+
+1. **Si el usuario verifica empíricamente que un código no produce
+   un síntoma, no añadas recovery code para ese síntoma.** El
+   recovery disimula bugs futuros; la ausencia de recovery los
+   hace fallar ruidosamente, que es lo que queremos.
+
+2. **Estructura > recuperación**. Una UNIQUE constraint parcial
+   cierra una invariante en el schema; un branch de re-fetch en
+   código tiene que mantenerse, testarse, y puede regresionar. La
+   constraint es ~5 líneas de SQL idempotente.
+
+3. **Whitelist hardcoded > registro dinámico**. El admin endpoint
+   `/admin/system/settings` admite 3 keys hoy, validadas en un
+   `switch` explícito. Una key nueva: const + caso + i18n. No hay
+   registro dinámico de "settings disponibles" porque no se
+   necesita y abrir el surface es la única forma de que un typo
+   en la UI escriba algo que no debería.
+
+4. **YAGNI en abstracciones**. La sesión 2026-04-29 tuvo dos
+   momentos donde estuvimos a punto de inventar un `Runtime`
+   struct (overlay de `Config + SettingsReader`) y un
+   `ErrItemConflict` tipado. Ambos rechazados por el mismo motivo:
+   nadie los necesitaba todavía. Los handlers consumen
+   `SettingsReader` directamente; las constraint failures se
+   propagan como errores genéricos hasta que aparezca un caller
+   que necesite ramificar sobre ellos.
+
+### Cuándo SÍ añadir defensa
+
+- **Cuando observamos el síntoma**. La UNIQUE constraint nueva existe
+  porque el operador reportó dups; el reaper de zombie sessions
+  existe porque vimos sesiones colgadas en un upstream que evade
+  `-rw_timeout`.
+- **Cuando el coste de fallar es alto**. El stderr drain barrier
+  (`stderrRing.wait()`) protege la decisión de auto-promoción a
+  reencode; sin él, ese feature no funciona en el peor caso. Esa
+  defensa es necesaria.
+- **Cuando el coste de la defensa es nulo o bajo**. Subir el buffer
+  del scanner stderr de 4 KiB a 64 KiB es una constante; añadir un
+  `io.Copy(io.Discard, rd)` post-scanner es 2 líneas. La defensa
+  paga su peso.
+
+---
+
+## Whitelist hardcoded para endpoints que escriben configuración
+
+Patrón aplicado en `internal/api/handlers/settings.go` (commit
+`b1a84da`). Cuando un endpoint admin escribe un key-value pair que
+afecta runtime config, **la lista de keys aceptadas vive en código,
+no en una tabla**:
+
+```go
+const (
+    settingBaseURL          = "server.base_url"
+    settingHWAccelEnabled   = "hardware_acceleration.enabled"
+    settingHWAccelPreferred = "hardware_acceleration.preferred"
+)
+
+func isAllowedSettingKey(key string) bool {
+    switch key {
+    case settingBaseURL, settingHWAccelEnabled, settingHWAccelPreferred:
+        return true
+    default:
+        return false
+    }
+}
+```
+
+Razones:
+
+- **Imposible de desbordar por dato**. El gate vive en el binario.
+  Una request con un key inventado se rechaza con 400 antes de
+  tocar la DB, incluso con admin auth válido.
+- **Validación per-key obvia**. Cada key tiene su forma (URL
+  absoluta, bool, enum). Un `switch` en `validateSettingValue`
+  pone la lógica visible; un sistema de "registro de validators"
+  esconde las decisiones reales.
+- **Una key nueva = una línea**. Const + caso en validator + par
+  i18n. Sin scaffolding ni "diseño extensible".
+
+**No usar este patrón** para datos del dominio (channels, items,
+preferences de usuario) — ahí el conjunto es abierto y la
+validación va en el repo / service.
+
+---
+
+## Drenaje de pipes externos (ffmpeg stderr) con barrera de sincronización
+
+Patrón aplicado en `internal/iptv/transmux_stderr.go` (commit
+`a21204c`). Cuando un proceso externo escribe a un pipe que tu
+goroutine consumer debe drenar:
+
+1. **El consumer cierra un canal `done` cuando termina** (defer
+   `close(r.done)` al inicio de `consume(rd io.Reader)`).
+2. **El watcher del proceso espera ese `done` antes de leer el
+   resultado del consumer**:
+   ```go
+   err := s.cmd.Wait()
+   s.stderrTail.wait()  // ← barrera obligatoria
+   tail := s.stderrTail.String()
+   ```
+3. **El consumer tolera una línea > buffer max** drenando lo que
+   queda con `io.Copy(io.Discard, rd)` después de salir el
+   scanner. Sin esto, una línea anómala wedge-a el writer remoto
+   (kernel pipe buffer fill → bloqueo en `write`).
+
+**Por qué no basta con `cmd.Wait()`**: la doc del stdlib es explícita
+— `Wait` cierra el pipe cuando el proceso muere, pero NO espera al
+consumer goroutine que lee de ese pipe. Sin la barrera, el `String()`
+del ring buffer puede ejecutarse antes de que el consumer haya
+flushado los últimos bytes del pipe del kernel. Resultado: la línea
+fatal que ffmpeg emite justo antes de exit se pierde silenciosamente.
+
+Verificado en `TestStderrRing_WaitBlocksUntilConsumeReturns` y
+`TestStderrRing_DrainsAfterOverlongLine`. Replicar este patrón si
+entra otro consumer de pipe externo (subtítulos OpenSubtitles,
+trickplay generator, lo que sea).
+
+---
+
+## WorkDir versionado por spawn para procesos efímeros
+
+Patrón aplicado en `internal/iptv/transmux.go startLocked` (commit
+`a21204c`). Cuando un proceso externo escribe a un directorio y la
+sesión puede recrearse para el mismo "slot lógico" antes de que la
+limpieza anterior termine:
+
+```go
+startedAt := time.Now()
+workDir := filepath.Join(m.cfg.CacheDir, channelID, fmt.Sprintf("%d", startedAt.UnixNano()))
+```
+
+En vez de:
+
+```go
+// ✗ vulnerable a race entre evict.RemoveAll y startLocked.MkdirAll
+workDir := filepath.Join(m.cfg.CacheDir, channelID)
+```
+
+Razones:
+
+- **evict** suelta el lock antes de `os.RemoveAll(WorkDir)` para no
+  bloquear otras operaciones. Con dir compartida, otro `GetOrStart`
+  para el mismo canal puede entrar entre el delete-from-map y el
+  RemoveAll, crear su propio workdir, y luego el RemoveAll del
+  primero se carga la dir nueva.
+- Versionar por `startNanos` aísla el árbol de cada spawn.
+  evict / terminate sólo borran su subdir; la limpieza del padre
+  `<channelID>/` se hace best-effort con `os.Remove` (ENOTEMPTY se
+  ignora — si hay otro spawn activo, el padre sobrevive).
+
+Test de regresión: `TestTransmuxManager_PerSpawnVersionedWorkDir`.
+Aplica a cualquier patrón "1 channel = 1 sesión efímera con files
+en disco que se borran al terminar". No aplica a directorios
+"propiedad" del proceso largo (cache de imágenes, etc.).
+
+---
+
+## Configuración runtime: `app_settings` overlay sobre YAML
+
+Decisión arquitectural en ADR-010 (sesión 2026-04-29). Patrón para
+añadir un cuarto setting runtime-editable al panel admin:
+
+1. **Const + entrada en whitelist** en
+   `internal/api/handlers/settings.go`:
+   ```go
+   const settingNew = "category.new_key"
+   func isAllowedSettingKey(key string) bool {
+       switch key {
+       // ...
+       case settingNew:
+           return true
+       }
+   }
+   ```
+
+2. **Caso en `validateSettingValue`** con la forma esperada (URL,
+   bool, enum, número con rango). Devolver el valor normalizado
+   listo para persistir.
+
+3. **Entrada en `describeAll`** con default desde `Config`, hint,
+   `restart_needed` (true si el setting se lee al boot, false si
+   se lee runtime), y `allowed_values` opcional para enums.
+
+4. **Lectura runtime** en el handler que consume:
+   ```go
+   value := h.settings.GetOr(ctx, settingNew, h.cfg.Default)
+   ```
+   o, si es boot-time, en `cmd/hubplay/main.go` antes del
+   `New*Manager` que captura el valor.
+
+5. **i18n**: `admin.system.settings.<slug>.label` + `.hint` en
+   `en.json` y `es.json`. El frontend renderiza solo — no hay que
+   tocar `SystemSettingsSection.tsx` salvo el mapping del slug en
+   `settingI18nKey()`.
+
+**Sin tocar**: el `SettingsRepository` (ya soporta cualquier key),
+el frontend hook (consume `allowed_values` del backend), ni el
+schema (es key-value).
+
+**Cuándo NO añadir aquí**: bootstrap secrets, paths críticos
+(database.path, cache_dir), bind/port. Esos cambian-requieren-restart
+de forma destructiva (file handles, listeners), no preferencias.
