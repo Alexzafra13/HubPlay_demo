@@ -3,6 +3,8 @@ import type { SystemStats } from "@/api/types";
 import { Badge, Spinner, Button, EmptyState } from "@/components/common";
 import { useTranslation } from "react-i18next";
 
+import { SystemSettingsSection } from "./SystemSettingsSection";
+
 // Refresh cadence for the live stats. 30s matches the original behaviour
 // and is frequent enough to feel live without flooding the dir-walk on
 // the backend (image cache + transcode cache are filesystem walks).
@@ -165,6 +167,8 @@ export default function SystemStatus() {
       <Section title={t("admin.system.sectionLibraries")}>
         <LibraryCards stats={stats} />
       </Section>
+
+      <SystemSettingsSection />
     </div>
   );
 }
@@ -223,13 +227,14 @@ function ServerCards({ stats }: { stats: SystemStats }) {
   const dbOk = stats.database.ok;
   const ffmpegOk = stats.ffmpeg.found;
 
-  // BaseURL hint: when empty the operator hasn't set server.base_url —
-  // surface that as actionable copy so the admin knows what to edit
-  // instead of seeing a confusing blank value.
+  // BaseURL hint: when empty the operator hasn't configured a public
+  // URL — point at the editable section below instead of the (now
+  // removed) "edit YAML" string. The actual editing surface lives in
+  // SystemSettingsSection rendered at the bottom of the page.
   const baseURLValue = stats.server.base_url || "—";
   const baseURLHint = stats.server.base_url
     ? undefined
-    : t("admin.system.baseURLEmpty");
+    : t("admin.system.baseURLUnset");
 
   return (
     <>
@@ -288,8 +293,8 @@ function StreamingCards({ stats }: { stats: SystemStats }) {
       : t("admin.system.transcodeUnlimited", { active });
 
   // HW accel: three distinct states surfaced here.
-  //  1) Disabled in config         → actionable "enable in config" hint
-  //  2) Enabled but none detected  → "Software (libx264)" + Available "—"
+  //  1) Disabled in settings       → "Disabled" + pointer to settings section
+  //  2) Enabled but none detected  → "None" + actionable host-side hint
   //  3) Enabled and selected       → uppercase ID + encoder hint
   const selected = stats.ffmpeg.hw_accel_selected;
   const enabled = stats.ffmpeg.hw_accel_enabled;
@@ -297,7 +302,7 @@ function StreamingCards({ stats }: { stats: SystemStats }) {
   let accelHint: string | undefined;
   if (!enabled) {
     accelLabel = t("admin.system.hwAccelDisabledLabel");
-    accelHint = t("admin.system.hwAccelDisabledHint");
+    accelHint = t("admin.system.hwAccelDisabledPointer");
   } else if (!selected || selected === "none") {
     accelLabel = t("admin.system.hwAccelNone");
     accelHint = t("admin.system.hwAccelNoneHint");

@@ -25,6 +25,7 @@ import type {
   SetupStatus,
   StreamSession,
   SystemCapabilities,
+  SystemSettingsResponse,
   SystemStats,
   AuthKey,
   RotateAuthKeyResponse,
@@ -954,6 +955,27 @@ export class ApiClient {
   // type T as the inner payload, not the envelope.
   async getSystemStats(): Promise<SystemStats> {
     return this.request<SystemStats>("GET", "/admin/system/stats");
+  }
+
+  // Runtime settings the admin can edit from the panel — replaces the
+  // need to SSH into the host to change server.base_url or the
+  // hardware-acceleration flags. The endpoint is whitelisted on the
+  // server so a typo in `key` is rejected before touching the DB.
+  async getSystemSettings(): Promise<SystemSettingsResponse> {
+    return this.request<SystemSettingsResponse>("GET", "/admin/system/settings");
+  }
+
+  async updateSystemSetting(key: string, value: string): Promise<SystemSettingsResponse> {
+    return this.request<SystemSettingsResponse>("PUT", "/admin/system/settings", {
+      body: { key, value },
+    });
+  }
+
+  async resetSystemSetting(key: string): Promise<SystemSettingsResponse> {
+    return this.request<SystemSettingsResponse>(
+      "DELETE",
+      `/admin/system/settings/${encodeURIComponent(key)}`,
+    );
   }
 
   // ─── Admin: signing keys ──────────────────────────────────────────────

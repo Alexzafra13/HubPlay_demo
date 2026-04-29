@@ -49,10 +49,13 @@ type IPTVHandler struct {
 //   - nil transmux: non-HLS upstreams fall back to the raw passthrough
 //     proxy (browsers can't play raw MPEG-TS, so this is a degraded
 //     state — kept for tests + platforms without ffmpeg).
-//   - nil logoCache: the channel DTO surfaces the upstream `tvg-logo`
-//     URL verbatim. With a strict CSP the browser blocks third-party
-//     image loads and the existing initials/colour fallback in the
-//     React component kicks in.
+//   - nil logoCache: the /logo endpoint returns 404 unconditionally.
+//     The DTO still emits the same-origin proxy path (toChannelDTO →
+//     logoProxyURL) so the frontend's <img onError> handler trips on
+//     every channel render and falls back to the initials avatar.
+//     Functional but wasteful (N×404 per grid paint); the cache is
+//     constructed best-effort in main.go and only ends up nil if the
+//     cache directory can't be created.
 func NewIPTVHandler(svc IPTVService, proxy IPTVStreamProxyService, transmux IPTVTransmuxer, logoCache *iptv.LogoCache, libraries LibraryRepository, access LibraryAccessService, logger *slog.Logger) *IPTVHandler {
 	return &IPTVHandler{
 		svc:       svc,

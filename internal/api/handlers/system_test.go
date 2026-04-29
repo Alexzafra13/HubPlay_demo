@@ -152,12 +152,12 @@ func TestSystemHandler_Stats_ReportsServerAndRuntime(t *testing.T) {
 	h := NewSystemHandler(SystemHandlerConfig{
 		DB:          database,
 		Streams:     streams,
-		ImageDir:    imageDir,
-		DBPath:      dbPath,
-		BindAddress: "0.0.0.0:8096",
-		BaseURL:     "https://hubplay.example.com",
-		Version:     "test-9.9.9",
-		Logger:      newQuietLogger(),
+		ImageDir:       imageDir,
+		DBPath:         dbPath,
+		BindAddress:    "0.0.0.0:8096",
+		BaseURLDefault: "https://hubplay.example.com",
+		Version:        "test-9.9.9",
+		Logger:         newQuietLogger(),
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/system/stats", nil)

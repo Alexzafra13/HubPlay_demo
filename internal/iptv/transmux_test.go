@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -965,5 +966,211 @@ func TestStderrRing_BoundedFIFO(t *testing.T) {
 	want := "line-c | line-d | line-e"
 	if got != want {
 		t.Errorf("ring tail: got %q want %q", got, want)
+	}
+}
+
+// Regression for B1 (stderr drain race): wait() must block until
+// consume() has returned. Without this barrier, processWatcher could
+// log an empty / partial tail and looksLikeCodecError would miss the
+// fatal line right before ffmpeg exits.
+func TestStderrRing_WaitBlocksUntilConsumeReturns(t *testing.T) {
+	r := newStderrRing(8)
+	pr, pw := io.Pipe()
+	consumed := make(chan struct{})
+	go func() {
+		r.consume(pr)
+		close(consumed)
+	}()
+
+	if _, err := pw.Write([]byte("warn 1\nfatal here\n")); err != nil {
+		t.Fatalf("pipe write: %v", err)
+	}
+	// wait() before pipe closes must block — consume only returns on EOF.
+	done := make(chan struct{})
+	go func() {
+		r.wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		t.Fatal("wait() returned before consume saw EOF")
+	case <-time.After(50 * time.Millisecond):
+	}
+	_ = pw.Close()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("wait() did not return after pipe close")
+	}
+	<-consumed
+	if got := r.String(); !strings.Contains(got, "fatal here") {
+		t.Errorf("ring missing the fatal line we synced for: got %q", got)
+	}
+}
+
+// wait() on a nil receiver or an unwired ring is a no-op so the
+// pre-spawn failure paths (where the ring was never attached to a
+// pipe) don't deadlock processWatcher.
+func TestStderrRing_WaitNilSafe(t *testing.T) {
+	var r *stderrRing
+	done := make(chan struct{})
+	go func() { r.wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("wait() on nil ring should return immediately")
+	}
+}
+
+// Regression for B2 (4 KiB scanner deadlock): a stderr line that
+// exceeds the per-line max must not cause consume to leave bytes in
+// the pipe. If consume bailed without draining, ffmpeg's writer side
+// would block once the kernel pipe buffer fills.
+func TestStderrRing_DrainsAfterOverlongLine(t *testing.T) {
+	pr, pw := io.Pipe()
+	r := newStderrRing(8)
+	consumed := make(chan struct{})
+	go func() {
+		r.consume(pr)
+		close(consumed)
+	}()
+
+	// First line longer than stderrScannerMaxLine — Scanner aborts.
+	long := strings.Repeat("x", stderrScannerMaxLine+1024)
+	go func() {
+		// Writes block until the consumer drains, so this must complete
+		// even after Scanner gave up.
+		_, _ = pw.Write([]byte(long + "\n"))
+		_, _ = pw.Write([]byte("trailing-line\n"))
+		_ = pw.Close()
+	}()
+
+	select {
+	case <-consumed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("consume did not return — overlong line wedged the pipe")
+	}
+	r.wait()
+}
+
+// Regression for M3 (zombie sessions): a session that never produces
+// a first segment AND whose ffmpeg stays alive must be force-reaped
+// after startupGraceMultiplier × ReadyTimeout. Without this, the
+// session would pin a MaxSessions slot forever.
+func TestTransmuxManager_ReapsStartupZombies(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake ffmpeg shim relies on /bin/sh; not available on Windows")
+	}
+	cacheDir := t.TempDir()
+	t.Setenv("FAKE_FFMPEG_MODE", "noseg")
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	m := NewTransmuxManager(TransmuxManagerConfig{
+		CacheDir:       cacheDir,
+		FFmpegPath:     fakeFFmpeg(t),
+		MaxSessions:    3,
+		IdleTimeout:    1 * time.Hour, // disable idle path so we observe startup_timeout in isolation
+		ReadyTimeout:   200 * time.Millisecond,
+		ReaperInterval: 50 * time.Millisecond,
+	}, logger)
+	t.Cleanup(m.Shutdown)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	// noseg + ReadyTimeout=200ms: GetOrStart returns ErrTransmuxFailed
+	// (waitReady gives up) but the session remains in the map because
+	// processWatcher is still blocked on cmd.Wait().
+	if _, err := m.GetOrStart(ctx, "ch-zombie", "http://upstream/hang"); !errors.Is(err, ErrTransmuxFailed) {
+		t.Fatalf("expected ErrTransmuxFailed; got %v", err)
+	}
+	if got := m.ActiveSessions(); got != 1 {
+		t.Fatalf("session should still be in map after waitReady timeout; got %d", got)
+	}
+
+	// Wait long enough for reapOnce to see (now - StartedAt) > 2*ReadyTimeout.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if m.ActiveSessions() == 0 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if got := m.ActiveSessions(); got != 0 {
+		t.Errorf("zombie session not reaped after startup grace; ActiveSessions=%d", got)
+	}
+}
+
+// Regression for B3 (workdir race on respawn): two consecutive spawns
+// for the same channel must use distinct workdirs. With the old
+// shared-dir layout, evict's RemoveAll on the first session could
+// race startLocked's MkdirAll for the second and wipe the new dir
+// mid-flight.
+func TestTransmuxManager_PerSpawnVersionedWorkDir(t *testing.T) {
+	m := newTestManager(t, "ok", 100*time.Millisecond)
+	t.Cleanup(m.Shutdown)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	first, err := m.GetOrStart(ctx, "ch-versioned", "http://upstream/v1")
+	if err != nil {
+		t.Fatalf("first spawn: %v", err)
+	}
+	firstDir := first.WorkDir
+
+	// Force the first session to evict.
+	m.Stop("ch-versioned")
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if m.ActiveSessions() == 0 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	second, err := m.GetOrStart(ctx, "ch-versioned", "http://upstream/v2")
+	if err != nil {
+		t.Fatalf("second spawn: %v", err)
+	}
+	if second.WorkDir == firstDir {
+		t.Errorf("second spawn reused workdir %q — versioning broken", firstDir)
+	}
+	// The second spawn's dir must contain the channel id so cleanup
+	// targets the right tree even after the parent dir survives.
+	if !strings.Contains(second.WorkDir, "ch-versioned") {
+		t.Errorf("workdir should be namespaced by channel id; got %q", second.WorkDir)
+	}
+}
+
+// Regression for M2 (pre-spawn metric coverage): a startLocked failure
+// (mkdir / fork / pipe) must increment IncStarts("spawn_error") so
+// the metrics layer can distinguish "our side broken" from upstream
+// crash. Drives the failure by pointing FFmpegPath at a missing
+// binary so cmd.Start fails before processWatcher ever runs.
+func TestTransmuxManager_PreSpawnFailureCountsAsSpawnError(t *testing.T) {
+	metrics := newFakeMetrics()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	m := NewTransmuxManager(TransmuxManagerConfig{
+		CacheDir:     t.TempDir(),
+		FFmpegPath:   filepath.Join(t.TempDir(), "ffmpeg-does-not-exist"),
+		MaxSessions:  3,
+		IdleTimeout:  1 * time.Second,
+		ReadyTimeout: 500 * time.Millisecond,
+		Metrics:      metrics,
+	}, logger)
+	t.Cleanup(m.Shutdown)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
+	if _, err := m.GetOrStart(ctx, "ch-prespawn", "http://upstream/p"); err == nil {
+		t.Fatal("expected GetOrStart to fail with missing ffmpeg binary")
+	}
+	starts, _, _ := metrics.snapshot()
+	if got := starts["spawn_error"]; got != 1 {
+		t.Errorf("spawn_error counter: got %d want 1; full starts=%v", got, starts)
+	}
+	if got := starts["crash"]; got != 0 {
+		t.Errorf("crash counter must not fire on pre-spawn failure: got %d", got)
 	}
 }

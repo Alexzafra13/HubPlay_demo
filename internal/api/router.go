@@ -49,6 +49,7 @@ type Dependencies struct {
 	ExternalIDs    *db.ExternalIDRepository
 	LibraryRepo    *db.LibraryRepository
 	ProviderRepo   *db.ProviderRepository
+	Settings       *db.SettingsRepository
 	SetupService   *setup.Service
 	EventBus       *event.Bus
 	Database       *sql.DB
@@ -221,19 +222,31 @@ func NewRouter(deps Dependencies) http.Handler {
 					baseURL = deps.Config.Server.BaseURL
 				}
 				sysHandler := handlers.NewSystemHandler(handlers.SystemHandlerConfig{
-					DB:          deps.Database,
-					Streams:     sysStreams,
-					Libraries:   sysLibs,
-					ImageDir:    imageDir,
-					DBPath:      dbPath,
-					BindAddress: bindAddress,
-					BaseURL:     baseURL,
-					Version:     deps.Version,
-					Logger:      deps.Logger,
+					DB:             deps.Database,
+					Streams:        sysStreams,
+					Libraries:      sysLibs,
+					Settings:       deps.Settings,
+					ImageDir:       imageDir,
+					DBPath:         dbPath,
+					BindAddress:    bindAddress,
+					BaseURLDefault: baseURL,
+					Version:        deps.Version,
+					Logger:         deps.Logger,
 				})
 				r.Route("/admin/system", func(r chi.Router) {
 					r.Use(auth.RequireAdmin)
 					r.Get("/stats", sysHandler.Stats)
+					if deps.Settings != nil {
+						settingsHandler := handlers.NewSettingsHandler(handlers.SettingsHandlerConfig{
+							Settings:       deps.Settings,
+							BaseURLDefault: baseURL,
+							HWAccelDefault: deps.Config.Streaming.HWAccel,
+							Logger:         deps.Logger,
+						})
+						r.Get("/settings", settingsHandler.List)
+						r.Put("/settings", settingsHandler.Update)
+						r.Delete("/settings/{key}", settingsHandler.Reset)
+					}
 				})
 			}
 
@@ -259,7 +272,7 @@ func NewRouter(deps Dependencies) http.Handler {
 				streamHandler := handlers.NewStreamHandler(
 					deps.StreamManager, deps.Items, deps.MediaStreams,
 					deps.ExternalIDs, deps.Providers,
-					deps.Config.Server.BaseURL, deps.Logger,
+					deps.Settings, deps.Config.Server.BaseURL, deps.Logger,
 				)
 
 				r.Route("/stream/{itemId}", func(r chi.Router) {

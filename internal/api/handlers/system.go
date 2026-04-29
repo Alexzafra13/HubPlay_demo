@@ -49,16 +49,25 @@ type LibraryStatsProvider interface {
 //   - /admin/system/stats is admin-only, can grow over time, and returns
 //     types that match what the React panel actually consumes.
 type SystemHandler struct {
-	db        *sql.DB
-	streams   SystemStatsProvider
-	libs      LibraryStatsProvider
-	imageDir  string // <dataDir>/images
-	dbPath    string // raw SQLite file path; "" disables disk size readout
-	bind      string // configured listen address (host:port). Empty hides.
-	baseURL   string // configured public URL (server.base_url). Empty hides.
-	startedAt time.Time
-	version   string
-	logger    *slog.Logger
+	db             *sql.DB
+	streams        SystemStatsProvider
+	libs           LibraryStatsProvider
+	settings       SettingsReader
+	imageDir       string // <dataDir>/images
+	dbPath         string // raw SQLite file path; "" disables disk size readout
+	bind           string // configured listen address (host:port). Empty hides.
+	baseURLDefault string // YAML fallback for server.base_url (overridden by app_settings).
+	startedAt      time.Time
+	version        string
+	logger         *slog.Logger
+}
+
+// SettingsReader is the slice of the settings repository system + other
+// handlers need to layer YAML defaults under DB overrides. Pulled
+// out as an interface so test fakes don't need to spin a real DB just
+// to assert behaviour around effective base_url etc.
+type SettingsReader interface {
+	GetOr(ctx context.Context, key, def string) (string, error)
 }
 
 // SystemHandlerConfig is the constructor's "named arguments" struct. As
@@ -66,34 +75,56 @@ type SystemHandler struct {
 // site — a tagged struct keeps the wiring readable and lets future
 // fields land without a signature change.
 type SystemHandlerConfig struct {
-	DB           *sql.DB
-	Streams      SystemStatsProvider
-	Libraries    LibraryStatsProvider
-	ImageDir     string
-	DBPath       string
-	BindAddress  string
-	BaseURL      string
-	Version      string
-	Logger       *slog.Logger
+	DB             *sql.DB
+	Streams        SystemStatsProvider
+	Libraries      LibraryStatsProvider
+	Settings       SettingsReader
+	ImageDir       string
+	DBPath         string
+	BindAddress    string
+	BaseURLDefault string // YAML / env value; runtime override lives in app_settings.
+	Version        string
+	Logger         *slog.Logger
 }
 
 // NewSystemHandler wires the dependencies. Any of the optional fields
-// (streams, libraries, dirs, paths) may be zero — the corresponding
-// fields in the response are then reported as empty rather than
-// erroring out, so a stripped-down test rig can still call Stats.
+// (streams, libraries, dirs, paths, settings) may be zero — the
+// corresponding fields in the response are then reported as empty
+// rather than erroring out, so a stripped-down test rig can still call
+// Stats.
 func NewSystemHandler(cfg SystemHandlerConfig) *SystemHandler {
 	return &SystemHandler{
-		db:        cfg.DB,
-		streams:   cfg.Streams,
-		libs:      cfg.Libraries,
-		imageDir:  cfg.ImageDir,
-		dbPath:    cfg.DBPath,
-		bind:      cfg.BindAddress,
-		baseURL:   cfg.BaseURL,
-		startedAt: time.Now(),
-		version:   cfg.Version,
-		logger:    cfg.Logger.With("module", "system-handler"),
+		db:             cfg.DB,
+		streams:        cfg.Streams,
+		libs:           cfg.Libraries,
+		settings:       cfg.Settings,
+		imageDir:       cfg.ImageDir,
+		dbPath:         cfg.DBPath,
+		bind:           cfg.BindAddress,
+		baseURLDefault: cfg.BaseURLDefault,
+		startedAt:      time.Now(),
+		version:        cfg.Version,
+		logger:         cfg.Logger.With("module", "system-handler"),
 	}
+}
+
+// effectiveBaseURL is the runtime-resolved public URL: app_settings
+// override if the admin set one in the panel, YAML / env value
+// otherwise. Reads on every request — base URL changes are rare
+// enough that one extra SQLite point query per /admin/system/stats
+// call is invisible.
+func (h *SystemHandler) effectiveBaseURL(ctx context.Context) string {
+	if h.settings == nil {
+		return h.baseURLDefault
+	}
+	value, err := h.settings.GetOr(ctx, "server.base_url", h.baseURLDefault)
+	if err != nil {
+		// Log but don't fail — the YAML default already came back as
+		// the fallback so the response stays correct.
+		h.logger.Warn("read base_url override", "error", err)
+		return h.baseURLDefault
+	}
+	return value
 }
 
 // systemStats is the wire format for /admin/system/stats. Grouped into
@@ -210,7 +241,7 @@ func (h *SystemHandler) Stats(w http.ResponseWriter, r *http.Request) {
 			StartedAt:     h.startedAt,
 			UptimeSeconds: int64(time.Since(h.startedAt).Seconds()),
 			BindAddress:   h.bind,
-			BaseURL:       h.baseURL,
+			BaseURL:       h.effectiveBaseURL(r.Context()),
 			ServerTime:    now,
 			Timezone:      tz,
 		},

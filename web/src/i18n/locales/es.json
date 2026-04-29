@@ -396,14 +396,37 @@
       "sectionRuntime": "Runtime",
       "sectionStorage": "Almacenamiento",
       "sectionLibraries": "Bibliotecas",
+      "sectionSettings": "Configuración",
       "bindAddress": "Dirección de escucha",
       "baseURL": "URL pública",
-      "baseURLEmpty": "Sin configurar (define server.base_url en hubplay.yaml).",
+      "baseURLUnset": "Sin configurar — establécela debajo en Configuración.",
       "serverTime": "Hora del servidor",
       "timezone": "Zona horaria",
       "hwAccelDisabledLabel": "Deshabilitada",
-      "hwAccelDisabledHint": "Activa hardware_acceleration.enabled en hubplay.yaml para detectar aceleradores.",
+      "hwAccelDisabledPointer": "Actívala debajo en Configuración (requiere reinicio).",
       "hwAccelNoneHint": "No se detectó acelerador hardware — cae a libx264.",
+      "save": "Guardar",
+      "resetToDefault": "Restaurar",
+      "overrideBadge": "Personalizado",
+      "defaultBadge": "Por defecto",
+      "currentDefault": "Por defecto: {{value}}",
+      "restartHint": "Reinicia para aplicar.",
+      "unset": "(sin definir)",
+      "settingsLoadFailed": "No se pudo cargar la configuración.",
+      "settings": {
+        "serverBaseURL": {
+          "label": "URL pública",
+          "hint": "URL absoluta http(s) por la que los clientes alcanzan el servidor. Usado para enlaces absolutos y CORS."
+        },
+        "hwAccelEnabled": {
+          "label": "Aceleración hardware",
+          "hint": "Usa un encoder de GPU cuando se detecta uno en el host."
+        },
+        "hwAccelPreferred": {
+          "label": "Acelerador preferido",
+          "hint": "Auto selecciona el mejor disponible; fija uno para forzar al detector."
+        }
+      },
       "totalLibraries": "Total de bibliotecas",
       "totalItems": "{{count, number}} items en total",
       "libraryBucketHint": "{{count, number}} bibliotecas",

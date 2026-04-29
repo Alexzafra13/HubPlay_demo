@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
@@ -25,13 +26,14 @@ var validSegmentName = regexp.MustCompile(`^(segment\d{5}\.ts|stream\.m3u8)$`)
 
 // StreamHandler serves media streams via HLS or direct play.
 type StreamHandler struct {
-	manager     StreamManagerService
-	items       ItemRepository
-	streams     MediaStreamRepository
-	externalIDs ExternalIDRepository
-	providers   ProviderManager
-	baseURL     string
-	logger      *slog.Logger
+	manager        StreamManagerService
+	items          ItemRepository
+	streams        MediaStreamRepository
+	externalIDs    ExternalIDRepository
+	providers      ProviderManager
+	settings       SettingsReader
+	baseURLDefault string
+	logger         *slog.Logger
 }
 
 // NewStreamHandler creates a new stream handler.
@@ -40,24 +42,47 @@ type StreamHandler struct {
 // subtitle endpoints return 503 instead of 500. Older test envs and
 // installs without OpenSubtitles configured keep working without
 // rewiring.
+//
+// `settings` is the runtime override layer (app_settings); when nil the
+// handler falls back to the boot-time `baseURL` exclusively, which is
+// what tests rely on. `baseURL` itself is the YAML / env default that
+// survives a missing or empty DB row.
 func NewStreamHandler(
 	manager StreamManagerService,
 	items ItemRepository,
 	streams MediaStreamRepository,
 	externalIDs ExternalIDRepository,
 	providers ProviderManager,
+	settings SettingsReader,
 	baseURL string,
 	logger *slog.Logger,
 ) *StreamHandler {
 	return &StreamHandler{
-		manager:     manager,
-		items:       items,
-		streams:     streams,
-		externalIDs: externalIDs,
-		providers:   providers,
-		baseURL:     strings.TrimRight(baseURL, "/"),
-		logger:      logger.With("module", "stream-handler"),
+		manager:        manager,
+		items:          items,
+		streams:        streams,
+		externalIDs:    externalIDs,
+		providers:      providers,
+		settings:       settings,
+		baseURLDefault: strings.TrimRight(baseURL, "/"),
+		logger:         logger.With("module", "stream-handler"),
 	}
+}
+
+// effectiveBaseURL resolves the runtime base URL: app_settings override
+// if the admin set one, YAML / env default otherwise. Trailing slash
+// is trimmed once at request time so the playlist + redirect formats
+// below stay clean.
+func (h *StreamHandler) effectiveBaseURL(ctx context.Context) string {
+	if h.settings == nil {
+		return h.baseURLDefault
+	}
+	value, err := h.settings.GetOr(ctx, "server.base_url", h.baseURLDefault)
+	if err != nil {
+		h.logger.Warn("read base_url override", "error", err)
+		return h.baseURLDefault
+	}
+	return strings.TrimRight(value, "/")
 }
 
 // Info returns playback info for an item (what method will be used, available profiles).
@@ -102,7 +127,7 @@ func (h *StreamHandler) MasterPlaylist(w http.ResponseWriter, r *http.Request) {
 	}
 
 	profiles := []string{"1080p", "720p", "480p", "360p"}
-	playlist := stream.GenerateMasterPlaylist(itemID, h.baseURL, profiles)
+	playlist := stream.GenerateMasterPlaylist(itemID, h.effectiveBaseURL(r.Context()), profiles)
 
 	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -134,7 +159,7 @@ func (h *StreamHandler) QualityPlaylist(w http.ResponseWriter, r *http.Request) 
 
 	if ms.Decision.Method == stream.MethodDirectPlay {
 		// Redirect to direct play
-		http.Redirect(w, r, fmt.Sprintf("%s/api/v1/stream/%s/direct", h.baseURL, itemID), http.StatusTemporaryRedirect)
+		http.Redirect(w, r, fmt.Sprintf("%s/api/v1/stream/%s/direct", h.effectiveBaseURL(r.Context()), itemID), http.StatusTemporaryRedirect)
 		return
 	}
 
