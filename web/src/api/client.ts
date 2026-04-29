@@ -15,6 +15,7 @@ import type {
   IPTVScheduledJobKind,
   ItemDetail,
   Library,
+  PersonDetail,
   LibraryEPGSource,
   MediaItem,
   PaginatedResponse,
@@ -415,6 +416,10 @@ export class ApiClient {
 
   async getItemChildren(id: string): Promise<MediaItem[]> {
     return this.request<MediaItem[]>("GET", `/items/${id}/children`);
+  }
+
+  async getPerson(id: string): Promise<PersonDetail> {
+    return this.request<PersonDetail>("GET", `/people/${id}`);
   }
 
   async searchItems(

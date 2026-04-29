@@ -23,6 +23,7 @@ import type {
   Library,
   MediaItem,
   PaginatedResponse,
+  PersonDetail,
   UpdateLibraryRequest,
 } from "../types";
 
@@ -110,6 +111,18 @@ export function useItemChildren(
   return useQuery<MediaItem[]>({
     queryKey: queryKeys.itemChildren(id),
     queryFn: () => api.getItemChildren(id),
+    enabled: !!id,
+    ...options,
+  });
+}
+
+export function usePerson(
+  id: string,
+  options?: Partial<UseQueryOptions<PersonDetail>>,
+) {
+  return useQuery<PersonDetail>({
+    queryKey: queryKeys.person(id),
+    queryFn: () => api.getPerson(id),
     enabled: !!id,
     ...options,
   });

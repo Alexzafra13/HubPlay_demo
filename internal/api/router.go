@@ -485,6 +485,7 @@ func NewRouter(deps Dependencies) http.Handler {
 				// imageDir before serving.
 				if deps.People != nil {
 					peopleHandler := handlers.NewPeopleHandler(deps.People, imageDir, deps.Logger)
+					r.Get("/people/{id}", peopleHandler.Get)
 					r.Get("/people/{id}/thumb", peopleHandler.Thumb)
 				}
 

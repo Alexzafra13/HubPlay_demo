@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router";
 import type { Person } from "@/api/types";
 
 // Plex-style cast/crew chip: a generous circular avatar stacked over
@@ -8,6 +9,11 @@ import type { Person } from "@/api/types";
 // endpoint) flip to an initial-letter placeholder via `onError`; the
 // failure state keys off the URL so a re-fetch with a new URL retries
 // instead of inheriting the previous failure.
+//
+// The whole chip is a <Link> to /people/{id} — clicking opens the
+// person's filmography page. Hover applies the same scale-up the
+// poster cards use so the affordance reads consistently across
+// browse surfaces.
 export function CastChip({ person }: { person: Person }) {
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const showImage = !!person.image_url && failedUrl !== person.image_url;
@@ -17,8 +23,11 @@ export function CastChip({ person }: { person: Person }) {
   const subtitle = person.character || person.role;
 
   return (
-    <div className="flex w-[120px] flex-col items-center gap-2 text-center">
-      <div className="flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-full bg-bg-elevated text-xl font-bold text-text-muted ring-1 ring-border/40 sm:h-28 sm:w-28">
+    <Link
+      to={`/people/${person.id}`}
+      className="group flex w-[120px] flex-col items-center gap-2 text-center outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg-card rounded-[--radius-lg]"
+    >
+      <div className="flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-full bg-bg-elevated text-xl font-bold text-text-muted ring-1 ring-border/40 transition-transform duration-200 group-hover:scale-[1.05] sm:h-28 sm:w-28">
         {showImage ? (
           <img
             src={person.image_url}
@@ -35,7 +44,7 @@ export function CastChip({ person }: { person: Person }) {
         )}
       </div>
       <div className="flex flex-col gap-0.5">
-        <span className="line-clamp-2 text-sm font-medium leading-snug text-text-primary">
+        <span className="line-clamp-2 text-sm font-medium leading-snug text-text-primary group-hover:text-white transition-colors">
           {person.name}
         </span>
         {subtitle && (
@@ -44,6 +53,6 @@ export function CastChip({ person }: { person: Person }) {
           </span>
         )}
       </div>
-    </div>
+    </Link>
   );
 }

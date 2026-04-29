@@ -264,6 +264,31 @@ export interface MediaStream {
   hdr_type: string | null;
 }
 
+// Server-side response shape for GET /people/{id}. Distinct from
+// `Person` (which is the per-item credit row in an item's cast strip)
+// because the person page bundles the filmography + a richer image
+// surface that the cast strip doesn't need.
+export interface FilmographyEntry {
+  item_id: string;
+  type: "movie" | "series";
+  title: string;
+  year?: number;
+  role: string;
+  character?: string;
+  sort_order: number;
+}
+
+export interface PersonDetail {
+  id: string;
+  name: string;
+  type: string;
+  // Built server-side as `/api/v1/people/{id}/thumb` only when a thumb
+  // file actually exists on disk. Absent on people scanned without a
+  // TMDb match or where the photo download failed.
+  image_url?: string;
+  filmography: FilmographyEntry[];
+}
+
 export interface Person {
   // Stable id — uuid. Used by /people/{id}/thumb (handled
   // server-side) and the upcoming person detail page route.

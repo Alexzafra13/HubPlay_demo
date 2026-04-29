@@ -137,6 +137,13 @@
     "emptyDescription": "Escribe en el cuadro de busqueda para encontrar contenido.",
     "noResults": "Sin resultados para \"{{query}}\""
   },
+  "personDetail": {
+    "notFoundTitle": "Persona no encontrada",
+    "notFoundDescription": "La persona que buscas no existe o ha sido eliminada.",
+    "filmography": "Filmografia",
+    "noFilmography": "Sin titulos asociados a esta persona en tu biblioteca.",
+    "asCharacter": "como {{character}}"
+  },
   "itemDetail": {
     "notFoundTitle": "Elemento no encontrado",
     "notFoundDescription": "El elemento que buscas no existe o ha sido eliminado.",
