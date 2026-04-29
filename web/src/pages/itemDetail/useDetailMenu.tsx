@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
-import type { MediaItem } from "@/api/types";
+import type { ItemDetail } from "@/api/types";
 import { queryKeys } from "@/api/hooks";
 import type { HeroMenuItem } from "@/components/media/HeroSection";
 import {
@@ -31,7 +31,12 @@ import {
 // a manual useMemo would just allocate dependency arrays for nothing.
 
 export interface UseDetailMenuArgs {
-  item: MediaItem | undefined;
+  // ItemDetail (not the bare MediaItem) because the menu reads
+  // `media_streams` and `external_ids`, which only exist on the
+  // detail-shape returned by GET /items/{id}. The page passes the
+  // `useItem(id).data` value directly so the type matches by
+  // construction.
+  item: ItemDetail | undefined;
   itemId: string | undefined;
   isAdmin: boolean;
   onOpenImageManager: () => void;
