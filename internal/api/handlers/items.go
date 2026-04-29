@@ -186,6 +186,23 @@ func (h *ItemHandler) Get(w http.ResponseWriter, r *http.Request) {
 		if item.ParentID != "" {
 			h.attachSeriesContextFromSeries(r.Context(), resp, item.ParentID)
 		}
+	case "series":
+		// "Has visto X de Y episodios" aggregate. Only emitted for an
+		// authenticated request — anonymous responses skip the field
+		// entirely so the client can render the same page without a
+		// presence check on a per-user value. Errors are best-effort:
+		// the page renders without the count rather than 500ing on
+		// what is essentially decoration.
+		if h.userData != nil {
+			if claims := auth.GetClaims(r.Context()); claims != nil {
+				if total, watched, err := h.userData.SeriesEpisodeProgress(r.Context(), claims.UserID, item.ID); err == nil && total > 0 {
+					resp["episode_progress"] = map[string]any{
+						"total":   total,
+						"watched": watched,
+					}
+				}
+			}
+		}
 	}
 
 	respondJSON(w, http.StatusOK, map[string]any{"data": resp})

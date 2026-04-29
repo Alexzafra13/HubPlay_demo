@@ -16,6 +16,116 @@ import (
 	"hubplay/internal/provider"
 )
 
+// ─── ImageRefreshScheduler ──────────────────────────────────────────────────
+
+// ImageRefreshScheduler periodically walks every non-manual library and
+// asks the ImageRefresher to fill any missing artwork kinds. Distinct
+// from the scan Scheduler because the cadence is different: scans run
+// every few hours (or per-library setting) so newly-added files appear
+// quickly, but image refresh only matters when a provider has fresher
+// art than what we already cached, which is a slow drift. Weekly is
+// enough to pick up TMDb's "the show got a new poster" without
+// hammering the provider.
+//
+// Locked images are respected per-kind by the refresher (ADR-003), so
+// admin curation survives this loop.
+type ImageRefreshScheduler struct {
+	libraries ImageRefreshLibrariesRepo
+	refresher *ImageRefresher
+	logger    *slog.Logger
+	stopCh    chan struct{}
+	interval  time.Duration
+	startup   time.Duration // grace before the first sweep
+}
+
+// ImageRefreshLibrariesRepo is the subset of the libraries repo needed
+// to enumerate scan targets. Defined here to keep the dependency arrow
+// pointing into library/, consistent with the rest of the schedulers
+// in this package.
+type ImageRefreshLibrariesRepo interface {
+	List(ctx context.Context) ([]*db.Library, error)
+}
+
+// NewImageRefreshScheduler wires the loop. interval=0 picks the
+// default of 7 days; startup=0 picks 1 hour after process start, so
+// the scheduler doesn't pile its first sweep on top of the startup
+// scan.
+func NewImageRefreshScheduler(libraries ImageRefreshLibrariesRepo, refresher *ImageRefresher, logger *slog.Logger) *ImageRefreshScheduler {
+	return &ImageRefreshScheduler{
+		libraries: libraries,
+		refresher: refresher,
+		logger:    logger.With("module", "image-refresh-scheduler"),
+		stopCh:    make(chan struct{}),
+		interval:  7 * 24 * time.Hour,
+		startup:   1 * time.Hour,
+	}
+}
+
+// Start runs the scheduler in its own goroutine. The first sweep fires
+// `startup` after Start; subsequent sweeps tick every `interval`.
+func (s *ImageRefreshScheduler) Start(ctx context.Context) {
+	s.logger.Info("image refresh scheduler started", "interval", s.interval, "first_sweep_in", s.startup)
+
+	go func() {
+		select {
+		case <-time.After(s.startup):
+			s.runSweep(ctx)
+		case <-s.stopCh:
+			return
+		case <-ctx.Done():
+			return
+		}
+
+		ticker := time.NewTicker(s.interval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				s.runSweep(ctx)
+			case <-s.stopCh:
+				s.logger.Info("image refresh scheduler stopped")
+				return
+			case <-ctx.Done():
+				s.logger.Info("image refresh scheduler context cancelled")
+				return
+			}
+		}
+	}()
+}
+
+// Stop halts the scheduler. Safe to call once; double-calls panic on
+// the closed channel, matching the existing Scheduler's contract.
+func (s *ImageRefreshScheduler) Stop() {
+	close(s.stopCh)
+}
+
+// runSweep enumerates libraries and asks the refresher to fill
+// missing artwork in each. Manual-mode libraries are skipped so the
+// admin's "do nothing automatic on this library" preference is
+// honoured here too. Per-library failures are logged and skipped;
+// only a list-libraries failure aborts the sweep.
+func (s *ImageRefreshScheduler) runSweep(ctx context.Context) {
+	libs, err := s.libraries.List(ctx)
+	if err != nil {
+		s.logger.Error("image refresh: list libraries failed", "error", err)
+		return
+	}
+	for _, lib := range libs {
+		if lib.ScanMode == "manual" {
+			continue
+		}
+		added, err := s.refresher.RefreshForLibrary(ctx, lib.ID)
+		if err != nil {
+			s.logger.Warn("image refresh: per-library failure", "library", lib.Name, "error", err)
+			continue
+		}
+		if added > 0 {
+			s.logger.Info("image refresh: filled missing artwork", "library", lib.Name, "added", added)
+		}
+	}
+}
+
 // ─── Collaborator interfaces ────────────────────────────────────────────────
 //
 // Defined here (not imported from handlers) to avoid an import cycle — handlers

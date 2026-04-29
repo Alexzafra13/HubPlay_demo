@@ -147,6 +147,8 @@
     "episodes": "Episodes",
     "episodeCount_one": "{{count}} episode",
     "episodeCount_other": "{{count}} episodes",
+    "episodesWatched": "You've watched {{watched}} of {{total}} episodes",
+    "episodesAllWatched": "Fully watched ({{total}} episodes)",
     "continueWatching": "Resume",
     "endsAt": "Ends at {{time}}",
     "trailer": "Trailer",

@@ -88,6 +88,20 @@ WHERE ud.user_id = ? AND ud.completed = 0 AND ud.position_ticks > 0
 ORDER BY ud.last_played_at DESC
 LIMIT ?;
 
+-- name: SeriesEpisodeProgress :one
+-- Aggregate "X of Y episodes watched" for a single series.
+-- The grid is series -> seasons -> episodes via parent_id; LEFT JOIN
+-- on user_data so episodes the user has never touched count as
+-- unwatched without forcing an INNER row to exist. Both columns come
+-- back as plain integers; SQLite COUNT() is well-typed for sqlc.
+SELECT
+    COUNT(e.id) AS total_episodes,
+    COUNT(CASE WHEN ud.completed = 1 THEN 1 END) AS watched_episodes
+FROM items s
+JOIN items e ON e.parent_id = s.id AND e.type = 'episode'
+LEFT JOIN user_data ud ON ud.user_id = ? AND ud.item_id = e.id
+WHERE s.parent_id = ? AND s.type = 'season';
+
 -- name: ListFavorites :many
 SELECT ud.item_id, ud.updated_at,
        i.title, i.type, i.year, i.duration_ticks

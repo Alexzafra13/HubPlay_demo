@@ -19,6 +19,12 @@ import { useItemChildren } from "@/api/hooks";
 import { Spinner } from "@/components/common";
 import { EpisodeCard, EpisodeRow } from "@/components/media";
 import type { MediaItem } from "@/api/types";
+import { thumb } from "@/utils/imageUrl";
+
+// Same target as PosterCard — season cards live on the same grid
+// surface so the served bytes match and the browser cache hits across
+// pages when the same image is reused.
+const SEASON_THUMB_WIDTH = 480;
 
 export function SeasonEpisodes({ seriesId }: { seriesId: string }) {
   const { t } = useTranslation();
@@ -105,7 +111,7 @@ function SeasonCard({ season }: SeasonCardProps) {
       >
         {season.poster_url ? (
           <img
-            src={season.poster_url}
+            src={thumb(season.poster_url, SEASON_THUMB_WIDTH) ?? season.poster_url}
             alt={season.title}
             loading="lazy"
             className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"

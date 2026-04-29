@@ -1,6 +1,10 @@
 import type { FC } from "react";
 import { useTranslation } from "react-i18next";
 import type { MediaItem } from "@/api/types";
+import { thumb } from "@/utils/imageUrl";
+
+// Row stills are 260-320px wide on lg; 720 keeps detail under 2x DPR.
+const ROW_THUMB_WIDTH = 720;
 
 interface EpisodeRowProps {
   item: MediaItem;
@@ -85,7 +89,7 @@ const EpisodeRow: FC<EpisodeRowProps> = ({ item, onPlay }) => {
       <div className="relative aspect-video w-full shrink-0 overflow-hidden rounded-[--radius-md] bg-bg-elevated sm:w-[260px] lg:w-[320px]">
         {stillUrl ? (
           <img
-            src={stillUrl}
+            src={thumb(stillUrl, ROW_THUMB_WIDTH) ?? stillUrl}
             alt=""
             loading="lazy"
             className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"

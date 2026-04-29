@@ -198,6 +198,18 @@ const SeriesHero: FC<SeriesHeroProps> = ({
                 </h1>
               )}
 
+              {/* Tagline sits between the title and the meta badges.
+                  Plex and TMDb both surface this string ("With great
+                  power comes great responsibility") right under the
+                  title — italic, single line, dimmer than the
+                  overview. Hidden when empty so series without a
+                  tagline don't get a phantom row. */}
+              {item.tagline && (
+                <p className="-mt-1 max-w-xl text-sm italic text-text-secondary/90 drop-shadow-md">
+                  {item.tagline}
+                </p>
+              )}
+
               <div className="flex flex-wrap items-center gap-2 text-sm text-text-secondary">
                 {item.year != null && <span className="font-medium">{item.year}</span>}
                 {item.community_rating != null && (
@@ -212,7 +224,53 @@ const SeriesHero: FC<SeriesHeroProps> = ({
                 {item.genres?.slice(0, 3).map((g) => (
                   <Badge key={g}>{g}</Badge>
                 ))}
+                {/* Studio / network — last in the row so it reads as
+                    a soft attribution rather than a primary tag.
+                    Rendered as plain text (not a Badge) to keep the
+                    badge cluster visually about taxonomy. */}
+                {item.studio && (
+                  <span className="text-xs text-text-muted">· {item.studio}</span>
+                )}
               </div>
+
+              {/* Watched-count aggregate — only present on the series
+                  scope and only when the user is authenticated. Shown
+                  as a thin progress bar with the count alongside, so
+                  a glance at the hero answers "how far am I in this
+                  show?" without scrolling to the seasons grid. */}
+              {item.episode_progress && item.episode_progress.total > 0 && (
+                <div className="flex items-center gap-3 text-xs text-text-secondary">
+                  <div
+                    className="h-1.5 w-32 overflow-hidden rounded-full bg-bg-elevated/60"
+                    role="progressbar"
+                    aria-valuemin={0}
+                    aria-valuemax={item.episode_progress.total}
+                    aria-valuenow={item.episode_progress.watched}
+                  >
+                    <div
+                      className="h-full bg-accent transition-all duration-500"
+                      style={{
+                        width: `${Math.min(
+                          100,
+                          (item.episode_progress.watched /
+                            item.episode_progress.total) *
+                            100,
+                        )}%`,
+                      }}
+                    />
+                  </div>
+                  <span>
+                    {item.episode_progress.watched >= item.episode_progress.total
+                      ? t("itemDetail.episodesAllWatched", {
+                          total: item.episode_progress.total,
+                        })
+                      : t("itemDetail.episodesWatched", {
+                          watched: item.episode_progress.watched,
+                          total: item.episode_progress.total,
+                        })}
+                  </span>
+                </div>
+              )}
 
               {item.overview && (
                 <p className="line-clamp-3 max-w-2xl text-sm leading-relaxed text-text-secondary sm:text-[15px]">

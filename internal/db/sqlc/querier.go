@@ -204,6 +204,12 @@ type Querier interface {
 	SetImagePrimary(ctx context.Context, arg SetImagePrimaryParams) error
 	SetProviderStatus(ctx context.Context, arg SetProviderStatusParams) (int64, error)
 	SetSigningKeyRetiredAt(ctx context.Context, arg SetSigningKeyRetiredAtParams) (int64, error)
+	// Aggregate "X of Y episodes watched" for a single series.
+	// The grid is series -> seasons -> episodes via parent_id; LEFT JOIN
+	// on user_data so episodes the user has never touched count as
+	// unwatched without forcing an INNER row to exist. Both columns come
+	// back as plain integers; SQLite COUNT() is well-typed for sqlc.
+	SeriesEpisodeProgress(ctx context.Context, arg SeriesEpisodeProgressParams) (SeriesEpisodeProgressRow, error)
 	UnsetPrimaryImages(ctx context.Context, arg UnsetPrimaryImagesParams) error
 	UpdateItem(ctx context.Context, arg UpdateItemParams) (int64, error)
 	UpdateLastLogin(ctx context.Context, arg UpdateLastLoginParams) error

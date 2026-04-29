@@ -147,6 +147,10 @@ func (r *progressFakeUserData) NextUp(ctx context.Context, userID string, limit 
 	return nil, nil
 }
 
+func (r *progressFakeUserData) SeriesEpisodeProgress(_ context.Context, _, _ string) (int, int, error) {
+	return 0, 0, nil
+}
+
 func (r *progressFakeUserData) Delete(_ context.Context, userID, itemID string) error {
 	if r.failDelete {
 		return errors.New("boom")
