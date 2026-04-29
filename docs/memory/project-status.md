@@ -2,11 +2,128 @@
 
 > Snapshot: **2026-04-29 día → tarde → noche, dos sesiones encadenadas de detail-UX premium** — bloque A `015ThedLMwhsx5ittdmtxSN4` (8 commits del "premium detail UX" pass: cast/crew end-to-end con fotos, IMDb/TMDb deep links, weekly image refresh scheduler, watched-count agregado, hero treatments) y bloque B `claude/review-project-resume-3V6Mr` (4 commits unificando hero movies↔series + aurora ambiental PS3-XMB como page canvas + fixes iterativos sobre fotos del usuario). Foundation lista para `/people/{id}` (SQL `ListFilmographyByPerson` + repo, sin handler aún). **tests: backend verde · frontend 336/336 · tsc clean**.
 
-Trabajo activo en `claude/review-project-resume-3V6Mr`:
-- `39698ce` ui(detail): unify movie hero with series layout + Plex-style cast strip
-- `99fd307` ui(detail): PS3-XMB ambient aurora as page canvas
-- `7000ec9` ui(detail): make ambient aurora actually visible + smoother hero seam
-- `10afab3` ui(detail): sharp hero backdrop, no clipped Play button, vibrant aurora, fix duplicate "Sigue viendo"
+`main` al día — último push 2026-04-29 17:04. Tres commits frescos
+cierran dos items P1 del roadmap pre-Kotlin TV:
+- `5a37ed2` stream(caps): server honra `X-Hubplay-Client-Capabilities`
+- `f21194f` api(client): probe MediaSource y manda el header
+- `94cb74b` sync(progress): cross-device watch state via `/me/events` SSE
+
+---
+
+## 🌐 Sesión 2026-04-29 tarde (PRs #122 + #123 a `main`) — 3 commits foundation pre-Kotlin TV
+
+Sesión doble que cierra **dos items P1 grandes** del roadmap "preparar la API
+para que la consuma una app nativa Android TV". Hasta hoy `Decide()` asumía
+"el cliente es un navegador web con codecs típicos" y el progreso de
+reproducción no se sincronizaba entre dispositivos. Ambos asuntos quedan
+cerrados.
+
+### Commit 1 — `5a37ed2` `stream(caps)`: capability negotiation server-side
+
+`stream.Decide()` deja de hard-codear codecs y acepta un `*Capabilities`
+parseado del header `X-Hubplay-Client-Capabilities` (formato semicolon
+separated key=value-list, mirror de `Accept-CH`/`Vary`):
+
+```
+video=h264,h265,vp9,av1; audio=aac,opus,eac3; container=mp4,mkv
+```
+
+Reglas clave:
+- Tokens lower-cased y trimmed; keys desconocidas se ignoran (forward-compat).
+- Segmentos malformados se descartan silenciosamente — un typo no envenena el resto.
+- Header ausente → `DefaultWebCapabilities` (= comportamiento legacy exacto).
+- Declaración parcial → `effectiveCapabilities` rellena con defaults.
+
+Resultado real: una Chromecast que decodifica EAC3 nativamente deja de
+recibir AAC stereo downmixed cuando el wire ya soportaba 5.1.
+
+Tests: 15 backend (parse, backfill, decisión nil/declarada/parcial,
+DirectPlay/DirectStream/Transcode). Bonus mientras estaba: fix de
+`TestSession_SegmentPath` que asumía forward-slashes y fallaba en Windows.
+
+**Files of record**: [`internal/stream/capabilities.go`](internal/stream/capabilities.go),
+[`internal/stream/decision.go`](internal/stream/decision.go),
+[`internal/api/handlers/stream.go`](internal/api/handlers/stream.go).
+
+### Commit 2 — `f21194f` `api(client)`: probe MSE + send header
+
+Cliente web probea `MediaSource.isTypeSupported` contra una lista fija de
+pares (codec, MIME). Resultado cacheado por sesión de página (codec
+support no cambia sin reload). El `api.request()` adjunta el header
+automáticamente.
+
+Detalles defensivos:
+- `isTypeSupported` lanza en algunos browsers con MIME malformado → try/catch
+  per-MIME, no envenena el resto.
+- SSR / pre-MSE → null → server fallback a defaults web (preserva legacy).
+- Cero probes pasan → header suprimido (no mentir con header vacío).
+- `hevc` y `h265` se emiten ambos cuando MSE decodifica la familia (ffprobe
+  normaliza a "hevc" pero hay items legacy con "h265" — listar ambos casa
+  con cualquier nombre que llegue del scanner).
+
+Tests: 9 (SSR, throw, partial, contenedor, memoización, alias hevc/h265,
+isTypeSupported missing, todo-false, fetch real con header).
+
+**Files of record**: [`web/src/api/clientCapabilities.ts`](web/src/api/clientCapabilities.ts),
+[`web/src/api/client.ts`](web/src/api/client.ts).
+
+### Commit 3 — `94cb74b` `sync(progress)`: cross-device via SSE
+
+El feature insignia "lo empecé en el portátil, sigo en el móvil". El bus de
+eventos (`internal/event/bus.go`) ya existía para scanner/IPTV; este commit
+lo abre per-user con filtrado correcto.
+
+Tres tipos nuevos en el bus: `user.progress.updated`, `user.played.toggled`,
+`user.favorite.toggled`. Splitting en tres (en vez de un genérico
+`user_data.changed`) permite al frontend invalidar el set TanStack correcto
+sin parsear payload kind.
+
+`ProgressHandler` recibe `EventBusPublisher` opcional; cada uno de los 4
+endpoints mutating publica tras DB write. nil bus = no-op (test rigs
+simples).
+
+Nuevo handler `GET /api/v1/me/events` (SSE):
+- **Filtra por `Data["user_id"] == claims.UserID` ANTES del channel write**
+  → un cliente lento del usuario A no presiona la publicación al usuario B.
+- Defence in depth: rechaza eventos con Data nil, sin user_id, o con
+  user_id wrong-typed. Un publisher mal configurado **no** debe fan-out a
+  todo el mundo.
+- Mismo framing SSE que `/events` (keepalive, JSON shape, unsubscribe-on-disconnect)
+  → el `EventSource` del frontend consume ambos sin divergencia.
+
+**Por qué SSE y no WebSocket**: canal one-way (server → client) y casa con
+todos los clientes (web `EventSource`, Kotlin TV `okhttp-sse` maduro,
+auth por cookie, exp-backoff reconnect gratis). WebSocket compraría
+bidireccionalidad innecesaria + nginx upgrade config.
+
+Frontend:
+- `useUserEventStream` — sibling de `useEventStream` apuntando a `/me/events`,
+  nombre explícito para que admin code no instancie sin auth por accidente.
+- `useUserDataSync` — orchestrator: 3 subs → invalidaciones correctas:
+  - `progress` → `items/{id}`, `progress/{id}`, continue-watching
+  - `played`   → `items/{id}`, continue-watching, next-up
+  - `favorite` → `items/{id}`, favorites
+- Montado **una vez** en `AppLayout` (no per-page) para no fan-out duplicate
+  connections ni perder eventos cuando otra ruta esté activa.
+
+Tests: 5 backend (401 unauth, delivers own, drops other users', drops
+malformed, unsubscribes 3 tipos on disconnect) + 5 frontend (subs por tipo,
+invalidaciones correctas, malformed JSON no-throw, close on unmount,
+disabled mounts nothing). Total 70+ stream/handlers backend, 364/364 frontend.
+
+**Files of record**: [`internal/api/handlers/me_events.go`](internal/api/handlers/me_events.go),
+[`internal/api/handlers/progress.go`](internal/api/handlers/progress.go),
+[`internal/event/bus.go`](internal/event/bus.go),
+[`web/src/hooks/useUserDataSync.ts`](web/src/hooks/useUserDataSync.ts),
+[`web/src/components/layout/AppLayout.tsx`](web/src/components/layout/AppLayout.tsx).
+
+### Estado al cierre
+
+- `main` 2026-04-29 17:04, working tree clean, sincronizado con origin.
+- Backend `go test -race ./...` clean, frontend 364/364 verde, `tsc -b` clean.
+- Quedan en P1: device-code login (~1-2 días) y OpenAPI spec (~½ día).
+  Después de esos dos, **todos los prerequisitos para empezar la app
+  Kotlin TV están completos**.
 
 ---
 
@@ -359,13 +476,12 @@ Trabajo que **sube en la cola** porque la app TV lo necesita:
 
 ### **P1 · Pre-Kotlin TV (foundation que la app va a consumir)**
 
-2. **Capability negotiation server-side** (~1 día). Nuevo header
-   `X-Hubplay-Client-Capabilities` con CSV de codecs decodificables
-   (audio + video). El stream manager evalúa
-   "¿puedes decodificar `eac3.7.1` directamente?" → direct-stream.
-   La app TV lo declarará agresivamente; el web seguirá siendo
-   conservador. Cuando la app TV exista será el primer cliente que
-   le saque jugo a esto.
+2. ~~**Capability negotiation server-side**~~ ✅ **shipped 2026-04-29**
+   (`5a37ed2` + `f21194f`). Header `X-Hubplay-Client-Capabilities`
+   parseado en `stream.Capabilities`; web client probea
+   `MediaSource.isTypeSupported` y manda el header. Defaults web
+   intactos para legacy. La app Kotlin TV declarará agresivamente
+   cuando llegue.
 
 3. **Device-code login flow** (~1-2 días). Endpoints:
    - `POST /auth/device/start` → devuelve `{user_code: "ABC123",
@@ -382,11 +498,12 @@ Trabajo que **sube en la cola** porque la app TV lo necesita:
    handlers). Sin esto, la app Kotlin va a redescubrir el wire
    format por trial-and-error.
 
-5. **WebSocket / SSE para progress sync** (~1 día). El cliente
-   reporta posición cada 5s; otros clientes del mismo usuario
-   reciben push si el item es el mismo. Crítico para "empezar en
-   un sitio, seguir en otro". El server ya tiene `event.Bus`
-   interno; falta exponerlo como SSE para clientes externos.
+5. ~~**SSE para progress sync**~~ ✅ **shipped 2026-04-29** (`94cb74b`).
+   `GET /api/v1/me/events` con filtrado per-user `BEFORE` channel write.
+   Tres event types: `user.progress.updated`, `user.played.toggled`,
+   `user.favorite.toggled`. Frontend `useUserDataSync` montado en
+   `AppLayout`. Mismo framing que `/events` para que la app Kotlin TV
+   reuse `okhttp-sse` igual que el web reusa `EventSource`.
 
 ### **P2 · Quick wins paralelos a la app**
 
