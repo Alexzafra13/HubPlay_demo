@@ -120,3 +120,33 @@ func TestSettingsRepository_All_ReturnsAllStored(t *testing.T) {
 		t.Errorf("All: got %v", got)
 	}
 }
+
+// Regression for the CI panic: a *SettingsRepository value can be
+// passed to a SettingsReader interface even when it's nil — Go wraps
+// the typed-nil into a non-nil interface, and any `if h.settings ==
+// nil` guard at the call site fails to catch it. The fix is making
+// the receiver methods nil-safe so the typed-nil flows through to a
+// proper "not found" + GetOr-fallback chain. Without this, the
+// integration test that wires the API router with a stubbed
+// Dependencies (Settings: nil) panics on the first request that
+// reads runtime settings (master.m3u8 → effectiveBaseURL).
+func TestSettingsRepository_NilReceiverReturnsNotFound(t *testing.T) {
+	var repo *db.SettingsRepository // typed nil
+	if _, err := repo.Get(context.Background(), "any"); err == nil {
+		t.Fatal("nil receiver Get should not panic and should return an error")
+	}
+	got, err := repo.GetOr(context.Background(), "any", "fallback")
+	if err != nil {
+		t.Errorf("GetOr nil receiver: unexpected err %v", err)
+	}
+	if got != "fallback" {
+		t.Errorf("GetOr nil receiver: got %q want %q", got, "fallback")
+	}
+	all, err := repo.All(context.Background())
+	if err != nil {
+		t.Errorf("All nil receiver: %v", err)
+	}
+	if len(all) != 0 {
+		t.Errorf("All nil receiver should be empty, got %v", all)
+	}
+}

@@ -364,13 +364,13 @@ func (h *ItemHandler) Children(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Dedupe duplicate season rows. Older scans (before show-hierarchy
-	// caching was robust) sometimes left two rows with the same parent
-	// + season_number. The canonical one is the season that actually
-	// has episodes attached — that's what we keep. The orphan stays in
-	// the DB (cleanup is a separate operation) but is hidden from the
-	// SeasonGrid so the user doesn't see "Season 1 / Season 1".
-	children = h.lib.DedupeSeasonsByChildCount(r.Context(), children)
+	// Note: a previous read-time `DedupeSeasonsByChildCount` step lived
+	// here for installs that still had legacy duplicate season rows.
+	// Migration 018 added partial UNIQUE indexes on
+	// (parent_id, season_number) so duplicates are now structurally
+	// impossible — the runtime dedupe was dead defence and was removed.
+	// If a constraint failure ever surfaces, that's the right outcome:
+	// fix the scanner regression rather than paper over it here.
 
 	data := make([]map[string]any, len(children))
 	for i, item := range children {

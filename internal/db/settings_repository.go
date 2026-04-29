@@ -27,7 +27,17 @@ func NewSettingsRepository(database *sql.DB) *SettingsRepository {
 // Get returns the stored value for key. domain.ErrNotFound when the
 // row is absent — callers should layer their YAML / env default on
 // top via GetOr below rather than treating absence as an error.
+//
+// Nil-safe receiver: a nil *SettingsRepository wrapped in a
+// SettingsReader interface is the typed-nil-in-interface trap that
+// catches every caller's `if r == nil` guard. Returning ErrNotFound
+// here lets the GetOr default-fallback path work transparently for
+// a wiring that didn't get a real repo (test rigs, deployments
+// where settings construction failed).
 func (r *SettingsRepository) Get(ctx context.Context, key string) (string, error) {
+	if r == nil {
+		return "", fmt.Errorf("setting %q: %w", key, domain.ErrNotFound)
+	}
 	var value string
 	err := r.db.QueryRowContext(ctx,
 		`SELECT value FROM app_settings WHERE key = ?`, key,
@@ -63,8 +73,14 @@ func (r *SettingsRepository) GetOr(ctx context.Context, key, def string) (string
 
 // Set upserts the value for key. Updating updated_at on every write
 // gives the system panel a "last edited" hint without a separate
-// audit log — sufficient for self-hosted single-tenant.
+// audit log — sufficient for self-hosted single-tenant. Writing to
+// a nil receiver is a programming error (the admin endpoint should
+// have refused the request before reaching here) so we surface a
+// clear error rather than silently dropping the write.
 func (r *SettingsRepository) Set(ctx context.Context, key, value string) error {
+	if r == nil {
+		return fmt.Errorf("set setting %q: settings repository not initialised", key)
+	}
 	_, err := r.db.ExecContext(ctx,
 		`INSERT INTO app_settings (key, value, updated_at)
 		 VALUES (?, ?, CURRENT_TIMESTAMP)
@@ -83,6 +99,9 @@ func (r *SettingsRepository) Set(ctx context.Context, key, value string) error {
 // it the operator could only pin a value, never explicitly clear an
 // override.
 func (r *SettingsRepository) Delete(ctx context.Context, key string) error {
+	if r == nil {
+		return fmt.Errorf("delete setting %q: settings repository not initialised", key)
+	}
 	_, err := r.db.ExecContext(ctx,
 		`DELETE FROM app_settings WHERE key = ?`, key)
 	if err != nil {
@@ -94,8 +113,12 @@ func (r *SettingsRepository) Delete(ctx context.Context, key string) error {
 // All returns every stored setting. Used by the admin GET endpoint to
 // hydrate the UI on first load — the page wants to show "current
 // effective values" with both the override (if any) and the YAML
-// default; the handler combines both.
+// default; the handler combines both. Nil receiver returns an empty
+// map so a partial wiring (handler without repo) renders defaults.
 func (r *SettingsRepository) All(ctx context.Context) (map[string]string, error) {
+	if r == nil {
+		return map[string]string{}, nil
+	}
 	rows, err := r.db.QueryContext(ctx, `SELECT key, value FROM app_settings`)
 	if err != nil {
 		return nil, fmt.Errorf("list settings: %w", err)

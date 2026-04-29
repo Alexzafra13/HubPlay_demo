@@ -58,11 +58,6 @@ type LibraryService interface {
 	// id has in one round-trip. Used by the Children handler to inject
 	// `episode_count` into season summaries.
 	GetItemChildCounts(ctx context.Context, parentIDs []string) (map[string]int, error)
-	// DedupeSeasonsByChildCount collapses duplicate season rows
-	// (same parent + season_number) down to the row with the most
-	// children attached. Lives on the service so the dedupe rule is
-	// owned by the items domain, not the handler that surfaces it.
-	DedupeSeasonsByChildCount(ctx context.Context, children []*db.Item) []*db.Item
 	GetItemStreams(ctx context.Context, itemID string) ([]*db.MediaStream, error)
 	GetItemImages(ctx context.Context, itemID string) ([]*db.Image, error)
 	LatestItems(ctx context.Context, libraryID string, itemType string, limit int) ([]*db.Item, error)
