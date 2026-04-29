@@ -101,7 +101,8 @@ func (h *StreamHandler) Info(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	decision := stream.Decide(item, mediaStreams, "")
+	caps := stream.CapabilitiesFromRequest(r)
+	decision := stream.Decide(item, mediaStreams, caps, "")
 	profiles := stream.ProfileNames()
 
 	respondJSON(w, http.StatusOK, map[string]any{
@@ -147,8 +148,14 @@ func (h *StreamHandler) QualityPlaylist(w http.ResponseWriter, r *http.Request) 
 	}
 
 	startTime := parseFloat(r.URL.Query().Get("start"))
+	// Client capabilities (codecs/containers) come in via the
+	// X-Hubplay-Client-Capabilities header. nil means "no header sent",
+	// in which case the stream manager + Decide() fall back to the
+	// conservative web-browser defaults — no behaviour change for
+	// today's web client which doesn't send the header yet.
+	caps := stream.CapabilitiesFromRequest(r)
 
-	ms, err := h.manager.StartSession(r.Context(), claims.UserID, itemID, quality, startTime)
+	ms, err := h.manager.StartSession(r.Context(), claims.UserID, itemID, quality, caps, startTime)
 	if err != nil {
 		// The manager returns typed AppErrors (e.g. TranscodeBusy) that
 		// handleServiceError renders without leaking internal messages.

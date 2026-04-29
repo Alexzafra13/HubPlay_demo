@@ -76,7 +76,7 @@ type LibraryAccessService interface {
 
 // StreamManagerService defines streaming operations needed by handlers.
 type StreamManagerService interface {
-	StartSession(ctx context.Context, userID, itemID, profileName string, startTime float64) (*stream.ManagedSession, error)
+	StartSession(ctx context.Context, userID, itemID, profileName string, caps *stream.Capabilities, startTime float64) (*stream.ManagedSession, error)
 	GetSession(key string) (*stream.ManagedSession, bool)
 	StopSession(key string)
 	ActiveSessions() int

@@ -142,7 +142,14 @@ func sessionKey(userID, itemID, profile string) string {
 }
 
 // StartSession creates or returns an existing session for the given item.
-func (m *Manager) StartSession(ctx context.Context, userID, itemID, profileName string, startTime float64) (*ManagedSession, error) {
+//
+// `caps` is the client's declared codec/container capabilities (parsed
+// from the X-Hubplay-Client-Capabilities header). Pass nil for unknown
+// clients — the playback Decide() falls back to web-browser defaults.
+// The capabilities affect the DirectPlay/DirectStream/Transcode
+// waterfall: a Kotlin TV app declaring HEVC + EAC3 + MKV gets
+// DirectPlay where today's hard-coded defaults forced a Transcode.
+func (m *Manager) StartSession(ctx context.Context, userID, itemID, profileName string, caps *Capabilities, startTime float64) (*ManagedSession, error) {
 	key := sessionKey(userID, itemID, profileName)
 
 	m.mu.Lock()
@@ -175,7 +182,7 @@ func (m *Manager) StartSession(ctx context.Context, userID, itemID, profileName 
 		return nil, fmt.Errorf("get streams: %w", err)
 	}
 
-	decision := Decide(item, mediaStreams, profileName)
+	decision := Decide(item, mediaStreams, caps, profileName)
 
 	// Direct play doesn't need a transcode session
 	if decision.Method == MethodDirectPlay {

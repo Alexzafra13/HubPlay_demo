@@ -20,17 +20,27 @@ type PlaybackDecision struct {
 	Profile    Profile // transcoding profile if Method == Transcode
 }
 
-// Web-compatible codecs and containers.
-var (
-	webVideoCodecs    = map[string]bool{"h264": true, "vp8": true, "vp9": true, "av1": true}
-	webAudioCodecs    = map[string]bool{"aac": true, "mp3": true, "opus": true, "vorbis": true, "flac": true}
-	webContainers     = map[string]bool{"mp4": true, "webm": true, "mov": true}
-	remuxableContainers = map[string]bool{"matroska": true, "mkv": true, "avi": true, "mpegts": true}
-)
+// remuxableContainers lists source containers that ffmpeg can repackage
+// into a web-friendly mp4 without re-encoding. The intersection with
+// the *client's* container caps is the one that matters for DirectPlay
+// (we'd send the file as-is), but DirectStream still needs the source
+// to be remuxable on our side.
+var remuxableContainers = map[string]bool{
+	"matroska": true,
+	"mkv":      true,
+	"avi":      true,
+	"mpegts":   true,
+}
 
 // Decide analyzes the item's media streams and returns a playback decision.
 // It follows the waterfall: DirectPlay → DirectStream → Transcode.
-func Decide(item *db.Item, streams []*db.MediaStream, requestedProfile string) PlaybackDecision {
+//
+// `caps` carries the client's declared capabilities (parsed from the
+// X-Hubplay-Client-Capabilities header). Pass nil for "unknown client" —
+// the function falls back to DefaultWebCapabilities, matching the
+// behaviour the original hard-coded version had so legacy web clients
+// see no change.
+func Decide(item *db.Item, streams []*db.MediaStream, caps *Capabilities, requestedProfile string) PlaybackDecision {
 	var videoStream, audioStream *db.MediaStream
 	for _, s := range streams {
 		switch s.StreamType {
@@ -50,9 +60,10 @@ func Decide(item *db.Item, streams []*db.MediaStream, requestedProfile string) P
 		return PlaybackDecision{Method: MethodTranscode, Profile: DefaultProfile()}
 	}
 
-	videoOK := webVideoCodecs[videoStream.Codec]
-	audioOK := audioStream == nil || webAudioCodecs[audioStream.Codec]
-	containerOK := isWebContainer(item.Container)
+	eff := effectiveCapabilities(caps)
+	videoOK := eff.VideoCodecs[videoStream.Codec]
+	audioOK := audioStream == nil || eff.AudioCodecs[audioStream.Codec]
+	containerOK := containerInSet(item.Container, eff.Containers)
 
 	// DirectPlay: everything is compatible
 	if videoOK && audioOK && containerOK {
@@ -91,10 +102,12 @@ func Decide(item *db.Item, streams []*db.MediaStream, requestedProfile string) P
 	}
 }
 
-func isWebContainer(container string) bool {
-	// ffprobe may return comma-separated format names like "mov,mp4,m4a,3gp,3g2,mj2"
+func containerInSet(container string, set map[string]bool) bool {
+	// ffprobe may return comma-separated format names like
+	// "mov,mp4,m4a,3gp,3g2,mj2" — accept the item if ANY of those
+	// matches a name the client said it supports.
 	for _, part := range splitContainer(container) {
-		if webContainers[part] {
+		if set[part] {
 			return true
 		}
 	}
