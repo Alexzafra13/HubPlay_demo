@@ -123,13 +123,6 @@ func (s *libFakeService) GetItemChildren(ctx context.Context, id string) ([]*db.
 func (s *libFakeService) GetItemChildCounts(_ context.Context, _ []string) (map[string]int, error) {
 	return map[string]int{}, nil
 }
-// DedupeSeasonsByChildCount in tests is the identity — production
-// behaviour is exercised in the library service unit tests, and
-// every handler test using this fake either doesn't pass duplicate
-// seasons or doesn't care about the dedupe outcome.
-func (s *libFakeService) DedupeSeasonsByChildCount(_ context.Context, in []*db.Item) []*db.Item {
-	return in
-}
 func (s *libFakeService) GetItemStreams(ctx context.Context, id string) ([]*db.MediaStream, error) {
 	if s.getStreamsFn != nil {
 		return s.getStreamsFn(ctx, id)
