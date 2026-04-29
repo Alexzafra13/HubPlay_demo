@@ -312,21 +312,40 @@ export default function ItemDetail() {
     if (!tintBase) return undefined;
     const vibrant = palette?.vibrant;
     const muted = palette?.muted;
+    // Both blobs prefer the VIBRANT swatch — by definition it's the
+    // most saturated colour the palette extracted, so it carries the
+    // page identity. Muted falls in only as a backstop for items
+    // whose vibrant slot couldn't be filled (rare, but happens on
+    // monochrome posters). Earlier revisions used muted for the
+    // lower-right blob, which read as "soso" because muted IS by
+    // definition desaturated; the lower half of the page is exactly
+    // where the user spends the most time scrolling, so it's the
+    // wrong place to dial colour back.
+    const primary = vibrant ?? muted;
+    const secondary = muted ?? vibrant;
     const layers: string[] = [];
-    if (vibrant) {
+    if (primary) {
+      // Upper-left vibrant blob — covers the hero left side and
+      // bleeds into the seasons-grid headline area. Big radius so
+      // the bleed reads as "the whole top of the page is tinted",
+      // not "there's a circle of red here".
       layers.push(
-        `radial-gradient(ellipse 90% 70% at 15% 5%, color-mix(in srgb, ${vibrant} 45%, transparent) 0%, transparent 65%)`,
+        `radial-gradient(ellipse 100% 80% at 10% 0%, color-mix(in srgb, ${primary} 60%, transparent) 0%, transparent 65%)`,
       );
     }
-    if (muted) {
+    if (primary) {
+      // Lower-right vibrant blob — the seasons grid + cast strip
+      // sit here. Same vibrant swatch but slightly muted via the
+      // mix percentage so foreground text stays readable.
       layers.push(
-        `radial-gradient(ellipse 80% 80% at 90% 95%, color-mix(in srgb, ${muted} 40%, transparent) 0%, transparent 70%)`,
+        `radial-gradient(ellipse 90% 90% at 90% 100%, color-mix(in srgb, ${primary} 50%, transparent) 0%, transparent 70%)`,
       );
     }
-    if (vibrant || muted) {
-      const accent = vibrant ?? muted!;
+    if (secondary) {
+      // Cooler counter-blob: balances the warm primary with a
+      // softer accent so the whole canvas isn't a single hue.
       layers.push(
-        `radial-gradient(circle 45% at 50% 60%, color-mix(in srgb, ${accent} 18%, transparent) 0%, transparent 75%)`,
+        `radial-gradient(circle 55% at 50% 55%, color-mix(in srgb, ${secondary} 28%, transparent) 0%, transparent 75%)`,
       );
     }
     return {
@@ -448,14 +467,19 @@ export default function ItemDetail() {
           </section>
         )}
 
-        {/* "Sigue viendo" panel — surfaces the resume-target episode
-            as a one-row Jellyfin-style card with progress bar +
-            synopsis. Lives below the hero (Netflix / Plex pattern)
-            instead of squashing the affordance into the main button.
-            Only renders when the user actually has progress on this
-            entity — cold-start users see "Reproducir" in the hero
-            and the seasons grid right below, no panel noise. */}
-        {heroScope &&
+        {/* "Sigue viendo" panel — series scope only. Surfaces the
+            resume-target episode as a one-row Jellyfin-style card so
+            the user can resume in one click without scrolling
+            through seasons + episodes to find their spot.
+            Suppressed on the SEASON page on purpose: the season's
+            full episode list renders right below the hero anyway,
+            and the in-progress episode in that list already shows
+            its own progress bar + resume affordance — surfacing it
+            twice (panel above + row in the list) reads as
+            duplication. Cold-start users on the series page see
+            "Reproducir" in the hero and the seasons grid right
+            below, no panel noise. */}
+        {heroScope === "series" &&
           resumeTarget.mode === "resume" &&
           resumeTarget.episode && (
             <section>
@@ -465,15 +489,10 @@ export default function ItemDetail() {
               <EpisodeRow
                 item={resumeTarget.episode}
                 onPlay={(epId) => {
-                  // On the season page we play inline; on the series
-                  // page we navigate so the VideoPlayer's title +
-                  // up-next prefetch use the episode's own context
+                  // Series page: navigate so the VideoPlayer's title
+                  // + up-next prefetch use the episode's own context
                   // instead of the series shell's.
-                  if (heroScope === "season") {
-                    handlePlay(epId);
-                  } else {
-                    navigate(`/items/${epId}`);
-                  }
+                  navigate(`/items/${epId}`);
                 }}
               />
             </section>
