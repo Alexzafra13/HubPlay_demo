@@ -124,7 +124,7 @@ const SeriesHero: FC<SeriesHeroProps> = ({
           so what we DO reveal includes the upper third where actor
           faces typically sit (instead of cropping heads off, which
           the previous `object-right` centre-anchor did). */}
-      <div className="relative min-h-[460px] sm:min-h-[540px] lg:min-h-[600px] max-h-[720px]">
+      <div className="relative min-h-[460px] sm:min-h-[540px] lg:min-h-[600px]">
         {heroBackdropUrl ? (
           <img
             src={heroBackdropUrl}

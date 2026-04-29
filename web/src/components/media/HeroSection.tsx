@@ -7,10 +7,13 @@ import { Badge } from "@/components/common/Badge";
 import { useVibrantColors } from "@/hooks/useVibrantColors";
 import { thumb } from "@/utils/imageUrl";
 
-// Hero backdrops and posters live on a large surface; serve a
-// bandwidth-efficient resized variant rather than the full-resolution
-// ingest. 1280 covers retina laptops; 720 covers the inline poster.
-const HERO_BACKDROP_WIDTH = 1280;
+// Posters are small enough (≤340px tall) that a 720px-wide variant
+// covers 2x DPR comfortably — worth the bandwidth save. The hero
+// backdrop, however, fills the entire viewport width on widescreen
+// monitors (1920+); requesting a 1280-wide variant for it produced
+// visibly upscaled, soft edges. The backdrop now uses the source
+// URL directly so the browser receives the largest available
+// ingest size and scales DOWN at most.
 const HERO_POSTER_WIDTH = 720;
 
 // ─── Menu item type ─────────────────────────────────────────────────────────
@@ -202,10 +205,10 @@ const HeroSection: FC<HeroSectionProps> = ({
         marginTop: "calc(var(--topbar-height) * -1)",
       }}
     >
-      <div className="relative min-h-[460px] sm:min-h-[540px] lg:min-h-[600px] max-h-[720px]">
+      <div className="relative min-h-[460px] sm:min-h-[540px] lg:min-h-[600px]">
         {heroBackdropUrl ? (
           <img
-            src={thumb(heroBackdropUrl, HERO_BACKDROP_WIDTH) ?? heroBackdropUrl}
+            src={heroBackdropUrl}
             alt=""
             loading="eager"
             className="absolute inset-0 h-full w-full object-cover"
