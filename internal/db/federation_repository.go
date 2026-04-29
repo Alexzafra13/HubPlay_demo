@@ -334,3 +334,108 @@ func scanPeer(row rowScanner) (*federation.Peer, error) {
 func scanPeerRow(rows *sql.Rows) (*federation.Peer, error) {
 	return scanPeer(rows)
 }
+
+// ─── audit log ──────────────────────────────────────────────────────
+
+// InsertAuditEntry persists one peer-request audit row. Idempotency
+// isn't a concern — every call is a new event. NULLs flow through
+// for optional fields so the table stays honest about what each
+// request actually touched.
+func (r *FederationRepository) InsertAuditEntry(ctx context.Context, e *federation.AuditEntry) error {
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO federation_audit_log
+		    (peer_id, remote_user_id, method, endpoint, status_code,
+		     bytes_out, item_id, session_id, error_kind, duration_ms,
+		     occurred_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		e.PeerID,
+		nullableString(e.RemoteUserID),
+		e.Method,
+		e.Endpoint,
+		e.StatusCode,
+		e.BytesOut,
+		nullableString(e.ItemID),
+		nullableString(e.SessionID),
+		nullableString(e.ErrorKind),
+		e.DurationMs,
+		e.OccurredAt,
+	)
+	if err != nil {
+		return fmt.Errorf("insert audit entry: %w", err)
+	}
+	return nil
+}
+
+// ListAuditEntries returns the most recent N audit rows for a peer,
+// newest first. Powers the admin UI's per-peer audit view.
+func (r *FederationRepository) ListAuditEntries(ctx context.Context, peerID string, limit int) ([]*federation.AuditEntry, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 100
+	}
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT peer_id, remote_user_id, method, endpoint, status_code,
+		       bytes_out, item_id, session_id, error_kind, duration_ms,
+		       occurred_at
+		  FROM federation_audit_log
+		 WHERE peer_id = ?
+		 ORDER BY occurred_at DESC
+		 LIMIT ?
+	`, peerID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list audit entries: %w", err)
+	}
+	defer rows.Close()
+
+	out := []*federation.AuditEntry{}
+	for rows.Next() {
+		var (
+			e            federation.AuditEntry
+			remoteUser   sql.NullString
+			itemID       sql.NullString
+			sessionID    sql.NullString
+			errorKind    sql.NullString
+		)
+		if err := rows.Scan(&e.PeerID, &remoteUser, &e.Method, &e.Endpoint,
+			&e.StatusCode, &e.BytesOut, &itemID, &sessionID,
+			&errorKind, &e.DurationMs, &e.OccurredAt); err != nil {
+			return nil, fmt.Errorf("scan audit entry: %w", err)
+		}
+		if remoteUser.Valid {
+			e.RemoteUserID = remoteUser.String
+		}
+		if itemID.Valid {
+			e.ItemID = itemID.String
+		}
+		if sessionID.Valid {
+			e.SessionID = sessionID.String
+		}
+		if errorKind.Valid {
+			e.ErrorKind = errorKind.String
+		}
+		out = append(out, &e)
+	}
+	return out, rows.Err()
+}
+
+// PruneAuditBefore deletes audit rows older than the cutoff.
+// Returns the number of rows removed. Called from a background
+// pruner (Phase 7+); for now it's a no-op without a caller.
+func (r *FederationRepository) PruneAuditBefore(ctx context.Context, cutoff time.Time) (int64, error) {
+	res, err := r.db.ExecContext(ctx, `
+		DELETE FROM federation_audit_log
+		 WHERE occurred_at < ?
+	`, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("prune audit: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+// nullableString lives in session_repository.go — shared across the
+// db package so audit columns can stay NULL when the request didn't
+// touch a particular dimension.

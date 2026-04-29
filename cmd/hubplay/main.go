@@ -292,6 +292,9 @@ func run(configPath string) error {
 		logger.Info("federation: manager initialised",
 			"server_uuid", federationManager.PublicServerInfo().ServerUUID,
 			"fingerprint", federationManager.PublicServerInfo().PubkeyFingerprint)
+		// Flush the audit log queue on graceful shutdown so the last
+		// few peer requests aren't lost.
+		defer federationManager.Close()
 	}
 
 	router := api.NewRouter(api.Dependencies{

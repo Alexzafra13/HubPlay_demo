@@ -25,6 +25,7 @@ import (
 // keeps the federation package testable with an in-memory fake.
 type Repo interface {
 	IdentityRepo
+	AuditRepo
 
 	InsertInvite(ctx context.Context, invite *Invite) error
 	GetInviteByCode(ctx context.Context, code string) (*Invite, error)
@@ -77,17 +78,24 @@ type Config struct {
 	// HTTPTimeout caps outbound peer calls (probe + handshake). Short
 	// — peers should respond quickly or be considered offline.
 	HTTPTimeout time.Duration
+	// PeerRequestsPerMinute is the per-peer rate-limit ceiling for
+	// inbound peer-authenticated requests. Defaults to 60.
+	PeerRequestsPerMinute int
+	// PeerBurst is the bucket ceiling above the steady rate. Defaults to 30.
+	PeerBurst int
 }
 
 // DefaultConfig returns sensible defaults for new deployments. Caller
 // overrides whatever they want from hubplay.yaml.
 func DefaultConfig() Config {
 	return Config{
-		AdvertisedURL:   "",
-		Version:         "0.1.0",
-		SupportedScopes: []string{"browse", "play"},
-		InviteTTL:       24 * time.Hour,
-		HTTPTimeout:     15 * time.Second,
+		AdvertisedURL:         "",
+		Version:               "0.1.0",
+		SupportedScopes:       []string{"browse", "play"},
+		InviteTTL:             24 * time.Hour,
+		HTTPTimeout:           15 * time.Second,
+		PeerRequestsPerMinute: 60,
+		PeerBurst:             30,
 	}
 }
 
@@ -95,13 +103,15 @@ func DefaultConfig() Config {
 // identity, persistent state, and outbound HTTP behaviour; HTTP
 // handlers and the JWT validator both go through it.
 type Manager struct {
-	cfg      Config
-	repo     Repo
-	identity *IdentityStore
-	clock    clock.Clock
-	logger   *slog.Logger
-	bus      EventBus
-	httpClt  *http.Client
+	cfg       Config
+	repo      Repo
+	identity  *IdentityStore
+	clock     clock.Clock
+	logger    *slog.Logger
+	bus       EventBus
+	httpClt   *http.Client
+	auditor   *Auditor
+	ratelimit *RateLimiter
 
 	// peerCache caches paired peers by server_uuid for the JWT
 	// validation hot path. Refreshed on each peer mutation.
@@ -121,18 +131,47 @@ func NewManager(ctx context.Context, cfg Config, repo Repo, clk clock.Clock, log
 		logger = slog.Default()
 	}
 	m := &Manager{
-		cfg:      cfg,
-		repo:     repo,
-		identity: is,
-		clock:    clk,
-		logger:   logger.With("module", "federation"),
-		bus:      bus,
-		httpClt:  &http.Client{Timeout: cfg.HTTPTimeout},
+		cfg:       cfg,
+		repo:      repo,
+		identity:  is,
+		clock:     clk,
+		logger:    logger.With("module", "federation"),
+		bus:       bus,
+		httpClt:   &http.Client{Timeout: cfg.HTTPTimeout},
+		auditor:   NewAuditor(repo, logger),
+		ratelimit: NewRateLimiter(clk, cfg.PeerRequestsPerMinute, cfg.PeerBurst),
 	}
 	if err := m.refreshPeerCache(ctx); err != nil {
+		// Tear down the auditor we just spawned so we don't leak the
+		// background goroutine when the constructor fails.
+		m.auditor.Close()
 		return nil, err
 	}
 	return m, nil
+}
+
+// Close releases background resources (auditor goroutine). Idempotent.
+// Wired into main.go's graceful shutdown so the audit queue flushes
+// before the process exits.
+func (m *Manager) Close() {
+	if m == nil {
+		return
+	}
+	m.auditor.Close()
+}
+
+// recordAudit forwards to the manager's auditor; safe to call when the
+// auditor is nil (test rigs that don't care about audit). Public via
+// internal helpers in middleware.go.
+func (m *Manager) recordAudit(entry AuditEntry) {
+	m.auditor.Record(entry)
+}
+
+// NowUTC returns the manager's clock in UTC. Lets handlers use the
+// same clock the manager does (testable + deterministic) without
+// having to pass clock around separately.
+func (m *Manager) NowUTC() time.Time {
+	return m.clock.Now().UTC()
 }
 
 // PublicServerInfo renders the ServerInfo this server advertises on
@@ -417,6 +456,12 @@ func (m *Manager) RevokePeer(ctx context.Context, peerID string) error {
 	}
 	if err := m.refreshPeerCache(ctx); err != nil {
 		m.logger.Warn("federation: peer cache refresh after revoke failed", "err", err)
+	}
+	// Drop any in-memory rate-limit state for this peer so a future
+	// re-pairing starts with a clean bucket instead of inheriting
+	// residual tokens from a previously hostile session.
+	if m.ratelimit != nil {
+		m.ratelimit.Reset(peerID)
 	}
 	m.publish(EventPeerRevoked, map[string]any{
 		"peer_id": peerID,

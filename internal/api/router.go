@@ -148,13 +148,29 @@ func NewRouter(deps Dependencies) http.Handler {
 			r.Post("/setup/complete", setupHandler.Complete)
 		}
 
-		// Federation public surface (no auth — handshake authenticates by
-		// invite code; subsequent peer-to-peer calls use Ed25519-signed
-		// JWTs validated in their own middleware, Phase 2).
+		// Federation public surface. Two flavours:
+		//
+		//   1. Truly unauthenticated — /federation/info and /peer/handshake.
+		//      The handshake authenticates by invite code in the body;
+		//      info is intentionally public so a peer can fetch our
+		//      identity before pairing.
+		//
+		//   2. Peer-authenticated — anything else under /peer/* is gated
+		//      by the RequirePeerJWT middleware (Ed25519-signed JWT,
+		//      issuer pinned to a paired peer, audience = our server_uuid).
+		//      The same middleware applies the per-peer rate limit and
+		//      records every request in the audit log.
 		if deps.Federation != nil {
 			pubFed := handlers.NewFederationPublicHandler(deps.Federation, deps.Logger)
 			r.Get("/federation/info", pubFed.ServerInfo)
 			r.Post("/peer/handshake", pubFed.Handshake)
+
+			r.Group(func(r chi.Router) {
+				r.Use(federation.RequirePeerJWT(deps.Federation))
+				r.Get("/peer/ping", pubFed.Ping)
+				// Phase 3+ peer endpoints (catalog browse, stream session,
+				// etc.) get added inside this group.
+			})
 		}
 
 		// Protected routes

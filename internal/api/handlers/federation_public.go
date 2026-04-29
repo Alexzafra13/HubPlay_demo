@@ -39,6 +39,28 @@ func (h *FederationPublicHandler) ServerInfo(w http.ResponseWriter, r *http.Requ
 	respondJSON(w, http.StatusOK, infoToWire(h.mgr.PublicServerInfo()))
 }
 
+// Ping is the canonical authenticated peer-to-peer endpoint. A peer
+// presenting a valid Ed25519-signed JWT (validated by RequirePeerJWT
+// middleware) hits this to verify the link is alive end-to-end.
+//
+// Response is the minimum signal the peer needs: OUR server_uuid + a
+// timestamp. The peer compares the server_uuid against what it pinned
+// at handshake — divergence means the peer is talking to a different
+// server than the one it paired with.
+func (h *FederationPublicHandler) Ping(w http.ResponseWriter, r *http.Request) {
+	peer := federation.PeerFromContext(r.Context())
+	if peer == nil {
+		// Should be impossible — middleware sets this. Fail closed.
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "peer context missing")
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{
+		"server_uuid":      h.mgr.PublicServerInfo().ServerUUID,
+		"now":              h.mgr.NowUTC().Format("2006-01-02T15:04:05Z"),
+		"acknowledged_to":  peer.ServerUUID,
+	})
+}
+
 // handshakeRequestWire mirrors the manager's request shape but uses
 // the JSON-serialisable infoWire so base64 pubkeys round-trip.
 type handshakeRequestWire struct {
