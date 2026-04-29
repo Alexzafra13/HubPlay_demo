@@ -168,8 +168,13 @@ func NewRouter(deps Dependencies) http.Handler {
 			r.Group(func(r chi.Router) {
 				r.Use(federation.RequirePeerJWT(deps.Federation))
 				r.Get("/peer/ping", pubFed.Ping)
-				// Phase 3+ peer endpoints (catalog browse, stream session,
-				// etc.) get added inside this group.
+				// Catalog browse (Phase 3) — JOIN-filtered against
+				// federation_library_shares server-side. A peer never
+				// sees libraries / items they don't have a share for.
+				r.Get("/peer/libraries", pubFed.ListLibraries)
+				r.Get("/peer/libraries/{libraryID}/items", pubFed.ListLibraryItems)
+				// Phase 5+ peer endpoints (stream session, download)
+				// get added inside this group.
 			})
 		}
 
@@ -247,6 +252,11 @@ func NewRouter(deps Dependencies) http.Handler {
 						r.Route("/invites", func(r chi.Router) {
 							r.Get("/", adminFed.ListActiveInvites)
 							r.Post("/", adminFed.GenerateInvite)
+						})
+						r.Route("/{id}/shares", func(r chi.Router) {
+							r.Get("/", adminFed.ListShares)
+							r.Post("/", adminFed.CreateShare)
+							r.Delete("/{shareID}", adminFed.DeleteShare)
 						})
 					})
 				}

@@ -418,6 +418,193 @@ func (r *FederationRepository) ListAuditEntries(ctx context.Context, peerID stri
 	return out, rows.Err()
 }
 
+// ─── library shares ────────────────────────────────────────────────
+
+// UpsertLibraryShare inserts or replaces a share row. SQLite UPSERT
+// via ON CONFLICT (peer_id, library_id) — the unique constraint
+// guarantees one share per (peer, library), and re-sharing simply
+// updates scopes without manual delete-then-insert.
+func (r *FederationRepository) UpsertLibraryShare(ctx context.Context, s *federation.LibraryShare) error {
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO federation_library_shares
+		    (id, peer_id, library_id, can_browse, can_play, can_download,
+		     can_livetv, extra_scopes, created_by, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(peer_id, library_id) DO UPDATE SET
+		    can_browse   = excluded.can_browse,
+		    can_play     = excluded.can_play,
+		    can_download = excluded.can_download,
+		    can_livetv   = excluded.can_livetv,
+		    extra_scopes = excluded.extra_scopes
+	`,
+		s.ID, s.PeerID, s.LibraryID,
+		s.CanBrowse, s.CanPlay, s.CanDownload, s.CanLiveTV,
+		nullableString(s.ExtraScopes),
+		s.CreatedByUserID, s.CreatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("upsert library share: %w", err)
+	}
+	return nil
+}
+
+// DeleteLibraryShare removes a share row. Filters by peer_id too so
+// a share-id leak from one peer can't be used to delete another
+// peer's share.
+func (r *FederationRepository) DeleteLibraryShare(ctx context.Context, peerID, shareID string) error {
+	_, err := r.db.ExecContext(ctx, `
+		DELETE FROM federation_library_shares
+		 WHERE peer_id = ? AND id = ?
+	`, peerID, shareID)
+	if err != nil {
+		return fmt.Errorf("delete library share: %w", err)
+	}
+	return nil
+}
+
+// GetLibraryShare returns the share row for a given (peer, library)
+// pair, or (nil, nil) if no row exists. The nil-without-error contract
+// lets callers branch on "share doesn't exist" without error-juggling.
+func (r *FederationRepository) GetLibraryShare(ctx context.Context, peerID, libraryID string) (*federation.LibraryShare, error) {
+	row := r.db.QueryRowContext(ctx, `
+		SELECT id, peer_id, library_id, can_browse, can_play,
+		       can_download, can_livetv, extra_scopes, created_by, created_at
+		  FROM federation_library_shares
+		 WHERE peer_id = ? AND library_id = ?
+	`, peerID, libraryID)
+	return scanLibraryShare(row)
+}
+
+// ListSharesByPeer returns every share row for a peer. Powers the
+// admin UI per-peer expansion panel.
+func (r *FederationRepository) ListSharesByPeer(ctx context.Context, peerID string) ([]*federation.LibraryShare, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, peer_id, library_id, can_browse, can_play,
+		       can_download, can_livetv, extra_scopes, created_by, created_at
+		  FROM federation_library_shares
+		 WHERE peer_id = ?
+		 ORDER BY created_at DESC
+	`, peerID)
+	if err != nil {
+		return nil, fmt.Errorf("list shares by peer: %w", err)
+	}
+	defer rows.Close()
+
+	out := []*federation.LibraryShare{}
+	for rows.Next() {
+		s, err := scanLibraryShare(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+// ListSharedLibrariesForPeer is the read for GET /peer/libraries.
+// JOIN-filtered: a peer cannot see libraries without a share row.
+// Empty rows is the legitimate "you have no shares yet" case.
+func (r *FederationRepository) ListSharedLibrariesForPeer(ctx context.Context, peerID string) ([]*federation.SharedLibrary, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT l.id, l.name, l.content_type,
+		       s.can_browse, s.can_play, s.can_download, s.can_livetv
+		  FROM federation_library_shares s
+		  JOIN libraries l ON l.id = s.library_id
+		 WHERE s.peer_id = ?
+		 ORDER BY l.name COLLATE NOCASE ASC
+	`, peerID)
+	if err != nil {
+		return nil, fmt.Errorf("list shared libraries: %w", err)
+	}
+	defer rows.Close()
+
+	out := []*federation.SharedLibrary{}
+	for rows.Next() {
+		var lib federation.SharedLibrary
+		if err := rows.Scan(&lib.ID, &lib.Name, &lib.ContentType,
+			&lib.Scopes.CanBrowse, &lib.Scopes.CanPlay,
+			&lib.Scopes.CanDownload, &lib.Scopes.CanLiveTV); err != nil {
+			return nil, fmt.Errorf("scan shared library: %w", err)
+		}
+		out = append(out, &lib)
+	}
+	return out, rows.Err()
+}
+
+// ListSharedItems is the read for GET /peer/libraries/{id}/items.
+// Caller must have already validated the share + scope; this query
+// trusts those assertions for performance and JOIN-filters against
+// federation_library_shares as defence in depth.
+//
+// Returns the slice + total count. Total drives pagination UI.
+func (r *FederationRepository) ListSharedItems(ctx context.Context, peerID, libraryID string, offset, limit int) ([]*federation.SharedItem, int, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	// Count first — pagination UI needs total. JOIN against shares so
+	// this can't return non-zero for a peer without a share.
+	var total int
+	err := r.db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		  FROM items i
+		  JOIN federation_library_shares s ON s.library_id = i.library_id
+		 WHERE i.library_id = ? AND s.peer_id = ? AND s.can_browse = 1
+		   AND i.parent_id IS NULL
+	`, libraryID, peerID).Scan(&total)
+	if err != nil {
+		return nil, 0, fmt.Errorf("count shared items: %w", err)
+	}
+
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT i.id, i.type, i.title,
+		       COALESCE(i.year, 0),
+		       COALESCE(i.overview, '')
+		  FROM items i
+		  JOIN federation_library_shares s ON s.library_id = i.library_id
+		 WHERE i.library_id = ? AND s.peer_id = ? AND s.can_browse = 1
+		   AND i.parent_id IS NULL
+		 ORDER BY i.title COLLATE NOCASE ASC
+		 LIMIT ? OFFSET ?
+	`, libraryID, peerID, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list shared items: %w", err)
+	}
+	defer rows.Close()
+
+	out := []*federation.SharedItem{}
+	for rows.Next() {
+		var it federation.SharedItem
+		if err := rows.Scan(&it.ID, &it.Type, &it.Title, &it.Year, &it.Overview); err != nil {
+			return nil, 0, fmt.Errorf("scan shared item: %w", err)
+		}
+		out = append(out, &it)
+	}
+	return out, total, rows.Err()
+}
+
+func scanLibraryShare(row rowScanner) (*federation.LibraryShare, error) {
+	var (
+		s           federation.LibraryShare
+		extraScopes sql.NullString
+	)
+	err := row.Scan(&s.ID, &s.PeerID, &s.LibraryID, &s.CanBrowse, &s.CanPlay,
+		&s.CanDownload, &s.CanLiveTV, &extraScopes, &s.CreatedByUserID, &s.CreatedAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("scan library share: %w", err)
+	}
+	if extraScopes.Valid {
+		s.ExtraScopes = extraScopes.String
+	}
+	return &s, nil
+}
+
 // PruneAuditBefore deletes audit rows older than the cutoff.
 // Returns the number of rows removed. Called from a background
 // pruner (Phase 7+); for now it's a no-op without a caller.

@@ -4,6 +4,9 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
+
+	"github.com/go-chi/chi/v5"
 
 	"hubplay/internal/domain"
 	"hubplay/internal/federation"
@@ -37,6 +40,71 @@ func NewFederationPublicHandler(mgr *federation.Manager, logger *slog.Logger) *F
 // non-secret by design.
 func (h *FederationPublicHandler) ServerInfo(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, infoToWire(h.mgr.PublicServerInfo()))
+}
+
+// ListLibraries returns the libraries we've shared with the calling
+// peer. Server-side filtered via JOIN — a peer cannot see (or
+// guess at) libraries they have no share row for. Empty array is
+// the "no shares yet" case (legitimate, NOT an error).
+//
+// Response shape:
+//
+//	[
+//	  {
+//	    "id": "lib-uuid", "name": "Movies", "content_type": "movies",
+//	    "scopes": { "can_browse": true, "can_play": true, ... }
+//	  }
+//	]
+func (h *FederationPublicHandler) ListLibraries(w http.ResponseWriter, r *http.Request) {
+	peer := federation.PeerFromContext(r.Context())
+	if peer == nil {
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "peer context missing")
+		return
+	}
+	libs, err := h.mgr.ListSharedLibrariesForPeer(r.Context(), peer.ID)
+	if err != nil {
+		h.logger.Error("federation: list shared libraries", "err", err, "peer_id", peer.ID)
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list libraries")
+		return
+	}
+	if libs == nil {
+		libs = []*federation.SharedLibrary{}
+	}
+	respondJSON(w, http.StatusOK, libs)
+}
+
+// ListLibraryItems returns paginated items in a shared library.
+// Returns 404 if the calling peer has no share for the library —
+// deliberately conflated with "library doesn't exist" so attackers
+// can't enumerate library IDs.
+func (h *FederationPublicHandler) ListLibraryItems(w http.ResponseWriter, r *http.Request) {
+	peer := federation.PeerFromContext(r.Context())
+	if peer == nil {
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "peer context missing")
+		return
+	}
+	libraryID := chi.URLParam(r, "libraryID")
+	if libraryID == "" {
+		respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "library id required")
+		return
+	}
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+
+	items, total, err := h.mgr.ListSharedItems(r.Context(), peer.ID, libraryID, offset, limit)
+	if err != nil {
+		if errors.Is(err, domain.ErrPeerNotFound) {
+			respondError(w, r, http.StatusNotFound, "LIBRARY_NOT_FOUND", "library not found")
+			return
+		}
+		h.logger.Error("federation: list shared items", "err", err)
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list items")
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{
+		"items": items,
+		"total": total,
+	})
 }
 
 // Ping is the canonical authenticated peer-to-peer endpoint. A peer

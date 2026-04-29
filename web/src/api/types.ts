@@ -40,6 +40,23 @@ export interface FederationInvite {
   expires_at: string;
 }
 
+// FederationLibraryShare — per-library opt-in. The presence of a row
+// for (peer_id, library_id) means the peer can see that library; the
+// boolean scopes refine what they can do (browse/play/download/livetv).
+// Default scopes when a share is first created: browse + play; download
+// and livetv are off by default because they consume our resources
+// (disk + upstream bandwidth) and need explicit admin opt-in.
+export interface FederationLibraryShare {
+  id: string;
+  peer_id: string;
+  library_id: string;
+  can_browse: boolean;
+  can_play: boolean;
+  can_download: boolean;
+  can_livetv: boolean;
+  created_at: string;
+}
+
 // ─── User & Auth ────────────────────────────────────────────────────────────
 
 export interface User {
