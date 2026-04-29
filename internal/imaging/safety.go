@@ -8,6 +8,8 @@ import (
 	_ "image/jpeg" // register JPEG decoder for image.DecodeConfig
 	_ "image/png"  // register PNG decoder for image.DecodeConfig
 	"io"
+
+	_ "golang.org/x/image/webp" // register WebP decoder for image.DecodeConfig
 	"net"
 	"net/http"
 	"net/url"
@@ -64,8 +66,10 @@ func SniffContentType(body io.Reader) (contentType string, full io.Reader, err e
 }
 
 // EnforceMaxPixels decodes only the header of data (cheap) and returns an
-// error if width*height exceeds MaxPixels. Unknown formats are accepted
-// (WebP and others fail image.DecodeConfig but are handled upstream).
+// error if width*height exceeds MaxPixels. Unknown formats (animated GIF,
+// AVIF, BMP, …) are accepted — the content-type validator and repo-level
+// constraints catch them. JPEG, PNG and WebP all decode their header
+// here so a 20000×20000 WebP bomb is rejected the same as a JPEG one.
 func EnforceMaxPixels(data []byte) error {
 	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil {

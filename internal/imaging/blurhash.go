@@ -7,6 +7,8 @@ import (
 	_ "image/png"  // register PNG decoder for image.Decode
 	"log/slog"
 
+	_ "golang.org/x/image/webp" // register WebP decoder for image.Decode
+
 	"hubplay/internal/blurhash"
 )
 
@@ -14,9 +16,14 @@ import (
 // Callers pass already-read bytes (e.g. from an upload) — this function only
 // touches memory, never disk.
 //
-// Returns an empty string when the decoder cannot understand the image
-// (e.g. a WebP payload — the std-lib decoders registered here are JPEG+PNG
-// only). A nil logger is tolerated.
+// Decoders registered: JPEG, PNG, WebP. Fanart logo assets in particular
+// arrive as WebP — without the explicit registration above the std-lib
+// image package would refuse them and ComputeBlurhash silently returned
+// "" for every Fanart logo, which then made the frontend fall back to
+// the grey-tile placeholder instead of a low-frequency preview.
+//
+// Returns an empty string for genuinely unsupported formats (animated
+// GIF, AVIF, BMP, …). A nil logger is tolerated.
 func ComputeBlurhash(data []byte, logger *slog.Logger) string {
 	img, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
