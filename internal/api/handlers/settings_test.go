@@ -26,13 +26,22 @@ type settingsRig struct {
 
 func newSettingsRig(t *testing.T, baseURLDefault string, hw config.HWAccelConfig) *settingsRig {
 	t.Helper()
+	return newSettingsRigWithDetected(t, baseURLDefault, hw, nil)
+}
+
+// newSettingsRigWithDetected is the variant that exercises the
+// HW-accel detector gating — pass the list of accelerators a host
+// would have reported at boot to drive the AllowedValues filter.
+func newSettingsRigWithDetected(t *testing.T, baseURLDefault string, hw config.HWAccelConfig, detected []string) *settingsRig {
+	t.Helper()
 	database := testutil.NewTestDB(t)
 	repo := db.NewSettingsRepository(database)
 	h := NewSettingsHandler(SettingsHandlerConfig{
-		Settings:       repo,
-		BaseURLDefault: baseURLDefault,
-		HWAccelDefault: hw,
-		Logger:         newQuietLogger(),
+		Settings:        repo,
+		BaseURLDefault:  baseURLDefault,
+		HWAccelDefault:  hw,
+		HWAccelDetected: detected,
+		Logger:          newQuietLogger(),
 	})
 	r := chi.NewRouter()
 	r.Get("/admin/system/settings", h.List)
@@ -243,4 +252,92 @@ func TestSettings_Reset_RejectsUnknownKey(t *testing.T) {
 	if rr.Code != http.StatusBadRequest {
 		t.Errorf("expected 400 for unknown key; got %d", rr.Code)
 	}
+}
+
+// The panel must only advertise accelerator backends the host actually
+// supports. Two scenarios:
+//
+//   - Detector saw vaapi+qsv on the host: AllowedValues = [auto, vaapi, qsv].
+//     A user can't accidentally select nvenc here and crash transcode.
+//   - Detector saw nothing (host has no GPU, or ffmpeg's hwaccel probe
+//     failed): AllowedValues collapses to just ["auto"], plus whatever
+//     value is currently effective so the admin can still see + reset
+//     the YAML override they have.
+//
+// Validator stays broad on purpose — see the comment on hwAccelChoices.
+// A scripted PUT can still set any whitelist value; the *panel* just
+// won't lead the operator to a broken choice.
+func TestSettings_HWAccel_AllowedValues_FilteredByDetector(t *testing.T) {
+	t.Run("detector saw vaapi+qsv", func(t *testing.T) {
+		rig := newSettingsRigWithDetected(t, "", config.HWAccelConfig{Preferred: "auto"},
+			[]string{"vaapi", "qsv"})
+		req := httptest.NewRequest(http.MethodGet, "/admin/system/settings", nil)
+		rr := httptest.NewRecorder()
+		rig.router.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status: %d body=%s", rr.Code, rr.Body.String())
+		}
+		var got []string
+		for _, row := range unwrapSettings(t, rr.Body.Bytes()) {
+			if row.Key == "hardware_acceleration.preferred" {
+				got = row.AllowedValues
+			}
+		}
+		want := []string{"auto", "vaapi", "qsv"}
+		if !equalStringSlice(got, want) {
+			t.Errorf("AllowedValues: got %v want %v", got, want)
+		}
+	})
+
+	t.Run("detector saw nothing", func(t *testing.T) {
+		rig := newSettingsRigWithDetected(t, "", config.HWAccelConfig{Preferred: "auto"}, nil)
+		req := httptest.NewRequest(http.MethodGet, "/admin/system/settings", nil)
+		rr := httptest.NewRecorder()
+		rig.router.ServeHTTP(rr, req)
+		var got []string
+		for _, row := range unwrapSettings(t, rr.Body.Bytes()) {
+			if row.Key == "hardware_acceleration.preferred" {
+				got = row.AllowedValues
+			}
+		}
+		want := []string{"auto"}
+		if !equalStringSlice(got, want) {
+			t.Errorf("empty detector should yield [auto]; got %v", got)
+		}
+	})
+
+	t.Run("effective value not in detected list still surfaces", func(t *testing.T) {
+		// Admin had nvenc set in YAML but moved the binary to a host with
+		// no NVIDIA GPU. The current effective is "nvenc"; the detector
+		// reports vaapi only. The panel must still include nvenc so the
+		// admin can see the bad state and either reset or pick auto —
+		// hiding it would leave them with no path to fix from the UI.
+		rig := newSettingsRigWithDetected(t, "", config.HWAccelConfig{Preferred: "nvenc"},
+			[]string{"vaapi"})
+		req := httptest.NewRequest(http.MethodGet, "/admin/system/settings", nil)
+		rr := httptest.NewRecorder()
+		rig.router.ServeHTTP(rr, req)
+		var got []string
+		for _, row := range unwrapSettings(t, rr.Body.Bytes()) {
+			if row.Key == "hardware_acceleration.preferred" {
+				got = row.AllowedValues
+			}
+		}
+		want := []string{"auto", "vaapi", "nvenc"}
+		if !equalStringSlice(got, want) {
+			t.Errorf("effective preserved: got %v want %v", got, want)
+		}
+	})
+}
+
+func equalStringSlice(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

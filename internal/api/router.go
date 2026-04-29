@@ -238,11 +238,23 @@ func NewRouter(deps Dependencies) http.Handler {
 					r.Use(auth.RequireAdmin)
 					r.Get("/stats", sysHandler.Stats)
 					if deps.Settings != nil {
+						// Surface the host's actually-detected accelerators to the
+						// settings handler so the panel only offers choices that have
+						// a chance of working. Empty slice when the stream manager
+						// isn't wired (test rig / minimal startup) — handler treats
+						// that as "detector saw nothing" and falls back to "auto".
+						var detectedHWAccel []string
+						if deps.StreamManager != nil {
+							for _, a := range deps.StreamManager.HWAccelInfo().Available {
+								detectedHWAccel = append(detectedHWAccel, string(a))
+							}
+						}
 						settingsHandler := handlers.NewSettingsHandler(handlers.SettingsHandlerConfig{
-							Settings:       deps.Settings,
-							BaseURLDefault: baseURL,
-							HWAccelDefault: deps.Config.Streaming.HWAccel,
-							Logger:         deps.Logger,
+							Settings:        deps.Settings,
+							BaseURLDefault:  baseURL,
+							HWAccelDefault:  deps.Config.Streaming.HWAccel,
+							HWAccelDetected: detectedHWAccel,
+							Logger:          deps.Logger,
 						})
 						r.Get("/settings", settingsHandler.List)
 						r.Put("/settings", settingsHandler.Update)
