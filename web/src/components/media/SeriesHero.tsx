@@ -124,7 +124,7 @@ const SeriesHero: FC<SeriesHeroProps> = ({
           so what we DO reveal includes the upper third where actor
           faces typically sit (instead of cropping heads off, which
           the previous `object-right` centre-anchor did). */}
-      <div className="relative min-h-[440px] sm:min-h-[520px] lg:min-h-[580px] max-h-[660px]">
+      <div className="relative min-h-[460px] sm:min-h-[540px] lg:min-h-[600px] max-h-[720px]">
         {heroBackdropUrl ? (
           <img
             src={heroBackdropUrl}
@@ -163,7 +163,21 @@ const SeriesHero: FC<SeriesHeroProps> = ({
               "linear-gradient(to right, var(--hero-c1) 0%, color-mix(in srgb, var(--hero-c2) 60%, transparent) 30%, transparent 55%)",
           }}
         />
-        <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-b from-transparent to-bg-base" />
+        {/* Bottom-fade: image -> page tint. The target colour is
+            published by the ItemDetail wrapper as `--detail-tint` and
+            falls back to plain bg-base when no palette is available.
+            Targeting the same colour the page below uses means the
+            seam between hero and seasons grid is invisible — no
+            "container-on-container" look. Taller fade band (h-32)
+            than before so the transition is gradual rather than
+            cliff-edge. */}
+        <div
+          className="absolute inset-x-0 bottom-0 h-32"
+          style={{
+            background:
+              "linear-gradient(to bottom, transparent, var(--detail-tint, rgb(8 12 16)))",
+          }}
+        />
 
         {/* Content column. `max-w` keeps it on the left third on wide
             screens; on mobile it stretches and the gradient extends
@@ -173,7 +187,7 @@ const SeriesHero: FC<SeriesHeroProps> = ({
             translucent TopBar — the backdrop bleeds up there but
             interactive content stays clear. */}
         <div
-          className="relative z-10 flex h-full items-center px-6 sm:px-10 lg:px-16"
+          className="relative z-10 flex h-full items-center px-6 pb-12 sm:px-10 lg:px-16"
           style={{ paddingTop: "calc(var(--topbar-height) + 1.5rem)" }}
         >
           <div className="flex w-full max-w-md flex-col items-start gap-5 lg:max-w-lg">

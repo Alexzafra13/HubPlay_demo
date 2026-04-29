@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, type CSSProperties } from "react";
 import { useParams, useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
@@ -179,8 +179,28 @@ export default function ItemDetail() {
     );
   }
 
+  // Premium color-bleed: pick the show's muted dominant colour, mix it
+  // into bg-base at low intensity, and apply that tint to the whole
+  // detail page. The first attempt at this used a top-down gradient
+  // which produced visible seams where the hero's own bottom-fade-to-
+  // bg-base met the wrapper's gradient stops. The fix is to use a
+  // single solid colour for the entire wrapper AND publish it as a
+  // CSS variable (`--detail-tint`) so SeriesHero's bottom fade can
+  // target the exact same colour — the hero blends into the page
+  // tint with no abrupt transition. When no palette is available
+  // (older items, extraction failed) the wrapper falls back to plain
+  // bg-base via the CSS var's default.
+  const palette = item.backdrop_colors;
+  const tintSeed = palette?.muted ?? palette?.vibrant;
+  const detailStyle: CSSProperties | undefined = tintSeed
+    ? {
+        ['--detail-tint' as string]: `color-mix(in srgb, ${tintSeed} 14%, rgb(8 12 16))`,
+        backgroundColor: 'var(--detail-tint)',
+      }
+    : undefined;
+
   return (
-    <div className="flex flex-col">
+    <div className="flex flex-col" style={detailStyle}>
       {/* Video Player Overlay */}
       {showPlayer && playerInfo && (playingItemId || id) && (
         <VideoPlayer
