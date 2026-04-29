@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, type CSSProperties } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { useParams, useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
@@ -179,24 +179,8 @@ export default function ItemDetail() {
     );
   }
 
-  // Carry the hero palette down into the rest of the detail page so
-  // the seasons grid + cast + media info sit on a faint tint of the
-  // dominant colours rather than a flat bg-base. Strength is low on
-  // purpose — too saturated and the cards stop reading; too weak and
-  // it looks accidental. The two-stop gradient mirrors the hero's
-  // own gradient so the visual handoff at the seam is invisible.
-  const palette = item.backdrop_colors;
-  const detailBgStyle: CSSProperties | undefined =
-    palette?.muted || palette?.vibrant
-      ? {
-          backgroundImage: `linear-gradient(to bottom, color-mix(in srgb, ${palette.muted ?? palette.vibrant} 22%, transparent) 0%, color-mix(in srgb, ${palette.vibrant ?? palette.muted} 8%, transparent) 35%, transparent 75%)`,
-          backgroundRepeat: "no-repeat",
-          backgroundSize: "100% 1400px",
-        }
-      : undefined;
-
   return (
-    <div className="flex flex-col" style={detailBgStyle}>
+    <div className="flex flex-col">
       {/* Video Player Overlay */}
       {showPlayer && playerInfo && (playingItemId || id) && (
         <VideoPlayer

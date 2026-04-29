@@ -113,18 +113,18 @@ const SeriesHero: FC<SeriesHeroProps> = ({
     >
       {/* Backdrop layer — fixed-height band so the season grid below
           stays visible above the fold on a typical 1080p viewport
-          (~960px usable after browser chrome). Aspect-ratio is dropped
-          deliberately: at 16:8 the hero stretched to ~850px on wide
-          monitors and pushed everything off-screen.
+          (~960px usable after browser chrome).
 
-          Heights are slightly tighter than 16:8 so the backdrop is
-          less aggressively cropped: at the previous 620px ceiling
-          on a 1920x1080 promo backdrop, `object-cover` zoomed the
-          image enough that actor faces in the upper third got
-          clipped. The combination of a slightly shorter band and
-          `object-position: right top` (instead of right-centre)
-          keeps heads in frame across most TMDb backdrops. */}
-      <div className="relative min-h-[440px] sm:min-h-[500px] lg:min-h-[560px] max-h-[640px]">
+          On wide desktop windows `object-cover` scales the natively
+          16:9 TMDb backdrop to fit the viewport width, which means
+          a band shorter than ~560px on lg ends up showing only the
+          centre slice of the image and reads as "very zoomed in".
+          Two levers fight that: a generous min-height so we reveal
+          more of the scaled image, and `object-position: right top`
+          so what we DO reveal includes the upper third where actor
+          faces typically sit (instead of cropping heads off, which
+          the previous `object-right` centre-anchor did). */}
+      <div className="relative min-h-[440px] sm:min-h-[520px] lg:min-h-[580px] max-h-[660px]">
         {heroBackdropUrl ? (
           <img
             src={heroBackdropUrl}
