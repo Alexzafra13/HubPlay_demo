@@ -2,6 +2,7 @@ import { NavLink, useNavigate } from 'react-router';
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAuthStore } from '@/store/auth';
+import { getInitials } from '@/utils/userDisplay';
 
 // ─── Inline SVG Icons (20x20 viewBox, stroke-based) ────────────────────────
 
@@ -170,14 +171,7 @@ export function Sidebar({ collapsed, onToggleCollapse, onClose }: SidebarProps) 
     navigate('/login');
   };
 
-  const initials = user?.display_name
-    ? user.display_name
-        .split(' ')
-        .map((n) => n[0])
-        .join('')
-        .toUpperCase()
-        .slice(0, 2)
-    : user?.username?.slice(0, 2).toUpperCase() ?? '?';
+  const initials = getInitials(user);
 
   return (
     <aside

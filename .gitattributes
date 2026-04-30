@@ -1,0 +1,50 @@
+# Line endings policy.
+#
+# git-on-Windows defaults to `core.autocrlf=true`, which translates LF
+# in the repo to CRLF on checkout. That's fine for prose / hand-edited
+# code, but TOXIC for files that get parsed by external tools that
+# expect LF specifically — sqlc 1.29 in particular mis-tokenizes
+# queries when the source file has CRLF, producing truncated SQL
+# strings and missing parameters in the generated Go (we hit this
+# 2026-04-30 trying to add new federation queries).
+#
+# `text=auto` here lets git keep auto-detection on, but the explicit
+# `eol=lf` overrides defeat the Windows CRLF conversion for the file
+# types that need it.
+#
+# After committing this file, on Windows clones run:
+#   git rm --cached -r .
+#   git reset --hard
+# to renormalise the working tree. Or just delete + re-checkout the
+# affected files.
+
+* text=auto
+
+# SQL files are consumed by sqlc + goose. Both tools' parsers expect LF.
+*.sql       text eol=lf
+
+# Go source/codegen — `gofmt` emits LF and the toolchain barfs on CRLF
+# in some cases. Lock it down.
+*.go        text eol=lf
+
+# YAML configs (sqlc.yaml, hubplay.yaml, OpenAPI spec, GitHub workflows).
+*.yaml      text eol=lf
+*.yml       text eol=lf
+
+# Shell scripts must be LF or `sh`/`bash` rejects them with cryptic
+# `: not found` errors on the shebang line.
+*.sh        text eol=lf
+
+# Windows-only files (Powershell, .bat) keep their native CRLF.
+*.ps1       text eol=crlf
+*.bat       text eol=crlf
+*.cmd       text eol=crlf
+
+# Binary lockfiles — never touch.
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.webp      binary
+*.ico       binary
+*.gif       binary
+*.pdf       binary
