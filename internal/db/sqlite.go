@@ -119,37 +119,95 @@ func Open(driver, path string, logger *slog.Logger) (*sql.DB, error) {
 	return database, nil
 }
 
-// Optimize runs `PRAGMA optimize` to refresh the query planner's
-// statistics. Recommended by the SQLite docs for long-running
-// processes; cheap to call (it's a no-op for tables that haven't
-// changed since the last analysis).
+// Optimize runs `PRAGMA optimize` plus an FTS5 inverted-index merge.
+// Both refresh data structures the query planner and search rely on:
 //
-// Wired into the graceful-shutdown path in main.go so every clean
-// stop persists fresh statistics for the next start. Run periodically
-// (every few hours) for very long-lived processes; we do it on
-// shutdown which is sufficient for HubPlay's restart cadence.
+//   - `PRAGMA optimize` recomputes per-table statistics (which
+//     indexes are useful, how skewed the data is). After many INSERTs
+//     and UPDATEs, stale stats produce sub-optimal plans (full scans
+//     where an index lookup would do). Cheap and idempotent — a
+//     no-op for tables that haven't changed since last run.
 //
-// `analysis_limit=400` caps work per index to ~400 rows sampled —
-// the SQLite docs recommend this for predictable latency on large
-// DBs. Without it, optimize can spend O(table_size) time on tables
-// that have grown a lot since last analysis.
+//   - `INSERT INTO items_fts(items_fts) VALUES('optimize')` merges
+//     the FTS5 inverted-index segments. Each scan-time INSERT/UPDATE
+//     of an `items` row appends a new segment; without periodic
+//     merging the index slowly fragments and search latency grows
+//     O(segments). The merge is incremental — bounded by the
+//     `analysis_limit` so a 50k-row index doesn't block for seconds.
+//
+// `analysis_limit=400` caps work per index to ~400 rows sampled — the
+// SQLite docs recommend this for predictable latency on large DBs.
+// Without it, optimize can spend O(table_size) time on tables that
+// have grown a lot since last analysis.
+//
+// Best-effort: any failure logs and continues. Stale stats / a
+// fragmented FTS at worst cost a few µs per query until the next
+// successful run; nothing operational depends on this completing.
 func Optimize(ctx context.Context, database *sql.DB, logger *slog.Logger) {
 	stmts := []string{
 		"PRAGMA analysis_limit=400",
 		"PRAGMA optimize",
+		"INSERT INTO items_fts(items_fts) VALUES('optimize')",
 	}
 	for _, s := range stmts {
 		if _, err := database.ExecContext(ctx, s); err != nil {
-			// Best-effort. A failure here doesn't mean the DB is
-			// broken — at worst the next process starts with stale
-			// stats, costing a few µs per query until the next run.
 			logger.Warn("sqlite optimize",
-				"stmt", strings.TrimPrefix(s, "PRAGMA "),
+				"stmt", trimPragma(s),
 				"err", err)
 			return
 		}
 	}
-	logger.Info("sqlite optimize: stats refreshed")
+	logger.Info("sqlite optimize: stats refreshed + FTS merged")
+}
+
+func trimPragma(s string) string {
+	if rest, ok := strings.CutPrefix(s, "PRAGMA "); ok {
+		return rest
+	}
+	return s
+}
+
+// optimizeInterval is how often the background tick fires. Six hours
+// is a balance: scans burst writes for ~minutes, then go quiet for
+// hours; running a planner refresh during the quiet window costs
+// nothing and keeps stats current. Daily would also be fine; sub-hour
+// is wasteful.
+const optimizeInterval = 6 * time.Hour
+
+// StartPeriodicOptimize fires `Optimize` every `optimizeInterval` until
+// `ctx` is cancelled. The first tick fires after the interval — never
+// at startup — so app boot doesn't pay the optimize cost on top of
+// the cold-cache overhead it already has.
+//
+// Returns a stop function the caller can defer for clean shutdown
+// (idempotent if the context is already cancelled).
+func StartPeriodicOptimize(ctx context.Context, database *sql.DB, logger *slog.Logger) func() {
+	tick := time.NewTicker(optimizeInterval)
+	stop := make(chan struct{})
+	go func() {
+		defer tick.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-stop:
+				return
+			case <-tick.C:
+				// Bounded ctx so a stuck Optimize can't pile up forever
+				// on top of the next scheduled tick.
+				optCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+				Optimize(optCtx, database, logger)
+				cancel()
+			}
+		}
+	}()
+	return func() {
+		select {
+		case <-stop:
+		default:
+			close(stop)
+		}
+	}
 }
 
 // Migrate runs all pending goose migrations using the provided filesystem.

@@ -142,6 +142,12 @@ func run(configPath string) error {
 	scnr := scanner.New(repos.Items, repos.MediaStreams, repos.Metadata, repos.ExternalIDs, repos.Images, repos.Chapters, repos.People, providerManager, prober, eventBus, imageDir, scannerPathmap, logger)
 	libraryService := library.NewService(repos.Libraries, repos.Items, repos.MediaStreams, repos.Images, repos.Channels, scnr, logger)
 
+	// Periodic SQLite query-planner refresh + FTS5 merge. Fires every
+	// 6h once started; first tick is on the interval, not immediately,
+	// so boot doesn't pay the cost on top of the cold-start overhead.
+	stopOptimize := db.StartPeriodicOptimize(ctx, database, logger)
+	defer stopOptimize()
+
 	// ═══ Phase 4a: Library Scan Scheduler ═══
 	scanScheduler := library.NewScheduler(libraryService, logger)
 	scanScheduler.Start(ctx)
