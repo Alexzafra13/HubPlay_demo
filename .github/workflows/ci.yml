@@ -10,6 +10,15 @@ on:
 permissions:
   contents: read
 
+# Opt into Node.js 24 for JavaScript-based actions. GitHub announced
+# (2025-09-19) that Node 20 will stop being available on runners on
+# 2026-09-16, with the default flipping to Node 24 in 2026-06-02.
+# Setting this now silences the deprecation warnings AND surfaces any
+# Node 24 incompat ahead of the forced switch — better to find a broken
+# action in CI now than have it explode at the deadline.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   test-frontend:
     name: Test Frontend

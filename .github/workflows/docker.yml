@@ -10,6 +10,12 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
+  # Opt into Node.js 24 for JavaScript-based actions. GitHub announced
+  # (2025-09-19) that Node 20 will be removed from runners on
+  # 2026-09-16, with the default flipping to Node 24 on 2026-06-02.
+  # Setting this now silences the deprecation warnings AND surfaces any
+  # Node 24 incompat ahead of the forced switch.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 # Default least-privilege scope. The build job below escalates explicitly
 # to packages:write to push the image to GHCR.
@@ -125,8 +131,16 @@ jobs:
           exit-code: '0'         # report-only; doesn't block the merge
 
       - name: Upload Trivy results
-        if: always() && (matrix.target == 'hwaccel' || github.event_name != 'pull_request')
-        uses: github/codeql-action/upload-sarif@v3
+        # `hashFiles` returns an empty string when no file matches —
+        # guards against the case where Trivy ran but couldn't produce
+        # output (registry pull failure, image-ref typo, etc.). Without
+        # this guard the upload step fails with "Path does not exist:
+        # trivy-results.sarif" and the matrix entry goes red even though
+        # nothing was actually broken.
+        if: always() && (matrix.target == 'hwaccel' || github.event_name != 'pull_request') && hashFiles('trivy-results.sarif') != ''
+        # Bumped to v4 — v3 deprecates December 2026 per
+        # https://github.blog/changelog/2025-10-28-upcoming-deprecation-of-codeql-action-v3/
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-results.sarif
           category: trivy-${{ matrix.target || 'default' }}
