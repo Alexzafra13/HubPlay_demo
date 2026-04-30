@@ -311,6 +311,7 @@ func TestProgressHandler_UpdateProgress_WritesState(t *testing.T) {
 	ud := env.userData.data[keyUD("user-1", "item-1")]
 	if ud == nil {
 		t.Fatal("no record written")
+		return // unreachable; helps staticcheck see the nil-guard.
 	}
 	if ud.PositionTicks != 5000 {
 		t.Errorf("position: %d", ud.PositionTicks)

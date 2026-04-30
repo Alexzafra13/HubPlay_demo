@@ -8,22 +8,18 @@ import (
 	"net/http"
 )
 
-// Client makes outbound peer-to-peer calls. The Manager owns one
-// per process; callers reach it via Manager.RemoteCatalog (Phase 4)
-// and Manager.RemoteStream (Phase 5).
-//
-// Authentication: every request sets `Authorization: Bearer <jwt>`
-// where the token is freshly minted with Manager.IssuePeerToken.
-// The remote's RequirePeerJWT middleware validates it against the
-// pubkey it pinned at handshake.
+// Outbound peer-to-peer calls. Implemented as methods on *Manager
+// (FetchPeerLibraries, FetchPeerItems) since they share the same
+// identity, http.Client, and peer-cache state. Authentication: every
+// request sets `Authorization: Bearer <jwt>` where the token is
+// freshly minted via Manager.IssuePeerToken; the remote's
+// RequirePeerJWT middleware validates it against the pubkey it
+// pinned at handshake.
 //
 // Errors: non-2xx responses are decoded into the standard error
 // envelope and surfaced as fmt.Errorf with the remote's code+message,
 // so the caller's logs see WHY the peer rejected (rate-limited,
 // scope insufficient, peer revoked, etc.).
-type peerClient struct {
-	mgr *Manager
-}
 
 // remoteSharedLibrary mirrors the JSON the peer emits at GET
 // /peer/libraries. Kept here (rather than imported from the handlers
@@ -173,5 +169,3 @@ func decodeRemoteError(resp *http.Response) error {
 	return fmt.Errorf("peer status %d: %s", resp.StatusCode, body)
 }
 
-// silence unused warning in trim builds where the type isn't referenced.
-var _ peerClient

@@ -842,6 +842,7 @@ func TestImageHandler_persistManualImage_HappyPath(t *testing.T) {
 	}
 	if img == nil {
 		t.Fatal("nil image returned")
+		return // unreachable; helps staticcheck see the nil-guard.
 	}
 
 	// 1) File written to disk under <imageDir>/<itemID>/

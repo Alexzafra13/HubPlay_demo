@@ -405,8 +405,12 @@ func TestRequirePeerJWT_FiresRateLimitAfterBurst(t *testing.T) {
 		BaseURL: "https://remote.example", PublicKey: pub, Status: PeerPaired,
 		CreatedAt: now, PairedAt: &now,
 	}
-	repo.InsertPeer(context.Background(), peer)
-	mgr.refreshPeerCache(context.Background())
+	if err := repo.InsertPeer(context.Background(), peer); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.refreshPeerCache(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 
 	mw := RequirePeerJWT(mgr)
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
