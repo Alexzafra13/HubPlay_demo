@@ -854,3 +854,62 @@ Lo único **realmente nuevo**:
 - **Mantener `federation/ratelimit.go` y `auth/ratelimit.go` como un solo paquete reutilizado**: rechazado. Las semánticas divergen sutilmente — auth ratelimit es per-IP con burst muy bajo (login attempts), federation es per-peer con bursts permisivos (catalog sync). Una abstracción unificada habría llevado opciones que oscurecen call sites.
 - **Auditor síncrono in-line** (write per-request en `RequirePeerJWT` antes de devolver): rechazado. El SQLite write añade ~5-10ms al hot path peer-to-peer; el audit es por definición no-critical; mejor async + tolerate-drop documentado.
 - **Persistencia del rate-limit state cross-restart** (`federation_rate_limit_state` table existe pero no se usa): pospuesto a Phase 2.5+. Self-hosted con un puñado de peers es ok perdiendo el estado en restart; un peer hostil que aprovechaba el restart para una nueva burst window queda frente a un cap más tarde por el resto del minuto.
+
+---
+
+## ADR-013 — Federation Phase 5: streaming proxy + sintetic stream-manager identity
+
+- **Fecha**: 2026-04-30
+- **Estado**: Aceptado
+- **Supersede**: extiende ADR-012 (federación como capa de integración) con la pieza de streaming.
+- **Contexto de descubrimiento**: implementación Phase 5 según `docs/architecture/federation.md` §8.
+
+### Contexto
+
+Phase 5 cierra la promesa de federación: usuario A pulsa play en peli del peer B, video llega. Diseño §8 fija la regla "user solo habla con A" — no direct client→B. Razones recapituladas: privacidad de IP del user, A puede aplicar caps de bandwidth, NAT de B funciona mientras A pueda alcanzarle. La pregunta arquitectural era cómo modelar la sesión de streaming en el origin sin reescribir `stream.Manager`.
+
+### Decisión
+
+**Reuso completo de `stream.Manager` con identidad sintética en lugar de un `peer-stream` paralelo.** El handler peer-side llama `stream.Manager.StartSession` con `userID = "rmt-{peerID}-{remoteUserID}"`. Tres consecuencias concretas:
+
+1. **Dedupe**: el manager keya por `(userID, itemID, profile)`. Mismo peer-user pidiendo mismo item dos veces obtiene la misma sesión — comportamiento idéntico al de un user local con dos pestañas en el mismo player. Sin código nuevo.
+
+2. **Concurrencia y transcode budget**: federation streams compiten en el mismo `MaxTranscodeSessions` global con local users. Si tu CPU está al 100% transcoding las pelis de tu hijo, una request del peer-user de Pedro encuentra el cap igualmente. Justo: tu transcode budget = tu CPU.
+
+3. **HW accel + idle reaper + decision waterfall**: heredados sin tocar. La decisión `Decide()` corre con las capabilities forwarded del cliente original; el idle reaper limpia sesiones peer-originated después de 5 min sin actividad igual que las locales.
+
+**Capa adicional `peerStreamGate` con cap per-peer**, separada del global. Razón: un peer hostil con un cliente que crashea-y-respawnea podía abrir N sesiones que TODAS pasan el dedupe del manager (cada una con un `remoteUserID` distinto fabricado). Sin un counter per-peer, eso drena el budget global. El cap per-peer (default 3) bounds el blast radius.
+
+**Master playlist URL rewriting** se queda como string transform en `internal/federation/`. La función pura sobre strings no necesita HTTP context y será reusable cuando Phase 6 (Live TV peering) traiga la misma necesidad de proxiar HLS.
+
+**`peer_item_progress` separado del local `user_data`**. Watch progress de "MI user X en peli REMOTA Y" se persiste en una tabla aparte. Razón: la PK del local user_data es `(user_id, item_id)` donde item_id es UN local UUID. Un peer item id no existe en local items. Tres opciones para encajarlo:
+
+- (a) Añadir columnas `peer_id` + `is_remote` al user_data. Polluye un schema bien definido.
+- (b) Cachear el peer item localmente con un fake row + tabla aparte. Romper el contrato "items son content que tu has scaneado".
+- (c) Tabla nueva con su propia PK `(user_id, peer_id, remote_item_id)`. **Elegida**.
+
+(c) deja user_data intocada, separa los dos conceptos cleanly, y permite que un futuro Continue Watching unificado haga UNION explícito si el producto lo necesita.
+
+### Consecuencias
+
+**Positivas**:
+- ~3000 LOC menos vs reimplementar transcoding peer-side (HLS, ffmpeg invocation, profile management, idle reap...). Solo orquestación.
+- Capability forwarding "gratis": `stream.Decide()` recibe los caps reales sin que el código de federación los entienda. Tu Chromecast hace DirectPlay de la peli de Pedro si la podía hacer en local.
+- HW accel funcionará automáticamente cuando se enable en server B — la decisión se toma con las flags del config local de B, no del peer A.
+
+**Negativas / trade-offs**:
+- Federation streams **compiten** con local users por el global cap. En servidores muy cargados (homelab con 100+ items reproduciendo), un peer puede hacer que un local user reciba "transcode busy". El cap per-peer mitiga el escenario hostil, no el escenario "carga real". Si llega a doler, future ADR puede partir el budget en dos pools (local-reservados + peer-disponibles).
+- Direct-Play vía federación **no soportado en v1**. El `directUrl` siempre se devuelve null para peer streams; un item que SERÍA direct-playable cae a HLS via DirectStream. Pierde un pelín de calidad y CPU. Phase 5.5 puede añadir un endpoint que range-streamea bytes originales del peer.
+- `peerStreamGate` es 100% in-memory. Restart del server pierde los counters; un peer hostil que aprovechara el restart para una nueva burst no encuentra resistencia hasta que el siguiente proceso boot pille la primera request. Aceptable para self-hosted (servidores no se restartean cada minuto).
+
+**Específicas del enfoque "rewrite master URL"**:
+- Variant manifests siguen usando URLs RELATIVAS, que el browser resolve contra la URL del playlist (= proxy local). No necesitamos rewriting recursivo. Simple.
+- Si el origin emitiera URLs absolutas en el variant playlist (ahora mismo no lo hace), el rewrite sería más invasivo. El test pin captura el formato actual; si cambia upstream, el test rompe ruidoso.
+
+### Alternativas descartadas
+
+- **Direct client→peer-B (no proxy)**: violaría el contrato de privacidad del §8 (B vería la IP del user de A) Y rompería el caso NAT donde B está detrás de un firewall. Rechazado.
+- **CDN-style 302 redirect del A al user, apuntando al peer**: simplifica el proxy pero rompe lo mismo (privacidad + NAT). Rechazado.
+- **Implementar un nuevo `peer.StreamManager` paralelo a `stream.Manager`**: 5x el código, divergencia inevitable, dos sitios donde ajustar HW accel cuando se mejora. Rechazado en favor de identidad sintética.
+- **Persistir `peerStreamGate` counters en SQLite**: 99% de los restarts en producción son updates rolling con 0 sesiones activas; persistir solo paga por el escenario de "crash with active sessions" que es raro. Aceptamos la ventana.
+- **Progress en `user_data` con un row sintético "peer:..." como item_id**: discutido en sección de decisión; rechazado por polluir un schema con FKs explícitas a items.id.
