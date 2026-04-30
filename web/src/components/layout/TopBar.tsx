@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useNavigate, NavLink } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { useAuthStore } from '@/store/auth';
+import { getInitials } from '@/utils/userDisplay';
 import { useTopBarSlotContent } from './TopBarSlot';
 
 // ─── Props ──────────────────────────────────────────────────────────────────
@@ -23,14 +24,7 @@ export function TopBar({ title, onMenuClick }: TopBarProps) {
   const slotContent = useTopBarSlotContent();
   const scrolled = useScrolledPast(8);
 
-  const initials = user?.display_name
-    ? user.display_name
-        .split(' ')
-        .map((n) => n[0])
-        .join('')
-        .toUpperCase()
-        .slice(0, 2)
-    : user?.username?.slice(0, 2).toUpperCase() ?? '?';
+  const initials = getInitials(user);
 
   const handleLogout = () => {
     logout();
