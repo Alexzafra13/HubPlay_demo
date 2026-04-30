@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import type { Channel, EPGProgram } from "@/api/types";
 import { useNowTick } from "@/hooks/useNowTick";
 import { ChannelLogo } from "./ChannelLogo";
@@ -21,11 +22,15 @@ import { ChannelLogo } from "./ChannelLogo";
  * dedicated "programme detail" surface yet; when there is, swap the
  * handler for one that routes to that instead.
  *
- * Performance: a 200-channel × ~30-programme-per-channel grid renders
- * ~6k DOM elements. Well inside what React handles smoothly. If we need
- * to scale past ~1000 channels we can swap the row layer for react-window
- * — the per-row markup was kept flat to make that a one-line change.
+ * Performance: the row layer is virtualised with @tanstack/react-virtual
+ * once the channel count crosses VIRTUALIZE_THRESHOLD. Below that, we
+ * render every row directly — fewer moving parts, friendlier for tests
+ * and screen readers, and the DOM cost is trivial at typical homelab
+ * sizes (20-50 channels). Above the threshold (large IPTV catalogues:
+ * 5k+ channels) only the visible rows + overscan are mounted, so the
+ * grid stays responsive regardless of catalogue size.
  */
+const VIRTUALIZE_THRESHOLD = 50;
 
 // Design-system constants. Changing these cascades through the whole grid;
 // keep them all in one place so the geometry stays consistent.
@@ -67,6 +72,13 @@ export function EPGGrid({
 }: EPGGridProps) {
   const { t } = useTranslation();
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Virtualisation of the row layer is opt-in by channel count. The
+  // hook lives in a child component (VirtualizedRows) so it only
+  // mounts above threshold — keeps tests on the simple path and
+  // avoids ResizeObserver overhead for small catalogues.
+  const shouldVirtualize = channels.length >= VIRTUALIZE_THRESHOLD;
+
   // 30 s cadence: smooth enough for the now-line to creep without jumping,
   // cheap enough to ignore. Minute granularity is fine visually but 30 s
   // hides the ragged edge when a programme ends mid-view.
@@ -197,50 +209,144 @@ export function EPGGrid({
             </div>
           </div>
 
-          {/* Rows */}
-          <div className="relative">
-            {channels.map((channel) => (
-              <ChannelRow
-                key={channel.id}
-                channel={channel}
-                programs={scheduleByChannel[channel.id] ?? []}
-                windowStart={windowStart}
-                windowEnd={windowEnd}
-                now={now}
-                isActive={channel.id === activeChannelId}
-                onSelect={onSelectChannel}
-                onSelectProgram={onSelectProgram}
-                noEpgLabel={t("liveTV.noEPG", {
-                  defaultValue: "Sin guía disponible",
-                })}
-              />
-            ))}
-
-            {/* Now-line overlay, spanning all rows. */}
-            {nowLineVisible && (
-              <div
-                className="pointer-events-none absolute top-0 bottom-0 z-[5]"
-                style={{
-                  left: CHANNEL_COL_WIDTH + nowLineOffset,
-                  width: 2,
-                }}
-                aria-hidden="true"
-              >
-                <div className="h-full w-0.5 bg-tv-live shadow-[0_0_8px_var(--tv-live)]" />
-                <div className="absolute -top-1 -left-[3px] h-2 w-2 rounded-full bg-tv-live" />
-              </div>
-            )}
-
-            {channels.length === 0 && (
-              <div className="px-6 py-10 text-center text-sm text-tv-fg-2">
-                {t("liveTV.noChannels", {
-                  defaultValue: "No hay canales disponibles.",
-                })}
-              </div>
-            )}
-          </div>
+          {/* Rows — virtualised above VIRTUALIZE_THRESHOLD channels.
+              Below threshold every row renders directly. The empty
+              state and the now-line live alongside the rows so they
+              line up with the grid's coordinate system. */}
+          {channels.length === 0 ? (
+            <div className="px-6 py-10 text-center text-sm text-tv-fg-2">
+              {t("liveTV.noChannels", {
+                defaultValue: "No hay canales disponibles.",
+              })}
+            </div>
+          ) : shouldVirtualize ? (
+            <VirtualizedRows
+              channels={channels}
+              scheduleByChannel={scheduleByChannel}
+              windowStart={windowStart}
+              windowEnd={windowEnd}
+              now={now}
+              activeChannelId={activeChannelId}
+              onSelectChannel={onSelectChannel}
+              onSelectProgram={onSelectProgram}
+              scrollRef={scrollRef}
+              noEpgLabel={t("liveTV.noEPG", {
+                defaultValue: "Sin guía disponible",
+              })}
+            >
+              {nowLineVisible && <NowLine offset={nowLineOffset} />}
+            </VirtualizedRows>
+          ) : (
+            <div className="relative">
+              {channels.map((channel) => (
+                <ChannelRow
+                  key={channel.id}
+                  channel={channel}
+                  programs={scheduleByChannel[channel.id] ?? []}
+                  windowStart={windowStart}
+                  windowEnd={windowEnd}
+                  now={now}
+                  isActive={channel.id === activeChannelId}
+                  onSelect={onSelectChannel}
+                  onSelectProgram={onSelectProgram}
+                  noEpgLabel={t("liveTV.noEPG", {
+                    defaultValue: "Sin guía disponible",
+                  })}
+                />
+              ))}
+              {nowLineVisible && <NowLine offset={nowLineOffset} />}
+            </div>
+          )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// NowLine — the absolute-positioned vertical bar marking "right now"
+// across all rows. Extracted so both the virtualised and non-
+// virtualised branches share the exact same DOM (same z-index, same
+// shadow) without copy-pasting.
+function NowLine({ offset }: { offset: number }) {
+  return (
+    <div
+      className="pointer-events-none absolute top-0 bottom-0 z-[5]"
+      style={{ left: CHANNEL_COL_WIDTH + offset, width: 2 }}
+      aria-hidden="true"
+    >
+      <div className="h-full w-0.5 bg-tv-live shadow-[0_0_8px_var(--tv-live)]" />
+      <div className="absolute -top-1 -left-[3px] h-2 w-2 rounded-full bg-tv-live" />
+    </div>
+  );
+}
+
+// VirtualizedRows — wraps useVirtualizer, only mounts when the grid
+// has enough rows to justify it. Below VIRTUALIZE_THRESHOLD the
+// parent renders rows directly (and never instantiates this
+// component / its hook), keeping the simpler render path
+// available for tests and small catalogues.
+interface VirtualizedRowsProps {
+  channels: Channel[];
+  scheduleByChannel: Record<string, EPGProgram[]>;
+  windowStart: number;
+  windowEnd: number;
+  now: number;
+  activeChannelId?: string;
+  onSelectChannel: (ch: Channel) => void;
+  onSelectProgram?: (channel: Channel, program: EPGProgram) => void;
+  scrollRef: React.RefObject<HTMLDivElement | null>;
+  noEpgLabel: string;
+  children?: React.ReactNode;
+}
+
+function VirtualizedRows({
+  channels,
+  scheduleByChannel,
+  windowStart,
+  windowEnd,
+  now,
+  activeChannelId,
+  onSelectChannel,
+  onSelectProgram,
+  scrollRef,
+  noEpgLabel,
+  children,
+}: VirtualizedRowsProps) {
+  const rowVirtualizer = useVirtualizer({
+    count: channels.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => ROW_HEIGHT,
+    overscan: 4,
+  });
+
+  return (
+    <div
+      className="relative"
+      style={{ height: rowVirtualizer.getTotalSize() }}
+    >
+      {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+        const channel = channels[virtualRow.index];
+        return (
+          <div
+            key={channel.id}
+            className="absolute top-0 left-0 w-full"
+            style={{ transform: `translateY(${virtualRow.start}px)` }}
+          >
+            <ChannelRow
+              channel={channel}
+              programs={scheduleByChannel[channel.id] ?? []}
+              windowStart={windowStart}
+              windowEnd={windowEnd}
+              now={now}
+              isActive={channel.id === activeChannelId}
+              onSelect={onSelectChannel}
+              onSelectProgram={onSelectProgram}
+              noEpgLabel={noEpgLabel}
+            />
+          </div>
+        );
+      })}
+      {children}
     </div>
   );
 }
