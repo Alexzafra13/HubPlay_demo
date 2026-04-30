@@ -130,6 +130,15 @@ func NewRouter(deps Dependencies) http.Handler {
 		// Health check (no auth)
 		r.Get("/health", healthHandler.Health)
 
+		// OpenAPI 3.0.3 spec — public on purpose. Clients (Kotlin TV,
+		// integration scripts, openapi-generator) fetch this before
+		// they can authenticate, and the document itself contains no
+		// secrets. ETag-aware so a polling client doesn't transfer the
+		// body more than once per build.
+		openapiHandler := handlers.NewOpenAPIHandler()
+		r.Get("/openapi.yaml", openapiHandler.ServeYAML)
+		r.Head("/openapi.yaml", openapiHandler.ServeYAML)
+
 		// Auth (no auth required)
 		r.Post("/auth/login", authHandler.Login)
 		r.Post("/auth/refresh", authHandler.Refresh)

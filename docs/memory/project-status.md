@@ -1,12 +1,17 @@
 # Estado del proyecto
 
-> Snapshot: **2026-04-30 mañana — rama `claude/federation-hardening` con 3 fixes federación + device-code login (RFC 8628) end-to-end**. 5 commits sobre `main`. Cierra los tres findings P0 de la sesión anterior + un P1 grande pre-Kotlin TV.
+> Snapshot: **2026-04-30 mañana (continuada) — rama `claude/openapi-spec` con OpenAPI 3.0.3 spec embed-y-servida**. 1 commit sobre `main`. Cierra el último item P1 pre-Kotlin TV. **Cola P0+P1 vacía**: todos los prerequisitos para empezar la app Kotlin Android TV están completos.
 >
-> Estado prev (2026-04-29 noche): Federación P2P entera (Phases 1-4 + plug-and-play + UX) mergeada a `main` — 8 commits, 4 migraciones (020-023), 18 ficheros nuevos en `internal/federation/`, 5 páginas frontend. Stack reutiliza primitivos existentes (keystore, JWT, event bus, ratelimit). Auditoría posterior detectó 3 findings que ahora están **cerrados** en esta rama.
+> Estado prev (2026-04-30 mañana, ya en main vía PR #124): 3 fixes federación + device-code login (RFC 8628) end-to-end. Cierra 3 findings P0 + 1 P1.
 >
-> **tests al cierre de esta sesión: backend `go test ./internal/auth/... ./internal/federation/... ./internal/db/... ./internal/api/...` verde · frontend 364/364 · tsc clean · `pnpm build` produce LinkDevice chunk OK**. El config preflight test sigue rojo en este Windows por ffmpeg/ffprobe no en PATH (env, no regresión; CI verde).
+> Estado prev² (2026-04-29 noche): Federación P2P entera (Phases 1-4 + plug-and-play + UX) — 8 commits.
+>
+> **tests al cierre: backend verde salvo `internal/config` preflight (env-only, ffmpeg no en PATH local; CI verde) · frontend 364/364 · tsc clean**.
 
-**Rama `claude/federation-hardening` (esta sesión, 5 commits sobre main)** — los detalles van en el primer bloque de sesión. Resumen:
+**Rama `claude/openapi-spec` (sesión actual, 1 commit sobre main)**:
+- `[pending-hash]` api(openapi): hand-written 3.0.3 spec embed-y-servida en `/api/v1/openapi.yaml`. Cubre auth + browse + stream + me + federation user surface (consumer-facing); admin/setup/peer-to-peer fuera de v1 deliberadamente.
+
+**Rama `claude/federation-hardening` (mergeada a main vía PR #124)**:
 - `b0b0613` federation(security): close JWT replay window with per-nonce cache
 - `c6e0d84` federation(security): SSRF gate on peer-controlled AdvertisedURL
 - `3b24e92` federation(docs): RevokePeer atomicity contract documented
@@ -19,6 +24,87 @@
 - `1c67800` — Phase 3 (library shares opt-in)
 - `8073d5c` — Phase 4 (browse remoto end-to-end, item cache)
 - `29af48e` + `aecfdf0` + `81d6d7c` + `73b749c` — lint CI, plug-and-play AdvertisedURL, fix overview JOIN, grid unificado /peers
+
+---
+
+## 📜 Sesión 2026-04-30 mañana (continuada) — OpenAPI 3.0.3 spec (rama `claude/openapi-spec`)
+
+Sesión corta y enfocada que cierra el último item P1 pre-Kotlin TV. Sin OpenAPI spec versionado, la app Kotlin Android TV iba a redescubrir el wire format por trial-and-error — peligro multiplicado por federación añadiendo 12+ endpoints `/peer/*` extra. Esta rama lo cierra: 1 commit, sin código nuevo de aplicación, solo el contrato.
+
+### Decisiones
+
+**Hand-written, no annotation pass.** Considerada la opción de [`swag`](https://github.com/swaggo/swag) (anotaciones encima de cada handler que generan el spec en build), pero rechazada:
+- 74 rutas registradas en el router → ~200 anotaciones (cada operación + cada parámetro + cada response). Coste ~2-3 días de comment churn que no añade safety.
+- El comment volume hace los handler files más difíciles de leer.
+- swag sigue draft-04 JSON Schema con extensiones propias; menos portable que un YAML/JSON OpenAPI canónico.
+- El surface API se versiona en `/api/v1`; estabilidad mayor que una doc auto-generada que cambia con cada handler refactor.
+
+Hand-written con foco en el **consumer surface** es el camino correcto para v1.
+
+**OpenAPI 3.0.3, no 3.1.** Tooling Kotlin (especialmente `openapi-generator`'s plantillas Kotlin) lag detrás de 3.1. El trade-off es JSON Schema draft-04-ish constraints; nada bloqueante para lo que el API expresa.
+
+**Embed via `//go:embed`, no serve-from-disk.** Tres razones:
+1. El spec ships con el binario que describe — imposible que drift por un mount mal configurado.
+2. Single-binary deploy story (mismo patrón que `web/dist` embed) extiende al contrato del API.
+3. Hot-reload del spec no tiene sentido — clients lo cachean igual, y un cambio de spec implica un cambio de código que implica restart.
+
+**Servido en `/api/v1/openapi.yaml`** con ETag (304 honored), Cache-Control 1h, soporte HEAD. No hay `/openapi.json` mirror — el spec es público y el cliente Kotlin / `openapi-generator` aceptan YAML directamente; quien necesite JSON corre `yq -o json` localmente.
+
+**Sin Swagger UI bundleada.** Considerado: añadir `swagger-ui-dist` y servir un `/api/v1/docs`. Rechazado para v1 — añade ~3MB de assets estáticos al binario para una superficie que el target user (developer integrando con el API) consume vía openapi-generator, no via web UI. Si en el futuro hay demanda real, fácil añadir.
+
+### Surface cubierta (v1 del spec)
+
+In scope (consumer-facing):
+- **Auth** — login, refresh, logout, RFC 8628 device flow (start/poll/approve)
+- **Identity** — `/me`, `/me/preferences` (CRUD)
+- **Events** — `/me/events` SSE con tres tipos (`user.progress.updated`, `user.played.toggled`, `user.favorite.toggled`)
+- **Browse** — libraries, items (latest, search, detail, children), trickplay
+- **Stream** — info, master.m3u8, variants, segments, direct-play, subtitles (embedded + external)
+- **User data** — progress (read/write/played/unplayed/favorite), continue-watching, favourites, next-up
+- **People** — detail con filmografía, thumbnails
+- **Images** — `/images/file/{id}` con `?w=` query param para variants
+- **Federation user surface** — `/me/peers/*` para browse de catalogos de peers
+- **Health** — liveness probe
+
+Out of scope (intencional, NO TODO):
+- `/admin/*` — admin UI es browser-only.
+- `/setup/*` — wizard de primera ejecución, web-only.
+- `/peer/*` — server-to-server, autenticado por Ed25519 JWTs no por sesiones de usuario; documentado en `docs/architecture/federation.md`.
+- IPTV (Live TV) — channel browse en scope cuando la app TV lo pida; el surface admin (transmux/EPG) waits.
+
+### Tests
+
+3 test files al handler del spec:
+- `TestOpenAPIHandler_ServesYAML` — Content-Type, ETag, Cache-Control headers correctos.
+- `TestOpenAPIHandler_HonoursIfNoneMatch` — re-request con If-None-Match → 304 sin body.
+- `TestOpenAPIHandler_HEADSendsHeadersOnly` — HEAD = 200 + Content-Length, sin body.
+
+2 test del spec en sí:
+- `TestOpenAPISpec_ParsesAsValidYAML` — gopkg.in/yaml.v3 unmarshal pasa, top-level `openapi: 3.x.x` + `paths` + `components` presentes. Catches a broken spec edit at compile-time-of-tests rather than first-client-fetch.
+- `TestOpenAPISpec_CoversCriticalPaths` — sanity-check que las rutas críticas (`/auth/login`, `/auth/refresh`, `/auth/device/start`, `/me`, `/libraries`, `/items/{id}`, `/stream/{itemId}/master.m3u8`, `/me/progress/{itemId}`, `/me/peers`) están en el spec. Si alguien borra una operación crítica por accidente, falla aquí.
+
+Sin dependencia nueva (`gopkg.in/yaml.v3` ya estaba para sqlc.yaml).
+
+### Surface fuera del spec, scoped para sesiones futuras
+
+Si alguna vez la app Kotlin TV necesita más surface:
+- IPTV consumer (channels, EPG, schedule, favorites): añadir `tags: [livetv]` con ~10 paths.
+- Image upload (clientes que quieren contribuir posters): añadir `/items/{id}/images/{type}/upload`.
+- Federation Phase 5+ surfaces (cuando se shipean): remote streaming, live TV peering, download to local.
+
+### Estado al cierre
+
+- 1 commit en `claude/openapi-spec`. Working tree clean.
+- Backend tests verde (incluyendo nuevos tests OpenAPI).
+- Cola P0+P1 **vacía**.
+- Próximo hito estratégico **desbloqueado**: app Kotlin Android TV.
+
+### Lo que la app Kotlin TV puede hacer ahora
+
+Día 1 del proyecto Kotlin:
+1. `curl https://hubplay.example.com/api/v1/openapi.yaml -o openapi.yaml`
+2. `openapi-generator generate -i openapi.yaml -g kotlin -o ./hubplay-client --additional-properties=library=jvm-okhttp4,serializationLibrary=kotlinx_serialization`
+3. Cliente tipado generado: data classes para todos los wire types, métodos para cada operación, OkHttp interceptors para auth.
 
 ---
 
@@ -680,14 +766,10 @@ Trabajo que **sube en la cola** porque la app TV lo necesita:
 2. ~~SSRF parcial via peer-controlled BaseURL~~ ✅ **shipped 2026-04-30** (`c6e0d84`).
 3. ~~RevokePeer TOCTOU micro-window~~ ✅ **documented 2026-04-30** (`3b24e92`).
 
-### **P1 · Pre-Kotlin TV (foundation que la app va a consumir)**
+### **P1 · CERRADO** — Pre-Kotlin TV foundation completa
 
-4. ~~**Device-code login flow**~~ ✅ **shipped 2026-04-30** (rama
-   `claude/federation-hardening`, dos commits backend + `683c512`
-   frontend). RFC 8628 end-to-end. /link page. JWT pair issuance via la
-   misma `auth.Service.createSession` (indistinguible de password login).
-
-5. **Versionado del API + documentación OpenAPI** (~½ día).
+4. ~~**Device-code login flow**~~ ✅ **shipped 2026-04-30** (PR #124).
+5. ~~**Versionado del API + documentación OpenAPI**~~ ✅ **shipped 2026-04-30** (rama `claude/openapi-spec`).
    Hoy todo cuelga de `/api/v1/*` pero no hay un OpenAPI spec
    versionado. Generar con go-swagger o swag (anotaciones en
    handlers). Sin esto, la app Kotlin va a redescubrir el wire

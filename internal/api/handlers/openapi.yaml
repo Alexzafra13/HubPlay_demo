@@ -1,0 +1,1365 @@
+# HubPlay API — OpenAPI 3.0.3 spec.
+#
+# Scope (v1 of the spec):
+#
+#   ✓ Auth (login, refresh, logout, RFC 8628 device-code flow)
+#   ✓ Identity (/me, /me/preferences)
+#   ✓ Browse (libraries, items, search, latest)
+#   ✓ Stream (HLS waterfall + direct-play + subtitles)
+#   ✓ User data (progress, played, favourites, continue-watching, next-up)
+#   ✓ User-scoped real-time events (SSE)
+#   ✓ People (cast/crew detail + thumbnails)
+#   ✓ Image serving
+#   ✓ Trickplay (seek-bar previews)
+#   ✓ Federation user surface (browse paired peers' shared libraries)
+#   ✓ Health
+#
+# Out of scope (intentional, not "TODO"):
+#
+#   ✗ Admin endpoints (/admin/*, library mutations, user management,
+#     provider config, federation pairing, IPTV admin operations).
+#     A native client doesn't run admin flows.
+#   ✗ Setup wizard (/setup/*). Web-only first-run flow.
+#   ✗ Peer-to-peer endpoints (/peer/*). Server-to-server, authenticated
+#     by Ed25519-signed JWTs from a paired peer's keypair, not by user
+#     sessions. Documented separately in docs/architecture/federation.md.
+#   ✗ IPTV (Live TV) — separate spec extension when the Kotlin TV app
+#     gets to that surface. Channel browse is in scope; the transmux /
+#     EPG management surface is admin-shaped.
+#
+# Format: OpenAPI 3.0.3 chosen over 3.1 for broader Kotlin tooling
+# compatibility (openapi-generator's Kotlin templates lag on 3.1).
+# The trade-off is JSON Schema draft-04-ish constraints; not a blocker
+# for what the API expresses.
+#
+# Authoritative source: this file. The spec is embedded into the binary
+# via //go:embed and served at /api/v1/openapi.yaml. Updates here ship
+# with the next build.
+
+openapi: 3.0.3
+
+info:
+  title: HubPlay API
+  description: |
+    Self-hosted media server REST API. Powers the React web client, the
+    Kotlin Android TV client, and any third-party integration that wants
+    to browse a HubPlay catalogue or stream from one.
+
+    ## Authentication
+
+    Two auth flows:
+
+    1. **Password (`/auth/login`)** — Username + password → JWT pair
+       (access + refresh). Used by the web client.
+    2. **Device code (`/auth/device/*`, RFC 8628)** — TV remotes can't
+       type passwords. The device asks the server for a short user code,
+       displays it, and polls. The operator approves the code on a
+       logged-in browser. Used by the Kotlin TV client and any headless
+       client.
+
+    Both produce JWT pairs that are **indistinguishable** thereafter —
+    same access-token shape, same refresh path.
+
+    ## Wire format
+
+    All JSON responses are envelope-shaped:
+
+    - **Success**: `{ "data": <payload> }`
+    - **Error**: `{ "error": { "code", "message", "hint?", "details?", "request_id" } }`
+
+    The `request_id` correlates server logs; the `code` is a stable
+    machine-readable identifier (e.g. `INVALID_CREDENTIALS`,
+    `PEER_RATE_LIMITED`); the `message` is human-readable English. Some
+    error codes adopt RFC-spec lowercase (e.g. `authorization_pending`
+    from RFC 8628). Match on `code` programmatically, surface `message`
+    to users via your client's i18n.
+
+    ## Streaming (HLS)
+
+    `/stream/{itemId}/master.m3u8` is the entry point. Send the
+    `X-Hubplay-Client-Capabilities` header to declare what your decoder
+    supports — the server picks the best of DirectPlay, DirectStream
+    (remux), or Transcode based on what you can natively decode.
+
+    Header format mirrors `Accept-CH`/`Vary`:
+    ```
+    X-Hubplay-Client-Capabilities: video=h264,hevc,av1; audio=aac,eac3,opus; container=mp4,mkv
+    ```
+
+    Header absent → conservative web-browser defaults (h264/aac/mp4).
+
+  version: 0.1.0
+  license:
+    name: AGPL-3.0
+    url: https://www.gnu.org/licenses/agpl-3.0.html
+
+servers:
+  - url: /api/v1
+    description: Same-origin (recommended)
+  - url: https://hubplay.example.com/api/v1
+    description: Example production deployment
+
+tags:
+  - name: auth
+    description: Login, token refresh, device-code flow
+  - name: identity
+    description: Current user info and preferences
+  - name: browse
+    description: Libraries and items catalog
+  - name: stream
+    description: Playback (HLS, direct play, subtitles, trickplay)
+  - name: user-data
+    description: Watch progress, played state, favourites, continue-watching
+  - name: events
+    description: Server-Sent Events for cross-device sync
+  - name: people
+    description: Cast and crew
+  - name: images
+    description: Poster/backdrop/thumbnail serving
+  - name: federation
+    description: Browse content from paired peer servers
+  - name: health
+    description: Liveness probe
+
+paths:
+  # ────────────────────────────────────────────────────────────────────
+  /health:
+    get:
+      tags: [health]
+      summary: Liveness probe
+      description: Returns OK when the process is up. Always public.
+      security: []
+      responses:
+        "200":
+          description: Service is up
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  # ─── Auth ───────────────────────────────────────────────────────────
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Sign in with username + password
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Logged in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthTokenEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Account disabled or rate-limited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /auth/refresh:
+    post:
+      tags: [auth]
+      summary: Exchange a refresh token for a fresh access+refresh pair
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: { type: string }
+      responses:
+        "200":
+          description: New token pair
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthTokenEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: Revoke the current refresh token
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                refresh_token:
+                  type: string
+                  description: |
+                    Optional — if omitted the server revokes whichever
+                    session matches the access token's `device_id` claim.
+      responses:
+        "204":
+          description: Logged out
+
+  /auth/device/start:
+    post:
+      tags: [auth]
+      summary: Start a device authorization flow (RFC 8628)
+      description: |
+        Used by headless clients (TVs, consoles, CLI tools) that can't
+        present a password form. The server issues a short `user_code`
+        the device displays, plus an opaque `device_code` the device
+        keeps secret and polls with.
+      security: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                device_name:
+                  type: string
+                  description: Friendly label shown in the user's session list
+                  example: "Living-room TV"
+      responses:
+        "201":
+          description: Code pair issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceStartEnvelope"
+
+  /auth/device/poll:
+    post:
+      tags: [auth]
+      summary: Poll for token issuance (RFC 8628)
+      description: |
+        Recommended polling interval is `interval` seconds from the
+        start response. If you receive `slow_down`, add 5s to your
+        interval per RFC 8628 §3.5.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [device_code]
+              properties:
+                device_code: { type: string }
+      responses:
+        "200":
+          description: Approved — tokens issued (single-use; subsequent polls return `expired_token`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthTokenEnvelope"
+        "400":
+          description: Protocol error (still polling)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                pending:
+                  summary: Operator hasn't approved yet
+                  value: { error: { code: authorization_pending, message: "the user has not yet approved the device" } }
+                slowDown:
+                  summary: Polling too aggressively
+                  value: { error: { code: slow_down, message: "polling too frequently; back off and retry" } }
+                expired:
+                  summary: Code expired or already redeemed
+                  value: { error: { code: expired_token, message: "the device code has expired or already been used" } }
+
+  /auth/device/approve:
+    post:
+      tags: [auth]
+      summary: Approve a pending device code (operator-side)
+      description: |
+        Called from the `/link` page after the operator types the code
+        from their device. Authenticated; the calling user is the one
+        the device's session will run as.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_code]
+              properties:
+                user_code:
+                  type: string
+                  example: "ABCD-EFGH"
+      responses:
+        "200":
+          description: Approved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      approved: { type: boolean }
+        "404":
+          description: User code unknown
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: Already approved by a different user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "410":
+          description: Code expired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  # ─── Identity ───────────────────────────────────────────────────────
+  /me:
+    get:
+      tags: [identity]
+      summary: Current user
+      responses:
+        "200":
+          description: User details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserEnvelope"
+
+  /me/preferences:
+    get:
+      tags: [identity]
+      summary: List user preferences
+      description: |
+        Per-user key/value preferences. Free-form keys for now; clients
+        SHOULD namespace their own preferences to avoid collisions
+        (e.g. `tv.hero_mode`, `web.theme`).
+      responses:
+        "200":
+          description: Preferences
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        key: { type: string }
+                        value: { type: string }
+                        updated_at: { type: string, format: date-time }
+
+  /me/preferences/{key}:
+    parameters:
+      - { name: key, in: path, required: true, schema: { type: string } }
+    put:
+      tags: [identity]
+      summary: Set a preference
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [value]
+              properties:
+                value: { type: string }
+      responses: { "204": { description: Saved } }
+    delete:
+      tags: [identity]
+      summary: Delete a preference
+      responses: { "204": { description: Deleted } }
+
+  # ─── Events (SSE) ───────────────────────────────────────────────────
+  /me/events:
+    get:
+      tags: [events]
+      summary: User-scoped Server-Sent Events stream
+      description: |
+        Long-lived `text/event-stream`. Server filters by user_id BEFORE
+        the channel write — a slow client of user A never blocks events
+        for user B. Three event types:
+
+        - `user.progress.updated` — watch progress changed (any device)
+        - `user.played.toggled` — played/unplayed state changed
+        - `user.favorite.toggled` — favourite state changed
+
+        Each event's `data` is JSON with `user_id`, `item_id`, and
+        type-specific fields. Connection uses HTTP keepalive comments
+        every 30s to defeat reverse-proxy timeouts.
+
+        Client behaviour: subscribe once at app start, invalidate the
+        relevant local cache (e.g. `/items/{id}`, continue-watching) on
+        each event. `EventSource` handles reconnection with exponential
+        backoff automatically.
+      responses:
+        "200":
+          description: Event stream (long-lived)
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
+  # ─── Browse ─────────────────────────────────────────────────────────
+  /libraries:
+    get:
+      tags: [browse]
+      summary: List libraries the calling user can access
+      responses:
+        "200":
+          description: Libraries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Library" }
+
+  /libraries/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [browse]
+      summary: Library detail
+      responses:
+        "200":
+          description: Library
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/Library" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /libraries/{id}/items:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+      - { name: offset, in: query, schema: { type: integer, default: 0 } }
+      - { name: limit, in: query, schema: { type: integer, default: 50, maximum: 200 } }
+      - { name: sort, in: query, schema: { type: string, enum: [title, year, added_at, rating] } }
+      - { name: type, in: query, schema: { type: string, enum: [movie, series, episode] } }
+      - { name: genre, in: query, schema: { type: string } }
+      - { name: year, in: query, schema: { type: integer } }
+      - { name: rating_min, in: query, schema: { type: number, format: float } }
+    get:
+      tags: [browse]
+      summary: Paginated items in a library, with filters
+      responses:
+        "200":
+          description: Items
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedItemsEnvelope"
+
+  /items/latest:
+    get:
+      tags: [browse]
+      summary: Recently added across visible libraries
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, default: 20 } }
+      responses:
+        "200":
+          description: Items
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/ItemSummary" }
+
+  /items/search:
+    get:
+      tags: [browse]
+      summary: Full-text search across item titles + people
+      parameters:
+        - { name: q, in: query, required: true, schema: { type: string, minLength: 2 } }
+        - { name: limit, in: query, schema: { type: integer, default: 20, maximum: 100 } }
+      responses:
+        "200":
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/ItemSummary" }
+
+  /items/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [browse]
+      summary: Full item detail (metadata, streams, cast, images)
+      responses:
+        "200":
+          description: Item detail
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/ItemDetail" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /items/{id}/children:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [browse]
+      summary: Children of an item (seasons of a series, episodes of a season)
+      responses:
+        "200":
+          description: Children
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/ItemSummary" }
+
+  /items/{id}/trickplay.json:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [stream]
+      summary: Trickplay sprite manifest (lazy-generated on first request)
+      responses:
+        "200":
+          description: Trickplay manifest
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      width: { type: integer }
+                      height: { type: integer }
+                      tile_width: { type: integer }
+                      tile_height: { type: integer }
+                      thumb_count: { type: integer }
+                      interval_ms: { type: integer }
+
+  /items/{id}/trickplay.png:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [stream]
+      summary: Trickplay sprite sheet
+      responses:
+        "200":
+          description: Sprite PNG
+          content:
+            image/png:
+              schema: { type: string, format: binary }
+
+  # ─── Stream ─────────────────────────────────────────────────────────
+  /stream/{itemId}/info:
+    parameters:
+      - { name: itemId, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [stream]
+      summary: Pre-flight stream info — picks the playback strategy
+      description: |
+        Sends back the master playlist URL plus the strategy decided
+        (`direct_play` / `direct_stream` / `transcode`). The decision
+        honours the `X-Hubplay-Client-Capabilities` header — declare
+        what your decoder supports for best fidelity.
+      parameters:
+        - $ref: "#/components/parameters/ClientCapabilitiesHeader"
+      responses:
+        "200":
+          description: Stream info
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/StreamInfo" }
+
+  /stream/{itemId}/master.m3u8:
+    parameters:
+      - { name: itemId, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [stream]
+      summary: HLS master playlist
+      parameters:
+        - $ref: "#/components/parameters/ClientCapabilitiesHeader"
+      responses:
+        "200":
+          description: HLS master playlist
+          content:
+            application/vnd.apple.mpegurl:
+              schema: { type: string }
+
+  /stream/{itemId}/{quality}/index.m3u8:
+    parameters:
+      - { name: itemId, in: path, required: true, schema: { type: string } }
+      - { name: quality, in: path, required: true, schema: { type: string }, description: "Variant identifier (e.g. `1080p`, `720p`)" }
+    get:
+      tags: [stream]
+      summary: HLS variant playlist
+      responses:
+        "200":
+          description: Variant playlist
+          content:
+            application/vnd.apple.mpegurl:
+              schema: { type: string }
+
+  /stream/{itemId}/{quality}/{segment}:
+    parameters:
+      - { name: itemId, in: path, required: true, schema: { type: string } }
+      - { name: quality, in: path, required: true, schema: { type: string } }
+      - { name: segment, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [stream]
+      summary: HLS segment
+      responses:
+        "200":
+          description: Transport stream segment
+          content:
+            video/mp2t:
+              schema: { type: string, format: binary }
+
+  /stream/{itemId}/direct:
+    parameters:
+      - { name: itemId, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [stream]
+      summary: Direct-play original file (Range requests supported)
+      description: |
+        For clients with native containers/codecs, byte-Range streaming
+        of the original media file. Less metadata overhead than HLS but
+        no adaptive bitrate.
+      responses:
+        "200":
+          description: Full file
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "206":
+          description: Partial content (Range request)
+
+  /stream/{itemId}/session:
+    parameters:
+      - { name: itemId, in: path, required: true, schema: { type: string } }
+    delete:
+      tags: [stream]
+      summary: Stop a streaming session (frees transcode slot, deletes work dir)
+      responses: { "204": { description: Stopped } }
+
+  /stream/{itemId}/subtitles:
+    parameters:
+      - { name: itemId, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [stream]
+      summary: List embedded subtitle tracks
+      responses:
+        "200":
+          description: Tracks
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/SubtitleTrack" }
+
+  /stream/{itemId}/subtitles/{trackIndex}:
+    parameters:
+      - { name: itemId, in: path, required: true, schema: { type: string } }
+      - { name: trackIndex, in: path, required: true, schema: { type: integer } }
+    get:
+      tags: [stream]
+      summary: Fetch one embedded subtitle track as WebVTT
+      responses:
+        "200":
+          description: WebVTT
+          content:
+            text/vtt:
+              schema: { type: string }
+
+  /stream/{itemId}/subtitles/external:
+    parameters:
+      - { name: itemId, in: path, required: true, schema: { type: string } }
+      - { name: lang, in: query, schema: { type: string }, description: ISO 639 language code }
+    get:
+      tags: [stream]
+      summary: Search external subtitle providers (OpenSubtitles)
+      responses:
+        "200":
+          description: Candidates
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        file_id: { type: string }
+                        language: { type: string }
+                        release: { type: string }
+                        rating: { type: number, format: float }
+
+  /stream/{itemId}/subtitles/external/{fileId}:
+    parameters:
+      - { name: itemId, in: path, required: true, schema: { type: string } }
+      - { name: fileId, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [stream]
+      summary: Download one external subtitle as WebVTT
+      responses:
+        "200":
+          description: WebVTT
+          content:
+            text/vtt:
+              schema: { type: string }
+
+  # ─── User data ──────────────────────────────────────────────────────
+  /me/continue-watching:
+    get:
+      tags: [user-data]
+      summary: Items the user paused mid-way (filters near-complete + abandoned)
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, default: 12, maximum: 50 } }
+      responses:
+        "200":
+          description: Resume targets
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/ContinueWatchingEntry" }
+
+  /me/favorites:
+    get:
+      tags: [user-data]
+      summary: Items the user marked as favourite
+      responses:
+        "200":
+          description: Favourites
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/ItemSummary" }
+
+  /me/next-up:
+    get:
+      tags: [user-data]
+      summary: Next episode to watch per series the user is following
+      responses:
+        "200":
+          description: Next-up entries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/ItemSummary" }
+
+  /me/progress/{itemId}:
+    parameters:
+      - { name: itemId, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [user-data]
+      summary: Read playback progress for an item
+      responses:
+        "200":
+          description: Progress
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/Progress" }
+    put:
+      tags: [user-data]
+      summary: Update playback progress
+      description: |
+        Idempotent — call as often as you like; the server takes the
+        latest. Publishes a `user.progress.updated` event over SSE so
+        other devices viewing this item refresh in real time.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [position_seconds]
+              properties:
+                position_seconds: { type: number, format: float }
+                duration_seconds: { type: number, format: float, nullable: true }
+      responses:
+        "200":
+          description: Saved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/Progress" }
+
+  /me/progress/{itemId}/played:
+    parameters:
+      - { name: itemId, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [user-data]
+      summary: Mark item as played
+      responses: { "204": { description: Marked } }
+
+  /me/progress/{itemId}/unplayed:
+    parameters:
+      - { name: itemId, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [user-data]
+      summary: Mark item as unplayed (clears progress + played flag)
+      responses: { "204": { description: Marked } }
+
+  /me/progress/{itemId}/favorite:
+    parameters:
+      - { name: itemId, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [user-data]
+      summary: Toggle favourite state
+      responses:
+        "200":
+          description: New state
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      is_favorite: { type: boolean }
+
+  # ─── People ─────────────────────────────────────────────────────────
+  /people/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [people]
+      summary: Person detail with filmography
+      responses:
+        "200":
+          description: Person
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/PersonDetail" }
+
+  /people/{id}/thumb:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [people, images]
+      summary: Person profile photo
+      responses:
+        "200":
+          description: Image
+          content:
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/png:  { schema: { type: string, format: binary } }
+            image/webp: { schema: { type: string, format: binary } }
+
+  # ─── Images ─────────────────────────────────────────────────────────
+  /images/file/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string }, description: "Image row id (referenced from item.images[].id)" }
+      - { name: w, in: query, schema: { type: integer }, description: "Optional width hint for server-side resizing (returns nearest cached variant)" }
+    get:
+      tags: [images]
+      summary: Serve a stored image (poster / backdrop / banner / logo)
+      responses:
+        "200":
+          description: Image
+          content:
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/png:  { schema: { type: string, format: binary } }
+            image/webp: { schema: { type: string, format: binary } }
+
+  # ─── Federation user surface ────────────────────────────────────────
+  /me/peers:
+    get:
+      tags: [federation]
+      summary: List paired peers visible to the calling user
+      responses:
+        "200":
+          description: Peers
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/ConnectedPeer" }
+
+  /me/peers/libraries:
+    get:
+      tags: [federation]
+      summary: Unified flat list of every library every paired peer has shared with us
+      description: |
+        Fans out to every paired peer in parallel; offline peers are
+        skipped (logged) so a single down peer doesn't 500 the
+        endpoint. Powers the user's `/peers` landing grid.
+      responses:
+        "200":
+          description: Libraries with peer attribution
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/PeerLibrary" }
+
+  /me/peers/{peerID}/libraries:
+    parameters:
+      - { name: peerID, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [federation]
+      summary: Libraries one specific peer has shared with us
+      responses:
+        "200":
+          description: Libraries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/PeerLibrary" }
+
+  /me/peers/{peerID}/libraries/{libraryID}/items:
+    parameters:
+      - { name: peerID, in: path, required: true, schema: { type: string } }
+      - { name: libraryID, in: path, required: true, schema: { type: string } }
+      - { name: offset, in: query, schema: { type: integer, default: 0 } }
+      - { name: limit, in: query, schema: { type: integer, default: 50, maximum: 200 } }
+    get:
+      tags: [federation]
+      summary: Browse items in a peer's library (read-through cache, falls back to stale on offline)
+      responses:
+        "200":
+          description: Items
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/PeerItem" }
+                  total: { type: integer }
+                  from_cache: { type: boolean, description: "true when served from local cache (peer offline or fresh-enough)" }
+
+  /me/peers/{peerID}/libraries/{libraryID}/refresh:
+    parameters:
+      - { name: peerID, in: path, required: true, schema: { type: string } }
+      - { name: libraryID, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [federation]
+      summary: Force a cache refresh for one peer library
+      responses: { "204": { description: Cache cleared (next browse call hits live) } }
+
+# ════════════════════════════════════════════════════════════════════════
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        JWT issued by `/auth/login`, `/auth/refresh`, or `/auth/device/poll`.
+        Send as `Authorization: Bearer <access_token>`. Tokens expire in
+        15 min by default — refresh proactively or on the first 401.
+
+  security:
+    - bearerAuth: []
+
+  parameters:
+    ClientCapabilitiesHeader:
+      name: X-Hubplay-Client-Capabilities
+      in: header
+      required: false
+      schema: { type: string }
+      description: |
+        Semicolon-separated key=value-list of decoder capabilities. Drives
+        the DirectPlay/DirectStream/Transcode decision. Format:
+        `video=h264,hevc; audio=aac,eac3; container=mp4,mkv`.
+        Header absent → server falls back to conservative web-browser defaults.
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid bearer token
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    NotFound:
+      description: Resource does not exist (or is hidden by ACL — both 404 by design to avoid existence leak)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  schemas:
+    # ─── Wrappers ────────────────────────────────────────────────────
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string, description: "Stable machine-readable identifier", example: "INVALID_CREDENTIALS" }
+            message: { type: string, description: "Human-readable English; surface via i18n in your client" }
+            hint: { type: string, description: "Optional remediation pointer" }
+            details: { type: object, additionalProperties: true }
+            request_id: { type: string, description: "Correlation id for server logs" }
+
+    HealthResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            status: { type: string, enum: [ok] }
+            version: { type: string }
+            uptime_seconds: { type: integer }
+
+    AuthTokenEnvelope:
+      type: object
+      properties:
+        data: { $ref: "#/components/schemas/AuthToken" }
+
+    AuthToken:
+      type: object
+      required: [access_token, refresh_token, expires_at, user]
+      properties:
+        access_token: { type: string }
+        refresh_token: { type: string }
+        expires_at: { type: string, format: date-time }
+        user: { $ref: "#/components/schemas/User" }
+
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string }
+        password: { type: string, format: password }
+        device_name: { type: string, example: "Chrome on macOS" }
+        device_id: { type: string, description: "Stable per-device identifier; defaults to a server-side UUID if omitted" }
+
+    DeviceStartEnvelope:
+      type: object
+      properties:
+        data:
+          type: object
+          required: [device_code, user_code, verification_url, expires_in, interval]
+          properties:
+            device_code: { type: string, description: "Opaque secret kept by the polling device" }
+            user_code:
+              type: string
+              description: "Operator-typed code, dash-formatted (`ABCD-EFGH`)"
+              example: "ABCD-EFGH"
+            verification_url: { type: string, format: uri, description: "Where to send the operator (typically `<base_url>/link`)" }
+            verification_uri: { type: string, format: uri, description: "RFC 8628 alias of `verification_url`" }
+            expires_in: { type: integer, description: "Seconds until the code pair becomes invalid" }
+            interval: { type: integer, description: "Recommended polling cadence in seconds" }
+
+    UserEnvelope:
+      type: object
+      properties:
+        data: { $ref: "#/components/schemas/User" }
+
+    User:
+      type: object
+      required: [id, username, role, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        username: { type: string }
+        display_name: { type: string }
+        role: { type: string, enum: [user, admin] }
+        avatar_path: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    # ─── Library + items ─────────────────────────────────────────────
+    Library:
+      type: object
+      required: [id, name, content_type]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        content_type: { type: string, enum: [movies, shows, music, livetv] }
+        item_count: { type: integer }
+
+    PaginatedItemsEnvelope:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            items:
+              type: array
+              items: { $ref: "#/components/schemas/ItemSummary" }
+            total: { type: integer }
+            offset: { type: integer }
+            limit: { type: integer }
+
+    ItemSummary:
+      type: object
+      required: [id, type, title]
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string, enum: [movie, series, season, episode] }
+        title: { type: string }
+        year: { type: integer, nullable: true }
+        rating: { type: number, format: float, nullable: true }
+        runtime_minutes: { type: integer, nullable: true }
+        poster_image_id: { type: string, nullable: true, description: "Use with `/images/file/{id}`" }
+        backdrop_image_id: { type: string, nullable: true }
+        poster_blurhash: { type: string, nullable: true, description: "BlurHash placeholder for instant render" }
+        backdrop_colors:
+          type: object
+          nullable: true
+          properties:
+            vibrant: { type: string, example: "rgb(180, 60, 90)" }
+            muted: { type: string }
+        # Series/season/episode hierarchy
+        parent_id: { type: string, format: uuid, nullable: true }
+        season_number: { type: integer, nullable: true }
+        episode_number: { type: integer, nullable: true }
+        # User state (when authenticated)
+        user_data:
+          type: object
+          nullable: true
+          properties:
+            played: { type: boolean }
+            position_seconds: { type: number, format: float }
+            is_favorite: { type: boolean }
+
+    ItemDetail:
+      allOf:
+        - $ref: "#/components/schemas/ItemSummary"
+        - type: object
+          properties:
+            overview: { type: string }
+            tagline: { type: string }
+            studio: { type: string }
+            genres:
+              type: array
+              items: { type: string }
+            external_ids:
+              type: object
+              additionalProperties: { type: string }
+              description: "Provider-keyed (e.g. `tmdb`, `imdb`) with the upstream id as value"
+            images:
+              type: array
+              items: { $ref: "#/components/schemas/Image" }
+            media_streams:
+              type: array
+              items: { $ref: "#/components/schemas/MediaStream" }
+            chapters:
+              type: array
+              items: { $ref: "#/components/schemas/Chapter" }
+            people:
+              type: array
+              items: { $ref: "#/components/schemas/CreditEntry" }
+
+    Image:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string, enum: [poster, backdrop, banner, logo, thumb] }
+        is_primary: { type: boolean }
+        is_locked: { type: boolean, description: "Manual override; protected from refresh sweeps" }
+        width: { type: integer, nullable: true }
+        height: { type: integer, nullable: true }
+        blurhash: { type: string, nullable: true }
+
+    MediaStream:
+      type: object
+      required: [type, codec]
+      properties:
+        type: { type: string, enum: [video, audio, subtitle] }
+        codec: { type: string, example: "hevc" }
+        index: { type: integer }
+        language: { type: string, nullable: true }
+        title: { type: string, nullable: true }
+        is_default: { type: boolean }
+        is_forced: { type: boolean }
+        bitrate: { type: integer, nullable: true }
+        # Video-only
+        width: { type: integer, nullable: true }
+        height: { type: integer, nullable: true }
+        # Audio-only
+        channels: { type: integer, nullable: true }
+        channel_layout: { type: string, nullable: true, example: "5.1" }
+
+    Chapter:
+      type: object
+      required: [start_seconds, title]
+      properties:
+        start_seconds: { type: number, format: float }
+        title: { type: string }
+
+    CreditEntry:
+      type: object
+      required: [person_id, name, role]
+      properties:
+        person_id: { type: string, format: uuid }
+        name: { type: string }
+        role: { type: string, enum: [actor, director, writer, producer, composer] }
+        character: { type: string, nullable: true }
+        sort_order: { type: integer }
+        thumb_url: { type: string, nullable: true, description: "Same-origin URL — proxied via /people/{id}/thumb" }
+
+    PersonDetail:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        biography: { type: string }
+        profile_url: { type: string, nullable: true }
+        filmography:
+          type: array
+          items: { $ref: "#/components/schemas/ItemSummary" }
+
+    # ─── Stream ──────────────────────────────────────────────────────
+    StreamInfo:
+      type: object
+      required: [strategy, master_playlist_url]
+      properties:
+        strategy: { type: string, enum: [direct_play, direct_stream, transcode] }
+        master_playlist_url: { type: string, format: uri }
+        direct_url: { type: string, format: uri, nullable: true, description: "Set when strategy=direct_play; serves the original file with Range support" }
+        decision_reason: { type: string, description: "Human-readable why-this-strategy explanation" }
+        media_streams:
+          type: array
+          items: { $ref: "#/components/schemas/MediaStream" }
+
+    SubtitleTrack:
+      type: object
+      properties:
+        index: { type: integer }
+        codec: { type: string }
+        language: { type: string }
+        title: { type: string }
+        is_default: { type: boolean }
+        is_forced: { type: boolean }
+        is_external: { type: boolean }
+
+    # ─── User data ───────────────────────────────────────────────────
+    Progress:
+      type: object
+      required: [item_id, position_seconds, played]
+      properties:
+        item_id: { type: string, format: uuid }
+        position_seconds: { type: number, format: float }
+        duration_seconds: { type: number, format: float, nullable: true }
+        played: { type: boolean }
+        is_favorite: { type: boolean }
+        updated_at: { type: string, format: date-time }
+
+    ContinueWatchingEntry:
+      allOf:
+        - $ref: "#/components/schemas/ItemSummary"
+        - type: object
+          properties:
+            position_seconds: { type: number, format: float }
+            updated_at: { type: string, format: date-time }
+
+    # ─── Federation ──────────────────────────────────────────────────
+    ConnectedPeer:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        server_uuid: { type: string, format: uuid }
+        name: { type: string }
+        status: { type: string, enum: [paired, revoked, pending] }
+        last_seen_at: { type: string, format: date-time, nullable: true }
+        fingerprint: { type: string, description: "16 hex chars in groups of 4 (e.g. `a8f3:k2m9:x4p1:c7e2`)" }
+
+    PeerLibrary:
+      type: object
+      properties:
+        peer:
+          $ref: "#/components/schemas/ConnectedPeer"
+        library:
+          type: object
+          properties:
+            id: { type: string }
+            name: { type: string }
+            content_type: { type: string, enum: [movies, shows, music, livetv] }
+            scopes:
+              type: object
+              properties:
+                can_browse: { type: boolean }
+                can_play: { type: boolean }
+                can_download: { type: boolean }
+                can_livetv: { type: boolean }
+
+    PeerItem:
+      type: object
+      required: [id, type, title]
+      properties:
+        id: { type: string, description: "Remote item id (opaque to us)" }
+        type: { type: string }
+        title: { type: string }
+        year: { type: integer, nullable: true }
+        overview: { type: string }
+        poster_url: { type: string, nullable: true, description: "Proxied via origin — never the peer's URL directly" }
+
+# Apply bearer auth to every operation by default. Endpoints that allow
+# anonymous access opt out via `security: []` (auth flow start, /health,
+# /federation/info, /peer/handshake — only the first is in this spec).
+security:
+  - bearerAuth: []
