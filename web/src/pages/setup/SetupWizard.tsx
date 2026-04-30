@@ -108,12 +108,17 @@ function StepIndicator({ currentStep }: { currentStep: number }) {
 
 // ─── Logo ────────────────────────────────────────────────────────────────────
 
+// HubPlayLogo — kept visually consistent with the Login page so a new
+// admin doesn't see two different brand marks during their first
+// session. Both are placeholders pending a proper logo design; until
+// then the squared-off accent tile + halo is the canonical mark.
 function HubPlayLogo() {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-col items-center gap-3">
-      <div className="flex h-16 w-16 items-center justify-center rounded-full bg-accent/10">
+      <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-accent shadow-[0_0_30px_rgba(13,148,136,0.55)]">
         <svg
-          className="h-8 w-8 text-accent"
+          className="h-8 w-8 text-white"
           viewBox="0 0 24 24"
           fill="currentColor"
         >
@@ -122,7 +127,7 @@ function HubPlayLogo() {
       </div>
       <div className="text-center">
         <h1 className="text-2xl font-bold text-text-primary">HubPlay</h1>
-        <p className="text-sm text-text-muted mt-1">Setup Wizard</p>
+        <p className="text-sm text-text-muted mt-1">{t('setup.wizardLabel')}</p>
       </div>
     </div>
   );
