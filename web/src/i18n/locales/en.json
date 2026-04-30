@@ -21,7 +21,9 @@
     "settings": "Settings",
     "administration": "Administration",
     "sortBy": "Sort by",
-    "moreOptions": "More options"
+    "moreOptions": "More options",
+    "loadErrorTitle": "Could not load",
+    "loadErrorHint": "Check your connection and try again."
   },
   "nav": {
     "home": "Home",
@@ -117,7 +119,8 @@
     "usernamePlaceholder": "Enter your username",
     "passwordPlaceholder": "Enter your password",
     "signIn": "Sign In",
-    "loginFailed": "Login failed. Check your credentials."
+    "loginFailed": "Login failed. Check your credentials.",
+    "tagline": "Your media. Anywhere."
   },
   "movies": {
     "title": "Movies",
@@ -304,7 +307,19 @@
     "notConfigured": "Not configured",
     "getApiKey": "Get your API key at {{url}}",
     "pathNotFound": "Path not found",
-    "metadataHint": "After saving a TMDB API key, run a library scan to fetch metadata, posters, and backdrops for your media. New items will be automatically enriched during future scans."
+    "metadataHint": "After saving a TMDB API key, run a library scan to fetch metadata, posters, and backdrops for your media. New items will be automatically enriched during future scans.",
+    "pathInaccessibleHint": "One or more paths aren't accessible. Check the volume is mounted correctly in docker-compose.yml and that the path matches the container mount point.",
+    "apiKeyEnter": "Enter API key",
+    "providers": {
+      "tmdb": {
+        "label": "TMDB (The Movie Database)",
+        "description": "Posters, backdrops, synopses, ratings, cast & crew"
+      },
+      "opensubtitles": {
+        "label": "OpenSubtitles",
+        "description": "Automatic subtitle downloads"
+      }
+    }
   },
   "admin": {
     "title": "Administration",

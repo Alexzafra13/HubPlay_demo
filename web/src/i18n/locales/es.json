@@ -21,7 +21,9 @@
     "settings": "Ajustes",
     "administration": "Administracion",
     "sortBy": "Ordenar por",
-    "moreOptions": "Mas opciones"
+    "moreOptions": "Mas opciones",
+    "loadErrorTitle": "No se pudo cargar",
+    "loadErrorHint": "Comprueba tu conexion e intentalo de nuevo."
   },
   "nav": {
     "home": "Inicio",
@@ -117,7 +119,8 @@
     "usernamePlaceholder": "Introduce tu usuario",
     "passwordPlaceholder": "Introduce tu contrasena",
     "signIn": "Iniciar sesion",
-    "loginFailed": "Error de inicio de sesion. Comprueba tus credenciales."
+    "loginFailed": "Error de inicio de sesion. Comprueba tus credenciales.",
+    "tagline": "Tus contenidos. En cualquier sitio."
   },
   "movies": {
     "title": "Peliculas",
@@ -304,7 +307,19 @@
     "notConfigured": "No configurado",
     "getApiKey": "Obtener tu clave API en {{url}}",
     "pathNotFound": "Ruta no encontrada",
-    "metadataHint": "Despues de guardar una clave API de TMDB, ejecuta un escaneo de biblioteca para obtener metadatos, posters y fondos para tus medios. Los nuevos elementos se enriqueceran automaticamente en futuros escaneos."
+    "metadataHint": "Despues de guardar una clave API de TMDB, ejecuta un escaneo de biblioteca para obtener metadatos, posters y fondos para tus medios. Los nuevos elementos se enriqueceran automaticamente en futuros escaneos.",
+    "pathInaccessibleHint": "Una o mas rutas no son accesibles. Comprueba que el volumen este montado correctamente en docker-compose.yml y que la ruta coincida con el punto de montaje del contenedor.",
+    "apiKeyEnter": "Introduce la clave API",
+    "providers": {
+      "tmdb": {
+        "label": "TMDB (The Movie Database)",
+        "description": "Posters, fondos, sinopsis, valoraciones, reparto y equipo"
+      },
+      "opensubtitles": {
+        "label": "OpenSubtitles",
+        "description": "Descarga automatica de subtitulos"
+      }
+    }
   },
   "admin": {
     "title": "Administracion",
