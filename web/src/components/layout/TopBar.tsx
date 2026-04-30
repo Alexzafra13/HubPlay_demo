@@ -139,7 +139,9 @@ export function TopBar({ title, onMenuClick }: TopBarProps) {
         <button
           onClick={() => setDropdownOpen(!dropdownOpen)}
           className="w-8 h-8 rounded-full bg-accent/20 text-accent flex items-center justify-center text-xs font-bold hover:bg-accent/30 transition-colors"
-          aria-label="User menu"
+          aria-label={t('topbar.userMenu')}
+          aria-haspopup="menu"
+          aria-expanded={dropdownOpen}
         >
           {initials}
         </button>

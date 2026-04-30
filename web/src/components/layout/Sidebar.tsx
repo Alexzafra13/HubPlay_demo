@@ -90,6 +90,20 @@ function IconLogout() {
   );
 }
 
+// IconLinkDevice — a tablet/phone with a link/chain glyph above it. Used
+// for the "Link a device" nav item that points at /link, the operator-
+// side approval page for the RFC 8628 device-code flow.
+function IconLinkDevice() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="6" y="3" width="8" height="14" rx="1.5" />
+      <path d="M9 14h2" />
+      <path d="M3 7l1 1.5L3 10" />
+      <path d="M17 7l-1 1.5L17 10" />
+    </svg>
+  );
+}
+
 function IconChevronLeft() {
   return (
     <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -206,6 +220,21 @@ export function Sidebar({ collapsed, onToggleCollapse, onClose }: SidebarProps) 
         <NavItem to="/live-tv" icon={<IconAntenna />} label={t('nav.liveTV')} collapsed={collapsed} />
         <NavItem to="/peers" icon={<IconUsers />} label={t('nav.peers')} collapsed={collapsed} />
         <NavItem to="/search" icon={<IconSearch />} label={t('nav.search')} collapsed={collapsed} />
+
+        {/* Account section — Settings + device pairing. Both were
+            previously only reachable via the avatar dropdown (Settings)
+            or by typing the URL (/link). Surfacing here makes them
+            discoverable for the everyday user. */}
+        <div className="my-3 mx-3 border-t border-white/5" />
+        {!collapsed && (
+          <span className="px-3 text-xs font-semibold text-text-secondary uppercase tracking-wider">
+            {t('nav.account')}
+          </span>
+        )}
+        <div className="mt-1 space-y-1">
+          <NavItem to="/settings" icon={<IconGear />} label={t('nav.settings')} collapsed={collapsed} />
+          <NavItem to="/link" icon={<IconLinkDevice />} label={t('nav.linkDevice')} collapsed={collapsed} />
+        </div>
 
         {isAdmin && (
           <>

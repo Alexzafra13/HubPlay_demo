@@ -29,6 +29,9 @@
     "series": "Series",
     "liveTV": "TV en vivo",
     "search": "Buscar",
+    "account": "Cuenta",
+    "settings": "Ajustes",
+    "linkDevice": "Vincular dispositivo",
     "admin": "Admin",
     "libraries": "Bibliotecas",
     "users": "Usuarios",
@@ -40,7 +43,8 @@
     "closeMenu": "Cerrar menu"
   },
   "topbar": {
-    "searchPlaceholder": "Buscar..."
+    "searchPlaceholder": "Buscar...",
+    "userMenu": "Menu de usuario"
   },
   "home": {
     "continueWatching": "Seguir viendo",
@@ -590,6 +594,7 @@
     }
   },
   "setup": {
+    "wizardLabel": "Asistente de configuracion",
     "steps": {
       "adminAccount": "Cuenta de admin",
       "libraries": "Bibliotecas",
