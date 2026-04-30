@@ -559,15 +559,21 @@ func (r *FederationRepository) ListSharedItems(ctx context.Context, peerID, libr
 		return nil, 0, fmt.Errorf("count shared items: %w", err)
 	}
 
+	// Overview lives in the `metadata` sidecar table (PRIMARY KEY
+	// item_id), not on `items` itself — LEFT JOIN so items without
+	// metadata still appear with empty overview rather than being
+	// filtered out. Sort by sort_title (indexed) instead of title
+	// for consistency with the local listings UI.
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT i.id, i.type, i.title,
 		       COALESCE(i.year, 0),
-		       COALESCE(i.overview, '')
+		       COALESCE(m.overview, '')
 		  FROM items i
 		  JOIN federation_library_shares s ON s.library_id = i.library_id
+		  LEFT JOIN metadata m ON m.item_id = i.id
 		 WHERE i.library_id = ? AND s.peer_id = ? AND s.can_browse = 1
 		   AND i.parent_id IS NULL
-		 ORDER BY i.title COLLATE NOCASE ASC
+		 ORDER BY i.sort_title COLLATE NOCASE ASC
 		 LIMIT ? OFFSET ?
 	`, libraryID, peerID, limit, offset)
 	if err != nil {
