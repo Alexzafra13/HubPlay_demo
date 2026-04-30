@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"flag"
 	"fmt"
 	"io/fs"
@@ -355,7 +356,7 @@ func run(configPath string) error {
 	return waitForShutdown(ctx, cancel, server, streamManager, iptvService, iptvProxy, iptvTransmux, iptvScheduler, iptvProberWorker, scanScheduler, imageRefreshScheduler, libraryService, authService, database, logger)
 }
 
-func waitForShutdown(ctx context.Context, cancel context.CancelFunc, server *http.Server, sm *stream.Manager, iptvSvc *iptv.Service, iptvProxy *iptv.StreamProxy, iptvTransmux *iptv.TransmuxManager, iptvSched *iptv.Scheduler, iptvProber *iptv.ProberWorker, scheduler *library.Scheduler, imageRefreshSched *library.ImageRefreshScheduler, librarySvc *library.Service, authSvc *auth.Service, database interface{ Close() error }, logger *slog.Logger) error {
+func waitForShutdown(ctx context.Context, cancel context.CancelFunc, server *http.Server, sm *stream.Manager, iptvSvc *iptv.Service, iptvProxy *iptv.StreamProxy, iptvTransmux *iptv.TransmuxManager, iptvSched *iptv.Scheduler, iptvProber *iptv.ProberWorker, scheduler *library.Scheduler, imageRefreshSched *library.ImageRefreshScheduler, librarySvc *library.Service, authSvc *auth.Service, database *sql.DB, logger *slog.Logger) error {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
@@ -415,6 +416,14 @@ func waitForShutdown(ctx context.Context, cancel context.CancelFunc, server *htt
 
 	// Cancel root context
 	cancel()
+
+	// Refresh sqlite query-planner stats before closing so the next
+	// process starts with up-to-date analysis. PRAGMA optimize is a
+	// no-op for tables that haven't changed; this is best-effort and
+	// never blocks shutdown.
+	optimizeCtx, optimizeCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	db.Optimize(optimizeCtx, database, logger)
+	optimizeCancel()
 
 	// Close database
 	if err := database.Close(); err != nil {
