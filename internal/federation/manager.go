@@ -98,19 +98,26 @@ type Config struct {
 	PeerRequestsPerMinute int
 	// PeerBurst is the bucket ceiling above the steady rate. Defaults to 30.
 	PeerBurst int
+	// MaxConcurrentStreamsPerPeer caps how many concurrent stream
+	// sessions a single peer can hold open against this server.
+	// Defaults to 3 — enough for a small-household peer (a couple
+	// people watching simultaneously) without letting one peer
+	// drain the local transcode budget. 0 disables the cap.
+	MaxConcurrentStreamsPerPeer int
 }
 
 // DefaultConfig returns sensible defaults for new deployments. Caller
 // overrides whatever they want from hubplay.yaml.
 func DefaultConfig() Config {
 	return Config{
-		AdvertisedURL:         "",
-		Version:               "0.1.0",
-		SupportedScopes:       []string{"browse", "play"},
-		InviteTTL:             24 * time.Hour,
-		HTTPTimeout:           15 * time.Second,
-		PeerRequestsPerMinute: 60,
-		PeerBurst:             30,
+		AdvertisedURL:               "",
+		Version:                     "0.1.0",
+		SupportedScopes:             []string{"browse", "play"},
+		InviteTTL:                   24 * time.Hour,
+		HTTPTimeout:                 15 * time.Second,
+		PeerRequestsPerMinute:       60,
+		PeerBurst:                   30,
+		MaxConcurrentStreamsPerPeer: 3,
 	}
 }
 
@@ -128,6 +135,7 @@ type Manager struct {
 	auditor   *Auditor
 	ratelimit *RateLimiter
 	nonces    *nonceCache
+	streams   *peerStreamGate
 
 	// peerCache caches paired peers by server_uuid for the JWT
 	// validation hot path. Refreshed on each peer mutation.
@@ -157,6 +165,7 @@ func NewManager(ctx context.Context, cfg Config, repo Repo, clk clock.Clock, log
 		auditor:   NewAuditor(repo, logger),
 		ratelimit: NewRateLimiter(clk, cfg.PeerRequestsPerMinute, cfg.PeerBurst),
 		nonces:    newNonceCache(clk),
+		streams:   newPeerStreamGate(cfg.MaxConcurrentStreamsPerPeer),
 	}
 	if err := m.refreshPeerCache(ctx); err != nil {
 		// Tear down the auditor we just spawned so we don't leak the
@@ -598,6 +607,15 @@ func (m *Manager) UnshareLibrary(ctx context.Context, peerID, shareID string) er
 // the admin UI's per-peer expansion panel.
 func (m *Manager) ListSharesByPeer(ctx context.Context, peerID string) ([]*LibraryShare, error) {
 	return m.repo.ListSharesByPeer(ctx, peerID)
+}
+
+// GetLibraryShareForPeer is the public access-check entry point —
+// returns the share row if one exists for (peer, library), or nil
+// without error if not. Powers the per-item permission check on
+// federation streaming and download endpoints. Wraps the repo call
+// to avoid leaking the Repo interface to handlers.
+func (m *Manager) GetLibraryShareForPeer(ctx context.Context, peerID, libraryID string) (*LibraryShare, error) {
+	return m.repo.GetLibraryShare(ctx, peerID, libraryID)
 }
 
 // ListSharedLibrariesForPeer returns the libraries the peer can see —
