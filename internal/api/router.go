@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"io/fs"
 	"log/slog"
@@ -194,8 +195,44 @@ func NewRouter(deps Dependencies) http.Handler {
 				// sees libraries / items they don't have a share for.
 				r.Get("/peer/libraries", pubFed.ListLibraries)
 				r.Get("/peer/libraries/{libraryID}/items", pubFed.ListLibraryItems)
-				// Phase 5+ peer endpoints (stream session, download)
-				// get added inside this group.
+
+				// Phase 5: peer-as-origin streaming. The calling peer's
+				// users hit these endpoints; we serve our own content
+				// to them via stream.Manager (DirectPlay / DirectStream
+				// / Transcode picked by Decide(), capped per-peer
+				// against streamGate).
+				if deps.StreamManager != nil && deps.Items != nil {
+					// Resolve the local base URL the same way the local
+					// stream handler does — runtime app_settings override
+					// wins, falls back to YAML/env Config.Server.BaseURL.
+					baseDefault := ""
+					if deps.Config != nil {
+						baseDefault = deps.Config.Server.BaseURL
+					}
+					settingsRepo := deps.Settings
+					effectiveBase := func(ctx context.Context) string {
+						if settingsRepo == nil {
+							return strings.TrimRight(baseDefault, "/")
+						}
+						v, err := settingsRepo.GetOr(ctx, "server.base_url", baseDefault)
+						if err != nil {
+							return strings.TrimRight(baseDefault, "/")
+						}
+						return strings.TrimRight(v, "/")
+					}
+					fedStream := handlers.NewFederationStreamHandler(
+						deps.Federation,
+						deps.StreamManager,
+						deps.Items,
+						effectiveBase,
+						deps.Logger,
+					)
+					r.Post("/peer/stream/{itemId}/session", fedStream.StartSession)
+					r.Get("/peer/stream/session/{sessionId}/master.m3u8", fedStream.MasterPlaylist)
+					r.Get("/peer/stream/session/{sessionId}/{quality}/index.m3u8", fedStream.QualityPlaylist)
+					r.Get("/peer/stream/session/{sessionId}/{quality}/{segment}", fedStream.Segment)
+					r.Delete("/peer/stream/session/{sessionId}", fedStream.StopSession)
+				}
 			})
 		}
 
@@ -281,6 +318,32 @@ func NewRouter(deps Dependencies) http.Handler {
 						r.Get("/{peerID}/libraries/{libraryID}/items", mePeers.BrowsePeerItems)
 						r.Post("/{peerID}/libraries/{libraryID}/refresh", mePeers.RefreshPeerLibrary)
 					})
+
+					// Phase 5: viewer-side streaming. The user clicks
+					// play on a peer's item; their browser hits these
+					// endpoints; we proxy the HLS request to the origin
+					// peer with a peer-JWT they never see.
+					baseDefault := ""
+					if deps.Config != nil {
+						baseDefault = deps.Config.Server.BaseURL
+					}
+					settingsRepo := deps.Settings
+					streamBase := func(ctx context.Context) string {
+						if settingsRepo == nil {
+							return strings.TrimRight(baseDefault, "/")
+						}
+						v, err := settingsRepo.GetOr(ctx, "server.base_url", baseDefault)
+						if err != nil {
+							return strings.TrimRight(baseDefault, "/")
+						}
+						return strings.TrimRight(v, "/")
+					}
+					mePeerStream := handlers.NewMePeersStreamHandler(deps.Federation, streamBase, deps.Logger)
+					r.Post("/me/peers/{peerID}/stream/{itemID}/session", mePeerStream.StartSession)
+					r.Get("/me/peers/{peerID}/stream/session/{sessionID}/master.m3u8", mePeerStream.MasterPlaylist)
+					r.Get("/me/peers/{peerID}/stream/session/{sessionID}/{quality}/index.m3u8", mePeerStream.QualityPlaylist)
+					r.Get("/me/peers/{peerID}/stream/session/{sessionID}/{quality}/{segment}", mePeerStream.Segment)
+					r.Delete("/me/peers/{peerID}/stream/session/{sessionID}", mePeerStream.StopSession)
 				}
 
 				// Federation admin surface — invite generation, peer

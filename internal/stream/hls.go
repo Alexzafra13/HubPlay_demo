@@ -27,7 +27,13 @@ func GenerateMasterPlaylist(itemID, baseURL string, profiles []string) string {
 	return b.String()
 }
 
-// parseBitrate converts a string like "4000k" to bits per second.
+// ParseBitrate converts a string like "4000k" to bits per second.
+// Exported so federation peer-stream handlers can build their own
+// master playlist without duplicating the parser.
+func ParseBitrate(s string) int { return parseBitrate(s) }
+
+// parseBitrate is the internal helper used by GenerateMasterPlaylist
+// in this package. ParseBitrate above is the export.
 func parseBitrate(s string) int {
 	if s == "" {
 		return 0

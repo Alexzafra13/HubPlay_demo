@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { Link, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import {
@@ -10,6 +10,14 @@ import {
 import { Spinner } from "@/components/common";
 import { Button } from "@/components/common/Button";
 import type { FederationRemoteItem } from "@/api/types";
+import { usePeerPlayback } from "./peerPlayback";
+
+// Lazy-load the player so the peer browse path doesn't pull hls.js + the
+// player chunk on initial render. Only when the user actually clicks
+// Play does the network fetch the player bundle.
+const VideoPlayer = lazy(() =>
+  import("@/components/player").then((m) => ({ default: m.VideoPlayer })),
+);
 
 const PAGE_SIZE = 50;
 
@@ -29,6 +37,11 @@ export default function PeerLibraryItemsPage() {
 
   const peer = peers.data?.find((p) => p.id === peerId);
   const library = libraries.data?.find((l) => l.id === libraryId);
+
+  // Phase 5 — viewer-side playback for peer items. The hook owns the
+  // session lifecycle (POST start, DELETE on close); the page just
+  // renders the overlay when showPlayer flips on.
+  const playback = usePeerPlayback();
 
   if (items.isLoading) {
     return (
@@ -119,9 +132,43 @@ export default function PeerLibraryItemsPage() {
               key={item.id}
               item={item}
               peerName={peer?.name ?? ""}
+              onPlay={() => playback.play(peerId, item.id)}
+              isStarting={playback.isLoading && playback.playingItemId === item.id}
             />
           ))}
         </ul>
+      )}
+
+      {playback.error && (
+        <div
+          role="alert"
+          className="mt-4 rounded border border-red-500/40 bg-red-500/10 p-3 text-sm text-text-primary"
+        >
+          {playback.error}
+        </div>
+      )}
+
+      {/* Inline player overlay. Mirrors the structure used on the
+          local item-detail page: full-screen fixed div, escape via the
+          player's own onClose. The Suspense fallback is a black void —
+          loading the player chunk takes <100ms on a warm cache; a
+          spinner here would be more flicker than help. */}
+      {playback.showPlayer && playback.source && playback.playingItemId && (
+        <div className="fixed inset-0 z-50 bg-black">
+          <Suspense fallback={<div className="h-full w-full bg-black" />}>
+            <VideoPlayer
+              itemId={playback.playingItemId}
+              sessionToken=""
+              masterPlaylistUrl={playback.source.masterPlaylistUrl}
+              directUrl={playback.source.directUrl}
+              playbackMethod={playback.source.playbackMethod}
+              title={
+                itemList.find((i) => i.id === playback.playingItemId)?.title
+              }
+              onClose={() => void playback.close()}
+            />
+          </Suspense>
+        </div>
       )}
 
       {totalPages > 1 && (
@@ -158,9 +205,13 @@ export default function PeerLibraryItemsPage() {
 function ItemCard({
   item,
   peerName,
+  onPlay,
+  isStarting,
 }: {
   item: FederationRemoteItem;
   peerName: string;
+  onPlay: () => void;
+  isStarting: boolean;
 }) {
   return (
     <li className="group flex flex-col gap-2 rounded-lg border border-border bg-bg-elevated p-4 transition-colors hover:border-accent">
@@ -182,17 +233,24 @@ function ItemCard({
           {item.overview}
         </p>
       )}
-      {peerName && (
-        <p className="mt-auto pt-2 text-[10px] text-text-muted/70">
-          <span className="inline-flex items-center gap-1">
-            <span
-              className="h-1 w-1 rounded-full bg-emerald-500"
-              aria-hidden
-            />
-            {peerName}
-          </span>
-        </p>
-      )}
+      <div className="mt-auto flex items-center justify-between pt-2">
+        {peerName ? (
+          <p className="text-[10px] text-text-muted/70">
+            <span className="inline-flex items-center gap-1">
+              <span
+                className="h-1 w-1 rounded-full bg-emerald-500"
+                aria-hidden
+              />
+              {peerName}
+            </span>
+          </p>
+        ) : (
+          <span />
+        )}
+        <Button size="sm" onClick={onPlay} disabled={isStarting}>
+          {isStarting ? "…" : "▶"}
+        </Button>
+      </div>
     </li>
   );
 }

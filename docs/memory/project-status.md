@@ -1,8 +1,8 @@
 # Estado del proyecto
 
-> ⚠️ **Bomba conocida — sqlc 1.29 incompatible con queries actuales**. No corras `make sqlc` ni `sqlc generate` hasta resolver. Detalles abajo en "Deudas operacionales".
+> ⚠️ **Bomba parcialmente cerrada (2026-04-30 sqlc-bug investigation)** — sqlc 1.29 con CRLF rompe la regen; con LF aplicado vía `.gitattributes` la mayoría regenera limpio EXCEPTO un par de queries (`ContinueWatching`, `SeriesEpisodeProgress`) que tienen `?` dentro de `NOT(...)` + `LIMIT ?` y siguen disparando un bug de parser. Workaround: no regenerar esas dos queries. Resto del package SÍ es seguro regenerar tras bumpear `.gitattributes` (en `main` desde PR #128).
 
-> Snapshot: **2026-04-30 mañana (continuada) — rama `claude/openapi-spec` con OpenAPI 3.0.3 spec embed-y-servida**. 1 commit sobre `main`. Cierra el último item P1 pre-Kotlin TV. **Cola P0+P1 vacía**: todos los prerequisitos para empezar la app Kotlin Android TV están completos.
+> Snapshot: **2026-04-30 tarde — rama `claude/federation-phase-5` con streaming peer-to-peer end-to-end**. Phase 5 ship: usuario A pulsa play en una peli del peer B, video llega vía proxy local. ~1500 LOC nuevas, migración 026, 2 commits backend, 1 commit frontend. **Tests: backend build verde, federation tests OK (algunos bloqueados por AppLocker en este Windows env, no por código), frontend 370/370, tsc clean**.
 >
 > Estado prev (2026-04-30 mañana, ya en main vía PR #124): 3 fixes federación + device-code login (RFC 8628) end-to-end. Cierra 3 findings P0 + 1 P1.
 >
@@ -10,7 +10,14 @@
 >
 > **tests al cierre: backend verde salvo `internal/config` preflight (env-only, ffmpeg no en PATH local; CI verde) · frontend 364/364 · tsc clean**.
 
-**Rama `claude/openapi-spec` (sesión actual, 1 commit sobre main)**:
+**Rama `claude/federation-phase-5` (sesión actual, ~3 commits sobre main)**:
+- migración 026 (federation_remote_users + peer_item_progress) + per-peer stream cap (`peerStreamGate`)
+- origin endpoints (`POST /peer/stream/{itemID}/session` + HLS proxy + DELETE) — `internal/api/handlers/federation_stream.go`
+- viewer endpoints (`POST /me/peers/{peerID}/stream/{itemID}/session` + master playlist URL rewrite + variant/segment proxy + DELETE) — `internal/api/handlers/me_peers_stream.go`
+- frontend `usePeerPlayback` hook + Play button en `PeerLibraryItemsPage` + lazy VideoPlayer overlay
+- Ya merged a main:
+
+**Rama `claude/openapi-spec` (sesión anterior)**:
 - `[pending-hash]` api(openapi): hand-written 3.0.3 spec embed-y-servida en `/api/v1/openapi.yaml`. Cubre auth + browse + stream + me + federation user surface (consumer-facing); admin/setup/peer-to-peer fuera de v1 deliberadamente.
 
 **Rama `claude/federation-hardening` (mergeada a main vía PR #124)**:
@@ -19,6 +26,96 @@
 - `3b24e92` federation(docs): RevokePeer atomicity contract documented
 - `[hash-pending]` auth(device): RFC 8628 device authorization grant — TV-friendly login
 - `683c512` auth(device): /link page — operator approves a device code
+
+---
+
+## 🎬 Sesión 2026-04-30 tarde — Federación Phase 5 streaming (rama `claude/federation-phase-5`)
+
+Phase 5 según `docs/architecture/federation.md` §8 — el "play" funcional de federación. Hasta hoy podías ver el catálogo del peer pero no reproducir; ahora pulsas play en una peli de Pedro y el video llega via proxy local.
+
+### Architecture en cuatro saltos
+
+```
+1. User on A → A: POST /api/v1/me/peers/{peerID}/stream/{itemID}/session
+                  (auth: user JWT)
+2. A → B:        POST /api/v1/peer/stream/{itemID}/session
+                  body: { remote_user_id, client_capabilities, profile? }
+                  (auth: peer JWT, EdDSA-signed)
+3. B opens stream.Manager session with userID="rmt-{peerID}-{remoteUserID}"
+   → Decide() picks DirectPlay/DirectStream/Transcode
+   → returns master.m3u8 URL on B
+4. A rewrites master URL → local /me/peers/{peerID}/stream/session/{sid}/master.m3u8
+   → returns to user's player
+5. Player fetches variants + segments from A; A proxies bytes to B.
+```
+
+Trade-off documentado en design §8: **no direct client→B**. El user solo habla con A. Razones: (a) B nunca ve la IP del user, (b) A puede aplicar bandwidth caps, (c) funciona aunque B esté detrás de NAT mientras A pueda llegarle.
+
+### Backend en una sentencia por commit
+
+**Migration 026** — dos tablas, dos concerns:
+- `federation_remote_users` — origin-side: identidad de peer's user para per-user concurrency caps + audit (no PK referencias users.id; cripto-distinto).
+- `peer_item_progress` — viewer-side: progreso del MI user en items remotos. Sin progreso origin-side en v1; defer a Phase 5.5.
+
+**Per-peer cap** (`internal/federation/streaming.go`):
+- `peerStreamGate` — counts map + sessions map + dedupe-key index. `MaxConcurrentStreamsPerPeer` default 3. Sweep idle al cabo de 4h (safety net contra opens leaked por crashed clients).
+- 5 unit tests pinning dedupe / cap-enforcement / close-releases-slot / sweep / Manager passthrough.
+
+**Origin handler** (`federation_stream.go`):
+- `POST /peer/stream/{itemID}/session` — verifica share `CanPlay`, abre `peerStreamGate.open` (cap), llama `stream.Manager.StartSession` con userID="rmt-{peerID}-{remoteUserID}", devuelve sessionID + master URL.
+- `GET .../session/{sid}/master.m3u8` — playlist con URLs scoped a sessionID.
+- `GET .../session/{sid}/{quality}/index.m3u8` — re-llama StartSession (idempotente), `waitForFile` 10s, `http.ServeFile(manifestPath)`.
+- `GET .../session/{sid}/{quality}/{segment}` — segment file desde session OutputDir, regex-validated path traversal guard.
+- `DELETE .../session/{sid}` — `peerStreamGate.close` libera el counter. Idempotente.
+
+**Viewer outbound** (`internal/federation/client_stream.go`):
+- `RequestPeerStream` — POST con peer JWT. Body incluye `remote_user_id` (= local user_id), `client_capabilities` (forward del header `X-Hubplay-Client-Capabilities`), `profile`.
+- `ProxyPeerStreamRequest` — byte-transparent proxy para variantes y segmentos.
+- `FetchPeerMasterPlaylist` — fetch separado (necesita parsing).
+- `RewritePeerMasterPlaylist` — string transform que sustituye URLs absolutas/relativas del origin path `/api/v1/peer/stream/...` por path local `/api/v1/me/peers/{peerID}/stream/...`. 4 tests pinning absolute/relative/comments-preserved/no-trailing-newline.
+
+**Viewer handlers** (`me_peers_stream.go`):
+- `POST /me/peers/{peerID}/stream/{itemID}/session` — llama `RequestPeerStream`, devuelve master URL **rewritten** al local proxy.
+- `GET /me/peers/{peerID}/stream/session/{sid}/master.m3u8` — fetch + rewrite.
+- `GET /me/peers/{peerID}/stream/session/{sid}/{quality}/index.m3u8` — proxy bytes.
+- `GET /me/peers/{peerID}/stream/session/{sid}/{quality}/{segment}` — proxy bytes (segments binary, no rewrite).
+- `DELETE /me/peers/{peerID}/stream/session/{sid}` — forward DELETE al origin.
+
+**Capability forwarding**: el header del cliente del user (Chrome/Kotlin TV/etc) se parsea con `stream.CapabilitiesFromRequest` y se serializa al JSON body de la POST a B. B lo deserializa back a `stream.Capabilities` y lo pasa a `Decide()`. Resultado: si tu Chromecast hace DirectPlay de una peli local sin reencodear, también lo hace de la peli de Pedro.
+
+### Frontend en cuatro líneas
+- `api.startPeerStream(peerID, itemID)` y `api.stopPeerStream(peerID, sessionID)` en `client.ts`.
+- `usePeerPlayback` hook (`pages/peerPlayback.ts`) que envuelve el ciclo de vida: state machine de `play()`/`close()`, ref de session id para cleanup.
+- `PeerLibraryItemsPage`: cada `ItemCard` ahora tiene un Play button. Al pulsar, `playback.play(peerID, item.id)` → muestra overlay full-screen con `<VideoPlayer />` lazy-loaded.
+- VideoPlayer existente reutilizado sin tocar — solo recibe `masterPlaylistUrl` ya rewritten + `playbackMethod`.
+
+### Decisiones registradas
+
+**Por qué rmt-{peerID}-{remoteUserID} como user-id sintético en stream.Manager.** Stream.Manager keya por `(userID, itemID, profile)`. Para que la dedupe funcione (mismo peer-user pidiendo el mismo item dos veces no abre dos sesiones) Y la separación funcione (peer A's user X y peer B's user X son distintos), el prefijo + peerID + remote_user_id da identidad globalmente única dentro del proceso. Prefix "rmt-" garantiza que jamás colisione con un local UUID.
+
+**Por qué per-peer cap separado del MaxTranscodeSessions global.** Sin él, un peer hostil con un cliente crasheador que respawneara abriendo nuevas sesiones podía drenar el budget local. El cap per-peer (default 3) limita el blast radius — peer A puede como mucho ocupar 3 slots, los demás peers + local users no se ven afectados.
+
+**Por qué `RewritePeerMasterPlaylist` está en el package federation y no en handlers.** Es transformación pura sobre strings; lógica reusable si Phase 6 (Live TV peering) la necesita igual. Los handlers se quedan declarativos.
+
+**Por qué progress tracking se queda fuera de v1.** `peer_item_progress` table ya existe (migración 026) pero no hay endpoints / UI todavía. Razón: el flujo de play es independiente del progreso, y ship tier-1 con play-funcionando es más útil que ship con todo a medias. Phase 5.5 PR seguirá con el progress reporter cliente-side + endpoints `/me/peers/{peerID}/progress/{itemID}`.
+
+**Por qué Direct-Play-via-federation no está soportado en v1.** `usePeerPlayback` hardcodea `directUrl: null` y deja que el waterfall caiga a HLS. Para Direct Play federado habría que añadir un endpoint que range-streamea los bytes originales del peer a través del proxy — Phase 5.5. v1 perderá un pelín de calidad/eficiencia en items que SERÍAN direct-playable, pero siempre funciona.
+
+### Queda pendiente para Phase 5.5
+- Progress reporter en cliente cuando se reproduce peer item (PUT a `/me/peers/{peerID}/progress/{itemID}`).
+- Endpoints viewer-side de progreso (GET/PUT/POST played).
+- Continue Watching del usuario incluyendo peer items.
+- Direct-Play-vía-proxy (range bytes del file original).
+- Origin-side `federation_remote_users` row writing (audit/identity tracking).
+- Tests E2E con dos servidores (extender `handshake_roundtrip_test.go`).
+
+### Tests + verificación
+- 5 tests `peerStreamGate`: dedupe, cap-enforcement (peer A ≠ peer B), close-releases-slot, sweep, manager passthrough.
+- 4 tests `RewritePeerMasterPlaylist`: absolute URL, comment preservation, relative URL, no-trailing-newline.
+- Frontend tests intactos 370/370.
+- tsc clean.
+- `pnpm build` produce chunks correctamente (player chunk separado por lazy import).
+- Backend tests bloqueados intermitentemente por AppLocker en este Windows env (mismo issue conocido) — `go vet` clean, `go build ./...` clean.
 
 ---
 
