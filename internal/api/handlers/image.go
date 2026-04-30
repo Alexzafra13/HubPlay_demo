@@ -414,13 +414,29 @@ func (h *ImageHandler) ServeFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Images are content-addressed by ID and rarely change.
-	// Cache aggressively with stale-while-revalidate for seamless background refresh.
+	// Images are content-addressed: the row id is a UUID assigned at
+	// ingest, the on-disk content is hashed before save, and a row is
+	// never overwritten — a re-scan of the same source produces a new
+	// row id. So the strongest possible ETag is the row id itself
+	// (plus the `w` param when a thumbnail variant is in play, which
+	// is a different byte stream at the same id).
+	//
+	// This makes the cache validation a pure-header round-trip: a
+	// client with `If-None-Match: "<id>"` gets a 304 with zero bytes
+	// transferred, regardless of whether http.ServeFile would have
+	// re-stat'd the file or not.
+	wParam := r.URL.Query().Get("w")
+	etag := strongImageETag(imageID, wParam)
+	w.Header().Set("ETag", etag)
 	w.Header().Set("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800")
+	if match := r.Header.Get("If-None-Match"); match != "" && etagMatches(match, etag) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
 
 	// Check for thumbnail width request.
-	if wStr := r.URL.Query().Get("w"); wStr != "" {
-		maxWidth, err := strconv.Atoi(wStr)
+	if wParam != "" {
+		maxWidth, err := strconv.Atoi(wParam)
 		if err == nil && maxWidth > 0 && maxWidth < 4096 {
 			thumbDir := filepath.Join(h.imageDir, ".thumbnails")
 			thumbPath := filepath.Join(thumbDir, fmt.Sprintf("%s_w%d%s", imageID, maxWidth, filepath.Ext(localPath)))
@@ -445,6 +461,33 @@ func (h *ImageHandler) ServeFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.ServeFile(w, r, localPath)
+}
+
+// strongImageETag returns the quoted ETag for an image variant.
+// Content-addressed so id+w is enough — no mtime dance.
+func strongImageETag(imageID, wParam string) string {
+	if wParam == "" {
+		return `"` + imageID + `"`
+	}
+	return `"` + imageID + ":w" + wParam + `"`
+}
+
+// etagMatches handles `If-None-Match` semantics: a single quoted
+// value, the wildcard `*`, or a comma-separated list. Strong vs weak
+// (`W/`) prefix is normalised away — for content-addressed images
+// the distinction is meaningless.
+func etagMatches(ifNoneMatch, etag string) bool {
+	if ifNoneMatch == "*" {
+		return true
+	}
+	for _, candidate := range strings.Split(ifNoneMatch, ",") {
+		candidate = strings.TrimSpace(candidate)
+		candidate = strings.TrimPrefix(candidate, "W/")
+		if candidate == etag {
+			return true
+		}
+	}
+	return false
 }
 
 // isUnderImageDir reports whether p, after cleaning, has h.imageDir as an
