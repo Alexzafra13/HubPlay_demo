@@ -1,60 +1,57 @@
-# golangci-lint configuration.
+# golangci-lint v2 configuration.
 #
 # The default 60s timeout runs out on CI now that the module has grown
 # past 100 files; bumping to 5m gives plenty of headroom without
 # masking legitimately slow linters.
 #
 # Note: the linter version is pinned in .github/workflows/ci.yml
-# (golangci-lint-action.version) so this config has a known target.
-# Upgrading to v2+ requires migrating the config schema first.
+# (golangci-lint-action.version). v2 was required because go.mod
+# declares `go 1.25` and v1.64.8 (the last v1.x) was built with Go
+# 1.24, which makes it refuse to load the config.
+version: "2"
+
 run:
   timeout: 5m
 
-# Linter selection. The default v1 set already covers errcheck, govet,
-# staticcheck, ineffassign, unused and gosimple — leaving them implicit
-# is fine. We add gosec on top because the default set has zero security
-# coverage, and a self-hosted server that handles user uploads, FFmpeg
-# args, file paths and HTTP fetches has more security surface than the
-# default linters would flag.
+# Linter selection. The default v2 set ("standard") already covers
+# errcheck, govet, ineffassign, staticcheck (which absorbed gosimple),
+# unused — leaving them implicit is fine. We add gosec on top because
+# the standard set has zero security coverage, and a self-hosted
+# server that handles user uploads, FFmpeg args, file paths, and HTTP
+# fetches has more security surface than the default linters would
+# flag.
 linters:
   enable:
     - gosec
 
-linters-settings:
-  gosec:
-    # CI gate runs at HIGH severity + HIGH confidence — that level is
-    # currently clean across the codebase. Medium-severity findings
-    # (subprocess launches, unbounded form parsing, integer overflow
-    # in stat conversions, etc.) have been audited manually and are
-    # either false positives (gosec can't see our path-validating
-    # `pathmap` package, the sqlc allowlist on dynamic SortBy, or the
-    # internally-built ffmpeg arg list) or known design choices we
-    # don't want to break the build over. They're worth a periodic
-    # manual sweep but shouldn't block PRs.
-    #
-    # Excluded rules:
-    #   G104 — overlaps with errcheck (already on by default).
-    #   G304 — file path tainted; pathmap + filepath.Clean make this
-    #          a false positive on every call site.
-    #
-    # G703 (taint analysis alias of G304) and G115 (integer overflow)
-    # are NOT excluded here even though they would also be false-positive
-    # noise — the version of gosec bundled with golangci-lint v1.64.8
-    # doesn't know those rules yet, and listing unknown IDs makes
-    # `golangci-lint config verify` reject the file. Re-add them when
-    # the linter version pin in .github/workflows/ci.yml moves up.
-    excludes:
-      - G104
-      - G304
-    severity: high
-    confidence: high
+  settings:
+    gosec:
+      # CI gate runs at HIGH severity + HIGH confidence — that level is
+      # currently clean across the codebase. Medium-severity findings
+      # (subprocess launches, unbounded form parsing, integer overflow
+      # in stat conversions, etc.) have been audited manually and are
+      # either false positives (gosec can't see our path-validating
+      # `pathmap` package, the sqlc allowlist on dynamic SortBy, or the
+      # internally-built ffmpeg arg list) or known design choices we
+      # don't want to break the build over. They're worth a periodic
+      # manual sweep but shouldn't block PRs.
+      #
+      # Excluded rules:
+      #   G104 — overlaps with errcheck (already on by default).
+      #   G304 — file path tainted; pathmap + filepath.Clean make this
+      #          a false positive on every call site.
+      excludes:
+        - G104
+        - G304
+      severity: high
+      confidence: high
 
 # CI runs on PR + push; outside the linter we don't gate on style
 # (golangci's defaults are strict enough). New rules added here should
 # come with a clean repo run before being committed.
 issues:
   # Nothing to exclude project-wide today; if a generated file ever
-  # shows up here, exclude with `exclude-rules` rather than disabling
-  # a linter outright.
+  # shows up here, exclude with `linters.exclusions.rules` rather than
+  # disabling a linter outright.
   max-issues-per-linter: 0
   max-same-issues: 0

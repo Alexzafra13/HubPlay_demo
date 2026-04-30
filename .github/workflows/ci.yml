@@ -75,12 +75,14 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - uses: golangci/golangci-lint-action@v6
+      - uses: golangci/golangci-lint-action@v8
         with:
-          # Pinned to avoid CI breaking on every upstream release. The
-          # matching .golangci.yml uses v1-style keys; bumping to v2+
-          # requires migrating the config first.
-          version: v1.64.8
+          # v2.x is required to lint a module declaring `go 1.25` —
+          # v1.64.8 was built with Go 1.24 and refuses to load. Pinned
+          # to a specific patch so CI doesn't drift on each upstream
+          # release. .golangci.yml uses the v2 schema (`version: "2"`,
+          # `linters.settings`).
+          version: v2.11.4
 
   build:
     name: Build
