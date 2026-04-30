@@ -620,7 +620,11 @@ func (r *FederationRepository) UpsertCachedItems(ctx context.Context, peerID, li
 	if err != nil {
 		return fmt.Errorf("begin cache upsert tx: %w", err)
 	}
-	defer tx.Rollback()
+	// Rollback is safe to call after a successful Commit (returns
+	// sql.ErrTxDone, which we ignore here). Wrap in func to silence
+	// errcheck — we genuinely don't care about the rollback error
+	// after Commit succeeds.
+	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM federation_item_cache

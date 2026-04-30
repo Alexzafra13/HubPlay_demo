@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
 
 	"hubplay/internal/clock"
 	"hubplay/internal/domain"
@@ -108,14 +107,12 @@ func TestHandshakeRoundtrip_TwoLiveServers(t *testing.T) {
 		t.Error("second use of the same invite should have failed")
 	}
 
-	// Step 6: outbound peer JWT roundtrip. B signs a token, hits A's
-	// /peer/ping. This exercises the middleware end-to-end through
-	// real HTTP.
-	tok, err := b.mgr.IssuePeerToken(bAsPeerOnA.ID) // B uses A's local peer ID
-	// Wait, this is wrong: IssuePeerToken takes the AUDIENCE peer's
-	// LOCAL id on the issuing server. From B's side, the audience is
-	// A; B's local ID for A is aAsPeerOnB.ID.
-	tok, err = b.mgr.IssuePeerToken(aAsPeerOnB.ID)
+	// Step 6: outbound peer JWT roundtrip. B signs a token addressed
+	// to A and hits A's /peer/ping. This exercises the middleware
+	// end-to-end through real HTTP. IssuePeerToken takes the AUDIENCE
+	// peer's LOCAL id on the issuing server — from B's side, A is
+	// stored as aAsPeerOnB.
+	tok, err := b.mgr.IssuePeerToken(aAsPeerOnB.ID)
 	if err != nil {
 		t.Fatalf("B issue peer token: %v", err)
 	}
@@ -338,6 +335,3 @@ func makePingHandler(mgr *Manager) http.HandlerFunc {
 	}
 }
 
-// uuidString is a tiny helper used in test setups elsewhere; declared
-// here for the test rig's convenience.
-func uuidString() string { return uuid.NewString() }
