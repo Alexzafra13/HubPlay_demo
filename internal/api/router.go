@@ -30,6 +30,7 @@ import (
 
 type Dependencies struct {
 	Auth           *auth.Service
+	DeviceCode     *auth.DeviceCodeService
 	Users          *user.Service
 	Libraries      *library.Service
 	StreamManager  *stream.Manager
@@ -133,6 +134,17 @@ func NewRouter(deps Dependencies) http.Handler {
 		r.Post("/auth/login", authHandler.Login)
 		r.Post("/auth/refresh", authHandler.Refresh)
 
+		// Device authorization grant (RFC 8628). Two unauthenticated
+		// endpoints (start + poll) for headless clients (TV apps, CLI
+		// tools); the approve endpoint is gated by the auth middleware
+		// down below.
+		var deviceHandler *handlers.DeviceAuthHandler
+		if deps.DeviceCode != nil {
+			deviceHandler = handlers.NewDeviceAuthHandler(deps.DeviceCode, nil, deps.Logger)
+			r.Post("/auth/device/start", deviceHandler.Start)
+			r.Post("/auth/device/poll", deviceHandler.Poll)
+		}
+
 		// Setup — create first admin (only works when no users exist)
 		r.Post("/auth/setup", authHandler.Setup)
 
@@ -184,6 +196,12 @@ func NewRouter(deps Dependencies) http.Handler {
 
 			// Auth
 			r.Post("/auth/logout", authHandler.Logout)
+
+			// Device authorization grant — approve route is auth-gated
+			// (the operator must already be logged in to confirm a code).
+			if deviceHandler != nil {
+				r.Post("/auth/device/approve", deviceHandler.Approve)
+			}
 
 			// Server-Sent Events for real-time updates
 			if deps.EventBus != nil {

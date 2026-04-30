@@ -119,6 +119,7 @@ func run(configPath string) error {
 	authService := auth.NewService(repos.Users, repos.Sessions, keyStore, cfg.Auth, clk, logger, cfg.RateLimit)
 	authService.SetEventBus(eventBus)
 	authService.StartSessionCleaner(ctx)
+	deviceCodeService := auth.NewDeviceCodeService(authService, repos.DeviceCodes, repos.Users, logger)
 	userService := user.NewService(repos.Users, logger)
 
 	prober := probe.New()
@@ -299,6 +300,7 @@ func run(configPath string) error {
 
 	router := api.NewRouter(api.Dependencies{
 		Auth:          authService,
+		DeviceCode:    deviceCodeService,
 		Users:         userService,
 		Libraries:     libraryService,
 		StreamManager: streamManager,

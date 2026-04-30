@@ -351,3 +351,15 @@ type WebhookLog struct {
 	ErrorMessage sql.NullString `json:"error_message"`
 	CreatedAt    time.Time      `json:"created_at"`
 }
+
+type DeviceCode struct {
+	DeviceCode   string         `json:"device_code"`
+	UserCode     string         `json:"user_code"`
+	DeviceName   string         `json:"device_name"`
+	UserID       sql.NullString `json:"user_id"`
+	ExpiresAt    time.Time      `json:"expires_at"`
+	CreatedAt    time.Time      `json:"created_at"`
+	ApprovedAt   sql.NullTime   `json:"approved_at"`
+	ConsumedAt   sql.NullTime   `json:"consumed_at"`
+	LastPolledAt sql.NullTime   `json:"last_polled_at"`
+}
