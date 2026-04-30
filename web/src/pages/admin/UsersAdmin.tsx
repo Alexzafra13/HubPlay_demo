@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 import type { User } from "@/api/types";
 import { useUsers, useCreateUser, useDeleteUser, useMe } from "@/api/hooks";
-import { Button, Badge, Modal, Input, Spinner, EmptyState } from "@/components/common";
+import { Button, Badge, Modal, Input, EmptyState, Skeleton } from "@/components/common";
 import { useTranslation } from 'react-i18next';
 
 export default function UsersAdmin() {
@@ -63,17 +63,12 @@ export default function UsersAdmin() {
     });
   }
 
-  if (isLoading) {
-    return (
-      <div className="flex justify-center py-16">
-        <Spinner size="lg" />
-      </div>
-    );
-  }
-
   if (error) {
     return (
-      <EmptyState title={t('admin.users.failedToLoad')} description={error.message} />
+      <EmptyState
+        title={t('admin.users.failedToLoad')}
+        description={t('common.loadErrorHint')}
+      />
     );
   }
 
@@ -85,8 +80,39 @@ export default function UsersAdmin() {
         <Button onClick={() => setShowAddModal(true)}>{t('admin.users.addUser')}</Button>
       </div>
 
-      {/* Table */}
-      {users && users.length > 0 ? (
+      {/* Table — render the chrome immediately. While `isLoading`,
+          fill the body with skeleton rows that match the real row's
+          shape so data arrival doesn't shift layout. */}
+      {isLoading ? (
+        <div className="overflow-x-auto rounded-[--radius-lg] border border-border">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border bg-bg-elevated text-left text-text-muted">
+                <th className="px-4 py-3 font-medium">{t('admin.users.username')}</th>
+                <th className="px-4 py-3 font-medium">{t('admin.users.displayName')}</th>
+                <th className="px-4 py-3 font-medium">{t('admin.users.role')}</th>
+                <th className="px-4 py-3 font-medium">{t('admin.users.created')}</th>
+                <th className="px-4 py-3 font-medium text-right">{t('admin.users.actions')}</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {Array.from({ length: 4 }, (_, i) => (
+                <tr key={i} className="bg-bg-card">
+                  <td className="px-4 py-3"><Skeleton variant="text" width="60%" /></td>
+                  <td className="px-4 py-3"><Skeleton variant="text" width="75%" /></td>
+                  <td className="px-4 py-3"><Skeleton variant="rectangular" width={56} height={20} /></td>
+                  <td className="px-4 py-3"><Skeleton variant="text" width="55%" /></td>
+                  <td className="px-4 py-3">
+                    <div className="flex justify-end">
+                      <Skeleton variant="rectangular" width={68} height={28} />
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : users && users.length > 0 ? (
         <div className="overflow-x-auto rounded-[--radius-lg] border border-border">
           <table className="w-full text-sm">
             <thead>

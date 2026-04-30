@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useProviders, useUpdateProvider } from "@/api/hooks";
-import { Badge, Spinner } from "@/components/common";
+import { Badge, Skeleton } from "@/components/common";
 import { Button } from "@/components/common/Button";
 import { useTranslation } from 'react-i18next';
 
@@ -247,9 +247,24 @@ export default function ProvidersAdmin() {
   const { data: providers, isLoading, error } = useProviders();
 
   if (isLoading) {
+    // Skeleton matches the per-provider card shape: title + description
+    // line + an input row. Two cards because that's the typical default
+    // population (TMDB + OpenSubtitles).
     return (
-      <div className="flex justify-center py-16">
-        <Spinner size="lg" />
+      <div className="flex flex-col gap-4">
+        <Skeleton variant="text" width={200} height={20} />
+        {Array.from({ length: 2 }, (_, i) => (
+          <div
+            key={i}
+            className="rounded-[--radius-lg] border border-border bg-bg-card p-4"
+          >
+            <div className="mb-3 flex flex-col gap-2">
+              <Skeleton variant="text" width="35%" height={16} />
+              <Skeleton variant="text" width="70%" height={12} />
+            </div>
+            <Skeleton variant="rectangular" height={40} />
+          </div>
+        ))}
       </div>
     );
   }
@@ -259,7 +274,7 @@ export default function ProvidersAdmin() {
       <div className="flex flex-col items-center gap-3 py-16">
         <Badge variant="error">{t('admin.providers.error')}</Badge>
         <p className="text-sm text-text-muted">
-          {error.message}
+          {t('common.loadErrorHint')}
         </p>
       </div>
     );

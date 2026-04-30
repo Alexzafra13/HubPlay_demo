@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useDeleteLibrary, useLibraries } from "@/api/hooks";
-import { Button, EmptyState, Modal, Spinner } from "@/components/common";
+import { Button, EmptyState, Modal, Skeleton } from "@/components/common";
 import type { ContentType, Library } from "@/api/types";
 import { LIBRARY_SECTIONS } from "./librariesAdmin/constants";
 import { SectionChevron } from "./librariesAdmin/SectionChevron";
@@ -56,9 +56,39 @@ export default function LibrariesAdmin() {
   }
 
   if (isLoading) {
+    // Skeleton mirrors the real layout: section header strip + 2
+    // library cards under each. Same outer shape (border + radius +
+    // bg-bg-card) so data arrival doesn't reflow the page.
     return (
-      <div className="flex justify-center py-16">
-        <Spinner size="lg" />
+      <div className="flex flex-col gap-6">
+        <div className="flex items-center justify-between">
+          <Skeleton variant="text" width={140} height={20} />
+          <Skeleton variant="rectangular" width={120} height={36} />
+        </div>
+        {LIBRARY_SECTIONS.slice(0, 2).map((section) => (
+          <div key={section.type} className="flex flex-col gap-3">
+            <Skeleton variant="text" width={180} height={18} />
+            <ul className="flex flex-col gap-2">
+              {Array.from({ length: 2 }, (_, i) => (
+                <li
+                  key={i}
+                  className="rounded-[--radius-lg] border border-border bg-bg-card overflow-hidden"
+                >
+                  <div className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:gap-4">
+                    <div className="flex flex-1 flex-col gap-2">
+                      <Skeleton variant="text" width="40%" />
+                      <Skeleton variant="text" width="65%" />
+                    </div>
+                    <div className="flex gap-1">
+                      <Skeleton variant="rectangular" width={64} height={28} />
+                      <Skeleton variant="rectangular" width={64} height={28} />
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
       </div>
     );
   }
@@ -67,7 +97,7 @@ export default function LibrariesAdmin() {
     return (
       <EmptyState
         title={t("admin.libraries.failedToLoad")}
-        description={error.message}
+        description={t("common.loadErrorHint")}
       />
     );
   }
