@@ -17,17 +17,22 @@ function ProviderSettings() {
   const [apiKeys, setApiKeys] = useState<Record<string, string>>({});
   const [saved, setSaved] = useState<Record<string, boolean>>({});
 
-  const providerMeta: Record<string, { label: string; description: string; url: string }> = {
-    tmdb: {
-      label: "TMDB (The Movie Database)",
-      description: "Posters, backdrops, synopses, ratings, cast & crew",
-      url: "https://www.themoviedb.org/settings/api",
-    },
-    opensubtitles: {
-      label: "OpenSubtitles",
-      description: "Automatic subtitle downloads",
-      url: "https://www.opensubtitles.com/consumers",
-    },
+  // Provider catalogue. Labels and descriptions come from i18n so a
+  // Spanish-locale user doesn't see English on first open. URLs are
+  // language-neutral and stay hardcoded.
+  const providerMeta: Record<string, { url: string }> = {
+    tmdb: { url: "https://www.themoviedb.org/settings/api" },
+    opensubtitles: { url: "https://www.opensubtitles.com/consumers" },
+  };
+  const providerLabel = (name: string): string => {
+    const key = `settings.providers.${name}.label`;
+    const translated = t(key);
+    return translated === key ? name : translated;
+  };
+  const providerDescription = (name: string, fallback: string): string => {
+    const key = `settings.providers.${name}.description`;
+    const translated = t(key);
+    return translated === key ? fallback : translated;
   };
 
   if (isLoading) {
@@ -41,11 +46,9 @@ function ProviderSettings() {
   return (
     <div className="flex flex-col gap-3">
       {providers?.map((p) => {
-        const meta = providerMeta[p.name] ?? {
-          label: p.name,
-          description: p.type,
-          url: "",
-        };
+        const meta = providerMeta[p.name] ?? { url: "" };
+        const label = providerLabel(p.name);
+        const description = providerDescription(p.name, p.type);
         const isSaved = saved[p.name];
 
         return (
@@ -55,9 +58,7 @@ function ProviderSettings() {
           >
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
-                <span className="font-medium text-text-primary">
-                  {meta.label}
-                </span>
+                <span className="font-medium text-text-primary">{label}</span>
                 <Badge
                   variant={
                     p.has_api_key && p.status === "active"
@@ -70,7 +71,7 @@ function ProviderSettings() {
               </div>
             </div>
 
-            <p className="text-xs text-text-muted mb-3">{meta.description}</p>
+            <p className="text-xs text-text-muted mb-3">{description}</p>
 
             <div className="flex items-end gap-2">
               <div className="flex-1">
@@ -83,7 +84,7 @@ function ProviderSettings() {
                 <input
                   id={`api-key-${p.name}`}
                   type="password"
-                  placeholder={p.has_api_key ? "••••••••••••" : "Enter API key"}
+                  placeholder={p.has_api_key ? "••••••••••••" : t('settings.apiKeyEnter')}
                   value={apiKeys[p.name] ?? ""}
                   onChange={(e) => {
                     setApiKeys((prev) => ({
@@ -333,9 +334,7 @@ export default function Settings() {
                   {hasInaccessiblePaths && isAdmin && (
                     <div className="mt-3 rounded-md bg-error/10 border border-error/20 px-3 py-2">
                       <p className="text-xs text-error">
-                        One or more paths are not accessible. Check that the
-                        volume is mounted correctly in docker-compose.yml and
-                        that the path matches the container mount point.
+                        {t('settings.pathInaccessibleHint')}
                       </p>
                     </div>
                   )}
