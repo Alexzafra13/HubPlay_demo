@@ -616,6 +616,52 @@ func (m *Manager) BrowsePeerLibraries(ctx context.Context, peerID string) ([]*Sh
 	return libs, nil
 }
 
+// BrowseAllPeerLibraries fans out to every paired peer in parallel
+// and aggregates their shared libraries into a single flat list with
+// the originating peer attached. Powers the unified "/peers" landing
+// page — one round trip from the user's perspective even if there
+// are five peers.
+//
+// A peer that's offline (or returns an error) is logged and skipped;
+// the rest still surface. This keeps the user view useful even when
+// one server is down.
+func (m *Manager) BrowseAllPeerLibraries(ctx context.Context) ([]*SharedLibraryWithPeer, error) {
+	peers, err := m.repo.ListPeers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := []*SharedLibraryWithPeer{}
+	type result struct {
+		peer *Peer
+		libs []*SharedLibrary
+		err  error
+	}
+	results := make(chan result, len(peers))
+	dispatched := 0
+	for _, p := range peers {
+		if p.Status != PeerPaired {
+			continue
+		}
+		dispatched++
+		go func(peer *Peer) {
+			libs, err := m.FetchPeerLibraries(ctx, peer.ID)
+			results <- result{peer: peer, libs: libs, err: err}
+		}(p)
+	}
+	for i := 0; i < dispatched; i++ {
+		r := <-results
+		if r.err != nil {
+			m.logger.Warn("federation: fetch peer libraries (unified view)",
+				"peer_id", r.peer.ID, "err", r.err)
+			continue
+		}
+		for _, lib := range r.libs {
+			out = append(out, &SharedLibraryWithPeer{Peer: r.peer, Library: lib})
+		}
+	}
+	return out, nil
+}
+
 // BrowsePeerItems returns paginated items for a peer's library with
 // a read-through cache. Strategy:
 //

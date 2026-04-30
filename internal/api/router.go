@@ -245,6 +245,11 @@ func NewRouter(deps Dependencies) http.Handler {
 					mePeers := handlers.NewMePeersHandler(deps.Federation, deps.Logger)
 					r.Route("/me/peers", func(r chi.Router) {
 						r.Get("/", mePeers.ListMyPeers)
+						// Unified view: all libraries from all paired
+						// peers in one response, used by the /peers
+						// landing page so the UI doesn't have to
+						// fan-out N calls itself.
+						r.Get("/libraries", mePeers.BrowseAllPeerLibraries)
 						r.Get("/{peerID}/libraries", mePeers.BrowsePeerLibraries)
 						r.Get("/{peerID}/libraries/{libraryID}/items", mePeers.BrowsePeerItems)
 						r.Post("/{peerID}/libraries/{libraryID}/refresh", mePeers.RefreshPeerLibrary)

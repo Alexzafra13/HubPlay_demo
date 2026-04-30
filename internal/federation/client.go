@@ -108,6 +108,15 @@ func (m *Manager) FetchPeerLibraries(ctx context.Context, peerID string) ([]*Sha
 	return out, nil
 }
 
+// SharedLibraryWithPeer pairs a SharedLibrary with the peer that
+// shares it. Powers the unified "all libraries from all peers" view
+// in the user-facing UI — fetched per-peer in parallel by
+// FetchAllPeerLibraries.
+type SharedLibraryWithPeer struct {
+	Peer    *Peer
+	Library *SharedLibrary
+}
+
 // FetchPeerItems hits the remote's paginated catalog browse.
 func (m *Manager) FetchPeerItems(ctx context.Context, peerID, libraryID string, offset, limit int) ([]*SharedItem, int, error) {
 	peer, err := m.repo.GetPeerByID(ctx, peerID)

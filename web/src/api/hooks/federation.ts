@@ -15,6 +15,7 @@ import type {
   FederationRemoteItemsResponse,
   FederationRemoteLibrary,
   FederationServerInfo,
+  FederationUnifiedLibrary,
 } from "../types";
 
 // useServerIdentity returns this server's own ServerInfo so the admin
@@ -142,6 +143,17 @@ export function useMyPeers() {
   return useQuery<FederationConnectedPeer[]>({
     queryKey: queryKeys.myPeers,
     queryFn: () => api.listMyPeers(),
+  });
+}
+
+// useAllPeerLibraries — flat list of (library × peer) across every
+// paired peer in one round trip. Powers the unified /peers landing
+// page so the user sees all available libraries at a glance, not
+// nested peer-then-library navigation.
+export function useAllPeerLibraries() {
+  return useQuery<FederationUnifiedLibrary[]>({
+    queryKey: queryKeys.myPeerLibrariesUnified,
+    queryFn: () => api.listAllPeerLibraries(),
   });
 }
 
