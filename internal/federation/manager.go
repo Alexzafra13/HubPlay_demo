@@ -330,6 +330,9 @@ func (m *Manager) AcceptInvite(ctx context.Context, baseURL, code, fallbackAdver
 	if err := ValidateCodeFormat(code); err != nil {
 		return nil, err
 	}
+	if err := validatePeerURL(baseURL); err != nil {
+		return nil, err
+	}
 	canonical := CanonicalCode(code)
 
 	url, err := joinBaseURL(baseURL, "/api/v1/peer/handshake")
@@ -415,6 +418,14 @@ func (m *Manager) HandleInboundHandshake(ctx context.Context, code string, remot
 	}
 	if remote == nil || remote.ServerUUID == "" || len(remote.PublicKey) == 0 {
 		return nil, nil, domain.NewValidationError(map[string]string{"remote_info": "missing or malformed"})
+	}
+	// SSRF gate: a hostile peer with a valid invite must not be able
+	// to advertise a URL pointing at our localhost or a link-local
+	// address. We pin remote.AdvertisedURL onto peer.BaseURL below;
+	// every future outbound call uses it, so the validation has to
+	// happen before persistence.
+	if err := validatePeerURL(remote.AdvertisedURL); err != nil {
+		return nil, nil, err
 	}
 	canonical := CanonicalCode(code)
 	now := m.clock.Now()

@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -15,6 +16,23 @@ import (
 	"hubplay/internal/clock"
 	"hubplay/internal/domain"
 )
+
+// allowLoopbackForTests swaps the SSRF gate so httptest.Server URLs
+// (always bound on 127.0.0.1) pass validation. The default production
+// gate refuses loopback. Restored via t.Cleanup.
+func allowLoopbackForTests(t *testing.T) {
+	t.Helper()
+	saved := blockedPeerIP
+	blockedPeerIP = func(ip net.IP) bool {
+		// Block everything the production gate blocks EXCEPT loopback,
+		// which httptest.Server uses unavoidably.
+		if ip.IsLoopback() {
+			return false
+		}
+		return saved(ip)
+	}
+	t.Cleanup(func() { blockedPeerIP = saved })
+}
 
 // TestHandshakeRoundtrip_TwoLiveServers — the integration smoke test
 // that's been missing. We spin up TWO completely independent managers,
@@ -36,6 +54,7 @@ import (
 //   5. After pairing, an outbound peer JWT signed by B and sent to
 //      A's /peer/ping passes auth + rate limit + audit.
 func TestHandshakeRoundtrip_TwoLiveServers(t *testing.T) {
+	allowLoopbackForTests(t)
 	ctx := context.Background()
 	clk := clock.New()
 
@@ -139,6 +158,7 @@ func TestHandshakeRoundtrip_TwoLiveServers(t *testing.T) {
 // TestHandshakeRoundtrip_RejectsExpiredInvite ensures the time check
 // in HandleInboundHandshake is honored when invites cross the wire.
 func TestHandshakeRoundtrip_RejectsExpiredInvite(t *testing.T) {
+	allowLoopbackForTests(t)
 	ctx := context.Background()
 	frozen := &fixedClock{now: time.Date(2026, 4, 29, 12, 0, 0, 0, time.UTC)}
 
@@ -164,6 +184,7 @@ func TestHandshakeRoundtrip_RejectsExpiredInvite(t *testing.T) {
 // stored on A's side matches the original bytes — protects against
 // any future regression in the wire format.
 func TestHandshakeRoundtrip_PubkeyBase64Survives(t *testing.T) {
+	allowLoopbackForTests(t)
 	ctx := context.Background()
 	clk := clock.New()
 	a := startTestServer(t, ctx, clk, "ServerA")
