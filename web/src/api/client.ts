@@ -960,6 +960,10 @@ export class ApiClient {
     return this.request("GET", "/me/peers");
   }
 
+  async listAllPeerLibraries(): Promise<import("./types").FederationUnifiedLibrary[]> {
+    return this.request("GET", "/me/peers/libraries");
+  }
+
   async browsePeerLibraries(peerID: string): Promise<import("./types").FederationRemoteLibrary[]> {
     return this.request("GET", `/me/peers/${peerID}/libraries`);
   }

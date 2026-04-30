@@ -102,6 +102,21 @@ export interface FederationRemoteItemsResponse {
   from_cache: boolean;
 }
 
+// Unified row: one library × one peer, flattened across all paired
+// peers in our network. Used by the "/peers" landing page so the UI
+// renders a single grid instead of nested peer→library navigation.
+export interface FederationUnifiedLibrary {
+  peer_id: string;
+  peer_name: string;
+  peer_fingerprint: string;
+  library_id: string;
+  library_name: string;
+  content_type: string;
+  can_play: boolean;
+  can_download: boolean;
+  can_livetv: boolean;
+}
+
 // ─── User & Auth ────────────────────────────────────────────────────────────
 
 export interface User {

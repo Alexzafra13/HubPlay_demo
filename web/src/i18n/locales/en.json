@@ -50,8 +50,20 @@
   },
   "peers": {
     "title": "Connected servers",
-    "subtitle": "HubPlay servers paired with yours. Click one to browse the libraries they've shared with you.",
+    "subtitle": "Libraries your friends have shared with you. Each card is a remote library — click to browse its catalog.",
     "emptyHint": "You haven't paired any HubPlay server yet. Head to Admin → Federation to generate or accept an invite.",
+    "allEmpty": "You have paired servers, but none have shared libraries with you yet. Ask their admin to enable some from their federation panel.",
+    "peersStripHeading_one": "{{count}} server connected",
+    "peersStripHeading_other": "{{count}} servers connected",
+    "peersStripHeading": "{{count}} servers connected",
+    "sharedBy": "Shared by {{name}}",
+    "contentType": {
+      "movies": "Movies",
+      "shows": "Series",
+      "livetv": "Live TV",
+      "music": "Music",
+      "other": "Other"
+    },
     "statusPaired": "Paired",
     "backToList": "Connected servers",
     "backToLibraries": "Libraries",

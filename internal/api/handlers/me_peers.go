@@ -71,6 +71,49 @@ func (h *MePeersHandler) ListMyPeers(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]any{"data": out})
 }
 
+// unifiedLibraryWire pairs a library with the peer it came from in a
+// shape friendly to a single React component (no nested object
+// indirection on the consumer).
+type unifiedLibraryWire struct {
+	PeerID          string `json:"peer_id"`
+	PeerName        string `json:"peer_name"`
+	PeerFingerprint string `json:"peer_fingerprint"`
+	LibraryID       string `json:"library_id"`
+	LibraryName     string `json:"library_name"`
+	ContentType     string `json:"content_type"`
+	CanPlay         bool   `json:"can_play"`
+	CanDownload     bool   `json:"can_download"`
+	CanLiveTV       bool   `json:"can_livetv"`
+}
+
+// BrowseAllPeerLibraries returns every shared library across every
+// paired peer in one response — drives the unified "/peers" landing
+// page. Each row carries enough peer context that the UI can render
+// "library X · shared by Pedro · 2 movies" without a second lookup.
+func (h *MePeersHandler) BrowseAllPeerLibraries(w http.ResponseWriter, r *http.Request) {
+	results, err := h.mgr.BrowseAllPeerLibraries(r.Context())
+	if err != nil {
+		h.logger.Error("federation: browse all peer libraries", "err", err)
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list libraries")
+		return
+	}
+	out := make([]unifiedLibraryWire, 0, len(results))
+	for _, e := range results {
+		out = append(out, unifiedLibraryWire{
+			PeerID:          e.Peer.ID,
+			PeerName:        e.Peer.Name,
+			PeerFingerprint: e.Peer.Fingerprint(),
+			LibraryID:       e.Library.ID,
+			LibraryName:     e.Library.Name,
+			ContentType:     e.Library.ContentType,
+			CanPlay:         e.Library.Scopes.CanPlay,
+			CanDownload:     e.Library.Scopes.CanDownload,
+			CanLiveTV:       e.Library.Scopes.CanLiveTV,
+		})
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"data": out})
+}
+
 // BrowsePeerLibraries returns the libraries a peer has shared with us.
 // Routed under /me/peers/{peerID}/libraries. Live fetch — small list,
 // no cache layer.

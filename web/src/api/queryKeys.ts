@@ -53,6 +53,7 @@ export const queryKeys = {
   federationInvites: ["federation", "invites"] as const,
   federationPeerShares: (peerID: string) => ["federation", "peers", peerID, "shares"] as const,
   myPeers: ["me", "peers"] as const,
+  myPeerLibrariesUnified: ["me", "peers", "libraries-unified"] as const,
   myPeerLibraries: (peerID: string) => ["me", "peers", peerID, "libraries"] as const,
   myPeerItems: (peerID: string, libraryID: string, offset: number) =>
     ["me", "peers", peerID, "libraries", libraryID, "items", offset] as const,

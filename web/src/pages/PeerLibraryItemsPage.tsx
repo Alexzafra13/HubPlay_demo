@@ -9,14 +9,14 @@ import {
 } from "@/api/hooks/federation";
 import { Spinner } from "@/components/common";
 import { Button } from "@/components/common/Button";
+import type { FederationRemoteItem } from "@/api/types";
 
 const PAGE_SIZE = 50;
 
-// PeerLibraryItemsPage — /peers/:peerId/libraries/:libraryId
-//
-// Lists items in a peer's shared library. Server-side pagination.
-// from_cache flag drives a "cached / offline" badge so the user
-// knows when they're seeing stale content because the peer is down.
+// PeerLibraryItemsPage — paginated catalog of items in a peer's
+// shared library. Layout matches the local Movies/Series feel: poster-
+// less grid for now (Phase 5+ will add poster proxying), but with
+// proper card spacing, peer attribution badge, and clear navigation.
 export default function PeerLibraryItemsPage() {
   const { t } = useTranslation();
   const { peerId = "", libraryId = "" } = useParams();
@@ -31,20 +31,21 @@ export default function PeerLibraryItemsPage() {
   const library = libraries.data?.find((l) => l.id === libraryId);
 
   if (items.isLoading) {
-    return <Spinner />;
+    return (
+      <div className="p-6 sm:p-10">
+        <Spinner />
+      </div>
+    );
   }
   if (items.error) {
     return (
-      <div className="p-6">
-        <p className="rounded border border-danger/40 bg-danger/5 p-3 text-sm text-danger">
+      <div className="p-6 sm:p-10">
+        <Link to="/peers" className="text-sm text-accent hover:underline">
+          ← {t("peers.backToList")}
+        </Link>
+        <p className="mt-4 rounded border border-danger/40 bg-danger/5 p-3 text-sm text-danger">
           {t("peers.unreachable", { error: String(items.error) })}
         </p>
-        <Link
-          to={`/peers/${peerId}`}
-          className="mt-4 inline-block text-sm text-accent hover:underline"
-        >
-          ← {t("peers.backToLibraries")}
-        </Link>
       </div>
     );
   }
@@ -57,20 +58,35 @@ export default function PeerLibraryItemsPage() {
 
   return (
     <div className="p-6 sm:p-10">
-      <Link
-        to={`/peers/${peerId}`}
-        className="text-sm text-accent hover:underline"
-      >
-        ← {t("peers.backToLibraries")}
+      <Link to="/peers" className="text-sm text-accent hover:underline">
+        ← {t("peers.backToList")}
       </Link>
-      <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+
+      <header className="mt-3 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-text-primary">
-            {library?.name ?? t("peers.unknownLibrary")}
-          </h1>
-          <p className="text-sm text-text-muted">
-            {peer?.name} · {t("peers.itemCount", { count: total })}
-          </p>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold text-text-primary sm:text-3xl">
+              {library?.name ?? t("peers.unknownLibrary")}
+            </h1>
+            {library?.content_type && (
+              <span className="rounded bg-bg-base px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-text-muted">
+                {library.content_type}
+              </span>
+            )}
+          </div>
+          {peer && (
+            <p className="mt-1 text-sm text-text-muted">
+              <span className="inline-flex items-center gap-1.5">
+                <span
+                  className="h-1.5 w-1.5 rounded-full bg-emerald-500"
+                  aria-hidden
+                />
+                {t("peers.sharedBy", { name: peer.name })}
+              </span>
+              <span className="mx-2 text-text-muted/50">·</span>
+              <span>{t("peers.itemCount", { count: total })}</span>
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-2">
           {fromCache && (
@@ -90,44 +106,26 @@ export default function PeerLibraryItemsPage() {
             {refresh.isPending ? t("peers.refreshing") : t("peers.refresh")}
           </Button>
         </div>
-      </div>
+      </header>
 
       {itemList.length === 0 ? (
-        <p className="mt-6 rounded-lg border border-dashed border-border bg-bg-elevated p-6 text-center text-sm text-text-muted">
-          {t("peers.emptyLibrary")}
-        </p>
+        <div className="mt-8 rounded-lg border border-dashed border-border bg-bg-elevated p-8 text-center">
+          <p className="text-sm text-text-muted">{t("peers.emptyLibrary")}</p>
+        </div>
       ) : (
-        <ul className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <ul className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {itemList.map((item) => (
-            <li
+            <ItemCard
               key={item.id}
-              className="rounded-lg border border-border bg-bg-elevated p-4"
-            >
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <h3 className="truncate font-semibold text-text-primary">
-                    {item.title}
-                  </h3>
-                  {item.year ? (
-                    <p className="text-xs text-text-muted">{item.year}</p>
-                  ) : null}
-                </div>
-                <span className="shrink-0 rounded bg-bg-base px-2 py-0.5 text-xs text-text-muted">
-                  {item.type}
-                </span>
-              </div>
-              {item.overview && (
-                <p className="mt-2 line-clamp-3 text-xs text-text-muted">
-                  {item.overview}
-                </p>
-              )}
-            </li>
+              item={item}
+              peerName={peer?.name ?? ""}
+            />
           ))}
         </ul>
       )}
 
       {totalPages > 1 && (
-        <div className="mt-6 flex items-center justify-between gap-3">
+        <div className="mt-8 flex items-center justify-between gap-3">
           <Button
             variant="secondary"
             size="sm"
@@ -150,5 +148,51 @@ export default function PeerLibraryItemsPage() {
         </div>
       )}
     </div>
+  );
+}
+
+// ItemCard — a single title in the grid. Mimics the local Movies
+// page poster-card aesthetic without needing actual poster proxying
+// (that's Phase 5+ when item-detail wire format ships). For now the
+// title + year + type chip + truncated overview is enough signal.
+function ItemCard({
+  item,
+  peerName,
+}: {
+  item: FederationRemoteItem;
+  peerName: string;
+}) {
+  return (
+    <li className="group flex flex-col gap-2 rounded-lg border border-border bg-bg-elevated p-4 transition-colors hover:border-accent">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <h3 className="truncate text-base font-semibold text-text-primary group-hover:text-accent">
+            {item.title}
+          </h3>
+          {item.year ? (
+            <p className="text-xs text-text-muted">{item.year}</p>
+          ) : null}
+        </div>
+        <span className="shrink-0 rounded bg-bg-base px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-text-muted">
+          {item.type}
+        </span>
+      </div>
+      {item.overview && (
+        <p className="line-clamp-3 text-xs text-text-muted">
+          {item.overview}
+        </p>
+      )}
+      {peerName && (
+        <p className="mt-auto pt-2 text-[10px] text-text-muted/70">
+          <span className="inline-flex items-center gap-1">
+            <span
+              className="h-1 w-1 rounded-full bg-emerald-500"
+              aria-hidden
+            />
+            {peerName}
+          </span>
+        </p>
+      )}
+    </li>
   );
 }

@@ -50,8 +50,20 @@
   },
   "peers": {
     "title": "Servidores conectados",
-    "subtitle": "Servidores HubPlay emparejados con el tuyo. Pulsa uno para ver las bibliotecas que te ha compartido.",
+    "subtitle": "Bibliotecas que tus amigos han compartido contigo. Cada tarjeta es una biblioteca remota — púlsala para ver el catálogo.",
     "emptyHint": "Aún no has emparejado tu HubPlay con ningún otro servidor. Ve a Admin → Federación para generar un invite o aceptar uno de un amigo.",
+    "allEmpty": "Tienes servidores emparejados pero ninguno te ha compartido bibliotecas todavía. Pídele al admin que active alguna desde su panel.",
+    "peersStripHeading_one": "{{count}} servidor conectado",
+    "peersStripHeading_other": "{{count}} servidores conectados",
+    "peersStripHeading": "{{count}} servidores conectados",
+    "sharedBy": "Compartida por {{name}}",
+    "contentType": {
+      "movies": "Películas",
+      "shows": "Series",
+      "livetv": "TV en directo",
+      "music": "Música",
+      "other": "Otro"
+    },
     "statusPaired": "Emparejado",
     "backToList": "Servidores conectados",
     "backToLibraries": "Bibliotecas",
