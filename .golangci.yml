@@ -58,15 +58,37 @@ linters:
     staticcheck:
       checks: ["all", "-QF*"]
 
-  # The v1 "default exclusions" (deferred Close/Flush, fmt.Print* to
-  # writers, well-known false positives) used to be on by default.
-  # In v2 you have to opt in via presets. `legacy` restores the full
-  # v1 baseline — the alternative is hundreds of `_ = x.Close()` and
-  # ignored fmt.Fprintf returns in handlers and tests, which is
-  # busywork that doesn't catch real bugs.
+    # v2 dropped the implicit v1 errcheck exclusions for deferred
+    # Close() and fmt.Print* to writers. Listing the canonical cases
+    # explicitly here makes the lint behavior deterministic — the
+    # exclusion presets below cover most of these, but the explicit
+    # list guards against future preset reshuffles.
+    errcheck:
+      exclude-functions:
+        - (*os.File).Close
+        - (io.Closer).Close
+        - (io.ReadCloser).Close
+        - (*database/sql.Rows).Close
+        - (*database/sql.Stmt).Close
+        - fmt.Print
+        - fmt.Println
+        - fmt.Printf
+        - fmt.Fprint
+        - fmt.Fprintln
+        - fmt.Fprintf
+
+  # The v1 "default exclusions" (text-matched patterns for deferred
+  # Close/Flush, fmt.Print* to writers, etc.) used to be on by
+  # default. v2 makes you opt in. These three presets together
+  # restore the v1 baseline:
+  #   - common-false-positives: deferred Close() noise
+  #   - std-error-handling:     fmt.Print* / os.Setenv noise
+  #   - legacy:                 misc v1 default text exclusions
   exclusions:
     presets:
+      - common-false-positives
       - legacy
+      - std-error-handling
 
 # CI runs on PR + push; outside the linter we don't gate on style
 # (golangci's defaults are strict enough). New rules added here should
