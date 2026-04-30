@@ -26,6 +26,7 @@ type Repositories struct {
 	Chapters           *ChapterRepository
 	Settings           *SettingsRepository
 	People             *PeopleRepository
+	DeviceCodes        *DeviceCodeRepository
 }
 
 // NewRepositories creates all repositories from a database connection.
@@ -53,5 +54,6 @@ func NewRepositories(database *sql.DB) *Repositories {
 		Chapters:           NewChapterRepository(database),
 		Settings:           NewSettingsRepository(database),
 		People:             NewPeopleRepository(database),
+		DeviceCodes:        NewDeviceCodeRepository(database),
 	}
 }

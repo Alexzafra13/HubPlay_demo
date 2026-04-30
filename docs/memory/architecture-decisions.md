@@ -783,3 +783,74 @@ Esa última pieza era atractiva como "defensa en profundidad" pero violaba Torva
 - **`ErrItemConflict` + recovery en el scanner**: rechazado. Defendía edge cases (case/whitespace/accents drift) que el usuario verificó empíricamente que no ocurren en su workflow. Si alguna vez ocurriera, queremos saberlo, no taparlo.
 - **Migración separada para cleanup, otra para UNIQUE**: rechazado. La cleanup es no-op si no hay dups; combinarlas es atómico (tx única de goose) y el operador sólo ve "se aplicó la migración 019".
 - **Backfill `external_id` o `tmdb_id` como discriminator** en lugar de title: rechazado. El title viene del filesystem y muchos series no tienen tmdb_id matched aún (TMDb deshabilitado, no match). El title es el único campo siempre presente; las dos heurísticas son ortogonales pero el title es el primario.
+
+---
+
+## ADR-012 — Federación P2P: capa de integración sobre primitivos existentes, no infraestructura paralela
+
+- **Fecha**: 2026-04-30
+- **Estado**: Aceptado
+- **Supersede**: —
+- **Contexto de descubrimiento**: Diseño en `docs/architecture/federation.md` §13 ("Implementation reuse map"). Aplicado en commits `f8a9e3a` → `73b749c` (Phases 1-4 + plug-and-play + UX).
+
+### Contexto
+
+HubPlay diferencia frente a Plex/Jellyfin con federación peer-to-peer **sin servicio central**: dos servidores se enlazan vía invite code, exchangean keypairs Ed25519, y cada admin elige libraries que comparte. Naive: implementarlo como un módulo independiente con su propia capa de auth, sus propios session secrets, su propio rate limiter, su propio fetcher con SSRF guards. Ese camino habría duplicado ~5 piezas que ya están battle-tested en otros lugares del codebase.
+
+El proyecto ya tiene:
+- `internal/auth/keystore.go` — encriptación-at-rest de signing keys con rotación (usado para JWT signing keys de usuarios).
+- `internal/auth/jwt.go` — issuance + validation de JWTs con claims plumbing (HS256 para usuarios).
+- `internal/auth/ratelimit.go` — token bucket primitives (usado para login throttling).
+- `internal/event/bus.go` — pub/sub interno con SSE downstream (`/events`, `/me/events`).
+- `internal/imaging/safe_get.go::SafeGet` — outbound HTTP con SSRF guard + decompression-bomb cap (usado para IPTV channel logos, image refresh).
+- `internal/stream/manager.go::StartSession` — session lifecycle con `MaxReencodeSessions`, hwaccel, idle reaper (usado para todo streaming local).
+- `internal/iptv/transmux.go` — shared ffmpeg session per-channel, breaker integration.
+- `internal/domain/errors.go` — `AppError` con `Kind` sentinel, mapping a HTTP status.
+
+### Decisión
+
+Federation **no introduce primitivas nuevas donde existen las útiles**. La nueva área del codebase (`internal/federation/`) es una capa de orquestación delgada que enchufa estos componentes en una secuencia distinta:
+
+| Concern federación | Reusa (no reinventa) |
+|---|---|
+| Server Ed25519 identity key | `auth/keystore.go` extendido con accessor; misma encriptación at-rest. |
+| Per-request peer JWT (EdDSA en vez de HS256) | `auth/jwt.go` con `EdDSA` algorithm variant añadido; mismo claims plumbing. |
+| Token bucket per-peer | Estructura nueva `RateLimiter` en `federation/ratelimit.go` que **mira igual** que `auth/ratelimit.go` — la simplicidad del primitive (~50 LOC) hace que copy + adaptar sea más limpio que generic-ifyingla original. Ambas implementaciones convergen al mismo shape. |
+| Federation events (peer.linked, peer.audit, etc.) | `event/bus.go` con tipos nuevos (`federation.peer_linked`, etc.). Subscribers existentes consumen sin special-casing. |
+| Stream session para peer requests (Phase 5) | `stream/manager.go` con `scope=peer` y `remote_user_pk` (Phase 5+ no shipped todavía). |
+| Live TV stream proxying (Phase 6) | `iptv/transmux.go::TransmuxManager.StartLocked` — federation viewers como readers adicionales en la sesión compartida (Phase 6+ no shipped). |
+| Error kinds | `domain/errors.go` extendido con `ErrPeerNotFound`, `ErrPeerKeyMismatch`, `ErrPeerRevoked`, `ErrPeerUnauthorized`, etc. Mapping a HTTP es uniforme con resto del API. |
+
+Lo único **realmente nuevo**:
+
+1. `internal/federation/identity.go` — keypair Ed25519 + fingerprint hex/words. Necesita ser fresh code porque el formato (fingerprint groups, BIP-39 wordlist) es específico al threat model SSH-style del feature.
+2. `internal/federation/invite.go` — códigos `hp-invite-<10-char>` con TTL + canonical form. No hay primitivo equivalente.
+3. `internal/federation/manager.go` — orquestador. Wraps repo + clock + identity + ratelimit + auditor.
+4. `internal/federation/middleware.go::RequirePeerJWT` — chi middleware. Reusa el shape de `auth.RequireUserJWT` pero distinto suficiente que generic-ifyingsería abstracción prematura.
+5. `internal/federation/audit.go` — async audit writer con queue + batch flush. Específico del feature; el audit log local de usuarios funciona distinto (sync, less volume).
+
+### Consecuencias
+
+**Positivas**
+
+- Surface nueva ~3000 LOC vs. estimación inicial de 8000+. La diferencia es código que NO se escribió porque ya existía.
+- Capabilities, hwaccel, transcode budget, idle reaper — todo aplica AUTOMÁTICAMENTE a streaming federation (Phase 5+) sin cambios. Un peer A streaming desde peer B usa el mismo `MaxReencodeSessions` cap que un usuario local.
+- Audit log + ratelimit + JWT validation share testing patterns con auth — el patrón de `withClock` injection, in-memory fakes, AssertJSON helpers se reusa.
+- Observability gratis: `event.Bus` ya tiene SSE downstream, así que admin UI live-updates al pair/revoke sin poll.
+- Bugfixes en primitives (mejorar `imaging.SafeGet`, refinar token bucket) benefician federation sin tocar federation code.
+
+**Negativas / trade-offs**
+
+- **Acoplamiento de versiones**: actualizar `auth/jwt.go` para soportar EdDSA forzó schema de claims updates en federación al mismo tiempo. Trade-off menor pero real — los packages no son independientes.
+- **`federation/ratelimit.go` no fue genericified contra `auth/ratelimit.go`**: ~50 LOC duplicados. Decisión consciente: el coste de un generic abstraction (interface design, refactor de tests, pérdida de claridad en cada call site) excede el de mantener dos copias paralelas para un total de ~100 LOC.
+- **El repo `internal/db/federation_repository.go` no es sqlc todavía** (ADR-001 dice sqlc-only). Ship-first decision: la urgencia de cerrar Phases 1-4 ganó sobre la consistencia. Backfill tracked en deuda P3.
+- **Surface API peer-to-peer crece sin OpenAPI spec** (ver P1.5). Para un feature donde la promesa es "tu server habla con otros HubPlays" o "alguien podría escribir un cliente Kotlin/Swift que consuma esta API", la falta de un schema versionado se siente más urgente que para los endpoints user-facing.
+
+### Alternativas descartadas
+
+- **Implementación 100% nueva en `federation/` sin reusar nada**: rechazado. Habría requerido reimplementar JWT signing, ratelimit, SSRF guards. Cada uno con su propia matriz de bugs sutiles.
+- **Microservicio separado** (`hubplay-federation-daemon` con su propia DB y proceso): rechazado. Self-hosted target user es alguien con un servidor; pedirles operar dos procesos es violar el "una imagen Docker, un binario" del proyecto. Y la federación necesita acceso a `items`, `libraries`, `users` — separar la DB es non-trivial.
+- **Genericizar `auth.JWTValidator` para soportar EdDSA + HS256 detrás de una interface**: rechazado por ahora. La superficie de tests crecía 2x sin claridad neta. Si en el futuro Phase 7 introduce más algoritmos (Ed25519+SHA256, etc.), revisitar.
+- **Mantener `federation/ratelimit.go` y `auth/ratelimit.go` como un solo paquete reutilizado**: rechazado. Las semánticas divergen sutilmente — auth ratelimit es per-IP con burst muy bajo (login attempts), federation es per-peer con bursts permisivos (catalog sync). Una abstracción unificada habría llevado opciones que oscurecen call sites.
+- **Auditor síncrono in-line** (write per-request en `RequirePeerJWT` antes de devolver): rechazado. El SQLite write añade ~5-10ms al hot path peer-to-peer; el audit es por definición no-critical; mejor async + tolerate-drop documentado.
+- **Persistencia del rate-limit state cross-restart** (`federation_rate_limit_state` table existe pero no se usa): pospuesto a Phase 2.5+. Self-hosted con un puñado de peers es ok perdiendo el estado en restart; un peer hostil que aprovechaba el restart para una nueva burst window queda frente a un cap más tarde por el resto del minuto.

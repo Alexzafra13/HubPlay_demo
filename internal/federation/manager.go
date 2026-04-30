@@ -127,6 +127,7 @@ type Manager struct {
 	httpClt   *http.Client
 	auditor   *Auditor
 	ratelimit *RateLimiter
+	nonces    *nonceCache
 
 	// peerCache caches paired peers by server_uuid for the JWT
 	// validation hot path. Refreshed on each peer mutation.
@@ -155,6 +156,7 @@ func NewManager(ctx context.Context, cfg Config, repo Repo, clk clock.Clock, log
 		httpClt:   &http.Client{Timeout: cfg.HTTPTimeout},
 		auditor:   NewAuditor(repo, logger),
 		ratelimit: NewRateLimiter(clk, cfg.PeerRequestsPerMinute, cfg.PeerBurst),
+		nonces:    newNonceCache(clk),
 	}
 	if err := m.refreshPeerCache(ctx); err != nil {
 		// Tear down the auditor we just spawned so we don't leak the
@@ -328,6 +330,9 @@ func (m *Manager) AcceptInvite(ctx context.Context, baseURL, code, fallbackAdver
 	if err := ValidateCodeFormat(code); err != nil {
 		return nil, err
 	}
+	if err := validatePeerURL(baseURL); err != nil {
+		return nil, err
+	}
 	canonical := CanonicalCode(code)
 
 	url, err := joinBaseURL(baseURL, "/api/v1/peer/handshake")
@@ -413,6 +418,14 @@ func (m *Manager) HandleInboundHandshake(ctx context.Context, code string, remot
 	}
 	if remote == nil || remote.ServerUUID == "" || len(remote.PublicKey) == 0 {
 		return nil, nil, domain.NewValidationError(map[string]string{"remote_info": "missing or malformed"})
+	}
+	// SSRF gate: a hostile peer with a valid invite must not be able
+	// to advertise a URL pointing at our localhost or a link-local
+	// address. We pin remote.AdvertisedURL onto peer.BaseURL below;
+	// every future outbound call uses it, so the validation has to
+	// happen before persistence.
+	if err := validatePeerURL(remote.AdvertisedURL); err != nil {
+		return nil, nil, err
 	}
 	canonical := CanonicalCode(code)
 	now := m.clock.Now()
@@ -501,6 +514,22 @@ func (m *Manager) LookupByServerUUID(serverUUID string) (*Peer, error) {
 		return nil, domain.ErrPeerNotFound
 	}
 	return p, nil
+}
+
+// CheckAndStoreNonce records a nonce as seen and returns whether it was
+// fresh. Returns false on replay (the same nonce was used before within
+// its parent token's TTL window). Called by the peer-JWT middleware
+// after signature/audience/expiry checks pass — replay is the *only*
+// thing left to verify before the request is honoured.
+//
+// `exp` is the JWT's expiry; the cache evicts entries past that point
+// because at that moment the token is rejected upstream by
+// ValidatePeerToken anyway, so the nonce no longer needs tracking.
+func (m *Manager) CheckAndStoreNonce(nonce string, exp time.Time) bool {
+	if m == nil || m.nonces == nil {
+		return true
+	}
+	return m.nonces.checkAndStore(nonce, exp)
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -724,6 +753,20 @@ func (m *Manager) PurgeCache(ctx context.Context, peerID, libraryID string) erro
 // RevokePeer terminates a peer relationship. The row remains for
 // audit (terminal state); all future JWTs from the peer are rejected
 // by ValidatePeerToken because PeerRevoked != PeerPaired.
+//
+// Atomicity note: the DB write (UpdatePeerRevoked) happens BEFORE the
+// in-memory peerCache refresh, so there is a sub-millisecond window
+// where a request that already passed LookupByServerUUID continues
+// to completion under the OLD cached *Peer. The window is bounded
+// by the time refreshPeerCache holds its write lock (microseconds in
+// practice), and any in-flight request was going to finish within
+// the JWT TTL anyway. New requests issued after the cache refresh
+// see PeerRevoked and fail at the auth gate.
+//
+// Stricter atomicity (DB + cache in one critical section) would
+// require holding the cache write lock during a SQLite roundtrip,
+// which we explicitly do not want — it would block every concurrent
+// JWT validation on every peer.
 func (m *Manager) RevokePeer(ctx context.Context, peerID string) error {
 	now := m.clock.Now()
 	if err := m.repo.UpdatePeerRevoked(ctx, peerID, now); err != nil {

@@ -48,6 +48,19 @@
     "nextUp": "Next Up",
     "failedToLoad": "Failed to load content. Check your server connection."
   },
+  "link": {
+    "title": "Link a device",
+    "subtitle": "Type the code shown on your TV, console or other device to authorise it on your account.",
+    "codeLabel": "Device code",
+    "codeHint": "Eight letters and numbers, dashes optional. Codes expire 10 minutes after the device requested them.",
+    "approve": "Approve device",
+    "approving": "Approving…",
+    "success": "Device approved. The device should sign in within a few seconds.",
+    "errorUnknown": "We don't recognise this code. Check what's on the device and try again.",
+    "errorExpired": "This code has expired. Ask the device to start over.",
+    "errorAlreadyApproved": "This code was already approved by another user.",
+    "errorAccountDisabled": "Your account is disabled. Contact your administrator."
+  },
   "peers": {
     "title": "Connected servers",
     "subtitle": "Libraries your friends have shared with you. Each card is a remote library — click to browse its catalog.",

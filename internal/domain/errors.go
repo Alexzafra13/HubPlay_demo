@@ -37,6 +37,8 @@ var (
 	ErrPeerScopeInsufficient = errors.New("peer scope insufficient")
 	ErrPeerRateLimited       = errors.New("peer rate limited")
 	ErrPeerRevoked           = errors.New("peer revoked")
+	ErrPeerReplay            = errors.New("peer token replay")
+	ErrPeerURLUnsafe         = errors.New("peer URL points to unsafe address")
 	ErrInviteNotFound        = errors.New("invite not found")
 	ErrInviteExpired         = errors.New("invite expired")
 	ErrInviteAlreadyUsed     = errors.New("invite already used")

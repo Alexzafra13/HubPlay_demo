@@ -1,12 +1,218 @@
 # Estado del proyecto
 
-> Snapshot: **2026-04-29 día → tarde → noche, dos sesiones encadenadas de detail-UX premium** — bloque A `015ThedLMwhsx5ittdmtxSN4` (8 commits del "premium detail UX" pass: cast/crew end-to-end con fotos, IMDb/TMDb deep links, weekly image refresh scheduler, watched-count agregado, hero treatments) y bloque B `claude/review-project-resume-3V6Mr` (4 commits unificando hero movies↔series + aurora ambiental PS3-XMB como page canvas + fixes iterativos sobre fotos del usuario). Foundation lista para `/people/{id}` (SQL `ListFilmographyByPerson` + repo, sin handler aún). **tests: backend verde · frontend 336/336 · tsc clean**.
+> Snapshot: **2026-04-30 mañana — rama `claude/federation-hardening` con 3 fixes federación + device-code login (RFC 8628) end-to-end**. 5 commits sobre `main`. Cierra los tres findings P0 de la sesión anterior + un P1 grande pre-Kotlin TV.
+>
+> Estado prev (2026-04-29 noche): Federación P2P entera (Phases 1-4 + plug-and-play + UX) mergeada a `main` — 8 commits, 4 migraciones (020-023), 18 ficheros nuevos en `internal/federation/`, 5 páginas frontend. Stack reutiliza primitivos existentes (keystore, JWT, event bus, ratelimit). Auditoría posterior detectó 3 findings que ahora están **cerrados** en esta rama.
+>
+> **tests al cierre de esta sesión: backend `go test ./internal/auth/... ./internal/federation/... ./internal/db/... ./internal/api/...` verde · frontend 364/364 · tsc clean · `pnpm build` produce LinkDevice chunk OK**. El config preflight test sigue rojo en este Windows por ffmpeg/ffprobe no en PATH (env, no regresión; CI verde).
 
-`main` al día — último push 2026-04-29 17:04. Tres commits frescos
-cierran dos items P1 del roadmap pre-Kotlin TV:
-- `5a37ed2` stream(caps): server honra `X-Hubplay-Client-Capabilities`
-- `f21194f` api(client): probe MediaSource y manda el header
-- `94cb74b` sync(progress): cross-device watch state via `/me/events` SSE
+**Rama `claude/federation-hardening` (esta sesión, 5 commits sobre main)** — los detalles van en el primer bloque de sesión. Resumen:
+- `b0b0613` federation(security): close JWT replay window with per-nonce cache
+- `c6e0d84` federation(security): SSRF gate on peer-controlled AdvertisedURL
+- `3b24e92` federation(docs): RevokePeer atomicity contract documented
+- `[hash-pending]` auth(device): RFC 8628 device authorization grant — TV-friendly login
+- `683c512` auth(device): /link page — operator approves a device code
+
+**Sesión 2026-04-29 noche → 2026-04-30 madrugada (en `main`)** — 8 commits federación:
+- `f8a9e3a` + `9967e23` — Phase 1 backend + admin UI (identidad Ed25519, invites, handshake)
+- `5a4b05a` + `ea5a141` — Phase 2 (JWT middleware, audit log, ratelimit) + integration test
+- `1c67800` — Phase 3 (library shares opt-in)
+- `8073d5c` — Phase 4 (browse remoto end-to-end, item cache)
+- `29af48e` + `aecfdf0` + `81d6d7c` + `73b749c` — lint CI, plug-and-play AdvertisedURL, fix overview JOIN, grid unificado /peers
+
+---
+
+## 🛡️ Sesión 2026-04-30 mañana — federation hardening + device-code login (rama `claude/federation-hardening`)
+
+Sesión doble: cierra los 3 findings P0 detectados en la auditoría de la noche previa + envía un item P1 grande del roadmap pre-Kotlin TV (device-code login). Cinco commits sobre `main`, lista para PR.
+
+### Bloque A — Federación hardening (3 commits)
+
+**`b0b0613` close JWT replay window**
+
+`internal/federation/jwt.go:90-92` documentaba que el cache de nonces vivía en el Manager — pero nunca se implementó. Cualquier peer JWT capturado podía replicarse durante los 5 min de TTL.
+
+- `internal/federation/nonce.go` — `nonceCache` con map `nonce → exp`. Sweep inline en cada check (O(n), n bounded por peers × ratelimit × TTL ≈ 3000 entries en defaults). Mutex única; federation no es hot path comparado con SQLite writes downstream.
+- `Manager.CheckAndStoreNonce` retorna false en replay.
+- `RequirePeerJWT` lo llama tras `ValidatePeerToken` y antes del ratelimit. Replay → 401 PEER_REPLAY + audit row con `ErrorKind="replay"`.
+- `domain.ErrPeerReplay` sentinel.
+- Tests: 5 unit + 1 end-to-end (middleware) + actualización de `TestRequirePeerJWT_FiresRateLimitAfterBurst` para emitir tokens frescos (su patrón previo —reusar el mismo JWT 4 veces— ahora correctamente rechazado como replay).
+
+**`c6e0d84` SSRF gate on peer-controlled AdvertisedURL**
+
+`HandleInboundHandshake` persistía `peer.BaseURL = remote.AdvertisedURL` verbatim. Un peer hostil con invite válido podía pairing advertando `BaseURL=http://127.0.0.1:8080`; cualquier `FetchPeerLibraries` del admin nuestro = TCP probe a localhost.
+
+- `internal/federation/url.go::validatePeerURL` — rechaza http(s) ausente, host vacío, y cualquier URL cuyo host (literal IP o resolución DNS) sea loopback / link-local / unspecified / multicast. **No** bloquea RFC1918 — `docker-compose.federation-test.yml` usa Docker bridge 172.x, y federación homelab LAN es legítima en v1.
+- Wired tanto en `HandleInboundHandshake` (peer-controlled, threat principal) como en `AcceptInvite` (admin-pasted, defense in depth).
+- `domain.ErrPeerURLUnsafe` sentinel.
+- Tests: 10 unit + 1 end-to-end (`TestHandleInboundHandshake_RejectsHostileLoopbackAdvertisedURL`).
+- Existing `handshake_roundtrip_test.go` (httptest.Server bound a 127.0.0.1) cubierto por nuevo helper `allowLoopbackForTests(t)`.
+
+**`3b24e92` RevokePeer atomicity comment**
+
+Documenta la sub-millisecond window entre `UpdatePeerRevoked` (DB) y `refreshPeerCache` (memoria). Trade-off consciente: cerrar la ventana requeriría holding la cache write lock durante un SQLite roundtrip → blocking todas las JWT validations concurrentes. Comment-only.
+
+### Bloque B — Device-code login (RFC 8628) (2 commits)
+
+Cierra el segundo P1 pre-Kotlin TV. Una TV remote no puede teclear password; el operator va a /link en el móvil, pega el code, aprueba. Mismo flow que Netflix / Spotify / YouTube TV.
+
+**Endpoints**:
+- `POST /api/v1/auth/device/start` (no auth) — devuelve `{device_code, user_code, verification_url, expires_in, interval}`.
+- `POST /api/v1/auth/device/poll` (no auth) — devuelve JWT pair o protocol error (`authorization_pending` / `slow_down` / `expired_token` / `access_denied`).
+- `POST /api/v1/auth/device/approve` (auth gated) — operator (login session distinto) liga su user_id al user_code.
+
+**Backend (commit pre-`683c512`)**:
+
+- Migración 024 — `device_codes(device_code PK, user_code UNIQUE, device_name, user_id NULLABLE, expires_at, approved_at, consumed_at, last_polled_at)`.
+- `internal/db/queries/device_codes.sql` + sqlc (ADR-001 respetado).
+- `internal/auth/device.go::DeviceCodeService` — orchestrator. Tokens issued via `s.auth.createSession` (la misma máquina de password login: indistinguible del JWT pair regular, mismo `MaxSessionsPerUser` eviction, mismo refresh path).
+- User code format: 8 chars de alfabeto sin ambigüedad (excluye 0/O, 1/I/L, 5/S). Display: `ABCD-EFGH`. Canonical (sin dashes, uppercase) on input.
+- Slow-down detection: gap entre polls < 4s → `slow_down` error.
+- Single-use: `consumed_at` set tras issuance; future polls = `expired_token`.
+- Tests: 5 service-level (happy path / slow_down / unknown user_code / unknown device_code / normalisation).
+
+**`683c512` /link page (frontend)**
+
+- `web/src/pages/LinkDevice.tsx` — single form, monospace input grande, client-side canonicalise mirror del backend.
+- `web/src/api/hooks/deviceAuth.ts::useApproveDeviceCode` (TanStack mutation).
+- Route `/link` behind `ProtectedRoute` (auth-gated).
+- `humaniseError` mapea códigos API a strings localizadas.
+- i18n: 11 strings bajo `link.*` en en + es.
+- Verificación: tsc clean · 364/364 frontend · `pnpm build` produce `LinkDevice-b6gMQCFI.js` chunk OK · live preview blocked en este Windows por ffmpeg env (mismo issue que afecta `internal/config` preflight test).
+
+### Decisiones a recordar
+
+- `DeviceCodeService` en package `auth` (no en `auth/device/` separado) para acceder a `Service.createSession` private. Encapsulación local-only.
+- Persistencia DB-backed para device codes — TTL-bounded pero idempotente under restart, y el sweep es trivial.
+- No rate limiter dedicado al `/poll` — el token-bucket existente per-IP cubre el degenerate case; `slow_down` cubre el cliente legítimo.
+- SSRF filter NO bloquea RFC1918 deliberadamente (docker-compose federation testing y LAN homelab son legítimos). El threat real cerrado es probe-to-loopback. Si en el futuro se necesita stricter, añadir flag config `federation.strict_url_validation` opt-in.
+
+### Estado al cierre
+
+- 5 commits sobre `main` en rama `claude/federation-hardening`. Working tree clean.
+- Backend tests verde (federation, auth, db, api). Frontend 364/364.
+- Cola P0 vacía. P1 queda **OpenAPI spec versionado** (~½ día) como único item pre-Kotlin TV pendiente.
+
+---
+
+## 🤝 Sesión 2026-04-29 noche → 2026-04-30 madrugada — federación peer-to-peer (Phases 1-4 + extras)
+
+La iniciativa federación, anunciada por mucho tiempo en `docs/architecture/federation.md` (15 secciones, 854 líneas), aterriza en código. Diseño de Sección 13 ("Implementation reuse map") cumple su promesa: el lift es **integración** sobre primitivos existentes (keystore, JWT/EdDSA, event bus, ratelimit token bucket, `imaging.SafeGet`, `stream.Manager`) en lugar de reescritura paralela. La rama `main` recibe 8 commits en orden cronológico estricto — cada fase merge a `main` antes de empezar la siguiente, con tests verde como gate.
+
+### Phase 1 — Identity + Pairing (commits `f8a9e3a`, `9967e23`)
+
+**Backend** (`f8a9e3a`, +2466/-2):
+- `internal/federation/identity.go` — `IdentityStore` carga/genera el keypair Ed25519 del servidor en migración 020. La privkey vive en `server_identity.private_key` (BLOB encrypted-at-rest TBD; v1 cleartext igual que las JWT signing keys originales antes del keystore). Fingerprint hex-grouped (`a8f3:k2m9:x4p1:c7e2`) + BIP-39 wordlist (`fingerprint_words.go`, 256 palabras) para confirmación voice-friendly tipo SSH.
+- `internal/federation/invite.go` — invites de 24h con código `hp-invite-<10-char-base32>`. `ValidateCodeFormat` + `CanonicalCode` (lowercase, dashes-collapsed) tolera typos del admin pegándolo desde un chat. `IsUsable` ata expiry + `accepted_at` no nulo.
+- `internal/federation/jwt.go` — `IssuePeerToken` y `ValidatePeerToken`. EdDSA explícito (no algorithm-confusion), aud=peer-uuid, iss=our-uuid, exp 5min, nbf con skew ±1min. `PeerLookup` interface para cortar el ciclo de tests sin importar Manager. **El campo `Nonce` se emite pero no se valida — ver "Bugs detectados" al final.**
+- `internal/federation/manager.go` — orquestador. `ProbePeer`, `AcceptInvite` (outbound: nosotros recibimos invite del remoto), `HandleInboundHandshake` (inbound: el remoto pegó nuestro invite), `RevokePeer`, `LookupByServerUUID` (cache in-memory de paired peers, refrescado en cada mutación).
+- `internal/db/federation_repository.go` — repo plano (no sqlc todavía — siguió la urgencia de ship antes que la pureza ADR-001). 5 ops invite + 6 ops peer + identity helpers.
+- Migración 020 — `server_identity` (singleton row) + `federation_peers` + `federation_invites`. UNIQUE en `(server_uuid)` y `(code)`. ON DELETE CASCADE para `accepted_by`.
+- Endpoints: `GET /api/v1/federation/info` (público, no auth), `POST /api/v1/federation/invites` (admin), `POST /api/v1/admin/federation/probe`, `POST /api/v1/admin/federation/accept`, `GET /api/v1/admin/federation/peers`, `DELETE /api/v1/admin/federation/peers/{id}`, `POST /api/v1/peer/handshake` (inbound, no peer JWT — el code es la autenticación).
+- `cmd/hubplay/main.go` — wired al boot phase. `Manager.Close()` en graceful shutdown para flush del audit queue.
+
+**Admin UI** (`9967e23`):
+- `web/src/pages/admin/FederationAdmin.tsx` — pestaña en /admin con tres flujos:
+  1. *Identity card* — fingerprint hex + words copy-to-clipboard, descubrible para confirmación out-of-band.
+  2. *Invite generation* — botón "Crear invitación", muestra el código grande para pegar en chat.
+  3. *Add server* — input de URL + invite code; pasa por probe → confirma fingerprint en modal → accept → peer aparece en lista con badge `paired`.
+
+**Tests Phase 1**: identity (4), invite (5), jwt (8), manager partial (TODO Phase 2 tras tener middleware). 17 nuevos en `internal/federation/`.
+
+### Phase 2 — JWT middleware + audit + ratelimit (commit `5a4b05a` + integration test `ea5a141`)
+
+**`5a4b05a`** (+1255/-22):
+- `internal/federation/middleware.go` — `RequirePeerJWT` middleware chi-style. Pipeline: extract Bearer → `ValidatePeerToken` → ratelimit gate → wrap responsewriter para capturar status+bytes → handler → audit. Falla mapea a 401/403/429 con códigos legibles (`PEER_AUTH_REQUIRED`, `PEER_KEY_MISMATCH`, `PEER_TOKEN_EXPIRED`, `PEER_REVOKED`, `PEER_RATE_LIMITED`, `PEER_UNKNOWN`). `normaliseEndpoint` reemplaza UUID-shaped segments por `:id` para que el audit no explote en cardinality.
+- `internal/federation/audit.go` — `Auditor` con goroutine background + canal de 256 entradas. `Record` no bloqueante (drop-on-full + log throttled cada 5s). `flush` cada 30s o cuando llega el `done`. Persistencia 1-row-at-a-time (acepta el coste para no perder un batch entero por un único error SQLite). Lifecycle ata a `Manager.Close`.
+- `internal/federation/ratelimit.go` — `RateLimiter` token-bucket per-peer. Doble-checked locking en `bucketFor`, mutex per-peer para arithmetic. `Reset` en revoke para que un re-pairing arranque limpio.
+- Migración 021 — `federation_audit_log` (id INTEGER PK AUTOINCREMENT + idx peer/time + idx endpoint/time) + `federation_rate_limit_state` (per-peer tokens persisted; no se usa todavía — la ratelimit es 100% en memoria, persistencia es Phase 2.5+).
+- `GET /api/v1/peer/ping` — primer endpoint protegido por la cadena nueva, sirve de smoke test.
+
+**`ea5a141`** integration test:
+- `internal/federation/handshake_roundtrip_test.go` — instancia dos Managers en proceso, hace pairing real (probe → invite → accept handshake), luego peer A emite JWT a peer B y B valida + sirve `/peer/ping`. Verifica que la cadena entera está enchufada: identity → JWT → middleware → audit row.
+
+**Tests Phase 2**: middleware (8), ratelimit (5), roundtrip (1) + audit cubierto via roundtrip. 14 más.
+
+### Phase 3 — Library shares (commit `1c67800`)
+
+**Backend** (+1240/-31, half frontend):
+- `internal/federation/share.go` + `share_test.go` — `LibraryShare` domain type, `ShareScopes` (CanBrowse/CanPlay/CanDownload/CanLiveTV). `Manager.ShareLibrary` (UPSERT idempotente — re-shareing con scopes nuevos no requiere unshare manual), `UnshareLibrary`, `ListSharesByPeer`, `ListSharedLibrariesForPeer`, `ListSharedItems`. **Decisión Plex-style**: si el peer pide items de una library no compartida, devolver `ErrPeerNotFound` (404 → `PEER_UNKNOWN`), **no 403**. No-existence-leak — un peer no puede enumerar IDs de libraries que no le compartimos.
+- Migración 022 — `federation_library_shares(peer_id, library_id, can_browse, can_play, can_download, can_livetv, extra_scopes JSON, created_by, created_at)` con UNIQUE(peer_id, library_id). El JOIN sobre la repo se hace server-side para que filtros sean unbypaseables a nivel SQL.
+- Endpoints inbound: `GET /api/v1/peer/libraries` (lista con scopes), `GET /api/v1/peer/libraries/{id}/items?offset&limit` (paginated, gated por share + CanBrowse).
+- Endpoints admin: `POST /api/v1/admin/federation/peers/{id}/shares`, `DELETE /api/v1/admin/federation/peers/{id}/shares/{shareID}`, `GET /api/v1/admin/federation/peers/{id}/shares`.
+
+**Admin UI**:
+- `FederationAdmin.tsx` extendido — cada peer card ahora expande lista de libraries + checkboxes de scopes inline. Save publishes `federation.share_added` event; el admin sees actualización inmediata.
+- i18n en/es para los strings nuevos.
+
+**Tests Phase 3**: share (10) + middleware extendidos para 403 path (3). 13 más.
+
+### Phase 4 — Remote browsing UI (commit `8073d5c`)
+
+**Backend** (+1143/-2):
+- `internal/federation/client.go` — `FetchPeerLibraries` y `FetchPeerItems` outbound. JWT freshly issued per request via `IssuePeerToken`. `decodeRemoteError` mapea el envelope `{error: {code, message}}` del peer a `fmt.Errorf` legible.
+- `internal/federation/manager.go` extendido con `BrowsePeerLibraries` (live-only — libraries son lista corta, no cachear) y `BrowsePeerItems` (read-through cache: si cache fresh < 1h serve cache, si stale o vacío → live, fallback a stale cache si live falla).
+- `PurgeCache` para el botón "force refresh" del admin.
+- Migración 023 — `federation_item_cache(peer_id, remote_id, type, title, year, overview, poster_url, parent_remote_id, cached_at)` + idx peer.
+- Endpoints user-facing: `GET /api/v1/me/peers/libraries` (todos los peers, lista plana), `GET /api/v1/me/peers/{peerID}/libraries`, `GET /api/v1/me/peers/{peerID}/libraries/{libraryID}/items`, `GET /api/v1/me/peers` (lista de peers paired).
+
+**Frontend** — 5 páginas nuevas:
+- `PeersPage` — landing /peers, lista de peers paired con badges status.
+- `PeerLibrariesPage` — /peers/{peerID}, libraries del peer en grid.
+- `PeerLibraryItemsPage` — /peers/{peerID}/libraries/{libraryID}, paginated browse.
+- Sidebar entry "Servidores conectados" cuando hay peers ≥ 1.
+- Hooks: `useMyPeers`, `usePeerLibraries`, `usePeerLibraryItems`, `useUnifiedPeerLibraries`.
+
+### Extras post-Phase 4 (4 commits de 30 min cada uno)
+
+**`29af48e` lint fixes** — CI verde tras las 4 fases. Cosas como `errcheck` en image_test, refactor de `client.go` para que el shape de `decodeRemoteError` no triggere `lll`, golangci-lint config pequeñas. -28 LOC sin cambiar funcionalidad.
+
+**`aecfdf0` plug-and-play AdvertisedURL** — el admin no debería tener que setear `HUBPLAY_SERVER_BASE_URL` antes de pairing. `internal/api/handlers/federation_url.go::deriveURLFromRequest` infiere de X-Forwarded-Proto/Host (con fallback a r.Host + r.TLS) y lo pasa como `fallbackAdvertisedURL` a `Manager.AcceptInvite`. **Trade-off documentado in-line**: X-Forwarded-* no se valida porque la auth real es la firma Ed25519. Worst case de spoofing es "advertise URL incorrecta → peer no nos puede llegar después" → falla ruidosamente, no compromiso silencioso. `docker-compose.federation-test.yml` añadido como setup de dos servidores en local para probar el flujo end-to-end sin un proxy real.
+
+**`81d6d7c` overview en shared items** — bug-fix mínimo: `ListSharedItems` no estaba haciendo JOIN a `metadata` para sacar `overview` → la card en el peer remoto mostraba título + año pero overview vacío. JOIN añadido. 8 LOC, ningún test añadido (visible al ojo en la UI).
+
+**`73b749c` unified library grid** — UX final de Phase 4. `BrowseAllPeerLibraries` fan-out paralelo a todos los peers paired (un goroutine cada uno, channel collector); errors per-peer se loguean pero no rompen el view. La PeersPage ahora es UNA grid unificada con la library de cada peer marcada con badge del peer; click navega al item view del peer correcto. Resultado: el usuario ve "Lo Bueno de Pedro" como vería sus propias libraries, sin click extra para "entrar al servidor de Pedro".
+
+### Estado al cierre
+
+- `main` 2026-04-30 02:57, working tree clean, sincronizado con origin.
+- Backend `go test -count=1 ./...`: verde salvo `internal/config` (TestPreflight_HappyPath / TestPreflight_CacheDirGetsCreated fallan en este Windows porque ffmpeg/ffprobe no están en PATH — env, no regresión; CI tiene la dep instalada).
+- Frontend: 46 ficheros, 364 tests, todos verde. tsc clean.
+- Migraciones: 19 → 23 (4 nuevas). Sin breaking changes — DBs viejas migran sin tocar tablas existentes.
+- Federación es **opcional**. Sin invites generados ni peers paired, todo el surface peer-to-peer es lazy (no goroutines, no cache, no audit writes). Operadores que no la usen no notan nada.
+
+### 🚨 Bugs detectados en auditoría posterior (sesión actual)
+
+Tras el merge a `main`, esta sesión hace un peer-review crítico del código federación. Tres findings reales, dos falsos positivos descartados.
+
+**1. `🚨` Replay protection no implementada (`internal/federation/jwt.go:90-92`)**
+
+El JWT incluye un campo `Nonce` (uuid fresh per token) y el comentario explícitamente dice *"Replay protection is the caller's responsibility — the per-nonce cache lives in the Manager so it can scope nonces by peer + window"*. Pero **el cache de nonces no existe**. `grep -r 'nonce' internal/federation/` solo devuelve la generación + el campo struct; ninguna validación. `RequirePeerJWT` no llama a ningún `seenNonce`/`checkReplay`.
+
+Impacto real: un atacante que capture **un** JWT válido (TLS termination en un proxy comprometido, observabilidad mal configurada, SSRF intermedia) puede replicarlo durante los 5 min de TTL. Eso significa N consultas a `/peer/libraries/{id}/items` con un solo token capturado, defeating per-peer ratelimit refill window.
+
+Defensa primaria sigue intacta (Ed25519 signature verifica que el token vino del peer; un atacante MITM no puede *forjar* un nuevo token). Lo que cae es la defensa secundaria (un token capturado y replicado).
+
+**Fix sugerido**: nonce cache LRU en `Manager` (capacidad ~10k entries × 5min TTL ≈ trivial), check en middleware después de validate y antes de servir. ~50 LOC + 3 tests.
+
+**2. `⚠️` SSRF parcial via peer-controlled BaseURL (`internal/federation/manager.go:441-450`)**
+
+`HandleInboundHandshake` persiste `peer.BaseURL = remote.AdvertisedURL` directamente desde el wire del peer, sin validación más allá de `joinBaseURL`'s check de scheme http(s) (manager.go:784-796). Un peer hostil que consiga un invite válido (que se le filtró a un atacante) puede hacer pairing advertando `BaseURL=http://127.0.0.1:8080` o `http://192.168.1.1`. Cualquier futuro `FetchPeerLibraries`/`FetchPeerItems` (admin browsing su catálogo) hace HTTP outbound a esa URL.
+
+Impacto **acotado**: la respuesta tiene que pasar `decodeRemoteError`/JSON decode. Localhost no va a tener Ed25519 signing, así que no puede pretender ser el peer real — pero el TCP connect probe **sí** ocurre (timing visible: ¿está el servicio interno arriba? ¿qué status devuelve?). En egress logs se ve tráfico desde HubPlay hacia IPs internas no-públicas. SSRF probe real, no exfil.
+
+**Fix sugerido**: validate `AdvertisedURL` en `HandleInboundHandshake` — rechazar `127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `169.254.0.0/16`, `::1`. Reusar la lista de `internal/imaging/safe_get.go::SafeGet` que ya tiene este filtro. Validate también que el TLD no sea `.local`/`.localhost`/`.internal` salvo opt-in explícito por config. ~40 LOC + 5 tests. Para Tailscale legítimo (ts.net) la URL es pública DNS-resolved.
+
+**3. `💡` RevokePeer TOCTOU micro-window (`internal/federation/manager.go:727-745`)**
+
+`UpdatePeerRevoked` (DB) seguido de `refreshPeerCache` (cache). Entre los dos, una request en flight que ya pasó `LookupByServerUUID` sigue. Window real: sub-millisegundo en SQLite local, micro-segundos. Cualquier request iniciada después de que el cache se refresca falla con `PEER_REVOKED`.
+
+No es un bug explotable — un atacante no puede forzar un timing tan apretado, y tras la ventana el rechazo es inmediato. Vale la pena un comentario en `RevokePeer` explicando la atomicidad esperable, no más.
+
+**Falsos positivos descartados (para no resolver fantasmas la próxima sesión)**:
+- ❌ "Cache survives unshare" — `UnshareLibrary` afecta libraries OUTBOUND (las que YO comparto con peer X). El `federation_item_cache` es items INBOUND (los que YO descargué de peer X). Diferentes superficies, sin relación.
+- ❌ "Audit drops on backpressure" — by design, documentado, log throttled. Federation hammered hard ya está rate-limited; perder algunos audits durante el spike es preferible a crear backpressure en el hot path.
+- ❌ "Auditor.persist context leak" — `defer cancel()` está en línea 172. El reviewer lo perdió.
 
 ---
 
@@ -468,58 +674,46 @@ Trabajo que **sube en la cola** porque la app TV lo necesita:
 
 ## Cola priorizada para la siguiente sesión
 
-### **P0 · Bloqueante operacional**
+### **P0 · Cerrado** (federación security debt — ver bloque sesión 2026-04-30 mañana al inicio)
 
-1. **Validación end-to-end final del usuario** sobre la rama
-   actual. Si destapa más bugs, se priorizan sobre todo. El QA
-   checklist cubre los 35 commits.
+1. ~~Replay protection peer JWT~~ ✅ **shipped 2026-04-30** (`b0b0613`).
+2. ~~SSRF parcial via peer-controlled BaseURL~~ ✅ **shipped 2026-04-30** (`c6e0d84`).
+3. ~~RevokePeer TOCTOU micro-window~~ ✅ **documented 2026-04-30** (`3b24e92`).
 
 ### **P1 · Pre-Kotlin TV (foundation que la app va a consumir)**
 
-2. ~~**Capability negotiation server-side**~~ ✅ **shipped 2026-04-29**
-   (`5a37ed2` + `f21194f`). Header `X-Hubplay-Client-Capabilities`
-   parseado en `stream.Capabilities`; web client probea
-   `MediaSource.isTypeSupported` y manda el header. Defaults web
-   intactos para legacy. La app Kotlin TV declarará agresivamente
-   cuando llegue.
+4. ~~**Device-code login flow**~~ ✅ **shipped 2026-04-30** (rama
+   `claude/federation-hardening`, dos commits backend + `683c512`
+   frontend). RFC 8628 end-to-end. /link page. JWT pair issuance via la
+   misma `auth.Service.createSession` (indistinguible de password login).
 
-3. **Device-code login flow** (~1-2 días). Endpoints:
-   - `POST /auth/device/start` → devuelve `{user_code: "ABC123",
-     device_code: "...", verification_url: "/link", expires_in: 600}`.
-   - `POST /auth/device/poll` → cliente sondea cada N segundos.
-     Devuelve el JWT cuando el usuario aprueba en `/link`.
-   - Frontend: página `/link` con input grande tipo TV-friendly
-     que permite al usuario aprobar el device code desde móvil.
-   Es el patrón que Netflix / Spotify / YouTube TV usan.
-
-4. **Versionado del API + documentación OpenAPI** (~½ día).
+5. **Versionado del API + documentación OpenAPI** (~½ día).
    Hoy todo cuelga de `/api/v1/*` pero no hay un OpenAPI spec
    versionado. Generar con go-swagger o swag (anotaciones en
    handlers). Sin esto, la app Kotlin va a redescubrir el wire
-   format por trial-and-error.
+   format por trial-and-error. **Federación incrementa la urgencia**:
+   ahora hay 12+ endpoints `/api/v1/peer/*` que un cliente tercero
+   (otra implementación de HubPlay) tendría que entender.
 
-5. ~~**SSE para progress sync**~~ ✅ **shipped 2026-04-29** (`94cb74b`).
-   `GET /api/v1/me/events` con filtrado per-user `BEFORE` channel write.
-   Tres event types: `user.progress.updated`, `user.played.toggled`,
-   `user.favorite.toggled`. Frontend `useUserDataSync` montado en
-   `AppLayout`. Mismo framing que `/events` para que la app Kotlin TV
-   reuse `okhttp-sse` igual que el web reusa `EventSource`.
+6. ~~**Capability negotiation server-side**~~ ✅ **shipped 2026-04-29** (`5a37ed2` + `f21194f`).
+7. ~~**SSE para progress sync**~~ ✅ **shipped 2026-04-29** (`94cb74b`).
+8. ~~**Person/cast clickable**~~ ✅ **shipped 2026-04-29** (`19be7f0` `people(detail): wire /people/{id} end-to-end`).
+9. ~~**Federación P2P (Phases 1-4)**~~ ✅ **shipped 2026-04-30** — ver ADR-012 y bloque de sesión arriba.
 
 ### **P2 · Quick wins paralelos a la app**
 
-6. **Blurhash en `<PosterCard>`** (30 min). Backend lo emite hace
-   meses; frontend nunca lo consume. Mejora drástica del LCP
-   percibido. *También aplica a la app TV* (Compose puede renderizar
-   blurhash).
+10. **Blurhash en `<PosterCard>`**: ya implementado parcialmente en
+    `cd14d11`. Verificar que la integración consume el campo.
 
-7. **WebP blurhash backend** (1h). Logos de Fanart vienen en WebP
-   → blurhash vacío. Importar `golang.org/x/image/webp`.
+11. **WebP blurhash backend**: ya shipped en `48f53cc` (Fanart logos).
 
-8. **Provider priority configurable** (½ día). Campo ya existe
-   en DB; falta UI admin (drag-to-reorder).
+12. **Provider priority configurable** (½ día). Campo ya existe
+    en DB; falta UI admin (drag-to-reorder).
 
-9. **Person/cast clickable** (~1 día). Página de actor con
-   filmografía. La app TV lo va a querer también.
+13. **Federación Phases 5-7** (~5-8 días total) — el resto del roadmap
+    de federación. Phase 5 (remote streaming + watch state, blocked en
+    arreglar bugs P0), Phase 6 (Live TV peering), Phase 7 (download to
+    local + audit log UI).
 
 ### **P3 · Diferenciadores estratégicos** (semanas, no días)
 

@@ -933,6 +933,13 @@ export class ApiClient {
     return this.request("POST", "/admin/peers/invites", { body: {} });
   }
 
+  // Device authorization grant — operator (this browser, logged-in)
+  // approves a user_code that a separate device (TV, CLI, etc.) is
+  // polling for. The device's next /poll receives a JWT pair.
+  async approveDeviceCode(userCode: string): Promise<{ approved: boolean }> {
+    return this.request("POST", "/auth/device/approve", { body: { user_code: userCode } });
+  }
+
   async listPeerShares(peerID: string): Promise<import("./types").FederationLibraryShare[]> {
     return this.request("GET", `/admin/peers/${peerID}/shares`);
   }
