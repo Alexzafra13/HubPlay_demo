@@ -753,6 +753,20 @@ func (m *Manager) PurgeCache(ctx context.Context, peerID, libraryID string) erro
 // RevokePeer terminates a peer relationship. The row remains for
 // audit (terminal state); all future JWTs from the peer are rejected
 // by ValidatePeerToken because PeerRevoked != PeerPaired.
+//
+// Atomicity note: the DB write (UpdatePeerRevoked) happens BEFORE the
+// in-memory peerCache refresh, so there is a sub-millisecond window
+// where a request that already passed LookupByServerUUID continues
+// to completion under the OLD cached *Peer. The window is bounded
+// by the time refreshPeerCache holds its write lock (microseconds in
+// practice), and any in-flight request was going to finish within
+// the JWT TTL anyway. New requests issued after the cache refresh
+// see PeerRevoked and fail at the auth gate.
+//
+// Stricter atomicity (DB + cache in one critical section) would
+// require holding the cache write lock during a SQLite roundtrip,
+// which we explicitly do not want — it would block every concurrent
+// JWT validation on every peer.
 func (m *Manager) RevokePeer(ctx context.Context, peerID string) error {
 	now := m.clock.Now()
 	if err := m.repo.UpdatePeerRevoked(ctx, peerID, now); err != nil {
