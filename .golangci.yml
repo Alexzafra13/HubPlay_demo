@@ -40,11 +40,33 @@ linters:
       #   G104 — overlaps with errcheck (already on by default).
       #   G304 — file path tainted; pathmap + filepath.Clean make this
       #          a false positive on every call site.
+      #   G703 — taint-analysis alias of G304; same false-positive
+      #          profile (pathmap-validated paths gosec can't reason
+      #          about). Excluded for the same reason.
       excludes:
         - G104
         - G304
+        - G703
       severity: high
       confidence: high
+
+    # Staticcheck QF* rules are quickfix style suggestions (apply De
+    # Morgan's law, convert to tagged switch, etc.) — they're not
+    # bugs, they're refactor hints from gopls. Useful in an editor;
+    # not worth gating CI on. Re-enable on a per-rule basis if a
+    # specific QF rule starts catching real issues.
+    staticcheck:
+      checks: ["all", "-QF*"]
+
+  # The v1 "default exclusions" (deferred Close/Flush, fmt.Print* to
+  # writers, well-known false positives) used to be on by default.
+  # In v2 you have to opt in via presets. `legacy` restores the full
+  # v1 baseline — the alternative is hundreds of `_ = x.Close()` and
+  # ignored fmt.Fprintf returns in handlers and tests, which is
+  # busywork that doesn't catch real bugs.
+  exclusions:
+    presets:
+      - legacy
 
 # CI runs on PR + push; outside the linter we don't gate on style
 # (golangci's defaults are strict enough). New rules added here should
