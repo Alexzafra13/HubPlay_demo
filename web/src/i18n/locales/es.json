@@ -48,6 +48,19 @@
     "nextUp": "Siguiente",
     "failedToLoad": "Error al cargar el contenido. Comprueba la conexion del servidor."
   },
+  "link": {
+    "title": "Vincular un dispositivo",
+    "subtitle": "Escribe el código que aparece en tu TV, consola u otro dispositivo para autorizarlo en tu cuenta.",
+    "codeLabel": "Código del dispositivo",
+    "codeHint": "Ocho letras y números, los guiones son opcionales. Los códigos expiran 10 minutos después de que el dispositivo los pida.",
+    "approve": "Aprobar dispositivo",
+    "approving": "Aprobando…",
+    "success": "Dispositivo aprobado. El dispositivo iniciará sesión en unos segundos.",
+    "errorUnknown": "No reconocemos este código. Revisa lo que aparece en el dispositivo e inténtalo de nuevo.",
+    "errorExpired": "Este código ha expirado. Pide al dispositivo que empiece de nuevo.",
+    "errorAlreadyApproved": "Este código ya lo aprobó otro usuario.",
+    "errorAccountDisabled": "Tu cuenta está deshabilitada. Contacta con un administrador."
+  },
   "peers": {
     "title": "Servidores conectados",
     "subtitle": "Bibliotecas que tus amigos han compartido contigo. Cada tarjeta es una biblioteca remota — púlsala para ver el catálogo.",

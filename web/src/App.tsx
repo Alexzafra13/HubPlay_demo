@@ -28,6 +28,7 @@ const FederationAdmin = lazy(() => import("@/pages/admin/FederationAdmin"));
 const PeersPage = lazy(() => import("@/pages/PeersPage"));
 const PeerLibrariesPage = lazy(() => import("@/pages/PeerLibrariesPage"));
 const PeerLibraryItemsPage = lazy(() => import("@/pages/PeerLibraryItemsPage"));
+const LinkDevice = lazy(() => import("@/pages/LinkDevice"));
 const SystemLayout = lazy(() => import("@/pages/admin/system/SystemLayout"));
 const SystemStatus = lazy(() => import("@/pages/admin/system/SystemStatus"));
 const SystemActivity = lazy(() => import("@/pages/admin/system/SystemActivity"));
@@ -117,6 +118,7 @@ export function App() {
             <Route path="peers" element={<PeersPage />} />
             <Route path="peers/:peerId" element={<PeerLibrariesPage />} />
             <Route path="peers/:peerId/libraries/:libraryId" element={<PeerLibraryItemsPage />} />
+            <Route path="link" element={<LinkDevice />} />
             <Route path="settings" element={<Settings />} />
 
             {/* Admin routes.
