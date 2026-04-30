@@ -1,5 +1,7 @@
 # Estado del proyecto
 
+> ⚠️ **Bomba conocida — sqlc 1.29 incompatible con queries actuales**. No corras `make sqlc` ni `sqlc generate` hasta resolver. Detalles abajo en "Deudas operacionales".
+
 > Snapshot: **2026-04-30 mañana (continuada) — rama `claude/openapi-spec` con OpenAPI 3.0.3 spec embed-y-servida**. 1 commit sobre `main`. Cierra el último item P1 pre-Kotlin TV. **Cola P0+P1 vacía**: todos los prerequisitos para empezar la app Kotlin Android TV están completos.
 >
 > Estado prev (2026-04-30 mañana, ya en main vía PR #124): 3 fixes federación + device-code login (RFC 8628) end-to-end. Cierra 3 findings P0 + 1 P1.
@@ -17,6 +19,37 @@
 - `3b24e92` federation(docs): RevokePeer atomicity contract documented
 - `[hash-pending]` auth(device): RFC 8628 device authorization grant — TV-friendly login
 - `683c512` auth(device): /link page — operator approves a device code
+
+---
+
+## ⚠️ Deudas operacionales
+
+### sqlc 1.29 rompe la regeneración (descubierto 2026-04-30)
+
+**Síntoma**: correr `sqlc generate` con sqlc 1.29.0 (la versión actualmente en `$GOPATH/bin`) regenera `internal/db/sqlc/*.sql.go` con dos clases de errores:
+
+1. **Truncado de queries con múltiples `?` en cláusulas anidadas**. La query `ContinueWatching` en `internal/db/queries/user_data.sql` tiene tres `?` (user_id, abandoned_threshold dentro de `NOT(...)`, LIMIT). sqlc 1.29 emite la SQL string truncada en `LIMIT` (sin `?`), y un `Params` struct con sólo dos campos (`UserID`, `Limit`) — pierde `AbandonedThreshold`. Misma cosa con `SeriesEpisodeProgress` (truncada mid-word: `s.type = 'seaso`).
+2. **Tipos nullable strictos**. `IsLocked` en `images` (BOOLEAN NOT NULL) pasa de `sql.NullBool` a `bool`. Es lo correcto, pero rompe `image_repository.go` que asume `sql.NullBool`. Trivial de arreglar manualmente.
+
+(1) NO es trivial — el código generado es funcionalmente roto, no es sólo un cambio de tipos. Forma de las queries → bug de sqlc 1.29.
+
+**Mitigación temporal**:
+- **No corras `sqlc generate` ni `make sqlc` con sqlc 1.29**. Los ficheros en `internal/db/sqlc/` que están commitidos son la fuente de verdad funcional.
+- Si necesitas añadir queries nuevas (ej. para `federation_repository.go` → sqlc), está bloqueado hasta resolver.
+
+**Posibles fixes (sin orden de preferencia)**:
+1. Pinear sqlc a la versión que generó los ficheros originales. Probablemente 1.27 o 1.26. `make sqlc` debería instalar la versión específica.
+2. Reescribir las queries problemáticas para evitar el patrón que confunde a 1.29 (queries con `?` dentro de `NOT(...)` y un `LIMIT ?` posterior). Quizá splitear en dos queries o usar @-named params.
+3. Filar bug upstream a sqlc-dev/sqlc.
+
+**Lo que esto bloquea**:
+- Conversión de `internal/db/federation_repository.go` (750 LOC, 31 raw SQL, viola ADR-001) a sqlc. Dependía de poder regenerar limpiamente.
+
+### `federation_repository.go` no es sqlc (ADR-001)
+
+Lo documenta el propio fichero ([línea 14-26](../../internal/db/federation_repository.go:14)) — diferida desde Phase 1 como housekeeping. Bloqueada ahora por la bomba sqlc-1.29 de arriba.
+
+---
 
 **Sesión 2026-04-29 noche → 2026-04-30 madrugada (en `main`)** — 8 commits federación:
 - `f8a9e3a` + `9967e23` — Phase 1 backend + admin UI (identidad Ed25519, invites, handshake)
