@@ -1097,6 +1097,25 @@ export class ApiClient {
     const body = beforeSeconds === undefined ? undefined : { before_seconds: beforeSeconds };
     return this.request<{ pruned: number }>("POST", "/admin/auth/keys/prune", { body });
   }
+
+  // Federation Phase 5 — viewer-side streaming. Calls the local
+  // `/me/peers/{peerID}/stream/...` surface; the server proxies to
+  // the origin peer with a peer-JWT we never see.
+  async startPeerStream(
+    peerID: string,
+    itemID: string,
+  ): Promise<{
+    session_id: string;
+    master_playlist_url: string;
+    method: string;
+    container?: string;
+  }> {
+    return this.request("POST", `/me/peers/${peerID}/stream/${itemID}/session`, { body: {} });
+  }
+
+  async stopPeerStream(peerID: string, sessionID: string): Promise<void> {
+    await this.request("DELETE", `/me/peers/${peerID}/stream/session/${sessionID}`);
+  }
 }
 
 export const api = new ApiClient("/api/v1");
