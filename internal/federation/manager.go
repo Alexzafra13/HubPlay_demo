@@ -318,7 +318,13 @@ func (m *Manager) ProbePeer(ctx context.Context, baseURL string) (*ServerInfo, e
 //
 // The remote URL must match what the admin saw in ProbePeer — the
 // admin should have visually confirmed the fingerprint already.
-func (m *Manager) AcceptInvite(ctx context.Context, baseURL, code string) (*Peer, error) {
+//
+// fallbackAdvertisedURL is the URL we send to the remote as our own
+// reachable address, USED ONLY IF cfg.AdvertisedURL is empty. The
+// admin handler derives this from the admin's session request so a
+// fresh deployment that hasn't set HUBPLAY_SERVER_BASE_URL still
+// pairs successfully — plug-and-play.
+func (m *Manager) AcceptInvite(ctx context.Context, baseURL, code, fallbackAdvertisedURL string) (*Peer, error) {
 	if err := ValidateCodeFormat(code); err != nil {
 		return nil, err
 	}
@@ -329,6 +335,9 @@ func (m *Manager) AcceptInvite(ctx context.Context, baseURL, code string) (*Peer
 		return nil, err
 	}
 	ours := m.PublicServerInfo()
+	if ours.AdvertisedURL == "" && fallbackAdvertisedURL != "" {
+		ours.AdvertisedURL = fallbackAdvertisedURL
+	}
 
 	body, err := json.Marshal(handshakeRequest{
 		Code:       canonical,

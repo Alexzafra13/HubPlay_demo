@@ -1,0 +1,81 @@
+# docker-compose.federation-test.yml
+#
+# Two fresh HubPlay containers on a shared internal network for
+# end-to-end federation testing. Reuses the latest image already
+# built by `docker compose build hubplay`. NOT a deployment artefact
+# — only for integration smoke tests of Phases 1-4.
+#
+# Usage:
+#   docker compose -f docker-compose.federation-test.yml up -d
+#   ./scripts/federation-smoke-test.sh   # programmatic test (gen invite, pair, verify)
+#   docker compose -f docker-compose.federation-test.yml down -v
+#
+# Network topology: both containers share `fed-test-net`, so peer A
+# can reach peer B at http://test-peer-b:8096 (Docker DNS by service
+# name) and vice versa. From the host, A is exposed on :8198 and B
+# on :8199 for browser inspection.
+
+services:
+  test-peer-a:
+    image: ghcr.io/alexzafra13/hubplay_demo:latest
+    container_name: test-peer-a
+    ports:
+      - "8198:8096"
+    volumes:
+      - test-peer-a-config:/config
+      - test-peer-a-cache:/cache
+    environment:
+      - TZ=Europe/Madrid
+      - HUBPLAY_SERVER_BIND=0.0.0.0
+      - HUBPLAY_SERVER_PORT=8096
+      # NOTE: HUBPLAY_SERVER_BASE_URL deliberately NOT set here so we
+      # exercise the plug-and-play auto-derivation from the inbound
+      # request (the path real users will hit). Env var stays as an
+      # explicit override for cases where the admin's URL differs from
+      # the URL peers should use.
+      - HUBPLAY_LOGGING_LEVEL=info
+      - HUBPLAY_LOGGING_FORMAT=text
+    networks:
+      - fed-test-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8096/api/v1/health"]
+      interval: 10s
+      timeout: 3s
+      start_period: 15s
+      retries: 3
+
+  test-peer-b:
+    image: ghcr.io/alexzafra13/hubplay_demo:latest
+    container_name: test-peer-b
+    ports:
+      - "8199:8096"
+    volumes:
+      - test-peer-b-config:/config
+      - test-peer-b-cache:/cache
+    environment:
+      - TZ=Europe/Madrid
+      - HUBPLAY_SERVER_BIND=0.0.0.0
+      - HUBPLAY_SERVER_PORT=8096
+      # No HUBPLAY_SERVER_BASE_URL — see test-peer-a above.
+      - HUBPLAY_LOGGING_LEVEL=info
+      - HUBPLAY_LOGGING_FORMAT=text
+    networks:
+      - fed-test-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8096/api/v1/health"]
+      interval: 10s
+      timeout: 3s
+      start_period: 15s
+      retries: 3
+
+volumes:
+  test-peer-a-config:
+  test-peer-a-cache:
+  test-peer-b-config:
+  test-peer-b-cache:
+
+networks:
+  fed-test-net:
+    driver: bridge
