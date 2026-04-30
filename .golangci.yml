@@ -50,13 +50,21 @@ linters:
       severity: high
       confidence: high
 
-    # Staticcheck QF* rules are quickfix style suggestions (apply De
-    # Morgan's law, convert to tagged switch, etc.) — they're not
-    # bugs, they're refactor hints from gopls. Useful in an editor;
-    # not worth gating CI on. Re-enable on a per-rule basis if a
-    # specific QF rule starts catching real issues.
+    # Staticcheck rule groups disabled here:
+    #   QF* — quickfix style suggestions (apply De Morgan's law,
+    #         convert to tagged switch, etc.). gopls refactor hints,
+    #         not bugs.
+    #   ST* — stylecheck rules that v2 absorbed from the standalone
+    #         stylecheck linter and enabled by default. v1's default
+    #         set didn't include stylecheck. The only ones firing
+    #         today are ST1000 (package comment) and ST1020/ST1021
+    #         (comment phrasing) — all stylistic, none catching
+    #         real bugs.
+    # Re-enable on a per-rule basis if a specific check starts
+    # catching real issues (e.g. `["all", "-QF*", "-ST*", "ST1019"]`
+    # to keep duplicate-import detection on).
     staticcheck:
-      checks: ["all", "-QF*"]
+      checks: ["all", "-QF*", "-ST*"]
 
     # v2 dropped the implicit v1 errcheck exclusions for deferred
     # Close() and fmt.Print* to writers. Listing the canonical cases
