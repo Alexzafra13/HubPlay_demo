@@ -303,6 +303,16 @@ func applyEnvOverrides(cfg *Config) {
 			cfg.Server.Port = p
 		}
 	}
+	if v := os.Getenv("HUBPLAY_SERVER_BASE_URL"); v != "" {
+		// Federation advertises this URL in /federation/info — peers
+		// outbound to us go through it. Env override is the explicit
+		// escape hatch; the federation layer also auto-derives from
+		// the inbound request when this is empty (the plug-and-play
+		// default). Set this only when the URL the admin uses is
+		// different from the URL peers should use (e.g. internal
+		// Tailscale vs public domain).
+		cfg.Server.BaseURL = v
+	}
 	if v := os.Getenv("HUBPLAY_SERVER_BIND"); v != "" {
 		cfg.Server.Bind = v
 	}

@@ -38,8 +38,17 @@ func NewFederationPublicHandler(mgr *federation.Manager, logger *slog.Logger) *F
 // ServerInfo returns this server's identity surface. Public — anyone
 // who can reach the URL can read it. The pubkey + fingerprint are
 // non-secret by design.
+//
+// Plug-and-play AdvertisedURL: if the admin hasn't set
+// HUBPLAY_SERVER_BASE_URL / server.base_url, we derive the URL from
+// the inbound request itself. The peer asking "what's your URL?"
+// already knows — they're hitting it. We just echo it back.
 func (h *FederationPublicHandler) ServerInfo(w http.ResponseWriter, r *http.Request) {
-	respondJSON(w, http.StatusOK, infoToWire(h.mgr.PublicServerInfo()))
+	info := h.mgr.PublicServerInfo()
+	if info.AdvertisedURL == "" {
+		info.AdvertisedURL = deriveURLFromRequest(r)
+	}
+	respondJSON(w, http.StatusOK, infoToWire(info))
 }
 
 // ListLibraries returns the libraries we've shared with the calling
@@ -156,7 +165,15 @@ func (h *FederationPublicHandler) Handshake(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Same plug-and-play augmentation as /federation/info: if our
+	// configured AdvertisedURL is empty, derive it from the inbound
+	// handshake request so the responding ServerInfo carries a URL
+	// the caller can use to reach us back.
+	derivedURL := deriveURLFromRequest(r)
 	_, ours, err := h.mgr.HandleInboundHandshake(r.Context(), req.Code, remote)
+	if ours != nil && ours.AdvertisedURL == "" {
+		ours.AdvertisedURL = derivedURL
+	}
 	if err != nil {
 		status, code := http.StatusInternalServerError, "INTERNAL_ERROR"
 		switch {

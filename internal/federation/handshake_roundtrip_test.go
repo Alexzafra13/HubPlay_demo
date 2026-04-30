@@ -68,7 +68,7 @@ func TestHandshakeRoundtrip_TwoLiveServers(t *testing.T) {
 	// has confirmed A's fingerprint and is asking A to register B
 	// as a peer + getting A's ServerInfo back to register A on B's
 	// side. After this, both servers have each other paired.
-	aAsPeerOnB, err := b.mgr.AcceptInvite(ctx, a.url, invite.Code)
+	aAsPeerOnB, err := b.mgr.AcceptInvite(ctx, a.url, invite.Code, "")
 	if err != nil {
 		t.Fatalf("B accept A's invite: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestHandshakeRoundtrip_TwoLiveServers(t *testing.T) {
 	// Step 5: invite single-use enforcement. A second AcceptInvite
 	// with the same code MUST fail — otherwise a leaked code could
 	// pair an attacker too.
-	_, err = b.mgr.AcceptInvite(ctx, a.url, invite.Code)
+	_, err = b.mgr.AcceptInvite(ctx, a.url, invite.Code, "")
 	if err == nil {
 		t.Error("second use of the same invite should have failed")
 	}
@@ -153,7 +153,7 @@ func TestHandshakeRoundtrip_RejectsExpiredInvite(t *testing.T) {
 	// Fast-forward past the invite TTL.
 	frozen.now = invite.ExpiresAt.Add(time.Minute)
 
-	_, err = b.mgr.AcceptInvite(ctx, a.url, invite.Code)
+	_, err = b.mgr.AcceptInvite(ctx, a.url, invite.Code, "")
 	if err == nil {
 		t.Fatal("expected expired-invite rejection")
 	}
@@ -177,7 +177,7 @@ func TestHandshakeRoundtrip_PubkeyBase64Survives(t *testing.T) {
 	if _, err := b.mgr.ProbePeer(ctx, a.url); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.mgr.AcceptInvite(ctx, a.url, invite.Code); err != nil {
+	if _, err := b.mgr.AcceptInvite(ctx, a.url, invite.Code, ""); err != nil {
 		t.Fatal(err)
 	}
 

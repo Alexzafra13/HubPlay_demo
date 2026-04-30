@@ -32,9 +32,14 @@ func NewFederationAdminHandler(mgr *federation.Manager, logger *slog.Logger) *Fe
 
 // GetServerIdentity returns this server's public-facing ServerInfo so
 // the admin can read their own fingerprint to a remote admin out-of-band
-// during handshake confirmation.
+// during handshake confirmation. Plug-and-play AdvertisedURL — derived
+// from the admin's session if not explicitly configured.
 func (h *FederationAdminHandler) GetServerIdentity(w http.ResponseWriter, r *http.Request) {
-	respondJSON(w, http.StatusOK, map[string]any{"data": infoToWire(h.mgr.PublicServerInfo())})
+	info := h.mgr.PublicServerInfo()
+	if info.AdvertisedURL == "" {
+		info.AdvertisedURL = deriveURLFromRequest(r)
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"data": infoToWire(info)})
 }
 
 // ─── Invites ────────────────────────────────────────────────────────
@@ -133,7 +138,12 @@ func (h *FederationAdminHandler) AcceptInvite(w http.ResponseWriter, r *http.Req
 		respondError(w, r, http.StatusBadRequest, "FEDERATION_REQUIRED_FIELDS_MISSING", "base_url and code required")
 		return
 	}
-	peer, err := h.mgr.AcceptInvite(r.Context(), req.BaseURL, req.Code)
+	// Plug-and-play: if the admin hasn't configured AdvertisedURL,
+	// fall back to whatever URL THIS admin is currently hitting our
+	// UI with. That URL works for them, so it's almost certainly a
+	// reachable URL the remote peer can use too.
+	fallback := deriveURLFromRequest(r)
+	peer, err := h.mgr.AcceptInvite(r.Context(), req.BaseURL, req.Code, fallback)
 	if err != nil {
 		status, code := http.StatusBadGateway, "PEER_HANDSHAKE_FAILED"
 		switch {
