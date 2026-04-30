@@ -417,10 +417,13 @@ func TestRequirePeerJWT_FiresRateLimitAfterBurst(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	tok, _ := IssuePeerToken(clk, priv, peer.ServerUUID, mgr.identity.Current().ServerUUID)
-
 	statuses := []int{}
 	for i := 0; i < 4; i++ {
+		// Fresh token per request — the replay-cache rejects reuse of
+		// the same JWT, so the rate-limit threshold has to be exercised
+		// with distinct tokens. Each call to IssuePeerToken mints a new
+		// nonce so the replay layer is bypassed.
+		tok, _ := IssuePeerToken(clk, priv, peer.ServerUUID, mgr.identity.Current().ServerUUID)
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/peer/ping", nil)
 		req.Header.Set("Authorization", "Bearer "+tok)
 		rec := httptest.NewRecorder()
@@ -434,5 +437,84 @@ func TestRequirePeerJWT_FiresRateLimitAfterBurst(t *testing.T) {
 	}
 	if statuses[2] != http.StatusTooManyRequests {
 		t.Errorf("3rd request should be rate limited, got %d", statuses[2])
+	}
+}
+
+// TestRequirePeerJWT_RejectsReplay verifies that the same JWT cannot be
+// used twice. The first request passes; a second request with the
+// identical token (same nonce) is rejected with 401 PEER_REPLAY.
+//
+// The audit log must record the rejection so a captured-and-replayed
+// token leaves a forensic trail.
+func TestRequirePeerJWT_RejectsReplay(t *testing.T) {
+	// Use real clock — the JWT library validates nbf/exp against
+	// time.Now() regardless of what we pass to ValidatePeerToken,
+	// so a Mock clock confuses iat/nbf/exp encoding vs validation.
+	clk := clock.New()
+	repo := &inMemoryFedRepo{}
+	if _, err := LoadOrCreate(context.Background(), repo, clk, "TestServer"); err != nil {
+		t.Fatal(err)
+	}
+	mgr, err := NewManager(context.Background(), DefaultConfig(), repo, clk, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	now := clk.Now()
+	peer := &Peer{
+		ID: "peer-A", ServerUUID: "remote-server-uuid", Name: "Remote",
+		BaseURL: "https://remote.example", PublicKey: pub, Status: PeerPaired,
+		CreatedAt: now, PairedAt: &now,
+	}
+	if err := repo.InsertPeer(context.Background(), peer); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.refreshPeerCache(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	mw := RequirePeerJWT(mgr)
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	tok, _ := IssuePeerToken(clk, priv, peer.ServerUUID, mgr.identity.Current().ServerUUID)
+
+	// First use — accepted.
+	req1 := httptest.NewRequest(http.MethodGet, "/api/v1/peer/ping", nil)
+	req1.Header.Set("Authorization", "Bearer "+tok)
+	rec1 := httptest.NewRecorder()
+	handler.ServeHTTP(rec1, req1)
+	if rec1.Code != http.StatusOK {
+		t.Fatalf("first use should be 200, got %d", rec1.Code)
+	}
+
+	// Replay — same token, must be rejected.
+	req2 := httptest.NewRequest(http.MethodGet, "/api/v1/peer/ping", nil)
+	req2.Header.Set("Authorization", "Bearer "+tok)
+	rec2 := httptest.NewRecorder()
+	handler.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusUnauthorized {
+		t.Fatalf("replay should be 401, got %d", rec2.Code)
+	}
+	if !strings.Contains(rec2.Body.String(), "PEER_REPLAY") {
+		t.Errorf("replay rejection should include PEER_REPLAY code, body: %s", rec2.Body.String())
+	}
+
+	// Audit must have recorded the replay rejection. Drain the auditor
+	// and find an entry with ErrorKind="replay".
+	mgr.Close() // flushes the audit queue
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	found := false
+	for _, e := range repo.audit {
+		if e.ErrorKind == "replay" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("audit should record the replay rejection, entries: %d", len(repo.audit))
 	}
 }

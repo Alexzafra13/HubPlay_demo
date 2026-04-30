@@ -61,7 +61,7 @@ func RequirePeerJWT(mgr *Manager) func(http.Handler) http.Handler {
 				return
 			}
 			ourUUID := mgr.identity.Current().ServerUUID
-			_, peer, err := ValidatePeerToken(mgr.clock, mgr, ourUUID, tok)
+			claims, peer, err := ValidatePeerToken(mgr.clock, mgr, ourUUID, tok)
 			if err != nil {
 				status, code := mapValidationError(err)
 				// Don't have a peer object yet — the token didn't resolve
@@ -69,6 +69,30 @@ func RequirePeerJWT(mgr *Manager) func(http.Handler) http.Handler {
 				mgr.logger.Warn("federation: peer JWT rejected",
 					"err", err, "status", status, "endpoint", r.URL.Path)
 				writePeerError(w, r, status, code, "peer authentication failed")
+				return
+			}
+
+			// Replay check — the JWT individually verifies (signature,
+			// audience, expiry) but a captured token can be replayed
+			// within its 5-minute TTL window. CheckAndStoreNonce returns
+			// false on a duplicate and the request is rejected.
+			tokenExp := mgr.clock.Now().Add(peerTokenTTL)
+			if claims.ExpiresAt != nil {
+				tokenExp = claims.ExpiresAt.Time
+			}
+			if !mgr.CheckAndStoreNonce(claims.Nonce, tokenExp) {
+				mgr.recordAudit(AuditEntry{
+					PeerID:     peer.ID,
+					Method:     r.Method,
+					Endpoint:   normaliseEndpoint(r.URL.Path),
+					StatusCode: http.StatusUnauthorized,
+					ErrorKind:  "replay",
+					DurationMs: time.Since(start).Milliseconds(),
+				})
+				mgr.logger.Warn("federation: peer JWT replay rejected",
+					"peer_id", peer.ID, "endpoint", r.URL.Path)
+				writePeerError(w, r, http.StatusUnauthorized, "PEER_REPLAY",
+					"token already used")
 				return
 			}
 

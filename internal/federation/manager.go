@@ -127,6 +127,7 @@ type Manager struct {
 	httpClt   *http.Client
 	auditor   *Auditor
 	ratelimit *RateLimiter
+	nonces    *nonceCache
 
 	// peerCache caches paired peers by server_uuid for the JWT
 	// validation hot path. Refreshed on each peer mutation.
@@ -155,6 +156,7 @@ func NewManager(ctx context.Context, cfg Config, repo Repo, clk clock.Clock, log
 		httpClt:   &http.Client{Timeout: cfg.HTTPTimeout},
 		auditor:   NewAuditor(repo, logger),
 		ratelimit: NewRateLimiter(clk, cfg.PeerRequestsPerMinute, cfg.PeerBurst),
+		nonces:    newNonceCache(clk),
 	}
 	if err := m.refreshPeerCache(ctx); err != nil {
 		// Tear down the auditor we just spawned so we don't leak the
@@ -501,6 +503,22 @@ func (m *Manager) LookupByServerUUID(serverUUID string) (*Peer, error) {
 		return nil, domain.ErrPeerNotFound
 	}
 	return p, nil
+}
+
+// CheckAndStoreNonce records a nonce as seen and returns whether it was
+// fresh. Returns false on replay (the same nonce was used before within
+// its parent token's TTL window). Called by the peer-JWT middleware
+// after signature/audience/expiry checks pass — replay is the *only*
+// thing left to verify before the request is honoured.
+//
+// `exp` is the JWT's expiry; the cache evicts entries past that point
+// because at that moment the token is rejected upstream by
+// ValidatePeerToken anyway, so the nonce no longer needs tracking.
+func (m *Manager) CheckAndStoreNonce(nonce string, exp time.Time) bool {
+	if m == nil || m.nonces == nil {
+		return true
+	}
+	return m.nonces.checkAndStore(nonce, exp)
 }
 
 // ────────────────────────────────────────────────────────────────────
