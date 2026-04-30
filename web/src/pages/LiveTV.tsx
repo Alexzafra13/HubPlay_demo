@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
+import { useTranslation } from "react-i18next";
 import { useQueries } from "@tanstack/react-query";
 import { useLiveTvPlayer } from "@/store/liveTvPlayer";
 import {
@@ -51,6 +52,7 @@ import {
  * changing a tab body doesn't bloat this file.
  */
 export default function LiveTV() {
+  const { t } = useTranslation();
   const { data: libraries, isLoading: librariesLoading } = useLibraries();
 
   // Every livetv library the current user can see. Channels from all of
@@ -400,11 +402,11 @@ export default function LiveTV() {
     <div>
       <h1 className="flex items-center gap-2 text-xl font-bold text-tv-fg-0 drop-shadow-md md:text-2xl">
         <span className="inline-flex h-2.5 w-2.5 animate-pulse rounded-full bg-tv-live shadow-[0_0_8px_var(--tv-live)]" />
-        TV en directo
+        {t('liveTV.title')}
       </h1>
       <p className="mt-1 text-xs text-tv-fg-1 drop-shadow">
-        <b className="text-tv-fg-0">{channels.length}</b> canales ·{" "}
-        <b className="text-tv-fg-0">{liveNowCount}</b> en vivo ahora
+        <b className="text-tv-fg-0">{channels.length}</b> {t('liveTV.channels')} ·{" "}
+        <b className="text-tv-fg-0">{liveNowCount}</b> {t('liveTV.liveNow')}
       </p>
     </div>
   );
