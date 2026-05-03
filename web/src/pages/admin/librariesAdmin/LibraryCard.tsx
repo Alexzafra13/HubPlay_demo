@@ -12,6 +12,7 @@
 // hosts the modal state). The card just notifies via callbacks.
 
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router";
 import { Badge, Button } from "@/components/common";
 import {
   useScanLibrary,
@@ -19,7 +20,6 @@ import {
   useRefreshM3U,
   useRefreshEPG,
 } from "@/api/hooks";
-import { LivetvAdminPanel } from "@/components/admin/LivetvAdminPanel";
 import type { Library } from "@/api/types";
 import { originLabel, originTitle, scanStatusVariant } from "./helpers";
 
@@ -43,6 +43,7 @@ export function LibraryCard({
   onShowMessage,
 }: LibraryCardProps) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const scanLibrary = useScanLibrary();
   const refreshImages = useRefreshLibraryImages();
   const refreshM3U = useRefreshM3U();
@@ -155,6 +156,13 @@ export function LibraryCard({
               >
                 {t("admin.libraries.refreshEPG", { defaultValue: "Actualizar EPG" })}
               </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => navigate(`/admin/libraries/${lib.id}`)}
+              >
+                {t("admin.libraries.manage", { defaultValue: "Gestionar" })}
+              </Button>
             </>
           ) : (
             // ── Regular media library: scan + metadata + images ──
@@ -236,11 +244,6 @@ export function LibraryCard({
           </Button>
         </div>
       </div>
-      {isLivetv && (
-        <div className="border-t border-border bg-bg-card/40 px-4 py-3">
-          <LivetvAdminPanel libraryId={lib.id} totalChannels={lib.item_count} />
-        </div>
-      )}
     </li>
   );
 }

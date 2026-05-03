@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
+import { useNavigate } from "react-router";
 import { useDeleteLibrary, useLibraries } from "@/api/hooks";
 import { Button, EmptyState, Modal, Skeleton } from "@/components/common";
 import type { ContentType, Library } from "@/api/types";
@@ -9,25 +10,22 @@ import {
   LibraryCard,
   type RefreshMessage,
 } from "./librariesAdmin/LibraryCard";
-import { LibraryFormModal } from "./librariesAdmin/LibraryFormModal";
 import { LibraryEditModal } from "./librariesAdmin/LibraryEditModal";
 
 export default function LibrariesAdmin() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const { data: libraries, isLoading, error } = useLibraries();
   const deleteLibrary = useDeleteLibrary();
 
-  // Page-level UI state. Per-form / per-row state lives inside the
-  // sub-components; everything that crosses component boundaries
-  // (which modal is open, which row is being deleted, the global
-  // refresh-toast banner) stays here.
-  const [showAddModal, setShowAddModal] = useState(false);
+  // Page-level UI state. "New" lives at /admin/libraries/new now
+  // (URL = state), so the page only owns row-scoped overlays:
+  // which row is being edited (target → Sheet) or deleted (target →
+  // confirm). The refresh banner is global because the user can
+  // trigger several refreshes in a row.
   const [editTarget, setEditTarget] = useState<Library | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Library | null>(null);
   const [refreshMessage, setRefreshMessage] = useState<RefreshMessage | null>(null);
-  // Sections are open by default; the admin can collapse the ones they
-  // aren't actively touching. Set instead of object so the toggle stays
-  // a one-liner and order doesn't matter.
   const [collapsedSections, setCollapsedSections] = useState<Set<ContentType>>(
     () => new Set(),
   );
@@ -56,9 +54,6 @@ export default function LibrariesAdmin() {
   }
 
   if (isLoading) {
-    // Skeleton mirrors the real layout: section header strip + 2
-    // library cards under each. Same outer shape (border + radius +
-    // bg-bg-card) so data arrival doesn't reflow the page.
     return (
       <div className="flex flex-col gap-6">
         <div className="flex items-center justify-between">
@@ -102,44 +97,47 @@ export default function LibrariesAdmin() {
     );
   }
 
+  const totalLibraries = libraries?.length ?? 0;
+
   return (
-    <div className="flex flex-col gap-6">
-      {/* Header — wraps on narrow viewports so the "Add library" button
-          stays visible instead of being pushed off the right edge. */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="min-w-0 flex-1 text-lg font-semibold text-text-primary">
-          {t("admin.libraries.title")}
-        </h2>
-        <Button className="shrink-0" onClick={() => setShowAddModal(true)}>
+    <div className="flex flex-col gap-5">
+      {/* Header — title + meta on the left, primary action on the
+          right. Tabular nums on the count so it doesn't twitch as
+          libraries are added/removed. */}
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <h2 className="text-[19px] font-semibold tracking-tight text-text-primary">
+            {t("admin.libraries.title")}
+          </h2>
+          <p className="mt-0.5 text-[12px] text-text-muted tabular-nums">
+            {totalLibraries === 0
+              ? t("admin.libraries.totalNone", { defaultValue: "Sin bibliotecas" })
+              : t("admin.libraries.total", {
+                  defaultValue: "{{count}} bibliotecas",
+                  count: totalLibraries,
+                })}
+          </p>
+        </div>
+        <Button className="shrink-0" onClick={() => navigate("/admin/libraries/new")}>
           {t("admin.libraries.addLibrary")}
         </Button>
       </div>
 
-      {/* Refresh toast — global because the user might trigger several
-          refreshes in a row (M3U then EPG then images), and a banner
-          near the action looks the same for any. The 4s auto-clear is
-          enforced by the effect above. */}
       {refreshMessage && (
         <div
           className={[
-            "rounded-[--radius-md] px-4 py-2 text-sm",
+            "rounded-[--radius-md] border px-3 py-2 text-[13px]",
             refreshMessage.type === "success"
-              ? "bg-success/10 text-success"
-              : "bg-error/10 text-error",
+              ? "border-success/30 bg-success/10 text-success"
+              : "border-error/30 bg-error/10 text-error",
           ].join(" ")}
         >
           {refreshMessage.text}
         </div>
       )}
 
-      {/* Libraries grouped by content type. Each section is a coloured
-          collapsible panel — amber for Películas, cyan for Series, red
-          for TV en vivo. Click the header to fold a section out of the
-          way; useful when one category dominates (a Spanish IPTV admin
-          may have 3 livetv libraries and only 1 movies library). Empty
-          sections are skipped entirely. */}
       {libraries && libraries.length > 0 ? (
-        <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-3">
           {LIBRARY_SECTIONS.map(({ type, labelKey, headerClass, dotClass, textClass }) => {
             const libs = libraries.filter((l) => l.content_type === type);
             if (libs.length === 0) return null;
@@ -151,7 +149,7 @@ export default function LibrariesAdmin() {
                   onClick={() => toggleSection(type)}
                   aria-expanded={isOpen}
                   className={[
-                    "flex items-center gap-3 px-3.5 py-2.5 rounded-[--radius-md] border text-left transition-colors",
+                    "flex items-center gap-3 px-3 py-2 rounded-[--radius-md] border text-left transition-colors",
                     headerClass,
                     isOpen ? "rounded-b-none" : "",
                   ].join(" ")}
@@ -161,17 +159,17 @@ export default function LibrariesAdmin() {
                   </span>
                   <span
                     aria-hidden
-                    className={["h-2 w-2 rounded-full", dotClass].join(" ")}
+                    className={["h-1.5 w-1.5 rounded-full", dotClass].join(" ")}
                   />
                   <span
                     className={[
-                      "text-[13px] font-semibold tracking-wider uppercase",
+                      "text-[11px] font-semibold tracking-[0.08em] uppercase",
                       textClass,
                     ].join(" ")}
                   >
                     {t(labelKey)}
                   </span>
-                  <span className="text-xs text-text-muted tabular-nums">
+                  <span className="text-[11px] text-text-muted tabular-nums">
                     {libs.length}
                   </span>
                 </button>
@@ -197,18 +195,12 @@ export default function LibrariesAdmin() {
           title={t("admin.libraries.noLibraries")}
           description={t("admin.libraries.noLibrariesHint")}
           action={
-            <Button onClick={() => setShowAddModal(true)}>
+            <Button onClick={() => navigate("/admin/libraries/new")}>
               {t("admin.libraries.addLibrary")}
             </Button>
           }
         />
       )}
-
-      <LibraryFormModal
-        isOpen={showAddModal}
-        onClose={() => setShowAddModal(false)}
-        onCreated={() => setShowAddModal(false)}
-      />
 
       <LibraryEditModal
         target={editTarget}
@@ -223,15 +215,6 @@ export default function LibrariesAdmin() {
       >
         <div className="flex flex-col gap-4">
           <p className="text-sm text-text-secondary">
-            {/*
-             * The translation string embeds <strong>{{name}}</strong> so the
-             * library name reads in bold inside the sentence. Plain
-             * t(...) returns the raw "<strong>X</strong>" string and React
-             * renders it as text — that's the "<strong/>" leak the admin
-             * was seeing in the modal. <Trans> parses the embedded tags
-             * against `components` and substitutes the placeholder via
-             * `values`, which is what every i18n-with-rich-text setup uses.
-             */}
             <Trans
               i18nKey="admin.libraries.deleteConfirm"
               values={{ name: deleteTarget?.name ?? "" }}
@@ -243,7 +226,7 @@ export default function LibrariesAdmin() {
             <p className="text-xs text-error">{deleteLibrary.error.message}</p>
           )}
 
-          <div className="flex justify-end gap-3">
+          <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setDeleteTarget(null)}>
               {t("common.cancel")}
             </Button>

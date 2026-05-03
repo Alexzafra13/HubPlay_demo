@@ -23,6 +23,8 @@ const SetupWizard = lazy(() => import("@/pages/setup/SetupWizard"));
 const AdminLayout = lazy(() => import("@/pages/admin/AdminLayout"));
 const DashboardAdmin = lazy(() => import("@/pages/admin/DashboardAdmin"));
 const LibrariesAdmin = lazy(() => import("@/pages/admin/LibrariesAdmin"));
+const LibraryNewPage = lazy(() => import("@/pages/admin/librariesAdmin/LibraryNewPage"));
+const LibraryDetailPage = lazy(() => import("@/pages/admin/librariesAdmin/LibraryDetailPage"));
 const UsersAdmin = lazy(() => import("@/pages/admin/UsersAdmin"));
 const ProvidersAdmin = lazy(() => import("@/pages/admin/ProvidersAdmin"));
 const FederationAdmin = lazy(() => import("@/pages/admin/FederationAdmin"));
@@ -138,6 +140,8 @@ export function App() {
                 <Route index element={<Navigate to="dashboard" replace />} />
                 <Route path="dashboard" element={<DashboardAdmin />} />
                 <Route path="libraries" element={<LibrariesAdmin />} />
+                <Route path="libraries/new" element={<LibraryNewPage />} />
+                <Route path="libraries/:id" element={<LibraryDetailPage />} />
                 <Route path="providers" element={<ProvidersAdmin />} />
                 <Route path="users" element={<UsersAdmin />} />
                 <Route path="federation" element={<FederationAdmin />} />
