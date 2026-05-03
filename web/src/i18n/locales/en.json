@@ -453,6 +453,7 @@
       "title": "Media Libraries",
       "addLibrary": "Add Library",
       "editLibrary": "Edit Library",
+      "browseFolders": "Browse Folders",
       "deleteLibrary": "Delete Library",
       "name": "Name",
       "type": "Type",

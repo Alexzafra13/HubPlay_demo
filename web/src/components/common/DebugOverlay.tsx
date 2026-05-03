@@ -20,6 +20,7 @@
 import { useEffect, useState } from "react";
 import { useLocation } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
+import { useModalStack } from "@/store/modalStack";
 
 const STORAGE_KEY = "hubplay_debug";
 
@@ -43,6 +44,7 @@ export function DebugOverlay() {
   const enabled = isDebugEnabled();
   const location = useLocation();
   const queryClient = useQueryClient();
+  const modalStack = useModalStack((s) => s.stack);
   const [tick, setTick] = useState(0);
 
   // Re-snapshot every 500ms while the panel is visible. cheap enough
@@ -55,10 +57,15 @@ export function DebugOverlay() {
 
   if (!enabled) return null;
 
-  // Anything on document.body with role="dialog" is a modal portal.
-  // Counting them surfaces a "ghost modal" leak immediately.
+  // Cross-check: the store's view of how many modals are open vs.
+  // what's actually mounted on document.body. They should always
+  // match. A drift means something rendered a portal-style overlay
+  // outside the Modal component (or the other way round) and is the
+  // first thing to look at if "navigation feels stuck".
   const dialogs = document.querySelectorAll('[role="dialog"]');
   const scrollLocked = document.body.style.overflow === "hidden";
+  const stackCount = modalStack.length;
+  const drift = stackCount !== dialogs.length;
 
   const queries: QuerySnapshot[] = queryClient
     .getQueryCache()
@@ -104,14 +111,12 @@ export function DebugOverlay() {
         debug · {location.pathname}
       </div>
       <div>
-        modals on body: <b>{dialogs.length}</b>
-        {dialogs.length > 1 && (
-          <span style={{ color: "#fca5a5" }}> ← LEAK</span>
-        )}
+        stack: <b>{stackCount}</b> · dom: <b>{dialogs.length}</b>
+        {drift && <span style={{ color: "#fca5a5" }}> ← drift</span>}
       </div>
       <div>
         body scroll lock: <b>{scrollLocked ? "ON" : "off"}</b>
-        {scrollLocked && dialogs.length === 0 && (
+        {scrollLocked && stackCount === 0 && (
           <span style={{ color: "#fca5a5" }}> ← stale</span>
         )}
       </div>

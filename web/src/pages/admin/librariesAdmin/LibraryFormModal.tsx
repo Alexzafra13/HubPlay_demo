@@ -10,7 +10,7 @@ import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Input, Modal } from "@/components/common";
-import { FolderBrowser } from "@/components/setup/FolderBrowser";
+import { FolderBrowserContent } from "@/components/setup/FolderBrowser";
 import {
   useCreateLibrary,
   useRefreshM3U,
@@ -46,7 +46,13 @@ export function LibraryFormModal({ isOpen, onClose, onCreated }: LibraryFormModa
   const [name, setName] = useState("");
   const [type, setType] = useState<ContentType>("movies");
   const [path, setPath] = useState("");
-  const [showBrowse, setShowBrowse] = useState(false);
+  // The folder picker is no longer a separate modal — it's a step
+  // INSIDE this modal. `view` flips between the two layouts; the
+  // outer <Modal> stays mounted the whole time. That single change
+  // is what makes a leaked-overlay bug structurally impossible: the
+  // picker has nowhere to live except inside the form's portal, and
+  // when the form closes its portal goes with it.
+  const [view, setView] = useState<"form" | "browse">("form");
   // livetv-specific: "public" = iptv-org country picker, "custom" = paste URLs.
   const [liveSource, setLiveSource] = useState<LiveSource>("public");
   // iptv-org supports four URL families: countries/categories/languages/regions.
@@ -88,16 +94,6 @@ export function LibraryFormModal({ isOpen, onClose, onCreated }: LibraryFormModa
 
   // Reset whenever the modal closes so the next open starts clean. Tied
   // to isOpen rather than a manual reset call so callers can't forget.
-  //
-  // showBrowse is reset HERE (not just in FolderBrowser's onClose)
-  // because the FolderBrowser is rendered as a sibling — not a child —
-  // of the form Modal. If the user closes the parent form (X /
-  // Cancelar) while the picker is still open, the picker stays mounted
-  // with isOpen=true; its fixed-position backdrop then covers the
-  // entire viewport invisibly and swallows every click on the page
-  // underneath, which surfaces as "navigation is broken until I
-  // reload". Treating showBrowse as just another form field gets reset
-  // for free.
   useEffect(() => {
     if (isOpen) return;
     setName("");
@@ -113,7 +109,7 @@ export function LibraryFormModal({ isOpen, onClose, onCreated }: LibraryFormModa
     setLanguageFilter([]);
     setTLSInsecure(false);
     setValidationError(null);
-    setShowBrowse(false);
+    setView("form");
   }, [isOpen]);
 
   // Clear the inline validation message whenever the user edits a
@@ -205,8 +201,32 @@ export function LibraryFormModal({ isOpen, onClose, onCreated }: LibraryFormModa
   }
 
   return (
-    <>
-      <Modal isOpen={isOpen} onClose={onClose} title={t("admin.libraries.addLibrary")}>
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title={
+        view === "browse"
+          ? t("admin.libraries.browseFolders")
+          : t("admin.libraries.addLibrary")
+      }
+    >
+      {view === "browse" ? (
+        <FolderBrowserContent
+          useAdmin
+          onSelect={(picked) => {
+            setPath(picked);
+            // Auto-fill the name from the trailing path segment when
+            // the user hasn't typed one yet — saves a round-trip to
+            // the name field on the common case.
+            if (!name.trim()) {
+              const segments = picked.split("/").filter(Boolean);
+              setName(segments[segments.length - 1] ?? "");
+            }
+            setView("form");
+          }}
+          onCancel={() => setView("form")}
+        />
+      ) : (
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <Input
             label={t("admin.libraries.name")}
@@ -429,7 +449,7 @@ export function LibraryFormModal({ isOpen, onClose, onCreated }: LibraryFormModa
               <Button
                 type="button"
                 variant="secondary"
-                onClick={() => setShowBrowse(true)}
+                onClick={() => setView("browse")}
               >
                 {t("common.browse")}
               </Button>
@@ -464,33 +484,7 @@ export function LibraryFormModal({ isOpen, onClose, onCreated }: LibraryFormModa
             </Button>
           </div>
         </form>
-      </Modal>
-
-      {/* Render the picker only while the parent form is open. The
-          previous "render unconditionally, control via showBrowse"
-          shape was load-bearing on showBrowse staying false, and any
-          path that left it true on parent close (mid-fetch error,
-          unhandled callback, race) leaked the picker's full-viewport
-          backdrop on top of the page until reload. Gating on isOpen
-          makes the picker physically incapable of outliving its
-          parent, regardless of how showBrowse got set. */}
-      {isOpen && (
-        <FolderBrowser
-          isOpen={showBrowse}
-          onClose={() => setShowBrowse(false)}
-          onSelect={(picked) => {
-            setPath(picked);
-            // Auto-fill the name from the trailing path segment when
-            // the user hasn't typed one yet — saves a round-trip to the
-            // name field on the common case.
-            if (!name.trim()) {
-              const segments = picked.split("/").filter(Boolean);
-              setName(segments[segments.length - 1] ?? "");
-            }
-          }}
-          useAdmin
-        />
       )}
-    </>
+    </Modal>
   );
 }

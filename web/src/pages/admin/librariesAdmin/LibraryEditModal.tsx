@@ -8,7 +8,7 @@ import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Input, Modal } from "@/components/common";
-import { FolderBrowser } from "@/components/setup/FolderBrowser";
+import { FolderBrowserContent } from "@/components/setup/FolderBrowser";
 import { useUpdateLibrary, usePrefetchBrowseLibraryDirectories } from "@/api/hooks";
 import type { Library } from "@/api/types";
 import { LanguageMultiSelect } from "./LanguageMultiSelect";
@@ -30,27 +30,24 @@ export function LibraryEditModal({ target, onClose }: LibraryEditModalProps) {
   const [epgURL, setEPGURL] = useState("");
   const [languageFilter, setLanguageFilter] = useState<string[]>([]);
   const [tlsInsecure, setTLSInsecure] = useState(false);
-  const [showBrowse, setShowBrowse] = useState(false);
+  // Inline view switching — see LibraryFormModal for the full
+  // rationale. The picker is a step inside this same Modal, never a
+  // sibling overlay.
+  const [view, setView] = useState<"form" | "browse">("form");
 
   // Hydrate from target on each open. `target` is the source of truth;
   // local state mirrors it while the modal is shown.
   useEffect(() => {
-    if (!target) return;
+    if (!target) {
+      setView("form");
+      return;
+    }
     setName(target.name);
     setPath((target.paths ?? [])[0] ?? "");
     setM3UURL(target.m3u_url ?? "");
     setEPGURL(target.epg_url ?? "");
     setLanguageFilter(target.language_filter ?? []);
     setTLSInsecure(target.tls_insecure ?? false);
-  }, [target]);
-
-  // Force-close the picker whenever the parent edit modal closes. The
-  // FolderBrowser is a sibling of the form Modal, so leaving showBrowse
-  // true after the parent unmounts leaves an invisible full-viewport
-  // backdrop that swallows every click on the page underneath. See
-  // LibraryFormModal for the same reasoning.
-  useEffect(() => {
-    if (!target) setShowBrowse(false);
   }, [target]);
 
   // Warm the folder-picker cache while the user reads the form. See
@@ -100,12 +97,25 @@ export function LibraryEditModal({ target, onClose }: LibraryEditModalProps) {
   }
 
   return (
-    <>
-      <Modal
-        isOpen={target !== null}
-        onClose={onClose}
-        title={t("admin.libraries.editLibrary")}
-      >
+    <Modal
+      isOpen={target !== null}
+      onClose={onClose}
+      title={
+        view === "browse"
+          ? t("admin.libraries.browseFolders")
+          : t("admin.libraries.editLibrary")
+      }
+    >
+      {view === "browse" ? (
+        <FolderBrowserContent
+          useAdmin
+          onSelect={(picked) => {
+            setPath(picked);
+            setView("form");
+          }}
+          onCancel={() => setView("form")}
+        />
+      ) : (
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <Input
             label={t("admin.libraries.name")}
@@ -165,7 +175,7 @@ export function LibraryEditModal({ target, onClose }: LibraryEditModalProps) {
               <Button
                 type="button"
                 variant="secondary"
-                onClick={() => setShowBrowse(true)}
+                onClick={() => setView("browse")}
               >
                 {t("common.browse")}
               </Button>
@@ -185,18 +195,7 @@ export function LibraryEditModal({ target, onClose }: LibraryEditModalProps) {
             </Button>
           </div>
         </form>
-      </Modal>
-
-      {/* Picker only mounts while the edit modal is open. See
-          LibraryFormModal for the full rationale. */}
-      {target && (
-        <FolderBrowser
-          isOpen={showBrowse}
-          onClose={() => setShowBrowse(false)}
-          onSelect={(picked) => setPath(picked)}
-          useAdmin
-        />
       )}
-    </>
+    </Modal>
   );
 }
