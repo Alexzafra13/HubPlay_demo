@@ -1,15 +1,26 @@
-// LibraryFormModal — the "Add library" modal.
+// LibraryNewPage — full-page "create library" form.
 //
-// Owns its own form state (name / type / path / livetv-source / iptv-org
-// kind+pick / custom M3U+EPG URLs). The parent only knows whether it's
-// open and gets a callback when a new library has been created. This
-// matches the Edit modal's contract: state is local, the parent stays
-// thin.
+// Replaces what used to be LibraryFormModal. Promoting Add Library
+// from a centred modal to a dedicated route gets us:
+//   - URL = state. /admin/libraries/new is bookmarkable, refresh-
+//     friendly, the back button works, and a refreshed tab lands
+//     back on the same screen instead of an empty list.
+//   - Real estate. A long form with livetv source picker, country
+//     filter, EPG URL, language filter and TLS toggle never fit
+//     comfortably in a max-w-lg modal. The page lays out as two
+//     columns on desktop (form + side help) and stacks on mobile.
+//   - Cleaner visual hierarchy. Page-level title and back button
+//     read like "I'm in a sub-task of admin", which is what's
+//     happening — instead of an overlay that interrupts the list.
+//
+// The folder picker stays as an inline "view: form ↔ browse" step
+// so single-portal-per-flow holds. No nested overlays anywhere.
 
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
+import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
-import { Button, Input, Modal } from "@/components/common";
+import { Button, Input } from "@/components/common";
 import { FolderBrowserContent } from "@/components/setup/FolderBrowser";
 import {
   useCreateLibrary,
@@ -17,7 +28,7 @@ import {
   usePublicCountries,
   usePrefetchBrowseLibraryDirectories,
 } from "@/api/hooks";
-import type { ContentType, Library } from "@/api/types";
+import type { ContentType } from "@/api/types";
 import { FilteredSelect } from "./FilteredSelect";
 import { LanguageMultiSelect } from "./LanguageMultiSelect";
 import { PreflightButton } from "./PreflightButton";
@@ -32,33 +43,17 @@ import {
   type LiveSource,
 } from "./constants";
 
-interface LibraryFormModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  onCreated: (lib: Library) => void;
-}
-
-export function LibraryFormModal({ isOpen, onClose, onCreated }: LibraryFormModalProps) {
+export default function LibraryNewPage() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const createLibrary = useCreateLibrary();
   const refreshM3U = useRefreshM3U();
 
   const [name, setName] = useState("");
   const [type, setType] = useState<ContentType>("movies");
   const [path, setPath] = useState("");
-  // The folder picker is no longer a separate modal — it's a step
-  // INSIDE this modal. `view` flips between the two layouts; the
-  // outer <Modal> stays mounted the whole time. That single change
-  // is what makes a leaked-overlay bug structurally impossible: the
-  // picker has nowhere to live except inside the form's portal, and
-  // when the form closes its portal goes with it.
   const [view, setView] = useState<"form" | "browse">("form");
-  // livetv-specific: "public" = iptv-org country picker, "custom" = paste URLs.
   const [liveSource, setLiveSource] = useState<LiveSource>("public");
-  // iptv-org supports four URL families: countries/categories/languages/regions.
-  // Keeping one state per kind lets the user switch tabs without losing typed
-  // input, and the single search filter `liveFilter` scopes to whatever is
-  // currently active.
   const [liveKind, setLiveKind] = useState<LiveKind>("country");
   const [liveFilter, setLiveFilter] = useState("");
   const [country, setCountry] = useState("");
@@ -67,68 +62,34 @@ export function LibraryFormModal({ isOpen, onClose, onCreated }: LibraryFormModa
   const [epgURL, setEPGURL] = useState("");
   const [languageFilter, setLanguageFilter] = useState<string[]>([]);
   const [tlsInsecure, setTLSInsecure] = useState(false);
-  // Inline validation message. Shows the first thing wrong with the
-  // form so the submit click can never silently no-op — that was the
-  // "Crear se cuelga" report (the button looked dead because every
-  // missing-required-field path returned without setting any state).
   const [validationError, setValidationError] = useState<string | null>(null);
 
-  // Only fires the network request while the Add modal is open AND the user
-  // has picked livetv — avoids loading the 200-country list for every admin
-  // page view.
   const publicCountries = usePublicCountries({
-    enabled: isOpen && type === "livetv" && liveSource === "public",
+    enabled: type === "livetv" && liveSource === "public",
   });
 
-  // Warm the folder-picker cache the moment the form opens. The user
-  // typically takes 2-5s to type the name and pick a content type
-  // before reaching for "Examinar carpetas" — that's plenty of time
-  // for the GET /libraries/browse round-trip to land. By the time they
-  // click, the modal renders against an already-resolved listing
-  // instead of a cold spinner. No-op when the cache is already warm.
+  // Warm the folder-picker cache while the user fills in the form.
+  // No-op when already cached.
   const prefetchBrowse = usePrefetchBrowseLibraryDirectories();
   useEffect(() => {
-    if (!isOpen) return;
     void prefetchBrowse();
-  }, [isOpen, prefetchBrowse]);
-
-  // Reset whenever the modal closes so the next open starts clean. Tied
-  // to isOpen rather than a manual reset call so callers can't forget.
-  useEffect(() => {
-    if (isOpen) return;
-    setName("");
-    setType("movies");
-    setPath("");
-    setLiveSource("public");
-    setLiveKind("country");
-    setLiveFilter("");
-    setCountry("");
-    setLivePick("");
-    setM3UURL("");
-    setEPGURL("");
-    setLanguageFilter([]);
-    setTLSInsecure(false);
-    setValidationError(null);
-    setView("form");
-  }, [isOpen]);
+  }, [prefetchBrowse]);
 
   // Clear the inline validation message whenever the user edits a
   // field — they're showing intent to fix it; nagging the previous
   // error would feel hostile.
   useEffect(() => {
     if (validationError) setValidationError(null);
-    // We intentionally watch every input the validator looks at so any
-    // edit clears the banner. Disabling exhaustive-deps here would be
-    // worse than the cost of the extra dep entries.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [name, path, country, livePick, m3uURL, type, liveSource, liveKind]);
+
+  function close() {
+    navigate("/admin/libraries");
+  }
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
 
-    // Run client-side validation up-front. Each missing-field path
-    // surfaces a human-readable message instead of silently returning,
-    // which is what made the Crear button look dead before the fix.
     if (!name.trim()) {
       setValidationError(
         t("admin.libraries.errors.nameRequired", {
@@ -175,17 +136,16 @@ export function LibraryFormModal({ isOpen, onClose, onCreated }: LibraryFormModa
         },
         {
           onSuccess: (lib) => {
-            onCreated(lib);
-            // Auto-trigger the first M3U refresh so the library isn't empty
-            // the moment the admin closes the modal.
+            // Auto-trigger the first M3U refresh so the library isn't
+            // empty the moment the user lands back on the list.
             refreshM3U.mutate(lib.id);
+            navigate("/admin/libraries");
           },
         },
       );
       return;
     }
 
-    // Non-livetv: path-based library.
     if (!path.trim()) {
       setValidationError(
         t("admin.libraries.errors.pathRequired", {
@@ -196,38 +156,54 @@ export function LibraryFormModal({ isOpen, onClose, onCreated }: LibraryFormModa
     }
     createLibrary.mutate(
       { name: name.trim(), content_type: type, paths: [path.trim()] },
-      { onSuccess: (lib) => onCreated(lib) },
+      { onSuccess: () => navigate("/admin/libraries") },
+    );
+  }
+
+  if (view === "browse") {
+    return (
+      <div className="flex flex-col gap-4">
+        <PageHeader
+          onBack={() => setView("form")}
+          title={t("admin.libraries.browseFolders")}
+          description={t("admin.libraries.browseFoldersHint", {
+            defaultValue: "Selecciona la carpeta donde están los archivos.",
+          })}
+        />
+        <div className="rounded-[--radius-lg] border border-border bg-bg-card p-4 sm:p-6">
+          <FolderBrowserContent
+            useAdmin
+            onSelect={(picked) => {
+              setPath(picked);
+              if (!name.trim()) {
+                const segments = picked.split("/").filter(Boolean);
+                setName(segments[segments.length - 1] ?? "");
+              }
+              setView("form");
+            }}
+            onCancel={() => setView("form")}
+          />
+        </div>
+      </div>
     );
   }
 
   return (
-    <Modal
-      isOpen={isOpen}
-      onClose={onClose}
-      title={
-        view === "browse"
-          ? t("admin.libraries.browseFolders")
-          : t("admin.libraries.addLibrary")
-      }
-    >
-      {view === "browse" ? (
-        <FolderBrowserContent
-          useAdmin
-          onSelect={(picked) => {
-            setPath(picked);
-            // Auto-fill the name from the trailing path segment when
-            // the user hasn't typed one yet — saves a round-trip to
-            // the name field on the common case.
-            if (!name.trim()) {
-              const segments = picked.split("/").filter(Boolean);
-              setName(segments[segments.length - 1] ?? "");
-            }
-            setView("form");
-          }}
-          onCancel={() => setView("form")}
-        />
-      ) : (
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+    <div className="flex flex-col gap-6">
+      <PageHeader
+        onBack={close}
+        title={t("admin.libraries.addLibrary")}
+        description={t("admin.libraries.addLibraryHint", {
+          defaultValue:
+            "Crea una nueva colección. Puedes apuntar a una carpeta local o a un servicio en directo.",
+        })}
+      />
+
+      <form
+        onSubmit={handleSubmit}
+        className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_280px]"
+      >
+        <div className="flex flex-col gap-5 rounded-[--radius-lg] border border-border bg-bg-card p-5 sm:p-6">
           <Input
             label={t("admin.libraries.name")}
             placeholder={t("admin.libraries.namePlaceholder")}
@@ -239,7 +215,7 @@ export function LibraryFormModal({ isOpen, onClose, onCreated }: LibraryFormModa
           <div className="flex flex-col gap-1.5">
             <label
               htmlFor="content-type"
-              className="text-sm font-medium text-text-secondary"
+              className="text-[13px] font-medium tracking-tight text-text-secondary"
             >
               {t("admin.libraries.contentType")}
             </label>
@@ -259,7 +235,6 @@ export function LibraryFormModal({ isOpen, onClose, onCreated }: LibraryFormModa
 
           {type === "livetv" ? (
             <>
-              {/* Source tabs — Público (iptv-org) vs Personalizada */}
               <div
                 role="tablist"
                 aria-label={t("admin.libraries.livetvSource", { defaultValue: "Fuente" })}
@@ -297,7 +272,6 @@ export function LibraryFormModal({ isOpen, onClose, onCreated }: LibraryFormModa
 
               {liveSource === "public" ? (
                 <div className="flex flex-col gap-3">
-                  {/* Kind selector — iptv-org has 4 URL families */}
                   <div
                     role="tablist"
                     aria-label="Tipo de lista"
@@ -334,7 +308,6 @@ export function LibraryFormModal({ isOpen, onClose, onCreated }: LibraryFormModa
                     ))}
                   </div>
 
-                  {/* Live filter input — works across all four kinds. */}
                   <Input
                     label={t("admin.libraries.searchList", { defaultValue: "Filtrar" })}
                     placeholder={t("admin.libraries.searchListPlaceholder", {
@@ -344,9 +317,6 @@ export function LibraryFormModal({ isOpen, onClose, onCreated }: LibraryFormModa
                     onChange={(e) => setLiveFilter(e.target.value)}
                   />
 
-                  {/* The actual picker. Separate branches keep each select's
-                      options and selected value independent — switching tabs
-                      doesn't wipe the filter but does reset the pick. */}
                   {liveKind === "country" ? (
                     <FilteredSelect
                       id="livetv-country"
@@ -388,13 +358,6 @@ export function LibraryFormModal({ isOpen, onClose, onCreated }: LibraryFormModa
                       options={IPTV_ORG_REGIONS}
                     />
                   )}
-
-                  <p className="text-[11px] text-text-muted">
-                    {t("admin.libraries.publicIPTVHint", {
-                      defaultValue:
-                        "Playlists públicas del proyecto iptv-org. Puedes añadir varias (p. ej. España + Francia + Deportes).",
-                    })}
-                  </p>
                 </div>
               ) : (
                 <Input
@@ -406,37 +369,30 @@ export function LibraryFormModal({ isOpen, onClose, onCreated }: LibraryFormModa
                 />
               )}
 
-              <Input
-                label={t("admin.libraries.epgUrl", { defaultValue: "URL EPG (opcional)" })}
-                placeholder="https://ejemplo.com/epg.xml"
-                value={epgURL}
-                onChange={(e) => setEPGURL(e.target.value)}
-              />
-              <p className="-mt-2 text-[11px] text-text-muted">
-                {t("admin.libraries.epgURLHint", {
-                  defaultValue: "Si el M3U trae url-tvg en su cabecera, se auto-detecta.",
-                })}
-              </p>
+              <div className="flex flex-col gap-1">
+                <Input
+                  label={t("admin.libraries.epgUrl", { defaultValue: "URL EPG (opcional)" })}
+                  placeholder="https://ejemplo.com/epg.xml"
+                  value={epgURL}
+                  onChange={(e) => setEPGURL(e.target.value)}
+                />
+                <p className="text-[11px] leading-snug text-text-muted">
+                  {t("admin.libraries.epgURLHint", {
+                    defaultValue:
+                      "Si el M3U trae url-tvg en su cabecera, se auto-detecta.",
+                  })}
+                </p>
+              </div>
 
-              <LanguageMultiSelect
-                value={languageFilter}
-                onChange={setLanguageFilter}
-              />
-
-              <TLSInsecureToggle
-                value={tlsInsecure}
-                onChange={setTLSInsecure}
-              />
+              <LanguageMultiSelect value={languageFilter} onChange={setLanguageFilter} />
+              <TLSInsecureToggle value={tlsInsecure} onChange={setTLSInsecure} />
 
               {liveSource === "custom" && (
-                <PreflightButton
-                  m3uURL={m3uURL}
-                  tlsInsecure={tlsInsecure}
-                />
+                <PreflightButton m3uURL={m3uURL} tlsInsecure={tlsInsecure} />
               )}
             </>
           ) : (
-            <div className="flex gap-2 items-end">
+            <div className="flex items-end gap-2">
               <div className="flex-1">
                 <Input
                   label={t("admin.libraries.path")}
@@ -456,12 +412,6 @@ export function LibraryFormModal({ isOpen, onClose, onCreated }: LibraryFormModa
             </div>
           )}
 
-          {/* Inline validation banner — covers the silent-no-op case
-              the Crear button used to fall into when a required field
-              was missing. The mutation error renders below for
-              backend-side failures (path doesn't exist, duplicate
-              name, …) so the user can tell client validation apart
-              from server validation at a glance. */}
           {validationError && (
             <div
               role="alert"
@@ -475,16 +425,107 @@ export function LibraryFormModal({ isOpen, onClose, onCreated }: LibraryFormModa
             <p className="text-xs text-error">{createLibrary.error.message}</p>
           )}
 
-          <div className="flex justify-end gap-3 pt-2">
-            <Button variant="secondary" type="button" onClick={onClose}>
+          <div className="flex justify-end gap-2 pt-1">
+            <Button variant="secondary" type="button" onClick={close}>
               {t("common.cancel")}
             </Button>
             <Button type="submit" isLoading={createLibrary.isPending}>
               {t("common.create")}
             </Button>
           </div>
-        </form>
-      )}
-    </Modal>
+        </div>
+
+        {/* Side help — explains the choices the user is about to
+            make so they can pick without context-switching. Plex /
+            Jellyfin both have this in their wizard; we put it
+            inline so it doesn't gate progress. */}
+        <aside className="hidden lg:flex flex-col gap-3 rounded-[--radius-lg] border border-border bg-bg-base/40 p-4">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-text-muted">
+            {t("admin.libraries.helpHeader", { defaultValue: "Sobre este formulario" })}
+          </p>
+          <SideTip title={t("admin.libraries.tipNameTitle", { defaultValue: "Nombre" })}>
+            {t("admin.libraries.tipNameBody", {
+              defaultValue:
+                "Aparece en la barra lateral. Cámbialo cuando quieras desde Editar.",
+            })}
+          </SideTip>
+          <SideTip title={t("admin.libraries.tipTypeTitle", { defaultValue: "Tipo de contenido" })}>
+            {t("admin.libraries.tipTypeBody", {
+              defaultValue:
+                "Decide cómo se escanean los archivos (películas, series, música) o si es TV en vivo.",
+            })}
+          </SideTip>
+          {type !== "livetv" ? (
+            <SideTip title={t("admin.libraries.tipPathTitle", { defaultValue: "Ruta" })}>
+              {t("admin.libraries.tipPathBody", {
+                defaultValue:
+                  "Apunta a la carpeta dentro del contenedor. Usa el botón Examinar para listarlas.",
+              })}
+            </SideTip>
+          ) : (
+            <SideTip title={t("admin.libraries.tipLiveTitle", { defaultValue: "Fuente IPTV" })}>
+              {t("admin.libraries.tipLiveBody", {
+                defaultValue:
+                  "Pública usa listas de iptv-org. Personalizada acepta tu propio M3U.",
+              })}
+            </SideTip>
+          )}
+        </aside>
+      </form>
+    </div>
+  );
+}
+
+function PageHeader({
+  onBack,
+  title,
+  description,
+}: {
+  onBack: () => void;
+  title: string;
+  description?: string;
+}) {
+  return (
+    <div className="flex items-start gap-3">
+      <button
+        type="button"
+        onClick={onBack}
+        className="mt-0.5 -ml-1 p-1.5 rounded-[--radius-sm] text-text-muted hover:text-text-primary hover:bg-bg-elevated transition-colors"
+        aria-label="Back"
+      >
+        <svg
+          className="h-4 w-4"
+          viewBox="0 0 20 20"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.5}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12.5 15l-5-5 5-5" />
+        </svg>
+      </button>
+      <div className="min-w-0 flex-1">
+        <h2 className="text-[19px] font-semibold tracking-tight text-text-primary leading-tight">
+          {title}
+        </h2>
+        {description && (
+          <p className="mt-1 text-[13px] text-text-muted">{description}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SideTip({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <p className="text-[12px] font-semibold text-text-secondary">{title}</p>
+      <p className="text-[12px] leading-snug text-text-muted">{children}</p>
+    </div>
   );
 }
