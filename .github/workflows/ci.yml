@@ -68,10 +68,12 @@ jobs:
 
       - uses: golangci/golangci-lint-action@v6
         with:
-          # Pinned to avoid CI breaking on every upstream release. The
-          # matching .golangci.yml uses v1-style keys; bumping to v2+
-          # requires migrating the config first.
-          version: v1.64.8
+          # Pinned to avoid CI breaking on every upstream release. We're
+          # on the v2 line because go.mod targets Go 1.25 and the last
+          # v1 release (v1.64.8) is built with go 1.24, so it can't
+          # analyse the module. Matching `.golangci.yml` uses the v2
+          # schema.
+          version: v2.5.0
 
   build:
     name: Build

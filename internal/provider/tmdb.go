@@ -423,12 +423,12 @@ func (t *TMDbProvider) GetImages(ctx context.Context, externalIDs map[string]str
 // Preferred language → +1000, language-neutral (no text) → +500, English fallback → +100.
 func (t *TMDbProvider) langScore(img tmdbImage, langCode string) float64 {
 	bonus := 0.0
-	switch {
-	case img.Language == langCode:
+	switch img.Language {
+	case langCode:
 		bonus = 1000
-	case img.Language == "" || img.Language == "xx":
+	case "", "xx":
 		bonus = 500
-	case img.Language == "en":
+	case "en":
 		bonus = 100
 	}
 	return img.VoteAverage + bonus
