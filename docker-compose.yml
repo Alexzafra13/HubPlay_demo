@@ -4,14 +4,16 @@ services:
     image: ghcr.io/alexzafra13/hubplay_demo:latest
     container_name: hubplay
     ports:
-      - "8097:8096"
+      - "${HUBPLAY_HOST_PORT:-8097}:8096"
     volumes:
       - ./config:/config
       - ./cache:/cache
-      # Map your media folders here:
-      - /mnt/media:/media:ro
+      # Host paths for your media. Defaults sit next to this compose file
+      # so it works out of the box. Override in `.env` to point elsewhere.
+      - ${HUBPLAY_MEDIA_MOVIES:-./peliculas}:/media/peliculas:ro
+      - ${HUBPLAY_MEDIA_SERIES:-./series}:/media/series:ro
     environment:
-      - TZ=Europe/Madrid
+      - TZ=${TZ:-Europe/Madrid}
     restart: unless-stopped
     logging:
       driver: json-file

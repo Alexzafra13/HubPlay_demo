@@ -29,3 +29,4 @@ web/dist/*
 # pnpm local store materialised when CI / Docker runs `pnpm install`
 # inside the repo with no shared global store.
 web/.pnpm-store/
+_backups/
