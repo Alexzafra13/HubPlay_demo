@@ -1,6 +1,7 @@
 // Setup wizard hooks. Used only during the first-run experience —
 // once setupStatus reports completion, none of these run again.
 
+import { useCallback } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseQueryOptions } from "@tanstack/react-query";
 import { api } from "../client";
@@ -73,14 +74,21 @@ export function useBrowseLibraryDirectories(
 // the time the user pulls up the folder picker the network round-trip
 // is already done. Same staleTime as the live query so a warm cache
 // is reused, not refetched.
+//
+// useCallback is load-bearing: callers wire this through a useEffect
+// dep array, and a fresh function reference on every render would
+// re-fire the effect every render and queue a new prefetch each time.
 export function usePrefetchBrowseLibraryDirectories() {
   const queryClient = useQueryClient();
-  return (path?: string) =>
-    queryClient.prefetchQuery({
-      queryKey: queryKeys.browseLibraryDirectories(path),
-      queryFn: () => api.browseLibraryDirectories(path),
-      staleTime: 5 * 60 * 1000,
-    });
+  return useCallback(
+    (path?: string) =>
+      queryClient.prefetchQuery({
+        queryKey: queryKeys.browseLibraryDirectories(path),
+        queryFn: () => api.browseLibraryDirectories(path),
+        staleTime: 5 * 60 * 1000,
+      }),
+    [queryClient],
+  );
 }
 
 export function useSetupCreateAdmin() {
