@@ -36,6 +36,15 @@ const FolderBrowser: FC<FolderBrowserProps> = ({ isOpen, onClose, onSelect, useA
   // blank in between makes the modal feel broken even when it's
   // working correctly.
   const isNavigating = !isLoading && isFetching;
+  // Whether the placeholder data is stale relative to where the user
+  // *thinks* they are. Once `data.current` matches `currentPath` the
+  // new listing has landed; until then the breadcrumb / list still
+  // belong to the previous path. Used to suppress click handlers and
+  // show an explicit "going to X…" hint so the user doesn't think the
+  // tap was lost.
+  const targetPath = currentPath ?? "/";
+  const isStalePlaceholder =
+    isNavigating && data?.current !== undefined && data.current !== targetPath;
 
   // Handlers are plain functions. Manual useCallback used to wrap these,
   // but its dep array (`data?.parent`, `data?.current`) couldn't be
@@ -123,11 +132,11 @@ const FolderBrowser: FC<FolderBrowserProps> = ({ isOpen, onClose, onSelect, useA
             </div>
           )}
 
-          {isLoading && (
+          {(isLoading || isStalePlaceholder) && (
             <div className="flex flex-col items-center justify-center gap-3 py-16">
               <Spinner size="md" />
               <p className="text-xs text-text-muted">
-                {currentPath ? `Cargando ${currentPath}…` : "Cargando…"}
+                {targetPath !== "/" ? `Cargando ${targetPath}…` : "Cargando…"}
               </p>
             </div>
           )}
@@ -151,7 +160,7 @@ const FolderBrowser: FC<FolderBrowserProps> = ({ isOpen, onClose, onSelect, useA
             </div>
           )}
 
-          {!isLoading && !isError && data && (
+          {!isLoading && !isError && !isStalePlaceholder && data && (
             <div
               className={`divide-y divide-border transition-opacity duration-200 ${
                 isNavigating ? "pointer-events-none opacity-50" : ""

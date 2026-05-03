@@ -88,6 +88,16 @@ export function LibraryFormModal({ isOpen, onClose, onCreated }: LibraryFormModa
 
   // Reset whenever the modal closes so the next open starts clean. Tied
   // to isOpen rather than a manual reset call so callers can't forget.
+  //
+  // showBrowse is reset HERE (not just in FolderBrowser's onClose)
+  // because the FolderBrowser is rendered as a sibling — not a child —
+  // of the form Modal. If the user closes the parent form (X /
+  // Cancelar) while the picker is still open, the picker stays mounted
+  // with isOpen=true; its fixed-position backdrop then covers the
+  // entire viewport invisibly and swallows every click on the page
+  // underneath, which surfaces as "navigation is broken until I
+  // reload". Treating showBrowse as just another form field gets reset
+  // for free.
   useEffect(() => {
     if (isOpen) return;
     setName("");
@@ -103,6 +113,7 @@ export function LibraryFormModal({ isOpen, onClose, onCreated }: LibraryFormModa
     setLanguageFilter([]);
     setTLSInsecure(false);
     setValidationError(null);
+    setShowBrowse(false);
   }, [isOpen]);
 
   // Clear the inline validation message whenever the user edits a

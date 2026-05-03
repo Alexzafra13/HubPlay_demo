@@ -44,6 +44,15 @@ export function LibraryEditModal({ target, onClose }: LibraryEditModalProps) {
     setTLSInsecure(target.tls_insecure ?? false);
   }, [target]);
 
+  // Force-close the picker whenever the parent edit modal closes. The
+  // FolderBrowser is a sibling of the form Modal, so leaving showBrowse
+  // true after the parent unmounts leaves an invisible full-viewport
+  // backdrop that swallows every click on the page underneath. See
+  // LibraryFormModal for the same reasoning.
+  useEffect(() => {
+    if (!target) setShowBrowse(false);
+  }, [target]);
+
   // Warm the folder-picker cache while the user reads the form. See
   // LibraryFormModal for the rationale.
   const prefetchBrowse = usePrefetchBrowseLibraryDirectories();
