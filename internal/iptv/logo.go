@@ -76,7 +76,7 @@ func DeriveLogoFallback(name string) LogoFallback {
 func pickInitials(name string) string {
 	folded := diacriticFolder.Replace(name)
 	fields := strings.FieldsFunc(folded, func(r rune) bool {
-		return !(unicode.IsLetter(r) || unicode.IsDigit(r))
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
 	})
 
 	// No usable tokens (e.g. "···" or pure punctuation).

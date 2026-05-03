@@ -344,6 +344,24 @@ func (s *iptvFakeService) ListUnhealthyChannels(_ context.Context, libraryID str
 	return out, nil
 }
 
+func (s *iptvFakeService) ChannelHealthSummary(_ context.Context, libraryID string) (db.ChannelHealthSummary, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sum := db.ChannelHealthSummary{}
+	for _, ch := range s.channels[libraryID] {
+		if ch.IsActive {
+			sum.TotalChannels++
+		}
+	}
+	for _, ch := range s.unhealthyByLibrary[libraryID] {
+		if ch.ConsecutiveFailures >= db.UnhealthyThreshold {
+			sum.UnhealthyCount++
+		}
+	}
+	sum.WithoutEPGCount = len(s.withoutEPGByLibrary[libraryID])
+	return sum, nil
+}
+
 func (s *iptvFakeService) SetChannelActive(_ context.Context, id string, active bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
