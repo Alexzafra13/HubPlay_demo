@@ -1,4 +1,4 @@
-import { useEffect, lazy, Suspense } from "react";
+import { useEffect, Suspense } from "react";
 import { Routes, Route, Navigate, useNavigate } from "react-router";
 import { useAuthStore } from "@/store/auth";
 import { useSetupStatus } from "@/api/hooks";
@@ -7,35 +7,38 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { ProtectedRoute } from "@/components/layout/ProtectedRoute";
 import { Spinner, ErrorBoundary } from "@/components/common";
 import { DebugOverlay } from "@/components/common/DebugOverlay";
+import { lazyWithRetry } from "@/utils/lazyWithRetry";
 import Login from "@/pages/Login";
 
-// Lazy-loaded routes for code splitting
-const Home = lazy(() => import("@/pages/Home"));
-const Movies = lazy(() => import("@/pages/Movies"));
-const Series = lazy(() => import("@/pages/Series"));
-const ItemDetail = lazy(() => import("@/pages/ItemDetail"));
-const PersonDetail = lazy(() => import("@/pages/PersonDetail"));
-const Search = lazy(() => import("@/pages/Search"));
-const LiveTV = lazy(() => import("@/pages/LiveTV"));
-const Settings = lazy(() => import("@/pages/Settings"));
-const NotFound = lazy(() => import("@/pages/NotFound"));
-const SetupWizard = lazy(() => import("@/pages/setup/SetupWizard"));
-const AdminLayout = lazy(() => import("@/pages/admin/AdminLayout"));
-const DashboardAdmin = lazy(() => import("@/pages/admin/DashboardAdmin"));
-const LibrariesAdmin = lazy(() => import("@/pages/admin/LibrariesAdmin"));
-const LibraryNewPage = lazy(() => import("@/pages/admin/librariesAdmin/LibraryNewPage"));
-const LibraryDetailPage = lazy(() => import("@/pages/admin/librariesAdmin/LibraryDetailPage"));
-const UsersAdmin = lazy(() => import("@/pages/admin/UsersAdmin"));
-const ProvidersAdmin = lazy(() => import("@/pages/admin/ProvidersAdmin"));
-const FederationAdmin = lazy(() => import("@/pages/admin/FederationAdmin"));
-const PeersPage = lazy(() => import("@/pages/PeersPage"));
-const PeerLibrariesPage = lazy(() => import("@/pages/PeerLibrariesPage"));
-const PeerLibraryItemsPage = lazy(() => import("@/pages/PeerLibraryItemsPage"));
-const LinkDevice = lazy(() => import("@/pages/LinkDevice"));
-const SystemLayout = lazy(() => import("@/pages/admin/system/SystemLayout"));
-const SystemStatus = lazy(() => import("@/pages/admin/system/SystemStatus"));
-const SystemActivity = lazy(() => import("@/pages/admin/system/SystemActivity"));
-const SystemAdvanced = lazy(() => import("@/pages/admin/system/SystemAdvanced"));
+// Lazy-loaded routes via lazyWithRetry: when a chunk 404s after a
+// deploy (stale tab references the previous build's hashes), the
+// helper triggers one hard reload so the new index.html resolves.
+const Home = lazyWithRetry(() => import("@/pages/Home"));
+const Movies = lazyWithRetry(() => import("@/pages/Movies"));
+const Series = lazyWithRetry(() => import("@/pages/Series"));
+const ItemDetail = lazyWithRetry(() => import("@/pages/ItemDetail"));
+const PersonDetail = lazyWithRetry(() => import("@/pages/PersonDetail"));
+const Search = lazyWithRetry(() => import("@/pages/Search"));
+const LiveTV = lazyWithRetry(() => import("@/pages/LiveTV"));
+const Settings = lazyWithRetry(() => import("@/pages/Settings"));
+const NotFound = lazyWithRetry(() => import("@/pages/NotFound"));
+const SetupWizard = lazyWithRetry(() => import("@/pages/setup/SetupWizard"));
+const AdminLayout = lazyWithRetry(() => import("@/pages/admin/AdminLayout"));
+const DashboardAdmin = lazyWithRetry(() => import("@/pages/admin/DashboardAdmin"));
+const LibrariesAdmin = lazyWithRetry(() => import("@/pages/admin/LibrariesAdmin"));
+const LibraryNewPage = lazyWithRetry(() => import("@/pages/admin/librariesAdmin/LibraryNewPage"));
+const LibraryDetailPage = lazyWithRetry(() => import("@/pages/admin/librariesAdmin/LibraryDetailPage"));
+const UsersAdmin = lazyWithRetry(() => import("@/pages/admin/UsersAdmin"));
+const ProvidersAdmin = lazyWithRetry(() => import("@/pages/admin/ProvidersAdmin"));
+const FederationAdmin = lazyWithRetry(() => import("@/pages/admin/FederationAdmin"));
+const PeersPage = lazyWithRetry(() => import("@/pages/PeersPage"));
+const PeerLibrariesPage = lazyWithRetry(() => import("@/pages/PeerLibrariesPage"));
+const PeerLibraryItemsPage = lazyWithRetry(() => import("@/pages/PeerLibraryItemsPage"));
+const LinkDevice = lazyWithRetry(() => import("@/pages/LinkDevice"));
+const SystemLayout = lazyWithRetry(() => import("@/pages/admin/system/SystemLayout"));
+const SystemStatus = lazyWithRetry(() => import("@/pages/admin/system/SystemStatus"));
+const SystemActivity = lazyWithRetry(() => import("@/pages/admin/system/SystemActivity"));
+const SystemAdvanced = lazyWithRetry(() => import("@/pages/admin/system/SystemAdvanced"));
 
 function LazyFallback() {
   return (

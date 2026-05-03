@@ -27,5 +27,8 @@ export type { SheetProps, SheetSize } from "./Sheet";
 
 export { ErrorBoundary } from "./ErrorBoundary";
 
+export { PageHeader, useDefaultBreadcrumbs } from "./PageHeader";
+export type { BreadcrumbItem } from "./PageHeader";
+
 export { BlurhashPlaceholder } from "./BlurhashPlaceholder";
 export type { BlurhashPlaceholderProps } from "./BlurhashPlaceholder";

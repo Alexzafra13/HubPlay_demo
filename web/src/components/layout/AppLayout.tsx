@@ -6,6 +6,7 @@ import { TopBarSlotProvider } from './TopBarSlot';
 import { MiniPlayer } from '@/components/livetv/MiniPlayer';
 import { usePlaylistRefreshEvents } from '@/hooks/usePlaylistRefreshEvents';
 import { useUserDataSync } from '@/hooks/useUserDataSync';
+import { useSidebarCollapsed } from '@/hooks/useSidebarCollapsed';
 
 // ─── Props ──────────────────────────────────────────────────────────────────
 
@@ -50,7 +51,7 @@ export function AppLayout({ title }: AppLayoutProps) {
   // Mounts at the shell so it works regardless of the active route.
   useUserDataSync();
 
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, toggleCollapsed] = useSidebarCollapsed();
   const [mobileOpen, setMobileOpen] = useState(false);
   const isMobile = useIsMobile();
   const location = useLocation();
@@ -71,7 +72,7 @@ export function AppLayout({ title }: AppLayoutProps) {
     if (mobileOpen) setMobileOpen(false);
   }
 
-  const toggleCollapse = () => setCollapsed((prev) => !prev);
+  const toggleCollapse = toggleCollapsed;
   const toggleMobile = () => setMobileOpen((prev) => !prev);
   const closeMobile = () => setMobileOpen(false);
 

@@ -91,6 +91,14 @@ const Modal: FC<ModalProps> = ({
       return;
     }
     document.body.style.overflow = "hidden";
+    // Defensive: route-level unmount while still open. The first
+    // useEffect's cleanup handles the close path, but if the parent
+    // tree disappears before we reach close, reset the lock here too.
+    return () => {
+      if (useModalStack.getState().stack.length === 0) {
+        document.body.style.overflow = "";
+      }
+    };
   }, [stackCount]);
 
   const handleKeyDown = useCallback(

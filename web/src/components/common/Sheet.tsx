@@ -94,6 +94,16 @@ const Sheet: FC<SheetProps> = ({
       return;
     }
     document.body.style.overflow = "hidden";
+    // Defensive cleanup: if the component unmounts while the stack
+    // hasn't drained (route change while open), reset on the way out
+    // so the body lock doesn't leak across navigations. Inline reset
+    // in the first effect already handles the normal close path; this
+    // catches the abrupt-unmount case.
+    return () => {
+      if (useModalStack.getState().stack.length === 0) {
+        document.body.style.overflow = "";
+      }
+    };
   }, [stackCount]);
 
   const handleKeyDown = useCallback(

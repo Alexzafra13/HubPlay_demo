@@ -202,10 +202,12 @@ export default function LibrariesAdmin() {
         />
       )}
 
-      <LibraryEditModal
-        target={editTarget}
-        onClose={() => setEditTarget(null)}
-      />
+      {editTarget && (
+        <LibraryEditModal
+          target={editTarget}
+          onClose={() => setEditTarget(null)}
+        />
+      )}
 
       <Modal
         isOpen={deleteTarget !== null}

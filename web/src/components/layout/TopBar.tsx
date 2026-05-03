@@ -19,7 +19,6 @@ export function TopBar({ title, onMenuClick }: TopBarProps) {
   const { user, logout } = useAuthStore();
   const navigate = useNavigate();
   const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
   const dropdownRef = useRef<HTMLDivElement>(null);
   const slotContent = useTopBarSlotContent();
   const scrolled = useScrolledPast(8);
@@ -32,13 +31,6 @@ export function TopBar({ title, onMenuClick }: TopBarProps) {
     navigate('/login');
   };
 
-  const handleSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (searchQuery.trim()) {
-      navigate(`/search?q=${encodeURIComponent(searchQuery.trim())}`);
-      setSearchQuery('');
-    }
-  };
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -97,36 +89,11 @@ export function TopBar({ title, onMenuClick }: TopBarProps) {
 
       <div className="flex-1" />
 
-      {/* Page-injected controls (LiveTV tabs+search, future page filters)
-          take precedence over the global search. Falls back to the
-          global search when no page registers content via useTopBarSlot. */}
-      {slotContent ?? (
-        <form onSubmit={handleSearch} className="hidden sm:flex items-center">
-          <div className="relative">
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 20 20"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-secondary pointer-events-none"
-            >
-              <circle cx="8.5" cy="8.5" r="5" />
-              <path d="M12.5 12.5L17 17" />
-            </svg>
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder={t('topbar.searchPlaceholder')}
-              className="w-48 pl-8 pr-3 py-1.5 rounded-lg bg-bg-base border border-border text-sm text-text-primary placeholder:text-text-secondary focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent transition-colors"
-            />
-          </div>
-        </form>
-      )}
+      {/* Page-injected controls (LiveTV tabs, page filters). The global
+          search lives in the sidebar now, so the fallback default that
+          used to live here was removed — leaving the topbar empty by
+          default lets the page-level header breathe. */}
+      {slotContent}
 
       {/* User Avatar Dropdown */}
       <div className="relative" ref={dropdownRef}>

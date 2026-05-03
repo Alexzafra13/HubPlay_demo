@@ -1,53 +1,71 @@
 @import "tailwindcss";
+@import "@fontsource-variable/inter";
 @import "./tv-theme.css";
 
 /* ============================================
- * THEME: HubPlay Teal
+ * THEME: HubPlay — Dark editorial
  * ============================================ */
 
 :root {
-  /* Backgrounds */
-  --color-bg-base: #0a0a0a;
-  --color-bg-surface: #0e0e0e;
-  --color-bg-card: #161616;
-  --color-bg-elevated: #1e1e1e;
+  /* Surfaces — cooler, slightly bluer darks for depth */
+  --color-bg-base: #07090E;
+  --color-bg-surface: #0B0F17;
+  --color-bg-card: #131722;
+  --color-bg-elevated: #1A1F2E;
+  --color-bg-overlay: #161A23;
+  --color-bg-hover: rgba(255, 255, 255, 0.04);
+  --color-bg-active: rgba(255, 255, 255, 0.06);
+  --color-bg-glass: rgba(11, 15, 23, 0.72);
 
-  /* Borders */
-  --color-border: #ffffff12;
-  --color-border-subtle: #ffffff08;
+  /* Borders — subtler, tiered */
+  --color-border: rgba(255, 255, 255, 0.08);
+  --color-border-subtle: rgba(255, 255, 255, 0.04);
+  --color-border-strong: rgba(255, 255, 255, 0.14);
 
   /* Text */
-  --color-text-primary: #f1f5f9;
-  --color-text-secondary: #94a3b8;
-  --color-text-muted: #64748b;
+  --color-text-primary: #E8EAF0;
+  --color-text-secondary: #8B92A5;
+  --color-text-muted: #5A6072;
 
-  /* Accent — Teal */
-  --color-accent: #0d9488;
-  --color-accent-hover: #0f766e;
-  --color-accent-soft: #0d3d38;
-  --color-accent-light: #2dd4bf;
+  /* Accent — Teal, more vivid for premium pop */
+  --color-accent: #14B8A6;
+  --color-accent-hover: #0E9985;
+  --color-accent-soft: rgba(20, 184, 166, 0.12);
+  --color-accent-light: #2EE3C5;
+  --color-accent-glow: rgba(20, 184, 166, 0.35);
 
   /* Semantic */
   --color-success: #22c55e;
   --color-error: #ef4444;
-  --color-error-soft: rgba(239, 68, 68, 0.1);
+  --color-error-soft: rgba(239, 68, 68, 0.12);
   --color-warning: #f59e0b;
+  --color-warning-soft: rgba(245, 158, 11, 0.12);
   --color-live: #ef4444;
+  --color-live-soft: rgba(239, 68, 68, 0.14);
 
-  /* Spacing & Radius */
+  /* Radius */
   --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-xl: 16px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --radius-2xl: 22px;
 
   /* Fonts */
-  --font-sans: "Plus Jakarta Sans", system-ui, -apple-system, sans-serif;
+  --font-sans: "Inter Variable", "Inter", system-ui, -apple-system, "Segoe UI",
+    sans-serif;
   --font-mono: ui-monospace, "Cascadia Code", "Fira Code", monospace;
 
-  /* Sidebar */
-  --sidebar-width: 240px;
-  --sidebar-collapsed-width: 64px;
-  --topbar-height: 56px;
+  /* Motion tokens */
+  --ease-emphasized: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 320ms;
+
+  /* Shell metrics */
+  --sidebar-width: 248px;
+  --sidebar-collapsed-width: 68px;
+  --topbar-height: 60px;
 }
 
 /* ============================================
@@ -59,24 +77,39 @@
   --color-bg-surface: var(--color-bg-surface);
   --color-bg-card: var(--color-bg-card);
   --color-bg-elevated: var(--color-bg-elevated);
+  --color-bg-overlay: var(--color-bg-overlay);
+  --color-bg-hover: var(--color-bg-hover);
+  --color-bg-active: var(--color-bg-active);
+  --color-bg-glass: var(--color-bg-glass);
+
   --color-border: var(--color-border);
   --color-border-subtle: var(--color-border-subtle);
+  --color-border-strong: var(--color-border-strong);
+
   --color-text-primary: var(--color-text-primary);
   --color-text-secondary: var(--color-text-secondary);
   --color-text-muted: var(--color-text-muted);
+
   --color-accent: var(--color-accent);
   --color-accent-hover: var(--color-accent-hover);
   --color-accent-soft: var(--color-accent-soft);
   --color-accent-light: var(--color-accent-light);
+  --color-accent-glow: var(--color-accent-glow);
+
   --color-success: var(--color-success);
   --color-error: var(--color-error);
   --color-error-soft: var(--color-error-soft);
   --color-warning: var(--color-warning);
+  --color-warning-soft: var(--color-warning-soft);
   --color-live: var(--color-live);
+  --color-live-soft: var(--color-live-soft);
+
   --radius-sm: var(--radius-sm);
   --radius-md: var(--radius-md);
   --radius-lg: var(--radius-lg);
   --radius-xl: var(--radius-xl);
+  --radius-2xl: var(--radius-2xl);
+
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);
 }
@@ -85,21 +118,42 @@
  * Base styles
  * ============================================ */
 
+html {
+  font-feature-settings: "cv11", "ss01", "ss03", "cv02", "cv03", "cv04";
+  font-optical-sizing: auto;
+}
+
 body {
   font-family: var(--font-sans);
   background-color: var(--color-bg-base);
   color: var(--color-text-primary);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  font-weight: 400;
+  text-rendering: optimizeLegibility;
+  font-weight: 450;
+  letter-spacing: -0.005em;
   margin: 0;
   min-height: 100dvh;
 }
 
-/* Scrollbar */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      1200px 600px at 0% 0%,
+      rgba(20, 184, 166, 0.045),
+      transparent 60%
+    ),
+    linear-gradient(180deg, #0A0D14 0%, #07090E 60%);
+}
+
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
@@ -108,23 +162,26 @@ body {
 
 ::-webkit-scrollbar-thumb {
   background: var(--color-border);
-  border-radius: 3px;
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--color-text-muted);
+  background: var(--color-border-strong);
+  background-clip: padding-box;
+  border: 2px solid transparent;
 }
 
-/* Focus ring */
 *:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-bg-base), 0 0 0 4px var(--color-accent);
+  border-radius: var(--radius-sm);
 }
 
-/* Selection */
 ::selection {
   background-color: var(--color-accent-soft);
-  color: var(--color-text-primary);
+  color: var(--color-accent-light);
 }
 
 /* ============================================
@@ -134,7 +191,7 @@ body {
 @keyframes fade-in {
   from {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(6px);
   }
   to {
     opacity: 1;
@@ -166,12 +223,30 @@ body {
   }
 }
 
+@keyframes pulse-soft {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+@keyframes pulse-dot {
+  0%, 100% {
+    box-shadow: 0 0 0 0 var(--color-accent-glow);
+  }
+  50% {
+    box-shadow: 0 0 0 4px transparent;
+  }
+}
+
 .animate-fade-in {
-  animation: fade-in 0.3s ease-out both;
+  animation: fade-in 0.32s var(--ease-emphasized) both;
 }
 
 .animate-slide-in-right {
-  animation: slide-in-right 0.18s cubic-bezier(0.32, 0.72, 0, 1) both;
+  animation: slide-in-right 0.18s var(--ease-emphasized) both;
 }
 
 .animate-shimmer {
@@ -189,7 +264,14 @@ body {
   animation: spin 1s linear infinite;
 }
 
-/* Hide scrollbar but keep scrollability */
+.animate-pulse-soft {
+  animation: pulse-soft 2s var(--ease-standard) infinite;
+}
+
+.animate-pulse-dot {
+  animation: pulse-dot 1.6s var(--ease-standard) infinite;
+}
+
 .scrollbar-hide {
   -ms-overflow-style: none;
   scrollbar-width: none;
