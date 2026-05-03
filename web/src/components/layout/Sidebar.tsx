@@ -8,14 +8,11 @@ import {
   Tv,
   Radio,
   Users,
-  Search,
   Settings,
   Smartphone,
   FolderTree,
   ServerCog,
   LogOut,
-  ChevronsLeft,
-  ChevronsRight,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -59,11 +56,11 @@ const ADMIN: NavItemDef[] = [
 
 interface SidebarProps {
   collapsed: boolean;
-  onToggleCollapse: () => void;
+  /** Mobile drawer-only — desktop has no in-sidebar close (use topbar hamburger). */
   onClose?: () => void;
 }
 
-export function Sidebar({ collapsed, onToggleCollapse, onClose }: SidebarProps) {
+export function Sidebar({ collapsed, onClose }: SidebarProps) {
   const { t } = useTranslation();
   const { user, logout } = useAuthStore();
   const navigate = useNavigate();
@@ -97,47 +94,22 @@ export function Sidebar({ collapsed, onToggleCollapse, onClose }: SidebarProps) 
         transition: "width var(--duration-base) var(--ease-emphasized)",
       }}
     >
-      {/* Brand */}
-      <div className="flex items-center h-16 px-3 flex-shrink-0">
-        <NavLink
-          to="/"
-          end
-          className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-bg-hover transition-colors flex-1 min-w-0"
-        >
-          <BrandMark />
-          <AnimatePresence initial={false}>
-            {!collapsed && (
-              <motion.span
-                key="brand-text"
-                initial={{ opacity: 0, x: -4 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -4 }}
-                transition={{ duration: 0.16 }}
-                className="text-[15px] font-semibold tracking-tight text-text-primary truncate"
-              >
-                HubPlay
-              </motion.span>
-            )}
-          </AnimatePresence>
-        </NavLink>
-        {onClose && (
+      {/* Mobile-only close button at the very top — desktop uses the
+          topbar hamburger as the single toggle. */}
+      {onClose && (
+        <div className="flex items-center justify-end px-3 h-12 flex-shrink-0 md:hidden">
           <button
             onClick={onClose}
-            className="ml-1 p-2 rounded-lg text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors md:hidden"
+            className="p-2 rounded-lg text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
             aria-label={t("nav.closeMenu")}
           >
             <X className="h-[18px] w-[18px]" strokeWidth={1.6} />
           </button>
-        )}
-      </div>
-
-      {/* Search trigger */}
-      <div className="px-3 mb-2">
-        <SearchTrigger collapsed={collapsed} onClick={() => navigate("/search")} />
-      </div>
+        </div>
+      )}
 
       {/* Navigation */}
-      <nav className="flex-1 overflow-y-auto px-3 pb-3 scrollbar-hide">
+      <nav className="flex-1 overflow-y-auto px-3 pt-3 pb-3 scrollbar-hide">
         <NavGroup items={MAIN} collapsed={collapsed} activePath={activePath} />
 
         <Divider collapsed={collapsed} />
@@ -152,8 +124,8 @@ export function Sidebar({ collapsed, onToggleCollapse, onClose }: SidebarProps) 
         )}
       </nav>
 
-      {/* Bottom: user pod + collapse toggle */}
-      <div className="px-3 pb-3 flex-shrink-0 space-y-2">
+      {/* Bottom: user pod (logout lives here) */}
+      <div className="px-3 pb-3 flex-shrink-0">
         <UserPod
           collapsed={collapsed}
           name={user?.display_name || user?.username || ""}
@@ -161,70 +133,12 @@ export function Sidebar({ collapsed, onToggleCollapse, onClose }: SidebarProps) 
           initials={initials}
           onLogout={handleLogout}
         />
-
-        <button
-          onClick={onToggleCollapse}
-          className="hidden md:flex w-full items-center justify-center h-9 rounded-lg text-text-muted hover:text-text-primary hover:bg-bg-hover transition-colors"
-          title={collapsed ? t("nav.expandSidebar") : t("nav.collapseSidebar")}
-          aria-label={collapsed ? t("nav.expandSidebar") : t("nav.collapseSidebar")}
-        >
-          {collapsed ? (
-            <ChevronsRight className="h-[18px] w-[18px]" strokeWidth={1.6} />
-          ) : (
-            <ChevronsLeft className="h-[18px] w-[18px]" strokeWidth={1.6} />
-          )}
-        </button>
       </div>
     </aside>
   );
 }
 
 // ─── Sub-components ─────────────────────────────────────────────────────────
-
-function BrandMark() {
-  return (
-    <span className="relative flex h-8 w-8 items-center justify-center rounded-lg bg-accent/10 ring-1 ring-accent/20 flex-shrink-0">
-      <span
-        className="absolute inset-0 rounded-lg opacity-60 blur-md"
-        style={{
-          background:
-            "radial-gradient(circle at 30% 30%, var(--color-accent-glow), transparent 65%)",
-        }}
-        aria-hidden
-      />
-      <svg viewBox="0 0 24 24" className="relative h-[16px] w-[16px] text-accent fill-current" aria-hidden>
-        <path d="M8 5.5v13l11-6.5L8 5.5z" />
-      </svg>
-    </span>
-  );
-}
-
-function SearchTrigger({ collapsed, onClick }: { collapsed: boolean; onClick: () => void }) {
-  const { t } = useTranslation();
-  if (collapsed) {
-    return (
-      <button
-        onClick={onClick}
-        className="w-full h-10 flex items-center justify-center rounded-lg text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
-        title={t("nav.search")}
-      >
-        <Search className="h-[18px] w-[18px]" strokeWidth={1.6} />
-      </button>
-    );
-  }
-  return (
-    <button
-      onClick={onClick}
-      className="w-full h-10 flex items-center gap-2.5 px-3 rounded-lg bg-bg-hover/60 hover:bg-bg-active border border-border-subtle hover:border-border text-left text-sm text-text-secondary hover:text-text-primary transition-colors"
-    >
-      <Search className="h-[16px] w-[16px] flex-shrink-0" strokeWidth={1.6} />
-      <span className="flex-1 truncate text-[13px]">{t("nav.search")}</span>
-      <kbd className="hidden md:flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-bg-base/60 border border-border-subtle text-text-muted">
-        ⌘K
-      </kbd>
-    </button>
-  );
-}
 
 function Divider({ collapsed }: { collapsed: boolean }) {
   return (

@@ -3,9 +3,15 @@ import { useCallback, useSyncExternalStore } from "react";
 const STORAGE_KEY = "hubplay:sidebar:collapsed";
 const EVENT = "hubplay:sidebar-collapsed-change";
 
+// Default: collapsed (icons only). The premium-feel choice — content
+// gets the breathing room, the topbar hamburger is the explicit
+// "expand" affordance. Users who want it permanently expanded set
+// the key to "0" once and we honor it forever.
 function read(): boolean {
-  if (typeof window === "undefined") return false;
-  return window.localStorage.getItem(STORAGE_KEY) === "1";
+  if (typeof window === "undefined") return true;
+  const stored = window.localStorage.getItem(STORAGE_KEY);
+  if (stored === null) return true;
+  return stored === "1";
 }
 
 function write(value: boolean) {
@@ -28,7 +34,7 @@ function subscribe(onChange: () => void) {
 // custom event, so toggling in one place updates the other instantly
 // without prop-drilling. SSR-safe via getServerSnapshot returning false.
 export function useSidebarCollapsed(): [boolean, () => void, (value: boolean) => void] {
-  const collapsed = useSyncExternalStore(subscribe, read, () => false);
+  const collapsed = useSyncExternalStore(subscribe, read, () => true);
   const toggle = useCallback(() => write(!read()), []);
   const set = useCallback((value: boolean) => write(value), []);
   return [collapsed, toggle, set];

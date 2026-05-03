@@ -11,7 +11,7 @@ export default function Search() {
   const debouncedQuery = useDebounce(query.trim(), 300);
 
   const { data, isLoading } = useSearch(debouncedQuery);
-  const items = data?.items ?? [];
+  const items = data ?? [];
 
   return (
     <div className="flex flex-col gap-6 px-6 py-8 sm:px-10">

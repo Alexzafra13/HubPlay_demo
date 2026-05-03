@@ -473,12 +473,18 @@ export class ApiClient {
     return this.request<PersonDetail>("GET", `/people/${id}`);
   }
 
+  // Backend returns { data: MediaItem[], total: N } and our `request`
+  // helper auto-unwraps the `data` envelope, so the actual resolved
+  // value is the array — not a PaginatedResponse. Earlier callers
+  // typed this as PaginatedResponse and reached for `.items`, which
+  // silently produced empty results in the global search page.
+  // Returning MediaItem[] matches what the wire actually delivers.
   async searchItems(
     q: string,
     type?: string,
     limit?: number,
-  ): Promise<PaginatedResponse<MediaItem>> {
-    return this.request<PaginatedResponse<MediaItem>>("GET", "/items/search", {
+  ): Promise<MediaItem[]> {
+    return this.request<MediaItem[]>("GET", "/items/search", {
       params: { q, type, limit },
     });
   }

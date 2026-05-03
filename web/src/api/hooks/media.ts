@@ -130,9 +130,9 @@ export function usePerson(
 
 export function useSearch(
   q: string,
-  options?: Partial<UseQueryOptions<PaginatedResponse<MediaItem>>>,
+  options?: Partial<UseQueryOptions<MediaItem[]>>,
 ) {
-  return useQuery<PaginatedResponse<MediaItem>>({
+  return useQuery<MediaItem[]>({
     queryKey: queryKeys.search(q),
     queryFn: () => api.searchItems(q),
     enabled: q.length > 0,

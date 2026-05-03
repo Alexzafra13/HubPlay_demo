@@ -87,35 +87,56 @@ export function AppLayout({ title }: AppLayoutProps) {
      * layout transparent lets per-route backgrounds show through.
      */}
     <div className="min-h-screen font-sans">
+      {/*
+       * Layout reorder: TopBar is fixed full-width at the top (z-40);
+       * the sidebar hangs from below it (top: var(--topbar-height),
+       * z-30) so it doesn't overlap the brand row. Main content is
+       * pushed down by topbar height and across by sidebar width.
+       *
+       * Mobile drawer slides in below the topbar — same `top` offset
+       * so the hamburger that opens it stays anchored visually.
+       */}
+
+      {/* TopBar — full-width fixed, owns hamburger + brand + search + avatar */}
+      <TopBar
+        title={title}
+        onMenuClick={isMobile ? toggleMobile : toggleCollapse}
+        sidebarCollapsed={collapsed}
+      />
+
       {/* Mobile drawer overlay */}
       <div
         className={[
           'fixed inset-0 z-30 bg-black/60 backdrop-blur-sm transition-opacity duration-300 md:hidden',
           mobileOpen ? 'opacity-100' : 'opacity-0 pointer-events-none',
         ].join(' ')}
+        style={{ top: 'var(--topbar-height)' }}
         onClick={closeMobile}
       />
 
       {/* Mobile drawer */}
       <div
         className={[
-          'fixed top-0 left-0 h-full z-40 transition-transform duration-300 ease-out md:hidden',
+          'fixed left-0 z-40 transition-transform duration-300 ease-out md:hidden',
           mobileOpen ? 'translate-x-0' : '-translate-x-full pointer-events-none',
         ].join(' ')}
+        style={{
+          top: 'var(--topbar-height)',
+          height: 'calc(100dvh - var(--topbar-height))',
+        }}
       >
-        <Sidebar
-          collapsed={false}
-          onToggleCollapse={toggleCollapse}
-          onClose={closeMobile}
-        />
+        <Sidebar collapsed={false} onClose={closeMobile} />
       </div>
 
       {/* Desktop sidebar */}
-      <div className="hidden md:block fixed top-0 left-0 h-full z-40">
-        <Sidebar
-          collapsed={collapsed}
-          onToggleCollapse={toggleCollapse}
-        />
+      <div
+        className="hidden md:block fixed left-0 z-30"
+        style={{
+          top: 'var(--topbar-height)',
+          height: 'calc(100dvh - var(--topbar-height))',
+        }}
+      >
+        <Sidebar collapsed={collapsed} />
       </div>
 
       {/* Main content area */}
@@ -127,10 +148,9 @@ export function AppLayout({ title }: AppLayoutProps) {
             : collapsed
               ? 'var(--sidebar-collapsed-width)'
               : 'var(--sidebar-width)',
+          paddingTop: 'var(--topbar-height)',
         }}
       >
-        <TopBar title={title} onMenuClick={toggleMobile} />
-
         <main className="px-4 pb-4 md:px-6 md:pb-6">
           <Outlet />
         </main>

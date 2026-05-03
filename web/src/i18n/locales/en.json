@@ -46,7 +46,10 @@
   },
   "topbar": {
     "searchPlaceholder": "Search...",
-    "userMenu": "User menu"
+    "userMenu": "User menu",
+    "suggestions": "Suggestions",
+    "noResultsFor": "No results for",
+    "viewAllResults": "View all results"
   },
   "home": {
     "continueWatching": "Continue Watching",
