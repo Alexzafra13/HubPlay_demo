@@ -68,6 +68,30 @@ interface RequestOptions {
   keepalive?: boolean;
 }
 
+// Hard ceiling on a single fetch attempt. Without a timeout, iOS WebKit
+// silently parks XHR/fetch promises when the app backgrounds or the
+// network transitions (LTE↔Wi-Fi, captive portal, idle TCP cleanup),
+// and the promise never settles — which manifests as a permanent
+// "Cargando…" spinner because TanStack Query only flips to isError on a
+// rejection. 30s is well above any healthy round-trip (admin folder
+// browse over a Windows-Docker bind-mount peaks at ~2s) and short
+// enough that a stuck request fails loudly instead of silently.
+const REQUEST_TIMEOUT_MS = 30_000;
+
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<Response> {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(id);
+  }
+}
+
 type AuthEventListener = {
   onTokenRefresh?: (accessToken: string, refreshToken: string) => void;
   onAuthFailure?: () => void;
@@ -161,18 +185,24 @@ export class ApiClient {
     const maxRetries = 2;
     for (let attempt = 0; ; attempt++) {
       try {
-        response = await fetch(url, {
-          method,
-          headers,
-          credentials: "include",
-          body: body !== undefined ? JSON.stringify(body) : undefined,
-          keepalive,
-        });
+        response = await fetchWithTimeout(
+          url,
+          {
+            method,
+            headers,
+            credentials: "include",
+            body: body !== undefined ? JSON.stringify(body) : undefined,
+            keepalive,
+          },
+          REQUEST_TIMEOUT_MS,
+        );
         // Only retry on server errors for idempotent methods
         const isRetryable = response.status >= 500 && (method === "GET" || method === "HEAD");
         if (!isRetryable || attempt >= maxRetries) break;
       } catch (err) {
-        // Network error — retry any method (request never reached server)
+        // Network error or timeout — retry any method (request never
+        // reached server, so re-sending is safe even for non-idempotent
+        // methods).
         if (attempt >= maxRetries) throw err;
       }
       // Exponential backoff: 500ms, 1000ms
@@ -185,13 +215,17 @@ export class ApiClient {
         try {
           await this.refresh();
           // Retry the original request with the new cookie
-          const retryResponse = await fetch(url, {
-            method,
-            headers,
-            credentials: "include",
-            body: body !== undefined ? JSON.stringify(body) : undefined,
-            keepalive,
-          });
+          const retryResponse = await fetchWithTimeout(
+            url,
+            {
+              method,
+              headers,
+              credentials: "include",
+              body: body !== undefined ? JSON.stringify(body) : undefined,
+              keepalive,
+            },
+            REQUEST_TIMEOUT_MS,
+          );
           if (retryResponse.ok) {
             if (retryResponse.status === 204) return undefined as T;
             const retryJson = await retryResponse.json();
