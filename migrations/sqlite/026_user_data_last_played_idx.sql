@@ -1,0 +1,24 @@
+-- +goose Up
+-- "Trending this week" rail on the home page aggregates plays across
+-- ALL users for the last 7 days:
+--
+--     SELECT item_id, COUNT(*) FROM user_data
+--     WHERE last_played_at > strftime('%s','now','-7 days')
+--     GROUP BY item_id
+--     ORDER BY COUNT(*) DESC LIMIT N
+--
+-- Without an index dedicated to last_played_at the WHERE clause has
+-- to scan every row in user_data. The existing
+-- idx_user_data_continue (user_id, completed, last_played_at DESC)
+-- helps per-user "continue watching" but its leading column is
+-- user_id, so it's useless for a global aggregate that doesn't
+-- restrict by user.
+--
+-- This index covers the trending-window scan and is small (one
+-- timestamp per (user, item) row). Sorted DESC so the LIMIT clause
+-- can stop early once the cutoff is crossed.
+CREATE INDEX IF NOT EXISTS idx_user_data_last_played
+    ON user_data(last_played_at DESC);
+
+-- +goose Down
+DROP INDEX IF EXISTS idx_user_data_last_played;

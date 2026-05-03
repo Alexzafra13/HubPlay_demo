@@ -3,10 +3,9 @@ import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   queryKeys,
-  useChannelsWithoutEPG,
+  useChannelHealthSummary,
   useLibraryEPGSources,
   useScheduledJobs,
-  useUnhealthyChannels,
 } from "@/api/hooks";
 import { useEventStream } from "@/hooks/useEventStream";
 import type { LibraryEPGSource } from "@/api/types";
@@ -47,10 +46,32 @@ export function LivetvAdminPanel({
   totalChannels: number;
 }) {
   const { t } = useTranslation();
+  // Always-on, cheap. The summary is the only thing the panel header
+  // and the tab badges read from on first paint — it's three integers
+  // per library, ~80 bytes on the wire.
+  const { data: summary } = useChannelHealthSummary(libraryId);
+  const unhealthyCount = summary?.unhealthy_count ?? 0;
+  const withoutEPGCount = summary?.without_epg_count ?? 0;
+
+  // sources + schedule are small (a handful of rows each at most),
+  // so they stay eagerly loaded — the warning-dot decoration on the
+  // sources tab needs sources.last_status, and the schedule badge
+  // needs the enabled count, neither of which can come from a
+  // count-only summary.
   const { data: sources = [] } = useLibraryEPGSources(libraryId);
-  const { data: unhealthy = [] } = useUnhealthyChannels(libraryId);
-  const { data: withoutEPG = [] } = useChannelsWithoutEPG(libraryId);
   const { data: schedule = [] } = useScheduledJobs(libraryId);
+
+  // The heavy unhealthy / without-epg lists used to be eagerly
+  // fetched here just so the panel could render `.length` in the
+  // header. They're now loaded by the corresponding sub-panels
+  // themselves — only when their tab mounts — so this component
+  // never carries hundreds of KB of channel rows it doesn't render.
+  const [tabOverride, setTabOverride] = useState<TabKey | null>(null);
+  // Always land on "sources" — the operator opens the panel mainly to
+  // wire EPGs and inspect the M3U, not to firefight unhealthy channels
+  // (those have their own coloured "Atención" banner above the tabs).
+  const defaultTab: TabKey = "sources";
+  const tab = tabOverride ?? defaultTab;
 
   // Real-time push: when the backend's prober/proxy/playback-failure
   // path flips a channel between health buckets it publishes
@@ -81,39 +102,27 @@ export function LivetvAdminPanel({
       queryClient.invalidateQueries({
         queryKey: queryKeys.channels(libraryId),
       });
+      // The summary is what the badge dot + stats strip read from
+      // when the unhealthy tab isn't open, so it must invalidate
+      // alongside the heavy list — otherwise the operator's view
+      // disagrees with itself depending on which tab is active.
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.channelHealthSummary(libraryId),
+      });
     }, 250);
   });
 
   const health = useMemo<HealthReport>(
     () =>
-      computeHealth(
-        t,
-        totalChannels,
-        sources,
-        unhealthy.length,
-        withoutEPG.length,
-      ),
-    [t, totalChannels, sources, unhealthy.length, withoutEPG.length],
+      computeHealth(t, totalChannels, sources, unhealthyCount, withoutEPGCount),
+    [t, totalChannels, sources, unhealthyCount, withoutEPGCount],
   );
-
-  // Default tab is chosen by what the admin most likely wants to see:
-  // if any channels are unhealthy, land on the "con problemas" tab;
-  // otherwise start on "sources" (the primary config surface, also
-  // where source-level errors show up via the warning dot on the tab).
-  // The override state lets a click win — default is only the initial
-  // guess, not a recurring nag.
-  const [tabOverride, setTabOverride] = useState<TabKey | null>(null);
-  // Always land on "sources" — the operator opens the panel mainly to
-  // wire EPGs and inspect the M3U, not to firefight unhealthy channels
-  // (those have their own coloured "Atención" banner above the tabs).
-  const defaultTab: TabKey = "sources";
-  const tab = tabOverride ?? defaultTab;
 
   const epgCoveragePct =
     totalChannels > 0
-      ? Math.round(((totalChannels - withoutEPG.length) / totalChannels) * 100)
+      ? Math.round(((totalChannels - withoutEPGCount) / totalChannels) * 100)
       : 0;
-  const matched = Math.max(0, totalChannels - withoutEPG.length);
+  const matched = Math.max(0, totalChannels - withoutEPGCount);
 
   return (
     <div className="border border-border rounded-lg bg-bg-elevated/40">
@@ -134,8 +143,8 @@ export function LivetvAdminPanel({
             total={totalChannels}
             matched={matched}
             coveragePct={epgCoveragePct}
-            unhealthy={unhealthy.length}
-            withoutEPG={withoutEPG.length}
+            unhealthy={unhealthyCount}
+            withoutEPG={withoutEPGCount}
           />
         </div>
       </header>
@@ -146,8 +155,8 @@ export function LivetvAdminPanel({
         onSelect={setTabOverride}
         sourcesCount={sources.length}
         sourcesHaveErrors={sources.some((s) => s.last_status === "error")}
-        withoutEPGCount={withoutEPG.length}
-        unhealthyCount={unhealthy.length}
+        withoutEPGCount={withoutEPGCount}
+        unhealthyCount={unhealthyCount}
         scheduleEnabledCount={schedule.filter((j) => j.enabled).length}
         scheduleHasErrors={schedule.some((j) => j.last_status === "error")}
         // Always shown: the GET /schedule endpoint synthesises two
@@ -167,10 +176,10 @@ export function LivetvAdminPanel({
         {tab === "sources" ? (
           <EPGSourcesPanel libraryId={libraryId} />
         ) : null}
-        {tab === "without-epg" && withoutEPG.length > 0 ? (
+        {tab === "without-epg" && withoutEPGCount > 0 ? (
           <ChannelsWithoutEPGPanel libraryId={libraryId} />
         ) : null}
-        {tab === "unhealthy" && unhealthy.length > 0 ? (
+        {tab === "unhealthy" && unhealthyCount > 0 ? (
           <UnhealthyChannelsPanel libraryId={libraryId} />
         ) : null}
         {tab === "schedule" ? (

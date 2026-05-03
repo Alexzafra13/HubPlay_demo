@@ -48,6 +48,7 @@ type Dependencies struct {
 	Chapters       *db.ChapterRepository
 	People         *db.PeopleRepository
 	UserPreferences *db.UserPreferenceRepository
+	Home            *db.HomeRepository
 	Providers      *provider.Manager
 	ExternalIDs    *db.ExternalIDRepository
 	LibraryRepo    *db.LibraryRepository
@@ -388,6 +389,27 @@ func NewRouter(deps Dependencies) http.Handler {
 				})
 			}
 
+			// Home page customisation + discovery rails. Sits next
+			// to the other /me/* surfaces because every handler is
+			// scoped to the caller — layout, trending, and live-now
+			// are all per-user (trending filters by accessible
+			// libraries, live-now joins favourites + access).
+			if deps.Home != nil && deps.UserPreferences != nil && deps.LibraryRepo != nil && deps.Items != nil {
+				homeHandler := handlers.NewHomeHandler(
+					deps.Home,
+					deps.UserPreferences,
+					deps.LibraryRepo,
+					deps.Items,
+					deps.Images,
+					deps.Metadata,
+					deps.Logger,
+				)
+				r.Get("/me/home/layout", homeHandler.GetLayout)
+				r.Put("/me/home/layout", homeHandler.PutLayout)
+				r.Get("/me/home/trending", homeHandler.Trending)
+				r.Get("/me/home/live-now", homeHandler.LiveNow)
+			}
+
 			// Streaming
 			if deps.StreamManager != nil {
 				streamHandler := handlers.NewStreamHandler(
@@ -510,6 +532,11 @@ func NewRouter(deps Dependencies) http.Handler {
 					// endpoints live under the admin group below.
 					r.Get("/libraries/{id}/channels/unhealthy", iptvHandler.ListUnhealthyChannels)
 					r.Get("/libraries/{id}/channels/without-epg", iptvHandler.ListChannelsWithoutEPG)
+					// Lightweight summary: just the three counts the
+					// admin panel needs on first paint. The heavy
+					// unhealthy / without-epg lists then load lazily,
+					// only when the operator opens their tab.
+					r.Get("/libraries/{id}/channels/health-summary", iptvHandler.ChannelHealthSummary)
 
 					// IPTV scheduled jobs (automated M3U + EPG refresh).
 					// Read: any user with library ACL (so the livetv panel

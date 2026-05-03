@@ -4,6 +4,7 @@ import { useAuthStore } from "@/store/auth";
 import { useLibraries, useScanLibrary, useProviders, useUpdateProvider } from "@/api/hooks";
 import type { Library } from "@/api/types";
 import { Badge, Button, Spinner } from "@/components/common";
+import { HomeLayoutSettings } from "@/components/home";
 
 function getPathAccessible(lib: Library, path: string): boolean | undefined {
   const status = lib.path_status?.find((ps) => ps.path === path);
@@ -179,6 +180,16 @@ export default function Settings() {
       <h1 className="text-2xl font-bold text-text-primary sm:text-3xl">
         {t('settings.title')}
       </h1>
+
+      {/* Home customisation — placed above Account because it's the
+          setting the user most often returns to once libraries grow.
+          Per-user, no admin gating. */}
+      <section className="flex flex-col gap-4">
+        <h2 className="text-lg font-semibold text-text-primary">
+          {t("settings.homeLayout.title", { defaultValue: "Personalizar inicio" })}
+        </h2>
+        <HomeLayoutSettings />
+      </section>
 
       {/* Account Info */}
       <section className="flex flex-col gap-4">

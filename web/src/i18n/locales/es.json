@@ -52,6 +52,12 @@
     "continueWatching": "Seguir viendo",
     "recentlyAdded": "Agregados recientemente",
     "nextUp": "Siguiente",
+    "trending": "Tendencia esta semana",
+    "liveNow": "En directo ahora",
+    "live": "En directo",
+    "noProgramInfo": "Sin información de programa",
+    "latestIn": "Reciente en {{library}}",
+    "viewDetails": "Ver detalles",
     "failedToLoad": "Error al cargar el contenido. Comprueba la conexion del servidor."
   },
   "link": {
@@ -295,6 +301,18 @@
   },
   "settings": {
     "title": "Ajustes",
+    "homeLayout": {
+      "title": "Personalizar inicio",
+      "intro": "Reordena y activa/desactiva las secciones que aparecen en tu página de Inicio. Los cambios se guardan al instante y se aplican solo a tu cuenta.",
+      "listLabel": "Secciones del inicio",
+      "moveUp": "Mover arriba",
+      "moveDown": "Mover abajo",
+      "libraryRail": "Rail por biblioteca",
+      "saving": "Guardando...",
+      "saveFailed": "No se pudo guardar — reintenta el cambio.",
+      "savedHint": "Los cambios se guardan automáticamente.",
+      "reset": "Restaurar valores por defecto"
+    },
     "account": "Cuenta",
     "username": "Usuario",
     "displayName": "Nombre para mostrar",

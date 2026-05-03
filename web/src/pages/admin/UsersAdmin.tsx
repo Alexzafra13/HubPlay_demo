@@ -3,7 +3,7 @@ import type { FormEvent } from "react";
 import type { User } from "@/api/types";
 import { useUsers, useCreateUser, useDeleteUser, useMe } from "@/api/hooks";
 import { Button, Badge, Modal, Input, EmptyState, Skeleton } from "@/components/common";
-import { useTranslation } from 'react-i18next';
+import { Trans, useTranslation } from 'react-i18next';
 
 export default function UsersAdmin() {
   const { t } = useTranslation();
@@ -255,7 +255,14 @@ export default function UsersAdmin() {
       >
         <div className="flex flex-col gap-4">
           <p className="text-sm text-text-secondary">
-            {t('admin.users.deleteConfirm', { name: deleteTarget?.username })}
+            {/* See LibrariesAdmin for the rationale — embedded <strong>
+                in the i18n string needs <Trans> to render as real
+                markup instead of literal "<strong/>" text. */}
+            <Trans
+              i18nKey="admin.users.deleteConfirm"
+              values={{ name: deleteTarget?.username ?? "" }}
+              components={{ strong: <strong className="text-text-primary" /> }}
+            />
           </p>
 
           {deleteUser.error && (

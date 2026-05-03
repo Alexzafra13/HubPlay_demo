@@ -208,6 +208,27 @@ export default function LiveTV() {
   );
   const closePlayer = collapsePlayer;
 
+  // Deep-link: ?channel=<id> lands here from the Home page's "En
+  // directo ahora" rail (and from any other surface that routes
+  // straight into a specific channel). Opens the player as soon as
+  // the channel list is hydrated, then strips the param from the
+  // URL so a back-nav or refresh doesn't re-trigger.
+  const channelParam = searchParams.get("channel");
+  useEffect(() => {
+    if (!channelParam) return;
+    if (channels.length === 0) return; // wait for channels to load
+    const ch = channels.find((c) => c.id === channelParam);
+    if (ch) openPlayer(ch);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("channel");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [channelParam, channels, openPlayer, setSearchParams]);
+
   // ── Program detail modal ─────────────────────────────────────────
   // Opened from EPGGrid by clicking a programme cell; closes when
   // the user dismisses or clicks "Ver canal ahora" (which also opens

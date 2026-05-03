@@ -123,6 +123,11 @@ type IPTVService interface {
 	// can either permanently disable a dead channel or clear its
 	// counter if they know it's actually working.
 	ListUnhealthyChannels(ctx context.Context, libraryID string, threshold int) ([]*db.Channel, error)
+	// ChannelHealthSummary is the lightweight aggregate the admin
+	// Bibliotecas panel reads on first paint (counts only) so the
+	// page doesn't pull every unhealthy / without-EPG row just to
+	// render badges.
+	ChannelHealthSummary(ctx context.Context, libraryID string) (db.ChannelHealthSummary, error)
 	SetChannelActive(ctx context.Context, id string, active bool) error
 	ResetChannelHealth(ctx context.Context, channelID string) error
 	// RecordProbeFailure is the same hook the proxy uses; the player

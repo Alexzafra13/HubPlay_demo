@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import { useDeleteLibrary, useLibraries } from "@/api/hooks";
 import { Button, EmptyState, Modal, Skeleton } from "@/components/common";
 import type { ContentType, Library } from "@/api/types";
@@ -223,7 +223,20 @@ export default function LibrariesAdmin() {
       >
         <div className="flex flex-col gap-4">
           <p className="text-sm text-text-secondary">
-            {t("admin.libraries.deleteConfirm", { name: deleteTarget?.name })}
+            {/*
+             * The translation string embeds <strong>{{name}}</strong> so the
+             * library name reads in bold inside the sentence. Plain
+             * t(...) returns the raw "<strong>X</strong>" string and React
+             * renders it as text — that's the "<strong/>" leak the admin
+             * was seeing in the modal. <Trans> parses the embedded tags
+             * against `components` and substitutes the placeholder via
+             * `values`, which is what every i18n-with-rich-text setup uses.
+             */}
+            <Trans
+              i18nKey="admin.libraries.deleteConfirm"
+              values={{ name: deleteTarget?.name ?? "" }}
+              components={{ strong: <strong className="text-text-primary" /> }}
+            />
           </p>
 
           {deleteLibrary.error && (

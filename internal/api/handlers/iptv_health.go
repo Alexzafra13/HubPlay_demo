@@ -115,6 +115,38 @@ func channelWithoutEPGDTO(ch *db.Channel) map[string]any {
 
 // ── Channel health endpoints ─────────────────────────────────────
 
+// ChannelHealthSummary returns the lightweight projection the admin
+// Bibliotecas panel needs on first paint: total active channels,
+// unhealthy count, and channels-without-EPG count for one library.
+//
+// Replaces the previous pattern of calling /channels/unhealthy +
+// /channels/without-epg just to read .length on the response — those
+// endpoints can return hundreds of KB on real catalogues, and the
+// Bibliotecas page mounts the panel for every livetv library at once,
+// so the parallel waterfall noticeably froze the browser on first
+// load. This single small response (~80 bytes) replaces all that
+// chatter; the heavy lists only load when the operator clicks into
+// the matching tab.
+func (h *IPTVHandler) ChannelHealthSummary(w http.ResponseWriter, r *http.Request) {
+	libraryID := chi.URLParam(r, "id")
+	if !h.canAccessLibrary(r, libraryID) {
+		h.denyForbidden(w, r)
+		return
+	}
+	sum, err := h.svc.ChannelHealthSummary(r.Context(), libraryID)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{
+		"data": map[string]any{
+			"total_channels":     sum.TotalChannels,
+			"unhealthy_count":    sum.UnhealthyCount,
+			"without_epg_count":  sum.WithoutEPGCount,
+		},
+	})
+}
+
 // ListUnhealthyChannels returns channels whose probe-failure count is
 // above the threshold. Optional `?threshold=N` query param; default
 // is the repo constant.

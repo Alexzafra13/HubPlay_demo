@@ -40,6 +40,8 @@ export const queryKeys = {
     ["unhealthy-channels", libraryId] as const,
   channelsWithoutEPG: (libraryId: string) =>
     ["channels-without-epg", libraryId] as const,
+  channelHealthSummary: (libraryId: string) =>
+    ["channel-health-summary", libraryId] as const,
   scheduledJobs: (libraryId: string) =>
     ["iptv-scheduled-jobs", libraryId] as const,
   continueWatchingChannels: ["continue-watching-channels"] as const,
@@ -58,6 +60,9 @@ export const queryKeys = {
   myPeerItems: (peerID: string, libraryID: string, offset: number) =>
     ["me", "peers", peerID, "libraries", libraryID, "items", offset] as const,
   health: ["health"] as const,
+  homeLayout: ["home", "layout"] as const,
+  homeTrending: ["home", "trending"] as const,
+  homeLiveNow: ["home", "live-now"] as const,
   systemStats: ["system-stats"] as const,
   systemSettings: ["system-settings"] as const,
   authKeys: ["auth-keys"] as const,

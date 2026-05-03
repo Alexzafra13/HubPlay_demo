@@ -882,6 +882,92 @@ export interface AvailableImage {
 
 // ─── Errors ─────────────────────────────────────────────────────────────────
 
+// ─── Channel health summary (admin Bibliotecas panel) ─────────────────────
+
+/**
+ * Lightweight projection the LivetvAdminPanel reads on first paint.
+ * Replaces the previous pattern of fetching the full unhealthy +
+ * without-epg lists just to call `.length` on them — those responses
+ * can be hundreds of KB on real catalogues, and the panel mounts
+ * once per livetv library on the Bibliotecas page so the parallel
+ * waterfall noticeably froze the browser. The full lists now load
+ * lazily, only when their tab is active.
+ */
+export interface ChannelHealthSummary {
+  total_channels: number;
+  unhealthy_count: number;
+  without_epg_count: number;
+}
+
+// ─── Home (configurable home page) ─────────────────────────────────────────
+
+/**
+ * One section/rail in the user's home layout. The same shape is used
+ * over the wire and in storage. `library_id` is set only when the
+ * section type is `latest_in_library`. `library_name` is server-resolved
+ * (read-only) for rail titles — the backend ignores anything the client
+ * sends in this field on PUT.
+ */
+export interface HomeSection {
+  id: string;
+  type:
+    | "continue_watching"
+    | "next_up"
+    | "trending"
+    | "live_now"
+    | "latest_in_library";
+  library_id?: string;
+  library_name?: string;
+  visible: boolean;
+}
+
+export interface HomeLayout {
+  version: number;
+  sections: HomeSection[];
+}
+
+/**
+ * One entry in the "trending this week" rail. Smaller than MediaItem —
+ * carries only what's needed to render a poster card. The frontend
+ * renders these via the same PosterCard / LandscapeCard family by
+ * mapping the fields onto a MediaItem-shaped subset.
+ */
+export interface HomeTrendingItem {
+  id: string;
+  type: string;
+  title: string;
+  library_id: string;
+  play_count: number;
+  year?: number;
+  community_rating?: number;
+  poster_url?: string;
+  poster_blurhash?: string;
+  poster_color?: string;
+  poster_color_muted?: string;
+  backdrop_url?: string;
+  logo_url?: string;
+  overview?: string;
+  genres?: string[];
+}
+
+/**
+ * One channel in the "live now" rail. Always carries the channel
+ * id/name/library; the EPG fields are populated only when the channel
+ * has a program currently airing (the rail still shows the channel
+ * with a "no programme info" hint when EPG is missing).
+ */
+export interface HomeLiveNowChannel {
+  channel_id: string;
+  channel_name: string;
+  channel_logo?: string;
+  library_id: string;
+  library_name: string;
+  program_title?: string;
+  program_start?: string;
+  program_end?: string;
+  program_icon?: string;
+}
+
 export interface ApiErrorBody {
   error: {
     code: string;

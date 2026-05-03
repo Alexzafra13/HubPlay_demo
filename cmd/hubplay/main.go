@@ -325,6 +325,7 @@ func run(configPath string) error {
 		Chapters:        repos.Chapters,
 		People:          repos.People,
 		UserPreferences: repos.UserPreferences,
+		Home:            repos.Home,
 		Providers:     providerManager,
 		ExternalIDs:   repos.ExternalIDs,
 		LibraryRepo:   repos.Libraries,

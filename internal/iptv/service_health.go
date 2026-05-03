@@ -136,6 +136,21 @@ func (s *Service) ListUnhealthyChannels(ctx context.Context, libraryID string, t
 	return s.channels.ListUnhealthyByLibrary(ctx, libraryID, threshold)
 }
 
+// ChannelHealthSummary is what the admin Bibliotecas panel reads on
+// page load to render the status dot, the stats strip, and the tab
+// badge counts — without dragging every channel row over the wire
+// just to call .length on the result. The full lists load lazily,
+// only when the operator clicks into the matching tab.
+//
+// Window matches ChannelWithoutEPGWindow on the read path so the
+// "without EPG" count agrees with what ListChannelsWithoutEPG would
+// return if called for the same library.
+func (s *Service) ChannelHealthSummary(ctx context.Context, libraryID string) (db.ChannelHealthSummary, error) {
+	now := time.Now().UTC()
+	return s.channels.HealthSummaryByLibrary(ctx, libraryID,
+		now.Add(-2*time.Hour), now.Add(ChannelWithoutEPGWindow))
+}
+
 // ResetChannelHealth clears the health state for one channel so it
 // reappears in the user-facing list on next render. Used by the
 // admin "marcar como OK" action.

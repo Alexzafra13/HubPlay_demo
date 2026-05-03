@@ -5,10 +5,14 @@ import type {
   BrowseResponse,
   Channel,
   ChannelWithoutEPG,
+  ChannelHealthSummary,
   ContinueWatchingChannel,
   CreateLibraryRequest,
   EPGProgram,
   HealthResponse,
+  HomeLayout,
+  HomeLiveNowChannel,
+  HomeTrendingItem,
   ImageInfo,
   ImportPublicIPTVResponse,
   IPTVScheduledJob,
@@ -503,6 +507,34 @@ export class ApiClient {
     return this.request<MediaItem[]>("GET", "/me/favorites");
   }
 
+  // ─── Home (configurable home page) ────────────────────────────────────
+
+  async getHomeLayout(): Promise<HomeLayout> {
+    return this.request<HomeLayout>("GET", "/me/home/layout");
+  }
+
+  async putHomeLayout(layout: HomeLayout): Promise<HomeLayout> {
+    return this.request<HomeLayout>("PUT", "/me/home/layout", { body: layout });
+  }
+
+  async getHomeTrending(limit?: number): Promise<HomeTrendingItem[]> {
+    const resp = await this.request<{ items: HomeTrendingItem[]; total: number }>(
+      "GET",
+      "/me/home/trending",
+      { params: { limit } },
+    );
+    return resp.items ?? [];
+  }
+
+  async getHomeLiveNow(limit?: number): Promise<HomeLiveNowChannel[]> {
+    const resp = await this.request<{ items: HomeLiveNowChannel[]; total: number }>(
+      "GET",
+      "/me/home/live-now",
+      { params: { limit } },
+    );
+    return resp.items ?? [];
+  }
+
   // ─── Streaming ────────────────────────────────────────────────────────
 
   async createStreamSession(
@@ -861,6 +893,15 @@ export class ApiClient {
     return this.request<ChannelWithoutEPG[]>(
       "GET",
       `/libraries/${libraryId}/channels/without-epg`,
+    );
+  }
+
+  async getChannelHealthSummary(
+    libraryId: string,
+  ): Promise<ChannelHealthSummary> {
+    return this.request<ChannelHealthSummary>(
+      "GET",
+      `/libraries/${libraryId}/channels/health-summary`,
     );
   }
 

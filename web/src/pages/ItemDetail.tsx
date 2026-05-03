@@ -1,5 +1,5 @@
-import { useState, useCallback, useMemo } from "react";
-import { useParams, useNavigate } from "react-router";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import { useParams, useNavigate, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { useItem, useItemChildren, useToggleFavorite } from "@/api/hooks";
 import type { MediaItem } from "@/api/types";
@@ -24,6 +24,7 @@ export default function ItemDetail() {
   const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { data: item, isLoading, isError } = useItem(id ?? "");
   const user = useAuthStore((s) => s.user);
   const isAdmin = user?.role === "admin";
@@ -76,6 +77,48 @@ export default function ItemDetail() {
     handlePlayerEnded,
     handleClosePlayer,
   } = usePlayback({ pageItemId: id, siblingEpisodes });
+
+  // ─── Auto-play deep-link (?play=1) ──────────────────────────────────────
+  // Lets surfaces like the home hero and Continue Watching launch the
+  // player directly instead of dropping the user on the detail page
+  // and asking them to click again. Movies / episodes call handlePlay;
+  // series + season scopes resolve through the same resume-target the
+  // hero's Reproducir button uses, then forward to the episode's own
+  // route so audio-track / next-up state hydrates correctly.
+  const autoPlayConsumed = useRef(false);
+  useEffect(() => {
+    if (autoPlayConsumed.current) return;
+    if (searchParams.get("play") !== "1") return;
+    if (!item) return;
+
+    if (heroScope === "series" || heroScope === "season") {
+      if (!resumeTarget.episode) return;
+      autoPlayConsumed.current = true;
+      // Strip the param then jump to the episode with auto-play
+      // preserved so its detail surface launches the overlay.
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.delete("play");
+          return next;
+        },
+        { replace: true },
+      );
+      navigate(`/items/${resumeTarget.episode.id}?play=1`, { replace: true });
+      return;
+    }
+
+    autoPlayConsumed.current = true;
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("play");
+        return next;
+      },
+      { replace: true },
+    );
+    void handlePlay();
+  }, [item, heroScope, resumeTarget.episode, searchParams, setSearchParams, navigate, handlePlay]);
 
   // ─── Favorite state ─────────────────────────────────────────────────────
 

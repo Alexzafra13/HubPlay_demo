@@ -38,6 +38,17 @@ export function useBrowseDirectories(
   return useQuery<BrowseResponse>({
     queryKey: queryKeys.browseDirectories(path),
     queryFn: () => api.browseDirectories(path),
+    // Keep the previously rendered listing visible while the next
+    // path's response is in flight — readdir over the Windows-Docker
+    // bind-mount can take 1-2s for large directories, and going
+    // briefly blank in between makes the modal feel broken. With
+    // placeholderData the user keeps seeing the previous listing
+    // (greyed out via isFetching) until the new one lands.
+    placeholderData: (prev) => prev,
+    // Listings are immutable from the client's perspective for the
+    // duration of the modal. Cache for the session so navigating
+    // back to a previously visited path is instant.
+    staleTime: 5 * 60 * 1000,
     ...options,
   });
 }
@@ -49,6 +60,8 @@ export function useBrowseLibraryDirectories(
   return useQuery<BrowseResponse>({
     queryKey: ["browse-library", path] as const,
     queryFn: () => api.browseLibraryDirectories(path),
+    placeholderData: (prev) => prev,
+    staleTime: 5 * 60 * 1000,
     ...options,
   });
 }

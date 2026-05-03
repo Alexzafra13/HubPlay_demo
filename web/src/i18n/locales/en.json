@@ -52,6 +52,12 @@
     "continueWatching": "Continue Watching",
     "recentlyAdded": "Recently Added",
     "nextUp": "Next Up",
+    "trending": "Trending this week",
+    "liveNow": "Live now",
+    "live": "Live",
+    "noProgramInfo": "No programme info",
+    "latestIn": "Latest in {{library}}",
+    "viewDetails": "View details",
     "failedToLoad": "Failed to load content. Check your server connection."
   },
   "link": {
@@ -295,6 +301,18 @@
   },
   "settings": {
     "title": "Settings",
+    "homeLayout": {
+      "title": "Customise home",
+      "intro": "Reorder and toggle the sections that appear on your Home page. Changes save instantly and only affect your account.",
+      "listLabel": "Home sections",
+      "moveUp": "Move up",
+      "moveDown": "Move down",
+      "libraryRail": "Library rail",
+      "saving": "Saving...",
+      "saveFailed": "Save failed — retry the change.",
+      "savedHint": "Changes save automatically.",
+      "reset": "Reset to defaults"
+    },
     "account": "Account",
     "username": "Username",
     "displayName": "Display Name",

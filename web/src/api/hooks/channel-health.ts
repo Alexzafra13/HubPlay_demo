@@ -11,10 +11,35 @@ import type { UseQueryOptions } from "@tanstack/react-query";
 import { api } from "../client";
 import { queryKeys } from "../queryKeys";
 import type {
+  ChannelHealthSummary,
   ChannelWithoutEPG,
   PatchChannelRequest,
   UnhealthyChannel,
 } from "../types";
+
+/**
+ * Cheap aggregate the LivetvAdminPanel reads on first paint to render
+ * status dot + stats strip + tab badges. The full unhealthy /
+ * without-epg lists then load lazily, only when the operator opens
+ * their tab — which is what keeps the Bibliotecas page from freezing
+ * when several livetv libraries with thousands of channels each
+ * mount their panels in parallel.
+ *
+ * Invalidated by the same `channel.health.changed` SSE push that
+ * already invalidates the heavy lists, so the badges flip in real
+ * time without polling.
+ */
+export function useChannelHealthSummary(
+  libraryId: string,
+  options?: Partial<UseQueryOptions<ChannelHealthSummary>>,
+) {
+  return useQuery<ChannelHealthSummary>({
+    queryKey: queryKeys.channelHealthSummary(libraryId),
+    queryFn: () => api.getChannelHealthSummary(libraryId),
+    enabled: !!libraryId,
+    ...options,
+  });
+}
 
 export function useUnhealthyChannels(
   libraryId: string,
@@ -41,6 +66,9 @@ export function useResetChannelHealth(libraryId: string) {
         queryKey: queryKeys.unhealthyChannels(libraryId),
       });
       queryClient.invalidateQueries({ queryKey: queryKeys.channels(libraryId) });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.channelHealthSummary(libraryId),
+      });
     },
   });
 }
@@ -54,6 +82,9 @@ export function useDisableChannel(libraryId: string) {
         queryKey: queryKeys.unhealthyChannels(libraryId),
       });
       queryClient.invalidateQueries({ queryKey: queryKeys.channels(libraryId) });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.channelHealthSummary(libraryId),
+      });
     },
   });
 }
@@ -67,6 +98,9 @@ export function useEnableChannel(libraryId: string) {
         queryKey: queryKeys.unhealthyChannels(libraryId),
       });
       queryClient.invalidateQueries({ queryKey: queryKeys.channels(libraryId) });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.channelHealthSummary(libraryId),
+      });
     },
   });
 }
@@ -104,6 +138,12 @@ export function usePatchChannel(libraryId: string) {
         queryKey: queryKeys.channelsWithoutEPG(libraryId),
       });
       queryClient.invalidateQueries({ queryKey: queryKeys.channels(libraryId) });
+      // The summary's without-EPG count drops when a tvg_id patch lands
+      // an orphan back into a programme — invalidate so the badge in
+      // the panel header agrees with the list emptying out.
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.channelHealthSummary(libraryId),
+      });
     },
   });
 }

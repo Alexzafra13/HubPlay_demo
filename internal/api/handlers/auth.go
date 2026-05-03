@@ -47,15 +47,55 @@ func NewAuthHandler(authSvc AuthService, userSvc UserService, authCfg config.Aut
 	}
 }
 
+// cookieSecure decides whether the Secure flag should be set on
+// auth cookies for the current request. Returns true when the
+// connection looks TLS-protected: either net/http resolved a TLS
+// connection state, or a reverse proxy in front of us forwarded the
+// original scheme via X-Forwarded-Proto.
+//
+// On plain http://localhost (the default dev / docker-compose
+// setup) we MUST NOT mark the cookie Secure, otherwise some
+// browsers refuse to attach it to subsequent same-origin POSTs even
+// though they happily send it on GETs — that was the symptom that
+// surfaced as a "401 on /libraries/browse while every GET works"
+// for the admin folder picker. Letting the flag follow the actual
+// transport keeps strict TLS protection for prod (HTTPS reverse
+// proxy) and stops the dev environment shooting itself in the foot.
+func cookieSecure(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	// Behind a reverse proxy / load balancer that terminates TLS,
+	// the original scheme arrives in X-Forwarded-Proto. We trust
+	// that header here because the docker-compose / nginx examples
+	// in deploy/ set it explicitly; pure self-hosted dev never
+	// receives the header and falls through to "not secure",
+	// which is the correct answer for plain http.
+	if proto := r.Header.Get("X-Forwarded-Proto"); proto == "https" {
+		return true
+	}
+	return false
+}
+
 // setAuthCookies sets HTTP-only cookies for access and refresh tokens.
-func setAuthCookies(w http.ResponseWriter, token *auth.AuthToken, accessTTL, refreshTTL int) {
+//
+// Cookie path is `/` (not `/api/v1` like the original) so the
+// browser attaches them to every same-origin request; the path-scope
+// experiment was tripping up at least one configuration where a
+// SameSite=Lax + Secure + Path=/api/v1 combo dropped the cookie on
+// non-navigation POSTs while keeping it on GETs. Keeping `/` as the
+// scope is what every reference cookie-auth setup (Plex, Jellyfin,
+// generic OAuth proxies) uses and makes the behaviour predictable
+// across browsers.
+func setAuthCookies(w http.ResponseWriter, r *http.Request, token *auth.AuthToken, accessTTL, refreshTTL int) {
+	secure := cookieSecure(r)
 	http.SetCookie(w, &http.Cookie{
 		Name:     accessCookieName,
 		Value:    token.AccessToken,
-		Path:     "/api/v1",
+		Path:     "/",
 		MaxAge:   accessTTL,
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
 	})
 	http.SetCookie(w, &http.Cookie{
@@ -64,20 +104,23 @@ func setAuthCookies(w http.ResponseWriter, token *auth.AuthToken, accessTTL, ref
 		Path:     "/api/v1/auth",
 		MaxAge:   refreshTTL,
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   secure,
 		SameSite: http.SameSiteStrictMode,
 	})
 }
 
 // clearAuthCookies removes auth cookies by setting them expired.
-func clearAuthCookies(w http.ResponseWriter) {
+// Mirrors setAuthCookies' Path/Secure choices so the browser's
+// cookie-jar key matches and the deletion actually lands.
+func clearAuthCookies(w http.ResponseWriter, r *http.Request) {
+	secure := cookieSecure(r)
 	http.SetCookie(w, &http.Cookie{
 		Name:     accessCookieName,
 		Value:    "",
-		Path:     "/api/v1",
+		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
 	})
 	http.SetCookie(w, &http.Cookie{
@@ -86,7 +129,7 @@ func clearAuthCookies(w http.ResponseWriter) {
 		Path:     "/api/v1/auth",
 		MaxAge:   -1,
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   secure,
 		SameSite: http.SameSiteStrictMode,
 	})
 }
@@ -129,7 +172,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	setAuthCookies(w, token, int(h.authCfg.AccessTokenTTL.Seconds()), int(h.authCfg.RefreshTokenTTL.Seconds()))
+	setAuthCookies(w, r, token, int(h.authCfg.AccessTokenTTL.Seconds()), int(h.authCfg.RefreshTokenTTL.Seconds()))
 	respondJSON(w, http.StatusOK, map[string]any{"data": authTokenResponse(token, u)})
 }
 
@@ -168,7 +211,7 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	setAuthCookies(w, token, int(h.authCfg.AccessTokenTTL.Seconds()), int(h.authCfg.RefreshTokenTTL.Seconds()))
+	setAuthCookies(w, r, token, int(h.authCfg.AccessTokenTTL.Seconds()), int(h.authCfg.RefreshTokenTTL.Seconds()))
 	respondJSON(w, http.StatusOK, map[string]any{"data": authTokenResponse(token, u)})
 }
 
@@ -200,7 +243,7 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	clearAuthCookies(w)
+	clearAuthCookies(w, r)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -309,7 +352,7 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	setAuthCookies(w, token, int(h.authCfg.AccessTokenTTL.Seconds()), int(h.authCfg.RefreshTokenTTL.Seconds()))
+	setAuthCookies(w, r, token, int(h.authCfg.AccessTokenTTL.Seconds()), int(h.authCfg.RefreshTokenTTL.Seconds()))
 	respondJSON(w, http.StatusCreated, map[string]any{"data": authTokenResponse(token, u)})
 }
 

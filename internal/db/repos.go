@@ -27,6 +27,7 @@ type Repositories struct {
 	Settings           *SettingsRepository
 	People             *PeopleRepository
 	DeviceCodes        *DeviceCodeRepository
+	Home               *HomeRepository
 }
 
 // NewRepositories creates all repositories from a database connection.
@@ -55,5 +56,6 @@ func NewRepositories(database *sql.DB) *Repositories {
 		Settings:           NewSettingsRepository(database),
 		People:             NewPeopleRepository(database),
 		DeviceCodes:        NewDeviceCodeRepository(database),
+		Home:               NewHomeRepository(database),
 	}
 }

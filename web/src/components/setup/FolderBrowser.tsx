@@ -23,7 +23,19 @@ const FolderBrowser: FC<FolderBrowserProps> = ({ isOpen, onClose, onSelect, useA
     enabled: isOpen && !!useAdmin,
   });
 
-  const { data, isLoading, isError, error } = useAdmin ? adminBrowse : setupBrowse;
+  const { data, isLoading, isError, error, isFetching } = useAdmin
+    ? adminBrowse
+    : setupBrowse;
+  // Distinguish "first time loading at all" from "swapping a fetched
+  // listing for a different path". `isLoading` is true only on the
+  // very first fetch (no cached data exists); `isFetching` flips on
+  // every subsequent navigation. We render the spinner for the cold
+  // start, but for navigation we keep the previous listing painted
+  // and just dim it + show a thin progress bar — the bind-mounted
+  // /media on Windows-Docker can take 1-2s to readdir, and going
+  // blank in between makes the modal feel broken even when it's
+  // working correctly.
+  const isNavigating = !isLoading && isFetching;
 
   // Handlers are plain functions. Manual useCallback used to wrap these,
   // but its dep array (`data?.parent`, `data?.current`) couldn't be
@@ -96,11 +108,27 @@ const FolderBrowser: FC<FolderBrowserProps> = ({ isOpen, onClose, onSelect, useA
           </div>
         )}
 
-        {/* Directory listing */}
-        <div className="min-h-[280px] max-h-[400px] overflow-y-auto rounded-[--radius-md] border border-border bg-bg-base">
+        {/* Directory listing.
+            Wrapper carries a thin top-progress strip while a navigation
+            request is in flight, so the user sees motion even when the
+            previous listing is still painted underneath. The cold-start
+            spinner only fires when there's no cached listing at all. */}
+        <div className="relative min-h-[280px] max-h-[400px] overflow-y-auto rounded-[--radius-md] border border-border bg-bg-base">
+          {isNavigating && (
+            <div
+              className="absolute inset-x-0 top-0 z-10 h-0.5 overflow-hidden bg-bg-elevated"
+              aria-hidden="true"
+            >
+              <div className="h-full w-1/3 animate-[shimmer_1s_linear_infinite] bg-accent" />
+            </div>
+          )}
+
           {isLoading && (
-            <div className="flex items-center justify-center py-16">
+            <div className="flex flex-col items-center justify-center gap-3 py-16">
               <Spinner size="md" />
+              <p className="text-xs text-text-muted">
+                {currentPath ? `Cargando ${currentPath}…` : "Cargando…"}
+              </p>
             </div>
           )}
 
@@ -124,7 +152,11 @@ const FolderBrowser: FC<FolderBrowserProps> = ({ isOpen, onClose, onSelect, useA
           )}
 
           {!isLoading && !isError && data && (
-            <div className="divide-y divide-border">
+            <div
+              className={`divide-y divide-border transition-opacity duration-200 ${
+                isNavigating ? "pointer-events-none opacity-50" : ""
+              }`}
+            >
               {/* Go up entry */}
               {data.parent && data.current !== "/" && (
                 <button

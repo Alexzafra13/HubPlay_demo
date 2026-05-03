@@ -248,6 +248,21 @@ func (h *ProgressHandler) ContinueWatching(w http.ResponseWriter, r *http.Reques
 
 	result := make([]map[string]any, 0, len(items))
 	for _, item := range items {
+		// Mirror the user_data envelope every other MediaItem-shaped
+		// endpoint emits so cards on the home rail can read
+		// `user_data.progress.percentage` without a special case.
+		// position/duration are kept at the top level for backwards
+		// compat with anything still reading the flat shape.
+		var pct float64
+		if item.DurationTicks > 0 {
+			pct = float64(item.PositionTicks) / float64(item.DurationTicks) * 100
+			if pct < 0 {
+				pct = 0
+			}
+			if pct > 100 {
+				pct = 100
+			}
+		}
 		entry := map[string]any{
 			"id":             item.ItemID,
 			"item_id":        item.ItemID, // backwards compat
@@ -260,6 +275,18 @@ func (h *ProgressHandler) ContinueWatching(w http.ResponseWriter, r *http.Reques
 			"poster_url":     nil,
 			"backdrop_url":   nil,
 			"logo_url":       nil,
+			"user_data": map[string]any{
+				"progress": map[string]any{
+					"position_ticks":        item.PositionTicks,
+					"percentage":            pct,
+					"audio_stream_index":    nil,
+					"subtitle_stream_index": nil,
+				},
+				"is_favorite":    false,
+				"played":         false,
+				"play_count":     0,
+				"last_played_at": item.LastPlayedAt,
+			},
 		}
 		// Episode coordinates so the SeriesHero / season "Sigue viendo"
 		// panel can render the SXXEYY badge without a second hop.

@@ -281,6 +281,61 @@ func (r *ChannelRepository) ListUnhealthyByLibrary(ctx context.Context, libraryI
 	return out, rows.Err()
 }
 
+// ChannelHealthSummary is the lightweight projection the admin home
+// panel reads to render badges + stats without pulling the full
+// unhealthy / without-epg / total channel lists. Each value is a
+// single COUNT(*) — three tiny aggregates in one round-trip vs.
+// hundreds of KB of full channel rows that the panel previously
+// loaded just to call `.length` on.
+type ChannelHealthSummary struct {
+	TotalChannels   int
+	UnhealthyCount  int
+	WithoutEPGCount int
+}
+
+// HealthSummaryByLibrary computes the three counts the admin Bibliotecas
+// panel needs (total active channels, unhealthy count, without-EPG
+// count) in a single SQL statement so the page-level "is this library
+// happy?" decision pays one round-trip instead of three big payloads.
+//
+// `since` / `until` define the EPG-coverage window the without-epg
+// count uses — same semantics as ListWithoutEPGByLibrary.
+//
+// Filtered conditional aggregates (`COUNT(*) FILTER (WHERE ...)`)
+// keep the query a single scan over the channels table; the EPG
+// subquery is correlated per channel, which the existing index on
+// epg_programs(channel_id, start_time, end_time) covers.
+func (r *ChannelRepository) HealthSummaryByLibrary(
+	ctx context.Context,
+	libraryID string,
+	since, until time.Time,
+) (ChannelHealthSummary, error) {
+	const query = `
+		SELECT
+			COUNT(*) FILTER (WHERE c.is_active = 1)                             AS total_active,
+			COUNT(*) FILTER (WHERE c.consecutive_failures >= ?)                 AS unhealthy,
+			COUNT(*) FILTER (
+				WHERE c.is_active = 1
+				  AND NOT EXISTS (
+				      SELECT 1 FROM epg_programs p
+				      WHERE p.channel_id = c.id
+				        AND p.end_time   > ?
+				        AND p.start_time < ?
+				  )
+			) AS without_epg
+		FROM channels c
+		WHERE c.library_id = ?`
+
+	var sum ChannelHealthSummary
+	err := r.db.QueryRowContext(ctx, query,
+		UnhealthyThreshold, since.UTC(), until.UTC(), libraryID,
+	).Scan(&sum.TotalChannels, &sum.UnhealthyCount, &sum.WithoutEPGCount)
+	if err != nil {
+		return ChannelHealthSummary{}, fmt.Errorf("health summary: %w", err)
+	}
+	return sum, nil
+}
+
 // ListHealthyByLibrary returns the channels the user-facing UI should
 // render: active and below the unhealthy threshold. Sorted by number
 // ascending — same order the M3U import produces and what viewers

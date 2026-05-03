@@ -56,6 +56,11 @@ export function LibraryFormModal({ isOpen, onClose, onCreated }: LibraryFormModa
   const [epgURL, setEPGURL] = useState("");
   const [languageFilter, setLanguageFilter] = useState<string[]>([]);
   const [tlsInsecure, setTLSInsecure] = useState(false);
+  // Inline validation message. Shows the first thing wrong with the
+  // form so the submit click can never silently no-op — that was the
+  // "Crear se cuelga" report (the button looked dead because every
+  // missing-required-field path returned without setting any state).
+  const [validationError, setValidationError] = useState<string | null>(null);
 
   // Only fires the network request while the Add modal is open AND the user
   // has picked livetv — avoids loading the 200-country list for every admin
@@ -80,21 +85,58 @@ export function LibraryFormModal({ isOpen, onClose, onCreated }: LibraryFormModa
     setEPGURL("");
     setLanguageFilter([]);
     setTLSInsecure(false);
+    setValidationError(null);
   }, [isOpen]);
+
+  // Clear the inline validation message whenever the user edits a
+  // field — they're showing intent to fix it; nagging the previous
+  // error would feel hostile.
+  useEffect(() => {
+    if (validationError) setValidationError(null);
+    // We intentionally watch every input the validator looks at so any
+    // edit clears the banner. Disabling exhaustive-deps here would be
+    // worse than the cost of the extra dep entries.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [name, path, country, livePick, m3uURL, type, liveSource, liveKind]);
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    if (!name.trim()) return;
+
+    // Run client-side validation up-front. Each missing-field path
+    // surfaces a human-readable message instead of silently returning,
+    // which is what made the Crear button look dead before the fix.
+    if (!name.trim()) {
+      setValidationError(
+        t("admin.libraries.errors.nameRequired", {
+          defaultValue: "El nombre es obligatorio.",
+        }),
+      );
+      return;
+    }
 
     if (type === "livetv") {
-      // Resolve the M3U URL depending on the chosen source.
       let resolvedM3U = "";
       if (liveSource === "public") {
         const pick = liveKind === "country" ? country : livePick;
-        if (!pick) return;
+        if (!pick) {
+          setValidationError(
+            t("admin.libraries.errors.livePickRequired", {
+              defaultValue:
+                "Selecciona un país, categoría, idioma o región para la lista pública.",
+            }),
+          );
+          return;
+        }
         resolvedM3U = `https://iptv-org.github.io/iptv/${IPTV_ORG_PATH_BY_KIND[liveKind]}/${pick}.m3u`;
       } else {
-        if (!m3uURL.trim()) return;
+        if (!m3uURL.trim()) {
+          setValidationError(
+            t("admin.libraries.errors.m3uRequired", {
+              defaultValue: "La URL del M3U es obligatoria.",
+            }),
+          );
+          return;
+        }
         resolvedM3U = m3uURL.trim();
       }
       createLibrary.mutate(
@@ -120,7 +162,14 @@ export function LibraryFormModal({ isOpen, onClose, onCreated }: LibraryFormModa
     }
 
     // Non-livetv: path-based library.
-    if (!path.trim()) return;
+    if (!path.trim()) {
+      setValidationError(
+        t("admin.libraries.errors.pathRequired", {
+          defaultValue: "Indica al menos una ruta de carpeta.",
+        }),
+      );
+      return;
+    }
     createLibrary.mutate(
       { name: name.trim(), content_type: type, paths: [path.trim()] },
       { onSuccess: (lib) => onCreated(lib) },
@@ -356,6 +405,21 @@ export function LibraryFormModal({ isOpen, onClose, onCreated }: LibraryFormModa
               >
                 {t("common.browse")}
               </Button>
+            </div>
+          )}
+
+          {/* Inline validation banner — covers the silent-no-op case
+              the Crear button used to fall into when a required field
+              was missing. The mutation error renders below for
+              backend-side failures (path doesn't exist, duplicate
+              name, …) so the user can tell client validation apart
+              from server validation at a glance. */}
+          {validationError && (
+            <div
+              role="alert"
+              className="rounded-[--radius-md] border border-error/40 bg-error-soft px-3 py-2 text-xs text-error"
+            >
+              {validationError}
             </div>
           )}
 

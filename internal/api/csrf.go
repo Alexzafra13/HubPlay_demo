@@ -31,14 +31,27 @@ func CSRFProtect(next http.Handler) http.Handler {
 			token = generateCSRFToken()
 		}
 
-		// Always (re)set the cookie so the frontend can read it
+		// Always (re)set the cookie so the frontend can read it.
+		//
+		// `Secure` follows the actual transport (TLS detected on the
+		// connection or X-Forwarded-Proto=https) so plain http://
+		// localhost dev still attaches the cookie to mutating
+		// requests. Forcing Secure on plain HTTP made some browsers
+		// drop the cookie on POST while keeping it on GET — same
+		// failure mode that hit the auth cookie.
+		secure := false
+		if r.TLS != nil {
+			secure = true
+		} else if r.Header.Get("X-Forwarded-Proto") == "https" {
+			secure = true
+		}
 		http.SetCookie(w, &http.Cookie{
 			Name:     csrfCookieName,
 			Value:    token,
 			Path:     "/",
 			MaxAge:   86400, // 24h
 			HttpOnly: false, // JS must read this
-			Secure:   true,
+			Secure:   secure,
 			SameSite: http.SameSiteLaxMode,
 		})
 

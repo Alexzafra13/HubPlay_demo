@@ -23,3 +23,4 @@ export * from "./hooks/providers";
 export * from "./hooks/system";
 export * from "./hooks/images";
 export * from "./hooks/preferences";
+export * from "./hooks/home";
