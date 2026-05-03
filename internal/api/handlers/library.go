@@ -129,19 +129,25 @@ func (h *LibraryHandler) Scan(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Browse lists subdirectories of a path on the host filesystem so the
+// admin "create / edit library" UI can pick a folder. It's a pure
+// read on a server-controlled set of paths (anchored by Abs +
+// isSensitiveBrowsePath) so the right HTTP verb is GET, not POST —
+// using POST forced this through the CSRF middleware, made the
+// response uncacheable by the browser, and meant every open of the
+// folder picker paid a full round-trip even when the user had just
+// browsed the same directory seconds earlier.
+//
+// Path comes in via the `path` query parameter; an empty path defaults
+// to "/" (the container root, which is what the wizard wants on first
+// open).
 func (h *LibraryHandler) Browse(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Path string `json:"path"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
-		return
-	}
-	if req.Path == "" {
-		req.Path = "/"
+	reqPath := r.URL.Query().Get("path")
+	if reqPath == "" {
+		reqPath = "/"
 	}
 
-	absPath, err := filepath.Abs(req.Path)
+	absPath, err := filepath.Abs(reqPath)
 	if err != nil {
 		respondError(w, r, http.StatusBadRequest, "BROWSE_ERROR", "invalid path")
 		return
@@ -179,6 +185,12 @@ func (h *LibraryHandler) Browse(w http.ResponseWriter, r *http.Request) {
 		parent = ""
 	}
 
+	// Short browser-side cache. Folder layout doesn't change second-to-
+	// second, but it does change (operator drops a new folder, mounts a
+	// drive). 30s is short enough that any real change is picked up
+	// quickly while still letting the modal re-open instantly when the
+	// user closes and re-opens it within the same flow.
+	w.Header().Set("Cache-Control", "private, max-age=30")
 	respondJSON(w, http.StatusOK, map[string]any{
 		"data": map[string]any{
 			"current":     absPath,

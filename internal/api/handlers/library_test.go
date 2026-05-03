@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -215,7 +216,7 @@ func newLibTestEnv(t *testing.T) *libTestEnv {
 		r.Put("/libraries/{id}", env.handler.Update)
 		r.Delete("/libraries/{id}", env.handler.Delete)
 		r.Post("/libraries/{id}/scan", env.handler.Scan)
-		r.Post("/libraries/browse", env.handler.Browse)
+		r.Get("/libraries/browse", env.handler.Browse)
 		r.Get("/libraries/{id}/items", env.handler.Items)
 	})
 	env.router = r
@@ -456,16 +457,8 @@ func TestLibraryHandler_Scan_ServiceError_Mapped(t *testing.T) {
 
 // ─── Browse ─────────────────────────────────────────────────────────────────
 
-func TestLibraryHandler_Browse_InvalidJSON_400(t *testing.T) {
-	env := newLibTestEnv(t)
-	rr := env.do(http.MethodPost, "/api/v1/libraries/browse", `{bogus`, nil)
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("status: %d", rr.Code)
-	}
-}
-
 func TestLibraryHandler_Browse_SensitivePath_403(t *testing.T) {
-	// The sensitive-path allowlist (internal/api/handlers/library.go:404)
+	// The sensitive-path allowlist (internal/api/handlers/library.go)
 	// is Unix-only — `/etc`, `/proc`, `/sys`, `/root` etc. all resolve
 	// to `C:\etc` on Windows, which then trips the dir-not-found path
 	// instead of the deny path. Skip on non-Unix; the deny logic is
@@ -474,7 +467,7 @@ func TestLibraryHandler_Browse_SensitivePath_403(t *testing.T) {
 		t.Skip("sensitive-path list is Unix-only; not meaningful on Windows")
 	}
 	env := newLibTestEnv(t)
-	rr := env.do(http.MethodPost, "/api/v1/libraries/browse", `{"path":"/etc"}`, nil)
+	rr := env.do(http.MethodGet, "/api/v1/libraries/browse?path=/etc", "", nil)
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("status: got %d want 403", rr.Code)
 	}
@@ -482,8 +475,8 @@ func TestLibraryHandler_Browse_SensitivePath_403(t *testing.T) {
 
 func TestLibraryHandler_Browse_NonexistentPath_400(t *testing.T) {
 	env := newLibTestEnv(t)
-	rr := env.do(http.MethodPost, "/api/v1/libraries/browse",
-		`{"path":"/definitely/does/not/exist/zzz"}`, nil)
+	rr := env.do(http.MethodGet,
+		"/api/v1/libraries/browse?path=/definitely/does/not/exist/zzz", "", nil)
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("status: got %d want 400", rr.Code)
 	}
@@ -501,8 +494,8 @@ func TestLibraryHandler_Browse_ListsSubdirectories(t *testing.T) {
 	if err := createFile(root, "readme.txt"); err != nil {
 		t.Fatalf("touch: %v", err)
 	}
-	body := `{"path":"` + strings.ReplaceAll(root, `\`, `\\`) + `"}`
-	rr := env.do(http.MethodPost, "/api/v1/libraries/browse", body, nil)
+	rr := env.do(http.MethodGet,
+		"/api/v1/libraries/browse?path="+url.QueryEscape(root), "", nil)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status: got %d want 200, body: %s", rr.Code, rr.Body.String())
 	}
@@ -510,6 +503,9 @@ func TestLibraryHandler_Browse_ListsSubdirectories(t *testing.T) {
 	dirs, _ := data["directories"].([]any)
 	if len(dirs) != 2 {
 		t.Fatalf("dirs: got %d want 2 (hidden + file excluded)", len(dirs))
+	}
+	if got := rr.Header().Get("Cache-Control"); got != "private, max-age=30" {
+		t.Errorf("Cache-Control = %q", got)
 	}
 }
 

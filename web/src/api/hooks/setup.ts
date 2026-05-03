@@ -58,12 +58,29 @@ export function useBrowseLibraryDirectories(
   options?: Partial<UseQueryOptions<BrowseResponse>>,
 ) {
   return useQuery<BrowseResponse>({
-    queryKey: ["browse-library", path] as const,
+    queryKey: queryKeys.browseLibraryDirectories(path),
     queryFn: () => api.browseLibraryDirectories(path),
     placeholderData: (prev) => prev,
     staleTime: 5 * 60 * 1000,
     ...options,
   });
+}
+
+// usePrefetchBrowseLibraryDirectories warms the TanStack cache for the
+// admin folder picker so the modal renders against an already-resolved
+// listing instead of starting from a cold spinner. Callers fire this
+// when the parent ("Add library" / "Edit library" modal) opens — by
+// the time the user pulls up the folder picker the network round-trip
+// is already done. Same staleTime as the live query so a warm cache
+// is reused, not refetched.
+export function usePrefetchBrowseLibraryDirectories() {
+  const queryClient = useQueryClient();
+  return (path?: string) =>
+    queryClient.prefetchQuery({
+      queryKey: queryKeys.browseLibraryDirectories(path),
+      queryFn: () => api.browseLibraryDirectories(path),
+      staleTime: 5 * 60 * 1000,
+    });
 }
 
 export function useSetupCreateAdmin() {

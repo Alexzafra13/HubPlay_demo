@@ -11,7 +11,12 @@ import type { FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Input, Modal } from "@/components/common";
 import { FolderBrowser } from "@/components/setup/FolderBrowser";
-import { useCreateLibrary, useRefreshM3U, usePublicCountries } from "@/api/hooks";
+import {
+  useCreateLibrary,
+  useRefreshM3U,
+  usePublicCountries,
+  usePrefetchBrowseLibraryDirectories,
+} from "@/api/hooks";
 import type { ContentType, Library } from "@/api/types";
 import { FilteredSelect } from "./FilteredSelect";
 import { LanguageMultiSelect } from "./LanguageMultiSelect";
@@ -68,6 +73,18 @@ export function LibraryFormModal({ isOpen, onClose, onCreated }: LibraryFormModa
   const publicCountries = usePublicCountries({
     enabled: isOpen && type === "livetv" && liveSource === "public",
   });
+
+  // Warm the folder-picker cache the moment the form opens. The user
+  // typically takes 2-5s to type the name and pick a content type
+  // before reaching for "Examinar carpetas" — that's plenty of time
+  // for the GET /libraries/browse round-trip to land. By the time they
+  // click, the modal renders against an already-resolved listing
+  // instead of a cold spinner. No-op when the cache is already warm.
+  const prefetchBrowse = usePrefetchBrowseLibraryDirectories();
+  useEffect(() => {
+    if (!isOpen) return;
+    void prefetchBrowse();
+  }, [isOpen, prefetchBrowse]);
 
   // Reset whenever the modal closes so the next open starts clean. Tied
   // to isOpen rather than a manual reset call so callers can't forget.

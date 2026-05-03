@@ -164,7 +164,7 @@ func NewRouter(deps Dependencies) http.Handler {
 
 			r.Get("/setup/status", setupHandler.Status)
 			r.Get("/setup/capabilities", setupHandler.Capabilities)
-			r.Post("/setup/browse", setupHandler.Browse)
+			r.Get("/setup/browse", setupHandler.Browse)
 			r.Post("/setup/libraries", setupHandler.CreateLibraries)
 			r.Post("/setup/settings", setupHandler.UpdateSettings)
 			r.Post("/setup/complete", setupHandler.Complete)
@@ -464,7 +464,7 @@ func NewRouter(deps Dependencies) http.Handler {
 				r.Group(func(r chi.Router) {
 					r.Use(auth.RequireAdmin)
 					r.Post("/libraries", libHandler.Create)
-					r.Post("/libraries/browse", libHandler.Browse)
+					r.Get("/libraries/browse", libHandler.Browse)
 				})
 
 				// IPTV channels (within library routes)
