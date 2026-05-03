@@ -1,14 +1,19 @@
-// LibraryEditModal — the "Edit library" modal.
+// LibraryEditModal — edits an existing library in a side sheet.
 //
-// Driven by `target` rather than a separate isOpen flag: when the
-// parent has a Library to edit, the modal opens with that row's values
-// preloaded; when target flips back to null, it closes.
+// Shape: target-driven, no separate isOpen flag. When the parent
+// has a Library to edit it passes it in; null closes.
+//
+// Lives in a Sheet, not a Modal, because editing a row is a
+// contextual action — the user wants to keep the row list visible
+// while they tweak. The folder picker is still a step inside the
+// SAME sheet (view: 'form' | 'browse') so a leaked overlay remains
+// structurally impossible.
 
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Input, Modal } from "@/components/common";
-import { FolderBrowser } from "@/components/setup/FolderBrowser";
+import { Button, Input, Sheet } from "@/components/common";
+import { FolderBrowserContent } from "@/components/setup/FolderBrowser";
 import { useUpdateLibrary, usePrefetchBrowseLibraryDirectories } from "@/api/hooks";
 import type { Library } from "@/api/types";
 import { LanguageMultiSelect } from "./LanguageMultiSelect";
@@ -30,12 +35,15 @@ export function LibraryEditModal({ target, onClose }: LibraryEditModalProps) {
   const [epgURL, setEPGURL] = useState("");
   const [languageFilter, setLanguageFilter] = useState<string[]>([]);
   const [tlsInsecure, setTLSInsecure] = useState(false);
-  const [showBrowse, setShowBrowse] = useState(false);
+  const [view, setView] = useState<"form" | "browse">("form");
 
   // Hydrate from target on each open. `target` is the source of truth;
   // local state mirrors it while the modal is shown.
   useEffect(() => {
-    if (!target) return;
+    if (!target) {
+      setView("form");
+      return;
+    }
     setName(target.name);
     setPath((target.paths ?? [])[0] ?? "");
     setM3UURL(target.m3u_url ?? "");
@@ -44,25 +52,13 @@ export function LibraryEditModal({ target, onClose }: LibraryEditModalProps) {
     setTLSInsecure(target.tls_insecure ?? false);
   }, [target]);
 
-  // Force-close the picker whenever the parent edit modal closes. The
-  // FolderBrowser is a sibling of the form Modal, so leaving showBrowse
-  // true after the parent unmounts leaves an invisible full-viewport
-  // backdrop that swallows every click on the page underneath. See
-  // LibraryFormModal for the same reasoning.
-  useEffect(() => {
-    if (!target) setShowBrowse(false);
-  }, [target]);
-
-  // Warm the folder-picker cache while the user reads the form. See
-  // LibraryFormModal for the rationale.
   const prefetchBrowse = usePrefetchBrowseLibraryDirectories();
   useEffect(() => {
     if (!target) return;
     void prefetchBrowse();
   }, [target, prefetchBrowse]);
 
-  function handleSubmit(e: FormEvent) {
-    e.preventDefault();
+  function submit() {
     if (!target || !name.trim()) return;
 
     if (target.content_type === "livetv") {
@@ -73,13 +69,7 @@ export function LibraryEditModal({ target, onClose }: LibraryEditModalProps) {
           data: {
             name: name.trim(),
             m3u_url: m3uURL.trim(),
-            // Explicit empty string clears; if the admin wants to
-            // preserve we still send the trimmed value (which is
-            // identical to current).
             epg_url: epgURL.trim(),
-            // Always send the array — the backend treats undefined as
-            // "leave as-is" and an empty array as "clear filter". We
-            // want explicit, so we always provide it.
             language_filter: languageFilter,
             tls_insecure: tlsInsecure,
           },
@@ -99,14 +89,53 @@ export function LibraryEditModal({ target, onClose }: LibraryEditModalProps) {
     );
   }
 
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    submit();
+  }
+
   return (
-    <>
-      <Modal
-        isOpen={target !== null}
-        onClose={onClose}
-        title={t("admin.libraries.editLibrary")}
-      >
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+    <Sheet
+      isOpen={target !== null}
+      onClose={onClose}
+      title={
+        view === "browse"
+          ? t("admin.libraries.browseFolders")
+          : t("admin.libraries.editLibrary")
+      }
+      description={
+        view === "form" && target
+          ? `${target.content_type} · ${target.id.slice(0, 8)}`
+          : undefined
+      }
+      size="lg"
+      footer={
+        view === "form" ? (
+          <>
+            <Button variant="secondary" onClick={onClose}>
+              {t("common.cancel")}
+            </Button>
+            <Button
+              isLoading={updateLibrary.isPending}
+              onClick={submit}
+            >
+              {t("common.save")}
+            </Button>
+          </>
+        ) : null
+      }
+    >
+      {view === "browse" ? (
+        <FolderBrowserContent
+          useAdmin
+          onSelect={(picked) => {
+            setPath(picked);
+            setView("form");
+          }}
+          onCancel={() => setView("form")}
+        />
+      ) : (
+        <form onSubmit={handleSubmit} className="flex flex-col gap-5">
           <Input
             label={t("admin.libraries.name")}
             placeholder={t("admin.libraries.namePlaceholder")}
@@ -124,17 +153,19 @@ export function LibraryEditModal({ target, onClose }: LibraryEditModalProps) {
                 onChange={(e) => setM3UURL(e.target.value)}
                 required
               />
-              <Input
-                label={t("admin.libraries.epgUrl", { defaultValue: "URL EPG (opcional)" })}
-                placeholder="https://ejemplo.com/epg.xml"
-                value={epgURL}
-                onChange={(e) => setEPGURL(e.target.value)}
-              />
-              <p className="-mt-2 text-[11px] text-text-muted">
-                {t("admin.libraries.epgURLHint", {
-                  defaultValue: "Si el M3U trae url-tvg en su cabecera, se auto-detecta.",
-                })}
-              </p>
+              <div className="flex flex-col gap-1">
+                <Input
+                  label={t("admin.libraries.epgUrl", { defaultValue: "URL EPG (opcional)" })}
+                  placeholder="https://ejemplo.com/epg.xml"
+                  value={epgURL}
+                  onChange={(e) => setEPGURL(e.target.value)}
+                />
+                <p className="text-[11px] leading-snug text-text-muted">
+                  {t("admin.libraries.epgURLHint", {
+                    defaultValue: "Si el M3U trae url-tvg en su cabecera, se auto-detecta.",
+                  })}
+                </p>
+              </div>
 
               <LanguageMultiSelect
                 value={languageFilter}
@@ -146,29 +177,28 @@ export function LibraryEditModal({ target, onClose }: LibraryEditModalProps) {
                 onChange={setTLSInsecure}
               />
 
-              <PreflightButton
-                m3uURL={m3uURL}
-                tlsInsecure={tlsInsecure}
-              />
+              <PreflightButton m3uURL={m3uURL} tlsInsecure={tlsInsecure} />
             </>
           ) : (
-            <div className="flex gap-2 items-end">
-              <div className="flex-1">
-                <Input
-                  label={t("admin.libraries.path")}
-                  placeholder={t("admin.libraries.pathPlaceholder")}
-                  value={path}
-                  onChange={(e) => setPath(e.target.value)}
-                  required
-                />
+            <div className="flex flex-col gap-2">
+              <div className="flex items-end gap-2">
+                <div className="flex-1">
+                  <Input
+                    label={t("admin.libraries.path")}
+                    placeholder={t("admin.libraries.pathPlaceholder")}
+                    value={path}
+                    onChange={(e) => setPath(e.target.value)}
+                    required
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => setView("browse")}
+                >
+                  {t("common.browse")}
+                </Button>
               </div>
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => setShowBrowse(true)}
-              >
-                {t("common.browse")}
-              </Button>
             </div>
           )}
 
@@ -176,23 +206,11 @@ export function LibraryEditModal({ target, onClose }: LibraryEditModalProps) {
             <p className="text-xs text-error">{updateLibrary.error.message}</p>
           )}
 
-          <div className="flex justify-end gap-3 pt-2">
-            <Button variant="secondary" type="button" onClick={onClose}>
-              {t("common.cancel")}
-            </Button>
-            <Button type="submit" isLoading={updateLibrary.isPending}>
-              {t("common.save")}
-            </Button>
-          </div>
+          {/* Hidden submit button so Enter still submits the form. The
+              visible action lives in the sheet footer. */}
+          <button type="submit" className="hidden" aria-hidden tabIndex={-1} />
         </form>
-      </Modal>
-
-      <FolderBrowser
-        isOpen={showBrowse}
-        onClose={() => setShowBrowse(false)}
-        onSelect={(picked) => setPath(picked)}
-        useAdmin
-      />
-    </>
+      )}
+    </Sheet>
   );
 }

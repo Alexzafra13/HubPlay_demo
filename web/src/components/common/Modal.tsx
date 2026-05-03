@@ -1,6 +1,7 @@
-import { useEffect, useCallback, useRef } from "react";
+import { useEffect, useId, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import type { FC, ReactNode } from "react";
+import { useModalStack, modalStackSelectors } from "@/store/modalStack";
 
 type ModalSize = "sm" | "md" | "lg";
 
@@ -45,6 +46,53 @@ const Modal: FC<ModalProps> = ({
 }) => {
   const dialogRef = useRef<HTMLDivElement>(null);
 
+  // Stable, opaque id for this Modal's lifetime. Used to register
+  // with the global stack so scroll lock + focus + escape behave
+  // correctly when modals are stacked.
+  const id = useId();
+  const push = useModalStack((s) => s.push);
+  const remove = useModalStack((s) => s.remove);
+  const stackCount = useModalStack(modalStackSelectors.count);
+  const topId = useModalStack(modalStackSelectors.topId);
+  const isTop = topId === id;
+
+  // Register / unregister this modal in the global stack. Pushing on
+  // every open and popping on close OR unmount means a parent that
+  // unmounts mid-flight (route change, reload, error boundary) takes
+  // its entry with it — no orphan portal can survive.
+  //
+  // The cleanup also handles the "last modal vanishes" case for body
+  // scroll: when this is the only modal up and it unmounts, the
+  // sibling useEffect below has no live subscriber left to clear the
+  // lock, so we do it inline here. Reading the stack snapshot via
+  // getState() rather than a closure keeps the value fresh after the
+  // remove() that just ran.
+  useEffect(() => {
+    if (!isOpen) return;
+    push(id);
+    return () => {
+      remove(id);
+      if (useModalStack.getState().stack.length === 0) {
+        document.body.style.overflow = "";
+      }
+    };
+  }, [isOpen, id, push, remove]);
+
+  // Body scroll lock is derived from the stack count, NOT from this
+  // modal's open flag. Two siblings opening together both contribute
+  // to the count; closing one drops the count by 1 but leaves the
+  // lock in place while the other is still up. The previous per-modal
+  // useEffect cleanup wiped the lock the moment the inner modal
+  // closed, even when an outer one was still open — that's the bug
+  // this whole refactor exists to kill.
+  useEffect(() => {
+    if (stackCount === 0) {
+      document.body.style.overflow = "";
+      return;
+    }
+    document.body.style.overflow = "hidden";
+  }, [stackCount]);
+
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -83,17 +131,14 @@ const Modal: FC<ModalProps> = ({
     [onClose],
   );
 
-  // Body scroll lock + key handler. Tied to isOpen so the rest of the
-  // page is responsive again the moment the modal closes.
+  // Only the top modal in the stack listens for Escape and Tab. A
+  // background modal that grabbed Escape would close itself instead
+  // of the dialog the user is actually looking at.
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || !isTop) return;
     document.addEventListener("keydown", handleKeyDown);
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-      document.body.style.overflow = "";
-    };
-  }, [isOpen, handleKeyDown]);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, isTop, handleKeyDown]);
 
   // On open: remember the element that had focus, then move focus into
   // the dialog. On close: restore focus to the trigger so the keyboard

@@ -6,6 +6,7 @@ import { api } from "@/api/client";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { ProtectedRoute } from "@/components/layout/ProtectedRoute";
 import { Spinner, ErrorBoundary } from "@/components/common";
+import { DebugOverlay } from "@/components/common/DebugOverlay";
 import Login from "@/pages/Login";
 
 // Lazy-loaded routes for code splitting
@@ -79,6 +80,7 @@ export function App() {
 
   return (
     <ErrorBoundary>
+    <DebugOverlay />
     <Suspense fallback={<LazyFallback />}>
       <Routes>
         {/* Setup wizard — only accessible when setup is needed */}

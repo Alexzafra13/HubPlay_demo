@@ -453,6 +453,7 @@
       "title": "Bibliotecas de medios",
       "addLibrary": "Agregar biblioteca",
       "editLibrary": "Editar biblioteca",
+      "browseFolders": "Examinar carpetas",
       "deleteLibrary": "Eliminar biblioteca",
       "name": "Nombre",
       "type": "Tipo",
