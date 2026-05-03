@@ -90,7 +90,7 @@ func newSetupTestEnv(t *testing.T) *setupTestEnv {
 	r := chi.NewRouter()
 	r.Route("/api/v1/setup", func(r chi.Router) {
 		r.Get("/status", env.handler.Status)
-		r.Post("/browse", env.handler.Browse)
+		r.Get("/browse", env.handler.Browse)
 		r.Post("/libraries", env.handler.CreateLibraries)
 		r.Put("/settings", env.handler.UpdateSettings)
 		r.Get("/capabilities", env.handler.Capabilities)
@@ -175,20 +175,12 @@ func TestSetupHandler_Status_LibsExist_SettingsStep(t *testing.T) {
 
 // ─── Browse ─────────────────────────────────────────────────────────────────
 
-func TestSetupHandler_Browse_InvalidJSON_400(t *testing.T) {
-	env := newSetupTestEnv(t)
-	rr := env.do(http.MethodPost, "/api/v1/setup/browse", `{nope`)
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("status: %d", rr.Code)
-	}
-}
-
 func TestSetupHandler_Browse_ServiceError_400(t *testing.T) {
 	env := newSetupTestEnv(t)
 	env.setup.browseFn = func(_ string) (*setup.BrowseResult, error) {
 		return nil, errors.New("permission denied")
 	}
-	rr := env.do(http.MethodPost, "/api/v1/setup/browse", `{"path":"/secret"}`)
+	rr := env.do(http.MethodGet, "/api/v1/setup/browse?path=/secret", "")
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("status: %d", rr.Code)
 	}
@@ -201,9 +193,20 @@ func TestSetupHandler_Browse_DefaultsRootPath(t *testing.T) {
 		gotPath = p
 		return &setup.BrowseResult{Current: p}, nil
 	}
-	_ = env.do(http.MethodPost, "/api/v1/setup/browse", `{"path":""}`)
+	_ = env.do(http.MethodGet, "/api/v1/setup/browse", "")
 	if gotPath != "/" {
 		t.Errorf("empty path should default to '/', got %q", gotPath)
+	}
+}
+
+func TestSetupHandler_Browse_SetsCacheControl(t *testing.T) {
+	env := newSetupTestEnv(t)
+	env.setup.browseFn = func(p string) (*setup.BrowseResult, error) {
+		return &setup.BrowseResult{Current: p}, nil
+	}
+	rr := env.do(http.MethodGet, "/api/v1/setup/browse?path=/", "")
+	if got := rr.Header().Get("Cache-Control"); got != "private, max-age=30" {
+		t.Errorf("Cache-Control = %q", got)
 	}
 }
 

@@ -69,5 +69,6 @@ export const queryKeys = {
   setupStatus: ["setup-status"] as const,
   systemCapabilities: ["system-capabilities"] as const,
   browseDirectories: (path?: string) => ["browse", path] as const,
+  browseLibraryDirectories: (path?: string) => ["browse-library", path] as const,
   progress: (itemId: string) => ["progress", itemId] as const,
 } as const;

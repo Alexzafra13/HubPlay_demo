@@ -9,7 +9,7 @@ import type { FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Input, Modal } from "@/components/common";
 import { FolderBrowser } from "@/components/setup/FolderBrowser";
-import { useUpdateLibrary } from "@/api/hooks";
+import { useUpdateLibrary, usePrefetchBrowseLibraryDirectories } from "@/api/hooks";
 import type { Library } from "@/api/types";
 import { LanguageMultiSelect } from "./LanguageMultiSelect";
 import { PreflightButton } from "./PreflightButton";
@@ -43,6 +43,14 @@ export function LibraryEditModal({ target, onClose }: LibraryEditModalProps) {
     setLanguageFilter(target.language_filter ?? []);
     setTLSInsecure(target.tls_insecure ?? false);
   }, [target]);
+
+  // Warm the folder-picker cache while the user reads the form. See
+  // LibraryFormModal for the rationale.
+  const prefetchBrowse = usePrefetchBrowseLibraryDirectories();
+  useEffect(() => {
+    if (!target) return;
+    void prefetchBrowse();
+  }, [target, prefetchBrowse]);
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();

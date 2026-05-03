@@ -354,8 +354,8 @@ export class ApiClient {
   }
 
   async browseDirectories(path?: string): Promise<BrowseResponse> {
-    return this.request<BrowseResponse>("POST", "/setup/browse", {
-      body: path ? { path } : {},
+    return this.request<BrowseResponse>("GET", "/setup/browse", {
+      params: path ? { path } : undefined,
     });
   }
 
@@ -434,8 +434,8 @@ export class ApiClient {
   }
 
   async browseLibraryDirectories(path?: string): Promise<BrowseResponse> {
-    return this.request<BrowseResponse>("POST", "/libraries/browse", {
-      body: path ? { path } : {},
+    return this.request<BrowseResponse>("GET", "/libraries/browse", {
+      params: path ? { path } : undefined,
     });
   }
 

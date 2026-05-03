@@ -85,31 +85,25 @@ func (h *SetupHandler) Status(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-type browseRequest struct {
-	Path string `json:"path"`
-}
-
-// Browse lists directories at the requested path.
+// Browse lists directories at the requested path. GET (not POST) so it
+// bypasses CSRF and the browser can short-cache the response — the
+// admin folder-picker re-opens instantly without a full round-trip.
 func (h *SetupHandler) Browse(w http.ResponseWriter, r *http.Request) {
-	var req browseRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
-		return
+	reqPath := r.URL.Query().Get("path")
+	if reqPath == "" {
+		reqPath = "/"
 	}
 
-	if req.Path == "" {
-		req.Path = "/"
-	}
-
-	result, err := h.setup.BrowseDirectories(req.Path)
+	result, err := h.setup.BrowseDirectories(reqPath)
 	if err != nil {
 		// Details (raw error, requested path) stay in logs only; the client
 		// gets a stable code it can map to a UI-friendly message.
-		h.logger.Warn("browse directories failed", "path", req.Path, "error", err)
+		h.logger.Warn("browse directories failed", "path", reqPath, "error", err)
 		respondError(w, r, http.StatusBadRequest, "BROWSE_ERROR", "cannot browse this directory")
 		return
 	}
 
+	w.Header().Set("Cache-Control", "private, max-age=30")
 	respondJSON(w, http.StatusOK, map[string]any{"data": result})
 }
 
