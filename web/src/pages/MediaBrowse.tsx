@@ -1,5 +1,6 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
+import { useSearchParams } from "react-router";
 import { useInfiniteItems } from "@/api/hooks";
 import { Spinner } from "@/components/common";
 import { MediaGrid } from "@/components/media";
@@ -27,7 +28,14 @@ const I18N_NS: Record<BrowseType, "movies" | "series"> = {
 export default function MediaBrowse({ type }: MediaBrowseProps) {
   const { t } = useTranslation();
   const ns = I18N_NS[type];
-  const [search, setSearch] = useState("");
+
+  // Search lives in the URL (`?q=`) so the topbar SearchBar — which is
+  // the only place the user types on these pages — can drive the
+  // grid filter without prop-drilling or a shared store. The URL also
+  // makes the filter shareable: hand a teammate /movies?q=batman.
+  const [searchParams] = useSearchParams();
+  const search = searchParams.get("q") ?? "";
+
   const [sort, setSort] = useState<SortOption>("added");
   const [filters, setFilters] = useState<BrowseFiltersState>(emptyFilters);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -79,15 +87,11 @@ export default function MediaBrowse({ type }: MediaBrowseProps) {
     return () => observerRef.current?.disconnect();
   }, []);
 
-  // Browse controls — a compact search + sort + filters trio that the
-  // global TopBar hoists in via TopBarSlot. Same component is rendered
-  // inline as a fallback when no slot provider is present (unit tests,
-  // any future shell without a global TopBar).
+  // Sort + filters for the topbar slot. The search input is gone:
+  // the global SearchBar in the topbar owns it now and writes the
+  // value to URL `?q=` which we read above.
   const controls = (
     <BrowseControls
-      ns={ns}
-      search={search}
-      onSearchChange={setSearch}
       sort={sort}
       onSortChange={setSort}
       filterCount={filterCount}
@@ -137,9 +141,6 @@ export default function MediaBrowse({ type }: MediaBrowseProps) {
 }
 
 interface BrowseControlsProps {
-  ns: "movies" | "series";
-  search: string;
-  onSearchChange: (value: string) => void;
   sort: SortOption;
   onSortChange: (value: SortOption) => void;
   filterCount: number;
@@ -148,13 +149,9 @@ interface BrowseControlsProps {
 }
 
 // Compact horizontal control strip designed to fit in the global
-// TopBar's right-aligned slot. Same primitives as the previous
-// in-page bar (input + select + filters button) but sized down so
-// they don't push the avatar off-screen.
+// TopBar's right-aligned slot. Search left this trio when the global
+// SearchBar took over the typing surface — sort + filter remain.
 function BrowseControls({
-  ns,
-  search,
-  onSearchChange,
   sort,
   onSortChange,
   filterCount,
@@ -164,31 +161,6 @@ function BrowseControls({
   const { t } = useTranslation();
   return (
     <div className="flex items-center gap-2">
-      <div className="relative">
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 20 20"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-secondary pointer-events-none"
-          aria-hidden="true"
-        >
-          <circle cx="8.5" cy="8.5" r="5" />
-          <path d="M12.5 12.5L17 17" />
-        </svg>
-        <input
-          type="search"
-          value={search}
-          onChange={(e) => onSearchChange(e.target.value)}
-          placeholder={t(`${ns}.searchPlaceholder`)}
-          className="hidden sm:block w-44 md:w-56 lg:w-64 pl-8 pr-3 py-1.5 rounded-lg bg-bg-base border border-border text-sm text-text-primary placeholder:text-text-secondary focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent transition-colors"
-          aria-label={t(`${ns}.searchPlaceholder`)}
-        />
-      </div>
       <select
         value={sort}
         onChange={(e) => onSortChange(e.target.value as SortOption)}

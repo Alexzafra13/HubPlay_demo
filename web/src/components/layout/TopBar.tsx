@@ -2,12 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, NavLink } from "react-router";
 import { useTranslation } from "react-i18next";
 import { motion, AnimatePresence } from "framer-motion";
-import { Menu, Search as SearchIcon, LogOut, Settings as SettingsIcon, ShieldCheck } from "lucide-react";
+import { Menu, LogOut, Settings as SettingsIcon, ShieldCheck } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { getInitials } from "@/utils/userDisplay";
 import { useTopBarSlotContent } from "./TopBarSlot";
 import { BrandMark } from "./BrandMark";
-import { SearchPopover } from "./SearchPopover";
+import { SearchBar } from "./SearchBar";
 
 interface TopBarProps {
   title?: string;
@@ -24,21 +24,7 @@ export function TopBar({ title, onMenuClick, sidebarCollapsed }: TopBarProps) {
   const slotContent = useTopBarSlotContent();
   const scrolled = useScrolledPast(8);
 
-  const [searchOpen, setSearchOpen] = useState(false);
-  const searchTriggerRef = useRef<HTMLButtonElement>(null);
   const initials = getInitials(user);
-
-  // ⌘K / Ctrl+K opens the search popover from anywhere.
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        setSearchOpen(true);
-      }
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
 
   return (
     <>
@@ -89,29 +75,11 @@ export function TopBar({ title, onMenuClick, sidebarCollapsed }: TopBarProps) {
           {slotContent}
         </div>
 
-        {/* Search trigger */}
-        <button
-          ref={searchTriggerRef}
-          onClick={() => setSearchOpen(true)}
-          className="hidden sm:flex items-center gap-2 h-9 pl-2.5 pr-2 rounded-lg bg-bg-hover/40 hover:bg-bg-active border border-border-subtle hover:border-border text-text-secondary hover:text-text-primary transition-colors"
-          aria-label={t("nav.search")}
-        >
-          <SearchIcon className="h-[16px] w-[16px]" strokeWidth={1.7} />
-          <span className="hidden md:inline text-[12.5px] text-text-muted pr-2">
-            {t("nav.search")}
-          </span>
-          <kbd className="hidden md:inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-bg-base/60 border border-border-subtle text-text-muted">
-            ⌘K
-          </kbd>
-        </button>
-
-        <button
-          onClick={() => setSearchOpen(true)}
-          className="flex sm:hidden items-center justify-center w-10 h-10 rounded-lg text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
-          aria-label={t("nav.search")}
-        >
-          <SearchIcon className="h-[18px] w-[18px]" strokeWidth={1.7} />
-        </button>
+        {/* Search — icon-only by default, animates wide on click. On
+            /movies and /series it acts as a URL-driven page filter
+            (no dropdown). Elsewhere it shows a results dropdown that
+            drops from the topbar. */}
+        <SearchBar />
 
         {/* User avatar dropdown */}
         <UserAvatarMenu
@@ -125,7 +93,6 @@ export function TopBar({ title, onMenuClick, sidebarCollapsed }: TopBarProps) {
         />
       </header>
 
-      <SearchPopover open={searchOpen} onClose={() => setSearchOpen(false)} />
     </>
   );
 }
