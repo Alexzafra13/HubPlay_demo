@@ -187,12 +187,16 @@ export function LibraryEditModal({ target, onClose }: LibraryEditModalProps) {
         </form>
       </Modal>
 
-      <FolderBrowser
-        isOpen={showBrowse}
-        onClose={() => setShowBrowse(false)}
-        onSelect={(picked) => setPath(picked)}
-        useAdmin
-      />
+      {/* Picker only mounts while the edit modal is open. See
+          LibraryFormModal for the full rationale. */}
+      {target && (
+        <FolderBrowser
+          isOpen={showBrowse}
+          onClose={() => setShowBrowse(false)}
+          onSelect={(picked) => setPath(picked)}
+          useAdmin
+        />
+      )}
     </>
   );
 }

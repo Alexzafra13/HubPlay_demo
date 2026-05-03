@@ -466,21 +466,31 @@ export function LibraryFormModal({ isOpen, onClose, onCreated }: LibraryFormModa
         </form>
       </Modal>
 
-      <FolderBrowser
-        isOpen={showBrowse}
-        onClose={() => setShowBrowse(false)}
-        onSelect={(picked) => {
-          setPath(picked);
-          // Auto-fill the name from the trailing path segment when
-          // the user hasn't typed one yet — saves a round-trip to the
-          // name field on the common case.
-          if (!name.trim()) {
-            const segments = picked.split("/").filter(Boolean);
-            setName(segments[segments.length - 1] ?? "");
-          }
-        }}
-        useAdmin
-      />
+      {/* Render the picker only while the parent form is open. The
+          previous "render unconditionally, control via showBrowse"
+          shape was load-bearing on showBrowse staying false, and any
+          path that left it true on parent close (mid-fetch error,
+          unhandled callback, race) leaked the picker's full-viewport
+          backdrop on top of the page until reload. Gating on isOpen
+          makes the picker physically incapable of outliving its
+          parent, regardless of how showBrowse got set. */}
+      {isOpen && (
+        <FolderBrowser
+          isOpen={showBrowse}
+          onClose={() => setShowBrowse(false)}
+          onSelect={(picked) => {
+            setPath(picked);
+            // Auto-fill the name from the trailing path segment when
+            // the user hasn't typed one yet — saves a round-trip to the
+            // name field on the common case.
+            if (!name.trim()) {
+              const segments = picked.split("/").filter(Boolean);
+              setName(segments[segments.length - 1] ?? "");
+            }
+          }}
+          useAdmin
+        />
+      )}
     </>
   );
 }
