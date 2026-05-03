@@ -142,6 +142,15 @@ body {
   }
 }
 
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
 @keyframes shimmer {
   0% {
     background-position: -200% 0;
@@ -159,6 +168,10 @@ body {
 
 .animate-fade-in {
   animation: fade-in 0.3s ease-out both;
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right 0.18s cubic-bezier(0.32, 0.72, 0, 1) both;
 }
 
 .animate-shimmer {

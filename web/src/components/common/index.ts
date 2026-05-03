@@ -22,6 +22,9 @@ export type { ProgressBarProps, ProgressBarSize } from "./ProgressBar";
 export { Modal } from "./Modal";
 export type { ModalProps, ModalSize } from "./Modal";
 
+export { Sheet } from "./Sheet";
+export type { SheetProps, SheetSize } from "./Sheet";
+
 export { ErrorBoundary } from "./ErrorBoundary";
 
 export { BlurhashPlaceholder } from "./BlurhashPlaceholder";
