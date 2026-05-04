@@ -234,6 +234,36 @@ func (r *inMemoryFedRepo) PurgeCachedItemsForLibrary(_ context.Context, peerID, 
 	delete(r.cache, peerID+"|"+libraryID)
 	return nil
 }
+func (r *inMemoryFedRepo) SearchSharedItems(_ context.Context, peerID, query string, limit int) ([]*SharedItem, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if query == "" || limit <= 0 {
+		return []*SharedItem{}, nil
+	}
+	allowed := map[string]bool{}
+	for _, s := range r.shares {
+		if s.PeerID == peerID && s.CanBrowse {
+			allowed[s.LibraryID] = true
+		}
+	}
+	q := strings.ToLower(query)
+	out := []*SharedItem{}
+	for libID, items := range r.items {
+		if !allowed[libID] {
+			continue
+		}
+		for _, it := range items {
+			if strings.Contains(strings.ToLower(it.Title), q) {
+				out = append(out, it)
+				if len(out) >= limit {
+					return out, nil
+				}
+			}
+		}
+	}
+	return out, nil
+}
+
 func (r *inMemoryFedRepo) ListSharedItems(_ context.Context, peerID, libraryID string, offset, limit int) ([]*SharedItem, int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

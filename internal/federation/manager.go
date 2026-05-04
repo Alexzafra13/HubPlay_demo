@@ -47,6 +47,7 @@ type Repo interface {
 	ListSharesByPeer(ctx context.Context, peerID string) ([]*LibraryShare, error)
 	ListSharedLibrariesForPeer(ctx context.Context, peerID string) ([]*SharedLibrary, error)
 	ListSharedItems(ctx context.Context, peerID, libraryID string, offset, limit int) ([]*SharedItem, int, error)
+	SearchSharedItems(ctx context.Context, peerID, query string, limit int) ([]*SharedItem, error)
 
 	// Catalog cache (Phase 4+).
 	UpsertCachedItems(ctx context.Context, peerID, libraryID string, items []*SharedItem, at time.Time) error
@@ -829,6 +830,81 @@ func (m *Manager) BrowsePeerItems(ctx context.Context, peerID, libraryID string,
 	}
 
 	return nil, 0, false, liveErr
+}
+
+// SearchLocalSharedItems answers an inbound peer search request: what
+// items in libraries shared with `peerID` match `query`. The repo
+// applies the share ACL (CanBrowse JOIN); we just bound the result.
+func (m *Manager) SearchLocalSharedItems(ctx context.Context, peerID, query string, limit int) ([]*SharedItem, error) {
+	return m.repo.SearchSharedItems(ctx, peerID, query, limit)
+}
+
+// SearchAllPeers fans out the user's query to every paired peer in
+// parallel and aggregates the results with origin metadata. A peer
+// that times out, errors, or is offline is logged and skipped — the
+// rest still surface, so a single misbehaving peer cannot blank a
+// federated search.
+//
+// perPeerTimeout caps the wait per outbound call so a slow peer
+// cannot drag the user-visible response past the (separate) request
+// deadline. Sized for a fast LAN/Tailscale topology; admins running
+// over a slow WAN can extend via config in a future revision.
+func (m *Manager) SearchAllPeers(ctx context.Context, query string, perPeerLimit int, perPeerTimeout time.Duration) ([]*SharedItemFromPeer, error) {
+	if query == "" {
+		return []*SharedItemFromPeer{}, nil
+	}
+	peers, err := m.repo.ListPeers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if perPeerLimit <= 0 {
+		perPeerLimit = 25
+	}
+	if perPeerTimeout <= 0 {
+		perPeerTimeout = 2 * time.Second
+	}
+
+	type result struct {
+		peer  *Peer
+		items []*SharedItem
+		err   error
+	}
+	results := make(chan result, len(peers))
+	dispatched := 0
+	for _, p := range peers {
+		if p.Status != PeerPaired {
+			continue
+		}
+		dispatched++
+		go func(peer *Peer) {
+			callCtx, cancel := context.WithTimeout(ctx, perPeerTimeout)
+			defer cancel()
+			items, err := m.FetchPeerSearch(callCtx, peer.ID, query, perPeerLimit)
+			results <- result{peer: peer, items: items, err: err}
+		}(p)
+	}
+
+	out := []*SharedItemFromPeer{}
+	for i := 0; i < dispatched; i++ {
+		r := <-results
+		if r.err != nil {
+			m.logger.Info("federation: peer search failed",
+				"peer_id", r.peer.ID, "err", r.err)
+			continue
+		}
+		for _, it := range r.items {
+			out = append(out, &SharedItemFromPeer{Peer: r.peer, Item: it})
+		}
+	}
+	return out, nil
+}
+
+// SharedItemFromPeer pairs a search hit with the peer it came from
+// so the user-facing handler can render an origin badge and route
+// Play through the right peer.
+type SharedItemFromPeer struct {
+	Peer *Peer
+	Item *SharedItem
 }
 
 // PurgeCache clears cached items for (peer, library) — wired to the

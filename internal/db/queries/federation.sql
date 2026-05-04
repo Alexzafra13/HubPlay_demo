@@ -183,6 +183,11 @@ WHERE i.library_id = ? AND s.peer_id = ? AND s.can_browse = 1
 ORDER BY i.sort_title COLLATE NOCASE ASC
 LIMIT ? OFFSET ?;
 
+-- NOTE: SearchSharedItems is implemented as raw SQL in
+-- federation_repository.go because sqlc does not parse FTS5 virtual
+-- tables (items_fts MATCH ?). Same precedent as item_repository.go's
+-- List path.
+
 -- ============================================================
 -- catalog cache (Phase 4 + 027)
 -- ============================================================

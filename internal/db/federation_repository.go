@@ -467,6 +467,66 @@ func (r *FederationRepository) ListSharedItems(ctx context.Context, peerID, libr
 	return out, int(total), nil
 }
 
+// SearchSharedItems runs a full-text query across libraries the calling
+// peer has CanBrowse on. Reuses the items_fts virtual table that
+// powers local search; ACL gate is the JOIN against
+// federation_library_shares so a peer cannot match titles in
+// libraries not shared with them.
+//
+// Implemented as raw SQL because sqlc does not parse FTS5 virtual
+// tables (items_fts MATCH ?). Same precedent as item_repository.go's
+// List path. The query parameter is appended with '*' for prefix
+// matching, mirroring local item search.
+//
+// Caller is expected to apply a sensible per-peer limit; the function
+// caps at 100 defensively so a runaway query cannot stream a peer's
+// whole catalog.
+func (r *FederationRepository) SearchSharedItems(ctx context.Context, peerID, query string, limit int) ([]*federation.SharedItem, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 25
+	}
+	if query == "" {
+		return []*federation.SharedItem{}, nil
+	}
+
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT i.id, i.type, i.title,
+		       COALESCE(i.year, 0),
+		       COALESCE(m.overview, ''),
+		       EXISTS (
+		         SELECT 1 FROM images img
+		          WHERE img.item_id = i.id
+		            AND img.type = 'primary'
+		            AND img.is_primary = 1
+		       ) AS has_poster
+		  FROM items i
+		  JOIN federation_library_shares s ON s.library_id = i.library_id
+		  LEFT JOIN metadata m ON m.item_id = i.id
+		 WHERE s.peer_id = ?
+		   AND s.can_browse = 1
+		   AND i.parent_id IS NULL
+		   AND i.rowid IN (
+		         SELECT rowid FROM items_fts WHERE items_fts MATCH ?
+		       )
+		 ORDER BY i.sort_title COLLATE NOCASE ASC
+		 LIMIT ?
+	`, peerID, query+"*", limit)
+	if err != nil {
+		return nil, fmt.Errorf("search shared items: %w", err)
+	}
+	defer rows.Close()
+
+	out := []*federation.SharedItem{}
+	for rows.Next() {
+		var it federation.SharedItem
+		if err := rows.Scan(&it.ID, &it.Type, &it.Title, &it.Year, &it.Overview, &it.HasPoster); err != nil {
+			return nil, fmt.Errorf("scan search result: %w", err)
+		}
+		out = append(out, &it)
+	}
+	return out, rows.Err()
+}
+
 // ─── catalog cache (Phase 4) ────────────────────────────────────────
 
 // UpsertCachedItems replaces all rows for (peer, library) with the

@@ -56,6 +56,7 @@ func (q *Queries) CountSharedItems(ctx context.Context, arg CountSharedItemsPara
 
 const deleteCachedItemsForLibrary = `-- name: DeleteCachedItemsForLibrary :exec
 
+
 DELETE FROM federation_item_cache
 WHERE peer_id = ? AND library_id = ?
 `
@@ -65,6 +66,10 @@ type DeleteCachedItemsForLibraryParams struct {
 	LibraryID string `json:"library_id"`
 }
 
+// NOTE: SearchSharedItems is implemented as raw SQL in
+// federation_repository.go because sqlc does not parse FTS5 virtual
+// tables (items_fts MATCH ?). Same precedent as item_repository.go's
+// List path.
 // ============================================================
 // catalog cache (Phase 4 + 027)
 // ============================================================

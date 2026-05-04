@@ -971,6 +971,48 @@ paths:
                     type: array
                     items: { $ref: "#/components/schemas/PeerLibrary" }
 
+  /me/peers/search:
+    parameters:
+      - { name: q,     in: query, required: true,  schema: { type: string }, description: "Search query" }
+      - { name: limit, in: query, required: false, schema: { type: integer, default: 10, maximum: 50 }, description: "Max hits per peer" }
+    get:
+      tags: [federation]
+      summary: Federated full-text search across every paired peer
+      description: |
+        Fans out the query to every paired peer in parallel with a
+        per-peer timeout (~2s). Peers that error or time out are
+        skipped (logged) so a single misbehaving peer cannot blank
+        the result page. Each hit carries the originating peer so
+        the UI can render an origin badge and route Play through
+        the right peer.
+      responses:
+        "200":
+          description: Search hits with peer attribution
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      hits:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            peer_id:    { type: string }
+                            peer_name:  { type: string }
+                            id:         { type: string }
+                            type:       { type: string }
+                            title:      { type: string }
+                            year:       { type: integer }
+                            overview:   { type: string }
+                            poster_url: { type: string }
+        "400":
+          description: q query parameter missing
+          content: { application/json: { schema: { $ref: "#/components/schemas/ErrorEnvelope" } } }
+
   /me/peers/{peerID}/libraries:
     parameters:
       - { name: peerID, in: path, required: true, schema: { type: string } }

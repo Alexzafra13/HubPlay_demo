@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -200,6 +201,73 @@ func (h *MePeersHandler) BrowsePeerItems(w http.ResponseWriter, r *http.Request)
 			"items":      out,
 			"total":      total,
 			"from_cache": fromCache,
+		},
+	})
+}
+
+// peerSearchHitWire is the user-facing federated-search row. Adds the
+// peer attribution that BrowsePeerItems doesn't need (single peer
+// is implicit in the path) so the UI can render an origin badge and
+// route the click into the right peer's detail view.
+type peerSearchHitWire struct {
+	PeerID    string `json:"peer_id"`
+	PeerName  string `json:"peer_name"`
+	LibraryID string `json:"library_id,omitempty"`
+	ID        string `json:"id"`
+	Type      string `json:"type"`
+	Title     string `json:"title"`
+	Year      int    `json:"year,omitempty"`
+	Overview  string `json:"overview,omitempty"`
+	PosterURL string `json:"poster_url,omitempty"`
+}
+
+// SearchPeers fans out a query string to every paired peer in
+// parallel and aggregates the hits. A peer that is offline / slow /
+// errors is silently skipped so a single misbehaving peer cannot
+// blank a federated search result page.
+//
+// GET /api/v1/me/peers/search?q=<query>&limit=<perPeerLimit>
+func (h *MePeersHandler) SearchPeers(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query().Get("q")
+	if query == "" {
+		respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "q required")
+		return
+	}
+	// Per-peer limit caps how many hits each peer can contribute. A
+	// global limit on the aggregated set would let a chatty peer
+	// crowd quieter ones out of the results; per-peer fairness gives
+	// every paired server a slice of the page.
+	perPeerLimit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if perPeerLimit <= 0 || perPeerLimit > 50 {
+		perPeerLimit = 10
+	}
+
+	hits, err := h.mgr.SearchAllPeers(r.Context(), query, perPeerLimit, 2*time.Second)
+	if err != nil {
+		h.logger.Warn("federation: search all peers", "err", err)
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
+
+	out := make([]peerSearchHitWire, 0, len(hits))
+	for _, h := range hits {
+		row := peerSearchHitWire{
+			PeerID:   h.Peer.ID,
+			PeerName: h.Peer.Name,
+			ID:       h.Item.ID,
+			Type:     h.Item.Type,
+			Title:    h.Item.Title,
+			Year:     h.Item.Year,
+			Overview: h.Item.Overview,
+		}
+		if h.Item.HasPoster {
+			row.PosterURL = "/api/v1/me/peers/" + h.Peer.ID + "/items/" + h.Item.ID + "/poster"
+		}
+		out = append(out, row)
+	}
+	respondJSON(w, http.StatusOK, map[string]any{
+		"data": map[string]any{
+			"hits": out,
 		},
 	})
 }

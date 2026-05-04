@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
 	"time"
 )
 
@@ -170,6 +171,55 @@ func (m *Manager) FetchPeerItems(ctx context.Context, peerID, libraryID string, 
 		})
 	}
 	return out, wire.Total, nil
+}
+
+// FetchPeerSearch hits a remote peer's GET /peer/search?q=...&limit=...
+// endpoint and returns matching items. Same retry policy as the other
+// idempotent peer GETs (transient failure → up to 3 attempts with
+// exponential backoff). The remote applies its own share ACL; we
+// take its decision at face value.
+func (m *Manager) FetchPeerSearch(ctx context.Context, peerID, query string, limit int) ([]*SharedItem, error) {
+	peer, err := m.repo.GetPeerByID(ctx, peerID)
+	if err != nil {
+		return nil, err
+	}
+	if peer == nil || peer.Status != PeerPaired {
+		return nil, fmt.Errorf("peer %s not paired", peerID)
+	}
+	if limit <= 0 {
+		limit = 25
+	}
+
+	url, err := joinBaseURL(peer.BaseURL, fmt.Sprintf("/api/v1/peer/search?q=%s&limit=%d",
+		neturl.QueryEscape(query), limit))
+	if err != nil {
+		return nil, err
+	}
+	resp, err := m.doIdempotentPeerGET(ctx, peerID, url, "search")
+	if err != nil {
+		return nil, fmt.Errorf("search peer %s: %w", peerID, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, decodeRemoteError(resp)
+	}
+	var wire remoteItemsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&wire); err != nil {
+		return nil, fmt.Errorf("decode search results: %w", err)
+	}
+	out := make([]*SharedItem, 0, len(wire.Items))
+	for _, w := range wire.Items {
+		out = append(out, &SharedItem{
+			ID:        w.ID,
+			Type:      w.Type,
+			Title:     w.Title,
+			Year:      w.Year,
+			Overview:  w.Overview,
+			HasPoster: w.HasPoster,
+		})
+	}
+	return out, nil
 }
 
 func decodeRemoteError(resp *http.Response) error {

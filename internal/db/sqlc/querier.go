@@ -82,6 +82,10 @@ type Querier interface {
 	CreateSigningKey(ctx context.Context, arg CreateSigningKeyParams) error
 	CreateUser(ctx context.Context, arg CreateUserParams) error
 	DeleteAllSessionsByUser(ctx context.Context, userID string) (int64, error)
+	// NOTE: SearchSharedItems is implemented as raw SQL in
+	// federation_repository.go because sqlc does not parse FTS5 virtual
+	// tables (items_fts MATCH ?). Same precedent as item_repository.go's
+	// List path.
 	// ============================================================
 	// catalog cache (Phase 4 + 027)
 	// ============================================================
