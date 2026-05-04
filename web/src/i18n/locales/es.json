@@ -205,8 +205,11 @@
     "title": "Buscar",
     "placeholder": "Buscar peliculas, series...",
     "emptyTitle": "Buscar peliculas, series...",
-    "emptyDescription": "Escribe en el cuadro de busqueda para encontrar contenido.",
-    "noResults": "Sin resultados para \"{{query}}\""
+    "emptyDescription": "Escribe en la barra superior para encontrar contenido.",
+    "noResults": "Sin resultados para \"{{query}}\"",
+    "resultsFor": "Resultados para \"{{query}}\"",
+    "totalCount": "{{count}} elementos",
+    "episodes": "Episodios"
   },
   "personDetail": {
     "notFoundTitle": "Persona no encontrada",

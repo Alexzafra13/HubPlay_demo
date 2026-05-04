@@ -28,7 +28,11 @@ import type { MediaItem } from "@/api/types";
 // or pages without a grid, an inline dropdown with poster previews is
 // the fastest path to "click the thing I meant".
 
-const FILTER_ROUTES = ["/movies", "/series"];
+// Routes whose grid reads `?q=` directly. Typing in the SearchBar on
+// these routes writes to the URL instead of opening a dropdown — the
+// page IS the result surface. /search is included so the dedicated
+// results page stays in sync with the topbar input.
+const FILTER_ROUTES = ["/movies", "/series", "/search"];
 
 function isFilterRoute(pathname: string): boolean {
   return FILTER_ROUTES.some(
@@ -178,6 +182,9 @@ export function SearchBar() {
   // what the current behavior is.
   const placeholder = useMemo(() => {
     if (filterMode) {
+      if (location.pathname.startsWith("/search")) {
+        return t("topbar.searchPlaceholder");
+      }
       const section = location.pathname.startsWith("/series")
         ? t("nav.series")
         : t("nav.movies");
