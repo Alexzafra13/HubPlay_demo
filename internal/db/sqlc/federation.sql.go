@@ -56,7 +56,6 @@ func (q *Queries) CountSharedItems(ctx context.Context, arg CountSharedItemsPara
 
 const deleteCachedItemsForLibrary = `-- name: DeleteCachedItemsForLibrary :exec
 
-
 DELETE FROM federation_item_cache
 WHERE peer_id = ? AND library_id = ?
 `
@@ -66,10 +65,6 @@ type DeleteCachedItemsForLibraryParams struct {
 	LibraryID string `json:"library_id"`
 }
 
-// NOTE: SearchSharedItems is implemented as raw SQL in
-// federation_repository.go because sqlc does not parse FTS5 virtual
-// tables (items_fts MATCH ?). Same precedent as item_repository.go's
-// List path.
 // ============================================================
 // catalog cache (Phase 4 + 027)
 // ============================================================
@@ -595,6 +590,84 @@ func (q *Queries) ListPeers(ctx context.Context) ([]FederationPeer, error) {
 			&i.LastSeenAt,
 			&i.LastSeenStatusCode,
 			&i.RevokedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRecentSharedItems = `-- name: ListRecentSharedItems :many
+
+SELECT i.id, i.type, i.title,
+       COALESCE(i.year, 0) AS year,
+       COALESCE(m.overview, '') AS overview,
+       EXISTS (
+         SELECT 1 FROM images img
+          WHERE img.item_id = i.id
+            AND img.type = 'primary'
+            AND img.is_primary = 1
+       ) AS has_poster,
+       i.library_id
+FROM items i
+JOIN federation_library_shares s ON s.library_id = i.library_id
+LEFT JOIN metadata m ON m.item_id = i.id
+WHERE s.peer_id = ? AND s.can_browse = 1
+  AND i.parent_id IS NULL
+ORDER BY i.added_at DESC
+LIMIT ?
+`
+
+type ListRecentSharedItemsParams struct {
+	PeerID string `json:"peer_id"`
+	Limit  int64  `json:"limit"`
+}
+
+type ListRecentSharedItemsRow struct {
+	ID        string `json:"id"`
+	Type      string `json:"type"`
+	Title     string `json:"title"`
+	Year      int64  `json:"year"`
+	Overview  string `json:"overview"`
+	HasPoster bool   `json:"has_poster"`
+	LibraryID string `json:"library_id"`
+}
+
+// NOTE: SearchSharedItems is implemented as raw SQL in
+// federation_repository.go because sqlc does not parse FTS5 virtual
+// tables (items_fts MATCH ?). Same precedent as item_repository.go's
+// List path.
+// Most recently added items across every library shared with `peerID`
+// (CanBrowse gate). Powers the consumer-side "Recently added on
+// peers" rail: each paired peer answers with its top-N freshest
+// titles, the consumer fan-out merges them. library_id is selected
+// so the consumer can route a click into
+// /peers/{peerID}/libraries/{libraryID}/items/{id} (same shape as
+// the search hits).
+func (q *Queries) ListRecentSharedItems(ctx context.Context, arg ListRecentSharedItemsParams) ([]ListRecentSharedItemsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listRecentSharedItems, arg.PeerID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRecentSharedItemsRow{}
+	for rows.Next() {
+		var i ListRecentSharedItemsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Type,
+			&i.Title,
+			&i.Year,
+			&i.Overview,
+			&i.HasPoster,
+			&i.LibraryID,
 		); err != nil {
 			return nil, err
 		}

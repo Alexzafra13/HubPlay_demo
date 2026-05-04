@@ -273,3 +273,38 @@ func TestFetchPeerSearch_NotPaired(t *testing.T) {
 		t.Fatal("unexpected error type")
 	}
 }
+
+// TestRecentFromAllPeers_AggregatesAndAttributes mirrors the fan-out
+// happy path for the "Recently added on peers" rail. Two peers each
+// answer with their own freshest items; the manager merges them and
+// the caller can tell which item came from which origin (badge in
+// the home rail depends on it).
+func TestRecentFromAllPeers_AggregatesAndAttributes(t *testing.T) {
+	a := canned200(`{"items":[{"id":"a1","type":"movie","title":"NewOnA","year":2026,"library_id":"lib-a"}],"total":1}`)
+	b := canned200(`{"items":[{"id":"b1","type":"movie","title":"NewOnB","year":2026,"library_id":"lib-b"}],"total":1}`)
+
+	f := newPeerSearchFixture(t, a, b)
+	defer f.close()
+
+	hits, err := f.mgr.RecentFromAllPeers(context.Background(), 12, time.Second)
+	if err != nil {
+		t.Fatalf("RecentFromAllPeers: %v", err)
+	}
+	if len(hits) != 2 {
+		t.Fatalf("expected 2 hits, got %d", len(hits))
+	}
+	byPeer := map[string]string{}
+	libByPeer := map[string]string{}
+	for _, h := range hits {
+		byPeer[h.Peer.ID] = h.Item.Title
+		libByPeer[h.Peer.ID] = h.Item.LibraryID
+	}
+	if byPeer["peer-a"] != "NewOnA" || byPeer["peer-b"] != "NewOnB" {
+		t.Errorf("attribution wrong: %v", byPeer)
+	}
+	// library_id must thread through the wire so the consumer can
+	// route a click into /peers/{peer}/libraries/{lib}/items/{id}.
+	if libByPeer["peer-a"] != "lib-a" || libByPeer["peer-b"] != "lib-b" {
+		t.Errorf("library attribution wrong: %v", libByPeer)
+	}
+}

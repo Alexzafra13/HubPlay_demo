@@ -1085,6 +1085,20 @@ export class ApiClient {
     );
   }
 
+  // "Recently added on peers" — server fans out to every paired peer
+  // and returns each peer's freshest items merged with origin
+  // attribution. Same wire shape as searchPeers (FederationSearchHit)
+  // so the home rail can reuse the same renderers.
+  async getPeerRecent(
+    perPeerLimit?: number,
+  ): Promise<import("./types").FederationSearchResponse> {
+    return this.request<import("./types").FederationSearchResponse>(
+      "GET",
+      "/me/peers/recent",
+      { params: { limit: perPeerLimit } },
+    );
+  }
+
   // startPeerStreamSession asks our origin to broker a stream session
   // on a peer for one of their items. Returns the same-origin master
   // playlist URL the HLS player should load -- never the peer's URL.

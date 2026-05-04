@@ -27,6 +27,7 @@ import {
   LatestInLibraryRail,
   LiveNowRail,
   NextUpRail,
+  PeerRecentRail,
   TrendingRail,
 } from "@/components/home";
 
@@ -323,6 +324,15 @@ export default function Home() {
           if (!node) return null;
           return <div key={s.id}>{node}</div>;
         })}
+        {/* Federated rail. Lives outside the layout-driven dispatch
+            for v1 because `peer_recent` isn't a registered
+            HomeSection type yet — the rail self-hides when no peer
+            answered with anything, so a solo deployment renders
+            home identically to pre-federation. Promoting it to a
+            configurable section is a follow-up that needs the
+            backend `validSectionType` whitelist + the home-layout
+            settings UI to grow a toggle for it. */}
+        <PeerRecentRail />
       </div>
     </div>
   );

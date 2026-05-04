@@ -61,6 +61,7 @@
     "live": "En directo",
     "noProgramInfo": "Sin información de programa",
     "latestIn": "Reciente en {{library}}",
+    "peerRecent": "Recientes en tus pares",
     "viewDetails": "Ver detalles",
     "failedToLoad": "Error al cargar el contenido. Comprueba la conexion del servidor."
   },

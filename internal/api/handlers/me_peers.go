@@ -273,6 +273,50 @@ func (h *MePeersHandler) SearchPeers(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// RecentPeers fans out a "what's new?" request to every paired peer
+// and aggregates the hits with origin attribution. Powers the home
+// page's "Recently added on peers" rail. Wire shape mirrors the
+// federated-search response so the frontend reuses the same hit
+// type: a peer that times out / errors is silently skipped.
+//
+// GET /api/v1/me/peers/recent?limit=<perPeerLimit>
+func (h *MePeersHandler) RecentPeers(w http.ResponseWriter, r *http.Request) {
+	perPeerLimit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if perPeerLimit <= 0 || perPeerLimit > 50 {
+		perPeerLimit = 12
+	}
+
+	hits, err := h.mgr.RecentFromAllPeers(r.Context(), perPeerLimit, 2*time.Second)
+	if err != nil {
+		h.logger.Warn("federation: recent all peers", "err", err)
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
+
+	out := make([]peerSearchHitWire, 0, len(hits))
+	for _, h := range hits {
+		row := peerSearchHitWire{
+			PeerID:    h.Peer.ID,
+			PeerName:  h.Peer.Name,
+			LibraryID: h.Item.LibraryID,
+			ID:        h.Item.ID,
+			Type:      h.Item.Type,
+			Title:     h.Item.Title,
+			Year:      h.Item.Year,
+			Overview:  h.Item.Overview,
+		}
+		if h.Item.HasPoster {
+			row.PosterURL = "/api/v1/me/peers/" + h.Peer.ID + "/items/" + h.Item.ID + "/poster"
+		}
+		out = append(out, row)
+	}
+	respondJSON(w, http.StatusOK, map[string]any{
+		"data": map[string]any{
+			"hits": out,
+		},
+	})
+}
+
 // RefreshPeerLibrary purges the cache for (peer, library) so the next
 // browse forces a live re-fetch. Wired to a "Refresh" button in the
 // peer-library UI.

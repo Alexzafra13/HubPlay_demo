@@ -39,6 +39,14 @@ interface SearchResultsViewProps {
    * local-only; the dedicated /search page passes both.
    */
   peerHits?: FederationSearchHit[];
+  /**
+   * Click handler for a peer hit. Mirrors `onItemClick` for the
+   * federated section so the dropdown can dismiss itself when the
+   * user picks a peer result. Kept separate from `onItemClick` so
+   * call sites that only care about local hits don't have to widen
+   * their type signature.
+   */
+  onPeerHitClick?: (hit: FederationSearchHit) => void;
 }
 
 export function SearchResultsView({
@@ -46,6 +54,7 @@ export function SearchResultsView({
   perSectionLimit,
   onItemClick,
   peerHits,
+  onPeerHitClick,
 }: SearchResultsViewProps) {
   const { t } = useTranslation();
   const groups = useMemo(() => groupByType(items), [items]);
@@ -83,6 +92,7 @@ export function SearchResultsView({
             perSectionLimit != null &&
             (peerHits?.length ?? 0) > perSectionLimit
           }
+          onHitClick={onPeerHitClick}
         />
       )}
     </div>
@@ -200,11 +210,13 @@ function PeerSection({
   hits,
   totalCount,
   limited,
+  onHitClick,
 }: {
   label: string;
   hits: FederationSearchHit[];
   totalCount: number;
   limited: boolean;
+  onHitClick?: (hit: FederationSearchHit) => void;
 }) {
   return (
     <section>
@@ -226,14 +238,24 @@ function PeerSection({
       </header>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {hits.map((hit) => (
-          <PeerResultCard key={`${hit.peer_id}:${hit.id}`} hit={hit} />
+          <PeerResultCard
+            key={`${hit.peer_id}:${hit.id}`}
+            hit={hit}
+            onClick={onHitClick}
+          />
         ))}
       </div>
     </section>
   );
 }
 
-function PeerResultCard({ hit }: { hit: FederationSearchHit }) {
+function PeerResultCard({
+  hit,
+  onClick,
+}: {
+  hit: FederationSearchHit;
+  onClick?: (hit: FederationSearchHit) => void;
+}) {
   const { t } = useTranslation();
   // poster_url is already same-origin (proxied through /api/v1/me/peers
   // /{peer_id}/items/{id}/poster), so we can hand it to thumb() the
@@ -252,6 +274,7 @@ function PeerResultCard({ hit }: { hit: FederationSearchHit }) {
   return (
     <Link
       to={href}
+      onClick={() => onClick?.(hit)}
       className="group relative flex items-stretch gap-4 p-3 rounded-2xl border border-border-subtle bg-bg-card/40 hover:bg-bg-card hover:border-border-strong transition-all duration-200 hover:shadow-lg hover:shadow-black/30"
     >
       <div className="relative flex-shrink-0 w-[68px] h-[100px] rounded-lg overflow-hidden bg-bg-elevated ring-1 ring-border-subtle/60">

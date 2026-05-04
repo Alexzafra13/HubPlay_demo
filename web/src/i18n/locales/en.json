@@ -61,6 +61,7 @@
     "live": "Live",
     "noProgramInfo": "No programme info",
     "latestIn": "Latest in {{library}}",
+    "peerRecent": "Recently added on peers",
     "viewDetails": "View details",
     "failedToLoad": "Failed to load content. Check your server connection."
   },

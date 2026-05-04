@@ -188,6 +188,32 @@ LIMIT ? OFFSET ?;
 -- tables (items_fts MATCH ?). Same precedent as item_repository.go's
 -- List path.
 
+-- name: ListRecentSharedItems :many
+-- Most recently added items across every library shared with `peerID`
+-- (CanBrowse gate). Powers the consumer-side "Recently added on
+-- peers" rail: each paired peer answers with its top-N freshest
+-- titles, the consumer fan-out merges them. library_id is selected
+-- so the consumer can route a click into
+-- /peers/{peerID}/libraries/{libraryID}/items/{id} (same shape as
+-- the search hits).
+SELECT i.id, i.type, i.title,
+       COALESCE(i.year, 0) AS year,
+       COALESCE(m.overview, '') AS overview,
+       EXISTS (
+         SELECT 1 FROM images img
+          WHERE img.item_id = i.id
+            AND img.type = 'primary'
+            AND img.is_primary = 1
+       ) AS has_poster,
+       i.library_id
+FROM items i
+JOIN federation_library_shares s ON s.library_id = i.library_id
+LEFT JOIN metadata m ON m.item_id = i.id
+WHERE s.peer_id = ? AND s.can_browse = 1
+  AND i.parent_id IS NULL
+ORDER BY i.added_at DESC
+LIMIT ?;
+
 -- ============================================================
 -- catalog cache (Phase 4 + 027)
 -- ============================================================

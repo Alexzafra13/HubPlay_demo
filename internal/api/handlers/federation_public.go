@@ -155,6 +155,37 @@ func (h *FederationPublicHandler) SearchLibraries(w http.ResponseWriter, r *http
 	})
 }
 
+// ListRecent returns the most recently added items across every
+// library the calling peer has CanBrowse on. Powers the consumer-side
+// "Recently added on peers" rail. Same wire shape as ListLibraryItems
+// (items + total) for trivial client reuse; each item carries its
+// library_id so the consumer can route a click into the per-library
+// detail view.
+//
+// GET /api/v1/peer/recent?limit=<n>  (peer JWT required)
+func (h *FederationPublicHandler) ListRecent(w http.ResponseWriter, r *http.Request) {
+	peer := federation.PeerFromContext(r.Context())
+	if peer == nil {
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "peer context missing")
+		return
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+
+	items, err := h.mgr.ListLocalRecentSharedItems(r.Context(), peer.ID, limit)
+	if err != nil {
+		h.logger.Error("federation: list recent shared items", "err", err, "peer_id", peer.ID)
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "list recent failed")
+		return
+	}
+	if items == nil {
+		items = []*federation.SharedItem{}
+	}
+	respondJSON(w, http.StatusOK, map[string]any{
+		"items": items,
+		"total": len(items),
+	})
+}
+
 // Ping is the canonical authenticated peer-to-peer endpoint. A peer
 // presenting a valid Ed25519-signed JWT (validated by RequirePeerJWT
 // middleware) hits this to verify the link is alive end-to-end.

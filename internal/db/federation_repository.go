@@ -467,6 +467,38 @@ func (r *FederationRepository) ListSharedItems(ctx context.Context, peerID, libr
 	return out, int(total), nil
 }
 
+// ListRecentSharedItems returns the most recently added items across
+// every library shared with `peerID` (CanBrowse gate). Powers the
+// consumer-side "Recently added on peers" rail: each paired peer
+// answers with its top-N freshest titles and the consumer fan-out
+// merges them. library_id is included on each row so the consumer
+// can route a click into /peers/{peerID}/libraries/{libraryID}/items/{id}.
+func (r *FederationRepository) ListRecentSharedItems(ctx context.Context, peerID string, limit int) ([]*federation.SharedItem, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 25
+	}
+	rows, err := r.q.ListRecentSharedItems(ctx, sqlc.ListRecentSharedItemsParams{
+		PeerID: peerID,
+		Limit:  int64(limit),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list recent shared items: %w", err)
+	}
+	out := make([]*federation.SharedItem, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, &federation.SharedItem{
+			ID:        row.ID,
+			Type:      row.Type,
+			Title:     row.Title,
+			Year:      int(row.Year),
+			Overview:  row.Overview,
+			HasPoster: row.HasPoster,
+			LibraryID: row.LibraryID,
+		})
+	}
+	return out, nil
+}
+
 // SearchSharedItems runs a full-text query across libraries the calling
 // peer has CanBrowse on. Reuses the items_fts virtual table that
 // powers local search; ACL gate is the JOIN against

@@ -175,6 +175,54 @@ func (m *Manager) FetchPeerItems(ctx context.Context, peerID, libraryID string, 
 	return out, wire.Total, nil
 }
 
+// FetchPeerRecent hits a remote peer's GET /peer/recent?limit=...
+// endpoint and returns the most recently added items (across every
+// library that peer shares with us). Same retry posture as the
+// other idempotent peer GETs.
+func (m *Manager) FetchPeerRecent(ctx context.Context, peerID string, limit int) ([]*SharedItem, error) {
+	peer, err := m.repo.GetPeerByID(ctx, peerID)
+	if err != nil {
+		return nil, err
+	}
+	if peer == nil || peer.Status != PeerPaired {
+		return nil, fmt.Errorf("peer %s not paired", peerID)
+	}
+	if limit <= 0 {
+		limit = 12
+	}
+
+	url, err := joinBaseURL(peer.BaseURL, fmt.Sprintf("/api/v1/peer/recent?limit=%d", limit))
+	if err != nil {
+		return nil, err
+	}
+	resp, err := m.doIdempotentPeerGET(ctx, peerID, url, "recent")
+	if err != nil {
+		return nil, fmt.Errorf("recent peer %s: %w", peerID, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, decodeRemoteError(resp)
+	}
+	var wire remoteItemsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&wire); err != nil {
+		return nil, fmt.Errorf("decode recent results: %w", err)
+	}
+	out := make([]*SharedItem, 0, len(wire.Items))
+	for _, w := range wire.Items {
+		out = append(out, &SharedItem{
+			ID:        w.ID,
+			Type:      w.Type,
+			Title:     w.Title,
+			Year:      w.Year,
+			Overview:  w.Overview,
+			HasPoster: w.HasPoster,
+			LibraryID: w.LibraryID,
+		})
+	}
+	return out, nil
+}
+
 // FetchPeerSearch hits a remote peer's GET /peer/search?q=...&limit=...
 // endpoint and returns matching items. Same retry policy as the other
 // idempotent peer GETs (transient failure → up to 3 attempts with

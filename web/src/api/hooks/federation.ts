@@ -200,6 +200,22 @@ export function usePeersSearch(
   });
 }
 
+// usePeerRecent — federated "Recently added on peers" rail. Server
+// fans out to every paired peer in parallel with a per-peer timeout
+// so a slow / offline peer can't block the rest. Same hit shape as
+// the federated search response, so the rail reuses the existing
+// FederationSearchHit type.
+export function usePeerRecent(perPeerLimit = 12) {
+  return useQuery<FederationSearchResponse>({
+    queryKey: queryKeys.myPeersRecent,
+    queryFn: () => api.getPeerRecent(perPeerLimit),
+    // Recently-added moves on a slow tempo (new scans land minutes
+    // apart at most). Cache for a minute so rapid Home re-renders
+    // don't stampede the fan-out.
+    staleTime: 60 * 1000,
+  });
+}
+
 // useRefreshPeerLibrary — admin "force refresh" button. Purges the
 // cache for (peer, library) so the next browse forces a live fetch.
 export function useRefreshPeerLibrary(peerID: string, libraryID: string) {

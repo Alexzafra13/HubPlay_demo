@@ -5,4 +5,5 @@ export { NextUpRail } from "./NextUpRail";
 export { LatestInLibraryRail } from "./LatestInLibraryRail";
 export { TrendingRail } from "./TrendingRail";
 export { LiveNowRail } from "./LiveNowRail";
+export { PeerRecentRail } from "./PeerRecentRail";
 export { HomeLayoutSettings } from "./HomeLayoutSettings";

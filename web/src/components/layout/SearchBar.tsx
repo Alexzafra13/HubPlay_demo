@@ -12,6 +12,7 @@ import {
   Radio,
 } from "lucide-react";
 import { useSearch } from "@/api/hooks";
+import { usePeersSearch } from "@/api/hooks/federation";
 import { useDebounce } from "@/hooks/useDebounce";
 import {
   SearchResultsView,
@@ -63,6 +64,16 @@ export function SearchBar() {
     staleTime: 30_000,
   });
   const results = useMemo(() => data ?? [], [data]);
+  // Federated hits run alongside the local query while the dropdown
+  // is open. The fetch is conditional on dropdownActive so we don't
+  // fan out to every paired peer for an empty / closed bar. Late
+  // peer hits join the panel under "From your peers" without
+  // disturbing the local rail above them.
+  const peers = usePeersSearch(debounced, dropdownActive);
+  const peerHits = peers.data?.hits ?? [];
+  const dropdownLoading = isFetching || peers.isFetching;
+  const dropdownEmpty =
+    !dropdownLoading && results.length === 0 && peerHits.length === 0;
 
   // Auto-expand if the URL already has ?q= when the page mounts
   // (filter route deep link, or user reloaded the tab mid-search).
@@ -224,7 +235,7 @@ export function SearchBar() {
                 autoComplete="off"
                 spellCheck={false}
               />
-              {isFetching && dropdownActive && (
+              {dropdownLoading && dropdownActive && (
                 <Loader2 className="h-3.5 w-3.5 mx-1.5 text-text-muted animate-spin flex-shrink-0" strokeWidth={1.8} />
               )}
               {query.length > 0 ? (
@@ -284,14 +295,19 @@ export function SearchBar() {
             >
               <div className="max-w-[1400px] mx-auto px-6 py-6 max-h-[calc(100dvh-var(--topbar-height)-24px)] overflow-y-auto">
                 {dropdownActive ? (
-                  results.length === 0 && !isFetching ? (
+                  dropdownEmpty ? (
                     <SearchNoResults query={debounced} />
                   ) : (
                     <>
                       <SearchResultsView
                         items={results}
+                        peerHits={peerHits}
                         perSectionLimit={6}
                         onItemClick={() => {
+                          setLocalQuery("");
+                          setOpen(false);
+                        }}
+                        onPeerHitClick={() => {
                           setLocalQuery("");
                           setOpen(false);
                         }}

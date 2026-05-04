@@ -82,10 +82,6 @@ type Querier interface {
 	CreateSigningKey(ctx context.Context, arg CreateSigningKeyParams) error
 	CreateUser(ctx context.Context, arg CreateUserParams) error
 	DeleteAllSessionsByUser(ctx context.Context, userID string) (int64, error)
-	// NOTE: SearchSharedItems is implemented as raw SQL in
-	// federation_repository.go because sqlc does not parse FTS5 virtual
-	// tables (items_fts MATCH ?). Same precedent as item_repository.go's
-	// List path.
 	// ============================================================
 	// catalog cache (Phase 4 + 027)
 	// ============================================================
@@ -293,6 +289,18 @@ type Querier interface {
 	ListPeers(ctx context.Context) ([]FederationPeer, error)
 	ListProviders(ctx context.Context) ([]Provider, error)
 	ListProvidersByType(ctx context.Context, type_ string) ([]Provider, error)
+	// NOTE: SearchSharedItems is implemented as raw SQL in
+	// federation_repository.go because sqlc does not parse FTS5 virtual
+	// tables (items_fts MATCH ?). Same precedent as item_repository.go's
+	// List path.
+	// Most recently added items across every library shared with `peerID`
+	// (CanBrowse gate). Powers the consumer-side "Recently added on
+	// peers" rail: each paired peer answers with its top-N freshest
+	// titles, the consumer fan-out merges them. library_id is selected
+	// so the consumer can route a click into
+	// /peers/{peerID}/libraries/{libraryID}/items/{id} (same shape as
+	// the search hits).
+	ListRecentSharedItems(ctx context.Context, arg ListRecentSharedItemsParams) ([]ListRecentSharedItemsRow, error)
 	ListSchedule(ctx context.Context, arg ListScheduleParams) ([]ListScheduleRow, error)
 	ListSessionsByUser(ctx context.Context, userID string) ([]Session, error)
 	// Overview lives in the metadata sidecar (LEFT JOIN so items without

@@ -1014,6 +1014,44 @@ paths:
           description: q query parameter missing
           content: { application/json: { schema: { $ref: "#/components/schemas/ErrorEnvelope" } } }
 
+  /me/peers/recent:
+    parameters:
+      - { name: limit, in: query, required: false, schema: { type: integer, default: 12, maximum: 50 }, description: "Max hits per peer" }
+    get:
+      tags: [federation]
+      summary: Most recently added items across every paired peer
+      description: |
+        Fans out a "what's new?" request to every paired peer in
+        parallel and aggregates the results with origin attribution.
+        Same fan-out posture as `/me/peers/search` (per-peer 2 s
+        timeout, errors silently skipped, per-peer fairness cap).
+        Powers the home page's "Recently added on peers" rail.
+      responses:
+        "200":
+          description: Recent hits with peer attribution
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      hits:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            peer_id:    { type: string }
+                            peer_name:  { type: string }
+                            library_id: { type: string }
+                            id:         { type: string }
+                            type:       { type: string }
+                            title:      { type: string }
+                            year:       { type: integer }
+                            overview:   { type: string }
+                            poster_url: { type: string }
+
   /me/peers/{peerID}/libraries:
     parameters:
       - { name: peerID, in: path, required: true, schema: { type: string } }
