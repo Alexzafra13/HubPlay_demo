@@ -47,6 +47,7 @@ type Repo interface {
 	ListSharesByPeer(ctx context.Context, peerID string) ([]*LibraryShare, error)
 	ListSharedLibrariesForPeer(ctx context.Context, peerID string) ([]*SharedLibrary, error)
 	ListSharedItems(ctx context.Context, peerID, libraryID string, offset, limit int) ([]*SharedItem, int, error)
+	SearchSharedItems(ctx context.Context, peerID, query string, limit int) ([]*SharedItem, error)
 
 	// Catalog cache (Phase 4+).
 	UpsertCachedItems(ctx context.Context, peerID, libraryID string, items []*SharedItem, at time.Time) error
@@ -128,6 +129,7 @@ type Manager struct {
 	auditor   *Auditor
 	ratelimit *RateLimiter
 	nonces    *nonceCache
+	metrics   MetricsSink
 
 	// peerCache caches paired peers by server_uuid for the JWT
 	// validation hot path. Refreshed on each peer mutation.
@@ -141,7 +143,17 @@ type Manager struct {
 	// JWT validation.
 	streamMu       sync.Mutex
 	streamSessions map[string]*PeerStreamSession
+
+	// sweeper goroutine state. cancel stops the ticker; done is closed
+	// when the goroutine has returned, so Close can wait on it.
+	sweepCancel context.CancelFunc
+	sweepDone   chan struct{}
 }
+
+// streamSweepInterval is how often we scan streamSessions for entries
+// past peerStreamSessionTTL. Comfortably tighter than the TTL itself
+// so a stale session lingers at most ~one interval beyond TTL.
+const streamSweepInterval = time.Minute
 
 // NewManager wires a Manager. Callers must have already invoked
 // LoadOrCreate on this server's identity (typically at startup) so
@@ -165,6 +177,7 @@ func NewManager(ctx context.Context, cfg Config, repo Repo, clk clock.Clock, log
 		auditor:        NewAuditor(repo, logger),
 		ratelimit:      NewRateLimiter(clk, cfg.PeerRequestsPerMinute, cfg.PeerBurst),
 		nonces:         newNonceCache(clk),
+		metrics:        noopMetricsSink{},
 		streamSessions: make(map[string]*PeerStreamSession),
 	}
 	if err := m.refreshPeerCache(ctx); err != nil {
@@ -173,15 +186,53 @@ func NewManager(ctx context.Context, cfg Config, repo Repo, clk clock.Clock, log
 		m.auditor.Close()
 		return nil, err
 	}
+	m.startStreamSweeper()
 	return m, nil
 }
 
-// Close releases background resources (auditor goroutine). Idempotent.
-// Wired into main.go's graceful shutdown so the audit queue flushes
-// before the process exits.
+// startStreamSweeper launches the background goroutine that periodically
+// reclaims peer stream sessions idle past peerStreamSessionTTL. Without
+// this, RegisterPeerStreamSession would accumulate entries forever for
+// any peer that opened a session and never came back to play it (the
+// JWT expires upstream, but the in-memory mapping does not).
+func (m *Manager) startStreamSweeper() {
+	ctx, cancel := context.WithCancel(context.Background())
+	m.sweepCancel = cancel
+	m.sweepDone = make(chan struct{})
+	go func() {
+		defer close(m.sweepDone)
+		t := time.NewTicker(streamSweepInterval)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				m.SweepStreamSessions()
+			}
+		}
+	}()
+}
+
+// Close releases background resources (audit queue, stream sweeper,
+// idle HTTP connections). Idempotent. Wired into main.go's graceful
+// shutdown so the audit queue flushes and outbound peer sockets are
+// closed before the process exits.
 func (m *Manager) Close() {
 	if m == nil {
 		return
+	}
+	if m.sweepCancel != nil {
+		m.sweepCancel()
+		<-m.sweepDone
+		m.sweepCancel = nil
+	}
+	if m.httpClt != nil {
+		// CloseIdleConnections is best-effort: in-flight requests are
+		// not interrupted (they finish on their own context), but TCP
+		// keepalives held in the transport's idle pool are released
+		// immediately so SIGTERM doesn't wait HTTPTimeout for them.
+		m.httpClt.CloseIdleConnections()
 	}
 	m.auditor.Close()
 }
@@ -218,11 +269,16 @@ func (m *Manager) SetAdvertisedURL(url string) {
 // browse, stream session start, etc.) to authenticate themselves on
 // the remote.
 //
+// Takes the request's ctx so a cancellation upstream (user closed the
+// tab, request deadline tripped) cancels the underlying DB lookup.
+// Without it, a stuck SQLite write would block the request indefinitely
+// even after the caller had walked away.
+//
 // Returns ErrPeerNotFound if `audiencePeerID` isn't a paired peer in
 // our registry, so callers can short-circuit before bothering with
 // the HTTP roundtrip.
-func (m *Manager) IssuePeerToken(audiencePeerID string) (string, error) {
-	peer, err := m.repo.GetPeerByID(context.Background(), audiencePeerID)
+func (m *Manager) IssuePeerToken(ctx context.Context, audiencePeerID string) (string, error) {
+	peer, err := m.repo.GetPeerByID(ctx, audiencePeerID)
 	if err != nil {
 		return "", err
 	}
@@ -335,7 +391,16 @@ func (m *Manager) ProbePeer(ctx context.Context, baseURL string) (*ServerInfo, e
 // admin handler derives this from the admin's session request so a
 // fresh deployment that hasn't set HUBPLAY_SERVER_BASE_URL still
 // pairs successfully — plug-and-play.
-func (m *Manager) AcceptInvite(ctx context.Context, baseURL, code, fallbackAdvertisedURL string) (*Peer, error) {
+func (m *Manager) AcceptInvite(ctx context.Context, baseURL, code, fallbackAdvertisedURL string) (out *Peer, err error) {
+	start := m.clock.Now()
+	defer func() {
+		outcome := "ok"
+		if err != nil {
+			outcome = "error"
+		}
+		m.metrics.HandshakeDuration("outbound", outcome, m.clock.Now().Sub(start).Seconds())
+	}()
+
 	if err := ValidateCodeFormat(code); err != nil {
 		return nil, err
 	}
@@ -421,7 +486,16 @@ func (m *Manager) AcceptInvite(ctx context.Context, baseURL, code, fallbackAdver
 // ServerInfo so the caller can persist us on their side. Atomic in
 // spirit — failures partway through leave the invite consumable for
 // another retry, since we update it last.
-func (m *Manager) HandleInboundHandshake(ctx context.Context, code string, remote *ServerInfo) (*Peer, *ServerInfo, error) {
+func (m *Manager) HandleInboundHandshake(ctx context.Context, code string, remote *ServerInfo) (outPeer *Peer, outInfo *ServerInfo, err error) {
+	start := m.clock.Now()
+	defer func() {
+		outcome := "ok"
+		if err != nil {
+			outcome = "error"
+		}
+		m.metrics.HandshakeDuration("inbound", outcome, m.clock.Now().Sub(start).Seconds())
+	}()
+
 	if err := ValidateCodeFormat(code); err != nil {
 		return nil, nil, err
 	}
@@ -756,6 +830,81 @@ func (m *Manager) BrowsePeerItems(ctx context.Context, peerID, libraryID string,
 	}
 
 	return nil, 0, false, liveErr
+}
+
+// SearchLocalSharedItems answers an inbound peer search request: what
+// items in libraries shared with `peerID` match `query`. The repo
+// applies the share ACL (CanBrowse JOIN); we just bound the result.
+func (m *Manager) SearchLocalSharedItems(ctx context.Context, peerID, query string, limit int) ([]*SharedItem, error) {
+	return m.repo.SearchSharedItems(ctx, peerID, query, limit)
+}
+
+// SearchAllPeers fans out the user's query to every paired peer in
+// parallel and aggregates the results with origin metadata. A peer
+// that times out, errors, or is offline is logged and skipped — the
+// rest still surface, so a single misbehaving peer cannot blank a
+// federated search.
+//
+// perPeerTimeout caps the wait per outbound call so a slow peer
+// cannot drag the user-visible response past the (separate) request
+// deadline. Sized for a fast LAN/Tailscale topology; admins running
+// over a slow WAN can extend via config in a future revision.
+func (m *Manager) SearchAllPeers(ctx context.Context, query string, perPeerLimit int, perPeerTimeout time.Duration) ([]*SharedItemFromPeer, error) {
+	if query == "" {
+		return []*SharedItemFromPeer{}, nil
+	}
+	peers, err := m.repo.ListPeers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if perPeerLimit <= 0 {
+		perPeerLimit = 25
+	}
+	if perPeerTimeout <= 0 {
+		perPeerTimeout = 2 * time.Second
+	}
+
+	type result struct {
+		peer  *Peer
+		items []*SharedItem
+		err   error
+	}
+	results := make(chan result, len(peers))
+	dispatched := 0
+	for _, p := range peers {
+		if p.Status != PeerPaired {
+			continue
+		}
+		dispatched++
+		go func(peer *Peer) {
+			callCtx, cancel := context.WithTimeout(ctx, perPeerTimeout)
+			defer cancel()
+			items, err := m.FetchPeerSearch(callCtx, peer.ID, query, perPeerLimit)
+			results <- result{peer: peer, items: items, err: err}
+		}(p)
+	}
+
+	out := []*SharedItemFromPeer{}
+	for i := 0; i < dispatched; i++ {
+		r := <-results
+		if r.err != nil {
+			m.logger.Info("federation: peer search failed",
+				"peer_id", r.peer.ID, "err", r.err)
+			continue
+		}
+		for _, it := range r.items {
+			out = append(out, &SharedItemFromPeer{Peer: r.peer, Item: it})
+		}
+	}
+	return out, nil
+}
+
+// SharedItemFromPeer pairs a search hit with the peer it came from
+// so the user-facing handler can render an origin badge and route
+// Play through the right peer.
+type SharedItemFromPeer struct {
+	Peer *Peer
+	Item *SharedItem
 }
 
 // PurgeCache clears cached items for (peer, library) — wired to the

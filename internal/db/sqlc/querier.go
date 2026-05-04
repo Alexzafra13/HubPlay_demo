@@ -46,9 +46,11 @@ type Querier interface {
 	// (em-dashes, accents, backticks) trigger another parser bug that
 	// silently truncates queries below.
 	ContinueWatching(ctx context.Context, arg ContinueWatchingParams) ([]ContinueWatchingRow, error)
+	CountAndNewestCachedItems(ctx context.Context, arg CountAndNewestCachedItemsParams) (CountAndNewestCachedItemsRow, error)
 	CountExternalIDsByItem(ctx context.Context, itemID string) (int64, error)
 	CountItemsByLibrary(ctx context.Context, libraryID string) (int64, error)
 	CountSessionsByUser(ctx context.Context, userID string) (int64, error)
+	CountSharedItems(ctx context.Context, arg CountSharedItemsParams) (int64, error)
 	CountUsers(ctx context.Context) (int64, error)
 	// IPTV channels per library.
 	//
@@ -80,6 +82,14 @@ type Querier interface {
 	CreateSigningKey(ctx context.Context, arg CreateSigningKeyParams) error
 	CreateUser(ctx context.Context, arg CreateUserParams) error
 	DeleteAllSessionsByUser(ctx context.Context, userID string) (int64, error)
+	// NOTE: SearchSharedItems is implemented as raw SQL in
+	// federation_repository.go because sqlc does not parse FTS5 virtual
+	// tables (items_fts MATCH ?). Same precedent as item_repository.go's
+	// List path.
+	// ============================================================
+	// catalog cache (Phase 4 + 027)
+	// ============================================================
+	DeleteCachedItemsForLibrary(ctx context.Context, arg DeleteCachedItemsForLibraryParams) error
 	DeleteChannelOverride(ctx context.Context, arg DeleteChannelOverrideParams) error
 	DeleteChannelWatch(ctx context.Context, arg DeleteChannelWatchParams) error
 	DeleteChannelsByLibrary(ctx context.Context, libraryID string) error
@@ -100,6 +110,7 @@ type Querier interface {
 	DeleteItemsByLibrary(ctx context.Context, libraryID string) error
 	DeleteLibrary(ctx context.Context, id string) (int64, error)
 	DeleteLibraryEPGSource(ctx context.Context, id string) error
+	DeleteLibraryShare(ctx context.Context, arg DeleteLibraryShareParams) error
 	// Media stream tracks (video, audio, subtitle) per item.
 	//
 	// Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE media_streams).
@@ -123,13 +134,17 @@ type Querier interface {
 	GetExternalIDByProvider(ctx context.Context, arg GetExternalIDByProviderParams) (ExternalID, error)
 	GetIPTVScheduledJob(ctx context.Context, arg GetIPTVScheduledJobParams) (IptvScheduledJob, error)
 	GetImageByID(ctx context.Context, id string) (GetImageByIDRow, error)
+	GetInviteByCode(ctx context.Context, code string) (FederationInvite, error)
 	GetItemByID(ctx context.Context, id string) (Item, error)
 	GetItemByPath(ctx context.Context, path sql.NullString) (Item, error)
 	GetItemChildren(ctx context.Context, parentID sql.NullString) ([]GetItemChildrenRow, error)
 	GetLibraryByID(ctx context.Context, id string) (GetLibraryByIDRow, error)
 	GetLibraryEPGSourceByID(ctx context.Context, id string) (GetLibraryEPGSourceByIDRow, error)
+	GetLibraryShare(ctx context.Context, arg GetLibraryShareParams) (FederationLibraryShare, error)
 	GetMetadataByItemID(ctx context.Context, itemID string) (GetMetadataByItemIDRow, error)
 	GetNowPlaying(ctx context.Context, arg GetNowPlayingParams) (GetNowPlayingRow, error)
+	GetPeerByID(ctx context.Context, id string) (FederationPeer, error)
+	GetPeerByServerUUID(ctx context.Context, serverUuid string) (FederationPeer, error)
 	GetPersonByID(ctx context.Context, id string) (GetPersonByIDRow, error)
 	// People (cast + crew) and the join table that links them to items.
 	//
@@ -146,6 +161,16 @@ type Querier interface {
 	GetPersonByName(ctx context.Context, name string) (GetPersonByNameRow, error)
 	GetPrimaryImage(ctx context.Context, arg GetPrimaryImageParams) (GetPrimaryImageRow, error)
 	GetProvider(ctx context.Context, name string) (Provider, error)
+	// Federation: server identity, peers, invites, library shares, audit
+	// log, item-cache. Schema: migrations/sqlite/020-023, 027.
+	//
+	// Adapter wrapping these queries lives in
+	// internal/db/federation_repository.go and is the public surface the
+	// federation package consumes.
+	// ============================================================
+	// server identity (one row, enforced by CHECK(id=1))
+	// ============================================================
+	GetServerIdentity(ctx context.Context) (GetServerIdentityRow, error)
 	GetSessionByRefreshTokenHash(ctx context.Context, refreshTokenHash string) (Session, error)
 	GetSigningKey(ctx context.Context, id string) (JwtSigningKey, error)
 	// User accounts.
@@ -156,6 +181,7 @@ type Querier interface {
 	GetUserData(ctx context.Context, arg GetUserDataParams) (UserDatum, error)
 	GrantLibraryAccess(ctx context.Context, arg GrantLibraryAccessParams) error
 	HasLockedImageForKind(ctx context.Context, arg HasLockedImageForKindParams) (bool, error)
+	InsertCachedItem(ctx context.Context, arg InsertCachedItemParams) error
 	// Chapter markers per item (movie or episode), keyed by start time.
 	//
 	// Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE chapters).
@@ -170,6 +196,14 @@ type Querier interface {
 	// Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE epg_programs).
 	// NOTE: BulkSchedule uses dynamic IN() and remains as raw SQL in the adapter.
 	InsertEPGProgram(ctx context.Context, arg InsertEPGProgramParams) error
+	// ============================================================
+	// audit log
+	// ============================================================
+	InsertFederationAuditEntry(ctx context.Context, arg InsertFederationAuditEntryParams) error
+	// ============================================================
+	// invites
+	// ============================================================
+	InsertInvite(ctx context.Context, arg InsertInviteParams) error
 	InsertItemPerson(ctx context.Context, arg InsertItemPersonParams) error
 	// Library management (media libraries, paths, access control).
 	//
@@ -177,11 +211,18 @@ type Querier interface {
 	InsertLibrary(ctx context.Context, arg InsertLibraryParams) error
 	InsertLibraryPath(ctx context.Context, arg InsertLibraryPathParams) error
 	InsertMediaStream(ctx context.Context, arg InsertMediaStreamParams) error
+	// ============================================================
+	// peers
+	// ============================================================
+	InsertPeer(ctx context.Context, arg InsertPeerParams) error
+	InsertServerIdentity(ctx context.Context, arg InsertServerIdentityParams) error
 	IsChannelFavorite(ctx context.Context, arg IsChannelFavoriteParams) (int64, error)
 	ListActiveChannelsByLibrary(ctx context.Context, libraryID string) ([]ListActiveChannelsByLibraryRow, error)
+	ListActiveInvites(ctx context.Context, expiresAt time.Time) ([]FederationInvite, error)
 	ListActiveProviders(ctx context.Context) ([]Provider, error)
 	ListActiveSigningKeys(ctx context.Context) ([]JwtSigningKey, error)
 	ListAllPaths(ctx context.Context) ([]LibraryPath, error)
+	ListCachedItems(ctx context.Context, arg ListCachedItemsParams) ([]ListCachedItemsRow, error)
 	ListChannelFavorites(ctx context.Context, userID string) ([]ListChannelFavoritesRow, error)
 	ListChannelFavoritesWithChannel(ctx context.Context, userID string) ([]ListChannelFavoritesWithChannelRow, error)
 	ListChannelGroups(ctx context.Context, libraryID string) ([]sql.NullString, error)
@@ -204,6 +245,7 @@ type Querier interface {
 	ListEnabledIPTVScheduledJobs(ctx context.Context) ([]IptvScheduledJob, error)
 	ListExternalIDsByItem(ctx context.Context, itemID string) ([]ExternalID, error)
 	ListFavorites(ctx context.Context, arg ListFavoritesParams) ([]ListFavoritesRow, error)
+	ListFederationAuditEntries(ctx context.Context, arg ListFederationAuditEntriesParams) ([]ListFederationAuditEntriesRow, error)
 	// Filmography: every movie + series this person has a direct credit
 	// on. Episode-level credits drop through for now (parent series
 	// usually carries the same person at the top level -- TMDb is
@@ -248,18 +290,29 @@ type Querier interface {
 	ListLibraryEPGSourcesByLibrary(ctx context.Context, libraryID string) ([]ListLibraryEPGSourcesByLibraryRow, error)
 	ListMediaStreamsByItem(ctx context.Context, itemID string) ([]ListMediaStreamsByItemRow, error)
 	ListPathsByLibrary(ctx context.Context, libraryID string) ([]string, error)
+	ListPeers(ctx context.Context) ([]FederationPeer, error)
 	ListProviders(ctx context.Context) ([]Provider, error)
 	ListProvidersByType(ctx context.Context, type_ string) ([]Provider, error)
 	ListSchedule(ctx context.Context, arg ListScheduleParams) ([]ListScheduleRow, error)
 	ListSessionsByUser(ctx context.Context, userID string) ([]Session, error)
+	// Overview lives in the metadata sidecar (LEFT JOIN so items without
+	// metadata still surface with empty overview). HasPoster is an EXISTS
+	// subquery against the images table so the listing path does not
+	// need to pull the image id; the actual bytes flow through
+	// /peer/items/{id}/poster on demand.
+	ListSharedItems(ctx context.Context, arg ListSharedItemsParams) ([]ListSharedItemsRow, error)
+	ListSharedLibrariesForPeer(ctx context.Context, peerID string) ([]ListSharedLibrariesForPeerRow, error)
+	ListSharesByPeer(ctx context.Context, peerID string) ([]FederationLibraryShare, error)
 	ListSigningKeys(ctx context.Context) ([]JwtSigningKey, error)
 	ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUsersRow, error)
+	MarkInviteUsed(ctx context.Context, arg MarkInviteUsedParams) error
 	MarkPlayed(ctx context.Context, arg MarkPlayedParams) error
 	// The default-priority slot for a freshly-added source: one past the
 	// current max, so it runs last and can be reordered from the UI.
 	// COALESCE returns -1 for "no rows yet" so the repo can lift it to 0
 	// without splitting NullInt branches.
 	NextLibraryEPGSourcePriority(ctx context.Context, libraryID string) (interface{}, error)
+	PruneFederationAuditBefore(ctx context.Context, occurredAt time.Time) (int64, error)
 	// Per-user "continue watching" history for LiveTV channels.
 	//
 	// Table schema: migrations/sqlite/012_channel_watch_history.sql.
@@ -292,6 +345,9 @@ type Querier interface {
 	UpdateLastLogin(ctx context.Context, arg UpdateLastLoginParams) error
 	UpdateLibrary(ctx context.Context, arg UpdateLibraryParams) (int64, error)
 	UpdateLibraryEPGSourcePriority(ctx context.Context, arg UpdateLibraryEPGSourcePriorityParams) error
+	UpdatePeerLastSeen(ctx context.Context, arg UpdatePeerLastSeenParams) error
+	UpdatePeerPaired(ctx context.Context, arg UpdatePeerPairedParams) error
+	UpdatePeerRevoked(ctx context.Context, arg UpdatePeerRevokedParams) (int64, error)
 	UpdateProgress(ctx context.Context, arg UpdateProgressParams) error
 	UpdateSessionLastActive(ctx context.Context, arg UpdateSessionLastActiveParams) error
 	UpdateUser(ctx context.Context, arg UpdateUserParams) error
@@ -310,6 +366,10 @@ type Querier interface {
 	// (interval_hours / enabled) and updated_at change. The history
 	// (last_run_at, last_status, ...) survives reconfiguration.
 	UpsertIPTVScheduledJob(ctx context.Context, arg UpsertIPTVScheduledJobParams) error
+	// ============================================================
+	// library shares
+	// ============================================================
+	UpsertLibraryShare(ctx context.Context, arg UpsertLibraryShareParams) error
 	// Extended metadata for items (overview, tagline, genres, etc.).
 	//
 	// Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE metadata).

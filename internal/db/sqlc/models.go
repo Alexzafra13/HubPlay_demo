@@ -135,6 +135,7 @@ type FederationItemCache struct {
 	Year      sql.NullInt64  `json:"year"`
 	Overview  sql.NullString `json:"overview"`
 	CachedAt  time.Time      `json:"cached_at"`
+	HasPoster bool           `json:"has_poster"`
 }
 
 type FederationLibraryShare struct {

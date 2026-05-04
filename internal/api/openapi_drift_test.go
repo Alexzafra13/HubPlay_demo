@@ -130,6 +130,7 @@ var outOfScopeExact = map[string]string{
 	"GET /peer/ping":                                            "p2p liveness",
 	"GET /peer/libraries":                                       "p2p catalog",
 	"GET /peer/libraries/{libraryID}/items":                     "p2p catalog",
+	"GET /peer/search":                                          "p2p catalog search",
 	"POST /peer/stream/{itemId}/session":                        "p2p stream session start",
 	"GET /peer/stream/session/{sessionId}/master.m3u8":          "p2p HLS master",
 	"GET /peer/stream/session/{sessionId}/{quality}/index.m3u8": "p2p HLS quality manifest",

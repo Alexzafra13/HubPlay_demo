@@ -1,0 +1,217 @@
+-- Federation: server identity, peers, invites, library shares, audit
+-- log, item-cache. Schema: migrations/sqlite/020-023, 027.
+--
+-- Adapter wrapping these queries lives in
+-- internal/db/federation_repository.go and is the public surface the
+-- federation package consumes.
+
+-- ============================================================
+-- server identity (one row, enforced by CHECK(id=1))
+-- ============================================================
+
+-- name: GetServerIdentity :one
+SELECT server_uuid, name, private_key, public_key, created_at, rotated_at
+FROM server_identity
+WHERE id = 1;
+
+-- name: InsertServerIdentity :exec
+INSERT INTO server_identity
+    (id, server_uuid, name, private_key, public_key, created_at)
+VALUES (1, ?, ?, ?, ?, ?);
+
+-- ============================================================
+-- invites
+-- ============================================================
+
+-- name: InsertInvite :exec
+INSERT INTO federation_invites
+    (id, code, created_by_user_id, created_at, expires_at)
+VALUES (?, ?, ?, ?, ?);
+
+-- name: GetInviteByCode :one
+SELECT id, code, created_by_user_id, created_at, expires_at,
+       accepted_by_peer_id, accepted_at
+FROM federation_invites
+WHERE code = ?;
+
+-- name: MarkInviteUsed :exec
+UPDATE federation_invites
+SET accepted_by_peer_id = ?, accepted_at = ?
+WHERE id = ? AND accepted_at IS NULL;
+
+-- name: ListActiveInvites :many
+SELECT id, code, created_by_user_id, created_at, expires_at,
+       accepted_by_peer_id, accepted_at
+FROM federation_invites
+WHERE accepted_at IS NULL AND expires_at > ?
+ORDER BY created_at DESC;
+
+-- ============================================================
+-- peers
+-- ============================================================
+
+-- name: InsertPeer :exec
+INSERT INTO federation_peers
+    (id, server_uuid, name, base_url, public_key, status, created_at, paired_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+
+-- name: UpdatePeerPaired :exec
+UPDATE federation_peers
+SET status = 'paired', paired_at = ?
+WHERE id = ?;
+
+-- name: UpdatePeerRevoked :execrows
+UPDATE federation_peers
+SET status = 'revoked', revoked_at = ?
+WHERE id = ? AND status != 'revoked';
+
+-- name: UpdatePeerLastSeen :exec
+UPDATE federation_peers
+SET last_seen_at = ?, last_seen_status_code = ?
+WHERE id = ?;
+
+-- name: GetPeerByID :one
+SELECT id, server_uuid, name, base_url, public_key, status,
+       created_at, paired_at, last_seen_at, last_seen_status_code, revoked_at
+FROM federation_peers
+WHERE id = ?;
+
+-- name: GetPeerByServerUUID :one
+SELECT id, server_uuid, name, base_url, public_key, status,
+       created_at, paired_at, last_seen_at, last_seen_status_code, revoked_at
+FROM federation_peers
+WHERE server_uuid = ?;
+
+-- name: ListPeers :many
+SELECT id, server_uuid, name, base_url, public_key, status,
+       created_at, paired_at, last_seen_at, last_seen_status_code, revoked_at
+FROM federation_peers
+ORDER BY created_at DESC;
+
+-- ============================================================
+-- audit log
+-- ============================================================
+
+-- name: InsertFederationAuditEntry :exec
+INSERT INTO federation_audit_log
+    (peer_id, remote_user_id, method, endpoint, status_code,
+     bytes_out, item_id, session_id, error_kind, duration_ms,
+     occurred_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+-- name: ListFederationAuditEntries :many
+SELECT peer_id, remote_user_id, method, endpoint, status_code,
+       bytes_out, item_id, session_id, error_kind, duration_ms,
+       occurred_at
+FROM federation_audit_log
+WHERE peer_id = ?
+ORDER BY occurred_at DESC
+LIMIT ?;
+
+-- name: PruneFederationAuditBefore :execrows
+DELETE FROM federation_audit_log
+WHERE occurred_at < ?;
+
+-- ============================================================
+-- library shares
+-- ============================================================
+
+-- name: UpsertLibraryShare :exec
+INSERT INTO federation_library_shares
+    (id, peer_id, library_id, can_browse, can_play, can_download,
+     can_livetv, extra_scopes, created_by, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(peer_id, library_id) DO UPDATE SET
+    can_browse   = excluded.can_browse,
+    can_play     = excluded.can_play,
+    can_download = excluded.can_download,
+    can_livetv   = excluded.can_livetv,
+    extra_scopes = excluded.extra_scopes;
+
+-- name: DeleteLibraryShare :exec
+DELETE FROM federation_library_shares
+WHERE peer_id = ? AND id = ?;
+
+-- name: GetLibraryShare :one
+SELECT id, peer_id, library_id, can_browse, can_play,
+       can_download, can_livetv, extra_scopes, created_by, created_at
+FROM federation_library_shares
+WHERE peer_id = ? AND library_id = ?;
+
+-- name: ListSharesByPeer :many
+SELECT id, peer_id, library_id, can_browse, can_play,
+       can_download, can_livetv, extra_scopes, created_by, created_at
+FROM federation_library_shares
+WHERE peer_id = ?
+ORDER BY created_at DESC;
+
+-- name: ListSharedLibrariesForPeer :many
+SELECT l.id, l.name, l.content_type,
+       s.can_browse, s.can_play, s.can_download, s.can_livetv
+FROM federation_library_shares s
+JOIN libraries l ON l.id = s.library_id
+WHERE s.peer_id = ?
+ORDER BY l.name COLLATE NOCASE ASC;
+
+-- name: CountSharedItems :one
+SELECT COUNT(*)
+FROM items i
+JOIN federation_library_shares s ON s.library_id = i.library_id
+WHERE i.library_id = ? AND s.peer_id = ? AND s.can_browse = 1
+  AND i.parent_id IS NULL;
+
+-- name: ListSharedItems :many
+-- Overview lives in the metadata sidecar (LEFT JOIN so items without
+-- metadata still surface with empty overview). HasPoster is an EXISTS
+-- subquery against the images table so the listing path does not
+-- need to pull the image id; the actual bytes flow through
+-- /peer/items/{id}/poster on demand.
+SELECT i.id, i.type, i.title,
+       COALESCE(i.year, 0) AS year,
+       COALESCE(m.overview, '') AS overview,
+       EXISTS (
+         SELECT 1 FROM images img
+          WHERE img.item_id = i.id
+            AND img.type = 'primary'
+            AND img.is_primary = 1
+       ) AS has_poster
+FROM items i
+JOIN federation_library_shares s ON s.library_id = i.library_id
+LEFT JOIN metadata m ON m.item_id = i.id
+WHERE i.library_id = ? AND s.peer_id = ? AND s.can_browse = 1
+  AND i.parent_id IS NULL
+ORDER BY i.sort_title COLLATE NOCASE ASC
+LIMIT ? OFFSET ?;
+
+-- NOTE: SearchSharedItems is implemented as raw SQL in
+-- federation_repository.go because sqlc does not parse FTS5 virtual
+-- tables (items_fts MATCH ?). Same precedent as item_repository.go's
+-- List path.
+
+-- ============================================================
+-- catalog cache (Phase 4 + 027)
+-- ============================================================
+
+-- name: DeleteCachedItemsForLibrary :exec
+DELETE FROM federation_item_cache
+WHERE peer_id = ? AND library_id = ?;
+
+-- name: InsertCachedItem :exec
+INSERT INTO federation_item_cache
+    (peer_id, library_id, remote_id, type, title, year, overview, has_poster, cached_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+-- name: CountAndNewestCachedItems :one
+SELECT COUNT(*) AS total, MAX(cached_at) AS newest_cached_at
+FROM federation_item_cache
+WHERE peer_id = ? AND library_id = ?;
+
+-- name: ListCachedItems :many
+SELECT remote_id, type, title,
+       COALESCE(year, 0) AS year,
+       COALESCE(overview, '') AS overview,
+       has_poster
+FROM federation_item_cache
+WHERE peer_id = ? AND library_id = ?
+ORDER BY title COLLATE NOCASE ASC
+LIMIT ? OFFSET ?;

@@ -218,6 +218,7 @@ func NewRouter(deps Dependencies) http.Handler {
 				// sees libraries / items they don't have a share for.
 				r.Get("/peer/libraries", pubFed.ListLibraries)
 				r.Get("/peer/libraries/{libraryID}/items", pubFed.ListLibraryItems)
+				r.Get("/peer/search", pubFed.SearchLibraries)
 
 				// Streaming (Phase 5). Peer A asks us to spawn a
 				// stream session for one of our items; we serve HLS
@@ -328,6 +329,12 @@ func NewRouter(deps Dependencies) http.Handler {
 						// landing page so the UI doesn't have to
 						// fan-out N calls itself.
 						r.Get("/libraries", mePeers.BrowseAllPeerLibraries)
+						// Federated search: fan-out the user's query
+						// to every paired peer in parallel and
+						// aggregate the hits with origin metadata.
+						// Per-peer timeouts inside the manager keep
+						// one slow peer from blocking the response.
+						r.Get("/search", mePeers.SearchPeers)
 						r.Get("/{peerID}/libraries", mePeers.BrowsePeerLibraries)
 						r.Get("/{peerID}/libraries/{libraryID}/items", mePeers.BrowsePeerItems)
 						r.Post("/{peerID}/libraries/{libraryID}/refresh", mePeers.RefreshPeerLibrary)

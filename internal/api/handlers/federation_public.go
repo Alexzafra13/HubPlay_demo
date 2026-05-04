@@ -116,6 +116,45 @@ func (h *FederationPublicHandler) ListLibraryItems(w http.ResponseWriter, r *htt
 	})
 }
 
+// SearchLibraries returns titles matching `q` from libraries the
+// calling peer has CanBrowse on. Server-side ACL via the share JOIN
+// — a peer cannot match titles in libraries not shared with them.
+//
+// GET /api/v1/peer/search?q=<query>&limit=<n>  (peer JWT required)
+//
+// Empty q is a 400. The repo applies a sensible upper limit so a
+// pathological query cannot stream the whole catalog.
+func (h *FederationPublicHandler) SearchLibraries(w http.ResponseWriter, r *http.Request) {
+	peer := federation.PeerFromContext(r.Context())
+	if peer == nil {
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "peer context missing")
+		return
+	}
+	query := r.URL.Query().Get("q")
+	if query == "" {
+		respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "q required")
+		return
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+
+	items, err := h.mgr.SearchLocalSharedItems(r.Context(), peer.ID, query, limit)
+	if err != nil {
+		h.logger.Error("federation: search shared items", "err", err, "peer_id", peer.ID)
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "search failed")
+		return
+	}
+	if items == nil {
+		items = []*federation.SharedItem{}
+	}
+	// Same shape as ListLibraryItems for client reuse — items + total.
+	// Total here equals len(items) because search is non-paginated;
+	// the limit caps it.
+	respondJSON(w, http.StatusOK, map[string]any{
+		"items": items,
+		"total": len(items),
+	})
+}
+
 // Ping is the canonical authenticated peer-to-peer endpoint. A peer
 // presenting a valid Ed25519-signed JWT (validated by RequirePeerJWT
 // middleware) hits this to verify the link is alive end-to-end.

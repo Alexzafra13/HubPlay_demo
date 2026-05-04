@@ -4,10 +4,26 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
+	"time"
 )
+
+// peerFetchAttempts is how many times an idempotent GET against a
+// paired peer is retried on transport errors and 5xx. Tight ceiling
+// because a single user-facing request shouldn't tie up the HTTP
+// client for more than a handful of seconds — better to surface
+// "peer offline" than to keep retrying past the user's patience.
+const peerFetchAttempts = 3
+
+// peerFetchBackoff is the initial delay between retry attempts. The
+// backoff doubles each attempt (250ms → 500ms → 1s), so worst-case
+// total wait is ~1.75s before giving up — comfortably under the
+// 15s HTTPTimeout but generous enough to ride out a brief blip.
+const peerFetchBackoff = 250 * time.Millisecond
 
 // Outbound peer-to-peer calls. Implemented as methods on *Manager
 // (FetchPeerLibraries, FetchPeerItems) since they share the same
@@ -60,6 +76,11 @@ type remoteErrorResponse struct {
 // FetchPeerLibraries hits the remote's GET /peer/libraries endpoint.
 // Returns the libraries the calling peer (us) has been granted via
 // shares. Errors include rate-limit, peer-offline, etc.
+//
+// Retries transient failures (transport error, 5xx) so a single dropped
+// packet or a peer that took an extra second to come back from a
+// restart does not flash an offline state to the user. See
+// doIdempotentPeerGET for the exact policy.
 func (m *Manager) FetchPeerLibraries(ctx context.Context, peerID string) ([]*SharedLibrary, error) {
 	peer, err := m.repo.GetPeerByID(ctx, peerID)
 	if err != nil {
@@ -73,18 +94,7 @@ func (m *Manager) FetchPeerLibraries(ctx context.Context, peerID string) ([]*Sha
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	tok, err := m.IssuePeerToken(peerID)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+tok)
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := m.httpClt.Do(req)
+	resp, err := m.doIdempotentPeerGET(ctx, peerID, url, "libraries")
 	if err != nil {
 		return nil, fmt.Errorf("fetch libraries from peer %s: %w", peerID, err)
 	}
@@ -120,6 +130,8 @@ type SharedLibraryWithPeer struct {
 }
 
 // FetchPeerItems hits the remote's paginated catalog browse.
+// Same retry policy as FetchPeerLibraries — transient failures are
+// retried so a brief blip doesn't blank the user's catalog grid.
 func (m *Manager) FetchPeerItems(ctx context.Context, peerID, libraryID string, offset, limit int) ([]*SharedItem, int, error) {
 	peer, err := m.repo.GetPeerByID(ctx, peerID)
 	if err != nil {
@@ -133,18 +145,7 @@ func (m *Manager) FetchPeerItems(ctx context.Context, peerID, libraryID string, 
 	if err != nil {
 		return nil, 0, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, 0, err
-	}
-	tok, err := m.IssuePeerToken(peerID)
-	if err != nil {
-		return nil, 0, err
-	}
-	req.Header.Set("Authorization", "Bearer "+tok)
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := m.httpClt.Do(req)
+	resp, err := m.doIdempotentPeerGET(ctx, peerID, url, "items")
 	if err != nil {
 		return nil, 0, fmt.Errorf("fetch items from peer %s: %w", peerID, err)
 	}
@@ -172,13 +173,176 @@ func (m *Manager) FetchPeerItems(ctx context.Context, peerID, libraryID string, 
 	return out, wire.Total, nil
 }
 
+// FetchPeerSearch hits a remote peer's GET /peer/search?q=...&limit=...
+// endpoint and returns matching items. Same retry policy as the other
+// idempotent peer GETs (transient failure → up to 3 attempts with
+// exponential backoff). The remote applies its own share ACL; we
+// take its decision at face value.
+func (m *Manager) FetchPeerSearch(ctx context.Context, peerID, query string, limit int) ([]*SharedItem, error) {
+	peer, err := m.repo.GetPeerByID(ctx, peerID)
+	if err != nil {
+		return nil, err
+	}
+	if peer == nil || peer.Status != PeerPaired {
+		return nil, fmt.Errorf("peer %s not paired", peerID)
+	}
+	if limit <= 0 {
+		limit = 25
+	}
+
+	url, err := joinBaseURL(peer.BaseURL, fmt.Sprintf("/api/v1/peer/search?q=%s&limit=%d",
+		neturl.QueryEscape(query), limit))
+	if err != nil {
+		return nil, err
+	}
+	resp, err := m.doIdempotentPeerGET(ctx, peerID, url, "search")
+	if err != nil {
+		return nil, fmt.Errorf("search peer %s: %w", peerID, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, decodeRemoteError(resp)
+	}
+	var wire remoteItemsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&wire); err != nil {
+		return nil, fmt.Errorf("decode search results: %w", err)
+	}
+	out := make([]*SharedItem, 0, len(wire.Items))
+	for _, w := range wire.Items {
+		out = append(out, &SharedItem{
+			ID:        w.ID,
+			Type:      w.Type,
+			Title:     w.Title,
+			Year:      w.Year,
+			Overview:  w.Overview,
+			HasPoster: w.HasPoster,
+		})
+	}
+	return out, nil
+}
+
 func decodeRemoteError(resp *http.Response) error {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
 	var er remoteErrorResponse
 	if err := json.Unmarshal(body, &er); err == nil && er.Error.Code != "" {
 		return fmt.Errorf("peer rejected: %d %s -- %s", resp.StatusCode, er.Error.Code, er.Error.Message)
 	}
-	return fmt.Errorf("peer status %d: %s", resp.StatusCode, body)
+	// Fallback: the peer's body is not the documented error envelope —
+	// could be an upstream proxy's HTML 502, a stack trace, or anything.
+	// Trim and sanitise so an inadvertent log capture doesn't ship a
+	// kilobyte of upstream internals (or anything resembling a token).
+	return fmt.Errorf("peer status %d: %s", resp.StatusCode, sanitiseRemoteBody(body))
+}
+
+// sanitiseRemoteBody renders an opaque peer response body as a bounded
+// single-line excerpt safe to embed in a log message: control chars
+// replaced by '.', length capped, and a "<N bytes total>" marker when
+// the body was truncated. The original bytes are never propagated
+// beyond this function.
+func sanitiseRemoteBody(body []byte) string {
+	const maxExcerpt = 256
+	total := len(body)
+	if total == 0 {
+		return "<empty>"
+	}
+	excerpt := body
+	if total > maxExcerpt {
+		excerpt = body[:maxExcerpt]
+	}
+	clean := make([]byte, 0, len(excerpt))
+	for _, b := range excerpt {
+		switch {
+		case b == '\t' || b == ' ':
+			clean = append(clean, ' ')
+		case b < 0x20 || b == 0x7f:
+			clean = append(clean, '.')
+		default:
+			clean = append(clean, b)
+		}
+	}
+	if total > maxExcerpt {
+		return fmt.Sprintf("%s… <%d bytes total>", clean, total)
+	}
+	return string(clean)
+}
+
+// doIdempotentPeerGET issues an authenticated GET against `url` on the
+// peer and retries on transient failures. Suitable only for idempotent
+// operations — never call this from a code path with side effects on
+// the remote.
+//
+// Retry policy:
+//   - transport error (connection refused, EOF, deadline before TLS) → retry
+//   - 5xx response                                                    → retry
+//   - 4xx response                                                    → return immediately (auth, scope, etc.)
+//   - 2xx/3xx                                                         → return immediately
+//
+// Backoff is exponential starting at peerFetchBackoff. The loop honors
+// ctx cancellation so a user navigating away interrupts the wait.
+//
+// A fresh JWT is minted per attempt (cheap, local Ed25519 signing) so
+// a token that expires between the first attempt and a retry is
+// implicitly refreshed.
+func (m *Manager) doIdempotentPeerGET(ctx context.Context, peerID, url, kind string) (*http.Response, error) {
+	var lastErr error
+	backoff := peerFetchBackoff
+	for attempt := 0; attempt < peerFetchAttempts; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(backoff):
+			}
+			backoff *= 2
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return nil, err
+		}
+		tok, err := m.IssuePeerToken(ctx, peerID)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Authorization", "Bearer "+tok)
+		req.Header.Set("Accept", "application/json")
+
+		resp, doErr := m.httpClt.Do(req)
+		if doErr != nil {
+			// Don't retry past the request context — the caller went
+			// away and any subsequent attempt would be wasted work.
+			if errors.Is(doErr, context.Canceled) || errors.Is(doErr, context.DeadlineExceeded) {
+				return nil, doErr
+			}
+			m.metrics.OutboundRequest(kind, "transport_error")
+			lastErr = doErr
+			continue
+		}
+		if resp.StatusCode >= 500 && resp.StatusCode <= 599 {
+			// Drain (bounded) so the connection returns to the idle
+			// pool instead of being closed; net/http requires this
+			// before another request can reuse the keep-alive socket.
+			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4<<10))
+			_ = resp.Body.Close()
+			m.metrics.OutboundRequest(kind, "5xx")
+			lastErr = fmt.Errorf("peer status %d", resp.StatusCode)
+			continue
+		}
+		switch {
+		case resp.StatusCode >= 400:
+			m.metrics.OutboundRequest(kind, "4xx")
+		default:
+			m.metrics.OutboundRequest(kind, "ok")
+		}
+		return resp, nil
+	}
+	if lastErr == nil {
+		// Defensive: peerFetchAttempts must be > 0 by construction,
+		// so we should never reach here. Surface a clear error rather
+		// than nil so callers don't dereference a nil response.
+		lastErr = errors.New("peer request loop exited without attempt")
+	}
+	return nil, lastErr
 }
 
 // PeerStreamSessionRequest is the JSON body POSTed by us (peer A) to a
@@ -244,7 +408,7 @@ func (m *Manager) StartPeerStreamSession(ctx context.Context, peerID, itemID str
 	if err != nil {
 		return nil, err
 	}
-	tok, err := m.IssuePeerToken(peerID)
+	tok, err := m.IssuePeerToken(ctx, peerID)
 	if err != nil {
 		return nil, err
 	}
@@ -254,13 +418,21 @@ func (m *Manager) StartPeerStreamSession(ctx context.Context, peerID, itemID str
 
 	resp, err := m.httpClt.Do(req)
 	if err != nil {
+		m.metrics.OutboundRequest("stream_session", "transport_error")
 		return nil, fmt.Errorf("start peer stream session %s: %w", peerID, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		switch {
+		case resp.StatusCode >= 500:
+			m.metrics.OutboundRequest("stream_session", "5xx")
+		default:
+			m.metrics.OutboundRequest("stream_session", "4xx")
+		}
 		return nil, decodeRemoteError(resp)
 	}
+	m.metrics.OutboundRequest("stream_session", "ok")
 	var out PeerStreamSessionResponse
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, fmt.Errorf("decode session response: %w", err)
@@ -287,6 +459,14 @@ func (m *Manager) ProxyPeerItemPoster(ctx context.Context, peerID, itemID string
 // Used for HLS manifest + segment proxying after StartPeerStreamSession.
 // The remote `path` is whatever MasterPath the session response
 // returned (or a manifest's relative reference resolved against it).
+//
+// Auth resilience: if the first attempt comes back 401/403 we drain
+// the response, mint a fresh JWT and retry once. This guards against
+// the corner where a JWT minted at the tail end of its TTL window
+// races the peer's clock — without the retry, the player would have
+// to re-fetch on its own, surfacing as a momentary stall. Peer session
+// state is keyed on session_id (not on the issuing JWT) so a fresh
+// token resumes the same session cleanly.
 func (m *Manager) ProxyPeerStreamRequest(ctx context.Context, peerID, path string) (*http.Response, error) {
 	peer, err := m.repo.GetPeerByID(ctx, peerID)
 	if err != nil {
@@ -300,20 +480,58 @@ func (m *Manager) ProxyPeerStreamRequest(ctx context.Context, peerID, path strin
 	if err != nil {
 		return nil, err
 	}
+
+	resp, err := m.proxyPeerAttempt(ctx, peerID, url)
+	if err != nil {
+		m.metrics.OutboundRequest("stream_proxy", "transport_error")
+		return nil, fmt.Errorf("proxy peer stream %s: %w", peerID, err)
+	}
+	if resp.StatusCode != http.StatusUnauthorized && resp.StatusCode != http.StatusForbidden {
+		m.recordProxyOutcome(resp.StatusCode)
+		return resp, nil
+	}
+
+	// Drain a bounded prefix so the keep-alive socket can return to
+	// the idle pool, then close. Required by net/http before the next
+	// request can reuse the connection.
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4<<10))
+	_ = resp.Body.Close()
+
+	retried, retryErr := m.proxyPeerAttempt(ctx, peerID, url)
+	if retryErr != nil {
+		m.metrics.OutboundRequest("stream_proxy", "transport_error")
+		return nil, fmt.Errorf("proxy peer stream %s (after auth refresh): %w", peerID, retryErr)
+	}
+	m.recordProxyOutcome(retried.StatusCode)
+	return retried, nil
+}
+
+// recordProxyOutcome maps an HTTP status from a proxy attempt to the
+// outbound-request counter labels.
+func (m *Manager) recordProxyOutcome(status int) {
+	switch {
+	case status >= 500:
+		m.metrics.OutboundRequest("stream_proxy", "5xx")
+	case status >= 400:
+		m.metrics.OutboundRequest("stream_proxy", "4xx")
+	default:
+		m.metrics.OutboundRequest("stream_proxy", "ok")
+	}
+}
+
+// proxyPeerAttempt issues a single authenticated GET and returns the
+// raw response; reused by ProxyPeerStreamRequest for both the initial
+// attempt and the post-401/403 refresh.
+func (m *Manager) proxyPeerAttempt(ctx context.Context, peerID, url string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
-	tok, err := m.IssuePeerToken(peerID)
+	tok, err := m.IssuePeerToken(ctx, peerID)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+tok)
-
-	resp, err := m.httpClt.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("proxy peer stream %s: %w", peerID, err)
-	}
-	return resp, nil
+	return m.httpClt.Do(req)
 }
 

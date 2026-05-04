@@ -300,6 +300,13 @@ func run(configPath string) error {
 		logger.Info("federation: manager initialised",
 			"server_uuid", federationManager.PublicServerInfo().ServerUUID,
 			"fingerprint", federationManager.PublicServerInfo().PubkeyFingerprint)
+		// Wire Prometheus observability: counter+histogram via sink,
+		// live gauges via GaugeFunc reading the manager's in-memory
+		// state at scrape time.
+		federationManager.SetMetricsSink(observability.NewFederationSink(metrics))
+		if err := observability.RegisterFederationGauges(metrics, federationManager); err != nil {
+			logger.Error("federation: register gauges failed", "err", err)
+		}
 		// Flush the audit log queue on graceful shutdown so the last
 		// few peer requests aren't lost.
 		defer federationManager.Close()

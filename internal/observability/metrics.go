@@ -43,6 +43,9 @@ type Metrics struct {
 	IPTVTransmuxReencodePromo prometheus.Counter
 
 	AuthKeyRotations *prometheus.CounterVec
+
+	FederationHandshakeDuration *prometheus.HistogramVec
+	FederationOutboundRequests  *prometheus.CounterVec
 }
 
 // NewMetrics creates and registers every collector. It returns an error if
@@ -135,6 +138,29 @@ func NewMetrics(version string) (*Metrics, error) {
 			// outcome: "success", "error"
 			[]string{"outcome"},
 		),
+
+		FederationHandshakeDuration: prometheus.NewHistogramVec(
+			prometheus.HistogramOpts{
+				Name: "hubplay_federation_handshake_duration_seconds",
+				Help: "Outbound + inbound federation handshake latency, by direction and outcome.",
+				// Wider than HTTP API buckets — handshakes do crypto +
+				// DB + at least one network round-trip; sub-50ms is a
+				// LAN peer, multi-second is a slow WAN one.
+				Buckets: []float64{0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30},
+			},
+			// direction: "outbound" | "inbound"; outcome: "ok" | "error"
+			[]string{"direction", "outcome"},
+		),
+
+		FederationOutboundRequests: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "hubplay_federation_outbound_requests_total",
+				Help: "Outbound peer-to-peer requests grouped by call kind and outcome.",
+			},
+			// kind: "libraries" | "items" | "stream_session" | "stream_proxy"
+			// outcome: "ok" | "4xx" | "5xx" | "transport_error"
+			[]string{"kind", "outcome"},
+		),
 	}
 
 	// Register everything. Any failure (e.g. name collision in tests) is
@@ -150,6 +176,8 @@ func NewMetrics(version string) (*Metrics, error) {
 		m.IPTVTransmuxDecodeMode,
 		m.IPTVTransmuxReencodePromo,
 		m.AuthKeyRotations,
+		m.FederationHandshakeDuration,
+		m.FederationOutboundRequests,
 		// Also surface process + Go runtime metrics — free and universally
 		// useful (goroutines, gc pauses, fds).
 		collectors.NewGoCollector(),

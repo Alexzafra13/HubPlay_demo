@@ -1,5 +1,7 @@
 # Estado del proyecto
 
+> 🛡️ **Sesión 2026-05-04 (rama `claude/review-federation-implementation-BZyli`, PR abierta)** — **Senior review de federación + 3 slices**. Tras review exhaustivo cerrados 4 P1 declarados (sweeper HLS sin wirar, `IssuePeerToken` con `context.Background()`, sin retry/backoff en client peer, JWT no se refresca mid-stream), añadido cap+LRU al nonce cache, sanitizer de body en `decodeRemoteError`, observabilidad Prometheus completa (5 collectors federation), **migración `federation_repository.go` a sqlc cerrando ADR-001** (760 LOC raw → 480 LOC tipado), y **federated search con fan-out backend completo** (origin `GET /peer/search` + manager `SearchAllPeers` con timeout 2s/peer + consumer `GET /me/peers/search` + 11 tests). 4 commits sobre la rama. Backend `go test -count=1 ./...` → todo verde. Frontend de search deferred (no hay `pnpm` instalable en el entorno).
+
 > 🎯 **Sesión 2026-05-04 (rama `claude/plex-federation-implementation-HUycl`, mergeada a `main`)** — **Phase 5 Slice 2 cerrada end-to-end Plex-style**. Federación P2P es ahora una feature completa visible-y-jugable en la UI: el peer aparece en el sidebar como navegación de primer nivel, `PeerLibraryItemsPage` usa el mismo `PosterCard` + `MediaGrid` que las locales con badge "shared by X" inline, nueva `PeerItemDetail` con Play que llama a `POST /me/peers/{peerID}/stream/{itemId}/session` y reproduce con el `VideoPlayer` existente, **posters proxiados** por origen (nuevo `GET /api/v1/peer/items/{itemId}/poster` server-to-server + `GET /api/v1/me/peers/{peerID}/items/{itemId}/poster` consumer), migración 027 añade `has_poster` al cache de federación, **tests de handler** (404 sin `can_play`, 404 sin share en poster). Backend verde · frontend 384/384 · tsc + build limpios. Phase 5 entera cerrada.
 
 > 🎬 **Sesión 2026-05-04 (rama `claude/prepare-tv-app-fb0cj`, mergeada a `main`)** — 4 commits sobre main. Plan: dejar el proyecto pulido antes del Kotlin TV nativo, foco en cerrar features visibles medio-hechas. **Federación Phase 5 backend cerrado** (slice 1 de 2; falta frontend). **sqlc desbloqueado para siempre** (era la mina del repo). **OpenAPI ampliado a Live TV + Home + meta** (24 paths nuevos al spec con drift test en CI).
@@ -13,6 +15,119 @@
 > Estado prev² (2026-04-29 noche): Federación P2P entera (Phases 1-4 + plug-and-play + UX) — 8 commits.
 >
 > **tests al cierre: backend verde salvo `internal/config` preflight (env-only, ffmpeg no en PATH local; CI verde) · frontend 364/364 · tsc clean**.
+
+## 🛡️ Sesión 2026-05-04 — Senior review + hardening (rama `claude/review-federation-implementation-BZyli`)
+
+> **HANDOFF — leer al inicio de la siguiente sesión.** El usuario pidió "revisa lo que queda y como va para hacerlo como senior perfecto". Tras un review estructurado con findings priorizados (P1/P2/P3), la sesión despachó **3 slices** sobre la rama de review. La rama tiene **4 commits limpios** y **PR abierta** (ver al final).
+
+### Slice A — P1 hardening (commit `ea54cb1`)
+
+Cuatro fixes que un senior con experiencia en streaming pillaría en code review:
+
+1. **Sweeper de sesiones HLS no se ejecutaba**. `Manager.SweepStreamSessions` existía pero NADIE llamaba al ticker. Sesiones idle vivían forever. Wireado en `NewManager` con `time.NewTicker(streamSweepInterval=1min)` controlado por context, parado en `Close` con `<-sweepDone`.
+2. **`IssuePeerToken` usaba `context.Background()`** rompiendo la cancelación. Cambiada signatura a `IssuePeerToken(ctx, audiencePeerID)`. 4 callsites en `client.go` + handshake roundtrip test actualizados.
+3. **Sin retry+backoff en client peer**. Nuevo helper `doIdempotentPeerGET` con 3 intentos, exp backoff 250ms→500ms→1s, retry en transport error y 5xx, no retry en 4xx, honra ctx cancellation. Aplicado a `FetchPeerLibraries`/`FetchPeerItems`.
+4. **JWT expira mid-stream**. `ProxyPeerStreamRequest` ahora hace one-shot refresh: si la primera respuesta es 401/403, drena, mintea JWT fresco, reintenta. La sesión del peer está keyed por `session_id` (no por JWT) → fresh token resume cleanly. **Manager.Close()** ahora cierra idle conns del transport para que SIGTERM no espere `HTTPTimeout`.
+
+Tests añadidos (`stream_test.go`, `client_retry_test.go`):
+- `TestSweepStreamSessions_DropsExpired`/`LookupBumpsLastSeen` (mock clock).
+- `TestManager_CloseStopsSweeperGoroutine` (no leak across 25 cycles).
+- `TestManager_CloseIdempotent`.
+- 7 tests de retry: retries-on-5xx, gives-up-after-max, no-retry-on-4xx, ctx-bails-fast, JWT-refresh-on-401, no-retry-on-200, no-double-refresh.
+
+### Slice B p1 — Bounded + observable (commit `8b029f0`)
+
+1. **Nonce cache cap + soonest-expiry eviction**. Defensa contra peer paireado-pero-hostil que mintea tokens con `exp = far-future` para pinear entradas. Cap a `nonceCacheMaxEntries=10_000`; en overflow drop `nonceCacheEvictBatch=2500` entradas con menor expiry. Amortised O(1) por insert; sort O(n log n) solo cada batch.
+2. **Sanitizer de body en `decodeRemoteError`**. Antes embeddaba 4 KiB raw en el error chain. Ahora `sanitiseRemoteBody` cap 256 bytes, control chars → `.`, marcador `<N bytes total>` cuando trunca.
+3. **Prometheus federation observability** (5 collectors):
+   - `hubplay_federation_paired_peers` (GaugeFunc)
+   - `hubplay_federation_peer_stream_sessions` (GaugeFunc)
+   - `hubplay_federation_nonce_cache_size` (GaugeFunc)
+   - `hubplay_federation_handshake_duration_seconds` (Histogram, direction × outcome)
+   - `hubplay_federation_outbound_requests_total` (Counter, kind × outcome)
+   Wireado vía sink pattern: `internal/federation/metrics.go` define `MetricsSink` + accessors `PairedPeers()/PeerStreamSessions()/NonceCacheSize()`. `internal/observability/federation.go` provee `FederationSink` (counter+histogram) + `RegisterFederationGauges` (gauges). Manager instrumentado en `AcceptInvite`/`HandleInboundHandshake` (handshake duration, named-returns para deferred capture) + counters en client (`OutboundRequest(kind, outcome)`).
+
+Tests: `TestNonceCache_EvictsOldestOnOverflow`, `TestSanitiseRemoteBody_*`, `TestRegisterFederationGauges_ReportsLiveValues`, `TestFederationSink_RecordsCounterAndHistogram`, etc.
+
+### Slice B p2 — sqlc migration (commit `80162f4`)
+
+**Cierra ADR-001 explícitamente**. `federation_repository.go` era el último archivo del repo con raw SQL (760 LOC). El bloqueo de sqlc se resolvió en `dc80538` (sesión previa); esta sesión hace la migración:
+
+- Nuevo `internal/db/queries/federation.sql` con 22 named queries (identity, invites, peers, audit log, library shares, item cache).
+- `sqlc generate` produce `internal/db/sqlc/federation.sql.go`.
+- `federation_repository.go` reescrito como adapter thin: 760 → 480 LOC. Mismo public API; cero cambios en callers.
+- **Nota**: `UpsertCachedItems` mantiene su transacción explícita (DELETE + N×INSERT atómico) usando `q.WithTx(tx)`.
+- **Nota**: `UpdatePeerRevoked` usa `:execrows` para preservar `domain.ErrPeerNotFound` en fila no encontrada.
+- **Nota**: `MAX(cached_at)` se tipa `interface{}` por sqlc (NULL-able aggregate); coerce defensivo a `time.Time`.
+- Drift test `TestSQLC_GeneratedFilesMatchQueries` verde.
+
+### Slice C — Federated search backend (commit `ec4f385`)
+
+User-facing federated search end-to-end backend. Sin esto, "Inception" solo daba resultados locales aunque un peer paireado lo tuviese.
+
+- **Repo** (`SearchSharedItems`): SQL crudo con `items_fts MATCH ?` + JOIN `federation_library_shares` como gate ACL. Documentado en `federation.sql` que la query queda raw porque sqlc 1.31 no parsea FTS5 virtual tables (mismo precedente que `item_repository.go::List`).
+- **Cliente** (`FetchPeerSearch` en `client.go`): reutiliza `doIdempotentPeerGET` → mismo retry+backoff. Imports `net/url` aliased como `neturl`.
+- **Manager** (`SearchAllPeers`): fan-out paralelo a peers paireados, timeout 2s/peer (separate `context.WithTimeout` por goroutine), agregación con atribución (`SharedItemFromPeer{Peer, Item}`), peer caído = log `Info` + skip (no blanquea).
+- **Origin handler** (`FederationPublicHandler.SearchLibraries`, `GET /peer/search`): bajo `RequirePeerJWT`, 400 si `q` vacío, returns `{items, total}` (mismo shape que ListLibraryItems).
+- **Consumer handler** (`MePeersHandler.SearchPeers`, `GET /me/peers/search`): bajo user auth, emite `{hits: [{peer_id, peer_name, id, type, title, year, overview, poster_url}]}` con `poster_url` sintetizado same-origin via `/api/v1/me/peers/{peerID}/items/{itemID}/poster`.
+- **Router**: 1 ruta consumer + 1 ruta origin.
+- **OpenAPI**: spec actualizado con `/me/peers/search`; `/peer/search` añadida al allowlist p2p del drift test.
+
+Tests (11 nuevos, todos verdes):
+- Repo: `TestFederationRepository_SearchSharedItems` con DB real + FTS5 — verifica ACL gate (peer-Z sin share → 0 hits), happy path (peer-A con share → 1 hit del library compartido, ignora `lib-private` con título matching), empty query, no match.
+- Manager: `TestSearchAllPeers_AggregatesAndAttributesByPeer`, `_SkipsErroringPeer` (5xx en peer no blanquea), `_HonoursPerPeerTimeout` (slow peer cortado por wallclock), `_EmptyQueryShortCircuits`. Plus `TestFetchPeerSearch_DecodesItemsResponse` y `_NotPaired`.
+- Handler: `TestFederationSearch_NoShare_ReturnsZeroHits` (ACL gate HTTP-layer), `_WithShare_ReturnsMatchingItems`, `_EmptyQuery_Returns400`, `_NoToken_Returns401`.
+
+### Estado al cierre
+
+- 4 commits limpios sobre `claude/review-federation-implementation-BZyli`, pusheados.
+- `go test -count=1 ./...` → todos los paquetes verdes (`internal/api`, `handlers`, `db`, `federation`, `observability`, etc.).
+- Drift tests (OpenAPI, sqlc) verdes.
+- Frontend NO tocado esta sesión (no hay `pnpm` instalable en el entorno).
+- PR abierta: `feat: federation senior review — 4 slices (hardening, sqlc, observability, search)`.
+
+### Decisiones técnicas relevantes
+
+1. **Retry policy diferenciada por método HTTP**. Idempotent GETs (libraries, items, search) → 3 attempts con exp backoff. POST `StartPeerStreamSession` → no retry (side effect: spawn transcode session). Proxy stream → one-shot refresh on 401/403 (defensive, key rotación / clock skew).
+2. **Per-peer timeout en search, no global**. Un peer lento NO debe arrastrar la respuesta del usuario; un global timeout daría timeout cuando un peer lento está casi listo. Goroutine per-peer + `context.WithTimeout` per-call.
+3. **Per-peer limit en search, no global**. Peer chatty no crowdea quieter peers fuera del result set. UI ve fairness.
+4. **GaugeFunc, no Gauge.Set()**. Cero drift risk: scrapes leen estado in-memory live. Three accessors (`PairedPeers`, `PeerStreamSessions`, `NonceCacheSize`) en Manager; observability usa interfaz local (`FederationStatsSource`) con int methods → arrow observability → federation, nunca al revés.
+5. **Sanitizer en decodeRemoteError, no en logger**. La sanitización ocurre en el momento de wrap, no en el logger downstream. Garantiza que cualquier error chain (Sentry, slog handler future, audit log) ve el body acotado.
+6. **Search via FTS5 con raw SQL**. sqlc 1.31 no soporta FTS5 virtual tables; documentado como excepción (mismo precedente que `item_repository.go`).
+7. **Slice C frontend deferred, no parcheado**. El entorno no tiene `pnpm`; en lugar de hacer cambios sin poder validar, dejo el frontend para sesión con env funcional. Wire shape ya documentado en OpenAPI.
+
+### Lo que NO está hecho (pendiente real)
+
+**Frontend de federated search** (~1-2h en sesión con `pnpm`):
+- Página `/search` ya existe local. Añadir consumo de `GET /api/v1/me/peers/search?q=...` paralelo al search local; renderizar hits con `PosterCard` + badge de origen (mismo patrón que `PeerLibraryItemsPage`); click → `/peers/{peerId}/libraries/{libraryId}/items/{id}` (ruta ya registrada).
+- i18n keys: `search.fromPeer`, `search.peerSection`.
+- Adapter: el `peerSearchHitWire` del backend mappea trivialmente a `MediaItem` vía `federationItemToMediaItem` ya existente.
+
+**`federation_progress` table** (~3h, backend + frontend):
+- Migración 028 con tabla `federation_progress(user_id, peer_id, remote_item_id, position_seconds, duration_seconds, is_completed, last_played_at)`.
+- Queries sqlc (`UpsertFederationProgress`, `GetFederationProgress`, `ListFederationContinueWatching`).
+- Handler `POST/GET /api/v1/me/peers/{peerID}/progress/{itemID}`.
+- Wireado en `PeerItemDetail` para resume (carga al abrir, save al pause/seek).
+- Sin esto, un user que ve un movie federado pierde la posición.
+
+**Home rail "Más en tus servidores conectados"** (~½ día):
+- Backend: `GET /api/v1/me/home/peer-latest` que pulle items recientes de cada peer paireado (fan-out paralelo, similar a search).
+- Frontend: nueva sección en Home component, mismo `PosterCard` + badge.
+
+**Slice 2.4 (cuando aparezcan casos reales)**:
+- `MaxConcurrentStreams` por peer (hoy comparten cap global con locales — slice 1 declaró pendiente).
+- Subtítulos federados.
+- Filtros origin chip en lists ("Local · Pedro · Maria").
+
+**Phase 6 — Live TV peering**: completamente intocada. Sección 9.5 de `federation.md`.
+
+**Phase 7 — Download to local**: completamente intocada.
+
+### Smoke manual pendiente (heredado, sigue sin hacerse)
+
+Aún NO se ha probado el botón Play end-to-end con dos servers reales paireados. `docker-compose.federation-test.yml` existe en el repo pero el smoke sigue siendo trabajo manual no hecho. La próxima sesión que toque federación podría empezar por ahí.
+
+---
 
 ## 🎯 Sesión 2026-05-04 — Phase 5 Slice 2 (rama `claude/plex-federation-implementation-HUycl`)
 
