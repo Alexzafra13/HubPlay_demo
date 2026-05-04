@@ -126,7 +126,7 @@ jobs:
 
       - name: Upload Trivy results
         if: always() && (matrix.target == 'hwaccel' || github.event_name != 'pull_request')
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-results.sarif
           category: trivy-${{ matrix.target || 'default' }}
