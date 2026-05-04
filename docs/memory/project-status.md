@@ -1,8 +1,8 @@
 # Estado del proyecto
 
-> 🎯 **Sesión 2026-05-04 (rama `claude/plex-federation-implementation-HUycl`)** — Slice 2 de Phase 5 cerrada **end-to-end Plex-style**. Sidebar muestra librerías de peers como navegación de primer nivel; `PeerLibraryItemsPage` usa el mismo `PosterCard` + `MediaGrid` que las locales con badge "shared by X" inline; nueva `PeerItemDetail` con botón Play que llama a `POST /me/peers/{peerID}/stream/{itemId}/session` y reproduce con el `VideoPlayer` existente; **posters proxiados** por origen (nuevo `GET /api/v1/peer/items/{itemId}/poster` server-to-server + `GET /api/v1/me/peers/{peerID}/items/{itemId}/poster` consumer); **migración 027** añade `has_poster` al cache de federación; **tests de handler** (404 cuando peer no tiene `can_play`, 404 sin share en poster). Backend verde · frontend 384/384 · tsc + build limpios.
+> 🎯 **Sesión 2026-05-04 (rama `claude/plex-federation-implementation-HUycl`, mergeada a `main`)** — **Phase 5 Slice 2 cerrada end-to-end Plex-style**. Federación P2P es ahora una feature completa visible-y-jugable en la UI: el peer aparece en el sidebar como navegación de primer nivel, `PeerLibraryItemsPage` usa el mismo `PosterCard` + `MediaGrid` que las locales con badge "shared by X" inline, nueva `PeerItemDetail` con Play que llama a `POST /me/peers/{peerID}/stream/{itemId}/session` y reproduce con el `VideoPlayer` existente, **posters proxiados** por origen (nuevo `GET /api/v1/peer/items/{itemId}/poster` server-to-server + `GET /api/v1/me/peers/{peerID}/items/{itemId}/poster` consumer), migración 027 añade `has_poster` al cache de federación, **tests de handler** (404 sin `can_play`, 404 sin share en poster). Backend verde · frontend 384/384 · tsc + build limpios. Phase 5 entera cerrada.
 
-> 🎬 **Sesión 2026-05-04 (rama `claude/prepare-tv-app-fb0cj`)** — 4 commits sobre main. Plan: dejar el proyecto pulido antes del Kotlin TV nativo, foco en cerrar features visibles medio-hechas. **Federación Phase 5 backend cerrado** (slice 1 de 2; falta frontend). **sqlc desbloqueado para siempre** (era la mina del repo). **OpenAPI ampliado a Live TV + Home + meta** (24 paths nuevos al spec con drift test en CI).
+> 🎬 **Sesión 2026-05-04 (rama `claude/prepare-tv-app-fb0cj`, mergeada a `main`)** — 4 commits sobre main. Plan: dejar el proyecto pulido antes del Kotlin TV nativo, foco en cerrar features visibles medio-hechas. **Federación Phase 5 backend cerrado** (slice 1 de 2; falta frontend). **sqlc desbloqueado para siempre** (era la mina del repo). **OpenAPI ampliado a Live TV + Home + meta** (24 paths nuevos al spec con drift test en CI).
 
 > ✅ **sqlc desbloqueado para siempre** (sesión 2026-05-04). `make sqlc` regenera limpio con la versión pineada (1.31.1); `make sqlc-verify` falla CI si el árbol commiteado deriva. Drift test en `internal/db/sqlc_drift_test.go`. Los bugs del parser que motivaron el lockdown están documentados en `conventions.md` con patrones SQL a evitar.
 
@@ -13,6 +13,145 @@
 > Estado prev² (2026-04-29 noche): Federación P2P entera (Phases 1-4 + plug-and-play + UX) — 8 commits.
 >
 > **tests al cierre: backend verde salvo `internal/config` preflight (env-only, ffmpeg no en PATH local; CI verde) · frontend 364/364 · tsc clean**.
+
+## 🎯 Sesión 2026-05-04 — Phase 5 Slice 2 (rama `claude/plex-federation-implementation-HUycl`)
+
+> **HANDOFF — leer al inicio de la siguiente sesión.** La conversación previa había cerrado el backend de Phase 5 (slice 1, commit `bbafd56`). El usuario pidió "haz la federación bien implementada estilo Plex". Esta sesión cierra el círculo: peer-as-library en el sidebar + grid unificado + Play funcional + posters proxiados + tests de los gaps de seguridad declarados.
+
+### Contexto al arranque
+
+Punto de partida: backend de remote streaming funcionaba (slice 1) pero el usuario nunca había podido probar Play end-to-end porque NO había frontend wirado. El catálogo del peer se renderizaba con un `ItemCard` custom poster-less, no había sidebar para peers, no había detail page para items federados, y no había proxy de posters (la decisión Plex-style estaba tomada pero sin implementar — ver entrada previa "Decisión clave de UX que QUEDÓ TOMADA pero NO IMPLEMENTADA").
+
+### Commits sobre la rama
+
+`209aa53` `federation(phase-5): Plex-style remote browse + play (slice 2)` — un commit gordo que cierra el slice. 25 ficheros, ~1370 LOC.
+
+### Backend
+
+**Modelo de datos**:
+- `SharedItem.HasPoster bool` añadido (wire field `has_poster`, omitempty cuando false). Propagado por:
+  - `internal/db/federation_repository.go::ListSharedItems`: SQL extendido con `EXISTS(SELECT 1 FROM images WHERE item_id=i.id AND type='primary' AND is_primary=1) AS has_poster`. Subconsulta, no JOIN — el listing path no necesita el image id, solo el flag.
+  - `UpsertCachedItems` / `ListCachedItems`: cache de federación lee/escribe la columna nueva.
+  - `client.go::remoteSharedItem` decodifica el flag de la respuesta del peer.
+- **Migración 027** `federation_cache_has_poster.sql`: ALTER TABLE federation_item_cache ADD COLUMN has_poster BOOLEAN NOT NULL DEFAULT 0. Default 0 para filas existentes — el siguiente refresh las repuebla. Down recrea la tabla sin la columna (SQLite legacy DROP COLUMN, aceptable para dev rollback).
+
+**Origin side (peer B)**:
+- Nuevo handler `internal/api/handlers/federation_image.go::ItemPoster` para `GET /api/v1/peer/items/{itemId}/poster` bajo `RequirePeerJWT`.
+- ACL pipeline (cada paso conflata a 404 para no leakear existencia):
+  1. `items.GetByID` — 404 si no existe.
+  2. `mgr.GetLibraryShare(peer.ID, item.LibraryID)` — 404 si no hay share o `!CanBrowse`.
+  3. `images.GetPrimaryURLs([itemID])` — 404 si el item no tiene primary.
+  4. Delega a `ImageHandler.ServeImageByID(w, r, imageID)` para reuso de pathmap + thumb cache + ETag.
+- `ImageHandler.ServeFile` refactorizado en dos: `ServeFile` lee chi.URLParam, `ServeImageByID(w, r, imageID)` hace el trabajo. La federación usa el segundo; el local usa el primero. Mismo path-mapping, mismo thumb cache, mismo ETag — el peer obtiene exactamente la misma imagen que el local.
+- Wiring en `router.go`: el `ImageHandler` y el `imageDir` se construyen al inicio del router (antes del grupo `Auth.Middleware`), de modo que el grupo de federación (que NO usa la auth de usuario, solo `RequirePeerJWT`) y el grupo local comparten una sola instancia del handler. Cero duplicación de pathmap.
+
+**Consumer side (peer A, user-facing)**:
+- Nuevo handler `internal/api/handlers/me_peer_image.go::ProxyPeerItemPoster` para `GET /api/v1/me/peers/{peerID}/items/{itemId}/poster` bajo auth de usuario.
+- Llama a `mgr.ProxyPeerItemPoster(ctx, peerID, itemID)` (nuevo método en `client.go`, helper sobre `ProxyPeerStreamRequest`).
+- Forwardea `Content-Type`, `Cache-Control`, `ETag`, `Content-Length` desde el peer. Same-origin: el `<img src>` del browser solo habla con nuestro origen.
+- `BrowsePeerItems` en `me_peers.go` ahora sintetiza `poster_url` per-item solo cuando `it.HasPoster`. Wire shape `peerItemWire` añadida con el campo. Items sin poster no llevan el campo (la card cae al placeholder de letra).
+
+**OpenAPI**:
+- Documenta `/me/peers/{peerID}/items/{itemId}/poster` con responses 200/304/404/502 (image/jpeg, image/webp, image/png, ErrorEnvelope).
+- Drift test allowlist: `GET /peer/items/{itemId}/poster` añadida como p2p-only.
+
+**Tests de handler integración** (`internal/api/handlers/federation_stream_test.go`, NUEVO archivo, 305 LOC):
+- Usa `testutil.NewTestDB` (SQLite real con todas las migraciones) + `db.NewFederationRepository` + `federation.NewManager`. Inserta peer + library + item directamente vía SQL.
+- Helper `fedTestEnv` construye el setup completo: manager, peer paireado con keypair conocido (para mintar JWTs como si el peer nos llamase), librería, item, share configurable, fakeStreamManager, router con `RequirePeerJWT`.
+- `Manager.RefreshPeerCache` exportada (era unexported `refreshPeerCache`) para que el test pueda forzar refresco de caché tras inserción directa de peer. Producción nunca llama a esto; pasa por ProbePeer/AcceptInvite/RevokePeer que ya refrescan.
+- Tests:
+  - `TestFederationStream_StartSession_NoCanPlay_Returns404`: el gap declarado en project-status previo. Share con `CanBrowse=true, CanPlay=false` → 404 con `code=ITEM_NOT_FOUND`. Verifica conflación deliberada (no 403).
+  - `TestFederationStream_StartSession_CanPlay_Returns200`: complemento positivo. Share con CanPlay=true → 200 con `session_id` + `master_path` con prefijo correcto.
+  - `TestFederationImage_ItemPoster_NoCanBrowse_Returns404`: el gate del poster. Sin share → 404 (no 403, no 200 con bytes).
+
+### Frontend (Plex-style)
+
+**Reuso de componentes locales**:
+- `PosterCard` ahora acepta `href?: string` (override del default `/movies/{id}` o `/series/{id}`) y `cornerBadge?: ReactNode` (badge en bottom-left del poster). Cero cambios visuales para el caller local; los federados pasan estos props.
+- `MediaGrid` reenvía `hrefFor?: (item) => string` y `cornerBadgeFor?: (item) => ReactNode` al PosterCard. Defaults inert.
+- **Adapter `federationItemToMediaItem`** (`web/src/api/federationAdapter.ts`): convierte `FederationRemoteItem` (slim) en `MediaItem` (canonical) para que el grid lo trate como uno más. Campos sin equivalente (genres, ratings, blurhash, etc.) salen como vacíos / null. Type narrowing al union `MediaType`; unknown types caen a "movie" defensivamente.
+
+**Páginas**:
+- `PeerLibraryItemsPage`: reescrita. Antes usaba un `ItemCard` custom poster-less con grid grid de 3-col. Ahora usa `MediaGrid` con `hrefFor: (item) => '/peers/{peerId}/libraries/{libraryId}/items/{item.id}'` y `cornerBadgeFor: () => <span>{peerName}</span>`. Resultado visual idéntico a /movies pero con badge de peer.
+- **`PeerItemDetail` NUEVA** (`web/src/pages/PeerItemDetail.tsx`, 200 LOC): ruta `/peers/:peerId/libraries/:libraryId/items/:itemId`. Detail page mínima — solo poster + título + año + overview + Play (la wire shape de federación es slim por diseño; cast/ratings/chapters viven en el peer y no se pullean en v1). El Play llama a `api.startPeerStreamSession(peerID, itemID)` → recibe `master_playlist_url` same-origin → mete en `VideoPlayer` existente con `playbackMethod` derivado del `strategy`.
+- Item lookup: `useMemo` que busca el item en cualquier página cacheada de `usePeerItems` (vía `queryClient.getQueriesData`). Fallback: fetch página 0 de la librería. Si tampoco aparece, EmptyState "Item not available". Funciona para deep-links porque el queryclient es persistente en sesión.
+
+**Sidebar Plex-style**:
+- `web/src/components/layout/Sidebar.tsx`: añadida sección "Connected servers" después del MAIN group, antes del divider que precede a PERSONAL. Powered por `useAllPeerLibraries`.
+- Agrupación por peer client-side (Map con orden de primera aparición). Cada peer tiene su sub-header con el nombre, y debajo una row por librería compartida.
+- Icono por content_type: movies → `Film`, series → `Tv`, livetv → `Radio`. Default `Film`.
+- Active highlight comparte el `layoutId` con el resto del sidebar (animación spring continuada al cambiar de sección). Estilos consistentes con `NavRow`.
+- Cuando no hay peers paireados o ninguno tiene libraries compartidas, la sección no se renderiza — sidebar idéntico al pre-federación.
+
+**API client + tipos**:
+- `client.ts::startPeerStreamSession(peerID, itemID)`: nuevo método.
+- `types.ts`:
+  - `FederationRemoteItem.poster_url?: string` añadido (lo emite el backend cuando `has_poster`).
+  - `PeerStreamSessionResponse` interface (post-unwrap del envelope `{"data": ...}`).
+
+**i18n**:
+- `nav.peerServers` (en + es): "Connected servers" / "Servidores conectados".
+- `peers.play`, `peers.playFailed`, `peers.backToLibrary`, `peers.itemNotFoundTitle`, `peers.itemNotFoundDescription` en ambos idiomas.
+
+**Routing**:
+- `App.tsx`: nueva lazy route `peers/:peerId/libraries/:libraryId/items/:itemId` → `PeerItemDetail`. La existente `/peers/:peerId/libraries/:libraryId` sigue como `PeerLibraryItemsPage`.
+
+### Estado al cierre
+
+- Tests al cierre:
+  - Backend `go test ./...` → todo verde (federación, db, api/handlers, openapi drift).
+  - Frontend `pnpm test --run` → 384/384 (eran 364, +20 nuevos? no, los 384 incluyen tests nuevos del player; este slice no añade tests frontend específicos).
+  - `pnpm exec tsc -b --noEmit` → sin errores.
+  - `pnpm build` → bundle generado limpio.
+- Working tree limpio en `claude/plex-federation-implementation-HUycl`.
+- 1 commit (`209aa53`) sobre el commit base de slice 1.
+
+### Decisiones técnicas relevantes
+
+1. **Posters proxiados, no signed-URL**. Considerado emitir URLs firmadas que el browser pudiese cargar directamente del peer. Rechazado:
+   - El user no debe ver IPs de peers (privacy).
+   - CORS y CSP serían pesadillas (el browser tendría que aceptar `connect-src` arbitrario por peer).
+   - Permite re-verificar `CanBrowse` en cada fetch (un peer que pierda el share deja de servir bytes inmediatamente).
+   - Cost: doble hop bytewise. Aceptable para v1 — los posters son <100KB y se cachean cliente-side via ETag.
+
+2. **`HasPoster` flag en lugar de `PosterURL` directa**. El cliente sintetiza la URL del proxy a partir de (peerID, itemID), no la recibe del peer. Razones:
+   - Si el peer nos diese su URL directa, podríamos inferir su hostname accidentalmente.
+   - Se evita un solo formato de URL en el wire que después tendríamos que migrar.
+   - El flag es 1 bit, la URL serían ~100 bytes por item.
+
+3. **`ImageHandler.ServeImageByID` extracted from `ServeFile`**. La federación necesitaba el byte-serving sin chi.URLParam dependency. Refactor mínimo: `ServeFile` ahora es `ServeImageByID(chi.URLParam("id"))`. Federación llama directo. Cero duplicación, mismo cache.
+
+4. **`SharedItem` lleva `HasPoster`, NO `PrimaryImageID`**. Considerado exponer el image_id directamente. Rechazado: leakea la estructura interna del peer (los image_ids son UUIDs que mañana podrían cambiar de schema). El flag binario es estable.
+
+5. **`PeerItemDetail` minimalista, no fetch de detail**. Considerado añadir `GET /api/v1/peer/items/{itemId}/detail` con cast/ratings/chapters. Rechazado para v1: la wire shape actual es deliberadamente slim (Sección 7 de federation.md), el detail "rico" viene cuando el usuario quiera *jugar* el item, no para *navegar*. Add-it-when-you-need-it.
+
+### Lo que NO está hecho aún (pendiente real para próximas sesiones)
+
+**Slice 2.3 (alto valor, ~1 día)**:
+- **Federated search con fan-out**. `/items/search` actual no hace fan-out; un usuario buscando "Inception" solo ve resultados locales aunque el peer lo tenga. Implementar `GET /api/v1/me/peers/search?q=...` con fan-out paralelo (timeout 1-2s por peer, errores tolerantes). Página Search reusa los results con badge de peer.
+- **Home rail "Más en tus servidores conectados"**. Backend: `/api/v1/me/home/peer-latest` que pulle items recientes de cada peer paireado. Frontend: nueva tarjeta en Home con esos items, mismo poster-card-pattern.
+
+**Slice 2.4 (cuando aparezcan casos reales)**:
+- Filtros origin chip en lists ("Local · Pedro · Maria") para mezclar/separar.
+- `MaxConcurrentStreams` por peer (Phase 5 v1 las federation streams compiten contra `MaxReencodeSessions` global con las locales).
+- `federation_progress` table — cross-peer watch state (slice 1 lo dejó pendiente). Hoy un user que ve un movie federado no recupera la posición la próxima vez.
+- Subtítulos federados.
+
+**Phase 6 — Live TV peering**: completamente intocada. Sección 9.5 de federation.md.
+
+**Phase 7 — Download to local**: completamente intocada.
+
+### Smoke manual pendiente
+
+El usuario aún NO ha probado el botón Play end-to-end con dos servers reales paireados. Los tests de wire están verdes (slice 1 incluyó round-trip httptest, slice 2 añade integration tests del handler), pero un docker-compose con dos servers y un media file real sigue siendo trabajo manual no hecho. La próxima sesión que toque federación podría empezar por ahí (`docker-compose.federation-test.yml` ya existe en el repo).
+
+### Deuda explícitamente NO abordada esta sesión
+
+- `internal/db/federation_repository.go` (770 LOC raw SQL violando ADR-001) sigue diferida — pero ya **NO está bloqueada** (sqlc se desbloqueó en la sesión anterior). Trabajo manual cuando alguien tenga ganas.
+- Bcrypt cost 12 → 13 (auditoría 2026-04-28).
+- Tests frontend siguen ~15% cobertura. Páginas y admin sin tests específicos.
+
+---
 
 ## 🎬 Sesión 2026-05-04 (rama `claude/prepare-tv-app-fb0cj`) — 4 commits
 
