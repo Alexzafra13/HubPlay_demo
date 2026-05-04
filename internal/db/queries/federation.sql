@@ -241,3 +241,69 @@ FROM federation_item_cache
 WHERE peer_id = ? AND library_id = ?
 ORDER BY title COLLATE NOCASE ASC
 LIMIT ? OFFSET ?;
+
+-- ============================================================
+-- federation_progress (028) -- cross-peer Continue Watching
+-- ============================================================
+
+-- name: UpsertFederationProgress :exec
+INSERT INTO federation_progress
+    (user_id, peer_id, remote_item_id, position_ticks, duration_ticks,
+     completed, last_played_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(user_id, peer_id, remote_item_id) DO UPDATE SET
+    position_ticks = excluded.position_ticks,
+    -- Only overwrite duration when the caller actually knows it.
+    -- The player learns duration from the manifest after a few
+    -- segments; the first save typically arrives before that, so
+    -- the first row may be inserted with duration_ticks = 0 and
+    -- later upserts replace it with the real value.
+    duration_ticks = CASE WHEN excluded.duration_ticks > 0
+                          THEN excluded.duration_ticks
+                          ELSE federation_progress.duration_ticks END,
+    completed = excluded.completed,
+    last_played_at = excluded.last_played_at,
+    updated_at = excluded.updated_at;
+
+-- name: GetFederationProgress :one
+SELECT user_id, peer_id, remote_item_id, position_ticks, duration_ticks,
+       completed, last_played_at, updated_at
+FROM federation_progress
+WHERE user_id = ? AND peer_id = ? AND remote_item_id = ?;
+
+-- name: DeleteFederationProgress :exec
+DELETE FROM federation_progress
+WHERE user_id = ? AND peer_id = ? AND remote_item_id = ?;
+
+-- name: ListFederationContinueWatching :many
+-- Cross-peer Continue Watching rail. Only rows that look genuinely
+-- "in progress" are returned: not completed, position > 0, and (when
+-- duration is known) less than 90 percent played -- mirrors the local
+-- ContinueWatching filter so peer rows behave the same way the user
+-- already expects from local rows. Joins the catalog cache for
+-- title / poster availability so the rail can render without a
+-- per-row hop. Rows whose cache entry has been evicted (peer
+-- catalog refreshed against newer state) are dropped from the rail
+-- rather than rendered title-less.
+SELECT fp.peer_id, fp.remote_item_id, fp.position_ticks,
+       fp.duration_ticks, fp.last_played_at,
+       c.library_id, c.type, c.title,
+       COALESCE(c.year, 0) AS year,
+       COALESCE(c.overview, '') AS overview,
+       c.has_poster,
+       p.name AS peer_name
+FROM federation_progress fp
+JOIN federation_item_cache c
+  ON c.peer_id = fp.peer_id AND c.remote_id = fp.remote_item_id
+JOIN federation_peers p
+  ON p.id = fp.peer_id
+WHERE fp.user_id = ?
+  AND fp.completed = 0
+  AND fp.position_ticks > 0
+  AND p.status = 'paired'
+  AND NOT (
+    fp.duration_ticks > 0
+    AND fp.position_ticks * 100 >= fp.duration_ticks * 90
+  )
+ORDER BY fp.last_played_at DESC
+LIMIT ?;

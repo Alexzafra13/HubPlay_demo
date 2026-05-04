@@ -93,6 +93,7 @@ type Querier interface {
 	DeleteEPGProgramsByChannel(ctx context.Context, channelID string) error
 	DeleteExpiredDeviceCodes(ctx context.Context, expiresAt time.Time) error
 	DeleteExpiredSessions(ctx context.Context) (int64, error)
+	DeleteFederationProgress(ctx context.Context, arg DeleteFederationProgressParams) error
 	DeleteIPTVScheduledJob(ctx context.Context, arg DeleteIPTVScheduledJobParams) error
 	DeleteImageByID(ctx context.Context, id string) error
 	DeleteImagesByItem(ctx context.Context, itemID string) error
@@ -128,6 +129,7 @@ type Querier interface {
 	GetDeviceCodeByDeviceCode(ctx context.Context, deviceCode string) (DeviceCode, error)
 	GetDeviceCodeByUserCode(ctx context.Context, userCode string) (DeviceCode, error)
 	GetExternalIDByProvider(ctx context.Context, arg GetExternalIDByProviderParams) (ExternalID, error)
+	GetFederationProgress(ctx context.Context, arg GetFederationProgressParams) (FederationProgress, error)
 	GetIPTVScheduledJob(ctx context.Context, arg GetIPTVScheduledJobParams) (IptvScheduledJob, error)
 	GetImageByID(ctx context.Context, id string) (GetImageByIDRow, error)
 	GetInviteByCode(ctx context.Context, code string) (FederationInvite, error)
@@ -242,6 +244,16 @@ type Querier interface {
 	ListExternalIDsByItem(ctx context.Context, itemID string) ([]ExternalID, error)
 	ListFavorites(ctx context.Context, arg ListFavoritesParams) ([]ListFavoritesRow, error)
 	ListFederationAuditEntries(ctx context.Context, arg ListFederationAuditEntriesParams) ([]ListFederationAuditEntriesRow, error)
+	// Cross-peer Continue Watching rail. Only rows that look genuinely
+	// "in progress" are returned: not completed, position > 0, and (when
+	// duration is known) less than 90 percent played -- mirrors the local
+	// ContinueWatching filter so peer rows behave the same way the user
+	// already expects from local rows. Joins the catalog cache for
+	// title / poster availability so the rail can render without a
+	// per-row hop. Rows whose cache entry has been evicted (peer
+	// catalog refreshed against newer state) are dropped from the rail
+	// rather than rendered title-less.
+	ListFederationContinueWatching(ctx context.Context, arg ListFederationContinueWatchingParams) ([]ListFederationContinueWatchingRow, error)
 	// Filmography: every movie + series this person has a direct credit
 	// on. Episode-level credits drop through for now (parent series
 	// usually carries the same person at the top level -- TMDb is
@@ -370,6 +382,10 @@ type Querier interface {
 	// Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE external_ids).
 	// PK: (item_id, provider).
 	UpsertExternalID(ctx context.Context, arg UpsertExternalIDParams) error
+	// ============================================================
+	// federation_progress (028) -- cross-peer Continue Watching
+	// ============================================================
+	UpsertFederationProgress(ctx context.Context, arg UpsertFederationProgressParams) error
 	// Preserves last_* fields by design: only the configuration
 	// (interval_hours / enabled) and updated_at change. The history
 	// (last_run_at, last_status, ...) survives reconfiguration.

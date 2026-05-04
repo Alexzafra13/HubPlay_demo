@@ -62,6 +62,7 @@
     "noProgramInfo": "No programme info",
     "latestIn": "Latest in {{library}}",
     "peerRecent": "Recently added on peers",
+    "peerContinueWatching": "Continue watching on peers",
     "viewDetails": "View details",
     "failedToLoad": "Failed to load content. Check your server connection."
   },
@@ -119,6 +120,8 @@
     "pageOf": "Page {{current}} of {{total}}",
     "unreachable": "Couldn't reach the peer: {{error}}",
     "play": "Play",
+    "resume": "Resume {{time}}",
+    "playFromStart": "Play from start",
     "playFailed": "Couldn't start playback: {{error}}",
     "backToLibrary": "Back to library",
     "itemNotFoundTitle": "Item not available",

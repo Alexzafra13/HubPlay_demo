@@ -62,6 +62,7 @@
     "noProgramInfo": "Sin información de programa",
     "latestIn": "Reciente en {{library}}",
     "peerRecent": "Recientes en tus pares",
+    "peerContinueWatching": "Sigue viendo en tus pares",
     "viewDetails": "Ver detalles",
     "failedToLoad": "Error al cargar el contenido. Comprueba la conexion del servidor."
   },
@@ -119,6 +120,8 @@
     "pageOf": "Página {{current}} de {{total}}",
     "unreachable": "No se ha podido contactar con el peer: {{error}}",
     "play": "Reproducir",
+    "resume": "Reanudar {{time}}",
+    "playFromStart": "Reproducir desde el inicio",
     "playFailed": "No se pudo iniciar la reproducción: {{error}}",
     "backToLibrary": "Volver a la biblioteca",
     "itemNotFoundTitle": "Título no disponible",

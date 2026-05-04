@@ -151,3 +151,187 @@ func insertTestUser(t *testing.T, database *sql.DB, id string) {
 		t.Fatalf("insert test user: %v", err)
 	}
 }
+
+// TestFederationRepository_Progress exercises Upsert/Get/Delete +
+// the cross-peer Continue Watching join. Also pins the duration
+// preservation contract: a second upsert with duration_ticks=0 must
+// keep the previously-stored non-zero value.
+func TestFederationRepository_Progress(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	ctx := context.Background()
+	fedRepo := db.NewFederationRepository(database)
+
+	insertTestUser(t, database, "u-1")
+
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	peer := &federation.Peer{
+		ID: "peer-A", ServerUUID: "uuid-A", Name: "A",
+		BaseURL: "https://a.test", PublicKey: pub,
+		Status: federation.PeerPaired, CreatedAt: now, PairedAt: &now,
+	}
+	if err := fedRepo.InsertPeer(ctx, peer); err != nil {
+		t.Fatal(err)
+	}
+	// Seed a cache row so the Continue Watching JOIN matches.
+	if err := fedRepo.UpsertCachedItems(ctx, "peer-A", "lib-1", []*federation.SharedItem{
+		{ID: "remote-1", Type: "movie", Title: "Inception", Year: 2010, HasPoster: true},
+		{ID: "remote-2", Type: "movie", Title: "Tenet", Year: 2020, HasPoster: false},
+	}, now); err != nil {
+		t.Fatal(err)
+	}
+
+	// First upsert: position only, duration unknown.
+	if err := fedRepo.UpsertProgress(ctx, &federation.Progress{
+		UserID:        "u-1",
+		PeerID:        "peer-A",
+		RemoteItemID:  "remote-1",
+		PositionTicks: 1_000,
+		DurationTicks: 0,
+		LastPlayedAt:  now,
+		UpdatedAt:     now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := fedRepo.GetProgress(ctx, "u-1", "peer-A", "remote-1")
+	if err != nil || got == nil {
+		t.Fatalf("get progress: got=%v err=%v", got, err)
+	}
+	if got.PositionTicks != 1_000 || got.DurationTicks != 0 {
+		t.Fatalf("first upsert: pos=%d dur=%d", got.PositionTicks, got.DurationTicks)
+	}
+
+	// Second upsert with duration. Should pin it.
+	if err := fedRepo.UpsertProgress(ctx, &federation.Progress{
+		UserID:        "u-1",
+		PeerID:        "peer-A",
+		RemoteItemID:  "remote-1",
+		PositionTicks: 2_000,
+		DurationTicks: 10_000,
+		LastPlayedAt:  now.Add(time.Second),
+		UpdatedAt:     now.Add(time.Second),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Third upsert with duration=0. Must preserve 10_000.
+	if err := fedRepo.UpsertProgress(ctx, &federation.Progress{
+		UserID:        "u-1",
+		PeerID:        "peer-A",
+		RemoteItemID:  "remote-1",
+		PositionTicks: 3_000,
+		DurationTicks: 0,
+		LastPlayedAt:  now.Add(2 * time.Second),
+		UpdatedAt:     now.Add(2 * time.Second),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = fedRepo.GetProgress(ctx, "u-1", "peer-A", "remote-1")
+	if got.PositionTicks != 3_000 || got.DurationTicks != 10_000 {
+		t.Fatalf("duration preservation broken: pos=%d dur=%d", got.PositionTicks, got.DurationTicks)
+	}
+
+	// Continue Watching: one in-progress row.
+	rail, err := fedRepo.ListContinueWatching(ctx, "u-1", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rail) != 1 {
+		t.Fatalf("rail expected 1 row, got %d", len(rail))
+	}
+	if rail[0].Title != "Inception" || rail[0].PeerName != "A" || !rail[0].HasPoster {
+		t.Fatalf("rail metadata wrong: %+v", rail[0])
+	}
+
+	// Mark completed -- must drop from rail.
+	if err := fedRepo.UpsertProgress(ctx, &federation.Progress{
+		UserID:        "u-1",
+		PeerID:        "peer-A",
+		RemoteItemID:  "remote-1",
+		PositionTicks: 9_500,
+		DurationTicks: 10_000,
+		Completed:     true,
+		LastPlayedAt:  now.Add(3 * time.Second),
+		UpdatedAt:     now.Add(3 * time.Second),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rail, _ = fedRepo.ListContinueWatching(ctx, "u-1", 10)
+	if len(rail) != 0 {
+		t.Fatalf("completed row should be off the rail, got %d", len(rail))
+	}
+
+	// Near-complete (>=90%) without explicit completed flag also drops.
+	if err := fedRepo.UpsertProgress(ctx, &federation.Progress{
+		UserID:        "u-1",
+		PeerID:        "peer-A",
+		RemoteItemID:  "remote-2",
+		PositionTicks: 9_500, // 95%
+		DurationTicks: 10_000,
+		LastPlayedAt:  now.Add(4 * time.Second),
+		UpdatedAt:     now.Add(4 * time.Second),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rail, _ = fedRepo.ListContinueWatching(ctx, "u-1", 10)
+	if len(rail) != 0 {
+		t.Fatalf("near-complete row should be off the rail, got %d", len(rail))
+	}
+
+	// Delete clears the row entirely.
+	if err := fedRepo.DeleteProgress(ctx, "u-1", "peer-A", "remote-1"); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = fedRepo.GetProgress(ctx, "u-1", "peer-A", "remote-1")
+	if got != nil {
+		t.Fatalf("delete failed, still got: %+v", got)
+	}
+}
+
+// TestFederationRepository_Progress_PeerRevokedDropsFromRail asserts
+// that revoking a peer removes its rows from the Continue Watching
+// rail without an explicit purge -- the JOIN gates on status='paired'.
+func TestFederationRepository_Progress_PeerRevokedDropsFromRail(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	ctx := context.Background()
+	fedRepo := db.NewFederationRepository(database)
+
+	insertTestUser(t, database, "u-1")
+
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	peer := &federation.Peer{
+		ID: "peer-A", ServerUUID: "uuid-A", Name: "A",
+		BaseURL: "https://a.test", PublicKey: pub,
+		Status: federation.PeerPaired, CreatedAt: now, PairedAt: &now,
+	}
+	if err := fedRepo.InsertPeer(ctx, peer); err != nil {
+		t.Fatal(err)
+	}
+	if err := fedRepo.UpsertCachedItems(ctx, "peer-A", "lib-1", []*federation.SharedItem{
+		{ID: "remote-1", Type: "movie", Title: "Inception"},
+	}, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := fedRepo.UpsertProgress(ctx, &federation.Progress{
+		UserID: "u-1", PeerID: "peer-A", RemoteItemID: "remote-1",
+		PositionTicks: 1_000, DurationTicks: 10_000,
+		LastPlayedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if rows, _ := fedRepo.ListContinueWatching(ctx, "u-1", 10); len(rows) != 1 {
+		t.Fatalf("paired rail should have 1 row, got %d", len(rows))
+	}
+	if err := fedRepo.UpdatePeerRevoked(ctx, "peer-A", now); err != nil {
+		t.Fatal(err)
+	}
+	if rows, _ := fedRepo.ListContinueWatching(ctx, "u-1", 10); len(rows) != 0 {
+		t.Fatalf("revoked peer should be off the rail, got %d", len(rows))
+	}
+}

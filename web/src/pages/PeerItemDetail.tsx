@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
@@ -14,8 +14,11 @@ import { VideoPlayer } from "@/components/player";
 import type {
   FederationRemoteItem,
   FederationRemoteItemsResponse,
+  PeerItemProgress,
   PlaybackMethod,
 } from "@/api/types";
+
+const TICKS_PER_SECOND = 10_000_000;
 
 // PeerItemDetail — Plex-style detail page for an item that lives on
 // a federated peer. Compared to the local ItemDetail, the metadata
@@ -71,37 +74,86 @@ export default function PeerItemDetail() {
   const [playerInfo, setPlayerInfo] = useState<{
     masterUrl: string;
     method: PlaybackMethod;
+    startPosition: number;
   } | null>(null);
   const [playError, setPlayError] = useState<string | null>(null);
 
-  const handlePlay = useCallback(async () => {
+  // Resume support: fetch the user's stored position for this remote
+  // item once on mount. Server returns the all-zero default when
+  // nothing's been stored, so we don't have to special-case 404.
+  const [progress, setProgress] = useState<PeerItemProgress | null>(null);
+  useEffect(() => {
     if (!peerId || !itemId) return;
-    setPlayError(null);
-    try {
-      const resp = await api.startPeerStreamSession(peerId, itemId);
-      // resp.master_playlist_url is already same-origin (the server
-      // synthesized it that way). VideoPlayer takes the URL verbatim
-      // and lets useHls / hls.js resolve relative variant URLs
-      // against it -- exactly the same as the local stream flow.
-      const method: PlaybackMethod =
-        resp.strategy === "direct_play"
-          ? "direct_play"
-          : resp.strategy === "direct_stream"
-          ? "direct_stream"
-          : "transcode";
-      setPlayerInfo({ masterUrl: resp.master_playlist_url, method });
-      setShowPlayer(true);
-    } catch (err) {
-      setPlayError(
-        t("peers.playFailed", { error: String(err) }),
-      );
+    let cancelled = false;
+    api
+      .getPeerItemProgress(peerId, itemId)
+      .then((p) => {
+        if (!cancelled) setProgress(p);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [peerId, itemId]);
+
+  const resumeSeconds = useMemo(() => {
+    if (!progress || progress.completed) return 0;
+    if (progress.position_ticks <= 0) return 0;
+    // Skip resume offers when the duration hasn't been recorded yet
+    // (first save before the manifest landed) -- a near-zero
+    // position_ticks alone is not enough to commit to "resume" UX.
+    if (progress.duration_ticks > 0) {
+      const pct = progress.position_ticks / progress.duration_ticks;
+      if (pct >= 0.9) return 0;
     }
-  }, [peerId, itemId, t]);
+    return progress.position_ticks / TICKS_PER_SECOND;
+  }, [progress]);
+
+  const startPlayback = useCallback(
+    async (startSeconds: number) => {
+      if (!peerId || !itemId) return;
+      setPlayError(null);
+      try {
+        const resp = await api.startPeerStreamSession(peerId, itemId);
+        // resp.master_playlist_url is already same-origin (the server
+        // synthesized it that way). VideoPlayer takes the URL verbatim
+        // and lets useHls / hls.js resolve relative variant URLs
+        // against it -- exactly the same as the local stream flow.
+        const method: PlaybackMethod =
+          resp.strategy === "direct_play"
+            ? "direct_play"
+            : resp.strategy === "direct_stream"
+            ? "direct_stream"
+            : "transcode";
+        setPlayerInfo({
+          masterUrl: resp.master_playlist_url,
+          method,
+          startPosition: startSeconds,
+        });
+        setShowPlayer(true);
+      } catch (err) {
+        setPlayError(t("peers.playFailed", { error: String(err) }));
+      }
+    },
+    [peerId, itemId, t],
+  );
+
+  const handlePlay = useCallback(() => startPlayback(0), [startPlayback]);
+  const handleResume = useCallback(
+    () => startPlayback(resumeSeconds),
+    [startPlayback, resumeSeconds],
+  );
 
   const handleClosePlayer = useCallback(() => {
     setShowPlayer(false);
     setPlayerInfo(null);
-  }, []);
+    // Refresh progress so a follow-up Resume reflects what was just
+    // saved on close. Fire-and-forget; the keepalive write from
+    // useProgressReporter has already raced ahead of this.
+    if (peerId && itemId) {
+      api.getPeerItemProgress(peerId, itemId).then(setProgress).catch(() => {});
+    }
+  }, [peerId, itemId]);
 
   // ─── Render ──────────────────────────────────────────────────────
 
@@ -197,9 +249,27 @@ export default function PeerItemDetail() {
           )}
 
           <div className="flex flex-wrap items-center gap-3 pt-2">
-            <Button onClick={handlePlay} disabled={showPlayer}>
-              ▶ {t("peers.play")}
-            </Button>
+            {resumeSeconds > 0 ? (
+              <>
+                <Button onClick={handleResume} disabled={showPlayer}>
+                  ▶ {t("peers.resume", {
+                    time: formatHms(resumeSeconds),
+                    defaultValue: "Resume {{time}}",
+                  })}
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={handlePlay}
+                  disabled={showPlayer}
+                >
+                  {t("peers.playFromStart", { defaultValue: "Play from start" })}
+                </Button>
+              </>
+            ) : (
+              <Button onClick={handlePlay} disabled={showPlayer}>
+                ▶ {t("peers.play")}
+              </Button>
+            )}
             <Button
               variant="secondary"
               onClick={() => navigate(backLink)}
@@ -222,14 +292,27 @@ export default function PeerItemDetail() {
       {showPlayer && playerInfo && (
         <VideoPlayer
           itemId={itemId}
+          peerId={peerId}
           sessionToken=""
           masterPlaylistUrl={playerInfo.masterUrl}
           directUrl={null}
           playbackMethod={playerInfo.method}
+          startPosition={playerInfo.startPosition}
           title={item.title}
           onClose={handleClosePlayer}
         />
       )}
     </div>
   );
+}
+
+function formatHms(totalSeconds: number): string {
+  const s = Math.max(0, Math.floor(totalSeconds));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (h > 0) {
+    return `${h}:${m.toString().padStart(2, "0")}:${sec.toString().padStart(2, "0")}`;
+  }
+  return `${m}:${sec.toString().padStart(2, "0")}`;
 }

@@ -145,6 +145,40 @@ export interface FederationSearchResponse {
   hits: FederationSearchHit[];
 }
 
+// Cross-peer playback state (federation_progress, migration 028).
+// Same shape as UserData.progress for federated items; the player
+// uses position_ticks for resume and the Continue Watching rail
+// renders percentage from (position / duration).
+export interface PeerItemProgress {
+  item_id: string;
+  peer_id: string;
+  position_ticks: number;
+  duration_ticks: number;
+  completed: boolean;
+  last_played_at?: string;
+}
+
+// One row of the cross-peer Continue Watching rail. Mirrors the
+// local rail's wire shape closely enough that the LandscapeCard
+// component can render either with a small adapter -- the extra
+// peer_id / peer_name fields enable the badge + click routing into
+// the federated detail page.
+export interface PeerContinueWatchingItem {
+  id: string;
+  peer_id: string;
+  peer_name: string;
+  library_id: string;
+  type: string;
+  title: string;
+  year?: number;
+  overview?: string;
+  poster_url?: string;
+  position_ticks: number;
+  duration_ticks: number;
+  percentage: number;
+  last_played_at: string;
+}
+
 // Unified row: one library × one peer, flattened across all paired
 // peers in our network. Used by the "/peers" landing page so the UI
 // renders a single grid instead of nested peer→library navigation.

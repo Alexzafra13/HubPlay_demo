@@ -17,6 +17,13 @@ import type { ExternalSubtitleResult } from "@/api/types";
 
 interface VideoPlayerProps {
   itemId: string;
+  /**
+   * When set, `itemId` is the remote item id on the named peer and
+   * progress reporting routes through `/me/peers/{peerId}/items/{itemId}/progress`
+   * (federation_progress) instead of the local user_data path. Local
+   * playback omits this prop.
+   */
+  peerId?: string;
   sessionToken: string;
   masterPlaylistUrl: string | null;
   directUrl: string | null;
@@ -55,6 +62,7 @@ interface VideoPlayerProps {
 
 const VideoPlayer: FC<VideoPlayerProps> = ({
   itemId,
+  peerId,
   sessionToken,
   masterPlaylistUrl,
   directUrl,
@@ -130,7 +138,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
     keepControlsVisible,
   } = useControlsVisibility(isPlaying);
 
-  useProgressReporter(videoRef, itemId);
+  useProgressReporter(videoRef, itemId, peerId);
 
   // Trickplay: fetched once per item. The first hit on the backend
   // triggers ffmpeg generation (5-30 s); during that window the
