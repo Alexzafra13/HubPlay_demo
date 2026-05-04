@@ -115,7 +115,11 @@ func TestValidate_PostgresRequiresDSN(t *testing.T) {
 }
 
 func TestLoad_NonexistentFile(t *testing.T) {
-	cfg, err := Load("/nonexistent/path/config.yaml")
+	// Point at a missing file inside an existing directory -- mirrors the
+	// production case (container with `/config/` mounted, no yaml dropped
+	// in yet) where validation needs the DB-path directory to exist.
+	dir := t.TempDir()
+	cfg, err := Load(filepath.Join(dir, "config.yaml"))
 	if err != nil {
 		t.Fatalf("expected no error for missing config, got: %v", err)
 	}
@@ -224,6 +228,41 @@ database:
 	}
 	if cfg.Logging.Level != "error" {
 		t.Errorf("expected env override log level error, got %s", cfg.Logging.Level)
+	}
+}
+
+// TestLoad_EnvOverrides_NoFile pins the bug exposed by the federation
+// smoke test: a fresh deployment with no hubplay.yaml on disk must
+// still pick up env overrides like HUBPLAY_SERVER_BASE_URL. Before
+// the fix, Load returned defaults early on os.IsNotExist and skipped
+// applyEnvOverrides entirely, so docker-compose env: lines were
+// silently dropped and federation peers ended up advertising
+// localhost.
+func TestLoad_EnvOverrides_NoFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "absent.yaml")
+
+	t.Setenv("HUBPLAY_SERVER_BASE_URL", "http://test-peer-a:8096")
+	t.Setenv("HUBPLAY_SERVER_PORT", "9000")
+	t.Setenv("HUBPLAY_AUTH_JWT_SECRET", "env-supplied-secret")
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.Server.BaseURL != "http://test-peer-a:8096" {
+		t.Errorf("base_url not picked up from env: %q", cfg.Server.BaseURL)
+	}
+	if cfg.Server.Port != 9000 {
+		t.Errorf("port: %d", cfg.Server.Port)
+	}
+	if cfg.Auth.JWTSecret != "env-supplied-secret" {
+		t.Errorf("jwt secret not picked up from env: %q", cfg.Auth.JWTSecret)
+	}
+	// DB path still anchored to the (missing) config file's directory.
+	if cfg.Database.Path != filepath.Join(dir, "hubplay.db") {
+		t.Errorf("db path: %q", cfg.Database.Path)
 	}
 }
 
