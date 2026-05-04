@@ -140,34 +140,31 @@ func Load(path string) (*Config, error) {
 	cfg := defaults()
 
 	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			// No config file — use defaults and generate JWT secret.
-			// Place the database in the same directory as the config file
-			// so it lands inside the mounted volume (e.g. /config/).
-			configDir := filepath.Dir(path)
-			if configDir != "." {
-				cfg.Database.Path = filepath.Join(configDir, "hubplay.db")
-			}
-			if cfg.Auth.JWTSecret == "" {
-				cfg.Auth.JWTSecret = generateSecret()
-			}
-			return cfg, nil
+	switch {
+	case err == nil:
+		// Expand environment variables (${TMDB_API_KEY} etc.)
+		data = []byte(os.ExpandEnv(string(data)))
+		if err := yaml.Unmarshal(data, cfg); err != nil {
+			return nil, fmt.Errorf("parsing config: %w", err)
 		}
+	case os.IsNotExist(err):
+		// No config file — fall through with defaults. Place the DB
+		// alongside the (missing) config file so it lands in the
+		// mounted volume (e.g. /config/).
+		configDir := filepath.Dir(path)
+		if configDir != "." {
+			cfg.Database.Path = filepath.Join(configDir, "hubplay.db")
+		}
+	default:
 		return nil, fmt.Errorf("reading config: %w", err)
 	}
 
-	// Expand environment variables (${TMDB_API_KEY} etc.)
-	data = []byte(os.ExpandEnv(string(data)))
-
-	if err := yaml.Unmarshal(data, cfg); err != nil {
-		return nil, fmt.Errorf("parsing config: %w", err)
-	}
-
-	// Apply env var overrides (HUBPLAY_SERVER_PORT etc.)
+	// Env overrides apply regardless of whether a file existed --
+	// HUBPLAY_SERVER_BASE_URL / HUBPLAY_AUTH_JWT_SECRET / etc. on a
+	// fresh deploy without yaml have to land somewhere.
 	applyEnvOverrides(cfg)
 
-	// Generate JWT secret if not set
+	// Generate JWT secret if neither the file nor the env supplied one.
 	if cfg.Auth.JWTSecret == "" {
 		cfg.Auth.JWTSecret = generateSecret()
 	}
