@@ -12,20 +12,26 @@
 #   ✓ Image serving
 #   ✓ Trickplay (seek-bar previews)
 #   ✓ Federation user surface (browse paired peers' shared libraries)
-#   ✓ Health
+#   ✓ Live TV (channels, EPG schedule, favourites, continue-watching,
+#     transmuxed HLS playback)
+#   ✓ Home (per-user layout + trending + live-now rails)
+#   ✓ Health, OpenAPI self-description
 #
 # Out of scope (intentional, not "TODO"):
 #
 #   ✗ Admin endpoints (/admin/*, library mutations, user management,
-#     provider config, federation pairing, IPTV admin operations).
+#     provider config, federation pairing, IPTV admin operations like
+#     M3U/EPG refresh, channel health management, scheduled jobs).
 #     A native client doesn't run admin flows.
 #   ✗ Setup wizard (/setup/*). Web-only first-run flow.
 #   ✗ Peer-to-peer endpoints (/peer/*). Server-to-server, authenticated
 #     by Ed25519-signed JWTs from a paired peer's keypair, not by user
 #     sessions. Documented separately in docs/architecture/federation.md.
-#   ✗ IPTV (Live TV) — separate spec extension when the Kotlin TV app
-#     gets to that surface. Channel browse is in scope; the transmux /
-#     EPG management surface is admin-shaped.
+#
+# Drift detection: a Go test (internal/api/openapi_drift_test.go) walks
+# the chi router AST and fails CI if a handler is registered without a
+# matching spec entry (or vice versa). Out-of-scope routes are listed
+# explicitly in that test with one-line justifications.
 #
 # Format: OpenAPI 3.0.3 chosen over 3.1 for broader Kotlin tooling
 # compatibility (openapi-generator's Kotlin templates lag on 3.1).
@@ -118,8 +124,14 @@ tags:
     description: Poster/backdrop/thumbnail serving
   - name: federation
     description: Browse content from paired peer servers
+  - name: livetv
+    description: IPTV channel browse, EPG, favourites, transmuxed HLS playback
+  - name: home
+    description: Per-user home layout + discovery rails (trending, live-now)
   - name: health
     description: Liveness probe
+  - name: meta
+    description: OpenAPI spec self-description
 
 paths:
   # ────────────────────────────────────────────────────────────────────
@@ -1009,6 +1021,503 @@ paths:
       summary: Force a cache refresh for one peer library
       responses: { "204": { description: Cache cleared (next browse call hits live) } }
 
+  # ─── Live TV (IPTV) ──────────────────────────────────────────────────
+  #
+  # Channels live inside an IPTV library (`content_type: livetv`). Browse
+  # and EPG are read-only for any authenticated user with library access;
+  # mutations (channel disable/reset-health, M3U/EPG refresh, scheduled
+  # jobs, EPG sources) are admin-only and intentionally out of this spec.
+  #
+  # Playback dispatch:
+  #   - HLS upstreams → `/channels/{id}/stream` proxies them (passthrough).
+  #   - MPEG-TS upstreams (typical of Xtream Codes) → that same endpoint
+  #     302-redirects to `/channels/{id}/hls/index.m3u8`, which spawns a
+  #     per-channel ffmpeg transmux session (`-c copy`, low CPU). The
+  #     manifest references segments served by `/hls/{segment}`.
+  /libraries/{id}/channels:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: active, in: query, schema: { type: boolean, default: true }, description: "Set false to include disabled channels" }
+    get:
+      tags: [livetv, browse]
+      summary: List channels in an IPTV library
+      responses:
+        "200":
+          description: Channels
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Channel" }
+
+  /libraries/{id}/channels/groups:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [livetv]
+      summary: List distinct group_name values for the library's channels
+      description: Used by the channel grid to populate the group filter.
+      responses:
+        "200":
+          description: Groups
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { type: string }
+
+  /channels/{channelId}:
+    parameters:
+      - { name: channelId, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [livetv]
+      summary: Channel detail with the currently-airing EPG program when known
+      responses:
+        "200":
+          description: Channel
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/ChannelDetail" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /channels/{channelId}/stream:
+    parameters:
+      - { name: channelId, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [livetv, stream]
+      summary: Play a channel (HLS passthrough or 302 to transmux)
+      description: |
+        Dispatches by upstream format:
+
+        - Upstream is HLS (`*.m3u8`) → server proxies the manifest with
+          segment URLs rewritten through `/proxy?url=` so auth + the
+          upstream rewriter still apply. `Content-Type: application/vnd.apple.mpegurl`.
+        - Upstream is anything else (typically raw MPEG-TS over HTTP) →
+          `302 Found` to `/channels/{channelId}/hls/index.m3u8` where a
+          per-channel ffmpeg transmux session has been (or will be)
+          spawned.
+      responses:
+        "200":
+          description: HLS manifest (passthrough)
+          content:
+            application/vnd.apple.mpegurl: { schema: { type: string } }
+        "302": { description: "Redirected to the transmux HLS endpoint" }
+        "404":
+          description: Channel inactive or not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  /channels/{channelId}/proxy:
+    parameters:
+      - { name: channelId, in: path, required: true, schema: { type: string } }
+      - { name: url, in: query, required: true, schema: { type: string, format: uri }, description: "Absolute upstream URL to proxy. Server validates against SSRF and the calling user's library ACL before proxying." }
+    get:
+      tags: [livetv, stream]
+      summary: Same-origin proxy for an HLS sub-playlist or segment
+      description: |
+        Used by the player when the upstream HLS manifest references
+        absolute URLs the browser CSP can't load directly. The handler
+        re-fetches `url` server-side and streams the bytes back. SSRF-
+        protected: rejects loopback / link-local / RFC1918 destinations.
+      responses:
+        "200":
+          description: Proxied bytes (HLS sub-playlist or MPEG-TS segment)
+          content:
+            application/vnd.apple.mpegurl: { schema: { type: string } }
+            video/mp2t: { schema: { type: string, format: binary } }
+
+  /channels/{channelId}/hls/index.m3u8:
+    parameters:
+      - { name: channelId, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [livetv, stream]
+      summary: Live HLS manifest from the per-channel ffmpeg transmux session
+      description: |
+        First hit spawns the session if none is running; subsequent hits
+        reuse it. Always returns no-cache so the player sees fresh segment
+        windows. Returns 501 NOT_IMPLEMENTED if the server was deployed
+        without ffmpeg (transmux disabled).
+      responses:
+        "200":
+          description: HLS manifest
+          content:
+            application/vnd.apple.mpegurl: { schema: { type: string } }
+        "501":
+          description: Transmux is disabled on this deployment (no ffmpeg)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  /channels/{channelId}/hls/{segment}:
+    parameters:
+      - { name: channelId, in: path, required: true, schema: { type: string } }
+      - { name: segment, in: path, required: true, schema: { type: string }, description: "Segment filename (e.g. `seg-12.ts`) as referenced by the manifest" }
+    get:
+      tags: [livetv, stream]
+      summary: Single HLS segment from the transmux session
+      responses:
+        "200":
+          description: MPEG-TS segment
+          content:
+            video/mp2t: { schema: { type: string, format: binary } }
+        "404":
+          description: Session expired; reload the manifest to resume
+
+  /channels/{channelId}/logo:
+    parameters:
+      - { name: channelId, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [livetv, images]
+      summary: Same-origin proxy for the channel's `tvg-logo`
+      description: |
+        Mirrors the upstream image to disk and serves from the local
+        cache so a strict `img-src 'self'` CSP can stay locked. 404 when
+        the upstream is unfetchable; the client should fall back to the
+        deterministic initials placeholder shipped in the channel DTO.
+      responses:
+        "200":
+          description: Logo
+          content:
+            image/png:  { schema: { type: string, format: binary } }
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/webp: { schema: { type: string, format: binary } }
+
+  /channels/{channelId}/schedule:
+    parameters:
+      - { name: channelId, in: path, required: true, schema: { type: string } }
+      - { name: from, in: query, schema: { type: string }, description: "RFC3339 timestamp OR integer hours offset from now (negative = past)" }
+      - { name: to, in: query, schema: { type: string }, description: "RFC3339 timestamp OR integer hours offset from now" }
+    get:
+      tags: [livetv]
+      summary: EPG schedule for one channel
+      responses:
+        "200":
+          description: Programs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/EPGProgram" }
+
+  /channels/{channelId}/watch:
+    parameters:
+      - { name: channelId, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [livetv, user-data]
+      summary: Beacon — record that the user started watching this channel
+      description: |
+        Fire-and-forget from the player on tune-in. Updates the
+        per-user "continue watching" rail (`GET /me/channels/continue-watching`).
+      responses:
+        "200":
+          description: Recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      channel_id: { type: string }
+                      last_watched_at: { type: string, format: date-time }
+
+  /channels/{channelId}/playback-failure:
+    parameters:
+      - { name: channelId, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [livetv]
+      summary: Beacon — report a playback failure for a channel
+      description: |
+        Fire-and-forget. The server increments the channel's consecutive-
+        failure counter, which feeds the `health_status` field on the
+        Channel DTO and the admin "Sin señal" panel.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, description: "Optional short label, e.g. `manifest_404`, `decode_error`" }
+      responses: { "204": { description: Recorded } }
+
+  /channels/schedule:
+    get:
+      tags: [livetv]
+      summary: Bulk EPG schedule for multiple channels (GET — small libraries)
+      description: |
+        Convenience for ad-hoc curl/debugging. Production clients should
+        prefer the POST variant — a query string with ~250 channel UUIDs
+        already trips a `414` on common nginx defaults.
+      parameters:
+        - { name: channels, in: query, schema: { type: string }, description: "Comma-separated channel ids" }
+        - { name: from, in: query, schema: { type: string } }
+        - { name: to, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: Per-channel program lists keyed by channel id
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BulkScheduleResponse" }
+    post:
+      tags: [livetv]
+      summary: Bulk EPG schedule (preferred — POST body, capped at 5000 channels)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [channels]
+              properties:
+                channels:
+                  type: array
+                  items: { type: string }
+                  description: "Channel ids; capped at 5000 per request"
+                from: { type: string, description: "RFC3339 or hours-offset" }
+                to:   { type: string, description: "RFC3339 or hours-offset" }
+      responses:
+        "200":
+          description: Per-channel program lists keyed by channel id
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BulkScheduleResponse" }
+
+  /me/channels/continue-watching:
+    get:
+      tags: [livetv, user-data]
+      summary: Most recently watched channels for the caller
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, default: 10, maximum: 20 } }
+      responses:
+        "200":
+          description: Recently watched channels (newest first), enriched with `last_watched_at`
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: "#/components/schemas/Channel"
+                        - type: object
+                          properties:
+                            last_watched_at: { type: string, format: date-time }
+
+  /favorites/channels:
+    get:
+      tags: [livetv, user-data]
+      summary: List the caller's favorite channels (full DTO)
+      responses:
+        "200":
+          description: Favorite channels
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Channel" }
+
+  /favorites/channels/ids:
+    get:
+      tags: [livetv, user-data]
+      summary: List the caller's favorite channel ids only (light payload for hydration)
+      responses:
+        "200":
+          description: Favorite channel ids
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { type: string }
+
+  /favorites/channels/{channelId}:
+    parameters:
+      - { name: channelId, in: path, required: true, schema: { type: string } }
+    put:
+      tags: [livetv, user-data]
+      summary: Mark a channel as favorited (idempotent)
+      responses:
+        "200":
+          description: Favorited
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      channel_id: { type: string }
+                      is_favorite: { type: boolean, enum: [true] }
+    delete:
+      tags: [livetv, user-data]
+      summary: Unfavorite a channel (idempotent — no error if it wasn't a favorite)
+      responses:
+        "200":
+          description: Unfavorited
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      channel_id: { type: string }
+                      is_favorite: { type: boolean, enum: [false] }
+
+  # ─── Home (per-user layout + discovery rails) ───────────────────────
+  #
+  # `/me/home/layout` is the user's customisable home order — read on
+  # mount, written when the user reorders rails. Trending and live-now
+  # are first-class rails the layout references and the client fetches
+  # in parallel.
+  /me/home/layout:
+    get:
+      tags: [home, identity]
+      summary: Current user's home layout
+      description: |
+        Returns a stored layout if one was saved, otherwise a default
+        synthesised from the user's accessible libraries (each
+        movie/series library gets a `latest_in_library` rail; livetv
+        libraries are covered by the global `live_now` rail). Library
+        names are server-resolved so the client renders rail titles
+        without a follow-up call.
+      responses:
+        "200":
+          description: Layout
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/HomeLayout" }
+    put:
+      tags: [home, identity]
+      summary: Persist the caller's home layout
+      description: |
+        The server normalises on write: unknown section types are
+        dropped; `latest_in_library` sections referencing libraries the
+        caller can't see are dropped (defence in depth); `library_name`
+        is read-only and stripped. The persisted, normalised layout is
+        echoed back so the client can rehydrate without a follow-up GET.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/HomeLayout" }
+      responses:
+        "200":
+          description: Persisted layout (normalised)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/HomeLayout" }
+
+  /me/home/trending:
+    get:
+      tags: [home]
+      summary: Top items watched across all users in the trailing 7-day window
+      description: |
+        Scoped to libraries the caller can see. Enriched with poster /
+        backdrop / logo paths (same shape as `/items/latest`) and with
+        overview + genres so trending cards can render the same chips
+        as Continue Watching without a follow-up detail fetch.
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, default: 12, maximum: 30 } }
+      responses:
+        "200":
+          description: Trending items
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: "#/components/schemas/TrendingItem" }
+                      total: { type: integer }
+
+  /me/home/live-now:
+    get:
+      tags: [home, livetv]
+      summary: Up to N live channels with the program currently airing on each
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, default: 5, maximum: 20 } }
+      responses:
+        "200":
+          description: Live-now entries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/LiveNowEntry" }
+
+  # ─── Meta ───────────────────────────────────────────────────────────
+  /openapi.yaml:
+    get:
+      tags: [meta]
+      summary: This OpenAPI 3.0.3 specification (self-description)
+      description: |
+        Served public on purpose — clients fetch the spec before they
+        can authenticate, and the document itself contains no secrets.
+        Backed by `//go:embed`, so the spec ships in the same binary
+        whose surface it describes (no drift from a misconfigured
+        volume mount). `ETag`-aware: re-fetch with `If-None-Match` to
+        get a `304 Not Modified` and skip the body transfer.
+      security: []
+      responses:
+        "200":
+          description: OpenAPI spec
+          headers:
+            ETag: { schema: { type: string } }
+            Cache-Control: { schema: { type: string }, description: "`public, max-age=3600`" }
+          content:
+            application/yaml:
+              schema: { type: string }
+        "304": { description: Not modified (matched If-None-Match) }
+    head:
+      tags: [meta]
+      summary: Spec metadata only (Content-Length + ETag, no body)
+      security: []
+      responses:
+        "200":
+          description: Headers only
+          headers:
+            ETag:           { schema: { type: string } }
+            Content-Length: { schema: { type: integer } }
+            Cache-Control:  { schema: { type: string } }
+
 # ════════════════════════════════════════════════════════════════════════
 components:
   securitySchemes:
@@ -1357,6 +1866,145 @@ components:
         year: { type: integer, nullable: true }
         overview: { type: string }
         poster_url: { type: string, nullable: true, description: "Proxied via origin — never the peer's URL directly" }
+
+    # ─── Live TV ─────────────────────────────────────────────────────
+    Channel:
+      type: object
+      required: [id, name, library_id, health_status]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        number: { type: integer, description: "1-based channel number from the M3U `tvg-chno`; 0 when the upstream omits it" }
+        group: { type: string, description: "Raw M3U `group-title`. Historical alias of `group_name` — prefer the latter" }
+        group_name: { type: string }
+        category:
+          type: string
+          description: |
+            Canonical, UI-stable classification derived from `group_name` via
+            an internal keyword table (sports, news, kids, movies, …).
+            Computed per request so keyword-table changes apply instantly
+            to existing libraries without a rescan.
+        logo_url:
+          type: string
+          description: |
+            Same-origin proxy URL (`/api/v1/channels/{id}/logo`). Empty
+            when the channel has no upstream logo. The endpoint may 404
+            even when this is set; clients should fall back to the
+            initials placeholder on `<img onerror>`.
+        logo_initials: { type: string, description: "Deterministic 1–2 character placeholder. Always populated" }
+        logo_bg: { type: string, description: "Hex/rgb background for the placeholder" }
+        logo_fg: { type: string, description: "Hex/rgb foreground for the placeholder" }
+        stream_url: { type: string, description: "Convenience: ready-to-fetch `/api/v1/channels/{id}/stream`. Omitted on the detail endpoint" }
+        library_id: { type: string, format: uuid }
+        tvg_id: { type: string }
+        language: { type: string }
+        country: { type: string, description: "ISO 3166-1 alpha-2 when known, raw M3U value otherwise" }
+        is_active: { type: boolean }
+        added_at: { type: string, format: date-time }
+        health_status:
+          type: string
+          enum: [ok, degraded, dead]
+          description: |
+            Derived from the channel's consecutive-failures counter.
+            `ok` = healthy or never failed; `degraded` = 1..N-1 recent
+            failures (still surfaced); `dead` = ≥ N failures (the
+            "Sin señal" bucket). N is the server's `UnhealthyThreshold`.
+
+    ChannelDetail:
+      allOf:
+        - $ref: "#/components/schemas/Channel"
+        - type: object
+          properties:
+            now_playing:
+              type: object
+              nullable: true
+              description: "Currently-airing EPG program when one is known"
+              properties:
+                title: { type: string }
+                description: { type: string }
+                category: { type: string }
+                start_time: { type: string, format: date-time }
+                end_time: { type: string, format: date-time }
+
+    EPGProgram:
+      type: object
+      properties:
+        id: { type: string }
+        title: { type: string }
+        description: { type: string }
+        category: { type: string }
+        icon_url: { type: string, nullable: true }
+        start_time: { type: string, format: date-time }
+        end_time: { type: string, format: date-time }
+
+    BulkScheduleResponse:
+      type: object
+      description: |
+        Per-channel program lists keyed by channel id. Channels the
+        caller doesn't have ACL for are silently dropped from the keys
+        rather than 403'ing the whole request.
+      properties:
+        data:
+          type: object
+          additionalProperties:
+            type: array
+            items: { $ref: "#/components/schemas/EPGProgram" }
+
+    # ─── Home ────────────────────────────────────────────────────────
+    HomeLayout:
+      type: object
+      required: [version, sections]
+      properties:
+        version: { type: integer, description: "Document version; bumped when the persisted shape changes" }
+        sections:
+          type: array
+          items: { $ref: "#/components/schemas/HomeSection" }
+
+    HomeSection:
+      type: object
+      required: [id, type, visible]
+      properties:
+        id: { type: string, description: "Stable id for drag-reorder; server synthesises one if the client omits it on PUT" }
+        type:
+          type: string
+          enum: [continue_watching, next_up, trending, live_now, latest_in_library]
+        library_id: { type: string, format: uuid, description: "Set only when `type=latest_in_library`" }
+        library_name: { type: string, description: "Read-only — server resolves from `library_id` on GET, ignored on PUT" }
+        visible: { type: boolean }
+
+    TrendingItem:
+      type: object
+      required: [id, type, title]
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string, enum: [movie, series, episode] }
+        title: { type: string }
+        year: { type: integer, nullable: true }
+        community_rating: { type: number, format: float, nullable: true }
+        library_id: { type: string, format: uuid }
+        play_count: { type: integer, description: "Plays across all users in the 7-day window" }
+        poster_url: { type: string, nullable: true }
+        backdrop_url: { type: string, nullable: true }
+        logo_url: { type: string, nullable: true }
+        poster_blurhash: { type: string, nullable: true }
+        overview: { type: string }
+        genres:
+          type: array
+          items: { type: string }
+
+    LiveNowEntry:
+      type: object
+      required: [channel_id, channel_name, library_id]
+      properties:
+        channel_id: { type: string }
+        channel_name: { type: string }
+        library_id: { type: string, format: uuid }
+        library_name: { type: string }
+        channel_logo: { type: string, nullable: true, description: "Same-origin proxy URL; absent when the channel has no logo" }
+        program_title: { type: string, nullable: true }
+        program_start: { type: string, format: date-time, nullable: true }
+        program_end: { type: string, format: date-time, nullable: true }
+        program_icon: { type: string, nullable: true }
 
 # Apply bearer auth to every operation by default. Endpoints that allow
 # anonymous access opt out via `security: []` (auth flow start, /health,
