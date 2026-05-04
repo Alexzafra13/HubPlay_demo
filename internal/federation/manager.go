@@ -141,7 +141,17 @@ type Manager struct {
 	// JWT validation.
 	streamMu       sync.Mutex
 	streamSessions map[string]*PeerStreamSession
+
+	// sweeper goroutine state. cancel stops the ticker; done is closed
+	// when the goroutine has returned, so Close can wait on it.
+	sweepCancel context.CancelFunc
+	sweepDone   chan struct{}
 }
+
+// streamSweepInterval is how often we scan streamSessions for entries
+// past peerStreamSessionTTL. Comfortably tighter than the TTL itself
+// so a stale session lingers at most ~one interval beyond TTL.
+const streamSweepInterval = time.Minute
 
 // NewManager wires a Manager. Callers must have already invoked
 // LoadOrCreate on this server's identity (typically at startup) so
@@ -173,15 +183,53 @@ func NewManager(ctx context.Context, cfg Config, repo Repo, clk clock.Clock, log
 		m.auditor.Close()
 		return nil, err
 	}
+	m.startStreamSweeper()
 	return m, nil
 }
 
-// Close releases background resources (auditor goroutine). Idempotent.
-// Wired into main.go's graceful shutdown so the audit queue flushes
-// before the process exits.
+// startStreamSweeper launches the background goroutine that periodically
+// reclaims peer stream sessions idle past peerStreamSessionTTL. Without
+// this, RegisterPeerStreamSession would accumulate entries forever for
+// any peer that opened a session and never came back to play it (the
+// JWT expires upstream, but the in-memory mapping does not).
+func (m *Manager) startStreamSweeper() {
+	ctx, cancel := context.WithCancel(context.Background())
+	m.sweepCancel = cancel
+	m.sweepDone = make(chan struct{})
+	go func() {
+		defer close(m.sweepDone)
+		t := time.NewTicker(streamSweepInterval)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				m.SweepStreamSessions()
+			}
+		}
+	}()
+}
+
+// Close releases background resources (audit queue, stream sweeper,
+// idle HTTP connections). Idempotent. Wired into main.go's graceful
+// shutdown so the audit queue flushes and outbound peer sockets are
+// closed before the process exits.
 func (m *Manager) Close() {
 	if m == nil {
 		return
+	}
+	if m.sweepCancel != nil {
+		m.sweepCancel()
+		<-m.sweepDone
+		m.sweepCancel = nil
+	}
+	if m.httpClt != nil {
+		// CloseIdleConnections is best-effort: in-flight requests are
+		// not interrupted (they finish on their own context), but TCP
+		// keepalives held in the transport's idle pool are released
+		// immediately so SIGTERM doesn't wait HTTPTimeout for them.
+		m.httpClt.CloseIdleConnections()
 	}
 	m.auditor.Close()
 }
@@ -218,11 +266,16 @@ func (m *Manager) SetAdvertisedURL(url string) {
 // browse, stream session start, etc.) to authenticate themselves on
 // the remote.
 //
+// Takes the request's ctx so a cancellation upstream (user closed the
+// tab, request deadline tripped) cancels the underlying DB lookup.
+// Without it, a stuck SQLite write would block the request indefinitely
+// even after the caller had walked away.
+//
 // Returns ErrPeerNotFound if `audiencePeerID` isn't a paired peer in
 // our registry, so callers can short-circuit before bothering with
 // the HTTP roundtrip.
-func (m *Manager) IssuePeerToken(audiencePeerID string) (string, error) {
-	peer, err := m.repo.GetPeerByID(context.Background(), audiencePeerID)
+func (m *Manager) IssuePeerToken(ctx context.Context, audiencePeerID string) (string, error) {
+	peer, err := m.repo.GetPeerByID(ctx, audiencePeerID)
 	if err != nil {
 		return "", err
 	}

@@ -131,7 +131,7 @@ func TestHandshakeRoundtrip_TwoLiveServers(t *testing.T) {
 	// end-to-end through real HTTP. IssuePeerToken takes the AUDIENCE
 	// peer's LOCAL id on the issuing server — from B's side, A is
 	// stored as aAsPeerOnB.
-	tok, err := b.mgr.IssuePeerToken(aAsPeerOnB.ID)
+	tok, err := b.mgr.IssuePeerToken(ctx, aAsPeerOnB.ID)
 	if err != nil {
 		t.Fatalf("B issue peer token: %v", err)
 	}
