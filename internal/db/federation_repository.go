@@ -498,7 +498,8 @@ func (r *FederationRepository) SearchSharedItems(ctx context.Context, peerID, qu
 		          WHERE img.item_id = i.id
 		            AND img.type = 'primary'
 		            AND img.is_primary = 1
-		       ) AS has_poster
+		       ) AS has_poster,
+		       i.library_id
 		  FROM items i
 		  JOIN federation_library_shares s ON s.library_id = i.library_id
 		  LEFT JOIN metadata m ON m.item_id = i.id
@@ -519,7 +520,7 @@ func (r *FederationRepository) SearchSharedItems(ctx context.Context, peerID, qu
 	out := []*federation.SharedItem{}
 	for rows.Next() {
 		var it federation.SharedItem
-		if err := rows.Scan(&it.ID, &it.Type, &it.Title, &it.Year, &it.Overview, &it.HasPoster); err != nil {
+		if err := rows.Scan(&it.ID, &it.Type, &it.Title, &it.Year, &it.Overview, &it.HasPoster, &it.LibraryID); err != nil {
 			return nil, fmt.Errorf("scan search result: %w", err)
 		}
 		out = append(out, &it)

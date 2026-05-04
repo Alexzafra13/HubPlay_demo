@@ -215,7 +215,9 @@
     "noResults": "Sin resultados para \"{{query}}\"",
     "resultsFor": "Resultados para \"{{query}}\"",
     "totalCount": "{{count}} elementos",
-    "episodes": "Episodios"
+    "episodes": "Episodios",
+    "peerSection": "De tus pares",
+    "fromPeer": "De {{name}}"
   },
   "personDetail": {
     "notFoundTitle": "Persona no encontrada",

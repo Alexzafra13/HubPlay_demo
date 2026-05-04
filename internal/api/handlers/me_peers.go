@@ -252,13 +252,14 @@ func (h *MePeersHandler) SearchPeers(w http.ResponseWriter, r *http.Request) {
 	out := make([]peerSearchHitWire, 0, len(hits))
 	for _, h := range hits {
 		row := peerSearchHitWire{
-			PeerID:   h.Peer.ID,
-			PeerName: h.Peer.Name,
-			ID:       h.Item.ID,
-			Type:     h.Item.Type,
-			Title:    h.Item.Title,
-			Year:     h.Item.Year,
-			Overview: h.Item.Overview,
+			PeerID:    h.Peer.ID,
+			PeerName:  h.Peer.Name,
+			LibraryID: h.Item.LibraryID,
+			ID:        h.Item.ID,
+			Type:      h.Item.Type,
+			Title:     h.Item.Title,
+			Year:      h.Item.Year,
+			Overview:  h.Item.Overview,
 		}
 		if h.Item.HasPoster {
 			row.PosterURL = "/api/v1/me/peers/" + h.Peer.ID + "/items/" + h.Item.ID + "/poster"

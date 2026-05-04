@@ -215,7 +215,9 @@
     "noResults": "No results for \"{{query}}\"",
     "resultsFor": "Results for \"{{query}}\"",
     "totalCount": "{{count}} items",
-    "episodes": "Episodes"
+    "episodes": "Episodes",
+    "peerSection": "From your peers",
+    "fromPeer": "From {{name}}"
   },
   "personDetail": {
     "notFoundTitle": "Person not found",

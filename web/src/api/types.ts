@@ -122,6 +122,29 @@ export interface PeerStreamSessionResponse {
   peer_session_id: string;
 }
 
+// One row of the federated-search response. Wire shape emitted by
+// GET /api/v1/me/peers/search?q=... after the consumer-side fan-out
+// across every paired peer. The poster_url is already same-origin
+// (proxied through us — see FederationRemoteItem) and library_id is
+// what the UI needs to route a click into
+// /peers/{peer_id}/libraries/{library_id}/items/{id}, the same detail
+// route the per-peer browse path uses.
+export interface FederationSearchHit {
+  peer_id: string;
+  peer_name: string;
+  library_id: string;
+  id: string;
+  type: string;
+  title: string;
+  year?: number;
+  overview?: string;
+  poster_url?: string;
+}
+
+export interface FederationSearchResponse {
+  hits: FederationSearchHit[];
+}
+
 // Unified row: one library × one peer, flattened across all paired
 // peers in our network. Used by the "/peers" landing page so the UI
 // renders a single grid instead of nested peer→library navigation.

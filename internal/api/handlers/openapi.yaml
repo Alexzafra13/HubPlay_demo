@@ -1003,6 +1003,7 @@ paths:
                           properties:
                             peer_id:    { type: string }
                             peer_name:  { type: string }
+                            library_id: { type: string }
                             id:         { type: string }
                             type:       { type: string }
                             title:      { type: string }

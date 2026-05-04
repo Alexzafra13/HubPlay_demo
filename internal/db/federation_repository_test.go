@@ -93,6 +93,9 @@ func TestFederationRepository_SearchSharedItems(t *testing.T) {
 	if hits[0].ID != "i-shared-match" {
 		t.Errorf("expected i-shared-match, got %s", hits[0].ID)
 	}
+	if hits[0].LibraryID != "lib-shared" {
+		t.Errorf("expected library_id=lib-shared on hit, got %q", hits[0].LibraryID)
+	}
 
 	// ── Empty query short-circuits without touching FTS. ─────────
 	empty, err := fedRepo.SearchSharedItems(ctx, "peer-A", "", 10)

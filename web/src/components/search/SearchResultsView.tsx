@@ -1,10 +1,10 @@
 import { useMemo } from "react";
 import { Link } from "react-router";
 import { useTranslation } from "react-i18next";
-import { Film, Tv, ListVideo, Search as SearchIcon, Star, Play } from "lucide-react";
+import { Film, Tv, ListVideo, Search as SearchIcon, Star, Play, Users } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { thumb } from "@/utils/imageUrl";
-import type { MediaItem } from "@/api/types";
+import type { FederationSearchHit, MediaItem } from "@/api/types";
 
 // Shared "grouped search results" rendering used by both the topbar
 // SearchBar drawer and the dedicated /search page. Density is tuned
@@ -32,15 +32,28 @@ interface SearchResultsViewProps {
   perSectionLimit?: number;
   /** Click handler — typically used by the dropdown to dismiss itself. */
   onItemClick?: (item: MediaItem) => void;
+  /**
+   * Hits from federated peers. Rendered as an extra section below
+   * the local groups with a "Shared by …" badge per card. The
+   * dropdown variant typically leaves this undefined and stays
+   * local-only; the dedicated /search page passes both.
+   */
+  peerHits?: FederationSearchHit[];
 }
 
 export function SearchResultsView({
   items,
   perSectionLimit,
   onItemClick,
+  peerHits,
 }: SearchResultsViewProps) {
   const { t } = useTranslation();
   const groups = useMemo(() => groupByType(items), [items]);
+
+  const peerSectionItems =
+    peerHits && peerHits.length > 0 && perSectionLimit != null
+      ? peerHits.slice(0, perSectionLimit)
+      : peerHits ?? [];
 
   return (
     <div className="flex flex-col gap-9">
@@ -61,6 +74,17 @@ export function SearchResultsView({
           />
         );
       })}
+      {peerSectionItems.length > 0 && (
+        <PeerSection
+          label={t("search.peerSection", { defaultValue: "From your peers" })}
+          hits={peerSectionItems}
+          totalCount={peerHits?.length ?? peerSectionItems.length}
+          limited={
+            perSectionLimit != null &&
+            (peerHits?.length ?? 0) > perSectionLimit
+          }
+        />
+      )}
     </div>
   );
 }
@@ -166,6 +190,112 @@ function ResultCard({
             ))}
           </div>
         )}
+      </div>
+    </Link>
+  );
+}
+
+function PeerSection({
+  label,
+  hits,
+  totalCount,
+  limited,
+}: {
+  label: string;
+  hits: FederationSearchHit[];
+  totalCount: number;
+  limited: boolean;
+}) {
+  return (
+    <section>
+      <header className="flex items-center justify-between gap-3 mb-4">
+        <div className="flex items-center gap-2.5">
+          <span className="flex items-center justify-center w-7 h-7 rounded-lg bg-emerald-500/10 ring-1 ring-emerald-500/30">
+            <Users className="h-[15px] w-[15px] text-emerald-400" strokeWidth={1.8} />
+          </span>
+          <h2 className="text-[13px] font-semibold uppercase tracking-[0.12em] text-text-primary">
+            {label}
+          </h2>
+          <span className="text-[12px] text-text-muted">· {totalCount}</span>
+        </div>
+        {limited && (
+          <span className="text-[11px] text-text-muted">
+            mostrando {hits.length}
+          </span>
+        )}
+      </header>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        {hits.map((hit) => (
+          <PeerResultCard key={`${hit.peer_id}:${hit.id}`} hit={hit} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function PeerResultCard({ hit }: { hit: FederationSearchHit }) {
+  const { t } = useTranslation();
+  // poster_url is already same-origin (proxied through /api/v1/me/peers
+  // /{peer_id}/items/{id}/poster), so we can hand it to thumb() the
+  // same way local items do.
+  const poster = hit.poster_url ? thumb(hit.poster_url, 200) : null;
+  // Detail route registered in App.tsx; libraryId is required to drive
+  // the page's per-library context (back link, item lookup).
+  const href = hit.library_id
+    ? `/peers/${hit.peer_id}/libraries/${hit.library_id}/items/${hit.id}`
+    : `/peers/${hit.peer_id}`;
+  const subtitle = t("search.fromPeer", {
+    defaultValue: "From {{name}}",
+    name: hit.peer_name,
+  });
+
+  return (
+    <Link
+      to={href}
+      className="group relative flex items-stretch gap-4 p-3 rounded-2xl border border-border-subtle bg-bg-card/40 hover:bg-bg-card hover:border-border-strong transition-all duration-200 hover:shadow-lg hover:shadow-black/30"
+    >
+      <div className="relative flex-shrink-0 w-[68px] h-[100px] rounded-lg overflow-hidden bg-bg-elevated ring-1 ring-border-subtle/60">
+        {poster ? (
+          <img
+            src={poster}
+            alt=""
+            loading="lazy"
+            className="absolute inset-0 w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-bg-elevated to-bg-card">
+            <span className="text-2xl font-bold text-text-muted">
+              {hit.title.charAt(0).toUpperCase()}
+            </span>
+          </div>
+        )}
+        <span className="absolute inset-0 flex items-center justify-center bg-black/45 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+          <span className="flex items-center justify-center w-9 h-9 rounded-full bg-bg-base/80 backdrop-blur-sm ring-1 ring-white/10">
+            <Play className="h-[14px] w-[14px] text-text-primary fill-current ml-0.5" strokeWidth={0} />
+          </span>
+        </span>
+        <span className="absolute left-1 bottom-1 inline-flex items-center gap-1 rounded-full bg-black/65 px-1.5 py-0.5 text-[9px] font-medium text-white shadow-sm backdrop-blur-sm">
+          <span className="h-1 w-1 rounded-full bg-emerald-400" aria-hidden />
+          <span className="max-w-[80px] truncate">{hit.peer_name}</span>
+        </span>
+      </div>
+
+      <div className="min-w-0 flex-1 flex flex-col justify-center py-0.5">
+        <p className="text-[15px] font-semibold text-text-primary truncate group-hover:text-accent-light transition-colors leading-snug">
+          {hit.title}
+        </p>
+        <p className="mt-1 text-[12.5px] text-text-secondary truncate">
+          {subtitle}
+        </p>
+        <div className="mt-2 flex items-center gap-2 text-[11.5px] text-text-muted">
+          {hit.year != null && hit.year > 0 && <span>{hit.year}</span>}
+          {hit.type && (
+            <>
+              {hit.year != null && hit.year > 0 && <span className="opacity-40">·</span>}
+              <span className="uppercase tracking-wide">{hit.type}</span>
+            </>
+          )}
+        </div>
       </div>
     </Link>
   );

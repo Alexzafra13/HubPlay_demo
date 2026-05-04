@@ -1070,6 +1070,21 @@ export class ApiClient {
     return this.request<void>("POST", `/me/peers/${peerID}/libraries/${libraryID}/refresh`);
   }
 
+  // Federated full-text search — fan-out to every paired peer with a
+  // ~2s per-peer timeout server-side. A peer that errors / times out
+  // is silently skipped: a single misbehaving server cannot blank the
+  // user-visible result page.
+  async searchPeers(
+    q: string,
+    perPeerLimit?: number,
+  ): Promise<import("./types").FederationSearchResponse> {
+    return this.request<import("./types").FederationSearchResponse>(
+      "GET",
+      "/me/peers/search",
+      { params: { q, limit: perPeerLimit } },
+    );
+  }
+
   // startPeerStreamSession asks our origin to broker a stream session
   // on a peer for one of their items. Returns the same-origin master
   // playlist URL the HLS player should load -- never the peer's URL.

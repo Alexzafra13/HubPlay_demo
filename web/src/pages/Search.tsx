@@ -1,6 +1,7 @@
 import { useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { useSearch } from "@/api/hooks";
+import { usePeersSearch } from "@/api/hooks/federation";
 import { Spinner, EmptyState } from "@/components/common";
 import { useDebounce } from "@/hooks/useDebounce";
 import { SearchResultsView, SearchNoResults } from "@/components/search/SearchResultsView";
@@ -9,6 +10,13 @@ import { SearchResultsView, SearchNoResults } from "@/components/search/SearchRe
 // (which is the only typing surface on this page) can drive the
 // results without prop-drilling. Layout/cards live in
 // SearchResultsView so the dropdown and this page stay in sync.
+//
+// Federated search runs alongside the local query. The local hook
+// hits /items/search; usePeersSearch fans out to every paired peer.
+// Both run in parallel — peer results trickle in (~2s ceiling per
+// peer) and join the view as a "From your peers" section without
+// blocking the local rail. Empty / errored peer responses are
+// silently absent: a single misbehaving peer cannot blank the page.
 
 export default function Search() {
   const { t } = useTranslation();
@@ -18,6 +26,19 @@ export default function Search() {
 
   const { data, isFetching } = useSearch(debouncedQuery);
   const items = data ?? [];
+  const peers = usePeersSearch(debouncedQuery);
+  const peerHits = peers.data?.hits ?? [];
+
+  // Total count shown next to the heading reflects everything the
+  // page is rendering — local + peer — so the user gets one honest
+  // number instead of two competing counts.
+  const totalCount = items.length + peerHits.length;
+  const hasAny = items.length > 0 || peerHits.length > 0;
+  // Initial spinner only when nothing is on screen yet; once we have
+  // something to render, late-arriving peer hits join inline without
+  // dropping the local results back into a spinner.
+  const showInitialSpinner =
+    (isFetching || peers.isFetching) && !hasAny;
 
   return (
     <div className="flex flex-col gap-8 px-6 py-8 sm:px-10 max-w-[1400px] mx-auto w-full">
@@ -33,11 +54,11 @@ export default function Search() {
               })
             : t("search.title")}
         </h1>
-        {debouncedQuery && items.length > 0 && !isFetching && (
+        {debouncedQuery && hasAny && !showInitialSpinner && (
           <span className="text-[13px] text-text-muted">
             {t("search.totalCount", {
               defaultValue: "{{count}} elementos",
-              count: items.length,
+              count: totalCount,
             })}
           </span>
         )}
@@ -54,14 +75,14 @@ export default function Search() {
             </svg>
           }
         />
-      ) : isFetching && items.length === 0 ? (
+      ) : showInitialSpinner ? (
         <div className="flex items-center justify-center py-24">
           <Spinner size="md" />
         </div>
-      ) : items.length === 0 ? (
+      ) : !hasAny ? (
         <SearchNoResults query={debouncedQuery} />
       ) : (
-        <SearchResultsView items={items} />
+        <SearchResultsView items={items} peerHits={peerHits} />
       )}
     </div>
   );

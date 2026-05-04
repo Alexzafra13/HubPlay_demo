@@ -14,6 +14,7 @@ import type {
   FederationPeer,
   FederationRemoteItemsResponse,
   FederationRemoteLibrary,
+  FederationSearchResponse,
   FederationServerInfo,
   FederationUnifiedLibrary,
 } from "../types";
@@ -175,6 +176,27 @@ export function usePeerItems(peerID: string, libraryID: string, offset = 0, limi
     queryKey: queryKeys.myPeerItems(peerID, libraryID, offset),
     queryFn: () => api.browsePeerItems(peerID, libraryID, { offset, limit }),
     enabled: Boolean(peerID && libraryID),
+  });
+}
+
+// usePeersSearch — federated full-text search across every paired
+// peer. Runs in parallel with the local /items/search query so the
+// page renders local hits immediately and merges peer hits as they
+// arrive. The backend caps per-peer wait at ~2s and silently skips
+// peers that error / time out, so this query is much closer to "best
+// effort" than the local search and may legitimately return zero
+// hits with status=success when no peer answered in time.
+export function usePeersSearch(
+  q: string,
+  enabled = true,
+) {
+  return useQuery<FederationSearchResponse>({
+    queryKey: queryKeys.myPeersSearch(q),
+    queryFn: () => api.searchPeers(q),
+    // Trigger only when the user actually typed something. The Search
+    // page already debounces and trims the query before passing it
+    // in, so any non-empty string here is one we want to send.
+    enabled: enabled && q.length > 0,
   });
 }
 

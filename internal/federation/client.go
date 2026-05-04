@@ -55,6 +55,7 @@ type remoteSharedItem struct {
 	Year      int    `json:"year,omitempty"`
 	Overview  string `json:"overview,omitempty"`
 	HasPoster bool   `json:"has_poster,omitempty"`
+	LibraryID string `json:"library_id,omitempty"`
 }
 
 type remoteItemsResponse struct {
@@ -168,6 +169,7 @@ func (m *Manager) FetchPeerItems(ctx context.Context, peerID, libraryID string, 
 			Year:      w.Year,
 			Overview:  w.Overview,
 			HasPoster: w.HasPoster,
+			LibraryID: w.LibraryID,
 		})
 	}
 	return out, wire.Total, nil
@@ -217,6 +219,7 @@ func (m *Manager) FetchPeerSearch(ctx context.Context, peerID, query string, lim
 			Year:      w.Year,
 			Overview:  w.Overview,
 			HasPoster: w.HasPoster,
+			LibraryID: w.LibraryID,
 		})
 	}
 	return out, nil

@@ -72,6 +72,11 @@ type SharedItem struct {
 	Year      int    `json:"year,omitempty"`
 	Overview  string `json:"overview,omitempty"`
 	HasPoster bool   `json:"has_poster,omitempty"`
+	// LibraryID is populated only by SearchSharedItems — the per-library
+	// browse path already knows the library from the URL, so the field
+	// stays empty there. The federated-search consumer needs it to
+	// route a click through to /peers/{peerID}/libraries/{libID}/items/{id}.
+	LibraryID string `json:"library_id,omitempty"`
 }
 
 // CachedItem extends SharedItem with the peer + library it belongs

@@ -59,6 +59,7 @@ export const queryKeys = {
   myPeerLibraries: (peerID: string) => ["me", "peers", peerID, "libraries"] as const,
   myPeerItems: (peerID: string, libraryID: string, offset: number) =>
     ["me", "peers", peerID, "libraries", libraryID, "items", offset] as const,
+  myPeersSearch: (q: string) => ["me", "peers", "search", q] as const,
   health: ["health"] as const,
   homeLayout: ["home", "layout"] as const,
   homeTrending: ["home", "trending"] as const,
