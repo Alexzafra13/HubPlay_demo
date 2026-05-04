@@ -202,9 +202,12 @@ func NewRouter(deps Dependencies) http.Handler {
 				// session UUID. Both ACL gated by share.CanPlay --
 				// session UUID alone is NOT sufficient.
 				if deps.StreamManager != nil && deps.Items != nil {
-					var fedStreamSvc handlers.StreamManagerService
-					fedStreamSvc = deps.StreamManager
-					fedStream := handlers.NewFederationStreamHandler(deps.Federation, fedStreamSvc, deps.Items, deps.Logger)
+					// We're already inside the deps.StreamManager != nil branch
+					// so the concrete-to-interface conversion is unconditional;
+					// the helper below takes the StreamManagerService interface
+					// directly without the var/assign dance the health handler
+					// uses (where the value can stay nil).
+					fedStream := handlers.NewFederationStreamHandler(deps.Federation, deps.StreamManager, deps.Items, deps.Logger)
 					r.Post("/peer/stream/{itemId}/session", fedStream.StartSession)
 					r.Get("/peer/stream/session/{sessionId}/master.m3u8", fedStream.MasterPlaylist)
 					r.Get("/peer/stream/session/{sessionId}/{quality}/index.m3u8", fedStream.QualityPlaylist)

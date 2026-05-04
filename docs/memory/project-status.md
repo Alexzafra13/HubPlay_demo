@@ -1,5 +1,7 @@
 # Estado del proyecto
 
+> 🎬 **Sesión 2026-05-04 (rama `claude/prepare-tv-app-fb0cj`)** — 4 commits sobre main. Plan: dejar el proyecto pulido antes del Kotlin TV nativo, foco en cerrar features visibles medio-hechas. **Federación Phase 5 backend cerrado** (slice 1 de 2; falta frontend). **sqlc desbloqueado para siempre** (era la mina del repo). **OpenAPI ampliado a Live TV + Home + meta** (24 paths nuevos al spec con drift test en CI).
+
 > ✅ **sqlc desbloqueado para siempre** (sesión 2026-05-04). `make sqlc` regenera limpio con la versión pineada (1.31.1); `make sqlc-verify` falla CI si el árbol commiteado deriva. Drift test en `internal/db/sqlc_drift_test.go`. Los bugs del parser que motivaron el lockdown están documentados en `conventions.md` con patrones SQL a evitar.
 
 > Snapshot: **2026-04-30 mañana (continuada) — rama `claude/openapi-spec` con OpenAPI 3.0.3 spec embed-y-servida**. 1 commit sobre `main`. Cierra el último item P1 pre-Kotlin TV. **Cola P0+P1 vacía**: todos los prerequisitos para empezar la app Kotlin Android TV están completos.
@@ -10,7 +12,118 @@
 >
 > **tests al cierre: backend verde salvo `internal/config` preflight (env-only, ffmpeg no en PATH local; CI verde) · frontend 364/364 · tsc clean**.
 
-**Rama `claude/openapi-spec` (sesión actual, 1 commit sobre main)**:
+## 🎬 Sesión 2026-05-04 (rama `claude/prepare-tv-app-fb0cj`) — 4 commits
+
+> **HANDOFF — leer al inicio de la siguiente sesión.** Resumen completo de qué se hizo, qué se decidió, y qué toca después.
+
+### Contexto al arranque
+
+El usuario dijo que NO va a empezar la app Kotlin Android TV todavía. La conversación derivó hacia "deja el HubPlay web pulido antes". Bajaron de la cola: D-pad navigation, Chromecast, app nativa Kotlin (las tres deferred). Subieron: cerrar deuda real (sqlc), cerrar features medio-hechas (federación Phase 5).
+
+**Pregunta que el usuario respondió en sesión**:
+- Federación: SÍ tiene peers reales en mente, sigue en cola.
+- Multi-versión 4K+1080p: NO ripéa en múltiples calidades, baja a P3.
+- Confirmó "como Plex" para la UX de federación (item content mezclado en el sidebar, no aparte).
+
+### Commits sobre main
+
+1. `4a9c8ca` `api(openapi): close the spec for Kotlin TV — Live TV + Home + drift test`
+   - 24 paths nuevos en `internal/api/handlers/openapi.yaml` (Live TV consumer, Home rails, /openapi.yaml self).
+   - 8 schemas nuevos: Channel, ChannelDetail, EPGProgram, BulkScheduleResponse, HomeLayout, HomeSection, TrendingItem, LiveNowEntry.
+   - **Drift test AST-based** en `internal/api/openapi_drift_test.go`: parsea `router.go`, exige que cada ruta esté documentada o en allowlist explícito. Inverso también (no documentación muerta).
+   - 65 paths en spec total (antes 50).
+
+2. `153e4de` `db(sqlc): lock down make sqlc until proper migration session`
+   - Decisión inicial conservadora (rollback en commit 3): puse un guard en el Makefile para rechazar `make sqlc` con un mensaje claro. Documenté los bugs.
+   - Era una solución pragmática mientras el usuario decidía. Le ofrecí "ahora candado / luego cirugía" y pidió "robusto para siempre".
+
+3. `dc80538` `db(sqlc): unlock regen for good — full migration + drift test in CI` ⭐
+   - Ejecución completa del playbook de 6 pasos. **Esto es ahora la fuente de verdad para sqlc**.
+   - **Bug raíz descubierto**: chars no-ASCII en comentarios SQL (em-dashes, acentos, backticks, comillas tipográficas) desplazan la cuenta de bytes UTF-8 del parser de sqlc. A partir de ahí, queries posteriores salen truncadas en los últimos 1-2 caracteres. Confirmado en sqlc 1.27, 1.29 y 1.31.
+   - **Bug raíz #2**: `?` placeholders dentro de `NOT (...)` no se detectan; el campo desaparece del Params struct y `QueryContext` queda con un `?` colgando. Workaround: DeMorgan. `sqlc.arg()` NO rescata el caso (sqlc 1.31 lo deja como literal en el SQL).
+   - **Aplicado**: em-dashes/acentos → ASCII en `chapters.sql`, `people.sql`, `user_data.sql`, `channel_watch_history.sql`. ContinueWatching reescrita con DeMorgan + `IS NOT NULL` guard para preservar three-valued semantics.
+   - **Type drift propagado** en repos: `image_repository.go` (IsLocked: NullBool → bool), `people_repository.go` (nullableString/Int64 wrappers), `user_data_repository.go` (rename `AbandonedThreshold` → `LastPlayedAt` por sqlc auto-naming, `SeriesID` → `ParentID`).
+   - **Makefile**: `SQLC_VERSION=v1.31.1` pineado, target `sqlc-install` idempotente, `sqlc-verify` para CI.
+   - **Drift test Go**: `internal/db/sqlc_drift_test.go` regen-against-scratch, falla en CI si el árbol commiteado deriva. Skipea si sqlc no está en PATH (dev local sin tool no se bloquea).
+   - **conventions.md**: sección "Regeneración sqlc" reescrita con los bugs documentados + patrones a evitar.
+   - El proyecto-status.md previo tenía la versión INVERTIDA ("1.29 es la rota"). Corregido.
+
+4. `bbafd56` `federation(phase-5): remote streaming backend (slice 1 of 2)` ⭐
+   - **Cierra el medio-hecho más visible de la federación**. Antes: ves catálogo del peer, le das play, 404. Ahora: backend round-trip funcional.
+   - **Origin side (peer B, server-to-server)**:
+     - `POST /api/v1/peer/stream/{itemId}/session` (peer JWT): valida share.CanPlay, spawn stream.Manager session con userID = `peer:{peerID}`, registra UUID → (peer, item, profile) en memoria, devuelve session_id + master_path + method.
+     - `GET /api/v1/peer/stream/session/{sid}/master.m3u8` con HLS de variantes relativas (`1080p/index.m3u8`).
+     - `GET /api/v1/peer/stream/session/{sid}/{quality}/index.m3u8` (transcode manifest).
+     - `GET /api/v1/peer/stream/session/{sid}/{quality}/{segment}` (.ts segments).
+     - **ACL doble**: cada request re-verifica `peer.ID == session.PeerID` para que un peer no pueda enumerar UUIDs de otros peers.
+   - **Consumer side (peer A, user-facing proxy)**:
+     - `POST /api/v1/me/peers/{peerID}/stream/{itemId}/session` (user session): forwarda caps del header `X-Hubplay-Client-Capabilities` al peer; devuelve URL same-origin.
+     - `GET /api/v1/me/peers/{peerID}/stream/session/{sid}/master.m3u8|{quality}/index.m3u8|{quality}/{segment}`: proxy transparente con peer JWT (server-side only).
+     - El user's HLS player solo habla con tu origin; el peer nunca ve su IP.
+     - URLs relativas en el manifest → cero rewriting necesario.
+   - **Sin tablas DB nuevas**. Sesiones en memoria con TTL 5min idle. `federation_progress` es slice 2.
+   - **Reuso del stream.Manager** (no se duplica infra). Sesiones federation compiten con locales por el `MaxReencodeSessions` cap — intencional v1, cap por peer es slice 2.
+   - **Tests**:
+     - `internal/federation/client_stream_test.go`: round-trip wire con httptest.Server canned. Verifica POST + auth header + JSON body shape + decode.
+     - Drift test catch los 4 paths user-facing nuevos → documentados en openapi.yaml; los 4 server-to-server al allowlist.
+   - **OpenAPI**: 5 operations añadidas bajo tags `[federation, stream]`.
+
+### Estado al cierre
+
+- 4 commits limpios en `claude/prepare-tv-app-fb0cj`, pusheados a origin.
+- `go test -count=1 ./...` → **todo verde**.
+- tsc / frontend: NO tocado esta sesión, sigue como estaba (364/364 al cierre previo).
+- Working tree limpio.
+
+### Decisión clave de UX que QUEDÓ TOMADA pero NO IMPLEMENTADA: federación al estilo Plex
+
+El usuario preguntó cómo lo hace Plex y dijo "me gusta como Plex entonces". Implicaciones:
+
+- **El servidor del peer aparece en el sidebar como una biblioteca más tuya**, con badge sutil de origen.
+- **`/movies` y `/series` siguen siendo locales** (no se mezcla — confunde sin filtros).
+- **El peer library tiene su propia entrada nav** (ej. "Movies · Pedro" debajo de las locales), y al click va al MISMO componente de detalle de biblioteca con un badge en el header.
+- **Search global** hace fan-out a todos los peers paired con timeout corto y muestra resultados mezclados con badge de origen.
+- **Home rails**: nada especial, el badge en la card cubre la atribución de origen.
+
+### 🎯 Slice 2 (siguiente sesión) — frontend Plex-style
+
+**Slice 2.1 (esta sería la próxima sesión, ~2-3h)**: fundación visible.
+- **Sidebar**: añadir sección "Servidores conectados" / "Peer Servers" después de MAIN. Cada peer's libraries aparecen como nav rows. Hook `useAllPeerLibraries` ya existe. Click → `/peers/{peerID}/libraries/{libraryID}` (ruta ya registrada en App.tsx).
+- **PeerLibraryItemsPage** (existe en `/web/src/pages/PeerLibraryItemsPage.tsx`, 198 LOC): reemplazar el `ItemCard` custom por **el mismo `PosterCard` que usan Movies/Series**. Usar `MediaGrid`. Añadir badge de origen del peer.
+- **Adaptador `FederationRemoteItem` → `MediaItem`**: posters siguen sin proxiar (eso es slice 2.2 backend). Por ahora placeholder con dominant color del título (función `getInitialsColor` o similar).
+- **i18n**: claves nuevas en `web/src/i18n/locales/en.json` y `es.json` para "nav.peerServers", "peer.sharedBy", etc. Las que ya hay están bajo `peers.*`, mantenlas.
+
+**Slice 2.2 (otra sesión)**: cerrar el círculo.
+- **Backend**: extender `FederationRemoteItem` JSON para incluir `poster_url` (proxiado a `/api/v1/me/peers/{peerID}/items/{itemId}/poster`). Otra ruta nueva al openapi.yaml + drift test.
+- **Frontend**: ItemDetail page para items federados (puede ser una variante de `pages/ItemDetail.tsx`). Botón Play → llama `POST /me/peers/{peerID}/stream/{itemId}/session`, mete el `master_playlist_url` devuelto en el reproductor HLS existente.
+- **Test smoke manual**: docker-compose con dos servers paireados → reproducir end-to-end.
+
+**Slice 2.3 (otra sesión, opcional pero alto valor)**:
+- **Federated search**: extender `/items/search` o crear `/me/peers/search` con fan-out paralelo (timeout 1-2s). Página Search reusa los results con badges. ~1 día.
+- **Home rail "Más en tus servidores conectados"**: nueva tarjeta en el Home con items recientes de peers. Backend: endpoint `/me/home/peer-latest`. ~½ día.
+
+**Slice 2.4 (cuando aparezcan casos reales)**: polish.
+- Filtros origin chip en lists ("Local · Pedro · Maria").
+- Cap por peer (MaxConcurrentStreams).
+- federation_progress table (cross-peer watch state).
+- Subtítulos federados.
+
+### Lo que NO está hecho aún (para que la próxima sesión sepa)
+
+- **El usuario nunca ha probado el botón Play de federación end-to-end** porque no hay frontend wirado todavía (eso es slice 2.2). El backend tiene tests del wire, pero el smoke manual con dos servers reales está pendiente.
+- **Tests frontend** siguen como estaban (~15% cobertura). No abordados esta sesión.
+- **Seguridad de share.CanPlay**: el handler verifica el flag, pero NO hay test de "peer sin can_play recibe 404 al intentar abrir sesión". Test pendiente.
+
+### Deuda explícitamente NO abordada esta sesión
+
+- `federation_repository.go` (750 LOC raw SQL violando ADR-001) sigue diferida — pero ya **NO está bloqueada por sqlc** (era el bloqueo declarado en el snapshot previo). Lo bloquea solo el trabajo manual.
+- Bcrypt cost 12 → 13 (auditoría 2026-04-28).
+
+---
+
+## 📜 Sesiones previas
+
+**Rama `claude/openapi-spec` (mergeada a main vía PR #125)**:
 - `[pending-hash]` api(openapi): hand-written 3.0.3 spec embed-y-servida en `/api/v1/openapi.yaml`. Cubre auth + browse + stream + me + federation user surface (consumer-facing); admin/setup/peer-to-peer fuera de v1 deliberadamente.
 
 **Rama `claude/federation-hardening` (mergeada a main vía PR #124)**:
@@ -657,8 +770,8 @@ Authority chain: `app_settings` row → YAML default → effective. Sin Runtime 
 
 ### Próximos hitos candidatos (no en este sprint)
 
-- **App nativa Kotlin para Android TV** sigue siendo el gran post-merge.
-- Virtualización de `EPGGrid` con `@tanstack/react-virtual` (deuda agendada conscientemente).
+- **App nativa Kotlin para Android TV** sigue siendo el gran post-merge — pero el usuario confirmó en 2026-05-04 que **NO va a empezarla todavía**; primero quiere dejar el HubPlay web pulido.
+- ~~Virtualización de `EPGGrid` con `@tanstack/react-virtual`~~ ✅ **shipped** (`d2f5216` ui(livetv): virtualize EPG grid above 50 channels).
 - Single-flight EPG fetches (deferida; lock per-library cubre el caso común).
 - Cuarto setting runtime cuando aparezca un caso real — añadir es trivial (whitelist + i18n).
 
@@ -845,9 +958,15 @@ Trabajo que **sube en la cola** porque la app TV lo necesita:
     en DB; falta UI admin (drag-to-reorder).
 
 13. **Federación Phases 5-7** (~5-8 días total) — el resto del roadmap
-    de federación. Phase 5 (remote streaming + watch state, blocked en
-    arreglar bugs P0), Phase 6 (Live TV peering), Phase 7 (download to
-    local + audit log UI).
+    de federación.
+    - **Phase 5 — slice 1 (backend remote streaming) ✅ shipped 2026-05-04** (`bbafd56`).
+      `POST /peer/stream/{itemId}/session` + HLS proxy round-trip funcionan;
+      `client_stream_test.go` cubre el wire format.
+    - **Phase 5 — slice 2 (frontend Plex-style + per-peer caps + federation_progress)**
+      pendiente. Plan detallado en el bloque "Sesión 2026-05-04 → Slice 2"
+      al inicio de este doc.
+    - **Phase 6 — Live TV peering**: pendiente.
+    - **Phase 7 — Download to local + audit log UI**: pendiente.
 
 ### **P3 · Diferenciadores estratégicos** (semanas, no días)
 
