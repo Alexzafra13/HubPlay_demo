@@ -165,6 +165,17 @@ type FederationPeer struct {
 	RevokedAt          sql.NullTime  `json:"revoked_at"`
 }
 
+type FederationProgress struct {
+	UserID        string    `json:"user_id"`
+	PeerID        string    `json:"peer_id"`
+	RemoteItemID  string    `json:"remote_item_id"`
+	PositionTicks int64     `json:"position_ticks"`
+	DurationTicks int64     `json:"duration_ticks"`
+	Completed     bool      `json:"completed"`
+	LastPlayedAt  time.Time `json:"last_played_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
 type FederationRateLimitState struct {
 	PeerID               string    `json:"peer_id"`
 	Tokens               float64   `json:"tokens"`

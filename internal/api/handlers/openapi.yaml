@@ -1052,6 +1052,101 @@ paths:
                             overview:   { type: string }
                             poster_url: { type: string }
 
+  /me/peers/continue-watching:
+    parameters:
+      - { name: limit, in: query, required: false, schema: { type: integer, default: 20, maximum: 100 } }
+    get:
+      tags: [federation]
+      summary: Cross-peer Continue Watching rail
+      description: |
+        Returns the user's in-progress federated items, ordered by
+        most-recently-played. Backed by the local
+        `federation_progress` table (see migration 028) joined with
+        the catalog cache, so this is a single local query -- no
+        peer fan-out. Filters mirror the local Continue Watching
+        rail: completed=false, position>0, less than 90% played
+        (when duration is known), and the owning peer is still
+        paired.
+      responses:
+        "200":
+          description: Cross-peer in-progress items
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:             { type: string, description: "Remote item id on the peer" }
+                        peer_id:        { type: string }
+                        peer_name:      { type: string }
+                        library_id:     { type: string }
+                        type:           { type: string }
+                        title:          { type: string }
+                        year:           { type: integer }
+                        overview:       { type: string }
+                        poster_url:     { type: string }
+                        position_ticks: { type: integer, format: int64 }
+                        duration_ticks: { type: integer, format: int64 }
+                        percentage:     { type: number, format: double }
+                        last_played_at: { type: string, format: date-time }
+
+  /me/peers/{peerID}/items/{itemId}/progress:
+    parameters:
+      - { name: peerID, in: path, required: true, schema: { type: string } }
+      - { name: itemId, in: path, required: true, schema: { type: string }, description: "Remote item id on the peer" }
+    get:
+      tags: [federation]
+      summary: Read playback state for one federated item
+      description: |
+        Returns the user's stored position for `(peerID, itemId)`.
+        Returns the all-zero default when nothing has been recorded
+        yet -- the player treats that as "start from 0" without
+        special-casing 404.
+      responses:
+        "200":
+          description: Stored position (zero-valued when absent)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      item_id:        { type: string }
+                      peer_id:        { type: string }
+                      position_ticks: { type: integer, format: int64 }
+                      duration_ticks: { type: integer, format: int64 }
+                      completed:      { type: boolean }
+                      last_played_at: { type: string, format: date-time }
+    post:
+      tags: [federation]
+      summary: Update playback state for one federated item
+      description: |
+        Upserts the user's position for `(peerID, itemId)` into
+        `federation_progress`. `duration_ticks` is optional on the
+        first save (the player learns it from the manifest after a
+        few segments); the upsert preserves a previously-stored
+        non-zero duration when 0 is passed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [position_ticks]
+              properties:
+                position_ticks: { type: integer, format: int64 }
+                duration_ticks: { type: integer, format: int64 }
+                completed:      { type: boolean }
+      responses:
+        "204":
+          description: Progress saved
+
   /me/peers/{peerID}/libraries:
     parameters:
       - { name: peerID, in: path, required: true, schema: { type: string } }

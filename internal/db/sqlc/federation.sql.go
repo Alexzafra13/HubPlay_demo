@@ -73,6 +73,22 @@ func (q *Queries) DeleteCachedItemsForLibrary(ctx context.Context, arg DeleteCac
 	return err
 }
 
+const deleteFederationProgress = `-- name: DeleteFederationProgress :exec
+DELETE FROM federation_progress
+WHERE user_id = ? AND peer_id = ? AND remote_item_id = ?
+`
+
+type DeleteFederationProgressParams struct {
+	UserID       string `json:"user_id"`
+	PeerID       string `json:"peer_id"`
+	RemoteItemID string `json:"remote_item_id"`
+}
+
+func (q *Queries) DeleteFederationProgress(ctx context.Context, arg DeleteFederationProgressParams) error {
+	_, err := q.db.ExecContext(ctx, deleteFederationProgress, arg.UserID, arg.PeerID, arg.RemoteItemID)
+	return err
+}
+
 const deleteLibraryShare = `-- name: DeleteLibraryShare :exec
 DELETE FROM federation_library_shares
 WHERE peer_id = ? AND id = ?
@@ -86,6 +102,35 @@ type DeleteLibraryShareParams struct {
 func (q *Queries) DeleteLibraryShare(ctx context.Context, arg DeleteLibraryShareParams) error {
 	_, err := q.db.ExecContext(ctx, deleteLibraryShare, arg.PeerID, arg.ID)
 	return err
+}
+
+const getFederationProgress = `-- name: GetFederationProgress :one
+SELECT user_id, peer_id, remote_item_id, position_ticks, duration_ticks,
+       completed, last_played_at, updated_at
+FROM federation_progress
+WHERE user_id = ? AND peer_id = ? AND remote_item_id = ?
+`
+
+type GetFederationProgressParams struct {
+	UserID       string `json:"user_id"`
+	PeerID       string `json:"peer_id"`
+	RemoteItemID string `json:"remote_item_id"`
+}
+
+func (q *Queries) GetFederationProgress(ctx context.Context, arg GetFederationProgressParams) (FederationProgress, error) {
+	row := q.db.QueryRowContext(ctx, getFederationProgress, arg.UserID, arg.PeerID, arg.RemoteItemID)
+	var i FederationProgress
+	err := row.Scan(
+		&i.UserID,
+		&i.PeerID,
+		&i.RemoteItemID,
+		&i.PositionTicks,
+		&i.DurationTicks,
+		&i.Completed,
+		&i.LastPlayedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const getInviteByCode = `-- name: GetInviteByCode :one
@@ -562,6 +607,96 @@ func (q *Queries) ListFederationAuditEntries(ctx context.Context, arg ListFedera
 	return items, nil
 }
 
+const listFederationContinueWatching = `-- name: ListFederationContinueWatching :many
+SELECT fp.peer_id, fp.remote_item_id, fp.position_ticks,
+       fp.duration_ticks, fp.last_played_at,
+       c.library_id, c.type, c.title,
+       COALESCE(c.year, 0) AS year,
+       COALESCE(c.overview, '') AS overview,
+       c.has_poster,
+       p.name AS peer_name
+FROM federation_progress fp
+JOIN federation_item_cache c
+  ON c.peer_id = fp.peer_id AND c.remote_id = fp.remote_item_id
+JOIN federation_peers p
+  ON p.id = fp.peer_id
+WHERE fp.user_id = ?
+  AND fp.completed = 0
+  AND fp.position_ticks > 0
+  AND p.status = 'paired'
+  AND NOT (
+    fp.duration_ticks > 0
+    AND fp.position_ticks * 100 >= fp.duration_ticks * 90
+  )
+ORDER BY fp.last_played_at DESC
+LIMIT ?
+`
+
+type ListFederationContinueWatchingParams struct {
+	UserID string `json:"user_id"`
+	Limit  int64  `json:"limit"`
+}
+
+type ListFederationContinueWatchingRow struct {
+	PeerID        string    `json:"peer_id"`
+	RemoteItemID  string    `json:"remote_item_id"`
+	PositionTicks int64     `json:"position_ticks"`
+	DurationTicks int64     `json:"duration_ticks"`
+	LastPlayedAt  time.Time `json:"last_played_at"`
+	LibraryID     string    `json:"library_id"`
+	Type          string    `json:"type"`
+	Title         string    `json:"title"`
+	Year          int64     `json:"year"`
+	Overview      string    `json:"overview"`
+	HasPoster     bool      `json:"has_poster"`
+	PeerName      string    `json:"peer_name"`
+}
+
+// Cross-peer Continue Watching rail. Only rows that look genuinely
+// "in progress" are returned: not completed, position > 0, and (when
+// duration is known) less than 90 percent played -- mirrors the local
+// ContinueWatching filter so peer rows behave the same way the user
+// already expects from local rows. Joins the catalog cache for
+// title / poster availability so the rail can render without a
+// per-row hop. Rows whose cache entry has been evicted (peer
+// catalog refreshed against newer state) are dropped from the rail
+// rather than rendered title-less.
+func (q *Queries) ListFederationContinueWatching(ctx context.Context, arg ListFederationContinueWatchingParams) ([]ListFederationContinueWatchingRow, error) {
+	rows, err := q.db.QueryContext(ctx, listFederationContinueWatching, arg.UserID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListFederationContinueWatchingRow{}
+	for rows.Next() {
+		var i ListFederationContinueWatchingRow
+		if err := rows.Scan(
+			&i.PeerID,
+			&i.RemoteItemID,
+			&i.PositionTicks,
+			&i.DurationTicks,
+			&i.LastPlayedAt,
+			&i.LibraryID,
+			&i.Type,
+			&i.Title,
+			&i.Year,
+			&i.Overview,
+			&i.HasPoster,
+			&i.PeerName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPeers = `-- name: ListPeers :many
 SELECT id, server_uuid, name, base_url, public_key, status,
        created_at, paired_at, last_seen_at, last_seen_status_code, revoked_at
@@ -929,6 +1064,55 @@ func (q *Queries) UpdatePeerRevoked(ctx context.Context, arg UpdatePeerRevokedPa
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const upsertFederationProgress = `-- name: UpsertFederationProgress :exec
+
+INSERT INTO federation_progress
+    (user_id, peer_id, remote_item_id, position_ticks, duration_ticks,
+     completed, last_played_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(user_id, peer_id, remote_item_id) DO UPDATE SET
+    position_ticks = excluded.position_ticks,
+    -- Only overwrite duration when the caller actually knows it.
+    -- The player learns duration from the manifest after a few
+    -- segments; the first save typically arrives before that, so
+    -- the first row may be inserted with duration_ticks = 0 and
+    -- later upserts replace it with the real value.
+    duration_ticks = CASE WHEN excluded.duration_ticks > 0
+                          THEN excluded.duration_ticks
+                          ELSE federation_progress.duration_ticks END,
+    completed = excluded.completed,
+    last_played_at = excluded.last_played_at,
+    updated_at = excluded.updated_at
+`
+
+type UpsertFederationProgressParams struct {
+	UserID        string    `json:"user_id"`
+	PeerID        string    `json:"peer_id"`
+	RemoteItemID  string    `json:"remote_item_id"`
+	PositionTicks int64     `json:"position_ticks"`
+	DurationTicks int64     `json:"duration_ticks"`
+	Completed     bool      `json:"completed"`
+	LastPlayedAt  time.Time `json:"last_played_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+// ============================================================
+// federation_progress (028) -- cross-peer Continue Watching
+// ============================================================
+func (q *Queries) UpsertFederationProgress(ctx context.Context, arg UpsertFederationProgressParams) error {
+	_, err := q.db.ExecContext(ctx, upsertFederationProgress,
+		arg.UserID,
+		arg.PeerID,
+		arg.RemoteItemID,
+		arg.PositionTicks,
+		arg.DurationTicks,
+		arg.Completed,
+		arg.LastPlayedAt,
+		arg.UpdatedAt,
+	)
+	return err
 }
 
 const upsertLibraryShare = `-- name: UpsertLibraryShare :exec

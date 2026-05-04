@@ -341,6 +341,10 @@ func NewRouter(deps Dependencies) http.Handler {
 						// Same fan-out posture as /search (per-peer
 						// timeout, errors-skip, per-peer fairness cap).
 						r.Get("/recent", mePeers.RecentPeers)
+						// Cross-peer Continue Watching: reads
+						// federation_progress JOIN federation_item_cache
+						// locally, no peer fan-out (state is ours).
+						r.Get("/continue-watching", mePeers.PeerContinueWatching)
 						r.Get("/{peerID}/libraries", mePeers.BrowsePeerLibraries)
 						r.Get("/{peerID}/libraries/{libraryID}/items", mePeers.BrowsePeerItems)
 						r.Post("/{peerID}/libraries/{libraryID}/refresh", mePeers.RefreshPeerLibrary)
@@ -356,6 +360,12 @@ func NewRouter(deps Dependencies) http.Handler {
 						r.Get("/{peerID}/stream/session/{sessionId}/master.m3u8", mePeers.ProxyPeerStreamMaster)
 						r.Get("/{peerID}/stream/session/{sessionId}/{quality}/index.m3u8", mePeers.ProxyPeerStreamQuality)
 						r.Get("/{peerID}/stream/session/{sessionId}/{quality}/{segment}", mePeers.ProxyPeerStreamSegment)
+						// Cross-peer playback state for a single item.
+						// Same shape as /me/items/{id}/progress but
+						// scoped to (peer, remote_item_id) and backed
+						// by federation_progress (migration 028).
+						r.Get("/{peerID}/items/{itemId}/progress", mePeers.GetPeerItemProgress)
+						r.Post("/{peerID}/items/{itemId}/progress", mePeers.UpdatePeerItemProgress)
 					})
 				}
 

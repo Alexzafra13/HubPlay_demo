@@ -1114,6 +1114,35 @@ export class ApiClient {
     });
   }
 
+  // Cross-peer playback state (federation_progress, migration 028).
+  // Same role as the local /me/progress/{itemId} pair, but routed to
+  // federation_progress instead of user_data because federated items
+  // never live in the local items table.
+  async getPeerItemProgress(
+    peerID: string,
+    itemID: string,
+  ): Promise<import("./types").PeerItemProgress> {
+    return this.request("GET", `/me/peers/${peerID}/items/${itemID}/progress`);
+  }
+  async updatePeerItemProgress(
+    peerID: string,
+    itemID: string,
+    data: { position_ticks: number; duration_ticks?: number; completed?: boolean },
+    options: { keepalive?: boolean } = {},
+  ): Promise<void> {
+    await this.request("POST", `/me/peers/${peerID}/items/${itemID}/progress`, {
+      body: data,
+      keepalive: options.keepalive,
+    });
+  }
+  async getPeerContinueWatching(
+    limit?: number,
+  ): Promise<import("./types").PeerContinueWatchingItem[]> {
+    return this.request("GET", "/me/peers/continue-watching", {
+      params: { limit },
+    });
+  }
+
   // ─── Images ────────────────────────────────────────────────────────────
 
   async getItemImages(itemId: string): Promise<ImageInfo[]> {

@@ -234,6 +234,14 @@ func (r *inMemoryFedRepo) PurgeCachedItemsForLibrary(_ context.Context, peerID, 
 	delete(r.cache, peerID+"|"+libraryID)
 	return nil
 }
+func (r *inMemoryFedRepo) UpsertProgress(_ context.Context, _ *Progress) error { return nil }
+func (r *inMemoryFedRepo) GetProgress(_ context.Context, _, _, _ string) (*Progress, error) {
+	return nil, nil
+}
+func (r *inMemoryFedRepo) DeleteProgress(_ context.Context, _, _, _ string) error { return nil }
+func (r *inMemoryFedRepo) ListContinueWatching(_ context.Context, _ string, _ int) ([]*PeerContinueWatchingItem, error) {
+	return nil, nil
+}
 func (r *inMemoryFedRepo) ListRecentSharedItems(_ context.Context, peerID string, limit int) ([]*SharedItem, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

@@ -673,3 +673,97 @@ func (r *FederationRepository) PruneAuditBefore(ctx context.Context, cutoff time
 	}
 	return n, nil
 }
+
+// ─── federation_progress (028) ────────────────────────────────────────────
+
+// UpsertProgress writes or replaces the user's playback state for a
+// (peer, remote_item) pair. Duration is preserved across updates that
+// pass 0 -- see the SQL upsert for the rationale.
+func (r *FederationRepository) UpsertProgress(ctx context.Context, p *federation.Progress) error {
+	if err := r.q.UpsertFederationProgress(ctx, sqlc.UpsertFederationProgressParams{
+		UserID:        p.UserID,
+		PeerID:        p.PeerID,
+		RemoteItemID:  p.RemoteItemID,
+		PositionTicks: p.PositionTicks,
+		DurationTicks: p.DurationTicks,
+		Completed:     p.Completed,
+		LastPlayedAt:  p.LastPlayedAt,
+		UpdatedAt:     p.UpdatedAt,
+	}); err != nil {
+		return fmt.Errorf("upsert federation progress: %w", err)
+	}
+	return nil
+}
+
+// GetProgress returns nil, nil when there's no row -- the player
+// treats that as "start from 0" with no special-casing.
+func (r *FederationRepository) GetProgress(ctx context.Context, userID, peerID, remoteItemID string) (*federation.Progress, error) {
+	row, err := r.q.GetFederationProgress(ctx, sqlc.GetFederationProgressParams{
+		UserID:       userID,
+		PeerID:       peerID,
+		RemoteItemID: remoteItemID,
+	})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get federation progress: %w", err)
+	}
+	return &federation.Progress{
+		UserID:        row.UserID,
+		PeerID:        row.PeerID,
+		RemoteItemID:  row.RemoteItemID,
+		PositionTicks: row.PositionTicks,
+		DurationTicks: row.DurationTicks,
+		Completed:     row.Completed,
+		LastPlayedAt:  row.LastPlayedAt,
+		UpdatedAt:     row.UpdatedAt,
+	}, nil
+}
+
+func (r *FederationRepository) DeleteProgress(ctx context.Context, userID, peerID, remoteItemID string) error {
+	if err := r.q.DeleteFederationProgress(ctx, sqlc.DeleteFederationProgressParams{
+		UserID:       userID,
+		PeerID:       peerID,
+		RemoteItemID: remoteItemID,
+	}); err != nil {
+		return fmt.Errorf("delete federation progress: %w", err)
+	}
+	return nil
+}
+
+// ListContinueWatching returns the user's in-progress federated items
+// ordered by last_played_at desc, joined with the catalog cache for
+// title / poster availability. Rows whose cache entry has been evicted
+// are dropped silently -- the rail prefers no row over a title-less
+// row.
+func (r *FederationRepository) ListContinueWatching(ctx context.Context, userID string, limit int) ([]*federation.PeerContinueWatchingItem, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	rows, err := r.q.ListFederationContinueWatching(ctx, sqlc.ListFederationContinueWatchingParams{
+		UserID: userID,
+		Limit:  int64(limit),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list federation continue watching: %w", err)
+	}
+	out := make([]*federation.PeerContinueWatchingItem, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, &federation.PeerContinueWatchingItem{
+			PeerID:        row.PeerID,
+			PeerName:      row.PeerName,
+			LibraryID:     row.LibraryID,
+			RemoteItemID:  row.RemoteItemID,
+			Type:          row.Type,
+			Title:         row.Title,
+			Year:          int(row.Year),
+			Overview:      row.Overview,
+			HasPoster:     row.HasPoster,
+			PositionTicks: row.PositionTicks,
+			DurationTicks: row.DurationTicks,
+			LastPlayedAt:  row.LastPlayedAt,
+		})
+	}
+	return out, nil
+}
