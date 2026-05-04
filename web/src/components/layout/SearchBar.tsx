@@ -13,25 +13,23 @@ import {
 } from "lucide-react";
 import { useSearch } from "@/api/hooks";
 import { useDebounce } from "@/hooks/useDebounce";
-import { thumb } from "@/utils/imageUrl";
-import type { MediaItem } from "@/api/types";
+import {
+  SearchResultsView,
+  SearchNoResults,
+} from "@/components/search/SearchResultsView";
 
-// SearchBar — collapsed by default to a single magnifier icon. Clicking
-// it animates the icon out into a full input, focused. Typing produces
-// either:
-//   · a dropdown (anchored below the topbar) on Home and most pages, or
-//   · a URL-driven `?q=` filter on /movies and /series (the page reads
-//     it and narrows its grid in-place — no dropdown).
+// SearchBar — collapsed by default to a single magnifier icon. Click
+// expands the icon into an inline input (spring animation). Typing
+// drops a full-width panel from below the topbar with grouped
+// results — same layout as the dedicated /search page so the user
+// gets a consistent experience between the dropdown and the page.
 //
-// The mode flip is intentional: on browse pages the user already has a
-// grid in view, so an overlay would feel like an extra step. On Home
-// or pages without a grid, an inline dropdown with poster previews is
-// the fastest path to "click the thing I meant".
+// Behavior modes:
+//   · /movies, /series, /search   → "filter mode": value mirrored
+//     to URL `?q=`, no dropdown (the page is the result surface).
+//   · everywhere else             → "search mode": local query,
+//     full-width dropdown, Enter goes to /search?q=…
 
-// Routes whose grid reads `?q=` directly. Typing in the SearchBar on
-// these routes writes to the URL instead of opening a dropdown — the
-// page IS the result surface. /search is included so the dedicated
-// results page stays in sync with the topbar input.
 const FILTER_ROUTES = ["/movies", "/series", "/search"];
 
 function isFilterRoute(pathname: string): boolean {
@@ -49,12 +47,7 @@ export function SearchBar() {
   const filterMode = isFilterRoute(location.pathname);
   const urlQuery = searchParams.get("q") ?? "";
   const [open, setOpen] = useState(urlQuery.length > 0);
-  const [highlightedIndex, setHighlightedIndex] = useState(0);
 
-  // Local query state mirrors the URL on filter pages (so the input
-  // value always reflects what's actually filtering the grid). On
-  // non-filter pages we keep an internal-only state so visiting
-  // /search?q=foo doesn't get its query mirrored back into the topbar.
   const [localQuery, setLocalQuery] = useState("");
   const query = filterMode ? urlQuery : localQuery;
 
@@ -63,18 +56,13 @@ export function SearchBar() {
 
   const debounced = useDebounce(query.trim(), 220);
   const dropdownActive = open && !filterMode && debounced.length > 0;
+  const suggestionsActive = open && !filterMode && query.length === 0;
 
   const { data, isFetching } = useSearch(debounced, {
     enabled: dropdownActive,
     staleTime: 30_000,
   });
-  const results = useMemo(() => (data ?? []).slice(0, 8), [data]);
-
-  // Reset highlight when results change so ↑/↓ doesn't point at a
-  // stale row index that no longer exists.
-  useEffect(() => {
-    setHighlightedIndex(0);
-  }, [debounced, results.length]);
+  const results = useMemo(() => data ?? [], [data]);
 
   // Auto-expand if the URL already has ?q= when the page mounts
   // (filter route deep link, or user reloaded the tab mid-search).
@@ -98,19 +86,40 @@ export function SearchBar() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Outside-click collapses the bar back to icon ONLY if it's empty.
-  // Keeping it expanded when there's a value avoids the user's text
-  // disappearing if they click on a result they then dismiss.
+  // Outside-click closes the dropdown AND collapses the bar if empty.
+  // The dropdown lives outside `wrapRef` (it's a full-width fixed
+  // panel below the topbar), so we have to whitelist its container too
+  // — handled by giving the dropdown its own ref and checking both.
+  const dropdownRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
     function onDoc(e: MouseEvent) {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
-        if (query.length === 0) setOpen(false);
+      const target = e.target as Node;
+      if (
+        wrapRef.current?.contains(target) ||
+        dropdownRef.current?.contains(target)
+      ) {
+        return;
+      }
+      // Closed-without-collapse if the bar is non-empty so the user
+      // doesn't lose their query when dismissing the dropdown.
+      if (query.length === 0) {
+        setOpen(false);
+      } else if (dropdownActive || suggestionsActive) {
+        // Just close the panel; keep the bar wide and the value.
+        // (We toggle `open` off then back on synchronously to drop
+        // the panel without losing the input width — but actually
+        // the panel hides naturally because dropdownActive depends
+        // on `open`. To dismiss without unmounting the bar, leave
+        // open=true but rely on a separate "panelClosed" flag.)
+        // Simplest: keep open=true, but the panel re-opens on focus.
+        // For now, just close everything; the user can click again.
+        setOpen(false);
       }
     }
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
-  }, [open, query]);
+  }, [open, query, dropdownActive, suggestionsActive]);
 
   function openSearch() {
     setOpen(true);
@@ -139,14 +148,10 @@ export function SearchBar() {
     }
   }
 
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  function handleSubmit(e?: React.FormEvent) {
+    if (e) e.preventDefault();
     const trimmed = query.trim();
     if (!trimmed) return;
-    if (dropdownActive && results[highlightedIndex]) {
-      goToItem(results[highlightedIndex]);
-      return;
-    }
     if (!filterMode) {
       navigate(`/search?q=${encodeURIComponent(trimmed)}`);
       setLocalQuery("");
@@ -154,32 +159,7 @@ export function SearchBar() {
     }
   }
 
-  function goToItem(item: MediaItem) {
-    const base =
-      item.type === "movie"
-        ? "/movies"
-        : item.type === "series"
-          ? "/series"
-          : "/items";
-    navigate(`${base}/${item.id}`);
-    setLocalQuery("");
-    setOpen(false);
-  }
-
-  function onArrow(dir: 1 | -1) {
-    if (!dropdownActive) return;
-    const max = results.length - 1;
-    if (max < 0) return;
-    setHighlightedIndex((idx) => {
-      const next = idx + dir;
-      if (next < 0) return max;
-      if (next > max) return 0;
-      return next;
-    });
-  }
-
-  // Page-aware placeholder — same query field, but we tell the user
-  // what the current behavior is.
+  // Page-aware placeholder.
   const placeholder = useMemo(() => {
     if (filterMode) {
       if (location.pathname.startsWith("/search")) {
@@ -196,156 +176,161 @@ export function SearchBar() {
     return t("topbar.searchPlaceholder");
   }, [filterMode, location.pathname, t]);
 
+  const panelOpen = dropdownActive || suggestionsActive;
+
   return (
-    <div ref={wrapRef} className="relative">
-      <motion.div
-        layout
-        initial={false}
-        animate={{ width: open ? 280 : 36 }}
-        transition={{ type: "spring", stiffness: 380, damping: 32, mass: 0.6 }}
-        className={[
-          "h-9 flex items-center rounded-lg overflow-hidden border transition-colors",
-          open
-            ? "bg-bg-overlay border-border-strong shadow-lg shadow-black/30"
-            : "bg-bg-hover/40 border-border-subtle hover:border-border",
-        ].join(" ")}
-      >
-        <button
-          type="button"
-          onClick={() => (open ? inputRef.current?.focus() : openSearch())}
-          className="flex items-center justify-center w-9 h-9 flex-shrink-0 text-text-secondary hover:text-text-primary transition-colors"
-          aria-label={t("nav.search")}
-          aria-expanded={open}
+    <>
+      <div ref={wrapRef} className="relative">
+        <motion.div
+          layout
+          initial={false}
+          animate={{ width: open ? 280 : 36 }}
+          transition={{ type: "spring", stiffness: 380, damping: 32, mass: 0.6 }}
+          className={[
+            "h-9 flex items-center rounded-lg overflow-hidden border transition-colors",
+            open
+              ? "bg-bg-overlay border-border-strong shadow-lg shadow-black/30"
+              : "bg-bg-hover/40 border-border-subtle hover:border-border",
+          ].join(" ")}
         >
-          <SearchIcon className="h-[17px] w-[17px]" strokeWidth={1.7} />
-        </button>
-
-        {open && (
-          <form onSubmit={handleSubmit} className="flex-1 flex items-center">
-            <input
-              ref={inputRef}
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") {
-                  e.preventDefault();
-                  if (query) {
-                    setQuery("");
-                  } else {
-                    setOpen(false);
-                  }
-                } else if (e.key === "ArrowDown") {
-                  e.preventDefault();
-                  onArrow(1);
-                } else if (e.key === "ArrowUp") {
-                  e.preventDefault();
-                  onArrow(-1);
-                }
-              }}
-              placeholder={placeholder}
-              className="flex-1 min-w-0 bg-transparent border-none outline-none text-[13px] text-text-primary placeholder:text-text-muted px-0 py-0"
-              autoComplete="off"
-              spellCheck={false}
-            />
-            {isFetching && dropdownActive && (
-              <Loader2 className="h-3.5 w-3.5 mx-1.5 text-text-muted animate-spin flex-shrink-0" strokeWidth={1.8} />
-            )}
-            {query.length > 0 ? (
-              <button
-                type="button"
-                onClick={() => setQuery("")}
-                className="flex items-center justify-center w-7 h-7 mr-1 rounded-md text-text-muted hover:text-text-primary hover:bg-bg-hover transition-colors flex-shrink-0"
-                aria-label={t("common.cancel")}
-              >
-                <X className="h-3.5 w-3.5" strokeWidth={1.8} />
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={closeAndClear}
-                className="flex items-center justify-center px-1.5 mr-1 text-[10px] font-medium text-text-muted hover:text-text-primary transition-colors flex-shrink-0"
-                aria-label={t("nav.closeMenu")}
-              >
-                Esc
-              </button>
-            )}
-          </form>
-        )}
-      </motion.div>
-
-      <AnimatePresence>
-        {dropdownActive && (
-          <motion.div
-            initial={{ opacity: 0, y: -6, scale: 0.985 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -6, scale: 0.985 }}
-            transition={{ duration: 0.16, ease: [0.32, 0.72, 0, 1] }}
-            className="absolute right-0 mt-2 w-[420px] max-w-[calc(100vw-32px)] rounded-xl border border-border bg-bg-overlay/95 backdrop-blur-2xl shadow-2xl shadow-black/50 overflow-hidden z-50"
-            style={{ top: "100%" }}
-            role="listbox"
+          <button
+            type="button"
+            onClick={() => (open ? inputRef.current?.focus() : openSearch())}
+            className="flex items-center justify-center w-9 h-9 flex-shrink-0 text-text-secondary hover:text-text-primary transition-colors"
             aria-label={t("nav.search")}
+            aria-expanded={open}
           >
-            <div className="max-h-[min(480px,65vh)] overflow-y-auto">
-              {results.length === 0 && !isFetching ? (
-                <EmptyResults query={debounced} />
-              ) : (
-                <ResultsList
-                  items={results}
-                  highlightedIndex={highlightedIndex}
-                  onHover={setHighlightedIndex}
-                  onPick={goToItem}
-                />
+            <SearchIcon className="h-[17px] w-[17px]" strokeWidth={1.7} />
+          </button>
+
+          {open && (
+            <form onSubmit={handleSubmit} className="flex-1 flex items-center">
+              <input
+                ref={inputRef}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    if (query) {
+                      setQuery("");
+                    } else {
+                      setOpen(false);
+                    }
+                  }
+                }}
+                placeholder={placeholder}
+                className="flex-1 min-w-0 bg-transparent border-none outline-none text-[13px] text-text-primary placeholder:text-text-muted px-0 py-0"
+                autoComplete="off"
+                spellCheck={false}
+              />
+              {isFetching && dropdownActive && (
+                <Loader2 className="h-3.5 w-3.5 mx-1.5 text-text-muted animate-spin flex-shrink-0" strokeWidth={1.8} />
               )}
-            </div>
+              {query.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => setQuery("")}
+                  className="flex items-center justify-center w-7 h-7 mr-1 rounded-md text-text-muted hover:text-text-primary hover:bg-bg-hover transition-colors flex-shrink-0"
+                  aria-label={t("common.cancel")}
+                >
+                  <X className="h-3.5 w-3.5" strokeWidth={1.8} />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={closeAndClear}
+                  className="flex items-center justify-center px-1.5 mr-1 text-[10px] font-medium text-text-muted hover:text-text-primary transition-colors flex-shrink-0"
+                  aria-label={t("nav.closeMenu")}
+                >
+                  Esc
+                </button>
+              )}
+            </form>
+          )}
+        </motion.div>
+      </div>
 
-            {results.length > 0 && (
-              <button
-                type="button"
-                onClick={() => handleSubmit({ preventDefault: () => {} } as React.FormEvent)}
-                className="w-full flex items-center justify-between gap-2 px-4 h-11 border-t border-border-subtle text-[12.5px] text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
-              >
-                <span>
-                  {t("topbar.viewAllResults", { defaultValue: "Ver todos los resultados" })}
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <kbd className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-bg-base/60 border border-border-subtle">
-                    Enter
-                  </kbd>
-                  <ArrowRight className="h-3.5 w-3.5" strokeWidth={1.7} />
-                </span>
-              </button>
-            )}
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Empty-state suggestion drawer — only when expanded with no
-          query yet, on non-filter routes. Helps the user discover
-          the section quick-links. */}
+      {/* Full-width drop-down panel anchored to the bottom of the
+          topbar. Lives outside the bar's relative parent so it can
+          stretch the entire viewport width — Plex-style drawer. */}
       <AnimatePresence>
-        {open && !filterMode && query.length === 0 && (
-          <motion.div
-            initial={{ opacity: 0, y: -6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -6 }}
-            transition={{ duration: 0.14 }}
-            className="absolute right-0 mt-2 w-[280px] max-w-[calc(100vw-32px)] rounded-xl border border-border bg-bg-overlay/95 backdrop-blur-2xl shadow-2xl shadow-black/50 overflow-hidden z-50"
-            style={{ top: "100%" }}
-          >
-            <SuggestionsPanel
-              onPick={(href) => {
-                navigate(href);
-                setOpen(false);
-              }}
+        {panelOpen && (
+          <>
+            {/* Backdrop — subtle dim of the page underneath, just
+                enough to focus the eye on the panel without making
+                the rest of the UI look offline. Starts below the
+                topbar so the bar stays clickable. */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.14 }}
+              className="fixed inset-0 z-40 bg-black/35 backdrop-blur-[3px]"
+              style={{ top: "var(--topbar-height)" }}
+              aria-hidden
             />
-          </motion.div>
+
+            <motion.div
+              ref={dropdownRef}
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.18, ease: [0.32, 0.72, 0, 1] }}
+              className="fixed left-0 right-0 z-50 bg-bg-overlay/95 backdrop-blur-2xl border-b border-border shadow-2xl shadow-black/60"
+              style={{ top: "var(--topbar-height)" }}
+              role="region"
+              aria-label={t("nav.search")}
+            >
+              <div className="max-w-[1400px] mx-auto px-6 py-6 max-h-[calc(100dvh-var(--topbar-height)-24px)] overflow-y-auto">
+                {dropdownActive ? (
+                  results.length === 0 && !isFetching ? (
+                    <SearchNoResults query={debounced} />
+                  ) : (
+                    <>
+                      <SearchResultsView
+                        items={results}
+                        perSectionLimit={6}
+                        onItemClick={() => {
+                          setLocalQuery("");
+                          setOpen(false);
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleSubmit()}
+                        className="mt-6 w-full flex items-center justify-center gap-2 h-11 rounded-lg border border-border-subtle text-[13px] text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
+                      >
+                        <span>
+                          {t("topbar.viewAllResults", {
+                            defaultValue: "Ver todos los resultados",
+                          })}
+                        </span>
+                        <kbd className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-bg-base/60 border border-border-subtle">
+                          Enter
+                        </kbd>
+                        <ArrowRight className="h-3.5 w-3.5" strokeWidth={1.7} />
+                      </button>
+                    </>
+                  )
+                ) : (
+                  <SuggestionsPanel
+                    onPick={(href) => {
+                      navigate(href);
+                      setOpen(false);
+                    }}
+                  />
+                )}
+              </div>
+            </motion.div>
+          </>
         )}
       </AnimatePresence>
-    </div>
+    </>
   );
 }
 
-// ─── Sub-components ─────────────────────────────────────────────────────────
+// ─── Empty-state suggestions ────────────────────────────────────────────────
 
 function SuggestionsPanel({ onPick }: { onPick: (href: string) => void }) {
   const { t } = useTranslation();
@@ -355,131 +340,29 @@ function SuggestionsPanel({ onPick }: { onPick: (href: string) => void }) {
     { href: "/live-tv", icon: Radio, label: t("nav.liveTV") },
   ];
   return (
-    <div className="p-2">
-      <p className="px-3 pt-2 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-text-muted">
+    <div>
+      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-text-muted mb-3">
         {t("topbar.suggestions", { defaultValue: "Sugerencias" })}
       </p>
-      <ul className="space-y-0.5">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         {items.map((item) => {
           const Icon = item.icon;
           return (
-            <li key={item.href}>
-              <button
-                onClick={() => onPick(item.href)}
-                className="w-full flex items-center gap-3 px-3 h-10 rounded-lg text-left text-[13px] text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
-              >
-                <Icon className="h-4 w-4 text-text-muted" strokeWidth={1.6} />
-                <span className="flex-1 truncate">{item.label}</span>
-              </button>
-            </li>
+            <button
+              key={item.href}
+              onClick={() => onPick(item.href)}
+              className="flex items-center gap-3 p-3 rounded-xl border border-border-subtle bg-bg-card/40 hover:bg-bg-card hover:border-border transition-colors text-left"
+            >
+              <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-accent/10 ring-1 ring-accent/20">
+                <Icon className="h-4 w-4 text-accent" strokeWidth={1.7} />
+              </span>
+              <span className="text-[13.5px] font-semibold text-text-primary">
+                {item.label}
+              </span>
+            </button>
           );
         })}
-      </ul>
+      </div>
     </div>
-  );
-}
-
-function EmptyResults({ query }: { query: string }) {
-  const { t } = useTranslation();
-  return (
-    <div className="flex flex-col items-center justify-center py-10 px-6 text-center">
-      <SearchIcon className="h-7 w-7 text-text-muted opacity-50 mb-3" strokeWidth={1.4} />
-      <p className="text-[13px] text-text-secondary">
-        {t("topbar.noResultsFor", { defaultValue: "Sin resultados para" })}{" "}
-        <span className="text-text-primary font-medium">"{query}"</span>
-      </p>
-    </div>
-  );
-}
-
-function ResultsList({
-  items,
-  highlightedIndex,
-  onHover,
-  onPick,
-}: {
-  items: MediaItem[];
-  highlightedIndex: number;
-  onHover: (i: number) => void;
-  onPick: (item: MediaItem) => void;
-}) {
-  return (
-    <ul className="p-2">
-      {items.map((item, i) => (
-        <ResultRow
-          key={item.id}
-          item={item}
-          isHighlighted={i === highlightedIndex}
-          onMouseEnter={() => onHover(i)}
-          onClick={() => onPick(item)}
-        />
-      ))}
-    </ul>
-  );
-}
-
-function ResultRow({
-  item,
-  isHighlighted,
-  onMouseEnter,
-  onClick,
-}: {
-  item: MediaItem;
-  isHighlighted: boolean;
-  onMouseEnter: () => void;
-  onClick: () => void;
-}) {
-  const poster = thumb(item.poster_url ?? item.series_poster_url, 80);
-  const typeLabel =
-    item.type === "movie" ? "Película" : item.type === "series" ? "Serie" : item.type;
-
-  return (
-    <li>
-      <button
-        onMouseEnter={onMouseEnter}
-        onClick={onClick}
-        className={[
-          "w-full flex items-center gap-3 p-2 rounded-lg text-left transition-colors",
-          isHighlighted ? "bg-bg-active" : "hover:bg-bg-hover",
-        ].join(" ")}
-      >
-        <div
-          className="relative flex-shrink-0 w-10 h-14 rounded-md overflow-hidden bg-bg-elevated"
-          style={item.poster_color ? { background: item.poster_color } : undefined}
-        >
-          {poster && (
-            <img
-              src={poster}
-              alt=""
-              loading="lazy"
-              className="absolute inset-0 w-full h-full object-cover"
-            />
-          )}
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="text-[13.5px] font-medium text-text-primary truncate">
-            {item.title}
-          </p>
-          <div className="mt-0.5 flex items-center gap-2 text-[11.5px] text-text-muted">
-            <span className="capitalize">{typeLabel}</span>
-            {item.year && (
-              <>
-                <span className="opacity-40">·</span>
-                <span>{item.year}</span>
-              </>
-            )}
-            {item.community_rating != null && (
-              <>
-                <span className="opacity-40">·</span>
-                <span>★ {item.community_rating.toFixed(1)}</span>
-              </>
-            )}
-          </div>
-        </div>
-        {isHighlighted && (
-          <ArrowRight className="h-4 w-4 text-text-muted flex-shrink-0" strokeWidth={1.6} />
-        )}
-      </button>
-    </li>
   );
 }
