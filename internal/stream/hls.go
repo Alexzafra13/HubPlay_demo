@@ -27,6 +27,12 @@ func GenerateMasterPlaylist(itemID, baseURL string, profiles []string) string {
 	return b.String()
 }
 
+// ParseBitrate converts a string like "4000k" or "2M" to bits per
+// second. Exported because the federation streaming handler needs to
+// compute BANDWIDTH= for its peer-flavoured HLS master playlist
+// without re-implementing the same parser.
+func ParseBitrate(s string) int { return parseBitrate(s) }
+
 // parseBitrate converts a string like "4000k" to bits per second.
 func parseBitrate(s string) int {
 	if s == "" {

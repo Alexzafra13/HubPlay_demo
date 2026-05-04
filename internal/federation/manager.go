@@ -133,6 +133,14 @@ type Manager struct {
 	// validation hot path. Refreshed on each peer mutation.
 	mu        sync.RWMutex
 	peerCache map[string]*Peer
+
+	// streamSessions maps peer-stream session UUIDs to their bookkeeping
+	// entry. See stream.go. Separate mutex from peerCache because the
+	// streaming hot path doesn't need the peer-cache reader, and
+	// holding peerCache's RWMutex during a stream sweep would block
+	// JWT validation.
+	streamMu       sync.Mutex
+	streamSessions map[string]*PeerStreamSession
 }
 
 // NewManager wires a Manager. Callers must have already invoked
@@ -147,16 +155,17 @@ func NewManager(ctx context.Context, cfg Config, repo Repo, clk clock.Clock, log
 		logger = slog.Default()
 	}
 	m := &Manager{
-		cfg:       cfg,
-		repo:      repo,
-		identity:  is,
-		clock:     clk,
-		logger:    logger.With("module", "federation"),
-		bus:       bus,
-		httpClt:   &http.Client{Timeout: cfg.HTTPTimeout},
-		auditor:   NewAuditor(repo, logger),
-		ratelimit: NewRateLimiter(clk, cfg.PeerRequestsPerMinute, cfg.PeerBurst),
-		nonces:    newNonceCache(clk),
+		cfg:            cfg,
+		repo:           repo,
+		identity:       is,
+		clock:          clk,
+		logger:         logger.With("module", "federation"),
+		bus:            bus,
+		httpClt:        &http.Client{Timeout: cfg.HTTPTimeout},
+		auditor:        NewAuditor(repo, logger),
+		ratelimit:      NewRateLimiter(clk, cfg.PeerRequestsPerMinute, cfg.PeerBurst),
+		nonces:         newNonceCache(clk),
+		streamSessions: make(map[string]*PeerStreamSession),
 	}
 	if err := m.refreshPeerCache(ctx); err != nil {
 		// Tear down the auditor we just spawned so we don't leak the
@@ -598,6 +607,15 @@ func (m *Manager) UnshareLibrary(ctx context.Context, peerID, shareID string) er
 // the admin UI's per-peer expansion panel.
 func (m *Manager) ListSharesByPeer(ctx context.Context, peerID string) ([]*LibraryShare, error) {
 	return m.repo.ListSharesByPeer(ctx, peerID)
+}
+
+// GetLibraryShare returns the share row for one (peer, library) pair,
+// or nil when the peer has no share for the library. Used by the
+// federation streaming handler to gate "is this item playable by the
+// requesting peer?" with one round-trip: look up the item's library,
+// look up the share, check CanPlay.
+func (m *Manager) GetLibraryShare(ctx context.Context, peerID, libraryID string) (*LibraryShare, error) {
+	return m.repo.GetLibraryShare(ctx, peerID, libraryID)
 }
 
 // ListSharedLibrariesForPeer returns the libraries the peer can see —

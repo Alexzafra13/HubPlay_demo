@@ -30,3 +30,6 @@ web/dist/*
 # inside the repo with no shared global store.
 web/.pnpm-store/
 _backups/
+
+# sqlc drift test scratch (internal/db/sqlc_drift_test.go)
+.sqlc-drift-*

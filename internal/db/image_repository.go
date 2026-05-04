@@ -56,7 +56,7 @@ func (r *ImageRepository) Create(ctx context.Context, img *Image) error {
 		Blurhash:           nullableString(img.Blurhash),
 		Provider:           nullableString(img.Provider),
 		IsPrimary:          sql.NullBool{Bool: img.IsPrimary, Valid: true},
-		IsLocked:           sql.NullBool{Bool: img.IsLocked, Valid: true},
+		IsLocked:           img.IsLocked,
 		AddedAt:            img.AddedAt,
 		DominantColor:      img.DominantColor,
 		DominantColorMuted: img.DominantColorMuted,
@@ -75,7 +75,7 @@ func (r *ImageRepository) Create(ctx context.Context, img *Image) error {
 func (r *ImageRepository) SetLocked(ctx context.Context, imageID string, locked bool) error {
 	if err := r.q.SetImageLocked(ctx, sqlc.SetImageLockedParams{
 		ID:       imageID,
-		IsLocked: sql.NullBool{Bool: locked, Valid: true},
+		IsLocked: locked,
 	}); err != nil {
 		return fmt.Errorf("set image locked: %w", err)
 	}
@@ -261,7 +261,7 @@ func imageFromGetRow(r sqlc.GetImageByIDRow) Image {
 		Blurhash:           r.Blurhash,
 		Provider:           r.Provider,
 		IsPrimary:          r.IsPrimary.Bool,
-		IsLocked:           r.IsLocked.Bool,
+		IsLocked:           r.IsLocked,
 		AddedAt:            r.AddedAt,
 		DominantColor:      r.DominantColor,
 		DominantColorMuted: r.DominantColorMuted,
@@ -279,7 +279,7 @@ func imageFromPrimaryRow(r sqlc.GetPrimaryImageRow) Image {
 		Blurhash:           r.Blurhash,
 		Provider:           r.Provider,
 		IsPrimary:          r.IsPrimary.Bool,
-		IsLocked:           r.IsLocked.Bool,
+		IsLocked:           r.IsLocked,
 		AddedAt:            r.AddedAt,
 		DominantColor:      r.DominantColor,
 		DominantColorMuted: r.DominantColorMuted,
@@ -297,7 +297,7 @@ func imageFromListRow(r sqlc.ListImagesByItemRow) Image {
 		Blurhash:           r.Blurhash,
 		Provider:           r.Provider,
 		IsPrimary:          r.IsPrimary.Bool,
-		IsLocked:           r.IsLocked.Bool,
+		IsLocked:           r.IsLocked,
 		AddedAt:            r.AddedAt,
 		DominantColor:      r.DominantColor,
 		DominantColorMuted: r.DominantColorMuted,

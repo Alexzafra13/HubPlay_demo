@@ -4,9 +4,9 @@
 --   people(id, name, type, thumb_path)
 --   item_people(item_id, person_id, role, character_name, sort_order)  PK on (item_id, person_id, role)
 --
--- Deduplication: people are keyed in DB by uuid `id` but the scanner
+-- Deduplication: people are keyed in DB by uuid id but the scanner
 -- needs a stable lookup from "the person TMDb just gave me". For now
--- we dedup by `name` (case-sensitive — TMDb is consistent) which is
+-- we dedup by name (case-sensitive -- TMDb is consistent) which is
 -- good enough for the 95% case. A future migration can add a
 -- person-level external_ids table for the edge cases (alias drift,
 -- two actors with the same name).
@@ -29,7 +29,7 @@ FROM people
 WHERE id = ?;
 
 -- Clear an item's existing cast/crew before re-inserting. Avoids
--- having to diff the new list against the old one — re-scans cost a
+-- having to diff the new list against the old one -- re-scans cost a
 -- few writes per item rather than a comparison pass. The composite
 -- PK on item_people means simple DELETE WHERE item_id = ? is the
 -- whole story.
@@ -63,10 +63,10 @@ ORDER BY ip.sort_order ASC, p.name ASC;
 
 -- Filmography: every movie + series this person has a direct credit
 -- on. Episode-level credits drop through for now (parent series
--- usually carries the same person at the top level — TMDb is
+-- usually carries the same person at the top level -- TMDb is
 -- consistent there). Sorted newest-first; rows for the same item
 -- but different role (e.g. actor + writer on the same movie) are
--- returned both — the caller dedupes keeping the lowest sort_order.
+-- returned both -- the caller dedupes keeping the lowest sort_order.
 -- name: ListFilmographyByPerson :many
 SELECT
     i.id AS item_id,

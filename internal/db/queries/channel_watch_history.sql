@@ -4,7 +4,7 @@
 -- Composite PK: (user_id, stream_url).
 --
 -- Keyed by stream_url so the rail survives M3U refreshes (channel
--- UUIDs regenerate). The list query joins back to `channels` by
+-- UUIDs regenerate). The list query joins back to channels by
 -- stream_url at read time.
 
 -- name: RecordChannelWatch :exec

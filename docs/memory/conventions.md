@@ -90,21 +90,80 @@ igual en el dominio, SQLite queda limpio).
 
 ## Regeneración sqlc
 
-Después de editar cualquier `internal/db/queries/*.sql` **o** cualquier
-`migrations/sqlite/*.sql`:
+`make sqlc` regenera `internal/db/sqlc/*.sql.go` desde
+`internal/db/queries/*.sql`. Idempotente — sin diff cuando las queries
+no han cambiado. El target instala primero la versión pineada de sqlc
+(`SQLC_VERSION` en el Makefile) si no está ya en el PATH, así que un
+contributor nuevo no tiene que gestionar su propia instalación.
 
-```powershell
-# Windows con Docker Desktop (sin instalar sqlc)
-docker run --rm -v "${PWD}:/src" -w /src sqlc/sqlc generate
-
-# Cualquier OS con sqlc instalado
-sqlc generate
-# o
-make sqlc
+```bash
+make sqlc        # regenera (instala sqlc pineado si hace falta)
+make sqlc-verify # regenera y falla si hay diff (lo usa CI)
 ```
 
-**Commit los generados**. Convención de sqlc y evita obligar a cada dev a
-tener la herramienta para compilar.
+**Commit los generados** junto con el cambio de query. Convención
+estándar de sqlc y evita que cada dev tenga la herramienta para
+compilar.
+
+### Drift test en CI
+
+`internal/db/sqlc_drift_test.go` regenera contra un directorio scratch
+y compara byte-a-byte con el árbol commiteado. Falla con tres clases de
+regresión:
+
+1. **Olvidaste correr `make sqlc`** tras editar una query.
+2. **Introdujiste un patrón parser-hostile** en una query (ver lista
+   abajo). El regen produce output corrupto en silencio; el drift test
+   lo destapa.
+3. **Subiste `SQLC_VERSION`** en el Makefile sin re-baselinear.
+
+El test se skipea si `sqlc` no está en PATH (developer local sin la
+herramienta no se bloquea). CI siempre lo ejecuta porque el
+prerequisito `make sqlc-install` lo instala.
+
+### Patrones parser-hostile a evitar en `*.sql`
+
+Bugs reales de sqlc 1.27 / 1.29 / 1.31 confirmados empíricamente
+(sesión 2026-05-04). Cualquier query con estos patrones rompe el
+regen en silencio — el drift test los caza, pero mejor evitarlos
+desde el inicio:
+
+1. **Caracteres no-ASCII en comentarios SQL**. Em-dashes (`—`),
+   acentos (`á í ó`), backticks (`` ` ``), comillas tipográficas, etc.
+   El parser cuenta bytes vs chars mal en UTF-8 multi-byte y a
+   partir de un char no-ASCII las posiciones quedan desplazadas N
+   bytes. Síntoma: queries posteriores salen truncadas en los
+   últimos 1-2 caracteres (`LIMIT ?` → `LIMIT`, `'season'` → `'seaso`).
+
+   **Convención**: comentarios SQL en ASCII puro. Si necesitas un
+   guion largo, usa `--` (doble hyphen, que SQL ya interpreta como
+   inicio de comentario y se renderiza visualmente como un dash en
+   muchos editores).
+
+2. **Placeholders `?` dentro de `NOT (...)` clauses**. sqlc no
+   detecta el parámetro anidado y lo descarta del struct `Params`.
+   Síntoma: el campo desaparece y el `QueryContext` no lo pasa →
+   SQLite recibe un `?` sin valor → error en runtime.
+
+   **Convención**: si necesitas negar un grupo de condiciones que
+   incluye un parámetro, usa **DeMorgan** y exprésalo positivamente:
+
+   ```sql
+   -- ✗ rompe sqlc
+   AND NOT (
+     col < ? AND other > 0
+   )
+
+   -- ✓ pasa
+   AND col IS NOT NULL  -- preservar semantica three-valued si col es nullable
+   AND (col >= ? OR other = 0)
+   ```
+
+3. **`sqlc.arg('name')` syntax**. Funciona inestablemente en SQLite;
+   en algunos contextos sqlc lo deja como literal text en la SQL
+   string. Usa `?` posicional simple. Si la auto-naming de sqlc no te
+   gusta, renombra en la repo layer (alias el campo del struct
+   generado al hacer Params{...}).
 
 ---
 

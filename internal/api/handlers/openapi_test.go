@@ -125,6 +125,20 @@ func TestOpenAPISpec_CoversCriticalPaths(t *testing.T) {
 		"/stream/{itemId}/master.m3u8",
 		"/me/progress/{itemId}",
 		"/me/peers",
+		// Live TV (IPTV consumer surface — TV app v1)
+		"/libraries/{id}/channels",
+		"/channels/{channelId}",
+		"/channels/{channelId}/stream",
+		"/channels/{channelId}/hls/index.m3u8",
+		"/channels/{channelId}/schedule",
+		"/favorites/channels",
+		"/me/channels/continue-watching",
+		// Home (per-user layout + discovery rails)
+		"/me/home/layout",
+		"/me/home/trending",
+		"/me/home/live-now",
+		// Self-description
+		"/openapi.yaml",
 	}
 	for _, path := range required {
 		if _, ok := doc.Paths[path]; !ok {
