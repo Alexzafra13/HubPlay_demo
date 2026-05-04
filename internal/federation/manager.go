@@ -128,6 +128,7 @@ type Manager struct {
 	auditor   *Auditor
 	ratelimit *RateLimiter
 	nonces    *nonceCache
+	metrics   MetricsSink
 
 	// peerCache caches paired peers by server_uuid for the JWT
 	// validation hot path. Refreshed on each peer mutation.
@@ -175,6 +176,7 @@ func NewManager(ctx context.Context, cfg Config, repo Repo, clk clock.Clock, log
 		auditor:        NewAuditor(repo, logger),
 		ratelimit:      NewRateLimiter(clk, cfg.PeerRequestsPerMinute, cfg.PeerBurst),
 		nonces:         newNonceCache(clk),
+		metrics:        noopMetricsSink{},
 		streamSessions: make(map[string]*PeerStreamSession),
 	}
 	if err := m.refreshPeerCache(ctx); err != nil {
@@ -388,7 +390,16 @@ func (m *Manager) ProbePeer(ctx context.Context, baseURL string) (*ServerInfo, e
 // admin handler derives this from the admin's session request so a
 // fresh deployment that hasn't set HUBPLAY_SERVER_BASE_URL still
 // pairs successfully — plug-and-play.
-func (m *Manager) AcceptInvite(ctx context.Context, baseURL, code, fallbackAdvertisedURL string) (*Peer, error) {
+func (m *Manager) AcceptInvite(ctx context.Context, baseURL, code, fallbackAdvertisedURL string) (out *Peer, err error) {
+	start := m.clock.Now()
+	defer func() {
+		outcome := "ok"
+		if err != nil {
+			outcome = "error"
+		}
+		m.metrics.HandshakeDuration("outbound", outcome, m.clock.Now().Sub(start).Seconds())
+	}()
+
 	if err := ValidateCodeFormat(code); err != nil {
 		return nil, err
 	}
@@ -474,7 +485,16 @@ func (m *Manager) AcceptInvite(ctx context.Context, baseURL, code, fallbackAdver
 // ServerInfo so the caller can persist us on their side. Atomic in
 // spirit — failures partway through leave the invite consumable for
 // another retry, since we update it last.
-func (m *Manager) HandleInboundHandshake(ctx context.Context, code string, remote *ServerInfo) (*Peer, *ServerInfo, error) {
+func (m *Manager) HandleInboundHandshake(ctx context.Context, code string, remote *ServerInfo) (outPeer *Peer, outInfo *ServerInfo, err error) {
+	start := m.clock.Now()
+	defer func() {
+		outcome := "ok"
+		if err != nil {
+			outcome = "error"
+		}
+		m.metrics.HandshakeDuration("inbound", outcome, m.clock.Now().Sub(start).Seconds())
+	}()
+
 	if err := ValidateCodeFormat(code); err != nil {
 		return nil, nil, err
 	}

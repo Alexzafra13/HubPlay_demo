@@ -93,7 +93,7 @@ func (m *Manager) FetchPeerLibraries(ctx context.Context, peerID string) ([]*Sha
 	if err != nil {
 		return nil, err
 	}
-	resp, err := m.doIdempotentPeerGET(ctx, peerID, url)
+	resp, err := m.doIdempotentPeerGET(ctx, peerID, url, "libraries")
 	if err != nil {
 		return nil, fmt.Errorf("fetch libraries from peer %s: %w", peerID, err)
 	}
@@ -144,7 +144,7 @@ func (m *Manager) FetchPeerItems(ctx context.Context, peerID, libraryID string, 
 	if err != nil {
 		return nil, 0, err
 	}
-	resp, err := m.doIdempotentPeerGET(ctx, peerID, url)
+	resp, err := m.doIdempotentPeerGET(ctx, peerID, url, "items")
 	if err != nil {
 		return nil, 0, fmt.Errorf("fetch items from peer %s: %w", peerID, err)
 	}
@@ -178,7 +178,43 @@ func decodeRemoteError(resp *http.Response) error {
 	if err := json.Unmarshal(body, &er); err == nil && er.Error.Code != "" {
 		return fmt.Errorf("peer rejected: %d %s -- %s", resp.StatusCode, er.Error.Code, er.Error.Message)
 	}
-	return fmt.Errorf("peer status %d: %s", resp.StatusCode, body)
+	// Fallback: the peer's body is not the documented error envelope —
+	// could be an upstream proxy's HTML 502, a stack trace, or anything.
+	// Trim and sanitise so an inadvertent log capture doesn't ship a
+	// kilobyte of upstream internals (or anything resembling a token).
+	return fmt.Errorf("peer status %d: %s", resp.StatusCode, sanitiseRemoteBody(body))
+}
+
+// sanitiseRemoteBody renders an opaque peer response body as a bounded
+// single-line excerpt safe to embed in a log message: control chars
+// replaced by '.', length capped, and a "<N bytes total>" marker when
+// the body was truncated. The original bytes are never propagated
+// beyond this function.
+func sanitiseRemoteBody(body []byte) string {
+	const maxExcerpt = 256
+	total := len(body)
+	if total == 0 {
+		return "<empty>"
+	}
+	excerpt := body
+	if total > maxExcerpt {
+		excerpt = body[:maxExcerpt]
+	}
+	clean := make([]byte, 0, len(excerpt))
+	for _, b := range excerpt {
+		switch {
+		case b == '\t' || b == ' ':
+			clean = append(clean, ' ')
+		case b < 0x20 || b == 0x7f:
+			clean = append(clean, '.')
+		default:
+			clean = append(clean, b)
+		}
+	}
+	if total > maxExcerpt {
+		return fmt.Sprintf("%s… <%d bytes total>", clean, total)
+	}
+	return string(clean)
 }
 
 // doIdempotentPeerGET issues an authenticated GET against `url` on the
@@ -198,7 +234,7 @@ func decodeRemoteError(resp *http.Response) error {
 // A fresh JWT is minted per attempt (cheap, local Ed25519 signing) so
 // a token that expires between the first attempt and a retry is
 // implicitly refreshed.
-func (m *Manager) doIdempotentPeerGET(ctx context.Context, peerID, url string) (*http.Response, error) {
+func (m *Manager) doIdempotentPeerGET(ctx context.Context, peerID, url, kind string) (*http.Response, error) {
 	var lastErr error
 	backoff := peerFetchBackoff
 	for attempt := 0; attempt < peerFetchAttempts; attempt++ {
@@ -228,6 +264,7 @@ func (m *Manager) doIdempotentPeerGET(ctx context.Context, peerID, url string) (
 			if errors.Is(doErr, context.Canceled) || errors.Is(doErr, context.DeadlineExceeded) {
 				return nil, doErr
 			}
+			m.metrics.OutboundRequest(kind, "transport_error")
 			lastErr = doErr
 			continue
 		}
@@ -237,8 +274,15 @@ func (m *Manager) doIdempotentPeerGET(ctx context.Context, peerID, url string) (
 			// before another request can reuse the keep-alive socket.
 			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4<<10))
 			_ = resp.Body.Close()
+			m.metrics.OutboundRequest(kind, "5xx")
 			lastErr = fmt.Errorf("peer status %d", resp.StatusCode)
 			continue
+		}
+		switch {
+		case resp.StatusCode >= 400:
+			m.metrics.OutboundRequest(kind, "4xx")
+		default:
+			m.metrics.OutboundRequest(kind, "ok")
 		}
 		return resp, nil
 	}
@@ -324,13 +368,21 @@ func (m *Manager) StartPeerStreamSession(ctx context.Context, peerID, itemID str
 
 	resp, err := m.httpClt.Do(req)
 	if err != nil {
+		m.metrics.OutboundRequest("stream_session", "transport_error")
 		return nil, fmt.Errorf("start peer stream session %s: %w", peerID, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		switch {
+		case resp.StatusCode >= 500:
+			m.metrics.OutboundRequest("stream_session", "5xx")
+		default:
+			m.metrics.OutboundRequest("stream_session", "4xx")
+		}
 		return nil, decodeRemoteError(resp)
 	}
+	m.metrics.OutboundRequest("stream_session", "ok")
 	var out PeerStreamSessionResponse
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, fmt.Errorf("decode session response: %w", err)
@@ -381,9 +433,11 @@ func (m *Manager) ProxyPeerStreamRequest(ctx context.Context, peerID, path strin
 
 	resp, err := m.proxyPeerAttempt(ctx, peerID, url)
 	if err != nil {
+		m.metrics.OutboundRequest("stream_proxy", "transport_error")
 		return nil, fmt.Errorf("proxy peer stream %s: %w", peerID, err)
 	}
 	if resp.StatusCode != http.StatusUnauthorized && resp.StatusCode != http.StatusForbidden {
+		m.recordProxyOutcome(resp.StatusCode)
 		return resp, nil
 	}
 
@@ -395,9 +449,24 @@ func (m *Manager) ProxyPeerStreamRequest(ctx context.Context, peerID, path strin
 
 	retried, retryErr := m.proxyPeerAttempt(ctx, peerID, url)
 	if retryErr != nil {
+		m.metrics.OutboundRequest("stream_proxy", "transport_error")
 		return nil, fmt.Errorf("proxy peer stream %s (after auth refresh): %w", peerID, retryErr)
 	}
+	m.recordProxyOutcome(retried.StatusCode)
 	return retried, nil
+}
+
+// recordProxyOutcome maps an HTTP status from a proxy attempt to the
+// outbound-request counter labels.
+func (m *Manager) recordProxyOutcome(status int) {
+	switch {
+	case status >= 500:
+		m.metrics.OutboundRequest("stream_proxy", "5xx")
+	case status >= 400:
+		m.metrics.OutboundRequest("stream_proxy", "4xx")
+	default:
+		m.metrics.OutboundRequest("stream_proxy", "ok")
+	}
 }
 
 // proxyPeerAttempt issues a single authenticated GET and returns the

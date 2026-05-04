@@ -222,6 +222,47 @@ func TestProxyPeerStreamRequest_DoesNotRetryOn200(t *testing.T) {
 	}
 }
 
+// TestSanitiseRemoteBody_TruncatesAndStripsControl checks the fallback
+// path of decodeRemoteError: a peer body full of binary or HTML
+// upstream cruft must not be propagated verbatim into the error
+// chain (which is what gets logged). We assert the truncation
+// marker and that ASCII control bytes are scrubbed.
+func TestSanitiseRemoteBody_TruncatesAndStripsControl(t *testing.T) {
+	long := make([]byte, 600)
+	for i := range long {
+		long[i] = byte(i % 256)
+	}
+	out := sanitiseRemoteBody(long)
+	if len(out) > 320 {
+		t.Fatalf("excerpt too long: %d", len(out))
+	}
+	if !contains(out, "<600 bytes total>") {
+		t.Fatalf("missing truncation marker: %q", out)
+	}
+	for _, b := range []byte(out) {
+		if b < 0x20 && b != ' ' {
+			t.Fatalf("control byte 0x%x leaked into excerpt", b)
+		}
+	}
+
+	if got := sanitiseRemoteBody(nil); got != "<empty>" {
+		t.Fatalf("empty body: got %q want <empty>", got)
+	}
+}
+
+func contains(haystack, needle string) bool {
+	return len(haystack) >= len(needle) && (haystack == needle || indexOf(haystack, needle) >= 0)
+}
+
+func indexOf(s, substr string) int {
+	for i := 0; i+len(substr) <= len(s); i++ {
+		if s[i:i+len(substr)] == substr {
+			return i
+		}
+	}
+	return -1
+}
+
 // TestProxyPeerStreamRequest_GivesUpAfterRefresh confirms the
 // refresh is one-shot. Two consecutive 401s mean something is
 // genuinely wrong (clock skew, key rotation, peer side bug) and

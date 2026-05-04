@@ -1,6 +1,7 @@
 package federation
 
 import (
+	"sort"
 	"sync"
 	"time"
 
@@ -18,6 +19,13 @@ import (
 // entries, ~100 KB. Sweep happens inline on every check; no separate
 // goroutine needed.
 //
+// Belt-and-braces ceiling: a hostile-but-paired peer that mints tokens
+// with deliberately far-future exp values would otherwise pin entries
+// in the cache past the natural sweep window. nonceCacheMaxEntries
+// caps the map and evicts the soonest-expiring nonceCacheEvictBatch
+// entries when crossed — preserving the freshest nonces (most likely
+// to actually be replayed) and dropping the staler tail.
+//
 // Concurrency: a single mutex covers the map. Federation traffic is
 // not the hot path (rate-limited to 60 req/min/peer), so contention
 // over a single lock is irrelevant compared to the SQLite writes that
@@ -28,6 +36,17 @@ type nonceCache struct {
 	mu   sync.Mutex
 	seen map[string]time.Time // nonce → expiry (when the token expires)
 }
+
+// nonceCacheMaxEntries is the hard ceiling on the cache. Sized for
+// ~30x the expected steady-state load at default rate limits, leaving
+// room for short bursts without triggering the eviction path.
+const nonceCacheMaxEntries = 10_000
+
+// nonceCacheEvictBatch is how many of the soonest-expiring entries
+// are dropped when the cache overflows. Batch eviction keeps amortised
+// cost O(1) per insert: the O(n log n) sort happens once per
+// nonceCacheEvictBatch inserts, not per insert.
+const nonceCacheEvictBatch = 2_500
 
 // newNonceCache wires an empty cache. Caller passes the same clock the
 // rest of the manager uses for deterministic tests.
@@ -68,8 +87,41 @@ func (c *nonceCache) checkAndStore(nonce string, exp time.Time) bool {
 	if _, ok := c.seen[nonce]; ok {
 		return false
 	}
+
+	// Cap eviction: a hostile peer minting tokens with far-future exp
+	// values cannot pin entries past nonceCacheMaxEntries — we drop
+	// the soonest-to-expire batch (the entries closest to natural
+	// sweep anyway) before admitting the new nonce.
+	if len(c.seen) >= nonceCacheMaxEntries {
+		c.evictOldest(nonceCacheEvictBatch)
+	}
+
 	c.seen[nonce] = exp
 	return true
+}
+
+// evictOldest drops the `n` entries with the smallest exp time. Caller
+// holds c.mu.
+func (c *nonceCache) evictOldest(n int) {
+	if n <= 0 || n >= len(c.seen) {
+		c.seen = make(map[string]time.Time)
+		return
+	}
+	// Sort entries by expiry ascending and pick the threshold. We
+	// can't iterate the map in expiry order, so a one-shot sort is
+	// the cleanest way to pick the cutoff.
+	type entry struct {
+		nonce string
+		exp   time.Time
+	}
+	all := make([]entry, 0, len(c.seen))
+	for k, v := range c.seen {
+		all = append(all, entry{k, v})
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].exp.Before(all[j].exp) })
+	for i := 0; i < n; i++ {
+		delete(c.seen, all[i].nonce)
+	}
 }
 
 // size returns the current number of tracked nonces. Test-only;
