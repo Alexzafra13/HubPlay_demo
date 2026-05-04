@@ -1021,6 +1021,97 @@ paths:
       summary: Force a cache refresh for one peer library
       responses: { "204": { description: Cache cleared (next browse call hits live) } }
 
+  # ─── Federation streaming (user-facing proxy) ───────────────────────
+  #
+  # When a user clicks play on a peer's item, their client only ever
+  # talks to OUR server. We forward to the peer with our peer JWT and
+  # stream the bytes back. The peer's hostname, peer JWT, and CORS
+  # posture stay invisible to the client.
+  #
+  # The HLS master playlist returned by the peer uses relative variant
+  # URLs scoped to /peer/stream/session/{id}/, so once the player
+  # loads our master URL its subsequent quality + segment requests
+  # come back here automatically -- no manifest rewriting on our side.
+  /me/peers/{peerID}/stream/{itemId}/session:
+    parameters:
+      - { name: peerID, in: path, required: true, schema: { type: string } }
+      - { name: itemId, in: path, required: true, schema: { type: string } }
+      - $ref: "#/components/parameters/ClientCapabilitiesHeader"
+    post:
+      tags: [federation, stream]
+      summary: Start a streaming session for a peer's item
+      description: |
+        Forwards the user's declared client capabilities to the peer's
+        own `stream.Manager` so the DirectPlay/DirectStream/Transcode
+        decision uses our caps end-to-end. Returns a `master_playlist_url`
+        scoped to the proxy under our origin -- the player loads that
+        URL and never sees the peer's hostname.
+      responses:
+        "200":
+          description: Session started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    required: [strategy, master_playlist_url, peer_session_id]
+                    properties:
+                      strategy: { type: string, enum: [direct_play, direct_stream, transcode] }
+                      master_playlist_url: { type: string, description: "Same-origin path the HLS player should load" }
+                      peer_session_id: { type: string, description: "Opaque session id assigned by the peer" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502":
+          description: Peer unreachable or rejected
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  /me/peers/{peerID}/stream/session/{sessionId}/master.m3u8:
+    parameters:
+      - { name: peerID, in: path, required: true, schema: { type: string } }
+      - { name: sessionId, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [federation, stream]
+      summary: Proxied HLS master playlist for a federated session
+      responses:
+        "200":
+          description: Master playlist
+          content:
+            application/vnd.apple.mpegurl: { schema: { type: string } }
+
+  /me/peers/{peerID}/stream/session/{sessionId}/{quality}/index.m3u8:
+    parameters:
+      - { name: peerID, in: path, required: true, schema: { type: string } }
+      - { name: sessionId, in: path, required: true, schema: { type: string } }
+      - { name: quality, in: path, required: true, schema: { type: string }, description: "Profile name (e.g. `1080p`, `720p`)" }
+    get:
+      tags: [federation, stream]
+      summary: Proxied per-quality HLS manifest
+      responses:
+        "200":
+          description: Quality manifest
+          content:
+            application/vnd.apple.mpegurl: { schema: { type: string } }
+        "503":
+          description: Manifest still being generated upstream; retry shortly
+
+  /me/peers/{peerID}/stream/session/{sessionId}/{quality}/{segment}:
+    parameters:
+      - { name: peerID, in: path, required: true, schema: { type: string } }
+      - { name: sessionId, in: path, required: true, schema: { type: string } }
+      - { name: quality, in: path, required: true, schema: { type: string } }
+      - { name: segment, in: path, required: true, schema: { type: string }, description: "Segment filename (e.g. `segment00012.ts`)" }
+    get:
+      tags: [federation, stream]
+      summary: Proxied HLS segment from a federated session
+      responses:
+        "200":
+          description: MPEG-TS segment
+          content:
+            video/mp2t: { schema: { type: string, format: binary } }
+
   # ─── Live TV (IPTV) ──────────────────────────────────────────────────
   #
   # Channels live inside an IPTV library (`content_type: livetv`). Browse

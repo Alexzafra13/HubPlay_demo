@@ -195,8 +195,21 @@ func NewRouter(deps Dependencies) http.Handler {
 				// sees libraries / items they don't have a share for.
 				r.Get("/peer/libraries", pubFed.ListLibraries)
 				r.Get("/peer/libraries/{libraryID}/items", pubFed.ListLibraryItems)
-				// Phase 5+ peer endpoints (stream session, download)
-				// get added inside this group.
+
+				// Streaming (Phase 5). Peer A asks us to spawn a
+				// stream session for one of our items; we serve HLS
+				// manifests + segments against the resulting opaque
+				// session UUID. Both ACL gated by share.CanPlay --
+				// session UUID alone is NOT sufficient.
+				if deps.StreamManager != nil && deps.Items != nil {
+					var fedStreamSvc handlers.StreamManagerService
+					fedStreamSvc = deps.StreamManager
+					fedStream := handlers.NewFederationStreamHandler(deps.Federation, fedStreamSvc, deps.Items, deps.Logger)
+					r.Post("/peer/stream/{itemId}/session", fedStream.StartSession)
+					r.Get("/peer/stream/session/{sessionId}/master.m3u8", fedStream.MasterPlaylist)
+					r.Get("/peer/stream/session/{sessionId}/{quality}/index.m3u8", fedStream.QualityPlaylist)
+					r.Get("/peer/stream/session/{sessionId}/{quality}/{segment}", fedStream.Segment)
+				}
 			})
 		}
 
@@ -281,6 +294,13 @@ func NewRouter(deps Dependencies) http.Handler {
 						r.Get("/{peerID}/libraries", mePeers.BrowsePeerLibraries)
 						r.Get("/{peerID}/libraries/{libraryID}/items", mePeers.BrowsePeerItems)
 						r.Post("/{peerID}/libraries/{libraryID}/refresh", mePeers.RefreshPeerLibrary)
+						// Streaming proxy (Phase 5). The user's HLS
+						// player only ever talks to us; we proxy
+						// the bytes from the peer with our peer JWT.
+						r.Post("/{peerID}/stream/{itemId}/session", mePeers.StartPeerStreamSession)
+						r.Get("/{peerID}/stream/session/{sessionId}/master.m3u8", mePeers.ProxyPeerStreamMaster)
+						r.Get("/{peerID}/stream/session/{sessionId}/{quality}/index.m3u8", mePeers.ProxyPeerStreamQuality)
+						r.Get("/{peerID}/stream/session/{sessionId}/{quality}/{segment}", mePeers.ProxyPeerStreamSegment)
 					})
 				}
 

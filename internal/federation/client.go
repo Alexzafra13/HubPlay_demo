@@ -1,6 +1,7 @@
 package federation
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -173,8 +174,133 @@ func decodeRemoteError(resp *http.Response) error {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
 	var er remoteErrorResponse
 	if err := json.Unmarshal(body, &er); err == nil && er.Error.Code != "" {
-		return fmt.Errorf("peer rejected: %d %s — %s", resp.StatusCode, er.Error.Code, er.Error.Message)
+		return fmt.Errorf("peer rejected: %d %s -- %s", resp.StatusCode, er.Error.Code, er.Error.Message)
 	}
 	return fmt.Errorf("peer status %d: %s", resp.StatusCode, body)
+}
+
+// PeerStreamSessionRequest is the JSON body POSTed by us (peer A) to a
+// remote peer (peer B) when a local user clicks play on a remote item.
+// The capability shape mirrors what stream.CapabilitiesFromRequest
+// produces from the X-Hubplay-Client-Capabilities header on a direct
+// client request -- so when peer B builds its waterfall decision, it
+// sees our user's caps verbatim and a Kotlin TV / Chromecast that
+// supports HEVC+EAC3+MKV gets DirectPlay through federation just as it
+// would talking to its own server.
+type PeerStreamSessionRequest struct {
+	Profile      string                  `json:"profile,omitempty"` // initial transcode profile name
+	Capabilities *PeerStreamCapabilities `json:"client_capabilities,omitempty"`
+}
+
+// PeerStreamCapabilities is the wire shape of stream.Capabilities,
+// duplicated here to avoid the federation->stream import cycle.
+// Conversion happens at the handler boundary on peer B's side.
+type PeerStreamCapabilities struct {
+	Video     []string `json:"video,omitempty"`
+	Audio     []string `json:"audio,omitempty"`
+	Container []string `json:"container,omitempty"`
+}
+
+// PeerStreamSessionResponse is the body the remote peer returns when
+// it has spawned (or attached to) a streaming session for the request.
+// MasterPath is what we feed back to our local client, rewritten to
+// proxy through us -- we never expose the remote's hostname or peer
+// JWT to the user's browser.
+type PeerStreamSessionResponse struct {
+	SessionID  string `json:"session_id"`
+	Method     string `json:"method"` // "direct_play" | "direct_stream" | "transcode"
+	MasterPath string `json:"master_path"`
+}
+
+// StartPeerStreamSession asks a paired peer to spawn a streaming
+// session for one of its items, on behalf of one of our users. The
+// remote peer uses its own stream.Manager (so its transcode budget
+// caps + hwaccel apply); we just get back a session id we'll proxy
+// HLS requests against.
+//
+// Errors: peer offline, peer revoked, item not in a shared library,
+// remote-side transcode budget full -- all surface via decodeRemoteError
+// so the caller's log sees the actual remote refusal.
+func (m *Manager) StartPeerStreamSession(ctx context.Context, peerID, itemID string, body PeerStreamSessionRequest) (*PeerStreamSessionResponse, error) {
+	peer, err := m.repo.GetPeerByID(ctx, peerID)
+	if err != nil {
+		return nil, err
+	}
+	if peer == nil || peer.Status != PeerPaired {
+		return nil, fmt.Errorf("peer %s not paired", peerID)
+	}
+
+	url, err := joinBaseURL(peer.BaseURL, fmt.Sprintf("/api/v1/peer/stream/%s/session", itemID))
+	if err != nil {
+		return nil, err
+	}
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshal stream session request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	tok, err := m.IssuePeerToken(peerID)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := m.httpClt.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("start peer stream session %s: %w", peerID, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, decodeRemoteError(resp)
+	}
+	var out PeerStreamSessionResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, fmt.Errorf("decode session response: %w", err)
+	}
+	return &out, nil
+}
+
+// ProxyPeerStreamRequest issues a GET against `path` on the remote
+// peer with our peer JWT and returns the live response. Callers MUST
+// `defer resp.Body.Close()` and stream bytes from `resp.Body` to the
+// user; the response is not buffered.
+//
+// Used for HLS manifest + segment proxying after StartPeerStreamSession.
+// The remote `path` is whatever MasterPath the session response
+// returned (or a manifest's relative reference resolved against it).
+func (m *Manager) ProxyPeerStreamRequest(ctx context.Context, peerID, path string) (*http.Response, error) {
+	peer, err := m.repo.GetPeerByID(ctx, peerID)
+	if err != nil {
+		return nil, err
+	}
+	if peer == nil || peer.Status != PeerPaired {
+		return nil, fmt.Errorf("peer %s not paired", peerID)
+	}
+
+	url, err := joinBaseURL(peer.BaseURL, path)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	tok, err := m.IssuePeerToken(peerID)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+tok)
+
+	resp, err := m.httpClt.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("proxy peer stream %s: %w", peerID, err)
+	}
+	return resp, nil
 }
 
