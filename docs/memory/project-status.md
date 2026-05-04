@@ -1,5 +1,17 @@
 # Estado del proyecto
 
+> 🌐 **Sesión 2026-05-04 (rama `claude/federated-search-frontend-6rbQm`)** — **Federación user-facing: search frontend + dropdown federado + Recently-Added rail**. 2 commits limpios sobre la rama, ambos pusheados.
+>
+> **Commit `5059191`** — *federated search wireado al `/search`*. El backend de fan-out ya estaba live desde la sesión anterior pero la página nunca lo consumía. Tapado el gap de wire (`SharedItem.LibraryID` plumb end-to-end por SQL FTS5 → client decoder → `peerSearchHitWire`) para que el click navegue a la ruta `/peers/{peer}/libraries/{lib}/items/{id}` ya registrada. Frontend: `FederationSearchHit` types, `api.searchPeers`, `usePeersSearch` hook + queryKey, sección "From your peers" en `SearchResultsView` con `PeerResultCard` (badge de peer sobre el póster). i18n `search.peerSection` + `search.fromPeer` (en + es). OpenAPI spec drift fix. Tests: backend `go test ./... -count=1` verde · frontend 384/384 · tsc + build limpios.
+>
+> **Commit `888c20c`** — *peer hits en topbar dropdown + "Recently added on peers" home rail*. Backend nuevo end-to-end: sqlc query `ListRecentSharedItems` (JOIN con `federation_library_shares` para ACL, `ORDER BY i.added_at DESC`, selecciona `library_id`) · origen expone `GET /peer/recent` bajo `RequirePeerJWT` · `Manager.FetchPeerRecent` + `RecentFromAllPeers` (mismo timeout/skip-error pattern que el search) · consumidor expone `GET /me/peers/recent` (mismo `peerSearchHitWire`) · OpenAPI + drift allowlist actualizados · test `TestRecentFromAllPeers_AggregatesAndAttributes`. Frontend: `usePeerRecent` (60s staleTime) · `PeerRecentRail` con `PosterCard` + `cornerBadge` "Shared by Pedro" · wired bajo las layout-driven sections en `Home.tsx`, **auto-oculta cuando no hay hits** (deployment solitario ve home idéntico al pre-federación). `SearchBar` topbar ahora dispara `usePeersSearch` mientras escribes — local hits aparecen al instante, peer hits joinan como sección sin volver el panel a spinner; click cierra el dropdown y limpia query.
+>
+> **Verificación**: `go test ./... -count=1` → todo verde (incluye `internal/federation`, `internal/api`, `internal/api/handlers`, `internal/db`) · web `vitest run` 384/384 · `tsc --noEmit` limpio · production build limpio · sin nuevos errores de lint en archivos tocados.
+>
+> **Diferido a próxima sesión** (multi-hour, scope grande): `federation_progress` table + Continue Watching cross-peer. Migración 028 + sqlc + endpoint `PUT /me/peers/{peerID}/progress/{remoteItemId}` + integración en `VideoPlayer` para distinguir item federado (hoy llama a `updateProgress` local que solo soporta items locales) + endpoint `GET /me/peers/continue-watching` o extensión del local con flag `is_remote` + adapter en el rail Continue Watching existente. Sin esto, un user que ve un movie federado pierde la posición.
+>
+> **También pendientes** (cola priorizada al final del archivo): subtítulos federados (~2h), Phase 6 Live TV peering (sin empezar), smoke real con dos servers paireados (manual, nunca hecho), `MaxConcurrentStreams` por peer, promover `peer_recent` a `HomeSection` configurable.
+
 > 🛡️ **Sesión 2026-05-04 (rama `claude/review-federation-implementation-BZyli`, PR abierta)** — **Senior review de federación + 3 slices**. Tras review exhaustivo cerrados 4 P1 declarados (sweeper HLS sin wirar, `IssuePeerToken` con `context.Background()`, sin retry/backoff en client peer, JWT no se refresca mid-stream), añadido cap+LRU al nonce cache, sanitizer de body en `decodeRemoteError`, observabilidad Prometheus completa (5 collectors federation), **migración `federation_repository.go` a sqlc cerrando ADR-001** (760 LOC raw → 480 LOC tipado), y **federated search con fan-out backend completo** (origin `GET /peer/search` + manager `SearchAllPeers` con timeout 2s/peer + consumer `GET /me/peers/search` + 11 tests). 4 commits sobre la rama. Backend `go test -count=1 ./...` → todo verde. Frontend de search deferred (no hay `pnpm` instalable en el entorno).
 
 > 🎯 **Sesión 2026-05-04 (rama `claude/plex-federation-implementation-HUycl`, mergeada a `main`)** — **Phase 5 Slice 2 cerrada end-to-end Plex-style**. Federación P2P es ahora una feature completa visible-y-jugable en la UI: el peer aparece en el sidebar como navegación de primer nivel, `PeerLibraryItemsPage` usa el mismo `PosterCard` + `MediaGrid` que las locales con badge "shared by X" inline, nueva `PeerItemDetail` con Play que llama a `POST /me/peers/{peerID}/stream/{itemId}/session` y reproduce con el `VideoPlayer` existente, **posters proxiados** por origen (nuevo `GET /api/v1/peer/items/{itemId}/poster` server-to-server + `GET /api/v1/me/peers/{peerID}/items/{itemId}/poster` consumer), migración 027 añade `has_poster` al cache de federación, **tests de handler** (404 sin `can_play`, 404 sin share en poster). Backend verde · frontend 384/384 · tsc + build limpios. Phase 5 entera cerrada.
@@ -1218,10 +1230,28 @@ Trabajo que **sube en la cola** porque la app TV lo necesita:
     - **Phase 5 — slice 1 (backend remote streaming) ✅ shipped 2026-05-04** (`bbafd56`).
       `POST /peer/stream/{itemId}/session` + HLS proxy round-trip funcionan;
       `client_stream_test.go` cubre el wire format.
-    - **Phase 5 — slice 2 (frontend Plex-style + per-peer caps + federation_progress)**
-      pendiente. Plan detallado en el bloque "Sesión 2026-05-04 → Slice 2"
-      al inicio de este doc.
-    - **Phase 6 — Live TV peering**: pendiente.
+    - **Phase 5 — slice 2 (frontend Plex-style)** ✅ **shipped 2026-05-04**
+      (`209aa53`). Sidebar peer-as-library, `PeerItemDetail`, posters proxiados.
+    - **Federated search frontend (search page + topbar dropdown)** ✅
+      **shipped 2026-05-04** (commits `5059191` + `888c20c`).
+    - **Recently-Added on peers home rail** ✅ **shipped 2026-05-04**
+      (commit `888c20c`).
+    - **`federation_progress` table + Continue Watching cross-peer**:
+      pendiente. Migración 028 + sqlc + endpoint progreso por peer +
+      integración player + endpoint listar + adapter en rail. ~3-4h.
+      Sin esto, ves un movie federado, lo pausas, mañana no recuperas
+      la posición.
+    - **Subtítulos federados**: pendiente (~2h). Master.m3u8 federado
+      no proxia tracks de subs.
+    - **Smoke real con dos servers paireados**: trabajo manual
+      pendiente. `docker-compose.federation-test.yml` existe, nunca
+      se ha probado el botón Play end-to-end con dos servers reales.
+    - **`MaxConcurrentStreams` por peer**: hoy compiten contra el
+      cap global `MaxReencodeSessions`. Pendiente.
+    - **Promover `peer_recent` a `HomeSection` configurable**: hoy
+      el rail vive fuera del layout-driven dispatch. Ampliar
+      `validSectionType` + UI en `HomeLayoutSettings`.
+    - **Phase 6 — Live TV peering**: pendiente, no empezado.
     - **Phase 7 — Download to local + audit log UI**: pendiente.
 
 ### **P3 · Diferenciadores estratégicos** (semanas, no días)
