@@ -39,6 +39,7 @@
     "users": "Users",
     "system": "System",
     "peers": "Connected servers",
+    "peerServers": "Connected servers",
     "expandSidebar": "Expand sidebar",
     "collapseSidebar": "Collapse sidebar",
     "toggleMenu": "Toggle menu",
@@ -115,7 +116,12 @@
     "prev": "Previous",
     "next": "Next",
     "pageOf": "Page {{current}} of {{total}}",
-    "unreachable": "Couldn't reach the peer: {{error}}"
+    "unreachable": "Couldn't reach the peer: {{error}}",
+    "play": "Play",
+    "playFailed": "Couldn't start playback: {{error}}",
+    "backToLibrary": "Back to library",
+    "itemNotFoundTitle": "Item not available",
+    "itemNotFoundDescription": "We couldn't find this title in the peer's catalog. It may have been removed or the share scope changed."
   },
   "watchTonight": {
     "tonight": "For tonight",

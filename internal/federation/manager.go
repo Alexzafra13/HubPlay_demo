@@ -809,6 +809,15 @@ func (m *Manager) RevokePeer(ctx context.Context, peerID string) error {
 // Internal helpers
 // ────────────────────────────────────────────────────────────────────
 
+// RefreshPeerCache repopulates the in-memory paired-peers cache from
+// the repository. Exposed for tests that insert peer rows directly
+// (bypassing the handshake flow) so JWT validation can find them.
+// Production callers go through ProbePeer / AcceptInvite / RevokePeer
+// which all refresh the cache themselves.
+func (m *Manager) RefreshPeerCache(ctx context.Context) error {
+	return m.refreshPeerCache(ctx)
+}
+
 func (m *Manager) refreshPeerCache(ctx context.Context) error {
 	peers, err := m.repo.ListPeers(ctx)
 	if err != nil {

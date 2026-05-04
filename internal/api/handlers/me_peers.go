@@ -136,6 +136,19 @@ func (h *MePeersHandler) BrowsePeerLibraries(w http.ResponseWriter, r *http.Requ
 	respondJSON(w, http.StatusOK, map[string]any{"data": libs})
 }
 
+// peerItemWire is the user-facing item shape. Mirrors federation.SharedItem
+// with one synthetic addition: `poster_url` is rewritten on this side
+// so the user's browser only ever asks our origin (proxied via peer
+// JWT). The peer's URL never reaches the client.
+type peerItemWire struct {
+	ID        string `json:"id"`
+	Type      string `json:"type"`
+	Title     string `json:"title"`
+	Year      int    `json:"year,omitempty"`
+	Overview  string `json:"overview,omitempty"`
+	PosterURL string `json:"poster_url,omitempty"`
+}
+
 // BrowsePeerItems returns paginated items in a peer's library. Reads
 // through the catalog cache: serves from cache if fresh, otherwise
 // fetches live and writes to cache.
@@ -143,6 +156,12 @@ func (h *MePeersHandler) BrowsePeerLibraries(w http.ResponseWriter, r *http.Requ
 // Response includes a `from_cache` flag so the UI can show a
 // "cached / offline" badge when serving stale data because peer is
 // unreachable.
+//
+// Per-item `poster_url` is synthesized on this side as a same-origin
+// path; the user's browser fetches the bytes via our proxy without
+// learning the peer's hostname. Items where the peer reported
+// has_poster=false get no poster_url (the card falls back to the
+// dominant-colour placeholder).
 func (h *MePeersHandler) BrowsePeerItems(w http.ResponseWriter, r *http.Request) {
 	peerID := chi.URLParam(r, "peerID")
 	libraryID := chi.URLParam(r, "libraryID")
@@ -160,9 +179,25 @@ func (h *MePeersHandler) BrowsePeerItems(w http.ResponseWriter, r *http.Request)
 		respondError(w, r, http.StatusBadGateway, "PEER_UNREACHABLE", err.Error())
 		return
 	}
+
+	out := make([]peerItemWire, 0, len(items))
+	for _, it := range items {
+		row := peerItemWire{
+			ID:       it.ID,
+			Type:     it.Type,
+			Title:    it.Title,
+			Year:     it.Year,
+			Overview: it.Overview,
+		}
+		if it.HasPoster {
+			row.PosterURL = "/api/v1/me/peers/" + peerID + "/items/" + it.ID + "/poster"
+		}
+		out = append(out, row)
+	}
+
 	respondJSON(w, http.StatusOK, map[string]any{
 		"data": map[string]any{
-			"items":      items,
+			"items":      out,
 			"total":      total,
 			"from_cache": fromCache,
 		},

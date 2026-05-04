@@ -1,6 +1,6 @@
 import { memo, useState } from "react";
 import { Link } from "react-router";
-import type { FC } from "react";
+import type { FC, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { MediaItem } from "@/api/types";
 import { thumb } from "@/utils/imageUrl";
@@ -20,6 +20,20 @@ interface PosterCardProps {
    * explicitly to avoid round-tripping through the item.
    */
   progress?: number;
+  /**
+   * Optional explicit destination href. Default is `/movies/{id}` for
+   * `type === 'series'` falls through to `/series/{id}`. Federated
+   * grids pass `/peers/{peerID}/items/{itemID}` so the same card
+   * routes into the per-peer detail page instead of the local one.
+   */
+  href?: string;
+  /**
+   * Optional badge node rendered at the bottom-left of the poster.
+   * Used by federated grids to attribute the source peer ("Pedro",
+   * "Maria") so the user can tell at a glance whether the card is
+   * local or remote without changing the rest of the layout.
+   */
+  cornerBadge?: ReactNode;
   onClick?: () => void;
 }
 
@@ -27,9 +41,10 @@ function formatRating(rating: number): string {
   return rating.toFixed(1);
 }
 
-const PosterCard: FC<PosterCardProps> = memo(({ item, progress, onClick }) => {
+const PosterCard: FC<PosterCardProps> = memo(({ item, progress, href, cornerBadge, onClick }) => {
   const { t } = useTranslation();
-  const href = item.type === "series" ? `/series/${item.id}` : `/movies/${item.id}`;
+  const resolvedHref =
+    href ?? (item.type === "series" ? `/series/${item.id}` : `/movies/${item.id}`);
 
   const ud = item.user_data;
   const watched = ud?.played === true;
@@ -48,7 +63,7 @@ const PosterCard: FC<PosterCardProps> = memo(({ item, progress, onClick }) => {
 
   return (
     <Link
-      to={href}
+      to={resolvedHref}
       onClick={onClick}
       className="group flex flex-col outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg-card rounded-[--radius-lg]"
     >
@@ -126,6 +141,16 @@ const PosterCard: FC<PosterCardProps> = memo(({ item, progress, onClick }) => {
             <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
             </svg>
+          </div>
+        )}
+
+        {/* Source attribution badge — bottom-left. Federated grids
+            pass a peer-name pill here so the user can tell at a
+            glance which server a card came from. Local rails leave
+            the prop unset and the badge isn't rendered. */}
+        {cornerBadge && (
+          <div className="absolute bottom-2 left-2 max-w-[80%]">
+            {cornerBadge}
           </div>
         )}
 

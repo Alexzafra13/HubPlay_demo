@@ -126,6 +126,29 @@ func NewRouter(deps Dependencies) http.Handler {
 	}
 	healthHandler := handlers.NewHealthHandler(deps.Database, streamSvc, deps.Version)
 
+	// Image handler is constructed early so the federation peer
+	// surface (under /api/v1/peer/*, mounted BEFORE the user-auth
+	// middleware group below) can reuse the same path-mapping store +
+	// thumbnail cache as the local /images/file/{id} endpoint. The
+	// local route is still registered down inside the auth-protected
+	// group; this just lifts the constructor out so both share one
+	// instance and stay perfectly cache-coherent.
+	var (
+		fedImgSrv   *handlers.ImageHandler
+		fedImageDir string
+	)
+	if deps.Database != nil && deps.Config != nil && deps.Images != nil && deps.ExternalIDs != nil && deps.Items != nil && deps.Providers != nil {
+		fedImageDir = filepath.Join(filepath.Dir(deps.Config.Database.Path), "images")
+		fedImgSrv = handlers.NewImageHandler(
+			deps.Images, deps.ExternalIDs, deps.Items, deps.Providers,
+			library.NewImageRefresher(
+				deps.Items, deps.ExternalIDs, deps.Images, deps.Providers,
+				pathmap.New(fedImageDir), fedImageDir, deps.Logger,
+			),
+			fedImageDir, deps.Logger,
+		)
+	}
+
 	// Public routes
 	r.Route("/api/v1", func(r chi.Router) {
 		// Health check (no auth)
@@ -213,6 +236,17 @@ func NewRouter(deps Dependencies) http.Handler {
 					r.Get("/peer/stream/session/{sessionId}/{quality}/index.m3u8", fedStream.QualityPlaylist)
 					r.Get("/peer/stream/session/{sessionId}/{quality}/{segment}", fedStream.Segment)
 				}
+
+				// Poster proxy (Phase 5 Slice 2). The peer's catalog
+				// UI fetches each item's poster bytes through here so
+				// users on the peer never contact this server directly
+				// (no IP / UA leak) and we can re-verify CanBrowse on
+				// every fetch (a peer that lost a share since the
+				// catalog cached locally cannot keep pulling artwork).
+				if deps.Items != nil && deps.Images != nil && fedImgSrv != nil {
+					fedImg := handlers.NewFederationImageHandler(deps.Federation, deps.Items, deps.Images, fedImgSrv, deps.Logger)
+					r.Get("/peer/items/{itemId}/poster", fedImg.ItemPoster)
+				}
 			})
 		}
 
@@ -297,6 +331,11 @@ func NewRouter(deps Dependencies) http.Handler {
 						r.Get("/{peerID}/libraries", mePeers.BrowsePeerLibraries)
 						r.Get("/{peerID}/libraries/{libraryID}/items", mePeers.BrowsePeerItems)
 						r.Post("/{peerID}/libraries/{libraryID}/refresh", mePeers.RefreshPeerLibrary)
+						// Poster proxy. The PosterCard's <img src> hits
+						// this endpoint and we relay the bytes from the
+						// peer with our peer JWT. Same-origin so no CORS,
+						// and the peer never sees the user's IP / UA.
+						r.Get("/{peerID}/items/{itemId}/poster", mePeers.ProxyPeerItemPoster)
 						// Streaming proxy (Phase 5). The user's HLS
 						// player only ever talks to us; we proxy
 						// the bytes from the peer with our peer JWT.
@@ -610,17 +649,13 @@ func NewRouter(deps Dependencies) http.Handler {
 				})
 			}
 
-			// Image management
-			if deps.Images != nil && deps.Providers != nil && deps.ExternalIDs != nil {
-				imageDir := filepath.Join(filepath.Dir(deps.Config.Database.Path), "images")
-				imageRefresher := library.NewImageRefresher(
-					deps.Items, deps.ExternalIDs, deps.Images, deps.Providers,
-					pathmap.New(imageDir), imageDir, deps.Logger,
-				)
-				imgHandler := handlers.NewImageHandler(
-					deps.Images, deps.ExternalIDs, deps.Items, deps.Providers,
-					imageRefresher, imageDir, deps.Logger,
-				)
+			// Image management — reuse the handler lifted above so the
+			// peer-facing federation poster endpoint and the local
+			// /images/file/{id} endpoint share one path-mapping store
+			// and one thumbnail cache.
+			if deps.Images != nil && deps.Providers != nil && deps.ExternalIDs != nil && fedImgSrv != nil {
+				imageDir := fedImageDir
+				imgHandler := fedImgSrv
 
 				// Image management (nested under items)
 				r.Route("/items/{id}/images", func(r chi.Router) {

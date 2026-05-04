@@ -33,11 +33,12 @@ type remoteSharedLibrary struct {
 }
 
 type remoteSharedItem struct {
-	ID       string `json:"id"`
-	Type     string `json:"type"`
-	Title    string `json:"title"`
-	Year     int    `json:"year,omitempty"`
-	Overview string `json:"overview,omitempty"`
+	ID        string `json:"id"`
+	Type      string `json:"type"`
+	Title     string `json:"title"`
+	Year      int    `json:"year,omitempty"`
+	Overview  string `json:"overview,omitempty"`
+	HasPoster bool   `json:"has_poster,omitempty"`
 }
 
 type remoteItemsResponse struct {
@@ -160,11 +161,12 @@ func (m *Manager) FetchPeerItems(ctx context.Context, peerID, libraryID string, 
 	out := make([]*SharedItem, 0, len(wire.Items))
 	for _, w := range wire.Items {
 		out = append(out, &SharedItem{
-			ID:       w.ID,
-			Type:     w.Type,
-			Title:    w.Title,
-			Year:     w.Year,
-			Overview: w.Overview,
+			ID:        w.ID,
+			Type:      w.Type,
+			Title:     w.Title,
+			Year:      w.Year,
+			Overview:  w.Overview,
+			HasPoster: w.HasPoster,
 		})
 	}
 	return out, wire.Total, nil
@@ -264,6 +266,17 @@ func (m *Manager) StartPeerStreamSession(ctx context.Context, peerID, itemID str
 		return nil, fmt.Errorf("decode session response: %w", err)
 	}
 	return &out, nil
+}
+
+// ProxyPeerItemPoster fetches a peer item's poster bytes through
+// authenticated GET /api/v1/peer/items/{itemId}/poster. The remote
+// re-verifies the calling peer (us) still has CanBrowse on the item's
+// library, so a peer that lost a share can no longer read posters
+// even if it cached the item id locally.
+//
+// Caller MUST defer resp.Body.Close(); the response is not buffered.
+func (m *Manager) ProxyPeerItemPoster(ctx context.Context, peerID, itemID string) (*http.Response, error) {
+	return m.ProxyPeerStreamRequest(ctx, peerID, fmt.Sprintf("/api/v1/peer/items/%s/poster", itemID))
 }
 
 // ProxyPeerStreamRequest issues a GET against `path` on the remote

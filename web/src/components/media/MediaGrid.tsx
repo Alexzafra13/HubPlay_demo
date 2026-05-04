@@ -1,5 +1,5 @@
 import { useRef, useState, useEffect, useCallback } from "react";
-import type { FC } from "react";
+import type { FC, ReactNode } from "react";
 import type { MediaItem } from "@/api/types";
 import { Skeleton } from "@/components/common/Skeleton";
 import { EmptyState } from "@/components/common/EmptyState";
@@ -9,6 +9,19 @@ interface MediaGridProps {
   items: MediaItem[];
   loading: boolean;
   emptyMessage?: string;
+  /**
+   * Optional per-item href builder. When provided, every PosterCard
+   * uses this to derive its destination instead of the default
+   * `/movies/{id}` / `/series/{id}` mapping. Federated grids pass a
+   * builder that returns `/peers/{peerID}/items/{itemID}` so the
+   * same grid component routes into a different detail page.
+   */
+  hrefFor?: (item: MediaItem) => string;
+  /**
+   * Optional per-item badge node rendered at the bottom-left of each
+   * card. Federated grids use this to attribute the source peer.
+   */
+  cornerBadgeFor?: (item: MediaItem) => ReactNode;
 }
 
 const SKELETON_COUNT = 8;
@@ -18,6 +31,8 @@ const MediaGrid: FC<MediaGridProps> = ({
   items,
   loading,
   emptyMessage = "No items found",
+  hrefFor,
+  cornerBadgeFor,
 }) => {
   const [visibleCount, setVisibleCount] = useState(BATCH_SIZE);
   // Track the items reference so we can reset visibleCount during render
@@ -93,7 +108,12 @@ const MediaGrid: FC<MediaGridProps> = ({
     <>
       <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] sm:grid-cols-[repeat(auto-fill,minmax(200px,1fr))] lg:grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">
         {visible.map((item) => (
-          <PosterCard key={item.id} item={item} />
+          <PosterCard
+            key={item.id}
+            item={item}
+            href={hrefFor?.(item)}
+            cornerBadge={cornerBadgeFor?.(item)}
+          />
         ))}
       </div>
       {visibleCount < items.length && (
