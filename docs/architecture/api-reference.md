@@ -533,11 +533,23 @@ All subsequent segment/playlist requests include `?token=session-token`.
 
 ### Federated Streaming
 
+Origin side (server-to-server, peer JWT) — Phase 5 slice 1 shipped 2026-05-04:
+
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| POST | `/federation/stream/{itemId}/session` | Peer JWT | Request stream session |
-| GET | `/federation/stream/session/{id}/*.m3u8` | Session | HLS playlists |
-| GET | `/federation/stream/session/{id}/*/*.ts` | Session | HLS segments |
+| POST | `/peer/stream/{itemId}/session` | Peer JWT | Request stream session for one of OUR items (gates on share.CanPlay) |
+| GET | `/peer/stream/session/{id}/master.m3u8` | Peer JWT | HLS master playlist (relative variants) |
+| GET | `/peer/stream/session/{id}/{quality}/index.m3u8` | Peer JWT | Per-quality manifest |
+| GET | `/peer/stream/session/{id}/{quality}/{segment}` | Peer JWT | HLS segment |
+
+Consumer side (user-facing proxy, normal user session):
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| POST | `/me/peers/{peerID}/stream/{itemId}/session` | User | Start session via peer; returns same-origin master URL |
+| GET | `/me/peers/{peerID}/stream/session/{sid}/master.m3u8` | User | Proxied master |
+| GET | `/me/peers/{peerID}/stream/session/{sid}/{quality}/index.m3u8` | User | Proxied quality manifest |
+| GET | `/me/peers/{peerID}/stream/session/{sid}/{quality}/{segment}` | User | Proxied segment |
 
 ### Federated Download (if permitted)
 

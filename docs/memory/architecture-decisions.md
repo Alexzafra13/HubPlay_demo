@@ -817,7 +817,7 @@ Federation **no introduce primitivas nuevas donde existen las útiles**. La nuev
 | Per-request peer JWT (EdDSA en vez de HS256) | `auth/jwt.go` con `EdDSA` algorithm variant añadido; mismo claims plumbing. |
 | Token bucket per-peer | Estructura nueva `RateLimiter` en `federation/ratelimit.go` que **mira igual** que `auth/ratelimit.go` — la simplicidad del primitive (~50 LOC) hace que copy + adaptar sea más limpio que generic-ifyingla original. Ambas implementaciones convergen al mismo shape. |
 | Federation events (peer.linked, peer.audit, etc.) | `event/bus.go` con tipos nuevos (`federation.peer_linked`, etc.). Subscribers existentes consumen sin special-casing. |
-| Stream session para peer requests (Phase 5) | `stream/manager.go` con `scope=peer` y `remote_user_pk` (Phase 5+ no shipped todavía). |
+| Stream session para peer requests (Phase 5) | `stream/manager.go` reusado con `userID = peer:{peerID}` namespace; sesiones federation comparten el `MaxReencodeSessions` cap con locales. **Slice 1 backend shipped 2026-05-04** (`bbafd56`); slice 2 (frontend Play button + per-peer caps + federation_progress) pendiente. |
 | Live TV stream proxying (Phase 6) | `iptv/transmux.go::TransmuxManager.StartLocked` — federation viewers como readers adicionales en la sesión compartida (Phase 6+ no shipped). |
 | Error kinds | `domain/errors.go` extendido con `ErrPeerNotFound`, `ErrPeerKeyMismatch`, `ErrPeerRevoked`, `ErrPeerUnauthorized`, etc. Mapping a HTTP es uniforme con resto del API. |
 
@@ -834,7 +834,7 @@ Lo único **realmente nuevo**:
 **Positivas**
 
 - Surface nueva ~3000 LOC vs. estimación inicial de 8000+. La diferencia es código que NO se escribió porque ya existía.
-- Capabilities, hwaccel, transcode budget, idle reaper — todo aplica AUTOMÁTICAMENTE a streaming federation (Phase 5+) sin cambios. Un peer A streaming desde peer B usa el mismo `MaxReencodeSessions` cap que un usuario local.
+- Capabilities, hwaccel, transcode budget, idle reaper — todo aplica AUTOMÁTICAMENTE a streaming federation. Un peer A streaming desde peer B usa el mismo `MaxReencodeSessions` cap que un usuario local. **Confirmed empíricamente en Phase 5 slice 1 (2026-05-04)**: la implementación reusa `stream.Manager.StartSession` con `userID = "peer:{peerID}"` y heredó cero código nuevo de transcoding.
 - Audit log + ratelimit + JWT validation share testing patterns con auth — el patrón de `withClock` injection, in-memory fakes, AssertJSON helpers se reusa.
 - Observability gratis: `event.Bus` ya tiene SSE downstream, así que admin UI live-updates al pair/revoke sin poll.
 - Bugfixes en primitives (mejorar `imaging.SafeGet`, refinar token bucket) benefician federation sin tocar federation code.
@@ -843,7 +843,7 @@ Lo único **realmente nuevo**:
 
 - **Acoplamiento de versiones**: actualizar `auth/jwt.go` para soportar EdDSA forzó schema de claims updates en federación al mismo tiempo. Trade-off menor pero real — los packages no son independientes.
 - **`federation/ratelimit.go` no fue genericified contra `auth/ratelimit.go`**: ~50 LOC duplicados. Decisión consciente: el coste de un generic abstraction (interface design, refactor de tests, pérdida de claridad en cada call site) excede el de mantener dos copias paralelas para un total de ~100 LOC.
-- **El repo `internal/db/federation_repository.go` no es sqlc todavía** (ADR-001 dice sqlc-only). Ship-first decision: la urgencia de cerrar Phases 1-4 ganó sobre la consistencia. Backfill tracked en deuda P3.
+- **El repo `internal/db/federation_repository.go` no es sqlc todavía** (ADR-001 dice sqlc-only). Ship-first decision: la urgencia de cerrar Phases 1-4 ganó sobre la consistencia. Backfill tracked en deuda P3. **Nota 2026-05-04**: ya **NO está bloqueado por sqlc** (era el bloqueo declarado en el snapshot de 2026-04-30); el sqlc lockdown se levantó al ejecutar el playbook completo de migración. Solo lo bloquea trabajo manual.
 - **Surface API peer-to-peer crece sin OpenAPI spec** (ver P1.5). Para un feature donde la promesa es "tu server habla con otros HubPlays" o "alguien podría escribir un cliente Kotlin/Swift que consuma esta API", la falta de un schema versionado se siente más urgente que para los endpoints user-facing.
 
 ### Alternativas descartadas
@@ -854,3 +854,44 @@ Lo único **realmente nuevo**:
 - **Mantener `federation/ratelimit.go` y `auth/ratelimit.go` como un solo paquete reutilizado**: rechazado. Las semánticas divergen sutilmente — auth ratelimit es per-IP con burst muy bajo (login attempts), federation es per-peer con bursts permisivos (catalog sync). Una abstracción unificada habría llevado opciones que oscurecen call sites.
 - **Auditor síncrono in-line** (write per-request en `RequirePeerJWT` antes de devolver): rechazado. El SQLite write añade ~5-10ms al hot path peer-to-peer; el audit es por definición no-critical; mejor async + tolerate-drop documentado.
 - **Persistencia del rate-limit state cross-restart** (`federation_rate_limit_state` table existe pero no se usa): pospuesto a Phase 2.5+. Self-hosted con un puñado de peers es ok perdiendo el estado en restart; un peer hostil que aprovechaba el restart para una nueva burst window queda frente a un cap más tarde por el resto del minuto.
+
+
+## ADR-013 — sqlc tolera mal UTF-8 multi-byte en comentarios y `?` anidado en `NOT(...)`
+
+**Fecha**: 2026-05-04
+**Estado**: Vigente. Drift test en CI lo enforzaa (`internal/db/sqlc_drift_test.go`).
+
+### Contexto
+
+El snapshot de project-status.md del 2026-04-30 declaraba "sqlc 1.29 está roto, no corras `make sqlc`". En 2026-05-04 reproduje empíricamente el bug con sqlc 1.27.0, 1.29.0 y 1.31.1: **los tres rompen el regen** de las queries actuales por dos bugs distintos del parser. La narrativa "una versión específica está rota" era incorrecta.
+
+### Decisión
+
+Documentar dos patrones SQL que son tóxicos para el parser de sqlc (independiente de la versión) y enforzarlos vía drift test:
+
+1. **Caracteres no-ASCII en comentarios SQL**. Em-dashes (`—`), acentos (`á í ó`), backticks, comillas tipográficas. El parser cuenta bytes vs caracteres mal en UTF-8 multi-byte y a partir del primer char no-ASCII las posiciones quedan desplazadas N bytes. Resultado: queries posteriores salen truncadas en los últimos 1-2 caracteres (`LIMIT ?` → `LIMIT`, `'season'` → `'seaso`). El char dropeado se "filtra" al inicio de la siguiente query como `?;` o `';`.
+2. **`?` placeholders dentro de cláusulas `NOT (...)`**. sqlc no detecta el parámetro anidado y lo descarta del struct `Params`. La SQL string se mantiene con un `?` colgando → SQLite recibe un parámetro sin valor → error en runtime.
+
+Convenciones (enforzadas por el drift test que regen-against-scratch en CI):
+
+- **Comentarios SQL en ASCII puro**. Si necesitas un guion largo, usa `--` (que ya es comment-marker SQL).
+- **Si una query tiene `?` que naturalmente caería dentro de `NOT(...)`, reescribir con DeMorgan** y un guard `IS NOT NULL` para preservar la semántica three-valued cuando la columna es nullable.
+- **`sqlc.arg('name')` no es estable en SQLite** (en algunos contextos sqlc 1.31 lo deja como literal en el SQL string). Usar `?` posicional. Si la auto-naming de sqlc no gusta, renombrar en la repo layer.
+
+### Consecuencias
+
+**Positivas**
+
+- **CI catches regression**: cualquier PR que añada un patrón parser-hostile falla el drift test antes de mergear. La trampa que acechaba ya no puede acechar.
+- **`make sqlc` desbloqueado**: la versión pinada (`SQLC_VERSION=v1.31.1` en Makefile) regenera limpio. Cualquier feature backend que necesite queries nuevas ya no está bloqueado.
+- **Type drift propagated**: la regen también introdujo `bool` (no `sql.NullBool`) para columnas `BOOLEAN NOT NULL` y `string` para `TEXT NOT NULL`. Más correcto, alineado con el schema.
+
+**Negativas**
+
+- **Comentarios SQL en español pierden tipografía bonita**. Em-dashes y acentos no se pueden usar en `*.sql`. Los comentarios en español usan ASCII (`--` en vez de `—`, `Regeneracion` sin tilde, etc.). Trade-off menor — los `.go` y `.md` siguen aceptando UTF-8 normal.
+- **Workaround DeMorgan ofusca queries**. La `ContinueWatching` es ahora más larga y menos legible que la versión original con `NOT (...)`. Comentario explicativo dentro del .sql lo aclara, pero un dev nuevo va a preguntar "¿por qué no usar `NOT`?".
+
+### Lecciones
+
+- **Empirizar antes de creer documentación previa**: el snapshot del 2026-04-30 afirmaba "1.29 es la rota" sin reproducir contra 1.27. Probar en sucio destapó el bug-pattern (no el bug-version).
+- **Defensive workaround ≠ fix**: la primera reacción fue añadir un guard al Makefile que rechaza `make sqlc` (commit `153e4de`). El usuario pidió "robusto para siempre", lo que forzó la cirugía completa (commit `dc80538`). El guard estaba bien para una sesión de bridge, no como solución terminal.
