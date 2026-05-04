@@ -43,7 +43,34 @@ lint:
 	golangci-lint run ./...
 
 ## sqlc: Generate Go code from SQL queries
+##
+## DO NOT RUN unless you know what you're doing. The committed
+## internal/db/sqlc/*.sql.go files are the source of truth — running
+## sqlc generate on the current queries with sqlc 1.27/1.29/1.31 corrupts
+## the output (em-dashes in comments + parameter detection inside
+## `NOT (...)` clauses). The committed files were produced by an older
+## sqlc build that didn't have these bugs. See
+## docs/memory/conventions.md ("sqlc regeneration is locked").
+##
+## When you genuinely need to add a new query, start a dedicated
+## migration session (see the "sqlc lockdown" section in conventions.md
+## for the playbook). The guard below makes accidental triggering hard;
+## set HUBPLAY_REGEN_SQLC=1 to bypass when you've read the playbook and
+## know what you're doing.
 sqlc:
+	@if [ "$(HUBPLAY_REGEN_SQLC)" != "1" ]; then \
+		echo ""; \
+		echo "  refusing to run 'sqlc generate'."; \
+		echo ""; \
+		echo "  the committed internal/db/sqlc/*.sql.go files are hand-validated;"; \
+		echo "  current sqlc versions corrupt the output. see"; \
+		echo "  docs/memory/conventions.md  ->  'sqlc regeneration is locked'."; \
+		echo ""; \
+		echo "  to bypass when you genuinely know what you're doing:"; \
+		echo "    HUBPLAY_REGEN_SQLC=1 make sqlc"; \
+		echo ""; \
+		exit 1; \
+	fi
 	sqlc generate
 
 ## sqlc-check: Verify queries are valid (CI)

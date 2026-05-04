@@ -88,23 +88,82 @@ igual en el dominio, SQLite queda limpio).
 
 ---
 
-## Regeneración sqlc
+## Regeneración sqlc → **bloqueada** (lockdown)
 
-Después de editar cualquier `internal/db/queries/*.sql` **o** cualquier
-`migrations/sqlite/*.sql`:
+> ⚠️ `make sqlc` está protegido por un guard. **No corras `sqlc generate`
+> contra las queries actuales**. Los ficheros `internal/db/sqlc/*.sql.go`
+> commiteados son la fuente de verdad funcional; los ha validado a mano
+> alguien que sabía qué hacer. La bombilla está fuera del enchufe a
+> propósito.
 
-```powershell
-# Windows con Docker Desktop (sin instalar sqlc)
-docker run --rm -v "${PWD}:/src" -w /src sqlc/sqlc generate
+### Por qué
 
-# Cualquier OS con sqlc instalado
-sqlc generate
-# o
-make sqlc
+Confirmado empíricamente con sqlc 1.27.0, 1.29.0 y 1.31.1 (sesión
+2026-05-04): los tres producen output corrupto al regenerar las queries
+actuales por dos bugs distintos:
+
+1. **Em-dashes (`—`) en comentarios SQL**. El parser de sqlc cuenta
+   bytes vs caracteres mal en UTF-8 multi-byte y a partir del em-dash
+   las posiciones quedan desplazadas N bytes. Síntoma: queries
+   posteriores salen truncadas en los últimos 1-2 caracteres
+   (`LIMIT ?` → `LIMIT`, `'season'` → `'seaso`, `LIMIT ? OFFSET ?` →
+   `LIMIT ? OFFSET`). Los caracteres descartados se "filtran" al
+   inicio de la siguiente query como `?;` o `';`.
+   Ficheros con em-dashes hoy: `chapters.sql` (1), `people.sql` (4),
+   `user_data.sql` (1).
+
+2. **Parámetros `?` dentro de `NOT (...)`**. sqlc no detecta el
+   placeholder anidado en cláusulas de negación. Síntoma:
+   `ContinueWatching` pierde el campo `AbandonedThreshold` del struct
+   `Params` y la llamada `QueryContext` no se lo pasa, dejando
+   SQLite con un `?` sin valor → error en runtime. `sqlc.arg('name')`
+   no rescata el caso (sqlc lo deja como literal en la SQL string).
+   Workaround: reescribir con DeMorgan
+   (`NOT (a AND b AND c)` → `(¬a OR ¬b OR ¬c)`).
+
+3. **Type drift por NULL inferenciado**. Versiones recientes de sqlc
+   inspeccionan más finamente el schema y emiten `bool` (no
+   `sql.NullBool`) para columnas declaradas `BOOLEAN NOT NULL`,
+   `string` (no `sql.NullString`) para `TEXT NOT NULL`, etc. La regen
+   actual rompe varios sitios en `internal/db/image_repository.go`
+   y `internal/db/people_repository.go` que asumen los tipos viejos.
+
+### Cómo desbloquear (sesión dedicada, no drive-by)
+
+Cuando aparezca una query nueva real, los pasos son:
+
+1. **Aplicar fix em-dash**: sustituir `—` por `--` en los 3 ficheros
+   `.sql` afectados (un `sed -i 's/—/--/g'`).
+2. **Reescribir queries con `?` dentro de `NOT(...)`** usando
+   DeMorgan, preservando semántica three-valued (cuidado con
+   columnas nullable: añadir guard `IS NOT NULL` si la query original
+   excluía implícitamente NULLs).
+3. **Decidir versión de sqlc** (probablemente la última estable,
+   1.31.x al cierre) y pinearla en una variable del Makefile
+   (`SQLC_VERSION`). Instalar con `go install
+   github.com/sqlc-dev/sqlc/cmd/sqlc@$SQLC_VERSION` antes de regen.
+4. **Regenerar y propagar el type drift**: actualizar
+   `image_repository.go` (~3 sitios `sql.NullBool` → `bool`),
+   `people_repository.go` (~5 sitios `sql.NullString` → `string`,
+   etc.), y cualquier otro caller que rompa al recompilar.
+5. **Validar con tests** (`go test ./internal/db/...` cubre la
+   mayoría) + smoke manual de Continue Watching y Series detail.
+6. **Quitar el guard del Makefile** o subir la versión de sqlc en
+   el guard, y dejar la sesión documentada.
+
+### Bypass operacional
+
+Si alguien con razón quiere correr la regen (a sabiendas de lo que
+romperá):
+
+```bash
+HUBPLAY_REGEN_SQLC=1 make sqlc
 ```
 
-**Commit los generados**. Convención de sqlc y evita obligar a cada dev a
-tener la herramienta para compilar.
+El guard del Makefile imprime un recordatorio y aborta sin esa
+variable. **Commit los generados** sólo si el plan de migración está
+ejecutado entero — un commit con la regen sin tocar adapters rompe
+`go build`.
 
 ---
 

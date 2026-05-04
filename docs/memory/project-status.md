@@ -1,6 +1,6 @@
 # Estado del proyecto
 
-> ⚠️ **Bomba conocida — sqlc 1.29 incompatible con queries actuales**. No corras `make sqlc` ni `sqlc generate` hasta resolver. Detalles abajo en "Deudas operacionales".
+> ⚠️ **sqlc en lockdown** — `make sqlc` está protegido por guard. La regen rompería los ficheros commiteados (bugs en sqlc 1.27/1.29/1.31). Para añadir queries nuevas, ver el playbook en `conventions.md` sección "Regeneración sqlc → bloqueada".
 
 > Snapshot: **2026-04-30 mañana (continuada) — rama `claude/openapi-spec` con OpenAPI 3.0.3 spec embed-y-servida**. 1 commit sobre `main`. Cierra el último item P1 pre-Kotlin TV. **Cola P0+P1 vacía**: todos los prerequisitos para empezar la app Kotlin Android TV están completos.
 >
@@ -24,26 +24,36 @@
 
 ## ⚠️ Deudas operacionales
 
-### sqlc 1.29 rompe la regeneración (descubierto 2026-04-30)
+### sqlc lockdown — `make sqlc` desactivado tras guard (2026-05-04)
 
-**Síntoma**: correr `sqlc generate` con sqlc 1.29.0 (la versión actualmente en `$GOPATH/bin`) regenera `internal/db/sqlc/*.sql.go` con dos clases de errores:
+**Estado**: el guard del Makefile rechaza `make sqlc` por defecto.
+Bypass con `HUBPLAY_REGEN_SQLC=1 make sqlc`. Detalles del bug, los
+ficheros afectados y el playbook para desbloquearlo cuando hagamos
+falta queries nuevas → `docs/memory/conventions.md` sección
+*"Regeneración sqlc → bloqueada (lockdown)"*.
 
-1. **Truncado de queries con múltiples `?` en cláusulas anidadas**. La query `ContinueWatching` en `internal/db/queries/user_data.sql` tiene tres `?` (user_id, abandoned_threshold dentro de `NOT(...)`, LIMIT). sqlc 1.29 emite la SQL string truncada en `LIMIT` (sin `?`), y un `Params` struct con sólo dos campos (`UserID`, `Limit`) — pierde `AbandonedThreshold`. Misma cosa con `SeriesEpisodeProgress` (truncada mid-word: `s.type = 'seaso`).
-2. **Tipos nullable strictos**. `IsLocked` en `images` (BOOLEAN NOT NULL) pasa de `sql.NullBool` a `bool`. Es lo correcto, pero rompe `image_repository.go` que asume `sql.NullBool`. Trivial de arreglar manualmente.
+**Snapshot anterior (2026-04-30) tenía la versión invertida**:
+afirmaba que 1.29 era la rota. Verificado empíricamente con sqlc
+1.27, 1.29 y 1.31 (sesión 2026-05-04): **ningún sqlc actual
+reproduce los ficheros commiteados sin tocar las queries**.
+La causa raíz son dos bugs distintos del parser:
 
-(1) NO es trivial — el código generado es funcionalmente roto, no es sólo un cambio de tipos. Forma de las queries → bug de sqlc 1.29.
+1. Em-dashes (`—`) en comentarios SQL desplazan la cuenta de bytes
+   y truncan la última 1-2 chars de las queries afectadas.
+2. `?` placeholders dentro de `NOT (...)` no se detectan; el
+   `Params` struct sale incompleto y falta el campo del parámetro.
 
-**Mitigación temporal**:
-- **No corras `sqlc generate` ni `make sqlc` con sqlc 1.29**. Los ficheros en `internal/db/sqlc/` que están commitidos son la fuente de verdad funcional.
-- Si necesitas añadir queries nuevas (ej. para `federation_repository.go` → sqlc), está bloqueado hasta resolver.
-
-**Posibles fixes (sin orden de preferencia)**:
-1. Pinear sqlc a la versión que generó los ficheros originales. Probablemente 1.27 o 1.26. `make sqlc` debería instalar la versión específica.
-2. Reescribir las queries problemáticas para evitar el patrón que confunde a 1.29 (queries con `?` dentro de `NOT(...)` y un `LIMIT ?` posterior). Quizá splitear en dos queries o usar @-named params.
-3. Filar bug upstream a sqlc-dev/sqlc.
+Plus drift de tipos (`sql.NullBool` → `bool` para columnas
+`NOT NULL`) que rompe los repository adapters al recompilar.
 
 **Lo que esto bloquea**:
-- Conversión de `internal/db/federation_repository.go` (750 LOC, 31 raw SQL, viola ADR-001) a sqlc. Dependía de poder regenerar limpiamente.
+- Conversión de `internal/db/federation_repository.go` (750 LOC,
+  31 raw SQL, viola ADR-001) a sqlc. Sigue diferida hasta que se
+  ejecute el playbook completo de unlock.
+
+**Cuando lo desbloqueemos**: una sesión dedicada con los 6 pasos
+del playbook (em-dash sed, DeMorgan rewrite, pin sqlc version,
+regen, propagar type drift en adapters, validar). No drive-by.
 
 ### `federation_repository.go` no es sqlc (ADR-001)
 
