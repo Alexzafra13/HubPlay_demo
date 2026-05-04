@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import {
@@ -7,16 +7,19 @@ import {
   usePeerLibraries,
   useRefreshPeerLibrary,
 } from "@/api/hooks/federation";
-import { Spinner } from "@/components/common";
 import { Button } from "@/components/common/Button";
-import type { FederationRemoteItem } from "@/api/types";
+import { MediaGrid } from "@/components/media/MediaGrid";
+import { federationItemToMediaItem } from "@/api/federationAdapter";
+import type { FederationRemoteItem, MediaItem } from "@/api/types";
 
 const PAGE_SIZE = 50;
 
 // PeerLibraryItemsPage — paginated catalog of items in a peer's
-// shared library. Layout matches the local Movies/Series feel: poster-
-// less grid for now (Phase 5+ will add poster proxying), but with
-// proper card spacing, peer attribution badge, and clear navigation.
+// shared library, rendered with the SAME PosterCard + MediaGrid the
+// local Movies / Series pages use. Plex-style mixed surfacing: the
+// sidebar surfaces the peer's library as a top-level entry, this
+// page renders it identically to a local library, only with proxied
+// posters + a small "shared by Pedro" badge per card.
 export default function PeerLibraryItemsPage() {
   const { t } = useTranslation();
   const { peerId = "", libraryId = "" } = useParams();
@@ -30,13 +33,35 @@ export default function PeerLibraryItemsPage() {
   const peer = peers.data?.find((p) => p.id === peerId);
   const library = libraries.data?.find((l) => l.id === libraryId);
 
-  if (items.isLoading) {
-    return (
-      <div className="p-6 sm:p-10">
-        <Spinner />
-      </div>
-    );
-  }
+  // Adapt the peer's item rows to the canonical MediaItem shape so
+  // PosterCard renders them like any local title. Memoised on the
+  // raw items pointer + peerId so paging doesn't recompute O(n) per
+  // render.
+  const remoteItems: FederationRemoteItem[] = items.data?.items ?? [];
+  const total = items.data?.total ?? 0;
+  const fromCache = items.data?.from_cache ?? false;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  const mediaItems = useMemo<MediaItem[]>(
+    () => remoteItems.map(federationItemToMediaItem),
+    [remoteItems],
+  );
+
+  const hrefFor = (item: MediaItem) =>
+    `/peers/${peerId}/libraries/${libraryId}/items/${item.id}`;
+
+  const cornerBadgeFor = peer
+    ? () => (
+        <span
+          className="inline-flex items-center gap-1 rounded-full bg-black/65 px-2 py-0.5 text-[10px] font-medium text-white shadow-sm backdrop-blur-sm"
+          title={t("peers.sharedBy", { name: peer.name })}
+        >
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" aria-hidden />
+          <span className="max-w-[120px] truncate">{peer.name}</span>
+        </span>
+      )
+    : undefined;
+
   if (items.error) {
     return (
       <div className="p-6 sm:p-10">
@@ -49,12 +74,6 @@ export default function PeerLibraryItemsPage() {
       </div>
     );
   }
-
-  const data = items.data;
-  const itemList = data?.items ?? [];
-  const total = data?.total ?? 0;
-  const fromCache = data?.from_cache ?? false;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
     <div className="p-6 sm:p-10">
@@ -108,21 +127,15 @@ export default function PeerLibraryItemsPage() {
         </div>
       </header>
 
-      {itemList.length === 0 ? (
-        <div className="mt-8 rounded-lg border border-dashed border-border bg-bg-elevated p-8 text-center">
-          <p className="text-sm text-text-muted">{t("peers.emptyLibrary")}</p>
-        </div>
-      ) : (
-        <ul className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {itemList.map((item) => (
-            <ItemCard
-              key={item.id}
-              item={item}
-              peerName={peer?.name ?? ""}
-            />
-          ))}
-        </ul>
-      )}
+      <div className="mt-8">
+        <MediaGrid
+          items={mediaItems}
+          loading={items.isLoading}
+          emptyMessage={t("peers.emptyLibrary")}
+          hrefFor={hrefFor}
+          cornerBadgeFor={cornerBadgeFor}
+        />
+      </div>
 
       {totalPages > 1 && (
         <div className="mt-8 flex items-center justify-between gap-3">
@@ -148,51 +161,5 @@ export default function PeerLibraryItemsPage() {
         </div>
       )}
     </div>
-  );
-}
-
-// ItemCard — a single title in the grid. Mimics the local Movies
-// page poster-card aesthetic without needing actual poster proxying
-// (that's Phase 5+ when item-detail wire format ships). For now the
-// title + year + type chip + truncated overview is enough signal.
-function ItemCard({
-  item,
-  peerName,
-}: {
-  item: FederationRemoteItem;
-  peerName: string;
-}) {
-  return (
-    <li className="group flex flex-col gap-2 rounded-lg border border-border bg-bg-elevated p-4 transition-colors hover:border-accent">
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          <h3 className="truncate text-base font-semibold text-text-primary group-hover:text-accent">
-            {item.title}
-          </h3>
-          {item.year ? (
-            <p className="text-xs text-text-muted">{item.year}</p>
-          ) : null}
-        </div>
-        <span className="shrink-0 rounded bg-bg-base px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-text-muted">
-          {item.type}
-        </span>
-      </div>
-      {item.overview && (
-        <p className="line-clamp-3 text-xs text-text-muted">
-          {item.overview}
-        </p>
-      )}
-      {peerName && (
-        <p className="mt-auto pt-2 text-[10px] text-text-muted/70">
-          <span className="inline-flex items-center gap-1">
-            <span
-              className="h-1 w-1 rounded-full bg-emerald-500"
-              aria-hidden
-            />
-            {peerName}
-          </span>
-        </p>
-      )}
-    </li>
   );
 }

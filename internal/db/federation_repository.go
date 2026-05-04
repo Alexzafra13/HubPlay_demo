@@ -564,10 +564,22 @@ func (r *FederationRepository) ListSharedItems(ctx context.Context, peerID, libr
 	// metadata still appear with empty overview rather than being
 	// filtered out. Sort by sort_title (indexed) instead of title
 	// for consistency with the local listings UI.
+	//
+	// HasPoster: an EXISTS subquery against the `images` table avoids
+	// pulling the image row for the listing path — the peer doesn't
+	// need the image id, just whether to surface a poster URL in its
+	// own catalog UI. The actual bytes flow through
+	// /peer/items/{id}/poster on demand.
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT i.id, i.type, i.title,
 		       COALESCE(i.year, 0),
-		       COALESCE(m.overview, '')
+		       COALESCE(m.overview, ''),
+		       EXISTS (
+		         SELECT 1 FROM images img
+		          WHERE img.item_id = i.id
+		            AND img.type = 'primary'
+		            AND img.is_primary = 1
+		       ) AS has_poster
 		  FROM items i
 		  JOIN federation_library_shares s ON s.library_id = i.library_id
 		  LEFT JOIN metadata m ON m.item_id = i.id
@@ -584,7 +596,7 @@ func (r *FederationRepository) ListSharedItems(ctx context.Context, peerID, libr
 	out := []*federation.SharedItem{}
 	for rows.Next() {
 		var it federation.SharedItem
-		if err := rows.Scan(&it.ID, &it.Type, &it.Title, &it.Year, &it.Overview); err != nil {
+		if err := rows.Scan(&it.ID, &it.Type, &it.Title, &it.Year, &it.Overview, &it.HasPoster); err != nil {
 			return nil, 0, fmt.Errorf("scan shared item: %w", err)
 		}
 		out = append(out, &it)
@@ -641,8 +653,8 @@ func (r *FederationRepository) UpsertCachedItems(ctx context.Context, peerID, li
 
 	stmt, err := tx.PrepareContext(ctx, `
 		INSERT INTO federation_item_cache
-		    (peer_id, library_id, remote_id, type, title, year, overview, cached_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		    (peer_id, library_id, remote_id, type, title, year, overview, has_poster, cached_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return fmt.Errorf("prepare cache insert: %w", err)
@@ -651,7 +663,7 @@ func (r *FederationRepository) UpsertCachedItems(ctx context.Context, peerID, li
 
 	for _, it := range items {
 		if _, err := stmt.ExecContext(ctx, peerID, libraryID, it.ID, it.Type,
-			it.Title, it.Year, nullableString(it.Overview), at); err != nil {
+			it.Title, it.Year, nullableString(it.Overview), it.HasPoster, at); err != nil {
 			return fmt.Errorf("insert cached item %s: %w", it.ID, err)
 		}
 	}
@@ -686,7 +698,7 @@ func (r *FederationRepository) ListCachedItems(ctx context.Context, peerID, libr
 	}
 
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT remote_id, type, title, COALESCE(year, 0), COALESCE(overview, '')
+		SELECT remote_id, type, title, COALESCE(year, 0), COALESCE(overview, ''), has_poster
 		  FROM federation_item_cache
 		 WHERE peer_id = ? AND library_id = ?
 		 ORDER BY title COLLATE NOCASE ASC
@@ -700,7 +712,7 @@ func (r *FederationRepository) ListCachedItems(ctx context.Context, peerID, libr
 	out := []*federation.SharedItem{}
 	for rows.Next() {
 		var it federation.SharedItem
-		if err := rows.Scan(&it.ID, &it.Type, &it.Title, &it.Year, &it.Overview); err != nil {
+		if err := rows.Scan(&it.ID, &it.Type, &it.Title, &it.Year, &it.Overview, &it.HasPoster); err != nil {
 			return nil, 0, time.Time{}, fmt.Errorf("scan cached item: %w", err)
 		}
 		out = append(out, &it)

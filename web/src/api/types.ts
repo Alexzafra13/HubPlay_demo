@@ -85,12 +85,19 @@ export interface FederationRemoteLibrary {
 }
 
 // One item in a peer's library catalog.
+//
+// `poster_url` is synthesized server-side as a same-origin path that
+// resolves through our local proxy: the user's browser only ever
+// fetches images from this server, never from the peer directly.
+// Absent when the peer didn't have a primary image for the item;
+// the card then falls back to the dominant-colour placeholder.
 export interface FederationRemoteItem {
   id: string;
   type: string;
   title: string;
   year?: number;
   overview?: string;
+  poster_url?: string;
 }
 
 // Paginated response for items + cache freshness flag. The UI shows
@@ -100,6 +107,19 @@ export interface FederationRemoteItemsResponse {
   items: FederationRemoteItem[];
   total: number;
   from_cache: boolean;
+}
+
+// PeerStreamSessionResponse — what /me/peers/{peerID}/stream/{itemId}/session
+// returns once the API client unwraps the `{"data": ...}` envelope.
+// `master_playlist_url` is same-origin (proxied through our server
+// with our peer JWT); the user's player only ever asks our origin.
+// `strategy` mirrors the peer's stream.Decide() outcome and drives
+// the local UI's "remuxing", "transcoding to 1080p", etc. labels
+// just as the local /stream/{id}/info response does.
+export interface PeerStreamSessionResponse {
+  strategy: "direct_play" | "direct_stream" | "transcode";
+  master_playlist_url: string;
+  peer_session_id: string;
 }
 
 // Unified row: one library × one peer, flattened across all paired

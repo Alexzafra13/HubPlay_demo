@@ -1070,6 +1070,21 @@ export class ApiClient {
     return this.request<void>("POST", `/me/peers/${peerID}/libraries/${libraryID}/refresh`);
   }
 
+  // startPeerStreamSession asks our origin to broker a stream session
+  // on a peer for one of their items. Returns the same-origin master
+  // playlist URL the HLS player should load -- never the peer's URL.
+  // The user's client capabilities are appended automatically by
+  // request() when the X-Hubplay-Client-Capabilities header is set
+  // through the same path the local /stream/{id}/info call uses.
+  async startPeerStreamSession(
+    peerID: string,
+    itemID: string,
+  ): Promise<import("./types").PeerStreamSessionResponse> {
+    return this.request("POST", `/me/peers/${peerID}/stream/${itemID}/session`, {
+      body: {},
+    });
+  }
+
   // ─── Images ────────────────────────────────────────────────────────────
 
   async getItemImages(itemId: string): Promise<ImageInfo[]> {

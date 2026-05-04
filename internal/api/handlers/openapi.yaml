@@ -1012,6 +1012,39 @@ paths:
                   total: { type: integer }
                   from_cache: { type: boolean, description: "true when served from local cache (peer offline or fresh-enough)" }
 
+  /me/peers/{peerID}/items/{itemId}/poster:
+    parameters:
+      - { name: peerID, in: path, required: true, schema: { type: string } }
+      - { name: itemId, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [federation]
+      summary: Proxied primary poster for a federated item
+      description: |
+        Streams the bytes of the item's primary poster from the peer
+        through this server's origin. The user's browser only ever
+        contacts this server -- the peer's hostname stays invisible.
+        The origin re-verifies the calling peer (this server) still
+        holds the `can_browse` scope on the item's library on every
+        request, so a peer that lost a share since the catalog was
+        cached locally cannot keep pulling artwork.
+
+        Cache-Control + ETag headers from the origin pass through, so
+        a re-render of the same grid hits a 304 in the browser.
+      responses:
+        "200":
+          description: Image bytes (Content-Type matches the source — usually `image/jpeg` or `image/webp`)
+          content:
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/webp: { schema: { type: string, format: binary } }
+            image/png:  { schema: { type: string, format: binary } }
+        "304": { description: Not modified (ETag matched If-None-Match) }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502":
+          description: Peer unreachable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
   /me/peers/{peerID}/libraries/{libraryID}/refresh:
     parameters:
       - { name: peerID, in: path, required: true, schema: { type: string } }

@@ -18,6 +18,8 @@ import {
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { getInitials } from "@/utils/userDisplay";
+import { useAllPeerLibraries } from "@/api/hooks/federation";
+import type { FederationUnifiedLibrary } from "@/api/types";
 
 // ─── Item model ─────────────────────────────────────────────────────────────
 
@@ -111,6 +113,11 @@ export function Sidebar({ collapsed, onClose }: SidebarProps) {
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto px-3 pt-3 pb-3 scrollbar-hide">
         <NavGroup items={MAIN} collapsed={collapsed} activePath={activePath} />
+
+        <PeerLibrariesSection
+          collapsed={collapsed}
+          activePath={location.pathname}
+        />
 
         <Divider collapsed={collapsed} />
 
@@ -382,6 +389,133 @@ function UserPod({
       )}
     </div>
   );
+}
+
+// PeerLibrariesSection — Plex-style "Connected servers" group. The
+// hook fetches every (library × peer) flat row across paired peers
+// and we group by peer client-side. Each peer becomes a sub-section
+// with the peer name as the header and one row per shared library.
+//
+// Empty / loading / error states all render as nothing — the
+// sidebar should never be louder than the user's own content. When
+// no peers are paired (or none have shared anything yet), this
+// section just doesn't appear; the sidebar feels exactly like the
+// pre-federation build.
+function PeerLibrariesSection({
+  collapsed,
+  activePath,
+}: {
+  collapsed: boolean;
+  activePath: string;
+}) {
+  const { t } = useTranslation();
+  const { data } = useAllPeerLibraries();
+
+  if (!data || data.length === 0) {
+    return null;
+  }
+
+  // Group libraries by peer. Stable order: first appearance wins
+  // (the API returns peers paired-time-ordered, which matches what
+  // the user sees on the /peers landing page).
+  const byPeer = new Map<string, { name: string; libs: FederationUnifiedLibrary[] }>();
+  for (const row of data) {
+    const entry = byPeer.get(row.peer_id);
+    if (entry) {
+      entry.libs.push(row);
+    } else {
+      byPeer.set(row.peer_id, { name: row.peer_name, libs: [row] });
+    }
+  }
+
+  return (
+    <>
+      <SectionHeader collapsed={collapsed} label={t("nav.peerServers")} />
+      {Array.from(byPeer.entries()).map(([peerId, { name, libs }]) => (
+        <div key={peerId} className="mb-2">
+          {!collapsed && (
+            <p
+              className="px-3 mb-1 text-[10px] uppercase tracking-[0.1em] text-text-muted/80 truncate"
+              title={name}
+            >
+              {name}
+            </p>
+          )}
+          <ul className="space-y-0.5">
+            {libs.map((lib) => {
+              const to = `/peers/${peerId}/libraries/${lib.library_id}`;
+              const isActive = activePath === to;
+              return (
+                <li key={lib.library_id} className="relative">
+                  <NavLink
+                    to={to}
+                    className="relative flex items-center gap-3 h-9 px-3 rounded-lg text-[13px] font-medium transition-colors group"
+                    style={{
+                      color: isActive
+                        ? "var(--color-accent-light)"
+                        : "var(--color-text-secondary)",
+                    }}
+                    title={collapsed ? `${name} · ${lib.library_name}` : undefined}
+                  >
+                    {isActive && (
+                      <motion.span
+                        layoutId="sidebar-active-bg"
+                        className="absolute inset-0 rounded-lg"
+                        style={{
+                          background:
+                            "linear-gradient(180deg, var(--color-accent-soft), color-mix(in srgb, var(--color-accent-soft) 50%, transparent))",
+                          boxShadow:
+                            "inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 20%, transparent)",
+                        }}
+                        transition={{ type: "spring", stiffness: 380, damping: 32, mass: 0.8 }}
+                      />
+                    )}
+                    <span
+                      className={`relative flex-shrink-0 transition-transform duration-150 group-hover:scale-105 ${collapsed ? "mx-auto" : ""}`}
+                    >
+                      <PeerLibraryIcon contentType={lib.content_type} />
+                    </span>
+                    <AnimatePresence initial={false}>
+                      {!collapsed && (
+                        <motion.span
+                          key="label"
+                          initial={{ opacity: 0, x: -4 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          exit={{ opacity: 0, x: -4 }}
+                          transition={{ duration: 0.14 }}
+                          className="relative truncate flex-1 group-hover:text-text-primary transition-colors"
+                        >
+                          {lib.library_name}
+                        </motion.span>
+                      )}
+                    </AnimatePresence>
+                  </NavLink>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ))}
+    </>
+  );
+}
+
+// PeerLibraryIcon picks a glyph that mirrors the local sidebar's
+// content-type aesthetic. The mapping deliberately stays simple
+// (movies → Film, series → Tv, livetv → Radio); any unrecognised
+// content_type falls back to the Film glyph so a stranger schema
+// doesn't render a missing icon.
+function PeerLibraryIcon({ contentType }: { contentType: string }) {
+  const iconClass = "h-[18px] w-[18px]";
+  switch (contentType) {
+    case "series":
+      return <Tv className={iconClass} strokeWidth={1.6} />;
+    case "livetv":
+      return <Radio className={iconClass} strokeWidth={1.6} />;
+    case "movies":
+    default:
+      return <Film className={iconClass} strokeWidth={1.6} />;
+  }
 }
 
 function Avatar({ initials }: { initials: string }) {

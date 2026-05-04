@@ -34,6 +34,7 @@ const FederationAdmin = lazyWithRetry(() => import("@/pages/admin/FederationAdmi
 const PeersPage = lazyWithRetry(() => import("@/pages/PeersPage"));
 const PeerLibrariesPage = lazyWithRetry(() => import("@/pages/PeerLibrariesPage"));
 const PeerLibraryItemsPage = lazyWithRetry(() => import("@/pages/PeerLibraryItemsPage"));
+const PeerItemDetail = lazyWithRetry(() => import("@/pages/PeerItemDetail"));
 const LinkDevice = lazyWithRetry(() => import("@/pages/LinkDevice"));
 const SystemLayout = lazyWithRetry(() => import("@/pages/admin/system/SystemLayout"));
 const SystemStatus = lazyWithRetry(() => import("@/pages/admin/system/SystemStatus"));
@@ -125,6 +126,7 @@ export function App() {
             <Route path="peers" element={<PeersPage />} />
             <Route path="peers/:peerId" element={<PeerLibrariesPage />} />
             <Route path="peers/:peerId/libraries/:libraryId" element={<PeerLibraryItemsPage />} />
+            <Route path="peers/:peerId/libraries/:libraryId/items/:itemId" element={<PeerItemDetail />} />
             <Route path="link" element={<LinkDevice />} />
             <Route path="settings" element={<Settings />} />
 

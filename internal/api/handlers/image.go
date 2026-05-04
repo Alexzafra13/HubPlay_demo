@@ -397,7 +397,17 @@ func (h *ImageHandler) RefreshLibraryImages(w http.ResponseWriter, r *http.Reque
 //     inside h.imageDir. Defense in depth against a poisoned mapping file.
 func (h *ImageHandler) ServeFile(w http.ResponseWriter, r *http.Request) {
 	imageID := chi.URLParam(r, "id")
+	h.ServeImageByID(w, r, imageID)
+}
 
+// ServeImageByID serves the bytes for the given image id with the
+// same caching, thumbnail and safety semantics as ServeFile, but
+// without requiring chi.URLParam(r, "id"). Federation poster handlers
+// reuse this entry point: they resolve item → primary image id under
+// the federation auth + share gates, then delegate the actual file
+// serving so the cache headers and thumb generation logic stay in
+// one place.
+func (h *ImageHandler) ServeImageByID(w http.ResponseWriter, r *http.Request, imageID string) {
 	localPath := h.readPathMapping(imageID)
 	if localPath == "" {
 		// No path-mapping entry → no on-disk file. Every image since

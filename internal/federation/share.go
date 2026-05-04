@@ -57,12 +57,21 @@ type SharedLibrary struct {
 // SharedItem is the subset of an Item exposed to a peer browsing the
 // catalog. Mirrors what the local PosterCard renders — just enough
 // to identify the title and decide whether to play / download / etc.
+//
+// HasPoster signals to the requesting peer that it can fetch a poster
+// from `GET /api/v1/peer/items/{id}/poster`. We deliberately don't
+// expose the underlying image's URL or path: the bytes flow through
+// the federation poster endpoint so the origin can re-check the
+// CanBrowse scope on every fetch and audit the access. A peer that
+// catalog-cached us last week and lost their share since then will
+// get a 404 on poster fetch — same gate as the catalog itself.
 type SharedItem struct {
-	ID       string `json:"id"`
-	Type     string `json:"type"`
-	Title    string `json:"title"`
-	Year     int    `json:"year,omitempty"`
-	Overview string `json:"overview,omitempty"`
+	ID        string `json:"id"`
+	Type      string `json:"type"`
+	Title     string `json:"title"`
+	Year      int    `json:"year,omitempty"`
+	Overview  string `json:"overview,omitempty"`
+	HasPoster bool   `json:"has_poster,omitempty"`
 }
 
 // CachedItem extends SharedItem with the peer + library it belongs

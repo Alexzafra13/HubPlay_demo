@@ -39,6 +39,7 @@
     "users": "Usuarios",
     "system": "Sistema",
     "peers": "Servidores conectados",
+    "peerServers": "Servidores conectados",
     "expandSidebar": "Expandir barra lateral",
     "collapseSidebar": "Contraer barra lateral",
     "toggleMenu": "Alternar menu",
@@ -115,7 +116,12 @@
     "prev": "Anterior",
     "next": "Siguiente",
     "pageOf": "Página {{current}} de {{total}}",
-    "unreachable": "No se ha podido contactar con el peer: {{error}}"
+    "unreachable": "No se ha podido contactar con el peer: {{error}}",
+    "play": "Reproducir",
+    "playFailed": "No se pudo iniciar la reproducción: {{error}}",
+    "backToLibrary": "Volver a la biblioteca",
+    "itemNotFoundTitle": "Título no disponible",
+    "itemNotFoundDescription": "No encontramos este título en el catálogo del peer. Puede que se haya eliminado o que cambiase el alcance del share."
   },
   "watchTonight": {
     "tonight": "Para esta noche",
