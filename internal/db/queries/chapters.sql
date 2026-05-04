@@ -1,7 +1,7 @@
 -- Chapter markers per item (movie or episode), keyed by start time.
 --
 -- Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE chapters).
--- PK: (item_id, start_ticks). Chapters are immutable per scan — the
+-- PK: (item_id, start_ticks). Chapters are immutable per scan -- the
 -- scanner clears the row set before re-inserting so a re-encode that
 -- shifted markers can replace them cleanly without leaving phantom
 -- entries from the previous timing.

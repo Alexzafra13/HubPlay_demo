@@ -193,10 +193,13 @@ func (r *UserDataRepository) ContinueWatching(ctx context.Context, userID string
 		limit = 20
 	}
 	abandonedThreshold := time.Now().Add(-AbandonedAfter)
+	// LastPlayedAt is sqlc's auto-name for the abandoned-threshold
+	// param (it's the column the comparison is against). Same value as
+	// before the DeMorgan rewrite — see queries/user_data.sql for why.
 	rows, err := r.q.ContinueWatching(ctx, sqlc.ContinueWatchingParams{
-		UserID:             userID,
-		AbandonedThreshold: sql.NullTime{Time: abandonedThreshold, Valid: true},
-		Limit:              int64(limit),
+		UserID:       userID,
+		LastPlayedAt: sql.NullTime{Time: abandonedThreshold, Valid: true},
+		Limit:        int64(limit),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("continue watching: %w", err)
@@ -330,7 +333,7 @@ type NextUpItem struct {
 func (r *UserDataRepository) SeriesEpisodeProgress(ctx context.Context, userID, seriesID string) (total, watched int, err error) {
 	row, qerr := r.q.SeriesEpisodeProgress(ctx, sqlc.SeriesEpisodeProgressParams{
 		UserID:   userID,
-		SeriesID: seriesID,
+		ParentID: sql.NullString{String: seriesID, Valid: seriesID != ""},
 	})
 	if qerr != nil {
 		return 0, 0, fmt.Errorf("series episode progress: %w", qerr)

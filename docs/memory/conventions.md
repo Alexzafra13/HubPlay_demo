@@ -88,82 +88,82 @@ igual en el dominio, SQLite queda limpio).
 
 ---
 
-## Regeneración sqlc → **bloqueada** (lockdown)
+## Regeneración sqlc
 
-> ⚠️ `make sqlc` está protegido por un guard. **No corras `sqlc generate`
-> contra las queries actuales**. Los ficheros `internal/db/sqlc/*.sql.go`
-> commiteados son la fuente de verdad funcional; los ha validado a mano
-> alguien que sabía qué hacer. La bombilla está fuera del enchufe a
-> propósito.
-
-### Por qué
-
-Confirmado empíricamente con sqlc 1.27.0, 1.29.0 y 1.31.1 (sesión
-2026-05-04): los tres producen output corrupto al regenerar las queries
-actuales por dos bugs distintos:
-
-1. **Em-dashes (`—`) en comentarios SQL**. El parser de sqlc cuenta
-   bytes vs caracteres mal en UTF-8 multi-byte y a partir del em-dash
-   las posiciones quedan desplazadas N bytes. Síntoma: queries
-   posteriores salen truncadas en los últimos 1-2 caracteres
-   (`LIMIT ?` → `LIMIT`, `'season'` → `'seaso`, `LIMIT ? OFFSET ?` →
-   `LIMIT ? OFFSET`). Los caracteres descartados se "filtran" al
-   inicio de la siguiente query como `?;` o `';`.
-   Ficheros con em-dashes hoy: `chapters.sql` (1), `people.sql` (4),
-   `user_data.sql` (1).
-
-2. **Parámetros `?` dentro de `NOT (...)`**. sqlc no detecta el
-   placeholder anidado en cláusulas de negación. Síntoma:
-   `ContinueWatching` pierde el campo `AbandonedThreshold` del struct
-   `Params` y la llamada `QueryContext` no se lo pasa, dejando
-   SQLite con un `?` sin valor → error en runtime. `sqlc.arg('name')`
-   no rescata el caso (sqlc lo deja como literal en la SQL string).
-   Workaround: reescribir con DeMorgan
-   (`NOT (a AND b AND c)` → `(¬a OR ¬b OR ¬c)`).
-
-3. **Type drift por NULL inferenciado**. Versiones recientes de sqlc
-   inspeccionan más finamente el schema y emiten `bool` (no
-   `sql.NullBool`) para columnas declaradas `BOOLEAN NOT NULL`,
-   `string` (no `sql.NullString`) para `TEXT NOT NULL`, etc. La regen
-   actual rompe varios sitios en `internal/db/image_repository.go`
-   y `internal/db/people_repository.go` que asumen los tipos viejos.
-
-### Cómo desbloquear (sesión dedicada, no drive-by)
-
-Cuando aparezca una query nueva real, los pasos son:
-
-1. **Aplicar fix em-dash**: sustituir `—` por `--` en los 3 ficheros
-   `.sql` afectados (un `sed -i 's/—/--/g'`).
-2. **Reescribir queries con `?` dentro de `NOT(...)`** usando
-   DeMorgan, preservando semántica three-valued (cuidado con
-   columnas nullable: añadir guard `IS NOT NULL` si la query original
-   excluía implícitamente NULLs).
-3. **Decidir versión de sqlc** (probablemente la última estable,
-   1.31.x al cierre) y pinearla en una variable del Makefile
-   (`SQLC_VERSION`). Instalar con `go install
-   github.com/sqlc-dev/sqlc/cmd/sqlc@$SQLC_VERSION` antes de regen.
-4. **Regenerar y propagar el type drift**: actualizar
-   `image_repository.go` (~3 sitios `sql.NullBool` → `bool`),
-   `people_repository.go` (~5 sitios `sql.NullString` → `string`,
-   etc.), y cualquier otro caller que rompa al recompilar.
-5. **Validar con tests** (`go test ./internal/db/...` cubre la
-   mayoría) + smoke manual de Continue Watching y Series detail.
-6. **Quitar el guard del Makefile** o subir la versión de sqlc en
-   el guard, y dejar la sesión documentada.
-
-### Bypass operacional
-
-Si alguien con razón quiere correr la regen (a sabiendas de lo que
-romperá):
+`make sqlc` regenera `internal/db/sqlc/*.sql.go` desde
+`internal/db/queries/*.sql`. Idempotente — sin diff cuando las queries
+no han cambiado. El target instala primero la versión pineada de sqlc
+(`SQLC_VERSION` en el Makefile) si no está ya en el PATH, así que un
+contributor nuevo no tiene que gestionar su propia instalación.
 
 ```bash
-HUBPLAY_REGEN_SQLC=1 make sqlc
+make sqlc        # regenera (instala sqlc pineado si hace falta)
+make sqlc-verify # regenera y falla si hay diff (lo usa CI)
 ```
 
-El guard del Makefile imprime un recordatorio y aborta sin esa
-variable. **Commit los generados** sólo si el plan de migración está
-ejecutado entero — un commit con la regen sin tocar adapters rompe
-`go build`.
+**Commit los generados** junto con el cambio de query. Convención
+estándar de sqlc y evita que cada dev tenga la herramienta para
+compilar.
+
+### Drift test en CI
+
+`internal/db/sqlc_drift_test.go` regenera contra un directorio scratch
+y compara byte-a-byte con el árbol commiteado. Falla con tres clases de
+regresión:
+
+1. **Olvidaste correr `make sqlc`** tras editar una query.
+2. **Introdujiste un patrón parser-hostile** en una query (ver lista
+   abajo). El regen produce output corrupto en silencio; el drift test
+   lo destapa.
+3. **Subiste `SQLC_VERSION`** en el Makefile sin re-baselinear.
+
+El test se skipea si `sqlc` no está en PATH (developer local sin la
+herramienta no se bloquea). CI siempre lo ejecuta porque el
+prerequisito `make sqlc-install` lo instala.
+
+### Patrones parser-hostile a evitar en `*.sql`
+
+Bugs reales de sqlc 1.27 / 1.29 / 1.31 confirmados empíricamente
+(sesión 2026-05-04). Cualquier query con estos patrones rompe el
+regen en silencio — el drift test los caza, pero mejor evitarlos
+desde el inicio:
+
+1. **Caracteres no-ASCII en comentarios SQL**. Em-dashes (`—`),
+   acentos (`á í ó`), backticks (`` ` ``), comillas tipográficas, etc.
+   El parser cuenta bytes vs chars mal en UTF-8 multi-byte y a
+   partir de un char no-ASCII las posiciones quedan desplazadas N
+   bytes. Síntoma: queries posteriores salen truncadas en los
+   últimos 1-2 caracteres (`LIMIT ?` → `LIMIT`, `'season'` → `'seaso`).
+
+   **Convención**: comentarios SQL en ASCII puro. Si necesitas un
+   guion largo, usa `--` (doble hyphen, que SQL ya interpreta como
+   inicio de comentario y se renderiza visualmente como un dash en
+   muchos editores).
+
+2. **Placeholders `?` dentro de `NOT (...)` clauses**. sqlc no
+   detecta el parámetro anidado y lo descarta del struct `Params`.
+   Síntoma: el campo desaparece y el `QueryContext` no lo pasa →
+   SQLite recibe un `?` sin valor → error en runtime.
+
+   **Convención**: si necesitas negar un grupo de condiciones que
+   incluye un parámetro, usa **DeMorgan** y exprésalo positivamente:
+
+   ```sql
+   -- ✗ rompe sqlc
+   AND NOT (
+     col < ? AND other > 0
+   )
+
+   -- ✓ pasa
+   AND col IS NOT NULL  -- preservar semantica three-valued si col es nullable
+   AND (col >= ? OR other = 0)
+   ```
+
+3. **`sqlc.arg('name')` syntax**. Funciona inestablemente en SQLite;
+   en algunos contextos sqlc lo deja como literal text en la SQL
+   string. Usa `?` posicional simple. Si la auto-naming de sqlc no te
+   gusta, renombra en la repo layer (alias el campo del struct
+   generado al hacer Params{...}).
 
 ---
 

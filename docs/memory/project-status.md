@@ -1,6 +1,6 @@
 # Estado del proyecto
 
-> ⚠️ **sqlc en lockdown** — `make sqlc` está protegido por guard. La regen rompería los ficheros commiteados (bugs en sqlc 1.27/1.29/1.31). Para añadir queries nuevas, ver el playbook en `conventions.md` sección "Regeneración sqlc → bloqueada".
+> ✅ **sqlc desbloqueado para siempre** (sesión 2026-05-04). `make sqlc` regenera limpio con la versión pineada (1.31.1); `make sqlc-verify` falla CI si el árbol commiteado deriva. Drift test en `internal/db/sqlc_drift_test.go`. Los bugs del parser que motivaron el lockdown están documentados en `conventions.md` con patrones SQL a evitar.
 
 > Snapshot: **2026-04-30 mañana (continuada) — rama `claude/openapi-spec` con OpenAPI 3.0.3 spec embed-y-servida**. 1 commit sobre `main`. Cierra el último item P1 pre-Kotlin TV. **Cola P0+P1 vacía**: todos los prerequisitos para empezar la app Kotlin Android TV están completos.
 >
@@ -24,40 +24,49 @@
 
 ## ⚠️ Deudas operacionales
 
-### sqlc lockdown — `make sqlc` desactivado tras guard (2026-05-04)
+### sqlc desbloqueado — playbook ejecutado (2026-05-04)
 
-**Estado**: el guard del Makefile rechaza `make sqlc` por defecto.
-Bypass con `HUBPLAY_REGEN_SQLC=1 make sqlc`. Detalles del bug, los
-ficheros afectados y el playbook para desbloquearlo cuando hagamos
-falta queries nuevas → `docs/memory/conventions.md` sección
-*"Regeneración sqlc → bloqueada (lockdown)"*.
+**Estado**: `make sqlc` funciona limpio. `make sqlc-verify` regenera y
+falla si hay diff (lo usa CI). `internal/db/sqlc_drift_test.go` lo
+ejecuta como test de Go también. Detalles de los bugs del parser y los
+patrones SQL a evitar → `conventions.md` sección "Regeneración sqlc".
 
-**Snapshot anterior (2026-04-30) tenía la versión invertida**:
-afirmaba que 1.29 era la rota. Verificado empíricamente con sqlc
-1.27, 1.29 y 1.31 (sesión 2026-05-04): **ningún sqlc actual
-reproduce los ficheros commiteados sin tocar las queries**.
-La causa raíz son dos bugs distintos del parser:
+**Lo que se ejecutó esta sesión** (los 6 pasos del playbook que el
+snapshot anterior listaba como "para una sesión futura"):
 
-1. Em-dashes (`—`) en comentarios SQL desplazan la cuenta de bytes
-   y truncan la última 1-2 chars de las queries afectadas.
-2. `?` placeholders dentro de `NOT (...)` no se detectan; el
-   `Params` struct sale incompleto y falta el campo del parámetro.
+1. ✅ Sustituidos em-dashes (`—`) y backticks (`` ` ``) por ASCII
+   en `chapters.sql`, `people.sql`, `user_data.sql`,
+   `channel_watch_history.sql`. Los caracteres no-ASCII en
+   comentarios SQL desplazan la cuenta de bytes UTF-8 del parser.
+2. ✅ `ContinueWatching` reescrita con DeMorgan para sacar el `?`
+   del `NOT (...)`. Guard `IS NOT NULL` añadido para preservar la
+   semántica three-valued original (rows con NULL last_played_at
+   se siguen excluyendo).
+3. ✅ `SQLC_VERSION=v1.31.1` pineado en Makefile. Target
+   `sqlc-install` lo instala idempotente con `go install`.
+4. ✅ Regen limpia, byte-identical reproducible.
+5. ✅ Type drift propagado en adapters:
+   - `image_repository.go`: `IsLocked` ahora `bool` puro (no
+     `sql.NullBool`), 3 sitios actualizados.
+   - `people_repository.go`: `nullableString`/`nullableInt64`
+     wrappers en `CreatePerson`, `SetPersonThumbPath`,
+     `InsertItemPerson`.
+   - `user_data_repository.go`: rename `AbandonedThreshold` →
+     `LastPlayedAt` (sqlc auto-naming) en `ContinueWatching` y
+     `SeriesID` → `ParentID` en `SeriesEpisodeProgress`.
+6. ✅ Drift test reemplaza el guard del Makefile que existía
+   temporalmente.
 
-Plus drift de tipos (`sql.NullBool` → `bool` para columnas
-`NOT NULL`) que rompe los repository adapters al recompilar.
-
-**Lo que esto bloquea**:
-- Conversión de `internal/db/federation_repository.go` (750 LOC,
-  31 raw SQL, viola ADR-001) a sqlc. Sigue diferida hasta que se
-  ejecute el playbook completo de unlock.
-
-**Cuando lo desbloqueemos**: una sesión dedicada con los 6 pasos
-del playbook (em-dash sed, DeMorgan rewrite, pin sqlc version,
-regen, propagar type drift en adapters, validar). No drive-by.
+**Lo que esto desbloquea**:
+- Cualquier query nueva. Antes estaba bloqueado por miedo a corromper
+  el output. Ahora `make sqlc` es seguro.
+- Conversión de `internal/db/federation_repository.go` (750 LOC raw
+  SQL violando ADR-001) a sqlc, cuando alguien tenga ganas — sigue
+  diferida porque es trabajo, no porque haya bloqueo técnico.
 
 ### `federation_repository.go` no es sqlc (ADR-001)
 
-Lo documenta el propio fichero ([línea 14-26](../../internal/db/federation_repository.go:14)) — diferida desde Phase 1 como housekeeping. Bloqueada ahora por la bomba sqlc-1.29 de arriba.
+Lo documenta el propio fichero ([línea 14-26](../../internal/db/federation_repository.go:14)). Diferida desde Phase 1 como housekeeping. Ya **no** está bloqueada por sqlc — abrir cuando convenga.
 
 ---
 

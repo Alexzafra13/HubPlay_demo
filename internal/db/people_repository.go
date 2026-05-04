@@ -65,7 +65,10 @@ func (r *PeopleRepository) EnsureByName(ctx context.Context, name, personType st
 	}
 	newID := uuid.NewString()
 	if err := r.q.CreatePerson(ctx, sqlc.CreatePersonParams{
-		ID: newID, Name: name, Type: personType, ThumbPath: "",
+		ID:        newID,
+		Name:      name,
+		Type:      nullableString(personType),
+		ThumbPath: nullableString(""),
 	}); err != nil {
 		return "", false, fmt.Errorf("create person: %w", err)
 	}
@@ -85,7 +88,8 @@ func (r *PeopleRepository) GetByID(ctx context.Context, id string) (*Person, err
 
 func (r *PeopleRepository) SetThumbPath(ctx context.Context, id, thumbPath string) error {
 	if err := r.q.SetPersonThumbPath(ctx, sqlc.SetPersonThumbPathParams{
-		ThumbPath: thumbPath, ID: id,
+		ThumbPath: nullableString(thumbPath),
+		ID:        id,
 	}); err != nil {
 		return fmt.Errorf("set person thumb: %w", err)
 	}
@@ -105,8 +109,8 @@ func (r *PeopleRepository) ReplaceItemPeople(ctx context.Context, itemID string,
 			ItemID:        itemID,
 			PersonID:      c.PersonID,
 			Role:          c.Role,
-			CharacterName: c.CharacterName,
-			SortOrder:     int64(c.SortOrder),
+			CharacterName: nullableString(c.CharacterName),
+			SortOrder:     nullableInt64(int64(c.SortOrder)),
 		}); err != nil {
 			return fmt.Errorf("insert item person: %w", err)
 		}

@@ -57,7 +57,7 @@ DELETE FROM user_data WHERE user_id = ? AND item_id = ?;
 -- name: ContinueWatching :many
 -- Two extra filters vs. the obvious "started but not completed" rail:
 --   1. Near-complete drop: position >= 90% of duration. Treat as
---      effectively done — the user almost certainly finished and the
+--      effectively done -- the user almost certainly finished and the
 --      rail showing it as in-progress is noise.
 --   2. Abandoned drop: last_played_at older than the caller-supplied
 --      threshold AND position < 50%. The user moved on; the rail
@@ -65,6 +65,18 @@ DELETE FROM user_data WHERE user_id = ? AND item_id = ?;
 -- Both checks are integer-safe (ticks * 100 / 90 and ticks * 2 / 1)
 -- and both require a known duration; rows with duration_ticks = 0
 -- are kept (we can't reason about progress without it).
+--
+-- The abandoned filter is expressed positively (DeMorgan equivalent of
+-- the obvious NOT (...) form) to dodge a sqlc parser bug where ?
+-- placeholders nested inside NOT (...) clauses are silently dropped
+-- from the generated Params struct. The IS NOT NULL guard preserves
+-- the original three-valued-logic behaviour where a NULL last_played_at
+-- excluded the row -- in practice the position_ticks > 0 above means
+-- last_played_at is always set; this is belt and braces. See
+-- docs/memory/conventions.md (Regeneracion sqlc section) for the full
+-- story. NOTE: keep this comment pure ASCII -- multi-byte chars
+-- (em-dashes, accents, backticks) trigger another parser bug that
+-- silently truncates queries below.
 SELECT ud.item_id, ud.position_ticks, ud.last_played_at,
        i.title, i.type, i.duration_ticks, COALESCE(i.parent_id, '') AS parent_id,
        COALESCE(i.container, '') AS container,
@@ -80,10 +92,11 @@ WHERE ud.user_id = ? AND ud.completed = 0 AND ud.position_ticks > 0
     i.duration_ticks > 0
     AND ud.position_ticks * 100 >= i.duration_ticks * 90
   )
-  AND NOT (
-    ud.last_played_at < ?
-    AND i.duration_ticks > 0
-    AND ud.position_ticks * 2 < i.duration_ticks
+  AND ud.last_played_at IS NOT NULL
+  AND (
+    ud.last_played_at >= ?  -- abandoned threshold (sqlc auto-names it LastPlayedAt)
+    OR i.duration_ticks = 0
+    OR ud.position_ticks * 2 >= i.duration_ticks
   )
 ORDER BY ud.last_played_at DESC
 LIMIT ?;
