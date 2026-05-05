@@ -1,6 +1,38 @@
 # Estado del proyecto
 
-> 🛡️ **Sesión 2026-05-05 (rama `claude/compassionate-bardeen-76afea`, PR pendiente)** — **Refresh estético de peer-detail + senior review de mantenibilidad + 3 P1 cerrados (B5/B1/F1)**. 4 commits sobre la rama.
+> 🎨 **Sesión 2026-05-05 (continuada, dos ramas nuevas, PRs #149 + #150 abiertas)** — **Accent discipline + FederationAdmin split. Reflexión honesta sobre la design.md de Netflix → descartar cargo-cult; quedarse solo con el patrón "reservar accent" que ya seguíamos a medias**.
+>
+> **Conversación clave**: el usuario compartió un design.md de Netflix Spain. Yo propuse 4 adaptaciones; el usuario me empujó con "estás seguro de que es mejor que lo que tenemos?" y al releer crítico salieron las grietas de las primeras 3 propuestas:
+> - **Top-N rail con dígito gigante 100px** asume social proof de millones de users — HubPlay es single-tenant; sería estética sin función.
+> - **Bumpear type scale a 56px** no aporta — los heroes ya leen cinematográficos y rompe en viewports estrechos.
+> - **Cosmic gradient** `linear-gradient(149deg, #192247, #210e17)` es color-Netflix (azul-vino) y choca con nuestro emerald.
+> - Solo el **(4) accent discipline** tenía ROI legítimo.
+>
+> **Lección**: el design.md de Netflix está pensado para una landing pública de signup. La mayoría de HubPlay es app autenticada. Aplicar el manual entero sin filtrar = cargo-cult. Guardarlo como referencia futura para una eventual landing pública del proyecto, no para el browse autenticado.
+>
+> **Commit `26229a0` (PR #149, rama `claude/accent-discipline`)** — *ui(accent): reserve emerald for action + identity*. Decorative chips inheriting `--color-accent` competían visualmente con CTAs reales (Play, Save, Sign in). Cleanup conservador, scope acotado:
+> - `Badge.tsx` `default` variant: `bg-accent-soft / text-accent-light` → `bg-bg-elevated / text-text-secondary`. Reshapes genre chips, content rating, library content_type, auth-key "retired", "default" admin markers. Status variants (success/warning/error/live) **untouched** — color semántico legítimo.
+> - Peer breadcrumbs (`PeerLibrariesPage`, `PeerLibraryItemsPage`): `text-accent hover:underline` → quiet `text-text-secondary` con hover a primary.
+> - `PeersPage` peer pill hover: drop `hover:bg-accent/10 hover:text-accent`.
+> - `PeersPage` `LibraryCard` title: drop `group-hover:text-accent`. La card ya tiene `hover:border-accent` como single focal hover indicator; doblarse era ruido.
+> - `PeersPage` `ScopeChip` ("Play" / "Download" / "Live TV"): mismo doctrine que Badge default — neutral.
+> - **Untouched** (uses funcionales/identidad): `Button` primary, `BrandMark`, sidebar active, focus rings, form active borders, `Spinner`, `ErrorBoundary` retry, `SetupWizard` step indicators, sidebar avatar identity ring.
+>
+> **Commit `14e81c9` (PR #150, rama `claude/federation-admin-split`)** — *ui(admin/federation): split FederationAdmin into per-section files*. Cierra **F7** del review. 684 LOC → 82 (orquestador) + 5 ficheros bajo `pages/admin/federation/`. Pure file-level refactor, zero behaviour change:
+> - `FederationAdmin.tsx` 684 → **82** (orquestador)
+> - `federation/IdentityCard.tsx` 54
+> - `federation/InviteSection.tsx` 62
+> - `federation/AcceptSection.tsx` 152
+> - `federation/PeersTable.tsx` 301 — incluye `SharesPanel` + `StatusBadge` (tightly coupled al row layout)
+> - `federation/_shared.tsx` 81 — primitives compartidas (`Label`, `Value`, `FieldInput`, `CopyButton`, `ErrorBanner`)
+>
+> Nota dejada en el PR: el `window.confirm` de `PeersTable.tsx:355` debería ser un `<Modal>` (la infra existe). **Out of scope** del refactor; queda flagged para follow-up.
+>
+> **Verificación**: ambos PRs `tsc -b` clean · `vitest` 384/384 · CI green del PR #149 (Lint, Test Backend, Test Frontend, Build linux/darwin amd64+arm64, Docker hwaccel, Trivy). #150 corriendo al cierre de sesión.
+>
+> **Diferido — (c) B4 Scanner refactor**. Conscientemente next-session porque es el más pesado de la triada: `New()` 13 params posicionales → `Repos` struct + split de `scanner.go` 1193 LOC en `scanner.go` (walk + lifecycle) / `enrich.go` (TMDb/imágenes) / `episodes.go` (jerarquía series/season/episode). 3-4h con disciplina. Más superficie y entrelazamiento que B2 federation split — mejor en aislamiento con main estable.
+
+> 🛡️ **Sesión 2026-05-05 (rama `claude/compassionate-bardeen-76afea`, mergeada via PR #148)** — **Refresh estético de peer-detail + senior review de mantenibilidad + 3 P1 cerrados (B5/B1/F1)**. 4 commits sobre la rama.
 >
 > **Commit `ff8f0d6`** — *ui(peers): peer item detail reuses HeroSection*. La página de detalle de items federados venía con un layout 2-col plano (póster pequeño + texto a la derecha) que rompía la paridad visual con el detail local cinematográfico. Refactor para que **`PeerItemDetail` reuse `<HeroSection>`** vía `federationItemToMediaItem` + aurora canvas page-wide con paleta extraída en runtime del póster (mismo look que un movie local). El wire de federación es estrecho (id/type/title/year/overview/poster_url) pero `HeroSection` degrada bien: sin backdrop cae al poster_url, sin logo cae al `<h1>`, sin géneros/rating los chips simplemente no se renderizan. Cambios mínimos a `HeroSection`: nuevo `playLabel?: string` opcional (defaults `t("common.play")`) para surfacear "Reanudar 0:58" cuando hay progress cross-peer guardado, y favorito condicional a que se pase `onToggleFavorite` (peer items no tienen favoritos cross-server). Atribución del peer en el slot `studio` + pill emerald-dotted "Compartida por X" debajo del hero. Resume: primary CTA = Reanudar, "Reproducir desde el inicio" en kebab.
 >
