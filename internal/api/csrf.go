@@ -3,8 +3,12 @@ package api
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"log/slog"
 	"net/http"
 	"strings"
+
+	"hubplay/internal/api/apperror"
+	"hubplay/internal/domain"
 )
 
 const (
@@ -28,7 +32,13 @@ func CSRFProtect(next http.Handler) http.Handler {
 			token = c.Value
 		}
 		if token == "" {
-			token = generateCSRFToken()
+			generated, err := generateCSRFToken()
+			if err != nil {
+				slog.Error("csrf: token generation failed", "error", err)
+				apperror.Write(w, r.Context(), domain.NewInternal(err))
+				return
+			}
+			token = generated
 		}
 
 		// Always (re)set the cookie so the frontend can read it.
@@ -71,9 +81,11 @@ func CSRFProtect(next http.Handler) http.Handler {
 		// Validate: header must match cookie
 		headerToken := r.Header.Get(csrfHeaderName)
 		if headerToken == "" || headerToken != token {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusForbidden)
-			_, _ = w.Write([]byte(`{"error":{"code":"CSRF_FAILED","message":"missing or invalid CSRF token"}}`))
+			apperror.Write(w, r.Context(), &domain.AppError{
+				Code:       "CSRF_FAILED",
+				HTTPStatus: http.StatusForbidden,
+				Message:    "missing or invalid CSRF token",
+			})
 			return
 		}
 
@@ -86,11 +98,15 @@ func isSafeMethod(method string) bool {
 	return m == "GET" || m == "HEAD" || m == "OPTIONS"
 }
 
-func generateCSRFToken() string {
+// generateCSRFToken returns a fresh hex-encoded random token.
+// crypto/rand.Read is documented to never fail on supported platforms,
+// but a hardware-RNG outage is the kind of failure where panicking
+// inside an HTTP handler is the wrong call — it'd take down the whole
+// server. The middleware now renders a 500 via apperror.Write instead.
+func generateCSRFToken() (string, error) {
 	b := make([]byte, csrfTokenBytes)
 	if _, err := rand.Read(b); err != nil {
-		// Fallback should never happen with crypto/rand
-		panic("csrf: failed to generate random token: " + err.Error())
+		return "", err
 	}
-	return hex.EncodeToString(b)
+	return hex.EncodeToString(b), nil
 }

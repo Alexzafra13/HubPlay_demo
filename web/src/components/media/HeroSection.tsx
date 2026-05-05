@@ -29,6 +29,12 @@ export interface HeroMenuItem {
 interface HeroSectionProps {
   item: MediaItem;
   onPlay?: () => void;
+  /**
+   * Custom label for the primary CTA. Defaults to t("common.play").
+   * Used by the federation peer detail page to surface
+   * "Reanudar 0:58" when there's a saved cross-peer position.
+   */
+  playLabel?: string;
   onToggleFavorite?: () => void;
   isFavorite?: boolean;
   menuItems?: HeroMenuItem[];
@@ -143,6 +149,7 @@ const KebabMenu: FC<{ items: HeroMenuItem[] }> = ({ items }) => {
 const HeroSection: FC<HeroSectionProps> = ({
   item,
   onPlay,
+  playLabel,
   onToggleFavorite,
   isFavorite = false,
   menuItems = [],
@@ -355,33 +362,35 @@ const HeroSection: FC<HeroSectionProps> = ({
                   <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M8 5v14l11-7z" />
                   </svg>
-                  {t("common.play")}
+                  {playLabel ?? t("common.play")}
                 </Button>
 
-                <button
-                  type="button"
-                  onClick={onToggleFavorite}
-                  className="flex h-10 w-10 items-center justify-center rounded-full border border-border bg-bg-card/60 backdrop-blur-sm transition-colors hover:bg-bg-elevated cursor-pointer"
-                  aria-label={
-                    isFavorite
-                      ? t("itemDetail.removeFromFavorites")
-                      : t("itemDetail.addToFavorites")
-                  }
-                >
-                  <svg
-                    className={`h-5 w-5 transition-colors ${isFavorite ? "text-error fill-error" : "text-text-secondary"}`}
-                    viewBox="0 0 24 24"
-                    fill={isFavorite ? "currentColor" : "none"}
-                    stroke="currentColor"
-                    strokeWidth={2}
+                {onToggleFavorite && (
+                  <button
+                    type="button"
+                    onClick={onToggleFavorite}
+                    className="flex h-10 w-10 items-center justify-center rounded-full border border-border bg-bg-card/60 backdrop-blur-sm transition-colors hover:bg-bg-elevated cursor-pointer"
+                    aria-label={
+                      isFavorite
+                        ? t("itemDetail.removeFromFavorites")
+                        : t("itemDetail.addToFavorites")
+                    }
                   >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"
-                    />
-                  </svg>
-                </button>
+                    <svg
+                      className={`h-5 w-5 transition-colors ${isFavorite ? "text-error fill-error" : "text-text-secondary"}`}
+                      viewBox="0 0 24 24"
+                      fill={isFavorite ? "currentColor" : "none"}
+                      stroke="currentColor"
+                      strokeWidth={2}
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"
+                      />
+                    </svg>
+                  </button>
+                )}
 
                 {menuItems.length > 0 && <KebabMenu items={menuItems} />}
               </div>

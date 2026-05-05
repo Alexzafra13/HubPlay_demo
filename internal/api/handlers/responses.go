@@ -6,41 +6,19 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"strconv"
 
 	"github.com/go-chi/chi/v5/middleware"
 
+	"hubplay/internal/api/apperror"
 	"hubplay/internal/domain"
 )
 
-// errorPayload is the envelope returned for every API error.
-// Fields with omitempty are only rendered when the AppError sets them,
-// keeping the response compact for simple cases.
-type errorPayload struct {
-	Code      string         `json:"code"`
-	Message   string         `json:"message"`
-	Hint      string         `json:"hint,omitempty"`
-	Details   map[string]any `json:"details,omitempty"`
-	RequestID string         `json:"request_id,omitempty"`
-}
-
-// errorRecorder is the observability hook invoked for every rendered
-// AppError. It is overwritten via SetErrorRecorder at wiring time; tests and
-// the default path use the no-op to avoid a hard dependency on Prometheus
-// (and the import cycle that would come with it).
-var errorRecorder = func(code string) {}
-
-// SetErrorRecorder installs a function that will be called with the Code of
-// every AppError rendered by the handler package. Pass nil to disable.
-//
-// The recorder is called after the HTTP response has been written so a slow
-// metrics backend cannot delay client-facing latency.
+// SetErrorRecorder installs the observability hook fired for every
+// rendered AppError. Thin wrapper around apperror.SetRecorder kept on
+// the handlers surface so router.go wiring (which already imports
+// handlers) doesn't need a second import.
 func SetErrorRecorder(fn func(code string)) {
-	if fn == nil {
-		errorRecorder = func(string) {}
-		return
-	}
-	errorRecorder = fn
+	apperror.SetRecorder(fn)
 }
 
 func respondJSON(w http.ResponseWriter, status int, data any) {
@@ -55,24 +33,11 @@ func decodeJSON(r *http.Request, v any) error {
 	return json.NewDecoder(r.Body).Decode(v)
 }
 
-// respondAppError writes an AppError as a JSON response, attaching the chi
-// request ID for correlation and setting Retry-After when present. It also
-// notifies the observability hook (see SetErrorRecorder) so every rendered
-// error code shows up as a metric — no handler code needed on call sites.
+// respondAppError writes an AppError as a JSON response. Thin wrapper
+// around apperror.Write so handler call sites stay terse and the
+// envelope/recorder/Retry-After logic lives in one place.
 func respondAppError(w http.ResponseWriter, ctx context.Context, appErr *domain.AppError) {
-	if appErr.RetryAfter > 0 {
-		w.Header().Set("Retry-After", strconv.Itoa(int(appErr.RetryAfter.Seconds())))
-	}
-	respondJSON(w, appErr.HTTPStatus, map[string]any{
-		"error": errorPayload{
-			Code:      appErr.Code,
-			Message:   appErr.Message,
-			Hint:      appErr.Hint,
-			Details:   appErr.Details,
-			RequestID: middleware.GetReqID(ctx),
-		},
-	})
-	errorRecorder(appErr.Code)
+	apperror.Write(w, ctx, appErr)
 }
 
 // respondError writes an ad-hoc error response. Prefer returning an AppError

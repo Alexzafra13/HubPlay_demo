@@ -520,7 +520,7 @@ func TestProgressHandler_NextUp_ShapesEpisodes(t *testing.T) {
 		t.Fatalf("want 1 entry, got %d", len(data))
 	}
 	entry := data[0].(map[string]any)
-	if entry["episode_id"] != "ep-1" || entry["series_title"] != "Show" {
+	if entry["id"] != "ep-1" || entry["series_title"] != "Show" {
 		t.Errorf("shape: %v", entry)
 	}
 	if entry["season_number"] != float64(2) || entry["episode_number"] != float64(3) {

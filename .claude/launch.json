@@ -15,8 +15,8 @@
     },
     {
       "name": "hubplay-web",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--prefix", "web"],
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--dir", "web", "run", "dev"],
       "port": 3000
     }
   ]

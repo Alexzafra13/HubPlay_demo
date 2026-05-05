@@ -65,6 +65,14 @@ export function useHls({
   // index — selecting "Auto" sets it back to -1.
   const [currentQuality, setCurrentQuality] = useState(-1);
 
+  // startPosition is only consumed when we attach a fresh Hls
+  // instance, so we read it from a ref rather than including it in
+  // the effect's dep list. Otherwise a parent that recomputes the
+  // resume seconds on every render (e.g. from a live duration) would
+  // tear the player down and reattach mid-playback.
+  const startPositionRef = useRef(startPosition);
+  startPositionRef.current = startPosition;
+
   const setAudioTrackCb = useCallback((id: number) => {
     const hls = hlsRef.current;
     if (hls) {
@@ -96,6 +104,32 @@ export function useHls({
     const video = videoRef.current;
     if (!video) return;
 
+    // Reset every piece of source-bound state up-front. Without this
+    // the player carries the previous file's audio/subtitle/quality
+    // ladder into the new attachment for the few hundred ms before
+    // MANIFEST_PARSED fires — most visibly, currentAudioTrack would
+    // stay at the prior episode's index until the next user action.
+    setError(null);
+    setAudioTracks([]);
+    setSubtitleTracks([]);
+    setQualityLevels([]);
+    setCurrentAudioTrack(0);
+    setCurrentSubtitleTrack(-1);
+    setCurrentQuality(-1);
+
+    // Tear down anything left from a prior attach. The cleanup
+    // returned below runs first when deps change, but defending here
+    // too keeps strict-mode double-mount and React-18 effect-replay
+    // edge cases honest. Also clears <video src> so a transition
+    // direct_play → transcode doesn't leave the previous progressive
+    // URL hanging on the element.
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+      hlsRef.current = null;
+    }
+    video.removeAttribute("src");
+    video.load();
+
     const useHlsPlayback =
       playbackMethod === "transcode" || playbackMethod === "direct_stream";
 
@@ -108,7 +142,7 @@ export function useHls({
         const hls = new Hls({
           enableWorker: true,
           lowLatencyMode: false,
-          startPosition: startPosition ?? -1,
+          startPosition: startPositionRef.current ?? -1,
           xhrSetup: (xhr) => {
             // Auth is handled via HTTP-only cookies.
             xhr.withCredentials = true;
@@ -225,9 +259,7 @@ export function useHls({
         hlsRef.current = null;
       }
     };
-    // Only run on mount
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [videoRef, masterPlaylistUrl, directUrl, playbackMethod, sessionToken]);
 
   return {
     error,

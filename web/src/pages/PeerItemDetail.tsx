@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router";
+import { useNavigate, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
@@ -8,12 +8,16 @@ import {
   usePeerItems,
   usePeerLibraries,
 } from "@/api/hooks/federation";
-import { Button } from "@/components/common/Button";
 import { Spinner, EmptyState } from "@/components/common";
+import { HeroSection, type HeroMenuItem } from "@/components/media/HeroSection";
 import { VideoPlayer } from "@/components/player";
+import { federationItemToMediaItem } from "@/api/federationAdapter";
+import { useVibrantColors } from "@/hooks/useVibrantColors";
+import { buildAuroraStyle } from "./itemDetail/aurora";
 import type {
   FederationRemoteItem,
   FederationRemoteItemsResponse,
+  MediaItem,
   PeerItemProgress,
   PlaybackMethod,
 } from "@/api/types";
@@ -21,17 +25,32 @@ import type {
 const TICKS_PER_SECOND = 10_000_000;
 
 // PeerItemDetail — Plex-style detail page for an item that lives on
-// a federated peer. Compared to the local ItemDetail, the metadata
-// surface is intentionally lean: the federation wire shape only
-// carries title / year / type / overview / poster_url. Cast, ratings,
-// chapters, episodes, and the per-user history all stay on the peer.
+// a federated peer.
 //
-// We surface what we have (poster + title + overview) and a single
-// canonical action: Play. When the user clicks it, we ask our origin
-// to broker a stream session with the peer, get back a same-origin
-// HLS master URL, and feed it into the same VideoPlayer the local
-// playback path uses. The peer's hostname never reaches the user's
-// browser -- all media flows through us.
+// Renders the SAME `HeroSection` used by the local movie / season /
+// episode detail page so the surface reads consistently regardless
+// of whether the item is local or shared. The federation wire shape
+// (id, type, title, year, overview, poster_url) is narrower than the
+// local item shape, but the hero degrades gracefully:
+//   - no backdrop_url   → falls back to poster_url
+//   - no logo_url       → falls back to <h1>title</h1>
+//   - no genres/rating  → those badge slots simply don't render
+//
+// The runtime vibrant-colour extraction (useVibrantColors) drives
+// both the hero gradient (inside HeroSection) and the page-wide
+// aurora canvas, so the page picks up the same warmth-of-the-poster
+// feel a local detail surface gets from its server-precomputed
+// palette.
+//
+// Peer attribution lives in the `studio` slot — that's the soft
+// "· {studio}" attribution the local hero already shows after the
+// taxonomy badges. Reads as "this came from Pedro's HubPlay" without
+// adding a new slot.
+//
+// Resume UX: when there's a saved cross-peer position (federation
+// progress migration 028), the primary CTA becomes "Reanudar 0:58"
+// and "Reproducir desde el inicio" appears in the kebab menu. Same
+// affordance pattern Plex uses for cross-device resume.
 export default function PeerItemDetail() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -51,9 +70,7 @@ export default function PeerItemDetail() {
   const library = libraries.data?.find((l) => l.id === libraryId);
 
   // findItem walks every cached items page for this (peer, library)
-  // pair and returns the first match. The query key shape from
-  // queryKeys.myPeerItems is ["me","peers",peerID,"libraries",libraryID,"items",offset]
-  // -- we filter by prefix so any cached page contributes.
+  // pair and returns the first match.
   const item = useMemo<FederationRemoteItem | undefined>(() => {
     const cached = queryClient.getQueriesData<FederationRemoteItemsResponse>({
       queryKey: ["me", "peers", peerId, "libraries", libraryId, "items"],
@@ -63,8 +80,6 @@ export default function PeerItemDetail() {
       const found = value.items.find((it) => it.id === itemId);
       if (found) return found;
     }
-    // Fallback: look at the page we just fetched in case the cache
-    // walk above missed it (e.g. mounting directly via deep link).
     return items.data?.items.find((it) => it.id === itemId);
   }, [queryClient, peerId, libraryId, itemId, items.data]);
 
@@ -99,9 +114,6 @@ export default function PeerItemDetail() {
   const resumeSeconds = useMemo(() => {
     if (!progress || progress.completed) return 0;
     if (progress.position_ticks <= 0) return 0;
-    // Skip resume offers when the duration hasn't been recorded yet
-    // (first save before the manifest landed) -- a near-zero
-    // position_ticks alone is not enough to commit to "resume" UX.
     if (progress.duration_ticks > 0) {
       const pct = progress.position_ticks / progress.duration_ticks;
       if (pct >= 0.9) return 0;
@@ -115,10 +127,6 @@ export default function PeerItemDetail() {
       setPlayError(null);
       try {
         const resp = await api.startPeerStreamSession(peerId, itemId);
-        // resp.master_playlist_url is already same-origin (the server
-        // synthesized it that way). VideoPlayer takes the URL verbatim
-        // and lets useHls / hls.js resolve relative variant URLs
-        // against it -- exactly the same as the local stream flow.
         const method: PlaybackMethod =
           resp.strategy === "direct_play"
             ? "direct_play"
@@ -147,13 +155,62 @@ export default function PeerItemDetail() {
   const handleClosePlayer = useCallback(() => {
     setShowPlayer(false);
     setPlayerInfo(null);
-    // Refresh progress so a follow-up Resume reflects what was just
-    // saved on close. Fire-and-forget; the keepalive write from
-    // useProgressReporter has already raced ahead of this.
     if (peerId && itemId) {
       api.getPeerItemProgress(peerId, itemId).then(setProgress).catch(() => {});
     }
   }, [peerId, itemId]);
+
+  // ─── Adapt to MediaItem so HeroSection consumes it directly ──────
+
+  // We mutate the adapted shape with the peer's name in the `studio`
+  // slot (soft attribution after the taxonomy chips) and patch the
+  // backdrop fallback so HeroSection's gradient + bottom fade have
+  // a richer image to work with than the cropped poster.
+  const mediaItem = useMemo<MediaItem | null>(() => {
+    if (!item) return null;
+    const base = federationItemToMediaItem(item);
+    return {
+      ...base,
+      studio: peer?.name,
+    };
+  }, [item, peer?.name]);
+
+  // Runtime palette — federation rows don't carry the server-extracted
+  // backdrop_colors local items get, so we run node-vibrant on the
+  // poster URL ourselves. The hook is cached per-URL and dynamic-
+  // imports node-vibrant in its own chunk, so this stays cheap. The
+  // hero already does its own runtime extraction internally; lifting
+  // it here just lets the page-wide aurora canvas use the same swatches
+  // (one decode, two consumers — the cache makes it free).
+  const palette = useVibrantColors(mediaItem?.poster_url ?? null);
+  const aurora = useMemo(
+    () =>
+      buildAuroraStyle({
+        vibrant: palette.vibrant ?? undefined,
+        muted: palette.muted ?? undefined,
+      }),
+    [palette.vibrant, palette.muted],
+  );
+
+  // ─── Hero menu rows ──────────────────────────────────────────────
+
+  const backLink = `/peers/${peerId}/libraries/${libraryId}`;
+  const menuItems = useMemo<HeroMenuItem[]>(() => {
+    const rows: HeroMenuItem[] = [];
+    if (resumeSeconds > 0) {
+      rows.push({
+        label: t("peers.playFromStart"),
+        icon: <PlayFromStartIcon />,
+        onClick: handlePlay,
+      });
+    }
+    rows.push({
+      label: t("peers.backToLibrary"),
+      icon: <BackIcon />,
+      onClick: () => navigate(backLink),
+    });
+    return rows;
+  }, [resumeSeconds, t, handlePlay, navigate, backLink]);
 
   // ─── Render ──────────────────────────────────────────────────────
 
@@ -165,129 +222,34 @@ export default function PeerItemDetail() {
     );
   }
 
-  if (!item) {
+  if (!item || !mediaItem) {
     return (
       <div className="p-6 sm:p-10">
-        <Link
-          to={`/peers/${peerId}/libraries/${libraryId}`}
-          className="text-sm text-accent hover:underline"
-        >
-          ← {t("peers.backToLibrary")}
-        </Link>
-        <div className="mt-6">
-          <EmptyState
-            title={t("peers.itemNotFoundTitle")}
-            description={t("peers.itemNotFoundDescription")}
-          />
-        </div>
+        <EmptyState
+          title={t("peers.itemNotFoundTitle")}
+          description={t("peers.itemNotFoundDescription")}
+        />
       </div>
     );
   }
 
-  const backLink = `/peers/${peerId}/libraries/${libraryId}`;
+  const playLabel =
+    resumeSeconds > 0
+      ? t("peers.resume", { time: formatHms(resumeSeconds) })
+      : t("peers.play");
 
   return (
-    <div className="p-6 sm:p-10">
-      <Link to={backLink} className="text-sm text-accent hover:underline">
-        ← {library?.name ?? t("peers.backToLibrary")}
-      </Link>
-
-      <div className="mt-6 grid gap-8 md:grid-cols-[260px_1fr] lg:grid-cols-[300px_1fr]">
-        {/* Poster column. Aspect-ratio reserved up-front so the
-            layout doesn't reflow when the image decodes. */}
+    <div className="flex flex-col" style={aurora.detailStyle}>
+      {/* Page-wide ambient aurora — same look as local detail. Only
+          mounts once node-vibrant resolves the poster palette; before
+          that the page reads as a regular bg-base canvas. */}
+      {aurora.auroraBackground && (
         <div
-          className="relative aspect-[2/3] w-full overflow-hidden rounded-[--radius-lg] bg-bg-elevated"
-        >
-          {item.poster_url ? (
-            <img
-              src={item.poster_url}
-              alt={`${item.title} poster`}
-              className="h-full w-full object-cover"
-            />
-          ) : (
-            <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-bg-elevated to-bg-card">
-              <span className="text-6xl font-bold text-text-muted">
-                {item.title.charAt(0).toUpperCase()}
-              </span>
-            </div>
-          )}
-        </div>
-
-        <div className="flex flex-col gap-4">
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-3xl font-bold text-text-primary sm:text-4xl">
-                {item.title}
-              </h1>
-              <span className="rounded bg-bg-base px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-text-muted">
-                {item.type}
-              </span>
-            </div>
-            {(item.year || peer) && (
-              <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-text-muted">
-                {item.year && <span>{item.year}</span>}
-                {item.year && peer && (
-                  <span className="text-text-muted/40">·</span>
-                )}
-                {peer && (
-                  <span className="inline-flex items-center gap-1.5">
-                    <span
-                      className="h-1.5 w-1.5 rounded-full bg-emerald-500"
-                      aria-hidden
-                    />
-                    {t("peers.sharedBy", { name: peer.name })}
-                  </span>
-                )}
-              </div>
-            )}
-          </div>
-
-          {item.overview && (
-            <p className="max-w-prose text-sm leading-relaxed text-text-secondary">
-              {item.overview}
-            </p>
-          )}
-
-          <div className="flex flex-wrap items-center gap-3 pt-2">
-            {resumeSeconds > 0 ? (
-              <>
-                <Button onClick={handleResume} disabled={showPlayer}>
-                  ▶ {t("peers.resume", {
-                    time: formatHms(resumeSeconds),
-                    defaultValue: "Resume {{time}}",
-                  })}
-                </Button>
-                <Button
-                  variant="secondary"
-                  onClick={handlePlay}
-                  disabled={showPlayer}
-                >
-                  {t("peers.playFromStart", { defaultValue: "Play from start" })}
-                </Button>
-              </>
-            ) : (
-              <Button onClick={handlePlay} disabled={showPlayer}>
-                ▶ {t("peers.play")}
-              </Button>
-            )}
-            <Button
-              variant="secondary"
-              onClick={() => navigate(backLink)}
-            >
-              {t("peers.backToLibrary")}
-            </Button>
-          </div>
-
-          {playError && (
-            <p
-              role="alert"
-              className="rounded border border-danger/40 bg-danger/5 p-3 text-sm text-danger"
-            >
-              {playError}
-            </p>
-          )}
-        </div>
-      </div>
+          aria-hidden="true"
+          className="fixed inset-0 -z-10"
+          style={aurora.auroraBackground}
+        />
+      )}
 
       {showPlayer && playerInfo && (
         <VideoPlayer
@@ -302,6 +264,43 @@ export default function PeerItemDetail() {
           onClose={handleClosePlayer}
         />
       )}
+
+      <HeroSection
+        item={mediaItem}
+        onPlay={resumeSeconds > 0 ? handleResume : handlePlay}
+        playLabel={playLabel}
+        menuItems={menuItems}
+      />
+
+      {playError && (
+        <div className="mx-6 mt-4 rounded-[--radius-md] bg-error/10 px-4 py-3 text-sm text-error sm:mx-10">
+          {playError}
+        </div>
+      )}
+
+      {/* Below-the-fold attribution row. The hero's chip strip already
+          shows the peer name as `· {studio}`, but the explicit
+          "shared by Pedro" pill with the live emerald dot reads more
+          like a Plex/Jellyfin "this server is online" affordance. */}
+      <div className="px-6 pt-8 sm:px-10">
+        <div className="flex flex-wrap items-center gap-3 text-sm text-text-muted">
+          {peer && (
+            <span className="inline-flex items-center gap-2 rounded-full border border-border bg-bg-card/60 px-3 py-1.5 backdrop-blur-sm">
+              <span
+                className="h-2 w-2 rounded-full bg-emerald-500"
+                aria-hidden
+              />
+              {t("peers.sharedBy", { name: peer.name })}
+            </span>
+          )}
+          {library?.name && (
+            <span className="inline-flex items-center gap-2">
+              <span aria-hidden className="text-text-muted/40">·</span>
+              <span>{library.name}</span>
+            </span>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -315,4 +314,28 @@ function formatHms(totalSeconds: number): string {
     return `${h}:${m.toString().padStart(2, "0")}:${sec.toString().padStart(2, "0")}`;
   }
   return `${m}:${sec.toString().padStart(2, "0")}`;
+}
+
+function PlayFromStartIcon() {
+  return (
+    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M6 6h2v12H6zM10 12l9-6v12z" />
+    </svg>
+  );
+}
+
+function BackIcon() {
+  return (
+    <svg
+      className="h-4 w-4"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M19 12H5M12 19l-7-7 7-7" />
+    </svg>
+  );
 }
