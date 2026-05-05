@@ -1,5 +1,37 @@
 # Estado del proyecto
 
+> 🧭 **Sesión 2026-05-05 tarde (rama `claude/quirky-archimedes-62902a`, read-only review)** — **Senior review consolidado + punch list documentado para próximas sesiones**. Cero código tocado esta sesión: 3 auditores en paralelo (backend Go, frontend React/TS, tests+observabilidad+seguridad) entregaron findings verificados contra código. **Resultado completo en [`docs/memory/audit-2026-05-05.md`](audit-2026-05-05.md)**.
+>
+> **Veredicto**: backend 8/10 (mejoró desde 7.5), frontend 6.5/10 (sin cambio). Cero regresiones desde audit 2026-04-28. Métricas verificadas: 196 .go producción / 124 _test.go (~63% vs 55% previo) · 50 tests frontend / 186 source (~27% vs 15% previo).
+>
+> **5 P0 nuevos (hardening pragmático, <3h cada uno)**:
+> - **P0-1** `/health` devuelve 200 con DB caída — split en `/health/live` + `/health/ready` con 503 en ping fail
+> - **P0-2** `RefreshToken` sin rate limit (solo `Login` lo tiene)
+> - **P0-3** `auth.Setup` (gate "no users yet") sin test directo del 403 con count>=1
+> - **P0-4** `CleanupOldPrograms` y `PruneAuditBefore` existen sin caller — daily ticker pendiente
+> - **P0-5** `useUserDataSync` abre 3 EventSource al mismo `/me/events` — singleton EventBus pendiente (los propios comments lo pedían)
+>
+> **P1 estratégico** (high leverage refactor):
+> - **B3 / P1-B1** `ItemHandler.Get` 207 LOC + 7 repos → service orchestrator + DTO tipado (mata el peor `map[string]any` de 387 ocurrencias)
+> - **F4 / P1-F1** extraer `useHlsLifecycle` compartido (useHls / useLiveHls divergen, ~150 LOC dup con drift sutil — el fix `a061267` solo tocó VOD)
+> - **B2 / P1-B2** split `internal/federation/manager.go` 1166 LOC por concern (mecánico)
+> - **B4 / P1-B3** `scanner.New()` 13 params → Repos struct
+> - **waitForShutdown / P1-B4** 14 params → runtime struct
+> - **F2 / P1-F2** split `LiveTV.tsx` 557 LOC + tests
+> - **F5 / P1-F3** Sidebar `NavRow` reutilizable (markup duplicado en `PeerLibrariesSection`)
+> - **F8 / P1-F4** `useUserDataSync` invalida queries que pueden no existir
+>
+> **Plan de ejecución en 3 sesiones discretas** (ver §7 del audit):
+> - **Sesión 1** (3-4h, single PR): los 5 P0 → cierra hardening pre-producción
+> - **Sesión 2** (4-5h): B3 + DTO tipado + F4 useHlsLifecycle → mayor leverage downstream
+> - **Sesión 3** (3-4h): B2 federation split + B4/waitForShutdown structs + F2/F5 → mecánico bajo riesgo
+>
+> **Hallazgos del review previo verificados**: B1 ✅ cerrado (commit `d7fc395`), B5 ✅ cerrado (`5313d11`), F1 ✅ cerrado (`a061267`), F9 ✅ cerrado (en/es i18n parity verificada). Resto del backlog B2/B3/B4/B6/B7/B8/B9/B10/B11/F2-F10 sigue abierto, ahora con plan de ejecución y prioridad pragmática.
+>
+> **Riesgo principal no mitigado**: 5 pages frontend god/críticas con acciones irreversibles sin tests (LiveTV, FederationAdmin, Settings, LibraryNewPage, SystemStatus, UsersAdmin, LibrariesAdmin). Las sesiones 2/3 incluyen escribir tests del área que se toca para no avanzar sin red.
+>
+> **Esta sesión NO tocó código** — solo `docs/memory/audit-2026-05-05.md` (nuevo) + esta entrada en `project-status.md`. Sigue el árbol limpio.
+
 > 🛡️ **Sesión 2026-05-05 (rama `claude/compassionate-bardeen-76afea`, PR pendiente)** — **Refresh estético de peer-detail + senior review de mantenibilidad + 3 P1 cerrados (B5/B1/F1)**. 4 commits sobre la rama.
 >
 > **Commit `ff8f0d6`** — *ui(peers): peer item detail reuses HeroSection*. La página de detalle de items federados venía con un layout 2-col plano (póster pequeño + texto a la derecha) que rompía la paridad visual con el detail local cinematográfico. Refactor para que **`PeerItemDetail` reuse `<HeroSection>`** vía `federationItemToMediaItem` + aurora canvas page-wide con paleta extraída en runtime del póster (mismo look que un movie local). El wire de federación es estrecho (id/type/title/year/overview/poster_url) pero `HeroSection` degrada bien: sin backdrop cae al poster_url, sin logo cae al `<h1>`, sin géneros/rating los chips simplemente no se renderizan. Cambios mínimos a `HeroSection`: nuevo `playLabel?: string` opcional (defaults `t("common.play")`) para surfacear "Reanudar 0:58" cuando hay progress cross-peer guardado, y favorito condicional a que se pase `onToggleFavorite` (peer items no tienen favoritos cross-server). Atribución del peer en el slot `studio` + pill emerald-dotted "Compartida por X" debajo del hero. Resume: primary CTA = Reanudar, "Reproducir desde el inicio" en kebab.
