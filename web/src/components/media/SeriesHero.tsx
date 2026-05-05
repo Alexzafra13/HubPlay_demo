@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, type FC, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { MediaItem } from "@/api/types";
 import { Badge } from "@/components/common/Badge";
-import { useVibrantColors } from "@/hooks/useVibrantColors";
 import type { HeroMenuItem } from "./HeroSection";
 import type { SeriesResumeMode } from "@/hooks/useSeriesResumeTarget";
 
@@ -82,27 +81,14 @@ const SeriesHero: FC<SeriesHeroProps> = ({
   // primary image was ingested before the extraction code shipped.
   // The hook is a no-op when imageUrl is null, so we skip the fetch
   // entirely on rows whose colours already arrived with the response.
-  const hasServerPalette =
-    !!(item.backdrop_colors?.vibrant || item.backdrop_colors?.muted);
-  const runtimePalette = useVibrantColors(
-    hasServerPalette ? null : heroBackdropUrl,
-  );
-
-  // CSS-var driven gradient. The two stops correspond to the dark-
-  // muted and vibrant swatches; when extraction is still pending or
-  // failed, fall back to plain bg-base so the page looks intentional
-  // either way.
-  const gradientStart =
-    item.backdrop_colors?.muted ?? runtimePalette.muted ?? "rgb(8, 12, 16)";
-  const gradientMid =
-    item.backdrop_colors?.vibrant ?? runtimePalette.vibrant ?? "rgb(8, 12, 16)";
-
+  // Palette extraction lives in ItemDetail.tsx now (it owns the
+  // page-wide aurora + publishes `--detail-tint`). The hero just
+  // consumes that variable via the bottom-fade and the backdrop
+  // image's mask — no per-hero palette state needed here.
   return (
     <section
-      className="relative -mx-4 md:-mx-6 overflow-hidden"
+      className="relative overflow-hidden"
       style={{
-        ['--hero-c1' as string]: gradientStart,
-        ['--hero-c2' as string]: gradientMid,
         // Bleed behind the sticky TopBar so the backdrop reaches the
         // very top of the viewport. The TopBar paints over it at z-30
         // and goes glass-blurred on scroll (see TopBar.tsx). Same
@@ -124,14 +110,27 @@ const SeriesHero: FC<SeriesHeroProps> = ({
           so what we DO reveal includes the upper third where actor
           faces typically sit (instead of cropping heads off, which
           the previous `object-right` centre-anchor did). */}
-      <div className="relative min-h-[460px] sm:min-h-[540px] lg:min-h-[600px]">
+      <div className="relative min-h-[400px] sm:min-h-[440px] lg:min-h-[480px]">
+        {/* Plex-style backdrop placement — see HeroSection.tsx for the
+            full rationale. Image lives on the right ~2/3 of the hero
+            and is masked into the page colour on its left edge, so
+            the page's 4-corner aurora shows through under the
+            poster/title column. */}
         {heroBackdropUrl ? (
           <img
             src={heroBackdropUrl}
             alt=""
             loading="eager"
-            className="absolute inset-0 h-full w-full object-cover"
-            style={{ objectPosition: "right top" }}
+            className="absolute inset-y-0 right-0 h-full w-full sm:w-4/5 lg:w-2/3 object-cover"
+            style={{
+              objectPosition: "right top",
+              maskImage:
+                "linear-gradient(to right, transparent 0%, rgba(0,0,0,0.2) 25%, rgba(0,0,0,0.85) 55%, black 75%), linear-gradient(to bottom, black 55%, rgba(0,0,0,0.2) 92%, transparent 100%)",
+              WebkitMaskImage:
+                "linear-gradient(to right, transparent 0%, rgba(0,0,0,0.2) 25%, rgba(0,0,0,0.85) 55%, black 75%), linear-gradient(to bottom, black 55%, rgba(0,0,0,0.2) 92%, transparent 100%)",
+              maskComposite: "intersect",
+              WebkitMaskComposite: "source-in",
+            }}
           />
         ) : (
           <div className="absolute inset-0 bg-gradient-to-br from-bg-elevated to-bg-card" />
@@ -149,35 +148,18 @@ const SeriesHero: FC<SeriesHeroProps> = ({
           />
         )}
 
-        {/* Vibrant-color fade on the left 50%. The first stop is solid
-            (hides whatever the backdrop has under the poster), the
-            second is at 70% opacity to bleed colour into the image, the
-            third is fully transparent to let the backdrop breathe on
-            the right side. The vertical fade-to-bg-base at the bottom
-            (8% from the bottom) hides the seam where the hero meets
-            the rest of the page. */}
-        <div
-          className="absolute inset-0"
-          style={{
-            background:
-              "linear-gradient(to right, var(--hero-c1) 0%, color-mix(in srgb, var(--hero-c2) 60%, transparent) 30%, transparent 55%)",
-          }}
-        />
-        {/* Bottom-fade: image -> page tint. The target colour is
-            published by the ItemDetail wrapper as `--detail-tint` and
-            falls back to plain bg-base when no palette is available.
-            Targeting the same colour the page below uses means the
-            seam between hero and seasons grid is invisible — no
-            "container-on-container" look. Taller fade band (h-32)
-            than before so the transition is gradual rather than
-            cliff-edge. */}
-        <div
-          className="absolute inset-x-0 bottom-0 h-48 lg:h-56"
-          style={{
-            background:
-              "linear-gradient(to bottom, transparent, var(--detail-tint, rgb(8 12 16)))",
-          }}
-        />
+        {/* Left-side gradient overlay removed — the image's own
+            mask (above) plus the page's 4-corner aurora handle the
+            same job without an extra layer. Keeping this comment as
+            a tombstone so future maintainers don't reintroduce a
+            duplicate fade thinking it's missing. */}
+        {/* Bottom-fade overlay removed — the image's own mask
+            (above) now fades the bottom edge to transparent so the
+            page background flows through uninterrupted. The old
+            overlay painted a solid `--detail-tint` band that left
+            a visible horizontal seam against the page's 4-corner
+            aurora (the colour at the centre-bottom of the page does
+            not match `--detail-tint`). */}
 
         {/* Content column. `max-w` keeps it on the left third on wide
             screens; on mobile it stretches and the gradient extends

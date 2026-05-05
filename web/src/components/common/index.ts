@@ -32,3 +32,5 @@ export type { BreadcrumbItem } from "./PageHeader";
 
 export { BlurhashPlaceholder } from "./BlurhashPlaceholder";
 export type { BlurhashPlaceholderProps } from "./BlurhashPlaceholder";
+
+export { HorizontalScroller } from "./HorizontalScroller";

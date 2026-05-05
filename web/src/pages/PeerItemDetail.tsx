@@ -188,8 +188,17 @@ export default function PeerItemDetail() {
       buildAuroraStyle({
         vibrant: palette.vibrant ?? undefined,
         muted: palette.muted ?? undefined,
+        darkVibrant: palette.darkVibrant ?? undefined,
+        lightVibrant: palette.lightVibrant ?? undefined,
+        lightMuted: palette.lightMuted ?? undefined,
       }),
-    [palette.vibrant, palette.muted],
+    [
+      palette.vibrant,
+      palette.muted,
+      palette.darkVibrant,
+      palette.lightVibrant,
+      palette.lightMuted,
+    ],
   );
 
   // ─── Hero menu rows ──────────────────────────────────────────────
@@ -238,18 +247,22 @@ export default function PeerItemDetail() {
       ? t("peers.resume", { time: formatHms(resumeSeconds) })
       : t("peers.play");
 
+  // Aurora applied directly to the wrapper — same reasoning as
+  // ItemDetail.tsx: the fixed/-z-10 canvas lost a stacking battle
+  // against the body's bg-base propagation in some browsers and
+  // stayed invisible. Painting on the wrapper is unambiguous.
+  const wrapperStyle = aurora.auroraBackground
+    ? { ...aurora.detailStyle, ...aurora.auroraBackground }
+    : aurora.detailStyle;
+
   return (
-    <div className="flex flex-col" style={aurora.detailStyle}>
-      {/* Page-wide ambient aurora — same look as local detail. Only
-          mounts once node-vibrant resolves the poster palette; before
-          that the page reads as a regular bg-base canvas. */}
-      {aurora.auroraBackground && (
-        <div
-          aria-hidden="true"
-          className="fixed inset-0 -z-10"
-          style={aurora.auroraBackground}
-        />
-      )}
+    <div
+      className="flex flex-col min-h-screen -mx-4 md:-mx-6 -mb-4 md:-mb-6"
+      style={wrapperStyle}
+    >
+      {/* No separate aurora canvas — the wrapper carries the colour
+          itself. --detail-tint is still published so the hero's
+          bottom-fade gradient lands on the same swatch. */}
 
       {showPlayer && playerInfo && (
         <VideoPlayer

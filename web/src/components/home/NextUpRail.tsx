@@ -18,7 +18,7 @@ export function NextUpRail() {
     return (
       <HomeRail title={t("home.nextUp")}>
         {Array.from({ length: 4 }, (_, i) => (
-          <div key={i} className="w-[280px] shrink-0">
+          <div key={i} className="w-[300px] md:w-[340px] lg:w-[380px] xl:w-[420px] shrink-0">
             <Skeleton
               variant="rectangular"
               className="aspect-video w-full rounded-md"
@@ -37,7 +37,7 @@ export function NextUpRail() {
   return (
     <HomeRail title={t("home.nextUp")} linkTo="/series">
       {items.map((item) => (
-        <div key={item.id} className="w-[280px] shrink-0">
+        <div key={item.id} className="w-[300px] md:w-[340px] lg:w-[380px] xl:w-[420px] shrink-0">
           <EpisodeCard item={item} />
         </div>
       ))}

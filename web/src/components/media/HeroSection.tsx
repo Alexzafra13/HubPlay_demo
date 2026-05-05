@@ -4,7 +4,6 @@ import { useTranslation } from "react-i18next";
 import type { MediaItem } from "@/api/types";
 import { Button } from "@/components/common/Button";
 import { Badge } from "@/components/common/Badge";
-import { useVibrantColors } from "@/hooks/useVibrantColors";
 import { thumb } from "@/utils/imageUrl";
 
 // Posters are small enough (≤340px tall) that a 720px-wide variant
@@ -190,61 +189,68 @@ const HeroSection: FC<HeroSectionProps> = ({
   // extraction code shipped. The hook is a no-op when imageUrl is null,
   // so we skip the fetch entirely on rows whose colours already arrived
   // with the response.
-  const hasServerPalette =
-    !!(item.backdrop_colors?.vibrant || item.backdrop_colors?.muted);
-  const runtimePalette = useVibrantColors(
-    hasServerPalette ? null : heroBackdropUrl,
-  );
-  const gradientStart =
-    item.backdrop_colors?.muted ?? runtimePalette.muted ?? "rgb(8, 12, 16)";
-  const gradientMid =
-    item.backdrop_colors?.vibrant ?? runtimePalette.vibrant ?? "rgb(8, 12, 16)";
-
+  // Palette extraction lives in ItemDetail.tsx now (it owns the
+  // page-wide aurora + publishes `--detail-tint` for hero hooks).
+  // The hero just consumes that variable via the bottom-fade and
+  // the image's mask — no per-hero palette state needed here.
   return (
     <section
-      className="relative -mx-4 md:-mx-6 overflow-hidden"
+      className="relative overflow-hidden"
       style={{
-        ['--hero-c1' as string]: gradientStart,
-        ['--hero-c2' as string]: gradientMid,
         // Bleed behind the sticky TopBar so the backdrop reaches the
         // very top of the viewport. Same pattern as SeriesHero — keeps
         // both detail surfaces visually aligned.
         marginTop: "calc(var(--topbar-height) * -1)",
       }}
     >
-      <div className="relative min-h-[460px] sm:min-h-[540px] lg:min-h-[600px]">
+      <div className="relative min-h-[400px] sm:min-h-[440px] lg:min-h-[480px]">
+        {/* Plex-style backdrop placement: image lives in the RIGHT
+            half of the hero only and is masked into the page colour
+            on its left edge. The result is that the page's 4-corner
+            aurora shows through the left of the hero (under the
+            poster + title) instead of the image bleeding edge to
+            edge. Plex implements this with an SVG mask; CSS
+            mask-image with a linear-gradient gives the same look in
+            ~3 lines and stays responsive. */}
         {heroBackdropUrl ? (
           <img
             src={heroBackdropUrl}
             alt=""
             loading="eager"
-            className="absolute inset-0 h-full w-full object-cover"
-            style={{ objectPosition: "right top" }}
+            className="absolute inset-y-0 right-0 h-full w-full sm:w-4/5 lg:w-2/3 object-cover"
+            style={{
+              objectPosition: "right top",
+              // Two-axis fade composited via mask-composite:intersect.
+              // Mask 1 fades the image's left edge to transparent so
+              // the page colour shows through under the title column.
+              // Mask 2 fades the bottom edge to transparent so the
+              // image dissolves into the page below the hero with no
+              // visible seam (Plex's SVG mask does the same job; CSS
+              // mask-composite is the lighter equivalent). Without
+              // this, an extra `bottom-fade` overlay used to paint a
+              // solid `--detail-tint` band that didn't match the
+              // page's 4-corner aurora at that y-coordinate.
+              // mask-composite: intersect (modern) +
+              // -webkit-mask-composite: source-in (Safari legacy).
+              maskImage:
+                "linear-gradient(to right, transparent 0%, rgba(0,0,0,0.2) 25%, rgba(0,0,0,0.85) 55%, black 75%), linear-gradient(to bottom, black 55%, rgba(0,0,0,0.2) 92%, transparent 100%)",
+              WebkitMaskImage:
+                "linear-gradient(to right, transparent 0%, rgba(0,0,0,0.2) 25%, rgba(0,0,0,0.85) 55%, black 75%), linear-gradient(to bottom, black 55%, rgba(0,0,0,0.2) 92%, transparent 100%)",
+              maskComposite: "intersect",
+              WebkitMaskComposite: "source-in",
+            }}
           />
         ) : (
           <div className="absolute inset-0 bg-gradient-to-br from-bg-elevated to-bg-card" />
         )}
 
-        {/* Vibrant-color fade on the left ~50%. Solid colour under the
-            poster, mid stop bleeds into the image, third stop is fully
-            transparent so the backdrop breathes on the right. */}
-        <div
-          className="absolute inset-0"
-          style={{
-            background:
-              "linear-gradient(to right, var(--hero-c1) 0%, color-mix(in srgb, var(--hero-c2) 60%, transparent) 30%, transparent 55%)",
-          }}
-        />
-
-        {/* Bottom-fade — image -> page tint. Targets `--detail-tint`
-            so the hero blends into the rest of the page with no seam. */}
-        <div
-          className="absolute inset-x-0 bottom-0 h-48 lg:h-56"
-          style={{
-            background:
-              "linear-gradient(to bottom, transparent, var(--detail-tint, rgb(8 12 16)))",
-          }}
-        />
+        {/* Bottom-fade overlay removed — the image's own mask
+            (above) now fades the bottom edge to transparent so the
+            page background flows through uninterrupted. The old
+            overlay painted a solid `--detail-tint` band that left
+            a visible horizontal seam against the page's 4-corner
+            aurora (the colour at the centre-bottom of the page does
+            not match `--detail-tint`). */}
 
         {/* Content column. `max-w` keeps it on the left third on wide
             screens; on mobile it stretches and the gradient extends

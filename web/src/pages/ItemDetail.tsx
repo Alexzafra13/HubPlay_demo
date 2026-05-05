@@ -15,6 +15,7 @@ import { VideoPlayer } from "@/components/player";
 import { ImageManager } from "@/components/ImageManager";
 import { useAuthStore } from "@/store/auth";
 import { useResumeTarget } from "@/hooks/useSeriesResumeTarget";
+import { useVibrantColors } from "@/hooks/useVibrantColors";
 import { usePlayback } from "./itemDetail/usePlayback";
 import { SeasonEpisodes, SeasonEpisodeList } from "./itemDetail/season";
 import { buildAuroraStyle } from "./itemDetail/aurora";
@@ -150,6 +151,25 @@ export default function ItemDetail() {
     }));
   }, [item?.chapters]);
 
+  // Runtime palette extraction — must run on EVERY render (Rules of
+  // Hooks) so it sits above the early returns. Server-side palette
+  // wins when present; this fallback only fires for items scanned
+  // before colour extraction shipped (and for federated remotes
+  // that haven't re-scanned). The fallback URL chain mirrors
+  // HeroSection so the swatch we tint with matches the swatch the
+  // hero already paints with.
+  const hasServerPalette = !!(
+    item?.backdrop_colors?.vibrant || item?.backdrop_colors?.muted
+  );
+  const isSubItem = item?.type === "season" || item?.type === "episode";
+  const fallbackUrl = hasServerPalette
+    ? null
+    : item?.backdrop_url ??
+      (isSubItem ? item?.series_backdrop_url : undefined) ??
+      item?.poster_url ??
+      null;
+  const runtimePalette = useVibrantColors(fallbackUrl);
+
   // ─── Render ─────────────────────────────────────────────────────────────
 
   if (isLoading) {
@@ -197,26 +217,52 @@ export default function ItemDetail() {
   // wrapper so the hero's bottom-fade gradient targets the exact
   // base colour the canvas paints in (no visible seam between hero
   // and the rest of the page).
-  const { detailStyle, auroraBackground } = buildAuroraStyle(
-    item.backdrop_colors,
-  );
+  // Composed palette — server-side `backdrop_colors` is canonical
+  // (extracted at scan time from the same source the hero shows)
+  // but the legacy server schema only stores vibrant + muted; the
+  // four-corner Plex composition wants up to four distinct
+  // swatches, so the darkVibrant / lightVibrant / lightMuted
+  // slots come from the runtime extractor (node-vibrant resolves
+  // them in one pass alongside the basic two). Page tint stays
+  // consistent with the hero because both consume the same merged
+  // object.
+  const { detailStyle, auroraBackground } = buildAuroraStyle({
+    vibrant: item.backdrop_colors?.vibrant ?? runtimePalette.vibrant ?? undefined,
+    muted: item.backdrop_colors?.muted ?? runtimePalette.muted ?? undefined,
+    darkVibrant: runtimePalette.darkVibrant ?? undefined,
+    lightVibrant: runtimePalette.lightVibrant ?? undefined,
+    lightMuted: runtimePalette.lightMuted ?? undefined,
+  });
+
+  // Apply the aurora directly to the page wrapper instead of a
+  // separate `position: fixed; -z-10` canvas. The fixed-canvas
+  // approach lost a stacking battle against the body's bg-base
+  // propagation in some browsers — the tint painted but stayed
+  // invisible behind the propagated canvas colour. Painting on the
+  // wrapper sidesteps the z-index war entirely: the wrapper IS the
+  // surface every section sits on, so its background paints under
+  // them by definition. min-h-screen guarantees the colour fills
+  // the viewport even when the page content is shorter than the
+  // window (small movies with no cast / extras).
+  const wrapperStyle = auroraBackground
+    ? { ...detailStyle, ...auroraBackground }
+    : detailStyle;
 
   return (
-    <div className="flex flex-col" style={detailStyle}>
-      {/* Page-wide ambient-aurora canvas — fixed, full viewport,
-          behind every other layer. Layered radial gradients give
-          the surface a PS3-XMB-style cloud-of-colour quality: the
-          page reads as personalised by the cover art rather than
-          a flat tint. Only mounts when we actually have a palette;
-          otherwise the body's bg-base shows through and the page
-          looks identical to the rest of the app. */}
-      {auroraBackground && (
-        <div
-          aria-hidden="true"
-          className="fixed inset-0 -z-10"
-          style={auroraBackground}
-        />
-      )}
+    // -mx-4 md:-mx-6 cancels the AppLayout <main> px gutter so the
+    // page-tint background reaches the very edges of the viewport
+    // (Plex never has that grey strip on the right between the
+    // coloured page and the scrollbar). pb cancels main's pb-4/6.
+    // The hero already lives at the wrapper's edges; body content
+    // re-adds horizontal padding via px-* on its own section.
+    <div
+      className="flex flex-col min-h-screen -mx-4 md:-mx-6 -mb-4 md:-mb-6"
+      style={wrapperStyle}
+    >
+      {/* No separate aurora canvas — the wrapper carries the colour
+          itself (see comment above the wrapperStyle composition).
+          --detail-tint is still published on the wrapper so the
+          hero's bottom-fade gradient lands on the same swatch. */}
 
       {/* Video Player Overlay */}
       {showPlayer && playerInfo && (playingItemId || id) && (

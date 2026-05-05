@@ -9,6 +9,7 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router";
 import { useTranslation } from "react-i18next";
+import { HorizontalScroller } from "@/components/common";
 
 interface HomeRailProps {
   title: string;
@@ -59,9 +60,8 @@ export function HomeRail({ title, linkTo, children }: HomeRailProps) {
 }
 
 export function ScrollRow({ children }: { children: ReactNode }) {
-  return (
-    <div className="flex gap-4 overflow-x-auto pb-2 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-white/10">
-      {children}
-    </div>
-  );
+  // Hidden scrollbar everywhere — desktop gets the chevron arrows
+  // on hover (HorizontalScroller), mobile keeps native swipe-to-
+  // scroll. The Plex playbook: never advertise the scrollbar.
+  return <HorizontalScroller>{children}</HorizontalScroller>;
 }
