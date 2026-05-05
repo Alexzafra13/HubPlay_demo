@@ -1,24 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
-import { useQueries } from "@tanstack/react-query";
 import { useLiveTvPlayer } from "@/store/liveTvPlayer";
 import {
-  queryKeys,
   useAddChannelFavorite,
-  useBulkSchedule,
   useChannelFavoriteIDs,
-  useContinueWatchingChannels,
-  useLibraries,
   useRemoveChannelFavorite,
 } from "@/api/hooks";
-import { api } from "@/api/client";
-import type {
-  Channel,
-  ChannelCategory,
-  EPGProgram,
-  UnhealthyChannel,
-} from "@/api/types";
+import type { Channel } from "@/api/types";
+import { useLiveTvData } from "./liveTv/useLiveTvData";
 import {
   type CategoryFilter,
   CountrySelector,
@@ -53,66 +43,20 @@ import {
  */
 export default function LiveTV() {
   const { t } = useTranslation();
-  const { data: libraries, isLoading: librariesLoading } = useLibraries();
 
-  // Every livetv library the current user can see. Channels from all of
-  // them are merged into a single pool for the Discover/Guide surfaces —
-  // the admin can have multiple (one per country, one per provider…) and
-  // the viewer shouldn't care which library a channel came from.
-  const liveTvLibraries = useMemo(
-    () => (libraries ?? []).filter((l) => l.content_type === "livetv"),
-    [libraries],
-  );
-
-  // Parallel channel fetches — one query per library. `useQueries` returns
-  // the same shape as `useQuery` for each entry; we flatten `.data` into a
-  // single Channel[] below. Cache keys match `useChannels` so a library
-  // scan invalidation hits both hooks.
-  const channelQueries = useQueries({
-    queries: liveTvLibraries.map((lib) => ({
-      queryKey: queryKeys.channels(lib.id),
-      queryFn: () => api.getChannels(lib.id),
-    })),
-  });
-  const channelsLoading =
-    liveTvLibraries.length > 0 && channelQueries.some((q) => q.isLoading);
-  const rawChannels = useMemo<Channel[]>(
-    () => channelQueries.flatMap((q) => q.data ?? []),
-    [channelQueries],
-  );
-
-  // Inactive channels 404 on playback — hide them rather than leave dead
-  // clicks in the mosaic.
-  const channels = useMemo(
-    () => (rawChannels ?? []).filter((c) => c.is_active !== false),
-    [rawChannels],
-  );
-
-  const channelIds = useMemo(() => channels.map((c) => c.id), [channels]);
-  const { data: scheduleData } = useBulkSchedule(channelIds);
-  const scheduleByChannel = useMemo(() => scheduleData ?? {}, [scheduleData]);
-
-  // Unhealthy channels per library. The backend filters these out of the
-  // main channel list (ListHealthyByLibrary) so Discover stays clean, but
-  // we still want to surface them — dimmed — in a dedicated "Apagados"
-  // rail so the viewer knows the channel exists and the admin can tell
-  // at a glance what's currently off the air without jumping to the
-  // admin page.
-  const unhealthyQueries = useQueries({
-    queries: liveTvLibraries.map((lib) => ({
-      queryKey: queryKeys.unhealthyChannels(lib.id),
-      queryFn: () => api.listUnhealthyChannels(lib.id),
-    })),
-  });
-  const unhealthyChannels = useMemo<UnhealthyChannel[]>(
-    () => unhealthyQueries.flatMap((q) => q.data ?? []),
-    [unhealthyQueries],
-  );
-
-  // "Continuar viendo" rail — per-user, populated by the beacon the
-  // ChannelPlayer fires on first play. The rail only shows up on the
-  // "all" category tab; DiscoverView handles the gating.
-  const { data: continueWatching = [] } = useContinueWatchingChannels();
+  // Data layer (parallel fetch + flatten) lives in useLiveTvData so
+  // this page only orchestrates URL state, player overlay, favourites,
+  // and rendering. Replaces ~60 lines of inline useQueries + useMemo
+  // chains that mixed data-shape concerns with view orchestration.
+  const {
+    liveTvLibraries,
+    channels,
+    channelsLoading,
+    librariesLoading,
+    unhealthyChannels,
+    scheduleByChannel,
+    continueWatching,
+  } = useLiveTvData();
 
   // ── Tabs + filters (URL-backed) ───────────────────────────────────
   // The page's filter state lives in `?tab&cat&q=` so deep-links survive

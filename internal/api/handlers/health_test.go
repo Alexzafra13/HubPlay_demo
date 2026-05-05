@@ -49,8 +49,10 @@ func TestHealthHandler_Health_ReturnsOK(t *testing.T) {
 	}
 }
 
-func TestHealthHandler_Health_ReportsDBError(t *testing.T) {
-	// Open then close a DB so Ping() errors.
+func TestHealthHandler_Health_ReportsDBError_With503(t *testing.T) {
+	// Open then close a DB so Ping() errors. Probes must see a non-2xx
+	// status so the load balancer drains the node instead of routing
+	// requests into a broken backend.
 	database := testutil.NewTestDB(t)
 	_ = database.Close() // t.Cleanup also closes, which is fine — double-close is ignored
 	sm := newFakeStreamManager()
@@ -60,14 +62,17 @@ func TestHealthHandler_Health_ReportsDBError(t *testing.T) {
 	rr := httptest.NewRecorder()
 	h.Health(rr, req)
 
-	if rr.Code != http.StatusOK {
-		t.Fatalf("handler should still respond 200 even on DB error, got %d", rr.Code)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("DB-down /health must return 503, got %d", rr.Code)
 	}
 	var out map[string]any
 	_ = json.NewDecoder(rr.Body).Decode(&out)
 	dbStatus, _ := out["database"].(string)
 	if dbStatus == "ok" {
 		t.Errorf("database status should report the error, got %q", dbStatus)
+	}
+	if out["status"] != "unavailable" {
+		t.Errorf("status field on DB error should be 'unavailable', got %v", out["status"])
 	}
 }
 
@@ -86,5 +91,71 @@ func TestHealthHandler_Health_NilStreamManager_ZeroStreams(t *testing.T) {
 	_ = json.NewDecoder(rr.Body).Decode(&out)
 	if out["active_streams"] != float64(0) {
 		t.Errorf("nil stream manager should yield 0 active_streams, got %v", out["active_streams"])
+	}
+}
+
+func TestHealthHandler_Live_AlwaysOK_EvenWithoutDB(t *testing.T) {
+	// Liveness must NOT depend on the DB — it answers "is the process
+	// alive enough to receive traffic?" Killing the DB should not flip
+	// /health/live or Kubernetes will restart healthy pods on every
+	// transient SQLite hiccup.
+	database := testutil.NewTestDB(t)
+	_ = database.Close()
+	h := NewHealthHandler(database, nil, "v")
+
+	req := httptest.NewRequest(http.MethodGet, "/health/live", nil)
+	rr := httptest.NewRecorder()
+	h.Live(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Live must return 200 even with broken DB, got %d", rr.Code)
+	}
+	var out map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out["status"] != "ok" {
+		t.Errorf("status: %v", out["status"])
+	}
+}
+
+func TestHealthHandler_Ready_OK(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	h := NewHealthHandler(database, nil, "v")
+
+	req := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
+	rr := httptest.NewRecorder()
+	h.Ready(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Ready with healthy DB must return 200, got %d", rr.Code)
+	}
+	var out map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&out)
+	if out["database"] != "ok" {
+		t.Errorf("database: %v", out["database"])
+	}
+}
+
+func TestHealthHandler_Ready_503OnDBDown(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	_ = database.Close()
+	h := NewHealthHandler(database, nil, "v")
+
+	req := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
+	rr := httptest.NewRecorder()
+	h.Ready(rr, req)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("Ready with broken DB must return 503, got %d", rr.Code)
+	}
+	var out map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&out)
+	if out["status"] != "unavailable" {
+		t.Errorf("status: %v", out["status"])
+	}
+	dbStatus, _ := out["database"].(string)
+	if dbStatus == "ok" {
+		t.Errorf("database status should report the error, got %q", dbStatus)
 	}
 }

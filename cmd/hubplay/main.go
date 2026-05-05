@@ -29,6 +29,7 @@ import (
 	"hubplay/internal/observability"
 	"hubplay/internal/probe"
 	"hubplay/internal/provider"
+	"hubplay/internal/retention"
 	"hubplay/internal/scanner"
 	"hubplay/internal/setup"
 	"hubplay/internal/stream"
@@ -312,6 +313,13 @@ func run(configPath string) error {
 		defer federationManager.Close()
 	}
 
+	// Retention sweep: prune EPG programmes and federation audit log on
+	// a fixed cadence so append-only tables don't grow forever. Both
+	// dependencies are nil-safe inside the runner — operators without
+	// IPTV or federation still get a no-op runner that costs nothing.
+	retentionRunner := retention.New(cfg.Retention, iptvService, federationRepo, logger)
+	retentionRunner.Start(ctx)
+
 	router := api.NewRouter(api.Dependencies{
 		Auth:          authService,
 		DeviceCode:    deviceCodeService,
@@ -367,10 +375,68 @@ func run(configPath string) error {
 	}()
 
 	// ═══ Phase 7: Wait for shutdown ═══
-	return waitForShutdown(ctx, cancel, server, streamManager, iptvService, iptvProxy, iptvTransmux, iptvScheduler, iptvProberWorker, scanScheduler, imageRefreshScheduler, libraryService, authService, database, logger)
+	// runtime bundles every long-lived component the shutdown path
+	// needs to stop or close. Adding a new background service is now
+	// a one-line struct-field append plus a Stop call inside
+	// waitForShutdown — instead of editing the positional argument
+	// list and risking a "forgot to wire it through" leak. The class
+	// of bug that fix is intended to prevent is "I added IPTV prober
+	// last quarter and only spotted that we never closed it during
+	// SIGTERM when CI flaked on a leaked goroutine."
+	return waitForShutdown(ctx, cancel, &runtime{
+		server:                server,
+		streamManager:         streamManager,
+		iptvService:           iptvService,
+		iptvProxy:             iptvProxy,
+		iptvTransmux:          iptvTransmux,
+		iptvScheduler:         iptvScheduler,
+		iptvProber:            iptvProberWorker,
+		scanScheduler:         scanScheduler,
+		imageRefreshScheduler: imageRefreshScheduler,
+		libraryService:        libraryService,
+		authService:           authService,
+		retention:             retentionRunner,
+		database:              database,
+		logger:                logger,
+	})
 }
 
-func waitForShutdown(ctx context.Context, cancel context.CancelFunc, server *http.Server, sm *stream.Manager, iptvSvc *iptv.Service, iptvProxy *iptv.StreamProxy, iptvTransmux *iptv.TransmuxManager, iptvSched *iptv.Scheduler, iptvProber *iptv.ProberWorker, scheduler *library.Scheduler, imageRefreshSched *library.ImageRefreshScheduler, librarySvc *library.Service, authSvc *auth.Service, database *sql.DB, logger *slog.Logger) error {
+// runtime is the bag of long-lived components the shutdown path drives.
+// Every field here must be safe to call its Stop / Shutdown / Close
+// method even when the corresponding feature is disabled (see nil-checks
+// in waitForShutdown).
+type runtime struct {
+	server                *http.Server
+	streamManager         *stream.Manager
+	iptvService           *iptv.Service
+	iptvProxy             *iptv.StreamProxy
+	iptvTransmux          *iptv.TransmuxManager
+	iptvScheduler         *iptv.Scheduler
+	iptvProber            *iptv.ProberWorker
+	scanScheduler         *library.Scheduler
+	imageRefreshScheduler *library.ImageRefreshScheduler
+	libraryService        *library.Service
+	authService           *auth.Service
+	retention             *retention.Runner
+	database              *sql.DB
+	logger                *slog.Logger
+}
+
+func waitForShutdown(ctx context.Context, cancel context.CancelFunc, rt *runtime) error {
+	server := rt.server
+	sm := rt.streamManager
+	iptvSvc := rt.iptvService
+	iptvProxy := rt.iptvProxy
+	iptvTransmux := rt.iptvTransmux
+	iptvSched := rt.iptvScheduler
+	iptvProber := rt.iptvProber
+	scheduler := rt.scanScheduler
+	imageRefreshSched := rt.imageRefreshScheduler
+	librarySvc := rt.libraryService
+	authSvc := rt.authService
+	retentionRunner := rt.retention
+	database := rt.database
+	logger := rt.logger
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
@@ -404,6 +470,8 @@ func waitForShutdown(ctx context.Context, cancel context.CancelFunc, server *htt
 	logger.Info("image refresh scheduler stopped")
 	authSvc.StopSessionCleaner()
 	logger.Info("session cleaner stopped")
+	retentionRunner.Stop()
+	logger.Info("retention runner stopped")
 
 	// Stop HTTP server
 	if err := server.Shutdown(shutdownCtx); err != nil {

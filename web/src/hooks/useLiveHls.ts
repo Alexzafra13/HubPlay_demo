@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 import Hls from "hls.js";
+import { destroyHlsInstance } from "./hlsLifecycle";
 
 /**
  * useLiveHls plays a live IPTV stream from a direct URL.
@@ -91,12 +92,10 @@ export function useLiveHls({
     setLoading(true);
 
     // Tear down any previous instance before attaching a new one.
-    if (hlsRef.current) {
-      hlsRef.current.destroy();
-      hlsRef.current = null;
-    }
-    video.removeAttribute("src");
-    video.load();
+    // Shared with useHls so a fix to either codepath cannot drift
+    // out of sync silently — the F1 re-attach patch on VOD only
+    // applied to one branch before this lift.
+    destroyHlsInstance(hlsRef, video);
 
     let playing = false;
     let beaconFired = false;
@@ -274,10 +273,7 @@ export function useLiveHls({
         );
         visibilityListenerRef.current = null;
       }
-      if (hlsRef.current) {
-        hlsRef.current.destroy();
-        hlsRef.current = null;
-      }
+      destroyHlsInstance(hlsRef, video);
     };
   }, [videoRef, streamUrl, unavailableMessage, timeoutMs, reloadToken]);
 

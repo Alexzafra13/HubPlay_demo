@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import type { RefObject } from "react";
 import Hls from "hls.js";
+import { destroyHlsInstance } from "./hlsLifecycle";
 
 export interface AudioTrack {
   id: number;
@@ -122,13 +123,9 @@ export function useHls({
     // too keeps strict-mode double-mount and React-18 effect-replay
     // edge cases honest. Also clears <video src> so a transition
     // direct_play → transcode doesn't leave the previous progressive
-    // URL hanging on the element.
-    if (hlsRef.current) {
-      hlsRef.current.destroy();
-      hlsRef.current = null;
-    }
-    video.removeAttribute("src");
-    video.load();
+    // URL hanging on the element. Shared with useLiveHls so a fix
+    // to either codepath cannot drift out of sync silently.
+    destroyHlsInstance(hlsRef, video);
 
     const useHlsPlayback =
       playbackMethod === "transcode" || playbackMethod === "direct_stream";
@@ -254,10 +251,7 @@ export function useHls({
     }
 
     return () => {
-      if (hlsRef.current) {
-        hlsRef.current.destroy();
-        hlsRef.current = null;
-      }
+      destroyHlsInstance(hlsRef, video);
     };
   }, [videoRef, masterPlaylistUrl, directUrl, playbackMethod, sessionToken]);
 
