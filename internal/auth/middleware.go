@@ -4,6 +4,9 @@ import (
 	"context"
 	"net/http"
 	"strings"
+
+	"hubplay/internal/api/apperror"
+	"hubplay/internal/domain"
 )
 
 type contextKey string
@@ -15,13 +18,17 @@ func (s *Service) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := extractToken(r)
 		if token == "" {
-			http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"missing authorization"}}`, http.StatusUnauthorized)
+			apperror.Write(w, r.Context(), domain.NewUnauthorized("missing authorization"))
 			return
 		}
 
 		claims, err := s.ValidateToken(r.Context(), token)
 		if err != nil {
-			http.Error(w, `{"error":{"code":"TOKEN_INVALID","message":"invalid or expired token"}}`, http.StatusUnauthorized)
+			apperror.Write(w, r.Context(), &domain.AppError{
+				Code:       "TOKEN_INVALID",
+				HTTPStatus: http.StatusUnauthorized,
+				Message:    "invalid or expired token",
+			})
 			return
 		}
 
@@ -35,7 +42,7 @@ func RequireAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		claims := GetClaims(r.Context())
 		if claims == nil || claims.Role != "admin" {
-			http.Error(w, `{"error":{"code":"FORBIDDEN","message":"admin access required"}}`, http.StatusForbidden)
+			apperror.Write(w, r.Context(), domain.NewForbidden("admin access required"))
 			return
 		}
 		next.ServeHTTP(w, r)
