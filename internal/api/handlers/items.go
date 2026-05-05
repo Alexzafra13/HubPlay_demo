@@ -46,33 +46,53 @@ func NewItemHandler(lib LibraryService, images ImageRepository, metadata Metadat
 	}
 }
 
+// Get renders the item detail JSON used by the React detail page.
+// Body assembly is delegated to buildItemDetail so the orchestration
+// across seven repositories is one self-contained function with a
+// single signature (ctx, id, userID) → map. The handler keeps only
+// the http-level concerns: param parsing, auth claim extraction,
+// status code, envelope.
 func (h *ItemHandler) Get(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	item, err := h.lib.GetItem(r.Context(), id)
+	userID := ""
+	if claims := auth.GetClaims(r.Context()); claims != nil {
+		userID = claims.UserID
+	}
+	detail, err := h.buildItemDetail(r.Context(), id, userID)
 	if err != nil {
 		handleServiceError(w, r, err)
 		return
 	}
+	respondJSON(w, http.StatusOK, map[string]any{"data": detail})
+}
 
+// buildItemDetail orchestrates the seven-repo fan-out for the item
+// detail response. Pure ctx/id/userID inputs and a single return —
+// no http.ResponseWriter, no chi, no claims plumbing. Easy to test
+// in isolation and to migrate to a typed DTO + service method in a
+// follow-up without touching the handler signature.
+//
+// userID is "" for anonymous requests; the per-user blocks (user_data,
+// episode_progress) are skipped in that case. Sub-fetch errors are
+// logged and skipped — the detail response degrades gracefully rather
+// than 500ing because (e.g.) the chapters table is unreachable.
+func (h *ItemHandler) buildItemDetail(ctx context.Context, id, userID string) (map[string]any, error) {
+	item, err := h.lib.GetItem(ctx, id)
+	if err != nil {
+		return nil, err
+	}
 	resp := itemDetailResponse(item)
 
-	// Per-user state (favorite, watched, resume position) — only when
-	// authenticated. Not fatal: if it fails, log and skip rather than
-	// fail the whole detail response.
-	if h.userData != nil {
-		if claims := auth.GetClaims(r.Context()); claims != nil {
-			ud, err := h.userData.Get(r.Context(), claims.UserID, id)
-			if err != nil {
-				h.logger.Warn("get user data", "item_id", id, "error", err)
-			} else if ud != nil {
-				resp["user_data"] = userDataResponse(ud, item.DurationTicks)
-			}
+	if h.userData != nil && userID != "" {
+		ud, err := h.userData.Get(ctx, userID, id)
+		if err != nil {
+			h.logger.Warn("get user data", "item_id", id, "error", err)
+		} else if ud != nil {
+			resp["user_data"] = userDataResponse(ud, item.DurationTicks)
 		}
 	}
 
-	// Include streams
-	streams, _ := h.lib.GetItemStreams(r.Context(), id)
-	if len(streams) > 0 {
+	if streams, err := h.lib.GetItemStreams(ctx, id); err == nil && len(streams) > 0 {
 		streamData := make([]map[string]any, len(streams))
 		for i, s := range streams {
 			streamData[i] = streamResponse(s)
@@ -80,179 +100,189 @@ func (h *ItemHandler) Get(w http.ResponseWriter, r *http.Request) {
 		resp["media_streams"] = streamData
 	}
 
-	// Include images and set poster_url/backdrop_url + the pre-computed
-	// dominant-colour palette for the SeriesHero gradient. We surface
-	// the backdrop's palette as `backdrop_colors` (with poster as a
-	// fallback when there's no backdrop), so the frontend gradient
-	// paints on first render with no client-side image decode.
-	images, _ := h.lib.GetItemImages(r.Context(), id)
-	if len(images) > 0 {
-		imgData := make([]map[string]any, len(images))
-		for i, img := range images {
-			imgData[i] = imageResponse(img)
-		}
-		resp["images"] = imgData
-
-		var (
-			backdropColors map[string]any
-			posterColors   map[string]any
-		)
-		for _, img := range images {
-			if !img.IsPrimary {
-				continue
-			}
-			switch img.Type {
-			case "primary":
-				resp["poster_url"] = img.Path
-				if img.DominantColor != "" || img.DominantColorMuted != "" {
-					posterColors = paletteResponse(img.DominantColor, img.DominantColorMuted)
-				}
-			case "backdrop":
-				resp["backdrop_url"] = img.Path
-				if img.DominantColor != "" || img.DominantColorMuted != "" {
-					backdropColors = paletteResponse(img.DominantColor, img.DominantColorMuted)
-				}
-			case "logo":
-				resp["logo_url"] = img.Path
-			}
-		}
-		// Backdrop wins when present; falls back to poster so
-		// poster-only items (movies without a downloaded backdrop)
-		// still drive a colourful gradient on the detail page.
-		if backdropColors != nil {
-			resp["backdrop_colors"] = backdropColors
-		} else if posterColors != nil {
-			resp["backdrop_colors"] = posterColors
-		}
-	}
-
-	// Include metadata (overview, tagline, genres)
-	if h.metadata != nil {
-		meta, err := h.metadata.GetByItemID(r.Context(), id)
-		if err == nil && meta != nil {
-			if meta.Overview != "" {
-				resp["overview"] = meta.Overview
-			}
-			if meta.Tagline != "" {
-				resp["tagline"] = meta.Tagline
-			}
-			if meta.GenresJSON != "" {
-				var genres []string
-				if err := json.Unmarshal([]byte(meta.GenresJSON), &genres); err == nil && len(genres) > 0 {
-					resp["genres"] = genres
-				}
-			}
-			if meta.Studio != "" {
-				resp["studio"] = meta.Studio
-			}
-			// Trailer is two fields paired together — both must be
-			// present for a valid embed URL. Keep them out of the
-			// response when either is empty so the frontend's
-			// nullable check is a single key, not a tuple.
-			if meta.TrailerKey != "" && meta.TrailerSite != "" {
-				resp["trailer"] = map[string]any{
-					"key":  meta.TrailerKey,
-					"site": meta.TrailerSite,
-				}
-			}
-		}
-	}
-
-	// Chapters drive the seek-bar tick marks and the (future) skip-
-	// intro affordance. Optional: a chapter-less file (most non-Blu-ray
-	// rips) returns a nil slice and the JSON omits the field — clients
-	// can treat absence and empty array identically.
-	if h.chapters != nil {
-		ch, err := h.chapters.ListByItem(r.Context(), id)
-		if err != nil {
-			h.logger.Warn("list chapters", "item_id", id, "error", err)
-		} else if len(ch) > 0 {
-			out := make([]map[string]any, len(ch))
-			for i, c := range ch {
-				out[i] = chapterResponse(c)
-			}
-			resp["chapters"] = out
-		}
-	}
-
-	// Cast / crew. Each row is rendered as a chip on the detail page;
-	// `image_url` points at the per-person thumb endpoint when a
-	// profile photo was downloaded, null otherwise so the client
-	// renders an initial-letter placeholder instead. Best-effort:
-	// any error logs and the response goes out without people.
-	if h.people != nil {
-		credits, err := h.people.ListByItem(r.Context(), id)
-		if err != nil {
-			h.logger.Warn("list item people", "item_id", id, "error", err)
-		} else if len(credits) > 0 {
-			peopleData := make([]map[string]any, len(credits))
-			for i, c := range credits {
-				entry := map[string]any{
-					"id":         c.PersonID,
-					"name":       c.Name,
-					"role":       c.Role,
-					"sort_order": c.SortOrder,
-				}
-				if c.CharacterName != "" {
-					entry["character"] = c.CharacterName
-				}
-				if c.ThumbPath != "" {
-					entry["image_url"] = "/api/v1/people/" + c.PersonID + "/thumb"
-				}
-				peopleData[i] = entry
-			}
-			resp["people"] = peopleData
-		}
-	}
-
-	// External provider IDs (IMDb / TMDb / TVDB / ...). Surfaced as a
-	// flat string-string map keyed by provider name so the client can
-	// build "Open in IMDb" links without having to know the provider
-	// list at build time. Best-effort: any DB error logs and skips.
-	if h.externalIDs != nil {
-		if extIDs, err := h.externalIDs.ListByItem(r.Context(), id); err == nil && len(extIDs) > 0 {
-			ids := make(map[string]string, len(extIDs))
-			for _, e := range extIDs {
-				ids[e.Provider] = e.ExternalID
-			}
-			resp["external_ids"] = ids
-		}
-	}
+	h.attachImages(ctx, resp, id)
+	h.attachMetadata(ctx, resp, id)
+	h.attachChapters(ctx, resp, id)
+	h.attachPeople(ctx, resp, id)
+	h.attachExternalIDs(ctx, resp, id)
 
 	// Episode and season pages both need a "what show is this?" anchor
 	// and the show's backdrop as a fallback hero image. Episodes climb
-	// episode → season → series; seasons climb season → series. Both
-	// surface `series_title` + `series_*_url` so the renderer doesn't
-	// have to know the relationship depth.
+	// episode → season → series; seasons climb season → series.
 	switch item.Type {
 	case "episode":
 		if item.ParentID != "" {
-			h.attachSeriesContext(r.Context(), resp, item.ParentID)
+			h.attachSeriesContext(ctx, resp, item.ParentID)
 		}
 	case "season":
 		if item.ParentID != "" {
-			h.attachSeriesContextFromSeries(r.Context(), resp, item.ParentID)
+			h.attachSeriesContextFromSeries(ctx, resp, item.ParentID)
 		}
 	case "series":
-		// "Has visto X de Y episodios" aggregate. Only emitted for an
-		// authenticated request — anonymous responses skip the field
-		// entirely so the client can render the same page without a
-		// presence check on a per-user value. Errors are best-effort:
-		// the page renders without the count rather than 500ing on
-		// what is essentially decoration.
-		if h.userData != nil {
-			if claims := auth.GetClaims(r.Context()); claims != nil {
-				if total, watched, err := h.userData.SeriesEpisodeProgress(r.Context(), claims.UserID, item.ID); err == nil && total > 0 {
-					resp["episode_progress"] = map[string]any{
-						"total":   total,
-						"watched": watched,
-					}
+		if h.userData != nil && userID != "" {
+			if total, watched, err := h.userData.SeriesEpisodeProgress(ctx, userID, item.ID); err == nil && total > 0 {
+				resp["episode_progress"] = map[string]any{
+					"total":   total,
+					"watched": watched,
 				}
 			}
 		}
 	}
 
-	respondJSON(w, http.StatusOK, map[string]any{"data": resp})
+	return resp, nil
+}
+
+// attachImages writes the items' images plus surfaced poster /
+// backdrop / logo URLs and the dominant-colour palette into resp.
+// Backdrop palette wins; poster is the fallback so poster-only
+// items still drive a colourful hero gradient.
+func (h *ItemHandler) attachImages(ctx context.Context, resp map[string]any, id string) {
+	images, _ := h.lib.GetItemImages(ctx, id)
+	if len(images) == 0 {
+		return
+	}
+	imgData := make([]map[string]any, len(images))
+	for i, img := range images {
+		imgData[i] = imageResponse(img)
+	}
+	resp["images"] = imgData
+
+	var (
+		backdropColors map[string]any
+		posterColors   map[string]any
+	)
+	for _, img := range images {
+		if !img.IsPrimary {
+			continue
+		}
+		switch img.Type {
+		case "primary":
+			resp["poster_url"] = img.Path
+			if img.DominantColor != "" || img.DominantColorMuted != "" {
+				posterColors = paletteResponse(img.DominantColor, img.DominantColorMuted)
+			}
+		case "backdrop":
+			resp["backdrop_url"] = img.Path
+			if img.DominantColor != "" || img.DominantColorMuted != "" {
+				backdropColors = paletteResponse(img.DominantColor, img.DominantColorMuted)
+			}
+		case "logo":
+			resp["logo_url"] = img.Path
+		}
+	}
+	if backdropColors != nil {
+		resp["backdrop_colors"] = backdropColors
+	} else if posterColors != nil {
+		resp["backdrop_colors"] = posterColors
+	}
+}
+
+// attachMetadata writes overview / tagline / genres / studio / trailer
+// when the item has a metadata row. Trailer is two fields paired
+// together — both must be present for a valid embed URL.
+func (h *ItemHandler) attachMetadata(ctx context.Context, resp map[string]any, id string) {
+	if h.metadata == nil {
+		return
+	}
+	meta, err := h.metadata.GetByItemID(ctx, id)
+	if err != nil || meta == nil {
+		return
+	}
+	if meta.Overview != "" {
+		resp["overview"] = meta.Overview
+	}
+	if meta.Tagline != "" {
+		resp["tagline"] = meta.Tagline
+	}
+	if meta.GenresJSON != "" {
+		var genres []string
+		if err := json.Unmarshal([]byte(meta.GenresJSON), &genres); err == nil && len(genres) > 0 {
+			resp["genres"] = genres
+		}
+	}
+	if meta.Studio != "" {
+		resp["studio"] = meta.Studio
+	}
+	if meta.TrailerKey != "" && meta.TrailerSite != "" {
+		resp["trailer"] = map[string]any{
+			"key":  meta.TrailerKey,
+			"site": meta.TrailerSite,
+		}
+	}
+}
+
+// attachChapters writes the per-item chapter list when present.
+// A chapter-less file yields no field at all; clients treat absence
+// and empty array identically.
+func (h *ItemHandler) attachChapters(ctx context.Context, resp map[string]any, id string) {
+	if h.chapters == nil {
+		return
+	}
+	ch, err := h.chapters.ListByItem(ctx, id)
+	if err != nil {
+		h.logger.Warn("list chapters", "item_id", id, "error", err)
+		return
+	}
+	if len(ch) == 0 {
+		return
+	}
+	out := make([]map[string]any, len(ch))
+	for i, c := range ch {
+		out[i] = chapterResponse(c)
+	}
+	resp["chapters"] = out
+}
+
+// attachPeople writes cast / crew when present. image_url points at
+// the per-person thumb endpoint when a profile photo was downloaded;
+// null otherwise so the client renders an initial-letter placeholder.
+func (h *ItemHandler) attachPeople(ctx context.Context, resp map[string]any, id string) {
+	if h.people == nil {
+		return
+	}
+	credits, err := h.people.ListByItem(ctx, id)
+	if err != nil {
+		h.logger.Warn("list item people", "item_id", id, "error", err)
+		return
+	}
+	if len(credits) == 0 {
+		return
+	}
+	peopleData := make([]map[string]any, len(credits))
+	for i, c := range credits {
+		entry := map[string]any{
+			"id":         c.PersonID,
+			"name":       c.Name,
+			"role":       c.Role,
+			"sort_order": c.SortOrder,
+		}
+		if c.CharacterName != "" {
+			entry["character"] = c.CharacterName
+		}
+		if c.ThumbPath != "" {
+			entry["image_url"] = "/api/v1/people/" + c.PersonID + "/thumb"
+		}
+		peopleData[i] = entry
+	}
+	resp["people"] = peopleData
+}
+
+// attachExternalIDs writes a flat provider→external-id map (IMDb,
+// TMDb, TVDB, ...) so the client can build "Open in X" links without
+// knowing the provider list at build time.
+func (h *ItemHandler) attachExternalIDs(ctx context.Context, resp map[string]any, id string) {
+	if h.externalIDs == nil {
+		return
+	}
+	extIDs, err := h.externalIDs.ListByItem(ctx, id)
+	if err != nil || len(extIDs) == 0 {
+		return
+	}
+	ids := make(map[string]string, len(extIDs))
+	for _, e := range extIDs {
+		ids[e.Provider] = e.ExternalID
+	}
+	resp["external_ids"] = ids
 }
 
 // attachSeriesContext walks episode → season → series and folds the show's
