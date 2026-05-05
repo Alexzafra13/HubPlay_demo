@@ -62,6 +62,15 @@ var outOfScopeExact = map[string]string{
 	// ── Admin auth setup (creates first user) ─────────────────────────
 	"POST /auth/setup": "first-run only, web wizard",
 
+	// ── Liveness / readiness probes (infra, not user-facing) ──────────
+	// /health is documented in openapi.yaml; /health/live and
+	// /health/ready are operator-side probes for Kubernetes /
+	// HAProxy / Uptime Kuma — they have no user-facing contract and
+	// no client SDK calls them, so they belong here rather than in
+	// the public API spec.
+	"GET /health/live":  "k8s/LB liveness probe",
+	"GET /health/ready": "k8s/LB readiness probe",
+
 	// ── User management (admin) ───────────────────────────────────────
 	"GET /users":         "admin user management",
 	"POST /users":        "admin user creation",
