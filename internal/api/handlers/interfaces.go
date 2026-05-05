@@ -21,7 +21,7 @@ import (
 // AuthService defines auth operations needed by handlers.
 type AuthService interface {
 	Login(ctx context.Context, username, password, deviceName, deviceID, ip string) (*auth.AuthToken, error)
-	RefreshToken(ctx context.Context, refreshToken string) (*auth.AuthToken, error)
+	RefreshToken(ctx context.Context, refreshToken, ip string) (*auth.AuthToken, error)
 	Logout(ctx context.Context, refreshToken string) error
 	Register(ctx context.Context, req auth.RegisterRequest) (*db.User, error)
 	ValidateToken(ctx context.Context, tokenStr string) (*auth.Claims, error)

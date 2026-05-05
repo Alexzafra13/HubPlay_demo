@@ -199,7 +199,7 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := h.auth.RefreshToken(r.Context(), req.RefreshToken)
+	token, err := h.auth.RefreshToken(r.Context(), req.RefreshToken, r.RemoteAddr)
 	if err != nil {
 		handleServiceError(w, r, err)
 		return

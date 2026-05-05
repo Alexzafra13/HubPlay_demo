@@ -21,7 +21,7 @@ import (
 
 type mockAuthService struct {
 	loginFn        func(ctx context.Context, username, password, deviceName, deviceID, ip string) (*auth.AuthToken, error)
-	refreshTokenFn func(ctx context.Context, refreshToken string) (*auth.AuthToken, error)
+	refreshTokenFn func(ctx context.Context, refreshToken, ip string) (*auth.AuthToken, error)
 	logoutFn       func(ctx context.Context, refreshToken string) error
 	registerFn     func(ctx context.Context, req auth.RegisterRequest) (*db.User, error)
 }
@@ -33,9 +33,9 @@ func (m *mockAuthService) Login(ctx context.Context, username, password, deviceN
 	return nil, errors.New("not implemented")
 }
 
-func (m *mockAuthService) RefreshToken(ctx context.Context, refreshToken string) (*auth.AuthToken, error) {
+func (m *mockAuthService) RefreshToken(ctx context.Context, refreshToken, ip string) (*auth.AuthToken, error) {
 	if m.refreshTokenFn != nil {
-		return m.refreshTokenFn(ctx, refreshToken)
+		return m.refreshTokenFn(ctx, refreshToken, ip)
 	}
 	return nil, errors.New("not implemented")
 }

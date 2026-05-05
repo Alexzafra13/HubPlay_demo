@@ -216,12 +216,33 @@ func (s *Service) Login(ctx context.Context, username, password, deviceName, dev
 	return token, nil
 }
 
-func (s *Service) RefreshToken(ctx context.Context, refreshToken string) (*AuthToken, error) {
+// RefreshToken exchanges a valid refresh token for a new access token.
+//
+// Same brute-force surface as Login: a leaked or guessed refresh token can
+// be hammered indefinitely without a gate. We reuse the same rate limiter
+// keyed under separate "refresh:" namespaces so a refresh flood does not
+// lock out the user's password login (and vice versa).
+//
+// Two keys are checked because each protects a different attacker model:
+//   - refresh:ip:<ip>      caps any single source IP regardless of the
+//                          token tried (defends against drag-net guessing).
+//   - refresh:tok:<hash>   caps attempts against one specific token, even
+//                          across rotating IPs (defends a leaked token).
+func (s *Service) RefreshToken(ctx context.Context, refreshToken, ip string) (*AuthToken, error) {
 	tokenHash := hashToken(refreshToken)
+	ipKey := "refresh:ip:" + ip
+	tokKey := "refresh:tok:" + tokenHash
+
+	if s.rateLimiter.isLocked(ipKey) || s.rateLimiter.isLocked(tokKey) {
+		s.logger.Warn("refresh rate limited", "ip", ip)
+		return nil, fmt.Errorf("too many failed attempts, try again later: %w", domain.ErrForbidden)
+	}
 
 	session, err := s.sessions.GetByRefreshTokenHash(ctx, tokenHash)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
+			s.rateLimiter.recordFailure(ipKey)
+			s.rateLimiter.recordFailure(tokKey)
 			return nil, fmt.Errorf("refresh: %w", domain.ErrInvalidToken)
 		}
 		return nil, fmt.Errorf("refresh lookup: %w", err)
@@ -231,6 +252,8 @@ func (s *Service) RefreshToken(ctx context.Context, refreshToken string) (*AuthT
 		if delErr := s.sessions.DeleteByID(ctx, session.ID); delErr != nil {
 			s.logger.Warn("failed to delete expired session", "session_id", session.ID, "error", delErr)
 		}
+		s.rateLimiter.recordFailure(ipKey)
+		s.rateLimiter.recordFailure(tokKey)
 		return nil, fmt.Errorf("refresh: %w", domain.ErrTokenExpired)
 	}
 
@@ -240,8 +263,13 @@ func (s *Service) RefreshToken(ctx context.Context, refreshToken string) (*AuthT
 	}
 
 	if !user.IsActive {
+		s.rateLimiter.recordFailure(ipKey)
 		return nil, fmt.Errorf("refresh: %w", domain.ErrAccountDisabled)
 	}
+
+	// Successful refresh clears the failure counters.
+	s.rateLimiter.recordSuccess(ipKey)
+	s.rateLimiter.recordSuccess(tokKey)
 
 	// Generate new access token (keep same refresh token + session) using
 	// the current primary key. Tokens signed with the previous primary (if
