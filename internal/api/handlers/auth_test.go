@@ -229,6 +229,123 @@ func TestAuthHandler_Login_InvalidBody(t *testing.T) {
 	}
 }
 
+// TestAuthHandler_Setup_AllowedWhenNoUsers ensures the bootstrap path
+// works on a clean install: with zero users in the DB, an unauthenticated
+// caller can create the first admin. This is the legitimate "first run"
+// path that the React wizard hits.
+func TestAuthHandler_Setup_AllowedWhenNoUsers(t *testing.T) {
+	created := &db.User{
+		ID:          "u1",
+		Username:    "admin",
+		DisplayName: "Admin",
+		Role:        "admin",
+		IsActive:    true,
+	}
+	authSvc := &mockAuthService{
+		registerFn: func(_ context.Context, req auth.RegisterRequest) (*db.User, error) {
+			if req.Role != "admin" {
+				t.Errorf("setup must register the first user as admin, got role=%q", req.Role)
+			}
+			return created, nil
+		},
+		loginFn: func(_ context.Context, _, _, _, _, _ string) (*auth.AuthToken, error) {
+			return &auth.AuthToken{AccessToken: "a", RefreshToken: "r", UserID: "u1", Role: "admin"}, nil
+		},
+	}
+	userSvc := &mockUserService{
+		countFn: func(_ context.Context) (int, error) { return 0, nil },
+		getByIDFn: func(_ context.Context, id string) (*db.User, error) {
+			if id == "u1" {
+				return created, nil
+			}
+			return nil, domain.ErrNotFound
+		},
+	}
+
+	handler := NewAuthHandler(authSvc, userSvc, testAuthCfg(), testLogger())
+	body := `{"username":"admin","password":"password123","display_name":"Admin"}`
+	req := httptest.NewRequest("POST", "/auth/setup", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	handler.Setup(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestAuthHandler_Setup_BlockedWhenUsersExist is the privilege-escalation
+// gate: once any user exists, the unauthenticated /auth/setup endpoint
+// MUST refuse to create another admin. A single line in the handler is
+// the only barrier between "fresh install" and "any anonymous visitor
+// registers themselves as admin." A refactor that flips this check —
+// e.g. changing `> 0` to `>= 0`, or removing it entirely while moving
+// the wizard logic — would silently break authentication. This test
+// pins the contract so that cannot regress.
+func TestAuthHandler_Setup_BlockedWhenUsersExist(t *testing.T) {
+	authSvc := &mockAuthService{
+		registerFn: func(_ context.Context, _ auth.RegisterRequest) (*db.User, error) {
+			t.Fatal("Register must NOT be called when users already exist")
+			return nil, nil
+		},
+		loginFn: func(_ context.Context, _, _, _, _, _ string) (*auth.AuthToken, error) {
+			t.Fatal("Login must NOT be called when setup is blocked")
+			return nil, nil
+		},
+	}
+	userSvc := &mockUserService{
+		countFn: func(_ context.Context) (int, error) { return 1, nil },
+	}
+
+	handler := NewAuthHandler(authSvc, userSvc, testAuthCfg(), testLogger())
+	body := `{"username":"attacker","password":"password123"}`
+	req := httptest.NewRequest("POST", "/auth/setup", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	handler.Setup(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("setup must return 403 when users exist, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// The response cookies must NOT include auth cookies — even on the
+	// off chance the handler partially succeeded, no session must be
+	// minted for an unauthenticated caller hitting a closed setup gate.
+	for _, c := range rr.Result().Cookies() {
+		if c.Name == "hubplay_access" || c.Name == "hubplay_refresh" {
+			t.Errorf("blocked setup must not set auth cookie %q", c.Name)
+		}
+	}
+}
+
+// TestAuthHandler_Setup_BlockedWhenManyUsersExist guards against the
+// "off-by-one" refactor mistake (changing `> 0` to `> 1`, etc.).
+func TestAuthHandler_Setup_BlockedWhenManyUsersExist(t *testing.T) {
+	authSvc := &mockAuthService{
+		registerFn: func(_ context.Context, _ auth.RegisterRequest) (*db.User, error) {
+			t.Fatal("Register must NOT be called")
+			return nil, nil
+		},
+	}
+	userSvc := &mockUserService{
+		countFn: func(_ context.Context) (int, error) { return 42, nil },
+	}
+
+	handler := NewAuthHandler(authSvc, userSvc, testAuthCfg(), testLogger())
+	body := `{"username":"attacker","password":"password123"}`
+	req := httptest.NewRequest("POST", "/auth/setup", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	handler.Setup(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("setup must return 403 with many users, got %d", rr.Code)
+	}
+}
+
 func TestUserHandler_Me(t *testing.T) {
 	user := &db.User{
 		ID:          "u1",
