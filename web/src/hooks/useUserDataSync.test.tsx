@@ -3,10 +3,13 @@ import { renderHook } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useUserDataSync } from "./useUserDataSync";
 import { queryKeys } from "@/api/queryKeys";
+import { __eventBusTestHelpers } from "./eventBus";
 
 // jsdom has no EventSource — fake it the same way useEventStream's
-// own tests do. Each (type, handler) pair maps to its own fake; the
-// orchestrator subscribes to three types so we expect three instances.
+// own tests do. With the SSE event bus, all three subscriptions on
+// /me/events multiplex through ONE EventSource (refcounted), so we
+// expect a single instance even though useUserDataSync registers
+// listeners for three different event types.
 class FakeEventSource {
   static instances: FakeEventSource[] = [];
   url: string;
@@ -38,9 +41,11 @@ function findInstance(type: string): FakeEventSource | undefined {
 beforeEach(() => {
   FakeEventSource.instances = [];
   vi.stubGlobal("EventSource", FakeEventSource);
+  __eventBusTestHelpers.reset();
 });
 
 afterEach(() => {
+  __eventBusTestHelpers.reset();
   vi.unstubAllGlobals();
 });
 
@@ -56,14 +61,21 @@ function makeWrapper() {
 }
 
 describe("useUserDataSync", () => {
-  it("opens one EventSource per event type at /api/v1/me/events", () => {
+  it("multiplexes all three subscriptions through ONE EventSource at /api/v1/me/events", () => {
     const { wrapper } = makeWrapper();
     renderHook(() => useUserDataSync(), { wrapper });
-    // Three subscriptions → three fake EventSource instances.
-    expect(FakeEventSource.instances).toHaveLength(3);
-    for (const es of FakeEventSource.instances) {
-      expect(es.url).toBe("/api/v1/me/events");
-    }
+    // BEFORE the bus this opened three separate EventSources to the
+    // same URL — three TCP connections per logged-in tab burning
+    // through Chrome's ~6 SSE-per-origin cap. The bus collapses them
+    // to one connection with refcounted listeners.
+    expect(FakeEventSource.instances).toHaveLength(1);
+    expect(FakeEventSource.instances[0].url).toBe("/api/v1/me/events");
+    // The single connection still carries listeners for all three
+    // event types — the bus dispatches by event name internally.
+    const es = FakeEventSource.instances[0];
+    expect(es.listeners.has("user.progress.updated")).toBe(true);
+    expect(es.listeners.has("user.played.toggled")).toBe(true);
+    expect(es.listeners.has("user.favorite.toggled")).toBe(true);
   });
 
   it("invalidates item + progress + continue-watching on user.progress.updated", () => {
@@ -139,14 +151,15 @@ describe("useUserDataSync", () => {
     expect(invalidateSpy).not.toHaveBeenCalled();
   });
 
-  it("closes all subscriptions on unmount", () => {
+  it("closes the underlying EventSource on unmount once refcount hits zero", () => {
     const { wrapper } = makeWrapper();
     const { unmount } = renderHook(() => useUserDataSync(), { wrapper });
-    expect(FakeEventSource.instances).toHaveLength(3);
+    expect(FakeEventSource.instances).toHaveLength(1);
+    const es = FakeEventSource.instances[0];
+    expect(es.closed).toBe(false);
     unmount();
-    for (const es of FakeEventSource.instances) {
-      expect(es.closed).toBe(true);
-    }
+    expect(es.closed).toBe(true);
+    expect(__eventBusTestHelpers.channelCount()).toBe(0);
   });
 
   it("opens nothing when enabled=false", () => {

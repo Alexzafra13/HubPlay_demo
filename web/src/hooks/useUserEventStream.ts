@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
+import { subscribeSse } from "./eventBus";
 
 /**
  * useUserEventStream — subscribe to one Server-Sent Events type from
@@ -25,10 +26,12 @@ import { useEffect, useLayoutEffect, useRef } from "react";
  * an unauth'd connection that closes on first ping. Naming the URL in
  * the hook surface makes the intent explicit at the call site.
  *
- * Connection sharing: each call opens its own EventSource. Acceptable
- * because most pages mount one or two subscriptions; if a page ever
- * needs many, promote both useEventStream variants to a singleton
- * with refcounts.
+ * Connection sharing: subscriptions multiplex through `eventBus`.
+ * useUserDataSync mounts THREE listeners on this URL (progress /
+ * played / favourite); without the bus those were three separate
+ * EventSources to the same endpoint per logged-in tab. Now there is
+ * one connection per URL, refcounted across listeners, closed when
+ * the last subscriber unmounts.
  */
 export function useUserEventStream(
   /** Event type as published by the backend (e.g. "user.progress.updated"). */
@@ -48,16 +51,8 @@ export function useUserEventStream(
 
   useEffect(() => {
     if (!enabled) return;
-
-    const source = new EventSource("/api/v1/me/events", { withCredentials: true });
-    const listener = (e: MessageEvent) => {
-      handlerRef.current(e.data);
-    };
-    source.addEventListener(type, listener);
-
-    return () => {
-      source.removeEventListener(type, listener);
-      source.close();
-    };
+    return subscribeSse("/api/v1/me/events", true, type, (data) => {
+      handlerRef.current(data);
+    });
   }, [type, enabled]);
 }

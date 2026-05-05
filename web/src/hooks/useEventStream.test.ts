@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook } from "@testing-library/react";
 import { useEventStream } from "./useEventStream";
+import { __eventBusTestHelpers, subscribeSse } from "./eventBus";
 
 // jsdom doesn't ship EventSource. We replace the global with a tiny
 // fake that records what listeners are attached, lets the test fire
@@ -36,9 +37,13 @@ class FakeEventSource {
 beforeEach(() => {
   FakeEventSource.instances = [];
   vi.stubGlobal("EventSource", FakeEventSource);
+  // Bus state is module-global; tests that share a URL across cases
+  // would otherwise observe stale refcounts from a previous run.
+  __eventBusTestHelpers.reset();
 });
 
 afterEach(() => {
+  __eventBusTestHelpers.reset();
   vi.unstubAllGlobals();
 });
 
@@ -138,5 +143,72 @@ describe("useEventStream", () => {
 
     FakeEventSource.instances[1].emit("b", "fresh");
     expect(onEvent).toHaveBeenCalledWith("fresh");
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────
+// Bus multiplexing — pins the contract that N subscribers to the same URL
+// share ONE EventSource. Without this, every useEventStream / use*EventStream
+// call opens its own connection and a tab quickly hits Chrome's ~6
+// SSE-per-origin cap (admin streams + the three /me/events listeners in
+// useUserDataSync).
+// ────────────────────────────────────────────────────────────────────────
+
+describe("eventBus multiplexing", () => {
+  it("two subscribers to the same URL share one EventSource", () => {
+    const onA = vi.fn();
+    const onB = vi.fn();
+    renderHook(() => useEventStream("a", onA));
+    renderHook(() => useEventStream("b", onB));
+
+    expect(FakeEventSource.instances).toHaveLength(1);
+    expect(__eventBusTestHelpers.refcount("/api/v1/events", true)).toBe(2);
+
+    // Both handlers fire from the single underlying source.
+    const es = FakeEventSource.instances[0];
+    es.emit("a", "first");
+    es.emit("b", "second");
+    expect(onA).toHaveBeenCalledWith("first");
+    expect(onB).toHaveBeenCalledWith("second");
+  });
+
+  it("the source closes only after the LAST subscriber unmounts", () => {
+    const a = renderHook(() => useEventStream("a", vi.fn()));
+    const b = renderHook(() => useEventStream("b", vi.fn()));
+    const es = FakeEventSource.instances[0];
+
+    a.unmount();
+    expect(es.closed).toBe(false);
+    expect(__eventBusTestHelpers.refcount("/api/v1/events", true)).toBe(1);
+
+    b.unmount();
+    expect(es.closed).toBe(true);
+    expect(__eventBusTestHelpers.channelCount()).toBe(0);
+  });
+
+  it("multiple subscribers to the SAME type all receive the event", () => {
+    const onA1 = vi.fn();
+    const onA2 = vi.fn();
+    renderHook(() => useEventStream("shared", onA1));
+    renderHook(() => useEventStream("shared", onA2));
+
+    expect(FakeEventSource.instances).toHaveLength(1);
+    FakeEventSource.instances[0].emit("shared", "broadcast");
+    expect(onA1).toHaveBeenCalledWith("broadcast");
+    expect(onA2).toHaveBeenCalledWith("broadcast");
+  });
+
+  it("a throwing handler does not break sibling subscribers", () => {
+    const bad = vi.fn(() => {
+      throw new Error("boom");
+    });
+    const good = vi.fn();
+    subscribeSse("/api/v1/events", true, "x", bad);
+    subscribeSse("/api/v1/events", true, "x", good);
+
+    const es = FakeEventSource.instances[0];
+    es.emit("x", "ping");
+    expect(bad).toHaveBeenCalled();
+    expect(good).toHaveBeenCalledWith("ping");
   });
 });
