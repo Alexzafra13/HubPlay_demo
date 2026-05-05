@@ -112,7 +112,7 @@ function PeersStrip({
           <Link
             key={peer.id}
             to={`/peers/${peer.id}`}
-            className="group flex items-center gap-2 rounded-full bg-bg-base px-3 py-1.5 text-sm text-text-primary transition-colors hover:bg-accent/10 hover:text-accent"
+            className="group flex items-center gap-2 rounded-full bg-bg-base px-3 py-1.5 text-sm text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
             title={peer.fingerprint}
           >
             <span
@@ -139,7 +139,7 @@ function LibraryCard({ lib }: { lib: FederationUnifiedLibrary }) {
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <h3 className="truncate text-base font-semibold text-text-primary group-hover:text-accent">
+          <h3 className="truncate text-base font-semibold text-text-primary">
             {lib.library_name}
           </h3>
           <p className="mt-0.5 text-xs text-text-muted">
@@ -165,9 +165,13 @@ function LibraryCard({ lib }: { lib: FederationUnifiedLibrary }) {
   );
 }
 
+// ScopeChip — metadata pill (play / download / livetv). Stays neutral
+// so the chip strip reads as "what this share allows" rather than
+// drawing the eye away from the card-level CTA (the card itself is
+// the action). Same doctrine the default Badge variant follows.
 function ScopeChip({ label }: { label: string }) {
   return (
-    <span className="rounded bg-accent/10 px-2 py-0.5 text-[10px] font-medium text-accent">
+    <span className="rounded bg-bg-elevated px-2 py-0.5 text-[10px] font-medium text-text-secondary">
       {label}
     </span>
   );
