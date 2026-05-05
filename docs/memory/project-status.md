@@ -1,5 +1,38 @@
 # Estado del proyecto
 
+> 🛡️ **Sesión 2026-05-05 (rama `claude/compassionate-bardeen-76afea`, PR pendiente)** — **Refresh estético de peer-detail + senior review de mantenibilidad + 3 P1 cerrados (B5/B1/F1)**. 4 commits sobre la rama.
+>
+> **Commit `ff8f0d6`** — *ui(peers): peer item detail reuses HeroSection*. La página de detalle de items federados venía con un layout 2-col plano (póster pequeño + texto a la derecha) que rompía la paridad visual con el detail local cinematográfico. Refactor para que **`PeerItemDetail` reuse `<HeroSection>`** vía `federationItemToMediaItem` + aurora canvas page-wide con paleta extraída en runtime del póster (mismo look que un movie local). El wire de federación es estrecho (id/type/title/year/overview/poster_url) pero `HeroSection` degrada bien: sin backdrop cae al poster_url, sin logo cae al `<h1>`, sin géneros/rating los chips simplemente no se renderizan. Cambios mínimos a `HeroSection`: nuevo `playLabel?: string` opcional (defaults `t("common.play")`) para surfacear "Reanudar 0:58" cuando hay progress cross-peer guardado, y favorito condicional a que se pase `onToggleFavorite` (peer items no tienen favoritos cross-server). Atribución del peer en el slot `studio` + pill emerald-dotted "Compartida por X" debajo del hero. Resume: primary CTA = Reanudar, "Reproducir desde el inicio" en kebab.
+>
+> **Senior review consolidado** — 2 agentes en paralelo (backend Go + frontend React/TS) tras leer audit-2026-04-15 + audit-2026-04-28 para no duplicar findings. Verdict: backend **7.5/10**, frontend **6.5/10**. Top hallazgos:
+> - **B1** middleware bypassing AppError envelope (audit-04-15 §2.2 abierto 3 semanas)
+> - **B2** `internal/federation/manager.go` god file 1166 LOC, 8 áreas disjuntas
+> - **B3** `ItemHandler.Get` 207 LOC orquestando 7 repos (handler haciendo trabajo de service)
+> - **B4** `internal/scanner/scanner.go` 1193 LOC + `New()` con 13 params posicionales
+> - **B5** dead `// backwards compat` fields en progress.go (audit-04-15 §3 abierto)
+> - **F1** `useHls` con deps `[]` + eslint-disable → audio stuck del episodio anterior
+> - **F2** `LiveTV.tsx` god page 557 LOC
+> - **F3** `SeriesHero.tsx` mezcla hero + IO observer + sessionStorage + URL builders (699 LOC)
+> - **F4** `useHls`/`useLiveHls` duplican lifecycle pero discrepan en disciplina
+> - **F5** `Sidebar.tsx` markup `NavLink` copy-pasteado entre `NavRow` y `PeerLibrariesSection`
+>
+> **Commit `5313d11`** — *api(progress): drop dead backwards-compat id aliases*. Cierra **B5**. 3 líneas `// backwards compat` borradas en Continue Watching / Favorites / NextUp (`item_id` x2, `episode_id` x1). Grep frontend confirmó 0 consumidores. Test de NextUp asertando `id` canónico.
+>
+> **Commit `d7fc395`** — *api(errors): centralize AppError envelope writer*. Cierra **B1**. Nuevo paquete `internal/api/apperror/` con `Write` + `SetRecorder` — depende solo de `domain` + `chi/middleware` (sin import cycle, ambos `handlers` y `auth` lo consumen). `handlers/responses.go` reduce a thin wrappers (errorPayload struct + errorRecorder var borrados, centralizados). `auth/middleware.go` los 3 `http.Error` con JSON hardcoded → `apperror.Write` con `domain.NewUnauthorized/NewForbidden/AppError{Code:TOKEN_INVALID}`. `api/csrf.go` el `http.Error` de CSRF_FAILED → `apperror.Write`; **`generateCSRFToken` ya no panic-ea** dentro de un handler HTTP (un fallo de hardware-RNG no debería tumbar el server) — retorna `error`, el caller renderiza 500 vía `apperror`. Resultado: UNAUTHORIZED/TOKEN_INVALID/FORBIDDEN/CSRF_FAILED ahora aparecen en `hubplay_errors_total` con `request_id` correlation.
+>
+> **Commit `a061267`** — *player(useHls): re-attach when source changes*. Cierra **F1**. El effect corría con `deps=[]` + `eslint-disable-next-line react-hooks/exhaustive-deps` — un parent que cambiase `masterPlaylistUrl`/`directUrl`/`playbackMethod`/`sessionToken` dejaba el player con la fuente vieja. Síntoma más visible: `currentAudioTrack` quedaba con el índice del episodio anterior cuando next-up avanzaba. Patrón de `useLiveHls`: real deps `[videoRef, masterPlaylistUrl, directUrl, playbackMethod, sessionToken]` + reset de estado source-bound al inicio del effect + tear-down defensivo (`hls.destroy()` + `video.removeAttribute("src") + video.load()`) cubriendo strict-mode double-mount y la transición direct_play → transcode + `startPosition` en ref para no re-attach cuando el padre recompute resume seconds.
+>
+> **Verificación**: `tsc -b` EXIT 0 · `vitest run` 384/384 · `go test ./internal/api/... ./internal/auth/... ./internal/domain/...` ok · build + vet limpio. Pre-existing failures NO causados por esta sesión (verificados con `git stash`): `TestStreamHandler_Segment_HappyPath`, `TestPreflight_HappyPath` (ffmpeg env), `TestSQLC_GeneratedFilesMatchQueries`, `pathmap`, `scanner` — Windows env stuff que el audit-04-28 ya documentaba.
+>
+> **Cola P1 senior-review pendiente** (priorizada por impacto/esfuerzo restantes):
+> - **B3** `ItemHandler.Get` → service orchestrator (2-3h, el refactor más rentable: testabilidad + DTO tipado, reduce el `map[string]any` count)
+> - **B2** split de `federation/manager.go` por concern (1-2h, file-only refactor, habilita Phase 6 limpio)
+> - **F2/F3/F6/F7** split de god-pages frontend (LiveTV, SeriesHero/HeroTrailer, LibraryNewPage, FederationAdmin) — paralelizables, 6-8h totales
+> - **B4** scanner Repos struct + 3 ficheros (3-4h)
+> - **B6/B8** servicios → AppError + handlers → DTOs tipados (gradual, semana de trabajo)
+>
+> **Cola P2/P3 senior-review** (ver review consolidado guardado en transcripción de esta sesión, no en docs aún): F4 hlsLifecycle compartido, F5 SidebarNavLink, F8 useUserDataSync optimistic write, F10 metaParts namespace, B6 service AppError migration, B7 Dependencies struct grouping, B9 me_home tests, B10 transmux split, B11 sqlc raw-SQL drift (33 vs 5 documented), F9 Settings i18n drift.
+
 > 🎬 **Sesión 2026-05-04 / 05 (rama `claude/federation-progress-cross-peer`, mergeada a `main`)** — **Continue Watching cross-peer cerrado + bug de config arreglado + smoke real con dos peers paireados verificado end-to-end con vídeo y browser**. 3 commits sobre la rama (Continue Watching, config fix, memory handoff). El gap UX más grande post-Phase-5 cerrado.
 >
 > **Commit `05c6b4a`** — *federation: cross-peer Continue Watching*. Items federados nunca viven en `items` local, así que `user_data` no puede guardar su posición. Surface dedicado `federation_progress`:
