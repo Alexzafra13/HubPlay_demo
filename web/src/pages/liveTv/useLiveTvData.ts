@@ -26,10 +26,10 @@ import {
 import { api } from "@/api/client";
 import type {
   Channel,
-  ChannelCategory,
+  ContinueWatchingChannel,
   EPGProgram,
-  UnhealthyChannel,
   Library,
+  UnhealthyChannel,
 } from "@/api/types";
 
 export interface LiveTvData {
@@ -42,10 +42,10 @@ export interface LiveTvData {
   librariesLoading: boolean;
   /** Unhealthy channels surfaced separately for the "Apagados" rail. */
   unhealthyChannels: UnhealthyChannel[];
-  /** Map of channelID → schedule row for the bulk-schedule call. */
-  scheduleByChannel: Record<string, ChannelCategory[] | EPGProgram[] | undefined>;
-  /** Per-user "continue watching" rail entries. */
-  continueWatching: Channel[];
+  /** Map of channelID → EPG schedule rows for the bulk-schedule call. */
+  scheduleByChannel: Record<string, EPGProgram[]>;
+  /** Per-user "continue watching" rail entries (livetv channels). */
+  continueWatching: ContinueWatchingChannel[];
 }
 
 export function useLiveTvData(): LiveTvData {

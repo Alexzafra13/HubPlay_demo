@@ -7,7 +7,7 @@ import {
   useChannelFavoriteIDs,
   useRemoveChannelFavorite,
 } from "@/api/hooks";
-import type { Channel } from "@/api/types";
+import type { Channel, ChannelCategory, EPGProgram } from "@/api/types";
 import { useLiveTvData } from "./liveTv/useLiveTvData";
 import {
   type CategoryFilter,
