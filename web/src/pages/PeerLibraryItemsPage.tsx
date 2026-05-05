@@ -65,7 +65,7 @@ export default function PeerLibraryItemsPage() {
   if (items.error) {
     return (
       <div className="p-6 sm:p-10">
-        <Link to="/peers" className="text-sm text-accent hover:underline">
+        <Link to="/peers" className="text-sm text-text-secondary hover:text-text-primary transition-colors">
           ← {t("peers.backToList")}
         </Link>
         <p className="mt-4 rounded border border-danger/40 bg-danger/5 p-3 text-sm text-danger">
@@ -77,7 +77,7 @@ export default function PeerLibraryItemsPage() {
 
   return (
     <div className="p-6 sm:p-10">
-      <Link to="/peers" className="text-sm text-accent hover:underline">
+      <Link to="/peers" className="text-sm text-text-secondary hover:text-text-primary transition-colors">
         ← {t("peers.backToList")}
       </Link>
 

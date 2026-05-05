@@ -25,7 +25,7 @@ export default function PeerLibrariesPage() {
         <p className="rounded border border-danger/40 bg-danger/5 p-3 text-sm text-danger">
           {t("peers.unreachable", { error: String(libraries.error) })}
         </p>
-        <Link to="/peers" className="mt-4 inline-block text-sm text-accent hover:underline">
+        <Link to="/peers" className="mt-4 inline-block text-sm text-text-secondary hover:text-text-primary transition-colors">
           ← {t("peers.backToList")}
         </Link>
       </div>
@@ -36,7 +36,7 @@ export default function PeerLibrariesPage() {
 
   return (
     <div className="p-6 sm:p-10">
-      <Link to="/peers" className="text-sm text-accent hover:underline">
+      <Link to="/peers" className="text-sm text-text-secondary hover:text-text-primary transition-colors">
         ← {t("peers.backToList")}
       </Link>
       <h1 className="mt-2 text-2xl font-bold text-text-primary">
