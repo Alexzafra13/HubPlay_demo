@@ -251,8 +251,6 @@ func (h *ProgressHandler) ContinueWatching(w http.ResponseWriter, r *http.Reques
 		// Mirror the user_data envelope every other MediaItem-shaped
 		// endpoint emits so cards on the home rail can read
 		// `user_data.progress.percentage` without a special case.
-		// position/duration are kept at the top level for backwards
-		// compat with anything still reading the flat shape.
 		var pct float64
 		if item.DurationTicks > 0 {
 			pct = float64(item.PositionTicks) / float64(item.DurationTicks) * 100
@@ -265,7 +263,6 @@ func (h *ProgressHandler) ContinueWatching(w http.ResponseWriter, r *http.Reques
 		}
 		entry := map[string]any{
 			"id":             item.ItemID,
-			"item_id":        item.ItemID, // backwards compat
 			"title":          item.Title,
 			"type":           item.Type,
 			"position_ticks": item.PositionTicks,
@@ -357,7 +354,6 @@ func (h *ProgressHandler) Favorites(w http.ResponseWriter, r *http.Request) {
 	for _, item := range items {
 		entry := map[string]any{
 			"id":             item.ItemID,
-			"item_id":        item.ItemID, // backwards compat
 			"title":          item.Title,
 			"type":           item.Type,
 			"year":           item.Year,
@@ -407,7 +403,6 @@ func (h *ProgressHandler) NextUp(w http.ResponseWriter, r *http.Request) {
 	for _, item := range items {
 		result = append(result, map[string]any{
 			"id":             item.EpisodeID,
-			"episode_id":     item.EpisodeID, // backwards compat
 			"episode_title":  item.EpisodeTitle,
 			"season_number":  item.SeasonNumber,
 			"episode_number": item.EpisodeNumber,
