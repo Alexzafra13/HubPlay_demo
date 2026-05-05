@@ -8,8 +8,16 @@ interface BadgeProps {
   className?: string;
 }
 
+// `default` is intentionally neutral so the brand accent stays
+// reserved for primary CTAs (Button), identity (BrandMark, sidebar
+// active indicator) and active interactive state. Decorative metadata
+// chips (genres, content-type, content-rating, "default" markers)
+// previously inherited the accent and competed with the real CTAs
+// for attention; rendering them in a quiet bg-elevated/text-secondary
+// pair lets the eye land on action surfaces first. Status variants
+// (success/warning/error/live) keep their semantic colour.
 const variantStyles: Record<BadgeVariant, string> = {
-  default: "bg-accent-soft text-accent-light",
+  default: "bg-bg-elevated text-text-secondary",
   success: "bg-success/10 text-success",
   warning: "bg-warning/10 text-warning",
   error: "bg-error/10 text-error",
