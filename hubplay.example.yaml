@@ -29,3 +29,12 @@ rate_limit:
 observability:
   metrics_enabled: true
   metrics_path: "/metrics"
+
+# Daily background sweep for append-only diagnostic tables. Without it
+# the EPG and federation audit log grow forever — a long-lived install
+# with IPTV + paired peers can hit multi-GB SQLite in weeks. Set any
+# duration to 0 to disable that specific sweep.
+retention:
+  epg_programs: "24h"            # drop EPG rows whose end_time is older
+  federation_audit_log: "720h"   # 30 days of cross-peer audit history
+  sweep_interval: "24h"

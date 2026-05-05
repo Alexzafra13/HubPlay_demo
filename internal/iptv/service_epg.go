@@ -348,11 +348,16 @@ func (s *Service) NowPlaying(ctx context.Context, channelID string) (*db.EPGProg
 	return s.epgPrograms.NowPlaying(ctx, channelID)
 }
 
-// CleanupOldPrograms removes EPG data older than 24 h. Called by the
-// scheduled cleanup job so stale programmes don't grow the DB
-// indefinitely.
-func (s *Service) CleanupOldPrograms(ctx context.Context) (int64, error) {
-	before := time.Now().Add(-24 * time.Hour)
+// CleanupOldPrograms removes EPG rows whose end_time is older than the
+// given window. Called by the scheduled retention runner so stale
+// programmes don't grow the DB indefinitely. Window <= 0 is a no-op so
+// an operator can disable the sweep via config without removing the
+// caller wiring.
+func (s *Service) CleanupOldPrograms(ctx context.Context, window time.Duration) (int64, error) {
+	if window <= 0 {
+		return 0, nil
+	}
+	before := time.Now().Add(-window)
 	return s.epgPrograms.CleanupOld(ctx, before)
 }
 

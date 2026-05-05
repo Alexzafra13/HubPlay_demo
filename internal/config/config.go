@@ -27,7 +27,33 @@ type Config struct {
 	Streaming      StreamingConfig     `yaml:"streaming"`
 	IPTV           IPTVConfig          `yaml:"iptv"`
 	Observability  ObservabilityConfig `yaml:"observability"`
+	Retention      RetentionConfig     `yaml:"retention"`
 	SetupCompleted bool                `yaml:"setup_completed"`
+}
+
+// RetentionConfig caps the lifetime of append-only diagnostic and
+// programming tables. Without these the EPG and federation audit log
+// grow monotonically forever — a long-lived install with IPTV +
+// federation paired peers can hit multi-GB SQLite in weeks. Defaults
+// are sane for a single-tenant self-hosted server; operators with
+// higher traffic can extend or shorten via YAML / env.
+//
+// Zero or negative values disable the corresponding sweep.
+type RetentionConfig struct {
+	// EPGPrograms keeps EPG rows whose end_time is within this window
+	// of `now`; older rows are deleted on every tick. Default 24h —
+	// matches the existing 24h cutoff that CleanupOldPrograms hard-coded.
+	EPGPrograms time.Duration `yaml:"epg_programs"`
+
+	// FederationAuditLog keeps audit rows newer than this window. The
+	// federation audit table grows on every cross-peer request (search,
+	// stream, progress, share). Default 30d.
+	FederationAuditLog time.Duration `yaml:"federation_audit_log"`
+
+	// SweepInterval is how often the background ticker runs. Default
+	// 24h. Lowering this trades steadier DB load for fresher cleanup;
+	// raising it batches more deletions per tick.
+	SweepInterval time.Duration `yaml:"sweep_interval"`
 }
 
 // IPTVConfig groups runtime knobs for the IPTV subsystem. Only
@@ -277,6 +303,11 @@ func defaults() *Config {
 		Observability: ObservabilityConfig{
 			MetricsEnabled: true,
 			MetricsPath:    "/metrics",
+		},
+		Retention: RetentionConfig{
+			EPGPrograms:        24 * time.Hour,
+			FederationAuditLog: 30 * 24 * time.Hour,
+			SweepInterval:      24 * time.Hour,
 		},
 	}
 }
