@@ -1,38 +1,38 @@
 # Estado del proyecto
 
-> 🎨 **Sesión 2026-05-05 (continuada, dos ramas nuevas, PRs #149 + #150 abiertas)** — **Accent discipline + FederationAdmin split. Reflexión honesta sobre la design.md de Netflix → descartar cargo-cult; quedarse solo con el patrón "reservar accent" que ya seguíamos a medias**.
+> 🧭 **Sesión 2026-05-05 tarde (rama `claude/quirky-archimedes-62902a`, read-only review)** — **Senior review consolidado + punch list documentado para próximas sesiones**. Cero código tocado esta sesión: 3 auditores en paralelo (backend Go, frontend React/TS, tests+observabilidad+seguridad) entregaron findings verificados contra código. **Resultado completo en [`docs/memory/audit-2026-05-05.md`](audit-2026-05-05.md)**.
 >
-> **Conversación clave**: el usuario compartió un design.md de Netflix Spain. Yo propuse 4 adaptaciones; el usuario me empujó con "estás seguro de que es mejor que lo que tenemos?" y al releer crítico salieron las grietas de las primeras 3 propuestas:
-> - **Top-N rail con dígito gigante 100px** asume social proof de millones de users — HubPlay es single-tenant; sería estética sin función.
-> - **Bumpear type scale a 56px** no aporta — los heroes ya leen cinematográficos y rompe en viewports estrechos.
-> - **Cosmic gradient** `linear-gradient(149deg, #192247, #210e17)` es color-Netflix (azul-vino) y choca con nuestro emerald.
-> - Solo el **(4) accent discipline** tenía ROI legítimo.
+> **Veredicto**: backend 8/10 (mejoró desde 7.5), frontend 6.5/10 (sin cambio). Cero regresiones desde audit 2026-04-28. Métricas verificadas: 196 .go producción / 124 _test.go (~63% vs 55% previo) · 50 tests frontend / 186 source (~27% vs 15% previo).
 >
-> **Lección**: el design.md de Netflix está pensado para una landing pública de signup. La mayoría de HubPlay es app autenticada. Aplicar el manual entero sin filtrar = cargo-cult. Guardarlo como referencia futura para una eventual landing pública del proyecto, no para el browse autenticado.
+> **5 P0 nuevos (hardening pragmático, <3h cada uno)**:
+> - **P0-1** `/health` devuelve 200 con DB caída — split en `/health/live` + `/health/ready` con 503 en ping fail
+> - **P0-2** `RefreshToken` sin rate limit (solo `Login` lo tiene)
+> - **P0-3** `auth.Setup` (gate "no users yet") sin test directo del 403 con count>=1
+> - **P0-4** `CleanupOldPrograms` y `PruneAuditBefore` existen sin caller — daily ticker pendiente
+> - **P0-5** `useUserDataSync` abre 3 EventSource al mismo `/me/events` — singleton EventBus pendiente (los propios comments lo pedían)
 >
-> **Commit `26229a0` (PR #149, rama `claude/accent-discipline`)** — *ui(accent): reserve emerald for action + identity*. Decorative chips inheriting `--color-accent` competían visualmente con CTAs reales (Play, Save, Sign in). Cleanup conservador, scope acotado:
-> - `Badge.tsx` `default` variant: `bg-accent-soft / text-accent-light` → `bg-bg-elevated / text-text-secondary`. Reshapes genre chips, content rating, library content_type, auth-key "retired", "default" admin markers. Status variants (success/warning/error/live) **untouched** — color semántico legítimo.
-> - Peer breadcrumbs (`PeerLibrariesPage`, `PeerLibraryItemsPage`): `text-accent hover:underline` → quiet `text-text-secondary` con hover a primary.
-> - `PeersPage` peer pill hover: drop `hover:bg-accent/10 hover:text-accent`.
-> - `PeersPage` `LibraryCard` title: drop `group-hover:text-accent`. La card ya tiene `hover:border-accent` como single focal hover indicator; doblarse era ruido.
-> - `PeersPage` `ScopeChip` ("Play" / "Download" / "Live TV"): mismo doctrine que Badge default — neutral.
-> - **Untouched** (uses funcionales/identidad): `Button` primary, `BrandMark`, sidebar active, focus rings, form active borders, `Spinner`, `ErrorBoundary` retry, `SetupWizard` step indicators, sidebar avatar identity ring.
+> **P1 estratégico** (high leverage refactor):
+> - **B3 / P1-B1** `ItemHandler.Get` 207 LOC + 7 repos → service orchestrator + DTO tipado (mata el peor `map[string]any` de 387 ocurrencias)
+> - **F4 / P1-F1** extraer `useHlsLifecycle` compartido (useHls / useLiveHls divergen, ~150 LOC dup con drift sutil — el fix `a061267` solo tocó VOD)
+> - **B2 / P1-B2** split `internal/federation/manager.go` 1166 LOC por concern (mecánico)
+> - **B4 / P1-B3** `scanner.New()` 13 params → Repos struct
+> - **waitForShutdown / P1-B4** 14 params → runtime struct
+> - **F2 / P1-F2** split `LiveTV.tsx` 557 LOC + tests
+> - **F5 / P1-F3** Sidebar `NavRow` reutilizable (markup duplicado en `PeerLibrariesSection`)
+> - **F8 / P1-F4** `useUserDataSync` invalida queries que pueden no existir
 >
-> **Commit `14e81c9` (PR #150, rama `claude/federation-admin-split`)** — *ui(admin/federation): split FederationAdmin into per-section files*. Cierra **F7** del review. 684 LOC → 82 (orquestador) + 5 ficheros bajo `pages/admin/federation/`. Pure file-level refactor, zero behaviour change:
-> - `FederationAdmin.tsx` 684 → **82** (orquestador)
-> - `federation/IdentityCard.tsx` 54
-> - `federation/InviteSection.tsx` 62
-> - `federation/AcceptSection.tsx` 152
-> - `federation/PeersTable.tsx` 301 — incluye `SharesPanel` + `StatusBadge` (tightly coupled al row layout)
-> - `federation/_shared.tsx` 81 — primitives compartidas (`Label`, `Value`, `FieldInput`, `CopyButton`, `ErrorBanner`)
+> **Plan de ejecución en 3 sesiones discretas** (ver §7 del audit):
+> - **Sesión 1** (3-4h, single PR): los 5 P0 → cierra hardening pre-producción
+> - **Sesión 2** (4-5h): B3 + DTO tipado + F4 useHlsLifecycle → mayor leverage downstream
+> - **Sesión 3** (3-4h): B2 federation split + B4/waitForShutdown structs + F2/F5 → mecánico bajo riesgo
 >
-> Nota dejada en el PR: el `window.confirm` de `PeersTable.tsx:355` debería ser un `<Modal>` (la infra existe). **Out of scope** del refactor; queda flagged para follow-up.
+> **Hallazgos del review previo verificados**: B1 ✅ cerrado (commit `d7fc395`), B5 ✅ cerrado (`5313d11`), F1 ✅ cerrado (`a061267`), F9 ✅ cerrado (en/es i18n parity verificada). Resto del backlog B2/B3/B4/B6/B7/B8/B9/B10/B11/F2-F10 sigue abierto, ahora con plan de ejecución y prioridad pragmática.
 >
-> **Verificación**: ambos PRs `tsc -b` clean · `vitest` 384/384 · CI green del PR #149 (Lint, Test Backend, Test Frontend, Build linux/darwin amd64+arm64, Docker hwaccel, Trivy). #150 corriendo al cierre de sesión.
+> **Riesgo principal no mitigado**: 5 pages frontend god/críticas con acciones irreversibles sin tests (LiveTV, FederationAdmin, Settings, LibraryNewPage, SystemStatus, UsersAdmin, LibrariesAdmin). Las sesiones 2/3 incluyen escribir tests del área que se toca para no avanzar sin red.
 >
-> **Diferido — (c) B4 Scanner refactor**. Conscientemente next-session porque es el más pesado de la triada: `New()` 13 params posicionales → `Repos` struct + split de `scanner.go` 1193 LOC en `scanner.go` (walk + lifecycle) / `enrich.go` (TMDb/imágenes) / `episodes.go` (jerarquía series/season/episode). 3-4h con disciplina. Más superficie y entrelazamiento que B2 federation split — mejor en aislamiento con main estable.
+> **Esta sesión NO tocó código** — solo `docs/memory/audit-2026-05-05.md` (nuevo) + esta entrada en `project-status.md`. Sigue el árbol limpio.
 
-> 🛡️ **Sesión 2026-05-05 (rama `claude/compassionate-bardeen-76afea`, mergeada via PR #148)** — **Refresh estético de peer-detail + senior review de mantenibilidad + 3 P1 cerrados (B5/B1/F1)**. 4 commits sobre la rama.
+> 🛡️ **Sesión 2026-05-05 (rama `claude/compassionate-bardeen-76afea`, PR pendiente)** — **Refresh estético de peer-detail + senior review de mantenibilidad + 3 P1 cerrados (B5/B1/F1)**. 4 commits sobre la rama.
 >
 > **Commit `ff8f0d6`** — *ui(peers): peer item detail reuses HeroSection*. La página de detalle de items federados venía con un layout 2-col plano (póster pequeño + texto a la derecha) que rompía la paridad visual con el detail local cinematográfico. Refactor para que **`PeerItemDetail` reuse `<HeroSection>`** vía `federationItemToMediaItem` + aurora canvas page-wide con paleta extraída en runtime del póster (mismo look que un movie local). El wire de federación es estrecho (id/type/title/year/overview/poster_url) pero `HeroSection` degrada bien: sin backdrop cae al poster_url, sin logo cae al `<h1>`, sin géneros/rating los chips simplemente no se renderizan. Cambios mínimos a `HeroSection`: nuevo `playLabel?: string` opcional (defaults `t("common.play")`) para surfacear "Reanudar 0:58" cuando hay progress cross-peer guardado, y favorito condicional a que se pase `onToggleFavorite` (peer items no tienen favoritos cross-server). Atribución del peer en el slot `studio` + pill emerald-dotted "Compartida por X" debajo del hero. Resume: primary CTA = Reanudar, "Reproducir desde el inicio" en kebab.
 >
