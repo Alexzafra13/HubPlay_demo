@@ -191,29 +191,50 @@ function NavGroup({
   );
 }
 
-function NavRow({
-  item,
-  collapsed,
+// SidebarNavLink is the shared row primitive for both top-level nav
+// items and per-peer-library children. Both used to inline the same
+// NavLink + motion.span(layoutId) markup with sub-200-line drift; any
+// tweak to active-bg animation or icon spacing had to land in two
+// places. The active-bar (left-side accent stripe) is opt-in because
+// peer-library rows live indented inside a section where the bar
+// would be off-axis with the parent.
+function SidebarNavLink({
+  to,
+  end = false,
   isActive,
+  label,
+  iconNode,
+  collapsed,
+  title,
+  showActiveBar = true,
+  rightSlot,
+  collapsedTopRight,
 }: {
-  item: NavItemDef;
-  collapsed: boolean;
+  to: string;
+  end?: boolean;
   isActive: boolean;
+  label: string;
+  /** ReactNode so callers render a LucideIcon, content-type icon, or anything else. */
+  iconNode: React.ReactNode;
+  collapsed: boolean;
+  title?: string;
+  /** Render the left accent stripe when active. Default true (top-level nav). */
+  showActiveBar?: boolean;
+  /** Content rendered to the right of the label when expanded. Used for nav badges. */
+  rightSlot?: React.ReactNode;
+  /** Corner indicator in collapsed mode (e.g. live pulse). */
+  collapsedTopRight?: React.ReactNode;
 }) {
-  const { t } = useTranslation();
-  const Icon = item.icon;
-  const label = t(item.labelKey);
-
   return (
     <li className="relative">
       <NavLink
-        to={item.to}
-        end={item.to === "/"}
+        to={to}
+        end={end}
         className="relative flex items-center gap-3 h-9 px-3 rounded-lg text-[13px] font-medium transition-colors group"
         style={{
           color: isActive ? "var(--color-accent-light)" : "var(--color-text-secondary)",
         }}
-        title={collapsed ? label : undefined}
+        title={title}
       >
         {isActive && (
           <>
@@ -228,21 +249,23 @@ function NavRow({
               }}
               transition={{ type: "spring", stiffness: 380, damping: 32, mass: 0.8 }}
             />
-            <motion.span
-              layoutId="sidebar-active-bar"
-              className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-r-full"
-              style={{
-                background: "var(--color-accent)",
-                boxShadow: "0 0 12px var(--color-accent-glow)",
-              }}
-              transition={{ type: "spring", stiffness: 380, damping: 32, mass: 0.8 }}
-            />
+            {showActiveBar && (
+              <motion.span
+                layoutId="sidebar-active-bar"
+                className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-r-full"
+                style={{
+                  background: "var(--color-accent)",
+                  boxShadow: "0 0 12px var(--color-accent-glow)",
+                }}
+                transition={{ type: "spring", stiffness: 380, damping: 32, mass: 0.8 }}
+              />
+            )}
           </>
         )}
         <span
           className={`relative flex-shrink-0 transition-transform duration-150 group-hover:scale-105 ${collapsed ? "mx-auto" : ""}`}
         >
-          <Icon className="h-[18px] w-[18px]" strokeWidth={isActive ? 2 : 1.6} />
+          {iconNode}
         </span>
         <AnimatePresence initial={false}>
           {!collapsed && (
@@ -258,18 +281,40 @@ function NavRow({
             </motion.span>
           )}
         </AnimatePresence>
-        {!collapsed && item.badge && (
-          <span className="relative flex-shrink-0">
-            <BadgeView badge={item.badge} />
-          </span>
-        )}
-        {collapsed && item.badge?.kind === "live" && (
-          <span className="absolute top-1.5 right-1.5">
-            <LivePulse />
-          </span>
+        {!collapsed && rightSlot && <span className="relative flex-shrink-0">{rightSlot}</span>}
+        {collapsed && collapsedTopRight && (
+          <span className="absolute top-1.5 right-1.5">{collapsedTopRight}</span>
         )}
       </NavLink>
     </li>
+  );
+}
+
+function NavRow({
+  item,
+  collapsed,
+  isActive,
+}: {
+  item: NavItemDef;
+  collapsed: boolean;
+  isActive: boolean;
+}) {
+  const { t } = useTranslation();
+  const Icon = item.icon;
+  const label = t(item.labelKey);
+
+  return (
+    <SidebarNavLink
+      to={item.to}
+      end={item.to === "/"}
+      isActive={isActive}
+      label={label}
+      iconNode={<Icon className="h-[18px] w-[18px]" strokeWidth={isActive ? 2 : 1.6} />}
+      collapsed={collapsed}
+      title={collapsed ? label : undefined}
+      rightSlot={item.badge ? <BadgeView badge={item.badge} /> : undefined}
+      collapsedTopRight={item.badge?.kind === "live" ? <LivePulse /> : undefined}
+    />
   );
 }
 
@@ -446,51 +491,19 @@ function PeerLibrariesSection({
               const to = `/peers/${peerId}/libraries/${lib.library_id}`;
               const isActive = activePath === to;
               return (
-                <li key={lib.library_id} className="relative">
-                  <NavLink
-                    to={to}
-                    className="relative flex items-center gap-3 h-9 px-3 rounded-lg text-[13px] font-medium transition-colors group"
-                    style={{
-                      color: isActive
-                        ? "var(--color-accent-light)"
-                        : "var(--color-text-secondary)",
-                    }}
-                    title={collapsed ? `${name} · ${lib.library_name}` : undefined}
-                  >
-                    {isActive && (
-                      <motion.span
-                        layoutId="sidebar-active-bg"
-                        className="absolute inset-0 rounded-lg"
-                        style={{
-                          background:
-                            "linear-gradient(180deg, var(--color-accent-soft), color-mix(in srgb, var(--color-accent-soft) 50%, transparent))",
-                          boxShadow:
-                            "inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 20%, transparent)",
-                        }}
-                        transition={{ type: "spring", stiffness: 380, damping: 32, mass: 0.8 }}
-                      />
-                    )}
-                    <span
-                      className={`relative flex-shrink-0 transition-transform duration-150 group-hover:scale-105 ${collapsed ? "mx-auto" : ""}`}
-                    >
-                      <PeerLibraryIcon contentType={lib.content_type} />
-                    </span>
-                    <AnimatePresence initial={false}>
-                      {!collapsed && (
-                        <motion.span
-                          key="label"
-                          initial={{ opacity: 0, x: -4 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          exit={{ opacity: 0, x: -4 }}
-                          transition={{ duration: 0.14 }}
-                          className="relative truncate flex-1 group-hover:text-text-primary transition-colors"
-                        >
-                          {lib.library_name}
-                        </motion.span>
-                      )}
-                    </AnimatePresence>
-                  </NavLink>
-                </li>
+                <SidebarNavLink
+                  key={lib.library_id}
+                  to={to}
+                  isActive={isActive}
+                  label={lib.library_name}
+                  iconNode={<PeerLibraryIcon contentType={lib.content_type} />}
+                  collapsed={collapsed}
+                  title={collapsed ? `${name} · ${lib.library_name}` : undefined}
+                  // Peer-library rows are indented children of a labelled
+                  // section; the left accent bar would render off-axis
+                  // with the parent's hierarchy. Active-bg layer alone.
+                  showActiveBar={false}
+                />
               );
             })}
           </ul>
