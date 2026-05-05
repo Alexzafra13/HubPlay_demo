@@ -12,9 +12,24 @@ import { useEffect, useState } from "react";
 export interface VibrantPalette {
   vibrant: string | null;
   muted: string | null;
+  // Plex-style 4-corner backgrounds (see itemDetail/aurora.ts) want
+  // up to four distinct swatches to fill the corners; node-vibrant
+  // already returns these, so we just expose them. All optional —
+  // monochrome posters return null for the variants the algorithm
+  // couldn't find, and downstream falls back to the basic vibrant /
+  // muted pair.
+  darkVibrant: string | null;
+  lightVibrant: string | null;
+  lightMuted: string | null;
 }
 
-const EMPTY: VibrantPalette = { vibrant: null, muted: null };
+const EMPTY: VibrantPalette = {
+  vibrant: null,
+  muted: null,
+  darkVibrant: null,
+  lightVibrant: null,
+  lightMuted: null,
+};
 
 /**
  * In-memory cache so repeated mounts of the same hero don't re-decode the
@@ -68,13 +83,17 @@ export function useVibrantColors(imageUrl: string | null | undefined): VibrantPa
         const { Vibrant } = await import("node-vibrant/browser");
         const swatches = await Vibrant.from(imageUrl).getPalette();
         if (cancelled) return;
+        const toRgb = (rgb?: number[] | null): string | null =>
+          rgb ? `rgb(${rgb.map(Math.round).join(", ")})` : null;
         const next: VibrantPalette = {
-          vibrant: swatches.Vibrant?.rgb
-            ? `rgb(${swatches.Vibrant.rgb.map(Math.round).join(", ")})`
-            : null,
-          muted: swatches.DarkMuted?.rgb
-            ? `rgb(${swatches.DarkMuted.rgb.map(Math.round).join(", ")})`
-            : null,
+          vibrant: toRgb(swatches.Vibrant?.rgb),
+          // Kept under the legacy name `muted` for backward-compat
+          // with HeroSection / SeriesHero — they read the darker
+          // muted swatch as the gradient backstop.
+          muted: toRgb(swatches.DarkMuted?.rgb),
+          darkVibrant: toRgb(swatches.DarkVibrant?.rgb),
+          lightVibrant: toRgb(swatches.LightVibrant?.rgb),
+          lightMuted: toRgb(swatches.Muted?.rgb),
         };
         cache.set(imageUrl, next);
         setPalette(next);

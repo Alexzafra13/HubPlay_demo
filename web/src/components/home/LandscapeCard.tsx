@@ -53,7 +53,7 @@ export function LandscapeCard({ item }: LandscapeCardProps) {
   return (
     <Link
       to={href}
-      className="group flex-shrink-0 w-[260px] sm:w-[300px] flex flex-col gap-2"
+      className="group flex-shrink-0 w-[300px] md:w-[340px] lg:w-[380px] xl:w-[420px] flex flex-col gap-2"
     >
       <div className="relative aspect-[16/9] overflow-hidden rounded-[--radius-md] bg-bg-elevated">
         {image ? (

@@ -30,7 +30,7 @@ export function PeerRecentRail() {
     return (
       <HomeRail title={t("home.peerRecent", { defaultValue: "Recently added on peers" })}>
         {Array.from({ length: 7 }, (_, i) => (
-          <div key={i} className="w-[150px] sm:w-[170px] shrink-0">
+          <div key={i} className="w-[180px] md:w-[200px] lg:w-[220px] xl:w-[240px] shrink-0">
             <Skeleton
               variant="rectangular"
               className="aspect-[2/3] w-full rounded-lg"
@@ -53,7 +53,7 @@ export function PeerRecentRail() {
       {hits.map((hit) => (
         <div
           key={`${hit.peer_id}:${hit.id}`}
-          className="w-[150px] sm:w-[170px] shrink-0"
+          className="w-[180px] md:w-[200px] lg:w-[220px] xl:w-[240px] shrink-0"
         >
           <PosterCard
             item={hitToMediaItem(hit)}

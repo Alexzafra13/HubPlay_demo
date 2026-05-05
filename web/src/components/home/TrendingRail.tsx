@@ -24,7 +24,7 @@ export function TrendingRail() {
     return (
       <HomeRail title={t("home.trending", { defaultValue: "Tendencia esta semana" })}>
         {Array.from({ length: 7 }, (_, i) => (
-          <div key={i} className="w-[150px] sm:w-[170px] shrink-0">
+          <div key={i} className="w-[180px] md:w-[200px] lg:w-[220px] xl:w-[240px] shrink-0">
             <Skeleton
               variant="rectangular"
               className="aspect-[2/3] w-full rounded-lg"
@@ -42,7 +42,7 @@ export function TrendingRail() {
   return (
     <HomeRail title={t("home.trending", { defaultValue: "Tendencia esta semana" })}>
       {items.map((it) => (
-        <div key={it.id} className="w-[150px] sm:w-[170px] shrink-0">
+        <div key={it.id} className="w-[180px] md:w-[200px] lg:w-[220px] xl:w-[240px] shrink-0">
           <PosterCard item={trendingToMediaItem(it)} />
         </div>
       ))}
