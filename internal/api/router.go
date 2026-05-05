@@ -151,8 +151,17 @@ func NewRouter(deps Dependencies) http.Handler {
 
 	// Public routes
 	r.Route("/api/v1", func(r chi.Router) {
-		// Health check (no auth)
+		// Health check (no auth).
+		// /health/live → process up, never touches deps. Kubernetes
+		//   liveness probes go here so a flaky DB does not get healthy
+		//   pods restarted in a loop.
+		// /health/ready → DB ping, returns 503 when deps are down so
+		//   load balancers drain traffic away from a broken backend.
+		// /health → legacy combined endpoint, mirrors /ready status code
+		//   plus rich body (ffmpeg, memory, streams) for the admin UI.
 		r.Get("/health", healthHandler.Health)
+		r.Get("/health/live", healthHandler.Live)
+		r.Get("/health/ready", healthHandler.Ready)
 
 		// OpenAPI 3.0.3 spec — public on purpose. Clients (Kotlin TV,
 		// integration scripts, openapi-generator) fetch this before
