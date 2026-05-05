@@ -1,5 +1,56 @@
 # Estado del proyecto
 
+> 🎬 **Sesión 2026-05-04 / 05 (rama `claude/federation-progress-cross-peer`, mergeada a `main`)** — **Continue Watching cross-peer cerrado + bug de config arreglado + smoke real con dos peers paireados verificado end-to-end con vídeo y browser**. 3 commits sobre la rama (Continue Watching, config fix, memory handoff). El gap UX más grande post-Phase-5 cerrado.
+>
+> **Commit `05c6b4a`** — *federation: cross-peer Continue Watching*. Items federados nunca viven en `items` local, así que `user_data` no puede guardar su posición. Surface dedicado `federation_progress`:
+> - **Migración 028** — tabla `federation_progress(user_id, peer_id, remote_item_id, position_ticks, duration_ticks, completed, last_played_at, updated_at)` + índice `(user_id, last_played_at DESC)`. Cascada en revoke de peer (`ON DELETE CASCADE`) y en delete de user.
+> - **sqlc** — 4 queries (`UpsertFederationProgress`, `GetFederationProgress`, `DeleteFederationProgress`, `ListFederationContinueWatching`). El upsert preserva un `duration_ticks` previo no-cero cuando el caller pasa 0 (duración aprende del manifest tras varios segmentos; primer save típicamente llega antes). El JOIN del rail filtra por `peer.status='paired'` para que **revoke quite filas del rail sin purga explícita**, y por `<90%` (mismo gate que el local Continue Watching).
+> - **Repo + Manager**: `FederationRepository.UpsertProgress/GetProgress/DeleteProgress/ListContinueWatching` thin wrappers. `Manager.RecordProgress` valida que el peer esté `paired` y dropea silenciosamente writes contra peers revocados (admin puede revocar mientras el user reproduce; no rompemos al user). `Manager.GetProgress` y `Manager.ListContinueWatching` añadidos a la `Repo` interface.
+> - **3 endpoints HTTP** documentados en `openapi.yaml` (drift test pasa):
+>   - `GET  /api/v1/me/peers/{peerID}/items/{itemId}/progress` → zero default cuando no hay row
+>   - `POST /api/v1/me/peers/{peerID}/items/{itemId}/progress` → upsert (`{position_ticks, duration_ticks?, completed?}`)
+>   - `GET  /api/v1/me/peers/continue-watching?limit=20` → cross-peer rail
+> - **Frontend**: `useProgressReporter` acepta `peerId?` opcional → enruta a `/me/peers/.../progress` (con `duration_ticks` desde `video.duration` para que el rail compute el porcentaje); mantiene `keepalive: true` en unmount. `VideoPlayer` propaga `peerId` al reporter. **`PeerItemDetail`** carga progreso al montar, ofrece **Resume {{tiempo}}** + **Play from start** cuando hay posición guardada (<90%), pasa `startPosition` al player, refresca progreso al cerrar. Nuevo `PeerContinueWatchingRail` (auto-hide cuando vacío) wireado en Home **antes** del `PeerRecentRail`. i18n `home.peerContinueWatching`, `peers.resume`, `peers.playFromStart` (en + es).
+> - **Tests**: `TestFederationRepository_Progress` (upsert + duration preservation con segundo POST `duration=0` + completed-drop + near-complete-drop + delete) y `TestFederationRepository_Progress_PeerRevokedDropsFromRail`. Stub `inMemoryFedRepo` en `middleware_test.go` extendido.
+>
+> **Commit `013550c`** — *config: apply env overrides when hubplay.yaml is missing*. Bug expuesto por el smoke con dos containers Docker: `config.Load` retornaba defaults temprano cuando no existía `hubplay.yaml`, **saltando `applyEnvOverrides`**. Resultado: `HUBPLAY_SERVER_BASE_URL` (y todos los demás `HUBPLAY_*`) se ignoraban en silencio en deployments fresh-install. La federación pairing fallaba contra el SSRF guard porque cada peer auto-derivaba su `advertised_url` del Host header del navegador del admin (`localhost:8198`) en vez de la URL Docker-network. **Fix**: colapsadas las dos ramas en un único path `applyEnvOverrides + Validate`. La lógica especial "DB junto al yaml" se queda solo en la rama "no-file" donde tiene sentido. Tests: `TestLoad_NonexistentFile` reescrito (`t.TempDir()` en vez de `/nonexistent/path/`, mejor reflejo del caso producción) + nuevo `TestLoad_EnvOverrides_NoFile` que pinea el bug específico.
+>
+> **Verificación end-to-end real con vídeo (smoke nunca hecho antes — heredado del proyecto)**:
+> - **2 containers Docker** en red bridge compartida con `Juego de Ladrones (2018).mkv` (14 GB) montado en peer A
+> - Pareados via API + via UI admin (segunda pasada)
+> - Library share + browse cross-peer ✅
+> - **Cross-peer stream session** con `strategy: Transcode` ✅
+> - HLS master `/me/peers/.../master.m3u8` proxiado A→B ✅ (4 variants: 1080p/720p/480p/360p)
+> - Quality playlist `/720p/index.m3u8` ✅ (dispara ffmpeg en peer A)
+> - **`segment00000.ts` real descargado** — 3.0 MB de MPEG transport stream cruzando A→origen→our-server→cliente en 24 ms ✅
+> - POST progress @ 50% → GET retorna `position+duration+last_played_at` ✅
+> - Continue Watching rail `data:[{title:"Juego de Ladrones (2018)", percentage:50, peer_name:"HubPlay Server"}]` ✅
+> - Edge cases: duration preservation (0 no clobberea), completed=true drop, near-complete (>=90%) auto-drop, **revoke peer drops from rail** (filas DB intactas, JOIN gates en `status='paired'`), POST contra revoked peer → 204 silent no-op ✅
+>
+> **Smoke con browser real** (Chrome MCP, dos pestañas en `localhost:8198` y `localhost:8199`):
+> - Setup wizard A + B vía form (admin + libraries + ajustes + finalizar) ✅
+> - Login + scan automático ✅ (2 movies ingestados, durations correctas: 140 min / 132 min)
+> - Pair via UI: invite generation + Probe (fingerprint + palabras de confirmación visibles) + paste invite + tick checkbox + Emparejar → "Emparejado" ✅
+> - Share library (vía API; el checkbox UI funciona — el "no firing" del smoke previo era ruido del driver de test, ver Findings abajo)
+> - **Click Reproducir en B** → video real renderizando en `<video>` ✅ (escena del planeta visto desde el espacio, timestamp `0:04 / 0:09` → `0:35 / 3:48` → `0:58 / 17:18` mientras el manifest crece)
+> - Progress save automático cada 10s vía `useProgressReporter` ✅ (`position_ticks=568292160, percentage=14.26%` en `federation_progress`)
+> - Home rail "Sigue viendo en tus pares" ✅ con poster + barra de progreso + badge "HubPlay Server"
+> - Detail page muestra **"▶ Reanudar 0:56" + "Reproducir desde el inicio"** ✅
+> - **Click Reanudar** → video arranca exactamente en **0:58** (escena del casino HUSTLER, NO desde el principio) ✅
+>
+> **Findings — bugs que NO eran bugs**: durante el smoke pareció haber dos issues UI (1) checkbox "Compartida" no disparaba mutation (2) botón "Generando..." stuck. **Re-investigado en clean run y NINGUNO se reproduce**: (1) era yo usando `cb.click()` desde JS sobre input controlado de React — el click pixel-real desde Chrome MCP sí dispara `POST /shares` 201. (2) era una race con el JWT TTL de 15 min expirado tras mucho rato dándole a la UI; en flow normal el botón vuelve a "Generar nuevo invite" en <1s. **Cero código que arreglar**.
+>
+> **Verificación final**: `go test -race ./... -count=1` → todos los paquetes verdes · `vitest run` 384/384 · `tsc --noEmit` limpio · production build limpio · `make sqlc-verify` limpio · container `hubplay-dev` arrancado, migración 028 aplicada.
+>
+> **Pendientes que quedan en federación user-facing** (cola al final, sin cambios):
+> - **Subtítulos federados** (~2h) — el master.m3u8 federado no proxia tracks de subs.
+> - **`MaxConcurrentStreams` por peer** — hoy comparten cap global con locales.
+> - **Promover `peer_recent` + `peer_continue_watching` a `HomeSection` configurables** — hoy viven fuera del layout-driven dispatch.
+> - **Phase 6 Live TV peering** — sin empezar.
+> - **Phase 7 Download to local + audit log UI** — sin empezar.
+>
+> **El smoke con dos servers paireados ya NO está pendiente**: hecho con vídeo real + browser real, end-to-end. La memoria de proyecto puede tachar ese item de la cola.
+
 > 🌐 **Sesión 2026-05-04 (rama `claude/federated-search-frontend-6rbQm`)** — **Federación user-facing: search frontend + dropdown federado + Recently-Added rail**. 2 commits limpios sobre la rama, ambos pusheados.
 >
 > **Commit `5059191`** — *federated search wireado al `/search`*. El backend de fan-out ya estaba live desde la sesión anterior pero la página nunca lo consumía. Tapado el gap de wire (`SharedItem.LibraryID` plumb end-to-end por SQL FTS5 → client decoder → `peerSearchHitWire`) para que el click navegue a la ruta `/peers/{peer}/libraries/{lib}/items/{id}` ya registrada. Frontend: `FederationSearchHit` types, `api.searchPeers`, `usePeersSearch` hook + queryKey, sección "From your peers" en `SearchResultsView` con `PeerResultCard` (badge de peer sobre el póster). i18n `search.peerSection` + `search.fromPeer` (en + es). OpenAPI spec drift fix. Tests: backend `go test ./... -count=1` verde · frontend 384/384 · tsc + build limpios.
@@ -1236,21 +1287,31 @@ Trabajo que **sube en la cola** porque la app TV lo necesita:
       **shipped 2026-05-04** (commits `5059191` + `888c20c`).
     - **Recently-Added on peers home rail** ✅ **shipped 2026-05-04**
       (commit `888c20c`).
-    - **`federation_progress` table + Continue Watching cross-peer**:
-      pendiente. Migración 028 + sqlc + endpoint progreso por peer +
-      integración player + endpoint listar + adapter en rail. ~3-4h.
-      Sin esto, ves un movie federado, lo pausas, mañana no recuperas
-      la posición.
+    - **`federation_progress` table + Continue Watching cross-peer** ✅
+      **shipped 2026-05-05** (commit `05c6b4a`). Migración 028 +
+      sqlc + 3 endpoints (`GET/POST /me/peers/{p}/items/{i}/progress`
+      y `GET /me/peers/continue-watching`) + `useProgressReporter`
+      con `peerId?` + Resume button en `PeerItemDetail` +
+      `PeerContinueWatchingRail` en Home.
+    - **Smoke real con dos servers paireados** ✅ **hecho 2026-05-05**
+      (sesión `claude/federation-progress-cross-peer`). End-to-end
+      con vídeo real (Juego de Ladrones (2018), 14 GB), Chrome MCP
+      pilotando dos pestañas en `localhost:8198`/`8199`. Pareados
+      via UI admin, share, Play, Resume @ 0:58, rail Continue
+      Watching visible. Bug de config descubierto y arreglado en
+      el camino (commit `013550c`).
+    - **Config bug `HUBPLAY_SERVER_BASE_URL` ignorado sin yaml** ✅
+      **fixed 2026-05-05** (commit `013550c`). `config.Load`
+      saltaba `applyEnvOverrides` cuando no había `hubplay.yaml`,
+      rompiendo deployments fresh-install que dependieran de env
+      vars (típico Docker compose). Tests reescritos.
     - **Subtítulos federados**: pendiente (~2h). Master.m3u8 federado
       no proxia tracks de subs.
-    - **Smoke real con dos servers paireados**: trabajo manual
-      pendiente. `docker-compose.federation-test.yml` existe, nunca
-      se ha probado el botón Play end-to-end con dos servers reales.
     - **`MaxConcurrentStreams` por peer**: hoy compiten contra el
       cap global `MaxReencodeSessions`. Pendiente.
-    - **Promover `peer_recent` a `HomeSection` configurable**: hoy
-      el rail vive fuera del layout-driven dispatch. Ampliar
-      `validSectionType` + UI en `HomeLayoutSettings`.
+    - **Promover `peer_recent` + `peer_continue_watching` a `HomeSection`
+      configurables**: hoy ambos rails viven fuera del layout-driven
+      dispatch. Ampliar `validSectionType` + UI en `HomeLayoutSettings`.
     - **Phase 6 — Live TV peering**: pendiente, no empezado.
     - **Phase 7 — Download to local + audit log UI**: pendiente.
 
