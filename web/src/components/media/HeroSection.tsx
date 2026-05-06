@@ -5,6 +5,11 @@ import type { MediaItem, Person } from "@/api/types";
 import { Button } from "@/components/common/Button";
 import { Badge } from "@/components/common/Badge";
 import { thumb } from "@/utils/imageUrl";
+import { HeroTrailer } from "./HeroTrailer";
+import { useUserPreference } from "@/api/hooks";
+import { TRAILERS_ENABLED_PREF_KEY } from "@/utils/playbackPrefs";
+import { ExternalIdRow, OverviewWithReadMore, StudioMark } from "./heroMeta";
+import { formatPremiereDate } from "@/utils/heroMeta";
 
 // Posters are small enough (≤340px tall) that a 720px-wide variant
 // covers 2x DPR comfortably — worth the bandwidth save. The hero
@@ -60,35 +65,11 @@ function findDirector(people: Person[] | undefined): string | null {
   return director?.name ?? null;
 }
 
-// External-ID button row — small icons that link out to the canonical
-// page on IMDb / TMDb / TVDb when the scanner persisted a provider id.
-// Order is fixed (IMDb first because it's the most-recognised in the
-// movie world) so users build muscle memory.
-const EXTERNAL_PROVIDERS: ReadonlyArray<{
-  key: string;
-  label: "openOnImdb" | "openOnTmdb" | "openOnTvdb";
-  href: (id: string) => string;
-  text: string;
-}> = [
-  {
-    key: "imdb",
-    label: "openOnImdb",
-    href: (id) => `https://www.imdb.com/title/${encodeURIComponent(id)}/`,
-    text: "IMDb",
-  },
-  {
-    key: "tmdb",
-    label: "openOnTmdb",
-    href: (id) => `https://www.themoviedb.org/movie/${encodeURIComponent(id)}`,
-    text: "TMDb",
-  },
-  {
-    key: "tvdb",
-    label: "openOnTvdb",
-    href: (id) => `https://thetvdb.com/?tab=series&id=${encodeURIComponent(id)}`,
-    text: "TVDb",
-  },
-];
+// EXTERNAL_PROVIDERS, ExternalIdRow, OverviewWithReadMore, StudioMark
+// and formatPremiereDate moved to ./heroMeta so SeriesHero can render
+// the same chips/markup without copy-pasting (any drift between the
+// two surfaces would be hard to spot — the bits are visually
+// identical even if the layout around them differs).
 
 function formatRating(rating: number): string {
   return rating.toFixed(1);
@@ -212,36 +193,13 @@ const HeroSection: FC<HeroSectionProps> = ({
   // Movies in Plex render the full premiere date ("7 sept 2012")
   // whereas episodes already do this elsewhere. Falls back to the
   // bare year when there's no premiere_date row, and to nothing when
-  // neither exists. Locale-aware via the active i18n language so
-  // Spanish UI shows "7 sept 2012" and English shows "Sep 7, 2012".
-  const movieReleaseDate = useMemo(() => {
-    if (item.type !== "movie") return null;
-    if (!item.premiere_date) return null;
-    const d = new Date(item.premiere_date);
-    if (Number.isNaN(d.getTime())) return null;
-    return d.toLocaleDateString(i18n.language, {
-      day: "numeric",
-      month: "short",
-      year: "numeric",
-    });
-  }, [item.type, item.premiere_date, i18n.language]);
-
-  const externalLinks = useMemo(() => {
-    if (!item.external_ids) return [];
-    return EXTERNAL_PROVIDERS.flatMap((p) => {
-      const id = item.external_ids?.[p.key];
-      return id ? [{ ...p, id }] : [];
-    });
-  }, [item.external_ids]);
-
-  // Overview clamp toggle — the description sits between the meta
-  // chips and the CTA row, and the design clamps to 3 lines so the
-  // hero stays focused on the play button. A "Read more" link reveals
-  // the full text in place; "Read less" collapses it back. Disabled
-  // when the overview obviously fits in 3 lines (≤240 chars is a
-  // pragmatic threshold — covers ~3 lines at hero width).
-  const [overviewExpanded, setOverviewExpanded] = useState(false);
-  const overviewClampable = (item.overview?.length ?? 0) > 240;
+  // neither exists. Series/seasons keep year-only because their air
+  // "premiere" is per-season; a single date misleads on a multi-year
+  // show.
+  const movieReleaseDate =
+    item.type === "movie"
+      ? formatPremiereDate(item.premiere_date, i18n.language)
+      : null;
 
   // Episodes and seasons carry limited visuals on their own (episodes
   // get a still, seasons get a poster, neither gets a backdrop). The
@@ -280,6 +238,20 @@ const HeroSection: FC<HeroSectionProps> = ({
   // page-wide aurora + publishes `--detail-tint` for hero hooks).
   // The hero just consumes that variable via the bottom-fade and
   // the image's mask — no per-hero palette state needed here.
+
+  // Trailer-on-hero: only movies opt-in here. Episodes have their
+  // own still and series/seasons go through SeriesHero which handles
+  // its own trailer. Tracked the same way as SeriesHero so the static
+  // backdrop fades out the moment the iframe reveals — keeps the two
+  // detail surfaces visually identical when both have a trailer
+  // attached.
+  const [trailerActive, setTrailerActive] = useState(false);
+  const [trailersEnabled] = useUserPreference<boolean>(
+    TRAILERS_ENABLED_PREF_KEY,
+    true,
+  );
+  const showTrailer = item.type === "movie" && !!item.trailer;
+
   return (
     <section
       className="relative overflow-hidden"
@@ -304,7 +276,14 @@ const HeroSection: FC<HeroSectionProps> = ({
             src={heroBackdropUrl}
             alt=""
             loading="eager"
-            className="absolute inset-y-0 right-0 h-full w-full sm:w-4/5 lg:w-2/3 object-cover"
+            className={[
+              "absolute inset-y-0 right-0 h-full w-full sm:w-4/5 lg:w-2/3 object-cover transition-opacity duration-700",
+              // Fade out when the trailer reveals (movies only) so
+              // the iframe and the static still don't fight for
+              // attention. 700ms matches HeroTrailer's own opacity
+              // transition so the swap reads as a single move.
+              trailerActive ? "opacity-0" : "opacity-100",
+            ].join(" ")}
             style={{
               objectPosition: "right top",
               // Two-axis fade composited via mask-composite:intersect.
@@ -329,6 +308,25 @@ const HeroSection: FC<HeroSectionProps> = ({
           />
         ) : (
           <div className="absolute inset-0 bg-gradient-to-br from-bg-elevated to-bg-card" />
+        )}
+
+        {/* Netflix-style trailer reveal — movies only. SeriesHero
+            renders its own copy for series/seasons; episodes have no
+            trailer field so this branch never fires for them. The
+            HeroTrailer component handles the load + reveal timers,
+            the embed URL (YouTube / Vimeo) and graceful dismissal —
+            when there's no trailer or the user opted out it renders
+            nothing. The reveal/dismiss callbacks coordinate with
+            `trailerActive` above so the static backdrop fades out
+            while the trailer is on screen. */}
+        {showTrailer && item.trailer && (
+          <HeroTrailer
+            siteKey={item.trailer.site}
+            videoKey={item.trailer.key}
+            userOptedOut={!trailersEnabled}
+            onReveal={() => setTrailerActive(true)}
+            onDismiss={() => setTrailerActive(false)}
+          />
         )}
 
         {/* Bottom-fade overlay removed — the image's own mask
@@ -396,7 +394,7 @@ const HeroSection: FC<HeroSectionProps> = ({
               {/* Tagline — italic line under the title, suppressed on
                   episodes. */}
               {!isEpisode && item.tagline && (
-                <p className="-mt-1 max-w-xl text-sm italic text-text-secondary/90 drop-shadow-md">
+                <p className="-mt-1 max-w-xl text-sm italic text-text-primary/80 drop-shadow-md">
                   {item.tagline}
                 </p>
               )}
@@ -409,12 +407,12 @@ const HeroSection: FC<HeroSectionProps> = ({
                   worth a single line) and series/seasons don't have
                   a single director attribution. */}
               {item.type === "movie" && director && (
-                <p className="text-sm font-medium text-text-secondary/90 drop-shadow-md">
+                <p className="text-sm font-medium text-text-primary/85 drop-shadow-md">
                   {t("itemDetail.directedBy", { name: director })}
                 </p>
               )}
 
-              <div className="flex flex-wrap items-center gap-2 text-sm text-text-secondary">
+              <div className="flex flex-wrap items-center gap-2 text-sm text-text-primary/85">
                 {/* Episodes: prefer the full air date — "12 Mar 2025"
                     reads more meaningfully than the bare year on the
                     per-episode page. Movies use the same full date
@@ -448,7 +446,7 @@ const HeroSection: FC<HeroSectionProps> = ({
                 {item.content_rating != null && <Badge>{item.content_rating}</Badge>}
 
                 {duration && (
-                  <span className="text-text-muted">{duration}</span>
+                  <span className="text-text-primary/80">{duration}</span>
                 )}
 
                 {item.genres?.slice(0, 3).map((genre) => (
@@ -456,71 +454,19 @@ const HeroSection: FC<HeroSectionProps> = ({
                 ))}
 
                 {/* Studio / network — soft attribution after the
-                    taxonomy badges, same pattern as SeriesHero. When
-                    the scanner persisted a brand-mark URL we render
-                    the image (Lucasfilm, HBO, Disney+ …); otherwise
-                    fall back to the studio text. The leading "·"
-                    only appears with the text fallback because the
-                    image already reads as a separate visual. */}
-                {item.studio_logo_url ? (
-                  <img
-                    src={item.studio_logo_url}
-                    alt={item.studio ?? ""}
-                    className="ml-1 h-5 w-auto max-w-[120px] object-contain opacity-80"
-                    loading="lazy"
-                  />
-                ) : item.studio ? (
-                  <span className="text-xs text-text-muted">· {item.studio}</span>
-                ) : null}
+                    taxonomy badges. Brand-mark image when present,
+                    text fallback otherwise — see ./heroMeta. */}
+                <StudioMark
+                  studio={item.studio}
+                  studioLogoUrl={item.studio_logo_url}
+                />
               </div>
 
-              {item.overview != null && (
-                <div className="max-w-2xl">
-                  <p
-                    className={`text-sm leading-relaxed text-text-secondary sm:text-[15px] ${
-                      overviewExpanded || !overviewClampable ? "" : "line-clamp-3"
-                    }`}
-                  >
-                    {item.overview}
-                  </p>
-                  {overviewClampable && (
-                    <button
-                      type="button"
-                      onClick={() => setOverviewExpanded((v) => !v)}
-                      className="mt-1 text-sm font-medium text-text-secondary transition-colors hover:text-text-primary cursor-pointer"
-                      aria-expanded={overviewExpanded}
-                    >
-                      {overviewExpanded
-                        ? t("itemDetail.readLess")
-                        : t("itemDetail.readMore")}
-                    </button>
-                  )}
-                </div>
-              )}
+              <OverviewWithReadMore overview={item.overview} />
 
-              {/* External-ID badges — small clickable chips that
-                  jump to the canonical IMDb / TMDb / TVDb page. The
-                  scanner only persists provider ids the metadata
-                  provider returned, so this row stays empty when no
-                  match was made (no broken links). target=_blank +
-                  rel=noopener so we don't leak referrer or window
-                  handle to the third party. */}
-              {externalLinks.length > 0 && (
-                <div className="flex flex-wrap items-center gap-2">
-                  {externalLinks.map((link) => (
-                    <a
-                      key={link.key}
-                      href={link.href(link.id)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      aria-label={t(`itemDetail.${link.label}`)}
-                      className="rounded-md border border-border/60 bg-bg-card/40 px-2 py-1 text-xs font-semibold text-text-secondary transition-colors hover:border-border hover:bg-bg-elevated hover:text-text-primary backdrop-blur-sm"
-                    >
-                      {link.text}
-                    </a>
-                  ))}
-                </div>
-              )}
+              {/* External-ID chips — IMDb / TMDb / TVDb. Empty row
+                  hides itself, so no surrounding gap when none. */}
+              <ExternalIdRow item={item} />
 
               <div className="flex items-center gap-3 pt-1">
                 <Button size="lg" onClick={onPlay}>

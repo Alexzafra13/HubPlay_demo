@@ -36,7 +36,11 @@ export default function MediaBrowse({ type }: MediaBrowseProps) {
   const [searchParams] = useSearchParams();
   const search = searchParams.get("q") ?? "";
 
-  const [sort, setSort] = useState<SortOption>("added");
+  // Default to alphabetical — matches the server default (sort_title ASC)
+  // so the user sees A→Z on landing without an extra round-trip when
+  // they change sort. "added" surfaces newest-first which is useful but
+  // belongs on Home rails, not the browse page.
+  const [sort, setSort] = useState<SortOption>("title");
   const [filters, setFilters] = useState<BrowseFiltersState>(emptyFilters);
   const [filtersOpen, setFiltersOpen] = useState(false);
 

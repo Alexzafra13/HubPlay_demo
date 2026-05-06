@@ -241,6 +241,54 @@ func (h *LibraryHandler) Items(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]any{"data": resp})
 }
 
+// AllItems lists items across every library, paginated and sorted.
+// Mirrors `Items` but without the LibraryID scope so the global
+// browse pages (`/movies`, `/series`) can fetch the full catalogue
+// without having to fan out per library on the client. Same response
+// shape as `Items` — keyset cursor + offset/total — so the frontend
+// `useInfiniteItems` hook works against either path.
+//
+// Without this route the same pages used to call `/items/latest`
+// which is capped at 50 results and doesn't paginate, surfacing as a
+// truncated grid.
+func (h *LibraryHandler) AllItems(w http.ResponseWriter, r *http.Request) {
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	sortBy := r.URL.Query().Get("sort_by")
+	sortOrder := r.URL.Query().Get("sort_order")
+	itemType := r.URL.Query().Get("type")
+	parentID := r.URL.Query().Get("parent_id")
+	cursor := r.URL.Query().Get("cursor")
+
+	items, total, err := h.lib.ListItems(r.Context(), db.ItemFilter{
+		ParentID:  parentID,
+		Type:      itemType,
+		Limit:     limit,
+		Offset:    offset,
+		SortBy:    sortBy,
+		SortOrder: sortOrder,
+		Cursor:    cursor,
+	})
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+
+	data := h.enrichItemSummaries(r, items)
+
+	resp := map[string]any{
+		"items":  data,
+		"total":  total,
+		"offset": offset,
+		"limit":  limit,
+	}
+	if len(items) > 0 && len(items) == limit {
+		resp["next_cursor"] = items[len(items)-1].ID
+	}
+
+	respondJSON(w, http.StatusOK, map[string]any{"data": resp})
+}
+
 func (h *LibraryHandler) LatestItems(w http.ResponseWriter, r *http.Request) {
 	libraryID := r.URL.Query().Get("library_id")
 	itemType := r.URL.Query().Get("type")

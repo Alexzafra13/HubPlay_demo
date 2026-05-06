@@ -341,6 +341,11 @@
       "savedHint": "Los cambios se guardan automáticamente.",
       "reset": "Restaurar valores por defecto"
     },
+    "playback": {
+      "title": "Reproducción",
+      "trailersTitle": "Reproducir avances automáticamente en el detalle",
+      "trailersDescription": "Reproduce un avance silenciado sobre la imagen de fondo unos segundos después de abrir el detalle de una película o serie. Desactívalo para mantener solo la imagen estática."
+    },
     "account": "Cuenta",
     "username": "Usuario",
     "displayName": "Nombre para mostrar",

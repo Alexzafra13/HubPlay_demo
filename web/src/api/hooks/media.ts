@@ -80,6 +80,12 @@ export function useInfiniteItems(params?: {
     queryKey: ["items-infinite", params] as const,
     queryFn: ({ pageParam }) =>
       api.getItems({
+        // Server-side sort defaults to sort_title ASC. Pass an explicit
+        // value when the caller asked for a different one — keeps the
+        // default behaviour alphabetical (movies/series browse) without
+        // forcing every callsite to repeat it.
+        sort_by: "sort_title",
+        sort_order: "asc",
         ...params,
         offset: (pageParam as number) * PAGE_SIZE,
         limit: PAGE_SIZE,

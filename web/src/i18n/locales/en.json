@@ -341,6 +341,11 @@
       "savedHint": "Changes save automatically.",
       "reset": "Reset to defaults"
     },
+    "playback": {
+      "title": "Playback",
+      "trailersTitle": "Auto-play trailers in detail view",
+      "trailersDescription": "Plays a muted trailer over the backdrop a few seconds after a movie or series detail page opens. Disable to keep the static artwork only."
+    },
     "account": "Account",
     "username": "Username",
     "displayName": "Display Name",

@@ -484,6 +484,30 @@ paths:
               schema:
                 $ref: "#/components/schemas/PaginatedItemsEnvelope"
 
+  /items:
+    get:
+      tags: [browse]
+      summary: Paginated items across every library, with filters
+      description: |
+        Same payload shape as `/libraries/{id}/items` but spans every library.
+        Used by the global browse pages (`/movies`, `/series`) which don't
+        scope by library.
+      parameters:
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+        - { name: limit, in: query, schema: { type: integer, default: 50, maximum: 200 } }
+        - { name: sort_by, in: query, schema: { type: string, enum: [sort_title, added_at, year] } }
+        - { name: sort_order, in: query, schema: { type: string, enum: [asc, desc] } }
+        - { name: type, in: query, schema: { type: string, enum: [movie, series, episode] } }
+        - { name: parent_id, in: query, schema: { type: string } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: Items
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedItemsEnvelope"
+
   /items/latest:
     get:
       tags: [browse]
