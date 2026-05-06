@@ -48,6 +48,7 @@ type Dependencies struct {
 	Chapters       *db.ChapterRepository
 	People         *db.PeopleRepository
 	Studios        *db.StudioRepository
+	Collections    *db.CollectionRepository
 	UserPreferences *db.UserPreferenceRepository
 	Home            *db.HomeRepository
 	Providers      *provider.Manager
@@ -539,7 +540,7 @@ func NewRouter(deps Dependencies) http.Handler {
 				// layout clustered (one tree the operator can backup,
 				// rsync, or `du` to size the cache).
 				trickplayDir := filepath.Join(filepath.Dir(deps.Config.Database.Path), "images", "trickplay")
-				itemHandler := handlers.NewItemHandler(deps.Libraries, deps.Images, deps.Metadata, deps.UserData, deps.Chapters, deps.ExternalIDs, deps.People, deps.Providers, trickplayDir, deps.Logger)
+				itemHandler := handlers.NewItemHandler(deps.Libraries, deps.Images, deps.Metadata, deps.UserData, deps.Chapters, deps.ExternalIDs, deps.People, deps.Collections, deps.Providers, trickplayDir, deps.Logger)
 
 				// Libraries
 				r.Get("/libraries", libHandler.List)
@@ -743,6 +744,17 @@ func NewRouter(deps Dependencies) http.Handler {
 					studioHandler := handlers.NewStudioHandler(deps.Studios, deps.Logger)
 					r.Get("/studios", studioHandler.List)
 					r.Get("/studios/{slug}", studioHandler.Get)
+				}
+
+				// Movie collections (Jellyfin-style sagas). Backed by
+				// TMDb's belongs_to_collection record on each movie;
+				// /collections/{id} renders the saga's members in
+				// release order under a hero pulled from the
+				// collection's own poster + backdrop.
+				if deps.Collections != nil {
+					collectionHandler := handlers.NewCollectionHandler(deps.Collections, deps.Logger)
+					r.Get("/collections", collectionHandler.List)
+					r.Get("/collections/{id}", collectionHandler.Get)
 				}
 
 				// Admin: batch refresh images for a library

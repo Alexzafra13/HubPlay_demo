@@ -105,7 +105,7 @@ func newItemTestEnv(t *testing.T) *itemTestEnv {
 	// Recommendations endpoint is opt-in; tests that need it pass a
 	// fakeProviderManager instance instead of nil. Default `nil` keeps
 	// the existing assertions on Get/Search/Children unaffected.
-	env.handler = NewItemHandler(env.svc, env.images, env.meta, env.userData, env.chapters, env.extIDs, env.people, nil, "", testutil.NopLogger())
+	env.handler = NewItemHandler(env.svc, env.images, env.meta, env.userData, env.chapters, env.extIDs, env.people, nil, nil, "", testutil.NopLogger())
 
 	r := chi.NewRouter()
 	r.Route("/api/v1/items", func(r chi.Router) {

@@ -129,6 +129,13 @@ type Querier interface {
 	DeleteUserData(ctx context.Context, arg DeleteUserDataParams) error
 	GetChannelByID(ctx context.Context, id string) (GetChannelByIDRow, error)
 	GetChannelOverride(ctx context.Context, arg GetChannelOverrideParams) (ChannelOverride, error)
+	// Movie collections (sagas).
+	//
+	// Schema: migrations/sqlite/033_collections.sql.
+	// Keyed by tmdb_id (UNIQUE) so the same X-Men / MCU / Toy Story
+	// saga collapses across every member movie regardless of name drift.
+	GetCollectionByID(ctx context.Context, id string) (Collection, error)
+	GetCollectionByTMDBID(ctx context.Context, tmdbID int64) (Collection, error)
 	GetDeviceCodeByDeviceCode(ctx context.Context, deviceCode string) (DeviceCode, error)
 	GetDeviceCodeByUserCode(ctx context.Context, userCode string) (DeviceCode, error)
 	GetExternalIDByProvider(ctx context.Context, arg GetExternalIDByProviderParams) (ExternalID, error)

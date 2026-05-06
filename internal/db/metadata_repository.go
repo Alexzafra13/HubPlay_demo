@@ -32,6 +32,12 @@ type Metadata struct {
 	// it with a single `<img src>` and falls back to the studio text
 	// when empty (older studios with no TMDb logo, or failed match).
 	StudioLogoURL string
+	// CollectionID is the FK to the saga (TMDb belongs_to_collection)
+	// this movie belongs to — populated at scan time when the
+	// provider returned one. Empty / NULL means "no saga"; the
+	// detail page renders the optional "Part of: X" link only when
+	// non-empty.
+	CollectionID string
 }
 
 type MetadataRepository struct {
@@ -166,5 +172,6 @@ func metadataFromRow(r sqlc.GetMetadataByItemIDRow) Metadata {
 		TrailerKey:    r.TrailerKey,
 		TrailerSite:   r.TrailerSite,
 		StudioLogoURL: r.StudioLogoUrl,
+		CollectionID:  r.CollectionID,
 	}
 }

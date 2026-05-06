@@ -67,6 +67,16 @@ type MetadataResult struct {
 	// 0 when the provider didn't return one (legacy / non-TMDb path);
 	// the scanner falls back to the slug-based dedupe in that case.
 	StudioTMDBID int64
+	// Collection is the movie saga (Jellyfin-style) the title belongs
+	// to — TMDb's `belongs_to_collection` record on /movie/{id}.
+	// Movies-only; populating any of these fields turns into a row
+	// in the `collections` table linked from the item's metadata.
+	// Zero CollectionTMDBID means "no saga, leave the link NULL".
+	CollectionTMDBID    int64
+	CollectionName      string
+	CollectionOverview  string
+	CollectionPoster    string // absolute URL
+	CollectionBackdrop  string // absolute URL
 }
 
 // Person represents a cast/crew member.

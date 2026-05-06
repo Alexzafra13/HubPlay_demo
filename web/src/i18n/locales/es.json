@@ -226,6 +226,14 @@
     "peerSection": "De tus pares",
     "fromPeer": "De {{name}}"
   },
+  "collectionDetail": {
+    "notFoundTitle": "Coleccion no encontrada",
+    "notFoundDescription": "Esta saga no existe o no tiene contenido en tu biblioteca.",
+    "noItems": "Sin peliculas de esta saga en tu biblioteca.",
+    "titlesCount_one": "{{count}} pelicula en tu biblioteca",
+    "titlesCount_other": "{{count}} peliculas en tu biblioteca",
+    "partOf": "Parte de"
+  },
   "studioDetail": {
     "notFoundTitle": "Estudio no encontrado",
     "notFoundDescription": "Este estudio no existe o no tiene contenido en tu biblioteca todavia.",

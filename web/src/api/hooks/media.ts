@@ -205,6 +205,36 @@ export function useStudio(
   });
 }
 
+// Movie-collection (saga) browse + detail. Same 5-min cache so
+// jumping between a movie page and its parent collection feels
+// instant. The detail endpoint accepts the canonical
+// "collection:<tmdb_id>" id directly so no slug encoding is needed.
+export function useCollections(
+  options?: Partial<
+    UseQueryOptions<{ collections: import("@/api/types").CollectionListEntry[] }>
+  >,
+) {
+  return useQuery<{ collections: import("@/api/types").CollectionListEntry[] }>({
+    queryKey: queryKeys.collections,
+    queryFn: () => api.getCollections(),
+    staleTime: 5 * 60_000,
+    ...options,
+  });
+}
+
+export function useCollection(
+  id: string,
+  options?: Partial<UseQueryOptions<import("@/api/types").CollectionDetail>>,
+) {
+  return useQuery<import("@/api/types").CollectionDetail>({
+    queryKey: queryKeys.collection(id),
+    queryFn: () => api.getCollection(id),
+    enabled: !!id,
+    staleTime: 5 * 60_000,
+    ...options,
+  });
+}
+
 export function useSearch(
   q: string,
   options?: Partial<UseQueryOptions<MediaItem[]>>,

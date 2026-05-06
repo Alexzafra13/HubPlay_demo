@@ -72,6 +72,16 @@ type Chapter struct {
 	ImagePath  sql.NullString `json:"image_path"`
 }
 
+type Collection struct {
+	ID          string    `json:"id"`
+	TmdbID      int64     `json:"tmdb_id"`
+	Name        string    `json:"name"`
+	Overview    string    `json:"overview"`
+	PosterUrl   string    `json:"poster_url"`
+	BackdropUrl string    `json:"backdrop_url"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
 type DeviceCode struct {
 	DeviceCode   string         `json:"device_code"`
 	UserCode     string         `json:"user_code"`
@@ -348,6 +358,7 @@ type Metadata struct {
 	TrailerSite   string         `json:"trailer_site"`
 	StudioLogoUrl string         `json:"studio_logo_url"`
 	StudioID      sql.NullString `json:"studio_id"`
+	CollectionID  sql.NullString `json:"collection_id"`
 }
 
 type Person struct {

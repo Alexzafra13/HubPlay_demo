@@ -23,6 +23,8 @@ export const queryKeys = {
   person: (id: string) => ["people", id] as const,
   studios: ["studios"] as const,
   studio: (slug: string) => ["studios", slug] as const,
+  collections: ["collections"] as const,
+  collection: (id: string) => ["collections", id] as const,
   search: (q: string) => ["search", q] as const,
   latestItems: (libraryId?: string) => ["items", "latest", libraryId] as const,
   continueWatching: ["continue-watching"] as const,

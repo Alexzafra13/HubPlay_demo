@@ -19,6 +19,7 @@ const Series = lazyWithRetry(() => import("@/pages/Series"));
 const ItemDetail = lazyWithRetry(() => import("@/pages/ItemDetail"));
 const PersonDetail = lazyWithRetry(() => import("@/pages/PersonDetail"));
 const StudioDetail = lazyWithRetry(() => import("@/pages/StudioDetail"));
+const CollectionDetail = lazyWithRetry(() => import("@/pages/CollectionDetail"));
 const Search = lazyWithRetry(() => import("@/pages/Search"));
 const LiveTV = lazyWithRetry(() => import("@/pages/LiveTV"));
 const Settings = lazyWithRetry(() => import("@/pages/Settings"));
@@ -123,6 +124,7 @@ export function App() {
             <Route path="items/:id" element={<ItemDetail />} />
             <Route path="people/:id" element={<PersonDetail />} />
             <Route path="studios/:slug" element={<StudioDetail />} />
+            <Route path="collections/:id" element={<CollectionDetail />} />
             <Route path="search" element={<Search />} />
             <Route path="live-tv" element={<LiveTV />} />
             <Route path="peers" element={<PeersPage />} />

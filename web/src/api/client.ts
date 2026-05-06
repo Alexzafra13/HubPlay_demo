@@ -512,6 +512,28 @@ export class ApiClient {
     );
   }
 
+  // Movie collections (Jellyfin-style sagas). Detail endpoint resolves
+  // the canonical "collection:<tmdb_id>" id directly — no slug
+  // encoding needed (the id is colon-separated lowercase ASCII so
+  // it's URL-safe out of the box).
+  async getCollections(): Promise<{
+    collections: import("./types").CollectionListEntry[];
+  }> {
+    return this.request<{ collections: import("./types").CollectionListEntry[] }>(
+      "GET",
+      "/collections",
+    );
+  }
+
+  async getCollection(
+    id: string,
+  ): Promise<import("./types").CollectionDetail> {
+    return this.request<import("./types").CollectionDetail>(
+      "GET",
+      `/collections/${encodeURIComponent(id)}`,
+    );
+  }
+
   // Backend returns { data: MediaItem[], total: N } and our `request`
   // helper auto-unwraps the `data` envelope, so the actual resolved
   // value is the array — not a PaginatedResponse. Earlier callers

@@ -168,6 +168,25 @@ func (t *TMDbProvider) GetMetadata(ctx context.Context, externalID string, itemT
 		}
 	}
 
+	// Belongs-to-collection (Jellyfin-style movie saga). TMDb only
+	// surfaces this on /movie/{id} (TV uses parent series instead),
+	// so the field is optional in the provider response.
+	if detail.BelongsToCollection != nil && detail.BelongsToCollection.ID > 0 {
+		result.CollectionTMDBID = detail.BelongsToCollection.ID
+		result.CollectionName = detail.BelongsToCollection.Name
+		if p := detail.BelongsToCollection.PosterPath; p != "" {
+			result.CollectionPoster = tmdbImageURL + "w500" + p
+		}
+		if b := detail.BelongsToCollection.BackdropPath; b != "" {
+			result.CollectionBackdrop = tmdbImageURL + "w1280" + b
+		}
+		// CollectionOverview is left empty here — the /movie/{id}
+		// payload doesn't carry the collection's own overview, only
+		// its name + artwork. A future "fetch /collection/{id}"
+		// pass can fill it in if we want richer headers; not blocking
+		// for the basic feature.
+	}
+
 	// Genres
 	for _, g := range detail.Genres {
 		result.Genres = append(result.Genres, g.Name)
@@ -630,6 +649,12 @@ type tmdbDetail struct {
 		IMDBID string `json:"imdb_id"`
 		TVDBID int    `json:"tvdb_id"`
 	} `json:"external_ids"`
+	BelongsToCollection *struct {
+		ID           int64  `json:"id"`
+		Name         string `json:"name"`
+		PosterPath   string `json:"poster_path"`
+		BackdropPath string `json:"backdrop_path"`
+	} `json:"belongs_to_collection"`
 	Videos struct {
 		Results []tmdbVideo `json:"results"`
 	} `json:"videos"`

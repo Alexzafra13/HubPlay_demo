@@ -27,6 +27,10 @@ type ItemHandler struct {
 	chapters    ChapterRepository
 	externalIDs ExternalIDsRepository
 	people      PeopleRepoForItems
+	// collections powers the "Part of: X" affordance on a movie's
+	// detail page. nil-safe — handler skips the field entirely when
+	// the dep wasn't wired, matching the legacy shape.
+	collections CollectionRepoForItems
 	// providers powers the "more like this" rail by calling the
 	// metadata provider's recommendations endpoint (TMDb today). nil
 	// disables the feature — the endpoint returns 503 in that case.
@@ -43,11 +47,12 @@ type ItemHandler struct {
 	logger         *slog.Logger
 }
 
-func NewItemHandler(lib LibraryService, images ImageRepository, metadata MetadataRepository, userData UserDataRepository, chapters ChapterRepository, externalIDs ExternalIDsRepository, people PeopleRepoForItems, providers ProviderManager, trickplayDir string, logger *slog.Logger) *ItemHandler {
+func NewItemHandler(lib LibraryService, images ImageRepository, metadata MetadataRepository, userData UserDataRepository, chapters ChapterRepository, externalIDs ExternalIDsRepository, people PeopleRepoForItems, collections CollectionRepoForItems, providers ProviderManager, trickplayDir string, logger *slog.Logger) *ItemHandler {
 	return &ItemHandler{
 		lib: lib, images: images, metadata: metadata, userData: userData,
 		chapters: chapters, externalIDs: externalIDs, people: people,
-		providers: providers,
+		collections: collections,
+		providers:   providers,
 		trickplayDir: trickplayDir, logger: logger,
 	}
 }
@@ -229,6 +234,20 @@ func (h *ItemHandler) attachMetadata(ctx context.Context, resp map[string]any, i
 		resp["trailer"] = map[string]any{
 			"key":  meta.TrailerKey,
 			"site": meta.TrailerSite,
+		}
+	}
+	// Movie-saga link (Jellyfin-style "Movie Collection"). Only the
+	// id + name go on the wire; the frontend renders "Part of: X"
+	// and links to /collections/{id}, which fetches the full hero
+	// (poster, backdrop, member list) on its own. Skip the lookup
+	// entirely when no collections dep is wired or the metadata
+	// row has no link.
+	if h.collections != nil && meta.CollectionID != "" {
+		if col, cErr := h.collections.GetByID(ctx, meta.CollectionID); cErr == nil && col != nil {
+			resp["collection"] = map[string]any{
+				"id":   col.ID,
+				"name": col.Name,
+			}
 		}
 	}
 }

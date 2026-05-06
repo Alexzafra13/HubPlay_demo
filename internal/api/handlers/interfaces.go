@@ -227,6 +227,14 @@ type PeopleRepoForItems interface {
 	ListByItem(ctx context.Context, itemID string) ([]*db.ItemPersonCredit, error)
 }
 
+// CollectionRepoForItems is the per-collection lookup used by the
+// items handler to surface the "Part of: X" affordance on a movie's
+// detail page. nil-safe at the handler level so deployments without
+// the collections feature wired keep returning the same shape.
+type CollectionRepoForItems interface {
+	GetByID(ctx context.Context, id string) (*db.Collection, error)
+}
+
 // ChapterRepository defines chapter data access needed by handlers.
 // Optional dep: when nil, the item-detail handler simply omits the
 // `chapters` field — older test environments and bare deployments

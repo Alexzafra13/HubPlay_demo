@@ -71,6 +71,7 @@ type Scanner struct {
 	people      *db.PeopleRepository
 	itemValues  *db.ItemValueRepository
 	studios     *db.StudioRepository
+	collections *db.CollectionRepository
 	providers   providerFetcher
 	prober      probe.Prober
 	bus         *event.Bus
@@ -89,6 +90,7 @@ func New(
 	people *db.PeopleRepository,
 	itemValues *db.ItemValueRepository,
 	studios *db.StudioRepository,
+	collections *db.CollectionRepository,
 	providers *provider.Manager,
 	prober probe.Prober,
 	bus *event.Bus,
@@ -113,6 +115,7 @@ func New(
 		people:      people,
 		itemValues:  itemValues,
 		studios:     studios,
+		collections: collections,
 		providers:   pf,
 		prober:      prober,
 		bus:         bus,
@@ -783,6 +786,26 @@ func (s *Scanner) enrichMetadata(ctx context.Context, item *db.Item) {
 			s.logger.Warn("failed to ensure studio", "id", item.ID, "studio", meta.Studio, "error", sErr)
 		} else if err := s.studios.SetItemStudio(ctx, item.ID, studioID); err != nil {
 			s.logger.Warn("failed to link item to studio", "id", item.ID, "studio_id", studioID, "error", err)
+		}
+	}
+
+	// Link this movie to its TMDb collection (saga) so /collections/{id}
+	// can render the X-Men / MCU / Toy Story page Jellyfin-style. TV
+	// items never carry belongs_to_collection (TMDb scope is movies);
+	// for those CollectionTMDBID stays 0 and the link stays NULL.
+	if s.collections != nil {
+		collectionID, cErr := s.collections.EnsureCollection(
+			ctx,
+			meta.CollectionTMDBID,
+			meta.CollectionName,
+			meta.CollectionOverview,
+			meta.CollectionPoster,
+			meta.CollectionBackdrop,
+		)
+		if cErr != nil {
+			s.logger.Warn("failed to ensure collection", "id", item.ID, "collection", meta.CollectionName, "error", cErr)
+		} else if err := s.collections.SetItemCollection(ctx, item.ID, collectionID); err != nil {
+			s.logger.Warn("failed to link item to collection", "id", item.ID, "collection_id", collectionID, "error", err)
 		}
 	}
 
