@@ -79,6 +79,10 @@ export default function MediaBrowse({ type }: MediaBrowseProps) {
   const sort = parseSort(searchParams.get("sort"));
   const filters = useMemo(() => readFiltersFromURL(searchParams), [searchParams]);
   const filtersOpen = searchParams.get("filters_open") === "1";
+  // Optional library scope from the URL — the topbar dropdown links
+  // here as `/movies?library_id=<id>` / `/series?library_id=<id>`
+  // when the user picks a specific library to browse.
+  const libraryId = searchParams.get("library_id") ?? undefined;
 
   // All filtering is server-side now: the page used to filter on the
   // client which silently broke once /items was paginated to 40
@@ -89,6 +93,7 @@ export default function MediaBrowse({ type }: MediaBrowseProps) {
   const { data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } =
     useInfiniteItems({
       type,
+      library_id: libraryId,
       sort_by,
       sort_order,
       q: search.trim() || undefined,

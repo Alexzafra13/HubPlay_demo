@@ -176,7 +176,30 @@ export function LibraryCard({
                   !scanLibrary.variables?.refreshMetadata
                 }
                 disabled={lib.scan_status === "scanning"}
-                onClick={() => scanLibrary.mutate({ id: lib.id })}
+                onClick={() =>
+                  scanLibrary.mutate(
+                    { id: lib.id },
+                    {
+                      onSuccess: () =>
+                        onShowMessage({
+                          type: "success",
+                          text: t("admin.libraries.scanStarted", {
+                            defaultValue:
+                              "Escaneo iniciado. La biblioteca se actualizará en segundo plano.",
+                          }),
+                          libId: lib.id,
+                        }),
+                      onError: () =>
+                        onShowMessage({
+                          type: "error",
+                          text: t("admin.libraries.scanFailed", {
+                            defaultValue: "No se pudo iniciar el escaneo.",
+                          }),
+                          libId: lib.id,
+                        }),
+                    },
+                  )
+                }
               >
                 {t("admin.libraries.scan")}
               </Button>

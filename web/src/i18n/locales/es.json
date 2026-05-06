@@ -61,6 +61,10 @@
     "collections": "Colecciones",
     "shared": "Compartidas contigo",
     "favorites": "Canales favoritos",
+    "seeAll": {
+      "collections": "Ver todas las colecciones",
+      "favorites": "Ver todos los favoritos"
+    },
     "empty": {
       "movies": "Aun no hay bibliotecas ni colecciones.",
       "series": "Aun no hay bibliotecas.",
@@ -290,6 +294,11 @@
     "titlesCount_one": "{{count}} pelicula en tu biblioteca",
     "titlesCount_other": "{{count}} peliculas en tu biblioteca",
     "partOf": "Parte de"
+  },
+  "collections": {
+    "title": "Colecciones",
+    "emptyTitle": "No hay colecciones",
+    "emptyDescription": "Cuando escanees pelis con metadatos de TMDb, las sagas (Star Wars, MCU, ...) apareceran aqui automaticamente."
   },
   "studioDetail": {
     "notFoundTitle": "Estudio no encontrado",
@@ -578,6 +587,8 @@
       "scanStatus": "Estado de escaneo",
       "actions": "Acciones",
       "scan": "Escanear",
+      "scanStarted": "Escaneo iniciado. La biblioteca se actualizara en segundo plano.",
+      "scanFailed": "No se pudo iniciar el escaneo.",
       "refreshMetadata": "Actualizar metadatos",
       "refreshMetadataTooltip": "Volver a obtener metadatos e imagenes de los proveedores",
       "refreshImages": "Actualizar imagenes",

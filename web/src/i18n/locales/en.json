@@ -61,6 +61,10 @@
     "collections": "Collections",
     "shared": "Shared with you",
     "favorites": "Favorite channels",
+    "seeAll": {
+      "collections": "View all collections",
+      "favorites": "View all favorites"
+    },
     "empty": {
       "movies": "No libraries or collections yet.",
       "series": "No libraries yet.",
@@ -290,6 +294,11 @@
     "titlesCount_one": "{{count}} movie in your library",
     "titlesCount_other": "{{count}} movies in your library",
     "partOf": "Part of"
+  },
+  "collections": {
+    "title": "Collections",
+    "emptyTitle": "No collections yet",
+    "emptyDescription": "When you scan movies with TMDb metadata, sagas (Star Wars, MCU, ...) will appear here automatically."
   },
   "studioDetail": {
     "notFoundTitle": "Studio not found",
@@ -578,6 +587,8 @@
       "scanStatus": "Scan Status",
       "actions": "Actions",
       "scan": "Scan",
+      "scanStarted": "Scan started. The library will update in the background.",
+      "scanFailed": "Couldn't start the scan.",
       "refreshMetadata": "Refresh Metadata",
       "refreshMetadataTooltip": "Re-fetch metadata and images from providers",
       "refreshImages": "Refresh Images",
