@@ -661,19 +661,36 @@ func (h *ItemHandler) Children(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ItemHandler) Search(w http.ResponseWriter, r *http.Request) {
-	query := r.URL.Query().Get("q")
+	q := r.URL.Query()
+	query := q.Get("q")
 	if query == "" {
 		respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "query parameter 'q' is required")
 		return
 	}
 
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	libraryID := r.URL.Query().Get("library_id")
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	offset, _ := strconv.Atoi(q.Get("offset"))
+	libraryID := q.Get("library_id")
+	itemType := q.Get("type")
+	// MediaBrowse search joins the same filter surface as its grid:
+	// when the user has genre/year/rating active, hitting `/items/search`
+	// must respect them too — otherwise typing in the topbar silently
+	// undoes the selection. Global SearchBar passes none of these.
+	genre := q.Get("genre")
+	yearFrom, _ := strconv.Atoi(q.Get("year_from"))
+	yearTo, _ := strconv.Atoi(q.Get("year_to"))
+	minRating, _ := strconv.ParseFloat(q.Get("min_rating"), 64)
 
 	items, total, err := h.lib.ListItems(r.Context(), db.ItemFilter{
 		LibraryID: libraryID,
+		Type:      itemType,
 		Query:     query,
+		Genre:     genre,
+		YearFrom:  yearFrom,
+		YearTo:    yearTo,
+		MinRating: minRating,
 		Limit:     limit,
+		Offset:    offset,
 	})
 	if err != nil {
 		handleServiceError(w, r, err)

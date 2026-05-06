@@ -209,25 +209,32 @@ interface StudioMarkProps {
  * resolved server-side); otherwise falls back to the studio name as
  * dim text — older studios with no TMDb logo still get attribution.
  *
- * The image is wrapped in a translucent white pill: TMDb logos come
- * with transparent backgrounds and arbitrary foreground colour (Marvel
- * black, Lucasfilm sometimes white, Disney blue, Pixar yellow…). On a
- * dark hero background that meant black logos were near-invisible.
- * The pill gives every logo a consistent, contrasting backdrop —
- * reads like a "credit card" lifted off the artwork.
+ * The pill gets a **fixed footprint** so every studio reads with the
+ * same visual weight regardless of the underlying logo's aspect ratio.
+ * TMDb's `production_companies[].logo_path` ships logos with wildly
+ * different dimensions: square shields (Warner Bros, Disney) used to
+ * render as tiny dots while horizontal pillboxes (Marvel Studios,
+ * Pixar) ballooned to 3× the size. The fixed pill + centred image with
+ * vertical breathing room (max-h smaller than the pill height) makes
+ * both look like the same "credits card" lifted off the artwork.
+ *
+ * The translucent white background also fixes a TMDb foreground-colour
+ * issue: their logos arrive with arbitrary fill (Marvel black,
+ * Lucasfilm sometimes white, Disney blue, Pixar yellow). On the dark
+ * hero a black logo was near-invisible without the white pill.
  */
 export function StudioMark({ studio, studioLogoUrl }: StudioMarkProps) {
   if (studioLogoUrl) {
     return (
       <span
-        className="ml-1 inline-flex items-center rounded-md bg-white/95 px-2 py-1 shadow-sm shadow-black/30"
+        className="ml-1 inline-flex h-8 w-[112px] items-center justify-center rounded-md bg-white/95 px-2 shadow-sm shadow-black/30"
         aria-label={studio}
         title={studio}
       >
         <img
           src={studioLogoUrl}
           alt={studio ?? ""}
-          className="h-5 w-auto max-w-[140px] object-contain sm:h-6"
+          className="max-h-5 max-w-full object-contain"
           loading="lazy"
         />
       </span>

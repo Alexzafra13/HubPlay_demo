@@ -41,6 +41,10 @@ type ItemFilter struct {
 	ParentID  string // filter by parent (e.g., episodes of a season)
 	Type      string // filter by type
 	Query     string // FTS search
+	Genre     string // genre name (case-insensitive); resolved against item_values
+	YearFrom  int    // inclusive lower year bound; 0 disables
+	YearTo    int    // inclusive upper year bound; 0 disables
+	MinRating float64 // inclusive lower community_rating bound; 0 disables
 	Limit     int
 	Offset    int
 	SortBy    string // sort_title, added_at, year
@@ -155,6 +159,29 @@ func (r *ItemRepository) List(ctx context.Context, filter ItemFilter) ([]*Item, 
 	if filter.Query != "" {
 		where += " AND rowid IN (SELECT rowid FROM items_fts WHERE items_fts MATCH ?)"
 		args = append(args, filter.Query+"*")
+	}
+
+	// Normalized genre lookup: the synthetic value id ("genre:<lower>")
+	// lets us filter with a single equality + indexed map join, no
+	// JSON scan over `metadata.genres_json`.
+	if filter.Genre != "" {
+		where += " AND id IN (SELECT item_id FROM item_value_map WHERE value_id = ?)"
+		args = append(args, GenreValueID(filter.Genre))
+	}
+	// Year range — items without a year (year IS NULL) bypass these
+	// constraints intentionally, matching the previous client-side
+	// behaviour where unrated/unyear'd items don't get hidden.
+	if filter.YearFrom > 0 {
+		where += " AND year IS NOT NULL AND year >= ?"
+		args = append(args, filter.YearFrom)
+	}
+	if filter.YearTo > 0 {
+		where += " AND year IS NOT NULL AND year <= ?"
+		args = append(args, filter.YearTo)
+	}
+	if filter.MinRating > 0 {
+		where += " AND community_rating IS NOT NULL AND community_rating >= ?"
+		args = append(args, filter.MinRating)
 	}
 
 	var total int

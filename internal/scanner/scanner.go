@@ -69,6 +69,7 @@ type Scanner struct {
 	images      *db.ImageRepository
 	chapters    *db.ChapterRepository
 	people      *db.PeopleRepository
+	itemValues  *db.ItemValueRepository
 	providers   providerFetcher
 	prober      probe.Prober
 	bus         *event.Bus
@@ -85,6 +86,7 @@ func New(
 	images *db.ImageRepository,
 	chapters *db.ChapterRepository,
 	people *db.PeopleRepository,
+	itemValues *db.ItemValueRepository,
 	providers *provider.Manager,
 	prober probe.Prober,
 	bus *event.Bus,
@@ -107,6 +109,7 @@ func New(
 		images:      images,
 		chapters:    chapters,
 		people:      people,
+		itemValues:  itemValues,
 		providers:   pf,
 		prober:      prober,
 		bus:         bus,
@@ -750,6 +753,17 @@ func (s *Scanner) enrichMetadata(ctx context.Context, item *db.Item) {
 		StudioLogoURL: meta.StudioLogoURL,
 	}); err != nil {
 		s.logger.Warn("failed to store metadata", "id", item.ID, "error", err)
+	}
+
+	// Mirror genres into the normalized tag store so the /movies and
+	// /series filter query can find matches with an indexed lookup
+	// instead of scanning every metadata row's JSON. Replace-semantics
+	// means a TMDb refresh that drops a genre also drops the chip from
+	// the filter — readers see the same set as `genres_json`.
+	if s.itemValues != nil {
+		if err := s.itemValues.SetGenres(ctx, item.ID, meta.Genres); err != nil {
+			s.logger.Warn("failed to mirror genres into item_values", "id", item.ID, "error", err)
+		}
 	}
 
 	// Store external IDs

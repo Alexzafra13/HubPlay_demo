@@ -63,6 +63,12 @@ type LibraryService interface {
 	LatestItems(ctx context.Context, libraryID string, itemType string, limit int) ([]*db.Item, error)
 	ItemCount(ctx context.Context, libraryID string) (int, error)
 	UserHasAccess(ctx context.Context, userID, libraryID string) (bool, error)
+	// ListGenres returns the genre vocabulary across the catalogue,
+	// optionally scoped by item type ("movie", "series", or "" for the
+	// union). Used by the /movies and /series filter panel so the
+	// available chips reflect the entire library, not just the loaded
+	// page.
+	ListGenres(ctx context.Context, itemType string) ([]db.GenreCount, error)
 }
 
 // LibraryAccessService is the minimal surface the IPTV handler uses to gate

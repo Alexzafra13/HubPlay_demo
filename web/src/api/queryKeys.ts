@@ -79,4 +79,5 @@ export const queryKeys = {
   trickplay: (itemId: string) => ["trickplay", itemId] as const,
   itemRecommendations: (itemId: string) =>
     ["items", itemId, "recommendations"] as const,
+  itemGenres: (itemType?: string) => ["items", "genres", itemType ?? ""] as const,
 } as const;

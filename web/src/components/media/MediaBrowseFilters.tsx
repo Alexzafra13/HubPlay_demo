@@ -1,12 +1,21 @@
-import { useMemo } from "react";
+import { useState, useEffect } from "react";
 import type { FC } from "react";
 import { useTranslation } from "react-i18next";
-import type { MediaItem } from "@/api/types";
+import { useGenres } from "@/api/hooks";
 
+// Server-driven filter state. Each field is the wire shape passed
+// straight to /items — keep these names aligned with the backend
+// query params so the URL <-> hook <-> request flow has no rename
+// step in the middle.
 export interface BrowseFiltersState {
-  /** Selected genres (case-insensitive). Empty set = no genre filter. */
-  genres: Set<string>;
-  /** Year inclusive bounds. null = no constraint on that side. */
+  /**
+   * Selected genre name (case-insensitive, exact match).
+   * Server-side filtering is single-genre for now — multi-select
+   * needs an `IN` rewrite of the WHERE clause and isn't worth the
+   * cost until users ask for it. Empty string disables.
+   */
+  genre: string;
+  /** Year inclusive bounds; null = no constraint on that side. */
   yearFrom: number | null;
   yearTo: number | null;
   /** Minimum community rating (0..10). 0 = no constraint. */
@@ -14,7 +23,7 @@ export interface BrowseFiltersState {
 }
 
 export const emptyFilters: BrowseFiltersState = {
-  genres: new Set(),
+  genre: "",
   yearFrom: null,
   yearTo: null,
   minRating: 0,
@@ -27,113 +36,59 @@ export const emptyFilters: BrowseFiltersState = {
  */
 export function activeFilterCount(f: BrowseFiltersState): number {
   let n = 0;
-  if (f.genres.size > 0) n++;
+  if (f.genre) n++;
   if (f.yearFrom != null || f.yearTo != null) n++;
   if (f.minRating > 0) n++;
   return n;
 }
 
-/**
- * Pure filter — applies the state to a list of items. Items with
- * unknown year / rating bypass the corresponding constraint (we
- * don't have grounds to exclude them just because metadata is
- * missing). Genre match is "any" (item must have at least one of
- * the selected genres), not "all" — Plex / Jellyfin both default
- * to OR for the same UX reason: AND filters quickly produce empty
- * results and frustrate the user.
- */
-export function applyFilters(items: MediaItem[], f: BrowseFiltersState): MediaItem[] {
-  if (activeFilterCount(f) === 0) return items;
-  const wantGenres = Array.from(f.genres).map((g) => g.toLowerCase());
-  return items.filter((item) => {
-    if (wantGenres.length > 0) {
-      const itemGenres = (item.genres ?? []).map((g) => g.toLowerCase());
-      const hit = wantGenres.some((g) => itemGenres.includes(g));
-      if (!hit) return false;
-    }
-    if (f.yearFrom != null && item.year != null && item.year < f.yearFrom) return false;
-    if (f.yearTo != null && item.year != null && item.year > f.yearTo) return false;
-    if (f.minRating > 0) {
-      // Items without a rating fall through. Otherwise the slider
-      // would silently hide unrated items, which is rarely what the
-      // user wants and impossible to discover.
-      if (item.community_rating != null && item.community_rating < f.minRating) {
-        return false;
-      }
-    }
-    return true;
-  });
-}
-
 interface MediaBrowseFiltersProps {
-  /** All items currently loaded (so we can derive the genre vocabulary). */
-  items: MediaItem[];
+  /** "movie" | "series" — scopes the genre vocabulary. */
+  itemType?: string;
   state: BrowseFiltersState;
   onChange: (next: BrowseFiltersState) => void;
 }
 
 /**
- * Render-time filter panel. Lives below the sort/search toolbar in
- * MediaBrowse; the parent controls visibility via a toggle button so
- * the panel stays out of the way for users who never use it.
- *
- * Keeps the genre vocabulary derived from the actual loaded items
- * rather than a hardcoded list — different libraries (TMDb-tagged
- * vs NFO-tagged) use different spellings and the user should see
- * what they have, not a guess.
+ * Filter panel below the sort/search toolbar. The genre vocabulary
+ * comes from `/items/genres` (server-aggregated over the whole
+ * catalogue) — the previous implementation derived it from the
+ * 40 already-loaded items, which silently broke on libraries with
+ * more than one page of content.
  */
-const MediaBrowseFilters: FC<MediaBrowseFiltersProps> = ({ items, state, onChange }) => {
+const MediaBrowseFilters: FC<MediaBrowseFiltersProps> = ({ itemType, state, onChange }) => {
   const { t } = useTranslation();
+  const { data: genres } = useGenres(itemType);
 
-  // Derive genre vocabulary from items. Sorted by frequency desc so
-  // the most useful chips appear first. Cap the visible set at 20 —
-  // libraries with deep TMDb metadata can hit ~50+ unique genres,
-  // most of which the user will never tap.
-  const genreOptions = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const item of items) {
-      for (const g of item.genres ?? []) {
-        const key = g.trim();
-        if (!key) continue;
-        counts.set(key, (counts.get(key) ?? 0) + 1);
-      }
-    }
-    return Array.from(counts.entries())
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 20)
-      .map(([name, count]) => ({ name, count }));
-  }, [items]);
+  // Local input state for the year fields. Bound directly to the
+  // input element so the user can clear or partially-type a value
+  // without triggering a debounced refetch on every keystroke;
+  // commits to the parent state on blur or Enter.
+  const [yearFromInput, setYearFromInput] = useState<string>(
+    state.yearFrom?.toString() ?? "",
+  );
+  const [yearToInput, setYearToInput] = useState<string>(
+    state.yearTo?.toString() ?? "",
+  );
+  // Sync local input when external state changes (e.g. URL deep-link).
+  useEffect(() => {
+    setYearFromInput(state.yearFrom?.toString() ?? "");
+    setYearToInput(state.yearTo?.toString() ?? "");
+  }, [state.yearFrom, state.yearTo]);
 
-  // Year bounds derived once for the input placeholders (so the user
-  // sees what range their library actually covers).
-  const { earliestYear, latestYear } = useMemo(() => {
-    let lo = Number.POSITIVE_INFINITY;
-    let hi = Number.NEGATIVE_INFINITY;
-    for (const item of items) {
-      if (item.year != null) {
-        if (item.year < lo) lo = item.year;
-        if (item.year > hi) hi = item.year;
-      }
-    }
-    return {
-      earliestYear: isFinite(lo) ? lo : null,
-      latestYear: isFinite(hi) ? hi : null,
-    };
-  }, [items]);
+  const cap = 20; // chip cap matches the previous client-side derivation
+  const genreOptions = (genres ?? []).slice(0, cap);
 
   const toggleGenre = (g: string) => {
-    const next = new Set(state.genres);
-    if (next.has(g)) next.delete(g);
-    else next.add(g);
-    onChange({ ...state, genres: next });
+    onChange({ ...state, genre: state.genre === g ? "" : g });
   };
 
-  const setYearFrom = (raw: string) => {
-    const n = raw === "" ? null : Number(raw);
+  const commitYearFrom = () => {
+    const n = yearFromInput === "" ? null : Number(yearFromInput);
     onChange({ ...state, yearFrom: Number.isFinite(n!) ? (n as number) : null });
   };
-  const setYearTo = (raw: string) => {
-    const n = raw === "" ? null : Number(raw);
+  const commitYearTo = () => {
+    const n = yearToInput === "" ? null : Number(yearToInput);
     onChange({ ...state, yearTo: Number.isFinite(n!) ? (n as number) : null });
   };
   const setMinRating = (n: number) => onChange({ ...state, minRating: n });
@@ -148,10 +103,10 @@ const MediaBrowseFilters: FC<MediaBrowseFiltersProps> = ({ items, state, onChang
           <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
             {t("filters.genre")}
           </p>
-          {state.genres.size > 0 && (
+          {state.genre && (
             <button
               type="button"
-              onClick={() => onChange({ ...state, genres: new Set() })}
+              onClick={() => onChange({ ...state, genre: "" })}
               className="text-xs text-text-muted hover:text-text-primary cursor-pointer"
             >
               {t("filters.clear")}
@@ -163,7 +118,7 @@ const MediaBrowseFilters: FC<MediaBrowseFiltersProps> = ({ items, state, onChang
         ) : (
           <div className="flex flex-wrap gap-1.5">
             {genreOptions.map(({ name, count }) => {
-              const active = state.genres.has(name);
+              const active = state.genre === name;
               return (
                 <button
                   key={name}
@@ -195,9 +150,13 @@ const MediaBrowseFilters: FC<MediaBrowseFiltersProps> = ({ items, state, onChang
             <input
               type="number"
               inputMode="numeric"
-              placeholder={earliestYear?.toString() ?? t("filters.from")}
-              value={state.yearFrom ?? ""}
-              onChange={(e) => setYearFrom(e.target.value)}
+              placeholder={t("filters.from")}
+              value={yearFromInput}
+              onChange={(e) => setYearFromInput(e.target.value)}
+              onBlur={commitYearFrom}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") commitYearFrom();
+              }}
               className="w-24 rounded-[--radius-md] border border-border bg-bg-elevated px-2 py-1 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
               aria-label={t("filters.from")}
             />
@@ -205,9 +164,13 @@ const MediaBrowseFilters: FC<MediaBrowseFiltersProps> = ({ items, state, onChang
             <input
               type="number"
               inputMode="numeric"
-              placeholder={latestYear?.toString() ?? t("filters.to")}
-              value={state.yearTo ?? ""}
-              onChange={(e) => setYearTo(e.target.value)}
+              placeholder={t("filters.to")}
+              value={yearToInput}
+              onChange={(e) => setYearToInput(e.target.value)}
+              onBlur={commitYearTo}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") commitYearTo();
+              }}
               className="w-24 rounded-[--radius-md] border border-border bg-bg-elevated px-2 py-1 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
               aria-label={t("filters.to")}
             />

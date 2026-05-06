@@ -70,12 +70,22 @@ export function useItems(
 
 const PAGE_SIZE = 40;
 
-export function useInfiniteItems(params?: {
+export interface InfiniteItemsParams {
   library_id?: string;
   type?: string;
   sort_by?: string;
   sort_order?: string;
-}) {
+  /** Full-text query — when set, the backend FTS-keys the result. */
+  q?: string;
+  /** Single genre name (case-insensitive). Multi-genre is not supported server-side yet. */
+  genre?: string;
+  year_from?: number;
+  year_to?: number;
+  /** 0..10. 0 disables. */
+  min_rating?: number;
+}
+
+export function useInfiniteItems(params?: InfiniteItemsParams) {
   return useInfiniteQuery<PaginatedResponse<MediaItem>>({
     queryKey: ["items-infinite", params] as const,
     queryFn: ({ pageParam }) =>
@@ -95,6 +105,24 @@ export function useInfiniteItems(params?: {
       const loaded = ((lastPageParam as number) + 1) * PAGE_SIZE;
       return loaded < lastPage.total ? (lastPageParam as number) + 1 : undefined;
     },
+  });
+}
+
+// Catalogue-wide genre vocabulary for the filter panel.
+//
+// The legacy panel derived genres from already-loaded items, which
+// silently broke once /items got paginated: a 100-movie library
+// would only ever show genres for the first 40. The hook hits a
+// dedicated endpoint that aggregates over the entire catalogue, so
+// the chip list is correct on first paint.
+export function useGenres(itemType?: string) {
+  return useQuery<{ name: string; count: number }[]>({
+    queryKey: queryKeys.itemGenres(itemType),
+    queryFn: () => api.getGenres(itemType),
+    // Genre vocabulary changes only when content is added/removed.
+    // 5 min staleness covers a normal browsing session without
+    // refetching mid-scroll.
+    staleTime: 5 * 60_000,
   });
 }
 

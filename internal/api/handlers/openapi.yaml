@@ -500,6 +500,26 @@ paths:
         - { name: type, in: query, schema: { type: string, enum: [movie, series, episode] } }
         - { name: parent_id, in: query, schema: { type: string } }
         - { name: cursor, in: query, schema: { type: string } }
+        - name: q
+          in: query
+          description: Full-text search query. Server-side FTS over titles + cast/crew.
+          schema: { type: string }
+        - name: genre
+          in: query
+          description: Genre name (case-insensitive, exact match against the normalized tag store).
+          schema: { type: string }
+        - name: year_from
+          in: query
+          description: Inclusive lower year bound. Items with no year are excluded when set.
+          schema: { type: integer, minimum: 1800 }
+        - name: year_to
+          in: query
+          description: Inclusive upper year bound. Items with no year are excluded when set.
+          schema: { type: integer, minimum: 1800 }
+        - name: min_rating
+          in: query
+          description: Inclusive minimum community_rating (0..10). Items without a rating are excluded when set.
+          schema: { type: number, format: float, minimum: 0, maximum: 10 }
       responses:
         "200":
           description: Items
@@ -546,6 +566,33 @@ paths:
                             in_library: { type: boolean }
                             local_id: { type: string }
 
+  /items/genres:
+    get:
+      tags: [browse]
+      summary: Catalogue-wide genre vocabulary for the filter panel
+      description: |
+        Returns every genre that has at least one item, with the
+        item count, ordered by frequency desc. Scope to movies or
+        series with the optional `type` parameter so unrelated genres
+        don't bleed across pages.
+      parameters:
+        - { name: type, in: query, schema: { type: string, enum: [movie, series, episode] } }
+      responses:
+        "200":
+          description: Genre vocabulary
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:  { type: string }
+                        count: { type: integer }
+
   /items/latest:
     get:
       tags: [browse]
@@ -568,9 +615,21 @@ paths:
     get:
       tags: [browse]
       summary: Full-text search across item titles + people
+      description: |
+        Returns the same item shape as `/items` but always FTS-keyed.
+        Mirrors the filter surface of `/items` so MediaBrowse can keep
+        genre/year/rating active while typing a query — server-side so
+        the result set is correct beyond the loaded page.
       parameters:
         - { name: q, in: query, required: true, schema: { type: string, minLength: 2 } }
         - { name: limit, in: query, schema: { type: integer, default: 20, maximum: 100 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+        - { name: library_id, in: query, schema: { type: string } }
+        - { name: type, in: query, schema: { type: string, enum: [movie, series, episode] } }
+        - { name: genre, in: query, schema: { type: string } }
+        - { name: year_from, in: query, schema: { type: integer, minimum: 1800 } }
+        - { name: year_to, in: query, schema: { type: integer, minimum: 1800 } }
+        - { name: min_rating, in: query, schema: { type: number, format: float, minimum: 0, maximum: 10 } }
       responses:
         "200":
           description: Search results
@@ -582,6 +641,7 @@ paths:
                   data:
                     type: array
                     items: { $ref: "#/components/schemas/ItemSummary" }
+                  total: { type: integer }
 
   /items/{id}:
     parameters:

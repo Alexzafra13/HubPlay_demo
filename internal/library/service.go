@@ -54,13 +54,14 @@ func normaliseLanguageFilter(codes []string) string {
 }
 
 type Service struct {
-	libraries *db.LibraryRepository
-	items     *db.ItemRepository
-	streams   *db.MediaStreamRepository
-	images    *db.ImageRepository
-	channels  *db.ChannelRepository
-	scanner   *scanner.Scanner
-	logger    *slog.Logger
+	libraries  *db.LibraryRepository
+	items      *db.ItemRepository
+	streams    *db.MediaStreamRepository
+	images     *db.ImageRepository
+	channels   *db.ChannelRepository
+	itemValues *db.ItemValueRepository
+	scanner    *scanner.Scanner
+	logger     *slog.Logger
 
 	// Track active scans to prevent concurrent scans of the same library
 	mu       sync.Mutex
@@ -82,21 +83,23 @@ func NewService(
 	streams *db.MediaStreamRepository,
 	images *db.ImageRepository,
 	channels *db.ChannelRepository,
+	itemValues *db.ItemValueRepository,
 	scnr *scanner.Scanner,
 	logger *slog.Logger,
 ) *Service {
 	bgCtx, bgCancel := context.WithCancel(context.Background())
 	return &Service{
-		libraries: libraries,
-		items:     items,
-		streams:   streams,
-		images:    images,
-		channels:  channels,
-		scanner:   scnr,
-		logger:    logger.With("module", "library"),
-		scanning:  make(map[string]bool),
-		bgCtx:     bgCtx,
-		bgCancel:  bgCancel,
+		libraries:  libraries,
+		items:      items,
+		streams:    streams,
+		images:     images,
+		channels:   channels,
+		itemValues: itemValues,
+		scanner:    scnr,
+		logger:     logger.With("module", "library"),
+		scanning:   make(map[string]bool),
+		bgCtx:      bgCtx,
+		bgCancel:   bgCancel,
 	}
 }
 
@@ -345,6 +348,15 @@ func (s *Service) ListItems(ctx context.Context, filter db.ItemFilter) ([]*db.It
 		filter.Limit = 100
 	}
 	return s.items.List(ctx, filter)
+}
+
+// ListGenres delegates to the normalized tag store. Optional itemType
+// scopes the vocabulary so /movies and /series only see relevant chips.
+func (s *Service) ListGenres(ctx context.Context, itemType string) ([]db.GenreCount, error) {
+	if s.itemValues == nil {
+		return nil, nil
+	}
+	return s.itemValues.ListGenres(ctx, itemType)
 }
 
 func (s *Service) GetItem(ctx context.Context, id string) (*db.Item, error) {

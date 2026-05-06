@@ -679,6 +679,11 @@ func NewRouter(deps Dependencies) http.Handler {
 				// up" in the browse grid.
 				r.Get("/items", libHandler.AllItems)
 				r.Get("/items/search", itemHandler.Search)
+				// Catalogue-wide genre vocabulary for the filter panel.
+				// Returns name + count, sorted by frequency desc, scoped
+				// by ?type=movie|series so a TV-only library doesn't
+				// surface "Action & Adventure" to /movies and vice versa.
+				r.Get("/items/genres", libHandler.Genres)
 				r.Route("/items/{id}", func(r chi.Router) {
 					r.Get("/", itemHandler.Get)
 					r.Get("/children", itemHandler.Children)

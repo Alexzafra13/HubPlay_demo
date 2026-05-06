@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useCallback, useEffect } from "react";
+import { useMemo, useRef, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router";
 import { useInfiniteItems } from "@/api/hooks";
@@ -7,12 +7,10 @@ import { MediaGrid } from "@/components/media";
 import { useTopBarSlot } from "@/components/layout/TopBarSlot";
 import {
   MediaBrowseFilters,
-  applyFilters,
   activeFilterCount,
-  emptyFilters,
   type BrowseFiltersState,
 } from "@/components/media/MediaBrowseFilters";
-import { sortItems, SORT_OPTIONS, type SortOption } from "@/utils/sort";
+import { SORT_OPTIONS, type SortOption } from "@/utils/sort";
 
 export type BrowseType = "movie" | "series";
 
@@ -25,46 +23,86 @@ const I18N_NS: Record<BrowseType, "movies" | "series"> = {
   series: "series",
 };
 
+// Maps client SortOption tokens to the wire `sort_by`/`sort_order`
+// pair the backend understands. Centralised so the URL <-> request
+// translation has a single source of truth.
+const SORT_TO_WIRE: Record<SortOption, { sort_by: string; sort_order: "asc" | "desc" }> = {
+  title: { sort_by: "sort_title", sort_order: "asc" },
+  added: { sort_by: "added_at", sort_order: "desc" },
+  year: { sort_by: "year", sort_order: "desc" },
+  rating: { sort_by: "year", sort_order: "desc" }, // backend doesn't sort by rating today; fall back to year so URL is still meaningful
+};
+
+function parseSort(raw: string | null): SortOption {
+  if (raw === "title" || raw === "added" || raw === "year" || raw === "rating") return raw;
+  return "title";
+}
+
+// URL <-> filters bridge. Filters live in the query string so the
+// page is shareable and back-button-navigable; the legacy approach
+// kept them in `useState` and lost on navigation, which is exactly
+// the behaviour Plex/Jellyfin avoid.
+function readFiltersFromURL(params: URLSearchParams): BrowseFiltersState {
+  const yearFrom = params.get("year_from");
+  const yearTo = params.get("year_to");
+  const minRating = params.get("min_rating");
+  return {
+    genre: params.get("genre") ?? "",
+    yearFrom: yearFrom != null && yearFrom !== "" ? Number(yearFrom) : null,
+    yearTo: yearTo != null && yearTo !== "" ? Number(yearTo) : null,
+    minRating: minRating != null && minRating !== "" ? Number(minRating) : 0,
+  };
+}
+
+function writeFiltersToURL(
+  current: URLSearchParams,
+  filters: BrowseFiltersState,
+): URLSearchParams {
+  const next = new URLSearchParams(current);
+  // Preserve `q` and other unrelated params; only touch the filter keys.
+  const setOrDelete = (key: string, value: string | null | undefined) => {
+    if (value == null || value === "") next.delete(key);
+    else next.set(key, value);
+  };
+  setOrDelete("genre", filters.genre);
+  setOrDelete("year_from", filters.yearFrom != null ? String(filters.yearFrom) : "");
+  setOrDelete("year_to", filters.yearTo != null ? String(filters.yearTo) : "");
+  setOrDelete("min_rating", filters.minRating > 0 ? String(filters.minRating) : "");
+  return next;
+}
+
 export default function MediaBrowse({ type }: MediaBrowseProps) {
   const { t } = useTranslation();
   const ns = I18N_NS[type];
 
-  // Search lives in the URL (`?q=`) so the topbar SearchBar — which is
-  // the only place the user types on these pages — can drive the
-  // grid filter without prop-drilling or a shared store. The URL also
-  // makes the filter shareable: hand a teammate /movies?q=batman.
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const search = searchParams.get("q") ?? "";
+  const sort = parseSort(searchParams.get("sort"));
+  const filters = useMemo(() => readFiltersFromURL(searchParams), [searchParams]);
+  const filtersOpen = searchParams.get("filters_open") === "1";
 
-  // Default to alphabetical — matches the server default (sort_title ASC)
-  // so the user sees A→Z on landing without an extra round-trip when
-  // they change sort. "added" surfaces newest-first which is useful but
-  // belongs on Home rails, not the browse page.
-  const [sort, setSort] = useState<SortOption>("title");
-  const [filters, setFilters] = useState<BrowseFiltersState>(emptyFilters);
-  const [filtersOpen, setFiltersOpen] = useState(false);
-
+  // All filtering is server-side now: the page used to filter on the
+  // client which silently broke once /items was paginated to 40
+  // results — a 200-movie library could only ever filter the first
+  // page. Filters and search go in the request params; the grid
+  // shows what came back, no second pass.
+  const { sort_by, sort_order } = SORT_TO_WIRE[sort];
   const { data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } =
-    useInfiniteItems({ type });
+    useInfiniteItems({
+      type,
+      sort_by,
+      sort_order,
+      q: search.trim() || undefined,
+      genre: filters.genre || undefined,
+      year_from: filters.yearFrom ?? undefined,
+      year_to: filters.yearTo ?? undefined,
+      min_rating: filters.minRating > 0 ? filters.minRating : undefined,
+    });
 
   const items = useMemo(
     () => data?.pages.flatMap((page) => page.items) ?? [],
     [data],
   );
-
-  const filtered = useMemo(() => {
-    let result = items;
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      result = result.filter(
-        (item) =>
-          item.title.toLowerCase().includes(q) ||
-          (item.original_title?.toLowerCase().includes(q) ?? false),
-      );
-    }
-    result = applyFilters(result, filters);
-    return sortItems(result, sort);
-  }, [items, search, sort, filters]);
 
   const filterCount = activeFilterCount(filters);
 
@@ -91,16 +129,31 @@ export default function MediaBrowse({ type }: MediaBrowseProps) {
     return () => observerRef.current?.disconnect();
   }, []);
 
-  // Sort + filters for the topbar slot. The search input is gone:
-  // the global SearchBar in the topbar owns it now and writes the
-  // value to URL `?q=` which we read above.
+  const setSort = (next: SortOption) => {
+    const updated = new URLSearchParams(searchParams);
+    if (next === "title") updated.delete("sort"); // default — keep URL clean
+    else updated.set("sort", next);
+    setSearchParams(updated, { replace: true });
+  };
+
+  const setFilters = (next: BrowseFiltersState) => {
+    setSearchParams(writeFiltersToURL(searchParams, next), { replace: true });
+  };
+
+  const toggleFilters = () => {
+    const updated = new URLSearchParams(searchParams);
+    if (filtersOpen) updated.delete("filters_open");
+    else updated.set("filters_open", "1");
+    setSearchParams(updated, { replace: true });
+  };
+
   const controls = (
     <BrowseControls
       sort={sort}
       onSortChange={setSort}
       filterCount={filterCount}
       filtersOpen={filtersOpen}
-      onToggleFilters={() => setFiltersOpen((o) => !o)}
+      onToggleFilters={toggleFilters}
     />
   );
   const slotActive = useTopBarSlot(controls);
@@ -120,25 +173,21 @@ export default function MediaBrowse({ type }: MediaBrowseProps) {
 
       {filtersOpen && (
         <div id="media-browse-filters">
-          <MediaBrowseFilters items={items} state={filters} onChange={setFilters} />
+          <MediaBrowseFilters itemType={type} state={filters} onChange={setFilters} />
         </div>
       )}
 
       <MediaGrid
-        items={filtered}
+        items={items}
         loading={isLoading}
         emptyMessage={t(`${ns}.noResults`)}
       />
 
-      {!search.trim() && (
-        <>
-          <div ref={sentinelRef} className="h-1" />
-          {isFetchingNextPage && (
-            <div className="flex justify-center py-4">
-              <Spinner size="md" />
-            </div>
-          )}
-        </>
+      <div ref={sentinelRef} className="h-1" />
+      {isFetchingNextPage && (
+        <div className="flex justify-center py-4">
+          <Spinner size="md" />
+        </div>
       )}
     </div>
   );
