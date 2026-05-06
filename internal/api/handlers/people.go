@@ -144,6 +144,14 @@ func (h *PeopleHandler) Get(w http.ResponseWriter, r *http.Request) {
 		if c.CharacterName != "" {
 			entry["character"] = c.CharacterName
 		}
+		// Primary-image URL when the item has a poster on disk; the
+		// frontend falls back to an initial-letter tile otherwise. The
+		// id round-trip through /api/v1/images/file/{id} keeps the
+		// caching policy and SSRF guards centralised in the image
+		// handler instead of duplicated here.
+		if c.PrimaryImageID != "" {
+			entry["poster_url"] = "/api/v1/images/file/" + c.PrimaryImageID
+		}
 		entries = append(entries, entry)
 	}
 	resp["filmography"] = entries

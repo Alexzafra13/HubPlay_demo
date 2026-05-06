@@ -23,12 +23,8 @@ SELECT COUNT(*) AS cnt
 FROM external_ids
 WHERE item_id = ?;
 
--- name: GetItemIDByExternalID :one
--- Reverse lookup used by recommendations cross-referencing — given a
--- provider name and the upstream id, returns the local item that
--- carries that mapping (NULL if none). Indexed by (provider, external_id)
--- on the table side so the lookup stays fast even on large libraries.
-SELECT item_id
-FROM external_ids
-WHERE provider = ? AND external_id = ?
-LIMIT 1;
+-- GetItemIDByExternalID is intentionally implemented as raw SQL in the
+-- repository (external_id_repository.go::GetItemIDByExternalID) — sqlc
+-- v1.31.1 truncates the trailing identifier of the final query in a
+-- file (here `LIMIT 1` becomes `LIMIT`, producing invalid SQL that
+-- fails at runtime). Same workaround as item_values.sql::ListGenres.

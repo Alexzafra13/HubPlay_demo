@@ -230,8 +230,13 @@
     "notFoundTitle": "Person not found",
     "notFoundDescription": "This person doesn't exist or has been removed.",
     "filmography": "Filmography",
+    "filmographyOnHubplay": "On HubPlay",
+    "titlesCount_one": "{{count}} title in your library",
+    "titlesCount_other": "{{count}} titles in your library",
     "noFilmography": "No titles associated with this person in your library.",
-    "asCharacter": "as {{character}}"
+    "asCharacter": "as {{character}}",
+    "movies": "Movies",
+    "series": "Series"
   },
   "itemDetail": {
     "notFoundTitle": "Item not found",
@@ -261,7 +266,7 @@
     "openOnTmdb": "Open on TMDb",
     "openOnTvdb": "Open on TVDb",
     "recommendations": "More like this",
-    "recInLibrary": "In library"
+    "recInLibrary": "On HubPlay"
   },
   "liveTV": {
     "title": "Live TV",
