@@ -52,10 +52,16 @@ function renderBar(
 }
 
 describe("LiveTvTopBar", () => {
-  it("renders the total and live-now counts from props", () => {
-    renderBar({ totalChannels: 268, liveNow: 19 });
-    // Counts live in <b> tags; assert both are present somewhere in the header.
+  it("renders the total channel count on the guide tab", () => {
+    // On the discover tab the title + counters are lifted into the
+    // hero overlay (DiscoverView), so the topbar header is empty —
+    // assert against tabs that keep counters in the header.
+    renderBar({ tab: "guide", totalChannels: 268, liveNow: 19 });
     expect(screen.getByText("268")).toBeInTheDocument();
+  });
+
+  it("renders the live-now count on the now tab", () => {
+    renderBar({ tab: "now", totalChannels: 268, liveNow: 19 });
     expect(screen.getByText("19")).toBeInTheDocument();
   });
 
