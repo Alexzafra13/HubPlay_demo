@@ -64,21 +64,36 @@ web/src/i18n/locales/
       80/200ms, click toggle para táctil, Escape, role=menu, dropdown
       con `framer-motion`, dropdown dinámico de peers)
 - [x] Nota de continuidad en `docs/memory/`
-- [ ] **Commit 1**: navConfig + MainNav + esta nota
-- [ ] Crear `MobileDrawer.tsx` (mismo schema apilado, accordions)
-- [ ] Editar `TopBar.tsx`: hamburger sólo móvil, monta MainNav,
+- [x] **Commit 1** (`c24f2c2`): navConfig + MainNav + esta nota
+- [x] Crear `MobileDrawer.tsx` (mismo schema apilado, accordions)
+- [x] Editar `TopBar.tsx`: hamburger sólo móvil, monta MainNav,
       avatar dropdown añade "Vincular dispositivo"
-- [ ] Editar `AppLayout.tsx`: borra Sidebar, drawer móvil pasa a
+- [x] Editar `AppLayout.tsx`: borra Sidebar, drawer móvil pasa a
       MobileDrawer, elimina `marginLeft` del main
-- [ ] **Commit 2**: TopBar + AppLayout + MobileDrawer integrados
-- [ ] Editar `LiveTvTopBar.tsx` y `MediaBrowse.tsx` para no usar
+- [x] **Commit 2** (`368ce52`): TopBar + AppLayout + MobileDrawer
+- [x] Editar `LiveTvTopBar.tsx` y `MediaBrowse.tsx` para no usar
       `useTopBarSlot` (render inline siempre)
-- [ ] Borrar `Sidebar.tsx`, `useSidebarCollapsed.ts`, `TopBarSlot.tsx`
-- [ ] **Commit 3**: cleanup + páginas inline
-- [ ] Añadir keys i18n nuevas (`navMenu.*`) a en.json + es.json
-- [ ] **Commit 4**: i18n
-- [ ] Verificar en preview a 1440/1024/768/360, dropdown hover y
-      teclado, dark mode
+- [x] Borrar `Sidebar.tsx`, `useSidebarCollapsed.ts`, `TopBarSlot.tsx`
+- [x] `tsc -b` y `eslint` limpios (warning preexistente en SearchBar
+      no tocado)
+- [x] **Commit 3** (`928bc8d`): cleanup + páginas inline
+- [x] Añadir keys i18n nuevas (`navMenu.*`) a en.json + es.json
+- [x] **Commit 4** (`9081add`): i18n
+- [x] **Push** a `origin/claude/pedantic-wozniak-9f70b1`
+- [ ] **Pendiente · QA visual**: el preview MCP no pudo arrancar el
+      backend porque la preflight de Go exige `ffmpeg`/`ffprobe` en
+      PATH (ver `internal/config/preflight.go:27`) y este entorno no
+      los tiene. La rama está pusheada — el usuario va a mergear y
+      verificar en su instancia desplegada (que sí los tiene). Si
+      encuentra fallos, pasos a revisar:
+        · Cabecera a 1440 / 1024 / 768 / 360
+        · Dropdown hover-intent (80/200 ms) y switch entre triggers
+        · Teclado: Tab + Enter + Escape; click-outside
+        · Móvil: drawer y hamburger sólo `<md`
+        · `/live-tv` y `/movies` y `/series` con su subbarra inline
+        · Avatar dropdown: Settings, Vincular dispositivo, Admin,
+          Logout — todos navegan correctamente
+        · Dark mode
 
 ## Decisiones técnicas no obvias
 
