@@ -221,11 +221,13 @@ describe("ItemDetail", () => {
     fireEvent.click(kebab);
     // "Refresh metadata" / "Image manager" are admin-only — must be absent.
     expect(screen.queryByText(/refresh metadata|actualizar metadatos/i)).toBeNull();
-    // The non-admin-visible "Media info" entry must mount as a menu
-    // button (the same label also appears as a section heading lower
-    // in the page, so we narrow to the button role).
+    // The non-admin-visible "Media info" entry mounts as an ARIA
+    // menuitem (the kebab is now `role="menu"` with `role="menuitem"`
+    // on each row — same label also appears as a section heading
+    // lower in the page, so narrowing to the menuitem role keeps the
+    // assertion unambiguous).
     expect(
-      screen.getByRole("button", { name: /media info|info del medio/i }),
+      screen.getByRole("menuitem", { name: /media info|info del medio/i }),
     ).toBeInTheDocument();
   });
 

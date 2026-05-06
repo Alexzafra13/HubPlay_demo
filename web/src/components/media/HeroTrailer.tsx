@@ -138,6 +138,16 @@ export function HeroTrailer({
   const [dismissed, setDismissed] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
+  // Embeddability pre-flight. YouTube returns 401 when a video is
+  // region-restricted or its owner disabled embedding, and 404 when
+  // the video was removed; without checking we'd render the iframe
+  // anyway and the user would see YouTube's "Este vídeo no está
+  // disponible" error inside our hero. The oEmbed endpoint is CORS-
+  // enabled and tiny (a few hundred bytes), so we treat it as a
+  // gating fetch before mounting the player. `null` = still
+  // checking, `true` = mount the iframe, `false` = silently bail.
+  const [embeddable, setEmbeddable] = useState<boolean | null>(null);
+
   // IntersectionObserver: only kick off the load timer when the hero
   // is at least 25% visible. Once we've seen it, we stop observing —
   // re-entering the viewport later doesn't restart the show, which
@@ -172,6 +182,23 @@ export function HeroTrailer({
     return () => observer.disconnect();
   }, [skipped, dismissed]);
 
+  // Embeddability check, gated on viewport so we don't pay the round
+  // trip for trailers the user may never see (scrolling away from a
+  // hero before it enters view). Aborts on unmount + on dismiss so a
+  // fast nav doesn't leak in-flight requests. Failures (network,
+  // 401, 404) all collapse to "not embeddable" — the trailer is a
+  // decorative affordance, falling back to the static backdrop is
+  // strictly better than showing a YouTube error frame.
+  useEffect(() => {
+    if (!inViewport || skipped || dismissed) return;
+    if (embeddable !== null) return;
+    const ctl = new AbortController();
+    checkEmbeddable(siteKey, videoKey, ctl.signal)
+      .then((ok) => setEmbeddable(ok))
+      .catch(() => setEmbeddable(false));
+    return () => ctl.abort();
+  }, [inViewport, skipped, dismissed, siteKey, videoKey, embeddable]);
+
   // Preconnect hint while the timers tick. Dropping it on mount of
   // the in-viewport phase saves ~150ms of TLS handshake when the
   // iframe finally requests the embed page.
@@ -193,9 +220,14 @@ export function HeroTrailer({
     };
   }, [inViewport, skipped, dismissed, siteKey]);
 
-  // Load + reveal timers, gated on actually being in view.
+  // Load + reveal timers, gated on actually being in view AND on
+  // the oEmbed pre-flight returning a positive answer. Without the
+  // embeddability gate we'd fire these timers immediately, and a
+  // failed oEmbed coming back later would have to tear them down —
+  // simpler to wait for the green light.
   useEffect(() => {
     if (!inViewport || skipped || dismissed) return;
+    if (embeddable !== true) return;
     const loadTimer = setTimeout(() => setLoaded(true), 2500);
     const revealTimer = setTimeout(() => {
       setRevealed(true);
@@ -207,7 +239,7 @@ export function HeroTrailer({
       clearTimeout(loadTimer);
       clearTimeout(revealTimer);
     };
-  }, [inViewport, skipped, dismissed, onReveal]);
+  }, [inViewport, skipped, dismissed, embeddable, onReveal]);
 
   const handleDismiss = () => {
     setDismissed(true);
@@ -223,7 +255,7 @@ export function HeroTrailer({
   };
 
   const embedUrl = trailerEmbedURL(siteKey, videoKey);
-  if (!embedUrl || dismissed || skipped) {
+  if (!embedUrl || dismissed || skipped || embeddable === false) {
     return null;
   }
 
@@ -287,6 +319,48 @@ export function HeroTrailer({
       )}
     </div>
   );
+}
+
+// checkEmbeddable returns true when the platform's oEmbed endpoint
+// confirms the video is publicly embeddable, false when it 401s
+// (region-restricted / embed-disabled), 404s (removed), or any other
+// error. The caller treats false the same as "no trailer at all" —
+// silently fall back to the static backdrop instead of rendering an
+// iframe that will surface YouTube's "Este vídeo no está disponible"
+// error inside the hero.
+//
+// oEmbed is CORS-enabled on both YouTube and Vimeo so we don't need a
+// server-side proxy. The response payload (a few hundred bytes) is
+// thrown away — we only care about the HTTP status.
+async function checkEmbeddable(
+  site: string,
+  key: string,
+  signal: AbortSignal,
+): Promise<boolean> {
+  let url: string;
+  switch (site) {
+    case "YouTube":
+      url = `https://www.youtube.com/oembed?url=${encodeURIComponent(
+        `https://youtu.be/${key}`,
+      )}&format=json`;
+      break;
+    case "Vimeo":
+      url = `https://vimeo.com/api/oembed.json?url=${encodeURIComponent(
+        `https://vimeo.com/${key}`,
+      )}`;
+      break;
+    default:
+      // Unknown site — trailerEmbedURL will reject it anyway, but
+      // returning false here short-circuits the gating effect so we
+      // don't even start timers.
+      return false;
+  }
+  try {
+    const res = await fetch(url, { signal, method: "GET" });
+    return res.ok;
+  } catch {
+    return false;
+  }
 }
 
 // trailerEmbedURL maps a (site, key) pair to the right embed URL. The

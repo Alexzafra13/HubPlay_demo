@@ -259,7 +259,9 @@
     "readLess": "Read less",
     "openOnImdb": "Open on IMDb",
     "openOnTmdb": "Open on TMDb",
-    "openOnTvdb": "Open on TVDb"
+    "openOnTvdb": "Open on TVDb",
+    "recommendations": "More like this",
+    "recInLibrary": "In library"
   },
   "liveTV": {
     "title": "Live TV",

@@ -22,3 +22,13 @@ WHERE item_id = ? AND provider = ?;
 SELECT COUNT(*) AS cnt
 FROM external_ids
 WHERE item_id = ?;
+
+-- name: GetItemIDByExternalID :one
+-- Reverse lookup used by recommendations cross-referencing — given a
+-- provider name and the upstream id, returns the local item that
+-- carries that mapping (NULL if none). Indexed by (provider, external_id)
+-- on the table side so the lookup stays fast even on large libraries.
+SELECT item_id
+FROM external_ids
+WHERE provider = ? AND external_id = ?
+LIMIT 1;

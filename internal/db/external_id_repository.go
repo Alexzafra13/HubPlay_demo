@@ -67,6 +67,26 @@ func (r *ExternalIDRepository) HasExternalID(ctx context.Context, itemID string)
 	return cnt > 0, nil
 }
 
+// GetItemIDByExternalID does the reverse lookup of GetByProvider:
+// given (provider, external_id) returns the local item id that
+// carries that mapping, or empty string if none. Used by the
+// recommendations endpoint to cross-reference TMDb candidates
+// against the user's library so each suggestion can be marked
+// "in library" with a deep link or "external" with a TMDb link.
+func (r *ExternalIDRepository) GetItemIDByExternalID(ctx context.Context, provider, externalID string) (string, error) {
+	id, err := r.q.GetItemIDByExternalID(ctx, sqlc.GetItemIDByExternalIDParams{
+		Provider:   provider,
+		ExternalID: externalID,
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("get item by external id: %w", err)
+	}
+	return id, nil
+}
+
 func externalIDFromRow(r sqlc.ExternalID) ExternalID {
 	return ExternalID{
 		ItemID:     r.ItemID,

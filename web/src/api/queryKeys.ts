@@ -77,4 +77,6 @@ export const queryKeys = {
   browseLibraryDirectories: (path?: string) => ["browse-library", path] as const,
   progress: (itemId: string) => ["progress", itemId] as const,
   trickplay: (itemId: string) => ["trickplay", itemId] as const,
+  itemRecommendations: (itemId: string) =>
+    ["items", itemId, "recommendations"] as const,
 } as const;

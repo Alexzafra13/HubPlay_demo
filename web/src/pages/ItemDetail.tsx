@@ -11,6 +11,7 @@ import {
   EpisodeRow,
   CastChip,
 } from "@/components/media";
+import { RecommendationsRail } from "@/components/media/RecommendationsRail";
 import { VideoPlayer } from "@/components/player";
 import { ImageManager } from "@/components/ImageManager";
 import { useAuthStore } from "@/store/auth";
@@ -359,6 +360,16 @@ export default function ItemDetail() {
               ))}
             </div>
           </section>
+        )}
+
+        {/* "More like this" rail — TMDb /recommendations cross-
+            referenced with the local library. Hides itself when no
+            candidates were returned (no TMDb match, no provider
+            configured, or empty list). Movies and series pages get
+            it; episode/season detail surfaces don't bother because
+            their parent series already shows the rail. */}
+        {(item.type === "movie" || item.type === "series") && id && (
+          <RecommendationsRail itemId={id} />
         )}
 
         {/* "Sigue viendo" panel — series scope only. Surfaces the

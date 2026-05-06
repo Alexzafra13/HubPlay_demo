@@ -508,6 +508,44 @@ paths:
               schema:
                 $ref: "#/components/schemas/PaginatedItemsEnvelope"
 
+  /items/{id}/recommendations:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [browse]
+      summary: 'More-like-this suggestions for the given item'
+      description: |
+        Calls the metadata provider's recommendations endpoint (TMDb's
+        `/movie/{id}/recommendations` or `/tv/{id}/recommendations`)
+        and cross-references each candidate against the local library.
+        Each entry is marked `in_library: true` with a `local_id` deep
+        link when the user already has it. 503 when no provider is
+        configured. Empty list when the item has no TMDb match.
+      responses:
+        "200":
+          description: Recommendations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            tmdb_id: { type: string }
+                            title: { type: string }
+                            year: { type: integer }
+                            overview: { type: string }
+                            poster_url: { type: string }
+                            rating: { type: number, format: float }
+                            in_library: { type: boolean }
+                            local_id: { type: string }
+
   /items/latest:
     get:
       tags: [browse]

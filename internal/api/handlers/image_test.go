@@ -179,6 +179,9 @@ func (p *fakeProviderManager) SearchSubtitles(_ context.Context, _ provider.Subt
 func (p *fakeProviderManager) DownloadSubtitle(_ context.Context, _, _ string) ([]byte, error) {
 	return nil, nil
 }
+func (p *fakeProviderManager) FetchRecommendations(_ context.Context, _ string, _ provider.ItemType, _ int) ([]provider.RecommendationResult, error) {
+	return nil, nil
+}
 
 // ─── Test server wiring ─────────────────────────────────────────────────────
 

@@ -133,6 +133,36 @@ type SearchResult struct {
 	Score      float64 // relevance 0-1
 }
 
+// RecommendationResult is one entry in a "more like this" list from a
+// metadata provider. Distinct from SearchResult because the source is
+// "TMDb thinks people who liked X also liked these" rather than a
+// query — and the frontend uses it to populate a rail under the cast,
+// where each candidate carries its own poster url + year so the UI
+// renders without a second round-trip per row. Cross-referencing
+// against the local library happens at the handler level via
+// ExternalIDRepository.GetItemIDByExternalID.
+type RecommendationResult struct {
+	// External provider id (TMDb id today). Used by the handler to
+	// look up whether the user has the title locally.
+	ExternalID string
+	Title      string
+	Year       int
+	Overview   string
+	// Absolute image URL (already resolved against the TMDb image
+	// base) so the frontend renders <img src=...> directly.
+	PosterURL string
+	// Community/average rating (TMDb's vote_average). Optional —
+	// titles with no votes yet have no rating to show.
+	Rating *float64
+}
+
+// RecommendationsProvider is the optional capability for "more like
+// this" suggestions. Providers that don't implement it simply yield
+// no recommendations and the rail hides itself.
+type RecommendationsProvider interface {
+	GetRecommendations(ctx context.Context, externalID string, itemType ItemType, limit int) ([]RecommendationResult, error)
+}
+
 // ──────────────────── Images ────────────────────
 
 // ImageResult represents a downloadable image.

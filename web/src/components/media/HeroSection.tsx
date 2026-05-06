@@ -130,23 +130,27 @@ const KebabMenu: FC<{ items: HeroMenuItem[] }> = ({ items }) => {
       </button>
 
       {open && (
-        <div className="absolute bottom-full mb-2 left-0 z-50 min-w-[200px] rounded-[--radius-lg] border border-border bg-bg-card shadow-xl shadow-black/40 backdrop-blur-xl overflow-hidden">
+        <div
+          role="menu"
+          className="absolute bottom-full left-0 z-50 mb-2 min-w-[220px] overflow-hidden rounded-[--radius-lg] border border-border/70 bg-bg-card/95 py-1 shadow-xl shadow-black/50 backdrop-blur-xl"
+        >
           {items.map((item, i) => (
             <button
               key={i}
               type="button"
+              role="menuitem"
               onClick={() => {
                 close();
                 item.onClick();
               }}
               className={[
-                "flex w-full items-center gap-3 px-4 py-2.5 text-sm transition-colors cursor-pointer",
+                "flex w-full items-center gap-3 px-3.5 py-2 text-sm font-medium transition-colors cursor-pointer",
                 item.variant === "danger"
                   ? "text-error hover:bg-error/10"
-                  : "text-text-secondary hover:text-text-primary hover:bg-bg-elevated",
+                  : "text-text-primary/90 hover:bg-bg-elevated hover:text-text-primary",
               ].join(" ")}
             >
-              <span className="flex h-5 w-5 shrink-0 items-center justify-center">
+              <span className="flex h-4 w-4 shrink-0 items-center justify-center text-text-secondary">
                 {item.icon}
               </span>
               {item.label}
@@ -469,7 +473,12 @@ const HeroSection: FC<HeroSectionProps> = ({
               <ExternalIdRow item={item} />
 
               <div className="flex items-center gap-3 pt-1">
-                <Button size="lg" onClick={onPlay}>
+                {/* Wrapped so the click event isn't forwarded as the
+                    first argument — usePlayback's handlePlay accepts
+                    an optional `targetId` and would receive the
+                    SyntheticEvent here, then build a stream URL with
+                    "[object Object]" as the item id. */}
+                <Button size="lg" onClick={() => onPlay?.()}>
                   <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M8 5v14l11-7z" />
                   </svg>

@@ -474,6 +474,18 @@ export class ApiClient {
     return this.request<MediaItem[]>("GET", `/items/${id}/children`);
   }
 
+  // "More like this" rail. Backend calls TMDb /recommendations and
+  // cross-references each candidate against the user's library so each
+  // entry is marked in_library + local_id when the user already has
+  // it. Empty list when the item has no TMDb match — the rail just
+  // hides itself in that case.
+  async getItemRecommendations(id: string): Promise<{ items: import("./types").Recommendation[] }> {
+    return this.request<{ items: import("./types").Recommendation[] }>(
+      "GET",
+      `/items/${id}/recommendations`,
+    );
+  }
+
   async getPerson(id: string): Promise<PersonDetail> {
     return this.request<PersonDetail>("GET", `/people/${id}`);
   }

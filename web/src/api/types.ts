@@ -547,6 +547,24 @@ export interface ExternalSubtitleResult {
   score: number;      // provider-specific quality / popularity score
 }
 
+// One "more like this" entry surfaced under the cast strip on the
+// detail page. Server resolves the poster URL against TMDb's image
+// CDN and tags `in_library` + `local_id` when the user already has
+// the title stored — clicking such an entry opens the local detail
+// page; clicking an external one opens TMDb in a new tab.
+export interface Recommendation {
+  tmdb_id: string;
+  title: string;
+  year: number;
+  overview?: string;
+  poster_url?: string;
+  rating?: number;
+  in_library: boolean;
+  /** Set when in_library is true; deep-link target for /movies/{id}
+   *  or /series/{id} depending on what the user actually has. */
+  local_id?: string;
+}
+
 export interface ItemDetail extends MediaItem {
   media_streams: MediaStream[];
   // Cast / crew. Server omits the key entirely when no rows are
