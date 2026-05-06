@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { queryKeys } from "@/api/queryKeys";
 
 /**
  * The wire shape of `<api>/items/{id}/trickplay.json`. Mirrors
@@ -34,54 +35,63 @@ export interface TrickplayState {
   available: boolean;
 }
 
+const UNAVAILABLE: TrickplayState = {
+  manifest: null,
+  spriteURL: "",
+  available: false,
+};
+
+async function fetchTrickplay(itemId: string): Promise<TrickplayManifest> {
+  const url = `/api/v1/items/${encodeURIComponent(itemId)}/trickplay.json`;
+  const r = await fetch(url, { credentials: "same-origin" });
+  if (!r.ok) throw new Error(`status ${r.status}`);
+  // The trickplay endpoint is one of the few that serves the
+  // manifest without the standard `{data: ...}` envelope (it
+  // ServeFile's the JSON straight from disk). Tolerate either
+  // shape so the contract can tighten without breaking the UI.
+  const body = (await r.json()) as { data: TrickplayManifest } | TrickplayManifest;
+  return "data" in body ? body.data : body;
+}
+
 /**
- * useTrickplay fetches the trickplay manifest for an item once on
- * mount. The first hit on the server triggers ffmpeg generation
- * (5-30 s) so we accept whatever latency that takes; the player
- * works fine without trickplay during that window — the SeekBar
- * just doesn't show a preview until `available` flips true.
+ * useTrickplay fetches the trickplay manifest for an item. The first
+ * hit on the server triggers ffmpeg generation (5-30 s) so we accept
+ * whatever latency that takes; the player works fine without
+ * trickplay during that window — the SeekBar just doesn't show a
+ * preview until `available` flips true.
+ *
+ * Wraps TanStack Query so a second mount of the same item (e.g.
+ * navigating away and back, or re-opening the player) reuses the
+ * cached manifest instead of re-paying the cold-start latency. The
+ * sprite PNG itself is HTTP-cached by the browser at the network
+ * layer, but the JSON manifest needs the in-memory cache.
  *
  * `itemId === ""` is a no-op (no fetch). Used by VideoPlayer to gate
  * the hook on "we actually have an item to preview".
  */
 export function useTrickplay(itemId: string): TrickplayState {
-  const [state, setState] = useState<TrickplayState>({
-    manifest: null,
-    spriteURL: "",
-    available: false,
+  const { data, isError } = useQuery({
+    queryKey: queryKeys.trickplay(itemId),
+    queryFn: () => fetchTrickplay(itemId),
+    enabled: itemId !== "",
+    // Manifest content is immutable for the lifetime of an item — once
+    // ffmpeg generates the sprite the contract is fixed. 5-minute
+    // staleness covers a session of bouncing between items without
+    // re-paying the round trip.
+    staleTime: 5 * 60_000,
+    // 503 (TRICKPLAY_DISABLED) and network errors land in error state.
+    // Both are non-fatal: the SeekBar falls back to no preview, and
+    // retrying buys nothing — provider state isn't going to change
+    // mid-session.
+    retry: false,
   });
 
-  useEffect(() => {
-    if (!itemId) {
-      setState({ manifest: null, spriteURL: "", available: false });
-      return;
-    }
-    const ctl = new AbortController();
-    const url = `/api/v1/items/${encodeURIComponent(itemId)}/trickplay.json`;
-    fetch(url, { credentials: "same-origin", signal: ctl.signal })
-      .then((r) => {
-        if (!r.ok) throw new Error(`status ${r.status}`);
-        return r.json() as Promise<{ data: TrickplayManifest } | TrickplayManifest>;
-      })
-      .then((body) => {
-        // The trickplay endpoint is one of the few that serves the
-        // manifest without the standard `{data: ...}` envelope (it
-        // ServeFile's the JSON straight from disk). Tolerate either
-        // shape so the contract can tighten without breaking the UI.
-        const manifest = "data" in body ? body.data : body;
-        setState({
-          manifest,
-          spriteURL: `/api/v1/items/${encodeURIComponent(itemId)}/trickplay.png`,
-          available: true,
-        });
-      })
-      .catch(() => {
-        // 503 (TRICKPLAY_DISABLED) and network errors land here.
-        // Both are non-fatal: the SeekBar falls back to no preview.
-        setState({ manifest: null, spriteURL: "", available: false });
-      });
-    return () => ctl.abort();
-  }, [itemId]);
-
-  return state;
+  if (!itemId || isError || !data) {
+    return UNAVAILABLE;
+  }
+  return {
+    manifest: data,
+    spriteURL: `/api/v1/items/${encodeURIComponent(itemId)}/trickplay.png`,
+    available: true,
+  };
 }

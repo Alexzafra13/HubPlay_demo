@@ -252,7 +252,14 @@
     "seasons": "Temporadas",
     "refreshMetadata": "Actualizar metadatos",
     "addToFavorites": "Anadir a favoritos",
-    "removeFromFavorites": "Quitar de favoritos"
+    "removeFromFavorites": "Quitar de favoritos",
+    "directedBy": "Dirigida por {{name}}",
+    "writtenBy": "Escrita por {{name}}",
+    "readMore": "Leer mas",
+    "readLess": "Leer menos",
+    "openOnImdb": "Abrir en IMDb",
+    "openOnTmdb": "Abrir en TMDb",
+    "openOnTvdb": "Abrir en TVDb"
   },
   "liveTV": {
     "title": "TV en directo",

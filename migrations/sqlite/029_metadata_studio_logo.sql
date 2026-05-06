@@ -1,0 +1,12 @@
+-- +goose Up
+-- Stores the URL of the headline production company / network logo for
+-- the item (e.g. Lucasfilm, HBO, Disney+) so the detail page can
+-- render the studio mark next to the meta chips instead of just the
+-- text name. TMDb returns `logo_path` on each entry of
+-- `production_companies` and `networks`; the scanner picks the first
+-- one (matching the existing `studio` text behaviour) and turns the
+-- relative path into a full image URL via the configured TMDb image
+-- base. Empty string when the company has no logo on TMDb (older
+-- studios, indie productions) so the frontend falls back to the
+-- existing `studio` text.
+ALTER TABLE metadata ADD COLUMN studio_logo_url TEXT NOT NULL DEFAULT '';

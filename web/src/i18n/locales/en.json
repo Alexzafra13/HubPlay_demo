@@ -252,7 +252,14 @@
     "seasons": "Seasons",
     "refreshMetadata": "Refresh metadata",
     "addToFavorites": "Add to favorites",
-    "removeFromFavorites": "Remove from favorites"
+    "removeFromFavorites": "Remove from favorites",
+    "directedBy": "Directed by {{name}}",
+    "writtenBy": "Written by {{name}}",
+    "readMore": "Read more",
+    "readLess": "Read less",
+    "openOnImdb": "Open on IMDb",
+    "openOnTmdb": "Open on TMDb",
+    "openOnTvdb": "Open on TVDb"
   },
   "liveTV": {
     "title": "Live TV",

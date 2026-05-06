@@ -79,7 +79,10 @@ describe("useUserDataSync", () => {
   });
 
   it("invalidates item + progress + continue-watching on user.progress.updated", () => {
-    const { wrapper, invalidateSpy } = makeWrapper();
+    const { wrapper, invalidateSpy, queryClient } = makeWrapper();
+    // Per-item keys only invalidate when something already fetched them.
+    queryClient.setQueryData(queryKeys.item("it-7"), { id: "it-7" });
+    queryClient.setQueryData(queryKeys.progress("it-7"), { position_ticks: 0 });
     renderHook(() => useUserDataSync(), { wrapper });
 
     const es = findInstance("user.progress.updated");
@@ -99,7 +102,8 @@ describe("useUserDataSync", () => {
   });
 
   it("invalidates item + continue-watching + next-up on user.played.toggled", () => {
-    const { wrapper, invalidateSpy } = makeWrapper();
+    const { wrapper, invalidateSpy, queryClient } = makeWrapper();
+    queryClient.setQueryData(queryKeys.item("it-9"), { id: "it-9" });
     renderHook(() => useUserDataSync(), { wrapper });
 
     const es = findInstance("user.played.toggled");
@@ -118,7 +122,8 @@ describe("useUserDataSync", () => {
   });
 
   it("invalidates item + favorites on user.favorite.toggled", () => {
-    const { wrapper, invalidateSpy } = makeWrapper();
+    const { wrapper, invalidateSpy, queryClient } = makeWrapper();
+    queryClient.setQueryData(queryKeys.item("it-3"), { id: "it-3" });
     renderHook(() => useUserDataSync(), { wrapper });
 
     const es = findInstance("user.favorite.toggled");
@@ -133,6 +138,29 @@ describe("useUserDataSync", () => {
     const calls = invalidateSpy.mock.calls.map((c) => c[0]);
     expect(calls).toContainEqual({ queryKey: queryKeys.item("it-3") });
     expect(calls).toContainEqual({ queryKey: queryKeys.favorites });
+  });
+
+  it("skips per-item invalidations when no observer fetched the key, but still refreshes global rails", () => {
+    // Nothing reads items/it-99 or progress/it-99 — the user is on
+    // /home, not on the item detail page. We still want the
+    // continue-watching rail (consumed by Home) to refresh; the
+    // per-item invalidations are wasted work and we elide them.
+    const { wrapper, invalidateSpy } = makeWrapper();
+    renderHook(() => useUserDataSync(), { wrapper });
+
+    const es = findInstance("user.progress.updated");
+    es!.emit(
+      "user.progress.updated",
+      JSON.stringify({
+        type: "user.progress.updated",
+        data: { user_id: "u-1", item_id: "it-99", position_ticks: 99 },
+      }),
+    );
+
+    const calls = invalidateSpy.mock.calls.map((c) => c[0]);
+    expect(calls).not.toContainEqual({ queryKey: queryKeys.item("it-99") });
+    expect(calls).not.toContainEqual({ queryKey: queryKeys.progress("it-99") });
+    expect(calls).toContainEqual({ queryKey: queryKeys.continueWatching });
   });
 
   it("ignores malformed JSON and missing item_id without throwing", () => {

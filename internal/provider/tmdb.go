@@ -145,12 +145,25 @@ func (t *TMDbProvider) GetMetadata(ctx context.Context, externalID string, itemT
 	// Content rating
 	result.ContentRating = detail.ContentRating
 
-	// Studio
+	// Studio + headline logo. The first production company is the
+	// canonical "studio" we already display as text; the same record
+	// carries `logo_path` when TMDb has a brand mark on file (e.g.
+	// Lucasfilm, HBO, Disney+). We resolve it to a w300 absolute URL
+	// once here so the scanner persists a ready-to-render value and
+	// the frontend doesn't need to know about TMDb image bases.
+	// Falls through to `networks` (TV) when the movie/series has no
+	// production company entry.
 	if len(detail.ProductionCompanies) > 0 {
 		result.Studio = detail.ProductionCompanies[0].Name
+		if path := detail.ProductionCompanies[0].LogoPath; path != "" {
+			result.StudioLogoURL = tmdbImageURL + "w300" + path
+		}
 	}
-	if len(detail.Networks) > 0 && result.Studio == "" {
+	if result.Studio == "" && len(detail.Networks) > 0 {
 		result.Studio = detail.Networks[0].Name
+		if path := detail.Networks[0].LogoPath; path != "" {
+			result.StudioLogoURL = tmdbImageURL + "w300" + path
+		}
 	}
 
 	// Genres
@@ -496,8 +509,14 @@ type tmdbDetail struct {
 	VoteAverage         float64 `json:"vote_average"`
 	ContentRating       string  `json:"certification"`
 	Genres              []struct{ Name string `json:"name"` } `json:"genres"`
-	ProductionCompanies []struct{ Name string `json:"name"` } `json:"production_companies"`
-	Networks            []struct{ Name string `json:"name"` } `json:"networks"`
+	ProductionCompanies []struct {
+		Name     string `json:"name"`
+		LogoPath string `json:"logo_path"`
+	} `json:"production_companies"`
+	Networks []struct {
+		Name     string `json:"name"`
+		LogoPath string `json:"logo_path"`
+	} `json:"networks"`
 	Credits             struct {
 		Cast []struct {
 			Name        string `json:"name"`

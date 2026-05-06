@@ -739,14 +739,15 @@ func (s *Scanner) enrichMetadata(ctx context.Context, item *db.Item) {
 	genresJSON, _ := json.Marshal(meta.Genres)
 	tagsJSON, _ := json.Marshal(meta.Tags)
 	if err := s.metadata.Upsert(ctx, &db.Metadata{
-		ItemID:      item.ID,
-		Overview:    meta.Overview,
-		Tagline:     meta.Tagline,
-		Studio:      meta.Studio,
-		GenresJSON:  string(genresJSON),
-		TagsJSON:    string(tagsJSON),
-		TrailerKey:  meta.TrailerKey,
-		TrailerSite: meta.TrailerSite,
+		ItemID:        item.ID,
+		Overview:      meta.Overview,
+		Tagline:       meta.Tagline,
+		Studio:        meta.Studio,
+		GenresJSON:    string(genresJSON),
+		TagsJSON:      string(tagsJSON),
+		TrailerKey:    meta.TrailerKey,
+		TrailerSite:   meta.TrailerSite,
+		StudioLogoURL: meta.StudioLogoURL,
 	}); err != nil {
 		s.logger.Warn("failed to store metadata", "id", item.ID, "error", err)
 	}

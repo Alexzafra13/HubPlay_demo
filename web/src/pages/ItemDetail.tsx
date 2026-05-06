@@ -316,6 +316,7 @@ export default function ItemDetail() {
       ) : (
         <HeroSection
           item={item}
+          people={item.people}
           onPlay={handlePlay}
           onToggleFavorite={handleToggleFavorite}
           isFavorite={isFavorite}

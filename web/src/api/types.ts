@@ -392,6 +392,13 @@ export interface MediaItem {
   // for items without a TMDb match. Rendered next to the meta badges
   // on the series hero so the page reads more like Plex / Jellyfin.
   studio?: string;
+  // Optional brand-mark image URL for the studio (TMDb's logo_path
+  // resolved server-side to an absolute image URL). Present when the
+  // production company has a logo on TMDb (Lucasfilm, HBO, Disney+,
+  // …) and absent otherwise — frontend renders the image when set
+  // and falls back to the `studio` text otherwise so older studios
+  // and indie productions still get attribution.
+  studio_logo_url?: string;
   // Series-only: aggregate of how many episodes the authenticated user
   // has watched out of the total under this show. Computed server-side
   // in the GetItem handler and only present for authenticated calls

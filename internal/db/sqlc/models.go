@@ -338,14 +338,15 @@ type MediaStream struct {
 }
 
 type Metadata struct {
-	ItemID      string         `json:"item_id"`
-	Overview    sql.NullString `json:"overview"`
-	Tagline     sql.NullString `json:"tagline"`
-	Studio      sql.NullString `json:"studio"`
-	GenresJson  sql.NullString `json:"genres_json"`
-	TagsJson    sql.NullString `json:"tags_json"`
-	TrailerKey  string         `json:"trailer_key"`
-	TrailerSite string         `json:"trailer_site"`
+	ItemID        string         `json:"item_id"`
+	Overview      sql.NullString `json:"overview"`
+	Tagline       sql.NullString `json:"tagline"`
+	Studio        sql.NullString `json:"studio"`
+	GenresJson    sql.NullString `json:"genres_json"`
+	TagsJson      sql.NullString `json:"tags_json"`
+	TrailerKey    string         `json:"trailer_key"`
+	TrailerSite   string         `json:"trailer_site"`
+	StudioLogoUrl string         `json:"studio_logo_url"`
 }
 
 type Person struct {
