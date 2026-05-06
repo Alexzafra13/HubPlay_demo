@@ -57,7 +57,15 @@
     "genres": "Generos",
     "categories": "Categorias",
     "views": "Vistas",
-    "browseAll": "Ver todo {{section}}",
+    "libraries": "Bibliotecas",
+    "collections": "Colecciones",
+    "shared": "Compartidas contigo",
+    "favorites": "Canales favoritos",
+    "empty": {
+      "movies": "Aun no hay bibliotecas ni colecciones.",
+      "series": "Aun no hay bibliotecas.",
+      "favorites": "Marca un canal como favorito para verlo aqui."
+    },
     "movies": {
       "all": "Todas las peliculas",
       "recentlyAdded": "Agregadas recientemente",

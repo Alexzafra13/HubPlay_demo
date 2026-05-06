@@ -42,8 +42,6 @@ export type NavItem =
       labelKey: string;
       icon: LucideIcon;
       groups: NavGroup[];
-      /** Show a "Live" pulse dot next to the label (TV en vivo). */
-      livePulse?: boolean;
     };
 
 // Genre presets for movies — labels are HubPlay-style Spanish names,
@@ -148,7 +146,6 @@ export const MAIN_NAV: NavItem[] = [
     to: "/live-tv",
     labelKey: "nav.liveTV",
     icon: Radio,
-    livePulse: true,
     groups: [
       {
         labelKey: "navMenu.views",
