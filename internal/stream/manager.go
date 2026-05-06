@@ -160,12 +160,31 @@ func (m *Manager) StartSession(ctx context.Context, userID, itemID, profileName 
 		return ms, nil
 	}
 
-	// Check concurrent limit
+	// Check global concurrent limit
 	if m.cfg.MaxTranscodeSessions > 0 && len(m.sessions) >= m.cfg.MaxTranscodeSessions {
 		active := len(m.sessions)
 		m.mu.Unlock()
 		m.metrics.TranscodeBusy()
 		return nil, domain.NewTranscodeBusy(active, m.cfg.MaxTranscodeSessions)
+	}
+
+	// Per-user cap. Without this a single user fanning out to many
+	// items / qualities (or repeatedly re-clicking Play during a
+	// flaky network) can soak up the whole global pool. The check
+	// runs while holding the manager mutex so concurrent StartSession
+	// calls from the same user can't both squeeze past it.
+	if m.cfg.MaxTranscodeSessionsPerUser > 0 {
+		var userActive int
+		for _, ms := range m.sessions {
+			if ms.UserID == userID {
+				userActive++
+			}
+		}
+		if userActive >= m.cfg.MaxTranscodeSessionsPerUser {
+			m.mu.Unlock()
+			m.metrics.TranscodeBusy()
+			return nil, domain.NewTranscodeBusy(userActive, m.cfg.MaxTranscodeSessionsPerUser)
+		}
 	}
 	m.mu.Unlock()
 
@@ -201,7 +220,7 @@ func (m *Manager) StartSession(ctx context.Context, userID, itemID, profileName 
 	}
 
 	// Start transcode/remux session
-	session, err := m.transcoder.Start(key, itemID, item.Path, decision.Profile, startTime)
+	session, err := m.transcoder.Start(key, itemID, item.Path, decision.Profile, startTime, decision.CopyVideo, decision.CopyAudio)
 	if err != nil {
 		m.metrics.TranscodeFailed()
 		return nil, fmt.Errorf("start transcode: %w", err)

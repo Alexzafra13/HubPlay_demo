@@ -173,8 +173,14 @@ func TestDecide_DeclaredCaps_RemuxToCompatibleContainer(t *testing.T) {
 	if d.Method != MethodDirectStream {
 		t.Fatalf("h264+aac+mkv with mp4-only client should DirectStream: got %s", d.Method)
 	}
-	if d.Container != "mp4" {
-		t.Errorf("DirectStream output container: got %q want mp4", d.Container)
+	// DirectStream output is HLS-mpegts (the segmenter's native
+	// container), not raw mp4. Both client streams are compatible so
+	// they ride through with stream-copy.
+	if d.Container != "mpegts" {
+		t.Errorf("DirectStream output container: got %q want mpegts", d.Container)
+	}
+	if !d.CopyVideo || !d.CopyAudio {
+		t.Errorf("expected both streams to be copied, got CopyVideo=%v CopyAudio=%v", d.CopyVideo, d.CopyAudio)
 	}
 }
 

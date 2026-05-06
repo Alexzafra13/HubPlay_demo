@@ -12,12 +12,27 @@ const (
 )
 
 // PlaybackDecision is the result of analyzing an item's streams against client capabilities.
+//
+// CopyVideo / CopyAudio describe what ffmpeg should do per stream when
+// the chosen Method requires a session (DirectStream or Transcode):
+//
+//   - CopyVideo=true  → `-c:v copy` (no re-encode, ~5% of full-encode cost)
+//   - CopyVideo=false → re-encode with the configured encoder
+//   - CopyAudio=true  → `-c:a copy` (works only when the codec is in client caps)
+//   - CopyAudio=false → re-encode to AAC stereo (the universal fallback)
+//
+// The flags exist so a common case — "h264 mkv with AC3 / DTS audio
+// the browser can't decode" — can copy the (expensive) video stream
+// untouched and only re-encode the cheap audio. Before this change,
+// that path full-transcoded the video for no reason.
 type PlaybackDecision struct {
 	Method     PlaybackMethod
 	VideoCodec string
 	AudioCodec string
 	Container  string
 	Profile    Profile // transcoding profile if Method == Transcode
+	CopyVideo  bool
+	CopyAudio  bool
 }
 
 // remuxableContainers lists source containers that ffmpeg can repackage
@@ -65,7 +80,17 @@ func Decide(item *db.Item, streams []*db.MediaStream, caps *Capabilities, reques
 	audioOK := audioStream == nil || eff.AudioCodecs[audioStream.Codec]
 	containerOK := containerInSet(item.Container, eff.Containers)
 
-	// DirectPlay: everything is compatible
+	// Profile selection used for any path that touches ffmpeg. For
+	// stream-copy paths the profile only carries HLS-segmenting knobs
+	// (the bitrate / scale fields are ignored when -c:v copy is set).
+	profile := DefaultProfile()
+	if requestedProfile != "" {
+		if p, ok := Profiles[requestedProfile]; ok {
+			profile = p
+		}
+	}
+
+	// DirectPlay: everything is compatible — no ffmpeg session at all.
 	if videoOK && audioOK && containerOK {
 		return PlaybackDecision{
 			Method:     MethodDirectPlay,
@@ -75,30 +100,42 @@ func Decide(item *db.Item, streams []*db.MediaStream, caps *Capabilities, reques
 		}
 	}
 
-	// DirectStream: codecs OK but container needs remuxing (e.g., MKV → MP4)
-	if videoOK && audioOK && remuxableContainers[item.Container] {
+	// DirectStream when the *video* stream is already compatible. This
+	// covers two distinct sub-cases:
+	//
+	//   a) video + audio OK, only the container needs remuxing
+	//      (the classic h264 + AAC + mkv → mp4/HLS case).
+	//   b) video OK, audio NOT OK (AC3 / DTS / TrueHD ripped from
+	//      BluRay), container is one we can remux into HLS.
+	//
+	// Both promote out of the full-transcode path: ffmpeg copies the
+	// video bytes (`-c:v copy`) and only touches audio when the codec
+	// is incompatible. The video stream is by far the most expensive
+	// to re-encode, so this is the difference between "burns a CPU
+	// core for the duration of playback" and "costs essentially
+	// nothing on top of disk I/O".
+	if videoOK && remuxableContainers[item.Container] {
 		return PlaybackDecision{
 			Method:     MethodDirectStream,
 			VideoCodec: videoStream.Codec,
 			AudioCodec: audioCodecName(audioStream),
-			Container:  "mp4",
+			Container:  "mpegts",
+			Profile:    profile,
+			CopyVideo:  true,
+			CopyAudio:  audioOK,
 		}
 	}
 
-	// Transcode
-	profile := DefaultProfile()
-	if requestedProfile != "" {
-		if p, ok := Profiles[requestedProfile]; ok {
-			profile = p
-		}
-	}
-
+	// Transcode: video codec isn't compatible (HEVC, VP9 on a client
+	// without VP9, …). Re-encode everything to the safe defaults.
 	return PlaybackDecision{
 		Method:     MethodTranscode,
 		VideoCodec: "h264",
 		AudioCodec: "aac",
 		Container:  "mpegts",
 		Profile:    profile,
+		CopyVideo:  false,
+		CopyAudio:  false,
 	}
 }
 

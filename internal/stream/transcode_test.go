@@ -63,7 +63,7 @@ func TestTranscoder_Start_InvalidFFmpeg(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	tc := stream.NewTranscoder(dir, "/nonexistent/ffmpeg", 4*time.Hour, stream.HWAccelNone, "libx264", logger)
 
-	_, err := tc.Start("sess-1", "item-1", "/some/video.mkv", stream.DefaultProfile(), 0)
+	_, err := tc.Start("sess-1", "item-1", "/some/video.mkv", stream.DefaultProfile(), 0, false, false)
 	if err == nil {
 		t.Fatal("expected error for invalid ffmpeg path")
 	}
@@ -113,7 +113,7 @@ func TestSession_SegmentPath(t *testing.T) {
 }
 
 func TestBuildFFmpegArgs_Original(t *testing.T) {
-	args := stream.BuildFFmpegArgs("/input.mkv", "/out", stream.Profiles["original"], 0, stream.HWAccelNone, "libx264")
+	args := stream.BuildFFmpegArgs("/input.mkv", "/out", stream.Profiles["original"], 0, stream.HWAccelNone, "libx264", false, false)
 
 	assertContains(t, args, "-c:v", "copy")
 	assertContains(t, args, "-c:a", "copy")
@@ -123,7 +123,7 @@ func TestBuildFFmpegArgs_Original(t *testing.T) {
 }
 
 func TestBuildFFmpegArgs_720p(t *testing.T) {
-	args := stream.BuildFFmpegArgs("/input.mkv", "/out", stream.Profiles["720p"], 0, stream.HWAccelNone, "libx264")
+	args := stream.BuildFFmpegArgs("/input.mkv", "/out", stream.Profiles["720p"], 0, stream.HWAccelNone, "libx264", false, false)
 
 	assertContains(t, args, "-c:v", "libx264")
 	assertContains(t, args, "-b:v", "2500k")
@@ -133,19 +133,19 @@ func TestBuildFFmpegArgs_720p(t *testing.T) {
 }
 
 func TestBuildFFmpegArgs_WithSeek(t *testing.T) {
-	args := stream.BuildFFmpegArgs("/input.mkv", "/out", stream.Profiles["720p"], 30.5, stream.HWAccelNone, "libx264")
+	args := stream.BuildFFmpegArgs("/input.mkv", "/out", stream.Profiles["720p"], 30.5, stream.HWAccelNone, "libx264", false, false)
 
 	assertContains(t, args, "-ss", "30.500")
 }
 
 func TestBuildFFmpegArgs_NoSeekAtZero(t *testing.T) {
-	args := stream.BuildFFmpegArgs("/input.mkv", "/out", stream.Profiles["720p"], 0, stream.HWAccelNone, "libx264")
+	args := stream.BuildFFmpegArgs("/input.mkv", "/out", stream.Profiles["720p"], 0, stream.HWAccelNone, "libx264", false, false)
 
 	assertNotContains(t, args, "-ss")
 }
 
 func TestBuildFFmpegArgs_HLSSettings(t *testing.T) {
-	args := stream.BuildFFmpegArgs("/input.mkv", "/out", stream.Profiles["480p"], 0, stream.HWAccelNone, "libx264")
+	args := stream.BuildFFmpegArgs("/input.mkv", "/out", stream.Profiles["480p"], 0, stream.HWAccelNone, "libx264", false, false)
 
 	assertContains(t, args, "-hls_time", "6")
 	assertContains(t, args, "-hls_list_size", "0")
@@ -155,7 +155,7 @@ func TestBuildFFmpegArgs_HLSSettings(t *testing.T) {
 
 func TestBuildFFmpegArgs_HWAccel_NVENC_PrependsHwaccelAndSwapsEncoder(t *testing.T) {
 	args := stream.BuildFFmpegArgs("/input.mkv", "/out", stream.Profiles["720p"], 0,
-		stream.HWAccelNVENC, "h264_nvenc")
+		stream.HWAccelNVENC, "h264_nvenc", false, false)
 
 	// Encoder swapped from libx264 to the NVENC variant.
 	assertContains(t, args, "-c:v", "h264_nvenc")
@@ -170,7 +170,7 @@ func TestBuildFFmpegArgs_HWAccel_NVENC_PrependsHwaccelAndSwapsEncoder(t *testing
 
 func TestBuildFFmpegArgs_HWAccel_VAAPI_PrependsHwaccel(t *testing.T) {
 	args := stream.BuildFFmpegArgs("/input.mkv", "/out", stream.Profiles["480p"], 0,
-		stream.HWAccelVAAPI, "h264_vaapi")
+		stream.HWAccelVAAPI, "h264_vaapi", false, false)
 	assertContains(t, args, "-c:v", "h264_vaapi")
 	assertContains(t, args, "-hwaccel", "vaapi")
 }
@@ -181,7 +181,7 @@ func TestBuildFFmpegArgs_HWAccel_VideoToolbox_NoInputHwaccelFlag(t *testing.T) {
 	// without prepending any -hwaccel flag — extra flags would just
 	// log a warning and slow ffmpeg's startup.
 	args := stream.BuildFFmpegArgs("/input.mkv", "/out", stream.Profiles["720p"], 0,
-		stream.HWAccelVideoToolbox, "h264_videotoolbox")
+		stream.HWAccelVideoToolbox, "h264_videotoolbox", false, false)
 	assertContains(t, args, "-c:v", "h264_videotoolbox")
 	assertNotContains(t, args, "-hwaccel")
 }
@@ -193,7 +193,7 @@ func TestBuildFFmpegArgs_HWAccel_VideoToolbox_NoInputHwaccelFlag(t *testing.T) {
 // produce. With the prefix the path is always treated verbatim.
 func TestBuildFFmpegArgs_InputUsesFileProtocol(t *testing.T) {
 	args := stream.BuildFFmpegArgs("/path/to/input.mkv", "/out",
-		stream.Profiles["720p"], 0, stream.HWAccelNone, "libx264")
+		stream.Profiles["720p"], 0, stream.HWAccelNone, "libx264", false, false)
 	assertContains(t, args, "-i", "file:/path/to/input.mkv")
 	assertNotContains(t, args, "/path/to/input.mkv") // raw path must NOT appear after -i
 }

@@ -34,15 +34,20 @@ async function resolvePlayerSource(itemId: string): Promise<PlayerSourceInfo> {
   };
 }
 
-// Best-effort session teardown. Failures here are silent — the server
-// has its own session reaper and a missed DELETE just sits idle until
-// then. No user-visible behaviour depends on this resolving.
+// Session teardown. The server's idle reaper still fires after
+// IdleTimeout (~90s), but we shouldn't make every closed tab burn
+// CPU + slot budget waiting for it. The `keepalive` flag lets the
+// fetch survive page unload — chrome / firefox / safari all support
+// it for short bodies, exactly matching our use case (no body, just
+// a DELETE). When the page is alive (closeplayer button, episode
+// switch) the same call works as a normal request.
 async function cleanupSession(itemId: string): Promise<void> {
   try {
     const token = localStorage.getItem("hubplay_access_token");
     await fetch(`/api/v1/stream/${itemId}/session`, {
       method: "DELETE",
       headers: token ? { Authorization: `Bearer ${token}` } : {},
+      keepalive: true,
     });
   } catch {
     // Cleanup is best-effort; ignore network/auth errors.

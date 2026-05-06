@@ -109,14 +109,15 @@ type ObservabilityConfig struct {
 }
 
 type StreamingConfig struct {
-	SegmentDuration      int           `yaml:"segment_duration"`       // seconds, default 6
-	MaxTranscodeSessions int           `yaml:"max_transcode_sessions"` // default 2
-	TranscodePreset      string        `yaml:"transcode_preset"`       // veryfast, fast, medium
-	DefaultAudioBitrate  string        `yaml:"default_audio_bitrate"`  // e.g. "192k"
-	CacheDir             string        `yaml:"cache_dir"`              // directory for transcode output
-	IdleTimeout          time.Duration `yaml:"idle_timeout"`           // cleanup idle sessions, default 5m
-	TranscodeTimeout     time.Duration `yaml:"transcode_timeout"`      // max duration per transcode, default 4h
-	HWAccel              HWAccelConfig `yaml:"hardware_acceleration"`
+	SegmentDuration             int           `yaml:"segment_duration"`                 // seconds, default 6
+	MaxTranscodeSessions        int           `yaml:"max_transcode_sessions"`           // global cap, default 4
+	MaxTranscodeSessionsPerUser int           `yaml:"max_transcode_sessions_per_user"`  // per-user cap, default 2 — prevents one user soaking the whole pool with seek-loops or fanout
+	TranscodePreset             string        `yaml:"transcode_preset"`                 // veryfast, fast, medium
+	DefaultAudioBitrate         string        `yaml:"default_audio_bitrate"`            // e.g. "192k"
+	CacheDir                    string        `yaml:"cache_dir"`                        // directory for transcode output
+	IdleTimeout                 time.Duration `yaml:"idle_timeout"`                     // cleanup idle sessions, default 90s
+	TranscodeTimeout            time.Duration `yaml:"transcode_timeout"`                // max duration per transcode, default 4h
+	HWAccel                     HWAccelConfig `yaml:"hardware_acceleration"`
 }
 
 type HWAccelConfig struct {
@@ -279,13 +280,14 @@ func defaults() *Config {
 			TrustedSubnets: []string{"127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"},
 		},
 		Streaming: StreamingConfig{
-			SegmentDuration:      6,
-			MaxTranscodeSessions: 4,
-			TranscodePreset:      "veryfast",
-			DefaultAudioBitrate:  "192k",
-			CacheDir:             "",
-			IdleTimeout:          5 * time.Minute,
-			TranscodeTimeout:     4 * time.Hour,
+			SegmentDuration:             6,
+			MaxTranscodeSessions:        4,
+			MaxTranscodeSessionsPerUser: 2,
+			TranscodePreset:             "veryfast",
+			DefaultAudioBitrate:         "192k",
+			CacheDir:                    "",
+			IdleTimeout:                 90 * time.Second,
+			TranscodeTimeout:            4 * time.Hour,
 			HWAccel: HWAccelConfig{
 				Enabled:   false,
 				Preferred: "auto",
