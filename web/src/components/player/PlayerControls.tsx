@@ -126,6 +126,14 @@ const SeekBar: FC<{
   const [hoverX, setHoverX] = useState(0);
   const [trackWidth, setTrackWidth] = useState(0);
 
+  // Chapter-tick hover state, separate from the trickplay-cursor
+  // tracking above. Only the index is needed because the marker
+  // owns its own X position via the absolute `left` percentage.
+  // Native `title` was already on each tick but the browser tooltip
+  // takes ~1s to appear and styles like 1998 — this gives an
+  // instant, on-brand pill above the seek bar.
+  const [hoveredChapter, setHoveredChapter] = useState<number | null>(null);
+
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!trickplay || duration <= 0) return;
     const rect = trackRef.current?.getBoundingClientRect();
@@ -138,6 +146,7 @@ const SeekBar: FC<{
 
   const handleMouseLeave = () => {
     setHoverTime(null);
+    setHoveredChapter(null);
   };
 
   return (
@@ -186,21 +195,46 @@ const SeekBar: FC<{
             Skipping the 0-second marker (no UI value: the bar itself
             starts there) and any marker that lands past the end
             (defensive: a re-encode that shrunk the file shouldn't
-            paint ticks off the visible bar). The `<title>` SVG-style
-            attribute is honoured by the browser as a hover tooltip. */}
+            paint ticks off the visible bar). Hover renders a styled
+            tooltip with the chapter title + timecode just above the
+            tick — replaces the native `title` attribute which had a
+            ~1s delay and looked unstyled. */}
         {duration > 0 && chapters?.map((c, i) => {
           if (c.startSeconds <= 0 || c.startSeconds >= duration) return null;
           const left = (c.startSeconds / duration) * 100;
+          // Slightly wider hit-target (4px) under a thinner visible
+          // tick (2px) so the hover doesn't feel pixel-precise.
           return (
             <div
               key={i}
-              className="absolute top-1/2 -translate-y-1/2 h-2 w-0.5 bg-white/80 pointer-events-auto"
+              className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 h-3 w-1 cursor-pointer pointer-events-auto"
               style={{ left: `${left}%` }}
-              title={c.title || `Chapter ${i + 1}`}
-              aria-hidden="true"
-            />
+              onMouseEnter={() => setHoveredChapter(i)}
+              onMouseLeave={() => setHoveredChapter((cur) => (cur === i ? null : cur))}
+              aria-label={c.title || `Chapter ${i + 1}`}
+            >
+              <div
+                className={[
+                  "absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 h-2 w-0.5 transition-all duration-150",
+                  hoveredChapter === i
+                    ? "bg-white h-3 w-[3px]"
+                    : "bg-white/80",
+                ].join(" ")}
+              />
+            </div>
           );
         })}
+        {/* Active chapter tooltip. Anchored above the seek bar at the
+            tick's percentage. Skipping when hovering the 0 index
+            because the early-return above filters those ticks; index
+            check just guards against a stale state. */}
+        {duration > 0 && hoveredChapter != null && chapters?.[hoveredChapter] && (
+          <ChapterTooltip
+            title={chapters[hoveredChapter].title || `Chapter ${hoveredChapter + 1}`}
+            time={chapters[hoveredChapter].startSeconds}
+            leftPercent={(chapters[hoveredChapter].startSeconds / duration) * 100}
+          />
+        )}
         {/* Thumb */}
         <div
           className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 h-3 w-3 bg-accent rounded-full opacity-0 group-hover/seek:opacity-100 transition-opacity duration-150"
@@ -275,6 +309,37 @@ const TrickplayTooltip: FC<{
     </div>
   );
 };
+
+// Chapter tooltip — appears above the seek bar when the user hovers a
+// chapter tick. Anchored at the tick's percentage along the bar
+// (translateX(-50%) centres it on that x); clamped via inline style
+// to stay within the track width using `max(8px, min(...))` so the
+// first-and-last chapters don't overflow either edge of the player
+// chrome. Pointer-events disabled so the tooltip never steals hover
+// from the seek bar itself — leaving the tick re-shows the trickplay
+// preview seamlessly.
+const ChapterTooltip: FC<{
+  title: string;
+  time: number;
+  leftPercent: number;
+}> = ({ title, time, leftPercent }) => (
+  <div
+    className="absolute bottom-full mb-3 pointer-events-none -translate-x-1/2 z-20"
+    style={{
+      left: `clamp(70px, ${leftPercent}%, calc(100% - 70px))`,
+    }}
+    aria-hidden="true"
+  >
+    <div className="flex flex-col items-center gap-0.5 rounded-md border border-border/70 bg-black/85 px-2.5 py-1.5 shadow-lg shadow-black/50 backdrop-blur-sm">
+      <span className="text-xs font-semibold text-white whitespace-nowrap max-w-[220px] truncate">
+        {title}
+      </span>
+      <span className="text-[10px] font-medium text-white/70 tabular-nums">
+        {formatHMS(time)}
+      </span>
+    </div>
+  </div>
+);
 
 function formatHMS(s: number): string {
   if (!isFinite(s) || s < 0) return "0:00";

@@ -60,6 +60,13 @@ interface ExternalIdRowProps {
  * Renders the IMDb / TMDb / TVDb mini-chip row. Returns null when no
  * external ids were persisted so callers don't have to gate the
  * surrounding spacing manually.
+ *
+ * Chips carry brand colours instead of plain text — IMDb's signature
+ * yellow, TMDb's dark-blue/green pill — so the row reads at a glance
+ * the way Plex / Letterboxd surface external links. The TMDb chip
+ * also shows the rating inline (`community_rating` IS TMDb's
+ * vote_average); IMDb's rating isn't on the wire (no free API for
+ * IMDb), so its chip stays as a deep-link only.
  */
 export function ExternalIdRow({ item }: ExternalIdRowProps) {
   const { t } = useTranslation();
@@ -82,13 +89,53 @@ export function ExternalIdRow({ item }: ExternalIdRowProps) {
           target="_blank"
           rel="noopener noreferrer"
           aria-label={t(`itemDetail.${link.label}`)}
-          className="rounded-md border border-border/60 bg-bg-card/40 px-2 py-1 text-xs font-semibold text-text-secondary transition-colors hover:border-border hover:bg-bg-elevated hover:text-text-primary backdrop-blur-sm"
+          className="inline-flex items-center gap-1.5 rounded-md transition-transform hover:scale-[1.04]"
         >
-          {link.text}
+          <ProviderBadge provider={link.key} />
+          {link.key === "tmdb" && item.community_rating != null && (
+            <span className="text-xs font-semibold text-text-primary/85 tabular-nums">
+              {item.community_rating.toFixed(1)}
+            </span>
+          )}
         </a>
       ))}
     </div>
   );
+}
+
+// Per-provider brand mark. Inline SVG/CSS so we don't depend on a
+// third-party logo dependency or ship binary assets — each is small
+// enough to sit next to the rating without bloating the bundle.
+// Colours match the official press kits (IMDb yellow #F5C518, TMDb
+// dark teal-blue #032541 with a #01B4E4 accent).
+function ProviderBadge({ provider }: { provider: string }) {
+  switch (provider) {
+    case "imdb":
+      return (
+        <span className="inline-flex h-5 items-center rounded-[3px] bg-[#F5C518] px-1.5 text-[11px] font-extrabold leading-none tracking-tight text-black">
+          IMDb
+        </span>
+      );
+    case "tmdb":
+      return (
+        <span className="inline-flex h-5 items-center gap-[2px] rounded-[3px] bg-[#032541] px-1.5 text-[10px] font-extrabold leading-none tracking-tight">
+          <span className="text-white">TM</span>
+          <span className="text-[#01B4E4]">DB</span>
+        </span>
+      );
+    case "tvdb":
+      return (
+        <span className="inline-flex h-5 items-center rounded-[3px] bg-[#6CD491] px-1.5 text-[11px] font-extrabold leading-none tracking-tight text-[#0a3d28]">
+          TVDB
+        </span>
+      );
+    default:
+      return (
+        <span className="inline-flex h-5 items-center rounded-[3px] bg-bg-elevated px-1.5 text-[11px] font-bold leading-none text-text-primary">
+          {provider}
+        </span>
+      );
+  }
 }
 
 // ─── Overview with read-more toggle ─────────────────────────────────────
@@ -161,18 +208,29 @@ interface StudioMarkProps {
  * scanner persisted one (TMDb's `production_companies[].logo_path`
  * resolved server-side); otherwise falls back to the studio name as
  * dim text — older studios with no TMDb logo still get attribution.
- * The leading "·" only appears with the text fallback so the image
- * reads as its own visual element.
+ *
+ * The image is wrapped in a translucent white pill: TMDb logos come
+ * with transparent backgrounds and arbitrary foreground colour (Marvel
+ * black, Lucasfilm sometimes white, Disney blue, Pixar yellow…). On a
+ * dark hero background that meant black logos were near-invisible.
+ * The pill gives every logo a consistent, contrasting backdrop —
+ * reads like a "credit card" lifted off the artwork.
  */
 export function StudioMark({ studio, studioLogoUrl }: StudioMarkProps) {
   if (studioLogoUrl) {
     return (
-      <img
-        src={studioLogoUrl}
-        alt={studio ?? ""}
-        className="ml-1 h-5 w-auto max-w-[120px] object-contain opacity-80"
-        loading="lazy"
-      />
+      <span
+        className="ml-1 inline-flex items-center rounded-md bg-white/95 px-2 py-1 shadow-sm shadow-black/30"
+        aria-label={studio}
+        title={studio}
+      >
+        <img
+          src={studioLogoUrl}
+          alt={studio ?? ""}
+          className="h-5 w-auto max-w-[140px] object-contain sm:h-6"
+          loading="lazy"
+        />
+      </span>
     );
   }
   if (studio) {
