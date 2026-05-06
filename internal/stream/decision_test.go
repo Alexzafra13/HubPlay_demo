@@ -30,8 +30,33 @@ func TestDecide_DirectStream_MKV_H264_AAC(t *testing.T) {
 	if d.Method != MethodDirectStream {
 		t.Errorf("expected DirectStream, got %s", d.Method)
 	}
-	if d.Container != "mp4" {
-		t.Errorf("expected mp4 container, got %s", d.Container)
+	// Both streams compatible — copy them through, no re-encode at all.
+	if !d.CopyVideo || !d.CopyAudio {
+		t.Errorf("expected CopyVideo+CopyAudio both true, got CopyVideo=%v CopyAudio=%v", d.CopyVideo, d.CopyAudio)
+	}
+}
+
+// h264 video with AC3 / DTS audio in mkv: the BluRay-rip case. Pre-fix
+// this hit MethodTranscode and re-encoded the (expensive) video for
+// no reason — the video stream is already client-compatible. The fix
+// promotes this to DirectStream with CopyVideo=true, CopyAudio=false:
+// ffmpeg copies video bytes and only re-encodes the (cheap) audio.
+func TestDecide_DirectStream_VideoCopyAudioReencode_AC3(t *testing.T) {
+	item := &db.Item{Container: "matroska"}
+	streams := []*db.MediaStream{
+		{StreamType: "video", Codec: "h264", IsDefault: true},
+		{StreamType: "audio", Codec: "ac3", IsDefault: true},
+	}
+
+	d := Decide(item, streams, nil, "")
+	if d.Method != MethodDirectStream {
+		t.Errorf("expected DirectStream (video copy + audio reencode), got %s", d.Method)
+	}
+	if !d.CopyVideo {
+		t.Error("expected CopyVideo=true (video stream is client-compatible)")
+	}
+	if d.CopyAudio {
+		t.Error("expected CopyAudio=false (AC3 not in default web caps, audio must be reencoded)")
 	}
 }
 
@@ -48,7 +73,9 @@ func TestDecide_Transcode_HEVC(t *testing.T) {
 	}
 }
 
-func TestDecide_Transcode_IncompatibleAudio(t *testing.T) {
+// Mirror of the AC3 test for DTS — same outcome, just a different
+// audio codec the browser can't decode natively.
+func TestDecide_DirectStream_VideoCopyAudioReencode_DTS(t *testing.T) {
 	item := &db.Item{Container: "matroska"}
 	streams := []*db.MediaStream{
 		{StreamType: "video", Codec: "h264", IsDefault: true},
@@ -56,8 +83,14 @@ func TestDecide_Transcode_IncompatibleAudio(t *testing.T) {
 	}
 
 	d := Decide(item, streams, nil, "")
-	if d.Method != MethodTranscode {
-		t.Errorf("expected Transcode, got %s", d.Method)
+	if d.Method != MethodDirectStream {
+		t.Errorf("expected DirectStream (video copy + audio reencode), got %s", d.Method)
+	}
+	if !d.CopyVideo {
+		t.Error("expected CopyVideo=true")
+	}
+	if d.CopyAudio {
+		t.Error("expected CopyAudio=false (DTS not supported)")
 	}
 }
 

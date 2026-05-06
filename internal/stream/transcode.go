@@ -65,7 +65,12 @@ func NewTranscoder(baseDir, ffmpegPath string, transcodeTimeout time.Duration, h
 }
 
 // Start begins a new HLS transcoding session.
-func (t *Transcoder) Start(sessionID, itemID, inputPath string, profile Profile, startTime float64) (*Session, error) {
+//
+// `copyVideo` / `copyAudio` request stream-copy on the corresponding
+// track. Pass false on both for the historical full-transcode path.
+// The DirectStream decision sets copyVideo=true (always) and
+// copyAudio=true when the audio codec also matches the client.
+func (t *Transcoder) Start(sessionID, itemID, inputPath string, profile Profile, startTime float64, copyVideo, copyAudio bool) (*Session, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -82,7 +87,7 @@ func (t *Transcoder) Start(sessionID, itemID, inputPath string, profile Profile,
 
 	ctx, cancel := context.WithTimeout(context.Background(), t.transcodeTimeout)
 
-	args := BuildFFmpegArgs(inputPath, outputDir, profile, startTime, t.hwAccel, t.encoder)
+	args := BuildFFmpegArgs(inputPath, outputDir, profile, startTime, t.hwAccel, t.encoder, copyVideo, copyAudio)
 	cmd := exec.CommandContext(ctx, t.ffmpeg, args...)
 	cmd.Dir = outputDir
 
@@ -200,12 +205,26 @@ func (s *Session) SegmentPath(index int) string {
 // the encoder. That's slower than a fully-on-device pipeline (vaapi
 // scale_vaapi etc.) but works without rewriting the filter graph and
 // matches what Plex/Jellyfin do for "general purpose" HW transcoding.
-func BuildFFmpegArgs(input, outputDir string, profile Profile, startTime float64, hwAccel HWAccelType, encoder string) []string {
+//
+// `copyVideo` / `copyAudio` request stream-copy on the corresponding
+// track — used by the DirectStream path when the source codec is
+// already client-compatible and only the container or the sibling
+// track needs ffmpeg work. The historical `profile.Name == "original"`
+// shortcut still implies both copy=true (kept for the rare callers
+// that pre-date the flags).
+func BuildFFmpegArgs(input, outputDir string, profile Profile, startTime float64, hwAccel HWAccelType, encoder string, copyVideo, copyAudio bool) []string {
 	if encoder == "" {
 		encoder = "libx264"
 	}
 	manifestPath := filepath.Join(outputDir, "stream.m3u8")
 	segmentPattern := filepath.Join(outputDir, "segment%05d.ts")
+
+	// Legacy shortcut: callers passing the "original" profile expect
+	// both streams copied without thinking about the flags.
+	if profile.Name == "original" {
+		copyVideo = true
+		copyAudio = true
+	}
 
 	args := []string{
 		"-hide_banner",
@@ -214,8 +233,12 @@ func BuildFFmpegArgs(input, outputDir string, profile Profile, startTime float64
 
 	// Hardware-accelerated decode flags go BEFORE -i. Skipped for
 	// libx264 / VideoToolbox (the latter only provides an encoder,
-	// no decoder pipeline worth declaring here).
-	args = append(args, HWAccelInputArgs(hwAccel)...)
+	// no decoder pipeline worth declaring here). For pure stream-copy
+	// runs (copyVideo=true) we also skip them — there is no decode
+	// happening, so an accel context just adds setup cost for nothing.
+	if !copyVideo {
+		args = append(args, HWAccelInputArgs(hwAccel)...)
+	}
 
 	// Seek if needed
 	if startTime > 0 {
@@ -232,8 +255,8 @@ func BuildFFmpegArgs(input, outputDir string, profile Profile, startTime float64
 	// that we never have to think about it again.
 	args = append(args, "-i", "file:"+input)
 
-	// Video encoding
-	if profile.Name == "original" {
+	// Video
+	if copyVideo {
 		args = append(args, "-c:v", "copy")
 	} else {
 		// Encoder-specific tuning. libx264 wants -preset/-tune; the
@@ -257,8 +280,8 @@ func BuildFFmpegArgs(input, outputDir string, profile Profile, startTime float64
 		)
 	}
 
-	// Audio encoding
-	if profile.Name == "original" {
+	// Audio
+	if copyAudio {
 		args = append(args, "-c:a", "copy")
 	} else {
 		args = append(args,
