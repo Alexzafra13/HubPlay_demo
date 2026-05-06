@@ -225,6 +225,7 @@
     "cancel": "Cancel auto-play"
   },
   "playerControls": {
+    "endsAt": "Ends at {{time}}",
     "quality": "Quality",
     "qualityAuto": "Auto",
     "audio": "Audio",

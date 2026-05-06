@@ -274,6 +274,7 @@ export default function ItemDetail() {
           directUrl={playerInfo.directUrl}
           playbackMethod={playerInfo.playbackMethod}
           title={item.title}
+          logoUrl={item.logo_url ?? undefined}
           knownDuration={
             item.duration_ticks
               ? item.duration_ticks / 10_000_000
