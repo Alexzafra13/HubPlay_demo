@@ -52,6 +52,10 @@ func (m *fakeStreamManager) GetSession(key string) (*stream.ManagedSession, bool
 	return s, ok
 }
 
+func (m *fakeStreamManager) RestartSessionAt(key string, segmentIndex int, segmentDuration float64) error {
+	return nil
+}
+
 func (m *fakeStreamManager) StopSession(key string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

@@ -84,6 +84,11 @@ type LibraryAccessService interface {
 type StreamManagerService interface {
 	StartSession(ctx context.Context, userID, itemID, profileName string, caps *stream.Capabilities, startTime float64) (*stream.ManagedSession, error)
 	GetSession(key string) (*stream.ManagedSession, bool)
+	// RestartSessionAt re-spawns the ffmpeg behind an active session
+	// so it begins encoding at `segmentIndex * segmentDuration`.
+	// Used by the segment handler when the player asks for a
+	// far-future segment that the existing ffmpeg run hasn't reached.
+	RestartSessionAt(key string, segmentIndex int, segmentDuration float64) error
 	StopSession(key string)
 	ActiveSessions() int
 }
