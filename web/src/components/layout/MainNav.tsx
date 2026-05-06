@@ -294,7 +294,7 @@ function DropdownPanel({
       />
       <div
         className="relative rounded-2xl border border-border bg-bg-overlay/95 backdrop-blur-2xl shadow-2xl shadow-black/50 overflow-hidden"
-        style={{ minWidth: totalCols >= 3 ? 680 : 460 }}
+        style={{ minWidth: totalCols >= 3 ? 720 : 460 }}
       >
         <div
           className="grid gap-x-8 gap-y-2 p-5"
@@ -475,7 +475,11 @@ function SectionExtra({
 const EXTRA_LIST_LIMIT = 6;
 
 function ExtraColumn({ children }: { children: React.ReactNode }) {
-  return <div className="min-w-[220px] flex flex-col gap-3">{children}</div>;
+  // No fixed min-width — the grid track (panel 720 - p-5 - gaps,
+  // divided by 3 ≈ 205px) sets the column width. A static min-w would
+  // overflow when bigger than the track and clip the row's hover
+  // background corners against the panel's overflow-hidden.
+  return <div className="min-w-0 flex flex-col gap-3">{children}</div>;
 }
 
 function ExtraSubheader({ labelKey }: { labelKey: string }) {
@@ -523,6 +527,29 @@ function ExtraEmpty({ labelKey }: { labelKey: string }) {
   );
 }
 
+function ExtraSeeAll({
+  to,
+  labelKey,
+  onClick,
+}: {
+  to: string;
+  labelKey: string;
+  onClick: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <NavLink
+      to={to}
+      onClick={onClick}
+      role="menuitem"
+      className="mt-0.5 flex items-center justify-between px-2 py-1.5 rounded-md text-[12px] font-medium text-accent hover:bg-bg-hover transition-colors"
+    >
+      <span>{t(labelKey)}</span>
+      <span aria-hidden>→</span>
+    </NavLink>
+  );
+}
+
 // ─── Movies extra: libraries + collections + peers ──────────────────
 
 function MoviesExtra({ onItemClick }: { onItemClick: () => void }) {
@@ -560,7 +587,7 @@ function MoviesExtra({ onItemClick }: { onItemClick: () => void }) {
             {movieLibs.slice(0, EXTRA_LIST_LIMIT).map((lib) => (
               <li key={lib.id}>
                 <ExtraRow
-                  to={`/libraries/${lib.id}`}
+                  to={`/movies?library_id=${encodeURIComponent(lib.id)}`}
                   onClick={onItemClick}
                   label={lib.name}
                 />
@@ -585,6 +612,11 @@ function MoviesExtra({ onItemClick }: { onItemClick: () => void }) {
               </li>
             ))}
           </ul>
+          <ExtraSeeAll
+            to="/collections"
+            labelKey="navMenu.seeAll.collections"
+            onClick={onItemClick}
+          />
         </div>
       )}
 
@@ -645,7 +677,7 @@ function SeriesExtra({ onItemClick }: { onItemClick: () => void }) {
             {seriesLibs.slice(0, EXTRA_LIST_LIMIT).map((lib) => (
               <li key={lib.id}>
                 <ExtraRow
-                  to={`/libraries/${lib.id}`}
+                  to={`/series?library_id=${encodeURIComponent(lib.id)}`}
                   onClick={onItemClick}
                   label={lib.name}
                 />
@@ -694,18 +726,25 @@ function LiveTvExtra({ onItemClick }: { onItemClick: () => void }) {
       <div>
         <ExtraSubheader labelKey="navMenu.favorites" />
         {top.length > 0 ? (
-          <ul className="flex flex-col">
-            {top.map((ch: Channel) => (
-              <li key={ch.id}>
-                <ExtraRow
-                  to={`/live-tv?channel=${encodeURIComponent(ch.id)}`}
-                  onClick={onItemClick}
-                  leading={<ChannelLogo url={ch.logo_url} alt={ch.name} />}
-                  label={ch.name}
-                />
-              </li>
-            ))}
-          </ul>
+          <>
+            <ul className="flex flex-col">
+              {top.map((ch: Channel) => (
+                <li key={ch.id}>
+                  <ExtraRow
+                    to={`/live-tv?channel=${encodeURIComponent(ch.id)}`}
+                    onClick={onItemClick}
+                    leading={<ChannelLogo url={ch.logo_url} alt={ch.name} />}
+                    label={ch.name}
+                  />
+                </li>
+              ))}
+            </ul>
+            <ExtraSeeAll
+              to="/live-tv?tab=favorites"
+              labelKey="navMenu.seeAll.favorites"
+              onClick={onItemClick}
+            />
+          </>
         ) : (
           <ExtraEmpty labelKey="navMenu.empty.favorites" />
         )}
