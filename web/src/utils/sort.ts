@@ -18,7 +18,18 @@ export function sortItems(items: MediaItem[], sort: SortOption): MediaItem[] {
   const sorted = [...items];
   switch (sort) {
     case "title":
-      return sorted.sort((a, b) => a.sort_title.localeCompare(b.sort_title));
+      // `sort_title` is the article-stripped variant the backend
+      // computes for SQL ORDER BY ("the matrix" → "matrix"). It only
+      // ships on endpoints that include it explicitly — some older
+      // surfaces (federation peer items, the latest rail before the
+      // recent fix) only carry `title`. Fall back so a missing
+      // sort_title doesn't crash the grid with
+      // "Cannot read properties of undefined (reading 'localeCompare')".
+      return sorted.sort((a, b) =>
+        (a.sort_title ?? a.title ?? "").localeCompare(
+          b.sort_title ?? b.title ?? "",
+        ),
+      );
     case "year":
       return sorted.sort((a, b) => (b.year ?? 0) - (a.year ?? 0));
     case "added":
