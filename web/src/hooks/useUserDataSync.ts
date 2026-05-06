@@ -1,7 +1,19 @@
 import { useCallback } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, type QueryClient, type QueryKey } from "@tanstack/react-query";
 import { useUserEventStream } from "./useUserEventStream";
 import { queryKeys } from "@/api/queryKeys";
+
+// Per-item keys (item(id), progress(id)) are only worth invalidating when
+// some component actually fetched them — otherwise we are scheduling a
+// refetch on a query nobody observes, which still costs a predicate match
+// per pending invalidation. Global rails (continue-watching, next-up,
+// favorites) are different: Home consumes them on every login, so they
+// must always be marked stale regardless of the active route.
+function invalidateIfCached(qc: QueryClient, queryKey: QueryKey) {
+  if (qc.getQueryData(queryKey) !== undefined) {
+    qc.invalidateQueries({ queryKey });
+  }
+}
 
 // Cross-device sync orchestrator. Mounts the three user-scoped SSE
 // subscriptions (progress / played / favourite) and translates each
@@ -52,8 +64,8 @@ export function useUserDataSync({ enabled = true }: { enabled?: boolean } = {}) 
       const data = parsePayload(raw);
       const itemId = typeof data?.item_id === "string" ? data.item_id : null;
       if (!itemId) return;
-      queryClient.invalidateQueries({ queryKey: queryKeys.item(itemId) });
-      queryClient.invalidateQueries({ queryKey: queryKeys.progress(itemId) });
+      invalidateIfCached(queryClient, queryKeys.item(itemId));
+      invalidateIfCached(queryClient, queryKeys.progress(itemId));
       queryClient.invalidateQueries({ queryKey: queryKeys.continueWatching });
     },
     [queryClient],
@@ -64,7 +76,7 @@ export function useUserDataSync({ enabled = true }: { enabled?: boolean } = {}) 
       const data = parsePayload(raw);
       const itemId = typeof data?.item_id === "string" ? data.item_id : null;
       if (!itemId) return;
-      queryClient.invalidateQueries({ queryKey: queryKeys.item(itemId) });
+      invalidateIfCached(queryClient, queryKeys.item(itemId));
       queryClient.invalidateQueries({ queryKey: queryKeys.continueWatching });
       queryClient.invalidateQueries({ queryKey: queryKeys.nextUp });
     },
@@ -76,7 +88,7 @@ export function useUserDataSync({ enabled = true }: { enabled?: boolean } = {}) 
       const data = parsePayload(raw);
       const itemId = typeof data?.item_id === "string" ? data.item_id : null;
       if (!itemId) return;
-      queryClient.invalidateQueries({ queryKey: queryKeys.item(itemId) });
+      invalidateIfCached(queryClient, queryKeys.item(itemId));
       queryClient.invalidateQueries({ queryKey: queryKeys.favorites });
     },
     [queryClient],

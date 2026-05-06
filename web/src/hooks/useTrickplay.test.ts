@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { createElement, type ReactNode } from "react";
 import { useTrickplay, type TrickplayManifest } from "./useTrickplay";
 
 const sampleManifest: TrickplayManifest = {
@@ -11,6 +13,15 @@ const sampleManifest: TrickplayManifest = {
   total: 100,
 };
 
+function makeWrapper() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: 0, staleTime: 0 } },
+  });
+  const wrapper = ({ children }: { children: ReactNode }) =>
+    createElement(QueryClientProvider, { client: queryClient }, children);
+  return { wrapper, queryClient };
+}
+
 beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn());
 });
@@ -20,8 +31,9 @@ afterEach(() => {
 });
 
 describe("useTrickplay", () => {
-  it("returns unavailable + does not fetch when itemId is empty", () => {
-    const { result } = renderHook(() => useTrickplay(""));
+  it("returns unavailable + does not fetch when itemId is empty", async () => {
+    const { wrapper } = makeWrapper();
+    const { result } = renderHook(() => useTrickplay(""), { wrapper });
     expect(fetch).not.toHaveBeenCalled();
     expect(result.current).toEqual({
       manifest: null,
@@ -37,7 +49,8 @@ describe("useTrickplay", () => {
       json: () => Promise.resolve({ data: sampleManifest }),
     });
 
-    const { result } = renderHook(() => useTrickplay("item-42"));
+    const { wrapper } = makeWrapper();
+    const { result } = renderHook(() => useTrickplay("item-42"), { wrapper });
     await waitFor(() => expect(result.current.available).toBe(true));
 
     expect(result.current.manifest).toEqual(sampleManifest);
@@ -62,7 +75,8 @@ describe("useTrickplay", () => {
       json: () => Promise.resolve(sampleManifest),
     });
 
-    const { result } = renderHook(() => useTrickplay("item-bare"));
+    const { wrapper } = makeWrapper();
+    const { result } = renderHook(() => useTrickplay("item-bare"), { wrapper });
     await waitFor(() => expect(result.current.available).toBe(true));
     expect(result.current.manifest).toEqual(sampleManifest);
   });
@@ -74,8 +88,8 @@ describe("useTrickplay", () => {
       json: () => Promise.resolve({}),
     });
 
-    const { result } = renderHook(() => useTrickplay("item-503"));
-    // Microtask drain — catch() runs immediately on rejection.
+    const { wrapper } = makeWrapper();
+    const { result } = renderHook(() => useTrickplay("item-503"), { wrapper });
     await waitFor(() =>
       expect(result.current).toEqual({
         manifest: null,
@@ -90,24 +104,39 @@ describe("useTrickplay", () => {
       new Error("network"),
     );
 
-    const { result } = renderHook(() => useTrickplay("item-net"));
+    const { wrapper } = makeWrapper();
+    const { result } = renderHook(() => useTrickplay("item-net"), { wrapper });
     await waitFor(() => expect(result.current.available).toBe(false));
     expect(result.current.manifest).toBeNull();
   });
 
-  it("aborts the fetch on unmount so a fast nav doesn't leak in-flight requests", () => {
-    const abortSpy = vi.fn();
-    (fetch as ReturnType<typeof vi.fn>).mockImplementation((_url, init) => {
-      const sig = (init as { signal?: AbortSignal }).signal;
-      sig?.addEventListener("abort", abortSpy);
-      // Return a never-resolving promise so the fetch is genuinely
-      // in-flight when the hook unmounts.
-      return new Promise(() => {});
+  // The cold-start ffmpeg pass is 5-30s; coming back to the same item
+  // within a session must not re-pay it. This is the whole reason the
+  // hook moved to TanStack Query.
+  it("reuses the cached manifest on a remount of the same item", async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ data: sampleManifest }),
     });
 
-    const { unmount } = renderHook(() => useTrickplay("item-leak"));
-    unmount();
-    expect(abortSpy).toHaveBeenCalled();
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false, staleTime: 5 * 60_000 },
+      },
+    });
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(QueryClientProvider, { client: queryClient }, children);
+
+    const first = renderHook(() => useTrickplay("item-cache"), { wrapper });
+    await waitFor(() => expect(first.result.current.available).toBe(true));
+    expect(fetch).toHaveBeenCalledTimes(1);
+    first.unmount();
+
+    const second = renderHook(() => useTrickplay("item-cache"), { wrapper });
+    // Cached: no second network call, manifest immediately available.
+    await waitFor(() => expect(second.result.current.available).toBe(true));
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(second.result.current.manifest).toEqual(sampleManifest);
   });
 
   it("re-fetches when itemId changes", async () => {
@@ -121,9 +150,10 @@ describe("useTrickplay", () => {
         json: () => Promise.resolve({ data: sampleManifest }),
       });
 
+    const { wrapper } = makeWrapper();
     const { result, rerender } = renderHook(
       ({ id }: { id: string }) => useTrickplay(id),
-      { initialProps: { id: "first" } },
+      { initialProps: { id: "first" }, wrapper },
     );
     await waitFor(() => expect(result.current.available).toBe(true));
     expect(result.current.spriteURL).toBe("/api/v1/items/first/trickplay.png");
@@ -145,11 +175,13 @@ describe("useTrickplay", () => {
       ok: true,
       json: () => Promise.resolve({ data: sampleManifest }),
     });
-    renderHook(() => useTrickplay("weird/id with space"));
+    const { wrapper } = makeWrapper();
+    renderHook(() => useTrickplay("weird/id with space"), { wrapper });
     await waitFor(() => expect(fetch).toHaveBeenCalled());
     const calledWith = (fetch as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(calledWith).toBe(
       "/api/v1/items/weird%2Fid%20with%20space/trickplay.json",
     );
   });
+
 });
