@@ -145,9 +145,12 @@ SELECT
     i.year,
     ip.role,
     COALESCE(ip.character_name, '') AS character_name,
-    COALESCE(ip.sort_order, 0) AS sort_order
+    COALESCE(ip.sort_order, 0) AS sort_order,
+    COALESCE(img.id, '') AS primary_image_id
 FROM item_people ip
 JOIN items i ON i.id = ip.item_id
+LEFT JOIN images img
+    ON img.item_id = i.id AND img.type = 'primary' AND img.is_primary = 1
 WHERE ip.person_id = ?
   AND i.type IN ('movie', 'series')
   AND i.is_available = 1
@@ -155,13 +158,14 @@ ORDER BY COALESCE(i.year, 0) DESC, i.title ASC, ip.sort_order ASC
 `
 
 type ListFilmographyByPersonRow struct {
-	ItemID        string        `json:"item_id"`
-	Type          string        `json:"type"`
-	Title         string        `json:"title"`
-	Year          sql.NullInt64 `json:"year"`
-	Role          string        `json:"role"`
-	CharacterName string        `json:"character_name"`
-	SortOrder     int64         `json:"sort_order"`
+	ItemID         string        `json:"item_id"`
+	Type           string        `json:"type"`
+	Title          string        `json:"title"`
+	Year           sql.NullInt64 `json:"year"`
+	Role           string        `json:"role"`
+	CharacterName  string        `json:"character_name"`
+	SortOrder      int64         `json:"sort_order"`
+	PrimaryImageID string        `json:"primary_image_id"`
 }
 
 // Filmography: every movie + series this person has a direct credit
@@ -170,6 +174,11 @@ type ListFilmographyByPersonRow struct {
 // consistent there). Sorted newest-first; rows for the same item
 // but different role (e.g. actor + writer on the same movie) are
 // returned both -- the caller dedupes keeping the lowest sort_order.
+//
+// Primary-image LEFT JOIN powers the poster thumbnail on the actor
+// page: still one query per page (the JOIN doesn't multiply rows --
+// there is at most one is_primary=1 row per (item, type='primary')),
+// the wire just gets one extra nullable column.
 func (q *Queries) ListFilmographyByPerson(ctx context.Context, personID string) ([]ListFilmographyByPersonRow, error) {
 	rows, err := q.db.QueryContext(ctx, listFilmographyByPerson, personID)
 	if err != nil {
@@ -187,6 +196,7 @@ func (q *Queries) ListFilmographyByPerson(ctx context.Context, personID string) 
 			&i.Role,
 			&i.CharacterName,
 			&i.SortOrder,
+			&i.PrimaryImageID,
 		); err != nil {
 			return nil, err
 		}

@@ -242,6 +242,20 @@ const SeriesHero: FC<SeriesHeroProps> = ({
                 </p>
               )}
 
+              {/* Network / studio — own line above the chip row,
+                  Plex-style. Sits between tagline and the year /
+                  rating / genre badges so HBO, Disney+, etc. read
+                  with proper visual weight instead of competing
+                  inline. */}
+              {(item.studio_logo_url || item.studio) && (
+                <div className="pt-0.5">
+                  <StudioMark
+                    studio={item.studio}
+                    studioLogoUrl={item.studio_logo_url}
+                  />
+                </div>
+              )}
+
               <div className="flex flex-wrap items-center gap-2 text-sm text-text-primary/85">
                 {/* Series air date: prefer the full first-air-date
                     when TMDb returned one (matches Plex's "Sep 8,
@@ -265,12 +279,6 @@ const SeriesHero: FC<SeriesHeroProps> = ({
                 {item.genres?.slice(0, 3).map((g) => (
                   <Badge key={g}>{g}</Badge>
                 ))}
-                {/* Studio / network — brand mark when TMDb has one
-                    (HBO, Disney+ …), text fallback otherwise. */}
-                <StudioMark
-                  studio={item.studio}
-                  studioLogoUrl={item.studio_logo_url}
-                />
               </div>
 
               {/* Watched-count aggregate — only present on the series

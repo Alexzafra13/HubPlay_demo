@@ -67,6 +67,11 @@ ORDER BY ip.sort_order ASC, p.name ASC;
 -- consistent there). Sorted newest-first; rows for the same item
 -- but different role (e.g. actor + writer on the same movie) are
 -- returned both -- the caller dedupes keeping the lowest sort_order.
+--
+-- Primary-image LEFT JOIN powers the poster thumbnail on the actor
+-- page: still one query per page (the JOIN doesn't multiply rows --
+-- there is at most one is_primary=1 row per (item, type='primary')),
+-- the wire just gets one extra nullable column.
 -- name: ListFilmographyByPerson :many
 SELECT
     i.id AS item_id,
@@ -75,9 +80,12 @@ SELECT
     i.year,
     ip.role,
     COALESCE(ip.character_name, '') AS character_name,
-    COALESCE(ip.sort_order, 0) AS sort_order
+    COALESCE(ip.sort_order, 0) AS sort_order,
+    COALESCE(img.id, '') AS primary_image_id
 FROM item_people ip
 JOIN items i ON i.id = ip.item_id
+LEFT JOIN images img
+    ON img.item_id = i.id AND img.type = 'primary' AND img.is_primary = 1
 WHERE ip.person_id = ?
   AND i.type IN ('movie', 'series')
   AND i.is_available = 1

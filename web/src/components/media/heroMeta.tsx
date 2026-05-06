@@ -209,7 +209,13 @@ interface StudioMarkProps {
  * resolved server-side); otherwise falls back to the studio name as
  * dim text — older studios with no TMDb logo still get attribution.
  *
- * The pill gets a **fixed footprint** so every studio reads with the
+ * Plex-style placement: this component is meant to sit on its OWN line
+ * between the director credit and the meta chips, not inline with
+ * year/rating/genre badges. Crammed inline the pill competed with the
+ * chips and read smaller than it should; on a dedicated line it lifts
+ * off the artwork as a "credits card".
+ *
+ * The pill has a **fixed footprint** so every studio reads with the
  * same visual weight regardless of the underlying logo's aspect ratio.
  * TMDb's `production_companies[].logo_path` ships logos with wildly
  * different dimensions: square shields (Warner Bros, Disney) used to
@@ -227,21 +233,25 @@ export function StudioMark({ studio, studioLogoUrl }: StudioMarkProps) {
   if (studioLogoUrl) {
     return (
       <span
-        className="ml-1 inline-flex h-8 w-[112px] items-center justify-center rounded-md bg-white/95 px-2 shadow-sm shadow-black/30"
+        className="inline-flex h-10 w-[140px] items-center justify-center rounded-md bg-white/95 px-2 shadow-sm shadow-black/30"
         aria-label={studio}
         title={studio}
       >
         <img
           src={studioLogoUrl}
           alt={studio ?? ""}
-          className="max-h-5 max-w-full object-contain"
+          className="max-h-6 max-w-full object-contain"
           loading="lazy"
         />
       </span>
     );
   }
   if (studio) {
-    return <span className="text-xs text-text-muted">· {studio}</span>;
+    return (
+      <span className="text-xs uppercase tracking-wide text-text-muted">
+        {studio}
+      </span>
+    );
   }
   return null;
 }

@@ -139,11 +139,6 @@ type Querier interface {
 	GetItemByID(ctx context.Context, id string) (Item, error)
 	GetItemByPath(ctx context.Context, path sql.NullString) (Item, error)
 	GetItemChildren(ctx context.Context, parentID sql.NullString) ([]GetItemChildrenRow, error)
-	// Reverse lookup used by recommendations cross-referencing — given a
-	// provider name and the upstream id, returns the local item that
-	// carries that mapping (NULL if none). Indexed by (provider, external_id)
-	// on the table side so the lookup stays fast even on large libraries.
-	GetItemIDByExternalID(ctx context.Context, arg GetItemIDByExternalIDParams) (string, error)
 	GetLibraryByID(ctx context.Context, id string) (GetLibraryByIDRow, error)
 	GetLibraryEPGSourceByID(ctx context.Context, id string) (GetLibraryEPGSourceByIDRow, error)
 	GetLibraryShare(ctx context.Context, arg GetLibraryShareParams) (FederationLibraryShare, error)
@@ -269,6 +264,11 @@ type Querier interface {
 	// consistent there). Sorted newest-first; rows for the same item
 	// but different role (e.g. actor + writer on the same movie) are
 	// returned both -- the caller dedupes keeping the lowest sort_order.
+	//
+	// Primary-image LEFT JOIN powers the poster thumbnail on the actor
+	// page: still one query per page (the JOIN doesn't multiply rows --
+	// there is at most one is_primary=1 row per (item, type='primary')),
+	// the wire just gets one extra nullable column.
 	ListFilmographyByPerson(ctx context.Context, personID string) ([]ListFilmographyByPersonRow, error)
 	// Scheduled IPTV jobs (per-library M3U + EPG refresh automation).
 	//

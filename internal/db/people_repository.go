@@ -122,14 +122,18 @@ func (r *PeopleRepository) ReplaceItemPeople(ctx context.Context, itemID string,
 // series the person has a direct credit on, plus the role/character
 // that surfaced for them in that title. Year is optional (provider
 // may not have a release year for very-old or in-progress titles).
+// PrimaryImageID is the id of the item's primary poster image (empty
+// when the item has no primary poster on disk yet); the handler
+// resolves it to a `/api/v1/images/file/{id}` URL.
 type FilmographyEntry struct {
-	ItemID        string
-	Type          string
-	Title         string
-	Year          int
-	Role          string
-	CharacterName string
-	SortOrder     int
+	ItemID         string
+	Type           string
+	Title          string
+	Year           int
+	Role           string
+	CharacterName  string
+	SortOrder      int
+	PrimaryImageID string
 }
 
 // ListFilmographyByPerson returns the deduped, sorted filmography for
@@ -155,13 +159,14 @@ func (r *PeopleRepository) ListFilmographyByPerson(ctx context.Context, personID
 			year = int(row.Year.Int64)
 		}
 		out = append(out, &FilmographyEntry{
-			ItemID:        row.ItemID,
-			Type:          row.Type,
-			Title:         row.Title,
-			Year:          year,
-			Role:          row.Role,
-			CharacterName: row.CharacterName,
-			SortOrder:     int(row.SortOrder),
+			ItemID:         row.ItemID,
+			Type:           row.Type,
+			Title:          row.Title,
+			Year:           year,
+			Role:           row.Role,
+			CharacterName:  row.CharacterName,
+			SortOrder:      int(row.SortOrder),
+			PrimaryImageID: row.PrimaryImageID,
 		})
 	}
 	return out, nil

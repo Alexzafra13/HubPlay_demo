@@ -1,70 +1,107 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { usePerson } from "@/api/hooks";
 import { Spinner, EmptyState } from "@/components/common";
+import type { FilmographyEntry } from "@/api/types";
 
 // /people/:id — actor / director / writer landing.
 //
 // Server contract (handlers/people.go::Get):
 //   { id, name, type, image_url?, filmography:[{item_id, type, title,
-//     year?, role, character?, sort_order}] }
+//     year?, role, character?, sort_order, poster_url?}] }
 //
-// The page is read-only and intentionally lightweight. Filmography is
-// pre-deduped + ordered by the repo (lowest sort_order wins per
-// item), so we don't re-sort here. The grid is plain Tailwind — same
-// 5/4/3/2-column rhythm the Movies and Series surfaces use, kept
-// inline because PersonDetail is the only place that consumes this
-// shape and lifting to a shared `<MediaGrid>` would require widening
-// MediaGrid's type to the FilmographyEntry contract.
+// Layout principles:
+//   1. Hero band that lifts the photo off the dark canvas — big enough
+//      to read at a glance. The earlier "small avatar inline with the
+//      name" felt like a list-row item, not a profile.
+//   2. Filmography split by type (movies first, then series) the way
+//      Plex and Letterboxd surface a person — same titles, but the
+//      grouping makes "what's this actor done" scannable.
+//   3. Real posters via the wire's `poster_url`. The previous tile
+//      was a deliberate placeholder under the assumption that adding
+//      posters required N queries; the backend now JOINs the primary
+//      image in a single query so the wire just carries one extra
+//      column per row.
+//   4. No bio yet — wiring TMDb's `/person/{id}` endpoint is real
+//      work (provider extension + DB migration + scanner update) and
+//      out of scope for this iteration.
 
-function FilmographyTile({
-  itemId,
-  title,
-  year,
-  character,
-}: {
-  itemId: string;
-  title: string;
-  year?: number;
-  character?: string;
-}) {
+function FilmographyTile({ entry }: { entry: FilmographyEntry }) {
   const { t } = useTranslation();
+  const [imageFailed, setImageFailed] = useState(false);
+  const showPoster = !!entry.poster_url && !imageFailed;
   return (
     <Link
-      to={`/items/${itemId}`}
+      to={`/items/${entry.item_id}`}
       className="group flex flex-col gap-2 outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-[--radius-lg]"
     >
-      <div className="relative aspect-[2/3] overflow-hidden rounded-[--radius-lg] bg-bg-elevated transition-transform duration-300 group-hover:scale-[1.03]">
-        {/* Placeholder tile — the filmography wire intentionally stays
-            slim (id + title + year + role) and does NOT include poster
-            URLs. Surfacing the poster here would require a per-item
-            join the user can already get one click away on the item
-            detail page; keeping the wire small means a 100-credit
-            actor page is one query, not 100. */}
-        <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-bg-elevated to-bg-card">
-          <span className="text-4xl font-bold text-text-muted">
-            {title.charAt(0).toUpperCase()}
-          </span>
-        </div>
+      <div className="relative aspect-[2/3] overflow-hidden rounded-[--radius-lg] bg-bg-elevated ring-1 ring-border/40 transition-transform duration-300 group-hover:scale-[1.03] group-hover:ring-accent/40">
+        {showPoster ? (
+          <img
+            src={entry.poster_url}
+            alt={entry.title}
+            loading="lazy"
+            decoding="async"
+            className="h-full w-full object-cover"
+            onError={() => setImageFailed(true)}
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-bg-elevated to-bg-card">
+            <span className="text-4xl font-bold text-text-muted">
+              {entry.title.charAt(0).toUpperCase()}
+            </span>
+          </div>
+        )}
+        {/* Gradient overlay for legibility of the year chip on bright
+            posters; only renders when we actually have a poster. */}
+        {showPoster && (
+          <div
+            className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/70 to-transparent opacity-0 transition-opacity group-hover:opacity-100"
+            aria-hidden
+          />
+        )}
       </div>
       <div className="flex flex-col gap-0.5 px-0.5">
         <p className="line-clamp-2 text-sm font-medium text-text-primary group-hover:text-white transition-colors">
-          {title}
+          {entry.title}
         </p>
         <div className="flex flex-wrap items-center gap-1.5 text-xs text-text-muted">
-          {year != null && <span>{year}</span>}
-          {character && (
+          {entry.year != null && <span>{entry.year}</span>}
+          {entry.character && (
             <>
-              {year != null && <span className="text-text-muted/40">·</span>}
+              {entry.year != null && <span className="text-text-muted/40">·</span>}
               <span className="truncate">
-                {t("personDetail.asCharacter", { character })}
+                {t("personDetail.asCharacter", { character: entry.character })}
               </span>
             </>
           )}
         </div>
       </div>
     </Link>
+  );
+}
+
+function FilmographySection({
+  title,
+  entries,
+}: {
+  title: string;
+  entries: FilmographyEntry[];
+}) {
+  if (entries.length === 0) return null;
+  return (
+    <section>
+      <div className="mb-4 flex items-baseline gap-3">
+        <h3 className="text-base font-semibold text-text-primary">{title}</h3>
+        <span className="text-xs text-text-muted">{entries.length}</span>
+      </div>
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+        {entries.map((entry) => (
+          <FilmographyTile key={entry.item_id} entry={entry} />
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -79,6 +116,19 @@ export default function PersonDetail() {
   // CastChip uses, keeping the page coherent with where the user
   // came from.
   const [photoFailed, setPhotoFailed] = useState(false);
+
+  // Group + memoise filmography. The repo already returns a single
+  // entry per item (deduped), sorted year-desc — we just split by
+  // type so the grid renders movies and series as separate sections.
+  const grouped = useMemo(() => {
+    const movies: FilmographyEntry[] = [];
+    const series: FilmographyEntry[] = [];
+    for (const entry of person?.filmography ?? []) {
+      if (entry.type === "series") series.push(entry);
+      else movies.push(entry);
+    }
+    return { movies, series };
+  }, [person?.filmography]);
 
   if (isLoading) {
     return (
@@ -100,60 +150,86 @@ export default function PersonDetail() {
   }
 
   const showPhoto = !!person.image_url && !photoFailed;
+  const totalCount = person.filmography.length;
 
   return (
-    <div className="flex flex-col gap-8 px-6 py-8 sm:px-10">
-      <header className="flex items-center gap-6">
-        <div className="flex h-32 w-32 shrink-0 items-center justify-center overflow-hidden rounded-full bg-bg-elevated text-4xl font-bold text-text-muted ring-1 ring-border/40 sm:h-40 sm:w-40">
-          {showPhoto ? (
-            <img
-              src={person.image_url}
-              alt={person.name}
-              loading="eager"
-              decoding="async"
-              width={160}
-              height={160}
-              className="h-full w-full object-cover"
-              onError={() => setPhotoFailed(true)}
-            />
-          ) : (
-            person.name.charAt(0)
-          )}
-        </div>
-        <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-semibold text-text-primary sm:text-3xl">
-            {person.name}
-          </h1>
-          {person.type && (
-            <span className="text-sm capitalize text-text-muted">
-              {person.type}
-            </span>
-          )}
-        </div>
-      </header>
+    <div className="flex flex-col">
+      {/* Hero band — soft gradient lift behind the avatar so the page
+          stops looking like a list-item and starts looking like a
+          profile. The blurred backdrop uses the photo itself when
+          present, falling back to the surface gradient otherwise. */}
+      <div className="relative overflow-hidden">
+        {showPhoto && (
+          <div
+            aria-hidden
+            className="absolute inset-0 -z-10 scale-110 bg-cover bg-center opacity-30 blur-3xl"
+            style={{ backgroundImage: `url(${person.image_url})` }}
+          />
+        )}
+        <div className="absolute inset-0 -z-10 bg-gradient-to-b from-bg-card/60 via-bg-card/85 to-bg-canvas" />
 
-      <section>
-        <h2 className="mb-4 text-lg font-semibold text-text-primary">
-          {t("personDetail.filmography")}
-        </h2>
-        {person.filmography.length === 0 ? (
+        <header className="flex flex-col items-center gap-6 px-6 py-10 text-center sm:flex-row sm:items-end sm:gap-8 sm:px-10 sm:py-12 sm:text-left">
+          <div className="flex h-44 w-44 shrink-0 items-center justify-center overflow-hidden rounded-full bg-bg-elevated text-5xl font-bold text-text-muted ring-2 ring-border/60 shadow-xl shadow-black/40 sm:h-56 sm:w-56">
+            {showPhoto ? (
+              <img
+                src={person.image_url}
+                alt={person.name}
+                loading="eager"
+                decoding="async"
+                width={224}
+                height={224}
+                className="h-full w-full object-cover"
+                onError={() => setPhotoFailed(true)}
+              />
+            ) : (
+              person.name.charAt(0)
+            )}
+          </div>
+
+          <div className="flex flex-col gap-2 sm:pb-2">
+            {person.type && (
+              <span className="text-xs font-semibold uppercase tracking-[0.2em] text-accent">
+                {person.type}
+              </span>
+            )}
+            <h1 className="text-3xl font-semibold text-text-primary drop-shadow-md sm:text-5xl">
+              {person.name}
+            </h1>
+            {totalCount > 0 && (
+              <p className="text-sm text-text-secondary">
+                {t("personDetail.titlesCount", { count: totalCount })}
+              </p>
+            )}
+          </div>
+        </header>
+      </div>
+
+      <div className="flex flex-col gap-10 px-6 py-8 sm:px-10">
+        {totalCount === 0 ? (
           <p className="text-sm text-text-muted">
             {t("personDetail.noFilmography")}
           </p>
         ) : (
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-            {person.filmography.map((entry) => (
-              <FilmographyTile
-                key={entry.item_id}
-                itemId={entry.item_id}
-                title={entry.title}
-                year={entry.year}
-                character={entry.character}
-              />
-            ))}
-          </div>
+          <>
+            <div className="flex items-baseline gap-3">
+              <h2 className="text-lg font-semibold text-text-primary">
+                {t("personDetail.filmographyOnHubplay")}
+              </h2>
+              <span className="text-xs text-text-muted">
+                {t("personDetail.filmography")}
+              </span>
+            </div>
+            <FilmographySection
+              title={t("personDetail.movies")}
+              entries={grouped.movies}
+            />
+            <FilmographySection
+              title={t("personDetail.series")}
+              entries={grouped.series}
+            />
+          </>
         )}
-      </section>
+      </div>
     </div>
   );
 }

@@ -416,6 +416,19 @@ const HeroSection: FC<HeroSectionProps> = ({
                 </p>
               )}
 
+              {/* Studio / network — own line above the chip row, the
+                  way Plex surfaces it. Crammed inline with year /
+                  rating / genre badges the pill competed with the
+                  text and read smaller than it should. */}
+              {(item.studio_logo_url || item.studio) && (
+                <div className="pt-0.5">
+                  <StudioMark
+                    studio={item.studio}
+                    studioLogoUrl={item.studio_logo_url}
+                  />
+                </div>
+              )}
+
               <div className="flex flex-wrap items-center gap-2 text-sm text-text-primary/85">
                 {/* Episodes: prefer the full air date — "12 Mar 2025"
                     reads more meaningfully than the bare year on the
@@ -456,14 +469,6 @@ const HeroSection: FC<HeroSectionProps> = ({
                 {item.genres?.slice(0, 3).map((genre) => (
                   <Badge key={genre}>{genre}</Badge>
                 ))}
-
-                {/* Studio / network — soft attribution after the
-                    taxonomy badges. Brand-mark image when present,
-                    text fallback otherwise — see ./heroMeta. */}
-                <StudioMark
-                  studio={item.studio}
-                  studioLogoUrl={item.studio_logo_url}
-                />
               </div>
 
               <OverviewWithReadMore overview={item.overview} />

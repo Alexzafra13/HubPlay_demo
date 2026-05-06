@@ -17,11 +17,12 @@ type ExternalID struct {
 }
 
 type ExternalIDRepository struct {
-	q *sqlc.Queries
+	db *sql.DB // kept for GetItemIDByExternalID (sqlc parser truncates the trailing LIMIT)
+	q  *sqlc.Queries
 }
 
 func NewExternalIDRepository(database *sql.DB) *ExternalIDRepository {
-	return &ExternalIDRepository{q: sqlc.New(database)}
+	return &ExternalIDRepository{db: database, q: sqlc.New(database)}
 }
 
 func (r *ExternalIDRepository) Upsert(ctx context.Context, e *ExternalID) error {
@@ -73,11 +74,15 @@ func (r *ExternalIDRepository) HasExternalID(ctx context.Context, itemID string)
 // recommendations endpoint to cross-reference TMDb candidates
 // against the user's library so each suggestion can be marked
 // "in library" with a deep link or "external" with a TMDb link.
+//
+// Raw SQL because sqlc v1.31.1 truncates the trailing identifier of
+// the final query in a file: `LIMIT 1` becomes `LIMIT`, producing
+// invalid SQL that fails at runtime. Same workaround as
+// item_value_repository.go::ListGenres.
 func (r *ExternalIDRepository) GetItemIDByExternalID(ctx context.Context, provider, externalID string) (string, error) {
-	id, err := r.q.GetItemIDByExternalID(ctx, sqlc.GetItemIDByExternalIDParams{
-		Provider:   provider,
-		ExternalID: externalID,
-	})
+	const query = `SELECT item_id FROM external_ids WHERE provider = ? AND external_id = ? LIMIT 1`
+	var id string
+	err := r.db.QueryRowContext(ctx, query, provider, externalID).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}

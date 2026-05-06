@@ -332,45 +332,17 @@ export default function ItemDetail() {
       )}
 
       <div className="flex flex-col gap-8 px-6 py-8 sm:px-10">
-        {/* Media info */}
-        {item.media_streams?.length > 0 && (
-          <section id="media-info-section">
-            <h2 className="mb-3 text-lg font-semibold text-text-primary">
-              {t('itemDetail.mediaInfo')}
-            </h2>
-            <MediaMeta streams={item.media_streams} />
-          </section>
-        )}
-
-        {/* Cast / crew. The chip stays the same shape whether or not
-            we have a profile photo — the avatar slot either renders
-            an <img> with onError fallback to the initial chip, or
-            jumps straight to the initial chip when image_url is
-            absent. Limited to the first 12 entries server-side
-            ordering (TMDb billing position) so the most-recognised
-            faces lead. */}
-        {item.people && item.people.length > 0 && (
-          <section>
-            <h2 className="mb-3 text-lg font-semibold text-text-primary">
-              {t('itemDetail.cast')}
-            </h2>
-            <div className="flex flex-wrap gap-3">
-              {item.people.slice(0, 12).map((person) => (
-                <CastChip key={person.id} person={person} />
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* "More like this" rail — TMDb /recommendations cross-
-            referenced with the local library. Hides itself when no
-            candidates were returned (no TMDb match, no provider
-            configured, or empty list). Movies and series pages get
-            it; episode/season detail surfaces don't bother because
-            their parent series already shows the rail. */}
-        {(item.type === "movie" || item.type === "series") && id && (
-          <RecommendationsRail itemId={id} />
-        )}
+        {/* Section order, Plex/Jellyfin-style: the most actionable
+            content sits closest to the hero so the user doesn't have
+            to scroll past technical metadata to find "where do I
+            click to keep watching".
+              1. Continue watching (series scope, resume available)
+              2. Seasons / episodes (series + season scope)
+              3. Cast
+              4. More like this
+              5. Media info (technical detail; lowest signal)
+            Movies skip 1 + 2 and fall straight to cast — the same
+            order then degrades gracefully without a special case. */}
 
         {/* "Sigue viendo" panel — series scope only. Surfaces the
             resume-target episode as a one-row Jellyfin-style card so
@@ -419,6 +391,49 @@ export default function ItemDetail() {
                 whatever is selected — same UX as Jellyfin's "play
                 from this row" affordance. */}
             <SeasonEpisodeList seasonId={item.id} onPlay={handlePlay} />
+          </section>
+        )}
+
+        {/* Cast / crew. The chip stays the same shape whether or not
+            we have a profile photo — the avatar slot either renders
+            an <img> with onError fallback to the initial chip, or
+            jumps straight to the initial chip when image_url is
+            absent. Limited to the first 12 entries server-side
+            ordering (TMDb billing position) so the most-recognised
+            faces lead. */}
+        {item.people && item.people.length > 0 && (
+          <section>
+            <h2 className="mb-3 text-lg font-semibold text-text-primary">
+              {t('itemDetail.cast')}
+            </h2>
+            <div className="flex flex-wrap gap-3">
+              {item.people.slice(0, 12).map((person) => (
+                <CastChip key={person.id} person={person} />
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* "More like this" rail — TMDb /recommendations cross-
+            referenced with the local library. Hides itself when no
+            candidates were returned (no TMDb match, no provider
+            configured, or empty list). Movies and series pages get
+            it; episode/season detail surfaces don't bother because
+            their parent series already shows the rail. */}
+        {(item.type === "movie" || item.type === "series") && id && (
+          <RecommendationsRail itemId={id} />
+        )}
+
+        {/* Media info — technical metadata (codecs, audio tracks,
+            subtitles). Lowest signal for a casual user, highest for
+            an admin debugging playback, so it sits at the bottom
+            where it stays out of the way but remains findable. */}
+        {item.media_streams?.length > 0 && (
+          <section id="media-info-section">
+            <h2 className="mb-3 text-lg font-semibold text-text-primary">
+              {t('itemDetail.mediaInfo')}
+            </h2>
+            <MediaMeta streams={item.media_streams} />
           </section>
         )}
       </div>

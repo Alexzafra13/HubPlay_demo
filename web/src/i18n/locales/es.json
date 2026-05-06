@@ -230,8 +230,13 @@
     "notFoundTitle": "Persona no encontrada",
     "notFoundDescription": "La persona que buscas no existe o ha sido eliminada.",
     "filmography": "Filmografia",
+    "filmographyOnHubplay": "En HubPlay",
+    "titlesCount_one": "{{count}} titulo en tu biblioteca",
+    "titlesCount_other": "{{count}} titulos en tu biblioteca",
     "noFilmography": "Sin titulos asociados a esta persona en tu biblioteca.",
-    "asCharacter": "como {{character}}"
+    "asCharacter": "como {{character}}",
+    "movies": "Peliculas",
+    "series": "Series"
   },
   "itemDetail": {
     "notFoundTitle": "Elemento no encontrado",
@@ -261,7 +266,7 @@
     "openOnTmdb": "Abrir en TMDb",
     "openOnTvdb": "Abrir en TVDb",
     "recommendations": "Mas como esta",
-    "recInLibrary": "En tu librería"
+    "recInLibrary": "En HubPlay"
   },
   "liveTV": {
     "title": "TV en directo",

@@ -484,6 +484,10 @@ export interface FilmographyEntry {
   role: string;
   character?: string;
   sort_order: number;
+  // `/api/v1/images/file/{id}` — present only when the item has a
+  // primary poster on disk. Absent for items scanned without a TMDb
+  // match or where the poster download failed.
+  poster_url?: string;
 }
 
 export interface PersonDetail {
