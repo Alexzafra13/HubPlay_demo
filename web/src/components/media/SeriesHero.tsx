@@ -576,14 +576,14 @@ function HeroTrailer({ siteKey, videoKey }: { siteKey: string; videoKey: string 
     return null;
   }
 
-  // Mask the trailer so its left edge fades into the gradient instead
-  // of cutting hard against the poster column. Black at the right is
-  // "fully opaque", transparent at ~50% means "blend into whatever is
-  // beneath" — and what's beneath is the static backdrop image plus
-  // the colour gradient, which is exactly the look we want. A solid
-  // sharp boundary felt like a TV-on-a-page; this fade matches the
-  // Netflix / Disney+ pre-play overlay.
-  const fadeMask = "linear-gradient(to right, transparent 0%, transparent 25%, black 55%, black 100%)";
+  // 2D mask: fade the trailer's left edge AND bottom edge into the
+  // page background, matching the static backdrop image's mask
+  // (HeroSection.tsx). Composited via mask-composite: intersect so
+  // the trailer is only opaque where BOTH masks are opaque (top
+  // half + right side). The previous 1D mask only handled the left
+  // fade and left a hard horizontal cut at the bottom.
+  const fadeMask =
+    "linear-gradient(to right, transparent 0%, rgba(0,0,0,0.2) 25%, rgba(0,0,0,0.85) 55%, black 75%), linear-gradient(to bottom, black 55%, rgba(0,0,0,0.2) 92%, transparent 100%)";
 
   return (
     <div
@@ -598,22 +598,28 @@ function HeroTrailer({ siteKey, videoKey }: { siteKey: string; videoKey: string 
         style={{
           maskImage: fadeMask,
           WebkitMaskImage: fadeMask,
+          maskComposite: "intersect",
+          WebkitMaskComposite: "source-in",
         }}
       >
-        {/* Object-cover behaviour for an iframe: size the iframe at
-            the hero's full width but lock its aspect to 16:9 (the
-            shape YouTube renders inside). The hero is closer to 16:7
-            on wide monitors, so 16:9 height overflows top + bottom —
-            cropped by `overflow-hidden`. The previous `scale-1.35`
-            approach scaled the wrapper but YouTube's letterbox bars
-            scaled with it, leaving black gutters on the right edge
-            on extra-wide screens. Aspect-ratio sizing kills them.
+        {/* Iframe sized by HEIGHT instead of width — fits the hero
+            at 100% height with auto width derived from aspectRatio.
+            Anchored to the right edge so it sits where the actors /
+            action are framed in YouTube trailers; the left side
+            shows the page background through the mask, matching the
+            static backdrop image's placement.
+
+            The previous version forced `minWidth: calc(100% * 16/9)`
+            which over-scaled the iframe to ~178% of the hero width,
+            making the resulting 16:9 height ~3× the hero's height.
+            Half of every actor's head was clipped by overflow-hidden.
+            Sizing by height keeps the trailer at its native aspect
+            with no cropping.
 
             Render the iframe *only* once `loaded` flips. Keeping it
             mounted with src='about:blank' would still cost layout +
             an internal frame in the engine, and would pre-emptively
-            wire up the iframe's parent-frame messaging hooks. Mounting
-            on demand is the cheapest path. */}
+            wire up the iframe's parent-frame messaging hooks. */}
         {loaded && (
           <iframe
             src={embedUrl}
@@ -621,25 +627,15 @@ function HeroTrailer({ siteKey, videoKey }: { siteKey: string; videoKey: string 
             allow="autoplay; encrypted-media; picture-in-picture"
             referrerPolicy="strict-origin-when-cross-origin"
             loading="lazy"
-            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 border-0 pointer-events-none"
+            className="absolute right-0 top-0 border-0 pointer-events-none"
             style={{
-              width: "100%",
+              height: "100%",
               aspectRatio: "16 / 9",
-              // Belt-and-suspenders for unusually tall hero bands
-              // (e.g. very narrow viewports): force the iframe to
-              // at least cover the parent height, accepting horizontal
-              // letterbox in that edge case rather than vertical bars.
-              minHeight: "100%",
-              minWidth: "calc(100% * 16 / 9)",
+              width: "auto",
             }}
           />
         )}
       </div>
-      {/* Subtle right-side dim — the gradient on the left already
-          handles its own blend with the masked trailer; this just
-          takes a bit of saturation off the bare right side so the
-          content + button stay readable. */}
-      <div className="absolute inset-0 bg-bg-base/20" />
 
       {revealed && (
         <button
