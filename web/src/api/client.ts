@@ -456,7 +456,12 @@ export class ApiClient {
         params: rest as Record<string, string | number | boolean | undefined>,
       });
     }
-    return this.request<PaginatedResponse<MediaItem>>("GET", "/items/latest", {
+    // Cross-library browse — `/items` is the paginated endpoint that
+    // mirrors `/libraries/{id}/items`. We used to fall back to
+    // `/items/latest` here, but that route caps at 50 results and
+    // doesn't paginate, so the Movies/Series grids appeared truncated
+    // for any catalogue beyond 50 items.
+    return this.request<PaginatedResponse<MediaItem>>("GET", "/items", {
       params: rest as Record<string, string | number | boolean | undefined>,
     });
   }

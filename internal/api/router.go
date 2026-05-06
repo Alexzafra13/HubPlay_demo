@@ -669,6 +669,15 @@ func NewRouter(deps Dependencies) http.Handler {
 
 				// Items
 				r.Get("/items/latest", libHandler.LatestItems)
+				// Global paginated items list. Same payload shape as
+				// /libraries/{id}/items but spanning every library —
+				// the Movies / Series browse pages don't pre-pick a
+				// library so they can't go through the scoped route.
+				// Without this the pages used to fall back to
+				// /items/latest which is capped at 50 and doesn't
+				// paginate, which surfaced as "only a few movies show
+				// up" in the browse grid.
+				r.Get("/items", libHandler.AllItems)
 				r.Get("/items/search", itemHandler.Search)
 				r.Route("/items/{id}", func(r chi.Router) {
 					r.Get("/", itemHandler.Get)

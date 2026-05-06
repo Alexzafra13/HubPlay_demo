@@ -4,6 +4,8 @@ import type { MediaItem } from "@/api/types";
 import { Badge } from "@/components/common/Badge";
 import type { HeroMenuItem } from "./HeroSection";
 import { HeroTrailer } from "./HeroTrailer";
+import { ExternalIdRow, OverviewWithReadMore, StudioMark } from "./heroMeta";
+import { formatPremiereDate } from "@/utils/heroMeta";
 import { useUserPreference } from "@/api/hooks";
 import { TRAILERS_ENABLED_PREF_KEY } from "@/utils/playbackPrefs";
 import type { SeriesResumeMode } from "@/hooks/useSeriesResumeTarget";
@@ -66,7 +68,8 @@ const SeriesHero: FC<SeriesHeroProps> = ({
   isFavorite,
   menuItems,
 }) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const firstAirDate = formatPremiereDate(item.premiere_date, i18n.language);
   // Backdrop resolution priority:
   //   1. The item's own backdrop (full series, when present).
   //   2. The series's backdrop folded in by attachSeriesContext —
@@ -234,13 +237,22 @@ const SeriesHero: FC<SeriesHeroProps> = ({
                   overview. Hidden when empty so series without a
                   tagline don't get a phantom row. */}
               {item.tagline && (
-                <p className="-mt-1 max-w-xl text-sm italic text-text-secondary/90 drop-shadow-md">
+                <p className="-mt-1 max-w-xl text-sm italic text-text-primary/80 drop-shadow-md">
                   {item.tagline}
                 </p>
               )}
 
-              <div className="flex flex-wrap items-center gap-2 text-sm text-text-secondary">
-                {item.year != null && <span className="font-medium">{item.year}</span>}
+              <div className="flex flex-wrap items-center gap-2 text-sm text-text-primary/85">
+                {/* Series air date: prefer the full first-air-date
+                    when TMDb returned one (matches Plex's "Sep 8,
+                    2017" treatment), fall back to the bare year
+                    otherwise. Locale-aware via the active i18n
+                    language. */}
+                {firstAirDate ? (
+                  <span className="font-medium">{firstAirDate}</span>
+                ) : item.year != null ? (
+                  <span className="font-medium">{item.year}</span>
+                ) : null}
                 {item.community_rating != null && (
                   <Badge variant="warning">
                     <svg className="h-3 w-3" viewBox="0 0 24 24" fill="currentColor">
@@ -253,13 +265,12 @@ const SeriesHero: FC<SeriesHeroProps> = ({
                 {item.genres?.slice(0, 3).map((g) => (
                   <Badge key={g}>{g}</Badge>
                 ))}
-                {/* Studio / network — last in the row so it reads as
-                    a soft attribution rather than a primary tag.
-                    Rendered as plain text (not a Badge) to keep the
-                    badge cluster visually about taxonomy. */}
-                {item.studio && (
-                  <span className="text-xs text-text-muted">· {item.studio}</span>
-                )}
+                {/* Studio / network — brand mark when TMDb has one
+                    (HBO, Disney+ …), text fallback otherwise. */}
+                <StudioMark
+                  studio={item.studio}
+                  studioLogoUrl={item.studio_logo_url}
+                />
               </div>
 
               {/* Watched-count aggregate — only present on the series
@@ -268,7 +279,7 @@ const SeriesHero: FC<SeriesHeroProps> = ({
                   a glance at the hero answers "how far am I in this
                   show?" without scrolling to the seasons grid. */}
               {item.episode_progress && item.episode_progress.total > 0 && (
-                <div className="flex items-center gap-3 text-xs text-text-secondary">
+                <div className="flex items-center gap-3 text-xs text-text-primary/85">
                   <div
                     className="h-1.5 w-32 overflow-hidden rounded-full bg-bg-elevated/60"
                     role="progressbar"
@@ -301,11 +312,12 @@ const SeriesHero: FC<SeriesHeroProps> = ({
                 </div>
               )}
 
-              {item.overview && (
-                <p className="line-clamp-3 max-w-2xl text-sm leading-relaxed text-text-secondary sm:text-[15px]">
-                  {item.overview}
-                </p>
-              )}
+              <OverviewWithReadMore overview={item.overview} />
+
+              {/* External-ID chips (IMDb / TMDb / TVDb). Empty row
+                  hides itself so series without a TMDb match keep
+                  the original spacing. */}
+              <ExternalIdRow item={item} />
 
               <div className="flex items-center gap-3 pt-1">
                 <button
