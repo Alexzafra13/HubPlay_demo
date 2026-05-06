@@ -11,8 +11,9 @@ import {
   Tv,
   Radio,
 } from "lucide-react";
-import { useSearch } from "@/api/hooks";
+import { useSearch, useContinueWatching, useHomeTrending } from "@/api/hooks";
 import { usePeersSearch } from "@/api/hooks/federation";
+import type { MediaItem, HomeTrendingItem } from "@/api/types";
 import { useDebounce } from "@/hooks/useDebounce";
 import {
   SearchResultsView,
@@ -191,14 +192,18 @@ export function SearchBar() {
 
   return (
     <>
-      <div ref={wrapRef} className="relative">
+      {/* Reserved 36×36 slot in the topbar flex flow — the expanded
+          search panel is absolute right-0 inside it, so growing left
+          to 280px never displaces the centered MainNav (the previous
+          layout pushed siblings every time the bar opened). */}
+      <div ref={wrapRef} className="relative w-9 h-9 flex-shrink-0">
         <motion.div
           layout
           initial={false}
           animate={{ width: open ? 280 : 36 }}
           transition={{ type: "spring", stiffness: 380, damping: 32, mass: 0.6 }}
           className={[
-            "h-9 flex items-center rounded-lg overflow-hidden border transition-colors",
+            "absolute right-0 top-0 h-9 flex items-center rounded-lg overflow-hidden border transition-colors",
             open
               ? "bg-bg-overlay border-border-strong shadow-lg shadow-black/30"
               : "bg-bg-hover/40 border-border-subtle hover:border-border",
@@ -347,37 +352,152 @@ export function SearchBar() {
 }
 
 // ─── Empty-state suggestions ────────────────────────────────────────────────
+//
+// Pre-typing state. Three blocks layered top-to-bottom: "Continúa
+// viendo" mini-posters, "Tendencias" mini-posters, and the section
+// shortcut tiles (Películas/Series/TV). Each rail self-hides when its
+// hook has nothing to show, so a brand-new user falls back to just
+// the section tiles — same behaviour as before but enriched.
 
 function SuggestionsPanel({ onPick }: { onPick: (href: string) => void }) {
   const { t } = useTranslation();
-  const items = [
+  const { data: continueWatching } = useContinueWatching({ staleTime: 60_000 });
+  const { data: trending } = useHomeTrending({ staleTime: 60_000 });
+
+  const continueRow = (continueWatching ?? []).slice(0, 6);
+  const trendingRow = (trending ?? []).slice(0, 8);
+
+  const sectionItems = [
     { href: "/movies", icon: Film, label: t("nav.movies") },
     { href: "/series", icon: Tv, label: t("nav.series") },
     { href: "/live-tv", icon: Radio, label: t("nav.liveTV") },
   ];
+
+  return (
+    <div className="flex flex-col gap-7">
+      {continueRow.length > 0 && (
+        <SuggestionRail
+          labelKey="topbar.suggestionContinue"
+          fallbackLabel="Continua viendo"
+          items={continueRow.map(mediaToPick)}
+          onPick={onPick}
+        />
+      )}
+
+      {trendingRow.length > 0 && (
+        <SuggestionRail
+          labelKey="topbar.suggestionTrending"
+          fallbackLabel="Tendencias"
+          items={trendingRow.map(trendingToPick)}
+          onPick={onPick}
+        />
+      )}
+
+      <div>
+        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-text-muted mb-3">
+          {t("topbar.browse", { defaultValue: "Explorar" })}
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {sectionItems.map((item) => {
+            const Icon = item.icon;
+            return (
+              <button
+                key={item.href}
+                onClick={() => onPick(item.href)}
+                className="flex items-center gap-3 p-3 rounded-xl border border-border-subtle bg-bg-card/40 hover:bg-bg-card hover:border-border transition-colors text-left"
+              >
+                <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-accent/10 ring-1 ring-accent/20">
+                  <Icon className="h-4 w-4 text-accent" strokeWidth={1.7} />
+                </span>
+                <span className="text-[13.5px] font-semibold text-text-primary">
+                  {item.label}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface PickItem {
+  id: string;
+  title: string;
+  href: string;
+  posterUrl?: string;
+  posterColor?: string;
+  year?: number;
+}
+
+function mediaToPick(it: MediaItem): PickItem {
+  const href = it.type === "series" ? `/series/${it.id}` : `/movies/${it.id}`;
+  return {
+    id: it.id,
+    title: it.title,
+    href,
+    posterUrl: it.poster_url ?? it.series_poster_url ?? undefined,
+    posterColor: it.poster_color ?? undefined,
+    year: it.year ?? undefined,
+  };
+}
+
+function trendingToPick(it: HomeTrendingItem): PickItem {
+  const href = it.type === "series" ? `/series/${it.id}` : `/movies/${it.id}`;
+  return {
+    id: it.id,
+    title: it.title,
+    href,
+    posterUrl: it.poster_url,
+    posterColor: it.poster_color,
+    year: it.year,
+  };
+}
+
+function SuggestionRail({
+  labelKey,
+  fallbackLabel,
+  items,
+  onPick,
+}: {
+  labelKey: string;
+  fallbackLabel: string;
+  items: PickItem[];
+  onPick: (href: string) => void;
+}) {
+  const { t } = useTranslation();
   return (
     <div>
       <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-text-muted mb-3">
-        {t("topbar.suggestions", { defaultValue: "Sugerencias" })}
+        {t(labelKey, { defaultValue: fallbackLabel })}
       </p>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        {items.map((item) => {
-          const Icon = item.icon;
-          return (
-            <button
-              key={item.href}
-              onClick={() => onPick(item.href)}
-              className="flex items-center gap-3 p-3 rounded-xl border border-border-subtle bg-bg-card/40 hover:bg-bg-card hover:border-border transition-colors text-left"
+      <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-3">
+        {items.map((it) => (
+          <button
+            key={it.id}
+            type="button"
+            onClick={() => onPick(it.href)}
+            className="group flex flex-col gap-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-md"
+          >
+            <div
+              className="relative aspect-[2/3] overflow-hidden rounded-md ring-1 ring-border-subtle/60 bg-bg-elevated transition-transform duration-200 group-hover:scale-[1.04]"
+              style={it.posterColor ? { background: it.posterColor } : undefined}
             >
-              <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-accent/10 ring-1 ring-accent/20">
-                <Icon className="h-4 w-4 text-accent" strokeWidth={1.7} />
-              </span>
-              <span className="text-[13.5px] font-semibold text-text-primary">
-                {item.label}
-              </span>
-            </button>
-          );
-        })}
+              {it.posterUrl && (
+                <img
+                  src={it.posterUrl}
+                  alt={it.title}
+                  loading="lazy"
+                  decoding="async"
+                  className="absolute inset-0 h-full w-full object-cover"
+                />
+              )}
+            </div>
+            <p className="text-[11.5px] font-medium text-text-secondary group-hover:text-text-primary truncate transition-colors">
+              {it.title}
+            </p>
+          </button>
+        ))}
       </div>
     </div>
   );
