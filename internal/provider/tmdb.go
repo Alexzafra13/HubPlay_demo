@@ -155,15 +155,36 @@ func (t *TMDbProvider) GetMetadata(ctx context.Context, externalID string, itemT
 	// production company entry.
 	if len(detail.ProductionCompanies) > 0 {
 		result.Studio = detail.ProductionCompanies[0].Name
+		result.StudioTMDBID = detail.ProductionCompanies[0].ID
 		if path := detail.ProductionCompanies[0].LogoPath; path != "" {
 			result.StudioLogoURL = tmdbImageURL + "w300" + path
 		}
 	}
 	if result.Studio == "" && len(detail.Networks) > 0 {
 		result.Studio = detail.Networks[0].Name
+		result.StudioTMDBID = detail.Networks[0].ID
 		if path := detail.Networks[0].LogoPath; path != "" {
 			result.StudioLogoURL = tmdbImageURL + "w300" + path
 		}
+	}
+
+	// Belongs-to-collection (Jellyfin-style movie saga). TMDb only
+	// surfaces this on /movie/{id} (TV uses parent series instead),
+	// so the field is optional in the provider response.
+	if detail.BelongsToCollection != nil && detail.BelongsToCollection.ID > 0 {
+		result.CollectionTMDBID = detail.BelongsToCollection.ID
+		result.CollectionName = detail.BelongsToCollection.Name
+		if p := detail.BelongsToCollection.PosterPath; p != "" {
+			result.CollectionPoster = tmdbImageURL + "w500" + p
+		}
+		if b := detail.BelongsToCollection.BackdropPath; b != "" {
+			result.CollectionBackdrop = tmdbImageURL + "w1280" + b
+		}
+		// CollectionOverview is left empty here — the /movie/{id}
+		// payload doesn't carry the collection's own overview, only
+		// its name + artwork. A future "fetch /collection/{id}"
+		// pass can fill it in if we want richer headers; not blocking
+		// for the basic feature.
 	}
 
 	// Genres
@@ -602,10 +623,12 @@ type tmdbDetail struct {
 	ContentRating       string  `json:"certification"`
 	Genres              []struct{ Name string `json:"name"` } `json:"genres"`
 	ProductionCompanies []struct {
+		ID       int64  `json:"id"`
 		Name     string `json:"name"`
 		LogoPath string `json:"logo_path"`
 	} `json:"production_companies"`
 	Networks []struct {
+		ID       int64  `json:"id"`
 		Name     string `json:"name"`
 		LogoPath string `json:"logo_path"`
 	} `json:"networks"`
@@ -626,6 +649,12 @@ type tmdbDetail struct {
 		IMDBID string `json:"imdb_id"`
 		TVDBID int    `json:"tvdb_id"`
 	} `json:"external_ids"`
+	BelongsToCollection *struct {
+		ID           int64  `json:"id"`
+		Name         string `json:"name"`
+		PosterPath   string `json:"poster_path"`
+		BackdropPath string `json:"backdrop_path"`
+	} `json:"belongs_to_collection"`
 	Videos struct {
 		Results []tmdbVideo `json:"results"`
 	} `json:"videos"`

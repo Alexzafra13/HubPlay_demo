@@ -72,6 +72,16 @@ type Chapter struct {
 	ImagePath  sql.NullString `json:"image_path"`
 }
 
+type Collection struct {
+	ID          string    `json:"id"`
+	TmdbID      int64     `json:"tmdb_id"`
+	Name        string    `json:"name"`
+	Overview    string    `json:"overview"`
+	PosterUrl   string    `json:"poster_url"`
+	BackdropUrl string    `json:"backdrop_url"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
 type DeviceCode struct {
 	DeviceCode   string         `json:"device_code"`
 	UserCode     string         `json:"user_code"`
@@ -347,6 +357,8 @@ type Metadata struct {
 	TrailerKey    string         `json:"trailer_key"`
 	TrailerSite   string         `json:"trailer_site"`
 	StudioLogoUrl string         `json:"studio_logo_url"`
+	StudioID      sql.NullString `json:"studio_id"`
+	CollectionID  sql.NullString `json:"collection_id"`
 }
 
 type Person struct {
@@ -388,6 +400,15 @@ type Session struct {
 	CreatedAt        time.Time      `json:"created_at"`
 	LastActiveAt     time.Time      `json:"last_active_at"`
 	ExpiresAt        time.Time      `json:"expires_at"`
+}
+
+type Studio struct {
+	ID        string        `json:"id"`
+	TmdbID    sql.NullInt64 `json:"tmdb_id"`
+	Name      string        `json:"name"`
+	Slug      string        `json:"slug"`
+	LogoUrl   string        `json:"logo_url"`
+	CreatedAt time.Time     `json:"created_at"`
 }
 
 type TrickplayInfo struct {

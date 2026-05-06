@@ -47,6 +47,8 @@ type Dependencies struct {
 	UserData       *db.UserDataRepository
 	Chapters       *db.ChapterRepository
 	People         *db.PeopleRepository
+	Studios        *db.StudioRepository
+	Collections    *db.CollectionRepository
 	UserPreferences *db.UserPreferenceRepository
 	Home            *db.HomeRepository
 	Providers      *provider.Manager
@@ -538,7 +540,7 @@ func NewRouter(deps Dependencies) http.Handler {
 				// layout clustered (one tree the operator can backup,
 				// rsync, or `du` to size the cache).
 				trickplayDir := filepath.Join(filepath.Dir(deps.Config.Database.Path), "images", "trickplay")
-				itemHandler := handlers.NewItemHandler(deps.Libraries, deps.Images, deps.Metadata, deps.UserData, deps.Chapters, deps.ExternalIDs, deps.People, deps.Providers, trickplayDir, deps.Logger)
+				itemHandler := handlers.NewItemHandler(deps.Libraries, deps.Images, deps.Metadata, deps.UserData, deps.Chapters, deps.ExternalIDs, deps.People, deps.Collections, deps.Providers, trickplayDir, deps.Logger)
 
 				// Libraries
 				r.Get("/libraries", libHandler.List)
@@ -731,6 +733,28 @@ func NewRouter(deps Dependencies) http.Handler {
 					peopleHandler := handlers.NewPeopleHandler(deps.People, imageDir, deps.Logger)
 					r.Get("/people/{id}", peopleHandler.Get)
 					r.Get("/people/{id}/thumb", peopleHandler.Thumb)
+				}
+
+				// Studios browse + detail. Powers the click-on-the-
+				// studio-mark flow on movie/series detail pages —
+				// /studios/{slug} returns the studio header (logo,
+				// name) plus every item from this catalogue linked to
+				// it, sorted year-desc.
+				if deps.Studios != nil {
+					studioHandler := handlers.NewStudioHandler(deps.Studios, deps.Logger)
+					r.Get("/studios", studioHandler.List)
+					r.Get("/studios/{slug}", studioHandler.Get)
+				}
+
+				// Movie collections (Jellyfin-style sagas). Backed by
+				// TMDb's belongs_to_collection record on each movie;
+				// /collections/{id} renders the saga's members in
+				// release order under a hero pulled from the
+				// collection's own poster + backdrop.
+				if deps.Collections != nil {
+					collectionHandler := handlers.NewCollectionHandler(deps.Collections, deps.Logger)
+					r.Get("/collections", collectionHandler.List)
+					r.Get("/collections/{id}", collectionHandler.Get)
 				}
 
 				// Admin: batch refresh images for a library

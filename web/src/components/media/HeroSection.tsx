@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import type { FC, ReactNode } from "react";
+import { Link } from "react-router";
 import { useTranslation } from "react-i18next";
 import type { MediaItem, Person } from "@/api/types";
 import { Button } from "@/components/common/Button";
@@ -416,6 +417,25 @@ const HeroSection: FC<HeroSectionProps> = ({
                 </p>
               )}
 
+              {/* "Part of: <saga>" — Jellyfin-style movie-collection
+                  link that takes the viewer to /collections/{id}.
+                  Movies-only because TV doesn't carry
+                  belongs_to_collection in TMDb. Hidden when the
+                  scanner had no provider match. */}
+              {item.type === "movie" && item.collection && (
+                <p className="text-sm text-text-primary/85 drop-shadow-md">
+                  <span className="text-text-secondary">
+                    {t("collectionDetail.partOf")}:
+                  </span>{" "}
+                  <Link
+                    to={`/collections/${encodeURIComponent(item.collection.id)}`}
+                    className="font-medium text-accent hover:underline outline-none focus-visible:ring-2 focus-visible:ring-accent rounded"
+                  >
+                    {item.collection.name}
+                  </Link>
+                </p>
+              )}
+
               {/* Studio / network — own line above the chip row, the
                   way Plex surfaces it. Crammed inline with year /
                   rating / genre badges the pill competed with the
@@ -425,6 +445,7 @@ const HeroSection: FC<HeroSectionProps> = ({
                   <StudioMark
                     studio={item.studio}
                     studioLogoUrl={item.studio_logo_url}
+                    studioSlug={item.studio_slug}
                   />
                 </div>
               )}

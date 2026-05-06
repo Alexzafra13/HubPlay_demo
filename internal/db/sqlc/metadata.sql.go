@@ -25,7 +25,8 @@ SELECT item_id, COALESCE(overview, '') AS overview, COALESCE(tagline, '') AS tag
        COALESCE(tags_json, '') AS tags_json,
        COALESCE(trailer_key, '') AS trailer_key,
        COALESCE(trailer_site, '') AS trailer_site,
-       COALESCE(studio_logo_url, '') AS studio_logo_url
+       COALESCE(studio_logo_url, '') AS studio_logo_url,
+       COALESCE(collection_id, '') AS collection_id
 FROM metadata
 WHERE item_id = ?
 `
@@ -40,6 +41,7 @@ type GetMetadataByItemIDRow struct {
 	TrailerKey    string `json:"trailer_key"`
 	TrailerSite   string `json:"trailer_site"`
 	StudioLogoUrl string `json:"studio_logo_url"`
+	CollectionID  string `json:"collection_id"`
 }
 
 func (q *Queries) GetMetadataByItemID(ctx context.Context, itemID string) (GetMetadataByItemIDRow, error) {
@@ -55,6 +57,7 @@ func (q *Queries) GetMetadataByItemID(ctx context.Context, itemID string) (GetMe
 		&i.TrailerKey,
 		&i.TrailerSite,
 		&i.StudioLogoUrl,
+		&i.CollectionID,
 	)
 	return i, err
 }

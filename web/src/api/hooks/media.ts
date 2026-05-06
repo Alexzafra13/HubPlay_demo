@@ -177,6 +177,64 @@ export function usePerson(
   });
 }
 
+// Studios browse + detail. The detail page (/studios/{slug}) is one
+// of the click-through targets from the studio mark on a movie /
+// series detail page; cache 5 min so revisits inside a session feel
+// instant without going stale on a fresh scan.
+export function useStudios(
+  options?: Partial<UseQueryOptions<{ studios: import("@/api/types").StudioListEntry[] }>>,
+) {
+  return useQuery<{ studios: import("@/api/types").StudioListEntry[] }>({
+    queryKey: queryKeys.studios,
+    queryFn: () => api.getStudios(),
+    staleTime: 5 * 60_000,
+    ...options,
+  });
+}
+
+export function useStudio(
+  slug: string,
+  options?: Partial<UseQueryOptions<import("@/api/types").StudioDetail>>,
+) {
+  return useQuery<import("@/api/types").StudioDetail>({
+    queryKey: queryKeys.studio(slug),
+    queryFn: () => api.getStudio(slug),
+    enabled: !!slug,
+    staleTime: 5 * 60_000,
+    ...options,
+  });
+}
+
+// Movie-collection (saga) browse + detail. Same 5-min cache so
+// jumping between a movie page and its parent collection feels
+// instant. The detail endpoint accepts the canonical
+// "collection:<tmdb_id>" id directly so no slug encoding is needed.
+export function useCollections(
+  options?: Partial<
+    UseQueryOptions<{ collections: import("@/api/types").CollectionListEntry[] }>
+  >,
+) {
+  return useQuery<{ collections: import("@/api/types").CollectionListEntry[] }>({
+    queryKey: queryKeys.collections,
+    queryFn: () => api.getCollections(),
+    staleTime: 5 * 60_000,
+    ...options,
+  });
+}
+
+export function useCollection(
+  id: string,
+  options?: Partial<UseQueryOptions<import("@/api/types").CollectionDetail>>,
+) {
+  return useQuery<import("@/api/types").CollectionDetail>({
+    queryKey: queryKeys.collection(id),
+    queryFn: () => api.getCollection(id),
+    enabled: !!id,
+    staleTime: 5 * 60_000,
+    ...options,
+  });
+}
+
 export function useSearch(
   q: string,
   options?: Partial<UseQueryOptions<MediaItem[]>>,

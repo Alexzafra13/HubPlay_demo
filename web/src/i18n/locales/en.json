@@ -226,6 +226,23 @@
     "peerSection": "From your peers",
     "fromPeer": "From {{name}}"
   },
+  "collectionDetail": {
+    "notFoundTitle": "Collection not found",
+    "notFoundDescription": "This saga doesn't exist or has no content in your library.",
+    "noItems": "No movies from this saga in your library.",
+    "titlesCount_one": "{{count}} movie in your library",
+    "titlesCount_other": "{{count}} movies in your library",
+    "partOf": "Part of"
+  },
+  "studioDetail": {
+    "notFoundTitle": "Studio not found",
+    "notFoundDescription": "This studio doesn't exist or has no content in your library yet.",
+    "noItems": "No titles from this studio in your library.",
+    "titlesCount_one": "{{count}} title in your library",
+    "titlesCount_other": "{{count}} titles in your library",
+    "movies": "Movies",
+    "series": "Series"
+  },
   "personDetail": {
     "notFoundTitle": "Person not found",
     "notFoundDescription": "This person doesn't exist or has been removed.",
