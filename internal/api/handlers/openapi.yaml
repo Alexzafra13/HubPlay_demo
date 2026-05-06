@@ -1040,6 +1040,90 @@ paths:
             image/png:  { schema: { type: string, format: binary } }
             image/webp: { schema: { type: string, format: binary } }
 
+  # ─── Studios ────────────────────────────────────────────────────────
+  /studios:
+    get:
+      tags: [studios]
+      summary: List studios with at least one item in the catalogue
+      description: |
+        Sorted by item_count desc on the way out. Drives the studio
+        browse surface and the autocomplete that backs the studio
+        click-through on item detail pages.
+      responses:
+        "200":
+          description: Studios
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      studios:
+                        type: array
+                        items: { $ref: "#/components/schemas/StudioListEntry" }
+
+  /studios/{slug}:
+    parameters:
+      - { name: slug, in: path, required: true, schema: { type: string }, description: "URL-safe slug — output of Slugify(name)" }
+    get:
+      tags: [studios]
+      summary: Studio detail + catalogue items linked to it
+      responses:
+        "200":
+          description: Studio
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/StudioDetail" }
+        "404":
+          description: Studio not found
+
+  # ─── Movie collections (sagas) ──────────────────────────────────────
+  /collections:
+    get:
+      tags: [collections]
+      summary: List movie collections (Jellyfin-style sagas)
+      description: |
+        Every collection that has at least one member movie in the
+        catalogue. Backed by TMDb belongs_to_collection records;
+        ordered by member count desc.
+      responses:
+        "200":
+          description: Collections
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      collections:
+                        type: array
+                        items: { $ref: "#/components/schemas/CollectionListEntry" }
+
+  /collections/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string }, description: "Canonical id `collection:<tmdb_id>`" }
+    get:
+      tags: [collections]
+      summary: Collection detail + member movies in release order
+      responses:
+        "200":
+          description: Collection
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/CollectionDetail" }
+        "404":
+          description: Collection not found
+
   # ─── Images ─────────────────────────────────────────────────────────
   /images/file/{id}:
     parameters:
@@ -2206,6 +2290,65 @@ components:
         filmography:
           type: array
           items: { $ref: "#/components/schemas/ItemSummary" }
+
+    # ─── Studios ─────────────────────────────────────────────────────
+    StudioListEntry:
+      type: object
+      required: [id, name, slug, item_count]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        slug: { type: string, description: "URL-safe key for /studios/{slug}" }
+        logo_url: { type: string, description: "Optional — TMDb production-company brand mark" }
+        item_count: { type: integer }
+
+    StudioItemRef:
+      type: object
+      required: [id, type, title]
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string, enum: [movie, series] }
+        title: { type: string }
+        year: { type: integer, nullable: true }
+        poster_url: { type: string, nullable: true }
+
+    StudioDetail:
+      type: object
+      required: [id, name, slug, items]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        slug: { type: string }
+        logo_url: { type: string, nullable: true }
+        tmdb_id: { type: integer, nullable: true }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/StudioItemRef" }
+
+    # ─── Movie collections (sagas) ───────────────────────────────────
+    CollectionListEntry:
+      type: object
+      required: [id, name, item_count]
+      properties:
+        id: { type: string, description: "Canonical id `collection:<tmdb_id>`" }
+        name: { type: string }
+        poster_url: { type: string, nullable: true }
+        backdrop_url: { type: string, nullable: true }
+        item_count: { type: integer }
+
+    CollectionDetail:
+      type: object
+      required: [id, tmdb_id, name, items]
+      properties:
+        id: { type: string }
+        tmdb_id: { type: integer }
+        name: { type: string }
+        overview: { type: string, nullable: true }
+        poster_url: { type: string, nullable: true }
+        backdrop_url: { type: string, nullable: true }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/StudioItemRef" }
 
     # ─── Stream ──────────────────────────────────────────────────────
     StreamInfo:
