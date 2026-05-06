@@ -1,5 +1,32 @@
 # Estado del proyecto
 
+> 🎬 **Sesión 2026-05-06 tarde (rama `claude/fix-visual-design-TZjub`, PR pendiente)** — **Filtros server-side en /movies y /series + studio-mark con footprint fijo + 2 commits**. Cierra una de las 3 cosas diferidas de la sesión 2026-05-06 mañana (regresión funcional en libs grandes) + arregla inconsistencia visual reportada por el user mirando el deploy real.
+>
+> **Commits (de más reciente a más antiguo, todos en la rama, pusheados)**:
+> - `42bb76b` *detail: studio-mark fixed-footprint pill for consistent visual weight*. Logos cuadrados (WB, Disney) salían como puntos pequeños y horizontales (Marvel Studios, Pixar) ocupaban 3× más en el mismo hero porque el pill crecía con el aspect ratio del PNG de TMDb (`h-5 sm:h-6`, `max-w-[140px]`, sin footprint fijo). Pill ahora `h-8 w-[112px]` fijo, imagen dentro `max-h-5 max-w-full object-contain` → todos los logos en la misma "tarjeta de créditos" con vertical breathing room. User reportó esto mirando capturas de "Fantastic Beasts" (WB pequeño) vs "Civil War" (Marvel enorme).
+> - `44f4817` *browse: server-side filters + paginated search across the whole catalogue*. Cierra el item `#2` diferido de la sesión mañana: filtros y `?q=` eran client-side sobre las páginas cargadas; con `/items` paginado a 40 items, libs grandes filtraban solo el 20%. **Migración 031** backfillea `metadata.genres_json` a `item_values` + `item_value_map` (tablas que existían en el schema inicial pero NUNCA se usaron — diseñadas exactamente para esto). Índice `(type, clean_value)`. **`ItemFilter`** gana `Genre/YearFrom/YearTo/MinRating`; `List()` raw SQL añade WHERE condicionales (subquery indexada para genre vía item_value_map, equality directa para year/community_rating). **Scanner** espeja géneros a `item_values` con replace-semantics tras cada `metadata.Upsert`. **`AllItems`** y **`Search`** handlers leen los nuevos params; nuevo **`GET /items/genres`** devuelve vocabulario catálogo-wide con counts y scope `?type=movie|series` (TV-only no contamina /movies). Frontend: `useInfiniteItems` reenvía los nuevos params; nuevo `useGenres` 5min staleTime. **MediaBrowse** borra todo el filtering client-side y mete filtros en URL (`?genre=Action&year_from=2010&min_rating=7&sort=year`) → shareable + back-button-friendly como Plex/Jellyfin. **MediaBrowseFilters** consume el vocabulario del server (no deriva de los items cargados). OpenAPI extendida con drift test verde.
+>
+> **Verificación al cierre**: `go test ./... -count=1` verde · `go test -race ./internal/db/... ./internal/library/... ./internal/scanner/... ./internal/api/...` verde · `tsc -b` clean · `vitest run` 391/391 · `make sqlc-verify` clean · OpenAPI drift verde. Suma 4 tests backend (`TestItemRepository_List_GenreYearRatingFilters`, `TestMigration031_BackfillsGenresFromMetadata`, `TestItemValueRepository_ListGenres`, casos en `library_test.go`) y 3 tests vitest (`MediaBrowse.test.tsx` cubre el round-trip URL→request, ausencia de filtering client-side, y URL writes desde el panel).
+>
+> **Decisiones senior tomadas** (anotadas para futuras sesiones):
+> 1. **Géneros normalizados** vía `item_values`+`item_value_map` (preexistentes, sin uso) en vez de LIKE sobre `genres_json` o tabla nueva. Plex/Jellyfin tratan género como tag de primera clase; LIKE es deuda técnica. La tabla además queda lista para hostear tags/studios/mood futuros sin más migraciones.
+> 2. **`/items/search` se queda como endpoint compat** pero MediaBrowse usa `/items` con `q` para evitar duplicar la lógica de paginación + filtros. SearchBar global sigue usando `/items/search` con su limit pequeño.
+> 3. **Filtros en URL** (no useState). Una página de browse en un media server **debe** ser shareable; el patrón previo perdía estado al navegar.
+> 4. **Genre single-select server-side**, no multi-select. Multi-select necesita `IN (?...)` con length variable, no merece la pena hasta que un user lo pida — la chip semantics actual (click para activar/desactivar) sigue siendo intuitiva.
+>
+> **sqlc gotcha hallado esta sesión**: el parser v1.31.1 trunca el último identificador de la última query en un archivo (`ORDER BY count DESC, iv.clean_value ASC` se generó como `iv.clean_val`). Workaround: `ListGenres` se escribió raw SQL en `item_value_repository.go` (List() raw ya está documentado como exception en items.sql). Anotado en docs/memory/conventions.md cuando lo actualice; precedente: bugs sqlc ya documentados en convenciones.
+>
+> **Quedan pendientes de la sesión 2026-05-06 mañana** (cola priorizada):
+> - **Click en estudio → página de colección con hero** (~2-3h). Backend `GET /api/v1/studios/{slug}/items`, ruta `/studios/:slug` con hero del logo + grid + paleta extraída del logo. Decisión a tomar en su momento: filtro `metadata.studio` con LIKE vs tabla normalizada `studios(id,name,logo_url)` (mejor opción ahora que el patrón `item_values` ya está demostrado funcionando — lo lógico sería extender ese mecanismo a un `type='studio'` o crear tabla dedicada porque studios tienen logo_url asociado, no solo nombre).
+> - **OMDb provider** (opcional, baja prioridad) — único camino para nota IMDb numérica. User dijo dejarlo de momento.
+>
+> **Cosas que el user verifica en su entorno** (preview no puede sin DB poblada):
+> - Filtros de género funcionan inmediatamente post-deploy gracias al backfill de migración 031 (no requiere re-scan); año/rating funcionan desde el primer momento porque ya estaban en `items`.
+> - URL share-test: ir a `/movies?genre=Action&year_from=2010` y compartir el link debe preservar filtros.
+> - Logos de productora — comparar WB y Marvel Studios en la misma página, deben tener el mismo tamaño visual.
+>
+> **Esta sesión NO ha tocado**: nada en `internal/federation/`, `internal/iptv/`, `internal/auth/`, `internal/stream/`, `internal/provider/`. Todo en items handler / library service / db items + nuevo item_values repo / scanner mirror / frontend MediaBrowse + filters + heroMeta. Los gaps de tests senior-review (P0 hardening, P1 splits) siguen sin tocar pero no surgen como dolor en este flujo.
+
 > 🎬 **Sesión 2026-05-06 (rama `claude/elated-ellis-f9bc9c`, PR abierta)** — **Detail page user-facing pass + bug fix crítico + 7 commits**. Iteración guiada por screenshots reales del despliegue del user en `hubplay.duckdns.org`. Todo pusheado, listo para Docker rebuild.
 >
 > **Commits (de más reciente a más antiguo, todos en la rama)**:
