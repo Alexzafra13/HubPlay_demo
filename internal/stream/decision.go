@@ -114,7 +114,14 @@ func Decide(item *db.Item, streams []*db.MediaStream, caps *Capabilities, reques
 	// to re-encode, so this is the difference between "burns a CPU
 	// core for the duration of playback" and "costs essentially
 	// nothing on top of disk I/O".
-	if videoOK && remuxableContainers[item.Container] {
+	//
+	// `item.Container` is what ffprobe returned for the file's
+	// format_name field, which for mkv arrives as `"matroska,webm"`
+	// — a comma-separated list. `containerInSet` is the same helper
+	// used for the client-caps check above; it splits on `,` and
+	// matches per-part so we recognise the file as remuxable
+	// regardless of the exact label ffprobe used.
+	if videoOK && containerInSet(item.Container, remuxableContainers) {
 		return PlaybackDecision{
 			Method:     MethodDirectStream,
 			VideoCodec: videoStream.Codec,
