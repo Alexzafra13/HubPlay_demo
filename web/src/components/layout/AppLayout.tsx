@@ -1,18 +1,11 @@
-import { useState, useSyncExternalStore } from 'react';
-import { Outlet, useLocation } from 'react-router';
-import { Sidebar } from './Sidebar';
-import { TopBar } from './TopBar';
-import { TopBarSlotProvider } from './TopBarSlot';
-import { MiniPlayer } from '@/components/livetv/MiniPlayer';
-import { usePlaylistRefreshEvents } from '@/hooks/usePlaylistRefreshEvents';
-import { useUserDataSync } from '@/hooks/useUserDataSync';
-import { useSidebarCollapsed } from '@/hooks/useSidebarCollapsed';
-
-// ─── Props ──────────────────────────────────────────────────────────────────
-
-interface AppLayoutProps {
-  title?: string;
-}
+import { useState, useSyncExternalStore } from "react";
+import { Outlet, useLocation, useNavigate } from "react-router";
+import { TopBar } from "./TopBar";
+import { MobileDrawer } from "./MobileDrawer";
+import { MiniPlayer } from "@/components/livetv/MiniPlayer";
+import { usePlaylistRefreshEvents } from "@/hooks/usePlaylistRefreshEvents";
+import { useUserDataSync } from "@/hooks/useUserDataSync";
+import { useAuthStore } from "@/store/auth";
 
 // ─── Responsive Hook ────────────────────────────────────────────────────────
 
@@ -28,8 +21,8 @@ function useIsMobile(breakpoint = 768) {
   return useSyncExternalStore(
     (onChange) => {
       const mql = window.matchMedia(query);
-      mql.addEventListener('change', onChange);
-      return () => mql.removeEventListener('change', onChange);
+      mql.addEventListener("change", onChange);
+      return () => mql.removeEventListener("change", onChange);
     },
     () => window.matchMedia(query).matches,
     () => false, // SSR fallback — we're a mobile-last client app.
@@ -38,7 +31,7 @@ function useIsMobile(breakpoint = 768) {
 
 // ─── AppLayout ──────────────────────────────────────────────────────────────
 
-export function AppLayout({ title }: AppLayoutProps) {
+export function AppLayout() {
   // App-wide listener for IPTV M3U refresh completion. Mounted here so
   // every authenticated route picks up backend invalidations regardless
   // of which page kicked off the import (or whether the kick came from
@@ -51,15 +44,15 @@ export function AppLayout({ title }: AppLayoutProps) {
   // Mounts at the shell so it works regardless of the active route.
   useUserDataSync();
 
-  const [collapsed, toggleCollapsed] = useSidebarCollapsed();
   const [mobileOpen, setMobileOpen] = useState(false);
   const isMobile = useIsMobile();
   const location = useLocation();
+  const navigate = useNavigate();
+  const logout = useAuthStore((s) => s.logout);
 
-  // Force-close the mobile drawer whenever we leave the mobile viewport or
-  // navigate to a new route. Done via the React-docs "reset on prop change"
-  // pattern (track the last seen values, compare during render) instead of
-  // useEffect + setState, which fires a second render after the first paint.
+  // Close drawer on navigation or when leaving the mobile viewport.
+  // React-docs "reset on prop change" pattern (track last seen, compare
+  // during render) avoids the extra render that useEffect+setState pays.
   const [lastResetKey, setLastResetKey] = useState({
     pathname: location.pathname,
     isMobile,
@@ -72,95 +65,64 @@ export function AppLayout({ title }: AppLayoutProps) {
     if (mobileOpen) setMobileOpen(false);
   }
 
-  const toggleCollapse = toggleCollapsed;
   const toggleMobile = () => setMobileOpen((prev) => !prev);
   const closeMobile = () => setMobileOpen(false);
 
+  const handleLogout = () => {
+    logout();
+    navigate("/login");
+  };
+
   return (
-    <TopBarSlotProvider>
-    {/*
+    /*
      * No `bg-bg-base` on this wrapper — the body has it globally
      * (see styles/globals.css). Painting it again here would cover
      * any fixed-positioned z<0 backdrop a route renders (e.g.
      * ItemDetail's ambient-aurora canvas), since the static wrapper
      * paints in z=auto over the negative-z siblings. Keeping the
      * layout transparent lets per-route backgrounds show through.
-     */}
+     */
     <div className="min-h-screen font-sans">
-      {/*
-       * Layout reorder: TopBar is fixed full-width at the top (z-40);
-       * the sidebar hangs from below it (top: var(--topbar-height),
-       * z-30) so it doesn't overlap the brand row. Main content is
-       * pushed down by topbar height and across by sidebar width.
-       *
-       * Mobile drawer slides in below the topbar — same `top` offset
-       * so the hamburger that opens it stays anchored visually.
-       */}
+      {/* TopBar — full-width fixed at the top (z-40). Owns brand,
+          center MainNav (desktop), search, avatar dropdown. */}
+      <TopBar onMobileMenuClick={toggleMobile} />
 
-      {/* TopBar — full-width fixed, owns hamburger + brand + search + avatar */}
-      <TopBar
-        title={title}
-        onMenuClick={isMobile ? toggleMobile : toggleCollapse}
-        sidebarCollapsed={collapsed}
-      />
-
-      {/* Mobile drawer overlay */}
+      {/* Mobile drawer — sliding panel below the topbar. Hidden on
+          md+ so it can't accidentally render once we widen the layout. */}
       <div
         className={[
-          'fixed inset-0 z-30 bg-black/60 backdrop-blur-sm transition-opacity duration-300 md:hidden',
-          mobileOpen ? 'opacity-100' : 'opacity-0 pointer-events-none',
-        ].join(' ')}
-        style={{ top: 'var(--topbar-height)' }}
+          "fixed inset-0 z-30 bg-black/60 backdrop-blur-sm transition-opacity duration-300 md:hidden",
+          mobileOpen ? "opacity-100" : "opacity-0 pointer-events-none",
+        ].join(" ")}
+        style={{ top: "var(--topbar-height)" }}
         onClick={closeMobile}
       />
-
-      {/* Mobile drawer */}
       <div
         className={[
-          'fixed left-0 z-40 transition-transform duration-300 ease-out md:hidden',
-          mobileOpen ? 'translate-x-0' : '-translate-x-full pointer-events-none',
-        ].join(' ')}
+          "fixed left-0 z-40 transition-transform duration-300 ease-out md:hidden",
+          mobileOpen ? "translate-x-0" : "-translate-x-full pointer-events-none",
+        ].join(" ")}
         style={{
-          top: 'var(--topbar-height)',
-          height: 'calc(100dvh - var(--topbar-height))',
+          top: "var(--topbar-height)",
+          height: "calc(100dvh - var(--topbar-height))",
         }}
       >
-        <Sidebar collapsed={false} onClose={closeMobile} />
+        <MobileDrawer onClose={closeMobile} onLogout={handleLogout} />
       </div>
 
-      {/* Desktop sidebar */}
-      <div
-        className="hidden md:block fixed left-0 z-30"
-        style={{
-          top: 'var(--topbar-height)',
-          height: 'calc(100dvh - var(--topbar-height))',
-        }}
+      {/* Main content — full width below the topbar. No sidebar means
+          no horizontal margin gymnastics; pages get the entire viewport. */}
+      <main
+        className="px-4 pb-4 md:px-6 md:pb-6"
+        style={{ paddingTop: "var(--topbar-height)" }}
       >
-        <Sidebar collapsed={collapsed} />
-      </div>
-
-      {/* Main content area */}
-      <div
-        className="transition-[margin-left] duration-200"
-        style={{
-          marginLeft: isMobile
-            ? 0
-            : collapsed
-              ? 'var(--sidebar-collapsed-width)'
-              : 'var(--sidebar-width)',
-          paddingTop: 'var(--topbar-height)',
-        }}
-      >
-        <main className="px-4 pb-4 md:px-6 md:pb-6">
-          <Outlet />
-        </main>
-      </div>
+        <Outlet />
+      </main>
 
       {/* Mini-player — fixed bottom-right, lives at the shell level so
           it survives navigation between routes. Renders nothing when
           either nothing is playing or the full overlay is up. */}
       <MiniPlayer />
     </div>
-    </TopBarSlotProvider>
   );
 }
