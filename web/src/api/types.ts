@@ -366,7 +366,12 @@ export interface MediaItem {
   title: string;
   original_title: string | null;
   year: number | null;
-  sort_title: string;
+  // The article-stripped sort key the backend computes for SQL
+  // ORDER BY ("the matrix" → "matrix"). Most endpoints ship it, but
+  // a few list shapes (federation peer items, older lean responses)
+  // omit it — keep this optional so callers handle absence rather
+  // than trusting a non-null type that the wire doesn't honour.
+  sort_title?: string;
   overview: string | null;
   tagline: string | null;
   genres: string[];

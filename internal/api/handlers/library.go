@@ -452,6 +452,12 @@ func itemSummaryResponse(item *db.Item) map[string]any {
 		"library_id":     item.LibraryID,
 		"type":           item.Type,
 		"title":          item.Title,
+		// `sort_title` is the lowercased + article-stripped variant the
+		// backend stores for SQL ORDER BY (so "The Matrix" sorts as
+		// "matrix"). The browse page also re-sorts client-side when
+		// the user picks "title" — without this field on the wire it
+		// did `undefined.localeCompare(...)` and crashed the grid.
+		"sort_title":     item.SortTitle,
 		"duration_ticks": item.DurationTicks,
 		"is_available":   item.IsAvailable,
 		"added_at":       item.AddedAt,
