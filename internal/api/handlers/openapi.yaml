@@ -2002,6 +2002,9 @@ components:
             overview: { type: string }
             tagline: { type: string }
             studio: { type: string }
+            studio_logo_url:
+              type: string
+              description: "Absolute URL of the studio brand-mark image (empty when no logo on file)"
             genres:
               type: array
               items: { type: string }

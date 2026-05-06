@@ -203,6 +203,13 @@ func (h *ItemHandler) attachMetadata(ctx context.Context, resp map[string]any, i
 	if meta.Studio != "" {
 		resp["studio"] = meta.Studio
 	}
+	// Studio logo (TMDb production-company brand mark) is optional —
+	// older studios with no logo on file produce empty strings here
+	// and the frontend falls back to the `studio` text. Persisted as
+	// an absolute URL by the scanner so we just pass it through.
+	if meta.StudioLogoURL != "" {
+		resp["studio_logo_url"] = meta.StudioLogoURL
+	}
 	if meta.TrailerKey != "" && meta.TrailerSite != "" {
 		resp["trailer"] = map[string]any{
 			"key":  meta.TrailerKey,

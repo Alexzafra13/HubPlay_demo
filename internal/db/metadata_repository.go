@@ -25,6 +25,13 @@ type Metadata struct {
 	// "Vimeo") so the frontend picks the right embed URL.
 	TrailerKey  string
 	TrailerSite string
+	// StudioLogoURL is the absolute image URL of the headline
+	// production company / network logo (Lucasfilm, HBO, Disney+, …).
+	// Built from TMDb's `production_companies[0].logo_path` at scan
+	// time using the configured image base, so the frontend renders
+	// it with a single `<img src>` and falls back to the studio text
+	// when empty (older studios with no TMDb logo, or failed match).
+	StudioLogoURL string
 }
 
 type MetadataRepository struct {
@@ -38,14 +45,15 @@ func NewMetadataRepository(database *sql.DB) *MetadataRepository {
 
 func (r *MetadataRepository) Upsert(ctx context.Context, m *Metadata) error {
 	err := r.q.UpsertMetadata(ctx, sqlc.UpsertMetadataParams{
-		ItemID:      m.ItemID,
-		Overview:    nullableString(m.Overview),
-		Tagline:     nullableString(m.Tagline),
-		Studio:      nullableString(m.Studio),
-		GenresJson:  nullableString(m.GenresJSON),
-		TagsJson:    nullableString(m.TagsJSON),
-		TrailerKey:  m.TrailerKey,
-		TrailerSite: m.TrailerSite,
+		ItemID:        m.ItemID,
+		Overview:      nullableString(m.Overview),
+		Tagline:       nullableString(m.Tagline),
+		Studio:        nullableString(m.Studio),
+		GenresJson:    nullableString(m.GenresJSON),
+		TagsJson:      nullableString(m.TagsJSON),
+		TrailerKey:    m.TrailerKey,
+		TrailerSite:   m.TrailerSite,
+		StudioLogoUrl: m.StudioLogoURL,
 	})
 	if err != nil {
 		return fmt.Errorf("upsert metadata: %w", err)
@@ -124,7 +132,8 @@ func (r *MetadataRepository) GetMetadataBatch(ctx context.Context, itemIDs []str
 	query := fmt.Sprintf(
 		`SELECT item_id, COALESCE(overview,''), COALESCE(tagline,''),
 		        COALESCE(studio,''), COALESCE(genres_json,''), COALESCE(tags_json,''),
-		        COALESCE(trailer_key,''), COALESCE(trailer_site,'')
+		        COALESCE(trailer_key,''), COALESCE(trailer_site,''),
+		        COALESCE(studio_logo_url,'')
 		 FROM metadata WHERE item_id IN (%s)`,
 		joinStrings(placeholders, ","),
 	)
@@ -138,7 +147,7 @@ func (r *MetadataRepository) GetMetadataBatch(ctx context.Context, itemIDs []str
 	result := make(map[string]*Metadata)
 	for rows.Next() {
 		m := &Metadata{}
-		if err := rows.Scan(&m.ItemID, &m.Overview, &m.Tagline, &m.Studio, &m.GenresJSON, &m.TagsJSON, &m.TrailerKey, &m.TrailerSite); err != nil {
+		if err := rows.Scan(&m.ItemID, &m.Overview, &m.Tagline, &m.Studio, &m.GenresJSON, &m.TagsJSON, &m.TrailerKey, &m.TrailerSite, &m.StudioLogoURL); err != nil {
 			return nil, fmt.Errorf("scan metadata: %w", err)
 		}
 		result[m.ItemID] = m
@@ -148,13 +157,14 @@ func (r *MetadataRepository) GetMetadataBatch(ctx context.Context, itemIDs []str
 
 func metadataFromRow(r sqlc.GetMetadataByItemIDRow) Metadata {
 	return Metadata{
-		ItemID:      r.ItemID,
-		Overview:    r.Overview,
-		Tagline:     r.Tagline,
-		Studio:      r.Studio,
-		GenresJSON:  r.GenresJson,
-		TagsJSON:    r.TagsJson,
-		TrailerKey:  r.TrailerKey,
-		TrailerSite: r.TrailerSite,
+		ItemID:        r.ItemID,
+		Overview:      r.Overview,
+		Tagline:       r.Tagline,
+		Studio:        r.Studio,
+		GenresJSON:    r.GenresJson,
+		TagsJSON:      r.TagsJson,
+		TrailerKey:    r.TrailerKey,
+		TrailerSite:   r.TrailerSite,
+		StudioLogoURL: r.StudioLogoUrl,
 	}
 }

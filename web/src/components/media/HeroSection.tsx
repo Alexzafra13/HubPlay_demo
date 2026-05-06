@@ -1,7 +1,7 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import type { FC, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import type { MediaItem } from "@/api/types";
+import type { MediaItem, Person } from "@/api/types";
 import { Button } from "@/components/common/Button";
 import { Badge } from "@/components/common/Badge";
 import { thumb } from "@/utils/imageUrl";
@@ -37,7 +37,58 @@ interface HeroSectionProps {
   onToggleFavorite?: () => void;
   isFavorite?: boolean;
   menuItems?: HeroMenuItem[];
+  /**
+   * Cast / crew rows from ItemDetail. The hero only consumes them to
+   * surface the director credit prominently below the title (Plex-
+   * style "Directed by …"). MediaItem itself doesn't carry people, so
+   * the page passes them through as a sibling prop. Optional —
+   * federation peer detail and any caller without the detail payload
+   * pass nothing and the line just doesn't render.
+   */
+  people?: Person[];
 }
+
+// Extract the headline crew credit. Movies almost always have a single
+// "Director" entry; if multiple are listed (co-direction) we surface
+// the first by sort_order so the line stays one row. The lookup is
+// case-insensitive because the scanner has historically inserted both
+// "Director" and "director" depending on TMDb's response shape.
+function findDirector(people: Person[] | undefined): string | null {
+  if (!people || people.length === 0) return null;
+  const sorted = [...people].sort((a, b) => a.sort_order - b.sort_order);
+  const director = sorted.find((p) => p.role.toLowerCase() === "director");
+  return director?.name ?? null;
+}
+
+// External-ID button row — small icons that link out to the canonical
+// page on IMDb / TMDb / TVDb when the scanner persisted a provider id.
+// Order is fixed (IMDb first because it's the most-recognised in the
+// movie world) so users build muscle memory.
+const EXTERNAL_PROVIDERS: ReadonlyArray<{
+  key: string;
+  label: "openOnImdb" | "openOnTmdb" | "openOnTvdb";
+  href: (id: string) => string;
+  text: string;
+}> = [
+  {
+    key: "imdb",
+    label: "openOnImdb",
+    href: (id) => `https://www.imdb.com/title/${encodeURIComponent(id)}/`,
+    text: "IMDb",
+  },
+  {
+    key: "tmdb",
+    label: "openOnTmdb",
+    href: (id) => `https://www.themoviedb.org/movie/${encodeURIComponent(id)}`,
+    text: "TMDb",
+  },
+  {
+    key: "tvdb",
+    label: "openOnTvdb",
+    href: (id) => `https://thetvdb.com/?tab=series&id=${encodeURIComponent(id)}`,
+    text: "TVDb",
+  },
+];
 
 function formatRating(rating: number): string {
   return rating.toFixed(1);
@@ -152,9 +203,45 @@ const HeroSection: FC<HeroSectionProps> = ({
   onToggleFavorite,
   isFavorite = false,
   menuItems = [],
+  people,
 }) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const duration = formatRuntime(item.duration_ticks);
+  const director = useMemo(() => findDirector(people), [people]);
+
+  // Movies in Plex render the full premiere date ("7 sept 2012")
+  // whereas episodes already do this elsewhere. Falls back to the
+  // bare year when there's no premiere_date row, and to nothing when
+  // neither exists. Locale-aware via the active i18n language so
+  // Spanish UI shows "7 sept 2012" and English shows "Sep 7, 2012".
+  const movieReleaseDate = useMemo(() => {
+    if (item.type !== "movie") return null;
+    if (!item.premiere_date) return null;
+    const d = new Date(item.premiere_date);
+    if (Number.isNaN(d.getTime())) return null;
+    return d.toLocaleDateString(i18n.language, {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    });
+  }, [item.type, item.premiere_date, i18n.language]);
+
+  const externalLinks = useMemo(() => {
+    if (!item.external_ids) return [];
+    return EXTERNAL_PROVIDERS.flatMap((p) => {
+      const id = item.external_ids?.[p.key];
+      return id ? [{ ...p, id }] : [];
+    });
+  }, [item.external_ids]);
+
+  // Overview clamp toggle — the description sits between the meta
+  // chips and the CTA row, and the design clamps to 3 lines so the
+  // hero stays focused on the play button. A "Read more" link reveals
+  // the full text in place; "Read less" collapses it back. Disabled
+  // when the overview obviously fits in 3 lines (≤240 chars is a
+  // pragmatic threshold — covers ~3 lines at hero width).
+  const [overviewExpanded, setOverviewExpanded] = useState(false);
+  const overviewClampable = (item.overview?.length ?? 0) > 240;
 
   // Episodes and seasons carry limited visuals on their own (episodes
   // get a still, seasons get a poster, neither gets a backdrop). The
@@ -314,19 +401,37 @@ const HeroSection: FC<HeroSectionProps> = ({
                 </p>
               )}
 
+              {/* "Directed by …" — Plex surfaces this prominently
+                  between tagline and meta chips so the headline crew
+                  credit isn't buried in the cast strip below the
+                  fold. Only rendered for movies; episodes inherit
+                  their show's directors per-episode (mixed bag, not
+                  worth a single line) and series/seasons don't have
+                  a single director attribution. */}
+              {item.type === "movie" && director && (
+                <p className="text-sm font-medium text-text-secondary/90 drop-shadow-md">
+                  {t("itemDetail.directedBy", { name: director })}
+                </p>
+              )}
+
               <div className="flex flex-wrap items-center gap-2 text-sm text-text-secondary">
                 {/* Episodes: prefer the full air date — "12 Mar 2025"
                     reads more meaningfully than the bare year on the
-                    per-episode page. Movies and seasons keep the
-                    year-only line. */}
+                    per-episode page. Movies use the same full date
+                    when available (Plex parity). Series/seasons
+                    keep the year-only line because their air
+                    "premiere" is per-season and a single date is
+                    misleading. */}
                 {isEpisode && item.premiere_date ? (
                   <span className="font-medium">
-                    {new Date(item.premiere_date).toLocaleDateString(undefined, {
+                    {new Date(item.premiere_date).toLocaleDateString(i18n.language, {
                       day: "numeric",
                       month: "short",
                       year: "numeric",
                     })}
                   </span>
+                ) : movieReleaseDate ? (
+                  <span className="font-medium">{movieReleaseDate}</span>
                 ) : item.year != null ? (
                   <span className="font-medium">{item.year}</span>
                 ) : null}
@@ -351,16 +456,70 @@ const HeroSection: FC<HeroSectionProps> = ({
                 ))}
 
                 {/* Studio / network — soft attribution after the
-                    taxonomy badges, same pattern as SeriesHero. */}
-                {item.studio && (
+                    taxonomy badges, same pattern as SeriesHero. When
+                    the scanner persisted a brand-mark URL we render
+                    the image (Lucasfilm, HBO, Disney+ …); otherwise
+                    fall back to the studio text. The leading "·"
+                    only appears with the text fallback because the
+                    image already reads as a separate visual. */}
+                {item.studio_logo_url ? (
+                  <img
+                    src={item.studio_logo_url}
+                    alt={item.studio ?? ""}
+                    className="ml-1 h-5 w-auto max-w-[120px] object-contain opacity-80"
+                    loading="lazy"
+                  />
+                ) : item.studio ? (
                   <span className="text-xs text-text-muted">· {item.studio}</span>
-                )}
+                ) : null}
               </div>
 
               {item.overview != null && (
-                <p className="line-clamp-3 max-w-2xl text-sm leading-relaxed text-text-secondary sm:text-[15px]">
-                  {item.overview}
-                </p>
+                <div className="max-w-2xl">
+                  <p
+                    className={`text-sm leading-relaxed text-text-secondary sm:text-[15px] ${
+                      overviewExpanded || !overviewClampable ? "" : "line-clamp-3"
+                    }`}
+                  >
+                    {item.overview}
+                  </p>
+                  {overviewClampable && (
+                    <button
+                      type="button"
+                      onClick={() => setOverviewExpanded((v) => !v)}
+                      className="mt-1 text-sm font-medium text-text-secondary transition-colors hover:text-text-primary cursor-pointer"
+                      aria-expanded={overviewExpanded}
+                    >
+                      {overviewExpanded
+                        ? t("itemDetail.readLess")
+                        : t("itemDetail.readMore")}
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* External-ID badges — small clickable chips that
+                  jump to the canonical IMDb / TMDb / TVDb page. The
+                  scanner only persists provider ids the metadata
+                  provider returned, so this row stays empty when no
+                  match was made (no broken links). target=_blank +
+                  rel=noopener so we don't leak referrer or window
+                  handle to the third party. */}
+              {externalLinks.length > 0 && (
+                <div className="flex flex-wrap items-center gap-2">
+                  {externalLinks.map((link) => (
+                    <a
+                      key={link.key}
+                      href={link.href(link.id)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label={t(`itemDetail.${link.label}`)}
+                      className="rounded-md border border-border/60 bg-bg-card/40 px-2 py-1 text-xs font-semibold text-text-secondary transition-colors hover:border-border hover:bg-bg-elevated hover:text-text-primary backdrop-blur-sm"
+                    >
+                      {link.text}
+                    </a>
+                  ))}
+                </div>
               )}
 
               <div className="flex items-center gap-3 pt-1">

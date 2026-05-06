@@ -54,6 +54,13 @@ type MetadataResult struct {
 	// backdrop alone".
 	TrailerKey  string
 	TrailerSite string
+	// StudioLogoURL is the absolute image URL of the headline
+	// production company / network logo, picked alongside `Studio`
+	// from the same provider record. Empty when the company has no
+	// logo in the provider's catalogue (older studios, indie
+	// productions). The frontend renders the image when present and
+	// falls back to the `Studio` text otherwise.
+	StudioLogoURL string
 }
 
 // Person represents a cast/crew member.

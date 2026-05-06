@@ -24,20 +24,22 @@ SELECT item_id, COALESCE(overview, '') AS overview, COALESCE(tagline, '') AS tag
        COALESCE(studio, '') AS studio, COALESCE(genres_json, '') AS genres_json,
        COALESCE(tags_json, '') AS tags_json,
        COALESCE(trailer_key, '') AS trailer_key,
-       COALESCE(trailer_site, '') AS trailer_site
+       COALESCE(trailer_site, '') AS trailer_site,
+       COALESCE(studio_logo_url, '') AS studio_logo_url
 FROM metadata
 WHERE item_id = ?
 `
 
 type GetMetadataByItemIDRow struct {
-	ItemID      string `json:"item_id"`
-	Overview    string `json:"overview"`
-	Tagline     string `json:"tagline"`
-	Studio      string `json:"studio"`
-	GenresJson  string `json:"genres_json"`
-	TagsJson    string `json:"tags_json"`
-	TrailerKey  string `json:"trailer_key"`
-	TrailerSite string `json:"trailer_site"`
+	ItemID        string `json:"item_id"`
+	Overview      string `json:"overview"`
+	Tagline       string `json:"tagline"`
+	Studio        string `json:"studio"`
+	GenresJson    string `json:"genres_json"`
+	TagsJson      string `json:"tags_json"`
+	TrailerKey    string `json:"trailer_key"`
+	TrailerSite   string `json:"trailer_site"`
+	StudioLogoUrl string `json:"studio_logo_url"`
 }
 
 func (q *Queries) GetMetadataByItemID(ctx context.Context, itemID string) (GetMetadataByItemIDRow, error) {
@@ -52,14 +54,15 @@ func (q *Queries) GetMetadataByItemID(ctx context.Context, itemID string) (GetMe
 		&i.TagsJson,
 		&i.TrailerKey,
 		&i.TrailerSite,
+		&i.StudioLogoUrl,
 	)
 	return i, err
 }
 
 const upsertMetadata = `-- name: UpsertMetadata :exec
 
-INSERT INTO metadata (item_id, overview, tagline, studio, genres_json, tags_json, trailer_key, trailer_site)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO metadata (item_id, overview, tagline, studio, genres_json, tags_json, trailer_key, trailer_site, studio_logo_url)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(item_id) DO UPDATE SET
     overview = excluded.overview,
     tagline = excluded.tagline,
@@ -67,18 +70,20 @@ ON CONFLICT(item_id) DO UPDATE SET
     genres_json = excluded.genres_json,
     tags_json = excluded.tags_json,
     trailer_key = excluded.trailer_key,
-    trailer_site = excluded.trailer_site
+    trailer_site = excluded.trailer_site,
+    studio_logo_url = excluded.studio_logo_url
 `
 
 type UpsertMetadataParams struct {
-	ItemID      string         `json:"item_id"`
-	Overview    sql.NullString `json:"overview"`
-	Tagline     sql.NullString `json:"tagline"`
-	Studio      sql.NullString `json:"studio"`
-	GenresJson  sql.NullString `json:"genres_json"`
-	TagsJson    sql.NullString `json:"tags_json"`
-	TrailerKey  string         `json:"trailer_key"`
-	TrailerSite string         `json:"trailer_site"`
+	ItemID        string         `json:"item_id"`
+	Overview      sql.NullString `json:"overview"`
+	Tagline       sql.NullString `json:"tagline"`
+	Studio        sql.NullString `json:"studio"`
+	GenresJson    sql.NullString `json:"genres_json"`
+	TagsJson      sql.NullString `json:"tags_json"`
+	TrailerKey    string         `json:"trailer_key"`
+	TrailerSite   string         `json:"trailer_site"`
+	StudioLogoUrl string         `json:"studio_logo_url"`
 }
 
 // Extended metadata for items (overview, tagline, genres, etc.).
@@ -97,6 +102,7 @@ func (q *Queries) UpsertMetadata(ctx context.Context, arg UpsertMetadataParams) 
 		arg.TagsJson,
 		arg.TrailerKey,
 		arg.TrailerSite,
+		arg.StudioLogoUrl,
 	)
 	return err
 }
