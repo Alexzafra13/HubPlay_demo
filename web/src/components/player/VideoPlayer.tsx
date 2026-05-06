@@ -207,6 +207,33 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
     }
   }, [onClose]);
 
+  // ─── Tab close / navigation cleanup ──────────────────────────────────────
+  //
+  // If the user closes the tab or navigates away (back button, address
+  // bar) without pressing the player's close button, we'd otherwise
+  // leak the transcode session for the server's idle timeout window
+  // (~90 s). Hook into `pagehide` (more reliable than `beforeunload`,
+  // also fires on iOS Safari and on bfcache eviction) and fire a
+  // best-effort DELETE with `keepalive: true` from the cleanup helper
+  // so the request survives unload. The server's idle reaper is still
+  // there as a backstop if even this drops.
+  useEffect(() => {
+    const onPageHide = () => {
+      const token = localStorage.getItem("hubplay_access_token");
+      try {
+        fetch(`/api/v1/stream/${itemId}/session`, {
+          method: "DELETE",
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          keepalive: true,
+        }).catch(() => {});
+      } catch {
+        // Browser may have already torn down fetch — best-effort only.
+      }
+    };
+    window.addEventListener("pagehide", onPageHide);
+    return () => window.removeEventListener("pagehide", onPageHide);
+  }, [itemId]);
+
   // ─── Keyboard shortcuts ──────────────────────────────────────────────────
 
   usePlayerKeyboard({
