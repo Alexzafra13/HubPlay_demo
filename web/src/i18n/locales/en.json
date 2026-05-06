@@ -52,6 +52,55 @@
     "noResultsFor": "No results for",
     "viewAllResults": "View all results"
   },
+  "navMenu": {
+    "explore": "Explore",
+    "genres": "Genres",
+    "categories": "Categories",
+    "views": "Views",
+    "browseAll": "Browse all {{section}}",
+    "movies": {
+      "all": "All movies",
+      "recentlyAdded": "Recently added",
+      "byYear": "By year",
+      "byTitle": "By title"
+    },
+    "series": {
+      "all": "All series",
+      "recentlyAdded": "Recently added",
+      "byYear": "By year",
+      "byTitle": "By title"
+    },
+    "live": {
+      "now": "Now",
+      "discover": "Discover",
+      "guide": "Guide",
+      "favorites": "Favorites",
+      "general": "General",
+      "news": "News",
+      "sports": "Sports",
+      "movies": "Movies",
+      "music": "Music",
+      "kids": "Kids",
+      "documentaries": "Documentaries",
+      "international": "International"
+    },
+    "genre": {
+      "action": "Action",
+      "adventure": "Adventure",
+      "animation": "Animation",
+      "comedy": "Comedy",
+      "drama": "Drama",
+      "scifi": "Sci-Fi",
+      "horror": "Horror",
+      "thriller": "Thriller",
+      "documentary": "Documentary",
+      "kids": "Kids",
+      "crime": "Crime"
+    },
+    "peers": {
+      "viewAll": "View all servers"
+    }
+  },
   "home": {
     "continueWatching": "Continue Watching",
     "recentlyAdded": "Recently Added",

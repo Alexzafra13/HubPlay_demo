@@ -2,102 +2,87 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, NavLink } from "react-router";
 import { useTranslation } from "react-i18next";
 import { motion, AnimatePresence } from "framer-motion";
-import { Menu, LogOut, Settings as SettingsIcon, ShieldCheck } from "lucide-react";
+import {
+  Menu,
+  LogOut,
+  Settings as SettingsIcon,
+  ShieldCheck,
+  Smartphone,
+} from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { getInitials } from "@/utils/userDisplay";
-import { useTopBarSlotContent } from "./TopBarSlot";
 import { BrandMark } from "./BrandMark";
 import { SearchBar } from "./SearchBar";
+import { MainNav } from "./MainNav";
 
 interface TopBarProps {
-  title?: string;
-  /** Toggles desktop collapse on md+; toggles mobile drawer below. */
-  onMenuClick: () => void;
-  /** Drives the hamburger icon's animated state hint. */
-  sidebarCollapsed: boolean;
+  /** Toggles mobile drawer (only shown <md). */
+  onMobileMenuClick: () => void;
 }
 
-export function TopBar({ title, onMenuClick, sidebarCollapsed }: TopBarProps) {
+export function TopBar({ onMobileMenuClick }: TopBarProps) {
   const { t } = useTranslation();
   const { user, logout } = useAuthStore();
   const navigate = useNavigate();
-  const slotContent = useTopBarSlotContent();
   const scrolled = useScrolledPast(8);
 
   const initials = getInitials(user);
 
   return (
-    <>
-      <header
-        className={[
-          "fixed top-0 left-0 right-0 z-40 flex items-center gap-3 px-3 md:px-4",
-          "transition-[background-color,backdrop-filter,border-color] duration-200",
-          scrolled
-            ? "bg-bg-base/85 backdrop-blur-xl border-b border-border-subtle"
-            : "bg-bg-base/70 backdrop-blur-xl border-b border-border-subtle/60",
-        ].join(" ")}
-        style={{ height: "var(--topbar-height)" }}
+    <header
+      className={[
+        "fixed top-0 left-0 right-0 z-40 flex items-center gap-3 px-3 md:px-4",
+        "transition-[background-color,backdrop-filter,border-color] duration-200",
+        scrolled
+          ? "bg-bg-base/85 backdrop-blur-xl border-b border-border-subtle"
+          : "bg-bg-base/70 backdrop-blur-xl border-b border-border-subtle/60",
+      ].join(" ")}
+      style={{ height: "var(--topbar-height)" }}
+    >
+      {/* Hamburger — mobile only. Desktop has no sidebar to toggle. */}
+      <button
+        onClick={onMobileMenuClick}
+        className="flex md:hidden items-center justify-center w-10 h-10 rounded-lg text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
+        aria-label={t("nav.toggleMenu")}
       >
-        {/* Hamburger — toggles sidebar (collapse on desktop, drawer on mobile) */}
-        <button
-          onClick={onMenuClick}
-          className="flex items-center justify-center w-10 h-10 rounded-lg text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
-          aria-label={t("nav.toggleMenu")}
-          aria-pressed={!sidebarCollapsed}
-        >
-          <Menu className="h-[19px] w-[19px]" strokeWidth={1.7} />
-        </button>
+        <Menu className="h-[19px] w-[19px]" strokeWidth={1.7} />
+      </button>
 
-        {/* Brand */}
-        <NavLink
-          to="/"
-          end
-          className="flex items-center gap-2.5 px-1 py-1.5 rounded-lg hover:bg-bg-hover/60 transition-colors min-w-0"
-        >
-          <BrandMark size={30} />
-          <span className="text-[15px] font-semibold tracking-tight text-text-primary truncate hidden sm:inline">
-            HubPlay
-          </span>
-        </NavLink>
+      {/* Brand */}
+      <NavLink
+        to="/"
+        end
+        className="flex items-center gap-2.5 px-1 py-1.5 rounded-lg hover:bg-bg-hover/60 transition-colors min-w-0 flex-shrink-0"
+      >
+        <BrandMark size={30} />
+        <span className="text-[15px] font-semibold tracking-tight text-text-primary truncate hidden sm:inline">
+          HubPlay
+        </span>
+      </NavLink>
 
-        {/* Optional page title (rare — most pages render their own
-            PageHeader inside the content area instead). */}
-        {title && (
-          <div className="hidden md:flex items-center gap-2 ml-2 pl-3 border-l border-border-subtle min-w-0">
-            <span className="text-[13px] text-text-secondary truncate">{title}</span>
-          </div>
-        )}
+      {/* Center nav — desktop only; on mobile the drawer holds it */}
+      <div className="flex-1 flex items-center justify-center min-w-0">
+        <MainNav />
+      </div>
 
-        <div className="flex-1 min-w-0">
-          {/* Page-injected controls (LiveTV tabs, page filters) live
-              centered in the available space so they don't fight with
-              the brand or the right-side actions. */}
-          {slotContent}
-        </div>
+      {/* Search — animated icon → input expansion. ⌘K opens from anywhere. */}
+      <SearchBar />
 
-        {/* Search — icon-only by default, animates wide on click. On
-            /movies and /series it acts as a URL-driven page filter
-            (no dropdown). Elsewhere it shows a results dropdown that
-            drops from the topbar. */}
-        <SearchBar />
-
-        {/* User avatar dropdown */}
-        <UserAvatarMenu
-          user={user}
-          initials={initials}
-          onLogout={() => {
-            logout();
-            navigate("/login");
-          }}
-          isAdmin={user?.role === "admin"}
-        />
-      </header>
-
-    </>
+      {/* User avatar dropdown — single home for all personal/admin actions */}
+      <UserAvatarMenu
+        user={user}
+        initials={initials}
+        onLogout={() => {
+          logout();
+          navigate("/login");
+        }}
+        isAdmin={user?.role === "admin"}
+      />
+    </header>
   );
 }
 
-// ─── User avatar dropdown ───────────────────────────────────────────────────
+// ─── User avatar dropdown ───────────────────────────────────────────
 
 function UserAvatarMenu({
   user,
@@ -126,7 +111,7 @@ function UserAvatarMenu({
   }, [open]);
 
   return (
-    <div ref={ref} className="relative">
+    <div ref={ref} className="relative flex-shrink-0">
       <button
         onClick={() => setOpen((v) => !v)}
         className="relative flex items-center justify-center h-9 w-9 rounded-full text-[12px] font-semibold ring-1 ring-accent/30 hover:ring-accent/60 transition-all"
@@ -172,7 +157,16 @@ function UserAvatarMenu({
               role="menuitem"
             >
               <SettingsIcon className="h-[15px] w-[15px]" strokeWidth={1.6} />
-              {t("common.settings")}
+              {t("nav.settings")}
+            </NavLink>
+            <NavLink
+              to="/link"
+              onClick={() => setOpen(false)}
+              className="flex items-center gap-2.5 px-3 py-2.5 text-[13px] text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
+              role="menuitem"
+            >
+              <Smartphone className="h-[15px] w-[15px]" strokeWidth={1.6} />
+              {t("nav.linkDevice")}
             </NavLink>
             {isAdmin && (
               <NavLink
@@ -204,7 +198,7 @@ function UserAvatarMenu({
   );
 }
 
-// ─── Scroll-aware backdrop hook ─────────────────────────────────────────────
+// ─── Scroll-aware backdrop hook ─────────────────────────────────────
 
 /**
  * useScrolledPast — returns true once `window.scrollY` exceeds `threshold`.
