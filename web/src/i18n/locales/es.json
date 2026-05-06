@@ -259,7 +259,9 @@
     "readLess": "Leer menos",
     "openOnImdb": "Abrir en IMDb",
     "openOnTmdb": "Abrir en TMDb",
-    "openOnTvdb": "Abrir en TVDb"
+    "openOnTvdb": "Abrir en TVDb",
+    "recommendations": "Mas como esta",
+    "recInLibrary": "En tu librería"
   },
   "liveTV": {
     "title": "TV en directo",

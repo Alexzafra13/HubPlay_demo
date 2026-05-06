@@ -122,6 +122,21 @@ export function useItemChildren(
   });
 }
 
+export function useItemRecommendations(id: string) {
+  return useQuery<{ items: import("../types").Recommendation[] }>({
+    queryKey: queryKeys.itemRecommendations(id),
+    queryFn: () => api.getItemRecommendations(id),
+    enabled: !!id,
+    // TMDb recommendations don't change minute-to-minute. 10-minute
+    // staleness covers a session of bouncing between detail pages
+    // without re-querying TMDb (the backend round-trip is what costs).
+    staleTime: 10 * 60_000,
+    // 503 (no provider configured) and 5xx are non-fatal — the rail
+    // just hides itself. No point in auto-retrying mid-session.
+    retry: false,
+  });
+}
+
 export function usePerson(
   id: string,
   options?: Partial<UseQueryOptions<PersonDetail>>,

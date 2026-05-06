@@ -7,7 +7,6 @@ import {
   ImageIcon,
   RefreshIcon,
   InfoIcon,
-  ExternalLinkIcon,
 } from "@/components/media/icons";
 
 // Builds the hero kebab menu rows for a detail page. Lives here as a
@@ -15,20 +14,15 @@ import {
 // the queryClient + i18n context that the page would otherwise plumb
 // in by hand.
 //
-// Composition rules (kept identical to the inline version that lived
-// in ItemDetail before the split):
+// Composition rules:
 //
 //   - Admin-only tools come first (image manager + metadata refresh).
 //   - "Media info" jumps to the section anchor on the same page.
-//   - External-provider deep links are filtered to providers we know
-//     how to URL-build, so an unknown key in the wire (a future
-//     `wikidata`) is silently ignored rather than emitting a dead
-//     row pointing nowhere.
-//   - Series/season/episode use TMDb /tv/, movies use /movie/.
 //
-// The returned array IS rebuilt on every render — that was true of
-// the inline IIFE too. With React Compiler auto-memoising the parent,
-// a manual useMemo would just allocate dependency arrays for nothing.
+// External-provider deep links (IMDb / TMDb) used to live here too
+// but moved to inline chips in the hero (`<ExternalIdRow>`) since
+// they're a frequent destination — duplicating them in the kebab made
+// the menu read as crowded for no payoff.
 
 export interface UseDetailMenuArgs {
   // ItemDetail (not the bare MediaItem) because the menu reads
@@ -78,43 +72,6 @@ export function useDetailMenu({
           ?.scrollIntoView({ behavior: "smooth" });
       },
     });
-  }
-
-  if (item?.external_ids) {
-    const ids = item.external_ids;
-    const tmdbType: "tv" | "movie" =
-      item.type === "series" ||
-      item.type === "season" ||
-      item.type === "episode"
-        ? "tv"
-        : "movie";
-
-    if (ids.imdb) {
-      items.push({
-        label: t("itemDetail.openInIMDb", { defaultValue: "Ver en IMDb" }),
-        icon: <ExternalLinkIcon />,
-        onClick: () => {
-          window.open(
-            `https://www.imdb.com/title/${ids.imdb}/`,
-            "_blank",
-            "noopener,noreferrer",
-          );
-        },
-      });
-    }
-    if (ids.tmdb) {
-      items.push({
-        label: t("itemDetail.openInTMDb", { defaultValue: "Ver en TMDb" }),
-        icon: <ExternalLinkIcon />,
-        onClick: () => {
-          window.open(
-            `https://www.themoviedb.org/${tmdbType}/${ids.tmdb}`,
-            "_blank",
-            "noopener,noreferrer",
-          );
-        },
-      });
-    }
   }
 
   return items;

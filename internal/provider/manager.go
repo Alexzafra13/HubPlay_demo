@@ -152,6 +152,34 @@ func (m *Manager) FetchMetadata(ctx context.Context, externalID string, itemType
 	return nil, fmt.Errorf("no provider returned metadata for %q", externalID)
 }
 
+// FetchRecommendations returns "more like this" suggestions from the
+// first registered metadata provider that implements
+// RecommendationsProvider AND yields a non-empty list. Same
+// "no result is not an error" contract as the episode/season
+// fetchers — callers render an empty rail without surfacing a
+// failure to the user.
+func (m *Manager) FetchRecommendations(ctx context.Context, externalID string, itemType ItemType, limit int) ([]RecommendationResult, error) {
+	m.mu.RLock()
+	providers := m.metadata
+	m.mu.RUnlock()
+
+	for _, mp := range providers {
+		rp, ok := mp.(RecommendationsProvider)
+		if !ok {
+			continue
+		}
+		result, err := rp.GetRecommendations(ctx, externalID, itemType, limit)
+		if err != nil {
+			m.logger.Warn("recommendations fetch failed", "provider", mp.Name(), "error", err)
+			continue
+		}
+		if len(result) > 0 {
+			return result, nil
+		}
+	}
+	return nil, nil
+}
+
 // FetchEpisodeMetadata returns per-episode details from the first registered
 // metadata provider that implements EpisodeMetadataProvider AND yields a
 // non-nil result. Returns (nil, nil) when no provider can resolve the

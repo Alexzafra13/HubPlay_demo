@@ -227,6 +227,80 @@ func (t *TMDbProvider) GetMetadata(ctx context.Context, externalID string, itemT
 // /tv/{id}/season/{n}/episode/{m} endpoint. Returns nil when TMDb
 // answers 404 (the underlying `get` helper already swallows 404 into
 // (nil, nil) leaving the response struct zero-valued — the ID==0 check
+// GetRecommendations calls TMDb's `/movie/{id}/recommendations` (or
+// `/tv/{id}/recommendations`) endpoint and returns the top N
+// candidates with absolute poster URLs already resolved. Empty
+// externalID short-circuits to nil — items without a TMDb match
+// have no recommendations to show.
+//
+// `limit` caps the response client-side; TMDb pages at 20 and we
+// don't bother fetching subsequent pages because the rail surfaces
+// at most ~12 cards. Anything below 0 falls back to the default 12.
+func (t *TMDbProvider) GetRecommendations(ctx context.Context, externalID string, itemType ItemType, limit int) ([]RecommendationResult, error) {
+	if externalID == "" {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 12
+	}
+
+	mediaType := "movie"
+	if itemType == ItemSeries {
+		mediaType = "tv"
+	}
+
+	endpoint := fmt.Sprintf("/%s/%s/recommendations", mediaType, externalID)
+	params := url.Values{
+		"language": {t.lang},
+		"page":     {"1"},
+	}
+
+	var raw tmdbRecommendationsResponse
+	if err := t.get(ctx, endpoint, params, &raw); err != nil {
+		return nil, err
+	}
+
+	results := make([]RecommendationResult, 0, len(raw.Results))
+	for _, r := range raw.Results {
+		if len(results) >= limit {
+			break
+		}
+		title := r.Title
+		if title == "" {
+			title = r.Name
+		}
+		// TMDb returns separate `release_date` (movies) and
+		// `first_air_date` (tv) fields — the recommendations endpoint
+		// always echoes the type-specific one based on the parent
+		// route, but we tolerate either to keep this future-proof.
+		year := extractYear(r.ReleaseDate)
+		if year == 0 {
+			year = extractYear(r.FirstAirDate)
+		}
+
+		var posterURL string
+		if r.PosterPath != "" {
+			posterURL = tmdbImageURL + "w500" + r.PosterPath
+		}
+
+		var rating *float64
+		if r.VoteAverage > 0 {
+			v := r.VoteAverage
+			rating = &v
+		}
+
+		results = append(results, RecommendationResult{
+			ExternalID: strconv.Itoa(r.ID),
+			Title:      title,
+			Year:       year,
+			Overview:   r.Overview,
+			PosterURL:  posterURL,
+			Rating:     rating,
+		})
+	}
+	return results, nil
+}
+
 // distinguishes "not found" from "found but the episode is brand new").
 func (t *TMDbProvider) GetEpisodeMetadata(ctx context.Context, showExternalID string, seasonNumber, episodeNumber int) (*EpisodeMetadataResult, error) {
 	if showExternalID == "" || seasonNumber < 0 || episodeNumber <= 0 {
@@ -493,6 +567,24 @@ type tmdbSearchResponse struct {
 		ReleaseDate  string  `json:"release_date"`
 		FirstAirDate string  `json:"first_air_date"`
 		Popularity   float64 `json:"popularity"`
+	} `json:"results"`
+}
+
+// Wire shape for `/movie/{id}/recommendations` and
+// `/tv/{id}/recommendations`. TMDb returns the same fields as a
+// search hit plus poster/backdrop paths and the type-specific date,
+// so this struct doubles as both. Fields we don't consume (genre_ids,
+// adult, original_language, …) are simply omitted.
+type tmdbRecommendationsResponse struct {
+	Results []struct {
+		ID           int     `json:"id"`
+		Title        string  `json:"title"`
+		Name         string  `json:"name"`
+		Overview     string  `json:"overview"`
+		ReleaseDate  string  `json:"release_date"`
+		FirstAirDate string  `json:"first_air_date"`
+		PosterPath   string  `json:"poster_path"`
+		VoteAverage  float64 `json:"vote_average"`
 	} `json:"results"`
 }
 

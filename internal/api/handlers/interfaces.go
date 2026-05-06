@@ -208,6 +208,11 @@ type MetadataRepository interface {
 // IMDb" / "Open in TMDb" affordances without a second round-trip.
 type ExternalIDsRepository interface {
 	ListByItem(ctx context.Context, itemID string) ([]*db.ExternalID, error)
+	// GetItemIDByExternalID is the reverse lookup used by the
+	// recommendations endpoint to mark TMDb candidates that the user
+	// already has locally. Returns "" when no item carries that
+	// (provider, external_id) pairing.
+	GetItemIDByExternalID(ctx context.Context, provider, externalID string) (string, error)
 }
 
 // PeopleRepoForItems is the per-item people lookup used by the
@@ -278,6 +283,11 @@ type ProviderManager interface {
 	FetchImages(ctx context.Context, externalIDs map[string]string, itemType provider.ItemType) ([]provider.ImageResult, error)
 	SearchSubtitles(ctx context.Context, query provider.SubtitleQuery) ([]provider.SubtitleResult, error)
 	DownloadSubtitle(ctx context.Context, sourceName, fileID string) ([]byte, error)
+	// FetchRecommendations powers the "more like this" rail on the
+	// detail page. Implementations return (nil, nil) when no provider
+	// can resolve recs for the given external id — handlers render
+	// an empty rail rather than a 5xx for that case.
+	FetchRecommendations(ctx context.Context, externalID string, itemType provider.ItemType, limit int) ([]provider.RecommendationResult, error)
 }
 
 // ProviderRepository defines provider config data access.

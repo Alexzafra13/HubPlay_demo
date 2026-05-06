@@ -14,6 +14,7 @@ import (
 	"hubplay/internal/auth"
 	"hubplay/internal/db"
 	"hubplay/internal/imaging"
+	"hubplay/internal/provider"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -26,6 +27,10 @@ type ItemHandler struct {
 	chapters    ChapterRepository
 	externalIDs ExternalIDsRepository
 	people      PeopleRepoForItems
+	// providers powers the "more like this" rail by calling the
+	// metadata provider's recommendations endpoint (TMDb today). nil
+	// disables the feature — the endpoint returns 503 in that case.
+	providers ProviderManager
 	// trickplayDir is the root for generated trickplay sprites
 	// (`<dir>/<itemID>/sprite.png` + `manifest.json`). Empty disables
 	// the feature; the endpoint returns 503 in that case.
@@ -38,10 +43,11 @@ type ItemHandler struct {
 	logger         *slog.Logger
 }
 
-func NewItemHandler(lib LibraryService, images ImageRepository, metadata MetadataRepository, userData UserDataRepository, chapters ChapterRepository, externalIDs ExternalIDsRepository, people PeopleRepoForItems, trickplayDir string, logger *slog.Logger) *ItemHandler {
+func NewItemHandler(lib LibraryService, images ImageRepository, metadata MetadataRepository, userData UserDataRepository, chapters ChapterRepository, externalIDs ExternalIDsRepository, people PeopleRepoForItems, providers ProviderManager, trickplayDir string, logger *slog.Logger) *ItemHandler {
 	return &ItemHandler{
 		lib: lib, images: images, metadata: metadata, userData: userData,
 		chapters: chapters, externalIDs: externalIDs, people: people,
+		providers: providers,
 		trickplayDir: trickplayDir, logger: logger,
 	}
 }
@@ -360,6 +366,106 @@ func (h *ItemHandler) attachSeriesContextFromSeries(ctx context.Context, resp ma
 			}
 		}
 	}
+}
+
+// Recommendations returns "more like this" suggestions for an item,
+// powered by the metadata provider's recommendations endpoint
+// (TMDb's `/movie/{id}/recommendations` or `/tv/{id}/recommendations`).
+// Each candidate is cross-referenced against the local library so the
+// frontend can mark "in library" suggestions with a deep link to the
+// stored item, while genuinely new suggestions surface as external
+// posters.
+//
+// Empty list is a valid response (item has no TMDb match, or TMDb
+// returned no recommendations). 503 when no provider is configured
+// — the frontend hides the rail in either case.
+func (h *ItemHandler) Recommendations(w http.ResponseWriter, r *http.Request) {
+	if h.providers == nil {
+		respondError(w, r, http.StatusServiceUnavailable, "RECOMMENDATIONS_DISABLED",
+			"no metadata provider is configured")
+		return
+	}
+	id := chi.URLParam(r, "id")
+	item, err := h.lib.GetItem(r.Context(), id)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	if item == nil {
+		respondError(w, r, http.StatusNotFound, "NOT_FOUND", "item not found")
+		return
+	}
+
+	// Pull the per-item external id map and read the tmdb slot —
+	// same shape as attachExternalIDs already uses on the detail
+	// response.
+	extIDs, err := h.externalIDs.ListByItem(r.Context(), id)
+	if err != nil || len(extIDs) == 0 {
+		// No external ids = nothing to query TMDb with. Empty rail
+		// rather than a 4xx; the user just doesn't see the section.
+		respondJSON(w, http.StatusOK, map[string]any{
+			"data": map[string]any{"items": []any{}},
+		})
+		return
+	}
+	var tmdbExt string
+	for _, e := range extIDs {
+		if e.Provider == "tmdb" {
+			tmdbExt = e.ExternalID
+			break
+		}
+	}
+	if tmdbExt == "" {
+		respondJSON(w, http.StatusOK, map[string]any{
+			"data": map[string]any{"items": []any{}},
+		})
+		return
+	}
+
+	itemType := provider.ItemMovie
+	if item.Type == "series" {
+		itemType = provider.ItemSeries
+	}
+
+	recs, err := h.providers.FetchRecommendations(r.Context(), tmdbExt, itemType, 12)
+	if err != nil {
+		h.logger.Warn("fetch recommendations", "item_id", id, "error", err)
+		// Recommendations are decorative — 502 here would hide the
+		// whole detail page. Empty rail is the right failure mode.
+		respondJSON(w, http.StatusOK, map[string]any{
+			"data": map[string]any{"items": []any{}},
+		})
+		return
+	}
+
+	// Cross-reference each candidate against the library to mark
+	// which ones the user already has. The reverse-lookup index on
+	// (provider, external_id) keeps each call O(log n).
+	out := make([]map[string]any, 0, len(recs))
+	for _, rec := range recs {
+		entry := map[string]any{
+			"tmdb_id":    rec.ExternalID,
+			"title":      rec.Title,
+			"year":       rec.Year,
+			"overview":   rec.Overview,
+			"poster_url": rec.PosterURL,
+		}
+		if rec.Rating != nil {
+			entry["rating"] = *rec.Rating
+		}
+		localID, lookupErr := h.externalIDs.GetItemIDByExternalID(r.Context(), "tmdb", rec.ExternalID)
+		if lookupErr == nil && localID != "" {
+			entry["local_id"] = localID
+			entry["in_library"] = true
+		} else {
+			entry["in_library"] = false
+		}
+		out = append(out, entry)
+	}
+
+	respondJSON(w, http.StatusOK, map[string]any{
+		"data": map[string]any{"items": out},
+	})
 }
 
 // TrickplayManifest serves (and lazily generates) the sprite-sheet

@@ -40,6 +40,29 @@ func (q *Queries) GetExternalIDByProvider(ctx context.Context, arg GetExternalID
 	return i, err
 }
 
+const getItemIDByExternalID = `-- name: GetItemIDByExternalID :one
+SELECT item_id
+FROM external_ids
+WHERE provider = ? AND external_id = ?
+LIMIT
+`
+
+type GetItemIDByExternalIDParams struct {
+	Provider   string `json:"provider"`
+	ExternalID string `json:"external_id"`
+}
+
+// Reverse lookup used by recommendations cross-referencing — given a
+// provider name and the upstream id, returns the local item that
+// carries that mapping (NULL if none). Indexed by (provider, external_id)
+// on the table side so the lookup stays fast even on large libraries.
+func (q *Queries) GetItemIDByExternalID(ctx context.Context, arg GetItemIDByExternalIDParams) (string, error) {
+	row := q.db.QueryRowContext(ctx, getItemIDByExternalID, arg.Provider, arg.ExternalID)
+	var item_id string
+	err := row.Scan(&item_id)
+	return item_id, err
+}
+
 const listExternalIDsByItem = `-- name: ListExternalIDsByItem :many
 SELECT item_id, provider, external_id
 FROM external_ids

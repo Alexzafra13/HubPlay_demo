@@ -538,7 +538,7 @@ func NewRouter(deps Dependencies) http.Handler {
 				// layout clustered (one tree the operator can backup,
 				// rsync, or `du` to size the cache).
 				trickplayDir := filepath.Join(filepath.Dir(deps.Config.Database.Path), "images", "trickplay")
-				itemHandler := handlers.NewItemHandler(deps.Libraries, deps.Images, deps.Metadata, deps.UserData, deps.Chapters, deps.ExternalIDs, deps.People, trickplayDir, deps.Logger)
+				itemHandler := handlers.NewItemHandler(deps.Libraries, deps.Images, deps.Metadata, deps.UserData, deps.Chapters, deps.ExternalIDs, deps.People, deps.Providers, trickplayDir, deps.Logger)
 
 				// Libraries
 				r.Get("/libraries", libHandler.List)
@@ -682,6 +682,11 @@ func NewRouter(deps Dependencies) http.Handler {
 				r.Route("/items/{id}", func(r chi.Router) {
 					r.Get("/", itemHandler.Get)
 					r.Get("/children", itemHandler.Children)
+					// "More like this" rail. Pulls from TMDb's
+					// recommendations endpoint and cross-references
+					// each candidate against the local library so the
+					// UI can deep-link to in-library matches.
+					r.Get("/recommendations", itemHandler.Recommendations)
 					// Trickplay (seek-bar thumbnail previews). The
 					// first hit triggers ffmpeg generation; both
 					// endpoints serve from disk on subsequent hits.

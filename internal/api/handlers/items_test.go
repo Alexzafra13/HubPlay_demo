@@ -46,6 +46,17 @@ func (r *fakeExternalIDsRepo) ListByItem(_ context.Context, itemID string) ([]*d
 	return r.byItem[itemID], nil
 }
 
+func (r *fakeExternalIDsRepo) GetItemIDByExternalID(_ context.Context, provider, externalID string) (string, error) {
+	for itemID, list := range r.byItem {
+		for _, e := range list {
+			if e.Provider == provider && e.ExternalID == externalID {
+				return itemID, nil
+			}
+		}
+	}
+	return "", nil
+}
+
 // fakePeopleForItems satisfies PeopleRepoForItems. Cast/crew lists
 // per item id; absent entries return nil (handler renders no people
 // section then).
@@ -91,7 +102,10 @@ func newItemTestEnv(t *testing.T) *itemTestEnv {
 	// trickplayDir empty — the existing tests don't exercise the
 	// trickplay endpoints, so the handlers short-circuit to 503 via
 	// their nil-guard. New trickplay tests wire a temp dir locally.
-	env.handler = NewItemHandler(env.svc, env.images, env.meta, env.userData, env.chapters, env.extIDs, env.people, "", testutil.NopLogger())
+	// Recommendations endpoint is opt-in; tests that need it pass a
+	// fakeProviderManager instance instead of nil. Default `nil` keeps
+	// the existing assertions on Get/Search/Children unaffected.
+	env.handler = NewItemHandler(env.svc, env.images, env.meta, env.userData, env.chapters, env.extIDs, env.people, nil, "", testutil.NopLogger())
 
 	r := chi.NewRouter()
 	r.Route("/api/v1/items", func(r chi.Router) {
