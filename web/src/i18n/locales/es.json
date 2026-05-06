@@ -52,6 +52,55 @@
     "noResultsFor": "Sin resultados para",
     "viewAllResults": "Ver todos los resultados"
   },
+  "navMenu": {
+    "explore": "Explorar",
+    "genres": "Generos",
+    "categories": "Categorias",
+    "views": "Vistas",
+    "browseAll": "Ver todo {{section}}",
+    "movies": {
+      "all": "Todas las peliculas",
+      "recentlyAdded": "Agregadas recientemente",
+      "byYear": "Por año",
+      "byTitle": "Por titulo"
+    },
+    "series": {
+      "all": "Todas las series",
+      "recentlyAdded": "Agregadas recientemente",
+      "byYear": "Por año",
+      "byTitle": "Por titulo"
+    },
+    "live": {
+      "now": "Ahora",
+      "discover": "Descubrir",
+      "guide": "Guia",
+      "favorites": "Favoritos",
+      "general": "General",
+      "news": "Noticias",
+      "sports": "Deportes",
+      "movies": "Peliculas",
+      "music": "Musica",
+      "kids": "Infantil",
+      "documentaries": "Documentales",
+      "international": "Internacional"
+    },
+    "genre": {
+      "action": "Accion",
+      "adventure": "Aventura",
+      "animation": "Animacion",
+      "comedy": "Comedia",
+      "drama": "Drama",
+      "scifi": "Ciencia ficcion",
+      "horror": "Terror",
+      "thriller": "Thriller",
+      "documentary": "Documental",
+      "kids": "Infantil",
+      "crime": "Crimen"
+    },
+    "peers": {
+      "viewAll": "Ver todos los servidores"
+    }
+  },
   "home": {
     "continueWatching": "Seguir viendo",
     "recentlyAdded": "Agregados recientemente",
