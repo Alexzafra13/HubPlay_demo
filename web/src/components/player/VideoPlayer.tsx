@@ -32,6 +32,14 @@ interface VideoPlayerProps {
   knownDuration?: number;
   title?: string;
   /**
+   * Optional title-treatment logo URL (the same TMDb-sourced PNG the
+   * hero / detail surfaces show). When present the player top-bar
+   * renders it instead of the plain text title — matches what the
+   * user already saw on the way into playback. Falls back to `title`
+   * text when missing.
+   */
+  logoUrl?: string;
+  /**
    * Optional next-item metadata. When provided alongside `onEnded`,
    * the player shows an "Up Next" countdown overlay when the video
    * finishes instead of triggering the callback immediately. The
@@ -70,6 +78,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
   startPosition,
   knownDuration,
   title,
+  logoUrl,
   nextUp,
   chapters,
   audioStreams,
@@ -419,6 +428,12 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
         ref={videoRef}
         className="absolute inset-0 w-full h-full object-contain"
         playsInline
+        // Suppress Chrome's floating PiP toggle that hovers near the
+        // bottom-right of the video element (intrudes on our own
+        // controls overlay) plus the download / remote-playback hints
+        // that appear on long-press / right-click on some platforms.
+        disablePictureInPicture
+        controlsList="nodownload nopictureinpicture noremoteplayback"
         onClick={(e) => e.stopPropagation()}
         onDoubleClick={(e) => {
           e.stopPropagation();
@@ -500,6 +515,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
           } : undefined}
           onClose={handleClose}
           title={title}
+          logoUrl={logoUrl}
         />
       </div>
 

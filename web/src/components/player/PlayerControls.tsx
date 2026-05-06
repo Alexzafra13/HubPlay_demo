@@ -96,6 +96,13 @@ interface PlayerControlsProps {
   onSearchExternalSubs?: () => void;
   onClose: () => void;
   title?: string;
+  /**
+   * Optional title-treatment logo URL. Rendered as an image in the
+   * top bar in place of the plain text title when present — keeps
+   * visual continuity with the hero / detail surfaces the user just
+   * came from. The text title is the fallback.
+   */
+  logoUrl?: string;
 }
 
 // Icons live in `./icons.tsx`; audio enrichment helpers in
@@ -490,6 +497,7 @@ const PlayerControls: FC<PlayerControlsProps> = ({
   onSearchExternalSubs,
   onClose,
   title,
+  logoUrl,
 }) => {
   const { t } = useTranslation();
   // Quality picker only earns its place when the player has more
@@ -517,7 +525,14 @@ const PlayerControls: FC<PlayerControlsProps> = ({
       <div className="absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-black/70 to-transparent pointer-events-none" />
       <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-black/80 to-transparent pointer-events-none" />
 
-      {/* Top bar */}
+      {/* Top bar — back button + brand mark / title.
+          When a TMDb-sourced title-treatment logo is available we
+          show it here so the player picks up the same visual brand
+          the user just clicked from. The image is constrained in
+          height (not just max-width) so a square logo (Disney) and a
+          wide one (Marvel Studios) end up roughly the same visual
+          weight; without the height clamp the wide variant would
+          overpower the back button on smaller viewports. */}
       <div className="relative flex items-center gap-3 px-4 pt-4">
         <button
           onClick={onClose}
@@ -526,11 +541,19 @@ const PlayerControls: FC<PlayerControlsProps> = ({
         >
           <BackIcon />
         </button>
-        {title && (
+        {logoUrl ? (
+          <img
+            src={logoUrl}
+            alt={title ?? ""}
+            loading="eager"
+            decoding="async"
+            className="h-8 sm:h-10 max-w-[60vw] sm:max-w-[40vw] w-auto object-contain object-left drop-shadow-[0_2px_12px_rgba(0,0,0,0.7)]"
+          />
+        ) : title ? (
           <h2 className="text-sm font-medium text-white/90 truncate">
             {title}
           </h2>
-        )}
+        ) : null}
       </div>
 
       {/* Center play/pause */}
@@ -556,7 +579,12 @@ const PlayerControls: FC<PlayerControlsProps> = ({
           onSeek={onSeek}
         />
 
-        {/* Controls row */}
+        {/* Controls row.
+            Layout (left → right): Play · Time · ··· · Audio · Subs ·
+            Search-online-subs · Quality · Volume · Fullscreen.
+            Volume sits on the right next to Fullscreen so the cluster
+            of "playback knobs" (audio/subs/quality/volume) is grouped
+            visually instead of bracketing the time on opposite sides. */}
         <div className="flex items-center gap-2">
           {/* Play/Pause small */}
           <button
@@ -566,14 +594,6 @@ const PlayerControls: FC<PlayerControlsProps> = ({
           >
             {isPlaying ? <PauseIcon /> : <PlayIcon />}
           </button>
-
-          {/* Volume */}
-          <VolumeControl
-            volume={volume}
-            isMuted={isMuted}
-            onVolumeChange={onVolumeChange}
-            onToggleMute={onToggleMute}
-          />
 
           {/* Time */}
           <TimeDisplay currentTime={currentTime} duration={duration} />
@@ -631,6 +651,15 @@ const PlayerControls: FC<PlayerControlsProps> = ({
               onSelect={onQualityChange}
             />
           )}
+
+          {/* Volume — moved here from the left so it sits with the
+              other playback knobs near Fullscreen. */}
+          <VolumeControl
+            volume={volume}
+            isMuted={isMuted}
+            onVolumeChange={onVolumeChange}
+            onToggleMute={onToggleMute}
+          />
 
           {/* Fullscreen */}
           <button
