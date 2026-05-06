@@ -137,6 +137,11 @@ func (h *StreamHandler) MasterPlaylist(w http.ResponseWriter, r *http.Request) {
 
 // QualityPlaylist returns the HLS playlist for a specific quality level.
 // It starts a transcode session if one doesn't exist.
+// segmentDurationSeconds is the value the transcoder hands to ffmpeg
+// via -hls_time and the value the synthesized manifest declares per
+// segment. Keep them in lockstep — if one moves, the other has to.
+const segmentDurationSeconds float64 = 6
+
 func (h *StreamHandler) QualityPlaylist(w http.ResponseWriter, r *http.Request) {
 	itemID := chi.URLParam(r, "itemId")
 	quality := chi.URLParam(r, "quality")
@@ -170,7 +175,35 @@ func (h *StreamHandler) QualityPlaylist(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Wait for manifest to be generated (up to 10s)
+	// Synthesized VOD manifest: built from the item's known duration
+	// rather than waiting for ffmpeg to produce its own .m3u8. This
+	// is what unlocks free seeking — the playlist declares every
+	// segment up-front with `EXT-X-PLAYLIST-TYPE:VOD` + `EXT-X-ENDLIST`,
+	// so hls.js stops treating the stream as live and lets the user
+	// scrub anywhere on the timeline. Segments that ffmpeg hasn't
+	// reached yet are produced on-demand by the segment handler
+	// (which restarts ffmpeg at the right offset on miss).
+	//
+	// We still need item.DurationTicks to compute the segment count.
+	// For sources where the duration is unknown (very rare — usually
+	// a scan-in-progress item), fall back to the legacy behaviour of
+	// serving ffmpeg's own progressively-grown manifest. The user
+	// loses free seeking on those items, which is the best we can
+	// do without knowing how long the stream is.
+	item, err := h.items.GetByID(r.Context(), itemID)
+	if err == nil && item != nil && item.DurationTicks > 0 {
+		duration := float64(item.DurationTicks) / 10_000_000
+		segmentTpl := fmt.Sprintf("/api/v1/stream/%s/%s/segment%%05d.ts", itemID, quality)
+		manifest := stream.SynthesizeVODManifest(duration, segmentDurationSeconds, segmentTpl)
+
+		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+		w.Header().Set("Cache-Control", "no-cache")
+		_, _ = w.Write([]byte(manifest))
+		return
+	}
+
+	// Fallback: legacy ffmpeg-driven manifest. Only reachable when
+	// item duration is unknown.
 	manifestPath := ms.ManifestPath()
 	if err := waitForFile(manifestPath, 10*time.Second); err != nil {
 		handleServiceError(w, r, domain.NewTranscodePending())
@@ -182,7 +215,27 @@ func (h *StreamHandler) QualityPlaylist(w http.ResponseWriter, r *http.Request) 
 	http.ServeFile(w, r, manifestPath)
 }
 
+// segmentIndexPattern extracts the integer index from a segment
+// filename like "segment00042.ts". Used by the seek-restart path to
+// figure out where to restart ffmpeg when the requested segment file
+// doesn't exist yet.
+var segmentIndexPattern = regexp.MustCompile(`^segment(\d+)\.ts$`)
+
 // Segment serves an HLS segment (.ts file) from a transcode session.
+//
+// Flow:
+//
+//  1. If the file is already on disk, serve it (fast path — happens
+//     for sequential playback once ffmpeg is producing).
+//  2. If not, wait briefly (~2 s) in case ffmpeg is one segment
+//     behind — sequential playback can momentarily race.
+//  3. If still missing, the client is asking for a segment ahead of
+//     where ffmpeg is encoding — the user just clicked the seek bar
+//     somewhere far. Restart ffmpeg at that segment's offset and
+//     wait up to 15 s for the new ffmpeg to produce the file (with
+//     `-c:v copy` this is typically <2 s).
+//  4. If still nothing, give up with 404. The synthesized manifest
+//     keeps offering the URL, so the player will retry.
 func (h *StreamHandler) Segment(w http.ResponseWriter, r *http.Request) {
 	itemID := chi.URLParam(r, "itemId")
 	quality := chi.URLParam(r, "quality")
@@ -215,15 +268,54 @@ func (h *StreamHandler) Segment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Wait for segment to appear (up to 30s, FFmpeg might still be encoding)
-	if err := waitForFile(segmentPath, 30*time.Second); err != nil {
-		respondError(w, r, http.StatusNotFound, "SEGMENT_NOT_FOUND", "segment not available")
+	// Fast path + short tolerance for "ffmpeg is one segment behind".
+	if err := waitForFile(segmentPath, 2*time.Second); err == nil {
+		serveSegment(w, r, segmentPath)
 		return
 	}
 
+	// Slow path: file isn't appearing. The user probably seeked far
+	// ahead. Parse the segment index out of the filename, restart
+	// ffmpeg at that offset, and wait again. Restart is cheap with
+	// stream-copy (the typical case for h264 sources after the
+	// DirectStream fix).
+	matches := segmentIndexPattern.FindStringSubmatch(segmentFile)
+	if len(matches) != 2 {
+		// Not a numbered segment (e.g. stream.m3u8 fallback) — keep
+		// the legacy long wait.
+		if err := waitForFile(segmentPath, 30*time.Second); err != nil {
+			respondError(w, r, http.StatusNotFound, "SEGMENT_NOT_FOUND", "segment not available")
+			return
+		}
+		serveSegment(w, r, segmentPath)
+		return
+	}
+	segIdx, parseErr := strconv.Atoi(matches[1])
+	if parseErr != nil {
+		respondError(w, r, http.StatusBadRequest, "INVALID_SEGMENT", "invalid segment index")
+		return
+	}
+
+	if err := h.manager.RestartSessionAt(key, segIdx, segmentDurationSeconds); err != nil {
+		h.logger.Error("seek restart failed", "key", key, "segment", segIdx, "error", err)
+		respondError(w, r, http.StatusServiceUnavailable, "RESTART_FAILED", "could not restart transcode at requested offset")
+		return
+	}
+
+	if err := waitForFile(segmentPath, 15*time.Second); err != nil {
+		respondError(w, r, http.StatusNotFound, "SEGMENT_NOT_FOUND", "segment not available after restart")
+		return
+	}
+	serveSegment(w, r, segmentPath)
+}
+
+// serveSegment writes the segment file with the right HLS headers.
+// Pulled out so the fast and seek-restart paths can both use it
+// without duplicating the headers.
+func serveSegment(w http.ResponseWriter, r *http.Request, path string) {
 	w.Header().Set("Content-Type", "video/mp2t")
 	w.Header().Set("Cache-Control", "max-age=3600")
-	http.ServeFile(w, r, segmentPath)
+	http.ServeFile(w, r, path)
 }
 
 // DirectPlay serves the original media file via progressive download / range requests.

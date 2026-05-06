@@ -2,6 +2,7 @@ package stream
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -55,10 +56,21 @@ type Manager struct {
 // ManagedSession wraps a transcoding session with access tracking.
 type ManagedSession struct {
 	*Session
-	UserID       string
+	UserID string
+	// InputPath is the absolute file path of the source media. We
+	// cache it here so RestartSessionAt doesn't have to re-query the
+	// items repository every time the user seeks to an unencoded
+	// region — the path is immutable for the life of the session.
+	InputPath    string
 	Decision     PlaybackDecision
 	LastAccessed time.Time
 }
+
+// ErrSessionNotFound is returned by RestartSessionAt / TouchSession
+// when the caller references a key that has no live session. The
+// handler converts this into a 404 so the client falls back to a
+// fresh StartSession instead of looping on a dead key.
+var ErrSessionNotFound = errors.New("stream: session not found")
 
 // NewManager creates a streaming manager.
 func NewManager(
@@ -219,8 +231,17 @@ func (m *Manager) StartSession(ctx context.Context, userID, itemID, profileName 
 		return ms, nil
 	}
 
-	// Start transcode/remux session
-	session, err := m.transcoder.Start(key, itemID, item.Path, decision.Profile, startTime, decision.CopyVideo, decision.CopyAudio)
+	// Start transcode/remux session. Initial run starts at segment
+	// index 0 to match a startTime of 0 (or the seek-from-resume
+	// startTime — at which point segment numbering still begins at
+	// segmentIndex(startTime), but the canonical first-play call
+	// just passes 0 here and lets the synthesized manifest do the
+	// rest).
+	startSegment := 0
+	if startTime > 0 {
+		startSegment = int(startTime / 6) // matches -hls_time 6
+	}
+	session, err := m.transcoder.Start(key, itemID, item.Path, decision.Profile, startTime, decision.CopyVideo, decision.CopyAudio, startSegment)
 	if err != nil {
 		m.metrics.TranscodeFailed()
 		return nil, fmt.Errorf("start transcode: %w", err)
@@ -229,6 +250,7 @@ func (m *Manager) StartSession(ctx context.Context, userID, itemID, profileName 
 	ms := &ManagedSession{
 		Session:      session,
 		UserID:       userID,
+		InputPath:    item.Path,
 		Decision:     decision,
 		LastAccessed: time.Now(),
 	}
@@ -259,6 +281,75 @@ func (m *Manager) StartSession(ctx context.Context, userID, itemID, profileName 
 	)
 
 	return ms, nil
+}
+
+// RestartSessionAt stops the existing transcoder for `key` and
+// re-starts it at the given segment index. This is the seek-restart
+// path: the synthesized VOD manifest lists every segment up-front,
+// so when the client asks for a far-future segment that ffmpeg
+// hasn't produced yet, we restart ffmpeg at the corresponding offset
+// (segIndex * segmentDuration) so the next segment file lands within
+// a couple of seconds instead of after waiting for sequential
+// encoding to catch up.
+//
+// Existing segment files from the previous ffmpeg run remain on disk
+// — useful for backwards seeks within an already-encoded range. The
+// new ffmpeg run uses `-start_number = segIndex` so its produced
+// files don't collide with the older ones.
+//
+// Returns ErrSessionNotFound if no session exists for the key
+// (caller should fall back to a fresh StartSession).
+func (m *Manager) RestartSessionAt(key string, segmentIndex int, segmentDuration float64) error {
+	m.mu.Lock()
+	ms, ok := m.sessions[key]
+	m.mu.Unlock()
+	if !ok {
+		return ErrSessionNotFound
+	}
+
+	// Stop the existing ffmpeg run. We keep the ManagedSession
+	// (and its UserID, Decision, LastAccessed) so the cap/observer
+	// state stays correct — only the underlying ffmpeg process
+	// is torn down and replaced. Session.Stop already cancels the
+	// context and waits up to 5s for the process to exit, then
+	// removes the output dir. We don't want the dir removed for a
+	// restart (we'd lose backwards-seek-able old segments), so we
+	// reach into the unexported cancel + done directly here. Same
+	// package, same author intent.
+	if ms.Session != nil && ms.Session.cancel != nil {
+		ms.Session.cancel()
+		select {
+		case <-ms.Session.done:
+		case <-time.After(2 * time.Second):
+		}
+	}
+
+	startTime := float64(segmentIndex) * segmentDuration
+	newSession, err := m.transcoder.RestartAt(
+		key,
+		ms.ItemID,
+		ms.InputPath,
+		ms.Decision.Profile,
+		startTime,
+		ms.Decision.CopyVideo,
+		ms.Decision.CopyAudio,
+		segmentIndex,
+	)
+	if err != nil {
+		return fmt.Errorf("restart transcode at segment %d: %w", segmentIndex, err)
+	}
+
+	m.mu.Lock()
+	ms.Session = newSession
+	ms.LastAccessed = time.Now()
+	m.mu.Unlock()
+
+	m.logger.Info("session restarted at segment",
+		"key", key,
+		"segment", segmentIndex,
+		"start_time", startTime,
+	)
+	return nil
 }
 
 // TouchSession updates the last accessed time for a session.

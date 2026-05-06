@@ -70,7 +70,13 @@ func NewTranscoder(baseDir, ffmpegPath string, transcodeTimeout time.Duration, h
 // track. Pass false on both for the historical full-transcode path.
 // The DirectStream decision sets copyVideo=true (always) and
 // copyAudio=true when the audio codec also matches the client.
-func (t *Transcoder) Start(sessionID, itemID, inputPath string, profile Profile, startTime float64, copyVideo, copyAudio bool) (*Session, error) {
+//
+// `startSegmentNumber` controls ffmpeg's `-start_number` flag. The
+// canonical first-play call passes 0; restart-on-seek passes the
+// segment index that corresponds to the new offset so the produced
+// segment files (segmentNNNNN.ts) line up with what the synthesized
+// VOD manifest already advertised to the client.
+func (t *Transcoder) Start(sessionID, itemID, inputPath string, profile Profile, startTime float64, copyVideo, copyAudio bool, startSegmentNumber int) (*Session, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -87,7 +93,7 @@ func (t *Transcoder) Start(sessionID, itemID, inputPath string, profile Profile,
 
 	ctx, cancel := context.WithTimeout(context.Background(), t.transcodeTimeout)
 
-	args := BuildFFmpegArgs(inputPath, outputDir, profile, startTime, t.hwAccel, t.encoder, copyVideo, copyAudio)
+	args := BuildFFmpegArgs(inputPath, outputDir, profile, startTime, t.hwAccel, t.encoder, copyVideo, copyAudio, startSegmentNumber)
 	cmd := exec.CommandContext(ctx, t.ffmpeg, args...)
 	cmd.Dir = outputDir
 
@@ -123,6 +129,69 @@ func (t *Transcoder) Start(sessionID, itemID, inputPath string, profile Profile,
 		"start_time", startTime,
 	)
 
+	return session, nil
+}
+
+// RestartAt replaces the ffmpeg process behind an existing session
+// without wiping the segment cache. Used by the seek-restart path:
+// the old ffmpeg gets cancelled (the caller must already have done
+// that via the session's `cancel` func), and a new ffmpeg is spawned
+// pointing at the same outputDir but with a different `-ss` offset
+// and `-start_number`. Existing segment files from the previous run
+// stay on disk so backwards seeks within the encoded prefix continue
+// to work.
+//
+// Unlike Start(), this method does NOT mkdir the outputDir and does
+// NOT call existing.Stop() (which would RemoveAll the directory).
+// The caller passes the *same* sessionID it used for the original
+// Start; ownership stays with this Transcoder.
+func (t *Transcoder) RestartAt(sessionID, itemID, inputPath string, profile Profile, startTime float64, copyVideo, copyAudio bool, startSegmentNumber int) (*Session, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	outputDir := filepath.Join(t.baseDir, sessionID)
+	// outputDir must already exist from the original Start; if
+	// somebody removed it out from under us, recreate so the new
+	// ffmpeg has somewhere to write.
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		return nil, fmt.Errorf("ensuring output dir: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), t.transcodeTimeout)
+	args := BuildFFmpegArgs(inputPath, outputDir, profile, startTime, t.hwAccel, t.encoder, copyVideo, copyAudio, startSegmentNumber)
+	cmd := exec.CommandContext(ctx, t.ffmpeg, args...)
+	cmd.Dir = outputDir
+
+	session := &Session{
+		ID:        sessionID,
+		ItemID:    itemID,
+		Profile:   profile,
+		OutputDir: outputDir,
+		StartedAt: time.Now(),
+		cmd:       cmd,
+		cancel:    cancel,
+		done:      make(chan struct{}),
+	}
+
+	if err := cmd.Start(); err != nil {
+		cancel()
+		return nil, fmt.Errorf("restarting ffmpeg: %w", err)
+	}
+
+	go func() {
+		defer close(session.done)
+		if err := cmd.Wait(); err != nil {
+			t.logger.Debug("ffmpeg restart process ended", "session", sessionID, "error", err)
+		}
+	}()
+
+	t.sessions[sessionID] = session
+	t.logger.Info("transcoding restarted",
+		"session", sessionID,
+		"item", itemID,
+		"start_time", startTime,
+		"start_segment", startSegmentNumber,
+	)
 	return session, nil
 }
 
@@ -212,7 +281,13 @@ func (s *Session) SegmentPath(index int) string {
 // track needs ffmpeg work. The historical `profile.Name == "original"`
 // shortcut still implies both copy=true (kept for the rare callers
 // that pre-date the flags).
-func BuildFFmpegArgs(input, outputDir string, profile Profile, startTime float64, hwAccel HWAccelType, encoder string, copyVideo, copyAudio bool) []string {
+//
+// `startSegmentNumber` is the value passed to ffmpeg's `-start_number`
+// HLS option. A first-play session passes 0; a seek-restart passes
+// the segment index corresponding to the new `startTime` so the
+// produced .ts files keep monotonically increasing names that line
+// up with the synthesized VOD manifest the client already holds.
+func BuildFFmpegArgs(input, outputDir string, profile Profile, startTime float64, hwAccel HWAccelType, encoder string, copyVideo, copyAudio bool, startSegmentNumber int) []string {
 	if encoder == "" {
 		encoder = "libx264"
 	}
@@ -291,14 +366,16 @@ func BuildFFmpegArgs(input, outputDir string, profile Profile, startTime float64
 		)
 	}
 
-	// HLS output
+	// HLS output. `-start_number` is parameterised so seek-restart
+	// runs produce segments that line up with the indices the
+	// synthesized VOD manifest already advertised to the client.
 	args = append(args,
 		"-f", "hls",
 		"-hls_time", "6",
 		"-hls_list_size", "0",
 		"-hls_segment_filename", segmentPattern,
 		"-hls_flags", "independent_segments",
-		"-start_number", "0",
+		"-start_number", strconv.Itoa(startSegmentNumber),
 		manifestPath,
 	)
 
