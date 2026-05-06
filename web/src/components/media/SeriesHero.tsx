@@ -576,14 +576,20 @@ function HeroTrailer({ siteKey, videoKey }: { siteKey: string; videoKey: string 
     return null;
   }
 
-  // 2D mask: fade the trailer's left edge AND bottom edge into the
-  // page background, matching the static backdrop image's mask
-  // (HeroSection.tsx). Composited via mask-composite: intersect so
-  // the trailer is only opaque where BOTH masks are opaque (top
-  // half + right side). The previous 1D mask only handled the left
-  // fade and left a hard horizontal cut at the bottom.
+  // 2D mask applied DIRECTLY to the iframe (not the wrapper). The
+  // wrapper spans the full hero, but the iframe only occupies the
+  // right ~60% — if the mask is on the wrapper, "0% transparent"
+  // lives at the wrapper's left edge (far outside the iframe), so
+  // the iframe's own left edge lands at ~30% mask opacity and the
+  // rectangle outline stays visible.
+  //
+  // Putting the mask on the iframe makes the gradient stops relative
+  // to the IFRAME'S bounds: 0% IS the iframe's left edge, fully
+  // transparent there, fading to opaque past ~50%. Top stays opaque,
+  // bottom fades. Composited via mask-composite: intersect so the
+  // image is only solid where both gradients agree.
   const fadeMask =
-    "linear-gradient(to right, transparent 0%, rgba(0,0,0,0.2) 25%, rgba(0,0,0,0.85) 55%, black 75%), linear-gradient(to bottom, black 55%, rgba(0,0,0,0.2) 92%, transparent 100%)";
+    "linear-gradient(to right, transparent 0%, rgba(0,0,0,0.25) 20%, rgba(0,0,0,0.85) 50%, black 75%), linear-gradient(to bottom, black 0%, black 70%, rgba(0,0,0,0.25) 92%, transparent 100%)";
 
   return (
     <div
@@ -593,33 +599,19 @@ function HeroTrailer({ siteKey, videoKey }: { siteKey: string; videoKey: string 
         revealed ? "opacity-100" : "opacity-0 pointer-events-none",
       ].join(" ")}
     >
-      <div
-        className="absolute inset-0 overflow-hidden"
-        style={{
-          maskImage: fadeMask,
-          WebkitMaskImage: fadeMask,
-          maskComposite: "intersect",
-          WebkitMaskComposite: "source-in",
-        }}
-      >
-        {/* Iframe sized by HEIGHT instead of width — fits the hero
-            at 100% height with auto width derived from aspectRatio.
-            Anchored to the right edge so it sits where the actors /
-            action are framed in YouTube trailers; the left side
-            shows the page background through the mask, matching the
-            static backdrop image's placement.
+      <div className="absolute inset-0 overflow-hidden">
+        {/* Iframe sized by HEIGHT (100% of hero, auto width via
+            aspectRatio 16/9) anchored to the right edge — sits
+            where the actors / action are framed in YouTube
+            trailers. Left side of the hero shows the page bg
+            through the mask, matching the static backdrop image's
+            placement.
 
-            The previous version forced `minWidth: calc(100% * 16/9)`
-            which over-scaled the iframe to ~178% of the hero width,
-            making the resulting 16:9 height ~3× the hero's height.
-            Half of every actor's head was clipped by overflow-hidden.
-            Sizing by height keeps the trailer at its native aspect
-            with no cropping.
-
-            Render the iframe *only* once `loaded` flips. Keeping it
-            mounted with src='about:blank' would still cost layout +
-            an internal frame in the engine, and would pre-emptively
-            wire up the iframe's parent-frame messaging hooks. */}
+            Mask is on the iframe itself (NOT the wrapper) so the
+            fade gradients are relative to the iframe's own bounds,
+            making the left edge fade smoothly to transparent at
+            its own border instead of leaving a visible rectangle
+            outline. */}
         {loaded && (
           <iframe
             src={embedUrl}
@@ -632,6 +624,10 @@ function HeroTrailer({ siteKey, videoKey }: { siteKey: string; videoKey: string 
               height: "100%",
               aspectRatio: "16 / 9",
               width: "auto",
+              maskImage: fadeMask,
+              WebkitMaskImage: fadeMask,
+              maskComposite: "intersect",
+              WebkitMaskComposite: "source-in",
             }}
           />
         )}
