@@ -5,6 +5,7 @@ import { useLibraries, useScanLibrary, useProviders, useUpdateProvider } from "@
 import type { Library } from "@/api/types";
 import { Badge, Button, Spinner } from "@/components/common";
 import { HomeLayoutSettings } from "@/components/home";
+import { PlaybackSettings } from "@/components/settings/PlaybackSettings";
 
 function getPathAccessible(lib: Library, path: string): boolean | undefined {
   const status = lib.path_status?.find((ps) => ps.path === path);
@@ -189,6 +190,15 @@ export default function Settings() {
           {t("settings.homeLayout.title", { defaultValue: "Personalizar inicio" })}
         </h2>
         <HomeLayoutSettings />
+      </section>
+
+      {/* Playback — per-user, no admin gating. Trailer auto-play
+          toggle today; will grow to default audio/subs and quality. */}
+      <section className="flex flex-col gap-4">
+        <h2 className="text-lg font-semibold text-text-primary">
+          {t("settings.playback.title")}
+        </h2>
+        <PlaybackSettings />
       </section>
 
       {/* Account Info */}

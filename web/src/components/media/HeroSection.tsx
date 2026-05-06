@@ -5,6 +5,9 @@ import type { MediaItem, Person } from "@/api/types";
 import { Button } from "@/components/common/Button";
 import { Badge } from "@/components/common/Badge";
 import { thumb } from "@/utils/imageUrl";
+import { HeroTrailer } from "./HeroTrailer";
+import { useUserPreference } from "@/api/hooks";
+import { TRAILERS_ENABLED_PREF_KEY } from "@/utils/playbackPrefs";
 
 // Posters are small enough (≤340px tall) that a 720px-wide variant
 // covers 2x DPR comfortably — worth the bandwidth save. The hero
@@ -280,6 +283,20 @@ const HeroSection: FC<HeroSectionProps> = ({
   // page-wide aurora + publishes `--detail-tint` for hero hooks).
   // The hero just consumes that variable via the bottom-fade and
   // the image's mask — no per-hero palette state needed here.
+
+  // Trailer-on-hero: only movies opt-in here. Episodes have their
+  // own still and series/seasons go through SeriesHero which handles
+  // its own trailer. Tracked the same way as SeriesHero so the static
+  // backdrop fades out the moment the iframe reveals — keeps the two
+  // detail surfaces visually identical when both have a trailer
+  // attached.
+  const [trailerActive, setTrailerActive] = useState(false);
+  const [trailersEnabled] = useUserPreference<boolean>(
+    TRAILERS_ENABLED_PREF_KEY,
+    true,
+  );
+  const showTrailer = item.type === "movie" && !!item.trailer;
+
   return (
     <section
       className="relative overflow-hidden"
@@ -304,7 +321,14 @@ const HeroSection: FC<HeroSectionProps> = ({
             src={heroBackdropUrl}
             alt=""
             loading="eager"
-            className="absolute inset-y-0 right-0 h-full w-full sm:w-4/5 lg:w-2/3 object-cover"
+            className={[
+              "absolute inset-y-0 right-0 h-full w-full sm:w-4/5 lg:w-2/3 object-cover transition-opacity duration-700",
+              // Fade out when the trailer reveals (movies only) so
+              // the iframe and the static still don't fight for
+              // attention. 700ms matches HeroTrailer's own opacity
+              // transition so the swap reads as a single move.
+              trailerActive ? "opacity-0" : "opacity-100",
+            ].join(" ")}
             style={{
               objectPosition: "right top",
               // Two-axis fade composited via mask-composite:intersect.
@@ -329,6 +353,25 @@ const HeroSection: FC<HeroSectionProps> = ({
           />
         ) : (
           <div className="absolute inset-0 bg-gradient-to-br from-bg-elevated to-bg-card" />
+        )}
+
+        {/* Netflix-style trailer reveal — movies only. SeriesHero
+            renders its own copy for series/seasons; episodes have no
+            trailer field so this branch never fires for them. The
+            HeroTrailer component handles the load + reveal timers,
+            the embed URL (YouTube / Vimeo) and graceful dismissal —
+            when there's no trailer or the user opted out it renders
+            nothing. The reveal/dismiss callbacks coordinate with
+            `trailerActive` above so the static backdrop fades out
+            while the trailer is on screen. */}
+        {showTrailer && item.trailer && (
+          <HeroTrailer
+            siteKey={item.trailer.site}
+            videoKey={item.trailer.key}
+            userOptedOut={!trailersEnabled}
+            onReveal={() => setTrailerActive(true)}
+            onDismiss={() => setTrailerActive(false)}
+          />
         )}
 
         {/* Bottom-fade overlay removed — the image's own mask
