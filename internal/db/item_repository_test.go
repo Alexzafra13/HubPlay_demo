@@ -129,6 +129,244 @@ func TestItemRepository_List(t *testing.T) {
 	}
 }
 
+func TestItemRepository_List_GenreYearRatingFilters(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	libRepo := db.NewLibraryRepository(database)
+	repo := db.NewItemRepository(database)
+	values := db.NewItemValueRepository(database)
+	seedLibraryForItems(t, libRepo)
+
+	// Three movies with different (genre, year, rating) so each filter
+	// can be exercised in isolation without leaking into the others.
+	rating := func(v float64) *float64 { return &v }
+
+	a := newTestItem("a", "lib-1", "Alpha")
+	a.Year = 2010
+	a.CommunityRating = rating(8.5)
+	if err := repo.Create(context.Background(), a); err != nil {
+		t.Fatal(err)
+	}
+	b := newTestItem("b", "lib-1", "Beta")
+	b.Year = 2005
+	b.CommunityRating = rating(7.0)
+	if err := repo.Create(context.Background(), b); err != nil {
+		t.Fatal(err)
+	}
+	c := newTestItem("c", "lib-1", "Gamma")
+	c.Year = 2020
+	c.CommunityRating = rating(6.0)
+	if err := repo.Create(context.Background(), c); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := values.SetGenres(context.Background(), "a", []string{"Action", "Drama"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := values.SetGenres(context.Background(), "b", []string{"Drama"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := values.SetGenres(context.Background(), "c", []string{"Comedy"}); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("genre filters case-insensitively", func(t *testing.T) {
+		items, total, err := repo.List(context.Background(), db.ItemFilter{Genre: "drama"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if total != 2 || len(items) != 2 {
+			t.Fatalf("expected 2 Drama items, got total=%d len=%d", total, len(items))
+		}
+	})
+
+	t.Run("year_from excludes older items", func(t *testing.T) {
+		_, total, err := repo.List(context.Background(), db.ItemFilter{YearFrom: 2010})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if total != 2 {
+			t.Errorf("expected 2 items >= 2010, got %d", total)
+		}
+	})
+
+	t.Run("year_to excludes newer items", func(t *testing.T) {
+		_, total, err := repo.List(context.Background(), db.ItemFilter{YearTo: 2010})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if total != 2 {
+			t.Errorf("expected 2 items <= 2010, got %d", total)
+		}
+	})
+
+	t.Run("min_rating excludes lower-rated items", func(t *testing.T) {
+		_, total, err := repo.List(context.Background(), db.ItemFilter{MinRating: 7.5})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if total != 1 {
+			t.Errorf("expected 1 item >= 7.5, got %d", total)
+		}
+	})
+
+	t.Run("filters compose with AND semantics", func(t *testing.T) {
+		_, total, err := repo.List(context.Background(), db.ItemFilter{
+			Genre:     "Drama",
+			MinRating: 8.0,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if total != 1 {
+			t.Errorf("expected only Alpha (Drama + 8.5), got %d", total)
+		}
+	})
+
+	t.Run("SetGenres replaces previous tags", func(t *testing.T) {
+		// "a" started as Action+Drama; replace with just Action and verify
+		// Drama no longer matches it.
+		if err := values.SetGenres(context.Background(), "a", []string{"Action"}); err != nil {
+			t.Fatal(err)
+		}
+		_, dramaTotal, err := repo.List(context.Background(), db.ItemFilter{Genre: "Drama"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if dramaTotal != 1 {
+			t.Errorf("after replace expected 1 Drama (just b), got %d", dramaTotal)
+		}
+	})
+}
+
+func TestMigration031_BackfillsGenresFromMetadata(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	libRepo := db.NewLibraryRepository(database)
+	itemRepo := db.NewItemRepository(database)
+	metaRepo := db.NewMetadataRepository(database)
+	values := db.NewItemValueRepository(database)
+	seedLibraryForItems(t, libRepo)
+
+	// Pre-existing item with metadata.genres_json present but no
+	// item_values row — this simulates a library scanned before
+	// migration 031 shipped. The migration's INSERT...SELECT needs to
+	// pick those rows up so users get filtering immediately without
+	// re-scanning their library.
+	if err := itemRepo.Create(context.Background(), newTestItem("legacy", "lib-1", "Legacy")); err != nil {
+		t.Fatal(err)
+	}
+	if err := metaRepo.Upsert(context.Background(), &db.Metadata{
+		ItemID:     "legacy",
+		GenresJSON: `["Action","Drama"]`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Re-run the backfill statement (idempotent under INSERT OR IGNORE).
+	// Mirrors what the migration runs at upgrade time.
+	const upsertValues = `
+		INSERT OR IGNORE INTO item_values (id, type, value, clean_value)
+		SELECT 'genre:' || LOWER(TRIM(je.value)), 'genre', TRIM(je.value), LOWER(TRIM(je.value))
+		FROM metadata m, json_each(m.genres_json) je
+		WHERE m.genres_json IS NOT NULL AND m.genres_json != '' AND json_valid(m.genres_json)
+		      AND TRIM(je.value) != ''`
+	const linkValues = `
+		INSERT OR IGNORE INTO item_value_map (item_id, value_id)
+		SELECT m.item_id, 'genre:' || LOWER(TRIM(je.value))
+		FROM metadata m, json_each(m.genres_json) je
+		WHERE m.genres_json IS NOT NULL AND m.genres_json != '' AND json_valid(m.genres_json)
+		      AND TRIM(je.value) != ''`
+	if _, err := database.Exec(upsertValues); err != nil {
+		t.Fatalf("backfill values: %v", err)
+	}
+	if _, err := database.Exec(linkValues); err != nil {
+		t.Fatalf("backfill map: %v", err)
+	}
+
+	// The repository's filter query should now find the legacy item by
+	// genre — proving the backfill closes the gap.
+	itemRepoForList := db.NewItemRepository(database)
+	_, total, err := itemRepoForList.List(context.Background(), db.ItemFilter{Genre: "Action"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 1 {
+		t.Errorf("expected 1 backfilled match for Action, got %d", total)
+	}
+
+	// Genre vocabulary listing should also reflect the backfill.
+	g, err := values.ListGenres(context.Background(), "movie")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(g) != 2 {
+		t.Errorf("expected backfill to surface 2 genres (Action, Drama), got %d", len(g))
+	}
+}
+
+func TestItemValueRepository_ListGenres(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	libRepo := db.NewLibraryRepository(database)
+	itemRepo := db.NewItemRepository(database)
+	values := db.NewItemValueRepository(database)
+	seedLibraryForItems(t, libRepo)
+
+	// Two movies with overlapping genres + one series with its own genre,
+	// so the type scope (movie vs series) demonstrably narrows the
+	// returned vocabulary.
+	movieA := newTestItem("ma", "lib-1", "MA")
+	if err := itemRepo.Create(context.Background(), movieA); err != nil {
+		t.Fatal(err)
+	}
+	movieB := newTestItem("mb", "lib-1", "MB")
+	if err := itemRepo.Create(context.Background(), movieB); err != nil {
+		t.Fatal(err)
+	}
+	series := newTestItem("ss", "lib-1", "SS")
+	series.Type = "series"
+	series.Path = "/media/ss"
+	if err := itemRepo.Create(context.Background(), series); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := values.SetGenres(context.Background(), "ma", []string{"Action", "Drama"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := values.SetGenres(context.Background(), "mb", []string{"Drama"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := values.SetGenres(context.Background(), "ss", []string{"Reality"}); err != nil {
+		t.Fatal(err)
+	}
+
+	moviesGenres, err := values.ListGenres(context.Background(), "movie")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(moviesGenres) != 2 {
+		t.Fatalf("expected 2 movie genres (Action, Drama), got %d", len(moviesGenres))
+	}
+	// Drama appears in 2 movies, Action in 1 → Drama first.
+	if moviesGenres[0].Name != "Drama" || moviesGenres[0].Count != 2 {
+		t.Errorf("expected Drama (2) first, got %+v", moviesGenres[0])
+	}
+
+	seriesGenres, err := values.ListGenres(context.Background(), "series")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(seriesGenres) != 1 || seriesGenres[0].Name != "Reality" {
+		t.Errorf("expected only Reality for series, got %+v", seriesGenres)
+	}
+
+	all, err := values.ListGenres(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 3 {
+		t.Errorf("expected 3 genres union (Action, Drama, Reality), got %d", len(all))
+	}
+}
+
 func TestItemRepository_List_ByType(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	libRepo := db.NewLibraryRepository(database)

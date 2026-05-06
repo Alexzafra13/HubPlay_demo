@@ -22,6 +22,9 @@ type Querier interface {
 	ApplyChannelOverride(ctx context.Context, arg ApplyChannelOverrideParams) (int64, error)
 	ApproveDeviceCode(ctx context.Context, arg ApproveDeviceCodeParams) error
 	CleanupOldPrograms(ctx context.Context, endTime time.Time) (int64, error)
+	// Used before re-populating an item's tags during a metadata refresh,
+	// so removed genres don't linger after a TMDb update changes them.
+	ClearItemValuesForItem(ctx context.Context, arg ClearItemValuesForItemParams) error
 	ConsumeDeviceCode(ctx context.Context, arg ConsumeDeviceCodeParams) error
 	// Two extra filters vs. the obvious "started but not completed" rail:
 	//   1. Near-complete drop: position >= 90% of duration. Treat as
@@ -220,6 +223,7 @@ type Querier interface {
 	InsertPeer(ctx context.Context, arg InsertPeerParams) error
 	InsertServerIdentity(ctx context.Context, arg InsertServerIdentityParams) error
 	IsChannelFavorite(ctx context.Context, arg IsChannelFavoriteParams) (int64, error)
+	LinkItemValue(ctx context.Context, arg LinkItemValueParams) error
 	ListActiveChannelsByLibrary(ctx context.Context, libraryID string) ([]ListActiveChannelsByLibraryRow, error)
 	ListActiveInvites(ctx context.Context, expiresAt time.Time) ([]FederationInvite, error)
 	ListActiveProviders(ctx context.Context) ([]Provider, error)
@@ -395,6 +399,15 @@ type Querier interface {
 	// (interval_hours / enabled) and updated_at change. The history
 	// (last_run_at, last_status, ...) survives reconfiguration.
 	UpsertIPTVScheduledJob(ctx context.Context, arg UpsertIPTVScheduledJobParams) error
+	// Normalized tag store reused for genres (and future tag-like facets).
+	//
+	// Table schema: migrations/sqlite/001_initial_schema.sql (item_values, item_value_map).
+	// Backfill: migrations/sqlite/031_item_values_genres_backfill.sql.
+	//
+	// The synthetic id format ("<type>:<clean_value>", lowercased) makes
+	// INSERT-OR-IGNORE idempotent across items sharing the same value, so
+	// the scanner can re-run UpsertItemValue per scan without dedup logic.
+	UpsertItemValue(ctx context.Context, arg UpsertItemValueParams) error
 	// ============================================================
 	// library shares
 	// ============================================================

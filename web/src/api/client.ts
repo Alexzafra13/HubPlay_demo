@@ -445,6 +445,10 @@ export class ApiClient {
     library_id?: string;
     type?: string;
     genre?: string;
+    year_from?: number;
+    year_to?: number;
+    min_rating?: number;
+    q?: string;
     sort_by?: string;
     sort_order?: string;
     offset?: number;
@@ -503,6 +507,16 @@ export class ApiClient {
   ): Promise<MediaItem[]> {
     return this.request<MediaItem[]>("GET", "/items/search", {
       params: { q, type, limit },
+    });
+  }
+
+  // Catalogue-wide genre vocabulary for the filter panel. Cached
+  // separately from items so the chip list doesn't keep flickering as
+  // items pages stream in. Optional `type` scopes to movies-only or
+  // series-only — empty = full union.
+  async getGenres(type?: string): Promise<{ name: string; count: number }[]> {
+    return this.request<{ name: string; count: number }[]>("GET", "/items/genres", {
+      params: { type },
     });
   }
 

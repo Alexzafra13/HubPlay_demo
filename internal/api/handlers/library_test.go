@@ -45,6 +45,7 @@ type libFakeService struct {
 	getChildrenFn   func(ctx context.Context, id string) ([]*db.Item, error)
 	getStreamsFn    func(ctx context.Context, id string) ([]*db.MediaStream, error)
 	getItemImagesFn func(ctx context.Context, id string) ([]*db.Image, error)
+	genres          []db.GenreCount
 }
 
 func (s *libFakeService) Create(ctx context.Context, req library.CreateRequest) (*db.Library, error) {
@@ -153,6 +154,13 @@ func (s *libFakeService) ItemCount(ctx context.Context, libraryID string) (int, 
 
 func (s *libFakeService) UserHasAccess(_ context.Context, _, _ string) (bool, error) {
 	return true, nil
+}
+
+func (s *libFakeService) ListGenres(_ context.Context, _ string) ([]db.GenreCount, error) {
+	if s.genres == nil {
+		return nil, nil
+	}
+	return s.genres, nil
 }
 
 // ─── Fake MetadataRepository ────────────────────────────────────────────────

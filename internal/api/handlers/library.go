@@ -252,17 +252,31 @@ func (h *LibraryHandler) Items(w http.ResponseWriter, r *http.Request) {
 // which is capped at 50 results and doesn't paginate, surfacing as a
 // truncated grid.
 func (h *LibraryHandler) AllItems(w http.ResponseWriter, r *http.Request) {
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-	sortBy := r.URL.Query().Get("sort_by")
-	sortOrder := r.URL.Query().Get("sort_order")
-	itemType := r.URL.Query().Get("type")
-	parentID := r.URL.Query().Get("parent_id")
-	cursor := r.URL.Query().Get("cursor")
+	q := r.URL.Query()
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	offset, _ := strconv.Atoi(q.Get("offset"))
+	sortBy := q.Get("sort_by")
+	sortOrder := q.Get("sort_order")
+	itemType := q.Get("type")
+	parentID := q.Get("parent_id")
+	cursor := q.Get("cursor")
+	// Search + facet filters: piped to the repository so a 100k-row
+	// catalogue doesn't pay round-trips to surface a single result.
+	// Empty / zero values disable each filter — see ItemFilter.
+	queryStr := q.Get("q")
+	genre := q.Get("genre")
+	yearFrom, _ := strconv.Atoi(q.Get("year_from"))
+	yearTo, _ := strconv.Atoi(q.Get("year_to"))
+	minRating, _ := strconv.ParseFloat(q.Get("min_rating"), 64)
 
 	items, total, err := h.lib.ListItems(r.Context(), db.ItemFilter{
 		ParentID:  parentID,
 		Type:      itemType,
+		Query:     queryStr,
+		Genre:     genre,
+		YearFrom:  yearFrom,
+		YearTo:    yearTo,
+		MinRating: minRating,
 		Limit:     limit,
 		Offset:    offset,
 		SortBy:    sortBy,
@@ -287,6 +301,28 @@ func (h *LibraryHandler) AllItems(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondJSON(w, http.StatusOK, map[string]any{"data": resp})
+}
+
+// Genres exposes the catalogue's genre vocabulary so the /movies and
+// /series filter panel can show a complete chip list independent of
+// what the infinite scroll has fetched. Optional `type` query param
+// scopes the vocabulary ("movie" or "series"); empty returns the union.
+func (h *LibraryHandler) Genres(w http.ResponseWriter, r *http.Request) {
+	itemType := r.URL.Query().Get("type")
+	if itemType != "" && itemType != "movie" && itemType != "series" && itemType != "episode" {
+		respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "type must be one of movie, series, episode")
+		return
+	}
+	genres, err := h.lib.ListGenres(r.Context(), itemType)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	data := make([]map[string]any, len(genres))
+	for i, g := range genres {
+		data[i] = map[string]any{"name": g.Name, "count": g.Count}
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"data": data})
 }
 
 func (h *LibraryHandler) LatestItems(w http.ResponseWriter, r *http.Request) {
