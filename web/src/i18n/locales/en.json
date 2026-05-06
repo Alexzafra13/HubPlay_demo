@@ -57,7 +57,15 @@
     "genres": "Genres",
     "categories": "Categories",
     "views": "Views",
-    "browseAll": "Browse all {{section}}",
+    "libraries": "Libraries",
+    "collections": "Collections",
+    "shared": "Shared with you",
+    "favorites": "Favorite channels",
+    "empty": {
+      "movies": "No libraries or collections yet.",
+      "series": "No libraries yet.",
+      "favorites": "Mark a channel as favorite to see it here."
+    },
     "movies": {
       "all": "All movies",
       "recentlyAdded": "Recently added",

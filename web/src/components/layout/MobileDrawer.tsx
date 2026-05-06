@@ -287,13 +287,6 @@ function DrawerAccordion({
                   </ul>
                 </div>
               ))}
-              <NavLink
-                to={primaryHref}
-                onClick={onNavigate}
-                className="block px-2 py-1.5 rounded-md text-[12.5px] font-semibold text-accent hover:bg-bg-hover transition-colors"
-              >
-                {t("navMenu.browseAll", { section: triggerLabel })} →
-              </NavLink>
             </div>
           </motion.div>
         )}
