@@ -604,7 +604,7 @@ function MoviesExtra({ onItemClick }: { onItemClick: () => void }) {
             {collections.map((c: CollectionListEntry) => (
               <li key={c.id}>
                 <ExtraRow
-                  to={`/collections/${c.id}`}
+                  to={`/collections/${encodeURIComponent(c.id)}`}
                   onClick={onItemClick}
                   leading={<CollectionPoster url={c.poster_url} alt={c.name} />}
                   label={c.name}

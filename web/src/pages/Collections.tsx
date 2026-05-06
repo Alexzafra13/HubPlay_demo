@@ -16,7 +16,7 @@ function CollectionTile({ entry }: { entry: CollectionListEntry }) {
   const showPoster = !!entry.poster_url && !imageFailed;
   return (
     <Link
-      to={`/collections/${entry.id}`}
+      to={`/collections/${encodeURIComponent(entry.id)}`}
       className="group flex flex-col gap-2 outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-[--radius-lg]"
     >
       <div className="relative aspect-[2/3] overflow-hidden rounded-[--radius-lg] bg-bg-elevated ring-1 ring-border/40 transition-transform duration-300 group-hover:scale-[1.03] group-hover:ring-accent/40">

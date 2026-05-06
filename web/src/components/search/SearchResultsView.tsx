@@ -148,7 +148,7 @@ function ResultCard({
   item: MediaItem;
   onClick?: (item: MediaItem) => void;
 }) {
-  const poster = thumb(item.poster_url ?? item.series_poster_url, 200);
+  const poster = thumb(item.poster_url ?? item.series_poster_url, 300);
   const href = hrefForItem(item);
   const subtitle = subtitleForItem(item);
   const meta = metaForItem(item);
@@ -157,11 +157,13 @@ function ResultCard({
     <Link
       to={href}
       onClick={() => onClick?.(item)}
-      className="group relative flex items-stretch gap-4 p-3 rounded-2xl border border-border-subtle bg-bg-card/40 hover:bg-bg-card hover:border-border-strong transition-all duration-200 hover:shadow-lg hover:shadow-black/30"
+      className="group relative flex items-stretch gap-5 p-3 rounded-2xl border border-border-subtle bg-bg-card/40 hover:bg-bg-card hover:border-border-strong transition-all duration-200 hover:shadow-lg hover:shadow-black/30"
     >
-      {/* Poster */}
+      {/* Poster — larger 2:3 thumb so the result row reads as a card,
+          not a list line. Width matches the suggestion mini-posters
+          for visual consistency through the dropdown. */}
       <div
-        className="relative flex-shrink-0 w-[68px] h-[100px] rounded-lg overflow-hidden bg-bg-elevated ring-1 ring-border-subtle/60"
+        className="relative flex-shrink-0 w-[100px] h-[150px] rounded-lg overflow-hidden bg-bg-elevated ring-1 ring-border-subtle/60"
         style={item.poster_color ? { background: item.poster_color } : undefined}
       >
         {poster && (
@@ -174,8 +176,8 @@ function ResultCard({
         )}
         {/* Subtle play affordance on hover */}
         <span className="absolute inset-0 flex items-center justify-center bg-black/45 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-          <span className="flex items-center justify-center w-9 h-9 rounded-full bg-bg-base/80 backdrop-blur-sm ring-1 ring-white/10">
-            <Play className="h-[14px] w-[14px] text-text-primary fill-current ml-0.5" strokeWidth={0} />
+          <span className="flex items-center justify-center w-10 h-10 rounded-full bg-bg-base/80 backdrop-blur-sm ring-1 ring-white/10">
+            <Play className="h-4 w-4 text-text-primary fill-current ml-0.5" strokeWidth={0} />
           </span>
         </span>
       </div>
@@ -275,9 +277,9 @@ function PeerResultCard({
     <Link
       to={href}
       onClick={() => onClick?.(hit)}
-      className="group relative flex items-stretch gap-4 p-3 rounded-2xl border border-border-subtle bg-bg-card/40 hover:bg-bg-card hover:border-border-strong transition-all duration-200 hover:shadow-lg hover:shadow-black/30"
+      className="group relative flex items-stretch gap-5 p-3 rounded-2xl border border-border-subtle bg-bg-card/40 hover:bg-bg-card hover:border-border-strong transition-all duration-200 hover:shadow-lg hover:shadow-black/30"
     >
-      <div className="relative flex-shrink-0 w-[68px] h-[100px] rounded-lg overflow-hidden bg-bg-elevated ring-1 ring-border-subtle/60">
+      <div className="relative flex-shrink-0 w-[100px] h-[150px] rounded-lg overflow-hidden bg-bg-elevated ring-1 ring-border-subtle/60">
         {poster ? (
           <img
             src={poster}
@@ -287,14 +289,14 @@ function PeerResultCard({
           />
         ) : (
           <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-bg-elevated to-bg-card">
-            <span className="text-2xl font-bold text-text-muted">
+            <span className="text-3xl font-bold text-text-muted">
               {hit.title.charAt(0).toUpperCase()}
             </span>
           </div>
         )}
         <span className="absolute inset-0 flex items-center justify-center bg-black/45 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-          <span className="flex items-center justify-center w-9 h-9 rounded-full bg-bg-base/80 backdrop-blur-sm ring-1 ring-white/10">
-            <Play className="h-[14px] w-[14px] text-text-primary fill-current ml-0.5" strokeWidth={0} />
+          <span className="flex items-center justify-center w-10 h-10 rounded-full bg-bg-base/80 backdrop-blur-sm ring-1 ring-white/10">
+            <Play className="h-4 w-4 text-text-primary fill-current ml-0.5" strokeWidth={0} />
           </span>
         </span>
         <span className="absolute left-1 bottom-1 inline-flex items-center gap-1 rounded-full bg-black/65 px-1.5 py-0.5 text-[9px] font-medium text-white shadow-sm backdrop-blur-sm">
