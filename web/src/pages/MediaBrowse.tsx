@@ -4,7 +4,6 @@ import { useSearchParams } from "react-router";
 import { useInfiniteItems } from "@/api/hooks";
 import { Spinner } from "@/components/common";
 import { MediaGrid } from "@/components/media";
-import { useTopBarSlot } from "@/components/layout/TopBarSlot";
 import {
   MediaBrowseFilters,
   activeFilterCount,
@@ -147,29 +146,20 @@ export default function MediaBrowse({ type }: MediaBrowseProps) {
     setSearchParams(updated, { replace: true });
   };
 
-  const controls = (
-    <BrowseControls
-      sort={sort}
-      onSortChange={setSort}
-      filterCount={filterCount}
-      filtersOpen={filtersOpen}
-      onToggleFilters={toggleFilters}
-    />
-  );
-  const slotActive = useTopBarSlot(controls);
-
   return (
     <div className="flex flex-col gap-6 px-6 py-8 sm:px-10">
       <div className="flex items-center justify-between gap-4">
         <h1 className="text-2xl font-bold text-text-primary sm:text-3xl">
           {t(`${ns}.title`)}
         </h1>
+        <BrowseControls
+          sort={sort}
+          onSortChange={setSort}
+          filterCount={filterCount}
+          filtersOpen={filtersOpen}
+          onToggleFilters={toggleFilters}
+        />
       </div>
-
-      {/* Inline-controls fallback for environments without a TopBar
-          provider — keeps the page usable in standalone tests / future
-          shells while the slot path stays the production default. */}
-      {!slotActive && <div>{controls}</div>}
 
       {filtersOpen && (
         <div id="media-browse-filters">

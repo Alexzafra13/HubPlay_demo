@@ -1,5 +1,4 @@
 import { useTranslation } from "react-i18next";
-import { useTopBarSlot } from "@/components/layout/TopBarSlot";
 import {
   HeroSettings,
   type HeroMode,
@@ -23,18 +22,12 @@ interface LiveTvTopBarProps {
 /**
  * LiveTvTopBar — page header for the Live TV surfaces.
  *
- * Layout split, so the user gets a single sticky bar instead of two:
- *   - Title block (h1 + counts) renders inline at the top of the page
- *     and scrolls away with the content. It's not a control surface,
- *     so it doesn't need to follow the viewer.
- *   - Search + tab switcher + hero-mode picker get hoisted into the
- *     global TopBar via `useTopBarSlot` — that bar is already sticky
- *     with a frosted-glass treatment, so the controls inherit it for
- *     free and the viewer doesn't see two stacked headers.
- *
- * If no slot provider is available (e.g. unit tests rendering this
- * component standalone), the controls fall back to rendering inline
- * so the component is still testable in isolation.
+ * Renders a sticky page subbar (title + counts + tabs + search +
+ * hero-mode picker) directly inside the page. Previously hoisted into
+ * the global TopBar via TopBarSlot, but the topbar now owns the main
+ * navigation and dropdown panels so page-level controls can't share
+ * that real estate without conflicts. Living inside the page gives
+ * each surface its own breathable header without a portal hop.
  *
  * Stateless wrt filters and mode — the parent page owns `tab`,
  * `search`, `heroMode`. This component only wires onChange callbacks
@@ -125,20 +118,9 @@ export function LiveTvTopBar({
     </div>
   );
 
-  // Try to hoist into the global TopBar slot. If the provider is
-  // missing (test harness, custom shell), render inline as a fallback.
-  const slotActive = useTopBarSlot(controls);
-
-  // On the discover surface we lift the title + counters into the
-  // hero's top-left overlay (DiscoverView wires that), so this
-  // component renders nothing in that case — the controls already live
-  // in the global TopBar via the slot. The fallback path (no provider,
-  // e.g. unit tests) and the guide/favorites tabs still render the
-  // inline header so they keep their identity strip.
-  if (slotActive && tab === "discover") {
-    return null;
-  }
-
+  // On the discover surface the title + counters are lifted into the
+  // hero's top-left overlay (DiscoverView wires that), so this header
+  // shrinks to just the controls strip — no double title.
   // Header copy adapts to the active tab so the title + subtitle
   // describe the surface you're actually looking at — instead of
   // claiming "169 canales" while the page only shows 45 (the old
@@ -193,17 +175,19 @@ export function LiveTvTopBar({
 
   return (
     <header className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-      <div>
-        <h1 className="flex items-center gap-2 text-xl font-bold text-tv-fg-0 md:text-2xl">
-          <span className="inline-flex h-2.5 w-2.5 animate-pulse rounded-full bg-tv-live shadow-[0_0_8px_var(--tv-live)]" />
-          {headerCopy.title}
-        </h1>
-        {headerCopy.subtitle ? (
-          <p className="mt-1 text-xs text-tv-fg-2">{headerCopy.subtitle}</p>
-        ) : null}
-      </div>
+      {tab !== "discover" && (
+        <div>
+          <h1 className="flex items-center gap-2 text-xl font-bold text-tv-fg-0 md:text-2xl">
+            <span className="inline-flex h-2.5 w-2.5 animate-pulse rounded-full bg-tv-live shadow-[0_0_8px_var(--tv-live)]" />
+            {headerCopy.title}
+          </h1>
+          {headerCopy.subtitle ? (
+            <p className="mt-1 text-xs text-tv-fg-2">{headerCopy.subtitle}</p>
+          ) : null}
+        </div>
+      )}
 
-      {!slotActive && controls}
+      {controls}
     </header>
   );
 }
