@@ -226,6 +226,15 @@
     "peerSection": "From your peers",
     "fromPeer": "From {{name}}"
   },
+  "studioDetail": {
+    "notFoundTitle": "Studio not found",
+    "notFoundDescription": "This studio doesn't exist or has no content in your library yet.",
+    "noItems": "No titles from this studio in your library.",
+    "titlesCount_one": "{{count}} title in your library",
+    "titlesCount_other": "{{count}} titles in your library",
+    "movies": "Movies",
+    "series": "Series"
+  },
   "personDetail": {
     "notFoundTitle": "Person not found",
     "notFoundDescription": "This person doesn't exist or has been removed.",

@@ -226,6 +226,15 @@
     "peerSection": "De tus pares",
     "fromPeer": "De {{name}}"
   },
+  "studioDetail": {
+    "notFoundTitle": "Estudio no encontrado",
+    "notFoundDescription": "Este estudio no existe o no tiene contenido en tu biblioteca todavia.",
+    "noItems": "Sin titulos de este estudio en tu biblioteca.",
+    "titlesCount_one": "{{count}} titulo en tu biblioteca",
+    "titlesCount_other": "{{count}} titulos en tu biblioteca",
+    "movies": "Peliculas",
+    "series": "Series"
+  },
   "personDetail": {
     "notFoundTitle": "Persona no encontrada",
     "notFoundDescription": "La persona que buscas no existe o ha sido eliminada.",

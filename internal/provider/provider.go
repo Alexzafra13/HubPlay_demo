@@ -61,6 +61,12 @@ type MetadataResult struct {
 	// productions). The frontend renders the image when present and
 	// falls back to the `Studio` text otherwise.
 	StudioLogoURL string
+	// StudioTMDBID is the upstream TMDb id of the headline production
+	// company / network. Drives the studios table's UNIQUE dedupe key
+	// so the same logical studio collapses into one row across items.
+	// 0 when the provider didn't return one (legacy / non-TMDb path);
+	// the scanner falls back to the slug-based dedupe in that case.
+	StudioTMDBID int64
 }
 
 // Person represents a cast/crew member.

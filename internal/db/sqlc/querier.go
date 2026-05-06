@@ -174,6 +174,15 @@ type Querier interface {
 	GetServerIdentity(ctx context.Context) (GetServerIdentityRow, error)
 	GetSessionByRefreshTokenHash(ctx context.Context, refreshTokenHash string) (Session, error)
 	GetSigningKey(ctx context.Context, id string) (JwtSigningKey, error)
+	// Studios (production companies + TV networks).
+	//
+	// Schema: migrations/sqlite/032_studios.sql.
+	// The slug is URL-safe; ListItemsForStudio is intentionally raw SQL
+	// (lives in studio_repository.go) because the trailing ORDER BY hits
+	// the sqlc v1.31.1 parser truncation we already work around for
+	// ListGenres + GetItemIDByExternalID.
+	GetStudioBySlug(ctx context.Context, slug string) (Studio, error)
+	GetStudioByTMDBID(ctx context.Context, tmdbID sql.NullInt64) (Studio, error)
 	// User accounts.
 	//
 	// Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE users).
@@ -333,6 +342,11 @@ type Querier interface {
 	ListSharedLibrariesForPeer(ctx context.Context, peerID string) ([]ListSharedLibrariesForPeerRow, error)
 	ListSharesByPeer(ctx context.Context, peerID string) ([]FederationLibraryShare, error)
 	ListSigningKeys(ctx context.Context) ([]JwtSigningKey, error)
+	// Browse-page listing: every studio that has at least one item linked
+	// to it, ordered by item count desc. The COUNT subquery is fine
+	// (one studio thousand-items at most) and keeps the index touched
+	// to (studio_id) which we already created in 032_studios.sql.
+	ListStudios(ctx context.Context) ([]ListStudiosRow, error)
 	ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUsersRow, error)
 	MarkInviteUsed(ctx context.Context, arg MarkInviteUsedParams) error
 	MarkPlayed(ctx context.Context, arg MarkPlayedParams) error
@@ -424,6 +438,18 @@ type Querier interface {
 	// Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE providers).
 	// Runtime registry + api-key sourcing lives in internal/provider/manager.go.
 	UpsertProvider(ctx context.Context, arg UpsertProviderParams) error
+	// The scanner calls this every time it processes a movie/series with
+	// a TMDb production company match. Conflict on tmdb_id keeps a single
+	// row per upstream studio even when the slug recipe would diverge
+	// (e.g. "Lucasfilm" vs "Lucasfilm Ltd."); conflict on slug catches
+	// the rare case of a studio with no tmdb_id (legacy backfill rows).
+	// We refresh the logo_url on conflict so a re-scan with a richer
+	// TMDb response upgrades the brand mark, but we keep `name` and
+	// `slug` stable so the URL stays valid even if TMDb renames.
+	UpsertStudio(ctx context.Context, arg UpsertStudioParams) error
+	// Fallback when the scanner has no tmdb_id (legacy items, providers
+	// other than TMDb). The slug is the dedupe key.
+	UpsertStudioBySlug(ctx context.Context, arg UpsertStudioBySlugParams) error
 	// Per-user per-item interaction data (progress, favorites, play history).
 	//
 	// Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE user_data).

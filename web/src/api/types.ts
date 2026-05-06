@@ -404,6 +404,12 @@ export interface MediaItem {
   // and falls back to the `studio` text otherwise so older studios
   // and indie productions still get attribution.
   studio_logo_url?: string;
+  // URL-safe slug for the click-through to /studios/{slug}. Backend
+  // computes it from `studio` via the same recipe stored in the
+  // `studios` table, so the link is valid for any studio that
+  // produced an item in the catalogue. Absent when the item has no
+  // studio attribution at all.
+  studio_slug?: string;
   // Series-only: aggregate of how many episodes the authenticated user
   // has watched out of the total under this show. Computed server-side
   // in the GetItem handler and only present for authenticated calls
@@ -499,6 +505,36 @@ export interface PersonDetail {
   // TMDb match or where the photo download failed.
   image_url?: string;
   filmography: FilmographyEntry[];
+}
+
+// Server-side response for GET /studios (browse) and
+// GET /studios/{slug} (detail). The detail wire reuses the same
+// {id, type, title, year, poster_url} shape the recommendations
+// rail and filmography use, so the Tile component can render any
+// of them with no special-casing.
+export interface StudioListEntry {
+  id: string;
+  name: string;
+  slug: string;
+  logo_url?: string;
+  item_count: number;
+}
+
+export interface StudioItem {
+  id: string;
+  type: "movie" | "series";
+  title: string;
+  year?: number;
+  poster_url?: string;
+}
+
+export interface StudioDetail {
+  id: string;
+  name: string;
+  slug: string;
+  logo_url?: string;
+  tmdb_id?: number;
+  items: StudioItem[];
 }
 
 export interface Person {

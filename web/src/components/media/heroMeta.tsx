@@ -5,6 +5,7 @@
 // instead of getting copy-pasted with subtle drift between the two.
 
 import { useMemo, useState } from "react";
+import { Link } from "react-router";
 import { useTranslation } from "react-i18next";
 import type { MediaItem } from "@/api/types";
 
@@ -201,6 +202,12 @@ export function OverviewWithReadMore({ overview, className }: OverviewProps) {
 interface StudioMarkProps {
   studio?: string;
   studioLogoUrl?: string;
+  /** Slug for /studios/{slug}; when present the mark renders as a
+   *  link instead of a static span. Backend computes this from the
+   *  studio name with the same recipe used in the studios table, so
+   *  the link is always valid for studios that produced an item in
+   *  the catalogue. */
+  studioSlug?: string;
 }
 
 /**
@@ -229,29 +236,51 @@ interface StudioMarkProps {
  * Lucasfilm sometimes white, Disney blue, Pixar yellow). On the dark
  * hero a black logo was near-invisible without the white pill.
  */
-export function StudioMark({ studio, studioLogoUrl }: StudioMarkProps) {
+export function StudioMark({ studio, studioLogoUrl, studioSlug }: StudioMarkProps) {
   if (studioLogoUrl) {
+    const className =
+      "inline-flex h-10 w-[140px] items-center justify-center rounded-md bg-white/95 px-2 shadow-sm shadow-black/30 transition-transform";
+    const inner = (
+      <img
+        src={studioLogoUrl}
+        alt={studio ?? ""}
+        className="max-h-6 max-w-full object-contain"
+        loading="lazy"
+      />
+    );
+    if (studioSlug) {
+      return (
+        <Link
+          to={`/studios/${studioSlug}`}
+          className={`${className} hover:scale-[1.04] hover:shadow-md hover:shadow-black/40 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-accent`}
+          aria-label={studio}
+          title={studio}
+        >
+          {inner}
+        </Link>
+      );
+    }
     return (
-      <span
-        className="inline-flex h-10 w-[140px] items-center justify-center rounded-md bg-white/95 px-2 shadow-sm shadow-black/30"
-        aria-label={studio}
-        title={studio}
-      >
-        <img
-          src={studioLogoUrl}
-          alt={studio ?? ""}
-          className="max-h-6 max-w-full object-contain"
-          loading="lazy"
-        />
+      <span className={className} aria-label={studio} title={studio}>
+        {inner}
       </span>
     );
   }
   if (studio) {
-    return (
-      <span className="text-xs uppercase tracking-wide text-text-muted">
-        {studio}
-      </span>
+    const text = (
+      <span className="text-xs uppercase tracking-wide">{studio}</span>
     );
+    if (studioSlug) {
+      return (
+        <Link
+          to={`/studios/${studioSlug}`}
+          className="text-text-muted hover:text-text-primary transition-colors cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-accent rounded"
+        >
+          {text}
+        </Link>
+      );
+    }
+    return <span className="text-text-muted">{text}</span>;
   }
   return null;
 }

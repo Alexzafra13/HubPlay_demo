@@ -155,12 +155,14 @@ func (t *TMDbProvider) GetMetadata(ctx context.Context, externalID string, itemT
 	// production company entry.
 	if len(detail.ProductionCompanies) > 0 {
 		result.Studio = detail.ProductionCompanies[0].Name
+		result.StudioTMDBID = detail.ProductionCompanies[0].ID
 		if path := detail.ProductionCompanies[0].LogoPath; path != "" {
 			result.StudioLogoURL = tmdbImageURL + "w300" + path
 		}
 	}
 	if result.Studio == "" && len(detail.Networks) > 0 {
 		result.Studio = detail.Networks[0].Name
+		result.StudioTMDBID = detail.Networks[0].ID
 		if path := detail.Networks[0].LogoPath; path != "" {
 			result.StudioLogoURL = tmdbImageURL + "w300" + path
 		}
@@ -602,10 +604,12 @@ type tmdbDetail struct {
 	ContentRating       string  `json:"certification"`
 	Genres              []struct{ Name string `json:"name"` } `json:"genres"`
 	ProductionCompanies []struct {
+		ID       int64  `json:"id"`
 		Name     string `json:"name"`
 		LogoPath string `json:"logo_path"`
 	} `json:"production_companies"`
 	Networks []struct {
+		ID       int64  `json:"id"`
 		Name     string `json:"name"`
 		LogoPath string `json:"logo_path"`
 	} `json:"networks"`

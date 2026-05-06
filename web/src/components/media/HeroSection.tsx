@@ -425,6 +425,7 @@ const HeroSection: FC<HeroSectionProps> = ({
                   <StudioMark
                     studio={item.studio}
                     studioLogoUrl={item.studio_logo_url}
+                    studioSlug={item.studio_slug}
                   />
                 </div>
               )}

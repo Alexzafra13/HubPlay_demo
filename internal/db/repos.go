@@ -29,6 +29,7 @@ type Repositories struct {
 	DeviceCodes        *DeviceCodeRepository
 	Home               *HomeRepository
 	ItemValues         *ItemValueRepository
+	Studios            *StudioRepository
 }
 
 // NewRepositories creates all repositories from a database connection.
@@ -59,5 +60,6 @@ func NewRepositories(database *sql.DB) *Repositories {
 		DeviceCodes:        NewDeviceCodeRepository(database),
 		Home:               NewHomeRepository(database),
 		ItemValues:         NewItemValueRepository(database),
+		Studios:            NewStudioRepository(database),
 	}
 }

@@ -70,6 +70,7 @@ type Scanner struct {
 	chapters    *db.ChapterRepository
 	people      *db.PeopleRepository
 	itemValues  *db.ItemValueRepository
+	studios     *db.StudioRepository
 	providers   providerFetcher
 	prober      probe.Prober
 	bus         *event.Bus
@@ -87,6 +88,7 @@ func New(
 	chapters *db.ChapterRepository,
 	people *db.PeopleRepository,
 	itemValues *db.ItemValueRepository,
+	studios *db.StudioRepository,
 	providers *provider.Manager,
 	prober probe.Prober,
 	bus *event.Bus,
@@ -110,6 +112,7 @@ func New(
 		chapters:    chapters,
 		people:      people,
 		itemValues:  itemValues,
+		studios:     studios,
 		providers:   pf,
 		prober:      prober,
 		bus:         bus,
@@ -763,6 +766,23 @@ func (s *Scanner) enrichMetadata(ctx context.Context, item *db.Item) {
 	if s.itemValues != nil {
 		if err := s.itemValues.SetGenres(ctx, item.ID, meta.Genres); err != nil {
 			s.logger.Warn("failed to mirror genres into item_values", "id", item.ID, "error", err)
+		}
+	}
+
+	// Link this item to the canonical studio row (production company /
+	// network) so the detail page's brand mark can deep-link to a
+	// per-studio collection page. Empty Studio leaves metadata.studio_id
+	// NULL — no chip on the detail page, no entry in the studios index.
+	if s.studios != nil {
+		var tmdbIDPtr *int64
+		if meta.StudioTMDBID > 0 {
+			tmdbIDPtr = &meta.StudioTMDBID
+		}
+		studioID, sErr := s.studios.EnsureStudio(ctx, meta.Studio, meta.StudioLogoURL, tmdbIDPtr)
+		if sErr != nil {
+			s.logger.Warn("failed to ensure studio", "id", item.ID, "studio", meta.Studio, "error", sErr)
+		} else if err := s.studios.SetItemStudio(ctx, item.ID, studioID); err != nil {
+			s.logger.Warn("failed to link item to studio", "id", item.ID, "studio_id", studioID, "error", err)
 		}
 	}
 

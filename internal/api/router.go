@@ -47,6 +47,7 @@ type Dependencies struct {
 	UserData       *db.UserDataRepository
 	Chapters       *db.ChapterRepository
 	People         *db.PeopleRepository
+	Studios        *db.StudioRepository
 	UserPreferences *db.UserPreferenceRepository
 	Home            *db.HomeRepository
 	Providers      *provider.Manager
@@ -731,6 +732,17 @@ func NewRouter(deps Dependencies) http.Handler {
 					peopleHandler := handlers.NewPeopleHandler(deps.People, imageDir, deps.Logger)
 					r.Get("/people/{id}", peopleHandler.Get)
 					r.Get("/people/{id}/thumb", peopleHandler.Thumb)
+				}
+
+				// Studios browse + detail. Powers the click-on-the-
+				// studio-mark flow on movie/series detail pages —
+				// /studios/{slug} returns the studio header (logo,
+				// name) plus every item from this catalogue linked to
+				// it, sorted year-desc.
+				if deps.Studios != nil {
+					studioHandler := handlers.NewStudioHandler(deps.Studios, deps.Logger)
+					r.Get("/studios", studioHandler.List)
+					r.Get("/studios/{slug}", studioHandler.Get)
 				}
 
 				// Admin: batch refresh images for a library

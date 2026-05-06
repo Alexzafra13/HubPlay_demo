@@ -208,6 +208,15 @@ func (h *ItemHandler) attachMetadata(ctx context.Context, resp map[string]any, i
 	}
 	if meta.Studio != "" {
 		resp["studio"] = meta.Studio
+		// Slug for the click-through to /studios/{slug}. Derived from
+		// the same Slugify recipe the scanner uses to insert the
+		// canonical row, so the link is always valid for studios that
+		// produced any item in the catalogue (the studios table itself
+		// is keyed on this slug). Empty studio → no slug, no chip
+		// link on the frontend.
+		if slug := db.Slugify(meta.Studio); slug != "" {
+			resp["studio_slug"] = slug
+		}
 	}
 	// Studio logo (TMDb production-company brand mark) is optional —
 	// older studios with no logo on file produce empty strings here

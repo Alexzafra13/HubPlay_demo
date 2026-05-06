@@ -140,7 +140,7 @@ func run(configPath string) error {
 	imageDir := filepath.Join(filepath.Dir(cfg.Database.Path), "images")
 	scannerPathmap := pathmap.New(imageDir)
 
-	scnr := scanner.New(repos.Items, repos.MediaStreams, repos.Metadata, repos.ExternalIDs, repos.Images, repos.Chapters, repos.People, repos.ItemValues, providerManager, prober, eventBus, imageDir, scannerPathmap, logger)
+	scnr := scanner.New(repos.Items, repos.MediaStreams, repos.Metadata, repos.ExternalIDs, repos.Images, repos.Chapters, repos.People, repos.ItemValues, repos.Studios, providerManager, prober, eventBus, imageDir, scannerPathmap, logger)
 	libraryService := library.NewService(repos.Libraries, repos.Items, repos.MediaStreams, repos.Images, repos.Channels, repos.ItemValues, scnr, logger)
 
 	// Periodic SQLite query-planner refresh + FTS5 merge. Fires every
@@ -339,6 +339,7 @@ func run(configPath string) error {
 		UserData:        repos.UserData,
 		Chapters:        repos.Chapters,
 		People:          repos.People,
+		Studios:         repos.Studios,
 		UserPreferences: repos.UserPreferences,
 		Home:            repos.Home,
 		Providers:     providerManager,

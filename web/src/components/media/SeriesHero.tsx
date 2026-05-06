@@ -252,6 +252,7 @@ const SeriesHero: FC<SeriesHeroProps> = ({
                   <StudioMark
                     studio={item.studio}
                     studioLogoUrl={item.studio_logo_url}
+                    studioSlug={item.studio_slug}
                   />
                 </div>
               )}

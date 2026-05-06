@@ -21,6 +21,8 @@ export const queryKeys = {
   item: (id: string) => ["items", id] as const,
   itemChildren: (id: string) => ["items", id, "children"] as const,
   person: (id: string) => ["people", id] as const,
+  studios: ["studios"] as const,
+  studio: (slug: string) => ["studios", slug] as const,
   search: (q: string) => ["search", q] as const,
   latestItems: (libraryId?: string) => ["items", "latest", libraryId] as const,
   continueWatching: ["continue-watching"] as const,

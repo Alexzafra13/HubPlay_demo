@@ -494,6 +494,24 @@ export class ApiClient {
     return this.request<PersonDetail>("GET", `/people/${id}`);
   }
 
+  // Studio browse + detail. The detail endpoint returns the studio
+  // header (logo, name) plus every item the catalogue has from this
+  // studio, sorted year-desc. Drives the click-on-the-studio-mark
+  // collection page on /studios/{slug}.
+  async getStudios(): Promise<{ studios: import("./types").StudioListEntry[] }> {
+    return this.request<{ studios: import("./types").StudioListEntry[] }>(
+      "GET",
+      "/studios",
+    );
+  }
+
+  async getStudio(slug: string): Promise<import("./types").StudioDetail> {
+    return this.request<import("./types").StudioDetail>(
+      "GET",
+      `/studios/${encodeURIComponent(slug)}`,
+    );
+  }
+
   // Backend returns { data: MediaItem[], total: N } and our `request`
   // helper auto-unwraps the `data` envelope, so the actual resolved
   // value is the array — not a PaginatedResponse. Earlier callers
