@@ -85,6 +85,14 @@ const SeriesHero: FC<SeriesHeroProps> = ({
   // page-wide aurora + publishes `--detail-tint`). The hero just
   // consumes that variable via the bottom-fade and the backdrop
   // image's mask — no per-hero palette state needed here.
+
+  // When the trailer reveals, the static backdrop image fades out
+  // so the two layers don't fight for attention (Plex / Netflix do
+  // the same). Tracked here (not inside HeroTrailer) because the
+  // <img> sits in a sibling tree — coordination has to happen at
+  // the common parent.
+  const [trailerActive, setTrailerActive] = useState(false);
+
   return (
     <section
       className="relative overflow-hidden"
@@ -121,7 +129,14 @@ const SeriesHero: FC<SeriesHeroProps> = ({
             src={heroBackdropUrl}
             alt=""
             loading="eager"
-            className="absolute inset-y-0 right-0 h-full w-full sm:w-4/5 lg:w-2/3 object-cover"
+            className={[
+              "absolute inset-y-0 right-0 h-full w-full sm:w-4/5 lg:w-2/3 object-cover transition-opacity duration-700",
+              // Fade the static backdrop out when the trailer
+              // reveals so the two layers don't fight for attention.
+              // The transition matches HeroTrailer's own 700ms
+              // opacity fade so the swap reads as a single move.
+              trailerActive ? "opacity-0" : "opacity-100",
+            ].join(" ")}
             style={{
               objectPosition: "right top",
               maskImage:
@@ -140,11 +155,15 @@ const SeriesHero: FC<SeriesHeroProps> = ({
             settles, fade in a muted trailer over the backdrop. The
             HeroTrailer component handles the timer, the embed URL
             (YouTube / Vimeo) and graceful dismissal — when there's
-            no trailer it renders nothing. */}
+            no trailer it renders nothing. The reveal/dismiss
+            callbacks let SeriesHero fade the static backdrop out
+            while the trailer is on screen so they don't blend. */}
         {item.trailer && (
           <HeroTrailer
             siteKey={item.trailer.site}
             videoKey={item.trailer.key}
+            onReveal={() => setTrailerActive(true)}
+            onDismiss={() => setTrailerActive(false)}
           />
         )}
 
@@ -471,7 +490,19 @@ function shouldSkipTrailer(): boolean {
  * `pointer-events: none` so a click anywhere in the hero hits the Play
  * button, never the embedded player.
  */
-function HeroTrailer({ siteKey, videoKey }: { siteKey: string; videoKey: string }) {
+interface HeroTrailerProps {
+  siteKey: string;
+  videoKey: string;
+  /** Fired the first time the trailer becomes visible (post-reveal
+   *  timer). Lets the parent fade the static backdrop out so the
+   *  two layers don't fight for attention. */
+  onReveal?: () => void;
+  /** Fired when the user clicks "Skip trailer" or the component
+   *  decides to bail. Parent should fade the backdrop back in. */
+  onDismiss?: () => void;
+}
+
+function HeroTrailer({ siteKey, videoKey, onReveal, onDismiss }: HeroTrailerProps) {
   const { t } = useTranslation();
 
   // Decide once at mount whether we should even start the dance. The
@@ -550,15 +581,23 @@ function HeroTrailer({ siteKey, videoKey }: { siteKey: string; videoKey: string 
   useEffect(() => {
     if (!inViewport || skipped || dismissed) return;
     const loadTimer = setTimeout(() => setLoaded(true), 2500);
-    const revealTimer = setTimeout(() => setRevealed(true), 3700);
+    const revealTimer = setTimeout(() => {
+      setRevealed(true);
+      // Notify parent so the static backdrop can fade out in step
+      // with the trailer fading in (both transitions are 700ms).
+      onReveal?.();
+    }, 3700);
     return () => {
       clearTimeout(loadTimer);
       clearTimeout(revealTimer);
     };
-  }, [inViewport, skipped, dismissed]);
+  }, [inViewport, skipped, dismissed, onReveal]);
 
   const handleDismiss = () => {
     setDismissed(true);
+    // Restore the static backdrop in the parent so the page doesn't
+    // go blank on the right when the trailer disappears.
+    onDismiss?.();
     try {
       sessionStorage.setItem(TRAILER_DISMISSED_KEY, "1");
     } catch {
@@ -576,14 +615,20 @@ function HeroTrailer({ siteKey, videoKey }: { siteKey: string; videoKey: string 
     return null;
   }
 
-  // Mask the trailer so its left edge fades into the gradient instead
-  // of cutting hard against the poster column. Black at the right is
-  // "fully opaque", transparent at ~50% means "blend into whatever is
-  // beneath" — and what's beneath is the static backdrop image plus
-  // the colour gradient, which is exactly the look we want. A solid
-  // sharp boundary felt like a TV-on-a-page; this fade matches the
-  // Netflix / Disney+ pre-play overlay.
-  const fadeMask = "linear-gradient(to right, transparent 0%, transparent 25%, black 55%, black 100%)";
+  // 2D mask applied DIRECTLY to the iframe (not the wrapper). The
+  // wrapper spans the full hero, but the iframe only occupies the
+  // right ~60% — if the mask is on the wrapper, "0% transparent"
+  // lives at the wrapper's left edge (far outside the iframe), so
+  // the iframe's own left edge lands at ~30% mask opacity and the
+  // rectangle outline stays visible.
+  //
+  // Putting the mask on the iframe makes the gradient stops relative
+  // to the IFRAME'S bounds: 0% IS the iframe's left edge, fully
+  // transparent there, fading to opaque past ~50%. Top stays opaque,
+  // bottom fades. Composited via mask-composite: intersect so the
+  // image is only solid where both gradients agree.
+  const fadeMask =
+    "linear-gradient(to right, transparent 0%, rgba(0,0,0,0.25) 20%, rgba(0,0,0,0.85) 50%, black 75%), linear-gradient(to bottom, black 0%, black 70%, rgba(0,0,0,0.25) 92%, transparent 100%)";
 
   return (
     <div
@@ -593,27 +638,19 @@ function HeroTrailer({ siteKey, videoKey }: { siteKey: string; videoKey: string 
         revealed ? "opacity-100" : "opacity-0 pointer-events-none",
       ].join(" ")}
     >
-      <div
-        className="absolute inset-0 overflow-hidden"
-        style={{
-          maskImage: fadeMask,
-          WebkitMaskImage: fadeMask,
-        }}
-      >
-        {/* Object-cover behaviour for an iframe: size the iframe at
-            the hero's full width but lock its aspect to 16:9 (the
-            shape YouTube renders inside). The hero is closer to 16:7
-            on wide monitors, so 16:9 height overflows top + bottom —
-            cropped by `overflow-hidden`. The previous `scale-1.35`
-            approach scaled the wrapper but YouTube's letterbox bars
-            scaled with it, leaving black gutters on the right edge
-            on extra-wide screens. Aspect-ratio sizing kills them.
+      <div className="absolute inset-0 overflow-hidden">
+        {/* Iframe sized by HEIGHT (100% of hero, auto width via
+            aspectRatio 16/9) anchored to the right edge — sits
+            where the actors / action are framed in YouTube
+            trailers. Left side of the hero shows the page bg
+            through the mask, matching the static backdrop image's
+            placement.
 
-            Render the iframe *only* once `loaded` flips. Keeping it
-            mounted with src='about:blank' would still cost layout +
-            an internal frame in the engine, and would pre-emptively
-            wire up the iframe's parent-frame messaging hooks. Mounting
-            on demand is the cheapest path. */}
+            Mask is on the iframe itself (NOT the wrapper) so the
+            fade gradients are relative to the iframe's own bounds,
+            making the left edge fade smoothly to transparent at
+            its own border instead of leaving a visible rectangle
+            outline. */}
         {loaded && (
           <iframe
             src={embedUrl}
@@ -621,25 +658,19 @@ function HeroTrailer({ siteKey, videoKey }: { siteKey: string; videoKey: string 
             allow="autoplay; encrypted-media; picture-in-picture"
             referrerPolicy="strict-origin-when-cross-origin"
             loading="lazy"
-            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 border-0 pointer-events-none"
+            className="absolute right-0 top-0 border-0 pointer-events-none"
             style={{
-              width: "100%",
+              height: "100%",
               aspectRatio: "16 / 9",
-              // Belt-and-suspenders for unusually tall hero bands
-              // (e.g. very narrow viewports): force the iframe to
-              // at least cover the parent height, accepting horizontal
-              // letterbox in that edge case rather than vertical bars.
-              minHeight: "100%",
-              minWidth: "calc(100% * 16 / 9)",
+              width: "auto",
+              maskImage: fadeMask,
+              WebkitMaskImage: fadeMask,
+              maskComposite: "intersect",
+              WebkitMaskComposite: "source-in",
             }}
           />
         )}
       </div>
-      {/* Subtle right-side dim — the gradient on the left already
-          handles its own blend with the masked trailer; this just
-          takes a bit of saturation off the bare right side so the
-          content + button stay readable. */}
-      <div className="absolute inset-0 bg-bg-base/20" />
 
       {revealed && (
         <button
