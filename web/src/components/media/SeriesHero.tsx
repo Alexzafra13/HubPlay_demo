@@ -85,6 +85,14 @@ const SeriesHero: FC<SeriesHeroProps> = ({
   // page-wide aurora + publishes `--detail-tint`). The hero just
   // consumes that variable via the bottom-fade and the backdrop
   // image's mask — no per-hero palette state needed here.
+
+  // When the trailer reveals, the static backdrop image fades out
+  // so the two layers don't fight for attention (Plex / Netflix do
+  // the same). Tracked here (not inside HeroTrailer) because the
+  // <img> sits in a sibling tree — coordination has to happen at
+  // the common parent.
+  const [trailerActive, setTrailerActive] = useState(false);
+
   return (
     <section
       className="relative overflow-hidden"
@@ -121,7 +129,14 @@ const SeriesHero: FC<SeriesHeroProps> = ({
             src={heroBackdropUrl}
             alt=""
             loading="eager"
-            className="absolute inset-y-0 right-0 h-full w-full sm:w-4/5 lg:w-2/3 object-cover"
+            className={[
+              "absolute inset-y-0 right-0 h-full w-full sm:w-4/5 lg:w-2/3 object-cover transition-opacity duration-700",
+              // Fade the static backdrop out when the trailer
+              // reveals so the two layers don't fight for attention.
+              // The transition matches HeroTrailer's own 700ms
+              // opacity fade so the swap reads as a single move.
+              trailerActive ? "opacity-0" : "opacity-100",
+            ].join(" ")}
             style={{
               objectPosition: "right top",
               maskImage:
@@ -140,11 +155,15 @@ const SeriesHero: FC<SeriesHeroProps> = ({
             settles, fade in a muted trailer over the backdrop. The
             HeroTrailer component handles the timer, the embed URL
             (YouTube / Vimeo) and graceful dismissal — when there's
-            no trailer it renders nothing. */}
+            no trailer it renders nothing. The reveal/dismiss
+            callbacks let SeriesHero fade the static backdrop out
+            while the trailer is on screen so they don't blend. */}
         {item.trailer && (
           <HeroTrailer
             siteKey={item.trailer.site}
             videoKey={item.trailer.key}
+            onReveal={() => setTrailerActive(true)}
+            onDismiss={() => setTrailerActive(false)}
           />
         )}
 
@@ -471,7 +490,19 @@ function shouldSkipTrailer(): boolean {
  * `pointer-events: none` so a click anywhere in the hero hits the Play
  * button, never the embedded player.
  */
-function HeroTrailer({ siteKey, videoKey }: { siteKey: string; videoKey: string }) {
+interface HeroTrailerProps {
+  siteKey: string;
+  videoKey: string;
+  /** Fired the first time the trailer becomes visible (post-reveal
+   *  timer). Lets the parent fade the static backdrop out so the
+   *  two layers don't fight for attention. */
+  onReveal?: () => void;
+  /** Fired when the user clicks "Skip trailer" or the component
+   *  decides to bail. Parent should fade the backdrop back in. */
+  onDismiss?: () => void;
+}
+
+function HeroTrailer({ siteKey, videoKey, onReveal, onDismiss }: HeroTrailerProps) {
   const { t } = useTranslation();
 
   // Decide once at mount whether we should even start the dance. The
@@ -550,15 +581,23 @@ function HeroTrailer({ siteKey, videoKey }: { siteKey: string; videoKey: string 
   useEffect(() => {
     if (!inViewport || skipped || dismissed) return;
     const loadTimer = setTimeout(() => setLoaded(true), 2500);
-    const revealTimer = setTimeout(() => setRevealed(true), 3700);
+    const revealTimer = setTimeout(() => {
+      setRevealed(true);
+      // Notify parent so the static backdrop can fade out in step
+      // with the trailer fading in (both transitions are 700ms).
+      onReveal?.();
+    }, 3700);
     return () => {
       clearTimeout(loadTimer);
       clearTimeout(revealTimer);
     };
-  }, [inViewport, skipped, dismissed]);
+  }, [inViewport, skipped, dismissed, onReveal]);
 
   const handleDismiss = () => {
     setDismissed(true);
+    // Restore the static backdrop in the parent so the page doesn't
+    // go blank on the right when the trailer disappears.
+    onDismiss?.();
     try {
       sessionStorage.setItem(TRAILER_DISMISSED_KEY, "1");
     } catch {
