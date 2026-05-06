@@ -94,6 +94,28 @@ func TestDecide_DirectStream_VideoCopyAudioReencode_DTS(t *testing.T) {
 	}
 }
 
+// Real-world ffprobe outputs the format_name field as a comma-
+// separated list (e.g. "matroska,webm"). The remuxable-containers
+// check has to recognise the file regardless of which label ffprobe
+// picked; otherwise every mkv on disk would silently fall to full
+// transcode because the literal "matroska,webm" string doesn't
+// match the map keys.
+func TestDecide_DirectStream_FormatNameCommaList(t *testing.T) {
+	item := &db.Item{Container: "matroska,webm"}
+	streams := []*db.MediaStream{
+		{StreamType: "video", Codec: "h264", IsDefault: true},
+		{StreamType: "audio", Codec: "ac3", IsDefault: true},
+	}
+
+	d := Decide(item, streams, nil, "")
+	if d.Method != MethodDirectStream {
+		t.Fatalf("h264 + AC3 in 'matroska,webm' must DirectStream (video copy), got %s", d.Method)
+	}
+	if !d.CopyVideo {
+		t.Error("expected CopyVideo=true even when container is comma-list")
+	}
+}
+
 func TestDecide_DirectPlay_WebM_VP9_Opus(t *testing.T) {
 	item := &db.Item{Container: "webm"}
 	streams := []*db.MediaStream{
