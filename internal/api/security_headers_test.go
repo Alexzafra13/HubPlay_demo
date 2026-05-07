@@ -64,6 +64,38 @@ func TestSecurityHeaders_CSPCoversThirdPartyHosts(t *testing.T) {
 			t.Errorf("CSP missing %q\nfull header: %s", sub, csp)
 		}
 	}
+
+	// connect-src must allow the YouTube + Vimeo oEmbed origins. The
+	// HeroTrailer pre-flight hits these before mounting the iframe; if
+	// the directive ever drops back to 'self' only, every trailer
+	// silently fails-closed in production with no JS console signal
+	// beyond a CSP violation. Pin it as a directive-scoped match so
+	// listing the host under any other directive (e.g. img-src) won't
+	// accidentally satisfy this assertion.
+	if connect := directive(csp, "connect-src"); connect == "" {
+		t.Fatal("connect-src directive missing entirely")
+	} else {
+		for _, host := range []string{"https://www.youtube.com", "https://vimeo.com"} {
+			if !strings.Contains(connect, host) {
+				t.Errorf("connect-src missing %q (oEmbed pre-flight will be blocked)\ndirective: %s", host, connect)
+			}
+		}
+	}
+}
+
+// directive extracts a single CSP directive (e.g. "connect-src ...") from a
+// full Content-Security-Policy header value. Returns "" if the directive is
+// not present. Used by the test to assert host placement, not just header
+// presence — putting youtube.com under img-src by mistake would silently
+// satisfy a naive substring check.
+func directive(csp, name string) string {
+	for _, part := range strings.Split(csp, ";") {
+		part = strings.TrimSpace(part)
+		if strings.HasPrefix(part, name+" ") || part == name {
+			return part
+		}
+	}
+	return ""
 }
 
 func TestSecurityHeaders_HSTSOnlyOverHTTPS(t *testing.T) {

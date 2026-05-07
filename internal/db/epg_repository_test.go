@@ -317,6 +317,52 @@ func TestEPG_CoerceSQLiteTime_LegacyString(t *testing.T) {
 	}
 }
 
+// TestEPG_CoerceSQLiteTime_MonotonicSuffix asserts the scanner strips the
+// " m=±d.d" tail Go's time.Time.String() appends when the value still carries
+// a monotonic-clock reading. modernc.org/sqlite falls through to fmt.Sprint
+// when binding non-UTC time.Time values, so any pre-fix build that passed
+// `time.Now()` (which always has monotonic) into a query landed rows shaped
+// like "2026-04-24 12:00:00 +0200 CEST m=+0.001234567" — unparseable by any
+// time.Parse layout. Same defensive read path the home/trending rail relies
+// on for legacy user_data rows; this test pins the EPG side of the same
+// invariant so a future change to coerceSQLiteTime can't regress it silently.
+func TestEPG_CoerceSQLiteTime_MonotonicSuffix(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	repos := db.NewRepositories(database)
+	ctx := context.Background()
+
+	now := time.Now()
+	_ = repos.Libraries.Create(ctx, &db.Library{
+		ID: "lib-mono", Name: "L", ContentType: "livetv",
+		CreatedAt: now, UpdatedAt: now,
+	})
+	_ = repos.Channels.Create(ctx, makeChannel("ch-mono", "lib-mono", "L", 1, true))
+
+	_, err := database.ExecContext(ctx, `INSERT INTO epg_programs
+		(id, channel_id, title, description, category, icon_url, start_time, end_time)
+		VALUES ('p-mono', 'ch-mono', 'Mono', '', '', '',
+		        '2026-04-24 12:00:00 +0200 CEST m=+0.001234567',
+		        '2026-04-24 13:00:00 +0200 CEST m=+3600.001234567')`)
+	if err != nil {
+		t.Fatalf("seed monotonic row: %v", err)
+	}
+
+	bulk, err := repos.EPGPrograms.BulkSchedule(ctx,
+		[]string{"ch-mono"},
+		time.Date(2026, 4, 24, 9, 0, 0, 0, time.UTC),
+		time.Date(2026, 4, 24, 14, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("bulk: %v", err)
+	}
+	if len(bulk["ch-mono"]) != 1 {
+		t.Fatalf("monotonic row not parsed: %v", bulk)
+	}
+	wantStart := time.Date(2026, 4, 24, 10, 0, 0, 0, time.UTC) // +0200 → 10:00Z
+	if !bulk["ch-mono"][0].StartTime.Equal(wantStart) {
+		t.Errorf("parsed monotonic start = %v, want %v", bulk["ch-mono"][0].StartTime, wantStart)
+	}
+}
+
 // TestEPG_BulkSchedule_DedupesDuplicateIDs guards against the same
 // channel id landing in two different chunks and doubling up in the
 // merged map.

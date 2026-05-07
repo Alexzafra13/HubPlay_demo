@@ -22,7 +22,15 @@ import (
 //   - font-src      Google Fonts woff2.
 //   - media-src     blob: for HLS MediaSource buffers; 'self' for direct
 //                   playback over the API.
-//   - connect-src   API + SSE on the same origin only.
+//   - connect-src   API + SSE on the same origin, plus the YouTube and
+//                   Vimeo oEmbed endpoints (www.youtube.com, vimeo.com).
+//                   HeroTrailer hits oEmbed *before* mounting the iframe
+//                   to detect "embedding disabled by uploader" responses
+//                   without flashing an empty player; without these
+//                   origins the fetch is blocked in prod and every
+//                   trailer silently fails-closed. The iframe itself
+//                   loads from youtube-nocookie.com / player.vimeo.com,
+//                   which are covered by frame-src.
 //
 // Adding a new third-party host (a different image CDN, a new embed
 // platform) means adding it here; otherwise the browser will block it
@@ -47,7 +55,7 @@ func SecurityHeaders() func(http.Handler) http.Handler {
 		"img-src 'self' data: blob: https://image.tmdb.org https://assets.fanart.tv",
 		"media-src 'self' blob:",
 		"frame-src https://www.youtube-nocookie.com https://player.vimeo.com",
-		"connect-src 'self'",
+		"connect-src 'self' https://www.youtube.com https://vimeo.com",
 		"font-src 'self' data: https://fonts.gstatic.com",
 		"object-src 'none'",
 		"base-uri 'self'",
