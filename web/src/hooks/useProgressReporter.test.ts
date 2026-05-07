@@ -25,6 +25,11 @@ describe("useProgressReporter", () => {
       writable: true,
       configurable: true,
     });
+    Object.defineProperty(mockVideo, "seeking", {
+      value: false,
+      writable: true,
+      configurable: true,
+    });
     videoRef = { current: mockVideo as HTMLVideoElement };
   });
 
@@ -108,6 +113,43 @@ describe("useProgressReporter", () => {
     vi.clearAllMocks();
 
     vi.advanceTimersByTime(20_000);
+
+    expect(api.updateProgress).not.toHaveBeenCalled();
+  });
+
+  // Mid-seek the <video>'s currentTime briefly reports the pre-seek
+  // sample (the new buffer hasn't landed yet), so persisting it would
+  // corrupt resume — the user clicked away from that point but the
+  // server would think they're still there. Pinning this gate keeps
+  // the bug we shipped 2026-05-07 from regressing silently.
+  it("does not save while a seek is in flight", () => {
+    Object.defineProperty(mockVideo, "seeking", {
+      value: true,
+      writable: true,
+      configurable: true,
+    });
+    renderHook(() => useProgressReporter(videoRef, "item-1"));
+
+    vi.advanceTimersByTime(10_000);
+
+    expect(api.updateProgress).not.toHaveBeenCalled();
+  });
+
+  // Same gate on the unmount path: a player that closes mid-seek
+  // (user pressed the back button while ffmpeg was still respawning)
+  // shouldn't write the pre-seek sample as the "final" position.
+  it("does not save on unmount while a seek is in flight", () => {
+    Object.defineProperty(mockVideo, "seeking", {
+      value: true,
+      writable: true,
+      configurable: true,
+    });
+    const { unmount } = renderHook(() =>
+      useProgressReporter(videoRef, "item-1"),
+    );
+
+    vi.clearAllMocks();
+    unmount();
 
     expect(api.updateProgress).not.toHaveBeenCalled();
   });

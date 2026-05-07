@@ -52,3 +52,35 @@ When the next session declares this closed, the following should hold:
 - Hover thumbnails reflect the actual frame at the hovered timestamp.
 - Pause after a successful seek shows a frame from the seeked-to position.
 - Play after pause resumes from the paused position, never from the start.
+
+## Resolution (2026-05-08, branch `claude/review-player-tasks-4guc9`)
+
+Closed end-to-end. Five fixes across frontend and backend.
+
+### Root causes (post-investigation)
+
+The four user-visible symptoms had **two** root causes, not one. The doc above was right that #2/#3/#4 were a frontend feedback loop, but the cause was structural — not "another `useEffect` re-applies progress" but the controlled `<input type="range" value={currentTime}>` itself fighting `setCurrentTime(video.currentTime)` on every `timeupdate` while the seek (1-2 s ffmpeg restart) was in flight. Symptom #1 was a backend bug — the trickplay generator hardcoded `IntervalSec=10` and `Total=GridSide² (100)`, capping coverage at 1000 s = 16 m 40 s for every item.
+
+### Fixes shipped
+
+1. **`SeekBar` pointerup-commit pattern** (`web/src/components/player/PlayerControls.tsx`). The seek input now tracks a local `dragValue` while the pointer is down; `onSeek` only fires on `onPointerUp` / `onPointerCancel`. Mid-drag values are visual echo, not real seeks. Keyboard-arrow nav (no pointer in flight) still commits immediately on each press. This is the Plex / YouTube pattern and kills the multi-fire-during-drag cascade at the source.
+2. **`isSeeking` gate in VideoPlayer** (`web/src/components/player/VideoPlayer.tsx`). Listeners on `seeking` / `seeked` flip a ref; `timeupdate` skips `setCurrentTime` while the ref is true. Without this React would re-render the slider with the pre-seek sample (the new buffer hasn't landed yet — `video.currentTime` briefly reports the old position) and the thumb would visibly jitter, reading as a "freeze".
+3. **Progress reporter respects `video.seeking`** (`web/src/hooks/useProgressReporter.ts`). Periodic + unmount paths both bail when a seek is in flight. Persisting a mid-seek sample as "where the user is" used to corrupt resume on the next session.
+4. **Defensive currentTime preservation across hls.js error/recover** (`web/src/hooks/useHls.ts`). A `lastGoodTimeRef` tracks the most recent settled position; on `MEDIA_ATTACHED` (the recovery path detaches and re-attaches media) we restore from it if `<video>.currentTime` zeroed out. `NETWORK_ERROR` recovery passes the resume time to `hls.startLoad(timeSec)`. The "Attempting to recover…" toast clears on the next `FRAG_LOADED`. This closes the doc'd "Play after frozen-paused state restarts from frame 0".
+5. **Trickplay covers full duration** (`internal/imaging/trickplay.go`). New `DurationSeconds` param drives an adaptive `IntervalSec` and `GridSide`: cap thumbnail count at ~400 per sprite (interval scales up for very long content), grid sized via `ceil(sqrt(total))`, manifest reports the real `total` (not `GridSide²`). Manifest carries a `Version` stamp so the handler regenerates legacy v1 (1000-s-coverage) sprites on first hit instead of serving wrong thumbnails forever.
+6. **Server-side restart rate limit** (`internal/stream/manager.go`). Sliding-window cap (20 / 60 s) per session as defense in depth. The pointerup-commit fix should keep healthy clients well under this; if a future regression triggers it, the manager refuses to spawn more ffmpegs and returns a 429 the handler maps to `Retry-After: 5`.
+
+### Verification
+
+- Backend: `go test ./... -count=1` → all packages green. New tests: `TestTrickplayParams_Adapt` (4 cases), `TestTrickplayParams_Adapt_NoDuration`, `TestTrickplayParams_Adapt_GridAlwaysFits`, `TestTrickplayManifestVersion_NonZero`, `TestManager_RestartSessionAt_RateLimited`, `TestManager_RestartSessionAt_RateLimitWindowResets`.
+- Frontend: `vitest run` → 394 / 394 (was 392; +2 in `useProgressReporter.test.ts` for the seeking-skip gate). `tsc -b` clean. Lint errors in touched files are pre-existing (verified by stashing).
+
+### What was out of scope (still open)
+
+- 360p ABR prefetch from hls.js's master playlist — orthogonal, untouched.
+- Cache cruft reconciler at startup — orthogonal, untouched.
+- `trending query` parse error in home-handler — orthogonal, untouched.
+
+### What this session did NOT touch
+
+`internal/federation/`, `internal/iptv/`, `internal/auth/`, the live-TV player (`useLiveHls`). The fixes are scoped to the VOD path because that's where the bugs lived; live still uses its own lifecycle hook (the F4 split lives at `web/src/hooks/hlsLifecycle.ts` already, but the seek-loop bug doesn't apply to live anyway since live playlists don't expose far-future seeks).

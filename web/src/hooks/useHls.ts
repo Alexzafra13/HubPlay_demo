@@ -74,6 +74,13 @@ export function useHls({
   const startPositionRef = useRef(startPosition);
   startPositionRef.current = startPosition;
 
+  // Remembers the most recent reliable currentTime so a
+  // recoverMediaError / re-attach path can restore the position
+  // instead of letting the <video> element snap to 0. Tracked here
+  // (not in the parent) because the recovery hooks live next to the
+  // hls.js instance below.
+  const lastGoodTimeRef = useRef(0);
+
   const setAudioTrackCb = useCallback((id: number) => {
     const hls = hlsRef.current;
     if (hls) {
@@ -117,6 +124,7 @@ export function useHls({
     setCurrentAudioTrack(0);
     setCurrentSubtitleTrack(-1);
     setCurrentQuality(-1);
+    lastGoodTimeRef.current = 0;
 
     // Tear down anything left from a prior attach. The cleanup
     // returned below runs first when deps change, but defending here
@@ -149,6 +157,20 @@ export function useHls({
         hlsRef.current = hls;
         hls.loadSource(url);
         hls.attachMedia(video);
+
+        // After hls.js detaches and re-attaches the media (the
+        // recoverMediaError path below), the <video> element can
+        // briefly read currentTime=0 before the new buffer is wired
+        // up. If we have a remembered good time, push it back so
+        // `play()` resumes from where the user actually was — this
+        // closes the doc'd "Play after frozen-paused state restarts
+        // from frame 0" bug.
+        hls.on(Hls.Events.MEDIA_ATTACHED, () => {
+          const target = lastGoodTimeRef.current;
+          if (target > 1 && video.currentTime < 0.5) {
+            video.currentTime = target;
+          }
+        });
 
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           const aTracks: AudioTrack[] = hls.audioTracks.map((t) => ({
@@ -207,22 +229,43 @@ export function useHls({
         });
 
         hls.on(Hls.Events.ERROR, (_event, data) => {
-          if (data.fatal) {
-            switch (data.type) {
-              case Hls.ErrorTypes.NETWORK_ERROR:
-                setError("A network error occurred. Attempting to recover...");
-                hls.startLoad();
-                break;
-              case Hls.ErrorTypes.MEDIA_ERROR:
-                setError("A media error occurred. Attempting to recover...");
-                hls.recoverMediaError();
-                break;
-              default:
-                setError(`Playback failed: ${data.details}`);
-                hls.destroy();
-                break;
-            }
+          if (!data.fatal) return;
+          // Capture the best-known position BEFORE recovery so the
+          // restart starts in the right place even if the recovery
+          // path detaches the media element.
+          const resumeFrom =
+            video.currentTime > 0.5 ? video.currentTime : lastGoodTimeRef.current;
+          switch (data.type) {
+            case Hls.ErrorTypes.NETWORK_ERROR:
+              setError("A network error occurred. Attempting to recover...");
+              // hls.startLoad(timeSec) tells the loader where to
+              // resume; without it the loader picks the live edge
+              // (irrelevant for VOD) or replays from the start.
+              hls.startLoad(resumeFrom > 0 ? resumeFrom : -1);
+              break;
+            case Hls.ErrorTypes.MEDIA_ERROR:
+              setError("A media error occurred. Attempting to recover...");
+              hls.recoverMediaError();
+              // recoverMediaError preserves <video>.currentTime, but
+              // a follow-on detach (e.g. swapAudioCodec on the second
+              // pass) can zero it. The MEDIA_ATTACHED handler above
+              // will restore from lastGoodTimeRef once the new media
+              // source is wired up.
+              break;
+            default:
+              setError(`Playback failed: ${data.details}`);
+              hls.destroy();
+              break;
           }
+        });
+
+        // Recovery worked — the next fragment loaded clean. Clear
+        // the "Attempting to recover…" toast so the player chrome
+        // doesn't keep nagging the user.
+        hls.on(Hls.Events.FRAG_LOADED, () => {
+          setError((prev) =>
+            prev && prev.includes("Attempting to recover") ? null : prev,
+          );
         });
       } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
         video.src = url;
@@ -250,8 +293,26 @@ export function useHls({
       setError("No playback source available.");
     }
 
+    // Capture the listener-removal handle in scope: the `onSettledTime`
+    // closure is only defined inside the `useHlsPlayback` branch, so
+    // the cleanup needs a stable cleanup function regardless of which
+    // branch ran.
+    const settledListener = () => {
+      if (video && !video.seeking && video.currentTime > 0.5) {
+        lastGoodTimeRef.current = video.currentTime;
+      }
+    };
+    if (useHlsPlayback && masterPlaylistUrl) {
+      // The branch above already attached its own listener, but we
+      // still register this one so direct_play paths also benefit
+      // from the settled-time tracking — recovery works the same way
+      // when a flaky network blanks the <video> source mid-play.
+    }
+    video.addEventListener("timeupdate", settledListener);
+
     return () => {
       destroyHlsInstance(hlsRef, video);
+      video.removeEventListener("timeupdate", settledListener);
     };
   }, [videoRef, masterPlaylistUrl, directUrl, playbackMethod, sessionToken]);
 

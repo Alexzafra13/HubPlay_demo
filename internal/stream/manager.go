@@ -96,7 +96,23 @@ type ManagedSession struct {
 	// already covered the range and bails out without touching
 	// ffmpeg.
 	LastRestartSegment int
+	// restartWindowStart / restartWindowCount form a per-session
+	// sliding-window rate limiter for RestartSessionAt. Defense in
+	// depth against a frontend regression that fires seek events
+	// the user did not request — observed 2026-05-07 with a
+	// +366-segment cadence in the server logs for one user click.
+	// The pointerup-commit fix in the SeekBar should keep this from
+	// triggering under normal use; if it does, it's a signal of a
+	// new client bug and we'd rather refuse the restart than melt
+	// the transcoder.
+	restartWindowStart time.Time
+	restartWindowCount int
 }
+
+// ErrRestartRateLimited is returned by RestartSessionAt when a
+// session exceeds the per-minute cap. The handler maps it to 429
+// so the client backs off; under healthy use this never fires.
+var ErrRestartRateLimited = errors.New("stream: restart rate limit exceeded")
 
 // ErrSessionNotFound is returned by RestartSessionAt / TouchSession
 // when the caller references a key that has no live session. The
@@ -375,6 +391,16 @@ func (m *Manager) startSessionSlow(ctx context.Context, userID, itemID, profileN
 // restart; only redundant near-duplicates get suppressed.
 const restartCoalesceWindow = 10
 
+// restartRateLimit caps RestartSessionAt invocations per session per
+// minute. Healthy use lands well under this — a user dragging the
+// seek bar with the SeekBar pointerup-commit pattern fires one seek
+// per click; even a power user keyboard-scrubbing rarely tops 6/min.
+// 20 leaves headroom while still detecting a runaway client.
+const (
+	restartRateLimitWindow = 60 * time.Second
+	restartRateLimitMax    = 20
+)
+
 // RestartSessionAt stops the existing transcoder for `key` and
 // re-starts it at the given segment index. This is the seek-restart
 // path: the synthesized VOD manifest lists every segment up-front,
@@ -430,6 +456,28 @@ func (m *Manager) RestartSessionAt(key string, segmentIndex int, segmentDuration
 			"current_start_segment", ms.LastRestartSegment,
 		)
 		return nil
+	}
+
+	// Sliding-window rate limit. The coalesce check above absorbs
+	// the parallel-fan-out case (hls.js firing 2-3 adjacent segment
+	// requests on every seek); this cap absorbs the SEQUENTIAL case
+	// — a buggy client that keeps issuing far-apart seeks the user
+	// never asked for. The 2026-05-07 incident registered 4 restarts
+	// in 42 s for one human click; 20 in 60 s gives room for real
+	// power-user scrubbing while still detecting that pattern.
+	now := time.Now()
+	if now.Sub(ms.restartWindowStart) > restartRateLimitWindow {
+		ms.restartWindowStart = now
+		ms.restartWindowCount = 0
+	}
+	ms.restartWindowCount++
+	if ms.restartWindowCount > restartRateLimitMax {
+		m.logger.Warn("restart rate limit hit — likely client-side seek loop",
+			"key", key,
+			"requested_segment", segmentIndex,
+			"window_count", ms.restartWindowCount,
+		)
+		return ErrRestartRateLimited
 	}
 
 	// Stop the existing ffmpeg run. We keep the ManagedSession
