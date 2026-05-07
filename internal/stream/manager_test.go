@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -365,4 +366,73 @@ func TestManager_PublishIsNilSafeWithoutBus(t *testing.T) {
 // this one spot.
 func eventNewBus() *event.Bus {
 	return event.NewBus(testLogger())
+}
+
+// TestManager_RestartSessionAt_CoalescesAdjacent pins the regression
+// for #176: hls.js fans out 2-3 parallel segment fetches after a
+// seek; before the per-session restart mutex + coverage check, each
+// fetch triggered its own RestartAt and orphaned the previous
+// ffmpeg. Now the second / third arrivals see they're within the
+// coalesce window of the first restart and bail without touching
+// the transcoder.
+//
+// We pre-set LastRestartSegment as if the "first" caller already
+// finished, then fire a burst of subsequent calls — each must
+// return nil without altering state. (We can't unit-test the
+// in-flight race directly without mocking the transcoder; this
+// inverted form covers the same code path.)
+func TestManager_RestartSessionAt_CoalescesAdjacent(t *testing.T) {
+	m := newTestManager(t)
+	defer m.Shutdown()
+
+	m.mu.Lock()
+	m.sessions["test-key"] = &ManagedSession{
+		Session: &Session{
+			ID:        "test-key",
+			ItemID:    "item-1",
+			OutputDir: t.TempDir(),
+			done:      closedChan(),
+		},
+		UserID:             "user1",
+		InputPath:          "/dev/null",
+		Decision:           PlaybackDecision{Profile: DefaultProfile()},
+		LastAccessed:       time.Now(),
+		LastRestartSegment: 953, // ffmpeg "is producing" from 953 onwards
+	}
+	m.mu.Unlock()
+
+	// Simulate hls.js fanout: three near-adjacent segment requests
+	// that all arrive after the first restart already happened.
+	for _, segIdx := range []int{953, 954, 955, 960, 962} {
+		if err := m.RestartSessionAt("test-key", segIdx, 6.0); err != nil {
+			t.Errorf("RestartSessionAt(%d) returned error %v — coalesce check should have skipped",
+				segIdx, err)
+		}
+	}
+
+	ms, ok := m.GetSession("test-key")
+	if !ok {
+		t.Fatal("session disappeared during coalesce checks")
+	}
+	if ms.LastRestartSegment != 953 {
+		t.Errorf("LastRestartSegment changed to %d (expected 953); coverage check failed to coalesce",
+			ms.LastRestartSegment)
+	}
+}
+
+// TestManager_RestartSessionAt_NotFound covers the lookup-miss
+// branch — caller used a key that's no longer in the map (idle
+// reaper happened between the segment-handler's GetSession and the
+// RestartSessionAt call, for example). The sentinel
+// ErrSessionNotFound is what lets the handler render a clean 404
+// for "session vanished" instead of the generic 503 we use for
+// genuine restart failures.
+func TestManager_RestartSessionAt_NotFound(t *testing.T) {
+	m := newTestManager(t)
+	defer m.Shutdown()
+
+	err := m.RestartSessionAt("never-existed", 100, 6.0)
+	if !errors.Is(err, ErrSessionNotFound) {
+		t.Errorf("expected ErrSessionNotFound, got %v", err)
+	}
 }
