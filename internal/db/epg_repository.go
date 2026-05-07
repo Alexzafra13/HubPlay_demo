@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"regexp"
 	"time"
 
 	"hubplay/internal/db/sqlc"
@@ -262,10 +263,22 @@ func coerceSQLiteTime(v any) (time.Time, error) {
 	}
 }
 
+// monotonicSuffix matches the " m=±d.d" tail Go's time.Time.String() appends
+// when the time still carries a monotonic clock reading. modernc.org/sqlite
+// falls back to fmt.Sprint for non-UTC time.Time values, so any caller that
+// forgot to normalise to UTC would have planted rows like
+//
+//	"2026-04-24 12:00:00 +0200 CEST m=+0.001234567"
+//
+// in the column. The trailing token is informational and unparseable by
+// time.Parse layouts; stripping it lets the legacy rows come back in.
+var monotonicSuffix = regexp.MustCompile(` m=[+-][0-9]+(?:\.[0-9]+)?$`)
+
 func parseSQLiteTimeString(s string) (time.Time, error) {
 	if s == "" {
 		return time.Time{}, nil
 	}
+	s = monotonicSuffix.ReplaceAllString(s, "")
 	for _, layout := range sqliteTimeStringLayouts {
 		if t, err := time.Parse(layout, s); err == nil {
 			return t.UTC(), nil

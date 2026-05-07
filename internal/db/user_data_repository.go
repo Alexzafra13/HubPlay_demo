@@ -35,6 +35,10 @@ func NewUserDataRepository(database *sql.DB) *UserDataRepository {
 }
 
 // Upsert creates or updates user data for an item.
+//
+// UpdatedAt is normalised to UTC at the binding boundary: see UpdateProgress
+// for the modernc.org/sqlite serialisation contract this enforces. LastPlayedAt
+// is normalised by nullableTimePtr.
 func (r *UserDataRepository) Upsert(ctx context.Context, ud *UserData) error {
 	err := r.q.UpsertUserData(ctx, sqlc.UpsertUserDataParams{
 		UserID:              ud.UserID,
@@ -47,7 +51,7 @@ func (r *UserDataRepository) Upsert(ctx context.Context, ud *UserData) error {
 		AudioStreamIndex:    nullableIntPtr(ud.AudioStreamIndex),
 		SubtitleStreamIndex: nullableIntPtr(ud.SubtitleStreamIndex),
 		LastPlayedAt:        nullableTimePtr(ud.LastPlayedAt),
-		UpdatedAt:           ud.UpdatedAt,
+		UpdatedAt:           ud.UpdatedAt.UTC(),
 	})
 	if err != nil {
 		return fmt.Errorf("upsert user data: %w", err)
@@ -120,8 +124,14 @@ func (r *UserDataRepository) GetBatch(ctx context.Context, userID string, itemID
 }
 
 // UpdateProgress updates just the playback position and timestamps.
+//
+// Times are normalised to UTC before binding: modernc.org/sqlite serialises
+// a non-UTC time.Time via time.Time.String() — "2026-04-24 12:00:00 +0200 CEST
+// m=+0.001..." — whose monotonic-clock suffix the default Scan path cannot
+// parse back. UTC times round-trip via RFC3339. Same hard contract the EPG
+// repository documents in epg_repository.go.
 func (r *UserDataRepository) UpdateProgress(ctx context.Context, userID, itemID string, positionTicks int64, completed bool) error {
-	now := time.Now()
+	now := time.Now().UTC()
 	err := r.q.UpdateProgress(ctx, sqlc.UpdateProgressParams{
 		UserID:        userID,
 		ItemID:        itemID,
@@ -138,7 +148,7 @@ func (r *UserDataRepository) UpdateProgress(ctx context.Context, userID, itemID 
 
 // MarkPlayed increments play count and marks completed.
 func (r *UserDataRepository) MarkPlayed(ctx context.Context, userID, itemID string) error {
-	now := time.Now()
+	now := time.Now().UTC()
 	err := r.q.MarkPlayed(ctx, sqlc.MarkPlayedParams{
 		UserID:       userID,
 		ItemID:       itemID,
@@ -153,7 +163,7 @@ func (r *UserDataRepository) MarkPlayed(ctx context.Context, userID, itemID stri
 
 // SetFavorite sets or unsets favorite for an item.
 func (r *UserDataRepository) SetFavorite(ctx context.Context, userID, itemID string, favorite bool) error {
-	now := time.Now()
+	now := time.Now().UTC()
 	err := r.q.SetFavorite(ctx, sqlc.SetFavoriteParams{
 		UserID:     userID,
 		ItemID:     itemID,
@@ -192,7 +202,7 @@ func (r *UserDataRepository) ContinueWatching(ctx context.Context, userID string
 	if limit <= 0 {
 		limit = 20
 	}
-	abandonedThreshold := time.Now().Add(-AbandonedAfter)
+	abandonedThreshold := time.Now().UTC().Add(-AbandonedAfter)
 	// LastPlayedAt is sqlc's auto-name for the abandoned-threshold
 	// param (it's the column the comparison is against). Same value as
 	// before the DeMorgan rewrite — see queries/user_data.sql for why.
@@ -368,11 +378,14 @@ func nullableIntPtr(i *int) sql.NullInt64 {
 	return sql.NullInt64{Int64: int64(*i), Valid: true}
 }
 
+// nullableTimePtr converts an optional time pointer into a sql.NullTime ready
+// for binding. Times are forced to UTC: see the UpdateProgress comment for the
+// modernc.org/sqlite round-trip contract this enforces.
 func nullableTimePtr(t *time.Time) sql.NullTime {
 	if t == nil {
 		return sql.NullTime{}
 	}
-	return sql.NullTime{Time: *t, Valid: true}
+	return sql.NullTime{Time: (*t).UTC(), Valid: true}
 }
 
 func userDataFromRow(r sqlc.UserDatum) UserData {
