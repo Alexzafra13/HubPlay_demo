@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"net/url"
 
 	"github.com/go-chi/chi/v5"
 
@@ -75,7 +76,22 @@ func (h *CollectionHandler) List(w http.ResponseWriter, r *http.Request) {
 //	    "items": [ {id,type,title,year,poster_url}, ... ]
 //	} }
 func (h *CollectionHandler) Get(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	// chi v5 returns URL parameters in their raw, percent-encoded form
+	// (it matches against r.URL.RawPath when set). Collection IDs are
+	// "collection:<tmdb_id>" so the frontend's encodeURIComponent
+	// turns the colon into "%3A" before navigation, and that escaped
+	// form is what lands here. Decode it before the DB lookup or the
+	// query searches for the literal "%3A" string and 404s every saga
+	// the home rail just listed. PathUnescape returning an error is
+	// theoretically impossible for a value that already came out of a
+	// validly-routed request, but we fall back to the raw value so a
+	// future malformed input surfaces as 404 from the lookup rather
+	// than crashing the handler.
+	rawID := chi.URLParam(r, "id")
+	id := rawID
+	if decoded, err := url.PathUnescape(rawID); err == nil {
+		id = decoded
+	}
 	col, err := h.collections.GetByID(r.Context(), id)
 	if err != nil {
 		h.logger.Error("get collection", "id", id, "error", err)
