@@ -25,8 +25,11 @@
  * ============================================================ */
 
 [data-theme="tv"] {
-  /* Backgrounds — darker and cooler than the app shell to frame video. */
-  --tv-bg-0: #0a0d0b;
+  /* Backgrounds — page bg matches the global app shell (--color-bg-base
+     #07090E) so the Live TV section doesn't read as a colour-shifted
+     panel. The elevation tokens (bg-1..4) stay slightly cooler than
+     base so cards/chips/sticky bars still have visual hierarchy. */
+  --tv-bg-0: #07090E;
   --tv-bg-1: #10141a;
   --tv-bg-2: #151a20;
   --tv-bg-3: #1c222a;
@@ -115,7 +118,7 @@
  * ------------------------------------------------------------ */
 
 @theme {
-  --color-tv-bg-0: #0a0d0b;
+  --color-tv-bg-0: #07090E;
   --color-tv-bg-1: #10141a;
   --color-tv-bg-2: #151a20;
   --color-tv-bg-3: #1c222a;
