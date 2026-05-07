@@ -83,6 +83,8 @@
       "byTitle": "By title"
     },
     "live": {
+      "inicio": "Home",
+      "explorar": "Explore",
       "now": "Now",
       "discover": "Discover",
       "guide": "Guide",
@@ -386,7 +388,13 @@
     "addToFavorites": "Add to favorites",
     "removeFromFavorites": "Remove from favorites",
     "favoritesEmpty": "No favorites yet. Tap the heart on any channel to add it.",
+    "favoritesOnly": "Favourites only",
+    "title": {
+      "explorar": "Explore channels"
+    },
     "tab": {
+      "inicio": "Home",
+      "explorar": "Explore",
       "discover": "Discover",
       "guide": "Guide",
       "favorites": "Favorites"

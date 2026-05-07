@@ -83,6 +83,8 @@
       "byTitle": "Por titulo"
     },
     "live": {
+      "inicio": "Inicio",
+      "explorar": "Explorar",
       "now": "Ahora",
       "discover": "Descubrir",
       "guide": "Guia",
@@ -386,7 +388,13 @@
     "addToFavorites": "Anadir a favoritos",
     "removeFromFavorites": "Quitar de favoritos",
     "favoritesEmpty": "Aun no tienes favoritos. Toca el corazon en cualquier canal para anadirlo.",
+    "favoritesOnly": "Solo favoritos",
+    "title": {
+      "explorar": "Explorar canales"
+    },
     "tab": {
+      "inicio": "Inicio",
+      "explorar": "Explorar",
       "discover": "Descubrir",
       "guide": "Guia",
       "favorites": "Favoritos"

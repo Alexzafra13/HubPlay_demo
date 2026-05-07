@@ -150,10 +150,9 @@ export const MAIN_NAV: NavItem[] = [
       {
         labelKey: "navMenu.views",
         links: [
-          { labelKey: "navMenu.live.now", to: "/live-tv?tab=now" },
-          { labelKey: "navMenu.live.discover", to: "/live-tv?tab=discover" },
-          { labelKey: "navMenu.live.guide", to: "/live-tv?tab=guide" },
-          { labelKey: "navMenu.live.favorites", to: "/live-tv?tab=favorites" },
+          { labelKey: "navMenu.live.inicio", to: "/live-tv" },
+          { labelKey: "navMenu.live.explorar", to: "/live-tv?tab=explorar" },
+          { labelKey: "navMenu.live.favorites", to: "/live-tv?tab=explorar&fav=1" },
         ],
       },
       {

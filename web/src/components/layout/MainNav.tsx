@@ -740,7 +740,7 @@ function LiveTvExtra({ onItemClick }: { onItemClick: () => void }) {
               ))}
             </ul>
             <ExtraSeeAll
-              to="/live-tv?tab=favorites"
+              to="/live-tv?tab=explorar&fav=1"
               labelKey="navMenu.seeAll.favorites"
               onClick={onItemClick}
             />
