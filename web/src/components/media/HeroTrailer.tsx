@@ -134,6 +134,13 @@ export function HeroTrailer({
   //      is the moving image, not the static placeholder UI.
   const [inViewport, setInViewport] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  // iframeLoaded flips true on the iframe's onLoad event (the YouTube /
+  // Vimeo embed page actually fetched). Used to gate the reveal: we
+  // wait for proof of life before fading out the backdrop, so a slow
+  // CDN or a blocked-frame error doesn't leave the user staring at a
+  // half-loaded player while the static hero is gone. A watchdog
+  // dismisses if this never flips.
+  const [iframeLoaded, setIframeLoaded] = useState(false);
   const [revealed, setRevealed] = useState(false);
   const [dismissed, setDismissed] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -220,26 +227,55 @@ export function HeroTrailer({
     };
   }, [inViewport, skipped, dismissed, siteKey]);
 
-  // Load + reveal timers, gated on actually being in view AND on
-  // the oEmbed pre-flight returning a positive answer. Without the
-  // embeddability gate we'd fire these timers immediately, and a
-  // failed oEmbed coming back later would have to tear them down —
-  // simpler to wait for the green light.
+  // Mount the iframe ~2.5s after the hero enters view, gated on the
+  // oEmbed pre-flight passing. Without the embeddability gate we'd
+  // fire this timer immediately, and a failed oEmbed coming back
+  // later would have to tear it down — simpler to wait for the
+  // green light.
   useEffect(() => {
     if (!inViewport || skipped || dismissed) return;
     if (embeddable !== true) return;
     const loadTimer = setTimeout(() => setLoaded(true), 2500);
+    return () => clearTimeout(loadTimer);
+  }, [inViewport, skipped, dismissed, embeddable]);
+
+  // Reveal is gated on the iframe actually loading, not on a fixed
+  // wall-clock timer. Once iframeLoaded flips true we add a 1.2s
+  // settle buffer to hide YouTube's pre-play overlay before the
+  // wrapper fades in, then notify the parent so the static backdrop
+  // can fade out in step. If the iframe never loads (CSP block,
+  // network failure, frame-ancestors mismatch from upstream, browser
+  // extension breaking the embed) the watchdog effect below
+  // dismisses and the backdrop stays — strictly better than fading
+  // the hero into a half-loaded player or a blocked-frame error.
+  useEffect(() => {
+    if (!loaded || !iframeLoaded || revealed || dismissed || skipped) return;
     const revealTimer = setTimeout(() => {
       setRevealed(true);
-      // Notify parent so the static backdrop can fade out in step
-      // with the trailer fading in (both transitions are 700ms).
       onReveal?.();
-    }, 3700);
-    return () => {
-      clearTimeout(loadTimer);
-      clearTimeout(revealTimer);
-    };
-  }, [inViewport, skipped, dismissed, embeddable, onReveal]);
+    }, 1200);
+    return () => clearTimeout(revealTimer);
+  }, [loaded, iframeLoaded, revealed, dismissed, skipped, onReveal]);
+
+  // Watchdog: if the iframe doesn't fire onLoad within 6s of mount
+  // we treat it as a hard fail and dismiss. Cross-origin iframes
+  // don't always fire onError on CSP / X-Frame-Options blocks
+  // (browsers vary), so this timer is the reliable signal — onError
+  // is a belt-and-suspenders nice-to-have, not the primary gate.
+  // 6s comfortably exceeds a slow-network embed page fetch (~3s p99
+  // on YouTube nocookie) without making a real failure hang the
+  // hero indefinitely.
+  useEffect(() => {
+    if (!loaded || iframeLoaded || dismissed || skipped) return;
+    const watchdog = setTimeout(() => {
+      handleDismiss();
+    }, 6000);
+    return () => clearTimeout(watchdog);
+    // handleDismiss only touches local state setters and
+    // sessionStorage — it's stable for the life of the component,
+    // so omitting it from deps is intentional.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded, iframeLoaded, dismissed, skipped]);
 
   const handleDismiss = () => {
     setDismissed(true);
@@ -290,6 +326,8 @@ export function HeroTrailer({
             allow="autoplay; encrypted-media; picture-in-picture"
             referrerPolicy="strict-origin-when-cross-origin"
             loading="lazy"
+            onLoad={() => setIframeLoaded(true)}
+            onError={handleDismiss}
             className="absolute right-0 top-0 border-0 pointer-events-none"
             style={{
               height: "100%",
