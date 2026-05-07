@@ -548,16 +548,25 @@ func (h *ItemHandler) TrickplaySprite(w http.ResponseWriter, r *http.Request) {
 // `sprite.png` + `manifest.json`, generating them via ffmpeg on first
 // call. Per-item locking prevents concurrent generation; once the
 // files exist the subsequent calls are O(stat).
+//
+// Stale-cache invalidation: the cached manifest carries a `version`
+// stamp matching imaging.TrickplayManifestVersion. When the generator's
+// output contract changes (e.g. v1 hardcoded a 10×10 grid that capped
+// coverage at 1000 s; v2 sizes adaptively to the item runtime) we
+// detect the older stamp and regenerate the sprite. Without this gate
+// upgraded servers would keep serving the wrong thumbnails for every
+// item that was ingested before the upgrade.
 func (h *ItemHandler) ensureTrickplay(ctx context.Context, itemID string) (string, error) {
 	itemDir := filepath.Join(h.trickplayDir, itemID)
 	spritePath := filepath.Join(itemDir, "sprite.png")
 	manifestPath := filepath.Join(itemDir, "manifest.json")
 
-	// Fast path: both files already cached.
-	if _, err := os.Stat(spritePath); err == nil {
-		if _, err := os.Stat(manifestPath); err == nil {
-			return itemDir, nil
-		}
+	// Fast path: both files already cached AND the manifest version
+	// matches what the current generator produces. A version mismatch
+	// (or unreadable / missing-field manifest) drops to the slow path
+	// for regeneration.
+	if trickplayCacheFresh(spritePath, manifestPath) {
+		return itemDir, nil
 	}
 
 	// Per-item mutex. Two concurrent first-hits collapse to one
@@ -570,10 +579,8 @@ func (h *ItemHandler) ensureTrickplay(ctx context.Context, itemID string) (strin
 
 	// Re-check under the lock — the previous holder may have just
 	// finished writing.
-	if _, err := os.Stat(spritePath); err == nil {
-		if _, err := os.Stat(manifestPath); err == nil {
-			return itemDir, nil
-		}
+	if trickplayCacheFresh(spritePath, manifestPath) {
+		return itemDir, nil
 	}
 
 	item, err := h.lib.GetItem(ctx, itemID)
@@ -584,11 +591,42 @@ func (h *ItemHandler) ensureTrickplay(ctx context.Context, itemID string) (strin
 		return "", errors.New("item has no playable file path")
 	}
 
-	if _, err := imaging.GenerateTrickplayWithDeadline(ctx, item.Path, itemDir, imaging.TrickplayParams{}, 0); err != nil {
+	// Duration plumbed in seconds so the generator can pick an
+	// adaptive interval+grid that covers the WHOLE timeline. Items
+	// store runtime in 100-ns ticks (Jellyfin convention); 0 means
+	// the scanner hasn't probed it yet, in which case the generator
+	// falls back to its legacy 10×10 = 1000 s coverage.
+	durationSec := float64(0)
+	if item.DurationTicks > 0 {
+		durationSec = float64(item.DurationTicks) / 10_000_000.0
+	}
+	params := imaging.TrickplayParams{DurationSeconds: durationSec}
+	if _, err := imaging.GenerateTrickplayWithDeadline(ctx, item.Path, itemDir, params, 0); err != nil {
 		h.logger.Warn("trickplay generation failed", "item_id", itemID, "error", err)
 		return "", err
 	}
 	return itemDir, nil
+}
+
+// trickplayCacheFresh reports whether the cached sprite + manifest
+// for an item are usable as-is. Returns false when either file is
+// missing OR when the manifest's `version` stamp lags the current
+// generator contract (TrickplayManifestVersion). Decoded as a bare
+// struct so an unreadable / partially-written manifest also lands in
+// "regenerate" rather than serving garbage.
+func trickplayCacheFresh(spritePath, manifestPath string) bool {
+	if _, err := os.Stat(spritePath); err != nil {
+		return false
+	}
+	body, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return false
+	}
+	var m imaging.TrickplayManifest
+	if err := json.Unmarshal(body, &m); err != nil {
+		return false
+	}
+	return m.Version >= imaging.TrickplayManifestVersion
 }
 
 func (h *ItemHandler) Children(w http.ResponseWriter, r *http.Request) {

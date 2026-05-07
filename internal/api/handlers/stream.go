@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -297,6 +298,16 @@ func (h *StreamHandler) Segment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.manager.RestartSessionAt(key, segIdx, segmentDurationSeconds); err != nil {
+		// Rate-limit hits are visibility-only: the client most
+		// likely has a seek-loop bug and the right behaviour is to
+		// stop encouraging it. 429 with Retry-After lets a healthy
+		// client back off and resume cleanly; a buggy one keeps
+		// retrying but at least no longer melts the transcoder.
+		if errors.Is(err, stream.ErrRestartRateLimited) {
+			w.Header().Set("Retry-After", "5")
+			respondError(w, r, http.StatusTooManyRequests, "RESTART_RATE_LIMITED", "too many seek restarts in a short window")
+			return
+		}
 		h.logger.Error("seek restart failed", "key", key, "segment", segIdx, "error", err)
 		respondError(w, r, http.StatusServiceUnavailable, "RESTART_FAILED", "could not restart transcode at requested offset")
 		return

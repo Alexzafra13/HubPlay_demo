@@ -89,6 +89,15 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const seekedToStartRef = useRef(false);
+  // True between `seeking` and `seeked` — used to stop `timeupdate`
+  // from clobbering the React `currentTime` state with intermediate
+  // values while ffmpeg is still producing the first segment after
+  // a restart. Without this gate the SeekBar's thumb would snap back
+  // to the pre-seek position for ~1-2 s, which read as a freeze and
+  // (when combined with the controlled <input value=...>) could fire
+  // ghost re-seeks. Stored as a ref because the timeupdate handler
+  // closes over it without needing a re-bind on every flip.
+  const isSeekingRef = useRef(false);
 
   // Zustand as single source of truth for volume/mute/fullscreen
   const volume = usePlayerStore((s) => s.volume);
@@ -288,8 +297,28 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
       keepControlsVisible();
     };
 
-    const onTimeUpdate = () => {
+    const onSeeking = () => {
+      isSeekingRef.current = true;
+    };
+
+    const onSeeked = () => {
+      isSeekingRef.current = false;
+      // Force one resync after the seek lands so the React state
+      // reflects the post-seek truth even if the next `timeupdate`
+      // is delayed (hls.js can take a moment to wire fresh buffer
+      // events after a transcode restart).
       setCurrentTime(video.currentTime);
+    };
+
+    const onTimeUpdate = () => {
+      // Block intermediate ticks while a seek is in flight. Without
+      // this gate the player's `currentTime` would briefly bounce
+      // back to the pre-seek position (the new buffer hasn't landed
+      // yet, so video.currentTime momentarily reports the last
+      // played sample) and the seek bar's thumb would jitter.
+      if (!isSeekingRef.current) {
+        setCurrentTime(video.currentTime);
+      }
       const videoDur = video.duration;
       const effectiveDuration =
         knownDuration && knownDuration > 0
@@ -328,12 +357,16 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
 
     video.addEventListener("play", onPlay);
     video.addEventListener("pause", onPause);
+    video.addEventListener("seeking", onSeeking);
+    video.addEventListener("seeked", onSeeked);
     video.addEventListener("timeupdate", onTimeUpdate);
     video.addEventListener("ended", onEnded);
 
     return () => {
       video.removeEventListener("play", onPlay);
       video.removeEventListener("pause", onPause);
+      video.removeEventListener("seeking", onSeeking);
+      video.removeEventListener("seeked", onSeeked);
       video.removeEventListener("timeupdate", onTimeUpdate);
       video.removeEventListener("ended", onEnded);
     };

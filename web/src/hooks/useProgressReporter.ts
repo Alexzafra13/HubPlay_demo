@@ -22,6 +22,12 @@ export function useProgressReporter(
     progressTimerRef.current = setInterval(() => {
       const video = videoRef.current;
       if (!video || video.paused || video.currentTime <= 0) return;
+      // Don't write while a seek is mid-flight: video.currentTime is
+      // briefly the pre-seek sample (the new buffer hasn't landed
+      // yet) and persisting that as "where the user is" would corrupt
+      // resume on the next session — they'd come back to the OLD
+      // position even though they had clearly seeked away.
+      if (video.seeking) return;
       const positionTicks = Math.floor(video.currentTime * TICKS_PER_SECOND);
       const durationTicks =
         Number.isFinite(video.duration) && video.duration > 0
@@ -58,6 +64,11 @@ export function useProgressReporter(
     const video = videoRef.current;
     return () => {
       if (!video || video.currentTime <= 0) return;
+      // Same rationale as the periodic save above: don't persist a
+      // mid-seek position. If the unmount races with a seek the user
+      // just kicked off, write the LAST known good (paused or settled)
+      // sample only.
+      if (video.seeking) return;
       const positionTicks = Math.floor(video.currentTime * TICKS_PER_SECOND);
       const durationTicks =
         Number.isFinite(video.duration) && video.duration > 0

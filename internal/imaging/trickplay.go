@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -24,6 +25,13 @@ import (
 // The browser renders one thumbnail by setting the sprite as
 // background-image and shifting background-position by (-x_px, -y_px).
 type TrickplayManifest struct {
+	// Version stamp for the on-disk cache. Bumped when the generator's
+	// output contract changes so the handler can detect stale sprites
+	// (e.g. the legacy v1 generator hardcoded a 10×10=100 grid that
+	// silently capped coverage at the first 16 minutes of source) and
+	// regenerate them instead of serving wrong thumbnails. v0/missing
+	// is treated as "stale, regenerate".
+	Version     int `json:"version"`
 	IntervalSec int `json:"interval_sec"`
 	ThumbWidth  int `json:"thumb_width"`
 	ThumbHeight int `json:"thumb_height"`
@@ -36,20 +44,40 @@ type TrickplayManifest struct {
 	Total   int `json:"total"`
 }
 
+// TrickplayManifestVersion is the current generator output contract
+// version. The handler's fast-path treats any cached manifest with a
+// lower version (or missing field, which decodes to 0) as stale and
+// regenerates the sprite + manifest. Bump when the math the player
+// uses to compute (col, row, total) cells changes.
+const TrickplayManifestVersion = 2
+
 // TrickplayParams configures the sprite generation. Defaults suitable
 // for general use:
 //
-//   - IntervalSec = 10  → one frame every 10 s of source.
-//   - ThumbWidth  = 320 → 16:9 yields ~180 px height; ~50 KB JPEG per
-//     thumb at quality 85.
-//   - GridSide    = 10  → 10×10 = 100 thumbnails per sprite, covering
-//     1000 s (≈ 16 min) of source. For longer runtimes the caller
-//     can either bump GridSide or chunk into multiple sprites.
+//   - IntervalSec     = 10   → one frame every 10 s of source (Plex default).
+//   - ThumbWidth      = 320  → 16:9 yields ~180 px height; small enough that
+//     a 20×20 grid stays under ~6 MB on disk.
+//   - GridSide        = 10   → fallback grid when DurationSeconds is unknown.
+//   - DurationSeconds = 0    → callers SHOULD set this from the item's
+//     runtime so we can pick an interval+grid that covers the whole
+//     timeline. Leaving it at 0 reproduces the legacy "10×10 = 1000 s"
+//     coverage and silently broken thumbnails past the first 16 minutes.
 type TrickplayParams struct {
-	IntervalSec int
-	ThumbWidth  int
-	GridSide    int
+	IntervalSec     int
+	ThumbWidth      int
+	GridSide        int
+	DurationSeconds float64
 }
+
+// maxThumbsPerSprite caps how many thumbnails we'll pack into a single
+// sprite sheet. Tuned so the resulting PNG stays under ~6-8 MB
+// (320×180 × 20×20 = 6400×3600 px) — large enough that browsers
+// decode it once and `background-position` shifts are GPU-fast, small
+// enough that a 4-hour film doesn't end up with a 50 MB sprite. When
+// the caller-supplied duration would overflow this, IntervalSec is
+// scaled up so the count stays bounded; the trade-off is one
+// thumbnail per ~25-35 s on long content vs Plex's 10 s default.
+const maxThumbsPerSprite = 400
 
 func (p TrickplayParams) defaults() TrickplayParams {
 	if p.IntervalSec <= 0 {
@@ -62,6 +90,40 @@ func (p TrickplayParams) defaults() TrickplayParams {
 		p.GridSide = 10
 	}
 	return p
+}
+
+// adapt scales IntervalSec / GridSide so the resulting sprite covers
+// the entire DurationSeconds without busting the maxThumbsPerSprite
+// budget. Returns the params and the real thumbnail count (which may
+// be less than GridSide² when the duration is short).
+func (p TrickplayParams) adapt() (TrickplayParams, int) {
+	q := p.defaults()
+	if q.DurationSeconds <= 0 {
+		// No duration → keep the legacy 10×10 fallback. Total is
+		// reported as GridSide² so nothing changes for callers that
+		// haven't been updated yet.
+		return q, q.GridSide * q.GridSide
+	}
+
+	desired := int(math.Ceil(q.DurationSeconds / float64(q.IntervalSec)))
+	if desired > maxThumbsPerSprite {
+		// Bump interval to keep the sprite small. Round up to the
+		// next 5 s so the manifest reads as a tidy number ("one
+		// thumb every 25 s") rather than 23.x s.
+		scaled := int(math.Ceil(q.DurationSeconds / float64(maxThumbsPerSprite)))
+		scaled = ((scaled + 4) / 5) * 5
+		if scaled > q.IntervalSec {
+			q.IntervalSec = scaled
+		}
+		desired = int(math.Ceil(q.DurationSeconds / float64(q.IntervalSec)))
+	}
+
+	grid := int(math.Ceil(math.Sqrt(float64(desired))))
+	if grid < 2 {
+		grid = 2
+	}
+	q.GridSide = grid
+	return q, desired
 }
 
 // GenerateTrickplay renders a single sprite sheet covering up to
@@ -79,7 +141,7 @@ func (p TrickplayParams) defaults() TrickplayParams {
 // are actionable: `ffmpeg`, `read sprite`, `write sprite`, `marshal`,
 // `write manifest`.
 func GenerateTrickplay(ctx context.Context, inputPath, outputDir string, params TrickplayParams) (*TrickplayManifest, error) {
-	p := params.defaults()
+	p, total := params.adapt()
 
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create dir: %w", err)
@@ -124,17 +186,20 @@ func GenerateTrickplay(ctx context.Context, inputPath, outputDir string, params 
 
 	thumbWidth := width / p.GridSide
 	thumbHeight := height / p.GridSide
+	// `total` is the real number of thumbnails the sprite carries —
+	// either ceil(duration / interval) when we have the runtime, or
+	// GridSide² as a legacy fallback. The player consumer reads this
+	// via the JSON manifest and clamps `floor(time / interval)` so
+	// hovering past the end of the sprite doesn't index into trailing
+	// black cells.
 	manifest := &TrickplayManifest{
+		Version:     TrickplayManifestVersion,
 		IntervalSec: p.IntervalSec,
 		ThumbWidth:  thumbWidth,
 		ThumbHeight: thumbHeight,
 		Columns:     p.GridSide,
 		Rows:        p.GridSide,
-		// `total` is unknown without re-probing the source for its
-		// runtime. The caller supplies it via TrickplayParams in a
-		// future iteration; today the player can derive an upper bound
-		// from columns*rows and stop once duration is reached.
-		Total: p.GridSide * p.GridSide,
+		Total:       total,
 	}
 
 	body, err := json.MarshalIndent(manifest, "", "  ")
@@ -172,12 +237,14 @@ func readPNGDimensions(path string) (int, int, error) {
 }
 
 // GenerateTrickplayWithDeadline is the timeout-bounded helper most
-// HTTP callers want. ffmpeg can stall forever on a corrupt input;
-// 60 s covers a typical 2 h movie at GridSide=10 (one frame every 10
-// s, ~100 frames decoded keyframe-only) on a stock laptop.
+// HTTP callers want. ffmpeg can stall forever on a corrupt input,
+// and the keyframe-only decode for a 4-hour film at 30 s intervals
+// can take 90-120 s on a stock laptop, so the default budget is
+// 180 s — short enough to fail fast on corrupt inputs, long enough
+// that legitimate long-form content always completes.
 func GenerateTrickplayWithDeadline(parent context.Context, inputPath, outputDir string, params TrickplayParams, timeout time.Duration) (*TrickplayManifest, error) {
 	if timeout <= 0 {
-		timeout = 60 * time.Second
+		timeout = 180 * time.Second
 	}
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()

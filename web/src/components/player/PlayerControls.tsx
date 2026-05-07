@@ -120,7 +120,25 @@ const SeekBar: FC<{
   onSeek: (time: number) => void;
 }> = memo(({ currentTime, duration, buffered, chapters, trickplay, onSeek }) => {
   const { t } = useTranslation();
-  const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
+
+  // While the user is actively dragging or click-positioning the seek
+  // input, we ignore `currentTime` from the video element so the thumb
+  // doesn't snap back when an in-flight `timeupdate` lands during the
+  // 1-2 s window ffmpeg needs to produce the first segment after a
+  // restart. The pending value is committed exactly once on pointerup
+  // (or, for keyboard arrows, immediately — see onChange below).
+  //
+  // This is the Plex/YouTube pattern: mid-drag is a local-only echo,
+  // commit happens at end of interaction. Without it React's onChange
+  // fires multiple times per drag (one per intermediate value) and
+  // each one was forwarding to `video.currentTime = X` → ffmpeg
+  // restart → cascade. The doc captured this on 2026-05-07 as the
+  // "+366-segment" cadence in server logs for one user click.
+  const [dragValue, setDragValue] = useState<number | null>(null);
+  const isDraggingRef = useRef(false);
+
+  const displayedTime = dragValue ?? currentTime;
+  const progress = duration > 0 ? (displayedTime / duration) * 100 : 0;
   const bufferedPercent = duration > 0 ? (buffered / duration) * 100 : 0;
 
   // Hover state for the trickplay preview tooltip. The two pieces:
@@ -156,6 +174,18 @@ const SeekBar: FC<{
     setHoveredChapter(null);
   };
 
+  // Commit the pending drag value. Capturing logic here so pointerup
+  // and pointercancel both end the interaction cleanly.
+  const commitPending = () => {
+    isDraggingRef.current = false;
+    setDragValue((current) => {
+      if (current != null) {
+        onSeek(current);
+      }
+      return null;
+    });
+  };
+
   return (
     <div
       ref={trackRef}
@@ -181,8 +211,25 @@ const SeekBar: FC<{
         min={0}
         max={duration || 1}
         step={0.1}
-        value={currentTime}
-        onChange={(e) => onSeek(Number(e.target.value))}
+        value={displayedTime}
+        onPointerDown={() => {
+          isDraggingRef.current = true;
+        }}
+        onPointerUp={commitPending}
+        onPointerCancel={commitPending}
+        onChange={(e) => {
+          const v = Number(e.target.value);
+          if (isDraggingRef.current) {
+            // Mid-drag: visual echo only. The seek itself fires when
+            // the pointer comes up (commitPending).
+            setDragValue(v);
+          } else {
+            // Keyboard arrow nav (no pointer in flight) — commit now.
+            // Native <input type=range> moves by ~step per arrow press,
+            // and the user expects each press to be a real seek.
+            onSeek(v);
+          }
+        }}
         className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
         aria-label={t("playerControls.seek")}
       />
