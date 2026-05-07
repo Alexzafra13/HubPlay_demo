@@ -1141,6 +1141,14 @@ export interface HomeLiveNowChannel {
   channel_id: string;
   channel_name: string;
   channel_logo?: string;
+  // Deterministic placeholder avatar — same recipe as the LiveTV
+  // browser's Channel.logo_initials/bg/fg, so a card on the home rail
+  // and on /live-tv share the same letters and colour for the same
+  // channel. Always populated by the server, even when channel_logo
+  // is set, so the <ChannelLogo> onError fallback never has to guess.
+  logo_initials: string;
+  logo_bg: string;
+  logo_fg: string;
   library_id: string;
   library_name: string;
   program_title?: string;

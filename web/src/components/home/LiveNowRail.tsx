@@ -23,6 +23,7 @@ import { useHomeLiveNow } from "@/api/hooks";
 import { useNowTick } from "@/hooks/useNowTick";
 import type { HomeLiveNowChannel } from "@/api/types";
 import { Skeleton } from "@/components/common";
+import { ChannelLogo } from "@/components/livetv/ChannelLogo";
 import { HomeRail } from "./HomeRail";
 
 export function LiveNowRail() {
@@ -80,18 +81,23 @@ function LiveNowCard({ channel }: LiveNowCardProps) {
       className="group flex-shrink-0 w-[320px] md:w-[360px] lg:w-[400px] xl:w-[440px] flex flex-col gap-2"
     >
       <div className="relative aspect-video overflow-hidden rounded-[--radius-md] bg-bg-elevated flex items-center justify-center">
-        {channel.channel_logo ? (
-          <img
-            src={channel.channel_logo}
-            alt={channel.channel_name}
-            loading="lazy"
-            className="max-h-[70%] max-w-[70%] object-contain transition-transform duration-300 group-hover:scale-105"
-          />
-        ) : (
-          <span className="text-2xl font-bold text-text-muted">
-            {channel.channel_name.charAt(0)}
-          </span>
-        )}
+        {/* ChannelLogo paints the deterministic colored tile + initials
+            underneath and overlays the upstream logo image on top when
+            it loads cleanly, swapping back to the tile on <img> error.
+            Same widget the LiveTV browser uses, so a card on this home
+            rail matches its sibling in /live-tv pixel-for-pixel for the
+            same channel. The square wrapper at ~70% height matches the
+            old design's logo footprint, so existing real logos keep
+            their breathing-room around the edge of the rail card. */}
+        <ChannelLogo
+          logoUrl={channel.channel_logo ?? null}
+          initials={channel.logo_initials}
+          bg={channel.logo_bg}
+          fg={channel.logo_fg}
+          name={channel.channel_name}
+          className="aspect-square h-[70%] rounded-md transition-transform duration-300 group-hover:scale-105"
+          textClassName="text-3xl font-extrabold tracking-wide"
+        />
 
         {/* Live pill */}
         <div className="absolute top-2 left-2 flex items-center gap-1 rounded-full bg-live/90 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">

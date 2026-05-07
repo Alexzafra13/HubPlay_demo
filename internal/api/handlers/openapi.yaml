@@ -2569,6 +2569,9 @@ components:
         library_id: { type: string, format: uuid }
         library_name: { type: string }
         channel_logo: { type: string, nullable: true, description: "Same-origin proxy URL; absent when the channel has no logo" }
+        logo_initials: { type: string, description: "Deterministic 1-3 letter abbreviation derived from channel_name; matches the channelDTO recipe so home and /live-tv share placeholder identity" }
+        logo_bg: { type: string, description: "Hex colour for the placeholder tile background" }
+        logo_fg: { type: string, description: "Hex colour for the placeholder initials" }
         program_title: { type: string, nullable: true }
         program_start: { type: string, format: date-time, nullable: true }
         program_end: { type: string, format: date-time, nullable: true }
