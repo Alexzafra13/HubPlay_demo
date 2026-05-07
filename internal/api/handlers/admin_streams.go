@@ -1,0 +1,144 @@
+package handlers
+
+import (
+	"context"
+	"log/slog"
+	"net/http"
+	"sort"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+
+	"hubplay/internal/auth"
+	"hubplay/internal/db"
+	"hubplay/internal/stream"
+)
+
+// adminUserLookup is the slice of the user surface the admin streams
+// panel needs: just GetByID. Declared here as a local interface so
+// the handler can be wired with either *user.Service (production) or
+// *db.UserRepository (or a fake in tests) without growing a hard
+// dependency on either concrete type. Mirrors the sink-pattern the
+// rest of the codebase uses to keep handlers test-isolated.
+type adminUserLookup interface {
+	GetByID(ctx context.Context, id string) (*db.User, error)
+}
+
+// AdminStreamsHandler exposes the admin "Now Playing" surface — a live
+// snapshot of active stream sessions plus a kill switch. Both
+// operations are admin-only; the router applies auth.RequireAdmin
+// before reaching here, so the methods don't re-check role.
+//
+// The handler is a thin wrapper around the stream manager: ListSessions
+// reads stream.SessionSnapshot values out of the manager and enriches
+// each with username + item title for display, KillSession delegates to
+// manager.StopSession (which is idempotent and publishes the same
+// transcode-completed event the player teardown would). No state lives
+// here — every request hits the manager fresh, which is what the panel
+// expects (admin sees the world as it is right now).
+type AdminStreamsHandler struct {
+	manager *stream.Manager
+	users   adminUserLookup
+	items   *db.ItemRepository
+	logger  *slog.Logger
+}
+
+// NewAdminStreamsHandler constructs a handler wired to the given
+// dependencies. users/items may be nil in test rigs — when nil, the
+// list endpoint emits sessions without the human-readable enrichment
+// (username / item title), matching the behaviour for orphaned rows
+// where the user / item has been deleted but the manager still holds
+// a session reference.
+func NewAdminStreamsHandler(manager *stream.Manager, users adminUserLookup, items *db.ItemRepository, logger *slog.Logger) *AdminStreamsHandler {
+	return &AdminStreamsHandler{
+		manager: manager,
+		users:   users,
+		items:   items,
+		logger:  logger.With("module", "admin-streams-handler"),
+	}
+}
+
+// adminSessionDTO is the wire shape for one row of the admin "Now
+// Playing" panel. Username and ItemTitle are best-effort enrichments
+// — if the row's user or item has been deleted from the DB but the
+// manager still tracks the session (the kill button hasn't been
+// pressed yet), the handler emits the IDs without the human-readable
+// name rather than erroring out. The frontend falls back to the IDs
+// so an orphaned session is still visibly killable.
+type adminSessionDTO struct {
+	SessionID    string `json:"session_id"`
+	UserID       string `json:"user_id"`
+	Username     string `json:"username,omitempty"`
+	ItemID       string `json:"item_id"`
+	ItemTitle    string `json:"item_title,omitempty"`
+	ItemType     string `json:"item_type,omitempty"`
+	Profile      string `json:"profile,omitempty"`
+	Method       string `json:"method"`
+	StartedAt    string `json:"started_at"`
+	LastAccessed string `json:"last_accessed"`
+}
+
+// ListSessions returns every active session the manager knows about.
+// Polled by the admin panel every ~5s; payload is wrapped in the
+// standard {"data": [...]} envelope so the frontend's existing list
+// fetching helpers don't need a special case.
+//
+// Sessions are sorted by StartedAt descending so the freshest reads
+// at the top — matches the typical "what's happening now?" workflow.
+// Per-session enrichment lookups are sequential because N is bounded
+// (max_transcode_sessions defaults to 8, hard-capped on construction),
+// so a cross-table batch fetch would be more code than it's worth.
+func (h *AdminStreamsHandler) ListSessions(w http.ResponseWriter, r *http.Request) {
+	snaps := h.manager.ListAllSessions()
+	sort.Slice(snaps, func(i, j int) bool {
+		return snaps[i].StartedAt.After(snaps[j].StartedAt)
+	})
+
+	out := make([]adminSessionDTO, 0, len(snaps))
+	for _, s := range snaps {
+		dto := adminSessionDTO{
+			SessionID:    s.ID,
+			UserID:       s.UserID,
+			ItemID:       s.ItemID,
+			Profile:      s.Profile,
+			Method:       string(s.Method),
+			StartedAt:    s.StartedAt.UTC().Format(time.RFC3339),
+			LastAccessed: s.LastAccessed.UTC().Format(time.RFC3339),
+		}
+		if h.users != nil && s.UserID != "" {
+			if u, err := h.users.GetByID(r.Context(), s.UserID); err == nil && u != nil {
+				dto.Username = u.Username
+			}
+		}
+		if h.items != nil && s.ItemID != "" {
+			if it, err := h.items.GetByID(r.Context(), s.ItemID); err == nil && it != nil {
+				dto.ItemTitle = it.Title
+				dto.ItemType = it.Type
+			}
+		}
+		out = append(out, dto)
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"data": out})
+}
+
+// KillSession is the admin "stop now" endpoint. Idempotent: killing a
+// session that already ended (idle reaper, user-driven teardown,
+// ffmpeg crash) returns 204 the same as a successful kill, because
+// from the admin's perspective the user-visible result is identical
+// — that session isn't running anymore. The manager's StopSession
+// short-circuits cleanly when the key isn't in the map, so we don't
+// have to look before we leap.
+func (h *AdminStreamsHandler) KillSession(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		respondError(w, r, http.StatusBadRequest, "MISSING_ID", "session id required")
+		return
+	}
+	h.manager.StopSession(id)
+	if claims := auth.GetClaims(r.Context()); claims != nil {
+		h.logger.Info("admin killed session", "session_id", id, "by", claims.UserID)
+	} else {
+		h.logger.Info("admin killed session", "session_id", id)
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

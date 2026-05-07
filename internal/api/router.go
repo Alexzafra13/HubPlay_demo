@@ -442,6 +442,18 @@ func NewRouter(deps Dependencies) http.Handler {
 				r.Route("/admin/system", func(r chi.Router) {
 					r.Use(auth.RequireAdmin)
 					r.Get("/stats", sysHandler.Stats)
+					// "Now Playing" admin panel — list every active stream
+					// session and let the operator kill any of them. Routed
+					// here (rather than next to the player streaming routes)
+					// because both methods are admin-only and want to share
+					// the /admin/system/* prefix the dashboard already uses.
+					if deps.StreamManager != nil {
+						adminStreams := handlers.NewAdminStreamsHandler(
+							deps.StreamManager, deps.Users, deps.Items, deps.Logger,
+						)
+						r.Get("/sessions", adminStreams.ListSessions)
+						r.Delete("/sessions/{id}", adminStreams.KillSession)
+					}
 					if deps.Settings != nil {
 						// Surface the host's actually-detected accelerators to the
 						// settings handler so the panel only offers choices that have

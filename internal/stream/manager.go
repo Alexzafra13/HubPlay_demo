@@ -593,6 +593,56 @@ func (m *Manager) ActiveSessions() int {
 	return len(m.sessions)
 }
 
+// SessionSnapshot is the read-only view of an active session that the
+// admin "Now Playing" panel consumes. Returned by value from
+// ListAllSessions so the caller can serialise / iterate without
+// re-acquiring the manager mutex and without aliasing back into live
+// state. Field semantics mirror ManagedSession + its embedded
+// Session, but all fields are plain values.
+//
+// ID is the manager's session map key (the same string StopSession
+// accepts), not the embedded Session.ID — the two happen to match
+// today, but pinning the API to the map key keeps the kill endpoint
+// honest if the Session struct ever grows a separate identifier.
+type SessionSnapshot struct {
+	ID           string
+	UserID       string
+	ItemID       string
+	Profile      string         // empty for non-transcode sessions
+	Method       PlaybackMethod // DirectPlay / DirectStream / Transcode
+	StartedAt    time.Time
+	LastAccessed time.Time
+}
+
+// ListAllSessions returns a snapshot of every active session, taken
+// under m.mu so the slice is internally consistent even while the
+// manager is mutating elsewhere. Intended for the admin panel —
+// callers that hold a single key (the player handler, the segment
+// route) keep using GetSession.
+//
+// Iteration order is unspecified (Go map iteration); the admin
+// frontend sorts by StartedAt descending for display.
+func (m *Manager) ListAllSessions() []SessionSnapshot {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]SessionSnapshot, 0, len(m.sessions))
+	for key, ms := range m.sessions {
+		snap := SessionSnapshot{
+			ID:           key,
+			UserID:       ms.UserID,
+			Method:       ms.Decision.Method,
+			LastAccessed: ms.LastAccessed,
+		}
+		if ms.Session != nil {
+			snap.ItemID = ms.Session.ItemID
+			snap.Profile = ms.Session.Profile.Name
+			snap.StartedAt = ms.Session.StartedAt
+		}
+		out = append(out, snap)
+	}
+	return out
+}
+
 // MaxTranscodeSessions returns the configured concurrent transcode cap (0
 // means unlimited). Read by admin endpoints to render "X of Y in use".
 func (m *Manager) MaxTranscodeSessions() int {

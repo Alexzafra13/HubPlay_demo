@@ -648,3 +648,95 @@ func TestManager_StartGroup_CollapsesConcurrent(t *testing.T) {
 		}
 	}
 }
+
+// TestManager_ListAllSessions covers the snapshot path the admin
+// "Now Playing" panel polls — every session in the manager's map
+// should appear in the slice, with the public key plus copies of
+// UserID / ItemID / Profile / Method / StartedAt / LastAccessed.
+// The slice itself is owned by the caller (no aliasing back to live
+// state), and the order is unspecified because Go map iteration is
+// non-deterministic, so we verify by lookup, not by index.
+func TestManager_ListAllSessions(t *testing.T) {
+	m := newTestManager(t)
+	defer m.Shutdown()
+
+	now := time.Now()
+	m.mu.Lock()
+	m.sessions["userA:item1:720p"] = &ManagedSession{
+		Session: &Session{
+			ID:        "userA:item1:720p",
+			ItemID:    "item1",
+			Profile:   Profile{Name: "720p"},
+			OutputDir: t.TempDir(),
+			StartedAt: now.Add(-30 * time.Second),
+			done:      closedChan(),
+		},
+		UserID:       "userA",
+		Decision:     PlaybackDecision{Method: MethodTranscode},
+		LastAccessed: now,
+	}
+	m.sessions["userB:item2:1080p"] = &ManagedSession{
+		Session: &Session{
+			ID:        "userB:item2:1080p",
+			ItemID:    "item2",
+			Profile:   Profile{Name: "1080p"},
+			OutputDir: t.TempDir(),
+			StartedAt: now.Add(-2 * time.Minute),
+			done:      closedChan(),
+		},
+		UserID:       "userB",
+		Decision:     PlaybackDecision{Method: MethodDirectStream},
+		LastAccessed: now.Add(-5 * time.Second),
+	}
+	m.mu.Unlock()
+
+	snaps := m.ListAllSessions()
+	if len(snaps) != 2 {
+		t.Fatalf("expected 2 snapshots, got %d", len(snaps))
+	}
+
+	byID := make(map[string]SessionSnapshot, len(snaps))
+	for _, s := range snaps {
+		byID[s.ID] = s
+	}
+
+	a, ok := byID["userA:item1:720p"]
+	if !ok {
+		t.Fatal("missing snapshot for userA:item1:720p")
+	}
+	if a.UserID != "userA" || a.ItemID != "item1" || a.Profile != "720p" {
+		t.Errorf("userA snapshot mismatch: %+v", a)
+	}
+	if a.Method != MethodTranscode {
+		t.Errorf("userA method = %q, want Transcode", a.Method)
+	}
+
+	b, ok := byID["userB:item2:1080p"]
+	if !ok {
+		t.Fatal("missing snapshot for userB:item2:1080p")
+	}
+	if b.UserID != "userB" || b.ItemID != "item2" || b.Profile != "1080p" {
+		t.Errorf("userB snapshot mismatch: %+v", b)
+	}
+	if b.Method != MethodDirectStream {
+		t.Errorf("userB method = %q, want DirectStream", b.Method)
+	}
+	if !b.LastAccessed.Before(a.LastAccessed) {
+		t.Errorf("LastAccessed values not preserved: a=%v b=%v", a.LastAccessed, b.LastAccessed)
+	}
+}
+
+// TestManager_ListAllSessions_Empty pins the zero-state response so
+// the admin panel never has to special-case nil vs len()==0.
+func TestManager_ListAllSessions_Empty(t *testing.T) {
+	m := newTestManager(t)
+	defer m.Shutdown()
+
+	snaps := m.ListAllSessions()
+	if snaps == nil {
+		t.Fatal("expected non-nil empty slice")
+	}
+	if len(snaps) != 0 {
+		t.Errorf("expected empty slice, got %d entries", len(snaps))
+	}
+}
