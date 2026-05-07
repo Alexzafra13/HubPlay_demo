@@ -170,3 +170,39 @@ func TestAdminStreams_KillSession_RejectsEmptyID(t *testing.T) {
 		t.Errorf("status = %d, want 400", rr.Code)
 	}
 }
+
+// TestAdminStreams_KillSession_DecodesPercentEncodedID covers the same
+// shape of bug the /collections endpoint had: session keys contain
+// colons ("userID:itemID:profile") and the frontend
+// encodeURIComponent's them, so chi.URLParam delivers
+// "user%3Aitem%3Aprofile". Without url.PathUnescape the manager
+// lookup misses, StopSession idempotents to a no-op, and the panel
+// returns 204 without actually killing anything — the worst kind
+// of bug because the UI thinks success but the session keeps
+// running. Pin the decode so a future edit can't regress it.
+func TestAdminStreams_KillSession_DecodesPercentEncodedID(t *testing.T) {
+	mgr := stream.NewManagerForTest()
+	now := time.Now().UTC()
+	injectSession(t, mgr, "userA:item1:720p", "userA", "item1", "720p",
+		stream.MethodTranscode, now)
+
+	if mgr.ActiveSessions() != 1 {
+		t.Fatalf("setup: ActiveSessions = %d, want 1", mgr.ActiveSessions())
+	}
+
+	h := handlers.NewAdminStreamsHandler(mgr, nil, nil, slog.Default())
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/system/sessions/userA%3Aitem1%3A720p", nil)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", "userA%3Aitem1%3A720p")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	h.KillSession(rr, req)
+
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body=%s", rr.Code, rr.Body.String())
+	}
+	if mgr.ActiveSessions() != 0 {
+		t.Errorf("session not removed (handler must url.PathUnescape); ActiveSessions = %d", mgr.ActiveSessions())
+	}
+}

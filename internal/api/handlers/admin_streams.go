@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"sort"
 	"time"
 
@@ -129,10 +130,21 @@ func (h *AdminStreamsHandler) ListSessions(w http.ResponseWriter, r *http.Reques
 // short-circuits cleanly when the key isn't in the map, so we don't
 // have to look before we leap.
 func (h *AdminStreamsHandler) KillSession(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	if id == "" {
+	// Session keys are "userID:itemID:profileName" — the colons mean
+	// the frontend's encodeURIComponent turns them into "%3A" before
+	// navigation. chi v5 returns URL params raw, so without
+	// PathUnescape on the way in StopSession would receive the literal
+	// "user%3Aitem%3Aprofile" string, miss the map lookup, and 204
+	// without actually killing anything (StopSession is idempotent).
+	// Same shape of bug as /collections/{id}; same fix.
+	rawID := chi.URLParam(r, "id")
+	if rawID == "" {
 		respondError(w, r, http.StatusBadRequest, "MISSING_ID", "session id required")
 		return
+	}
+	id := rawID
+	if decoded, err := url.PathUnescape(rawID); err == nil {
+		id = decoded
 	}
 	h.manager.StopSession(id)
 	if claims := auth.GetClaims(r.Context()); claims != nil {
