@@ -33,6 +33,7 @@ import (
 
 	"hubplay/internal/auth"
 	"hubplay/internal/db"
+	"hubplay/internal/iptv"
 )
 
 // HomeHandler exposes the home-page customisation + discovery rails.
@@ -374,11 +375,23 @@ func (h *HomeHandler) LiveNow(w http.ResponseWriter, r *http.Request) {
 
 	out := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
+		// Deterministic placeholder avatar so the home rail can match
+		// the LiveTV browser's look when a channel has no logo or the
+		// upstream 404s. Same recipe as channelDTO (iptv_dto.go) — both
+		// surfaces hand the frontend identical (initials, bg, fg) for
+		// the same channel name, so a card on the home page and on
+		// /live-tv don't drift in colour or letters. Always populated,
+		// even when channel_logo is present, so the onError fallback
+		// in <ChannelLogo> never has to guess.
+		logo := iptv.DeriveLogoFallback(row.ChannelName)
 		entry := map[string]any{
-			"channel_id":   row.ChannelID,
-			"channel_name": row.ChannelName,
-			"library_id":   row.LibraryID,
-			"library_name": row.LibraryName,
+			"channel_id":    row.ChannelID,
+			"channel_name":  row.ChannelName,
+			"library_id":    row.LibraryID,
+			"library_name":  row.LibraryName,
+			"logo_initials": logo.Initials,
+			"logo_bg":       logo.Background,
+			"logo_fg":       logo.Foreground,
 		}
 		// Channel logos go through the same-origin proxy so a strict
 		// img-src CSP doesn't have to whitelist every upstream the
