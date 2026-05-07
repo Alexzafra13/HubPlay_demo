@@ -1,5 +1,43 @@
 # Estado del proyecto
 
+> 🎬 **Sesión 2026-05-07 noche (rama `claude/vibrant-ishizaka-57f510`, PRs #191 + #192 mergeadas a main, #193 con 4 commits abierto/construyendo)** — **8 commits cerrando producción + un feature grande (Now Playing admin panel) + bug raíz de las colecciones encontrado en directo contra prod**.
+>
+> **Commits (de más reciente a más antiguo, todos en la rama)**:
+> - `1169806` *stream: drop redundant Session selector in ListAllSessions snapshot*. Lint fix CI: 3 findings staticcheck QF1008 — `ms.Session.X` se puede simplificar a `ms.X` por field promotion del `*Session` embebido. Cosmético, sin cambio de comportamiento.
+> - `8afe094` *admin: same percent-encoded id fix for /admin/system/sessions/{id} kill*. Self-found mientras validaba el fix de colecciones — el botón Kill del Now Playing tenía el mismo bug: session keys son `userID:itemID:profileName`, frontend `encodeURIComponent` los rompe. Manager.StopSession es idempotente → respondía 204 sin matar la sesión real. Bug silencioso de los peores. Mismo fix `url.PathUnescape` + test de regresión.
+> - `4fac3df` *api: decode percent-encoded id in /collections/{id}*. **Bug del usuario**: "Colección no encontrada" en cada saga. Reproducido contra prod en directo: list 200 ✓, detail 404 con id idéntico. Causa raíz: chi v5 NO decodifica path params automáticamente, IDs `collection:<tmdb_id>` con `:` se convierten en `%3A` por encodeURIComponent del frontend, handler buscaba en DB la cadena literal con `%3A`. Fix: `url.PathUnescape` antes del lookup. 2 tests nuevos pinning encoded + unencoded.
+> - `4b769e2` ⭐ *admin: ship "Now Playing" panel with active sessions list + kill switch*. **Cierra la última gap grande del admin vs Plex/Jellyfin**. Backend: `stream.SessionSnapshot` + `Manager.ListAllSessions()`, `internal/api/handlers/admin_streams.go` con ListSessions (GET sorted by StartedAt desc, enriched con username + item title) + KillSession (DELETE idempotente). Routes en `/admin/system/sessions{,/{id}}` bajo `auth.RequireAdmin`. Frontend: `useAdminStreamSessions` poll 5s, `useKillAdminStreamSession` con optimistic remove, `NowPlayingPanel.tsx` con table User/Item/Method/Profile/Elapsed/Kill. Test seam público en `internal/stream/testseam.go` (`NewManagerForTest` / `SetSessionForTest` / `NewClosedSessionForTest`) para cross-package tests. 6 tests nuevos backend.
+> - `2630897` *home: unify "En directo ahora" channel placeholder with LiveTV browser*. Home rail mostraba `channel.charAt(0)` en gris sobre negro para canales sin logo; LiveTV browser ya tenía colored-tile-with-initials. Backend `/me/home/live-now` ahora devuelve `logo_initials/bg/fg` vía `iptv.DeriveLogoFallback(name)` (mismo recipe que channelDTO). Frontend swap por `<ChannelLogo>` widget. Pixel-identical entre superficies.
+> - `81153da` *HeroTrailer: keep backdrop visible if the iframe never loads*. Reveal usaba timer wall-clock 3.7s independiente de si el iframe cargaba. Con CSP block / network drop / extensión rompiendo YouTube (caso real del user con Audio Transposer), backdrop fade → iframe roto visible. Nuevo `iframeLoaded` state on `onLoad`, gate de reveal. 6s watchdog → handleDismiss si onLoad nunca dispara. `onError` belt-and-suspenders.
+> - `a07324b` *player: route session-cleanup DELETE through ApiClient so CSRF doesn't 403 it*. Pagehide unload + close-button cleanup usaban raw `fetch(..., { method: 'DELETE' })` solo con Authorization. CSRF middleware bloqueaba con 403, idle reaper limpiaba a los 90s. Nuevo `ApiClient.stopStreamSession(itemID)` con `request<void>(..., { keepalive: true })` que pilla X-CSRF-Token automático.
+> - `843616f` *api: allow YouTube + Vimeo oEmbed in connect-src so trailers actually load*. HeroTrailer hace pre-flight oEmbed `fetch()` antes de montar iframe; CSP `connect-src 'self'` lo bloqueaba en prod, todo trailer caía en silencio a "unavailable". Añadido `https://www.youtube.com https://vimeo.com` a `connect-src`. Test pinea con parsed-CSP helper (no substring match).
+> - `79f8004` ⭐ *home: fix /me/home/trending 500 caused by non-UTC time.Time round-trip*. **Causa raíz confirmada contra DB de prod**: rows de `user_data.last_played_at` con forma `"2026-04-28 02:10:59 +0200 CEST m=+13.166591023"`. modernc.org/sqlite serializa `time.Time` no-UTC vía `String()` con monotonic clock suffix. `coerceSQLiteTime` no parseaba el `m=...` → 500 en cada carga de detail page. Fix dos lados: write side normaliza UTC en `UpdateProgress`/`MarkPlayed`/`SetFavorite`/`Upsert`/`nullableTimePtr`; read side strip ` m=±d.d` en `parseSQLiteTimeString` para recuperar legacy data sin migración.
+>
+> **Verificación al cierre**: `go test -race ./...` verde · golangci-lint v2.5.0 limpio · `tsc -b && vite build` clean · `vitest run` 394/394. Producción `dev-ade9ffc` (PR #192) corriendo en hubplay.duckdns.org con migraciones 33 aplicadas; el rail Trending pobla, "En directo ahora" muestra tiles coloreados consistentes, /collections lista 68 sagas (a partir de 201 pelis), Now Playing aparecerá tras siguiente deploy.
+>
+> **Lecciones senior anotadas para futuras sesiones**:
+> 1. **chi v5 NO decodifica path params**. Siempre que un handler reciba un `chi.URLParam(r, "id")` cuyo formato pueda contener `:` o `/`, hacer `url.PathUnescape` explícito. Combinado con backends idempotentes (manager.StopSession), el bug se enmascara como 204 silencioso — peor que un error visible. Test de regresión debe verificar EFECTO LATERAL (count drops, row removed), no solo status code. Documentado en `~/.claude/.../memory/feedback_chi_path_param_decode.md`.
+> 2. **Deployment lag es real**. Mergear PR != binario corriendo. Verificar `docker inspect ... --format '{{.State.StartedAt}}'` Y `/api/v1/health.version` antes de asumir que un bug está en código. Diagnosis local equivocada por una hora antes de descubrir que el contenedor era pre-merge.
+> 3. **CSP `connect-src` es invisible hasta prod**. Dev environments rara vez tienen mismatches origin/proxy que disparen oEmbed cross-origin. Documentar terceros en el comentario del CSP cuando se añade cualquier feature que llame fuera del origin.
+> 4. **Verificar contra prod live, no asumir**. La diagnosis del agent inicial sobre colecciones decía "row missing in DB" — falsa. La realidad solo se vio reproduciendo el flow encoded vs unencoded contra hubplay.duckdns.org. Memoria explícita ya tenía la regla pero merece reforzarla.
+>
+> **Cosas que el user verifica en su entorno tras CI rebuild + deploy de PR #193**:
+> - Click en saga del rail home → renderiza la colección con miembros (no más "Colección no encontrada")
+> - Admin Dashboard → Now Playing panel muestra sesiones activas en directo, Kill button funciona
+> - Botón Kill realmente termina ffmpeg (no solo aparenta)
+>
+> **Pendientes / cola priorizada al final** (ninguno crítico, todos en orden de mi recomendación senior):
+> - **#1 360p auto-fanout** — hls.js prefetcha 360p en cada seek, duplicando ffmpeg work. Necesita decisión: (a) master 1-variante, (b) `startLevel` fijo + `capLevelToPlayerSize`, (c) lazy-spawn por bandwidth real. Mi voto: (b).
+> - **#2 TV en vivo guide-style estilo Plex** — User pasó referencia https://watch.plex.tv/es/live-tv, quiere featured player + EPG horizontal por categoría. NO sustituir browser actual; añadir como pestaña "Guía".
+> - **#3 Polish vista canal en directo** — Plex/Jellyfin tienen tratamiento más rico (info programa actual sobre video, EPG horizontal, descripción extendida).
+> - **#4 Setup wizard avanzado** — pedir max sessions + cache path durante install.
+> - **#5 Intro animado tipo Netflix** — backdrop loading overlay actual (commit 2d8514d sesión anterior) es el canvas para slot la animación.
+> - **#6 (UX pequeño) toast scan diferenciar 409 vs error real** — frontend muestra "No se pudo iniciar el escaneo" en cualquier no-2xx, incluyendo 409 conflict (ya hay scan en marcha). Confunde al user que ve "error" cuando es success.
+>
+> **Esta sesión NO ha tocado**: federation, IPTV transmux, auth keystore, live-TV player. Todo en home repo + admin + collections + stream manager + frontend admin pages.
+
+
+
 > 🎬 **Sesión 2026-05-08 (rama `claude/review-player-tasks-4guc9`, PRs #185 + #186 mergeadas, #187 abierta con 3 commits adicionales)** — **Bug raíz del seek cascade cerrado (`-copyts` en ffmpeg), trickplay regenerado adaptativo, async generation cierra el 504, backdrop loading overlay Jellyfin-style, 6 commits**. Cierra los 4 bugs declarados en `docs/memory/player-seek-bugs-2026-05-07.md` end-to-end con verificación del usuario en producción.
 >
 > **Commits (de más reciente a más antiguo, todos en la rama)**:
