@@ -389,9 +389,7 @@
     "removeFromFavorites": "Remove from favorites",
     "favoritesEmpty": "No favorites yet. Tap the heart on any channel to add it.",
     "favoritesOnly": "Favourites only",
-    "title": {
-      "explorar": "Explore channels"
-    },
+    "titleExplorar": "Explore channels",
     "tab": {
       "inicio": "Home",
       "explorar": "Explore",

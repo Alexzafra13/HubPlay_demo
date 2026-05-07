@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, NavLink } from "react-router";
+import { useNavigate, NavLink, useLocation } from "react-router";
 import { useTranslation } from "react-i18next";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -24,9 +24,15 @@ export function TopBar({ onMobileMenuClick }: TopBarProps) {
   const { t } = useTranslation();
   const { user, logout } = useAuthStore();
   const navigate = useNavigate();
+  const location = useLocation();
   const scrolled = useScrolledPast(8);
 
   const initials = getInitials(user);
+  // The Live TV page owns its own surface (Inicio + Explorar tabs +
+  // an in-page channel/programme search), so hide the global search
+  // and the global nav when we're inside /live-tv. The BrandWordmark
+  // on the left remains the escape route back home.
+  const slimTopBar = location.pathname.startsWith("/live-tv");
 
   return (
     <header
@@ -58,13 +64,19 @@ export function TopBar({ onMobileMenuClick }: TopBarProps) {
         <BrandWordmark height={26} />
       </NavLink>
 
-      {/* Center nav — desktop only; on mobile the drawer holds it */}
+      {/* Center nav — desktop only; on mobile the drawer holds it.
+          Hidden inside /live-tv so the topbar stays focused on the TV
+          surface (the page itself owns Inicio/Explorar tabs); the
+          BrandWordmark on the left remains the escape back home. */}
       <div className="flex-1 flex items-center justify-center min-w-0">
-        <MainNav />
+        {!slimTopBar && <MainNav />}
       </div>
 
-      {/* Search — animated icon → input expansion. ⌘K opens from anywhere. */}
-      <SearchBar />
+      {/* Search — animated icon → input expansion. ⌘K opens from anywhere.
+          Hidden inside /live-tv: that surface has its own channel/programme
+          search bar so the global one (which queries the VOD library) would
+          just compete with it. */}
+      {!slimTopBar && <SearchBar />}
 
       {/* User avatar dropdown — single home for all personal/admin actions */}
       <UserAvatarMenu

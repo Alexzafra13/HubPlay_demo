@@ -34,11 +34,11 @@ const VIRTUALIZE_THRESHOLD = 50;
 
 // Design-system constants. Changing these cascades through the whole grid;
 // keep them all in one place so the geometry stays consistent.
-const PX_PER_HOUR = 160;
+const PX_PER_HOUR = 220;
 const HOURS_IN_WINDOW = 24;
-const CHANNEL_COL_WIDTH = 220;
+const CHANNEL_COL_WIDTH = 240;
 const HEADER_HEIGHT = 36;
-const ROW_HEIGHT = 68;
+const ROW_HEIGHT = 72;
 
 const TIMELINE_WIDTH = HOURS_IN_WINDOW * PX_PER_HOUR;
 const PX_PER_MS = PX_PER_HOUR / (60 * 60 * 1000);
@@ -387,14 +387,18 @@ function ChannelRow({
       style={{ height: ROW_HEIGHT }}
       role="row"
     >
-      {/* Sticky channel cell */}
+      {/* Sticky channel cell — Plex-style: bigger logo tile, name only,
+          channel number as a subtle right-aligned badge. The category
+          chip on the channel column was double-counting (the chip bar
+          above already filters by category) and made the column feel
+          like a data table; we drop it. */}
       <button
         type="button"
         onClick={() => onSelect(channel)}
         aria-pressed={isActive}
         className={[
-          "sticky left-0 z-10 flex shrink-0 items-center gap-3 border-r border-tv-line px-3 text-left",
-          isActive ? "bg-tv-accent/10" : "bg-tv-bg-1/95",
+          "sticky left-0 z-10 flex shrink-0 items-center gap-3 border-r border-tv-line px-3 text-left transition-colors",
+          isActive ? "bg-tv-accent/10" : "bg-tv-bg-1/95 hover:bg-tv-bg-2",
         ].join(" ")}
         style={{ width: CHANNEL_COL_WIDTH }}
         role="gridcell"
@@ -405,21 +409,20 @@ function ChannelRow({
           bg={channel.logo_bg}
           fg={channel.logo_fg}
           name={channel.name}
-          className="h-9 w-9 rounded-tv-sm"
-          textClassName="text-[11px] font-bold"
+          className="h-12 w-12 rounded-tv-sm shadow-sm ring-1 ring-black/30"
+          textClassName="text-[12px] font-bold"
         />
         <div className="min-w-0 flex-1">
           <div
             className={[
-              "truncate text-sm font-medium",
+              "truncate text-[13px] font-semibold leading-tight",
               isActive ? "text-tv-accent" : "text-tv-fg-0",
             ].join(" ")}
           >
             {channel.name}
           </div>
-          <div className="truncate font-mono text-[10px] uppercase tracking-widest text-tv-fg-3">
+          <div className="mt-0.5 truncate font-mono text-[10px] uppercase tracking-widest text-tv-fg-3">
             CH {channel.number}
-            {channel.category ? ` · ${channel.category}` : ""}
           </div>
         </div>
       </button>
@@ -497,39 +500,43 @@ function ProgramBlock({
   const isPast = end <= now;
   const progress = isLive ? (now - start) / (end - start) : 0;
 
-  const timeLabel = `${fmtTime(start)} – ${fmtTime(end)}`;
+  // Compact "Queda Xmin" copy for the live programme reads better than
+  // "00:00 – 02:00" while watching. Past + future blocks keep the
+  // start–end range so the user can scan ahead.
+  const timeLabel = isLive
+    ? `Queda ${Math.max(1, Math.round((end - now) / 60_000))} min`
+    : `${fmtTime(start)} – ${fmtTime(end)}`;
 
   return (
     <button
       type="button"
       onClick={onSelect}
-      title={`${program.title}\n${timeLabel}`}
-      aria-label={`${program.title} en ${channelName}, ${timeLabel}`}
+      title={`${program.title}\n${fmtTime(start)} – ${fmtTime(end)}`}
+      aria-label={`${program.title} en ${channelName}, ${fmtTime(start)} – ${fmtTime(end)}`}
       className={[
-        "absolute top-1.5 bottom-1.5 flex flex-col justify-center overflow-hidden rounded-tv-xs px-2.5 text-left transition",
+        // Plex-style cells: titles in white semibold over a subtle
+        // accent-tinted background. Live blocks get a slightly stronger
+        // tint + ring so they jump on a busy schedule; past blocks fade
+        // their text but keep the chrome so the row stays readable.
+        "absolute top-1.5 bottom-1.5 flex flex-col justify-center overflow-hidden rounded-tv-xs px-3 py-1.5 text-left transition",
         isLive
-          ? "bg-tv-accent/[0.18] ring-1 ring-tv-accent/50 hover:bg-tv-accent/[0.25]"
+          ? "bg-tv-accent/[0.22] ring-1 ring-tv-accent/60 hover:bg-tv-accent/[0.30]"
           : isPast
-            ? "bg-tv-bg-2/60 hover:bg-tv-bg-3"
-            : "bg-tv-bg-2 hover:bg-tv-bg-3",
+            ? "bg-tv-bg-2/40 hover:bg-tv-bg-2/70"
+            : "bg-tv-accent/[0.06] hover:bg-tv-accent/[0.12]",
       ].join(" ")}
       style={{ left, width }}
     >
       <div
         className={[
-          "truncate text-[12px] font-medium",
-          isLive
-            ? "text-tv-fg-0"
-            : isPast
-              ? "text-tv-fg-3"
-              : "text-tv-fg-1",
+          "truncate text-[13px] font-semibold leading-tight",
+          isPast ? "text-tv-fg-3" : "text-tv-fg-0",
         ].join(" ")}
       >
         {program.title}
       </div>
-      <div className="truncate font-mono text-[10px] tabular-nums text-tv-fg-3">
+      <div className="mt-0.5 truncate text-[10.5px] tabular-nums text-tv-fg-2">
         {timeLabel}
-        {program.category ? ` · ${program.category}` : ""}
       </div>
       {isLive && (
         <div
