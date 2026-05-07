@@ -315,11 +315,13 @@ func (m *Manager) RestartSessionAt(key string, segmentIndex int, segmentDuration
 	// removes the output dir. We don't want the dir removed for a
 	// restart (we'd lose backwards-seek-able old segments), so we
 	// reach into the unexported cancel + done directly here. Same
-	// package, same author intent.
-	if ms.Session != nil && ms.Session.cancel != nil {
-		ms.Session.cancel()
+	// package, same author intent. (Session is embedded as *Session
+	// in ManagedSession, so cancel / done resolve through the
+	// promotion — no need to spell out `ms.Session.cancel`.)
+	if ms.Session != nil && ms.cancel != nil {
+		ms.cancel()
 		select {
-		case <-ms.Session.done:
+		case <-ms.done:
 		case <-time.After(2 * time.Second):
 		}
 	}
