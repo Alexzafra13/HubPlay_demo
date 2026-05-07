@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"hubplay/internal/config"
 	"hubplay/internal/db"
 	"hubplay/internal/domain"
@@ -46,6 +48,16 @@ type Manager struct {
 	stopClean  chan struct{}
 	metrics    MetricsSink
 	bus        *event.Bus // optional; nil-safe
+	// startGroup serialises StartSession's slow path per session
+	// key. Two parallel callers for the same userID:itemID:profile
+	// (player init + an immediate auth-retry burst, a double-clicked
+	// Play, hls.js requesting the manifest while the page is still
+	// mounting, etc.) used to BOTH miss the m.sessions fast-path
+	// lookup and BOTH reach transcoder.Start, leaving two ffmpegs
+	// alive simultaneously and writing segments to the same cache
+	// dir. singleflight collapses the racers onto a single execution;
+	// late joiners receive the same ManagedSession the winner built.
+	startGroup singleflight.Group
 	// hwAccel is the snapshot of accelerator detection done at startup.
 	// Cached here so the admin /system/stats endpoint can read it without
 	// re-running ffmpeg on every poll. Zero value means "no detection
@@ -181,18 +193,66 @@ func sessionKey(userID, itemID, profile string) string {
 // The capabilities affect the DirectPlay/DirectStream/Transcode
 // waterfall: a Kotlin TV app declaring HEVC + EAC3 + MKV gets
 // DirectPlay where today's hard-coded defaults forced a Transcode.
+//
+// Concurrent calls for the same key collapse onto a single ffmpeg
+// spawn via `m.startGroup` (singleflight). Without this, the gap
+// between releasing m.mu (after the cap checks) and writing the
+// completed session back into m.sessions was large enough — items
+// fetch + streams fetch + transcoder.Start, hundreds of milliseconds
+// in production — that two HTTP requests landing within the same
+// player init burst could both miss the fast-path lookup and both
+// drive the slow path to completion. transcoder.Start serialises on
+// its own mutex but its existing-session check uses the same map,
+// so the second caller's existing.Stop() race-killed the first
+// caller's just-spawned ffmpeg. The visible symptom was two ffmpegs
+// at 99% CPU writing segments to the same cache dir, fighting over
+// segmentNNNNN.ts. singleflight makes the slow path single-flight
+// per key; late joiners receive the same ManagedSession the winner
+// produced.
 func (m *Manager) StartSession(ctx context.Context, userID, itemID, profileName string, caps *Capabilities, startTime float64) (*ManagedSession, error) {
 	key := sessionKey(userID, itemID, profileName)
 
+	// Fast path: already-running session bypasses the singleflight
+	// and the slow-path setup entirely. This is the >99% case once
+	// the player is past its init burst — every subsequent segment
+	// request for the session.
 	m.mu.Lock()
-	// Return existing session if available
+	if ms, ok := m.sessions[key]; ok {
+		ms.LastAccessed = time.Now()
+		m.mu.Unlock()
+		return ms, nil
+	}
+	m.mu.Unlock()
+
+	v, err, _ := m.startGroup.Do(key, func() (any, error) {
+		return m.startSessionSlow(ctx, userID, itemID, profileName, caps, startTime, key)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.(*ManagedSession), nil
+}
+
+// startSessionSlow runs the actual fetch + decide + ffmpeg spawn.
+// Wrapped by `m.startGroup.Do` so concurrent callers for the same
+// `key` collapse onto one execution. The first caller's `ctx` drives
+// the work — if it cancels mid-fetch, late joiners get the same
+// error, which is the right trade: callers who arrived 50 ms apart
+// for the same key were going to share the result anyway.
+func (m *Manager) startSessionSlow(ctx context.Context, userID, itemID, profileName string, caps *Capabilities, startTime float64, key string) (*ManagedSession, error) {
+	// Re-check after singleflight admission: a previous Do for this
+	// key may have just finished and populated m.sessions in the
+	// brief window between this caller's fast-path miss and its
+	// arrival here. singleflight collapses *concurrent* calls; it
+	// doesn't deduplicate a fresh call against a finished one.
+	m.mu.Lock()
 	if ms, ok := m.sessions[key]; ok {
 		ms.LastAccessed = time.Now()
 		m.mu.Unlock()
 		return ms, nil
 	}
 
-	// Check global concurrent limit
+	// Global concurrent limit.
 	if m.cfg.MaxTranscodeSessions > 0 && len(m.sessions) >= m.cfg.MaxTranscodeSessions {
 		active := len(m.sessions)
 		m.mu.Unlock()
