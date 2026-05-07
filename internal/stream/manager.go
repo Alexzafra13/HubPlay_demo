@@ -634,9 +634,11 @@ func (m *Manager) ListAllSessions() []SessionSnapshot {
 			LastAccessed: ms.LastAccessed,
 		}
 		if ms.Session != nil {
-			snap.ItemID = ms.Session.ItemID
-			snap.Profile = ms.Session.Profile.Name
-			snap.StartedAt = ms.Session.StartedAt
+			// Field promotion via the embedded *Session — gofmt-safe and
+			// matches the QF1008 staticcheck guidance.
+			snap.ItemID = ms.ItemID
+			snap.Profile = ms.Profile.Name
+			snap.StartedAt = ms.StartedAt
 		}
 		out = append(out, snap)
 	}
