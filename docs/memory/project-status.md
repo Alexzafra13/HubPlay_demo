@@ -1,5 +1,51 @@
 # Estado del proyecto
 
+> 🎬 **Sesión 2026-05-08 (rama `claude/review-player-tasks-4guc9`, PRs #185 + #186 mergeadas, #187 abierta con 3 commits adicionales)** — **Bug raíz del seek cascade cerrado (`-copyts` en ffmpeg), trickplay regenerado adaptativo, async generation cierra el 504, backdrop loading overlay Jellyfin-style, 6 commits**. Cierra los 4 bugs declarados en `docs/memory/player-seek-bugs-2026-05-07.md` end-to-end con verificación del usuario en producción.
+>
+> **Commits (de más reciente a más antiguo, todos en la rama)**:
+> - `2d8514d` *player: backdrop loading overlay (Jellyfin/Plex-style) until first frame paints*. Cierra el gap "video negro 2-5 s mientras ffmpeg arranca". `VideoPlayer` recibe `backdropUrl?` opcional y mantiene `firstFrameReady` state que flippea en el evento `playing` (no `play` ni `loadeddata`). Overlay full-bleed con backdrop + degradado vignette + título/logo bottom-left + barra fina indeterminada arriba (animación `loading-slide` GPU-only). Fade de 500 ms al frame uno. Reset on `itemId` change para next-up. Callers (`ItemDetail`, `PeerItemDetail`) pluman el backdrop que ya tenían.
+> - `3f0ee55` ⭐ *stream: add -copyts to ffmpeg so seek-restart segments align with manifest (root cause fix)*. **LA CURA REAL**. ffmpeg sin `-copyts` resetea PTS a 0 en cada restart → manifest dice "seg 296 está en [1776, 1782]" pero el archivo `.ts` tiene PTS [0, 6] → MSE construye timeline Frankenstein → hls.js fan-out a múltiplos del seek (+297 segs cadence) → MediaSource colapsa duration → player termina en EOF → Play arranca de 0. `-copyts` aplicado unconditionally después de `-i` (no-op cuando startTime=0 anyway). Plex/Jellyfin lo usan por la misma razón. Test `TestBuildFFmpegArgs_AlwaysIncludesCopyts` con 3 casos. **Verificado por user en producción**: "el ffmpeg funciona perfecto".
+> - `b2374de` *player: defensive currentTime restore on play + opt-in hls.js debug*. `lastGoodTimeRef` en VideoPlayer actualiza en cada timeupdate con `currentTime > 0.5`; `onPlay` lo restaura si play() landea en 0 con un valor recordado. Defensa contra "Play tras pause empieza de 0" si por edge case currentTime se resetea (probablemente innecesario tras `-copyts` pero cheap belt-and-suspenders). `useHls` añade `debug: window.__hp_debug_hls === true` para opt-in verbose logging.
+> - `ac601bc` *trickplay: async generation + smaller sprite to fix 504 timeouts*. Mi fix anterior (adaptive grid) generaba 360-720 thumbs por sprite que tomaba 60-120 s en CPU stock; el reverse proxy 504-eaba antes. Refactor: `ensureTrickplay` no bloquea HTTP, spawn ffmpeg en goroutine con `context.Background()`, devuelve `errTrickplayPending` → 503 + `Retry-After: 10` con código `TRICKPLAY_PENDING`. Per-item `sync.Mutex` con `TryLock`. `maxThumbsPerSprite` 400→200 (sprite ~3 MB PNG, ffmpeg <30 s). 3 tests handler nuevos (fresh / pending-non-blocking / stale).
+> - `b96983f` *player: fix "second seek feels blocked" + harden seek-state tracking*. AND-coalesce: `RestartSessionAt` colapsa solo si `time<2s AND segment≤6` (antes solo segmento ±10, atrapaba seeks humanos vecinos). Nueva field `LastRestartTime` en `ManagedSession`. Reduced `restartCoalesceWindow` 10→6 segs. Frontend: reemplaza `isSeekingRef` con lectura directa de `video.seeking` (autorrecupera si un evento `seeked` se cae). Test `_StaleCoalesceDoesNotBlock`.
+> - `2ce4a5c` *player: end-to-end fix for the 2026-05-07 seek + trick-play bugs*. Primera tanda. SeekBar pointerup-commit pattern (Plex/YouTube), `isSeeking` gate (luego sustituido por `video.seeking` directo en `b96983f`), progress reporter skip mientras seeking, defensive `lastGoodTimeRef` en useHls + MEDIA_ATTACHED restore, **trickplay generator adaptive grid** (`maxThumbsPerSprite=400` luego bajado a 200, `IntervalSec` adaptativo a duración, `Total = ceil(duration/interval)` real, `Version` stamp para invalidar v1 caches), **per-session restart rate limit** (sliding window 20/60s, 429 + Retry-After).
+>
+> **Verificación al cierre**: `go test ./... -count=1` verde · `vitest run` 394/394 (era 392, +2 progressReporter seeking-skip) · `tsc -b` clean · production build clean · `pnpm build` clean. Tests nuevos backend: `TestBuildFFmpegArgs_AlwaysIncludesCopyts` (3 casos), `TestTrickplayParams_Adapt` (4), `_NoDuration`, `_GridAlwaysFits`, `TrickplayManifestVersion_NonZero`, `_RestartSessionAt_RateLimited`, `_RateLimitWindowResets`, `_StaleCoalesceDoesNotBlock`, `TestItemHandler_TrickplayManifest_FreshCacheServesImmediately`, `_PendingDoesNotBlock`, `_StaleCacheReturnsPending`. Tests nuevos frontend: 2 en `useProgressReporter.test.ts` (skip while seeking).
+>
+> **Lecciones senior** (anotadas para futuras sesiones):
+> 1. **No declarar "closed" antes de verificación en prod**. La primera resolución decía "fixed end-to-end" sin que el user hubiera testado en su entorno con una peli larga real; el cascade volvió a aparecer y resultó tener una causa diferente a la que asumimos.
+> 2. **Server logs algorítmicos NO son suficientes**. Las cadencias `+366 / +231 / +297` en logs lucían algorítmicas pero no apuntaban a la causa. El snippet de debug del navegador (XHR + video events + duration changes) fue lo que surfaceó el timeline collapse — y desde ahí `-copyts` fue 5 minutos.
+> 3. **Integridad del timeline MSE es frágil**. Si el manifest y los PTS reales del segmento discrepan, MSE construye un timeline Frankenstein silenciosamente; los síntomas downstream (fetches en cascada, duration colapsando, playhead saltando) parecen bugs de manejo de seek pero no lo son.
+>
+> **Defensive layers que se quedan** (todas <50 LOC, protegen contra regresiones futuras):
+> - SeekBar pointerup-commit (Plex/YouTube pattern, correcto al margen de `-copyts`)
+> - `video.seeking` direct read en timeupdate (self-recovery si `seeked` se cae)
+> - `useProgressReporter` skip while seeking (evita corromper resume state)
+> - `lastGoodTimeRef` recovery × 2 (en useHls para MEDIA_ATTACHED, en VideoPlayer para `play` event) — duplicación admitida porque cada ref vive en scope local sin coupling
+> - AND-coalesce + restartCoalesceTimeWindow + restartRateLimit (defensa server contra regresiones de cliente)
+> - Trickplay version stamp (invalidación cuando cambie el contrato)
+> - hls.js debug opt-in via `window.__hp_debug_hls = true` (puramente diagnóstico, off por default)
+>
+> **Cosas que el user verifica en su entorno tras CI rebuild**:
+> - Click en barra a cualquier minuto → seek instantáneo, no se cuelga (commit `3f0ee55`)
+> - Pause + Play → resume desde donde estaba, nunca desde 0 (`3f0ee55` + `b2374de` defensa)
+> - Hover en timeline → thumbnail correcto en cualquier punto (commit `2ce4a5c` adaptive trickplay)
+> - Trickplay primera vez → 503 + retry tras 10 s, no 504 colgado (commit `ac601bc`)
+> - Click Play en peli → backdrop fullscreen con título/logo + barra de carga, fade al video (commit `2d8514d`)
+> - Logo de la peli en el overlay sale del `item.logo_url` actual; cuando se reemplace por el definitivo lo coge automático sin tocar código.
+>
+> **Pendientes / cola al final** (todo out-of-scope para esta sesión, ninguno crítico):
+> - **DELETE `/stream/.../session` 403** al cerrar player → CSRF middleware bloquea el cleanup; hoy idle reaper de 90 s lo limpia igual. Fix: exempt esa ruta de CSRF o pasar token.
+> - **360p auto-fanout** vía hls.js ABR — duplica trabajo ffmpeg cada seek. Tres opciones: (a) servir un master con UNA variante (perdemos ABR), (b) configurar hls.js con `startLevel` fijo + `capLevelToPlayerSize`, (c) lazy-spawn 360p solo si bandwidth real lo justifica.
+> - **CSP block YouTube oembed** trailer feature → añadir `connect-src https://www.youtube.com https://vimeo.com` al CSP en producción.
+> - **`/me/home/trending` 500** → parse error documentado out-of-scope desde 2026-05-07; `time.Time.String()` round-trip con sufijo de monotonic clock. Sin diagnosis aún.
+> - **`/channels/*/logo` 404** masivo → IPTV provider no popula logos; degradar elegante en frontend o pre-cachear.
+> - **Admin "Now Playing" panel** — el backend ya tiene `manager.sessions[]` con per-user info, falta un endpoint `GET /admin/system/sessions` y un componente que la renderice + botón Kill por sesión. ~½ día. ÚLTIMA gap grande del admin panel vs Plex/Jellyfin.
+> - **Setup wizard avanzado** — pedir max sessions y cache path durante install (hoy todo default).
+> - **Intro animado tipo Netflix** — el user lo dijo explícitamente, lo quiere fabricar después; el backdrop loading overlay actual es el canvas correcto para slot esa animación cuando llegue.
+>
+> **Esta sesión NO ha tocado**: `internal/federation/`, `internal/iptv/`, `internal/auth/`, live-TV player (`useLiveHls`). El bug del seek era VOD-only.
+
 > 🎬 **Sesión 2026-05-06 noche (rama `claude/vigilant-noyce-d2f526`, PR pendiente)** — **Recommendations bug crítico + Plex polish + studios clicables + colecciones de saga Jellyfin-style + 5 commits + 2 features grandes nuevas**. Cierra **dos** de las cosas diferidas (estudio clicable + reorden series) + bug fix de regresión + nueva feature solicitada (colecciones). Bio de actor sigue diferida explícitamente por el user. Todo pusheado.
 >
 > **Commits (de más reciente a más antiguo, en la rama)**:
