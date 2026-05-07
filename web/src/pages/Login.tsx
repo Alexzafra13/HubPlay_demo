@@ -6,6 +6,7 @@ import { useLogin } from "@/api/hooks";
 import { useAuthStore } from "@/store/auth";
 import { Button } from "@/components/common";
 import { Input } from "@/components/common";
+import { BrandWordmark } from "@/components/layout/BrandWordmark";
 
 // Login — visual rework 2026-04-30. The previous version was a card
 // floating on flat bg-base; the first impression of the product was
@@ -80,21 +81,8 @@ export default function Login() {
           the dark bg without being garish. */}
       <div className="relative w-full max-w-sm rounded-2xl border border-white/10 bg-bg-card/70 p-8 shadow-2xl backdrop-blur-xl">
         <div className="mb-7 flex flex-col items-center gap-3">
-          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-accent shadow-[0_0_30px_rgba(13,148,136,0.55)]">
-            <svg
-              className="h-8 w-8 text-white"
-              viewBox="0 0 24 24"
-              fill="currentColor"
-            >
-              <path d="M8 5v14l11-7z" />
-            </svg>
-          </div>
-          <div className="flex flex-col items-center gap-1">
-            <h1 className="text-3xl font-bold tracking-tight text-text-primary">
-              HubPlay
-            </h1>
-            <p className="text-xs text-text-muted">{t("login.tagline")}</p>
-          </div>
+          <BrandWordmark height={48} />
+          <p className="text-xs text-text-muted">{t("login.tagline")}</p>
         </div>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
