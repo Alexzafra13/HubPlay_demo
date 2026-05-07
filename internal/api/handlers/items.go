@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"time"
 
 	"hubplay/internal/auth"
 	"hubplay/internal/db"
@@ -496,15 +497,19 @@ func (h *ItemHandler) Recommendations(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// TrickplayManifest serves (and lazily generates) the sprite-sheet
-// manifest for an item. The manifest tells the client how to compute
-// which sub-image of the sprite covers a given playback time. See
+// TrickplayManifest serves the sprite-sheet manifest for an item.
+// The manifest tells the client how to compute which sub-image of
+// the sprite covers a given playback time. See
 // `imaging.TrickplayManifest` for the fields' precise contract.
 //
-// Generation is on-demand: the first hit triggers a synchronous
-// ffmpeg run (one-shot, ~5–30 s for a 2 h movie), subsequent hits
-// serve the cached file. A per-item mutex prevents two concurrent
-// hovers from spawning duplicate ffmpeg processes.
+// Generation is asynchronous: a cache miss kicks off ffmpeg in a
+// background goroutine and returns 503 + Retry-After immediately,
+// so the HTTP request never blocks behind the 30-90 s ffmpeg run
+// (which used to time out at the 60 s reverse-proxy limit and
+// surface as a 504 to the player). The frontend's `useTrickplay`
+// already treats non-200 as "preview unavailable" and degrades
+// gracefully — next render, once the goroutine has written the
+// cache, the manifest serves cleanly.
 func (h *ItemHandler) TrickplayManifest(w http.ResponseWriter, r *http.Request) {
 	if h.trickplayDir == "" {
 		respondError(w, r, http.StatusServiceUnavailable, "TRICKPLAY_DISABLED",
@@ -514,6 +519,12 @@ func (h *ItemHandler) TrickplayManifest(w http.ResponseWriter, r *http.Request) 
 	id := chi.URLParam(r, "id")
 	itemDir, err := h.ensureTrickplay(r.Context(), id)
 	if err != nil {
+		if errors.Is(err, errTrickplayPending) {
+			w.Header().Set("Retry-After", "10")
+			respondError(w, r, http.StatusServiceUnavailable, "TRICKPLAY_PENDING",
+				"trickplay sprite is being generated; retry shortly")
+			return
+		}
 		handleServiceError(w, r, err)
 		return
 	}
@@ -522,12 +533,12 @@ func (h *ItemHandler) TrickplayManifest(w http.ResponseWriter, r *http.Request) 
 	http.ServeFile(w, r, filepath.Join(itemDir, "manifest.json"))
 }
 
-// TrickplaySprite serves the sprite PNG. Same lazy-generate-on-first-
-// hit semantics as the manifest endpoint above. Browsers cache the
-// PNG aggressively (the sprite is content-addressable per item — same
-// runtime + same params produces byte-identical output), so the
-// hover-scroll experience after the first miss is a single fetch
-// per item per long-term cache window.
+// TrickplaySprite serves the sprite PNG. Mirrors TrickplayManifest's
+// async semantics: cache hit serves immediately; cache miss returns
+// 503 with Retry-After while the background ffmpeg run completes.
+// Browsers cache the PNG aggressively (same item + same params
+// produces byte-identical output) so once it lands the hover-scroll
+// is one fetch per long-term cache window.
 func (h *ItemHandler) TrickplaySprite(w http.ResponseWriter, r *http.Request) {
 	if h.trickplayDir == "" {
 		respondError(w, r, http.StatusServiceUnavailable, "TRICKPLAY_DISABLED",
@@ -537,6 +548,12 @@ func (h *ItemHandler) TrickplaySprite(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	itemDir, err := h.ensureTrickplay(r.Context(), id)
 	if err != nil {
+		if errors.Is(err, errTrickplayPending) {
+			w.Header().Set("Retry-After", "10")
+			respondError(w, r, http.StatusServiceUnavailable, "TRICKPLAY_PENDING",
+				"trickplay sprite is being generated; retry shortly")
+			return
+		}
 		handleServiceError(w, r, err)
 		return
 	}
@@ -544,18 +561,32 @@ func (h *ItemHandler) TrickplaySprite(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, filepath.Join(itemDir, "sprite.png"))
 }
 
+// errTrickplayPending is the sentinel ensureTrickplay returns when a
+// background generation is in flight (or just kicked off). Handlers
+// translate it to a 503 + Retry-After so the client can poll without
+// the HTTP request hanging behind ffmpeg.
+var errTrickplayPending = errors.New("trickplay: generation pending")
+
 // ensureTrickplay returns the per-item directory containing
-// `sprite.png` + `manifest.json`, generating them via ffmpeg on first
-// call. Per-item locking prevents concurrent generation; once the
-// files exist the subsequent calls are O(stat).
+// `sprite.png` + `manifest.json` when the cache is fresh. When the
+// cache is missing or stale, it kicks off ffmpeg in a background
+// goroutine and returns errTrickplayPending immediately — the
+// caller's HTTP request must NOT block on the ~30-90 s ffmpeg run.
 //
 // Stale-cache invalidation: the cached manifest carries a `version`
-// stamp matching imaging.TrickplayManifestVersion. When the generator's
-// output contract changes (e.g. v1 hardcoded a 10×10 grid that capped
-// coverage at 1000 s; v2 sizes adaptively to the item runtime) we
-// detect the older stamp and regenerate the sprite. Without this gate
-// upgraded servers would keep serving the wrong thumbnails for every
-// item that was ingested before the upgrade.
+// stamp matching imaging.TrickplayManifestVersion. When the
+// generator's output contract changes (e.g. v1 hardcoded a 10×10
+// grid that capped coverage at 1000 s; v2 sizes adaptively to the
+// item runtime) we detect the older stamp and regenerate the
+// sprite. Without this gate upgraded servers would keep serving the
+// wrong thumbnails for every item that was ingested before the
+// upgrade.
+//
+// Concurrency: trickplayLocks is a sync.Map of itemID → *sync.Mutex.
+// The first request to land on a cache-miss for an item TryLocks the
+// mutex, spawns the goroutine, and the goroutine Unlocks when ffmpeg
+// finishes. Concurrent requests during generation see TryLock fail
+// and return pending too — no duplicate ffmpegs, no thundering herd.
 func (h *ItemHandler) ensureTrickplay(ctx context.Context, itemID string) (string, error) {
 	itemDir := filepath.Join(h.trickplayDir, itemID)
 	spritePath := filepath.Join(itemDir, "sprite.png")
@@ -563,31 +594,37 @@ func (h *ItemHandler) ensureTrickplay(ctx context.Context, itemID string) (strin
 
 	// Fast path: both files already cached AND the manifest version
 	// matches what the current generator produces. A version mismatch
-	// (or unreadable / missing-field manifest) drops to the slow path
-	// for regeneration.
+	// (or unreadable / missing-field manifest) drops through to the
+	// regeneration kickoff below.
 	if trickplayCacheFresh(spritePath, manifestPath) {
 		return itemDir, nil
 	}
 
-	// Per-item mutex. Two concurrent first-hits collapse to one
-	// ffmpeg process; the loser blocks until the winner publishes
-	// the files and then returns from the fast path on retry below.
+	// Per-item mutex via sync.Map. TryLock means: if another caller
+	// is already generating (or just-about-to), we don't queue behind
+	// them — we tell our caller "pending" too. They'll retry shortly,
+	// and when the generation lands the fast path above takes over.
 	mu, _ := h.trickplayLocks.LoadOrStore(itemID, &sync.Mutex{})
 	lock := mu.(*sync.Mutex)
-	lock.Lock()
-	defer lock.Unlock()
+	if !lock.TryLock() {
+		return "", errTrickplayPending
+	}
 
-	// Re-check under the lock — the previous holder may have just
-	// finished writing.
+	// Re-check under the lock — a previous holder may have finished
+	// while we were entering this branch. Releasing the lock before
+	// returning so it stays available for genuine future invalidations.
 	if trickplayCacheFresh(spritePath, manifestPath) {
+		lock.Unlock()
 		return itemDir, nil
 	}
 
 	item, err := h.lib.GetItem(ctx, itemID)
 	if err != nil {
+		lock.Unlock()
 		return "", err
 	}
 	if item.Path == "" {
+		lock.Unlock()
 		return "", errors.New("item has no playable file path")
 	}
 
@@ -600,12 +637,24 @@ func (h *ItemHandler) ensureTrickplay(ctx context.Context, itemID string) (strin
 	if item.DurationTicks > 0 {
 		durationSec = float64(item.DurationTicks) / 10_000_000.0
 	}
-	params := imaging.TrickplayParams{DurationSeconds: durationSec}
-	if _, err := imaging.GenerateTrickplayWithDeadline(ctx, item.Path, itemDir, params, 0); err != nil {
-		h.logger.Warn("trickplay generation failed", "item_id", itemID, "error", err)
-		return "", err
-	}
-	return itemDir, nil
+	itemPath := item.Path
+
+	// Spawn the actual ffmpeg run in a fresh goroutine with a fresh
+	// context — using r.Context() would kill the generation as soon
+	// as the client times out / disconnects. The lock is released
+	// from inside the goroutine when work is done (success or fail).
+	go func() {
+		defer lock.Unlock()
+		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		params := imaging.TrickplayParams{DurationSeconds: durationSec}
+		if _, err := imaging.GenerateTrickplayWithDeadline(bgCtx, itemPath, itemDir, params, 0); err != nil {
+			h.logger.Warn("trickplay generation failed (background)",
+				"item_id", itemID, "error", err)
+		}
+	}()
+
+	return "", errTrickplayPending
 }
 
 // trickplayCacheFresh reports whether the cached sprite + manifest
