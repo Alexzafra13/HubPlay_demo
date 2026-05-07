@@ -89,6 +89,13 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const seekedToStartRef = useRef(false);
+  // Tracks the most recent reliable currentTime (timeupdate while
+  // not seeking). Used by the `play` event handler to recover from
+  // the "Play after pause restarts from frame 0" edge case where a
+  // recoverMediaError or transient hls.js reattach zeroed out the
+  // <video> element's currentTime even though the user expected it
+  // to resume where they were.
+  const lastGoodTimeRef = useRef(0);
 
   // Zustand as single source of truth for volume/mute/fullscreen
   const volume = usePlayerStore((s) => s.volume);
@@ -281,6 +288,15 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
     const onPlay = () => {
       setIsPlaying(true);
       showControls();
+      // Defensive: if we somehow ended up at frame 0 even though we
+      // had a remembered good position, jump back. This catches the
+      // user-reported "Play after pause restarts from the beginning"
+      // edge case where a recoverMediaError or detach/reattach
+      // sequence zeroed out the <video> element's currentTime mid
+      // session. lastGoodTimeRef is updated below in `onTimeUpdate`.
+      if (video.currentTime < 1 && lastGoodTimeRef.current > 1) {
+        video.currentTime = lastGoodTimeRef.current;
+      }
     };
 
     const onPause = () => {
@@ -305,6 +321,14 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
       // property each tick self-recovers on the next event boundary.
       if (!video.seeking) {
         setCurrentTime(video.currentTime);
+        // Remember the most recent settled position so the `play`
+        // handler above can recover from a zeroed-out currentTime
+        // after recoverMediaError. Only update when we're past the
+        // intro buffer (>0.5 s) so legitimate fresh-start sessions
+        // don't accidentally save 0.
+        if (video.currentTime > 0.5) {
+          lastGoodTimeRef.current = video.currentTime;
+        }
       }
       const videoDur = video.duration;
       const effectiveDuration =

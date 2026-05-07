@@ -148,6 +148,17 @@ export function useHls({
           enableWorker: true,
           lowLatencyMode: false,
           startPosition: startPositionRef.current ?? -1,
+          // Opt-in verbose logging. Set `window.__hp_debug_hls = true`
+          // in DevTools BEFORE opening the player to dump every
+          // hls.js decision (level switch, fragment load, error,
+          // recovery) to the console. Off by default to keep
+          // production console quiet. Used to diagnose the seek
+          // cascade reported on 2026-05-08 — without it the only
+          // observability of hls.js's internal seeks was indirect
+          // (via server-side RestartSessionAt logs).
+          debug:
+            typeof window !== "undefined" &&
+            (window as unknown as { __hp_debug_hls?: boolean }).__hp_debug_hls === true,
           xhrSetup: (xhr) => {
             // Auth is handled via HTTP-only cookies.
             xhr.withCredentials = true;
