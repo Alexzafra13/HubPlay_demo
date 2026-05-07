@@ -241,6 +241,21 @@ body::before {
   }
 }
 
+/* Indeterminate-progress slide. A partial-width bar travels across
+   its container left → right and loops. Used by the player's
+   loading overlay (Plex / Apple TV-style "preparing" hint while
+   ffmpeg produces the first segment). Driven by transform so it
+   composites on the GPU and doesn't trigger layout/paint per frame
+   like the background-based `shimmer` keyframe above. */
+@keyframes loading-slide {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(400%);
+  }
+}
+
 .animate-fade-in {
   animation: fade-in 0.32s var(--ease-emphasized) both;
 }

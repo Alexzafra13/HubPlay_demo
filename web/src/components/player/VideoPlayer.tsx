@@ -40,6 +40,16 @@ interface VideoPlayerProps {
    */
   logoUrl?: string;
   /**
+   * Optional backdrop image to render full-bleed BEHIND the <video>
+   * element until the first frame paints. Closes the "black screen
+   * for 2-5 s while ffmpeg produces the first segment" gap — same
+   * Jellyfin / Plex pattern: the user sees the title artwork during
+   * the prep window, fades to video on playback start. Pulled by
+   * the parent from the same `item.backdrop_url` the detail page
+   * already had.
+   */
+  backdropUrl?: string;
+  /**
    * Optional next-item metadata. When provided alongside `onEnded`,
    * the player shows an "Up Next" countdown overlay when the video
    * finishes instead of triggering the callback immediately. The
@@ -79,6 +89,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
   knownDuration,
   title,
   logoUrl,
+  backdropUrl,
   nextUp,
   chapters,
   audioStreams,
@@ -111,6 +122,14 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [buffered, setBuffered] = useState(0);
+  // True once the first frame has painted (we listen to the
+  // `playing` event, which fires when the browser actually
+  // starts decoding+rendering, NOT when play() resolves). Drives
+  // the backdrop loading overlay's fade-out: while false, the
+  // overlay covers the (still-black) <video> with the item's
+  // artwork; on flip, a CSS transition fades it out so the video
+  // reveal feels cinematic instead of abrupt.
+  const [firstFrameReady, setFirstFrameReady] = useState(false);
   // Up-next overlay visibility. Set on `ended` when nextUp is wired,
   // cleared by play-now / cancel / next-load. Decoupled from
   // onEndedCallback so the parent only sees the auto-advance signal
@@ -299,6 +318,15 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
       }
     };
 
+    // First-frame painted: this is what we wait for before fading
+    // the backdrop overlay out. `playing` is the right event (not
+    // `play`, which fires on the play() call before any frame has
+    // rendered, and not `loadeddata`, which can fire before HLS
+    // has wired the first segment into MSE).
+    const onPlaying = () => {
+      setFirstFrameReady(true);
+    };
+
     const onPause = () => {
       setIsPlaying(false);
       keepControlsVisible();
@@ -367,6 +395,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
     };
 
     video.addEventListener("play", onPlay);
+    video.addEventListener("playing", onPlaying);
     video.addEventListener("pause", onPause);
     video.addEventListener("seeked", onSeeked);
     video.addEventListener("timeupdate", onTimeUpdate);
@@ -374,6 +403,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
 
     return () => {
       video.removeEventListener("play", onPlay);
+      video.removeEventListener("playing", onPlaying);
       video.removeEventListener("pause", onPause);
       video.removeEventListener("seeked", onSeeked);
       video.removeEventListener("timeupdate", onTimeUpdate);
@@ -386,6 +416,12 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
   // inherit the previous one's overlay state.
   useEffect(() => {
     setUpNextActive(false);
+    // Same rationale for firstFrameReady: a next-up advance reuses
+    // the same VideoPlayer instance with a new source. Without the
+    // reset the loading overlay would NOT show during the prep
+    // window of the next episode (it'd think the first frame had
+    // already painted from the previous one).
+    setFirstFrameReady(false);
   }, [itemId]);
 
   const handleUpNextConfirm = useCallback(() => {
@@ -492,6 +528,74 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
           />
         )}
       </video>
+
+      {/* Backdrop loading overlay. Sits ABOVE the <video> until the
+          first frame paints (`playing` event), then fades out via the
+          opacity transition. Renders the item's backdrop full-bleed
+          with a soft dark gradient so the title/logo stays legible
+          on bright artwork (Avengers / Doctor Strange / etc. have
+          near-white skies). `pointer-events-none` once faded so it
+          never intercepts clicks. Subtle pulsing thin bar at top
+          telegraphs "preparing" without a Windows-95 spinner. */}
+      <div
+        className={[
+          "absolute inset-0 transition-opacity duration-500 ease-out",
+          firstFrameReady ? "opacity-0 pointer-events-none" : "opacity-100",
+        ].join(" ")}
+        aria-hidden={firstFrameReady}
+      >
+        {/* Top progress bar (thin, indeterminate). 0.5 px tall so the
+            artwork dominates; the slide animation travels a 25%-wide
+            highlight left → right via transform-only animation so it
+            composites on the GPU and doesn't perturb the rest of the
+            overlay. */}
+        <div className="absolute top-0 left-0 right-0 h-0.5 bg-white/10 overflow-hidden">
+          <div
+            className="h-full w-1/4 bg-white/70"
+            style={{ animation: "loading-slide 1.8s ease-in-out infinite" }}
+          />
+        </div>
+
+        {/* Backdrop image, scaled to cover. Falls back to a flat
+            black surface when no backdrop was passed (federated
+            items, scan-in-progress items, etc.) — still better than
+            the bare-black <video> because the title/logo is on
+            screen. */}
+        <div
+          className="absolute inset-0 bg-black"
+          style={
+            backdropUrl
+              ? {
+                  backgroundImage: `url(${backdropUrl})`,
+                  backgroundSize: "cover",
+                  backgroundPosition: "center",
+                }
+              : undefined
+          }
+        />
+        {/* Dark gradient: ensures the title/logo at the bottom-left
+            reads cleanly regardless of the underlying frame. Plex /
+            Jellyfin both rely on this same vignette pattern. */}
+        <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-black/30" />
+
+        {/* Title treatment in the bottom-left, mirroring the hero
+            page the user came from. Logo wins when present (matches
+            Plex / Apple TV); plain text falls back so we never end
+            up with an empty corner. */}
+        <div className="absolute left-6 right-6 bottom-12 sm:left-12 sm:bottom-20 max-w-[60%]">
+          {logoUrl ? (
+            <img
+              src={logoUrl}
+              alt={title ?? ""}
+              className="max-h-24 sm:max-h-32 w-auto object-contain drop-shadow-[0_4px_12px_rgba(0,0,0,0.7)]"
+            />
+          ) : title ? (
+            <h1 className="text-3xl sm:text-5xl font-bold text-white drop-shadow-[0_4px_12px_rgba(0,0,0,0.8)]">
+              {title}
+            </h1>
+          ) : null}
+        </div>
+      </div>
 
       {/* Error overlay */}
       {error && (

@@ -274,6 +274,12 @@ export default function PeerItemDetail() {
           playbackMethod={playerInfo.method}
           startPosition={playerInfo.startPosition}
           title={item.title}
+          // Federated items don't carry a backdrop in the wire shape
+          // (slim by design — see federationItemToMediaItem), so the
+          // loading overlay falls back to the poster. Still way more
+          // cinematic than a bare black <video> while the cross-peer
+          // stream session warms up.
+          backdropUrl={item.poster_url ?? undefined}
           onClose={handleClosePlayer}
         />
       )}
