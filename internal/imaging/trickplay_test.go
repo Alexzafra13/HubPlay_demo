@@ -30,20 +30,20 @@ func TestTrickplayParams_Adapt(t *testing.T) {
 			wantGridAtMost:  14,
 		},
 		{
-			name:            "2 hour movie stays under 400-thumb cap",
+			name:            "2 hour movie stays under 200-thumb cap",
 			duration:        7200,
-			wantInterval:    20, // 7200/400=18 → rounded up to next 5
-			wantTotal:       360,
-			wantGridAtLeast: 19, // ceil(sqrt(360)) = 19
-			wantGridAtMost:  19,
+			wantInterval:    40, // 7200/200=36 → rounded up to next 5
+			wantTotal:       180,
+			wantGridAtLeast: 14, // ceil(sqrt(180)) = 14
+			wantGridAtMost:  14,
 		},
 		{
 			name:            "4 hour epic scales interval up",
 			duration:        14400,
-			wantInterval:    40, // 14400/400=36 → rounded up to next 5
-			wantTotal:       360,
-			wantGridAtLeast: 19,
-			wantGridAtMost:  19,
+			wantInterval:    75, // 14400/200=72 → rounded up to next 5
+			wantTotal:       192,
+			wantGridAtLeast: 14, // ceil(sqrt(192)) = 14
+			wantGridAtMost:  14,
 		},
 		{
 			name:            "very short clip still gets grid >= 2",

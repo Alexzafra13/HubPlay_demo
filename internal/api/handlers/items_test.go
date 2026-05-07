@@ -4,15 +4,21 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"hubplay/internal/auth"
 	"hubplay/internal/db"
 	"hubplay/internal/domain"
+	"hubplay/internal/imaging"
 	"hubplay/internal/testutil"
 )
 
@@ -435,6 +441,115 @@ func TestItemHandler_TrickplayManifest_DisabledReturns503(t *testing.T) {
 	rr = env.do(http.MethodGet, "/api/v1/items/it-1/trickplay.png")
 	if rr.Code != http.StatusServiceUnavailable {
 		t.Fatalf("sprite: status %d, want 503", rr.Code)
+	}
+}
+
+// trickplayWriteCache writes a sprite + manifest to itemDir so the
+// fast path picks them up. version=0 simulates a legacy v1 cache the
+// new generator should treat as stale.
+func trickplayWriteCache(t *testing.T, itemDir string, version int) {
+	t.Helper()
+	if err := os.MkdirAll(itemDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(itemDir, "sprite.png"),
+		[]byte("\x89PNG fake"), 0o644); err != nil {
+		t.Fatalf("write sprite: %v", err)
+	}
+	manifest := fmt.Sprintf(`{"version":%d,"interval_sec":10,"thumb_width":320,"thumb_height":180,"columns":10,"rows":10,"total":100}`, version)
+	if err := os.WriteFile(filepath.Join(itemDir, "manifest.json"),
+		[]byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+}
+
+// trickplayEnv creates an item handler wired to a real temporary
+// trickplay directory + a default in-memory item lookup. Used by the
+// async-generation tests that need to exercise the cache-vs-pending
+// branches under the actual handler logic.
+func trickplayEnv(t *testing.T) (*itemTestEnv, string) {
+	t.Helper()
+	dir := t.TempDir()
+	env := newItemTestEnv(t)
+	env.handler = NewItemHandler(env.svc, env.images, env.meta, env.userData, env.chapters, env.extIDs, env.people, nil, nil, dir, testutil.NopLogger())
+	r := chi.NewRouter()
+	r.Route("/api/v1/items/{id}", func(r chi.Router) {
+		r.Get("/trickplay.json", env.handler.TrickplayManifest)
+		r.Get("/trickplay.png", env.handler.TrickplaySprite)
+	})
+	env.router = r
+	return env, dir
+}
+
+// TestItemHandler_TrickplayManifest_FreshCacheServesImmediately pins
+// the fast-path: when a current-version sprite + manifest are on
+// disk, the handler must return 200 with the manifest body and not
+// touch ffmpeg. Regression guard for the async refactor that ships
+// with the 504-fix.
+func TestItemHandler_TrickplayManifest_FreshCacheServesImmediately(t *testing.T) {
+	env, dir := trickplayEnv(t)
+	itemDir := filepath.Join(dir, "it-1")
+	trickplayWriteCache(t, itemDir, imaging.TrickplayManifestVersion)
+
+	rr := env.do(http.MethodGet, "/api/v1/items/it-1/trickplay.json")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), `"version":`) {
+		t.Errorf("response did not include manifest body: %s", rr.Body.String())
+	}
+}
+
+// TestItemHandler_TrickplayManifest_PendingDoesNotBlock pins the
+// regression that broke production 2026-05-08: the synchronous
+// ffmpeg call inside the HTTP request handler took >60 s on adaptive
+// long-content sprites and the reverse proxy returned 504 to the
+// player. After the async refactor, a cache-miss must return 503
+// + Retry-After IMMEDIATELY (no ffmpeg work in the request goroutine).
+func TestItemHandler_TrickplayManifest_PendingDoesNotBlock(t *testing.T) {
+	env, _ := trickplayEnv(t)
+	// Wire a valid item so the goroutine spawn path runs (it'll fail
+	// behind the scenes because /dev/null isn't a real video, but the
+	// HTTP request must NOT wait for that failure).
+	env.svc.getItemFn = func(_ context.Context, id string) (*db.Item, error) {
+		return &db.Item{ID: id, Type: "movie", Title: "Foo", Path: "/dev/null", DurationTicks: 60 * 10_000_000}, nil
+	}
+
+	start := time.Now()
+	rr := env.do(http.MethodGet, "/api/v1/items/it-async/trickplay.json")
+	elapsed := time.Since(start)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status: %d, want 503; body=%s", rr.Code, rr.Body.String())
+	}
+	if elapsed > 500*time.Millisecond {
+		t.Errorf("handler blocked for %v; async refactor regressed (must return < 500 ms)", elapsed)
+	}
+	if rr.Header().Get("Retry-After") == "" {
+		t.Errorf("missing Retry-After header on pending response")
+	}
+	if !strings.Contains(rr.Body.String(), "TRICKPLAY_PENDING") {
+		t.Errorf("response did not include TRICKPLAY_PENDING code: %s", rr.Body.String())
+	}
+}
+
+// TestItemHandler_TrickplayManifest_StaleCacheReturnsPending pins the
+// version-stamp invalidation: a manifest from the legacy v1 generator
+// (version=0 / version=1) must NOT be served as-is — the handler
+// detects the older stamp via trickplayCacheFresh and falls through
+// to the regen-kickoff branch (which now returns 503 pending).
+func TestItemHandler_TrickplayManifest_StaleCacheReturnsPending(t *testing.T) {
+	env, dir := trickplayEnv(t)
+	itemDir := filepath.Join(dir, "it-stale")
+	trickplayWriteCache(t, itemDir, 0) // legacy v1 stamp
+	env.svc.getItemFn = func(_ context.Context, id string) (*db.Item, error) {
+		return &db.Item{ID: id, Type: "movie", Title: "Foo", Path: "/dev/null"}, nil
+	}
+
+	rr := env.do(http.MethodGet, "/api/v1/items/it-stale/trickplay.json")
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status: %d, want 503 (stale cache should fall through to pending); body=%s",
+			rr.Code, rr.Body.String())
 	}
 }
 

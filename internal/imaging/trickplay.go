@@ -70,14 +70,16 @@ type TrickplayParams struct {
 }
 
 // maxThumbsPerSprite caps how many thumbnails we'll pack into a single
-// sprite sheet. Tuned so the resulting PNG stays under ~6-8 MB
-// (320×180 × 20×20 = 6400×3600 px) — large enough that browsers
-// decode it once and `background-position` shifts are GPU-fast, small
-// enough that a 4-hour film doesn't end up with a 50 MB sprite. When
-// the caller-supplied duration would overflow this, IntervalSec is
-// scaled up so the count stays bounded; the trade-off is one
-// thumbnail per ~25-35 s on long content vs Plex's 10 s default.
-const maxThumbsPerSprite = 400
+// sprite sheet. Tuned so the resulting PNG stays under ~3-4 MB
+// (320×180 × 15×15 = 4800×2700 px) AND ffmpeg's keyframe-only decode
+// stays under ~30 s for typical sources — important because the
+// trickplay HTTP endpoint sits behind a reverse proxy that times out
+// at 60 s by default. When the caller-supplied duration would
+// overflow this, IntervalSec is scaled up so the count stays
+// bounded; the trade-off is one thumbnail per ~30-50 s on long
+// content vs Plex's 10 s default. 200 is plenty granular for the
+// hover preview UX (still < 30 s between frames on a 4-hour film).
+const maxThumbsPerSprite = 200
 
 func (p TrickplayParams) defaults() TrickplayParams {
 	if p.IntervalSec <= 0 {
