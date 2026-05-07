@@ -10,6 +10,7 @@ import type { UseQueryOptions } from "@tanstack/react-query";
 import { api } from "../client";
 import { queryKeys } from "../queryKeys";
 import type {
+  AdminStreamSession,
   AuthKey,
   HealthResponse,
   RotateAuthKeyResponse,
@@ -72,6 +73,45 @@ export function useResetSystemSetting() {
     mutationFn: ({ key }) => api.resetSystemSetting(key),
     onSuccess: (data) => {
       qc.setQueryData(queryKeys.systemSettings, data);
+      qc.invalidateQueries({ queryKey: queryKeys.systemStats });
+    },
+  });
+}
+
+// Active stream sessions for the admin "Now Playing" panel.
+//
+// 5s refetch interval matches Plex/Jellyfin's admin cadence — fast
+// enough that opening the panel during a playback feels live, slow
+// enough that we're not hammering the manager's mutex 12 times per
+// minute per admin viewer. The panel can opt out via options.
+export function useAdminStreamSessions(
+  options?: Partial<UseQueryOptions<AdminStreamSession[]>>,
+) {
+  return useQuery<AdminStreamSession[]>({
+    queryKey: queryKeys.adminStreamSessions,
+    queryFn: () => api.listAdminStreamSessions(),
+    refetchInterval: 5000,
+    ...options,
+  });
+}
+
+// Kill a session (admin scope). Optimistically nudges the local
+// cache to remove the row before the next 5s poll lands, so the
+// panel responds instantly to the click. The server's StopSession
+// is idempotent, so a stale optimistic remove combined with a real
+// kill via another admin tab is harmless.
+export function useKillAdminStreamSession() {
+  const qc = useQueryClient();
+  return useMutation<void, Error, { sessionID: string }>({
+    mutationFn: ({ sessionID }) => api.killAdminStreamSession(sessionID),
+    onSuccess: (_data, vars) => {
+      qc.setQueryData<AdminStreamSession[]>(queryKeys.adminStreamSessions, (prev) =>
+        prev ? prev.filter((s) => s.session_id !== vars.sessionID) : prev,
+      );
+      qc.invalidateQueries({ queryKey: queryKeys.adminStreamSessions });
+      // The system stats panel renders an "active sessions" gauge;
+      // killing one should refresh that count without waiting on the
+      // 30s system-stats refetch.
       qc.invalidateQueries({ queryKey: queryKeys.systemStats });
     },
   });

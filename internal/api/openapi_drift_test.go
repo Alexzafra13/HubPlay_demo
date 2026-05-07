@@ -99,6 +99,8 @@ var outOfScopeExact = map[string]string{
 	"GET /admin/system/settings":         "admin runtime config",
 	"PUT /admin/system/settings":         "admin runtime config",
 	"DELETE /admin/system/settings/{key}": "admin runtime config",
+	"GET /admin/system/sessions":         "admin now-playing panel",
+	"DELETE /admin/system/sessions/{id}": "admin now-playing panel",
 
 	// ── Library admin ─────────────────────────────────────────────────
 	"POST /libraries":              "admin library creation",

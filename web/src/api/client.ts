@@ -30,6 +30,7 @@ import type {
   SetupStatus,
   StreamSession,
   SystemCapabilities,
+  AdminStreamSession,
   SystemSettingsResponse,
   SystemStats,
   AuthKey,
@@ -1315,6 +1316,21 @@ export class ApiClient {
     return this.request<SystemSettingsResponse>("PUT", "/admin/system/settings", {
       body: { key, value },
     });
+  }
+
+  // Admin "Now Playing" panel — every active stream session the
+  // server is currently servicing. Polled every ~5s by the dashboard;
+  // the response is sorted server-side by StartedAt descending so the
+  // freshest session is first.
+  async listAdminStreamSessions(): Promise<AdminStreamSession[]> {
+    return this.request<AdminStreamSession[]>("GET", "/admin/system/sessions");
+  }
+
+  // Idempotent: killing a session that has already ended (idle reaper,
+  // user-driven teardown, ffmpeg crash) returns 204 same as a real
+  // kill, so the admin button never surfaces a misleading error.
+  async killAdminStreamSession(sessionID: string): Promise<void> {
+    return this.request<void>("DELETE", `/admin/system/sessions/${encodeURIComponent(sessionID)}`);
   }
 
   async resetSystemSetting(key: string): Promise<SystemSettingsResponse> {

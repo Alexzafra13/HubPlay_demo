@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useSystemStats } from "@/api/hooks";
 import type { SystemStats } from "@/api/types";
 import { Badge, Spinner, EmptyState } from "@/components/common";
+import { NowPlayingPanel } from "./dashboard/NowPlayingPanel";
 
 // Friendly labels for the canonical content_type vocabulary, mirrored
 // from SystemStatus. Kept duplicated to avoid importing across the
@@ -101,14 +102,12 @@ export default function DashboardAdmin() {
         </span>
       </header>
 
-      {/* Now Playing — filled in by Phase B (sessions endpoint). The
-          placeholder is intentional: the planned shape is visible so
-          the user can see where it'll land. */}
+      {/* Now Playing — live snapshot of every active stream session,
+          polled from /admin/system/sessions every 5s. Each row carries
+          a Kill button that delegates to manager.StopSession via the
+          DELETE endpoint. */}
       <Section title={t("admin.dashboard.nowPlaying")}>
-        <EmptyState
-          title={t("admin.dashboard.nowPlayingComingSoon")}
-          description={t("admin.dashboard.nowPlayingComingSoonHint")}
-        />
+        <NowPlayingPanel />
       </Section>
 
       {/* Inventory — backed by the libraries section of /admin/system/stats.

@@ -1018,6 +1018,25 @@ export interface SystemSettingsResponse {
   settings: SystemSetting[];
 }
 
+// AdminStreamSession is one row of the admin "Now Playing" table.
+// Mirrors the wire shape of GET /admin/system/sessions; the username
+// and item title are best-effort enrichments from the server (empty
+// strings if the underlying user/item has been deleted but the
+// manager still tracks the session — at which point the kill button
+// is the only remaining way to clean up).
+export interface AdminStreamSession {
+  session_id: string;
+  user_id: string;
+  username?: string;
+  item_id: string;
+  item_title?: string;
+  item_type?: string;
+  profile?: string; // empty for non-transcode sessions
+  method: "DirectPlay" | "DirectStream" | "Transcode";
+  started_at: string; // RFC3339 UTC
+  last_accessed: string; // RFC3339 UTC
+}
+
 export interface SetupStatus {
   needs_setup: boolean;
   current_step: "account" | "libraries" | "settings" | "complete" | "";
