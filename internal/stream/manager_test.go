@@ -2,6 +2,8 @@ package stream
 
 import (
 	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -434,5 +436,64 @@ func TestManager_RestartSessionAt_NotFound(t *testing.T) {
 	err := m.RestartSessionAt("never-existed", 100, 6.0)
 	if !errors.Is(err, ErrSessionNotFound) {
 		t.Errorf("expected ErrSessionNotFound, got %v", err)
+	}
+}
+
+// TestManager_StartGroup_CollapsesConcurrent pins the contract that
+// guards against the "two ffmpegs alive for the same session"
+// production bug: StartSession's slow path must collapse onto a single
+// execution when concurrent callers arrive for the same session key.
+//
+// The bug as observed: the player's init burst would fire StartSession
+// + an immediate retry (auth refresh, hls.js loading the manifest,
+// double-clicked Play, etc.) within the same few hundred ms.  Both
+// callers missed the m.sessions fast-path, both reached
+// transcoder.Start, and both ended up with their own ffmpeg writing
+// segmentNNNNN.ts to the same /cache/<sessionID> directory.  htop
+// showed two ffmpegs at 99% CPU for the same Bluray rip.
+//
+// Driving the actual StartSession path concurrently from a unit test
+// would require fakes for ItemRepository / MediaStreamRepository /
+// Transcoder, none of which the rest of this package needs.  Instead
+// we verify the singleflight instance the production code relies on
+// (m.startGroup) collapses N parallel Do() calls for the same key
+// into one fn execution — the property StartSession is built on.
+// If the field is ever moved, renamed, or replaced with something
+// non-coalescing, this test fails.
+func TestManager_StartGroup_CollapsesConcurrent(t *testing.T) {
+	m := newTestManager(t)
+	defer m.Shutdown()
+
+	var counter int32
+	// Sleep long enough that all N goroutines are guaranteed to be
+	// blocked inside Do() by the time the leader's fn returns. With
+	// N=5 spawned in a tight loop, 50 ms is comfortably more than
+	// the goroutine-startup window.
+	fn := func() (any, error) {
+		atomic.AddInt32(&counter, 1)
+		time.Sleep(50 * time.Millisecond)
+		return "winner", nil
+	}
+
+	const N = 5
+	results := make([]any, N)
+	var wg sync.WaitGroup
+	wg.Add(N)
+	for i := 0; i < N; i++ {
+		go func(i int) {
+			defer wg.Done()
+			v, _, _ := m.startGroup.Do("test-key", fn)
+			results[i] = v
+		}(i)
+	}
+	wg.Wait()
+
+	if got := atomic.LoadInt32(&counter); got != 1 {
+		t.Errorf("fn ran %d times; expected 1 — singleflight failed to collapse %d concurrent callers", got, N)
+	}
+	for i, r := range results {
+		if r != "winner" {
+			t.Errorf("caller %d got result %v; expected all callers to receive the leader's value", i, r)
+		}
 	}
 }
