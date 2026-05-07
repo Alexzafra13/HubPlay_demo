@@ -36,19 +36,16 @@ async function resolvePlayerSource(itemId: string): Promise<PlayerSourceInfo> {
 
 // Session teardown. The server's idle reaper still fires after
 // IdleTimeout (~90s), but we shouldn't make every closed tab burn
-// CPU + slot budget waiting for it. The `keepalive` flag lets the
-// fetch survive page unload — chrome / firefox / safari all support
-// it for short bodies, exactly matching our use case (no body, just
-// a DELETE). When the page is alive (closeplayer button, episode
-// switch) the same call works as a normal request.
+// CPU + slot budget waiting for it. The api.stopStreamSession helper
+// sets keepalive: true on the underlying fetch so the request
+// survives page unload (chrome / firefox / safari all support that
+// for short bodies, which matches our no-body DELETE exactly), and
+// goes through the CSRF-aware request path so the middleware doesn't
+// 403 the cleanup. When the page is alive (close player button,
+// episode switch) the same call works as a normal request.
 async function cleanupSession(itemId: string): Promise<void> {
   try {
-    const token = localStorage.getItem("hubplay_access_token");
-    await fetch(`/api/v1/stream/${itemId}/session`, {
-      method: "DELETE",
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-      keepalive: true,
-    });
+    await api.stopStreamSession(itemId);
   } catch {
     // Cleanup is best-effort; ignore network/auth errors.
   }

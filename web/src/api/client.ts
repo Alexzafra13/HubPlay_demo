@@ -662,6 +662,23 @@ export class ApiClient {
     });
   }
 
+  // stopStreamSession releases the server-side ffmpeg session and frees its
+  // slot. Called from player teardown (close button, episode switch) and from
+  // the pagehide/usePlayback cleanup hook so the user closing the tab doesn't
+  // leak ~90s of CPU to the idle reaper.
+  //
+  // `keepalive: true` lets the request survive page unload (covers pagehide
+  // / bfcache / iOS Safari). Routing it through `request` instead of a raw
+  // fetch picks up the standard CSRF double-submit (X-CSRF-Token header from
+  // the hubplay_csrf cookie) — without it the DELETE 403'd in production and
+  // we depended on the idle reaper to clean up. Errors are swallowed at the
+  // call sites; the reaper is still the safety net if even keepalive drops.
+  async stopStreamSession(itemId: string): Promise<void> {
+    return this.request<void>("DELETE", `/stream/${itemId}/session`, {
+      keepalive: true,
+    });
+  }
+
   async getStreamInfo(itemId: string): Promise<{
     media_streams: import("./types").MediaStream[];
     playback_methods: string[];
