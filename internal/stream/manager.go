@@ -90,12 +90,18 @@ type ManagedSession struct {
 	// LastRestartSegment is the segment index of the most recent
 	// successful Start / RestartAt for this session — i.e. the
 	// `-start_number` value the currently-running ffmpeg was given.
-	// Used by RestartSessionAt to coalesce near-simultaneous restart
-	// requests for adjacent segments: if two callers ask to restart
-	// near the same offset, the second one sees that the first
-	// already covered the range and bails out without touching
-	// ffmpeg.
+	// Paired with LastRestartTime by the coalesce check.
 	LastRestartSegment int
+	// LastRestartTime is the wall-clock moment of the most recent
+	// successful Start / RestartAt. The coalesce window in
+	// RestartSessionAt requires BOTH (a) recent in time AND
+	// (b) nearby in segment number — so a parallel-fanout burst
+	// from hls.js (3 adjacent segment requests fired within 100 ms
+	// of each other) collapses onto one ffmpeg, but a SECOND human
+	// click 5 s later that happens to land near the first still
+	// gets its own restart instead of waiting for ffmpeg to encode
+	// linearly through the gap.
+	LastRestartTime time.Time
 	// restartWindowStart / restartWindowCount form a per-session
 	// sliding-window rate limiter for RestartSessionAt. Defense in
 	// depth against a frontend regression that fires seek events
@@ -350,6 +356,7 @@ func (m *Manager) startSessionSlow(ctx context.Context, userID, itemID, profileN
 		Decision:           decision,
 		LastAccessed:       time.Now(),
 		LastRestartSegment: startSegment,
+		LastRestartTime:    time.Now(),
 	}
 
 	m.mu.Lock()
@@ -381,15 +388,16 @@ func (m *Manager) startSessionSlow(ctx context.Context, userID, itemID, profileN
 }
 
 // restartCoalesceWindow is the ±N segment range within which a
-// pending restart is considered to "cover" a new request. Set so a
-// burst of parallel hls.js segment fetches after a seek (typically
-// 2-3 adjacent segments) all coalesce onto one ffmpeg restart.
-//
-// Tuned conservatively: 10 segments × 6 s = 60 s of forward coverage.
-// A real seek to a different scene is always > 60 s away from the
-// previous restart point, so legitimate seeks still get their own
-// restart; only redundant near-duplicates get suppressed.
-const restartCoalesceWindow = 10
+// pending restart MAY be considered to "cover" a new request. Pair
+// with restartCoalesceTimeWindow: BOTH conditions must hold for a
+// new call to be coalesced. hls.js's parallel-fanout burst on a
+// seek arrives within ~100 ms across 2-3 adjacent segments, so the
+// AND-gate catches it cleanly. A second HUMAN click that happens
+// to land on a nearby segment 5 s later fails the time gate and
+// gets its own real restart — fixes the "second seek feels
+// blocked" bug observed 2026-05-08 in production.
+const restartCoalesceWindow = 6
+const restartCoalesceTimeWindow = 2 * time.Second
 
 // restartRateLimit caps RestartSessionAt invocations per session per
 // minute. Healthy use lands well under this — a user dragging the
@@ -440,20 +448,25 @@ func (m *Manager) RestartSessionAt(key string, segmentIndex int, segmentDuration
 	ms.restartMu.Lock()
 	defer ms.restartMu.Unlock()
 
-	// Coverage check, after the lock — by the time this caller
-	// won the mutex, an earlier caller may have just finished a
-	// restart that covers the requested segment. ffmpeg is now
-	// producing segments from `LastRestartSegment` onwards; if the
-	// requested index falls within the forward window we stay out
-	// of its way. The caller's segment will appear naturally as
-	// ffmpeg encodes ahead, and the segment-handler's waitForFile
-	// already gives us 15 s for that to happen.
+	// Coverage check, after the lock. Coalesce only when the previous
+	// restart was BOTH (a) very recent in time AND (b) at a nearby
+	// segment — that's the signature of hls.js's parallel-fanout
+	// after a seek (3 adjacent segment fetches within ~100 ms) and
+	// nothing else. A request that fails either gate is treated as
+	// a fresh seek that deserves its own restart, even if it happens
+	// to land near the previous one — humans clicking the bar twice
+	// in adjacent regions used to fall into the trap and feel
+	// "blocked" while ffmpeg encoded through the gap.
 	delta := segmentIndex - ms.LastRestartSegment
-	if delta >= 0 && delta <= restartCoalesceWindow {
-		m.logger.Debug("seek restart coalesced into in-flight restart",
+	timeSinceRestart := time.Since(ms.LastRestartTime)
+	timeRecent := !ms.LastRestartTime.IsZero() && timeSinceRestart < restartCoalesceTimeWindow
+	segmentNear := delta >= 0 && delta <= restartCoalesceWindow
+	if timeRecent && segmentNear {
+		m.logger.Debug("seek restart coalesced into in-flight fanout",
 			"key", key,
 			"requested_segment", segmentIndex,
 			"current_start_segment", ms.LastRestartSegment,
+			"since_last_restart", timeSinceRestart,
 		)
 		return nil
 	}
@@ -517,6 +530,7 @@ func (m *Manager) RestartSessionAt(key string, segmentIndex int, segmentDuration
 	ms.Session = newSession
 	ms.LastAccessed = time.Now()
 	ms.LastRestartSegment = segmentIndex
+	ms.LastRestartTime = time.Now()
 	m.mu.Unlock()
 
 	m.logger.Info("session restarted at segment",
