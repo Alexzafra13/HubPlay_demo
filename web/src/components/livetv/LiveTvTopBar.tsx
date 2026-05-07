@@ -145,7 +145,7 @@ export function LiveTvTopBar({
   const headerCopy =
     tab === "explorar"
       ? {
-          title: t("liveTV.title.explorar", {
+          title: t("liveTV.titleExplorar", {
             defaultValue: "Explorar canales",
           }),
           subtitle: (

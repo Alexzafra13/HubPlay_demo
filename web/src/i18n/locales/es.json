@@ -389,9 +389,7 @@
     "removeFromFavorites": "Quitar de favoritos",
     "favoritesEmpty": "Aun no tienes favoritos. Toca el corazon en cualquier canal para anadirlo.",
     "favoritesOnly": "Solo favoritos",
-    "title": {
-      "explorar": "Explorar canales"
-    },
+    "titleExplorar": "Explorar canales",
     "tab": {
       "inicio": "Inicio",
       "explorar": "Explorar",
