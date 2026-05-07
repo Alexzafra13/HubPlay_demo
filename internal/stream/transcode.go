@@ -330,6 +330,29 @@ func BuildFFmpegArgs(input, outputDir string, profile Profile, startTime float64
 	// that we never have to think about it again.
 	args = append(args, "-i", "file:"+input)
 
+	// Preserve source PTS in the output. Without this flag ffmpeg
+	// resets the output's presentation timestamps to 0 on each run,
+	// which is fine for a continuous transcode (segments produced in
+	// order, manifest entries match) but BREAKS the seek-restart
+	// case: a restart at -ss 1776 -start_number 296 produces
+	// segment00296.ts with internal PTS [0, 6] while the synthesized
+	// VOD manifest has already told the client "segment 296 covers
+	// timeline [1776, 1782]". MSE picks up the segment's actual PTS
+	// (not the manifest's claim) and ends up with a Frankenstein
+	// timeline; hls.js then fires fan-out requests at multiples of
+	// the seek target trying to fill what it thinks are buffer holes,
+	// which is exactly the +297-segment cadence the user reported on
+	// 2026-05-08. -copyts keeps PTS aligned with the source so
+	// segment N always lands at timeline N*hls_time, regardless of
+	// how many ffmpeg runs produced it. Plex / Jellyfin both apply
+	// this for the same reason.
+	//
+	// Pair this with default `-avoid_negative_ts auto` (already
+	// applied by ffmpeg) which corrects the rare case where a
+	// keyframe-aligned -ss lands on content with B-frames whose
+	// decoder-order PTS is fractionally negative.
+	args = append(args, "-copyts")
+
 	// Video
 	if copyVideo {
 		args = append(args, "-c:v", "copy")
