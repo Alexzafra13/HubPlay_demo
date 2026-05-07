@@ -84,3 +84,44 @@ The four user-visible symptoms had **two** root causes, not one. The doc above w
 ### What this session did NOT touch
 
 `internal/federation/`, `internal/iptv/`, `internal/auth/`, the live-TV player (`useLiveHls`). The fixes are scoped to the VOD path because that's where the bugs lived; live still uses its own lifecycle hook (the F4 split lives at `web/src/hooks/hlsLifecycle.ts` already, but the seek-loop bug doesn't apply to live anyway since live playlists don't expose far-future seeks).
+
+---
+
+## Addendum: the REAL root cause (2026-05-08 evening — `-copyts`)
+
+The "Resolution" section above declared the bug closed prematurely. The user post-deployed and reproduced a NEW symptom: "queda sin ir y se pausa, al darle Play empieza de nuevo". Browser-side debug instrumentation captured the actual cascade for the first time:
+
+```
+t=36.21s   user click @ 29:42 → seeking @1782.2  ✓
+t=36.21s   XHR seg 296                             ← correct
+t=39.03s   XHR seg 593   (+297 segs)               ← spurious
+t=41.94s   XHR seg 890   (+297 segs)               ← spurious
+t=48.82s   XHR seg 1171  (end of file)             ← spurious
+t=54.32s   durationchange  d=7026.6 → d=1786.5     ← timeline collapsed
+t=54.39s   pause + ended                            ← player TERMINATED
+```
+
+**Root cause: ffmpeg without `-copyts`** resets the output's PTS to 0 on each restart. Synthesized VOD manifest claims segment 296 covers timeline `[1776, 1782]`, but the produced `segment00296.ts` has internal PTS `[0, 6]`. MSE places segments by their actual PTS (NOT the manifest's claim), so the player's `<video>.currentTime = 1782` lands in a buffer hole. hls.js's stream controller then fires fan-out probe requests at multiples of the seek target trying to find content for the requested time — visible as the +297-segment cadence in server logs. Eventually MediaSource latches onto the smaller buffered range as the new duration, the player reaches EOF, and on Play the user sees "back to the beginning".
+
+Fix in commit `3f0ee55`: add `-copyts` unconditionally after `-i` so segment N always lands at timeline `N * hls_time` regardless of how many ffmpeg runs produced it. Plex and Jellyfin both apply this for the same reason.
+
+### What the earlier "Resolution" actually achieved
+
+The 6 fixes in the previous section were **all defensive layers**, not the root-cause fix. Specifically:
+
+- **Pointerup-commit SeekBar**: pre-existing concern (multi-fire during drag) but not the cause of the cascade. Worth keeping — Plex/YouTube pattern.
+- **`isSeeking` gate → `video.seeking` direct read**: defended against thumb jitter that was ITSELF caused by the timeline collapse. Once `-copyts` lands, jitter doesn't happen anyway. The simpler `video.seeking` direct read still wins because it self-recovers if a `seeked` event drops.
+- **Progress reporter skip while seeking**: still useful (defends resume state from being corrupted by mid-seek samples). Keep.
+- **`lastGoodTimeRef` recovery (both in useHls and VideoPlayer)**: defended against the "Play restarts from 0" symptom. With `-copyts` correct the timeline doesn't collapse anymore so currentTime never resets. The defensive layer is harmless and protects against unrelated future regressions (e.g., recoverMediaError edge cases). Keep but acknowledge as belt-and-suspenders.
+- **Trickplay adaptive grid + version stamp**: independent bug. Real fix. Necessary and unrelated to `-copyts`.
+- **Restart rate limit + AND-coalesce**: defends against future client-side seek loops that could re-emerge. Cheap defense. Keep.
+
+### Verification (post-fix)
+
+User reported back 2026-05-08: "el ffmpeg funciona perfecto!" ✓ Free seeking confirmed working in production after pulling the build with commit `3f0ee55`. Trickplay 504 timeouts also gone (commit `ac601bc` — async generation).
+
+### Lessons
+
+1. **Don't declare "closed" without prod verification.** The previous "Resolution" section was written before the user could test in their environment with a real long movie. The frontend fixes were defensible but the cascade reproduced — telling us the real cause was elsewhere.
+2. **Server logs alone aren't enough.** The +366 / +231 / +297 segment cadences in server logs all looked algorithmic but didn't pin the cause. The user-side debug snippet (XHR + video events + duration changes) was what surfaced the timeline collapse — and from there `-copyts` was a 5-minute fix.
+3. **MSE timeline integrity is fragile.** When manifest claims and segment PTS disagree, MSE silently builds a Frankenstein timeline; downstream symptoms (cascading fetches, duration collapse, playhead jumping) look like seek-handling bugs but aren't.
