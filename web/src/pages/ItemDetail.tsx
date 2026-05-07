@@ -275,6 +275,16 @@ export default function ItemDetail() {
           playbackMethod={playerInfo.playbackMethod}
           title={item.title}
           logoUrl={item.logo_url ?? undefined}
+          // Player's loading overlay falls back to series-level
+          // backdrop for episodes (the per-episode still is too
+          // small / often missing). When neither is available the
+          // overlay degrades to a flat black surface with the
+          // title/logo — still better than the bare-black <video>.
+          backdropUrl={
+            item.backdrop_url ??
+            (isSubItem ? item.series_backdrop_url : undefined) ??
+            undefined
+          }
           knownDuration={
             item.duration_ticks
               ? item.duration_ticks / 10_000_000
