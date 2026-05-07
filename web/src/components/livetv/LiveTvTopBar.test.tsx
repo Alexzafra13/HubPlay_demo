@@ -37,7 +37,7 @@ function renderBar(
   overrides: Partial<React.ComponentProps<typeof LiveTvTopBar>> = {},
 ) {
   const props: React.ComponentProps<typeof LiveTvTopBar> = {
-    tab: "discover",
+    tab: "inicio",
     onTab: vi.fn(),
     search: "",
     onSearch: vi.fn(),
@@ -46,44 +46,40 @@ function renderBar(
     heroMode: "favorites",
     heroModeOptions: MODE_OPTIONS,
     onHeroModeChange: vi.fn(),
+    favoritesOnly: false,
+    onFavoritesOnlyChange: vi.fn(),
     ...overrides,
   };
   return { props, ...render(<LiveTvTopBar {...props} />) };
 }
 
 describe("LiveTvTopBar", () => {
-  it("renders the total channel count on the guide tab", () => {
-    // On the discover tab the title + counters are lifted into the
-    // hero overlay (DiscoverView), so the topbar header is empty —
-    // assert against tabs that keep counters in the header.
-    renderBar({ tab: "guide", totalChannels: 268, liveNow: 19 });
+  it("renders the total + live-now counts on the explorar tab", () => {
+    // On Inicio the title + counters are lifted into the hero overlay
+    // so the topbar header is empty — assert against Explorar which
+    // keeps counters in the inline page header.
+    renderBar({ tab: "explorar", totalChannels: 268, liveNow: 19 });
     expect(screen.getByText("268")).toBeInTheDocument();
-  });
-
-  it("renders the live-now count on the now tab", () => {
-    renderBar({ tab: "now", totalChannels: 268, liveNow: 19 });
     expect(screen.getByText("19")).toBeInTheDocument();
   });
 
-  it("renders four tabs with role=tab and marks the active one aria-selected", () => {
-    renderBar({ tab: "guide" });
+  it("renders two tabs with role=tab and marks the active one aria-selected", () => {
+    renderBar({ tab: "explorar" });
     const tabs = screen.getAllByRole("tab");
-    // Now / Descubrir / Guía / Favoritos. "Ahora" was promoted to a
-    // first-class tab so the default landing answers "what to put on?"
-    // directly instead of routing the user through editorial Discover.
-    expect(tabs).toHaveLength(4);
+    // Inicio / Explorar — Plex-style 2-surface design.
+    expect(tabs).toHaveLength(2);
 
     const selected = tabs.filter((t) => t.getAttribute("aria-selected") === "true");
     expect(selected).toHaveLength(1);
-    expect(selected[0]).toHaveTextContent(/Guía/);
+    expect(selected[0]).toHaveTextContent(/Explorar/);
   });
 
   it("clicking a tab fires onTab with its id", () => {
     const onTab = vi.fn();
-    renderBar({ tab: "discover", onTab });
+    renderBar({ tab: "inicio", onTab });
 
-    fireEvent.click(screen.getByRole("tab", { name: /Favoritos/ }));
-    expect(onTab).toHaveBeenCalledWith("favorites");
+    fireEvent.click(screen.getByRole("tab", { name: /Explorar/ }));
+    expect(onTab).toHaveBeenCalledWith("explorar");
   });
 
   it("search input is controlled and fires onSearch on every keystroke", () => {
@@ -97,21 +93,18 @@ describe("LiveTvTopBar", () => {
     expect(onSearch).toHaveBeenCalledWith("news");
   });
 
-  it("HeroSettings is only rendered on the discover tab", () => {
-    const { rerender, props } = renderBar({ tab: "discover" });
+  it("HeroSettings is only rendered on the inicio tab", () => {
+    const { rerender, props } = renderBar({ tab: "inicio" });
     expect(screen.getByTestId("hero-settings")).toBeInTheDocument();
 
-    rerender(<LiveTvTopBar {...props} tab="guide" />);
-    expect(screen.queryByTestId("hero-settings")).toBeNull();
-
-    rerender(<LiveTvTopBar {...props} tab="favorites" />);
+    rerender(<LiveTvTopBar {...props} tab="explorar" />);
     expect(screen.queryByTestId("hero-settings")).toBeNull();
   });
 
   it("forwards the heroMode prop and wires onHeroModeChange when a mode is picked", () => {
     const onHeroModeChange = vi.fn();
     renderBar({
-      tab: "discover",
+      tab: "inicio",
       heroMode: "live-now",
       onHeroModeChange,
     });
@@ -123,5 +116,23 @@ describe("LiveTvTopBar", () => {
 
     fireEvent.click(screen.getByText("mode-off"));
     expect(onHeroModeChange).toHaveBeenCalledWith("off");
+  });
+
+  it("Solo favoritos toggle is only on Explorar and fires onFavoritesOnlyChange", () => {
+    const onFavoritesOnlyChange = vi.fn();
+    const { rerender, props } = renderBar({
+      tab: "inicio",
+      favoritesOnly: false,
+      onFavoritesOnlyChange,
+    });
+    // Hidden on Inicio.
+    expect(screen.queryByRole("button", { name: /Solo favoritos/i })).toBeNull();
+
+    rerender(<LiveTvTopBar {...props} tab="explorar" />);
+    const btn = screen.getByRole("button", { name: /Solo favoritos/i });
+    expect(btn).toHaveAttribute("aria-pressed", "false");
+
+    fireEvent.click(btn);
+    expect(onFavoritesOnlyChange).toHaveBeenCalledWith(true);
   });
 });

@@ -10,13 +10,12 @@ import {
 import type { Channel, ChannelCategory, EPGProgram } from "@/api/types";
 import { useLiveTvData } from "./liveTv/useLiveTvData";
 import {
+  CategoryChips,
   type CategoryFilter,
   CountrySelector,
   DiscoverView,
   EPGGrid,
-  FavoritesView,
-  LiveNowView,
-  type LiveNowSort,
+  HeroSpotlight,
   LiveTvSkeleton,
   LiveTvTopBar,
   type ViewTab,
@@ -26,20 +25,41 @@ import {
   useHeroSpotlight,
 } from "@/components/livetv";
 
+// Map from legacy ?tab values (pre 2026-05-08, when Live TV had 4
+// tabs: Now / Discover / Guide / Favorites) onto the current 2-tab
+// vocabulary. Sidebar links and any bookmarks from before the redesign
+// route through here on first land so users don't hit a dead URL.
+const LEGACY_TAB_MAP: Record<string, ViewTab> = {
+  now: "inicio",
+  guide: "inicio",
+  discover: "explorar",
+  favorites: "explorar",
+};
+
+function normalizeViewTab(raw: string | null): ViewTab {
+  if (raw === "inicio" || raw === "explorar") return raw;
+  if (raw && LEGACY_TAB_MAP[raw]) return LEGACY_TAB_MAP[raw];
+  return "inicio";
+}
+
 /**
- * LiveTV — Discover / Guide / Favorites, wired.
+ * LiveTV — Plex-style 2-surface design: Inicio + Explorar.
+ *
+ * Inicio: hero spotlight + Plex-style EPG schedule grid (filterable
+ *   by category). Answers the user's "what's on right now?" question.
+ * Explorar: full channel lineup with category sections and an inline
+ *   "Solo favoritos" filter for browsing.
  *
  * Responsibilities kept on this page:
  *   - Fetch livetv libraries + channels + schedules + unhealthy list.
- *   - Tab / category / search state.
+ *   - Tab / category / search / favourites-filter state (URL-backed).
  *   - Player overlay state + Escape handler.
  *   - Favorite toggle.
- *   - Derive counts + filtered channels for the tabs.
+ *   - Derive counts + filtered channels for both surfaces.
  *
- * The three tab bodies (DiscoverView, EPGGrid, FavoritesView) are
- * separate components under web/src/components/livetv/. The hero policy
- * lives in useHeroSpotlight. Keeps the page focused on orchestration so
- * changing a tab body doesn't bloat this file.
+ * Composition lives inline (small enough now) — the page-level pieces
+ * (HeroSpotlight, EPGGrid, DiscoverView) live under web/src/components/
+ * livetv/ so each can iterate independently.
  */
 export default function LiveTV() {
   const { t } = useTranslation();
@@ -59,16 +79,16 @@ export default function LiveTV() {
   } = useLiveTvData();
 
   // ── Tabs + filters (URL-backed) ───────────────────────────────────
-  // The page's filter state lives in `?tab&cat&q=` so deep-links survive
-  // a refresh, the browser Back button works as the user expects, and
-  // links are shareable. Defaults are the canonical empty state and
-  // are kept out of the URL (we delete the param) so the bar stays
-  // tidy when the user is on Discover/Todos/no-search.
+  // The page's filter state lives in `?tab&cat&q=fav=` so deep-links
+  // survive a refresh, the browser Back button works as the user
+  // expects, and links are shareable. Defaults are the canonical empty
+  // state and are kept out of the URL (we delete the param) so the bar
+  // stays tidy when the user is on Inicio/Todos/no-search.
   const [searchParams, setSearchParams] = useSearchParams();
-  const tab = (searchParams.get("tab") as ViewTab) ?? "now";
+  const tab = normalizeViewTab(searchParams.get("tab"));
   const category = (searchParams.get("cat") as CategoryFilter) ?? "all";
   const search = searchParams.get("q") ?? "";
-  const sort = (searchParams.get("sort") as LiveNowSort) ?? "favorites";
+  const favoritesOnly = searchParams.get("fav") === "1";
 
   const updateParam = useCallback(
     (key: string, value: string, defaultValue: string) => {
@@ -85,7 +105,7 @@ export default function LiveTV() {
     [setSearchParams],
   );
   const setTab = useCallback(
-    (next: ViewTab) => updateParam("tab", next, "now"),
+    (next: ViewTab) => updateParam("tab", next, "inicio"),
     [updateParam],
   );
   const setCategory = useCallback(
@@ -96,10 +116,33 @@ export default function LiveTV() {
     (next: string) => updateParam("q", next, ""),
     [updateParam],
   );
-  const setSort = useCallback(
-    (next: LiveNowSort) => updateParam("sort", next, "favorites"),
+  const setFavoritesOnly = useCallback(
+    (next: boolean) => updateParam("fav", next ? "1" : "", ""),
     [updateParam],
   );
+
+  // Migrate legacy `?tab=now|guide|discover|favorites` URLs (sidebar
+  // links and bookmarks pre-2026-05-08) onto the new 2-tab vocabulary.
+  // Runs once on mount; subsequent navigations land directly on the
+  // new param names. We rewrite via `setSearchParams({replace})` so
+  // the user's history isn't polluted with an extra entry.
+  useEffect(() => {
+    const raw = searchParams.get("tab");
+    if (!raw) return;
+    const migrated = LEGACY_TAB_MAP[raw];
+    if (!migrated) return;
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (migrated === "inicio") next.delete("tab");
+        else next.set("tab", migrated);
+        // `?sort=` was an artefact of the old "Ahora" tab — drop it.
+        next.delete("sort");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [searchParams, setSearchParams]);
 
   // ── Player overlay (lives in the global LiveTV player store so it
   //    survives navigation as a corner mini-player) ────────────────
@@ -242,6 +285,10 @@ export default function LiveTV() {
   }, [channels]);
 
   // ── Derived: filtered + grouped for Discover ─────────────────────
+  // `filteredChannels` honours category + search + favourites toggle
+  // (Explorar) and is shared with the EPG grid on Inicio (which only
+  // honours category + search since Inicio has no favourites filter
+  // — favourites are surfaced via the hero spotlight there).
   const filteredChannels = useMemo(() => {
     let list = channels;
     if (category === "no-signal") {
@@ -262,15 +309,23 @@ export default function LiveTV() {
     return list;
   }, [channels, category, search]);
 
+  // Explorar applies the favourites toggle on top of the shared
+  // filtering — kept separate so Inicio's EPG keeps showing every
+  // channel the user can scroll to.
+  const explorarChannels = useMemo(() => {
+    if (!favoritesOnly) return filteredChannels;
+    return filteredChannels.filter((c) => favoriteSet.has(c.id));
+  }, [filteredChannels, favoritesOnly, favoriteSet]);
+
   const channelsByCategory = useMemo(() => {
     const byCat = new Map<ChannelCategory, Channel[]>();
-    for (const ch of filteredChannels) {
+    for (const ch of explorarChannels) {
       const list = byCat.get(ch.category) ?? [];
       list.push(ch);
       byCat.set(ch.category, list);
     }
     return byCat;
-  }, [filteredChannels]);
+  }, [explorarChannels]);
 
   // Hero spotlight — preference, silent fallback and mode options live
   // in the dedicated hook so this page stays focused on layout.
@@ -281,52 +336,6 @@ export default function LiveTV() {
     setMode: setHeroMode,
     modeOptions: heroModeOptions,
   } = useHeroSpotlight({ channels, scheduleByChannel, favoriteSet });
-
-  // ── "Ahora en directo" rail ──────────────────────────────────────
-  // Independent of the hero — surfaces every channel that has an EPG
-  // entry currently broadcasting, capped at a manageable rail length.
-  // Favourites bubble to the front so the user's anchor channels don't
-  // get buried; ties break by channel number for a stable order.
-  // Capped at 18 because beyond that the rail becomes a wall the user
-  // can't really scan; the dedicated "Guía" tab is the right place for
-  // exhaustive listings.
-  const liveNowChannels = useMemo(() => {
-    return channels
-      .filter((c) => getNowPlaying(scheduleByChannel[c.id]))
-      .sort((a, b) => {
-        const aFav = favoriteSet.has(a.id) ? 0 : 1;
-        const bFav = favoriteSet.has(b.id) ? 0 : 1;
-        return aFav - bFav || a.number - b.number;
-      });
-  }, [channels, scheduleByChannel, favoriteSet]);
-
-  // Counts per category — scoped to live-now channels only — so the
-  // chip pills on the "Ahora" tab read "how many channels in this
-  // category are on right now", not "how many total". The total
-  // counts already live in `counts` (used by DiscoverView).
-  const liveNowCounts = useMemo<Record<CategoryFilter, number>>(() => {
-    const base: Record<CategoryFilter, number> = {
-      all: liveNowChannels.length,
-      "no-signal": 0,
-      general: 0,
-      news: 0,
-      sports: 0,
-      movies: 0,
-      music: 0,
-      entertainment: 0,
-      kids: 0,
-      culture: 0,
-      documentaries: 0,
-      international: 0,
-      travel: 0,
-      religion: 0,
-      adult: 0,
-    };
-    for (const ch of liveNowChannels) {
-      base[ch.category] += 1;
-    }
-    return base;
-  }, [liveNowChannels]);
 
   // Topbar counter: number of channels *actually broadcasting now* — in IPTV
   // all active channels stream continuously, so this is simply the count of
@@ -353,16 +362,15 @@ export default function LiveTV() {
     return <CountrySelector hasLibrary={liveTvLibraries.length > 0} />;
   }
 
-  // ── Active-channel pointer for EPGGrid (kept for the Guide tab) ───
+  // ── Active-channel pointer for EPGGrid ───────────────────────────
   // Fall back to the first visible row so the "active" highlight never
   // points off-screen when the user has a filter or search applied.
-  const guideActiveChannel =
+  const inicioActiveChannel =
     playingChannel ?? filteredChannels[0] ?? channels[0] ?? null;
 
   // Header overlay for the hero — page title + counters. Lifted into
   // the hero so the spotlight hugs the TopBar instead of sitting under
-  // a separate stripe; reused on the discover tab only (the other tabs
-  // still get the inline title from LiveTvTopBar).
+  // a separate stripe.
   const heroHeaderOverlay = (
     <div>
       <h1 className="flex items-center gap-2 text-xl font-bold text-tv-fg-0 drop-shadow-md md:text-2xl">
@@ -381,12 +389,7 @@ export default function LiveTV() {
       data-theme="tv"
       data-accent="lime"
       // Small top breathing room (pt-3) so the hero feels close to the
-      // global TopBar without looking sliced off at the top edge —
-      // flush-zero looked cropped against the bar's frosted glass.
-      // The hero keeps its rounded corners (no flushTop) for the same
-      // reason: a soft-edged card framed by a few px of bg reads as
-      // intentional whereas hard square corners under the bar read as
-      // overflow.
+      // global TopBar without looking sliced off at the top edge.
       className="-mx-4 flex flex-col gap-6 px-4 pb-10 pt-3 md:-mx-6 md:px-6"
     >
       <LiveTvTopBar
@@ -399,9 +402,36 @@ export default function LiveTV() {
         heroMode={heroMode}
         heroModeOptions={heroModeOptions}
         onHeroModeChange={setHeroMode}
+        favoritesOnly={favoritesOnly}
+        onFavoritesOnlyChange={setFavoritesOnly}
       />
 
-      {tab === "discover" && (
+      {tab === "inicio" && (
+        <div className="flex flex-col gap-6">
+          {heroMode !== "off" && heroItems.length > 0 ? (
+            <HeroSpotlight
+              items={heroItems}
+              label={heroLabel}
+              onOpen={openPlayer}
+              headerOverlay={heroHeaderOverlay}
+            />
+          ) : null}
+          <CategoryChips
+            counts={counts}
+            active={category}
+            onChange={setCategory}
+          />
+          <EPGGrid
+            channels={filteredChannels}
+            scheduleByChannel={scheduleByChannel}
+            activeChannelId={inicioActiveChannel?.id}
+            onSelectChannel={openPlayer}
+            onSelectProgram={openProgramDetail}
+          />
+        </div>
+      )}
+
+      {tab === "explorar" && (
         <DiscoverView
           heroItems={heroItems}
           heroLabel={heroLabel}
@@ -415,45 +445,13 @@ export default function LiveTV() {
           onToggleFavorite={toggleFavorite}
           unhealthyChannels={unhealthyChannels}
           continueWatching={continueWatching}
-          heroHeaderOverlay={heroHeaderOverlay}
-          heroMode={heroMode}
+          // Hero overlay/title only on Explorar when we keep the
+          // spotlight (we hide it here when the user is filtering by
+          // favourites — the favourites toggle replaces the hero as
+          // the dominant signal).
+          heroHeaderOverlay={favoritesOnly ? undefined : heroHeaderOverlay}
+          heroMode={favoritesOnly ? "off" : heroMode}
           onHeroModeChange={setHeroMode}
-        />
-      )}
-
-      {tab === "now" && (
-        <LiveNowView
-          channels={liveNowChannels}
-          scheduleByChannel={scheduleByChannel}
-          category={category}
-          onCategoryChange={setCategory}
-          counts={liveNowCounts}
-          search={search}
-          sort={sort}
-          onSortChange={setSort}
-          onOpen={openPlayer}
-          favoriteSet={favoriteSet}
-          onToggleFavorite={toggleFavorite}
-        />
-      )}
-
-      {tab === "guide" && (
-        <EPGGrid
-          channels={filteredChannels}
-          scheduleByChannel={scheduleByChannel}
-          activeChannelId={guideActiveChannel?.id}
-          onSelectChannel={openPlayer}
-          onSelectProgram={openProgramDetail}
-        />
-      )}
-
-      {tab === "favorites" && (
-        <FavoritesView
-          channels={channels}
-          favoriteSet={favoriteSet}
-          scheduleByChannel={scheduleByChannel}
-          onOpen={openPlayer}
-          onToggleFavorite={toggleFavorite}
         />
       )}
 

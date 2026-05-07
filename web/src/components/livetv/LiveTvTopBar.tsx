@@ -5,7 +5,7 @@ import {
   type HeroModeOption,
 } from "./HeroSettings";
 
-export type ViewTab = "now" | "discover" | "guide" | "favorites";
+export type ViewTab = "inicio" | "explorar";
 
 interface LiveTvTopBarProps {
   tab: ViewTab;
@@ -17,6 +17,11 @@ interface LiveTvTopBarProps {
   heroMode: HeroMode;
   heroModeOptions: HeroModeOption[];
   onHeroModeChange: (mode: HeroMode) => void;
+  /** "Solo favoritos" toggle — only relevant on the Explorar tab.
+   * Inicio doesn't expose it because the hero already promotes
+   * favourites via the spotlight strategy. */
+  favoritesOnly?: boolean;
+  onFavoritesOnlyChange?: (v: boolean) => void;
 }
 
 /**
@@ -43,22 +48,19 @@ export function LiveTvTopBar({
   heroMode,
   heroModeOptions,
   onHeroModeChange,
+  favoritesOnly = false,
+  onFavoritesOnlyChange,
 }: LiveTvTopBarProps) {
   const { t } = useTranslation();
-  // Tab order encodes intent: "Ahora" first because it's the answer to
-  // the user's actual question on landing ("what do I put on?"), then
-  // "Descubrir" for browsing the lineup, "Guía" for the schedule view
-  // and "Favoritos" as the personal anchor list.
+  // Two-surface design (Plex-style): "Inicio" lands on a hero +
+  // schedule grid that answers "what's on right now?", "Explorar"
+  // surfaces the full channel lineup with categories + favourites
+  // filter for browsing.
   const tabs: { id: ViewTab; label: string }[] = [
-    { id: "now", label: t("liveTV.tab.now", { defaultValue: "Ahora" }) },
+    { id: "inicio", label: t("liveTV.tab.inicio", { defaultValue: "Inicio" }) },
     {
-      id: "discover",
-      label: t("liveTV.tab.discover", { defaultValue: "Descubrir" }),
-    },
-    { id: "guide", label: t("liveTV.tab.guide", { defaultValue: "Guía" }) },
-    {
-      id: "favorites",
-      label: t("liveTV.tab.favorites", { defaultValue: "Favoritos" }),
+      id: "explorar",
+      label: t("liveTV.tab.explorar", { defaultValue: "Explorar" }),
     },
   ];
 
@@ -102,13 +104,32 @@ export function LiveTvTopBar({
         ))}
       </div>
 
-      {/* Hero view settings. Only relevant to the Discover surface,
-          so we hide it on the other tabs to avoid offering a control
-          whose effect isn't visible. Living here (not inside the hero
-          itself) keeps it reachable even when the viewer has hidden
-          the spotlight entirely — the previous in-hero gear vanished
-          with the hero, making "ocultar" a dead end. */}
-      {tab === "discover" ? (
+      {/* Favourites-only filter — only on Explorar (Inicio surfaces
+          favourites via the hero spotlight strategy). The toggle
+          lives in the topbar so the user can flip it without scrolling. */}
+      {tab === "explorar" && onFavoritesOnlyChange ? (
+        <button
+          type="button"
+          aria-pressed={favoritesOnly}
+          onClick={() => onFavoritesOnlyChange(!favoritesOnly)}
+          className={[
+            "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+            favoritesOnly
+              ? "border-tv-accent/60 bg-tv-accent/15 text-tv-accent"
+              : "border-tv-line bg-tv-bg-1 text-tv-fg-1 hover:text-tv-fg-0",
+          ].join(" ")}
+        >
+          <HeartIcon filled={favoritesOnly} />
+          {t("liveTV.favoritesOnly", { defaultValue: "Solo favoritos" })}
+        </button>
+      ) : null}
+
+      {/* Hero view settings — surfaced on Inicio because that's where
+          the spotlight lives. Living here (not inside the hero itself)
+          keeps it reachable even when the viewer has hidden the
+          spotlight entirely — an in-hero gear would vanish with the
+          hero, making "ocultar" a dead end. */}
+      {tab === "inicio" ? (
         <HeroSettings
           mode={heroMode}
           modeOptions={heroModeOptions}
@@ -118,49 +139,15 @@ export function LiveTvTopBar({
     </div>
   );
 
-  // On the discover surface the title + counters are lifted into the
-  // hero's top-left overlay (DiscoverView wires that), so this header
-  // shrinks to just the controls strip — no double title.
-  // Header copy adapts to the active tab so the title + subtitle
-  // describe the surface you're actually looking at — instead of
-  // claiming "169 canales" while the page only shows 45 (the old
-  // behaviour was technically correct for the library, but lied
-  // about what was on screen).
-  const headerCopy = (() => {
-    switch (tab) {
-      case "now":
-        return {
-          title: t("liveTV.title.now", { defaultValue: "Ahora en directo" }),
-          subtitle: (
-            <>
-              <b className="text-tv-fg-1">{liveNow}</b>{" "}
-              {t("liveTV.channelsLive", {
-                defaultValue: "canales emitiendo ahora",
-              })}
-            </>
-          ),
-        };
-      case "guide":
-        return {
-          title: t("liveTV.title.guide", { defaultValue: "Guía TV" }),
-          subtitle: (
-            <>
-              <b className="text-tv-fg-1">{totalChannels}</b>{" "}
-              {t("liveTV.channels", { defaultValue: "canales" })}
-            </>
-          ),
-        };
-      case "favorites":
-        return {
-          title: t("liveTV.title.favorites", {
-            defaultValue: "Tus favoritos",
+  // On Inicio the title + counters are lifted into the hero's top-left
+  // overlay so the hero hugs the topbar; on Explorar we show an inline
+  // page header with channel counts.
+  const headerCopy =
+    tab === "explorar"
+      ? {
+          title: t("liveTV.title.explorar", {
+            defaultValue: "Explorar canales",
           }),
-          subtitle: null,
-        };
-      case "discover":
-      default:
-        return {
-          title: t("liveTV.title", { defaultValue: "TV en directo" }),
           subtitle: (
             <>
               <b className="text-tv-fg-1">{totalChannels}</b>{" "}
@@ -169,13 +156,12 @@ export function LiveTvTopBar({
               {t("liveTV.liveNow", { defaultValue: "en vivo ahora" })}
             </>
           ),
-        };
-    }
-  })();
+        }
+      : null;
 
   return (
     <header className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-      {tab !== "discover" && (
+      {headerCopy && (
         <div>
           <h1 className="flex items-center gap-2 text-xl font-bold text-tv-fg-0 md:text-2xl">
             <span className="inline-flex h-2.5 w-2.5 animate-pulse rounded-full bg-tv-live shadow-[0_0_8px_var(--tv-live)]" />
@@ -189,6 +175,24 @@ export function LiveTvTopBar({
 
       {controls}
     </header>
+  );
+}
+
+function HeartIcon({ filled }: { filled: boolean }) {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill={filled ? "currentColor" : "none"}
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+    </svg>
   );
 }
 
