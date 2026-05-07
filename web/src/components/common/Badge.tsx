@@ -9,7 +9,7 @@ interface BadgeProps {
 }
 
 // `default` is intentionally neutral so the brand accent stays
-// reserved for primary CTAs (Button), identity (BrandMark, sidebar
+// reserved for primary CTAs (Button), identity (BrandWordmark, sidebar
 // active indicator) and active interactive state. Decorative metadata
 // chips (genres, content-type, content-rating, "default" markers)
 // previously inherited the accent and competed with the real CTAs

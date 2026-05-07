@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { getInitials } from "@/utils/userDisplay";
-import { BrandMark } from "./BrandMark";
+import { BrandWordmark } from "./BrandWordmark";
 import { SearchBar } from "./SearchBar";
 import { MainNav } from "./MainNav";
 
@@ -52,12 +52,10 @@ export function TopBar({ onMobileMenuClick }: TopBarProps) {
       <NavLink
         to="/"
         end
-        className="flex items-center gap-2.5 px-1 py-1.5 rounded-lg hover:bg-bg-hover/60 transition-colors min-w-0 flex-shrink-0"
+        aria-label="HubPlay"
+        className="flex items-center px-1 py-1.5 rounded-lg hover:bg-bg-hover/60 transition-colors min-w-0 flex-shrink-0"
       >
-        <BrandMark size={30} />
-        <span className="text-[15px] font-semibold tracking-tight text-text-primary truncate hidden sm:inline">
-          HubPlay
-        </span>
+        <BrandWordmark height={26} />
       </NavLink>
 
       {/* Center nav — desktop only; on mobile the drawer holds it */}

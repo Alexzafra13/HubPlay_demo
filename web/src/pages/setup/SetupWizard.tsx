@@ -5,6 +5,7 @@ import AccountStep from "./AccountStep";
 import LibrariesStep from "./LibrariesStep";
 import SettingsStep from "./SettingsStep";
 import CompleteStep from "./CompleteStep";
+import { BrandWordmark } from "@/components/layout/BrandWordmark";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -108,27 +109,14 @@ function StepIndicator({ currentStep }: { currentStep: number }) {
 
 // ─── Logo ────────────────────────────────────────────────────────────────────
 
-// HubPlayLogo — kept visually consistent with the Login page so a new
-// admin doesn't see two different brand marks during their first
-// session. Both are placeholders pending a proper logo design; until
-// then the squared-off accent tile + halo is the canonical mark.
+// HubPlayLogo — kept visually consistent with the Login page and TopBar so
+// a new admin sees the same brand mark across their first session.
 function HubPlayLogo() {
   const { t } = useTranslation();
   return (
-    <div className="flex flex-col items-center gap-3">
-      <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-accent shadow-[0_0_30px_rgba(13,148,136,0.55)]">
-        <svg
-          className="h-8 w-8 text-white"
-          viewBox="0 0 24 24"
-          fill="currentColor"
-        >
-          <path d="M8 5v14l11-7z" />
-        </svg>
-      </div>
-      <div className="text-center">
-        <h1 className="text-2xl font-bold text-text-primary">HubPlay</h1>
-        <p className="text-sm text-text-muted mt-1">{t('setup.wizardLabel')}</p>
-      </div>
+    <div className="flex flex-col items-center gap-2">
+      <BrandWordmark height={44} />
+      <p className="text-sm text-text-muted">{t('setup.wizardLabel')}</p>
     </div>
   );
 }
