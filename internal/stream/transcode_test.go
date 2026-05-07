@@ -138,6 +138,44 @@ func TestBuildFFmpegArgs_WithSeek(t *testing.T) {
 	assertContains(t, args, "-ss", "30.500")
 }
 
+// TestBuildFFmpegArgs_AlwaysIncludesCopyts pins the regression for
+// the 2026-05-08 seek cascade: without `-copyts`, a restart at
+// -ss <T> -start_number N produces segments whose internal PTS
+// resets to 0, NOT to N*hls_time as the synthesized VOD manifest
+// claims. MSE then picks up the actual PTS (not the manifest's
+// claim), the timeline becomes Frankenstein, and hls.js fires
+// fan-out segment requests at multiples of the seek target trying
+// to fill the resulting "buffer holes". Visible in production as
+// "queda sin ir y se pausa" with +297-segment cadence in server
+// logs. -copyts must be on every codepath, not just the restarts —
+// initial sessions with startTime>0 (resume from saved progress)
+// have the same issue.
+func TestBuildFFmpegArgs_AlwaysIncludesCopyts(t *testing.T) {
+	cases := []struct {
+		name      string
+		startTime float64
+	}{
+		{"initial-session-from-zero", 0},
+		{"resume-from-saved-position", 42},
+		{"seek-restart-mid-movie", 1776},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			args := stream.BuildFFmpegArgs("/input.mkv", "/out", stream.Profiles["720p"], tc.startTime, stream.HWAccelNone, "libx264", false, false, 0)
+			found := false
+			for _, a := range args {
+				if a == "-copyts" {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("ffmpeg args missing -copyts; got %v", args)
+			}
+		})
+	}
+}
+
 func TestBuildFFmpegArgs_NoSeekAtZero(t *testing.T) {
 	args := stream.BuildFFmpegArgs("/input.mkv", "/out", stream.Profiles["720p"], 0, stream.HWAccelNone, "libx264", false, false, 0)
 
