@@ -400,12 +400,15 @@ func TestManager_RestartSessionAt_CoalescesAdjacent(t *testing.T) {
 		Decision:           PlaybackDecision{Profile: DefaultProfile()},
 		LastAccessed:       time.Now(),
 		LastRestartSegment: 953, // ffmpeg "is producing" from 953 onwards
+		LastRestartTime:    time.Now(),
 	}
 	m.mu.Unlock()
 
-	// Simulate hls.js fanout: three near-adjacent segment requests
-	// that all arrive after the first restart already happened.
-	for _, segIdx := range []int{953, 954, 955, 960, 962} {
+	// Simulate hls.js fanout: near-adjacent segment requests that all
+	// arrive within milliseconds of the first restart (LastRestartTime
+	// just set above is "now"). Both gates of the AND-coalesce hold
+	// → all extra calls return nil without touching ffmpeg.
+	for _, segIdx := range []int{953, 954, 955, 956, 958} {
 		if err := m.RestartSessionAt("test-key", segIdx, 6.0); err != nil {
 			t.Errorf("RestartSessionAt(%d) returned error %v — coalesce check should have skipped",
 				segIdx, err)
@@ -419,6 +422,62 @@ func TestManager_RestartSessionAt_CoalescesAdjacent(t *testing.T) {
 	if ms.LastRestartSegment != 953 {
 		t.Errorf("LastRestartSegment changed to %d (expected 953); coverage check failed to coalesce",
 			ms.LastRestartSegment)
+	}
+}
+
+// TestManager_RestartSessionAt_StaleCoalesceDoesNotBlock pins the
+// regression from the 2026-05-08 user report: first seek worked
+// instantly; second seek a few seconds later "felt blocked" because
+// it landed near the first restart point and the segment-only
+// coalesce check told the manager to skip the restart, leaving
+// ffmpeg encoding linearly through the gap while the player waited.
+//
+// The fix is the AND-gate: coalesce requires BOTH recent-in-time
+// AND nearby-in-segment. With LastRestartTime several seconds in the
+// past, even a near-segment request must trigger a real restart.
+//
+// We can't run a real transcode in a unit test, but we CAN verify
+// the manager *attempts* a restart — the transcoder.RestartAt call
+// will fail synthetically against /dev/null, and the resulting
+// error is what we assert. The important contract is "does not
+// silently return nil and let the player wait".
+func TestManager_RestartSessionAt_StaleCoalesceDoesNotBlock(t *testing.T) {
+	m := newTestManager(t)
+	defer m.Shutdown()
+
+	now := time.Now()
+	m.mu.Lock()
+	m.sessions["test-key"] = &ManagedSession{
+		Session: &Session{
+			ID:        "test-key",
+			ItemID:    "item-1",
+			OutputDir: t.TempDir(),
+			done:      closedChan(),
+		},
+		UserID:             "user1",
+		InputPath:          "/dev/null",
+		Decision:           PlaybackDecision{Profile: DefaultProfile()},
+		LastAccessed:       now,
+		LastRestartSegment: 953,
+		// 5 s ago — outside the time-coalesce window. A second seek
+		// to a nearby segment must NOT coalesce.
+		LastRestartTime: now.Add(-5 * time.Second),
+	}
+	m.mu.Unlock()
+
+	// Adjacent segment that under the OLD segment-only coalesce
+	// would have returned nil (delta=2, within ±10). Under the new
+	// AND-coalesce the time gate fails → real restart attempted.
+	// transcoder.RestartAt will fail (/dev/null is not a real file),
+	// which is fine — what we're pinning is the rejection of the
+	// silent-coalesce path. A nil return here means the regression
+	// is back.
+	err := m.RestartSessionAt("test-key", 955, 6.0)
+	if err == nil {
+		t.Fatal("RestartSessionAt returned nil for a stale-coalesce case — manager silently skipped a real seek (regression from 2026-05-08)")
+	}
+	if errors.Is(err, ErrSessionNotFound) || errors.Is(err, ErrRestartRateLimited) {
+		t.Fatalf("RestartSessionAt returned unrelated sentinel %v — expected a transcoder error from the genuine restart attempt", err)
 	}
 }
 
@@ -466,6 +525,7 @@ func TestManager_RestartSessionAt_RateLimited(t *testing.T) {
 		Decision:           PlaybackDecision{Profile: DefaultProfile()},
 		LastAccessed:       now,
 		LastRestartSegment: 100,
+		LastRestartTime:    now,
 		// Pre-seat the session at the cap so the next non-coalesced
 		// restart trips the limit. Window is "fresh" so the reset
 		// branch isn't taken.
@@ -506,16 +566,18 @@ func TestManager_RestartSessionAt_RateLimitWindowResets(t *testing.T) {
 		Decision:           PlaybackDecision{Profile: DefaultProfile()},
 		LastAccessed:       now,
 		LastRestartSegment: 100,
+		LastRestartTime:    now, // recent enough that the AND-coalesce time gate holds
 		restartWindowStart: now.Add(-2 * time.Minute), // outside the window
 		restartWindowCount: restartRateLimitMax + 50,  // would otherwise trip
 	}
 	m.mu.Unlock()
 
-	// Coalesced restart: stays inside the window check (delta=2 ≤ 10)
-	// and returns nil without touching the rate-limit accounting.
-	// What we're actually pinning is that the window-reset path is
-	// what the next non-coalesced call would take — we read it back
-	// via the field below.
+	// Coalesced restart: BOTH gates hold (delta=2 ≤ 6 AND time gate
+	// fresh) so the call returns nil without ever consuming
+	// rate-limit budget. The original intent of this test was the
+	// window-reset path; with the AND-coalesce in place the cleaner
+	// invariant is "coalesce never burns budget" — and that's what
+	// we verify via restartWindowCount below.
 	if err := m.RestartSessionAt("test-key", 102, 6.0); err != nil {
 		t.Fatalf("coalesced restart errored unexpectedly: %v", err)
 	}
