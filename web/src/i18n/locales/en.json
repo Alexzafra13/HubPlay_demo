@@ -390,6 +390,9 @@
     "favoritesEmpty": "No favorites yet. Tap the heart on any channel to add it.",
     "favoritesOnly": "Favourites only",
     "titleExplorar": "Explore channels",
+    "heroLabelSelected": "Selected channel",
+    "play": "Play",
+    "timeLeftMin": "{{min}} min left",
     "tab": {
       "inicio": "Home",
       "explorar": "Explore",

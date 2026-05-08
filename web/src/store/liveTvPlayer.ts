@@ -38,6 +38,13 @@ export interface LiveTvPlayerState {
   /** Open the full overlay on `channel`, optionally seeding the surf list. */
   open: (channel: Channel, surfList?: Channel[]) => void;
   /**
+   * Select a channel without expanding the fullscreen overlay. Plex-style
+   * EPG behaviour: clicking a channel logo / row puts the channel in the
+   * hero ("preview") and does NOT take the user fullscreen. The user
+   * presses Play / Expand on the hero to escalate to `open` / `expand`.
+   */
+  select: (channel: Channel, surfList?: Channel[]) => void;
+  /**
    * Stop playback entirely. Use this for the explicit "X" / close on the
    * mini-player; the overlay's back button calls `collapse()` instead so
    * audio survives.
@@ -64,6 +71,17 @@ export const useLiveTvPlayer = create<LiveTvPlayerState>()((set, get) => ({
     set({
       channel,
       expanded: true,
+      surfList: surfList && surfList.length > 0 ? surfList : [channel],
+    });
+  },
+  select(channel, surfList) {
+    set({
+      channel,
+      // Preserve `expanded` only if the same channel is already selected
+      // and was already in fullscreen — otherwise an EPG click on the
+      // already-open channel would surprise the user by collapsing it.
+      // Switching to a different channel always lands in preview mode.
+      expanded: get().channel?.id === channel.id ? get().expanded : false,
       surfList: surfList && surfList.length > 0 ? surfList : [channel],
     });
   },

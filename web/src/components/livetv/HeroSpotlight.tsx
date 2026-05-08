@@ -1,9 +1,9 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import type { Channel, EPGProgram } from "@/api/types";
 import { useNowTick } from "@/hooks/useNowTick";
-import { ChannelLogo } from "./ChannelLogo";
 import { StreamPreview } from "./StreamPreview";
-import { formatTime, getProgramProgress } from "./epgHelpers";
+import { getProgramProgress } from "./epgHelpers";
 
 /**
  * Lazy-mount window for the live preview so a fast page load isn't
@@ -51,10 +51,17 @@ interface HeroSpotlightProps {
   items: HeroSpotlightItem[];
   /** Caption above the title, e.g. "Tu favorito" or "En directo ahora". */
   label: string;
+  /** Fired when the user explicitly asks to play (player area click
+   * or the Reproducir CTA). Caller decides whether to escalate to
+   * fullscreen. */
   onOpen?: (channel: Channel) => void;
+  /** Optional favourites toggle wiring. When provided, a heart CTA
+   * appears next to "Reproducir". */
+  isFavorite?: boolean;
+  onToggleFavorite?: (channelId: string) => void;
   /**
    * Optional page-level title block rendered as a top-left overlay on
-   * the hero card. Lets the page lift its `<h1>` + counts into the
+   * the info column. Lets the page lift its `<h1>` + counts into the
    * hero so the hero itself hugs the top of the layout instead of
    * sitting under a separate page header.
    */
@@ -89,9 +96,12 @@ export function HeroSpotlight({
   items,
   label,
   onOpen,
+  isFavorite,
+  onToggleFavorite,
   headerOverlay,
   flushTop,
 }: HeroSpotlightProps) {
+  const { t } = useTranslation();
   // Keep the progress bar advancing without the parent re-rendering
   // every second — the tick is hoisted here (rather than in a child)
   // so the explicit-deps useMemo's downstream stay stable.
@@ -120,114 +130,205 @@ export function HeroSpotlight({
   // hue does the work of "this channel".
   const bg = `radial-gradient(circle at 18% 12%, ${channel.logo_bg}99 0%, transparent 55%), radial-gradient(circle at 82% 88%, ${channel.logo_bg}55 0%, transparent 60%), linear-gradient(180deg, var(--tv-bg-2) 0%, var(--tv-bg-0) 100%)`;
 
+  const minutesLeft = nowPlaying
+    ? Math.max(
+        0,
+        Math.round(
+          (new Date(nowPlaying.end_time).getTime() - Date.now()) / 60_000,
+        ),
+      )
+    : 0;
+
+  // Info-column backdrop — same brand-tinted gradient as the player
+  // box but rotated horizontally so the seam between the two columns
+  // reads as one continuous surface.
+  const infoBg = `linear-gradient(105deg, ${channel.logo_bg}33 0%, transparent 55%), linear-gradient(180deg, var(--tv-bg-2) 0%, var(--tv-bg-0) 100%)`;
+
+  const playLabel = t("liveTV.play", { defaultValue: "Reproducir" });
+  const playAria = nowPlaying
+    ? `${playLabel} ${channel.name} — ${nowPlaying.title}`
+    : `${playLabel} ${channel.name}`;
+
   return (
-    <section aria-label={label} className="relative">
+    <section
+      aria-label={label}
+      className={[
+        "relative grid grid-cols-1 overflow-hidden border border-tv-line bg-tv-bg-1 lg:grid-cols-[minmax(360px,460px)_1fr]",
+        flushTop ? "rounded-b-tv-lg border-t-0" : "rounded-tv-lg",
+      ].join(" ")}
+    >
+      {/* Player area — clickable, escalates to fullscreen via onOpen.
+          aria-label keeps the same `${name} — ${program}` shape so
+          existing tests / screen readers find it the same way. */}
       <button
         type="button"
         onClick={() => onOpen?.(channel)}
-        className={[
-          "group relative block aspect-[21/9] w-full max-h-[420px] overflow-hidden border border-tv-line text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tv-accent md:aspect-[32/9]",
-          flushTop ? "rounded-b-tv-lg border-t-0" : "rounded-tv-lg",
-        ].join(" ")}
         aria-label={
           nowPlaying ? `${channel.name} — ${nowPlaying.title}` : channel.name
         }
+        className="group relative block aspect-video w-full overflow-hidden text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tv-accent"
       >
-        <div
-          className="pointer-events-none absolute inset-0"
-          style={{ background: bg }}
-        />
+        <div className="pointer-events-none absolute inset-0" style={{ background: bg }} />
 
         {/* Live preview — muted HLS of the actual stream. Keyed on
             channel.id so changes in the upstream selection remount a
-            fresh HLS instance (no state leak). Only rendered after the
-            mount delay AND when reduced-motion is off; otherwise the
-            gradient backdrop carries the surface alone. */}
+            fresh HLS instance. Only rendered after the mount delay
+            AND when reduced-motion is off; otherwise the gradient
+            backdrop carries the surface alone. */}
         {showPreview ? (
           <StreamPreview
             key={channel.id}
             streamUrl={channel.stream_url}
-            className="absolute inset-0 h-full w-full object-cover opacity-90"
+            className="absolute inset-0 h-full w-full object-cover"
           />
         ) : null}
 
-        {/* Vignette over the (preview or gradient) backdrop so the
-            caption stays readable on bright frames. Always on. */}
+        {/* Channel + program overlay top-left, pill style. */}
+        <div className="pointer-events-none absolute inset-x-3 top-3 z-10 flex">
+          <span className="max-w-full truncate rounded-tv-xs bg-black/65 px-2.5 py-1 text-[11.5px] font-medium text-white backdrop-blur">
+            {channel.name}
+            {nowPlaying ? ` — ${nowPlaying.title}` : ""}
+          </span>
+        </div>
+
+        {/* Soft vignette so the play affordance reads. */}
         <div
-          className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-black/10"
+          className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-black/10"
           aria-hidden="true"
         />
 
-        {/* Top overlay — page title (when supplied). The mode label +
-            country pills sit below it. Whole stack is
-            pointer-events-none so the underlying button still receives
-            the click. */}
-        {headerOverlay ? (
-          <div className="pointer-events-none absolute inset-x-5 top-4 md:top-5">
-            {headerOverlay}
-          </div>
-        ) : null}
-        <div
-          className={[
-            "pointer-events-none absolute inset-x-5 flex items-center gap-2",
-            headerOverlay ? "top-[5.5rem] md:top-24" : "top-5",
-          ].join(" ")}
-        >
-          {/* Mode label — single explanation of *why* this channel is
-              featured. Live status lives on the page-level h1's
-              pulsating dot, so no separate LIVE pill here. */}
-          <span className="rounded-tv-xs bg-accent/95 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider text-white shadow-md">
-            {label}
+        {/* Center play affordance — visible on hover/focus, lifts on
+            interaction so the click target feels alive. The button
+            itself is the parent <button>, this is just the visual. */}
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+          <span className="flex h-16 w-16 items-center justify-center rounded-full bg-black/45 ring-1 ring-white/30 backdrop-blur transition group-hover:scale-110 group-hover:bg-tv-accent/85 group-focus-visible:scale-110 group-focus-visible:bg-tv-accent/85">
+            <PlayGlyph />
           </span>
-          {channel.country && (
-            <span className="rounded-tv-xs bg-black/40 px-2 py-0.5 font-mono text-[11px] font-semibold uppercase tracking-wider text-tv-fg-1 backdrop-blur">
-              {channel.country}
-            </span>
-          )}
-        </div>
-
-        {/* Bottom caption. */}
-        <div className="absolute inset-x-5 bottom-5 flex flex-col gap-3">
-          <div className="flex items-end gap-3">
-            <ChannelLogo
-              logoUrl={channel.logo_url}
-              initials={channel.logo_initials}
-              bg={channel.logo_bg}
-              fg={channel.logo_fg}
-              name={channel.name}
-              className="h-14 w-14 rounded-tv-md ring-2 ring-white/10 shadow-lg"
-              textClassName="text-base font-bold"
-            />
-            <div className="min-w-0 flex-1">
-              <div className="font-mono text-[11px] uppercase tracking-widest text-tv-fg-2">
-                CH {channel.number}
-              </div>
-              <div className="truncate text-xl font-semibold text-tv-fg-0 md:text-2xl">
-                {channel.name}
-              </div>
-            </div>
-          </div>
-
-          {nowPlaying ? (
-            <>
-              <div className="line-clamp-2 max-w-3xl text-sm text-tv-fg-1 md:text-base">
-                {nowPlaying.title}
-              </div>
-              <div className="flex max-w-xl items-center gap-2">
-                <div className="h-1 flex-1 overflow-hidden rounded-full bg-white/10">
-                  <div
-                    className="h-full rounded-full bg-accent transition-[width] duration-1000 motion-reduce:transition-none"
-                    style={{ width: `${progress}%` }}
-                  />
-                </div>
-                <span className="font-mono text-[11px] tabular-nums text-tv-fg-2">
-                  {formatTime(nowPlaying.end_time)}
-                </span>
-              </div>
-            </>
-          ) : null}
         </div>
       </button>
+
+      {/* Info column — informational, NOT a single button. CTAs are
+          their own buttons so a click on the description text doesn't
+          fire the play action. */}
+      <div
+        className="relative flex flex-col gap-2.5 p-5 md:gap-3 md:p-7"
+        style={{ background: infoBg }}
+      >
+        {headerOverlay ? <div>{headerOverlay}</div> : null}
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="rounded-tv-xs bg-accent/95 px-2.5 py-0.5 text-[10.5px] font-bold uppercase tracking-wider text-white shadow-sm">
+            {label}
+          </span>
+          {channel.country ? (
+            <span className="rounded-tv-xs bg-black/40 px-2 py-0.5 font-mono text-[10.5px] font-semibold uppercase tracking-wider text-tv-fg-1 backdrop-blur">
+              {channel.country}
+            </span>
+          ) : null}
+          <span className="font-mono text-[10.5px] uppercase tracking-widest text-tv-fg-2">
+            CH {channel.number}
+          </span>
+        </div>
+
+        <h2 className="text-2xl font-bold leading-tight text-tv-fg-0 md:text-3xl">
+          {channel.name}
+        </h2>
+
+        {nowPlaying ? (
+          <>
+            <p className="text-base font-medium text-tv-fg-0 md:text-lg">
+              {nowPlaying.title}
+            </p>
+            <div className="flex items-center gap-3">
+              <span className="text-[12px] tabular-nums text-tv-fg-2">
+                {t("liveTV.timeLeftMin", {
+                  defaultValue: "Queda {{min}} min",
+                  min: minutesLeft,
+                })}
+              </span>
+              <div className="h-1 flex-1 max-w-[280px] overflow-hidden rounded-full bg-white/10">
+                <div
+                  className="h-full rounded-full bg-accent transition-[width] duration-1000 motion-reduce:transition-none"
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+            </div>
+            {nowPlaying.description ? (
+              <p className="line-clamp-3 max-w-2xl text-[13px] text-tv-fg-1 md:text-[13.5px]">
+                {nowPlaying.description}
+              </p>
+            ) : null}
+          </>
+        ) : null}
+
+        {/* CTAs */}
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onOpen?.(channel)}
+            aria-label={playAria}
+            className="inline-flex items-center gap-2 rounded-full bg-accent px-4 py-2 text-[13px] font-semibold text-white shadow-md transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tv-accent/60"
+          >
+            <PlayGlyph small />
+            {playLabel}
+          </button>
+          {onToggleFavorite ? (
+            <button
+              type="button"
+              aria-pressed={!!isFavorite}
+              onClick={() => onToggleFavorite(channel.id)}
+              className={[
+                "inline-flex items-center gap-1.5 rounded-full border px-3 py-2 text-[13px] font-medium transition",
+                isFavorite
+                  ? "border-tv-accent/60 bg-tv-accent/15 text-tv-accent"
+                  : "border-tv-line bg-tv-bg-1 text-tv-fg-1 hover:text-tv-fg-0",
+              ].join(" ")}
+            >
+              <HeartGlyph filled={!!isFavorite} />
+              {isFavorite
+                ? t("liveTV.removeFromFavorites", {
+                    defaultValue: "Quitar de favoritos",
+                  })
+                : t("liveTV.addToFavorites", {
+                    defaultValue: "Añadir a favoritos",
+                  })}
+            </button>
+          ) : null}
+        </div>
+      </div>
     </section>
+  );
+}
+
+function PlayGlyph({ small }: { small?: boolean } = {}) {
+  const size = small ? 14 : 22;
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden="true"
+    >
+      <path d="M8 5v14l11-7z" />
+    </svg>
+  );
+}
+
+function HeartGlyph({ filled }: { filled: boolean }) {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill={filled ? "currentColor" : "none"}
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+    </svg>
   );
 }

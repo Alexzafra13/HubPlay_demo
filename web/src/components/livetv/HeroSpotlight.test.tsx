@@ -88,7 +88,7 @@ describe("HeroSpotlight", () => {
     // suffix (or full label when no EPG). The presence of "A" confirms
     // we rendered items[0], not [1] or [2].
     expect(
-      screen.getByRole("button", { name: /A — Live p-a/ }),
+      screen.getByRole("button", { name: "A — Live p-a" }),
     ).toBeInTheDocument();
     // No carousel UI.
     expect(screen.queryByRole("tablist")).toBeNull();
@@ -100,7 +100,7 @@ describe("HeroSpotlight", () => {
       <HeroSpotlight items={[item("a"), item("b")]} label="Tu favorito" />,
     );
     expect(
-      screen.getByRole("button", { name: /A — Live p-a/ }),
+      screen.getByRole("button", { name: "A — Live p-a" }),
     ).toBeInTheDocument();
 
     // Far past the previous 12 s rotate threshold — still the same
@@ -108,7 +108,7 @@ describe("HeroSpotlight", () => {
     vi.advanceTimersByTime(60_000);
 
     expect(
-      screen.getByRole("button", { name: /A — Live p-a/ }),
+      screen.getByRole("button", { name: "A — Live p-a" }),
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /B/ })).toBeNull();
   });
