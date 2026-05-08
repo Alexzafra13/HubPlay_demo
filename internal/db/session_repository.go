@@ -64,6 +64,18 @@ func (r *SessionRepository) GetByRefreshTokenHash(ctx context.Context, hash stri
 	return &s, nil
 }
 
+func (r *SessionRepository) GetByID(ctx context.Context, id string) (*Session, error) {
+	row, err := r.q.GetSessionByID(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("session: %w", domain.ErrNotFound)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get session by id: %w", err)
+	}
+	s := sessionFromRow(row)
+	return &s, nil
+}
+
 func (r *SessionRepository) DeleteByID(ctx context.Context, id string) error {
 	if err := r.q.DeleteSession(ctx, id); err != nil {
 		return fmt.Errorf("delete session: %w", err)

@@ -119,6 +119,30 @@ func (q *Queries) DeleteSessionByRefreshTokenHash(ctx context.Context, refreshTo
 	return err
 }
 
+const getSessionByID = `-- name: GetSessionByID :one
+SELECT id, user_id, device_name, device_id, ip_address,
+       refresh_token_hash, created_at, last_active_at, expires_at
+FROM sessions
+WHERE id = ?
+`
+
+func (q *Queries) GetSessionByID(ctx context.Context, id string) (Session, error) {
+	row := q.db.QueryRowContext(ctx, getSessionByID, id)
+	var i Session
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.DeviceName,
+		&i.DeviceID,
+		&i.IpAddress,
+		&i.RefreshTokenHash,
+		&i.CreatedAt,
+		&i.LastActiveAt,
+		&i.ExpiresAt,
+	)
+	return i, err
+}
+
 const getSessionByRefreshTokenHash = `-- name: GetSessionByRefreshTokenHash :one
 SELECT id, user_id, device_name, device_id, ip_address,
        refresh_token_hash, created_at, last_active_at, expires_at

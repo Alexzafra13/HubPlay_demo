@@ -293,6 +293,8 @@ func NewRouter(deps Dependencies) http.Handler {
 			r.Post("/me/password", authHandler.ChangeMyPassword)
 			r.Get("/me/profiles", authHandler.ListProfiles)
 			r.Post("/auth/switch-profile", authHandler.SwitchProfile)
+			r.Get("/me/sessions", authHandler.ListMySessions)
+			r.Delete("/me/sessions/{id}", authHandler.RevokeMySession)
 
 			// Per-user preferences (hero mode, theme overrides, etc.)
 			// Authenticated; the handler derives userID from claims so

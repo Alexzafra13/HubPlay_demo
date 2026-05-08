@@ -367,6 +367,51 @@ func (s *Service) InvalidateUserSessions(ctx context.Context, userID string) err
 	return nil
 }
 
+// ListSessions returns the active sessions for a single user. Used
+// by the user-facing "Your devices" panel — distinct from the admin
+// "Now Playing" surface, which lists playback sessions across the
+// whole server. Returns sessions sorted newest-first by last_active.
+func (s *Service) ListSessions(ctx context.Context, userID string) ([]*db.Session, error) {
+	rows, err := s.sessions.ListByUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// RevokeSession deletes a single session if it belongs to the
+// caller. Returning ErrNotFound for foreign sessions keeps the
+// surface anti-enumeration: an attacker probing other users'
+// session IDs gets the same response as a missing one.
+func (s *Service) RevokeSession(ctx context.Context, userID, sessionID string) error {
+	row, err := s.sessions.GetByID(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if row == nil || row.UserID != userID {
+		return fmt.Errorf("revoke session: %w", domain.ErrNotFound)
+	}
+	if err := s.sessions.DeleteByID(ctx, sessionID); err != nil {
+		return err
+	}
+	s.logger.Info("user revoked session", "user_id", userID, "session_id", sessionID)
+	return nil
+}
+
+// CurrentSessionID resolves the caller's session id from the
+// refresh-token cookie. Returns "" when no cookie matches a
+// row — the UI just won't mark "this device" in that case.
+func (s *Service) CurrentSessionID(ctx context.Context, refreshToken string) string {
+	if refreshToken == "" {
+		return ""
+	}
+	row, err := s.sessions.GetByRefreshTokenHash(ctx, hashToken(refreshToken))
+	if err != nil || row == nil {
+		return ""
+	}
+	return row.ID
+}
+
 func (s *Service) Logout(ctx context.Context, refreshToken string) error {
 	tokenHash := hashToken(refreshToken)
 	// Look up the session first so we can publish a UserLoggedOut event with

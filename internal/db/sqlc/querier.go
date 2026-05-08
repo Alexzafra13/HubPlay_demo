@@ -184,6 +184,7 @@ type Querier interface {
 	// server identity (one row, enforced by CHECK(id=1))
 	// ============================================================
 	GetServerIdentity(ctx context.Context) (GetServerIdentityRow, error)
+	GetSessionByID(ctx context.Context, id string) (Session, error)
 	GetSessionByRefreshTokenHash(ctx context.Context, refreshTokenHash string) (Session, error)
 	GetSigningKey(ctx context.Context, id string) (JwtSigningKey, error)
 	// Studios (production companies + TV networks).

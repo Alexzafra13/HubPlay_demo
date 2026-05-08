@@ -1152,6 +1152,56 @@ paths:
             image/png:  { schema: { type: string, format: binary } }
             image/webp: { schema: { type: string, format: binary } }
 
+  # ─── Active sessions (user-facing "Tus dispositivos") ───────────────
+  /me/sessions:
+    get:
+      tags: [auth]
+      summary: List the caller's active auth sessions
+      description: |
+        One row per refresh token alive in the database. The `current`
+        flag marks whichever session matches the caller's refresh
+        cookie so the UI can warn before the operator revokes the
+        device they are using right now.
+      responses:
+        "200":
+          description: Sessions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:             { type: string }
+                        device_name:    { type: string }
+                        device_id:      { type: string }
+                        ip_address:     { type: string }
+                        created_at:     { type: string, format: date-time }
+                        last_active_at: { type: string, format: date-time }
+                        expires_at:     { type: string, format: date-time }
+                        current:        { type: boolean }
+
+  /me/sessions/{id}:
+    delete:
+      tags: [auth]
+      summary: Revoke one of the caller's auth sessions
+      description: |
+        Foreign session IDs (belonging to other users) return 404 to
+        avoid leaking session existence. Revoking the caller's own
+        current session also clears the auth cookies so the next
+        request lands on /login cleanly.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "204": { description: Revoked }
+        "404": { description: Session not found or not owned by caller }
+
   # ─── Federation user surface ────────────────────────────────────────
   /me/peers:
     get:

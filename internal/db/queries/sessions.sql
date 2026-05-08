@@ -15,6 +15,12 @@ SELECT id, user_id, device_name, device_id, ip_address,
 FROM sessions
 WHERE refresh_token_hash = ?;
 
+-- name: GetSessionByID :one
+SELECT id, user_id, device_name, device_id, ip_address,
+       refresh_token_hash, created_at, last_active_at, expires_at
+FROM sessions
+WHERE id = ?;
+
 -- name: DeleteSession :exec
 DELETE FROM sessions WHERE id = ?;
 

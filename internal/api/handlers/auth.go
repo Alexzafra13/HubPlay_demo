@@ -725,3 +725,77 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusCreated, map[string]any{"data": authTokenResponse(token, u)})
 }
 
+
+// ─── Active sessions (user-facing) ──────────────────────────────────
+
+// ListMySessions returns the caller's active auth sessions (one row
+// per refresh token alive in the DB). The "Tus dispositivos" panel
+// in Settings consumes this. We mark whichever row matches the
+// caller's refresh cookie as `current: true` so the UI can label
+// it and warn before the operator revokes themselves.
+func (h *AuthHandler) ListMySessions(w http.ResponseWriter, r *http.Request) {
+	claims := auth.GetClaims(r.Context())
+	if claims == nil {
+		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+		return
+	}
+	rows, err := h.auth.ListSessions(r.Context(), claims.UserID)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	currentID := ""
+	if c, cerr := r.Cookie(refreshCookieName); cerr == nil {
+		currentID = h.auth.CurrentSessionID(r.Context(), c.Value)
+	}
+	out := make([]map[string]any, len(rows))
+	for i, s := range rows {
+		out[i] = map[string]any{
+			"id":             s.ID,
+			"device_name":    s.DeviceName,
+			"device_id":      s.DeviceID,
+			"ip_address":     s.IPAddress,
+			"created_at":     s.CreatedAt,
+			"last_active_at": s.LastActiveAt,
+			"expires_at":     s.ExpiresAt,
+			"current":        s.ID == currentID,
+		}
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"data": out})
+}
+
+// RevokeMySession deletes a single auth session if it belongs to
+// the caller. Revoking the caller's own session clears the cookies
+// too so the next request lands on /login cleanly instead of
+// hitting a 401 loop on the now-orphaned refresh token.
+func (h *AuthHandler) RevokeMySession(w http.ResponseWriter, r *http.Request) {
+	claims := auth.GetClaims(r.Context())
+	if claims == nil {
+		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+		return
+	}
+	sessionID := chi.URLParam(r, "id")
+	if sessionID == "" {
+		respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "session id is required")
+		return
+	}
+
+	// Detect "user revoked themselves" before the row is gone so we
+	// can clear cookies on the response.
+	revokedSelf := false
+	if c, cerr := r.Cookie(refreshCookieName); cerr == nil {
+		if h.auth.CurrentSessionID(r.Context(), c.Value) == sessionID {
+			revokedSelf = true
+		}
+	}
+
+	if err := h.auth.RevokeSession(r.Context(), claims.UserID, sessionID); err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+
+	if revokedSelf {
+		clearAuthCookies(w, r)
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

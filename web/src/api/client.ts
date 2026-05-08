@@ -43,6 +43,7 @@ import type {
   UpsertScheduledJobRequest,
   User,
   CreateUserResponse,
+  MySession,
   ProfileSummary,
   ResetPasswordResponse,
   UserData,
@@ -456,6 +457,20 @@ export class ApiClient {
       "/auth/switch-profile",
       { body: { profile_id: profileId, pin: pin ?? "" } },
     );
+  }
+
+  /** List the caller's active auth sessions ("Tus dispositivos"). */
+  async listMySessions(): Promise<MySession[]> {
+    return this.request<MySession[]>("GET", "/me/sessions");
+  }
+
+  /** Revoke a single auth session (must belong to the caller; the
+   *  server returns 404 for foreign sessions to avoid leaking
+   *  existence of other users' rows). Revoking the caller's own
+   *  session also clears the auth cookies server-side, so the
+   *  next request lands on /login cleanly. */
+  async revokeMySession(sessionId: string): Promise<void> {
+    await this.request<void>("DELETE", `/me/sessions/${sessionId}`);
   }
 
   /** Admin profile creation. Wraps POST /users with parent_user_id

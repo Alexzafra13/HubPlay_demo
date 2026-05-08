@@ -5,6 +5,7 @@ import { useLibraries, useScanLibrary, useProviders, useUpdateProvider } from "@
 import type { Library } from "@/api/types";
 import { Badge, Button, Spinner } from "@/components/common";
 import { HomeLayoutSettings } from "@/components/home";
+import { DevicesPanel } from "@/components/settings/DevicesPanel";
 import { PlaybackSettings } from "@/components/settings/PlaybackSettings";
 
 function getPathAccessible(lib: Library, path: string): boolean | undefined {
@@ -199,6 +200,23 @@ export default function Settings() {
           {t("settings.playback.title")}
         </h2>
         <PlaybackSettings />
+      </section>
+
+      {/* Tus dispositivos — active auth sessions for this user.
+          Sits above Account so a user worried about a missing phone
+          finds the revoke surface first instead of scrolling past
+          the static account info. */}
+      <section className="flex flex-col gap-4">
+        <h2 className="text-lg font-semibold text-text-primary">
+          {t("settings.devices.title", { defaultValue: "Tus dispositivos" })}
+        </h2>
+        <p className="text-sm text-text-muted">
+          {t("settings.devices.subtitle", {
+            defaultValue:
+              "Cada inicio de sesión queda guardado aquí. Cierra una sesión si no reconoces el dispositivo o pierdes el móvil.",
+          })}
+        </p>
+        <DevicesPanel />
       </section>
 
       {/* Account Info */}
