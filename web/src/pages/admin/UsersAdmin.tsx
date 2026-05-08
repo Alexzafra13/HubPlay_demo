@@ -818,13 +818,13 @@ export default function UsersAdmin() {
               <Trans
                 i18nKey="admin.users.addProfileHelper"
                 values={{ name: profileParent.username }}
-                defaults="El perfil se creará bajo <strong>{{name}}</strong>. Podrá entrar al servidor desde la pantalla de selección sin contraseña propia."
+                defaults="Esta persona compartirá el inicio de sesión de <strong>{{name}}</strong>. Cada miembro tiene sus propios favoritos, su historial y, si quieres, su PIN o un límite de edad."
                 components={{ strong: <strong className="text-text-primary" /> }}
               />
             </p>
             <Input
-              label={t('admin.users.profileName', { defaultValue: 'Nombre del perfil' })}
-              placeholder={t('admin.users.profileNamePlaceholder', { defaultValue: 'Niños · Pareja · Visita' })}
+              label={t('admin.users.profileName', { defaultValue: 'Nombre del miembro' })}
+              placeholder={t('admin.users.profileNamePlaceholder', { defaultValue: 'Pedro' })}
               value={profileName}
               onChange={(e) => setProfileName(e.target.value)}
               autoFocus
