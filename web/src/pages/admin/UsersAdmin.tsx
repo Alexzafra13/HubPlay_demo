@@ -93,25 +93,28 @@ export default function UsersAdmin() {
   // literal. Modelled after how Disney+ / Netflix surface "+13"
   // rather than the raw MPAA / TV codes.
   const ratingOptions: { value: string; key: string; defaultLabel: string }[] = [
-    { value: "",      key: "admin.users.ratingNone",      defaultLabel: "Sin límite" },
+    { value: "",      key: "admin.users.ratingNone",      defaultLabel: "Sin límite (+18)" },
     { value: "G",     key: "admin.users.ratingAllAges",   defaultLabel: "Apto para todos" },
     { value: "PG",    key: "admin.users.rating7",         defaultLabel: "+7" },
     { value: "PG-13", key: "admin.users.rating13",        defaultLabel: "+13" },
     { value: "R",     key: "admin.users.rating17",        defaultLabel: "+17" },
-    { value: "NC-17", key: "admin.users.rating18",        defaultLabel: "+18 (solo adultos)" },
   ];
 
   // When the stored cap is a TV-* literal (a legacy / federated row,
   // or a manually edited DB value), the dropdown wouldn't match any
-  // of the six MPAA-anchored rungs. Map back to the equivalent MPAA
+  // of the five MPAA-anchored rungs. Map back to the equivalent MPAA
   // anchor so the select renders a valid current-value highlight.
+  // NC-17 / TV-MA collapse to "" (Sin límite) — an adult cap is
+  // semantically the same as no restriction in this UI, so we don't
+  // expose two options that do effectively the same thing.
   function ratingDropdownValue(rating: string | undefined): string {
     if (!rating) return "";
     const tvToMpaa: Record<string, string> = {
       "TV-Y": "G", "TV-G": "G",
       "TV-Y7": "PG", "TV-PG": "PG",
       "TV-14": "PG-13",
-      "TV-MA": "NC-17",
+      "TV-MA": "",
+      "NC-17": "",
     };
     return tvToMpaa[rating] ?? rating;
   }
