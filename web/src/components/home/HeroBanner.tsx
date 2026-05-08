@@ -584,7 +584,15 @@ export function HeroBanner(props: HeroBannerProps) {
             key={s.key}
             src={bg}
             alt=""
-            className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-1000 ${
+            // object-position lifts the framing so subjects' faces
+            // (which sit in the upper third on most movie / series
+            // backdrops) don't get cropped by the bottom gradient.
+            // Pure `object-cover` defaults to centre-centre, which
+            // routinely chops off the top of heads on portrait-heavy
+            // posters (Transformers / superhero ensembles especially).
+            // 50% 28% biases up enough to preserve heads without
+            // exposing letterboxing on landscape-heavy backdrops.
+            className={`absolute inset-0 h-full w-full object-cover [object-position:50%_28%] transition-opacity duration-1000 ${
               i === safeIndex ? "opacity-100" : "opacity-0"
             }`}
           />
