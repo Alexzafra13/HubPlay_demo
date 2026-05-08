@@ -3,10 +3,52 @@ import type { FormEvent } from "react";
 import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import { useLogin } from "@/api/hooks";
+import { ApiError } from "@/api/types";
 import { useAuthStore } from "@/store/auth";
 import { Button } from "@/components/common";
 import { Input } from "@/components/common";
 import { BrandWordmark } from "@/components/layout/BrandWordmark";
+
+// loginErrorMessage maps an unauthenticated error to operator-
+// friendly copy. The wire-level messages from the server ("account
+// is disabled", "temporary access window has expired") are accurate
+// but English and feel like debug strings; we translate them here
+// AND tailor each one to the action the user has to take next.
+//
+// Anti-enumeration: we still treat "user not found" and "wrong
+// password" identically (server already maps both to
+// INVALID_CREDENTIALS), so this function only branches on outcomes
+// that aren't an attacker probing the user table.
+function loginErrorMessage(
+  err: Error,
+  t: (key: string, opts?: Record<string, unknown>) => string,
+): string {
+  if (err instanceof ApiError) {
+    switch (err.code) {
+      case "ACCESS_EXPIRED":
+        return t("login.errorAccessExpired", {
+          defaultValue:
+            "Tu acceso temporal ha caducado. Contacta con el administrador del servidor para extenderlo.",
+        });
+      case "ACCOUNT_DISABLED":
+        return t("login.errorAccountDisabled", {
+          defaultValue:
+            "Tu cuenta está desactivada. Contacta con el administrador del servidor.",
+        });
+      case "INVALID_CREDENTIALS":
+        return t("login.errorInvalidCredentials", {
+          defaultValue: "Usuario o contraseña incorrectos.",
+        });
+      case "RATE_LIMITED":
+      case "TOO_MANY_REQUESTS":
+        return t("login.errorRateLimited", {
+          defaultValue:
+            "Demasiados intentos. Espera unos minutos e inténtalo de nuevo.",
+        });
+    }
+  }
+  return err.message || t("login.loginFailed");
+}
 
 // Login — visual rework 2026-04-30. The previous version was a card
 // floating on flat bg-base; the first impression of the product was
@@ -39,20 +81,22 @@ export default function Login() {
       {
         onSuccess(data) {
           setAuth(data.user);
-          // Multi-profile account → drop into the "Who's watching?"
-          // picker. Solo accounts (1 profile = parent itself) fall
-          // straight into the home shell. The server already
-          // returns the trimmed `profiles` payload alongside the
-          // token so we don't need a follow-up round-trip here.
-          const profileCount = data.profiles?.length ?? 0;
-          if (profileCount > 1 && !data.user.password_change_required) {
-            navigate("/select-profile");
+          // Forced rotation wins over the picker — a user with a
+          // temp password shouldn't be able to pick a child profile
+          // before they rotate. Otherwise everyone goes through
+          // /select-profile, which queries /me/profiles itself and
+          // auto-bounces home when there's nothing to pick. Routing
+          // everyone through it means the picker is the single
+          // source of truth instead of trusting two separate
+          // payloads (login response.profiles AND /me/profiles).
+          if (data.user.password_change_required) {
+            navigate("/change-password");
           } else {
-            navigate("/");
+            navigate("/select-profile");
           }
         },
         onError(err) {
-          setError(err.message || t("login.loginFailed"));
+          setError(loginErrorMessage(err, t));
         },
       },
     );

@@ -10,6 +10,7 @@ import {
   Smartphone,
   UserCog,
 } from "lucide-react";
+import { useProfiles } from "@/api/hooks";
 import { useAuthStore } from "@/store/auth";
 import { getInitials } from "@/utils/userDisplay";
 import { avatarColorFor } from "@/utils/avatarColor";
@@ -107,6 +108,14 @@ function UserAvatarMenu({
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
+  // Only show "Cambiar perfil" when there's actually more than one
+  // profile under this account. Solo deploys (parent only) had the
+  // link sitting in the menu doing nothing — clicking it would land
+  // on /select-profile, which auto-bounces home, so the affordance
+  // was lying about availability.
+  const { data: profiles } = useProfiles();
+  const canSwitchProfile = (profiles?.length ?? 0) > 1;
+
   useEffect(() => {
     if (!open) return;
     function onDocClick(e: MouseEvent) {
@@ -178,15 +187,17 @@ function UserAvatarMenu({
               <Smartphone className="h-[15px] w-[15px]" strokeWidth={1.6} />
               {t("nav.linkDevice")}
             </NavLink>
-            <NavLink
-              to="/select-profile"
-              onClick={() => setOpen(false)}
-              className="flex items-center gap-2.5 px-3 py-2.5 text-[13px] text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
-              role="menuitem"
-            >
-              <UserCog className="h-[15px] w-[15px]" strokeWidth={1.6} />
-              {t("topbar.switchProfile")}
-            </NavLink>
+            {canSwitchProfile && (
+              <NavLink
+                to="/select-profile"
+                onClick={() => setOpen(false)}
+                className="flex items-center gap-2.5 px-3 py-2.5 text-[13px] text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
+                role="menuitem"
+              >
+                <UserCog className="h-[15px] w-[15px]" strokeWidth={1.6} />
+                {t("topbar.switchProfile")}
+              </NavLink>
+            )}
             {isAdmin && (
               <NavLink
                 to="/admin"

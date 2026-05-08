@@ -21,6 +21,7 @@ var (
 	ErrTokenExpired    = errors.New("token expired")
 	ErrInvalidPassword = errors.New("invalid password")
 	ErrAccountDisabled = errors.New("account disabled")
+	ErrAccessExpired   = errors.New("access expired")
 
 	// Validation
 	ErrValidation = errors.New("validation error")
@@ -229,6 +230,21 @@ func NewAccountDisabled() *AppError {
 		HTTPStatus: http.StatusForbidden,
 		Message:    "account is disabled",
 		kind:       ErrAccountDisabled,
+	}
+}
+
+// NewAccessExpired returns a 403 AppError for an account whose
+// temporary-access window has elapsed. Distinct from
+// AccountDisabled so the frontend can surface a tailored message
+// ("contact the admin to extend access") instead of the generic
+// "account disabled" copy that fits a manually-deactivated user
+// better.
+func NewAccessExpired() *AppError {
+	return &AppError{
+		Code:       "ACCESS_EXPIRED",
+		HTTPStatus: http.StatusForbidden,
+		Message:    "temporary access window has expired",
+		kind:       ErrAccessExpired,
 	}
 }
 

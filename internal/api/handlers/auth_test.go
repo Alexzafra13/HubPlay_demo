@@ -82,6 +82,18 @@ func (m *mockAuthService) Middleware(next http.Handler) http.Handler {
 	return next
 }
 
+func (m *mockAuthService) ListSessions(_ context.Context, _ string) ([]*db.Session, error) {
+	return nil, nil
+}
+
+func (m *mockAuthService) RevokeSession(_ context.Context, _, _ string) error {
+	return nil
+}
+
+func (m *mockAuthService) CurrentSessionID(_ context.Context, _ string) string {
+	return ""
+}
+
 // ─── Mock user service ──────────────────────────────────────────────────────
 
 type mockUserService struct {

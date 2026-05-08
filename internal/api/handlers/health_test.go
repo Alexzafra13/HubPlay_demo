@@ -15,7 +15,7 @@ import (
 func TestHealthHandler_Health_ReturnsOK(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	sm := newFakeStreamManager()
-	h := NewHealthHandler(database, sm, "test-1.2.3")
+	h := NewHealthHandler(database, sm, "test-1.2.3", ":memory:")
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rr := httptest.NewRecorder()
@@ -56,7 +56,7 @@ func TestHealthHandler_Health_ReportsDBError_With503(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	_ = database.Close() // t.Cleanup also closes, which is fine — double-close is ignored
 	sm := newFakeStreamManager()
-	h := NewHealthHandler(database, sm, "v")
+	h := NewHealthHandler(database, sm, "v", ":memory:")
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rr := httptest.NewRecorder()
@@ -78,7 +78,7 @@ func TestHealthHandler_Health_ReportsDBError_With503(t *testing.T) {
 
 func TestHealthHandler_Health_NilStreamManager_ZeroStreams(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	h := NewHealthHandler(database, nil, "v")
+	h := NewHealthHandler(database, nil, "v", ":memory:")
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rr := httptest.NewRecorder()
@@ -101,7 +101,7 @@ func TestHealthHandler_Live_AlwaysOK_EvenWithoutDB(t *testing.T) {
 	// transient SQLite hiccup.
 	database := testutil.NewTestDB(t)
 	_ = database.Close()
-	h := NewHealthHandler(database, nil, "v")
+	h := NewHealthHandler(database, nil, "v", ":memory:")
 
 	req := httptest.NewRequest(http.MethodGet, "/health/live", nil)
 	rr := httptest.NewRecorder()
@@ -119,17 +119,20 @@ func TestHealthHandler_Live_AlwaysOK_EvenWithoutDB(t *testing.T) {
 	}
 }
 
-func TestHealthHandler_Ready_OK(t *testing.T) {
+func TestHealthHandler_Ready_DBPingsOK(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	h := NewHealthHandler(database, nil, "v")
+	h := NewHealthHandler(database, nil, "v", ":memory:")
 
 	req := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
 	rr := httptest.NewRecorder()
 	h.Ready(rr, req)
 
-	if rr.Code != http.StatusOK {
-		t.Fatalf("Ready with healthy DB must return 200, got %d", rr.Code)
-	}
+	// We don't assert overall HTTP status here because Ready also
+	// gates on ffmpeg-in-PATH and free disk space, both of which
+	// are environment-dependent (CI runners may or may not have
+	// ffmpeg, /tmp may be tight). The 503-on-DB-down test below
+	// covers the "fail hard" case; this test only verifies that
+	// DB ping itself reports as healthy.
 	var out map[string]any
 	_ = json.NewDecoder(rr.Body).Decode(&out)
 	if out["database"] != "ok" {
@@ -140,7 +143,7 @@ func TestHealthHandler_Ready_OK(t *testing.T) {
 func TestHealthHandler_Ready_503OnDBDown(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	_ = database.Close()
-	h := NewHealthHandler(database, nil, "v")
+	h := NewHealthHandler(database, nil, "v", ":memory:")
 
 	req := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
 	rr := httptest.NewRecorder()

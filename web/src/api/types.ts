@@ -242,6 +242,25 @@ export interface ResetPasswordResponse {
 }
 
 /**
+ * One row of the user-facing "Tus dispositivos" panel — every active
+ * auth session (refresh token alive in DB) for the calling user.
+ * Distinct from AdminStreamSession (the admin's "Now Playing" surface
+ * over the streaming manager): these are LOGINS, not playbacks. The
+ * `current` flag marks whichever row matches the caller's refresh
+ * cookie so the UI can warn before the operator revokes themselves.
+ */
+export interface MySession {
+  id: string;
+  device_name: string;
+  device_id: string;
+  ip_address: string;
+  created_at: string;
+  last_active_at: string;
+  expires_at: string;
+  current: boolean;
+}
+
+/**
  * One entry in the "Who's watching?" picker. Slim wire payload —
  * just identity, the avatar attribution that the deterministic
  * colour helper consumes, and the PIN flag so the picker can render

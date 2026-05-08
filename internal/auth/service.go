@@ -194,8 +194,11 @@ func (s *Service) Login(ctx context.Context, username, password, deviceName, dev
 	// background job; the comparison happens here on every login
 	// AND inside the JWT middleware (so an already-issued token
 	// doesn't outlive the deadline by more than the JWT TTL).
+	// Distinct from the generic "account disabled" sentinel so the
+	// UI can surface a tailored "contact the admin to extend
+	// access" message instead of the catch-all copy.
 	if user.AccessExpiresAt != nil && !user.AccessExpiresAt.After(s.clock.Now()) {
-		return nil, fmt.Errorf("login: %w", domain.ErrAccountDisabled)
+		return nil, fmt.Errorf("login: %w", domain.ErrAccessExpired)
 	}
 
 	if !user.IsActive {
@@ -281,6 +284,18 @@ func (s *Service) RefreshToken(ctx context.Context, refreshToken, ip string) (*A
 		return nil, fmt.Errorf("refresh user lookup: %w", err)
 	}
 
+	// Temporary-access window: same lazy enforcement as Login.
+	// Without this check a user whose window expired mid-session
+	// could keep extending themselves via /auth/refresh and ride
+	// past the deadline indefinitely (the validate-token path
+	// catches it within one JWT TTL, but refresh issues a fresh
+	// token so the deadline would slip another full TTL on every
+	// call).
+	if user.AccessExpiresAt != nil && !user.AccessExpiresAt.After(s.clock.Now()) {
+		s.rateLimiter.recordFailure(ipKey)
+		return nil, fmt.Errorf("refresh: %w", domain.ErrAccessExpired)
+	}
+
 	if !user.IsActive {
 		s.rateLimiter.recordFailure(ipKey)
 		return nil, fmt.Errorf("refresh: %w", domain.ErrAccountDisabled)
@@ -332,7 +347,7 @@ func (s *Service) ValidateToken(ctx context.Context, tokenStr string) (*Claims, 
 	// repo call returns NotFound anyway.
 	if user, err := s.users.GetByID(ctx, claims.UserID); err == nil && user != nil {
 		if user.AccessExpiresAt != nil && !user.AccessExpiresAt.After(s.clock.Now()) {
-			return nil, fmt.Errorf("validate: %w", domain.ErrAccountDisabled)
+			return nil, fmt.Errorf("validate: %w", domain.ErrAccessExpired)
 		}
 		if !user.IsActive {
 			return nil, fmt.Errorf("validate: %w", domain.ErrAccountDisabled)
@@ -350,6 +365,51 @@ func (s *Service) InvalidateUserSessions(ctx context.Context, userID string) err
 	}
 	s.logger.Info("invalidated all user sessions", "user_id", userID, "count", count)
 	return nil
+}
+
+// ListSessions returns the active sessions for a single user. Used
+// by the user-facing "Your devices" panel — distinct from the admin
+// "Now Playing" surface, which lists playback sessions across the
+// whole server. Returns sessions sorted newest-first by last_active.
+func (s *Service) ListSessions(ctx context.Context, userID string) ([]*db.Session, error) {
+	rows, err := s.sessions.ListByUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// RevokeSession deletes a single session if it belongs to the
+// caller. Returning ErrNotFound for foreign sessions keeps the
+// surface anti-enumeration: an attacker probing other users'
+// session IDs gets the same response as a missing one.
+func (s *Service) RevokeSession(ctx context.Context, userID, sessionID string) error {
+	row, err := s.sessions.GetByID(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if row == nil || row.UserID != userID {
+		return fmt.Errorf("revoke session: %w", domain.ErrNotFound)
+	}
+	if err := s.sessions.DeleteByID(ctx, sessionID); err != nil {
+		return err
+	}
+	s.logger.Info("user revoked session", "user_id", userID, "session_id", sessionID)
+	return nil
+}
+
+// CurrentSessionID resolves the caller's session id from the
+// refresh-token cookie. Returns "" when no cookie matches a
+// row — the UI just won't mark "this device" in that case.
+func (s *Service) CurrentSessionID(ctx context.Context, refreshToken string) string {
+	if refreshToken == "" {
+		return ""
+	}
+	row, err := s.sessions.GetByRefreshTokenHash(ctx, hashToken(refreshToken))
+	if err != nil || row == nil {
+		return ""
+	}
+	return row.ID
 }
 
 func (s *Service) Logout(ctx context.Context, refreshToken string) error {

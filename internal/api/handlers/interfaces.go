@@ -31,6 +31,9 @@ type AuthService interface {
 	SetPIN(ctx context.Context, userID, pin string) error
 	ValidateToken(ctx context.Context, tokenStr string) (*auth.Claims, error)
 	Middleware(next http.Handler) http.Handler
+	ListSessions(ctx context.Context, userID string) ([]*db.Session, error)
+	RevokeSession(ctx context.Context, userID, sessionID string) error
+	CurrentSessionID(ctx context.Context, refreshToken string) string
 }
 
 // ─── User service ───────────────────────────────────────────────────────────

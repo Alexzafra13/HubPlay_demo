@@ -73,6 +73,12 @@ func run(configPath string) error {
 	}
 
 	// ═══ Phase 2: Database ═══
+	// Swap in any pending admin-uploaded restore file before opening
+	// the live connection. No-op when no file is present, so this
+	// adds a single Stat() to every boot — cheap.
+	if err := db.ApplyPendingRestoreIfAny(cfg.Database.Path, logger); err != nil {
+		return fmt.Errorf("applying pending DB restore: %w", err)
+	}
 	database, err := db.Open(cfg.Database.Driver, cfg.Database.Path, logger)
 	if err != nil {
 		return fmt.Errorf("opening database: %w", err)

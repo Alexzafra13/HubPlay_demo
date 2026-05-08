@@ -126,7 +126,7 @@ func NewRouter(deps Dependencies) http.Handler {
 	if deps.StreamManager != nil {
 		streamSvc = deps.StreamManager
 	}
-	healthHandler := handlers.NewHealthHandler(deps.Database, streamSvc, deps.Version)
+	healthHandler := handlers.NewHealthHandler(deps.Database, streamSvc, deps.Version, deps.Config.Database.Path)
 
 	// Image handler is constructed early so the federation peer
 	// surface (under /api/v1/peer/*, mounted BEFORE the user-auth
@@ -293,6 +293,8 @@ func NewRouter(deps Dependencies) http.Handler {
 			r.Post("/me/password", authHandler.ChangeMyPassword)
 			r.Get("/me/profiles", authHandler.ListProfiles)
 			r.Post("/auth/switch-profile", authHandler.SwitchProfile)
+			r.Get("/me/sessions", authHandler.ListMySessions)
+			r.Delete("/me/sessions/{id}", authHandler.RevokeMySession)
 
 			// Per-user preferences (hero mode, theme overrides, etc.)
 			// Authenticated; the handler derives userID from claims so
@@ -498,6 +500,18 @@ func NewRouter(deps Dependencies) http.Handler {
 						r.Get("/settings", settingsHandler.List)
 						r.Put("/settings", settingsHandler.Update)
 						r.Delete("/settings/{key}", settingsHandler.Reset)
+					}
+
+					// DB backup / restore. Lives under /admin/system
+					// because it's a system-level admin operation —
+					// same RequireAdmin gate, same prefix the dashboard
+					// uses for its other system endpoints.
+					if deps.Database != nil {
+						backupHandler := handlers.NewAdminBackupHandler(
+							deps.Database, deps.Config.Database.Path, deps.Logger,
+						)
+						r.Get("/backup", backupHandler.Download)
+						r.Post("/backup/restore", backupHandler.Upload)
 					}
 				})
 			}

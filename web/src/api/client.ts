@@ -43,6 +43,7 @@ import type {
   UpsertScheduledJobRequest,
   User,
   CreateUserResponse,
+  MySession,
   ProfileSummary,
   ResetPasswordResponse,
   UserData,
@@ -456,6 +457,74 @@ export class ApiClient {
       "/auth/switch-profile",
       { body: { profile_id: profileId, pin: pin ?? "" } },
     );
+  }
+
+  /** List the caller's active auth sessions ("Tus dispositivos"). */
+  async listMySessions(): Promise<MySession[]> {
+    return this.request<MySession[]>("GET", "/me/sessions");
+  }
+
+  /** Revoke a single auth session (must belong to the caller; the
+   *  server returns 404 for foreign sessions to avoid leaking
+   *  existence of other users' rows). Revoking the caller's own
+   *  session also clears the auth cookies server-side, so the
+   *  next request lands on /login cleanly. */
+  async revokeMySession(sessionId: string): Promise<void> {
+    await this.request<void>("DELETE", `/me/sessions/${sessionId}`);
+  }
+
+  // ─── Admin DB backup ───────────────────────────────────────────────
+
+  /** Stream the SQLite snapshot from /admin/system/backup as a Blob.
+   *  Caller is responsible for triggering a download (object URL +
+   *  anchor click). Sized as a Blob — no JSON wrapping — because the
+   *  endpoint serves application/octet-stream and we want to bypass
+   *  the standard `request()` JSON decoder. */
+  async downloadBackup(): Promise<Blob> {
+    const res = await fetch(`${this.baseUrl}/admin/system/backup`, {
+      method: "GET",
+      credentials: "include",
+    });
+    if (!res.ok) {
+      throw new Error(`backup download failed: ${res.status}`);
+    }
+    return await res.blob();
+  }
+
+  /** Upload a backup file to /admin/system/backup/restore. Server
+   *  stages it for application on the next process restart — the
+   *  response carries a hint to that effect. */
+  async restoreBackup(file: File): Promise<{
+    staged: boolean;
+    size_bytes: number;
+    uploaded_filename: string;
+    applies_on: string;
+  }> {
+    const fd = new FormData();
+    fd.append("backup", file);
+    const headers: Record<string, string> = {};
+    const csrf = getCookie("hubplay_csrf");
+    if (csrf) headers["X-CSRF-Token"] = csrf;
+    const res = await fetch(`${this.baseUrl}/admin/system/backup/restore`, {
+      method: "POST",
+      credentials: "include",
+      headers,
+      body: fd,
+    });
+    if (!res.ok) {
+      let msg = `restore upload failed: ${res.status}`;
+      try {
+        const body = (await res.json()) as { error?: { message?: string } };
+        if (body?.error?.message) msg = body.error.message;
+      } catch {
+        // body wasn't JSON; keep the default message
+      }
+      throw new Error(msg);
+    }
+    const json = (await res.json()) as { data: {
+      staged: boolean; size_bytes: number; uploaded_filename: string; applies_on: string;
+    } };
+    return json.data;
   }
 
   /** Admin profile creation. Wraps POST /users with parent_user_id
