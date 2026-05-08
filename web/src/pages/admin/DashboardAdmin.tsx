@@ -16,6 +16,7 @@
 
 import { Link } from "react-router";
 import { useTranslation } from "react-i18next";
+import { Library, PlayCircle, TrendingUp } from "lucide-react";
 import {
   useAdminStreamActivity,
   useAdminTopItems,
@@ -23,6 +24,7 @@ import {
 } from "@/api/hooks";
 import type { SystemStats } from "@/api/types";
 import { Spinner, EmptyState } from "@/components/common";
+import { SectionHeader } from "@/components/admin/SectionHeader";
 import { Sparkline } from "@/components/admin/Sparkline";
 import { NowPlayingPanel } from "./dashboard/NowPlayingPanel";
 
@@ -138,38 +140,44 @@ export default function DashboardAdmin() {
       {/* Now Playing — kept as its own well-tested panel because it
           owns a polling cycle + kill mutation. The redesign happens
           inside NowPlayingPanel itself if/when we touch it. */}
-      <section className="flex flex-col gap-3">
-        <h2 className="text-base font-semibold text-text-primary">
-          {t("admin.summary.nowPlaying")}
-        </h2>
+      <section className="flex flex-col gap-4">
+        <SectionHeader
+          icon={PlayCircle}
+          title={t("admin.summary.nowPlaying")}
+          subtitle={t("admin.summary.nowPlayingSubtitle", {
+            defaultValue: "Reproducciones en curso ahora mismo.",
+          })}
+        />
         <NowPlayingPanel />
       </section>
 
       {/* This-week panel — sparkline of watch activity + top-5
-          most-watched leaderboard, side by side on lg. The columns
-          are deliberately different in shape: chart on the left,
-          ranked text rows on the right. Same data theme but the eye
-          gets variety. */}
+          most-watched leaderboard, side by side on lg. */}
       <section className="flex flex-col gap-4">
-        <h2 className="text-base font-semibold text-text-primary">
-          {t("admin.summary.thisWeek")}
-        </h2>
+        <SectionHeader
+          icon={TrendingUp}
+          title={t("admin.summary.thisWeek")}
+          subtitle={t("admin.summary.thisWeekSubtitle", {
+            defaultValue:
+              "Tiempo total visualizado y los títulos que más arrastran.",
+          })}
+        />
         <div className="grid gap-6 lg:grid-cols-2">
-          <ActivityPanel
-            activity={activity?.buckets ?? []}
-            t={t}
-          />
+          <ActivityPanel activity={activity?.buckets ?? []} t={t} />
           <TopItemsPanel items={topItems?.items ?? []} t={t} />
         </div>
       </section>
 
       {/* Catalogue summary — one prose line + a small action chip.
-          Plain-language copy ("12.453 elementos en 8 bibliotecas")
-          beats four stat cards for skimming.  */}
-      <section className="flex flex-col gap-3">
-        <h2 className="text-base font-semibold text-text-primary">
-          {t("admin.summary.catalogue")}
-        </h2>
+          Plain-language copy beats four stat cards for skimming. */}
+      <section className="flex flex-col gap-4">
+        <SectionHeader
+          icon={Library}
+          title={t("admin.summary.catalogue")}
+          subtitle={t("admin.summary.catalogueSubtitle", {
+            defaultValue: "Tamaño del catálogo y de la base de datos.",
+          })}
+        />
         <CatalogueLine stats={stats} />
       </section>
     </div>
