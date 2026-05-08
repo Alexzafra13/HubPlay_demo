@@ -439,6 +439,14 @@ export interface MediaItem {
   series_poster_url?: string;
   series_backdrop_url?: string;
   series_logo_url?: string;
+  // Season-level artwork the Home hero uses for episode slides: the
+  // poster the user sees when entering the season page on the left,
+  // and the season's own backdrop (or, if absent, the series'
+  // backdrop via the `series_backdrop_url` fallback). Surfaced by
+  // `/me/continue-watching` for episode rows; absent on movies and
+  // on episodes whose season has no scanned artwork.
+  season_poster_url?: string;
+  season_backdrop_url?: string;
   // Pre-computed dominant + dark-muted colours of the primary backdrop
   // (or poster, when no backdrop exists), formatted as CSS rgb()
   // strings. The SeriesHero gradient consumes these on first paint —

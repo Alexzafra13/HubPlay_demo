@@ -239,12 +239,31 @@ func (h *ProgressHandler) ContinueWatching(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Batch-fetch images for all items
-	itemIDs := make([]string, len(items))
-	for i, item := range items {
-		itemIDs[i] = item.ItemID
+	// Batch-fetch images for the episode/movie itself plus, when the
+	// row is an episode, its season (parent_id) and series (series_id).
+	// The Home hero promotes a season slide to "Sigue viendo S2E5" with
+	// the season's poster on the left and the season/series backdrop
+	// behind it — same artwork the user sees when entering the season
+	// page. Falling back to the series' artwork covers seasons that
+	// TMDb only ships with a poster (no backdrop) and orphan episodes
+	// whose season was never scanned.
+	idSet := make(map[string]struct{}, len(items)*3)
+	for _, item := range items {
+		idSet[item.ItemID] = struct{}{}
+		if item.Type == "episode" {
+			if item.ParentID != "" {
+				idSet[item.ParentID] = struct{}{}
+			}
+			if item.SeriesID != "" {
+				idSet[item.SeriesID] = struct{}{}
+			}
+		}
 	}
-	imageMap, _ := h.images.GetPrimaryURLs(r.Context(), itemIDs)
+	allIDs := make([]string, 0, len(idSet))
+	for id := range idSet {
+		allIDs = append(allIDs, id)
+	}
+	imageMap, _ := h.images.GetPrimaryURLs(r.Context(), allIDs)
 
 	result := make([]map[string]any, 0, len(items))
 	for _, item := range items {
@@ -297,6 +316,9 @@ func (h *ProgressHandler) ContinueWatching(w http.ResponseWriter, r *http.Reques
 		if item.SeriesID != "" {
 			entry["series_id"] = item.SeriesID
 		}
+		if item.SeriesTitle != "" {
+			entry["series_title"] = item.SeriesTitle
+		}
 		if urls, ok := imageMap[item.ItemID]; ok {
 			if u, ok := urls["primary"]; ok {
 				entry["poster_url"] = u.Path
@@ -307,6 +329,33 @@ func (h *ProgressHandler) ContinueWatching(w http.ResponseWriter, r *http.Reques
 			}
 			if u, ok := urls["logo"]; ok {
 				entry["logo_url"] = u.Path
+			}
+		}
+		// Episode-only enrichment: surface the season's primary +
+		// backdrop so the Home hero can render the season's actual
+		// artwork (the poster the user sees when entering the season
+		// page) instead of the episode still. Falls back to the
+		// series for fields the season lacks — TMDb commonly ships
+		// seasons with only a poster, leaving backdrop empty.
+		if item.Type == "episode" {
+			if seasonImgs, ok := imageMap[item.ParentID]; ok {
+				if u, ok := seasonImgs["primary"]; ok {
+					entry["season_poster_url"] = u.Path
+				}
+				if u, ok := seasonImgs["backdrop"]; ok {
+					entry["season_backdrop_url"] = u.Path
+				}
+			}
+			if seriesImgs, ok := imageMap[item.SeriesID]; ok {
+				if u, ok := seriesImgs["primary"]; ok {
+					entry["series_poster_url"] = u.Path
+				}
+				if u, ok := seriesImgs["backdrop"]; ok {
+					entry["series_backdrop_url"] = u.Path
+				}
+				if u, ok := seriesImgs["logo"]; ok {
+					entry["series_logo_url"] = u.Path
+				}
 			}
 		}
 		result = append(result, entry)

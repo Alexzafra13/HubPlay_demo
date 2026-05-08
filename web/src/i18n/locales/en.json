@@ -130,7 +130,13 @@
     "peerRecent": "Recently added on peers",
     "peerContinueWatching": "Continue watching on peers",
     "viewDetails": "View details",
-    "failedToLoad": "Failed to load content. Check your server connection."
+    "failedToLoad": "Failed to load content. Check your server connection.",
+    "heroTagResume": "Continue watching",
+    "heroTagNew": "New on HubPlay",
+    "heroTagTrending": "Trending",
+    "heroResumeCta": "Resume",
+    "heroEpisodeBadge": "S{{season}} · E{{episode}}",
+    "heroRemaining": "{{minutes}} min left"
   },
   "link": {
     "title": "Link a device",
