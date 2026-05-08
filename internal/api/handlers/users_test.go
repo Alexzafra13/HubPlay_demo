@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -64,6 +65,10 @@ func (s *userFakeService) SetActive(_ context.Context, _ string, _ bool) error {
 
 func (s *userFakeService) PrimaryAdminID(_ context.Context) (string, error) {
 	return "", nil
+}
+
+func (s *userFakeService) SetAccessExpiresAt(_ context.Context, _ string, _ *time.Time) error {
+	return nil
 }
 
 var _ UserService = (*userFakeService)(nil)

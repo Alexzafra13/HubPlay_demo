@@ -135,6 +135,10 @@ func (m *mockUserService) PrimaryAdminID(_ context.Context) (string, error) {
 	return "", nil
 }
 
+func (m *mockUserService) SetAccessExpiresAt(_ context.Context, _ string, _ *time.Time) error {
+	return nil
+}
+
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 func testLogger() *slog.Logger {

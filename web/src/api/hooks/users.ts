@@ -171,3 +171,13 @@ export function useSetUserActive() {
     },
   });
 }
+
+export function useSetUserAccess() {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, { userId: string; durationDays: number }>({
+    mutationFn: ({ userId, durationDays }) => api.setUserAccess(userId, durationDays),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.users });
+    },
+  });
+}

@@ -44,6 +44,7 @@ type UserService interface {
 	SetMaxContentRating(ctx context.Context, id, rating string) error
 	SetRole(ctx context.Context, id, role string) error
 	SetActive(ctx context.Context, id string, active bool) error
+	SetAccessExpiresAt(ctx context.Context, id string, expiresAt *time.Time) error
 	PrimaryAdminID(ctx context.Context) (string, error)
 }
 

@@ -100,6 +100,7 @@ var outOfScopeExact = map[string]string{
 	"PUT /users/{id}/content-rating":  "profile content cap admin",
 	"PUT /users/{id}/role":            "user role admin",
 	"PUT /users/{id}/active":          "user active toggle admin",
+	"PUT /users/{id}/access":          "user access window admin",
 	"POST /me/password":               "self password change",
 	"GET /me/profiles":                "profile selector listing",
 	"POST /auth/switch-profile":       "profile switch",

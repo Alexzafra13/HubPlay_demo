@@ -8,6 +8,8 @@ import {
   useDeleteUser,
   useMe,
   useResetUserPassword,
+  useSetUserAccess,
+  useSetUserActive,
   useSetUserContentRating,
   useSetUserPIN,
   useSetUserRole,
@@ -50,6 +52,8 @@ export default function UsersAdmin() {
   const setUserPIN = useSetUserPIN();
   const setUserContentRating = useSetUserContentRating();
   const setUserRole = useSetUserRole();
+  const setUserActive = useSetUserActive();
+  const setUserAccess = useSetUserAccess();
 
   // "Add profile" modal — admin types a display name; the server
   // synthesises the username + a throwaway password (profiles can't
@@ -77,6 +81,36 @@ export default function UsersAdmin() {
         },
       },
     );
+  }
+
+  // Maps the dropdown selection to a number of days for the
+  // /users/{id}/access endpoint. 0 = clear → permanent. The select
+  // also lets admins read the current state ("Caduca en 5 días")
+  // without exposing the raw timestamp.
+  const accessOptions: { value: number; key: string; defaultLabel: string }[] = [
+    { value: 0, key: "admin.users.accessPermanent", defaultLabel: "Permanente" },
+    { value: 1, key: "admin.users.access1d", defaultLabel: "1 día" },
+    { value: 3, key: "admin.users.access3d", defaultLabel: "3 días" },
+    { value: 7, key: "admin.users.access1w", defaultLabel: "1 semana" },
+    { value: 30, key: "admin.users.access1m", defaultLabel: "1 mes" },
+    { value: 90, key: "admin.users.access3m", defaultLabel: "3 meses" },
+    { value: 365, key: "admin.users.access1y", defaultLabel: "1 año" },
+  ];
+
+  function describeAccess(user: User): string {
+    if (!user.access_expires_at) {
+      return t("admin.users.accessPermanent", { defaultValue: "Permanente" });
+    }
+    const expires = new Date(user.access_expires_at);
+    const now = new Date();
+    const diffDays = Math.ceil((expires.getTime() - now.getTime()) / 86_400_000);
+    if (diffDays <= 0) {
+      return t("admin.users.accessExpired", { defaultValue: "Caducado" });
+    }
+    return t("admin.users.accessExpiresIn", {
+      defaultValue: "Caduca en {{days}} días",
+      days: diffDays,
+    });
   }
 
   function handleRoleChange(user: User, nextRole: "user" | "admin") {
@@ -222,6 +256,8 @@ export default function UsersAdmin() {
                 <th className="px-4 py-3 font-medium">{t('admin.users.displayName')}</th>
                 <th className="px-4 py-3 font-medium">{t('admin.users.role')}</th>
                 <th className="px-4 py-3 font-medium">{t('admin.users.rating', { defaultValue: 'Edad máxima' })}</th>
+                <th className="px-4 py-3 font-medium">{t('admin.users.access', { defaultValue: 'Acceso' })}</th>
+                <th className="px-4 py-3 font-medium">{t('admin.users.status', { defaultValue: 'Estado' })}</th>
                 <th className="px-4 py-3 font-medium">{t('admin.users.created')}</th>
                 <th className="px-4 py-3 font-medium text-right">{t('admin.users.actions')}</th>
               </tr>
@@ -232,6 +268,8 @@ export default function UsersAdmin() {
                   <td className="px-4 py-3"><Skeleton variant="text" width="60%" /></td>
                   <td className="px-4 py-3"><Skeleton variant="text" width="75%" /></td>
                   <td className="px-4 py-3"><Skeleton variant="rectangular" width={56} height={20} /></td>
+                  <td className="px-4 py-3"><Skeleton variant="rectangular" width={70} height={20} /></td>
+                  <td className="px-4 py-3"><Skeleton variant="rectangular" width={90} height={20} /></td>
                   <td className="px-4 py-3"><Skeleton variant="rectangular" width={70} height={20} /></td>
                   <td className="px-4 py-3"><Skeleton variant="text" width="55%" /></td>
                   <td className="px-4 py-3">
@@ -253,6 +291,8 @@ export default function UsersAdmin() {
                 <th className="px-4 py-3 font-medium">{t('admin.users.displayName')}</th>
                 <th className="px-4 py-3 font-medium">{t('admin.users.role')}</th>
                 <th className="px-4 py-3 font-medium">{t('admin.users.rating', { defaultValue: 'Edad máxima' })}</th>
+                <th className="px-4 py-3 font-medium">{t('admin.users.access', { defaultValue: 'Acceso' })}</th>
+                <th className="px-4 py-3 font-medium">{t('admin.users.status', { defaultValue: 'Estado' })}</th>
                 <th className="px-4 py-3 font-medium">{t('admin.users.created')}</th>
                 <th className="px-4 py-3 font-medium text-right">{t('admin.users.actions')}</th>
               </tr>
@@ -372,6 +412,85 @@ export default function UsersAdmin() {
                           <option value="TV-14">TV-14</option>
                           <option value="TV-MA">TV-MA</option>
                         </select>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      {/* Profiles inherit access from their parent, so
+                          surfacing the dropdown on profile rows would
+                          mislead. Primary admin is locked too. */}
+                      {user.parent_user_id || user.is_primary ? (
+                        <span className="text-xs text-text-muted">
+                          {t('admin.users.accessInherits', { defaultValue: '—' })}
+                        </span>
+                      ) : (
+                        <select
+                          value={user.access_expires_at ? -1 : 0}
+                          onChange={(e) => {
+                            const days = Number(e.target.value);
+                            if (days < 0) return; // "Current" placeholder; no-op
+                            setUserAccess.mutate({ userId: user.id, durationDays: days });
+                          }}
+                          className="rounded-[--radius-sm] border border-border bg-bg-elevated px-2 py-1 text-xs text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
+                          aria-label={t('admin.users.access', { defaultValue: 'Acceso' })}
+                          title={describeAccess(user)}
+                        >
+                          {/* Negative-value placeholder shows the
+                              current state when expires_at is set;
+                              picking it again is a no-op so accidental
+                              selection doesn't mutate. */}
+                          {user.access_expires_at && (
+                            <option value={-1}>{describeAccess(user)}</option>
+                          )}
+                          {accessOptions.map((opt) => (
+                            <option key={opt.value} value={opt.value}>
+                              {t(opt.key, { defaultValue: opt.defaultLabel })}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      {/* Active toggle. Hidden on the row's own user
+                          (cannot deactivate self) and on the primary
+                          admin (server rejects with 403 PRIMARY_ADMIN_LOCKED
+                          anyway). Profiles inherit from parent. */}
+                      {isSelf || user.is_primary || user.parent_user_id ? (
+                        <span
+                          className={
+                            user.is_active === false
+                              ? 'rounded-full bg-error/15 px-2 py-0.5 text-[11px] font-medium text-error'
+                              : 'rounded-full bg-success/15 px-2 py-0.5 text-[11px] font-medium text-success'
+                          }
+                        >
+                          {user.is_active === false
+                            ? t('admin.users.statusInactive', { defaultValue: 'Inactivo' })
+                            : t('admin.users.statusActive', { defaultValue: 'Activo' })}
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setUserActive.mutate({
+                              userId: user.id,
+                              isActive: !(user.is_active ?? true),
+                            })
+                          }
+                          className={[
+                            'rounded-full px-2 py-0.5 text-[11px] font-medium transition-colors',
+                            user.is_active === false
+                              ? 'bg-error/15 text-error hover:bg-error/25'
+                              : 'bg-success/15 text-success hover:bg-success/25',
+                          ].join(' ')}
+                          title={
+                            user.is_active === false
+                              ? t('admin.users.activateHint', { defaultValue: 'Click para reactivar' })
+                              : t('admin.users.deactivateHint', { defaultValue: 'Click para desactivar' })
+                          }
+                        >
+                          {user.is_active === false
+                            ? t('admin.users.statusInactive', { defaultValue: 'Inactivo' })
+                            : t('admin.users.statusActive', { defaultValue: 'Activo' })}
+                        </button>
                       )}
                     </td>
                     <td className="px-4 py-3 text-text-secondary">

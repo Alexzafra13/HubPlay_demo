@@ -48,6 +48,13 @@ type User struct {
 	// Set true on admin-driven create / reset; cleared automatically
 	// when the user finishes a successful change.
 	PasswordChangeRequired bool
+
+	// AccessExpiresAt, when set, marks a temporary-access window.
+	// Login + middleware reject after this timestamp; nil = no
+	// expiry (permanent access). Lazy enforcement — there's no
+	// background job that flips is_active automatically; the JWT
+	// TTL bounds how long a stale token can outlive its expiry.
+	AccessExpiresAt *time.Time
 }
 
 // IsProfile is the canonical readability helper around `ParentUserID`.
@@ -166,6 +173,24 @@ func (r *UserRepository) SetActive(ctx context.Context, id string, active bool) 
 		IsActive: active,
 	}); err != nil {
 		return fmt.Errorf("set active: %w", err)
+	}
+	return nil
+}
+
+// SetAccessExpiresAt updates the temporary-access deadline. Pass nil
+// to clear (= permanent access). Lazy enforcement: Login +
+// middleware compare against time.Now() so we never need a job to
+// flip is_active automatically.
+func (r *UserRepository) SetAccessExpiresAt(ctx context.Context, id string, expiresAt *time.Time) error {
+	var nt sql.NullTime
+	if expiresAt != nil {
+		nt = sql.NullTime{Time: expiresAt.UTC(), Valid: true}
+	}
+	if err := r.q.UpdateUserAccessExpiresAt(ctx, sqlc.UpdateUserAccessExpiresAtParams{
+		ID:              id,
+		AccessExpiresAt: nt,
+	}); err != nil {
+		return fmt.Errorf("set access expires at: %w", err)
 	}
 	return nil
 }
@@ -303,6 +328,7 @@ func userFromGetRow(r sqlc.GetUserByIDRow) User {
 		PINHash:                r.PinHash.String,
 		MaxContentRating:       r.MaxContentRating.String,
 		PasswordChangeRequired: r.PasswordChangeRequired,
+		AccessExpiresAt:        nullTimeToPtr(r.AccessExpiresAt),
 	}
 }
 
@@ -322,6 +348,7 @@ func userFromGetByUsernameRow(r sqlc.GetUserByUsernameRow) User {
 		PINHash:                r.PinHash.String,
 		MaxContentRating:       r.MaxContentRating.String,
 		PasswordChangeRequired: r.PasswordChangeRequired,
+		AccessExpiresAt:        nullTimeToPtr(r.AccessExpiresAt),
 	}
 }
 
@@ -339,6 +366,7 @@ func userFromListRow(r sqlc.ListUsersRow) User {
 		PINHash:                r.PinHash.String,
 		MaxContentRating:       r.MaxContentRating.String,
 		PasswordChangeRequired: r.PasswordChangeRequired,
+		AccessExpiresAt:        nullTimeToPtr(r.AccessExpiresAt),
 	}
 }
 
@@ -356,6 +384,7 @@ func userFromProfilesRow(r sqlc.ListProfilesForOwnerRow) User {
 		PINHash:                r.PinHash.String,
 		MaxContentRating:       r.MaxContentRating.String,
 		PasswordChangeRequired: r.PasswordChangeRequired,
+		AccessExpiresAt:        nullTimeToPtr(r.AccessExpiresAt),
 	}
 }
 

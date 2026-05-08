@@ -217,6 +217,10 @@ export interface User {
   // change) on the bootstrap account so a sibling admin can't
   // accidentally lock the deploy owner out.
   is_primary?: boolean;
+  // ISO timestamp of the temporary-access deadline. Null / undefined
+  // = permanent access. Lazy enforcement on the server: Login +
+  // middleware reject after this stamp, no background job needed.
+  access_expires_at?: string | null;
 }
 
 export interface CreateUserResponse {

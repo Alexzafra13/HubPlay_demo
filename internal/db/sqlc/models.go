@@ -442,6 +442,7 @@ type User struct {
 	PinHash                sql.NullString `json:"pin_hash"`
 	MaxContentRating       sql.NullString `json:"max_content_rating"`
 	PasswordChangeRequired bool           `json:"password_change_required"`
+	AccessExpiresAt        sql.NullTime   `json:"access_expires_at"`
 }
 
 type UserChannelFavorite struct {

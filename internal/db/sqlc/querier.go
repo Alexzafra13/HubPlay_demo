@@ -415,6 +415,9 @@ type Querier interface {
 	UpdateProgress(ctx context.Context, arg UpdateProgressParams) error
 	UpdateSessionLastActive(ctx context.Context, arg UpdateSessionLastActiveParams) error
 	UpdateUser(ctx context.Context, arg UpdateUserParams) error
+	// NULL = no expiry (permanent). Non-null = JWT middleware + login
+	// reject after this timestamp. Lazy: no background job needed.
+	UpdateUserAccessExpiresAt(ctx context.Context, arg UpdateUserAccessExpiresAtParams) error
 	// Soft-disable a user without deleting. Login rejects on
 	// is_active=false; the row + every per-user table stays intact so
 	// re-enabling is a one-flag flip.

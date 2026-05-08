@@ -7,14 +7,16 @@
 -- name: GetUserByID :one
 SELECT id, username, display_name, password_hash, COALESCE(avatar_path, '') AS avatar_path,
        role, is_active, max_sessions, created_at, last_login_at,
-       parent_user_id, pin_hash, max_content_rating, password_change_required
+       parent_user_id, pin_hash, max_content_rating, password_change_required,
+       access_expires_at
 FROM users
 WHERE id = ?;
 
 -- name: GetUserByUsername :one
 SELECT id, username, display_name, password_hash, COALESCE(avatar_path, '') AS avatar_path,
        role, is_active, max_sessions, created_at, last_login_at,
-       parent_user_id, pin_hash, max_content_rating, password_change_required
+       parent_user_id, pin_hash, max_content_rating, password_change_required,
+       access_expires_at
 FROM users
 WHERE username = ?;
 
@@ -32,7 +34,8 @@ SELECT COUNT(*) AS cnt FROM users;
 -- name: ListUsers :many
 SELECT id, username, display_name, COALESCE(avatar_path, '') AS avatar_path,
        role, is_active, created_at, last_login_at,
-       parent_user_id, pin_hash, max_content_rating, password_change_required
+       parent_user_id, pin_hash, max_content_rating, password_change_required,
+       access_expires_at
 FROM users
 ORDER BY username
 LIMIT ? OFFSET ?;
@@ -82,6 +85,11 @@ UPDATE users SET pin_hash = ? WHERE id = ?;
 -- normalised to NULL by the handler so callers don't have to choose.
 UPDATE users SET max_content_rating = ? WHERE id = ?;
 
+-- name: UpdateUserAccessExpiresAt :exec
+-- NULL = no expiry (permanent). Non-null = JWT middleware + login
+-- reject after this timestamp. Lazy: no background job needed.
+UPDATE users SET access_expires_at = ? WHERE id = ?;
+
 -- name: ListProfilesForOwner :many
 -- Returns the parent account row plus every profile that hangs off
 -- it, ordered by the parent first, then profiles alphabetically.
@@ -91,7 +99,8 @@ UPDATE users SET max_content_rating = ? WHERE id = ?;
 -- via the handler — we don't expose them for login anyway.
 SELECT id, username, display_name, COALESCE(avatar_path, '') AS avatar_path,
        role, is_active, created_at, last_login_at,
-       parent_user_id, pin_hash, max_content_rating, password_change_required
+       parent_user_id, pin_hash, max_content_rating, password_change_required,
+       access_expires_at
 FROM users
 WHERE id = ? OR parent_user_id = ?
 ORDER BY parent_user_id IS NOT NULL, display_name COLLATE NOCASE;

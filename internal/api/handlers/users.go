@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -87,6 +88,7 @@ func (h *UserHandler) List(w http.ResponseWriter, r *http.Request) {
 			"max_content_rating":       u.MaxContentRating,
 			"has_pin":                  u.PINHash != "",
 			"is_primary":               primaryID != "" && u.ID == primaryID,
+			"access_expires_at":        u.AccessExpiresAt,
 		}
 	}
 
@@ -133,6 +135,53 @@ func (h *UserHandler) SetRole(w http.ResponseWriter, r *http.Request) {
 
 type updateActiveRequest struct {
 	IsActive bool `json:"is_active"`
+}
+
+type updateAccessRequest struct {
+	// Duration of access in days. 0 (or absent) = clear deadline =
+	// permanent access. Server computes ExpiresAt as now + days.
+	// Frontend sends one of {1, 3, 7, 30, 90, 365} or 0; server
+	// trusts the value (no enum to maintain in two places).
+	DurationDays int `json:"duration_days"`
+}
+
+// SetAccess writes a temporary-access window or clears it for
+// permanent access. duration_days=0 → NULL deadline (permanent);
+// any positive integer is taken as "now + N days". Admin-only.
+//
+// The primary admin is locked out of this surface for the same
+// reason as Delete + SetActive: a sibling admin could otherwise
+// time-bomb the deploy owner.
+func (h *UserHandler) SetAccess(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "missing user id")
+		return
+	}
+	if primaryID, _ := h.users.PrimaryAdminID(r.Context()); primaryID != "" && primaryID == id {
+		respondError(w, r, http.StatusForbidden, "PRIMARY_ADMIN_LOCKED",
+			"the primary admin's access window cannot be changed")
+		return
+	}
+	var req updateAccessRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
+		return
+	}
+	if req.DurationDays < 0 {
+		respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "duration_days must be non-negative")
+		return
+	}
+	var expiresAt *time.Time
+	if req.DurationDays > 0 {
+		t := time.Now().UTC().Add(time.Duration(req.DurationDays) * 24 * time.Hour)
+		expiresAt = &t
+	}
+	if err := h.users.SetAccessExpiresAt(r.Context(), id, expiresAt); err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // SetActive flips the per-user is_active flag. Admin-only at the

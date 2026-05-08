@@ -504,6 +504,15 @@ export class ApiClient {
     });
   }
 
+  /** Sets a temporary access window in days; 0 (or omitted) clears
+   *  the deadline = permanent access. Server computes the actual
+   *  expiry timestamp as now + N days. */
+  async setUserAccess(userId: string, durationDays: number): Promise<void> {
+    return this.request<void>("PUT", `/users/${userId}/access`, {
+      body: { duration_days: durationDays },
+    });
+  }
+
   // ─── Libraries ────────────────────────────────────────────────────────
 
   async getLibraries(): Promise<Library[]> {

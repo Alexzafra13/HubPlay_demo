@@ -319,6 +319,7 @@ func NewRouter(deps Dependencies) http.Handler {
 				r.Put("/{id}/content-rating", authHandler.SetContentRating)
 				r.Put("/{id}/role", userHandler.SetRole)
 				r.Put("/{id}/active", userHandler.SetActive)
+				r.Put("/{id}/access", userHandler.SetAccess)
 			})
 
 			// PIN management — auth-only (the handler then enforces

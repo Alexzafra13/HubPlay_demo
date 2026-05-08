@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"hubplay/internal/db"
 )
@@ -91,4 +92,19 @@ func (s *Service) SetActive(ctx context.Context, id string, active bool) error {
 // users table to disable destructive actions on the bootstrap admin.
 func (s *Service) PrimaryAdminID(ctx context.Context) (string, error) {
 	return s.users.PrimaryAdminID(ctx)
+}
+
+// SetAccessExpiresAt sets / clears the temporary-access deadline.
+// Pass nil for permanent. The auth service is the consumer: Login
+// + middleware reject after this stamp.
+func (s *Service) SetAccessExpiresAt(ctx context.Context, id string, expiresAt *time.Time) error {
+	if err := s.users.SetAccessExpiresAt(ctx, id, expiresAt); err != nil {
+		return fmt.Errorf("set access expires at: %w", err)
+	}
+	if expiresAt == nil {
+		s.logger.Info("user access set to permanent", "user_id", id)
+	} else {
+		s.logger.Info("user access window set", "user_id", id, "expires_at", *expiresAt)
+	}
+	return nil
 }
