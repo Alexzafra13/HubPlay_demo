@@ -97,6 +97,7 @@ var outOfScopeExact = map[string]string{
 	// ── User management admin ─────────────────────────────────────────
 	"POST /users/{id}/reset-password": "admin password reset",
 	"PUT /users/{id}/pin":             "profile PIN admin",
+	"PUT /users/{id}/content-rating":  "profile content cap admin",
 	"POST /me/password":               "self password change",
 	"GET /me/profiles":                "profile selector listing",
 	"POST /auth/switch-profile":       "profile switch",

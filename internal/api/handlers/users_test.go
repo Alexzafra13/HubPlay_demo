@@ -50,6 +50,10 @@ func (s *userFakeService) Count(ctx context.Context) (int, error) {
 	return 0, nil
 }
 
+func (s *userFakeService) SetMaxContentRating(_ context.Context, _, _ string) error {
+	return nil
+}
+
 var _ UserService = (*userFakeService)(nil)
 
 // ─── Env ────────────────────────────────────────────────────────────────────

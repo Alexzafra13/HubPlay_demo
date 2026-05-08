@@ -295,6 +295,41 @@ type setPINRequest struct {
 	PIN string `json:"pin"`
 }
 
+type setContentRatingRequest struct {
+	// Empty string clears the cap (= no restriction). Otherwise one
+	// of the literals from the rating ranking table (G/PG/PG-13/R/
+	// NC-17/TV-Y/TV-Y7/TV-G/TV-PG/TV-14/TV-MA).
+	Rating string `json:"rating"`
+}
+
+// SetContentRating updates a profile's max content rating. Validation
+// is permissive — unknown values are stored as-is and the filter
+// callsite fail-opens (treats unknown caps as "no restriction") so a
+// future deploy that adds a localised rating won't lock users out
+// retroactively.
+func (h *AuthHandler) SetContentRating(w http.ResponseWriter, r *http.Request) {
+	claims := auth.GetClaims(r.Context())
+	if claims == nil {
+		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "missing user id")
+		return
+	}
+	var req setContentRatingRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
+		return
+	}
+	if err := h.users.SetMaxContentRating(r.Context(), id, req.Rating); err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // SetPIN sets or clears the PIN of any user under the caller's
 // account tree. Admins can hit it for any user; profile owners
 // (the parent) can hit it for their own children. Profiles can't

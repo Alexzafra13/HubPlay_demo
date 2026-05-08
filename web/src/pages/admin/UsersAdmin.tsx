@@ -8,6 +8,7 @@ import {
   useDeleteUser,
   useMe,
   useResetUserPassword,
+  useSetUserContentRating,
   useSetUserPIN,
 } from "@/api/hooks";
 import { Button, Badge, Modal, Input, EmptyState, Skeleton } from "@/components/common";
@@ -46,6 +47,7 @@ export default function UsersAdmin() {
   const resetPassword = useResetUserPassword();
   const createProfile = useCreateProfile();
   const setUserPIN = useSetUserPIN();
+  const setUserContentRating = useSetUserContentRating();
 
   // "Add profile" modal — admin types a display name; the server
   // synthesises the username + a throwaway password (profiles can't
@@ -194,6 +196,7 @@ export default function UsersAdmin() {
                 <th className="px-4 py-3 font-medium">{t('admin.users.username')}</th>
                 <th className="px-4 py-3 font-medium">{t('admin.users.displayName')}</th>
                 <th className="px-4 py-3 font-medium">{t('admin.users.role')}</th>
+                <th className="px-4 py-3 font-medium">{t('admin.users.rating', { defaultValue: 'Edad máxima' })}</th>
                 <th className="px-4 py-3 font-medium">{t('admin.users.created')}</th>
                 <th className="px-4 py-3 font-medium text-right">{t('admin.users.actions')}</th>
               </tr>
@@ -204,6 +207,7 @@ export default function UsersAdmin() {
                   <td className="px-4 py-3"><Skeleton variant="text" width="60%" /></td>
                   <td className="px-4 py-3"><Skeleton variant="text" width="75%" /></td>
                   <td className="px-4 py-3"><Skeleton variant="rectangular" width={56} height={20} /></td>
+                  <td className="px-4 py-3"><Skeleton variant="rectangular" width={70} height={20} /></td>
                   <td className="px-4 py-3"><Skeleton variant="text" width="55%" /></td>
                   <td className="px-4 py-3">
                     <div className="flex justify-end">
@@ -223,6 +227,7 @@ export default function UsersAdmin() {
                 <th className="px-4 py-3 font-medium">{t('admin.users.username')}</th>
                 <th className="px-4 py-3 font-medium">{t('admin.users.displayName')}</th>
                 <th className="px-4 py-3 font-medium">{t('admin.users.role')}</th>
+                <th className="px-4 py-3 font-medium">{t('admin.users.rating', { defaultValue: 'Edad máxima' })}</th>
                 <th className="px-4 py-3 font-medium">{t('admin.users.created')}</th>
                 <th className="px-4 py-3 font-medium text-right">{t('admin.users.actions')}</th>
               </tr>
@@ -282,6 +287,37 @@ export default function UsersAdmin() {
                       >
                         {user.role}
                       </Badge>
+                    </td>
+                    <td className="px-4 py-3">
+                      {/* Inline content-rating dropdown. Empty = no
+                          restriction; the cap filters /items, /items/
+                          latest and the per-item Get gate. */}
+                      <select
+                        value={user.max_content_rating ?? ""}
+                        onChange={(e) =>
+                          setUserContentRating.mutate({
+                            userId: user.id,
+                            rating: e.target.value,
+                          })
+                        }
+                        className="rounded-[--radius-sm] border border-border bg-bg-elevated px-2 py-1 text-xs text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
+                        aria-label={t('admin.users.rating', {
+                          defaultValue: 'Edad máxima',
+                        })}
+                      >
+                        <option value="">{t('admin.users.ratingNone', { defaultValue: 'Sin límite' })}</option>
+                        <option value="G">G</option>
+                        <option value="PG">PG</option>
+                        <option value="PG-13">PG-13</option>
+                        <option value="R">R</option>
+                        <option value="NC-17">NC-17</option>
+                        <option value="TV-Y">TV-Y</option>
+                        <option value="TV-Y7">TV-Y7</option>
+                        <option value="TV-G">TV-G</option>
+                        <option value="TV-PG">TV-PG</option>
+                        <option value="TV-14">TV-14</option>
+                        <option value="TV-MA">TV-MA</option>
+                      </select>
                     </td>
                     <td className="px-4 py-3 text-text-secondary">
                       {formatDate(user.created_at)}

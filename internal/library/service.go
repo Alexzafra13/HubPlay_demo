@@ -383,8 +383,13 @@ func (s *Service) GetItemImages(ctx context.Context, itemID string) ([]*db.Image
 	return s.images.ListByItem(ctx, itemID)
 }
 
-func (s *Service) LatestItems(ctx context.Context, libraryID string, itemType string, limit int) ([]*db.Item, error) {
-	return s.items.LatestItems(ctx, libraryID, itemType, limit)
+// LatestItems returns the most recently added items in a library
+// (or globally when libraryID == ""). When `capRating` is non-empty
+// the result set is filtered to ratings at-or-below the cap; pass
+// "" to disable the filter (unrestricted profile / admin context).
+func (s *Service) LatestItems(ctx context.Context, libraryID string, itemType string, limit int, capRating string) ([]*db.Item, error) {
+	allowed := AllowedRatingsAtMost(capRating)
+	return s.items.LatestItems(ctx, libraryID, itemType, limit, allowed...)
 }
 
 // LatestSeriesByActivity wraps the dedicated shows-library rail query.

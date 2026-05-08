@@ -314,6 +314,7 @@ func NewRouter(deps Dependencies) http.Handler {
 				r.Delete("/{id}", userHandler.Delete)
 				r.Post("/{id}/reset-password", authHandler.ResetPassword)
 				r.Put("/{id}/pin", authHandler.SetPIN)
+				r.Put("/{id}/content-rating", authHandler.SetContentRating)
 			})
 
 			// Signing key lifecycle (admin only). Every route here is
@@ -556,13 +557,13 @@ func NewRouter(deps Dependencies) http.Handler {
 
 			// Libraries & Items (only if service is wired)
 			if deps.Libraries != nil {
-				libHandler := handlers.NewLibraryHandler(deps.Libraries, deps.Images, deps.Metadata, deps.UserData, deps.Logger)
+				libHandler := handlers.NewLibraryHandler(deps.Libraries, deps.Images, deps.Metadata, deps.UserData, deps.Users, deps.Logger)
 				// Trickplay sprites land under <imageDir>/trickplay/ —
 				// reusing the image-storage root keeps the on-disk
 				// layout clustered (one tree the operator can backup,
 				// rsync, or `du` to size the cache).
 				trickplayDir := filepath.Join(filepath.Dir(deps.Config.Database.Path), "images", "trickplay")
-				itemHandler := handlers.NewItemHandler(deps.Libraries, deps.Images, deps.Metadata, deps.UserData, deps.Chapters, deps.ExternalIDs, deps.People, deps.Collections, deps.Providers, trickplayDir, deps.Logger)
+				itemHandler := handlers.NewItemHandler(deps.Libraries, deps.Images, deps.Metadata, deps.UserData, deps.Users, deps.Chapters, deps.ExternalIDs, deps.People, deps.Collections, deps.Providers, trickplayDir, deps.Logger)
 
 				// Libraries
 				r.Get("/libraries", libHandler.List)

@@ -478,6 +478,15 @@ export class ApiClient {
     });
   }
 
+  /** Sets or clears (empty string) a profile's content cap. Empty
+   *  rating means "no restriction". Admin-only — caller gate is
+   *  enforced server-side. */
+  async setUserContentRating(userId: string, rating: string): Promise<void> {
+    return this.request<void>("PUT", `/users/${userId}/content-rating`, {
+      body: { rating },
+    });
+  }
+
   // ─── Libraries ────────────────────────────────────────────────────────
 
   async getLibraries(): Promise<Library[]> {

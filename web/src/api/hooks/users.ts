@@ -136,3 +136,14 @@ export function useSetUserPIN() {
     },
   });
 }
+
+export function useSetUserContentRating() {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, { userId: string; rating: string }>({
+    mutationFn: ({ userId, rating }) => api.setUserContentRating(userId, rating),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.users });
+      queryClient.invalidateQueries({ queryKey: ["me", "profiles"] });
+    },
+  });
+}

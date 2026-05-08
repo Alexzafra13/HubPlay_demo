@@ -119,6 +119,10 @@ func (m *mockUserService) Count(ctx context.Context) (int, error) {
 	return 0, nil
 }
 
+func (m *mockUserService) SetMaxContentRating(_ context.Context, _, _ string) error {
+	return nil
+}
+
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 func testLogger() *slog.Logger {

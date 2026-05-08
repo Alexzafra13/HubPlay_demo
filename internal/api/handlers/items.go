@@ -15,6 +15,7 @@ import (
 	"hubplay/internal/auth"
 	"hubplay/internal/db"
 	"hubplay/internal/imaging"
+	"hubplay/internal/library"
 	"hubplay/internal/provider"
 
 	"github.com/go-chi/chi/v5"
@@ -25,6 +26,11 @@ type ItemHandler struct {
 	images      ImageRepository
 	metadata    MetadataRepository
 	userData    UserDataRepository
+	// users resolves the caller's max_content_rating for the
+	// per-item rating gate on Get. Optional — nil disables the gate
+	// (admin / unauthenticated context, same fail-open default the
+	// browse / latest paths use).
+	users       UserService
 	chapters    ChapterRepository
 	externalIDs ExternalIDsRepository
 	people      PeopleRepoForItems
@@ -48,14 +54,34 @@ type ItemHandler struct {
 	logger         *slog.Logger
 }
 
-func NewItemHandler(lib LibraryService, images ImageRepository, metadata MetadataRepository, userData UserDataRepository, chapters ChapterRepository, externalIDs ExternalIDsRepository, people PeopleRepoForItems, collections CollectionRepoForItems, providers ProviderManager, trickplayDir string, logger *slog.Logger) *ItemHandler {
+func NewItemHandler(lib LibraryService, images ImageRepository, metadata MetadataRepository, userData UserDataRepository, users UserService, chapters ChapterRepository, externalIDs ExternalIDsRepository, people PeopleRepoForItems, collections CollectionRepoForItems, providers ProviderManager, trickplayDir string, logger *slog.Logger) *ItemHandler {
 	return &ItemHandler{
 		lib: lib, images: images, metadata: metadata, userData: userData,
+		users:    users,
 		chapters: chapters, externalIDs: externalIDs, people: people,
 		collections: collections,
 		providers:   providers,
 		trickplayDir: trickplayDir, logger: logger,
 	}
+}
+
+// callerCapRating mirrors the LibraryHandler helper. nil-safe: when
+// the handler is wired without UserService (e.g. test rigs that don't
+// care about rating gates), the cap collapses to "" and AllowedRating
+// returns true for everything.
+func (h *ItemHandler) callerCapRating(ctx context.Context) string {
+	if h.users == nil {
+		return ""
+	}
+	claims := auth.GetClaims(ctx)
+	if claims == nil {
+		return ""
+	}
+	u, err := h.users.GetByID(ctx, claims.UserID)
+	if err != nil || u == nil {
+		return ""
+	}
+	return u.MaxContentRating
 }
 
 // Get renders the item detail JSON used by the React detail page.
@@ -74,6 +100,18 @@ func (h *ItemHandler) Get(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		handleServiceError(w, r, err)
 		return
+	}
+	// Per-profile content-rating gate: when the caller has a cap
+	// set and the item exceeds it, return 404 (NOT 403) — same shape
+	// as if the item didn't exist. A 403 would leak the existence of
+	// blocked content to a kid profile and let them probe what their
+	// parent has in the library.
+	if cap := h.callerCapRating(r.Context()); cap != "" {
+		rating, _ := detail["content_rating"].(string)
+		if !library.AllowedRating(rating, cap) {
+			respondError(w, r, http.StatusNotFound, "NOT_FOUND", "item not found")
+			return
+		}
 	}
 	respondJSON(w, http.StatusOK, map[string]any{"data": detail})
 }

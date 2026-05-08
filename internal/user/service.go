@@ -55,3 +55,13 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 func (s *Service) Count(ctx context.Context) (int, error) {
 	return s.users.Count(ctx)
 }
+
+// SetMaxContentRating updates a user's per-profile content cap.
+// Empty string clears the cap (= no restriction).
+func (s *Service) SetMaxContentRating(ctx context.Context, id, rating string) error {
+	if err := s.users.SetMaxContentRating(ctx, id, rating); err != nil {
+		return fmt.Errorf("set max content rating: %w", err)
+	}
+	s.logger.Info("max content rating set", "user_id", id, "rating", rating)
+	return nil
+}

@@ -45,11 +45,17 @@ type ItemFilter struct {
 	YearFrom  int    // inclusive lower year bound; 0 disables
 	YearTo    int    // inclusive upper year bound; 0 disables
 	MinRating float64 // inclusive lower community_rating bound; 0 disables
-	Limit     int
-	Offset    int
-	SortBy    string // sort_title, added_at, year
-	SortOrder string // asc, desc
-	Cursor    string // cursor for keyset pagination (item ID after which to fetch)
+	// AllowedContentRatings, when non-nil, restricts the result set
+	// to items whose `content_rating` matches one of the values.
+	// Built upstream from the caller's profile via
+	// library.AllowedRatingsAtMost(profile.max_content_rating). nil
+	// = no restriction (caller has no cap or unknown cap → fail-open).
+	AllowedContentRatings []string
+	Limit                 int
+	Offset                int
+	SortBy                string // sort_title, added_at, year
+	SortOrder             string // asc, desc
+	Cursor                string // cursor for keyset pagination (item ID after which to fetch)
 }
 
 type ItemRepository struct {
@@ -182,6 +188,21 @@ func (r *ItemRepository) List(ctx context.Context, filter ItemFilter) ([]*Item, 
 	if filter.MinRating > 0 {
 		where += " AND community_rating IS NOT NULL AND community_rating >= ?"
 		args = append(args, filter.MinRating)
+	}
+	if len(filter.AllowedContentRatings) > 0 {
+		// IN (?,?,?) over the allow-list. Items with NULL/empty
+		// content_rating are excluded — when a caller passes a
+		// non-empty allow-list it always means "the caller has a
+		// cap set" and we deny unrated items the same way the
+		// AllowedRating helper does for symmetry.
+		placeholders := "?"
+		for range filter.AllowedContentRatings[1:] {
+			placeholders += ",?"
+		}
+		where += " AND content_rating IS NOT NULL AND content_rating IN (" + placeholders + ")"
+		for _, v := range filter.AllowedContentRatings {
+			args = append(args, v)
+		}
 	}
 
 	var total int
@@ -346,7 +367,7 @@ func (r *ItemRepository) GetChildren(ctx context.Context, parentID string) ([]*I
 
 // LatestItems returns the most recently added items.
 // Uses raw SQL because of dynamic WHERE clauses.
-func (r *ItemRepository) LatestItems(ctx context.Context, libraryID string, itemType string, limit int) ([]*Item, error) {
+func (r *ItemRepository) LatestItems(ctx context.Context, libraryID string, itemType string, limit int, allowedRatings ...string) ([]*Item, error) {
 	if limit <= 0 {
 		limit = 20
 	}
@@ -363,6 +384,19 @@ func (r *ItemRepository) LatestItems(ctx context.Context, libraryID string, item
 	if itemType != "" {
 		where += " AND type = ?"
 		args = append(args, itemType)
+	}
+	if len(allowedRatings) > 0 {
+		// Same content_rating IN (...) gate as List() above; the
+		// "+ Nuevos" / "Reciente en X" rails honour the caller
+		// profile's content cap.
+		placeholders := "?"
+		for range allowedRatings[1:] {
+			placeholders += ",?"
+		}
+		where += " AND content_rating IS NOT NULL AND content_rating IN (" + placeholders + ")"
+		for _, v := range allowedRatings {
+			args = append(args, v)
+		}
 	}
 	args = append(args, limit)
 
