@@ -96,6 +96,8 @@ var outOfScopeExact = map[string]string{
 
 	// ── System / settings admin ───────────────────────────────────────
 	"GET /admin/system/stats":            "admin observability",
+	"GET /admin/system/stream-activity":  "admin observability",
+	"GET /admin/system/top-items":        "admin observability",
 	"GET /admin/system/settings":         "admin runtime config",
 	"PUT /admin/system/settings":         "admin runtime config",
 	"DELETE /admin/system/settings/{key}": "admin runtime config",
