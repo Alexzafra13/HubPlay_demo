@@ -126,7 +126,7 @@ func NewRouter(deps Dependencies) http.Handler {
 	if deps.StreamManager != nil {
 		streamSvc = deps.StreamManager
 	}
-	healthHandler := handlers.NewHealthHandler(deps.Database, streamSvc, deps.Version)
+	healthHandler := handlers.NewHealthHandler(deps.Database, streamSvc, deps.Version, deps.Config.Database.Path)
 
 	// Image handler is constructed early so the federation peer
 	// surface (under /api/v1/peer/*, mounted BEFORE the user-auth

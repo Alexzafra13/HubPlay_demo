@@ -4,23 +4,39 @@ import (
 	"database/sql"
 	"net/http"
 	"os/exec"
+	"path/filepath"
 	"runtime"
+	"syscall"
 	"time"
 )
+
+// minReadyFreeBytes is the floor below which /health/ready turns red.
+// 1 GiB is enough headroom for thumbnails + transcode segments + DB
+// growth between two healthcheck cycles on a busy server. Lower than
+// that and the next scan / transcode is liable to write-fail mid-run,
+// which we'd rather surface as "not ready" than as a 500 in the user
+// flow.
+const minReadyFreeBytes uint64 = 1 << 30 // 1 GiB
 
 type HealthHandler struct {
 	db            *sql.DB
 	streamManager StreamManagerService
 	startedAt     time.Time
 	version       string
+	// dbPath is the on-disk location of the SQLite file. We probe its
+	// containing directory for free space — the DB, image cache, and
+	// transcode cache all sit on the same volume in the default
+	// deployment, so one statfs covers all three.
+	dbPath string
 }
 
-func NewHealthHandler(database *sql.DB, sm StreamManagerService, version string) *HealthHandler {
+func NewHealthHandler(database *sql.DB, sm StreamManagerService, version, dbPath string) *HealthHandler {
 	return &HealthHandler{
 		db:            database,
 		streamManager: sm,
 		startedAt:     time.Now(),
 		version:       version,
+		dbPath:        dbPath,
 	}
 }
 
@@ -34,9 +50,19 @@ func (h *HealthHandler) Live(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Ready answers readiness probes: is the process able to serve traffic?
-// 503 when a critical dependency (DB) is unreachable so load balancers
-// drain the node instead of routing requests into a broken backend.
+// Ready answers readiness probes: is the process able to serve traffic
+// in a useful way? We check the three things that, when broken, will
+// make user-visible features fail:
+//
+//   - DB ping (every request hits SQLite)
+//   - ffmpeg in PATH (transcoding is a core feature; without it
+//     non-direct-play sessions return errors mid-stream)
+//   - free disk space on the data volume (writes — DB, image cache,
+//     transcode segments — all share the volume)
+//
+// 503 when any of them is degraded so load balancers / Docker
+// healthchecks drain the node instead of routing requests into a
+// half-broken backend.
 func (h *HealthHandler) Ready(w http.ResponseWriter, r *http.Request) {
 	dbStatus := "ok"
 	dbOK := true
@@ -45,9 +71,28 @@ func (h *HealthHandler) Ready(w http.ResponseWriter, r *http.Request) {
 		dbOK = false
 	}
 
+	ffmpegStatus := "ok"
+	ffmpegOK := true
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		ffmpegStatus = "not found in PATH"
+		ffmpegOK = false
+	}
+
+	diskStatus := "ok"
+	diskOK := true
+	freeBytes, derr := freeDiskBytes(h.dbPath)
+	if derr != nil {
+		diskStatus = "unknown: " + derr.Error()
+		// Stat failure is non-fatal — we'd rather report "unknown" than
+		// drain the node because a chroot doesn't have statfs.
+	} else if freeBytes < minReadyFreeBytes {
+		diskStatus = "low"
+		diskOK = false
+	}
+
 	status := http.StatusOK
 	overall := "ok"
-	if !dbOK {
+	if !dbOK || !ffmpegOK || !diskOK {
 		status = http.StatusServiceUnavailable
 		overall = "unavailable"
 	}
@@ -57,6 +102,9 @@ func (h *HealthHandler) Ready(w http.ResponseWriter, r *http.Request) {
 		"version":        h.version,
 		"uptime_seconds": int(time.Since(h.startedAt).Seconds()),
 		"database":       dbStatus,
+		"ffmpeg":         ffmpegStatus,
+		"disk":           diskStatus,
+		"disk_free_mb":   int(freeBytes / (1024 * 1024)),
 	})
 }
 
@@ -105,4 +153,24 @@ func (h *HealthHandler) Health(w http.ResponseWriter, r *http.Request) {
 		"memory_alloc_mb": int(mem.Alloc / 1024 / 1024),
 		"memory_sys_mb":   int(mem.Sys / 1024 / 1024),
 	})
+}
+
+// freeDiskBytes reports the bytes available to a non-root caller on
+// the filesystem hosting `path`'s containing directory. Linux-only
+// today; building for non-Unix would need a build tag and a Windows
+// equivalent (GetDiskFreeSpaceEx) — out of scope while HubPlay's
+// only supported runtime is Linux/Docker.
+func freeDiskBytes(path string) (uint64, error) {
+	dir := filepath.Dir(path)
+	if dir == "" {
+		dir = "."
+	}
+	var stat syscall.Statfs_t
+	if err := syscall.Statfs(dir, &stat); err != nil {
+		return 0, err
+	}
+	// Bavail is "blocks available to non-root" — the right number to
+	// surface, since HubPlay typically runs as a non-root user. Bfree
+	// would over-report by including the root reserve.
+	return stat.Bavail * uint64(stat.Bsize), nil
 }

@@ -284,6 +284,18 @@ func (s *Service) RefreshToken(ctx context.Context, refreshToken, ip string) (*A
 		return nil, fmt.Errorf("refresh user lookup: %w", err)
 	}
 
+	// Temporary-access window: same lazy enforcement as Login.
+	// Without this check a user whose window expired mid-session
+	// could keep extending themselves via /auth/refresh and ride
+	// past the deadline indefinitely (the validate-token path
+	// catches it within one JWT TTL, but refresh issues a fresh
+	// token so the deadline would slip another full TTL on every
+	// call).
+	if user.AccessExpiresAt != nil && !user.AccessExpiresAt.After(s.clock.Now()) {
+		s.rateLimiter.recordFailure(ipKey)
+		return nil, fmt.Errorf("refresh: %w", domain.ErrAccessExpired)
+	}
+
 	if !user.IsActive {
 		s.rateLimiter.recordFailure(ipKey)
 		return nil, fmt.Errorf("refresh: %w", domain.ErrAccountDisabled)
