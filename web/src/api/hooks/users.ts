@@ -7,7 +7,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseQueryOptions } from "@tanstack/react-query";
 import { api } from "../client";
 import { queryKeys } from "../queryKeys";
-import type { CreateUserResponse, ResetPasswordResponse, User } from "../types";
+import type {
+  CreateUserResponse,
+  ProfileSummary,
+  ResetPasswordResponse,
+  User,
+} from "../types";
 
 export function useUsers(options?: Partial<UseQueryOptions<User[]>>) {
   return useQuery<User[]>({
@@ -73,6 +78,61 @@ export function useChangeMyPassword() {
       api.changeMyPassword(currentPassword, newPassword),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.me });
+    },
+  });
+}
+
+// "Who's watching?" — the profile tree under the current account.
+// 5-min staleTime: profiles change rarely and the create-profile
+// mutation invalidates this key on success.
+export function useProfiles() {
+  return useQuery<ProfileSummary[]>({
+    queryKey: ["me", "profiles"],
+    queryFn: () => api.listProfiles(),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useSwitchProfile() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    { user: User; profiles?: ProfileSummary[] },
+    Error,
+    { profileId: string; pin?: string }
+  >({
+    mutationFn: ({ profileId, pin }) => api.switchProfile(profileId, pin),
+    onSuccess: () => {
+      // Switching changes the JWT identity → wipe every per-user
+      // cache so the new profile sees its own user_data, not the
+      // previous user's Continue Watching / Favorites / etc.
+      queryClient.clear();
+    },
+  });
+}
+
+export function useCreateProfile() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    CreateUserResponse,
+    Error,
+    { parentUserId: string; displayName: string }
+  >({
+    mutationFn: ({ parentUserId, displayName }) =>
+      api.createProfile(parentUserId, displayName),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.users });
+      queryClient.invalidateQueries({ queryKey: ["me", "profiles"] });
+    },
+  });
+}
+
+export function useSetUserPIN() {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, { userId: string; pin: string }>({
+    mutationFn: ({ userId, pin }) => api.setUserPIN(userId, pin),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.users });
+      queryClient.invalidateQueries({ queryKey: ["me", "profiles"] });
     },
   });
 }

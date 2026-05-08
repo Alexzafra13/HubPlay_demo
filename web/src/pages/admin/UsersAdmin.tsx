@@ -1,7 +1,15 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import type { User } from "@/api/types";
-import { useUsers, useCreateUser, useDeleteUser, useMe, useResetUserPassword } from "@/api/hooks";
+import {
+  useUsers,
+  useCreateUser,
+  useCreateProfile,
+  useDeleteUser,
+  useMe,
+  useResetUserPassword,
+  useSetUserPIN,
+} from "@/api/hooks";
 import { Button, Badge, Modal, Input, EmptyState, Skeleton } from "@/components/common";
 import { Trans, useTranslation } from 'react-i18next';
 import FederationAdmin from "./FederationAdmin";
@@ -36,6 +44,56 @@ export default function UsersAdmin() {
   } | null>(null);
 
   const resetPassword = useResetUserPassword();
+  const createProfile = useCreateProfile();
+  const setUserPIN = useSetUserPIN();
+
+  // "Add profile" modal — admin types a display name; the server
+  // synthesises the username + a throwaway password (profiles can't
+  // log in directly anyway).
+  const [profileParent, setProfileParent] = useState<User | null>(null);
+  const [profileName, setProfileName] = useState("");
+
+  // PIN modal — admin types a 4-digit PIN (or clears it).
+  const [pinTarget, setPinTarget] = useState<User | null>(null);
+  const [pinValue, setPinValue] = useState("");
+  const [pinError, setPinError] = useState<string | null>(null);
+
+  function handleCreateProfile(e: FormEvent) {
+    e.preventDefault();
+    if (!profileParent || !profileName.trim()) return;
+    createProfile.mutate(
+      {
+        parentUserId: profileParent.id,
+        displayName: profileName.trim(),
+      },
+      {
+        onSuccess: () => {
+          setProfileParent(null);
+          setProfileName("");
+        },
+      },
+    );
+  }
+
+  function handleSavePin(e: FormEvent) {
+    e.preventDefault();
+    if (!pinTarget) return;
+    setPinError(null);
+    if (pinValue !== "" && !/^\d{4}$/.test(pinValue)) {
+      setPinError(t("admin.users.pinValidation", { defaultValue: "El PIN debe ser exactamente 4 dígitos." }));
+      return;
+    }
+    setUserPIN.mutate(
+      { userId: pinTarget.id, pin: pinValue },
+      {
+        onSuccess: () => {
+          setPinTarget(null);
+          setPinValue("");
+        },
+        onError: (err) => setPinError(err.message),
+      },
+    );
+  }
 
   function resetForm() {
     setNewUsername("");
@@ -178,7 +236,37 @@ export default function UsersAdmin() {
                     className="bg-bg-card hover:bg-bg-elevated transition-colors"
                   >
                     <td className="px-4 py-3 font-medium text-text-primary">
-                      {user.username}
+                      {/* Profiles are visually nested under their
+                          parent — easier to read than scanning the
+                          parent_user_id column. */}
+                      {user.parent_user_id && (
+                        <span className="mr-2 text-text-muted" aria-hidden>
+                          ↳
+                        </span>
+                      )}
+                      {/* Profile usernames carry the synthetic
+                          "<parent>/<name>" prefix the server uses to
+                          keep UNIQUE happy; show only the suffix. */}
+                      {user.parent_user_id
+                        ? user.username.split("/").pop()
+                        : user.username}
+                      {user.parent_user_id && (
+                        <span className="ml-2 text-[10px] uppercase tracking-wider text-accent">
+                          {t('admin.users.profileTag', { defaultValue: 'perfil' })}
+                        </span>
+                      )}
+                      {user.has_pin && (
+                        <span
+                          className="ml-2 inline-flex h-4 w-4 items-center justify-center text-text-muted"
+                          aria-label={t('admin.users.pinSet', { defaultValue: 'PIN configurado' })}
+                          title={t('admin.users.pinSet', { defaultValue: 'PIN configurado' })}
+                        >
+                          <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                            <rect x="5" y="11" width="14" height="9" rx="2" />
+                            <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+                          </svg>
+                        </span>
+                      )}
                       {isSelf && (
                         <span className="ml-2 text-xs text-text-muted">
                           {t('admin.users.you')}
@@ -199,14 +287,40 @@ export default function UsersAdmin() {
                       {formatDate(user.created_at)}
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex justify-end gap-2">
+                      <div className="flex justify-end gap-2 flex-wrap">
+                        {!user.parent_user_id && (
+                          <>
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => setProfileParent(user)}
+                              title={t('admin.users.addProfileHint', { defaultValue: 'Crear perfil hijo bajo esta cuenta' })}
+                            >
+                              {t('admin.users.addProfile', { defaultValue: '+ Perfil' })}
+                            </Button>
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => setResetTarget(user)}
+                              title={t('admin.users.resetPasswordHint', { defaultValue: 'Generar contraseña temporal nueva' })}
+                            >
+                              {t('admin.users.resetPassword', { defaultValue: 'Reiniciar contraseña' })}
+                            </Button>
+                          </>
+                        )}
                         <Button
                           variant="secondary"
                           size="sm"
-                          onClick={() => setResetTarget(user)}
-                          title={t('admin.users.resetPasswordHint', { defaultValue: 'Generar contraseña temporal nueva' })}
+                          onClick={() => {
+                            setPinTarget(user);
+                            setPinValue("");
+                            setPinError(null);
+                          }}
+                          title={t('admin.users.pinHint', { defaultValue: 'Configurar PIN del perfil' })}
                         >
-                          {t('admin.users.resetPassword', { defaultValue: 'Reiniciar contraseña' })}
+                          {user.has_pin
+                            ? t('admin.users.pinChange', { defaultValue: 'Cambiar PIN' })
+                            : t('admin.users.pinSetCta', { defaultValue: 'Poner PIN' })}
                         </Button>
                         <Button
                           variant="danger"
@@ -457,6 +571,113 @@ export default function UsersAdmin() {
               </Button>
             </div>
           </div>
+        )}
+      </Modal>
+
+      {/* Add profile modal — admin types a display name; the
+          server synthesises username + a throwaway internal
+          password. Profiles can't log in directly anyway. */}
+      <Modal
+        isOpen={profileParent !== null}
+        onClose={() => {
+          setProfileParent(null);
+          setProfileName("");
+        }}
+        title={t('admin.users.addProfile', { defaultValue: 'Añadir perfil' })}
+        size="sm"
+      >
+        {profileParent && (
+          <form onSubmit={handleCreateProfile} className="flex flex-col gap-4">
+            <p className="text-sm text-text-secondary">
+              <Trans
+                i18nKey="admin.users.addProfileHelper"
+                values={{ name: profileParent.username }}
+                defaults="El perfil se creará bajo <strong>{{name}}</strong>. Podrá entrar al servidor desde la pantalla de selección sin contraseña propia."
+                components={{ strong: <strong className="text-text-primary" /> }}
+              />
+            </p>
+            <Input
+              label={t('admin.users.profileName', { defaultValue: 'Nombre del perfil' })}
+              placeholder={t('admin.users.profileNamePlaceholder', { defaultValue: 'Niños · Pareja · Visita' })}
+              value={profileName}
+              onChange={(e) => setProfileName(e.target.value)}
+              autoFocus
+              required
+            />
+            {createProfile.error && (
+              <p className="text-xs text-error">{createProfile.error.message}</p>
+            )}
+            <div className="flex justify-end gap-3">
+              <Button
+                variant="secondary"
+                type="button"
+                onClick={() => {
+                  setProfileParent(null);
+                  setProfileName("");
+                }}
+              >
+                {t('common.cancel')}
+              </Button>
+              <Button type="submit" isLoading={createProfile.isPending}>
+                {t('common.create')}
+              </Button>
+            </div>
+          </form>
+        )}
+      </Modal>
+
+      {/* PIN modal — type 4 digits or leave empty to clear. */}
+      <Modal
+        isOpen={pinTarget !== null}
+        onClose={() => {
+          setPinTarget(null);
+          setPinValue("");
+          setPinError(null);
+        }}
+        title={t('admin.users.pinModalTitle', { defaultValue: 'PIN del perfil' })}
+        size="sm"
+      >
+        {pinTarget && (
+          <form onSubmit={handleSavePin} className="flex flex-col gap-4">
+            <p className="text-sm text-text-secondary">
+              {t('admin.users.pinModalHint', {
+                defaultValue:
+                  'Escribe un PIN de 4 dígitos o déjalo vacío para quitarlo. El PIN se pide al elegir el perfil en la pantalla de selección.',
+              })}
+            </p>
+            <input
+              type="tel"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              maxLength={4}
+              autoFocus
+              value={pinValue}
+              onChange={(e) => setPinValue(e.target.value.replace(/[^0-9]/g, '').slice(0, 4))}
+              placeholder="••••"
+              className="w-32 self-center rounded-lg border border-border bg-bg-card px-4 py-2.5 text-center text-2xl font-mono tracking-[0.6em] text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30"
+            />
+            {pinError && (
+              <p className="text-xs text-error text-center">{pinError}</p>
+            )}
+            <div className="flex justify-end gap-3">
+              <Button
+                variant="secondary"
+                type="button"
+                onClick={() => {
+                  setPinTarget(null);
+                  setPinValue("");
+                  setPinError(null);
+                }}
+              >
+                {t('common.cancel')}
+              </Button>
+              <Button type="submit" isLoading={setUserPIN.isPending}>
+                {pinValue === ''
+                  ? t('admin.users.pinClearCta', { defaultValue: 'Quitar PIN' })
+                  : t('common.save', { defaultValue: 'Guardar' })}
+              </Button>
+            </div>
+          </form>
         )}
       </Modal>
 

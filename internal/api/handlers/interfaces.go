@@ -26,6 +26,9 @@ type AuthService interface {
 	Register(ctx context.Context, req auth.RegisterRequest) (*db.User, error)
 	ResetPassword(ctx context.Context, userID string) (string, error)
 	ChangePassword(ctx context.Context, userID, current, next string) error
+	ListProfiles(ctx context.Context, userID string) ([]*db.User, error)
+	SwitchProfile(ctx context.Context, currentUserID, targetProfileID, pin, deviceName, deviceID, ip string) (*auth.AuthToken, error)
+	SetPIN(ctx context.Context, userID, pin string) error
 	ValidateToken(ctx context.Context, tokenStr string) (*auth.Claims, error)
 	Middleware(next http.Handler) http.Handler
 }

@@ -50,7 +50,8 @@
     "userMenu": "User menu",
     "suggestions": "Suggestions",
     "noResultsFor": "No results for",
-    "viewAllResults": "View all results"
+    "viewAllResults": "View all results",
+    "switchProfile": "Switch profile"
   },
   "navMenu": {
     "explore": "Explore",
@@ -114,6 +115,15 @@
     "peers": {
       "viewAll": "View all servers"
     }
+  },
+  "whoIsWatching": {
+    "title": "Who's watching?",
+    "pickProfile": "Sign in as {{name}}",
+    "enterPin": "Enter the 4-digit PIN",
+    "unlock": "Continue",
+    "errorWrongPin": "Wrong PIN. Try again.",
+    "errorPinLength": "PIN must be exactly 4 digits.",
+    "pinInputLabel": "4-digit PIN"
   },
   "changePassword": {
     "title": "Change password",

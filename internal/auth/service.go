@@ -473,6 +473,99 @@ func (s *Service) ResetPassword(ctx context.Context, userID string) (string, err
 	return plain, nil
 }
 
+// ListProfiles returns the parent account row plus every child
+// profile that hangs off it. Caller must be either the parent or
+// one of its children — passing any other userID resolves the
+// owner via parent_user_id and returns the right tree, but the
+// public surface only ever reaches this with the caller's own
+// claims.
+func (s *Service) ListProfiles(ctx context.Context, userID string) ([]*db.User, error) {
+	user, err := s.users.GetByID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	owner := user.ID
+	if user.IsProfile() {
+		owner = user.ParentUserID
+	}
+	return s.users.ListProfilesForOwner(ctx, owner)
+}
+
+// SwitchProfile mints a new auth session for a child profile (or for
+// the parent when the user wants to switch back). Caller must be the
+// parent of the target OR another child under the same parent — the
+// shared owner-id is the gate.
+//
+// PIN is optional from the wire perspective; required when the target
+// profile carries pin_hash. Empty PIN against a PIN-protected profile
+// returns ErrInvalidPassword (sharing the same sentinel as a wrong
+// password keeps the error surface tiny).
+func (s *Service) SwitchProfile(
+	ctx context.Context,
+	currentUserID, targetProfileID, pin, deviceName, deviceID, ip string,
+) (*AuthToken, error) {
+	current, err := s.users.GetByID(ctx, currentUserID)
+	if err != nil {
+		return nil, err
+	}
+	target, err := s.users.GetByID(ctx, targetProfileID)
+	if err != nil {
+		return nil, err
+	}
+	// Owner is the parent (current user when current is the parent,
+	// current.parent_user_id when current is a profile). Same for
+	// the target. Match → caller is allowed to switch.
+	currentOwner := current.ID
+	if current.IsProfile() {
+		currentOwner = current.ParentUserID
+	}
+	targetOwner := target.ID
+	if target.IsProfile() {
+		targetOwner = target.ParentUserID
+	}
+	if currentOwner != targetOwner {
+		return nil, fmt.Errorf("switch profile: %w", domain.ErrForbidden)
+	}
+	if !target.IsActive {
+		return nil, fmt.Errorf("switch profile: %w", domain.ErrAccountDisabled)
+	}
+	// PIN gate. Stored hash empty = "no PIN, anyone can switch in".
+	// Non-empty hash = the caller must provide a PIN that bcrypt-
+	// matches. Wrong PIN intentionally returns the same error code
+	// as a wrong password so an enumeration attack can't map it.
+	if target.PINHash != "" {
+		if pin == "" {
+			return nil, fmt.Errorf("switch profile: pin required: %w", domain.ErrInvalidPassword)
+		}
+		if err := bcrypt.CompareHashAndPassword([]byte(target.PINHash), []byte(pin)); err != nil {
+			return nil, fmt.Errorf("switch profile: %w", domain.ErrInvalidPassword)
+		}
+	}
+	// Token is just a regular session for the target profile's
+	// users.id — every existing user-keyed endpoint (user_data,
+	// favourites, federation_progress, ...) keeps working without
+	// learning what a "profile" is.
+	if err := s.users.UpdateLastLogin(ctx, target.ID, s.clock.Now()); err != nil {
+		s.logger.Warn("switch profile: update last login", "error", err)
+	}
+	s.logger.Info("profile switched", "from", currentUserID, "to", targetProfileID)
+	return s.createSession(ctx, target, deviceName, deviceID, ip)
+}
+
+// SetPIN bcrypt-hashes (and stores) a 4-digit PIN, or clears it when
+// `pin` is empty. The caller's permission check happens at the HTTP
+// layer; this method trusts its inputs by design (admin-only path).
+func (s *Service) SetPIN(ctx context.Context, userID, pin string) error {
+	if pin == "" {
+		return s.users.SetPIN(ctx, userID, "")
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(pin), s.cfg.BCryptCost)
+	if err != nil {
+		return fmt.Errorf("hashing pin: %w", err)
+	}
+	return s.users.SetPIN(ctx, userID, string(hash))
+}
+
 // ChangePassword is the user-side "rotate my own password" flow.
 // Verifies the current password before mutating so a stolen JWT
 // can't pivot into a permanent takeover. Clears the must-change

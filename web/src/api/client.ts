@@ -43,6 +43,7 @@ import type {
   UpsertScheduledJobRequest,
   User,
   CreateUserResponse,
+  ProfileSummary,
   ResetPasswordResponse,
   UserData,
   ApiErrorBody,
@@ -432,6 +433,48 @@ export class ApiClient {
   async changeMyPassword(currentPassword: string, newPassword: string): Promise<void> {
     return this.request<void>("POST", "/me/password", {
       body: { current_password: currentPassword, new_password: newPassword },
+    });
+  }
+
+  /** List the profiles under the current account (parent + children).
+   *  Used by the "Who's watching?" screen when the frontend lands
+   *  via cookie refresh and doesn't have a fresh login response to
+   *  consume. */
+  async listProfiles(): Promise<ProfileSummary[]> {
+    return this.request<ProfileSummary[]>("GET", "/me/profiles");
+  }
+
+  /** Switch into a sibling / parent profile. Returns a fresh auth
+   *  token for the target. PIN is only required when the target
+   *  profile has one set. */
+  async switchProfile(profileId: string, pin?: string): Promise<{
+    user: User;
+    profiles?: ProfileSummary[];
+  }> {
+    return this.request<{ user: User; profiles?: ProfileSummary[] }>(
+      "POST",
+      "/auth/switch-profile",
+      { body: { profile_id: profileId, pin: pin ?? "" } },
+    );
+  }
+
+  /** Admin profile creation. Wraps POST /users with parent_user_id
+   *  set so the server creates a child row. Password / username are
+   *  ignored on the wire — the server synthesises them. */
+  async createProfile(parentUserId: string, displayName: string): Promise<CreateUserResponse> {
+    return this.request<CreateUserResponse>("POST", "/users", {
+      body: {
+        parent_user_id: parentUserId,
+        display_name: displayName,
+      },
+    });
+  }
+
+  /** Sets or clears (empty string) a profile's PIN. Caller must be
+   *  the parent of the profile or an admin. */
+  async setUserPIN(userId: string, pin: string): Promise<void> {
+    return this.request<void>("PUT", `/users/${userId}/pin`, {
+      body: { pin },
     });
   }
 

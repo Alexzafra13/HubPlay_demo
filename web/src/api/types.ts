@@ -232,11 +232,34 @@ export interface ResetPasswordResponse {
   generated_password: string;
 }
 
+/**
+ * One entry in the "Who's watching?" picker. Slim wire payload —
+ * just identity, the avatar attribution that the deterministic
+ * colour helper consumes, and the PIN flag so the picker can render
+ * a lock icon. Returned by /auth/login (alongside the token) and by
+ * GET /me/profiles when the frontend lands via cookie refresh.
+ */
+export interface ProfileSummary {
+  id: string;
+  username: string;
+  display_name: string;
+  role: string;
+  is_active: boolean;
+  parent_user_id?: string;
+  has_pin: boolean;
+  max_content_rating?: string;
+}
+
 export interface AuthResponse {
   access_token: string;
   refresh_token: string;
   expires_in: number;
   user: User;
+  /** Profile tree under the current account. Returned by /auth/login
+   *  and /auth/switch-profile so the frontend can decide whether to
+   *  drop into the "Who's watching?" picker without an extra fetch.
+   *  Absent on solo deploys (server omits the field). */
+  profiles?: ProfileSummary[];
 }
 
 export interface LoginRequest {

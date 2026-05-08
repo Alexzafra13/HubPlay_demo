@@ -291,6 +291,8 @@ func NewRouter(deps Dependencies) http.Handler {
 			// Current user
 			r.Get("/me", userHandler.Me)
 			r.Post("/me/password", authHandler.ChangeMyPassword)
+			r.Get("/me/profiles", authHandler.ListProfiles)
+			r.Post("/auth/switch-profile", authHandler.SwitchProfile)
 
 			// Per-user preferences (hero mode, theme overrides, etc.)
 			// Authenticated; the handler derives userID from claims so
@@ -311,6 +313,7 @@ func NewRouter(deps Dependencies) http.Handler {
 				r.Post("/", authHandler.Register)
 				r.Delete("/{id}", userHandler.Delete)
 				r.Post("/{id}/reset-password", authHandler.ResetPassword)
+				r.Put("/{id}/pin", authHandler.SetPIN)
 			})
 
 			// Signing key lifecycle (admin only). Every route here is
