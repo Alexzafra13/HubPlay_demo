@@ -6,6 +6,7 @@ import { ChevronDown, X, LogOut, Settings, ShieldCheck, Smartphone } from "lucid
 import { useAuthStore } from "@/store/auth";
 import { useAllPeerLibraries } from "@/api/hooks/federation";
 import { getInitials } from "@/utils/userDisplay";
+import { avatarColorFor } from "@/utils/avatarColor";
 import { MAIN_NAV, PEERS_NAV, type NavItem } from "./navConfig";
 
 // MobileDrawer — replaces the legacy mobile sidebar drawer. Renders
@@ -27,6 +28,7 @@ export function MobileDrawer({ onClose, onLogout }: MobileDrawerProps) {
   const { user } = useAuthStore();
   const isAdmin = user?.role === "admin";
   const initials = getInitials(user);
+  const palette = avatarColorFor(user?.username);
 
   const { data: peerLibs } = useAllPeerLibraries();
   const showPeers = isAdmin && (peerLibs?.length ?? 0) > 0;
@@ -106,12 +108,8 @@ export function MobileDrawer({ onClose, onLogout }: MobileDrawerProps) {
       <div className="px-3 pb-3 flex-shrink-0">
         <div className="flex items-center gap-3 p-3 rounded-xl border border-border-subtle bg-bg-card/40">
           <span
-            className="relative flex h-9 w-9 items-center justify-center rounded-full text-[12px] font-semibold ring-1 ring-accent/30 flex-shrink-0"
-            style={{
-              background:
-                "linear-gradient(135deg, color-mix(in srgb, var(--color-accent) 20%, transparent), color-mix(in srgb, var(--color-accent) 8%, transparent))",
-              color: "var(--color-accent-light)",
-            }}
+            className="relative flex h-9 w-9 items-center justify-center rounded-full text-[12px] font-semibold text-white ring-1 ring-white/15 flex-shrink-0"
+            style={{ background: palette.background }}
           >
             {initials}
           </span>

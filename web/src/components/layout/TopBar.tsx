@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { getInitials } from "@/utils/userDisplay";
+import { avatarColorFor } from "@/utils/avatarColor";
 import { BrandWordmark } from "./BrandWordmark";
 import { SearchBar } from "./SearchBar";
 import { MainNav } from "./MainNav";
@@ -55,7 +56,7 @@ export function TopBar({ onMobileMenuClick }: TopBarProps) {
         aria-label="HubPlay"
         className="flex items-center px-1 py-1.5 rounded-lg hover:bg-bg-hover/60 transition-colors min-w-0 flex-shrink-0"
       >
-        <BrandWordmark height={26} />
+        <BrandWordmark height={32} />
       </NavLink>
 
       {/* Center nav — desktop only; on mobile the drawer holds it. */}
@@ -112,16 +113,18 @@ function UserAvatarMenu({
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [open]);
 
+  // Solid avatar colour deterministically derived from the username so
+  // the same user reads identical across every device with no DB
+  // round-trip. Falls through to the first palette entry while the
+  // /me query is still resolving so the circle never pops in blank.
+  const palette = avatarColorFor(user?.username);
+
   return (
     <div ref={ref} className="relative flex-shrink-0">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="relative flex items-center justify-center h-9 w-9 rounded-full text-[12px] font-semibold ring-1 ring-accent/30 hover:ring-accent/60 transition-all"
-        style={{
-          background:
-            "linear-gradient(135deg, color-mix(in srgb, var(--color-accent) 20%, transparent), color-mix(in srgb, var(--color-accent) 8%, transparent))",
-          color: "var(--color-accent-light)",
-        }}
+        className="relative flex items-center justify-center h-9 w-9 rounded-full text-[12px] font-semibold text-white ring-1 ring-white/15 hover:ring-white/35 transition-all"
+        style={{ background: palette.background }}
         aria-label={t("topbar.userMenu")}
         aria-haspopup="menu"
         aria-expanded={open}
