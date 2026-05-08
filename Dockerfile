@@ -21,9 +21,35 @@ ARG VERSION=dev
 
 WORKDIR /src
 
+# GOPROXY fallback chain: try the official proxy first, then a public
+# mirror, finally fall back to direct VCS. Buys us resilience against
+# transient `proxy.golang.org` outages (GOAWAY frames during their
+# rolling restarts) on multi-arch builds where the QEMU emulation
+# slowdown widens the window. Each entry is tried in order; `direct`
+# at the end means "skip the proxy and clone the module's repo
+# straight" so a hard outage doesn't gate the build.
+ENV GOPROXY=https://proxy.golang.org,https://goproxy.cn,direct
+ENV GOSUMDB=sum.golang.org
+
 COPY go.mod go.sum ./
+# Up to 3 attempts with linear backoff (5s, 10s) so a single GOAWAY
+# on a heavy module (modernc.org/libc weighs ~50 MB) doesn't fail
+# the whole stage. The `until/exit 1` shape — instead of a for-loop
+# with `break` — propagates the final attempt's exit code so a
+# legitimate auth/checksum failure still fails the build instead of
+# being silently swallowed by a `done && ...` chain.
 RUN --mount=type=cache,target=/go/pkg/mod \
-    go mod download
+    set -e; \
+    n=0; \
+    until go mod download; do \
+        n=$((n+1)); \
+        if [ "$n" -ge 3 ]; then \
+            echo "go mod download failed after $n attempts"; exit 1; \
+        fi; \
+        echo "go mod download attempt $n failed; retrying in $((n * 5))s..."; \
+        sleep $((n * 5)); \
+    done; \
+    go mod verify
 
 # Copy only what the Go build needs
 COPY cmd/ cmd/

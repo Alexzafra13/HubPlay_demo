@@ -106,8 +106,13 @@ jobs:
       # Severity gate is HIGH/CRITICAL — anything lower would gate
       # builds on weekly OS-level patch updates that the base-image
       # rebuild handles automatically.
+      #
+      # Gated on `success()` so a failed build (e.g. transient
+      # proxy.golang.org GOAWAY on `go mod download`) doesn't drag the
+      # scan into a "file does not exist" upload error — Trivy needs
+      # an image to scan.
       - name: Scan image with Trivy
-        if: matrix.target == 'hwaccel' || github.event_name != 'pull_request'
+        if: success() && (matrix.target == 'hwaccel' || github.event_name != 'pull_request')
         # `@master` is what the official Aqua README recommends — the
         # repo doesn't ship marketplace tags consistently (we tried
         # @0.28.0, which doesn't resolve). Pin to a SHA instead of a
@@ -124,9 +129,16 @@ jobs:
           ignore-unfixed: true   # don't gate on CVEs the base image hasn't fixed yet
           exit-code: '0'         # report-only; doesn't block the merge
 
+      # Only attempt the SARIF upload when Trivy actually produced a
+      # file. `hashFiles` returns "" when no path matches, so the
+      # condition is false on builds where the scan was skipped or
+      # failed. Without this, a failed build cascade into "Path does
+      # not exist: trivy-results.sarif" and red the workflow twice.
+      #
+      # Bumped to v4 — v3 is scheduled for deprecation in Dec 2026.
       - name: Upload Trivy results
-        if: always() && (matrix.target == 'hwaccel' || github.event_name != 'pull_request')
-        uses: github/codeql-action/upload-sarif@v3
+        if: always() && hashFiles('trivy-results.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-results.sarif
           category: trivy-${{ matrix.target || 'default' }}
