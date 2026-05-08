@@ -490,12 +490,14 @@
   "admin": {
     "title": "Administration",
     "tabs": {
+      "summary": "Summary",
+      "library": "Library",
+      "users": "Users",
+      "system": "System",
       "dashboard": "Dashboard",
       "libraries": "Libraries",
       "providers": "Providers",
-      "users": "Users",
-      "federation": "Federation",
-      "system": "System"
+      "federation": "Federation"
     },
     "federation": {
       "title": "Connected servers",
@@ -726,6 +728,7 @@
       "sectionRuntime": "Runtime",
       "sectionStorage": "Storage",
       "sectionLibraries": "Libraries",
+      "sectionAdvanced": "Advanced",
       "sectionSettings": "Settings",
       "bindAddress": "Listen address",
       "baseURL": "Public URL",

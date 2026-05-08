@@ -4,6 +4,7 @@ import type { User } from "@/api/types";
 import { useUsers, useCreateUser, useDeleteUser, useMe } from "@/api/hooks";
 import { Button, Badge, Modal, Input, EmptyState, Skeleton } from "@/components/common";
 import { Trans, useTranslation } from 'react-i18next';
+import FederationAdmin from "./FederationAdmin";
 
 export default function UsersAdmin() {
   const { t } = useTranslation();
@@ -286,6 +287,16 @@ export default function UsersAdmin() {
           </div>
         </div>
       </Modal>
+
+      {/* Federation lived as its own top-level admin tab. It's a
+          niche feature most installs never touch, but it IS about
+          who's allowed to access this server's catalogue — so it
+          fits naturally as a "Servidores conectados" section under
+          the Users page. The dedicated /admin/federation route still
+          works for direct links. */}
+      <section className="mt-8 pt-6 border-t border-border-subtle">
+        <FederationAdmin />
+      </section>
     </div>
   );
 }

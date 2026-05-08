@@ -490,12 +490,14 @@
   "admin": {
     "title": "Administracion",
     "tabs": {
+      "summary": "Resumen",
+      "library": "Biblioteca",
+      "users": "Usuarios",
+      "system": "Sistema",
       "dashboard": "Inicio",
       "libraries": "Bibliotecas",
       "providers": "Proveedores",
-      "users": "Usuarios",
-      "federation": "Federación",
-      "system": "Sistema"
+      "federation": "Federación"
     },
     "federation": {
       "title": "Servidores conectados",
@@ -726,6 +728,7 @@
       "sectionRuntime": "Runtime",
       "sectionStorage": "Almacenamiento",
       "sectionLibraries": "Bibliotecas",
+      "sectionAdvanced": "Avanzado",
       "sectionSettings": "Configuración",
       "bindAddress": "Dirección de escucha",
       "baseURL": "URL pública",

@@ -94,7 +94,7 @@ export default function DashboardAdmin() {
         </span>
         <span className="ml-auto">
           <Link
-            to="/admin/system/status"
+            to="/admin/system"
             className="text-sm font-medium text-accent hover:underline"
           >
             {t("admin.dashboard.viewSystemDetails")}
@@ -128,7 +128,7 @@ export default function DashboardAdmin() {
             {t("admin.dashboard.actionGoToLibraries")}
           </Link>
           <Link
-            to="/admin/system/advanced"
+            to="/admin/system"
             className="rounded-[--radius-md] border border-border bg-bg-card px-4 py-3 text-sm font-medium text-text-primary hover:bg-bg-elevated transition-colors"
           >
             {t("admin.dashboard.actionGoToAdvanced")}

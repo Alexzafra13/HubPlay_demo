@@ -39,10 +39,7 @@ const PeerLibrariesPage = lazyWithRetry(() => import("@/pages/PeerLibrariesPage"
 const PeerLibraryItemsPage = lazyWithRetry(() => import("@/pages/PeerLibraryItemsPage"));
 const PeerItemDetail = lazyWithRetry(() => import("@/pages/PeerItemDetail"));
 const LinkDevice = lazyWithRetry(() => import("@/pages/LinkDevice"));
-const SystemLayout = lazyWithRetry(() => import("@/pages/admin/system/SystemLayout"));
 const SystemStatus = lazyWithRetry(() => import("@/pages/admin/system/SystemStatus"));
-const SystemActivity = lazyWithRetry(() => import("@/pages/admin/system/SystemActivity"));
-const SystemAdvanced = lazyWithRetry(() => import("@/pages/admin/system/SystemAdvanced"));
 
 function LazyFallback() {
   return (
@@ -153,15 +150,37 @@ export function App() {
                 <Route path="libraries" element={<LibrariesAdmin />} />
                 <Route path="libraries/new" element={<LibraryNewPage />} />
                 <Route path="libraries/:id" element={<LibraryDetailPage />} />
+                {/* Providers used to be its own top-level tab. Folded
+                    into the Library page as a section, but the URL
+                    stays for bookmarks (and so deep-links from search
+                    keep working) — it just renders the providers
+                    surface without its own tab in the rail. */}
                 <Route path="providers" element={<ProvidersAdmin />} />
                 <Route path="users" element={<UsersAdmin />} />
+                {/* Federation moved out of the top-level rail and
+                    into the Users page. The dedicated route stays
+                    so bookmarks survive; landing on it shows the
+                    federation surface inline. */}
                 <Route path="federation" element={<FederationAdmin />} />
-                <Route path="system" element={<SystemLayout />}>
-                  <Route index element={<Navigate to="status" replace />} />
-                  <Route path="status" element={<SystemStatus />} />
-                  <Route path="activity" element={<SystemActivity />} />
-                  <Route path="advanced" element={<SystemAdvanced />} />
-                </Route>
+                {/* System lost its three sub-tabs (status / activity /
+                    advanced) — rendered as a single Settings-style
+                    page now. Activity in particular was empty
+                    placeholders that the audit log + dashboard cover
+                    better. The legacy paths redirect so external
+                    bookmarks survive. */}
+                <Route path="system" element={<SystemStatus />} />
+                <Route
+                  path="system/status"
+                  element={<Navigate to="/admin/system" replace />}
+                />
+                <Route
+                  path="system/activity"
+                  element={<Navigate to="/admin/dashboard" replace />}
+                />
+                <Route
+                  path="system/advanced"
+                  element={<Navigate to="/admin/system" replace />}
+                />
               </Route>
             </Route>
           </Route>
