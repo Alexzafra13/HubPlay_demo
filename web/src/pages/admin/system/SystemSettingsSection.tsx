@@ -27,41 +27,26 @@ export function SystemSettingsSection() {
 
   if (isLoading) {
     return (
-      <section className="flex flex-col gap-3">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-text-muted">
-          {t("admin.system.sectionSettings")}
-        </h3>
-        <div className="flex justify-center py-6">
-          <Spinner size="md" />
-        </div>
-      </section>
+      <div className="flex justify-center py-6">
+        <Spinner size="md" />
+      </div>
     );
   }
 
   if (error || !data) {
     return (
-      <section className="flex flex-col gap-3">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-text-muted">
-          {t("admin.system.sectionSettings")}
-        </h3>
-        <p className="text-sm text-text-muted">
-          {error?.message ?? t("admin.system.settingsLoadFailed")}
-        </p>
-      </section>
+      <p className="text-sm text-text-muted">
+        {error?.message ?? t("admin.system.settingsLoadFailed")}
+      </p>
     );
   }
 
   return (
-    <section className="flex flex-col gap-3">
-      <h3 className="text-xs font-semibold uppercase tracking-wider text-text-muted">
-        {t("admin.system.sectionSettings")}
-      </h3>
-      <div className="grid gap-4 lg:grid-cols-2">
-        {data.settings.map((s) => (
-          <SettingRow key={s.key} setting={s} />
-        ))}
-      </div>
-    </section>
+    <div className="grid gap-4 lg:grid-cols-2">
+      {data.settings.map((s) => (
+        <SettingRow key={s.key} setting={s} />
+      ))}
+    </div>
   );
 }
 
@@ -117,13 +102,17 @@ function SettingRow({ setting }: SettingRowProps) {
             {t(`admin.system.settings.${settingI18nKey(setting.key)}.hint`, setting.hint)}
           </span>
         </div>
-        <div className="flex flex-shrink-0 items-center gap-2">
-          {setting.override ? (
-            <Badge variant="success">{t("admin.system.overrideBadge")}</Badge>
-          ) : (
-            <Badge variant="default">{t("admin.system.defaultBadge")}</Badge>
-          )}
-        </div>
+        {/* Show a badge only when the operator has actually
+            overridden this key — the "at default" state needs no
+            label (the bottom hint already says "Por defecto: X"
+            and a duplicate badge just reads as redundant). */}
+        {setting.override && (
+          <div className="flex flex-shrink-0 items-center gap-2">
+            <Badge variant="success">
+              {t("admin.system.overrideBadge", { defaultValue: "Personalizado" })}
+            </Badge>
+          </div>
+        )}
       </div>
 
       {setting.allowed_values && setting.allowed_values.length > 0 ? (
@@ -135,7 +124,16 @@ function SettingRow({ setting }: SettingRowProps) {
         >
           {setting.allowed_values.map((v) => (
             <option key={v} value={v}>
-              {v}
+              {/* Boolean settings come over the wire as the literal
+                  strings "true" / "false" — surfacing the raw token
+                  to the operator reads as a debug screen. Translate
+                  those two well-known values; everything else is
+                  passed through as-is. */}
+              {v === "true"
+                ? t("admin.system.boolEnabled", { defaultValue: "Activado" })
+                : v === "false"
+                  ? t("admin.system.boolDisabled", { defaultValue: "Desactivado" })
+                  : v}
             </option>
           ))}
         </select>
