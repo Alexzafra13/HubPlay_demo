@@ -391,6 +391,8 @@
     "favoritesOnly": "Favourites only",
     "titleExplorar": "Explore channels",
     "heroLabelSelected": "Selected channel",
+    "play": "Play",
+    "timeLeftMin": "{{min}} min left",
     "tab": {
       "inicio": "Home",
       "explorar": "Explore",

@@ -437,6 +437,10 @@ export default function LiveTV() {
               items={heroItems}
               label={heroLabel}
               onOpen={openPlayer}
+              isFavorite={
+                heroItems[0] ? favoriteSet.has(heroItems[0].channel.id) : false
+              }
+              onToggleFavorite={toggleFavorite}
               headerOverlay={heroHeaderOverlay}
             />
           ) : null}
