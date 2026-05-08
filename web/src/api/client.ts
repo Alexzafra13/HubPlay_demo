@@ -12,6 +12,7 @@ import type {
   HealthResponse,
   HomeLayout,
   HomeLiveNowChannel,
+  HomeRecommendedItem,
   HomeTrendingItem,
   ImageInfo,
   ImportPublicIPTVResponse,
@@ -633,6 +634,15 @@ export class ApiClient {
     const resp = await this.request<{ items: HomeTrendingItem[]; total: number }>(
       "GET",
       "/me/home/trending",
+      { params: { limit } },
+    );
+    return resp.items ?? [];
+  }
+
+  async getHomeRecommended(limit?: number): Promise<HomeRecommendedItem[]> {
+    const resp = await this.request<{ items: HomeRecommendedItem[]; total: number }>(
+      "GET",
+      "/me/home/recommended",
       { params: { limit } },
     );
     return resp.items ?? [];

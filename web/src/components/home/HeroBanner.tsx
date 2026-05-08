@@ -1,51 +1,71 @@
-// HeroBanner — the curated front door of the Home page.
+// HeroBanner — the curated discovery surface of the Home page.
 //
-// Slides aren't a flat carousel of "latest items"; they're a tiered
-// shortlist where each tier expresses a clear intent so the rotation
-// always exposes something the user can act on.
+// Continue Watching deliberately doesn't appear here: the user already
+// has a dedicated rail for it directly below, so a "Resume" slot in
+// the hero would just duplicate that experience. The hero's job is to
+// expose things the user *isn't* already engaging with — three tiers
+// of intent, dedupe across them, hide tiers that have nothing useful.
 //
-//   1. Resume   - the most recent in-progress show / movie. For episodes
-//                 we render a 2-col layout: the season's poster on the
-//                 left + season backdrop behind, mirroring the artwork
-//                 the user sees when entering the season detail page.
-//                 Deep-link goes straight to the episode (auto-play).
-//   2. New      - a fresh-off-the-scanner movie or series the user has
-//                 not started yet. Episodes are filtered out: a single
-//                 brand-new episode buried in season 4 is not Hero
-//                 material. Series duplicated by the Resume tier are
-//                 dropped to avoid back-to-back slides of the same
-//                 show with two different copies.
-//   3. Trending - cross-peer "shared by ..." card, optional. Hidden
-//                 entirely on solo deployments so the carousel never
-//                 inflates with placeholder content.
+//   1. New        - movie or series added to the library this calendar
+//                   year that the user has not started. Episodes never
+//                   appear in this tier (a fresh episode buried in
+//                   season 4 isn't a hero candidate).
+//   2. Trending   - the "Trending this week" rail's top hits. Server-
+//                   wide aggregate (all users on this HubPlay), with
+//                   the user-access ACL applied. Useful in shared
+//                   deployments; in solo deploys it doubles as "your
+//                   recent-7-day plays" and still gives discovery
+//                   value when the user has more in their library
+//                   than they remember.
+//   3. Recommended- genre-affinity picks: items the user hasn't
+//                   started that share genres with what they
+//                   actively watch. Carries a "Porque te gusta {{X}}"
+//                   subtitle so the slide explains itself.
+//
+// Episode slides keep the 2-col layout (season poster on the left,
+// season backdrop behind) because future tiers (Next-up etc.) will
+// reuse it. Movies / series keep the single-column layout.
 //
 // Rotation pauses while the pointer is over the hero so the user can
 // read the overview without slides advancing under them. The slide
-// indicator shows the intent tag (Reanudar / Nuevo / Trending) above
-// the active dot rather than blind bullets, so the user can tell at a
-// glance what each slide is going to give them.
+// indicator shows the intent tag (Nuevo / Trending / Recomendado)
+// rather than blind bullets so the user can tell what each slide
+// will give them at a glance.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
-import type { MediaItem } from "@/api/types";
+import type {
+  HomeRecommendedItem,
+  HomeTrendingItem,
+  MediaItem,
+} from "@/api/types";
 
 const HERO_INTERVAL = 8000;
 const MAX_SLOTS = 5;
 
-type HeroTag = "resume" | "new" | "trending";
+type HeroTag = "new" | "trending" | "recommended";
 
 interface HeroSlot {
   key: string;
   tag: HeroTag;
   item: MediaItem;
+  // Optional contextual line the slide renders under the title:
+  //   - "new"        → "Estreno {{year}}"
+  //   - "recommended"→ "Porque te gusta {{genre}}"
+  // `trending` slides don't carry one (the tag chip alone is the cue).
+  reason?: string;
 }
 
 interface HeroBannerProps {
-  continueWatching: MediaItem[];
   latest: MediaItem[];
-  trending?: MediaItem[];
+  trending: HomeTrendingItem[];
+  recommended: HomeRecommendedItem[];
+  // Reason copy is built upstream so the component stays
+  // i18n-pluggable — Home.tsx passes the formatter once.
+  buildNewReason: (year: number | null | undefined) => string | undefined;
+  buildRecommendedReason: (genres: string[]) => string | undefined;
 }
 
 // ─── Slot selection ─────────────────────────────────────────────────────────
@@ -69,42 +89,133 @@ function hasUsableBackdrop(item: MediaItem): boolean {
   return Boolean(item.backdrop_url);
 }
 
+// Adapter: HomeTrendingItem / HomeRecommendedItem don't carry the full
+// MediaItem surface (no premiere_date, no series_id, etc.) but the
+// fields the hero actually renders — title, year, posters, overview —
+// are all present and use the same names. Coercing them to a partial
+// MediaItem keeps the rendering pipeline single-shape.
+function trendingToMediaItem(t: HomeTrendingItem): MediaItem {
+  return {
+    id: t.id,
+    type: t.type as MediaItem["type"],
+    title: t.title,
+    original_title: null,
+    year: t.year ?? null,
+    overview: t.overview ?? null,
+    tagline: null,
+    genres: t.genres ?? [],
+    community_rating: t.community_rating ?? null,
+    content_rating: null,
+    duration_ticks: null,
+    premiere_date: null,
+    poster_url: t.poster_url ?? null,
+    backdrop_url: t.backdrop_url ?? null,
+    logo_url: t.logo_url ?? null,
+    poster_color: t.poster_color,
+    poster_color_muted: t.poster_color_muted,
+    poster_blurhash: t.poster_blurhash,
+    parent_id: null,
+    series_id: null,
+    season_number: null,
+    episode_number: null,
+    path: null,
+  };
+}
+
+function recommendedToMediaItem(r: HomeRecommendedItem): MediaItem {
+  return {
+    id: r.id,
+    type: r.type,
+    title: r.title,
+    original_title: null,
+    year: r.year ?? null,
+    overview: r.overview ?? null,
+    tagline: null,
+    genres: r.genres ?? [],
+    community_rating: r.community_rating ?? null,
+    content_rating: null,
+    duration_ticks: null,
+    premiere_date: null,
+    poster_url: r.poster_url ?? null,
+    backdrop_url: r.backdrop_url ?? null,
+    logo_url: r.logo_url ?? null,
+    poster_color: r.poster_color,
+    poster_color_muted: r.poster_color_muted,
+    poster_blurhash: r.poster_blurhash,
+    parent_id: null,
+    series_id: null,
+    season_number: null,
+    episode_number: null,
+    path: null,
+  };
+}
+
 function buildSlots({
-  continueWatching,
   latest,
   trending,
+  recommended,
+  buildNewReason,
+  buildRecommendedReason,
 }: HeroBannerProps): HeroSlot[] {
   const slots: HeroSlot[] = [];
   const usedSeries = new Set<string>();
+  const currentYear = new Date().getFullYear();
 
-  for (const item of continueWatching) {
+  // Tier 1 — "New on HubPlay": filter latest to items added this
+  // calendar year so the slide can confidently say "Estreno 2026"
+  // without lying about an item from 2014. If no item in `latest`
+  // matches the current year, fall back to the freshest one — the
+  // user just sees "Recientes" copy and the discovery story still
+  // holds.
+  const thisYearOnly = latest.filter((i) => i.year === currentYear);
+  const newPool = thisYearOnly.length > 0 ? thisYearOnly : latest;
+  for (const item of newPool) {
     if (slots.length >= MAX_SLOTS) break;
+    if (item.type === "episode") continue;
     if (!hasUsableBackdrop(item)) continue;
     const k = seriesKey(item);
     if (usedSeries.has(k)) continue;
     usedSeries.add(k);
-    slots.push({ key: `resume-${item.id}`, tag: "resume", item });
+    slots.push({
+      key: `new-${item.id}`,
+      tag: "new",
+      item,
+      reason: buildNewReason(item.year),
+    });
   }
 
-  for (const item of latest) {
+  // Tier 2 — Trending. Server-wide rail; the same item can also be
+  // a recent add, so dedupe by series key against everything chosen
+  // so far. Episodes from trending get rolled up to their series at
+  // the SQL level (HomeRepository.Trending), so we never see a bare
+  // episode here — but the dedupe guard keeps that contract robust.
+  for (const t of trending) {
     if (slots.length >= MAX_SLOTS) break;
-    if (item.type === "episode") continue; // episodes aren't "new"-tier
+    const item = trendingToMediaItem(t);
     if (!hasUsableBackdrop(item)) continue;
     const k = seriesKey(item);
     if (usedSeries.has(k)) continue;
     usedSeries.add(k);
-    slots.push({ key: `new-${item.id}`, tag: "new", item });
+    slots.push({ key: `trending-${item.id}`, tag: "trending", item });
   }
 
-  if (trending) {
-    for (const item of trending) {
-      if (slots.length >= MAX_SLOTS) break;
-      if (!hasUsableBackdrop(item)) continue;
-      const k = seriesKey(item);
-      if (usedSeries.has(k)) continue;
-      usedSeries.add(k);
-      slots.push({ key: `trending-${item.id}`, tag: "trending", item });
-    }
+  // Tier 3 — Recommended. Carries `recommended_because.genres` for the
+  // honest "Porque te gusta {{X}}" subtitle. Cold-start users get an
+  // empty list here; their hero just shows fewer slides, which is the
+  // right behaviour (we don't pad with random picks).
+  for (const r of recommended) {
+    if (slots.length >= MAX_SLOTS) break;
+    const item = recommendedToMediaItem(r);
+    if (!hasUsableBackdrop(item)) continue;
+    const k = seriesKey(item);
+    if (usedSeries.has(k)) continue;
+    usedSeries.add(k);
+    slots.push({
+      key: `recommended-${item.id}`,
+      tag: "recommended",
+      item,
+      reason: buildRecommendedReason(r.recommended_because.genres),
+    });
   }
 
   return slots;
@@ -163,12 +274,12 @@ function playHrefFor(item: MediaItem): string {
 
 function tagLabel(tag: HeroTag, t: (k: string) => string): string {
   switch (tag) {
-    case "resume":
-      return t("home.heroTagResume");
     case "new":
       return t("home.heroTagNew");
     case "trending":
       return t("home.heroTagTrending");
+    case "recommended":
+      return t("home.heroTagRecommended");
   }
 }
 
@@ -250,50 +361,25 @@ function MetaRow({ parts }: { parts: MetaPart[] }) {
   );
 }
 
-function ResumeProgress({ item }: { item: MediaItem }) {
-  const { t } = useTranslation();
-  const pct = item.user_data?.progress?.percentage;
-  if (pct == null || pct <= 0) return null;
-  const remainingMin =
-    item.duration_ticks != null && item.duration_ticks > 0
-      ? Math.max(
-          0,
-          Math.round(
-            ((item.duration_ticks - (item.user_data?.progress?.position_ticks ?? 0)) /
-              10_000_000) /
-              60,
-          ),
-        )
-      : null;
+function ReasonLine({ text }: { text?: string }) {
+  if (!text) return null;
   return (
-    <div className="flex flex-col gap-1.5 max-w-md">
-      <div className="h-1 w-full overflow-hidden rounded-full bg-white/15">
-        <div
-          className="h-full bg-white transition-all"
-          style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
-        />
-      </div>
-      {remainingMin != null && remainingMin > 0 && (
-        <span className="text-xs font-medium text-white/60">
-          {t("home.heroRemaining", { minutes: remainingMin })}
-        </span>
-      )}
-    </div>
+    <span className="text-sm font-medium text-white/70">
+      {text}
+    </span>
   );
 }
 
 function PlayCta({
   href,
   navigate,
-  resume,
   t,
 }: {
   href: string;
   navigate: (to: string) => void;
-  resume: boolean;
   t: (k: string) => string;
 }) {
-  const label = resume ? t("home.heroResumeCta") : t("common.play");
+  const label = t("common.play");
   return (
     <button
       type="button"
@@ -406,15 +492,15 @@ function SlideContents({
           <div className="flex max-w-2xl flex-col gap-5">
             {tagChip}
             <TitleBlock item={item} detailHref={detailHref} smallTitle={episodeSubtitle} />
+            <ReasonLine text={slot.reason} />
             <MetaRow parts={metaParts} />
-            <ResumeProgress item={item} />
             {item.overview != null && (
               <p className="max-w-xl text-sm leading-relaxed text-white/60 line-clamp-2">
                 {item.overview}
               </p>
             )}
             <div className="flex items-center gap-3 pt-1">
-              <PlayCta href={playHref} navigate={navigate} resume t={t} />
+              <PlayCta href={playHref} navigate={navigate} t={t} />
               <Link
                 to={detailHref}
                 className="text-sm font-medium text-white/60 transition-colors hover:text-white/90"
@@ -436,15 +522,15 @@ function SlideContents({
       <div className="flex max-w-2xl flex-col gap-5">
         {tagChip}
         <TitleBlock item={item} detailHref={detailHref} />
+        <ReasonLine text={slot.reason} />
         <MetaRow parts={metaParts} />
-        <ResumeProgress item={item} />
         {item.overview != null && (
           <p className="max-w-xl text-sm leading-relaxed text-white/60 line-clamp-3">
             {item.overview}
           </p>
         )}
         <div className="flex items-center gap-3 pt-1">
-          <PlayCta href={playHref} navigate={navigate} resume={tag === "resume"} t={t} />
+          <PlayCta href={playHref} navigate={navigate} t={t} />
           <Link
             to={detailHref}
             className="text-sm font-medium text-white/60 transition-colors hover:text-white/90"

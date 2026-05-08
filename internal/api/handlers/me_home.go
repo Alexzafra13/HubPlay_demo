@@ -352,6 +352,111 @@ func (h *HomeHandler) Trending(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ─── GET /me/home/recommended ────────────────────────────────────────
+
+// Recommended powers the "Recomendado para ti" tier of the home hero.
+// Picks unwatched movies / series that share genres with what the
+// caller most actively watches, attaching the matched genres so the
+// frontend can render a "Porque te gusta {{genre}}" subtitle.
+//
+// Returns an empty list (200) when the caller has no engagement
+// history — the cold-start case. The hero hides the slot rather than
+// erroring; falling back to a generic "newest" pick would just be
+// the New tier rendered twice with different copy.
+//
+// `limit` caps the response size (default 5, max 20).
+func (h *HomeHandler) Recommended(w http.ResponseWriter, r *http.Request) {
+	claims := auth.GetClaims(r.Context())
+	if claims == nil {
+		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "authentication required")
+		return
+	}
+
+	limit := parseLimit(r, 5, 20)
+
+	rows, err := h.home.Recommended(r.Context(), claims.UserID, limit)
+	if err != nil {
+		h.logger.Error("recommended query", "error", err)
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load recommended")
+		return
+	}
+
+	out := make([]map[string]any, 0, len(rows))
+	ids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		entry := map[string]any{
+			"id":         row.ID,
+			"type":       row.Type,
+			"title":      row.Title,
+			"library_id": row.LibraryID,
+			// `recommended_because` is a stable wire field the hero
+			// renders as "Porque te gusta {{genres[0]}} y {{genres[1]}}".
+			// Carrying the matched genres (not the user's top-3) means
+			// the copy honestly explains *this* item's match instead
+			// of overpromising shared affinity.
+			"recommended_because": map[string]any{"genres": row.Because},
+		}
+		if row.Year.Valid {
+			entry["year"] = row.Year.Int64
+		}
+		if row.CommunityRating.Valid {
+			entry["community_rating"] = row.CommunityRating.Float64
+		}
+		out = append(out, entry)
+		ids = append(ids, row.ID)
+	}
+
+	if h.images != nil && len(ids) > 0 {
+		imgs, ierr := h.images.GetPrimaryURLs(r.Context(), ids)
+		if ierr != nil {
+			h.logger.Warn("recommended image fetch", "error", ierr)
+		} else {
+			for i, row := range rows {
+				if urls, ok := imgs[row.ID]; ok {
+					if poster, ok := urls["primary"]; ok {
+						out[i]["poster_url"] = poster.Path
+						attachPosterPlaceholder(out[i], poster)
+					}
+					if backdrop, ok := urls["backdrop"]; ok {
+						out[i]["backdrop_url"] = backdrop.Path
+					}
+					if logo, ok := urls["logo"]; ok {
+						out[i]["logo_url"] = logo.Path
+					}
+				}
+			}
+		}
+	}
+
+	if h.metadata != nil && len(ids) > 0 {
+		metas, merr := h.metadata.GetMetadataBatch(r.Context(), ids)
+		if merr != nil {
+			h.logger.Warn("recommended metadata fetch", "error", merr)
+		} else {
+			for i, row := range rows {
+				if m, ok := metas[row.ID]; ok {
+					if m.Overview != "" {
+						out[i]["overview"] = m.Overview
+					}
+					if m.GenresJSON != "" {
+						var genres []string
+						if jerr := json.Unmarshal([]byte(m.GenresJSON), &genres); jerr == nil && len(genres) > 0 {
+							out[i]["genres"] = genres
+						}
+					}
+				}
+			}
+		}
+	}
+
+	respondJSON(w, http.StatusOK, map[string]any{
+		"data": map[string]any{
+			"items": out,
+			"total": len(out),
+		},
+	})
+}
+
 // ─── GET /me/home/live-now ───────────────────────────────────────────
 
 // LiveNow returns up to N live channels with their currently airing

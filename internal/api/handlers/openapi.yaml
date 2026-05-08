@@ -1971,6 +1971,34 @@ paths:
                         items: { $ref: "#/components/schemas/TrendingItem" }
                       total: { type: integer }
 
+  /me/home/recommended:
+    get:
+      tags: [home]
+      summary: Genre-affinity recommendations the caller has not watched
+      description: |
+        Picks unwatched movies / series that share genres with the
+        items the caller most actively watches. Each entry carries
+        `recommended_because.genres` so the frontend can render a
+        "Porque te gusta {{genre}}" subtitle. Returns an empty list
+        for cold-start users (no engagement history yet).
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, default: 5, maximum: 20 } }
+      responses:
+        "200":
+          description: Recommended items
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: "#/components/schemas/RecommendedItem" }
+                      total: { type: integer }
+
   /me/home/live-now:
     get:
       tags: [home, livetv]
@@ -2559,6 +2587,33 @@ components:
         genres:
           type: array
           items: { type: string }
+
+    RecommendedItem:
+      type: object
+      required: [id, type, title, recommended_because]
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string, enum: [movie, series] }
+        title: { type: string }
+        year: { type: integer, nullable: true }
+        community_rating: { type: number, format: float, nullable: true }
+        library_id: { type: string, format: uuid }
+        poster_url: { type: string, nullable: true }
+        backdrop_url: { type: string, nullable: true }
+        logo_url: { type: string, nullable: true }
+        poster_blurhash: { type: string, nullable: true }
+        overview: { type: string }
+        genres:
+          type: array
+          items: { type: string }
+        recommended_because:
+          type: object
+          required: [genres]
+          properties:
+            genres:
+              type: array
+              description: Genres this item shares with the caller's most-watched
+              items: { type: string }
 
     LiveNowEntry:
       type: object

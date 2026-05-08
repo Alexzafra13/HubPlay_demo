@@ -131,12 +131,14 @@
     "peerContinueWatching": "Continue watching on peers",
     "viewDetails": "View details",
     "failedToLoad": "Failed to load content. Check your server connection.",
-    "heroTagResume": "Continue watching",
     "heroTagNew": "New on HubPlay",
-    "heroTagTrending": "Trending",
-    "heroResumeCta": "Resume",
+    "heroTagTrending": "Trending this week",
+    "heroTagRecommended": "Recommended for you",
     "heroEpisodeBadge": "S{{season}} · E{{episode}}",
-    "heroRemaining": "{{minutes}} min left"
+    "heroReasonNew": "Released {{year}}",
+    "heroReasonNewFallback": "Just added",
+    "heroReasonRecommendedSingle": "Because you like {{genre}}",
+    "heroReasonRecommendedPair": "Because you like {{first}} and {{second}}"
   },
   "link": {
     "title": "Link a device",

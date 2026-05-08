@@ -515,6 +515,7 @@ func NewRouter(deps Dependencies) http.Handler {
 				r.Get("/me/home/layout", homeHandler.GetLayout)
 				r.Put("/me/home/layout", homeHandler.PutLayout)
 				r.Get("/me/home/trending", homeHandler.Trending)
+				r.Get("/me/home/recommended", homeHandler.Recommended)
 				r.Get("/me/home/live-now", homeHandler.LiveNow)
 			}
 
