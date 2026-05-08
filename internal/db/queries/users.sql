@@ -103,4 +103,11 @@ SELECT id, username, display_name, COALESCE(avatar_path, '') AS avatar_path,
        access_expires_at
 FROM users
 WHERE id = ? OR parent_user_id = ?
-ORDER BY parent_user_id IS NOT NULL, display_name COLLATE NOCASE;
+-- ASC is redundant for collation but works around a sqlc 1.31.x
+-- bug that truncates `COLLATE NOCASE;` (with the trailing semicolon
+-- directly after) to `COLLATE NOCA` in the generated Go string —
+-- which then errors at runtime ("no such collation sequence: NOCA").
+-- The other queries in this codebase that use COLLATE happen to
+-- carry ASC/DESC and render fine. See git history of this file
+-- for the diagnosis.
+ORDER BY parent_user_id IS NOT NULL, display_name COLLATE NOCASE ASC;

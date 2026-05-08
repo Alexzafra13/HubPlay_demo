@@ -83,16 +83,21 @@ export default function Login() {
           setAuth(data.user);
           // Forced rotation wins over the picker — a user with a
           // temp password shouldn't be able to pick a child profile
-          // before they rotate. Otherwise everyone goes through
-          // /select-profile, which queries /me/profiles itself and
-          // auto-bounces home when there's nothing to pick. Routing
-          // everyone through it means the picker is the single
-          // source of truth instead of trusting two separate
-          // payloads (login response.profiles AND /me/profiles).
+          // before they rotate.
+          //
+          // Otherwise we look at the login response: if the server
+          // returned a profile tree with more than one entry, route
+          // through /select-profile so the picker can ask "who's
+          // watching?". Solo accounts (no children) skip the picker
+          // entirely so they land on Home with one tap. The picker
+          // page also has its own bounce-when-empty as a belt-and-
+          // braces in case the login response is missing the field.
           if (data.user.password_change_required) {
             navigate("/change-password");
-          } else {
+          } else if ((data.profiles?.length ?? 0) > 1) {
             navigate("/select-profile");
+          } else {
+            navigate("/");
           }
         },
         onError(err) {
