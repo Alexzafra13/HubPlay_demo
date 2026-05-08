@@ -83,6 +83,39 @@ export default function UsersAdmin() {
     );
   }
 
+  // Age-friendly labels for the content-rating dropdown. The
+  // backend's ranking table maps both MPAA literals (G/PG/PG-13/R/
+  // NC-17) and US-TV literals (TV-Y/Y7/G/PG/14/MA) to the same five
+  // tiers, so the admin only needs to pick one of six rungs (Sin
+  // límite + 5 ages). The stored value is the MPAA literal that
+  // anchors that tier; the rating filter still catches TV-* content
+  // at the equivalent rung because it queries the rank, not the
+  // literal. Modelled after how Disney+ / Netflix surface "+13"
+  // rather than the raw MPAA / TV codes.
+  const ratingOptions: { value: string; key: string; defaultLabel: string }[] = [
+    { value: "",      key: "admin.users.ratingNone",      defaultLabel: "Sin límite" },
+    { value: "G",     key: "admin.users.ratingAllAges",   defaultLabel: "Apto para todos" },
+    { value: "PG",    key: "admin.users.rating7",         defaultLabel: "+7" },
+    { value: "PG-13", key: "admin.users.rating13",        defaultLabel: "+13" },
+    { value: "R",     key: "admin.users.rating17",        defaultLabel: "+17" },
+    { value: "NC-17", key: "admin.users.rating18",        defaultLabel: "+18 (solo adultos)" },
+  ];
+
+  // When the stored cap is a TV-* literal (a legacy / federated row,
+  // or a manually edited DB value), the dropdown wouldn't match any
+  // of the six MPAA-anchored rungs. Map back to the equivalent MPAA
+  // anchor so the select renders a valid current-value highlight.
+  function ratingDropdownValue(rating: string | undefined): string {
+    if (!rating) return "";
+    const tvToMpaa: Record<string, string> = {
+      "TV-Y": "G", "TV-G": "G",
+      "TV-Y7": "PG", "TV-PG": "PG",
+      "TV-14": "PG-13",
+      "TV-MA": "NC-17",
+    };
+    return tvToMpaa[rating] ?? rating;
+  }
+
   // Maps the dropdown selection to a number of days for the
   // /users/{id}/access endpoint. 0 = clear → permanent. The select
   // also lets admins read the current state ("Caduca en 5 días")
@@ -387,7 +420,7 @@ export default function UsersAdmin() {
                         </span>
                       ) : (
                         <select
-                          value={user.max_content_rating ?? ""}
+                          value={ratingDropdownValue(user.max_content_rating)}
                           onChange={(e) =>
                             setUserContentRating.mutate({
                               userId: user.id,
@@ -398,19 +431,16 @@ export default function UsersAdmin() {
                           aria-label={t('admin.users.rating', {
                             defaultValue: 'Edad máxima',
                           })}
+                          title={t('admin.users.ratingHint', {
+                            defaultValue:
+                              'Cubre los códigos MPAA (G/PG/PG-13/R/NC-17) y de TV (TV-Y/Y7/G/PG/14/MA) del mismo nivel.',
+                          })}
                         >
-                          <option value="">{t('admin.users.ratingNone', { defaultValue: 'Sin límite' })}</option>
-                          <option value="G">G</option>
-                          <option value="PG">PG</option>
-                          <option value="PG-13">PG-13</option>
-                          <option value="R">R</option>
-                          <option value="NC-17">NC-17</option>
-                          <option value="TV-Y">TV-Y</option>
-                          <option value="TV-Y7">TV-Y7</option>
-                          <option value="TV-G">TV-G</option>
-                          <option value="TV-PG">TV-PG</option>
-                          <option value="TV-14">TV-14</option>
-                          <option value="TV-MA">TV-MA</option>
+                          {ratingOptions.map((opt) => (
+                            <option key={opt.value} value={opt.value}>
+                              {t(opt.key, { defaultValue: opt.defaultLabel })}
+                            </option>
+                          ))}
                         </select>
                       )}
                     </td>
