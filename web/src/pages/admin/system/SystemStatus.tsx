@@ -23,6 +23,7 @@ import type {
 import { Spinner, Button, EmptyState } from "@/components/common";
 import { AuthKeysPanel } from "@/components/admin/AuthKeysPanel";
 import { BackupPanel } from "@/components/admin/BackupPanel";
+import { LogsPanel } from "@/components/admin/LogsPanel";
 import { SectionHeader } from "@/components/admin/SectionHeader";
 import { Sparkline } from "@/components/admin/Sparkline";
 import { useTranslation } from "react-i18next";
@@ -873,6 +874,7 @@ function AdvancedSection() {
       >
         {t("admin.advanced.warning")}
       </div>
+      <LogsPanel />
       <BackupPanel />
       <AuthKeysPanel />
     </section>

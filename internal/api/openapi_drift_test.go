@@ -89,6 +89,12 @@ var outOfScopeExact = map[string]string{
 	"GET /admin/system/backup":           "admin DB snapshot download",
 	"POST /admin/system/backup/restore":  "admin DB restore upload",
 
+	// ── Logs viewer (admin) ───────────────────────────────────────────
+	// In-process ring + SSE stream tailored to the admin viewer.
+	// No public SDK consumer.
+	"GET /admin/system/logs":         "admin log ring snapshot",
+	"GET /admin/system/logs/stream":  "admin log live SSE stream",
+
 	// ── Federation admin (admin) ──────────────────────────────────────
 	"GET /admin/peers":                    "federation pairing admin",
 	"GET /admin/peers/identity":           "federation pairing admin",

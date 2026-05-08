@@ -58,7 +58,7 @@ func run(configPath string) error {
 		return fmt.Errorf("loading config: %w", err)
 	}
 
-	logger := logging.New(cfg.Logging)
+	logger, logBuffer := logging.NewWithBuffer(cfg.Logging)
 	slog.SetDefault(logger)
 	clk := clock.New()
 
@@ -363,6 +363,7 @@ func run(configPath string) error {
 		Config:        cfg,
 		Logger:        logger,
 		Metrics:       metrics,
+		LogBuffer:     logBuffer,
 	})
 
 	server := &http.Server{
