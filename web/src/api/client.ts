@@ -32,6 +32,8 @@ import type {
   StreamSession,
   SystemCapabilities,
   AdminStreamSession,
+  AdminStreamActivityResponse,
+  AdminTopItemsResponse,
   SystemSettingsResponse,
   SystemStats,
   AuthKey,
@@ -1316,6 +1318,22 @@ export class ApiClient {
   // type T as the inner payload, not the envelope.
   async getSystemStats(): Promise<SystemStats> {
     return this.request<SystemStats>("GET", "/admin/system/stats");
+  }
+
+  async getAdminStreamActivity(days = 14): Promise<AdminStreamActivityResponse> {
+    return this.request<AdminStreamActivityResponse>(
+      "GET",
+      "/admin/system/stream-activity",
+      { params: { days } },
+    );
+  }
+
+  async getAdminTopItems(days = 7, limit = 5): Promise<AdminTopItemsResponse> {
+    return this.request<AdminTopItemsResponse>(
+      "GET",
+      "/admin/system/top-items",
+      { params: { days, limit } },
+    );
   }
 
   // Runtime settings the admin can edit from the panel — replaces the
