@@ -53,9 +53,10 @@ export default function FederationAdmin() {
       {/* Hero row: identity (anchor) on the left, connect tabs on
           the right. Identity stays visible during handshake so the
           admin can read fingerprint + words to the remote admin
-          without scrolling. */}
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
-        <section>
+          without scrolling — `lg:sticky lg:top-4 self-start` pins
+          the column while the right side scrolls past it. */}
+      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
+        <section className="lg:sticky lg:top-4 self-start">
           <SectionHeading>
             {t("admin.federation.identity.heading")}
           </SectionHeading>

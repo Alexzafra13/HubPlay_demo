@@ -376,15 +376,32 @@ export default function UsersAdmin() {
                     expanded?: boolean;
                     memberCount?: number;
                     onToggle?: () => void;
+                    /** Row sits inside a currently-expanded parent
+                     *  group (either the parent itself or one of its
+                     *  children). Drives the left accent rail that
+                     *  visually ties parent and children together. */
+                    inGroup?: boolean;
                   },
                 ) => {
                   const isSelf = me?.id === user.id;
                   return (
                   <tr
                     key={user.id}
-                    className="bg-bg-card hover:bg-bg-elevated transition-colors"
+                    className={[
+                      'transition-colors',
+                      opts.inGroup
+                        ? 'bg-bg-elevated/60 hover:bg-bg-elevated'
+                        : 'bg-bg-card hover:bg-bg-elevated',
+                    ].join(' ')}
                   >
-                    <td className="px-4 py-3 font-medium text-text-primary">
+                    <td
+                      className={[
+                        'px-4 py-3 font-medium text-text-primary',
+                        opts.inGroup
+                          ? 'border-l-2 border-accent/50'
+                          : '',
+                      ].join(' ')}
+                    >
                       {/* Chevron only on parent rows that actually
                           have profile members. Click toggles their
                           children's visibility. Parents without
@@ -713,11 +730,12 @@ export default function UsersAdmin() {
                       expanded,
                       memberCount: kids.length,
                       onToggle: () => toggleParent(parent.id),
+                      inGroup: expanded && kids.length > 0,
                     }),
                   );
                   if (expanded) {
                     for (const kid of kids) {
-                      rows.push(renderRow(kid, {}));
+                      rows.push(renderRow(kid, { inGroup: true }));
                     }
                   }
                 }

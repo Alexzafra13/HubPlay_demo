@@ -22,6 +22,7 @@ import type {
 } from "@/api/types";
 import { Spinner, Button, EmptyState } from "@/components/common";
 import { AuthKeysPanel } from "@/components/admin/AuthKeysPanel";
+import { SectionHeader } from "@/components/admin/SectionHeader";
 import { Sparkline } from "@/components/admin/Sparkline";
 import { useTranslation } from "react-i18next";
 
@@ -181,38 +182,6 @@ export default function SystemStatus() {
 
       <AdvancedSection />
     </div>
-  );
-}
-
-// ─── Section header primitive ──────────────────────────────────────
-
-// A consistent header for every editorial block on the page: an
-// icon-tinted square + a bold title + a one-line subhead. Cheap
-// way to give the page rhythm without resorting to bento cards.
-function SectionHeader({
-  icon: Icon,
-  title,
-  subtitle,
-  trailing,
-}: {
-  icon: React.ComponentType<{ className?: string }>;
-  title: string;
-  subtitle?: string;
-  trailing?: React.ReactNode;
-}) {
-  return (
-    <header className="flex items-start gap-3">
-      <div className="rounded-md bg-bg-elevated p-2 text-text-secondary">
-        <Icon className="h-4 w-4" />
-      </div>
-      <div className="flex-1">
-        <h2 className="text-sm font-semibold text-text-primary">{title}</h2>
-        {subtitle && (
-          <p className="mt-0.5 text-xs text-text-muted">{subtitle}</p>
-        )}
-      </div>
-      {trailing && <div className="flex-none">{trailing}</div>}
-    </header>
   );
 }
 
