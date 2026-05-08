@@ -304,20 +304,29 @@ func NewRouter(deps Dependencies) http.Handler {
 				r.Delete("/me/preferences/{key}", prefsHandler.DeleteMine)
 			}
 
-			// Users (admin only). Profiles + reset-password live next
-			// to the legacy CRUD because they share the admin gate;
-			// no point in a parallel /admin/users route.
+			// Users — most surfaces are admin-only (List, Register,
+			// Delete, role, content-rating, active, reset-password)
+			// but PIN is special: the parent of a profile must be
+			// able to set their own kid's PIN without admin help.
+			// PIN therefore lives under the auth-only group below
+			// while the rest stay admin-gated.
 			r.Route("/users", func(r chi.Router) {
 				r.Use(auth.RequireAdmin)
 				r.Get("/", userHandler.List)
 				r.Post("/", authHandler.Register)
 				r.Delete("/{id}", userHandler.Delete)
 				r.Post("/{id}/reset-password", authHandler.ResetPassword)
-				r.Put("/{id}/pin", authHandler.SetPIN)
 				r.Put("/{id}/content-rating", authHandler.SetContentRating)
 				r.Put("/{id}/role", userHandler.SetRole)
 				r.Put("/{id}/active", userHandler.SetActive)
 			})
+
+			// PIN management — auth-only (the handler then enforces
+			// the admin-OR-parent-of-target-OR-self matrix). Lives
+			// outside the admin-gated /users block above so the
+			// parent of a profile can hit it without holding the
+			// admin role.
+			r.Put("/users/{id}/pin", authHandler.SetPIN)
 
 			// Signing key lifecycle (admin only). Every route here is
 			// destructive — guarded at the group level so a single

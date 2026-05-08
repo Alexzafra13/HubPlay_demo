@@ -330,11 +330,20 @@ func (h *AuthHandler) SetContentRating(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// SetPIN sets or clears the PIN of any user under the caller's
-// account tree. Admins can hit it for any user; profile owners
-// (the parent) can hit it for their own children. Profiles can't
-// set their siblings' PIN, only their own (handled by the same
-// owner-id check the switch flow uses).
+// SetPIN sets or clears the PIN of a user. Authorisation matrix:
+//   - admins can set the PIN of any user.
+//   - the parent of a profile can set their own child's PIN. This
+//     matches the household-owner mental model: you don't need an
+//     admin to give your kid a PIN, the parent of the family group
+//     can do it themselves.
+//   - a user can set their own PIN.
+//   - everyone else gets 403.
+//
+// Routed under /users/{id}/pin which is admin-gated by middleware,
+// so the non-admin paths (parent / self) only reach this handler
+// because the route is also exposed under the user-side group. The
+// gate below catches any future reshuffle that might widen the
+// route accidentally.
 func (h *AuthHandler) SetPIN(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
 	if claims == nil {
@@ -346,6 +355,28 @@ func (h *AuthHandler) SetPIN(w http.ResponseWriter, r *http.Request) {
 		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "missing user id")
 		return
 	}
+
+	allowed := claims.Role == "admin" || claims.UserID == id
+	if !allowed {
+		// Parent-of-target check. The target's parent_user_id must
+		// match the caller's user_id; nested profiles are forbidden
+		// at creation time so the parent layer is always exactly
+		// one hop deep.
+		target, err := h.users.GetByID(r.Context(), id)
+		if err != nil {
+			handleServiceError(w, r, err)
+			return
+		}
+		if target.ParentUserID == claims.UserID {
+			allowed = true
+		}
+	}
+	if !allowed {
+		respondError(w, r, http.StatusForbidden, "FORBIDDEN",
+			"only admins or the profile's parent can change the PIN")
+		return
+	}
+
 	var req setPINRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
