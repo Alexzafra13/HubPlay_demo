@@ -582,8 +582,10 @@ func (s *Service) ChangePassword(ctx context.Context, userID, current, next stri
 	// caller didn't supply one. Matches the UX of "you just typed
 	// the auto-generated password to log in, you shouldn't have to
 	// type it again" — but if `current` is supplied we still verify
-	// it as a belt-and-braces measure.
-	if !(user.PasswordChangeRequired && current == "") {
+	// it as a belt-and-braces measure. De Morgan'd from the obvious
+	// `!(must_change && current=="")` so staticcheck QF1001 stays
+	// quiet.
+	if !user.PasswordChangeRequired || current != "" {
 		if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(current)); err != nil {
 			return fmt.Errorf("change password: %w", domain.ErrInvalidPassword)
 		}
