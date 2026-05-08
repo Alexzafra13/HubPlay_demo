@@ -11,6 +11,7 @@ import {
   type RefreshMessage,
 } from "./librariesAdmin/LibraryCard";
 import { LibraryEditModal } from "./librariesAdmin/LibraryEditModal";
+import ProvidersAdmin from "./ProvidersAdmin";
 
 export default function LibrariesAdmin() {
   const { t } = useTranslation();
@@ -242,6 +243,17 @@ export default function LibrariesAdmin() {
           </div>
         </div>
       </Modal>
+
+      {/* Providers used to be its own top-level admin tab. It's a
+          property of the catalogue (TMDb match policy, Fanart,
+          OpenSubtitles credentials), not its own entity, so it
+          lives here as a section under the libraries grid. The
+          dedicated /admin/providers route still works for direct
+          links — it just renders the same surface without the
+          libraries grid above it. */}
+      <section className="mt-6 pt-6 border-t border-border-subtle">
+        <ProvidersAdmin />
+      </section>
     </div>
   );
 }

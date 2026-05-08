@@ -442,6 +442,8 @@ func NewRouter(deps Dependencies) http.Handler {
 				r.Route("/admin/system", func(r chi.Router) {
 					r.Use(auth.RequireAdmin)
 					r.Get("/stats", sysHandler.Stats)
+					r.Get("/stream-activity", sysHandler.StreamActivity)
+					r.Get("/top-items", sysHandler.TopItems)
 					// "Now Playing" admin panel — list every active stream
 					// session and let the operator kill any of them. Routed
 					// here (rather than next to the player streaming routes)

@@ -1,16 +1,21 @@
 import { NavLink, Outlet } from "react-router";
 import { useTranslation } from 'react-i18next';
 
-// Top-level admin tabs. "Dashboard" goes first because it's the landing —
-// the at-a-glance overview that mirrors what Plex puts under Status.
-// Existing per-domain tabs (Libraries / Providers / Users) keep their
-// order; System stays last because it's the deepest-detail tab.
+// Top-level admin tabs. Collapsed from the previous six (Dashboard,
+// Libraries, Providers, Users, Federation, System) to four because:
+//   - Providers is a property of the catalogue, not its own entity →
+//     merged inside "Biblioteca" as a section under the libraries grid.
+//   - Federation is an advanced feature most installs never touch →
+//     merged inside "Usuarios" as a "Servidores conectados" section.
+//   - System lost its sub-tabs (Status / Activity / Advanced) and
+//     became a single page modelled after macOS Settings: stacked
+//     sections with the destructive ones at the bottom.
+//   - Dashboard renamed to "Resumen" because the page is no longer a
+//     bento of stat cards — it's an editorial overview.
 const tabs = [
-  { key: "admin.tabs.dashboard", to: "/admin/dashboard" },
-  { key: "admin.tabs.libraries", to: "/admin/libraries" },
-  { key: "admin.tabs.providers", to: "/admin/providers" },
+  { key: "admin.tabs.summary", to: "/admin/dashboard" },
+  { key: "admin.tabs.library", to: "/admin/libraries" },
   { key: "admin.tabs.users", to: "/admin/users" },
-  { key: "admin.tabs.federation", to: "/admin/federation" },
   { key: "admin.tabs.system", to: "/admin/system" },
 ] as const;
 

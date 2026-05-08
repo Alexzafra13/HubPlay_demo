@@ -322,6 +322,259 @@ func (h *SystemHandler) Stats(w http.ResponseWriter, r *http.Request) {
 // poison the whole response — we log at debug and skip that one row.
 //
 // Returns an empty (zero-value) libraryStats when no provider is wired
+// streamActivityBucket is one row of the daily watch-activity rollup
+// the admin Resumen renders as a sparkline. Date is YYYY-MM-DD in
+// UTC; the frontend localises display.
+type streamActivityBucket struct {
+	Date         string `json:"date"`
+	WatchMinutes int    `json:"watch_minutes"`
+	SessionCount int    `json:"session_count"`
+}
+
+// StreamActivity returns a per-day rollup of watch activity over the
+// trailing N days for the admin Resumen sparkline. "Watch minutes"
+// approximates engagement by integrating duration_ticks * progress
+// over user_data rows updated within the bucket. "Session count" is
+// distinct (user_id, item_id) pairs touched that day — close enough
+// to "play sessions" for at-a-glance trend lines without a real
+// session-event log.
+//
+// Admin-only — same gate as the rest of /admin/system/*. Days clamped
+// to [1, 90] so a hostile / typo'd query can't fan-out a year of
+// scans on every poll.
+func (h *SystemHandler) StreamActivity(w http.ResponseWriter, r *http.Request) {
+	days := 14
+	if v := r.URL.Query().Get("days"); v != "" {
+		if d, err := strconvAtoiSafe(v); err == nil && d > 0 && d <= 90 {
+			days = d
+		}
+	}
+	cutoff := time.Now().UTC().Add(-time.Duration(days) * 24 * time.Hour)
+
+	// Per-day rollup. user_data.last_played_at lands in the DB via
+	// modernc.org/sqlite's time.Time formatter, which trails the
+	// stamp with " +0000 UTC" — outside SQLite's strftime grammar,
+	// so we slice the ISO date prefix directly with SUBSTR. ISO8601
+	// is lexicographically ordered so the comparison still holds.
+	// CASE/MIN keeps us safe when position_ticks runs past the
+	// item's known duration (rounding / restart edge case).
+	const query = `
+		SELECT
+			SUBSTR(ud.last_played_at, 1, 10) AS day,
+			COALESCE(SUM(
+				CASE
+					WHEN i.duration_ticks > 0
+						AND ud.position_ticks <= i.duration_ticks
+						THEN ud.position_ticks / 600000000
+					WHEN i.duration_ticks > 0
+						THEN i.duration_ticks / 600000000
+					ELSE 0
+				END
+			), 0) AS watch_minutes,
+			COUNT(DISTINCT ud.user_id || ':' || ud.item_id) AS session_count
+		FROM user_data ud
+		JOIN items i ON i.id = ud.item_id
+		WHERE ud.last_played_at IS NOT NULL
+		  AND ud.last_played_at >= ?
+		GROUP BY day
+		ORDER BY day ASC`
+
+	// Pass cutoff as time.Time so the driver formats it the same way
+	// last_played_at was written (UTC, no monotonic suffix because
+	// repos.UserData normalises). String pre-formatting was rejecting
+	// rows that the trending query happily matches.
+	rows, err := h.db.QueryContext(r.Context(), query, cutoff)
+	if err != nil {
+		h.logger.Error("stream activity query", "error", err)
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "stream activity unavailable")
+		return
+	}
+	defer rows.Close() //nolint:errcheck
+
+	// Build a date → bucket map first so we can backfill empty days
+	// with zeros. The sparkline needs a contiguous series — gaps
+	// would render as visual breaks rather than "no plays that day".
+	seen := make(map[string]streamActivityBucket, days)
+	for rows.Next() {
+		var b streamActivityBucket
+		// modernc.org/sqlite + the DATETIME affinity used by user_data
+		// produce result sets where the strftime() output and SUM()
+		// can come back as either string-encoded numbers or native
+		// integers depending on the driver path. Scan into `any` and
+		// coerce, identical pattern to how trending parses
+		// MAX(last_played_at) elsewhere in the repo.
+		var dateRaw, minutesRaw, sessionsRaw any
+		if err := rows.Scan(&dateRaw, &minutesRaw, &sessionsRaw); err != nil {
+			h.logger.Error("stream activity scan", "error", err)
+			respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "stream activity scan failed")
+			return
+		}
+		switch v := dateRaw.(type) {
+		case string:
+			b.Date = v
+		case []byte:
+			b.Date = string(v)
+		}
+		switch v := minutesRaw.(type) {
+		case int64:
+			b.WatchMinutes = int(v)
+		case float64:
+			b.WatchMinutes = int(v)
+		case []byte:
+			if n, perr := strconvAtoiSafe(string(v)); perr == nil {
+				b.WatchMinutes = n
+			}
+		case string:
+			if n, perr := strconvAtoiSafe(v); perr == nil {
+				b.WatchMinutes = n
+			}
+		}
+		switch v := sessionsRaw.(type) {
+		case int64:
+			b.SessionCount = int(v)
+		case float64:
+			b.SessionCount = int(v)
+		}
+		seen[b.Date] = b
+	}
+	if err := rows.Err(); err != nil {
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "stream activity row error")
+		return
+	}
+
+	out := make([]streamActivityBucket, 0, days)
+	for i := days - 1; i >= 0; i-- {
+		date := time.Now().UTC().AddDate(0, 0, -i).Format("2006-01-02")
+		if b, ok := seen[date]; ok {
+			out = append(out, b)
+		} else {
+			out = append(out, streamActivityBucket{Date: date})
+		}
+	}
+
+	respondJSON(w, http.StatusOK, map[string]any{
+		"data": map[string]any{
+			"days":    days,
+			"buckets": out,
+		},
+	})
+}
+
+// topItem is one row of the admin "most-watched in the last N days"
+// list. Slim payload — the admin Resumen renders title + count, no
+// poster (saves the image-fetch round-trip the rail-style cards
+// would need).
+type topItem struct {
+	ID        string `json:"id"`
+	Type      string `json:"type"`
+	Title     string `json:"title"`
+	PlayCount int    `json:"play_count"`
+}
+
+// TopItems returns the top N items watched across all users in the
+// trailing window. Mirrors the engine of HomeRepository.Trending but
+// without the per-user library_access guard — admin sees everything.
+// Episodes get rolled up to their series so the list reads like
+// "Mr Robot · 12 plays" instead of polluting with individual episodes.
+func (h *SystemHandler) TopItems(w http.ResponseWriter, r *http.Request) {
+	days := 7
+	if v := r.URL.Query().Get("days"); v != "" {
+		if d, err := strconvAtoiSafe(v); err == nil && d > 0 && d <= 90 {
+			days = d
+		}
+	}
+	limit := 5
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if l, err := strconvAtoiSafe(v); err == nil && l > 0 && l <= 30 {
+			limit = l
+		}
+	}
+	cutoff := time.Now().UTC().Add(-time.Duration(days) * 24 * time.Hour)
+
+	// Same rollup CTE as HomeRepository.Trending but admin-scoped:
+	// no library_access EXISTS guard. Counts each (user, rollup) once
+	// so a single binge-watcher can't dominate the chart.
+	const query = `
+		WITH plays AS (
+			SELECT
+				ud.user_id,
+				CASE
+					WHEN i.type = 'episode' AND i.parent_id IS NOT NULL
+						THEN COALESCE(
+							(SELECT s.parent_id FROM items s WHERE s.id = i.parent_id),
+							i.parent_id
+						)
+					ELSE i.id
+				END AS rollup_id
+			FROM user_data ud
+			JOIN items i ON i.id = ud.item_id
+			WHERE ud.last_played_at IS NOT NULL
+			  AND ud.last_played_at >= ?
+			  AND i.is_available = 1
+		)
+		SELECT i.id, i.type, i.title, COUNT(DISTINCT p.user_id) AS plays
+		FROM plays p
+		JOIN items i ON i.id = p.rollup_id
+		WHERE i.is_available = 1
+		GROUP BY i.id
+		ORDER BY plays DESC, i.title ASC
+		LIMIT ?`
+
+	rows, err := h.db.QueryContext(r.Context(), query, cutoff, limit)
+	if err != nil {
+		h.logger.Error("top items query", "error", err)
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "top items unavailable")
+		return
+	}
+	defer rows.Close() //nolint:errcheck
+
+	out := make([]topItem, 0, limit)
+	for rows.Next() {
+		var it topItem
+		if err := rows.Scan(&it.ID, &it.Type, &it.Title, &it.PlayCount); err != nil {
+			respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "top items scan failed")
+			return
+		}
+		out = append(out, it)
+	}
+	if err := rows.Err(); err != nil {
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "top items row error")
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]any{
+		"data": map[string]any{
+			"days":  days,
+			"items": out,
+		},
+	})
+}
+
+// strconvAtoiSafe is a tiny wrapper kept here to avoid pulling
+// strconv into this file's import block (already long); used only
+// by the two admin metrics handlers above.
+func strconvAtoiSafe(s string) (int, error) {
+	n := 0
+	negative := false
+	for i, c := range s {
+		if i == 0 && c == '-' {
+			negative = true
+			continue
+		}
+		if c < '0' || c > '9' {
+			return 0, errors.New("not a number")
+		}
+		n = n*10 + int(c-'0')
+		if n > 1<<30 {
+			return 0, errors.New("overflow")
+		}
+	}
+	if negative {
+		n = -n
+	}
+	return n, nil
+}
+
 // (e.g. test rigs). The frontend renders an empty inventory placeholder
 // in that case.
 func (h *SystemHandler) collectLibraryStats(ctx context.Context) libraryStats {

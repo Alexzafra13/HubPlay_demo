@@ -1,6 +1,7 @@
 import { useSystemStats } from "@/api/hooks";
 import type { SystemStats } from "@/api/types";
 import { Badge, Spinner, Button, EmptyState } from "@/components/common";
+import { AuthKeysPanel } from "@/components/admin/AuthKeysPanel";
 import { useTranslation } from "react-i18next";
 
 import { SystemSettingsSection } from "./SystemSettingsSection";
@@ -169,6 +170,24 @@ export default function SystemStatus() {
       </Section>
 
       <SystemSettingsSection />
+
+      {/* Advanced — destructive / power-user actions kept at the
+          bottom of the page so the eye doesn't land on them by
+          default. The warning banner is the same one the previous
+          /admin/system/advanced sub-tab carried, just inlined now
+          that System collapsed to a single page. */}
+      <section className="flex flex-col gap-3 pt-4 border-t border-border-subtle">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-text-muted">
+          {t("admin.system.sectionAdvanced")}
+        </h3>
+        <div
+          role="note"
+          className="rounded-[--radius-md] border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning"
+        >
+          {t("admin.advanced.warning")}
+        </div>
+        <AuthKeysPanel />
+      </section>
     </div>
   );
 }

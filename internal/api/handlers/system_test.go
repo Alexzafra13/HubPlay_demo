@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"hubplay/internal/db"
 	"hubplay/internal/stream"
@@ -422,5 +423,149 @@ func TestSystemHandler_Stats_LibrariesRollup_SkipsCountErrors(t *testing.T) {
 	}
 	if out.Data.Libraries.ItemsTotal != 50 {
 		t.Errorf("only the working library contributes items: got %d want 50", out.Data.Libraries.ItemsTotal)
+	}
+}
+
+// TestSystemHandler_StreamActivity_BackfillsEmptyDays exercises the
+// admin Resumen sparkline endpoint. The query must always emit a
+// contiguous date series — gaps would render as visual breaks
+// rather than "no plays that day".
+func TestSystemHandler_StreamActivity_BackfillsEmptyDays(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	repos := db.NewRepositories(database)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	if err := repos.Users.Create(ctx, &db.User{
+		ID: "u-1", Username: "u", PasswordHash: "h",
+		Role: "user", CreatedAt: now, IsActive: true,
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := repos.Libraries.Create(ctx, &db.Library{
+		ID: "lib-1", Name: "L", ContentType: "movies", CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create library: %v", err)
+	}
+	if err := repos.Items.Create(ctx, &db.Item{
+		ID: "movie-1", LibraryID: "lib-1", Type: "movie", Title: "M", SortTitle: "m",
+		DurationTicks: 60 * 60 * 10_000_000, AddedAt: now, UpdatedAt: now, IsAvailable: true,
+	}); err != nil {
+		t.Fatalf("create item: %v", err)
+	}
+	// Plant one progress row in the user_data table so today's
+	// bucket carries non-zero numbers; previous days stay empty.
+	if err := repos.UserData.UpdateProgress(ctx, "u-1", "movie-1", 30*60*10_000_000, false); err != nil {
+		t.Fatalf("update progress: %v", err)
+	}
+
+	h := NewSystemHandler(SystemHandlerConfig{DB: database, Version: "v", Logger: newQuietLogger()})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/system/stream-activity?days=7", nil)
+	rr := httptest.NewRecorder()
+	h.StreamActivity(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: %d body: %s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Data struct {
+			Days    int `json:"days"`
+			Buckets []struct {
+				Date         string `json:"date"`
+				WatchMinutes int    `json:"watch_minutes"`
+				SessionCount int    `json:"session_count"`
+			} `json:"buckets"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Data.Days != 7 {
+		t.Errorf("days = %d, want 7", resp.Data.Days)
+	}
+	if len(resp.Data.Buckets) != 7 {
+		t.Fatalf("expected contiguous 7 buckets, got %d", len(resp.Data.Buckets))
+	}
+	// Last bucket = today, has the play. The other six are zero-padded.
+	last := resp.Data.Buckets[len(resp.Data.Buckets)-1]
+	if last.SessionCount != 1 {
+		t.Errorf("today session_count = %d, want 1 (full series: %+v)", last.SessionCount, resp.Data.Buckets)
+	}
+	if last.WatchMinutes != 30 {
+		t.Errorf("today watch_minutes = %d, want 30 (30 min play)", last.WatchMinutes)
+	}
+}
+
+// TestSystemHandler_TopItems_EpisodesRolledUpToSeries ensures the
+// admin "most watched" list rolls up episode plays to their parent
+// series instead of polluting the chart with individual episodes.
+func TestSystemHandler_TopItems_EpisodesRolledUpToSeries(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	repos := db.NewRepositories(database)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	if err := repos.Users.Create(ctx, &db.User{
+		ID: "u-1", Username: "u", PasswordHash: "h",
+		Role: "user", CreatedAt: now, IsActive: true,
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := repos.Libraries.Create(ctx, &db.Library{
+		ID: "lib-1", Name: "L", ContentType: "shows", CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create library: %v", err)
+	}
+	mustItem := func(id, parent, kind, title string) {
+		if err := repos.Items.Create(ctx, &db.Item{
+			ID: id, LibraryID: "lib-1", ParentID: parent, Type: kind, Title: title, SortTitle: title,
+			DurationTicks: 1, AddedAt: now, UpdatedAt: now, IsAvailable: true,
+		}); err != nil {
+			t.Fatalf("create %s: %v", id, err)
+		}
+	}
+	mustItem("series-1", "", "series", "Mr Robot")
+	mustItem("season-1", "series-1", "season", "S1")
+	mustItem("ep-1", "season-1", "episode", "S1E1")
+	mustItem("ep-2", "season-1", "episode", "S1E2")
+
+	if err := repos.UserData.UpdateProgress(ctx, "u-1", "ep-1", 1, false); err != nil {
+		t.Fatalf("progress ep-1: %v", err)
+	}
+	if err := repos.UserData.UpdateProgress(ctx, "u-1", "ep-2", 1, false); err != nil {
+		t.Fatalf("progress ep-2: %v", err)
+	}
+
+	h := NewSystemHandler(SystemHandlerConfig{DB: database, Version: "v", Logger: newQuietLogger()})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/system/top-items?days=7&limit=5", nil)
+	rr := httptest.NewRecorder()
+	h.TopItems(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: %d body: %s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Data struct {
+			Items []struct {
+				ID        string `json:"id"`
+				Type      string `json:"type"`
+				Title     string `json:"title"`
+				PlayCount int    `json:"play_count"`
+			} `json:"items"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Data.Items) != 1 {
+		t.Fatalf("expected 1 rolled-up entry, got %d: %+v", len(resp.Data.Items), resp.Data.Items)
+	}
+	row := resp.Data.Items[0]
+	if row.ID != "series-1" || row.Type != "series" {
+		t.Errorf("expected series-1, got %+v", row)
+	}
+	// Two episodes by the same user roll up to one distinct play.
+	if row.PlayCount != 1 {
+		t.Errorf("play_count = %d, want 1 (DISTINCT user_id per rollup)", row.PlayCount)
 	}
 }

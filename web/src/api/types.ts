@@ -1195,6 +1195,40 @@ export interface HomeRecommendedItem {
 }
 
 /**
+ * One bucket in the admin Resumen's watch-activity sparkline. The
+ * series is always contiguous (the backend zero-pads days that had
+ * no plays) so the frontend can pass `buckets.map(b => b.watch_minutes)`
+ * straight into `<Sparkline />` without reshaping.
+ */
+export interface AdminStreamActivityBucket {
+  date: string; // YYYY-MM-DD UTC
+  watch_minutes: number;
+  session_count: number;
+}
+
+export interface AdminStreamActivityResponse {
+  days: number;
+  buckets: AdminStreamActivityBucket[];
+}
+
+/**
+ * One row of the admin "most-watched" leaderboard. Slim payload —
+ * episodes get rolled up to their parent series so the list stays
+ * meaningful without per-episode noise.
+ */
+export interface AdminTopItem {
+  id: string;
+  type: "movie" | "series";
+  title: string;
+  play_count: number;
+}
+
+export interface AdminTopItemsResponse {
+  days: number;
+  items: AdminTopItem[];
+}
+
+/**
  * One channel in the "live now" rail. Always carries the channel
  * id/name/library; the EPG fields are populated only when the channel
  * has a program currently airing (the rail still shows the channel

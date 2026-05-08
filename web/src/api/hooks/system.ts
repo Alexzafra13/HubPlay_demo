@@ -10,7 +10,9 @@ import type { UseQueryOptions } from "@tanstack/react-query";
 import { api } from "../client";
 import { queryKeys } from "../queryKeys";
 import type {
+  AdminStreamActivityResponse,
   AdminStreamSession,
+  AdminTopItemsResponse,
   AuthKey,
   HealthResponse,
   RotateAuthKeyResponse,
@@ -33,6 +35,37 @@ export function useSystemStats(options?: Partial<UseQueryOptions<SystemStats>>) 
   return useQuery<SystemStats>({
     queryKey: queryKeys.systemStats,
     queryFn: () => api.getSystemStats(),
+    ...options,
+  });
+}
+
+// Per-day watch-activity rollup powering the Resumen sparkline. Ten-
+// minute stale window: the data only changes when someone presses
+// play, and refetch on tab focus already covers an admin returning
+// from a different surface.
+export function useAdminStreamActivity(
+  days = 14,
+  options?: Partial<UseQueryOptions<AdminStreamActivityResponse>>,
+) {
+  return useQuery<AdminStreamActivityResponse>({
+    queryKey: ["admin", "stream-activity", days],
+    queryFn: () => api.getAdminStreamActivity(days),
+    staleTime: 10 * 60 * 1000,
+    ...options,
+  });
+}
+
+// Top-watched leaderboard powering the Resumen "Más visto" panel.
+// Same staleTime rationale as stream activity.
+export function useAdminTopItems(
+  days = 7,
+  limit = 5,
+  options?: Partial<UseQueryOptions<AdminTopItemsResponse>>,
+) {
+  return useQuery<AdminTopItemsResponse>({
+    queryKey: ["admin", "top-items", days, limit],
+    queryFn: () => api.getAdminTopItems(days, limit),
+    staleTime: 10 * 60 * 1000,
     ...options,
   });
 }
