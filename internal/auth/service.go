@@ -194,8 +194,11 @@ func (s *Service) Login(ctx context.Context, username, password, deviceName, dev
 	// background job; the comparison happens here on every login
 	// AND inside the JWT middleware (so an already-issued token
 	// doesn't outlive the deadline by more than the JWT TTL).
+	// Distinct from the generic "account disabled" sentinel so the
+	// UI can surface a tailored "contact the admin to extend
+	// access" message instead of the catch-all copy.
 	if user.AccessExpiresAt != nil && !user.AccessExpiresAt.After(s.clock.Now()) {
-		return nil, fmt.Errorf("login: %w", domain.ErrAccountDisabled)
+		return nil, fmt.Errorf("login: %w", domain.ErrAccessExpired)
 	}
 
 	if !user.IsActive {
@@ -332,7 +335,7 @@ func (s *Service) ValidateToken(ctx context.Context, tokenStr string) (*Claims, 
 	// repo call returns NotFound anyway.
 	if user, err := s.users.GetByID(ctx, claims.UserID); err == nil && user != nil {
 		if user.AccessExpiresAt != nil && !user.AccessExpiresAt.After(s.clock.Now()) {
-			return nil, fmt.Errorf("validate: %w", domain.ErrAccountDisabled)
+			return nil, fmt.Errorf("validate: %w", domain.ErrAccessExpired)
 		}
 		if !user.IsActive {
 			return nil, fmt.Errorf("validate: %w", domain.ErrAccountDisabled)

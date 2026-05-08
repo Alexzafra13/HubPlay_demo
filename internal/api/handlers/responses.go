@@ -85,6 +85,8 @@ func handleServiceError(w http.ResponseWriter, r *http.Request, err error) {
 		respondAppError(w, ctx, domain.NewTokenExpired())
 	case errors.Is(err, domain.ErrUnauthorized), errors.Is(err, domain.ErrInvalidToken):
 		respondAppError(w, ctx, domain.NewUnauthorized(""))
+	case errors.Is(err, domain.ErrAccessExpired):
+		respondAppError(w, ctx, domain.NewAccessExpired())
 	case errors.Is(err, domain.ErrAccountDisabled):
 		respondAppError(w, ctx, domain.NewAccountDisabled())
 	case errors.Is(err, domain.ErrForbidden):
