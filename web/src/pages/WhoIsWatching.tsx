@@ -3,39 +3,23 @@
 // more than one profile in the tree (parent + ≥1 child). Solo
 // accounts skip this screen entirely and go straight to /.
 //
-// Visual brief (post-2026-05 redesign — see git for the
-// "premium feel" review notes):
+// Layout brief:
 //
-//   - The canvas works in TWO modes that should both feel premium:
+//   - "with content" (≥ 4 items in the catalogue have a poster):
+//     two-column split. Left column owns the picker (title +
+//     circular avatars + bottom rail). Right column is a visible
+//     poster wall — actual posters at full opacity, not the
+//     ambient blur-mosaic — so the page reads "this is YOUR
+//     media platform" instead of "generic auth screen".
 //
-//       * "with content": pull a handful of recent backdrops from
-//         the catalogue and tile them in a heavily-blurred mosaic
-//         at very low opacity. Reads as "this is YOUR library"
-//         without ever being a recognisable poster.
+//   - "fresh install": single column, picker centred. The aurora
+//     gradients carry the canvas alone; no empty wall on the
+//     right. Same vibe as the Login page.
 //
-//       * "fresh install": the same aurora gradients the Login
-//         page uses, so the auth canvas is one continuous moment.
-//
-//     Either way, an ambient tint follows the hovered profile —
-//     a radial gradient that picks up that profile's avatar
-//     palette colour. The room "lights up" where the cursor is.
-//
-//   - Cards are ~160 px (vs the previous 128) with a soft inner
-//     light gradient on top + a deeper colour on the bottom so
-//     the tile reads as an object, not a flat swatch. Hover
-//     scales 1.06, lifts -4 px, and adds a halo of that profile's
-//     palette colour at 20 % alpha behind the card.
-//
-//   - Typography goes light + tracked. Title shifts to font-weight
-//     200 with letter-spacing; subtitle softer.
-//
-//   - PIN entry stays as the four-box pad we shipped before — it
-//     was already the right pattern.
-//
-// PIN-protected profiles surface the dot-boxes on click; wrong PIN
-// intentionally maps to the same generic-error path the wrong-
-// password login does so PIN guessing can't be distinguished from
-// an inactive profile.
+// Avatars are circular (matching the TopBar), generously sized,
+// with a halo of the profile's palette colour bleeding behind
+// on hover/focus. The hovered profile also tints the page-level
+// ambient — a soft radial bleed in that colour follows the cursor.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
@@ -56,6 +40,11 @@ import { avatarColorFor } from "@/utils/avatarColor";
 import { getInitials } from "@/utils/userDisplay";
 import { BrandWordmark } from "@/components/layout/BrandWordmark";
 
+// Minimum posters the catalogue must surface before we promote the
+// "two-column with poster wall" layout. Below this, the wall would
+// look sparse and we get a better-looking single-column instead.
+const MIN_POSTERS_FOR_WALL = 4;
+
 export default function WhoIsWatching() {
   const { t } = useTranslation();
   const { data: profiles, isLoading, error } = useProfiles();
@@ -69,16 +58,27 @@ export default function WhoIsWatching() {
   const [pin, setPin] = useState("");
   const [pinError, setPinError] = useState<string | null>(null);
   const [pinAttempting, setPinAttempting] = useState(false);
-
-  // Hovered profile drives the ambient room-tint behind the grid
-  // (radial gradient that picks up that profile's palette colour).
-  // Stored at the page level so the backdrop layer can react.
   const [hoveredProfileId, setHoveredProfileId] = useState<string | null>(null);
 
-  // Solo account → bounce home. Login routes everyone through this
-  // page so the picker is the single source of truth on "do I
-  // actually need to choose?" — when the answer is no, we silently
-  // navigate away.
+  // Catalogue slice for the right-side poster wall + the ambient
+  // hover bleed. One fetch, two consumers. Failures are non-fatal:
+  // the picker degrades to a single-column aurora layout.
+  const { data: itemsData } = useItems(
+    { limit: 12, sort_by: "date_added", sort_order: "desc" },
+    { staleTime: 5 * 60 * 1000, retry: false },
+  );
+  const posters = useMemo(() => {
+    const items = (itemsData?.items ?? []) as MediaItem[];
+    return items
+      .map((it) => ({ id: it.id, src: it.poster_url, title: it.title }))
+      .filter((p): p is { id: string; src: string; title: string } =>
+        Boolean(p.src),
+      )
+      .slice(0, 6);
+  }, [itemsData]);
+
+  const showWall = posters.length >= MIN_POSTERS_FOR_WALL;
+
   useEffect(() => {
     if (!isLoading && !error && profiles && profiles.length <= 1) {
       navigate("/", { replace: true });
@@ -93,15 +93,13 @@ export default function WhoIsWatching() {
     );
   }
 
-  // Render the friendly fallback page on a real failure so the
-  // operator never stares at an empty grid wondering what broke.
   const profilesMissing = !profiles || profiles.length === 0;
   if (error || profilesMissing) {
     return (
       <div className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-bg-base px-6 py-12">
-        <CinematicBackdrop hoveredHex={null} />
+        <CinematicBackdrop hoveredHex={null} hasWall={false} />
         <div className="relative z-10 flex max-w-md flex-col items-center gap-5 text-center">
-          <BrandWordmark height={28} className="opacity-80" />
+          <BrandWordmark height={48} className="opacity-90" />
           <h2 className="text-xl font-semibold text-text-primary">
             {t("whoIsWatching.loadFailedTitle", {
               defaultValue: "No pudimos cargar los perfiles",
@@ -119,7 +117,7 @@ export default function WhoIsWatching() {
             <button
               type="button"
               onClick={() => navigate("/", { replace: true })}
-              className="rounded-md border border-border-subtle bg-bg-card/50 px-3 py-1.5 text-xs text-text-muted backdrop-blur-sm transition-colors hover:bg-bg-card hover:text-text-primary"
+              className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs text-text-secondary backdrop-blur-md transition-all hover:border-white/20 hover:bg-white/10 hover:text-text-primary"
             >
               {t("whoIsWatching.continueAnyway", {
                 defaultValue: "Continuar al inicio",
@@ -128,7 +126,7 @@ export default function WhoIsWatching() {
             <button
               type="button"
               onClick={() => void handleSignOut()}
-              className="inline-flex items-center gap-1.5 rounded-md border border-border-subtle bg-bg-card/50 px-3 py-1.5 text-xs text-text-muted backdrop-blur-sm transition-colors hover:bg-bg-card hover:text-text-primary"
+              className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs text-text-secondary backdrop-blur-md transition-all hover:border-white/20 hover:bg-white/10 hover:text-text-primary"
             >
               <LogOut className="h-3.5 w-3.5" />
               {t("whoIsWatching.signOut", {
@@ -154,9 +152,6 @@ export default function WhoIsWatching() {
     setPinError(null);
     setPinAttempting(true);
     try {
-      // Same-profile switch is a no-op — picking the parent (which
-      // is the JWT identity here) yields the same token. Skip the
-      // round-trip and just send them home.
       if (profile.id === user?.id) {
         navigate("/", { replace: true });
         return;
@@ -181,29 +176,125 @@ export default function WhoIsWatching() {
     }
   }
 
-  // Only admins see the "manage profiles" shortcut — non-admin
-  // members of a family account can't open the admin pane.
   const canManage = me?.role === "admin";
 
-  // Hovered hex powers the ambient room-tint behind the picker.
-  // Computed once per hover change rather than re-derived inside
-  // CinematicBackdrop so the gradient string stays stable.
   const hoveredHex = useMemo(() => {
     if (!hoveredProfileId) return null;
     const p = profiles?.find((x) => x.id === hoveredProfileId);
     return p ? avatarColorFor(p.username).background : null;
   }, [hoveredProfileId, profiles]);
 
+  // The picker block (title + avatars + rail) is shared between
+  // the single-column and split layouts. Pulled to a local
+  // closure rather than a child component to keep the hover /
+  // commit handlers in scope without prop-drilling.
+  const renderPicker = (alignment: "center" | "start") => (
+    <div
+      className={[
+        "flex flex-col",
+        alignment === "center" ? "items-center text-center" : "items-start text-left",
+      ].join(" ")}
+    >
+      <motion.h1
+        initial={{ opacity: 0, y: -6 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, ease: [0.22, 0.61, 0.36, 1] }}
+        className="mb-3 text-5xl font-extralight tracking-[-0.015em] text-text-primary sm:text-6xl"
+      >
+        {t("whoIsWatching.title")}
+      </motion.h1>
+      <motion.p
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.5, delay: 0.15 }}
+        className="mb-12 text-sm tracking-wider text-text-muted"
+      >
+        {t("whoIsWatching.subtitle", {
+          defaultValue: "Selecciona tu perfil para continuar.",
+        })}
+      </motion.p>
+      <motion.div
+        initial="hidden"
+        animate="show"
+        variants={{
+          hidden: {},
+          show: {
+            transition: {
+              staggerChildren: 0.08,
+              delayChildren: 0.2,
+            },
+          },
+        }}
+        className={[
+          "flex flex-wrap gap-8 sm:gap-10",
+          alignment === "center" ? "justify-center" : "justify-start",
+        ].join(" ")}
+      >
+        {profiles?.map((p) => (
+          <ProfileCard
+            key={p.id}
+            profile={p}
+            onClick={() => void pickProfile(p)}
+            onHoverChange={(h) => setHoveredProfileId(h ? p.id : null)}
+          />
+        ))}
+      </motion.div>
+
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.5, delay: 0.5 }}
+        className={[
+          "mt-12 flex flex-wrap items-center gap-3 text-xs",
+          alignment === "center" ? "justify-center" : "justify-start",
+        ].join(" ")}
+      >
+        {canManage && (
+          <button
+            type="button"
+            onClick={() => navigate("/admin/users")}
+            className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-text-secondary backdrop-blur-md transition-all hover:border-white/20 hover:bg-white/10 hover:text-text-primary"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+            {t("whoIsWatching.manageProfiles", {
+              defaultValue: "Gestionar perfiles",
+            })}
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => void handleSignOut()}
+          className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-text-secondary backdrop-blur-md transition-all hover:border-white/20 hover:bg-white/10 hover:text-text-primary"
+        >
+          <LogOut className="h-3.5 w-3.5" />
+          {t("whoIsWatching.signOut", {
+            defaultValue: "Cerrar sesión",
+          })}
+        </button>
+      </motion.div>
+    </div>
+  );
+
   return (
     <div
-      className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-bg-base px-6 py-12"
+      className="relative flex min-h-screen flex-col items-center overflow-hidden bg-bg-base px-6 py-10 sm:py-14"
       onMouseLeave={() => setHoveredProfileId(null)}
     >
-      <CinematicBackdrop hoveredHex={hoveredHex} />
+      <CinematicBackdrop hoveredHex={hoveredHex} hasWall={showWall} />
 
-      <div className="relative z-10 flex w-full flex-col items-center">
-        <BrandWordmark height={28} className="mb-12 opacity-80" />
+      {/* Logo — sized big enough to read as a brand mark, not a
+          favicon. Keeps to the top of the viewport so the picker
+          doesn't fight for attention with it. */}
+      <motion.div
+        initial={{ opacity: 0, y: -8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+        className="relative z-10 mb-10 sm:mb-14"
+      >
+        <BrandWordmark height={56} className="opacity-95" />
+      </motion.div>
 
+      <div className="relative z-10 flex w-full flex-1 items-center justify-center">
         {selected && selected.has_pin ? (
           <PinPad
             profile={selected}
@@ -223,143 +314,62 @@ export default function WhoIsWatching() {
             isLoading={pinAttempting}
             errorMessage={pinError}
           />
+        ) : showWall ? (
+          // Two-column split. Picker on the left, poster wall on
+          // the right. The grid is `auto / minmax(0, 1fr)` so the
+          // wall consumes the slack — picker stays at its natural
+          // width, posters fill whatever's left up to a sensible
+          // cap (max-w-3xl).
+          <div className="grid w-full max-w-7xl items-center gap-12 lg:grid-cols-[auto_minmax(0,1fr)] lg:gap-20">
+            {renderPicker("start")}
+            <div className="flex justify-center lg:justify-end">
+              <PosterWall posters={posters} />
+            </div>
+          </div>
         ) : (
-          <>
-            <motion.h1
-              initial={{ opacity: 0, y: -6 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4, ease: [0.22, 0.61, 0.36, 1] }}
-              className="mb-3 text-center text-5xl font-extralight tracking-[-0.01em] text-text-primary sm:text-6xl"
-              style={{ letterSpacing: "-0.015em" }}
-            >
-              {t("whoIsWatching.title")}
-            </motion.h1>
-            <motion.p
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ duration: 0.5, delay: 0.15 }}
-              className="mb-14 text-sm text-text-muted tracking-wider"
-            >
-              {t("whoIsWatching.subtitle", {
-                defaultValue: "Selecciona tu perfil para continuar.",
-              })}
-            </motion.p>
-            <motion.div
-              initial="hidden"
-              animate="show"
-              variants={{
-                hidden: {},
-                show: {
-                  transition: {
-                    staggerChildren: 0.08,
-                    delayChildren: 0.2,
-                  },
-                },
-              }}
-              className="flex flex-wrap items-start justify-center gap-8 sm:gap-12"
-            >
-              {profiles?.map((p) => (
-                <ProfileCard
-                  key={p.id}
-                  profile={p}
-                  onClick={() => void pickProfile(p)}
-                  onHoverChange={(h) =>
-                    setHoveredProfileId(h ? p.id : null)
-                  }
-                />
-              ))}
-            </motion.div>
-          </>
+          // Single column when there isn't enough catalogue art
+          // to fill a wall. The aurora carries the canvas alone
+          // so the page still feels deliberate, not under-built.
+          renderPicker("center")
         )}
       </div>
-
-      {/* Bottom rail — glassier, with a cleaner separation between
-          "manage" (admin) and "sign out" (any user). Always visible
-          when not in PIN mode so the operator never feels trapped. */}
-      {!selected && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.5, delay: 0.5 }}
-          className="relative z-10 mt-16 flex flex-wrap items-center justify-center gap-3 text-xs"
-        >
-          {canManage && (
-            <button
-              type="button"
-              onClick={() => navigate("/admin/users")}
-              className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-text-secondary backdrop-blur-md transition-all hover:border-white/20 hover:bg-white/10 hover:text-text-primary"
-            >
-              <Pencil className="h-3.5 w-3.5" />
-              {t("whoIsWatching.manageProfiles", {
-                defaultValue: "Gestionar perfiles",
-              })}
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => void handleSignOut()}
-            className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-text-secondary backdrop-blur-md transition-all hover:border-white/20 hover:bg-white/10 hover:text-text-primary"
-          >
-            <LogOut className="h-3.5 w-3.5" />
-            {t("whoIsWatching.signOut", {
-              defaultValue: "Cerrar sesión",
-            })}
-          </button>
-        </motion.div>
-      )}
     </div>
   );
 }
 
-// CinematicBackdrop — the layered canvas that sits behind the picker.
-// Three stacked layers, painter's-algorithm bottom-up:
+// CinematicBackdrop — the layered canvas. Three or four layers
+// depending on whether we're rendering the poster wall:
 //
-//   1. Aurora gradients (always, even when no content) — same recipe
-//      as the Login page so the auth surface is one continuous look.
-//   2. Backdrop mosaic — when there's at least one item with a
-//      backdrop, tile the most-recent ones at heavy blur + 6 %
-//      opacity. Falls through silently when no content (fresh
-//      install, new account, etc.) so this is purely additive
-//      polish and never breaks the page.
-//   3. Hover ambient tint — when the user is hovering a profile,
-//      a soft radial gradient in that profile's palette colour
-//      bleeds in behind the grid. The room "lights up" where the
-//      cursor is. Smooth opacity transition so flicking between
-//      cards reads as a glow that follows.
-//   4. Vertical vignette to keep card edges legible.
-function CinematicBackdrop({ hoveredHex }: { hoveredHex: string | null }) {
-  // Pull a small slice of recent items with backdrops. Capped at 12
-  // so the mosaic stays a 4×3 grid even on ultrawide. We don't care
-  // if the request fails — the aurora alone is the fallback.
-  // Sorted by date_added DESC so the canvas evolves as the catalogue
-  // grows ("the picker remembers what you just imported").
+//   1. Aurora gradients (always).
+//   2. Backdrop blur-mosaic (only when there's NO poster wall —
+//      otherwise the wall + mosaic compete and the page reads
+//      busy. With a wall, the wall is the "this is your library"
+//      signal and the canvas stays calm aurora-only).
+//   3. Hover ambient tint — radial bleed in the hovered profile's
+//      palette colour. Always on.
+//   4. Vertical vignette for card-edge contrast.
+function CinematicBackdrop({
+  hoveredHex,
+  hasWall,
+}: {
+  hoveredHex: string | null;
+  hasWall: boolean;
+}) {
   const { data } = useItems(
-    {
-      limit: 12,
-      sort_by: "date_added",
-      sort_order: "desc",
-    },
-    {
-      // Picker isn't user-data; backdrops change rarely. Generous
-      // staleTime saves a refetch on every navigation back here.
-      staleTime: 5 * 60 * 1000,
-      // Failures are non-fatal (no content yet, parent JWT can't
-      // hit /items, etc.). Don't retry — slows the picker for no
-      // gain.
-      retry: false,
-    },
+    { limit: 12, sort_by: "date_added", sort_order: "desc" },
+    { staleTime: 5 * 60 * 1000, retry: false },
   );
   const backdrops = useMemo(() => {
+    if (hasWall) return []; // wall replaces mosaic as the catalogue signal
     const items = (data?.items ?? []) as MediaItem[];
     return items
       .map((it) => it.backdrop_url)
       .filter((u): u is string => !!u)
       .slice(0, 12);
-  }, [data]);
+  }, [data, hasWall]);
 
   return (
     <>
-      {/* Layer 1 — aurora. Always on. */}
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-0"
@@ -371,11 +381,6 @@ function CinematicBackdrop({ hoveredHex }: { hoveredHex: string | null }) {
           ].join(", "),
         }}
       />
-
-      {/* Layer 2 — backdrop mosaic. Renders only when we actually
-          have catalogue art. Heavy blur + low opacity so individual
-          posters are unrecognisable; the eye reads "warm room
-          lit by the room's own contents". */}
       {backdrops.length > 0 && (
         <div
           aria-hidden="true"
@@ -393,28 +398,76 @@ function CinematicBackdrop({ hoveredHex }: { hoveredHex: string | null }) {
           </div>
         </div>
       )}
-
-      {/* Layer 3 — hover ambient. Radial wash in the hovered
-          profile's palette colour. Opacity transition so a flick
-          across cards reads as a single travelling glow. */}
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 transition-opacity duration-500"
         style={{
           opacity: hoveredHex ? 1 : 0,
           background: hoveredHex
-            ? `radial-gradient(45% 55% at 50% 55%, ${hoveredHex}66 0%, transparent 70%)`
+            ? `radial-gradient(45% 55% at 50% 55%, ${hoveredHex}55 0%, transparent 70%)`
             : "transparent",
         }}
       />
-
-      {/* Layer 4 — vignette so the card edges + bottom rail keep
-          contrast against the mosaic. */}
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute inset-0 bg-gradient-to-b from-bg-base/80 via-transparent to-bg-base/95"
+        className="pointer-events-none absolute inset-0 bg-gradient-to-b from-bg-base/60 via-transparent to-bg-base/95"
       />
     </>
+  );
+}
+
+// PosterWall — the right-hand showcase. Six posters in a 3-col
+// grid with subtle staggered entry + per-tile float so the wall
+// reads as alive without requiring a video loop. Each tile gets
+// a tiny rotation (alternating direction) for a casual "spread on
+// a table" feel rather than a perfectly grid-aligned mosaic.
+function PosterWall({
+  posters,
+}: {
+  posters: { id: string; src: string; title: string }[];
+}) {
+  return (
+    <motion.div
+      initial="hidden"
+      animate="show"
+      variants={{
+        hidden: {},
+        show: {
+          transition: {
+            staggerChildren: 0.07,
+            delayChildren: 0.3,
+          },
+        },
+      }}
+      className="grid w-full max-w-md grid-cols-3 gap-4"
+      aria-hidden="true" // decorative — the picker beside it owns the meaning
+    >
+      {posters.map((p, i) => {
+        // Alternate tilt + small vertical offset so the grid feels
+        // hand-arranged rather than CSS-perfect. The middle column
+        // sits flush; outer columns lean a few degrees.
+        const tilt = i % 3 === 0 ? -2 : i % 3 === 2 ? 2 : 0;
+        const offsetY = i % 3 === 1 ? -8 : 0;
+        return (
+          <motion.div
+            key={p.id}
+            variants={{
+              hidden: { opacity: 0, y: 18, rotate: tilt },
+              show: { opacity: 1, y: offsetY, rotate: tilt },
+            }}
+            transition={{ duration: 0.5, ease: [0.22, 0.61, 0.36, 1] }}
+            className="aspect-[2/3] overflow-hidden rounded-xl bg-bg-card shadow-2xl ring-1 ring-white/5"
+          >
+            <img
+              src={p.src}
+              alt=""
+              loading="lazy"
+              className="h-full w-full object-cover"
+            />
+          </motion.div>
+        );
+      })}
+    </motion.div>
   );
 }
 
@@ -451,28 +504,26 @@ function ProfileCard({ profile, onClick, onHoverChange }: ProfileCardProps) {
         name: profile.display_name || profile.username,
       })}
     >
-      {/* Halo behind the card. Same palette colour, blurred and
-          scaled up so it reads as ambient light on the wall behind
-          the tile rather than a flat outline. */}
+      {/* Halo — same trick as before, sized and shaped for a
+          circle this time so the bleed reads as a sphere of light
+          rather than a square smudge. */}
       <span
         aria-hidden
-        className="absolute -inset-6 rounded-3xl opacity-0 blur-2xl transition-opacity duration-300 group-hover:opacity-70 group-focus-visible:opacity-70"
+        className="absolute -inset-6 rounded-full opacity-0 blur-2xl transition-opacity duration-300 group-hover:opacity-70 group-focus-visible:opacity-70"
         style={{
-          background: `radial-gradient(closest-side, ${palette.background}, transparent 75%)`,
+          background: `radial-gradient(closest-side, ${palette.background}, transparent 70%)`,
         }}
       />
 
-      {/* The tile itself. The inner gradient on top + darker on the
-          bottom is the "this is an object" trick — a flat colour
-          would read like a swatch. The white/10 ring picks up on
-          hover and matches Netflix's "selected" affordance. */}
+      {/* Round avatar (rounded-full) matching the TopBar's avatar
+          shape — visual continuity once the user picks and lands
+          on the home shell. */}
       <div
-        className="relative flex h-40 w-40 items-center justify-center overflow-hidden rounded-2xl text-5xl font-extralight tracking-tight text-white shadow-2xl ring-2 ring-transparent transition-all duration-300 group-hover:ring-white/30 group-focus-visible:ring-accent group-focus-visible:ring-offset-4 group-focus-visible:ring-offset-transparent sm:h-44 sm:w-44 sm:text-6xl"
+        className="relative flex h-36 w-36 items-center justify-center overflow-hidden rounded-full text-5xl font-extralight tracking-tight text-white shadow-2xl ring-2 ring-transparent transition-all duration-300 group-hover:ring-white/30 group-focus-visible:ring-accent group-focus-visible:ring-offset-4 group-focus-visible:ring-offset-transparent sm:h-40 sm:w-40 sm:text-6xl"
         style={{
           background: `linear-gradient(160deg, ${lighten(palette.background, 0.12)}, ${palette.background} 45%, ${darken(palette.background, 0.18)})`,
         }}
       >
-        {/* Inner top-light gloss for depth. */}
         <span
           aria-hidden
           className="pointer-events-none absolute inset-0 bg-gradient-to-b from-white/10 via-transparent to-transparent"
@@ -530,8 +581,6 @@ function PinPad({
 
   const focusInput = () => inputRef.current?.focus();
 
-  // After a wrong PIN we clear the field; refocus immediately so
-  // the operator can retype without an extra tap.
   useEffect(() => {
     if (errorMessage) {
       focusInput();
@@ -546,7 +595,7 @@ function PinPad({
       className="flex w-full max-w-sm flex-col items-center gap-6"
     >
       <motion.div
-        className="flex h-28 w-28 items-center justify-center overflow-hidden rounded-2xl text-3xl font-extralight text-white shadow-2xl"
+        className="relative flex h-28 w-28 items-center justify-center overflow-hidden rounded-full text-3xl font-extralight text-white shadow-2xl"
         style={{
           background: `linear-gradient(160deg, ${lighten(palette.background, 0.12)}, ${palette.background} 45%, ${darken(palette.background, 0.18)})`,
         }}
@@ -647,10 +696,10 @@ function PinPad({
   );
 }
 
-// Small colour helpers for the tile depth gradient. We don't pull
-// in a colour library — the avatar palette is hand-picked dark
-// tones, and a 12 %/18 % linear shift on each end is enough for
-// the highlight + shadow effect without breaking colour identity.
+// Same colour helpers as before — stays inline to keep the file
+// self-contained. A 12 %/18 % linear shift on each end of the
+// avatar's base colour is the cheapest "object lit from above"
+// effect that doesn't break colour identity.
 function lighten(hex: string, amount: number): string {
   return shift(hex, amount);
 }
