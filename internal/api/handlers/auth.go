@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/go-chi/chi/v5"
+
 	"hubplay/internal/auth"
 	"hubplay/internal/config"
 	"hubplay/internal/db"
@@ -27,6 +29,11 @@ func authTokenResponse(token *auth.AuthToken, u *db.User) map[string]any {
 			"display_name": u.DisplayName,
 			"role":         u.Role,
 			"created_at":   u.CreatedAt,
+			// Surface the must-change flag so the frontend can route
+			// to the forced ChangePassword screen before any rail or
+			// detail fetch tries to use the JWT. Cleared by a
+			// successful POST /me/password.
+			"password_change_required": u.PasswordChangeRequired,
 		},
 	}
 }
@@ -173,7 +180,195 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	setAuthCookies(w, r, token, int(h.authCfg.AccessTokenTTL.Seconds()), int(h.authCfg.RefreshTokenTTL.Seconds()))
-	respondJSON(w, http.StatusOK, map[string]any{"data": authTokenResponse(token, u)})
+
+	// Profile list goes with the token so the frontend can decide
+	// whether to drop into "Who's watching?" or skip straight to the
+	// home screen on solo accounts. We swallow lookup errors here —
+	// a deploy without profile rows just gets an empty `profiles`
+	// array, which the frontend already handles as "no selection
+	// needed".
+	resp := authTokenResponse(token, u)
+	if profiles, perr := h.auth.ListProfiles(r.Context(), u.ID); perr == nil {
+		resp["profiles"] = profileListResponse(profiles)
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"data": resp})
+}
+
+// profileListResponse trims the User wire payload down to what the
+// "Who's watching?" screen and the topbar switcher need: identity +
+// avatar attribution + PIN flag + parent linkage. Crucially leaves
+// `password_hash` and `pin_hash` on the floor.
+func profileListResponse(profiles []*db.User) []map[string]any {
+	out := make([]map[string]any, len(profiles))
+	for i, p := range profiles {
+		out[i] = map[string]any{
+			"id":             p.ID,
+			"username":       p.Username,
+			"display_name":   p.DisplayName,
+			"role":           p.Role,
+			"is_active":      p.IsActive,
+			"parent_user_id": p.ParentUserID,
+			"has_pin":        p.PINHash != "",
+		}
+		if p.MaxContentRating != "" {
+			out[i]["max_content_rating"] = p.MaxContentRating
+		}
+	}
+	return out
+}
+
+// ListProfiles returns the profile tree for the authenticated user.
+// Used by the "Who's watching?" screen when the frontend lands via a
+// refreshed cookie (no fresh login response to consume profiles from).
+func (h *AuthHandler) ListProfiles(w http.ResponseWriter, r *http.Request) {
+	claims := auth.GetClaims(r.Context())
+	if claims == nil {
+		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+		return
+	}
+	profiles, err := h.auth.ListProfiles(r.Context(), claims.UserID)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{
+		"data": profileListResponse(profiles),
+	})
+}
+
+type switchProfileRequest struct {
+	ProfileID  string `json:"profile_id"`
+	PIN        string `json:"pin"`
+	DeviceName string `json:"device_name"`
+	DeviceID   string `json:"device_id"`
+}
+
+// SwitchProfile mints a new auth token for a sibling / parent profile.
+// Caller authenticates with their current JWT; the service verifies
+// the target lives under the same parent before issuing the new
+// token. PIN-protected profiles require the matching PIN — wrong
+// PIN returns the same 401 the wrong-password path does.
+func (h *AuthHandler) SwitchProfile(w http.ResponseWriter, r *http.Request) {
+	claims := auth.GetClaims(r.Context())
+	if claims == nil {
+		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+		return
+	}
+	var req switchProfileRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
+		return
+	}
+	if req.ProfileID == "" {
+		respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "profile_id is required")
+		return
+	}
+	if req.DeviceName == "" {
+		req.DeviceName = r.UserAgent()
+	}
+	if req.DeviceID == "" {
+		req.DeviceID = "unknown"
+	}
+	token, err := h.auth.SwitchProfile(
+		r.Context(), claims.UserID, req.ProfileID, req.PIN,
+		req.DeviceName, req.DeviceID, r.RemoteAddr,
+	)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	u, err := h.users.GetByID(r.Context(), token.UserID)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	setAuthCookies(w, r, token, int(h.authCfg.AccessTokenTTL.Seconds()), int(h.authCfg.RefreshTokenTTL.Seconds()))
+	resp := authTokenResponse(token, u)
+	if profiles, perr := h.auth.ListProfiles(r.Context(), u.ID); perr == nil {
+		resp["profiles"] = profileListResponse(profiles)
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"data": resp})
+}
+
+type setPINRequest struct {
+	// Empty string clears the PIN. 4 digits otherwise.
+	PIN string `json:"pin"`
+}
+
+type setContentRatingRequest struct {
+	// Empty string clears the cap (= no restriction). Otherwise one
+	// of the literals from the rating ranking table (G/PG/PG-13/R/
+	// NC-17/TV-Y/TV-Y7/TV-G/TV-PG/TV-14/TV-MA).
+	Rating string `json:"rating"`
+}
+
+// SetContentRating updates a profile's max content rating. Validation
+// is permissive — unknown values are stored as-is and the filter
+// callsite fail-opens (treats unknown caps as "no restriction") so a
+// future deploy that adds a localised rating won't lock users out
+// retroactively.
+func (h *AuthHandler) SetContentRating(w http.ResponseWriter, r *http.Request) {
+	claims := auth.GetClaims(r.Context())
+	if claims == nil {
+		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "missing user id")
+		return
+	}
+	var req setContentRatingRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
+		return
+	}
+	if err := h.users.SetMaxContentRating(r.Context(), id, req.Rating); err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// SetPIN sets or clears the PIN of any user under the caller's
+// account tree. Admins can hit it for any user; profile owners
+// (the parent) can hit it for their own children. Profiles can't
+// set their siblings' PIN, only their own (handled by the same
+// owner-id check the switch flow uses).
+func (h *AuthHandler) SetPIN(w http.ResponseWriter, r *http.Request) {
+	claims := auth.GetClaims(r.Context())
+	if claims == nil {
+		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "missing user id")
+		return
+	}
+	var req setPINRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
+		return
+	}
+	// Validate format: empty (clear) or exactly 4 digits.
+	if req.PIN != "" {
+		if len(req.PIN) != 4 {
+			respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "pin must be exactly 4 digits")
+			return
+		}
+		for _, c := range req.PIN {
+			if c < '0' || c > '9' {
+				respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "pin must be numeric")
+				return
+			}
+		}
+	}
+	if err := h.auth.SetPIN(r.Context(), id, req.PIN); err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 type refreshRequest struct {
@@ -250,8 +445,19 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 type registerRequest struct {
 	Username    string `json:"username"`
 	DisplayName string `json:"display_name"`
-	Password    string `json:"password"`
-	Role        string `json:"role"`
+	// Password is optional in the admin path: when empty the server
+	// generates a readable temporary password and returns it once in
+	// the response under "generated_password". The new account's
+	// password_change_required flag is set so first login lands on
+	// the ChangePassword screen.
+	Password string `json:"password"`
+	Role     string `json:"role"`
+	// ParentUserID, when set, makes this row a profile under the
+	// referenced account rather than a standalone user. Profiles
+	// share the parent's password and switch via /auth/switch-profile;
+	// the legacy `password` field is ignored when a parent is set
+	// because profiles don't authenticate independently.
+	ParentUserID string `json:"parent_user_id"`
 }
 
 func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
@@ -261,12 +467,34 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	isProfile := req.ParentUserID != ""
+
 	fields := make(map[string]string)
-	if req.Username == "" || len(req.Username) < 3 || len(req.Username) > 32 {
-		fields["username"] = "must be 3-32 characters"
+	// Profile usernames get auto-derived from the parent + the
+	// display name so the admin doesn't have to invent unique
+	// usernames for each kid in the household — the slot just
+	// doesn't matter for profiles, they don't log in directly.
+	if !isProfile {
+		if req.Username == "" || len(req.Username) < 3 || len(req.Username) > 32 {
+			fields["username"] = "must be 3-32 characters"
+		}
 	}
-	if req.Password == "" || len(req.Password) < 8 {
-		fields["password"] = "must be at least 8 characters"
+	// Password is admin-optional for top-level accounts; profiles
+	// share the parent's password so the field is ignored entirely
+	// when ParentUserID is set.
+	autoGenerated := false
+	if !isProfile {
+		if req.Password == "" {
+			generated, err := auth.GeneratePassword()
+			if err != nil {
+				handleServiceError(w, r, err)
+				return
+			}
+			req.Password = generated
+			autoGenerated = true
+		} else if len(req.Password) < 8 {
+			fields["password"] = "must be at least 8 characters"
+		}
 	}
 	if len(fields) > 0 {
 		handleServiceError(w, r, domain.NewValidationError(fields))
@@ -276,26 +504,136 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	if req.DisplayName == "" {
 		req.DisplayName = req.Username
 	}
+	// For profiles, synthesise a username from the parent's
+	// username + a UUID prefix so the UNIQUE constraint stays happy
+	// without making the admin invent unique handles for kids. The
+	// password is a random 32-char token used solely as the bcrypt
+	// input — profiles can't log in with it.
+	if isProfile {
+		parent, err := h.users.GetByID(r.Context(), req.ParentUserID)
+		if err != nil {
+			handleServiceError(w, r, err)
+			return
+		}
+		// Profile creation can only target a top-level account, not
+		// another profile (no nested profiles).
+		if parent.IsProfile() {
+			respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR",
+				"parent_user_id must be a top-level account")
+			return
+		}
+		// Username is admin-supplied? Use it. Otherwise synthesise
+		// from the display_name. Either way prefix with the parent's
+		// id so collisions are impossible.
+		base := req.Username
+		if base == "" {
+			base = req.DisplayName
+		}
+		req.Username = parent.Username + "/" + base
+		// Token used as bcrypt input for the password column. We
+		// don't ship it anywhere — profiles authenticate via the
+		// parent's switch-profile flow.
+		filler, perr := auth.GeneratePassword()
+		if perr != nil {
+			handleServiceError(w, r, perr)
+			return
+		}
+		req.Password = filler
+		// Profiles never carry the must-change flag — they never
+		// see the change-password screen because they don't log in
+		// directly.
+	}
 
 	u, err := h.auth.Register(r.Context(), auth.RegisterRequest{
-		Username:    req.Username,
-		DisplayName: req.DisplayName,
-		Password:    req.Password,
-		Role:        req.Role,
+		Username:               req.Username,
+		DisplayName:            req.DisplayName,
+		Password:               req.Password,
+		Role:                   req.Role,
+		ParentUserID:           req.ParentUserID,
+		PasswordChangeRequired: autoGenerated,
 	})
 	if err != nil {
 		handleServiceError(w, r, err)
 		return
 	}
 
-	respondJSON(w, http.StatusCreated, map[string]any{
+	out := map[string]any{
+		"id":                       u.ID,
+		"username":                 u.Username,
+		"display_name":             u.DisplayName,
+		"role":                     u.Role,
+		"password_change_required": u.PasswordChangeRequired,
+	}
+	if autoGenerated {
+		// Return the plaintext exactly once. The admin pane copies it
+		// into a "share with the user" modal; we never persist it.
+		out["generated_password"] = req.Password
+	}
+
+	respondJSON(w, http.StatusCreated, map[string]any{"data": out})
+}
+
+// ResetPassword is the admin "user lost their password" path. Mints a
+// fresh readable password, stores it with must-change=true, blows away
+// any active sessions for the target, and returns the plaintext exactly
+// once. The legacy /api/v1/users router gates this with RequireAdmin so
+// the handler can trust the caller already has admin role.
+func (h *AuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "missing user id")
+		return
+	}
+	plain, err := h.auth.ResetPassword(r.Context(), id)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{
 		"data": map[string]any{
-			"id":           u.ID,
-			"username":     u.Username,
-			"display_name": u.DisplayName,
-			"role":         u.Role,
+			"user_id":            id,
+			"generated_password": plain,
 		},
 	})
+}
+
+type changePasswordRequest struct {
+	// CurrentPassword is required when the caller's account doesn't
+	// have password_change_required set. When the flag IS set the
+	// server skips the comparison since the caller just authenticated
+	// using the temporary password the admin gave them.
+	CurrentPassword string `json:"current_password"`
+	NewPassword     string `json:"new_password"`
+}
+
+// ChangeMyPassword is the user-side "rotate my own password" flow.
+// Mounted under /me/password so the authenticated user can rotate
+// their own credential without admin involvement. Clearing the
+// must-change flag is the side effect that completes a forced
+// rotation — the frontend re-issues `/me` after success and sees
+// the flag flip to false.
+func (h *AuthHandler) ChangeMyPassword(w http.ResponseWriter, r *http.Request) {
+	claims := auth.GetClaims(r.Context())
+	if claims == nil {
+		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+		return
+	}
+	var req changePasswordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
+		return
+	}
+	if len(req.NewPassword) < 8 {
+		handleServiceError(w, r, domain.NewValidationError(map[string]string{
+			"new_password": "must be at least 8 characters",
+		}))
+		return
+	}
+	if err := h.auth.ChangePassword(r.Context(), claims.UserID, req.CurrentPassword, req.NewPassword); err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // Setup creates the first admin user. Only works when no users exist.

@@ -202,6 +202,52 @@ export interface User {
   display_name: string;
   role: string;
   created_at: string;
+  // Profile-tree fields surfaced by /me, /users, and the upcoming
+  // /auth/profiles list. All four are optional on the wire because
+  // legacy responses (older deploys, federated peers) may not carry
+  // them yet.
+  parent_user_id?: string;
+  password_change_required?: boolean;
+  has_pin?: boolean;
+  max_content_rating?: string;
+  is_active?: boolean;
+  last_login_at?: string | null;
+}
+
+export interface CreateUserResponse {
+  id: string;
+  username: string;
+  display_name: string;
+  role: string;
+  password_change_required: boolean;
+  // Returned exactly once when the admin creates a user without
+  // typing a password — the server generated a readable temporary
+  // password and the admin must hand it to the user. Absent when
+  // the admin specified their own password.
+  generated_password?: string;
+}
+
+export interface ResetPasswordResponse {
+  user_id: string;
+  generated_password: string;
+}
+
+/**
+ * One entry in the "Who's watching?" picker. Slim wire payload —
+ * just identity, the avatar attribution that the deterministic
+ * colour helper consumes, and the PIN flag so the picker can render
+ * a lock icon. Returned by /auth/login (alongside the token) and by
+ * GET /me/profiles when the frontend lands via cookie refresh.
+ */
+export interface ProfileSummary {
+  id: string;
+  username: string;
+  display_name: string;
+  role: string;
+  is_active: boolean;
+  parent_user_id?: string;
+  has_pin: boolean;
+  max_content_rating?: string;
 }
 
 export interface AuthResponse {
@@ -209,6 +255,11 @@ export interface AuthResponse {
   refresh_token: string;
   expires_in: number;
   user: User;
+  /** Profile tree under the current account. Returned by /auth/login
+   *  and /auth/switch-profile so the frontend can decide whether to
+   *  drop into the "Who's watching?" picker without an extra fetch.
+   *  Absent on solo deploys (server omits the field). */
+  profiles?: ProfileSummary[];
 }
 
 export interface LoginRequest {

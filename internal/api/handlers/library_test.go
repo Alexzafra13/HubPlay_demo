@@ -139,7 +139,7 @@ func (s *libFakeService) GetItemImages(ctx context.Context, id string) ([]*db.Im
 	return nil, nil
 }
 
-func (s *libFakeService) LatestItems(ctx context.Context, libraryID, itemType string, limit int) ([]*db.Item, error) {
+func (s *libFakeService) LatestItems(ctx context.Context, libraryID, itemType string, limit int, _ string) ([]*db.Item, error) {
 	if s.latestFn != nil {
 		return s.latestFn(ctx, libraryID, itemType, limit)
 	}
@@ -221,7 +221,7 @@ func newLibTestEnv(t *testing.T) *libTestEnv {
 		meta:     &libFakeMetadataRepo{byID: map[string]*db.Metadata{}},
 		userData: newProgressFakeUserData(),
 	}
-	env.handler = NewLibraryHandler(env.svc, env.images, env.meta, env.userData, testutil.NopLogger())
+	env.handler = NewLibraryHandler(env.svc, env.images, env.meta, env.userData, nil, testutil.NopLogger())
 
 	r := chi.NewRouter()
 	r.Route("/api/v1", func(r chi.Router) {

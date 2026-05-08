@@ -50,7 +50,8 @@
     "userMenu": "Menu de usuario",
     "suggestions": "Sugerencias",
     "noResultsFor": "Sin resultados para",
-    "viewAllResults": "Ver todos los resultados"
+    "viewAllResults": "Ver todos los resultados",
+    "switchProfile": "Cambiar perfil"
   },
   "navMenu": {
     "explore": "Explorar",
@@ -114,6 +115,29 @@
     "peers": {
       "viewAll": "Ver todos los servidores"
     }
+  },
+  "whoIsWatching": {
+    "title": "¿Quién está viendo?",
+    "pickProfile": "Entrar como {{name}}",
+    "enterPin": "Introduce el PIN de 4 dígitos",
+    "unlock": "Entrar",
+    "errorWrongPin": "PIN incorrecto. Inténtalo otra vez.",
+    "errorPinLength": "El PIN tiene 4 dígitos.",
+    "pinInputLabel": "PIN de 4 dígitos"
+  },
+  "changePassword": {
+    "title": "Cambiar contraseña",
+    "titleForced": "Cambia tu contraseña",
+    "subtitle": "Elige una nueva contraseña para tu cuenta.",
+    "subtitleForced": "Antes de continuar, sustituye la contraseña temporal por una solo tuya.",
+    "currentLabel": "Contraseña actual",
+    "newLabel": "Contraseña nueva",
+    "confirmLabel": "Repite la contraseña",
+    "submit": "Guardar",
+    "alsoVerifyOld": "Quiero también escribir la contraseña actual",
+    "errorTooShort": "La contraseña debe tener al menos 8 caracteres.",
+    "errorMismatch": "Las contraseñas no coinciden.",
+    "errorGeneric": "No se pudo cambiar la contraseña. Inténtalo de nuevo."
   },
   "home": {
     "continueWatching": "Seguir viendo",

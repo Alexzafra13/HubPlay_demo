@@ -24,6 +24,11 @@ type AuthService interface {
 	RefreshToken(ctx context.Context, refreshToken, ip string) (*auth.AuthToken, error)
 	Logout(ctx context.Context, refreshToken string) error
 	Register(ctx context.Context, req auth.RegisterRequest) (*db.User, error)
+	ResetPassword(ctx context.Context, userID string) (string, error)
+	ChangePassword(ctx context.Context, userID, current, next string) error
+	ListProfiles(ctx context.Context, userID string) ([]*db.User, error)
+	SwitchProfile(ctx context.Context, currentUserID, targetProfileID, pin, deviceName, deviceID, ip string) (*auth.AuthToken, error)
+	SetPIN(ctx context.Context, userID, pin string) error
 	ValidateToken(ctx context.Context, tokenStr string) (*auth.Claims, error)
 	Middleware(next http.Handler) http.Handler
 }
@@ -36,6 +41,7 @@ type UserService interface {
 	List(ctx context.Context, limit, offset int) ([]*db.User, int, error)
 	Delete(ctx context.Context, id string) error
 	Count(ctx context.Context) (int, error)
+	SetMaxContentRating(ctx context.Context, id, rating string) error
 }
 
 // ─── Library service ────────────────────────────────────────────────────────
@@ -60,7 +66,7 @@ type LibraryService interface {
 	GetItemChildCounts(ctx context.Context, parentIDs []string) (map[string]int, error)
 	GetItemStreams(ctx context.Context, itemID string) ([]*db.MediaStream, error)
 	GetItemImages(ctx context.Context, itemID string) ([]*db.Image, error)
-	LatestItems(ctx context.Context, libraryID string, itemType string, limit int) ([]*db.Item, error)
+	LatestItems(ctx context.Context, libraryID string, itemType string, limit int, capRating string) ([]*db.Item, error)
 	LatestSeriesByActivity(ctx context.Context, libraryID string, limit int) ([]*db.LatestSeriesActivity, error)
 	ItemCount(ctx context.Context, libraryID string) (int, error)
 	UserHasAccess(ctx context.Context, userID, libraryID string) (bool, error)

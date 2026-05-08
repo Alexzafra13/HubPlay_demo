@@ -39,7 +39,17 @@ export default function Login() {
       {
         onSuccess(data) {
           setAuth(data.user);
-          navigate("/");
+          // Multi-profile account → drop into the "Who's watching?"
+          // picker. Solo accounts (1 profile = parent itself) fall
+          // straight into the home shell. The server already
+          // returns the trimmed `profiles` payload alongside the
+          // token so we don't need a follow-up round-trip here.
+          const profileCount = data.profiles?.length ?? 0;
+          if (profileCount > 1 && !data.user.password_change_required) {
+            navigate("/select-profile");
+          } else {
+            navigate("/");
+          }
         },
         onError(err) {
           setError(err.message || t("login.loginFailed"));

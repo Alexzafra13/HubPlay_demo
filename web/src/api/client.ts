@@ -42,6 +42,9 @@ import type {
   UpdateLibraryRequest,
   UpsertScheduledJobRequest,
   User,
+  CreateUserResponse,
+  ProfileSummary,
+  ResetPasswordResponse,
   UserData,
   ApiErrorBody,
   ExternalSubtitleResult,
@@ -399,15 +402,89 @@ export class ApiClient {
 
   async createUser(data: {
     username: string;
-    password: string;
+    /** Optional. When omitted the server generates a temporary password
+     *  and returns it once in the response under `generated_password`. */
+    password?: string;
     display_name?: string;
     role?: string;
-  }): Promise<User> {
-    return this.request<User>("POST", "/users", { body: data });
+  }): Promise<CreateUserResponse> {
+    return this.request<CreateUserResponse>("POST", "/users", { body: data });
   }
 
   async deleteUser(id: string): Promise<void> {
     return this.request<void>("DELETE", `/users/${id}`);
+  }
+
+  /** Admin-only. Generates a fresh temporary password for the target
+   *  user, returns it exactly once for the admin to hand off. The
+   *  user's must-change flag is set so first login lands on the
+   *  ChangePassword screen. */
+  async resetUserPassword(id: string): Promise<ResetPasswordResponse> {
+    return this.request<ResetPasswordResponse>(
+      "POST",
+      `/users/${id}/reset-password`,
+    );
+  }
+
+  /** Self password change. The current password may be empty when the
+   *  user is completing a forced rotation (server skips the compare
+   *  in that case because the user just authenticated with the
+   *  temporary password). */
+  async changeMyPassword(currentPassword: string, newPassword: string): Promise<void> {
+    return this.request<void>("POST", "/me/password", {
+      body: { current_password: currentPassword, new_password: newPassword },
+    });
+  }
+
+  /** List the profiles under the current account (parent + children).
+   *  Used by the "Who's watching?" screen when the frontend lands
+   *  via cookie refresh and doesn't have a fresh login response to
+   *  consume. */
+  async listProfiles(): Promise<ProfileSummary[]> {
+    return this.request<ProfileSummary[]>("GET", "/me/profiles");
+  }
+
+  /** Switch into a sibling / parent profile. Returns a fresh auth
+   *  token for the target. PIN is only required when the target
+   *  profile has one set. */
+  async switchProfile(profileId: string, pin?: string): Promise<{
+    user: User;
+    profiles?: ProfileSummary[];
+  }> {
+    return this.request<{ user: User; profiles?: ProfileSummary[] }>(
+      "POST",
+      "/auth/switch-profile",
+      { body: { profile_id: profileId, pin: pin ?? "" } },
+    );
+  }
+
+  /** Admin profile creation. Wraps POST /users with parent_user_id
+   *  set so the server creates a child row. Password / username are
+   *  ignored on the wire — the server synthesises them. */
+  async createProfile(parentUserId: string, displayName: string): Promise<CreateUserResponse> {
+    return this.request<CreateUserResponse>("POST", "/users", {
+      body: {
+        parent_user_id: parentUserId,
+        display_name: displayName,
+      },
+    });
+  }
+
+  /** Sets or clears (empty string) a profile's PIN. Caller must be
+   *  the parent of the profile or an admin. */
+  async setUserPIN(userId: string, pin: string): Promise<void> {
+    return this.request<void>("PUT", `/users/${userId}/pin`, {
+      body: { pin },
+    });
+  }
+
+  /** Sets or clears (empty string) a profile's content cap. Empty
+   *  rating means "no restriction". Admin-only — caller gate is
+   *  enforced server-side. */
+  async setUserContentRating(userId: string, rating: string): Promise<void> {
+    return this.request<void>("PUT", `/users/${userId}/content-rating`, {
+      body: { rating },
+    });
   }
 
   // ─── Libraries ────────────────────────────────────────────────────────

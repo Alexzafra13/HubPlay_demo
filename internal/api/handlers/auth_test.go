@@ -58,6 +58,26 @@ func (m *mockAuthService) ValidateToken(_ context.Context, _ string) (*auth.Clai
 	return nil, errors.New("not implemented")
 }
 
+func (m *mockAuthService) ResetPassword(_ context.Context, _ string) (string, error) {
+	return "stub-password", nil
+}
+
+func (m *mockAuthService) ChangePassword(_ context.Context, _, _, _ string) error {
+	return nil
+}
+
+func (m *mockAuthService) ListProfiles(_ context.Context, _ string) ([]*db.User, error) {
+	return nil, nil
+}
+
+func (m *mockAuthService) SwitchProfile(_ context.Context, _, _, _, _, _, _ string) (*auth.AuthToken, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (m *mockAuthService) SetPIN(_ context.Context, _, _ string) error {
+	return nil
+}
+
 func (m *mockAuthService) Middleware(next http.Handler) http.Handler {
 	return next
 }
@@ -97,6 +117,10 @@ func (m *mockUserService) Count(ctx context.Context) (int, error) {
 		return m.countFn(ctx)
 	}
 	return 0, nil
+}
+
+func (m *mockUserService) SetMaxContentRating(_ context.Context, _, _ string) error {
+	return nil
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────────

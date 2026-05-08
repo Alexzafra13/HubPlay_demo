@@ -19,6 +19,12 @@ interface AuthState {
   logout: () => void
   bootstrap: () => Promise<void>
   updateUser: (user: User) => void
+  /** Re-fetch /me from the server and persist whatever it returns.
+   *  Called after a successful password change so the cached
+   *  must-change flag flips off without waiting on the next polling
+   *  cycle of useMe (which would still bounce ProtectedRoute back
+   *  to /change-password in the meantime). */
+  refreshMe: () => Promise<void>
 }
 
 export const useAuthStore = create<AuthState>()((set, get) => ({
@@ -74,5 +80,16 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
   updateUser(user: User) {
     localStorage.setItem(USER_KEY, JSON.stringify(user))
     set({ user })
+  },
+
+  async refreshMe() {
+    try {
+      const me = await api.getMe()
+      localStorage.setItem(USER_KEY, JSON.stringify(me))
+      set({ user: me })
+    } catch {
+      // Failure here is non-fatal — the caller can retry, and the
+      // cached user stays put until the next refreshMe / refetch.
+    }
   },
 }))

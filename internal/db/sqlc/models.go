@@ -423,21 +423,25 @@ type TrickplayInfo struct {
 }
 
 type User struct {
-	ID                  string         `json:"id"`
-	Username            string         `json:"username"`
-	DisplayName         string         `json:"display_name"`
-	PasswordHash        string         `json:"password_hash"`
-	AvatarPath          sql.NullString `json:"avatar_path"`
-	Role                string         `json:"role"`
-	IsActive            bool           `json:"is_active"`
-	MaxSessions         int64          `json:"max_sessions"`
-	SubtitleLanguage    sql.NullString `json:"subtitle_language"`
-	AudioLanguage       sql.NullString `json:"audio_language"`
-	MaxStreamingQuality sql.NullString `json:"max_streaming_quality"`
-	EnableAutoPlay      bool           `json:"enable_auto_play"`
-	Theme               sql.NullString `json:"theme"`
-	CreatedAt           time.Time      `json:"created_at"`
-	LastLoginAt         sql.NullTime   `json:"last_login_at"`
+	ID                     string         `json:"id"`
+	Username               string         `json:"username"`
+	DisplayName            string         `json:"display_name"`
+	PasswordHash           string         `json:"password_hash"`
+	AvatarPath             sql.NullString `json:"avatar_path"`
+	Role                   string         `json:"role"`
+	IsActive               bool           `json:"is_active"`
+	MaxSessions            int64          `json:"max_sessions"`
+	SubtitleLanguage       sql.NullString `json:"subtitle_language"`
+	AudioLanguage          sql.NullString `json:"audio_language"`
+	MaxStreamingQuality    sql.NullString `json:"max_streaming_quality"`
+	EnableAutoPlay         bool           `json:"enable_auto_play"`
+	Theme                  sql.NullString `json:"theme"`
+	CreatedAt              time.Time      `json:"created_at"`
+	LastLoginAt            sql.NullTime   `json:"last_login_at"`
+	ParentUserID           sql.NullString `json:"parent_user_id"`
+	PinHash                sql.NullString `json:"pin_hash"`
+	MaxContentRating       sql.NullString `json:"max_content_rating"`
+	PasswordChangeRequired bool           `json:"password_change_required"`
 }
 
 type UserChannelFavorite struct {

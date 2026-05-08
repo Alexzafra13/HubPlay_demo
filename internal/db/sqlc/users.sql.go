@@ -23,17 +23,20 @@ func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
 }
 
 const createUser = `-- name: CreateUser :exec
-INSERT INTO users (id, username, display_name, password_hash, role, created_at)
-VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO users (id, username, display_name, password_hash, role, created_at,
+                   parent_user_id, password_change_required)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateUserParams struct {
-	ID           string    `json:"id"`
-	Username     string    `json:"username"`
-	DisplayName  string    `json:"display_name"`
-	PasswordHash string    `json:"password_hash"`
-	Role         string    `json:"role"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID                     string         `json:"id"`
+	Username               string         `json:"username"`
+	DisplayName            string         `json:"display_name"`
+	PasswordHash           string         `json:"password_hash"`
+	Role                   string         `json:"role"`
+	CreatedAt              time.Time      `json:"created_at"`
+	ParentUserID           sql.NullString `json:"parent_user_id"`
+	PasswordChangeRequired bool           `json:"password_change_required"`
 }
 
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) error {
@@ -44,6 +47,8 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) error {
 		arg.PasswordHash,
 		arg.Role,
 		arg.CreatedAt,
+		arg.ParentUserID,
+		arg.PasswordChangeRequired,
 	)
 	return err
 }
@@ -63,27 +68,34 @@ func (q *Queries) DeleteUser(ctx context.Context, id string) (int64, error) {
 const getUserByID = `-- name: GetUserByID :one
 
 SELECT id, username, display_name, password_hash, COALESCE(avatar_path, '') AS avatar_path,
-       role, is_active, max_sessions, created_at, last_login_at
+       role, is_active, max_sessions, created_at, last_login_at,
+       parent_user_id, pin_hash, max_content_rating, password_change_required
 FROM users
 WHERE id = ?
 `
 
 type GetUserByIDRow struct {
-	ID           string       `json:"id"`
-	Username     string       `json:"username"`
-	DisplayName  string       `json:"display_name"`
-	PasswordHash string       `json:"password_hash"`
-	AvatarPath   string       `json:"avatar_path"`
-	Role         string       `json:"role"`
-	IsActive     bool         `json:"is_active"`
-	MaxSessions  int64        `json:"max_sessions"`
-	CreatedAt    time.Time    `json:"created_at"`
-	LastLoginAt  sql.NullTime `json:"last_login_at"`
+	ID                     string         `json:"id"`
+	Username               string         `json:"username"`
+	DisplayName            string         `json:"display_name"`
+	PasswordHash           string         `json:"password_hash"`
+	AvatarPath             string         `json:"avatar_path"`
+	Role                   string         `json:"role"`
+	IsActive               bool           `json:"is_active"`
+	MaxSessions            int64          `json:"max_sessions"`
+	CreatedAt              time.Time      `json:"created_at"`
+	LastLoginAt            sql.NullTime   `json:"last_login_at"`
+	ParentUserID           sql.NullString `json:"parent_user_id"`
+	PinHash                sql.NullString `json:"pin_hash"`
+	MaxContentRating       sql.NullString `json:"max_content_rating"`
+	PasswordChangeRequired bool           `json:"password_change_required"`
 }
 
 // User accounts.
 //
-// Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE users).
+// Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE users)
+// + migrations/sqlite/034_user_profiles.sql (parent_user_id, pin_hash,
+// max_content_rating, password_change_required).
 func (q *Queries) GetUserByID(ctx context.Context, id string) (GetUserByIDRow, error) {
 	row := q.db.QueryRowContext(ctx, getUserByID, id)
 	var i GetUserByIDRow
@@ -98,28 +110,37 @@ func (q *Queries) GetUserByID(ctx context.Context, id string) (GetUserByIDRow, e
 		&i.MaxSessions,
 		&i.CreatedAt,
 		&i.LastLoginAt,
+		&i.ParentUserID,
+		&i.PinHash,
+		&i.MaxContentRating,
+		&i.PasswordChangeRequired,
 	)
 	return i, err
 }
 
 const getUserByUsername = `-- name: GetUserByUsername :one
 SELECT id, username, display_name, password_hash, COALESCE(avatar_path, '') AS avatar_path,
-       role, is_active, max_sessions, created_at, last_login_at
+       role, is_active, max_sessions, created_at, last_login_at,
+       parent_user_id, pin_hash, max_content_rating, password_change_required
 FROM users
 WHERE username = ?
 `
 
 type GetUserByUsernameRow struct {
-	ID           string       `json:"id"`
-	Username     string       `json:"username"`
-	DisplayName  string       `json:"display_name"`
-	PasswordHash string       `json:"password_hash"`
-	AvatarPath   string       `json:"avatar_path"`
-	Role         string       `json:"role"`
-	IsActive     bool         `json:"is_active"`
-	MaxSessions  int64        `json:"max_sessions"`
-	CreatedAt    time.Time    `json:"created_at"`
-	LastLoginAt  sql.NullTime `json:"last_login_at"`
+	ID                     string         `json:"id"`
+	Username               string         `json:"username"`
+	DisplayName            string         `json:"display_name"`
+	PasswordHash           string         `json:"password_hash"`
+	AvatarPath             string         `json:"avatar_path"`
+	Role                   string         `json:"role"`
+	IsActive               bool           `json:"is_active"`
+	MaxSessions            int64          `json:"max_sessions"`
+	CreatedAt              time.Time      `json:"created_at"`
+	LastLoginAt            sql.NullTime   `json:"last_login_at"`
+	ParentUserID           sql.NullString `json:"parent_user_id"`
+	PinHash                sql.NullString `json:"pin_hash"`
+	MaxContentRating       sql.NullString `json:"max_content_rating"`
+	PasswordChangeRequired bool           `json:"password_change_required"`
 }
 
 func (q *Queries) GetUserByUsername(ctx context.Context, username string) (GetUserByUsernameRow, error) {
@@ -136,13 +157,89 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (GetUs
 		&i.MaxSessions,
 		&i.CreatedAt,
 		&i.LastLoginAt,
+		&i.ParentUserID,
+		&i.PinHash,
+		&i.MaxContentRating,
+		&i.PasswordChangeRequired,
 	)
 	return i, err
 }
 
+const listProfilesForOwner = `-- name: ListProfilesForOwner :many
+SELECT id, username, display_name, COALESCE(avatar_path, '') AS avatar_path,
+       role, is_active, created_at, last_login_at,
+       parent_user_id, pin_hash, max_content_rating, password_change_required
+FROM users
+WHERE id = ? OR parent_user_id = ?
+ORDER BY parent_user_id IS NOT NULL, display_name COLLATE NOCA
+`
+
+type ListProfilesForOwnerParams struct {
+	ID           string         `json:"id"`
+	ParentUserID sql.NullString `json:"parent_user_id"`
+}
+
+type ListProfilesForOwnerRow struct {
+	ID                     string         `json:"id"`
+	Username               string         `json:"username"`
+	DisplayName            string         `json:"display_name"`
+	AvatarPath             string         `json:"avatar_path"`
+	Role                   string         `json:"role"`
+	IsActive               bool           `json:"is_active"`
+	CreatedAt              time.Time      `json:"created_at"`
+	LastLoginAt            sql.NullTime   `json:"last_login_at"`
+	ParentUserID           sql.NullString `json:"parent_user_id"`
+	PinHash                sql.NullString `json:"pin_hash"`
+	MaxContentRating       sql.NullString `json:"max_content_rating"`
+	PasswordChangeRequired bool           `json:"password_change_required"`
+}
+
+// Returns the parent account row plus every profile that hangs off
+// it, ordered by the parent first, then profiles alphabetically.
+// Drives both the post-login "Who's watching?" payload and the admin
+// profile list under a user. The username column is unique, so
+// profiles synthesise theirs as "<parent.username>:<display_name>"
+// via the handler — we don't expose them for login anyway.
+func (q *Queries) ListProfilesForOwner(ctx context.Context, arg ListProfilesForOwnerParams) ([]ListProfilesForOwnerRow, error) {
+	rows, err := q.db.QueryContext(ctx, listProfilesForOwner, arg.ID, arg.ParentUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListProfilesForOwnerRow{}
+	for rows.Next() {
+		var i ListProfilesForOwnerRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Username,
+			&i.DisplayName,
+			&i.AvatarPath,
+			&i.Role,
+			&i.IsActive,
+			&i.CreatedAt,
+			&i.LastLoginAt,
+			&i.ParentUserID,
+			&i.PinHash,
+			&i.MaxContentRating,
+			&i.PasswordChangeRequired,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUsers = `-- name: ListUsers :many
 SELECT id, username, display_name, COALESCE(avatar_path, '') AS avatar_path,
-       role, is_active, created_at, last_login_at
+       role, is_active, created_at, last_login_at,
+       parent_user_id, pin_hash, max_content_rating, password_change_required
 FROM users
 ORDER BY username
 LIMIT ? OFFSET ?
@@ -154,14 +251,18 @@ type ListUsersParams struct {
 }
 
 type ListUsersRow struct {
-	ID          string       `json:"id"`
-	Username    string       `json:"username"`
-	DisplayName string       `json:"display_name"`
-	AvatarPath  string       `json:"avatar_path"`
-	Role        string       `json:"role"`
-	IsActive    bool         `json:"is_active"`
-	CreatedAt   time.Time    `json:"created_at"`
-	LastLoginAt sql.NullTime `json:"last_login_at"`
+	ID                     string         `json:"id"`
+	Username               string         `json:"username"`
+	DisplayName            string         `json:"display_name"`
+	AvatarPath             string         `json:"avatar_path"`
+	Role                   string         `json:"role"`
+	IsActive               bool           `json:"is_active"`
+	CreatedAt              time.Time      `json:"created_at"`
+	LastLoginAt            sql.NullTime   `json:"last_login_at"`
+	ParentUserID           sql.NullString `json:"parent_user_id"`
+	PinHash                sql.NullString `json:"pin_hash"`
+	MaxContentRating       sql.NullString `json:"max_content_rating"`
+	PasswordChangeRequired bool           `json:"password_change_required"`
 }
 
 func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUsersRow, error) {
@@ -182,6 +283,10 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUse
 			&i.IsActive,
 			&i.CreatedAt,
 			&i.LastLoginAt,
+			&i.ParentUserID,
+			&i.PinHash,
+			&i.MaxContentRating,
+			&i.PasswordChangeRequired,
 		); err != nil {
 			return nil, err
 		}
@@ -228,5 +333,57 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) error {
 		arg.IsActive,
 		arg.ID,
 	)
+	return err
+}
+
+const updateUserMaxContentRating = `-- name: UpdateUserMaxContentRating :exec
+UPDATE users SET max_content_rating = ? WHERE id = ?
+`
+
+type UpdateUserMaxContentRatingParams struct {
+	MaxContentRating sql.NullString `json:"max_content_rating"`
+	ID               string         `json:"id"`
+}
+
+// max_content_rating NULL means "no restriction". Empty string is
+// normalised to NULL by the handler so callers don't have to choose.
+func (q *Queries) UpdateUserMaxContentRating(ctx context.Context, arg UpdateUserMaxContentRatingParams) error {
+	_, err := q.db.ExecContext(ctx, updateUserMaxContentRating, arg.MaxContentRating, arg.ID)
+	return err
+}
+
+const updateUserPIN = `-- name: UpdateUserPIN :exec
+UPDATE users SET pin_hash = ? WHERE id = ?
+`
+
+type UpdateUserPINParams struct {
+	PinHash sql.NullString `json:"pin_hash"`
+	ID      string         `json:"id"`
+}
+
+// pin_hash NULL clears the PIN; non-null sets it. The handler always
+// bcrypt-hashes the value before reaching the repo.
+func (q *Queries) UpdateUserPIN(ctx context.Context, arg UpdateUserPINParams) error {
+	_, err := q.db.ExecContext(ctx, updateUserPIN, arg.PinHash, arg.ID)
+	return err
+}
+
+const updateUserPassword = `-- name: UpdateUserPassword :exec
+UPDATE users SET password_hash = ?, password_change_required = ? WHERE id = ?
+`
+
+type UpdateUserPasswordParams struct {
+	PasswordHash           string `json:"password_hash"`
+	PasswordChangeRequired bool   `json:"password_change_required"`
+	ID                     string `json:"id"`
+}
+
+// Used by both the admin reset-password endpoint and the user's own
+// change-password flow. Resetting must clear the must-change flag so
+// the user isn't bounced back to the change screen forever; setting
+// a fresh password from the admin path SETs it so the new password
+// triggers a forced change on first login.
+func (q *Queries) UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error {
+	_, err := q.db.ExecContext(ctx, updateUserPassword, arg.PasswordHash, arg.PasswordChangeRequired, arg.ID)
 	return err
 }

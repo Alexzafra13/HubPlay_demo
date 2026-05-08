@@ -1,7 +1,16 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import type { User } from "@/api/types";
-import { useUsers, useCreateUser, useDeleteUser, useMe } from "@/api/hooks";
+import {
+  useUsers,
+  useCreateUser,
+  useCreateProfile,
+  useDeleteUser,
+  useMe,
+  useResetUserPassword,
+  useSetUserContentRating,
+  useSetUserPIN,
+} from "@/api/hooks";
 import { Button, Badge, Modal, Input, EmptyState, Skeleton } from "@/components/common";
 import { Trans, useTranslation } from 'react-i18next';
 import FederationAdmin from "./FederationAdmin";
@@ -15,38 +24,133 @@ export default function UsersAdmin() {
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
+  const [resetTarget, setResetTarget] = useState<User | null>(null);
 
-  // Add user form state
+  // Add user form state. autoGenerate defaults true so the admin's
+  // happy path is "type username, click Create, copy the password
+  // the modal shows" — no thinking required for normal use.
   const [newUsername, setNewUsername] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const [autoGenerate, setAutoGenerate] = useState(true);
   const [newDisplayName, setNewDisplayName] = useState("");
   const [newRole, setNewRole] = useState("user");
+
+  // Modal that surfaces a one-shot password to copy. Drives both the
+  // post-create flow and the post-reset flow — same UX (a chip with
+  // Copy + a "share with the user" hint), different trigger.
+  const [generatedPasswordModal, setGeneratedPasswordModal] = useState<{
+    username: string;
+    password: string;
+    kind: "created" | "reset";
+  } | null>(null);
+
+  const resetPassword = useResetUserPassword();
+  const createProfile = useCreateProfile();
+  const setUserPIN = useSetUserPIN();
+  const setUserContentRating = useSetUserContentRating();
+
+  // "Add profile" modal — admin types a display name; the server
+  // synthesises the username + a throwaway password (profiles can't
+  // log in directly anyway).
+  const [profileParent, setProfileParent] = useState<User | null>(null);
+  const [profileName, setProfileName] = useState("");
+
+  // PIN modal — admin types a 4-digit PIN (or clears it).
+  const [pinTarget, setPinTarget] = useState<User | null>(null);
+  const [pinValue, setPinValue] = useState("");
+  const [pinError, setPinError] = useState<string | null>(null);
+
+  function handleCreateProfile(e: FormEvent) {
+    e.preventDefault();
+    if (!profileParent || !profileName.trim()) return;
+    createProfile.mutate(
+      {
+        parentUserId: profileParent.id,
+        displayName: profileName.trim(),
+      },
+      {
+        onSuccess: () => {
+          setProfileParent(null);
+          setProfileName("");
+        },
+      },
+    );
+  }
+
+  function handleSavePin(e: FormEvent) {
+    e.preventDefault();
+    if (!pinTarget) return;
+    setPinError(null);
+    if (pinValue !== "" && !/^\d{4}$/.test(pinValue)) {
+      setPinError(t("admin.users.pinValidation", { defaultValue: "El PIN debe ser exactamente 4 dígitos." }));
+      return;
+    }
+    setUserPIN.mutate(
+      { userId: pinTarget.id, pin: pinValue },
+      {
+        onSuccess: () => {
+          setPinTarget(null);
+          setPinValue("");
+        },
+        onError: (err) => setPinError(err.message),
+      },
+    );
+  }
 
   function resetForm() {
     setNewUsername("");
     setNewPassword("");
+    setAutoGenerate(true);
     setNewDisplayName("");
     setNewRole("user");
   }
 
   function handleCreate(e: FormEvent) {
     e.preventDefault();
-    if (!newUsername.trim() || !newPassword.trim()) return;
+    if (!newUsername.trim()) return;
+    if (!autoGenerate && !newPassword.trim()) return;
 
+    const username = newUsername.trim();
     createUser.mutate(
       {
-        username: newUsername.trim(),
-        password: newPassword,
+        username,
+        // Empty `password` triggers the server's auto-generation path
+        // — see the AuthHandler.Register handler. The response then
+        // carries `generated_password` which we surface to the admin
+        // exactly once via the GeneratedPassword modal below.
+        password: autoGenerate ? undefined : newPassword,
         display_name: newDisplayName.trim() || undefined,
         role: newRole,
       },
       {
-        onSuccess: () => {
+        onSuccess: (resp) => {
           setShowAddModal(false);
           resetForm();
+          if (resp.generated_password) {
+            setGeneratedPasswordModal({
+              username,
+              password: resp.generated_password,
+              kind: "created",
+            });
+          }
         },
       },
     );
+  }
+
+  function handleReset() {
+    if (!resetTarget) return;
+    const target = resetTarget;
+    resetPassword.mutate(target.id, {
+      onSuccess: (resp) => {
+        setResetTarget(null);
+        setGeneratedPasswordModal({
+          username: target.username,
+          password: resp.generated_password,
+          kind: "reset",
+        });
+      },
+    });
   }
 
   function handleDelete() {
@@ -92,6 +196,7 @@ export default function UsersAdmin() {
                 <th className="px-4 py-3 font-medium">{t('admin.users.username')}</th>
                 <th className="px-4 py-3 font-medium">{t('admin.users.displayName')}</th>
                 <th className="px-4 py-3 font-medium">{t('admin.users.role')}</th>
+                <th className="px-4 py-3 font-medium">{t('admin.users.rating', { defaultValue: 'Edad máxima' })}</th>
                 <th className="px-4 py-3 font-medium">{t('admin.users.created')}</th>
                 <th className="px-4 py-3 font-medium text-right">{t('admin.users.actions')}</th>
               </tr>
@@ -102,6 +207,7 @@ export default function UsersAdmin() {
                   <td className="px-4 py-3"><Skeleton variant="text" width="60%" /></td>
                   <td className="px-4 py-3"><Skeleton variant="text" width="75%" /></td>
                   <td className="px-4 py-3"><Skeleton variant="rectangular" width={56} height={20} /></td>
+                  <td className="px-4 py-3"><Skeleton variant="rectangular" width={70} height={20} /></td>
                   <td className="px-4 py-3"><Skeleton variant="text" width="55%" /></td>
                   <td className="px-4 py-3">
                     <div className="flex justify-end">
@@ -121,6 +227,7 @@ export default function UsersAdmin() {
                 <th className="px-4 py-3 font-medium">{t('admin.users.username')}</th>
                 <th className="px-4 py-3 font-medium">{t('admin.users.displayName')}</th>
                 <th className="px-4 py-3 font-medium">{t('admin.users.role')}</th>
+                <th className="px-4 py-3 font-medium">{t('admin.users.rating', { defaultValue: 'Edad máxima' })}</th>
                 <th className="px-4 py-3 font-medium">{t('admin.users.created')}</th>
                 <th className="px-4 py-3 font-medium text-right">{t('admin.users.actions')}</th>
               </tr>
@@ -134,7 +241,37 @@ export default function UsersAdmin() {
                     className="bg-bg-card hover:bg-bg-elevated transition-colors"
                   >
                     <td className="px-4 py-3 font-medium text-text-primary">
-                      {user.username}
+                      {/* Profiles are visually nested under their
+                          parent — easier to read than scanning the
+                          parent_user_id column. */}
+                      {user.parent_user_id && (
+                        <span className="mr-2 text-text-muted" aria-hidden>
+                          ↳
+                        </span>
+                      )}
+                      {/* Profile usernames carry the synthetic
+                          "<parent>/<name>" prefix the server uses to
+                          keep UNIQUE happy; show only the suffix. */}
+                      {user.parent_user_id
+                        ? user.username.split("/").pop()
+                        : user.username}
+                      {user.parent_user_id && (
+                        <span className="ml-2 text-[10px] uppercase tracking-wider text-accent">
+                          {t('admin.users.profileTag', { defaultValue: 'perfil' })}
+                        </span>
+                      )}
+                      {user.has_pin && (
+                        <span
+                          className="ml-2 inline-flex h-4 w-4 items-center justify-center text-text-muted"
+                          aria-label={t('admin.users.pinSet', { defaultValue: 'PIN configurado' })}
+                          title={t('admin.users.pinSet', { defaultValue: 'PIN configurado' })}
+                        >
+                          <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                            <rect x="5" y="11" width="14" height="9" rx="2" />
+                            <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+                          </svg>
+                        </span>
+                      )}
                       {isSelf && (
                         <span className="ml-2 text-xs text-text-muted">
                           {t('admin.users.you')}
@@ -151,11 +288,76 @@ export default function UsersAdmin() {
                         {user.role}
                       </Badge>
                     </td>
+                    <td className="px-4 py-3">
+                      {/* Inline content-rating dropdown. Empty = no
+                          restriction; the cap filters /items, /items/
+                          latest and the per-item Get gate. */}
+                      <select
+                        value={user.max_content_rating ?? ""}
+                        onChange={(e) =>
+                          setUserContentRating.mutate({
+                            userId: user.id,
+                            rating: e.target.value,
+                          })
+                        }
+                        className="rounded-[--radius-sm] border border-border bg-bg-elevated px-2 py-1 text-xs text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
+                        aria-label={t('admin.users.rating', {
+                          defaultValue: 'Edad máxima',
+                        })}
+                      >
+                        <option value="">{t('admin.users.ratingNone', { defaultValue: 'Sin límite' })}</option>
+                        <option value="G">G</option>
+                        <option value="PG">PG</option>
+                        <option value="PG-13">PG-13</option>
+                        <option value="R">R</option>
+                        <option value="NC-17">NC-17</option>
+                        <option value="TV-Y">TV-Y</option>
+                        <option value="TV-Y7">TV-Y7</option>
+                        <option value="TV-G">TV-G</option>
+                        <option value="TV-PG">TV-PG</option>
+                        <option value="TV-14">TV-14</option>
+                        <option value="TV-MA">TV-MA</option>
+                      </select>
+                    </td>
                     <td className="px-4 py-3 text-text-secondary">
                       {formatDate(user.created_at)}
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex justify-end">
+                      <div className="flex justify-end gap-2 flex-wrap">
+                        {!user.parent_user_id && (
+                          <>
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => setProfileParent(user)}
+                              title={t('admin.users.addProfileHint', { defaultValue: 'Crear perfil hijo bajo esta cuenta' })}
+                            >
+                              {t('admin.users.addProfile', { defaultValue: '+ Perfil' })}
+                            </Button>
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => setResetTarget(user)}
+                              title={t('admin.users.resetPasswordHint', { defaultValue: 'Generar contraseña temporal nueva' })}
+                            >
+                              {t('admin.users.resetPassword', { defaultValue: 'Reiniciar contraseña' })}
+                            </Button>
+                          </>
+                        )}
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => {
+                            setPinTarget(user);
+                            setPinValue("");
+                            setPinError(null);
+                          }}
+                          title={t('admin.users.pinHint', { defaultValue: 'Configurar PIN del perfil' })}
+                        >
+                          {user.has_pin
+                            ? t('admin.users.pinChange', { defaultValue: 'Cambiar PIN' })
+                            : t('admin.users.pinSetCta', { defaultValue: 'Poner PIN' })}
+                        </Button>
                         <Button
                           variant="danger"
                           size="sm"
@@ -194,14 +396,42 @@ export default function UsersAdmin() {
             required
           />
 
-          <Input
-            label={t('admin.users.password')}
-            type="password"
-            placeholder={t('admin.users.passwordPlaceholder')}
-            value={newPassword}
-            onChange={(e) => setNewPassword(e.target.value)}
-            required
-          />
+          {/* Auto-generate is the default. The server picks a
+              readable temporary password and returns it once in the
+              response; the GeneratedPasswordModal below surfaces it
+              to the admin to share with the user. The user is forced
+              to rotate at first login. */}
+          <label className="flex items-start gap-2 text-sm text-text-secondary cursor-pointer select-none">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={autoGenerate}
+              onChange={(e) => setAutoGenerate(e.target.checked)}
+            />
+            <span>
+              <span className="block font-medium text-text-primary">
+                {t('admin.users.autoGeneratePassword', { defaultValue: 'Generar contraseña automáticamente' })}
+              </span>
+              <span className="block text-xs text-text-muted">
+                {t('admin.users.autoGenerateHint', {
+                  defaultValue:
+                    'Te enseñaremos la contraseña una sola vez. El usuario tendrá que cambiarla al iniciar sesión.',
+                })}
+              </span>
+            </span>
+          </label>
+
+          {!autoGenerate && (
+            <Input
+              label={t('admin.users.password')}
+              type="password"
+              placeholder={t('admin.users.passwordPlaceholder')}
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              required
+              minLength={8}
+            />
+          )}
 
           <Input
             label={t('admin.users.displayName')}
@@ -286,6 +516,205 @@ export default function UsersAdmin() {
             </Button>
           </div>
         </div>
+      </Modal>
+
+      {/* Reset password confirm. Two-click action because it
+          invalidates every active session for the target — the user
+          will be kicked out of every device and forced to enter the
+          new temp password on next login. */}
+      <Modal
+        isOpen={resetTarget !== null}
+        onClose={() => setResetTarget(null)}
+        title={t('admin.users.resetPassword', { defaultValue: 'Reiniciar contraseña' })}
+        size="sm"
+      >
+        <div className="flex flex-col gap-4">
+          <p className="text-sm text-text-secondary">
+            <Trans
+              i18nKey="admin.users.resetConfirm"
+              values={{ name: resetTarget?.username ?? '' }}
+              defaults="Se generará una contraseña temporal para <strong>{{name}}</strong>. Sus sesiones activas se cerrarán y tendrá que cambiar la contraseña al volver a entrar."
+              components={{ strong: <strong className="text-text-primary" /> }}
+            />
+          </p>
+          {resetPassword.error && (
+            <p className="text-xs text-error">{resetPassword.error.message}</p>
+          )}
+          <div className="flex justify-end gap-3">
+            <Button variant="secondary" onClick={() => setResetTarget(null)}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              variant="danger"
+              isLoading={resetPassword.isPending}
+              onClick={handleReset}
+            >
+              {t('admin.users.resetPasswordConfirmCta', { defaultValue: 'Sí, reiniciar' })}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Generated password modal. Shown exactly once after either
+          create-with-auto-password or reset-password. Closing this
+          modal drops the plaintext from React state — there's no
+          way to retrieve it again. The "Copy" affordance + the
+          "share with the user" hint nudges the admin to act before
+          they close. */}
+      <Modal
+        isOpen={generatedPasswordModal !== null}
+        onClose={() => setGeneratedPasswordModal(null)}
+        title={
+          generatedPasswordModal?.kind === 'created'
+            ? t('admin.users.generatedPasswordCreatedTitle', {
+                defaultValue: 'Usuario creado',
+              })
+            : t('admin.users.generatedPasswordResetTitle', {
+                defaultValue: 'Contraseña reiniciada',
+              })
+        }
+        size="sm"
+      >
+        {generatedPasswordModal && (
+          <div className="flex flex-col gap-4">
+            <p className="text-sm text-text-secondary">
+              <Trans
+                i18nKey="admin.users.generatedPasswordHint"
+                values={{ username: generatedPasswordModal.username }}
+                defaults="Comparte esta contraseña con <strong>{{username}}</strong>. La verás solo una vez. Cuando inicie sesión se le pedirá que la cambie."
+                components={{ strong: <strong className="text-text-primary" /> }}
+              />
+            </p>
+            <div className="flex items-center gap-2 rounded-[--radius-md] border border-border bg-bg-elevated px-3 py-2 font-mono text-sm text-text-primary">
+              <span className="flex-1 select-all break-all">
+                {generatedPasswordModal.password}
+              </span>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  void navigator.clipboard.writeText(
+                    generatedPasswordModal.password,
+                  );
+                }}
+              >
+                {t('common.copy', { defaultValue: 'Copiar' })}
+              </Button>
+            </div>
+            <div className="flex justify-end">
+              <Button onClick={() => setGeneratedPasswordModal(null)}>
+                {t('common.close', { defaultValue: 'Cerrar' })}
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Add profile modal — admin types a display name; the
+          server synthesises username + a throwaway internal
+          password. Profiles can't log in directly anyway. */}
+      <Modal
+        isOpen={profileParent !== null}
+        onClose={() => {
+          setProfileParent(null);
+          setProfileName("");
+        }}
+        title={t('admin.users.addProfile', { defaultValue: 'Añadir perfil' })}
+        size="sm"
+      >
+        {profileParent && (
+          <form onSubmit={handleCreateProfile} className="flex flex-col gap-4">
+            <p className="text-sm text-text-secondary">
+              <Trans
+                i18nKey="admin.users.addProfileHelper"
+                values={{ name: profileParent.username }}
+                defaults="El perfil se creará bajo <strong>{{name}}</strong>. Podrá entrar al servidor desde la pantalla de selección sin contraseña propia."
+                components={{ strong: <strong className="text-text-primary" /> }}
+              />
+            </p>
+            <Input
+              label={t('admin.users.profileName', { defaultValue: 'Nombre del perfil' })}
+              placeholder={t('admin.users.profileNamePlaceholder', { defaultValue: 'Niños · Pareja · Visita' })}
+              value={profileName}
+              onChange={(e) => setProfileName(e.target.value)}
+              autoFocus
+              required
+            />
+            {createProfile.error && (
+              <p className="text-xs text-error">{createProfile.error.message}</p>
+            )}
+            <div className="flex justify-end gap-3">
+              <Button
+                variant="secondary"
+                type="button"
+                onClick={() => {
+                  setProfileParent(null);
+                  setProfileName("");
+                }}
+              >
+                {t('common.cancel')}
+              </Button>
+              <Button type="submit" isLoading={createProfile.isPending}>
+                {t('common.create')}
+              </Button>
+            </div>
+          </form>
+        )}
+      </Modal>
+
+      {/* PIN modal — type 4 digits or leave empty to clear. */}
+      <Modal
+        isOpen={pinTarget !== null}
+        onClose={() => {
+          setPinTarget(null);
+          setPinValue("");
+          setPinError(null);
+        }}
+        title={t('admin.users.pinModalTitle', { defaultValue: 'PIN del perfil' })}
+        size="sm"
+      >
+        {pinTarget && (
+          <form onSubmit={handleSavePin} className="flex flex-col gap-4">
+            <p className="text-sm text-text-secondary">
+              {t('admin.users.pinModalHint', {
+                defaultValue:
+                  'Escribe un PIN de 4 dígitos o déjalo vacío para quitarlo. El PIN se pide al elegir el perfil en la pantalla de selección.',
+              })}
+            </p>
+            <input
+              type="tel"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              maxLength={4}
+              autoFocus
+              value={pinValue}
+              onChange={(e) => setPinValue(e.target.value.replace(/[^0-9]/g, '').slice(0, 4))}
+              placeholder="••••"
+              className="w-32 self-center rounded-lg border border-border bg-bg-card px-4 py-2.5 text-center text-2xl font-mono tracking-[0.6em] text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30"
+            />
+            {pinError && (
+              <p className="text-xs text-error text-center">{pinError}</p>
+            )}
+            <div className="flex justify-end gap-3">
+              <Button
+                variant="secondary"
+                type="button"
+                onClick={() => {
+                  setPinTarget(null);
+                  setPinValue("");
+                  setPinError(null);
+                }}
+              >
+                {t('common.cancel')}
+              </Button>
+              <Button type="submit" isLoading={setUserPIN.isPending}>
+                {pinValue === ''
+                  ? t('admin.users.pinClearCta', { defaultValue: 'Quitar PIN' })
+                  : t('common.save', { defaultValue: 'Guardar' })}
+              </Button>
+            </div>
+          </form>
+        )}
       </Modal>
 
       {/* Federation lived as its own top-level admin tab. It's a

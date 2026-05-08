@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -22,11 +23,34 @@ type LibraryHandler struct {
 	images   ImageRepository
 	metadata MetadataRepository
 	userData UserDataRepository
-	logger   *slog.Logger
+	// users resolves the caller's max_content_rating so /items/latest
+	// can scope its result set to ratings the profile is allowed to
+	// see. Optional — when nil the rating filter is skipped (admin
+	// or unknown context, fail-open is the right default).
+	users  UserService
+	logger *slog.Logger
 }
 
-func NewLibraryHandler(lib LibraryService, images ImageRepository, metadata MetadataRepository, userData UserDataRepository, logger *slog.Logger) *LibraryHandler {
-	return &LibraryHandler{lib: lib, images: images, metadata: metadata, userData: userData, logger: logger}
+func NewLibraryHandler(lib LibraryService, images ImageRepository, metadata MetadataRepository, userData UserDataRepository, users UserService, logger *slog.Logger) *LibraryHandler {
+	return &LibraryHandler{lib: lib, images: images, metadata: metadata, userData: userData, users: users, logger: logger}
+}
+
+// callerCapRating resolves the authenticated user's content cap, or
+// "" when no caller is attached / no cap is set / a lookup error
+// happens. Used by browse + latest handlers to gate the result set.
+func (h *LibraryHandler) callerCapRating(ctx context.Context) string {
+	if h.users == nil {
+		return ""
+	}
+	claims := auth.GetClaims(ctx)
+	if claims == nil {
+		return ""
+	}
+	u, err := h.users.GetByID(ctx, claims.UserID)
+	if err != nil || u == nil {
+		return ""
+	}
+	return u.MaxContentRating
 }
 
 func (h *LibraryHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -212,14 +236,15 @@ func (h *LibraryHandler) Items(w http.ResponseWriter, r *http.Request) {
 	cursor := r.URL.Query().Get("cursor")
 
 	items, total, err := h.lib.ListItems(r.Context(), db.ItemFilter{
-		LibraryID: id,
-		ParentID:  parentID,
-		Type:      itemType,
-		Limit:     limit,
-		Offset:    offset,
-		SortBy:    sortBy,
-		SortOrder: sortOrder,
-		Cursor:    cursor,
+		LibraryID:             id,
+		ParentID:              parentID,
+		Type:                  itemType,
+		AllowedContentRatings: library.AllowedRatingsAtMost(h.callerCapRating(r.Context())),
+		Limit:                 limit,
+		Offset:                offset,
+		SortBy:                sortBy,
+		SortOrder:             sortOrder,
+		Cursor:                cursor,
 	})
 	if err != nil {
 		handleServiceError(w, r, err)
@@ -271,18 +296,19 @@ func (h *LibraryHandler) AllItems(w http.ResponseWriter, r *http.Request) {
 	minRating, _ := strconv.ParseFloat(q.Get("min_rating"), 64)
 
 	items, total, err := h.lib.ListItems(r.Context(), db.ItemFilter{
-		ParentID:  parentID,
-		Type:      itemType,
-		Query:     queryStr,
-		Genre:     genre,
-		YearFrom:  yearFrom,
-		YearTo:    yearTo,
-		MinRating: minRating,
-		Limit:     limit,
-		Offset:    offset,
-		SortBy:    sortBy,
-		SortOrder: sortOrder,
-		Cursor:    cursor,
+		ParentID:              parentID,
+		Type:                  itemType,
+		Query:                 queryStr,
+		Genre:                 genre,
+		YearFrom:              yearFrom,
+		YearTo:                yearTo,
+		MinRating:             minRating,
+		AllowedContentRatings: library.AllowedRatingsAtMost(h.callerCapRating(r.Context())),
+		Limit:                 limit,
+		Offset:                offset,
+		SortBy:                sortBy,
+		SortOrder:             sortOrder,
+		Cursor:                cursor,
 	})
 	if err != nil {
 		handleServiceError(w, r, err)
@@ -330,6 +356,7 @@ func (h *LibraryHandler) LatestItems(w http.ResponseWriter, r *http.Request) {
 	libraryID := r.URL.Query().Get("library_id")
 	itemType := r.URL.Query().Get("type")
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	cap := h.callerCapRating(r.Context())
 
 	// Activity-aware shows rail: when the caller asks for the latest
 	// series scoped to one library, we route to a dedicated query
@@ -343,6 +370,19 @@ func (h *LibraryHandler) LatestItems(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			handleServiceError(w, r, err)
 			return
+		}
+		// Apply the per-profile content-rating cap in memory. The
+		// activity-aware query doesn't accept an allow-list because
+		// the SQL is already busy joining episodes; filtering N≤20
+		// rows post-fetch is cheaper than restructuring the query.
+		if cap != "" {
+			filtered := rows[:0]
+			for _, row := range rows {
+				if library.AllowedRating(row.ContentRating, cap) {
+					filtered = append(filtered, row)
+				}
+			}
+			rows = filtered
 		}
 		// Adapter layer: we still want the standard image / metadata
 		// enrichment that operates on []*db.Item, then we splice the
@@ -373,7 +413,7 @@ func (h *LibraryHandler) LatestItems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	items, err := h.lib.LatestItems(r.Context(), libraryID, itemType, limit)
+	items, err := h.lib.LatestItems(r.Context(), libraryID, itemType, limit, cap)
 	if err != nil {
 		handleServiceError(w, r, err)
 		return

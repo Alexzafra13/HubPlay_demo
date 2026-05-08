@@ -192,7 +192,9 @@ type Querier interface {
 	GetStudioByTMDBID(ctx context.Context, tmdbID sql.NullInt64) (Studio, error)
 	// User accounts.
 	//
-	// Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE users).
+	// Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE users)
+	// + migrations/sqlite/034_user_profiles.sql (parent_user_id, pin_hash,
+	// max_content_rating, password_change_required).
 	GetUserByID(ctx context.Context, id string) (GetUserByIDRow, error)
 	GetUserByUsername(ctx context.Context, username string) (GetUserByUsernameRow, error)
 	GetUserData(ctx context.Context, arg GetUserDataParams) (UserDatum, error)
@@ -324,6 +326,13 @@ type Querier interface {
 	ListMediaStreamsByItem(ctx context.Context, itemID string) ([]ListMediaStreamsByItemRow, error)
 	ListPathsByLibrary(ctx context.Context, libraryID string) ([]string, error)
 	ListPeers(ctx context.Context) ([]FederationPeer, error)
+	// Returns the parent account row plus every profile that hangs off
+	// it, ordered by the parent first, then profiles alphabetically.
+	// Drives both the post-login "Who's watching?" payload and the admin
+	// profile list under a user. The username column is unique, so
+	// profiles synthesise theirs as "<parent.username>:<display_name>"
+	// via the handler — we don't expose them for login anyway.
+	ListProfilesForOwner(ctx context.Context, arg ListProfilesForOwnerParams) ([]ListProfilesForOwnerRow, error)
 	ListProviders(ctx context.Context) ([]Provider, error)
 	ListProvidersByType(ctx context.Context, type_ string) ([]Provider, error)
 	// NOTE: SearchSharedItems is implemented as raw SQL in
@@ -401,6 +410,18 @@ type Querier interface {
 	UpdateProgress(ctx context.Context, arg UpdateProgressParams) error
 	UpdateSessionLastActive(ctx context.Context, arg UpdateSessionLastActiveParams) error
 	UpdateUser(ctx context.Context, arg UpdateUserParams) error
+	// max_content_rating NULL means "no restriction". Empty string is
+	// normalised to NULL by the handler so callers don't have to choose.
+	UpdateUserMaxContentRating(ctx context.Context, arg UpdateUserMaxContentRatingParams) error
+	// pin_hash NULL clears the PIN; non-null sets it. The handler always
+	// bcrypt-hashes the value before reaching the repo.
+	UpdateUserPIN(ctx context.Context, arg UpdateUserPINParams) error
+	// Used by both the admin reset-password endpoint and the user's own
+	// change-password flow. Resetting must clear the must-change flag so
+	// the user isn't bounced back to the change screen forever; setting
+	// a fresh password from the admin path SETs it so the new password
+	// triggers a forced change on first login.
+	UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error
 	// Manual channel edits keyed by stream URL so they survive an M3U
 	// refresh (channel UUIDs are regenerated on every import).
 	//

@@ -290,6 +290,9 @@ func NewRouter(deps Dependencies) http.Handler {
 
 			// Current user
 			r.Get("/me", userHandler.Me)
+			r.Post("/me/password", authHandler.ChangeMyPassword)
+			r.Get("/me/profiles", authHandler.ListProfiles)
+			r.Post("/auth/switch-profile", authHandler.SwitchProfile)
 
 			// Per-user preferences (hero mode, theme overrides, etc.)
 			// Authenticated; the handler derives userID from claims so
@@ -301,12 +304,17 @@ func NewRouter(deps Dependencies) http.Handler {
 				r.Delete("/me/preferences/{key}", prefsHandler.DeleteMine)
 			}
 
-			// Users (admin only)
+			// Users (admin only). Profiles + reset-password live next
+			// to the legacy CRUD because they share the admin gate;
+			// no point in a parallel /admin/users route.
 			r.Route("/users", func(r chi.Router) {
 				r.Use(auth.RequireAdmin)
 				r.Get("/", userHandler.List)
 				r.Post("/", authHandler.Register)
 				r.Delete("/{id}", userHandler.Delete)
+				r.Post("/{id}/reset-password", authHandler.ResetPassword)
+				r.Put("/{id}/pin", authHandler.SetPIN)
+				r.Put("/{id}/content-rating", authHandler.SetContentRating)
 			})
 
 			// Signing key lifecycle (admin only). Every route here is
@@ -549,13 +557,13 @@ func NewRouter(deps Dependencies) http.Handler {
 
 			// Libraries & Items (only if service is wired)
 			if deps.Libraries != nil {
-				libHandler := handlers.NewLibraryHandler(deps.Libraries, deps.Images, deps.Metadata, deps.UserData, deps.Logger)
+				libHandler := handlers.NewLibraryHandler(deps.Libraries, deps.Images, deps.Metadata, deps.UserData, deps.Users, deps.Logger)
 				// Trickplay sprites land under <imageDir>/trickplay/ —
 				// reusing the image-storage root keeps the on-disk
 				// layout clustered (one tree the operator can backup,
 				// rsync, or `du` to size the cache).
 				trickplayDir := filepath.Join(filepath.Dir(deps.Config.Database.Path), "images", "trickplay")
-				itemHandler := handlers.NewItemHandler(deps.Libraries, deps.Images, deps.Metadata, deps.UserData, deps.Chapters, deps.ExternalIDs, deps.People, deps.Collections, deps.Providers, trickplayDir, deps.Logger)
+				itemHandler := handlers.NewItemHandler(deps.Libraries, deps.Images, deps.Metadata, deps.UserData, deps.Users, deps.Chapters, deps.ExternalIDs, deps.People, deps.Collections, deps.Providers, trickplayDir, deps.Logger)
 
 				// Libraries
 				r.Get("/libraries", libHandler.List)

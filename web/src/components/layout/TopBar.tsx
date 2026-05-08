@@ -8,6 +8,7 @@ import {
   Settings as SettingsIcon,
   ShieldCheck,
   Smartphone,
+  UserCog,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { getInitials } from "@/utils/userDisplay";
@@ -176,6 +177,15 @@ function UserAvatarMenu({
             >
               <Smartphone className="h-[15px] w-[15px]" strokeWidth={1.6} />
               {t("nav.linkDevice")}
+            </NavLink>
+            <NavLink
+              to="/select-profile"
+              onClick={() => setOpen(false)}
+              className="flex items-center gap-2.5 px-3 py-2.5 text-[13px] text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
+              role="menuitem"
+            >
+              <UserCog className="h-[15px] w-[15px]" strokeWidth={1.6} />
+              {t("topbar.switchProfile")}
             </NavLink>
             {isAdmin && (
               <NavLink
