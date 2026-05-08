@@ -22,7 +22,39 @@ type User struct {
 	MaxSessions  int
 	CreatedAt    time.Time
 	LastLoginAt  *time.Time
+
+	// Profile tree fields (migration 034). All four are zero-value
+	// safe — pre-existing users get NULL/0 when the migration runs,
+	// which means "top-level account, no PIN, no rating cap, no
+	// forced password change".
+	//
+	// ParentUserID identifies the parent account when this row is a
+	// child profile (Netflix-style). Empty/NULL marks an account
+	// owner — the only kind of user that authenticates with a
+	// password. Profiles share the parent's password and use
+	// /auth/switch-profile to rotate JWTs.
+	ParentUserID string
+	// PINHash, when set, gates entry into this profile from the
+	// "Who's watching?" selector. bcrypt-hashed; never returned over
+	// the wire.
+	PINHash string
+	// MaxContentRating caps what the profile can browse. Empty =
+	// "no restriction". Stored as the rating literal ("PG-13",
+	// "TV-MA", ...); the filter consults a ranking table at query
+	// time.
+	MaxContentRating string
+	// PasswordChangeRequired forces the next successful login to
+	// land on the change-password screen before any other surface.
+	// Set true on admin-driven create / reset; cleared automatically
+	// when the user finishes a successful change.
+	PasswordChangeRequired bool
 }
+
+// IsProfile is the canonical readability helper around `ParentUserID`.
+// Profiles can't authenticate directly, can't be admins, and can't
+// own peers — every gate that matters consults this one method
+// instead of duplicating the empty-string check at each callsite.
+func (u User) IsProfile() bool { return u.ParentUserID != "" }
 
 type UserRepository struct {
 	q *sqlc.Queries
@@ -58,17 +90,81 @@ func (r *UserRepository) GetByUsername(ctx context.Context, username string) (*U
 
 func (r *UserRepository) Create(ctx context.Context, u *User) error {
 	err := r.q.CreateUser(ctx, sqlc.CreateUserParams{
-		ID:           u.ID,
-		Username:     u.Username,
-		DisplayName:  u.DisplayName,
-		PasswordHash: u.PasswordHash,
-		Role:         u.Role,
-		CreatedAt:    u.CreatedAt,
+		ID:                     u.ID,
+		Username:               u.Username,
+		DisplayName:            u.DisplayName,
+		PasswordHash:           u.PasswordHash,
+		Role:                   u.Role,
+		CreatedAt:              u.CreatedAt,
+		ParentUserID:           nullStringFromOptional(u.ParentUserID),
+		PasswordChangeRequired: u.PasswordChangeRequired,
 	})
 	if err != nil {
 		return fmt.Errorf("create user: %w", err)
 	}
 	return nil
+}
+
+// SetPassword updates the user's password hash and the must-change
+// flag in a single shot. The handler decides what `mustChange` should
+// be: true after admin-driven reset (forces change on next login);
+// false after the user themselves changed it.
+func (r *UserRepository) SetPassword(ctx context.Context, id, hash string, mustChange bool) error {
+	if err := r.q.UpdateUserPassword(ctx, sqlc.UpdateUserPasswordParams{
+		ID:                     id,
+		PasswordHash:           hash,
+		PasswordChangeRequired: mustChange,
+	}); err != nil {
+		return fmt.Errorf("set password: %w", err)
+	}
+	return nil
+}
+
+// SetPIN stores (or clears, when hash is empty) the profile PIN.
+// Plumbed through the auth/switch-profile handler.
+func (r *UserRepository) SetPIN(ctx context.Context, id, hash string) error {
+	if err := r.q.UpdateUserPIN(ctx, sqlc.UpdateUserPINParams{
+		ID:      id,
+		PinHash: nullStringFromOptional(hash),
+	}); err != nil {
+		return fmt.Errorf("set pin: %w", err)
+	}
+	return nil
+}
+
+// SetMaxContentRating updates the per-profile rating cap. Empty
+// rating clears the cap (= profile sees everything).
+func (r *UserRepository) SetMaxContentRating(ctx context.Context, id, rating string) error {
+	if err := r.q.UpdateUserMaxContentRating(ctx, sqlc.UpdateUserMaxContentRatingParams{
+		ID:               id,
+		MaxContentRating: nullStringFromOptional(rating),
+	}); err != nil {
+		return fmt.Errorf("set content rating: %w", err)
+	}
+	return nil
+}
+
+// ListProfilesForOwner returns the parent account row plus all child
+// profiles in a single query. The handler maps each row to a User
+// and the parent comes first by virtue of the `parent_user_id IS NOT
+// NULL` ORDER BY trick in the SQL.
+func (r *UserRepository) ListProfilesForOwner(ctx context.Context, ownerID string) ([]*User, error) {
+	rows, err := r.q.ListProfilesForOwner(ctx, sqlc.ListProfilesForOwnerParams{
+		ID:           ownerID,
+		ParentUserID: sql.NullString{String: ownerID, Valid: true},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list profiles for owner %s: %w", ownerID, err)
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	out := make([]*User, len(rows))
+	for i, row := range rows {
+		u := userFromProfilesRow(row)
+		out[i] = &u
+	}
+	return out, nil
 }
 
 func (r *UserRepository) UpdateLastLogin(ctx context.Context, id string, t time.Time) error {
@@ -139,46 +235,86 @@ func nullTimeToPtr(nt sql.NullTime) *time.Time {
 	return &nt.Time
 }
 
+// nullStringFromOptional bridges Go's "" sentinel for absent string
+// fields to sqlc's sql.NullString. Empty string → invalid (NULL),
+// any other value → valid. Keeps the call sites readable and
+// matches how the rest of the repo already coerces optional strings.
+func nullStringFromOptional(s string) sql.NullString {
+	if s == "" {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: s, Valid: true}
+}
+
 func userFromGetRow(r sqlc.GetUserByIDRow) User {
 	return User{
-		ID:           r.ID,
-		Username:     r.Username,
-		DisplayName:  r.DisplayName,
-		PasswordHash: r.PasswordHash,
-		AvatarPath:   r.AvatarPath,
-		Role:         r.Role,
-		IsActive:     r.IsActive,
-		MaxSessions:  int(r.MaxSessions),
-		CreatedAt:    r.CreatedAt,
-		LastLoginAt:  nullTimeToPtr(r.LastLoginAt),
+		ID:                     r.ID,
+		Username:               r.Username,
+		DisplayName:            r.DisplayName,
+		PasswordHash:           r.PasswordHash,
+		AvatarPath:             r.AvatarPath,
+		Role:                   r.Role,
+		IsActive:               r.IsActive,
+		MaxSessions:            int(r.MaxSessions),
+		CreatedAt:              r.CreatedAt,
+		LastLoginAt:            nullTimeToPtr(r.LastLoginAt),
+		ParentUserID:           r.ParentUserID.String,
+		PINHash:                r.PinHash.String,
+		MaxContentRating:       r.MaxContentRating.String,
+		PasswordChangeRequired: r.PasswordChangeRequired,
 	}
 }
 
 func userFromGetByUsernameRow(r sqlc.GetUserByUsernameRow) User {
 	return User{
-		ID:           r.ID,
-		Username:     r.Username,
-		DisplayName:  r.DisplayName,
-		PasswordHash: r.PasswordHash,
-		AvatarPath:   r.AvatarPath,
-		Role:         r.Role,
-		IsActive:     r.IsActive,
-		MaxSessions:  int(r.MaxSessions),
-		CreatedAt:    r.CreatedAt,
-		LastLoginAt:  nullTimeToPtr(r.LastLoginAt),
+		ID:                     r.ID,
+		Username:               r.Username,
+		DisplayName:            r.DisplayName,
+		PasswordHash:           r.PasswordHash,
+		AvatarPath:             r.AvatarPath,
+		Role:                   r.Role,
+		IsActive:               r.IsActive,
+		MaxSessions:            int(r.MaxSessions),
+		CreatedAt:              r.CreatedAt,
+		LastLoginAt:            nullTimeToPtr(r.LastLoginAt),
+		ParentUserID:           r.ParentUserID.String,
+		PINHash:                r.PinHash.String,
+		MaxContentRating:       r.MaxContentRating.String,
+		PasswordChangeRequired: r.PasswordChangeRequired,
 	}
 }
 
 func userFromListRow(r sqlc.ListUsersRow) User {
 	return User{
-		ID:          r.ID,
-		Username:    r.Username,
-		DisplayName: r.DisplayName,
-		AvatarPath:  r.AvatarPath,
-		Role:        r.Role,
-		IsActive:    r.IsActive,
-		CreatedAt:   r.CreatedAt,
-		LastLoginAt: nullTimeToPtr(r.LastLoginAt),
+		ID:                     r.ID,
+		Username:               r.Username,
+		DisplayName:            r.DisplayName,
+		AvatarPath:             r.AvatarPath,
+		Role:                   r.Role,
+		IsActive:               r.IsActive,
+		CreatedAt:              r.CreatedAt,
+		LastLoginAt:            nullTimeToPtr(r.LastLoginAt),
+		ParentUserID:           r.ParentUserID.String,
+		PINHash:                r.PinHash.String,
+		MaxContentRating:       r.MaxContentRating.String,
+		PasswordChangeRequired: r.PasswordChangeRequired,
+	}
+}
+
+func userFromProfilesRow(r sqlc.ListProfilesForOwnerRow) User {
+	return User{
+		ID:                     r.ID,
+		Username:               r.Username,
+		DisplayName:            r.DisplayName,
+		AvatarPath:             r.AvatarPath,
+		Role:                   r.Role,
+		IsActive:               r.IsActive,
+		CreatedAt:              r.CreatedAt,
+		LastLoginAt:            nullTimeToPtr(r.LastLoginAt),
+		ParentUserID:           r.ParentUserID.String,
+		PINHash:                r.PinHash.String,
+		MaxContentRating:       r.MaxContentRating.String,
+		PasswordChangeRequired: r.PasswordChangeRequired,
 	}
 }
 
