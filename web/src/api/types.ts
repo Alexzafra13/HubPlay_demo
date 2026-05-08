@@ -1159,6 +1159,33 @@ export interface HomeTrendingItem {
 }
 
 /**
+ * One entry in the "Recomendado para ti" tier of the home hero. Same
+ * basic media-card shape as a TrendingItem but enriched with
+ * `recommended_because.genres` so the hero slide can render an
+ * honest "Porque te gusta {{genre}}" subtitle. Only movies and
+ * series — episodes are filtered server-side.
+ */
+export interface HomeRecommendedItem {
+  id: string;
+  type: "movie" | "series";
+  title: string;
+  library_id: string;
+  year?: number;
+  community_rating?: number;
+  poster_url?: string;
+  poster_blurhash?: string;
+  poster_color?: string;
+  poster_color_muted?: string;
+  backdrop_url?: string;
+  logo_url?: string;
+  overview?: string;
+  genres?: string[];
+  recommended_because: {
+    genres: string[];
+  };
+}
+
+/**
  * One channel in the "live now" rail. Always carries the channel
  * id/name/library; the EPG fields are populated only when the channel
  * has a program currently airing (the rail still shows the channel

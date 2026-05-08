@@ -16,6 +16,7 @@ import { queryKeys } from "../queryKeys";
 import type {
   HomeLayout,
   HomeLiveNowChannel,
+  HomeRecommendedItem,
   HomeTrendingItem,
 } from "../types";
 
@@ -53,6 +54,21 @@ export function useHomeTrending(
     // Trending is a server-wide aggregate over a 7-day window.
     // It moves slowly — five-minute stale window keeps the rail
     // stable across navigations without hammering the DB.
+    staleTime: 5 * 60 * 1000,
+    ...options,
+  });
+}
+
+export function useHomeRecommended(
+  options?: Partial<UseQueryOptions<HomeRecommendedItem[]>>,
+) {
+  return useQuery<HomeRecommendedItem[]>({
+    queryKey: queryKeys.homeRecommended,
+    queryFn: () => api.getHomeRecommended(),
+    // Recommendations are derived from the user's genre affinity,
+    // which only shifts when they finish (or significantly start)
+    // something new. A five-minute stale window matches Trending,
+    // and the home page refetches anyway when the layout changes.
     staleTime: 5 * 60 * 1000,
     ...options,
   });

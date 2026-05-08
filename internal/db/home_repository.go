@@ -132,6 +132,187 @@ func (r *HomeRepository) Trending(ctx context.Context, userID string, windowDays
 	return out, rows.Err()
 }
 
+// HomeRecommendation is one item the genre-affinity recommender
+// surfaced for the caller, plus the genres that triggered the match.
+// `Because` is the slice of genres (already humanly-cased) the user
+// most actively watches that this item shares — copy the homepage
+// renders as "Porque te gusta Drama, Thriller". Movies and series
+// only; episodes are filtered at the SQL level.
+type HomeRecommendation struct {
+	ID              string
+	Type            string
+	Title           string
+	Year            sql.NullInt64
+	CommunityRating sql.NullFloat64
+	LibraryID       string
+	Because         []string
+}
+
+// Recommended returns up to `limit` items the caller hasn't watched
+// (no user_data row, or watched < 5% with no completion mark) drawn
+// from the genres the caller most actively engages with. Acts as the
+// "Recomendado para ti" tier of the home hero without depending on a
+// metadata provider being reachable.
+//
+// Ranking strategy:
+//
+//  1. Compute the caller's top-3 genres by play weight (any user_data
+//     row with progress counts as one vote per genre on the played
+//     item, episodes folded back to their series so binge-watching
+//     one show doesn't dominate).
+//  2. Score every unwatched item by how many of those top genres it
+//     hits, breaking ties on community_rating then added_at.
+//  3. Return the top `limit` along with the genres that scored them.
+//
+// Returns (nil, nil) when the user has no engagement history yet —
+// the cold-start case. Caller decides whether to fall back to a
+// generic "newest in catalogue" rail or hide the slot.
+//
+// Library access enforced via the same EXISTS pattern as Trending.
+func (r *HomeRepository) Recommended(ctx context.Context, userID string, limit int) ([]HomeRecommendation, error) {
+	if limit <= 0 || limit > 30 {
+		limit = 5
+	}
+
+	// First pass: pull the caller's top-3 genres. Empty slice = the
+	// user has touched nothing yet, so no personalised pick is
+	// possible. The handler treats this as "skip the slot".
+	const genresQuery = `
+		WITH played AS (
+			SELECT
+				CASE
+					WHEN i.type = 'episode' AND i.parent_id IS NOT NULL
+						THEN COALESCE(
+							(SELECT s.parent_id FROM items s WHERE s.id = i.parent_id),
+							i.parent_id
+						)
+					ELSE i.id
+				END AS rollup_id
+			FROM user_data ud
+			JOIN items i ON i.id = ud.item_id
+			WHERE ud.user_id = ? AND ud.position_ticks > 0
+		)
+		SELECT iv.value, COUNT(DISTINCT p.rollup_id) AS weight
+		FROM played p
+		JOIN item_value_map ivm ON ivm.item_id = p.rollup_id
+		JOIN item_values iv ON iv.id = ivm.value_id AND iv.type = 'genre'
+		GROUP BY iv.value
+		ORDER BY weight DESC, iv.value ASC
+		LIMIT 3`
+
+	rows, err := r.db.QueryContext(ctx, genresQuery, userID)
+	if err != nil {
+		return nil, fmt.Errorf("recommended seeds: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	var topGenres []string
+	for rows.Next() {
+		var g string
+		var w int64
+		if err := rows.Scan(&g, &w); err != nil {
+			return nil, fmt.Errorf("scan recommended seed: %w", err)
+		}
+		topGenres = append(topGenres, g)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(topGenres) == 0 {
+		return nil, nil
+	}
+
+	// Second pass: score candidate items by genre overlap. The
+	// `genre_hits` aggregate counts how many of the user's top-3
+	// genres the candidate carries — that's the primary sort. We
+	// surface that count plus the actual matched genres so the wire
+	// can render "Porque te gusta {{genre1}}, {{genre2}}".
+	//
+	// Unwatched filter: no user_data row OR row with position_ticks <
+	// 5% of duration AND completed = 0. The 5% threshold matches the
+	// "user opened the player by accident" case — a 30-second play on
+	// a 2-hour movie shouldn't flag it as watched.
+	// Param order matches the placeholder order in the query body:
+	//   1. iv.value IN (?,?,?)       — top genres
+	//   2. ud.user_id = ?            — left join filter
+	//   3. la.user_id = ?            — library access guard
+	//   4. LIMIT ?
+	placeholders := "?"
+	for i := 1; i < len(topGenres); i++ {
+		placeholders += ",?"
+	}
+	args := make([]any, 0, len(topGenres)+3)
+	for _, g := range topGenres {
+		args = append(args, g)
+	}
+	args = append(args, userID, userID, limit)
+
+	itemsQuery := fmt.Sprintf(`
+		SELECT
+			i.id, i.type, i.title, i.year, i.community_rating, i.library_id,
+			COUNT(DISTINCT iv.value) AS genre_hits,
+			GROUP_CONCAT(DISTINCT iv.value) AS matched_genres
+		FROM items i
+		JOIN item_value_map ivm ON ivm.item_id = i.id
+		JOIN item_values iv ON iv.id = ivm.value_id AND iv.type = 'genre' AND iv.value IN (%s)
+		LEFT JOIN user_data ud ON ud.user_id = ? AND ud.item_id = i.id
+		WHERE i.is_available = 1
+		  AND i.type IN ('movie', 'series')
+		  AND (
+			ud.item_id IS NULL
+			OR (ud.completed = 0 AND (i.duration_ticks = 0 OR ud.position_ticks * 100 < i.duration_ticks * 5))
+		  )
+		  AND (
+			EXISTS (SELECT 1 FROM library_access la WHERE la.library_id = i.library_id AND la.user_id = ?)
+			OR NOT EXISTS (SELECT 1 FROM library_access la WHERE la.library_id = i.library_id)
+		  )
+		GROUP BY i.id
+		ORDER BY genre_hits DESC, COALESCE(i.community_rating, 0) DESC, i.added_at DESC
+		LIMIT ?`, placeholders)
+
+	itemsRows, err := r.db.QueryContext(ctx, itemsQuery, args...)
+	if err != nil {
+		return nil, fmt.Errorf("recommended items: %w", err)
+	}
+	defer itemsRows.Close() //nolint:errcheck
+
+	out := make([]HomeRecommendation, 0, limit)
+	for itemsRows.Next() {
+		var rec HomeRecommendation
+		var matched sql.NullString
+		var genreHits int64
+		if err := itemsRows.Scan(&rec.ID, &rec.Type, &rec.Title, &rec.Year, &rec.CommunityRating,
+			&rec.LibraryID, &genreHits, &matched); err != nil {
+			return nil, fmt.Errorf("scan recommended item: %w", err)
+		}
+		if matched.Valid && matched.String != "" {
+			rec.Because = splitGroupConcat(matched.String)
+		}
+		out = append(out, rec)
+	}
+	return out, itemsRows.Err()
+}
+
+// splitGroupConcat splits SQLite's GROUP_CONCAT default-comma output.
+// Genre values themselves never contain commas in our normalised
+// vocabulary so a plain split is safe; documenting it here so a
+// future genre with embedded comma is caught at code review.
+func splitGroupConcat(s string) []string {
+	if s == "" {
+		return nil
+	}
+	out := []string{}
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == ',' {
+			out = append(out, s[start:i])
+			start = i + 1
+		}
+	}
+	out = append(out, s[start:])
+	return out
+}
+
 // HomeLiveNowChannel is one entry in the "live now" rail.
 type HomeLiveNowChannel struct {
 	ChannelID    string
