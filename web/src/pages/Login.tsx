@@ -131,84 +131,65 @@ export default function Login() {
         className="pointer-events-none absolute inset-0 bg-gradient-to-b from-transparent via-bg-base/40 to-bg-base/80"
       />
 
-      {/* Foreground stack. Logo + welcome above the card, form
-          card below. max-w-sm keeps the form pleasant to fill
-          even on ultrawide. */}
-      <div className="relative z-10 flex w-full max-w-sm flex-col items-center gap-8">
-        <motion.div
-          initial={{ opacity: 0, y: -8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-        >
-          <BrandWordmark height={56} className="opacity-95" />
-        </motion.div>
+      {/* Foreground card. Logo lives back INSIDE the card (per user
+          feedback — pulling it out broke the form's visual unity)
+          and there's no surrounding hero copy: the brand mark
+          alone carries the page identity, and the GhostPosters
+          drifting behind do the cinematic lifting. */}
+      <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{
+          duration: 0.5,
+          ease: [0.22, 0.61, 0.36, 1],
+        }}
+        className="relative z-10 w-full max-w-sm rounded-2xl border border-white/10 bg-bg-card/70 p-8 shadow-2xl backdrop-blur-xl"
+      >
+        <div className="mb-7 flex justify-center">
+          <BrandWordmark height={48} />
+        </div>
 
-        <motion.div
-          initial={{ opacity: 0, y: -4 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.1 }}
-          className="text-center"
-        >
-          <h1 className="text-3xl font-extralight tracking-[-0.01em] text-text-primary sm:text-4xl">
-            {t("login.welcomeTitle", { defaultValue: "Bienvenido" })}
-          </h1>
-          <p className="mt-2 text-sm tracking-wider text-text-muted">
-            {t("login.tagline")}
-          </p>
-        </motion.div>
+        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+          <Input
+            label={t("login.username")}
+            type="text"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            placeholder={t("login.usernamePlaceholder")}
+            autoComplete="username"
+            required
+          />
 
-        <motion.div
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{
-            duration: 0.5,
-            delay: 0.2,
-            ease: [0.22, 0.61, 0.36, 1],
-          }}
-          className="w-full rounded-2xl border border-white/10 bg-bg-card/70 p-7 shadow-2xl backdrop-blur-xl"
-        >
-          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-            <Input
-              label={t("login.username")}
-              type="text"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder={t("login.usernamePlaceholder")}
-              autoComplete="username"
-              required
-            />
+          <Input
+            label={t("login.password")}
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder={t("login.passwordPlaceholder")}
+            autoComplete="current-password"
+            required
+          />
 
-            <Input
-              label={t("login.password")}
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder={t("login.passwordPlaceholder")}
-              autoComplete="current-password"
-              required
-            />
-
-            {error && (
-              <p
-                role="alert"
-                className="rounded-md border border-error/30 bg-error/10 px-3 py-2 text-sm text-error"
-              >
-                {error}
-              </p>
-            )}
-
-            <Button
-              type="submit"
-              fullWidth
-              size="lg"
-              isLoading={login.isPending}
-              className="mt-2"
+          {error && (
+            <p
+              role="alert"
+              className="rounded-md border border-error/30 bg-error/10 px-3 py-2 text-sm text-error"
             >
-              {t("login.signIn")}
-            </Button>
-          </form>
-        </motion.div>
-      </div>
+              {error}
+            </p>
+          )}
+
+          <Button
+            type="submit"
+            fullWidth
+            size="lg"
+            isLoading={login.isPending}
+            className="mt-2"
+          >
+            {t("login.signIn")}
+          </Button>
+        </form>
+      </motion.div>
     </div>
   );
 }
