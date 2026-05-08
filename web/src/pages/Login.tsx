@@ -39,16 +39,18 @@ export default function Login() {
       {
         onSuccess(data) {
           setAuth(data.user);
-          // Multi-profile account → drop into the "Who's watching?"
-          // picker. Solo accounts (1 profile = parent itself) fall
-          // straight into the home shell. The server already
-          // returns the trimmed `profiles` payload alongside the
-          // token so we don't need a follow-up round-trip here.
-          const profileCount = data.profiles?.length ?? 0;
-          if (profileCount > 1 && !data.user.password_change_required) {
-            navigate("/select-profile");
+          // Forced rotation wins over the picker — a user with a
+          // temp password shouldn't be able to pick a child profile
+          // before they rotate. Otherwise everyone goes through
+          // /select-profile, which queries /me/profiles itself and
+          // auto-bounces home when there's nothing to pick. Routing
+          // everyone through it means the picker is the single
+          // source of truth instead of trusting two separate
+          // payloads (login response.profiles AND /me/profiles).
+          if (data.user.password_change_required) {
+            navigate("/change-password");
           } else {
-            navigate("/");
+            navigate("/select-profile");
           }
         },
         onError(err) {

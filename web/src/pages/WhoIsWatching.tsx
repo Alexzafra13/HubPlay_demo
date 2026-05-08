@@ -49,9 +49,13 @@ export default function WhoIsWatching() {
   const [pinError, setPinError] = useState<string | null>(null);
   const [pinAttempting, setPinAttempting] = useState(false);
 
-  // Solo account → don't even render the picker; bounce home. The
-  // login flow will skip this screen too in the happy path; this
-  // branch covers users who land directly on /select-profile.
+  // Solo account → bounce home. Login routes everyone through
+  // this page so the picker is the single source of truth on
+  // "do I actually need to choose?" — when the answer is no, we
+  // silently navigate away. The check covers both length 0 (a
+  // truly empty result, which shouldn't happen because the
+  // backend always returns the caller's own row) and length 1
+  // (just the parent / just self, no siblings to switch into).
   useEffect(() => {
     if (!isLoading && !error && profiles && profiles.length <= 1) {
       navigate("/", { replace: true });
@@ -62,6 +66,58 @@ export default function WhoIsWatching() {
     return (
       <div className="flex min-h-screen items-center justify-center bg-bg-base">
         <Spinner size="lg" />
+      </div>
+    );
+  }
+
+  // The query settled but we got nothing usable (network error or
+  // unexpected empty payload). Without this branch the page would
+  // render the title + an empty grid and the user has no idea why.
+  // The bottom rail handles "I clicked wrong, get me out" via the
+  // sign-out button, but having an explicit message above it tells
+  // the operator what just went wrong.
+  const profilesMissing = !profiles || profiles.length === 0;
+  if (error || profilesMissing) {
+    return (
+      <div className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-bg-base px-6 py-12">
+        <AuroraBackdrop />
+        <div className="relative z-10 flex max-w-md flex-col items-center gap-5 text-center">
+          <BrandWordmark height={28} className="opacity-80" />
+          <h2 className="text-xl font-semibold text-text-primary">
+            {t("whoIsWatching.loadFailedTitle", {
+              defaultValue: "No pudimos cargar los perfiles",
+            })}
+          </h2>
+          <p className="text-sm text-text-muted">
+            {error
+              ? error.message
+              : t("whoIsWatching.loadFailedHint", {
+                  defaultValue:
+                    "El servidor no devolvió ningún perfil para esta cuenta. Pulsa reintentar; si persiste, cierra sesión y vuelve a entrar.",
+                })}
+          </p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => navigate("/", { replace: true })}
+              className="rounded-md border border-border-subtle bg-bg-card/50 px-3 py-1.5 text-xs text-text-muted backdrop-blur-sm transition-colors hover:bg-bg-card hover:text-text-primary"
+            >
+              {t("whoIsWatching.continueAnyway", {
+                defaultValue: "Continuar al inicio",
+              })}
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleSignOut()}
+              className="inline-flex items-center gap-1.5 rounded-md border border-border-subtle bg-bg-card/50 px-3 py-1.5 text-xs text-text-muted backdrop-blur-sm transition-colors hover:bg-bg-card hover:text-text-primary"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+              {t("whoIsWatching.signOut", {
+                defaultValue: "Cerrar sesión",
+              })}
+            </button>
+          </div>
+        </div>
       </div>
     );
   }

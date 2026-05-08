@@ -84,12 +84,17 @@ export function useChangeMyPassword() {
 
 // "Who's watching?" — the profile tree under the current account.
 // 5-min staleTime: profiles change rarely and the create-profile
-// mutation invalidates this key on success.
-export function useProfiles() {
+// mutation invalidates this key on success. We refetch on mount so
+// the picker always reflects the freshest tree even when the cache
+// holds a stale list (e.g. admin just added a profile in another
+// tab and the user navigated to /select-profile).
+export function useProfiles(options?: Partial<UseQueryOptions<ProfileSummary[]>>) {
   return useQuery<ProfileSummary[]>({
     queryKey: ["me", "profiles"],
     queryFn: () => api.listProfiles(),
     staleTime: 5 * 60 * 1000,
+    refetchOnMount: "always",
+    ...options,
   });
 }
 
