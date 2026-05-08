@@ -501,6 +501,18 @@ func NewRouter(deps Dependencies) http.Handler {
 						r.Put("/settings", settingsHandler.Update)
 						r.Delete("/settings/{key}", settingsHandler.Reset)
 					}
+
+					// DB backup / restore. Lives under /admin/system
+					// because it's a system-level admin operation —
+					// same RequireAdmin gate, same prefix the dashboard
+					// uses for its other system endpoints.
+					if deps.Database != nil {
+						backupHandler := handlers.NewAdminBackupHandler(
+							deps.Database, deps.Config.Database.Path, deps.Logger,
+						)
+						r.Get("/backup", backupHandler.Download)
+						r.Post("/backup/restore", backupHandler.Upload)
+					}
 				})
 			}
 

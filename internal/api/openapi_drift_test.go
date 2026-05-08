@@ -81,6 +81,13 @@ var outOfScopeExact = map[string]string{
 	"POST /admin/auth/keys/rotate": "admin key rotation",
 	"POST /admin/auth/keys/prune":  "admin key rotation",
 
+	// ── DB backup / restore (admin) ───────────────────────────────────
+	// Operator-only file transfer endpoints (octet-stream download +
+	// multipart upload). No public SDK consumes them; admin UI calls
+	// them via direct fetch with credentials.
+	"GET /admin/system/backup":           "admin DB snapshot download",
+	"POST /admin/system/backup/restore":  "admin DB restore upload",
+
 	// ── Federation admin (admin) ──────────────────────────────────────
 	"GET /admin/peers":                    "federation pairing admin",
 	"GET /admin/peers/identity":           "federation pairing admin",
