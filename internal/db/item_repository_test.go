@@ -696,3 +696,101 @@ func TestItemRepository_LatestItems(t *testing.T) {
 		t.Errorf("expected most recent first, got %q", items[0].Title)
 	}
 }
+
+// TestItemRepository_LatestSeriesByActivity covers the home rail's
+// "Reciente en series" tier: series should sort by the most recent
+// activity across the whole show subtree (not just the series row's
+// own added_at), and the row should report how many episodes were
+// added in the trailing 14-day window.
+func TestItemRepository_LatestSeriesByActivity(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	libRepo := db.NewLibraryRepository(database)
+	repo := db.NewItemRepository(database)
+
+	now := time.Now().UTC()
+	if err := libRepo.Create(context.Background(), &db.Library{
+		ID: "lib-shows", Name: "Shows", ContentType: "shows",
+		CreatedAt: now, UpdatedAt: now, Paths: []string{"/tv"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Helper: build series / season / episode items. All under the
+	// shows library so the query's library_id filter matches.
+	mustItem := func(id, parentID, kind, title string, addedAt time.Time) {
+		it := &db.Item{
+			ID: id, LibraryID: "lib-shows", ParentID: parentID, Type: kind,
+			Title: title, SortTitle: title,
+			Path:        "/tv/" + id,
+			AddedAt:     addedAt,
+			UpdatedAt:   addedAt,
+			IsAvailable: true,
+		}
+		if err := repo.Create(context.Background(), it); err != nil {
+			t.Fatalf("create %s: %v", id, err)
+		}
+	}
+
+	// Three series:
+	//  - "Old Show" added 6 months ago, no recent activity. Bottom.
+	//  - "Mr Robot" added 3 months ago, last episode yesterday.
+	//    activity_at = yesterday (1 day ago).
+	//  - "Brand New" series itself added 1 hour ago, no episodes.
+	//    activity_at = 1 hour ago — most recent of the three.
+	mustItem("series-old", "", "series", "Old Show", now.Add(-180*24*time.Hour))
+	mustItem("series-old-s1", "series-old", "season", "S1", now.Add(-180*24*time.Hour))
+	mustItem("series-old-e1", "series-old-s1", "episode", "E1", now.Add(-180*24*time.Hour))
+
+	mustItem("series-robot", "", "series", "Mr Robot", now.Add(-90*24*time.Hour))
+	mustItem("series-robot-s1", "series-robot", "season", "S1", now.Add(-90*24*time.Hour))
+	mustItem("series-robot-e1", "series-robot-s1", "episode", "S1E1", now.Add(-89*24*time.Hour))
+	// Yesterday's drop. 1 within the 14-day window.
+	mustItem("series-robot-e2", "series-robot-s1", "episode", "S1E2", now.Add(-1*24*time.Hour))
+
+	mustItem("series-new", "", "series", "Brand New", now.Add(-1*time.Hour))
+
+	rows, err := repo.LatestSeriesByActivity(context.Background(), "lib-shows", 10)
+	if err != nil {
+		t.Fatalf("latest series by activity: %v", err)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("expected 3 series, got %d: %+v", len(rows), rows)
+	}
+
+	// Most recent activity first. Brand-new beats Mr Robot because
+	// the series row itself was just added (1h) — newer than Mr
+	// Robot's most recent episode (1d). Old Show's last activity is
+	// 6 months ago so it lands at the bottom.
+	wantOrder := []string{"series-new", "series-robot", "series-old"}
+	gotOrder := []string{rows[0].ID, rows[1].ID, rows[2].ID}
+	for i := range wantOrder {
+		if gotOrder[i] != wantOrder[i] {
+			t.Errorf("order[%d] = %q, want %q (full: %v)", i, gotOrder[i], wantOrder[i], gotOrder)
+		}
+	}
+
+	// Brand New has no episodes → 0 new episodes regardless of its
+	// own added_at. The "+N nuevos" badge tracks episode drops, not
+	// the series-was-just-added case (which the rail's title already
+	// communicates).
+	if rows[0].NewEpisodesCount != 0 {
+		t.Errorf("Brand New new_episodes_count = %d, want 0", rows[0].NewEpisodesCount)
+	}
+	// Mr Robot got the yesterday drop — 1 inside the 14-day window.
+	// The 89-day-old S1E1 is outside.
+	if rows[1].NewEpisodesCount != 1 {
+		t.Errorf("Mr Robot new_episodes_count = %d, want 1", rows[1].NewEpisodesCount)
+	}
+	// Old Show's only episode is 6 months old → 0.
+	if rows[2].NewEpisodesCount != 0 {
+		t.Errorf("Old Show new_episodes_count = %d, want 0", rows[2].NewEpisodesCount)
+	}
+
+	// LatestActivityAt for Mr Robot should match the yesterday-drop
+	// timestamp, NOT the series's own added_at. Tolerance absorbs
+	// sub-second rounding through SQLite's text storage.
+	wantActivity := now.Add(-1 * 24 * time.Hour)
+	if delta := rows[1].LatestActivityAt.Sub(wantActivity); delta < -time.Second || delta > time.Second {
+		t.Errorf("Mr Robot LatestActivityAt = %v, want ~%v", rows[1].LatestActivityAt, wantActivity)
+	}
+}

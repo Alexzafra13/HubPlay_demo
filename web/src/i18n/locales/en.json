@@ -226,7 +226,10 @@
   },
   "posterCard": {
     "watched": "Watched",
-    "inProgress": "In progress"
+    "inProgress": "In progress",
+    "newEpisodes_one": "{{count}} new episode",
+    "newEpisodes_other": "{{count}} new episodes",
+    "newShort": "new"
   },
   "upNext": {
     "title": "Up next",

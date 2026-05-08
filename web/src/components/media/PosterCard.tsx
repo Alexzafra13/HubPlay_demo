@@ -144,6 +144,31 @@ const PosterCard: FC<PosterCardProps> = memo(({ item, progress, href, cornerBadg
           </div>
         )}
 
+        {/* New-episodes badge — top left, below the watched check
+            (which won't ever co-render: an unwatched series with new
+            episodes lacks a `played` mark). Surfaces the per-series
+            episode-activity count emitted by `/items/latest?type=
+            series` for shows libraries — the "Mr Robot got 3 new
+            episodes this week" hint Plex / Jellyfin both ship. The
+            badge stays compact at one short line so it never fights
+            the rating chip on the right. */}
+        {!watched && item.new_episodes_count != null && item.new_episodes_count > 0 && (
+          <div
+            className="absolute top-2 left-2 flex items-center gap-1 rounded-full bg-accent px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white shadow-md shadow-black/40"
+            aria-label={t("posterCard.newEpisodes", {
+              count: item.new_episodes_count,
+              defaultValue: "{{count}} new episodes",
+            })}
+            title={t("posterCard.newEpisodes", {
+              count: item.new_episodes_count,
+              defaultValue: "{{count}} new episodes",
+            })}
+          >
+            <span>+{item.new_episodes_count}</span>
+            <span>{t("posterCard.newShort", { defaultValue: "new" })}</span>
+          </div>
+        )}
+
         {/* Source attribution badge — bottom-left. Federated grids
             pass a peer-name pill here so the user can tell at a
             glance which server a card came from. Local rails leave

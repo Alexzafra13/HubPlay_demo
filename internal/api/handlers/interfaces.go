@@ -61,6 +61,7 @@ type LibraryService interface {
 	GetItemStreams(ctx context.Context, itemID string) ([]*db.MediaStream, error)
 	GetItemImages(ctx context.Context, itemID string) ([]*db.Image, error)
 	LatestItems(ctx context.Context, libraryID string, itemType string, limit int) ([]*db.Item, error)
+	LatestSeriesByActivity(ctx context.Context, libraryID string, limit int) ([]*db.LatestSeriesActivity, error)
 	ItemCount(ctx context.Context, libraryID string) (int, error)
 	UserHasAccess(ctx context.Context, userID, libraryID string) (bool, error)
 	// ListGenres returns the genre vocabulary across the catalogue,

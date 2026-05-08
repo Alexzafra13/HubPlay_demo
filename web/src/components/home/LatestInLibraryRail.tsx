@@ -23,13 +23,27 @@ export function LatestInLibraryRail({
   libraryName,
 }: LatestInLibraryRailProps) {
   const { t } = useTranslation();
-  const { data, isLoading, isError } = useLatestItems(libraryId);
 
-  // Look up the library to derive the click target. Lazy: the
-  // libraries list is already cached app-wide so this rides on the
-  // existing fetch with no extra round-trip.
+  // Look up the library to derive the click target + the per-library
+  // type filter. Lazy: the libraries list is already cached app-wide
+  // so this rides on the existing fetch with no extra round-trip.
   const { data: libraries } = useLibraries();
   const library = libraries?.find((l) => l.id === libraryId);
+
+  // For shows libraries we ask the backend for series rows directly.
+  // Without the filter, `/items/latest` returns the most recently
+  // added items by `added_at` — which in a TV library is dominated
+  // by episodes (new episodes are the most common write pattern).
+  // The frontend would then filter them out client-side and the rail
+  // ends up showing one or two series at most. Pushing the filter
+  // server-side keeps the rail honest with its title and avoids
+  // wasting payload on rows we'd discard anyway.
+  const typeFilter: "series" | undefined =
+    library?.content_type === "shows" ? "series" : undefined;
+
+  const { data, isLoading, isError } = useLatestItems(libraryId, {
+    type: typeFilter,
+  });
 
   if (isError) return null;
 
@@ -40,12 +54,10 @@ export function LatestInLibraryRail({
     defaultValue: `Reciente en ${libraryName}`,
   });
 
-  // The /items/latest endpoint returns every item type — including
-  // seasons under a series. In a "Latest in series" rail seasons
-  // duplicate their parent (you'd see Daredevil's poster as the
-  // series and again as season 1). Keep only top-level catalog
-  // items so each title appears once. Episodes get folded the same
-  // way — they belong on the series detail page, not the home rail.
+  // Defensive client-side filter for libraries that aren't shows
+  // (movies, mixed): keep only top-level catalogue items so seasons
+  // and orphan episodes never leak into the rail. Shows libraries
+  // already get the right shape from the server.
   const filtered = (data ?? []).filter(
     (i) => i.type === "movie" || i.type === "series",
   );

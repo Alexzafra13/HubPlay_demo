@@ -387,6 +387,13 @@ func (s *Service) LatestItems(ctx context.Context, libraryID string, itemType st
 	return s.items.LatestItems(ctx, libraryID, itemType, limit)
 }
 
+// LatestSeriesByActivity wraps the dedicated shows-library rail query.
+// Returned to the API handler so the wire can surface the per-series
+// activity stamp + new-episode count without an extra round-trip.
+func (s *Service) LatestSeriesByActivity(ctx context.Context, libraryID string, limit int) ([]*db.LatestSeriesActivity, error) {
+	return s.items.LatestSeriesByActivity(ctx, libraryID, limit)
+}
+
 func (s *Service) ItemCount(ctx context.Context, libraryID string) (int, error) {
 	// livetv libraries don't populate the `items` table — their catalog
 	// lives in `channels`. Dispatch so the admin UI shows a meaningful

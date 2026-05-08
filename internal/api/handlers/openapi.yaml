@@ -597,8 +597,20 @@ paths:
     get:
       tags: [browse]
       summary: Recently added across visible libraries
+      description: |
+        Default ordering is `added_at DESC` over every item in the
+        library. When the caller scopes to a single shows library
+        with `type=series`, the response is instead ordered by recent
+        activity (max `added_at` over the series and any of its
+        episodes), and each entry carries an extra
+        `new_episodes_count` (episodes added in the last 14 days)
+        plus `latest_activity_at` so the rail can render a "+N
+        nuevos episodios" hint. Movies / mixed / global queries
+        keep the simple ordering.
       parameters:
         - { name: limit, in: query, schema: { type: integer, default: 20 } }
+        - { name: library_id, in: query, schema: { type: string } }
+        - { name: type, in: query, schema: { type: string, enum: [movie, series, season, episode] } }
       responses:
         "200":
           description: Items

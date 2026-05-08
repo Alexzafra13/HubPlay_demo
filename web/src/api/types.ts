@@ -447,6 +447,15 @@ export interface MediaItem {
   // on episodes whose season has no scanned artwork.
   season_poster_url?: string;
   season_backdrop_url?: string;
+  // Episode-activity hint emitted by /items/latest when the caller
+  // scopes to a shows library with `type=series`. The number is the
+  // count of episodes added under this series in the trailing 14-day
+  // window; the home rail renders a "+N nuevos episodios" corner
+  // badge on the PosterCard when present and > 0. Absent for non-
+  // series rows and on the standard /items/latest call without the
+  // type filter.
+  new_episodes_count?: number;
+  latest_activity_at?: string;
   // Pre-computed dominant + dark-muted colours of the primary backdrop
   // (or poster, when no backdrop exists), formatted as CSS rgb()
   // strings. The SeriesHero gradient consumes these on first paint —

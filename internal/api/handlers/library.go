@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"hubplay/internal/auth"
 	"hubplay/internal/db"
@@ -329,6 +330,48 @@ func (h *LibraryHandler) LatestItems(w http.ResponseWriter, r *http.Request) {
 	libraryID := r.URL.Query().Get("library_id")
 	itemType := r.URL.Query().Get("type")
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+
+	// Activity-aware shows rail: when the caller asks for the latest
+	// series scoped to one library, we route to a dedicated query
+	// that orders by recent episode activity and includes the
+	// per-series new-episode count. Lets the home rail say "Mr Robot
+	// got 3 new episodes this week" without a follow-up roundtrip.
+	// Movies / mixed / global queries keep the simple `ORDER BY
+	// added_at DESC` path.
+	if itemType == "series" && libraryID != "" {
+		rows, err := h.lib.LatestSeriesByActivity(r.Context(), libraryID, limit)
+		if err != nil {
+			handleServiceError(w, r, err)
+			return
+		}
+		// Adapter layer: we still want the standard image / metadata
+		// enrichment that operates on []*db.Item, then we splice the
+		// activity stamp + new-episode count back into each entry by
+		// position so the wire stays a flat MediaItem-shaped list.
+		items := make([]*db.Item, len(rows))
+		for i, r := range rows {
+			cp := r.Item
+			items[i] = &cp
+		}
+		data := h.enrichItemSummaries(r, items)
+		for i, row := range rows {
+			if !row.LatestActivityAt.IsZero() {
+				data[i]["latest_activity_at"] = row.LatestActivityAt.UTC().Format(time.RFC3339)
+			}
+			if row.NewEpisodesCount > 0 {
+				data[i]["new_episodes_count"] = row.NewEpisodesCount
+			}
+		}
+		respondJSON(w, http.StatusOK, map[string]any{
+			"data": map[string]any{
+				"items":  data,
+				"total":  len(rows),
+				"offset": 0,
+				"limit":  limit,
+			},
+		})
+		return
+	}
 
 	items, err := h.lib.LatestItems(r.Context(), libraryID, itemType, limit)
 	if err != nil {
