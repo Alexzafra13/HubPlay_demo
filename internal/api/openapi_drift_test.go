@@ -72,9 +72,10 @@ var outOfScopeExact = map[string]string{
 	"GET /health/ready": "k8s/LB readiness probe",
 
 	// ── User management (admin) ───────────────────────────────────────
-	"GET /users":         "admin user management",
-	"POST /users":        "admin user creation",
-	"DELETE /users/{id}": "admin user deletion",
+	"GET /users":                      "admin user management",
+	"POST /users":                     "admin user creation",
+	"DELETE /users/{id}":              "admin user deletion",
+	"PUT /users/{id}/display-name":    "rename user/profile (admin OR parent OR self)",
 
 	// ── Signing-key lifecycle (admin) ─────────────────────────────────
 	"GET /admin/auth/keys":         "admin key rotation",

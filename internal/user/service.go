@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"hubplay/internal/db"
+	"hubplay/internal/domain"
 )
 
 type Service struct {
@@ -64,6 +66,28 @@ func (s *Service) SetMaxContentRating(ctx context.Context, id, rating string) er
 		return fmt.Errorf("set max content rating: %w", err)
 	}
 	s.logger.Info("max content rating set", "user_id", id, "rating", rating)
+	return nil
+}
+
+// SetDisplayName renames the user. The username + parent_user_id
+// stay put — this only changes the human label that the picker
+// and the admin table show.
+//
+// Validation lives at the boundary (length 1..64, no leading/
+// trailing whitespace) instead of at the repo to keep the SQL
+// column free of opinions; downstream callers that already have a
+// trusted name can write it directly via the repo.
+func (s *Service) SetDisplayName(ctx context.Context, id, name string) error {
+	trimmed := strings.TrimSpace(name)
+	if len(trimmed) == 0 || len(trimmed) > 64 {
+		return domain.NewValidationError(map[string]string{
+			"display_name": "must be 1-64 characters",
+		})
+	}
+	if err := s.users.SetDisplayName(ctx, id, trimmed); err != nil {
+		return fmt.Errorf("set display name: %w", err)
+	}
+	s.logger.Info("display name updated", "user_id", id)
 	return nil
 }
 

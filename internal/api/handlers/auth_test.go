@@ -135,6 +135,10 @@ func (m *mockUserService) SetMaxContentRating(_ context.Context, _, _ string) er
 	return nil
 }
 
+func (m *mockUserService) SetDisplayName(_ context.Context, _, _ string) error {
+	return nil
+}
+
 func (m *mockUserService) SetRole(_ context.Context, _, _ string) error {
 	return nil
 }

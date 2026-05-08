@@ -11,6 +11,7 @@ import {
   useSetUserAccess,
   useSetUserActive,
   useSetUserContentRating,
+  useSetUserDisplayName,
   useSetUserPIN,
   useSetUserRole,
 } from "@/api/hooks";
@@ -68,6 +69,43 @@ export default function UsersAdmin() {
   const createProfile = useCreateProfile();
   const setUserPIN = useSetUserPIN();
   const setUserContentRating = useSetUserContentRating();
+  const setUserDisplayName = useSetUserDisplayName();
+
+  // Rename modal — admin (or parent of profile, or self) types a
+  // new display_name; submit hits PUT /users/{id}/display-name.
+  // The username stays put so logins / avatar colours don't shift.
+  const [renameTarget, setRenameTarget] = useState<User | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [renameError, setRenameError] = useState<string | null>(null);
+
+  function openRename(user: User) {
+    setRenameTarget(user);
+    setRenameValue(user.display_name || user.username.split("/").pop() || "");
+    setRenameError(null);
+  }
+
+  function handleRename(e: FormEvent) {
+    e.preventDefault();
+    if (!renameTarget) return;
+    const next = renameValue.trim();
+    if (!next) {
+      setRenameError(t("admin.users.renameValidation", {
+        defaultValue: "El nombre no puede estar vacío.",
+      }));
+      return;
+    }
+    setUserDisplayName.mutate(
+      { userId: renameTarget.id, displayName: next },
+      {
+        onSuccess: () => {
+          setRenameTarget(null);
+          setRenameValue("");
+          setRenameError(null);
+        },
+        onError: (err) => setRenameError(err.message),
+      },
+    );
+  }
   const setUserRole = useSetUserRole();
   const setUserActive = useSetUserActive();
   const setUserAccess = useSetUserAccess();
@@ -685,6 +723,16 @@ export default function UsersAdmin() {
                         <Button
                           variant="secondary"
                           size="sm"
+                          onClick={() => openRename(user)}
+                          title={t('admin.users.renameHint', {
+                            defaultValue: 'Cambiar el nombre que se ve en la app',
+                          })}
+                        >
+                          {t('admin.users.rename', { defaultValue: 'Renombrar' })}
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          size="sm"
                           onClick={() => {
                             setPinTarget(user);
                             setPinValue("");
@@ -1026,6 +1074,60 @@ export default function UsersAdmin() {
               </Button>
               <Button type="submit" isLoading={createProfile.isPending}>
                 {t('common.create')}
+              </Button>
+            </div>
+          </form>
+        )}
+      </Modal>
+
+      {/* Rename modal — change display_name (visible label).
+          Username + parent linkage stay put so logins / avatar
+          colours / profile membership are unaffected. */}
+      <Modal
+        isOpen={renameTarget !== null}
+        onClose={() => {
+          setRenameTarget(null);
+          setRenameValue("");
+          setRenameError(null);
+        }}
+        title={t("admin.users.renameModalTitle", {
+          defaultValue: "Renombrar",
+        })}
+        size="sm"
+      >
+        {renameTarget && (
+          <form onSubmit={handleRename} className="flex flex-col gap-4">
+            <p className="text-sm text-text-secondary">
+              {t("admin.users.renameModalHint", {
+                defaultValue:
+                  "Cambia el nombre que aparece en la app. El usuario interno (login) y el color del avatar no cambian.",
+              })}
+            </p>
+            <Input
+              label={t("admin.users.displayName")}
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              autoFocus
+              required
+              maxLength={64}
+            />
+            {renameError && (
+              <p className="text-xs text-error">{renameError}</p>
+            )}
+            <div className="flex justify-end gap-3">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  setRenameTarget(null);
+                  setRenameValue("");
+                  setRenameError(null);
+                }}
+              >
+                {t("common.cancel")}
+              </Button>
+              <Button type="submit" isLoading={setUserDisplayName.isPending}>
+                {t("common.save", { defaultValue: "Guardar" })}
               </Button>
             </div>
           </form>

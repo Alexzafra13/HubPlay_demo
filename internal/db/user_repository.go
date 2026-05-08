@@ -139,6 +139,19 @@ func (r *UserRepository) SetPIN(ctx context.Context, id, hash string) error {
 	return nil
 }
 
+// SetDisplayName renames the user (label only — username stays put,
+// avatar colour derived from username also stays put). Trims to a
+// reasonable max so a runaway paste doesn't fill the column.
+func (r *UserRepository) SetDisplayName(ctx context.Context, id, name string) error {
+	if err := r.q.UpdateUserDisplayName(ctx, sqlc.UpdateUserDisplayNameParams{
+		ID:          id,
+		DisplayName: name,
+	}); err != nil {
+		return fmt.Errorf("set display name: %w", err)
+	}
+	return nil
+}
+
 // SetMaxContentRating updates the per-profile rating cap. Empty
 // rating clears the cap (= profile sees everything).
 func (r *UserRepository) SetMaxContentRating(ctx context.Context, id, rating string) error {

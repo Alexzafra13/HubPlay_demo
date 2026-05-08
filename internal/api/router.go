@@ -330,6 +330,11 @@ func NewRouter(deps Dependencies) http.Handler {
 			// parent of a profile can hit it without holding the
 			// admin role.
 			r.Put("/users/{id}/pin", authHandler.SetPIN)
+			// Display-name rename — same authorisation matrix as
+			// SetPIN (admin OR parent-of-target OR self) so a parent
+			// can relabel their own profile members from the picker
+			// without needing the admin role.
+			r.Put("/users/{id}/display-name", userHandler.SetDisplayName)
 
 			// Signing key lifecycle (admin only). Every route here is
 			// destructive — guarded at the group level so a single

@@ -43,6 +43,12 @@ LIMIT ? OFFSET ?;
 -- name: UpdateUser :exec
 UPDATE users SET display_name = ?, role = ?, is_active = ? WHERE id = ?;
 
+-- name: UpdateUserDisplayName :exec
+-- Per-field update so callers (renaming a profile, an admin
+-- relabelling a user) don't need to round-trip the rest of the
+-- mutable surface.
+UPDATE users SET display_name = ? WHERE id = ?;
+
 -- name: UpdateUserRole :exec
 -- Promote / demote between user and admin. Caller-side gate keeps
 -- the primary admin (oldest role=admin row) immutable.

@@ -406,6 +406,23 @@ func (q *Queries) UpdateUserActive(ctx context.Context, arg UpdateUserActivePara
 	return err
 }
 
+const updateUserDisplayName = `-- name: UpdateUserDisplayName :exec
+UPDATE users SET display_name = ? WHERE id = ?
+`
+
+type UpdateUserDisplayNameParams struct {
+	DisplayName string `json:"display_name"`
+	ID          string `json:"id"`
+}
+
+// Per-field update so callers (renaming a profile, an admin
+// relabelling a user) don't need to round-trip the rest of the
+// mutable surface.
+func (q *Queries) UpdateUserDisplayName(ctx context.Context, arg UpdateUserDisplayNameParams) error {
+	_, err := q.db.ExecContext(ctx, updateUserDisplayName, arg.DisplayName, arg.ID)
+	return err
+}
+
 const updateUserMaxContentRating = `-- name: UpdateUserMaxContentRating :exec
 UPDATE users SET max_content_rating = ? WHERE id = ?
 `
