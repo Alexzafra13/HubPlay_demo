@@ -27,12 +27,14 @@ import {
 // gets a consistent experience between the dropdown and the page.
 //
 // Behavior modes:
-//   · /movies, /series, /search   → "filter mode": value mirrored
-//     to URL `?q=`, no dropdown (the page is the result surface).
+//   · /movies, /series, /search, /live-tv  → "filter mode": value
+//     mirrored to URL `?q=`, no dropdown (the page is the result
+//     surface). On /live-tv the query filters channels + programmes
+//     in place.
 //   · everywhere else             → "search mode": local query,
 //     full-width dropdown, Enter goes to /search?q=…
 
-const FILTER_ROUTES = ["/movies", "/series", "/search"];
+const FILTER_ROUTES = ["/movies", "/series", "/search", "/live-tv"];
 
 function isFilterRoute(pathname: string): boolean {
   return FILTER_ROUTES.some(
@@ -176,6 +178,11 @@ export function SearchBar() {
     if (filterMode) {
       if (location.pathname.startsWith("/search")) {
         return t("topbar.searchPlaceholder");
+      }
+      if (location.pathname.startsWith("/live-tv")) {
+        return t("liveTV.searchPlaceholder", {
+          defaultValue: "Busca canales o programas…",
+        });
       }
       const section = location.pathname.startsWith("/series")
         ? t("nav.series")

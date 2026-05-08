@@ -17,7 +17,6 @@ import {
   EPGGrid,
   HeroSpotlight,
   LiveTvSkeleton,
-  LiveTvTopBar,
   type ViewTab,
   PlayerOverlay,
   ProgramDetailModal,
@@ -104,22 +103,15 @@ export default function LiveTV() {
     },
     [setSearchParams],
   );
-  const setTab = useCallback(
-    (next: ViewTab) => updateParam("tab", next, "inicio"),
-    [updateParam],
-  );
   const setCategory = useCallback(
     (next: CategoryFilter) => updateParam("cat", next, "all"),
     [updateParam],
   );
-  const setSearch = useCallback(
-    (next: string) => updateParam("q", next, ""),
-    [updateParam],
-  );
-  const setFavoritesOnly = useCallback(
-    (next: boolean) => updateParam("fav", next ? "1" : "", ""),
-    [updateParam],
-  );
+  // tab / search / favouritesOnly are mirrored to the URL by callers
+  // outside this page (the global TopBar SearchBar mirrors `?q=`,
+  // the MainNav dropdown links to `/live-tv?tab=…&fav=1`). Reading
+  // them as URL state keeps this page passive — it just renders
+  // whichever combination the URL describes.
 
   // Migrate legacy `?tab=now|guide|discover|favorites` URLs (sidebar
   // links and bookmarks pre-2026-05-08) onto the new 2-tab vocabulary.
@@ -149,6 +141,7 @@ export default function LiveTV() {
   const playingChannel = useLiveTvPlayer((s) => s.channel);
   const overlayExpanded = useLiveTvPlayer((s) => s.expanded);
   const openPlayerStore = useLiveTvPlayer((s) => s.open);
+  const selectChannel = useLiveTvPlayer((s) => s.select);
   const collapsePlayer = useLiveTvPlayer((s) => s.collapse);
   const surfNext = useLiveTvPlayer((s) => s.surfNext);
   const surfPrev = useLiveTvPlayer((s) => s.surfPrev);
@@ -184,9 +177,21 @@ export default function LiveTV() {
     return () => window.removeEventListener("keydown", onKey);
   }, [playingChannel, overlayExpanded, surfNext, surfPrev]);
 
-  // Helper used by every "click a channel card" path on this page.
-  // Seeds the surf list with whichever subset is currently visible to
-  // the user so ↑/↓ matches what they're actually browsing.
+  // Plex-style click model:
+  //   - `selectPreview`: click on a channel card / EPG row puts the
+  //     channel in the hero (preview) and does NOT escalate to
+  //     fullscreen. Used by every "pick a channel" surface.
+  //   - `openPlayer`: explicit "Reproducir" / "Expandir" action
+  //     (hero play button, deep-link from /live-tv?channel=X). Goes
+  //     fullscreen.
+  // Both seed the surf list with whichever subset the user is
+  // currently browsing so ↑/↓ matches what they're seeing.
+  const selectPreview = useCallback(
+    (ch: Channel, surfList?: Channel[]) => {
+      selectChannel(ch, surfList ?? channels);
+    },
+    [selectChannel, channels],
+  );
   const openPlayer = useCallback(
     (ch: Channel, surfList?: Channel[]) => {
       openPlayerStore(ch, surfList ?? channels);
@@ -330,12 +335,31 @@ export default function LiveTV() {
   // Hero spotlight — preference, silent fallback and mode options live
   // in the dedicated hook so this page stays focused on layout.
   const {
-    items: heroItems,
-    label: heroLabel,
+    items: heroAutoItems,
+    label: heroAutoLabel,
     mode: heroMode,
     setMode: setHeroMode,
-    modeOptions: heroModeOptions,
   } = useHeroSpotlight({ channels, scheduleByChannel, favoriteSet });
+
+  // Effective hero feed: when the user has clicked a channel (Plex
+  // pattern → preview without fullscreen), the hero shows that
+  // channel. Otherwise we fall back to the auto-curated spotlight.
+  // The label flips to "Selected" so the user knows the hero is
+  // mirroring their click, not a curated suggestion.
+  const heroItems = useMemo(() => {
+    if (playingChannel) {
+      return [
+        {
+          channel: playingChannel,
+          nowPlaying: getNowPlaying(scheduleByChannel[playingChannel.id]) ?? null,
+        },
+      ];
+    }
+    return heroAutoItems;
+  }, [playingChannel, scheduleByChannel, heroAutoItems]);
+  const heroLabel = playingChannel
+    ? t("liveTV.heroLabelSelected", { defaultValue: "Canal seleccionado" })
+    : heroAutoLabel;
 
   // Topbar counter: number of channels *actually broadcasting now* — in IPTV
   // all active channels stream continuously, so this is simply the count of
@@ -387,24 +411,24 @@ export default function LiveTV() {
   return (
     <section
       data-theme="tv"
-      data-accent="lime"
       // Small top breathing room (pt-3) so the hero feels close to the
       // global TopBar without looking sliced off at the top edge.
+      // No `data-accent` override — the section inherits the global
+      // platform accent (teal) instead of the previous lime so the
+      // active state on chips, the now-line and the live-cell ring
+      // match the buttons elsewhere in the app.
       className="-mx-4 flex flex-col gap-6 px-4 pb-10 pt-3 md:-mx-6 md:px-6"
     >
-      <LiveTvTopBar
-        tab={tab}
-        onTab={setTab}
-        search={search}
-        onSearch={setSearch}
-        totalChannels={channels.length}
-        liveNow={liveNowCount}
-        heroMode={heroMode}
-        heroModeOptions={heroModeOptions}
-        onHeroModeChange={setHeroMode}
-        favoritesOnly={favoritesOnly}
-        onFavoritesOnlyChange={setFavoritesOnly}
-      />
+      {/* Page-level subnav and search live in the GLOBAL TopBar so
+          /live-tv keeps the same chrome as the rest of the app:
+          - the global SearchBar already filter-mode mirrors `?q=` on
+            this route (FILTER_ROUTES in SearchBar.tsx)
+          - Inicio / Explorar are reachable via the "TV en vivo"
+            dropdown in MainNav. We don't redraw a second nav strip
+            here.
+          - Hero settings (the gear) and the favourites filter live
+            inside their respective surfaces (hero overlay / Explorar
+            chips), not as a bar across the top. */}
 
       {tab === "inicio" && (
         <div className="flex flex-col gap-6">
@@ -425,7 +449,10 @@ export default function LiveTV() {
             channels={filteredChannels}
             scheduleByChannel={scheduleByChannel}
             activeChannelId={inicioActiveChannel?.id}
-            onSelectChannel={openPlayer}
+            // Plex-style: clicking a channel row swaps the hero
+            // (preview) instead of opening fullscreen. The hero's
+            // play button stays the explicit "go fullscreen" action.
+            onSelectChannel={selectPreview}
             onSelectProgram={openProgramDetail}
           />
         </div>
@@ -440,7 +467,9 @@ export default function LiveTV() {
           onCategoryChange={setCategory}
           channelsByCategory={channelsByCategory}
           scheduleByChannel={scheduleByChannel}
-          onOpen={openPlayer}
+          // Same Plex pattern as the EPG: card click previews on
+          // the hero, the hero's play button is the fullscreen action.
+          onOpen={selectPreview}
           favoriteSet={favoriteSet}
           onToggleFavorite={toggleFavorite}
           unhealthyChannels={unhealthyChannels}
