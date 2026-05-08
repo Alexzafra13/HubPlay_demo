@@ -6,28 +6,41 @@ import { useTranslation } from "react-i18next";
 
 import { SystemSettingsSection } from "./SystemSettingsSection";
 
-// Refresh cadence for the live stats. 30s matches the original behaviour
-// and is frequent enough to feel live without flooding the dir-walk on
-// the backend (image cache + transcode cache are filesystem walks).
+// Refresh cadence for the live stats. 30s matches the original
+// behaviour and is frequent enough to feel live without flooding the
+// dir-walk on the backend (image cache + transcode cache are
+// filesystem walks).
 const REFETCH_MS = 30_000;
 
-// Friendly labels for the canonical content_type vocabulary. Anything we
-// haven't named falls back to the raw value so a future "music" library
-// renders as "music" instead of disappearing.
-const CONTENT_TYPE_LABELS: Record<string, string> = {
-  movies: "contentTypes.movies",
-  shows: "contentTypes.tvShows",
-  livetv: "contentTypes.liveTV",
-};
+// SystemStatus — admin Sistema page.
+//
+// The previous iteration was a 4-column bento of stat cards split
+// into five sections (Servidor / Streaming / Runtime / Almacenamiento
+// / Bibliotecas). It read as machine-generated and exposed runtime
+// data (CPU cores, raw memory) that an admin rarely consults.
+//
+// This redesign trades the bento for editorial blocks:
+//   1. Identity strip — single line: version + uptime + clock.
+//   2. Estado — three health rows (DB / FFmpeg / URL pública)
+//      rendered as horizontal pills with copy that explains the
+//      problem when something is degraded, not just "Operativo".
+//   3. Conexión — bind address + base URL summary, leading directly
+//      into the editable settings section so an admin missing a
+//      URL pública sees the input the same scroll height.
+//   4. Streaming — sessions meter (active / max), HW accel state.
+//   5. Almacenamiento — three horizontal bars at the same scale so
+//      the eye registers which directory grew the most. Total size
+//      summed in the section header.
+//   6. Configuración — runtime-editable settings (existing panel).
+//   7. Avanzado — destructive ops kept at the bottom with a banner.
 
-// formatUptime turns seconds into a Plex-style "12d 3h 7m" string.
-// Days/hours collapse silently when zero so short uptimes don't show "0d".
+// ─── Helpers ────────────────────────────────────────────────────────
+
 function formatUptime(seconds: number): string {
   if (!seconds || seconds < 0) return "—";
   const days = Math.floor(seconds / 86_400);
   const hours = Math.floor((seconds % 86_400) / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
-
   const parts: string[] = [];
   if (days > 0) parts.push(`${days}d`);
   if (hours > 0 || days > 0) parts.push(`${hours}h`);
@@ -35,11 +48,8 @@ function formatUptime(seconds: number): string {
   return parts.join(" ");
 }
 
-// formatBytes — short human-readable size. Returns "—" for zero so
-// missing/empty caches read clearly. Sub-MiB is integer; MiB+ is one
-// decimal — the panel is at-a-glance, not a forensic tool.
 function formatBytes(n: number): string {
-  if (!n || n <= 0) return "—";
+  if (!n || n <= 0) return "0 B";
   const units = ["B", "KiB", "MiB", "GiB", "TiB"];
   let i = 0;
   let v = n;
@@ -50,63 +60,13 @@ function formatBytes(n: number): string {
   return i <= 1 ? `${Math.round(v)} ${units[i]}` : `${v.toFixed(1)} ${units[i]}`;
 }
 
-// formatServerTime — local time only, no date (the date is implied by the
-// 30s polling cadence). The TZ tag is rendered separately in the hint.
 function formatServerTime(iso: string): string {
   if (!iso) return "—";
-  const d = new Date(iso);
-  return d.toLocaleTimeString();
+  return new Date(iso).toLocaleTimeString();
 }
 
-interface StatCardProps {
-  label: string;
-  value: React.ReactNode;
-  hint?: React.ReactNode;
-}
+// ─── Page ──────────────────────────────────────────────────────────
 
-function StatCard({ label, value, hint }: StatCardProps) {
-  return (
-    <div className="flex flex-col gap-2 rounded-[--radius-lg] bg-bg-card border border-border p-5">
-      <span className="text-xs font-medium uppercase tracking-wider text-text-muted">
-        {label}
-      </span>
-      <span className="text-lg font-semibold text-text-primary break-all">
-        {value}
-      </span>
-      {hint && (
-        <span className="text-xs text-text-muted break-all">{hint}</span>
-      )}
-    </div>
-  );
-}
-
-interface SectionProps {
-  title: string;
-  children: React.ReactNode;
-}
-
-function Section({ title, children }: SectionProps) {
-  return (
-    <section className="flex flex-col gap-3">
-      <h3 className="text-xs font-semibold uppercase tracking-wider text-text-muted">
-        {title}
-      </h3>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {children}
-      </div>
-    </section>
-  );
-}
-
-// SystemStatus — "what's going on with my server right now" at a glance.
-// Lives at /admin/system/status as the default sub-tab inside the System
-// page. Mirrors what Plex puts under Status > Dashboard: the server's
-// identity and a real-time health snapshot.
-//
-// Intentionally drops the Go-runtime power-user fields that the previous
-// iteration showed (goroutines, GC pause, go_version, OS/arch). They are
-// useful for debugging but noise for an admin who just wants to know
-// the server is alive.
 export default function SystemStatus() {
   const { t } = useTranslation();
   const {
@@ -141,42 +101,28 @@ export default function SystemStatus() {
   }
 
   return (
-    <div className="flex flex-col gap-8">
-      <SystemHeader
+    <div className="flex flex-col gap-12">
+      <IdentityStrip
         stats={stats}
         dataUpdatedAt={dataUpdatedAt}
         isFetching={isFetching}
         onRefresh={() => refetch()}
       />
 
-      <Section title={t("admin.system.sectionServer")}>
-        <ServerCards stats={stats} />
-      </Section>
+      <HealthSection stats={stats} />
 
-      <Section title={t("admin.system.sectionStreaming")}>
-        <StreamingCards stats={stats} />
-      </Section>
+      <ConnectionSection stats={stats} />
 
-      <Section title={t("admin.system.sectionRuntime")}>
-        <RuntimeCards stats={stats} />
-      </Section>
+      <StreamingSection stats={stats} />
 
-      <Section title={t("admin.system.sectionStorage")}>
-        <StorageCards stats={stats} />
-      </Section>
-
-      <Section title={t("admin.system.sectionLibraries")}>
-        <LibraryCards stats={stats} />
-      </Section>
+      <StorageSection stats={stats} />
 
       <SystemSettingsSection />
 
       {/* Advanced — destructive / power-user actions kept at the
           bottom of the page so the eye doesn't land on them by
-          default. The warning banner is the same one the previous
-          /admin/system/advanced sub-tab carried, just inlined now
-          that System collapsed to a single page. */}
-      <section className="flex flex-col gap-3 pt-4 border-t border-border-subtle">
+          default. */}
+      <section className="flex flex-col gap-3 pt-6 border-t border-border-subtle">
         <h3 className="text-xs font-semibold uppercase tracking-wider text-text-muted">
           {t("admin.system.sectionAdvanced")}
         </h3>
@@ -192,35 +138,39 @@ export default function SystemStatus() {
   );
 }
 
-interface HeaderProps {
+// ─── Identity strip ────────────────────────────────────────────────
+
+interface IdentityStripProps {
   stats: SystemStats;
   dataUpdatedAt: number;
   isFetching: boolean;
   onRefresh: () => void;
 }
 
-function SystemHeader({ stats, dataUpdatedAt, isFetching, onRefresh }: HeaderProps) {
+function IdentityStrip({ stats, dataUpdatedAt, isFetching, onRefresh }: IdentityStripProps) {
   const { t } = useTranslation();
-
-  // Aggregate "is everything green?" — single traffic light. DB ping +
-  // FFmpeg detection are the two an admin checks first when anything
-  // misbehaves; weighting them equally surfaces the symptom immediately.
-  const dbOk = stats.database.ok;
-  const ffmpegOk = stats.ffmpeg.found;
-  const allHealthy = dbOk && ffmpegOk;
-
+  const allHealthy = stats.database.ok && stats.ffmpeg.found;
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3">
-      <div className="flex items-center gap-3">
-        <h2 className="text-lg font-semibold text-text-primary">
-          {t("admin.system.title")}
-        </h2>
-        <Badge variant={allHealthy ? "success" : "error"}>
-          {allHealthy ? t("admin.system.healthy") : t("admin.system.degraded")}
-        </Badge>
-      </div>
-
-      <div className="flex items-center gap-3 text-xs text-text-muted">
+    <header className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+      <span
+        aria-hidden
+        className="h-2 w-2 rounded-full"
+        style={{
+          background: allHealthy ? "var(--color-success)" : "var(--color-error)",
+        }}
+      />
+      <span className="font-semibold text-text-primary">
+        HubPlay {stats.server.version}
+      </span>
+      <span className="text-text-muted">·</span>
+      <span className="text-text-secondary">
+        {t("admin.summary.uptime", { uptime: formatUptime(stats.server.uptime_seconds) })}
+      </span>
+      <span className="text-text-muted">·</span>
+      <span className="text-text-secondary tabular-nums">
+        {formatServerTime(stats.server.server_time)} {stats.server.timezone}
+      </span>
+      <span className="ml-auto flex items-center gap-3 text-xs text-text-muted">
         {dataUpdatedAt > 0 && (
           <span>
             {t("admin.system.updated", {
@@ -236,204 +186,359 @@ function SystemHeader({ stats, dataUpdatedAt, isFetching, onRefresh }: HeaderPro
         >
           {isFetching ? t("admin.system.refreshing") : t("admin.system.refresh")}
         </Button>
+      </span>
+    </header>
+  );
+}
+
+// ─── Estado ─────────────────────────────────────────────────────────
+
+function HealthSection({ stats }: { stats: SystemStats }) {
+  const { t } = useTranslation();
+
+  const rows: HealthRowProps[] = [
+    {
+      label: t("admin.system.database"),
+      ok: stats.database.ok,
+      okText: t("admin.systemHealth.dbOk", {
+        defaultValue: "Operativo · {{size}}",
+        size: formatBytes(stats.database.size_bytes),
+      }),
+      errorText: stats.database.error ?? t("admin.system.degraded"),
+      detail: stats.database.path,
+    },
+    {
+      label: "FFmpeg",
+      ok: stats.ffmpeg.found,
+      okText: t("admin.systemHealth.ffmpegOk", {
+        defaultValue: "Encontrado · {{path}}",
+        path: stats.ffmpeg.path,
+      }),
+      errorText: t("admin.system.ffmpegMissing"),
+      detail: stats.ffmpeg.found
+        ? undefined
+        : t("admin.systemHealth.ffmpegMissingHint", {
+            defaultValue:
+              "Instala ffmpeg en el host o monta el binario en el contenedor — sin él no hay transcodificación.",
+          }),
+    },
+    {
+      label: t("admin.system.baseURL"),
+      ok: !!stats.server.base_url,
+      okText: stats.server.base_url || "—",
+      errorText: t("admin.systemHealth.baseURLMissing", {
+        defaultValue: "Sin configurar",
+      }),
+      detail: stats.server.base_url
+        ? undefined
+        : t("admin.system.baseURLUnset"),
+    },
+  ];
+
+  return (
+    <section className="flex flex-col gap-3">
+      <h2 className="text-base font-semibold text-text-primary">
+        {t("admin.systemHealth.title", { defaultValue: "Estado" })}
+      </h2>
+      <ul className="flex flex-col divide-y divide-border-subtle rounded-[--radius-lg] border border-border bg-bg-card">
+        {rows.map((r) => (
+          <HealthRow key={r.label} {...r} />
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+interface HealthRowProps {
+  label: string;
+  ok: boolean;
+  okText: string;
+  errorText: string;
+  detail?: string;
+}
+
+function HealthRow({ label, ok, okText, errorText, detail }: HealthRowProps) {
+  return (
+    <li className="flex flex-wrap items-center gap-3 px-5 py-3.5 text-sm">
+      <span className="min-w-[110px] font-medium text-text-primary">
+        {label}
+      </span>
+      <Badge variant={ok ? "success" : "error"}>
+        {ok ? "OK" : "FALLO"}
+      </Badge>
+      <span className="text-text-secondary truncate flex-1 min-w-0 font-mono text-xs">
+        {ok ? okText : errorText}
+      </span>
+      {detail && (
+        <span className="basis-full pl-[126px] text-xs text-text-muted">
+          {detail}
+        </span>
+      )}
+    </li>
+  );
+}
+
+// ─── Conexión ──────────────────────────────────────────────────────
+
+function ConnectionSection({ stats }: { stats: SystemStats }) {
+  const { t } = useTranslation();
+  return (
+    <section className="flex flex-col gap-3">
+      <h2 className="text-base font-semibold text-text-primary">
+        {t("admin.systemConnection.title", { defaultValue: "Conexión" })}
+      </h2>
+      <p className="text-sm text-text-muted">
+        {t("admin.systemConnection.hint", {
+          defaultValue:
+            "El servidor escucha en la dirección de abajo y se identifica externamente con la URL pública (la editas en Configuración).",
+        })}
+      </p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <ConnectionField
+          label={t("admin.system.bindAddress")}
+          value={stats.server.bind_address || "—"}
+          hint={t("admin.systemConnection.bindHint", {
+            defaultValue: "Configurada vía hubplay.yaml o $HUBPLAY_SERVER_HOST/PORT.",
+          })}
+        />
+        <ConnectionField
+          label={t("admin.system.baseURL")}
+          value={stats.server.base_url || "—"}
+          hint={
+            stats.server.base_url
+              ? undefined
+              : t("admin.system.baseURLUnset")
+          }
+        />
       </div>
+    </section>
+  );
+}
+
+function ConnectionField({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+}) {
+  return (
+    <div className="flex flex-col gap-1 rounded-[--radius-md] border border-border bg-bg-card px-4 py-3">
+      <span className="text-xs font-medium uppercase tracking-wider text-text-muted">
+        {label}
+      </span>
+      <span className="text-base font-mono text-text-primary break-all">
+        {value}
+      </span>
+      {hint && <span className="text-xs text-text-muted">{hint}</span>}
     </div>
   );
 }
 
-function ServerCards({ stats }: { stats: SystemStats }) {
+// ─── Streaming ──────────────────────────────────────────────────────
+
+function StreamingSection({ stats }: { stats: SystemStats }) {
   const { t } = useTranslation();
-  const dbOk = stats.database.ok;
-  const ffmpegOk = stats.ffmpeg.found;
+  const { transcode_sessions_active, transcode_sessions_max } = stats.streaming;
+  // The meter runs from 0..max. When max == 0 (unlimited config) the
+  // bar reads "ilimitado" and we just show the active count without
+  // a denominator — a meter pinned at "X / ∞" looks broken.
+  const max = transcode_sessions_max;
+  const active = transcode_sessions_active;
+  const pct = max > 0 ? Math.min(100, (active / max) * 100) : 0;
 
-  // BaseURL hint: when empty the operator hasn't configured a public
-  // URL — point at the editable section below instead of the (now
-  // removed) "edit YAML" string. The actual editing surface lives in
-  // SystemSettingsSection rendered at the bottom of the page.
-  const baseURLValue = stats.server.base_url || "—";
-  const baseURLHint = stats.server.base_url
-    ? undefined
-    : t("admin.system.baseURLUnset");
-
-  return (
-    <>
-      <StatCard
-        label={t("admin.system.version")}
-        value={stats.server.version || "—"}
-      />
-      <StatCard
-        label={t("admin.system.uptime")}
-        value={<span className="tabular-nums">{formatUptime(stats.server.uptime_seconds)}</span>}
-      />
-      <StatCard
-        label={t("admin.system.bindAddress")}
-        value={<span className="font-mono text-sm">{stats.server.bind_address || "—"}</span>}
-      />
-      <StatCard
-        label={t("admin.system.baseURL")}
-        value={<span className="font-mono text-sm">{baseURLValue}</span>}
-        hint={baseURLHint}
-      />
-      <StatCard
-        label={t("admin.system.serverTime")}
-        value={<span className="tabular-nums">{formatServerTime(stats.server.server_time)}</span>}
-        hint={`${t("admin.system.timezone")}: ${stats.server.timezone}`}
-      />
-      <StatCard
-        label={t("admin.system.database")}
-        value={
-          <Badge variant={dbOk ? "success" : "error"}>
-            {dbOk ? t("admin.system.healthy") : t("admin.system.degraded")}
-          </Badge>
-        }
-        hint={stats.database.error || formatBytes(stats.database.size_bytes)}
-      />
-      <StatCard
-        label={t("admin.system.ffmpeg")}
-        value={
-          <Badge variant={ffmpegOk ? "success" : "error"}>
-            {ffmpegOk ? t("admin.system.ffmpegFound") : t("admin.system.ffmpegMissing")}
-          </Badge>
-        }
-        hint={stats.ffmpeg.path || undefined}
-      />
-    </>
-  );
-}
-
-function StreamingCards({ stats }: { stats: SystemStats }) {
-  const { t } = useTranslation();
-
-  const max = stats.streaming.transcode_sessions_max;
-  const active = stats.streaming.transcode_sessions_active;
-  const transcodeHint =
-    max > 0
-      ? t("admin.system.transcodeSlots", { active, max })
-      : t("admin.system.transcodeUnlimited", { active });
-
-  // HW accel: three distinct states surfaced here.
-  //  1) Disabled in settings       → "Disabled" + pointer to settings section
-  //  2) Enabled but none detected  → "None" + actionable host-side hint
-  //  3) Enabled and selected       → uppercase ID + encoder hint
+  const accelEnabled = stats.ffmpeg.hw_accel_enabled;
   const selected = stats.ffmpeg.hw_accel_selected;
-  const enabled = stats.ffmpeg.hw_accel_enabled;
+  const available = stats.ffmpeg.hw_accels_available ?? [];
   let accelLabel: string;
-  let accelHint: string | undefined;
-  if (!enabled) {
+  let accelTone: "success" | "warning" | "default";
+  if (!accelEnabled) {
     accelLabel = t("admin.system.hwAccelDisabledLabel");
-    accelHint = t("admin.system.hwAccelDisabledPointer");
+    accelTone = "default";
   } else if (!selected || selected === "none") {
     accelLabel = t("admin.system.hwAccelNone");
-    accelHint = t("admin.system.hwAccelNoneHint");
+    accelTone = "warning";
   } else {
     accelLabel = selected.toUpperCase();
-    accelHint = stats.ffmpeg.hw_accel_encoder
-      ? `${t("admin.system.hwAccelEncoder")}: ${stats.ffmpeg.hw_accel_encoder}`
-      : undefined;
+    accelTone = "success";
   }
 
-  const availableLabel =
-    stats.ffmpeg.hw_accels_available.length > 0
-      ? stats.ffmpeg.hw_accels_available.map((a) => a.toUpperCase()).join(", ")
-      : "—";
-
   return (
-    <>
-      <StatCard
-        label={t("admin.system.activeTranscodes")}
-        value={<span className="tabular-nums">{active}</span>}
-        hint={transcodeHint}
-      />
-      <StatCard
-        label={t("admin.system.hwAccelSelected")}
-        value={accelLabel}
-        hint={accelHint}
-      />
-      <StatCard
-        label={t("admin.system.hwAccelAvailable")}
-        value={<span className="text-sm font-medium">{availableLabel}</span>}
-      />
-    </>
+    <section className="flex flex-col gap-4">
+      <h2 className="text-base font-semibold text-text-primary">
+        {t("admin.system.sectionStreaming")}
+      </h2>
+      <div className="grid gap-4 lg:grid-cols-2">
+        {/* Sessions meter */}
+        <div className="flex flex-col gap-3 rounded-[--radius-lg] border border-border bg-bg-card p-5">
+          <div className="flex items-baseline justify-between">
+            <span className="text-xs font-medium uppercase tracking-wider text-text-muted">
+              {t("admin.system.activeTranscodes")}
+            </span>
+            <span className="text-xs text-text-muted tabular-nums">
+              {max > 0
+                ? t("admin.system.transcodeSlots", { active, max })
+                : t("admin.system.transcodeUnlimited", { active })}
+            </span>
+          </div>
+          <div className="flex items-baseline gap-2">
+            <span className="text-3xl font-semibold text-text-primary tabular-nums">
+              {active}
+            </span>
+            {max > 0 && (
+              <span className="text-base text-text-muted tabular-nums">
+                / {max}
+              </span>
+            )}
+          </div>
+          {max > 0 && (
+            <div className="h-1 w-full overflow-hidden rounded-full bg-bg-elevated">
+              <div
+                className="h-full transition-all"
+                style={{
+                  width: `${pct}%`,
+                  background:
+                    pct < 70
+                      ? "var(--color-success)"
+                      : pct < 95
+                        ? "var(--color-warning)"
+                        : "var(--color-error)",
+                }}
+              />
+            </div>
+          )}
+        </div>
+
+        {/* Hardware acceleration */}
+        <div className="flex flex-col gap-3 rounded-[--radius-lg] border border-border bg-bg-card p-5">
+          <div className="flex items-baseline justify-between">
+            <span className="text-xs font-medium uppercase tracking-wider text-text-muted">
+              {t("admin.system.hwAccelSelected")}
+            </span>
+            {available.length > 0 && (
+              <span className="text-xs text-text-muted truncate">
+                {t("admin.system.hwAccelAvailable")}:{" "}
+                {available.map((a) => a.toUpperCase()).join(", ")}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-2xl font-semibold text-text-primary">
+              {accelLabel}
+            </span>
+            <Badge
+              variant={
+                accelTone === "success"
+                  ? "success"
+                  : accelTone === "warning"
+                    ? "warning"
+                    : "default"
+              }
+            >
+              {accelEnabled
+                ? t("admin.system.hwAccelEnabled", { defaultValue: "Activado" })
+                : t("admin.system.hwAccelDisabledLabel")}
+            </Badge>
+          </div>
+          <p className="text-xs text-text-muted">
+            {accelEnabled
+              ? stats.ffmpeg.hw_accel_encoder
+                ? `${t("admin.system.hwAccelEncoder")}: ${stats.ffmpeg.hw_accel_encoder}`
+                : t("admin.system.hwAccelNoneHint")
+              : t("admin.system.hwAccelDisabledPointer")}
+          </p>
+        </div>
+      </div>
+    </section>
   );
 }
 
-function RuntimeCards({ stats }: { stats: SystemStats }) {
-  const { t } = useTranslation();
-  const r = stats.runtime;
-  // Intentionally slimmed down vs the previous iteration. The fields
-  // dropped (goroutines, GC pause, go_version, OS/arch) are still
-  // returned by the backend so a power user can curl them; they don't
-  // belong on the default admin view.
-  return (
-    <>
-      <StatCard
-        label={t("admin.system.memoryAlloc")}
-        value={<span className="tabular-nums">{r.memory_alloc_mb} MiB</span>}
-        hint={`${t("admin.system.memorySys")}: ${r.memory_sys_mb} MiB`}
-      />
-      <StatCard
-        label={t("admin.system.cpuCount")}
-        value={<span className="tabular-nums">{r.cpu_count}</span>}
-      />
-    </>
-  );
-}
+// ─── Almacenamiento ─────────────────────────────────────────────────
 
-function StorageCards({ stats }: { stats: SystemStats }) {
+function StorageSection({ stats }: { stats: SystemStats }) {
   const { t } = useTranslation();
   const s = stats.storage;
-  // Cache hint: when the size is zero, instead of just showing "—" we
-  // explain why (no scans yet, no transcodes yet). Avoids the "is this
-  // broken?" confusion on a fresh install.
-  const imageHint = s.image_dir_bytes > 0 ? s.image_dir_path : t("admin.system.cacheEmptyImages", { path: s.image_dir_path });
-  const transcodeHint = s.transcode_cache_bytes > 0 ? s.transcode_cache_path : t("admin.system.cacheEmptyTranscodes", { path: s.transcode_cache_path });
-
+  const dbBytes = stats.database.size_bytes;
+  const total = (s.image_dir_bytes ?? 0) + (s.transcode_cache_bytes ?? 0) + dbBytes;
+  // Bars share the same denominator (the largest of the three) so
+  // the eye registers relative size at a glance — a 2 GiB image
+  // cache vs a 30 MiB DB reads as a real ratio, not three numbers.
+  const denom = Math.max(s.image_dir_bytes, s.transcode_cache_bytes, dbBytes, 1);
+  const rows = [
+    {
+      label: t("admin.system.imageDir"),
+      bytes: s.image_dir_bytes,
+      path: s.image_dir_path,
+    },
+    {
+      label: t("admin.system.transcodeCache"),
+      bytes: s.transcode_cache_bytes,
+      path: s.transcode_cache_path,
+    },
+    {
+      label: t("admin.system.databaseSize"),
+      bytes: dbBytes,
+      path: stats.database.path,
+    },
+  ];
   return (
-    <>
-      <StatCard
-        label={t("admin.system.imageDir")}
-        value={<span className="tabular-nums">{formatBytes(s.image_dir_bytes)}</span>}
-        hint={imageHint}
-      />
-      <StatCard
-        label={t("admin.system.transcodeCache")}
-        value={<span className="tabular-nums">{formatBytes(s.transcode_cache_bytes)}</span>}
-        hint={transcodeHint}
-      />
-      <StatCard
-        label={t("admin.system.databaseSize")}
-        value={<span className="tabular-nums">{formatBytes(stats.database.size_bytes)}</span>}
-        hint={stats.database.path}
-      />
-    </>
+    <section className="flex flex-col gap-3">
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 className="text-base font-semibold text-text-primary">
+          {t("admin.system.sectionStorage")}
+        </h2>
+        <span className="text-sm text-text-muted tabular-nums">
+          {t("admin.systemStorage.total", {
+            defaultValue: "Total {{size}}",
+            size: formatBytes(total),
+          })}
+        </span>
+      </div>
+      <div className="flex flex-col gap-3 rounded-[--radius-lg] border border-border bg-bg-card p-5">
+        {rows.map((r) => (
+          <StorageRow
+            key={r.label}
+            label={r.label}
+            bytes={r.bytes}
+            path={r.path}
+            denom={denom}
+          />
+        ))}
+      </div>
+    </section>
   );
 }
 
-function LibraryCards({ stats }: { stats: SystemStats }) {
-  const { t } = useTranslation();
-  const l = stats.libraries;
+interface StorageRowProps {
+  label: string;
+  bytes: number;
+  path?: string;
+  denom: number;
+}
 
-  // Total + per-type rollup. Backend already sorts by_type alphabetically
-  // so the card order is stable across renders.
+function StorageRow({ label, bytes, path, denom }: StorageRowProps) {
+  const pct = denom > 0 ? (bytes / denom) * 100 : 0;
   return (
-    <>
-      <StatCard
-        label={t("admin.system.totalLibraries")}
-        value={<span className="tabular-nums">{l.total}</span>}
-        hint={t("admin.system.totalItems", { count: l.items_total })}
-      />
-      {l.by_type.map((bucket) => {
-        const labelKey = CONTENT_TYPE_LABELS[bucket.content_type];
-        const heading = labelKey ? t(labelKey) : bucket.content_type;
-        return (
-          <StatCard
-            key={bucket.content_type}
-            label={heading}
-            value={<span className="tabular-nums">{bucket.items}</span>}
-            hint={t("admin.system.libraryBucketHint", { count: bucket.count })}
-          />
-        );
-      })}
-    </>
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-baseline justify-between gap-3 text-sm">
+        <span className="font-medium text-text-primary">{label}</span>
+        <span className="tabular-nums text-text-secondary">
+          {formatBytes(bytes)}
+        </span>
+      </div>
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-bg-elevated">
+        <div
+          className="h-full bg-accent transition-all"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      {path && (
+        <span className="text-[11px] font-mono text-text-muted truncate">
+          {path}
+        </span>
+      )}
+    </div>
   );
 }
