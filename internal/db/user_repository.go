@@ -48,6 +48,13 @@ type User struct {
 	// Set true on admin-driven create / reset; cleared automatically
 	// when the user finishes a successful change.
 	PasswordChangeRequired bool
+
+	// AccessExpiresAt, when set, marks a temporary-access window.
+	// Login + middleware reject after this timestamp; nil = no
+	// expiry (permanent access). Lazy enforcement — there's no
+	// background job that flips is_active automatically; the JWT
+	// TTL bounds how long a stale token can outlive its expiry.
+	AccessExpiresAt *time.Time
 }
 
 // IsProfile is the canonical readability helper around `ParentUserID`.
@@ -142,6 +149,65 @@ func (r *UserRepository) SetMaxContentRating(ctx context.Context, id, rating str
 		return fmt.Errorf("set content rating: %w", err)
 	}
 	return nil
+}
+
+// SetRole flips the user between "user" and "admin". The handler
+// gate stops the primary admin from being demoted; this method
+// trusts the caller, by design.
+func (r *UserRepository) SetRole(ctx context.Context, id, role string) error {
+	if err := r.q.UpdateUserRole(ctx, sqlc.UpdateUserRoleParams{
+		ID:   id,
+		Role: role,
+	}); err != nil {
+		return fmt.Errorf("set role: %w", err)
+	}
+	return nil
+}
+
+// SetActive soft-disables / re-enables a user. Login + middleware
+// reject on is_active=false. The row and every per-user table stays
+// intact — re-enabling restores access without a recovery flow.
+func (r *UserRepository) SetActive(ctx context.Context, id string, active bool) error {
+	if err := r.q.UpdateUserActive(ctx, sqlc.UpdateUserActiveParams{
+		ID:       id,
+		IsActive: active,
+	}); err != nil {
+		return fmt.Errorf("set active: %w", err)
+	}
+	return nil
+}
+
+// SetAccessExpiresAt updates the temporary-access deadline. Pass nil
+// to clear (= permanent access). Lazy enforcement: Login +
+// middleware compare against time.Now() so we never need a job to
+// flip is_active automatically.
+func (r *UserRepository) SetAccessExpiresAt(ctx context.Context, id string, expiresAt *time.Time) error {
+	var nt sql.NullTime
+	if expiresAt != nil {
+		nt = sql.NullTime{Time: expiresAt.UTC(), Valid: true}
+	}
+	if err := r.q.UpdateUserAccessExpiresAt(ctx, sqlc.UpdateUserAccessExpiresAtParams{
+		ID:              id,
+		AccessExpiresAt: nt,
+	}); err != nil {
+		return fmt.Errorf("set access expires at: %w", err)
+	}
+	return nil
+}
+
+// PrimaryAdminID returns the oldest admin's user_id. Used to gate
+// destructive actions on the primary admin row from the admin
+// table. Empty string + nil error when no admin exists yet (cold-
+// start, before setup wizard runs).
+func (r *UserRepository) PrimaryAdminID(ctx context.Context) (string, error) {
+	id, err := r.q.GetPrimaryAdminID(ctx)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("primary admin id: %w", err)
+	}
+	return id, nil
 }
 
 // ListProfilesForOwner returns the parent account row plus all child
@@ -262,6 +328,7 @@ func userFromGetRow(r sqlc.GetUserByIDRow) User {
 		PINHash:                r.PinHash.String,
 		MaxContentRating:       r.MaxContentRating.String,
 		PasswordChangeRequired: r.PasswordChangeRequired,
+		AccessExpiresAt:        nullTimeToPtr(r.AccessExpiresAt),
 	}
 }
 
@@ -281,6 +348,7 @@ func userFromGetByUsernameRow(r sqlc.GetUserByUsernameRow) User {
 		PINHash:                r.PinHash.String,
 		MaxContentRating:       r.MaxContentRating.String,
 		PasswordChangeRequired: r.PasswordChangeRequired,
+		AccessExpiresAt:        nullTimeToPtr(r.AccessExpiresAt),
 	}
 }
 
@@ -298,6 +366,7 @@ func userFromListRow(r sqlc.ListUsersRow) User {
 		PINHash:                r.PinHash.String,
 		MaxContentRating:       r.MaxContentRating.String,
 		PasswordChangeRequired: r.PasswordChangeRequired,
+		AccessExpiresAt:        nullTimeToPtr(r.AccessExpiresAt),
 	}
 }
 
@@ -315,6 +384,7 @@ func userFromProfilesRow(r sqlc.ListProfilesForOwnerRow) User {
 		PINHash:                r.PinHash.String,
 		MaxContentRating:       r.MaxContentRating.String,
 		PasswordChangeRequired: r.PasswordChangeRequired,
+		AccessExpiresAt:        nullTimeToPtr(r.AccessExpiresAt),
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"hubplay/internal/db"
 )
@@ -63,5 +64,47 @@ func (s *Service) SetMaxContentRating(ctx context.Context, id, rating string) er
 		return fmt.Errorf("set max content rating: %w", err)
 	}
 	s.logger.Info("max content rating set", "user_id", id, "rating", rating)
+	return nil
+}
+
+// SetRole promotes / demotes a user between "user" and "admin". The
+// handler is responsible for the primary-admin gate.
+func (s *Service) SetRole(ctx context.Context, id, role string) error {
+	if err := s.users.SetRole(ctx, id, role); err != nil {
+		return fmt.Errorf("set role: %w", err)
+	}
+	s.logger.Info("user role changed", "user_id", id, "role", role)
+	return nil
+}
+
+// SetActive flips the is_active flag. False = login rejected, JWT
+// middleware rejects subsequent requests; row stays in the DB so
+// flipping back true restores everything.
+func (s *Service) SetActive(ctx context.Context, id string, active bool) error {
+	if err := s.users.SetActive(ctx, id, active); err != nil {
+		return fmt.Errorf("set active: %w", err)
+	}
+	s.logger.Info("user active state changed", "user_id", id, "active", active)
+	return nil
+}
+
+// PrimaryAdminID returns the oldest admin's id. Used by the admin
+// users table to disable destructive actions on the bootstrap admin.
+func (s *Service) PrimaryAdminID(ctx context.Context) (string, error) {
+	return s.users.PrimaryAdminID(ctx)
+}
+
+// SetAccessExpiresAt sets / clears the temporary-access deadline.
+// Pass nil for permanent. The auth service is the consumer: Login
+// + middleware reject after this stamp.
+func (s *Service) SetAccessExpiresAt(ctx context.Context, id string, expiresAt *time.Time) error {
+	if err := s.users.SetAccessExpiresAt(ctx, id, expiresAt); err != nil {
+		return fmt.Errorf("set access expires at: %w", err)
+	}
+	if expiresAt == nil {
+		s.logger.Info("user access set to permanent", "user_id", id)
+	} else {
+		s.logger.Info("user access window set", "user_id", id, "expires_at", *expiresAt)
+	}
 	return nil
 }

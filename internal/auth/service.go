@@ -190,6 +190,14 @@ func (s *Service) Login(ctx context.Context, username, password, deviceName, dev
 		return nil, fmt.Errorf("login lookup: %w", err)
 	}
 
+	// Temporary-access window check. Lazy enforcement — no
+	// background job; the comparison happens here on every login
+	// AND inside the JWT middleware (so an already-issued token
+	// doesn't outlive the deadline by more than the JWT TTL).
+	if user.AccessExpiresAt != nil && !user.AccessExpiresAt.After(s.clock.Now()) {
+		return nil, fmt.Errorf("login: %w", domain.ErrAccountDisabled)
+	}
+
 	if !user.IsActive {
 		return nil, fmt.Errorf("login: %w", domain.ErrAccountDisabled)
 	}
@@ -313,6 +321,22 @@ func (s *Service) ValidateToken(ctx context.Context, tokenStr string) (*Claims, 
 	}, tokenStr)
 	if err != nil {
 		return nil, fmt.Errorf("validate: %w", domain.ErrInvalidToken)
+	}
+	// Temporary-access window: the JWT may still be cryptographically
+	// valid but the user's access window may have closed since the
+	// token was issued. Lazy check at every request — bounded
+	// staleness equals the JWT TTL (15 min default), no background
+	// job. We swallow the lookup error here because forcing every
+	// authed request to depend on a DB hit would tank latency on
+	// the hot path; if the user vanished mid-flight the next downstream
+	// repo call returns NotFound anyway.
+	if user, err := s.users.GetByID(ctx, claims.UserID); err == nil && user != nil {
+		if user.AccessExpiresAt != nil && !user.AccessExpiresAt.After(s.clock.Now()) {
+			return nil, fmt.Errorf("validate: %w", domain.ErrAccountDisabled)
+		}
+		if !user.IsActive {
+			return nil, fmt.Errorf("validate: %w", domain.ErrAccountDisabled)
+		}
 	}
 	return claims, nil
 }
@@ -582,8 +606,10 @@ func (s *Service) ChangePassword(ctx context.Context, userID, current, next stri
 	// caller didn't supply one. Matches the UX of "you just typed
 	// the auto-generated password to log in, you shouldn't have to
 	// type it again" — but if `current` is supplied we still verify
-	// it as a belt-and-braces measure.
-	if !(user.PasswordChangeRequired && current == "") {
+	// it as a belt-and-braces measure. De Morgan'd from the obvious
+	// `!(must_change && current=="")` so staticcheck QF1001 stays
+	// quiet.
+	if !user.PasswordChangeRequired || current != "" {
 		if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(current)); err != nil {
 			return fmt.Errorf("change password: %w", domain.ErrInvalidPassword)
 		}

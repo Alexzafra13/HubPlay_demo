@@ -487,6 +487,32 @@ export class ApiClient {
     });
   }
 
+  /** Promote / demote between user and admin. The primary admin
+   *  (oldest by created_at) is gated server-side and returns 403. */
+  async setUserRole(userId: string, role: "user" | "admin"): Promise<void> {
+    return this.request<void>("PUT", `/users/${userId}/role`, {
+      body: { role },
+    });
+  }
+
+  /** Soft-disable / re-enable a user. is_active=false rejects login
+   *  and middleware; the row stays put so flipping back true
+   *  restores access without a recovery flow. */
+  async setUserActive(userId: string, isActive: boolean): Promise<void> {
+    return this.request<void>("PUT", `/users/${userId}/active`, {
+      body: { is_active: isActive },
+    });
+  }
+
+  /** Sets a temporary access window in days; 0 (or omitted) clears
+   *  the deadline = permanent access. Server computes the actual
+   *  expiry timestamp as now + N days. */
+  async setUserAccess(userId: string, durationDays: number): Promise<void> {
+    return this.request<void>("PUT", `/users/${userId}/access`, {
+      body: { duration_days: durationDays },
+    });
+  }
+
   // ─── Libraries ────────────────────────────────────────────────────────
 
   async getLibraries(): Promise<Library[]> {

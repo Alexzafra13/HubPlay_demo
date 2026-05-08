@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -51,6 +52,22 @@ func (s *userFakeService) Count(ctx context.Context) (int, error) {
 }
 
 func (s *userFakeService) SetMaxContentRating(_ context.Context, _, _ string) error {
+	return nil
+}
+
+func (s *userFakeService) SetRole(_ context.Context, _, _ string) error {
+	return nil
+}
+
+func (s *userFakeService) SetActive(_ context.Context, _ string, _ bool) error {
+	return nil
+}
+
+func (s *userFakeService) PrimaryAdminID(_ context.Context) (string, error) {
+	return "", nil
+}
+
+func (s *userFakeService) SetAccessExpiresAt(_ context.Context, _ string, _ *time.Time) error {
 	return nil
 }
 

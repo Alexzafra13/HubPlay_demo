@@ -65,11 +65,30 @@ func (q *Queries) DeleteUser(ctx context.Context, id string) (int64, error) {
 	return result.RowsAffected()
 }
 
+const getPrimaryAdminID = `-- name: GetPrimaryAdminID :one
+SELECT id FROM users
+WHERE role = 'admin' AND parent_user_id IS NULL
+ORDER BY created_at ASC
+LIMIT 1
+`
+
+// Returns the user_id of the oldest admin row. The primary admin
+// is identified positionally, not by an explicit flag, so a fresh
+// DB starts with the setup-wizard user as primary automatically.
+// Empty result when no admin exists yet (cold-start install).
+func (q *Queries) GetPrimaryAdminID(ctx context.Context) (string, error) {
+	row := q.db.QueryRowContext(ctx, getPrimaryAdminID)
+	var id string
+	err := row.Scan(&id)
+	return id, err
+}
+
 const getUserByID = `-- name: GetUserByID :one
 
 SELECT id, username, display_name, password_hash, COALESCE(avatar_path, '') AS avatar_path,
        role, is_active, max_sessions, created_at, last_login_at,
-       parent_user_id, pin_hash, max_content_rating, password_change_required
+       parent_user_id, pin_hash, max_content_rating, password_change_required,
+       access_expires_at
 FROM users
 WHERE id = ?
 `
@@ -89,6 +108,7 @@ type GetUserByIDRow struct {
 	PinHash                sql.NullString `json:"pin_hash"`
 	MaxContentRating       sql.NullString `json:"max_content_rating"`
 	PasswordChangeRequired bool           `json:"password_change_required"`
+	AccessExpiresAt        sql.NullTime   `json:"access_expires_at"`
 }
 
 // User accounts.
@@ -114,6 +134,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id string) (GetUserByIDRow, e
 		&i.PinHash,
 		&i.MaxContentRating,
 		&i.PasswordChangeRequired,
+		&i.AccessExpiresAt,
 	)
 	return i, err
 }
@@ -121,7 +142,8 @@ func (q *Queries) GetUserByID(ctx context.Context, id string) (GetUserByIDRow, e
 const getUserByUsername = `-- name: GetUserByUsername :one
 SELECT id, username, display_name, password_hash, COALESCE(avatar_path, '') AS avatar_path,
        role, is_active, max_sessions, created_at, last_login_at,
-       parent_user_id, pin_hash, max_content_rating, password_change_required
+       parent_user_id, pin_hash, max_content_rating, password_change_required,
+       access_expires_at
 FROM users
 WHERE username = ?
 `
@@ -141,6 +163,7 @@ type GetUserByUsernameRow struct {
 	PinHash                sql.NullString `json:"pin_hash"`
 	MaxContentRating       sql.NullString `json:"max_content_rating"`
 	PasswordChangeRequired bool           `json:"password_change_required"`
+	AccessExpiresAt        sql.NullTime   `json:"access_expires_at"`
 }
 
 func (q *Queries) GetUserByUsername(ctx context.Context, username string) (GetUserByUsernameRow, error) {
@@ -161,6 +184,7 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (GetUs
 		&i.PinHash,
 		&i.MaxContentRating,
 		&i.PasswordChangeRequired,
+		&i.AccessExpiresAt,
 	)
 	return i, err
 }
@@ -168,7 +192,8 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (GetUs
 const listProfilesForOwner = `-- name: ListProfilesForOwner :many
 SELECT id, username, display_name, COALESCE(avatar_path, '') AS avatar_path,
        role, is_active, created_at, last_login_at,
-       parent_user_id, pin_hash, max_content_rating, password_change_required
+       parent_user_id, pin_hash, max_content_rating, password_change_required,
+       access_expires_at
 FROM users
 WHERE id = ? OR parent_user_id = ?
 ORDER BY parent_user_id IS NOT NULL, display_name COLLATE NOCA
@@ -192,6 +217,7 @@ type ListProfilesForOwnerRow struct {
 	PinHash                sql.NullString `json:"pin_hash"`
 	MaxContentRating       sql.NullString `json:"max_content_rating"`
 	PasswordChangeRequired bool           `json:"password_change_required"`
+	AccessExpiresAt        sql.NullTime   `json:"access_expires_at"`
 }
 
 // Returns the parent account row plus every profile that hangs off
@@ -222,6 +248,7 @@ func (q *Queries) ListProfilesForOwner(ctx context.Context, arg ListProfilesForO
 			&i.PinHash,
 			&i.MaxContentRating,
 			&i.PasswordChangeRequired,
+			&i.AccessExpiresAt,
 		); err != nil {
 			return nil, err
 		}
@@ -239,7 +266,8 @@ func (q *Queries) ListProfilesForOwner(ctx context.Context, arg ListProfilesForO
 const listUsers = `-- name: ListUsers :many
 SELECT id, username, display_name, COALESCE(avatar_path, '') AS avatar_path,
        role, is_active, created_at, last_login_at,
-       parent_user_id, pin_hash, max_content_rating, password_change_required
+       parent_user_id, pin_hash, max_content_rating, password_change_required,
+       access_expires_at
 FROM users
 ORDER BY username
 LIMIT ? OFFSET ?
@@ -263,6 +291,7 @@ type ListUsersRow struct {
 	PinHash                sql.NullString `json:"pin_hash"`
 	MaxContentRating       sql.NullString `json:"max_content_rating"`
 	PasswordChangeRequired bool           `json:"password_change_required"`
+	AccessExpiresAt        sql.NullTime   `json:"access_expires_at"`
 }
 
 func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUsersRow, error) {
@@ -287,6 +316,7 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUse
 			&i.PinHash,
 			&i.MaxContentRating,
 			&i.PasswordChangeRequired,
+			&i.AccessExpiresAt,
 		); err != nil {
 			return nil, err
 		}
@@ -333,6 +363,39 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) error {
 		arg.IsActive,
 		arg.ID,
 	)
+	return err
+}
+
+const updateUserAccessExpiresAt = `-- name: UpdateUserAccessExpiresAt :exec
+UPDATE users SET access_expires_at = ? WHERE id = ?
+`
+
+type UpdateUserAccessExpiresAtParams struct {
+	AccessExpiresAt sql.NullTime `json:"access_expires_at"`
+	ID              string       `json:"id"`
+}
+
+// NULL = no expiry (permanent). Non-null = JWT middleware + login
+// reject after this timestamp. Lazy: no background job needed.
+func (q *Queries) UpdateUserAccessExpiresAt(ctx context.Context, arg UpdateUserAccessExpiresAtParams) error {
+	_, err := q.db.ExecContext(ctx, updateUserAccessExpiresAt, arg.AccessExpiresAt, arg.ID)
+	return err
+}
+
+const updateUserActive = `-- name: UpdateUserActive :exec
+UPDATE users SET is_active = ? WHERE id = ?
+`
+
+type UpdateUserActiveParams struct {
+	IsActive bool   `json:"is_active"`
+	ID       string `json:"id"`
+}
+
+// Soft-disable a user without deleting. Login rejects on
+// is_active=false; the row + every per-user table stays intact so
+// re-enabling is a one-flag flip.
+func (q *Queries) UpdateUserActive(ctx context.Context, arg UpdateUserActiveParams) error {
+	_, err := q.db.ExecContext(ctx, updateUserActive, arg.IsActive, arg.ID)
 	return err
 }
 
@@ -385,5 +448,21 @@ type UpdateUserPasswordParams struct {
 // triggers a forced change on first login.
 func (q *Queries) UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error {
 	_, err := q.db.ExecContext(ctx, updateUserPassword, arg.PasswordHash, arg.PasswordChangeRequired, arg.ID)
+	return err
+}
+
+const updateUserRole = `-- name: UpdateUserRole :exec
+UPDATE users SET role = ? WHERE id = ?
+`
+
+type UpdateUserRoleParams struct {
+	Role string `json:"role"`
+	ID   string `json:"id"`
+}
+
+// Promote / demote between user and admin. Caller-side gate keeps
+// the primary admin (oldest role=admin row) immutable.
+func (q *Queries) UpdateUserRole(ctx context.Context, arg UpdateUserRoleParams) error {
+	_, err := q.db.ExecContext(ctx, updateUserRole, arg.Role, arg.ID)
 	return err
 }

@@ -167,6 +167,11 @@ type Querier interface {
 	// person-level external_ids table for the edge cases (alias drift,
 	// two actors with the same name).
 	GetPersonByName(ctx context.Context, name string) (GetPersonByNameRow, error)
+	// Returns the user_id of the oldest admin row. The primary admin
+	// is identified positionally, not by an explicit flag, so a fresh
+	// DB starts with the setup-wizard user as primary automatically.
+	// Empty result when no admin exists yet (cold-start install).
+	GetPrimaryAdminID(ctx context.Context) (string, error)
 	GetPrimaryImage(ctx context.Context, arg GetPrimaryImageParams) (GetPrimaryImageRow, error)
 	GetProvider(ctx context.Context, name string) (Provider, error)
 	// Federation: server identity, peers, invites, library shares, audit
@@ -410,6 +415,13 @@ type Querier interface {
 	UpdateProgress(ctx context.Context, arg UpdateProgressParams) error
 	UpdateSessionLastActive(ctx context.Context, arg UpdateSessionLastActiveParams) error
 	UpdateUser(ctx context.Context, arg UpdateUserParams) error
+	// NULL = no expiry (permanent). Non-null = JWT middleware + login
+	// reject after this timestamp. Lazy: no background job needed.
+	UpdateUserAccessExpiresAt(ctx context.Context, arg UpdateUserAccessExpiresAtParams) error
+	// Soft-disable a user without deleting. Login rejects on
+	// is_active=false; the row + every per-user table stays intact so
+	// re-enabling is a one-flag flip.
+	UpdateUserActive(ctx context.Context, arg UpdateUserActiveParams) error
 	// max_content_rating NULL means "no restriction". Empty string is
 	// normalised to NULL by the handler so callers don't have to choose.
 	UpdateUserMaxContentRating(ctx context.Context, arg UpdateUserMaxContentRatingParams) error
@@ -422,6 +434,9 @@ type Querier interface {
 	// a fresh password from the admin path SETs it so the new password
 	// triggers a forced change on first login.
 	UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error
+	// Promote / demote between user and admin. Caller-side gate keeps
+	// the primary admin (oldest role=admin row) immutable.
+	UpdateUserRole(ctx context.Context, arg UpdateUserRoleParams) error
 	// Manual channel edits keyed by stream URL so they survive an M3U
 	// refresh (channel UUIDs are regenerated on every import).
 	//
