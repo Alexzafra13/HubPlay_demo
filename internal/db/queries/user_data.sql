@@ -82,10 +82,12 @@ SELECT ud.item_id, ud.position_ticks, ud.last_played_at,
        COALESCE(i.container, '') AS container,
        COALESCE(i.season_number, 0) AS season_number,
        COALESCE(i.episode_number, 0) AS episode_number,
-       COALESCE(season.parent_id, '') AS series_id
+       COALESCE(season.parent_id, '') AS series_id,
+       COALESCE(series.title, '') AS series_title
 FROM user_data ud
 JOIN items i ON i.id = ud.item_id
 LEFT JOIN items season ON season.id = i.parent_id
+LEFT JOIN items series ON series.id = season.parent_id
 WHERE ud.user_id = ? AND ud.completed = 0 AND ud.position_ticks > 0
   AND i.is_available = 1
   AND NOT (

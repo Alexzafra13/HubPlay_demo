@@ -17,10 +17,12 @@ SELECT ud.item_id, ud.position_ticks, ud.last_played_at,
        COALESCE(i.container, '') AS container,
        COALESCE(i.season_number, 0) AS season_number,
        COALESCE(i.episode_number, 0) AS episode_number,
-       COALESCE(season.parent_id, '') AS series_id
+       COALESCE(season.parent_id, '') AS series_id,
+       COALESCE(series.title, '') AS series_title
 FROM user_data ud
 JOIN items i ON i.id = ud.item_id
 LEFT JOIN items season ON season.id = i.parent_id
+LEFT JOIN items series ON series.id = season.parent_id
 WHERE ud.user_id = ? AND ud.completed = 0 AND ud.position_ticks > 0
   AND i.is_available = 1
   AND NOT (
@@ -55,6 +57,7 @@ type ContinueWatchingRow struct {
 	SeasonNumber  int64         `json:"season_number"`
 	EpisodeNumber int64         `json:"episode_number"`
 	SeriesID      string        `json:"series_id"`
+	SeriesTitle   string        `json:"series_title"`
 }
 
 // Two extra filters vs. the obvious "started but not completed" rail:
@@ -101,6 +104,7 @@ func (q *Queries) ContinueWatching(ctx context.Context, arg ContinueWatchingPara
 			&i.SeasonNumber,
 			&i.EpisodeNumber,
 			&i.SeriesID,
+			&i.SeriesTitle,
 		); err != nil {
 			return nil, err
 		}

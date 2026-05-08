@@ -1,5 +1,28 @@
 # Estado del proyecto
 
+> 🎬 **Sesión 2026-05-08 (rama `claude/adoring-dhawan-7ff545`, PRs #196→#200 todas mergeadas a `main`)** — **Branding real + LiveTV redesign Plex-style en 6 commits**. Cierra el ítem #2 + #3 de la cola priorizada anterior (TV en vivo guide-style + polish vista canal). Cuenta corta porque la sesión iteró rápido contra el deploy del user.
+>
+> **Commits (de más reciente a más antiguo, ya en main)**:
+> - `6f605f1` ⭐ *livetv: redesign hero with 2-column Plex layout + explicit CTAs*. **`HeroSpotlight` reescrito** a 2-col tipo Plex/watch.plex.tv: backdrop full-bleed + degradado izquierdo, columna izquierda con thumbnail/logo del canal y CTAs explícitas (Ver ahora · Más info · Añadir a favoritos), columna derecha con metadata extendida del programa actual + "A continuación". El patrón nuevo se vuelve referencia: cualquier hero del proyecto (Home, Detail) debería alinearse a este 2-col cuando el contenido lo justifique. **El bot recomienda usar este como canon estético** en futuras superficies.
+> - `1ee33b5` *livetv: rework click model + restore global TopBar chrome*. La iteración anterior había roto el TopBar global en `/live-tv` (slim TopBar custom). Restaurado el chrome global (mismo TopBar que el resto del shell) + click model unificado: tap en celda EPG abre modal con detalles, doble-tap o tap en CTA dispara play. Antes el modelo era ambiguo y mezclaba navegación con play.
+> - `7bf741d` *livetv: align section bg with global app shell (--color-bg-base)*. El fondo de sección difería de `--color-bg-base` por un override pre-redesign; resultaba en una franja visible al hacer scroll entre secciones. Trivial, solo CSS variable.
+> - `4caf0a5` *livetv: fix i18n title bug, slim TopBar on /live-tv, polish EPG cells*. Bug i18n: el título de la página caía a la key cruda en es. Polish EPG: celdas con border-radius consistente, hover state + estado "en directo" más legible.
+> - `62b44c3` ⭐ *livetv: collapse 4 tabs into Inicio + Explorar (Plex-style)*. La página tenía 4 tabs (Inicio / Guía / Canales / Grabaciones) — exceso para el MVP. **Plex usa 2** (Watch / Browse) y la decisión era replicar eso. Las funciones se reagruparon: "Inicio" trae spotlight + EPG horizontal, "Explorar" lista canales + filtros. Las grabaciones se posponen hasta tener feature real que mostrar.
+> - `bda9217` *brand: replace placeholder mark with real hubplay logotype + favicon*. **`BrandMark` deprecado, sustituido por `BrandWordmark`** en TopBar/Sidebar; `web/public/hubplay_icon.svg` + `hubplay_icon_mark.svg` reemplazan el placeholder; favicon nuevo. Cierre cosmético antes de empezar a empujar a usuarios externos.
+>
+> **Verificación al cierre**: `go test ./... -count=1` verde · vitest verde · tsc clean · build clean. Producción `dev-3cd54f9` corriendo en hubplay.duckdns.org. El user verifica live: TV en vivo se ve coherente con Plex (esperado), branding nuevo aparece en TopBar y favicon.
+>
+> **Pendientes / cola priorizada al cierre** (ninguno crítico):
+> - **#1 Hero del Home más interesante** (planteado por el user en la sesión 2026-05-09 como next-up). Hoy el Hero coge `[continueWatching, ...latestItems]` con filtro `backdrop_url`, slice 0..5, rotate 8s. **Limitaciones**: (a) cuando un slide es un EPISODIO, muestra el "still" del episodio como backdrop y no tiene póster lateral — el user quiere que muestre el **póster + backdrop de la TEMPORADA** como hace el detail page de la season; (b) selección naïf, mezcla `continue` y `latest` sin saber intenciones — el user quiere **tiers de slot por intención** (Reanudar / Próximo / Nuevo / Trending). El plan acordado: backend enriquece `/me/continue-watching` con `season_poster_url`, `season_backdrop_url`, `series_*` ya plumb-eados; frontend re-arquitectura `HeroBanner` con tiers + dedupe + label per-slide + pause-on-hover + deep-link al episodio (no al detail genérico).
+> - **#2 360p auto-fanout** — sin cambio desde la sesión anterior.
+> - **#3 Setup wizard avanzado** — pedir max sessions + cache path.
+> - **#4 Intro animado tipo Netflix** — el backdrop loading overlay actual (commit 2d8514d) sigue siendo el canvas.
+> - **#5 (UX pequeño) toast scan diferenciar 409 vs error real**.
+>
+> **Esta sesión NO ha tocado**: backend (Go), federation, IPTV transmux, auth keystore. Todo en frontend (livetv + topbar + branding) + assets públicos.
+
+
+
 > 🎬 **Sesión 2026-05-07 noche (rama `claude/vibrant-ishizaka-57f510`, PRs #191 + #192 mergeadas a main, #193 con 4 commits abierto/construyendo)** — **8 commits cerrando producción + un feature grande (Now Playing admin panel) + bug raíz de las colecciones encontrado en directo contra prod**.
 >
 > **Commits (de más reciente a más antiguo, todos en la rama)**:

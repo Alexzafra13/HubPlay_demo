@@ -40,14 +40,30 @@ import (
 type fakeImageRepo struct {
 	mu     sync.Mutex
 	images map[string]*db.Image // by image ID
+	// primaryURLs lets tests stub GetPrimaryURLs cheaply without
+	// having to back the repo with a real images table. Keyed by
+	// itemID then by image type ("primary" / "backdrop" / "logo").
+	primaryURLs map[string]map[string]db.PrimaryImageRef
 }
 
 func newFakeImageRepo() *fakeImageRepo {
 	return &fakeImageRepo{images: map[string]*db.Image{}}
 }
 
-func (r *fakeImageRepo) GetPrimaryURLs(_ context.Context, _ []string) (map[string]map[string]db.PrimaryImageRef, error) {
-	return map[string]map[string]db.PrimaryImageRef{}, nil
+func (r *fakeImageRepo) GetPrimaryURLs(_ context.Context, ids []string) (map[string]map[string]db.PrimaryImageRef, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make(map[string]map[string]db.PrimaryImageRef, len(ids))
+	for _, id := range ids {
+		if urls, ok := r.primaryURLs[id]; ok {
+			cp := make(map[string]db.PrimaryImageRef, len(urls))
+			for k, v := range urls {
+				cp[k] = v
+			}
+			out[id] = cp
+		}
+	}
+	return out, nil
 }
 
 func (r *fakeImageRepo) ListByItem(_ context.Context, itemID string) ([]*db.Image, error) {

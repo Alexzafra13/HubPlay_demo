@@ -443,6 +443,118 @@ func TestProgressHandler_ContinueWatching_ShapesEntries(t *testing.T) {
 	}
 }
 
+func TestProgressHandler_ContinueWatching_EpisodeSurfacesSeasonAndSeriesArt(t *testing.T) {
+	env := newProgressTestEnv(t)
+	now := time.Now()
+	env.userData.continueFn = func(_ context.Context, _ string, _ int) ([]*db.ContinueWatchingItem, error) {
+		return []*db.ContinueWatchingItem{
+			{
+				ItemID:        "ep-1",
+				PositionTicks: 200,
+				LastPlayedAt:  &now,
+				Title:         "Episode One",
+				Type:          "episode",
+				DurationTicks: 1000,
+				ParentID:      "season-1",
+				SeasonNumber:  1,
+				EpisodeNumber: 3,
+				SeriesID:      "series-1",
+				SeriesTitle:   "Mr Robot",
+			},
+		}, nil
+	}
+	// Stub artwork at three levels: episode still, season poster +
+	// backdrop, series poster + backdrop + logo. The handler should
+	// promote season art onto the wire so the Home hero can render
+	// a "Sigue viendo" slide that mirrors the season detail page.
+	env.images.primaryURLs = map[string]map[string]db.PrimaryImageRef{
+		"ep-1": {
+			"primary":  {Path: "/img/ep-still.jpg"},
+			"backdrop": {Path: "/img/ep-still-bd.jpg"},
+		},
+		"season-1": {
+			"primary":  {Path: "/img/season-poster.jpg"},
+			"backdrop": {Path: "/img/season-bd.jpg"},
+		},
+		"series-1": {
+			"primary":  {Path: "/img/series-poster.jpg"},
+			"backdrop": {Path: "/img/series-bd.jpg"},
+			"logo":     {Path: "/img/series-logo.png"},
+		},
+	}
+
+	rr := env.do(http.MethodGet, "/api/v1/me/continue-watching?limit=5", "", defaultClaims())
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: %d", rr.Code)
+	}
+	var out map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&out)
+	data, _ := out["data"].([]any)
+	if len(data) != 1 {
+		t.Fatalf("want 1 entry, got %d", len(data))
+	}
+	entry := data[0].(map[string]any)
+
+	// Episode-level artwork still flows through the canonical fields
+	// so older clients keep working.
+	if entry["poster_url"] != "/img/ep-still.jpg" {
+		t.Errorf("poster_url: %v", entry["poster_url"])
+	}
+	if entry["backdrop_url"] != "/img/ep-still-bd.jpg" {
+		t.Errorf("backdrop_url: %v", entry["backdrop_url"])
+	}
+	// Season + series enrichment lets the hero pick the right artwork
+	// per slide. The season fields cover the user's primary ask
+	// (poster + backdrop "as when entering the season"); series
+	// fields are a graceful fallback for seasons TMDb only ships
+	// with a poster.
+	if entry["season_poster_url"] != "/img/season-poster.jpg" {
+		t.Errorf("season_poster_url: %v", entry["season_poster_url"])
+	}
+	if entry["season_backdrop_url"] != "/img/season-bd.jpg" {
+		t.Errorf("season_backdrop_url: %v", entry["season_backdrop_url"])
+	}
+	if entry["series_poster_url"] != "/img/series-poster.jpg" {
+		t.Errorf("series_poster_url: %v", entry["series_poster_url"])
+	}
+	if entry["series_backdrop_url"] != "/img/series-bd.jpg" {
+		t.Errorf("series_backdrop_url: %v", entry["series_backdrop_url"])
+	}
+	if entry["series_logo_url"] != "/img/series-logo.png" {
+		t.Errorf("series_logo_url: %v", entry["series_logo_url"])
+	}
+	if entry["series_title"] != "Mr Robot" {
+		t.Errorf("series_title: %v", entry["series_title"])
+	}
+}
+
+func TestProgressHandler_ContinueWatching_MovieSkipsSeasonEnrichment(t *testing.T) {
+	env := newProgressTestEnv(t)
+	now := time.Now()
+	env.userData.continueFn = func(_ context.Context, _ string, _ int) ([]*db.ContinueWatchingItem, error) {
+		return []*db.ContinueWatchingItem{
+			{ItemID: "movie-1", PositionTicks: 50, LastPlayedAt: &now, Title: "Foo", Type: "movie", DurationTicks: 1000},
+		}, nil
+	}
+	env.images.primaryURLs = map[string]map[string]db.PrimaryImageRef{
+		"movie-1": {"primary": {Path: "/img/movie.jpg"}},
+	}
+
+	rr := env.do(http.MethodGet, "/api/v1/me/continue-watching?limit=5", "", defaultClaims())
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: %d", rr.Code)
+	}
+	var out map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&out)
+	data, _ := out["data"].([]any)
+	entry := data[0].(map[string]any)
+	for _, k := range []string{"season_poster_url", "season_backdrop_url", "series_poster_url", "series_backdrop_url", "series_logo_url", "series_title"} {
+		if _, ok := entry[k]; ok {
+			t.Errorf("movie row should not carry %q, got %v", k, entry[k])
+		}
+	}
+}
+
 func TestProgressHandler_ContinueWatching_LimitValidated(t *testing.T) {
 	env := newProgressTestEnv(t)
 	var gotLimit int

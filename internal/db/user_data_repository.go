@@ -238,6 +238,11 @@ type ContinueWatchingItem struct {
 	// movie or an orphaned episode without a parent chain. The
 	// useResumeTarget hook keys series-scope matching off this field.
 	SeriesID string
+	// SeriesTitle is the parent show's title, joined in by SQL via
+	// `episode → season → series`. Empty for movies and orphaned
+	// episodes. The Home hero uses it as the headline when the slide
+	// is an episode (the episode's own title becomes the subtitle).
+	SeriesTitle string
 }
 
 // Favorites returns items marked as favorite by the user.
@@ -433,6 +438,7 @@ func continueWatchingFromRows(rows []sqlc.ContinueWatchingRow) []*ContinueWatchi
 			SeasonNumber:  int(r.SeasonNumber),
 			EpisodeNumber: int(r.EpisodeNumber),
 			SeriesID:      r.SeriesID,
+			SeriesTitle:   r.SeriesTitle,
 		}
 		if r.LastPlayedAt.Valid {
 			item.LastPlayedAt = &r.LastPlayedAt.Time

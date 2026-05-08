@@ -130,7 +130,13 @@
     "peerRecent": "Recientes en tus pares",
     "peerContinueWatching": "Sigue viendo en tus pares",
     "viewDetails": "Ver detalles",
-    "failedToLoad": "Error al cargar el contenido. Comprueba la conexion del servidor."
+    "failedToLoad": "Error al cargar el contenido. Comprueba la conexion del servidor.",
+    "heroTagResume": "Sigue viendo",
+    "heroTagNew": "Nuevo en HubPlay",
+    "heroTagTrending": "Trending",
+    "heroResumeCta": "Reanudar",
+    "heroEpisodeBadge": "T{{season}} · E{{episode}}",
+    "heroRemaining": "{{minutes}} min restantes"
   },
   "link": {
     "title": "Vincular un dispositivo",
