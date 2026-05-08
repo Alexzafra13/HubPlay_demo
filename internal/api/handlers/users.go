@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -62,6 +63,15 @@ func (h *UserHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Primary admin id powers the admin table's "this row's
+	// destructive buttons stay disabled" gate. Lookup is cheap
+	// (single SQL with a bound LIMIT 1); we tolerate failure here
+	// because a transient lookup error shouldn't 500 the whole
+	// /users response — the client just renders without the gate
+	// (which the backend re-checks on every destructive POST/PUT
+	// anyway, so the only downside is a confusing button state).
+	primaryID, _ := h.users.PrimaryAdminID(r.Context())
+
 	items := make([]map[string]any, len(users))
 	for i, u := range users {
 		items[i] = map[string]any{
@@ -76,6 +86,7 @@ func (h *UserHandler) List(w http.ResponseWriter, r *http.Request) {
 			"parent_user_id":           u.ParentUserID,
 			"max_content_rating":       u.MaxContentRating,
 			"has_pin":                  u.PINHash != "",
+			"is_primary":               primaryID != "" && u.ID == primaryID,
 		}
 	}
 
@@ -83,6 +94,78 @@ func (h *UserHandler) List(w http.ResponseWriter, r *http.Request) {
 		"data":  items,
 		"total": total,
 	})
+}
+
+type updateRoleRequest struct {
+	Role string `json:"role"`
+}
+
+// SetRole promotes / demotes a user between "user" and "admin". The
+// primary admin (oldest by created_at, role=admin) is immutable —
+// preventing self-DoS where a sibling admin demotes the owner of
+// the deploy.
+func (h *UserHandler) SetRole(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "missing user id")
+		return
+	}
+	var req updateRoleRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
+		return
+	}
+	if req.Role != "user" && req.Role != "admin" {
+		respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "role must be 'user' or 'admin'")
+		return
+	}
+	if primaryID, _ := h.users.PrimaryAdminID(r.Context()); primaryID != "" && primaryID == id {
+		respondError(w, r, http.StatusForbidden, "PRIMARY_ADMIN_LOCKED",
+			"the primary admin cannot be demoted")
+		return
+	}
+	if err := h.users.SetRole(r.Context(), id, req.Role); err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+type updateActiveRequest struct {
+	IsActive bool `json:"is_active"`
+}
+
+// SetActive flips the per-user is_active flag. Admin-only at the
+// route level. Self-deactivation is rejected to prevent the admin
+// from accidentally locking themselves out; the primary admin is
+// also protected — they're the recovery path for a deactivated
+// sibling admin.
+func (h *UserHandler) SetActive(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "missing user id")
+		return
+	}
+	claims := auth.GetClaims(r.Context())
+	if claims != nil && claims.UserID == id {
+		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "cannot deactivate your own account")
+		return
+	}
+	if primaryID, _ := h.users.PrimaryAdminID(r.Context()); primaryID != "" && primaryID == id {
+		respondError(w, r, http.StatusForbidden, "PRIMARY_ADMIN_LOCKED",
+			"the primary admin cannot be deactivated")
+		return
+	}
+	var req updateActiveRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
+		return
+	}
+	if err := h.users.SetActive(r.Context(), id, req.IsActive); err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // Delete removes a user by ID (admin only).

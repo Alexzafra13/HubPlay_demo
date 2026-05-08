@@ -212,6 +212,11 @@ export interface User {
   max_content_rating?: string;
   is_active?: boolean;
   last_login_at?: string | null;
+  // True for the oldest admin row. Used by the admin Users table to
+  // grey out destructive actions (delete / reset password / role
+  // change) on the bootstrap account so a sibling admin can't
+  // accidentally lock the deploy owner out.
+  is_primary?: boolean;
 }
 
 export interface CreateUserResponse {

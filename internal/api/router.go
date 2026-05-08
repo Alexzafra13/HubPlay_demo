@@ -315,6 +315,8 @@ func NewRouter(deps Dependencies) http.Handler {
 				r.Post("/{id}/reset-password", authHandler.ResetPassword)
 				r.Put("/{id}/pin", authHandler.SetPIN)
 				r.Put("/{id}/content-rating", authHandler.SetContentRating)
+				r.Put("/{id}/role", userHandler.SetRole)
+				r.Put("/{id}/active", userHandler.SetActive)
 			})
 
 			// Signing key lifecycle (admin only). Every route here is

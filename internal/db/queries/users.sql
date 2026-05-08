@@ -40,6 +40,27 @@ LIMIT ? OFFSET ?;
 -- name: UpdateUser :exec
 UPDATE users SET display_name = ?, role = ?, is_active = ? WHERE id = ?;
 
+-- name: UpdateUserRole :exec
+-- Promote / demote between user and admin. Caller-side gate keeps
+-- the primary admin (oldest role=admin row) immutable.
+UPDATE users SET role = ? WHERE id = ?;
+
+-- name: UpdateUserActive :exec
+-- Soft-disable a user without deleting. Login rejects on
+-- is_active=false; the row + every per-user table stays intact so
+-- re-enabling is a one-flag flip.
+UPDATE users SET is_active = ? WHERE id = ?;
+
+-- name: GetPrimaryAdminID :one
+-- Returns the user_id of the oldest admin row. The primary admin
+-- is identified positionally, not by an explicit flag, so a fresh
+-- DB starts with the setup-wizard user as primary automatically.
+-- Empty result when no admin exists yet (cold-start install).
+SELECT id FROM users
+WHERE role = 'admin' AND parent_user_id IS NULL
+ORDER BY created_at ASC
+LIMIT 1;
+
 -- name: DeleteUser :execrows
 DELETE FROM users WHERE id = ?;
 

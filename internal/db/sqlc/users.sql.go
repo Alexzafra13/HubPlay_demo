@@ -65,6 +65,24 @@ func (q *Queries) DeleteUser(ctx context.Context, id string) (int64, error) {
 	return result.RowsAffected()
 }
 
+const getPrimaryAdminID = `-- name: GetPrimaryAdminID :one
+SELECT id FROM users
+WHERE role = 'admin' AND parent_user_id IS NULL
+ORDER BY created_at ASC
+LIMIT 1
+`
+
+// Returns the user_id of the oldest admin row. The primary admin
+// is identified positionally, not by an explicit flag, so a fresh
+// DB starts with the setup-wizard user as primary automatically.
+// Empty result when no admin exists yet (cold-start install).
+func (q *Queries) GetPrimaryAdminID(ctx context.Context) (string, error) {
+	row := q.db.QueryRowContext(ctx, getPrimaryAdminID)
+	var id string
+	err := row.Scan(&id)
+	return id, err
+}
+
 const getUserByID = `-- name: GetUserByID :one
 
 SELECT id, username, display_name, password_hash, COALESCE(avatar_path, '') AS avatar_path,
@@ -336,6 +354,23 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) error {
 	return err
 }
 
+const updateUserActive = `-- name: UpdateUserActive :exec
+UPDATE users SET is_active = ? WHERE id = ?
+`
+
+type UpdateUserActiveParams struct {
+	IsActive bool   `json:"is_active"`
+	ID       string `json:"id"`
+}
+
+// Soft-disable a user without deleting. Login rejects on
+// is_active=false; the row + every per-user table stays intact so
+// re-enabling is a one-flag flip.
+func (q *Queries) UpdateUserActive(ctx context.Context, arg UpdateUserActiveParams) error {
+	_, err := q.db.ExecContext(ctx, updateUserActive, arg.IsActive, arg.ID)
+	return err
+}
+
 const updateUserMaxContentRating = `-- name: UpdateUserMaxContentRating :exec
 UPDATE users SET max_content_rating = ? WHERE id = ?
 `
@@ -385,5 +420,21 @@ type UpdateUserPasswordParams struct {
 // triggers a forced change on first login.
 func (q *Queries) UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error {
 	_, err := q.db.ExecContext(ctx, updateUserPassword, arg.PasswordHash, arg.PasswordChangeRequired, arg.ID)
+	return err
+}
+
+const updateUserRole = `-- name: UpdateUserRole :exec
+UPDATE users SET role = ? WHERE id = ?
+`
+
+type UpdateUserRoleParams struct {
+	Role string `json:"role"`
+	ID   string `json:"id"`
+}
+
+// Promote / demote between user and admin. Caller-side gate keeps
+// the primary admin (oldest role=admin row) immutable.
+func (q *Queries) UpdateUserRole(ctx context.Context, arg UpdateUserRoleParams) error {
+	_, err := q.db.ExecContext(ctx, updateUserRole, arg.Role, arg.ID)
 	return err
 }

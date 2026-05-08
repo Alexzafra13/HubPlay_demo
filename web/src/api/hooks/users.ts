@@ -147,3 +147,27 @@ export function useSetUserContentRating() {
     },
   });
 }
+
+export function useSetUserRole() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    void,
+    Error,
+    { userId: string; role: "user" | "admin" }
+  >({
+    mutationFn: ({ userId, role }) => api.setUserRole(userId, role),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.users });
+    },
+  });
+}
+
+export function useSetUserActive() {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, { userId: string; isActive: boolean }>({
+    mutationFn: ({ userId, isActive }) => api.setUserActive(userId, isActive),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.users });
+    },
+  });
+}

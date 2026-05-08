@@ -144,6 +144,47 @@ func (r *UserRepository) SetMaxContentRating(ctx context.Context, id, rating str
 	return nil
 }
 
+// SetRole flips the user between "user" and "admin". The handler
+// gate stops the primary admin from being demoted; this method
+// trusts the caller, by design.
+func (r *UserRepository) SetRole(ctx context.Context, id, role string) error {
+	if err := r.q.UpdateUserRole(ctx, sqlc.UpdateUserRoleParams{
+		ID:   id,
+		Role: role,
+	}); err != nil {
+		return fmt.Errorf("set role: %w", err)
+	}
+	return nil
+}
+
+// SetActive soft-disables / re-enables a user. Login + middleware
+// reject on is_active=false. The row and every per-user table stays
+// intact — re-enabling restores access without a recovery flow.
+func (r *UserRepository) SetActive(ctx context.Context, id string, active bool) error {
+	if err := r.q.UpdateUserActive(ctx, sqlc.UpdateUserActiveParams{
+		ID:       id,
+		IsActive: active,
+	}); err != nil {
+		return fmt.Errorf("set active: %w", err)
+	}
+	return nil
+}
+
+// PrimaryAdminID returns the oldest admin's user_id. Used to gate
+// destructive actions on the primary admin row from the admin
+// table. Empty string + nil error when no admin exists yet (cold-
+// start, before setup wizard runs).
+func (r *UserRepository) PrimaryAdminID(ctx context.Context) (string, error) {
+	id, err := r.q.GetPrimaryAdminID(ctx)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("primary admin id: %w", err)
+	}
+	return id, nil
+}
+
 // ListProfilesForOwner returns the parent account row plus all child
 // profiles in a single query. The handler maps each row to a User
 // and the parent comes first by virtue of the `parent_user_id IS NOT

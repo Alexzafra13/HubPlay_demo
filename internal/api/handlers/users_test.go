@@ -54,6 +54,18 @@ func (s *userFakeService) SetMaxContentRating(_ context.Context, _, _ string) er
 	return nil
 }
 
+func (s *userFakeService) SetRole(_ context.Context, _, _ string) error {
+	return nil
+}
+
+func (s *userFakeService) SetActive(_ context.Context, _ string, _ bool) error {
+	return nil
+}
+
+func (s *userFakeService) PrimaryAdminID(_ context.Context) (string, error) {
+	return "", nil
+}
+
 var _ UserService = (*userFakeService)(nil)
 
 // ─── Env ────────────────────────────────────────────────────────────────────

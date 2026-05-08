@@ -10,8 +10,9 @@ import {
   useResetUserPassword,
   useSetUserContentRating,
   useSetUserPIN,
+  useSetUserRole,
 } from "@/api/hooks";
-import { Button, Badge, Modal, Input, EmptyState, Skeleton } from "@/components/common";
+import { Button, Modal, Input, EmptyState, Skeleton } from "@/components/common";
 import { Trans, useTranslation } from 'react-i18next';
 import FederationAdmin from "./FederationAdmin";
 
@@ -48,6 +49,7 @@ export default function UsersAdmin() {
   const createProfile = useCreateProfile();
   const setUserPIN = useSetUserPIN();
   const setUserContentRating = useSetUserContentRating();
+  const setUserRole = useSetUserRole();
 
   // "Add profile" modal — admin types a display name; the server
   // synthesises the username + a throwaway password (profiles can't
@@ -75,6 +77,29 @@ export default function UsersAdmin() {
         },
       },
     );
+  }
+
+  function handleRoleChange(user: User, nextRole: "user" | "admin") {
+    if (user.role === nextRole) return;
+    // Promotion to admin is irreversible-ish (the new admin gains
+    // every dangerous button) so confirm explicitly. Demotion is
+    // safe — we still confirm because admins shouldn't lose the
+    // role accidentally either, but with softer copy.
+    const promptKey =
+      nextRole === "admin"
+        ? "admin.users.confirmPromote"
+        : "admin.users.confirmDemote";
+    const ok = window.confirm(
+      t(promptKey, {
+        defaultValue:
+          nextRole === "admin"
+            ? "Vas a hacer admin a {{name}}. Tendrá acceso completo al panel. ¿Continuar?"
+            : "Vas a quitar permisos de admin a {{name}}. ¿Continuar?",
+        name: user.display_name || user.username,
+      }),
+    );
+    if (!ok) return;
+    setUserRole.mutate({ userId: user.id, role: nextRole });
   }
 
   function handleSavePin(e: FormEvent) {
@@ -277,47 +302,77 @@ export default function UsersAdmin() {
                           {t('admin.users.you')}
                         </span>
                       )}
+                      {user.is_primary && (
+                        <span
+                          className="ml-2 rounded-full bg-warning/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-warning"
+                          title={t('admin.users.primaryHint', {
+                            defaultValue:
+                              'Cuenta principal del servidor — no se puede eliminar ni cambiar de rol desde aquí.',
+                          })}
+                        >
+                          {t('admin.users.primaryTag', { defaultValue: 'Principal' })}
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-text-secondary">
                       {user.display_name}
                     </td>
                     <td className="px-4 py-3">
-                      <Badge
-                        variant={user.role === "admin" ? "warning" : "default"}
+                      {/* Role select — disabled on self (no admin
+                          can demote themselves accidentally) and on
+                          the primary admin row (the bootstrap user
+                          is immutable from the UI; recovery happens
+                          via DB / setup wizard if ever needed). */}
+                      <select
+                        value={user.role}
+                        onChange={(e) =>
+                          handleRoleChange(user, e.target.value as "user" | "admin")
+                        }
+                        disabled={isSelf || user.is_primary || !!user.parent_user_id}
+                        className="rounded-[--radius-sm] border border-border bg-bg-elevated px-2 py-1 text-xs text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30 disabled:opacity-60 disabled:cursor-not-allowed"
+                        aria-label={t('admin.users.role')}
                       >
-                        {user.role}
-                      </Badge>
+                        <option value="user">{t('admin.users.roleUser')}</option>
+                        <option value="admin">{t('admin.users.roleAdmin')}</option>
+                      </select>
                     </td>
                     <td className="px-4 py-3">
-                      {/* Inline content-rating dropdown. Empty = no
-                          restriction; the cap filters /items, /items/
-                          latest and the per-item Get gate. */}
-                      <select
-                        value={user.max_content_rating ?? ""}
-                        onChange={(e) =>
-                          setUserContentRating.mutate({
-                            userId: user.id,
-                            rating: e.target.value,
-                          })
-                        }
-                        className="rounded-[--radius-sm] border border-border bg-bg-elevated px-2 py-1 text-xs text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
-                        aria-label={t('admin.users.rating', {
-                          defaultValue: 'Edad máxima',
-                        })}
-                      >
-                        <option value="">{t('admin.users.ratingNone', { defaultValue: 'Sin límite' })}</option>
-                        <option value="G">G</option>
-                        <option value="PG">PG</option>
-                        <option value="PG-13">PG-13</option>
-                        <option value="R">R</option>
-                        <option value="NC-17">NC-17</option>
-                        <option value="TV-Y">TV-Y</option>
-                        <option value="TV-Y7">TV-Y7</option>
-                        <option value="TV-G">TV-G</option>
-                        <option value="TV-PG">TV-PG</option>
-                        <option value="TV-14">TV-14</option>
-                        <option value="TV-MA">TV-MA</option>
-                      </select>
+                      {/* Content cap is meaningless on admin rows
+                          (admins see everything) and on the row the
+                          admin is logged in as. Hide it instead of
+                          leaving a confusing inert select. */}
+                      {user.role === "admin" ? (
+                        <span className="text-xs text-text-muted">
+                          {t('admin.users.ratingNotApplicable', { defaultValue: '—' })}
+                        </span>
+                      ) : (
+                        <select
+                          value={user.max_content_rating ?? ""}
+                          onChange={(e) =>
+                            setUserContentRating.mutate({
+                              userId: user.id,
+                              rating: e.target.value,
+                            })
+                          }
+                          className="rounded-[--radius-sm] border border-border bg-bg-elevated px-2 py-1 text-xs text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
+                          aria-label={t('admin.users.rating', {
+                            defaultValue: 'Edad máxima',
+                          })}
+                        >
+                          <option value="">{t('admin.users.ratingNone', { defaultValue: 'Sin límite' })}</option>
+                          <option value="G">G</option>
+                          <option value="PG">PG</option>
+                          <option value="PG-13">PG-13</option>
+                          <option value="R">R</option>
+                          <option value="NC-17">NC-17</option>
+                          <option value="TV-Y">TV-Y</option>
+                          <option value="TV-Y7">TV-Y7</option>
+                          <option value="TV-G">TV-G</option>
+                          <option value="TV-PG">TV-PG</option>
+                          <option value="TV-14">TV-14</option>
+                          <option value="TV-MA">TV-MA</option>
+                        </select>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-text-secondary">
                       {formatDate(user.created_at)}
@@ -325,24 +380,30 @@ export default function UsersAdmin() {
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-2 flex-wrap">
                         {!user.parent_user_id && (
-                          <>
-                            <Button
-                              variant="secondary"
-                              size="sm"
-                              onClick={() => setProfileParent(user)}
-                              title={t('admin.users.addProfileHint', { defaultValue: 'Crear perfil hijo bajo esta cuenta' })}
-                            >
-                              {t('admin.users.addProfile', { defaultValue: '+ Perfil' })}
-                            </Button>
-                            <Button
-                              variant="secondary"
-                              size="sm"
-                              onClick={() => setResetTarget(user)}
-                              title={t('admin.users.resetPasswordHint', { defaultValue: 'Generar contraseña temporal nueva' })}
-                            >
-                              {t('admin.users.resetPassword', { defaultValue: 'Reiniciar contraseña' })}
-                            </Button>
-                          </>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => setProfileParent(user)}
+                            title={t('admin.users.addProfileHint', { defaultValue: 'Crear perfil hijo bajo esta cuenta' })}
+                          >
+                            {t('admin.users.addProfile', { defaultValue: '+ Perfil' })}
+                          </Button>
+                        )}
+                        {/* Reset password is hidden on:
+                            - profile rows (no own password to reset)
+                            - the row the admin is logged in as
+                              (own-password is the Settings flow)
+                            - the primary admin (immutable from
+                              this surface, recovery via DB) */}
+                        {!user.parent_user_id && !isSelf && !user.is_primary && (
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => setResetTarget(user)}
+                            title={t('admin.users.resetPasswordHint', { defaultValue: 'Generar contraseña temporal nueva' })}
+                          >
+                            {t('admin.users.resetPassword', { defaultValue: 'Reiniciar contraseña' })}
+                          </Button>
                         )}
                         <Button
                           variant="secondary"
@@ -358,11 +419,21 @@ export default function UsersAdmin() {
                             ? t('admin.users.pinChange', { defaultValue: 'Cambiar PIN' })
                             : t('admin.users.pinSetCta', { defaultValue: 'Poner PIN' })}
                         </Button>
+                        {/* Delete blocked for the row's own user
+                            (already protected) AND for the primary
+                            admin (would orphan the deploy). */}
                         <Button
                           variant="danger"
                           size="sm"
-                          disabled={isSelf}
+                          disabled={isSelf || user.is_primary}
                           onClick={() => setDeleteTarget(user)}
+                          title={
+                            user.is_primary
+                              ? t('admin.users.primaryHint', {
+                                  defaultValue: 'La cuenta principal no se puede eliminar.',
+                                })
+                              : undefined
+                          }
                         >
                           {t('common.delete')}
                         </Button>
