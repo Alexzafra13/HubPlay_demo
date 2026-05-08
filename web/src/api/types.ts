@@ -202,6 +202,34 @@ export interface User {
   display_name: string;
   role: string;
   created_at: string;
+  // Profile-tree fields surfaced by /me, /users, and the upcoming
+  // /auth/profiles list. All four are optional on the wire because
+  // legacy responses (older deploys, federated peers) may not carry
+  // them yet.
+  parent_user_id?: string;
+  password_change_required?: boolean;
+  has_pin?: boolean;
+  max_content_rating?: string;
+  is_active?: boolean;
+  last_login_at?: string | null;
+}
+
+export interface CreateUserResponse {
+  id: string;
+  username: string;
+  display_name: string;
+  role: string;
+  password_change_required: boolean;
+  // Returned exactly once when the admin creates a user without
+  // typing a password — the server generated a readable temporary
+  // password and the admin must hand it to the user. Absent when
+  // the admin specified their own password.
+  generated_password?: string;
+}
+
+export interface ResetPasswordResponse {
+  user_id: string;
+  generated_password: string;
 }
 
 export interface AuthResponse {

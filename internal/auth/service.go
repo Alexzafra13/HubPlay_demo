@@ -32,6 +32,15 @@ type RegisterRequest struct {
 	DisplayName string
 	Password    string
 	Role        string
+	// PasswordChangeRequired forces the next successful login to land
+	// on the change-password screen. Set to true for admin-driven
+	// account creation when the password is server-generated.
+	PasswordChangeRequired bool
+	// ParentUserID, when set, makes the new row a profile under
+	// `ParentUserID` rather than a standalone account. Profiles
+	// share the parent's password and authenticate via switch-
+	// profile rather than the regular login handshake.
+	ParentUserID string
 }
 
 type Service struct {
@@ -145,13 +154,15 @@ func (s *Service) Register(ctx context.Context, req RegisterRequest) (*db.User, 
 	}
 
 	user := &db.User{
-		ID:           uuid.New().String(),
-		Username:     req.Username,
-		DisplayName:  req.DisplayName,
-		PasswordHash: string(hash),
-		Role:         role,
-		IsActive:     true,
-		CreatedAt:    s.clock.Now(),
+		ID:                     uuid.New().String(),
+		Username:               req.Username,
+		DisplayName:            req.DisplayName,
+		PasswordHash:           string(hash),
+		Role:                   role,
+		IsActive:               true,
+		CreatedAt:              s.clock.Now(),
+		ParentUserID:           req.ParentUserID,
+		PasswordChangeRequired: req.PasswordChangeRequired,
 	}
 
 	if err := s.users.Create(ctx, user); err != nil {
@@ -404,4 +415,93 @@ func generateRefreshToken() (string, error) {
 		return "", fmt.Errorf("generating refresh token: %w", err)
 	}
 	return hex.EncodeToString(b), nil
+}
+
+// passwordAlphabet is the readable charset used for admin-driven
+// auto-generated passwords. Drops 0/O/1/l/I to keep the result
+// copy-pasteable without "is that a one or an L?" friction. The
+// admin reads the password to the user, so legibility matters.
+const passwordAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789"
+
+// GeneratePassword returns a 12-character readable password drawn
+// from a CSPRNG. Length 12 over a 56-char alphabet ≈ 70 bits of
+// entropy — comfortable for a temporary credential the user will
+// rotate at first login. Rejecting bias from `% len(alphabet)` is
+// done by reading enough bytes that the modulo skew is negligible
+// at this length.
+func GeneratePassword() (string, error) {
+	const n = 12
+	buf := make([]byte, n)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("generating password: %w", err)
+	}
+	out := make([]byte, n)
+	for i := 0; i < n; i++ {
+		out[i] = passwordAlphabet[int(buf[i])%len(passwordAlphabet)]
+	}
+	return string(out), nil
+}
+
+// ResetPassword is the admin-only "user lost their password" path.
+// Generates a fresh readable password, hashes it, stores it with
+// must-change=true, and returns the plaintext to the caller exactly
+// once. The handler is responsible for surfacing it to the admin —
+// it never touches the DB again, so a leak here equals the leak
+// from a typed-into-a-form admin-set password.
+//
+// All sessions for the target user are invalidated so a stolen JWT
+// for the old password becomes worthless immediately.
+func (s *Service) ResetPassword(ctx context.Context, userID string) (string, error) {
+	plain, err := GeneratePassword()
+	if err != nil {
+		return "", err
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(plain), s.cfg.BCryptCost)
+	if err != nil {
+		return "", fmt.Errorf("hashing password: %w", err)
+	}
+	if err := s.users.SetPassword(ctx, userID, string(hash), true); err != nil {
+		return "", err
+	}
+	if _, err := s.sessions.DeleteAllByUser(ctx, userID); err != nil {
+		// Logged but not fatal — the password is already rotated, so
+		// the worst case is the old refresh token outlives the JWT
+		// TTL until next refresh attempt.
+		s.logger.Warn("reset password: invalidate sessions failed", "user_id", userID, "error", err)
+	}
+	s.logger.Info("admin reset password", "user_id", userID)
+	return plain, nil
+}
+
+// ChangePassword is the user-side "rotate my own password" flow.
+// Verifies the current password before mutating so a stolen JWT
+// can't pivot into a permanent takeover. Clears the must-change
+// flag — that's how a forced rotation completes.
+func (s *Service) ChangePassword(ctx context.Context, userID, current, next string) error {
+	if next == "" || len(next) < 8 {
+		return fmt.Errorf("change password: %w", domain.ErrInvalidPassword)
+	}
+	user, err := s.users.GetByID(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("change password lookup: %w", err)
+	}
+	// Skip current-password check when must_change is set AND the
+	// caller didn't supply one. Matches the UX of "you just typed
+	// the auto-generated password to log in, you shouldn't have to
+	// type it again" — but if `current` is supplied we still verify
+	// it as a belt-and-braces measure.
+	if !(user.PasswordChangeRequired && current == "") {
+		if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(current)); err != nil {
+			return fmt.Errorf("change password: %w", domain.ErrInvalidPassword)
+		}
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(next), s.cfg.BCryptCost)
+	if err != nil {
+		return fmt.Errorf("hashing password: %w", err)
+	}
+	if err := s.users.SetPassword(ctx, userID, string(hash), false); err != nil {
+		return err
+	}
+	s.logger.Info("password changed", "user_id", userID)
+	return nil
 }

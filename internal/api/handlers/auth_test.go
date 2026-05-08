@@ -58,6 +58,14 @@ func (m *mockAuthService) ValidateToken(_ context.Context, _ string) (*auth.Clai
 	return nil, errors.New("not implemented")
 }
 
+func (m *mockAuthService) ResetPassword(_ context.Context, _ string) (string, error) {
+	return "stub-password", nil
+}
+
+func (m *mockAuthService) ChangePassword(_ context.Context, _, _, _ string) error {
+	return nil
+}
+
 func (m *mockAuthService) Middleware(next http.Handler) http.Handler {
 	return next
 }

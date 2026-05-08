@@ -38,13 +38,15 @@ func (h *UserHandler) Me(w http.ResponseWriter, r *http.Request) {
 
 	respondJSON(w, http.StatusOK, map[string]any{
 		"data": map[string]any{
-			"id":            u.ID,
-			"username":      u.Username,
-			"display_name":  u.DisplayName,
-			"role":          u.Role,
-			"is_active":     u.IsActive,
-			"created_at":    u.CreatedAt,
-			"last_login_at": u.LastLoginAt,
+			"id":                       u.ID,
+			"username":                 u.Username,
+			"display_name":             u.DisplayName,
+			"role":                     u.Role,
+			"is_active":                u.IsActive,
+			"created_at":               u.CreatedAt,
+			"last_login_at":            u.LastLoginAt,
+			"password_change_required": u.PasswordChangeRequired,
+			"parent_user_id":           u.ParentUserID,
 		},
 	})
 }
@@ -63,13 +65,17 @@ func (h *UserHandler) List(w http.ResponseWriter, r *http.Request) {
 	items := make([]map[string]any, len(users))
 	for i, u := range users {
 		items[i] = map[string]any{
-			"id":            u.ID,
-			"username":      u.Username,
-			"display_name":  u.DisplayName,
-			"role":          u.Role,
-			"is_active":     u.IsActive,
-			"created_at":    u.CreatedAt,
-			"last_login_at": u.LastLoginAt,
+			"id":                       u.ID,
+			"username":                 u.Username,
+			"display_name":             u.DisplayName,
+			"role":                     u.Role,
+			"is_active":                u.IsActive,
+			"created_at":               u.CreatedAt,
+			"last_login_at":            u.LastLoginAt,
+			"password_change_required": u.PasswordChangeRequired,
+			"parent_user_id":           u.ParentUserID,
+			"max_content_rating":       u.MaxContentRating,
+			"has_pin":                  u.PINHash != "",
 		}
 	}
 

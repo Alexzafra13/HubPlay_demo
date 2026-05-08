@@ -290,6 +290,7 @@ func NewRouter(deps Dependencies) http.Handler {
 
 			// Current user
 			r.Get("/me", userHandler.Me)
+			r.Post("/me/password", authHandler.ChangeMyPassword)
 
 			// Per-user preferences (hero mode, theme overrides, etc.)
 			// Authenticated; the handler derives userID from claims so
@@ -301,12 +302,15 @@ func NewRouter(deps Dependencies) http.Handler {
 				r.Delete("/me/preferences/{key}", prefsHandler.DeleteMine)
 			}
 
-			// Users (admin only)
+			// Users (admin only). Profiles + reset-password live next
+			// to the legacy CRUD because they share the admin gate;
+			// no point in a parallel /admin/users route.
 			r.Route("/users", func(r chi.Router) {
 				r.Use(auth.RequireAdmin)
 				r.Get("/", userHandler.List)
 				r.Post("/", authHandler.Register)
 				r.Delete("/{id}", userHandler.Delete)
+				r.Post("/{id}/reset-password", authHandler.ResetPassword)
 			})
 
 			// Signing key lifecycle (admin only). Every route here is

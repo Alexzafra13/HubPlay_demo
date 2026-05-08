@@ -42,6 +42,8 @@ import type {
   UpdateLibraryRequest,
   UpsertScheduledJobRequest,
   User,
+  CreateUserResponse,
+  ResetPasswordResponse,
   UserData,
   ApiErrorBody,
   ExternalSubtitleResult,
@@ -399,15 +401,38 @@ export class ApiClient {
 
   async createUser(data: {
     username: string;
-    password: string;
+    /** Optional. When omitted the server generates a temporary password
+     *  and returns it once in the response under `generated_password`. */
+    password?: string;
     display_name?: string;
     role?: string;
-  }): Promise<User> {
-    return this.request<User>("POST", "/users", { body: data });
+  }): Promise<CreateUserResponse> {
+    return this.request<CreateUserResponse>("POST", "/users", { body: data });
   }
 
   async deleteUser(id: string): Promise<void> {
     return this.request<void>("DELETE", `/users/${id}`);
+  }
+
+  /** Admin-only. Generates a fresh temporary password for the target
+   *  user, returns it exactly once for the admin to hand off. The
+   *  user's must-change flag is set so first login lands on the
+   *  ChangePassword screen. */
+  async resetUserPassword(id: string): Promise<ResetPasswordResponse> {
+    return this.request<ResetPasswordResponse>(
+      "POST",
+      `/users/${id}/reset-password`,
+    );
+  }
+
+  /** Self password change. The current password may be empty when the
+   *  user is completing a forced rotation (server skips the compare
+   *  in that case because the user just authenticated with the
+   *  temporary password). */
+  async changeMyPassword(currentPassword: string, newPassword: string): Promise<void> {
+    return this.request<void>("POST", "/me/password", {
+      body: { current_password: currentPassword, new_password: newPassword },
+    });
   }
 
   // ─── Libraries ────────────────────────────────────────────────────────

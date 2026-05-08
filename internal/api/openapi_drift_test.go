@@ -94,6 +94,10 @@ var outOfScopeExact = map[string]string{
 	"POST /admin/peers/{id}/shares":       "federation pairing admin",
 	"DELETE /admin/peers/{id}/shares/{shareID}": "federation pairing admin",
 
+	// ── User management admin ─────────────────────────────────────────
+	"POST /users/{id}/reset-password": "admin password reset",
+	"POST /me/password":               "self password change",
+
 	// ── System / settings admin ───────────────────────────────────────
 	"GET /admin/system/stats":            "admin observability",
 	"GET /admin/system/stream-activity":  "admin observability",

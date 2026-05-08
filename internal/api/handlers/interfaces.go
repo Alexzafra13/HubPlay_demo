@@ -24,6 +24,8 @@ type AuthService interface {
 	RefreshToken(ctx context.Context, refreshToken, ip string) (*auth.AuthToken, error)
 	Logout(ctx context.Context, refreshToken string) error
 	Register(ctx context.Context, req auth.RegisterRequest) (*db.User, error)
+	ResetPassword(ctx context.Context, userID string) (string, error)
+	ChangePassword(ctx context.Context, userID, current, next string) error
 	ValidateToken(ctx context.Context, tokenStr string) (*auth.Claims, error)
 	Middleware(next http.Handler) http.Handler
 }

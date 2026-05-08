@@ -9,6 +9,7 @@ import { Spinner, ErrorBoundary } from "@/components/common";
 import { DebugOverlay } from "@/components/common/DebugOverlay";
 import { lazyWithRetry } from "@/utils/lazyWithRetry";
 import Login from "@/pages/Login";
+const ChangePassword = lazyWithRetry(() => import("@/pages/ChangePassword"));
 
 // Lazy-loaded routes via lazyWithRetry: when a chunk 404s after a
 // deploy (stale tab references the previous build's hashes), the
@@ -101,6 +102,18 @@ export function App() {
         <Route
           path="/login"
           element={needsSetup ? <Navigate to="/setup" replace /> : <Login />}
+        />
+
+        {/* Forced password change. Mounted outside the AppLayout
+            tree so the page renders standalone (no TopBar / Sidebar
+            chrome) and can't escape into the rest of the app while
+            the user holds a temp-password JWT. ProtectedRoute redirects
+            here when password_change_required is set. */}
+        <Route
+          path="/change-password"
+          element={
+            needsSetup ? <Navigate to="/setup" replace /> : <ChangePassword />
+          }
         />
 
         {/* Protected app routes */}

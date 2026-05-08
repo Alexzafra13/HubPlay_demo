@@ -115,6 +115,20 @@
       "viewAll": "Ver todos los servidores"
     }
   },
+  "changePassword": {
+    "title": "Cambiar contraseña",
+    "titleForced": "Cambia tu contraseña",
+    "subtitle": "Elige una nueva contraseña para tu cuenta.",
+    "subtitleForced": "Antes de continuar, sustituye la contraseña temporal por una solo tuya.",
+    "currentLabel": "Contraseña actual",
+    "newLabel": "Contraseña nueva",
+    "confirmLabel": "Repite la contraseña",
+    "submit": "Guardar",
+    "alsoVerifyOld": "Quiero también escribir la contraseña actual",
+    "errorTooShort": "La contraseña debe tener al menos 8 caracteres.",
+    "errorMismatch": "Las contraseñas no coinciden.",
+    "errorGeneric": "No se pudo cambiar la contraseña. Inténtalo de nuevo."
+  },
   "home": {
     "continueWatching": "Seguir viendo",
     "recentlyAdded": "Agregados recientemente",

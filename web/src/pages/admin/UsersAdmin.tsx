@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import type { User } from "@/api/types";
-import { useUsers, useCreateUser, useDeleteUser, useMe } from "@/api/hooks";
+import { useUsers, useCreateUser, useDeleteUser, useMe, useResetUserPassword } from "@/api/hooks";
 import { Button, Badge, Modal, Input, EmptyState, Skeleton } from "@/components/common";
 import { Trans, useTranslation } from 'react-i18next';
 import FederationAdmin from "./FederationAdmin";
@@ -15,38 +15,82 @@ export default function UsersAdmin() {
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
+  const [resetTarget, setResetTarget] = useState<User | null>(null);
 
-  // Add user form state
+  // Add user form state. autoGenerate defaults true so the admin's
+  // happy path is "type username, click Create, copy the password
+  // the modal shows" — no thinking required for normal use.
   const [newUsername, setNewUsername] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const [autoGenerate, setAutoGenerate] = useState(true);
   const [newDisplayName, setNewDisplayName] = useState("");
   const [newRole, setNewRole] = useState("user");
+
+  // Modal that surfaces a one-shot password to copy. Drives both the
+  // post-create flow and the post-reset flow — same UX (a chip with
+  // Copy + a "share with the user" hint), different trigger.
+  const [generatedPasswordModal, setGeneratedPasswordModal] = useState<{
+    username: string;
+    password: string;
+    kind: "created" | "reset";
+  } | null>(null);
+
+  const resetPassword = useResetUserPassword();
 
   function resetForm() {
     setNewUsername("");
     setNewPassword("");
+    setAutoGenerate(true);
     setNewDisplayName("");
     setNewRole("user");
   }
 
   function handleCreate(e: FormEvent) {
     e.preventDefault();
-    if (!newUsername.trim() || !newPassword.trim()) return;
+    if (!newUsername.trim()) return;
+    if (!autoGenerate && !newPassword.trim()) return;
 
+    const username = newUsername.trim();
     createUser.mutate(
       {
-        username: newUsername.trim(),
-        password: newPassword,
+        username,
+        // Empty `password` triggers the server's auto-generation path
+        // — see the AuthHandler.Register handler. The response then
+        // carries `generated_password` which we surface to the admin
+        // exactly once via the GeneratedPassword modal below.
+        password: autoGenerate ? undefined : newPassword,
         display_name: newDisplayName.trim() || undefined,
         role: newRole,
       },
       {
-        onSuccess: () => {
+        onSuccess: (resp) => {
           setShowAddModal(false);
           resetForm();
+          if (resp.generated_password) {
+            setGeneratedPasswordModal({
+              username,
+              password: resp.generated_password,
+              kind: "created",
+            });
+          }
         },
       },
     );
+  }
+
+  function handleReset() {
+    if (!resetTarget) return;
+    const target = resetTarget;
+    resetPassword.mutate(target.id, {
+      onSuccess: (resp) => {
+        setResetTarget(null);
+        setGeneratedPasswordModal({
+          username: target.username,
+          password: resp.generated_password,
+          kind: "reset",
+        });
+      },
+    });
   }
 
   function handleDelete() {
@@ -155,7 +199,15 @@ export default function UsersAdmin() {
                       {formatDate(user.created_at)}
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex justify-end">
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => setResetTarget(user)}
+                          title={t('admin.users.resetPasswordHint', { defaultValue: 'Generar contraseña temporal nueva' })}
+                        >
+                          {t('admin.users.resetPassword', { defaultValue: 'Reiniciar contraseña' })}
+                        </Button>
                         <Button
                           variant="danger"
                           size="sm"
@@ -194,14 +246,42 @@ export default function UsersAdmin() {
             required
           />
 
-          <Input
-            label={t('admin.users.password')}
-            type="password"
-            placeholder={t('admin.users.passwordPlaceholder')}
-            value={newPassword}
-            onChange={(e) => setNewPassword(e.target.value)}
-            required
-          />
+          {/* Auto-generate is the default. The server picks a
+              readable temporary password and returns it once in the
+              response; the GeneratedPasswordModal below surfaces it
+              to the admin to share with the user. The user is forced
+              to rotate at first login. */}
+          <label className="flex items-start gap-2 text-sm text-text-secondary cursor-pointer select-none">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={autoGenerate}
+              onChange={(e) => setAutoGenerate(e.target.checked)}
+            />
+            <span>
+              <span className="block font-medium text-text-primary">
+                {t('admin.users.autoGeneratePassword', { defaultValue: 'Generar contraseña automáticamente' })}
+              </span>
+              <span className="block text-xs text-text-muted">
+                {t('admin.users.autoGenerateHint', {
+                  defaultValue:
+                    'Te enseñaremos la contraseña una sola vez. El usuario tendrá que cambiarla al iniciar sesión.',
+                })}
+              </span>
+            </span>
+          </label>
+
+          {!autoGenerate && (
+            <Input
+              label={t('admin.users.password')}
+              type="password"
+              placeholder={t('admin.users.passwordPlaceholder')}
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              required
+              minLength={8}
+            />
+          )}
 
           <Input
             label={t('admin.users.displayName')}
@@ -286,6 +366,98 @@ export default function UsersAdmin() {
             </Button>
           </div>
         </div>
+      </Modal>
+
+      {/* Reset password confirm. Two-click action because it
+          invalidates every active session for the target — the user
+          will be kicked out of every device and forced to enter the
+          new temp password on next login. */}
+      <Modal
+        isOpen={resetTarget !== null}
+        onClose={() => setResetTarget(null)}
+        title={t('admin.users.resetPassword', { defaultValue: 'Reiniciar contraseña' })}
+        size="sm"
+      >
+        <div className="flex flex-col gap-4">
+          <p className="text-sm text-text-secondary">
+            <Trans
+              i18nKey="admin.users.resetConfirm"
+              values={{ name: resetTarget?.username ?? '' }}
+              defaults="Se generará una contraseña temporal para <strong>{{name}}</strong>. Sus sesiones activas se cerrarán y tendrá que cambiar la contraseña al volver a entrar."
+              components={{ strong: <strong className="text-text-primary" /> }}
+            />
+          </p>
+          {resetPassword.error && (
+            <p className="text-xs text-error">{resetPassword.error.message}</p>
+          )}
+          <div className="flex justify-end gap-3">
+            <Button variant="secondary" onClick={() => setResetTarget(null)}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              variant="danger"
+              isLoading={resetPassword.isPending}
+              onClick={handleReset}
+            >
+              {t('admin.users.resetPasswordConfirmCta', { defaultValue: 'Sí, reiniciar' })}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Generated password modal. Shown exactly once after either
+          create-with-auto-password or reset-password. Closing this
+          modal drops the plaintext from React state — there's no
+          way to retrieve it again. The "Copy" affordance + the
+          "share with the user" hint nudges the admin to act before
+          they close. */}
+      <Modal
+        isOpen={generatedPasswordModal !== null}
+        onClose={() => setGeneratedPasswordModal(null)}
+        title={
+          generatedPasswordModal?.kind === 'created'
+            ? t('admin.users.generatedPasswordCreatedTitle', {
+                defaultValue: 'Usuario creado',
+              })
+            : t('admin.users.generatedPasswordResetTitle', {
+                defaultValue: 'Contraseña reiniciada',
+              })
+        }
+        size="sm"
+      >
+        {generatedPasswordModal && (
+          <div className="flex flex-col gap-4">
+            <p className="text-sm text-text-secondary">
+              <Trans
+                i18nKey="admin.users.generatedPasswordHint"
+                values={{ username: generatedPasswordModal.username }}
+                defaults="Comparte esta contraseña con <strong>{{username}}</strong>. La verás solo una vez. Cuando inicie sesión se le pedirá que la cambie."
+                components={{ strong: <strong className="text-text-primary" /> }}
+              />
+            </p>
+            <div className="flex items-center gap-2 rounded-[--radius-md] border border-border bg-bg-elevated px-3 py-2 font-mono text-sm text-text-primary">
+              <span className="flex-1 select-all break-all">
+                {generatedPasswordModal.password}
+              </span>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  void navigator.clipboard.writeText(
+                    generatedPasswordModal.password,
+                  );
+                }}
+              >
+                {t('common.copy', { defaultValue: 'Copiar' })}
+              </Button>
+            </div>
+            <div className="flex justify-end">
+              <Button onClick={() => setGeneratedPasswordModal(null)}>
+                {t('common.close', { defaultValue: 'Cerrar' })}
+              </Button>
+            </div>
+          </div>
+        )}
       </Modal>
 
       {/* Federation lived as its own top-level admin tab. It's a
