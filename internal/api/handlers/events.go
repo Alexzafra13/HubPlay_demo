@@ -51,6 +51,7 @@ func (h *EventHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	// Subscribe to all relevant event types
 	types := []event.Type{
 		event.LibraryScanStarted,
+		event.LibraryScanProgress,
 		event.LibraryScanCompleted,
 		event.ItemAdded,
 		event.ItemUpdated,

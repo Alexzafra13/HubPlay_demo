@@ -24,6 +24,12 @@ type Type string
 const (
 	LibraryScanStarted   Type = "library.scan.started"
 	LibraryScanCompleted Type = "library.scan.completed"
+	// LibraryScanProgress is emitted periodically (every ~50 files)
+	// while a scan is walking. Data: library_id, library_name,
+	// scanned (count so far), current_path. No total because we
+	// don't pre-walk to count — the user-facing UI shows a running
+	// number + spinner rather than a fractional progress bar.
+	LibraryScanProgress  Type = "library.scan.progress"
 	ItemAdded            Type = "item.added"
 	ItemUpdated          Type = "item.updated"
 	ItemRemoved          Type = "item.removed"
