@@ -226,7 +226,10 @@
   },
   "posterCard": {
     "watched": "Visto",
-    "inProgress": "En curso"
+    "inProgress": "En curso",
+    "newEpisodes_one": "{{count}} episodio nuevo",
+    "newEpisodes_other": "{{count}} episodios nuevos",
+    "newShort": "nuevos"
   },
   "upNext": {
     "title": "A continuacion",

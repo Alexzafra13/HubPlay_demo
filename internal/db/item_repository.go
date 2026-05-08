@@ -394,6 +394,120 @@ func (r *ItemRepository) LatestItems(ctx context.Context, libraryID string, item
 	return items, rows.Err()
 }
 
+// LatestSeriesActivity is one row from `LatestSeriesByActivity`. The
+// embedded Item is the series itself; the two extra fields encode how
+// the rail should render it. Naming mirrors what the wire ends up
+// emitting so the handler can pluck fields by name without a second
+// adapter struct.
+type LatestSeriesActivity struct {
+	Item
+	// LatestActivityAt is the most recent timestamp from either the
+	// series row's own added_at or any of its descendants' (seasons /
+	// episodes). Drives the rail order so a show that just received a
+	// new weekly episode sorts above a show added six months ago that
+	// hasn't moved since.
+	LatestActivityAt time.Time
+	// NewEpisodesCount is how many episodes under this series were
+	// added inside the rolling 14-day window. Zero for shows that
+	// haven't received anything in two weeks. The frontend only
+	// renders the "+N nuevos" badge when this is > 0, so the field
+	// is optional from the wire perspective.
+	NewEpisodesCount int
+}
+
+// LatestSeriesByActivity is the curated rail used by the home page's
+// "Reciente en <library>" tier on shows libraries. It returns series
+// rows (no episodes / seasons) ordered by the most recent activity
+// across the whole show subtree, alongside the count of episodes
+// added in the trailing 14 days so the card can render a "+N nuevos
+// episodios" hint when applicable.
+//
+// The query is structured as:
+//
+//	WITH activity AS (
+//	    SELECT s.id AS series_id,
+//	           MAX(s.added_at, MAX(e.added_at)) AS latest_at,
+//	           COUNT(e.id) FILTER (added_at >= cutoff) AS new_count
+//	    FROM series s LEFT JOIN episodes e via parent->season->series
+//	)
+//
+// SQLite doesn't support FILTER; the equivalent is a CASE/SUM trick.
+// The double-deep parent climb (season → series) is encoded with the
+// item table's own parent_id column rather than a recursive CTE,
+// since shows-only have a fixed two-level depth.
+//
+// Limit caps at 50 to match `LatestItems`.
+func (r *ItemRepository) LatestSeriesByActivity(ctx context.Context, libraryID string, limit int) ([]*LatestSeriesActivity, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 50 {
+		limit = 50
+	}
+	cutoff := time.Now().UTC().Add(-14 * 24 * time.Hour)
+
+	const query = `
+		WITH activity AS (
+			SELECT
+				s.id AS series_id,
+				s.added_at AS series_added_at,
+				MAX(COALESCE(e.added_at, s.added_at)) AS latest_at,
+				SUM(CASE WHEN e.added_at IS NOT NULL AND e.added_at >= ? THEN 1 ELSE 0 END) AS new_count
+			FROM items s
+			LEFT JOIN items season ON season.parent_id = s.id AND season.type = 'season'
+			LEFT JOIN items e ON e.parent_id = season.id
+			                 AND e.type = 'episode'
+			                 AND e.is_available = 1
+			WHERE s.type = 'series'
+			  AND s.is_available = 1
+			  AND s.library_id = ?
+			GROUP BY s.id
+		)
+		SELECT s.id, s.library_id, s.parent_id, s.type, s.title, s.sort_title, s.year, s.path,
+		       s.duration_ticks, s.container, s.added_at, s.is_available,
+		       a.latest_at, a.new_count
+		FROM activity a
+		JOIN items s ON s.id = a.series_id
+		ORDER BY a.latest_at DESC, s.added_at DESC
+		LIMIT ?`
+
+	rows, err := r.db.QueryContext(ctx, query, cutoff, libraryID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("latest series by activity: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	var out []*LatestSeriesActivity
+	for rows.Next() {
+		row := &LatestSeriesActivity{}
+		var parentID, path, container sql.NullString
+		var latestAtRaw any
+		var newCount sql.NullInt64
+		if err := rows.Scan(
+			&row.ID, &row.LibraryID, &parentID, &row.Type, &row.Title, &row.SortTitle,
+			&row.Year, &path, &row.DurationTicks, &container, &row.AddedAt, &row.IsAvailable,
+			&latestAtRaw, &newCount,
+		); err != nil {
+			return nil, fmt.Errorf("scan latest series activity: %w", err)
+		}
+		row.ParentID = parentID.String
+		row.Path = path.String
+		row.Container = container.String
+		// The MAX() over a heterogeneous column comes back as the
+		// driver's any. coerceSQLiteTime handles the prod-legacy
+		// "+0200 CEST m=+..." monotonic-clock shape too, same path
+		// the trending rail already trusts.
+		t, err := coerceSQLiteTime(latestAtRaw)
+		if err != nil {
+			return nil, fmt.Errorf("parse latest_activity_at: %w", err)
+		}
+		row.LatestActivityAt = t
+		row.NewEpisodesCount = int(newCount.Int64)
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
 // ── row mapping helpers ─────────────────────────────────────────────────
 
 func nullableFloat64Ptr(f *float64) sql.NullFloat64 {

@@ -40,6 +40,7 @@ type libFakeService struct {
 	scanFn          func(ctx context.Context, id string, refresh ...bool) error
 	listItemsFn     func(ctx context.Context, f db.ItemFilter) ([]*db.Item, int, error)
 	latestFn        func(ctx context.Context, libraryID, itemType string, limit int) ([]*db.Item, error)
+	latestSeriesFn  func(ctx context.Context, libraryID string, limit int) ([]*db.LatestSeriesActivity, error)
 	itemCountFn     func(ctx context.Context, libraryID string) (int, error)
 	getItemFn       func(ctx context.Context, id string) (*db.Item, error)
 	getChildrenFn   func(ctx context.Context, id string) ([]*db.Item, error)
@@ -141,6 +142,13 @@ func (s *libFakeService) GetItemImages(ctx context.Context, id string) ([]*db.Im
 func (s *libFakeService) LatestItems(ctx context.Context, libraryID, itemType string, limit int) ([]*db.Item, error) {
 	if s.latestFn != nil {
 		return s.latestFn(ctx, libraryID, itemType, limit)
+	}
+	return nil, nil
+}
+
+func (s *libFakeService) LatestSeriesByActivity(ctx context.Context, libraryID string, limit int) ([]*db.LatestSeriesActivity, error) {
+	if s.latestSeriesFn != nil {
+		return s.latestSeriesFn(ctx, libraryID, limit)
 	}
 	return nil, nil
 }
