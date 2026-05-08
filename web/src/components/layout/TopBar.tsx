@@ -32,7 +32,11 @@ export function TopBar({ onMobileMenuClick }: TopBarProps) {
   return (
     <header
       className={[
-        "fixed top-0 left-0 right-0 z-40 flex items-center gap-3 px-3 md:px-4",
+        // px-4 md:px-8 buys the brand mark visible breathing room from
+        // the viewport edge — the previous md:px-4 (16px) read as
+        // "stuck to the left" against the search bar and avatar
+        // sitting comfortably to the right with their own padding.
+        "fixed top-0 left-0 right-0 z-40 flex items-center gap-3 px-4 md:px-8",
         "transition-[background-color,backdrop-filter,border-color] duration-200",
         scrolled
           ? "bg-bg-base/85 backdrop-blur-xl border-b border-border-subtle"

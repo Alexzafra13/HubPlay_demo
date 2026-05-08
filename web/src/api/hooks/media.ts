@@ -249,11 +249,21 @@ export function useSearch(
 
 export function useLatestItems(
   libraryId?: string,
-  options?: Partial<UseQueryOptions<MediaItem[]>>,
+  options?: Partial<UseQueryOptions<MediaItem[]>> & {
+    type?: "movie" | "series" | "season" | "episode";
+  },
 ) {
+  // The "Reciente en <library>" rail on a shows library uses this
+  // hook with type="series" so the SQL query already filters out
+  // episodes (which dominate `added_at DESC` because new episodes are
+  // the most common write to the library, leaving the rail with
+  // almost no series-row hits otherwise).
+  const type = options?.type;
   return useQuery<MediaItem[]>({
-    queryKey: queryKeys.latestItems(libraryId),
-    queryFn: () => api.getLatestItems(libraryId),
+    queryKey: type
+      ? [...queryKeys.latestItems(libraryId), type]
+      : queryKeys.latestItems(libraryId),
+    queryFn: () => api.getLatestItems(libraryId, undefined, type),
     ...options,
   });
 }
