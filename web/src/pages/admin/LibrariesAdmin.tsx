@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { useNavigate } from "react-router";
 import { useDeleteLibrary, useLibraries } from "@/api/hooks";
+import { ScanProgressBanner } from "@/components/admin/ScanProgressBanner";
 import { Button, EmptyState, Modal, Skeleton } from "@/components/common";
 import type { ContentType, Library } from "@/api/types";
 import { LIBRARY_SECTIONS } from "./librariesAdmin/constants";
@@ -136,6 +137,8 @@ export default function LibrariesAdmin() {
           {refreshMessage.text}
         </div>
       )}
+
+      <ScanProgressBanner />
 
       {libraries && libraries.length > 0 ? (
         <div className="flex flex-col gap-3">

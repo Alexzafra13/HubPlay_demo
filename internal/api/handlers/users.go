@@ -137,6 +137,55 @@ type updateActiveRequest struct {
 	IsActive bool `json:"is_active"`
 }
 
+type updateDisplayNameRequest struct {
+	DisplayName string `json:"display_name"`
+}
+
+// SetDisplayName renames a user's human-visible label. Authorisation
+// matrix mirrors SetPIN's: admins can rename anyone, parents can
+// rename their own profile children, and the user themselves can
+// rename their own row. Same anti-tampering rationale as SetPIN —
+// the URL path param is the only identity input, the JWT claims
+// drive the gate.
+func (h *UserHandler) SetDisplayName(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "missing user id")
+		return
+	}
+	claims := auth.GetClaims(r.Context())
+	if claims == nil {
+		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+		return
+	}
+
+	target, err := h.users.GetByID(r.Context(), id)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+
+	// Allowed: admin OR self OR (caller is parent of target profile).
+	allowed := claims.Role == "admin" || claims.UserID == id ||
+		(target.ParentUserID != "" && target.ParentUserID == claims.UserID)
+	if !allowed {
+		respondError(w, r, http.StatusForbidden, "FORBIDDEN",
+			"you cannot rename this user")
+		return
+	}
+
+	var req updateDisplayNameRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
+		return
+	}
+	if err := h.users.SetDisplayName(r.Context(), id, req.DisplayName); err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 type updateAccessRequest struct {
 	// Duration of access in days. 0 (or absent) = clear deadline =
 	// permanent access. Server computes ExpiresAt as now + days.

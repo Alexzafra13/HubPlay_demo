@@ -326,6 +326,25 @@ func (s *Scanner) walkPath(ctx context.Context, lib *db.Library, root string, se
 			s.logger.Warn("error processing file", "path", path, "error", err)
 			result.Errors++
 		}
+
+		// Progress beat every 50 files. Cheap (publish is async)
+		// and frequent enough that a slow disk's 5 fps feels live
+		// in the admin panel without flooding the bus on a hot
+		// SSD's hundreds-per-second walk. The current relative
+		// path lets the UI surface "scanning Action/2024/foo.mkv"
+		// — much more reassuring than a bare counter.
+		if len(seenPaths)%50 == 0 {
+			rel, _ := filepath.Rel(root, path)
+			s.bus.Publish(event.Event{
+				Type: event.LibraryScanProgress,
+				Data: map[string]any{
+					"library_id":   lib.ID,
+					"library_name": lib.Name,
+					"scanned":      len(seenPaths),
+					"current_path": rel,
+				},
+			})
+		}
 		return nil
 	})
 }

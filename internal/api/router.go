@@ -21,6 +21,7 @@ import (
 	"hubplay/internal/imaging/pathmap"
 	"hubplay/internal/iptv"
 	"hubplay/internal/library"
+	"hubplay/internal/logging"
 	"hubplay/internal/observability"
 	"hubplay/internal/provider"
 	"hubplay/internal/setup"
@@ -65,6 +66,11 @@ type Dependencies struct {
 	Config         *config.Config
 	Logger         *slog.Logger
 	Metrics        *observability.Metrics
+	// LogBuffer is the in-memory ring the admin "Logs" surface
+	// tails. Optional — tests pass nil and the admin /logs
+	// endpoint short-circuits to "logs not available" rather than
+	// 500. Production builds wire it up via logging.NewWithBuffer.
+	LogBuffer      *logging.Buffer
 }
 
 func NewRouter(deps Dependencies) http.Handler {
@@ -330,6 +336,11 @@ func NewRouter(deps Dependencies) http.Handler {
 			// parent of a profile can hit it without holding the
 			// admin role.
 			r.Put("/users/{id}/pin", authHandler.SetPIN)
+			// Display-name rename — same authorisation matrix as
+			// SetPIN (admin OR parent-of-target OR self) so a parent
+			// can relabel their own profile members from the picker
+			// without needing the admin role.
+			r.Put("/users/{id}/display-name", userHandler.SetDisplayName)
 
 			// Signing key lifecycle (admin only). Every route here is
 			// destructive — guarded at the group level so a single
@@ -513,6 +524,14 @@ func NewRouter(deps Dependencies) http.Handler {
 						r.Get("/backup", backupHandler.Download)
 						r.Post("/backup/restore", backupHandler.Upload)
 					}
+
+					// Logs viewer. Snapshot endpoint for the initial
+					// fill, SSE stream for the live tail. The handler
+					// short-circuits when LogBuffer is nil (test
+					// builds, etc.) so callers don't 500.
+					logsHandler := handlers.NewAdminLogsHandler(deps.LogBuffer)
+					r.Get("/logs", logsHandler.Snapshot)
+					r.Get("/logs/stream", logsHandler.Stream)
 				})
 			}
 

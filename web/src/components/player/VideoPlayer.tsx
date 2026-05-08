@@ -11,6 +11,7 @@ import { useTrickplay } from "@/hooks/useTrickplay";
 import { PlayerControls } from "./PlayerControls";
 import { UpNextOverlay, type UpNextInfo } from "./UpNextOverlay";
 import { ExternalSubsModal } from "./ExternalSubsModal";
+import { KeyboardHelpOverlay } from "./KeyboardHelpOverlay";
 import type { ExternalSubtitleResult } from "@/api/types";
 
 // ─── Props ───────────────────────────────────────────────────────────────────
@@ -242,6 +243,35 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
     }
   }, [onClose]);
 
+  // PiP toggle. Wrapped so the keyboard hook + a future toolbar
+  // button share the same code path. Pre-flight failures
+  // (no <video>, user-gesture missing, browser without PiP) are
+  // non-fatal — silently no-op rather than throwing in the user's
+  // face; the operator can still hit fullscreen as the fallback.
+  const handleTogglePiP = useCallback(async () => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (!document.pictureInPictureEnabled || video.disablePictureInPicture) {
+      return;
+    }
+    try {
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture();
+      } else {
+        await video.requestPictureInPicture();
+      }
+    } catch {
+      // Ignored — pre-flight + browser-policy errors are recoverable
+      // by the user trying again from a confirmed gesture.
+    }
+  }, []);
+
+  // Help overlay state. `?` toggles; clicking the backdrop or
+  // pressing Escape closes. The shortcut list itself is rendered
+  // by KeyboardHelpOverlay below.
+  const [showHelp, setShowHelp] = useState(false);
+  const toggleHelp = useCallback(() => setShowHelp((v) => !v), []);
+
   // ─── Tab close / navigation cleanup ──────────────────────────────────────
   //
   // If the user closes the tab or navigates away (back button, address
@@ -275,6 +305,8 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
     onVolumeChange: handleVolumeChange,
     onClose: handleClose,
     onActivity: showControls,
+    onTogglePiP: () => void handleTogglePiP(),
+    onToggleHelp: toggleHelp,
   });
 
   // ─── Seek to start position (direct_play) ────────────────────────────────
@@ -502,12 +534,13 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
         ref={videoRef}
         className="absolute inset-0 w-full h-full object-contain"
         playsInline
-        // Suppress Chrome's floating PiP toggle that hovers near the
-        // bottom-right of the video element (intrudes on our own
-        // controls overlay) plus the download / remote-playback hints
-        // that appear on long-press / right-click on some platforms.
-        disablePictureInPicture
-        controlsList="nodownload nopictureinpicture noremoteplayback"
+        // We DO want Picture-in-Picture (the `p` shortcut +
+        // future toolbar button rely on it), so disablePictureInPicture
+        // is intentionally absent. We still suppress the download +
+        // remote-playback hints that appear on long-press / right-click
+        // on some platforms; PiP is opt-in via our own UI, not the
+        // browser chrome.
+        controlsList="nodownload noremoteplayback"
         onClick={(e) => e.stopPropagation()}
         onDoubleClick={(e) => {
           e.stopPropagation();
@@ -687,6 +720,14 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
             onCancel={handleUpNextCancel}
           />
         </div>
+      )}
+
+      {/* Keyboard shortcuts overlay (toggled with `?`). z-50 so it
+          floats above controls + up-next; backdrop click closes
+          since the operator's expectation is "anywhere outside the
+          card dismisses". */}
+      {showHelp && (
+        <KeyboardHelpOverlay onClose={() => setShowHelp(false)} />
       )}
     </div>
   );

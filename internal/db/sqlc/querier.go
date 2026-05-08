@@ -430,6 +430,10 @@ type Querier interface {
 	// is_active=false; the row + every per-user table stays intact so
 	// re-enabling is a one-flag flip.
 	UpdateUserActive(ctx context.Context, arg UpdateUserActiveParams) error
+	// Per-field update so callers (renaming a profile, an admin
+	// relabelling a user) don't need to round-trip the rest of the
+	// mutable surface.
+	UpdateUserDisplayName(ctx context.Context, arg UpdateUserDisplayNameParams) error
 	// max_content_rating NULL means "no restriction". Empty string is
 	// normalised to NULL by the handler so callers don't have to choose.
 	UpdateUserMaxContentRating(ctx context.Context, arg UpdateUserMaxContentRatingParams) error

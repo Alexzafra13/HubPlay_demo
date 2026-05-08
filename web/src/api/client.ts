@@ -556,6 +556,15 @@ export class ApiClient {
     });
   }
 
+  /** Rename a user (admin) or one of your own profile children
+   *  (parent of profile). Server enforces the same matrix the SetPIN
+   *  endpoint uses: admin OR parent-of-target OR self. */
+  async setUserDisplayName(userId: string, displayName: string): Promise<void> {
+    return this.request<void>("PUT", `/users/${userId}/display-name`, {
+      body: { display_name: displayName },
+    });
+  }
+
   /** Promote / demote between user and admin. The primary admin
    *  (oldest by created_at) is gated server-side and returns 403. */
   async setUserRole(userId: string, role: "user" | "admin"): Promise<void> {

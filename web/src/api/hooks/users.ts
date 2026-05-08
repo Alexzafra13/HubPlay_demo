@@ -153,6 +153,23 @@ export function useSetUserContentRating() {
   });
 }
 
+// Rename a user / profile. Invalidates both the admin users list and
+// the per-account profile tree so the new label appears everywhere
+// (admin table + Who's-watching picker + topbar avatar) without a
+// round-trip wait.
+export function useSetUserDisplayName() {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, { userId: string; displayName: string }>({
+    mutationFn: ({ userId, displayName }) =>
+      api.setUserDisplayName(userId, displayName),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.users });
+      queryClient.invalidateQueries({ queryKey: ["me", "profiles"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.me });
+    },
+  });
+}
+
 export function useSetUserRole() {
   const queryClient = useQueryClient();
   return useMutation<

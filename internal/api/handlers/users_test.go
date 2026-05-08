@@ -55,6 +55,10 @@ func (s *userFakeService) SetMaxContentRating(_ context.Context, _, _ string) er
 	return nil
 }
 
+func (s *userFakeService) SetDisplayName(_ context.Context, _, _ string) error {
+	return nil
+}
+
 func (s *userFakeService) SetRole(_ context.Context, _, _ string) error {
 	return nil
 }

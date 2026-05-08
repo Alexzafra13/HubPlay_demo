@@ -72,9 +72,10 @@ var outOfScopeExact = map[string]string{
 	"GET /health/ready": "k8s/LB readiness probe",
 
 	// ── User management (admin) ───────────────────────────────────────
-	"GET /users":         "admin user management",
-	"POST /users":        "admin user creation",
-	"DELETE /users/{id}": "admin user deletion",
+	"GET /users":                      "admin user management",
+	"POST /users":                     "admin user creation",
+	"DELETE /users/{id}":              "admin user deletion",
+	"PUT /users/{id}/display-name":    "rename user/profile (admin OR parent OR self)",
 
 	// ── Signing-key lifecycle (admin) ─────────────────────────────────
 	"GET /admin/auth/keys":         "admin key rotation",
@@ -87,6 +88,12 @@ var outOfScopeExact = map[string]string{
 	// them via direct fetch with credentials.
 	"GET /admin/system/backup":           "admin DB snapshot download",
 	"POST /admin/system/backup/restore":  "admin DB restore upload",
+
+	// ── Logs viewer (admin) ───────────────────────────────────────────
+	// In-process ring + SSE stream tailored to the admin viewer.
+	// No public SDK consumer.
+	"GET /admin/system/logs":         "admin log ring snapshot",
+	"GET /admin/system/logs/stream":  "admin log live SSE stream",
 
 	// ── Federation admin (admin) ──────────────────────────────────────
 	"GET /admin/peers":                    "federation pairing admin",
