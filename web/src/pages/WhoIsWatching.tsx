@@ -26,6 +26,7 @@ import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import { motion } from "framer-motion";
 import { LogOut, Pencil } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import {
   useItems,
   useLogout,
@@ -126,7 +127,7 @@ export default function WhoIsWatching() {
             <button
               type="button"
               onClick={() => void handleSignOut()}
-              className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs text-text-secondary backdrop-blur-md transition-all hover:border-white/20 hover:bg-white/10 hover:text-text-primary"
+              className="inline-flex items-center gap-1.5 rounded-full border border-red-500/20 bg-red-500/5 px-4 py-2 text-xs text-red-400/85 backdrop-blur-md transition-all hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-400"
             >
               <LogOut className="h-3.5 w-3.5" />
               {t("whoIsWatching.signOut", {
@@ -264,7 +265,7 @@ export default function WhoIsWatching() {
         <button
           type="button"
           onClick={() => void handleSignOut()}
-          className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-text-secondary backdrop-blur-md transition-all hover:border-white/20 hover:bg-white/10 hover:text-text-primary"
+          className="inline-flex items-center gap-1.5 rounded-full border border-red-500/20 bg-red-500/5 px-4 py-2 text-red-400/85 backdrop-blur-md transition-all hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-400"
         >
           <LogOut className="h-3.5 w-3.5" />
           {t("whoIsWatching.signOut", {
@@ -281,6 +282,28 @@ export default function WhoIsWatching() {
       onMouseLeave={() => setHoveredProfileId(null)}
     >
       <CinematicBackdrop hoveredHex={hoveredHex} hasWall={showWall} />
+
+      {/* Back button — top-left. The picker is reachable both from
+          a fresh login (where "back" goes nowhere) AND from
+          TopBar → Cambiar perfil (where "back" should drop the
+          user back into the home shell on their current profile).
+          We always navigate to "/" rather than navigate(-1):
+          history-back from a fresh login lands on /login again,
+          which traps the user. "/" is the right answer in both
+          flows because ProtectedRoute will keep them
+          authenticated. */}
+      <motion.button
+        type="button"
+        onClick={() => navigate("/")}
+        initial={{ opacity: 0, x: -8 }}
+        animate={{ opacity: 1, x: 0 }}
+        transition={{ duration: 0.4 }}
+        className="absolute left-4 top-4 z-20 inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-text-secondary backdrop-blur-md transition-all hover:border-white/20 hover:bg-white/10 hover:text-text-primary sm:left-6 sm:top-6"
+        aria-label={t("whoIsWatching.back", { defaultValue: "Volver" })}
+      >
+        <ArrowLeft className="h-3.5 w-3.5" />
+        {t("whoIsWatching.back", { defaultValue: "Volver" })}
+      </motion.button>
 
       {/* Logo — sized big enough to read as a brand mark, not a
           favicon. Keeps to the top of the viewport so the picker

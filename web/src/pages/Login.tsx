@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
+import { motion } from "framer-motion";
 import { useLogin } from "@/api/hooks";
 import { ApiError } from "@/api/types";
 import { useAuthStore } from "@/store/auth";
@@ -14,11 +15,6 @@ import { BrandWordmark } from "@/components/layout/BrandWordmark";
 // is disabled", "temporary access window has expired") are accurate
 // but English and feel like debug strings; we translate them here
 // AND tailor each one to the action the user has to take next.
-//
-// Anti-enumeration: we still treat "user not found" and "wrong
-// password" identically (server already maps both to
-// INVALID_CREDENTIALS), so this function only branches on outcomes
-// that aren't an attacker probing the user table.
 function loginErrorMessage(
   err: Error,
   t: (key: string, opts?: Record<string, unknown>) => string,
@@ -50,18 +46,25 @@ function loginErrorMessage(
   return err.message || t("login.loginFailed");
 }
 
-// Login — visual rework 2026-04-30. The previous version was a card
-// floating on flat bg-base; the first impression of the product was
-// "this is a generic admin tool". Now: an aurora backdrop (same
-// vocabulary as the detail-page ambient effect — three radial gradients
-// with the project's accent palette) + glass-effect card on top.
+// Login — visual rework 2026-05. The form itself wasn't the
+// problem (the user explicitly liked it) but the canvas around
+// it read like "any admin login". Now it follows the same
+// vocabulary the WhoIsWatching picker uses post-cinematic-pass:
 //
-// Why CSS gradients and not a backdrop image: the user is unauthenticated,
-// so they can't fetch any item / poster from the API yet. A static asset
-// in the bundle would work but ages badly (one image gets boring).
-// Aurora is on-brand (matches detail pages), pure CSS, and stays fresh
-// because the colours are close to the accent token — change the token,
-// the login backdrop changes too.
+//   - Big BrandWordmark above the card so the brand owns the
+//     top of the viewport instead of hiding inside an 8 px box.
+//   - A "Bienvenido" hero with the same extralight + tracked
+//     type the picker uses, so the auth flow reads as one
+//     continuous moment.
+//   - Aurora backdrop plus a set of ghosted "poster silhouettes"
+//     drifting slowly behind the card. They're not real
+//     content (the user is unauthenticated so we can't fetch
+//     /items here) — they're rounded rects coloured with the
+//     avatar palette + a slow infinite drift, just enough to
+//     suggest "media platform" without being literal.
+//   - Form card unchanged in structure, slightly more breathing
+//     room and the redundant inline logo dropped (the big one
+//     above is the brand mark now).
 export default function Login() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -81,17 +84,6 @@ export default function Login() {
       {
         onSuccess(data) {
           setAuth(data.user);
-          // Forced rotation wins over the picker — a user with a
-          // temp password shouldn't be able to pick a child profile
-          // before they rotate.
-          //
-          // Otherwise we look at the login response: if the server
-          // returned a profile tree with more than one entry, route
-          // through /select-profile so the picker can ask "who's
-          // watching?". Solo accounts (no children) skip the picker
-          // entirely so they land on Home with one tap. The picker
-          // page also has its own bounce-when-empty as a belt-and-
-          // braces in case the login response is missing the field.
           if (data.user.password_change_required) {
             navigate("/change-password");
           } else if ((data.profiles?.length ?? 0) > 1) {
@@ -108,83 +100,189 @@ export default function Login() {
   }
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-bg-base px-4">
-      {/* Aurora backdrop. Three radial gradients stacked: a vibrant
-          teal blob upper-left, a deeper teal lower-right, and a small
-          warm halo center-bottom to break the monochrome. The whole
-          layer sits behind the card with -z-10 and is wider than the
-          viewport so it never reveals an edge on ultrawide. */}
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-bg-base px-4 py-12">
+      {/* Layer 1 — aurora. Three stacked radial gradients for the
+          warm/cool wash the picker also uses, so the auth shell
+          reads as a single visual family. */}
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute inset-0 -z-10"
+        className="pointer-events-none absolute inset-0"
         style={{
           background: [
-            // upper-left vibrant (accent teal)
             "radial-gradient(60% 70% at 18% 22%, rgba(45, 212, 191, 0.35) 0%, transparent 65%)",
-            // lower-right muted (accent-soft, deeper)
             "radial-gradient(55% 65% at 82% 78%, rgba(13, 148, 136, 0.28) 0%, transparent 60%)",
-            // small warm halo to add temperature contrast
             "radial-gradient(35% 40% at 50% 95%, rgba(244, 114, 182, 0.10) 0%, transparent 70%)",
           ].join(", "),
         }}
       />
 
-      {/* Subtle vignette so the card edges read against the glow */}
+      {/* Layer 2 — drifting ghosted poster silhouettes. Decorative
+          scaffolding that suggests "this is a media app" without
+          requiring catalogue data we can't fetch from a logged-out
+          session. Keep them outside the card by virtue of fixed
+          positioning + low z, and at small max-w on narrow viewports
+          so they don't crowd the form. */}
+      <GhostPosters />
+
+      {/* Layer 3 — vignette so the card edges read against the
+          glow. */}
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute inset-0 -z-10 bg-gradient-to-b from-transparent via-bg-base/40 to-bg-base/80"
+        className="pointer-events-none absolute inset-0 bg-gradient-to-b from-transparent via-bg-base/40 to-bg-base/80"
       />
 
-      {/* Card. backdrop-blur over a semi-transparent surface so the
-          aurora hue tints through. The border stays high-contrast on
-          the dark bg without being garish. */}
-      <div className="relative w-full max-w-sm rounded-2xl border border-white/10 bg-bg-card/70 p-8 shadow-2xl backdrop-blur-xl">
-        <div className="mb-7 flex flex-col items-center gap-3">
-          <BrandWordmark height={48} />
-          <p className="text-xs text-text-muted">{t("login.tagline")}</p>
-        </div>
+      {/* Foreground stack. Logo + welcome above the card, form
+          card below. max-w-sm keeps the form pleasant to fill
+          even on ultrawide. */}
+      <div className="relative z-10 flex w-full max-w-sm flex-col items-center gap-8">
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
+        >
+          <BrandWordmark height={56} className="opacity-95" />
+        </motion.div>
 
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-          <Input
-            label={t("login.username")}
-            type="text"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            placeholder={t("login.usernamePlaceholder")}
-            autoComplete="username"
-            required
-          />
+        <motion.div
+          initial={{ opacity: 0, y: -4 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.1 }}
+          className="text-center"
+        >
+          <h1 className="text-3xl font-extralight tracking-[-0.01em] text-text-primary sm:text-4xl">
+            {t("login.welcomeTitle", { defaultValue: "Bienvenido" })}
+          </h1>
+          <p className="mt-2 text-sm tracking-wider text-text-muted">
+            {t("login.tagline")}
+          </p>
+        </motion.div>
 
-          <Input
-            label={t("login.password")}
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder={t("login.passwordPlaceholder")}
-            autoComplete="current-password"
-            required
-          />
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{
+            duration: 0.5,
+            delay: 0.2,
+            ease: [0.22, 0.61, 0.36, 1],
+          }}
+          className="w-full rounded-2xl border border-white/10 bg-bg-card/70 p-7 shadow-2xl backdrop-blur-xl"
+        >
+          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+            <Input
+              label={t("login.username")}
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder={t("login.usernamePlaceholder")}
+              autoComplete="username"
+              required
+            />
 
-          {error && (
-            <p
-              role="alert"
-              className="rounded-md border border-error/30 bg-error/10 px-3 py-2 text-sm text-error"
+            <Input
+              label={t("login.password")}
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder={t("login.passwordPlaceholder")}
+              autoComplete="current-password"
+              required
+            />
+
+            {error && (
+              <p
+                role="alert"
+                className="rounded-md border border-error/30 bg-error/10 px-3 py-2 text-sm text-error"
+              >
+                {error}
+              </p>
+            )}
+
+            <Button
+              type="submit"
+              fullWidth
+              size="lg"
+              isLoading={login.isPending}
+              className="mt-2"
             >
-              {error}
-            </p>
-          )}
-
-          <Button
-            type="submit"
-            fullWidth
-            size="lg"
-            isLoading={login.isPending}
-            className="mt-2"
-          >
-            {t("login.signIn")}
-          </Button>
-        </form>
+              {t("login.signIn")}
+            </Button>
+          </form>
+        </motion.div>
       </div>
+    </div>
+  );
+}
+
+// GhostPosters — six rounded-rectangle silhouettes positioned around
+// the form card and drifting slowly via framer-motion infinite
+// animations. They're aria-hidden decorative scaffolding only —
+// the auth flow needs no catalogue context, but a flat aurora
+// + card reads as "yet another admin login". Adding a few
+// suggestive shapes at low opacity is the cheapest way to plant
+// "this is a media app" in the user's eye without resorting to a
+// hardcoded image asset that ages.
+//
+// Sizes + positions are hand-chosen to look composed (a few near,
+// a few far, one offset) rather than evenly spaced. Colour comes
+// from a subset of the avatar palette so the same chromatic
+// vocabulary covers every authenticated surface too.
+function GhostPosters() {
+  // Hand-picked frames. Position is in % of viewport so it
+  // scales; size is in fractional viewport units so it adapts
+  // without overwhelming on small screens. Each entry's `delay`
+  // staggers the float animation so the wall doesn't pulse in
+  // unison. Tilts (rotate) keep the grid from looking
+  // CSS-perfect.
+  const ghosts = [
+    { top: "8%",  left: "6%",   w: "8rem",  h: "12rem", color: "#3d5a40", rotate: -7,  delay: 0 },
+    { top: "14%", left: "78%",  w: "9rem",  h: "13rem", color: "#1e3252", rotate: 5,   delay: 0.4 },
+    { top: "55%", left: "10%",  w: "10rem", h: "15rem", color: "#5c3d6e", rotate: 4,   delay: 0.8 },
+    { top: "62%", left: "82%",  w: "8.5rem", h: "12.5rem", color: "#7a3d2e", rotate: -6, delay: 1.2 },
+    { top: "75%", left: "40%",  w: "7rem",  h: "10.5rem", color: "#2e5c5a", rotate: -3, delay: 0.6 },
+    { top: "26%", left: "44%",  w: "7.5rem", h: "11rem", color: "#5a3d3d", rotate: 6,  delay: 1.4 },
+  ];
+
+  return (
+    <div
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-0 hidden md:block"
+    >
+      {ghosts.map((g, i) => (
+        <motion.div
+          key={i}
+          className="absolute rounded-2xl shadow-2xl"
+          style={{
+            top: g.top,
+            left: g.left,
+            width: g.w,
+            height: g.h,
+            background: `linear-gradient(160deg, ${g.color}aa, ${g.color}55 50%, ${g.color}22)`,
+            opacity: 0.18,
+            transform: `rotate(${g.rotate}deg)`,
+          }}
+          animate={{
+            y: [0, -12, 0],
+            opacity: [0.14, 0.22, 0.14],
+          }}
+          transition={{
+            duration: 8 + i,
+            repeat: Infinity,
+            ease: "easeInOut",
+            delay: g.delay,
+          }}
+        />
+      ))}
+      {/* Soft inner-glow overlay so the ghosts blend into the
+          aurora rather than reading as flat tiles. */}
+      <div
+        className="absolute inset-0 backdrop-blur-[3px]"
+        style={{
+          maskImage:
+            "radial-gradient(circle at 50% 50%, transparent 25%, black 75%)",
+          WebkitMaskImage:
+            "radial-gradient(circle at 50% 50%, transparent 25%, black 75%)",
+        }}
+      />
     </div>
   );
 }
