@@ -227,8 +227,16 @@ export default function WhoIsWatching() {
           },
         }}
         className={[
-          "flex flex-wrap gap-8 sm:gap-10",
-          alignment === "center" ? "justify-center" : "justify-start",
+          // Stacked vertically when in the split-layout (alignment="start")
+          // so the picker reads as a side rail next to the poster wall;
+          // the centred fallback layout still wraps a horizontal row for
+          // installations with no catalogue art on the right. This
+          // matches the "list usuarios arriba a abajo" pattern HBO and
+          // Disney+ use on TV-shaped surfaces, while the centred row
+          // covers the desktop-like Netflix shape.
+          alignment === "start"
+            ? "flex flex-col gap-6"
+            : "flex flex-wrap justify-center gap-8 sm:gap-10",
         ].join(" ")}
       >
         {profiles?.map((p) => (
@@ -237,6 +245,7 @@ export default function WhoIsWatching() {
             profile={p}
             onClick={() => void pickProfile(p)}
             onHoverChange={(h) => setHoveredProfileId(h ? p.id : null)}
+            compact={alignment === "start"}
           />
         ))}
       </motion.div>
@@ -498,15 +507,108 @@ interface ProfileCardProps {
   profile: ProfileSummary;
   onClick: () => void;
   onHoverChange?: (hovering: boolean) => void;
+  /** Compact (list-row) layout when the picker is the side rail
+   *  next to the poster wall. Default false → big-tile layout. */
+  compact?: boolean;
 }
 
-function ProfileCard({ profile, onClick, onHoverChange }: ProfileCardProps) {
+function ProfileCard({
+  profile,
+  onClick,
+  onHoverChange,
+  compact = false,
+}: ProfileCardProps) {
   const { t } = useTranslation();
   const palette = avatarColorFor(profile.username);
   const initials = getInitials({
     display_name: profile.display_name,
     username: profile.username,
   });
+
+  // Compact (vertical-stack) variant: list row with a smaller avatar
+  // on the left, the name on the right, and a subtle background that
+  // brightens on hover. Reads as a sidebar list rather than a row of
+  // hero tiles, which is what the user asked for ("arriba a abajo")
+  // and matches HBO Max / Disney+ TV-shaped surfaces.
+  if (compact) {
+    return (
+      <motion.button
+        type="button"
+        onClick={onClick}
+        onMouseEnter={() => onHoverChange?.(true)}
+        onMouseLeave={() => onHoverChange?.(false)}
+        onFocus={() => onHoverChange?.(true)}
+        onBlur={() => onHoverChange?.(false)}
+        variants={{
+          hidden: { opacity: 0, x: -16 },
+          show: { opacity: 1, x: 0 },
+        }}
+        transition={{ duration: 0.45, ease: [0.22, 0.61, 0.36, 1] }}
+        whileHover={{ x: 4 }}
+        whileTap={{ scale: 0.98 }}
+        className="group relative flex w-full items-center gap-4 rounded-2xl border border-transparent bg-white/0 px-3 py-2.5 text-left transition-all duration-300 hover:border-white/10 hover:bg-white/5 focus:outline-none focus-visible:border-accent/40"
+        aria-label={t("whoIsWatching.pickProfile", {
+          name: profile.display_name || profile.username,
+        })}
+      >
+        {/* Halo bleed behind the avatar in the row's palette colour.
+            Smaller than the hero variant since the row's height is
+            ~ 80 px, but the same recipe so the visual language stays
+            consistent across both layouts. */}
+        <span
+          aria-hidden
+          className="absolute left-2 top-1/2 -z-10 h-20 w-20 -translate-y-1/2 rounded-full opacity-0 blur-2xl transition-opacity duration-300 group-hover:opacity-70 group-focus-visible:opacity-70"
+          style={{
+            background: `radial-gradient(closest-side, ${palette.background}, transparent 70%)`,
+          }}
+        />
+        <div
+          className="relative flex h-16 w-16 flex-none items-center justify-center overflow-hidden rounded-full text-2xl font-extralight text-white shadow-lg ring-2 ring-transparent transition-all duration-300 group-hover:ring-white/30 group-focus-visible:ring-accent"
+          style={{
+            background: `linear-gradient(160deg, ${lighten(palette.background, 0.12)}, ${palette.background} 45%, ${darken(palette.background, 0.18)})`,
+          }}
+        >
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-0 bg-gradient-to-b from-white/10 via-transparent to-transparent"
+          />
+          <span className="relative">{initials}</span>
+          {profile.has_pin && (
+            <span
+              className="absolute bottom-0 right-0 flex h-5 w-5 items-center justify-center rounded-full bg-black/70 text-white shadow-md backdrop-blur-sm"
+              aria-hidden
+            >
+              <svg
+                className="h-2.5 w-2.5"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <rect x="5" y="11" width="14" height="9" rx="2" />
+                <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+              </svg>
+            </span>
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-base font-light tracking-wide text-text-primary">
+            {profile.display_name || profile.username.split("/").pop()}
+          </p>
+          {profile.has_pin && (
+            <p className="text-xs text-text-muted">
+              {t("whoIsWatching.pinRequiredHint", {
+                defaultValue: "Pedirá PIN",
+              })}
+            </p>
+          )}
+        </div>
+      </motion.button>
+    );
+  }
+
+  // Hero-tile variant — used when the picker is centred (no
+  // poster wall). Big circular avatar with name underneath.
   return (
     <motion.button
       type="button"
@@ -527,9 +629,6 @@ function ProfileCard({ profile, onClick, onHoverChange }: ProfileCardProps) {
         name: profile.display_name || profile.username,
       })}
     >
-      {/* Halo — same trick as before, sized and shaped for a
-          circle this time so the bleed reads as a sphere of light
-          rather than a square smudge. */}
       <span
         aria-hidden
         className="absolute -inset-6 rounded-full opacity-0 blur-2xl transition-opacity duration-300 group-hover:opacity-70 group-focus-visible:opacity-70"
@@ -538,9 +637,6 @@ function ProfileCard({ profile, onClick, onHoverChange }: ProfileCardProps) {
         }}
       />
 
-      {/* Round avatar (rounded-full) matching the TopBar's avatar
-          shape — visual continuity once the user picks and lands
-          on the home shell. */}
       <div
         className="relative flex h-36 w-36 items-center justify-center overflow-hidden rounded-full text-5xl font-extralight tracking-tight text-white shadow-2xl ring-2 ring-transparent transition-all duration-300 group-hover:ring-white/30 group-focus-visible:ring-accent group-focus-visible:ring-offset-4 group-focus-visible:ring-offset-transparent sm:h-40 sm:w-40 sm:text-6xl"
         style={{
