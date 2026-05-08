@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { FormEvent } from "react";
+import type { FormEvent, ReactNode } from "react";
 import type { User } from "@/api/types";
 import {
   useUsers,
@@ -28,6 +28,23 @@ export default function UsersAdmin() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
   const [resetTarget, setResetTarget] = useState<User | null>(null);
+
+  // Set of parent IDs whose profile members are currently expanded.
+  // Default collapsed so a parent with members reads as a single line
+  // ("alex · 2 miembros · ▸") and admins drill in on demand. Parents
+  // with zero members render plain — no chevron, no badge — so a
+  // typical single-account install isn't littered with empty
+  // affordances.
+  const [expandedParents, setExpandedParents] = useState<Set<string>>(new Set());
+
+  function toggleParent(parentId: string) {
+    setExpandedParents((prev) => {
+      const next = new Set(prev);
+      if (next.has(parentId)) next.delete(parentId);
+      else next.add(parentId);
+      return next;
+    });
+  }
 
   // Add user form state. autoGenerate defaults true so the admin's
   // happy path is "type username, click Create, copy the password
@@ -334,14 +351,77 @@ export default function UsersAdmin() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {users.map((user) => {
-                const isSelf = me?.id === user.id;
-                return (
+              {(() => {
+                // Group profiles under their parents so the table reads
+                // as a flat list of accounts. Parents with members get
+                // a chevron + "N miembros" pill that toggles their
+                // children's visibility; parents with no members render
+                // plain so there's no dead affordance.
+                const childrenByParent = new Map<string, User[]>();
+                const parents: User[] = [];
+                for (const u of users) {
+                  if (u.parent_user_id) {
+                    const arr = childrenByParent.get(u.parent_user_id) ?? [];
+                    arr.push(u);
+                    childrenByParent.set(u.parent_user_id, arr);
+                  } else {
+                    parents.push(u);
+                  }
+                }
+
+                const renderRow = (
+                  user: User,
+                  opts: {
+                    expandable?: boolean;
+                    expanded?: boolean;
+                    memberCount?: number;
+                    onToggle?: () => void;
+                  },
+                ) => {
+                  const isSelf = me?.id === user.id;
+                  return (
                   <tr
                     key={user.id}
                     className="bg-bg-card hover:bg-bg-elevated transition-colors"
                   >
                     <td className="px-4 py-3 font-medium text-text-primary">
+                      {/* Chevron only on parent rows that actually
+                          have profile members. Click toggles their
+                          children's visibility. Parents without
+                          members never render the button so there's
+                          no inert affordance. */}
+                      {opts.expandable && opts.onToggle && (
+                        <button
+                          type="button"
+                          onClick={opts.onToggle}
+                          aria-expanded={opts.expanded}
+                          aria-label={
+                            opts.expanded
+                              ? t('admin.users.collapseMembers', {
+                                  defaultValue: 'Ocultar miembros',
+                                })
+                              : t('admin.users.expandMembers', {
+                                  defaultValue: 'Mostrar miembros',
+                                })
+                          }
+                          className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded text-text-muted hover:bg-bg-elevated hover:text-text-primary transition-colors"
+                        >
+                          <svg
+                            className={[
+                              'h-3.5 w-3.5 transition-transform',
+                              opts.expanded ? 'rotate-90' : '',
+                            ].join(' ')}
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth={2.5}
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <path d="M9 6l6 6-6 6" />
+                          </svg>
+                        </button>
+                      )}
                       {/* Profiles are visually nested under their
                           parent — easier to read than scanning the
                           parent_user_id column. */}
@@ -387,6 +467,34 @@ export default function UsersAdmin() {
                           })}
                         >
                           {t('admin.users.primaryTag', { defaultValue: 'Principal' })}
+                        </span>
+                      )}
+                      {/* Member count pill — only when this account
+                          actually has profile members. Lets the admin
+                          read "how many people share this login" at a
+                          glance without expanding the row. */}
+                      {opts.memberCount !== undefined && opts.memberCount > 0 && (
+                        <span className="ml-2 inline-flex items-center gap-1 rounded-full border border-border-subtle bg-bg-elevated px-2 py-0.5 text-[10px] font-medium text-text-secondary">
+                          <svg
+                            className="h-3 w-3"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth={2}
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <circle cx="12" cy="8" r="3.5" />
+                            <path d="M5 20a7 7 0 0 1 14 0" />
+                          </svg>
+                          {opts.memberCount === 1
+                            ? t('admin.users.memberCountOne', {
+                                defaultValue: '1 miembro',
+                              })
+                            : t('admin.users.memberCountOther', {
+                                defaultValue: '{{count}} miembros',
+                                count: opts.memberCount,
+                              })}
                         </span>
                       )}
                     </td>
@@ -592,8 +700,29 @@ export default function UsersAdmin() {
                       </div>
                     </td>
                   </tr>
-                );
-              })}
+                  );
+                };
+
+                const rows: ReactNode[] = [];
+                for (const parent of parents) {
+                  const kids = childrenByParent.get(parent.id) ?? [];
+                  const expanded = expandedParents.has(parent.id);
+                  rows.push(
+                    renderRow(parent, {
+                      expandable: kids.length > 0,
+                      expanded,
+                      memberCount: kids.length,
+                      onToggle: () => toggleParent(parent.id),
+                    }),
+                  );
+                  if (expanded) {
+                    for (const kid of kids) {
+                      rows.push(renderRow(kid, {}));
+                    }
+                  }
+                }
+                return rows;
+              })()}
             </tbody>
           </table>
         </div>
