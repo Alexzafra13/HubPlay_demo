@@ -13,7 +13,7 @@ import {
 import { useProfiles } from "@/api/hooks";
 import { useAuthStore } from "@/store/auth";
 import { getInitials } from "@/utils/userDisplay";
-import { avatarColorFor } from "@/utils/avatarColor";
+import { avatarColorForUser } from "@/utils/avatarColor";
 import { BrandWordmark } from "./BrandWordmark";
 import { SearchBar } from "./SearchBar";
 import { MainNav } from "./MainNav";
@@ -131,7 +131,7 @@ function UserAvatarMenu({
   // the same user reads identical across every device with no DB
   // round-trip. Falls through to the first palette entry while the
   // /me query is still resolving so the circle never pops in blank.
-  const palette = avatarColorFor(user?.username);
+  const palette = avatarColorForUser(user);
 
   return (
     <div ref={ref} className="relative flex-shrink-0">

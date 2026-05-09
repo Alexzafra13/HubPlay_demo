@@ -43,6 +43,33 @@ export const AVATAR_PALETTE: readonly AvatarPalette[] = [
   { background: "#5c5c2e", label: "olive" },      // olivo oscuro
 ];
 
+// avatarColorForUser is the higher-level helper most callers should
+// reach for: prefers the user's `avatar_color` override (set via the
+// per-profile customisation modal) and falls back to the
+// deterministic FNV helper when the override is empty. Accepts a
+// loose user-shaped object so call sites that already have a User /
+// ProfileSummary don't have to massage the input.
+export function avatarColorForUser(
+  user:
+    | { avatar_color?: string | null; username?: string | null }
+    | null
+    | undefined,
+): AvatarPalette {
+  const override = user?.avatar_color?.toLowerCase();
+  if (override) {
+    const match = AVATAR_PALETTE.find(
+      (p) => p.background.toLowerCase() === override,
+    );
+    if (match) return match;
+    // Unknown hex (legacy / hand-edited DB row). Fall through to the
+    // deterministic helper so we never paint with something the
+    // palette never agreed to. We don't render `override` directly:
+    // a stale value would persist visually and the user couldn't
+    // un-pick it from the UI list.
+  }
+  return avatarColorFor(user?.username ?? null);
+}
+
 export function avatarColorFor(seed: string | null | undefined): AvatarPalette {
   // Cold-start guard: when we don't yet know the user's identity (the
   // TopBar can briefly render before /me resolves), fall back to the

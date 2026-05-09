@@ -16,6 +16,7 @@ import { queryKeys } from "../queryKeys";
 import type {
   HomeLayout,
   HomeLiveNowChannel,
+  HomeBecauseResponse,
   HomeRecommendedItem,
   HomeTrendingItem,
 } from "../types";
@@ -69,6 +70,23 @@ export function useHomeRecommended(
     // which only shifts when they finish (or significantly start)
     // something new. A five-minute stale window matches Trending,
     // and the home page refetches anyway when the layout changes.
+    staleTime: 5 * 60 * 1000,
+    ...options,
+  });
+}
+
+// "Porque viste X" rail. Returns the seed (latest completed watch)
+// + recommendations sharing genres with it. Same staleTime as
+// Recommended (5 min) since the seed only flips when the user
+// finishes another item; refetchOnMount stays default ("if stale")
+// so re-entering Home from a navigation doesn't fire an extra
+// request mid-session.
+export function useHomeBecauseYouWatched(
+  options?: Partial<UseQueryOptions<HomeBecauseResponse>>,
+) {
+  return useQuery<HomeBecauseResponse>({
+    queryKey: queryKeys.homeBecauseYouWatched,
+    queryFn: () => api.getHomeBecauseYouWatched(),
     staleTime: 5 * 60 * 1000,
     ...options,
   });

@@ -37,7 +37,7 @@ import {
 import type { MediaItem, ProfileSummary } from "@/api/types";
 import { useAuthStore } from "@/store/auth";
 import { Spinner } from "@/components/common";
-import { avatarColorFor } from "@/utils/avatarColor";
+import { avatarColorForUser } from "@/utils/avatarColor";
 import { getInitials } from "@/utils/userDisplay";
 import { BrandWordmark } from "@/components/layout/BrandWordmark";
 
@@ -85,6 +85,17 @@ export default function WhoIsWatching() {
       navigate("/", { replace: true });
     }
   }, [isLoading, error, profiles, navigate]);
+
+  // The hovered profile drives the page-level ambient tint behind
+  // the picker. Computed up here (before the early returns below)
+  // because hooks must always run in the same order — moving this
+  // useMemo past an `if (isLoading) return ...` would be a real
+  // rules-of-hooks violation.
+  const hoveredHex = useMemo(() => {
+    if (!hoveredProfileId) return null;
+    const p = profiles?.find((x) => x.id === hoveredProfileId);
+    return p ? avatarColorForUser(p).background : null;
+  }, [hoveredProfileId, profiles]);
 
   if (isLoading) {
     return (
@@ -178,12 +189,6 @@ export default function WhoIsWatching() {
   }
 
   const canManage = me?.role === "admin";
-
-  const hoveredHex = useMemo(() => {
-    if (!hoveredProfileId) return null;
-    const p = profiles?.find((x) => x.id === hoveredProfileId);
-    return p ? avatarColorFor(p.username).background : null;
-  }, [hoveredProfileId, profiles]);
 
   // The picker block (title + avatars + rail) is shared between
   // the single-column and split layouts. Pulled to a local
@@ -519,7 +524,7 @@ function ProfileCard({
   compact = false,
 }: ProfileCardProps) {
   const { t } = useTranslation();
-  const palette = avatarColorFor(profile.username);
+  const palette = avatarColorForUser(profile);
   const initials = getInitials({
     display_name: profile.display_name,
     username: profile.username,
@@ -691,7 +696,7 @@ function PinPad({
   errorMessage,
 }: PinPadProps) {
   const { t } = useTranslation();
-  const palette = avatarColorFor(profile.username);
+  const palette = avatarColorForUser(profile);
   const initials = getInitials({
     display_name: profile.display_name,
     username: profile.username,

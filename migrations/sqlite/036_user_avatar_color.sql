@@ -1,0 +1,22 @@
+-- +goose Up
+--
+-- 036_user_avatar_color.sql — per-profile avatar override.
+--
+-- The avatar shown in the picker / TopBar / row is a circle with the
+-- user's initials over a solid colour. Until now the colour was
+-- 100 % deterministic (FNV-1a hash of the username, mod the 14-entry
+-- palette). That gives every user a stable colour with zero migration
+-- cost — but a parent who doesn't like the colour assigned to a
+-- profile member couldn't override it.
+--
+-- This adds an optional override column. When set, the frontend uses
+-- the stored hex; when null (the default), it falls back to the same
+-- deterministic helper. Free for accounts that never customise.
+--
+-- Storage: TEXT nullable. Constraints intentionally loose — the
+-- service layer validates against the known palette before the write
+-- lands here, and we'd rather accept a free-form colour for some
+-- future "pick any hex" UI than gate every write on a CHECK that
+-- needs schema-coupled changes when the palette grows.
+
+ALTER TABLE users ADD COLUMN avatar_color TEXT;

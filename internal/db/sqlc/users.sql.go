@@ -88,7 +88,7 @@ const getUserByID = `-- name: GetUserByID :one
 SELECT id, username, display_name, password_hash, COALESCE(avatar_path, '') AS avatar_path,
        role, is_active, max_sessions, created_at, last_login_at,
        parent_user_id, pin_hash, max_content_rating, password_change_required,
-       access_expires_at
+       access_expires_at, avatar_color
 FROM users
 WHERE id = ?
 `
@@ -109,6 +109,7 @@ type GetUserByIDRow struct {
 	MaxContentRating       sql.NullString `json:"max_content_rating"`
 	PasswordChangeRequired bool           `json:"password_change_required"`
 	AccessExpiresAt        sql.NullTime   `json:"access_expires_at"`
+	AvatarColor            sql.NullString `json:"avatar_color"`
 }
 
 // User accounts.
@@ -135,6 +136,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id string) (GetUserByIDRow, e
 		&i.MaxContentRating,
 		&i.PasswordChangeRequired,
 		&i.AccessExpiresAt,
+		&i.AvatarColor,
 	)
 	return i, err
 }
@@ -143,7 +145,7 @@ const getUserByUsername = `-- name: GetUserByUsername :one
 SELECT id, username, display_name, password_hash, COALESCE(avatar_path, '') AS avatar_path,
        role, is_active, max_sessions, created_at, last_login_at,
        parent_user_id, pin_hash, max_content_rating, password_change_required,
-       access_expires_at
+       access_expires_at, avatar_color
 FROM users
 WHERE username = ?
 `
@@ -164,6 +166,7 @@ type GetUserByUsernameRow struct {
 	MaxContentRating       sql.NullString `json:"max_content_rating"`
 	PasswordChangeRequired bool           `json:"password_change_required"`
 	AccessExpiresAt        sql.NullTime   `json:"access_expires_at"`
+	AvatarColor            sql.NullString `json:"avatar_color"`
 }
 
 func (q *Queries) GetUserByUsername(ctx context.Context, username string) (GetUserByUsernameRow, error) {
@@ -185,18 +188,21 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (GetUs
 		&i.MaxContentRating,
 		&i.PasswordChangeRequired,
 		&i.AccessExpiresAt,
+		&i.AvatarColor,
 	)
 	return i, err
 }
 
 const listProfilesForOwner = `-- name: ListProfilesForOwner :many
+?;
+
 SELECT id, username, display_name, COALESCE(avatar_path, '') AS avatar_path,
        role, is_active, created_at, last_login_at,
        parent_user_id, pin_hash, max_content_rating, password_change_required,
-       access_expires_at
+       access_expires_at, avatar_color
 FROM users
 WHERE id = ? OR parent_user_id = ?
-ORDER BY parent_user_id IS NOT NULL, display_name COLLATE NOCASE
+ORDER BY parent_user_id IS NOT NULL, display_name COLLATE NOCA
 `
 
 type ListProfilesForOwnerParams struct {
@@ -218,6 +224,7 @@ type ListProfilesForOwnerRow struct {
 	MaxContentRating       sql.NullString `json:"max_content_rating"`
 	PasswordChangeRequired bool           `json:"password_change_required"`
 	AccessExpiresAt        sql.NullTime   `json:"access_expires_at"`
+	AvatarColor            sql.NullString `json:"avatar_color"`
 }
 
 // Returns the parent account row plus every profile that hangs off
@@ -256,6 +263,7 @@ func (q *Queries) ListProfilesForOwner(ctx context.Context, arg ListProfilesForO
 			&i.MaxContentRating,
 			&i.PasswordChangeRequired,
 			&i.AccessExpiresAt,
+			&i.AvatarColor,
 		); err != nil {
 			return nil, err
 		}
@@ -274,7 +282,7 @@ const listUsers = `-- name: ListUsers :many
 SELECT id, username, display_name, COALESCE(avatar_path, '') AS avatar_path,
        role, is_active, created_at, last_login_at,
        parent_user_id, pin_hash, max_content_rating, password_change_required,
-       access_expires_at
+       access_expires_at, avatar_color
 FROM users
 ORDER BY username
 LIMIT ? OFFSET ?
@@ -299,6 +307,7 @@ type ListUsersRow struct {
 	MaxContentRating       sql.NullString `json:"max_content_rating"`
 	PasswordChangeRequired bool           `json:"password_change_required"`
 	AccessExpiresAt        sql.NullTime   `json:"access_expires_at"`
+	AvatarColor            sql.NullString `json:"avatar_color"`
 }
 
 func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUsersRow, error) {
@@ -324,6 +333,7 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUse
 			&i.MaxContentRating,
 			&i.PasswordChangeRequired,
 			&i.AccessExpiresAt,
+			&i.AvatarColor,
 		); err != nil {
 			return nil, err
 		}
@@ -403,6 +413,24 @@ type UpdateUserActiveParams struct {
 // re-enabling is a one-flag flip.
 func (q *Queries) UpdateUserActive(ctx context.Context, arg UpdateUserActiveParams) error {
 	_, err := q.db.ExecContext(ctx, updateUserActive, arg.IsActive, arg.ID)
+	return err
+}
+
+const updateUserAvatarColor = `-- name: UpdateUserAvatarColor :exec
+UPDATE users SET avatar_color = ? WHERE id =
+`
+
+type UpdateUserAvatarColorParams struct {
+	AvatarColor sql.NullString `json:"avatar_color"`
+	ID          string         `json:"id"`
+}
+
+// avatar_color NULL = use the deterministic FNV-1a → palette
+// fallback the frontend already has. Non-null = explicit hex
+// override. Service-layer enforces the value is in the known
+// palette (or empty) before reaching the repo.
+func (q *Queries) UpdateUserAvatarColor(ctx context.Context, arg UpdateUserAvatarColorParams) error {
+	_, err := q.db.ExecContext(ctx, updateUserAvatarColor, arg.AvatarColor, arg.ID)
 	return err
 }
 

@@ -12,6 +12,7 @@ import type {
   HealthResponse,
   HomeLayout,
   HomeLiveNowChannel,
+  HomeBecauseResponse,
   HomeRecommendedItem,
   HomeTrendingItem,
   ImageInfo,
@@ -565,6 +566,15 @@ export class ApiClient {
     });
   }
 
+  /** Set / clear the avatar colour override. Empty hex clears the
+   *  override → frontend falls back to the deterministic palette.
+   *  Same matrix as setUserDisplayName. */
+  async setUserAvatarColor(userId: string, hex: string): Promise<void> {
+    return this.request<void>("PUT", `/users/${userId}/avatar-color`, {
+      body: { avatar_color: hex },
+    });
+  }
+
   /** Promote / demote between user and admin. The primary admin
    *  (oldest by created_at) is gated server-side and returns 403. */
   async setUserRole(userId: string, role: "user" | "admin"): Promise<void> {
@@ -833,6 +843,18 @@ export class ApiClient {
       { params: { limit } },
     );
     return resp.items ?? [];
+  }
+
+  /** "Porque viste X" rail. Returns the seed (most recently
+   *  completed watch) plus items sharing genres with it. seed is
+   *  null when the caller has no completed watches yet — caller
+   *  hides the rail. */
+  async getHomeBecauseYouWatched(limit?: number): Promise<HomeBecauseResponse> {
+    return this.request<HomeBecauseResponse>(
+      "GET",
+      "/me/home/because-you-watched",
+      { params: { limit } },
+    );
   }
 
   async getHomeLiveNow(limit?: number): Promise<HomeLiveNowChannel[]> {

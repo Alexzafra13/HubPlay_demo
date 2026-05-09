@@ -221,6 +221,10 @@ export interface User {
   // = permanent access. Lazy enforcement on the server: Login +
   // middleware reject after this stamp, no background job needed.
   access_expires_at?: string | null;
+  // Per-user avatar override (hex string `#RRGGBB`). Empty / absent
+  // = use the deterministic FNV → palette fallback in
+  // `avatarColorForUser`.
+  avatar_color?: string;
 }
 
 export interface CreateUserResponse {
@@ -276,6 +280,7 @@ export interface ProfileSummary {
   parent_user_id?: string;
   has_pin: boolean;
   max_content_rating?: string;
+  avatar_color?: string;
 }
 
 export interface AuthResponse {
@@ -1271,6 +1276,29 @@ export interface HomeRecommendedItem {
   recommended_because: {
     genres: string[];
   };
+}
+
+/**
+ * Payload of /me/home/because-you-watched. The seed is the recently-
+ * completed item that lit the rail; the items are recommendations
+ * sharing genres with the seed. `seed` is null when the caller has
+ * no completed watches yet (cold-start) — the rail hides itself in
+ * that case.
+ */
+export interface HomeBecauseSeed {
+  id: string;
+  type: "movie" | "series";
+  title: string;
+  library_id: string;
+  year?: number;
+  poster_url?: string;
+  poster_blurhash?: string;
+  poster_color?: string;
+}
+
+export interface HomeBecauseResponse {
+  seed: HomeBecauseSeed | null;
+  items: HomeRecommendedItem[];
 }
 
 /**

@@ -6,7 +6,7 @@ import { ChevronDown, X, LogOut, Settings, ShieldCheck, Smartphone } from "lucid
 import { useAuthStore } from "@/store/auth";
 import { useAllPeerLibraries } from "@/api/hooks/federation";
 import { getInitials } from "@/utils/userDisplay";
-import { avatarColorFor } from "@/utils/avatarColor";
+import { avatarColorForUser } from "@/utils/avatarColor";
 import { MAIN_NAV, PEERS_NAV, type NavItem } from "./navConfig";
 
 // MobileDrawer — replaces the legacy mobile sidebar drawer. Renders
@@ -28,7 +28,7 @@ export function MobileDrawer({ onClose, onLogout }: MobileDrawerProps) {
   const { user } = useAuthStore();
   const isAdmin = user?.role === "admin";
   const initials = getInitials(user);
-  const palette = avatarColorFor(user?.username);
+  const palette = avatarColorForUser(user);
 
   const { data: peerLibs } = useAllPeerLibraries();
   const showPeers = isAdmin && (peerLibs?.length ?? 0) > 0;

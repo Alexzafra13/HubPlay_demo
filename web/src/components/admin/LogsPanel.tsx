@@ -42,10 +42,22 @@ export function LogsPanel() {
 
   // Buffered new entries while paused so the operator catches up
   // when they un-pause instead of missing whatever happened during.
+  // Stored in a ref so SSE writes don't re-render every entry, with
+  // a parallel counter in state so the UI can react when we want
+  // to surface "N entradas en cola" without reading the ref during
+  // render (which violates React's rules — refs aren't reactive).
   const bufferRef = useRef<LogEntry[]>([]);
+  const [bufferedCount, setBufferedCount] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   const pausedRef = useRef(paused);
-  pausedRef.current = paused;
+
+  // Keep the SSE callback's view of `paused` fresh without
+  // re-establishing the EventSource on every toggle. Sync via
+  // useEffect rather than a render-phase assignment so React
+  // strict-mode / the React Compiler stop warning.
+  useEffect(() => {
+    pausedRef.current = paused;
+  }, [paused]);
 
   // SSE wiring. Recreated only on mount/unmount; pause is handled
   // in the consumer rather than by tearing down the connection
@@ -66,6 +78,7 @@ export function LogsPanel() {
           if (bufferRef.current.length > MAX_ENTRIES) {
             bufferRef.current = bufferRef.current.slice(-MAX_ENTRIES);
           }
+          setBufferedCount(bufferRef.current.length);
         } else {
           setEntries((prev) => {
             const next = prev.concat(e);
@@ -81,17 +94,31 @@ export function LogsPanel() {
     return () => es.close();
   }, []);
 
-  // Drain the pause buffer when the operator un-pauses.
-  useEffect(() => {
-    if (!paused && bufferRef.current.length > 0) {
-      const drained = bufferRef.current;
-      bufferRef.current = [];
-      setEntries((prev) => {
-        const next = prev.concat(drained);
-        return next.length > MAX_ENTRIES ? next.slice(-MAX_ENTRIES) : next;
-      });
-    }
-  }, [paused]);
+  // Toggle pause + drain the buffer atomically when leaving paused
+  // mode. This was an effect reacting to `paused` before; React's
+  // strict rules flag setState-in-effect because the drain is
+  // really an event response, not a synchronisation. Moving it into
+  // the click handler removes the effect entirely and React batches
+  // the three setState calls into a single re-render.
+  const onTogglePause = () => {
+    setPaused((prev) => {
+      if (prev) {
+        // un-pausing
+        const drained = bufferRef.current;
+        bufferRef.current = [];
+        setBufferedCount(0);
+        if (drained.length > 0) {
+          setEntries((prevEntries) => {
+            const next = prevEntries.concat(drained);
+            return next.length > MAX_ENTRIES
+              ? next.slice(-MAX_ENTRIES)
+              : next;
+          });
+        }
+      }
+      return !prev;
+    });
+  };
 
   // Auto-scroll. Only when not paused so the operator's read
   // position stays put while they investigate.
@@ -173,7 +200,7 @@ export function LogsPanel() {
           <Button
             size="sm"
             variant="ghost"
-            onClick={() => setPaused((p) => !p)}
+            onClick={onTogglePause}
             title={
               paused
                 ? t("admin.logs.resume", { defaultValue: "Reanudar" })
@@ -214,12 +241,12 @@ export function LogsPanel() {
         )}
       </div>
 
-      {paused && bufferRef.current.length > 0 && (
+      {paused && bufferedCount > 0 && (
         <p className="text-[11px] text-text-muted">
           {t("admin.logs.pausedHint", {
             defaultValue:
               "Pausado · {{n}} entrada(s) en cola, se aplicarán al reanudar.",
-            n: bufferRef.current.length,
+            n: bufferedCount,
           })}
         </p>
       )}

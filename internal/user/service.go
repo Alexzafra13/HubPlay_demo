@@ -69,6 +69,44 @@ func (s *Service) SetMaxContentRating(ctx context.Context, id, rating string) er
 	return nil
 }
 
+// allowedAvatarHexes mirrors the 14-entry palette in
+// `web/src/utils/avatarColor.ts`. Service-side validation so a
+// stray frontend can't write an arbitrary hex (or worse, a CSS
+// expression) into the column. Empty string is also valid — it
+// clears the override, falling back to the deterministic helper.
+//
+// Keep in lock-step with the frontend palette: when one changes,
+// the other must too. We accept this slight duplication because
+// the alternative (serving the palette from a backend endpoint
+// the frontend fetches) adds an HTTP round-trip on every Settings
+// load for a list of 14 strings that move twice a year.
+var allowedAvatarHexes = map[string]struct{}{
+	"#3d5a40": {}, "#7a3d2e": {}, "#1e3252": {}, "#5c3d6e": {},
+	"#2e5c5a": {}, "#7a5c2e": {}, "#5a3d3d": {}, "#3d4a5c": {},
+	"#6e3d5c": {}, "#3d6e6e": {}, "#5c4a2e": {}, "#4a2e5c": {},
+	"#2e4a5c": {}, "#5c5c2e": {},
+}
+
+// SetAvatarColor updates the per-user avatar colour override.
+// Empty string clears the override → frontend falls back to the
+// FNV-1a → palette helper. Non-empty must be one of the 14 known
+// palette entries; anything else is a 400.
+func (s *Service) SetAvatarColor(ctx context.Context, id, hex string) error {
+	trimmed := strings.TrimSpace(strings.ToLower(hex))
+	if trimmed != "" {
+		if _, ok := allowedAvatarHexes[trimmed]; !ok {
+			return domain.NewValidationError(map[string]string{
+				"avatar_color": "must be empty or one of the known palette colours",
+			})
+		}
+	}
+	if err := s.users.SetAvatarColor(ctx, id, trimmed); err != nil {
+		return fmt.Errorf("set avatar color: %w", err)
+	}
+	s.logger.Info("avatar color updated", "user_id", id, "color", trimmed)
+	return nil
+}
+
 // SetDisplayName renames the user. The username + parent_user_id
 // stay put — this only changes the human label that the picker
 // and the admin table show.

@@ -139,6 +139,10 @@ func (m *mockUserService) SetDisplayName(_ context.Context, _, _ string) error {
 	return nil
 }
 
+func (m *mockUserService) SetAvatarColor(_ context.Context, _, _ string) error {
+	return nil
+}
+
 func (m *mockUserService) SetRole(_ context.Context, _, _ string) error {
 	return nil
 }

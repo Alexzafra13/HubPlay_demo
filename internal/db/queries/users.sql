@@ -8,7 +8,7 @@
 SELECT id, username, display_name, password_hash, COALESCE(avatar_path, '') AS avatar_path,
        role, is_active, max_sessions, created_at, last_login_at,
        parent_user_id, pin_hash, max_content_rating, password_change_required,
-       access_expires_at
+       access_expires_at, avatar_color
 FROM users
 WHERE id = ?;
 
@@ -16,7 +16,7 @@ WHERE id = ?;
 SELECT id, username, display_name, password_hash, COALESCE(avatar_path, '') AS avatar_path,
        role, is_active, max_sessions, created_at, last_login_at,
        parent_user_id, pin_hash, max_content_rating, password_change_required,
-       access_expires_at
+       access_expires_at, avatar_color
 FROM users
 WHERE username = ?;
 
@@ -35,7 +35,7 @@ SELECT COUNT(*) AS cnt FROM users;
 SELECT id, username, display_name, COALESCE(avatar_path, '') AS avatar_path,
        role, is_active, created_at, last_login_at,
        parent_user_id, pin_hash, max_content_rating, password_change_required,
-       access_expires_at
+       access_expires_at, avatar_color
 FROM users
 ORDER BY username
 LIMIT ? OFFSET ?;
@@ -96,6 +96,13 @@ UPDATE users SET max_content_rating = ? WHERE id = ?;
 -- reject after this timestamp. Lazy: no background job needed.
 UPDATE users SET access_expires_at = ? WHERE id = ?;
 
+-- name: UpdateUserAvatarColor :exec
+-- avatar_color NULL = use the deterministic FNV-1a → palette
+-- fallback the frontend already has. Non-null = explicit hex
+-- override. Service-layer enforces the value is in the known
+-- palette (or empty) before reaching the repo.
+UPDATE users SET avatar_color = ? WHERE id = ?;
+
 -- name: ListProfilesForOwner :many
 -- Returns the parent account row plus every profile that hangs off
 -- it, ordered by the parent first, then profiles alphabetically.
@@ -106,7 +113,7 @@ UPDATE users SET access_expires_at = ? WHERE id = ?;
 SELECT id, username, display_name, COALESCE(avatar_path, '') AS avatar_path,
        role, is_active, created_at, last_login_at,
        parent_user_id, pin_hash, max_content_rating, password_change_required,
-       access_expires_at
+       access_expires_at, avatar_color
 FROM users
 WHERE id = ? OR parent_user_id = ?
 -- ASC is redundant for collation but works around a sqlc 1.31.x
