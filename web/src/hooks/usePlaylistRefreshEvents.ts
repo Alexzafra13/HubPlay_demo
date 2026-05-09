@@ -86,7 +86,6 @@ export function usePlaylistRefreshEvents() {
       const evt = JSON.parse(raw) as {
         data?: { library_id?: string; error?: string };
       };
-      // eslint-disable-next-line no-console
       console.warn("[playlist] refresh failed", evt.data);
     } catch {
       /* ignore malformed payload */

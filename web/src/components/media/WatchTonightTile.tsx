@@ -1,3 +1,7 @@
+// HMR caveat: this file exports both the component and helpers
+// (recommendation type, etc) consumed by callers. File-split for
+// Fast Refresh would gain little.
+/* eslint-disable react-refresh/only-export-components */
 import type { FC } from "react";
 import { Link } from "react-router";
 import { useTranslation } from "react-i18next";

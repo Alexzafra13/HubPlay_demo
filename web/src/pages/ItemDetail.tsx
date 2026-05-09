@@ -144,13 +144,17 @@ export default function ItemDetail() {
   // and SeekBar stay unit-agnostic (they only know about seconds,
   // matching `<video>.currentTime`). 10_000_000 ticks per second is
   // the constant used everywhere else in the codebase.
+  // Pulled to a local so the React Compiler agrees with the dep
+  // list — `item?.chapters` in the array vs `item.chapters` in
+  // the body confused its inference and skipped memoization.
+  const chapters = item?.chapters;
   const chapterMarkers = useMemo(() => {
-    if (!item?.chapters || item.chapters.length === 0) return undefined;
-    return item.chapters.map((c) => ({
+    if (!chapters || chapters.length === 0) return undefined;
+    return chapters.map((c) => ({
       startSeconds: c.start_ticks / 10_000_000,
       title: c.title,
     }));
-  }, [item?.chapters]);
+  }, [chapters]);
 
   // Runtime palette extraction — must run on EVERY render (Rules of
   // Hooks) so it sits above the early returns. Server-side palette

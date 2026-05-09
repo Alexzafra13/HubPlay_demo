@@ -61,8 +61,12 @@ const UpNextOverlay: FC<UpNextOverlayProps> = ({
   const playRef = useRef(onPlayNow);
   // Keep the latest callback in a ref so the timer effect can stay
   // dependency-free without going stale. The countdown should not
-  // restart just because the parent re-renders.
-  playRef.current = onPlayNow;
+  // restart just because the parent re-renders. Sync via useEffect
+  // (not render-phase assignment) so React's strict mode + the
+  // React Compiler stop flagging the ref mutation.
+  useEffect(() => {
+    playRef.current = onPlayNow;
+  }, [onPlayNow]);
 
   useEffect(() => {
     const start = Date.now();

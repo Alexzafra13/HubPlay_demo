@@ -119,6 +119,22 @@ export function HeroSpotlight({
     return () => window.clearTimeout(id);
   }, [reducedMotion]);
 
+  // Live countdown to the end of the current programme. We can't
+  // call `Date.now()` inline during render — that's an impure
+  // function (linter rightly flags it) and the value would freeze
+  // at last-render time, so the "X min left" label never actually
+  // counts down without an unrelated re-render. Tick once a minute
+  // via state + effect so the value is always fresh and React-aware.
+  // Hoisted ABOVE the early return below so React's rules-of-hooks
+  // sees the hook call on every render.
+  const firstNowPlaying = items[0]?.nowPlaying ?? null;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!firstNowPlaying) return;
+    const id = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, [firstNowPlaying]);
+
   if (items.length === 0) return null;
 
   const { channel, nowPlaying } = items[0];
@@ -133,9 +149,7 @@ export function HeroSpotlight({
   const minutesLeft = nowPlaying
     ? Math.max(
         0,
-        Math.round(
-          (new Date(nowPlaying.end_time).getTime() - Date.now()) / 60_000,
-        ),
+        Math.round((new Date(nowPlaying.end_time).getTime() - now) / 60_000),
       )
     : 0;
 

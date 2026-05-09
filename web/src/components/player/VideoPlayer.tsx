@@ -439,18 +439,18 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
     };
   }, [itemId, knownDuration, showControls, keepControlsVisible, updateTime, onEndedCallback, nextUp]);
 
-  // Reset upNextActive whenever the source changes — the parent's
-  // auto-advance switches `itemId`, and the new episode shouldn't
-  // inherit the previous one's overlay state.
+  // Reset upNextActive + firstFrameReady whenever the source changes
+  // — the parent's auto-advance switches `itemId`, and the new
+  // episode shouldn't inherit the previous one's overlay state. The
+  // canonical "key={itemId}" alternative would re-mount the whole
+  // VideoPlayer and tear down the hls.js instance on every advance,
+  // which is the opposite of what auto-advance is for.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     setUpNextActive(false);
-    // Same rationale for firstFrameReady: a next-up advance reuses
-    // the same VideoPlayer instance with a new source. Without the
-    // reset the loading overlay would NOT show during the prep
-    // window of the next episode (it'd think the first frame had
-    // already painted from the previous one).
     setFirstFrameReady(false);
   }, [itemId]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const handleUpNextConfirm = useCallback(() => {
     setUpNextActive(false);

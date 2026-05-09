@@ -75,9 +75,14 @@ function SettingRow({ setting }: SettingRowProps) {
   // mutations rewrite the cache) keeps the input current without a
   // re-mount loop.
   const [draft, setDraft] = useState(setting.effective);
-  useEffect(() => {
-    setDraft(setting.effective);
-  }, [setting.effective]);
+  // Sync local draft when the canonical value flips (admin saved
+  // from another tab, or an upstream invalidation rewrote the
+  // cache). The lint rule (set-state-in-effect) is too strict for
+  // this controlled-mirror pattern; the alternative — keying the
+  // whole row by setting.effective — would re-mount the input and
+  // wipe the user's in-progress typing on every cache refetch.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => setDraft(setting.effective), [setting.effective]);
 
   const dirty = draft !== setting.effective;
   const isSaving = update.isPending;
