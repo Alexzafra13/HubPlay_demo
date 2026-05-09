@@ -6,7 +6,9 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -45,10 +47,13 @@ import (
 //     are caught even though the leaf paths didn't exist when we
 //     started.
 //
-//   - **Reconcile loop**: libraries created or removed via the admin
-//     UI need their paths added/dropped from the watcher without a
-//     server restart. Every 5 min we re-list libraries and reconcile.
-//     Cheap — the library count is in the dozens, not thousands.
+//   - **Lazy reconcile**: the periodic refresh of "what libraries
+//     exist" only WALKS THE TREE when a library's identity or paths
+//     have changed since the previous tick. Unchanged libraries are
+//     a single map-comparison; their thousands of subdirs stay
+//     untouched. Cost of the periodic tick on a stable deployment
+//     is one cheap SQL query plus a paths-equality check per
+//     library — independent of how big each library's tree is.
 //
 //   - **Fail-soft on inotify-less environments**: Docker on Windows
 //     with bind mounts cannot deliver inotify events into the
@@ -75,19 +80,23 @@ type FSWatcher struct {
 	watch *fsnotify.Watcher
 
 	// debouncers are per-library timers, keyed by library id. Owned
-	// exclusively by the dispatcher goroutine — the mu protects
-	// only the cross-goroutine read of watchedRoots from outside.
+	// exclusively by the dispatcher goroutine.
 	debouncers map[string]*time.Timer
 
-	// watchedRoots tracks which library each currently-watched path
-	// belongs to so we know which library debouncer to fire on an
-	// event. Reverse map: dirPath → libraryID. Mutated only by the
-	// dispatcher goroutine.
+	// watchedRoots maps every directory currently under watch to the
+	// library id that owns it. Owned exclusively by the dispatcher.
 	watchedRoots map[string]string
 
-	// libraries is the last-known set of (libID → []paths). Updated
-	// each reconcile pass.
-	libraries map[string][]string
+	// lastSeen is the snapshot of (libID → sorted paths) from the
+	// previous reconcile tick. Used to skip the expensive tree walk
+	// for libraries that didn't change.
+	lastSeen map[string][]string
+
+	// walksDone counts how many times addLibraryTree() has run.
+	// Test-only observability — prod code never reads this. Atomic so
+	// tests can sample it from outside the dispatcher goroutine
+	// without holding any locks.
+	walksDone atomic.Int64
 
 	// mu guards stop visibility from Stop() to the dispatcher loop.
 	mu      sync.Mutex
@@ -106,7 +115,7 @@ func NewFSWatcher(service *Service, logger *slog.Logger) *FSWatcher {
 		reconcileEvery: 5 * time.Minute,
 		debouncers:     make(map[string]*time.Timer),
 		watchedRoots:   make(map[string]string),
-		libraries:      make(map[string][]string),
+		lastSeen:       make(map[string][]string),
 		stopCh:         make(chan struct{}),
 	}
 }
@@ -118,6 +127,13 @@ func (w *FSWatcher) SetDebounce(d time.Duration) { w.debounce = d }
 // SetReconcileEvery overrides the library-list refresh cadence. For
 // tests only.
 func (w *FSWatcher) SetReconcileEvery(d time.Duration) { w.reconcileEvery = d }
+
+// WalksDone returns how many tree walks the watcher has performed
+// since startup. Test-only observability for asserting that the
+// reconcile loop is lazy — a stable deployment should see this
+// counter increment once at startup and stay there for the rest of
+// the process lifetime.
+func (w *FSWatcher) WalksDone() int64 { return w.walksDone.Load() }
 
 // Start spawns the dispatcher goroutine. Returns an error only when
 // the platform doesn't support fsnotify (Docker on Windows with
@@ -156,7 +172,8 @@ func (w *FSWatcher) Stop() {
 // no further locking is needed inside this loop.
 func (w *FSWatcher) dispatch(ctx context.Context) {
 	// First reconcile happens immediately so newly-started instances
-	// catch up to the existing library set without waiting 5 min.
+	// catch up to the existing library set without waiting for the
+	// first tick.
 	w.reconcile(ctx)
 
 	reconcileTicker := time.NewTicker(w.reconcileEvery)
@@ -184,9 +201,15 @@ func (w *FSWatcher) dispatch(ctx context.Context) {
 	}
 }
 
-// reconcile lists every library, walks its paths, and brings the
-// fsnotify subscription in sync. Idempotent. Safe to call from the
-// dispatcher loop on a tick or after a library mutation event.
+// reconcile keeps the fsnotify subscription in sync with the current
+// library set. The expensive part — walking each library's tree —
+// runs ONLY for libraries that are new or whose paths changed since
+// the previous tick. Unchanged libraries cost one paths-equality
+// check apiece, regardless of how big their tree is.
+//
+// New subdirectories created at runtime under an already-watched
+// library are picked up by the inline subscribe-on-CREATE path in
+// handleEvent — they do not need a periodic tree walk to be seen.
 func (w *FSWatcher) reconcile(ctx context.Context) {
 	libs, err := w.service.List(ctx)
 	if err != nil {
@@ -194,53 +217,108 @@ func (w *FSWatcher) reconcile(ctx context.Context) {
 		return
 	}
 
-	wantPaths := make(map[string]string) // path → libraryID
-	wantLibs := make(map[string][]string)
+	current := make(map[string][]string, len(libs))
 	for _, lib := range libs {
 		// Auto-mode only — manual libraries are not walked by the
 		// scheduler either, so respect the same operator intent.
 		if lib.ScanMode != "auto" {
 			continue
 		}
-		wantLibs[lib.ID] = append([]string(nil), lib.Paths...)
-		for _, root := range lib.Paths {
-			collectDirs(root, lib.ID, wantPaths, w.logger)
-		}
+		paths := append([]string(nil), lib.Paths...)
+		sort.Strings(paths)
+		current[lib.ID] = paths
 	}
 
-	// Add new watches.
-	for path, libID := range wantPaths {
-		if _, alreadyWatched := w.watchedRoots[path]; alreadyWatched {
+	// Libraries that disappeared — drop every watch they owned.
+	for libID := range w.lastSeen {
+		if _, stillThere := current[libID]; stillThere {
 			continue
 		}
-		if err := w.watch.Add(path); err != nil {
-			// fail-soft per-path: an unreadable subdirectory
-			// shouldn't stop the rest of the tree from being watched.
-			w.logger.Warn("fsnotify add",
-				"path", path,
+		w.removeLibraryWatches(libID)
+	}
+
+	// Libraries that are new or whose paths changed — walk and
+	// (re-)add. Unchanged libraries fall through this loop with no
+	// I/O at all.
+	for libID, paths := range current {
+		prev, seen := w.lastSeen[libID]
+		if seen && pathsEqual(prev, paths) {
+			continue
+		}
+		// Paths changed: nuke the previous set first so a path that
+		// was removed from the library no longer leaks a watch.
+		if seen {
+			w.removeLibraryWatches(libID)
+		}
+		w.addLibraryTree(libID, paths)
+	}
+
+	w.lastSeen = current
+}
+
+// addLibraryTree walks every path of a library and adds a fsnotify
+// watch for each directory. Errors per-path are logged and skipped —
+// an unreadable subtree should not block coverage of the rest.
+//
+// Increments walksDone for test observability.
+func (w *FSWatcher) addLibraryTree(libID string, paths []string) {
+	w.walksDone.Add(1)
+	for _, root := range paths {
+		err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				w.logger.Warn("walk for watcher",
+					"path", path,
+					"library_id", libID,
+					"error", walkErr)
+				if entry != nil && entry.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if !entry.IsDir() {
+				return nil
+			}
+			if _, alreadyWatched := w.watchedRoots[path]; alreadyWatched {
+				return nil
+			}
+			if err := w.watch.Add(path); err != nil {
+				w.logger.Warn("fsnotify add",
+					"path", path,
+					"library_id", libID,
+					"error", err)
+				return nil
+			}
+			w.watchedRoots[path] = libID
+			return nil
+		})
+		if err != nil {
+			w.logger.Warn("walk root for watcher",
+				"root", root,
 				"library_id", libID,
 				"error", err)
-			continue
 		}
-		w.watchedRoots[path] = libID
 	}
+}
 
-	// Drop watches whose libraries / subdirs no longer exist.
-	for path := range w.watchedRoots {
-		if _, stillWanted := wantPaths[path]; stillWanted {
+// removeLibraryWatches drops every watch owned by a library. Called
+// when a library disappeared from the catalog or when its `paths`
+// changed (full rebuild is simpler than a per-path diff and the
+// total number of watches is small enough not to matter).
+func (w *FSWatcher) removeLibraryWatches(libID string) {
+	for path, owner := range w.watchedRoots {
+		if owner != libID {
 			continue
 		}
 		_ = w.watch.Remove(path) // best-effort; path may already be gone
 		delete(w.watchedRoots, path)
 	}
-
-	w.libraries = wantLibs
 }
 
 // handleEvent processes one fsnotify event. Most events just kick
 // the per-library debouncer; the special case is a directory being
 // CREATED while we're already watching its parent — we add a watch
-// for it inline so deep nested file copies don't escape coverage.
+// for it inline so deep nested file copies don't escape coverage
+// and we never need a periodic tree walk to discover them.
 func (w *FSWatcher) handleEvent(ctx context.Context, ev fsnotify.Event) {
 	libID, ok := w.watchedRoots[filepath.Dir(ev.Name)]
 	if !ok {
@@ -286,36 +364,17 @@ func (w *FSWatcher) kickDebounce(ctx context.Context, libID string) {
 	})
 }
 
-// collectDirs walks the tree rooted at `root` and adds every
-// directory to `out` with the given libraryID. Errors during the
-// walk are logged but never abort it — one unreadable subdirectory
-// shouldn't disable watching for the rest.
-func collectDirs(
-	root, libraryID string,
-	out map[string]string,
-	logger *slog.Logger,
-) {
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			logger.Warn("walk for watcher",
-				"path", path,
-				"library_id", libraryID,
-				"error", walkErr)
-			// Skip unreadable subtree; continue with siblings.
-			if entry != nil && entry.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if entry.IsDir() {
-			out[path] = libraryID
-		}
-		return nil
-	})
-	if err != nil {
-		logger.Warn("walk root for watcher",
-			"root", root,
-			"library_id", libraryID,
-			"error", err)
+// pathsEqual compares two pre-sorted string slices for equality.
+// reconcile() sorts before storing in lastSeen, so callers can rely
+// on positional comparison rather than going through a set.
+func pathsEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
 	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
