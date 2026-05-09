@@ -834,16 +834,24 @@ func (h *ItemHandler) Search(w http.ResponseWriter, r *http.Request) {
 	yearTo, _ := strconv.Atoi(q.Get("year_to"))
 	minRating, _ := strconv.ParseFloat(q.Get("min_rating"), 64)
 
+	// Per-profile content cap — same gate Latest / Browse already
+	// honour. A profile with `max_content_rating = "PG-13"` typing
+	// "fight club" in the global search must NOT see the R result;
+	// the previous implementation skipped this filter and let the
+	// search bar bypass kid mode entirely.
+	cap := h.callerCapRating(r.Context())
+
 	items, total, err := h.lib.ListItems(r.Context(), db.ItemFilter{
-		LibraryID: libraryID,
-		Type:      itemType,
-		Query:     query,
-		Genre:     genre,
-		YearFrom:  yearFrom,
-		YearTo:    yearTo,
-		MinRating: minRating,
-		Limit:     limit,
-		Offset:    offset,
+		LibraryID:             libraryID,
+		Type:                  itemType,
+		Query:                 query,
+		Genre:                 genre,
+		YearFrom:              yearFrom,
+		YearTo:                yearTo,
+		MinRating:             minRating,
+		Limit:                 limit,
+		Offset:                offset,
+		AllowedContentRatings: library.AllowedRatingsAtMost(cap),
 	})
 	if err != nil {
 		handleServiceError(w, r, err)

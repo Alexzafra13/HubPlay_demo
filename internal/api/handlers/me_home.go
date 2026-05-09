@@ -33,6 +33,7 @@ import (
 
 	"hubplay/internal/auth"
 	"hubplay/internal/db"
+	"hubplay/internal/library"
 	"hubplay/internal/iptv"
 )
 
@@ -44,7 +45,12 @@ type HomeHandler struct {
 	items    *db.ItemRepository
 	images   ImageRepository
 	metadata HomeMetadataRepo
-	logger   *slog.Logger
+	// users resolves the caller's max_content_rating so trending /
+	// recommended can be filtered for kid profiles. Optional — when
+	// nil the cap collapses to "" and AllowedRating returns true
+	// for everything.
+	users  UserService
+	logger *slog.Logger
 }
 
 // HomeLibraryLister is the slice of LibraryRepository the home
@@ -69,6 +75,7 @@ func NewHomeHandler(
 	items *db.ItemRepository,
 	images ImageRepository,
 	metadata HomeMetadataRepo,
+	users UserService,
 	logger *slog.Logger,
 ) *HomeHandler {
 	return &HomeHandler{
@@ -78,8 +85,29 @@ func NewHomeHandler(
 		items:    items,
 		images:   images,
 		metadata: metadata,
+		users:    users,
 		logger:   logger.With("module", "home-handler"),
 	}
+}
+
+// callerCapRating mirrors LibraryHandler / ItemHandler. Resolves
+// the caller's max_content_rating cap from the JWT subject. Nil-
+// safe: handlers wired without a UserService just fall back to no
+// cap (kid profiles won't get filtered, but non-cap deployments
+// keep working).
+func (h *HomeHandler) callerCapRating(ctx context.Context) string {
+	if h.users == nil {
+		return ""
+	}
+	claims := auth.GetClaims(ctx)
+	if claims == nil {
+		return ""
+	}
+	u, err := h.users.GetByID(ctx, claims.UserID)
+	if err != nil || u == nil {
+		return ""
+	}
+	return u.MaxContentRating
 }
 
 // homeLayoutKey is the well-known user_preferences row that stores
@@ -270,11 +298,37 @@ func (h *HomeHandler) Trending(w http.ResponseWriter, r *http.Request) {
 
 	limit := parseLimit(r, 12, 30)
 
-	rows, err := h.home.Trending(r.Context(), claims.UserID, 7, limit)
+	// Bump the inner limit when a content cap is active so the post-
+	// fetch filter has headroom — otherwise a kid profile at PG-13
+	// would always come back light if the trending list happens to
+	// be R-heavy that week. 2x is a pragmatic pad; cap is rarely
+	// active so the cost on regular accounts is one extra LIMIT.
+	cap := h.callerCapRating(r.Context())
+	innerLimit := limit
+	if cap != "" {
+		innerLimit = limit * 2
+	}
+
+	rows, err := h.home.Trending(r.Context(), claims.UserID, 7, innerLimit)
 	if err != nil {
 		h.logger.Error("trending query", "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load trending")
 		return
+	}
+
+	// Apply the rating cap. AllowedRating returns true when cap is
+	// "" so the no-cap path is a no-op.
+	if cap != "" {
+		filtered := rows[:0]
+		for _, row := range rows {
+			if library.AllowedRating(row.ContentRating, cap) {
+				filtered = append(filtered, row)
+			}
+		}
+		rows = filtered
+	}
+	if len(rows) > limit {
+		rows = rows[:limit]
 	}
 
 	out := make([]map[string]any, 0, len(rows))
@@ -374,11 +428,33 @@ func (h *HomeHandler) Recommended(w http.ResponseWriter, r *http.Request) {
 
 	limit := parseLimit(r, 5, 20)
 
-	rows, err := h.home.Recommended(r.Context(), claims.UserID, limit)
+	// Same headroom trick as Trending: pull 2x when a cap is active
+	// so the post-fetch filter has room to drop blocked items
+	// without leaving the rail empty.
+	cap := h.callerCapRating(r.Context())
+	innerLimit := limit
+	if cap != "" {
+		innerLimit = limit * 2
+	}
+
+	rows, err := h.home.Recommended(r.Context(), claims.UserID, innerLimit)
 	if err != nil {
 		h.logger.Error("recommended query", "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load recommended")
 		return
+	}
+
+	if cap != "" {
+		filtered := rows[:0]
+		for _, row := range rows {
+			if library.AllowedRating(row.ContentRating, cap) {
+				filtered = append(filtered, row)
+			}
+		}
+		rows = filtered
+	}
+	if len(rows) > limit {
+		rows = rows[:limit]
 	}
 
 	out := make([]map[string]any, 0, len(rows))

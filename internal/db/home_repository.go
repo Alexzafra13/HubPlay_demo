@@ -37,6 +37,11 @@ type HomeTrendingItem struct {
 	LibraryID       string
 	PlayCount       int64
 	LastPlayedAt    time.Time
+	// ContentRating exposed so the handler can apply per-profile
+	// rating caps post-fetch. We push it through the same SELECT
+	// rather than a second per-row query — the items table is
+	// already in the FROM clause for trending so the column is free.
+	ContentRating string
 }
 
 // Trending returns the top `limit` items played across ALL users in
@@ -97,7 +102,8 @@ func (r *HomeRepository) Trending(ctx context.Context, userID string, windowDays
 		SELECT
 			i.id, i.type, i.title, i.year, i.community_rating, i.library_id,
 			COUNT(DISTINCT p.user_id) AS votes,
-			MAX(p.last_played_at)     AS last_played_at
+			MAX(p.last_played_at)     AS last_played_at,
+			COALESCE(i.content_rating, '') AS content_rating
 		FROM plays p
 		JOIN items i ON i.id = p.rollup_id
 		WHERE i.is_available = 1
@@ -120,7 +126,7 @@ func (r *HomeRepository) Trending(ctx context.Context, userID string, windowDays
 		var it HomeTrendingItem
 		var lastPlayedRaw any
 		if err := rows.Scan(&it.ID, &it.Type, &it.Title, &it.Year, &it.CommunityRating,
-			&it.LibraryID, &it.PlayCount, &lastPlayedRaw); err != nil {
+			&it.LibraryID, &it.PlayCount, &lastPlayedRaw, &it.ContentRating); err != nil {
 			return nil, fmt.Errorf("scan trending row: %w", err)
 		}
 		it.LastPlayedAt, err = coerceSQLiteTime(lastPlayedRaw)
@@ -146,6 +152,10 @@ type HomeRecommendation struct {
 	CommunityRating sql.NullFloat64
 	LibraryID       string
 	Because         []string
+	// ContentRating exposed so the handler can apply per-profile
+	// rating caps post-fetch — same rationale as on
+	// HomeTrendingItem.
+	ContentRating string
 }
 
 // Recommended returns up to `limit` items the caller hasn't watched
@@ -250,6 +260,7 @@ func (r *HomeRepository) Recommended(ctx context.Context, userID string, limit i
 	itemsQuery := fmt.Sprintf(`
 		SELECT
 			i.id, i.type, i.title, i.year, i.community_rating, i.library_id,
+			COALESCE(i.content_rating, '') AS content_rating,
 			COUNT(DISTINCT iv.value) AS genre_hits,
 			GROUP_CONCAT(DISTINCT iv.value) AS matched_genres
 		FROM items i
@@ -282,7 +293,7 @@ func (r *HomeRepository) Recommended(ctx context.Context, userID string, limit i
 		var matched sql.NullString
 		var genreHits int64
 		if err := itemsRows.Scan(&rec.ID, &rec.Type, &rec.Title, &rec.Year, &rec.CommunityRating,
-			&rec.LibraryID, &genreHits, &matched); err != nil {
+			&rec.LibraryID, &rec.ContentRating, &genreHits, &matched); err != nil {
 			return nil, fmt.Errorf("scan recommended item: %w", err)
 		}
 		if matched.Valid && matched.String != "" {

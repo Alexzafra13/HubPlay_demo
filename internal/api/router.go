@@ -565,6 +565,7 @@ func NewRouter(deps Dependencies) http.Handler {
 					deps.Items,
 					deps.Images,
 					deps.Metadata,
+					deps.Users,
 					deps.Logger,
 				)
 				r.Get("/me/home/layout", homeHandler.GetLayout)
