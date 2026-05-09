@@ -394,6 +394,9 @@ export default function UsersAdmin() {
           setPinValue("");
           setPinError(null);
         },
+        hint: t("admin.users.pinHint", {
+          defaultValue: "Configurar PIN del perfil",
+        }),
       },
       {
         label: t("admin.users.resetPassword", {
@@ -401,6 +404,9 @@ export default function UsersAdmin() {
         }),
         onClick: () => setResetTarget(user),
         hidden: isProfile || isSelf || !!user.is_primary,
+        hint: t("admin.users.resetPasswordHint", {
+          defaultValue: "Generar contraseña temporal nueva",
+        }),
       },
       {
         label: t("common.delete"),
@@ -1126,76 +1132,30 @@ export default function UsersAdmin() {
                       {formatDate(user.created_at)}
                     </td>
                     <td className="px-4 py-3">
+                      {/* Desktop reuses the same KebabMenuItem[] the
+                          mobile card menu consumes (getUserActions
+                          above). `hidden` filters out actions that
+                          don't apply to this row (profile vs parent,
+                          self, primary admin); `disabled`/`hint`/`danger`
+                          map straight onto the Button props. The
+                          icons attached to each item are intentionally
+                          ignored here — the strip stays text-only to
+                          keep table rows compact. */}
                       <div className="flex justify-end gap-2 flex-wrap">
-                        {!user.parent_user_id && (
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => setProfileParent(user)}
-                            title={t('admin.users.addProfileHint', { defaultValue: 'Crear perfil hijo bajo esta cuenta' })}
-                          >
-                            {t('admin.users.addProfile', { defaultValue: '+ Perfil' })}
-                          </Button>
-                        )}
-                        {/* Reset password is hidden on:
-                            - profile rows (no own password to reset)
-                            - the row the admin is logged in as
-                              (own-password is the Settings flow)
-                            - the primary admin (immutable from
-                              this surface, recovery via DB) */}
-                        {!user.parent_user_id && !isSelf && !user.is_primary && (
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => setResetTarget(user)}
-                            title={t('admin.users.resetPasswordHint', { defaultValue: 'Generar contraseña temporal nueva' })}
-                          >
-                            {t('admin.users.resetPassword', { defaultValue: 'Reiniciar contraseña' })}
-                          </Button>
-                        )}
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => openRename(user)}
-                          title={t('admin.users.renameHint', {
-                            defaultValue:
-                              'Editar el nombre y el color del avatar',
-                          })}
-                        >
-                          {t('admin.users.rename', { defaultValue: 'Personalizar' })}
-                        </Button>
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => {
-                            setPinTarget(user);
-                            setPinValue("");
-                            setPinError(null);
-                          }}
-                          title={t('admin.users.pinHint', { defaultValue: 'Configurar PIN del perfil' })}
-                        >
-                          {user.has_pin
-                            ? t('admin.users.pinChange', { defaultValue: 'Cambiar PIN' })
-                            : t('admin.users.pinSetCta', { defaultValue: 'Poner PIN' })}
-                        </Button>
-                        {/* Delete blocked for the row's own user
-                            (already protected) AND for the primary
-                            admin (would orphan the deploy). */}
-                        <Button
-                          variant="danger"
-                          size="sm"
-                          disabled={isSelf || user.is_primary}
-                          onClick={() => setDeleteTarget(user)}
-                          title={
-                            user.is_primary
-                              ? t('admin.users.primaryHint', {
-                                  defaultValue: 'La cuenta principal no se puede eliminar.',
-                                })
-                              : undefined
-                          }
-                        >
-                          {t('common.delete')}
-                        </Button>
+                        {getUserActions(user)
+                          .filter((action) => !action.hidden)
+                          .map((action) => (
+                            <Button
+                              key={action.label}
+                              variant={action.danger ? 'danger' : 'secondary'}
+                              size="sm"
+                              disabled={action.disabled}
+                              onClick={action.onClick}
+                              title={action.hint}
+                            >
+                              {action.label}
+                            </Button>
+                          ))}
                       </div>
                     </td>
                   </tr>
