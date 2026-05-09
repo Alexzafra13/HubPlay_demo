@@ -1,5 +1,31 @@
 # Estado del proyecto
 
+> 🎯 **Próxima sesión planeada — Bloque C: mobile responsive admin** (~3-4h estimado).
+>
+> **El problema concreto**:
+> - `/admin/users` (`web/src/pages/admin/UsersAdmin.tsx`) es una `<table>` de **8 columnas** (username, displayName, role, edad máxima, acceso, estado, created, actions) envuelta en `overflow-x-auto`. En móvil (<768px) se convierte en un scroll horizontal: el operador tiene que arrastrar a la derecha para ver "actions" y volver a la izquierda para identificar la fila. Peor aún, la columna de acciones tiene 5 botones (`+ Perfil`, `Personalizar`, `Cambiar PIN`, `Reiniciar contraseña`, `Eliminar`) que envuelven a 2-3 líneas, dejando cada fila a ~200px de alto.
+> - `/admin/libraries` (`LibrariesAdmin.tsx`) — ya está agrupado por content_type pero las filas siguen siendo card-like sin tabla; se reflujan razonablemente. Verificar.
+> - `/admin/system` — editorial sections, ya OK en móvil (Health rows, Connection grid `sm:grid-cols-2`, Storage bars).
+> - `/admin` (Resumen) — paneles ya stackean (`lg:grid-cols-2`).
+>
+> **El plan**:
+> 1. Lift `useIsMobile` (vive inline en `AppLayout.tsx:19`, breakpoint 768) a `web/src/hooks/useIsMobile.ts` para reuso.
+> 2. En `UsersAdmin.tsx`: en `isMobile` swap el `<table>` a una pila de `<div>` cards. Cada card: avatar + nombre arriba; rol / cap / estado / created como `<dl>` etiquetada; acciones en un row horizontal scrolleable o detrás de un kebab (`MoreVertical` icon → menú).
+> 3. Validar `LibrariesAdmin.tsx` en mobile real (probable que solo necesite ajustes de padding).
+> 4. Tests: re-renderizar UsersAdmin con `useIsMobile = true` y verificar que las acciones siguen disparando los mismos handlers.
+>
+> **Patrón de diseño**: matchear lo que ya hace TopBar / LiveTV en móvil — cards apiladas con divider, sin tabla. Conservar la lógica de collapse/expand de profile members (chevron sigue al lado del nombre, no en una columna aparte).
+>
+> **Sub-items que también caben aquí**:
+> - i18n migration round 2: ~30 archivos restantes, ~440 defaultValues. Mismo script Python del commit `a00bd9d`. ~2-3h adicionales.
+> - Tests round 2: ChangePassword form validation, UsersAdmin rename modal, BackupPanel restore validation. ~3-4h.
+>
+> **Decisiones a tomar al arrancar**:
+> - ¿Las acciones de cada row caben en un row horizontal scrolleable, o mejor un kebab menu? El kebab es más limpio pero añade un click extra; el scroll mantiene parity con desktop.
+> - ¿Siempre stackear en mobile, o gating por feature flag? Recomiendo siempre.
+>
+> ---
+>
 > 🎬 **Sesión 2026-05-10 (Bloque B — calidad de código, post-PR-220 re-sync)** — **Tres ataques al fondo de armario que no daban features pero sí dejan la base sustancialmente más sana**: lint clean (13 errores → 0), tests frontend admin/auth (de 0 a 22 tests cubriendo Login/DevicesPanel/WhoIsWatching/LogsPanel), i18n migration (161 keys extraídas a es.json/en.json).
 >
 > **Commits**:
