@@ -24,7 +24,8 @@
     "moreOptions": "More options",
     "loadErrorTitle": "Could not load",
     "loadErrorHint": "Check your connection and try again.",
-    "copy": "Copiar"
+    "copy": "Copiar",
+    "add": "Añadir"
   },
   "nav": {
     "home": "Home",
@@ -52,7 +53,8 @@
     "suggestions": "Suggestions",
     "noResultsFor": "No results for",
     "viewAllResults": "View all results",
-    "switchProfile": "Switch profile"
+    "switchProfile": "Switch profile",
+    "browse": "Explorar"
   },
   "navMenu": {
     "explore": "Explore",
@@ -172,7 +174,9 @@
     "heroReasonNew": "Released {{year}}",
     "heroReasonNewFallback": "Just added",
     "heroReasonRecommendedSingle": "Because you like {{genre}}",
-    "heroReasonRecommendedPair": "Because you like {{first}} and {{second}}"
+    "heroReasonRecommendedPair": "Because you like {{first}} and {{second}}",
+    "becauseYouWatchedLoading": "Porque viste…",
+    "becauseYouWatched": "Porque viste {{title}}"
   },
   "link": {
     "title": "Link a device",
@@ -233,7 +237,10 @@
     "playFailed": "Couldn't start playback: {{error}}",
     "backToLibrary": "Back to library",
     "itemNotFoundTitle": "Item not available",
-    "itemNotFoundDescription": "We couldn't find this title in the peer's catalog. It may have been removed or the share scope changed."
+    "itemNotFoundDescription": "We couldn't find this title in the peer's catalog. It may have been removed or the share scope changed.",
+    "noSharesTitle": "Este servidor aún no comparte nada contigo",
+    "emptyTitle": "Aún no hay servidores conectados",
+    "allEmptyTitle": "Sin bibliotecas compartidas todavía"
   },
   "watchTonight": {
     "tonight": "For tonight",
@@ -267,7 +274,8 @@
     "inProgress": "In progress",
     "newEpisodes_one": "{{count}} new episode",
     "newEpisodes_other": "{{count}} new episodes",
-    "newShort": "new"
+    "newShort": "new",
+    "newEpisodes": "{{count}} new episodes"
   },
   "upNext": {
     "title": "Up next",
@@ -468,8 +476,54 @@
       "international": "International",
       "travel": "Travel",
       "religion": "Religion",
-      "adult": "Adult"
-    }
+      "adult": "Adult",
+      "apagados": "Apagados"
+    },
+    "heroHidden": "El destacado está oculto.",
+    "heroRestore": "Mostrar",
+    "continueWatching": "Continuar viendo",
+    "showingCount": "Mostrando {{visible}} de {{total}}",
+    "apagadosSubtitle": "Canales con fallos recientes; reintenta, quizá hayan vuelto.",
+    "hero": {
+      "customise": "Personalizar destacado",
+      "customiseTitle": "Qué ver destacado",
+      "customiseHint": "Se guarda en tu cuenta para todos tus dispositivos.",
+      "label": {
+        "favorites": "Tu favorito",
+        "liveNow": "En directo ahora",
+        "newest": "Recién añadidos"
+      },
+      "option": {
+        "favorites": "Mis favoritos",
+        "favoritesHint": "Los canales con ♥, rotando.",
+        "liveNow": "En vivo ahora",
+        "liveNowHint": "Canales con programa EPG emitiendo ahora mismo.",
+        "newest": "Recién añadidos",
+        "newestHint": "Los últimos canales que entraron en la biblioteca.",
+        "off": "Ocultar destacado",
+        "offHint": "Discover empieza directamente por las rails."
+      }
+    },
+    "sortLabel": "Ordenar",
+    "sortAria": "Ordenar canales",
+    "sort": {
+      "favorites": "Favoritos",
+      "ending": "Termina pronto",
+      "starting": "Empieza pronto",
+      "name": "Nombre A-Z"
+    },
+    "noLiveNowMatch": "Ningún canal en directo coincide con la búsqueda.",
+    "noLiveNowInCategory": "No hay canales en directo en esta categoría ahora mismo.",
+    "noLiveNowAtAll": "No hay canales emitiendo ahora mismo.",
+    "noLiveNowHint": "Si acabas de añadir canales, su guía EPG aún se está descargando. Puedes revisar las fuentes EPG en Bibliotecas.",
+    "noLiveNow": "No hay canales emitiendo en este momento.",
+    "miniPlayer": "Reproductor flotante",
+    "miniExpand": "Expandir reproductor",
+    "miniStop": "Detener reproductor",
+    "noDescription": "Sin sinopsis disponible.",
+    "upNext": "A continuación",
+    "programEnded": "Ya terminó",
+    "watchChannelNow": "Ver canal ahora"
   },
   "notFound": {
     "title": "404",
@@ -739,7 +793,53 @@
       "contentType": "Content Type",
       "pathPlaceholder": "/media/movies",
       "deleteConfirm": "Are you sure you want to delete <strong>{{name}}</strong>? This will remove the library and all associated metadata. Media files on disk will not be affected.",
-      "failedToLoad": "Failed to load libraries"
+      "failedToLoad": "Failed to load libraries",
+      "languageFilter": "Filtrar idiomas (opcional)",
+      "languageFilterCustom": "Otro código (ej. zh)",
+      "languageFilterEmpty": "Sin selección: se importan todos los idiomas (comportamiento por defecto).",
+      "languageFilterHint": "Solo se persisten canales cuyo tvg-language, tvg-country, group-title o nombre coincida.",
+      "refreshM3UFailed": "No se pudo refrescar el M3U.",
+      "refreshM3U": "Actualizar canales",
+      "refreshEPGFailed": "No se pudo refrescar la guía EPG.",
+      "noEPGURL": "No hay URL EPG configurada en esta biblioteca.",
+      "refreshEPG": "Actualizar EPG",
+      "manage": "Gestionar",
+      "detailNotAvailable": "No hay configuración avanzada para este tipo",
+      "detailNotAvailableHint": "Las acciones diarias (escanear, actualizar metadatos / imágenes, editar) están en la lista. Esta vista de detalle existe sobre todo para bibliotecas en directo.",
+      "m3uUrl": "URL M3U",
+      "epgUrl": "URL EPG (opcional)",
+      "epgURLHint": "Si el M3U trae url-tvg en su cabecera, se auto-detecta.",
+      "errors": {
+        "nameRequired": "El nombre es obligatorio.",
+        "livePickRequired": "Selecciona un país, categoría, idioma o región para la lista pública.",
+        "m3uRequired": "La URL del M3U es obligatoria.",
+        "pathRequired": "Indica al menos una ruta de carpeta."
+      },
+      "browseFoldersHint": "Selecciona la carpeta donde están los archivos.",
+      "addLibraryHint": "Crea una nueva colección. Puedes apuntar a una carpeta local o a un servicio en directo.",
+      "livetvSource": "Fuente",
+      "livetvPublic": "Público (iptv-org)",
+      "livetvCustom": "Personalizada",
+      "searchList": "Filtrar",
+      "searchListPlaceholder": "Escribe para filtrar…",
+      "country": "País",
+      "helpHeader": "Sobre este formulario",
+      "tipNameTitle": "Nombre",
+      "tipNameBody": "Aparece en la barra lateral. Cámbialo cuando quieras desde Editar.",
+      "tipTypeTitle": "Tipo de contenido",
+      "tipTypeBody": "Decide cómo se escanean los archivos (películas, series, música) o si es TV en vivo.",
+      "tipPathTitle": "Ruta",
+      "tipPathBody": "Apunta a la carpeta dentro del contenedor. Usa el botón Examinar para listarlas.",
+      "tipLiveTitle": "Fuente IPTV",
+      "tipLiveBody": "Pública usa listas de iptv-org. Personalizada acepta tu propio M3U.",
+      "preflightTesting": "Probando conexión…",
+      "preflightTest": "Probar conexión",
+      "preflightError": "No se pudo lanzar la prueba",
+      "tlsInsecureLabel": "Saltar verificación TLS (cert. inválido)",
+      "tlsInsecureWarn": "⚠ Las descargas de M3U/EPG aceptarán cualquier certificado, incluso caducados o auto-firmados. Sólo activar para providers de confianza con TLS roto. El proxy de streams mantiene verificación estricta.",
+      "tlsInsecureHint": "Activar sólo si el provider tiene el certificado caducado o auto-firmado y aceptas el riesgo MITM.",
+      "totalNone": "Sin bibliotecas",
+      "total": "{{count}} bibliotecas"
     },
     "providers": {
       "title": "Metadata Providers",
@@ -1016,6 +1116,111 @@
     "scan": {
       "scanning": "Escaneando ",
       "fileCount": "{{count}} archivos"
+    },
+    "withoutEPG": {
+      "hint": "Corrige el tvg-id para emparejarlo con una entrada del XMLTV. La edición se conserva tras refrescar el M3U.",
+      "searchPlaceholder": "Buscar por número, nombre o grupo…",
+      "searchLabel": "Filtrar canales sin guía",
+      "counter": "{{shown}} de {{total}}",
+      "noMatches": "Ningún canal coincide con la búsqueda.",
+      "listLabel": "Canales sin guía EPG",
+      "showMore": "Mostrar más ({{remaining}})",
+      "tvgIDPlaceholder": "tvg-id (p. ej. La1.ES)",
+      "tvgIDLabel": "Nuevo tvg-id",
+      "empty": "(vacío)",
+      "edit": "Editar tvg-id"
+    },
+    "epg": {
+      "pickCatalog": "Selecciona una fuente del catálogo",
+      "emptyURL": "Introduce una URL XMLTV",
+      "loading": "Cargando fuentes EPG…",
+      "priorityHint": "Prioridad: la primera fuente gana cuando varias cubren el mismo canal.",
+      "empty": "Aún no hay fuentes EPG. Añade una del catálogo o pega una URL XMLTV para que la guía aparezca en la app.",
+      "listLabel": "Fuentes EPG configuradas, en orden de prioridad",
+      "fromCatalog": "Del catálogo",
+      "custom": "URL personalizada",
+      "catalogLabel": "Catálogo de fuentes EPG",
+      "pickCatalogPlaceholder": "— Selecciona una fuente —",
+      "add": "Añadir",
+      "customURLLabel": "URL XMLTV personalizada",
+      "programs": "programas",
+      "channelsMatched": "canales",
+      "error": "error",
+      "neverRefreshed": "nunca refrescada",
+      "moveUp": "Subir prioridad",
+      "moveDown": "Bajar prioridad",
+      "catalogEntry": "del catálogo",
+      "remove": "Eliminar fuente"
+    },
+    "livetv": {
+      "tabs": {
+        "sources": "Fuentes EPG",
+        "schedule": "Programación",
+        "withoutEPG": "Sin guía",
+        "unhealthy": "Con problemas"
+      },
+      "tabsLabel": "Secciones de la biblioteca livetv",
+      "stats": {
+        "channels": "canales",
+        "epg": "EPG",
+        "unhealthy": "con problemas",
+        "withoutEPG": "sin guía"
+      },
+      "health": {
+        "pending": "Pendiente de importar",
+        "pendingHint": "Pulsa \"Actualizar canales\" para traer el M3U.",
+        "noSources": "Sin fuente EPG",
+        "noSourcesHint": "Los canales funcionan; la guía no aparecerá hasta añadir una fuente.",
+        "allFailing": "Todas las fuentes EPG fallan",
+        "allFailingHint": "Revisa las URLs o añade una fuente alternativa.",
+        "someFailing": "{{count}} fuente(s) fallando",
+        "unhealthy": "{{count}} canal(es) con fallos de conexión",
+        "lowEpgCoverage": "cobertura EPG baja ({{pct}}%)",
+        "attention": "Atención",
+        "neverRefreshed": "EPG sin refrescar aún",
+        "neverRefreshedHint": "Pulsa \"Actualizar EPG\" para cargar la guía.",
+        "ok": "Todo en orden"
+      }
+    },
+    "schedule": {
+      "noJobs": "Sin tareas programadas disponibles.",
+      "title": "Tareas automáticas",
+      "description": "Refresca el M3U y la guía EPG cada X horas sin intervención.",
+      "toggle": "Activar {{kind}}",
+      "enabled": "Activo",
+      "disabled": "Inactivo",
+      "intervalLabel": "Intervalo de {{kind}}",
+      "running": "Ejecutando…",
+      "runNow": "Ejecutar ahora",
+      "kind": {
+        "m3u": "Refrescar M3U",
+        "epg": "Refrescar EPG"
+      },
+      "status": {
+        "error": "Error",
+        "ok": "OK",
+        "neverRun": "Sin ejecutar"
+      },
+      "lastRun": {
+        "never": "Aún no se ha ejecutado.",
+        "errored": "Falló {{when}}: {{error}}",
+        "ok": "Última ejecución: {{when}}"
+      }
+    },
+    "health": {
+      "hiddenHint": "Ocultos automáticamente de la vista de usuario tras 3 fallos consecutivos. Márcalos como OK cuando los arregles o desactívalos si siguen muertos.",
+      "searchPlaceholder": "Buscar por nombre o motivo del fallo…",
+      "searchLabel": "Filtrar canales con problemas",
+      "counter": "{{shown}} de {{total}}",
+      "noMatches": "Ningún canal coincide con la búsqueda.",
+      "listLabel": "Canales con fallos recientes",
+      "showMore": "Mostrar más ({{remaining}})",
+      "failures": "fallos",
+      "noError": "sin detalle",
+      "lastProbe": "Último intento: {{when}}",
+      "resetHint": "Borra el contador. Úsalo si sabes que el canal funciona.",
+      "markOK": "Marcar OK",
+      "disable": "Desactivar"
     }
   },
   "setup": {
