@@ -16,13 +16,26 @@ import {
   useSetUserPIN,
   useSetUserRole,
 } from "@/api/hooks";
-import { Button, Modal, Input, EmptyState, Skeleton } from "@/components/common";
-import { AVATAR_PALETTE } from "@/utils/avatarColor";
+import { Button, KebabMenu, Modal, Input, EmptyState, Skeleton } from "@/components/common";
+import type { KebabMenuItem } from "@/components/common";
+import { AVATAR_PALETTE, avatarColorForUser } from "@/utils/avatarColor";
+import { useIsMobile } from "@/hooks/useIsMobile";
+import { getInitials } from "@/utils/userDisplay";
+import {
+  ChevronDown,
+  ChevronRight,
+  KeyRound,
+  Lock,
+  Palette,
+  Trash2,
+  UserPlus,
+} from "lucide-react";
 import { Trans, useTranslation } from 'react-i18next';
 import FederationAdmin from "./FederationAdmin";
 
 export default function UsersAdmin() {
   const { t } = useTranslation();
+  const isMobile = useIsMobile();
   const { data: me } = useMe();
   const { data: users, isLoading, error } = useUsers();
   const createUser = useCreateUser();
@@ -345,6 +358,65 @@ export default function UsersAdmin() {
     });
   }
 
+  // Action descriptors shared between the desktop row's button
+  // strip and the mobile card's kebab menu. Single source of truth
+  // so a flag added here lights up in both places automatically.
+  // The `hidden` flag is used by the kebab; desktop iterates and
+  // skips them with the same predicate.
+  function getUserActions(user: User): KebabMenuItem[] {
+    const isSelf = me?.id === user.id;
+    const isProfile = !!user.parent_user_id;
+    return [
+      {
+        label: t("admin.users.rename", { defaultValue: "Personalizar" }),
+        icon: Palette,
+        onClick: () => openRename(user),
+        hint: t("admin.users.renameHint", {
+          defaultValue: "Editar el nombre y el color del avatar",
+        }),
+      },
+      {
+        label: t("admin.users.addProfile", { defaultValue: "+ Perfil" }),
+        icon: UserPlus,
+        onClick: () => setProfileParent(user),
+        hidden: isProfile,
+        hint: t("admin.users.addProfileHint", {
+          defaultValue: "Crear perfil hijo bajo esta cuenta",
+        }),
+      },
+      {
+        label: user.has_pin
+          ? t("admin.users.pinChange", { defaultValue: "Cambiar PIN" })
+          : t("admin.users.pinSetCta", { defaultValue: "Poner PIN" }),
+        icon: KeyRound,
+        onClick: () => {
+          setPinTarget(user);
+          setPinValue("");
+          setPinError(null);
+        },
+      },
+      {
+        label: t("admin.users.resetPassword", {
+          defaultValue: "Reiniciar contraseña",
+        }),
+        onClick: () => setResetTarget(user),
+        hidden: isProfile || isSelf || !!user.is_primary,
+      },
+      {
+        label: t("common.delete"),
+        icon: Trash2,
+        danger: true,
+        disabled: isSelf || !!user.is_primary,
+        hint: user.is_primary
+          ? t("admin.users.primaryHint", {
+              defaultValue: "La cuenta principal no se puede eliminar.",
+            })
+          : undefined,
+        onClick: () => setDeleteTarget(user),
+      },
+    ];
+  }
+
   function formatDate(iso: string) {
     return new Date(iso).toLocaleDateString(undefined, {
       year: "numeric",
@@ -360,6 +432,323 @@ export default function UsersAdmin() {
         description={t('common.loadErrorHint')}
       />
     );
+  }
+
+  // ─── Mobile users list ─────────────────────────────────────────
+  //
+  // Renders the same parent-with-collapsible-children tree as the
+  // desktop table but as stacked cards: avatar + name + tags
+  // header, metadata as a 2-col grid, actions behind a kebab menu.
+  // Closure-scoped (lives inside UsersAdmin) so it can reach the
+  // same handler set the table renderer uses without prop-drilling
+  // a dozen mutations through.
+  function renderMobileUserList() {
+    if (!users) return null;
+
+    const childrenByParent = new Map<string, User[]>();
+    const parents: User[] = [];
+    for (const u of users) {
+      if (u.parent_user_id) {
+        const arr = childrenByParent.get(u.parent_user_id) ?? [];
+        arr.push(u);
+        childrenByParent.set(u.parent_user_id, arr);
+      } else {
+        parents.push(u);
+      }
+    }
+
+    const renderCard = (
+      user: User,
+      opts: {
+        expandable?: boolean;
+        expanded?: boolean;
+        memberCount?: number;
+        onToggle?: () => void;
+        inGroup?: boolean;
+      },
+    ) => {
+      const isSelf = me?.id === user.id;
+      const isProfile = !!user.parent_user_id;
+      const palette = avatarColorForUser(user);
+      const initials = getInitials({
+        display_name: user.display_name,
+        username: user.username,
+      });
+      const username = isProfile
+        ? user.username.split("/").pop() ?? user.username
+        : user.username;
+
+      return (
+        <li
+          key={user.id}
+          className={[
+            "flex flex-col gap-3 rounded-[--radius-lg] border bg-bg-card p-4",
+            opts.inGroup
+              ? "border-l-2 border-l-accent/50 border-border bg-bg-elevated/60"
+              : "border-border",
+          ].join(" ")}
+        >
+          {/* Header row */}
+          <div className="flex items-start gap-3">
+            {opts.expandable && opts.onToggle && (
+              <button
+                type="button"
+                onClick={opts.onToggle}
+                aria-expanded={opts.expanded}
+                aria-label={
+                  opts.expanded
+                    ? t("admin.users.collapseMembers", {
+                        defaultValue: "Ocultar miembros",
+                      })
+                    : t("admin.users.expandMembers", {
+                        defaultValue: "Mostrar miembros",
+                      })
+                }
+                className="mt-1.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-text-muted hover:bg-bg-elevated hover:text-text-primary transition-colors"
+              >
+                {opts.expanded ? (
+                  <ChevronDown className="h-3.5 w-3.5" />
+                ) : (
+                  <ChevronRight className="h-3.5 w-3.5" />
+                )}
+              </button>
+            )}
+            <div
+              className="relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full text-base font-semibold text-white shadow-sm"
+              style={{ background: palette.background }}
+              aria-hidden
+            >
+              {initials}
+              {user.has_pin && (
+                <span
+                  className="absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-black/70 text-white shadow ring-1 ring-bg-card"
+                  aria-label={t("admin.users.pinSet", {
+                    defaultValue: "PIN configurado",
+                  })}
+                >
+                  <Lock className="h-2.5 w-2.5" />
+                </span>
+              )}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="font-medium text-text-primary truncate">
+                  {username}
+                </span>
+                {isSelf && (
+                  <span className="text-xs text-text-muted">
+                    {t("admin.users.you")}
+                  </span>
+                )}
+                {user.is_primary && (
+                  <span className="rounded-full bg-warning/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-warning">
+                    {t("admin.users.primaryTag", { defaultValue: "Principal" })}
+                  </span>
+                )}
+                {isProfile && (
+                  <span className="text-[10px] uppercase tracking-wider text-accent">
+                    {t("admin.users.profileTag", { defaultValue: "perfil" })}
+                  </span>
+                )}
+                {opts.memberCount !== undefined && opts.memberCount > 0 && (
+                  <span className="rounded-full border border-border-subtle bg-bg-elevated px-2 py-0.5 text-[10px] font-medium text-text-secondary">
+                    {opts.memberCount === 1
+                      ? t("admin.users.memberCountOne", {
+                          defaultValue: "1 miembro",
+                        })
+                      : t("admin.users.memberCountOther", {
+                          defaultValue: "{{count}} miembros",
+                          count: opts.memberCount,
+                        })}
+                  </span>
+                )}
+              </div>
+              {user.display_name && user.display_name !== username && (
+                <p className="mt-0.5 truncate text-xs text-text-muted">
+                  {user.display_name}
+                </p>
+              )}
+            </div>
+            <KebabMenu
+              items={getUserActions(user)}
+              ariaLabel={t("admin.users.actions")}
+            />
+          </div>
+
+          {/* Metadata grid */}
+          <dl className="grid grid-cols-2 gap-x-3 gap-y-3 text-xs">
+            {/* Rol */}
+            <div className="flex flex-col gap-1">
+              <dt className="text-text-muted">{t("admin.users.role")}</dt>
+              <dd>
+                {isProfile ? (
+                  <span className="text-text-muted">—</span>
+                ) : (
+                  <select
+                    value={user.role}
+                    onChange={(e) =>
+                      handleRoleChange(
+                        user,
+                        e.target.value as "user" | "admin",
+                      )
+                    }
+                    disabled={isSelf || user.is_primary}
+                    className="w-full rounded-[--radius-sm] border border-border bg-bg-elevated px-2 py-1 text-xs text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30 disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    <option value="user">{t("admin.users.roleUser")}</option>
+                    <option value="admin">{t("admin.users.roleAdmin")}</option>
+                  </select>
+                )}
+              </dd>
+            </div>
+
+            {/* Edad máxima */}
+            <div className="flex flex-col gap-1">
+              <dt className="text-text-muted">
+                {t("admin.users.rating", { defaultValue: "Edad máxima" })}
+              </dt>
+              <dd>
+                {user.role === "admin" ? (
+                  <span className="text-text-muted">—</span>
+                ) : (
+                  <select
+                    value={ratingDropdownValue(user.max_content_rating)}
+                    onChange={(e) =>
+                      setUserContentRating.mutate({
+                        userId: user.id,
+                        rating: e.target.value,
+                      })
+                    }
+                    className="w-full rounded-[--radius-sm] border border-border bg-bg-elevated px-2 py-1 text-xs text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
+                  >
+                    {ratingOptions.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {t(opt.key, { defaultValue: opt.defaultLabel })}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </dd>
+            </div>
+
+            {/* Estado */}
+            <div className="flex flex-col gap-1">
+              <dt className="text-text-muted">
+                {t("admin.users.status", { defaultValue: "Estado" })}
+              </dt>
+              <dd>
+                {isSelf || user.is_primary || isProfile ? (
+                  <span
+                    className={
+                      user.is_active === false
+                        ? "inline-block rounded-full bg-error/15 px-2 py-0.5 text-[11px] font-medium text-error"
+                        : "inline-block rounded-full bg-success/15 px-2 py-0.5 text-[11px] font-medium text-success"
+                    }
+                  >
+                    {user.is_active === false
+                      ? t("admin.users.statusInactive", {
+                          defaultValue: "Inactivo",
+                        })
+                      : t("admin.users.statusActive", {
+                          defaultValue: "Activo",
+                        })}
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setUserActive.mutate({
+                        userId: user.id,
+                        isActive: !(user.is_active ?? true),
+                      })
+                    }
+                    className={[
+                      "rounded-full px-2 py-0.5 text-[11px] font-medium transition-colors",
+                      user.is_active === false
+                        ? "bg-error/15 text-error hover:bg-error/25"
+                        : "bg-success/15 text-success hover:bg-success/25",
+                    ].join(" ")}
+                  >
+                    {user.is_active === false
+                      ? t("admin.users.statusInactive", {
+                          defaultValue: "Inactivo",
+                        })
+                      : t("admin.users.statusActive", {
+                          defaultValue: "Activo",
+                        })}
+                  </button>
+                )}
+              </dd>
+            </div>
+
+            {/* Acceso */}
+            <div className="flex flex-col gap-1">
+              <dt className="text-text-muted">
+                {t("admin.users.access", { defaultValue: "Acceso" })}
+              </dt>
+              <dd>
+                {isProfile || user.is_primary ? (
+                  <span className="text-text-muted">—</span>
+                ) : (
+                  <select
+                    value={user.access_expires_at ? -1 : 0}
+                    onChange={(e) => {
+                      const days = Number(e.target.value);
+                      if (days < 0) return;
+                      setUserAccess.mutate({
+                        userId: user.id,
+                        durationDays: days,
+                      });
+                    }}
+                    title={describeAccess(user)}
+                    className="w-full rounded-[--radius-sm] border border-border bg-bg-elevated px-2 py-1 text-xs text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
+                  >
+                    {user.access_expires_at && (
+                      <option value={-1}>{describeAccess(user)}</option>
+                    )}
+                    {accessOptions.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {t(opt.key, { defaultValue: opt.defaultLabel })}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </dd>
+            </div>
+
+            {/* Creado — full row */}
+            <div className="col-span-2 flex flex-col gap-0.5 border-t border-border-subtle pt-2">
+              <dt className="text-text-muted">
+                {t("admin.users.created")}
+              </dt>
+              <dd className="text-text-secondary">{formatDate(user.created_at)}</dd>
+            </div>
+          </dl>
+        </li>
+      );
+    };
+
+    const cards: ReactNode[] = [];
+    for (const parent of parents) {
+      const kids = childrenByParent.get(parent.id) ?? [];
+      const expanded = expandedParents.has(parent.id);
+      cards.push(
+        renderCard(parent, {
+          expandable: kids.length > 0,
+          expanded,
+          memberCount: kids.length,
+          onToggle: () => toggleParent(parent.id),
+          inGroup: expanded && kids.length > 0,
+        }),
+      );
+      if (expanded) {
+        for (const kid of kids) {
+          cards.push(renderCard(kid, { inGroup: true }));
+        }
+      }
+    }
+
+    return <ul className="flex flex-col gap-3">{cards}</ul>;
   }
 
   return (
@@ -409,6 +798,15 @@ export default function UsersAdmin() {
           </table>
         </div>
       ) : users && users.length > 0 ? (
+        isMobile ? (
+          // Mobile: stacked cards instead of an 8-col table.
+          // Same parent/child grouping as the desktop branch
+          // (parents render with chevron + member count when
+          // expandable, kids render under the parent when
+          // expanded). Actions live in a kebab menu so the row
+          // height stays bounded.
+          renderMobileUserList()
+        ) : (
         <div className="overflow-x-auto rounded-[--radius-lg] border border-border">
           <table className="w-full text-sm">
             <thead>
@@ -828,6 +1226,7 @@ export default function UsersAdmin() {
             </tbody>
           </table>
         </div>
+        )
       ) : (
         <EmptyState
           title={t('admin.users.noUsers')}

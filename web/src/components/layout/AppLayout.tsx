@@ -1,33 +1,12 @@
-import { useState, useSyncExternalStore } from "react";
+import { useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router";
 import { TopBar } from "./TopBar";
 import { MobileDrawer } from "./MobileDrawer";
 import { MiniPlayer } from "@/components/livetv/MiniPlayer";
 import { usePlaylistRefreshEvents } from "@/hooks/usePlaylistRefreshEvents";
 import { useUserDataSync } from "@/hooks/useUserDataSync";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { useAuthStore } from "@/store/auth";
-
-// ─── Responsive Hook ────────────────────────────────────────────────────────
-
-/**
- * useIsMobile subscribes to a `matchMedia` query via useSyncExternalStore,
- * which is the React-18+ canonical way to mirror browser state into React
- * without an effect. This avoids the cascading render `setState-in-effect`
- * produced (initial state from innerWidth, effect then reconciles with
- * matchMedia).
- */
-function useIsMobile(breakpoint = 768) {
-  const query = `(max-width: ${breakpoint - 1}px)`;
-  return useSyncExternalStore(
-    (onChange) => {
-      const mql = window.matchMedia(query);
-      mql.addEventListener("change", onChange);
-      return () => mql.removeEventListener("change", onChange);
-    },
-    () => window.matchMedia(query).matches,
-    () => false, // SSR fallback — we're a mobile-last client app.
-  );
-}
 
 // ─── AppLayout ──────────────────────────────────────────────────────────────
 
