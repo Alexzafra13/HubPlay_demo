@@ -75,11 +75,6 @@ var outOfScopeExact = map[string]string{
 	"GET /users":                      "admin user management",
 	"POST /users":                     "admin user creation",
 	"DELETE /users/{id}":              "admin user deletion",
-	"PUT /users/{id}/display-name":    "rename user/profile (admin OR parent OR self)",
-	"PUT /users/{id}/avatar-color":    "set avatar override (admin OR parent OR self)",
-
-	// ── Home discovery rails ──────────────────────────────────────────
-	"GET /me/home/because-you-watched": "discovery rail seeded by latest completed watch",
 
 	// ── Signing-key lifecycle (admin) ─────────────────────────────────
 	"GET /admin/auth/keys":         "admin key rotation",
@@ -114,8 +109,6 @@ var outOfScopeExact = map[string]string{
 
 	// ── User management admin ─────────────────────────────────────────
 	"POST /users/{id}/reset-password": "admin password reset",
-	"PUT /users/{id}/pin":             "profile PIN admin",
-	"PUT /users/{id}/content-rating":  "profile content cap admin",
 	"PUT /users/{id}/role":            "user role admin",
 	"PUT /users/{id}/active":          "user active toggle admin",
 	"PUT /users/{id}/access":          "user access window admin",

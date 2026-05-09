@@ -128,6 +128,46 @@ export default function CompleteStep({ setupData }: CompleteStepProps) {
         </p>
       </div>
 
+      {/* Generated password — only shown when the operator picked
+          the auto-generate path on the account step. We surface it
+          ONCE here with a copy button; closing/leaving the wizard
+          drops it from React state and there's no way to recover.
+          The warning copy nudges the operator to act before they
+          finish setup. */}
+      {setupData.user?.generatedPassword && (
+        <div className="mb-6 rounded-[--radius-md] border border-warning/40 bg-warning/10 p-4">
+          <p className="text-sm font-medium text-warning">
+            {t("setup.complete.generatedPasswordTitle", {
+              defaultValue: "Tu contraseña de admin",
+            })}
+          </p>
+          <p className="mt-1 text-xs text-text-secondary">
+            {t("setup.complete.generatedPasswordHint", {
+              defaultValue:
+                "Cópiala ahora a tu gestor de contraseñas. Solo se mostrará una vez. Si la pierdes, tendrás que recuperar la cuenta a mano desde la base de datos.",
+            })}
+          </p>
+          <div className="mt-3 flex items-center gap-2 rounded-[--radius-md] border border-border bg-bg-card px-3 py-2 font-mono text-sm text-text-primary">
+            <span className="flex-1 select-all break-all">
+              {setupData.user.generatedPassword}
+            </span>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                if (setupData.user?.generatedPassword) {
+                  void navigator.clipboard.writeText(
+                    setupData.user.generatedPassword,
+                  );
+                }
+              }}
+            >
+              {t("common.copy", { defaultValue: "Copiar" })}
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Summary card */}
       <div className="rounded-[--radius-md] border border-border bg-bg-surface p-4 mb-6">
         <div className="divide-y divide-border">

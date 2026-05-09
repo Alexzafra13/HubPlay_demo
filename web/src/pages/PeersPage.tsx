@@ -1,7 +1,7 @@
 import { Link } from "react-router";
 import { useTranslation } from "react-i18next";
 import { useAllPeerLibraries, useMyPeers } from "@/api/hooks/federation";
-import { Spinner } from "@/components/common";
+import { EmptyState, Spinner } from "@/components/common";
 import type { FederationUnifiedLibrary } from "@/api/types";
 
 // PeersPage — unified landing for "Servidores conectados".
@@ -36,12 +36,17 @@ export default function PeersPage() {
   if (peerList.length === 0) {
     return (
       <div className="p-6 sm:p-10">
-        <h1 className="mb-2 text-2xl font-bold text-text-primary">
+        <h1 className="mb-6 text-2xl font-bold text-text-primary">
           {t("peers.title")}
         </h1>
-        <div className="rounded-lg border border-dashed border-border bg-bg-elevated p-8 text-center">
-          <p className="text-sm text-text-muted">{t("peers.emptyHint")}</p>
-        </div>
+        <EmptyState
+          bordered
+          compact
+          title={t("peers.emptyTitle", {
+            defaultValue: "Aún no hay servidores conectados",
+          })}
+          description={t("peers.emptyHint")}
+        />
       </div>
     );
   }
@@ -62,8 +67,15 @@ export default function PeersPage() {
       <PeersStrip peers={peerList} />
 
       {libList.length === 0 ? (
-        <div className="mt-8 rounded-lg border border-dashed border-border bg-bg-elevated p-8 text-center">
-          <p className="text-sm text-text-muted">{t("peers.allEmpty")}</p>
+        <div className="mt-8">
+          <EmptyState
+            bordered
+            compact
+            title={t("peers.allEmptyTitle", {
+              defaultValue: "Sin bibliotecas compartidas todavía",
+            })}
+            description={t("peers.allEmpty")}
+          />
         </div>
       ) : (
         <div className="mt-8 flex flex-col gap-10">

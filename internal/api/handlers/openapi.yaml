@@ -1202,6 +1202,111 @@ paths:
         "204": { description: Revoked }
         "404": { description: Session not found or not owned by caller }
 
+  # ─── Per-user / per-profile mutations ───────────────────────────────
+  # All four routes share the same authorisation matrix:
+  #   admin    OR
+  #   self     OR
+  #   parent of the target profile
+  # Foreign callers get 403. The PIN endpoint is the canonical
+  # example — see internal/api/handlers/users.go.
+  /users/{id}/display-name:
+    put:
+      tags: [users]
+      summary: Rename a user / profile (label-only)
+      description: |
+        Changes the human-visible `display_name`. The username and
+        parent_user_id stay put so logins, profile membership, and
+        the deterministic FNV avatar colour remain stable.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [display_name]
+              properties:
+                display_name: { type: string, minLength: 1, maxLength: 64 }
+      responses:
+        "204": { description: Renamed }
+        "400": { description: Validation error }
+        "403": { description: Caller is not admin, self, or parent of the target }
+
+  /users/{id}/avatar-color:
+    put:
+      tags: [users]
+      summary: Set or clear the avatar colour override
+      description: |
+        Empty `avatar_color` clears the override → frontend falls
+        back to the deterministic FNV-1a → palette helper. Non-empty
+        must match one of the 14 known palette entries; anything
+        else is a 400.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [avatar_color]
+              properties:
+                avatar_color: { type: string, description: "Hex like #RRGGBB or empty to clear" }
+      responses:
+        "204": { description: Updated }
+        "400": { description: Hex not in palette }
+        "403": { description: Caller is not admin, self, or parent of the target }
+
+  /users/{id}/pin:
+    put:
+      tags: [users]
+      summary: Set or clear the profile PIN
+      description: |
+        Empty `pin` clears the PIN; non-empty must be exactly four
+        digits. The handler bcrypt-hashes the value before storage.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pin]
+              properties:
+                pin: { type: string, pattern: "^[0-9]{4}$|^$" }
+      responses:
+        "204": { description: Updated }
+        "400": { description: PIN format invalid }
+        "403": { description: Caller is not admin, self, or parent of the target }
+
+  /users/{id}/content-rating:
+    put:
+      tags: [users]
+      summary: Set the per-profile content-rating cap
+      description: |
+        Empty string clears the cap (no restriction). Non-empty must
+        be one of the MPAA / TV-* literals in the ranking table —
+        anything below or equal to the cap is allowed; everything
+        above is filtered from /items, /me/home/*, and the
+        item-detail surfaces.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rating]
+              properties:
+                rating: { type: string, description: "MPAA or TV literal, or empty to clear" }
+      responses:
+        "204": { description: Updated }
+        "400": { description: Unknown rating literal }
+        "403": { description: Caller is not admin, self, or parent of the target }
+
   # ─── Federation user surface ────────────────────────────────────────
   /me/peers:
     get:
@@ -2060,6 +2165,49 @@ paths:
                         type: array
                         items: { $ref: "#/components/schemas/RecommendedItem" }
                       total: { type: integer }
+
+  /me/home/because-you-watched:
+    get:
+      tags: [home]
+      summary: Because-you-watched rail seeded by the latest completed watch
+      description: |
+        Picks the caller's most recent COMPLETED watch as the seed
+        (episode completes fold to the parent series so the rail
+        title reads "Porque viste Breaking Bad", not an episode
+        title) and returns up to `limit` unwatched movies / series
+        that share genres with it. Returns `{seed: null, items: []}`
+        for cold-start users; the rail self-hides on the
+        frontend in that case.
+
+        Per-profile content cap is honoured with a 2x headroom so
+        kid profiles don't end up with an empty rail just because
+        the seed's matches happen to be R-heavy.
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, default: 12, maximum: 30 } }
+      responses:
+        "200":
+          description: Recommendations + seed metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      seed:
+                        nullable: true
+                        type: object
+                        properties:
+                          id:         { type: string }
+                          type:       { type: string, enum: [movie, series] }
+                          title:      { type: string }
+                          year:       { type: integer }
+                          library_id: { type: string }
+                          poster_url: { type: string }
+                      items:
+                        type: array
+                        items: { $ref: "#/components/schemas/RecommendedItem" }
 
   /me/home/live-now:
     get:

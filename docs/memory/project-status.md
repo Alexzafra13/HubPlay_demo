@@ -1,5 +1,24 @@
 # Estado del proyecto
 
+> 🎬 **Sesión 2026-05-10 (continuación post-merge, rama `claude/review-project-updates-GN0JB` re-sincronizada con main)** — **Bloque A operacional: 4 items del backlog ejecutados de un tirón**. Todos pequeños individualmente; el conjunto cierra los huecos restantes que dejé documentados en el commit anterior de esta entrada.
+>
+> **Commits**:
+> - `712787b` *auth: device-code path checks AccessExpiresAt + setup wizard auto-generates password*. Cierra el último flanco de access-expired (DeviceCodeService.ApproveDevice + PollDevice no chequeaban) usando el mismo `ErrAccessExpired` que login/refresh/validate. Setup wizard estrena flujo opt-in de auto-pwd: AccountStep gana checkbox "Generar contraseña automáticamente" (default OFF), backend devuelve `generated_password` una vez en el response, CompleteStep lo surface con copy-to-clipboard. Sin forced-rotation porque el operador IS el admin nuevo y vería el password en el mismo flow.
+> - `c9b691a` *docs(openapi): migrate user-facing /users mutations + because-you-watched into the spec*. 5 paths salieron del allowlist al yaml propiamente: PUT /users/{id}/{display-name,avatar-color,pin,content-rating} (admin OR parent OR self) + GET /me/home/because-you-watched. Schemas con validación (length caps, palette restriction, regex en pin) + 403 doc del auth matrix explicit. Las ~98 entradas restantes del allowlist son operator-only (admin auth keys, federation pairing, IPTV admin, channel health) — sin SDK consumer, no migran.
+> - `3bcf510` *settings(providers): fanart link in the Provider catalogue + es copy on the API-key hint*. Auditoría descubrió que provider keys editables desde Settings YA estaba implementado (page tiene ProviderSettings con useProviders + useUpdateProvider, backend tiene PUT /providers/{name}). Solo dos completeness fixes: añadir URL de Fanart al providerMeta y traducir "Get your API key at" al ES via i18n. El claim original "hoy solo yaml" del backlog era erróneo.
+> - `7e18a61` *common(empty-state): bordered + compact variants + migrate the obvious ad-hoc usages*. EmptyState era single-purpose (py-16 full-page) → ad-hoc divs en PeersPage (×2) + PeerLibrariesPage que reproducían a mano `rounded-lg border-dashed bg-elevated`. Nuevas props `bordered` + `compact` capturan el patrón. Migrados los 3 call-sites obvios. NO migrado: Live-TV (usa `tv-*` design language), SetupWizard library drop zone (es CTA, no empty), SystemStatus inline session strip (más tight que compact).
+>
+> **Decisiones senior tomadas**:
+> 1. **Setup wizard auto-pwd default OFF**: el bootstrap admin es el operador del setup, lo más probable es que tenga su password elegida. Surprise-with-random-password sería hostil. Toggle opt-in.
+> 2. **Setup wizard forced-rotation NO se aplica al auto-pwd**: el operador acaba de ver el password en el wizard, mandarlo a /change-password en el primer login sería circular. Trade-off vs el flow normal de /admin/users (donde sí se fuerza rotation porque el admin crea cuentas para OTROS).
+> 3. **OpenAPI cleanup selectivo**: 103 paths en allowlist → 98. Solo migré los 5 user-facing genuinos. Operator-only stays en allowlist (admin keys, federation, IPTV admin, etc) — no SDK consumer, sin valor en doc-as-public-spec.
+> 4. **EmptyState `bordered` + `compact` props, no `variant="card"|"page"`**: dos booleans dan los 4 quadrants reales (bare/page, bare/inline, card/page, card/inline) sin acoplar layout a variant name. Misma elección de Vercel/shadcn para componentes con multiple display modes.
+>
+> **Quedan en backlog (orden propuesto para próximas sesiones)**:
+> - **Bloque B — Calidad de código** (~6-8h): tests frontend admin/auth (cero cobertura hoy), lint cleanup pre-existente (13 errors en archivos no tocados por este branch), i18n migration (~600 `defaultValue` → es.json/en.json).
+> - **Bloque C — Mobile + features grandes** (~5-7h): mobile responsive admin tables + Skip intro/outro detection.
+> - **Singletons sueltos**: PIN brute-force lockout (~1h, bcrypt-cost da rate-limit natural pero no lockout explícito); 2FA (descartado por user en sesión previa).
+
 > 🎬 **Sesión 2026-05-10 (rama `claude/review-project-updates-GN0JB`, **46 commits acumulados**, todo empujado, listo para PR)** — **Sesión maratón cerrando todas las ráfagas de "qué falta": Tanda 1 (security/ops), Tanda 2 (UX features), rediseño cinematográfico de Login + WhoIsWatching, fixes de regresiones del propio session, y 4 features grandes de cierre (cap filter coverage, avatar custom, "Porque viste X", lint clean)**. Continuación natural de la sesión 2026-05-09.
 >
 > **Cambios totales en la rama**: 112 ficheros, +12881 / −1516 líneas. Todos los tests verdes (backend + 398 vitest), tsc + build limpios.

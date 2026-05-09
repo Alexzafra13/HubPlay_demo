@@ -94,7 +94,7 @@ export function usePrefetchBrowseLibraryDirectories() {
 export function useSetupCreateAdmin() {
   const queryClient = useQueryClient();
   return useMutation<
-    AuthResponse,
+    AuthResponse & { generated_password?: string },
     Error,
     { username: string; password: string; display_name?: string }
   >({

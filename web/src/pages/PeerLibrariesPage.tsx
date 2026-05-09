@@ -1,7 +1,7 @@
 import { Link, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { useMyPeers, usePeerLibraries } from "@/api/hooks/federation";
-import { Spinner } from "@/components/common";
+import { EmptyState, Spinner } from "@/components/common";
 
 // PeerLibrariesPage — /peers/:peerId
 //
@@ -47,9 +47,14 @@ export default function PeerLibrariesPage() {
       </p>
 
       {libs.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-border bg-bg-elevated p-6 text-center text-sm text-text-muted">
-          {t("peers.noShares")}
-        </p>
+        <EmptyState
+          bordered
+          compact
+          title={t("peers.noSharesTitle", {
+            defaultValue: "Este servidor aún no comparte nada contigo",
+          })}
+          description={t("peers.noShares")}
+        />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {libs.map((lib) => (

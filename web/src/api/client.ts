@@ -351,14 +351,22 @@ export class ApiClient {
     return this.request<SetupStatus>("GET", "/setup/status");
   }
 
+  /** Create the bootstrap admin. Pass `password = ""` to let the
+   *  server auto-generate a temp password — the response then
+   *  carries `generated_password` once for the wizard to surface
+   *  in the completion step. */
   async setupCreateAdmin(
     username: string,
     password: string,
     displayName?: string,
-  ): Promise<AuthResponse> {
-    const data = await this.request<AuthResponse>("POST", "/auth/setup", {
-      body: { username, password, display_name: displayName },
-    });
+  ): Promise<AuthResponse & { generated_password?: string }> {
+    const data = await this.request<AuthResponse & { generated_password?: string }>(
+      "POST",
+      "/auth/setup",
+      {
+        body: { username, password, display_name: displayName },
+      },
+    );
     return data;
   }
 
