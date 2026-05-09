@@ -1,5 +1,34 @@
 # Estado del proyecto
 
+> 🎬 **Sesión 2026-05-10 (Bloque C — mobile responsive admin)** — **UsersAdmin renderiza como cards apiladas con kebab menu en <768px**. La única superficie de admin que se rompía de verdad en móvil ya no lo hace.
+>
+> **Commit**: `8f14cc4` *admin(mobile): UsersAdmin renders as stacked cards + kebab menu under <md*.
+>
+> **Decisiones tomadas en sesión**:
+> 1. **Kebab menu (Opción B), no horizontal scroll strip**: el operador del móvil prefiere 2 clicks (kebab → opción) a deslizar para encontrar el botón. Implementado como nuevo componente `web/src/components/common/KebabMenu.tsx` — trigger + dropdown sin Radix dep, click-outside + Escape cierran, items con flags `danger`/`disabled`/`hidden`/`hint`.
+> 2. **Single source of truth para acciones**: helper `getUserActions(user)` dentro de UsersAdmin retorna un `KebabMenuItem[]` que el kebab consume directo. La desktop sigue rendizando botones inline pero podría leer del mismo array en una pasada futura para deduplicar.
+> 3. **Card de mobile reusa el state machine de collapse/expand**: la lógica `expandedParents` + chevron + member-count pill se replica en el card; los children renderan debajo con el mismo accent rail izquierdo cuando expanded.
+> 4. **`useIsMobile` lifted a hook compartido** (`web/src/hooks/useIsMobile.ts`) en vez de quedarse inline en AppLayout. Mismo comportamiento (768px breakpoint, `useSyncExternalStore` sin effect).
+> 5. **LibraryCard NO se tocó**: ya usaba `flex-col sm:flex-row` con `flex-wrap` en las acciones; mobile-friendly sin esfuerzo. Validado por inspección.
+>
+> **Tests añadidos** (+5, 420 → 425):
+> - mobile path renderiza cards (no `<table>`)
+> - chevron expande el kid row
+> - kebab abre con items correctos para un user regular
+> - profiles ocultan `+ Perfil` y `Reiniciar contraseña` del kebab
+> - click en `Personalizar` abre el rename modal
+>
+> **Verificación**: backend `go test ./...` verde · vitest 425/425 · tsc -b clean · vite build clean · pnpm lint 0 errores.
+>
+> **Pendientes en backlog (cola priorizada)**:
+> - **i18n migration round 2** (~2-3h): los ~30 archivos restantes con ~440 defaultValues. Mismo script Python del commit `a00bd9d` (la primera pasada solo cubrió 20 de los 50 archivos).
+> - **Tests round 2** (~3-4h): ChangePassword form validation, BackupPanel restore validation, ScanProgressBanner mount, BecauseYouWatchedRail empty state.
+> - **Skip intro/outro detection** (~5-8h, feature gorda): chromaprint o Plex's intro-marker tool.
+> - **PIN brute-force lockout** (~1h): bcrypt-cost da rate-limit natural pero sin lockout explícito por user.
+> - **getUserActions usado también por desktop** (~30 min): la helper está pero el desktop sigue inlineando los botones; reescribir el `<td>` de actions para mapear `getUserActions(user).filter(it => !it.hidden && !it.disabled)` y rendir buttons. Pequeña limpieza.
+>
+> ---
+>
 > 🎯 **Próxima sesión planeada — Bloque C: mobile responsive admin** (~3-4h estimado).
 >
 > **El problema concreto**:

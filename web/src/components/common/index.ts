@@ -34,3 +34,6 @@ export { BlurhashPlaceholder } from "./BlurhashPlaceholder";
 export type { BlurhashPlaceholderProps } from "./BlurhashPlaceholder";
 
 export { HorizontalScroller } from "./HorizontalScroller";
+
+export { KebabMenu } from "./KebabMenu";
+export type { KebabMenuItem } from "./KebabMenu";
