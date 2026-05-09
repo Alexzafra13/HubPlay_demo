@@ -1,5 +1,24 @@
 # Estado del proyecto
 
+> 🎬 **Sesión 2026-05-10 (Bloque B — calidad de código, post-PR-220 re-sync)** — **Tres ataques al fondo de armario que no daban features pero sí dejan la base sustancialmente más sana**: lint clean (13 errores → 0), tests frontend admin/auth (de 0 a 22 tests cubriendo Login/DevicesPanel/WhoIsWatching/LogsPanel), i18n migration (161 keys extraídas a es.json/en.json).
+>
+> **Commits**:
+> - `25a98dc` *lint: clear all 13 pre-existing errors*. Tres bugs reales (Date.now en render de HeroSpotlight, ref-during-render en UpNextOverlay y useHls), seis sync-prop-to-state con eslint-disable + comment justificando por qué `key={prop}` sería peor (VideoPlayer, useHls, SystemSettingsSection, MediaBrowseFilters, LibraryEditModal, useMetricsHistory en SystemStatus), tres react-refresh/only-export-components con file-level disable (PageHeader, MediaBrowseFilters, WatchTonightTile), ItemDetail useMemo dep mismatch arreglado pulling local. 3 unused eslint-disable directives borrados. Quedan 2 warnings pre-existentes no fixables: EPGGrid (TanStack Virtual incompat) + PeerLibraryItemsPage (exhaustive-deps suggestion).
+> - `1efe6fd` *tests: cover Login error mapping, DevicesPanel revoke flow, WhoIsWatching bounce, LogsPanel pause/drain*. Cuatro test files nuevos, +22 tests (398 → 420). Login: la matriz de loginErrorMessage que mapea wire codes (ACCESS_EXPIRED / ACCOUNT_DISABLED / INVALID_CREDENTIALS / RATE_LIMITED) a copy ES + redirect logic post-success (change-password vs select-profile vs solo). DevicesPanel: pill "Este dispositivo" en current=true, confirm prompt antes de revocar la propia, empty-state copy. WhoIsWatching: bounce-when-solo, error fallback explícito, multi-profile rendering, presencia del botón Volver. LogsPanel: state machine pause/drain (entries buffereadas mientras paused → drained on unpause), filter ERROR-only, EventSource onerror → "Reconectando" pill. EventSource mockeado via test class.
+> - `a00bd9d` *i18n: extract 161 defaultValue strings into es.json + en.json placeholders*. Script Python regex sobre los 20 archivos admin/auth de mayor tráfico extrayó cada `t("key", { defaultValue: "..." })` y las pobló en es.json bajo el dotted path correcto. Keys ya curadas (20) NO se sobreescribieron. en.json recibió placeholders ES (es-default codebase, mejor mostrar texto en español que warning de missing-key). Los `defaultValue` siguen en código como belt-and-braces. Otros ~30 archivos con ~440 defaultValues quedan para follow-up.
+>
+> **Decisiones senior tomadas**:
+> 1. **eslint-disable con comentario explicativo > refactor agresivo**: para los 6 sync-prop-to-state, la "fix correcta" del lint rule es `key={prop}` para forzar remount. Pero esa estrategia destruiría hls.js, animaciones de Sheet, focus mid-typing en filtros. Trade-off documentado inline en cada disable.
+> 2. **No file-split por react-refresh/only-export-components**: HMR-only concern. Splitear PageHeader/MediaBrowseFilters/WatchTonightTile solo para Fast Refresh fragmentaría la API por nada. File-level disable + comment.
+> 3. **Tests focused en regresión, no coverage por coverage**: las 4 superficies cubiertas (Login error map, DevicesPanel revoke, WhoIsWatching bounce, LogsPanel state machine) son las que han dado bugs reales o son state-machines complejas. ChangePassword / UsersAdmin / BackupPanel quedan para otra sesión — son CRUD más sencillos.
+> 4. **i18n: en.json placeholder = ES value**: alternativa era dejar las keys faltantes y que cayera al defaultValue (status quo). Pero entonces un translator no puede ver qué keys faltan en EN. Placeholder ES + nota en commit doc dice "translator: replace these" sin requerir ningún tooling.
+>
+> **Quedan en backlog**:
+> - **Bloque C — Mobile + features grandes** (~5-7h): mobile responsive admin tables (UsersAdmin/LibrariesAdmin overflow horizontal en móvil); skip intro/outro detection (chromaprint, feature gorda).
+> - **i18n migration round 2** (~2-3h): los ~30 archivos restantes con ~440 defaultValues. Mecánico, mismo script.
+> - **Tests frontend round 2** (~3-4h): ChangePassword form validation, UsersAdmin rename/delete confirms, BackupPanel restore validation, ScanProgressBanner mount, BecauseYouWatchedRail empty state.
+> - **Singletons sueltos**: PIN brute-force lockout (~1h, bcrypt-cost da rate-limit natural pero sin lockout explícito); 2FA (descartado por user en sesión previa); empty states de LiveTV / setup wizard (intencionalmente no migrados).
+
 > 🎬 **Sesión 2026-05-10 (continuación post-merge, rama `claude/review-project-updates-GN0JB` re-sincronizada con main)** — **Bloque A operacional: 4 items del backlog ejecutados de un tirón**. Todos pequeños individualmente; el conjunto cierra los huecos restantes que dejé documentados en el commit anterior de esta entrada.
 >
 > **Commits**:
