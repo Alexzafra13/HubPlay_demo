@@ -86,6 +86,17 @@ export default function WhoIsWatching() {
     }
   }, [isLoading, error, profiles, navigate]);
 
+  // The hovered profile drives the page-level ambient tint behind
+  // the picker. Computed up here (before the early returns below)
+  // because hooks must always run in the same order — moving this
+  // useMemo past an `if (isLoading) return ...` would be a real
+  // rules-of-hooks violation.
+  const hoveredHex = useMemo(() => {
+    if (!hoveredProfileId) return null;
+    const p = profiles?.find((x) => x.id === hoveredProfileId);
+    return p ? avatarColorFor(p.username).background : null;
+  }, [hoveredProfileId, profiles]);
+
   if (isLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-bg-base">
@@ -178,12 +189,6 @@ export default function WhoIsWatching() {
   }
 
   const canManage = me?.role === "admin";
-
-  const hoveredHex = useMemo(() => {
-    if (!hoveredProfileId) return null;
-    const p = profiles?.find((x) => x.id === hoveredProfileId);
-    return p ? avatarColorFor(p.username).background : null;
-  }, [hoveredProfileId, profiles]);
 
   // The picker block (title + avatars + rail) is shared between
   // the single-column and split layouts. Pulled to a local
