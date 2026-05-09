@@ -189,6 +189,22 @@ func run(configPath string) error {
 	segmentDetectorUnsub := segmentDetector.Start(ctx)
 	defer segmentDetectorUnsub()
 
+	// ═══ Phase 4a-quater: Filesystem Watcher ═══
+	//
+	// Reactive complement to scanScheduler — when a file is copied
+	// into a library path, the watcher fires a scan within ~2 s
+	// instead of waiting for the next scheduled tick (15 min).
+	// Fail-soft on platforms without inotify/equivalent (Docker on
+	// Windows with bind mounts is the realistic case): the start
+	// error is logged and the scheduler keeps doing its job.
+	fsWatcher := library.NewFSWatcher(libraryService, logger)
+	if err := fsWatcher.Start(ctx); err != nil {
+		logger.Warn("filesystem watcher unavailable, scheduler-only mode",
+			"error", err)
+	} else {
+		defer fsWatcher.Stop()
+	}
+
 	// ═══ Phase 4b: Streaming ═══
 	//
 	// Apply runtime overrides from app_settings BEFORE constructing the
