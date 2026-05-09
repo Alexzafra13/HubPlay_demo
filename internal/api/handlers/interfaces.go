@@ -46,6 +46,7 @@ type UserService interface {
 	Count(ctx context.Context) (int, error)
 	SetMaxContentRating(ctx context.Context, id, rating string) error
 	SetDisplayName(ctx context.Context, id, name string) error
+	SetAvatarColor(ctx context.Context, id, hex string) error
 	SetRole(ctx context.Context, id, role string) error
 	SetActive(ctx context.Context, id string, active bool) error
 	SetAccessExpiresAt(ctx context.Context, id string, expiresAt *time.Time) error

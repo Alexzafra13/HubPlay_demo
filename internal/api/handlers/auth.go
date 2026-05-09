@@ -213,6 +213,9 @@ func profileListResponse(profiles []*db.User) []map[string]any {
 		if p.MaxContentRating != "" {
 			out[i]["max_content_rating"] = p.MaxContentRating
 		}
+		if p.AvatarColor != "" {
+			out[i]["avatar_color"] = p.AvatarColor
+		}
 	}
 	return out
 }

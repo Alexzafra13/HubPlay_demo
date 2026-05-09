@@ -341,6 +341,11 @@ func NewRouter(deps Dependencies) http.Handler {
 			// can relabel their own profile members from the picker
 			// without needing the admin role.
 			r.Put("/users/{id}/display-name", userHandler.SetDisplayName)
+			// Avatar colour override — same authorisation matrix as
+			// SetDisplayName. Lives outside the admin-gated /users
+			// block so a parent can recolour their own profile
+			// member without holding the admin role.
+			r.Put("/users/{id}/avatar-color", userHandler.SetAvatarColor)
 
 			// Signing key lifecycle (admin only). Every route here is
 			// destructive — guarded at the group level so a single

@@ -37,7 +37,7 @@ import {
 import type { MediaItem, ProfileSummary } from "@/api/types";
 import { useAuthStore } from "@/store/auth";
 import { Spinner } from "@/components/common";
-import { avatarColorFor } from "@/utils/avatarColor";
+import { avatarColorForUser } from "@/utils/avatarColor";
 import { getInitials } from "@/utils/userDisplay";
 import { BrandWordmark } from "@/components/layout/BrandWordmark";
 
@@ -94,7 +94,7 @@ export default function WhoIsWatching() {
   const hoveredHex = useMemo(() => {
     if (!hoveredProfileId) return null;
     const p = profiles?.find((x) => x.id === hoveredProfileId);
-    return p ? avatarColorFor(p.username).background : null;
+    return p ? avatarColorForUser(p).background : null;
   }, [hoveredProfileId, profiles]);
 
   if (isLoading) {
@@ -524,7 +524,7 @@ function ProfileCard({
   compact = false,
 }: ProfileCardProps) {
   const { t } = useTranslation();
-  const palette = avatarColorFor(profile.username);
+  const palette = avatarColorForUser(profile);
   const initials = getInitials({
     display_name: profile.display_name,
     username: profile.username,
@@ -696,7 +696,7 @@ function PinPad({
   errorMessage,
 }: PinPadProps) {
   const { t } = useTranslation();
-  const palette = avatarColorFor(profile.username);
+  const palette = avatarColorForUser(profile);
   const initials = getInitials({
     display_name: profile.display_name,
     username: profile.username,

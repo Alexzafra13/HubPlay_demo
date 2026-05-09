@@ -55,6 +55,14 @@ type User struct {
 	// background job that flips is_active automatically; the JWT
 	// TTL bounds how long a stale token can outlive its expiry.
 	AccessExpiresAt *time.Time
+
+	// AvatarColor is an optional per-user override for the
+	// circular avatar's background colour. Stored as a literal
+	// hex string (#RRGGBB) when set; empty string means "fall
+	// back to the deterministic FNV-1a→palette helper the
+	// frontend already has". Free for accounts that never
+	// customise.
+	AvatarColor string
 }
 
 // IsProfile is the canonical readability helper around `ParentUserID`.
@@ -135,6 +143,20 @@ func (r *UserRepository) SetPIN(ctx context.Context, id, hash string) error {
 		PinHash: nullStringFromOptional(hash),
 	}); err != nil {
 		return fmt.Errorf("set pin: %w", err)
+	}
+	return nil
+}
+
+// SetAvatarColor updates the per-user avatar override. Empty string
+// clears the override (fall back to the deterministic
+// FNV-1a→palette helper the frontend has). The service layer is
+// responsible for validating the value against the known palette.
+func (r *UserRepository) SetAvatarColor(ctx context.Context, id, hex string) error {
+	if err := r.q.UpdateUserAvatarColor(ctx, sqlc.UpdateUserAvatarColorParams{
+		ID:          id,
+		AvatarColor: nullStringFromOptional(hex),
+	}); err != nil {
+		return fmt.Errorf("set avatar color: %w", err)
 	}
 	return nil
 }
@@ -342,6 +364,7 @@ func userFromGetRow(r sqlc.GetUserByIDRow) User {
 		MaxContentRating:       r.MaxContentRating.String,
 		PasswordChangeRequired: r.PasswordChangeRequired,
 		AccessExpiresAt:        nullTimeToPtr(r.AccessExpiresAt),
+		AvatarColor:            r.AvatarColor.String,
 	}
 }
 
@@ -362,6 +385,7 @@ func userFromGetByUsernameRow(r sqlc.GetUserByUsernameRow) User {
 		MaxContentRating:       r.MaxContentRating.String,
 		PasswordChangeRequired: r.PasswordChangeRequired,
 		AccessExpiresAt:        nullTimeToPtr(r.AccessExpiresAt),
+		AvatarColor:            r.AvatarColor.String,
 	}
 }
 
@@ -380,6 +404,7 @@ func userFromListRow(r sqlc.ListUsersRow) User {
 		MaxContentRating:       r.MaxContentRating.String,
 		PasswordChangeRequired: r.PasswordChangeRequired,
 		AccessExpiresAt:        nullTimeToPtr(r.AccessExpiresAt),
+		AvatarColor:            r.AvatarColor.String,
 	}
 }
 
@@ -398,6 +423,7 @@ func userFromProfilesRow(r sqlc.ListProfilesForOwnerRow) User {
 		MaxContentRating:       r.MaxContentRating.String,
 		PasswordChangeRequired: r.PasswordChangeRequired,
 		AccessExpiresAt:        nullTimeToPtr(r.AccessExpiresAt),
+		AvatarColor:            r.AvatarColor.String,
 	}
 }
 

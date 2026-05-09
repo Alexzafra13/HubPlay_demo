@@ -10,12 +10,14 @@ import {
   useResetUserPassword,
   useSetUserAccess,
   useSetUserActive,
+  useSetUserAvatarColor,
   useSetUserContentRating,
   useSetUserDisplayName,
   useSetUserPIN,
   useSetUserRole,
 } from "@/api/hooks";
 import { Button, Modal, Input, EmptyState, Skeleton } from "@/components/common";
+import { AVATAR_PALETTE } from "@/utils/avatarColor";
 import { Trans, useTranslation } from 'react-i18next';
 import FederationAdmin from "./FederationAdmin";
 
@@ -70,41 +72,74 @@ export default function UsersAdmin() {
   const setUserPIN = useSetUserPIN();
   const setUserContentRating = useSetUserContentRating();
   const setUserDisplayName = useSetUserDisplayName();
+  const setUserAvatarColor = useSetUserAvatarColor();
 
-  // Rename modal — admin (or parent of profile, or self) types a
-  // new display_name; submit hits PUT /users/{id}/display-name.
-  // The username stays put so logins / avatar colours don't shift.
+  // Personalize modal — admin (or parent of profile, or self) edits
+  // both the display_name AND the avatar colour override here. We
+  // keep both controls in one place because the operator's mental
+  // model is "edit this profile" rather than "rename" + "recolour"
+  // as separate actions. On submit, only the dirty fields fire
+  // their respective mutations.
   const [renameTarget, setRenameTarget] = useState<User | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  const [renameColor, setRenameColor] = useState<string>("");
   const [renameError, setRenameError] = useState<string | null>(null);
 
   function openRename(user: User) {
     setRenameTarget(user);
     setRenameValue(user.display_name || user.username.split("/").pop() || "");
+    setRenameColor(user.avatar_color ?? "");
     setRenameError(null);
   }
 
   function handleRename(e: FormEvent) {
     e.preventDefault();
     if (!renameTarget) return;
-    const next = renameValue.trim();
-    if (!next) {
+    const nextName = renameValue.trim();
+    if (!nextName) {
       setRenameError(t("admin.users.renameValidation", {
         defaultValue: "El nombre no puede estar vacío.",
       }));
       return;
     }
-    setUserDisplayName.mutate(
-      { userId: renameTarget.id, displayName: next },
-      {
-        onSuccess: () => {
-          setRenameTarget(null);
-          setRenameValue("");
-          setRenameError(null);
-        },
-        onError: (err) => setRenameError(err.message),
-      },
-    );
+
+    const nameDirty = nextName !== renameTarget.display_name;
+    const colorDirty = renameColor !== (renameTarget.avatar_color ?? "");
+
+    if (!nameDirty && !colorDirty) {
+      // Nothing changed; just close.
+      setRenameTarget(null);
+      return;
+    }
+
+    // Fire both mutations in parallel when both are dirty. Each
+    // invalidates the same queryKeys; TanStack Query will collapse
+    // the refetches.
+    const tasks: Promise<unknown>[] = [];
+    if (nameDirty) {
+      tasks.push(
+        setUserDisplayName.mutateAsync({
+          userId: renameTarget.id,
+          displayName: nextName,
+        }),
+      );
+    }
+    if (colorDirty) {
+      tasks.push(
+        setUserAvatarColor.mutateAsync({
+          userId: renameTarget.id,
+          hex: renameColor,
+        }),
+      );
+    }
+    Promise.all(tasks)
+      .then(() => {
+        setRenameTarget(null);
+        setRenameValue("");
+        setRenameColor("");
+        setRenameError(null);
+      })
+      .catch((err: Error) => setRenameError(err.message));
   }
   const setUserRole = useSetUserRole();
   const setUserActive = useSetUserActive();
@@ -725,10 +760,11 @@ export default function UsersAdmin() {
                           size="sm"
                           onClick={() => openRename(user)}
                           title={t('admin.users.renameHint', {
-                            defaultValue: 'Cambiar el nombre que se ve en la app',
+                            defaultValue:
+                              'Editar el nombre y el color del avatar',
                           })}
                         >
-                          {t('admin.users.rename', { defaultValue: 'Renombrar' })}
+                          {t('admin.users.rename', { defaultValue: 'Personalizar' })}
                         </Button>
                         <Button
                           variant="secondary"
@@ -1088,10 +1124,11 @@ export default function UsersAdmin() {
         onClose={() => {
           setRenameTarget(null);
           setRenameValue("");
+          setRenameColor("");
           setRenameError(null);
         }}
         title={t("admin.users.renameModalTitle", {
-          defaultValue: "Renombrar",
+          defaultValue: "Personalizar perfil",
         })}
         size="sm"
       >
@@ -1100,7 +1137,7 @@ export default function UsersAdmin() {
             <p className="text-sm text-text-secondary">
               {t("admin.users.renameModalHint", {
                 defaultValue:
-                  "Cambia el nombre que aparece en la app. El usuario interno (login) y el color del avatar no cambian.",
+                  "Cambia el nombre y el color del avatar. El usuario interno (login) no cambia, así que las contraseñas y permisos siguen igual.",
               })}
             </p>
             <Input
@@ -1111,6 +1148,60 @@ export default function UsersAdmin() {
               required
               maxLength={64}
             />
+
+            {/* Colour picker — 14 swatches matching the avatar
+                palette + an "auto" tile that clears the override
+                so the deterministic FNV helper picks for you. */}
+            <div className="flex flex-col gap-2">
+              <span className="text-sm font-medium text-text-secondary">
+                {t("admin.users.avatarColorLabel", {
+                  defaultValue: "Color del avatar",
+                })}
+              </span>
+              <div className="grid grid-cols-7 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setRenameColor("")}
+                  className={[
+                    "h-9 w-9 rounded-full border-2 text-[10px] font-medium transition-all",
+                    renameColor === ""
+                      ? "border-accent ring-2 ring-accent/30 text-text-primary"
+                      : "border-border-subtle text-text-muted hover:border-border",
+                  ].join(" ")}
+                  title={t("admin.users.avatarColorAutoHint", {
+                    defaultValue:
+                      "Color automático según el nombre de usuario.",
+                  })}
+                  aria-label={t("admin.users.avatarColorAuto", {
+                    defaultValue: "Auto",
+                  })}
+                >
+                  A
+                </button>
+                {AVATAR_PALETTE.map((p) => {
+                  const selected =
+                    renameColor.toLowerCase() === p.background.toLowerCase();
+                  return (
+                    <button
+                      type="button"
+                      key={p.background}
+                      onClick={() => setRenameColor(p.background)}
+                      className={[
+                        "h-9 w-9 rounded-full border-2 transition-all",
+                        selected
+                          ? "border-white scale-110 ring-2 ring-white/30"
+                          : "border-transparent hover:scale-105",
+                      ].join(" ")}
+                      style={{ background: p.background }}
+                      title={p.label}
+                      aria-label={p.label}
+                      aria-pressed={selected}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+
             {renameError && (
               <p className="text-xs text-error">{renameError}</p>
             )}
@@ -1121,12 +1212,18 @@ export default function UsersAdmin() {
                 onClick={() => {
                   setRenameTarget(null);
                   setRenameValue("");
+                  setRenameColor("");
                   setRenameError(null);
                 }}
               >
                 {t("common.cancel")}
               </Button>
-              <Button type="submit" isLoading={setUserDisplayName.isPending}>
+              <Button
+                type="submit"
+                isLoading={
+                  setUserDisplayName.isPending || setUserAvatarColor.isPending
+                }
+              >
                 {t("common.save", { defaultValue: "Guardar" })}
               </Button>
             </div>

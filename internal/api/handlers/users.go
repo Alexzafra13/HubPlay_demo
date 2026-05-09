@@ -49,6 +49,7 @@ func (h *UserHandler) Me(w http.ResponseWriter, r *http.Request) {
 			"last_login_at":            u.LastLoginAt,
 			"password_change_required": u.PasswordChangeRequired,
 			"parent_user_id":           u.ParentUserID,
+			"avatar_color":             u.AvatarColor,
 		},
 	})
 }
@@ -86,6 +87,7 @@ func (h *UserHandler) List(w http.ResponseWriter, r *http.Request) {
 			"password_change_required": u.PasswordChangeRequired,
 			"parent_user_id":           u.ParentUserID,
 			"max_content_rating":       u.MaxContentRating,
+			"avatar_color":             u.AvatarColor,
 			"has_pin":                  u.PINHash != "",
 			"is_primary":               primaryID != "" && u.ID == primaryID,
 			"access_expires_at":        u.AccessExpiresAt,
@@ -139,6 +141,50 @@ type updateActiveRequest struct {
 
 type updateDisplayNameRequest struct {
 	DisplayName string `json:"display_name"`
+}
+
+type updateAvatarColorRequest struct {
+	// AvatarColor as a hex string (#RRGGBB) — empty clears the
+	// override, falling back to the deterministic helper.
+	AvatarColor string `json:"avatar_color"`
+}
+
+// SetAvatarColor swaps the user's avatar colour override. Same
+// authorisation matrix as SetDisplayName / SetPIN: admin OR
+// parent-of-target OR self.
+func (h *UserHandler) SetAvatarColor(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "missing user id")
+		return
+	}
+	claims := auth.GetClaims(r.Context())
+	if claims == nil {
+		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+		return
+	}
+	target, err := h.users.GetByID(r.Context(), id)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	allowed := claims.Role == "admin" || claims.UserID == id ||
+		(target.ParentUserID != "" && target.ParentUserID == claims.UserID)
+	if !allowed {
+		respondError(w, r, http.StatusForbidden, "FORBIDDEN",
+			"you cannot change this user's avatar colour")
+		return
+	}
+	var req updateAvatarColorRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
+		return
+	}
+	if err := h.users.SetAvatarColor(r.Context(), id, req.AvatarColor); err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // SetDisplayName renames a user's human-visible label. Authorisation

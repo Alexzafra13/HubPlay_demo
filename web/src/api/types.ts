@@ -221,6 +221,10 @@ export interface User {
   // = permanent access. Lazy enforcement on the server: Login +
   // middleware reject after this stamp, no background job needed.
   access_expires_at?: string | null;
+  // Per-user avatar override (hex string `#RRGGBB`). Empty / absent
+  // = use the deterministic FNV → palette fallback in
+  // `avatarColorForUser`.
+  avatar_color?: string;
 }
 
 export interface CreateUserResponse {
@@ -276,6 +280,7 @@ export interface ProfileSummary {
   parent_user_id?: string;
   has_pin: boolean;
   max_content_rating?: string;
+  avatar_color?: string;
 }
 
 export interface AuthResponse {

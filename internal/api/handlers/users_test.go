@@ -59,6 +59,10 @@ func (s *userFakeService) SetDisplayName(_ context.Context, _, _ string) error {
 	return nil
 }
 
+func (s *userFakeService) SetAvatarColor(_ context.Context, _, _ string) error {
+	return nil
+}
+
 func (s *userFakeService) SetRole(_ context.Context, _, _ string) error {
 	return nil
 }

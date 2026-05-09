@@ -430,6 +430,11 @@ type Querier interface {
 	// is_active=false; the row + every per-user table stays intact so
 	// re-enabling is a one-flag flip.
 	UpdateUserActive(ctx context.Context, arg UpdateUserActiveParams) error
+	// avatar_color NULL = use the deterministic FNV-1a → palette
+	// fallback the frontend already has. Non-null = explicit hex
+	// override. Service-layer enforces the value is in the known
+	// palette (or empty) before reaching the repo.
+	UpdateUserAvatarColor(ctx context.Context, arg UpdateUserAvatarColorParams) error
 	// Per-field update so callers (renaming a profile, an admin
 	// relabelling a user) don't need to round-trip the rest of the
 	// mutable surface.

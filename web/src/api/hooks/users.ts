@@ -170,6 +170,20 @@ export function useSetUserDisplayName() {
   });
 }
 
+// Set / clear the avatar colour override. Same surfaces invalidated
+// as the rename mutation since the avatar appears in all three.
+export function useSetUserAvatarColor() {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, { userId: string; hex: string }>({
+    mutationFn: ({ userId, hex }) => api.setUserAvatarColor(userId, hex),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.users });
+      queryClient.invalidateQueries({ queryKey: ["me", "profiles"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.me });
+    },
+  });
+}
+
 export function useSetUserRole() {
   const queryClient = useQueryClient();
   return useMutation<
