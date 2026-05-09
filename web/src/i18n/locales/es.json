@@ -23,7 +23,8 @@
     "sortBy": "Ordenar por",
     "moreOptions": "Mas opciones",
     "loadErrorTitle": "No se pudo cargar",
-    "loadErrorHint": "Comprueba tu conexion e intentalo de nuevo."
+    "loadErrorHint": "Comprueba tu conexion e intentalo de nuevo.",
+    "copy": "Copiar"
   },
   "nav": {
     "home": "Inicio",
@@ -123,7 +124,16 @@
     "unlock": "Entrar",
     "errorWrongPin": "PIN incorrecto. Inténtalo otra vez.",
     "errorPinLength": "El PIN tiene 4 dígitos.",
-    "pinInputLabel": "PIN de 4 dígitos"
+    "pinInputLabel": "PIN de 4 dígitos",
+    "loadFailedTitle": "No pudimos cargar los perfiles",
+    "loadFailedHint": "El servidor no devolvió ningún perfil para esta cuenta. Pulsa reintentar; si persiste, cierra sesión y vuelve a entrar.",
+    "continueAnyway": "Continuar al inicio",
+    "signOut": "Cerrar sesión",
+    "subtitle": "Selecciona tu perfil para continuar.",
+    "manageProfiles": "Gestionar perfiles",
+    "back": "Volver",
+    "pinRequiredHint": "Pedirá PIN",
+    "unlocking": "Desbloqueando…"
   },
   "changePassword": {
     "title": "Cambiar contraseña",
@@ -241,7 +251,11 @@
     "passwordPlaceholder": "Introduce tu contrasena",
     "signIn": "Iniciar sesion",
     "loginFailed": "Error de inicio de sesion. Comprueba tus credenciales.",
-    "tagline": "Tus contenidos. En cualquier sitio."
+    "tagline": "Tus contenidos. En cualquier sitio.",
+    "errorAccessExpired": "Tu acceso temporal ha caducado. Contacta con el administrador del servidor para extenderlo.",
+    "errorAccountDisabled": "Tu cuenta está desactivada. Contacta con el administrador del servidor.",
+    "errorInvalidCredentials": "Usuario o contraseña incorrectos.",
+    "errorRateLimited": "Demasiados intentos. Espera unos minutos e inténtalo de nuevo."
   },
   "movies": {
     "title": "Peliculas",
@@ -508,7 +522,20 @@
       "opensubtitles": {
         "label": "OpenSubtitles",
         "description": "Descarga automatica de subtitulos"
-      }
+      },
+      "getApiKey": "Consigue tu API key en"
+    },
+    "devices": {
+      "loadFailed": "No pudimos cargar tus dispositivos.",
+      "empty": "No hay sesiones activas en este momento.",
+      "revokeSelfConfirm": "Vas a cerrar la sesión de este mismo dispositivo. Te tocará volver a iniciar sesión. ¿Continuar?",
+      "unknownDevice": "Dispositivo desconocido",
+      "thisDevice": "Este dispositivo",
+      "lastActive": "Última actividad: {{when}}",
+      "revokeHint": "Cerrar esta sesión",
+      "revoke": "Cerrar sesión",
+      "title": "Tus dispositivos",
+      "subtitle": "Cada inicio de sesión queda guardado aquí. Cierra una sesión si no reconoces el dispositivo o pierdes el móvil."
     }
   },
   "admin": {
@@ -542,7 +569,9 @@
         "description": "Crea un código de un solo uso (válido 24h) y compártelo por canal seguro con el admin del otro servidor. Él lo pegará en su panel para emparejar.",
         "generate": "Generar nuevo invite",
         "generating": "Generando…",
-        "expiresAt": "Expira: {{when}}"
+        "expiresAt": "Expira: {{when}}",
+        "tab": "Generar invite",
+        "activeHeading": "Códigos activos"
       },
       "accept": {
         "heading": "Emparejar con otro servidor",
@@ -554,7 +583,8 @@
         "foundServer": "Servidor encontrado: {{name}}",
         "confirm": "Confirmo que esta huella coincide con la que el admin del otro servidor me ha leído / pasado",
         "pair": "Emparejar",
-        "pairing": "Emparejando…"
+        "pairing": "Emparejando…",
+        "tab": "Aceptar invite"
       },
       "peers": {
         "heading": "Servidores emparejados",
@@ -572,8 +602,15 @@
         "status": {
           "pending": "Pendiente",
           "paired": "Emparejado",
-          "revoked": "Revocado"
-        }
+          "revoked": "Revocado",
+          "online": "Online"
+        },
+        "count": {
+          "one": "1 servidor",
+          "other": "{{count}} servidores"
+        },
+        "emptyTitle": "Aún no has emparejado con nadie",
+        "emptyHint": "Genera un invite y compártelo con otro admin, o pega aquí el invite que te hayan enviado. El handshake es directo entre servidores y revocable en cualquier momento."
       },
       "shares": {
         "heading": "Bibliotecas compartidas con {{name}}",
@@ -586,6 +623,9 @@
           "download": "Descargar",
           "livetv": "Live TV"
         }
+      },
+      "connect": {
+        "heading": "Conectar con otro servidor"
       }
     },
     "summary": {
@@ -619,7 +659,10 @@
       "databaseSize": "Base de datos: {{size}}",
       "minutesShort": "{{minutes}} min",
       "hoursShort": "{{hours}} h",
-      "hoursMinutesShort": "{{hours}} h {{minutes}} min"
+      "hoursMinutesShort": "{{hours}} h {{minutes}} min",
+      "nowPlayingSubtitle": "Reproducciones en curso ahora mismo.",
+      "thisWeekSubtitle": "Tiempo total visualizado y los títulos que más arrastran.",
+      "catalogueSubtitle": "Tamaño del catálogo y de la base de datos."
     },
     "dashboard": {
       "title": "Inicio",
@@ -737,7 +780,54 @@
       "noUsers": "Sin usuarios",
       "noUsersHint": "No se encontraron cuentas de usuario.",
       "deleteConfirm": "Estas seguro de que deseas eliminar al usuario <strong>{{name}}</strong>? Esta accion no se puede deshacer.",
-      "failedToLoad": "Error al cargar los usuarios"
+      "failedToLoad": "Error al cargar los usuarios",
+      "renameValidation": "El nombre no puede estar vacío.",
+      "accessPermanent": "Permanente",
+      "accessExpired": "Caducado",
+      "accessExpiresIn": "Caduca en {{days}} días",
+      "pinValidation": "El PIN debe ser exactamente 4 dígitos.",
+      "rating": "Edad máxima",
+      "access": "Acceso",
+      "status": "Estado",
+      "collapseMembers": "Ocultar miembros",
+      "expandMembers": "Mostrar miembros",
+      "profileTag": "perfil",
+      "pinSet": "PIN configurado",
+      "primaryHint": "Cuenta principal del servidor — no se puede eliminar ni cambiar de rol desde aquí.",
+      "primaryTag": "Principal",
+      "memberCountOne": "1 miembro",
+      "memberCountOther": "{{count}} miembros",
+      "ratingNotApplicable": "—",
+      "ratingHint": "Cubre los códigos MPAA (G/PG/PG-13/R/NC-17) y de TV (TV-Y/Y7/G/PG/14/MA) del mismo nivel.",
+      "accessInherits": "—",
+      "statusInactive": "Inactivo",
+      "statusActive": "Activo",
+      "activateHint": "Click para reactivar",
+      "deactivateHint": "Click para desactivar",
+      "addProfileHint": "Crear perfil hijo bajo esta cuenta",
+      "addProfile": "+ Perfil",
+      "resetPasswordHint": "Generar contraseña temporal nueva",
+      "resetPassword": "Reiniciar contraseña",
+      "renameHint": "Editar el nombre y el color del avatar",
+      "rename": "Personalizar",
+      "pinHint": "Configurar PIN del perfil",
+      "pinChange": "Cambiar PIN",
+      "pinSetCta": "Poner PIN",
+      "autoGeneratePassword": "Generar contraseña automáticamente",
+      "autoGenerateHint": "Te enseñaremos la contraseña una sola vez. El usuario tendrá que cambiarla al iniciar sesión.",
+      "resetPasswordConfirmCta": "Sí, reiniciar",
+      "generatedPasswordCreatedTitle": "Usuario creado",
+      "generatedPasswordResetTitle": "Contraseña reiniciada",
+      "profileName": "Nombre del miembro",
+      "profileNamePlaceholder": "Pedro",
+      "renameModalTitle": "Personalizar perfil",
+      "renameModalHint": "Cambia el nombre y el color del avatar. El usuario interno (login) no cambia, así que las contraseñas y permisos siguen igual.",
+      "avatarColorLabel": "Color del avatar",
+      "avatarColorAutoHint": "Color automático según el nombre de usuario.",
+      "avatarColorAuto": "Auto",
+      "pinModalTitle": "PIN del perfil",
+      "pinModalHint": "Escribe un PIN de 4 dígitos o déjalo vacío para quitarlo. El PIN se pide al elegir el perfil en la pantalla de selección.",
+      "pinClearCta": "Quitar PIN"
     },
     "system": {
       "tabs": {
@@ -823,7 +913,13 @@
       "cacheEmptyImages": "{{path}} — se llena al escanear bibliotecas.",
       "cacheEmptyTranscodes": "{{path}} — se llena la primera vez que algo se transcodifica.",
       "refreshing": "Actualizando…",
-      "refresh": "Actualizar ahora"
+      "refresh": "Actualizar ahora",
+      "hwAccelEnabled": "Activado",
+      "singleOptionHint": "Solo hay una opción disponible — se aplicará automáticamente.",
+      "singleOptionLabel": "(única opción detectada)",
+      "emptyDraftHint": "Para borrar el valor usa ",
+      "boolEnabled": "Activado",
+      "boolDisabled": "Desactivado"
     },
     "authKeys": {
       "title": "Claves de firma",
@@ -847,6 +943,79 @@
       "pruneFailed": "No se pudieron purgar las claves.",
       "noKeys": "Aún no hay claves de firma.",
       "loadFailed": "No se pudieron cargar las claves de firma."
+    },
+    "systemHealth": {
+      "dbOk": "Operativo · {{size}}",
+      "ffmpegOk": "Encontrado · {{path}}",
+      "ffmpegMissingHint": "Instala ffmpeg en el host o monta el binario en el contenedor — sin él no hay transcodificación.",
+      "baseURLMissing": "Sin configurar",
+      "title": "Estado",
+      "subtitle": "Comprobaciones rápidas de los componentes que tienen que estar arriba para que HubPlay funcione."
+    },
+    "systemConnection": {
+      "title": "Conexión",
+      "hint": "El servidor escucha en la dirección de abajo y se identifica externamente con la URL pública.",
+      "bindHint": "Configurada vía hubplay.yaml o $HUBPLAY_SERVER_HOST/PORT."
+    },
+    "systemStreaming": {
+      "subtitle": "Sesiones de transcodificación activas y backend de aceleración por hardware."
+    },
+    "systemSessions": {
+      "killConfirm": "¿Cerrar la sesión de {{user}}? El cliente volverá a la pantalla anterior.",
+      "empty": "Nadie está reproduciendo nada ahora mismo.",
+      "title": "Sesiones activas",
+      "refreshHint": "Actualiza cada 5 s",
+      "kill": "Cerrar sesión"
+    },
+    "systemRuntime": {
+      "title": "Proceso",
+      "subtitle": "Memoria que el runtime de Go tiene reservada y goroutines vivas en este momento.",
+      "memAlloc": "Memoria asignada",
+      "memAllocHint": "Heap de Go en uso (no la RAM total del host).",
+      "memSys": "Memoria reservada",
+      "memSysHint": "Lo que el runtime ha pedido al SO.",
+      "goroutines": "Goroutines"
+    },
+    "systemStorage": {
+      "subtitle": "Espacio que ocupan los caches y la base de datos en disco.",
+      "total": "Total {{size}}"
+    },
+    "systemSettings": {
+      "title": "Configuración",
+      "subtitle": "Valores en tiempo de ejecución que se aplican sin reiniciar el servidor."
+    },
+    "systemAdvanced": {
+      "subtitle": "Operaciones destructivas y rotación de llaves. Nada que tocar en el día a día."
+    },
+    "logs": {
+      "title": "Logs en vivo",
+      "subtitle": "Últimos eventos del servidor. Útil para diagnosticar fallos sin abrir la consola del contenedor.",
+      "connected": "Conectado",
+      "disconnected": "Reconectando…",
+      "live": "En vivo",
+      "reconnecting": "Reconectando",
+      "filterAll": "Todo",
+      "filterWarn": "Warn + Error",
+      "filterError": "Solo Error",
+      "resume": "Reanudar",
+      "pause": "Pausar",
+      "clear": "Limpiar pantalla",
+      "empty": "No hay entradas todavía. Se mostrarán aquí en cuanto el servidor escriba algo.",
+      "pausedHint": "Pausado · {{n}} entrada(s) en cola, se aplicarán al reanudar."
+    },
+    "backup": {
+      "downloadFailed": "No pudimos generar el backup.",
+      "restoreConfirm": "El backup sustituirá la base de datos actual al reiniciar HubPlay. La copia anterior se guardará al lado con un nombre con fecha. ¿Continuar?",
+      "restoreStaged": "Backup preparado ({{size}}). Se aplicará al reiniciar HubPlay.",
+      "restoreFailed": "No pudimos preparar el backup.",
+      "title": "Copia de seguridad",
+      "subtitle": "Descarga una copia consistente de la base de datos o restaura una previa. La restauración se aplica al reiniciar HubPlay; la BD anterior se guarda al lado con marca de tiempo.",
+      "download": "Descargar backup",
+      "restore": "Restaurar copia"
+    },
+    "scan": {
+      "scanning": "Escaneando ",
+      "fileCount": "{{count}} archivos"
     }
   },
   "setup": {
@@ -874,7 +1043,9 @@
       "usernameMinLength": "El usuario debe tener al menos 3 caracteres",
       "passwordMinLength": "La contrasena debe tener al menos 8 caracteres",
       "passwordMismatch": "Las contrasenas no coinciden",
-      "adminExists": "La cuenta de administrador ya existe. Introduce la contrasena correcta para continuar."
+      "adminExists": "La cuenta de administrador ya existe. Introduce la contrasena correcta para continuar.",
+      "autoGenerate": "Generar contraseña automáticamente",
+      "autoGenerateHint": "Te enseñaremos la contraseña generada al final del asistente para que la copies a tu gestor."
     },
     "libraries": {
       "title": "Agregar bibliotecas de medios",
@@ -928,7 +1099,9 @@
       "softwareDefault": "Codificacion por software (predeterminado)",
       "scanNow": "Comenzar a escanear bibliotecas ahora",
       "scanDescription": "Esto comenzara a indexar tus archivos en segundo plano.",
-      "finishSetup": "Finalizar configuracion"
+      "finishSetup": "Finalizar configuracion",
+      "generatedPasswordTitle": "Tu contraseña de admin",
+      "generatedPasswordHint": "Cópiala ahora a tu gestor de contraseñas. Solo se mostrará una vez. Si la pierdes, tendrás que recuperar la cuenta a mano desde la base de datos."
     }
   },
   "imageManager": {
@@ -950,7 +1123,7 @@
     "delete": "Eliminar",
     "deleteConfirm": "Eliminar esta imagen?",
     "primary": "Principal",
-    "resolution": "{{width}}\u00d7{{height}}",
+    "resolution": "{{width}}×{{height}}",
     "score": "Puntuacion: {{score}}",
     "selectImage": "Usar esta imagen",
     "uploadHint": "JPEG, PNG o WebP (max 10MB)",
@@ -961,5 +1134,25 @@
     "movies": "Peliculas",
     "tvShows": "Series",
     "liveTV": "TV en vivo"
+  },
+  "player": {
+    "shortcuts": {
+      "playback": "Reproducción",
+      "togglePlay": "Play / Pausa",
+      "seekBack": "Retroceder 10 s",
+      "seekForward": "Avanzar 10 s",
+      "seekPercent": "Saltar al 0 % – 90 % de la duración",
+      "audio": "Audio",
+      "volumeUp": "Subir volumen",
+      "volumeDown": "Bajar volumen",
+      "mute": "Silenciar",
+      "view": "Vista",
+      "fullscreen": "Pantalla completa",
+      "pip": "Picture-in-Picture",
+      "help": "Mostrar / ocultar esta ayuda",
+      "exit": "Salir de pantalla completa o cerrar el reproductor",
+      "title": "Atajos de teclado",
+      "dismissHint": "Pulsa ? otra vez o haz clic fuera para cerrar."
+    }
   }
 }
