@@ -1,3 +1,7 @@
+// HMR caveat: this file exports both the component and helper
+// types/constants reached by other modules. Splitting solely for
+// Fast Refresh would over-fragment the filter surface.
+/* eslint-disable react-refresh/only-export-components */
 import { useState, useEffect } from "react";
 import type { FC } from "react";
 import { useTranslation } from "react-i18next";
@@ -70,11 +74,16 @@ const MediaBrowseFilters: FC<MediaBrowseFiltersProps> = ({ itemType, state, onCh
   const [yearToInput, setYearToInput] = useState<string>(
     state.yearTo?.toString() ?? "",
   );
-  // Sync local input when external state changes (e.g. URL deep-link).
+  // Sync local input when external state changes (e.g. URL deep-
+  // link). The lint rule (set-state-in-effect) flags this but the
+  // alternative — keying the inputs by the URL state — would
+  // re-mount on every keystroke and lose focus mid-typing.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     setYearFromInput(state.yearFrom?.toString() ?? "");
     setYearToInput(state.yearTo?.toString() ?? "");
   }, [state.yearFrom, state.yearTo]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const cap = 20; // chip cap matches the previous client-side derivation
   const genreOptions = (genres ?? []).slice(0, cap);

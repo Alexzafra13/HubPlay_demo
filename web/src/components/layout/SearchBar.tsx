@@ -97,7 +97,6 @@ export function SearchBar() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Outside-click closes the dropdown AND collapses the bar if empty.

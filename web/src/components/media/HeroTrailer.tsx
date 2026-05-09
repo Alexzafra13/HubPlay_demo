@@ -169,7 +169,6 @@ export function HeroTrailer({
       // effect's only job IS to flip the gating state once. The lint
       // rule's "cascading renders" concern doesn't apply: the next
       // render of this same component is exactly what we want.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setInViewport(true);
       return;
     }

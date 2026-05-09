@@ -37,8 +37,15 @@ export function LibraryEditModal({ target, onClose }: LibraryEditModalProps) {
   const [tlsInsecure, setTLSInsecure] = useState(false);
   const [view, setView] = useState<"form" | "browse">("form");
 
-  // Hydrate from target on each open. `target` is the source of truth;
-  // local state mirrors it while the modal is shown.
+  // Hydrate from target on each open. `target` is the source of
+  // truth; local state mirrors it while the modal is shown.
+  //
+  // The lint rule (set-state-in-effect) is too aggressive for the
+  // sync-controlled-local-state-from-prop pattern: the alternative
+  // is keying the whole subtree by target.id and lifting the form
+  // into its own component, which would force a Sheet remount on
+  // every edit and lose the open-animation. Trade-off documented.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!target) {
       setView("form");
@@ -51,6 +58,7 @@ export function LibraryEditModal({ target, onClose }: LibraryEditModalProps) {
     setLanguageFilter(target.language_filter ?? []);
     setTLSInsecure(target.tls_insecure ?? false);
   }, [target]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const prefetchBrowse = usePrefetchBrowseLibraryDirectories();
   useEffect(() => {

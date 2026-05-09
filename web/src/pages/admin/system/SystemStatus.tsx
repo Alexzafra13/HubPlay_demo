@@ -107,6 +107,13 @@ function useMetricsHistory(
   const [samples, setSamples] = useState<MetricsSample[]>([]);
   const lastTsRef = useRef(0);
 
+  // Subscribe to TanStack Query updates and append a sample to the
+  // ring whenever a fresh response lands. The lint rule
+  // (set-state-in-effect) flags the setSamples call inside the
+  // effect, but this IS the canonical "subscribe to an external
+  // system" shape — react-query owns the source of truth and the
+  // effect is the bridge into local state.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!stats || dataUpdatedAt === 0 || dataUpdatedAt === lastTsRef.current) {
       return;
@@ -121,6 +128,7 @@ function useMetricsHistory(
       return next.length > MAX_SAMPLES ? next.slice(-MAX_SAMPLES) : next;
     });
   }, [stats, dataUpdatedAt]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   return samples;
 }

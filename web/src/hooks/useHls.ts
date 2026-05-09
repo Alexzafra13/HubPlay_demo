@@ -72,7 +72,13 @@ export function useHls({
   // resume seconds on every render (e.g. from a live duration) would
   // tear the player down and reattach mid-playback.
   const startPositionRef = useRef(startPosition);
-  startPositionRef.current = startPosition;
+  // Sync via effect rather than render-phase assignment: ref
+  // mutations during render are a React rule violation, even
+  // though in practice this one is harmless (we read it from an
+  // effect, never from JSX).
+  useEffect(() => {
+    startPositionRef.current = startPosition;
+  }, [startPosition]);
 
   // Remembers the most recent reliable currentTime so a
   // recoverMediaError / re-attach path can restore the position
@@ -108,6 +114,7 @@ export function useHls({
     setCurrentQuality(id);
   }, []);
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -117,6 +124,10 @@ export function useHls({
     // ladder into the new attachment for the few hundred ms before
     // MANIFEST_PARSED fires — most visibly, currentAudioTrack would
     // stay at the prior episode's index until the next user action.
+    // The set-state-in-effect rule is disabled here because the
+    // alternative — keying the whole hook by src — would tear down
+    // the hls.js instance on every source change, which is exactly
+    // what we want to avoid for next-up auto-advance.
     setError(null);
     setAudioTracks([]);
     setSubtitleTracks([]);
@@ -326,6 +337,7 @@ export function useHls({
       video.removeEventListener("timeupdate", settledListener);
     };
   }, [videoRef, masterPlaylistUrl, directUrl, playbackMethod, sessionToken]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   return {
     error,
