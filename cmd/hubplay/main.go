@@ -189,6 +189,21 @@ func run(configPath string) error {
 	segmentDetectorUnsub := segmentDetector.Start(ctx)
 	defer segmentDetectorUnsub()
 
+	// Phase 4a-quinquies: Audio fingerprint segment detector.
+	//
+	// Phase 2 of the skip-intro feature — kicks in when the file
+	// has no chapter markers (most cases). Listens to the same
+	// library.scan.completed event as the chapter detector, runs
+	// chromaprint over each episode's first / last few minutes,
+	// and writes any common runs as fingerprint-source segments.
+	// Disabled at runtime when fpcalc isn't on PATH.
+	fingerprinter := library.NewFingerprinter(cfg.Streaming.EffectiveCacheDir())
+	segmentFingerprinter := library.NewSegmentFingerprinter(
+		repos.Items, repos.EpisodeSegments, fingerprinter, eventBus, logger,
+	)
+	segmentFingerprinterUnsub := segmentFingerprinter.Start(ctx)
+	defer segmentFingerprinterUnsub()
+
 	// ═══ Phase 4a-quater: Filesystem Watcher ═══
 	//
 	// Reactive complement to scanScheduler — when a file is copied

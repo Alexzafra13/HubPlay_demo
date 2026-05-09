@@ -78,6 +78,7 @@ FROM ubuntu:24.04 AS hwaccel
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
+    libchromaprint-tools \
     ca-certificates \
     tzdata \
     wget \
@@ -121,6 +122,7 @@ FROM alpine:3.21
 
 RUN apk add --no-cache \
     ffmpeg \
+    chromaprint \
     ca-certificates \
     tzdata
 
