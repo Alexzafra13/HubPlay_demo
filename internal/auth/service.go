@@ -617,13 +617,34 @@ func (s *Service) SwitchProfile(
 	// Non-empty hash = the caller must provide a PIN that bcrypt-
 	// matches. Wrong PIN intentionally returns the same error code
 	// as a wrong password so an enumeration attack can't map it.
+	//
+	// Brute-force protection: a 4-digit PIN has only 10k combinations,
+	// so the same loginRateLimiter Login uses gates this path too.
+	// We key by the target profile id (so a flood against one profile
+	// locks that profile, not the family) AND by IP (so an attacker
+	// rotating profile ids from the same network still trips a lock).
+	// Empty PINs against a PIN-protected profile count as failures —
+	// it's not a normal user mode and treating it as one would let
+	// `pin = ""` bypass the lockout.
 	if target.PINHash != "" {
+		pinKey := "pin:" + target.ID
+		pinIPKey := "pin:ip:" + ip
+		if s.rateLimiter.isLocked(pinKey) || s.rateLimiter.isLocked(pinIPKey) {
+			s.logger.Warn("switch profile rate limited", "target", target.ID, "ip", ip)
+			return nil, fmt.Errorf("switch profile: too many failed pin attempts: %w", domain.ErrForbidden)
+		}
 		if pin == "" {
+			s.rateLimiter.recordFailure(pinKey)
+			s.rateLimiter.recordFailure(pinIPKey)
 			return nil, fmt.Errorf("switch profile: pin required: %w", domain.ErrInvalidPassword)
 		}
 		if err := bcrypt.CompareHashAndPassword([]byte(target.PINHash), []byte(pin)); err != nil {
+			s.rateLimiter.recordFailure(pinKey)
+			s.rateLimiter.recordFailure(pinIPKey)
 			return nil, fmt.Errorf("switch profile: %w", domain.ErrInvalidPassword)
 		}
+		s.rateLimiter.recordSuccess(pinKey)
+		s.rateLimiter.recordSuccess(pinIPKey)
 	}
 	// Token is just a regular session for the target profile's
 	// users.id — every existing user-keyed endpoint (user_data,
