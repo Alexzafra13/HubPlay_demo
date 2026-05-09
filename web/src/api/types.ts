@@ -711,6 +711,29 @@ export interface Chapter {
   image_path?: string;
 }
 
+// Skip-intro / skip-credits / skip-recap segment.
+//
+// Emitted by the backend's segment detector at the (item, kind)
+// level — the server already collapsed multiple sources to the
+// highest-confidence row, so the client can iterate without
+// further resolution. `start_seconds` / `end_seconds` are floats
+// because that's what `<video>.currentTime` speaks; the underlying
+// DB stores 10M-tick integers but the API rounds at the boundary.
+//
+// `confidence` is 0..1. Anything ≥ 0.7 is treated as "show the skip
+// button automatically"; lower values exist only because future
+// fingerprint-derived rows may be uncertain — chapter-derived rows
+// always sit at 0.95.
+export type EpisodeSegmentKind = "intro" | "outro" | "recap";
+
+export interface EpisodeSegment {
+  kind: EpisodeSegmentKind;
+  source: "chapter" | "fingerprint" | "manual";
+  start_seconds: number;
+  end_seconds: number;
+  confidence: number;
+}
+
 // One candidate from an external subtitle provider (OpenSubtitles
 // today). The `file_id` is opaque — pass it back to the download
 // endpoint along with `source` to fetch the actual VTT.
@@ -750,6 +773,11 @@ export interface ItemDetail extends MediaItem {
   // markers (most non-Blu-ray rips). Empty and absent are equivalent
   // for clients.
   chapters?: Chapter[];
+  // Optional: skip-intro / skip-credits / recap markers. Backend
+  // emits at most one row per kind (highest-confidence source wins
+  // server-side), so the player can iterate without further
+  // resolution. Absent === no segments detected.
+  segments?: EpisodeSegment[];
   // Inherited from MediaItem (optional). Re-listed in this interface
   // for documentation only — the backend omits the key entirely when
   // the request is unauthenticated or no row exists, so it parses as

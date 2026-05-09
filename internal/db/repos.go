@@ -31,6 +31,7 @@ type Repositories struct {
 	ItemValues         *ItemValueRepository
 	Studios            *StudioRepository
 	Collections        *CollectionRepository
+	EpisodeSegments    *EpisodeSegmentRepository
 }
 
 // NewRepositories creates all repositories from a database connection.
@@ -63,5 +64,6 @@ func NewRepositories(database *sql.DB) *Repositories {
 		ItemValues:         NewItemValueRepository(database),
 		Studios:            NewStudioRepository(database),
 		Collections:        NewCollectionRepository(database),
+		EpisodeSegments:    NewEpisodeSegmentRepository(database),
 	}
 }

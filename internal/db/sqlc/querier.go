@@ -94,6 +94,8 @@ type Querier interface {
 	DeleteChannelsByLibrary(ctx context.Context, libraryID string) error
 	DeleteChaptersByItem(ctx context.Context, itemID string) error
 	DeleteEPGProgramsByChannel(ctx context.Context, channelID string) error
+	DeleteEpisodeSegmentsByItem(ctx context.Context, itemID string) error
+	DeleteEpisodeSegmentsByItemAndSource(ctx context.Context, arg DeleteEpisodeSegmentsByItemAndSourceParams) error
 	DeleteExpiredDeviceCodes(ctx context.Context, expiresAt time.Time) error
 	DeleteExpiredSessions(ctx context.Context) (int64, error)
 	DeleteFederationProgress(ctx context.Context, arg DeleteFederationProgressParams) error
@@ -221,6 +223,13 @@ type Querier interface {
 	// Table schema: migrations/sqlite/001_initial_schema.sql (CREATE TABLE epg_programs).
 	// NOTE: BulkSchedule uses dynamic IN() and remains as raw SQL in the adapter.
 	InsertEPGProgram(ctx context.Context, arg InsertEPGProgramParams) error
+	// Skip-intro / skip-credits markers per item.
+	//
+	// Schema: migrations/sqlite/037_episode_segments.sql.
+	// PK: (item_id, kind, source). Repository.Replace() wraps DELETE+INSERT
+	// in a transaction so a re-run of one detector replaces only its own
+	// rows; segments from other sources stay untouched.
+	InsertEpisodeSegment(ctx context.Context, arg InsertEpisodeSegmentParams) error
 	// ============================================================
 	// audit log
 	// ============================================================
@@ -269,6 +278,7 @@ type Querier interface {
 	// multi-format-tolerant column would invite the same Scan problem
 	// we work around elsewhere.
 	ListEnabledIPTVScheduledJobs(ctx context.Context) ([]IptvScheduledJob, error)
+	ListEpisodeSegmentsByItem(ctx context.Context, itemID string) ([]EpisodeSegment, error)
 	ListExternalIDsByItem(ctx context.Context, itemID string) ([]ExternalID, error)
 	ListFavorites(ctx context.Context, arg ListFavoritesParams) ([]ListFavoritesRow, error)
 	ListFederationAuditEntries(ctx context.Context, arg ListFederationAuditEntriesParams) ([]ListFederationAuditEntriesRow, error)

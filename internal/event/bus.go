@@ -53,6 +53,21 @@ const (
 	UserLoggedIn         Type = "user.logged_in"
 	UserLoggedOut        Type = "user.logged_out"
 
+	// ── Segment detection (skip-intro / skip-credits).
+	// Published by the segment detector as it walks a library's
+	// episodes deriving intro/outro/recap markers from chapter
+	// titles. Subscribers (the admin SSE stream) surface a small
+	// progress banner the same way library.scan.* does.
+	//
+	// Data shape:
+	//   library_id   — string
+	//   library_name — string (Started/Completed only)
+	//   scanned      — int (Progress only; how many episodes inspected)
+	//   detected     — int (Progress/Completed; how many segments written)
+	SegmentDetectStarted   Type = "library.segments.started"
+	SegmentDetectProgress  Type = "library.segments.progress"
+	SegmentDetectCompleted Type = "library.segments.completed"
+
 	// ── User watch state — published by ProgressHandler so other
 	// devices owned by the SAME user can sync their UI without polling.
 	// `Data` carries:

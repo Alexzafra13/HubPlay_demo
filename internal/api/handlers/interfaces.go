@@ -264,6 +264,17 @@ type ChapterRepository interface {
 	ListByItem(ctx context.Context, itemID string) ([]*db.Chapter, error)
 }
 
+// EpisodeSegmentRepository surfaces skip-intro / skip-credits markers
+// to the item handler so the playback page can render the floating
+// "Saltar intro" / "Saltar créditos" buttons without a second API
+// call. One row per (item_id, kind, source) — a single episode can
+// carry chapter-derived AND fingerprint-derived segments in the same
+// query result; the handler picks the highest-confidence row per
+// kind before serialising.
+type EpisodeSegmentRepository interface {
+	ListByItem(ctx context.Context, itemID string) ([]db.EpisodeSegment, error)
+}
+
 // UserDataRepository defines user data access needed by handlers.
 type UserDataRepository interface {
 	Get(ctx context.Context, userID, itemID string) (*db.UserData, error)

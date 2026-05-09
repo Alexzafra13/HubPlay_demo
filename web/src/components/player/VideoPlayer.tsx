@@ -12,6 +12,7 @@ import { PlayerControls } from "./PlayerControls";
 import { UpNextOverlay, type UpNextInfo } from "./UpNextOverlay";
 import { ExternalSubsModal } from "./ExternalSubsModal";
 import { KeyboardHelpOverlay } from "./KeyboardHelpOverlay";
+import { SkipSegmentButton } from "./SkipSegmentButton";
 import type { ExternalSubtitleResult } from "@/api/types";
 
 // ─── Props ───────────────────────────────────────────────────────────────────
@@ -66,6 +67,16 @@ interface VideoPlayerProps {
    */
   chapters?: Array<{ startSeconds: number; title: string }>;
   /**
+   * Skip-intro / skip-credits / skip-recap markers from the
+   * backend's segment detector. When `currentTime` falls inside a
+   * range we render a floating "Saltar intro" / "Saltar créditos"
+   * button bottom-right; clicking it sets `currentTime` to the
+   * segment end. Confidence below 0.7 is filtered out at this
+   * boundary so low-quality detector results never auto-surface
+   * a button.
+   */
+  segments?: import("@/api/types").EpisodeSegment[];
+  /**
    * Audio MediaStream rows from the DB (already filtered to
    * type === "audio"). Used to enrich the audio track picker labels
    * with codec + channel count ("English · TrueHD 7.1") instead of
@@ -93,6 +104,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
   backdropUrl,
   nextUp,
   chapters,
+  segments,
   audioStreams,
   onClose,
   onEnded: onEndedCallback,
@@ -703,6 +715,22 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
           itemId={itemId}
           onSelect={handleExternalSubPicked}
           onClose={() => setExternalSubsModalOpen(false)}
+        />
+      )}
+
+      {/* Skip-intro / skip-credits / skip-recap floating button.
+          Sits ABOVE the controls (z-30) but below the up-next
+          overlay (z-40) so an active up-next prompt can't be
+          partially hidden by a stale skip button. The button is
+          suppressed entirely while up-next is active because
+          control of attention belongs to that prompt at end-of-
+          episode time. */}
+      {!upNextActive && (
+        <SkipSegmentButton
+          segments={segments}
+          currentTime={currentTime}
+          onSkip={handleSeek}
+          nextUpAvailable={!!nextUp}
         />
       )}
 

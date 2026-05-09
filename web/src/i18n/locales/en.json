@@ -1358,6 +1358,9 @@
       "exit": "Salir de pantalla completa o cerrar el reproductor",
       "title": "Atajos de teclado",
       "dismissHint": "Pulsa ? otra vez o haz clic fuera para cerrar."
-    }
+    },
+    "skipIntro": "Saltar intro",
+    "skipCredits": "Saltar créditos",
+    "skipRecap": "Saltar resumen"
   }
 }

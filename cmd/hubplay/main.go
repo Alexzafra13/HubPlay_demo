@@ -175,6 +175,20 @@ func run(configPath string) error {
 	imageRefreshScheduler := library.NewImageRefreshScheduler(repos.Libraries, imageRefresher, logger)
 	imageRefreshScheduler.Start(ctx)
 
+	// ═══ Phase 4a-ter: Episode Segment Detector (skip-intro) ═══
+	//
+	// Subscribes to library.scan.completed and writes intro / outro /
+	// recap markers for each episode by reading its chapter titles.
+	// Secondary detector — does NOT block scans, runs in its own
+	// goroutine off the bus. The unsubscribe handle is held for the
+	// process lifetime; bus.Subscribe leaks the handler if it's
+	// never released.
+	segmentDetector := library.NewSegmentDetector(
+		repos.Items, repos.Chapters, repos.EpisodeSegments, eventBus, logger,
+	)
+	segmentDetectorUnsub := segmentDetector.Start(ctx)
+	defer segmentDetectorUnsub()
+
 	// ═══ Phase 4b: Streaming ═══
 	//
 	// Apply runtime overrides from app_settings BEFORE constructing the
@@ -344,6 +358,7 @@ func run(configPath string) error {
 		Metadata:      repos.Metadata,
 		UserData:        repos.UserData,
 		Chapters:        repos.Chapters,
+		EpisodeSegments: repos.EpisodeSegments,
 		People:          repos.People,
 		Studios:         repos.Studios,
 		Collections:     repos.Collections,
