@@ -5,7 +5,7 @@
 //
 // EventSource is mocked so the test owns the message stream.
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   render,
   screen,
