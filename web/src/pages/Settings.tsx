@@ -25,6 +25,7 @@ function ProviderSettings() {
   // language-neutral and stay hardcoded.
   const providerMeta: Record<string, { url: string }> = {
     tmdb: { url: "https://www.themoviedb.org/settings/api" },
+    fanart: { url: "https://fanart.tv/get-an-api-key/" },
     opensubtitles: { url: "https://www.opensubtitles.com/consumers" },
   };
   const providerLabel = (name: string): string => {
@@ -140,7 +141,9 @@ function ProviderSettings() {
 
             {meta.url && (
               <p className="mt-2 text-xs text-text-muted">
-                Get your API key at{" "}
+                {t("settings.providers.getApiKey", {
+                  defaultValue: "Consigue tu API key en",
+                })}{" "}
                 <a
                   href={meta.url}
                   target="_blank"
