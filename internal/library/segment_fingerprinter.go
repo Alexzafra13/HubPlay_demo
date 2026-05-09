@@ -29,10 +29,18 @@ import (
 // (mutex) and one season at a time within a library; episodes
 // inside a season are fingerprinted in parallel up to a small
 // worker pool.
+// FingerprintComputer is the slice of *Fingerprinter the orchestrator
+// actually depends on. Extracted as an interface so tests can wire
+// in a stub that returns synthetic hashes without spawning fpcalc.
+type FingerprintComputer interface {
+	Available() bool
+	Compute(ctx context.Context, itemID, sourcePath string, window FingerprintWindow) ([]uint32, error)
+}
+
 type SegmentFingerprinter struct {
 	items    *db.ItemRepository
 	segments *db.EpisodeSegmentRepository
-	prints   *Fingerprinter
+	prints   FingerprintComputer
 	bus      *event.Bus
 	logger   *slog.Logger
 
@@ -48,7 +56,7 @@ type SegmentFingerprinter struct {
 func NewSegmentFingerprinter(
 	items *db.ItemRepository,
 	segments *db.EpisodeSegmentRepository,
-	prints *Fingerprinter,
+	prints FingerprintComputer,
 	bus *event.Bus,
 	logger *slog.Logger,
 ) *SegmentFingerprinter {
