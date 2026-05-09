@@ -734,3 +734,153 @@ func parseLimit(r *http.Request, def, max int) int {
 	return n
 }
 
+
+// ─── GET /me/home/because-you-watched ────────────────────────────────
+
+// BecauseYouWatched powers the "Porque viste X" rail on Home.
+// Picks the caller's most recent COMPLETED watch as the seed, then
+// returns up to `limit` unwatched items that share genres with the
+// seed. Episode completes fold to their parent series so the
+// header reads "Porque viste Breaking Bad" instead of an episode
+// title.
+//
+// Returns 200 with `{"seed": null, "items": []}` when the caller
+// has no completed watches yet (cold-start), so the frontend can
+// hide the rail without a 404 round-trip. Same shape when the
+// seed exists but has no genres tagged — recommendations would be
+// too noisy to be useful.
+//
+// `limit` caps the response size (default 12, max 30).
+func (h *HomeHandler) BecauseYouWatched(w http.ResponseWriter, r *http.Request) {
+	claims := auth.GetClaims(r.Context())
+	if claims == nil {
+		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "authentication required")
+		return
+	}
+
+	limit := parseLimit(r, 12, 30)
+	cap := h.callerCapRating(r.Context())
+	innerLimit := limit
+	if cap != "" {
+		innerLimit = limit * 2
+	}
+
+	result, err := h.home.BecauseYouWatched(r.Context(), claims.UserID, innerLimit)
+	if err != nil {
+		h.logger.Error("because-you-watched query", "error", err)
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR",
+			"failed to load recommendations")
+		return
+	}
+
+	if result == nil || result.Seed == nil {
+		respondJSON(w, http.StatusOK, map[string]any{
+			"data": map[string]any{
+				"seed":  nil,
+				"items": []any{},
+			},
+		})
+		return
+	}
+
+	rows := result.Items
+	if cap != "" {
+		filtered := rows[:0]
+		for _, row := range rows {
+			if library.AllowedRating(row.ContentRating, cap) {
+				filtered = append(filtered, row)
+			}
+		}
+		rows = filtered
+	}
+	if len(rows) > limit {
+		rows = rows[:limit]
+	}
+
+	out := make([]map[string]any, 0, len(rows))
+	ids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		entry := map[string]any{
+			"id":         row.ID,
+			"type":       row.Type,
+			"title":      row.Title,
+			"library_id": row.LibraryID,
+		}
+		// Match the shape /me/home/recommended already uses so the
+		// frontend has a single Recommendation card vocabulary
+		// across both rails.
+		if len(row.Because) > 0 {
+			entry["recommended_because"] = map[string]any{"genres": row.Because}
+		}
+		if row.Year.Valid {
+			entry["year"] = row.Year.Int64
+		}
+		if row.CommunityRating.Valid {
+			entry["community_rating"] = row.CommunityRating.Float64
+		}
+		out = append(out, entry)
+		ids = append(ids, row.ID)
+	}
+
+	// Enrich with poster art for the rail tiles. The seed gets
+	// its own poster lookup so the rail header can render a small
+	// thumbnail next to "Porque viste X".
+	if h.images != nil && (len(ids) > 0 || result.Seed != nil) {
+		if result.Seed != nil {
+			ids = append(ids, result.Seed.ID)
+		}
+		if imgs, ierr := h.images.GetPrimaryURLs(r.Context(), ids); ierr == nil {
+			// Strip the seed id back off after consumption so the
+			// tiles loop only sees recommendation rows.
+			seedURLs := imgs[result.Seed.ID]
+			for i := range out {
+				rec := rows[i]
+				if urls, ok := imgs[rec.ID]; ok {
+					if poster, ok := urls["primary"]; ok {
+						out[i]["poster_url"] = poster.Path
+						attachPosterPlaceholder(out[i], poster)
+					}
+				}
+			}
+			seed := map[string]any{
+				"id":         result.Seed.ID,
+				"type":       result.Seed.Type,
+				"title":      result.Seed.Title,
+				"library_id": result.Seed.LibraryID,
+			}
+			if result.Seed.Year.Valid {
+				seed["year"] = result.Seed.Year.Int64
+			}
+			if poster, ok := seedURLs["primary"]; ok {
+				seed["poster_url"] = poster.Path
+				attachPosterPlaceholder(seed, poster)
+			}
+			respondJSON(w, http.StatusOK, map[string]any{
+				"data": map[string]any{
+					"seed":  seed,
+					"items": out,
+				},
+			})
+			return
+		}
+	}
+
+	// Image fetch failed (or no image repo wired) — still respond
+	// with the basic shape so the frontend can render text-only
+	// chips rather than a broken state.
+	seed := map[string]any{
+		"id":         result.Seed.ID,
+		"type":       result.Seed.Type,
+		"title":      result.Seed.Title,
+		"library_id": result.Seed.LibraryID,
+	}
+	if result.Seed.Year.Valid {
+		seed["year"] = result.Seed.Year.Int64
+	}
+	respondJSON(w, http.StatusOK, map[string]any{
+		"data": map[string]any{
+			"seed":  seed,
+			"items": out,
+		},
+	})
+}

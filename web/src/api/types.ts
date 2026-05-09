@@ -1279,6 +1279,29 @@ export interface HomeRecommendedItem {
 }
 
 /**
+ * Payload of /me/home/because-you-watched. The seed is the recently-
+ * completed item that lit the rail; the items are recommendations
+ * sharing genres with the seed. `seed` is null when the caller has
+ * no completed watches yet (cold-start) — the rail hides itself in
+ * that case.
+ */
+export interface HomeBecauseSeed {
+  id: string;
+  type: "movie" | "series";
+  title: string;
+  library_id: string;
+  year?: number;
+  poster_url?: string;
+  poster_blurhash?: string;
+  poster_color?: string;
+}
+
+export interface HomeBecauseResponse {
+  seed: HomeBecauseSeed | null;
+  items: HomeRecommendedItem[];
+}
+
+/**
  * One bucket in the admin Resumen's watch-activity sparkline. The
  * series is always contiguous (the backend zero-pads days that had
  * no plays) so the frontend can pass `buckets.map(b => b.watch_minutes)`

@@ -72,6 +72,7 @@ export const queryKeys = {
   homeLayout: ["home", "layout"] as const,
   homeTrending: ["home", "trending"] as const,
   homeRecommended: ["home", "recommended"] as const,
+  homeBecauseYouWatched: ["home", "because-you-watched"] as const,
   homeLiveNow: ["home", "live-now"] as const,
   systemStats: ["system-stats"] as const,
   adminStreamSessions: ["admin-stream-sessions"] as const,

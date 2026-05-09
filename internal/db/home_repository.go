@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -302,6 +303,197 @@ func (r *HomeRepository) Recommended(ctx context.Context, userID string, limit i
 		out = append(out, rec)
 	}
 	return out, itemsRows.Err()
+}
+
+// HomeBecauseSeed is the "this is the item that triggered the rail"
+// row that pairs with a list of recommendations. The wire format
+// renders "Porque viste {{seed.title}}" as the rail title, so we
+// surface enough metadata for that header without making the
+// frontend do a second round-trip on the seed item.
+type HomeBecauseSeed struct {
+	ID        string
+	Type      string
+	Title     string
+	Year      sql.NullInt64
+	LibraryID string
+}
+
+// HomeBecauseResult is the one-call payload for the
+// "Because-you-watched" rail: the seed (the item that lit up the
+// rail) plus a list of recommendations that share genres with it.
+// items.Because already exists in HomeRecommendation; we re-use
+// that shape so the frontend has one card vocabulary across both
+// rails ("Recomendado para ti" and "Porque viste X").
+type HomeBecauseResult struct {
+	Seed  *HomeBecauseSeed
+	Items []HomeRecommendation
+}
+
+// BecauseYouWatched picks the user's most recent COMPLETED watch
+// and returns items that share ≥1 genre with it. The seed is
+// folded for episodes (an episode's "completed" lights up the
+// whole series as the seed) so the rail header reads
+// "Porque viste Breaking Bad", not "Porque viste S05E14".
+//
+// Returns (nil, nil) when the user has no completed watches yet —
+// the cold-start case. Caller hides the slot rather than rendering
+// an empty rail.
+//
+// Strategy:
+//
+//   1. Find the latest user_data row with completed = 1 for this
+//      user. Episodes fold to the parent series id (climb
+//      parent_id twice). Movies / series stay as themselves.
+//   2. Look up the seed item's genres + title for the rail
+//      header. Bail when the seed has no genres tagged
+//      (recommendations would be unfocused).
+//   3. Score every unwatched movie / series by how many of the
+//      seed's genres it carries, surface the top `limit`.
+func (r *HomeBecauseResult) IsEmpty() bool {
+	return r == nil || r.Seed == nil
+}
+
+func (r *HomeRepository) BecauseYouWatched(ctx context.Context, userID string, limit int) (*HomeBecauseResult, error) {
+	if limit <= 0 || limit > 30 {
+		limit = 12
+	}
+
+	// Step 1: find the seed. Pick the most recent completed watch,
+	// folding episodes to their parent series id. We deliberately
+	// don't constrain by item type — a finished movie or completed
+	// series both qualify. The rollup expression mirrors the one in
+	// Trending so the same "binge-completed Breaking Bad" event
+	// shows up consistently across rails.
+	const seedQuery = `
+		SELECT
+			CASE
+				WHEN i.type = 'episode' AND i.parent_id IS NOT NULL
+					THEN COALESCE(
+						(SELECT s.parent_id FROM items s WHERE s.id = i.parent_id),
+						i.parent_id
+					)
+				ELSE i.id
+			END AS rollup_id,
+			ud.last_played_at
+		FROM user_data ud
+		JOIN items i ON i.id = ud.item_id
+		WHERE ud.user_id = ? AND ud.completed = 1 AND i.is_available = 1
+		ORDER BY ud.last_played_at DESC
+		LIMIT 1
+	`
+	var seedID string
+	var lastPlayedRaw any
+	if err := r.db.QueryRowContext(ctx, seedQuery, userID).
+		Scan(&seedID, &lastPlayedRaw); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("because seed: %w", err)
+	}
+
+	// Step 2: pull the seed's metadata for the rail header + the
+	// genre list we'll use to score candidates. We do this in a
+	// single query rather than two so we don't have to ferry the
+	// seed id between calls.
+	const seedMetaQuery = `
+		SELECT
+			i.id, i.type, i.title, i.year, i.library_id,
+			GROUP_CONCAT(DISTINCT iv.value) AS genres
+		FROM items i
+		LEFT JOIN item_value_map ivm ON ivm.item_id = i.id
+		LEFT JOIN item_values iv ON iv.id = ivm.value_id AND iv.type = 'genre'
+		WHERE i.id = ? AND i.is_available = 1
+		GROUP BY i.id
+	`
+	var seed HomeBecauseSeed
+	var genresRaw sql.NullString
+	if err := r.db.QueryRowContext(ctx, seedMetaQuery, seedID).
+		Scan(&seed.ID, &seed.Type, &seed.Title, &seed.Year, &seed.LibraryID, &genresRaw); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("because seed meta: %w", err)
+	}
+	if !genresRaw.Valid || genresRaw.String == "" {
+		// No genres tagged → recommendations would be too noisy
+		// to be useful. Hide the rail rather than show
+		// "everything in the catalogue".
+		return &HomeBecauseResult{Seed: &seed, Items: nil}, nil
+	}
+	genres := splitGroupConcat(genresRaw.String)
+	if len(genres) == 0 {
+		return &HomeBecauseResult{Seed: &seed, Items: nil}, nil
+	}
+
+	// Step 3: score candidates. Same shape as Recommended, but
+	// scoped to the seed's specific genres rather than the user's
+	// top-3, AND we exclude the seed itself from the result so
+	// "Porque viste X" doesn't include X.
+	placeholders := "?"
+	for i := 1; i < len(genres); i++ {
+		placeholders += ",?"
+	}
+	args := make([]any, 0, len(genres)+4)
+	for _, g := range genres {
+		args = append(args, g)
+	}
+	args = append(args, userID, userID, seed.ID, limit)
+
+	itemsQuery := fmt.Sprintf(`
+		SELECT
+			i.id, i.type, i.title, i.year, i.community_rating, i.library_id,
+			COALESCE(i.content_rating, '') AS content_rating,
+			COUNT(DISTINCT iv.value) AS genre_hits,
+			GROUP_CONCAT(DISTINCT iv.value) AS matched_genres
+		FROM items i
+		JOIN item_value_map ivm ON ivm.item_id = i.id
+		JOIN item_values iv ON iv.id = ivm.value_id AND iv.type = 'genre' AND iv.value IN (%s)
+		LEFT JOIN user_data ud ON ud.user_id = ? AND ud.item_id = i.id
+		WHERE i.is_available = 1
+		  AND i.type IN ('movie', 'series')
+		  AND (
+			ud.item_id IS NULL
+			OR (ud.completed = 0 AND (i.duration_ticks = 0 OR ud.position_ticks * 100 < i.duration_ticks * 5))
+		  )
+		  AND (
+			EXISTS (SELECT 1 FROM library_access la WHERE la.library_id = i.library_id AND la.user_id = ?)
+			OR NOT EXISTS (SELECT 1 FROM library_access la WHERE la.library_id = i.library_id)
+		  )
+		  AND i.id <> ?
+		GROUP BY i.id
+		ORDER BY genre_hits DESC, COALESCE(i.community_rating, 0) DESC, i.added_at DESC
+		LIMIT ?`, placeholders)
+
+	itemsRows, err := r.db.QueryContext(ctx, itemsQuery, args...)
+	if err != nil {
+		return nil, fmt.Errorf("because items: %w", err)
+	}
+	defer itemsRows.Close() //nolint:errcheck
+
+	out := make([]HomeRecommendation, 0, limit)
+	for itemsRows.Next() {
+		var rec HomeRecommendation
+		var matched sql.NullString
+		var genreHits int64
+		if err := itemsRows.Scan(&rec.ID, &rec.Type, &rec.Title, &rec.Year, &rec.CommunityRating,
+			&rec.LibraryID, &rec.ContentRating, &genreHits, &matched); err != nil {
+			return nil, fmt.Errorf("scan because item: %w", err)
+		}
+		if matched.Valid && matched.String != "" {
+			rec.Because = splitGroupConcat(matched.String)
+		}
+		out = append(out, rec)
+	}
+	if err := itemsRows.Err(); err != nil {
+		return nil, err
+	}
+
+	// lastPlayedRaw is a side-effect of the seed query; not
+	// surfaced on the wire today, but we drop it explicitly so
+	// staticcheck doesn't flag the var as unused.
+	_ = lastPlayedRaw
+
+	return &HomeBecauseResult{Seed: &seed, Items: out}, nil
 }
 
 // splitGroupConcat splits SQLite's GROUP_CONCAT default-comma output.

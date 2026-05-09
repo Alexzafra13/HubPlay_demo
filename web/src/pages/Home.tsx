@@ -31,6 +31,7 @@ import {
   PeerRecentRail,
   PeerContinueWatchingRail,
   TrendingRail,
+  BecauseYouWatchedRail,
 } from "@/components/home";
 
 // ─── Layout-driven section dispatch ───────────────────────────────────────
@@ -168,6 +169,15 @@ export default function Home() {
           if (!node) return null;
           return <div key={s.id}>{node}</div>;
         })}
+        {/* "Porque viste X" rail. Same out-of-layout placement as
+            the federated rails for the same reason: not yet a
+            registered HomeSection type, self-hides when the user
+            has no completed watches yet. Sits between the layout
+            sections and the federated ones because it's still
+            local-catalogue content (what's on this server) rather
+            than peer content. */}
+        <BecauseYouWatchedRail />
+
         {/* Federated rails. Live outside the layout-driven dispatch
             for v1 because `peer_recent` / `peer_continue_watching`
             aren't registered HomeSection types yet — both self-hide

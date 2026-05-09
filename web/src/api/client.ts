@@ -12,6 +12,7 @@ import type {
   HealthResponse,
   HomeLayout,
   HomeLiveNowChannel,
+  HomeBecauseResponse,
   HomeRecommendedItem,
   HomeTrendingItem,
   ImageInfo,
@@ -842,6 +843,18 @@ export class ApiClient {
       { params: { limit } },
     );
     return resp.items ?? [];
+  }
+
+  /** "Porque viste X" rail. Returns the seed (most recently
+   *  completed watch) plus items sharing genres with it. seed is
+   *  null when the caller has no completed watches yet — caller
+   *  hides the rail. */
+  async getHomeBecauseYouWatched(limit?: number): Promise<HomeBecauseResponse> {
+    return this.request<HomeBecauseResponse>(
+      "GET",
+      "/me/home/because-you-watched",
+      { params: { limit } },
+    );
   }
 
   async getHomeLiveNow(limit?: number): Promise<HomeLiveNowChannel[]> {
