@@ -1114,7 +1114,7 @@
       "restore": "Restaurar copia"
     },
     "scan": {
-      "scanning": "Escaneando ",
+      "scanning": "Escaneando '{{name}}'",
       "fileCount": "{{count}} archivos"
     },
     "withoutEPG": {

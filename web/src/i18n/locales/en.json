@@ -1114,8 +1114,8 @@
       "restore": "Restaurar copia"
     },
     "scan": {
-      "scanning": "Escaneando ",
-      "fileCount": "{{count}} archivos"
+      "scanning": "Scanning '{{name}}'",
+      "fileCount": "{{count}} files"
     },
     "withoutEPG": {
       "hint": "Corrige el tvg-id para emparejarlo con una entrada del XMLTV. La edición se conserva tras refrescar el M3U.",

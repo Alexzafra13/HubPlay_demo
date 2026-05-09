@@ -332,3 +332,226 @@ func TestService_ValidateToken_Invalid(t *testing.T) {
 		t.Errorf("expected ErrInvalidToken, got %v", err)
 	}
 }
+
+// registerProfileWithPIN registers a child profile under the given
+// parent and pins it with the supplied 4-digit PIN. Returns the
+// resulting child user record so tests can use its ID.
+func registerProfileWithPIN(
+	t *testing.T,
+	svc *auth.Service,
+	parent *db.User,
+	username, pin string,
+) *db.User {
+	t.Helper()
+	child, err := svc.Register(context.Background(), auth.RegisterRequest{
+		Username:     parent.Username + "/" + username,
+		DisplayName:  username,
+		Password:     "irrelevant-but-required",
+		Role:         "user",
+		ParentUserID: parent.ID,
+	})
+	if err != nil {
+		t.Fatalf("register profile: %v", err)
+	}
+	if err := svc.SetPIN(context.Background(), child.ID, pin); err != nil {
+		t.Fatalf("set pin: %v", err)
+	}
+	return child
+}
+
+// TestService_SwitchProfile_PinRateLimited asserts that hammering a
+// PIN-protected profile with wrong PINs trips the same loginRateLimiter
+// Login uses, locking out further attempts (even with the correct PIN)
+// until the lockout expires. Without this guard a 4-digit PIN — only
+// 10k combinations — falls in minutes against bcrypt.
+func TestService_SwitchProfile_PinRateLimited(t *testing.T) {
+	const maxFails = 3
+	svc, _, _ := newTestAuthServiceWithRL(t, maxFails)
+	parent := registerTestUser(t, svc)
+	child := registerProfileWithPIN(t, svc, parent, "kid", "1234")
+
+	const ip = "203.0.113.7"
+
+	// Drive maxFails wrong PINs from the same IP. Each attempt should
+	// surface ErrInvalidPassword (the wire-level "wrong credential"
+	// sentinel — same code as a wrong password to avoid enumeration).
+	for i := 0; i < maxFails; i++ {
+		_, err := svc.SwitchProfile(
+			context.Background(),
+			parent.ID,
+			child.ID,
+			"0000",
+			"Chrome",
+			"dev-1",
+			ip,
+		)
+		if !errors.Is(err, domain.ErrInvalidPassword) {
+			t.Fatalf("attempt %d: expected ErrInvalidPassword, got %v", i, err)
+		}
+	}
+
+	// Now even the correct PIN must be rejected — the profile is
+	// locked. The error code flips to ErrForbidden so callers can
+	// distinguish "your PIN is wrong" from "you've been throttled."
+	_, err := svc.SwitchProfile(
+		context.Background(),
+		parent.ID,
+		child.ID,
+		"1234",
+		"Chrome",
+		"dev-1",
+		ip,
+	)
+	if !errors.Is(err, domain.ErrForbidden) {
+		t.Errorf("expected ErrForbidden after %d wrong PINs, got %v", maxFails, err)
+	}
+}
+
+// TestService_SwitchProfile_PinLockoutPerProfile asserts the lock is
+// scoped to the target profile, not the whole family. A different
+// PIN-protected sibling under the same parent must remain reachable
+// even after the first sibling is locked out.
+func TestService_SwitchProfile_PinLockoutPerProfile(t *testing.T) {
+	const maxFails = 3
+	svc, _, _ := newTestAuthServiceWithRL(t, maxFails)
+	parent := registerTestUser(t, svc)
+	locked := registerProfileWithPIN(t, svc, parent, "kid-a", "1111")
+	free := registerProfileWithPIN(t, svc, parent, "kid-b", "2222")
+
+	// Hammer the first sibling from a clean IP; we exercise the
+	// per-profile counter rather than the per-IP one by spreading
+	// each attempt across a fresh IP.
+	for i := 0; i < maxFails; i++ {
+		_, err := svc.SwitchProfile(
+			context.Background(),
+			parent.ID,
+			locked.ID,
+			"0000",
+			"Chrome",
+			"dev-1",
+			"10.0.0."+string(rune('a'+i)),
+		)
+		if !errors.Is(err, domain.ErrInvalidPassword) {
+			t.Fatalf("attempt %d: expected ErrInvalidPassword, got %v", i, err)
+		}
+	}
+
+	// Sibling A is now locked even with a correct PIN.
+	if _, err := svc.SwitchProfile(
+		context.Background(),
+		parent.ID,
+		locked.ID,
+		"1111",
+		"Chrome",
+		"dev-1",
+		"198.51.100.1",
+	); !errors.Is(err, domain.ErrForbidden) {
+		t.Errorf("expected sibling-a locked, got %v", err)
+	}
+
+	// Sibling B with its own PIN must still resolve from a fresh IP.
+	if _, err := svc.SwitchProfile(
+		context.Background(),
+		parent.ID,
+		free.ID,
+		"2222",
+		"Chrome",
+		"dev-2",
+		"198.51.100.2",
+	); err != nil {
+		t.Errorf("expected sibling-b to remain reachable, got %v", err)
+	}
+}
+
+// TestService_SwitchProfile_PinSuccessClearsCounter asserts that a
+// correct PIN before the limit clears the failure counter, so users
+// who fat-finger their PIN once or twice don't see the lockout drift
+// closer over the day.
+func TestService_SwitchProfile_PinSuccessClearsCounter(t *testing.T) {
+	const maxFails = 3
+	svc, _, _ := newTestAuthServiceWithRL(t, maxFails)
+	parent := registerTestUser(t, svc)
+	child := registerProfileWithPIN(t, svc, parent, "kid", "1234")
+
+	const ip = "203.0.113.42"
+
+	// Two wrong PINs (one short of the lock).
+	for i := 0; i < maxFails-1; i++ {
+		if _, err := svc.SwitchProfile(
+			context.Background(),
+			parent.ID,
+			child.ID,
+			"0000",
+			"Chrome",
+			"dev-1",
+			ip,
+		); !errors.Is(err, domain.ErrInvalidPassword) {
+			t.Fatalf("warmup %d: %v", i, err)
+		}
+	}
+
+	// One success — clears both per-profile and per-IP counters.
+	if _, err := svc.SwitchProfile(
+		context.Background(),
+		parent.ID,
+		child.ID,
+		"1234",
+		"Chrome",
+		"dev-1",
+		ip,
+	); err != nil {
+		t.Fatalf("correct PIN should succeed before lockout: %v", err)
+	}
+
+	// We can now afford another full burst of `maxFails-1` wrong
+	// PINs without tripping the lock — proves the counter reset.
+	for i := 0; i < maxFails-1; i++ {
+		if _, err := svc.SwitchProfile(
+			context.Background(),
+			parent.ID,
+			child.ID,
+			"9999",
+			"Chrome",
+			"dev-1",
+			ip,
+		); !errors.Is(err, domain.ErrInvalidPassword) {
+			t.Errorf("after-success attempt %d should still be invalid-password (not locked), got %v", i, err)
+		}
+	}
+}
+
+// TestService_SwitchProfile_NoPin_NotRateLimited asserts the rate
+// limiter is dormant when the target profile has no PIN — switching
+// to an unlocked profile should never grow attempt records that could
+// tip a sibling into lockout.
+func TestService_SwitchProfile_NoPin_NotRateLimited(t *testing.T) {
+	const maxFails = 2
+	svc, _, _ := newTestAuthServiceWithRL(t, maxFails)
+	parent := registerTestUser(t, svc)
+	child, err := svc.Register(context.Background(), auth.RegisterRequest{
+		Username:     parent.Username + "/open",
+		DisplayName:  "open",
+		Password:     "irrelevant-but-required",
+		Role:         "user",
+		ParentUserID: parent.ID,
+	})
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	// More iterations than maxFails — none should accumulate a
+	// failure record because the PIN branch is skipped entirely.
+	for i := 0; i < maxFails*3; i++ {
+		if _, err := svc.SwitchProfile(
+			context.Background(),
+			parent.ID,
+			child.ID,
+			"",
+			"Chrome",
+			"dev-1",
+			"10.0.0.1",
+		); err != nil {
+			t.Fatalf("switch %d: expected success, got %v", i, err)
+		}
+	}
+}
