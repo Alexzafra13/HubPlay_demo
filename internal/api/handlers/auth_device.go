@@ -139,6 +139,9 @@ func (h *DeviceAuthHandler) writePollError(w http.ResponseWriter, r *http.Reques
 	case errors.Is(err, domain.ErrNotFound):
 		respondError(w, r, http.StatusBadRequest, "expired_token",
 			"unknown device_code")
+	case errors.Is(err, domain.ErrAccessExpired):
+		respondError(w, r, http.StatusBadRequest, "access_denied",
+			"the approving user's temporary access window has expired")
 	case errors.Is(err, domain.ErrAccountDisabled):
 		respondError(w, r, http.StatusBadRequest, "access_denied",
 			"the approving user account is disabled")
@@ -185,6 +188,9 @@ func (h *DeviceAuthHandler) Approve(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, domain.ErrAlreadyExists):
 			respondError(w, r, http.StatusConflict, "USER_CODE_ALREADY_APPROVED",
 				"this code was already approved by a different user")
+		case errors.Is(err, domain.ErrAccessExpired):
+			respondError(w, r, http.StatusForbidden, "ACCESS_EXPIRED",
+				"your temporary access window has expired — contact the admin to extend it")
 		case errors.Is(err, domain.ErrAccountDisabled):
 			respondError(w, r, http.StatusForbidden, "ACCOUNT_DISABLED",
 				"your account is disabled")

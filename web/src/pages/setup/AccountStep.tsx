@@ -13,6 +13,7 @@ interface AdminData {
   username: string;
   password: string;
   displayName?: string;
+  generatedPassword?: string;
 }
 
 interface AccountStepProps {
@@ -35,6 +36,14 @@ export default function AccountStep({ onNext, initialData }: AccountStepProps) {
   const [displayName, setDisplayName] = useState(
     initialData?.displayName ?? "",
   );
+  // autoGenerate hides the password fields and lets the server
+  // mint a 12-char temp password; the CompleteStep surfaces it
+  // once for the operator to copy into a password manager. Same
+  // path the /admin/users "create user" form uses, but opt-in
+  // here (default OFF) — the bootstrap admin running setup is
+  // most likely typing their own password and would be surprised
+  // to be handed a random one.
+  const [autoGenerate, setAutoGenerate] = useState(false);
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [serverError, setServerError] = useState<string | null>(null);
@@ -46,12 +55,13 @@ export default function AccountStep({ onNext, initialData }: AccountStepProps) {
       newErrors.username = t("setup.account.usernameMinLength");
     }
 
-    if (password.length < 8) {
-      newErrors.password = t("setup.account.passwordMinLength");
-    }
-
-    if (password !== confirmPassword) {
-      newErrors.confirmPassword = t("setup.account.passwordMismatch");
+    if (!autoGenerate) {
+      if (password.length < 8) {
+        newErrors.password = t("setup.account.passwordMinLength");
+      }
+      if (password !== confirmPassword) {
+        newErrors.confirmPassword = t("setup.account.passwordMismatch");
+      }
     }
 
     setErrors(newErrors);
@@ -64,10 +74,15 @@ export default function AccountStep({ onNext, initialData }: AccountStepProps) {
 
     if (!validate()) return;
 
+    // Empty password ⇒ server auto-generates and returns it once
+    // under generated_password. We pass an empty string explicitly
+    // so the wire stays predictable.
+    const passwordToSend = autoGenerate ? "" : password;
+
     createAdmin.mutate(
       {
         username: username.trim(),
-        password,
+        password: passwordToSend,
         display_name: displayName.trim() || undefined,
       },
       {
@@ -75,13 +90,21 @@ export default function AccountStep({ onNext, initialData }: AccountStepProps) {
           setAuth(data.user);
           onNext({
             username: username.trim(),
-            password,
+            password: data.generated_password ?? password,
             displayName: displayName.trim() || undefined,
+            generatedPassword: data.generated_password,
           });
         },
         async onError(err) {
-          // Admin already exists — try logging in instead
+          // Admin already exists — try logging in with what they
+          // typed. The auto-generate path obviously can't recover
+          // here because we don't know what the existing password
+          // is, so we surface the "completed" message instead.
           if (err instanceof ApiError && err.code === "SETUP_COMPLETED") {
+            if (autoGenerate) {
+              setServerError(t("setup.account.adminExists"));
+              return;
+            }
             try {
               const loginData = await api.login(username.trim(), password);
               setAuth(loginData.user);
@@ -154,27 +177,53 @@ export default function AccountStep({ onNext, initialData }: AccountStepProps) {
           hint={t("setup.account.displayNameHint")}
         />
 
-        <Input
-          label={t("setup.account.password")}
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder={t("setup.account.passwordPlaceholder")}
-          autoComplete="new-password"
-          error={errors.password}
-          required
-        />
+        <label className="flex cursor-pointer select-none items-start gap-2 rounded-[--radius-md] border border-border bg-bg-elevated/40 px-3 py-2.5 text-sm text-text-secondary">
+          <input
+            type="checkbox"
+            checked={autoGenerate}
+            onChange={(e) => setAutoGenerate(e.target.checked)}
+            className="mt-0.5"
+          />
+          <span>
+            <span className="block font-medium text-text-primary">
+              {t("setup.account.autoGenerate", {
+                defaultValue: "Generar contraseña automáticamente",
+              })}
+            </span>
+            <span className="block text-xs text-text-muted">
+              {t("setup.account.autoGenerateHint", {
+                defaultValue:
+                  "Te enseñaremos la contraseña generada al final del asistente para que la copies a tu gestor.",
+              })}
+            </span>
+          </span>
+        </label>
 
-        <Input
-          label={t("setup.account.confirmPassword")}
-          type="password"
-          value={confirmPassword}
-          onChange={(e) => setConfirmPassword(e.target.value)}
-          placeholder={t("setup.account.confirmPlaceholder")}
-          autoComplete="new-password"
-          error={errors.confirmPassword}
-          required
-        />
+        {!autoGenerate && (
+          <>
+            <Input
+              label={t("setup.account.password")}
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder={t("setup.account.passwordPlaceholder")}
+              autoComplete="new-password"
+              error={errors.password}
+              required
+            />
+
+            <Input
+              label={t("setup.account.confirmPassword")}
+              type="password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              placeholder={t("setup.account.confirmPlaceholder")}
+              autoComplete="new-password"
+              error={errors.confirmPassword}
+              required
+            />
+          </>
+        )}
 
         {serverError && (
           <p className="rounded-[--radius-sm] bg-error/10 px-3 py-2 text-sm text-error">

@@ -171,6 +171,12 @@ func (s *DeviceCodeService) ApproveDevice(ctx context.Context, userCode, userID 
 	if err != nil {
 		return err
 	}
+	// Same lazy access-window check as Login / Refresh / Validate:
+	// a temp-access user whose deadline elapsed shouldn't be able
+	// to approve a device pairing either.
+	if user.AccessExpiresAt != nil && !user.AccessExpiresAt.After(s.auth.clock.Now()) {
+		return domain.ErrAccessExpired
+	}
 	if !user.IsActive {
 		return domain.ErrAccountDisabled
 	}
@@ -232,6 +238,13 @@ func (s *DeviceCodeService) PollDevice(ctx context.Context, deviceCode, ip strin
 	user, err := s.users.GetByID(ctx, row.UserID.String)
 	if err != nil {
 		return nil, err
+	}
+	// Lazy access-window check at poll time. A device approved
+	// before the deadline that polls AFTER it shouldn't get a
+	// fresh token; mirroring the Login / Refresh / Validate /
+	// Approve checks keeps the matrix consistent.
+	if user.AccessExpiresAt != nil && !user.AccessExpiresAt.After(s.auth.clock.Now()) {
+		return nil, domain.ErrAccessExpired
 	}
 	if !user.IsActive {
 		return nil, domain.ErrAccountDisabled

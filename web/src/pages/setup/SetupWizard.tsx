@@ -13,6 +13,12 @@ interface AdminData {
   username: string;
   password: string;
   displayName?: string;
+  /** Set when the operator chose the auto-generate path. The
+   *  CompleteStep surfaces this once with a copy button so they
+   *  can save it to a password manager — same pattern the admin
+   *  /users flow uses for created accounts. We never ferry it
+   *  outside the wizard's React state. */
+  generatedPassword?: string;
 }
 
 interface LibraryEntry {
