@@ -105,6 +105,16 @@ type EpgProgram struct {
 	EndTime     time.Time      `json:"end_time"`
 }
 
+type EpisodeSegment struct {
+	ItemID     string  `json:"item_id"`
+	Kind       string  `json:"kind"`
+	Source     string  `json:"source"`
+	StartTicks int64   `json:"start_ticks"`
+	EndTicks   int64   `json:"end_ticks"`
+	Confidence float64 `json:"confidence"`
+	DetectedAt int64   `json:"detected_at"`
+}
+
 type ExternalID struct {
 	ItemID     string `json:"item_id"`
 	Provider   string `json:"provider"`

@@ -46,8 +46,9 @@ type Dependencies struct {
 	Images         *db.ImageRepository
 	Metadata       *db.MetadataRepository
 	UserData       *db.UserDataRepository
-	Chapters       *db.ChapterRepository
-	People         *db.PeopleRepository
+	Chapters        *db.ChapterRepository
+	EpisodeSegments *db.EpisodeSegmentRepository
+	People          *db.PeopleRepository
 	Studios        *db.StudioRepository
 	Collections    *db.CollectionRepository
 	UserPreferences *db.UserPreferenceRepository
@@ -615,7 +616,7 @@ func NewRouter(deps Dependencies) http.Handler {
 				// layout clustered (one tree the operator can backup,
 				// rsync, or `du` to size the cache).
 				trickplayDir := filepath.Join(filepath.Dir(deps.Config.Database.Path), "images", "trickplay")
-				itemHandler := handlers.NewItemHandler(deps.Libraries, deps.Images, deps.Metadata, deps.UserData, deps.Users, deps.Chapters, deps.ExternalIDs, deps.People, deps.Collections, deps.Providers, trickplayDir, deps.Logger)
+				itemHandler := handlers.NewItemHandler(deps.Libraries, deps.Images, deps.Metadata, deps.UserData, deps.Users, deps.Chapters, deps.EpisodeSegments, deps.ExternalIDs, deps.People, deps.Collections, deps.Providers, trickplayDir, deps.Logger)
 
 				// Libraries
 				r.Get("/libraries", libHandler.List)

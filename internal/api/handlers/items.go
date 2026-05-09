@@ -32,6 +32,10 @@ type ItemHandler struct {
 	// browse / latest paths use).
 	users       UserService
 	chapters    ChapterRepository
+	// segments holds intro / outro / recap markers. Optional — nil
+	// disables the segments field on item detail; clients treat
+	// absence and an empty array identically.
+	segments    EpisodeSegmentRepository
 	externalIDs ExternalIDsRepository
 	people      PeopleRepoForItems
 	// collections powers the "Part of: X" affordance on a movie's
@@ -54,11 +58,11 @@ type ItemHandler struct {
 	logger         *slog.Logger
 }
 
-func NewItemHandler(lib LibraryService, images ImageRepository, metadata MetadataRepository, userData UserDataRepository, users UserService, chapters ChapterRepository, externalIDs ExternalIDsRepository, people PeopleRepoForItems, collections CollectionRepoForItems, providers ProviderManager, trickplayDir string, logger *slog.Logger) *ItemHandler {
+func NewItemHandler(lib LibraryService, images ImageRepository, metadata MetadataRepository, userData UserDataRepository, users UserService, chapters ChapterRepository, segments EpisodeSegmentRepository, externalIDs ExternalIDsRepository, people PeopleRepoForItems, collections CollectionRepoForItems, providers ProviderManager, trickplayDir string, logger *slog.Logger) *ItemHandler {
 	return &ItemHandler{
 		lib: lib, images: images, metadata: metadata, userData: userData,
 		users:    users,
-		chapters: chapters, externalIDs: externalIDs, people: people,
+		chapters: chapters, segments: segments, externalIDs: externalIDs, people: people,
 		collections: collections,
 		providers:   providers,
 		trickplayDir: trickplayDir, logger: logger,
@@ -153,6 +157,7 @@ func (h *ItemHandler) buildItemDetail(ctx context.Context, id, userID string) (m
 	h.attachImages(ctx, resp, id)
 	h.attachMetadata(ctx, resp, id)
 	h.attachChapters(ctx, resp, id)
+	h.attachSegments(ctx, resp, id)
 	h.attachPeople(ctx, resp, id)
 	h.attachExternalIDs(ctx, resp, id)
 
@@ -311,6 +316,57 @@ func (h *ItemHandler) attachChapters(ctx context.Context, resp map[string]any, i
 		out[i] = chapterResponse(c)
 	}
 	resp["chapters"] = out
+}
+
+// attachSegments writes intro / outro / recap markers when the
+// segment detector has run for this item. The repo can return
+// multiple rows of the same kind (different sources — chapter and
+// fingerprint may both fire); we collapse to one row per kind by
+// picking the highest-confidence source. Stable ordering: recap →
+// intro → outro, so the player can iterate in playback order.
+//
+// Same nil/empty contract as attachChapters: no field at all when
+// nothing applies. Returns ticks-as-seconds (float) for the
+// frontend, which speaks `video.currentTime` natively.
+func (h *ItemHandler) attachSegments(ctx context.Context, resp map[string]any, id string) {
+	if h.segments == nil {
+		return
+	}
+	rows, err := h.segments.ListByItem(ctx, id)
+	if err != nil {
+		h.logger.Warn("list segments", "item_id", id, "error", err)
+		return
+	}
+	if len(rows) == 0 {
+		return
+	}
+	bestByKind := make(map[db.EpisodeSegmentKind]db.EpisodeSegment, 3)
+	for _, r := range rows {
+		prev, seen := bestByKind[r.Kind]
+		if !seen || r.Confidence > prev.Confidence {
+			bestByKind[r.Kind] = r
+		}
+	}
+	order := []db.EpisodeSegmentKind{
+		db.EpisodeSegmentRecap,
+		db.EpisodeSegmentIntro,
+		db.EpisodeSegmentOutro,
+	}
+	out := make([]map[string]any, 0, len(bestByKind))
+	for _, kind := range order {
+		seg, ok := bestByKind[kind]
+		if !ok {
+			continue
+		}
+		out = append(out, map[string]any{
+			"kind":          string(seg.Kind),
+			"source":        string(seg.Source),
+			"start_seconds": float64(seg.StartTicks) / 10_000_000,
+			"end_seconds":   float64(seg.EndTicks) / 10_000_000,
+			"confidence":    seg.Confidence,
+		})
+	}
+	resp["segments"] = out
 }
 
 // attachPeople writes cast / crew when present. image_url points at
