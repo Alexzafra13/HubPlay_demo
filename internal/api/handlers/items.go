@@ -223,6 +223,14 @@ func (h *ItemHandler) attachImages(ctx context.Context, resp map[string]any, id 
 			}
 		case "logo":
 			resp["logo_url"] = img.Path
+		case "thumb":
+			// "Miniatura" in the image-manager UI. 16:9 still that
+			// providers (TMDb / Fanart) supply alongside the
+			// poster/backdrop pair — purpose-built for landscape
+			// listing cards. The Continue Watching rail uses it for
+			// movies so the recognisable cartel-thumb shows up at
+			// the same shape as episode screencaps.
+			resp["thumb_url"] = img.Path
 		}
 	}
 	if backdropColors != nil {

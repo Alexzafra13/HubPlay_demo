@@ -291,6 +291,12 @@ func (h *ProgressHandler) ContinueWatching(w http.ResponseWriter, r *http.Reques
 			"poster_url":     nil,
 			"backdrop_url":   nil,
 			"logo_url":       nil,
+			// Movie-only: 16:9 marketing still ("miniatura") that
+			// the Continue Watching rail prefers over backdrop for
+			// landscape cards. Episodes get nil because their
+			// backdrop_url is already the per-episode screencap,
+			// which is the equivalent shape.
+			"thumb_url": nil,
 			"user_data": map[string]any{
 				"progress": map[string]any{
 					"position_ticks":        item.PositionTicks,
@@ -329,6 +335,9 @@ func (h *ProgressHandler) ContinueWatching(w http.ResponseWriter, r *http.Reques
 			}
 			if u, ok := urls["logo"]; ok {
 				entry["logo_url"] = u.Path
+			}
+			if u, ok := urls["thumb"]; ok {
+				entry["thumb_url"] = u.Path
 			}
 		}
 		// Episode-only enrichment: surface the season's primary +

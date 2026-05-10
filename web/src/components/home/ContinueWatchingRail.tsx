@@ -6,7 +6,6 @@
 import { useTranslation } from "react-i18next";
 import { useContinueWatching } from "@/api/hooks";
 import { Skeleton } from "@/components/common";
-import { PosterCard } from "@/components/media";
 import { HomeRail } from "./HomeRail";
 import { LandscapeCard } from "./LandscapeCard";
 
@@ -40,28 +39,18 @@ export function ContinueWatchingRail() {
 
   return (
     <HomeRail title={t("home.continueWatching")}>
-      {items.map((item) =>
-        // Movies use their poster (vertical 2:3) so the user
-        // recognises the cartel they're used to — backdrops are
-        // marketing-wide images that often share visual language
-        // with other titles in the same franchise and are harder
-        // to scan at a glance. Episodes stay on the landscape
-        // card with their per-episode screencap (the still you'd
-        // expect to see for a "what was this episode about" hint).
-        // Both cards launch playback on click — the rail is
-        // "resume" by definition; dropping the user on the detail
-        // page first is friction nobody wants here.
-        item.type === "movie" ? (
-          <div
-            key={item.id}
-            className="w-[180px] md:w-[200px] lg:w-[220px] shrink-0"
-          >
-            <PosterCard item={item} href={`/movies/${item.id}?play=1`} />
-          </div>
-        ) : (
-          <LandscapeCard key={item.id} item={item} autoPlay />
-        ),
-      )}
+      {items.map((item) => (
+        // One uniform 16:9 shape for the whole rail — episodes use
+        // their per-episode screencap, movies use their thumb_url
+        // ("miniatura"), the landscape still TMDb / Fanart ship
+        // alongside the cartel for exactly this kind of listing.
+        // LandscapeCard handles the per-type image selection
+        // internally so the rail itself stays trivial. Auto-play
+        // on click because every card here is mid-watch by
+        // definition — dropping the user on the detail page first
+        // is friction nobody wants on a "resume" surface.
+        <LandscapeCard key={item.id} item={item} autoPlay />
+      ))}
     </HomeRail>
   );
 }
