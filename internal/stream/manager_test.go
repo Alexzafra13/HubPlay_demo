@@ -145,6 +145,46 @@ func TestManager_Shutdown_StopsAll(t *testing.T) {
 	}
 }
 
+func TestManager_StopSessionsByItem_StopsEveryVariant(t *testing.T) {
+	m := newTestManager(t)
+	defer m.Shutdown()
+
+	// Three sessions for the same (user, item) across two qualities
+	// and two audio configs. The legacy per-key DELETE only stopped
+	// one — the rest accreted as zombies and ate the per-user cap
+	// on the next playback. StopSessionsByItem must wipe all three.
+	seed := func(key, itemID string) {
+		m.mu.Lock()
+		m.sessions[key] = &ManagedSession{
+			Session: &Session{
+				ID:        key,
+				ItemID:    itemID,
+				OutputDir: t.TempDir(),
+				done:      closedChan(),
+			},
+			UserID:       "user1",
+			LastAccessed: time.Now(),
+		}
+		m.mu.Unlock()
+	}
+	seed(SessionKey("user1", "item1", "1080p", -1), "item1")
+	seed(SessionKey("user1", "item1", "1080p", 1), "item1")
+	seed(SessionKey("user1", "item1", "720p", -1), "item1")
+	// Distractor for a different item — must be left alone.
+	seed(SessionKey("user1", "item2", "720p", -1), "item2")
+
+	stopped := m.StopSessionsByItem("user1", "item1")
+	if stopped != 3 {
+		t.Errorf("StopSessionsByItem returned %d, want 3", stopped)
+	}
+	if got := m.ActiveSessions(); got != 1 {
+		t.Errorf("active = %d, want 1 (the other-item distractor)", got)
+	}
+	if _, ok := m.sessions[SessionKey("user1", "item2", "720p", -1)]; !ok {
+		t.Errorf("foreign session for item2 should still be alive")
+	}
+}
+
 func TestManager_StopSession_RemovesSession(t *testing.T) {
 	m := newTestManager(t)
 	defer m.Shutdown()

@@ -523,6 +523,10 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
       setActiveExternalSub(pick);
       setExternalSubsModalOpen(false);
       setSubtitleTrack(-1); // disable any HLS sub
+      // Clear any federated track too — only one set of cues at a
+      // time. Without this, both <track> elements stayed mounted and
+      // the two rAF effects raced for which one ended in `showing`.
+      setActiveFederatedSubIndex(null);
     },
     [setSubtitleTrack],
   );

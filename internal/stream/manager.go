@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -216,6 +217,15 @@ func (m *Manager) publish(e event.Event) {
 // for callers that don't care about audio stay intact.
 func sessionKey(userID, itemID, profile string, audioStreamIndex int) string {
 	return userID + ":" + itemID + ":" + profile + ":" + strconv.Itoa(audioStreamIndex)
+}
+
+// SessionKey is the exported canonical key builder. Handlers must use
+// this rather than concatenating fields by hand — the format includes
+// the audio stream index suffix that PR #229 introduced, and a
+// hand-rolled "user:item:profile" key silently misses every session
+// the manager actually registered (404 on every segment fetch).
+func SessionKey(userID, itemID, profile string, audioStreamIndex int) string {
+	return sessionKey(userID, itemID, profile, audioStreamIndex)
 }
 
 // StartSession creates or returns an existing session for the given item.
@@ -561,6 +571,34 @@ func (m *Manager) TouchSession(key string) {
 	if ms, ok := m.sessions[key]; ok {
 		ms.LastAccessed = time.Now()
 	}
+}
+
+// StopSessionsByItem stops every session belonging to (userID, itemID),
+// regardless of profile or audio stream index. Used by the player
+// teardown DELETE so the client doesn't have to enumerate which
+// (quality, audio) tuples ended up cached — a single request frees
+// every active variant. Returns the count of sessions stopped.
+//
+// Without this, the per-user cap (MaxTranscodeSessionsPerUser) kept
+// gathering zombie sessions across audio-language switches and
+// quality flips, eventually returning 503 TranscodeBusy on every
+// new playback. Also: hls.js routinely fans out to multiple variants
+// during ABR probing, so a single playback can leave 4 sessions
+// behind if only one (the active variant) is explicitly stopped.
+func (m *Manager) StopSessionsByItem(userID, itemID string) int {
+	m.mu.Lock()
+	prefix := userID + ":" + itemID + ":"
+	var keys []string
+	for k := range m.sessions {
+		if strings.HasPrefix(k, prefix) {
+			keys = append(keys, k)
+		}
+	}
+	m.mu.Unlock()
+	for _, k := range keys {
+		m.StopSession(k)
+	}
+	return len(keys)
 }
 
 // StopSession stops a specific session.
