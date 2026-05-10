@@ -250,9 +250,16 @@ func NewRouter(deps Dependencies) http.Handler {
 					// the helper below takes the StreamManagerService interface
 					// directly without the var/assign dance the health handler
 					// uses (where the value can stay nil).
-					fedStream := handlers.NewFederationStreamHandler(deps.Federation, deps.StreamManager, deps.Items, deps.Logger)
+					fedStream := handlers.NewFederationStreamHandler(deps.Federation, deps.StreamManager, deps.Items, deps.MediaStreams, deps.Logger)
 					r.Post("/peer/stream/{itemId}/session", fedStream.StartSession)
 					r.Get("/peer/stream/session/{sessionId}/master.m3u8", fedStream.MasterPlaylist)
+					// Subtitles BEFORE the {quality}/* wildcard routes so
+					// the literal `subtitles` segment wins the match (chi
+					// prefers literal over param at the same depth, but
+					// keeping the registration order explicit avoids
+					// surprises if the routing logic changes).
+					r.Get("/peer/stream/session/{sessionId}/subtitles", fedStream.Subtitles)
+					r.Get("/peer/stream/session/{sessionId}/subtitles/{trackIndex}", fedStream.SubtitleTrack)
 					r.Get("/peer/stream/session/{sessionId}/{quality}/index.m3u8", fedStream.QualityPlaylist)
 					r.Get("/peer/stream/session/{sessionId}/{quality}/{segment}", fedStream.Segment)
 				}
@@ -408,6 +415,8 @@ func NewRouter(deps Dependencies) http.Handler {
 						// the bytes from the peer with our peer JWT.
 						r.Post("/{peerID}/stream/{itemId}/session", mePeers.StartPeerStreamSession)
 						r.Get("/{peerID}/stream/session/{sessionId}/master.m3u8", mePeers.ProxyPeerStreamMaster)
+						r.Get("/{peerID}/stream/session/{sessionId}/subtitles", mePeers.ProxyPeerStreamSubtitles)
+						r.Get("/{peerID}/stream/session/{sessionId}/subtitles/{trackIndex}", mePeers.ProxyPeerStreamSubtitleTrack)
 						r.Get("/{peerID}/stream/session/{sessionId}/{quality}/index.m3u8", mePeers.ProxyPeerStreamQuality)
 						r.Get("/{peerID}/stream/session/{sessionId}/{quality}/{segment}", mePeers.ProxyPeerStreamSegment)
 						// Cross-peer playback state for a single item.

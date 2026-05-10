@@ -46,7 +46,7 @@ export function MiniPlayer() {
         type="button"
         onClick={expand}
         className="group relative aspect-video w-full overflow-hidden bg-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-        aria-label={t("liveTV.miniExpand", {
+        aria-label={t("liveTV.miniExpandAria", {
           defaultValue: "Expandir reproductor",
         })}
       >

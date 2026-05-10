@@ -26,6 +26,15 @@ interface VideoPlayerProps {
    * playback omits this prop.
    */
   peerId?: string;
+  /**
+   * Federation stream session id returned by StartPeerStreamSession.
+   * Set together with `peerId` for federated playback. Used to fetch
+   * the federated subtitle list (master.m3u8 doesn't carry embedded
+   * sub tracks across the federation boundary, so we surface them
+   * via a session-scoped JSON endpoint and ride a `<track>` element
+   * for the picked one — same plumbing as external subs).
+   */
+  peerStreamSessionId?: string;
   sessionToken: string;
   masterPlaylistUrl: string | null;
   directUrl: string | null;
@@ -93,6 +102,7 @@ interface VideoPlayerProps {
 const VideoPlayer: FC<VideoPlayerProps> = ({
   itemId,
   peerId,
+  peerStreamSessionId,
   sessionToken,
   masterPlaylistUrl,
   directUrl,
@@ -155,6 +165,36 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
   // entirely.
   const [externalSubsModalOpen, setExternalSubsModalOpen] = useState(false);
   const [activeExternalSub, setActiveExternalSub] = useState<ExternalSubtitleResult | null>(null);
+
+  // Federated subtitles. Populated once at mount when both peerId +
+  // peerStreamSessionId are set; the master.m3u8 we receive from the
+  // peer is variant-only (no EXT-X-MEDIA SUBTITLES), so the player
+  // surfaces these through the same `<track>` plumbing the external
+  // subs use. IDs above FEDERATED_TRACK_ID_BASE distinguish them
+  // from HLS-native track IDs in the unified `subtitleTracks` array
+  // passed to the controls dropdown.
+  const [federatedSubs, setFederatedSubs] = useState<
+    Array<{ index: number; language: string; title: string; default: boolean; forced: boolean }>
+  >([]);
+  const [activeFederatedSubIndex, setActiveFederatedSubIndex] = useState<number | null>(null);
+  useEffect(() => {
+    if (!peerId || !peerStreamSessionId) return;
+    let cancelled = false;
+    api
+      .listFederatedSubtitles(peerId, peerStreamSessionId)
+      .then((tracks) => {
+        if (!cancelled) setFederatedSubs(tracks);
+      })
+      .catch(() => {
+        // Silent: a failure to fetch the federated sub list shouldn't
+        // break playback — the dropdown will just show the HLS tracks
+        // (typically empty for federated streams) and the user keeps
+        // the option of external/OpenSubtitles.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [peerId, peerStreamSessionId]);
 
   // ─── Hooks ─────────────────────────────────────────────────────────────────
 
@@ -513,6 +553,64 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
     return () => window.cancelAnimationFrame(rafID);
   }, [activeExternalSub]);
 
+  // Force the federated `<track>` into `showing` once mounted —
+  // identical reasoning to the external-subs effect above. Keying on
+  // the active index re-runs the effect when the user picks a
+  // different federated track.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || activeFederatedSubIndex === null) return;
+    const rafID = window.requestAnimationFrame(() => {
+      const tracks = Array.from(video.textTracks);
+      const target = tracks.find((t) => t.label.startsWith("Federated:"));
+      if (target) target.mode = "showing";
+      for (const t of tracks) {
+        if (t !== target && t.mode === "showing") {
+          t.mode = "disabled";
+        }
+      }
+    });
+    return () => window.cancelAnimationFrame(rafID);
+  }, [activeFederatedSubIndex]);
+
+  // Merge federated tracks into the dropdown's track list. IDs from
+  // FEDERATED_TRACK_ID_BASE up are reserved for federated subs so the
+  // routing logic in handleSubtitleTrackChange can tell them apart
+  // from hls.js-native track ids (which are 0..N-1).
+  const FEDERATED_TRACK_ID_BASE = 10000;
+  const showFederatedTracks = !!peerId && !!peerStreamSessionId && federatedSubs.length > 0;
+  const mergedSubtitleTracks = showFederatedTracks
+    ? [
+        ...subtitleTracks,
+        ...federatedSubs.map((s, i) => ({
+          id: FEDERATED_TRACK_ID_BASE + i,
+          name: s.title || s.language || `Track ${s.index}`,
+          lang: s.language || "",
+        })),
+      ]
+    : subtitleTracks;
+  const effectiveCurrentSubtitleTrack =
+    activeFederatedSubIndex !== null
+      ? FEDERATED_TRACK_ID_BASE + activeFederatedSubIndex
+      : currentSubtitleTrack;
+  const handleSubtitleTrackChange = useCallback(
+    (id: number) => {
+      if (id >= FEDERATED_TRACK_ID_BASE) {
+        // Pick a federated track. Suppress HLS subs + external subs
+        // so only one set of cues renders at a time.
+        setActiveFederatedSubIndex(id - FEDERATED_TRACK_ID_BASE);
+        setActiveExternalSub(null);
+        setSubtitleTrack(-1);
+        return;
+      }
+      // HLS path (or "off" with id=-1). Clear federated sub state so
+      // its `<track>` element unmounts.
+      setActiveFederatedSubIndex(null);
+      setSubtitleTrack(id);
+    },
+    [setSubtitleTrack],
+  );
+
   // ─── Fullscreen change listener ──────────────────────────────────────────
 
   useEffect(() => {
@@ -567,6 +665,16 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
             label={`External:${activeExternalSub.language}`}
             src={api.externalSubtitleURL(itemId, activeExternalSub.source, activeExternalSub.file_id)}
           />
+        )}
+        {peerId && peerStreamSessionId && activeFederatedSubIndex !== null
+          && federatedSubs[activeFederatedSubIndex] && (
+            <track
+              key={`fed:${federatedSubs[activeFederatedSubIndex].index}`}
+              kind="subtitles"
+              srcLang={federatedSubs[activeFederatedSubIndex].language}
+              label={`Federated:${federatedSubs[activeFederatedSubIndex].language || activeFederatedSubIndex}`}
+              src={api.federatedSubtitleURL(peerId, peerStreamSessionId, federatedSubs[activeFederatedSubIndex].index)}
+            />
         )}
       </video>
 
@@ -681,11 +789,11 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
           isFullscreen={isFullscreen}
           audioTracks={audioTracks}
           audioStreams={audioStreams}
-          subtitleTracks={subtitleTracks}
+          subtitleTracks={mergedSubtitleTracks}
           qualityLevels={qualityLevels}
           chapters={chapters}
           currentAudioTrack={currentAudioTrack}
-          currentSubtitleTrack={currentSubtitleTrack}
+          currentSubtitleTrack={effectiveCurrentSubtitleTrack}
           currentQuality={currentQuality}
           onPlayPause={togglePlayPause}
           onSeek={handleSeek}
@@ -693,7 +801,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
           onToggleMute={handleToggleMute}
           onToggleFullscreen={handleToggleFullscreen}
           onAudioTrackChange={setAudioTrack}
-          onSubtitleTrackChange={setSubtitleTrack}
+          onSubtitleTrackChange={handleSubtitleTrackChange}
           onQualityChange={setQuality}
           onSearchExternalSubs={() => setExternalSubsModalOpen(true)}
           trickplay={trickplay.available && trickplay.manifest ? {

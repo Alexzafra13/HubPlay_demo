@@ -414,7 +414,7 @@ export default function UsersAdmin() {
         danger: true,
         disabled: isSelf || !!user.is_primary,
         hint: user.is_primary
-          ? t("admin.users.primaryHint", {
+          ? t("admin.users.primaryDeleteHint", {
               defaultValue: "La cuenta principal no se puede eliminar.",
             })
           : undefined,
@@ -1432,7 +1432,7 @@ export default function UsersAdmin() {
           setProfileParent(null);
           setProfileName("");
         }}
-        title={t('admin.users.addProfile', { defaultValue: 'Añadir perfil' })}
+        title={t('admin.users.addProfileTitle', { defaultValue: 'Añadir perfil' })}
         size="sm"
       >
         {profileParent && (

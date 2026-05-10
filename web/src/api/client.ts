@@ -934,6 +934,36 @@ export class ApiClient {
     return `${this.baseUrl}/stream/${itemId}/subtitles/external/${encodeURIComponent(fileID)}?source=${encodeURIComponent(source)}`;
   }
 
+  // ─── Federated subtitles (HubPlay peer) ───────────────────────────────
+  //
+  // When the user is playing a federated item, embedded subtitles live
+  // on the remote server's filesystem. We expose them via a session-
+  // keyed proxy: list once at mount, then a `<track>` element fetches
+  // each picked .vtt directly. Same auth shape as the external subs
+  // path — same-origin cookies do the work, no JS fetch required.
+  async listFederatedSubtitles(
+    peerId: string,
+    sessionId: string,
+  ): Promise<Array<{
+    index: number;
+    codec: string;
+    language: string;
+    title: string;
+    forced: boolean;
+    default: boolean;
+  }>> {
+    return this.request("GET", `/me/peers/${encodeURIComponent(peerId)}/stream/session/${encodeURIComponent(sessionId)}/subtitles`);
+  }
+
+  /**
+   * Builds the URL for a federated subtitle so a `<track>` element can
+   * fetch it directly. The proxy keeps the request same-origin so the
+   * peer's hostname stays invisible to the browser.
+   */
+  federatedSubtitleURL(peerId: string, sessionId: string, trackIndex: number): string {
+    return `${this.baseUrl}/me/peers/${encodeURIComponent(peerId)}/stream/session/${encodeURIComponent(sessionId)}/subtitles/${trackIndex}`;
+  }
+
   // ─── Channels / Live TV ───────────────────────────────────────────────
 
   async getChannels(libraryId?: string): Promise<Channel[]> {

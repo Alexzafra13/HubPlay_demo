@@ -1663,6 +1663,47 @@ paths:
           content:
             application/vnd.apple.mpegurl: { schema: { type: string } }
 
+  /me/peers/{peerID}/stream/session/{sessionId}/subtitles:
+    parameters:
+      - { name: peerID, in: path, required: true, schema: { type: string } }
+      - { name: sessionId, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [federation, stream]
+      summary: List embedded subtitle tracks of a federated session
+      description: |
+        Returns the same shape as `/stream/{itemId}/subtitles` for local
+        items. Federated master playlists are variant-only (no
+        EXT-X-MEDIA SUBTITLES across the federation boundary), so the
+        player fetches the track list out-of-band and rides a `<track>`
+        element pointing at `/me/peers/.../subtitles/{trackIndex}` for
+        the picked one.
+      responses:
+        "200":
+          description: Tracks
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/SubtitleTrack" }
+
+  /me/peers/{peerID}/stream/session/{sessionId}/subtitles/{trackIndex}:
+    parameters:
+      - { name: peerID, in: path, required: true, schema: { type: string } }
+      - { name: sessionId, in: path, required: true, schema: { type: string } }
+      - { name: trackIndex, in: path, required: true, schema: { type: integer } }
+    get:
+      tags: [federation, stream]
+      summary: Fetch one federated subtitle track as WebVTT
+      responses:
+        "200":
+          description: WebVTT
+          content:
+            text/vtt:
+              schema: { type: string }
+
   /me/peers/{peerID}/stream/session/{sessionId}/{quality}/index.m3u8:
     parameters:
       - { name: peerID, in: path, required: true, schema: { type: string } }

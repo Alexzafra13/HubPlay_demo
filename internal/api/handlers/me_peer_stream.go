@@ -135,6 +135,30 @@ func (h *MePeersHandler) ProxyPeerStreamSegment(w http.ResponseWriter, r *http.R
 	h.proxyPeerStreamPath(w, r, quality+"/"+segment)
 }
 
+// ProxyPeerStreamSubtitles proxies the federated subtitle list for a
+// remote session. Returns the same JSON shape as the local
+// /stream/{itemId}/subtitles endpoint so the player UI can reuse a
+// single code path for local + federated subtitle pickers.
+//
+// GET /api/v1/me/peers/{peerID}/stream/session/{sessionId}/subtitles
+func (h *MePeersHandler) ProxyPeerStreamSubtitles(w http.ResponseWriter, r *http.Request) {
+	h.proxyPeerStreamPath(w, r, "subtitles")
+}
+
+// ProxyPeerStreamSubtitleTrack proxies a single federated subtitle as
+// WebVTT. Same wire format as /stream/{itemId}/subtitles/{trackIndex}
+// so a `<track>` element can point at this URL directly.
+//
+// GET /api/v1/me/peers/{peerID}/stream/session/{sessionId}/subtitles/{trackIndex}
+func (h *MePeersHandler) ProxyPeerStreamSubtitleTrack(w http.ResponseWriter, r *http.Request) {
+	trackIndex := chi.URLParam(r, "trackIndex")
+	if trackIndex == "" {
+		respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "trackIndex required")
+		return
+	}
+	h.proxyPeerStreamPath(w, r, "subtitles/"+trackIndex)
+}
+
 // proxyPeerStreamPath is the shared HTTP-proxy core for master,
 // quality, and segment requests. Builds the matching peer URL,
 // issues the GET with our peer JWT, and copies status + selected

@@ -1,5 +1,36 @@
 # Estado del proyecto
 
+> 🎬 **Sesión 2026-05-10 (continuación post-megablock, rama `claude/review-and-continue-Xi3KF`)** — quick-wins block del backlog: cerrados los 4 conflictos i18n del megablock + subtítulos federados end-to-end. **2 commits limpios, todo verde, pusheado**.
+>
+> **Commits**:
+> - `921649f` *i18n(round-3): resolve 4 conflicting keys + backfill missing playback defaults*. Los 4 conflictos del megablock handoff (`liveTV.miniExpand`, `liveTV.live`, `admin.users.primaryHint`, `admin.users.addProfile`) eran "una key reusada en dos contextos con copy distinto" — la fix limpia es split per-contexto, no elegir uno y romper la otra UI. **Bug bonito cazado**: la chip flotante de `MiniPlayer` decía "Expandir reproductor" en producción aunque el dev escribió `defaultValue: "Expandir"` en el chip — i18n prefería el JSON value que lleva la versión larga porque la aria-label sibling también usa la misma key. El split arregla ambos sitios. Drive-by del extractor: 6 keys de audio language (audioLangTitle/Description, languageAuto, subtitleLangTitle/Description, subtitlesOff) shipped en PR #229 sin backfill — el extractor las pilló automáticamente.
+> - `c781c11` *feat(federation): proxy embedded subtitle tracks across the peer boundary*. Cierra la deuda "Subtítulos federados pendiente (~2h)". El master.m3u8 federado es variant-only (no EXT-X-MEDIA SUBTITLES) y HubPlay sirve subs out-of-band también localmente, así que el problema NO era reescribir el master — era que el camino federado no tenía el equivalente del par `/stream/{itemId}/subtitles{,/{trackIndex}}` local. Implementado los 4 endpoints (2 origin + 2 proxy) con la misma shape JSON / WebVTT que el camino local. Frontend: `VideoPlayer` acepta nuevo prop `peerStreamSessionId`, fetch al mount, merge en el dropdown con namespace de IDs ≥ 10000 para distinguir federadas de HLS-native (0..N-1), `<track>` element para la pickada usando el mismo rAF effect que la externa.
+>
+> **Decisiones senior tomadas (no obvias del código)**:
+> 1. **Split de keys, no elegir un copy**: `addProfile` se usaba como label de botón (`+ Perfil`) Y como título de modal (`Añadir perfil`). Elegir uno rompe la otra UI. Split en `addProfile` + `addProfileTitle` deja cada contexto con su copy correcto.
+> 2. **Subs federados scoped a session UUID, no a itemID**: el endpoint origin recibe `{sessionId}` no `{itemId}`. El session UUID ya prueba acceso (StartSession aplicó share.CanPlay), así que repetir el ACL gate por itemID sería redundante. Mismo patrón que master.m3u8 + variants.
+> 3. **Subs federadas riden el mismo `<track>` mechanism que las externas**: ambas son "subtitle source que no viene de hls.js". Reusar el mismo rAF + label-prefix discriminator (`Federated:` vs `External:`) evita un canal paralelo de cues.
+> 4. **ID namespace `>= 10000` para subs federadas en el dropdown**: `setSubtitleTrack` de hls.js solo conoce IDs 0..N-1. El handler del player rutea por rango: id ≥ 10000 → estado local + `<track>`, id < 10000 → hls.js. Lo más limpio es añadir un range-check sin cambiar la API de PlayerControls.
+> 5. **`subtitles` literal antes que `{quality}` wildcard en chi**: `subtitles/{trackIndex}` y `{quality}/{segment}` ambos tienen 2 segments — chi prefiere literal sobre param a igual depth, pero registrar primero clarifica intent y blinda futuros refactors.
+> 6. **Origin-side endpoints NO van al openapi.yaml**: server-to-server, no hay SDK consumer humano. Se añaden a `outOfScopeExact` con justificación. Los proxied (`/me/peers/...`) sí — esos los consume el browser del operador.
+> 7. **Fail-soft en `listFederatedSubtitles`**: si el peer está caído o devuelve error, el dropdown solo muestra HLS tracks (típicamente vacío en federación) + el operador conserva la opción de OpenSubtitles. No bloquear playback por subs.
+>
+> **Métricas**:
+> - Backend Go: `go test -race ./...` verde (un flake conocido en `TestFSWatcher_NewSubdirGetsWatched` por timing de inotify, pasa al reintentar).
+> - Frontend: `tsc -b` clean, `pnpm lint` 0 errores (2 warnings pre-existentes unchanged), **vitest 468/468**.
+> - Tests backend nuevos: 4 (`TestFederationStream_Subtitles_*` — happy path, unknown session 404, foreign-peer enum guard 404, empty list 200).
+>
+> **Backlog que queda**:
+> - **Multi-version del mismo título** (~1 sesión, P3): 4K + 1080p agrupados con quality picker.
+> - **Watch-together** (~1-2 sesiones, P3): sync sessions WebSocket. Plex tiene la web rota, diferenciador real.
+> - **Privacy stack** (P3): modo offline NFO, egress allowlist, CSP estricto.
+> - **Tests round 4**: SystemStatus, LibraryNewPage, AuthKeysPanel, UnhealthyChannelsPanel, ChannelsWithoutEPGPanel.
+> - **`MaxConcurrentStreams` por peer**: hoy compiten contra el cap global.
+> - **Skip-intro Phase 3**: manual segment editor (UI). Phase 1+2 (chapter + chromaprint) ya shipped en PRs #229/#230.
+> - **Schema fix `is_default`/`is_forced`**: el `SubtitleTrack` schema en openapi.yaml usa `is_default`/`is_forced` pero la respuesta JSON real usa `default`/`forced` (sin prefix). Pre-existente, no en scope de esta sesión.
+>
+> ---
+>
 > 🎬 **Sesión 2026-05-10 (Megablock — 8 commits cerrando todo el backlog operacional pendiente)** — todo lo que quedaba en la cola priorizada del Bloque C handoff (i18n round 2, tests round 2, PIN brute-force, getUserActions desktop, skip-intro Phase 1, watcher fsnotify) más una optimización de coste descubierta cuando el user preguntó por consumo de recursos. Vitest 425 → 468.
 >
 > **Branch**: `claude/hungry-liskov-6a853c` (worktree). Todo pusheado. PR pendiente de abrir.

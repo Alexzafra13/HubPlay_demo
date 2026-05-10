@@ -46,20 +46,22 @@ import (
 // can mint outbound JWTs from the peer's perspective), the items
 // repo stub, and the chi router with the handler mounted.
 type fedTestEnv struct {
-	t           *testing.T
-	mgr         *federation.Manager
-	clk         clock.Clock
-	rawDB       *sql.DB
-	peerID      string
-	peerSrvUUID string
-	peerPriv    ed25519.PrivateKey
-	libraryID   string
-	itemID      string
-	userID      string
-	items       *streamFakeItemRepo
-	streams     *fakeStreamManager
-	srv         *httptest.Server
-	imageDir    string
+	t            *testing.T
+	mgr          *federation.Manager
+	clk          clock.Clock
+	rawDB        *sql.DB
+	peerID       string
+	peerSrvUUID  string
+	peerPriv     ed25519.PrivateKey
+	libraryID    string
+	itemID       string
+	userID       string
+	items        *streamFakeItemRepo
+	streams      *fakeStreamManager
+	mediaStreams *fakeMediaStreamRepoForFedTest
+	fedHandler   *FederationStreamHandler
+	srv          *httptest.Server
+	imageDir     string
 }
 
 func newFedTestEnv(t *testing.T) *fedTestEnv {
@@ -144,7 +146,8 @@ func newFedTestEnv(t *testing.T) *fedTestEnv {
 	// Router mounting the handler under the same RequirePeerJWT
 	// middleware production uses. Skipping the rate-limit + audit
 	// middlewares -- they have their own dedicated tests.
-	fedHandler := NewFederationStreamHandler(mgr, streams, items, testutil.NopLogger())
+	mediaStreams := &fakeMediaStreamRepoForFedTest{byItem: map[string][]*db.MediaStream{}}
+	fedHandler := NewFederationStreamHandler(mgr, streams, items, mediaStreams, testutil.NopLogger())
 
 	imageDir := t.TempDir()
 	imgSrv := NewImageHandler(nil, nil, nil, nil, nil, imageDir, testutil.NopLogger())
@@ -156,6 +159,7 @@ func newFedTestEnv(t *testing.T) *fedTestEnv {
 	r.Group(func(r chi.Router) {
 		r.Use(federation.RequirePeerJWT(mgr))
 		r.Post("/api/v1/peer/stream/{itemId}/session", fedHandler.StartSession)
+		r.Get("/api/v1/peer/stream/session/{sessionId}/subtitles", fedHandler.Subtitles)
 		r.Get("/api/v1/peer/items/{itemId}/poster", fedImg.ItemPoster)
 	})
 
@@ -163,20 +167,22 @@ func newFedTestEnv(t *testing.T) *fedTestEnv {
 	t.Cleanup(srv.Close)
 
 	return &fedTestEnv{
-		t:           t,
-		mgr:         mgr,
-		clk:         clk,
-		rawDB:       rawDB,
-		peerID:      peerID,
-		peerSrvUUID: peerSrvUUID,
-		peerPriv:    priv,
-		libraryID:   libraryID,
-		itemID:      itemID,
-		userID:      userID,
-		items:       items,
-		streams:     streams,
-		srv:         srv,
-		imageDir:    imageDir,
+		t:            t,
+		mgr:          mgr,
+		clk:          clk,
+		rawDB:        rawDB,
+		peerID:       peerID,
+		peerSrvUUID:  peerSrvUUID,
+		peerPriv:     priv,
+		libraryID:    libraryID,
+		itemID:       itemID,
+		userID:       userID,
+		items:        items,
+		streams:      streams,
+		mediaStreams: mediaStreams,
+		fedHandler:   fedHandler,
+		srv:          srv,
+		imageDir:     imageDir,
 	}
 }
 
@@ -320,3 +326,194 @@ func TestFederationImage_ItemPoster_NoCanBrowse_Returns404(t *testing.T) {
 
 // Compile-time interface check.
 var _ ImageRepository = (*fakeImageRepoForFedTest)(nil)
+
+// ─── Federated subtitle list endpoint ─────────────────────────────────────
+
+// fakeMediaStreamRepoForFedTest is a tiny MediaStreamRepository
+// implementation backed by a per-itemID slice. The federation
+// subtitle handler is the only consumer in these tests, so we don't
+// need to model anything else.
+type fakeMediaStreamRepoForFedTest struct {
+	byItem map[string][]*db.MediaStream
+}
+
+func (r *fakeMediaStreamRepoForFedTest) ListByItem(_ context.Context, itemID string) ([]*db.MediaStream, error) {
+	return r.byItem[itemID], nil
+}
+
+var _ MediaStreamRepository = (*fakeMediaStreamRepoForFedTest)(nil)
+
+// startSessionAndGetSID drives StartSession through the handler and
+// returns the freshly-minted session UUID. Reused by the subtitle
+// list / track tests so each one doesn't have to re-derive how
+// session UUIDs are produced.
+func (e *fedTestEnv) startSessionAndGetSID(t *testing.T) string {
+	t.Helper()
+	resp := e.postSession(t)
+	defer resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("start session: status = %d, want 200", resp.StatusCode)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	sid, _ := body["session_id"].(string)
+	if sid == "" {
+		t.Fatal("session_id empty in start-session response")
+	}
+	return sid
+}
+
+// getSubtitles GETs the federated subtitle list for the given session
+// UUID with a fresh peer JWT.
+func (e *fedTestEnv) getSubtitles(t *testing.T, sessionID string) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet,
+		e.srv.URL+"/api/v1/peer/stream/session/"+sessionID+"/subtitles", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+e.peerToken())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do request: %v", err)
+	}
+	return resp
+}
+
+func TestFederationStream_Subtitles_ReturnsOnlySubtitleStreams(t *testing.T) {
+	env := newFedTestEnv(t)
+	env.share(federation.ShareScopes{CanBrowse: true, CanPlay: true})
+
+	// Mixed media-stream rows: video, audio, two subtitle tracks.
+	// The handler must return only the subtitle ones, in the same
+	// shape as the local /stream/{itemId}/subtitles handler.
+	env.mediaStreams.byItem[env.itemID] = []*db.MediaStream{
+		{StreamType: "video", StreamIndex: 0, Codec: "h264"},
+		{StreamType: "audio", StreamIndex: 1, Codec: "ac3", Language: "eng"},
+		{StreamType: "subtitle", StreamIndex: 2, Codec: "subrip", Language: "eng", Title: "English", IsDefault: true},
+		{StreamType: "subtitle", StreamIndex: 3, Codec: "subrip", Language: "spa", Title: "Español"},
+	}
+
+	sid := env.startSessionAndGetSID(t)
+	resp := env.getSubtitles(t, sid)
+	defer resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var body struct {
+		Data []struct {
+			Index    int    `json:"index"`
+			Codec    string `json:"codec"`
+			Language string `json:"language"`
+			Title    string `json:"title"`
+			Forced   bool   `json:"forced"`
+			Default  bool   `json:"default"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Data) != 2 {
+		t.Fatalf("data length = %d, want 2 subtitle entries (got %+v)", len(body.Data), body.Data)
+	}
+	if body.Data[0].Index != 2 || body.Data[0].Language != "eng" || !body.Data[0].Default {
+		t.Errorf("first track = %+v, want index=2 lang=eng default=true", body.Data[0])
+	}
+	if body.Data[1].Index != 3 || body.Data[1].Language != "spa" {
+		t.Errorf("second track = %+v, want index=3 lang=spa", body.Data[1])
+	}
+}
+
+func TestFederationStream_Subtitles_UnknownSession_Returns404(t *testing.T) {
+	env := newFedTestEnv(t)
+	env.share(federation.ShareScopes{CanBrowse: true, CanPlay: true})
+
+	// Session UUID conflated to "not found" -- otherwise a peer
+	// could enumerate other peers' active sessions.
+	resp := env.getSubtitles(t, uuid.NewString())
+	defer resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestFederationStream_Subtitles_ForeignPeerSession_Returns404(t *testing.T) {
+	env := newFedTestEnv(t)
+	env.share(federation.ShareScopes{CanBrowse: true, CanPlay: true})
+
+	// Pair a SECOND peer and mint a JWT for it. Try to read the
+	// first peer's session via the second peer's token -- must 404
+	// (peer ID mismatch in lookupPeerSession). Same enumeration
+	// guard as the StartSession path.
+	sid := env.startSessionAndGetSID(t)
+
+	pub2, priv2, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("ed25519: %v", err)
+	}
+	now := env.clk.Now()
+	peer2ID := uuid.NewString()
+	peer2SrvUUID := uuid.NewString()
+	if err := db.NewFederationRepository(env.rawDB).InsertPeer(context.Background(), &federation.Peer{
+		ID:         peer2ID,
+		ServerUUID: peer2SrvUUID,
+		Name:       "OtherPeer",
+		BaseURL:    "https://other.peer.invalid",
+		PublicKey:  pub2,
+		Status:     federation.PeerPaired,
+		CreatedAt:  now,
+		PairedAt:   &now,
+	}); err != nil {
+		t.Fatalf("insert peer2: %v", err)
+	}
+	if err := env.mgr.RefreshPeerCache(context.Background()); err != nil {
+		t.Fatalf("refresh peer cache: %v", err)
+	}
+	tok2, err := federation.IssuePeerToken(env.clk, priv2, peer2SrvUUID, env.mgr.PublicServerInfo().ServerUUID)
+	if err != nil {
+		t.Fatalf("issue token: %v", err)
+	}
+
+	req, _ := http.NewRequest(http.MethodGet,
+		env.srv.URL+"/api/v1/peer/stream/session/"+sid+"/subtitles", nil)
+	req.Header.Set("Authorization", "Bearer "+tok2)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 (peer mismatch)", resp.StatusCode)
+	}
+}
+
+func TestFederationStream_Subtitles_NoMatchingTracks_ReturnsEmpty(t *testing.T) {
+	env := newFedTestEnv(t)
+	env.share(federation.ShareScopes{CanBrowse: true, CanPlay: true})
+
+	// Only audio + video, no subs. Handler must respond 200 with
+	// an empty data array (NOT 404 -- the item exists, it just has
+	// no embedded subs).
+	env.mediaStreams.byItem[env.itemID] = []*db.MediaStream{
+		{StreamType: "video", StreamIndex: 0, Codec: "h264"},
+		{StreamType: "audio", StreamIndex: 1, Codec: "aac"},
+	}
+
+	sid := env.startSessionAndGetSID(t)
+	resp := env.getSubtitles(t, sid)
+	defer resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var body struct {
+		Data []map[string]any `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Data) != 0 {
+		t.Errorf("data length = %d, want 0", len(body.Data))
+	}
+}
