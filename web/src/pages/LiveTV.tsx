@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { useLiveTvPlayer } from "@/store/liveTvPlayer";
@@ -205,12 +205,34 @@ export default function LiveTV() {
   // straight into a specific channel). Opens the player as soon as
   // the channel list is hydrated, then strips the param from the
   // URL so a back-nav or refresh doesn't re-trigger.
+  //
+  // Defensive notes (post 2026-05-03 freeze bug):
+  //   1. `channels` from useLiveTvData is a fresh array ref on every
+  //      render (no stable identity), so `openPlayer` — which has
+  //      `channels` in its deps — also rebuilds each render. Without
+  //      a guard the effect re-enters and re-fires `openPlayer` and
+  //      `setSearchParams` on every render until the strip lands,
+  //      which in React 19 concurrent mode can spiral into a freeze.
+  //   2. `handledChannelRef` makes the deep-link strictly idempotent
+  //      per `channelParam` value; we also reset it when the param
+  //      clears so a *future* navigation back to ?channel=<sameId>
+  //      still fires.
+  //   3. If the channel isn't in the hydrated list yet (race with
+  //      query cache), we wait — we do NOT strip the param, so the
+  //      next render with a fuller list can resolve it.
   const channelParam = searchParams.get("channel");
+  const handledChannelRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!channelParam) return;
+    if (!channelParam) {
+      handledChannelRef.current = null;
+      return;
+    }
+    if (handledChannelRef.current === channelParam) return;
     if (channels.length === 0) return; // wait for channels to load
     const ch = channels.find((c) => c.id === channelParam);
-    if (ch) openPlayer(ch);
+    if (!ch) return; // channel not in list yet — keep waiting
+    handledChannelRef.current = channelParam;
+    openPlayer(ch);
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev);
