@@ -302,7 +302,26 @@ export default function ItemDetail() {
           audioStreamIndex={playerInfo.audioStreamIndex}
           startPosition={playerInfo.startPosition}
           onAudioStreamSelected={switchAudioStream}
-          onClose={handleClosePlayer}
+          onClose={async () => {
+            await handleClosePlayer();
+            // Auto-play deep-links (Continue Watching cards, hero
+            // "Reproducir", etc.) drop the user on a metadata page
+            // they didn't ask to see when the player closes. Take
+            // them somewhere useful instead:
+            //   - Episode → the season's episode list (the "show me
+            //     all the chapters" surface the user actually
+            //     thinks of as the back-target).
+            //   - Movie / series → wherever they came from (back).
+            // Manual play (clicking Reproducir from a detail page
+            // they already navigated to) leaves them on that page,
+            // which is the expected return point.
+            if (!autoPlayConsumed.current) return;
+            if (item?.type === "episode" && item.parent_id) {
+              navigate(`/items/${item.parent_id}`, { replace: true });
+            } else {
+              navigate(-1);
+            }
+          }}
           onEnded={handlePlayerEnded}
         />
       )}
