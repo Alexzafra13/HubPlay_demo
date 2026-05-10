@@ -171,6 +171,8 @@ var outOfScopeExact = map[string]string{
 	"GET /peer/stream/session/{sessionId}/master.m3u8":          "p2p HLS master",
 	"GET /peer/stream/session/{sessionId}/{quality}/index.m3u8": "p2p HLS quality manifest",
 	"GET /peer/stream/session/{sessionId}/{quality}/{segment}":  "p2p HLS segment",
+	"GET /peer/stream/session/{sessionId}/subtitles":              "p2p subtitle list (origin side)",
+	"GET /peer/stream/session/{sessionId}/subtitles/{trackIndex}": "p2p subtitle WebVTT (origin side)",
 	"GET /peer/items/{itemId}/poster":                           "p2p poster bytes (origin side)",
 
 	// ── Legacy global SSE (replaced by /me/events) ───────────────────

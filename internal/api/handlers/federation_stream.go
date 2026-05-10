@@ -22,9 +22,11 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -36,21 +38,29 @@ import (
 
 // FederationStreamHandler serves the peer-facing streaming surface.
 type FederationStreamHandler struct {
-	mgr     *federation.Manager
-	streams StreamManagerService
-	items   ItemRepository
-	logger  *slog.Logger
+	mgr          *federation.Manager
+	streams      StreamManagerService
+	items        ItemRepository
+	mediaStreams MediaStreamRepository
+	logger       *slog.Logger
 }
 
-func NewFederationStreamHandler(mgr *federation.Manager, streams StreamManagerService, items ItemRepository, logger *slog.Logger) *FederationStreamHandler {
+func NewFederationStreamHandler(
+	mgr *federation.Manager,
+	streams StreamManagerService,
+	items ItemRepository,
+	mediaStreams MediaStreamRepository,
+	logger *slog.Logger,
+) *FederationStreamHandler {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &FederationStreamHandler{
-		mgr:     mgr,
-		streams: streams,
-		items:   items,
-		logger:  logger.With("handler", "federation_stream"),
+		mgr:          mgr,
+		streams:      streams,
+		items:        items,
+		mediaStreams: mediaStreams,
+		logger:       logger.With("handler", "federation_stream"),
 	}
 }
 
@@ -290,6 +300,93 @@ func (h *FederationStreamHandler) Segment(w http.ResponseWriter, r *http.Request
 	w.Header().Set("Content-Type", "video/mp2t")
 	w.Header().Set("Cache-Control", "max-age=3600")
 	http.ServeFile(w, r, segmentPath)
+}
+
+// Subtitles lists the embedded subtitle tracks of the item backing
+// a peer-spawned session. Same shape as StreamHandler.Subtitles so
+// the requesting peer's frontend can reuse the local-streaming UI
+// for federated playback.
+//
+// GET /api/v1/peer/stream/session/{sessionId}/subtitles
+func (h *FederationStreamHandler) Subtitles(w http.ResponseWriter, r *http.Request) {
+	peer := federation.PeerFromContext(r.Context())
+	if peer == nil {
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "peer context missing")
+		return
+	}
+	sess := h.lookupPeerSession(w, r, peer.ID)
+	if sess == nil {
+		return
+	}
+	if h.mediaStreams == nil {
+		respondJSON(w, http.StatusOK, map[string]any{"data": []map[string]any{}})
+		return
+	}
+
+	mediaStreams, err := h.mediaStreams.ListByItem(r.Context(), sess.ItemID)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+
+	subs := make([]map[string]any, 0, len(mediaStreams))
+	for _, s := range mediaStreams {
+		if s.StreamType != "subtitle" {
+			continue
+		}
+		subs = append(subs, map[string]any{
+			"index":    s.StreamIndex,
+			"codec":    s.Codec,
+			"language": s.Language,
+			"title":    s.Title,
+			"forced":   s.IsForced,
+			"default":  s.IsDefault,
+		})
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"data": subs})
+}
+
+// SubtitleTrack extracts and serves a single subtitle track as
+// WebVTT for a peer-spawned session. Mirrors StreamHandler.SubtitleTrack
+// so the proxy on the requesting peer can be a byte pass-through.
+//
+// GET /api/v1/peer/stream/session/{sessionId}/subtitles/{trackIndex}
+func (h *FederationStreamHandler) SubtitleTrack(w http.ResponseWriter, r *http.Request) {
+	peer := federation.PeerFromContext(r.Context())
+	if peer == nil {
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "peer context missing")
+		return
+	}
+	sess := h.lookupPeerSession(w, r, peer.ID)
+	if sess == nil {
+		return
+	}
+	trackIndex, err := strconv.Atoi(chi.URLParam(r, "trackIndex"))
+	if err != nil {
+		respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "trackIndex must be an integer")
+		return
+	}
+
+	item, err := h.items.GetByID(r.Context(), sess.ItemID)
+	if err != nil {
+		respondError(w, r, http.StatusNotFound, "SESSION_NOT_FOUND", "session no longer valid")
+		return
+	}
+	if item.Path == "" {
+		respondError(w, r, http.StatusNotFound, "FILE_NOT_FOUND", "media file not available")
+		return
+	}
+
+	vttData, err := stream.ExtractSubtitleVTT(r.Context(), item.Path, trackIndex)
+	if err != nil {
+		h.logger.Error("federation: subtitle extraction failed", "error", err, "peer", peer.ID, "session", sess.ID, "track", trackIndex)
+		respondError(w, r, http.StatusInternalServerError, "SUBTITLE_ERROR", "failed to extract subtitle")
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/vtt")
+	w.Header().Set("Cache-Control", "max-age=86400")
+	_, _ = io.Copy(w, vttData)
 }
 
 // lookupPeerSession resolves the session UUID from the URL and

@@ -90,6 +90,7 @@ export default function PeerItemDetail() {
     masterUrl: string;
     method: PlaybackMethod;
     startPosition: number;
+    peerSessionId: string;
   } | null>(null);
   const [playError, setPlayError] = useState<string | null>(null);
 
@@ -137,6 +138,7 @@ export default function PeerItemDetail() {
           masterUrl: resp.master_playlist_url,
           method,
           startPosition: startSeconds,
+          peerSessionId: resp.peer_session_id,
         });
         setShowPlayer(true);
       } catch (err) {
@@ -268,6 +270,7 @@ export default function PeerItemDetail() {
         <VideoPlayer
           itemId={itemId}
           peerId={peerId}
+          peerStreamSessionId={playerInfo.peerSessionId}
           sessionToken=""
           masterPlaylistUrl={playerInfo.masterUrl}
           directUrl={null}
