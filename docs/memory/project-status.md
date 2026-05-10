@@ -1,5 +1,49 @@
 # Estado del proyecto
 
+> 🎬 **Sesión 2026-05-10 (auditoría senior + 11 commits, rama `claude/relaxed-lederberg-48e836`)** — el usuario pidió "revisa mi proyecto, quiero comprobar cosas que todo lo que tenemos funciona de verdad… piensa como senior". Auditoría completa con 4 sub-agentes en paralelo (backend / frontend / streaming-IPTV / infra-seguridad) + verificación visual end-to-end via Chrome MCP. Encontrados 5 P0 reales, los 5 arreglados + 5 mejoras UX adicionales. **Todo pusheado a `origin/claude/relaxed-lederberg-48e836` y mergeado a `main` local vía fast-forward**. Detalle completo en [`session_2026-05-10_audit_p0_fixes.md`](session_2026-05-10_audit_p0_fixes.md).
+>
+> **5 P0 fixes**:
+> - `5b47630` *i18n(es): restore accents and ñ across 147 strings* — "Contrasena", "Iniciar sesion", "Administracion", "Anadir a favoritos"… en cada pantalla. Audit exhaustivo identificó 147 entradas en `es.json` (no 78 como decía el primer grep). Script Python one-shot, idempotente, validación JSON-OK al final.
+> - `251cd7a` *fix(db): bypass sqlc 1.31.x parser bug for ListProfilesForOwner* — `/api/v1/me/profiles` daba 500 SQL syntax error en cada llamada (selector "Who's watching?" roto). Causa: bug del codegen de sqlc 1.31.1 que añade `?;` espurio + trunca el último token cuando ORDER BY combina expresión booleana + COLLATE NOCASE. Fix: raw SQL en `user_repository.go` siguiendo el patrón de los otros 5 holdouts.
+> - `7c9149d` *fix(api): require active setup wizard for browse/libraries/settings/complete* — `/setup/browse` listaba filesystem (`/home`, `/srv`, `/var/lib`, `/config`, librerías) sin auth para siempre. Helper `requireSetupActive` con 403 SETUP_COMPLETE; `Status` queda público para el on-boot del SPA.
+> - `73418a9` *feat(auth): rotate refresh token on every successful refresh* — antes el RT se reusaba durante todo el RefreshTokenTTL (30 días) sin detección. Rotación atómica + UPDATE hand-rolled (sqlc trunca UPDATEs con 4+ placeholders, mismo bug que profiles).
+> - `97c6698` *feat(auth): refresh-token reuse detection with chain revocation* — migración 038 añade `previous_refresh_token_hash` + índice. Auth0-style: si llega un RT que matchea el previous (no el current) = reuse → revoca toda la sesión + WARN log. One-step memory (no full chain) suficiente para el threat "atacante leak + race vs dueño".
+>
+> **6 mejoras UX adicionales pedidas por el usuario al iterar**:
+> - `aa223a8` *test: regression coverage for the four P0 fixes* — 268 LOC de tests nuevos (4 `internal/db/...`, `internal/auth/...`, `internal/api/handlers/...`). `go test ./...` verde via `golang:1.25` docker (host sin go en PATH).
+> - `3be7dce` *feat(home): launch player directly from Continue Watching cards* — antes click en CW paraba en detail page. `LandscapeCard` gana prop `autoPlay` que tagea href con `?play=1`. ItemDetail ya tenía el deep-link consumer wireado pero las rails no lo usaban.
+> - `ee6836c` *fix(player): resume from saved progress + smarter back-out target* — handlePlay ahora lee `user_data.progress.position_ticks` del item y lo pasa como `startPosition`. Cuando se cierra un player auto-played, episodios → season list (`/items/${parent_id}`), movies → `navigate(-1)`. Manual play sin tocar.
+> - `f488ea0` *feat(layout): universal back arrow in the top bar* — ArrowLeft visible en cada `pathname !== "/"`. Click → `navigate(-1)`. Edge case URL-directa: si `window.history.state.idx === 0`, fallback a `navigate("/")`.
+> - `d78f17d` *feat(home): movies in Continue Watching show their poster, not the backdrop* — intermedio: PosterCard vertical 2:3 para movies, mezclado con LandscapeCard 16:9 para episodios. **Reverted en `6c046ce`** porque rompía el rhythm de la rail y el usuario aclaró que existe un tipo "Miniatura" específico.
+> - `6c046ce` *feat(images): expose thumb (16:9 miniatura) and use it in Continue Watching* — backend ahora expone `thumb_url` en `/me/continue-watching` y `/items/{id}` (campo de DB que ya existía pero no estaba on the wire). `ImageRepository.GetPrimaryURLs` añade `type='thumb'` al SELECT. `LandscapeCard` para movies prefiere `thumb_url > backdrop_url > poster_url`. Rail vuelve a uniform 16:9.
+>
+> **Decisiones senior tomadas (no obvias del código)**:
+> 1. **sqlc 1.31.1 bug es estructural, no edge case**: visto 3 veces (ORDER BY + COLLATE, UPDATE con 4+ placeholders, comentario pre-existente). Las 2 queries afectadas pasaron a raw SQL con comment cruzado. Recomendación: bumpar sqlc cuando salga el fix, migrar de vuelta.
+> 2. **Player VOD bug = imagen Docker obsoleta, no código** — el commit `44566b9` ya tenía el fix; el contenedor del usuario corría `hubplay:fingerprint` de 17h atrás. Rebuild solucionó el "bug crítico". **Lección**: en cada audit, verificar la fecha del binary corriendo vs último commit relevante en main.
+> 3. **Reuse-detection one-step (no full chain)** suficiente para el threat model self-hosted: el escenario "atacante con RT N rotaciones viejo" coincide con "dueño activo y rotando", la ventana de ataque desaparece. Auth0 keeps full chain pero el coste (insertar fila por refresh + cleanup) no se justifica aquí.
+> 4. **Setup `Status` queda público intencional** — el SPA lo polea on-boot para decidir si redirigir al wizard. Carve-out pinned por `TestSetupHandler_PostCompletion_Status_StillOpen` para que un futuro "lock everything" refactor no rompa el flow.
+> 5. **Resume position desde `getItem`, no `getProgress`** — el endpoint `/me/progress/{id}` devuelve un shape flat (`position_ticks` directo) que no matchea el tipo declarado `UserData` (nested `progress.position_ticks`). El client TypeScript habría leído undefined silenciosamente. `getItem` devuelve el shape canónico que el resto del codebase ya consume.
+> 6. **Back-out tras auto-play va a season list para episodios**, no `navigate(-1)` directo — el detail page del episodio individual existe sólo como redirect target intermedio; mostrarla post-playback es jarring. Movies no tienen ese problema (su detail page es la canonical).
+> 7. **Thumb backend: añadirlo a la API, no construir URL en cliente** — el campo existe en DB (`type='thumb'`), no había razón para no exponerlo. Una llamada al `/items/{id}/images` por movie sería N+1 + duplicaría conocimiento de qué tipos hay. La opción D (extender el wire shape) deja el frontend con un access pattern consistente.
+>
+> **Métricas**:
+> - Backend Go: `go test -count=1 ./internal/db/... ./internal/auth/... ./internal/api/handlers/...` verde via `golang:1.25` docker (~55s total). El flake `TestFSWatcher_NewSubdirGetsWatched` sigue presente, no tocado.
+> - Frontend: `pnpm exec tsc --noEmit` clean. Vitest no corrido en esta sesión (cambios de data-only en es.json + UI components sin lógica nueva).
+> - Container: `hubplay` (`ghcr.io/alexzafra13/hubplay_demo:latest`) recién built, healthy en :8097, mount apunta al config padre con la DB de 130MB del usuario.
+>
+> **Estado del worktree**:
+> - 11 commits en `claude/relaxed-lederberg-48e836`, todos pusheados a origin.
+> - `main` local mergeado vía fast-forward con los 11 commits — **`git push origin main` está pendiente** de hacer si se quiere consolidar; el remote main NO los tiene aún.
+> - PR remoto disponible: https://github.com/Alexzafra13/HubPlay_demo/pull/new/claude/relaxed-lederberg-48e836
+>
+> **Backlog que queda explícito (próxima sesión)**:
+> - **Streaming P1** (del audit inicial): HDR/tone-mapping, subtítulos burn-in (PGS/ASS), audio multichannel passthrough, GOP-aligned `-force_key_frames`, refactor del seek-coalesce (3 capas defensivas), VAAPI fully-on-GPU.
+> - **Frontend P1**: polling 5s/30s residual → SSE, vite `manualChunks` (hls.js no se separa), tests para Home/LiveTV/Search/Movies/Series, `node-vibrant` server-side.
+> - **Infra P1**: `RateLimitConfig.GlobalRPM` dead code, YAML config a `0600`, CSRF fail-open + localhost en AllowedOrigins, `govulncheck` en CI, Trivy pinned a SHA, cap SSE per-user.
+> - **UX que el usuario mencionó pero no se atacaron**: quitar item de CW (botón X), marcar como visto desde la rail, hero del home auto-play (sigue yendo a detail), skip-intro/credits visible, next-up overlay automático al fin episode, aurora colors al detail.
+
+---
+
 > 🎬 **Sesión 2026-05-10 (continuación post-megablock, rama `claude/review-and-continue-Xi3KF`)** — quick-wins block del backlog: cerrados los 4 conflictos i18n del megablock + subtítulos federados end-to-end. **2 commits limpios, todo verde, pusheado**.
 >
 > **Commits**:
