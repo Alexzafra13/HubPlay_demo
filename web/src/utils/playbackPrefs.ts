@@ -13,3 +13,91 @@
  * itself which only suppresses for the current tab.
  */
 export const TRAILERS_ENABLED_PREF_KEY = "playback.trailers_enabled";
+
+/**
+ * ISO 639-2 (3-letter) code for the user's preferred audio language.
+ * Empty string = "use the file's default audio track" (current
+ * behaviour for everyone before they pick a preference). Resolved by
+ * the player on stream start: it scans the item's media_streams for
+ * the first audio row whose `language` matches and appends
+ * `?audio=<index>` to the manifest URL so the backend transcoder maps
+ * that specific track. Same model Plex / Jellyfin use for "Audio
+ * language" in the account preferences pane.
+ */
+export const PREFERRED_AUDIO_LANG_PREF_KEY = "playback.preferred_audio_lang";
+
+/**
+ * ISO 639-2 code for preferred subtitle language. Empty = no subs
+ * (current default). The player auto-enables a matching text track
+ * on first manifest load when this is set; the user can still
+ * disable mid-playback from the subtitle picker — that override is
+ * session-scoped and doesn't write back to the pref so the next
+ * episode reverts to the configured default.
+ */
+export const PREFERRED_SUBTITLE_LANG_PREF_KEY = "playback.preferred_subtitle_lang";
+
+/**
+ * Curated list of languages exposed in the Settings pickers. Three-
+ * letter ISO 639-2 codes — what ffprobe writes into media_streams.
+ * language and what the source mkv tags emit. Intentionally short:
+ * the picker is for the user to set a default, NOT for them to
+ * discover every possible language. New entries added by request as
+ * users hit them.
+ */
+export interface PlaybackLanguage {
+  code: string;
+  labelEs: string;
+  labelEn: string;
+}
+export const PLAYBACK_LANGUAGES: PlaybackLanguage[] = [
+  { code: "spa", labelEs: "Español", labelEn: "Spanish" },
+  { code: "eng", labelEs: "Inglés", labelEn: "English" },
+  { code: "fre", labelEs: "Francés", labelEn: "French" },
+  { code: "ger", labelEs: "Alemán", labelEn: "German" },
+  { code: "ita", labelEs: "Italiano", labelEn: "Italian" },
+  { code: "por", labelEs: "Portugués", labelEn: "Portuguese" },
+  { code: "jpn", labelEs: "Japonés", labelEn: "Japanese" },
+  { code: "kor", labelEs: "Coreano", labelEn: "Korean" },
+  { code: "chi", labelEs: "Chino", labelEn: "Chinese" },
+  { code: "ara", labelEs: "Árabe", labelEn: "Arabic" },
+  { code: "rus", labelEs: "Ruso", labelEn: "Russian" },
+];
+
+/**
+ * pickAudioStreamIndex returns the 0-based index of the first audio
+ * stream in `streams` whose `language` matches `preferredLang`, or
+ * -1 if no match (or no preference). Index is per-type — i.e. the
+ * Nth audio stream when filtered to type='audio' — which is what
+ * ffmpeg's `-map 0:a:<N>` expects. Source-array order is preserved
+ * (ffprobe writes streams in container order; the container's
+ * decision about which audio is "default" is irrelevant once we
+ * pin a specific index).
+ */
+export function pickAudioStreamIndex(
+  // The runtime shape from the API is snake_case (`stream_type`,
+  // `stream_index`) — mirrors sqlc's column names. The TS interface
+  // claims `type`/`index` but never matched reality. We accept both
+  // here so the helper works regardless of which side is fixed first.
+  streams:
+    | ReadonlyArray<{
+        type?: string | null;
+        stream_type?: string | null;
+        language?: string | null;
+      }>
+    | undefined
+    | null,
+  preferredLang: string,
+): number {
+  if (!streams || !preferredLang) return -1;
+  const want = preferredLang.toLowerCase();
+  let audioIdx = -1;
+  for (const s of streams) {
+    const kind = s.stream_type ?? s.type;
+    if (kind !== "audio") continue;
+    audioIdx++;
+    if ((s.language ?? "").toLowerCase() === want) {
+      return audioIdx;
+    }
+  }
+  return -1;
+}

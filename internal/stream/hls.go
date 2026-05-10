@@ -7,9 +7,20 @@ import (
 
 // GenerateMasterPlaylist creates an HLS master playlist (M3U8) offering
 // multiple quality levels for adaptive bitrate streaming.
-func GenerateMasterPlaylist(itemID, baseURL string, profiles []string) string {
+// audioStreamIndex < 0 → omit the ?audio= query string entirely so
+// the per-quality endpoint falls back to ffmpeg's default audio
+// pick (current behaviour for users without a preferred-language
+// preference). audioStreamIndex >= 0 → embed it in every variant URL
+// the master playlist emits so hls.js's per-quality switches keep
+// the same dub instead of falling back to the file default mid-play.
+func GenerateMasterPlaylist(itemID, baseURL string, profiles []string, audioStreamIndex int) string {
 	var b strings.Builder
 	b.WriteString("#EXTM3U\n")
+
+	suffix := ""
+	if audioStreamIndex >= 0 {
+		suffix = fmt.Sprintf("?audio=%d", audioStreamIndex)
+	}
 
 	for _, name := range profiles {
 		p, ok := Profiles[name]
@@ -21,7 +32,7 @@ func GenerateMasterPlaylist(itemID, baseURL string, profiles []string) string {
 
 		fmt.Fprintf(&b, "#EXT-X-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%dx%d,FRAME-RATE=%d,NAME=\"%s\"\n",
 			bandwidth, p.Width, p.Height, p.MaxFrameRate, p.Name)
-		fmt.Fprintf(&b, "%s/api/v1/stream/%s/%s/index.m3u8\n", baseURL, itemID, name)
+		fmt.Fprintf(&b, "%s/api/v1/stream/%s/%s/index.m3u8%s\n", baseURL, itemID, name, suffix)
 	}
 
 	return b.String()

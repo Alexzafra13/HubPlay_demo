@@ -38,7 +38,7 @@ func newFakeStreamManager() *fakeStreamManager {
 	}
 }
 
-func (m *fakeStreamManager) StartSession(ctx context.Context, userID, itemID, profileName string, caps *stream.Capabilities, startTime float64) (*stream.ManagedSession, error) {
+func (m *fakeStreamManager) StartSession(ctx context.Context, userID, itemID, profileName string, caps *stream.Capabilities, startTime float64, audioStreamIndex int) (*stream.ManagedSession, error) {
 	if m.startSessionFn != nil {
 		return m.startSessionFn(ctx, userID, itemID, profileName, caps, startTime)
 	}
