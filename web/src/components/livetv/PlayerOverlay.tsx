@@ -90,7 +90,7 @@ export function PlayerOverlay({
     <div
       role="dialog"
       aria-modal="true"
-      aria-label={`${channel.name} — ${t("liveTV.live", { defaultValue: "En directo" })}`}
+      aria-label={`${channel.name} — ${t("liveTV.live", { defaultValue: "EN VIVO" })}`}
       className="fixed inset-0 z-50 flex flex-col bg-black/95 backdrop-blur"
       data-theme="tv"
       data-accent="lime"
