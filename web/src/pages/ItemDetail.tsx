@@ -78,6 +78,7 @@ export default function ItemDetail() {
     handlePlay,
     handlePlayerEnded,
     handleClosePlayer,
+    switchAudioStream,
   } = usePlayback({ pageItemId: id, siblingEpisodes });
 
   // ─── Auto-play deep-link (?play=1) ──────────────────────────────────────
@@ -298,6 +299,9 @@ export default function ItemDetail() {
           chapters={chapterMarkers}
           segments={item.segments}
           audioStreams={item.media_streams?.filter((s) => s.type === "audio")}
+          audioStreamIndex={playerInfo.audioStreamIndex}
+          startPosition={playerInfo.startPosition}
+          onAudioStreamSelected={switchAudioStream}
           onClose={handleClosePlayer}
           onEnded={handlePlayerEnded}
         />
