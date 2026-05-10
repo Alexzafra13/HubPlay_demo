@@ -6,6 +6,7 @@
 import { useTranslation } from "react-i18next";
 import { useContinueWatching } from "@/api/hooks";
 import { Skeleton } from "@/components/common";
+import { PosterCard } from "@/components/media";
 import { HomeRail } from "./HomeRail";
 import { LandscapeCard } from "./LandscapeCard";
 
@@ -39,14 +40,28 @@ export function ContinueWatchingRail() {
 
   return (
     <HomeRail title={t("home.continueWatching")}>
-      {items.map((item) => (
-        // Continue Watching cards always launch playback on click —
-        // by definition the user is mid-watch, so dropping them on
-        // the detail page first is one click of friction nobody
-        // wants. The detail surface is one back-arrow away if they
-        // really want metadata.
-        <LandscapeCard key={item.id} item={item} autoPlay />
-      ))}
+      {items.map((item) =>
+        // Movies use their poster (vertical 2:3) so the user
+        // recognises the cartel they're used to — backdrops are
+        // marketing-wide images that often share visual language
+        // with other titles in the same franchise and are harder
+        // to scan at a glance. Episodes stay on the landscape
+        // card with their per-episode screencap (the still you'd
+        // expect to see for a "what was this episode about" hint).
+        // Both cards launch playback on click — the rail is
+        // "resume" by definition; dropping the user on the detail
+        // page first is friction nobody wants here.
+        item.type === "movie" ? (
+          <div
+            key={item.id}
+            className="w-[180px] md:w-[200px] lg:w-[220px] shrink-0"
+          >
+            <PosterCard item={item} href={`/movies/${item.id}?play=1`} />
+          </div>
+        ) : (
+          <LandscapeCard key={item.id} item={item} autoPlay />
+        ),
+      )}
     </HomeRail>
   );
 }
