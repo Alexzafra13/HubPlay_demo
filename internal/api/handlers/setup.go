@@ -40,6 +40,24 @@ func NewSetupHandler(
 	}
 }
 
+// requireSetupActive short-circuits a request when the initial setup
+// wizard has already been completed. Setup endpoints are intentionally
+// unauthenticated so the very first user can reach them on a fresh
+// install — but once setup is done, leaving them open turned the
+// filesystem browser, library creation, and settings updates into an
+// unauthenticated attack surface (filesystem disclosure via
+// /setup/browse, library/path takeover via /setup/libraries, etc.).
+//
+// Returns true when the handler should continue, false when it has
+// already written a 403 response.
+func (h *SetupHandler) requireSetupActive(w http.ResponseWriter, r *http.Request) bool {
+	if h.setup.NeedsSetup(r.Context()) {
+		return true
+	}
+	respondError(w, r, http.StatusForbidden, "SETUP_COMPLETE", "setup wizard is no longer accepting requests")
+	return false
+}
+
 // Status returns setup state including the current step so the wizard
 // can resume from where it was interrupted (similar to Jellyfin's approach).
 // Steps: "account" → "libraries" → "settings" → "complete" → "" (done).
@@ -89,6 +107,9 @@ func (h *SetupHandler) Status(w http.ResponseWriter, r *http.Request) {
 // bypasses CSRF and the browser can short-cache the response — the
 // admin folder-picker re-opens instantly without a full round-trip.
 func (h *SetupHandler) Browse(w http.ResponseWriter, r *http.Request) {
+	if !h.requireSetupActive(w, r) {
+		return
+	}
 	reqPath := r.URL.Query().Get("path")
 	if reqPath == "" {
 		reqPath = "/"
@@ -119,6 +140,9 @@ type createLibraryEntry struct {
 
 // CreateLibraries creates one or more libraries during setup.
 func (h *SetupHandler) CreateLibraries(w http.ResponseWriter, r *http.Request) {
+	if !h.requireSetupActive(w, r) {
+		return
+	}
 	var req createLibrariesRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
@@ -155,6 +179,9 @@ type updateSettingsRequest struct {
 
 // UpdateSettings updates server settings during setup.
 func (h *SetupHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
+	if !h.requireSetupActive(w, r) {
+		return
+	}
 	var req updateSettingsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
@@ -198,6 +225,9 @@ func (h *SetupHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 
 // Capabilities returns system capabilities (FFmpeg, hardware acceleration).
 func (h *SetupHandler) Capabilities(w http.ResponseWriter, r *http.Request) {
+	if !h.requireSetupActive(w, r) {
+		return
+	}
 	caps := h.setup.DetectCapabilities()
 	respondJSON(w, http.StatusOK, map[string]any{"data": caps})
 }
@@ -208,6 +238,9 @@ type completeRequest struct {
 
 // Complete marks the setup wizard as finished.
 func (h *SetupHandler) Complete(w http.ResponseWriter, r *http.Request) {
+	if !h.requireSetupActive(w, r) {
+		return
+	}
 	var req completeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
