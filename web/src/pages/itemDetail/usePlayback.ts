@@ -24,6 +24,10 @@ interface PlayerSourceInfo {
   // the in-player switcher mark the active option without having
   // to re-derive the language match).
   audioStreamIndex: number;
+  // Seconds to seek to once the new manifest attaches. Set when
+  // the user switches audio dub mid-playback so the next master
+  // load resumes at the same playhead. Undefined for fresh plays.
+  startPosition?: number;
 }
 
 // resolvePlayerSource hits /stream/:id/info and turns the response
@@ -124,6 +128,12 @@ export interface UsePlaybackResult extends PlayerOverlayState {
    *  fires a session DELETE so the backend transcoder isn't left
    *  buffering ahead for nothing. */
   handleClosePlayer: () => Promise<void>;
+  /** Hooked into VideoPlayer.onAudioStreamSelected. Re-resolves the
+   *  master playlist with `?audio=<streamIndex>` and primes the
+   *  player to resume at `resumeAtSeconds` once the new manifest
+   *  attaches. Same item id throughout — it's a swap, not an
+   *  advance. */
+  switchAudioStream: (streamIndex: number, resumeAtSeconds: number) => Promise<void>;
   /** Up-next promo card data for the player overlay. undefined when
    *  there's no next sibling. */
   nextUpInfo: NextUpInfo | undefined;
@@ -226,6 +236,34 @@ export function usePlayback({
     };
   }, [nextEpisode]);
 
+  const switchAudioStream = useCallback(
+    async (streamIndex: number, resumeAtSeconds: number) => {
+      if (!playingItemId) return;
+      try {
+        // Re-resolve the source with the new audio index. Reusing
+        // resolvePlayerSource keeps the URL-shaping logic in one
+        // place — we just bake in the picked index instead of
+        // re-doing pickAudioStreamIndex against the user's
+        // language preference.
+        const source = await resolvePlayerSource(playingItemId, streamIndex);
+        setPlayerInfo({
+          ...source,
+          // Threaded through to VideoPlayer's startPosition so the
+          // canplay handler seeks back to the playhead the user
+          // was at. The seek-reset effect on masterPlaylistUrl
+          // change guarantees the gate fires again instead of
+          // staying latched from the first play.
+          startPosition: resumeAtSeconds,
+        });
+      } catch {
+        // Audio switch failures are best-effort: leave the existing
+        // playerInfo in place so the user keeps their current dub
+        // rather than getting bumped back to the detail page.
+      }
+    },
+    [playingItemId],
+  );
+
   const handlePlayerEnded = useCallback(() => {
     if (!playingItemId || siblingEpisodes.length === 0) return;
     const idx = siblingEpisodes.findIndex((ep) => ep.id === playingItemId);
@@ -267,5 +305,6 @@ export function usePlayback({
     handlePlay,
     handlePlayerEnded,
     handleClosePlayer,
+    switchAudioStream,
   };
 }

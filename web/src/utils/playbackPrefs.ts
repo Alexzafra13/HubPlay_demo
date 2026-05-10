@@ -64,6 +64,52 @@ export const PLAYBACK_LANGUAGES: PlaybackLanguage[] = [
 ];
 
 /**
+ * Maps ISO 639-1 (2-letter) codes to ISO 639-2/B (3-letter) so the
+ * file-side language tag and the user-side preference can be compared
+ * without forcing both ends to agree on a single standard. The MKV
+ * spec mandates 639-2, but plenty of encoders (and ffprobe pulling
+ * them through) emit 639-1 instead. Covers the languages exposed in
+ * the Settings picker plus a few common ISO 639-2/T (terminological)
+ * synonyms — `fra`/`fre`, `deu`/`ger`, `zho`/`chi`, `ron`/`rum` —
+ * because real-world rips use both halves of the dual codes.
+ */
+const LANGUAGE_ALIASES: Record<string, string> = {
+  // ISO 639-1 → ISO 639-2/B
+  es: "spa",
+  en: "eng",
+  fr: "fre",
+  de: "ger",
+  it: "ita",
+  pt: "por",
+  ja: "jpn",
+  ko: "kor",
+  zh: "chi",
+  ar: "ara",
+  ru: "rus",
+  ro: "rum",
+  // ISO 639-2/T → ISO 639-2/B (the codes the picker uses)
+  fra: "fre",
+  deu: "ger",
+  zho: "chi",
+  ron: "rum",
+};
+
+/**
+ * normaliseLanguage collapses a language tag to the canonical ISO
+ * 639-2/B 3-letter form the picker uses. Strips region/script
+ * suffixes (`spa-419`, `es-MX`, `zh-Hant`) and resolves 2-letter +
+ * alternate-639-2 codes via LANGUAGE_ALIASES. Returns the lowercase
+ * input untouched when it doesn't fit any of the known shapes — the
+ * caller still gets a deterministic key it can match on.
+ */
+export function normaliseLanguage(raw: string | null | undefined): string {
+  if (!raw) return "";
+  // BCP-47 / Matroska region tags: keep the first subtag only.
+  const head = raw.toLowerCase().split(/[-_]/, 1)[0]!;
+  return LANGUAGE_ALIASES[head] ?? head;
+}
+
+/**
  * pickAudioStreamIndex returns the 0-based index of the first audio
  * stream in `streams` whose `language` matches `preferredLang`, or
  * -1 if no match (or no preference). Index is per-type — i.e. the
@@ -72,6 +118,13 @@ export const PLAYBACK_LANGUAGES: PlaybackLanguage[] = [
  * (ffprobe writes streams in container order; the container's
  * decision about which audio is "default" is irrelevant once we
  * pin a specific index).
+ *
+ * Language matching is lenient: ISO 639-1 ("es") matches the picker's
+ * 639-2 ("spa") via LANGUAGE_ALIASES, and region-tagged codes
+ * ("spa-419", "en-GB") match their bare form. Without this a
+ * Daredevil rip whose Spanish track is tagged "es" or "spa-419"
+ * never matched a "spa" preference — playback fell back to the file
+ * default (English) on the first play.
  */
 export function pickAudioStreamIndex(
   // The runtime shape from the API is snake_case (`stream_type`,
@@ -89,13 +142,14 @@ export function pickAudioStreamIndex(
   preferredLang: string,
 ): number {
   if (!streams || !preferredLang) return -1;
-  const want = preferredLang.toLowerCase();
+  const want = normaliseLanguage(preferredLang);
+  if (!want) return -1;
   let audioIdx = -1;
   for (const s of streams) {
     const kind = s.stream_type ?? s.type;
     if (kind !== "audio") continue;
     audioIdx++;
-    if ((s.language ?? "").toLowerCase() === want) {
+    if (normaliseLanguage(s.language) === want) {
       return audioIdx;
     }
   }

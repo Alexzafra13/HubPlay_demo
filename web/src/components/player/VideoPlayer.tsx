@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import type { FC } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "@/api/client";
@@ -13,6 +13,7 @@ import { UpNextOverlay, type UpNextInfo } from "./UpNextOverlay";
 import { ExternalSubsModal } from "./ExternalSubsModal";
 import { KeyboardHelpOverlay } from "./KeyboardHelpOverlay";
 import { SkipSegmentButton } from "./SkipSegmentButton";
+import { buildPickerTracksFromDB, type AudioTrack } from "./audioTracks";
 import type { ExternalSubtitleResult } from "@/api/types";
 
 // ─── Props ───────────────────────────────────────────────────────────────────
@@ -93,6 +94,23 @@ interface VideoPlayerProps {
    * it the picker falls back to the bare name.
    */
   audioStreams?: import("@/api/types").MediaStream[];
+  /**
+   * Per-type index of the currently-active audio stream. Drives the
+   * picker's "selected" indicator. -1 = file default (whichever
+   * `is_default` audio the muxer flagged); the picker resolves that
+   * to the matching DB row so the user still sees a check mark.
+   * Default -1 keeps existing call sites working without ceremony.
+   */
+  audioStreamIndex?: number;
+  /**
+   * Click-to-switch audio mid-playback. Player passes the picked
+   * stream's per-type index + the current playhead time so the
+   * parent can re-resolve the master with `?audio=N&start=<seconds>`
+   * and remount us. When this prop is absent the picker falls back
+   * to hls.js's setAudioTrack — which only works if the master.m3u8
+   * exposes multiple in-stream tracks (atypical for HubPlay).
+   */
+  onAudioStreamSelected?: (streamIndex: number, currentTimeSeconds: number) => void;
   onClose: () => void;
   onEnded?: () => void;
 }
@@ -103,6 +121,8 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
   itemId,
   peerId,
   peerStreamSessionId,
+  audioStreamIndex = -1,
+  onAudioStreamSelected,
   sessionToken,
   masterPlaylistUrl,
   directUrl,
@@ -119,7 +139,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
   onClose,
   onEnded: onEndedCallback,
 }) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const seekedToStartRef = useRef(false);
@@ -378,6 +398,17 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
     return () => video.removeEventListener("canplay", onCanPlay);
   }, [startPosition]);
 
+  // When the source URL changes mid-session — runtime audio-track
+  // switch reloads master.m3u8 with a new ?audio=N — reset the
+  // seeked-to-start gate so the next canplay event re-seeks to the
+  // updated startPosition. Without this, picking a different audio
+  // dub while playing dropped the user back at frame 0 of the new
+  // transcode (seekedToStartRef was already true from the first
+  // seek and no further seek would fire).
+  useEffect(() => {
+    seekedToStartRef.current = false;
+  }, [masterPlaylistUrl, directUrl]);
+
   // ─── Video event listeners ───────────────────────────────────────────────
 
   useEffect(() => {
@@ -615,6 +646,66 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
     [setSubtitleTrack],
   );
 
+  // Audio picker entries. When the parent provides DB MediaStream
+  // rows AND a switch callback, build the picker straight from the
+  // file's audio inventory with rich labels ("Castellano · DD+ 5.1
+  // · Predeterminado") that mirror what Plex / Jellyfin show. This
+  // path is the normal HubPlay route — the master.m3u8 transcodes a
+  // single track per session, so hls.js's audio-track list only
+  // sees that one entry; without the DB-driven picker the user
+  // can't see the other languages exist. Falls back to the bare
+  // hls.js list when the callback isn't wired (legacy callers /
+  // sessions without DB metadata).
+  const audioLocale: "es" | "en" = i18n.language?.startsWith("en") ? "en" : "es";
+  const dbDrivenAudioTracks = useMemo<AudioTrack[]>(() => {
+    if (!audioStreams || !onAudioStreamSelected) return [];
+    return buildPickerTracksFromDB(
+      audioStreams,
+      audioLocale,
+      audioLocale === "es" ? "Predeterminado" : "Default",
+    );
+  }, [audioStreams, onAudioStreamSelected, audioLocale]);
+
+  const useDbAudioPicker = dbDrivenAudioTracks.length > 1;
+
+  // Resolve which entry shows the check. -1 from the parent means
+  // "use the file's default audio" — we map that to the row whose
+  // is_default flag is set so the picker still shows a checkmark
+  // (matches Jellyfin's UX). Falls back to the first row if no
+  // stream is flagged default.
+  const defaultStreamPerTypeIndex = useMemo<number>(() => {
+    if (!audioStreams) return 0;
+    let idx = -1;
+    let firstAudio = -1;
+    for (const s of audioStreams) {
+      if (s.type !== "audio") continue;
+      idx++;
+      if (firstAudio === -1) firstAudio = idx;
+      if (s.is_default) return idx;
+    }
+    return firstAudio === -1 ? 0 : firstAudio;
+  }, [audioStreams]);
+
+  const displayAudioTracks = useDbAudioPicker ? dbDrivenAudioTracks : audioTracks;
+  const displayCurrentAudioTrack = useDbAudioPicker
+    ? (audioStreamIndex >= 0 ? audioStreamIndex : defaultStreamPerTypeIndex)
+    : currentAudioTrack;
+  const handleAudioTrackChange = useCallback(
+    (id: number) => {
+      if (useDbAudioPicker && onAudioStreamSelected) {
+        // Capture the playhead so the parent can resume at the
+        // same spot after the master reloads with the new ?audio=N.
+        // currentTime is already the live value from the <video>
+        // element, no need to round-trip through state.
+        const at = videoRef.current?.currentTime ?? 0;
+        onAudioStreamSelected(id, at);
+        return;
+      }
+      setAudioTrack(id);
+    },
+    [useDbAudioPicker, onAudioStreamSelected, setAudioTrack],
+  );
+
   // ─── Fullscreen change listener ──────────────────────────────────────────
 
   useEffect(() => {
@@ -791,12 +882,12 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
           volume={volume}
           isMuted={isMuted}
           isFullscreen={isFullscreen}
-          audioTracks={audioTracks}
-          audioStreams={audioStreams}
+          audioTracks={displayAudioTracks}
+          audioStreams={useDbAudioPicker ? undefined : audioStreams}
           subtitleTracks={mergedSubtitleTracks}
           qualityLevels={qualityLevels}
           chapters={chapters}
-          currentAudioTrack={currentAudioTrack}
+          currentAudioTrack={displayCurrentAudioTrack}
           currentSubtitleTrack={effectiveCurrentSubtitleTrack}
           currentQuality={currentQuality}
           onPlayPause={togglePlayPause}
@@ -804,7 +895,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
           onVolumeChange={handleVolumeChange}
           onToggleMute={handleToggleMute}
           onToggleFullscreen={handleToggleFullscreen}
-          onAudioTrackChange={setAudioTrack}
+          onAudioTrackChange={handleAudioTrackChange}
           onSubtitleTrackChange={handleSubtitleTrackChange}
           onQualityChange={setQuality}
           onSearchExternalSubs={() => setExternalSubsModalOpen(true)}
