@@ -212,6 +212,96 @@ func TestUserRepository_Count(t *testing.T) {
 	}
 }
 
+// TestUserRepository_ListProfilesForOwner pins the regression that
+// motivated the raw-SQL rewrite: sqlc 1.31.x truncated the generated
+// query so this endpoint 500'd permanently with "near \"?\": syntax
+// error" on every call. The hand-rolled implementation must (a)
+// return both the parent and any profiles in one call and (b) order
+// the parent first, then profiles alphabetically (case-insensitive).
+func TestUserRepository_ListProfilesForOwner(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	repo := db.NewUserRepository(database)
+	ctx := context.Background()
+
+	// Parent account.
+	parent := &db.User{
+		ID: "parent-1", Username: "alex", DisplayName: "Alex",
+		PasswordHash: "$2a$10$fake", Role: "admin", IsActive: true,
+		CreatedAt: time.Now(),
+	}
+	if err := repo.Create(ctx, parent); err != nil {
+		t.Fatalf("creating parent: %v", err)
+	}
+
+	// Three child profiles in non-alphabetical order so we can assert
+	// the ORDER BY actually sorts them. Names mix case to exercise
+	// LOWER()-based collation.
+	for _, p := range []*db.User{
+		{ID: "p-charlie", Username: "alex:charlie", DisplayName: "charlie",
+			PasswordHash: "", Role: "user", IsActive: true,
+			ParentUserID: parent.ID, CreatedAt: time.Now()},
+		{ID: "p-Bea", Username: "alex:bea", DisplayName: "Bea",
+			PasswordHash: "", Role: "user", IsActive: true,
+			ParentUserID: parent.ID, CreatedAt: time.Now()},
+		{ID: "p-alma", Username: "alex:alma", DisplayName: "alma",
+			PasswordHash: "", Role: "user", IsActive: true,
+			ParentUserID: parent.ID, CreatedAt: time.Now()},
+	} {
+		if err := repo.Create(ctx, p); err != nil {
+			t.Fatalf("creating profile %s: %v", p.DisplayName, err)
+		}
+	}
+
+	got, err := repo.ListProfilesForOwner(ctx, parent.ID)
+	if err != nil {
+		t.Fatalf("ListProfilesForOwner: %v", err)
+	}
+	if len(got) != 4 {
+		t.Fatalf("want 4 rows (parent + 3 profiles), got %d", len(got))
+	}
+
+	// Parent must be first regardless of name.
+	if got[0].ID != parent.ID {
+		t.Errorf("expected parent first, got %s", got[0].ID)
+	}
+	if got[0].ParentUserID != "" {
+		t.Errorf("parent row leaked ParentUserID = %q", got[0].ParentUserID)
+	}
+
+	// Profiles must follow case-insensitively: alma, Bea, charlie.
+	wantOrder := []string{"alma", "Bea", "charlie"}
+	for i, want := range wantOrder {
+		if got[i+1].DisplayName != want {
+			t.Errorf("position %d: want %q, got %q", i+1, want, got[i+1].DisplayName)
+		}
+		if got[i+1].ParentUserID != parent.ID {
+			t.Errorf("profile %s missing ParentUserID", got[i+1].DisplayName)
+		}
+	}
+}
+
+// TestUserRepository_ListProfilesForOwner_NoProfiles covers the
+// degenerate but common case: a single-user install. The query must
+// still return the owner row, not nil.
+func TestUserRepository_ListProfilesForOwner_NoProfiles(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	repo := db.NewUserRepository(database)
+	ctx := context.Background()
+
+	createTestUser(t, repo, "solo")
+
+	got, err := repo.ListProfilesForOwner(ctx, "user-solo")
+	if err != nil {
+		t.Fatalf("ListProfilesForOwner: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("want 1 row (just the owner), got %d", len(got))
+	}
+	if got[0].Username != "solo" {
+		t.Errorf("want 'solo', got %q", got[0].Username)
+	}
+}
+
 func TestUserRepository_UpdateLastLogin(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	repo := db.NewUserRepository(database)

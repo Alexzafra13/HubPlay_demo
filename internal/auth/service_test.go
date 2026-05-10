@@ -175,6 +175,50 @@ func TestService_RefreshToken_Success(t *testing.T) {
 	}
 }
 
+// TestService_RefreshToken_RotatesSecret pins the security-critical
+// invariant introduced when /auth/refresh stopped reusing the same
+// refresh token forever: every refresh MUST mint a fresh secret and
+// the old one MUST stop working immediately. A regression here would
+// silently re-open the 30-day leak window.
+func TestService_RefreshToken_RotatesSecret(t *testing.T) {
+	svc, _, _ := newTestAuthService(t)
+	registerTestUser(t, svc)
+	ctx := context.Background()
+
+	loginToken, err := svc.Login(ctx, "testuser", "password123", "Chrome", "dev-1", "127.0.0.1")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+
+	refreshed, err := svc.RefreshToken(ctx, loginToken.RefreshToken, "127.0.0.1")
+	if err != nil {
+		t.Fatalf("first refresh: %v", err)
+	}
+
+	if refreshed.RefreshToken == "" {
+		t.Fatal("rotated refresh token must not be empty")
+	}
+	if refreshed.RefreshToken == loginToken.RefreshToken {
+		t.Fatal("refresh token did not rotate — leak window is back to RefreshTokenTTL")
+	}
+
+	// Old token must be dead. Use a different IP so the per-IP rate
+	// limiter doesn't conflate this with a brute-force burst.
+	if _, err := svc.RefreshToken(ctx, loginToken.RefreshToken, "127.0.0.2"); err == nil {
+		t.Fatal("old refresh token still accepted after rotation")
+	}
+
+	// New token still works for a second refresh — the rotation is
+	// stateful, not a one-shot.
+	twiceRefreshed, err := svc.RefreshToken(ctx, refreshed.RefreshToken, "127.0.0.1")
+	if err != nil {
+		t.Fatalf("second refresh with new token: %v", err)
+	}
+	if twiceRefreshed.RefreshToken == refreshed.RefreshToken {
+		t.Error("second refresh did not rotate again")
+	}
+}
+
 func TestService_RefreshToken_InvalidToken(t *testing.T) {
 	svc, _, _ := newTestAuthService(t)
 

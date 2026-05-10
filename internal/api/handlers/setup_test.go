@@ -373,3 +373,74 @@ func TestSetupHandler_Complete_PropagatesStartScan(t *testing.T) {
 		t.Errorf("start_scan not propagated")
 	}
 }
+
+// ─── Post-completion guard ─────────────────────────────────────────────────
+//
+// Once the wizard has been completed, the mutating + filesystem-snooping
+// endpoints must refuse traffic. Before the guard, /setup/browse stayed
+// open as an unauthenticated filesystem listing forever (root-level
+// blocklist only — /home, /srv, /var/lib, mounted media were all
+// browsable). /setup/status keeps responding because the SPA hits it
+// on boot to know whether to redirect to the wizard, and it doesn't
+// leak anything.
+
+func TestSetupHandler_PostCompletion_Browse_403(t *testing.T) {
+	env := newSetupTestEnv(t)
+	env.setup.needsSetupFn = func(context.Context) bool { return false }
+	rr := env.do(http.MethodGet, "/api/v1/setup/browse?path=/", "")
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status: want 403, got %d", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "SETUP_COMPLETE") {
+		t.Errorf("expected SETUP_COMPLETE error code, body=%s", rr.Body.String())
+	}
+}
+
+func TestSetupHandler_PostCompletion_Capabilities_403(t *testing.T) {
+	env := newSetupTestEnv(t)
+	env.setup.needsSetupFn = func(context.Context) bool { return false }
+	rr := env.do(http.MethodGet, "/api/v1/setup/capabilities", "")
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status: want 403, got %d", rr.Code)
+	}
+}
+
+func TestSetupHandler_PostCompletion_CreateLibraries_403(t *testing.T) {
+	env := newSetupTestEnv(t)
+	env.setup.needsSetupFn = func(context.Context) bool { return false }
+	rr := env.do(http.MethodPost, "/api/v1/setup/libraries",
+		`{"libraries":[{"name":"x","content_type":"movie","paths":["/m"]}]}`)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status: want 403, got %d", rr.Code)
+	}
+}
+
+func TestSetupHandler_PostCompletion_UpdateSettings_403(t *testing.T) {
+	env := newSetupTestEnv(t)
+	env.setup.needsSetupFn = func(context.Context) bool { return false }
+	rr := env.do(http.MethodPut, "/api/v1/setup/settings", `{}`)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status: want 403, got %d", rr.Code)
+	}
+}
+
+func TestSetupHandler_PostCompletion_Complete_403(t *testing.T) {
+	env := newSetupTestEnv(t)
+	env.setup.needsSetupFn = func(context.Context) bool { return false }
+	rr := env.do(http.MethodPost, "/api/v1/setup/complete", `{"start_scan":false}`)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status: want 403, got %d", rr.Code)
+	}
+}
+
+// Status remains open because the SPA polls it on boot. Pin the
+// carve-out so a future "lock everything when needs_setup=false"
+// refactor doesn't accidentally break the redirect logic.
+func TestSetupHandler_PostCompletion_Status_StillOpen(t *testing.T) {
+	env := newSetupTestEnv(t)
+	env.setup.needsSetupFn = func(context.Context) bool { return false }
+	rr := env.do(http.MethodGet, "/api/v1/setup/status", "")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", rr.Code)
+	}
+}

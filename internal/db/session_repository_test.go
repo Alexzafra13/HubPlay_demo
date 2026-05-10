@@ -11,6 +11,60 @@ import (
 	"hubplay/internal/testutil"
 )
 
+// TestSessionRepository_RotateRefreshToken pins the rotation
+// invariant: the old hash MUST no longer resolve and the new hash
+// MUST resolve to the same session row, with bumped last_active_at
+// and expires_at. Without this the rotation in /auth/refresh would
+// silently regress a future refactor.
+func TestSessionRepository_RotateRefreshToken(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	userRepo := db.NewUserRepository(database)
+	repo := db.NewSessionRepository(database)
+	seedUserForSessions(t, userRepo)
+
+	created := time.Now().Add(-time.Hour).Truncate(time.Second)
+	original := &db.Session{
+		ID:               "session-1",
+		UserID:           "user-1",
+		DeviceName:       "Chrome",
+		DeviceID:         "dev-1",
+		RefreshTokenHash: "hash-old",
+		CreatedAt:        created,
+		LastActiveAt:     created,
+		ExpiresAt:        created.Add(720 * time.Hour),
+	}
+	if err := repo.Create(context.Background(), original); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	rotateAt := time.Now().Truncate(time.Second)
+	newExp := rotateAt.Add(720 * time.Hour)
+	if err := repo.RotateRefreshToken(context.Background(), original.ID, "hash-new", rotateAt, newExp); err != nil {
+		t.Fatalf("rotate: %v", err)
+	}
+
+	if _, err := repo.GetByRefreshTokenHash(context.Background(), "hash-old"); !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("old hash should be gone, got err=%v", err)
+	}
+
+	got, err := repo.GetByRefreshTokenHash(context.Background(), "hash-new")
+	if err != nil {
+		t.Fatalf("new hash lookup: %v", err)
+	}
+	if got.ID != original.ID {
+		t.Errorf("new hash resolved to different session: %s", got.ID)
+	}
+	if !got.LastActiveAt.Equal(rotateAt) {
+		t.Errorf("LastActiveAt: want %v, got %v", rotateAt, got.LastActiveAt)
+	}
+	if !got.ExpiresAt.Equal(newExp) {
+		t.Errorf("ExpiresAt: want %v, got %v", newExp, got.ExpiresAt)
+	}
+	if !got.CreatedAt.Equal(created) {
+		t.Errorf("CreatedAt should not change: want %v, got %v", created, got.CreatedAt)
+	}
+}
+
 func seedUserForSessions(t *testing.T, database *db.UserRepository) {
 	t.Helper()
 	u := &db.User{
