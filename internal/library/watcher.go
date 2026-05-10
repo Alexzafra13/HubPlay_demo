@@ -329,15 +329,64 @@ func (w *FSWatcher) handleEvent(ctx context.Context, ev fsnotify.Event) {
 
 	// New subdirectory under a watched root → add a watch for it
 	// before the user copies files into it.
+	//
+	// Race: `mkdir -p deep/path` (or any tool that creates several
+	// nested dirs in one syscall burst) fires CREATE for the OUTER
+	// dir while the parent is watched, but by the time we process
+	// that event the kernel has already created the inner dirs —
+	// their CREATE events fired against a parent that wasn't yet
+	// watched, so they were never delivered. We compensate by
+	// walking the new dir and adding watches for everything inside
+	// it that already exists. New leaf dirs that appear AFTER this
+	// walk land in our own watch (we now own their parent), so
+	// they're handled by the standard per-event path. Idempotent
+	// against the alreadyWatched check in addLibraryTree-style
+	// loops — a dir already in watchedRoots is skipped.
 	if ev.Has(fsnotify.Create) {
 		if info, err := os.Stat(ev.Name); err == nil && info.IsDir() {
-			if err := w.watch.Add(ev.Name); err == nil {
-				w.watchedRoots[ev.Name] = libID
-			}
+			w.addSubtreeWatch(ev.Name, libID)
 		}
 	}
 
 	w.kickDebounce(ctx, libID)
+}
+
+// addSubtreeWatch walks `root` and adds an fsnotify watch for every
+// directory underneath, attributed to `libID`. Skips paths already
+// in watchedRoots so the inline subscribe-on-CREATE remains
+// idempotent against the periodic reconcile walk. Errors per-path
+// are logged once and the walk continues — losing one branch is
+// strictly better than losing the rest of the tree.
+func (w *FSWatcher) addSubtreeWatch(root, libID string) {
+	_ = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			// Permission denied / vanished mid-walk / etc. Log and
+			// keep going; matches addLibraryTree's policy.
+			w.logger.Warn("subtree watch walk",
+				"path", path,
+				"library_id", libID,
+				"error", walkErr)
+			if entry != nil && entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !entry.IsDir() {
+			return nil
+		}
+		if _, already := w.watchedRoots[path]; already {
+			return nil
+		}
+		if err := w.watch.Add(path); err != nil {
+			w.logger.Warn("fsnotify add (subtree)",
+				"path", path,
+				"library_id", libID,
+				"error", err)
+			return nil
+		}
+		w.watchedRoots[path] = libID
+		return nil
+	})
 }
 
 // kickDebounce starts (or restarts) the per-library quiet-timer.
