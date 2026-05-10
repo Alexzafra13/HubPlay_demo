@@ -412,14 +412,25 @@ func (m *Manager) startSessionSlow(ctx context.Context, userID, itemID, profileN
 // restartCoalesceWindow is the ±N segment range within which a
 // pending restart MAY be considered to "cover" a new request. Pair
 // with restartCoalesceTimeWindow: BOTH conditions must hold for a
-// new call to be coalesced. hls.js's parallel-fanout burst on a
-// seek arrives within ~100 ms across 2-3 adjacent segments, so the
-// AND-gate catches it cleanly. A second HUMAN click that happens
-// to land on a nearby segment 5 s later fails the time gate and
-// gets its own real restart — fixes the "second seek feels
-// blocked" bug observed 2026-05-08 in production.
-const restartCoalesceWindow = 6
-const restartCoalesceTimeWindow = 2 * time.Second
+// new call to be coalesced.
+//
+// We size the gates against ONE specific pattern — hls.js's
+// parallel-fanout burst on a single seek, which arrives within
+// ~100 ms across the segment containing the seek + 1-2 prefill
+// segments after it. Anything wider, and a second human click on
+// a nearby spot 1-2 s later gets silently coalesced into the
+// in-flight restart — the user sees ffmpeg keep producing from
+// the FIRST seek's offset and the player never reaches their
+// second target. Reported 2026-05-10: "click another minute, the
+// player doesn't go there; click again, sometimes works".
+//
+// 2 segments AND 300 ms cover hls.js's actual fanout (~100 ms,
+// 3 adjacent segments — the segment containing the seek + 2
+// prefill) with a comfortable jitter margin, while staying
+// well below human re-click reaction time (~500 ms minimum for
+// "click, see no movement, click again").
+const restartCoalesceWindow = 2
+const restartCoalesceTimeWindow = 300 * time.Millisecond
 
 // restartRateLimit caps RestartSessionAt invocations per session per
 // minute. Healthy use lands well under this — a user dragging the

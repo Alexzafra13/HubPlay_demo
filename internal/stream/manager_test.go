@@ -426,11 +426,11 @@ func eventNewBus() *event.Bus {
 // coalesce window of the first restart and bail without touching
 // the transcoder.
 //
-// We pre-set LastRestartSegment as if the "first" caller already
-// finished, then fire a burst of subsequent calls — each must
-// return nil without altering state. (We can't unit-test the
-// in-flight race directly without mocking the transcoder; this
-// inverted form covers the same code path.)
+// Window is intentionally tight — only the documented hls.js
+// fanout shape (3 adjacent segments within ~100 ms) coalesces.
+// Anything wider was eating legitimate human re-seeks; see
+// TestManager_RestartSessionAt_NearbyHumanSeekTriggersNewRestart
+// below for that regression.
 func TestManager_RestartSessionAt_CoalescesAdjacent(t *testing.T) {
 	m := newTestManager(t)
 	defer m.Shutdown()
@@ -452,11 +452,12 @@ func TestManager_RestartSessionAt_CoalescesAdjacent(t *testing.T) {
 	}
 	m.mu.Unlock()
 
-	// Simulate hls.js fanout: near-adjacent segment requests that all
-	// arrive within milliseconds of the first restart (LastRestartTime
-	// just set above is "now"). Both gates of the AND-coalesce hold
-	// → all extra calls return nil without touching ffmpeg.
-	for _, segIdx := range []int{953, 954, 955, 956, 958} {
+	// hls.js fanout shape: the segment containing the seek + 2
+	// prefill segments. All three arrive within milliseconds. Both
+	// gates of the AND-coalesce hold (delta 0/1/2 ≤ window=2,
+	// time < 300 ms) so each call returns nil without touching
+	// ffmpeg.
+	for _, segIdx := range []int{953, 954, 955} {
 		if err := m.RestartSessionAt("test-key", segIdx, 6.0); err != nil {
 			t.Errorf("RestartSessionAt(%d) returned error %v — coalesce check should have skipped",
 				segIdx, err)
@@ -470,6 +471,94 @@ func TestManager_RestartSessionAt_CoalescesAdjacent(t *testing.T) {
 	if ms.LastRestartSegment != 953 {
 		t.Errorf("LastRestartSegment changed to %d (expected 953); coverage check failed to coalesce",
 			ms.LastRestartSegment)
+	}
+}
+
+// TestManager_RestartSessionAt_NearbyHumanSeekTriggersNewRestart
+// pins the user-reported 2026-05-10 regression: the player asked
+// for a far minute, the manager silently coalesced the seek into
+// the in-flight one because the new segment landed within the old
+// 6-segment / 2-second window. Result was the player feeling
+// "stuck" — ffmpeg kept producing from the FIRST seek, the requested
+// segment never landed within the 15 s waitForFile, the user
+// clicked again and again until something stuck.
+//
+// With the tightened window (2 segments / 300 ms) a click 500 ms
+// later on a segment 5 ahead must NOT coalesce — it must attempt a
+// real restart. The transcoder then errors on the bogus
+// /dev/null InputPath but the test only cares that the restart
+// codepath was entered (i.e. NOT silently swallowed).
+func TestManager_RestartSessionAt_NearbyHumanSeekTriggersNewRestart(t *testing.T) {
+	m := newTestManager(t)
+	defer m.Shutdown()
+
+	m.mu.Lock()
+	m.sessions["test-key"] = &ManagedSession{
+		Session: &Session{
+			ID:        "test-key",
+			ItemID:    "item-1",
+			OutputDir: t.TempDir(),
+			done:      closedChan(),
+		},
+		UserID:             "user1",
+		InputPath:          "/dev/null",
+		Decision:           PlaybackDecision{Profile: DefaultProfile()},
+		LastAccessed:       time.Now(),
+		LastRestartSegment: 100,
+		// 500 ms ago — well past the 300 ms coalesce window, so
+		// even if the new segment is "near", the time gate fails
+		// and the coalesce is skipped.
+		LastRestartTime: time.Now().Add(-500 * time.Millisecond),
+	}
+	m.mu.Unlock()
+
+	// Segment 105: delta = 5 (would have coalesced under the old
+	// 6-segment window). With the time gate already failing on its
+	// own, the call must reach the actual restart path.
+	err := m.RestartSessionAt("test-key", 105, 6.0)
+	if err == nil {
+		t.Fatal("RestartSessionAt returned nil — the manager silently coalesced a legitimate human re-seek")
+	}
+	if errors.Is(err, ErrRestartRateLimited) || errors.Is(err, ErrSessionNotFound) {
+		t.Fatalf("expected a transcoder error from the real restart path, got %v", err)
+	}
+}
+
+// TestManager_RestartSessionAt_FarSegmentBypassesCoalesce covers
+// the OTHER half of the tightening: a fanout request for a segment
+// well outside the new 2-segment window should also bypass the
+// coalesce, even when it arrives instantly after the in-flight
+// restart. This catches a future widening of either gate from
+// silently breaking the user-facing behaviour.
+func TestManager_RestartSessionAt_FarSegmentBypassesCoalesce(t *testing.T) {
+	m := newTestManager(t)
+	defer m.Shutdown()
+
+	m.mu.Lock()
+	m.sessions["test-key"] = &ManagedSession{
+		Session: &Session{
+			ID:        "test-key",
+			ItemID:    "item-1",
+			OutputDir: t.TempDir(),
+			done:      closedChan(),
+		},
+		UserID:             "user1",
+		InputPath:          "/dev/null",
+		Decision:           PlaybackDecision{Profile: DefaultProfile()},
+		LastAccessed:       time.Now(),
+		LastRestartSegment: 100,
+		LastRestartTime:    time.Now(),
+	}
+	m.mu.Unlock()
+
+	// Segment 200 is 100 ahead — clearly a far seek even though
+	// the time gate alone would have allowed coalesce.
+	err := m.RestartSessionAt("test-key", 200, 6.0)
+	if err == nil {
+		t.Fatal("RestartSessionAt returned nil for a far-seek call — segment gate failed")
+	}
+	if errors.Is(err, ErrRestartRateLimited) || errors.Is(err, ErrSessionNotFound) {
+		t.Fatalf("expected a transcoder error from the real restart path, got %v", err)
 	}
 }
 
