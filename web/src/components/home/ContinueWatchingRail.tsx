@@ -40,7 +40,12 @@ export function ContinueWatchingRail() {
   return (
     <HomeRail title={t("home.continueWatching")}>
       {items.map((item) => (
-        <LandscapeCard key={item.id} item={item} />
+        // Continue Watching cards always launch playback on click —
+        // by definition the user is mid-watch, so dropping them on
+        // the detail page first is one click of friction nobody
+        // wants. The detail surface is one back-arrow away if they
+        // really want metadata.
+        <LandscapeCard key={item.id} item={item} autoPlay />
       ))}
     </HomeRail>
   );

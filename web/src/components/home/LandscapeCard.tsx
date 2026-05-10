@@ -17,19 +17,34 @@ import type { MediaItem } from "@/api/types";
 
 interface LandscapeCardProps {
   item: MediaItem;
+  // autoPlay=true tags the destination URL with `?play=1`, which the
+  // detail page consumes to launch the player overlay immediately
+  // instead of stopping on the metadata view. Used by Continue
+  // Watching where every card is already a "resume" affordance —
+  // clicking the play icon on a half-watched episode and then
+  // having to click Reproducir again is a Plex pet peeve.
+  autoPlay?: boolean;
 }
 
-export function LandscapeCard({ item }: LandscapeCardProps) {
+export function LandscapeCard({ item, autoPlay = false }: LandscapeCardProps) {
   const isEpisode = item.type === "episode";
   // Episodes link to their season's page so the user lands in the
   // episode list rather than hitting an isolated episode-detail
   // route. Movies / series link to their own detail surface.
-  const href =
+  // Resume mode (autoPlay) is special: episodes link directly to
+  // their own /items/:id route so the auto-play handler can fire
+  // without a season-scope detour.
+  const baseHref =
     item.type === "series"
       ? `/series/${item.id}`
-      : item.type === "episode" && item.parent_id
-        ? `/items/${item.parent_id}`
+      : item.type === "episode"
+        ? autoPlay
+          ? `/items/${item.id}`
+          : item.parent_id
+            ? `/items/${item.parent_id}`
+            : `/items/${item.id}`
         : `/movies/${item.id}`;
+  const href = autoPlay ? `${baseHref}?play=1` : baseHref;
 
   // Image priority: episode → its own screencap (backdrop_url is
   // populated by the scanner from the per-episode still). Movies →
