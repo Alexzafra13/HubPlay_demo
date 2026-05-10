@@ -906,6 +906,20 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
           onClose={handleClose}
           title={title}
           logoUrl={logoUrl}
+          playbackMethod={
+            playbackMethod === "direct_play" || playbackMethod === "direct_stream" || playbackMethod === "transcode"
+              ? playbackMethod
+              : undefined
+          }
+          // Show the active variant only for transcoded sessions —
+          // direct_play / direct_stream serve the source as-is so a
+          // "1080p" badge there would lie. The current quality
+          // index maps back to the variant label hls.js exposed.
+          transcodeProfileLabel={
+            playbackMethod === "transcode" && currentQuality !== undefined
+              ? qualityLevels.find((q) => q.id === currentQuality)?.label
+              : undefined
+          }
         />
       </div>
 

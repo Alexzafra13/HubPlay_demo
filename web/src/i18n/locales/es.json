@@ -301,7 +301,13 @@
     "fullscreen": "Pantalla completa",
     "exitFullscreen": "Salir de pantalla completa",
     "closePlayer": "Cerrar reproductor",
-    "trackFallback": "Pista {{n}}"
+    "trackFallback": "Pista {{n}}",
+    "method": {
+      "directPlay": "Reproducción directa",
+      "directStream": "Stream directo",
+      "transcode": "Transcodificando",
+      "transcodeWithProfile": "Transcodificando · {{profile}}"
+    }
   },
   "externalSubs": {
     "title": "Subtitulos online",
@@ -1014,6 +1020,10 @@
         "hwAccelPreferred": {
           "label": "Acelerador preferido",
           "hint": "Auto selecciona el mejor disponible; fija uno para forzar al detector."
+        },
+        "forceDirectPlay": {
+          "label": "Forzar reproducción directa",
+          "hint": "Envía el archivo tal cual a todos los clientes y nunca transcodifica. Off por defecto. Actívalo solo si estás seguro de que cada cliente (navegador, app TV, etc.) puede decodificar todos los códecs y contenedores de tu biblioteca; si no, la reproducción fallará."
         }
       },
       "totalLibraries": "Total de bibliotecas",

@@ -65,6 +65,14 @@ type Manager struct {
 	// re-running ffmpeg on every poll. Zero value means "no detection
 	// performed" (HWAccel.Enabled = false in config).
 	hwAccel HWAccelResult
+	// forceDirectPlayLookup is the optional hook into runtime settings
+	// for `playback.force_direct_play`. When set and the lookup
+	// returns true, the manager skips the capability waterfall and
+	// returns a DirectPlay decision — the admin has vouched that
+	// every client can decode every file. Nil-safe: when the hook
+	// isn't wired (tests, deployments without runtime settings) the
+	// normal Decide() path runs unchanged.
+	forceDirectPlayLookup func(context.Context) bool
 }
 
 // ManagedSession wraps a transcoding session with access tracking.
@@ -228,6 +236,30 @@ func SessionKey(userID, itemID, profile string, audioStreamIndex int) string {
 	return sessionKey(userID, itemID, profile, audioStreamIndex)
 }
 
+// SetForceDirectPlayLookup wires the runtime-settings hook for the
+// `playback.force_direct_play` admin toggle. main.go calls this
+// after both the Manager and the Settings repo are constructed.
+// Nil-safe and idempotent — call again to swap implementations
+// (e.g. swapping a test stub for the real settings repo).
+func (m *Manager) SetForceDirectPlayLookup(fn func(context.Context) bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.forceDirectPlayLookup = fn
+}
+
+// shouldForceDirectPlay returns the runtime value of the
+// `playback.force_direct_play` admin toggle. Falls through to false
+// when no lookup is wired.
+func (m *Manager) shouldForceDirectPlay(ctx context.Context) bool {
+	m.mu.Lock()
+	fn := m.forceDirectPlayLookup
+	m.mu.Unlock()
+	if fn == nil {
+		return false
+	}
+	return fn(ctx)
+}
+
 // StartSession creates or returns an existing session for the given item.
 //
 // `caps` is the client's declared codec/container capabilities (parsed
@@ -336,7 +368,12 @@ func (m *Manager) startSessionSlow(ctx context.Context, userID, itemID, profileN
 		return nil, fmt.Errorf("get streams: %w", err)
 	}
 
-	decision := Decide(item, mediaStreams, caps, profileName)
+	var decision PlaybackDecision
+	if m.shouldForceDirectPlay(ctx) {
+		decision = DecideForceDirectPlay(item, mediaStreams)
+	} else {
+		decision = Decide(item, mediaStreams, caps, profileName)
+	}
 
 	// Direct play doesn't need a transcode session
 	if decision.Method == MethodDirectPlay {

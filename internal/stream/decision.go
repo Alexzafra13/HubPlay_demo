@@ -47,6 +47,49 @@ var remuxableContainers = map[string]bool{
 	"mpegts":   true,
 }
 
+// DecideForceDirectPlay short-circuits the capability waterfall and
+// returns a DirectPlay decision regardless of what the client said it
+// can decode. This is the policy hook for an admin who has flipped
+// `playback.force_direct_play` on — they're vouching that every client
+// they care about can decode every file in the library, and they'd
+// rather see a broken playback than have the server burn CPU on a
+// transcode they think is unnecessary.
+//
+// We still pull the file's actual video / audio / container metadata
+// so the response shape mirrors what Decide() returns on the
+// happy-path DirectPlay branch — the player UI's pill ("Reproducción
+// directa") shows the codecs the file ships with, not "unknown".
+//
+// Caller is expected to have verified item != nil already; the helper
+// returns a zero-value DirectPlay decision when streams are empty,
+// which the player will then attempt to play with whatever the
+// browser can do.
+func DecideForceDirectPlay(item *db.Item, streams []*db.MediaStream) PlaybackDecision {
+	var videoStream, audioStream *db.MediaStream
+	for _, s := range streams {
+		switch s.StreamType {
+		case "video":
+			if videoStream == nil || s.IsDefault {
+				videoStream = s
+			}
+		case "audio":
+			if audioStream == nil || s.IsDefault {
+				audioStream = s
+			}
+		}
+	}
+	videoCodec := ""
+	if videoStream != nil {
+		videoCodec = videoStream.Codec
+	}
+	return PlaybackDecision{
+		Method:     MethodDirectPlay,
+		VideoCodec: videoCodec,
+		AudioCodec: audioCodecName(audioStream),
+		Container:  item.Container,
+	}
+}
+
 // Decide analyzes the item's media streams and returns a playback decision.
 // It follows the waterfall: DirectPlay → DirectStream → Transcode.
 //

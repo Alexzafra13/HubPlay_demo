@@ -269,6 +269,8 @@ function settingI18nKey(backendKey: string): string {
       return "hwAccelEnabled";
     case "hardware_acceleration.preferred":
       return "hwAccelPreferred";
+    case "playback.force_direct_play":
+      return "forceDirectPlay";
     default:
       return backendKey.replace(/[^a-zA-Z0-9]+/g, "_");
   }

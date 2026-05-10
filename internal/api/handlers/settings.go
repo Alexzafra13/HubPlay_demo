@@ -74,6 +74,12 @@ const (
 	settingBaseURL          = "server.base_url"
 	settingHWAccelEnabled   = "hardware_acceleration.enabled"
 	settingHWAccelPreferred = "hardware_acceleration.preferred"
+	// settingForceDirectPlay tells the streaming layer to skip the
+	// capability-negotiation waterfall and serve every item via
+	// DirectPlay (raw file, no ffmpeg). The admin owns the
+	// trade-off: zero CPU cost vs. broken playback when a client
+	// can't actually decode the file.
+	settingForceDirectPlay = "playback.force_direct_play"
 )
 
 // hwAccelChoices is the master set of values the *validator* accepts
@@ -261,6 +267,13 @@ func (h *SettingsHandler) describeAll(ctx context.Context) ([]settingDescriptor,
 			// saw on the host so the panel can't offer (e.g.) nvenc
 			// when no NVIDIA GPU is present.
 		},
+		{
+			Key:           settingForceDirectPlay,
+			Default:       "false",
+			RestartNeeded: false,
+			Hint:          "Send the file as-is to every client; skip the capability waterfall and never transcode. Off by default — only enable when you're certain every client (browser, TV app, etc.) can decode every codec / container in your library.",
+			AllowedValues: []string{"true", "false"},
+		},
 	}
 	for i := range rows {
 		stored, err := h.settings.Get(ctx, rows[i].Key)
@@ -291,7 +304,7 @@ func (h *SettingsHandler) describeAll(ctx context.Context) ([]settingDescriptor,
 // valid value looks like.
 func isAllowedSettingKey(key string) bool {
 	switch key {
-	case settingBaseURL, settingHWAccelEnabled, settingHWAccelPreferred:
+	case settingBaseURL, settingHWAccelEnabled, settingHWAccelPreferred, settingForceDirectPlay:
 		return true
 	default:
 		return false
@@ -334,6 +347,15 @@ func validateSettingValue(key, value string) (string, error) {
 			}
 		}
 		return "", errors.New("value must be one of: " + strings.Join(hwAccelChoices, ", "))
+	case settingForceDirectPlay:
+		_, err := strconv.ParseBool(value)
+		if err != nil {
+			return "", errors.New("value must be true or false")
+		}
+		if value == "1" || strings.EqualFold(value, "true") || strings.EqualFold(value, "t") {
+			return "true", nil
+		}
+		return "false", nil
 	default:
 		return "", errors.New("unknown key")
 	}

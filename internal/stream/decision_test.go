@@ -165,3 +165,74 @@ func TestDecide_AudioOnly(t *testing.T) {
 		t.Errorf("expected Transcode for audio-only, got %s", d.Method)
 	}
 }
+
+func TestDecideForceDirectPlay_BypassesCapsForHEVC(t *testing.T) {
+	// Daredevil-shaped rip: HEVC video + EAC3 audio + MKV container.
+	// Decide() forces a Transcode against web defaults (no HEVC, no
+	// EAC3, no MKV). DecideForceDirectPlay must skip the waterfall
+	// and return DirectPlay with the file's actual codecs in the
+	// response — that's what the player pill renders.
+	item := &db.Item{Container: "matroska,webm"}
+	streams := []*db.MediaStream{
+		{StreamType: "video", Codec: "hevc", IsDefault: true},
+		{StreamType: "audio", Codec: "eac3", IsDefault: true},
+	}
+	d := DecideForceDirectPlay(item, streams)
+	if d.Method != MethodDirectPlay {
+		t.Fatalf("Method = %s, want DirectPlay", d.Method)
+	}
+	if d.VideoCodec != "hevc" {
+		t.Errorf("VideoCodec = %q, want hevc (from the file, not the encoder)", d.VideoCodec)
+	}
+	if d.AudioCodec != "eac3" {
+		t.Errorf("AudioCodec = %q, want eac3", d.AudioCodec)
+	}
+	if d.Container != "matroska,webm" {
+		t.Errorf("Container = %q, want the raw ffprobe value", d.Container)
+	}
+	// DirectPlay never spins up ffmpeg, so the copy flags + profile
+	// are zero-value by construction. Pin that so a future "pass
+	// the profile through anyway" change is at least deliberate.
+	if d.CopyVideo || d.CopyAudio {
+		t.Errorf("CopyVideo/CopyAudio should be false for DirectPlay (got %v / %v)", d.CopyVideo, d.CopyAudio)
+	}
+}
+
+func TestDecideForceDirectPlay_PrefersDefaultStream(t *testing.T) {
+	// Multi-language rip: the file has a non-default English audio
+	// AND a default Spanish one. DecideForceDirectPlay must pick the
+	// flagged default — same convention as Decide() so the player
+	// pill labels the dub the user actually hears, not whichever
+	// stream happened to be first in the container.
+	item := &db.Item{Container: "matroska,webm"}
+	streams := []*db.MediaStream{
+		{StreamType: "video", Codec: "h264", IsDefault: true},
+		{StreamType: "audio", Codec: "ac3", Language: "eng"},        // first, non-default
+		{StreamType: "audio", Codec: "eac3", Language: "spa", IsDefault: true},
+	}
+	d := DecideForceDirectPlay(item, streams)
+	if d.AudioCodec != "eac3" {
+		t.Errorf("AudioCodec = %q, want eac3 (the IsDefault stream)", d.AudioCodec)
+	}
+}
+
+func TestDecideForceDirectPlay_AudioOnlyItemEmptyVideoCodec(t *testing.T) {
+	// Defensive: a row with no video stream returns DirectPlay with
+	// an empty VideoCodec rather than panicking. The browser will
+	// likely fail to play it, but that's the operator's risk
+	// (force_direct_play is opt-in for a reason).
+	item := &db.Item{Container: "mp4"}
+	streams := []*db.MediaStream{
+		{StreamType: "audio", Codec: "aac", IsDefault: true},
+	}
+	d := DecideForceDirectPlay(item, streams)
+	if d.Method != MethodDirectPlay {
+		t.Errorf("Method = %s, want DirectPlay even on audio-only", d.Method)
+	}
+	if d.VideoCodec != "" {
+		t.Errorf("VideoCodec = %q, want empty", d.VideoCodec)
+	}
+	if d.AudioCodec != "aac" {
+		t.Errorf("AudioCodec = %q, want aac", d.AudioCodec)
+	}
+}
