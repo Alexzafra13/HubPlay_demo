@@ -55,3 +55,8 @@ DELETE FROM sessions WHERE user_id = ?;
 
 -- name: UpdateSessionLastActive :exec
 UPDATE sessions SET last_active_at = ? WHERE id = ?;
+
+-- RotateSessionRefreshToken: hand-rolled in session_repository.go.
+-- sqlc 1.31.x mangles UPDATEs with 4+ placeholders by truncating the
+-- trailing `?;` of the WHERE clause, so the rotation has to bypass
+-- codegen.

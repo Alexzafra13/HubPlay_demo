@@ -319,11 +319,29 @@ func (s *Service) RefreshToken(ctx context.Context, refreshToken, ip string) (*A
 		return nil, err
 	}
 
-	_ = s.sessions.UpdateLastActive(ctx, session.ID, s.clock.Now())
+	// Rotate the refresh token: every successful refresh mints a new
+	// secret and atomically replaces the hash on the row, so the old
+	// token is dead the moment the response leaves the server. With
+	// the previous "keep the same refresh token forever" behaviour a
+	// leaked refresh sat valid for the full RefreshTokenTTL (30 days)
+	// with no detection. Rotation alone doesn't give us reuse
+	// detection (we'd need a "rotated_at" column to flag the chain
+	// on a duplicate use), but it caps the attacker's window to
+	// "until the legitimate client refreshes once" — typically
+	// minutes — and is invisible to a well-behaved client.
+	newRefreshToken, err := generateRefreshToken()
+	if err != nil {
+		return nil, fmt.Errorf("refresh: rotate: %w", err)
+	}
+	now := s.clock.Now()
+	newExpiresAt := now.Add(s.cfg.RefreshTokenTTL)
+	if err := s.sessions.RotateRefreshToken(ctx, session.ID, hashToken(newRefreshToken), now, newExpiresAt); err != nil {
+		return nil, fmt.Errorf("refresh: rotate: %w", err)
+	}
 
 	return &AuthToken{
 		AccessToken:  accessToken,
-		RefreshToken: refreshToken,
+		RefreshToken: newRefreshToken,
 		ExpiresAt:    expiresAt,
 		UserID:       user.ID,
 		Role:         user.Role,

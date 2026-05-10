@@ -27,11 +27,12 @@ type Session struct {
 }
 
 type SessionRepository struct {
-	q *sqlc.Queries
+	db *sql.DB // kept for RotateRefreshToken (sqlc 1.31.x parser bug)
+	q  *sqlc.Queries
 }
 
 func NewSessionRepository(database *sql.DB) *SessionRepository {
-	return &SessionRepository{q: sqlc.New(database)}
+	return &SessionRepository{db: database, q: sqlc.New(database)}
 }
 
 func (r *SessionRepository) Create(ctx context.Context, s *Session) error {
@@ -138,6 +139,23 @@ func (r *SessionRepository) DeleteAllByUser(ctx context.Context, userID string) 
 		return 0, fmt.Errorf("delete all user sessions: %w", err)
 	}
 	return n, nil
+}
+
+// RotateRefreshToken atomically replaces the stored refresh-token
+// hash, bumps last_active_at, and pushes expires_at out by another
+// full TTL. Caller is responsible for ensuring `newHash` was minted
+// from a freshly generated refresh token; this method only does the
+// DB update.
+//
+// Hand-rolled (not sqlc-generated) because sqlc 1.31.x truncates
+// UPDATEs with 4+ placeholders by chopping the trailing `?;` off the
+// WHERE clause. See the same dodge for ListProfilesForOwner.
+func (r *SessionRepository) RotateRefreshToken(ctx context.Context, id, newHash string, lastActive, expiresAt time.Time) error {
+	const query = `UPDATE sessions SET refresh_token_hash = ?, last_active_at = ?, expires_at = ? WHERE id = ?`
+	if _, err := r.db.ExecContext(ctx, query, newHash, lastActive, expiresAt, id); err != nil {
+		return fmt.Errorf("rotate session refresh token: %w", err)
+	}
+	return nil
 }
 
 func (r *SessionRepository) UpdateLastActive(ctx context.Context, id string, t time.Time) error {
