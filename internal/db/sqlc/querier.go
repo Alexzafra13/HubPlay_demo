@@ -342,20 +342,6 @@ type Querier interface {
 	ListMediaStreamsByItem(ctx context.Context, itemID string) ([]ListMediaStreamsByItemRow, error)
 	ListPathsByLibrary(ctx context.Context, libraryID string) ([]string, error)
 	ListPeers(ctx context.Context) ([]FederationPeer, error)
-	// Returns the parent account row plus every profile that hangs off
-	// it, ordered by the parent first, then profiles alphabetically.
-	// Drives both the post-login "Who's watching?" payload and the admin
-	// profile list under a user. The username column is unique, so
-	// profiles synthesise theirs as "<parent.username>:<display_name>"
-	// via the handler — we don't expose them for login anyway.
-	// ASC is redundant for collation but works around a sqlc 1.31.x
-	// bug that truncates `COLLATE NOCASE;` (with the trailing semicolon
-	// directly after) to `COLLATE NOCA` in the generated Go string —
-	// which then errors at runtime ("no such collation sequence: NOCA").
-	// The other queries in this codebase that use COLLATE happen to
-	// carry ASC/DESC and render fine. See git history of this file
-	// for the diagnosis.
-	ListProfilesForOwner(ctx context.Context, arg ListProfilesForOwnerParams) ([]ListProfilesForOwnerRow, error)
 	ListProviders(ctx context.Context) ([]Provider, error)
 	ListProvidersByType(ctx context.Context, type_ string) ([]Provider, error)
 	// NOTE: SearchSharedItems is implemented as raw SQL in

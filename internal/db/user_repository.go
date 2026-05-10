@@ -72,11 +72,12 @@ type User struct {
 func (u User) IsProfile() bool { return u.ParentUserID != "" }
 
 type UserRepository struct {
-	q *sqlc.Queries
+	db *sql.DB // kept for ListProfilesForOwner (sqlc 1.31.x parser bug)
+	q  *sqlc.Queries
 }
 
 func NewUserRepository(database *sql.DB) *UserRepository {
-	return &UserRepository{q: sqlc.New(database)}
+	return &UserRepository{db: database, q: sqlc.New(database)}
 }
 
 func (r *UserRepository) GetByID(ctx context.Context, id string) (*User, error) {
@@ -246,24 +247,68 @@ func (r *UserRepository) PrimaryAdminID(ctx context.Context) (string, error) {
 }
 
 // ListProfilesForOwner returns the parent account row plus all child
-// profiles in a single query. The handler maps each row to a User
-// and the parent comes first by virtue of the `parent_user_id IS NOT
-// NULL` ORDER BY trick in the SQL.
+// profiles in a single query. Parent comes first by virtue of the
+// `parent_user_id IS NOT NULL` ORDER BY trick.
+//
+// Hand-rolled because sqlc 1.31.x miscompiles the original query: the
+// ORDER BY clause that combines a boolean expression with a trailing
+// `COLLATE NOCASE` (or LOWER() / any expression that ends with
+// parentheses or a keyword) gets truncated in the generated Go string,
+// producing a literal that errors at runtime ("no such collation
+// sequence: NOCA") and breaking /api/v1/me/profiles permanently.
+// Raw SQL sidesteps the codegen bug entirely. See the 5 other
+// raw-SQL holdouts in this package for the same pattern.
 func (r *UserRepository) ListProfilesForOwner(ctx context.Context, ownerID string) ([]*User, error) {
-	rows, err := r.q.ListProfilesForOwner(ctx, sqlc.ListProfilesForOwnerParams{
-		ID:           ownerID,
-		ParentUserID: sql.NullString{String: ownerID, Valid: true},
-	})
+	const query = `
+SELECT id, username, display_name, COALESCE(avatar_path, '') AS avatar_path,
+       role, is_active, created_at, last_login_at,
+       parent_user_id, pin_hash, max_content_rating, password_change_required,
+       access_expires_at, avatar_color
+FROM users
+WHERE id = ? OR parent_user_id = ?
+ORDER BY parent_user_id IS NOT NULL, LOWER(display_name)`
+
+	rows, err := r.db.QueryContext(ctx, query, ownerID, ownerID)
 	if err != nil {
 		return nil, fmt.Errorf("list profiles for owner %s: %w", ownerID, err)
 	}
-	if len(rows) == 0 {
-		return nil, nil
+	defer rows.Close()
+
+	var out []*User
+	for rows.Next() {
+		var u User
+		var avatarPath string
+		var lastLoginAt, accessExpiresAt sql.NullTime
+		var parentUserID, pinHash, maxContentRating, avatarColor sql.NullString
+		if err := rows.Scan(
+			&u.ID,
+			&u.Username,
+			&u.DisplayName,
+			&avatarPath,
+			&u.Role,
+			&u.IsActive,
+			&u.CreatedAt,
+			&lastLoginAt,
+			&parentUserID,
+			&pinHash,
+			&maxContentRating,
+			&u.PasswordChangeRequired,
+			&accessExpiresAt,
+			&avatarColor,
+		); err != nil {
+			return nil, fmt.Errorf("scan profile row: %w", err)
+		}
+		u.AvatarPath = avatarPath
+		u.LastLoginAt = nullTimeToPtr(lastLoginAt)
+		u.ParentUserID = parentUserID.String
+		u.PINHash = pinHash.String
+		u.MaxContentRating = maxContentRating.String
+		u.AccessExpiresAt = nullTimeToPtr(accessExpiresAt)
+		u.AvatarColor = avatarColor.String
+		out = append(out, &u)
 	}
-	out := make([]*User, len(rows))
-	for i, row := range rows {
-		u := userFromProfilesRow(row)
-		out[i] = &u
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate profile rows: %w", err)
 	}
 	return out, nil
 }
@@ -390,25 +435,6 @@ func userFromGetByUsernameRow(r sqlc.GetUserByUsernameRow) User {
 }
 
 func userFromListRow(r sqlc.ListUsersRow) User {
-	return User{
-		ID:                     r.ID,
-		Username:               r.Username,
-		DisplayName:            r.DisplayName,
-		AvatarPath:             r.AvatarPath,
-		Role:                   r.Role,
-		IsActive:               r.IsActive,
-		CreatedAt:              r.CreatedAt,
-		LastLoginAt:            nullTimeToPtr(r.LastLoginAt),
-		ParentUserID:           r.ParentUserID.String,
-		PINHash:                r.PinHash.String,
-		MaxContentRating:       r.MaxContentRating.String,
-		PasswordChangeRequired: r.PasswordChangeRequired,
-		AccessExpiresAt:        nullTimeToPtr(r.AccessExpiresAt),
-		AvatarColor:            r.AvatarColor.String,
-	}
-}
-
-func userFromProfilesRow(r sqlc.ListProfilesForOwnerRow) User {
 	return User{
 		ID:                     r.ID,
 		Username:               r.Username,

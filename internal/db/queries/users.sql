@@ -103,24 +103,6 @@ UPDATE users SET access_expires_at = ? WHERE id = ?;
 -- palette (or empty) before reaching the repo.
 UPDATE users SET avatar_color = ? WHERE id = ?;
 
--- name: ListProfilesForOwner :many
--- Returns the parent account row plus every profile that hangs off
--- it, ordered by the parent first, then profiles alphabetically.
--- Drives both the post-login "Who's watching?" payload and the admin
--- profile list under a user. The username column is unique, so
--- profiles synthesise theirs as "<parent.username>:<display_name>"
--- via the handler — we don't expose them for login anyway.
-SELECT id, username, display_name, COALESCE(avatar_path, '') AS avatar_path,
-       role, is_active, created_at, last_login_at,
-       parent_user_id, pin_hash, max_content_rating, password_change_required,
-       access_expires_at, avatar_color
-FROM users
-WHERE id = ? OR parent_user_id = ?
--- ASC is redundant for collation but works around a sqlc 1.31.x
--- bug that truncates `COLLATE NOCASE;` (with the trailing semicolon
--- directly after) to `COLLATE NOCA` in the generated Go string —
--- which then errors at runtime ("no such collation sequence: NOCA").
--- The other queries in this codebase that use COLLATE happen to
--- carry ASC/DESC and render fine. See git history of this file
--- for the diagnosis.
-ORDER BY parent_user_id IS NOT NULL, display_name COLLATE NOCASE ASC;
+-- ListProfilesForOwner: hand-rolled in user_repository.go, not sqlc.
+-- See the long comment on UserRepository.ListProfilesForOwner for the
+-- sqlc 1.31.x parser bug that forced the move.
