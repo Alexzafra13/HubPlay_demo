@@ -196,6 +196,39 @@ func TestFSWatcher_DebounceCoalescesBurst(t *testing.T) {
 	}
 }
 
+// TestFSWatcher_ReconcileLazyOnUnchangedLibraries: the periodic
+// reconcile tick must NOT walk the library tree when nothing
+// changed. The cost of the watcher on a stable deployment should be
+// O(libraries) per tick, not O(directories) per tick — that's the
+// difference between "free" and "measurable on big collections".
+//
+// Strategy: start the watcher (initial reconcile = 1 walk), force a
+// few extra reconcile ticks while the library set is unchanged,
+// assert that walksDone never grew past the initial 1.
+func TestFSWatcher_ReconcileLazyOnUnchangedLibraries(t *testing.T) {
+	dir := t.TempDir()
+	svc, _, _ := newTestServiceWithRoot(t, dir)
+	w := library.NewFSWatcher(svc, slog.Default())
+	w.SetDebounce(60 * time.Second)         // disable debouncer for this test
+	w.SetReconcileEvery(50 * time.Millisecond) // tick fast
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := w.Start(ctx); err != nil {
+		t.Skipf("fsnotify unsupported on this platform: %v", err)
+	}
+	defer w.Stop()
+
+	// Wait for the startup reconcile to complete and a few periodic
+	// ticks to fire. 250 ms at 50 ms/tick = ~5 ticks.
+	time.Sleep(250 * time.Millisecond)
+
+	got := w.WalksDone()
+	if got != 1 {
+		t.Fatalf("expected exactly 1 tree walk after %d periodic ticks (only the startup walk), got %d", 5, got)
+	}
+}
+
 // TestFSWatcher_NewSubdirGetsWatched: a directory created after the
 // watcher started should be added to the watch set as soon as its
 // CREATE event fires, so a file dropped in the new subdir still
