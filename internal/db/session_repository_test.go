@@ -63,6 +63,53 @@ func TestSessionRepository_RotateRefreshToken(t *testing.T) {
 	if !got.CreatedAt.Equal(created) {
 		t.Errorf("CreatedAt should not change: want %v, got %v", created, got.CreatedAt)
 	}
+	if got.PreviousRefreshTokenHash != "hash-old" {
+		t.Errorf("previous hash: want hash-old (the just-rotated value), got %q", got.PreviousRefreshTokenHash)
+	}
+}
+
+// TestSessionRepository_GetByPreviousRefreshTokenHash covers the
+// reverse lookup that powers reuse detection in /auth/refresh: a
+// refresh request that hits the previous (already-rotated) hash must
+// still resolve to the session, so the service can revoke it.
+func TestSessionRepository_GetByPreviousRefreshTokenHash(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	userRepo := db.NewUserRepository(database)
+	repo := db.NewSessionRepository(database)
+	seedUserForSessions(t, userRepo)
+	ctx := context.Background()
+
+	now := time.Now().Truncate(time.Second)
+	s := &db.Session{
+		ID: "session-x", UserID: "user-1", DeviceName: "Chrome", DeviceID: "d",
+		RefreshTokenHash: "hash-current", CreatedAt: now, LastActiveAt: now,
+		ExpiresAt: now.Add(time.Hour),
+	}
+	if err := repo.Create(ctx, s); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := repo.RotateRefreshToken(ctx, s.ID, "hash-newer", now, now.Add(2*time.Hour)); err != nil {
+		t.Fatalf("rotate: %v", err)
+	}
+
+	got, err := repo.GetByPreviousRefreshTokenHash(ctx, "hash-current")
+	if err != nil {
+		t.Fatalf("lookup by previous hash: %v", err)
+	}
+	if got.ID != s.ID {
+		t.Errorf("want session ID %q, got %q", s.ID, got.ID)
+	}
+
+	// An empty string must NOT match never-rotated rows — that
+	// would turn every fresh session into a reuse signal.
+	if _, err := repo.GetByPreviousRefreshTokenHash(ctx, ""); !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("empty previous hash should not match: got err=%v", err)
+	}
+
+	// A genuine never-seen hash must also miss.
+	if _, err := repo.GetByPreviousRefreshTokenHash(ctx, "hash-stranger"); !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("unknown hash should miss: got err=%v", err)
+	}
 }
 
 func seedUserForSessions(t *testing.T, database *db.UserRepository) {

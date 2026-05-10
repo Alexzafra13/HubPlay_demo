@@ -262,12 +262,33 @@ func (s *Service) RefreshToken(ctx context.Context, refreshToken, ip string) (*A
 
 	session, err := s.sessions.GetByRefreshTokenHash(ctx, tokenHash)
 	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
+		if !errors.Is(err, domain.ErrNotFound) {
+			return nil, fmt.Errorf("refresh lookup: %w", err)
+		}
+		// Reuse detection: a refresh token that doesn't match the
+		// current hash might still match the previous-generation
+		// hash we kept after the last rotation. If it does, that's
+		// either an attacker replaying a stolen token (the dueño
+		// already refreshed past it) or the legitimate client
+		// retrying after a lost response. We can't tell which, so
+		// the safe response is to revoke the entire session and
+		// force a fresh login. After that point neither party can
+		// keep refreshing — both will hit /auth/login which is rate
+		// limited the same way.
+		if reused, rerr := s.sessions.GetByPreviousRefreshTokenHash(ctx, tokenHash); rerr == nil && reused != nil {
+			s.logger.Warn("refresh token reuse detected — revoking session",
+				"session_id", reused.ID, "user_id", reused.UserID, "ip", ip)
+			if delErr := s.sessions.DeleteByID(ctx, reused.ID); delErr != nil {
+				s.logger.Error("failed to revoke session after reuse detection",
+					"session_id", reused.ID, "error", delErr)
+			}
 			s.rateLimiter.recordFailure(ipKey)
 			s.rateLimiter.recordFailure(tokKey)
 			return nil, fmt.Errorf("refresh: %w", domain.ErrInvalidToken)
 		}
-		return nil, fmt.Errorf("refresh lookup: %w", err)
+		s.rateLimiter.recordFailure(ipKey)
+		s.rateLimiter.recordFailure(tokKey)
+		return nil, fmt.Errorf("refresh: %w", domain.ErrInvalidToken)
 	}
 
 	if s.clock.Now().After(session.ExpiresAt) {

@@ -175,11 +175,10 @@ func TestService_RefreshToken_Success(t *testing.T) {
 	}
 }
 
-// TestService_RefreshToken_RotatesSecret pins the security-critical
-// invariant introduced when /auth/refresh stopped reusing the same
-// refresh token forever: every refresh MUST mint a fresh secret and
-// the old one MUST stop working immediately. A regression here would
-// silently re-open the 30-day leak window.
+// TestService_RefreshToken_RotatesSecret pins the rotation half of
+// the refresh-token lifecycle: a successful refresh MUST mint a
+// fresh secret and the rotated token MUST itself be rotatable.
+// (The reuse-detection half is covered separately below.)
 func TestService_RefreshToken_RotatesSecret(t *testing.T) {
 	svc, _, _ := newTestAuthService(t)
 	registerTestUser(t, svc)
@@ -202,20 +201,54 @@ func TestService_RefreshToken_RotatesSecret(t *testing.T) {
 		t.Fatal("refresh token did not rotate — leak window is back to RefreshTokenTTL")
 	}
 
-	// Old token must be dead. Use a different IP so the per-IP rate
-	// limiter doesn't conflate this with a brute-force burst.
-	if _, err := svc.RefreshToken(ctx, loginToken.RefreshToken, "127.0.0.2"); err == nil {
-		t.Fatal("old refresh token still accepted after rotation")
-	}
-
-	// New token still works for a second refresh — the rotation is
-	// stateful, not a one-shot.
+	// New token must itself be rotatable — rotation is stateful, not
+	// a one-shot. This is the well-behaved-client path: client always
+	// uses the most recent token and never replays the old one.
 	twiceRefreshed, err := svc.RefreshToken(ctx, refreshed.RefreshToken, "127.0.0.1")
 	if err != nil {
 		t.Fatalf("second refresh with new token: %v", err)
 	}
 	if twiceRefreshed.RefreshToken == refreshed.RefreshToken {
 		t.Error("second refresh did not rotate again")
+	}
+}
+
+// TestService_RefreshToken_ReuseDetection_RevokesSession pins the
+// security-critical invariant: a refresh token that's already been
+// rotated past (i.e. matches previous_refresh_token_hash, not
+// refresh_token_hash) signals reuse. The safe response is to nuke
+// the entire session row so neither the attacker nor the legitimate
+// client can keep refreshing — both must come back through /login,
+// which is rate-limited the same way.
+func TestService_RefreshToken_ReuseDetection_RevokesSession(t *testing.T) {
+	svc, _, _ := newTestAuthService(t)
+	registerTestUser(t, svc)
+	ctx := context.Background()
+
+	loginToken, err := svc.Login(ctx, "testuser", "password123", "Chrome", "dev-1", "127.0.0.1")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+
+	// Legitimate client rotates once.
+	refreshed, err := svc.RefreshToken(ctx, loginToken.RefreshToken, "127.0.0.1")
+	if err != nil {
+		t.Fatalf("first refresh: %v", err)
+	}
+
+	// Attacker (or stale-cookie client) replays the original token.
+	// Different IP so the per-IP rate limiter doesn't conflate it
+	// with a brute-force burst from the legit client.
+	if _, err := svc.RefreshToken(ctx, loginToken.RefreshToken, "203.0.113.5"); err == nil {
+		t.Fatal("reused old refresh token must be rejected")
+	}
+
+	// After reuse detection fires, the session is gone. Even the
+	// rotated token (which the legitimate client still holds) MUST
+	// stop working — that's the whole point of the revoke. The user
+	// has to re-authenticate via /login.
+	if _, err := svc.RefreshToken(ctx, refreshed.RefreshToken, "127.0.0.1"); err == nil {
+		t.Fatal("session should have been revoked by reuse detection; rotated token still accepted")
 	}
 }
 

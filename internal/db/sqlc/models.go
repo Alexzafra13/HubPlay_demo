@@ -401,15 +401,16 @@ type ServerIdentity struct {
 }
 
 type Session struct {
-	ID               string         `json:"id"`
-	UserID           string         `json:"user_id"`
-	DeviceName       string         `json:"device_name"`
-	DeviceID         string         `json:"device_id"`
-	IpAddress        sql.NullString `json:"ip_address"`
-	RefreshTokenHash string         `json:"refresh_token_hash"`
-	CreatedAt        time.Time      `json:"created_at"`
-	LastActiveAt     time.Time      `json:"last_active_at"`
-	ExpiresAt        time.Time      `json:"expires_at"`
+	ID                       string         `json:"id"`
+	UserID                   string         `json:"user_id"`
+	DeviceName               string         `json:"device_name"`
+	DeviceID                 string         `json:"device_id"`
+	IpAddress                sql.NullString `json:"ip_address"`
+	RefreshTokenHash         string         `json:"refresh_token_hash"`
+	CreatedAt                time.Time      `json:"created_at"`
+	LastActiveAt             time.Time      `json:"last_active_at"`
+	ExpiresAt                time.Time      `json:"expires_at"`
+	PreviousRefreshTokenHash string         `json:"previous_refresh_token_hash"`
 }
 
 type Studio struct {

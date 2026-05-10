@@ -1,0 +1,54 @@
+-- +goose Up
+--
+-- 038_session_previous_refresh_hash.sql — refresh-token reuse detection.
+--
+-- The previous migration of /auth/refresh added rotation: every
+-- successful refresh mints a new refresh secret and overwrites the
+-- stored hash, so the old token dies the moment the response leaves
+-- the server. That alone caps the leak window from RefreshTokenTTL
+-- (30 days) to "until the legitimate client refreshes once" —
+-- typically minutes — but it can't tell whether a reused-after-rotation
+-- attempt is an attacker or a client whose response got dropped on
+-- the wire.
+--
+-- This migration adds the column we need to spot the difference. Each
+-- session keeps a one-step memory: the hash of the refresh token that
+-- was current immediately before the most recent rotation. A refresh
+-- request now resolves through both columns:
+--
+--   - hits refresh_token_hash          → rotate normally.
+--   - hits previous_refresh_token_hash → reuse detected. Either an
+--                                        attacker has a stolen copy
+--                                        and the legitimate client
+--                                        already rotated, or vice
+--                                        versa. We can't tell which,
+--                                        so we revoke the entire
+--                                        session and force a fresh
+--                                        login. This is the
+--                                        Auth0-style refresh-rotation
+--                                        with reuse detection.
+--   - hits neither                     → return ErrInvalidToken,
+--                                        same as before.
+--
+-- One-step memory (rather than the full chain Auth0 keeps) is enough
+-- in practice: the threat we care about is "attacker leaked token,
+-- racing the dueño". The window where the attacker holds a token
+-- that's older than `previous` is the same window where the dueño
+-- has already rotated several times — meaning the dueño is online
+-- and active, which makes the attack window vanishingly small. The
+-- rare edge cases (dueño N rotations ahead) just fail the refresh
+-- silently with ErrInvalidToken; the attacker is locked out either
+-- way, just without the explicit revoke-chain signal.
+--
+-- Migration is additive: existing rows get an empty string and the
+-- code path treats "" as "no previous hash known" → never matches
+-- anything (we never hash to ""). No backfill needed.
+ALTER TABLE sessions ADD COLUMN previous_refresh_token_hash TEXT NOT NULL DEFAULT '';
+
+-- Lookup index: reuse detection queries by `previous_refresh_token_hash`
+-- on every refresh that misses the primary index. Must be selective
+-- enough that an attacker probing tokens still pays one B-tree seek
+-- per attempt rather than a full sessions scan.
+CREATE INDEX idx_sessions_previous_refresh_hash ON sessions(previous_refresh_token_hash);
+
+-- migrations are up-only by project convention; no Down block.

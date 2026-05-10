@@ -21,9 +21,18 @@ type Session struct {
 	DeviceID         string
 	IPAddress        string
 	RefreshTokenHash string
-	CreatedAt        time.Time
-	LastActiveAt     time.Time
-	ExpiresAt        time.Time
+	// PreviousRefreshTokenHash is the previous-generation hash kept
+	// for one-step refresh-token reuse detection. A refresh request
+	// that hits this column instead of RefreshTokenHash means an
+	// already-rotated token came back through the door — either an
+	// attacker is replaying a leak or a legitimate client lost its
+	// last response. Either way the safe response is to revoke the
+	// whole session and force a fresh login. Empty string when no
+	// rotation has happened yet (first refresh after login).
+	PreviousRefreshTokenHash string
+	CreatedAt                time.Time
+	LastActiveAt             time.Time
+	ExpiresAt                time.Time
 }
 
 type SessionRepository struct {
@@ -142,20 +151,65 @@ func (r *SessionRepository) DeleteAllByUser(ctx context.Context, userID string) 
 }
 
 // RotateRefreshToken atomically replaces the stored refresh-token
-// hash, bumps last_active_at, and pushes expires_at out by another
-// full TTL. Caller is responsible for ensuring `newHash` was minted
-// from a freshly generated refresh token; this method only does the
-// DB update.
+// hash, copies the previous hash into previous_refresh_token_hash
+// for one-step reuse detection, bumps last_active_at, and pushes
+// expires_at out by another full TTL. Caller is responsible for
+// ensuring `newHash` was minted from a freshly generated refresh
+// token.
+//
+// The `previous_refresh_token_hash = refresh_token_hash` clause runs
+// in the same UPDATE as the new hash assignment so the atomicity
+// holds: there's no window where a refresh request can see one
+// column rotated and the other stale.
 //
 // Hand-rolled (not sqlc-generated) because sqlc 1.31.x truncates
-// UPDATEs with 4+ placeholders by chopping the trailing `?;` off the
-// WHERE clause. See the same dodge for ListProfilesForOwner.
+// UPDATEs with 4+ placeholders. See the same dodge for
+// ListProfilesForOwner.
 func (r *SessionRepository) RotateRefreshToken(ctx context.Context, id, newHash string, lastActive, expiresAt time.Time) error {
-	const query = `UPDATE sessions SET refresh_token_hash = ?, last_active_at = ?, expires_at = ? WHERE id = ?`
+	const query = `UPDATE sessions SET previous_refresh_token_hash = refresh_token_hash, refresh_token_hash = ?, last_active_at = ?, expires_at = ? WHERE id = ?`
 	if _, err := r.db.ExecContext(ctx, query, newHash, lastActive, expiresAt, id); err != nil {
 		return fmt.Errorf("rotate session refresh token: %w", err)
 	}
 	return nil
+}
+
+// GetByPreviousRefreshTokenHash returns the session whose previous
+// (i.e. just-rotated) refresh-token hash matches. Used by /auth/refresh
+// to spot the "already rotated, but the old token came back" case
+// that signals reuse.
+//
+// Hand-rolled because the previous_refresh_token_hash column was
+// added in migration 038 and pulling it through sqlc would require a
+// new query that risks tripping the same parser bug that already
+// forced the other holdouts off codegen. The lookup is a single
+// indexed seek (idx_sessions_previous_refresh_hash).
+//
+// Returns domain.ErrNotFound when no row matches; the caller treats
+// that as "this token was never anybody's previous-generation hash"
+// — i.e. a normal invalid token.
+func (r *SessionRepository) GetByPreviousRefreshTokenHash(ctx context.Context, hash string) (*Session, error) {
+	if hash == "" {
+		// Empty string is the column default for never-rotated rows;
+		// matching against it would return every session that has
+		// not yet been refreshed. That's never a reuse signal.
+		return nil, domain.ErrNotFound
+	}
+	const query = `SELECT id, user_id, device_name, device_id, ip_address, refresh_token_hash, previous_refresh_token_hash, created_at, last_active_at, expires_at FROM sessions WHERE previous_refresh_token_hash = ? LIMIT 1`
+	var s Session
+	var ip sql.NullString
+	err := r.db.QueryRowContext(ctx, query, hash).Scan(
+		&s.ID, &s.UserID, &s.DeviceName, &s.DeviceID, &ip,
+		&s.RefreshTokenHash, &s.PreviousRefreshTokenHash,
+		&s.CreatedAt, &s.LastActiveAt, &s.ExpiresAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, domain.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("lookup session by previous refresh hash: %w", err)
+	}
+	s.IPAddress = ip.String
+	return &s, nil
 }
 
 func (r *SessionRepository) UpdateLastActive(ctx context.Context, id string, t time.Time) error {
@@ -173,15 +227,16 @@ func (r *SessionRepository) UpdateLastActive(ctx context.Context, id string, t t
 // Session (IPAddress string). Invalid → "".
 func sessionFromRow(r sqlc.Session) Session {
 	return Session{
-		ID:               r.ID,
-		UserID:           r.UserID,
-		DeviceName:       r.DeviceName,
-		DeviceID:         r.DeviceID,
-		IPAddress:        r.IpAddress.String,
-		RefreshTokenHash: r.RefreshTokenHash,
-		CreatedAt:        r.CreatedAt,
-		LastActiveAt:     r.LastActiveAt,
-		ExpiresAt:        r.ExpiresAt,
+		ID:                       r.ID,
+		UserID:                   r.UserID,
+		DeviceName:               r.DeviceName,
+		DeviceID:                 r.DeviceID,
+		IPAddress:                r.IpAddress.String,
+		RefreshTokenHash:         r.RefreshTokenHash,
+		PreviousRefreshTokenHash: r.PreviousRefreshTokenHash,
+		CreatedAt:                r.CreatedAt,
+		LastActiveAt:             r.LastActiveAt,
+		ExpiresAt:                r.ExpiresAt,
 	}
 }
 

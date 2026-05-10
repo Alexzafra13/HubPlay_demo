@@ -121,7 +121,8 @@ func (q *Queries) DeleteSessionByRefreshTokenHash(ctx context.Context, refreshTo
 
 const getSessionByID = `-- name: GetSessionByID :one
 SELECT id, user_id, device_name, device_id, ip_address,
-       refresh_token_hash, created_at, last_active_at, expires_at
+       refresh_token_hash, created_at, last_active_at, expires_at,
+       previous_refresh_token_hash
 FROM sessions
 WHERE id = ?
 `
@@ -139,13 +140,15 @@ func (q *Queries) GetSessionByID(ctx context.Context, id string) (Session, error
 		&i.CreatedAt,
 		&i.LastActiveAt,
 		&i.ExpiresAt,
+		&i.PreviousRefreshTokenHash,
 	)
 	return i, err
 }
 
 const getSessionByRefreshTokenHash = `-- name: GetSessionByRefreshTokenHash :one
 SELECT id, user_id, device_name, device_id, ip_address,
-       refresh_token_hash, created_at, last_active_at, expires_at
+       refresh_token_hash, created_at, last_active_at, expires_at,
+       previous_refresh_token_hash
 FROM sessions
 WHERE refresh_token_hash = ?
 `
@@ -163,13 +166,15 @@ func (q *Queries) GetSessionByRefreshTokenHash(ctx context.Context, refreshToken
 		&i.CreatedAt,
 		&i.LastActiveAt,
 		&i.ExpiresAt,
+		&i.PreviousRefreshTokenHash,
 	)
 	return i, err
 }
 
 const listSessionsByUser = `-- name: ListSessionsByUser :many
 SELECT id, user_id, device_name, device_id, ip_address,
-       refresh_token_hash, created_at, last_active_at, expires_at
+       refresh_token_hash, created_at, last_active_at, expires_at,
+       previous_refresh_token_hash
 FROM sessions
 WHERE user_id = ?
 ORDER BY last_active_at DESC
@@ -194,6 +199,7 @@ func (q *Queries) ListSessionsByUser(ctx context.Context, userID string) ([]Sess
 			&i.CreatedAt,
 			&i.LastActiveAt,
 			&i.ExpiresAt,
+			&i.PreviousRefreshTokenHash,
 		); err != nil {
 			return nil, err
 		}

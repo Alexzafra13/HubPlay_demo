@@ -11,13 +11,15 @@ INSERT INTO sessions (
 
 -- name: GetSessionByRefreshTokenHash :one
 SELECT id, user_id, device_name, device_id, ip_address,
-       refresh_token_hash, created_at, last_active_at, expires_at
+       refresh_token_hash, created_at, last_active_at, expires_at,
+       previous_refresh_token_hash
 FROM sessions
 WHERE refresh_token_hash = ?;
 
 -- name: GetSessionByID :one
 SELECT id, user_id, device_name, device_id, ip_address,
-       refresh_token_hash, created_at, last_active_at, expires_at
+       refresh_token_hash, created_at, last_active_at, expires_at,
+       previous_refresh_token_hash
 FROM sessions
 WHERE id = ?;
 
@@ -29,7 +31,8 @@ DELETE FROM sessions WHERE refresh_token_hash = ?;
 
 -- name: ListSessionsByUser :many
 SELECT id, user_id, device_name, device_id, ip_address,
-       refresh_token_hash, created_at, last_active_at, expires_at
+       refresh_token_hash, created_at, last_active_at, expires_at,
+       previous_refresh_token_hash
 FROM sessions
 WHERE user_id = ?
 ORDER BY last_active_at DESC;
