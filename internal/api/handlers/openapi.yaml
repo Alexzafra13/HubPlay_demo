@@ -2649,9 +2649,8 @@ components:
         codec: { type: string }
         language: { type: string }
         title: { type: string }
-        is_default: { type: boolean }
-        is_forced: { type: boolean }
-        is_external: { type: boolean }
+        default: { type: boolean }
+        forced: { type: boolean }
 
     # ─── User data ───────────────────────────────────────────────────
     Progress:
