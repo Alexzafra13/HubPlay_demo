@@ -46,10 +46,17 @@ export function LandscapeCard({ item, autoPlay = false }: LandscapeCardProps) {
         : `/movies/${item.id}`;
   const href = autoPlay ? `${baseHref}?play=1` : baseHref;
 
-  // Image priority: episode → its own screencap (backdrop_url is
-  // populated by the scanner from the per-episode still). Movies →
-  // backdrop, then poster as fallback.
-  const image = item.backdrop_url ?? item.poster_url;
+  // Image priority depends on type:
+  //   episode → backdrop_url (the per-episode screencap the scanner
+  //             pulled from the still). Already 16:9 native.
+  //   movie   → thumb_url first (the 16:9 "miniatura" providers ship
+  //             with the cartel — purpose-built for landscape
+  //             listing cards), then backdrop, then poster as the
+  //             last resort. Older catalog entries without a thumb
+  //             still get something usable.
+  const image = isEpisode
+    ? (item.backdrop_url ?? item.poster_url)
+    : (item.thumb_url ?? item.backdrop_url ?? item.poster_url);
 
   // Title strategy — for episodes the "main" label is the series
   // name (which the API returns in `series_title` when available;

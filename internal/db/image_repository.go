@@ -134,9 +134,11 @@ type PrimaryImageRef struct {
 	DominantColorMuted string
 }
 
-// GetPrimaryURLs returns the primary poster/backdrop/logo refs for a
-// batch of item IDs. Uses raw SQL because sqlc doesn't support
-// dynamic IN() on SQLite.
+// GetPrimaryURLs returns the primary poster/backdrop/logo/thumb refs
+// for a batch of item IDs. Uses raw SQL because sqlc doesn't support
+// dynamic IN() on SQLite. Thumb is the 16:9 "miniatura" providers
+// ship alongside the cartel — landscape rails (Continue Watching)
+// use it for movies so the cards stay rectangular like episodes do.
 func (r *ImageRepository) GetPrimaryURLs(ctx context.Context, itemIDs []string) (map[string]map[string]PrimaryImageRef, error) {
 	if len(itemIDs) == 0 {
 		return nil, nil
@@ -151,7 +153,7 @@ func (r *ImageRepository) GetPrimaryURLs(ctx context.Context, itemIDs []string) 
 
 	query := fmt.Sprintf(
 		`SELECT item_id, type, path, blurhash, dominant_color, dominant_color_muted FROM images
-		 WHERE item_id IN (%s) AND is_primary = 1 AND type IN ('primary', 'backdrop', 'logo')
+		 WHERE item_id IN (%s) AND is_primary = 1 AND type IN ('primary', 'backdrop', 'logo', 'thumb')
 		 ORDER BY item_id, type`,
 		joinStrings(placeholders, ","),
 	)

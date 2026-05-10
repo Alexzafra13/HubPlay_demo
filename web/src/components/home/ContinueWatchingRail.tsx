@@ -40,11 +40,15 @@ export function ContinueWatchingRail() {
   return (
     <HomeRail title={t("home.continueWatching")}>
       {items.map((item) => (
-        // Continue Watching cards always launch playback on click —
-        // by definition the user is mid-watch, so dropping them on
-        // the detail page first is one click of friction nobody
-        // wants. The detail surface is one back-arrow away if they
-        // really want metadata.
+        // One uniform 16:9 shape for the whole rail — episodes use
+        // their per-episode screencap, movies use their thumb_url
+        // ("miniatura"), the landscape still TMDb / Fanart ship
+        // alongside the cartel for exactly this kind of listing.
+        // LandscapeCard handles the per-type image selection
+        // internally so the rail itself stays trivial. Auto-play
+        // on click because every card here is mid-watch by
+        // definition — dropping the user on the detail page first
+        // is friction nobody wants on a "resume" surface.
         <LandscapeCard key={item.id} item={item} autoPlay />
       ))}
     </HomeRail>

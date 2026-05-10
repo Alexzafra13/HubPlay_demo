@@ -195,9 +195,30 @@ export function usePlayback({
         }
         const audioIdx = await resolveAudioStreamIndex(playId, preferredAudio);
         const source = await resolvePlayerSource(playId, audioIdx);
+
+        // Resume from the saved playhead when there's progress on
+        // record AND the item isn't already marked as fully watched
+        // — otherwise hitting "Reproducir" on a finished episode
+        // would jump straight to the credits, which feels worse
+        // than starting over. We read the position off the item's
+        // user_data (same shape the Continue Watching rail consumes)
+        // so the resume offset matches what the rail's progress bar
+        // is showing the user. Best-effort: if the lookup fails we
+        // just start at zero.
+        let startPosition: number | undefined;
+        try {
+          const it = await api.getItem(playId);
+          const ticks = it.user_data?.progress?.position_ticks ?? 0;
+          if (ticks > 0 && !it.user_data?.played) {
+            startPosition = ticks / 10_000_000;
+          }
+        } catch {
+          // Best-effort.
+        }
+
         isPlayingRef.current = true;
         setPlayingItemId(playId);
-        setPlayerInfo(source);
+        setPlayerInfo({ ...source, startPosition });
         setShowPlayer(true);
       } catch {
         setPlayError(t("itemDetail.playbackError"));

@@ -466,6 +466,12 @@ export interface MediaItem {
   poster_url: string | null;
   backdrop_url: string | null;
   logo_url: string | null;
+  // 16:9 "miniatura" — the marketing still providers (TMDb / Fanart)
+  // ship next to the cartel. The Continue Watching rail prefers it
+  // over backdrop_url for movies so the landscape cards stay
+  // rectangular like the per-episode screencaps next to them. Null
+  // when the provider never shipped one for this title.
+  thumb_url?: string | null;
   // Cheap loading-placeholder data for the primary poster, computed
   // server-side at image-ingest time. PosterCard paints `poster_color`
   // as the card background while the real <img> decodes so cards never
