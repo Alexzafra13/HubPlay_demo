@@ -215,7 +215,16 @@ func (h *StreamHandler) QualityPlaylist(w http.ResponseWriter, r *http.Request) 
 	item, err := h.items.GetByID(r.Context(), itemID)
 	if err == nil && item != nil && item.DurationTicks > 0 {
 		duration := float64(item.DurationTicks) / 10_000_000
-		segmentTpl := fmt.Sprintf("/api/v1/stream/%s/%s/segment%%05d.ts", itemID, quality)
+		// Carry the audio param forward into segment URLs so hls.js
+		// keeps the same dub on every fetch. Without this, the segment
+		// handler can't reconstruct the session key (which embeds
+		// audioStreamIndex) and every .ts request 404s with
+		// SESSION_NOT_FOUND.
+		segSuffix := ""
+		if audioStreamIndex >= 0 {
+			segSuffix = fmt.Sprintf("?audio=%d", audioStreamIndex)
+		}
+		segmentTpl := fmt.Sprintf("/api/v1/stream/%s/%s/segment%%05d.ts%s", itemID, quality, segSuffix)
 		manifest := stream.SynthesizeVODManifest(duration, segmentDurationSeconds, segmentTpl)
 
 		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
@@ -269,7 +278,18 @@ func (h *StreamHandler) Segment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	key := claims.UserID + ":" + itemID + ":" + quality
+	// Audio stream index has to ride on every segment URL — the
+	// manifest synthesizer threaded ?audio=N into each segment so the
+	// session key we compute here matches the one Manager.StartSession
+	// registered. Missing/unparseable defaults to -1 (file default),
+	// which matches the master.m3u8 path that omits the param entirely.
+	audioStreamIndex := -1
+	if a := r.URL.Query().Get("audio"); a != "" {
+		if v, err := strconv.Atoi(a); err == nil && v >= 0 {
+			audioStreamIndex = v
+		}
+	}
+	key := stream.SessionKey(claims.UserID, itemID, quality, audioStreamIndex)
 	ms, ok := h.manager.GetSession(key)
 	if !ok {
 		respondError(w, r, http.StatusNotFound, "SESSION_NOT_FOUND", "no active transcode session")
@@ -382,13 +402,14 @@ func (h *StreamHandler) StopSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	quality := r.URL.Query().Get("quality")
-	if quality == "" {
-		quality = "720p"
-	}
-
-	key := claims.UserID + ":" + itemID + ":" + quality
-	h.manager.StopSession(key)
+	// Stop EVERY session for this (user, item) — the player accreted
+	// one per (quality, audioStreamIndex) tuple during ABR + audio
+	// switches and the close button doesn't know which ones survived.
+	// Without the bulk-stop the per-user cap kept hoarding zombies
+	// and 503'd new playbacks. The legacy ?quality= param is ignored
+	// for the same reason: the client doesn't track audio config so
+	// a precise per-key delete would still leak the others.
+	h.manager.StopSessionsByItem(claims.UserID, itemID)
 	w.WriteHeader(http.StatusNoContent)
 }
 

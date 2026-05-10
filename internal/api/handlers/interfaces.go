@@ -106,6 +106,11 @@ type StreamManagerService interface {
 	// far-future segment that the existing ffmpeg run hasn't reached.
 	RestartSessionAt(key string, segmentIndex int, segmentDuration float64) error
 	StopSession(key string)
+	// StopSessionsByItem stops every active session for (user, item)
+	// across qualities and audio configs. Used by the player-teardown
+	// DELETE so a single call frees the whole bag the player accreted
+	// during ABR + audio-track switches.
+	StopSessionsByItem(userID, itemID string) int
 	ActiveSessions() int
 }
 

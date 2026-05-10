@@ -280,7 +280,12 @@ func (h *FederationStreamHandler) Segment(w http.ResponseWriter, r *http.Request
 	}
 
 	peerUserID := peerUserPrefix + peer.ID
-	key := peerUserID + ":" + sess.ItemID + ":" + quality
+	// Federated sessions are always started with audioStreamIndex=-1
+	// (see QualityPlaylist below); use the canonical key helper so
+	// the format matches what Manager.StartSession registered. The
+	// hand-rolled `user:item:quality` format silently misses the
+	// session — every segment 404'd before this fix.
+	key := stream.SessionKey(peerUserID, sess.ItemID, quality, -1)
 	ms, ok := h.streams.GetSession(key)
 	if !ok {
 		respondError(w, r, http.StatusNotFound, "SESSION_NOT_FOUND", "no active transcode session")
