@@ -128,8 +128,17 @@ func (h *StreamHandler) MasterPlaylist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Carry the user's preferred-audio choice (or the in-player
+	// switcher's override) into every variant URL the master
+	// playlist emits, so hls.js bitrate switches keep the same dub.
+	audioStreamIndex := -1
+	if a := r.URL.Query().Get("audio"); a != "" {
+		if v, err := strconv.Atoi(a); err == nil && v >= 0 {
+			audioStreamIndex = v
+		}
+	}
 	profiles := []string{"1080p", "720p", "480p", "360p"}
-	playlist := stream.GenerateMasterPlaylist(itemID, h.effectiveBaseURL(r.Context()), profiles)
+	playlist := stream.GenerateMasterPlaylist(itemID, h.effectiveBaseURL(r.Context()), profiles, audioStreamIndex)
 
 	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -154,6 +163,18 @@ func (h *StreamHandler) QualityPlaylist(w http.ResponseWriter, r *http.Request) 
 	}
 
 	startTime := parseFloat(r.URL.Query().Get("start"))
+
+	// Optional audio track override. The client passes ?audio=<n>
+	// (0-based index into the source file's audio streams) when
+	// the user has a preferred-language preference or has switched
+	// audio from the player menu. Missing / unparseable defaults to
+	// -1 which lets ffmpeg auto-pick the source's default audio.
+	audioStreamIndex := -1
+	if a := r.URL.Query().Get("audio"); a != "" {
+		if v, err := strconv.Atoi(a); err == nil && v >= 0 {
+			audioStreamIndex = v
+		}
+	}
 	// Client capabilities (codecs/containers) come in via the
 	// X-Hubplay-Client-Capabilities header. nil means "no header sent",
 	// in which case the stream manager + Decide() fall back to the
@@ -161,7 +182,7 @@ func (h *StreamHandler) QualityPlaylist(w http.ResponseWriter, r *http.Request) 
 	// today's web client which doesn't send the header yet.
 	caps := stream.CapabilitiesFromRequest(r)
 
-	ms, err := h.manager.StartSession(r.Context(), claims.UserID, itemID, quality, caps, startTime)
+	ms, err := h.manager.StartSession(r.Context(), claims.UserID, itemID, quality, caps, startTime, audioStreamIndex)
 	if err != nil {
 		// The manager returns typed AppErrors (e.g. TranscodeBusy) that
 		// handleServiceError renders without leaking internal messages.

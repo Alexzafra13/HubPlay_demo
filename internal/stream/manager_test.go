@@ -12,9 +12,17 @@ import (
 )
 
 func TestSessionKey(t *testing.T) {
-	key := sessionKey("user1", "item1", "720p")
-	if key != "user1:item1:720p" {
-		t.Errorf("unexpected key: %s", key)
+	if got := sessionKey("user1", "item1", "720p", -1); got != "user1:item1:720p:-1" {
+		t.Errorf("default audio: unexpected key %q", got)
+	}
+	if got := sessionKey("user1", "item1", "720p", 2); got != "user1:item1:720p:2" {
+		t.Errorf("explicit audio idx: unexpected key %q", got)
+	}
+	// Different audio indexes must not collide -- that's what allows
+	// mid-playback dub switching to spawn a fresh session instead
+	// of returning the old transcode unchanged.
+	if sessionKey("u", "i", "p", 0) == sessionKey("u", "i", "p", 1) {
+		t.Errorf("keys for distinct audio indexes collided")
 	}
 }
 
@@ -113,7 +121,7 @@ func TestManager_Shutdown_StopsAll(t *testing.T) {
 	m.mu.Lock()
 	profiles := []string{"720p", "480p", "360p"}
 	for i := range 3 {
-		key := sessionKey("user", "item", profiles[i])
+		key := sessionKey("user", "item", profiles[i], -1)
 		m.sessions[key] = &ManagedSession{
 			Session: &Session{
 				ID:        key,

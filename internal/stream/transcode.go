@@ -76,7 +76,7 @@ func NewTranscoder(baseDir, ffmpegPath string, transcodeTimeout time.Duration, h
 // segment index that corresponds to the new offset so the produced
 // segment files (segmentNNNNN.ts) line up with what the synthesized
 // VOD manifest already advertised to the client.
-func (t *Transcoder) Start(sessionID, itemID, inputPath string, profile Profile, startTime float64, copyVideo, copyAudio bool, startSegmentNumber int) (*Session, error) {
+func (t *Transcoder) Start(sessionID, itemID, inputPath string, profile Profile, startTime float64, copyVideo, copyAudio bool, startSegmentNumber, audioStreamIndex int) (*Session, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -93,7 +93,7 @@ func (t *Transcoder) Start(sessionID, itemID, inputPath string, profile Profile,
 
 	ctx, cancel := context.WithTimeout(context.Background(), t.transcodeTimeout)
 
-	args := BuildFFmpegArgs(inputPath, outputDir, profile, startTime, t.hwAccel, t.encoder, copyVideo, copyAudio, startSegmentNumber)
+	args := BuildFFmpegArgs(inputPath, outputDir, profile, startTime, t.hwAccel, t.encoder, copyVideo, copyAudio, startSegmentNumber, audioStreamIndex)
 	cmd := exec.CommandContext(ctx, t.ffmpeg, args...)
 	cmd.Dir = outputDir
 
@@ -145,7 +145,7 @@ func (t *Transcoder) Start(sessionID, itemID, inputPath string, profile Profile,
 // NOT call existing.Stop() (which would RemoveAll the directory).
 // The caller passes the *same* sessionID it used for the original
 // Start; ownership stays with this Transcoder.
-func (t *Transcoder) RestartAt(sessionID, itemID, inputPath string, profile Profile, startTime float64, copyVideo, copyAudio bool, startSegmentNumber int) (*Session, error) {
+func (t *Transcoder) RestartAt(sessionID, itemID, inputPath string, profile Profile, startTime float64, copyVideo, copyAudio bool, startSegmentNumber, audioStreamIndex int) (*Session, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -158,7 +158,7 @@ func (t *Transcoder) RestartAt(sessionID, itemID, inputPath string, profile Prof
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), t.transcodeTimeout)
-	args := BuildFFmpegArgs(inputPath, outputDir, profile, startTime, t.hwAccel, t.encoder, copyVideo, copyAudio, startSegmentNumber)
+	args := BuildFFmpegArgs(inputPath, outputDir, profile, startTime, t.hwAccel, t.encoder, copyVideo, copyAudio, startSegmentNumber, audioStreamIndex)
 	cmd := exec.CommandContext(ctx, t.ffmpeg, args...)
 	cmd.Dir = outputDir
 
@@ -287,7 +287,14 @@ func (s *Session) SegmentPath(index int) string {
 // the segment index corresponding to the new `startTime` so the
 // produced .ts files keep monotonically increasing names that line
 // up with the synthesized VOD manifest the client already holds.
-func BuildFFmpegArgs(input, outputDir string, profile Profile, startTime float64, hwAccel HWAccelType, encoder string, copyVideo, copyAudio bool, startSegmentNumber int) []string {
+// audioStreamIndex < 0 → let ffmpeg auto-pick (default audio track per
+// the source file's metadata). audioStreamIndex >= 0 → emit explicit
+// -map 0:v:0 -map 0:a:<index> so the user's preferred-audio choice
+// (or the in-player switcher) selects a specific dub. The index is
+// the per-type stream index ffmpeg uses, NOT the absolute stream id —
+// the client resolves DB MediaStream rows (filtered to type='audio')
+// to a 0-based index before calling.
+func BuildFFmpegArgs(input, outputDir string, profile Profile, startTime float64, hwAccel HWAccelType, encoder string, copyVideo, copyAudio bool, startSegmentNumber, audioStreamIndex int) []string {
 	if encoder == "" {
 		encoder = "libx264"
 	}
@@ -329,6 +336,18 @@ func BuildFFmpegArgs(input, outputDir string, profile Profile, startTime float64
 	// the prefix is one extra word in the args list and the upside is
 	// that we never have to think about it again.
 	args = append(args, "-i", "file:"+input)
+
+	// Audio track selection. Emitted after -i so the maps refer to
+	// the input we just opened. We always pin video to the first
+	// stream alongside the audio map — ffmpeg's default-stream
+	// picker gets confused once any -map is present, and "first
+	// video stream" is always what we want for HLS.
+	if audioStreamIndex >= 0 {
+		args = append(args,
+			"-map", "0:v:0",
+			"-map", fmt.Sprintf("0:a:%d", audioStreamIndex),
+		)
+	}
 
 	// Preserve source PTS in the output. Without this flag ffmpeg
 	// resets the output's presentation timestamps to 0 on each run,

@@ -2,8 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
-import { queryKeys } from "@/api/hooks";
+import { queryKeys, useUserPreference } from "@/api/hooks";
 import type { MediaItem, PlaybackMethod } from "@/api/types";
+import {
+  PREFERRED_AUDIO_LANG_PREF_KEY,
+  pickAudioStreamIndex,
+} from "@/utils/playbackPrefs";
 
 // HLS protocol map shared between initial play and auto-advance.
 const PLAYBACK_METHOD_MAP: Record<string, PlaybackMethod> = {
@@ -16,22 +20,46 @@ interface PlayerSourceInfo {
   playbackMethod: PlaybackMethod;
   masterPlaylistUrl: string | null;
   directUrl: string | null;
+  // Resolved audio stream index for the player's audio menu (lets
+  // the in-player switcher mark the active option without having
+  // to re-derive the language match).
+  audioStreamIndex: number;
 }
 
 // resolvePlayerSource hits /stream/:id/info and turns the response
 // into the URL pair the VideoPlayer expects (master.m3u8 OR direct,
 // never both). Pulled out so the initial-play and auto-advance flows
-// share one canonical mapping.
-async function resolvePlayerSource(itemId: string): Promise<PlayerSourceInfo> {
+// share one canonical mapping. The audio query string carries the
+// user's preferred-language pick (or -1 for "use file default") so
+// the master playlist embeds it into every variant URL it emits and
+// hls.js can't accidentally drop it on a bitrate switch.
+async function resolvePlayerSource(itemId: string, audioStreamIndex: number): Promise<PlayerSourceInfo> {
   const info = await api.getStreamInfo(itemId);
   const rawMethod = (info as Record<string, unknown>).method as string ?? "";
   const method: PlaybackMethod = PLAYBACK_METHOD_MAP[rawMethod] ?? "transcode";
+  const query = audioStreamIndex >= 0 ? `?audio=${audioStreamIndex}` : "";
   return {
     playbackMethod: method,
     masterPlaylistUrl:
-      method !== "direct_play" ? `/api/v1/stream/${itemId}/master.m3u8` : null,
+      method !== "direct_play" ? `/api/v1/stream/${itemId}/master.m3u8${query}` : null,
     directUrl: method === "direct_play" ? `/api/v1/stream/${itemId}/direct` : null,
+    audioStreamIndex,
   };
+}
+
+// Audio-stream-index resolution lives in the playback hook because
+// it depends on both the per-item media_streams list AND the user's
+// global preference. Returns -1 when there's no preference, when the
+// item has no audio streams matching it, or when the source isn't
+// (yet) loaded.
+async function resolveAudioStreamIndex(itemId: string, preferredLang: string): Promise<number> {
+  if (!preferredLang) return -1;
+  try {
+    const item = await api.getItem(itemId);
+    return pickAudioStreamIndex(item.media_streams, preferredLang);
+  } catch {
+    return -1;
+  }
 }
 
 // Session teardown. The server's idle reaper still fires after
@@ -128,6 +156,11 @@ export function usePlayback({
 }: UsePlaybackArgs): UsePlaybackResult {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
+  // Reading the preference here (rather than inside resolvePlayerSource)
+  // keeps the helper a pure async function — easier to memoise and
+  // test — and means we re-resolve when the user changes their
+  // audio language between episodes without juggling closures.
+  const [preferredAudio] = useUserPreference<string>(PREFERRED_AUDIO_LANG_PREF_KEY, "");
 
   const [showPlayer, setShowPlayer] = useState(false);
   const [playerInfo, setPlayerInfo] = useState<PlayerSourceInfo | null>(null);
@@ -150,7 +183,8 @@ export function usePlayback({
         if (isPlayingRef.current && playingItemId) {
           await cleanup(playingItemId);
         }
-        const source = await resolvePlayerSource(playId);
+        const audioIdx = await resolveAudioStreamIndex(playId, preferredAudio);
+        const source = await resolvePlayerSource(playId, audioIdx);
         isPlayingRef.current = true;
         setPlayingItemId(playId);
         setPlayerInfo(source);
@@ -159,7 +193,7 @@ export function usePlayback({
         setPlayError(t("itemDetail.playbackError"));
       }
     },
-    [pageItemId, playingItemId, cleanup, t],
+    [pageItemId, playingItemId, cleanup, preferredAudio, t],
   );
 
   // Next-episode lookup. Used both to prefetch its item data when
@@ -204,7 +238,8 @@ export function usePlayback({
         if (isPlayingRef.current && playingItemId) {
           await cleanup(playingItemId);
         }
-        const source = await resolvePlayerSource(nextEp.id);
+        const audioIdx = await resolveAudioStreamIndex(nextEp.id, preferredAudio);
+        const source = await resolvePlayerSource(nextEp.id, audioIdx);
         isPlayingRef.current = true;
         setPlayerInfo(source);
       } catch {
@@ -212,7 +247,7 @@ export function usePlayback({
         setPlayerInfo(null);
       }
     })();
-  }, [playingItemId, siblingEpisodes, cleanup]);
+  }, [playingItemId, siblingEpisodes, cleanup, preferredAudio]);
 
   const handleClosePlayer = useCallback(async () => {
     setShowPlayer(false);

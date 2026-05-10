@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"sync"
 	"time"
 
@@ -73,7 +74,13 @@ type ManagedSession struct {
 	// cache it here so RestartSessionAt doesn't have to re-query the
 	// items repository every time the user seeks to an unencoded
 	// region — the path is immutable for the life of the session.
-	InputPath    string
+	InputPath string
+	// AudioStreamIndex is the per-type audio track ffmpeg should
+	// pick (0-based, mapped from the user's preferred-language /
+	// in-player switcher). -1 = let ffmpeg auto-pick the file's
+	// default audio. Cached on the session so RestartSessionAt
+	// keeps the same dub across seeks.
+	AudioStreamIndex int
 	Decision     PlaybackDecision
 	LastAccessed time.Time
 
@@ -202,9 +209,13 @@ func (m *Manager) publish(e event.Event) {
 	}
 }
 
-// sessionKey builds a unique key for a user+item+profile combination.
-func sessionKey(userID, itemID, profile string) string {
-	return userID + ":" + itemID + ":" + profile
+// sessionKey builds a unique key for a user+item+profile+audio combo.
+// Audio index is part of the key so switching dub mid-playback creates
+// a fresh session instead of the manager handing back the existing
+// English transcode unchanged. -1 collapses to "default" so cache hits
+// for callers that don't care about audio stay intact.
+func sessionKey(userID, itemID, profile string, audioStreamIndex int) string {
+	return userID + ":" + itemID + ":" + profile + ":" + strconv.Itoa(audioStreamIndex)
 }
 
 // StartSession creates or returns an existing session for the given item.
@@ -231,8 +242,8 @@ func sessionKey(userID, itemID, profile string) string {
 // segmentNNNNN.ts. singleflight makes the slow path single-flight
 // per key; late joiners receive the same ManagedSession the winner
 // produced.
-func (m *Manager) StartSession(ctx context.Context, userID, itemID, profileName string, caps *Capabilities, startTime float64) (*ManagedSession, error) {
-	key := sessionKey(userID, itemID, profileName)
+func (m *Manager) StartSession(ctx context.Context, userID, itemID, profileName string, caps *Capabilities, startTime float64, audioStreamIndex int) (*ManagedSession, error) {
+	key := sessionKey(userID, itemID, profileName, audioStreamIndex)
 
 	// Fast path: already-running session bypasses the singleflight
 	// and the slow-path setup entirely. This is the >99% case once
@@ -247,7 +258,7 @@ func (m *Manager) StartSession(ctx context.Context, userID, itemID, profileName 
 	m.mu.Unlock()
 
 	v, err, _ := m.startGroup.Do(key, func() (any, error) {
-		return m.startSessionSlow(ctx, userID, itemID, profileName, caps, startTime, key)
+		return m.startSessionSlow(ctx, userID, itemID, profileName, caps, startTime, key, audioStreamIndex)
 	})
 	if err != nil {
 		return nil, err
@@ -261,7 +272,7 @@ func (m *Manager) StartSession(ctx context.Context, userID, itemID, profileName 
 // the work — if it cancels mid-fetch, late joiners get the same
 // error, which is the right trade: callers who arrived 50 ms apart
 // for the same key were going to share the result anyway.
-func (m *Manager) startSessionSlow(ctx context.Context, userID, itemID, profileName string, caps *Capabilities, startTime float64, key string) (*ManagedSession, error) {
+func (m *Manager) startSessionSlow(ctx context.Context, userID, itemID, profileName string, caps *Capabilities, startTime float64, key string, audioStreamIndex int) (*ManagedSession, error) {
 	// Re-check after singleflight admission: a previous Do for this
 	// key may have just finished and populated m.sessions in the
 	// brief window between this caller's fast-path miss and its
@@ -343,7 +354,7 @@ func (m *Manager) startSessionSlow(ctx context.Context, userID, itemID, profileN
 	if startTime > 0 {
 		startSegment = int(startTime / 6) // matches -hls_time 6
 	}
-	session, err := m.transcoder.Start(key, itemID, item.Path, decision.Profile, startTime, decision.CopyVideo, decision.CopyAudio, startSegment)
+	session, err := m.transcoder.Start(key, itemID, item.Path, decision.Profile, startTime, decision.CopyVideo, decision.CopyAudio, startSegment, audioStreamIndex)
 	if err != nil {
 		m.metrics.TranscodeFailed()
 		return nil, fmt.Errorf("start transcode: %w", err)
@@ -353,6 +364,7 @@ func (m *Manager) startSessionSlow(ctx context.Context, userID, itemID, profileN
 		Session:            session,
 		UserID:             userID,
 		InputPath:          item.Path,
+		AudioStreamIndex:   audioStreamIndex,
 		Decision:           decision,
 		LastAccessed:       time.Now(),
 		LastRestartSegment: startSegment,
@@ -521,6 +533,7 @@ func (m *Manager) RestartSessionAt(key string, segmentIndex int, segmentDuration
 		ms.Decision.CopyVideo,
 		ms.Decision.CopyAudio,
 		segmentIndex,
+		ms.AudioStreamIndex,
 	)
 	if err != nil {
 		return fmt.Errorf("restart transcode at segment %d: %w", segmentIndex, err)
