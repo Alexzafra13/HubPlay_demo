@@ -103,11 +103,61 @@ interface PlayerControlsProps {
    * came from. The text title is the fallback.
    */
   logoUrl?: string;
+  /**
+   * Active playback method — "direct_play" / "direct_stream" /
+   * "transcode". Drives the small pill on the top bar that tells
+   * the user what the server is actually doing per-session (the
+   * Plex / Jellyfin convention). Optional; pill hides when absent
+   * so the player stays clean if a caller doesn't have the info.
+   */
+  playbackMethod?: "direct_play" | "direct_stream" | "transcode";
+  /**
+   * Optional resolution / quality label appended to the pill when
+   * the method is `transcode` (e.g. "1080p"). Hidden for
+   * direct_play / direct_stream because those don't pick a profile.
+   */
+  transcodeProfileLabel?: string;
 }
 
 // Icons live in `./icons.tsx`; audio enrichment helpers in
 // `./audioTracks.ts`. Kept out of this file so it stays a pure
 // presentation component (composition + props mapping).
+
+// ─── Playback method pill ───────────────────────────────────────────────────
+
+const PlaybackMethodPill: FC<{
+  method?: "direct_play" | "direct_stream" | "transcode";
+  profileLabel?: string;
+}> = ({ method, profileLabel }) => {
+  const { t } = useTranslation();
+  if (!method) return null;
+  const label = (() => {
+    switch (method) {
+      case "direct_play":
+        return t("playerControls.method.directPlay");
+      case "direct_stream":
+        return t("playerControls.method.directStream");
+      case "transcode":
+        return profileLabel
+          ? t("playerControls.method.transcodeWithProfile", { profile: profileLabel })
+          : t("playerControls.method.transcode");
+    }
+  })();
+  // Colour cue: green for "free" paths (direct play / remux), amber
+  // for transcode so the operator instantly sees a CPU-paid session.
+  const tone =
+    method === "transcode"
+      ? "border-warning/40 bg-warning/15 text-warning"
+      : "border-success/40 bg-success/15 text-success";
+  return (
+    <span
+      className={`ml-2 inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${tone}`}
+      title={label}
+    >
+      {label}
+    </span>
+  );
+};
 
 // ─── Seek bar ────────────────────────────────────────────────────────────────
 
@@ -545,6 +595,8 @@ const PlayerControls: FC<PlayerControlsProps> = ({
   onClose,
   title,
   logoUrl,
+  playbackMethod,
+  transcodeProfileLabel,
 }) => {
   const { t } = useTranslation();
   // Quality picker only earns its place when the player has more
@@ -601,6 +653,13 @@ const PlayerControls: FC<PlayerControlsProps> = ({
             {title}
           </h2>
         ) : null}
+        {/* Playback-method pill. Sits next to the title so the user
+            sees at a glance whether the server is shipping the file
+            as-is or burning CPU on a transcode — same convention as
+            Plex / Jellyfin's Now-Playing chrome. Hidden when the
+            parent doesn't pass the prop so callers without the info
+            stay clean. */}
+        <PlaybackMethodPill method={playbackMethod} profileLabel={transcodeProfileLabel} />
       </div>
 
       {/* Center play/pause */}

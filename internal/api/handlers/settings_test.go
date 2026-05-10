@@ -71,8 +71,8 @@ func TestSettings_List_DefaultsBeforeAnyOverride(t *testing.T) {
 		t.Fatalf("status: %d body=%s", rr.Code, rr.Body.String())
 	}
 	rows := unwrapSettings(t, rr.Body.Bytes())
-	if len(rows) != 3 {
-		t.Fatalf("expected 3 settings, got %d", len(rows))
+	if len(rows) != 4 {
+		t.Fatalf("expected 4 settings, got %d", len(rows))
 	}
 	for _, row := range rows {
 		if row.Override {
@@ -89,6 +89,13 @@ func TestSettings_List_DefaultsBeforeAnyOverride(t *testing.T) {
 			}
 			if !row.RestartNeeded {
 				t.Errorf("hwaccel.enabled: should advertise restart_needed=true")
+			}
+		case "playback.force_direct_play":
+			if row.Effective != "false" {
+				t.Errorf("force_direct_play default: got %q want false", row.Effective)
+			}
+			if row.RestartNeeded {
+				t.Errorf("force_direct_play should not require a restart (runtime read on every StartSession)")
 			}
 		case "hardware_acceleration.preferred":
 			if row.Effective != "vaapi" {

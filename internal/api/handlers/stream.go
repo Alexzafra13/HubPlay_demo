@@ -103,7 +103,23 @@ func (h *StreamHandler) Info(w http.ResponseWriter, r *http.Request) {
 	}
 
 	caps := stream.CapabilitiesFromRequest(r)
-	decision := stream.Decide(item, mediaStreams, caps, "")
+	// Honour the runtime `playback.force_direct_play` admin toggle —
+	// the /info response is what drives the player's pill, so the
+	// method shown to the user must match what StartSession will
+	// actually pick. Without this the panel would read "Transcode"
+	// for every item even when the manager was wired to short-circuit
+	// to DirectPlay, which is exactly the visibility gap the toggle
+	// is meant to close.
+	var decision stream.PlaybackDecision
+	if h.settings != nil {
+		v, _ := h.settings.GetOr(r.Context(), "playback.force_direct_play", "false")
+		if v == "true" {
+			decision = stream.DecideForceDirectPlay(item, mediaStreams)
+		}
+	}
+	if decision.Method == "" {
+		decision = stream.Decide(item, mediaStreams, caps, "")
+	}
 	profiles := stream.ProfileNames()
 
 	respondJSON(w, http.StatusOK, map[string]any{

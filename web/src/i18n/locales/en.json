@@ -301,7 +301,13 @@
     "fullscreen": "Fullscreen",
     "exitFullscreen": "Exit fullscreen",
     "closePlayer": "Close Player",
-    "trackFallback": "Track {{n}}"
+    "trackFallback": "Track {{n}}",
+    "method": {
+      "directPlay": "Direct play",
+      "directStream": "Direct stream",
+      "transcode": "Transcoding",
+      "transcodeWithProfile": "Transcoding · {{profile}}"
+    }
   },
   "externalSubs": {
     "title": "Online subtitles",
@@ -1014,6 +1020,10 @@
         "hwAccelPreferred": {
           "label": "Preferred accelerator",
           "hint": "Auto picks the best available; pin to one to override the detector."
+        },
+        "forceDirectPlay": {
+          "label": "Force direct play",
+          "hint": "Send the file as-is to every client; never transcode. Off by default. Only enable when you're certain every client (browser, TV app, etc.) can decode every codec and container in your library — otherwise playback will fail."
         }
       },
       "totalLibraries": "Total libraries",

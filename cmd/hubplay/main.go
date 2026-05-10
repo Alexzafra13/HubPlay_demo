@@ -239,6 +239,17 @@ func run(configPath string) error {
 	streamManager := stream.NewManager(repos.Items, repos.MediaStreams, streamingCfg, logger)
 	streamManager.SetMetrics(observability.NewStreamSink(metrics))
 	streamManager.SetEventBus(eventBus)
+	// Runtime hook for the playback.force_direct_play admin toggle.
+	// Read on every StartSession so the admin can flip it without a
+	// restart. Boolean parse mirrors the validator in
+	// settings.validateSettingValue (canonical "true"/"false" strings).
+	streamManager.SetForceDirectPlayLookup(func(ctx context.Context) bool {
+		v, err := repos.Settings.GetOr(ctx, "playback.force_direct_play", "false")
+		if err != nil {
+			return false
+		}
+		return v == "true"
+	})
 
 	// ═══ Phase 4c: IPTV ═══
 	iptvService := iptv.NewService(repos.Channels, repos.EPGPrograms, repos.Libraries, repos.ChannelFavorites, repos.LibraryEPGSources, repos.ChannelOverrides, repos.ChannelWatchHistory, logger)
