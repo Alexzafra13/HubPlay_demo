@@ -1,5 +1,7 @@
 # Estado del proyecto
 
+> ⚠️ **sqlc 1.31.1 sigue siendo la última versión** (verificado 2026-05-11 contra `github.com/sqlc-dev/sqlc/releases`). El bug del parser que documentamos en `architecture-decisions.md` NO está arreglado upstream. Las 5+ queries en raw-SQL holdout (`ListProfilesForOwner`, refresh-token UPDATE, `SearchSharedItems`, y las 3 nuevas de federation poster colours) seguirán así hasta que upstream publique 1.32+. Cuando salga, abrir tarea de "migrar holdouts de vuelta a sqlc" — son ~15 min cada una. Por ahora **NO especular** sobre roadmap upstream cuando hablemos con el usuario.
+>
 > 🎬 **Sesión 2026-05-11 (rama `claude/review-project-1y28j`, federation poster colours)** — el usuario pidió cerrar el item "node-vibrant server-side". Audit en frío reveló que el grueso del trabajo YA estaba hecho (migración 014, `imaging/colors.go`, API expone `backdrop_colors` para items locales, `ItemDetail.tsx:167-177` ya hace `hasServerPalette` gate). El item real pendiente era SOLO federation: `PeerItemDetail` ejecutaba node-vibrant siempre porque `FederationRemoteItem` no transportaba colores.
 >
 > **Senior call**: cerrar el gap real (federation) en lugar de tocar el path local que ya funciona. Documentar que el item del backlog estaba parcialmente vencido.
