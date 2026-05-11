@@ -743,7 +743,25 @@ func TestTransmuxManager_PromotesToReencodeOnCodecCrash(t *testing.T) {
 	}
 
 	// Metric assertions.
-	starts, modes, promos := metrics.snapshot()
+	//
+	// `starts["ok"]` is recorded by readyWatcher AFTER it closes the
+	// session's ready channel — see transmux.go:737 (recordSuccess
+	// runs right after close(s.ready)). GetOrStart returns as soon as
+	// ready is closed, so under race detection + coverage instrumentation
+	// the test goroutine can win the race to snapshot before
+	// readyWatcher schedules its IncStarts call. Poll with a deadline
+	// like the other transmux tests do for eventually-consistent state
+	// (cf. IdleReaper above, ReapsStartupZombies below).
+	deadline2 := time.Now().Add(2 * time.Second)
+	var starts, modes map[string]int
+	var promos int
+	for time.Now().Before(deadline2) {
+		starts, modes, promos = metrics.snapshot()
+		if starts["ok"] >= 1 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 	if promos != 1 {
 		t.Errorf("reencode promotions: got %d want 1", promos)
 	}
