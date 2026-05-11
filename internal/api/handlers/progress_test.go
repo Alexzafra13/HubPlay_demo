@@ -32,11 +32,12 @@ type progressFakeUserData struct {
 	nextUpFn   func(ctx context.Context, userID string, limit int) ([]*db.NextUpItem, error)
 
 	// Optional failure injection for write methods.
-	failGet      bool
-	failUpdate   bool
-	failMark     bool
-	failFavorite bool
-	failDelete   bool
+	failGet           bool
+	failUpdate        bool
+	failMark          bool
+	failFavorite      bool
+	failDelete        bool
+	failClearProgress bool
 }
 
 func newProgressFakeUserData() *progressFakeUserData {
@@ -162,6 +163,19 @@ func (r *progressFakeUserData) Delete(_ context.Context, userID, itemID string) 
 	return nil
 }
 
+func (r *progressFakeUserData) ClearProgress(_ context.Context, userID, itemID string) error {
+	if r.failClearProgress {
+		return errors.New("boom")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	k := keyUD(userID, itemID)
+	if ud, ok := r.data[k]; ok {
+		ud.PositionTicks = 0
+	}
+	return nil
+}
+
 var _ UserDataRepository = (*progressFakeUserData)(nil)
 
 // ─── Test env ───────────────────────────────────────────────────────────────
@@ -193,6 +207,7 @@ func newProgressTestEnv(t *testing.T) *progressTestEnv {
 		r.Delete("/progress/{itemId}/played", env.handler.MarkUnplayed)
 		r.Post("/favorite/{itemId}", env.handler.ToggleFavorite)
 		r.Get("/continue-watching", env.handler.ContinueWatching)
+		r.Delete("/continue-watching/{itemId}", env.handler.RemoveFromContinueWatching)
 		r.Get("/favorites", env.handler.Favorites)
 		r.Get("/next-up", env.handler.NextUp)
 	})
@@ -372,6 +387,46 @@ func TestProgressHandler_MarkUnplayed_DeletesRecord(t *testing.T) {
 	}
 	if _, ok := env.userData.data[keyUD("user-1", "item-1")]; ok {
 		t.Error("record not deleted")
+	}
+}
+
+// ─── RemoveFromContinueWatching ─────────────────────────────────────────────
+
+func TestProgressHandler_RemoveFromContinueWatching_ZeroesPosition(t *testing.T) {
+	env := newProgressTestEnv(t)
+	// Pre-seed a partly-watched, favorited record to verify we zero
+	// position WITHOUT collateral damage to play_count + is_favorite.
+	env.userData.data[keyUD("user-1", "item-1")] = &db.UserData{
+		UserID: "user-1", ItemID: "item-1",
+		PositionTicks: 1_234_567_890,
+		PlayCount:     3,
+		IsFavorite:    true,
+	}
+	rr := env.do(http.MethodDelete, "/api/v1/me/continue-watching/item-1", "", defaultClaims())
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	ud := env.userData.data[keyUD("user-1", "item-1")]
+	if ud == nil {
+		t.Fatal("row was deleted; ClearProgress should preserve it")
+	}
+	if ud.PositionTicks != 0 {
+		t.Errorf("position not zeroed: %d", ud.PositionTicks)
+	}
+	if ud.PlayCount != 3 {
+		t.Errorf("play_count clobbered: %d", ud.PlayCount)
+	}
+	if !ud.IsFavorite {
+		t.Error("is_favorite clobbered")
+	}
+}
+
+func TestProgressHandler_RemoveFromContinueWatching_Idempotent_NoRow(t *testing.T) {
+	env := newProgressTestEnv(t)
+	// No row exists — endpoint must still succeed (no 404 / 500).
+	rr := env.do(http.MethodDelete, "/api/v1/me/continue-watching/ghost-item", "", defaultClaims())
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status: %d body=%s", rr.Code, rr.Body.String())
 	}
 }
 

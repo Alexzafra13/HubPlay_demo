@@ -12,7 +12,9 @@
 // shapes share the same hover/zoom and rating-badge treatment so
 // the rail keeps a consistent rhythm.
 
+import { Check, X } from "lucide-react";
 import { Link } from "react-router";
+import { useTranslation } from "react-i18next";
 import type { MediaItem } from "@/api/types";
 
 interface LandscapeCardProps {
@@ -24,9 +26,24 @@ interface LandscapeCardProps {
   // clicking the play icon on a half-watched episode and then
   // having to click Reproducir again is a Plex pet peeve.
   autoPlay?: boolean;
+  // Row actions for the Continue Watching surface. When provided the
+  // card renders a top-right overlay (hover/focus revealed) with a
+  // check button (mark as watched) and/or an X button (remove from
+  // the rail). The card's surrounding <Link> doesn't fire when these
+  // are clicked because we preventDefault + stopPropagation. Both
+  // are optional so a single button can be rendered if only one
+  // makes sense in context.
+  onMarkWatched?: (item: MediaItem) => void;
+  onRemove?: (item: MediaItem) => void;
 }
 
-export function LandscapeCard({ item, autoPlay = false }: LandscapeCardProps) {
+export function LandscapeCard({
+  item,
+  autoPlay = false,
+  onMarkWatched,
+  onRemove,
+}: LandscapeCardProps) {
+  const { t } = useTranslation();
   const isEpisode = item.type === "episode";
   // Episodes link to their season's page so the user lands in the
   // episode list rather than hitting an isolated episode-detail
@@ -101,6 +118,45 @@ export function LandscapeCard({ item, autoPlay = false }: LandscapeCardProps) {
             </svg>
           </div>
         </div>
+
+        {/* Row actions overlay — top-right, only rendered when at
+            least one handler is provided. Buttons stopPropagation so
+            the surrounding <Link> doesn't navigate when the user
+            actually wanted "mark as watched" or "remove from rail". */}
+        {(onMarkWatched || onRemove) && (
+          <div className="absolute top-2 left-2 flex items-center gap-1 opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100">
+            {onMarkWatched && (
+              <button
+                type="button"
+                aria-label={t("home.markWatched")}
+                title={t("home.markWatched")}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onMarkWatched(item);
+                }}
+                className="flex h-7 w-7 items-center justify-center rounded-full bg-black/70 text-white backdrop-blur-sm transition-colors hover:bg-black/85 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+              >
+                <Check className="h-3.5 w-3.5" />
+              </button>
+            )}
+            {onRemove && (
+              <button
+                type="button"
+                aria-label={t("home.removeFromContinueWatching")}
+                title={t("home.removeFromContinueWatching")}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onRemove(item);
+                }}
+                className="flex h-7 w-7 items-center justify-center rounded-full bg-black/70 text-white backdrop-blur-sm transition-colors hover:bg-black/85 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Rating badge */}
         {item.community_rating != null && (

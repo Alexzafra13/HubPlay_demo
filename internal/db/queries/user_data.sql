@@ -54,6 +54,17 @@ ON CONFLICT(user_id, item_id) DO UPDATE SET
 -- name: DeleteUserData :exec
 DELETE FROM user_data WHERE user_id = ? AND item_id = ?;
 
+-- name: ClearProgress :exec
+-- Drop the row from "Seguir viendo" / Continue Watching without touching
+-- play_count, is_favorite or last_played_at. The CW SQL gates on
+-- position_ticks > 0, so zeroing it is enough to make the item vanish
+-- from the rail; everything else stays intact so a future Play resumes
+-- the play-count history and a favorited title remains favorited.
+UPDATE user_data
+SET position_ticks = 0,
+    updated_at = ?
+WHERE user_id = ? AND item_id = ?;
+
 -- name: ContinueWatching :many
 -- Two extra filters vs. the obvious "started but not completed" rail:
 --   1. Near-complete drop: position >= 90% of duration. Treat as

@@ -4,7 +4,12 @@
 // episodes show "S0XE0Y · Title" with the series name as the lead.
 
 import { useTranslation } from "react-i18next";
-import { useContinueWatching } from "@/api/hooks";
+import type { MediaItem } from "@/api/types";
+import {
+  useContinueWatching,
+  useMarkPlayed,
+  useRemoveFromContinueWatching,
+} from "@/api/hooks";
 import { Skeleton } from "@/components/common";
 import { HomeRail } from "./HomeRail";
 import { LandscapeCard } from "./LandscapeCard";
@@ -12,6 +17,15 @@ import { LandscapeCard } from "./LandscapeCard";
 export function ContinueWatchingRail() {
   const { t } = useTranslation();
   const { data, isLoading, isError } = useContinueWatching();
+  const markPlayed = useMarkPlayed();
+  const remove = useRemoveFromContinueWatching();
+
+  const handleMarkWatched = (item: MediaItem) => {
+    markPlayed.mutate(item.id);
+  };
+  const handleRemove = (item: MediaItem) => {
+    remove.mutate(item.id);
+  };
 
   // Hide the rail entirely on error — the home page already shows
   // a generic error toast / refetch button if every query failed.
@@ -49,7 +63,13 @@ export function ContinueWatchingRail() {
         // on click because every card here is mid-watch by
         // definition — dropping the user on the detail page first
         // is friction nobody wants on a "resume" surface.
-        <LandscapeCard key={item.id} item={item} autoPlay />
+        <LandscapeCard
+          key={item.id}
+          item={item}
+          autoPlay
+          onMarkWatched={handleMarkWatched}
+          onRemove={handleRemove}
+        />
       ))}
     </HomeRail>
   );

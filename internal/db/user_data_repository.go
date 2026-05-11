@@ -367,6 +367,24 @@ func (r *UserDataRepository) Delete(ctx context.Context, userID, itemID string) 
 	return nil
 }
 
+// ClearProgress zeroes position_ticks for an item so it falls off the
+// Continue Watching rail. Distinct from Delete (which nukes the whole
+// user_data row, losing play_count + favorite + last_played_at) and
+// MarkPlayed (which lies about completion). Idempotent — no error
+// when the row doesn't exist (the UPDATE simply matches zero rows).
+func (r *UserDataRepository) ClearProgress(ctx context.Context, userID, itemID string) error {
+	now := time.Now().UTC()
+	err := r.q.ClearProgress(ctx, sqlc.ClearProgressParams{
+		UpdatedAt: now,
+		UserID:    userID,
+		ItemID:    itemID,
+	})
+	if err != nil {
+		return fmt.Errorf("clear progress: %w", err)
+	}
+	return nil
+}
+
 // ── row mapping helpers ─────────────────────────────────────────────────
 
 func nullableBoolPtr(b *bool) sql.NullBool {

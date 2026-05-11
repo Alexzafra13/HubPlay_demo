@@ -176,7 +176,9 @@
     "heroReasonRecommendedSingle": "Because you like {{genre}}",
     "heroReasonRecommendedPair": "Because you like {{first}} and {{second}}",
     "becauseYouWatchedLoading": "Porque viste…",
-    "becauseYouWatched": "Porque viste {{title}}"
+    "becauseYouWatched": "Porque viste {{title}}",
+    "markWatched": "Mark as watched",
+    "removeFromContinueWatching": "Remove from Continue Watching"
   },
   "link": {
     "title": "Link a device",

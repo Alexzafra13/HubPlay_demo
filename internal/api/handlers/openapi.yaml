@@ -912,6 +912,24 @@ paths:
                     type: array
                     items: { $ref: "#/components/schemas/ContinueWatchingEntry" }
 
+  /me/continue-watching/{itemId}:
+    parameters:
+      - { name: itemId, in: path, required: true, schema: { type: string } }
+    delete:
+      tags: [user-data]
+      summary: Drop an item from the Continue Watching rail
+      description: |
+        Hides the item from the rail without lying about completion
+        state: zeroes `position_ticks` while preserving `play_count`,
+        `is_favorite`, and `last_played_at`. Distinct from
+        `/me/progress/{itemId}/played` (which marks completion) and
+        `/me/progress/{itemId}/unplayed` (which nukes the whole row).
+        Idempotent — succeeds even if no `user_data` row exists. Emits
+        a `user.progress.updated` event so other devices refresh.
+      responses:
+        "204":
+          description: Removed (or already absent)
+
   /me/favorites:
     get:
       tags: [user-data]
