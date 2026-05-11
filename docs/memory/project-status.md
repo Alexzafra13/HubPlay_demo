@@ -1,5 +1,66 @@
 # Estado del proyecto
 
+> 🎬 **Sesión 2026-05-11 (rama `claude/infallible-robinson-97926d`, Phase B completa + seek-coalesce audit)** — cierre del modelo de acceso por hogar con dos PRs sucesivos sobre la misma rama, más auditoría a fondo de seek-coalesce que terminó en una recomendación de no tocar.
+>
+> **Commits pusheados** (ambos a `origin/claude/infallible-robinson-97926d`, pendientes de merge):
+>
+> 1. `d0017be` `feat(access): admin endpoints for the household library matrix` — Phase B backend.
+>    - `POST /users` ampliado con `grant_library_ids` opcional. Valida la existencia de cada library ANTES de crear el user (half-applied imposible) y rechaza outright si el body es de profile creation (ADR-014).
+>    - `GET /users/{id}/library-access` — normaliza profile→parent server-side, devuelve `{user_id, owner_id, library_ids, is_inherited}` para que el frontend pinte la matriz heredada en un round-trip.
+>    - `PUT /users/{id}/library-access` — diff transaccional (insert faltantes, revoke sobrantes). 400 si target es profile.
+>    - Nueva query sqlc `ListLibraryAccessByUser`; nuevo método `LibraryRepository.ReplaceAccess` con tx.
+>    - **sqlc 1.31.1 trip evitado**: la primera versión del comment del query tenía un em-dash que truncó `ORDER BY library_id` a `ORDER BY library_`. Fix a ASCII y regen. Patrón ya documentado en `architecture-decisions.md`.
+>    - **Decisión senior**: cambio de path `/users/{id}/access` → `/users/{id}/library-access` porque el primero YA estaba ocupado para account-expires-at. El status doc viejo no lo había detectado.
+>    - 4 tests Go nuevos en repo + handler. `go test -race ./...` verde (vía docker linux porque health.go usa `syscall.Statfs` no-portable a Windows). `golangci-lint v2.5.0` 0 issues.
+>    - OpenAPI drift documentado bajo `/users/{id}/library-access`; `POST /users` ya estaba en allowlist.
+>
+> 2. `0886dfa` `feat(web): admin matrix UI for the household library access surface` — Phase B frontend.
+>    - Add User modal gana sección "Bibliotecas accesibles" con todas las libraries pre-tickeadas (default "dale acceso a todo el hogar"; el admin DESTICKEA para restringir). Ships dirty set como `grant_library_ids` en el mismo POST.
+>    - Nueva acción "Bibliotecas" en el kebab por usuario → abre modal Edit que carga GET (normaliza profile→parent server-side) y persiste con PUT contra `owner_id`. Profile targets muestran notice "editas el titular del hogar" + heredan al instante.
+>    - Componente reutilizable `LibraryAccessCheckboxes.tsx` (controlado, language-aware, lib-content-type tag). Usado por ambos modales.
+>    - 3 vitest nuevos en `UsersAdmin.test.tsx` cubren: payload del create-with-grants, round-trip GET/PUT del kebab, routing profile→parent. **519/519** vitest verdes (era 516). `tsc --noEmit` clean. Vite arranca limpio.
+>    - i18n: añadidas 9 keys en `es.json` + `en.json`. Las tests usan regex `|` para matchear ambos idiomas porque el fallbackLng es `en` y muchos valores de en.json siguen en español (traducción parcial preexistente del proyecto).
+>    - **Detalle no obvio**: el `useEffect` que pre-checkea libraries en el Add User modal seedea SOLO una vez (cuando modal opens AND newGrantLibraryIds.length === 0). Si el admin destickea todo y luego cierra+reabre, el modal SÍ vuelve a tickear todo. Es UX intencionada — "abrir el modal" siempre arranca desde el estado por defecto.
+>    - **Profile flow**: el handler frontend SIEMPRE manda el PUT contra `accessData.owner_id` (no contra el `accessTarget.id` original). El server YA rechazaría con 400 si mandases el id del profile; resolver en frontend es belt-and-braces.
+>
+> **Audit de seek-coalesce** (recomendación: **no tocar**):
+>
+> El status doc viejo listaba "refactor seek-coalesce" en P1. Audit a fondo (`internal/stream/manager.go:506+`, 4 tests dedicados en `manager_test.go:421-700`) reveló que el código YA está maduro:
+> - AND-gate (segmento ≤2 + tiempo ≤300ms) tuneado contra el fanout de hls.js (~100ms, 3 segments) sin tragarse re-clicks humanos legítimos. Bug 2026-05-10 cubierto.
+> - Sliding-window rate limit (20 restarts/60s) defendiendo contra el bug 2026-05-07 (cliente disparó 366 seeks por un click humano).
+> - Per-session mutex (`ms.restartMu`) sin bloquear el resto del manager.
+> - Constants HARDCODED a propósito — los comentarios dicen explícitamente que no son user-tunable porque son fixes empíricos a bugs concretos. Exponerlas en config invita a romper la coalesce policy.
+>
+> Opciones de "refactor" evaluadas y descartadas:
+> 1. Config-tunable → anti-recomendado, invita regresiones.
+> 2. Extraer `canCoalesce()` + `bumpRateLimit()` helpers → la función pasa de 100→50 líneas pero el flujo top-down actual lee como receta con why-comment por gate; fragmentar dispersa la comprensión. Win marginal.
+> 3. AND-gate predictivo / ML → sobreingeniería.
+> 4. Zombie-ffmpeg al expirar el 2s shutdown timeout → comentado como trade-off conocido; `-start_number` evita corrupción de archivos. Solo cosmético.
+>
+> **Senior call**: el código causó 2 incidentes en 1 semana y desde entonces convergió. Cualquier cambio aquí es churn sin valor. Item retirado del backlog activo.
+>
+> **Pendiente / próximo bloque sugerido**:
+>
+> El usuario está informado de las opciones del backlog en lenguaje llano (no jerga). Se le presentaron 3 candidates de mayor valor visible:
+> - **Subs burn-in PGS/DVDSUB/ASS** (Blu-ray y subs animados que hoy no se ven porque son imágenes; hay que quemarlos sobre el vídeo en transcoding) — feature visible inmediato.
+> - **Audio multichannel passthrough** (5.1/7.1 hoy baja a estéreo; relevante para home cinema/soundbar).
+> - **VAAPI fully-on-GPU** (hoy mezcla CPU+GPU; pasarlo todo a GPU = más sesiones simultáneas con el mismo hardware).
+>
+> A la espera de que el usuario elija cuál atacar después del merge de los dos PRs activos.
+>
+> **Reglas duras que siguen vigentes**:
+> - `library_access.user_id` ES SIEMPRE un top-level user (ADR-014). El frontend resuelve `owner_id` antes del PUT; el backend rechaza con 400 si llega un profile id.
+> - El predicate strict (post-migración 040) bypassea para admin queries (admin ve todo).
+> - sqlc 1.31.1 sigue siendo la última versión upstream. Comentarios en `.sql` files: ASCII estricto, sin em-dashes.
+> - Tests del backend en Windows: usar docker (`golang:1.25-alpine` + `apk add build-base`) porque health.go usa `syscall.Statfs` no-portable a Windows. Issue preexistente, no tocado.
+>
+> **Métricas al cierre de la sesión**:
+> - Backend: `go test -race ./...` → todos los paquetes verdes. golangci-lint v2.5.0 → 0 issues.
+> - Frontend: `pnpm test --run` → **519/519** (+3 nuevos). `tsc --noEmit` clean. Vite dev arranca sin compile errors.
+> - OpenAPI drift gate satisfecho con los 2 endpoints nuevos documentados.
+>
+> ---
+>
 > 🎬 **Sesión 2026-05-11 (rama `claude/review-project-1y28j`, modelo de acceso por hogar)** — el usuario pidió diseño de control de acceso per-user/group + M3Us personales. Audit reveló que el sistema YA existía parcialmente: tabla `library_access` per-user (opt-in: público por defecto) Y profile-system tipo Netflix vía `parent_user_id` (migración 034) que NO estaba integrado en el predicado de acceso.
 >
 > **Modelo final acordado con el usuario (re-formulación tras 2 rondas)**: el "hogar" se materializa REUSANDO los profiles existentes. Top-level user (parent_user_id NULL) = dueño del hogar. Profiles (parent_user_id != NULL) = miembros que heredan acceso. Los grants en `library_access` apuntan SIEMPRE al top-level user. No hay tabla `households` ni `groups`. El admin gestiona todo (v1 no expone self-service para invitar miembros).

@@ -944,7 +944,16 @@
       "avatarColorAuto": "Auto",
       "pinModalTitle": "PIN del perfil",
       "pinModalHint": "Escribe un PIN de 4 dígitos o déjalo vacío para quitarlo. El PIN se pide al elegir el perfil en la pantalla de selección.",
-      "pinClearCta": "Quitar PIN"
+      "pinClearCta": "Quitar PIN",
+      "libraryAccessAction": "Libraries",
+      "libraryAccessHint": "Which libraries this household can see.",
+      "libraryAccessProfileHint": "Edit the household's library access (inherited from the owner).",
+      "libraryAccessModalTitle": "Library access",
+      "libraryAccessSectionLabel": "Accessible libraries",
+      "libraryAccessSectionHint": "By default, the new user sees every existing library. Uncheck the ones you don't want them to see.",
+      "libraryAccessInheritedNotice": "You are editing the household owner <strong>{{owner}}</strong>. Every profile under that account inherits the same set.",
+      "libraryAccessNoLibraries": "No libraries created yet. Add one from /admin/libraries and come back here to assign access.",
+      "libraryAccessAriaLabel": "Libraries this user can access"
     },
     "system": {
       "tabs": {

@@ -12,6 +12,7 @@ import type {
   ProfileSummary,
   ResetPasswordResponse,
   User,
+  UserLibraryAccess,
 } from "../types";
 
 export function useUsers(options?: Partial<UseQueryOptions<User[]>>) {
@@ -27,14 +28,73 @@ export function useCreateUser() {
   // Password is now optional from the wire perspective: omit it and
   // the server generates a temporary one and returns it under
   // `generated_password` for the admin to share with the user.
+  // `grant_library_ids` opts the new account into the household
+  // library matrix in the same request — the server validates each
+  // id exists before creating the row and rejects the field outright
+  // on profile creation (ADR-014).
   return useMutation<
     CreateUserResponse,
     Error,
-    { username: string; password?: string; display_name?: string; role?: string }
+    {
+      username: string;
+      password?: string;
+      display_name?: string;
+      role?: string;
+      grant_library_ids?: string[];
+    }
   >({
     mutationFn: (data) => api.createUser(data),
-    onSuccess: () => {
+    onSuccess: (_data, vars) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.users });
+      // The post-create grant fan-out lands rows in library_access
+      // that the matrix UI reads through this key. Invalidate
+      // proactively so the row's checkbox state is correct the next
+      // time the admin opens the modal.
+      if (vars.grant_library_ids && vars.grant_library_ids.length > 0) {
+        queryClient.invalidateQueries({
+          queryKey: ["users"],
+          predicate: (q) => q.queryKey[0] === "users",
+        });
+      }
+    },
+  });
+}
+
+// Per-user library matrix — admin-only. Profile ids resolve to the
+// parent server-side, and the response flags `is_inherited` so the
+// caller can render a read-only "inherited from parent" view without
+// re-querying.
+export function useUserLibraryAccess(
+  userId: string | null | undefined,
+  options?: Partial<UseQueryOptions<UserLibraryAccess>>,
+) {
+  return useQuery<UserLibraryAccess>({
+    queryKey: userId
+      ? queryKeys.userLibraryAccess(userId)
+      : ["users", "library-access", "disabled"],
+    queryFn: () => api.getUserLibraryAccess(userId as string),
+    // Disabled when no target is selected (modal closed). Prevents
+    // the hook from firing on every render of the parent page.
+    enabled: !!userId,
+    ...options,
+  });
+}
+
+export function useSetUserLibraryAccess() {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, { userId: string; libraryIds: string[] }>({
+    mutationFn: ({ userId, libraryIds }) =>
+      api.setUserLibraryAccess(userId, libraryIds),
+    onSuccess: (_data, vars) => {
+      // The matrix view this user just saved reads from
+      // queryKeys.userLibraryAccess(...); invalidate that key so the
+      // next open shows the post-PUT state. Also drop any profile-
+      // scoped cache pointing at the same household (the GET endpoint
+      // normalises profile ids server-side, but we can't enumerate
+      // them client-side, so we wipe the whole `users` subtree).
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.userLibraryAccess(vars.userId),
+      });
     },
   });
 }

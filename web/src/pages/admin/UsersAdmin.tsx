@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import type { User } from "@/api/types";
 import {
@@ -6,6 +6,7 @@ import {
   useCreateUser,
   useCreateProfile,
   useDeleteUser,
+  useLibraries,
   useMe,
   useResetUserPassword,
   useSetUserAccess,
@@ -13,8 +14,10 @@ import {
   useSetUserAvatarColor,
   useSetUserContentRating,
   useSetUserDisplayName,
+  useSetUserLibraryAccess,
   useSetUserPIN,
   useSetUserRole,
+  useUserLibraryAccess,
 } from "@/api/hooks";
 import { Button, KebabMenu, Modal, Input, EmptyState, Skeleton } from "@/components/common";
 import type { KebabMenuItem } from "@/components/common";
@@ -25,6 +28,7 @@ import {
   ChevronDown,
   ChevronRight,
   KeyRound,
+  Library as LibraryIcon,
   Lock,
   Palette,
   Trash2,
@@ -32,6 +36,7 @@ import {
 } from "lucide-react";
 import { Trans, useTranslation } from 'react-i18next';
 import FederationAdmin from "./FederationAdmin";
+import { LibraryAccessCheckboxes } from "./LibraryAccessCheckboxes";
 
 export default function UsersAdmin() {
   const { t } = useTranslation();
@@ -70,6 +75,17 @@ export default function UsersAdmin() {
   const [autoGenerate, setAutoGenerate] = useState(true);
   const [newDisplayName, setNewDisplayName] = useState("");
   const [newRole, setNewRole] = useState("user");
+  // Optional pre-checked library grants applied in the same POST.
+  // Pre-load all libraries by default so the happy-path "create user
+  // with full household access" is one click — the admin un-ticks if
+  // they want to restrict, not the other way round.
+  const [newGrantLibraryIds, setNewGrantLibraryIds] = useState<string[]>([]);
+
+  // Library list — used by both the create modal (grant checkboxes)
+  // and the edit-access modal (matrix view). Cached behind useQuery,
+  // so reusing the same hook in two places shares cache.
+  const { data: libraries } = useLibraries();
+  const allLibraries = useMemo(() => libraries ?? [], [libraries]);
 
   // Modal that surfaces a one-shot password to copy. Drives both the
   // post-create flow and the post-reset flow — same UX (a chip with
@@ -163,6 +179,50 @@ export default function UsersAdmin() {
   // log in directly anyway).
   const [profileParent, setProfileParent] = useState<User | null>(null);
   const [profileName, setProfileName] = useState("");
+
+  // Edit-library-access modal. `accessTarget` is the row the kebab was
+  // clicked from; the modal's GET fetches the canonical owner (parent
+  // for profiles) and we mirror its `library_ids` into local state so
+  // the admin can stage changes before hitting Save. Closing without
+  // saving discards the local edits.
+  const [accessTarget, setAccessTarget] = useState<User | null>(null);
+  const [accessDraft, setAccessDraft] = useState<string[] | null>(null);
+  const setUserLibraryAccess = useSetUserLibraryAccess();
+  const { data: accessData, isLoading: accessLoading } = useUserLibraryAccess(
+    accessTarget?.id,
+  );
+  useEffect(() => {
+    // Seed the draft once when the server response lands. If the admin
+    // already edited the draft, leave it alone — re-seeding would
+    // discard their in-progress changes when the query refetches.
+    if (accessData && accessDraft === null) {
+      setAccessDraft(accessData.library_ids);
+    }
+  }, [accessData, accessDraft]);
+
+  function closeAccessModal() {
+    setAccessTarget(null);
+    setAccessDraft(null);
+    setUserLibraryAccess.reset();
+  }
+
+  function handleSaveAccess() {
+    if (!accessTarget || !accessData || accessDraft === null) return;
+    setUserLibraryAccess.mutate(
+      {
+        // ALWAYS hit the owner id (parent for profiles). The server
+        // would reject a profile target with 400; we resolve here
+        // proactively so the admin can edit a profile's matrix
+        // through the same kebab — the GET already normalises and the
+        // PUT honours that contract.
+        userId: accessData.owner_id,
+        libraryIds: accessDraft,
+      },
+      {
+        onSuccess: () => closeAccessModal(),
+      },
+    );
+  }
 
   // PIN modal — admin types a 4-digit PIN (or clears it).
   const [pinTarget, setPinTarget] = useState<User | null>(null);
@@ -301,7 +361,26 @@ export default function UsersAdmin() {
     setAutoGenerate(true);
     setNewDisplayName("");
     setNewRole("user");
+    setNewGrantLibraryIds([]);
   }
+
+  // Default the grant checkboxes to "all libraries" the first time the
+  // modal opens after libraries finish loading. The admin's typical
+  // intent on a fresh hubplay is "give the new household access to
+  // everything"; un-ticking is the deliberate restrict gesture, not
+  // the default. We only seed when the modal is open AND the local
+  // state is still the initial empty array, so an admin who explicitly
+  // un-checks everything before submitting doesn't get auto-re-checked.
+  useEffect(() => {
+    if (!showAddModal) return;
+    if (newGrantLibraryIds.length > 0) return;
+    if (allLibraries.length === 0) return;
+    setNewGrantLibraryIds(allLibraries.map((l) => l.id));
+    // We deliberately omit newGrantLibraryIds from deps: this seed is a
+    // ONE-shot when the modal opens, not a reactive sync, otherwise
+    // un-ticking everything would immediately re-tick everything.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showAddModal, allLibraries]);
 
   function handleCreate(e: FormEvent) {
     e.preventDefault();
@@ -319,6 +398,10 @@ export default function UsersAdmin() {
         password: autoGenerate ? undefined : newPassword,
         display_name: newDisplayName.trim() || undefined,
         role: newRole,
+        // Omit when empty so the server's "no grants" branch fires
+        // cleanly; sending [] would also work but it's noise.
+        grant_library_ids:
+          newGrantLibraryIds.length > 0 ? newGrantLibraryIds : undefined,
       },
       {
         onSuccess: (resp) => {
@@ -397,6 +480,24 @@ export default function UsersAdmin() {
         hint: t("admin.users.pinHint", {
           defaultValue: "Configurar PIN del perfil",
         }),
+      },
+      {
+        label: t("admin.users.libraryAccessAction", {
+          defaultValue: "Bibliotecas",
+        }),
+        icon: LibraryIcon,
+        onClick: () => {
+          setAccessTarget(user);
+          setAccessDraft(null);
+        },
+        hint: isProfile
+          ? t("admin.users.libraryAccessProfileHint", {
+              defaultValue:
+                "Editar las bibliotecas del hogar (hereda del titular).",
+            })
+          : t("admin.users.libraryAccessHint", {
+              defaultValue: "Qué bibliotecas ve este hogar.",
+            }),
       },
       {
         label: t("admin.users.resetPassword", {
@@ -1271,6 +1372,25 @@ export default function UsersAdmin() {
             </select>
           </div>
 
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-medium text-text-secondary">
+              {t("admin.users.libraryAccessSectionLabel", {
+                defaultValue: "Bibliotecas accesibles",
+              })}
+            </label>
+            <p className="text-xs text-text-muted">
+              {t("admin.users.libraryAccessSectionHint", {
+                defaultValue:
+                  "Por defecto, el nuevo usuario ve todas las bibliotecas existentes. Desmarca las que no quieras que vea.",
+              })}
+            </p>
+            <LibraryAccessCheckboxes
+              libraries={allLibraries}
+              selectedIds={newGrantLibraryIds}
+              onChange={setNewGrantLibraryIds}
+            />
+          </div>
+
           {createUser.error && (
             <p className="text-xs text-error">{createUser.error.message}</p>
           )}
@@ -1288,6 +1408,70 @@ export default function UsersAdmin() {
             </Button>
           </div>
         </form>
+      </Modal>
+
+      {/* Edit Library Access modal. Loads the canonical grant set via
+          GET (which normalises profile→parent server-side), keeps a
+          local draft so the admin can stage changes, and persists with
+          PUT against the OWNER id. Profile rows render the same
+          editable matrix because grants apply to the household, but
+          the header makes clear which top-level account is being
+          edited so the operator isn't surprised when changing one
+          profile's row affects everyone under that parent. */}
+      <Modal
+        isOpen={accessTarget !== null}
+        onClose={closeAccessModal}
+        title={t("admin.users.libraryAccessModalTitle", {
+          defaultValue: "Bibliotecas accesibles",
+        })}
+      >
+        <div className="flex flex-col gap-4">
+          {accessLoading || !accessData ? (
+            <Skeleton className="h-32 w-full" />
+          ) : (
+            <>
+              {accessData.is_inherited && (
+                <p className="text-xs text-text-muted">
+                  <Trans
+                    i18nKey="admin.users.libraryAccessInheritedNotice"
+                    defaults="Editas el acceso del titular del hogar <strong>{{owner}}</strong>. Todos los perfiles bajo esa cuenta heredan el mismo set."
+                    values={{
+                      owner:
+                        users?.find((u) => u.id === accessData.owner_id)
+                          ?.display_name ??
+                        users?.find((u) => u.id === accessData.owner_id)
+                          ?.username ??
+                        accessData.owner_id,
+                    }}
+                    components={{ strong: <strong className="text-text-primary" /> }}
+                  />
+                </p>
+              )}
+              <LibraryAccessCheckboxes
+                libraries={allLibraries}
+                selectedIds={accessDraft ?? []}
+                onChange={setAccessDraft}
+              />
+              {setUserLibraryAccess.error && (
+                <p className="text-xs text-error">
+                  {setUserLibraryAccess.error.message}
+                </p>
+              )}
+              <div className="flex justify-end gap-3">
+                <Button variant="secondary" onClick={closeAccessModal}>
+                  {t("common.cancel")}
+                </Button>
+                <Button
+                  onClick={handleSaveAccess}
+                  isLoading={setUserLibraryAccess.isPending}
+                  disabled={accessDraft === null}
+                >
+                  {t("common.save")}
+                </Button>
+              </div>
+            </>
+          )}
+        </div>
       </Modal>
 
       {/* Delete Confirmation Modal */}
