@@ -27,14 +27,19 @@ import (
 // episode within ~50ms instead of waiting for the next 60s staleTime
 // to elapse.
 type MeEventsHandler struct {
-	bus    EventBusSubscriber
-	logger *slog.Logger
+	bus     EventBusSubscriber
+	limiter *SSELimiter
+	logger  *slog.Logger
 }
 
-func NewMeEventsHandler(bus EventBusSubscriber, logger *slog.Logger) *MeEventsHandler {
+// NewMeEventsHandler — limiter is optional. See NewEventHandler doc;
+// the per-user cap matters most here because /me/events is the only
+// SSE surface a regular (non-admin) user controls directly.
+func NewMeEventsHandler(bus EventBusSubscriber, limiter *SSELimiter, logger *slog.Logger) *MeEventsHandler {
 	return &MeEventsHandler{
-		bus:    bus,
-		logger: logger.With("module", "sse-me"),
+		bus:     bus,
+		limiter: limiter,
+		logger:  logger.With("module", "sse-me"),
 	}
 }
 
@@ -68,6 +73,21 @@ func (h *MeEventsHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		respondError(w, r, http.StatusInternalServerError, "SSE_NOT_SUPPORTED", "streaming not supported")
 		return
+	}
+
+	// Acquire before flushing headers; once the response starts we
+	// can't return a 503. Per-user cap protects against runaway
+	// reconnect loops (the most common failure mode is a stale tab
+	// retrying every 100ms after the bearer token expired).
+	if h.limiter != nil {
+		release, err := h.limiter.Acquire(userID)
+		if err != nil {
+			w.Header().Set("Retry-After", "30")
+			respondError(w, r, http.StatusServiceUnavailable, "SSE_CAP_EXCEEDED",
+				"too many concurrent event streams; retry shortly")
+			return
+		}
+		defer release()
 	}
 
 	w.Header().Set("Content-Type", "text/event-stream")

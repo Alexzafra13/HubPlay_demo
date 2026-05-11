@@ -16,6 +16,7 @@ import (
 
 	hubplay "hubplay"
 	"hubplay/internal/api"
+	"hubplay/internal/api/handlers"
 	"hubplay/internal/auth"
 	"hubplay/internal/clock"
 	"hubplay/internal/config"
@@ -421,6 +422,11 @@ func run(configPath string) error {
 		Logger:        logger,
 		Metrics:       metrics,
 		LogBuffer:     logBuffer,
+		// One shared limiter across every SSE surface. Defaults
+		// (100 global, 5 per-user) are sized for a household-scale
+		// self-hosted server; if a deployment grows, lift these to
+		// config rather than tweaking the constants.
+		SSELimiter:    handlers.NewSSELimiter(handlers.DefaultSSEGlobalMax, handlers.DefaultSSEPerUserMax),
 	})
 
 	server := &http.Server{

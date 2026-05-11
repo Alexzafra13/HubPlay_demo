@@ -22,7 +22,7 @@ import (
 func newMeEventsTestServer(t *testing.T, claims *auth.Claims) (*event.Bus, *httptest.Server) {
 	t.Helper()
 	bus := event.NewBus(testutil.NopLogger())
-	h := NewMeEventsHandler(bus, testutil.NopLogger())
+	h := NewMeEventsHandler(bus, nil, testutil.NopLogger())
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Inject the test claims into the request context — the
 		// handler reads them via auth.GetClaims, same path the real
@@ -191,6 +191,64 @@ func TestMeEvents_DropsEventsWithoutUserID(t *testing.T) {
 	}
 	if strings.Contains(saw, "no-uid") || strings.Contains(saw, "wrong-type") {
 		t.Fatalf("malformed event leaked: %q", saw)
+	}
+}
+
+// When the per-user SSE cap is reached the handler must return 503
+// with a Retry-After hint BEFORE writing any SSE headers — once the
+// stream opens the client is committed to read forever and the
+// status code is locked in.
+func TestMeEvents_RejectsWhenPerUserCapReached(t *testing.T) {
+	bus := event.NewBus(testutil.NopLogger())
+	limiter := NewSSELimiter(10, 1) // per-user cap = 1
+	h := NewMeEventsHandler(bus, limiter, testutil.NopLogger())
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(auth.WithClaims(r.Context(), &auth.Claims{UserID: "u-cap"}))
+		h.Stream(w, r)
+	}))
+	t.Cleanup(srv.Close)
+
+	// First connection: takes the only slot for u-cap.
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	defer cancel1()
+	req1, _ := http.NewRequestWithContext(ctx1, http.MethodGet, srv.URL, nil)
+	resp1, err := http.DefaultClient.Do(req1)
+	if err != nil {
+		t.Fatalf("first connect: %v", err)
+	}
+	defer resp1.Body.Close() //nolint:errcheck
+	if resp1.StatusCode != http.StatusOK {
+		t.Fatalf("first stream status: got %d want 200", resp1.StatusCode)
+	}
+	waitForHandlerCount(t, bus, event.ProgressUpdated, 1)
+
+	// Second connection for the SAME user: must 503 with Retry-After.
+	resp2, err := http.Get(srv.URL)
+	if err != nil {
+		t.Fatalf("second connect: %v", err)
+	}
+	defer resp2.Body.Close() //nolint:errcheck
+	if resp2.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("second stream status: got %d want 503", resp2.StatusCode)
+	}
+	if got := resp2.Header.Get("Retry-After"); got == "" {
+		t.Errorf("Retry-After header missing on 503")
+	}
+
+	// Releasing the first slot must let a fresh connection through.
+	cancel1()
+	_ = resp1.Body.Close()
+	// Wait for the unsubscribe + release to land.
+	deadline := time.Now().Add(1 * time.Second)
+	for time.Now().Before(deadline) {
+		if global, _ := limiter.Snapshot(); global == 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if global, _ := limiter.Snapshot(); global != 0 {
+		t.Fatalf("limiter did not release after disconnect: global=%d", global)
 	}
 }
 

@@ -72,6 +72,11 @@ type Dependencies struct {
 	// endpoint short-circuits to "logs not available" rather than
 	// 500. Production builds wire it up via logging.NewWithBuffer.
 	LogBuffer      *logging.Buffer
+	// SSELimiter bounds concurrent Server-Sent Events connections
+	// across all SSE surfaces (events, me_events, admin_logs). Optional
+	// — tests pass nil and handlers skip enforcement; production wires
+	// a single shared instance so global + per-user counts are unified.
+	SSELimiter     *handlers.SSELimiter
 }
 
 func NewRouter(deps Dependencies) http.Handler {
@@ -292,13 +297,13 @@ func NewRouter(deps Dependencies) http.Handler {
 
 			// Server-Sent Events for real-time updates
 			if deps.EventBus != nil {
-				eventHandler := handlers.NewEventHandler(deps.EventBus, deps.Logger)
+				eventHandler := handlers.NewEventHandler(deps.EventBus, deps.SSELimiter, deps.Logger)
 				r.Get("/events", eventHandler.Stream)
 
 				// User-scoped SSE: cross-device sync of watch progress,
 				// played, favourites. The handler filters by claims.UserID
 				// so other users on the same server never see these events.
-				meEventsHandler := handlers.NewMeEventsHandler(deps.EventBus, deps.Logger)
+				meEventsHandler := handlers.NewMeEventsHandler(deps.EventBus, deps.SSELimiter, deps.Logger)
 				r.Get("/me/events", meEventsHandler.Stream)
 			}
 
@@ -544,7 +549,7 @@ func NewRouter(deps Dependencies) http.Handler {
 					// fill, SSE stream for the live tail. The handler
 					// short-circuits when LogBuffer is nil (test
 					// builds, etc.) so callers don't 500.
-					logsHandler := handlers.NewAdminLogsHandler(deps.LogBuffer)
+					logsHandler := handlers.NewAdminLogsHandler(deps.LogBuffer, deps.SSELimiter)
 					r.Get("/logs", logsHandler.Snapshot)
 					r.Get("/logs/stream", logsHandler.Stream)
 				})
