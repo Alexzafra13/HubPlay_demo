@@ -255,6 +255,21 @@ export interface ResetPasswordResponse {
 }
 
 /**
+ * Admin-only payload of GET /users/{id}/library-access. Profile ids
+ * server-side resolve to their parent (grants always target the
+ * top-level account — ADR-014), so the response surfaces both the
+ * requested user_id AND the owner_id whose grants actually apply,
+ * plus a flag the UI uses to render a read-only "inherited" view
+ * with a "edit on the parent account" hint.
+ */
+export interface UserLibraryAccess {
+  user_id: string;
+  owner_id: string;
+  library_ids: string[];
+  is_inherited: boolean;
+}
+
+/**
  * One row of the user-facing "Tus dispositivos" panel — every active
  * auth session (refresh token alive in DB) for the calling user.
  * Distinct from AdminStreamSession (the admin's "Now Playing" surface

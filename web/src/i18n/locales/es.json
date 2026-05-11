@@ -944,7 +944,16 @@
       "avatarColorAuto": "Auto",
       "pinModalTitle": "PIN del perfil",
       "pinModalHint": "Escribe un PIN de 4 dígitos o déjalo vacío para quitarlo. El PIN se pide al elegir el perfil en la pantalla de selección.",
-      "pinClearCta": "Quitar PIN"
+      "pinClearCta": "Quitar PIN",
+      "libraryAccessAction": "Bibliotecas",
+      "libraryAccessHint": "Qué bibliotecas ve este hogar.",
+      "libraryAccessProfileHint": "Editar las bibliotecas del hogar (hereda del titular).",
+      "libraryAccessModalTitle": "Bibliotecas accesibles",
+      "libraryAccessSectionLabel": "Bibliotecas accesibles",
+      "libraryAccessSectionHint": "Por defecto, el nuevo usuario ve todas las bibliotecas existentes. Desmarca las que no quieras que vea.",
+      "libraryAccessInheritedNotice": "Editas el acceso del titular del hogar <strong>{{owner}}</strong>. Todos los perfiles bajo esa cuenta heredan el mismo set.",
+      "libraryAccessNoLibraries": "No hay bibliotecas creadas todavía. Crea una desde /admin/libraries y vuelve aquí para asignar acceso.",
+      "libraryAccessAriaLabel": "Bibliotecas accesibles para este usuario"
     },
     "system": {
       "tabs": {

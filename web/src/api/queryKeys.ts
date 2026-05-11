@@ -15,6 +15,8 @@
 export const queryKeys = {
   me: ["me"] as const,
   users: ["users"] as const,
+  userLibraryAccess: (userId: string) =>
+    ["users", userId, "library-access"] as const,
   libraries: ["libraries"] as const,
   library: (id: string) => ["libraries", id] as const,
   items: (params?: Record<string, unknown>) => ["items", params] as const,

@@ -47,6 +47,7 @@ import type {
   MySession,
   ProfileSummary,
   ResetPasswordResponse,
+  UserLibraryAccess,
   UserData,
   ApiErrorBody,
   ExternalSubtitleResult,
@@ -417,6 +418,11 @@ export class ApiClient {
     password?: string;
     display_name?: string;
     role?: string;
+    /** Optional. When non-empty, the server attaches library_access
+     *  grants to the new user in the same request. Only valid for
+     *  top-level accounts; profile creation rejects this with 400
+     *  because grants belong to the parent (ADR-014). */
+    grant_library_ids?: string[];
   }): Promise<CreateUserResponse> {
     return this.request<CreateUserResponse>("POST", "/users", { body: data });
   }
@@ -606,6 +612,29 @@ export class ApiClient {
   async setUserAccess(userId: string, durationDays: number): Promise<void> {
     return this.request<void>("PUT", `/users/${userId}/access`, {
       body: { duration_days: durationDays },
+    });
+  }
+
+  /** Reads the library_access grants for a user. Profile ids are
+   *  normalised to their parent server-side; the response flags this
+   *  with `is_inherited` so the UI can render a read-only inherited
+   *  view without an extra round-trip to look up the parent. */
+  async getUserLibraryAccess(userId: string): Promise<UserLibraryAccess> {
+    return this.request<UserLibraryAccess>(
+      "GET",
+      `/users/${userId}/library-access`,
+    );
+  }
+
+  /** Replaces the user's library_access grant set in one transactional
+   *  diff. Passing `[]` clears every grant. Only valid against
+   *  top-level accounts — profile targets are rejected with 400. */
+  async setUserLibraryAccess(
+    userId: string,
+    libraryIds: string[],
+  ): Promise<void> {
+    return this.request<void>("PUT", `/users/${userId}/library-access`, {
+      body: { library_ids: libraryIds },
     });
   }
 
