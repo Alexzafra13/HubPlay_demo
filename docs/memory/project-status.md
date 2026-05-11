@@ -1,5 +1,74 @@
 # Estado del proyecto
 
+> 🎬 **Sesión 2026-05-11 (rama `claude/fix-admin-permissions-fpFHG`, admin principal + pairing UI con QR/SSE)** — el usuario reportó dos cosas: la matriz de bibliotecas mostraba vacío para el admin principal (Phase B cerró el modelo pero olvidó al admin) y el flujo de vincular dispositivo era poco profesional (todos los accesos mezclados en Settings, sin QR para TVs). Tres commits pusheados a `origin/claude/fix-admin-permissions-fpFHG`, pendientes de merge.
+>
+> **Commit 1 — `a965743` `feat(access): primary admin sees every library by default`**.
+>
+> - Migración `041_primary_admin_library_access.sql`: backfill `INSERT OR IGNORE` para el admin principal (oldest top-level `role='admin'`, misma definición que `GetPrimaryAdminID`) × todas las libraries existentes. Migración 040 lo había excluido (`AND u.role != 'admin'`) confiando en el bypass de código de LIST, pero la matriz de Phase B consulta `library_access` directo. Persistir cierra la inconsistencia.
+> - Nueva sqlc query `GrantPrimaryAdminLibraryAccess` invocada desde `LibraryRepository.Create` dentro de la misma tx: mantiene la invariante para libraries creadas después de la migración. No-op cuando no existe admin (cold-start pre-setup).
+> - **Decisión consensuada con el usuario**: solo el admin principal recibe grants automáticos. Admins secundarios siguen apoyados en el bypass de LIST; su matriz vacía refleja honestamente que no tienen grants explícitos. Demote conserva los grants.
+> - 4 tests Go nuevos en `library_repository_test.go`: happy path, no-admin no-op, only-primary-admin (no secundarios), backfill-migration simulation (wipe + replay del SQL de 041).
+>
+> **Commit 2 — `a549332` `feat(auth/device): SSE pairing channel + RFC 8628 §3.3.1 + cookies`**. El usuario preguntó "de forma correcta todo nada de polling no?", así que se entregó SSE en vez de polling para la UI in-app. El proyecto ya tenía el patrón (`MeEventsHandler`).
+>
+> - `verification_uri_complete` en `/auth/device/start` (RFC 8628 §3.3.1) = `verification_url + ?code=ABCD-EFGH`. Helper `buildVerificationURIComplete` honra URLs con query ya presente.
+> - Nuevo tipo de evento `event.DeviceCodeApproved` (data: `device_code`, `user_id`). `DeviceCodeService.ApproveDevice` publica vía `s.auth.publish` tras `codes.Approve`. `Service.publish` ya era nil-safe.
+> - Nuevo método `DeviceCodeService.InspectDevice(ctx, deviceCode) (*DeviceCodeStatus, error)` — read-only snapshot (status: pending/approved/consumed/expired + expires_at) que el SSE handler consulta on-connect sin tocar `LastPolledAt`.
+> - Nuevo handler SSE `GET /api/v1/auth/device/events?device_code=X`: keyed por device_code (mismo threat model que `/poll`), 404 BEFORE flushear headers si el code es typo, emite `pending` inicial + síntesis de `approved/consumed/expired` cuando ya está terminal (cubre reconexión + race), subscribe al bus, timer local con `time.Until(expiresAt)` para emitir `expired` y cerrar. SSE limiter keyed `"device:" + deviceCode` (no user_id porque endpoint es unauthenticated).
+> - `/auth/device/poll` setea cookies (`hubplay_access`, `hubplay_refresh`) en éxito vía `setAuthCookies(w, r, tok, accessTTL, refreshTTL)` ANTES del `respondJSON`. Native clients (TVs, CLI) ignoran las cookies y leen los tokens del JSON; navegador queda logueado.
+> - `MySession` wire gana `auth_method` derivado del prefijo `device-code-` en `device_id` (string check en handler, sin migración). Función `sessionAuthMethod` en `internal/api/handlers/auth.go`.
+> - `NewDeviceAuthHandler` ahora pide `authCfg config.AuthConfig` + `bus EventBusSubscriber` + `limiter *SSELimiter`. Método `HasEventBus()` permite al router skipear el SSE endpoint si no hay bus inyectado (tests, headless setups).
+> - 2 tests nuevos en `internal/auth/device_test.go`: `InspectDevice` walk de estados, `ApprovePublishesEvent` (sync.Mutex + channel, ventana 2s). 4 tests nuevos en `internal/api/handlers/auth_device_test.go` (archivo nuevo): start emite URI complete, poll setea cookies, SSE happy path (con goroutine que dispara Approve mid-stream y `bufio.Scanner` parseando event-stream wire format), SSE unknown code → 404.
+>
+> **Commit 3 — `dcb23cd` `feat(web): in-app device pairing UI with QR + SSE + linked-device list`**. Tres surfaces frontend en una sola pasada:
+>
+> - **`/pair`** (público, fuera de `ProtectedRoute`): página nueva `PairThisDevice.tsx`. Detecta el dispositivo (`Tizen → "Samsung TV"`, `webOS → "LG TV"`, etc.) para que la session row en Settings sea legible. Llama `useStartDeviceCode` on-mount, renderiza el user_code grande + QR vía `qrcode` (`pnpm add qrcode @types/qrcode`, ~28KB gz, modo SVG para evitar canvas en TVs viejos), abre `EventSource` contra `/auth/device/events`. Escucha `approved` → llama `usePollDeviceCode` UNA SOLA VEZ → navega a `/` (App.tsx ya rutea según `password_change_required` etc.). `expired/consumed` → notice + botón "Generar nuevo código". `EventSource.onerror` no flipea a error (auto-reconnect transitorio); solo los terminal events cierran el stream.
+> - **`/link`** gana sección "Dispositivos vinculados" (`LinkedDevicesList.tsx`) debajo del formulario. Filtra `MySession[]` por `auth_method === "device_link"`. Hidden completamente si vacío. Revoke sin confirm (operator ya está en otro dispositivo). También prefill desde `?code=ABCD-EFGH` via `useSearchParams`: el QR del TV apunta a `/link?code=…`, móvil escanea, aterriza con el campo lleno, tap "Aprobar".
+> - **Settings → Tus dispositivos**: `DevicesPanel` ordena device-link primero, password después, dentro de cada grupo por `last_active_at` desc. Cada row tiene badge `"Vínculo dispositivo"` (azul) vs `"Sesión web"` (gris). El badge se oculta en `/link` (toda la lista ya es device-link) vía `showAuthMethodBadge` prop.
+> - **`DeviceRow.tsx`** extraído de `DevicesPanel` para reuso. Icono: `Tv` si `device_link`, `Smartphone` si `device_name` matchea `/iphone|android|mobi|ipad|tablet/i`, sino `Laptop`.
+> - **Login** gana link discreto al final del card: "¿Estás en una TV o consola? Vincula este dispositivo" → `/pair`.
+> - **i18n**: nuevas keys en `link.linked.*`, `pair.*`, `login.pairPrompt/pairCta`, `settings.devices.badge.*` (en es + en). Convención del proyecto seguida: `defaultValue` por todos lados, en.json mezcla inglés y español según traducción parcial existente.
+> - **TS strict**: `MySession.auth_method` es required (no opcional) — rompe fixtures de tests, actualicé `DevicesPanel.test.tsx` con `auth_method: "password"`.
+> - 3 tests nuevos en `LinkedDevicesList.test.tsx` (filter, empty render, revoke sin confirm), 2 en `LinkDevice.test.tsx` (prefill, canonicalización antes de POST). El test de LinkDevice IMPORTA `"@/i18n"` para que `t()` resuelva keys reales — el resto del frontend usa `defaultValue` consistentemente, este componente no.
+>
+> **Decisiones senior tomadas en esta sesión**:
+>
+> 1. **SSE en vez de polling para la UI in-app**. El proyecto migró a SSE en sesiones anteriores (`drive useMySessions + useAdminStreamSessions from SSE`). RFC 8628 prescribe polling pero solo es vinculante para native clients; la web in-app puede push y `/poll` queda como source-of-truth de token issuance + fallback. El SSE handler nunca emite tokens — solo notifica "ahora llama /poll".
+> 2. **Síntesis de terminal events on-connect** en vez de "esperar a que pase algo". Si el row ya está approved/consumed/expired cuando el client se conecta, emitimos el evento y cerramos. Hace los reconnects idempotentes sin código cliente complejo.
+> 3. **Cookies en `/poll`** (no en `/approve`). El operator apruena DESDE otro device — el cookie ahí no sirve. La cookie tiene que estar en la respuesta que el dispositivo paired recibe, que es `/poll`. Native clients ignoran cookies y leen JSON. Wire shape sin cambios.
+> 4. **Reusar el prefijo `device-code-` en `device_id`** para derivar `auth_method`. Cero migración. La invariante ya existía (`auth/device.go:255` lo stampea), solo había que exponerla.
+> 5. **`qrcode` en modo SVG** en vez de canvas. Tizen/webOS antiguos tienen problemas con WebGL/canvas grandes; SVG inline es seguro y la diff de tamaño es despreciable (~5KB).
+> 6. **Solo admin principal recibe auto-grants**, no todos los admins. Consistente con la noción de "primary admin" que ya está en el código (`GetPrimaryAdminID`, `PRIMARY_ADMIN_LOCKED` en deactivate). Admins secundarios son raros y su matriz vacía es honesta.
+>
+> **Métricas al cierre**:
+> - Backend Go: `go test -race ./internal/auth/... ./internal/api/handlers/... ./internal/db/... ./internal/library/... ./internal/event/...` → todos verdes. `golangci-lint` 0 issues.
+> - Frontend: `pnpm test --run` → **524/524** (+8 nuevos: 4 LibraryRepository + Migration + 2 device service + 4 device handler + 3 LinkedDevicesList + 2 LinkDevice). `tsc --noEmit` clean.
+> - Nuevas dependencias frontend: `qrcode@1.5.4`, `@types/qrcode@1.5.6` (dev). `pnpm@10.32.1`.
+> - Migración 041 idempotente, no rompe el sweep `testutil.NewTestDB`.
+>
+> **Reglas duras que esta sesión añade / refuerza**:
+>
+> - El admin principal SIEMPRE tiene grants explícitos en `library_access` post-041. Cualquier código que itere libraries para el admin principal puede asumirlo. Admins secundarios NO (siguen con el bypass de código).
+> - SSE `/auth/device/events` está autenticado por `device_code` (no por bearer/cookie). El threat model es idéntico a `/poll`: quien tenga el opaque token puede escuchar. No filtrar por user — el row no tiene user_id hasta después del approve.
+> - `MySession.auth_method` es required en TS. Todo fixture nuevo lo necesita.
+> - `qrcode` queda como única dep para QR rendering. Si en el futuro hace falta QR en otro lado (federation invites? share links?) reutilizar la misma lib + modo SVG.
+> - El sweeper de `device_codes` no publica eventos al borrar. El SSE handler usa un timer local para `expired`. Si en el futuro se quiere precisión strict, hookear el sweeper al bus.
+>
+> **Pendiente / próximo bloque**:
+>
+> El backlog activo del cierre anterior sigue válido:
+> - **Subs burn-in PGS/DVDSUB/ASS** — feature visible (Blu-ray subs hoy no se ven).
+> - **Audio multichannel passthrough** (5.1/7.1 → estéreo hoy).
+> - **VAAPI fully-on-GPU**.
+>
+> Cosas que asomaron en esta sesión y NO se hicieron (no scope):
+> - Backfill script para grants de admins secundarios si el operador los promueve y quiere matrices completas.
+> - Sweeper hookeado al bus para emitir `device_code.expired` exacto (cosmético).
+> - `frontend-design` polish del `/pair` (la página funciona pero usa el styling estándar; un TV-mode con tipografía más grande, contraste alto, focus visible para mando D-pad sería P3).
+> - QR generation reuse en federation invites (hoy `generateInvite` devuelve un código texto). Misma lib, ~15 LOC de UI.
+>
+> ---
+>
 > 🎬 **Sesión 2026-05-11 (rama `claude/infallible-robinson-97926d`, Phase B completa + seek-coalesce audit)** — cierre del modelo de acceso por hogar con dos PRs sucesivos sobre la misma rama, más auditoría a fondo de seek-coalesce que terminó en una recomendación de no tocar.
 >
 > **Commits pusheados** (ambos a `origin/claude/infallible-robinson-97926d`, pendientes de merge):
