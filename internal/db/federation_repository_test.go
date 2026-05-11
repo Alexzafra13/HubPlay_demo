@@ -138,6 +138,168 @@ func TestFederationRepository_SearchSharedItems(t *testing.T) {
 	}
 }
 
+// TestFederationRepository_SharedItem_ColorsForwarded pins the
+// contract the consumer-side aurora depends on: every peer-facing
+// query that emits SharedItem (ListSharedItems, ListRecentSharedItems,
+// SearchSharedItems) must surface the primary image's pre-extracted
+// dominant + dark-muted swatches when present. Without these, the
+// federated PeerItemDetail page would have nothing to paint with on
+// first render and would silently fall back to runtime node-vibrant.
+//
+// Coverage by surface:
+//   - ListSharedItems  → per-library browse (BrowsePeerItems consumer)
+//   - ListRecentSharedItems → "what's new on peers" rail
+//   - SearchSharedItems → federated search (raw SQL holdout)
+//
+// Each surface is given one item WITH colors and one item WITHOUT (no
+// matching image row), so the test also blinds against "always emit"
+// regressions. UpsertCachedItems is exercised separately at the bottom
+// so the catalog cache also carries colors through the migration 039
+// columns.
+func TestFederationRepository_SharedItem_ColorsForwarded(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	ctx := context.Background()
+
+	libRepo := db.NewLibraryRepository(database)
+	itemRepo := db.NewItemRepository(database)
+	imgRepo := db.NewImageRepository(database)
+	fedRepo := db.NewFederationRepository(database)
+
+	now := time.Now().UTC()
+	lib := db.Library{ID: "lib-1", Name: "Movies", ContentType: "movies", ScanMode: "auto", ScanInterval: "6h", CreatedAt: now, UpdatedAt: now, Paths: []string{"/m"}}
+	if err := libRepo.Create(ctx, &lib); err != nil {
+		t.Fatal(err)
+	}
+
+	withColors := db.Item{ID: "i-color", LibraryID: "lib-1", Type: "movie", Title: "Aurora", SortTitle: "Aurora", Path: "/m/a.mkv", AddedAt: now, UpdatedAt: now, IsAvailable: true}
+	noColors := db.Item{ID: "i-bare", LibraryID: "lib-1", Type: "movie", Title: "Bare", SortTitle: "Bare", Path: "/m/b.mkv", AddedAt: now, UpdatedAt: now, IsAvailable: true}
+	for _, it := range []db.Item{withColors, noColors} {
+		it := it
+		if err := itemRepo.Create(ctx, &it); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Only the first item gets a primary image with colors. The
+	// second item gets nothing — emitter must report ""/"" for it.
+	if err := imgRepo.Create(ctx, &db.Image{
+		ID: "img-1", ItemID: "i-color", Type: "primary", Path: "/m/a.jpg",
+		IsPrimary: true, AddedAt: now,
+		DominantColor: "rgb(120, 30, 40)", DominantColorMuted: "rgb(20, 10, 12)",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Paired peer + share so the items show up to the queries.
+	insertTestUser(t, database, "u-admin")
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	peer := &federation.Peer{
+		ID: "peer-1", ServerUUID: "uuid-1", Name: "A",
+		BaseURL: "https://a.test", PublicKey: pub,
+		Status: federation.PeerPaired, CreatedAt: now, PairedAt: &now,
+	}
+	if err := fedRepo.InsertPeer(ctx, peer); err != nil {
+		t.Fatal(err)
+	}
+	if err := fedRepo.UpsertLibraryShare(ctx, &federation.LibraryShare{
+		ID: "share-1", PeerID: "peer-1", LibraryID: "lib-1",
+		CanBrowse: true, CanPlay: true,
+		CreatedByUserID: "u-admin", CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	assertColors := func(t *testing.T, label string, items []*federation.SharedItem) {
+		t.Helper()
+		byID := map[string]*federation.SharedItem{}
+		for _, it := range items {
+			byID[it.ID] = it
+		}
+		c := byID["i-color"]
+		if c == nil {
+			t.Fatalf("%s: i-color missing", label)
+		}
+		if c.PosterColor != "rgb(120, 30, 40)" || c.PosterColorMuted != "rgb(20, 10, 12)" {
+			t.Errorf("%s: i-color expected colours; got %q / %q", label, c.PosterColor, c.PosterColorMuted)
+		}
+		b := byID["i-bare"]
+		if b == nil {
+			t.Fatalf("%s: i-bare missing", label)
+		}
+		if b.PosterColor != "" || b.PosterColorMuted != "" {
+			t.Errorf("%s: i-bare expected no colours; got %q / %q", label, b.PosterColor, b.PosterColorMuted)
+		}
+	}
+
+	t.Run("ListSharedItems", func(t *testing.T) {
+		items, _, err := fedRepo.ListSharedItems(ctx, "peer-1", "lib-1", 0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertColors(t, "ListSharedItems", items)
+	})
+
+	t.Run("ListRecentSharedItems", func(t *testing.T) {
+		items, err := fedRepo.ListRecentSharedItems(ctx, "peer-1", 50)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertColors(t, "ListRecentSharedItems", items)
+	})
+
+	t.Run("SearchSharedItems", func(t *testing.T) {
+		// One query that hits both items — FTS prefix match on the
+		// shared "a" / "b" first letter would over-match, so search
+		// on the explicit titles instead. Two calls so the test reads
+		// linearly.
+		hits1, err := fedRepo.SearchSharedItems(ctx, "peer-1", "Aurora", 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		hits2, err := fedRepo.SearchSharedItems(ctx, "peer-1", "Bare", 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertColors(t, "SearchSharedItems", append(hits1, hits2...))
+	})
+
+	t.Run("UpsertCachedItems_roundtrip", func(t *testing.T) {
+		// Cache writes must carry colours through migration 039's two
+		// new columns so the offline-cache read returns identical
+		// shape to the live query.
+		err := fedRepo.UpsertCachedItems(ctx, "peer-1", "lib-1", []*federation.SharedItem{
+			{ID: "remote-c", Type: "movie", Title: "Cached Aurora", HasPoster: true,
+				PosterColor: "rgb(99, 11, 22)", PosterColorMuted: "rgb(33, 44, 55)"},
+			{ID: "remote-b", Type: "movie", Title: "Cached Bare", HasPoster: false},
+		}, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out, total, _, err := fedRepo.ListCachedItems(ctx, "peer-1", "lib-1", 0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if total != 2 {
+			t.Fatalf("total: got %d want 2", total)
+		}
+		byID := map[string]*federation.SharedItem{}
+		for _, it := range out {
+			byID[it.ID] = it
+		}
+		c := byID["remote-c"]
+		if c == nil || c.PosterColor != "rgb(99, 11, 22)" || c.PosterColorMuted != "rgb(33, 44, 55)" {
+			t.Errorf("cache lost colours for remote-c: %+v", c)
+		}
+		b := byID["remote-b"]
+		if b == nil || b.PosterColor != "" || b.PosterColorMuted != "" {
+			t.Errorf("cache invented colours for remote-b: %+v", b)
+		}
+	})
+}
+
 // insertTestUser writes a minimal users row so federation_library_shares.
 // created_by FK is satisfiable. The auth tests have richer fixtures;
 // federation just needs the ID present.

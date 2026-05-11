@@ -147,15 +147,17 @@ type FederationInvite struct {
 }
 
 type FederationItemCache struct {
-	PeerID    string         `json:"peer_id"`
-	LibraryID string         `json:"library_id"`
-	RemoteID  string         `json:"remote_id"`
-	Type      string         `json:"type"`
-	Title     string         `json:"title"`
-	Year      sql.NullInt64  `json:"year"`
-	Overview  sql.NullString `json:"overview"`
-	CachedAt  time.Time      `json:"cached_at"`
-	HasPoster bool           `json:"has_poster"`
+	PeerID           string         `json:"peer_id"`
+	LibraryID        string         `json:"library_id"`
+	RemoteID         string         `json:"remote_id"`
+	Type             string         `json:"type"`
+	Title            string         `json:"title"`
+	Year             sql.NullInt64  `json:"year"`
+	Overview         sql.NullString `json:"overview"`
+	CachedAt         time.Time      `json:"cached_at"`
+	HasPoster        bool           `json:"has_poster"`
+	PosterColor      string         `json:"poster_color"`
+	PosterColorMuted string         `json:"poster_color_muted"`
 }
 
 type FederationLibraryShare struct {
