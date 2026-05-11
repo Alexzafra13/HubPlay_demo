@@ -4,9 +4,9 @@
 >
 > **Modelo final acordado con el usuario (re-formulación tras 2 rondas)**: el "hogar" se materializa REUSANDO los profiles existentes. Top-level user (parent_user_id NULL) = dueño del hogar. Profiles (parent_user_id != NULL) = miembros que heredan acceso. Los grants en `library_access` apuntan SIEMPRE al top-level user. No hay tabla `households` ni `groups`. El admin gestiona todo (v1 no expone self-service para invitar miembros).
 >
-> **Commit en esta sesión** (1 commit pendiente push tras stop-hook):
+> **Commit en esta sesión** (pusheado a `origin/claude/review-project-1y28j`):
 >
-> - `feat(access): household model via profiles + strict library_access predicate`. Migración 040 + reescritura del predicado en 4 surfaces (home_repository ×4 EXISTS, library_repository UserHasAccess, library_repository ListForUser).
+> - `748d640` `feat(access): household model via profiles + strict library_access`. Migración 040 + reescritura del predicado en 4 surfaces (home_repository ×4 EXISTS, library_repository UserHasAccess, library_repository ListForUser).
 >
 > **Migración 040** (`040_households.sql`, idempotente, ~25 líneas):
 > 1. Promueve grants per-profile al parent (INSERT OR IGNORE → si ya había grant del parent no duplica).
@@ -41,11 +41,35 @@
 >
 > **M3U personal** queda implícito en el modelo: una biblioteca `content_type=livetv` con `m3u_url` y un solo grant en `library_access(user_id, library_id)` → solo ese top-level user y sus profiles ven los canales. No requiere modelo nuevo.
 >
-> **Pendiente para próxima sesión (Phase B, no scope hoy)**:
-> - Admin UX: panel "Households/Usuarios" con matriz de acceso a bibliotecas.
-> - Endpoint admin: createUserWithAccess (POST users + grants en una sola petición).
-> - Endpoint admin: createProfileForUser (crear miembro/profile bajo un top-level user).
-> - Live TV UI: agregar canales de múltiples bibliotecas livetv accesibles en una sola grid.
+> **Pendiente para próxima sesión — Phase B (kick-off rápido)**:
+>
+> Phase A entregó el modelo de datos + predicado. Phase B es UX para que el admin opere el modelo sin tocar SQL. Orden sugerido y entry points:
+>
+> 1. **Endpoint POST `/api/v1/admin/users` con `grant_library_ids` opcional**.
+>    - Hoy `internal/api/handlers/admin_users.go` tiene `CreateUser` que crea el row de users y nada más. Ampliar la request shape para aceptar un array de library_ids; el handler hace el INSERT + N×`libRepo.GrantAccess` en una sola tx.
+>    - Validar que el caller resuelve top-level: si el body pide crear un profile (parent_user_id set), los grants deben ir al parent, no al profile recién creado (gotcha documentado en ADR-014).
+>    - Test: nuevo en `admin_users_test.go` cubriendo "create user con grants en 1 POST".
+>
+> 2. **Endpoint POST `/api/v1/admin/users/{id}/profiles`** (crear miembro/profile bajo un top-level user). Probablemente ya exista parcialmente (mirar `user_repository.go:CreateProfile` y handler asociado). Solo verificar que esté expuesto en el router y testeado.
+>
+> 3. **Endpoint PUT `/api/v1/admin/users/{id}/access`** — reemplazar el set de grants de un usuario.
+>    - Útil para la UI: el admin tickea/destickea bibliotecas y el frontend hace un PUT con el array completo.
+>    - El handler hace diff (current grants vs new) y aplica grants/revokes para llegar al target. Idempotente.
+>    - Bonus: si el `id` es un profile, error 400 "grants must target the top-level user".
+>
+> 4. **Frontend admin: panel "Usuarios"** con matriz de bibliotecas.
+>    - `web/src/pages/admin/Users.tsx` ya existe. Añadir columna o expandible con checkboxes de bibliotecas.
+>    - Endpoint nuevo a añadir: GET `/api/v1/admin/users/{id}/access` que devuelve `[library_id]` con los grants actuales.
+>    - i18n strings en `web/src/i18n/locales/es.json` + `en.json`.
+>
+> 5. **Live TV agregando múltiples bibliotecas livetv del hogar**.
+>    - `web/src/pages/LiveTV.tsx` hoy itera UNA biblioteca seleccionada. Audit: probablemente ya funcione con `ListForUser` post-Phase-A si la página solo pide "libraries content_type=livetv que veo"; verificar.
+>    - Si necesita cambio: agregar canales de todas las livetv accesibles en la grid principal, con un badge "Origen: Mis canales" / "Origen: General" según library.
+>
+> **Reglas duras de Phase B** (a recordarle al asistente al inicio):
+> - `library_access.user_id` ES SIEMPRE un top-level user. El handler resuelve antes de llamar al repo. ADR-014 + doc-comment de `GrantAccess`.
+> - El predicate strict ya está en producción; cualquier endpoint admin que liste para el admin **debe saltarse el predicate** (rol=admin bypasea). No copiar el JOIN+COALESCE en queries que el admin consume.
+> - sqlc 1.31.1 sigue siendo la última versión upstream. Si necesitas añadir queries nuevas, revisar primero ADR-013 + convenciones (ASCII en comments, evitar `?` en `NOT(...)`, evitar ORDER BY ... COLLATE con JOINs complejos).
 >
 > **Métricas al cierre**: 21 paquetes Go verdes con `-race`. 2 tests de access nuevos. Backfill testeado en CI vía migraciones aplicadas en cada `testutil.NewTestDB`.
 >

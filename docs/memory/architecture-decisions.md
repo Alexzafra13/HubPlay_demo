@@ -895,3 +895,62 @@ Convenciones (enforzadas por el drift test que regen-against-scratch en CI):
 
 - **Empirizar antes de creer documentación previa**: el snapshot del 2026-04-30 afirmaba "1.29 es la rota" sin reproducir contra 1.27. Probar en sucio destapó el bug-pattern (no el bug-version).
 - **Defensive workaround ≠ fix**: la primera reacción fue añadir un guard al Makefile que rechaza `make sqlc` (commit `153e4de`). El usuario pidió "robusto para siempre", lo que forzó la cirugía completa (commit `dc80538`). El guard estaba bien para una sesión de bridge, no como solución terminal.
+
+
+## ADR-014 — Control de acceso por hogar reusando el profile system existente
+
+**Fecha**: 2026-05-11
+**Estado**: Vigente. Cubierto por `TestLibraryRepository_Access` y `TestLibraryRepository_Access_ProfileInherits`.
+
+### Contexto
+
+El usuario pidió un modelo donde "el admin controla todo: cada usuario tiene su acceso a bibliotecas y M3Us; un usuario puede tener miembros (hogar/grupo) que heredan su acceso". Primera reacción: proponer tablas nuevas — `households`, `user_groups`, `household_library_access` — un cambio de ~200 LOC + migración + panel admin paralelo.
+
+Auditando el código en frío descubrí que la app **ya tenía profile-system tipo Netflix** (migración 034, `parent_user_id`): un top-level user con credenciales y N profiles que comparten cuenta pero tienen historial / preferencias propios. Lo que NO estaba era esa estructura integrada al predicado de acceso (`library_access`): un profile no heredaba grants del parent.
+
+### Decisión
+
+**Reusar profiles como "hogar"**: el top-level user (parent_user_id NULL) es el dueño del hogar, los profiles (parent_user_id != NULL) son los miembros. Los grants en `library_access` apuntan SIEMPRE al top-level user; el predicado consulta `COALESCE(parent_user_id, id)` para que los profiles los hereden automáticamente.
+
+```sql
+EXISTS (
+  SELECT 1 FROM library_access la
+  JOIN users u ON u.id = ?
+  WHERE la.library_id = X
+    AND la.user_id = COALESCE(u.parent_user_id, u.id)
+)
+```
+
+Modelo strict: sin grant explícito, no se ve. Se elimina el viejo `OR NOT EXISTS = público por defecto`.
+
+Migración 040 normaliza data existente:
+1. Promueve grants per-profile al parent (idempotente vía `INSERT OR IGNORE`).
+2. Borra grants huérfanos contra profiles.
+3. Backfill: bibliotecas sin grants previos reciben grant explícito hacia cada top-level user no-admin para preservar visibilidad bajo el modelo strict.
+
+`GrantAccess` / `RevokeAccess` siguen aceptando user_id pero el doc-comment del método pide explícitamente que el caller resuelva al top-level antes de llamar. El handler admin se encarga.
+
+### Alternativas consideradas
+
+- **Tabla `households` + `household_library_access`** (mi primera propuesta). ~200 LOC + endpoints paralelos. Cubre el mismo comportamiento con 25 LOC de migración usando profiles. Rechazada por sobre-modelado.
+- **Tabla `groups` con membresía N:M**. Genérica, pero el usuario describió "un usuario con miembros", no "un usuario en varios grupos". Profiles match exacto.
+- **Self-service: el dueño del hogar invita miembros desde su perfil**. Aplazado a v2. La v1 mantiene "solo admin crea usuarios y profiles" porque añade 0 surface UX nuevo.
+
+### Consecuencias
+
+**Positivas**
+
+- **25 LOC de migración** vs cientos en una propuesta households. Cambio de predicado en 4 surfaces, drop-in (mismo número de `?` placeholders).
+- **Cohesión con el sistema existente**: profiles ya tienen UI, ya tienen aislamiento de user_data, ya tienen PIN opcional, ya se renderizan en el switcher. El modelo de acceso ahora es el mismo árbol.
+- **Tests reflejan el contrato del usuario**: `Access_ProfileInherits` pinea "grant al parent → profile ve; revoke al parent → profile pierde".
+
+**Negativas**
+
+- **El concepto "hogar" no existe como entidad explícita en DB**. Es emergente desde `parent_user_id`. Si en el futuro un hogar necesita atributos propios (nombre, color, configuración global), habrá que añadir la tabla `households` y migrar. Por ahora YAGNI.
+- **`GrantAccess` puede crear rows huérfanos** si el caller le pasa un profile_id en vez de su parent. El predicado nunca los consulta → grant es no-op silencioso. Mitigado por doc-comment + el endpoint admin resuelve top-level antes de llamar. Falta pinearlo como gotcha en tests dedicados.
+- **Holdout raw SQL nuevo** (`ListLibrariesForUser` en `library_repository.go`): el JOIN con COALESCE trunca el ORDER BY en sqlc 1.31.1 (mismo bug que documenta ADR-013). Add to the pile — total 6 holdouts ahora.
+
+### Lecciones
+
+- **Auditar antes de proponer**: la primera lectura del code-base me hizo perder 30 min diseñando `households`+`groups`. Una segunda búsqueda más amplia (`grep parent_user_id`) reveló que media solución ya estaba implementada. Para esta clase de tarea, **el primer paso es siempre "qué hay ya"**, no "qué diseño".
+- **Preguntas que fuerzan al usuario a re-formular ayudan al diseño**. Un `AskUserQuestion` con tres opciones produjo una respuesta natural ("cada usuario puede agregar miembros, el acceso va al grupo") que cristalizó que profiles encajaba. Sin esa pregunta hubiera implementado `households` antes de descubrir el atajo.

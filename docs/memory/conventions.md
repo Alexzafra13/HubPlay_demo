@@ -1030,3 +1030,51 @@ rápida sin Docker es:
 GOTOOLCHAIN=go1.24.7 go mod download && go build ./...
 ```
 Si pasa con `GOTOOLCHAIN` forzado, CI también pasará.
+
+## Access predicate (post-migración 040)
+
+Cualquier query que filtre ítems / canales / bibliotecas por el usuario logueado tiene que usar el predicate strict + profile-aware. La forma canónica es:
+
+```sql
+EXISTS (
+    SELECT 1 FROM library_access la
+    JOIN users u ON u.id = ?
+    WHERE la.library_id = <columna_de_la_query>
+      AND la.user_id = COALESCE(u.parent_user_id, u.id)
+)
+```
+
+Reglas:
+- Un solo `?` en el predicate (el user_id del logueado). El COALESCE resuelve top-level vs profile sin parámetros extra.
+- Sin `OR NOT EXISTS` (fallback público). El modelo strict post-040 dice: si no hay grant, no se ve. Admin override vive en el handler, no en la query.
+- **`GrantAccess` / `RevokeAccess` esperan el top-level user id**. Si te llega un profile_id (por ejemplo del JWT del logueado), resuélvelo a parent ANTES de llamar:
+  ```go
+  effective := userID
+  if parentID, _ := userRepo.ParentOf(ctx, userID); parentID != "" {
+      effective = parentID
+  }
+  libRepo.GrantAccess(ctx, effective, libraryID)
+  ```
+  Pasar un profile_id NO falla — crea un row huérfano que el predicate ignora. Doc-comment del método lo avisa.
+- Tests que seedean rails de home / catálogo / iptv DEBEN incluir `libRepo.GrantAccess(ctx, user.ID, library.ID)` o las queries devolverán `[]`. Patrón ya aplicado en `setupHomeTrendingTest` y los Recommended.
+
+Surfaces que aplican el predicate hoy (auditadas 2026-05-11):
+- `internal/db/home_repository.go` — 4 EXISTS (Trending, Recommended ×2, IPTV channel sidebar)
+- `internal/db/library_repository.go` — `UserHasAccess`, `ListForUser`
+- `internal/api/handlers/iptv_access.go` — usa `LibraryAccessService.UserHasAccess` (heredado)
+- `internal/api/handlers/system.go` — admin endpoints saltan el guard intencionadamente
+
+## sqlc raw-SQL holdouts (actualizado 2026-05-11)
+
+Queries que viven como raw SQL en el repo porque sqlc 1.31.1 las trunca o las parsea mal. Cada una tiene comentario cruzado con el "por qué" y referencia al ADR-013. Lista canónica:
+
+1. `UserRepository.ListProfilesForOwner` — UTF-8 multi-byte trip.
+2. `AuthRepository` refresh-token UPDATE con previous_refresh_token_hash — 4+ placeholders trip.
+3. `FederationRepository.SearchSharedItems` — FTS5 MATCH no parsea (no es bug, es feature).
+4. `FederationRepository.UpsertCachedItems` — INSERT con 11 placeholders trip (2026-05-11).
+5. `FederationRepository.ListCachedItems` — SELECT con colour columns + ORDER BY COLLATE NOCASE trip (2026-05-11).
+6. `FederationRepository.attachPrimaryImageColors` helper — batch SELECT que no encaja en sqlc por la aridad variable del IN-clause (2026-05-11).
+7. `LibraryRepository.UserHasAccess` — JOIN + COALESCE trip.
+8. `LibraryRepository.ListForUser` — JOIN + COALESCE + ORDER BY trip (2026-05-11).
+
+Cuando upstream publique sqlc 1.32+ con el parser fix, abrir tarea "migrate raw-SQL holdouts back to sqlc" — son ~15 min cada una.
