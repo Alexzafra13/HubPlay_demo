@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"hubplay/internal/config"
 	"hubplay/internal/db"
 	"hubplay/internal/domain"
+	"hubplay/internal/event"
 	"hubplay/internal/testutil"
 )
 
@@ -630,5 +632,117 @@ func TestService_SwitchProfile_NoPin_NotRateLimited(t *testing.T) {
 		); err != nil {
 			t.Fatalf("switch %d: expected success, got %v", i, err)
 		}
+	}
+}
+
+// recordingSubscriber collects events for assertions. The bus
+// dispatches handlers in goroutines (see internal/event/bus.go),
+// so waitForEvents polls the snapshot until the expected count
+// arrives or the deadline expires.
+type recordingSubscriber struct {
+	mu     sync.Mutex
+	events []event.Event
+}
+
+func (r *recordingSubscriber) handle(e event.Event) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.events = append(r.events, e)
+}
+
+func (r *recordingSubscriber) snapshot() []event.Event {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]event.Event, len(r.events))
+	copy(out, r.events)
+	return out
+}
+
+func (r *recordingSubscriber) waitForCount(t *testing.T, want int) []event.Event {
+	t.Helper()
+	deadline := time.Now().Add(1 * time.Second)
+	for time.Now().Before(deadline) {
+		got := r.snapshot()
+		if len(got) >= want {
+			return got
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return r.snapshot()
+}
+
+// TestService_RevokeSession_PublishesUserLoggedOut pins the contract
+// the frontend "Tus dispositivos" panel relies on: an event hits
+// /me/events the moment a session is revoked, no 30 s poll needed.
+// The previous behaviour was silent — only Logout published.
+func TestService_RevokeSession_PublishesUserLoggedOut(t *testing.T) {
+	svc, _, _ := newTestAuthService(t)
+	bus := event.NewBus(testutil.NopLogger())
+	svc.SetEventBus(bus)
+	rec := &recordingSubscriber{}
+	bus.Subscribe(event.UserLoggedOut, rec.handle)
+
+	user := registerTestUser(t, svc)
+	token, err := svc.Login(context.Background(), "testuser", "password123", "Chrome", "dev-1", "127.0.0.1")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+
+	// Resolve the session ID from the refresh-token cookie path the
+	// handler uses, so the test mirrors production.
+	sessionID := svc.CurrentSessionID(context.Background(), token.RefreshToken)
+	if sessionID == "" {
+		t.Fatal("expected non-empty session id from CurrentSessionID")
+	}
+
+	if err := svc.RevokeSession(context.Background(), user.ID, sessionID); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+
+	events := rec.waitForCount(t, 1)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 UserLoggedOut event, got %d: %+v", len(events), events)
+	}
+	got := events[0]
+	if got.Type != event.UserLoggedOut {
+		t.Errorf("event type: got %q want %q", got.Type, event.UserLoggedOut)
+	}
+	if uid, _ := got.Data["user_id"].(string); uid != user.ID {
+		t.Errorf("event user_id: got %q want %q", uid, user.ID)
+	}
+	if sid, _ := got.Data["session_id"].(string); sid != sessionID {
+		t.Errorf("event session_id: got %q want %q", sid, sessionID)
+	}
+}
+
+// TestService_RevokeSession_ForeignSession_NoPublish guards the
+// anti-enumeration carve-out: revoking a session that belongs to
+// another user must NOT publish, because publishing would confirm
+// the session ID exists to an attacker probing the endpoint.
+func TestService_RevokeSession_ForeignSession_NoPublish(t *testing.T) {
+	svc, _, _ := newTestAuthService(t)
+	bus := event.NewBus(testutil.NopLogger())
+	svc.SetEventBus(bus)
+	rec := &recordingSubscriber{}
+	bus.Subscribe(event.UserLoggedOut, rec.handle)
+
+	owner := registerTestUser(t, svc)
+	token, err := svc.Login(context.Background(), "testuser", "password123", "Chrome", "dev-1", "127.0.0.1")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	sessionID := svc.CurrentSessionID(context.Background(), token.RefreshToken)
+	if sessionID == "" {
+		t.Fatal("expected non-empty session id")
+	}
+
+	// Try to revoke owner's session as a different user.
+	attackerID := owner.ID + "-other"
+	err = svc.RevokeSession(context.Background(), attackerID, sessionID)
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for foreign session, got %v", err)
+	}
+	if got := rec.snapshot(); len(got) != 0 {
+		t.Errorf("foreign-session revoke must not publish; got %d events: %+v", len(got), got)
 	}
 }

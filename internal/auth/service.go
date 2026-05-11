@@ -434,6 +434,17 @@ func (s *Service) RevokeSession(ctx context.Context, userID, sessionID string) e
 		return err
 	}
 	s.logger.Info("user revoked session", "user_id", userID, "session_id", sessionID)
+	// Same payload shape as Logout's UserLoggedOut so the SSE
+	// consumer (frontend "Tus dispositivos" panel) treats both
+	// revocation paths uniformly — the panel just invalidates its
+	// query and the freshly-revoked row drops out.
+	s.publish(event.Event{
+		Type: event.UserLoggedOut,
+		Data: map[string]any{
+			"user_id":    userID,
+			"session_id": sessionID,
+		},
+	})
 	return nil
 }
 
