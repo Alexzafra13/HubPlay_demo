@@ -25,6 +25,14 @@ const (
 // the browser can't decode" — can copy the (expensive) video stream
 // untouched and only re-encode the cheap audio. Before this change,
 // that path full-transcoded the video for no reason.
+//
+// ToneMap is set when the source carries an HDR transfer (HDR10 / HLG
+// / Dolby Vision) and the client did NOT declare matching HDR support.
+// It always implies CopyVideo=false (you can't tonemap a stream-copy)
+// and instructs BuildFFmpegArgs to insert a zscale+tonemap filter
+// chain before the regular scale. Without this, an HDR file played on
+// an SDR client looks washed out and grey because the browser pipes
+// the PQ-coded luma straight to the SDR display.
 type PlaybackDecision struct {
 	Method     PlaybackMethod
 	VideoCodec string
@@ -33,6 +41,7 @@ type PlaybackDecision struct {
 	Profile    Profile // transcoding profile if Method == Transcode
 	CopyVideo  bool
 	CopyAudio  bool
+	ToneMap    bool
 }
 
 // remuxableContainers lists source containers that ffmpeg can repackage
@@ -123,6 +132,15 @@ func Decide(item *db.Item, streams []*db.MediaStream, caps *Capabilities, reques
 	audioOK := audioStream == nil || eff.AudioCodecs[audioStream.Codec]
 	containerOK := containerInSet(item.Container, eff.Containers)
 
+	// HDR gate: a source with an HDR transfer (PQ / HLG / Dolby Vision)
+	// can only ride the DirectPlay or DirectStream paths if the client
+	// declared support for that exact HDR format. Otherwise the browser
+	// receives PQ-coded luma but renders it as if it were sRGB and the
+	// picture comes out grey and desaturated. When this gate fires we
+	// fall through to Transcode with ToneMap=true; the encoder side
+	// inserts a zscale chain that maps the HDR signal down to BT.709.
+	hdrOK := videoStream.HDRType == "" || hdrFormatInSet(videoStream.HDRType, eff.HDRFormats)
+
 	// Profile selection used for any path that touches ffmpeg. For
 	// stream-copy paths the profile only carries HLS-segmenting knobs
 	// (the bitrate / scale fields are ignored when -c:v copy is set).
@@ -134,7 +152,7 @@ func Decide(item *db.Item, streams []*db.MediaStream, caps *Capabilities, reques
 	}
 
 	// DirectPlay: everything is compatible — no ffmpeg session at all.
-	if videoOK && audioOK && containerOK {
+	if videoOK && audioOK && containerOK && hdrOK {
 		return PlaybackDecision{
 			Method:     MethodDirectPlay,
 			VideoCodec: videoStream.Codec,
@@ -164,7 +182,11 @@ func Decide(item *db.Item, streams []*db.MediaStream, caps *Capabilities, reques
 	// used for the client-caps check above; it splits on `,` and
 	// matches per-part so we recognise the file as remuxable
 	// regardless of the exact label ffprobe used.
-	if videoOK && containerInSet(item.Container, remuxableContainers) {
+	// DirectStream stream-copies the video, which is incompatible with
+	// any HDR→SDR fix-up (no decode = nothing to tonemap). Gate it on
+	// hdrOK so HDR sources for SDR clients fall through to the full
+	// transcode below and get the zscale chain applied.
+	if videoOK && hdrOK && containerInSet(item.Container, remuxableContainers) {
 		return PlaybackDecision{
 			Method:     MethodDirectStream,
 			VideoCodec: videoStream.Codec,
@@ -177,7 +199,9 @@ func Decide(item *db.Item, streams []*db.MediaStream, caps *Capabilities, reques
 	}
 
 	// Transcode: video codec isn't compatible (HEVC, VP9 on a client
-	// without VP9, …). Re-encode everything to the safe defaults.
+	// without VP9, …) OR the source is HDR and the client can't render
+	// it. Re-encode everything to the safe defaults; ToneMap propagates
+	// to BuildFFmpegArgs, which inserts the zscale+tonemap chain.
 	return PlaybackDecision{
 		Method:     MethodTranscode,
 		VideoCodec: "h264",
@@ -186,6 +210,28 @@ func Decide(item *db.Item, streams []*db.MediaStream, caps *Capabilities, reques
 		Profile:    profile,
 		CopyVideo:  false,
 		CopyAudio:  false,
+		ToneMap:    !hdrOK,
+	}
+}
+
+// hdrFormatInSet matches the source's HDR transfer label (the strings
+// emitted by probe.detectHDR — "HDR10", "HLG", "DolbyVision") against
+// the client-declared set, which uses lowercase aliases the wire
+// header carries ("hdr10", "hlg", "dovi" / "dolbyvision"). Both sides
+// are lowercased here so the parser doesn't have to memorize casing.
+func hdrFormatInSet(hdrType string, set map[string]bool) bool {
+	if hdrType == "" || len(set) == 0 {
+		return false
+	}
+	switch hdrType {
+	case "HDR10":
+		return set["hdr10"]
+	case "HLG":
+		return set["hlg"]
+	case "DolbyVision":
+		return set["dovi"] || set["dolbyvision"]
+	default:
+		return false
 	}
 }
 

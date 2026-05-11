@@ -184,6 +184,51 @@ func TestDecide_DeclaredCaps_RemuxToCompatibleContainer(t *testing.T) {
 	}
 }
 
+// HDR header round-trip: the parser accepts `hdr=` alongside the
+// existing keys and lowercases the tokens. Pinned so the wire shape
+// documented in the header doc-comment stays the actually-parsed
+// shape — the next person extending capabilities will copy this row.
+func TestParseCapabilitiesHeader_HDRFormats(t *testing.T) {
+	got := ParseCapabilitiesHeader("video=hevc; hdr=HDR10,HLG,DoVi")
+	if got == nil {
+		t.Fatal("expected non-nil")
+	}
+	for _, want := range []string{"hdr10", "hlg", "dovi"} {
+		if !got.HDRFormats[want] {
+			t.Errorf("HDRFormats missing %q (got %+v)", want, got.HDRFormats)
+		}
+	}
+}
+
+// Default web caps must NOT claim any HDR support. Browsers handle
+// HDR poorly and inconsistently; defaulting to "no HDR" makes the
+// server tonemap HDR sources to BT.709 instead of trusting the
+// browser. A regression that adds "hdr10" here would silently re-
+// introduce the washed-out grey playback this work fixes.
+func TestDefaultWebCapabilities_NoHDR(t *testing.T) {
+	def := DefaultWebCapabilities()
+	if len(def.HDRFormats) != 0 {
+		t.Errorf("DefaultWebCapabilities.HDRFormats must be empty, got %+v", def.HDRFormats)
+	}
+}
+
+// effectiveCapabilities backfills missing HDR from the (empty)
+// default — which keeps the field non-nil so downstream callers
+// don't need a nil guard. The map stays empty either way.
+func TestEffectiveCapabilities_HDRBackfill(t *testing.T) {
+	c := &Capabilities{
+		VideoCodecs: map[string]bool{"h264": true},
+		// HDRFormats nil
+	}
+	eff := effectiveCapabilities(c)
+	if eff.HDRFormats == nil {
+		t.Error("HDRFormats should be non-nil after backfill (empty map ok)")
+	}
+	if len(eff.HDRFormats) != 0 {
+		t.Errorf("HDRFormats should be empty after backfill from web defaults, got %+v", eff.HDRFormats)
+	}
+}
+
 // Codec the client doesn't declare → Transcode, regardless of how many
 // other capabilities it sends. The waterfall stops short.
 func TestDecide_DeclaredCaps_TranscodeOnUnsupportedCodec(t *testing.T) {

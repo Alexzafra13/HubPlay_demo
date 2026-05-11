@@ -401,7 +401,7 @@ func (m *Manager) startSessionSlow(ctx context.Context, userID, itemID, profileN
 	if startTime > 0 {
 		startSegment = int(startTime / 6) // matches -hls_time 6
 	}
-	session, err := m.transcoder.Start(key, itemID, item.Path, decision.Profile, startTime, decision.CopyVideo, decision.CopyAudio, startSegment, audioStreamIndex)
+	session, err := m.transcoder.Start(key, itemID, item.Path, decision.Profile, startTime, decision.CopyVideo, decision.CopyAudio, decision.ToneMap, startSegment, audioStreamIndex)
 	if err != nil {
 		m.metrics.TranscodeFailed()
 		return nil, fmt.Errorf("start transcode: %w", err)
@@ -590,6 +590,7 @@ func (m *Manager) RestartSessionAt(key string, segmentIndex int, segmentDuration
 		startTime,
 		ms.Decision.CopyVideo,
 		ms.Decision.CopyAudio,
+		ms.Decision.ToneMap,
 		segmentIndex,
 		ms.AudioStreamIndex,
 	)
