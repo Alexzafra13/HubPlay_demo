@@ -32,6 +32,12 @@ func setupHomeTrendingTest(t *testing.T) *db.Repositories {
 	}); err != nil {
 		t.Fatalf("create library: %v", err)
 	}
+	// Post-migración 040 el modelo es strict: sin grant explícito,
+	// las queries de home filtran la biblioteca. Cada test que use
+	// este setup necesita el grant para que el item llegue al rail.
+	if err := repos.Libraries.GrantAccess(ctx, "u-1", "lib-h"); err != nil {
+		t.Fatalf("grant library access: %v", err)
+	}
 	if err := repos.Items.Create(ctx, &db.Item{
 		ID: "movie-trending", LibraryID: "lib-h", Type: "movie",
 		Title: "Trending Movie", SortTitle: "trending movie",
@@ -93,6 +99,7 @@ func TestHomeRepository_Trending_HandlesLegacyMonotonicTimestamp(t *testing.T) {
 		ID: "lib-h", Name: "Movies", ContentType: "movies",
 		CreatedAt: now, UpdatedAt: now,
 	})
+	_ = repos.Libraries.GrantAccess(ctx, "u-1", "lib-h")
 	_ = repos.Items.Create(ctx, &db.Item{
 		ID: "movie-legacy", LibraryID: "lib-h", Type: "movie",
 		Title: "Legacy Movie", SortTitle: "legacy movie",
@@ -148,6 +155,9 @@ func TestHomeRepository_Recommended_ScoresUnwatchedByGenreOverlap(t *testing.T) 
 		CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("create library: %v", err)
+	}
+	if err := repos.Libraries.GrantAccess(ctx, "u-1", "lib-rec"); err != nil {
+		t.Fatalf("grant access: %v", err)
 	}
 
 	// Three movies: one watched (drama+thriller), one drama unwatched
@@ -255,6 +265,9 @@ func TestHomeRepository_Recommended_FiltersWatchedItems(t *testing.T) {
 		CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("create library: %v", err)
+	}
+	if err := repos.Libraries.GrantAccess(ctx, "u-1", "lib-rec"); err != nil {
+		t.Fatalf("grant access: %v", err)
 	}
 
 	// Two dramas matching the user's affinity: one started past 5%

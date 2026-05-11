@@ -178,7 +178,12 @@ func (r *LibraryRepository) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-// GrantAccess gives a user access to a library.
+// GrantAccess gives a top-level user (and all its profiles) access
+// to a library. Profiles inherit automatically through the
+// COALESCE(parent_user_id, id) predicate, so the handler MUST pass
+// the parent's id — passing a profile id would create an orphan row
+// the access predicate never consults. The admin endpoint enforces
+// this by resolving the user to its top-level before reaching here.
 func (r *LibraryRepository) GrantAccess(ctx context.Context, userID, libraryID string) error {
 	err := r.q.GrantLibraryAccess(ctx, sqlc.GrantLibraryAccessParams{
 		UserID:    userID,
@@ -190,7 +195,8 @@ func (r *LibraryRepository) GrantAccess(ctx context.Context, userID, libraryID s
 	return nil
 }
 
-// RevokeAccess removes a user's access to a library.
+// RevokeAccess removes a top-level user's access to a library. All
+// profiles below that user lose access in the same operation.
 func (r *LibraryRepository) RevokeAccess(ctx context.Context, userID, libraryID string) error {
 	err := r.q.RevokeLibraryAccess(ctx, sqlc.RevokeLibraryAccessParams{
 		UserID:    userID,
@@ -202,36 +208,80 @@ func (r *LibraryRepository) RevokeAccess(ctx context.Context, userID, libraryID 
 	return nil
 }
 
-// UserHasAccess reports whether userID is allowed to access libraryID under
-// the opt-in ACL model: the user has an explicit grant, OR no grants at all
-// exist for the library (public by default).
+// UserHasAccess reports whether userID is allowed to access libraryID.
+// Modelo strict post-migración 040: necesita grant explícito en
+// library_access. Los profiles (parent_user_id != NULL) heredan el
+// grant de su parent vía COALESCE — el admin solo necesita gestionar
+// accesos del top-level user y todos sus miembros los reciben.
 //
-// Kept as raw SQL (not sqlc) because the library_id parameter appears twice
-// and sqlc's SQLite engine mishandles duplicate positional bindings for this
-// kind of branched EXISTS query — same limitation already documented for
-// NextUp in user_data_repository.go.
+// Kept as raw SQL: el JOIN+COALESCE no es trivial de pintar con sqlc
+// 1.31.1 y la versión anterior ya era raw SQL por la misma razón.
 func (r *LibraryRepository) UserHasAccess(ctx context.Context, userID, libraryID string) (bool, error) {
 	const query = `
-		SELECT CASE
-			WHEN EXISTS (SELECT 1 FROM library_access WHERE library_id = ? AND user_id = ?) THEN 1
-			WHEN NOT EXISTS (SELECT 1 FROM library_access WHERE library_id = ?)            THEN 1
-			ELSE 0
-		END`
+		SELECT EXISTS (
+			SELECT 1 FROM library_access la
+			JOIN users u ON u.id = ?
+			WHERE la.library_id = ?
+			  AND la.user_id = COALESCE(u.parent_user_id, u.id)
+		)`
 	var has int
-	if err := r.db.QueryRowContext(ctx, query, libraryID, userID, libraryID).Scan(&has); err != nil {
+	if err := r.db.QueryRowContext(ctx, query, userID, libraryID).Scan(&has); err != nil {
 		return false, fmt.Errorf("check library access: %w", err)
 	}
 	return has == 1, nil
 }
 
-// ListForUser returns libraries a user has access to. If empty, all are accessible.
+// ListForUser returns libraries a user has access to under the strict
+// (post-migración 040) modelo: necesita grant explícito en
+// library_access apuntando al top-level user. Los profiles
+// (parent_user_id != NULL) ven lo mismo que su parent vía COALESCE.
+//
+// Raw SQL holdout: sqlc 1.31.1 trunca el ORDER BY cuando el JOIN
+// usa COALESCE en la condición. Mismo precedente que UserHasAccess y
+// las queries de federation poster colours.
 func (r *LibraryRepository) ListForUser(ctx context.Context, userID string) ([]*Library, error) {
-	rows, err := r.q.ListLibrariesForUser(ctx, userID)
+	const query = `
+		SELECT l.id, l.name, l.content_type, l.scan_mode,
+		       COALESCE(l.scan_interval, '6h') AS scan_interval,
+		       COALESCE(l.m3u_url, '') AS m3u_url,
+		       COALESCE(l.epg_url, '') AS epg_url,
+		       COALESCE(l.refresh_interval, '24h') AS refresh_interval,
+		       l.language_filter, l.tls_insecure,
+		       l.created_at, l.updated_at
+		FROM libraries l
+		JOIN users u ON u.id = ?
+		JOIN library_access la
+		  ON la.library_id = l.id
+		 AND la.user_id = COALESCE(u.parent_user_id, u.id)
+		ORDER BY l.name`
+	rows, err := r.db.QueryContext(ctx, query, userID)
 	if err != nil {
 		return nil, fmt.Errorf("list libraries for user: %w", err)
 	}
+	defer rows.Close()
 
-	libs := librariesFromForUserRows(rows)
+	var libs []*Library
+	for rows.Next() {
+		var lib Library
+		var langFilter sql.NullString
+		var tlsInsecure int64
+		if err := rows.Scan(
+			&lib.ID, &lib.Name, &lib.ContentType, &lib.ScanMode,
+			&lib.ScanInterval, &lib.M3UURL, &lib.EPGURL,
+			&lib.RefreshInterval, &langFilter, &tlsInsecure,
+			&lib.CreatedAt, &lib.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan library row: %w", err)
+		}
+		if langFilter.Valid {
+			lib.LanguageFilter = langFilter.String
+		}
+		lib.TLSInsecure = tlsInsecure != 0
+		libs = append(libs, &lib)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 
 	if err := r.loadPaths(ctx, libs); err != nil {
 		return nil, err
@@ -298,23 +348,6 @@ func libraryFromListRow(r sqlc.ListLibrariesRow) Library {
 	}
 }
 
-func libraryFromForUserRow(r sqlc.ListLibrariesForUserRow) Library {
-	return Library{
-		ID:              r.ID,
-		Name:            r.Name,
-		ContentType:     r.ContentType,
-		ScanMode:        r.ScanMode,
-		ScanInterval:    r.ScanInterval,
-		M3UURL:          r.M3uUrl,
-		EPGURL:          r.EpgUrl,
-		RefreshInterval: r.RefreshInterval,
-		LanguageFilter:  r.LanguageFilter,
-		TLSInsecure:     r.TlsInsecure != 0,
-		CreatedAt:       r.CreatedAt,
-		UpdatedAt:       r.UpdatedAt,
-	}
-}
-
 // boolToInt64 maps a Go bool to the SQLite-friendly 0/1 the schema
 // stores in tls_insecure (the only boolean column not modelled as
 // NUMERIC nullable). Kept here so future toggles can reuse it.
@@ -337,14 +370,3 @@ func librariesFromListRows(rows []sqlc.ListLibrariesRow) []*Library {
 	return out
 }
 
-func librariesFromForUserRows(rows []sqlc.ListLibrariesForUserRow) []*Library {
-	if len(rows) == 0 {
-		return nil
-	}
-	out := make([]*Library, len(rows))
-	for i, row := range rows {
-		lib := libraryFromForUserRow(row)
-		out[i] = &lib
-	}
-	return out
-}

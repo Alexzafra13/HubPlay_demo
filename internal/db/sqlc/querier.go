@@ -330,7 +330,6 @@ type Querier interface {
 	// to the UI without a client-side sort.
 	ListItemPeople(ctx context.Context, itemID string) ([]ListItemPeopleRow, error)
 	ListLibraries(ctx context.Context) ([]ListLibrariesRow, error)
-	ListLibrariesForUser(ctx context.Context, userID string) ([]ListLibrariesForUserRow, error)
 	// Per-library EPG source list (multi-provider XMLTV configuration).
 	//
 	// Table schema: migrations/sqlite/007_library_epg_sources.sql.

@@ -1,5 +1,58 @@
 # Estado del proyecto
 
+> 🎬 **Sesión 2026-05-11 (rama `claude/review-project-1y28j`, modelo de acceso por hogar)** — el usuario pidió diseño de control de acceso per-user/group + M3Us personales. Audit reveló que el sistema YA existía parcialmente: tabla `library_access` per-user (opt-in: público por defecto) Y profile-system tipo Netflix vía `parent_user_id` (migración 034) que NO estaba integrado en el predicado de acceso.
+>
+> **Modelo final acordado con el usuario (re-formulación tras 2 rondas)**: el "hogar" se materializa REUSANDO los profiles existentes. Top-level user (parent_user_id NULL) = dueño del hogar. Profiles (parent_user_id != NULL) = miembros que heredan acceso. Los grants en `library_access` apuntan SIEMPRE al top-level user. No hay tabla `households` ni `groups`. El admin gestiona todo (v1 no expone self-service para invitar miembros).
+>
+> **Commit en esta sesión** (1 commit pendiente push tras stop-hook):
+>
+> - `feat(access): household model via profiles + strict library_access predicate`. Migración 040 + reescritura del predicado en 4 surfaces (home_repository ×4 EXISTS, library_repository UserHasAccess, library_repository ListForUser).
+>
+> **Migración 040** (`040_households.sql`, idempotente, ~25 líneas):
+> 1. Promueve grants per-profile al parent (INSERT OR IGNORE → si ya había grant del parent no duplica).
+> 2. Borra grants huérfanos contra profiles.
+> 3. Backfill: bibliotecas SIN grants (eran "públicas" en el modelo viejo) reciben grant explícito hacia cada top-level user no-admin existente para preservar visibilidad. Pre-v1.0 squash limpia esto al consolidar schema.
+>
+> **Cambio de predicado** (modelo strict: sin fallback público):
+> ```sql
+> EXISTS (
+>   SELECT 1 FROM library_access la
+>   JOIN users u ON u.id = ?
+>   WHERE la.library_id = X
+>     AND la.user_id = COALESCE(u.parent_user_id, u.id)
+> )
+> ```
+> Reemplaza al viejo `EXISTS(...) OR NOT EXISTS(...)`. Mismo número de `?` placeholders (1), drop-in en cada call site.
+>
+> **Holdouts raw SQL nuevos** (sqlc 1.31.1 trips):
+> - `LibraryRepository.ListForUser` ya era sqlc, pasa a raw SQL en `library_repository.go` porque el JOIN-con-COALESCE trunca el ORDER BY (mismo patrón ya conocido). La query sqlc original se elimina; la nota cruza-referencia el bug en su sitio.
+> - `UserHasAccess` ya era raw SQL, se reescribe in-place.
+>
+> **Decisiones senior tomadas**:
+> 1. **No tabla `households`**: el usuario describió "hogares con miembros" pero EL CÓDIGO YA TENÍA PROFILES. Reusar es 25 LOC de migración vs 200+ LOC de tablas/repos/handlers nuevos para el mismo comportamiento funcional.
+> 2. **Strict mode (sin fallback público)** porque el usuario dijo "el admin tiene control de todo". Backfill preserva data existente; en deploys fresh-install no hay nada que preservar.
+> 3. **No exponer "invitar miembro" auto-servicio en v1**: el admin crea top-level users Y profiles. Self-service se añade después sin tocar el modelo de datos.
+> 4. **`GrantAccess` espera SIEMPRE el top-level user id**. El handler admin tiene que resolver `COALESCE(parent_user_id, id)` antes de llamar al repo, o el grant queda huérfano (el predicate nunca lo consulta). Documentado en el doc-comment del método.
+>
+> **Tests añadidos**:
+> - `TestLibraryRepository_Access` reescrito para el modelo strict (sin grants → 0 visible, con grant explícito → sólo esa biblioteca).
+> - `TestLibraryRepository_Access_ProfileInherits` nuevo: cubre el contrato "profile hereda acceso de parent" y "revoke al parent quita acceso al profile en el mismo instante".
+> - `home_repository_test.go` setups (`setupHomeTrendingTest`, Recommended × 2) actualizados para incluir `GrantAccess` (sin él, los rails quedan vacíos por el predicate strict).
+>
+> **M3U personal** queda implícito en el modelo: una biblioteca `content_type=livetv` con `m3u_url` y un solo grant en `library_access(user_id, library_id)` → solo ese top-level user y sus profiles ven los canales. No requiere modelo nuevo.
+>
+> **Pendiente para próxima sesión (Phase B, no scope hoy)**:
+> - Admin UX: panel "Households/Usuarios" con matriz de acceso a bibliotecas.
+> - Endpoint admin: createUserWithAccess (POST users + grants en una sola petición).
+> - Endpoint admin: createProfileForUser (crear miembro/profile bajo un top-level user).
+> - Live TV UI: agregar canales de múltiples bibliotecas livetv accesibles en una sola grid.
+>
+> **Métricas al cierre**: 21 paquetes Go verdes con `-race`. 2 tests de access nuevos. Backfill testeado en CI vía migraciones aplicadas en cada `testutil.NewTestDB`.
+>
+> ---
+>
+> ⚠️ **sqlc 1.31.1 sigue siendo la última versión** (verificado 2026-05-11 contra `github.com/sqlc-dev/sqlc/releases`). El bug del parser que documentamos en `architecture-decisions.md` NO está arreglado upstream. Las 5+ queries en raw-SQL holdout (`ListProfilesForOwner`, refresh-token UPDATE, `SearchSharedItems`, y las 3 nuevas de federation poster colours) seguirán así hasta que upstream publique 1.32+. Cuando salga, abrir tarea de "migrar holdouts de vuelta a sqlc" — son ~15 min cada una. Por ahora **NO especular** sobre roadmap upstream cuando hablemos con el usuario.
+>
 > 🎬 **Sesión 2026-05-11 (rama `claude/review-project-1y28j`, federation poster colours)** — el usuario pidió cerrar el item "node-vibrant server-side". Audit en frío reveló que el grueso del trabajo YA estaba hecho (migración 014, `imaging/colors.go`, API expone `backdrop_colors` para items locales, `ItemDetail.tsx:167-177` ya hace `hasServerPalette` gate). El item real pendiente era SOLO federation: `PeerItemDetail` ejecutaba node-vibrant siempre porque `FederationRemoteItem` no transportaba colores.
 >
 > **Senior call**: cerrar el gap real (federation) en lugar de tocar el path local que ya funciona. Documentar que el item del backlog estaba parcialmente vencido.
