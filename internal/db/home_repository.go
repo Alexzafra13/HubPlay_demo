@@ -78,10 +78,10 @@ func (r *HomeRepository) Trending(ctx context.Context, userID string, windowDays
 	// votes (one user resuming N times still counts once), and order
 	// by votes DESC.
 	//
-	// The library_access guard runs as an EXISTS sub-query rather
-	// than a JOIN so the "no rows means everyone has access" rule
-	// the rest of the codebase enforces stays consistent (see
-	// LibraryRepository.UserHasAccess).
+	// library_access guard: JOIN users so el predicado consulta el
+	// grant del top-level user (parent_user_id resolved vía COALESCE
+	// — los profiles heredan acceso del parent, ver migración 034 +
+	// 040). Modelo strict: si no hay grant, no se ve.
 	const query = `
 		WITH plays AS (
 			SELECT
@@ -108,9 +108,11 @@ func (r *HomeRepository) Trending(ctx context.Context, userID string, windowDays
 		FROM plays p
 		JOIN items i ON i.id = p.rollup_id
 		WHERE i.is_available = 1
-		  AND (
-			EXISTS (SELECT 1 FROM library_access la WHERE la.library_id = i.library_id AND la.user_id = ?)
-			OR NOT EXISTS (SELECT 1 FROM library_access la WHERE la.library_id = i.library_id)
+		  AND EXISTS (
+			SELECT 1 FROM library_access la
+			JOIN users u ON u.id = ?
+			WHERE la.library_id = i.library_id
+			  AND la.user_id = COALESCE(u.parent_user_id, u.id)
 		  )
 		GROUP BY i.id
 		ORDER BY votes DESC, last_played_at DESC
@@ -274,9 +276,11 @@ func (r *HomeRepository) Recommended(ctx context.Context, userID string, limit i
 			ud.item_id IS NULL
 			OR (ud.completed = 0 AND (i.duration_ticks = 0 OR ud.position_ticks * 100 < i.duration_ticks * 5))
 		  )
-		  AND (
-			EXISTS (SELECT 1 FROM library_access la WHERE la.library_id = i.library_id AND la.user_id = ?)
-			OR NOT EXISTS (SELECT 1 FROM library_access la WHERE la.library_id = i.library_id)
+		  AND EXISTS (
+			SELECT 1 FROM library_access la
+			JOIN users u ON u.id = ?
+			WHERE la.library_id = i.library_id
+			  AND la.user_id = COALESCE(u.parent_user_id, u.id)
 		  )
 		GROUP BY i.id
 		ORDER BY genre_hits DESC, COALESCE(i.community_rating, 0) DESC, i.added_at DESC
@@ -455,9 +459,11 @@ func (r *HomeRepository) BecauseYouWatched(ctx context.Context, userID string, l
 			ud.item_id IS NULL
 			OR (ud.completed = 0 AND (i.duration_ticks = 0 OR ud.position_ticks * 100 < i.duration_ticks * 5))
 		  )
-		  AND (
-			EXISTS (SELECT 1 FROM library_access la WHERE la.library_id = i.library_id AND la.user_id = ?)
-			OR NOT EXISTS (SELECT 1 FROM library_access la WHERE la.library_id = i.library_id)
+		  AND EXISTS (
+			SELECT 1 FROM library_access la
+			JOIN users u ON u.id = ?
+			WHERE la.library_id = i.library_id
+			  AND la.user_id = COALESCE(u.parent_user_id, u.id)
 		  )
 		  AND i.id <> ?
 		GROUP BY i.id
@@ -565,9 +571,11 @@ func (r *HomeRepository) LiveNow(ctx context.Context, userID string, limit int) 
 			ON cf.channel_id = c.id AND cf.user_id = ?
 		WHERE c.is_active = 1
 		  AND c.consecutive_failures < ?
-		  AND (
-			EXISTS (SELECT 1 FROM library_access la WHERE la.library_id = c.library_id AND la.user_id = ?)
-			OR NOT EXISTS (SELECT 1 FROM library_access la WHERE la.library_id = c.library_id)
+		  AND EXISTS (
+			SELECT 1 FROM library_access la
+			JOIN users u ON u.id = ?
+			WHERE la.library_id = c.library_id
+			  AND la.user_id = COALESCE(u.parent_user_id, u.id)
 		  )
 		ORDER BY is_fav DESC, has_now DESC, c.name ASC
 		LIMIT ?`

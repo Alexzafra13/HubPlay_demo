@@ -52,16 +52,7 @@ INSERT OR IGNORE INTO library_access (user_id, library_id) VALUES (?, ?);
 -- name: RevokeLibraryAccess :exec
 DELETE FROM library_access WHERE user_id = ? AND library_id = ?;
 
--- name: ListLibrariesForUser :many
-SELECT l.id, l.name, l.content_type, l.scan_mode,
-       COALESCE(l.scan_interval, '6h') AS scan_interval,
-       COALESCE(l.m3u_url, '') AS m3u_url,
-       COALESCE(l.epg_url, '') AS epg_url,
-       COALESCE(l.refresh_interval, '24h') AS refresh_interval,
-       l.language_filter, l.tls_insecure,
-       l.created_at, l.updated_at
-FROM libraries l
-LEFT JOIN library_access la ON la.library_id = l.id AND la.user_id = ?
-WHERE la.user_id IS NOT NULL
-   OR NOT EXISTS (SELECT 1 FROM library_access WHERE library_id = l.id)
-ORDER BY l.name;
+-- ListLibrariesForUser: hand-rolled en library_repository.go (raw SQL),
+-- no sqlc. El JOIN con COALESCE(parent_user_id, id) trips el parser
+-- de sqlc 1.31.1 igual que las queries de federation con ORDER BY +
+-- COLLATE. Documentado en docs/memory/architecture-decisions.md.
