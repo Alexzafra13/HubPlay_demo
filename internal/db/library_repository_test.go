@@ -413,6 +413,197 @@ func TestLibraryRepository_ReplaceAccess(t *testing.T) {
 	}
 }
 
+// TestLibraryRepository_Create_GrantsPrimaryAdmin pins el invariante
+// "el admin principal ve toda biblioteca creada después de
+// migración 041". El runtime hook en Create otorga library_access
+// dentro de la misma tx, así que la matriz UI se mantiene consistente
+// con LIST y el grant queda persistido (multi-dispositivo).
+func TestLibraryRepository_Create_GrantsPrimaryAdmin(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	libRepo := db.NewLibraryRepository(database)
+	userRepo := db.NewUserRepository(database)
+	ctx := context.Background()
+
+	now := time.Now()
+	if err := userRepo.Create(ctx, &db.User{
+		ID: "admin-1", Username: "boss", DisplayName: "Boss",
+		PasswordHash: "$2a$10$fakehash", Role: "admin", IsActive: true,
+		CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := libRepo.Create(ctx, newTestLibrary("lib-1", "Movies")); err != nil {
+		t.Fatal(err)
+	}
+
+	ids, err := libRepo.ListAccessByUser(ctx, "admin-1")
+	if err != nil {
+		t.Fatalf("ListAccessByUser: %v", err)
+	}
+	if len(ids) != 1 || ids[0] != "lib-1" {
+		t.Errorf("primary admin should have grant for lib-1, got %v", ids)
+	}
+
+	// Crear más libraries añade más grants sin tocar los previos.
+	if err := libRepo.Create(ctx, newTestLibrary("lib-2", "Shows")); err != nil {
+		t.Fatal(err)
+	}
+	ids, _ = libRepo.ListAccessByUser(ctx, "admin-1")
+	if !equalStringSets(ids, []string{"lib-1", "lib-2"}) {
+		t.Errorf("primary admin should have grants for both libs, got %v", ids)
+	}
+}
+
+// TestLibraryRepository_Create_NoAdmin_NoOp valida que crear bibliotecas
+// ANTES de que exista cualquier admin no rompe (LIMIT 1 sobre 0 rows =
+// 0 inserts) y no deja grants huérfanos. Caso edge: setup wizard
+// inicializa el operador admin DESPUÉS del primer arranque; si por
+// alguna razón se hubiese inicializado una library antes, la
+// migración 041 + el siguiente Create resincronizan el estado.
+func TestLibraryRepository_Create_NoAdmin_NoOp(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	libRepo := db.NewLibraryRepository(database)
+	ctx := context.Background()
+
+	if err := libRepo.Create(ctx, newTestLibrary("lib-1", "Movies")); err != nil {
+		t.Fatalf("Create without admin should not error: %v", err)
+	}
+
+	var count int
+	if err := database.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM library_access`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Errorf("expected library_access empty without admin, got %d rows", count)
+	}
+}
+
+// TestLibraryRepository_Create_OnlyPrimaryAdmin valida que con varios
+// admins sólo el más antiguo (PrimaryAdminID) recibe el grant
+// automático. Los demás siguen viendo libraries por el bypass de LIST,
+// pero su matriz UI refleja honestamente que no tienen grants
+// explícitos (decisión consensuada — admins secundarios se gestionan
+// manualmente).
+func TestLibraryRepository_Create_OnlyPrimaryAdmin(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	libRepo := db.NewLibraryRepository(database)
+	userRepo := db.NewUserRepository(database)
+	ctx := context.Background()
+
+	older := time.Now()
+	newer := older.Add(time.Hour)
+	if err := userRepo.Create(ctx, &db.User{
+		ID: "admin-old", Username: "founder", DisplayName: "Founder",
+		PasswordHash: "$2a$10$fakehash", Role: "admin", IsActive: true,
+		CreatedAt: older,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := userRepo.Create(ctx, &db.User{
+		ID: "admin-new", Username: "second", DisplayName: "Second",
+		PasswordHash: "$2a$10$fakehash", Role: "admin", IsActive: true,
+		CreatedAt: newer,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := libRepo.Create(ctx, newTestLibrary("lib-1", "Movies")); err != nil {
+		t.Fatal(err)
+	}
+
+	gotOld, _ := libRepo.ListAccessByUser(ctx, "admin-old")
+	if len(gotOld) != 1 || gotOld[0] != "lib-1" {
+		t.Errorf("oldest admin should be granted, got %v", gotOld)
+	}
+	gotNew, _ := libRepo.ListAccessByUser(ctx, "admin-new")
+	if len(gotNew) != 0 {
+		t.Errorf("secondary admin should NOT receive auto-grant, got %v", gotNew)
+	}
+}
+
+// TestMigration041_BackfillsPrimaryAdmin simula el caso real que
+// motivó la migración: admin + libraries pre-existentes en producción
+// (creados antes de Phase B) sin grants en library_access. La
+// migración aplica el INSERT OR IGNORE y restaura la invariante.
+//
+// NewTestDB ya aplica 041, así que reproducimos el estado "viejo"
+// borrando library_access manualmente y volvemos a correr el SQL de
+// la migración.
+func TestMigration041_BackfillsPrimaryAdmin(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	libRepo := db.NewLibraryRepository(database)
+	userRepo := db.NewUserRepository(database)
+	ctx := context.Background()
+
+	now := time.Now()
+	if err := userRepo.Create(ctx, &db.User{
+		ID: "admin-1", Username: "boss", DisplayName: "Boss",
+		PasswordHash: "$2a$10$fakehash", Role: "admin", IsActive: true,
+		CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"lib-a", "lib-b", "lib-c"} {
+		if err := libRepo.Create(ctx, newTestLibrary(id, id)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Estado "pre-041": el runtime hook ya insertó grants, los
+	// borramos para simular un despliegue legacy.
+	if _, err := database.ExecContext(ctx, `DELETE FROM library_access`); err != nil {
+		t.Fatal(err)
+	}
+	pre, _ := libRepo.ListAccessByUser(ctx, "admin-1")
+	if len(pre) != 0 {
+		t.Fatalf("setup precondition: expected empty library_access, got %v", pre)
+	}
+
+	// Re-correr el SQL idéntico al de migrations/sqlite/041.
+	if _, err := database.ExecContext(ctx, `
+		INSERT OR IGNORE INTO library_access (user_id, library_id)
+		SELECT primary_admin.id, l.id
+		FROM libraries l
+		CROSS JOIN (
+			SELECT id FROM users
+			WHERE role = 'admin' AND parent_user_id IS NULL
+			ORDER BY created_at ASC
+			LIMIT 1
+		) AS primary_admin
+	`); err != nil {
+		t.Fatalf("migration 041 SQL: %v", err)
+	}
+
+	post, err := libRepo.ListAccessByUser(ctx, "admin-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !equalStringSets(post, []string{"lib-a", "lib-b", "lib-c"}) {
+		t.Errorf("after backfill: expected grants for all 3 libs, got %v", post)
+	}
+
+	// Idempotente: re-correr la migración no duplica filas.
+	if _, err := database.ExecContext(ctx, `
+		INSERT OR IGNORE INTO library_access (user_id, library_id)
+		SELECT primary_admin.id, l.id
+		FROM libraries l
+		CROSS JOIN (
+			SELECT id FROM users
+			WHERE role = 'admin' AND parent_user_id IS NULL
+			ORDER BY created_at ASC
+			LIMIT 1
+		) AS primary_admin
+	`); err != nil {
+		t.Fatalf("migration 041 SQL (re-run): %v", err)
+	}
+	again, _ := libRepo.ListAccessByUser(ctx, "admin-1")
+	if !equalStringSets(again, []string{"lib-a", "lib-b", "lib-c"}) {
+		t.Errorf("re-run should be idempotent, got %v", again)
+	}
+}
+
 func equalStringSets(a, b []string) bool {
 	if len(a) != len(b) {
 		return false

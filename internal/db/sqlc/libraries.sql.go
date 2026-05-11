@@ -91,6 +91,26 @@ func (q *Queries) GrantLibraryAccess(ctx context.Context, arg GrantLibraryAccess
 	return err
 }
 
+const grantPrimaryAdminLibraryAccess = `-- name: GrantPrimaryAdminLibraryAccess :exec
+INSERT OR IGNORE INTO library_access (user_id, library_id)
+SELECT u.id, ?
+FROM users u
+WHERE u.role = 'admin' AND u.parent_user_id IS NULL
+ORDER BY u.created_at ASC
+LIMIT 1
+`
+
+// Grants the given library_id to the primary admin (oldest top-level
+// role=admin row, same definition as GetPrimaryAdminID). Idempotent
+// via INSERT OR IGNORE; no-op when no admin exists yet (cold-start
+// pre setup-wizard). Called from LibraryRepository.Create inside the
+// same tx so the invariant "primary admin sees every library" holds
+// for libraries created after migration 041.
+func (q *Queries) GrantPrimaryAdminLibraryAccess(ctx context.Context, libraryID string) error {
+	_, err := q.db.ExecContext(ctx, grantPrimaryAdminLibraryAccess, libraryID)
+	return err
+}
+
 const insertLibrary = `-- name: InsertLibrary :exec
 
 INSERT INTO libraries (id, name, content_type, scan_mode, scan_interval,
