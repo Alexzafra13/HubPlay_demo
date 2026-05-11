@@ -3,9 +3,12 @@
 //
 // Mirrors the Plex/Jellyfin admin live-sessions surface: one row per
 // active session, with user / item / profile / method / elapsed,
-// plus a Kill button per row. Polls every 5s via useAdminStreamSessions;
-// optimistic remove on kill keeps the click responsive without waiting
-// on the next poll.
+// plus a Kill button per row. Driven by SSE — useAdminStreamSessions
+// invalidates on transcode.started/completed events so the table
+// refreshes within ~50 ms of a session starting or stopping. The
+// useNowTick(1000) below is just a local re-render trigger so the
+// elapsed counters keep climbing between events; it makes no
+// network requests.
 //
 // State variants:
 //   isLoading + no cache → Spinner (first time the tab opens)
@@ -17,11 +20,16 @@ import { useTranslation } from "react-i18next";
 import { useAdminStreamSessions, useKillAdminStreamSession } from "@/api/hooks";
 import type { AdminStreamSession } from "@/api/types";
 import { Badge, EmptyState, Spinner } from "@/components/common";
+import { useNowTick } from "@/hooks/useNowTick";
 
 export function NowPlayingPanel() {
   const { t, i18n } = useTranslation();
   const { data, isLoading, isError } = useAdminStreamSessions();
   const killMutation = useKillAdminStreamSession();
+  // 1 Hz local tick so the elapsed column climbs smoothly between
+  // SSE-driven cache invalidations. Replaces the side-effect of the
+  // 5s refetch that used to drive the re-render.
+  useNowTick(1000);
 
   if (isLoading && !data) {
     return (
@@ -143,8 +151,9 @@ function MethodBadge({ method }: { method: AdminStreamSession["method"] }) {
 }
 
 // formatElapsed renders "Xm Ys" or "Xh Ym" relative to now. Recomputed
-// on every render — the panel itself refetches every 5s, which
-// implicitly bumps elapsed values by ~5s, no extra ticker needed.
+// on every render — the useNowTick(1000) at the panel level re-renders
+// once a second, so elapsed values climb smoothly between SSE-driven
+// invalidations without any network traffic.
 function formatElapsed(startedAtISO: string, locale: string, t: (k: string, opts?: Record<string, unknown>) => string): string {
   const startedAt = Date.parse(startedAtISO);
   if (Number.isNaN(startedAt)) return "—";
