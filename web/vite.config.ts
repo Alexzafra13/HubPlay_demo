@@ -56,6 +56,12 @@ export default defineConfig({
           react: ["react", "react-dom"],
           router: ["react-router"],
           query: ["@tanstack/react-query"],
+          // hls.js is ~400 KB minified and only matters on routes
+          // that touch the player. Splitting keeps it out of the
+          // initial bundle so Home / Browse / Login skip the parse
+          // cost on first paint; the chunk fetches lazily when the
+          // detail page mounts the player.
+          hls: ["hls.js"],
         },
       },
     },
