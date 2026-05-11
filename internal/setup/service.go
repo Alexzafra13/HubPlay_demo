@@ -157,6 +157,14 @@ func isSensitivePath(absPath string) bool {
 }
 
 // CompleteSetup marks the setup as done and persists the config to disk.
+//
+// The file is written with mode 0600. The YAML carries secrets the
+// runtime treats as sensitive — JWT signing seed, provider API keys
+// (TMDb, Fanart, OpenSubtitles), and the DB path — and a 0644 file on
+// a multi-user host (or a docker-compose mount with permissive umask)
+// leaks them to any local reader. 0600 matches the convention every
+// other secret-bearing file in self-hosted media servers uses (Plex
+// Preferences.xml, Jellyfin server.json).
 func (s *Service) CompleteSetup(startScan bool) error {
 	s.config.SetupCompleted = true
 
@@ -165,7 +173,7 @@ func (s *Service) CompleteSetup(startScan bool) error {
 		return fmt.Errorf("marshalling config: %w", err)
 	}
 
-	if err := os.WriteFile(s.configPath, data, 0644); err != nil {
+	if err := os.WriteFile(s.configPath, data, 0o600); err != nil {
 		return fmt.Errorf("writing config: %w", err)
 	}
 
