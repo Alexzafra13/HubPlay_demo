@@ -76,6 +76,29 @@ jobs:
           # accepts v2 binaries; v6 hard-rejects them in parseVersion.
           version: v2.5.0
 
+  vuln:
+    name: Vulnerability scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # govulncheck does call-graph analysis: it only fails the build
+      # when a CVE actually reaches a code path we compile in, not
+      # when a CVE merely lives in a transitive import. False-positive
+      # rate is therefore very low and we can keep this gating.
+      # Pulling from @latest is acceptable because the tool is an
+      # official x/vuln binary signed by the Go team — the same trust
+      # boundary as the toolchain itself.
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Run govulncheck
+        run: govulncheck ./...
+
   build:
     name: Build
     runs-on: ubuntu-latest
