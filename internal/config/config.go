@@ -155,7 +155,6 @@ type RateLimitConfig struct {
 	LoginAttempts  int           `yaml:"login_attempts"`
 	LoginWindow    time.Duration `yaml:"login_window"`
 	LoginLockout   time.Duration `yaml:"login_lockout"`
-	GlobalRPM      int           `yaml:"global_rpm"`
 	TrustedSubnets []string      `yaml:"trusted_subnets"` // subnets exempt from rate limiting (e.g. LAN)
 }
 
@@ -276,7 +275,6 @@ func defaults() *Config {
 			LoginAttempts:  10,
 			LoginWindow:    15 * time.Minute,
 			LoginLockout:   5 * time.Minute,
-			GlobalRPM:      0, // 0 = unlimited (self-hosted default)
 			TrustedSubnets: []string{"127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"},
 		},
 		Streaming: StreamingConfig{
