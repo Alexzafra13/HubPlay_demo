@@ -1,13 +1,18 @@
 package handlers
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"hubplay/internal/auth"
+	"hubplay/internal/config"
 	"hubplay/internal/domain"
+	"hubplay/internal/event"
 )
 
 // DeviceAuthHandler implements the device authorization grant
@@ -25,9 +30,12 @@ import (
 // operator types the code on a phone and approves. The device's
 // next poll receives access + refresh tokens.
 type DeviceAuthHandler struct {
-	svc    *auth.DeviceCodeService
-	mgr    baseURLProvider // for verification_url derivation; same shape used by federation
-	logger *slog.Logger
+	svc     *auth.DeviceCodeService
+	mgr     baseURLProvider // for verification_url derivation; same shape used by federation
+	authCfg config.AuthConfig
+	bus     EventBusSubscriber // optional; nil disables the SSE Events endpoint
+	limiter *SSELimiter        // optional; same instance shared with /events and /me/events
+	logger  *slog.Logger
 }
 
 // baseURLProvider is the small surface DeviceAuthHandler needs to
@@ -39,13 +47,29 @@ type baseURLProvider interface {
 }
 
 // NewDeviceAuthHandler wires the device-code service. The base URL
-// provider is optional (nil = derive from request only).
-func NewDeviceAuthHandler(svc *auth.DeviceCodeService, base baseURLProvider, logger *slog.Logger) *DeviceAuthHandler {
+// provider is optional (nil = derive from request only). authCfg
+// drives the cookie TTLs that Poll sets when the caller is a browser
+// (zero value disables cookie issuance — handy for tests). bus +
+// limiter are optional; when bus is nil the SSE Events endpoint is
+// not functional and the router skips registering it.
+func NewDeviceAuthHandler(svc *auth.DeviceCodeService, base baseURLProvider, authCfg config.AuthConfig, bus EventBusSubscriber, limiter *SSELimiter, logger *slog.Logger) *DeviceAuthHandler {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &DeviceAuthHandler{svc: svc, mgr: base, logger: logger.With("handler", "auth_device")}
+	return &DeviceAuthHandler{
+		svc:     svc,
+		mgr:     base,
+		authCfg: authCfg,
+		bus:     bus,
+		limiter: limiter,
+		logger:  logger.With("handler", "auth_device"),
+	}
 }
+
+// HasEventBus reports whether the SSE Events endpoint can be wired by
+// the router. Returns false when no bus was injected (e.g. unit tests
+// that exercise Start/Poll/Approve only).
+func (h *DeviceAuthHandler) HasEventBus() bool { return h.bus != nil }
 
 // ─── Start ──────────────────────────────────────────────────────────
 
@@ -54,12 +78,13 @@ type deviceStartRequest struct {
 }
 
 type deviceStartResponse struct {
-	DeviceCode      string `json:"device_code"`
-	UserCode        string `json:"user_code"`         // dash-formatted ABCD-EFGH for display
-	VerificationURL string `json:"verification_url"`  // where the operator goes
-	VerificationURI string `json:"verification_uri"`  // RFC 8628 alias of the above (alias kept for spec-compliance)
-	ExpiresIn       int    `json:"expires_in"`        // seconds
-	Interval        int    `json:"interval"`          // seconds
+	DeviceCode              string `json:"device_code"`
+	UserCode                string `json:"user_code"`                // dash-formatted ABCD-EFGH for display
+	VerificationURL         string `json:"verification_url"`         // where the operator goes
+	VerificationURI         string `json:"verification_uri"`         // RFC 8628 alias of the above (alias kept for spec-compliance)
+	VerificationURIComplete string `json:"verification_uri_complete"` // RFC 8628 §3.3.1: URL with the user_code pre-filled (QR-friendly)
+	ExpiresIn               int    `json:"expires_in"`               // seconds
+	Interval                int    `json:"interval"`                 // seconds
 }
 
 // Start mints a fresh code pair. Body: { "device_name": "..." }.
@@ -79,16 +104,37 @@ func (h *DeviceAuthHandler) Start(w http.ResponseWriter, r *http.Request) {
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to start device flow")
 		return
 	}
+	displayCode := auth.FormatUserCodeDisplay(pair.UserCode)
+	complete := buildVerificationURIComplete(pair.VerificationURL, displayCode)
 	respondJSON(w, http.StatusCreated, map[string]any{
 		"data": deviceStartResponse{
-			DeviceCode:      pair.DeviceCode,
-			UserCode:        auth.FormatUserCodeDisplay(pair.UserCode),
-			VerificationURL: pair.VerificationURL,
-			VerificationURI: pair.VerificationURL,
-			ExpiresIn:       int(pair.ExpiresIn.Seconds()),
-			Interval:        int(pair.Interval.Seconds()),
+			DeviceCode:              pair.DeviceCode,
+			UserCode:                displayCode,
+			VerificationURL:         pair.VerificationURL,
+			VerificationURI:         pair.VerificationURL,
+			VerificationURIComplete: complete,
+			ExpiresIn:               int(pair.ExpiresIn.Seconds()),
+			Interval:                int(pair.Interval.Seconds()),
 		},
 	})
+}
+
+// buildVerificationURIComplete returns the verification URL with the
+// user_code attached as a query parameter, ready for QR encoding. The
+// /link page's canonicalise() strips dashes, so the dashed display
+// form is fine to embed verbatim (RFC 8628 §3.3.1 explicitly allows
+// either form). When the base URL is missing we still emit something
+// usable rather than a bare "?code=" — the /link page resolves
+// relative URLs in the browser regardless.
+func buildVerificationURIComplete(verificationURL, displayCode string) string {
+	base := strings.TrimRight(verificationURL, "?&")
+	if displayCode == "" {
+		return base
+	}
+	if strings.Contains(base, "?") {
+		return base + "&code=" + displayCode
+	}
+	return base + "?code=" + displayCode
 }
 
 // ─── Poll ───────────────────────────────────────────────────────────
@@ -117,6 +163,17 @@ func (h *DeviceAuthHandler) Poll(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.writePollError(w, r, err)
 		return
+	}
+	// Issue cookies on success so a browser-side poll (the in-app
+	// "Vincular este dispositivo" pairing UI on a TV) gets logged in
+	// without exposing tokens to JS. Native clients (TV apps, CLI)
+	// keep reading access_token / refresh_token from the JSON body and
+	// just ignore the cookies. Zero-valued authCfg disables cookies —
+	// useful in tests and headless setups that explicitly opt out.
+	if h.authCfg.AccessTokenTTL > 0 && h.authCfg.RefreshTokenTTL > 0 {
+		setAuthCookies(w, r, tok,
+			int(h.authCfg.AccessTokenTTL.Seconds()),
+			int(h.authCfg.RefreshTokenTTL.Seconds()))
 	}
 	respondJSON(w, http.StatusOK, map[string]any{"data": tok})
 }
@@ -203,6 +260,173 @@ func (h *DeviceAuthHandler) Approve(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]any{
 		"data": map[string]any{"approved": true},
 	})
+}
+
+// ─── Events (SSE) ───────────────────────────────────────────────────
+
+// Events streams the lifecycle of a single device_code as Server-Sent
+// Events so the browser-side pairing UI (the QR + user_code screen on
+// a TV running HubPlay in a tab) reacts instantly to approval instead
+// of polling /auth/device/poll on a timer. The /poll endpoint stays
+// the single source of truth for token issuance — a client that sees
+// the "approved" event still calls /poll exactly once to swap the
+// device_code for tokens.
+//
+// Wire (text/event-stream):
+//
+//	event: pending      data: {"device_code":"..."}    // initial state
+//	event: approved     data: {"device_code":"..."}    // call /poll now
+//	event: consumed     data: {}                       // someone else polled
+//	event: expired      data: {}                       // 10-min TTL elapsed
+//	: ping                                              // keepalive every 25s
+//
+// Auth: the opaque `device_code` query parameter is the secret — same
+// threat model as POST /auth/device/poll. No bearer required.
+func (h *DeviceAuthHandler) Events(w http.ResponseWriter, r *http.Request) {
+	if h.bus == nil {
+		respondError(w, r, http.StatusServiceUnavailable, "SSE_UNAVAILABLE",
+			"event stream not wired")
+		return
+	}
+	deviceCode := strings.TrimSpace(r.URL.Query().Get("device_code"))
+	if deviceCode == "" {
+		respondError(w, r, http.StatusBadRequest, "DEVICE_CODE_REQUIRED",
+			"device_code query parameter required")
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		respondError(w, r, http.StatusInternalServerError, "SSE_NOT_SUPPORTED",
+			"streaming not supported")
+		return
+	}
+
+	// Verify the code exists BEFORE flushing headers so a typo lands
+	// as a clean 404 instead of an empty stream the client has to
+	// interpret. InspectDevice does not bump LastPolledAt — it is a
+	// read-only inspector and safe to call on every connect.
+	initial, err := h.svc.InspectDevice(r.Context(), deviceCode)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			respondError(w, r, http.StatusNotFound, "DEVICE_CODE_UNKNOWN",
+				"unknown device_code")
+			return
+		}
+		h.logger.Error("device events inspect failed", "err", err)
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR",
+			"failed to start event stream")
+		return
+	}
+
+	// Acquire the SSE slot. Limiter is keyed by the device_code so a
+	// runaway client cannot stack streams for the same pairing, while
+	// different pairings stay independent. Unauthenticated, so we
+	// cannot key by user_id like /me/events does.
+	if h.limiter != nil {
+		release, err := h.limiter.Acquire("device:" + deviceCode)
+		if err != nil {
+			w.Header().Set("Retry-After", "30")
+			respondError(w, r, http.StatusServiceUnavailable, "SSE_CAP_EXCEEDED",
+				"too many concurrent event streams; retry shortly")
+			return
+		}
+		defer release()
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
+
+	// Synthetic terminal events: if the row is already in a terminal
+	// state when the client connects (raced the approve, reconnected
+	// after a network blip), emit the matching event and close. The
+	// client interprets it identically to a live push.
+	switch initial.Status {
+	case "approved":
+		writeSSE(w, "approved", map[string]any{"device_code": deviceCode})
+		flusher.Flush()
+		return
+	case "consumed":
+		writeSSE(w, "consumed", map[string]any{})
+		flusher.Flush()
+		return
+	case "expired":
+		writeSSE(w, "expired", map[string]any{})
+		flusher.Flush()
+		return
+	}
+
+	// Pending: subscribe to the bus and wait. Buffer of 4 is plenty
+	// for a stream that emits at most one terminal event before
+	// closing — the extra slots cover bus chatter the filter drops.
+	eventCh := make(chan event.Event, 4)
+	unsub := h.bus.Subscribe(event.DeviceCodeApproved, func(e event.Event) {
+		if e.Data == nil {
+			return
+		}
+		if dc, _ := e.Data["device_code"].(string); dc != deviceCode {
+			return
+		}
+		select {
+		case eventCh <- e:
+		default:
+		}
+	})
+	defer unsub()
+
+	// Local expiry timer so we close the stream the moment the row's
+	// TTL elapses rather than waiting for /poll to surface the error.
+	ttl := time.Until(initial.ExpiresAt)
+	if ttl <= 0 {
+		ttl = time.Second
+	}
+	expiryTimer := time.NewTimer(ttl)
+	defer expiryTimer.Stop()
+
+	writeSSE(w, "pending", map[string]any{"device_code": deviceCode})
+	flusher.Flush()
+
+	h.logger.Info("device events client connected",
+		"device_code_prefix", deviceCode[:8], "remote_addr", r.RemoteAddr)
+
+	keepalive := time.NewTicker(sseKeepaliveInterval)
+	defer keepalive.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-keepalive.C:
+			if _, err := fmt.Fprint(w, ": ping\n\n"); err != nil {
+				return
+			}
+			flusher.Flush()
+		case <-expiryTimer.C:
+			writeSSE(w, "expired", map[string]any{})
+			flusher.Flush()
+			return
+		case <-eventCh:
+			writeSSE(w, "approved", map[string]any{"device_code": deviceCode})
+			flusher.Flush()
+			return
+		}
+	}
+}
+
+// writeSSE emits a single event in the text/event-stream wire format.
+// Encoding errors are swallowed — the connection will close on the
+// next flush failure anyway and the SSE protocol has no way to signal
+// "this one event failed, try again" mid-stream.
+func writeSSE(w http.ResponseWriter, name string, payload map[string]any) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", name, body)
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────

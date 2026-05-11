@@ -45,6 +45,7 @@ const fixture: MySession[] = [
     last_active_at: new Date(Date.now() - 2 * 60_000).toISOString(),
     expires_at: "2026-06-10T08:00:00Z",
     current: true,
+    auth_method: "password",
   },
   {
     id: "sess-2",
@@ -55,6 +56,7 @@ const fixture: MySession[] = [
     last_active_at: new Date(Date.now() - 60 * 60_000).toISOString(),
     expires_at: "2026-06-09T08:00:00Z",
     current: false,
+    auth_method: "password",
   },
 ];
 

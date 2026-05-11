@@ -49,6 +49,20 @@ DELETE FROM library_paths WHERE library_id = ?;
 -- name: GrantLibraryAccess :exec
 INSERT OR IGNORE INTO library_access (user_id, library_id) VALUES (?, ?);
 
+-- name: GrantPrimaryAdminLibraryAccess :exec
+-- Grants the given library_id to the primary admin (oldest top-level
+-- role=admin row, same definition as GetPrimaryAdminID). Idempotent
+-- via INSERT OR IGNORE; no-op when no admin exists yet (cold-start
+-- pre setup-wizard). Called from LibraryRepository.Create inside the
+-- same tx so the invariant "primary admin sees every library" holds
+-- for libraries created after migration 041.
+INSERT OR IGNORE INTO library_access (user_id, library_id)
+SELECT u.id, ?
+FROM users u
+WHERE u.role = 'admin' AND u.parent_user_id IS NULL
+ORDER BY u.created_at ASC
+LIMIT 1;
+
 -- name: RevokeLibraryAccess :exec
 DELETE FROM library_access WHERE user_id = ? AND library_id = ?;
 

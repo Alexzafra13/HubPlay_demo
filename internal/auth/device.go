@@ -11,6 +11,7 @@ import (
 
 	"hubplay/internal/db"
 	"hubplay/internal/domain"
+	"hubplay/internal/event"
 )
 
 // DeviceCodeTTL is how long a freshly-issued code pair stays valid.
@@ -186,7 +187,51 @@ func (s *DeviceCodeService) ApproveDevice(ctx context.Context, userCode, userID 
 	}
 	s.logger.Info("device code approved",
 		"user_code", canonical, "user_id", userID, "device_name", row.DeviceName)
+	// Push notification to any SSE listener tied to this device_code so
+	// the browser-side pairing UI swaps to "logged in" instantly. The
+	// publish is best-effort (nil-safe via Service.publish); a missed
+	// event just falls back to the device's existing /poll cadence.
+	s.auth.publish(event.Event{
+		Type: event.DeviceCodeApproved,
+		Data: map[string]any{
+			"device_code": row.DeviceCode,
+			"user_id":     userID,
+		},
+	})
 	return nil
+}
+
+// DeviceCodeStatus is the snapshot the SSE handler queries on connect to
+// decide whether to subscribe or emit a synthetic terminal event right
+// away (covers the race where the operator approves between StartDevice
+// and the browser opening its EventSource).
+type DeviceCodeStatus struct {
+	Status     string    // "pending" | "approved" | "consumed" | "expired"
+	DeviceCode string
+	ExpiresAt  time.Time
+}
+
+// InspectDevice returns the current state of a device_code row without
+// touching the poll cadence (no LastPolledAt update). domain.ErrNotFound
+// when the code is unknown — the handler maps that to 404.
+func (s *DeviceCodeService) InspectDevice(ctx context.Context, deviceCode string) (*DeviceCodeStatus, error) {
+	row, err := s.codes.GetByDeviceCode(ctx, deviceCode)
+	if err != nil {
+		return nil, err
+	}
+	now := s.auth.clock.Now()
+	out := &DeviceCodeStatus{DeviceCode: deviceCode, ExpiresAt: row.ExpiresAt}
+	switch {
+	case now.After(row.ExpiresAt):
+		out.Status = "expired"
+	case row.ConsumedAt.Valid:
+		out.Status = "consumed"
+	case row.UserID.Valid:
+		out.Status = "approved"
+	default:
+		out.Status = "pending"
+	}
+	return out, nil
 }
 
 // PollDevice is called by the device on a periodic basis. Returns:

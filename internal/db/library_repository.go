@@ -86,6 +86,16 @@ func (r *LibraryRepository) Create(ctx context.Context, lib *Library) error {
 		}
 	}
 
+	// The primary admin (oldest top-level role=admin) gets an
+	// automatic library_access grant for every library that exists in
+	// the system. Migration 041 backfills pre-existing libraries; this
+	// hook keeps the invariant for libraries created afterwards. The
+	// query is a no-op when no admin exists yet (cold-start pre
+	// setup-wizard) and idempotent via INSERT OR IGNORE.
+	if err := qtx.GrantPrimaryAdminLibraryAccess(ctx, lib.ID); err != nil {
+		return fmt.Errorf("grant primary admin access: %w", err)
+	}
+
 	return tx.Commit()
 }
 

@@ -213,6 +213,13 @@ type Querier interface {
 	GetUserByUsername(ctx context.Context, username string) (GetUserByUsernameRow, error)
 	GetUserData(ctx context.Context, arg GetUserDataParams) (UserDatum, error)
 	GrantLibraryAccess(ctx context.Context, arg GrantLibraryAccessParams) error
+	// Grants the given library_id to the primary admin (oldest top-level
+	// role=admin row, same definition as GetPrimaryAdminID). Idempotent
+	// via INSERT OR IGNORE; no-op when no admin exists yet (cold-start
+	// pre setup-wizard). Called from LibraryRepository.Create inside the
+	// same tx so the invariant "primary admin sees every library" holds
+	// for libraries created after migration 041.
+	GrantPrimaryAdminLibraryAccess(ctx context.Context, libraryID string) error
 	HasLockedImageForKind(ctx context.Context, arg HasLockedImageForKindParams) (bool, error)
 	InsertCachedItem(ctx context.Context, arg InsertCachedItemParams) error
 	// Chapter markers per item (movie or episode), keyed by start time.

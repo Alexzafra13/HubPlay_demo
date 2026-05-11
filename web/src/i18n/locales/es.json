@@ -191,7 +191,26 @@
     "errorUnknown": "No reconocemos este código. Revisa lo que aparece en el dispositivo e inténtalo de nuevo.",
     "errorExpired": "Este código ha expirado. Pide al dispositivo que empiece de nuevo.",
     "errorAlreadyApproved": "Este código ya lo aprobó otro usuario.",
-    "errorAccountDisabled": "Tu cuenta está deshabilitada. Contacta con un administrador."
+    "errorAccountDisabled": "Tu cuenta está deshabilitada. Contacta con un administrador.",
+    "linked": {
+      "title": "Dispositivos vinculados",
+      "subtitle": "Aparatos que ya autorizaste desde aquí. Cierra la sesión de uno si lo prestaste o si ya no lo usas."
+    }
+  },
+  "pair": {
+    "title": "Vincular este dispositivo",
+    "subtitle": "Escanea el código QR con el móvil donde ya tienes sesión, o entra a /link en otro dispositivo e introduce este código.",
+    "codeLabel": "O escribe este código",
+    "qrAlt": "Código QR para vincular este dispositivo",
+    "qrLoading": "Generando código…",
+    "verificationHint": "Entra a {{url}} en otro dispositivo donde ya tengas sesión.",
+    "statusWaiting": "Esperando aprobación…",
+    "statusApproved": "Aprobado. Iniciando sesión…",
+    "expired": "El código caducó o se aprobó desde otro dispositivo. Genera uno nuevo si quieres seguir vinculando.",
+    "regenerate": "Generar nuevo código",
+    "errorGeneric": "No pudimos preparar el vínculo. Inténtalo de nuevo.",
+    "retry": "Reintentar",
+    "footer": "El código expira a los 10 minutos. Cuando lo apruebes, este dispositivo iniciará sesión automáticamente."
   },
   "peers": {
     "title": "Servidores conectados",
@@ -264,7 +283,9 @@
     "errorAccessExpired": "Tu acceso temporal ha caducado. Contacta con el administrador del servidor para extenderlo.",
     "errorAccountDisabled": "Tu cuenta está desactivada. Contacta con el administrador del servidor.",
     "errorInvalidCredentials": "Usuario o contraseña incorrectos.",
-    "errorRateLimited": "Demasiados intentos. Espera unos minutos e inténtalo de nuevo."
+    "errorRateLimited": "Demasiados intentos. Espera unos minutos e inténtalo de nuevo.",
+    "pairPrompt": "¿Estás en una TV o consola? ",
+    "pairCta": "Vincula este dispositivo"
   },
   "movies": {
     "title": "Películas",
@@ -604,7 +625,11 @@
       "revokeHint": "Cerrar esta sesión",
       "revoke": "Cerrar sesión",
       "title": "Tus dispositivos",
-      "subtitle": "Cada inicio de sesión queda guardado aquí. Cierra una sesión si no reconoces el dispositivo o pierdes el móvil."
+      "subtitle": "Cada inicio de sesión queda guardado aquí. Cierra una sesión si no reconoces el dispositivo o pierdes el móvil.",
+      "badge": {
+        "deviceLink": "Vínculo dispositivo",
+        "web": "Sesión web"
+      }
     }
   },
   "admin": {

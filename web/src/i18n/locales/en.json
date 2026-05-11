@@ -191,7 +191,26 @@
     "errorUnknown": "We don't recognise this code. Check what's on the device and try again.",
     "errorExpired": "This code has expired. Ask the device to start over.",
     "errorAlreadyApproved": "This code was already approved by another user.",
-    "errorAccountDisabled": "Your account is disabled. Contact your administrator."
+    "errorAccountDisabled": "Your account is disabled. Contact your administrator.",
+    "linked": {
+      "title": "Linked devices",
+      "subtitle": "Devices you have already authorised here. Sign one out if you lent it or no longer use it."
+    }
+  },
+  "pair": {
+    "title": "Link this device",
+    "subtitle": "Scan the QR code with the phone where you are already signed in, or visit /link on another device and enter this code.",
+    "codeLabel": "Or type this code",
+    "qrAlt": "QR code to link this device",
+    "qrLoading": "Generating code…",
+    "verificationHint": "Visit {{url}} on another device where you are already signed in.",
+    "statusWaiting": "Waiting for approval…",
+    "statusApproved": "Approved. Signing in…",
+    "expired": "The code expired or was approved from another device. Generate a new one to keep linking.",
+    "regenerate": "Generate new code",
+    "errorGeneric": "We couldn't start the pairing. Please try again.",
+    "retry": "Retry",
+    "footer": "The code expires after 10 minutes. Once approved, this device will sign in automatically."
   },
   "peers": {
     "title": "Connected servers",
@@ -264,7 +283,9 @@
     "errorAccessExpired": "Tu acceso temporal ha caducado. Contacta con el administrador del servidor para extenderlo.",
     "errorAccountDisabled": "Tu cuenta está desactivada. Contacta con el administrador del servidor.",
     "errorInvalidCredentials": "Usuario o contraseña incorrectos.",
-    "errorRateLimited": "Demasiados intentos. Espera unos minutos e inténtalo de nuevo."
+    "errorRateLimited": "Demasiados intentos. Espera unos minutos e inténtalo de nuevo.",
+    "pairPrompt": "On a TV or console? ",
+    "pairCta": "Link this device"
   },
   "movies": {
     "title": "Movies",
@@ -604,7 +625,11 @@
       "revokeHint": "Cerrar esta sesión",
       "revoke": "Cerrar sesión",
       "title": "Tus dispositivos",
-      "subtitle": "Cada inicio de sesión queda guardado aquí. Cierra una sesión si no reconoces el dispositivo o pierdes el móvil."
+      "subtitle": "Cada inicio de sesión queda guardado aquí. Cierra una sesión si no reconoces el dispositivo o pierdes el móvil.",
+      "badge": {
+        "deviceLink": "Device pairing",
+        "web": "Web session"
+      }
     }
   },
   "admin": {
