@@ -330,6 +330,12 @@ type Querier interface {
 	// to the UI without a client-side sort.
 	ListItemPeople(ctx context.Context, itemID string) ([]ListItemPeopleRow, error)
 	ListLibraries(ctx context.Context) ([]ListLibrariesRow, error)
+	// Returns library_ids the user_id has explicit grants for. Admin-only
+	// surface (the user's library list goes through ListLibrariesForUser
+	// which applies the profile-inheritance predicate). Callers pass the
+	// top-level user id; for profile rows the caller must resolve to the
+	// parent first. See ADR-014.
+	ListLibraryAccessByUser(ctx context.Context, userID string) ([]string, error)
 	// Per-library EPG source list (multi-provider XMLTV configuration).
 	//
 	// Table schema: migrations/sqlite/007_library_epg_sources.sql.

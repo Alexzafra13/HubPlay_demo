@@ -47,6 +47,17 @@ type libFakeService struct {
 	getStreamsFn    func(ctx context.Context, id string) ([]*db.MediaStream, error)
 	getItemImagesFn func(ctx context.Context, id string) ([]*db.Image, error)
 	genres          []db.GenreCount
+	// Access surface — used by the admin user-libraries matrix tests.
+	grantAccessFn      func(ctx context.Context, userID, libraryID string) error
+	revokeAccessFn     func(ctx context.Context, userID, libraryID string) error
+	listAccessFn       func(ctx context.Context, userID string) ([]string, error)
+	replaceAccessFn    func(ctx context.Context, userID string, libraryIDs []string) error
+	replaceAccessCalls []replaceAccessCall
+}
+
+type replaceAccessCall struct {
+	UserID     string
+	LibraryIDs []string
 }
 
 func (s *libFakeService) Create(ctx context.Context, req library.CreateRequest) (*db.Library, error) {
@@ -162,6 +173,32 @@ func (s *libFakeService) ItemCount(ctx context.Context, libraryID string) (int, 
 
 func (s *libFakeService) UserHasAccess(_ context.Context, _, _ string) (bool, error) {
 	return true, nil
+}
+
+func (s *libFakeService) GrantAccess(ctx context.Context, userID, libraryID string) error {
+	if s.grantAccessFn != nil {
+		return s.grantAccessFn(ctx, userID, libraryID)
+	}
+	return nil
+}
+func (s *libFakeService) RevokeAccess(ctx context.Context, userID, libraryID string) error {
+	if s.revokeAccessFn != nil {
+		return s.revokeAccessFn(ctx, userID, libraryID)
+	}
+	return nil
+}
+func (s *libFakeService) ListAccessByUser(ctx context.Context, userID string) ([]string, error) {
+	if s.listAccessFn != nil {
+		return s.listAccessFn(ctx, userID)
+	}
+	return nil, nil
+}
+func (s *libFakeService) ReplaceAccess(ctx context.Context, userID string, libraryIDs []string) error {
+	s.replaceAccessCalls = append(s.replaceAccessCalls, replaceAccessCall{UserID: userID, LibraryIDs: append([]string(nil), libraryIDs...)})
+	if s.replaceAccessFn != nil {
+		return s.replaceAccessFn(ctx, userID, libraryIDs)
+	}
+	return nil
 }
 
 func (s *libFakeService) ListGenres(_ context.Context, _ string) ([]db.GenreCount, error) {

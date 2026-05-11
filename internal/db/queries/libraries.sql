@@ -52,6 +52,14 @@ INSERT OR IGNORE INTO library_access (user_id, library_id) VALUES (?, ?);
 -- name: RevokeLibraryAccess :exec
 DELETE FROM library_access WHERE user_id = ? AND library_id = ?;
 
+-- name: ListLibraryAccessByUser :many
+-- Returns library_ids the user_id has explicit grants for. Admin-only
+-- surface (the user's library list goes through ListLibrariesForUser
+-- which applies the profile-inheritance predicate). Callers pass the
+-- top-level user id; for profile rows the caller must resolve to the
+-- parent first. See ADR-014.
+SELECT library_id FROM library_access WHERE user_id = ? ORDER BY library_id;
+
 -- ListLibrariesForUser: hand-rolled en library_repository.go (raw SQL),
 -- no sqlc. El JOIN con COALESCE(parent_user_id, id) trips el parser
 -- de sqlc 1.31.1 igual que las queries de federation con ORDER BY +

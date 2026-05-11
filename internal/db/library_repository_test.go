@@ -289,3 +289,142 @@ func TestLibraryRepository_Access_ProfileInherits(t *testing.T) {
 		}
 	}
 }
+
+// TestLibraryRepository_ListAccessByUser cubre el surface admin-only:
+// devuelve los library_ids con grant explícito para el user. Bypassea
+// el predicate (no resuelve profiles) porque el admin matrix tiene que
+// pintar exactamente lo que hay en library_access.
+func TestLibraryRepository_ListAccessByUser(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	libRepo := db.NewLibraryRepository(database)
+	userRepo := db.NewUserRepository(database)
+	ctx := context.Background()
+
+	now := time.Now()
+	user := &db.User{
+		ID: "u-1", Username: "alice", DisplayName: "Alice",
+		PasswordHash: "$2a$10$fakehash", Role: "user", IsActive: true,
+		CreatedAt: now,
+	}
+	if err := userRepo.Create(ctx, user); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"lib-z", "lib-a", "lib-m"} {
+		if err := libRepo.Create(ctx, newTestLibrary(id, id)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Sin grants → slice vacío.
+	ids, err := libRepo.ListAccessByUser(ctx, "u-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(ids) != 0 {
+		t.Errorf("expected 0 ids, got %v", ids)
+	}
+
+	// Con grants → ordenados por library_id (predecible para tests).
+	for _, id := range []string{"lib-z", "lib-a"} {
+		if err := libRepo.GrantAccess(ctx, "u-1", id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ids, err = libRepo.ListAccessByUser(ctx, "u-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []string{"lib-a", "lib-z"}
+	if len(ids) != len(want) || ids[0] != want[0] || ids[1] != want[1] {
+		t.Errorf("expected %v, got %v", want, ids)
+	}
+
+	// User sin filas en library_access (no existe siquiera): slice vacío,
+	// no error. El admin matrix usa esto para "user nuevo, sin grants".
+	ids, err = libRepo.ListAccessByUser(ctx, "u-ghost")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(ids) != 0 {
+		t.Errorf("unknown user: expected 0 ids, got %v", ids)
+	}
+}
+
+// TestLibraryRepository_ReplaceAccess valida que el diff transaccional
+// añade lo nuevo, borra lo sobrante y deja intactos los rows ya
+// presentes. La operación es idempotente: pasar el mismo set dos veces
+// no debería tocar nada.
+func TestLibraryRepository_ReplaceAccess(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	libRepo := db.NewLibraryRepository(database)
+	userRepo := db.NewUserRepository(database)
+	ctx := context.Background()
+
+	now := time.Now()
+	if err := userRepo.Create(ctx, &db.User{
+		ID: "u-1", Username: "alice", DisplayName: "Alice",
+		PasswordHash: "$2a$10$fakehash", Role: "user", IsActive: true,
+		CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"lib-a", "lib-b", "lib-c", "lib-d"} {
+		if err := libRepo.Create(ctx, newTestLibrary(id, id)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Estado inicial: grant a {a, b}.
+	for _, id := range []string{"lib-a", "lib-b"} {
+		if err := libRepo.GrantAccess(ctx, "u-1", id); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Replace con {b, c, d}: a sale, c/d entran, b queda.
+	if err := libRepo.ReplaceAccess(ctx, "u-1", []string{"lib-b", "lib-c", "lib-d"}); err != nil {
+		t.Fatalf("replace: %v", err)
+	}
+	got, err := libRepo.ListAccessByUser(ctx, "u-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"lib-b", "lib-c", "lib-d"}
+	if !equalStringSets(got, want) {
+		t.Errorf("after replace: expected %v, got %v", want, got)
+	}
+
+	// Idempotente: misma llamada no rompe nada.
+	if err := libRepo.ReplaceAccess(ctx, "u-1", []string{"lib-b", "lib-c", "lib-d"}); err != nil {
+		t.Fatalf("replace (idempotent): %v", err)
+	}
+	got, _ = libRepo.ListAccessByUser(ctx, "u-1")
+	if !equalStringSets(got, want) {
+		t.Errorf("idempotent replace: expected %v, got %v", want, got)
+	}
+
+	// Set vacío limpia todo.
+	if err := libRepo.ReplaceAccess(ctx, "u-1", []string{}); err != nil {
+		t.Fatalf("replace empty: %v", err)
+	}
+	got, _ = libRepo.ListAccessByUser(ctx, "u-1")
+	if len(got) != 0 {
+		t.Errorf("replace empty: expected 0 ids, got %v", got)
+	}
+}
+
+func equalStringSets(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	seen := make(map[string]struct{}, len(a))
+	for _, s := range a {
+		seen[s] = struct{}{}
+	}
+	for _, s := range b {
+		if _, ok := seen[s]; !ok {
+			return false
+		}
+	}
+	return true
+}

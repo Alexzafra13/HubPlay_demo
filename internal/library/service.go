@@ -209,6 +209,50 @@ func (s *Service) UserHasAccess(ctx context.Context, userID, libraryID string) (
 	return s.libraries.UserHasAccess(ctx, userID, libraryID)
 }
 
+// GrantAccess adds a library_access row for (userID, libraryID). userID
+// MUST be a top-level user (ADR-014); profile resolution is the caller's
+// job. Idempotent: re-granting an existing row is a no-op.
+func (s *Service) GrantAccess(ctx context.Context, userID, libraryID string) error {
+	if err := s.libraries.GrantAccess(ctx, userID, libraryID); err != nil {
+		return err
+	}
+	s.logger.Info("library access granted", "user_id", userID, "library_id", libraryID)
+	return nil
+}
+
+// RevokeAccess removes the grant for (userID, libraryID). userID MUST be
+// a top-level user. Profiles under that user lose access in the same
+// operation through the COALESCE predicate.
+func (s *Service) RevokeAccess(ctx context.Context, userID, libraryID string) error {
+	if err := s.libraries.RevokeAccess(ctx, userID, libraryID); err != nil {
+		return err
+	}
+	s.logger.Info("library access revoked", "user_id", userID, "library_id", libraryID)
+	return nil
+}
+
+// ListAccessByUser returns the library_ids the user has explicit grants
+// for. Admin-only surface: powers the per-user matrix in the admin UI.
+// Caller must pass a top-level user id; a profile id returns the empty
+// slice because grants always target the parent.
+func (s *Service) ListAccessByUser(ctx context.Context, userID string) ([]string, error) {
+	return s.libraries.ListAccessByUser(ctx, userID)
+}
+
+// ReplaceAccess overwrites the user's grant set with libraryIDs in one
+// transactional diff: missing grants get inserted, extras get revoked.
+// The handler is responsible for resolving the user to its top-level id
+// AND for validating that every libraryID actually exists; ReplaceAccess
+// only deduplicates the input. Returns nil on success even when the
+// caller passed an empty list (clears every grant).
+func (s *Service) ReplaceAccess(ctx context.Context, userID string, libraryIDs []string) error {
+	if err := s.libraries.ReplaceAccess(ctx, userID, libraryIDs); err != nil {
+		return err
+	}
+	s.logger.Info("library access replaced", "user_id", userID, "count", len(libraryIDs))
+	return nil
+}
+
 type UpdateRequest struct {
 	Name        string   `json:"name"`
 	ContentType string   `json:"content_type"`

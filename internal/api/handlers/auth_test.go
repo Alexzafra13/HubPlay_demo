@@ -203,7 +203,7 @@ func TestAuthHandler_Login_Success(t *testing.T) {
 		},
 	}
 
-	handler := NewAuthHandler(authSvc, userSvc, testAuthCfg(), testLogger())
+	handler := NewAuthHandler(authSvc, userSvc, nil, testAuthCfg(), testLogger())
 
 	body := `{"username":"admin","password":"password"}`
 	req := httptest.NewRequest("POST", "/auth/login", strings.NewReader(body))
@@ -261,7 +261,7 @@ func TestAuthHandler_Login_InvalidCredentials(t *testing.T) {
 	}
 	userSvc := &mockUserService{}
 
-	handler := NewAuthHandler(authSvc, userSvc, testAuthCfg(), testLogger())
+	handler := NewAuthHandler(authSvc, userSvc, nil, testAuthCfg(), testLogger())
 
 	body := `{"username":"bad","password":"wrong"}`
 	req := httptest.NewRequest("POST", "/auth/login", strings.NewReader(body))
@@ -276,7 +276,7 @@ func TestAuthHandler_Login_InvalidCredentials(t *testing.T) {
 }
 
 func TestAuthHandler_Login_InvalidBody(t *testing.T) {
-	handler := NewAuthHandler(&mockAuthService{}, &mockUserService{}, testAuthCfg(), testLogger())
+	handler := NewAuthHandler(&mockAuthService{}, &mockUserService{}, nil, testAuthCfg(), testLogger())
 
 	req := httptest.NewRequest("POST", "/auth/login", strings.NewReader("not json"))
 	req.Header.Set("Content-Type", "application/json")
@@ -322,7 +322,7 @@ func TestAuthHandler_Setup_AllowedWhenNoUsers(t *testing.T) {
 		},
 	}
 
-	handler := NewAuthHandler(authSvc, userSvc, testAuthCfg(), testLogger())
+	handler := NewAuthHandler(authSvc, userSvc, nil, testAuthCfg(), testLogger())
 	body := `{"username":"admin","password":"password123","display_name":"Admin"}`
 	req := httptest.NewRequest("POST", "/auth/setup", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -358,7 +358,7 @@ func TestAuthHandler_Setup_BlockedWhenUsersExist(t *testing.T) {
 		countFn: func(_ context.Context) (int, error) { return 1, nil },
 	}
 
-	handler := NewAuthHandler(authSvc, userSvc, testAuthCfg(), testLogger())
+	handler := NewAuthHandler(authSvc, userSvc, nil, testAuthCfg(), testLogger())
 	body := `{"username":"attacker","password":"password123"}`
 	req := httptest.NewRequest("POST", "/auth/setup", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -393,7 +393,7 @@ func TestAuthHandler_Setup_BlockedWhenManyUsersExist(t *testing.T) {
 		countFn: func(_ context.Context) (int, error) { return 42, nil },
 	}
 
-	handler := NewAuthHandler(authSvc, userSvc, testAuthCfg(), testLogger())
+	handler := NewAuthHandler(authSvc, userSvc, nil, testAuthCfg(), testLogger())
 	body := `{"username":"attacker","password":"password123"}`
 	req := httptest.NewRequest("POST", "/auth/setup", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -424,7 +424,7 @@ func TestUserHandler_Me(t *testing.T) {
 		},
 	}
 
-	handler := NewUserHandler(userSvc, testLogger())
+	handler := NewUserHandler(userSvc, nil, testLogger())
 
 	req := httptest.NewRequest("GET", "/me", nil)
 	// Inject claims into context
@@ -450,7 +450,7 @@ func TestUserHandler_Me(t *testing.T) {
 }
 
 func TestUserHandler_Me_Unauthenticated(t *testing.T) {
-	handler := NewUserHandler(&mockUserService{}, testLogger())
+	handler := NewUserHandler(&mockUserService{}, nil, testLogger())
 
 	req := httptest.NewRequest("GET", "/me", nil)
 	rr := httptest.NewRecorder()
@@ -468,7 +468,7 @@ func TestUserHandler_Me_NotFound(t *testing.T) {
 		},
 	}
 
-	handler := NewUserHandler(userSvc, testLogger())
+	handler := NewUserHandler(userSvc, nil, testLogger())
 
 	req := httptest.NewRequest("GET", "/me", nil)
 	claims := &auth.Claims{UserID: "nonexistent", Role: "user"}
@@ -480,5 +480,136 @@ func TestUserHandler_Me_NotFound(t *testing.T) {
 
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// ─── Register w/ grant_library_ids ──────────────────────────────────────────
+
+// TestAuthHandler_Register_AppliesLibraryGrants verifies the one-shot
+// "create user AND attach grants" admin flow: a single POST creates the
+// row AND tx-applies the requested grants. The grants must hit
+// ReplaceAccess with the new user's id and the deduplicated set; the
+// library service must be probed for existence before user creation so
+// a typo doesn't strand a half-created account.
+func TestAuthHandler_Register_AppliesLibraryGrants(t *testing.T) {
+	createdUser := &db.User{ID: "new-u", Username: "alice", DisplayName: "Alice", Role: "user"}
+	authSvc := &mockAuthService{
+		registerFn: func(_ context.Context, _ auth.RegisterRequest) (*db.User, error) {
+			return createdUser, nil
+		},
+	}
+	libSvc := &libFakeService{
+		getByIDFn: func(_ context.Context, _ string) (*db.Library, error) {
+			return &db.Library{}, nil
+		},
+	}
+	handler := NewAuthHandler(authSvc, &mockUserService{}, libSvc, testAuthCfg(), testLogger())
+
+	body := `{"username":"alice","password":"password123","grant_library_ids":["lib-a","lib-b","lib-a"]}`
+	req := httptest.NewRequest("POST", "/users", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	handler.Register(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	if len(libSvc.replaceAccessCalls) != 1 {
+		t.Fatalf("expected 1 ReplaceAccess call, got %d", len(libSvc.replaceAccessCalls))
+	}
+	call := libSvc.replaceAccessCalls[0]
+	if call.UserID != "new-u" {
+		t.Errorf("expected ReplaceAccess against new user id, got %q", call.UserID)
+	}
+	if len(call.LibraryIDs) != 2 {
+		t.Errorf("expected dedup to 2 ids, got %v", call.LibraryIDs)
+	}
+}
+
+// Profile creation MUST reject grant_library_ids — grants always target
+// the parent (ADR-014). Anything else would create orphan rows the
+// predicate never consults.
+func TestAuthHandler_Register_GrantsOnProfile_400(t *testing.T) {
+	libSvc := &libFakeService{}
+	authSvc := &mockAuthService{
+		registerFn: func(_ context.Context, _ auth.RegisterRequest) (*db.User, error) {
+			t.Fatal("Register must NOT be called when validation fails")
+			return nil, nil
+		},
+	}
+	userSvc := &mockUserService{
+		getByIDFn: func(_ context.Context, _ string) (*db.User, error) {
+			return &db.User{ID: "parent-1", Username: "parent"}, nil
+		},
+	}
+	handler := NewAuthHandler(authSvc, userSvc, libSvc, testAuthCfg(), testLogger())
+
+	body := `{"parent_user_id":"parent-1","display_name":"Kid","grant_library_ids":["lib-a"]}`
+	req := httptest.NewRequest("POST", "/users", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	handler.Register(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	if len(libSvc.replaceAccessCalls) != 0 {
+		t.Error("ReplaceAccess must not run on profile create with grants")
+	}
+}
+
+// Unknown library_id during validation MUST short-circuit before the
+// user row is created. The mock Register fatals if invoked.
+func TestAuthHandler_Register_GrantsUnknownLibrary_404(t *testing.T) {
+	authSvc := &mockAuthService{
+		registerFn: func(_ context.Context, _ auth.RegisterRequest) (*db.User, error) {
+			t.Fatal("Register must NOT be called when library validation fails")
+			return nil, nil
+		},
+	}
+	libSvc := &libFakeService{
+		getByIDFn: func(_ context.Context, id string) (*db.Library, error) {
+			if id == "lib-good" {
+				return &db.Library{ID: id}, nil
+			}
+			return nil, domain.NewNotFound("library")
+		},
+	}
+	handler := NewAuthHandler(authSvc, &mockUserService{}, libSvc, testAuthCfg(), testLogger())
+
+	body := `{"username":"alice","password":"password123","grant_library_ids":["lib-good","lib-missing"]}`
+	req := httptest.NewRequest("POST", "/users", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	handler.Register(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	if len(libSvc.replaceAccessCalls) != 0 {
+		t.Error("ReplaceAccess must not run when validation fails")
+	}
+}
+
+// Register without grant_library_ids must work even when libraries is
+// nil (test setups don't always wire the library service). The grants
+// branch is purely opt-in.
+func TestAuthHandler_Register_NoGrants_NilLibraries_OK(t *testing.T) {
+	created := &db.User{ID: "u1", Username: "alice", DisplayName: "Alice", Role: "user"}
+	authSvc := &mockAuthService{
+		registerFn: func(_ context.Context, _ auth.RegisterRequest) (*db.User, error) {
+			return created, nil
+		},
+	}
+	handler := NewAuthHandler(authSvc, &mockUserService{}, nil, testAuthCfg(), testLogger())
+
+	body := `{"username":"alice","password":"password123"}`
+	req := httptest.NewRequest("POST", "/users", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	handler.Register(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status: %d body=%s", rr.Code, rr.Body.String())
 	}
 }

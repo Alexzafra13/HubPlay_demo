@@ -79,6 +79,15 @@ type LibraryService interface {
 	LatestSeriesByActivity(ctx context.Context, libraryID string, limit int) ([]*db.LatestSeriesActivity, error)
 	ItemCount(ctx context.Context, libraryID string) (int, error)
 	UserHasAccess(ctx context.Context, userID, libraryID string) (bool, error)
+	// GrantAccess / RevokeAccess / ListAccessByUser / ReplaceAccess
+	// power the admin user-libraries matrix. The userID MUST be a
+	// top-level user (ADR-014): library_access never points at a
+	// profile, so the handler resolves the row to its parent before
+	// reaching here.
+	GrantAccess(ctx context.Context, userID, libraryID string) error
+	RevokeAccess(ctx context.Context, userID, libraryID string) error
+	ListAccessByUser(ctx context.Context, userID string) ([]string, error)
+	ReplaceAccess(ctx context.Context, userID string, libraryIDs []string) error
 	// ListGenres returns the genre vocabulary across the catalogue,
 	// optionally scoped by item type ("movie", "series", or "" for the
 	// union). Used by the /movies and /series filter panel so the

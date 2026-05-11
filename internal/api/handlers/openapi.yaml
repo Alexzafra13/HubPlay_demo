@@ -1299,6 +1299,63 @@ paths:
         "400": { description: PIN format invalid }
         "403": { description: Caller is not admin, self, or parent of the target }
 
+  /users/{id}/library-access:
+    get:
+      tags: [users]
+      summary: List the library_ids the user has explicit grants for (admin)
+      description: |
+        Admin-only surface that powers the per-user library matrix in
+        the admin UI. Profile ids are normalised to their parent before
+        the lookup because `library_access` rows always target a
+        top-level account (ADR-014); the response flags this with
+        `is_inherited`. Returns an empty `library_ids` array for users
+        with no grants.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Current grants
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      user_id:      { type: string }
+                      owner_id:     { type: string, description: "Top-level account whose grants apply. Equal to user_id for top-level users." }
+                      library_ids:  { type: array, items: { type: string } }
+                      is_inherited: { type: boolean, description: "True when the target is a profile and the listed grants come from the parent." }
+        "404": { description: User not found }
+    put:
+      tags: [users]
+      summary: Replace the library access grant set for a top-level user (admin)
+      description: |
+        Idempotent transactional diff. Sending `library_ids: []` clears
+        every grant. Sending a profile id is a 400 — grants belong to
+        the parent account (ADR-014). Each entry must reference an
+        existing library; an unknown id returns 404 and nothing is
+        applied.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [library_ids]
+              properties:
+                library_ids:
+                  type: array
+                  items: { type: string }
+                  description: "Full desired grant set. Duplicates are deduplicated."
+      responses:
+        "204": { description: Grant set replaced }
+        "400": { description: Target is a profile, or library_ids contains an empty value }
+        "404": { description: User or one of the library_ids does not exist }
+
   /users/{id}/content-rating:
     put:
       tags: [users]

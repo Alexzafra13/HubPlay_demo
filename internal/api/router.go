@@ -130,8 +130,8 @@ func NewRouter(deps Dependencies) http.Handler {
 	}
 
 	// Handlers
-	authHandler := handlers.NewAuthHandler(deps.Auth, deps.Users, deps.Config.Auth, deps.Logger)
-	userHandler := handlers.NewUserHandler(deps.Users, deps.Logger)
+	authHandler := handlers.NewAuthHandler(deps.Auth, deps.Users, deps.Libraries, deps.Config.Auth, deps.Logger)
+	userHandler := handlers.NewUserHandler(deps.Users, deps.Libraries, deps.Logger)
 
 	// Avoid wrapping a nil concrete pointer in a non-nil interface.
 	var streamSvc handlers.StreamManagerService
@@ -341,6 +341,16 @@ func NewRouter(deps Dependencies) http.Handler {
 				r.Put("/{id}/role", userHandler.SetRole)
 				r.Put("/{id}/active", userHandler.SetActive)
 				r.Put("/{id}/access", userHandler.SetAccess)
+				// Library access matrix. GET paints the admin UI
+				// (current grants for the target's household); PUT
+				// replaces the whole set transactionally. Grants
+				// always target the top-level user — passing a
+				// profile id to PUT returns 400 (ADR-014). The GET
+				// counterpart normalises profile ids to the parent
+				// so the frontend can render the inherited set
+				// without an extra round-trip.
+				r.Get("/{id}/library-access", userHandler.GetLibraryAccess)
+				r.Put("/{id}/library-access", userHandler.SetLibraryAccess)
 			})
 
 			// PIN management — auth-only (the handler then enforces
