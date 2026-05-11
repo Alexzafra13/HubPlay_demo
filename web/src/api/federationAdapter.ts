@@ -57,5 +57,10 @@ export function federationItemToMediaItem(it: FederationRemoteItem): MediaItem {
     season_number: null,
     episode_number: null,
     path: null,
+    // Forward the peer's pre-extracted swatches so the aurora canvas
+    // paints on first render. Same field name + shape MediaItem
+    // already uses for local items; downstream code (ItemDetail's
+    // hasServerPalette check, aurora.ts) is shape-agnostic.
+    backdrop_colors: it.backdrop_colors,
   };
 }
