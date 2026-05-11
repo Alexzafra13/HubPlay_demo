@@ -1,11 +1,19 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useSearchParams } from "react-router";
 import { useApproveDeviceCode } from "@/api/hooks/deviceAuth";
+import { useMySessions } from "@/api/hooks";
+import { LinkedDevicesList } from "@/components/settings/LinkedDevicesList";
 
 // LinkDevice — /link route. The operator landed here from the verification
 // URL displayed on a TV / CLI / headless device that's polling our
 // /auth/device/poll endpoint. They paste the user_code they see on the
 // device, hit Approve, and the device's next poll receives tokens.
+//
+// The same URL also accepts ?code=ABCD-EFGH — the QR rendered on the
+// TV (encoded as verification_uri_complete) points here with the
+// user_code already in the query so the input pre-fills and the
+// operator only needs to tap Aprobar.
 //
 // Errors mirror RFC 8628's protocol vocabulary plus our localised
 // strings:
@@ -19,8 +27,20 @@ import { useApproveDeviceCode } from "@/api/hooks/deviceAuth";
 export default function LinkDevice() {
   const { t } = useTranslation();
   const approve = useApproveDeviceCode();
-  const [code, setCode] = useState("");
+  const [searchParams] = useSearchParams();
+  const [code, setCode] = useState(() => searchParams.get("code") ?? "");
   const [success, setSuccess] = useState(false);
+  const sessions = useMySessions();
+
+  // Keep the input in sync with the URL — if the operator scans a
+  // second QR without leaving the page, the field updates.
+  useEffect(() => {
+    const fromURL = searchParams.get("code");
+    if (fromURL && fromURL !== code && !approve.isPending) {
+      setCode(fromURL);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -90,6 +110,16 @@ export default function LinkDevice() {
           {humaniseError(approve.error, t)}
         </div>
       ) : null}
+
+      {/*
+       * Linked-devices roster. Filters MySession rows to the ones the
+       * device-flow minted (auth_method === "device_link") so the
+       * operator sees what they've already paired and can revoke a
+       * stale TV / console without scrolling the full Settings panel.
+       * Hidden until at least one row exists — no point teasing an
+       * empty section on first paint.
+       */}
+      <LinkedDevicesList sessions={sessions.data ?? []} />
     </div>
   );
 }

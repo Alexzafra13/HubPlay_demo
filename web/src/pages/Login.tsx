@@ -189,6 +189,21 @@ export default function Login() {
             {t("login.signIn")}
           </Button>
         </form>
+
+        {/* Pairing entry. TVs / consoles where typing a password on a
+            remote is awful land on /pair instead. The link is small
+            so it does not compete with the primary login flow. */}
+        <p className="mt-5 text-center text-xs text-text-muted">
+          {t("login.pairPrompt", {
+            defaultValue: "¿Estás en una TV o consola? ",
+          })}
+          <a
+            href="/pair"
+            className="font-medium text-accent hover:underline"
+          >
+            {t("login.pairCta", { defaultValue: "Vincula este dispositivo" })}
+          </a>
+        </p>
       </motion.div>
     </div>
   );

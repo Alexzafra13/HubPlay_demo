@@ -1400,6 +1400,31 @@ export class ApiClient {
     return this.request("POST", "/auth/device/approve", { body: { user_code: userCode } });
   }
 
+  // Starts a device-pairing flow on behalf of THIS browser. The
+  // in-app "Vincular este dispositivo" UI calls this, displays
+  // user_code + a QR pointing at verification_uri_complete, and
+  // waits on /auth/device/events (SSE) for the operator to approve
+  // from another device.
+  async startDeviceCode(
+    deviceName: string,
+  ): Promise<import("./types").DeviceStartResponse> {
+    return this.request("POST", "/auth/device/start", {
+      body: { device_name: deviceName },
+    });
+  }
+
+  // Single poll after an SSE "approved" event. On 200 the server
+  // sets HTTP-only auth cookies so the caller is logged in for the
+  // next /api/v1 request — the JSON tokens in the body are for
+  // native clients (TVs, CLI) and can be ignored by the browser.
+  async pollDeviceCode(
+    deviceCode: string,
+  ): Promise<{ access_token: string; refresh_token: string; expires_at: string }> {
+    return this.request("POST", "/auth/device/poll", {
+      body: { device_code: deviceCode },
+    });
+  }
+
   async listPeerShares(peerID: string): Promise<import("./types").FederationLibraryShare[]> {
     return this.request("GET", `/admin/peers/${peerID}/shares`);
   }

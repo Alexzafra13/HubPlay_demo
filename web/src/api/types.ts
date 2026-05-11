@@ -286,6 +286,30 @@ export interface MySession {
   last_active_at: string;
   expires_at: string;
   current: boolean;
+  /**
+   * How this session was minted. "device_link" rows came from the
+   * RFC 8628 pairing flow (QR / user_code) so the UI can group them
+   * separately from regular username/password logins. Derived
+   * server-side from the device_id prefix the device-code service
+   * stamps; callers must NOT compute it on the wire row.
+   */
+  auth_method: "device_link" | "password";
+}
+
+/**
+ * Response shape of POST /auth/device/start. The display form of
+ * user_code is `ABCD-EFGH`; verification_uri_complete already carries
+ * it as a query parameter so a QR rendered against the URL lands the
+ * operator on /link with the input pre-filled.
+ */
+export interface DeviceStartResponse {
+  device_code: string;
+  user_code: string;
+  verification_url: string;
+  verification_uri: string;
+  verification_uri_complete: string;
+  expires_in: number;
+  interval: number;
 }
 
 /**

@@ -41,6 +41,7 @@ const PeerLibrariesPage = lazyWithRetry(() => import("@/pages/PeerLibrariesPage"
 const PeerLibraryItemsPage = lazyWithRetry(() => import("@/pages/PeerLibraryItemsPage"));
 const PeerItemDetail = lazyWithRetry(() => import("@/pages/PeerItemDetail"));
 const LinkDevice = lazyWithRetry(() => import("@/pages/LinkDevice"));
+const PairThisDevice = lazyWithRetry(() => import("@/pages/PairThisDevice"));
 const SystemStatus = lazyWithRetry(() => import("@/pages/admin/system/SystemStatus"));
 
 function LazyFallback() {
@@ -103,6 +104,17 @@ export function App() {
         <Route
           path="/login"
           element={needsSetup ? <Navigate to="/setup" replace /> : <Login />}
+        />
+
+        {/* Public pairing UI — TVs / consoles opening HubPlay in
+            their browser hit this to render a QR + user_code instead
+            of typing a password on a remote. Unauthenticated; the
+            poll-on-approval path sets cookies and routes home. */}
+        <Route
+          path="/pair"
+          element={
+            needsSetup ? <Navigate to="/setup" replace /> : <PairThisDevice />
+          }
         />
 
         {/* Forced password change. Mounted outside the AppLayout
