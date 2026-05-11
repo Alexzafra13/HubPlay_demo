@@ -1,5 +1,59 @@
 # Estado del proyecto
 
+> 🎬 **Sesión 2026-05-11 (rama `claude/review-project-1y28j`, bloque polling → SSE)** — tras cerrar el bloque infra/seguridad, el usuario pidió "Revisa lo del polling" y luego "Las dos a SSE" entre las migraciones que recomendé.
+>
+> **Audit del polling restante** (verificado contra el código):
+>
+> | Hook | Antes | Verdict |
+> |---|---|---|
+> | `useAdminStreamSessions` (admin Now Playing) | **5s** | ✅ migrado a SSE |
+> | `useMySessions` ("Tus dispositivos") | 30s | ✅ migrado a SSE |
+> | `useSystemStats` (Dashboard + SystemStatus) | 30s | Stay — snapshot agregado, polling apropiado |
+> | `useHomeLiveNow` | 60s | Stay — EPG slots cambian cada ~30 min, polling marginal |
+> | `useBulkSchedule` | 5 min | Stay — schedule futuro, baja frecuencia |
+> | (setInterval para timers/relojes/progress writer) | — | Stay — no son polling de datos |
+>
+> **Hallazgo no obvio del audit**: el evento `transcode.started/completed` que parecía solo cubrir transcodes, en realidad fire para TODAS las sesiones que el manager mantiene en `m.sessions` (DirectStream + Transcode). DirectPlay (`manager.go:379-392`) NO entra al map — pero tampoco aparece en `ListAllSessions()`, así que el evento cubre exactamente lo que la API admin lista. Nombre legacy engañoso, semántica correcta para el caso de uso. Documentado en el comentario del hook nuevo.
+>
+> **Commits en esta sesión** (todos pendientes de push):
+>
+> - `feat(auth): publish UserLoggedOut on RevokeSession` — el endpoint era silencioso, ahora emite el mismo payload shape que `Logout` (`user_id` + `session_id`). El SSE consumer del frontend invalida la query y la fila de la sesión revocada desaparece dentro de ~50ms en vez de esperar el siguiente poll. +2 tests Go (PublishesUserLoggedOut + ForeignSession_NoPublish — el segundo blinda el anti-enumeration carve-out de no publicar cuando la sesión pertenece a otro usuario).
+>
+> - `feat(api): forward user.logged_in/out through /me/events` — añadido a `userScopedEventTypes` en `me_events.go`. El per-user filter del handler ya hace el matching por `Data["user_id"]`; los dos eventos ya emiten ese campo desde antes (`auth.Login`, `auth.Logout`), así que el split es zero-extra-code en el filtro.
+>
+> - `feat(web): drive useMySessions + useAdminStreamSessions from SSE` — dropea `refetchInterval` en ambos hooks, suscribe a los eventos correspondientes vía `useUserEventStream` / `useEventStream`, invalida la query en cada evento. Para `NowPlayingPanel`, añadido `useNowTick(1000)` para que la columna "elapsed" siga subiendo entre eventos (antes el re-render lo daba el 5s refetch).
+>
+> - `test(web): cover the two new hook subscriptions` — `auth.test.tsx` + `system.test.tsx` con FakeEventSource (mismo patrón de `useUserDataSync.test.tsx`). 8 tests nuevos: no-polling-after-mount, subscribes-to-correct-types, invalidates-on-each-event (×2 per hook).
+>
+> - `test(setup): default no-op EventSource stub in vitest setup` — sin esto, cualquier componente que consuma un hook con SSE crashea en tests no relacionados (DevicesPanel.test.tsx fue el canario). Tests que necesiten driving events siguen pudiendo override con `vi.stubGlobal`.
+>
+> **Decisiones senior tomadas**:
+>
+> 1. **Suscripción dentro del hook, no en cada panel**: `useAdminStreamSessions` tiene 2 consumers (`NowPlayingPanel`, `SystemStatus`). Si el SSE wiring vive en cada panel, dos sitios para mantener y dos lugares para olvidar. Dentro del hook se hace una vez y cada panel hereda sin saberlo. Trade-off conocido: tests que mockean `api` ahora también necesitan EventSource — resuelto con el setup global.
+>
+> 2. **Reusar `UserLoggedOut` para `RevokeSession`, no nuevo type**: el shape del payload (`user_id` + `session_id`) es idéntico al de `Logout`, y el consumer (la query invalidation) trata ambos identical. Añadir `SessionRevoked` event sería plumbing extra sin información nueva.
+>
+> 3. **`transcode.started/completed` legacy name kept**: renombrar a `stream.session.started/stopped` sería más claro pero requiere coordinar listeners (subscriptions en `events.go`, frontend metrics, observability) — beneficio cosmético, coste real. Comentario en el hook nuevo explica la semántica.
+>
+> 4. **`useNowTick(1000)` solo en NowPlayingPanel**: `SystemStatus` también consume `useAdminStreamSessions` pero no muestra elapsed; añadir el tick allí sería waste. El panel sabe qué necesita re-render.
+>
+> 5. **NoopEventSource en setup.ts, no en cada test**: el stub global previene crashes cross-test sin imponer una API a los tests que sí drivean events. Vi.stubGlobal en tests específicos sigue funcionando y reemplaza el noop por la subclase con `.emit()`.
+>
+> **Métricas al cierre**:
+>
+> - Backend Go: `go test -race ./internal/auth/ ./internal/api/...` → ok 106s + 78s + 68s, todos verdes (incluído los 2 RevokeSession tests nuevos).
+> - Frontend: `pnpm test --run` → **512/512** verde (era 504, +8 nuevos).
+> - `go build ./...` + `tsc --noEmit` clean.
+>
+> **Backlog actualizado**:
+>
+> - **Streaming P1** (del audit del 2026-05-10, sin tocar): subs burn-in PGS/DVDSUB/ASS, audio multichannel passthrough, refactor seek-coalesce, `-force_key_frames` GOP-aligned, VAAPI fully-on-GPU.
+> - **Frontend P1**: `node-vibrant` sigue 100% client-side, tests grandes para `pages/` (Home, LiveTV, Search, Movies, Series, Collections). ~~Polling residual~~ ✅ migrado (los dos targets reales del backlog).
+> - **Infra P1**: vacío.
+> - **Features grandes P3**: Multi-version, Watch-together, Privacy stack.
+>
+> ---
+>
 > 🎬 **Sesión 2026-05-11 (rama `claude/review-project-1y28j`, bloque de infra/seguridad)** — el usuario pidió "revisa mi proyecto para seguir haciendo cosas" + eligió el bloque "Trivy pin + CSRF + SSE cap" + "que me recomiendas? quiero que sea robusto y bien hecho".
 >
 > **Recomendación senior tomada**: implementar SSE cap (gap real) + pinear Trivy a SHA (mejor práctica industria, el comentario que justificaba `@master` pasaba por alto que la imagen se publica a GHCR pública y la consumen terceros) + cerrar CSRF como "intentional by design, no action" (la auditoría flagueaba "fail-open cuando no hay session cookie" pero el código + tests demuestran que es la elección correcta — sin sesión autenticada no hay nada que proteger).

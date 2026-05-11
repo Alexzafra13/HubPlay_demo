@@ -7,8 +7,10 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseQueryOptions } from "@tanstack/react-query";
+import { useCallback } from "react";
 import { api } from "../client";
 import { queryKeys } from "../queryKeys";
+import { useEventStream } from "@/hooks/useEventStream";
 import type {
   AdminStreamActivityResponse,
   AdminStreamSession,
@@ -113,17 +115,28 @@ export function useResetSystemSetting() {
 
 // Active stream sessions for the admin "Now Playing" panel.
 //
-// 5s refetch interval matches Plex/Jellyfin's admin cadence — fast
-// enough that opening the panel during a playback feels live, slow
-// enough that we're not hammering the manager's mutex 12 times per
-// minute per admin viewer. The panel can opt out via options.
+// Previously polled every 5 s — the most aggressive poll in the app,
+// hammering the manager mutex 12×/min per admin viewer. Now driven by
+// /events: the stream manager publishes transcode.started /
+// transcode.completed on every session start/stop (the event names
+// are legacy — DirectPlay bypasses the manager entirely, so the
+// events cover the same set of sessions the list endpoint returns).
+//
+// Elapsed-time display in the panel still needs a ticker — see
+// NowPlayingPanel's useNowTick for the 1 Hz re-render that keeps
+// "started 23s ago" climbing without any network traffic.
 export function useAdminStreamSessions(
   options?: Partial<UseQueryOptions<AdminStreamSession[]>>,
 ) {
+  const qc = useQueryClient();
+  const invalidate = useCallback(() => {
+    qc.invalidateQueries({ queryKey: queryKeys.adminStreamSessions });
+  }, [qc]);
+  useEventStream("transcode.started", invalidate);
+  useEventStream("transcode.completed", invalidate);
   return useQuery<AdminStreamSession[]>({
     queryKey: queryKeys.adminStreamSessions,
     queryFn: () => api.listAdminStreamSessions(),
-    refetchInterval: 5000,
     ...options,
   });
 }

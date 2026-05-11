@@ -53,6 +53,12 @@ var userScopedEventTypes = []event.Type{
 	event.ProgressUpdated,
 	event.PlayedToggled,
 	event.FavoriteToggled,
+	// Auth session lifecycle — drives the "Tus dispositivos" panel.
+	// Both events already carry user_id in Data (see auth.Service.Login
+	// and Logout / RevokeSession), so the per-user filter below treats
+	// them like any other user-scoped event.
+	event.UserLoggedIn,
+	event.UserLoggedOut,
 }
 
 // Stream opens an SSE connection scoped to the authenticated user.
