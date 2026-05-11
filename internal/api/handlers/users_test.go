@@ -93,7 +93,7 @@ type userTestEnv struct {
 func newUserTestEnv(t *testing.T) *userTestEnv {
 	t.Helper()
 	env := &userTestEnv{t: t, svc: &userFakeService{}}
-	env.handler = NewUserHandler(env.svc, testutil.NopLogger())
+	env.handler = NewUserHandler(env.svc, nil, testutil.NopLogger())
 
 	r := chi.NewRouter()
 	r.Route("/api/v1", func(r chi.Router) {

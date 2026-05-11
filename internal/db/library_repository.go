@@ -208,6 +208,77 @@ func (r *LibraryRepository) RevokeAccess(ctx context.Context, userID, libraryID 
 	return nil
 }
 
+// ListAccessByUser returns the library_ids the given user has explicit
+// grants for. Admin-only surface: bypasses the strict profile-inheritance
+// predicate so the admin UI can paint the matrix exactly as stored. The
+// caller must pass a top-level user id; passing a profile id returns the
+// empty slice (grants always target the parent, per ADR-014).
+func (r *LibraryRepository) ListAccessByUser(ctx context.Context, userID string) ([]string, error) {
+	ids, err := r.q.ListLibraryAccessByUser(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list library access by user: %w", err)
+	}
+	return ids, nil
+}
+
+// ReplaceAccess overwrites a top-level user's grant set with the given
+// libraryIDs in a single transaction. Idempotent: missing libraries get
+// granted, extra grants get revoked, untouched rows stay. The caller is
+// responsible for resolving the user to its top-level id (ADR-014) and
+// for validating that every libraryID exists; ReplaceAccess only enforces
+// uniqueness within libraryIDs.
+func (r *LibraryRepository) ReplaceAccess(ctx context.Context, userID string, libraryIDs []string) error {
+	desired := make(map[string]struct{}, len(libraryIDs))
+	for _, id := range libraryIDs {
+		desired[id] = struct{}{}
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	qtx := r.q.WithTx(tx)
+
+	current, err := qtx.ListLibraryAccessByUser(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("list current access: %w", err)
+	}
+	currentSet := make(map[string]struct{}, len(current))
+	for _, id := range current {
+		currentSet[id] = struct{}{}
+	}
+
+	for id := range desired {
+		if _, ok := currentSet[id]; ok {
+			continue
+		}
+		if err := qtx.GrantLibraryAccess(ctx, sqlc.GrantLibraryAccessParams{
+			UserID:    userID,
+			LibraryID: id,
+		}); err != nil {
+			return fmt.Errorf("grant library access: %w", err)
+		}
+	}
+	for _, id := range current {
+		if _, ok := desired[id]; ok {
+			continue
+		}
+		if err := qtx.RevokeLibraryAccess(ctx, sqlc.RevokeLibraryAccessParams{
+			UserID:    userID,
+			LibraryID: id,
+		}); err != nil {
+			return fmt.Errorf("revoke library access: %w", err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit replace access: %w", err)
+	}
+	return nil
+}
+
 // UserHasAccess reports whether userID is allowed to access libraryID.
 // Modelo strict post-migración 040: necesita grant explícito en
 // library_access. Los profiles (parent_user_id != NULL) heredan el

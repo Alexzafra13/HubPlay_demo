@@ -39,18 +39,23 @@ func authTokenResponse(token *auth.AuthToken, u *db.User) map[string]any {
 }
 
 type AuthHandler struct {
-	auth    AuthService
-	users   UserService
-	authCfg config.AuthConfig
-	logger  *slog.Logger
+	auth      AuthService
+	users     UserService
+	libraries LibraryService
+	authCfg   config.AuthConfig
+	logger    *slog.Logger
 }
 
-func NewAuthHandler(authSvc AuthService, userSvc UserService, authCfg config.AuthConfig, logger *slog.Logger) *AuthHandler {
+// NewAuthHandler wires the auth handler. libraries may be nil (the setup
+// wizard reuses a slimmer handler that never receives grant_library_ids);
+// the main router always passes the real service.
+func NewAuthHandler(authSvc AuthService, userSvc UserService, libraries LibraryService, authCfg config.AuthConfig, logger *slog.Logger) *AuthHandler {
 	return &AuthHandler{
-		auth:    authSvc,
-		users:   userSvc,
-		authCfg: authCfg,
-		logger:  logger,
+		auth:      authSvc,
+		users:     userSvc,
+		libraries: libraries,
+		authCfg:   authCfg,
+		logger:    logger,
 	}
 }
 
@@ -492,6 +497,13 @@ type registerRequest struct {
 	// the legacy `password` field is ignored when a parent is set
 	// because profiles don't authenticate independently.
 	ParentUserID string `json:"parent_user_id"`
+	// GrantLibraryIDs, when present, attaches library_access grants
+	// to the freshly created user in the same request. Only valid for
+	// top-level accounts: profiles inherit access from their parent
+	// (ADR-014), so sending grants with parent_user_id set is a 400.
+	// Empty / absent means "no grants" — the admin can still call
+	// PUT /users/{id}/library-access afterwards.
+	GrantLibraryIDs []string `json:"grant_library_ids"`
 }
 
 func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
@@ -502,6 +514,17 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	isProfile := req.ParentUserID != ""
+
+	// Reject library grants on profile creation early — they MUST go
+	// to the parent account (ADR-014). Doing this before the heavier
+	// password / username validation surfaces the contract failure
+	// without burning a password autogen on a request that can't
+	// succeed.
+	if isProfile && len(req.GrantLibraryIDs) > 0 {
+		respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR",
+			"grant_library_ids cannot be set on a profile; grant access on the parent account")
+		return
+	}
 
 	fields := make(map[string]string)
 	// Profile usernames get auto-derived from the parent + the
@@ -578,6 +601,38 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		// directly.
 	}
 
+	// Validate every requested library_id BEFORE creating the user so a
+	// typo doesn't leave behind a half-applied account (user row created
+	// but no grants attached, surfacing as "the new user can't see
+	// anything"). Top-level accounts only — the profile branch above
+	// already rejected grants outright.
+	var validatedGrantIDs []string
+	if !isProfile && len(req.GrantLibraryIDs) > 0 {
+		if h.libraries == nil {
+			respondError(w, r, http.StatusServiceUnavailable, "UNAVAILABLE",
+				"library access surface is not wired in this deployment")
+			return
+		}
+		seen := make(map[string]struct{}, len(req.GrantLibraryIDs))
+		validatedGrantIDs = make([]string, 0, len(req.GrantLibraryIDs))
+		for _, libID := range req.GrantLibraryIDs {
+			if libID == "" {
+				respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR",
+					"grant_library_ids must not contain empty values")
+				return
+			}
+			if _, dup := seen[libID]; dup {
+				continue
+			}
+			seen[libID] = struct{}{}
+			if _, err := h.libraries.GetByID(r.Context(), libID); err != nil {
+				handleServiceError(w, r, err)
+				return
+			}
+			validatedGrantIDs = append(validatedGrantIDs, libID)
+		}
+	}
+
 	u, err := h.auth.Register(r.Context(), auth.RegisterRequest{
 		Username:               req.Username,
 		DisplayName:            req.DisplayName,
@@ -589,6 +644,21 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		handleServiceError(w, r, err)
 		return
+	}
+
+	// Best-effort grant application. The user already exists at this
+	// point: a grant failure is logged but does not 500 the create —
+	// the admin can retry via PUT /users/{id}/library-access without
+	// having to recreate the account. ReplaceAccess is a transaction,
+	// so partial state inside the grant set is impossible.
+	if len(validatedGrantIDs) > 0 && h.libraries != nil {
+		if err := h.libraries.ReplaceAccess(r.Context(), u.ID, validatedGrantIDs); err != nil {
+			h.logger.Error("apply library grants after user create",
+				"user_id", u.ID, "error", err)
+			respondError(w, r, http.StatusInternalServerError, "INTERNAL",
+				"user created but library access grants failed; retry via PUT /users/{id}/library-access")
+			return
+		}
 	}
 
 	out := map[string]any{

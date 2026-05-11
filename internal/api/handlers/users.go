@@ -13,14 +13,19 @@ import (
 )
 
 type UserHandler struct {
-	users  UserService
-	logger *slog.Logger
+	users     UserService
+	libraries LibraryService
+	logger    *slog.Logger
 }
 
-func NewUserHandler(users UserService, logger *slog.Logger) *UserHandler {
+// NewUserHandler wires the user handler. libraries may be nil in test
+// setups that don't exercise the library-access surface; production
+// always passes the real service.
+func NewUserHandler(users UserService, libraries LibraryService, logger *slog.Logger) *UserHandler {
 	return &UserHandler{
-		users:  users,
-		logger: logger,
+		users:     users,
+		libraries: libraries,
+		logger:    logger,
 	}
 }
 
@@ -306,6 +311,116 @@ func (h *UserHandler) SetActive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.users.SetActive(r.Context(), id, req.IsActive); err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// GetLibraryAccess returns the library_ids the user has explicit grants
+// for. Admin-only. Profile ids are normalised to their parent before the
+// lookup — library_access never points at a profile, so asking for a
+// profile's grants returns the parent's set (which is what the profile
+// actually inherits at runtime).
+func (h *UserHandler) GetLibraryAccess(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "missing user id")
+		return
+	}
+	if h.libraries == nil {
+		respondError(w, r, http.StatusServiceUnavailable, "UNAVAILABLE",
+			"library access surface is not wired in this deployment")
+		return
+	}
+	target, err := h.users.GetByID(r.Context(), id)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	ownerID := target.ID
+	if target.ParentUserID != "" {
+		ownerID = target.ParentUserID
+	}
+	libraryIDs, err := h.libraries.ListAccessByUser(r.Context(), ownerID)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	if libraryIDs == nil {
+		libraryIDs = []string{}
+	}
+	respondJSON(w, http.StatusOK, map[string]any{
+		"data": map[string]any{
+			"user_id":      id,
+			"owner_id":     ownerID,
+			"library_ids":  libraryIDs,
+			"is_inherited": ownerID != id,
+		},
+	})
+}
+
+type updateLibraryAccessRequest struct {
+	// LibraryIDs is the full desired set of grants. Empty/null clears
+	// every grant. The handler performs a transactional diff against
+	// the current set, so duplicate entries are deduplicated.
+	LibraryIDs []string `json:"library_ids"`
+}
+
+// SetLibraryAccess replaces the user's library_access grant set in one
+// idempotent PUT. Admin-only. The target MUST be a top-level user
+// (parent_user_id == ""): grants for profiles belong to the parent, so
+// the endpoint rejects profile ids with 400 instead of silently
+// re-targeting (which would surprise the admin when the profile got
+// access through a sibling later). Unknown library_ids also 400.
+func (h *UserHandler) SetLibraryAccess(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "missing user id")
+		return
+	}
+	if h.libraries == nil {
+		respondError(w, r, http.StatusServiceUnavailable, "UNAVAILABLE",
+			"library access surface is not wired in this deployment")
+		return
+	}
+	var req updateLibraryAccessRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
+		return
+	}
+	target, err := h.users.GetByID(r.Context(), id)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	if target.ParentUserID != "" {
+		respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR",
+			"library access grants must target the top-level account, not a profile")
+		return
+	}
+	// Dedupe + validate. Doing this before touching the repo keeps a
+	// half-applied state impossible: either every library_id checks out
+	// and the tx-backed ReplaceAccess commits, or nothing changes.
+	seen := make(map[string]struct{}, len(req.LibraryIDs))
+	cleaned := make([]string, 0, len(req.LibraryIDs))
+	for _, libID := range req.LibraryIDs {
+		if libID == "" {
+			respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR",
+				"library_ids must not contain empty values")
+			return
+		}
+		if _, dup := seen[libID]; dup {
+			continue
+		}
+		seen[libID] = struct{}{}
+		if _, err := h.libraries.GetByID(r.Context(), libID); err != nil {
+			handleServiceError(w, r, err)
+			return
+		}
+		cleaned = append(cleaned, libID)
+	}
+	if err := h.libraries.ReplaceAccess(r.Context(), target.ID, cleaned); err != nil {
 		handleServiceError(w, r, err)
 		return
 	}

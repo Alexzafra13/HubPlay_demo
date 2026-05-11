@@ -236,6 +236,38 @@ func (q *Queries) ListLibraries(ctx context.Context) ([]ListLibrariesRow, error)
 	return items, nil
 }
 
+const listLibraryAccessByUser = `-- name: ListLibraryAccessByUser :many
+SELECT library_id FROM library_access WHERE user_id = ? ORDER BY library_id
+`
+
+// Returns library_ids the user_id has explicit grants for. Admin-only
+// surface (the user's library list goes through ListLibrariesForUser
+// which applies the profile-inheritance predicate). Callers pass the
+// top-level user id; for profile rows the caller must resolve to the
+// parent first. See ADR-014.
+func (q *Queries) ListLibraryAccessByUser(ctx context.Context, userID string) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listLibraryAccessByUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var library_id string
+		if err := rows.Scan(&library_id); err != nil {
+			return nil, err
+		}
+		items = append(items, library_id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPathsByLibrary = `-- name: ListPathsByLibrary :many
 SELECT path FROM library_paths WHERE library_id = ? ORDER BY path
 `
