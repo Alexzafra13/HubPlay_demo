@@ -53,6 +53,20 @@ const (
 	UserLoggedIn         Type = "user.logged_in"
 	UserLoggedOut        Type = "user.logged_out"
 
+	// DeviceCodeApproved is published by DeviceCodeService.ApproveDevice
+	// when the operator binds their identity to a pending device-code
+	// row. The auth/device events SSE stream listens for this so the
+	// browser-side pairing UI (showing the QR + user_code) can react
+	// instantly instead of polling the RFC 8628 /poll endpoint.
+	//
+	// Data shape:
+	//   device_code — string, the opaque token only the device + server
+	//                 know. Used by the SSE handler to filter to "this
+	//                 client only" before fan-out.
+	//   user_id     — string, who approved (informational; the SSE
+	//                 stream does not relay it to the client).
+	DeviceCodeApproved Type = "device_code.approved"
+
 	// ── Segment detection (skip-intro / skip-credits).
 	// Published by the segment detector as it walks a library's
 	// episodes deriving intro/outro/recap markers from chapter

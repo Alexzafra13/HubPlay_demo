@@ -196,9 +196,15 @@ func NewRouter(deps Dependencies) http.Handler {
 		// down below.
 		var deviceHandler *handlers.DeviceAuthHandler
 		if deps.DeviceCode != nil {
-			deviceHandler = handlers.NewDeviceAuthHandler(deps.DeviceCode, nil, deps.Logger)
+			deviceHandler = handlers.NewDeviceAuthHandler(
+				deps.DeviceCode, nil, deps.Config.Auth, deps.EventBus, deps.SSELimiter, deps.Logger)
 			r.Post("/auth/device/start", deviceHandler.Start)
 			r.Post("/auth/device/poll", deviceHandler.Poll)
+			if deviceHandler.HasEventBus() {
+				// SSE — the in-app pairing UI (QR + user_code) reacts
+				// instantly to approval instead of polling /poll.
+				r.Get("/auth/device/events", deviceHandler.Events)
+			}
 		}
 
 		// Setup — create first admin (only works when no users exist)

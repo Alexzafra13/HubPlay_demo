@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -870,9 +871,24 @@ func (h *AuthHandler) ListMySessions(w http.ResponseWriter, r *http.Request) {
 			"last_active_at": s.LastActiveAt,
 			"expires_at":     s.ExpiresAt,
 			"current":        s.ID == currentID,
+			"auth_method":    sessionAuthMethod(s.DeviceID),
 		}
 	}
 	respondJSON(w, http.StatusOK, map[string]any{"data": out})
+}
+
+// sessionAuthMethod classifies a session by how it was minted. The
+// device-code service prefixes device_id with "device-code-" (see
+// internal/auth/device.go), so a string prefix check is enough to
+// distinguish a paired-via-QR-or-link session from a regular
+// username/password login. The wire string lets the UI badge each
+// session honestly ("Vínculo dispositivo" vs "Sesión web") instead of
+// dumping every refresh token undifferentiated.
+func sessionAuthMethod(deviceID string) string {
+	if strings.HasPrefix(deviceID, "device-code-") {
+		return "device_link"
+	}
+	return "password"
 }
 
 // RevokeMySession deletes a single auth session if it belongs to

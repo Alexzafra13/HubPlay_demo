@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"hubplay/internal/config"
 	"hubplay/internal/db"
 	"hubplay/internal/domain"
+	"hubplay/internal/event"
 	"hubplay/internal/testutil"
 )
 
@@ -173,4 +175,114 @@ func toLower(s string) string {
 		}
 	}
 	return string(out)
+}
+
+// TestDeviceCode_InspectDevice pins the read-only snapshot the SSE
+// stream uses to decide whether to subscribe or emit a synthetic
+// terminal event. Walks every state machine transition: pending →
+// approved → consumed, plus expired and unknown.
+func TestDeviceCode_InspectDevice(t *testing.T) {
+	dev, authSvc, _, clk := newTestDeviceCodeService(t)
+	ctx := context.Background()
+	user := registerDeviceUser(t, authSvc)
+
+	pair, err := dev.StartDevice(ctx, "TV", "https://example.com/link")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := dev.InspectDevice(ctx, pair.DeviceCode)
+	if err != nil {
+		t.Fatalf("inspect pending: %v", err)
+	}
+	if got.Status != "pending" {
+		t.Errorf("status pending: got %q", got.Status)
+	}
+
+	if err := dev.ApproveDevice(ctx, pair.UserCode, user.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = dev.InspectDevice(ctx, pair.DeviceCode)
+	if got.Status != "approved" {
+		t.Errorf("status approved: got %q", got.Status)
+	}
+
+	// Consume via a real poll, then inspect → consumed.
+	clk.Advance(5 * time.Second)
+	if _, err := dev.PollDevice(ctx, pair.DeviceCode, "127.0.0.1"); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = dev.InspectDevice(ctx, pair.DeviceCode)
+	if got.Status != "consumed" {
+		t.Errorf("status consumed: got %q", got.Status)
+	}
+
+	// Fresh pair → advance past the TTL → expired.
+	clk.Advance(time.Minute) // separate row from the consumed one
+	pair2, _ := dev.StartDevice(ctx, "TV2", "https://example.com/link")
+	clk.Advance(auth.DeviceCodeTTL + time.Second)
+	got, _ = dev.InspectDevice(ctx, pair2.DeviceCode)
+	if got.Status != "expired" {
+		t.Errorf("status expired: got %q", got.Status)
+	}
+
+	// Unknown device_code → ErrNotFound.
+	if _, err := dev.InspectDevice(ctx, "deadbeef"); !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("unknown inspect: got %v, want ErrNotFound", err)
+	}
+}
+
+// TestDeviceCode_ApprovePublishesEvent pins the bus contract the SSE
+// stream relies on: a successful approval MUST fan a
+// DeviceCodeApproved event with the device_code in Data so subscribers
+// can filter to "this pairing only" before reacting.
+func TestDeviceCode_ApprovePublishesEvent(t *testing.T) {
+	dev, authSvc, _, _ := newTestDeviceCodeService(t)
+	ctx := context.Background()
+	user := registerDeviceUser(t, authSvc)
+
+	bus := event.NewBus(slog.Default())
+	authSvc.SetEventBus(bus)
+
+	var (
+		mu      sync.Mutex
+		got     []event.Event
+		seen    = make(chan struct{}, 1)
+	)
+	unsub := bus.Subscribe(event.DeviceCodeApproved, func(e event.Event) {
+		mu.Lock()
+		got = append(got, e)
+		mu.Unlock()
+		select {
+		case seen <- struct{}{}:
+		default:
+		}
+	})
+	defer unsub()
+
+	pair, err := dev.StartDevice(ctx, "TV", "https://example.com/link")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := dev.ApproveDevice(ctx, pair.UserCode, user.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case <-seen:
+	case <-time.After(2 * time.Second):
+		t.Fatal("DeviceCodeApproved was not published within 2s of ApproveDevice")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != 1 {
+		t.Fatalf("expected exactly 1 event, got %d", len(got))
+	}
+	if dc, _ := got[0].Data["device_code"].(string); dc != pair.DeviceCode {
+		t.Errorf("event device_code: got %q want %q", dc, pair.DeviceCode)
+	}
+	if uid, _ := got[0].Data["user_id"].(string); uid != user.ID {
+		t.Errorf("event user_id: got %q want %q", uid, user.ID)
+	}
 }
