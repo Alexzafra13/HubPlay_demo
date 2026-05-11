@@ -53,3 +53,34 @@ export function useMarkPlayed() {
     },
   });
 }
+
+// useRemoveFromContinueWatching dismisses a row from the Continue
+// Watching rail. Optimistic: the card disappears the instant the user
+// clicks. On error we roll back so the rail re-shows the row instead of
+// silently swallowing the failure.
+export function useRemoveFromContinueWatching() {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, string, { previous: unknown }>({
+    mutationFn: (itemId) => api.removeFromContinueWatching(itemId),
+    onMutate: async (itemId) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.continueWatching });
+      const previous = queryClient.getQueryData(queryKeys.continueWatching);
+      queryClient.setQueryData(
+        queryKeys.continueWatching,
+        (old: unknown) => {
+          if (!Array.isArray(old)) return old;
+          return old.filter((it) => (it as { id?: string }).id !== itemId);
+        },
+      );
+      return { previous };
+    },
+    onError: (_err, _itemId, ctx) => {
+      if (ctx?.previous !== undefined) {
+        queryClient.setQueryData(queryKeys.continueWatching, ctx.previous);
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.continueWatching });
+    },
+  });
+}

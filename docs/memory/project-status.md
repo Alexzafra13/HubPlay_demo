@@ -1,5 +1,82 @@
 # Estado del proyecto
 
+> 🎬 **Sesión 2026-05-11 (rama `claude/review-project-status-SBKN4`, 2 commits, todo pusheado)** — el usuario pidió "revisa mi proyecto para ver por dónde seguir o si está la memoria desactualizada" y "haz como senior lo que creas mejor".
+>
+> **Hallazgo principal — el backlog estaba sustancialmente desactualizado**. Audit honesto contra el código actual descubrió que **5 items que estaban listados como "pendientes" en el handoff del 2026-05-10 ya estaban implementados** (algunos hace semanas), y otros tenían sutilezas que cambiaban su prioridad:
+>
+> | Item del backlog "pendiente" | Estado real |
+> |---|---|
+> | Hero del home auto-play | ✅ Ya hecho — `HeroBanner.tsx:266-273` usa `playHrefFor()` que devuelve `?play=1`. |
+> | Next-up overlay automático | ✅ Ya hecho — `VideoPlayer.tsx:501-502`, `setUpNextActive(true)` en `ended`. |
+> | Skip-intro/credits visible en player | ✅ Ya hecho — `SkipSegmentButton` shipped en Phase 1 (`3da1a01`). |
+> | **Skip-intro Phase 2 (chromaprint)** | ✅ Ya hecho — `internal/library/fingerprint.go` + `segment_matcher.go` + `segment_fingerprinter.go` + `libchromaprint-tools` en Dockerfile. La memoria decía "ready to plug in" pero está completamente enchufado. |
+> | Aurora colors aplicado al detail | ✅ Ya hecho — `web/src/pages/itemDetail/aurora.ts` con `buildAuroraStyle()` + test. |
+> | `manualChunks` en vite | ⚠️ Parcial — `react`, `router`, `query` separados; `hls.js` sigue sin split. |
+>
+> **2 commits pusheados a `origin/claude/review-project-status-SBKN4`**:
+>
+> - `39f01c7` *docs(memory): sync audit handoff with PR #239 follow-up* — corrige el handoff del 2026-05-10 que decía `git push origin main` pendiente (ya estaba mergeado vía PR #238) y omitía el follow-up `59dbad0` *fix(livetv): make ?channel=<id> deep-link idempotent against re-render churn* (PR #239, freeze de 45s+ al pinchar canales desde el rail "En directo ahora" del Home).
+>
+> - `d7ea9ee` *feat(home): row actions on Continue Watching cards — mark watched + remove* — cierra los dos items reales del backlog UX:
+>   - Backend: `DELETE /me/continue-watching/{itemId}` con nuevo `UserDataRepository.ClearProgress`. Distinto semánticamente de `MarkPlayed` (miente sobre completion) y `MarkUnplayed` (nukea todo el row): zeroes `position_ticks` preservando `play_count`, `is_favorite`, `last_played_at`. Emite `event.ProgressUpdated` con `position_ticks=0` para que `useUserDataSync` invalide el CW rail en otros devices vía SSE existente — cero event types nuevos. Idempotente.
+>   - Frontend: `LandscapeCard` gana props opcionales `onMarkWatched` + `onRemove`. Overlay hover top-left con Check + X (rating badge sigue top-right, sin colisión). Buttons hacen `preventDefault + stopPropagation` para no disparar el `<Link>` envolvente. `useRemoveFromContinueWatching` con optimistic update + rollback on error. `useMarkPlayed` reusa el endpoint existente.
+>   - i18n: 2 strings nuevas (`home.markWatched`, `home.removeFromContinueWatching`) en ES + EN.
+>   - OpenAPI: el endpoint nuevo documentado bajo `paths:` (es user-facing, no operator-only).
+>   - Tests: 2 Go nuevos (zeroes-preserves-rest + idempotent-no-row) + 4 vitest nuevos (no-buttons-without-handlers + mark-watched-fires + remove-fires + clicks-do-NOT-navigate). **504/504 vitest verdes** (era 500).
+>
+> **Decisiones senior tomadas**:
+> 1. **`ClearProgress`, no `MarkUnplayed` reuse**: el endpoint existente nukea `play_count` + `is_favorite`. Para "quitar de Seguir viendo" eso es colateral damage — el usuario no está diciendo "no he visto esto", está diciendo "no me lo muestres aquí". Zeroes `position_ticks` y nada más.
+> 2. **sqlc safe pasa el query nuevo**: 3 placeholders, generación limpia sin tocar los bugs documentados (ORDER BY+COLLATE, UPDATE con 4+ placeholders). Si futuros queries vuelven a topar con los bugs, raw SQL holdout sigue siendo el patrón.
+> 3. **Reuse `ProgressUpdated` event, no nuevo type**: `useUserDataSync` ya invalida CW en este evento. Añadir `RemovedFromCW` event sería duplicar plumbing por nada — el shape del payload (`position_ticks: 0`) ya transmite la información.
+> 4. **Overlay top-LEFT, no top-right**: el rating badge ya vive top-right. Splitear left/right evita colisión en lugar de stack.
+> 5. **OpenAPI yaml, no allowlist**: es endpoint user-facing del SPA. Las paths operator-only (admin keys, federation pairing) sí quedan en allowlist; las user-facing migran.
+>
+> **Métricas reales al cierre (la guía CLAUDE.md estaba desactualizada desde 2026-04-17)**:
+> - .go production: 224 (era 97) · _test.go: 137 (era 53) · ratio ~61%.
+> - frontend tests: 67 files / 504 assertions (era 12 / "~15%").
+> - HTTP routes: 217 (era 74).
+> - Handlers: 29 con test, 21 sin (mayoría thin wrappers / admin-only / federation passthroughs).
+> - **CLAUDE.md actualizada con estas métricas en esta sesión**.
+>
+> **Backlog real que queda al cerrar la sesión** (filtrado de los items que no estaban realmente pendientes):
+>
+> **Streaming P1** (del audit del 2026-05-10, sin tocar):
+> - HDR/10-bit decision + tone-mapping (`stream/decision.go` ignora `BitDepth`/`ColorTransfer`/`Profile`).
+> - Burn-in PGS/DVDSUB/ASS (sin soporte nativo del browser).
+> - Audio multichannel passthrough (siempre baja a `aac stereo`).
+> - Refactor seek-coalesce (3 capas defensivas tras 3 commits seguidos).
+> - `-force_key_frames` GOP-aligned en transcode args.
+> - Pipeline VAAPI fully-on-GPU.
+>
+> **Frontend P1**:
+> - **hls.js** sigue sin chunk separado (~400KB en el bundle principal). React/router/query sí están en manualChunks.
+> - Polling 5s/30s residual donde debería ser SSE.
+> - Tests grandes para `pages/`: Home, LiveTV, Search, Movies, Series, Collections.
+> - **node-vibrant** sigue 100% client-side (`useVibrantColors.ts`). Plex/Jellyfin lo hacen server-side + cache.
+>
+> **Infra/seguridad P1**:
+> - `RateLimitConfig.GlobalRPM` confirmado dead code (declarado en `config.go:158`, 0 lectores).
+> - YAML config probablemente persistido a `0644` (sin evidencia de fix; chmod 0600 no aparece en `internal/config/`).
+> - CSRF middleware exists (`internal/api/csrf.go`); el "fail-open cuando no hay session cookie" del audit no he verificado en esta sesión.
+> - **`govulncheck` sigue ausente en CI** (`.github/workflows/`). Trivy sigue pinned a `@master` (supply-chain risk).
+> - No connection cap en SSE.
+>
+> **UX adicionales que el usuario mencionó pero NO atacamos** (filtrado del original):
+> - ~~Quitar item de CW~~ ✅ hecho hoy.
+> - ~~Marcar como visto desde la rail~~ ✅ hecho hoy.
+> - ~~Hero del home auto-play~~ ✅ estaba ya.
+> - ~~Skip-intro/credits visible~~ ✅ Phase 1 + Phase 2 shipped.
+> - ~~Next-up overlay automático~~ ✅ estaba ya.
+> - ~~Aurora colors al detail~~ ✅ estaba ya.
+> - **Todo cerrado**. No quedan UX explicitos del bloque del audit. Si el usuario pide nuevos, abrir entrada propia.
+>
+> **Features grandes pendientes (P3, sin tocar)**:
+> - Multi-version del mismo título (4K + 1080p agrupados con picker).
+> - Watch-together (sync WebSocket sessions).
+> - Privacy stack (modo offline NFO, egress allowlist, CSP estricto).
+>
+> ---
+>
 > 🎬 **Sesión 2026-05-10 (auditoría senior + 11 commits, rama `claude/relaxed-lederberg-48e836`)** — el usuario pidió "revisa mi proyecto, quiero comprobar cosas que todo lo que tenemos funciona de verdad… piensa como senior". Auditoría completa con 4 sub-agentes en paralelo (backend / frontend / streaming-IPTV / infra-seguridad) + verificación visual end-to-end via Chrome MCP. Encontrados 5 P0 reales, los 5 arreglados + 5 mejoras UX adicionales. **Todo pusheado a `origin/claude/relaxed-lederberg-48e836` y mergeado a `main` local vía fast-forward**. Detalle completo en [`session_2026-05-10_audit_p0_fixes.md`](session_2026-05-10_audit_p0_fixes.md).
 >
 > **5 P0 fixes**:
@@ -31,10 +108,10 @@
 > - Frontend: `pnpm exec tsc --noEmit` clean. Vitest no corrido en esta sesión (cambios de data-only en es.json + UI components sin lógica nueva).
 > - Container: `hubplay` (`ghcr.io/alexzafra13/hubplay_demo:latest`) recién built, healthy en :8097, mount apunta al config padre con la DB de 130MB del usuario.
 >
-> **Estado del worktree**:
-> - 11 commits en `claude/relaxed-lederberg-48e836`, todos pusheados a origin.
-> - `main` local mergeado vía fast-forward con los 11 commits — **`git push origin main` está pendiente** de hacer si se quiere consolidar; el remote main NO los tiene aún.
-> - PR remoto disponible: https://github.com/Alexzafra13/HubPlay_demo/pull/new/claude/relaxed-lederberg-48e836
+> **Estado del worktree** (actualizado tras follow-up):
+> - 11 commits en `claude/relaxed-lederberg-48e836`, PR #238 mergeada a `main` (`afae026`).
+> - Post-merge follow-up: `59dbad0` *fix(livetv): make ?channel=<id> deep-link idempotent against re-render churn* (PR #239, merge `aa01f14`) — el useEffect que auto-reproducía un canal al venir del rail "En directo ahora" del Home spiraleaba por re-render churn (`openPlayer` dep rebuilt en cada render porque `channels` array ref cambia) y con React 19 concurrent mode podía colgar la página >45s. Fix con `handledChannelRef` idempotente per-channel-id + eliminado el strip-on-not-found que perdía deep-links silenciosamente cuando la lista no había hidratado aún.
+> - `origin/main` y local main ya sincronizados.
 >
 > **Backlog que queda explícito (próxima sesión)**:
 > - **Streaming P1** (del audit inicial): HDR/tone-mapping, subtítulos burn-in (PGS/ASS), audio multichannel passthrough, GOP-aligned `-force_key_frames`, refactor del seek-coalesce (3 capas defensivas), VAAPI fully-on-GPU.

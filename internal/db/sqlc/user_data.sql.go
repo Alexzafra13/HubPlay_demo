@@ -11,6 +11,29 @@ import (
 	"time"
 )
 
+const clearProgress = `-- name: ClearProgress :exec
+UPDATE user_data
+SET position_ticks = 0,
+    updated_at = ?
+WHERE user_id = ? AND item_id = ?
+`
+
+type ClearProgressParams struct {
+	UpdatedAt time.Time `json:"updated_at"`
+	UserID    string    `json:"user_id"`
+	ItemID    string    `json:"item_id"`
+}
+
+// Drop the row from "Seguir viendo" / Continue Watching without touching
+// play_count, is_favorite or last_played_at. The CW SQL gates on
+// position_ticks > 0, so zeroing it is enough to make the item vanish
+// from the rail; everything else stays intact so a future Play resumes
+// the play-count history and a favorited title remains favorited.
+func (q *Queries) ClearProgress(ctx context.Context, arg ClearProgressParams) error {
+	_, err := q.db.ExecContext(ctx, clearProgress, arg.UpdatedAt, arg.UserID, arg.ItemID)
+	return err
+}
+
 const continueWatching = `-- name: ContinueWatching :many
 SELECT ud.item_id, ud.position_ticks, ud.last_played_at,
        i.title, i.type, i.duration_ticks, COALESCE(i.parent_id, '') AS parent_id,

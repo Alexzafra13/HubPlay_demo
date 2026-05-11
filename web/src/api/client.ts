@@ -817,6 +817,10 @@ export class ApiClient {
     return this.request<MediaItem[]>("GET", "/me/continue-watching");
   }
 
+  async removeFromContinueWatching(itemId: string): Promise<void> {
+    await this.request<void>("DELETE", `/me/continue-watching/${itemId}`);
+  }
+
   async getNextUp(): Promise<MediaItem[]> {
     return this.request<MediaItem[]>("GET", "/me/next-up");
   }

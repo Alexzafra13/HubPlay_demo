@@ -25,6 +25,12 @@ type Querier interface {
 	// Used before re-populating an item's tags during a metadata refresh,
 	// so removed genres don't linger after a TMDb update changes them.
 	ClearItemValuesForItem(ctx context.Context, arg ClearItemValuesForItemParams) error
+	// Drop the row from "Seguir viendo" / Continue Watching without touching
+	// play_count, is_favorite or last_played_at. The CW SQL gates on
+	// position_ticks > 0, so zeroing it is enough to make the item vanish
+	// from the rail; everything else stays intact so a future Play resumes
+	// the play-count history and a favorited title remains favorited.
+	ClearProgress(ctx context.Context, arg ClearProgressParams) error
 	ConsumeDeviceCode(ctx context.Context, arg ConsumeDeviceCodeParams) error
 	// Two extra filters vs. the obvious "started but not completed" rail:
 	//   1. Near-complete drop: position >= 90% of duration. Treat as

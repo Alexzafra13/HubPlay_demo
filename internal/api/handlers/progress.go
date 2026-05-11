@@ -217,6 +217,37 @@ func (h *ProgressHandler) ToggleFavorite(w http.ResponseWriter, r *http.Request)
 	})
 }
 
+// RemoveFromContinueWatching drops an item from the Continue Watching
+// rail without lying about completion state. Zeroes position_ticks
+// (the rail's CW SQL filters on `position_ticks > 0`) while keeping
+// play_count, is_favorite, and last_played_at intact — semantically
+// "the user told me to stop showing this here", not "the user finished
+// it" (mark played) or "the user never watched it" (mark unplayed).
+// Idempotent: returns 204 even when no user_data row exists.
+func (h *ProgressHandler) RemoveFromContinueWatching(w http.ResponseWriter, r *http.Request) {
+	claims := auth.GetClaims(r.Context())
+	if claims == nil {
+		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+		return
+	}
+
+	itemID := chi.URLParam(r, "itemId")
+	if err := h.userData.ClearProgress(r.Context(), claims.UserID, itemID); err != nil {
+		h.logger.Error("clear progress", "error", err)
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to remove from continue watching")
+		return
+	}
+	// Reuse ProgressUpdated so existing SSE consumers (useUserDataSync)
+	// pick this up and invalidate the CW rail on other devices without
+	// a new event type.
+	h.publish(event.ProgressUpdated, claims.UserID, itemID, map[string]any{
+		"position_ticks": int64(0),
+		"completed":      false,
+	})
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // ContinueWatching returns items the user has started but not finished.
 func (h *ProgressHandler) ContinueWatching(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())

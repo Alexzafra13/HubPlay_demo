@@ -80,13 +80,13 @@ Config de ejemplo: `hubplay.example.yaml` (puerto 8096, SQLite local, JWT auto-g
 
 ---
 
-## Métricas rápidas (verificadas 2026-04-17)
+## Métricas rápidas (verificadas 2026-05-11)
 
-- **97** ficheros `.go` de producción en `internal/`+`cmd/` · **53** `_test.go` (~55%)
-- **12** test files en frontend (cobertura ~15% estimada — páginas y admin aún sin tests)
+- **224** ficheros `.go` de producción en `internal/`+`cmd/` · **137** `_test.go` (~61%)
+- **67** test files en frontend, **504/504** vitest verdes — admin panels y auth ya cubiertos; quedan páginas grandes (Home, LiveTV, Search, Movies, Series).
 - **26** docs de arquitectura en `docs/architecture/`
-- **74** rutas HTTP registradas en `internal/api/router.go`
-- Handlers con tests: image, stream, progress, iptv, library (5 de 15). Sin tests: items, users, setup, providers, events, health.
+- **217** rutas HTTP registradas en `internal/api/router.go` (3× lo de Apr 17).
+- **29** handler files con `_test.go`; **21** sin (mayoría son thin wrappers, admin-only o federation passthroughs): `admin_backup`, `admin_logs`, `auth_device`, `federation_admin/image/public/url`, `iptv_access/admin/channels/epg/favorites/health`, `me_home`, `me_peer_image/progress/stream`, `me_peers`, `preferences`, `studios`.
 
 ---
 

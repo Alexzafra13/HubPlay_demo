@@ -292,6 +292,7 @@ type UserDataRepository interface {
 	NextUp(ctx context.Context, userID string, limit int) ([]*db.NextUpItem, error)
 	SeriesEpisodeProgress(ctx context.Context, userID, seriesID string) (total, watched int, err error)
 	Delete(ctx context.Context, userID, itemID string) error
+	ClearProgress(ctx context.Context, userID, itemID string) error
 }
 
 // ImageRefreshService runs the library-wide image refresh. Defined here so

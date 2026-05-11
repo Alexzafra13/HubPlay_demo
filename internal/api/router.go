@@ -555,6 +555,7 @@ func NewRouter(deps Dependencies) http.Handler {
 				progressHandler := handlers.NewProgressHandler(deps.UserData, deps.Images, deps.EventBus, deps.Logger)
 
 				r.Get("/me/continue-watching", progressHandler.ContinueWatching)
+				r.Delete("/me/continue-watching/{itemId}", progressHandler.RemoveFromContinueWatching)
 				r.Get("/me/favorites", progressHandler.Favorites)
 				r.Get("/me/next-up", progressHandler.NextUp)
 
