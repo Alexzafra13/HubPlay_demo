@@ -76,7 +76,7 @@ func NewTranscoder(baseDir, ffmpegPath string, transcodeTimeout time.Duration, h
 // segment index that corresponds to the new offset so the produced
 // segment files (segmentNNNNN.ts) line up with what the synthesized
 // VOD manifest already advertised to the client.
-func (t *Transcoder) Start(sessionID, itemID, inputPath string, profile Profile, startTime float64, copyVideo, copyAudio bool, startSegmentNumber, audioStreamIndex int) (*Session, error) {
+func (t *Transcoder) Start(sessionID, itemID, inputPath string, profile Profile, startTime float64, copyVideo, copyAudio, toneMap bool, startSegmentNumber, audioStreamIndex int) (*Session, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -93,7 +93,7 @@ func (t *Transcoder) Start(sessionID, itemID, inputPath string, profile Profile,
 
 	ctx, cancel := context.WithTimeout(context.Background(), t.transcodeTimeout)
 
-	args := BuildFFmpegArgs(inputPath, outputDir, profile, startTime, t.hwAccel, t.encoder, copyVideo, copyAudio, startSegmentNumber, audioStreamIndex)
+	args := BuildFFmpegArgs(inputPath, outputDir, profile, startTime, t.hwAccel, t.encoder, copyVideo, copyAudio, toneMap, startSegmentNumber, audioStreamIndex)
 	cmd := exec.CommandContext(ctx, t.ffmpeg, args...)
 	cmd.Dir = outputDir
 
@@ -145,7 +145,7 @@ func (t *Transcoder) Start(sessionID, itemID, inputPath string, profile Profile,
 // NOT call existing.Stop() (which would RemoveAll the directory).
 // The caller passes the *same* sessionID it used for the original
 // Start; ownership stays with this Transcoder.
-func (t *Transcoder) RestartAt(sessionID, itemID, inputPath string, profile Profile, startTime float64, copyVideo, copyAudio bool, startSegmentNumber, audioStreamIndex int) (*Session, error) {
+func (t *Transcoder) RestartAt(sessionID, itemID, inputPath string, profile Profile, startTime float64, copyVideo, copyAudio, toneMap bool, startSegmentNumber, audioStreamIndex int) (*Session, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -158,7 +158,7 @@ func (t *Transcoder) RestartAt(sessionID, itemID, inputPath string, profile Prof
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), t.transcodeTimeout)
-	args := BuildFFmpegArgs(inputPath, outputDir, profile, startTime, t.hwAccel, t.encoder, copyVideo, copyAudio, startSegmentNumber, audioStreamIndex)
+	args := BuildFFmpegArgs(inputPath, outputDir, profile, startTime, t.hwAccel, t.encoder, copyVideo, copyAudio, toneMap, startSegmentNumber, audioStreamIndex)
 	cmd := exec.CommandContext(ctx, t.ffmpeg, args...)
 	cmd.Dir = outputDir
 
@@ -294,7 +294,14 @@ func (s *Session) SegmentPath(index int) string {
 // the per-type stream index ffmpeg uses, NOT the absolute stream id —
 // the client resolves DB MediaStream rows (filtered to type='audio')
 // to a 0-based index before calling.
-func BuildFFmpegArgs(input, outputDir string, profile Profile, startTime float64, hwAccel HWAccelType, encoder string, copyVideo, copyAudio bool, startSegmentNumber, audioStreamIndex int) []string {
+//
+// `toneMap` (only meaningful when copyVideo=false) prepends a
+// zscale → tonemap(hable) → zscale chain to the video filter graph,
+// converting an HDR PQ / HLG source to BT.709 SDR before the regular
+// scale + pad. Skipped on stream-copy paths because there is no
+// decoded frame to filter — the decision code already routes HDR
+// sources for SDR clients to the full-transcode branch.
+func BuildFFmpegArgs(input, outputDir string, profile Profile, startTime float64, hwAccel HWAccelType, encoder string, copyVideo, copyAudio, toneMap bool, startSegmentNumber, audioStreamIndex int) []string {
 	if encoder == "" {
 		encoder = "libx264"
 	}
@@ -391,8 +398,7 @@ func BuildFFmpegArgs(input, outputDir string, profile Profile, startTime float64
 			"-b:v", profile.VideoBitrate,
 			"-maxrate", profile.VideoBitrate,
 			"-bufsize", profile.VideoBitrate,
-			"-vf", fmt.Sprintf("scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2",
-				profile.Width, profile.Height, profile.Width, profile.Height),
+			"-vf", buildVideoFilterChain(profile, toneMap),
 			"-r", strconv.Itoa(profile.MaxFrameRate),
 		)
 	}
@@ -422,4 +428,44 @@ func BuildFFmpegArgs(input, outputDir string, profile Profile, startTime float64
 	)
 
 	return args
+}
+
+// buildVideoFilterChain assembles the value passed to ffmpeg's `-vf`.
+//
+// Without tonemap (the SDR case): the historical scale-and-letterbox
+// chain — scale to the profile dimensions preserving aspect ratio,
+// then pad with black bars so the encoder sees exactly profile.Width ×
+// profile.Height regardless of source aspect.
+//
+// With tonemap (HDR source for an SDR client): a zscale-based chain
+// that converts PQ / HLG / DolbyVision down to BT.709 before the
+// regular scale runs:
+//
+//   zscale=t=linear:npl=100  → linearise PQ/HLG luma at 100-nit display peak
+//   format=gbrpf32le         → float pixel format (tonemap requires it)
+//   zscale=p=bt709           → swap primaries to Rec.709 colourspace
+//   tonemap=hable            → Hable operator; neutral-look default Plex/Jellyfin use
+//   zscale=t=bt709:m=bt709:r=tv → repackage as BT.709 SDR with TV-range
+//   format=yuv420p           → drop back to the encoder's expected pixel format
+//
+// Then the same scale+pad as the SDR path. The whole expression is
+// one filter string (commas chain filters); the encoder receives
+// 8-bit BT.709 frames identical in shape to a non-HDR source.
+//
+// Requires ffmpeg built with libzimg (zscale). The `hwaccel` Docker
+// target ships it; software builds on most distros do too. If a user
+// runs against an ffmpeg without zscale they'll see an "Unrecognized
+// option" failure in transcode logs — at which point HDR sources
+// simply error rather than rendering wrong, which is the safer
+// failure mode of the two.
+func buildVideoFilterChain(profile Profile, toneMap bool) string {
+	scalePad := fmt.Sprintf(
+		"scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2",
+		profile.Width, profile.Height, profile.Width, profile.Height,
+	)
+	if !toneMap {
+		return scalePad
+	}
+	const tonemapChain = "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=hable,zscale=t=bt709:m=bt709:r=tv,format=yuv420p"
+	return tonemapChain + "," + scalePad
 }

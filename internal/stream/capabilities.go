@@ -20,13 +20,21 @@ type Capabilities struct {
 	VideoCodecs map[string]bool
 	AudioCodecs map[string]bool
 	Containers  map[string]bool
+	// HDRFormats lists HDR transfer characteristics the client can
+	// render natively. Tokens are the lowercase wire aliases:
+	// "hdr10" (PQ / SMPTE 2084), "hlg" (BBC/NHK Hybrid Log-Gamma),
+	// "dovi" (Dolby Vision; "dolbyvision" also accepted as alias).
+	// Empty / nil means "SDR only" — the decision code will tonemap
+	// any HDR source down to BT.709 instead of letting the browser
+	// render PQ luma as if it were sRGB (grey, washed-out output).
+	HDRFormats map[string]bool
 }
 
 // HeaderCapabilities is the request header clients send to declare what
 // they can decode. Format is the typical semicolon-separated key=value-list
 // pattern (same shape as Accept-CH, Vary, etc.):
 //
-//	X-Hubplay-Client-Capabilities: video=h264,h265,vp9,av1; audio=aac,opus,eac3; container=mp4,mkv,ts
+//	X-Hubplay-Client-Capabilities: video=h264,h265,vp9,av1; audio=aac,opus,eac3; container=mp4,mkv,ts; hdr=hdr10,hlg
 //
 // Tokens are lower-cased and trimmed; unknown keys are silently ignored
 // so adding a future "subtitle=srt,ass" field is non-breaking.
@@ -66,6 +74,8 @@ func ParseCapabilitiesHeader(value string) *Capabilities {
 			dst = &caps.AudioCodecs
 		case "container":
 			dst = &caps.Containers
+		case "hdr":
+			dst = &caps.HDRFormats
 		default:
 			continue // forward-compat: unknown keys ignored
 		}
@@ -79,7 +89,7 @@ func ParseCapabilitiesHeader(value string) *Capabilities {
 			}
 		}
 	}
-	if len(caps.VideoCodecs) == 0 && len(caps.AudioCodecs) == 0 && len(caps.Containers) == 0 {
+	if len(caps.VideoCodecs) == 0 && len(caps.AudioCodecs) == 0 && len(caps.Containers) == 0 && len(caps.HDRFormats) == 0 {
 		return nil
 	}
 	return caps
@@ -112,11 +122,19 @@ func CapabilitiesFromRequest(r *http.Request) *Capabilities {
 // the win — it's the difference between "burn CPU re-encoding HEVC to
 // H.264 for a Chromecast that can decode HEVC natively" and "send the
 // HEVC file as-is".
+//
+// HDRFormats is intentionally empty: browser HDR is a minefield
+// (depends on OS HDR mode, display, GPU driver, browser version,
+// container parser quirks). Defaulting to "no HDR" makes the server
+// tonemap to BT.709 — looks correct everywhere instead of correct on
+// some setups and grey on others. A native-app client that knows it
+// can render HDR opts in by sending `hdr=hdr10,hlg` in the header.
 func DefaultWebCapabilities() *Capabilities {
 	return &Capabilities{
 		VideoCodecs: map[string]bool{"h264": true, "vp8": true, "vp9": true, "av1": true},
 		AudioCodecs: map[string]bool{"aac": true, "mp3": true, "opus": true, "vorbis": true, "flac": true},
 		Containers:  map[string]bool{"mp4": true, "webm": true, "mov": true},
+		HDRFormats:  map[string]bool{},
 	}
 }
 
@@ -135,6 +153,7 @@ func effectiveCapabilities(c *Capabilities) *Capabilities {
 		VideoCodecs: c.VideoCodecs,
 		AudioCodecs: c.AudioCodecs,
 		Containers:  c.Containers,
+		HDRFormats:  c.HDRFormats,
 	}
 	def := DefaultWebCapabilities()
 	if out.VideoCodecs == nil {
@@ -145,6 +164,14 @@ func effectiveCapabilities(c *Capabilities) *Capabilities {
 	}
 	if out.Containers == nil {
 		out.Containers = def.Containers
+	}
+	// HDRFormats does NOT fall back to def — a client that declared
+	// some buckets but not `hdr=` is saying "I told you what I can do,
+	// HDR isn't on the list". Backfilling from the default (empty
+	// anyway) would be no-op today but would silently leak a future
+	// non-empty default into clients that didn't ask for it.
+	if out.HDRFormats == nil {
+		out.HDRFormats = def.HDRFormats
 	}
 	return out
 }

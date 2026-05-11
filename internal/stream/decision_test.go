@@ -216,6 +216,119 @@ func TestDecideForceDirectPlay_PrefersDefaultStream(t *testing.T) {
 	}
 }
 
+// HDR HEVC source against the default web client (which doesn't
+// declare hdr=...) must Transcode + ToneMap, even though HEVC alone
+// would be allowed via DirectStream when the codec is in caps. Pin
+// the rule so a future "let HEVC ride DirectStream for everyone"
+// refactor doesn't silently send PQ luma to an SDR browser and
+// produce the washed-out grey picture this fix exists to prevent.
+func TestDecide_HDR_TonemapsForDefaultWebClient(t *testing.T) {
+	cases := []struct {
+		name    string
+		hdrType string
+	}{
+		{"HDR10", "HDR10"},
+		{"HLG", "HLG"},
+		{"DolbyVision", "DolbyVision"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			item := &db.Item{Container: "matroska"}
+			streams := []*db.MediaStream{
+				{StreamType: "video", Codec: "h264", IsDefault: true, HDRType: tc.hdrType},
+				{StreamType: "audio", Codec: "aac", IsDefault: true},
+			}
+			d := Decide(item, streams, nil, "")
+			if d.Method != MethodTranscode {
+				t.Fatalf("Method = %s, want Transcode (HDR source + SDR client)", d.Method)
+			}
+			if !d.ToneMap {
+				t.Error("ToneMap = false, want true so BuildFFmpegArgs adds the zscale chain")
+			}
+			if d.CopyVideo {
+				t.Error("CopyVideo = true, want false (tonemapping requires a decoded frame)")
+			}
+		})
+	}
+}
+
+// Same HDR file, but the client opted in to the matching HDR format
+// in the wire header. Now there's nothing to fix up: the source's
+// codec / container is also compatible (h264/mkv → DirectStream
+// path), so the decision should ride DirectStream with CopyVideo=true
+// and ToneMap=false. This is the "native HDR-capable Android TV app"
+// scenario.
+func TestDecide_HDR_DirectStreamsWhenClientDeclaresHDR(t *testing.T) {
+	item := &db.Item{Container: "matroska"}
+	streams := []*db.MediaStream{
+		{StreamType: "video", Codec: "h264", IsDefault: true, HDRType: "HDR10"},
+		{StreamType: "audio", Codec: "aac", IsDefault: true},
+	}
+	caps := &Capabilities{HDRFormats: map[string]bool{"hdr10": true}}
+	d := Decide(item, streams, caps, "")
+	if d.Method != MethodDirectStream {
+		t.Fatalf("Method = %s, want DirectStream (HDR client matches HDR source)", d.Method)
+	}
+	if !d.CopyVideo {
+		t.Error("CopyVideo = false, want true (no need to re-encode)")
+	}
+	if d.ToneMap {
+		t.Error("ToneMap = true, want false (client can render HDR)")
+	}
+}
+
+// DolbyVision source against a client that declared "dolbyvision"
+// (the longer alias) — same outcome as the "dovi" short form. The
+// alias matters because the wire header is informal and a
+// hand-rolled client could send either.
+func TestDecide_HDR_DolbyVisionLongAlias(t *testing.T) {
+	item := &db.Item{Container: "matroska"}
+	streams := []*db.MediaStream{
+		{StreamType: "video", Codec: "h264", IsDefault: true, HDRType: "DolbyVision"},
+		{StreamType: "audio", Codec: "aac", IsDefault: true},
+	}
+	caps := &Capabilities{HDRFormats: map[string]bool{"dolbyvision": true}}
+	d := Decide(item, streams, caps, "")
+	if d.Method == MethodTranscode || d.ToneMap {
+		t.Errorf("DolbyVision client (long alias) should not tonemap; got Method=%s ToneMap=%v", d.Method, d.ToneMap)
+	}
+}
+
+// HDR source where the codec is also incompatible (HEVC). The decision
+// should still tonemap — it's the full transcode path either way, but
+// without ToneMap=true the encoder would produce washed-out SDR-sized
+// frames from HDR-coded source data.
+func TestDecide_HDR_HEVCAlsoTonemaps(t *testing.T) {
+	item := &db.Item{Container: "matroska"}
+	streams := []*db.MediaStream{
+		{StreamType: "video", Codec: "hevc", IsDefault: true, HDRType: "HDR10"},
+		{StreamType: "audio", Codec: "aac", IsDefault: true},
+	}
+	d := Decide(item, streams, nil, "")
+	if d.Method != MethodTranscode {
+		t.Fatalf("Method = %s, want Transcode", d.Method)
+	}
+	if !d.ToneMap {
+		t.Error("ToneMap = false, want true (HDR HEVC for SDR client must both transcode AND tonemap)")
+	}
+}
+
+// SDR sources never tonemap regardless of what the client declared
+// — `hdr=` is a capability, not a request. Pin so a future bug that
+// flips ToneMap unconditionally for any client without hdr=... can't
+// re-encode every SDR stream the project serves.
+func TestDecide_SDR_NeverTonemaps(t *testing.T) {
+	item := &db.Item{Container: "matroska"}
+	streams := []*db.MediaStream{
+		{StreamType: "video", Codec: "hevc", IsDefault: true}, // HDRType deliberately empty
+		{StreamType: "audio", Codec: "dts", IsDefault: true},
+	}
+	d := Decide(item, streams, nil, "")
+	if d.ToneMap {
+		t.Error("ToneMap = true on SDR source, want false")
+	}
+}
+
 func TestDecideForceDirectPlay_AudioOnlyItemEmptyVideoCodec(t *testing.T) {
 	// Defensive: a row with no video stream returns DirectPlay with
 	// an empty VideoCodec rather than panicking. The browser will
