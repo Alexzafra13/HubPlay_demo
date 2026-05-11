@@ -1,5 +1,65 @@
 # Estado del proyecto
 
+> 🎬 **Sesión 2026-05-11 (rama `claude/review-project-1y28j`, federation poster colours)** — el usuario pidió cerrar el item "node-vibrant server-side". Audit en frío reveló que el grueso del trabajo YA estaba hecho (migración 014, `imaging/colors.go`, API expone `backdrop_colors` para items locales, `ItemDetail.tsx:167-177` ya hace `hasServerPalette` gate). El item real pendiente era SOLO federation: `PeerItemDetail` ejecutaba node-vibrant siempre porque `FederationRemoteItem` no transportaba colores.
+>
+> **Senior call**: cerrar el gap real (federation) en lugar de tocar el path local que ya funciona. Documentar que el item del backlog estaba parcialmente vencido.
+>
+> **Commits en esta sesión** (todos pendientes de push):
+>
+> - `feat(federation): plumb pre-extracted poster colours through SharedItem` — `federation.SharedItem` gana `PosterColor` + `PosterColorMuted` (mismas CSS rgb() strings que la tabla `images`). Los 3 decoders de `client.go` los reenvían. El emitter (peer-side) los pinta a partir de un batch SELECT raw-SQL (`attachPrimaryImageColors`) llamado tras `ListSharedItems` / `ListRecentSharedItems` / `SearchSharedItems` — un solo query extra por página, sin N+1.
+>
+> - `feat(api): expose backdrop_colors on /me/peers item wire` — `peerItemWire` + `peerSearchHitWire` ganan `backdrop_colors: { vibrant, muted }`, mismo wire shape que el handler de items locales emite. `paletteFromShared` lifter devuelve `nil` cuando ambos swatches están vacíos para que `omitempty` los drope (peers antiguos que no emiten estos campos quedan exactos como antes).
+>
+> - `feat(web): PeerItemDetail consumes server backdrop_colors first` — `FederationRemoteItem` + `federationItemToMediaItem` forwardean los colores. `PeerItemDetail` aplica el mismo patrón que `ItemDetail`: `hasServerPalette` gate desactiva el fallback URL así `useVibrantColors` no carga `node-vibrant/browser` (~400KB) cuando el peer ya mandó la paleta. Items pre-014 o peers viejos siguen yendo al fallback runtime sin regresión visual.
+>
+> - `feat(db): migration 039 + cache colour round-trip` — `federation_item_cache` gana `poster_color` + `poster_color_muted` (default `''`). `UpsertCachedItems` / `ListCachedItems` quedaron en raw SQL holdouts para que la cache offline también arrastre colores. Sin esto, ir offline silenciosamente dropeaba la paleta y el frontend volvía a node-vibrant.
+>
+> - `test`: backend `TestFederationRepository_SharedItem_ColorsForwarded` cubre los 3 emitters + cache roundtrip. Frontend `federationAdapter.test.ts` con 4 tests (full palette / half palette / absent / preserves-other-fields).
+>
+> **Decisiones senior tomadas (no obvias del código)**:
+>
+> 1. **Raw SQL batch en `attachPrimaryImageColors`, NO subquery inline en sqlc**: probé pintar las dos `dominant_color*` columns vía `COALESCE((SELECT … LIMIT 1), '')` correlated subqueries dentro de `ListSharedItems` / `ListRecentSharedItems`. sqlc 1.31.1 trunca el output al combinar eso con `ORDER BY ... COLLATE NOCASE` — bug estructural ya documentado en `architecture-decisions.md`. Pivot a un batch `SELECT … WHERE item_id IN (?…)` post-query: 1 query extra por página, sin tocar sqlc, sin N+1.
+>
+> 2. **Cache table → raw SQL holdouts**: el segundo intento (añadir las 2 columnas al `INSERT INTO federation_item_cache (…)` con 11 placeholders) también tropezó el parser. Movimos `UpsertCachedItems` y la query de lectura a raw SQL en el repo y dejamos los queries sqlc en su shape pre-cambio. Precedente: `ListProfilesForOwner`, `SearchSharedItems`. Comentarios cruzados explican el por qué.
+>
+> 3. **Federation peers viejos = backwards compat**: el wire shape ahora trae `poster_color` con `omitempty`. Un peer que pre-data este cambio simplemente no lo envía, `paletteFromShared` devuelve `nil`, omitempty drope el campo, el frontend ve `backdrop_colors: undefined`, `hasServerPalette` falla, runtime fallback se enchufa. Cero rupturas.
+>
+> 4. **No expandir el emitter a 5 swatches (vibrant/muted/darkVibrant/lightVibrant/lightMuted)**: el backend (migración 014, `imaging/colors.go`) solo computa 2. Replicar el algoritmo de node-vibrant en Go server-side daría aurora con más variación pero es trabajo nuevo, y `aurora.ts` ya tiene fallback chains que llenan las 4 esquinas con solo `vibrant`+`muted`. Si en el futuro queremos paridad exacta, el sitio para iterar es `internal/imaging/colors.go`.
+>
+> 5. **No backfill automático**: items ya escaneados antes de migración 014 quedan sin colores; cuando el operador re-escanea o el `ImageRefresher` los toca, los colores aparecen. Backfill explícito sería un script separado fuera de scope.
+>
+> **Estado del wire shape al cierre**:
+>
+> ```text
+> /api/v1/me/peers/{peerID}/libraries/{libID}/items
+>   items[].backdrop_colors?: { vibrant?, muted? }  ← NEW
+> /api/v1/me/peers/search?q=…
+>   hits[].backdrop_colors?: { vibrant?, muted? }   ← NEW
+> /api/v1/me/peers/recent
+>   hits[].backdrop_colors?: { vibrant?, muted? }   ← NEW
+> /api/v1/peer/libraries/{libID}/items   (peer→peer)
+>   items[].poster_color?, poster_color_muted?     ← NEW
+> /api/v1/peer/search?q=… , /api/v1/peer/recent    (peer→peer)
+>   items[].poster_color?, poster_color_muted?     ← NEW
+> ```
+>
+> **Métricas al cierre**:
+> - Backend Go: `go test -race ./...` → 21 paquetes verdes. Federation repo tests +1 test nuevo (4 subtests).
+> - Frontend: `pnpm test --run` → **516/516** (era 512, +4 nuevos).
+> - `go build ./...` + `tsc --noEmit` clean. sqlc regen idempotente sobre el shape final.
+>
+> **Backlog actualizado**:
+> - **Frontend P1**: tests grandes para `pages/` (Home, LiveTV, Search, Movies, Series, Collections). ~~node-vibrant server-side~~ ✅ cerrado (local YA estaba; federation cerrado hoy).
+> - **Streaming P1**: subs burn-in PGS/DVDSUB/ASS, audio multichannel passthrough, refactor seek-coalesce, `-force_key_frames` GOP-aligned, VAAPI fully-on-GPU.
+> - **Infra P1**: vacío.
+> - **Features grandes P3**: Multi-version, Watch-together, Privacy stack.
+>
+> **Posible follow-up identificado** (no scope hoy):
+> - Backfill script para items pre-014 sin colores extraídos.
+> - Expandir el extractor server-side a 4-5 swatches para paridad con node-vibrant. Hoy `aurora.ts` rellena con fallback chains cuando solo hay 2.
+>
+> ---
+>
 > 🎬 **Sesión 2026-05-11 (rama `claude/review-project-1y28j`, bloque polling → SSE)** — tras cerrar el bloque infra/seguridad, el usuario pidió "Revisa lo del polling" y luego "Las dos a SSE" entre las migraciones que recomendé.
 >
 > **Audit del polling restante** (verificado contra el código):
