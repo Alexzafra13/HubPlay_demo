@@ -77,6 +77,15 @@ type SharedItem struct {
 	// stays empty there. The federated-search consumer needs it to
 	// route a click through to /peers/{peerID}/libraries/{libID}/items/{id}.
 	LibraryID string `json:"library_id,omitempty"`
+	// PosterColor / PosterColorMuted are the pre-extracted dominant
+	// CSS rgb() swatches for the item's primary image (migration 014).
+	// The federated consumer renders the page-wide aurora on first
+	// paint from these instead of waiting on a client-side node-vibrant
+	// decode — same flow the local detail page uses for items in OUR
+	// catalog. Empty when extraction failed or the item pre-dates
+	// migration 014; the consumer falls back to runtime extraction.
+	PosterColor      string `json:"poster_color,omitempty"`
+	PosterColorMuted string `json:"poster_color_muted,omitempty"`
 }
 
 // CachedItem extends SharedItem with the peer + library it belongs

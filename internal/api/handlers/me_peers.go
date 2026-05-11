@@ -141,13 +141,42 @@ func (h *MePeersHandler) BrowsePeerLibraries(w http.ResponseWriter, r *http.Requ
 // with one synthetic addition: `poster_url` is rewritten on this side
 // so the user's browser only ever asks our origin (proxied via peer
 // JWT). The peer's URL never reaches the client.
+//
+// BackdropColors carries the peer's pre-extracted dominant swatches so
+// PeerItemDetail can paint the aurora on first paint without running
+// node-vibrant in the browser. Same shape and consumer path the local
+// ItemDetail uses for items in OUR catalog. Older peers that don't
+// emit poster_color* leave the field nil → consumer falls back to
+// runtime extraction, matching the pre-migration behaviour exactly.
 type peerItemWire struct {
-	ID        string `json:"id"`
-	Type      string `json:"type"`
-	Title     string `json:"title"`
-	Year      int    `json:"year,omitempty"`
-	Overview  string `json:"overview,omitempty"`
-	PosterURL string `json:"poster_url,omitempty"`
+	ID             string           `json:"id"`
+	Type           string           `json:"type"`
+	Title          string           `json:"title"`
+	Year           int              `json:"year,omitempty"`
+	Overview       string           `json:"overview,omitempty"`
+	PosterURL      string           `json:"poster_url,omitempty"`
+	BackdropColors *peerItemPalette `json:"backdrop_colors,omitempty"`
+}
+
+// peerItemPalette mirrors the local `backdrop_colors` wire shape so
+// the same frontend reducer drives the aurora for local AND federated
+// items. Either field may be absent — the extractor couldn't classify
+// a swatch in that role — and the consumer treats absence the same as
+// "no server palette" (drop the corner from the gradient).
+type peerItemPalette struct {
+	Vibrant string `json:"vibrant,omitempty"`
+	Muted   string `json:"muted,omitempty"`
+}
+
+// paletteFromShared lifts the two SharedItem color fields into the
+// optional wire shape. Returns nil when both swatches are empty so
+// omitempty drops the field entirely — keeps the wire payload clean
+// for items that pre-date migration 014.
+func paletteFromShared(it *federation.SharedItem) *peerItemPalette {
+	if it.PosterColor == "" && it.PosterColorMuted == "" {
+		return nil
+	}
+	return &peerItemPalette{Vibrant: it.PosterColor, Muted: it.PosterColorMuted}
 }
 
 // BrowsePeerItems returns paginated items in a peer's library. Reads
@@ -184,11 +213,12 @@ func (h *MePeersHandler) BrowsePeerItems(w http.ResponseWriter, r *http.Request)
 	out := make([]peerItemWire, 0, len(items))
 	for _, it := range items {
 		row := peerItemWire{
-			ID:       it.ID,
-			Type:     it.Type,
-			Title:    it.Title,
-			Year:     it.Year,
-			Overview: it.Overview,
+			ID:             it.ID,
+			Type:           it.Type,
+			Title:          it.Title,
+			Year:           it.Year,
+			Overview:       it.Overview,
+			BackdropColors: paletteFromShared(it),
 		}
 		if it.HasPoster {
 			row.PosterURL = "/api/v1/me/peers/" + peerID + "/items/" + it.ID + "/poster"
@@ -209,16 +239,20 @@ func (h *MePeersHandler) BrowsePeerItems(w http.ResponseWriter, r *http.Request)
 // peer attribution that BrowsePeerItems doesn't need (single peer
 // is implicit in the path) so the UI can render an origin badge and
 // route the click into the right peer's detail view.
+//
+// BackdropColors mirrors peerItemWire — same rationale, same shape, so
+// the rail/grid components don't fork their palette plumbing by surface.
 type peerSearchHitWire struct {
-	PeerID    string `json:"peer_id"`
-	PeerName  string `json:"peer_name"`
-	LibraryID string `json:"library_id,omitempty"`
-	ID        string `json:"id"`
-	Type      string `json:"type"`
-	Title     string `json:"title"`
-	Year      int    `json:"year,omitempty"`
-	Overview  string `json:"overview,omitempty"`
-	PosterURL string `json:"poster_url,omitempty"`
+	PeerID         string           `json:"peer_id"`
+	PeerName       string           `json:"peer_name"`
+	LibraryID      string           `json:"library_id,omitempty"`
+	ID             string           `json:"id"`
+	Type           string           `json:"type"`
+	Title          string           `json:"title"`
+	Year           int              `json:"year,omitempty"`
+	Overview       string           `json:"overview,omitempty"`
+	PosterURL      string           `json:"poster_url,omitempty"`
+	BackdropColors *peerItemPalette `json:"backdrop_colors,omitempty"`
 }
 
 // SearchPeers fans out a query string to every paired peer in
@@ -252,14 +286,15 @@ func (h *MePeersHandler) SearchPeers(w http.ResponseWriter, r *http.Request) {
 	out := make([]peerSearchHitWire, 0, len(hits))
 	for _, h := range hits {
 		row := peerSearchHitWire{
-			PeerID:    h.Peer.ID,
-			PeerName:  h.Peer.Name,
-			LibraryID: h.Item.LibraryID,
-			ID:        h.Item.ID,
-			Type:      h.Item.Type,
-			Title:     h.Item.Title,
-			Year:      h.Item.Year,
-			Overview:  h.Item.Overview,
+			PeerID:         h.Peer.ID,
+			PeerName:       h.Peer.Name,
+			LibraryID:      h.Item.LibraryID,
+			ID:             h.Item.ID,
+			Type:           h.Item.Type,
+			Title:          h.Item.Title,
+			Year:           h.Item.Year,
+			Overview:       h.Item.Overview,
+			BackdropColors: paletteFromShared(h.Item),
 		}
 		if h.Item.HasPoster {
 			row.PosterURL = "/api/v1/me/peers/" + h.Peer.ID + "/items/" + h.Item.ID + "/poster"
@@ -296,14 +331,15 @@ func (h *MePeersHandler) RecentPeers(w http.ResponseWriter, r *http.Request) {
 	out := make([]peerSearchHitWire, 0, len(hits))
 	for _, h := range hits {
 		row := peerSearchHitWire{
-			PeerID:    h.Peer.ID,
-			PeerName:  h.Peer.Name,
-			LibraryID: h.Item.LibraryID,
-			ID:        h.Item.ID,
-			Type:      h.Item.Type,
-			Title:     h.Item.Title,
-			Year:      h.Item.Year,
-			Overview:  h.Item.Overview,
+			PeerID:         h.Peer.ID,
+			PeerName:       h.Peer.Name,
+			LibraryID:      h.Item.LibraryID,
+			ID:             h.Item.ID,
+			Type:           h.Item.Type,
+			Title:          h.Item.Title,
+			Year:           h.Item.Year,
+			Overview:       h.Item.Overview,
+			BackdropColors: paletteFromShared(h.Item),
 		}
 		if h.Item.HasPoster {
 			row.PosterURL = "/api/v1/me/peers/" + h.Peer.ID + "/items/" + h.Item.ID + "/poster"

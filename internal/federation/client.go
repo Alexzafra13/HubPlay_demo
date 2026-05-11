@@ -56,6 +56,15 @@ type remoteSharedItem struct {
 	Overview  string `json:"overview,omitempty"`
 	HasPoster bool   `json:"has_poster,omitempty"`
 	LibraryID string `json:"library_id,omitempty"`
+	// Pre-extracted swatches from the peer's images table. Forwarded
+	// unchanged to consumers — they end up as `backdrop_colors` on
+	// the user-facing wire shape. Empty when the peer pre-dates the
+	// federation-side color plumbing OR when the underlying image has
+	// no extracted palette (older scans). Zero-value defaults are
+	// safe because omitempty drops them; consumer treats absence
+	// identically to "no server palette".
+	PosterColor      string `json:"poster_color,omitempty"`
+	PosterColorMuted string `json:"poster_color_muted,omitempty"`
 }
 
 type remoteItemsResponse struct {
@@ -163,13 +172,15 @@ func (m *Manager) FetchPeerItems(ctx context.Context, peerID, libraryID string, 
 	out := make([]*SharedItem, 0, len(wire.Items))
 	for _, w := range wire.Items {
 		out = append(out, &SharedItem{
-			ID:        w.ID,
-			Type:      w.Type,
-			Title:     w.Title,
-			Year:      w.Year,
-			Overview:  w.Overview,
-			HasPoster: w.HasPoster,
-			LibraryID: w.LibraryID,
+			ID:               w.ID,
+			Type:             w.Type,
+			Title:            w.Title,
+			Year:             w.Year,
+			Overview:         w.Overview,
+			HasPoster:        w.HasPoster,
+			LibraryID:        w.LibraryID,
+			PosterColor:      w.PosterColor,
+			PosterColorMuted: w.PosterColorMuted,
 		})
 	}
 	return out, wire.Total, nil
@@ -211,13 +222,15 @@ func (m *Manager) FetchPeerRecent(ctx context.Context, peerID string, limit int)
 	out := make([]*SharedItem, 0, len(wire.Items))
 	for _, w := range wire.Items {
 		out = append(out, &SharedItem{
-			ID:        w.ID,
-			Type:      w.Type,
-			Title:     w.Title,
-			Year:      w.Year,
-			Overview:  w.Overview,
-			HasPoster: w.HasPoster,
-			LibraryID: w.LibraryID,
+			ID:               w.ID,
+			Type:             w.Type,
+			Title:            w.Title,
+			Year:             w.Year,
+			Overview:         w.Overview,
+			HasPoster:        w.HasPoster,
+			LibraryID:        w.LibraryID,
+			PosterColor:      w.PosterColor,
+			PosterColorMuted: w.PosterColorMuted,
 		})
 	}
 	return out, nil
@@ -261,13 +274,15 @@ func (m *Manager) FetchPeerSearch(ctx context.Context, peerID, query string, lim
 	out := make([]*SharedItem, 0, len(wire.Items))
 	for _, w := range wire.Items {
 		out = append(out, &SharedItem{
-			ID:        w.ID,
-			Type:      w.Type,
-			Title:     w.Title,
-			Year:      w.Year,
-			Overview:  w.Overview,
-			HasPoster: w.HasPoster,
-			LibraryID: w.LibraryID,
+			ID:               w.ID,
+			Type:             w.Type,
+			Title:            w.Title,
+			Year:             w.Year,
+			Overview:         w.Overview,
+			HasPoster:        w.HasPoster,
+			LibraryID:        w.LibraryID,
+			PosterColor:      w.PosterColor,
+			PosterColorMuted: w.PosterColorMuted,
 		})
 	}
 	return out, nil

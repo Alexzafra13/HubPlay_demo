@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"hubplay/internal/db/sqlc"
@@ -427,6 +428,15 @@ func (r *FederationRepository) ListSharedLibrariesForPeer(ctx context.Context, p
 // ListSharedItems returns shared items in (peer, library), paginated.
 // Caller must have already validated the share + scope; the SQL JOIN
 // against federation_library_shares is defence in depth.
+//
+// PosterColor / PosterColorMuted are attached via a separate batch
+// query rather than baked into the sqlc ListSharedItems statement —
+// the sqlc 1.31.1 parser truncates `ORDER BY ... COLLATE NOCASE` on
+// queries with extra COALESCE-over-subquery columns (see
+// architecture-decisions.md). The batch query reads the same
+// images.dominant_color* the inline subquery would have, so the
+// behaviour is identical: empty strings when the item pre-dates
+// migration 014 or extraction failed.
 func (r *FederationRepository) ListSharedItems(ctx context.Context, peerID, libraryID string, offset, limit int) ([]*federation.SharedItem, int, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
@@ -464,6 +474,9 @@ func (r *FederationRepository) ListSharedItems(ctx context.Context, peerID, libr
 			HasPoster: row.HasPoster,
 		})
 	}
+	if err := r.attachPrimaryImageColors(ctx, out); err != nil {
+		return nil, 0, fmt.Errorf("attach poster colours: %w", err)
+	}
 	return out, int(total), nil
 }
 
@@ -496,7 +509,59 @@ func (r *FederationRepository) ListRecentSharedItems(ctx context.Context, peerID
 			LibraryID: row.LibraryID,
 		})
 	}
+	if err := r.attachPrimaryImageColors(ctx, out); err != nil {
+		return nil, fmt.Errorf("attach poster colours: %w", err)
+	}
 	return out, nil
+}
+
+// attachPrimaryImageColors fills SharedItem.PosterColor and
+// PosterColorMuted in place by batch-fetching primary-image swatches
+// from the images table. Single query for the whole page, so no N+1.
+//
+// Lives here (raw SQL, not sqlc) because the natural place — a
+// correlated subquery on the parent query — trips the sqlc 1.31.1
+// parser when combined with ORDER BY ... COLLATE NOCASE. Empty
+// `items` and items whose image has no extracted swatch are both
+// no-ops (the field already defaults to "").
+func (r *FederationRepository) attachPrimaryImageColors(ctx context.Context, items []*federation.SharedItem) error {
+	if len(items) == 0 {
+		return nil
+	}
+	placeholders := make([]string, len(items))
+	args := make([]any, len(items))
+	for i, it := range items {
+		placeholders[i] = "?"
+		args[i] = it.ID
+	}
+	q := `SELECT item_id, dominant_color, dominant_color_muted
+	      FROM images
+	      WHERE type = 'primary' AND is_primary = 1
+	        AND item_id IN (` + strings.Join(placeholders, ",") + `)`
+	rows, err := r.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	colors := make(map[string][2]string, len(items))
+	for rows.Next() {
+		var itemID, vibrant, muted string
+		if err := rows.Scan(&itemID, &vibrant, &muted); err != nil {
+			return err
+		}
+		colors[itemID] = [2]string{vibrant, muted}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, it := range items {
+		if c, ok := colors[it.ID]; ok {
+			it.PosterColor = c[0]
+			it.PosterColorMuted = c[1]
+		}
+	}
+	return nil
 }
 
 // SearchSharedItems runs a full-text query across libraries the calling
@@ -557,7 +622,13 @@ func (r *FederationRepository) SearchSharedItems(ctx context.Context, peerID, qu
 		}
 		out = append(out, &it)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := r.attachPrimaryImageColors(ctx, out); err != nil {
+		return nil, fmt.Errorf("attach poster colours: %w", err)
+	}
+	return out, nil
 }
 
 // ─── catalog cache (Phase 4) ────────────────────────────────────────
@@ -584,17 +655,26 @@ func (r *FederationRepository) UpsertCachedItems(ctx context.Context, peerID, li
 		return fmt.Errorf("clear cache: %w", err)
 	}
 	for _, it := range items {
-		if err := qtx.InsertCachedItem(ctx, sqlc.InsertCachedItemParams{
-			PeerID:    peerID,
-			LibraryID: libraryID,
-			RemoteID:  it.ID,
-			Type:      it.Type,
-			Title:     it.Title,
-			Year:      sql.NullInt64{Int64: int64(it.Year), Valid: it.Year != 0},
-			Overview:  nullableString(it.Overview),
-			HasPoster: it.HasPoster,
-			CachedAt:  at,
-		}); err != nil {
+		// sqlc 1.31.1 truncates the InsertCachedItem statement when
+		// the 10+ placeholders combine with adjacent ORDER BY ...
+		// COLLATE NOCASE queries in the same file (see
+		// architecture-decisions.md). Raw SQL holdout keeps the
+		// colour columns flowing without poking the parser bug.
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO federation_item_cache
+			    (peer_id, library_id, remote_id, type, title,
+			     year, overview, has_poster,
+			     poster_color, poster_color_muted, cached_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`,
+			peerID, libraryID, it.ID, it.Type, it.Title,
+			sql.NullInt64{Int64: int64(it.Year), Valid: it.Year != 0},
+			nullableString(it.Overview),
+			it.HasPoster,
+			it.PosterColor, it.PosterColorMuted,
+			at,
+		)
+		if err != nil {
 			return fmt.Errorf("insert cached item %s: %w", it.ID, err)
 		}
 	}
@@ -624,25 +704,38 @@ func (r *FederationRepository) ListCachedItems(ctx context.Context, peerID, libr
 		return []*federation.SharedItem{}, 0, time.Time{}, nil
 	}
 
-	rows, err := r.q.ListCachedItems(ctx, sqlc.ListCachedItemsParams{
-		PeerID:    peerID,
-		LibraryID: libraryID,
-		Limit:     int64(limit),
-		Offset:    int64(offset),
-	})
+	// Raw SQL mirrors UpsertCachedItems: the sqlc ListCachedItems
+	// query stays on the previously-working column set, and the
+	// two colour columns ride a sibling SELECT here. Same reasoning
+	// as in UpsertCachedItems re: the sqlc 1.31.1 parser bug.
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT remote_id, type, title,
+		       COALESCE(year, 0) AS year,
+		       COALESCE(overview, '') AS overview,
+		       has_poster, poster_color, poster_color_muted
+		FROM federation_item_cache
+		WHERE peer_id = ? AND library_id = ?
+		ORDER BY title COLLATE NOCASE ASC
+		LIMIT ? OFFSET ?
+	`, peerID, libraryID, limit, offset)
 	if err != nil {
 		return nil, 0, time.Time{}, fmt.Errorf("list cached items: %w", err)
 	}
-	out := make([]*federation.SharedItem, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, &federation.SharedItem{
-			ID:        row.RemoteID,
-			Type:      row.Type,
-			Title:     row.Title,
-			Year:      int(row.Year),
-			Overview:  row.Overview,
-			HasPoster: row.HasPoster,
-		})
+	defer rows.Close()
+	out := []*federation.SharedItem{}
+	for rows.Next() {
+		var it federation.SharedItem
+		if err := rows.Scan(
+			&it.ID, &it.Type, &it.Title,
+			&it.Year, &it.Overview,
+			&it.HasPoster, &it.PosterColor, &it.PosterColorMuted,
+		); err != nil {
+			return nil, 0, time.Time{}, fmt.Errorf("scan cached item: %w", err)
+		}
+		out = append(out, &it)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, time.Time{}, err
 	}
 	// MAX(cached_at) is typed as interface{} by sqlc because the
 	// aggregate could legitimately return NULL; coerce defensively.

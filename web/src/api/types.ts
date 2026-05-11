@@ -98,6 +98,14 @@ export interface FederationRemoteItem {
   year?: number;
   overview?: string;
   poster_url?: string;
+  // Pre-extracted dominant swatches from the peer's primary image,
+  // same wire shape the local Item carries. PeerItemDetail consumes
+  // these so the page-wide aurora paints on first render without
+  // running node-vibrant in the browser. Absent for older peers that
+  // pre-date the federation-side color plumbing OR for items whose
+  // primary image hasn't been extracted yet — frontend falls back to
+  // runtime extraction in either case.
+  backdrop_colors?: { vibrant?: string; muted?: string };
 }
 
 // Paginated response for items + cache freshness flag. The UI shows
@@ -139,6 +147,7 @@ export interface FederationSearchHit {
   year?: number;
   overview?: string;
   poster_url?: string;
+  backdrop_colors?: { vibrant?: string; muted?: string };
 }
 
 export interface FederationSearchResponse {

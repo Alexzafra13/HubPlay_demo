@@ -177,29 +177,40 @@ export default function PeerItemDetail() {
     };
   }, [item, peer?.name]);
 
-  // Runtime palette — federation rows don't carry the server-extracted
-  // backdrop_colors local items get, so we run node-vibrant on the
-  // poster URL ourselves. The hook is cached per-URL and dynamic-
-  // imports node-vibrant in its own chunk, so this stays cheap. The
-  // hero already does its own runtime extraction internally; lifting
-  // it here just lets the page-wide aurora canvas use the same swatches
-  // (one decode, two consumers — the cache makes it free).
-  const palette = useVibrantColors(mediaItem?.poster_url ?? null);
+  // Aurora palette — prefer the peer's pre-extracted swatches (same
+  // path the local detail page uses for items in our catalog). When
+  // backdrop_colors lands on the wire we skip node-vibrant entirely;
+  // the runtime extractor only runs as a fallback for older peers
+  // that pre-date the federation-side colour plumbing or items whose
+  // primary image hasn't been extracted yet.
+  //
+  // The fallback URL is gated on hasServerPalette so the dynamic
+  // import of node-vibrant doesn't load when the server already
+  // delivered a palette — same first-paint cost as a local item.
+  const hasServerPalette = !!(
+    mediaItem?.backdrop_colors?.vibrant || mediaItem?.backdrop_colors?.muted
+  );
+  const fallbackUrl = hasServerPalette ? null : mediaItem?.poster_url ?? null;
+  const runtimePalette = useVibrantColors(fallbackUrl);
   const aurora = useMemo(
     () =>
       buildAuroraStyle({
-        vibrant: palette.vibrant ?? undefined,
-        muted: palette.muted ?? undefined,
-        darkVibrant: palette.darkVibrant ?? undefined,
-        lightVibrant: palette.lightVibrant ?? undefined,
-        lightMuted: palette.lightMuted ?? undefined,
+        vibrant:
+          mediaItem?.backdrop_colors?.vibrant ?? runtimePalette.vibrant ?? undefined,
+        muted:
+          mediaItem?.backdrop_colors?.muted ?? runtimePalette.muted ?? undefined,
+        darkVibrant: runtimePalette.darkVibrant ?? undefined,
+        lightVibrant: runtimePalette.lightVibrant ?? undefined,
+        lightMuted: runtimePalette.lightMuted ?? undefined,
       }),
     [
-      palette.vibrant,
-      palette.muted,
-      palette.darkVibrant,
-      palette.lightVibrant,
-      palette.lightMuted,
+      mediaItem?.backdrop_colors?.vibrant,
+      mediaItem?.backdrop_colors?.muted,
+      runtimePalette.vibrant,
+      runtimePalette.muted,
+      runtimePalette.darkVibrant,
+      runtimePalette.lightVibrant,
+      runtimePalette.lightMuted,
     ],
   );
 
