@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"hubplay/internal/auth"
 	"hubplay/internal/logging"
 )
 
@@ -19,11 +20,15 @@ import (
 // Read-only. Mutations (level changes, log file rotation, etc.) live
 // elsewhere; this handler only ever returns data.
 type AdminLogsHandler struct {
-	buffer *logging.Buffer
+	buffer  *logging.Buffer
+	limiter *SSELimiter
 }
 
-func NewAdminLogsHandler(buffer *logging.Buffer) *AdminLogsHandler {
-	return &AdminLogsHandler{buffer: buffer}
+// NewAdminLogsHandler — limiter is optional. Admin-only surface so
+// abuse vectors are narrow, but counting it toward the global cap
+// keeps the system-wide invariant honest.
+func NewAdminLogsHandler(buffer *logging.Buffer, limiter *SSELimiter) *AdminLogsHandler {
+	return &AdminLogsHandler{buffer: buffer, limiter: limiter}
 }
 
 // Snapshot returns the most recent entries (oldest first). Default
@@ -70,6 +75,21 @@ func (h *AdminLogsHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		respondError(w, r, http.StatusInternalServerError, "STREAMING_UNSUPPORTED",
 			"streaming not supported by this server")
 		return
+	}
+
+	if h.limiter != nil {
+		userID := ""
+		if claims := auth.GetClaims(r.Context()); claims != nil {
+			userID = claims.UserID
+		}
+		release, err := h.limiter.Acquire(userID)
+		if err != nil {
+			w.Header().Set("Retry-After", "30")
+			respondError(w, r, http.StatusServiceUnavailable, "SSE_CAP_EXCEEDED",
+				"too many concurrent event streams; retry shortly")
+			return
+		}
+		defer release()
 	}
 
 	w.Header().Set("Content-Type", "text/event-stream")

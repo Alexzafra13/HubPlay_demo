@@ -20,7 +20,7 @@ import (
 func newSSETestServer(t *testing.T) (*event.Bus, *httptest.Server) {
 	t.Helper()
 	bus := event.NewBus(testutil.NopLogger())
-	h := NewEventHandler(bus, testutil.NopLogger())
+	h := NewEventHandler(bus, nil, testutil.NopLogger())
 	srv := httptest.NewServer(http.HandlerFunc(h.Stream))
 	t.Cleanup(srv.Close)
 	return bus, srv

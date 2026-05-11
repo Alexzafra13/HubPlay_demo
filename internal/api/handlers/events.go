@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"hubplay/internal/auth"
 	"hubplay/internal/event"
 )
 
@@ -19,14 +20,20 @@ const sseKeepaliveInterval = 25 * time.Second
 // EventHandler provides a Server-Sent Events (SSE) endpoint for real-time updates.
 // Clients connect via GET /api/v1/events and receive JSON events as they happen.
 type EventHandler struct {
-	bus    EventBusSubscriber
-	logger *slog.Logger
+	bus     EventBusSubscriber
+	limiter *SSELimiter
+	logger  *slog.Logger
 }
 
-func NewEventHandler(bus EventBusSubscriber, logger *slog.Logger) *EventHandler {
+// NewEventHandler — limiter is optional. nil means no cap enforcement
+// (test builds wire it that way); production passes the shared
+// SSELimiter from the router so global + per-user counts are unified
+// across every SSE surface.
+func NewEventHandler(bus EventBusSubscriber, limiter *SSELimiter, logger *slog.Logger) *EventHandler {
 	return &EventHandler{
-		bus:    bus,
-		logger: logger.With("module", "sse"),
+		bus:     bus,
+		limiter: limiter,
+		logger:  logger.With("module", "sse"),
 	}
 }
 
@@ -36,6 +43,26 @@ func (h *EventHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		respondError(w, r, http.StatusInternalServerError, "SSE_NOT_SUPPORTED", "streaming not supported")
 		return
+	}
+
+	// Cap connections BEFORE the headers flush. Once the SSE response
+	// starts there's no way to return a 503; the client is committed
+	// to read forever. Tying the slot to claims.UserID means a single
+	// user opening 200 tabs can't starve the global cap for everyone
+	// else.
+	if h.limiter != nil {
+		userID := ""
+		if claims := auth.GetClaims(r.Context()); claims != nil {
+			userID = claims.UserID
+		}
+		release, err := h.limiter.Acquire(userID)
+		if err != nil {
+			w.Header().Set("Retry-After", "30")
+			respondError(w, r, http.StatusServiceUnavailable, "SSE_CAP_EXCEEDED",
+				"too many concurrent event streams; retry shortly")
+			return
+		}
+		defer release()
 	}
 
 	w.Header().Set("Content-Type", "text/event-stream")

@@ -1,5 +1,70 @@
 # Estado del proyecto
 
+> 🎬 **Sesión 2026-05-11 (rama `claude/review-project-1y28j`, bloque de infra/seguridad)** — el usuario pidió "revisa mi proyecto para seguir haciendo cosas" + eligió el bloque "Trivy pin + CSRF + SSE cap" + "que me recomiendas? quiero que sea robusto y bien hecho".
+>
+> **Recomendación senior tomada**: implementar SSE cap (gap real) + pinear Trivy a SHA (mejor práctica industria, el comentario que justificaba `@master` pasaba por alto que la imagen se publica a GHCR pública y la consumen terceros) + cerrar CSRF como "intentional by design, no action" (la auditoría flagueaba "fail-open cuando no hay session cookie" pero el código + tests demuestran que es la elección correcta — sin sesión autenticada no hay nada que proteger).
+>
+> **Commits en esta sesión**:
+>
+> - **Trivy pin a SHA**: `aquasecurity/trivy-action@master` → `@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0` en `.github/workflows/docker.yml`. Comentario refactorizado: la justificación previa ("self-hosted single-tenant, latency-of-fix outweighs supply-chain risk") era débil porque la imagen va a GHCR pública. Bump path documentado (releases de aquasecurity/trivy-action). Renovate/dependabot puede levantarlo automáticamente.
+>
+> - **SSELimiter compartido**: nuevo `internal/api/handlers/sse_limiter.go` con caps `Default=100 global`, `Default=5 per-user`. Tres handlers (`events.go` global, `me_events.go` user-scoped, `admin_logs.go` admin) ahora consumen UNA instancia inyectada vía `api.Dependencies.SSELimiter`. Cada handler llama `limiter.Acquire(userID)` ANTES de flush de headers — una vez que la SSE response arranca el status code está locked-in. Sobre el cap: 503 + `Retry-After: 30`. Release es idempotente (sync.Once interno) por si el handler hace defer doble.
+>
+> - **Tests**: `sse_limiter_test.go` con 6 tests (under-caps, idempotent release, anonymous-only global, map cleanup, concurrent acquire/release race-detector smoke, defaults-when-zero) + `TestMeEvents_RejectsWhenPerUserCapReached` integration test (verifica 503 + Retry-After + release-on-disconnect cycle).
+>
+> **Decisiones senior tomadas (no obvias del código)**:
+>
+> 1. **Per-user cap = 5, global cap = 100**: dimensionado para self-hosted household-scale. Usuario legit típico = 2-3 tabs; >5 concurrentes per-user es runaway reconnect loop. Si una deployment crece, los caps se lift via config (no constants tweak).
+>
+> 2. **Acquire ANTES de WriteHeader**: una vez que el flusher escribe `Content-Type: text/event-stream` el status code está fijo a 200. Si quisiéramos rechazar a la mitad tendríamos que cerrar la conexión sin status — feedback ambiguo para el cliente.
+>
+> 3. **Anonymous userID="" cuenta solo para global**: carve-out futuro-proof. Hoy las 3 SSE surfaces requieren auth (todas dentro de `r.Use(deps.Auth.Middleware)`), pero si llega una pública (status SSE, p.ej.), no queremos que la nada-userID exhausta una sola entrada del mapa.
+>
+> 4. **Sync.Once interno en release**: defer + double-call defensivo. El cost del Once es trivial (~ns) y la idempotencia simplifica el código de los handlers — no necesitan trackear "ya releazé".
+>
+> 5. **`SSELimiter` opcional (nil = no cap)**: tests pasan nil y los handlers skipean la enforcement. Producción wira un SSELimiter shared en main.go. Mismo pattern que `LogBuffer` — nil-safe en construction, requerido en runtime para producción.
+>
+> 6. **Trivy bump path documentado**: en lugar de "actualiza cuando puedas" el comentario apunta explícitamente a `https://github.com/aquasecurity/trivy-action/releases` y obliga a mantener SHA + version comment juntos. Renovate path explícito.
+>
+> 7. **CSRF "fail-open" cerrado sin código nuevo**: relectura cuidadosa de `csrf.go:74-79` + `csrf_test.go` (5 tests, incluído `TestCSRF_MutatingWithoutSessionCookieAllowed`) confirma que el behavior está bien diseñado y testeado. Atacante sin la cookie del víctima no puede setearla cross-origin (SameSite=Lax), y sin sesión autenticada no hay nada que CSRF pueda explotar. Cerrado como "intentional, no action".
+>
+> **Métricas**:
+>
+> - Backend Go: `go build ./...` clean. `go test -race -count=1 ./internal/api/...` → ok 67s + 55s, todos verdes incluyendo los 7 SSE tests nuevos.
+> - Frontend: sin cambios (sesión 100% backend/infra).
+>
+> **Backlog actualizado al cerrar sesión** (filtrado de los items que ya están hechos):
+>
+> **Streaming P1** (del audit del 2026-05-10):
+> - Burn-in PGS/DVDSUB/ASS (sin soporte nativo del browser).
+> - Audio multichannel passthrough (siempre baja a `aac stereo`).
+> - Refactor seek-coalesce (3 capas defensivas tras `7f6a053`).
+> - `-force_key_frames` GOP-aligned en transcode args.
+> - Pipeline VAAPI fully-on-GPU.
+>
+> **Frontend P1**:
+> - Polling 5s/30s residual donde debería ser SSE.
+> - Tests grandes para `pages/`: Home, LiveTV, Search, Movies, Series, Collections.
+> - **node-vibrant** sigue 100% client-side (`useVibrantColors.ts`). Plex/Jellyfin lo hacen server-side + cache.
+>
+> **Infra/seguridad P1** (estado real al cierre):
+> - ~~`RateLimitConfig.GlobalRPM` dead code~~ ✅ done (commit `dc4c741`).
+> - ~~YAML 0644 → 0600~~ ✅ done (commit `2a4a3b7`).
+> - ~~`govulncheck` en CI~~ ✅ done (commit `9cee31e`).
+> - ~~hls.js sin chunk separado~~ ✅ done (commit `0c870ae`).
+> - ~~HDR/10-bit decision + tone-mapping~~ ✅ done (commit `392f1da`).
+> - ~~Trivy pinned a SHA~~ ✅ done en esta sesión.
+> - ~~CSRF middleware "fail-open"~~ ✅ cerrado como intentional, sin código.
+> - ~~No connection cap en SSE~~ ✅ done en esta sesión.
+> - (no quedan items P1 de infra/seguridad activos)
+>
+> **Features grandes pendientes (P3, sin tocar)**:
+> - Multi-version del mismo título (4K + 1080p agrupados con picker).
+> - Watch-together (sync WebSocket sessions).
+> - Privacy stack (modo offline NFO, egress allowlist, CSP estricto).
+>
+> ---
+>
 > 🎬 **Sesión 2026-05-11 (rama `claude/review-project-status-SBKN4`, 2 commits, todo pusheado)** — el usuario pidió "revisa mi proyecto para ver por dónde seguir o si está la memoria desactualizada" y "haz como senior lo que creas mejor".
 >
 > **Hallazgo principal — el backlog estaba sustancialmente desactualizado**. Audit honesto contra el código actual descubrió que **5 items que estaban listados como "pendientes" en el handoff del 2026-05-10 ya estaban implementados** (algunos hace semanas), y otros tenían sutilezas que cambiaban su prioridad:
