@@ -31,10 +31,10 @@
 > - Frontend: `pnpm exec tsc --noEmit` clean. Vitest no corrido en esta sesión (cambios de data-only en es.json + UI components sin lógica nueva).
 > - Container: `hubplay` (`ghcr.io/alexzafra13/hubplay_demo:latest`) recién built, healthy en :8097, mount apunta al config padre con la DB de 130MB del usuario.
 >
-> **Estado del worktree**:
-> - 11 commits en `claude/relaxed-lederberg-48e836`, todos pusheados a origin.
-> - `main` local mergeado vía fast-forward con los 11 commits — **`git push origin main` está pendiente** de hacer si se quiere consolidar; el remote main NO los tiene aún.
-> - PR remoto disponible: https://github.com/Alexzafra13/HubPlay_demo/pull/new/claude/relaxed-lederberg-48e836
+> **Estado del worktree** (actualizado tras follow-up):
+> - 11 commits en `claude/relaxed-lederberg-48e836`, PR #238 mergeada a `main` (`afae026`).
+> - Post-merge follow-up: `59dbad0` *fix(livetv): make ?channel=<id> deep-link idempotent against re-render churn* (PR #239, merge `aa01f14`) — el useEffect que auto-reproducía un canal al venir del rail "En directo ahora" del Home spiraleaba por re-render churn (`openPlayer` dep rebuilt en cada render porque `channels` array ref cambia) y con React 19 concurrent mode podía colgar la página >45s. Fix con `handledChannelRef` idempotente per-channel-id + eliminado el strip-on-not-found que perdía deep-links silenciosamente cuando la lista no había hidratado aún.
+> - `origin/main` y local main ya sincronizados.
 >
 > **Backlog que queda explícito (próxima sesión)**:
 > - **Streaming P1** (del audit inicial): HDR/tone-mapping, subtítulos burn-in (PGS/ASS), audio multichannel passthrough, GOP-aligned `-force_key_frames`, refactor del seek-coalesce (3 capas defensivas), VAAPI fully-on-GPU.

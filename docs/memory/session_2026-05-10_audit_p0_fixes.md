@@ -114,7 +114,8 @@ Las dos queries afectadas pasaron a raw SQL (`ListProfilesForOwner`, `RotateRefr
 ## Estado del worktree
 
 - **11 commits** en la rama `claude/relaxed-lederberg-48e836`, todos pushados a origin.
-- `main` local mergeado vía fast-forward; **pending `git push origin main`** para sincronizar el remote.
+- PR #238 mergeada a `main` (`afae026`); `origin/main` ya sincronizado.
+- Follow-up post-merge: `59dbad0` *fix(livetv): make ?channel=<id> deep-link idempotent against re-render churn* (PR #239, merge `aa01f14`) cierra el freeze de 45s+ al pinchar canales desde el rail "En directo ahora" del Home. Causa: el useEffect de deep-link tenía `openPlayer` en deps, que se rebuildeaba en cada render porque `channels` también lo hacía; en concurrent rendering React 19 entraba en spiral. Fix con `handledChannelRef` para idempotencia per-channel-id + eliminado el strip-on-not-found que perdía deep-links silenciosamente.
 - Container `hubplay` corriendo `ghcr.io/alexzafra13/hubplay_demo:latest` (recién built, healthy) con todos los fixes.
 - Suite de tests Go verde: `go test ./internal/db/... ./internal/auth/... ./internal/api/handlers/...` (golang:1.25 docker, ~55s total).
 - `pnpm exec tsc --noEmit` clean en frontend.
@@ -156,11 +157,9 @@ Del audit inicial, items P1 que siguen abiertos:
 
 ```bash
 git -C C:\Users\alex\Desktop\hubp\HubPlay_demo log --oneline -12
-git -C C:\Users\alex\Desktop\hubp\HubPlay_demo push origin main  # si aún no se hizo
 docker ps --filter name=hubplay
 ```
 
-PR remoto:
-https://github.com/Alexzafra13/HubPlay_demo/pull/new/claude/relaxed-lederberg-48e836
+PRs ya cerrados: #238 (audit + 11 commits) y #239 (livetv deep-link fix). Ambos en `main`.
 
 Las credenciales del setup local: `admin` / `admin123`.
