@@ -24,7 +24,6 @@ logging:
 rate_limit:
   enabled: true
   login_attempts: 5
-  global_rpm: 100
 
 observability:
   metrics_enabled: true
