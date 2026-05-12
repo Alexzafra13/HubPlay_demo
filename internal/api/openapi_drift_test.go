@@ -94,6 +94,16 @@ var outOfScopeExact = map[string]string{
 	"GET /admin/system/logs":         "admin log ring snapshot",
 	"GET /admin/system/logs/stream":  "admin log live SSE stream",
 
+	// ── Device-code pairing SSE (RFC 8628 §3.3.1 sibling) ─────────
+	// Server-Sent Events channel a /pair page subscribes to so the
+	// in-app device-link flow doesn't need polling. Authenticated
+	// by the opaque device_code in the query string; native clients
+	// keep using /auth/device/poll. No request body, no JSON
+	// response — SSE wire format only. Documenting in openapi.yaml
+	// would mean expressing event-stream semantics that the spec's
+	// REST primitives can't model cleanly.
+	"GET /auth/device/events": "device-code SSE channel for in-app pair flow",
+
 	// ── Federation admin (admin) ──────────────────────────────────────
 	"GET /admin/peers":                    "federation pairing admin",
 	"GET /admin/peers/identity":           "federation pairing admin",
