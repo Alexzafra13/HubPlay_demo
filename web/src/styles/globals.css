@@ -318,3 +318,19 @@ body::before {
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
 }
+
+/* BottomSheet: slide up from the bottom + fade in. Single 180ms run
+   on mount so the sheet feels native (matches iOS / Android sheet
+   timings) without delaying interaction. The container starts
+   translated by 100% of its own height so it animates from off-
+   screen, and uses translate3d to stay on the GPU compositor. */
+@keyframes sheet-up {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 24px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}

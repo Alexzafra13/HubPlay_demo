@@ -310,10 +310,14 @@
     "endsAt": "Termina a las {{time}}",
     "quality": "Calidad",
     "qualityAuto": "Auto",
+    "qualitySingleRung": "Esta fuente solo expone una calidad.",
+    "qualityNotApplicable": "Reproducción directa: no aplica selector de calidad.",
     "audio": "Audio",
     "subtitles": "Subtítulos",
     "subtitlesOff": "Ninguno",
     "subtitlesExternal": "Buscar subtítulos online",
+    "settings": "Ajustes",
+    "playbackRate": "Velocidad",
     "play": "Reproducir",
     "pause": "Pausa",
     "back": "Atrás",
@@ -325,6 +329,9 @@
     "exitFullscreen": "Salir de pantalla completa",
     "closePlayer": "Cerrar reproductor",
     "trackFallback": "Pista {{n}}",
+    "sheet": {
+      "close": "Cerrar"
+    },
     "method": {
       "directPlay": "Reproducción directa",
       "directStream": "Stream directo",

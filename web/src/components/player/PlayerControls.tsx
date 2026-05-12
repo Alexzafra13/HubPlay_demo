@@ -1,8 +1,10 @@
-import { memo, useRef, useState } from "react";
-import type { FC } from "react";
+import { memo, useEffect, useRef, useState } from "react";
+import type { FC, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { TimeDisplay } from "./TimeDisplay";
 import type { TrickplayManifest } from "@/hooks/useTrickplay";
+import { useIsMobile } from "@/hooks/useIsMobile";
+import { BottomSheet, SheetRow, SheetSection } from "./BottomSheet";
 import {
   AudioIcon,
   BackIcon,
@@ -12,7 +14,7 @@ import {
   LargePlayIcon,
   PauseIcon,
   PlayIcon,
-  QualityIcon,
+  SettingsIcon,
   SubtitleIcon,
   VolumeHighIcon,
   VolumeLowIcon,
@@ -51,6 +53,20 @@ interface TrickplayProps {
   spriteURL: string;
 }
 
+// Playback-rate ladder. Hard-coded ladder (matches Plex / YouTube)
+// because three-quarter / one-and-a-third increments confuse more
+// than they help, and exposing arbitrary values via a slider on
+// touch is fiddly. Stored as numbers so the parent can multiply
+// directly onto `video.playbackRate` without parsing.
+const PLAYBACK_RATES: ReadonlyArray<{ value: number; label: string }> = [
+  { value: 0.5, label: "0.5×" },
+  { value: 0.75, label: "0.75×" },
+  { value: 1.0, label: "1×" },
+  { value: 1.25, label: "1.25×" },
+  { value: 1.5, label: "1.5×" },
+  { value: 2.0, label: "2×" },
+];
+
 interface PlayerControlsProps {
   isPlaying: boolean;
   currentTime: number;
@@ -82,6 +98,8 @@ interface PlayerControlsProps {
   currentSubtitleTrack: number;
   /** -1 = auto / ABR. */
   currentQuality?: number;
+  /** Current playback rate (1.0 = normal). */
+  playbackRate?: number;
   onPlayPause: () => void;
   onSeek: (time: number) => void;
   onVolumeChange: (volume: number) => void;
@@ -90,9 +108,17 @@ interface PlayerControlsProps {
   onAudioTrackChange: (id: number) => void;
   onSubtitleTrackChange: (id: number) => void;
   onQualityChange?: (id: number) => void;
-  /** Optional: when provided, renders a "search online subs" button
-   *  next to the subtitle selector. The parent owns the modal and
-   *  the resulting `<track>` injection. */
+  /** Called with the new playback rate (e.g. 1.5). Renders the
+   *  Velocidad section in the Ajustes sheet when provided. */
+  onPlaybackRateChange?: (rate: number) => void;
+  /** Called whenever a picker (Audio / Subs / Ajustes) opens or
+   *  closes. The parent uses this to pin the controls-visible state
+   *  while a sheet is up, so the 3-second auto-hide timer can't
+   *  evict the sheet's containing overlay mid-interaction. */
+  onMenuOpenChange?: (anyOpen: boolean) => void;
+  /** Optional: when provided, renders a "search online subs" action
+   *  inside the subtitle picker. The parent owns the modal and the
+   *  resulting `<track>` injection. */
   onSearchExternalSubs?: () => void;
   onClose: () => void;
   title?: string;
@@ -105,15 +131,16 @@ interface PlayerControlsProps {
   logoUrl?: string;
   /**
    * Active playback method — "direct_play" / "direct_stream" /
-   * "transcode". Drives the small pill on the top bar that tells
-   * the user what the server is actually doing per-session (the
-   * Plex / Jellyfin convention). Optional; pill hides when absent
-   * so the player stays clean if a caller doesn't have the info.
+   * "transcode". Drives the colour tint on the Ajustes button (the
+   * gear icon picks up green for "free" paths or amber for transcode
+   * so the operator sees the session state without opening anything).
+   * Inside the Ajustes sheet the method is shown as a banner above
+   * the Calidad section.
    */
   playbackMethod?: "direct_play" | "direct_stream" | "transcode";
   /**
-   * Optional resolution / quality label appended to the pill when
-   * the method is `transcode` (e.g. "1080p"). Hidden for
+   * Optional resolution / quality label appended next to the method
+   * inside the Ajustes sheet banner (e.g. "1080p"). Hidden for
    * direct_play / direct_stream because those don't pick a profile.
    */
   transcodeProfileLabel?: string;
@@ -123,41 +150,31 @@ interface PlayerControlsProps {
 // `./audioTracks.ts`. Kept out of this file so it stays a pure
 // presentation component (composition + props mapping).
 
-// ─── Playback method pill ───────────────────────────────────────────────────
+// ─── Click-away helper ──────────────────────────────────────────────────────
 
-const PlaybackMethodPill: FC<{
-  method?: "direct_play" | "direct_stream" | "transcode";
-  profileLabel?: string;
-}> = ({ method, profileLabel }) => {
-  const { t } = useTranslation();
-  if (!method) return null;
-  const label = (() => {
-    switch (method) {
-      case "direct_play":
-        return t("playerControls.method.directPlay");
-      case "direct_stream":
-        return t("playerControls.method.directStream");
-      case "transcode":
-        return profileLabel
-          ? t("playerControls.method.transcodeWithProfile", { profile: profileLabel })
-          : t("playerControls.method.transcode");
-    }
-  })();
-  // Colour cue: green for "free" paths (direct play / remux), amber
-  // for transcode so the operator instantly sees a CPU-paid session.
-  const tone =
-    method === "transcode"
-      ? "border-warning/40 bg-warning/15 text-warning"
-      : "border-success/40 bg-success/15 text-success";
-  return (
-    <span
-      className={`ml-2 inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${tone}`}
-      title={label}
-    >
-      {label}
-    </span>
-  );
-};
+// useClickAway: closes a popover when the user mousedowns outside the
+// referenced element. Bound at document level so a click on the
+// video / backdrop / a sibling control all dismiss the popover. The
+// caller passes a ref + a setter and (optionally) an `enabled` gate
+// to avoid binding listeners when the popover is closed.
+function useClickAway(
+  ref: React.RefObject<HTMLElement | null>,
+  onAway: () => void,
+  enabled: boolean,
+) {
+  useEffect(() => {
+    if (!enabled) return;
+    const handler = (e: MouseEvent) => {
+      const el = ref.current;
+      if (!el) return;
+      if (!el.contains(e.target as Node)) onAway();
+    };
+    // mousedown (not click) so a fresh click on another menu button
+    // closes us BEFORE that button's click toggles its own open state.
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [ref, onAway, enabled]);
+}
 
 // ─── Seek bar ────────────────────────────────────────────────────────────────
 
@@ -204,9 +221,6 @@ const SeekBar: FC<{
   // Chapter-tick hover state, separate from the trickplay-cursor
   // tracking above. Only the index is needed because the marker
   // owns its own X position via the absolute `left` percentage.
-  // Native `title` was already on each tick but the browser tooltip
-  // takes ~1s to appear and styles like 1998 — this gives an
-  // instant, on-brand pill above the seek bar.
   const [hoveredChapter, setHoveredChapter] = useState<number | null>(null);
 
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -243,9 +257,6 @@ const SeekBar: FC<{
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
     >
-      {/* Trickplay preview tooltip. Positioned above the bar, clamped
-          inside the track width so the right edge of a 320 px thumb
-          on a 30 px bar doesn't overflow the player. */}
       {trickplay && hoverTime != null && (
         <TrickplayTooltip
           manifest={trickplay.manifest}
@@ -270,44 +281,26 @@ const SeekBar: FC<{
         onChange={(e) => {
           const v = Number(e.target.value);
           if (isDraggingRef.current) {
-            // Mid-drag: visual echo only. The seek itself fires when
-            // the pointer comes up (commitPending).
             setDragValue(v);
           } else {
-            // Keyboard arrow nav (no pointer in flight) — commit now.
-            // Native <input type=range> moves by ~step per arrow press,
-            // and the user expects each press to be a real seek.
             onSeek(v);
           }
         }}
         className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
         aria-label={t("playerControls.seek")}
       />
-      {/* Track background */}
       <div className="relative w-full h-1 group-hover/seek:h-1.5 bg-white/20 rounded-full transition-all duration-150">
-        {/* Buffered */}
         <div
           className="absolute inset-y-0 left-0 bg-white/30 rounded-full"
           style={{ width: `${bufferedPercent}%` }}
         />
-        {/* Progress */}
         <div
           className="absolute inset-y-0 left-0 bg-accent rounded-full"
           style={{ width: `${progress}%` }}
         />
-        {/* Chapter markers — 2px white ticks at each chapter start.
-            Skipping the 0-second marker (no UI value: the bar itself
-            starts there) and any marker that lands past the end
-            (defensive: a re-encode that shrunk the file shouldn't
-            paint ticks off the visible bar). Hover renders a styled
-            tooltip with the chapter title + timecode just above the
-            tick — replaces the native `title` attribute which had a
-            ~1s delay and looked unstyled. */}
         {duration > 0 && chapters?.map((c, i) => {
           if (c.startSeconds <= 0 || c.startSeconds >= duration) return null;
           const left = (c.startSeconds / duration) * 100;
-          // Slightly wider hit-target (4px) under a thinner visible
-          // tick (2px) so the hover doesn't feel pixel-precise.
           return (
             <div
               key={i}
@@ -328,10 +321,6 @@ const SeekBar: FC<{
             </div>
           );
         })}
-        {/* Active chapter tooltip. Anchored above the seek bar at the
-            tick's percentage. Skipping when hovering the 0 index
-            because the early-return above filters those ticks; index
-            check just guards against a stale state. */}
         {duration > 0 && hoveredChapter != null && chapters?.[hoveredChapter] && (
           <ChapterTooltip
             title={chapters[hoveredChapter].title || `Chapter ${hoveredChapter + 1}`}
@@ -339,7 +328,6 @@ const SeekBar: FC<{
             leftPercent={(chapters[hoveredChapter].startSeconds / duration) * 100}
           />
         )}
-        {/* Thumb */}
         <div
           className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 h-3 w-3 bg-accent rounded-full opacity-0 group-hover/seek:opacity-100 transition-opacity duration-150"
           style={{ left: `${progress}%` }}
@@ -353,20 +341,6 @@ SeekBar.displayName = "SeekBar";
 
 // ─── Trickplay tooltip ─────────────────────────────────────────────────────
 
-/**
- * Renders a single thumbnail at hover time, plus a small time label.
- * The math is the inverse of `imaging.GenerateTrickplay`: given a
- * time in seconds, find which sub-image of the sprite covers it and
- * shift `background-position` to that cell.
- *
- * Position rules:
- *   - Centered on cursor X by default.
- *   - Clamped to stay inside the track width so the right/left edges
- *     don't bleed past the player chrome.
- *   - Sits above the track (bottom anchored), with a small gap so
- *     the seek thumb (visible on hover) doesn't overlap the
- *     thumbnail's bottom edge.
- */
 const TrickplayTooltip: FC<{
   manifest: TrickplayManifest;
   spriteURL: string;
@@ -383,8 +357,6 @@ const TrickplayTooltip: FC<{
   const tw = manifest.thumb_width;
   const th = manifest.thumb_height;
 
-  // Center on cursor, then clamp so the tooltip box stays inside the
-  // track. The 8 px margin is just visual breathing room.
   const half = tw / 2;
   let left = cursorX - half;
   if (left < 8) left = 8;
@@ -414,14 +386,6 @@ const TrickplayTooltip: FC<{
   );
 };
 
-// Chapter tooltip — appears above the seek bar when the user hovers a
-// chapter tick. Anchored at the tick's percentage along the bar
-// (translateX(-50%) centres it on that x); clamped via inline style
-// to stay within the track width using `max(8px, min(...))` so the
-// first-and-last chapters don't overflow either edge of the player
-// chrome. Pointer-events disabled so the tooltip never steals hover
-// from the seek bar itself — leaving the tick re-shows the trickplay
-// preview seamlessly.
 const ChapterTooltip: FC<{
   title: string;
   time: number;
@@ -455,77 +419,397 @@ function formatHMS(s: number): string {
   return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${m}:${pad(sec)}`;
 }
 
-// channelLabel + codecLabel + enrichAudioTracks live in
-// `./audioTracks.ts` so the logic is unit-testable without rendering
-// React. PlayerControls just imports `enrichAudioTracks` and lets the
-// helper own the (codec × channel) → label mapping.
+// ─── Track button (click-to-open, mobile sheet / desktop popover) ────────────
 
-// ─── Track selector dropdown ─────────────────────────────────────────────────
-
-const TrackSelector: FC<{
-  icon: FC;
+interface TrackOption {
+  id: number;
   label: string;
-  tracks: Array<{ id: number; name: string; lang: string }>;
-  currentTrack: number;
+  sublabel?: string;
+}
+
+interface TrackButtonProps {
+  /** Aria label + sheet/popover title. */
+  label: string;
+  /** Active method tint. Optional — when set, the button tints
+   *  background/border to surface direct-play vs transcode at a glance
+   *  (used by the Ajustes button). */
+  tint?: "success" | "warning";
+  icon: FC;
+  options: TrackOption[];
+  currentId: number;
+  /** When set, the picker renders a leading "off" / "auto" row mapped
+   *  to id = -1. */
   offLabel?: string;
   onSelect: (id: number) => void;
-}> = ({ icon: Icon, label, tracks, currentTrack, offLabel, onSelect }) => {
-  const { t } = useTranslation();
-  if (tracks.length === 0 && !offLabel) return null;
-  // The fallback label used when a track has neither name nor lang.
-  // The locale provides the "Track N" / "Pista N" shape; the index
-  // is interpolated as `n` so each language can word-order it
-  // freely.
-  const trackLabel = (id: number) => t("playerControls.trackFallback", { n: id + 1 });
+  /** Optional extra row appended at the end of the list (used by the
+   *  Subtitles picker to surface "Search online"). */
+  extra?: ReactNode;
+  /** When true, the button is disabled (e.g. quality picker with one
+   *  rung). The wrapping caller is responsible for the conditional. */
+  disabled?: boolean;
+  /** Optional text label rendered next to the icon — used on the
+   *  Settings button (desktop) to show "1080p" / "Auto" etc. at a
+   *  glance. Hidden on mobile via responsive class to save space. */
+  textLabel?: string;
+  /** Reports open/close to the parent so it can pin the controls
+   *  overlay visible while the picker is up. */
+  onOpenChange?: (open: boolean) => void;
+}
 
-  return (
-    <div className="relative group/track">
-      <button
-        className="p-1.5 rounded-[--radius-sm] text-white/80 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
-        aria-label={label}
-      >
-        <Icon />
-      </button>
-      <div className="absolute bottom-full right-0 mb-2 hidden group-hover/track:block z-20">
-        <div className="bg-bg-card/95 backdrop-blur-md border border-border rounded-[--radius-md] shadow-xl py-1 min-w-[160px]">
-          <div className="px-3 py-1.5 text-xs font-medium text-text-muted uppercase tracking-wide">
-            {label}
-          </div>
-          {offLabel && (
-            <button
-              onClick={() => onSelect(-1)}
-              className={[
-                "w-full text-left px-3 py-1.5 text-sm transition-colors cursor-pointer",
-                currentTrack === -1
-                  ? "text-accent bg-accent/10"
-                  : "text-text-primary hover:bg-bg-elevated",
-              ].join(" ")}
-            >
-              {offLabel}
-            </button>
-          )}
-          {tracks.map((track) => (
-            <button
-              key={track.id}
-              onClick={() => onSelect(track.id)}
-              className={[
-                "w-full text-left px-3 py-1.5 text-sm transition-colors cursor-pointer",
-                currentTrack === track.id
-                  ? "text-accent bg-accent/10"
-                  : "text-text-primary hover:bg-bg-elevated",
-              ].join(" ")}
-            >
-              {track.name || track.lang || trackLabel(track.id)}
-            </button>
-          ))}
-        </div>
+const TrackButton: FC<TrackButtonProps> = ({
+  label,
+  tint,
+  icon: Icon,
+  options,
+  currentId,
+  offLabel,
+  onSelect,
+  extra,
+  disabled,
+  textLabel,
+  onOpenChange,
+}) => {
+  const [open, setOpenState] = useState(false);
+  const setOpen = (next: boolean | ((v: boolean) => boolean)) => {
+    setOpenState((v) => {
+      const resolved = typeof next === "function" ? next(v) : next;
+      onOpenChange?.(resolved);
+      return resolved;
+    });
+  };
+  const isMobile = useIsMobile();
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  useClickAway(wrapperRef, () => setOpen(false), open && !isMobile);
+
+  const tintClass = (() => {
+    if (!tint) return "text-white/80 hover:text-white hover:bg-white/10";
+    if (tint === "success") {
+      return "text-success hover:text-success hover:bg-success/15 ring-1 ring-success/40";
+    }
+    return "text-warning hover:text-warning hover:bg-warning/15 ring-1 ring-warning/40";
+  })();
+
+  const handleSelect = (id: number) => {
+    onSelect(id);
+    setOpen(false);
+  };
+
+  const Btn = (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        if (!disabled) setOpen((v) => !v);
+      }}
+      disabled={disabled}
+      className={[
+        // Bigger hit target on mobile (~44 px effective) so the bar
+        // doesn't feel like a desktop-port. Desktop keeps the compact
+        // 28-px footprint to leave room for the volume slider next to
+        // it on hover.
+        "inline-flex items-center gap-1.5 rounded-[--radius-sm] p-2 sm:p-1.5 transition-colors cursor-pointer",
+        disabled ? "opacity-40 cursor-not-allowed" : tintClass,
+      ].join(" ")}
+      aria-label={label}
+      aria-haspopup="menu"
+      aria-expanded={open}
+    >
+      <Icon />
+      {textLabel && (
+        <span className="hidden sm:inline text-xs font-semibold tabular-nums">
+          {textLabel}
+        </span>
+      )}
+    </button>
+  );
+
+  // Mobile: native bottom sheet. Animated, fills width, scrolls.
+  if (isMobile) {
+    return (
+      <div ref={wrapperRef} className="relative">
+        {Btn}
+        <BottomSheet open={open} title={label} onClose={() => setOpen(false)}>
+          <SheetSection>
+            {offLabel && (
+              <SheetRow
+                selected={currentId === -1}
+                label={offLabel}
+                onClick={() => handleSelect(-1)}
+              />
+            )}
+            {options.map((opt) => (
+              <SheetRow
+                key={opt.id}
+                selected={currentId === opt.id}
+                label={opt.label}
+                sublabel={opt.sublabel}
+                onClick={() => handleSelect(opt.id)}
+              />
+            ))}
+            {extra}
+          </SheetSection>
+        </BottomSheet>
       </div>
+    );
+  }
+
+  // Desktop: click-to-open popover (replaces the old hover dropdown
+  // so the menu doesn't disappear when the cursor leaves it).
+  return (
+    <div ref={wrapperRef} className="relative">
+      {Btn}
+      {open && (
+        <div className="absolute bottom-full right-0 mb-2 z-30 min-w-[200px]">
+          <div className="bg-bg-card/95 backdrop-blur-md border border-border rounded-[--radius-md] shadow-xl py-1">
+            <div className="px-3 py-1.5 text-xs font-medium text-text-muted uppercase tracking-wide">
+              {label}
+            </div>
+            {offLabel && (
+              <button
+                type="button"
+                onClick={() => handleSelect(-1)}
+                className={[
+                  "w-full text-left px-3 py-1.5 text-sm transition-colors cursor-pointer",
+                  currentId === -1
+                    ? "text-accent bg-accent/10"
+                    : "text-text-primary hover:bg-bg-elevated",
+                ].join(" ")}
+              >
+                {offLabel}
+              </button>
+            )}
+            {options.map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => handleSelect(opt.id)}
+                className={[
+                  "w-full text-left px-3 py-1.5 text-sm transition-colors cursor-pointer",
+                  currentId === opt.id
+                    ? "text-accent bg-accent/10"
+                    : "text-text-primary hover:bg-bg-elevated",
+                ].join(" ")}
+              >
+                <div className="truncate">{opt.label}</div>
+                {opt.sublabel && (
+                  <div className="text-xs text-text-muted truncate">{opt.sublabel}</div>
+                )}
+              </button>
+            ))}
+            {extra && <div className="border-t border-border/60 mt-1">{extra}</div>}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
 
-// ─── Volume slider ───────────────────────────────────────────────────────────
+// ─── Settings button (Ajustes: Velocidad + Calidad) ──────────────────────────
 
+interface SettingsButtonProps {
+  qualityLevels: QualityLevel[];
+  currentQuality: number;
+  onQualityChange?: (id: number) => void;
+  playbackRate: number;
+  onPlaybackRateChange?: (rate: number) => void;
+  playbackMethod?: "direct_play" | "direct_stream" | "transcode";
+  transcodeProfileLabel?: string;
+  onOpenChange?: (open: boolean) => void;
+}
+
+const SettingsButton: FC<SettingsButtonProps> = ({
+  qualityLevels,
+  currentQuality,
+  onQualityChange,
+  playbackRate,
+  onPlaybackRateChange,
+  playbackMethod,
+  transcodeProfileLabel,
+  onOpenChange,
+}) => {
+  const { t } = useTranslation();
+  const [open, setOpenState] = useState(false);
+  const setOpen = (next: boolean | ((v: boolean) => boolean)) => {
+    setOpenState((v) => {
+      const resolved = typeof next === "function" ? next(v) : next;
+      onOpenChange?.(resolved);
+      return resolved;
+    });
+  };
+  const isMobile = useIsMobile();
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  useClickAway(wrapperRef, () => setOpen(false), open && !isMobile);
+
+  // Tint reflects the active playback method. Green = direct path
+  // (no CPU cost on the server), amber = transcoding session. The
+  // tint replaces the old STREAM-DIRECTO pill in the top bar — same
+  // information, fewer UI elements, lives on the button that already
+  // owns the quality picker.
+  const tint: "success" | "warning" | undefined = (() => {
+    if (!playbackMethod) return undefined;
+    return playbackMethod === "transcode" ? "warning" : "success";
+  })();
+
+  const tintClass = (() => {
+    if (!tint) return "text-white/80 hover:text-white hover:bg-white/10";
+    if (tint === "success") {
+      return "text-success hover:text-success hover:bg-success/15 ring-1 ring-success/40";
+    }
+    return "text-warning hover:text-warning hover:bg-warning/15 ring-1 ring-warning/40";
+  })();
+
+  // Desktop label next to the gear — gives the user a "Plex Convert·1080p"
+  // feel without opening anything. Hidden on mobile (no room).
+  const methodLabel = (() => {
+    if (!playbackMethod) return undefined;
+    switch (playbackMethod) {
+      case "direct_play":
+        return t("playerControls.method.directPlay");
+      case "direct_stream":
+        return t("playerControls.method.directStream");
+      case "transcode":
+        return transcodeProfileLabel
+          ? t("playerControls.method.transcodeWithProfile", { profile: transcodeProfileLabel })
+          : t("playerControls.method.transcode");
+    }
+  })();
+
+  const hasQualityLadder = qualityLevels.length > 1 && !!onQualityChange;
+
+  const Btn = (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        setOpen((v) => !v);
+      }}
+      className={[
+        "inline-flex items-center gap-1.5 rounded-[--radius-sm] p-2 sm:p-1.5 transition-colors cursor-pointer",
+        tintClass,
+      ].join(" ")}
+      aria-label={t("playerControls.settings")}
+      aria-haspopup="menu"
+      aria-expanded={open}
+    >
+      <SettingsIcon />
+      {methodLabel && (
+        <span className="hidden sm:inline text-xs font-semibold uppercase tracking-wider">
+          {methodLabel}
+        </span>
+      )}
+    </button>
+  );
+
+  const QualitySection = (
+    <SheetSection title={t("playerControls.quality")}>
+      {hasQualityLadder ? (
+        <>
+          <SheetRow
+            selected={currentQuality === -1}
+            label={t("playerControls.qualityAuto")}
+            onClick={() => {
+              onQualityChange?.(-1);
+              setOpen(false);
+            }}
+          />
+          {qualityLevels.map((l) => (
+            <SheetRow
+              key={l.id}
+              selected={currentQuality === l.id}
+              label={l.label}
+              onClick={() => {
+                onQualityChange?.(l.id);
+                setOpen(false);
+              }}
+            />
+          ))}
+        </>
+      ) : (
+        <div className="px-3 py-2 text-xs text-text-muted">
+          {playbackMethod === "transcode"
+            ? t("playerControls.qualitySingleRung")
+            : t("playerControls.qualityNotApplicable")}
+        </div>
+      )}
+    </SheetSection>
+  );
+
+  const SpeedSection = onPlaybackRateChange ? (
+    <SheetSection title={t("playerControls.playbackRate")}>
+      {PLAYBACK_RATES.map((r) => (
+        <SheetRow
+          key={r.value}
+          selected={Math.abs(playbackRate - r.value) < 0.01}
+          label={r.label}
+          onClick={() => {
+            onPlaybackRateChange(r.value);
+            setOpen(false);
+          }}
+        />
+      ))}
+    </SheetSection>
+  ) : null;
+
+  if (isMobile) {
+    return (
+      <div ref={wrapperRef} className="relative">
+        {Btn}
+        <BottomSheet
+          open={open}
+          title={t("playerControls.settings")}
+          onClose={() => setOpen(false)}
+        >
+          {methodLabel && (
+            <div
+              className={[
+                "mx-3 my-2 rounded-[--radius-md] border px-3 py-2 text-xs font-medium",
+                tint === "warning"
+                  ? "border-warning/40 bg-warning/10 text-warning"
+                  : "border-success/40 bg-success/10 text-success",
+              ].join(" ")}
+            >
+              {methodLabel}
+            </div>
+          )}
+          {SpeedSection}
+          {QualitySection}
+        </BottomSheet>
+      </div>
+    );
+  }
+
+  return (
+    <div ref={wrapperRef} className="relative">
+      {Btn}
+      {open && (
+        <div className="absolute bottom-full right-0 mb-2 z-30 min-w-[240px]">
+          <div className="bg-bg-card/95 backdrop-blur-md border border-border rounded-[--radius-md] shadow-xl py-2 px-1">
+            {methodLabel && (
+              <div
+                className={[
+                  "mx-2 mb-2 rounded-[--radius-sm] border px-2.5 py-1.5 text-[11px] font-semibold uppercase tracking-wider",
+                  tint === "warning"
+                    ? "border-warning/40 bg-warning/10 text-warning"
+                    : "border-success/40 bg-success/10 text-success",
+                ].join(" ")}
+              >
+                {methodLabel}
+              </div>
+            )}
+            {SpeedSection}
+            {QualitySection}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ─── Volume control ─────────────────────────────────────────────────────────
+
+// Desktop: hover-reveal slider next to a mute button. Mobile: only
+// the mute button — the slider is hidden because mobile users have
+// hardware volume keys and crowding the bar costs touch targets.
 const VolumeControl: FC<{
   volume: number;
   isMuted: boolean;
@@ -542,13 +826,15 @@ const VolumeControl: FC<{
   return (
     <div className="group/vol flex items-center gap-1">
       <button
+        type="button"
         onClick={onToggleMute}
-        className="p-1.5 rounded-[--radius-sm] text-white/80 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+        className="p-2 sm:p-1.5 rounded-[--radius-sm] text-white/80 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
         aria-label={isMuted ? t("playerControls.unmute") : t("playerControls.mute")}
       >
         <VIcon />
       </button>
-      <div className="w-0 group-hover/vol:w-20 overflow-hidden transition-all duration-200">
+      {/* Slider hidden on mobile (hardware keys + space constraints). */}
+      <div className="hidden sm:block w-0 group-hover/vol:w-20 overflow-hidden transition-all duration-200">
         <input
           type="range"
           min={0}
@@ -583,6 +869,7 @@ const PlayerControls: FC<PlayerControlsProps> = ({
   currentAudioTrack,
   currentSubtitleTrack,
   currentQuality = -1,
+  playbackRate = 1,
   onPlayPause,
   onSeek,
   onVolumeChange,
@@ -591,6 +878,8 @@ const PlayerControls: FC<PlayerControlsProps> = ({
   onAudioTrackChange,
   onSubtitleTrackChange,
   onQualityChange,
+  onPlaybackRateChange,
+  onMenuOpenChange,
   onSearchExternalSubs,
   onClose,
   title,
@@ -599,25 +888,55 @@ const PlayerControls: FC<PlayerControlsProps> = ({
   transcodeProfileLabel,
 }) => {
   const { t } = useTranslation();
-  // Quality picker only earns its place when the player has more
-  // than one rung to choose from. With a single level the dropdown
-  // would be a UI lie ("Auto / 1080p" → both pick the same stream).
-  const qualityTracks = qualityLevels.map((l) => ({
-    id: l.id,
-    name: l.label,
-    lang: "",
-  }));
 
-  // Enrich the audio picker labels with codec + channel info from the
-  // DB-side stream list (bare hls.js names are just "English" /
-  // "Spanish"; the user can't tell a stereo AAC from a 7.1 TrueHD
-  // sibling without it). Match by language because hls.js doesn't
-  // expose the original file's stream index — and within a language
-  // we match by position so two Spanish tracks (DTS-MA, AAC) map
-  // 1↔1 instead of both showing the same enriched label.
+  // Aggregate the open state of the three pickers (Audio, Subs,
+  // Settings) into one boolean and bubble it up. The parent uses
+  // it to pin the controls overlay so the auto-hide timer can't
+  // evict the sheet mid-interaction.
+  const openMenusRef = useRef(new Set<string>());
+  const reportMenu = (key: string) => (open: boolean) => {
+    if (open) openMenusRef.current.add(key);
+    else openMenusRef.current.delete(key);
+    onMenuOpenChange?.(openMenusRef.current.size > 0);
+  };
+
+  // Audio picker labels enriched with codec + channels when the
+  // DB-side stream list is available. Match by language + index
+  // within language (see audioTracks.ts).
   const enrichedAudioTracks = audioStreams && audioStreams.length > 0
     ? enrichAudioTracks(audioTracks, audioStreams)
     : audioTracks;
+
+  const audioOptions: TrackOption[] = enrichedAudioTracks.map((tr) => ({
+    id: tr.id,
+    label: tr.name || tr.lang || t("playerControls.trackFallback", { n: tr.id + 1 }),
+  }));
+
+  const subtitleOptions: TrackOption[] = subtitleTracks.map((tr) => ({
+    id: tr.id,
+    label: tr.name || tr.lang || t("playerControls.trackFallback", { n: tr.id + 1 }),
+  }));
+
+  // External-subs row, appended to the subtitle picker. Lives inside
+  // the picker (not as its own button on the bar) — Plex pattern. The
+  // styling is intentionally distinct from the regular rows so users
+  // see it's an action, not a track selection.
+  const externalSubsRow = onSearchExternalSubs ? (
+    <button
+      type="button"
+      onClick={() => {
+        onSearchExternalSubs();
+      }}
+      className="w-full flex items-center gap-3 px-3 py-3 mt-1 rounded-[--radius-md] text-left text-sm text-accent hover:bg-accent/10 transition-colors cursor-pointer"
+    >
+      <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+        <circle cx="11" cy="11" r="7" />
+        <path d="M21 21l-4.35-4.35" strokeLinecap="round" />
+      </svg>
+      <span className="flex-1 font-medium">{t("playerControls.subtitlesExternal")}</span>
+    </button>
+  ) : null;
+
   return (
     <div className="absolute inset-0 flex flex-col justify-between z-10">
       {/* Gradient overlays for readability */}
@@ -625,15 +944,12 @@ const PlayerControls: FC<PlayerControlsProps> = ({
       <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-black/80 to-transparent pointer-events-none" />
 
       {/* Top bar — back button + brand mark / title.
-          When a TMDb-sourced title-treatment logo is available we
-          show it here so the player picks up the same visual brand
-          the user just clicked from. The image is constrained in
-          height (not just max-width) so a square logo (Disney) and a
-          wide one (Marvel Studios) end up roughly the same visual
-          weight; without the height clamp the wide variant would
-          overpower the back button on smaller viewports. */}
+          Method pill removed in 2026-05-12 redesign: the same info now
+          lives on the Ajustes button (gear) below as a colour tint +
+          label, removing the redundant chrome up here. */}
       <div className="relative flex items-center gap-3 px-4 pt-4">
         <button
+          type="button"
           onClick={onClose}
           className="p-2 rounded-full text-white/80 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
           aria-label={t("playerControls.back")}
@@ -653,18 +969,12 @@ const PlayerControls: FC<PlayerControlsProps> = ({
             {title}
           </h2>
         ) : null}
-        {/* Playback-method pill. Sits next to the title so the user
-            sees at a glance whether the server is shipping the file
-            as-is or burning CPU on a transcode — same convention as
-            Plex / Jellyfin's Now-Playing chrome. Hidden when the
-            parent doesn't pass the prop so callers without the info
-            stay clean. */}
-        <PlaybackMethodPill method={playbackMethod} profileLabel={transcodeProfileLabel} />
       </div>
 
-      {/* Center play/pause */}
+      {/* Center play/pause — bigger hit target on mobile. */}
       <div className="relative flex items-center justify-center">
         <button
+          type="button"
           onClick={onPlayPause}
           className="p-4 rounded-full text-white/90 hover:text-white bg-black/30 hover:bg-black/50 backdrop-blur-sm transition-all duration-200 cursor-pointer"
           aria-label={isPlaying ? t("playerControls.pause") : t("playerControls.play")}
@@ -675,7 +985,6 @@ const PlayerControls: FC<PlayerControlsProps> = ({
 
       {/* Bottom bar */}
       <div className="relative flex flex-col gap-2 px-4 pb-4">
-        {/* Seek bar */}
         <SeekBar
           currentTime={currentTime}
           duration={duration}
@@ -685,81 +994,58 @@ const PlayerControls: FC<PlayerControlsProps> = ({
           onSeek={onSeek}
         />
 
-        {/* Controls row.
-            Layout (left → right): Play · Time · ··· · Audio · Subs ·
-            Search-online-subs · Quality · Volume · Fullscreen.
-            Volume sits on the right next to Fullscreen so the cluster
-            of "playback knobs" (audio/subs/quality/volume) is grouped
-            visually instead of bracketing the time on opposite sides. */}
-        <div className="flex items-center gap-2">
-          {/* Play/Pause small */}
+        {/* Controls row. Layout (left → right):
+            Play · Time · ··· · Audio · Subs · Ajustes (with method
+            tint) · Volume · Fullscreen.
+            Search-online-subs moved INSIDE the subs picker (no longer
+            a top-level button) — same pattern as Plex. */}
+        <div className="flex items-center gap-1 sm:gap-2">
           <button
+            type="button"
             onClick={onPlayPause}
-            className="p-1.5 rounded-[--radius-sm] text-white/80 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+            className="p-2 sm:p-1.5 rounded-[--radius-sm] text-white/80 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
             aria-label={isPlaying ? t("playerControls.pause") : t("playerControls.play")}
           >
             {isPlaying ? <PauseIcon /> : <PlayIcon />}
           </button>
 
-          {/* Time */}
           <TimeDisplay currentTime={currentTime} duration={duration} />
 
-          {/* Spacer */}
           <div className="flex-1" />
 
-          {/* Audio tracks */}
-          <TrackSelector
-            icon={AudioIcon}
-            label={t("playerControls.audio")}
-            tracks={enrichedAudioTracks}
-            currentTrack={currentAudioTrack}
-            onSelect={onAudioTrackChange}
-          />
-
-          {/* Subtitle tracks */}
-          <TrackSelector
-            icon={SubtitleIcon}
-            label={t("playerControls.subtitles")}
-            tracks={subtitleTracks}
-            currentTrack={currentSubtitleTrack}
-            offLabel={t("playerControls.subtitlesOff")}
-            onSelect={onSubtitleTrackChange}
-          />
-
-          {/* Search online subtitles. Sibling to the subs selector
-              rather than nested inside it: opening a modal from a
-              hover-revealed dropdown is fragile (the dropdown closes
-              the moment focus moves), so the affordance is a
-              dedicated button. */}
-          {onSearchExternalSubs && (
-            <button
-              type="button"
-              onClick={onSearchExternalSubs}
-              aria-label={t("playerControls.subtitlesExternal")}
-              title={t("playerControls.subtitlesExternal")}
-              className="p-1.5 rounded-[--radius-sm] text-white/80 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
-            >
-              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <circle cx="11" cy="11" r="7" />
-                <path d="M21 21l-4.35-4.35" strokeLinecap="round" />
-              </svg>
-            </button>
-          )}
-
-          {/* Quality (HLS levels only — direct play has no ladder) */}
-          {qualityLevels.length > 1 && onQualityChange && (
-            <TrackSelector
-              icon={QualityIcon}
-              label={t("playerControls.quality")}
-              tracks={qualityTracks}
-              currentTrack={currentQuality}
-              offLabel={t("playerControls.qualityAuto")}
-              onSelect={onQualityChange}
+          {audioOptions.length > 0 && (
+            <TrackButton
+              label={t("playerControls.audio")}
+              icon={AudioIcon}
+              options={audioOptions}
+              currentId={currentAudioTrack}
+              onSelect={onAudioTrackChange}
+              onOpenChange={reportMenu("audio")}
             />
           )}
 
-          {/* Volume — moved here from the left so it sits with the
-              other playback knobs near Fullscreen. */}
+          <TrackButton
+            label={t("playerControls.subtitles")}
+            icon={SubtitleIcon}
+            options={subtitleOptions}
+            currentId={currentSubtitleTrack}
+            offLabel={t("playerControls.subtitlesOff")}
+            onSelect={onSubtitleTrackChange}
+            extra={externalSubsRow}
+            onOpenChange={reportMenu("subs")}
+          />
+
+          <SettingsButton
+            qualityLevels={qualityLevels}
+            currentQuality={currentQuality}
+            onQualityChange={onQualityChange}
+            playbackRate={playbackRate}
+            onPlaybackRateChange={onPlaybackRateChange}
+            playbackMethod={playbackMethod}
+            transcodeProfileLabel={transcodeProfileLabel}
+            onOpenChange={reportMenu("settings")}
+          />
+
           <VolumeControl
             volume={volume}
             isMuted={isMuted}
@@ -767,10 +1053,10 @@ const PlayerControls: FC<PlayerControlsProps> = ({
             onToggleMute={onToggleMute}
           />
 
-          {/* Fullscreen */}
           <button
+            type="button"
             onClick={onToggleFullscreen}
-            className="p-1.5 rounded-[--radius-sm] text-white/80 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+            className="p-2 sm:p-1.5 rounded-[--radius-sm] text-white/80 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
             aria-label={isFullscreen ? t("playerControls.exitFullscreen") : t("playerControls.fullscreen")}
           >
             {isFullscreen ? <ExitFullscreenIcon /> : <FullscreenIcon />}

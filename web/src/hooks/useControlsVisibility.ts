@@ -6,6 +6,10 @@ const MOUSE_LEAVE_DELAY = 800;
 interface UseControlsVisibilityReturn {
   controlsVisible: boolean;
   showControls: () => void;
+  /** Immediate hide. Used by the mobile tap-toggle pattern so a tap on
+   *  the video while controls are visible dismisses them without
+   *  pausing playback. */
+  hideControls: () => void;
   handleMouseMove: () => void;
   handleMouseLeave: () => void;
   keepControlsVisible: () => void;
@@ -45,9 +49,15 @@ export function useControlsVisibility(
     clearTimeout(hideTimerRef.current);
   }, []);
 
+  const hideControls = useCallback(() => {
+    clearTimeout(hideTimerRef.current);
+    setControlsVisible(false);
+  }, []);
+
   return {
     controlsVisible,
     showControls,
+    hideControls,
     handleMouseMove,
     handleMouseLeave,
     keepControlsVisible,
