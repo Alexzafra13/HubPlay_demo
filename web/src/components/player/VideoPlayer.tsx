@@ -5,6 +5,7 @@ import { api } from "@/api/client";
 import { usePlayerStore } from "@/store/player";
 import { useHls } from "@/hooks/useHls";
 import { useControlsVisibility } from "@/hooks/useControlsVisibility";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { usePlayerKeyboard } from "@/hooks/usePlayerKeyboard";
 import { useProgressReporter } from "@/hooks/useProgressReporter";
 import { useTrickplay } from "@/hooks/useTrickplay";
@@ -241,10 +242,24 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
   const {
     controlsVisible,
     showControls,
+    hideControls,
     handleMouseMove,
     handleMouseLeave,
     keepControlsVisible,
   } = useControlsVisibility(isPlaying);
+
+  // Mobile-aware tap pattern: on touch a tap on the video surface
+  // toggles control visibility (Plex/Netflix), instead of toggling
+  // play/pause. The user reaches play/pause through the (now
+  // visible) play button. Desktop keeps click-to-pause because
+  // mouse users expect that affordance.
+  const isMobile = useIsMobile();
+
+  // Playback rate. Persisted only for this session (refresh resets
+  // to 1×). Plex / YouTube do the same — sticky preferences would
+  // need a settings surface that doesn't exist yet, and 1.5× from a
+  // last-watched session is jarring when revisiting.
+  const [playbackRate, setPlaybackRate] = useState(1);
 
   useProgressReporter(videoRef, itemId, peerId);
 
@@ -275,6 +290,33 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
       video.pause();
     }
   }, []);
+
+  // Surface tap: on mobile this only toggles control visibility (no
+  // accidental pause when the user is just trying to bring up the
+  // bar). On desktop this falls through to togglePlayPause — mouse
+  // users expect click-to-pause. The decision is made at click-time,
+  // not via different handlers, so a viewport resize that flips
+  // isMobile mid-session keeps behaviour consistent.
+  const handleSurfaceTap = useCallback(() => {
+    if (isMobile) {
+      if (controlsVisible) {
+        hideControls();
+      } else {
+        showControls();
+      }
+      return;
+    }
+    togglePlayPause();
+  }, [isMobile, controlsVisible, hideControls, showControls, togglePlayPause]);
+
+  // Apply playback rate to the <video> element whenever it changes.
+  // Done as an effect so a remount (audio swap, recover) re-applies
+  // the user's chosen rate to the new media stream automatically.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.playbackRate = playbackRate;
+  }, [playbackRate, masterPlaylistUrl, directUrl]);
 
   const handleSeek = useCallback((time: number) => {
     const video = videoRef.current;
@@ -726,7 +768,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
       className="fixed inset-0 z-50 bg-black select-none"
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
-      onClick={togglePlayPause}
+      onClick={handleSurfaceTap}
     >
       {/* Video element. External subtitles ride as a child <track>:
           the browser decodes the WebVTT and renders cues natively, so
@@ -890,6 +932,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
           currentAudioTrack={displayCurrentAudioTrack}
           currentSubtitleTrack={effectiveCurrentSubtitleTrack}
           currentQuality={currentQuality}
+          playbackRate={playbackRate}
           onPlayPause={togglePlayPause}
           onSeek={handleSeek}
           onVolumeChange={handleVolumeChange}
@@ -898,6 +941,16 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
           onAudioTrackChange={handleAudioTrackChange}
           onSubtitleTrackChange={handleSubtitleTrackChange}
           onQualityChange={setQuality}
+          onPlaybackRateChange={setPlaybackRate}
+          onMenuOpenChange={(open) => {
+            // While a picker is up, pin controls visible so the 3s
+            // auto-hide timer can't evict the overlay (and the sheet
+            // hanging off it) mid-interaction. On close, restart
+            // the timer via showControls() so the bar can fade
+            // again once the user is back on the video.
+            if (open) keepControlsVisible();
+            else showControls();
+          }}
           onSearchExternalSubs={() => setExternalSubsModalOpen(true)}
           trickplay={trickplay.available && trickplay.manifest ? {
             manifest: trickplay.manifest,
