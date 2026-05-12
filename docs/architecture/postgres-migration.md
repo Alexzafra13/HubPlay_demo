@@ -334,6 +334,36 @@ auto-reconnect nativo para sobrevivir al restart del contenedor.
       migración en curso, panel detecta marker activo, ofrece
       "Ver progreso" y se engancha al SSE existente.
 
+**G.5 — Migración programada (ventana de mantenimiento)**
+
+El admin no siempre quiere migrar AHORA. Algunos preferirán "esta
+noche a las 3am" para no afectar a la familia. Añadimos esa opción
+con un campo extra en el state machine, sin reabrir el resto del
+diseño:
+
+- [ ] Panel admin: dropdown junto al botón "Migrar":
+      `[Ahora ▾]` con opciones `Ahora`, `Programar...` (date+time picker)
+- [ ] Cuando es programada, `POST /admin/system/db/migrate` con body
+      `{"scheduled_at": "2026-05-13T03:00:00Z"}` → 202 + migration_id,
+      estado en marker: `scheduled`
+- [ ] Background goroutine (mismo retention runner pattern) tick cada
+      1 min: si hay marker con `scheduled` y `scheduled_at <= now`,
+      flipea a `starting` y dispara el flujo normal de G.1
+- [ ] Email/notificación in-app al admin 5 min antes del kickoff
+      (banner persistente en el panel; sin email para no añadir
+      dependencia SMTP)
+- [ ] Cancelable: si el admin cambia de opinión, botón "Cancelar"
+      borra el marker `scheduled` antes del kickoff
+- [ ] Persistente entre restarts: si el servidor se reinicia por
+      otra razón antes de la hora programada, al boot lee el marker
+      `scheduled` y la goroutine sigue esperándola
+- [ ] Auto-detect "horas valle": cuando el admin abre el dropdown,
+      sugerimos un horario basado en las últimas 24h de actividad
+      ("Sin sesiones activas entre las 2 y las 6 AM — ¿programar
+      para las 03:00?"). Opcional, calidad de UX.
+
+Coste extra sobre G.1-G.4: ~3h. Lo añadimos al estimado de Sesión G.
+
 #### UX final que verá el operador
 
 ```
@@ -587,13 +617,13 @@ Esos tres son requisitos de cualquier cliente robusto. No son
 | D — Queries (26 ficheros) | 7 | 24 | 🔜 siguiente |
 | E — Repos refactor (14 repos) | 14 | 38 | |
 | F — Wiring pgx + pool | 3 | 41 | |
-| G — Migration plug-and-play (4 sub-fases) | 21 | 62 | |
+| G — Migration plug-and-play (5 sub-fases con scheduling) | 24 | 65 | |
 | H — Worker pool con auto-tune | 21 | 83 | |
 | I — Extensiones + índices | 7 | 90 | |
 | J — Production hardening + CI dual | 7 | 97 | |
 
-**~97 horas de trabajo enfocado** (subió de 90 por el scope creep
-del plug-and-play SSE en Sesión G — vale la pena). 17h acumuladas.
+**~100 horas de trabajo enfocado** (Sesión G subió a 24h con la
+sub-fase G.5 de migración programada). 17h acumuladas.
 
 **v1 mínimo viable = A a F + G**: el operador puede instalar
 HubPlay con SQLite, decidir migrar a Postgres desde el panel,
