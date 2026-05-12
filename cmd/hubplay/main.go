@@ -35,6 +35,7 @@ import (
 	"hubplay/internal/scanner"
 	"hubplay/internal/setup"
 	"hubplay/internal/stream"
+	"hubplay/internal/sysmetrics"
 	"hubplay/internal/user"
 )
 
@@ -403,6 +404,16 @@ func run(configPath string) error {
 	retentionRunner := retention.New(cfg.Retention, iptvService, federationRepo, logger)
 	retentionRunner.Start(ctx)
 
+	// Host metrics sampler: CPU%, RAM, CPU/GPU model strings.
+	// Background goroutine ticks every 5 s and stores the latest
+	// snapshot in an atomic.Value; the admin /system/stats handler
+	// reads non-blocking on every poll. Start() runs the slow probes
+	// (gopsutil cpu.Info, nvidia-smi when present) inline so the
+	// first /system/stats response after boot already has populated
+	// values. Lifetime bound to ctx (cancelled on shutdown signal).
+	hostMetrics := sysmetrics.New(5*time.Second, logger)
+	hostMetrics.Start(ctx)
+
 	router := api.NewRouter(api.Dependencies{
 		Auth:          authService,
 		DeviceCode:    deviceCodeService,
@@ -447,6 +458,7 @@ func run(configPath string) error {
 		// self-hosted server; if a deployment grows, lift these to
 		// config rather than tweaking the constants.
 		SSELimiter:    handlers.NewSSELimiter(handlers.DefaultSSEGlobalMax, handlers.DefaultSSEPerUserMax),
+		HostMetrics:   hostMetrics,
 	})
 
 	server := &http.Server{

@@ -26,6 +26,7 @@ import (
 	"hubplay/internal/provider"
 	"hubplay/internal/setup"
 	"hubplay/internal/stream"
+	"hubplay/internal/sysmetrics"
 	"hubplay/internal/user"
 )
 
@@ -77,6 +78,12 @@ type Dependencies struct {
 	// — tests pass nil and handlers skip enforcement; production wires
 	// a single shared instance so global + per-user counts are unified.
 	SSELimiter     *handlers.SSELimiter
+	// HostMetrics samples host-level introspection (CPU%, RAM, GPU
+	// model). Optional — tests pass nil and the admin /system/stats
+	// response carries a zero-value host section, which the panel
+	// renders as dashes. Production wires a single instance, started
+	// at boot, lifetime bound to the process context.
+	HostMetrics    *sysmetrics.Sampler
 }
 
 func NewRouter(deps Dependencies) http.Handler {
@@ -496,11 +503,19 @@ func NewRouter(deps Dependencies) http.Handler {
 					bindAddress = deps.Config.Server.Addr()
 					baseURL = deps.Config.Server.BaseURL
 				}
+				// Host info sampler — optional. nil providers degrade to
+				// an empty host section so the test rig + minimal startup
+				// paths keep working.
+				var hostInfo handlers.HostInfoProvider
+				if deps.HostMetrics != nil {
+					hostInfo = deps.HostMetrics
+				}
 				sysHandler := handlers.NewSystemHandler(handlers.SystemHandlerConfig{
 					DB:             deps.Database,
 					Streams:        sysStreams,
 					Libraries:      sysLibs,
 					Settings:       deps.Settings,
+					Host:           hostInfo,
 					ImageDir:       imageDir,
 					DBPath:         dbPath,
 					BindAddress:    bindAddress,

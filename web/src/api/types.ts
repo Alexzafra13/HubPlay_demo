@@ -1085,12 +1085,38 @@ export interface HealthResponse {
 
 export interface SystemStats {
   server: SystemServerStats;
+  host: SystemHostStats;
   database: SystemDatabaseStats;
   ffmpeg: SystemFFmpegStats;
   runtime: SystemRuntimeStats;
   streaming: SystemStreamingStats;
   storage: SystemStorageStats;
   libraries: SystemLibraryStats;
+}
+
+// Host-level introspection sampled by internal/sysmetrics. Distinct
+// from SystemRuntimeStats (which is Go-process-specific: heap MB,
+// goroutines) — answers "is my SERVER hot?" rather than "is my hubplay
+// process hot?". Empty strings / zero values are valid: they mean the
+// probe couldn't fingerprint that field on this host (e.g. no
+// nvidia-smi for GPU; gopsutil failure for CPU model). The panel
+// renders dashes for empty rows rather than hiding them.
+export interface SystemHostStats {
+  /** Human-readable CPU model (e.g. "AMD Ryzen 5 5600 6-Core Processor"). */
+  cpu_model: string;
+  /** Physical cores. Hyper-threaded CPUs have half the logical count. */
+  cpu_cores_physical: number;
+  /** Logical threads — matches runtime.NumCPU() on Linux. */
+  cpu_cores_logical: number;
+  /** Host-wide CPU utilisation 0-100. 0 on the very first sample. */
+  cpu_percent: number;
+  ram_total_bytes: number;
+  /** "Used" defined as Total - Available, matching `free -h`'s used column. */
+  ram_used_bytes: number;
+  /** NVIDIA GPU model when nvidia-smi succeeded at boot. Empty otherwise. */
+  gpu_model: string;
+  gpu_memory_total_bytes: number;
+  gpu_driver_version: string;
 }
 
 export interface SystemServerStats {

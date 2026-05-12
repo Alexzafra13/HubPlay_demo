@@ -15,6 +15,7 @@ import (
 
 	"hubplay/internal/db"
 	"hubplay/internal/stream"
+	"hubplay/internal/sysmetrics"
 	"hubplay/internal/testutil"
 )
 
@@ -62,6 +63,17 @@ func (f *fakeSystemLibs) ItemCount(_ context.Context, libraryID string) (int, er
 }
 
 var _ LibraryStatsProvider = (*fakeSystemLibs)(nil)
+
+// fakeHost is a HostInfoProvider stub returning a canned snapshot.
+// Lets the handler tests assert that the host section serialises
+// correctly without spinning a real gopsutil sampler.
+type fakeHost struct {
+	snap sysmetrics.HostInfo
+}
+
+func (f *fakeHost) Snapshot() sysmetrics.HostInfo { return f.snap }
+
+var _ HostInfoProvider = (*fakeHost)(nil)
 
 func newQuietLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -117,6 +129,17 @@ type systemStatsResponse struct {
 				Items       int    `json:"items"`
 			} `json:"by_type"`
 		} `json:"libraries"`
+		Host struct {
+			CPUModel            string  `json:"cpu_model"`
+			CPUCoresPhysical    int     `json:"cpu_cores_physical"`
+			CPUCoresLogical     int     `json:"cpu_cores_logical"`
+			CPUPercent          float64 `json:"cpu_percent"`
+			RAMTotalBytes       uint64  `json:"ram_total_bytes"`
+			RAMUsedBytes        uint64  `json:"ram_used_bytes"`
+			GPUModel            string  `json:"gpu_model"`
+			GPUMemoryTotalBytes uint64  `json:"gpu_memory_total_bytes"`
+			GPUDriverVersion    string  `json:"gpu_driver_version"`
+		} `json:"host"`
 	} `json:"data"`
 }
 
@@ -567,5 +590,77 @@ func TestSystemHandler_TopItems_EpisodesRolledUpToSeries(t *testing.T) {
 	// Two episodes by the same user roll up to one distinct play.
 	if row.PlayCount != 1 {
 		t.Errorf("play_count = %d, want 1 (DISTINCT user_id per rollup)", row.PlayCount)
+	}
+}
+
+// TestSystemHandler_Stats_HostBlock_SerialisesAllFields covers the
+// admin "Host" card wire shape. The handler must not silently swallow
+// any sysmetrics snapshot field — the panel reads each one directly
+// and missing values would render as dashes for no reason.
+func TestSystemHandler_Stats_HostBlock_SerialisesAllFields(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	host := &fakeHost{snap: sysmetrics.HostInfo{
+		CPUModel:            "AMD Ryzen 5 5600 6-Core Processor",
+		CPUCoresPhysical:    6,
+		CPUCoresLogical:     12,
+		CPUPercent:          42.5,
+		RAMTotalBytes:       16 * 1024 * 1024 * 1024,
+		RAMUsedBytes:        4 * 1024 * 1024 * 1024,
+		GPUModel:            "NVIDIA GeForce GTX 1660",
+		GPUMemoryTotalBytes: 6 * 1024 * 1024 * 1024,
+		GPUDriverVersion:    "560.35.03",
+	}}
+	h := NewSystemHandler(SystemHandlerConfig{
+		DB:     database,
+		Host:   host,
+		Logger: newQuietLogger(),
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/system/stats", nil)
+	rr := httptest.NewRecorder()
+	h.Stats(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	got := decodeStats(t, rr.Body).Data.Host
+	if got.CPUModel != "AMD Ryzen 5 5600 6-Core Processor" {
+		t.Errorf("cpu_model = %q", got.CPUModel)
+	}
+	if got.CPUCoresPhysical != 6 || got.CPUCoresLogical != 12 {
+		t.Errorf("cores: p=%d l=%d, want 6/12", got.CPUCoresPhysical, got.CPUCoresLogical)
+	}
+	if got.CPUPercent != 42.5 {
+		t.Errorf("cpu_percent = %f, want 42.5", got.CPUPercent)
+	}
+	if got.RAMTotalBytes == 0 || got.RAMUsedBytes == 0 {
+		t.Errorf("ram missing: total=%d used=%d", got.RAMTotalBytes, got.RAMUsedBytes)
+	}
+	if got.GPUModel != "NVIDIA GeForce GTX 1660" {
+		t.Errorf("gpu_model = %q", got.GPUModel)
+	}
+	if got.GPUDriverVersion != "560.35.03" {
+		t.Errorf("gpu_driver_version = %q", got.GPUDriverVersion)
+	}
+}
+
+// TestSystemHandler_Stats_HostBlock_AbsentProviderEmitsZeroes pins the
+// nil-host degradation contract: a test rig / minimal startup that
+// doesn't wire HostInfoProvider gets a zero-value host section, not a
+// 500. The frontend renders dashes for empty rows.
+func TestSystemHandler_Stats_HostBlock_AbsentProviderEmitsZeroes(t *testing.T) {
+	h := NewSystemHandler(SystemHandlerConfig{
+		DB:     testutil.NewTestDB(t),
+		Host:   nil, // explicit — same shape the test rigs use
+		Logger: newQuietLogger(),
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/system/stats", nil)
+	rr := httptest.NewRecorder()
+	h.Stats(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	host := decodeStats(t, rr.Body).Data.Host
+	if host.CPUModel != "" || host.GPUModel != "" || host.RAMTotalBytes != 0 || host.CPUPercent != 0 {
+		t.Errorf("nil host provider should yield zero-value section; got %+v", host)
 	}
 }
