@@ -15,6 +15,7 @@ import (
 	"hubplay/internal/config"
 	"hubplay/internal/db"
 	"hubplay/internal/domain"
+	"hubplay/internal/stream"
 )
 
 // SettingsHandler exposes the admin-editable subset of runtime
@@ -29,11 +30,28 @@ import (
 //     app_settings overrides the YAML default; deleting the row reverts
 //     to the YAML default.
 type SettingsHandler struct {
-	settings         *db.SettingsRepository
-	baseURLDefault   string
-	hwAccelDefault   config.HWAccelConfig
-	hwAccelDetected  []string
-	logger           *slog.Logger
+	settings        *db.SettingsRepository
+	baseURLDefault  string
+	hwAccelDefault  config.HWAccelConfig
+	hwAccelDetected []string
+	// streamingDefaults is the post-auto-tune snapshot of the
+	// streaming knobs that don't have explicit YAML / DB overrides.
+	// The settings panel renders this in the "Default" column so the
+	// operator sees what the auto-tuner picked and can decide whether
+	// to override. Captured at construction so the panel reflects the
+	// values the running manager is actually using.
+	streamingDefaults StreamingDefaults
+	logger            *slog.Logger
+}
+
+// StreamingDefaults carries the values the auto-tuner picked for the
+// streaming knobs that are surfaced on the admin settings panel. The
+// "Default" column of the UI shows these so an operator who's never
+// touched the panel can see what the server is currently using.
+type StreamingDefaults struct {
+	MaxTranscodeSessions        int
+	MaxTranscodeSessionsPerUser int
+	TranscodePreset             string
 }
 
 // SettingsHandlerConfig is the named-arg shape for the constructor —
@@ -53,16 +71,23 @@ type SettingsHandlerConfig struct {
 	// that case the panel only offers "auto", which still maps to the
 	// software fallback at the stream layer.
 	HWAccelDetected []string
-	Logger          *slog.Logger
+	// StreamingDefaults is the auto-tuned snapshot of the streaming
+	// knobs (max sessions, per-user cap, libx264 preset) the running
+	// manager is using when no admin override is in place. The panel
+	// renders these as the "Default" value so the operator sees what
+	// the server picked for their hardware before deciding to tune.
+	StreamingDefaults StreamingDefaults
+	Logger            *slog.Logger
 }
 
 func NewSettingsHandler(cfg SettingsHandlerConfig) *SettingsHandler {
 	return &SettingsHandler{
-		settings:        cfg.Settings,
-		baseURLDefault:  cfg.BaseURLDefault,
-		hwAccelDefault:  cfg.HWAccelDefault,
-		hwAccelDetected: append([]string(nil), cfg.HWAccelDetected...),
-		logger:          cfg.Logger.With("module", "settings-handler"),
+		settings:          cfg.Settings,
+		baseURLDefault:    cfg.BaseURLDefault,
+		hwAccelDefault:    cfg.HWAccelDefault,
+		hwAccelDetected:   append([]string(nil), cfg.HWAccelDetected...),
+		streamingDefaults: cfg.StreamingDefaults,
+		logger:            cfg.Logger.With("module", "settings-handler"),
 	}
 }
 
@@ -80,6 +105,23 @@ const (
 	// trade-off: zero CPU cost vs. broken playback when a client
 	// can't actually decode the file.
 	settingForceDirectPlay = "playback.force_direct_play"
+	// settingMaxTranscodeSessions caps how many concurrent transcode
+	// sessions the manager will start before returning BUSY to new
+	// clients. Auto-tuned at boot from CPU count / HW backend; the
+	// admin overrides when they want explicit headroom or a tighter
+	// ceiling.
+	settingMaxTranscodeSessions = "streaming.max_transcode_sessions"
+	// settingMaxTranscodeSessionsPerUser is the per-user slice of
+	// the global pool. One user can't soak all sessions; the cap
+	// returns BUSY for that user's next request while leaving room
+	// for other clients. Auto-tuned to half of the global cap.
+	settingMaxTranscodeSessionsPerUser = "streaming.max_transcode_sessions_per_user"
+	// settingTranscodePreset is the libx264 -preset string applied
+	// on the software encode path. Ignored when a HW encoder is
+	// active. Auto-tuned to a value matching the host's core count;
+	// admins on a beefy desktop bump to "medium" for better quality,
+	// admins on a low-power NAS drop to "ultrafast".
+	settingTranscodePreset = "streaming.transcode_preset"
 )
 
 // hwAccelChoices is the master set of values the *validator* accepts
@@ -274,6 +316,38 @@ func (h *SettingsHandler) describeAll(ctx context.Context) ([]settingDescriptor,
 			Hint:          "Send the file as-is to every client; skip the capability waterfall and never transcode. Off by default — only enable when you're certain every client (browser, TV app, etc.) can decode every codec / container in your library.",
 			AllowedValues: []string{"true", "false"},
 		},
+		{
+			Key: settingMaxTranscodeSessions,
+			// Default is the auto-tuned value from the running manager,
+			// stringified so the existing wire shape stays uniform. The
+			// admin sees "4 (auto)" rather than a fixed YAML constant
+			// that doesn't reflect their hardware.
+			Default:       strconv.Itoa(h.streamingDefaults.MaxTranscodeSessions),
+			RestartNeeded: true,
+			Hint:          "Maximum concurrent transcode sessions. Default scales with detected hardware (GPU type or CPU cores). Raise for a beefier server, lower if you see CPU saturation under load.",
+		},
+		{
+			Key:           settingMaxTranscodeSessionsPerUser,
+			Default:       strconv.Itoa(h.streamingDefaults.MaxTranscodeSessionsPerUser),
+			RestartNeeded: true,
+			Hint:          "Per-user cap on concurrent transcodes. Keeps one user from soaking the whole pool with seek-loops or simultaneous devices. Default is half the global cap.",
+		},
+		{
+			Key:     settingTranscodePreset,
+			Default: h.streamingDefaults.TranscodePreset,
+			// Preset changes take effect on the NEXT transcode (no
+			// process restart needed) but in-flight sessions keep the
+			// old value until they end. Marking restart_needed=false
+			// matches the user's expectation that switching from
+			// "veryfast" to "medium" doesn't require touching the
+			// container.
+			RestartNeeded: false,
+			Hint:          "libx264 software preset — controls CPU vs. quality trade-off. ultrafast/superfast for low-power NAS, veryfast (default) for mid-range desktop, fast/medium for beefy servers. Ignored when a hardware encoder is active.",
+			AllowedValues: []string{
+				"ultrafast", "superfast", "veryfast", "faster", "fast",
+				"medium", "slow", "slower", "veryslow",
+			},
+		},
 	}
 	for i := range rows {
 		stored, err := h.settings.Get(ctx, rows[i].Key)
@@ -304,7 +378,10 @@ func (h *SettingsHandler) describeAll(ctx context.Context) ([]settingDescriptor,
 // valid value looks like.
 func isAllowedSettingKey(key string) bool {
 	switch key {
-	case settingBaseURL, settingHWAccelEnabled, settingHWAccelPreferred, settingForceDirectPlay:
+	case settingBaseURL, settingHWAccelEnabled, settingHWAccelPreferred,
+		settingForceDirectPlay,
+		settingMaxTranscodeSessions, settingMaxTranscodeSessionsPerUser,
+		settingTranscodePreset:
 		return true
 	default:
 		return false
@@ -356,6 +433,35 @@ func validateSettingValue(key, value string) (string, error) {
 			return "true", nil
 		}
 		return "false", nil
+	case settingMaxTranscodeSessions:
+		n, err := strconv.Atoi(value)
+		if err != nil {
+			return "", errors.New("value must be a whole number")
+		}
+		// Upper bound is generous (64) — beyond that no single host
+		// can keep up regardless of HW, and exposing higher invites
+		// the operator to footgun themselves. Zero is rejected here
+		// because the wire format doesn't distinguish "clear override"
+		// from "explicitly zero"; reset via DELETE.
+		if n < 1 || n > 64 {
+			return "", errors.New("value must be between 1 and 64 — use 'Reset to default' to clear the override")
+		}
+		return strconv.Itoa(n), nil
+	case settingMaxTranscodeSessionsPerUser:
+		n, err := strconv.Atoi(value)
+		if err != nil {
+			return "", errors.New("value must be a whole number")
+		}
+		if n < 1 || n > 32 {
+			return "", errors.New("value must be between 1 and 32 — use 'Reset to default' to clear the override")
+		}
+		return strconv.Itoa(n), nil
+	case settingTranscodePreset:
+		v := strings.ToLower(value)
+		if !stream.ValidLibx264Preset(v) {
+			return "", errors.New("value must be one of: ultrafast, superfast, veryfast, faster, fast, medium, slow, slower, veryslow")
+		}
+		return v, nil
 	default:
 		return "", errors.New("unknown key")
 	}

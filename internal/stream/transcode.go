@@ -37,13 +37,25 @@ type Transcoder struct {
 	// set once and read on every session.
 	hwAccel HWAccelType
 	encoder string // ffmpeg encoder name, e.g. "h264_nvenc" or "libx264"
-	logger  *slog.Logger
+	// libx264Preset is the -preset value passed to ffmpeg on the
+	// software encode path. Ignored when encoder != "libx264". Empty
+	// falls back to "veryfast" at use time. Auto-tuned at boot in
+	// AutoTuneStreaming so a fresh install picks a preset matching
+	// the host's core count (see autotune.go); admins can override
+	// from `streaming.transcode_preset` in the admin settings panel.
+	libx264Preset string
+	logger        *slog.Logger
 }
 
 // NewTranscoder constructs a transcoder. Pass `HWAccelNone` and an
 // empty `encoder` to force software encoding (libx264); pass the
 // values from `DetectHWAccel` to use the platform's accelerator.
-func NewTranscoder(baseDir, ffmpegPath string, transcodeTimeout time.Duration, hwAccel HWAccelType, encoder string, logger *slog.Logger) *Transcoder {
+//
+// `libx264Preset` is the -preset string ffmpeg should receive on the
+// software encode path. Pass "" to accept the historical "veryfast"
+// default; callers wired through `stream.NewManager` get a
+// hardware-aware value via AutoTuneStreaming. Ignored on HW encoders.
+func NewTranscoder(baseDir, ffmpegPath string, transcodeTimeout time.Duration, hwAccel HWAccelType, encoder, libx264Preset string, logger *slog.Logger) *Transcoder {
 	if ffmpegPath == "" {
 		ffmpegPath = "ffmpeg"
 	}
@@ -53,6 +65,9 @@ func NewTranscoder(baseDir, ffmpegPath string, transcodeTimeout time.Duration, h
 	if encoder == "" {
 		encoder = "libx264"
 	}
+	if libx264Preset == "" {
+		libx264Preset = "veryfast"
+	}
 	return &Transcoder{
 		sessions:         make(map[string]*Session),
 		baseDir:          baseDir,
@@ -60,6 +75,7 @@ func NewTranscoder(baseDir, ffmpegPath string, transcodeTimeout time.Duration, h
 		transcodeTimeout: transcodeTimeout,
 		hwAccel:          hwAccel,
 		encoder:          encoder,
+		libx264Preset:    libx264Preset,
 		logger:           logger.With("module", "transcoder"),
 	}
 }
@@ -93,7 +109,7 @@ func (t *Transcoder) Start(sessionID, itemID, inputPath string, profile Profile,
 
 	ctx, cancel := context.WithTimeout(context.Background(), t.transcodeTimeout)
 
-	args := BuildFFmpegArgs(inputPath, outputDir, profile, startTime, t.hwAccel, t.encoder, copyVideo, copyAudio, toneMap, startSegmentNumber, audioStreamIndex)
+	args := BuildFFmpegArgs(inputPath, outputDir, profile, startTime, t.hwAccel, t.encoder, t.libx264Preset, copyVideo, copyAudio, toneMap, startSegmentNumber, audioStreamIndex)
 	cmd := exec.CommandContext(ctx, t.ffmpeg, args...)
 	cmd.Dir = outputDir
 
@@ -158,7 +174,7 @@ func (t *Transcoder) RestartAt(sessionID, itemID, inputPath string, profile Prof
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), t.transcodeTimeout)
-	args := BuildFFmpegArgs(inputPath, outputDir, profile, startTime, t.hwAccel, t.encoder, copyVideo, copyAudio, toneMap, startSegmentNumber, audioStreamIndex)
+	args := BuildFFmpegArgs(inputPath, outputDir, profile, startTime, t.hwAccel, t.encoder, t.libx264Preset, copyVideo, copyAudio, toneMap, startSegmentNumber, audioStreamIndex)
 	cmd := exec.CommandContext(ctx, t.ffmpeg, args...)
 	cmd.Dir = outputDir
 
@@ -301,9 +317,20 @@ func (s *Session) SegmentPath(index int) string {
 // scale + pad. Skipped on stream-copy paths because there is no
 // decoded frame to filter — the decision code already routes HDR
 // sources for SDR clients to the full-transcode branch.
-func BuildFFmpegArgs(input, outputDir string, profile Profile, startTime float64, hwAccel HWAccelType, encoder string, copyVideo, copyAudio, toneMap bool, startSegmentNumber, audioStreamIndex int) []string {
+//
+// `libx264Preset` is the -preset value passed to ffmpeg when encoding
+// with libx264. It controls the CPU/quality trade-off: ultrafast
+// burns the least CPU at the worst quality, medium / slow burn more
+// for noticeably better output. Ignored when `encoder != "libx264"`
+// (HW encoders use their own preset namespace). Empty string falls
+// back to "veryfast" — the historical default — so test callers that
+// don't care about the preset keep working unchanged.
+func BuildFFmpegArgs(input, outputDir string, profile Profile, startTime float64, hwAccel HWAccelType, encoder, libx264Preset string, copyVideo, copyAudio, toneMap bool, startSegmentNumber, audioStreamIndex int) []string {
 	if encoder == "" {
 		encoder = "libx264"
+	}
+	if libx264Preset == "" {
+		libx264Preset = "veryfast"
 	}
 	manifestPath := filepath.Join(outputDir, "stream.m3u8")
 	segmentPattern := filepath.Join(outputDir, "segment%05d.ts")
@@ -390,7 +417,7 @@ func BuildFFmpegArgs(input, outputDir string, profile Profile, startTime float64
 		args = append(args, "-c:v", encoder)
 		if encoder == "libx264" {
 			args = append(args,
-				"-preset", "veryfast",
+				"-preset", libx264Preset,
 				"-tune", "zerolatency",
 			)
 		}

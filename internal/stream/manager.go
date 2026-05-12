@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -169,9 +170,29 @@ func NewManager(
 		encoder = hwResult.Encoder
 	}
 
+	// Auto-tune zero/empty knobs in cfg with hardware-aware defaults.
+	// Runs AFTER detection so the recommendation is matched to the
+	// accelerator that's actually going to do the work; runs AFTER
+	// the caller has applied YAML + app_settings overrides so any
+	// explicit operator value (in cfg already) survives unchanged.
+	//
+	// runtime.NumCPU() reads the cgroup-aware CPU limit on Linux
+	// (Go 1.18+), so a container with --cpus=2 sees 2 here even on
+	// a 32-core host — auto-tune scales to the budget the operator
+	// gave the process, not the underlying hardware.
+	tuned := AutoTuneStreaming(cfg, hwAccel, runtime.NumCPU())
+	logger.Info("streaming auto-tune applied",
+		"hw_accel", hwAccel,
+		"cpu_count", runtime.NumCPU(),
+		"max_sessions", tuned.MaxTranscodeSessions,
+		"max_sessions_per_user", tuned.MaxTranscodeSessionsPerUser,
+		"libx264_preset", tuned.TranscodePreset,
+	)
+	cfg = tuned
+
 	m := &Manager{
 		sessions:   make(map[string]*ManagedSession),
-		transcoder: NewTranscoder(cacheDir, "", cfg.TranscodeTimeout, hwAccel, encoder, logger),
+		transcoder: NewTranscoder(cacheDir, "", cfg.TranscodeTimeout, hwAccel, encoder, cfg.TranscodePreset, logger),
 		items:      items,
 		streams:    streams,
 		cfg:        cfg,
@@ -745,10 +766,29 @@ func (m *Manager) ListAllSessions() []SessionSnapshot {
 	return out
 }
 
-// MaxTranscodeSessions returns the configured concurrent transcode cap (0
-// means unlimited). Read by admin endpoints to render "X of Y in use".
+// MaxTranscodeSessions returns the concurrent transcode cap in
+// effect after auto-tune + YAML + app_settings overrides. 0 means
+// unlimited (an unusual operator choice but supported). Read by
+// admin endpoints to render "X of Y in use".
 func (m *Manager) MaxTranscodeSessions() int {
 	return m.cfg.MaxTranscodeSessions
+}
+
+// MaxTranscodeSessionsPerUser returns the per-user transcode cap in
+// effect after auto-tune + overrides. 0 means "no per-user cap".
+// Surfaced to the admin panel so a saturation warning can explain
+// whether the limit hit was the global pool or a single user
+// soaking their slice.
+func (m *Manager) MaxTranscodeSessionsPerUser() int {
+	return m.cfg.MaxTranscodeSessionsPerUser
+}
+
+// TranscodePreset returns the libx264 -preset value in effect after
+// auto-tune + overrides. Always non-empty post-construction (defaults
+// to "veryfast" when nothing else applies). Used by the admin panel
+// to display "Software preset: veryfast" alongside the HW status row.
+func (m *Manager) TranscodePreset() string {
+	return m.cfg.TranscodePreset
 }
 
 // HWAccelInfo returns the accelerator snapshot computed at construction.

@@ -278,14 +278,19 @@ func defaults() *Config {
 			TrustedSubnets: []string{"127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"},
 		},
 		Streaming: StreamingConfig{
-			SegmentDuration:             6,
-			MaxTranscodeSessions:        4,
-			MaxTranscodeSessionsPerUser: 2,
-			TranscodePreset:             "veryfast",
-			DefaultAudioBitrate:         "192k",
-			CacheDir:                    "",
-			IdleTimeout:                 90 * time.Second,
-			TranscodeTimeout:            4 * time.Hour,
+			SegmentDuration: 6,
+			// MaxTranscodeSessions / MaxTranscodeSessionsPerUser /
+			// TranscodePreset default to zero / empty on purpose:
+			// stream.AutoTuneStreaming (called from NewManager after
+			// HW detection) fills them with hardware-aware
+			// recommendations on every boot. Operators who want
+			// explicit control override these from hubplay.yaml or the
+			// admin settings panel; the auto-tuner only touches
+			// sentinel zeros so explicit values survive untouched.
+			DefaultAudioBitrate: "192k",
+			CacheDir:            "",
+			IdleTimeout:         90 * time.Second,
+			TranscodeTimeout:    4 * time.Hour,
 			HWAccel: HWAccelConfig{
 				Enabled:   false,
 				Preferred: "auto",

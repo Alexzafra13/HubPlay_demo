@@ -1067,6 +1067,18 @@
         "forceDirectPlay": {
           "label": "Force direct play",
           "hint": "Send the file as-is to every client; never transcode. Off by default. Only enable when you're certain every client (browser, TV app, etc.) can decode every codec and container in your library — otherwise playback will fail."
+        },
+        "maxTranscodeSessions": {
+          "label": "Max concurrent transcodes",
+          "hint": "Maximum transcoding sessions running in parallel before returning BUSY. The default auto-tunes to your hardware (GPU type or CPU core count). Raise if your server has headroom, lower if you see CPU saturation."
+        },
+        "maxTranscodeSessionsPerUser": {
+          "label": "Max transcodes per user",
+          "hint": "How many of the global pool a single user can consume. Keeps one user with seek-loops or many devices from soaking the whole server. Defaults to half the global cap."
+        },
+        "transcodePreset": {
+          "label": "libx264 preset (CPU)",
+          "hint": "CPU vs. quality trade-off on the software encode path. ultrafast/superfast for low-power NAS, veryfast for mid-range desktop, fast/medium for beefy servers. Ignored when a hardware encoder is active."
         }
       },
       "totalLibraries": "Total libraries",

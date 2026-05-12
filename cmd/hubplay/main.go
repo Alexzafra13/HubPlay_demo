@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -236,6 +237,25 @@ func run(configPath string) error {
 	}
 	if v, err := repos.Settings.Get(ctx, "hardware_acceleration.preferred"); err == nil && v != "" {
 		streamingCfg.HWAccel.Preferred = v
+	}
+	// Runtime overrides for the auto-tuned knobs. Empty / zero values
+	// in streamingCfg trigger stream.AutoTuneStreaming inside
+	// NewManager; values populated here (whether from YAML defaults
+	// the operator set, or from admin app_settings rows) bypass the
+	// auto-tuner. Parse failures fall through silently — a bad row in
+	// app_settings is a UI bug, not a reason to refuse to boot.
+	if v, err := repos.Settings.Get(ctx, "streaming.max_transcode_sessions"); err == nil {
+		if n, perr := strconv.Atoi(v); perr == nil && n >= 0 {
+			streamingCfg.MaxTranscodeSessions = n
+		}
+	}
+	if v, err := repos.Settings.Get(ctx, "streaming.max_transcode_sessions_per_user"); err == nil {
+		if n, perr := strconv.Atoi(v); perr == nil && n >= 0 {
+			streamingCfg.MaxTranscodeSessionsPerUser = n
+		}
+	}
+	if v, err := repos.Settings.Get(ctx, "streaming.transcode_preset"); err == nil && v != "" {
+		streamingCfg.TranscodePreset = v
 	}
 	streamManager := stream.NewManager(repos.Items, repos.MediaStreams, streamingCfg, logger)
 	streamManager.SetMetrics(observability.NewStreamSink(metrics))

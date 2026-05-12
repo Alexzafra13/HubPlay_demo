@@ -532,17 +532,29 @@ func NewRouter(deps Dependencies) http.Handler {
 						// isn't wired (test rig / minimal startup) — handler treats
 						// that as "detector saw nothing" and falls back to "auto".
 						var detectedHWAccel []string
+						var streamingDefaults handlers.StreamingDefaults
 						if deps.StreamManager != nil {
 							for _, a := range deps.StreamManager.HWAccelInfo().Available {
 								detectedHWAccel = append(detectedHWAccel, string(a))
 							}
+							// Snapshot the auto-tuned streaming knobs from the
+							// running manager so the panel's "Default" column
+							// reflects what the server actually picked for the
+							// host's hardware — not a static YAML constant the
+							// admin would have to deduce in their head.
+							streamingDefaults = handlers.StreamingDefaults{
+								MaxTranscodeSessions:        deps.StreamManager.MaxTranscodeSessions(),
+								MaxTranscodeSessionsPerUser: deps.StreamManager.MaxTranscodeSessionsPerUser(),
+								TranscodePreset:             deps.StreamManager.TranscodePreset(),
+							}
 						}
 						settingsHandler := handlers.NewSettingsHandler(handlers.SettingsHandlerConfig{
-							Settings:        deps.Settings,
-							BaseURLDefault:  baseURL,
-							HWAccelDefault:  deps.Config.Streaming.HWAccel,
-							HWAccelDetected: detectedHWAccel,
-							Logger:          deps.Logger,
+							Settings:          deps.Settings,
+							BaseURLDefault:    baseURL,
+							HWAccelDefault:    deps.Config.Streaming.HWAccel,
+							HWAccelDetected:   detectedHWAccel,
+							StreamingDefaults: streamingDefaults,
+							Logger:            deps.Logger,
 						})
 						r.Get("/settings", settingsHandler.List)
 						r.Put("/settings", settingsHandler.Update)

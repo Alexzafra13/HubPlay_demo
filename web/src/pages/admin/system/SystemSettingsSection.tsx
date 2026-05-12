@@ -109,8 +109,27 @@ function SettingRow({ setting }: SettingRowProps) {
   const isMultiEnum =
     !!setting.allowed_values && setting.allowed_values.length > 1;
 
+  // `playback.force_direct_play = true` is the panel's single most
+  // dangerous toggle: it bypasses the capability waterfall for every
+  // client and means a TV / phone that can't decode an HEVC + EAC3
+  // file will just refuse to play. Plenty of operators will flip it
+  // thinking "I'll save CPU" and then get bug reports they can't
+  // explain. Block the save behind a confirm so the intent is
+  // explicit. Disabling it again doesn't need the prompt — going back
+  // to the safe default is always OK.
+  const requiresDangerousConfirm =
+    setting.key === "playback.force_direct_play" && draft === "true";
   const onSave = () => {
     if (!canSave) return;
+    if (requiresDangerousConfirm) {
+      const ok = window.confirm(
+        t("admin.system.forceDirectPlayConfirm", {
+          defaultValue:
+            "Vas a desactivar la transcodificación para TODOS los clientes. Cualquier reproductor que no pueda decodificar un archivo nativamente dejará de funcionar. ¿Seguro?",
+        }),
+      );
+      if (!ok) return;
+    }
     update.mutate({ key: setting.key, value: draft });
   };
 
@@ -156,6 +175,22 @@ function SettingRow({ setting }: SettingRowProps) {
           on sm+ so every row's control aligns at the same x position
           (Vercel / macOS Settings convention). */}
       <div className="flex flex-col gap-2 sm:w-[280px]">
+        {/* Force-direct-play danger banner. Renders only when the
+            override is currently active so the row visually stands
+            out from the rest — the operator should never miss that
+            the safety net is off. */}
+        {setting.key === "playback.force_direct_play" &&
+          setting.effective === "true" && (
+            <div
+              role="alert"
+              className="rounded-md border border-error/40 bg-error/10 px-3 py-2 text-xs text-error"
+            >
+              {t("admin.system.forceDirectPlayActiveWarning", {
+                defaultValue:
+                  "Transcodificación deshabilitada para todos los clientes. Si un reproductor no decodifica un archivo, la reproducción fallará sin fallback.",
+              })}
+            </div>
+          )}
         {isMultiEnum ? (
           <select
             value={draft}
@@ -271,6 +306,12 @@ function settingI18nKey(backendKey: string): string {
       return "hwAccelPreferred";
     case "playback.force_direct_play":
       return "forceDirectPlay";
+    case "streaming.max_transcode_sessions":
+      return "maxTranscodeSessions";
+    case "streaming.max_transcode_sessions_per_user":
+      return "maxTranscodeSessionsPerUser";
+    case "streaming.transcode_preset":
+      return "transcodePreset";
     default:
       return backendKey.replace(/[^a-zA-Z0-9]+/g, "_");
   }
