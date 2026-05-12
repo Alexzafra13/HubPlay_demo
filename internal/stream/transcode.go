@@ -37,13 +37,25 @@ type Transcoder struct {
 	// set once and read on every session.
 	hwAccel HWAccelType
 	encoder string // ffmpeg encoder name, e.g. "h264_nvenc" or "libx264"
-	logger  *slog.Logger
+	// libx264Preset is the -preset value passed to ffmpeg on the
+	// software encode path. Ignored when encoder != "libx264". Empty
+	// falls back to "veryfast" at use time. Auto-tuned at boot in
+	// AutoTuneStreaming so a fresh install picks a preset matching
+	// the host's core count (see autotune.go); admins can override
+	// from `streaming.transcode_preset` in the admin settings panel.
+	libx264Preset string
+	logger        *slog.Logger
 }
 
 // NewTranscoder constructs a transcoder. Pass `HWAccelNone` and an
 // empty `encoder` to force software encoding (libx264); pass the
 // values from `DetectHWAccel` to use the platform's accelerator.
-func NewTranscoder(baseDir, ffmpegPath string, transcodeTimeout time.Duration, hwAccel HWAccelType, encoder string, logger *slog.Logger) *Transcoder {
+//
+// `libx264Preset` is the -preset string ffmpeg should receive on the
+// software encode path. Pass "" to accept the historical "veryfast"
+// default; callers wired through `stream.NewManager` get a
+// hardware-aware value via AutoTuneStreaming. Ignored on HW encoders.
+func NewTranscoder(baseDir, ffmpegPath string, transcodeTimeout time.Duration, hwAccel HWAccelType, encoder, libx264Preset string, logger *slog.Logger) *Transcoder {
 	if ffmpegPath == "" {
 		ffmpegPath = "ffmpeg"
 	}
@@ -53,6 +65,9 @@ func NewTranscoder(baseDir, ffmpegPath string, transcodeTimeout time.Duration, h
 	if encoder == "" {
 		encoder = "libx264"
 	}
+	if libx264Preset == "" {
+		libx264Preset = "veryfast"
+	}
 	return &Transcoder{
 		sessions:         make(map[string]*Session),
 		baseDir:          baseDir,
@@ -60,6 +75,7 @@ func NewTranscoder(baseDir, ffmpegPath string, transcodeTimeout time.Duration, h
 		transcodeTimeout: transcodeTimeout,
 		hwAccel:          hwAccel,
 		encoder:          encoder,
+		libx264Preset:    libx264Preset,
 		logger:           logger.With("module", "transcoder"),
 	}
 }
@@ -76,7 +92,7 @@ func NewTranscoder(baseDir, ffmpegPath string, transcodeTimeout time.Duration, h
 // segment index that corresponds to the new offset so the produced
 // segment files (segmentNNNNN.ts) line up with what the synthesized
 // VOD manifest already advertised to the client.
-func (t *Transcoder) Start(sessionID, itemID, inputPath string, profile Profile, startTime float64, copyVideo, copyAudio, toneMap bool, startSegmentNumber, audioStreamIndex int) (*Session, error) {
+func (t *Transcoder) Start(sessionID, itemID, inputPath string, profile Profile, startTime float64, copyVideo, copyAudio, toneMap bool, startSegmentNumber, audioStreamIndex int, burnSub *BurnSubtitleSpec) (*Session, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -93,7 +109,7 @@ func (t *Transcoder) Start(sessionID, itemID, inputPath string, profile Profile,
 
 	ctx, cancel := context.WithTimeout(context.Background(), t.transcodeTimeout)
 
-	args := BuildFFmpegArgs(inputPath, outputDir, profile, startTime, t.hwAccel, t.encoder, copyVideo, copyAudio, toneMap, startSegmentNumber, audioStreamIndex)
+	args := BuildFFmpegArgs(inputPath, outputDir, profile, startTime, t.hwAccel, t.encoder, t.libx264Preset, copyVideo, copyAudio, toneMap, startSegmentNumber, audioStreamIndex, burnSub)
 	cmd := exec.CommandContext(ctx, t.ffmpeg, args...)
 	cmd.Dir = outputDir
 
@@ -145,7 +161,7 @@ func (t *Transcoder) Start(sessionID, itemID, inputPath string, profile Profile,
 // NOT call existing.Stop() (which would RemoveAll the directory).
 // The caller passes the *same* sessionID it used for the original
 // Start; ownership stays with this Transcoder.
-func (t *Transcoder) RestartAt(sessionID, itemID, inputPath string, profile Profile, startTime float64, copyVideo, copyAudio, toneMap bool, startSegmentNumber, audioStreamIndex int) (*Session, error) {
+func (t *Transcoder) RestartAt(sessionID, itemID, inputPath string, profile Profile, startTime float64, copyVideo, copyAudio, toneMap bool, startSegmentNumber, audioStreamIndex int, burnSub *BurnSubtitleSpec) (*Session, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -158,7 +174,7 @@ func (t *Transcoder) RestartAt(sessionID, itemID, inputPath string, profile Prof
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), t.transcodeTimeout)
-	args := BuildFFmpegArgs(inputPath, outputDir, profile, startTime, t.hwAccel, t.encoder, copyVideo, copyAudio, toneMap, startSegmentNumber, audioStreamIndex)
+	args := BuildFFmpegArgs(inputPath, outputDir, profile, startTime, t.hwAccel, t.encoder, t.libx264Preset, copyVideo, copyAudio, toneMap, startSegmentNumber, audioStreamIndex, burnSub)
 	cmd := exec.CommandContext(ctx, t.ffmpeg, args...)
 	cmd.Dir = outputDir
 
@@ -301,9 +317,32 @@ func (s *Session) SegmentPath(index int) string {
 // scale + pad. Skipped on stream-copy paths because there is no
 // decoded frame to filter — the decision code already routes HDR
 // sources for SDR clients to the full-transcode branch.
-func BuildFFmpegArgs(input, outputDir string, profile Profile, startTime float64, hwAccel HWAccelType, encoder string, copyVideo, copyAudio, toneMap bool, startSegmentNumber, audioStreamIndex int) []string {
+//
+// `libx264Preset` is the -preset value passed to ffmpeg when encoding
+// with libx264. It controls the CPU/quality trade-off: ultrafast
+// burns the least CPU at the worst quality, medium / slow burn more
+// for noticeably better output. Ignored when `encoder != "libx264"`
+// (HW encoders use their own preset namespace). Empty string falls
+// back to "veryfast" — the historical default — so test callers that
+// don't care about the preset keep working unchanged.
+//
+// `burnSub` (optional, nil = no burn-in) drives subtitle burn-in for
+// PGS / DVDSUB / ASS streams that no browser can render natively.
+// Setting it forces copyVideo=false (overlay needs decoded frames)
+// and switches the video filter strategy:
+//   - bitmap codecs (PGS, DVDSUB, ...) → -filter_complex with overlay
+//   - styled text (ASS / SSA)           → -vf with subtitles= prepended
+//
+// The chosen subtitle is permanent for the resulting segments, so
+// the caller MUST include the subtitle choice in its session key
+// (sessionKey() already does for audio; the analogous extension is
+// in this PR). Plex / Jellyfin handle this identically.
+func BuildFFmpegArgs(input, outputDir string, profile Profile, startTime float64, hwAccel HWAccelType, encoder, libx264Preset string, copyVideo, copyAudio, toneMap bool, startSegmentNumber, audioStreamIndex int, burnSub *BurnSubtitleSpec) []string {
 	if encoder == "" {
 		encoder = "libx264"
+	}
+	if libx264Preset == "" {
+		libx264Preset = "veryfast"
 	}
 	manifestPath := filepath.Join(outputDir, "stream.m3u8")
 	segmentPattern := filepath.Join(outputDir, "segment%05d.ts")
@@ -314,6 +353,16 @@ func BuildFFmpegArgs(input, outputDir string, profile Profile, startTime float64
 		copyVideo = true
 		copyAudio = true
 	}
+
+	// Burn-in requires re-encoding the video stream — there's no
+	// decoded frame to composite onto when we're just remuxing.
+	// Force the flag here so callers that flipped both knobs by
+	// mistake get the safe behaviour.
+	if burnSub != nil {
+		copyVideo = false
+	}
+	useFilterComplex := burnSub != nil && IsImageSubtitleCodec(burnSub.Codec)
+	useSubtitlesFilter := burnSub != nil && IsStyledTextSubtitleCodec(burnSub.Codec)
 
 	args := []string{
 		"-hide_banner",
@@ -344,12 +393,29 @@ func BuildFFmpegArgs(input, outputDir string, profile Profile, startTime float64
 	// that we never have to think about it again.
 	args = append(args, "-i", "file:"+input)
 
-	// Audio track selection. Emitted after -i so the maps refer to
-	// the input we just opened. We always pin video to the first
-	// stream alongside the audio map — ffmpeg's default-stream
-	// picker gets confused once any -map is present, and "first
-	// video stream" is always what we want for HLS.
-	if audioStreamIndex >= 0 {
+	// Audio + video stream selection.
+	//
+	// Plain path: when `audioStreamIndex >= 0`, pin both video (always
+	// the first stream) and the chosen audio track. ffmpeg's default
+	// stream picker gets confused once any -map is present, so we
+	// must declare video too.
+	//
+	// Filter-complex path (bitmap subtitle burn-in): -map "[burned]"
+	// is added AFTER the -filter_complex flag is emitted lower down,
+	// because the label only exists once the filter graph defines it.
+	// Audio still needs an explicit map here (filter_complex disables
+	// the default stream picker for ALL streams) — we use 0:a:0? with
+	// the trailing `?` so a video-only source doesn't fail the start.
+	if useFilterComplex {
+		if audioStreamIndex >= 0 {
+			args = append(args, "-map", fmt.Sprintf("0:a:%d", audioStreamIndex))
+		} else {
+			// Default audio, optional. The `?` makes the map non-fatal
+			// when the input has no audio track at all (rare but
+			// legitimate — silent video).
+			args = append(args, "-map", "0:a:0?")
+		}
+	} else if audioStreamIndex >= 0 {
 		args = append(args,
 			"-map", "0:v:0",
 			"-map", fmt.Sprintf("0:a:%d", audioStreamIndex),
@@ -390,7 +456,7 @@ func BuildFFmpegArgs(input, outputDir string, profile Profile, startTime float64
 		args = append(args, "-c:v", encoder)
 		if encoder == "libx264" {
 			args = append(args,
-				"-preset", "veryfast",
+				"-preset", libx264Preset,
 				"-tune", "zerolatency",
 			)
 		}
@@ -398,9 +464,44 @@ func BuildFFmpegArgs(input, outputDir string, profile Profile, startTime float64
 			"-b:v", profile.VideoBitrate,
 			"-maxrate", profile.VideoBitrate,
 			"-bufsize", profile.VideoBitrate,
-			"-vf", buildVideoFilterChain(profile, toneMap),
-			"-r", strconv.Itoa(profile.MaxFrameRate),
 		)
+
+		vfChain := buildVideoFilterChain(profile, toneMap)
+
+		switch {
+		case useFilterComplex:
+			// Bitmap subtitle burn-in. Two graph nodes:
+			//   1. [0:v] runs through the SDR/HDR vf chain → [scaled]
+			//   2. [scaled] + [0:s:N] overlay → [burned]
+			// `-map [burned]` here completes the video map that the
+			// audio block above already prepared. The subtitle is now
+			// permanently baked into the output frames — switching it
+			// mid-session requires a fresh transcode (enforced by
+			// sessionKey including BurnSubtitleIndex).
+			filterComplex := fmt.Sprintf(
+				"[0:v]%s[scaled];[scaled][0:s:%d]overlay[burned]",
+				vfChain, burnSub.Index,
+			)
+			args = append(args,
+				"-filter_complex", filterComplex,
+				"-map", "[burned]",
+			)
+		case useSubtitlesFilter:
+			// Styled-text burn-in (ASS / SSA). The `subtitles` filter
+			// re-opens the source file and rasterises the chosen sub
+			// stream onto every video frame. Prepended to the chain
+			// so it operates on the full-resolution source frames
+			// before scale/pad — text stays crisper through the
+			// downscale than rendering at output resolution would.
+			subPath := ffmpegInputPathEscape(burnSub.InputPath)
+			chain := fmt.Sprintf("subtitles=filename='%s':si=%d,%s",
+				subPath, burnSub.Index, vfChain)
+			args = append(args, "-vf", chain)
+		default:
+			args = append(args, "-vf", vfChain)
+		}
+
+		args = append(args, "-r", strconv.Itoa(profile.MaxFrameRate))
 	}
 
 	// Audio

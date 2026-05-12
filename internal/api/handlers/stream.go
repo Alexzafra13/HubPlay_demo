@@ -153,8 +153,18 @@ func (h *StreamHandler) MasterPlaylist(w http.ResponseWriter, r *http.Request) {
 			audioStreamIndex = v
 		}
 	}
+	// Same for the burned-in subtitle. ?subtitle=N picks a
+	// PGS / DVDSUB / ASS stream to render into the video frames.
+	// Missing / unparseable → no burn-in (the player will fall back
+	// to whatever native sub track it advertises, if any).
+	burnSubIndex := -1
+	if s := r.URL.Query().Get("subtitle"); s != "" {
+		if v, err := strconv.Atoi(s); err == nil && v >= 0 {
+			burnSubIndex = v
+		}
+	}
 	profiles := []string{"1080p", "720p", "480p", "360p"}
-	playlist := stream.GenerateMasterPlaylist(itemID, h.effectiveBaseURL(r.Context()), profiles, audioStreamIndex)
+	playlist := stream.GenerateMasterPlaylist(itemID, h.effectiveBaseURL(r.Context()), profiles, audioStreamIndex, burnSubIndex)
 
 	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -191,6 +201,17 @@ func (h *StreamHandler) QualityPlaylist(w http.ResponseWriter, r *http.Request) 
 			audioStreamIndex = v
 		}
 	}
+	// Optional subtitle burn-in. ?subtitle=<n> picks a per-type
+	// subtitle index (PGS / DVDSUB / ASS) to render into the video
+	// frames. -1 = no burn-in. The manager only honours indices
+	// pointing at burnable codecs; pointing at an SRT track is a
+	// no-op (those ride as native HLS sub tracks elsewhere).
+	burnSubIndex := -1
+	if s := r.URL.Query().Get("subtitle"); s != "" {
+		if v, err := strconv.Atoi(s); err == nil && v >= 0 {
+			burnSubIndex = v
+		}
+	}
 	// Client capabilities (codecs/containers) come in via the
 	// X-Hubplay-Client-Capabilities header. nil means "no header sent",
 	// in which case the stream manager + Decide() fall back to the
@@ -198,7 +219,7 @@ func (h *StreamHandler) QualityPlaylist(w http.ResponseWriter, r *http.Request) 
 	// today's web client which doesn't send the header yet.
 	caps := stream.CapabilitiesFromRequest(r)
 
-	ms, err := h.manager.StartSession(r.Context(), claims.UserID, itemID, quality, caps, startTime, audioStreamIndex)
+	ms, err := h.manager.StartSession(r.Context(), claims.UserID, itemID, quality, caps, startTime, audioStreamIndex, burnSubIndex)
 	if err != nil {
 		// The manager returns typed AppErrors (e.g. TranscodeBusy) that
 		// handleServiceError renders without leaking internal messages.
@@ -231,14 +252,21 @@ func (h *StreamHandler) QualityPlaylist(w http.ResponseWriter, r *http.Request) 
 	item, err := h.items.GetByID(r.Context(), itemID)
 	if err == nil && item != nil && item.DurationTicks > 0 {
 		duration := float64(item.DurationTicks) / 10_000_000
-		// Carry the audio param forward into segment URLs so hls.js
-		// keeps the same dub on every fetch. Without this, the segment
-		// handler can't reconstruct the session key (which embeds
-		// audioStreamIndex) and every .ts request 404s with
-		// SESSION_NOT_FOUND.
-		segSuffix := ""
+		// Carry the audio + subtitle params forward into segment URLs
+		// so hls.js keeps the same dub AND burned-in subtitle on every
+		// fetch. Without this, the segment handler can't reconstruct
+		// the session key (which embeds both indices) and every .ts
+		// request 404s with SESSION_NOT_FOUND.
+		params := make([]string, 0, 2)
 		if audioStreamIndex >= 0 {
-			segSuffix = fmt.Sprintf("?audio=%d", audioStreamIndex)
+			params = append(params, fmt.Sprintf("audio=%d", audioStreamIndex))
+		}
+		if burnSubIndex >= 0 {
+			params = append(params, fmt.Sprintf("subtitle=%d", burnSubIndex))
+		}
+		segSuffix := ""
+		if len(params) > 0 {
+			segSuffix = "?" + strings.Join(params, "&")
 		}
 		segmentTpl := fmt.Sprintf("/api/v1/stream/%s/%s/segment%%05d.ts%s", itemID, quality, segSuffix)
 		manifest := stream.SynthesizeVODManifest(duration, segmentDurationSeconds, segmentTpl)
@@ -294,18 +322,25 @@ func (h *StreamHandler) Segment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Audio stream index has to ride on every segment URL — the
-	// manifest synthesizer threaded ?audio=N into each segment so the
-	// session key we compute here matches the one Manager.StartSession
-	// registered. Missing/unparseable defaults to -1 (file default),
-	// which matches the master.m3u8 path that omits the param entirely.
+	// Audio + subtitle indices have to ride on every segment URL —
+	// the manifest synthesizer threaded both params into each
+	// segment URL so the session key we compute here matches the
+	// one Manager.StartSession registered. Missing/unparseable
+	// defaults to -1, which matches the master.m3u8 path that omits
+	// the param entirely.
 	audioStreamIndex := -1
 	if a := r.URL.Query().Get("audio"); a != "" {
 		if v, err := strconv.Atoi(a); err == nil && v >= 0 {
 			audioStreamIndex = v
 		}
 	}
-	key := stream.SessionKey(claims.UserID, itemID, quality, audioStreamIndex)
+	burnSubIndex := -1
+	if s := r.URL.Query().Get("subtitle"); s != "" {
+		if v, err := strconv.Atoi(s); err == nil && v >= 0 {
+			burnSubIndex = v
+		}
+	}
+	key := stream.SessionKey(claims.UserID, itemID, quality, audioStreamIndex, burnSubIndex)
 	ms, ok := h.manager.GetSession(key)
 	if !ok {
 		respondError(w, r, http.StatusNotFound, "SESSION_NOT_FOUND", "no active transcode session")

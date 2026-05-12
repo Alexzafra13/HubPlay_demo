@@ -7,7 +7,7 @@ import (
 )
 
 func TestGenerateMasterPlaylist(t *testing.T) {
-	playlist := GenerateMasterPlaylist("item123", "http://localhost:8096", []string{"1080p", "720p", "480p"}, -1)
+	playlist := GenerateMasterPlaylist("item123", "http://localhost:8096", []string{"1080p", "720p", "480p"}, -1, -1)
 
 	if !strings.HasPrefix(playlist, "#EXTM3U") {
 		t.Error("playlist should start with #EXTM3U")
@@ -32,7 +32,7 @@ func TestGenerateMasterPlaylist(t *testing.T) {
 }
 
 func TestGenerateMasterPlaylist_SkipsOriginal(t *testing.T) {
-	playlist := GenerateMasterPlaylist("item1", "", []string{"original", "720p"}, -1)
+	playlist := GenerateMasterPlaylist("item1", "", []string{"original", "720p"}, -1, -1)
 
 	if strings.Contains(playlist, "original") {
 		t.Error("should not include original profile in master playlist")

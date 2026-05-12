@@ -16,6 +16,7 @@ import (
 
 	"hubplay/internal/db"
 	"hubplay/internal/stream"
+	"hubplay/internal/sysmetrics"
 )
 
 // SystemStatsProvider is the slice of the stream manager the system handler
@@ -27,6 +28,17 @@ type SystemStatsProvider interface {
 	HWAccelInfo() stream.HWAccelResult
 	HWAccelEnabled() bool
 	CacheDir() string
+}
+
+// HostInfoProvider is the slice of the sysmetrics sampler the system
+// handler reads. Pulled out as an interface so tests pass a fake
+// snapshot without spinning a real sampler + gopsutil probes. Nil
+// providers are valid — the handler emits zero values, the panel
+// renders blank cells.
+type HostInfoProvider interface {
+	// Snapshot returns the latest probed host info (CPU model, %, RAM,
+	// GPU, ...). Implementations must be safe for concurrent reads.
+	Snapshot() sysmetrics.HostInfo
 }
 
 // LibraryStatsProvider is the slice of the library service the system
@@ -53,10 +65,11 @@ type SystemHandler struct {
 	streams        SystemStatsProvider
 	libs           LibraryStatsProvider
 	settings       SettingsReader
-	imageDir       string // <dataDir>/images
-	dbPath         string // raw SQLite file path; "" disables disk size readout
-	bind           string // configured listen address (host:port). Empty hides.
-	baseURLDefault string // YAML fallback for server.base_url (overridden by app_settings).
+	host           HostInfoProvider // optional — nil disables the host section
+	imageDir       string           // <dataDir>/images
+	dbPath         string           // raw SQLite file path; "" disables disk size readout
+	bind           string           // configured listen address (host:port). Empty hides.
+	baseURLDefault string           // YAML fallback for server.base_url (overridden by app_settings).
 	startedAt      time.Time
 	version        string
 	logger         *slog.Logger
@@ -79,6 +92,7 @@ type SystemHandlerConfig struct {
 	Streams        SystemStatsProvider
 	Libraries      LibraryStatsProvider
 	Settings       SettingsReader
+	Host           HostInfoProvider // optional — nil emits a zero-value host section
 	ImageDir       string
 	DBPath         string
 	BindAddress    string
@@ -98,6 +112,7 @@ func NewSystemHandler(cfg SystemHandlerConfig) *SystemHandler {
 		streams:        cfg.Streams,
 		libs:           cfg.Libraries,
 		settings:       cfg.Settings,
+		host:           cfg.Host,
 		imageDir:       cfg.ImageDir,
 		dbPath:         cfg.DBPath,
 		bind:           cfg.BindAddress,
@@ -132,12 +147,35 @@ func (h *SystemHandler) effectiveBaseURL(ctx context.Context) string {
 // contained card without prop-drilling 20 flat fields.
 type systemStats struct {
 	Server    serverStats    `json:"server"`
+	Host      hostStats      `json:"host"`
 	Database  databaseStats  `json:"database"`
 	FFmpeg    ffmpegStats    `json:"ffmpeg"`
 	Runtime   runtimeStats   `json:"runtime"`
 	Streaming streamingStats `json:"streaming"`
 	Storage   storageStats   `json:"storage"`
 	Libraries libraryStats   `json:"libraries"`
+}
+
+// hostStats is the host-level introspection — model strings + live
+// utilisation — sampled by internal/sysmetrics. Distinct from
+// runtimeStats (which is Go-process-specific: heap MB, goroutines)
+// because the admin's question "is my SERVER hot?" is fundamentally
+// different from "is my hubplay process hot?", and we want both
+// visible at a glance.
+//
+// Empty fields render as "—" in the panel — they happen on platforms
+// without a probe (no nvidia-smi → empty GPU model; gopsutil can't
+// read /proc/cpuinfo on a sandboxed runtime → empty CPU model).
+type hostStats struct {
+	CPUModel            string  `json:"cpu_model"`
+	CPUCoresPhysical    int     `json:"cpu_cores_physical"`
+	CPUCoresLogical     int     `json:"cpu_cores_logical"`
+	CPUPercent          float64 `json:"cpu_percent"`
+	RAMTotalBytes       uint64  `json:"ram_total_bytes"`
+	RAMUsedBytes        uint64  `json:"ram_used_bytes"`
+	GPUModel            string  `json:"gpu_model"`
+	GPUMemoryTotalBytes uint64  `json:"gpu_memory_total_bytes"`
+	GPUDriverVersion    string  `json:"gpu_driver_version"`
 }
 
 type serverStats struct {
@@ -297,6 +335,27 @@ func (h *SystemHandler) Stats(w http.ResponseWriter, r *http.Request) {
 	if h.streams != nil {
 		out.Streaming.TranscodeSessionsActive = h.streams.ActiveSessions()
 		out.Streaming.TranscodeSessionsMax = h.streams.MaxTranscodeSessions()
+	}
+
+	// ── Host (CPU%, RAM, model strings) ────────────────────────────────
+	// Provided by internal/sysmetrics if wired; otherwise the section
+	// stays empty and the panel renders dashes. The handler intentionally
+	// doesn't probe directly — gopsutil's CPU% needs a delta window the
+	// handler can't reasonably hold, so the sampler does it in the
+	// background and we just read its atomic snapshot here.
+	if h.host != nil {
+		snap := h.host.Snapshot()
+		out.Host = hostStats{
+			CPUModel:            snap.CPUModel,
+			CPUCoresPhysical:    snap.CPUCoresPhysical,
+			CPUCoresLogical:     snap.CPUCoresLogical,
+			CPUPercent:          snap.CPUPercent,
+			RAMTotalBytes:       snap.RAMTotalBytes,
+			RAMUsedBytes:        snap.RAMUsedBytes,
+			GPUModel:            snap.GPUModel,
+			GPUMemoryTotalBytes: snap.GPUMemoryTotalBytes,
+			GPUDriverVersion:    snap.GPUDriverVersion,
+		}
 	}
 
 	// ── Storage ────────────────────────────────────────────────────────

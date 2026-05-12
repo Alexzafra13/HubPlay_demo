@@ -15,13 +15,13 @@ func newTestTranscoder(t *testing.T) *stream.Transcoder {
 	t.Helper()
 	dir := t.TempDir()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	return stream.NewTranscoder(dir, "ffmpeg", 4*time.Hour, stream.HWAccelNone, "libx264", logger)
+	return stream.NewTranscoder(dir, "ffmpeg", 4*time.Hour, stream.HWAccelNone, "libx264", "", logger)
 }
 
 func TestNewTranscoder_DefaultFFmpeg(t *testing.T) {
 	dir := t.TempDir()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	tc := stream.NewTranscoder(dir, "", 4*time.Hour, stream.HWAccelNone, "libx264", logger)
+	tc := stream.NewTranscoder(dir, "", 4*time.Hour, stream.HWAccelNone, "libx264", "", logger)
 	if tc == nil {
 		t.Fatal("expected non-nil transcoder")
 	}
@@ -61,9 +61,9 @@ func TestTranscoder_StopAll_Empty(t *testing.T) {
 func TestTranscoder_Start_InvalidFFmpeg(t *testing.T) {
 	dir := t.TempDir()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	tc := stream.NewTranscoder(dir, "/nonexistent/ffmpeg", 4*time.Hour, stream.HWAccelNone, "libx264", logger)
+	tc := stream.NewTranscoder(dir, "/nonexistent/ffmpeg", 4*time.Hour, stream.HWAccelNone, "libx264", "", logger)
 
-	_, err := tc.Start("sess-1", "item-1", "/some/video.mkv", stream.DefaultProfile(), 0, false, false, false, 0, -1)
+	_, err := tc.Start("sess-1", "item-1", "/some/video.mkv", stream.DefaultProfile(), 0, false, false, false, 0, -1, nil)
 	if err == nil {
 		t.Fatal("expected error for invalid ffmpeg path")
 	}
@@ -113,7 +113,7 @@ func TestSession_SegmentPath(t *testing.T) {
 }
 
 func TestBuildFFmpegArgs_Original(t *testing.T) {
-	args := stream.BuildFFmpegArgs("/input.mkv", "/out", stream.Profiles["original"], 0, stream.HWAccelNone, "libx264", false, false, false, 0, -1)
+	args := stream.BuildFFmpegArgs("/input.mkv", "/out", stream.Profiles["original"], 0, stream.HWAccelNone, "libx264", "", false, false, false, 0, -1, nil)
 
 	assertContains(t, args, "-c:v", "copy")
 	assertContains(t, args, "-c:a", "copy")
@@ -123,7 +123,7 @@ func TestBuildFFmpegArgs_Original(t *testing.T) {
 }
 
 func TestBuildFFmpegArgs_720p(t *testing.T) {
-	args := stream.BuildFFmpegArgs("/input.mkv", "/out", stream.Profiles["720p"], 0, stream.HWAccelNone, "libx264", false, false, false, 0, -1)
+	args := stream.BuildFFmpegArgs("/input.mkv", "/out", stream.Profiles["720p"], 0, stream.HWAccelNone, "libx264", "", false, false, false, 0, -1, nil)
 
 	assertContains(t, args, "-c:v", "libx264")
 	assertContains(t, args, "-b:v", "2500k")
@@ -133,7 +133,7 @@ func TestBuildFFmpegArgs_720p(t *testing.T) {
 }
 
 func TestBuildFFmpegArgs_WithSeek(t *testing.T) {
-	args := stream.BuildFFmpegArgs("/input.mkv", "/out", stream.Profiles["720p"], 30.5, stream.HWAccelNone, "libx264", false, false, false, 0, -1)
+	args := stream.BuildFFmpegArgs("/input.mkv", "/out", stream.Profiles["720p"], 30.5, stream.HWAccelNone, "libx264", "", false, false, false, 0, -1, nil)
 
 	assertContains(t, args, "-ss", "30.500")
 }
@@ -161,7 +161,7 @@ func TestBuildFFmpegArgs_AlwaysIncludesCopyts(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			args := stream.BuildFFmpegArgs("/input.mkv", "/out", stream.Profiles["720p"], tc.startTime, stream.HWAccelNone, "libx264", false, false, false, 0, -1)
+			args := stream.BuildFFmpegArgs("/input.mkv", "/out", stream.Profiles["720p"], tc.startTime, stream.HWAccelNone, "libx264", "", false, false, false, 0, -1, nil)
 			found := false
 			for _, a := range args {
 				if a == "-copyts" {
@@ -177,13 +177,13 @@ func TestBuildFFmpegArgs_AlwaysIncludesCopyts(t *testing.T) {
 }
 
 func TestBuildFFmpegArgs_NoSeekAtZero(t *testing.T) {
-	args := stream.BuildFFmpegArgs("/input.mkv", "/out", stream.Profiles["720p"], 0, stream.HWAccelNone, "libx264", false, false, false, 0, -1)
+	args := stream.BuildFFmpegArgs("/input.mkv", "/out", stream.Profiles["720p"], 0, stream.HWAccelNone, "libx264", "", false, false, false, 0, -1, nil)
 
 	assertNotContains(t, args, "-ss")
 }
 
 func TestBuildFFmpegArgs_HLSSettings(t *testing.T) {
-	args := stream.BuildFFmpegArgs("/input.mkv", "/out", stream.Profiles["480p"], 0, stream.HWAccelNone, "libx264", false, false, false, 0, -1)
+	args := stream.BuildFFmpegArgs("/input.mkv", "/out", stream.Profiles["480p"], 0, stream.HWAccelNone, "libx264", "", false, false, false, 0, -1, nil)
 
 	assertContains(t, args, "-hls_time", "6")
 	assertContains(t, args, "-hls_list_size", "0")
@@ -193,7 +193,7 @@ func TestBuildFFmpegArgs_HLSSettings(t *testing.T) {
 
 func TestBuildFFmpegArgs_HWAccel_NVENC_PrependsHwaccelAndSwapsEncoder(t *testing.T) {
 	args := stream.BuildFFmpegArgs("/input.mkv", "/out", stream.Profiles["720p"], 0,
-		stream.HWAccelNVENC, "h264_nvenc", false, false, false, 0, -1)
+		stream.HWAccelNVENC, "h264_nvenc", "", false, false, false, 0, -1, nil)
 
 	// Encoder swapped from libx264 to the NVENC variant.
 	assertContains(t, args, "-c:v", "h264_nvenc")
@@ -208,7 +208,7 @@ func TestBuildFFmpegArgs_HWAccel_NVENC_PrependsHwaccelAndSwapsEncoder(t *testing
 
 func TestBuildFFmpegArgs_HWAccel_VAAPI_PrependsHwaccel(t *testing.T) {
 	args := stream.BuildFFmpegArgs("/input.mkv", "/out", stream.Profiles["480p"], 0,
-		stream.HWAccelVAAPI, "h264_vaapi", false, false, false, 0, -1)
+		stream.HWAccelVAAPI, "h264_vaapi", "", false, false, false, 0, -1, nil)
 	assertContains(t, args, "-c:v", "h264_vaapi")
 	assertContains(t, args, "-hwaccel", "vaapi")
 }
@@ -219,7 +219,7 @@ func TestBuildFFmpegArgs_HWAccel_VideoToolbox_NoInputHwaccelFlag(t *testing.T) {
 	// without prepending any -hwaccel flag — extra flags would just
 	// log a warning and slow ffmpeg's startup.
 	args := stream.BuildFFmpegArgs("/input.mkv", "/out", stream.Profiles["720p"], 0,
-		stream.HWAccelVideoToolbox, "h264_videotoolbox", false, false, false, 0, -1)
+		stream.HWAccelVideoToolbox, "h264_videotoolbox", "", false, false, false, 0, -1, nil)
 	assertContains(t, args, "-c:v", "h264_videotoolbox")
 	assertNotContains(t, args, "-hwaccel")
 }
@@ -232,7 +232,7 @@ func TestBuildFFmpegArgs_HWAccel_VideoToolbox_NoInputHwaccelFlag(t *testing.T) {
 // produce washed-out output.
 func TestBuildFFmpegArgs_ToneMap_PrependsZscaleChain(t *testing.T) {
 	args := stream.BuildFFmpegArgs("/input.mkv", "/out", stream.Profiles["720p"], 0,
-		stream.HWAccelNone, "libx264", false, false, true, 0, -1)
+		stream.HWAccelNone, "libx264", "", false, false, true, 0, -1, nil)
 
 	vf := flagValue(args, "-vf")
 	if vf == "" {
@@ -254,7 +254,7 @@ func TestBuildFFmpegArgs_ToneMap_PrependsZscaleChain(t *testing.T) {
 // break setups that don't have it.
 func TestBuildFFmpegArgs_NoToneMap_NoZscale(t *testing.T) {
 	args := stream.BuildFFmpegArgs("/input.mkv", "/out", stream.Profiles["720p"], 0,
-		stream.HWAccelNone, "libx264", false, false, false, 0, -1)
+		stream.HWAccelNone, "libx264", "", false, false, false, 0, -1, nil)
 	vf := flagValue(args, "-vf")
 	if strings.Contains(vf, "zscale") || strings.Contains(vf, "tonemap") {
 		t.Errorf("SDR -vf must not contain zscale/tonemap; got %q", vf)
@@ -268,12 +268,141 @@ func TestBuildFFmpegArgs_NoToneMap_NoZscale(t *testing.T) {
 // produces this combination, but the encoder side stays defensive.
 func TestBuildFFmpegArgs_ToneMap_IgnoredOnCopyVideo(t *testing.T) {
 	args := stream.BuildFFmpegArgs("/input.mkv", "/out", stream.Profiles["720p"], 0,
-		stream.HWAccelNone, "libx264", true /* copyVideo */, false, true /* toneMap */, 0, -1)
+		stream.HWAccelNone, "libx264", "", true /* copyVideo */, false, true /* toneMap */, 0, -1, nil)
 	for _, a := range args {
 		if a == "-vf" {
 			t.Errorf("copyVideo=true must not emit -vf; got %v", args)
 		}
 	}
+}
+
+// TestBuildFFmpegArgs_LibX264Preset_Threaded pins that the
+// libx264Preset argument actually flows to ffmpeg's -preset on the
+// software path. Before this argument existed the value was hardcoded
+// to "veryfast" in BuildFFmpegArgs, which silently defeated the
+// `streaming.transcode_preset` config knob — a dead config bug for
+// the lifetime of the project until 2026-05-12.
+func TestBuildFFmpegArgs_LibX264Preset_Threaded(t *testing.T) {
+	cases := []struct {
+		name    string
+		preset  string
+		wantArg string
+	}{
+		{"explicit medium", "medium", "medium"},
+		{"explicit ultrafast", "ultrafast", "ultrafast"},
+		{"empty falls back to veryfast", "", "veryfast"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			args := stream.BuildFFmpegArgs("/input.mkv", "/out", stream.Profiles["720p"], 0,
+				stream.HWAccelNone, "libx264", tc.preset, false, false, false, 0, -1, nil)
+			got := flagValue(args, "-preset")
+			if got != tc.wantArg {
+				t.Errorf("-preset = %q, want %q (full args: %v)", got, tc.wantArg, args)
+			}
+		})
+	}
+}
+
+// TestBuildFFmpegArgs_LibX264Preset_IgnoredOnHWAccel pins that the
+// preset value is NOT emitted when the encoder is a hardware path —
+// libx264 -preset names mean nothing to NVENC / VAAPI / QSV and
+// leaking them into the args list logs spurious warnings.
+func TestBuildFFmpegArgs_LibX264Preset_IgnoredOnHWAccel(t *testing.T) {
+	args := stream.BuildFFmpegArgs("/input.mkv", "/out", stream.Profiles["720p"], 0,
+		stream.HWAccelNVENC, "h264_nvenc", "medium", false, false, false, 0, -1, nil)
+	for i, a := range args {
+		if a == "-preset" {
+			t.Errorf("HW encoder must not emit -preset; got %q at %d in %v", args[i+1], i, args)
+		}
+	}
+}
+
+// TestBuildFFmpegArgs_BurnSub_Bitmap_UsesFilterComplex pins that
+// PGS / DVDSUB burn-in emits a filter_complex chain with the overlay
+// node + explicit -map [burned] for video. The order matters: the
+// scale chain runs FIRST so the subtitle overlay receives
+// already-downscaled frames (matches output size).
+func TestBuildFFmpegArgs_BurnSub_Bitmap_UsesFilterComplex(t *testing.T) {
+	args := stream.BuildFFmpegArgs("/in.mkv", "/out", stream.Profiles["720p"], 0,
+		stream.HWAccelNone, "libx264", "", false, false, false, 0, -1,
+		&stream.BurnSubtitleSpec{Index: 2, Codec: "hdmv_pgs_subtitle", InputPath: "/in.mkv"})
+
+	fc := flagValue(args, "-filter_complex")
+	if fc == "" {
+		t.Fatalf("missing -filter_complex; args=%v", args)
+	}
+	if !strings.Contains(fc, "[0:s:2]overlay[burned]") {
+		t.Errorf("filter_complex missing overlay node referencing sub stream 2: %q", fc)
+	}
+	if !strings.Contains(fc, "scale=1280:720") {
+		t.Errorf("filter_complex must include the regular scale chain before overlay: %q", fc)
+	}
+	// Video map comes from the filter_complex output, not 0:v:0.
+	assertContains(t, args, "-map", "[burned]")
+	// Audio map must be present (filter_complex disables ffmpeg's
+	// default stream picker). Default audio uses the optional ?
+	// suffix so video-only files don't fail the start.
+	assertContains(t, args, "-map", "0:a:0?")
+	// -vf must NOT also appear — ffmpeg rejects both flags together.
+	for _, a := range args {
+		if a == "-vf" {
+			t.Errorf("burn-in path must not emit -vf alongside -filter_complex; args=%v", args)
+		}
+	}
+}
+
+// TestBuildFFmpegArgs_BurnSub_ASS_UsesSubtitlesFilter pins that
+// ASS / SSA burn-in uses the `subtitles` filter prepended to -vf.
+// The path inside the filter expression must be single-quoted and
+// have colons / backslashes escaped or ffmpeg will silently parse
+// half of it as filter options.
+func TestBuildFFmpegArgs_BurnSub_ASS_UsesSubtitlesFilter(t *testing.T) {
+	args := stream.BuildFFmpegArgs("/mnt/x:y/anime.mkv", "/out", stream.Profiles["720p"], 0,
+		stream.HWAccelNone, "libx264", "", false, false, false, 0, -1,
+		&stream.BurnSubtitleSpec{Index: 0, Codec: "ass", InputPath: "/mnt/x:y/anime.mkv"})
+
+	vf := flagValue(args, "-vf")
+	if vf == "" {
+		t.Fatalf("missing -vf; args=%v", args)
+	}
+	// subtitles filter must come first (full-resolution frames →
+	// crisper text after downscale).
+	if !strings.HasPrefix(vf, "subtitles=filename='") {
+		t.Errorf("-vf should start with subtitles= filter, got %q", vf)
+	}
+	// Colon in path must be escaped — otherwise ffmpeg parses
+	// :y/anime.mkv as a separate filter option and breaks.
+	if !strings.Contains(vf, `'/mnt/x\:y/anime.mkv'`) {
+		t.Errorf("colon in path not escaped inside subtitles= filter: %q", vf)
+	}
+	if !strings.Contains(vf, ":si=0,") {
+		t.Errorf("subtitles filter missing si=0 index marker: %q", vf)
+	}
+	// filter_complex must NOT be used for ASS.
+	for _, a := range args {
+		if a == "-filter_complex" {
+			t.Errorf("ASS burn-in should use -vf, not -filter_complex; args=%v", args)
+		}
+	}
+}
+
+// TestBuildFFmpegArgs_BurnSub_ForcesReencode pins that passing a
+// BurnSubtitleSpec overrides copyVideo=true. Stream-copy paths have
+// no decoded frames to composite onto; ffmpeg would error mid-run
+// otherwise. The handler should already convert the decision before
+// calling us, but the encoder side stays defensive.
+func TestBuildFFmpegArgs_BurnSub_ForcesReencode(t *testing.T) {
+	args := stream.BuildFFmpegArgs("/in.mkv", "/out", stream.Profiles["720p"], 0,
+		stream.HWAccelNone, "libx264", "", true /* caller asked copyVideo */, false, false, 0, -1,
+		&stream.BurnSubtitleSpec{Index: 0, Codec: "pgs", InputPath: "/in.mkv"})
+	// -c:v copy must NOT appear; the real encoder must be selected.
+	for i, a := range args {
+		if a == "-c:v" && i+1 < len(args) && args[i+1] == "copy" {
+			t.Errorf("burn-in must override copyVideo; got -c:v copy in %v", args)
+		}
+	}
+	assertContains(t, args, "-c:v", "libx264")
 }
 
 // TestBuildFFmpegArgs_InputUsesFileProtocol pins the `file:` prefix
@@ -283,7 +412,7 @@ func TestBuildFFmpegArgs_ToneMap_IgnoredOnCopyVideo(t *testing.T) {
 // produce. With the prefix the path is always treated verbatim.
 func TestBuildFFmpegArgs_InputUsesFileProtocol(t *testing.T) {
 	args := stream.BuildFFmpegArgs("/path/to/input.mkv", "/out",
-		stream.Profiles["720p"], 0, stream.HWAccelNone, "libx264", false, false, false, 0, -1)
+		stream.Profiles["720p"], 0, stream.HWAccelNone, "libx264", "", false, false, false, 0, -1, nil)
 	assertContains(t, args, "-i", "file:/path/to/input.mkv")
 	assertNotContains(t, args, "/path/to/input.mkv") // raw path must NOT appear after -i
 }

@@ -107,7 +107,7 @@ type LibraryAccessService interface {
 
 // StreamManagerService defines streaming operations needed by handlers.
 type StreamManagerService interface {
-	StartSession(ctx context.Context, userID, itemID, profileName string, caps *stream.Capabilities, startTime float64, audioStreamIndex int) (*stream.ManagedSession, error)
+	StartSession(ctx context.Context, userID, itemID, profileName string, caps *stream.Capabilities, startTime float64, audioStreamIndex, burnSubIndex int) (*stream.ManagedSession, error)
 	GetSession(key string) (*stream.ManagedSession, bool)
 	// RestartSessionAt re-spawns the ffmpeg behind an active session
 	// so it begins encoding at `segmentIndex * segmentDuration`.

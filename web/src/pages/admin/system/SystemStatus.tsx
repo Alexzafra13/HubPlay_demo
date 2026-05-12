@@ -17,6 +17,7 @@ import {
 } from "@/api/hooks";
 import type {
   AdminStreamSession,
+  SystemHostStats,
   SystemRuntimeStats,
   SystemStats,
 } from "@/api/types";
@@ -91,6 +92,11 @@ interface MetricsSample {
   ts: number;
   sessions: number;
   memMb: number;
+  /** Host-wide CPU% (0-100). NaN-safe: the sampler returns 0 when
+   *  gopsutil can't read /proc/stat (sandboxed CI runners). */
+  cpuPercent: number;
+  /** Host RAM used as a fraction of total (0-1). 0 when unknown. */
+  ramRatio: number;
 }
 
 const MAX_SAMPLES = 120; // ≈ 1 h at 30 s cadence
@@ -120,10 +126,14 @@ function useMetricsHistory(
     }
     lastTsRef.current = dataUpdatedAt;
     setSamples((prev) => {
+      const ramTotal = stats.host?.ram_total_bytes ?? 0;
+      const ramUsed = stats.host?.ram_used_bytes ?? 0;
       const next = prev.concat({
         ts: dataUpdatedAt,
         sessions: stats.streaming.transcode_sessions_active,
         memMb: stats.runtime.memory_alloc_mb,
+        cpuPercent: stats.host?.cpu_percent ?? 0,
+        ramRatio: ramTotal > 0 ? Math.min(1, ramUsed / ramTotal) : 0,
       });
       return next.length > MAX_SAMPLES ? next.slice(-MAX_SAMPLES) : next;
     });
@@ -179,6 +189,8 @@ export default function SystemStatus() {
       />
 
       <HealthSection stats={stats} />
+
+      <HostSection host={stats.host} history={history} />
 
       <ConnectionSection stats={stats} />
 
@@ -242,6 +254,29 @@ function IdentityStrip({
 }: IdentityStripProps) {
   const { t } = useTranslation();
   const allHealthy = stats.database.ok && stats.ffmpeg.found;
+  // Build the hardware hint shown alongside the version/uptime strip
+  // so the operator gets the "what's under the hood" answer without
+  // scrolling. Examples:
+  //   "Ryzen 5 5600 · 6c/12t · NVENC"
+  //   "Apple M2 · 8c"
+  //   ""   (probe failed, hide the row to keep the chrome clean)
+  const hostBits: string[] = [];
+  if (stats.host?.cpu_model) {
+    // Trim the marketing suffix that adds no value on a narrow header.
+    const clean = stats.host.cpu_model
+      .replace(/\s+\d+-Core Processor.*$/i, "")
+      .replace(/\(R\)|\(TM\)|CPU @ .*$/g, "")
+      .trim();
+    hostBits.push(clean);
+  }
+  if (stats.host?.cpu_cores_logical) {
+    const p = stats.host.cpu_cores_physical;
+    const l = stats.host.cpu_cores_logical;
+    hostBits.push(p > 0 && p !== l ? `${p}c/${l}t` : `${l}c`);
+  }
+  if (stats.ffmpeg.hw_accel_selected && stats.ffmpeg.hw_accel_selected !== "none") {
+    hostBits.push(stats.ffmpeg.hw_accel_selected.toUpperCase());
+  }
   return (
     <header className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
       <span
@@ -260,6 +295,17 @@ function IdentityStrip({
           uptime: formatUptime(stats.server.uptime_seconds),
         })}
       </span>
+      {hostBits.length > 0 && (
+        <>
+          <span className="text-text-muted">·</span>
+          <span
+            className="text-text-secondary truncate max-w-[40ch]"
+            title={stats.host?.cpu_model}
+          >
+            {hostBits.join(" · ")}
+          </span>
+        </>
+      )}
       <span className="text-text-muted">·</span>
       <span className="text-text-secondary tabular-nums">
         {formatServerTime(stats.server.server_time)} {stats.server.timezone}
@@ -665,6 +711,187 @@ function ActiveSessionsList() {
         ))}
       </ul>
     </div>
+  );
+}
+
+// ─── Host (CPU/RAM/GPU) ────────────────────────────────────────────
+//
+// Distinct from the "Proceso" section below. Host = "the box" (CPU
+// model, RAM total/used, GPU model). Proceso = "this Go process"
+// (heap, goroutines). Both are useful; conflating them led to the
+// previous version showing only Go heap, which doesn't tell the
+// operator if their CPU is saturated.
+//
+// Empty fields render as "—". A host without nvidia-smi has no GPU
+// row; a sandboxed runtime where gopsutil can't read /proc/cpuinfo
+// just shows the cores count without a model string.
+
+function HostSection({
+  host,
+  history,
+}: {
+  host: SystemHostStats;
+  history: MetricsSample[];
+}) {
+  const { t } = useTranslation();
+
+  const cpuPct = host.cpu_percent ?? 0;
+  const cpuTone =
+    cpuPct < 60 ? "success" : cpuPct < 85 ? "warning" : "error";
+  const cpuColour =
+    cpuTone === "success"
+      ? "var(--color-success)"
+      : cpuTone === "warning"
+        ? "var(--color-warning)"
+        : "var(--color-error)";
+
+  const ramTotal = host.ram_total_bytes ?? 0;
+  const ramUsed = host.ram_used_bytes ?? 0;
+  const ramPct = ramTotal > 0 ? Math.min(100, (ramUsed / ramTotal) * 100) : 0;
+  const ramTone =
+    ramPct < 75 ? "success" : ramPct < 90 ? "warning" : "error";
+  const ramColour =
+    ramTone === "success"
+      ? "var(--color-success)"
+      : ramTone === "warning"
+        ? "var(--color-warning)"
+        : "var(--color-error)";
+
+  // Compose the CPU sub-label: "6 cores · 12 threads" when both are
+  // known and differ, "6 cores" otherwise. Saves a vertical row vs
+  // showing them as separate fields.
+  const coresLabel = (() => {
+    const p = host.cpu_cores_physical;
+    const l = host.cpu_cores_logical;
+    if (p > 0 && l > 0 && p !== l) {
+      return t("admin.systemHost.coresWithThreads", {
+        defaultValue: "{{physical}} núcleos · {{logical}} hilos",
+        physical: p,
+        logical: l,
+      });
+    }
+    if (l > 0) {
+      return t("admin.systemHost.coresOnly", {
+        defaultValue: "{{count}} núcleos",
+        count: l,
+      });
+    }
+    return "—";
+  })();
+
+  return (
+    <section className="flex flex-col gap-4">
+      <SectionHeader
+        icon={Cpu}
+        title={t("admin.systemHost.title", { defaultValue: "Host" })}
+        subtitle={t("admin.systemHost.subtitle", {
+          defaultValue:
+            "Hardware del servidor donde corre HubPlay y carga real ahora mismo.",
+        })}
+      />
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        {/* CPU card — model + cores + live % with sparkline */}
+        <div className="flex flex-col gap-3 rounded-[--radius-lg] border border-border bg-bg-card p-5">
+          <div className="flex items-baseline justify-between">
+            <span className="text-xs font-medium uppercase tracking-wider text-text-muted">
+              {t("admin.systemHost.cpu", { defaultValue: "CPU" })}
+            </span>
+            <span className="text-xs text-text-muted">{coresLabel}</span>
+          </div>
+          <div className="text-sm font-medium text-text-primary truncate" title={host.cpu_model}>
+            {host.cpu_model || "—"}
+          </div>
+          <div className="flex items-end justify-between gap-3">
+            <div className="flex items-baseline gap-2">
+              <span
+                className="text-3xl font-semibold tabular-nums"
+                style={{ color: cpuColour }}
+              >
+                {cpuPct.toFixed(1)}
+              </span>
+              <span className="text-base text-text-muted">%</span>
+            </div>
+            <Sparkline
+              values={history.map((h) => h.cpuPercent)}
+              width={120}
+              height={32}
+            />
+          </div>
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-bg-elevated">
+            <div
+              className="h-full transition-all"
+              style={{ width: `${Math.min(100, cpuPct)}%`, background: cpuColour }}
+            />
+          </div>
+        </div>
+
+        {/* RAM card — total / used + bar */}
+        <div className="flex flex-col gap-3 rounded-[--radius-lg] border border-border bg-bg-card p-5">
+          <div className="flex items-baseline justify-between">
+            <span className="text-xs font-medium uppercase tracking-wider text-text-muted">
+              {t("admin.systemHost.ram", { defaultValue: "RAM" })}
+            </span>
+            <span className="text-xs text-text-muted tabular-nums">
+              {ramPct.toFixed(0)}%
+            </span>
+          </div>
+          <div className="flex items-end justify-between gap-3">
+            <div className="flex items-baseline gap-2">
+              <span
+                className="text-3xl font-semibold tabular-nums"
+                style={{ color: ramColour }}
+              >
+                {formatBytes(ramUsed)}
+              </span>
+              <span className="text-base text-text-muted tabular-nums">
+                / {formatBytes(ramTotal)}
+              </span>
+            </div>
+          </div>
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-bg-elevated">
+            <div
+              className="h-full transition-all"
+              style={{ width: `${ramPct}%`, background: ramColour }}
+            />
+          </div>
+          <p className="text-[11px] text-text-muted leading-relaxed">
+            {t("admin.systemHost.ramHint", {
+              defaultValue:
+                "RAM usada = total − disponible (como `free -h`). Sube cuando hay scans / transcodes en vuelo.",
+            })}
+          </p>
+        </div>
+      </div>
+
+      {/* GPU row — collapses to a single line when present, hidden
+          when not (no nvidia-smi / non-NVIDIA host). The HW accel
+          card in StreamingSection already shows the accelerator
+          family for non-NVIDIA hosts. */}
+      {host.gpu_model && (
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 rounded-[--radius-lg] border border-border bg-bg-card px-5 py-3 text-sm">
+          <span className="text-xs font-medium uppercase tracking-wider text-text-muted">
+            GPU
+          </span>
+          <span className="font-medium text-text-primary">
+            {host.gpu_model}
+          </span>
+          {host.gpu_memory_total_bytes > 0 && (
+            <span className="text-text-secondary tabular-nums">
+              · {formatBytes(host.gpu_memory_total_bytes)} VRAM
+            </span>
+          )}
+          {host.gpu_driver_version && (
+            <span className="text-text-muted">
+              · {t("admin.systemHost.driverVersion", {
+                defaultValue: "driver {{v}}",
+                v: host.gpu_driver_version,
+              })}
+            </span>
+          )}
+        </div>
+      )}
+    </section>
   );
 }
 

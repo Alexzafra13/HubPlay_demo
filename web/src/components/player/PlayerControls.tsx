@@ -30,6 +30,12 @@ interface SubtitleTrack {
   id: number;
   name: string;
   lang: string;
+  // burnIn marks a subtitle that has to be rendered into the video
+  // frames at transcode time (PGS / DVDSUB / ASS) instead of riding
+  // as an HLS sub track. The picker decorates these with a hint —
+  // "se reinicia el stream" — so the user knows their selection
+  // causes a brief reload rather than an instant switch.
+  burnIn?: boolean;
 }
 
 interface QualityLevel {
@@ -915,6 +921,17 @@ const PlayerControls: FC<PlayerControlsProps> = ({
   const subtitleOptions: TrackOption[] = subtitleTracks.map((tr) => ({
     id: tr.id,
     label: tr.name || tr.lang || t("playerControls.trackFallback", { n: tr.id + 1 }),
+    // Burn-in entries get a small inline tag ("integrado") next to
+    // the name so the user can distinguish them from native HLS
+    // sub tracks. Defined as a free-text sublabel rather than a
+    // structured badge so existing TrackOption consumers don't have
+    // to grow a new field — the picker renders sublabel beneath the
+    // label exactly the way it already does for audio.
+    sublabel: tr.burnIn
+      ? t("playerControls.subtitlesBurnInHint", {
+          defaultValue: "Integrado · reinicia el stream",
+        })
+      : undefined,
   }));
 
   // External-subs row, appended to the subtitle picker. Lives inside

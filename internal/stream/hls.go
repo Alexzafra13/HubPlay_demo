@@ -7,19 +7,36 @@ import (
 
 // GenerateMasterPlaylist creates an HLS master playlist (M3U8) offering
 // multiple quality levels for adaptive bitrate streaming.
-// audioStreamIndex < 0 → omit the ?audio= query string entirely so
+//
+// `audioStreamIndex` < 0 → omit the ?audio= query string entirely so
 // the per-quality endpoint falls back to ffmpeg's default audio
 // pick (current behaviour for users without a preferred-language
-// preference). audioStreamIndex >= 0 → embed it in every variant URL
-// the master playlist emits so hls.js's per-quality switches keep
-// the same dub instead of falling back to the file default mid-play.
-func GenerateMasterPlaylist(itemID, baseURL string, profiles []string, audioStreamIndex int) string {
+// preference). >= 0 → embed it in every variant URL the master
+// playlist emits so hls.js's per-quality switches keep the same dub
+// instead of falling back to the file default mid-play.
+//
+// `burnSubIndex` follows the same convention. >= 0 carries a
+// subtitle burn-in choice (PGS / DVDSUB / ASS) into every variant
+// URL so an ABR switch doesn't drop the burned subtitle. < 0 means
+// no burn-in; the player either has no sub picked or is consuming a
+// native HLS sub track instead.
+func GenerateMasterPlaylist(itemID, baseURL string, profiles []string, audioStreamIndex, burnSubIndex int) string {
 	var b strings.Builder
 	b.WriteString("#EXTM3U\n")
 
-	suffix := ""
+	// Build the query suffix once. Order is stable (audio first,
+	// subtitle second) so cache keys + test assertions stay
+	// deterministic.
+	params := make([]string, 0, 2)
 	if audioStreamIndex >= 0 {
-		suffix = fmt.Sprintf("?audio=%d", audioStreamIndex)
+		params = append(params, fmt.Sprintf("audio=%d", audioStreamIndex))
+	}
+	if burnSubIndex >= 0 {
+		params = append(params, fmt.Sprintf("subtitle=%d", burnSubIndex))
+	}
+	suffix := ""
+	if len(params) > 0 {
+		suffix = "?" + strings.Join(params, "&")
 	}
 
 	for _, name := range profiles {

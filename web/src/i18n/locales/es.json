@@ -1067,6 +1067,18 @@
         "forceDirectPlay": {
           "label": "Forzar reproducción directa",
           "hint": "Envía el archivo tal cual a todos los clientes y nunca transcodifica. Off por defecto. Actívalo solo si estás seguro de que cada cliente (navegador, app TV, etc.) puede decodificar todos los códecs y contenedores de tu biblioteca; si no, la reproducción fallará."
+        },
+        "maxTranscodeSessions": {
+          "label": "Transcodes simultáneos (máx.)",
+          "hint": "Sesiones de transcodificación en paralelo antes de devolver BUSY. El valor por defecto se ajusta automáticamente a tu hardware (GPU o número de núcleos de CPU). Sube si tu servidor tiene margen, baja si ves la CPU saturada."
+        },
+        "maxTranscodeSessionsPerUser": {
+          "label": "Transcodes por usuario (máx.)",
+          "hint": "Cuántas sesiones puede consumir un solo usuario del pool global. Evita que un usuario con muchos seek o varios dispositivos sature el servidor. Por defecto es la mitad del cap global."
+        },
+        "transcodePreset": {
+          "label": "Preset libx264 (CPU)",
+          "hint": "Compromiso entre CPU y calidad cuando se transcodifica por software. ultrafast/superfast para NAS de bajo consumo, veryfast para escritorio medio, fast/medium para servidor potente. Se ignora cuando hay un encoder hardware activo."
         }
       },
       "totalLibraries": "Total de bibliotecas",

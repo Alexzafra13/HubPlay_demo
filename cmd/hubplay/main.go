@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -34,6 +35,7 @@ import (
 	"hubplay/internal/scanner"
 	"hubplay/internal/setup"
 	"hubplay/internal/stream"
+	"hubplay/internal/sysmetrics"
 	"hubplay/internal/user"
 )
 
@@ -237,6 +239,25 @@ func run(configPath string) error {
 	if v, err := repos.Settings.Get(ctx, "hardware_acceleration.preferred"); err == nil && v != "" {
 		streamingCfg.HWAccel.Preferred = v
 	}
+	// Runtime overrides for the auto-tuned knobs. Empty / zero values
+	// in streamingCfg trigger stream.AutoTuneStreaming inside
+	// NewManager; values populated here (whether from YAML defaults
+	// the operator set, or from admin app_settings rows) bypass the
+	// auto-tuner. Parse failures fall through silently — a bad row in
+	// app_settings is a UI bug, not a reason to refuse to boot.
+	if v, err := repos.Settings.Get(ctx, "streaming.max_transcode_sessions"); err == nil {
+		if n, perr := strconv.Atoi(v); perr == nil && n >= 0 {
+			streamingCfg.MaxTranscodeSessions = n
+		}
+	}
+	if v, err := repos.Settings.Get(ctx, "streaming.max_transcode_sessions_per_user"); err == nil {
+		if n, perr := strconv.Atoi(v); perr == nil && n >= 0 {
+			streamingCfg.MaxTranscodeSessionsPerUser = n
+		}
+	}
+	if v, err := repos.Settings.Get(ctx, "streaming.transcode_preset"); err == nil && v != "" {
+		streamingCfg.TranscodePreset = v
+	}
 	streamManager := stream.NewManager(repos.Items, repos.MediaStreams, streamingCfg, logger)
 	streamManager.SetMetrics(observability.NewStreamSink(metrics))
 	streamManager.SetEventBus(eventBus)
@@ -383,6 +404,16 @@ func run(configPath string) error {
 	retentionRunner := retention.New(cfg.Retention, iptvService, federationRepo, logger)
 	retentionRunner.Start(ctx)
 
+	// Host metrics sampler: CPU%, RAM, CPU/GPU model strings.
+	// Background goroutine ticks every 5 s and stores the latest
+	// snapshot in an atomic.Value; the admin /system/stats handler
+	// reads non-blocking on every poll. Start() runs the slow probes
+	// (gopsutil cpu.Info, nvidia-smi when present) inline so the
+	// first /system/stats response after boot already has populated
+	// values. Lifetime bound to ctx (cancelled on shutdown signal).
+	hostMetrics := sysmetrics.New(5*time.Second, logger)
+	hostMetrics.Start(ctx)
+
 	router := api.NewRouter(api.Dependencies{
 		Auth:          authService,
 		DeviceCode:    deviceCodeService,
@@ -427,6 +458,7 @@ func run(configPath string) error {
 		// self-hosted server; if a deployment grows, lift these to
 		// config rather than tweaking the constants.
 		SSELimiter:    handlers.NewSSELimiter(handlers.DefaultSSEGlobalMax, handlers.DefaultSSEPerUserMax),
+		HostMetrics:   hostMetrics,
 	})
 
 	server := &http.Server{

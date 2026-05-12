@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -90,6 +91,14 @@ type ManagedSession struct {
 	// default audio. Cached on the session so RestartSessionAt
 	// keeps the same dub across seeks.
 	AudioStreamIndex int
+	// BurnSubtitle is the subtitle stream burned into the encoded
+	// video frames (PGS / DVDSUB / ASS). Nil = no burn-in, the
+	// player either has no sub or relies on a native HLS sub track.
+	// Cached on the session so RestartSessionAt keeps the chosen
+	// subtitle across seeks — without this, a seek would restart
+	// ffmpeg without the filter graph and the next segments would
+	// drop the burned subtitle silently.
+	BurnSubtitle *BurnSubtitleSpec
 	Decision     PlaybackDecision
 	LastAccessed time.Time
 
@@ -169,9 +178,29 @@ func NewManager(
 		encoder = hwResult.Encoder
 	}
 
+	// Auto-tune zero/empty knobs in cfg with hardware-aware defaults.
+	// Runs AFTER detection so the recommendation is matched to the
+	// accelerator that's actually going to do the work; runs AFTER
+	// the caller has applied YAML + app_settings overrides so any
+	// explicit operator value (in cfg already) survives unchanged.
+	//
+	// runtime.NumCPU() reads the cgroup-aware CPU limit on Linux
+	// (Go 1.18+), so a container with --cpus=2 sees 2 here even on
+	// a 32-core host — auto-tune scales to the budget the operator
+	// gave the process, not the underlying hardware.
+	tuned := AutoTuneStreaming(cfg, hwAccel, runtime.NumCPU())
+	logger.Info("streaming auto-tune applied",
+		"hw_accel", hwAccel,
+		"cpu_count", runtime.NumCPU(),
+		"max_sessions", tuned.MaxTranscodeSessions,
+		"max_sessions_per_user", tuned.MaxTranscodeSessionsPerUser,
+		"libx264_preset", tuned.TranscodePreset,
+	)
+	cfg = tuned
+
 	m := &Manager{
 		sessions:   make(map[string]*ManagedSession),
-		transcoder: NewTranscoder(cacheDir, "", cfg.TranscodeTimeout, hwAccel, encoder, logger),
+		transcoder: NewTranscoder(cacheDir, "", cfg.TranscodeTimeout, hwAccel, encoder, cfg.TranscodePreset, logger),
 		items:      items,
 		streams:    streams,
 		cfg:        cfg,
@@ -218,22 +247,31 @@ func (m *Manager) publish(e event.Event) {
 	}
 }
 
-// sessionKey builds a unique key for a user+item+profile+audio combo.
-// Audio index is part of the key so switching dub mid-playback creates
-// a fresh session instead of the manager handing back the existing
-// English transcode unchanged. -1 collapses to "default" so cache hits
-// for callers that don't care about audio stay intact.
-func sessionKey(userID, itemID, profile string, audioStreamIndex int) string {
-	return userID + ":" + itemID + ":" + profile + ":" + strconv.Itoa(audioStreamIndex)
+// sessionKey builds a unique key for a user+item+profile+audio+sub
+// combo. Index fields are part of the key so a mid-playback switch
+// (audio dub or burned-in subtitle) creates a fresh session instead
+// of the manager handing back the previous transcode unchanged.
+// -1 on either index collapses to "default" so cache hits for
+// callers that don't care about that dimension stay intact.
+//
+// Why subtitle index belongs in the key: burned-in subtitles are
+// baked into the encoded segments, so toggling the subtitle later
+// MUST produce a different transcode. Without this, the manager
+// would return the old session and the player would see frames
+// with the previous subtitle still rendered on them.
+func sessionKey(userID, itemID, profile string, audioStreamIndex, burnSubIndex int) string {
+	return userID + ":" + itemID + ":" + profile +
+		":" + strconv.Itoa(audioStreamIndex) +
+		":" + strconv.Itoa(burnSubIndex)
 }
 
 // SessionKey is the exported canonical key builder. Handlers must use
 // this rather than concatenating fields by hand — the format includes
-// the audio stream index suffix that PR #229 introduced, and a
+// the audio stream index AND the burn-in subtitle index, and a
 // hand-rolled "user:item:profile" key silently misses every session
 // the manager actually registered (404 on every segment fetch).
-func SessionKey(userID, itemID, profile string, audioStreamIndex int) string {
-	return sessionKey(userID, itemID, profile, audioStreamIndex)
+func SessionKey(userID, itemID, profile string, audioStreamIndex, burnSubIndex int) string {
+	return sessionKey(userID, itemID, profile, audioStreamIndex, burnSubIndex)
 }
 
 // SetForceDirectPlayLookup wires the runtime-settings hook for the
@@ -284,8 +322,19 @@ func (m *Manager) shouldForceDirectPlay(ctx context.Context) bool {
 // segmentNNNNN.ts. singleflight makes the slow path single-flight
 // per key; late joiners receive the same ManagedSession the winner
 // produced.
-func (m *Manager) StartSession(ctx context.Context, userID, itemID, profileName string, caps *Capabilities, startTime float64, audioStreamIndex int) (*ManagedSession, error) {
-	key := sessionKey(userID, itemID, profileName, audioStreamIndex)
+// StartSession's burnSubtitleIndex argument:
+//   - < 0 → no burn-in. The player either has no subtitle picked or
+//     is consuming an HLS-native sub track (text format, sidecar).
+//   - >= 0 → burn the subtitle at this per-type index. The manager
+//     resolves the codec from the item's MediaStream rows and decides
+//     between the overlay (bitmap) and the subtitles= (ASS/SSA)
+//     filter strategy at ffmpeg-arg time.
+//
+// Burn-in forces a Transcode decision regardless of what the
+// capability waterfall would have picked — there's no decoded frame
+// to composite onto in DirectPlay / DirectStream paths.
+func (m *Manager) StartSession(ctx context.Context, userID, itemID, profileName string, caps *Capabilities, startTime float64, audioStreamIndex, burnSubIndex int) (*ManagedSession, error) {
+	key := sessionKey(userID, itemID, profileName, audioStreamIndex, burnSubIndex)
 
 	// Fast path: already-running session bypasses the singleflight
 	// and the slow-path setup entirely. This is the >99% case once
@@ -300,7 +349,7 @@ func (m *Manager) StartSession(ctx context.Context, userID, itemID, profileName 
 	m.mu.Unlock()
 
 	v, err, _ := m.startGroup.Do(key, func() (any, error) {
-		return m.startSessionSlow(ctx, userID, itemID, profileName, caps, startTime, key, audioStreamIndex)
+		return m.startSessionSlow(ctx, userID, itemID, profileName, caps, startTime, key, audioStreamIndex, burnSubIndex)
 	})
 	if err != nil {
 		return nil, err
@@ -314,7 +363,7 @@ func (m *Manager) StartSession(ctx context.Context, userID, itemID, profileName 
 // the work — if it cancels mid-fetch, late joiners get the same
 // error, which is the right trade: callers who arrived 50 ms apart
 // for the same key were going to share the result anyway.
-func (m *Manager) startSessionSlow(ctx context.Context, userID, itemID, profileName string, caps *Capabilities, startTime float64, key string, audioStreamIndex int) (*ManagedSession, error) {
+func (m *Manager) startSessionSlow(ctx context.Context, userID, itemID, profileName string, caps *Capabilities, startTime float64, key string, audioStreamIndex, burnSubIndex int) (*ManagedSession, error) {
 	// Re-check after singleflight admission: a previous Do for this
 	// key may have just finished and populated m.sessions in the
 	// brief window between this caller's fast-path miss and its
@@ -368,11 +417,55 @@ func (m *Manager) startSessionSlow(ctx context.Context, userID, itemID, profileN
 		return nil, fmt.Errorf("get streams: %w", err)
 	}
 
+	// Resolve the subtitle-burn-in spec from the requested index.
+	// Find the Nth subtitle stream (per-type ordering, matching the
+	// audio convention) and capture its codec so BuildFFmpegArgs can
+	// choose between filter_complex overlay (bitmap) and the
+	// subtitles= filter (ASS / SSA). Unknown / out-of-range index =
+	// no-op (nil) so a stale client URL doesn't fail the start —
+	// the player just doesn't get its subtitle this time.
+	var burnSub *BurnSubtitleSpec
+	if burnSubIndex >= 0 {
+		var subOrd int
+		for _, s := range mediaStreams {
+			if s.StreamType != "subtitle" {
+				continue
+			}
+			if subOrd == burnSubIndex {
+				if IsBurnableSubtitleCodec(s.Codec) {
+					burnSub = &BurnSubtitleSpec{
+						Index:     burnSubIndex,
+						Codec:     s.Codec,
+						InputPath: item.Path,
+					}
+				}
+				break
+			}
+			subOrd++
+		}
+	}
+
 	var decision PlaybackDecision
 	if m.shouldForceDirectPlay(ctx) {
 		decision = DecideForceDirectPlay(item, mediaStreams)
 	} else {
 		decision = Decide(item, mediaStreams, caps, profileName)
+	}
+
+	// Burn-in needs decoded frames to overlay onto. If the waterfall
+	// picked DirectPlay or DirectStream (CopyVideo=true), upgrade to
+	// a full re-encode — same trade-off Plex / Jellyfin make: video
+	// re-encode cost in exchange for the user actually seeing the
+	// subtitle. Audio decision stays untouched.
+	if burnSub != nil {
+		if decision.Method == MethodDirectPlay {
+			// Forcing DirectStream here would still copy video; jump
+			// straight to Transcode. We keep the streams metadata so
+			// the rest of the path is identical to a regular transcode.
+			decision = Decide(item, mediaStreams, caps, profileName)
+		}
+		decision.Method = MethodTranscode
+		decision.CopyVideo = false
 	}
 
 	// Direct play doesn't need a transcode session
@@ -401,7 +494,7 @@ func (m *Manager) startSessionSlow(ctx context.Context, userID, itemID, profileN
 	if startTime > 0 {
 		startSegment = int(startTime / 6) // matches -hls_time 6
 	}
-	session, err := m.transcoder.Start(key, itemID, item.Path, decision.Profile, startTime, decision.CopyVideo, decision.CopyAudio, decision.ToneMap, startSegment, audioStreamIndex)
+	session, err := m.transcoder.Start(key, itemID, item.Path, decision.Profile, startTime, decision.CopyVideo, decision.CopyAudio, decision.ToneMap, startSegment, audioStreamIndex, burnSub)
 	if err != nil {
 		m.metrics.TranscodeFailed()
 		return nil, fmt.Errorf("start transcode: %w", err)
@@ -412,6 +505,7 @@ func (m *Manager) startSessionSlow(ctx context.Context, userID, itemID, profileN
 		UserID:             userID,
 		InputPath:          item.Path,
 		AudioStreamIndex:   audioStreamIndex,
+		BurnSubtitle:       burnSub,
 		Decision:           decision,
 		LastAccessed:       time.Now(),
 		LastRestartSegment: startSegment,
@@ -593,6 +687,7 @@ func (m *Manager) RestartSessionAt(key string, segmentIndex int, segmentDuration
 		ms.Decision.ToneMap,
 		segmentIndex,
 		ms.AudioStreamIndex,
+		ms.BurnSubtitle,
 	)
 	if err != nil {
 		return fmt.Errorf("restart transcode at segment %d: %w", segmentIndex, err)
@@ -745,10 +840,29 @@ func (m *Manager) ListAllSessions() []SessionSnapshot {
 	return out
 }
 
-// MaxTranscodeSessions returns the configured concurrent transcode cap (0
-// means unlimited). Read by admin endpoints to render "X of Y in use".
+// MaxTranscodeSessions returns the concurrent transcode cap in
+// effect after auto-tune + YAML + app_settings overrides. 0 means
+// unlimited (an unusual operator choice but supported). Read by
+// admin endpoints to render "X of Y in use".
 func (m *Manager) MaxTranscodeSessions() int {
 	return m.cfg.MaxTranscodeSessions
+}
+
+// MaxTranscodeSessionsPerUser returns the per-user transcode cap in
+// effect after auto-tune + overrides. 0 means "no per-user cap".
+// Surfaced to the admin panel so a saturation warning can explain
+// whether the limit hit was the global pool or a single user
+// soaking their slice.
+func (m *Manager) MaxTranscodeSessionsPerUser() int {
+	return m.cfg.MaxTranscodeSessionsPerUser
+}
+
+// TranscodePreset returns the libx264 -preset value in effect after
+// auto-tune + overrides. Always non-empty post-construction (defaults
+// to "veryfast" when nothing else applies). Used by the admin panel
+// to display "Software preset: veryfast" alongside the HW status row.
+func (m *Manager) TranscodePreset() string {
+	return m.cfg.TranscodePreset
 }
 
 // HWAccelInfo returns the accelerator snapshot computed at construction.

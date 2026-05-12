@@ -12,17 +12,29 @@ import (
 )
 
 func TestSessionKey(t *testing.T) {
-	if got := sessionKey("user1", "item1", "720p", -1); got != "user1:item1:720p:-1" {
-		t.Errorf("default audio: unexpected key %q", got)
+	if got := sessionKey("user1", "item1", "720p", -1, -1); got != "user1:item1:720p:-1:-1" {
+		t.Errorf("default audio + no burn-sub: unexpected key %q", got)
 	}
-	if got := sessionKey("user1", "item1", "720p", 2); got != "user1:item1:720p:2" {
+	if got := sessionKey("user1", "item1", "720p", 2, -1); got != "user1:item1:720p:2:-1" {
 		t.Errorf("explicit audio idx: unexpected key %q", got)
+	}
+	if got := sessionKey("user1", "item1", "720p", -1, 0); got != "user1:item1:720p:-1:0" {
+		t.Errorf("burn-sub idx 0: unexpected key %q", got)
 	}
 	// Different audio indexes must not collide -- that's what allows
 	// mid-playback dub switching to spawn a fresh session instead
 	// of returning the old transcode unchanged.
-	if sessionKey("u", "i", "p", 0) == sessionKey("u", "i", "p", 1) {
+	if sessionKey("u", "i", "p", 0, -1) == sessionKey("u", "i", "p", 1, -1) {
 		t.Errorf("keys for distinct audio indexes collided")
+	}
+	// Same invariant for burned-in subtitles: a sub switch must
+	// produce a new session, not return a transcode with the
+	// previous subtitle baked into the segments.
+	if sessionKey("u", "i", "p", 0, 0) == sessionKey("u", "i", "p", 0, 1) {
+		t.Errorf("keys for distinct burn-sub indexes collided")
+	}
+	if sessionKey("u", "i", "p", 0, -1) == sessionKey("u", "i", "p", 0, 0) {
+		t.Errorf("no-burn vs burn-sub idx 0 collided")
 	}
 }
 
@@ -121,7 +133,7 @@ func TestManager_Shutdown_StopsAll(t *testing.T) {
 	m.mu.Lock()
 	profiles := []string{"720p", "480p", "360p"}
 	for i := range 3 {
-		key := sessionKey("user", "item", profiles[i], -1)
+		key := sessionKey("user", "item", profiles[i], -1, -1)
 		m.sessions[key] = &ManagedSession{
 			Session: &Session{
 				ID:        key,
@@ -167,11 +179,11 @@ func TestManager_StopSessionsByItem_StopsEveryVariant(t *testing.T) {
 		}
 		m.mu.Unlock()
 	}
-	seed(SessionKey("user1", "item1", "1080p", -1), "item1")
-	seed(SessionKey("user1", "item1", "1080p", 1), "item1")
-	seed(SessionKey("user1", "item1", "720p", -1), "item1")
+	seed(SessionKey("user1", "item1", "1080p", -1, -1), "item1")
+	seed(SessionKey("user1", "item1", "1080p", 1, -1), "item1")
+	seed(SessionKey("user1", "item1", "720p", -1, -1), "item1")
 	// Distractor for a different item — must be left alone.
-	seed(SessionKey("user1", "item2", "720p", -1), "item2")
+	seed(SessionKey("user1", "item2", "720p", -1, -1), "item2")
 
 	stopped := m.StopSessionsByItem("user1", "item1")
 	if stopped != 3 {
@@ -180,7 +192,7 @@ func TestManager_StopSessionsByItem_StopsEveryVariant(t *testing.T) {
 	if got := m.ActiveSessions(); got != 1 {
 		t.Errorf("active = %d, want 1 (the other-item distractor)", got)
 	}
-	if _, ok := m.sessions[SessionKey("user1", "item2", "720p", -1)]; !ok {
+	if _, ok := m.sessions[SessionKey("user1", "item2", "720p", -1, -1)]; !ok {
 		t.Errorf("foreign session for item2 should still be alive")
 	}
 }
@@ -261,7 +273,7 @@ func newTestManager(t *testing.T) *Manager {
 		sessions:   make(map[string]*ManagedSession),
 		// HWAccelNone + libx264 — software path, matches what the
 		// existing tests assumed before HW accel detection was wired.
-		transcoder: NewTranscoder(t.TempDir(), "", 4*time.Hour, HWAccelNone, "libx264", logger),
+		transcoder: NewTranscoder(t.TempDir(), "", 4*time.Hour, HWAccelNone, "libx264", "", logger),
 		cfg:        cfg,
 		logger:     logger.With("module", "stream-manager"),
 		stopClean:  make(chan struct{}),

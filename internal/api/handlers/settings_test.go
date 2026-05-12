@@ -34,14 +34,28 @@ func newSettingsRig(t *testing.T, baseURLDefault string, hw config.HWAccelConfig
 // would have reported at boot to drive the AllowedValues filter.
 func newSettingsRigWithDetected(t *testing.T, baseURLDefault string, hw config.HWAccelConfig, detected []string) *settingsRig {
 	t.Helper()
+	// Default streaming snapshot — small but plausible numbers so the
+	// "Default" column in descriptors is non-zero. Tests that care
+	// about specific auto-tune behaviour use the new
+	// newSettingsRigWithStreaming variant.
+	return newSettingsRigWithStreaming(t, baseURLDefault, hw, detected,
+		StreamingDefaults{MaxTranscodeSessions: 4, MaxTranscodeSessionsPerUser: 2, TranscodePreset: "veryfast"})
+}
+
+// newSettingsRigWithStreaming exposes the StreamingDefaults knob so
+// tests can verify the descriptor's "Default" column reflects what
+// the auto-tuner picked on the running host.
+func newSettingsRigWithStreaming(t *testing.T, baseURLDefault string, hw config.HWAccelConfig, detected []string, streaming StreamingDefaults) *settingsRig {
+	t.Helper()
 	database := testutil.NewTestDB(t)
 	repo := db.NewSettingsRepository(database)
 	h := NewSettingsHandler(SettingsHandlerConfig{
-		Settings:        repo,
-		BaseURLDefault:  baseURLDefault,
-		HWAccelDefault:  hw,
-		HWAccelDetected: detected,
-		Logger:          newQuietLogger(),
+		Settings:          repo,
+		BaseURLDefault:    baseURLDefault,
+		HWAccelDefault:    hw,
+		HWAccelDetected:   detected,
+		StreamingDefaults: streaming,
+		Logger:            newQuietLogger(),
 	})
 	r := chi.NewRouter()
 	r.Get("/admin/system/settings", h.List)
@@ -71,8 +85,8 @@ func TestSettings_List_DefaultsBeforeAnyOverride(t *testing.T) {
 		t.Fatalf("status: %d body=%s", rr.Code, rr.Body.String())
 	}
 	rows := unwrapSettings(t, rr.Body.Bytes())
-	if len(rows) != 4 {
-		t.Fatalf("expected 4 settings, got %d", len(rows))
+	if len(rows) != 7 {
+		t.Fatalf("expected 7 settings, got %d", len(rows))
 	}
 	for _, row := range rows {
 		if row.Override {
@@ -170,6 +184,14 @@ func TestSettings_Update_ValidatesValueShape(t *testing.T) {
 		{"base_url not http", "server.base_url", "ftp://example.com"},
 		{"hwaccel.enabled not bool", "hardware_acceleration.enabled", "yesnomaybe"},
 		{"hwaccel.preferred unknown", "hardware_acceleration.preferred", "magick"},
+		{"max_sessions not int", "streaming.max_transcode_sessions", "many"},
+		{"max_sessions zero", "streaming.max_transcode_sessions", "0"},
+		{"max_sessions too big", "streaming.max_transcode_sessions", "999"},
+		{"max_sessions_per_user not int", "streaming.max_transcode_sessions_per_user", "two"},
+		{"max_sessions_per_user zero", "streaming.max_transcode_sessions_per_user", "0"},
+		{"max_sessions_per_user too big", "streaming.max_transcode_sessions_per_user", "999"},
+		{"transcode_preset unknown", "streaming.transcode_preset", "fastest"},
+		{"transcode_preset empty", "streaming.transcode_preset", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -248,6 +270,88 @@ func TestSettings_Reset_ClearsOverride(t *testing.T) {
 		if row.Effective != "https://yaml.example/" {
 			t.Errorf("after reset: got %q want yaml default", row.Effective)
 		}
+	}
+}
+
+// TestSettings_StreamingDefaults_ReflectAutoTune pins that the
+// descriptors' Default column carries the auto-tuned values handed
+// in via SettingsHandlerConfig.StreamingDefaults — not a static
+// constant. Without this, a fresh-install operator who looks at the
+// "Default" column would see "0" or "" for the streaming knobs and
+// have no idea what their server is actually using.
+func TestSettings_StreamingDefaults_ReflectAutoTune(t *testing.T) {
+	streaming := StreamingDefaults{
+		MaxTranscodeSessions:        8,
+		MaxTranscodeSessionsPerUser: 4,
+		TranscodePreset:             "fast",
+	}
+	rig := newSettingsRigWithStreaming(t, "", config.HWAccelConfig{}, nil, streaming)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/system/settings", nil)
+	rr := httptest.NewRecorder()
+	rig.router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	rows := unwrapSettings(t, rr.Body.Bytes())
+	seen := make(map[string]settingDescriptor, len(rows))
+	for _, r := range rows {
+		seen[r.Key] = r
+	}
+	if got := seen["streaming.max_transcode_sessions"]; got.Default != "8" || got.Effective != "8" {
+		t.Errorf("max_transcode_sessions: default=%q effective=%q, want 8/8", got.Default, got.Effective)
+	}
+	if got := seen["streaming.max_transcode_sessions_per_user"]; got.Default != "4" || got.Effective != "4" {
+		t.Errorf("max_per_user: default=%q effective=%q, want 4/4", got.Default, got.Effective)
+	}
+	if got := seen["streaming.transcode_preset"]; got.Default != "fast" || got.Effective != "fast" {
+		t.Errorf("preset: default=%q effective=%q, want fast/fast", got.Default, got.Effective)
+	}
+	// Preset must come with a multi-value AllowedValues so the panel
+	// renders a dropdown, not a free-text input.
+	if len(seen["streaming.transcode_preset"].AllowedValues) != 9 {
+		t.Errorf("preset should advertise 9 libx264 levels; got %v",
+			seen["streaming.transcode_preset"].AllowedValues)
+	}
+}
+
+// TestSettings_StreamingOverride_HappyPath rounds-trip the three new
+// keys through PUT + GET so the wire shape stays right for the
+// frontend.
+func TestSettings_StreamingOverride_HappyPath(t *testing.T) {
+	rig := newSettingsRigWithStreaming(t, "", config.HWAccelConfig{}, nil,
+		StreamingDefaults{MaxTranscodeSessions: 4, MaxTranscodeSessionsPerUser: 2, TranscodePreset: "veryfast"})
+
+	cases := []struct {
+		key, value, want string
+	}{
+		{"streaming.max_transcode_sessions", "10", "10"},
+		{"streaming.max_transcode_sessions_per_user", "3", "3"},
+		// Preset normalises to lowercase.
+		{"streaming.transcode_preset", "MEDIUM", "medium"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.key, func(t *testing.T) {
+			body, _ := json.Marshal(map[string]string{"key": tc.key, "value": tc.value})
+			req := httptest.NewRequest(http.MethodPut, "/admin/system/settings", strings.NewReader(string(body)))
+			req.Header.Set("Content-Type", "application/json")
+			rr := httptest.NewRecorder()
+			rig.router.ServeHTTP(rr, req)
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status: %d body=%s", rr.Code, rr.Body.String())
+			}
+			rows := unwrapSettings(t, rr.Body.Bytes())
+			var got settingDescriptor
+			for _, r := range rows {
+				if r.Key == tc.key {
+					got = r
+				}
+			}
+			if !got.Override || got.Effective != tc.want {
+				t.Errorf("%s: override=%v effective=%q want override=true effective=%q",
+					tc.key, got.Override, got.Effective, tc.want)
+			}
+		})
 	}
 }
 
