@@ -79,6 +79,7 @@ export default function ItemDetail() {
     handlePlayerEnded,
     handleClosePlayer,
     switchAudioStream,
+    switchBurnSubtitle,
   } = usePlayback({ pageItemId: id, siblingEpisodes });
 
   // ─── Auto-play deep-link (?play=1) ──────────────────────────────────────
@@ -302,6 +303,9 @@ export default function ItemDetail() {
           audioStreamIndex={playerInfo.audioStreamIndex}
           startPosition={playerInfo.startPosition}
           onAudioStreamSelected={switchAudioStream}
+          subtitleStreams={item.media_streams?.filter((s) => s.type === "subtitle")}
+          burnSubtitleIndex={playerInfo.burnSubtitleIndex}
+          onBurnSubtitleSelected={switchBurnSubtitle}
           onClose={async () => {
             await handleClosePlayer();
             // Auto-play deep-links (Continue Watching cards, hero

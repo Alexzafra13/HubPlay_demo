@@ -112,6 +112,33 @@ interface VideoPlayerProps {
    * exposes multiple in-stream tracks (atypical for HubPlay).
    */
   onAudioStreamSelected?: (streamIndex: number, currentTimeSeconds: number) => void;
+  /**
+   * Subtitle MediaStream rows from the DB (already filtered to
+   * type === "subtitle"). Used to enumerate PGS / DVDSUB / ASS
+   * tracks that the browser can't render natively; entries with
+   * `IsBurnableSubtitleCodec`-matching codecs appear in the picker
+   * tagged "integrado", and picking one re-mounts the player with
+   * `?subtitle=N` so the backend overlays the sub into the video.
+   * Optional — without it the picker only surfaces native HLS subs
+   * (SRT / WebVTT).
+   */
+  subtitleStreams?: import("@/api/types").MediaStream[];
+  /**
+   * Per-type index of the subtitle currently being burned in.
+   * -1 = no burn-in (the user has either no sub picked or is on a
+   * native HLS sub track). Drives the picker's "selected" indicator
+   * for burn-in entries so the user sees the active row checked.
+   */
+  burnSubtitleIndex?: number;
+  /**
+   * Click-to-burn subtitle mid-playback. Same shape as
+   * onAudioStreamSelected — the parent rebuilds the master URL
+   * with `?subtitle=N` and primes a resume at the playhead so the
+   * seam between sessions is invisible. Passing -1 clears the
+   * burn-in. Without this prop the burn-in entries don't appear
+   * in the picker (the user can't act on them).
+   */
+  onBurnSubtitleSelected?: (subtitleIndex: number, currentTimeSeconds: number) => void;
   onClose: () => void;
   onEnded?: () => void;
 }
@@ -137,6 +164,9 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
   chapters,
   segments,
   audioStreams,
+  subtitleStreams,
+  burnSubtitleIndex = -1,
+  onBurnSubtitleSelected,
   onClose,
   onEnded: onEndedCallback,
 }) => {
@@ -655,23 +685,80 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
   // routing logic in handleSubtitleTrackChange can tell them apart
   // from hls.js-native track ids (which are 0..N-1).
   const FEDERATED_TRACK_ID_BASE = 10000;
+  // Burn-in subtitle id space sits ABOVE federation (20000+) so the
+  // dispatch in handleSubtitleTrackChange stays a single if-ladder.
+  // The id is BURN_SUB_TRACK_ID_BASE + perTypeSubtitleIndex so the
+  // parent's onBurnSubtitleSelected receives the index the manager
+  // expects directly, no extra lookup table.
+  const BURN_SUB_TRACK_ID_BASE = 20000;
+
+  // Build burn-in subtitle picker entries from the item's
+  // MediaStream rows. Each row gets a stable per-type index (the
+  // 0-based position among subtitle streams) so the URL param
+  // ?subtitle=N matches the index ffmpeg's 0:s:N reference uses.
+  // Filter is "is this codec something the browser can't render
+  // natively?" — SRT / WebVTT subs ride as HLS sub tracks and are
+  // intentionally NOT listed here (they'd duplicate entries).
+  const BURNABLE_CODECS = new Set([
+    "hdmv_pgs_subtitle", "pgs",
+    "dvd_subtitle", "dvdsub",
+    "dvb_subtitle", "dvbsub",
+    "xsub",
+    "ass", "ssa",
+  ]);
+  const burnInSubtitleEntries = useMemo(() => {
+    if (!subtitleStreams || !onBurnSubtitleSelected) return [];
+    const out: { id: number; name: string; lang: string; burnIn: true }[] = [];
+    let subOrd = -1;
+    for (const s of subtitleStreams) {
+      if (s.type !== "subtitle") continue;
+      subOrd++;
+      if (!BURNABLE_CODECS.has((s.codec || "").toLowerCase())) continue;
+      out.push({
+        id: BURN_SUB_TRACK_ID_BASE + subOrd,
+        name: s.title || s.language || `Track ${subOrd + 1}`,
+        lang: s.language || "",
+        burnIn: true,
+      });
+    }
+    return out;
+  }, [subtitleStreams, onBurnSubtitleSelected]);
+
   const showFederatedTracks = !!peerId && !!peerStreamSessionId && federatedSubs.length > 0;
-  const mergedSubtitleTracks = showFederatedTracks
-    ? [
-        ...subtitleTracks,
-        ...federatedSubs.map((s, i) => ({
+  const mergedSubtitleTracks = [
+    ...subtitleTracks,
+    ...(showFederatedTracks
+      ? federatedSubs.map((s, i) => ({
           id: FEDERATED_TRACK_ID_BASE + i,
           name: s.title || s.language || `Track ${s.index}`,
           lang: s.language || "",
-        })),
-      ]
-    : subtitleTracks;
+        }))
+      : []),
+    ...burnInSubtitleEntries,
+  ];
   const effectiveCurrentSubtitleTrack =
     activeFederatedSubIndex !== null
       ? FEDERATED_TRACK_ID_BASE + activeFederatedSubIndex
-      : currentSubtitleTrack;
+      : burnSubtitleIndex >= 0
+        ? BURN_SUB_TRACK_ID_BASE + burnSubtitleIndex
+        : currentSubtitleTrack;
+
   const handleSubtitleTrackChange = useCallback(
     (id: number) => {
+      if (id >= BURN_SUB_TRACK_ID_BASE) {
+        // Burn-in pick: clear every other sub surface so only the
+        // burned-in stream is shown after the remount completes,
+        // then ask the parent to re-resolve the master with the
+        // new ?subtitle=N param. The current playhead is captured
+        // so the new manifest seeks back to where the user was.
+        if (!onBurnSubtitleSelected) return;
+        setActiveFederatedSubIndex(null);
+        setActiveExternalSub(null);
+        setSubtitleTrack(-1);
+        const subIdx = id - BURN_SUB_TRACK_ID_BASE;
+        onBurnSubtitleSelected(subIdx, videoRef.current?.currentTime ?? 0);
+        return;
+      }
       if (id >= FEDERATED_TRACK_ID_BASE) {
         // Pick a federated track. Suppress HLS subs + external subs
         // so only one set of cues renders at a time.
@@ -681,11 +768,18 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
         return;
       }
       // HLS path (or "off" with id=-1). Clear federated sub state so
-      // its `<track>` element unmounts.
+      // its `<track>` element unmounts. Also clear the burn-in if
+      // one is active — the user is explicitly switching to no-sub
+      // or to a native HLS track, neither of which co-exists with
+      // burn-in. -1 triggers the manager to spin down the transcode
+      // session and start a fresh non-burn one on next play.
       setActiveFederatedSubIndex(null);
+      if (burnSubtitleIndex >= 0 && onBurnSubtitleSelected) {
+        onBurnSubtitleSelected(-1, videoRef.current?.currentTime ?? 0);
+      }
       setSubtitleTrack(id);
     },
-    [setSubtitleTrack],
+    [setSubtitleTrack, onBurnSubtitleSelected, burnSubtitleIndex],
   );
 
   // Audio picker entries. When the parent provides DB MediaStream

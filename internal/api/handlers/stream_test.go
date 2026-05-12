@@ -38,7 +38,7 @@ func newFakeStreamManager() *fakeStreamManager {
 	}
 }
 
-func (m *fakeStreamManager) StartSession(ctx context.Context, userID, itemID, profileName string, caps *stream.Capabilities, startTime float64, audioStreamIndex int) (*stream.ManagedSession, error) {
+func (m *fakeStreamManager) StartSession(ctx context.Context, userID, itemID, profileName string, caps *stream.Capabilities, startTime float64, audioStreamIndex, burnSubIndex int) (*stream.ManagedSession, error) {
 	if m.startSessionFn != nil {
 		return m.startSessionFn(ctx, userID, itemID, profileName, caps, startTime)
 	}
@@ -379,7 +379,7 @@ func TestStreamHandler_Segment_SessionNotFound(t *testing.T) {
 func TestStreamHandler_Segment_InvalidFilename(t *testing.T) {
 	env := newStreamTestEnv(t)
 	dir := t.TempDir()
-	env.manager.sessions[stream.SessionKey("user-1", "item-1", "720p", -1)] = &stream.ManagedSession{
+	env.manager.sessions[stream.SessionKey("user-1", "item-1", "720p", -1, -1)] = &stream.ManagedSession{
 		Session: &stream.Session{OutputDir: dir},
 	}
 	// Filename doesn't match validSegmentName regex.
@@ -397,7 +397,7 @@ func TestStreamHandler_Segment_HappyPath(t *testing.T) {
 	if err := os.WriteFile(segPath, []byte("TS_BYTES"), 0o644); err != nil {
 		t.Fatalf("write seg: %v", err)
 	}
-	env.manager.sessions[stream.SessionKey("user-1", "item-1", "720p", -1)] = &stream.ManagedSession{
+	env.manager.sessions[stream.SessionKey("user-1", "item-1", "720p", -1, -1)] = &stream.ManagedSession{
 		Session: &stream.Session{OutputDir: dir},
 	}
 	rr := env.doWithClaims(http.MethodGet, "/api/v1/stream/item-1/720p/segment00042.ts",
@@ -429,7 +429,7 @@ func TestStreamHandler_Segment_HonoursAudioQuery(t *testing.T) {
 	}
 	// Session registered with audioStreamIndex=1 (Spanish dub on a
 	// typical Marvel rip — index 0 is English default).
-	env.manager.sessions[stream.SessionKey("user-1", "item-1", "1080p", 1)] = &stream.ManagedSession{
+	env.manager.sessions[stream.SessionKey("user-1", "item-1", "1080p", 1, -1)] = &stream.ManagedSession{
 		Session: &stream.Session{OutputDir: dir},
 	}
 	// Request without ?audio=1 → handler builds key with audio=-1
