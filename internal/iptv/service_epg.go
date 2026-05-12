@@ -180,6 +180,26 @@ func (s *Service) RefreshEPG(ctx context.Context, libraryID string) (int, error)
 		"orphan_programs", totalOrphans,
 		"sources_ok", workedCount,
 		"sources_total", len(sources))
+
+	// Zero-match diagnostic: when at least one XMLTV source loaded
+	// successfully but the matcher couldn't pin a single library
+	// channel to it, the most likely cause is a tvg-id mismatch
+	// between the M3U and the XMLTV feed. Surfacing a small sample
+	// of the library's tvg-ids in the log helps the operator
+	// compare them by eye against the XMLTV they're pointing to
+	// without having to query the DB.
+	if len(ownedByChannel) == 0 && workedCount > 0 {
+		sample := sampleTvgIDs(channels, 8)
+		blanks := countBlankTvgIDs(channels)
+		s.logger.Warn(
+			"EPG refresh matched zero channels — likely tvg-id mismatch between M3U and XMLTV",
+			"library", libraryID,
+			"library_channels", len(channels),
+			"library_channels_without_tvg_id", blanks,
+			"library_tvg_id_sample", sample,
+			"hint", "compare these tvg-ids against your XMLTV <channel id=\"...\"> values",
+		)
+	}
 	s.publish(event.Event{
 		Type: event.EPGUpdated,
 		Data: map[string]any{

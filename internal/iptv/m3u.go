@@ -286,7 +286,11 @@ func parseExtInf(line string) M3UChannel {
 		case "tvg-logo":
 			ch.LogoURL = val
 		case "group-title":
-			ch.GroupName = val
+			// Some M3Us pack multiple labels into one group-title
+			// ("Animation;Kids;Public", "News | Talk"). Keep only
+			// the first token at import time so the filter chips
+			// downstream don't multiply near-identical groups.
+			ch.GroupName = NormalizeGroupTitle(val)
 		case "tvg-language":
 			ch.Language = val
 		case "tvg-country":

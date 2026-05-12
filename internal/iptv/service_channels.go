@@ -30,8 +30,32 @@ func (s *Service) GetChannel(ctx context.Context, id string) (*db.Channel, error
 }
 
 // GetGroups returns channel group names for a library.
+//
+// Output is normalised + deduplicated: the M3U importer now strips
+// multi-token group-titles ("Animation;Kids;Public" → "Animation")
+// before insert, but legacy rows from older builds may still carry
+// the packed form. Cleaning at read time means existing libraries
+// surface tidy chips without needing a re-import or one-shot
+// migration.
 func (s *Service) GetGroups(ctx context.Context, libraryID string) ([]string, error) {
-	return s.channels.Groups(ctx, libraryID)
+	raw, err := s.channels.Groups(ctx, libraryID)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{}, len(raw))
+	out  := make([]string, 0, len(raw))
+	for _, g := range raw {
+		n := NormalizeGroupTitle(g)
+		if n == "" {
+			continue
+		}
+		if _, dup := seen[n]; dup {
+			continue
+		}
+		seen[n] = struct{}{}
+		out = append(out, n)
+	}
+	return out, nil
 }
 
 // SetChannelActive enables or disables a channel.

@@ -77,9 +77,14 @@ func toChannelDTO(ch *db.Channel, streamPath string) channelDTO {
 		ID:           ch.ID,
 		Name:         ch.Name,
 		Number:       ch.Number,
-		Group:        ch.GroupName,
-		GroupName:    ch.GroupName,
-		Category:     string(iptv.Canonical(ch.GroupName)),
+		// Normalise the group label on the wire so legacy rows
+		// imported before iptv.NormalizeGroupTitle landed in the
+		// parser still surface a single clean token to clients.
+		// New imports already arrive normalised; this is the
+		// defence-in-depth pair to Service.GetGroups.
+		Group:        iptv.NormalizeGroupTitle(ch.GroupName),
+		GroupName:    iptv.NormalizeGroupTitle(ch.GroupName),
+		Category:     string(iptv.Canonical(iptv.NormalizeGroupTitle(ch.GroupName))),
 		LogoURL:      logoProxyURL(ch),
 		LogoInitials: logo.Initials,
 		LogoBg:       logo.Background,
