@@ -6,6 +6,65 @@ decisiones.
 
 ---
 
+## Topología de despliegue — contenedor aparte
+
+PostgreSQL NO se embebe en el binario hubplay. Va en un contenedor
+separado, lifecycle independiente, comunicación TCP via la red
+interna de docker-compose. Esta es la decisión arquitectural más
+visible para el operador.
+
+**SQLite**: 1 contenedor, ~50 MB RAM idle, backup = copy file.
+
+**PostgreSQL**: 2 contenedores (hubplay + postgres), ~250 MB RAM
+idle combinado, backup = `pg_dump` + cron O snapshot del volumen.
+
+Patrón docker-compose recomendado:
+
+```yaml
+services:
+  hubplay:
+    image: hubplay:latest
+    environment:
+      DATABASE_DSN: postgresql://hubplay:secret@postgres:5432/hubplay?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./config:/config
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: hubplay
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: hubplay
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hubplay"]
+      interval: 5s
+      retries: 12
+
+volumes:
+  postgres_data:
+```
+
+Alternativas evaluadas y descartadas:
+
+- **Postgres embebido en el binario** (`fergusstrange/embedded-postgres`):
+  +80 MB binario, sin upgrade independiente, el operador no puede
+  tunear nada del postgres. Anti-pattern.
+- **Mismo contenedor con supervisord**: viola one-process-per-container,
+  logs mezclados, restarts confusos.
+- **Postgres externo** (RDS, Cloud SQL, LAN box): variante válida del
+  patrón estándar — basta cambiar el DSN, mismo código.
+
+El sample de docker-compose lo dejaremos en `deploy/docker-compose.postgres.yml`
+en Sesión J. Hasta entonces el operador construye su compose a mano
+siguiendo este patrón.
+
+---
+
 ## Decisión arquitectural en una frase
 
 Mantenemos SQLite como backend por defecto (zero-ops self-hosted
