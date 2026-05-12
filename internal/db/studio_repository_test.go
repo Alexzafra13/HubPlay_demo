@@ -40,7 +40,7 @@ func TestSlugify(t *testing.T) {
 
 func TestStudioRepository_EnsureAndList(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository(database)
+	libRepo := db.NewLibraryRepository("sqlite", database)
 	itemRepo := db.NewItemRepository(database)
 	metaRepo := db.NewMetadataRepository(database)
 	studioRepo := db.NewStudioRepository(database)

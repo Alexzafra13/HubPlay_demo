@@ -42,7 +42,7 @@ func (m *mockProber) Probe(ctx context.Context, path string) (*probe.Result, err
 func newTestScanner(t *testing.T) (*Scanner, *db.ItemRepository, *db.MediaStreamRepository) {
 	t.Helper()
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository(database)
+	libRepo := db.NewLibraryRepository("sqlite", database)
 	itemRepo := db.NewItemRepository(database)
 	streamRepo := db.NewMediaStreamRepository(database)
 	bus := event.NewBus(slog.Default())
@@ -559,7 +559,7 @@ func TestFetchAndStoreImages_PersistsLocalPathNotURL(t *testing.T) {
 	// use, plus the on-disk image dir + pathmap that the production
 	// constructor would build in main.go.
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository(database)
+	libRepo := db.NewLibraryRepository("sqlite", database)
 	itemRepo := db.NewItemRepository(database)
 	imgRepo := db.NewImageRepository(database)
 	now := time.Now()
@@ -682,7 +682,7 @@ func TestEnrichEpisode_PersistsOverviewAndStill(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository(database)
+	libRepo := db.NewLibraryRepository("sqlite", database)
 	itemRepo := db.NewItemRepository(database)
 	imgRepo := db.NewImageRepository(database)
 	metaRepo := db.NewMetadataRepository(database)
@@ -801,7 +801,7 @@ func TestEnrichEpisode_PersistsOverviewAndStill(t *testing.T) {
 // provider call, no metadata row, no image row. The next scan retries.
 func TestEnrichEpisode_NoTMDbIDOnSeries(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository(database)
+	libRepo := db.NewLibraryRepository("sqlite", database)
 	itemRepo := db.NewItemRepository(database)
 	imgRepo := db.NewImageRepository(database)
 	metaRepo := db.NewMetadataRepository(database)
@@ -888,7 +888,7 @@ func TestEnrichSeason_PersistsMetadataAndPoster(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository(database)
+	libRepo := db.NewLibraryRepository("sqlite", database)
 	itemRepo := db.NewItemRepository(database)
 	imgRepo := db.NewImageRepository(database)
 	metaRepo := db.NewMetadataRepository(database)
@@ -1017,7 +1017,7 @@ func TestFetchAndStoreImages_SkippedWhenImageDirEmpty(t *testing.T) {
 	// the legacy-callsite escape hatch that keeps existing tests
 	// working without spinning up the artwork pipeline.
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository(database)
+	libRepo := db.NewLibraryRepository("sqlite", database)
 	itemRepo := db.NewItemRepository(database)
 	imgRepo := db.NewImageRepository(database)
 	now := time.Now()

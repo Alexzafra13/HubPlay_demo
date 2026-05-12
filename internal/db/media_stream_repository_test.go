@@ -29,7 +29,7 @@ func seedItemForStreams(t *testing.T, database *db.LibraryRepository, itemRepo *
 
 func TestMediaStreamRepository_ReplaceAndList(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository(database)
+	libRepo := db.NewLibraryRepository("sqlite", database)
 	itemRepo := db.NewItemRepository(database)
 	repo := db.NewMediaStreamRepository(database)
 	seedItemForStreams(t, libRepo, itemRepo)
@@ -75,7 +75,7 @@ func TestMediaStreamRepository_ReplaceAndList(t *testing.T) {
 
 func TestMediaStreamRepository_Replace_OverwritesPrevious(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository(database)
+	libRepo := db.NewLibraryRepository("sqlite", database)
 	itemRepo := db.NewItemRepository(database)
 	repo := db.NewMediaStreamRepository(database)
 	seedItemForStreams(t, libRepo, itemRepo)
