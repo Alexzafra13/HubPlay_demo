@@ -20,9 +20,9 @@ import (
 func newTestDeviceCodeService(t *testing.T) (*auth.DeviceCodeService, *auth.Service, *db.UserRepository, *clock.Mock) {
 	t.Helper()
 	database := testutil.NewTestDB(t)
-	userRepo := db.NewUserRepository(database)
-	sessionRepo := db.NewSessionRepository(database)
-	keyRepo := db.NewSigningKeyRepository(database)
+	userRepo := db.NewUserRepository("sqlite", database)
+	sessionRepo := db.NewSessionRepository("sqlite", database)
+	keyRepo := db.NewSigningKeyRepository("sqlite", database)
 	codeRepo := db.NewDeviceCodeRepository(database)
 
 	cfg := config.AuthConfig{

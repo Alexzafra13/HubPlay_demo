@@ -1,5 +1,71 @@
 # Estado del proyecto
 
+> 🎬 **Sesión 2026-05-12 noche (rama `claude/gallant-galileo-3c374b`, +5 commits Sesión E parcial)** — continuación de la sesión del día. La rama acumula ahora ~18 commits sobre main, todos pendientes de merge. **Stop point honesto: 6 de 28 repos refactorizados a dual-dialect, patrón A y B probados ambos contra Postgres real.**
+>
+> **Lo nuevo de esta tanda nocturna**:
+>
+> - **[`128dbd0`](https://github.com/Alexzafra13/HubPlay_demo/commit/128dbd0) Sesión E.1 — dialect helper + Settings (Pattern B)**: nuevo `internal/db/dialect.go` con `DriverSQLite`/`DriverPostgres` constantes, `IsPostgres()` helper, y `rewritePlaceholders(driver, sql)` que convierte `?` → `$N` en runtime. Maneja string literals + line comments correctamente (la palabra "user's" en un comment activaba el modo string-tracking y se tragaba placeholders posteriores — bug que ya pillé antes en el script de conversión de queries). 11 tests unitarios. SettingsRepository refactorizado como PoC del Pattern B (raw SQL pre-computado al construir). Verificación end-to-end: `docker run postgres:16-alpine` + smoke test Go invocando SettingsRepository via pgx → CRUD completo round-trip ✓.
+>
+> - **[`d1f36d2`](https://github.com/Alexzafra13/HubPlay_demo/commit/d1f36d2) Sesión E.2 — auth core (3 repos)**: User/Session/SigningKey refactorizados al Pattern A (dual q pointers, branch per method). El más sutil fue SigningKey que era `type SigningKey = sqlc.JwtSigningKey` (alias) → convertido a struct propio. Sessions tiene 2 raw SQL holdouts (RotateRefreshToken por bug UPDATE 4+ placeholders, GetByPreviousRefreshTokenHash por la column-post-038), Users tiene 1 (ListProfilesForOwner por bug ORDER BY+COLLATE).
+>
+> - **[`911a09a`](https://github.com/Alexzafra13/HubPlay_demo/commit/911a09a) Sesión E.3 — LibraryRepository**: refactor más complejo hasta ahora. Mezcla Pattern A (sqlc) + 3 transacciones con `WithTx` (Create, Update, ReplaceAccess) + 2 raw SQL holdouts (UserHasAccess, ListForUser). Tx pattern: `if useSQLite() { qtx := r.sq.WithTx(tx) ... } else { qtx := r.pq.WithTx(tx) ... }` — sin abstracción intermedia, cada rama completa.
+>
+> - **[`24b7e2c`](https://github.com/Alexzafra13/HubPlay_demo/commit/24b7e2c) Sesión E.4 — MediaStreamRepository**: pequeño pero introdujo helper nuevo `nullableInt32` para columnas INTEGER (no BIGINT) en el branch Postgres.
+>
+> **Patrón decidido y probado para los 22 repos restantes**:
+>
+> 1. **Pattern A** (repos sqlc-based, ~21 de 27): dual q pointers `sq *sqlc.Queries` + `pq *sqlc_pg.Queries`, exactamente uno non-nil tras construct. Helper `useSQLite() bool`. Cada método público es `if r.useSQLite() { ... sqlc branch ... } else { ... sqlc_pg branch ... }`. Verbose por construcción pero LINEAL — cada método autocontiene su lógica de ambos dialectos. Auditable sin saltar entre sitios.
+>
+> 2. **Pattern B** (repos raw SQL, ~7 holdouts): driver field + queries pre-computadas en el constructor vía `rewritePlaceholders(driver, sql)`. Cero overhead por llamada. Reusable en los otros 6 holdouts existentes (federation, library partial, session partial, user partial, image batch, metadata batch, items LatestItems).
+>
+> **Gotchas descubiertos haciendo los 6 repos** (válidos para los 22 siguientes):
+>
+> - **sqlc genera int32 para Postgres INTEGER, int64 para SQLite INTEGER**. Cast inline `int32(...)` en la rama postgres. Aplica a LIMIT/OFFSET (siempre int) y a columnas declaradas INTEGER en el schema.
+> - **BIGINT en ambos dialectos = int64**. Las columnas `*_ticks`, `size`, `bytes_*` no sufren este split porque están declaradas BIGINT en migrations/postgres/.
+> - **Type aliases (`type X = sqlc.Y`)** se rompen con dual-dialect. Convertir a struct propio + 2 helpers (uno por dialecto) para mappear desde la row generada.
+> - **Transacciones funcionan idénticas**: `WithTx(tx)` existe en ambos paquetes generados. Solo cambia el tipo retornado.
+> - **`nullableInt32`** se ha añadido al pool de helpers junto a `nullableInt64`, `nullableFloat64`, `nullableString`.
+>
+> **Estado real al cierre de la noche**:
+>
+> | Repo | Estado |
+> |---|---|
+> | Settings | ✅ Pattern B |
+> | Users | ✅ Pattern A + 1 raw SQL holdout |
+> | Sessions | ✅ Pattern A + 2 raw SQL holdouts |
+> | SigningKeys | ✅ Pattern A (alias → struct) |
+> | Library | ✅ Pattern A + 2 raw SQL holdouts + 3 tx |
+> | MediaStreams | ✅ Pattern A + 1 tx + nullableInt32 |
+> | Items | ⏳ 633 LOC — el más grande, tiene raw SQL LatestItems |
+> | UserData | ⏳ 485 LOC — grande |
+> | Channel | ⏳ 561 LOC — grande |
+> | EPGPrograms | ⏳ 314 LOC — tiene BulkSchedule raw SQL holdout |
+> | Image | ⏳ 319 LOC — tiene GetPrimaryURLs raw SQL holdout |
+> | Federation | ⏳ enorme con MUCHOS raw SQL holdouts |
+> | UserData / Channel / Home / Metadata / etc | ⏳ por ver |
+> | 14 repos pequeños/medianos | ⏳ trabajo mecánico |
+>
+> **Verificación a final de noche**:
+> - `go build ./...` clean
+> - `go test -count=1 ./internal/db/ ./internal/auth/...` todos verde (15s + 5.8s)
+> - `golangci-lint v2.5.0` 0 issues
+> - Test smoke contra Postgres real: SettingsRepository CRUD round-trip ✓
+>
+> **Próximo arranque** (cuando se retome):
+>
+> 1. Continuar Sesión E refactorizando los 22 repos restantes. Orden recomendado: **Items + UserData + Channel** primero (los 3 grandes críticos sin los que no se puede ver contenido). Después en cualquier orden los medianos/pequeños.
+> 2. Tiempo estimado restante para Sesión E: ~12-14h en sesiones de 3-4h cada una.
+> 3. Después de E vendrá **Sesión F** (wiring pgx + pgxpool en main.go, ~3h) — ese es el punto donde el binario por fin puede arrancar contra Postgres y se puede VALIDAR end-to-end.
+> 4. La regla mecánica para cada repo siguiente:
+>    - Si usa sqlc: Pattern A (ver UserRepository como template)
+>    - Si tiene raw SQL: Pattern B (ver SettingsRepository como template) o mezclar como Library/Session/User
+>    - Cast `int32(...)` en la rama postgres cuando la columna sea INTEGER (no BIGINT)
+>    - Actualizar `repos.go` para pasar `driver` al constructor
+>    - Actualizar todas las llamadas test en grep con sed `s/db\.NewXRepository(database)/db.NewXRepository("sqlite", database)/g`
+>    - Verificar `go build ./...` + `go test ./internal/db/` antes de pasar al siguiente
+>
+> ---
+>
 > 🎬 **Sesión 2026-05-12 (rama `claude/gallant-galileo-3c374b`, 11 commits acumulados, dual-dialect Postgres + plug-and-play migration)** — sesión larga de varios bloques estratégicos. Pendiente de merge: rama con 11 commits sobre main.
 >
 > **Bloque 1 — auto-tune transcoding ([72f7409](https://github.com/Alexzafra13/HubPlay_demo/commit/72f7409))**: arreglo del bug del `transcode_preset` dead-config (estaba hardcoded a "veryfast"). Nuevo `AutoTuneStreaming(hwAccel, cores)` que rellena MaxTranscodeSessions / MaxTranscodeSessionsPerUser / TranscodePreset según el hardware al boot. Tabla auto-tune: NVENC=3, QSV/VAAPI=6, VideoToolbox=4, software=cores/2; preset escala con cores (≥12 fast, 6-11 veryfast, 4-5 superfast, <4 ultrafast). 3 settings nuevos en el panel admin (`streaming.*`) con validators int 1-64 / int 1-32 / enum libx264. `force_direct_play` ahora tiene banner rojo + confirm() obligatorio.

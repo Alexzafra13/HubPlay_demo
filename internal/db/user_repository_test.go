@@ -30,7 +30,7 @@ func createTestUser(t *testing.T, repo *db.UserRepository, username string) *db.
 
 func TestUserRepository_Create_And_GetByID(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repo := db.NewUserRepository(database)
+	repo := db.NewUserRepository("sqlite", database)
 
 	u := createTestUser(t, repo, "alex")
 
@@ -52,7 +52,7 @@ func TestUserRepository_Create_And_GetByID(t *testing.T) {
 
 func TestUserRepository_GetByID_NotFound(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repo := db.NewUserRepository(database)
+	repo := db.NewUserRepository("sqlite", database)
 
 	_, err := repo.GetByID(context.Background(), "nonexistent")
 	if !errors.Is(err, domain.ErrNotFound) {
@@ -62,7 +62,7 @@ func TestUserRepository_GetByID_NotFound(t *testing.T) {
 
 func TestUserRepository_GetByUsername(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repo := db.NewUserRepository(database)
+	repo := db.NewUserRepository("sqlite", database)
 
 	createTestUser(t, repo, "maria")
 
@@ -77,7 +77,7 @@ func TestUserRepository_GetByUsername(t *testing.T) {
 
 func TestUserRepository_GetByUsername_NotFound(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repo := db.NewUserRepository(database)
+	repo := db.NewUserRepository("sqlite", database)
 
 	_, err := repo.GetByUsername(context.Background(), "nonexistent")
 	if !errors.Is(err, domain.ErrNotFound) {
@@ -87,7 +87,7 @@ func TestUserRepository_GetByUsername_NotFound(t *testing.T) {
 
 func TestUserRepository_List(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repo := db.NewUserRepository(database)
+	repo := db.NewUserRepository("sqlite", database)
 
 	createTestUser(t, repo, "alice")
 	createTestUser(t, repo, "bob")
@@ -112,7 +112,7 @@ func TestUserRepository_List(t *testing.T) {
 
 func TestUserRepository_List_Pagination(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repo := db.NewUserRepository(database)
+	repo := db.NewUserRepository("sqlite", database)
 
 	createTestUser(t, repo, "alice")
 	createTestUser(t, repo, "bob")
@@ -140,7 +140,7 @@ func TestUserRepository_List_Pagination(t *testing.T) {
 
 func TestUserRepository_Update(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repo := db.NewUserRepository(database)
+	repo := db.NewUserRepository("sqlite", database)
 
 	u := createTestUser(t, repo, "alex")
 	u.DisplayName = "Alejandro"
@@ -164,7 +164,7 @@ func TestUserRepository_Update(t *testing.T) {
 
 func TestUserRepository_Delete(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repo := db.NewUserRepository(database)
+	repo := db.NewUserRepository("sqlite", database)
 
 	u := createTestUser(t, repo, "alex")
 
@@ -180,7 +180,7 @@ func TestUserRepository_Delete(t *testing.T) {
 
 func TestUserRepository_Delete_NotFound(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repo := db.NewUserRepository(database)
+	repo := db.NewUserRepository("sqlite", database)
 
 	err := repo.Delete(context.Background(), "nonexistent")
 	if !errors.Is(err, domain.ErrNotFound) {
@@ -190,7 +190,7 @@ func TestUserRepository_Delete_NotFound(t *testing.T) {
 
 func TestUserRepository_Count(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repo := db.NewUserRepository(database)
+	repo := db.NewUserRepository("sqlite", database)
 
 	count, err := repo.Count(context.Background())
 	if err != nil {
@@ -220,7 +220,7 @@ func TestUserRepository_Count(t *testing.T) {
 // the parent first, then profiles alphabetically (case-insensitive).
 func TestUserRepository_ListProfilesForOwner(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repo := db.NewUserRepository(database)
+	repo := db.NewUserRepository("sqlite", database)
 	ctx := context.Background()
 
 	// Parent account.
@@ -285,7 +285,7 @@ func TestUserRepository_ListProfilesForOwner(t *testing.T) {
 // still return the owner row, not nil.
 func TestUserRepository_ListProfilesForOwner_NoProfiles(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repo := db.NewUserRepository(database)
+	repo := db.NewUserRepository("sqlite", database)
 	ctx := context.Background()
 
 	createTestUser(t, repo, "solo")
@@ -304,7 +304,7 @@ func TestUserRepository_ListProfilesForOwner_NoProfiles(t *testing.T) {
 
 func TestUserRepository_UpdateLastLogin(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repo := db.NewUserRepository(database)
+	repo := db.NewUserRepository("sqlite", database)
 
 	u := createTestUser(t, repo, "alex")
 

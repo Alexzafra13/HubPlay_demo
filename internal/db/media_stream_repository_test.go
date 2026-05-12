@@ -29,9 +29,9 @@ func seedItemForStreams(t *testing.T, database *db.LibraryRepository, itemRepo *
 
 func TestMediaStreamRepository_ReplaceAndList(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository(database)
+	libRepo := db.NewLibraryRepository("sqlite", database)
 	itemRepo := db.NewItemRepository(database)
-	repo := db.NewMediaStreamRepository(database)
+	repo := db.NewMediaStreamRepository("sqlite", database)
 	seedItemForStreams(t, libRepo, itemRepo)
 
 	streams := []*db.MediaStream{
@@ -75,9 +75,9 @@ func TestMediaStreamRepository_ReplaceAndList(t *testing.T) {
 
 func TestMediaStreamRepository_Replace_OverwritesPrevious(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository(database)
+	libRepo := db.NewLibraryRepository("sqlite", database)
 	itemRepo := db.NewItemRepository(database)
-	repo := db.NewMediaStreamRepository(database)
+	repo := db.NewMediaStreamRepository("sqlite", database)
 	seedItemForStreams(t, libRepo, itemRepo)
 
 	// First set
@@ -106,7 +106,7 @@ func TestMediaStreamRepository_Replace_OverwritesPrevious(t *testing.T) {
 
 func TestMediaStreamRepository_ListByItem_Empty(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repo := db.NewMediaStreamRepository(database)
+	repo := db.NewMediaStreamRepository("sqlite", database)
 
 	got, err := repo.ListByItem(context.Background(), "nonexistent")
 	if err != nil {

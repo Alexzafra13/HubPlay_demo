@@ -22,7 +22,7 @@ func TestFederationRepository_SearchSharedItems(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	ctx := context.Background()
 
-	libRepo := db.NewLibraryRepository(database)
+	libRepo := db.NewLibraryRepository("sqlite", database)
 	itemRepo := db.NewItemRepository(database)
 	fedRepo := db.NewFederationRepository(database)
 
@@ -160,7 +160,7 @@ func TestFederationRepository_SharedItem_ColorsForwarded(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	ctx := context.Background()
 
-	libRepo := db.NewLibraryRepository(database)
+	libRepo := db.NewLibraryRepository("sqlite", database)
 	itemRepo := db.NewItemRepository(database)
 	imgRepo := db.NewImageRepository(database)
 	fedRepo := db.NewFederationRepository(database)

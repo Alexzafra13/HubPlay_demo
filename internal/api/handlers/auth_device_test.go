@@ -41,9 +41,9 @@ type deviceAuthEnv struct {
 func newDeviceAuthEnv(t *testing.T) *deviceAuthEnv {
 	t.Helper()
 	database := testutil.NewTestDB(t)
-	userRepo := db.NewUserRepository(database)
-	sessionRepo := db.NewSessionRepository(database)
-	keyRepo := db.NewSigningKeyRepository(database)
+	userRepo := db.NewUserRepository("sqlite", database)
+	sessionRepo := db.NewSessionRepository("sqlite", database)
+	keyRepo := db.NewSigningKeyRepository("sqlite", database)
 	codeRepo := db.NewDeviceCodeRepository(database)
 
 	cfg := config.AuthConfig{

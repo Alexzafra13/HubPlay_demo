@@ -45,12 +45,12 @@ type Repositories struct {
 // (main.go) don't have to change again as each repo lands.
 func NewRepositories(driver string, database *sql.DB) *Repositories {
 	return &Repositories{
-		Users:              NewUserRepository(database),
-		Sessions:           NewSessionRepository(database),
-		SigningKeys:        NewSigningKeyRepository(database),
-		Libraries:          NewLibraryRepository(database),
+		Users:              NewUserRepository(driver, database),
+		Sessions:           NewSessionRepository(driver, database),
+		SigningKeys:        NewSigningKeyRepository(driver, database),
+		Libraries:          NewLibraryRepository(driver, database),
 		Items:              NewItemRepository(database),
-		MediaStreams:       NewMediaStreamRepository(database),
+		MediaStreams:       NewMediaStreamRepository(driver, database),
 		Images:             NewImageRepository(database),
 		UserData:           NewUserDataRepository(database),
 		Channels:           NewChannelRepository(database),

@@ -21,7 +21,7 @@ import (
 func newAdminAuthFixture(t *testing.T) (*handlers.AdminAuthHandler, *auth.KeyStore, *clock.Mock, *[]string) {
 	t.Helper()
 	database := testutil.NewTestDB(t)
-	repo := db.NewSigningKeyRepository(database)
+	repo := db.NewSigningKeyRepository("sqlite", database)
 	clk := &clock.Mock{CurrentTime: time.Now().UTC()}
 	ctx := context.Background()
 

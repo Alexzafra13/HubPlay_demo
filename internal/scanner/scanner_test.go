@@ -42,9 +42,9 @@ func (m *mockProber) Probe(ctx context.Context, path string) (*probe.Result, err
 func newTestScanner(t *testing.T) (*Scanner, *db.ItemRepository, *db.MediaStreamRepository) {
 	t.Helper()
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository(database)
+	libRepo := db.NewLibraryRepository("sqlite", database)
 	itemRepo := db.NewItemRepository(database)
-	streamRepo := db.NewMediaStreamRepository(database)
+	streamRepo := db.NewMediaStreamRepository("sqlite", database)
 	bus := event.NewBus(slog.Default())
 
 	// Seed library
@@ -559,7 +559,7 @@ func TestFetchAndStoreImages_PersistsLocalPathNotURL(t *testing.T) {
 	// use, plus the on-disk image dir + pathmap that the production
 	// constructor would build in main.go.
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository(database)
+	libRepo := db.NewLibraryRepository("sqlite", database)
 	itemRepo := db.NewItemRepository(database)
 	imgRepo := db.NewImageRepository(database)
 	now := time.Now()
@@ -582,7 +582,7 @@ func TestFetchAndStoreImages_PersistsLocalPathNotURL(t *testing.T) {
 
 	bus := event.NewBus(slog.Default())
 	prober := &mockProber{result: &probe.Result{}}
-	s := New(itemRepo, db.NewMediaStreamRepository(database),
+	s := New(itemRepo, db.NewMediaStreamRepository("sqlite", database),
 		db.NewMetadataRepository(database), db.NewExternalIDRepository(database),
 		imgRepo, db.NewChapterRepository(database), db.NewPeopleRepository(database),
 		db.NewItemValueRepository(database),
@@ -682,7 +682,7 @@ func TestEnrichEpisode_PersistsOverviewAndStill(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository(database)
+	libRepo := db.NewLibraryRepository("sqlite", database)
 	itemRepo := db.NewItemRepository(database)
 	imgRepo := db.NewImageRepository(database)
 	metaRepo := db.NewMetadataRepository(database)
@@ -732,7 +732,7 @@ func TestEnrichEpisode_PersistsOverviewAndStill(t *testing.T) {
 	pm := pathmap.New(imageDir)
 	bus := event.NewBus(slog.Default())
 	prober := &mockProber{result: &probe.Result{}}
-	s := New(itemRepo, db.NewMediaStreamRepository(database), metaRepo, extRepo,
+	s := New(itemRepo, db.NewMediaStreamRepository("sqlite", database), metaRepo, extRepo,
 		imgRepo, db.NewChapterRepository(database), db.NewPeopleRepository(database),
 		db.NewItemValueRepository(database),
 		db.NewStudioRepository(database),
@@ -801,7 +801,7 @@ func TestEnrichEpisode_PersistsOverviewAndStill(t *testing.T) {
 // provider call, no metadata row, no image row. The next scan retries.
 func TestEnrichEpisode_NoTMDbIDOnSeries(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository(database)
+	libRepo := db.NewLibraryRepository("sqlite", database)
 	itemRepo := db.NewItemRepository(database)
 	imgRepo := db.NewImageRepository(database)
 	metaRepo := db.NewMetadataRepository(database)
@@ -837,7 +837,7 @@ func TestEnrichEpisode_NoTMDbIDOnSeries(t *testing.T) {
 
 	bus := event.NewBus(slog.Default())
 	prober := &mockProber{result: &probe.Result{}}
-	s := New(itemRepo, db.NewMediaStreamRepository(database), metaRepo, extRepo,
+	s := New(itemRepo, db.NewMediaStreamRepository("sqlite", database), metaRepo, extRepo,
 		imgRepo, db.NewChapterRepository(database), db.NewPeopleRepository(database),
 		db.NewItemValueRepository(database),
 		db.NewStudioRepository(database),
@@ -888,7 +888,7 @@ func TestEnrichSeason_PersistsMetadataAndPoster(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository(database)
+	libRepo := db.NewLibraryRepository("sqlite", database)
 	itemRepo := db.NewItemRepository(database)
 	imgRepo := db.NewImageRepository(database)
 	metaRepo := db.NewMetadataRepository(database)
@@ -929,7 +929,7 @@ func TestEnrichSeason_PersistsMetadataAndPoster(t *testing.T) {
 	pm := pathmap.New(imageDir)
 	bus := event.NewBus(slog.Default())
 	prober := &mockProber{result: &probe.Result{}}
-	s := New(itemRepo, db.NewMediaStreamRepository(database), metaRepo, extRepo,
+	s := New(itemRepo, db.NewMediaStreamRepository("sqlite", database), metaRepo, extRepo,
 		imgRepo, db.NewChapterRepository(database), db.NewPeopleRepository(database),
 		db.NewItemValueRepository(database),
 		db.NewStudioRepository(database),
@@ -1017,7 +1017,7 @@ func TestFetchAndStoreImages_SkippedWhenImageDirEmpty(t *testing.T) {
 	// the legacy-callsite escape hatch that keeps existing tests
 	// working without spinning up the artwork pipeline.
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository(database)
+	libRepo := db.NewLibraryRepository("sqlite", database)
 	itemRepo := db.NewItemRepository(database)
 	imgRepo := db.NewImageRepository(database)
 	now := time.Now()
@@ -1034,7 +1034,7 @@ func TestFetchAndStoreImages_SkippedWhenImageDirEmpty(t *testing.T) {
 	stub := &stubProvider{images: []provider.ImageResult{
 		{Type: "primary", URL: "http://example.test/poster.png", Score: 1},
 	}}
-	s := New(itemRepo, db.NewMediaStreamRepository(database),
+	s := New(itemRepo, db.NewMediaStreamRepository("sqlite", database),
 		db.NewMetadataRepository(database), db.NewExternalIDRepository(database),
 		imgRepo, db.NewChapterRepository(database), db.NewPeopleRepository(database),
 		db.NewItemValueRepository(database),

@@ -21,7 +21,7 @@ import (
 // an error.
 func TestExternalIDRepository_GetItemIDByExternalID_RoundTrip(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository(database)
+	libRepo := db.NewLibraryRepository("sqlite", database)
 	itemRepo := db.NewItemRepository(database)
 	extRepo := db.NewExternalIDRepository(database)
 	seedLibraryForItems(t, libRepo)
