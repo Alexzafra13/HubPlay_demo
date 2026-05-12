@@ -28,7 +28,7 @@ func (m *mockProber) Probe(ctx context.Context, path string) (*probe.Result, err
 func newTestLibraryService(t *testing.T) *library.Service {
 	t.Helper()
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories(database)
+	repos := db.NewRepositories("sqlite", database)
 	bus := event.NewBus(slog.Default())
 	prober := &mockProber{}
 	scnr := scanner.New(repos.Items, repos.MediaStreams, repos.Metadata, repos.ExternalIDs, repos.Images, repos.Chapters, repos.People, repos.ItemValues, repos.Studios, repos.Collections, nil, prober, bus, "", nil, slog.Default())
@@ -206,7 +206,7 @@ func TestService_ItemCount(t *testing.T) {
 // in place, the dedupe code became dead defence and was removed.
 func TestService_SeasonUniqueConstraintRejectsDuplicates(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories(database)
+	repos := db.NewRepositories("sqlite", database)
 	ctx := context.Background()
 
 	now := time.Now()

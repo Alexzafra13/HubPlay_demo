@@ -27,7 +27,7 @@ func newStreamTestApp(t *testing.T) *streamTestApp {
 	t.Helper()
 
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories(database)
+	repos := db.NewRepositories("sqlite", database)
 	cfg := config.TestConfig()
 	clk := &clock.Mock{CurrentTime: time.Now().UTC()}
 

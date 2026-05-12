@@ -37,9 +37,11 @@ func NewTestDB(t *testing.T) *sql.DB {
 }
 
 // NewTestRepos creates repositories backed by an in-memory database.
+// Always SQLite in tests — the dual-dialect refactor takes "sqlite"
+// as the default branch.
 func NewTestRepos(t *testing.T) *db.Repositories {
 	t.Helper()
-	return db.NewRepositories(NewTestDB(t))
+	return db.NewRepositories("sqlite", NewTestDB(t))
 }
 
 // NopLogger returns a logger that discards output.

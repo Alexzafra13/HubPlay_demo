@@ -147,7 +147,7 @@ func TestDetectFromChapters_ZeroDurationSkipsPositionGuard(t *testing.T) {
 // detector replaces the prior chapter-source rows cleanly.
 func TestSegmentDetector_DetectLibrary_EndToEnd(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories(database)
+	repos := db.NewRepositories("sqlite", database)
 	bus := event.NewBus(slog.Default())
 
 	// Seed: one library, one series, one season, two episodes.

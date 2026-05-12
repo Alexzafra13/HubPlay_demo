@@ -26,7 +26,7 @@ import (
 func TestRefreshM3U_SelfSignedHTTPS_FailsByDefault(t *testing.T) {
 	unblockLoopback(t)
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories(database)
+	repos := db.NewRepositories("sqlite", database)
 	ctx := context.Background()
 
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -72,7 +72,7 @@ http://upstream.example/x.m3u8
 func TestRefreshM3U_SelfSignedHTTPS_SucceedsWhenInsecure(t *testing.T) {
 	unblockLoopback(t)
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories(database)
+	repos := db.NewRepositories("sqlite", database)
 	ctx := context.Background()
 
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -115,7 +115,7 @@ http://upstream.example/la1.m3u8
 func TestRefreshM3U_ToggleAtRuntime(t *testing.T) {
 	unblockLoopback(t)
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories(database)
+	repos := db.NewRepositories("sqlite", database)
 	ctx := context.Background()
 
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -166,7 +166,7 @@ http://upstream.example/t.m3u8
 // pointer never changes after first use.
 func TestService_InsecureFetchClient_Cached(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories(database)
+	repos := db.NewRepositories("sqlite", database)
 	svc := NewService(repos.Channels, repos.EPGPrograms, repos.Libraries,
 		repos.ChannelFavorites, repos.LibraryEPGSources, repos.ChannelOverrides,
 		repos.ChannelWatchHistory,

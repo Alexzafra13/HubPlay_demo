@@ -92,7 +92,9 @@ func run(configPath string) error {
 		return fmt.Errorf("running migrations: %w", err)
 	}
 
-	repos := db.NewRepositories(database)
+	// Driver string drives dual-dialect repos (Sesión E in progress).
+	// Repos not yet migrated ignore the param and stay on SQLite.
+	repos := db.NewRepositories(cfg.Database.Driver, database)
 
 	// ═══ Phase 3: Infrastructure ═══
 	eventBus := event.NewBus(logger)
