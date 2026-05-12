@@ -8,89 +8,135 @@ import (
 	"time"
 
 	"hubplay/internal/db/sqlc"
+	"hubplay/internal/db/sqlc_pg"
 	"hubplay/internal/domain"
 )
 
-// SigningKey is an alias for the sqlc-generated row type. The alias keeps the
-// name stable for callers in internal/auth/ (keystore, jwt, service) while the
-// underlying shape is owned by sqlc from the jwt_signing_keys table defined in
-// migrations/sqlite/004_jwt_signing_keys.sql.
-type SigningKey = sqlc.JwtSigningKey
+// SigningKey is the domain shape exposed to internal/auth. Used to
+// live as an alias to sqlc.JwtSigningKey; now a proper struct so the
+// dual-dialect repo can return the same type regardless of which
+// generated package produced the row.
+type SigningKey struct {
+	ID        string
+	Secret    string
+	CreatedAt time.Time
+	RetiredAt sql.NullTime
+}
 
-// SigningKeyRepository persists JWT signing keys.
-//
-// The repository is intentionally minimal: the keystore layer owns rotation
-// policy (when to retire, how long to overlap) and caches reads. This file
-// only adapts the sqlc-generated queries to the narrow interface the keystore
-// consumes (see internal/auth/keystore.go:signingKeyRepo).
+// SigningKeyRepository — Pattern A dual-dialect. The rotation policy
+// + caching lives in internal/auth/keystore.go; this file only
+// adapts the sqlc-generated queries to the narrow keystore interface.
 type SigningKeyRepository struct {
-	q *sqlc.Queries
+	sq *sqlc.Queries
+	pq *sqlc_pg.Queries
 }
 
-func NewSigningKeyRepository(database *sql.DB) *SigningKeyRepository {
-	return &SigningKeyRepository{q: sqlc.New(database)}
+func NewSigningKeyRepository(driver string, database *sql.DB) *SigningKeyRepository {
+	r := &SigningKeyRepository{}
+	if IsPostgres(driver) {
+		r.pq = sqlc_pg.New(database)
+	} else {
+		r.sq = sqlc.New(database)
+	}
+	return r
 }
 
-// Insert adds a new signing key. The caller generates the id and secret.
+func (r *SigningKeyRepository) useSQLite() bool { return r.sq != nil }
+
 func (r *SigningKeyRepository) Insert(ctx context.Context, k *SigningKey) error {
-	err := r.q.CreateSigningKey(ctx, sqlc.CreateSigningKeyParams{
+	if r.useSQLite() {
+		if err := r.sq.CreateSigningKey(ctx, sqlc.CreateSigningKeyParams{
+			ID:        k.ID,
+			Secret:    k.Secret,
+			CreatedAt: k.CreatedAt,
+			RetiredAt: k.RetiredAt,
+		}); err != nil {
+			return fmt.Errorf("insert signing key: %w", err)
+		}
+		return nil
+	}
+	if err := r.pq.CreateSigningKey(ctx, sqlc_pg.CreateSigningKeyParams{
 		ID:        k.ID,
 		Secret:    k.Secret,
 		CreatedAt: k.CreatedAt,
 		RetiredAt: k.RetiredAt,
-	})
-	if err != nil {
+	}); err != nil {
 		return fmt.Errorf("insert signing key: %w", err)
 	}
 	return nil
 }
 
-// GetByID fetches a single key by id. Returns domain.ErrNotFound for a
-// missing kid so handlers can map it to a 401.
 func (r *SigningKeyRepository) GetByID(ctx context.Context, id string) (*SigningKey, error) {
-	k, err := r.q.GetSigningKey(ctx, id)
+	if r.useSQLite() {
+		row, err := r.sq.GetSigningKey(ctx, id)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("signing key %s: %w", id, domain.ErrNotFound)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("get signing key: %w", err)
+		}
+		k := signingKeyFromSqlite(row)
+		return &k, nil
+	}
+	row, err := r.pq.GetSigningKey(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("signing key %s: %w", id, domain.ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get signing key: %w", err)
 	}
+	k := signingKeyFromPg(row)
 	return &k, nil
 }
 
-// ListActive returns every non-retired key, newest first. The newest is
-// treated as the primary signer; any other active key is in its overlap
-// window and only validates in-flight tokens.
 func (r *SigningKeyRepository) ListActive(ctx context.Context) ([]*SigningKey, error) {
-	rows, err := r.q.ListActiveSigningKeys(ctx)
+	if r.useSQLite() {
+		rows, err := r.sq.ListActiveSigningKeys(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("list active signing keys: %w", err)
+		}
+		return mapSigningKeysFromSqlite(rows), nil
+	}
+	rows, err := r.pq.ListActiveSigningKeys(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list active signing keys: %w", err)
 	}
-	return rowsToPtrs(rows), nil
+	return mapSigningKeysFromPg(rows), nil
 }
 
-// ListAll returns every key, active and retired, newest first. Used by the
-// admin UI and by the pruner to identify retirable keys.
 func (r *SigningKeyRepository) ListAll(ctx context.Context) ([]*SigningKey, error) {
-	rows, err := r.q.ListSigningKeys(ctx)
+	if r.useSQLite() {
+		rows, err := r.sq.ListSigningKeys(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("list signing keys: %w", err)
+		}
+		return mapSigningKeysFromSqlite(rows), nil
+	}
+	rows, err := r.pq.ListSigningKeys(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list signing keys: %w", err)
 	}
-	return rowsToPtrs(rows), nil
+	return mapSigningKeysFromPg(rows), nil
 }
 
-// SetRetiredAt marks a key as retired (or clears it if retiredAt is zero).
-// The zero-time branch exists so tests and admins can "unretire" a key
-// without recreating it; production typically just passes a concrete time.
 func (r *SigningKeyRepository) SetRetiredAt(ctx context.Context, id string, retiredAt time.Time) error {
 	ra := sql.NullTime{}
 	if !retiredAt.IsZero() {
 		ra = sql.NullTime{Time: retiredAt, Valid: true}
 	}
-	n, err := r.q.SetSigningKeyRetiredAt(ctx, sqlc.SetSigningKeyRetiredAtParams{
-		RetiredAt: ra,
-		ID:        id,
-	})
+	var (
+		n   int64
+		err error
+	)
+	if r.useSQLite() {
+		n, err = r.sq.SetSigningKeyRetiredAt(ctx, sqlc.SetSigningKeyRetiredAtParams{
+			RetiredAt: ra, ID: id,
+		})
+	} else {
+		n, err = r.pq.SetSigningKeyRetiredAt(ctx, sqlc_pg.SetSigningKeyRetiredAtParams{
+			RetiredAt: ra, ID: id,
+		})
+	}
 	if err != nil {
 		return fmt.Errorf("retire signing key: %w", err)
 	}
@@ -100,26 +146,53 @@ func (r *SigningKeyRepository) SetRetiredAt(ctx context.Context, id string, reti
 	return nil
 }
 
-// DeleteRetiredBefore removes every key that was retired before the cutoff.
-// Returns how many rows were deleted.
 func (r *SigningKeyRepository) DeleteRetiredBefore(ctx context.Context, cutoff time.Time) (int64, error) {
-	n, err := r.q.DeleteRetiredSigningKeysBefore(ctx, sql.NullTime{Time: cutoff, Valid: true})
+	cut := sql.NullTime{Time: cutoff, Valid: true}
+	var (
+		n   int64
+		err error
+	)
+	if r.useSQLite() {
+		n, err = r.sq.DeleteRetiredSigningKeysBefore(ctx, cut)
+	} else {
+		n, err = r.pq.DeleteRetiredSigningKeysBefore(ctx, cut)
+	}
 	if err != nil {
 		return 0, fmt.Errorf("prune signing keys: %w", err)
 	}
 	return n, nil
 }
 
-// rowsToPtrs adapts sqlc's value slices to the pointer-slice shape the auth
-// package consumes. Taking &rows[i] in a loop is safe because rows is the
-// local slice owned by this call.
-func rowsToPtrs(rows []sqlc.JwtSigningKey) []*SigningKey {
+// ── row mapping helpers ─────────────────────────────────────────────────
+
+func signingKeyFromSqlite(r sqlc.JwtSigningKey) SigningKey {
+	return SigningKey{ID: r.ID, Secret: r.Secret, CreatedAt: r.CreatedAt, RetiredAt: r.RetiredAt}
+}
+
+func signingKeyFromPg(r sqlc_pg.JwtSigningKey) SigningKey {
+	return SigningKey{ID: r.ID, Secret: r.Secret, CreatedAt: r.CreatedAt, RetiredAt: r.RetiredAt}
+}
+
+func mapSigningKeysFromSqlite(rows []sqlc.JwtSigningKey) []*SigningKey {
 	if len(rows) == 0 {
 		return nil
 	}
 	out := make([]*SigningKey, len(rows))
-	for i := range rows {
-		out[i] = &rows[i]
+	for i, row := range rows {
+		k := signingKeyFromSqlite(row)
+		out[i] = &k
+	}
+	return out
+}
+
+func mapSigningKeysFromPg(rows []sqlc_pg.JwtSigningKey) []*SigningKey {
+	if len(rows) == 0 {
+		return nil
+	}
+	out := make([]*SigningKey, len(rows))
+	for i, row := range rows {
+		k := signingKeyFromPg(row)
+		out[i] = &k
 	}
 	return out
 }

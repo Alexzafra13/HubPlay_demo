@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"hubplay/internal/db/sqlc"
+	"hubplay/internal/db/sqlc_pg"
 	"hubplay/internal/domain"
 )
 
@@ -23,89 +24,113 @@ type User struct {
 	CreatedAt    time.Time
 	LastLoginAt  *time.Time
 
-	// Profile tree fields (migration 034). All four are zero-value
-	// safe — pre-existing users get NULL/0 when the migration runs,
-	// which means "top-level account, no PIN, no rating cap, no
-	// forced password change".
-	//
-	// ParentUserID identifies the parent account when this row is a
-	// child profile (Netflix-style). Empty/NULL marks an account
-	// owner — the only kind of user that authenticates with a
-	// password. Profiles share the parent's password and use
-	// /auth/switch-profile to rotate JWTs.
-	ParentUserID string
-	// PINHash, when set, gates entry into this profile from the
-	// "Who's watching?" selector. bcrypt-hashed; never returned over
-	// the wire.
-	PINHash string
-	// MaxContentRating caps what the profile can browse. Empty =
-	// "no restriction". Stored as the rating literal ("PG-13",
-	// "TV-MA", ...); the filter consults a ranking table at query
-	// time.
-	MaxContentRating string
-	// PasswordChangeRequired forces the next successful login to
-	// land on the change-password screen before any other surface.
-	// Set true on admin-driven create / reset; cleared automatically
-	// when the user finishes a successful change.
+	// Profile tree fields (migration 034). See repo docs above for the
+	// invariants — top-level account = parent_user_id empty; profile =
+	// child row sharing parent's password.
+	ParentUserID           string
+	PINHash                string
+	MaxContentRating       string
 	PasswordChangeRequired bool
 
-	// AccessExpiresAt, when set, marks a temporary-access window.
-	// Login + middleware reject after this timestamp; nil = no
-	// expiry (permanent access). Lazy enforcement — there's no
-	// background job that flips is_active automatically; the JWT
-	// TTL bounds how long a stale token can outlive its expiry.
+	// AccessExpiresAt is the temp-access deadline. nil = permanent.
 	AccessExpiresAt *time.Time
 
-	// AvatarColor is an optional per-user override for the
-	// circular avatar's background colour. Stored as a literal
-	// hex string (#RRGGBB) when set; empty string means "fall
-	// back to the deterministic FNV-1a→palette helper the
-	// frontend already has". Free for accounts that never
-	// customise.
+	// AvatarColor — optional per-user override. Empty = deterministic
+	// FNV-1a → palette fallback in the frontend.
 	AvatarColor string
 }
 
 // IsProfile is the canonical readability helper around `ParentUserID`.
-// Profiles can't authenticate directly, can't be admins, and can't
-// own peers — every gate that matters consults this one method
-// instead of duplicating the empty-string check at each callsite.
 func (u User) IsProfile() bool { return u.ParentUserID != "" }
 
+// UserRepository — dual-dialect repo using Pattern A (dual q
+// pointers, branching per method). Exactly one of sq / pq is non-nil
+// after construction, picked from the driver string.
 type UserRepository struct {
 	db *sql.DB // kept for ListProfilesForOwner (sqlc 1.31.x parser bug)
-	q  *sqlc.Queries
+	sq *sqlc.Queries
+	pq *sqlc_pg.Queries
 }
 
-func NewUserRepository(database *sql.DB) *UserRepository {
-	return &UserRepository{db: database, q: sqlc.New(database)}
+// NewUserRepository wires the repo against the chosen backend.
+// "postgres" → sqlc_pg; anything else → sqlc (SQLite default).
+func NewUserRepository(driver string, database *sql.DB) *UserRepository {
+	r := &UserRepository{db: database}
+	if IsPostgres(driver) {
+		r.pq = sqlc_pg.New(database)
+	} else {
+		r.sq = sqlc.New(database)
+	}
+	return r
 }
+
+// useSQLite reports whether the SQLite branch is active. Local
+// helper to keep each method's branching one-liner readable.
+func (r *UserRepository) useSQLite() bool { return r.sq != nil }
 
 func (r *UserRepository) GetByID(ctx context.Context, id string) (*User, error) {
-	row, err := r.q.GetUserByID(ctx, id)
+	if r.useSQLite() {
+		row, err := r.sq.GetUserByID(ctx, id)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("user %s: %w", id, domain.ErrNotFound)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("get user %s: %w", id, err)
+		}
+		u := userFromSqliteGetRow(row)
+		return &u, nil
+	}
+	row, err := r.pq.GetUserByID(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("user %s: %w", id, domain.ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get user %s: %w", id, err)
 	}
-	u := userFromGetRow(row)
+	u := userFromPgGetRow(row)
 	return &u, nil
 }
 
 func (r *UserRepository) GetByUsername(ctx context.Context, username string) (*User, error) {
-	row, err := r.q.GetUserByUsername(ctx, username)
+	if r.useSQLite() {
+		row, err := r.sq.GetUserByUsername(ctx, username)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("user %q: %w", username, domain.ErrNotFound)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("get user by username %q: %w", username, err)
+		}
+		u := userFromSqliteGetByUsernameRow(row)
+		return &u, nil
+	}
+	row, err := r.pq.GetUserByUsername(ctx, username)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("user %q: %w", username, domain.ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get user by username %q: %w", username, err)
 	}
-	u := userFromGetByUsernameRow(row)
+	u := userFromPgGetByUsernameRow(row)
 	return &u, nil
 }
 
 func (r *UserRepository) Create(ctx context.Context, u *User) error {
-	err := r.q.CreateUser(ctx, sqlc.CreateUserParams{
+	if r.useSQLite() {
+		if err := r.sq.CreateUser(ctx, sqlc.CreateUserParams{
+			ID:                     u.ID,
+			Username:               u.Username,
+			DisplayName:            u.DisplayName,
+			PasswordHash:           u.PasswordHash,
+			Role:                   u.Role,
+			CreatedAt:              u.CreatedAt,
+			ParentUserID:           nullStringFromOptional(u.ParentUserID),
+			PasswordChangeRequired: u.PasswordChangeRequired,
+		}); err != nil {
+			return fmt.Errorf("create user: %w", err)
+		}
+		return nil
+	}
+	if err := r.pq.CreateUser(ctx, sqlc_pg.CreateUserParams{
 		ID:                     u.ID,
 		Username:               u.Username,
 		DisplayName:            u.DisplayName,
@@ -114,19 +139,24 @@ func (r *UserRepository) Create(ctx context.Context, u *User) error {
 		CreatedAt:              u.CreatedAt,
 		ParentUserID:           nullStringFromOptional(u.ParentUserID),
 		PasswordChangeRequired: u.PasswordChangeRequired,
-	})
-	if err != nil {
+	}); err != nil {
 		return fmt.Errorf("create user: %w", err)
 	}
 	return nil
 }
 
-// SetPassword updates the user's password hash and the must-change
-// flag in a single shot. The handler decides what `mustChange` should
-// be: true after admin-driven reset (forces change on next login);
-// false after the user themselves changed it.
 func (r *UserRepository) SetPassword(ctx context.Context, id, hash string, mustChange bool) error {
-	if err := r.q.UpdateUserPassword(ctx, sqlc.UpdateUserPasswordParams{
+	if r.useSQLite() {
+		if err := r.sq.UpdateUserPassword(ctx, sqlc.UpdateUserPasswordParams{
+			ID:                     id,
+			PasswordHash:           hash,
+			PasswordChangeRequired: mustChange,
+		}); err != nil {
+			return fmt.Errorf("set password: %w", err)
+		}
+		return nil
+	}
+	if err := r.pq.UpdateUserPassword(ctx, sqlc_pg.UpdateUserPasswordParams{
 		ID:                     id,
 		PasswordHash:           hash,
 		PasswordChangeRequired: mustChange,
@@ -136,10 +166,17 @@ func (r *UserRepository) SetPassword(ctx context.Context, id, hash string, mustC
 	return nil
 }
 
-// SetPIN stores (or clears, when hash is empty) the profile PIN.
-// Plumbed through the auth/switch-profile handler.
 func (r *UserRepository) SetPIN(ctx context.Context, id, hash string) error {
-	if err := r.q.UpdateUserPIN(ctx, sqlc.UpdateUserPINParams{
+	if r.useSQLite() {
+		if err := r.sq.UpdateUserPIN(ctx, sqlc.UpdateUserPINParams{
+			ID:      id,
+			PinHash: nullStringFromOptional(hash),
+		}); err != nil {
+			return fmt.Errorf("set pin: %w", err)
+		}
+		return nil
+	}
+	if err := r.pq.UpdateUserPIN(ctx, sqlc_pg.UpdateUserPINParams{
 		ID:      id,
 		PinHash: nullStringFromOptional(hash),
 	}); err != nil {
@@ -148,12 +185,17 @@ func (r *UserRepository) SetPIN(ctx context.Context, id, hash string) error {
 	return nil
 }
 
-// SetAvatarColor updates the per-user avatar override. Empty string
-// clears the override (fall back to the deterministic
-// FNV-1a→palette helper the frontend has). The service layer is
-// responsible for validating the value against the known palette.
 func (r *UserRepository) SetAvatarColor(ctx context.Context, id, hex string) error {
-	if err := r.q.UpdateUserAvatarColor(ctx, sqlc.UpdateUserAvatarColorParams{
+	if r.useSQLite() {
+		if err := r.sq.UpdateUserAvatarColor(ctx, sqlc.UpdateUserAvatarColorParams{
+			ID:          id,
+			AvatarColor: nullStringFromOptional(hex),
+		}); err != nil {
+			return fmt.Errorf("set avatar color: %w", err)
+		}
+		return nil
+	}
+	if err := r.pq.UpdateUserAvatarColor(ctx, sqlc_pg.UpdateUserAvatarColorParams{
 		ID:          id,
 		AvatarColor: nullStringFromOptional(hex),
 	}); err != nil {
@@ -162,11 +204,17 @@ func (r *UserRepository) SetAvatarColor(ctx context.Context, id, hex string) err
 	return nil
 }
 
-// SetDisplayName renames the user (label only — username stays put,
-// avatar colour derived from username also stays put). Trims to a
-// reasonable max so a runaway paste doesn't fill the column.
 func (r *UserRepository) SetDisplayName(ctx context.Context, id, name string) error {
-	if err := r.q.UpdateUserDisplayName(ctx, sqlc.UpdateUserDisplayNameParams{
+	if r.useSQLite() {
+		if err := r.sq.UpdateUserDisplayName(ctx, sqlc.UpdateUserDisplayNameParams{
+			ID:          id,
+			DisplayName: name,
+		}); err != nil {
+			return fmt.Errorf("set display name: %w", err)
+		}
+		return nil
+	}
+	if err := r.pq.UpdateUserDisplayName(ctx, sqlc_pg.UpdateUserDisplayNameParams{
 		ID:          id,
 		DisplayName: name,
 	}); err != nil {
@@ -175,10 +223,17 @@ func (r *UserRepository) SetDisplayName(ctx context.Context, id, name string) er
 	return nil
 }
 
-// SetMaxContentRating updates the per-profile rating cap. Empty
-// rating clears the cap (= profile sees everything).
 func (r *UserRepository) SetMaxContentRating(ctx context.Context, id, rating string) error {
-	if err := r.q.UpdateUserMaxContentRating(ctx, sqlc.UpdateUserMaxContentRatingParams{
+	if r.useSQLite() {
+		if err := r.sq.UpdateUserMaxContentRating(ctx, sqlc.UpdateUserMaxContentRatingParams{
+			ID:               id,
+			MaxContentRating: nullStringFromOptional(rating),
+		}); err != nil {
+			return fmt.Errorf("set content rating: %w", err)
+		}
+		return nil
+	}
+	if err := r.pq.UpdateUserMaxContentRating(ctx, sqlc_pg.UpdateUserMaxContentRatingParams{
 		ID:               id,
 		MaxContentRating: nullStringFromOptional(rating),
 	}); err != nil {
@@ -187,11 +242,17 @@ func (r *UserRepository) SetMaxContentRating(ctx context.Context, id, rating str
 	return nil
 }
 
-// SetRole flips the user between "user" and "admin". The handler
-// gate stops the primary admin from being demoted; this method
-// trusts the caller, by design.
 func (r *UserRepository) SetRole(ctx context.Context, id, role string) error {
-	if err := r.q.UpdateUserRole(ctx, sqlc.UpdateUserRoleParams{
+	if r.useSQLite() {
+		if err := r.sq.UpdateUserRole(ctx, sqlc.UpdateUserRoleParams{
+			ID:   id,
+			Role: role,
+		}); err != nil {
+			return fmt.Errorf("set role: %w", err)
+		}
+		return nil
+	}
+	if err := r.pq.UpdateUserRole(ctx, sqlc_pg.UpdateUserRoleParams{
 		ID:   id,
 		Role: role,
 	}); err != nil {
@@ -200,11 +261,17 @@ func (r *UserRepository) SetRole(ctx context.Context, id, role string) error {
 	return nil
 }
 
-// SetActive soft-disables / re-enables a user. Login + middleware
-// reject on is_active=false. The row and every per-user table stays
-// intact — re-enabling restores access without a recovery flow.
 func (r *UserRepository) SetActive(ctx context.Context, id string, active bool) error {
-	if err := r.q.UpdateUserActive(ctx, sqlc.UpdateUserActiveParams{
+	if r.useSQLite() {
+		if err := r.sq.UpdateUserActive(ctx, sqlc.UpdateUserActiveParams{
+			ID:       id,
+			IsActive: active,
+		}); err != nil {
+			return fmt.Errorf("set active: %w", err)
+		}
+		return nil
+	}
+	if err := r.pq.UpdateUserActive(ctx, sqlc_pg.UpdateUserActiveParams{
 		ID:       id,
 		IsActive: active,
 	}); err != nil {
@@ -213,16 +280,21 @@ func (r *UserRepository) SetActive(ctx context.Context, id string, active bool) 
 	return nil
 }
 
-// SetAccessExpiresAt updates the temporary-access deadline. Pass nil
-// to clear (= permanent access). Lazy enforcement: Login +
-// middleware compare against time.Now() so we never need a job to
-// flip is_active automatically.
 func (r *UserRepository) SetAccessExpiresAt(ctx context.Context, id string, expiresAt *time.Time) error {
 	var nt sql.NullTime
 	if expiresAt != nil {
 		nt = sql.NullTime{Time: expiresAt.UTC(), Valid: true}
 	}
-	if err := r.q.UpdateUserAccessExpiresAt(ctx, sqlc.UpdateUserAccessExpiresAtParams{
+	if r.useSQLite() {
+		if err := r.sq.UpdateUserAccessExpiresAt(ctx, sqlc.UpdateUserAccessExpiresAtParams{
+			ID:              id,
+			AccessExpiresAt: nt,
+		}); err != nil {
+			return fmt.Errorf("set access expires at: %w", err)
+		}
+		return nil
+	}
+	if err := r.pq.UpdateUserAccessExpiresAt(ctx, sqlc_pg.UpdateUserAccessExpiresAtParams{
 		ID:              id,
 		AccessExpiresAt: nt,
 	}); err != nil {
@@ -231,12 +303,16 @@ func (r *UserRepository) SetAccessExpiresAt(ctx context.Context, id string, expi
 	return nil
 }
 
-// PrimaryAdminID returns the oldest admin's user_id. Used to gate
-// destructive actions on the primary admin row from the admin
-// table. Empty string + nil error when no admin exists yet (cold-
-// start, before setup wizard runs).
 func (r *UserRepository) PrimaryAdminID(ctx context.Context) (string, error) {
-	id, err := r.q.GetPrimaryAdminID(ctx)
+	var (
+		id  string
+		err error
+	)
+	if r.useSQLite() {
+		id, err = r.sq.GetPrimaryAdminID(ctx)
+	} else {
+		id, err = r.pq.GetPrimaryAdminID(ctx)
+	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
@@ -246,33 +322,28 @@ func (r *UserRepository) PrimaryAdminID(ctx context.Context) (string, error) {
 	return id, nil
 }
 
-// ListProfilesForOwner returns the parent account row plus all child
-// profiles in a single query. Parent comes first by virtue of the
-// `parent_user_id IS NOT NULL` ORDER BY trick.
-//
-// Hand-rolled because sqlc 1.31.x miscompiles the original query: the
-// ORDER BY clause that combines a boolean expression with a trailing
-// `COLLATE NOCASE` (or LOWER() / any expression that ends with
-// parentheses or a keyword) gets truncated in the generated Go string,
-// producing a literal that errors at runtime ("no such collation
-// sequence: NOCA") and breaking /api/v1/me/profiles permanently.
-// Raw SQL sidesteps the codegen bug entirely. See the 5 other
-// raw-SQL holdouts in this package for the same pattern.
+// ListProfilesForOwner — raw SQL holdout. See the original SQLite-only
+// version's long comment about the sqlc 1.31.x parser bug. The query
+// is dialect-aware via rewritePlaceholders.
 func (r *UserRepository) ListProfilesForOwner(ctx context.Context, ownerID string) ([]*User, error) {
-	const query = `
+	driver := DriverSQLite
+	if !r.useSQLite() {
+		driver = DriverPostgres
+	}
+	query := rewritePlaceholders(driver, `
 SELECT id, username, display_name, COALESCE(avatar_path, '') AS avatar_path,
        role, is_active, created_at, last_login_at,
        parent_user_id, pin_hash, max_content_rating, password_change_required,
        access_expires_at, avatar_color
 FROM users
 WHERE id = ? OR parent_user_id = ?
-ORDER BY parent_user_id IS NOT NULL, LOWER(display_name)`
+ORDER BY parent_user_id IS NOT NULL, LOWER(display_name)`)
 
 	rows, err := r.db.QueryContext(ctx, query, ownerID, ownerID)
 	if err != nil {
 		return nil, fmt.Errorf("list profiles for owner %s: %w", ownerID, err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	var out []*User
 	for rows.Next() {
@@ -314,34 +385,74 @@ ORDER BY parent_user_id IS NOT NULL, LOWER(display_name)`
 }
 
 func (r *UserRepository) UpdateLastLogin(ctx context.Context, id string, t time.Time) error {
-	err := r.q.UpdateLastLogin(ctx, sqlc.UpdateLastLoginParams{
-		LastLoginAt: sql.NullTime{Time: t, Valid: true},
-		ID:          id,
-	})
-	if err != nil {
+	nt := sql.NullTime{Time: t, Valid: true}
+	if r.useSQLite() {
+		if err := r.sq.UpdateLastLogin(ctx, sqlc.UpdateLastLoginParams{
+			LastLoginAt: nt, ID: id,
+		}); err != nil {
+			return fmt.Errorf("update last login: %w", err)
+		}
+		return nil
+	}
+	if err := r.pq.UpdateLastLogin(ctx, sqlc_pg.UpdateLastLoginParams{
+		LastLoginAt: nt, ID: id,
+	}); err != nil {
 		return fmt.Errorf("update last login: %w", err)
 	}
 	return nil
 }
 
 func (r *UserRepository) List(ctx context.Context, limit, offset int) ([]*User, int, error) {
-	cnt, err := r.q.CountUsers(ctx)
+	if r.useSQLite() {
+		cnt, err := r.sq.CountUsers(ctx)
+		if err != nil {
+			return nil, 0, fmt.Errorf("count users: %w", err)
+		}
+		rows, err := r.sq.ListUsers(ctx, sqlc.ListUsersParams{
+			Limit: int64(limit), Offset: int64(offset),
+		})
+		if err != nil {
+			return nil, 0, fmt.Errorf("list users: %w", err)
+		}
+		out := make([]*User, len(rows))
+		for i, row := range rows {
+			u := userFromSqliteListRow(row)
+			out[i] = &u
+		}
+		return out, int(cnt), nil
+	}
+	cnt, err := r.pq.CountUsers(ctx)
 	if err != nil {
 		return nil, 0, fmt.Errorf("count users: %w", err)
 	}
-
-	rows, err := r.q.ListUsers(ctx, sqlc.ListUsersParams{
-		Limit:  int64(limit),
-		Offset: int64(offset),
+	// sqlc generates int32 for Postgres LIMIT/OFFSET (vs int64 for
+	// SQLite) — the underlying SQL standard maps Postgres BIGINT
+	// differently. Cast at the call site rather than trying to
+	// override the type globally in sqlc.yaml.
+	rows, err := r.pq.ListUsers(ctx, sqlc_pg.ListUsersParams{
+		Limit: int32(limit), Offset: int32(offset),
 	})
 	if err != nil {
 		return nil, 0, fmt.Errorf("list users: %w", err)
 	}
-	return usersFromListRows(rows), int(cnt), nil
+	out := make([]*User, len(rows))
+	for i, row := range rows {
+		u := userFromPgListRow(row)
+		out[i] = &u
+	}
+	return out, int(cnt), nil
 }
 
 func (r *UserRepository) Count(ctx context.Context) (int, error) {
-	cnt, err := r.q.CountUsers(ctx)
+	var (
+		cnt int64
+		err error
+	)
+	if r.useSQLite() {
+		cnt, err = r.sq.CountUsers(ctx)
+	} else {
+		cnt, err = r.pq.CountUsers(ctx)
+	}
 	if err != nil {
 		return 0, fmt.Errorf("count users: %w", err)
 	}
@@ -349,20 +460,38 @@ func (r *UserRepository) Count(ctx context.Context) (int, error) {
 }
 
 func (r *UserRepository) Update(ctx context.Context, u *User) error {
-	err := r.q.UpdateUser(ctx, sqlc.UpdateUserParams{
+	if r.useSQLite() {
+		if err := r.sq.UpdateUser(ctx, sqlc.UpdateUserParams{
+			DisplayName: u.DisplayName,
+			Role:        u.Role,
+			IsActive:    u.IsActive,
+			ID:          u.ID,
+		}); err != nil {
+			return fmt.Errorf("update user: %w", err)
+		}
+		return nil
+	}
+	if err := r.pq.UpdateUser(ctx, sqlc_pg.UpdateUserParams{
 		DisplayName: u.DisplayName,
 		Role:        u.Role,
 		IsActive:    u.IsActive,
 		ID:          u.ID,
-	})
-	if err != nil {
+	}); err != nil {
 		return fmt.Errorf("update user: %w", err)
 	}
 	return nil
 }
 
 func (r *UserRepository) Delete(ctx context.Context, id string) error {
-	n, err := r.q.DeleteUser(ctx, id)
+	var (
+		n   int64
+		err error
+	)
+	if r.useSQLite() {
+		n, err = r.sq.DeleteUser(ctx, id)
+	} else {
+		n, err = r.pq.DeleteUser(ctx, id)
+	}
 	if err != nil {
 		return fmt.Errorf("delete user: %w", err)
 	}
@@ -383,8 +512,7 @@ func nullTimeToPtr(nt sql.NullTime) *time.Time {
 
 // nullStringFromOptional bridges Go's "" sentinel for absent string
 // fields to sqlc's sql.NullString. Empty string → invalid (NULL),
-// any other value → valid. Keeps the call sites readable and
-// matches how the rest of the repo already coerces optional strings.
+// any other value → valid.
 func nullStringFromOptional(s string) sql.NullString {
 	if s == "" {
 		return sql.NullString{}
@@ -392,7 +520,7 @@ func nullStringFromOptional(s string) sql.NullString {
 	return sql.NullString{String: s, Valid: true}
 }
 
-func userFromGetRow(r sqlc.GetUserByIDRow) User {
+func userFromSqliteGetRow(r sqlc.GetUserByIDRow) User {
 	return User{
 		ID:                     r.ID,
 		Username:               r.Username,
@@ -413,7 +541,7 @@ func userFromGetRow(r sqlc.GetUserByIDRow) User {
 	}
 }
 
-func userFromGetByUsernameRow(r sqlc.GetUserByUsernameRow) User {
+func userFromSqliteGetByUsernameRow(r sqlc.GetUserByUsernameRow) User {
 	return User{
 		ID:                     r.ID,
 		Username:               r.Username,
@@ -434,7 +562,7 @@ func userFromGetByUsernameRow(r sqlc.GetUserByUsernameRow) User {
 	}
 }
 
-func userFromListRow(r sqlc.ListUsersRow) User {
+func userFromSqliteListRow(r sqlc.ListUsersRow) User {
 	return User{
 		ID:                     r.ID,
 		Username:               r.Username,
@@ -453,14 +581,63 @@ func userFromListRow(r sqlc.ListUsersRow) User {
 	}
 }
 
-func usersFromListRows(rows []sqlc.ListUsersRow) []*User {
-	if len(rows) == 0 {
-		return nil
+func userFromPgGetRow(r sqlc_pg.GetUserByIDRow) User {
+	return User{
+		ID:                     r.ID,
+		Username:               r.Username,
+		DisplayName:            r.DisplayName,
+		PasswordHash:           r.PasswordHash,
+		AvatarPath:             r.AvatarPath,
+		Role:                   r.Role,
+		IsActive:               r.IsActive,
+		MaxSessions:            int(r.MaxSessions),
+		CreatedAt:              r.CreatedAt,
+		LastLoginAt:            nullTimeToPtr(r.LastLoginAt),
+		ParentUserID:           r.ParentUserID.String,
+		PINHash:                r.PinHash.String,
+		MaxContentRating:       r.MaxContentRating.String,
+		PasswordChangeRequired: r.PasswordChangeRequired,
+		AccessExpiresAt:        nullTimeToPtr(r.AccessExpiresAt),
+		AvatarColor:            r.AvatarColor.String,
 	}
-	out := make([]*User, len(rows))
-	for i, row := range rows {
-		u := userFromListRow(row)
-		out[i] = &u
+}
+
+func userFromPgGetByUsernameRow(r sqlc_pg.GetUserByUsernameRow) User {
+	return User{
+		ID:                     r.ID,
+		Username:               r.Username,
+		DisplayName:            r.DisplayName,
+		PasswordHash:           r.PasswordHash,
+		AvatarPath:             r.AvatarPath,
+		Role:                   r.Role,
+		IsActive:               r.IsActive,
+		MaxSessions:            int(r.MaxSessions),
+		CreatedAt:              r.CreatedAt,
+		LastLoginAt:            nullTimeToPtr(r.LastLoginAt),
+		ParentUserID:           r.ParentUserID.String,
+		PINHash:                r.PinHash.String,
+		MaxContentRating:       r.MaxContentRating.String,
+		PasswordChangeRequired: r.PasswordChangeRequired,
+		AccessExpiresAt:        nullTimeToPtr(r.AccessExpiresAt),
+		AvatarColor:            r.AvatarColor.String,
 	}
-	return out
+}
+
+func userFromPgListRow(r sqlc_pg.ListUsersRow) User {
+	return User{
+		ID:                     r.ID,
+		Username:               r.Username,
+		DisplayName:            r.DisplayName,
+		AvatarPath:             r.AvatarPath,
+		Role:                   r.Role,
+		IsActive:               r.IsActive,
+		CreatedAt:              r.CreatedAt,
+		LastLoginAt:            nullTimeToPtr(r.LastLoginAt),
+		ParentUserID:           r.ParentUserID.String,
+		PINHash:                r.PinHash.String,
+		MaxContentRating:       r.MaxContentRating.String,
+		PasswordChangeRequired: r.PasswordChangeRequired,
+		AccessExpiresAt:        nullTimeToPtr(r.AccessExpiresAt),
+		AvatarColor:            r.AvatarColor.String,
+	}
 }

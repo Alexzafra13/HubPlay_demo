@@ -20,7 +20,7 @@ import (
 func newKeystore(t *testing.T, seed string) (*auth.KeyStore, *db.SigningKeyRepository, *clock.Mock) {
 	t.Helper()
 	database := testutil.NewTestDB(t)
-	repo := db.NewSigningKeyRepository(database)
+	repo := db.NewSigningKeyRepository("sqlite", database)
 	clk := &clock.Mock{CurrentTime: time.Now().UTC()}
 	ctx := context.Background()
 
@@ -77,7 +77,7 @@ func TestBootstrap_Idempotent(t *testing.T) {
 	// is a no-op that returns the existing key. main.go runs this on every
 	// boot — any regression here would silently create keys at every start.
 	database := testutil.NewTestDB(t)
-	repo := db.NewSigningKeyRepository(database)
+	repo := db.NewSigningKeyRepository("sqlite", database)
 	clk := &clock.Mock{CurrentTime: time.Now().UTC()}
 	ctx := context.Background()
 

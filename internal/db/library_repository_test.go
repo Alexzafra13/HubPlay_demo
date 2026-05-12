@@ -159,7 +159,7 @@ func TestLibraryRepository_Delete_NotFound(t *testing.T) {
 func TestLibraryRepository_Access(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	libRepo := db.NewLibraryRepository(database)
-	userRepo := db.NewUserRepository(database)
+	userRepo := db.NewUserRepository("sqlite", database)
 
 	if err := userRepo.Create(context.Background(), &db.User{
 		ID: "user-1", Username: "alice", DisplayName: "Alice",
@@ -226,7 +226,7 @@ func TestLibraryRepository_Access(t *testing.T) {
 func TestLibraryRepository_Access_ProfileInherits(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	libRepo := db.NewLibraryRepository(database)
-	userRepo := db.NewUserRepository(database)
+	userRepo := db.NewUserRepository("sqlite", database)
 	ctx := context.Background()
 
 	now := time.Now()
@@ -297,7 +297,7 @@ func TestLibraryRepository_Access_ProfileInherits(t *testing.T) {
 func TestLibraryRepository_ListAccessByUser(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	libRepo := db.NewLibraryRepository(database)
-	userRepo := db.NewUserRepository(database)
+	userRepo := db.NewUserRepository("sqlite", database)
 	ctx := context.Background()
 
 	now := time.Now()
@@ -357,7 +357,7 @@ func TestLibraryRepository_ListAccessByUser(t *testing.T) {
 func TestLibraryRepository_ReplaceAccess(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	libRepo := db.NewLibraryRepository(database)
-	userRepo := db.NewUserRepository(database)
+	userRepo := db.NewUserRepository("sqlite", database)
 	ctx := context.Background()
 
 	now := time.Now()
@@ -421,7 +421,7 @@ func TestLibraryRepository_ReplaceAccess(t *testing.T) {
 func TestLibraryRepository_Create_GrantsPrimaryAdmin(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	libRepo := db.NewLibraryRepository(database)
-	userRepo := db.NewUserRepository(database)
+	userRepo := db.NewUserRepository("sqlite", database)
 	ctx := context.Background()
 
 	now := time.Now()
@@ -489,7 +489,7 @@ func TestLibraryRepository_Create_NoAdmin_NoOp(t *testing.T) {
 func TestLibraryRepository_Create_OnlyPrimaryAdmin(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	libRepo := db.NewLibraryRepository(database)
-	userRepo := db.NewUserRepository(database)
+	userRepo := db.NewUserRepository("sqlite", database)
 	ctx := context.Background()
 
 	older := time.Now()
@@ -534,7 +534,7 @@ func TestLibraryRepository_Create_OnlyPrimaryAdmin(t *testing.T) {
 func TestMigration041_BackfillsPrimaryAdmin(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	libRepo := db.NewLibraryRepository(database)
-	userRepo := db.NewUserRepository(database)
+	userRepo := db.NewUserRepository("sqlite", database)
 	ctx := context.Background()
 
 	now := time.Now()
