@@ -20,40 +20,33 @@ sql:
             go_type: "time.Time"
 
   # ─── PostgreSQL (optional production backend) ───────────────────
-  # The block below is staged but COMMENTED OUT until session B of the
-  # dual-dialect work — see docs/architecture/postgres-migration.md
-  # for the full migration plan. Uncommenting before queries-postgres/
-  # has SQL files in it makes `sqlc generate` error on the empty dir.
-  #
-  # When session B starts: translate at least one query into
-  # queries-postgres/, then uncomment this block.
   #
   # Parallel generation tree. Each query file in queries-postgres/
   # mirrors its SQLite sibling with dialect-specific adjustments
-  # (ON CONFLICT, BOOLEAN, TIMESTAMPTZ, etc.). The schema lives in
+  # (ON CONFLICT, BOOLEAN, TIMESTAMPTZ, etc.). The schema lives en
   # migrations/postgres/ — same table names + column names so the
-  # generated Queries struct has the same method signatures and the
+  # generated Queries struct has the same method signatures y los
   # repos can swap implementations without changing the call sites.
   #
   # Both packages implement the SAME emit_interface contract; the
   # repo layer holds whichever was constructed at boot based on
-  # cfg.Database.Driver.
-  #
-  # - engine: "postgresql"
-  #   queries: "internal/db/queries-postgres/"
-  #   schema: "migrations/postgres/"
-  #   gen:
-  #     go:
-  #       package: "sqlc_pg"
-  #       out: "internal/db/sqlc_pg"
-  #       emit_interface: true
-  #       emit_json_tags: true
-  #       emit_empty_slices: true
-  #       sql_package: "database/sql"
-  #       overrides:
-  #         - column: "*.id"
-  #           go_type: "string"
-  #         - column: "*.created_at"
-  #           go_type: "time.Time"
-  #         - column: "*.updated_at"
-  #           go_type: "time.Time"
+  # cfg.Database.Driver. See docs/architecture/postgres-migration.md
+  # for the full plan + translation rules.
+  - engine: "postgresql"
+    queries: "internal/db/queries-postgres/"
+    schema: "migrations/postgres/"
+    gen:
+      go:
+        package: "sqlc_pg"
+        out: "internal/db/sqlc_pg"
+        emit_interface: true
+        emit_json_tags: true
+        emit_empty_slices: true
+        sql_package: "database/sql"
+        overrides:
+          - column: "*.id"
+            go_type: "string"
+          - column: "*.created_at"
+            go_type: "time.Time"
+          - column: "*.updated_at"
+            go_type: "time.Time"

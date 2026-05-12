@@ -1,5 +1,61 @@
 # Estado del proyecto
 
+> 🎬 **Sesión 2026-05-12 (rama `claude/gallant-galileo-3c374b`, 11 commits acumulados, dual-dialect Postgres + plug-and-play migration)** — sesión larga de varios bloques estratégicos. Pendiente de merge: rama con 11 commits sobre main.
+>
+> **Bloque 1 — auto-tune transcoding ([72f7409](https://github.com/Alexzafra13/HubPlay_demo/commit/72f7409))**: arreglo del bug del `transcode_preset` dead-config (estaba hardcoded a "veryfast"). Nuevo `AutoTuneStreaming(hwAccel, cores)` que rellena MaxTranscodeSessions / MaxTranscodeSessionsPerUser / TranscodePreset según el hardware al boot. Tabla auto-tune: NVENC=3, QSV/VAAPI=6, VideoToolbox=4, software=cores/2; preset escala con cores (≥12 fast, 6-11 veryfast, 4-5 superfast, <4 ultrafast). 3 settings nuevos en el panel admin (`streaming.*`) con validators int 1-64 / int 1-32 / enum libx264. `force_direct_play` ahora tiene banner rojo + confirm() obligatorio.
+>
+> **Bloque 2 — host metrics reales ([bea8286](https://github.com/Alexzafra13/HubPlay_demo/commit/bea8286))**: nuevo paquete `internal/sysmetrics/` con `Sampler` que usa `github.com/shirou/gopsutil/v4` (pure Go, no CGO). Muestreo cada 5s en background con `atomic.Value` para read sin bloqueos. Probes one-time al Start: CPU model + cores físicos/lógicos, RAM total, GPU model via `nvidia-smi --query-gpu` (cuando hay NVIDIA). Wire shape `host` añadido a `/admin/system/stats`. Frontend: nueva sección "Host" en SystemStatus con cards CPU% (sparkline + color por threshold) + RAM bar + GPU info. Identity strip arriba muestra "HubPlay X · uptime · Ryzen 5 5600 · 6c/12t · NVENC".
+>
+> **Bloque 3 — burn-in subs PGS/DVDSUB/ASS ([77e0c2c](https://github.com/Alexzafra13/HubPlay_demo/commit/77e0c2c))**: el gap funcional real de subs de Blu-ray + anime. Nuevo `internal/stream/subburn.go` con `BurnSubtitleSpec` + helpers `IsImageSubtitleCodec` / `IsStyledTextSubtitleCodec` / `IsBurnableSubtitleCodec`. `BuildFFmpegArgs` rutea bitmap codecs a `-filter_complex` con `[0:s:N]overlay`, ASS/SSA a `-vf subtitles=filename='...':si=N`. Path escape correcto para colons/backslashes/brackets. Session key incluye `burnSubIndex` (el índice se hornea en los segmentos, switch requiere fresh session). Frontend: `BURN_SUB_TRACK_ID_BASE = 20000` (paralelo a FEDERATED_TRACK_ID_BASE = 10000), entries con `burnIn: true` flag, sub-label "Integrado · reinicia el stream". `usePlayback` gana `switchBurnSubtitle(idx, resumeAt)` que mantiene audio + remonta master URL con `?subtitle=N`.
+>
+> **Bloque 4 — fix OpenAPI drift gate ([5b2d90a](https://github.com/Alexzafra13/HubPlay_demo/commit/5b2d90a))**: bonus. Test `TestOpenAPISpec_RouterCoverage` fallaba bajo `-race` porque `/auth/device/events` (SSE pairing añadido en a549332) no estaba en el allowlist. Añadida entrada al `outOfScopeExact` con justificación SSE.
+>
+> **Bloque 5 — audit plan futuro ([39732b8](https://github.com/Alexzafra13/HubPlay_demo/commit/39732b8))**: doc `docs/memory/audit-plan.md` (430 líneas) con 5 pases secuenciales accionables — funcional / código / performance / seguridad / producción. Para ejecutar en otra sesión con media real.
+>
+> **Bloque 6 — dual-dialect Postgres foundation ([50c9089](https://github.com/Alexzafra13/HubPlay_demo/commit/50c9089) + [9335f46](https://github.com/Alexzafra13/HubPlay_demo/commit/9335f46) + [db886c1](https://github.com/Alexzafra13/HubPlay_demo/commit/db886c1))**: 3 commits, Sesiones A/B/C del plan. Foundation: `sqlc.yaml` con bloque postgres staged comentado, `migrations/postgres/001_initial_schema.sql` traducido, `pgx v5.9.2` añadido. Sesión B: las 18 migraciones 002-019 traducidas (FTS5 → tsvector + GIN + función pl/pgsql + 2 triggers, hex(randomblob) → encode(gen_random_bytes,'hex') + pgcrypto, partial indexes con TRUE en lugar de 1, INTEGER mantenido para tls_insecure por paridad sqlc cross-dialect). Sesión C: las 22 migraciones 020-041 (BLOB → BYTEA para Ed25519, INTEGER PRIMARY KEY AUTOINCREMENT → BIGSERIAL, bytes_out → BIGINT por overflow, json_each → LATERAL jsonb_array_elements_text + IS JSON ARRAY de Postgres 16+, INSERT OR IGNORE → ON CONFLICT DO NOTHING). **41 migraciones aplicadas en Postgres 16 real via goose en docker, 46 tablas creadas, todos los índices críticos verificados.** SQLite intacto en todo momento.
+>
+> **Bloque 7 — voz interna en docs ([56fcd68](https://github.com/Alexzafra13/HubPlay_demo/commit/56fcd68))**: a petición del usuario, `postgres-migration.md` reescrito sin tono de onboarding-de-contribuidores. Preferencia guardada en memoria (`feedback_internal_voice_docs.md`).
+>
+> **Decisiones senior tomadas en esta sesión**:
+>
+> 1. **Plug-and-play SSE para migración DB (no polling)**: actualizado el plan Sesión G con sub-fases G.1–G.4. Migración 100% desde panel admin usando EventSource auto-reconnect nativo del browser (NO es polling — es comportamiento del protocolo, exactamente lo mismo que `useUserDataSync`). State machine + marker file en `/config/migrations/{id}.json` sobreviven al restart. Auto-detect de `/var/run/docker.sock` decide modo `in_process` vs `advisory`. Read-only window 503 + Retry-After durante pgloader copy. Rollback automático si falla.
+>
+> 2. **Disciplina de mantenibilidad dual-dialect**: cuatro capas documentadas en `postgres-migration.md` — convención de gemelas obligatorias, schema-fingerprint test (Sesión J), query-parity test (post-Sesión D), CI matrix con `[sqlite, postgres]`. Imposible mergear PRs que rompan un backend sin verlo.
+>
+> 3. **App TV (Android) no afecta arquitectura dual-dialect**: es un cliente, le da igual el backend. Lo único requerido: handler de 503 + Retry-After (común a apps con conectividad flaky), device-code flow (ya existe vía `/auth/device` desde la sesión 2026-05-11). Postgres ES beneficioso para hogares con muchas TVs activas (writes de progreso paralelizan).
+>
+> 4. **Squash de migraciones diferido a v1.0 cutover**: NO hacer mientras estamos en pleno trabajo. Plan documentado: archivar `migrations/sqlite/_archive/`, baseline consolidado en `001_baseline.sql`, script `migrate-to-baseline` que detecta DBs existentes y reescribe `goose_db_version`. Riesgo en el test server actual: bajo con procedimiento documentado.
+>
+> 5. **sqlc.yaml bloque postgres queda comentado** hasta Sesión D (primer query traducido). Sin queries la generación falla en dir vacío — comentado mantiene el commit limpio.
+>
+> **Métricas al cierre**:
+> - 11 commits sobre `claude/gallant-galileo-3c374b`, pendientes de merge.
+> - 41 migraciones Postgres validadas contra `postgres:16-alpine` real (`successfully migrated database to version: 41`).
+> - `go test -race ./...` todos verdes (22 paquetes, incluyendo handlers, db, stream, sysmetrics).
+> - `golangci-lint v2.5.0` 0 issues.
+> - `pnpm test --run` 532/532, `tsc --noEmit` clean.
+> - Smoke test del binario boot en docker: identity strip muestra "AMD Ryzen 7 7730U · 16c · ..." con métricas live, auto-tune `max_sessions=8 max_sessions_per_user=4 libx264_preset=fast`.
+> - Binary build CGO_ENABLED=0 19.5MB.
+>
+> **Backlog activo al cierre**:
+>
+> - **Sesión D (siguiente)**: traducir 26 query files a `internal/db/queries-postgres/`. Mecánico salvo donde haya `INSERT OR IGNORE` / `json_each` / fecha-math. Activa el bloque sqlc postgres + permite regen del paquete `sqlc_pg`.
+> - **Sesión E**: refactor de 14 repos a interface dual-dialect. La grande (~14h).
+> - **Sesión F**: wiring `pgx/v5/stdlib` + `pgxpool` en main.go. Una vez aquí el binario puede arrancar contra Postgres.
+> - **Sesión G** (4 sub-fases): plug-and-play SSE migration. Ver `docs/architecture/postgres-migration.md` para el desglose.
+> - **Sesión H–J**: worker pool, extensiones, CI dual. Pueden esperar a v1.1.
+> - **Audit del proyecto**: planificada en `docs/memory/audit-plan.md`. Hay que ejecutarla con media real, no en esta rama.
+>
+> **Reglas duras que esta sesión añade / refuerza**:
+>
+> - **Migraciones SIEMPRE en pareja**: añadir `migrations/sqlite/N_x.sql` exige `migrations/postgres/N_x.sql` en el mismo commit. Sin excepciones.
+> - **No assumed types entre dialectos**: cualquier columna `*_ticks` / `size` / `bytes_*` es `BIGINT` en Postgres (regla de escaneo documentada).
+> - **SQLite es la fuente de verdad de schema** hasta que termine Sesión F. El generador no es bidireccional.
+> - **No polling para feedback de operaciones lentas**: usar SSE con reconnect nativo. Es el patrón del proyecto.
+> - **El test server del usuario tiene goose_db_version=41**: cualquier squash futuro debe respetar eso, no asumir DB virgen.
+>
+> ---
+>
 > 🎬 **Sesión 2026-05-11 (rama `claude/fix-admin-permissions-fpFHG`, admin principal + pairing UI con QR/SSE)** — el usuario reportó dos cosas: la matriz de bibliotecas mostraba vacío para el admin principal (Phase B cerró el modelo pero olvidó al admin) y el flujo de vincular dispositivo era poco profesional (todos los accesos mezclados en Settings, sin QR para TVs). Tres commits pusheados a `origin/claude/fix-admin-permissions-fpFHG`, pendientes de merge.
 >
 > **Commit 1 — `a965743` `feat(access): primary admin sees every library by default`**.
