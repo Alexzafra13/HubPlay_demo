@@ -44,7 +44,7 @@ func newTestScanner(t *testing.T) (*Scanner, *db.ItemRepository, *db.MediaStream
 	database := testutil.NewTestDB(t)
 	libRepo := db.NewLibraryRepository("sqlite", database)
 	itemRepo := db.NewItemRepository(database)
-	streamRepo := db.NewMediaStreamRepository(database)
+	streamRepo := db.NewMediaStreamRepository("sqlite", database)
 	bus := event.NewBus(slog.Default())
 
 	// Seed library
@@ -582,7 +582,7 @@ func TestFetchAndStoreImages_PersistsLocalPathNotURL(t *testing.T) {
 
 	bus := event.NewBus(slog.Default())
 	prober := &mockProber{result: &probe.Result{}}
-	s := New(itemRepo, db.NewMediaStreamRepository(database),
+	s := New(itemRepo, db.NewMediaStreamRepository("sqlite", database),
 		db.NewMetadataRepository(database), db.NewExternalIDRepository(database),
 		imgRepo, db.NewChapterRepository(database), db.NewPeopleRepository(database),
 		db.NewItemValueRepository(database),
@@ -732,7 +732,7 @@ func TestEnrichEpisode_PersistsOverviewAndStill(t *testing.T) {
 	pm := pathmap.New(imageDir)
 	bus := event.NewBus(slog.Default())
 	prober := &mockProber{result: &probe.Result{}}
-	s := New(itemRepo, db.NewMediaStreamRepository(database), metaRepo, extRepo,
+	s := New(itemRepo, db.NewMediaStreamRepository("sqlite", database), metaRepo, extRepo,
 		imgRepo, db.NewChapterRepository(database), db.NewPeopleRepository(database),
 		db.NewItemValueRepository(database),
 		db.NewStudioRepository(database),
@@ -837,7 +837,7 @@ func TestEnrichEpisode_NoTMDbIDOnSeries(t *testing.T) {
 
 	bus := event.NewBus(slog.Default())
 	prober := &mockProber{result: &probe.Result{}}
-	s := New(itemRepo, db.NewMediaStreamRepository(database), metaRepo, extRepo,
+	s := New(itemRepo, db.NewMediaStreamRepository("sqlite", database), metaRepo, extRepo,
 		imgRepo, db.NewChapterRepository(database), db.NewPeopleRepository(database),
 		db.NewItemValueRepository(database),
 		db.NewStudioRepository(database),
@@ -929,7 +929,7 @@ func TestEnrichSeason_PersistsMetadataAndPoster(t *testing.T) {
 	pm := pathmap.New(imageDir)
 	bus := event.NewBus(slog.Default())
 	prober := &mockProber{result: &probe.Result{}}
-	s := New(itemRepo, db.NewMediaStreamRepository(database), metaRepo, extRepo,
+	s := New(itemRepo, db.NewMediaStreamRepository("sqlite", database), metaRepo, extRepo,
 		imgRepo, db.NewChapterRepository(database), db.NewPeopleRepository(database),
 		db.NewItemValueRepository(database),
 		db.NewStudioRepository(database),
@@ -1034,7 +1034,7 @@ func TestFetchAndStoreImages_SkippedWhenImageDirEmpty(t *testing.T) {
 	stub := &stubProvider{images: []provider.ImageResult{
 		{Type: "primary", URL: "http://example.test/poster.png", Score: 1},
 	}}
-	s := New(itemRepo, db.NewMediaStreamRepository(database),
+	s := New(itemRepo, db.NewMediaStreamRepository("sqlite", database),
 		db.NewMetadataRepository(database), db.NewExternalIDRepository(database),
 		imgRepo, db.NewChapterRepository(database), db.NewPeopleRepository(database),
 		db.NewItemValueRepository(database),
