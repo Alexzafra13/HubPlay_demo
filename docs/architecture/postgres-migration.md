@@ -1,239 +1,194 @@
-# PostgreSQL backend — migration & translation guide
+# PostgreSQL backend — notas de la migración dual-dialect
 
-This document is a recipe for porting the SQLite source-of-truth schema
-+ queries to a parallel PostgreSQL tree. Read top to bottom before
-touching anything — most decisions are already made; you're following
-a path, not blazing one.
-
-**Audience**: contributors picking up the dual-dialect work across
-multiple sessions. Each session should leave the tree in a state where
-`go build` + SQLite tests still pass.
+Memoria interna del trabajo dual SQLite/PostgreSQL. Cuando retomemos
+el tema en una sesión futura, leer esto primero para no repetir
+decisiones.
 
 ---
 
-## Architecture in one paragraph
+## Decisión arquitectural en una frase
 
-HubPlay keeps SQLite as the default backend (zero-ops self-hosted
-sweet spot). PostgreSQL is the opt-in production-scale alternative.
-Both backends are accessed through identical Go repository interfaces;
-the implementation under the hood is selected at boot via
-`cfg.Database.Driver`. sqlc generates two parallel packages
-(`internal/db/sqlc/` for SQLite, `internal/db/sqlc_pg/` for Postgres);
-the repo layer holds whichever was constructed. The driver bridge is
-`pgx/v5/stdlib` so we can keep using `*sql.DB` across the codebase
-without rewriting every repo for pgx's native API.
+Mantenemos SQLite como backend por defecto (zero-ops self-hosted
+sweet spot). PostgreSQL es el opt-in para escalar usuarios
+concurrentes. Ambos backends acceden por interfaces Go idénticas; la
+implementación se elige al boot vía `cfg.Database.Driver`. sqlc
+genera dos paquetes paralelos (`internal/db/sqlc/` para SQLite,
+`internal/db/sqlc_pg/` para Postgres). El puente de drivers es
+`pgx/v5/stdlib` para mantener `*sql.DB` en toda la base sin
+reescribir cada repo a la API nativa de pgx.
 
 ---
 
-## Directory layout
+## Layout en disco
 
 ```
 migrations/
-  sqlite/           ← source of truth (41 files)
-  postgres/         ← parallel translations (this guide is how)
+  sqlite/           ← fuente de verdad (41 ficheros)
+  postgres/         ← traducciones paralelas (en construcción)
 
 internal/db/
-  queries/          ← SQLite query files, sqlc input
-  queries-postgres/ ← Postgres query files, sqlc input
-  sqlc/             ← generated SQLite bindings
-  sqlc_pg/          ← generated Postgres bindings
-  *_repository.go   ← repo layer — interface unchanged, ctor branches
+  queries/          ← queries SQLite, input sqlc
+  queries-postgres/ ← queries Postgres, input sqlc
+  sqlc/             ← bindings SQLite generados
+  sqlc_pg/          ← bindings Postgres generados (cuando se uncomment sqlc.yaml)
+  *_repository.go   ← repos — interface igual, constructor con branch
 ```
 
-`sqlc.yaml` has two `sql` entries (one per engine). Run `make sqlc`
-and both packages regenerate.
+`sqlc.yaml` tiene dos bloques `sql`, uno por engine. El bloque de
+postgres está actualmente comentado hasta que `queries-postgres/`
+tenga ficheros reales (si no, `sqlc generate` falla en dir vacío).
 
 ---
 
-## Translation rules — schema (.sql in migrations/)
+## Reglas de traducción — schema (.sql en migrations/)
 
-The vast majority of SQLite syntax is identical in Postgres. The
-deltas:
+### Tipos
 
-### Types
-
-| SQLite | PostgreSQL | When | Note |
+| SQLite | PostgreSQL | Cuándo | Nota |
 |---|---|---|---|
-| `DATETIME` | `TIMESTAMPTZ` | always | TZ-aware is the safe default. Code reads into `time.Time` regardless. |
-| `BOOLEAN DEFAULT 0` | `BOOLEAN DEFAULT FALSE` | always | SQLite stores bool as 0/1; Postgres requires the keyword. |
-| `BOOLEAN DEFAULT 1` | `BOOLEAN DEFAULT TRUE` | always | Same |
-| `REAL` | `DOUBLE PRECISION` | always | SQLite's REAL is 8-byte float; equivalent. |
-| `INTEGER` (small) | `INTEGER` | always | 32-bit int. |
-| `INTEGER` (tick / size / large) | `BIGINT` | when storing `*_ticks` or `size` fields | SQLite INTEGER is dynamically sized, Postgres is fixed. Anything that could exceed `2^31` (movie tick counts, file sizes) MUST be BIGINT. |
-| `TEXT` | `TEXT` | always | Identical. |
-| `BLOB` | `BYTEA` | if any | None in HubPlay so far. |
+| `DATETIME` | `TIMESTAMPTZ` | siempre | TZ-aware es el default seguro. El código lee `time.Time` en ambos. |
+| `BOOLEAN DEFAULT 0` | `BOOLEAN DEFAULT FALSE` | siempre | SQLite guarda bool como 0/1; Postgres exige keyword. |
+| `BOOLEAN DEFAULT 1` | `BOOLEAN DEFAULT TRUE` | siempre | Idem. |
+| `REAL` | `DOUBLE PRECISION` | siempre | El REAL de SQLite es float de 8 bytes; equivalente. |
+| `INTEGER` (pequeño) | `INTEGER` | siempre | int de 32 bits. |
+| `INTEGER` (tick / size / grande) | `BIGINT` | cuando es campo `*_ticks` o `size` | SQLite INTEGER es dinámico, Postgres fijo. Cualquier valor que pueda superar `2^31` (ticks de pelis, tamaños de archivo) DEBE ser BIGINT. |
+| `TEXT` | `TEXT` | siempre | Idéntico. |
+| `BLOB` | `BYTEA` | si aparece | Ninguno en HubPlay hoy. |
 
-**Quick scan rule**: in every `CREATE TABLE`, find columns named
-`*_ticks`, `size`, `duration_ticks`, `position_ticks`, `bytes`. These
-must be `BIGINT` in Postgres.
+**Regla rápida de escaneo**: en cada `CREATE TABLE`, busca columnas
+con nombre `*_ticks`, `size`, `duration_ticks`, `position_ticks`,
+`bytes`. Esas tienen que ser `BIGINT` en Postgres.
 
-### Constraints & defaults
+### Constraints + defaults
 
 | SQLite | PostgreSQL |
 |---|---|
-| `PRIMARY KEY` | `PRIMARY KEY` (unchanged) |
-| `PRIMARY KEY (a, b)` | `PRIMARY KEY (a, b)` (unchanged) |
-| `REFERENCES … ON DELETE CASCADE` | (unchanged) |
-| `REFERENCES … ON DELETE SET NULL` | (unchanged) |
-| `UNIQUE(a, b)` | (unchanged) |
-| `CHECK (col IN ('a','b'))` | (unchanged) |
-| `DEFAULT CURRENT_TIMESTAMP` | (unchanged) |
-| `STRICT` table modifier | omit — Postgres is strict by default |
-| `WITHOUT ROWID` | omit |
+| `PRIMARY KEY` | igual |
+| `PRIMARY KEY (a, b)` | igual |
+| `REFERENCES … ON DELETE CASCADE` | igual |
+| `REFERENCES … ON DELETE SET NULL` | igual |
+| `UNIQUE(a, b)` | igual |
+| `CHECK (col IN ('a','b'))` | igual |
+| `DEFAULT CURRENT_TIMESTAMP` | igual |
+| `STRICT` (modificador de tabla) | quitar — Postgres es strict por defecto |
+| `WITHOUT ROWID` | quitar |
 
-### Indexes
+### Índices
 
-`CREATE INDEX …` syntax is identical. **Opportunity** (do NOT do
-blindly — wait for the perf pass):
-- Partial indexes: `WHERE deleted_at IS NULL` etc.
-- BRIN indexes for time-series columns (epg_programs.start_time,
-  federation_audit_log.created_at) — much smaller than B-tree.
-- Covering indexes with INCLUDE clauses.
+`CREATE INDEX …` igual. **Oportunidad** (NO hacer a ciegas — esperar
+al perf pass):
+- Índices parciales: `WHERE deleted_at IS NULL` etc.
+- Índices BRIN para columnas time-series (epg_programs.start_time,
+  federation_audit_log.created_at) — mucho más pequeños que B-tree.
+- Índices covering con cláusula INCLUDE.
 
-These are NOT in the 1:1 translation. Tackle them in a separate
-performance PR after the dual-dialect compiles.
+Estas optimizaciones NO van en la traducción 1:1. Van en una PR de
+performance separada cuando el dual-dialect compile.
 
 ### FTS (full-text search)
 
-`migrations/sqlite/002_fts_search.sql` uses SQLite's `fts5` extension.
-This is the **biggest divergence**. Postgres equivalent is
-`tsvector` + GIN index. Both shapes do "search text, get items
-ranked by relevance", but the API is dialect-specific.
+`migrations/sqlite/002_fts_search.sql` usa la extensión `fts5` de
+SQLite. **La divergencia más grande**. El equivalente Postgres es
+`tsvector` + índice GIN. Misma idea (buscar texto, devolver items
+rankeados por relevancia) pero API distinta.
 
-For initial translation:
-1. The Postgres version of `002_fts_search.sql` should NOT use `fts5`
-   syntax (it doesn't exist). Replace with:
+Para la traducción inicial:
+1. La versión Postgres de `002_fts_search.sql` NO debe usar `fts5`
+   (no existe). Reemplazar por:
    ```sql
    ALTER TABLE items ADD COLUMN search_vector tsvector;
    CREATE INDEX idx_items_fts ON items USING GIN(search_vector);
-   -- Plus a trigger to populate search_vector from title +
-   -- original_title + (metadata.overview joined) on insert/update.
+   -- Más un trigger que populate search_vector desde title +
+   -- original_title + (metadata.overview con join) en insert/update.
    ```
-2. The SearchItems query needs a Postgres-specific variant using
+2. La query SearchItems necesita variante Postgres con:
    `WHERE search_vector @@ plainto_tsquery('english', $1)
     ORDER BY ts_rank(search_vector, plainto_tsquery('english', $1)) DESC`.
-3. Multilingual: consider `tsvector('simple', ...)` for accent
-   tolerance, or load language-specific dictionaries.
+3. Multilingüe: considerar `tsvector('simple', ...)` para tolerancia
+   a acentos, o cargar diccionarios por idioma.
 
-This is one of the harder migrations. Allocate ~half a day for it.
+Es la migración más dura. Reservar medio día.
 
-### UPSERT patterns
-
-The SQLite codebase uses several upsert shapes. Translation table:
+### UPSERT
 
 | SQLite | Postgres |
 |---|---|
 | `INSERT OR IGNORE INTO t (a,b) VALUES (?,?)` | `INSERT INTO t (a,b) VALUES ($1,$2) ON CONFLICT DO NOTHING` |
 | `INSERT OR REPLACE INTO t (a,b) VALUES (?,?)` | `INSERT INTO t (a,b) VALUES ($1,$2) ON CONFLICT (a) DO UPDATE SET b = EXCLUDED.b` |
-| `INSERT … ON CONFLICT(col) DO UPDATE SET …` | (unchanged — both support this) |
-| `INSERT … ON CONFLICT(col) DO NOTHING` | (unchanged) |
+| `INSERT … ON CONFLICT(col) DO UPDATE SET …` | igual — ambos lo soportan |
+| `INSERT … ON CONFLICT(col) DO NOTHING` | igual |
 
-**Important**: Postgres requires you to NAME the conflict target
-explicitly (the constraint or column list). SQLite's `INSERT OR
-IGNORE` infers it from any constraint violation. Be deliberate when
-translating: a row that violates two constraints behaves differently.
+**Cuidado**: Postgres exige nombrar EXPLÍCITAMENTE el target del
+conflicto (constraint o lista de columnas). El `INSERT OR IGNORE` de
+SQLite lo infiere de cualquier violación. Si una fila viola dos
+constraints, el comportamiento difiere — ser deliberado al traducir.
 
-### Date / time arithmetic
+### Fechas
 
 | SQLite | Postgres |
 |---|---|
 | `datetime('now', '-7 days')` | `NOW() - INTERVAL '7 days'` |
 | `strftime('%Y-%m-%d', col)` | `TO_CHAR(col, 'YYYY-MM-DD')` |
-| `SUBSTR(col, 1, 10)` | (unchanged) — both support SUBSTR |
-| `EXTRACT(YEAR FROM col)` | (unchanged in both, but more idiomatic in Postgres) |
+| `SUBSTR(col, 1, 10)` | igual — ambos soportan SUBSTR |
+| `EXTRACT(YEAR FROM col)` | igual, pero más idiomático en Postgres |
 
-The home repository's daily-bucket queries (used by
-`internal/api/handlers/system.go:StreamActivity` and trending) lean
-heavily on date arithmetic. Translate carefully — there is room for
-silent semantic drift here.
+Las queries de home/system con buckets diarios (en
+`internal/api/handlers/system.go:StreamActivity` y trending) usan
+fecha-aritmética. Cuidado al traducir — hay margen para drift
+semántico silencioso aquí.
 
 ### Placeholders
 
 | SQLite | Postgres |
 |---|---|
-| `?` (positional, anonymous) | `$1`, `$2`, … (positional, numbered) |
+| `?` (posicional, anónimo) | `$1`, `$2`, … (posicional, numerado) |
 
-sqlc handles this automatically when the `engine` is set in
-`sqlc.yaml`. You don't write `$N` by hand; you write `?` in the
-query file and sqlc rewrites for postgres. **However**, if you reuse
-the same parameter twice in a query, SQLite repeats `?` while
-Postgres references the same `$N`. sqlc handles this with
-`sqlc.arg(name)` syntax if you need clarity.
-
----
-
-## Translation rules — queries (.sql in queries-postgres/)
-
-For each file in `internal/db/queries/`, create a sibling in
-`internal/db/queries-postgres/` with the same name. The Go function
-names emitted by `-- name: FunctionName :return-shape` MUST be
-identical so the generated `Queries` interfaces match.
-
-Most query files will be **near-identical** between the two — just
-substitute UPSERT shapes and date math where needed. Run a diff
-between the two files; if it's more than ~5 lines different,
-double-check the semantics match.
-
-### Things that DO need attention per query
-
-1. **Boolean parameters**: SQLite accepts `0/1` for boolean; Postgres
-   wants `TRUE/FALSE`. sqlc usually handles this via Go types.
-2. **NULL ordering**: `ORDER BY col` puts NULLs LAST in Postgres,
-   FIRST in SQLite. Add `NULLS LAST` explicitly where the order
-   matters semantically.
-3. **`COALESCE` with strings**: SQLite often returns empty string
-   from `COALESCE(col, '')`; Postgres requires consistent typing.
-   No-op for HubPlay's existing queries, just be aware.
-4. **`LIMIT` with subqueries**: Postgres requires subqueries to be
-   parenthesized in some contexts SQLite doesn't.
-5. **The raw-SQL holdouts**: `internal/db/library_repository.go` and
-   a few others have raw SQL bypassing sqlc due to the 1.31.1
-   parser bug (see `docs/memory/architecture-decisions.md`). These
-   need TWO versions: one for SQLite (existing), one for Postgres.
-   Branch in the repo method.
+sqlc lo maneja automáticamente según `engine`. No escribimos `$N` a
+mano; escribimos `?` y sqlc reescribe para postgres. **Sin embargo**:
+si reusas el mismo parámetro dos veces, SQLite repite `?` mientras
+Postgres referencia el mismo `$N`. sqlc lo gestiona vía
+`sqlc.arg(name)` si hace falta claridad.
 
 ---
 
-## Translation rules — repo layer (Go)
+## Reglas de traducción — queries (.sql en queries-postgres/)
 
-Today each repo is a struct with a `*sql.DB` and `*sqlc.Queries`
-embedded. Pattern post-migration:
+Para cada fichero en `internal/db/queries/`, crear un hermano en
+`internal/db/queries-postgres/` con el mismo nombre. Los nombres
+de función emitidos por `-- name: FunctionName :return-shape` DEBEN
+ser idénticos para que las interfaces `Querier` generadas coincidan.
 
-```go
-type SettingsRepository struct {
-    db *sql.DB
-    // Generated query handles. Exactly one is non-nil based on
-    // the driver chosen at construction. The interface emitted
-    // by sqlc (Querier) is the same for both, so callers see
-    // a single method set.
-    sqlite *sqlc.Queries
-    pg     *sqlc_pg.Queries
-}
+La mayoría de queries serán **casi idénticas** entre los dos
+dialectos — solo sustituir UPSERTs y fecha-math donde toque. Hacer
+diff entre los dos ficheros; si difieren más de ~5 líneas,
+verificar dos veces la semántica.
 
-func NewSettingsRepository(driver string, db *sql.DB) *SettingsRepository {
-    r := &SettingsRepository{db: db}
-    switch driver {
-    case "postgres":
-        r.pg = sqlc_pg.New(db)
-    default:
-        r.sqlite = sqlc.New(db)
-    }
-    return r
-}
+### Lo que SÍ requiere atención por query
 
-// Each method picks the right backend transparently.
-func (r *SettingsRepository) Get(ctx context.Context, key string) (string, error) {
-    if r.pg != nil {
-        return r.pg.GetSetting(ctx, key)
-    }
-    return r.sqlite.GetSetting(ctx, key)
-}
-```
+1. **Parámetros boolean**: SQLite acepta `0/1`; Postgres quiere
+   `TRUE/FALSE`. Sqlc suele resolverlo vía tipos Go.
+2. **Orden con NULL**: `ORDER BY col` pone NULLs LAST en Postgres,
+   FIRST en SQLite. Añadir `NULLS LAST` explícito donde importe.
+3. **`COALESCE` con strings**: SQLite suele devolver string vacío
+   desde `COALESCE(col, '')`; Postgres exige tipado consistente.
+   No-op para las queries actuales, pero saberlo.
+4. **`LIMIT` con subqueries**: Postgres exige paréntesis en
+   contextos que SQLite no.
+5. **Holdouts raw SQL**: `internal/db/library_repository.go` y
+   varios otros tienen SQL raw bypaseando sqlc por el bug del
+   parser 1.31.1 (ver `docs/memory/architecture-decisions.md`).
+   Necesitan DOS versiones: SQLite (existente) y Postgres.
+   El branching va en el método del repo.
 
-For repos with many methods (most), this branching becomes
-boilerplate. Two cleaner alternatives:
+---
 
-**Option A — internal interface (recommended)**:
+## Reglas de traducción — capa repo (Go)
+
+Hoy cada repo es un struct con `*sql.DB` y `*sqlc.Queries`
+embebidos. Patrón post-migración:
+
+### Opción A — interface interna (recomendada)
+
 ```go
 type settingsQueries interface {
     GetSetting(ctx context.Context, key string) (string, error)
@@ -243,7 +198,7 @@ type settingsQueries interface {
 
 type SettingsRepository struct {
     db *sql.DB
-    q  settingsQueries  // *sqlc.Queries or *sqlc_pg.Queries
+    q  settingsQueries  // *sqlc.Queries o *sqlc_pg.Queries
 }
 
 func NewSettingsRepository(driver string, db *sql.DB) *SettingsRepository {
@@ -257,191 +212,180 @@ func NewSettingsRepository(driver string, db *sql.DB) *SettingsRepository {
 }
 ```
 
-The interface is hand-rolled (kept in the repo file). Both generated
-`Queries` types satisfy it because they expose the same method
-signatures (we made sure of that by keeping query names + return
-shapes identical). This is the cleanest and what we'll go with.
+La interface se escribe a mano (vive en el fichero del repo). Ambos
+tipos `Queries` generados la satisfacen porque las signaturas son
+idénticas (lo aseguramos manteniendo los nombres de query + return
+shape iguales entre dialectos). Esta es la opción limpia.
 
-**Option B — generics with a type parameter**: more elegant in theory
-but requires Go's type inference to handle methods on `*Queries`
-pointers; gets ugly with method sets. Avoid.
+### Opción B — generics
+
+Más elegante en teoría pero complicado con method sets sobre
+pointer types. No.
 
 ---
 
-## Step-by-step plan for the dual-dialect work (multi-session)
+## Plan multi-sesión
 
-### Session A — Foundation (~1 day) ✅ DONE in current PR
+### Sesión A — Foundation ✅ HECHA
 
-- [x] Add postgres engine to `sqlc.yaml`
-- [x] Create `migrations/postgres/` with `001_initial_schema.sql` translated
-- [x] Create `internal/db/queries-postgres/` directory
-- [x] Add `github.com/jackc/pgx/v5` to `go.mod`
-- [x] Write this guide
+- [x] Añadido engine postgres a `sqlc.yaml` (staged comentado)
+- [x] `migrations/postgres/001_initial_schema.sql` traducido
+- [x] `internal/db/queries-postgres/` directorio creado
+- [x] `github.com/jackc/pgx/v5` añadido a `go.mod`
+- [x] Esta guía escrita
 
-### Session B — Schema translation (~1 day)
+### Sesión B — Schema part 1 (~1 día)
 
-- [ ] Translate `migrations/sqlite/002_fts_search.sql` to tsvector +
-      GIN (the hardest one)
-- [ ] Translate `003_add_indexes.sql` through `019_app_settings.sql`
-- [ ] Run `sqlc generate` and confirm both packages emit identical
-      `Querier` interfaces (you'll see compile errors when they don't)
-- [ ] Add a smoke test: spin a Postgres container via testcontainers
-      and run `goose up` against `migrations/postgres/` — must succeed
+- [ ] Traducir `migrations/sqlite/002_fts_search.sql` a tsvector +
+      GIN (la más dura)
+- [ ] Traducir `003_add_indexes.sql` hasta `019_app_settings.sql`
+- [ ] Correr `sqlc generate` y confirmar que ambos paquetes emiten
+      interfaces `Querier` idénticas (se ven los errores cuando no)
+- [ ] Smoke test: contenedor Postgres via testcontainers, `goose up`
+      contra `migrations/postgres/`
 
-### Session C — Schema translation cont. (~1 day)
+### Sesión C — Schema part 2 (~1 día)
 
-- [ ] Translate migrations 020 through 041 (federation, IPTV
-      extensions, household model, etc.)
-- [ ] Smoke test ALL migrations via testcontainers
-- [ ] Add a CI job that runs migrations both for SQLite (existing)
-      and Postgres (new)
+- [ ] Traducir migraciones 020 a 041 (federation, IPTV, household)
+- [ ] Smoke test TODAS las migraciones via testcontainers
+- [ ] Job CI que corre migraciones para SQLite (existente) Y Postgres
 
-### Session D — Query files (~1 day)
+### Sesión D — Query files (~1 día)
 
-- [ ] Copy every file from `queries/` to `queries-postgres/`
-- [ ] Apply UPSERT translations + date math + booleans per the
-      tables above
-- [ ] `sqlc generate` and confirm interface parity
-- [ ] Add a test that `len(sqlc.Querier methods) == len(sqlc_pg.Querier methods)`
+- [ ] Copiar todo de `queries/` a `queries-postgres/`
+- [ ] Aplicar traducciones UPSERT + fecha-math + booleans según
+      las tablas de arriba
+- [ ] `sqlc generate` y confirmar paridad de interface
+- [ ] Test que `len(sqlc.Querier methods) == len(sqlc_pg.Querier methods)`
 
-### Session E — Repo layer (~2 days)
+### Sesión E — Repos (~2 días)
 
-- [ ] Refactor each repo to use the internal-interface pattern
-      (Option A above). 14 repos total: settings, users, sessions,
-      libraries, items, media_streams, images, metadata, user_data,
-      home, providers, federation, channels, epg_programs.
-- [ ] Update `main.go` to construct repos with the driver string.
-- [ ] All existing SQLite tests must still pass with no changes.
-- [ ] Add parallel `_postgres_test.go` files using testcontainers
-      for the critical repos (settings, users, items, user_data).
+- [ ] Refactorizar cada repo a la opción A. 14 repos: settings,
+      users, sessions, libraries, items, media_streams, images,
+      metadata, user_data, home, providers, federation, channels,
+      epg_programs.
+- [ ] Actualizar `main.go` para construir repos con el driver
+- [ ] Los tests SQLite existentes deben pasar sin cambios
+- [ ] Añadir `_postgres_test.go` paralelos con testcontainers para
+      los repos críticos (settings, users, items, user_data)
 
-### Session F — Connection wiring + pgx (~half day)
+### Sesión F — Wiring + pgx (~medio día)
 
-- [ ] In `main.go`, when `cfg.Database.Driver == "postgres"`, register
-      the `pgx/v5/stdlib` driver and use the DSN.
-- [ ] Configure `pgxpool` parameters (MaxConns, MinConns,
-      MaxConnLifetime) from a new config block.
-- [ ] Add health-check probe in admin panel that distinguishes
-      SQLite ping vs Postgres ping.
-- [ ] Document the connection-string format in `hubplay.example.yaml`.
+- [ ] En `main.go`, cuando `driver == "postgres"`, registrar el
+      driver `pgx/v5/stdlib` y usar el DSN
+- [ ] Configurar `pgxpool` (MaxConns, MinConns, MaxConnLifetime)
+      desde un nuevo bloque de config
+- [ ] Health-check probe en panel admin que distinga SQLite ping vs
+      Postgres ping
+- [ ] Documentar el formato del DSN en `hubplay.example.yaml`
 
-### Session G — Migration CLI (`hubplay migrate-db`) + admin UI (~2 days)
+### Sesión G — CLI `migrate-db` + UI admin (~2 días)
 
-- [ ] New CLI subcommand using `pgloader` under the hood (pull image
-      `dimitri/pgloader` or vendor a static binary).
-- [ ] Admin panel section "Base de datos" with "Probar conexión" +
-      copy-paste instructions for the CLI command.
-- [ ] After-migration marker file + admin-panel "Migración completa"
-      banner that disappears when the marker is removed.
+- [ ] Subcomando CLI que use `pgloader` (pull `dimitri/pgloader` o
+      vendor un binario estático)
+- [ ] Sección "Base de datos" en el panel admin con "Probar conexión"
+      + instrucciones copy-paste para el comando CLI
+- [ ] Marker file post-migración + banner "Migración completa" en el
+      panel que desaparece cuando se quita el marker
 
-### Session H — Worker pool with backend-aware auto-tune (~3 days)
+### Sesión H — Worker pool (~3 días)
 
-- [ ] New `internal/workerpool/` package with the pipeline-stages
-      pattern described in the conversation (this conversation's
-      Postgres tools section).
+- [ ] Nuevo `internal/workerpool/` con el patrón pipeline-stages
 - [ ] `AutoTuneWorkers(driver)`: SQLite → 1 writer; Postgres → cores
-      writers.
-- [ ] Migrate scanner / image processor / provider fetcher to use
-      worker-pool stages instead of inline goroutines.
-- [ ] Add `LISTEN/NOTIFY` channel for cross-instance events when
-      Postgres is selected (graceful no-op on SQLite).
+- [ ] Migrar scanner / image processor / provider fetcher a etapas
+- [ ] Canal `LISTEN/NOTIFY` para eventos cross-instance cuando hay
+      Postgres (no-op silencioso en SQLite)
 
-### Session I — Extensions + indexes for Postgres (~1 day)
+### Sesión I — Extensiones + índices (~1 día)
 
-- [ ] Migration that runs `CREATE EXTENSION IF NOT EXISTS pg_trgm`
-      and adds a GIN index on items.title for fuzzy search.
-- [ ] Migration that enables `pg_stat_statements` (operator must
-      add to `shared_preload_libraries`; document this).
-- [ ] Add the partial indexes + BRIN indexes identified in the perf
-      audit (only after Session H).
+- [ ] Migración que corra `CREATE EXTENSION IF NOT EXISTS pg_trgm`
+      y añada índice GIN en items.title para búsqueda fuzzy
+- [ ] Migración que active `pg_stat_statements` (el operador debe
+      añadirlo a `shared_preload_libraries`; documentarlo)
+- [ ] Añadir índices parciales + BRIN identificados en el perf audit
+      (solo después de Sesión H)
 
-### Session J — Production hardening (~1 day)
+### Sesión J — Producción (~1 día)
 
-- [ ] `postgres_exporter` example docker-compose for Prometheus
-- [ ] `pg_dump`-based backup that replaces the SQLite backup endpoint
-      when Postgres is selected
-- [ ] Operations doc: how to upgrade Postgres version safely, how to
-      restore from a `pg_dump`, recommended `postgresql.conf` tunings
-      for self-hosted
-
----
-
-## Anti-patterns to avoid
-
-1. **Don't use ORMs**: GORM / ent etc. hide what's executing. The
-   project has chosen sqlc for typed, visible queries. Stay there.
-
-2. **Don't drop SQLite support**: SQLite is the zero-ops sweet spot
-   for ~95% of self-hosted users. The dual-dialect work makes
-   Postgres available, NOT mandatory.
-
-3. **Don't introduce Redis as a cache layer**: Postgres with good
-   indexes + the existing in-process caches are enough. Redis adds
-   operational complexity (one more thing to back up, monitor, fail).
-
-4. **Don't run goose against both schemas in the same call**: the
-   schema versions might drift if a migration only applies to one
-   dialect. Use the driver to pick the migrations directory at boot.
-
-5. **Don't use pgx's native API in repos**: stick with `database/sql`
-   + `pgx/v5/stdlib` so the repo code is dialect-agnostic. Drop down
-   to pgx native only in specific hot paths (worker pool's bulk
-   inserts via `COPY FROM`).
-
-6. **Don't add Postgres-specific features lightly**: every time you
-   write a query that LISTEN/NOTIFYs or uses RETURNING…INTO etc.,
-   you create a divergence the SQLite path can't follow. Use them
-   only where there's clear value (worker pool, event bus).
+- [ ] Ejemplo de docker-compose con `postgres_exporter` para
+      Prometheus
+- [ ] Backup basado en `pg_dump` que reemplace el endpoint de backup
+      SQLite cuando el driver es Postgres
+- [ ] Doc de operaciones: cómo subir de versión Postgres con
+      seguridad, cómo restaurar desde `pg_dump`, tunings recomendados
+      de `postgresql.conf` para self-hosted
 
 ---
 
-## Testing strategy
+## Anti-patterns
 
-- **SQLite tests** stay as-is. They run fast (in-memory) and cover
-  the default path 99% of users hit.
-- **Postgres tests** use `testcontainers-go`. Slower (~2 s/test
-  initial container) but cached after that. Add only for critical
-  repos + migrations + queries with dialect-specific syntax.
-- **CI** runs both. Use Github Actions matrix:
+1. **No ORMs**: GORM / ent etc. ocultan qué se ejecuta. sqlc fue la
+   elección por queries typadas y visibles. Mantenerlo.
+
+2. **No quitar SQLite**: SQLite sigue siendo el sweet spot para
+   ~95% de usuarios self-hosted. El dual-dialect hace que Postgres
+   esté disponible, NO obligatorio.
+
+3. **No introducir Redis como cache**: Postgres con buenos índices
+   + los caches in-process que ya hay son suficientes. Redis añade
+   complejidad operacional (otra cosa que backup, monitorizar,
+   fallar).
+
+4. **No correr goose contra los dos schemas a la vez**: las
+   versiones podrían driftear si una migración solo aplica a un
+   dialecto. Usar el driver para elegir el dir de migraciones al
+   boot.
+
+5. **No usar la API nativa pgx en repos**: quedarse con
+   `database/sql` + `pgx/v5/stdlib` para que el código de repo sea
+   dialect-agnostic. Bajar a pgx nativo solo en hot paths
+   concretos (worker pool con `COPY FROM` para bulk inserts).
+
+6. **No añadir features Postgres-specific a la ligera**: cada vez
+   que se escriba una query que LISTEN/NOTIFYs o usa RETURNING…INTO
+   etc., se crea una divergencia que el path SQLite no puede
+   seguir. Usarlas solo donde haya valor claro (worker pool, event
+   bus entre instancias).
+
+---
+
+## Estrategia de testing
+
+- **Tests SQLite** se quedan como están. Rápidos (in-memory),
+  cubren el path por defecto que hit el 99% de instalaciones.
+- **Tests Postgres** usan `testcontainers-go`. Más lentos (~2 s/test
+  inicial por contenedor) pero cacheados después. Añadir solo para
+  repos críticos + migraciones + queries con sintaxis específica.
+- **CI** corre ambos. Github Actions matrix:
   ```yaml
   strategy:
     matrix:
       database: [sqlite, postgres]
   ```
-- **Migration tests**: a single test per dialect that runs
-  `goose up` from empty against the full migration tree. Catches
-  syntax errors early.
+- **Tests de migración**: uno por dialecto que corra `goose up`
+  desde vacío contra el tree entero. Captura errores de sintaxis
+  pronto.
 
 ---
 
-## Where to ask questions while doing this
+## Estimación total
 
-- sqlc bugs / dialect oddities: search the project memory for
-  documented holdouts (`docs/memory/architecture-decisions.md`).
-- Postgres-specific behavior questions: official docs are
-  excellent — https://www.postgresql.org/docs/
-- pgx specifics: https://github.com/jackc/pgx
-- testcontainers-go: https://golang.testcontainers.org/
-
----
-
-## Estimated total effort
-
-| Session | Hours | Cumulative |
+| Sesión | Horas | Acumulado |
 |---|---:|---:|
-| A — Foundation (done) | 3 | 3 |
-| B — Schema part 1 | 7 | 10 |
-| C — Schema part 2 | 7 | 17 |
+| A — Foundation (hecha) | 3 | 3 |
+| B — Schema parte 1 | 7 | 10 |
+| C — Schema parte 2 | 7 | 17 |
 | D — Queries | 7 | 24 |
 | E — Repos | 14 | 38 |
 | F — Wiring | 3 | 41 |
 | G — Migration CLI + UI | 14 | 55 |
 | H — Worker pool | 21 | 76 |
-| I — Extensions / indexes | 7 | 83 |
+| I — Extensiones / índices | 7 | 83 |
 | J — Production hardening | 7 | 90 |
 
-**~90 hours of focused work**, distributed across 10 sessions. The
-project doesn't need to do all of them — sessions A through F deliver
-"functional Postgres mode", and G–J are the productionizing layer.
+**~90 horas de trabajo enfocado**, repartibles en 10 sesiones. No
+tenemos que hacerlas todas — sesiones A a F entregan "modo
+Postgres funcional", y G–J son la capa de producción.
 
-A pragmatic v1 = A through F + G (migration UX). H–J can land later.
+v1 pragmático = A a F + G (UX de migración). H–J pueden venir
+después.

@@ -1,17 +1,16 @@
-# PostgreSQL query files
+# queries-postgres/
 
-Parallel tree to `internal/db/queries/`. Each `.sql` file here is a
-dialect-translated sibling of its SQLite counterpart.
+Tree paralelo a `internal/db/queries/`. Cada `.sql` aquí es un
+hermano traducido al dialecto de su homólogo SQLite.
 
-**Translation guide**: `docs/architecture/postgres-migration.md`.
+Guía de traducción: `docs/architecture/postgres-migration.md`.
 
-**Source of truth**: the SQLite versions. When the SQLite query
-changes, the Postgres version must change to match. Until the dual-
-dialect migration is complete (sessions B–E in the guide), this
-directory is intentionally empty so sqlc generates an empty Queries
-package without errors. Add files one repo at a time.
+Hasta que las sesiones B–E del plan estén hechas, este directorio
+está vacío a propósito. El bloque postgres en `sqlc.yaml` está
+comentado para que `sqlc generate` no falle en dir vacío. Al añadir
+el primer `.sql` aquí, descomentar el bloque y regenerar.
 
-**Function-name parity is mandatory**: the `-- name: ListByItem :many`
-comment must match between the two dialects so the generated Go
-`Querier` interfaces have the same method set. The repo layer relies
-on this parity to swap implementations transparently.
+**Paridad de nombres de función**: el comentario `-- name: ListByItem :many`
+debe coincidir entre los dos dialectos para que las interfaces
+`Querier` generadas tengan el mismo method set. La capa de repo
+depende de esa paridad para swappear backends sin tocar call sites.
