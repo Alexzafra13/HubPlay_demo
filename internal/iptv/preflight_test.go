@@ -21,7 +21,7 @@ import (
 func newPreflightSvc(t *testing.T) *Service {
 	t.Helper()
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories(database)
+	repos := db.NewRepositories("sqlite", database)
 	return NewService(repos.Channels, repos.EPGPrograms, repos.Libraries,
 		repos.ChannelFavorites, repos.LibraryEPGSources, repos.ChannelOverrides,
 		repos.ChannelWatchHistory,

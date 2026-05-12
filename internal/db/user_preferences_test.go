@@ -12,7 +12,7 @@ import (
 func setupPreferencesTest(t *testing.T) (*db.Repositories, string) {
 	t.Helper()
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories(database)
+	repos := db.NewRepositories("sqlite", database)
 	ctx := context.Background()
 
 	user := &db.User{

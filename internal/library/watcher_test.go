@@ -77,7 +77,7 @@ func (c *scanCounter) waitForScan(n int, timeout time.Duration) bool {
 func newTestServiceWithRoot(t *testing.T, root string) (*library.Service, string, *event.Bus) {
 	t.Helper()
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories(database)
+	repos := db.NewRepositories("sqlite", database)
 	bus := event.NewBus(slog.Default())
 	prober := &watcherTestProber{}
 	scnr := scanner.New(

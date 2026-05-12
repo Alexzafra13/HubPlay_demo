@@ -16,7 +16,7 @@ import (
 // clean 409 instead of surfacing the raw SQLite error.
 func TestLibraryEPGSources_DuplicateURLReturnsSentinel(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories(database)
+	repos := db.NewRepositories("sqlite", database)
 	ctx := context.Background()
 
 	now := time.Now()

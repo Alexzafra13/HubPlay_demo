@@ -35,7 +35,15 @@ type Repositories struct {
 }
 
 // NewRepositories creates all repositories from a database connection.
-func NewRepositories(database *sql.DB) *Repositories {
+//
+// `driver` selects the dual-dialect backend per repo. "postgres" wires
+// repos against the sqlc_pg generated package; anything else
+// (typically "sqlite") wires against sqlc — the project's default
+// backend. Until Sesión E finishes refactoring every repo, only the
+// ones already migrated honour the driver; the rest ignore it and
+// stay SQLite-only. The signature keeps the driver param so callers
+// (main.go) don't have to change again as each repo lands.
+func NewRepositories(driver string, database *sql.DB) *Repositories {
 	return &Repositories{
 		Users:              NewUserRepository(database),
 		Sessions:           NewSessionRepository(database),
@@ -57,7 +65,7 @@ func NewRepositories(database *sql.DB) *Repositories {
 		Metadata:           NewMetadataRepository(database),
 		ExternalIDs:        NewExternalIDRepository(database),
 		Chapters:           NewChapterRepository(database),
-		Settings:           NewSettingsRepository(database),
+		Settings:           NewSettingsRepository(driver, database),
 		People:             NewPeopleRepository(database),
 		DeviceCodes:        NewDeviceCodeRepository(database),
 		Home:               NewHomeRepository(database),

@@ -13,7 +13,7 @@ import (
 func setupEPGTest(t *testing.T) (*db.EPGProgramRepository, *db.ChannelRepository, string) {
 	t.Helper()
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories(database)
+	repos := db.NewRepositories("sqlite", database)
 	ctx := context.Background()
 
 	now := time.Now()
@@ -176,7 +176,7 @@ func TestEPG_BulkSchedule(t *testing.T) {
 // same chunk twice.
 func TestEPG_BulkSchedule_LargeList(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories(database)
+	repos := db.NewRepositories("sqlite", database)
 	ctx := context.Background()
 
 	libID := "lib-epg-large"
@@ -279,7 +279,7 @@ func TestEPG_XMLTVTimeRoundtrip(t *testing.T) {
 // opens the guide before running "Refresh EPG". Those reads must not 500.
 func TestEPG_CoerceSQLiteTime_LegacyString(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories(database)
+	repos := db.NewRepositories("sqlite", database)
 	ctx := context.Background()
 
 	now := time.Now()
@@ -328,7 +328,7 @@ func TestEPG_CoerceSQLiteTime_LegacyString(t *testing.T) {
 // invariant so a future change to coerceSQLiteTime can't regress it silently.
 func TestEPG_CoerceSQLiteTime_MonotonicSuffix(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories(database)
+	repos := db.NewRepositories("sqlite", database)
 	ctx := context.Background()
 
 	now := time.Now()

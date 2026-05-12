@@ -38,7 +38,7 @@ func (s *stubFingerprintComputer) Compute(_ context.Context, itemID, _ string, w
 // source) primary key.
 func TestSegmentFingerprinter_DetectLibrary_EndToEnd(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories(database)
+	repos := db.NewRepositories("sqlite", database)
 	bus := event.NewBus(slog.Default())
 	must := func(err error) {
 		t.Helper()
@@ -172,7 +172,7 @@ func TestSegmentFingerprinter_DetectLibrary_EndToEnd(t *testing.T) {
 // compare and singletons would otherwise spam zero-result logs.
 func TestSegmentFingerprinter_SeasonWithOneEpisode(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories(database)
+	repos := db.NewRepositories("sqlite", database)
 	bus := event.NewBus(slog.Default())
 	must := func(err error) {
 		t.Helper()

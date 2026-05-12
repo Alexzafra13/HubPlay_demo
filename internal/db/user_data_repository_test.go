@@ -12,7 +12,7 @@ import (
 func setupUserDataTest(t *testing.T) (*db.UserDataRepository, *db.ItemRepository) {
 	t.Helper()
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories(database)
+	repos := db.NewRepositories("sqlite", database)
 
 	// Create a user
 	now := time.Now()
@@ -306,7 +306,7 @@ func TestUserData_Delete(t *testing.T) {
 
 func TestUserData_SeriesEpisodeProgress(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories(database)
+	repos := db.NewRepositories("sqlite", database)
 	ctx := context.Background()
 	now := time.Now()
 
