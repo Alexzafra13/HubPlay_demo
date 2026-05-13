@@ -1,5 +1,68 @@
 # Estado del proyecto
 
+> 🎬 **Sesión 2026-05-13 (rama `claude/beautiful-margulis-3db022`, 6 commits, Sesiones E.5–E.9 — 11 de 28 repos cerrados)** — continuando dual-dialect tras los 6 ya mergeados (PRs #260 y #261). Pendiente de merge: 6 commits sobre main en PR [#264](https://github.com/Alexzafra13/HubPlay_demo/pull/264).
+>
+> **Lo nuevo de esta tanda (E.8 + E.9 sobre lo previo)**:
+>
+> - **[`107f7ca`](https://github.com/Alexzafra13/HubPlay_demo/commit/107f7ca) E.8 — EPGPrograms** (314 LOC): Pattern A para CleanupOld + Insert/Delete dentro del tx ReplaceForChannel; Pattern B para los 3 reads (NowPlaying, Schedule, BulkSchedule chunked en 500 para `SQLITE_LIMIT_VARIABLE_NUMBER`). Sin gotchas BOOLEAN — la tabla `epg_programs` es sólo timestamps + texto. El `coerceSQLiteTime` se queda con su nombre histórico (pgx pasa por el `case time.Time`); doc-comment actualizado.
+>
+> - **[`434a846`](https://github.com/Alexzafra13/HubPlay_demo/commit/434a846) E.9 — Image** (319 LOC): Pattern A para 8 métodos sqlc + Pattern B para GetPrimaryURLs (dynamic IN + el último `is_primary = 1` reescrito a `is_primary`). Tx `SetPrimary` dialectado. Width/Height (INTEGER) → NullInt64 sqlite, NullInt32 pg en Create (helper `nullableInt32` reusado de MediaStreams). 11 callers actualizados en tests via PowerShell sed.
+>
+> **Estado al cierre de la tanda — 11 de 28 repos done, 17 pending**:
+>
+> ✅ **Done** (11):
+>
+> | Repo | LOC | Pattern | Notas |
+> |---|---|---|---|
+> | Settings | 149 | B (raw SQL pre-rewrite) | Template Pattern B |
+> | Users | — | A + 1 raw SQL holdout | |
+> | Sessions | — | A + 2 raw SQL holdouts | |
+> | SigningKeys | — | A (alias → struct) | |
+> | Library | — | A + 2 raw + 3 tx | |
+> | MediaStreams | — | A + 1 tx + nullableInt32 | |
+> | Items | 633 | A + 4 raw SQL | FTS dual-mecanismo + toTSQueryPrefix |
+> | UserData | 485 | A + 2 raw SQL | + fix masivo BOOLEAN drift en 8 ficheros pg |
+> | Channels | 562 | A + 9 raw SQL + tx | FILTER aggregate, ReplaceForLibrary tx |
+> | EPGPrograms | 314 | A + 3 raw SQL + tx | Sólo time/text, sin BOOLEAN |
+> | Images | 319 | A + 1 raw SQL + tx | Width/Height nullableInt32 |
+>
+> ⏳ **Pending** (17 repos, 3953 LOC totales):
+>
+> | Repo | LOC | Tier | Notas esperadas |
+> |---|---|---|---|
+> | **Federation** | **862** | 🔴 Gigante | MUCHOS raw SQL holdouts. Sesión propia. Ya tiene los `is_active = 1` / `can_browse = 1` / `COLLATE NOCASE` arreglados en E.6, pero aún hay raw SQL en el repo Go que necesita rewrite + dialect branch |
+> | **Home** | **631** | 🟠 Grande | Segundo más grande. Probablemente queries complejas sobre items + user_data agregados |
+> | Studio | 242 | 🟡 Mediano | |
+> | LibraryEPGSources | 235 | 🟡 Mediano | |
+> | IPTVSchedule | 206 | 🟡 Mediano | |
+> | Collection | 201 | 🟡 Mediano | |
+> | People | 193 | 🟢 Pequeño | El query con `is_available = 1` ya arreglado en E.6 |
+> | Metadata | 177 | 🟢 Pequeño | Tiene un raw SQL batch (visto en E.5/E.6) |
+> | EpisodeSegment | 154 | 🟢 Pequeño | |
+> | Provider | 152 | 🟢 Pequeño | |
+> | ChannelOverride | 130 | 🟢 Pequeño | |
+> | ItemValue | 123 | 🟢 Pequeño | |
+> | ChannelFavorites | 120 | 🟢 Pequeño | El `c.is_active = 1` ya arreglado en E.6 |
+> | ChannelWatchHistory | 117 | 🟢 Pequeño | El `c.is_active = 1` ya arreglado en E.6 |
+> | DeviceCode | 116 | 🟢 Pequeño | |
+> | ExternalID | 113 | 🟢 Pequeño | |
+> | Chapter | 96 | 🟢 Mini | |
+> | UserPreferences | 85 | 🟢 Mini | |
+>
+> **Próximo arranque sugerido (orden por valor)**:
+>
+> 1. **Empezar por los 11 pequeños/mini (sub-200 LOC)** — son trabajo mecánico, sin riesgo, suman ~1500 LOC y cierran 11 repos rápido. Una sesión de 2-3h debería cerrarlos todos. Beneficio psicológico + reducir lista a sólo Federation + Home + 4 medianos.
+> 2. **Después los 4 medianos** (Studio, LibraryEPGSources, IPTVSchedule, Collection) — ~1h cada uno. Otra sesión.
+> 3. **Home (631 LOC)** — sesión propia. Inspeccionar primero qué queries tiene.
+> 4. **Federation (862 LOC)** — la última sesión grande. Inspeccionar el repo Go primero porque la memoria dice "MUCHOS raw SQL holdouts" — puede tener tanto raw SQL como Library + Channels juntos.
+> 5. **Sesión F** — wiring `pgx/v5/stdlib` + `pgxpool` en main.go (~3h). Es donde el binario por fin puede arrancar contra Postgres y se valida end-to-end.
+>
+> Tiempo total restante estimado para Sesión E: **~6-9h** (3-4 sesiones de 2-3h).
+>
+> **Cuando Docker esté arriba**: smoke-test E.5–E.9 contra Postgres real usando `docker run -d -e POSTGRES_PASSWORD=test postgres:16-alpine`, `goose -dir migrations/postgres postgres "..." up`, y un script Go scratch que invoque cada Repository.GetByID/List sobre datos seedeados. Las firmas Pattern A/B + el FTS-dual + el FILTER aggregate son lo nuevo a validar — todos los demás patrones ya tienen smoke contra Postgres real desde E.1-E.4.
+>
+> ---
+>
 > 🎬 **Sesión 2026-05-13 (rama `claude/beautiful-margulis-3db022`, 4 commits, Sesiones E.5 + E.6 + E.7 — los tres repos grandes cerrados)** — continuando dual-dialect tras los 6 ya mergeados (PRs #260 y #261). Pendiente de merge: 4 commits sobre main en PR [#264](https://github.com/Alexzafra13/HubPlay_demo/pull/264).
 >
 > **Lo entregado en esta tanda (resumen)**:
