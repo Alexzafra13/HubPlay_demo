@@ -69,7 +69,7 @@ func newFedTestEnv(t *testing.T) *fedTestEnv {
 	ctx := context.Background()
 	clk := clock.New()
 	rawDB := testutil.NewTestDB(t)
-	fedRepo := db.NewFederationRepository(rawDB)
+	fedRepo := db.NewFederationRepository("sqlite", rawDB)
 
 	if _, err := federation.LoadOrCreate(ctx, fedRepo, clk, "TestServer"); err != nil {
 		t.Fatalf("load or create identity: %v", err)
