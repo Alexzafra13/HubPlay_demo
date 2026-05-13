@@ -72,7 +72,7 @@ func newTestScanner(t *testing.T) (*Scanner, *db.ItemRepository, *db.MediaStream
 
 	metaRepo := db.NewMetadataRepository(database)
 	extIDRepo := db.NewExternalIDRepository(database)
-	imageRepo := db.NewImageRepository(database)
+	imageRepo := db.NewImageRepository("sqlite", database)
 
 	// imageDir + pathmap are nil for tests that don't exercise the
 	// artwork pipeline; the scanner skips image enrichment when either
@@ -561,7 +561,7 @@ func TestFetchAndStoreImages_PersistsLocalPathNotURL(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	libRepo := db.NewLibraryRepository("sqlite", database)
 	itemRepo := db.NewItemRepository("sqlite", database)
-	imgRepo := db.NewImageRepository(database)
+	imgRepo := db.NewImageRepository("sqlite", database)
 	now := time.Now()
 	if err := libRepo.Create(context.Background(), &db.Library{
 		ID: "lib-test", Name: "Test", ContentType: "movies", ScanMode: "auto",
@@ -684,7 +684,7 @@ func TestEnrichEpisode_PersistsOverviewAndStill(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	libRepo := db.NewLibraryRepository("sqlite", database)
 	itemRepo := db.NewItemRepository("sqlite", database)
-	imgRepo := db.NewImageRepository(database)
+	imgRepo := db.NewImageRepository("sqlite", database)
 	metaRepo := db.NewMetadataRepository(database)
 	extRepo := db.NewExternalIDRepository(database)
 
@@ -803,7 +803,7 @@ func TestEnrichEpisode_NoTMDbIDOnSeries(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	libRepo := db.NewLibraryRepository("sqlite", database)
 	itemRepo := db.NewItemRepository("sqlite", database)
-	imgRepo := db.NewImageRepository(database)
+	imgRepo := db.NewImageRepository("sqlite", database)
 	metaRepo := db.NewMetadataRepository(database)
 	extRepo := db.NewExternalIDRepository(database)
 
@@ -890,7 +890,7 @@ func TestEnrichSeason_PersistsMetadataAndPoster(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	libRepo := db.NewLibraryRepository("sqlite", database)
 	itemRepo := db.NewItemRepository("sqlite", database)
-	imgRepo := db.NewImageRepository(database)
+	imgRepo := db.NewImageRepository("sqlite", database)
 	metaRepo := db.NewMetadataRepository(database)
 	extRepo := db.NewExternalIDRepository(database)
 
@@ -1019,7 +1019,7 @@ func TestFetchAndStoreImages_SkippedWhenImageDirEmpty(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	libRepo := db.NewLibraryRepository("sqlite", database)
 	itemRepo := db.NewItemRepository("sqlite", database)
-	imgRepo := db.NewImageRepository(database)
+	imgRepo := db.NewImageRepository("sqlite", database)
 	now := time.Now()
 	_ = libRepo.Create(context.Background(), &db.Library{
 		ID: "lib-test", Name: "Test", ContentType: "movies", ScanMode: "auto",

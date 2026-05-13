@@ -51,7 +51,7 @@ func NewRepositories(driver string, database *sql.DB) *Repositories {
 		Libraries:          NewLibraryRepository(driver, database),
 		Items:              NewItemRepository(driver, database),
 		MediaStreams:       NewMediaStreamRepository(driver, database),
-		Images:             NewImageRepository(database),
+		Images:             NewImageRepository(driver, database),
 		UserData:           NewUserDataRepository(driver, database),
 		Channels:           NewChannelRepository(driver, database),
 		ChannelFavorites:   NewChannelFavoritesRepository(database),
