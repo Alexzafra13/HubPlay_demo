@@ -24,7 +24,7 @@ SELECT id, item_id, type, path, COALESCE(width, 0) AS width, COALESCE(height, 0)
        COALESCE(dominant_color, '') AS dominant_color,
        COALESCE(dominant_color_muted, '') AS dominant_color_muted
 FROM images
-WHERE item_id = $1 AND type = $2 AND is_primary = 1;
+WHERE item_id = $1 AND type = $2 AND is_primary;
 
 -- name: ListImagesByItem :many
 SELECT id, item_id, type, path, COALESCE(width, 0) AS width, COALESCE(height, 0) AS height,
@@ -43,14 +43,14 @@ DELETE FROM images WHERE item_id = $1;
 DELETE FROM images WHERE id = $1;
 
 -- name: UnsetPrimaryImages :exec
-UPDATE images SET is_primary = 0 WHERE item_id = $1 AND type = $2;
+UPDATE images SET is_primary = FALSE WHERE item_id = $1 AND type = $2;
 
 -- name: SetImagePrimary :exec
-UPDATE images SET is_primary = 1 WHERE id = $1 AND item_id = $2 AND type = $3;
+UPDATE images SET is_primary = TRUE WHERE id = $1 AND item_id = $2 AND type = $3;
 
 -- name: SetImageLocked :exec
 UPDATE images SET is_locked = $1 WHERE id = $2;
 
 -- name: HasLockedImageForKind :one
 SELECT COUNT(*) > 0 AS has_lock FROM images
-WHERE item_id = $1 AND type = $2 AND is_locked = 1;
+WHERE item_id = $1 AND type = $2 AND is_locked;

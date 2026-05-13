@@ -62,7 +62,7 @@ SELECT library_id, kind, interval_hours, enabled,
        last_run_at, last_status, last_error,
        last_duration_ms, created_at, updated_at
 FROM iptv_scheduled_jobs
-WHERE enabled = 1
+WHERE enabled
 ORDER BY last_run_at ASC NULLS FIRST
 `
 

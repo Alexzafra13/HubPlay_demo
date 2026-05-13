@@ -38,7 +38,7 @@ SELECT c.id, c.library_id, c.name, c.number,
 FROM   channel_watch_history h
 JOIN   channels c ON c.stream_url = h.stream_url
 WHERE  h.user_id = $1
-  AND  c.is_active = 1
+  AND  c.is_active
 ORDER BY h.last_watched_at DESC, c.library_id ASC
 LIMIT  $2
 `

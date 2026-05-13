@@ -85,8 +85,8 @@ SELECT
 FROM item_people ip
 JOIN items i ON i.id = ip.item_id
 LEFT JOIN images img
-    ON img.item_id = i.id AND img.type = 'primary' AND img.is_primary = 1
+    ON img.item_id = i.id AND img.type = 'primary' AND img.is_primary
 WHERE ip.person_id = $1
   AND i.type IN ('movie', 'series')
-  AND i.is_available = 1
+  AND i.is_available
 ORDER BY COALESCE(i.year, 0) DESC, i.title ASC, ip.sort_order ASC;

@@ -30,7 +30,7 @@ SELECT id, library_id, name, number, COALESCE(group_name, '') AS group_name,
        COALESCE(language, '') AS language, COALESCE(country, '') AS country,
        is_active, added_at
 FROM channels
-WHERE library_id = $1 AND is_active = 1
+WHERE library_id = $1 AND is_active
 ORDER BY number, name;
 
 -- name: DeleteChannelsByLibrary :exec
