@@ -55,7 +55,16 @@ type ItemHandler struct {
 	// ffmpeg. The map grows by one entry per item that's ever been
 	// generated; bounded by library size, fine in practice.
 	trickplayLocks sync.Map
-	logger         *slog.Logger
+	// trickplayBG tracks background generation goroutines spawned by
+	// ensureTrickplay. Exists solely so tests can wait for inflight
+	// work to finish before t.Cleanup runs `RemoveAll` on the
+	// TempDir — without it, the goroutine keeps writing into the
+	// directory after the test returns and the cleanup races with
+	// the writes ("directory not empty" unlinkat error). Production
+	// shutdown doesn't currently wait on this; the cancelled bg
+	// contexts inside the goroutine bound the work to its own deadline.
+	trickplayBG sync.WaitGroup
+	logger      *slog.Logger
 }
 
 func NewItemHandler(lib LibraryService, images ImageRepository, metadata MetadataRepository, userData UserDataRepository, users UserService, chapters ChapterRepository, segments EpisodeSegmentRepository, externalIDs ExternalIDsRepository, people PeopleRepoForItems, collections CollectionRepoForItems, providers ProviderManager, trickplayDir string, logger *slog.Logger) *ItemHandler {
@@ -669,6 +678,17 @@ func (h *ItemHandler) TrickplaySprite(w http.ResponseWriter, r *http.Request) {
 // the HTTP request hanging behind ffmpeg.
 var errTrickplayPending = errors.New("trickplay: generation pending")
 
+// WaitTrickplayInflight blocks until every background trickplay
+// goroutine spawned via this handler has returned. Intended for tests
+// that use `t.TempDir()` as the trickplay root — without this, the
+// test return races with goroutines still writing into the dir and
+// `t.Cleanup`'s RemoveAll fails with "directory not empty". Safe to
+// call concurrently and from production shutdown paths if a graceful
+// drain is wanted there (none today).
+func (h *ItemHandler) WaitTrickplayInflight() {
+	h.trickplayBG.Wait()
+}
+
 // ensureTrickplay returns the per-item directory containing
 // `sprite.png` + `manifest.json` when the cache is fresh. When the
 // cache is missing or stale, it kicks off ffmpeg in a background
@@ -745,7 +765,9 @@ func (h *ItemHandler) ensureTrickplay(ctx context.Context, itemID string) (strin
 	// context — using r.Context() would kill the generation as soon
 	// as the client times out / disconnects. The lock is released
 	// from inside the goroutine when work is done (success or fail).
+	h.trickplayBG.Add(1)
 	go func() {
+		defer h.trickplayBG.Done()
 		defer lock.Unlock()
 		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
