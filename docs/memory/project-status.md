@@ -1,5 +1,55 @@
 # Estado del proyecto
 
+> 🎬 **Sesión 2026-05-13 (rama `claude/objective-swartz-6f9f3c`, 1 commit, Sesión E.11 — los 4 medianos cerrados de un golpe)** — continuando dual-dialect tras los 24 ya mergeados (PRs #260, #261, #264, #265, #266). Pendiente de merge: 1 commit (`363d808`) sobre main.
+>
+> **Lo entregado en esta sesión**:
+>
+> Cierra el "Bloque 2" del handoff anterior — los 4 repos sub-250 LOC en un único commit. Mismo perfil que E.10: trabajo mecánico aplicando los gotchas ya conocidos. +592/−197 LOC, 8 ficheros tocados (4 repos + repos.go + 3 test files externos).
+>
+> **Repos cerrados (orden por LOC)**:
+>
+> | Repo | LOC | Pattern | Notas |
+> |---|---|---|---|
+> | Collection | 201 | A + 4 raw pre-rewriteadas | BOOLEAN drift `i.is_available = 1` + `img.is_primary = 1` → predicados truthy. EnsureCollection/List/ListItems/SetItemCollection raw por sqlc 1.31.1 trunc + ON CONFLICT CASE |
+> | IPTVSchedule | 206 | A puro | IntervalHours/LastDurationMs INTEGER → int64↔int32 |
+> | LibraryEPGSources | 235 | A + tx UpdatePriorities + interface{} | Priority/LastProgramCount/LastChannelCount INTEGER cast. nextPriority acepta int64 e int32 (driver-agnostic). **isUniqueConstraintError extendido para Postgres SQLSTATE 23505** — primer repo que detecta UNIQUE drift entre dialectos |
+> | Studio | 242 | A + 2 raw pre-rewriteadas | TmdbID NullInt64↔NullInt32. BOOLEAN drift en ListItemsForStudio |
+>
+> **Verificación al cierre**:
+>
+> - `go build ./internal/db/...` clean.
+> - `GOOS=linux go build ./...` clean (cross-compile completo del binario).
+> - `go test -count=1 ./internal/db/` 10.4s — todos verde.
+> - `go test ./internal/auth/ ./internal/scanner/ ./internal/iptv/ ./internal/library/ ./internal/federation/` todos verde.
+> - `TestSQLC_GeneratedFilesMatchQueries` verde (drift test).
+> - `go vet ./internal/db/... ./internal/scanner/...` clean.
+> - `internal/api/...` sigue fallando en host Windows por `syscall.Statfs_t` (preexistente, no del refactor; cross-compile linux confirma que esos paquetes compilan bien).
+>
+> **Estado al cierre — 26 de 28 repos done, 2 pending (los dos grandes)**:
+>
+> ✅ **Done** (26): Settings, Users, Sessions, SigningKeys, Library, MediaStreams, Items, UserData, Channels, EPGPrograms, Image, UserPreferences, Chapter, ExternalID, DeviceCode, ChannelWatchHistory, ChannelFavorites, ItemValue, ChannelOverride, Provider, EpisodeSegment, Metadata, People, **Collection (E.11)**, **IPTVSchedule (E.11)**, **LibraryEPGSources (E.11)**, **Studio (E.11)**.
+>
+> ⏳ **Pending** (2):
+>
+> | Repo | LOC | Tier | Notas esperadas |
+> |---|---|---|---|
+> | **Home** | **631** | 🟠 Grande | Queries complejas items + user_data agregados. Access-predicate post-040 ya aplicado |
+> | **Federation** | **862** | 🔴 Gigante | MUCHOS raw SQL holdouts. Los `is_active = 1` / `can_browse = 1` / `COLLATE NOCASE` ya arreglados en E.6 — falta el repo Go con raw rewrite + dialect branch |
+>
+> **Próximo arranque sugerido**:
+>
+> 1. **Home (631 LOC)** sesión propia, ~2-3h. Inspeccionar primero qué queries tiene (CTE con NextUp-style? items + user_data agregados?). Los predicados BOOLEAN/COLLATE ya arreglados en E.6.
+> 2. **Federation (862 LOC)** la última sesión grande, ~3-4h. Inspeccionar el repo Go primero porque "MUCHOS raw SQL holdouts" — puede tener tanto raw SQL como Library + Channels juntos.
+> 3. **Sesión F** — wiring `pgx/v5/stdlib` + `pgxpool` en `main.go` (~3h). Primera vez que el binario arranca contra Postgres y se valida end-to-end.
+>
+> Tiempo total restante para Sesión E: **~5-7h** (1-2 sesiones).
+>
+> **Nota nueva sobre isUniqueConstraintError**: la función está localizada en `library_epg_sources_repository.go` y detecta ambos dialectos por string-matching. Cuando Sesión F wire `pgx/v5`, conviene migrarlo a `errors.As(*pgconn.PgError)` para detección tipada (el TODO está embebido en el doc-comment).
+>
+> **Cuando Docker daemon esté arriba**: smoke-test E.11 contra Postgres real con `docker run -d -e POSTGRES_PASSWORD=test postgres:16-alpine`, `goose -dir migrations/postgres postgres "..." up`, y un script Go scratch que invoque cada Repository sobre datos seedeados. Patrones nuevos a validar: UpdatePriorities con qtx por rama, isUniqueConstraintError contra error real de pg (testear duplicate URL → ErrEPGSourceAlreadyAttached), TmdbID NullInt32 en Studio. Los Pattern A/B básicos ya tienen smoke contra Postgres real desde E.1-E.4.
+>
+> ---
+>
 > 🎬 **Sesión 2026-05-13 (rama `claude/musing-bell-cbe1da`, 1 commit, Sesión E.10 — 13 repos pequeños/mini cerrados de un golpe)** — continuando dual-dialect tras los 11 ya mergeados (PRs #260, #261, #264, #265). Pendiente de merge: 1 commit (`43161da`) sobre main.
 >
 > **Lo entregado en esta sesión**:

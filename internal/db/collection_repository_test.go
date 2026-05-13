@@ -13,7 +13,7 @@ func TestCollectionRepository_EnsureAndList(t *testing.T) {
 	libRepo := db.NewLibraryRepository("sqlite", database)
 	itemRepo := db.NewItemRepository("sqlite", database)
 	metaRepo := db.NewMetadataRepository("sqlite", database)
-	colRepo := db.NewCollectionRepository(database)
+	colRepo := db.NewCollectionRepository("sqlite", database)
 	seedLibraryForItems(t, libRepo)
 
 	// Three movies in the X-Men collection (TMDb 748), one in Toy
