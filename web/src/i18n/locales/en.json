@@ -1161,6 +1161,33 @@
     "systemAdvanced": {
       "subtitle": "Operaciones destructivas y rotación de llaves. Nada que tocar en el día a día."
     },
+    "database": {
+      "title": "Database",
+      "subtitle": "Switch between SQLite and PostgreSQL, see pool stats, and migrate existing data without leaving the panel.",
+      "activeDriver": "Active driver",
+      "path": "Path",
+      "dsn": "Connection string",
+      "poolUsage": "Pool in use",
+      "poolIdle": "idle",
+      "poolWaits": "Total waits",
+      "changeTitle": "Change driver",
+      "test": "Test connection",
+      "testOK": "Reachable",
+      "save": "Save",
+      "saveAndRestart": "Save & Restart",
+      "restartOnly": "Restart only",
+      "savedAndRestarting": "Saved. Restarting against the new driver — the panel will reconnect in a few seconds.",
+      "savedNeedsRestart": "Saved. Restart the server to apply.",
+      "restarting": "Restart scheduled.",
+      "migrateTitle": "Migrate SQLite → PostgreSQL",
+      "migrateSubtitle": "One-shot copy of every row from your current SQLite into a fresh Postgres target. The source is never touched.",
+      "migrateHint": "The target Postgres user must be allowed to disable foreign-key checks during the bulk copy (typically a superuser role). Heavy catalogues should use pgloader / pg_dump instead — see docs/operations/postgres.md.",
+      "migrateTargetDSN": "Target Postgres DSN",
+      "migrateStart": "Start migration",
+      "migrateInProgress": "Copying…",
+      "migrateDone": "Migration complete. Save & Restart against the new target.",
+      "migrateLog": "Show event log"
+    },
     "logs": {
       "title": "Logs en vivo",
       "subtitle": "Últimos eventos del servidor. Útil para diagnosticar fallos sin abrir la consola del contenedor.",
@@ -1300,10 +1327,26 @@
   "setup": {
     "wizardLabel": "Setup Wizard",
     "steps": {
+      "database": "Database",
       "adminAccount": "Admin Account",
       "libraries": "Libraries",
       "settings": "Settings",
       "complete": "Complete"
+    },
+    "database": {
+      "title": "Choose where data lives",
+      "subtitle": "HubPlay can keep its catalogue in a bundled SQLite file (perfect for single-host installs) or in a PostgreSQL server (recommended for production or multi-instance setups).",
+      "sqliteHint": "Zero-config. Stored next to your hubplay.yaml. Best for households and small servers.",
+      "postgresHint": "Bring your own Postgres 14+ cluster. Production-grade concurrency and backups.",
+      "path": "SQLite path",
+      "pathHint": "Absolute path on the host filesystem.",
+      "dsn": "PostgreSQL DSN",
+      "dsnHint": "Standard libpq URL. The password is never stored in clear text outside your YAML.",
+      "test": "Test connection",
+      "testOK": "Reachable",
+      "saveAndRestart": "Save & Restart",
+      "skip": "Continue with SQLite (default)",
+      "savedAndRestarting": "Saved. The server is restarting against the new database — this page will resume in a few seconds."
     },
     "account": {
       "title": "Create Admin Account",

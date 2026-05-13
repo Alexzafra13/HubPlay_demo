@@ -1161,6 +1161,33 @@
     "systemAdvanced": {
       "subtitle": "Operaciones destructivas y rotación de llaves. Nada que tocar en el día a día."
     },
+    "database": {
+      "title": "Base de datos",
+      "subtitle": "Cambia entre SQLite y PostgreSQL, consulta el uso del pool y migra datos existentes sin salir del panel.",
+      "activeDriver": "Motor activo",
+      "path": "Ruta",
+      "dsn": "Cadena de conexión",
+      "poolUsage": "Pool en uso",
+      "poolIdle": "libres",
+      "poolWaits": "Esperas totales",
+      "changeTitle": "Cambiar motor",
+      "test": "Probar conexión",
+      "testOK": "Accesible",
+      "save": "Guardar",
+      "saveAndRestart": "Guardar y reiniciar",
+      "restartOnly": "Sólo reiniciar",
+      "savedAndRestarting": "Guardado. Reiniciando contra el nuevo motor — el panel volverá en unos segundos.",
+      "savedNeedsRestart": "Guardado. Reinicia el servidor para aplicar.",
+      "restarting": "Reinicio programado.",
+      "migrateTitle": "Migrar SQLite → PostgreSQL",
+      "migrateSubtitle": "Copia única de cada fila desde tu SQLite actual a un Postgres limpio. La base origen no se toca.",
+      "migrateHint": "El usuario de Postgres destino debe poder deshabilitar las verificaciones de claves foráneas durante la copia (rol superuser por defecto). Para catálogos grandes usa pgloader / pg_dump — mira docs/operations/postgres.md.",
+      "migrateTargetDSN": "DSN del Postgres destino",
+      "migrateStart": "Empezar migración",
+      "migrateInProgress": "Copiando…",
+      "migrateDone": "Migración completa. Guarda y reinicia contra el nuevo destino.",
+      "migrateLog": "Ver registro"
+    },
     "logs": {
       "title": "Logs en vivo",
       "subtitle": "Últimos eventos del servidor. Útil para diagnosticar fallos sin abrir la consola del contenedor.",
@@ -1300,10 +1327,26 @@
   "setup": {
     "wizardLabel": "Asistente de configuración",
     "steps": {
+      "database": "Base de datos",
       "adminAccount": "Cuenta de admin",
       "libraries": "Bibliotecas",
       "settings": "Ajustes",
       "complete": "Completar"
+    },
+    "database": {
+      "title": "Elige dónde guardar los datos",
+      "subtitle": "HubPlay puede guardar su catálogo en un fichero SQLite incluido (ideal para un solo host) o en un servidor PostgreSQL (recomendado para producción o múltiples instancias).",
+      "sqliteHint": "Sin configuración. Se guarda junto a tu hubplay.yaml. Ideal para casa y servidores pequeños.",
+      "postgresHint": "Usa tu propio cluster Postgres 14+. Concurrencia y backups de nivel producción.",
+      "path": "Ruta SQLite",
+      "pathHint": "Ruta absoluta en el sistema de archivos del host.",
+      "dsn": "DSN de PostgreSQL",
+      "dsnHint": "URL estándar libpq. La contraseña nunca se guarda en texto plano fuera de tu YAML.",
+      "test": "Probar conexión",
+      "testOK": "Accesible",
+      "saveAndRestart": "Guardar y reiniciar",
+      "skip": "Continuar con SQLite (por defecto)",
+      "savedAndRestarting": "Guardado. El servidor se está reiniciando con la nueva base — esta página se reanudará en unos segundos."
     },
     "account": {
       "title": "Crear cuenta de administrador",

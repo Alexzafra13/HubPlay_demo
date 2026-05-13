@@ -10,8 +10,6 @@ import (
 	"strings"
 
 	"hubplay/internal/config"
-
-	"gopkg.in/yaml.v3"
 )
 
 // DirEntry represents a single directory in a browse result.
@@ -156,27 +154,42 @@ func isSensitivePath(absPath string) bool {
 	return false
 }
 
-// CompleteSetup marks the setup as done and persists the config to disk.
-//
-// The file is written with mode 0600. The YAML carries secrets the
-// runtime treats as sensitive — JWT signing seed, provider API keys
-// (TMDb, Fanart, OpenSubtitles), and the DB path — and a 0644 file on
-// a multi-user host (or a docker-compose mount with permissive umask)
-// leaks them to any local reader. 0600 matches the convention every
-// other secret-bearing file in self-hosted media servers uses (Plex
-// Preferences.xml, Jellyfin server.json).
+// CompleteSetup marks the setup as done and persists the config to
+// disk via the shared config.Save helper (atomic write, 0600 perms).
+// The YAML carries secrets the runtime treats as sensitive — JWT
+// signing seed, provider API keys (TMDb, Fanart, OpenSubtitles), and
+// the DB path or DSN — so the file is never world-readable.
 func (s *Service) CompleteSetup(startScan bool) error {
 	s.config.SetupCompleted = true
 
-	data, err := yaml.Marshal(s.config)
-	if err != nil {
-		return fmt.Errorf("marshalling config: %w", err)
-	}
-
-	if err := os.WriteFile(s.configPath, data, 0o600); err != nil {
-		return fmt.Errorf("writing config: %w", err)
+	if err := config.Save(s.config, s.configPath); err != nil {
+		return fmt.Errorf("persisting config: %w", err)
 	}
 
 	s.logger.Info("setup completed, config persisted", "start_scan", startScan)
+	return nil
+}
+
+// SaveDatabaseConfig persists a new database driver + DSN/path to the
+// YAML so the next boot picks it up. Used by the wizard step 0 and the
+// admin Database panel after the candidate connection passes the Open
+// + Ping test. Does not validate the connection itself — callers must
+// have tested it first; this is the persistence-only path.
+//
+// The change is not applied to the running process. The operator is
+// expected to call Restart afterwards so the new driver takes effect.
+func (s *Service) SaveDatabaseConfig(driver, path, dsn string) error {
+	s.config.Database.Driver = driver
+	s.config.Database.Path = path
+	s.config.Database.DSN = dsn
+
+	if err := config.Save(s.config, s.configPath); err != nil {
+		return fmt.Errorf("persisting database config: %w", err)
+	}
+
+	s.logger.Info("database config persisted",
+		"driver", driver,
+		"path", path,
+		"dsn_set", dsn != "")
 	return nil
 }

@@ -39,6 +39,11 @@ import type {
   SystemStats,
   AuthKey,
   RotateAuthKeyResponse,
+  AdminDatabaseStatus,
+  AdminDatabaseTestRequest,
+  AdminDatabaseTestResponse,
+  AdminDatabaseSaveRequest,
+  AdminDatabaseSaveResponse,
   UnhealthyChannel,
   UpdateLibraryRequest,
   UpsertScheduledJobRequest,
@@ -1669,6 +1674,56 @@ export class ApiClient {
       "DELETE",
       `/admin/system/settings/${encodeURIComponent(key)}`,
     );
+  }
+
+  // ─── Admin: database driver + DSN management ──────────────────────────
+
+  async getAdminDatabase(): Promise<AdminDatabaseStatus> {
+    return this.request<AdminDatabaseStatus>("GET", "/admin/system/db");
+  }
+
+  async testAdminDatabase(req: AdminDatabaseTestRequest): Promise<AdminDatabaseTestResponse> {
+    return this.request<AdminDatabaseTestResponse>("POST", "/admin/system/db/test", { body: req });
+  }
+
+  async saveAdminDatabase(req: AdminDatabaseSaveRequest): Promise<AdminDatabaseSaveResponse> {
+    return this.request<AdminDatabaseSaveResponse>("PUT", "/admin/system/db", { body: req });
+  }
+
+  async restartServer(): Promise<{ restart_scheduled: boolean }> {
+    return this.request<{ restart_scheduled: boolean }>("POST", "/admin/system/restart");
+  }
+
+  // migrateDatabase streams NDJSON events through the response body.
+  // Returns the raw Response so the caller can use the ReadableStream
+  // reader to render live progress in the panel.
+  async migrateDatabase(
+    req: { target_dsn: string; restart?: boolean },
+  ): Promise<Response> {
+    // Use the underlying fetch so we get the raw stream; the
+    // request<T> helper auto-parses JSON which would buffer the
+    // entire response.
+    const res = await fetch("/api/v1/admin/system/db/migrate", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || `HTTP ${res.status}`);
+    }
+    return res;
+  }
+
+  // ─── Setup wizard: database step ──────────────────────────────────────
+
+  async testSetupDatabase(req: AdminDatabaseTestRequest): Promise<AdminDatabaseTestResponse> {
+    return this.request<AdminDatabaseTestResponse>("POST", "/setup/db/test", { body: req });
+  }
+
+  async saveSetupDatabase(req: AdminDatabaseSaveRequest): Promise<AdminDatabaseSaveResponse> {
+    return this.request<AdminDatabaseSaveResponse>("POST", "/setup/db", { body: req });
   }
 
   // ─── Admin: signing keys ──────────────────────────────────────────────

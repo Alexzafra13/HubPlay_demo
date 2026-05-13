@@ -12,6 +12,11 @@ import { api } from "../client";
 import { queryKeys } from "../queryKeys";
 import { useEventStream } from "@/hooks/useEventStream";
 import type {
+  AdminDatabaseSaveRequest,
+  AdminDatabaseSaveResponse,
+  AdminDatabaseStatus,
+  AdminDatabaseTestRequest,
+  AdminDatabaseTestResponse,
   AdminStreamActivityResponse,
   AdminStreamSession,
   AdminTopItemsResponse,
@@ -160,6 +165,49 @@ export function useKillAdminStreamSession() {
       // 30s system-stats refetch.
       qc.invalidateQueries({ queryKey: queryKeys.systemStats });
     },
+  });
+}
+
+// ─── Database driver management ────────────────────────────────────
+
+// Live driver + pool stats. Polled at a slow cadence (10s) because
+// the only mutation is "operator clicks Save" — between clicks the
+// pool stats drift slowly and the snapshot the panel already has is
+// fine.
+export function useAdminDatabase(
+  options?: Partial<UseQueryOptions<AdminDatabaseStatus>>,
+) {
+  return useQuery<AdminDatabaseStatus>({
+    queryKey: ["admin", "db"],
+    queryFn: () => api.getAdminDatabase(),
+    refetchInterval: 10_000,
+    ...options,
+  });
+}
+
+// One-shot probe of a candidate driver/DSN. The mutation pattern
+// matches Sonarr/Radarr/Jellyfin's "Test" buttons: the response is
+// the same shape as the save path (ok + error + version) so the
+// form can render inline feedback without owning two queries.
+export function useTestAdminDatabase() {
+  return useMutation<AdminDatabaseTestResponse, Error, AdminDatabaseTestRequest>({
+    mutationFn: (req) => api.testAdminDatabase(req),
+  });
+}
+
+export function useSaveAdminDatabase() {
+  const qc = useQueryClient();
+  return useMutation<AdminDatabaseSaveResponse, Error, AdminDatabaseSaveRequest>({
+    mutationFn: (req) => api.saveAdminDatabase(req),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin", "db"] });
+    },
+  });
+}
+
+export function useRestartServer() {
+  return useMutation<{ restart_scheduled: boolean }, Error, void>({
+    mutationFn: () => api.restartServer(),
   });
 }
 
