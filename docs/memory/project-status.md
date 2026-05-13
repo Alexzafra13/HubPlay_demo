@@ -2403,6 +2403,26 @@ Trabajo que **sube en la cola** porque la app TV lo necesita:
 
 ## Cola priorizada para la siguiente sesión
 
+### **Pendiente · IPTV per-user channel order + hide** (specced 2026-05-13)
+
+> Plan completo en [`per-user-channel-order-pending.md`](./per-user-channel-order-pending.md).
+
+Hoy `channels.number` es **global** — todos los usuarios ven el mismo
+dial. El user pidió poder reordenar la lista de canales por cuenta
+("poner el 35 en el 3") y ocultar canales que no quiere ver.
+
+Implementación esperada:
+- Nueva tabla `user_channel_preferences (user_id, channel_id, custom_number, is_hidden, updated_at)` con PK compuesta y cascade deletes (SQLite + Postgres).
+- `iptv.Service.ListHealthyByLibraryForUser(ctx, libraryID, userID)` que joina prefs + filtra `is_hidden` + reemplaza `Number`.
+- Endpoints `POST /me/channels/reorder`, `PUT /me/channels/{id}/number`, `PUT/DELETE /me/channels/{id}/hide`.
+- UI Android TV: long-press OK sobre canal → "subir/bajar/ocultar". Web: drag&drop.
+- **Esfuerzo**: ~1 sesión mínimo viable (reorder), ~2 con hide + UI completa.
+
+**Confirmado por separado**: los canales con health_status=dead YA se
+filtran del lado server vía `ListHealthyByLibrary` (test
+`TestChannel_ListHealthyByLibrary_HidesUnhealthyAndDisabled`). No hay
+trabajo aquí — la pregunta sólo era verificación.
+
 ### **P0 · Cerrado** (federación security debt — ver bloque sesión 2026-04-30 mañana al inicio)
 
 1. ~~Replay protection peer JWT~~ ✅ **shipped 2026-04-30** (`b0b0613`).
