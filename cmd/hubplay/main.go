@@ -77,18 +77,25 @@ func run(configPath string) error {
 
 	// ═══ Phase 2: Database ═══
 	// Swap in any pending admin-uploaded restore file before opening
-	// the live connection. No-op when no file is present, so this
-	// adds a single Stat() to every boot — cheap.
-	if err := db.ApplyPendingRestoreIfAny(cfg.Database.Path, logger); err != nil {
-		return fmt.Errorf("applying pending DB restore: %w", err)
+	// the live connection. SQLite-only — restore is a file swap on the
+	// live DB path; Postgres has its own server-side restore tooling
+	// (pg_restore + base backups) that operates out-of-process.
+	if cfg.Database.Driver == db.DriverSQLite {
+		if err := db.ApplyPendingRestoreIfAny(cfg.Database.Path, logger); err != nil {
+			return fmt.Errorf("applying pending DB restore: %w", err)
+		}
 	}
-	database, err := db.Open(cfg.Database.Driver, cfg.Database.Path, logger)
+	dbDsnOrPath := cfg.Database.Path
+	if cfg.Database.Driver == db.DriverPostgres {
+		dbDsnOrPath = cfg.Database.DSN
+	}
+	database, err := db.Open(cfg.Database.Driver, dbDsnOrPath, logger)
 	if err != nil {
 		return fmt.Errorf("opening database: %w", err)
 	}
 	defer database.Close() //nolint:errcheck
 
-	if err := db.Migrate(database, hubplay.SQLiteMigrations, logger); err != nil {
+	if err := db.Migrate(cfg.Database.Driver, database, hubplay.Migrations(cfg.Database.Driver), logger); err != nil {
 		return fmt.Errorf("running migrations: %w", err)
 	}
 
@@ -157,7 +164,8 @@ func run(configPath string) error {
 	// Periodic SQLite query-planner refresh + FTS5 merge. Fires every
 	// 6h once started; first tick is on the interval, not immediately,
 	// so boot doesn't pay the cost on top of the cold-start overhead.
-	stopOptimize := db.StartPeriodicOptimize(ctx, database, logger)
+	// No-op on Postgres (autovacuum handles ANALYZE on its own schedule).
+	stopOptimize := db.StartPeriodicOptimize(ctx, cfg.Database.Driver, database, logger)
 	defer stopOptimize()
 
 	// ═══ Phase 4a: Library Scan Scheduler ═══
@@ -503,6 +511,7 @@ func run(configPath string) error {
 		authService:           authService,
 		retention:             retentionRunner,
 		database:              database,
+		dbDriver:              cfg.Database.Driver,
 		logger:                logger,
 	})
 }
@@ -525,6 +534,7 @@ type runtime struct {
 	authService           *auth.Service
 	retention             *retention.Runner
 	database              *sql.DB
+	dbDriver              string
 	logger                *slog.Logger
 }
 
@@ -608,9 +618,9 @@ func waitForShutdown(ctx context.Context, cancel context.CancelFunc, rt *runtime
 	// Refresh sqlite query-planner stats before closing so the next
 	// process starts with up-to-date analysis. PRAGMA optimize is a
 	// no-op for tables that haven't changed; this is best-effort and
-	// never blocks shutdown.
+	// never blocks shutdown. No-op on Postgres.
 	optimizeCtx, optimizeCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	db.Optimize(optimizeCtx, database, logger)
+	db.Optimize(optimizeCtx, rt.dbDriver, database, logger)
 	optimizeCancel()
 
 	// Close database

@@ -86,7 +86,7 @@ func TestOptimize_DoesNotPanicOnFreshDB(t *testing.T) {
 	// Should be a no-op on an empty DB. The test passes if the call
 	// returns without panicking and without printing an error to a
 	// logger that's wired to t.Error (we use io.Discard above).
-	db.Optimize(context.Background(), database, silent)
+	db.Optimize(context.Background(), db.DriverSQLite, database, silent)
 }
 
 func isExactly(want string) func(string) bool {

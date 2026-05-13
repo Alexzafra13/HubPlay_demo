@@ -8,6 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgerrcode"
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"hubplay/internal/db/sqlc"
 	"hubplay/internal/db/sqlc_pg"
 )
@@ -198,23 +201,21 @@ func (r *LibraryEPGSourceRepository) nextPriority(ctx context.Context, libraryID
 }
 
 // isUniqueConstraintError detects UNIQUE-constraint violations from
-// both backends. SQLite (modernc.org/sqlite) emits "UNIQUE constraint
-// failed: …"; Postgres emits SQLSTATE 23505 with "duplicate key
-// value violates unique constraint". Substring matching is the
-// pragmatic check while the project ships without a typed pgx /
-// lib/pq dependency — once Sesión F wires the driver, this can
-// switch to `errors.As(*pgconn.PgError)`.
+// both backends. Postgres uses the typed pgx error (SQLSTATE 23505
+// per the SQL standard); SQLite (modernc.org/sqlite) ships no typed
+// error value, so a substring match against the stable "UNIQUE
+// constraint failed: …" message is the pragmatic check.
 func isUniqueConstraintError(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := err.Error()
-	if strings.Contains(msg, "UNIQUE constraint failed") ||
-		strings.Contains(msg, "constraint failed: UNIQUE") {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == pgerrcode.UniqueViolation {
 		return true
 	}
-	return strings.Contains(msg, "duplicate key value violates unique constraint") ||
-		strings.Contains(msg, "SQLSTATE 23505")
+	msg := err.Error()
+	return strings.Contains(msg, "UNIQUE constraint failed") ||
+		strings.Contains(msg, "constraint failed: UNIQUE")
 }
 
 // Delete removes a source. CASCADE on `libraries(id)` already covers

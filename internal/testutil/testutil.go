@@ -27,7 +27,7 @@ func NewTestDB(t *testing.T) *sql.DB {
 		t.Fatalf("opening test db: %v", err)
 	}
 
-	if err := db.Migrate(database, hubplay.SQLiteMigrations, slog.Default()); err != nil {
+	if err := db.Migrate("sqlite", database, hubplay.SQLiteMigrations, slog.Default()); err != nil {
 		_ = database.Close()
 		t.Fatalf("migrating test db: %v", err)
 	}
