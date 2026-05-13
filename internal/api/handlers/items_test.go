@@ -478,6 +478,10 @@ func trickplayEnv(t *testing.T) (*itemTestEnv, string) {
 		r.Get("/trickplay.png", env.handler.TrickplaySprite)
 	})
 	env.router = r
+	// Wait for any background ffmpeg goroutine before t.TempDir's
+	// RemoveAll runs — without this the cleanup races with writes
+	// into the dir and fails with "directory not empty".
+	t.Cleanup(env.handler.WaitTrickplayInflight)
 	return env, dir
 }
 
