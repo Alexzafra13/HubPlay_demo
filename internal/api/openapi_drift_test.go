@@ -184,6 +184,15 @@ var outOfScopeExact = map[string]string{
 	"POST /setup/db/test":        "first-run wizard — DB driver test",
 	"POST /setup/db":             "first-run wizard — DB driver save",
 
+	// ── Per-user IPTV personalisation (web-only) ──────────────────────
+	// Out of scope for the public SDK — these are settings UI a viewer
+	// uses to reorder / hide channels for their own account. No third-
+	// party consumer drives them; the React Live TV "Personalise" panel
+	// is the only client.
+	"PUT /me/iptv/channels/order":                   "user channel ordering",
+	"DELETE /me/iptv/channels/order":                "user channel ordering reset",
+	"PUT /me/iptv/channels/{channelId}/visibility":  "user channel hide/show",
+
 	// ── Peer-to-peer federation (server-to-server) ────────────────────
 	"GET /federation/info":                                      "p2p server info",
 	"POST /peer/handshake":                                      "p2p pairing",

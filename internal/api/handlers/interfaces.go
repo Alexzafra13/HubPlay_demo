@@ -188,6 +188,16 @@ type IPTVService interface {
 	// refresh cycles.
 	RecordWatch(ctx context.Context, userID, channelID string) (time.Time, error)
 	ListContinueWatching(ctx context.Context, userID string, limit int, accessibleLibraries map[string]bool) ([]*db.Channel, []time.Time, error)
+
+	// Per-user channel ordering + visibility. The overlay onto a
+	// library's channel list is applied by GetChannelsForUser;
+	// ReplaceChannelOrder / SetChannelVisibility / ResetChannelOrder
+	// drive the personalisation panel's mutations.
+	GetChannelsForUser(ctx context.Context, libraryID, userID string, activeOnly bool) ([]*db.Channel, error)
+	ListChannelOverrides(ctx context.Context, userID string) ([]db.UserChannelOrderEntry, error)
+	ReplaceChannelOrder(ctx context.Context, userID string, orderedIDs []string, hiddenIDs map[string]bool) error
+	SetChannelVisibility(ctx context.Context, userID, channelID string, hidden bool) error
+	ResetChannelOrder(ctx context.Context, userID string) error
 }
 
 // IPTVStreamProxyService defines IPTV proxy operations needed by handlers.

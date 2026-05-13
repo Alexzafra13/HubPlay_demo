@@ -14,6 +14,7 @@ type Repositories struct {
 	UserData           *UserDataRepository
 	Channels           *ChannelRepository
 	ChannelFavorites   *ChannelFavoritesRepository
+	ChannelOrder       *UserChannelOrderRepository
 	ChannelWatchHistory *ChannelWatchHistoryRepository
 	EPGPrograms        *EPGProgramRepository
 	LibraryEPGSources  *LibraryEPGSourceRepository
@@ -55,6 +56,7 @@ func NewRepositories(driver string, database *sql.DB) *Repositories {
 		UserData:           NewUserDataRepository(driver, database),
 		Channels:           NewChannelRepository(driver, database),
 		ChannelFavorites:   NewChannelFavoritesRepository(driver, database),
+		ChannelOrder:       NewUserChannelOrderRepository(driver, database),
 		ChannelWatchHistory: NewChannelWatchHistoryRepository(driver, database),
 		EPGPrograms:        NewEPGProgramRepository(driver, database),
 		LibraryEPGSources:  NewLibraryEPGSourceRepository(driver, database),

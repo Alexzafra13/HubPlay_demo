@@ -468,6 +468,31 @@ func (s *iptvFakeService) ListContinueWatching(_ context.Context, userID string,
 	return channels, watched, nil
 }
 
+// Per-user channel personalisation — stubs return zero values; the
+// per-feature tests under iptv_personalisation_test.go drive the real
+// service against a real DB, so the fake only needs to satisfy the
+// interface for tests that don't exercise these methods.
+
+func (s *iptvFakeService) GetChannelsForUser(ctx context.Context, libraryID, userID string, activeOnly bool) ([]*db.Channel, error) {
+	return s.GetChannels(ctx, libraryID, activeOnly)
+}
+
+func (s *iptvFakeService) ListChannelOverrides(_ context.Context, userID string) ([]db.UserChannelOrderEntry, error) {
+	return nil, nil
+}
+
+func (s *iptvFakeService) ReplaceChannelOrder(_ context.Context, userID string, orderedIDs []string, hiddenIDs map[string]bool) error {
+	return nil
+}
+
+func (s *iptvFakeService) SetChannelVisibility(_ context.Context, userID, channelID string, hidden bool) error {
+	return nil
+}
+
+func (s *iptvFakeService) ResetChannelOrder(_ context.Context, userID string) error {
+	return nil
+}
+
 func (s *iptvFakeService) ReorderEPGSources(_ context.Context, libraryID string, orderedIDs []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

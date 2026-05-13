@@ -1490,5 +1490,28 @@
     "skipIntro": "Saltar intro",
     "skipCredits": "Saltar créditos",
     "skipRecap": "Saltar resumen"
+  },
+  "livetv": {
+    "customize": {
+      "link": "Personalizar",
+      "linkAria": "Personalizar la lista de canales",
+      "title": "Personalizar TV en directo",
+      "subtitle": "Reordena canales u oculta los que no ves. Los cambios sólo afectan a tu cuenta — otros usuarios y el orden del administrador no cambian.",
+      "back": "Volver a TV en directo",
+      "library": "Biblioteca",
+      "moveUp": "Subir",
+      "moveDown": "Bajar",
+      "hide": "Ocultar para mí",
+      "show": "Volver a mostrar",
+      "save": "Guardar",
+      "saved": "Guardado.",
+      "reset": "Restaurar orden del administrador",
+      "resetConfirm": "¿Borrar todas tus personalizaciones y restaurar el orden original del administrador?",
+      "resetDone": "Restaurado.",
+      "empty": "Aún no hay canales.",
+      "emptyHint": "Cuando el administrador refresque la lista M3U, tus canales aparecerán aquí.",
+      "noLibraries": "No hay bibliotecas de TV en directo configuradas.",
+      "noLibrariesHint": "Pide al administrador que configure una fuente IPTV primero."
+    }
   }
 }

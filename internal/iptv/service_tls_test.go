@@ -50,7 +50,7 @@ http://upstream.example/x.m3u8
 	}
 
 	svc := NewService(repos.Channels, repos.EPGPrograms, repos.Libraries,
-		repos.ChannelFavorites, repos.LibraryEPGSources, repos.ChannelOverrides,
+		repos.ChannelFavorites, repos.ChannelOrder, repos.LibraryEPGSources, repos.ChannelOverrides,
 		repos.ChannelWatchHistory,
 		slog.New(slog.NewTextHandler(new(discard), nil)))
 
@@ -96,7 +96,7 @@ http://upstream.example/la1.m3u8
 	}
 
 	svc := NewService(repos.Channels, repos.EPGPrograms, repos.Libraries,
-		repos.ChannelFavorites, repos.LibraryEPGSources, repos.ChannelOverrides,
+		repos.ChannelFavorites, repos.ChannelOrder, repos.LibraryEPGSources, repos.ChannelOverrides,
 		repos.ChannelWatchHistory,
 		slog.New(slog.NewTextHandler(new(discard), nil)))
 
@@ -138,7 +138,7 @@ http://upstream.example/t.m3u8
 	}
 
 	svc := NewService(repos.Channels, repos.EPGPrograms, repos.Libraries,
-		repos.ChannelFavorites, repos.LibraryEPGSources, repos.ChannelOverrides,
+		repos.ChannelFavorites, repos.ChannelOrder, repos.LibraryEPGSources, repos.ChannelOverrides,
 		repos.ChannelWatchHistory,
 		slog.New(slog.NewTextHandler(new(discard), nil)))
 
@@ -168,7 +168,7 @@ func TestService_InsecureFetchClient_Cached(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	repos := db.NewRepositories(testutil.Driver(), database)
 	svc := NewService(repos.Channels, repos.EPGPrograms, repos.Libraries,
-		repos.ChannelFavorites, repos.LibraryEPGSources, repos.ChannelOverrides,
+		repos.ChannelFavorites, repos.ChannelOrder, repos.LibraryEPGSources, repos.ChannelOverrides,
 		repos.ChannelWatchHistory,
 		slog.New(slog.NewTextHandler(new(discard), nil)))
 

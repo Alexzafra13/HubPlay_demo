@@ -39,6 +39,7 @@ type Service struct {
 	epgPrograms  *db.EPGProgramRepository
 	libraries    *db.LibraryRepository
 	favorites    *db.ChannelFavoritesRepository
+	channelOrder *db.UserChannelOrderRepository
 	epgSources   *db.LibraryEPGSourceRepository
 	overrides    *db.ChannelOverrideRepository
 	watchHistory *db.ChannelWatchHistoryRepository
@@ -104,6 +105,7 @@ func NewService(
 	epgPrograms *db.EPGProgramRepository,
 	libraries *db.LibraryRepository,
 	favorites *db.ChannelFavoritesRepository,
+	channelOrder *db.UserChannelOrderRepository,
 	epgSources *db.LibraryEPGSourceRepository,
 	overrides *db.ChannelOverrideRepository,
 	watchHistory *db.ChannelWatchHistoryRepository,
@@ -114,6 +116,7 @@ func NewService(
 		epgPrograms:  epgPrograms,
 		libraries:    libraries,
 		favorites:    favorites,
+		channelOrder: channelOrder,
 		epgSources:   epgSources,
 		overrides:    overrides,
 		watchHistory: watchHistory,

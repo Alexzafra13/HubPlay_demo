@@ -45,7 +45,7 @@ func TestSetChannelTvgID_PersistsAcrossM3URefresh(t *testing.T) {
 	}
 
 	svc := NewService(repos.Channels, repos.EPGPrograms, repos.Libraries,
-		repos.ChannelFavorites, repos.LibraryEPGSources, repos.ChannelOverrides,
+		repos.ChannelFavorites, repos.ChannelOrder, repos.LibraryEPGSources, repos.ChannelOverrides,
 		repos.ChannelWatchHistory,
 		slog.New(slog.NewTextHandler(new(discard), nil)))
 
@@ -118,7 +118,7 @@ func TestSetChannelTvgID_ClearsPersistentOverride(t *testing.T) {
 	})
 
 	svc := NewService(repos.Channels, repos.EPGPrograms, repos.Libraries,
-		repos.ChannelFavorites, repos.LibraryEPGSources, repos.ChannelOverrides,
+		repos.ChannelFavorites, repos.ChannelOrder, repos.LibraryEPGSources, repos.ChannelOverrides,
 		repos.ChannelWatchHistory,
 		slog.New(slog.NewTextHandler(new(discard), nil)))
 
@@ -178,7 +178,7 @@ func TestListChannelsWithoutEPG_SurfaceOrphansOnly(t *testing.T) {
 	}})
 
 	svc := NewService(repos.Channels, repos.EPGPrograms, repos.Libraries,
-		repos.ChannelFavorites, repos.LibraryEPGSources, repos.ChannelOverrides,
+		repos.ChannelFavorites, repos.ChannelOrder, repos.LibraryEPGSources, repos.ChannelOverrides,
 		repos.ChannelWatchHistory,
 		slog.New(slog.NewTextHandler(new(discard), nil)))
 
