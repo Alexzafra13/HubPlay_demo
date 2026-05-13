@@ -14,9 +14,65 @@ services:
       - ${HUBPLAY_MEDIA_SERIES:-./series}:/media/series:ro
     environment:
       - TZ=${TZ:-Europe/Madrid}
+      # Bundled Postgres DSN — points at the `db` service below. The
+      # binary uses this to offer a one-click "Switch to PostgreSQL"
+      # toggle in the admin panel + setup wizard without making the
+      # operator type a connection string. SQLite remains the default
+      # until the operator explicitly flips the switch in the UI.
+      - HUBPLAY_POSTGRES_BUNDLED_DSN=postgres://hubplay:${HUBPLAY_POSTGRES_PASSWORD:-hubplay}@db:5432/hubplay?sslmode=disable
+    # The hubplay process never crashes on a missing/unreachable
+    # `db` — SQLite is the default, the bundled DSN is just an
+    # *offer*. `depends_on` with `service_healthy` keeps the boot
+    # ordering predictable for operators who DID flip the switch
+    # (they get a ready Postgres before the binary tries to open).
+    depends_on:
+      db:
+        condition: service_healthy
     restart: unless-stopped
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
+
+  # Bundled Postgres for the plug-and-play "Switch to PostgreSQL"
+  # toggle in the admin panel. ~30 MB RAM idle — small change for a
+  # significantly nicer UX (no DSN to copy/paste, no external server
+  # to provision). SQLite users pay nothing else: the binary defaults
+  # to SQLite and only opens this DB when the operator flips the
+  # toggle and restarts.
+  #
+  # Operators who want to use a managed / external Postgres can
+  # simply leave the toggle off and paste a custom DSN in the
+  # "Advanced — custom DSN" section of the panel.
+  db:
+    image: postgres:16-alpine
+    container_name: hubplay-db
+    environment:
+      - POSTGRES_DB=hubplay
+      - POSTGRES_USER=hubplay
+      - POSTGRES_PASSWORD=${HUBPLAY_POSTGRES_PASSWORD:-hubplay}
+    volumes:
+      # Named volume keeps the data across container recreates. Docker
+      # Compose namespaces this so two stacks on the same host don't
+      # collide.
+      - hubplay_pgdata:/var/lib/postgresql/data
+    # No host port exposed by default — the Postgres only talks to
+    # the hubplay container over the internal docker network. If you
+    # want to attach `psql` from the host, add a `ports:` entry in
+    # your `.env` setup or use `docker exec hubplay-db psql -U hubplay`.
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hubplay -d hubplay"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  hubplay_pgdata:

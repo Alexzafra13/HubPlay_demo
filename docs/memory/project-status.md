@@ -1,5 +1,46 @@
 # Estado del proyecto
 
+> 🎬 **Sesión 2026-05-13 (rama `claude/pensive-lehmann-8c13f5`, Sesión H + H.1 — DB plug-and-play UI + bundled Postgres en docker-compose)** — la migración Postgres pasa de "operacional desde YAML" a "operacional desde la web" (Sesión H) y de ahí a "un click sin pegar nada" gracias a Postgres pre-cableado en docker-compose (Sesión H.1).
+>
+> ## 🎯 Sesión H.1 — Bundled Postgres + UI toggle (sin DSN visible)
+>
+> Tras Sesión H el flujo seguía pidiendo al operador pegar una DSN. El usuario lo flagged: "no puede estar ya en el docker compose y que el usuario solo a traves del panel de la web con un selector lo elija?". Sesión H.1 cierra la última grieta: Postgres viene ya en `docker-compose.yml` + `docker-compose.dev.yml` + `deploy/docker-compose.prod.yml` como servicio `db`, y la UI lo detecta y ofrece un toggle de un click.
+>
+> **docker-compose**:
+> - Servicio `db: postgres:16-alpine` con volume nombrado, healthcheck `pg_isready`, NO expone puerto al host (red docker interna).
+> - User/password default `hubplay:hubplay`, sobreescribibles vía `HUBPLAY_POSTGRES_PASSWORD` en `.env`.
+> - `hubplay` recibe `HUBPLAY_POSTGRES_BUNDLED_DSN=postgres://hubplay:${HUBPLAY_POSTGRES_PASSWORD}@db:5432/hubplay?sslmode=disable` por env.
+> - `depends_on: db.service_healthy` para que el boot sea predecible si el operador ya está en pg.
+> - SQLite sigue siendo default — el operador paga ~30 MB RAM idle del pg que sólo se usa cuando flipa el switch.
+>
+> **Backend H.1**:
+> - `internal/api/handlers/admin_db.go::BundledPostgresDSN()` — exporta el lookup de la env var, una sola fuente de verdad.
+> - Nuevo endpoint `GET /admin/system/db/profiles` y `GET /setup/db/profiles` — devuelven `{bundled_postgres: bool, bundled_label?}`. NO devuelven la DSN (lleva password). La UI sólo aprende "puedo ofrecer el toggle".
+> - `dbTestRequest`, `dbSaveRequest` y el handler `Migrate` ahora aceptan `use_bundled: true` — el server sustituye la DSN candidata por la del env, el cliente nunca la ve ni la tipa.
+>
+> **Frontend H.1**:
+> - `DatabasePanel.tsx` reescrito: cuando hay bundled, dos cards "tipo radio gigante" (SQLite / PostgreSQL) que ejecutan Test+Save+Restart en cadena en un único click (`applyOneClick`). El form de DSN sigue ahí detrás de un collapsible "DSN personalizado (avanzado)" — para operadores con pg externo (managed cloud, remoto). Cuando NO hay bundled, el collapsible se abre por defecto (vía `customOpenManual ?? !hasBundled`).
+> - `DatabaseStep.tsx` reescrito en paralelo: dos cards en el wizard, "PostgreSQL" marcado como `recommended`. SQLite simplemente avanza al siguiente step (no requiere save/restart porque ya está activo). Cualquier elección de pg → Test bundled + Save + Restart automático.
+> - `useAdminDatabaseProfiles` hook nuevo con staleTime 1h (no cambia entre redeploys).
+>
+> **Tests H.1** (suma):
+> - 4 nuevos tests Go: `Profiles_NoBundledByDefault`, `Profiles_BundledWhenEnvSet` (con assertion defence-in-depth de que la DSN NO se filtra en la respuesta), `Save_UseBundledFallsBackToEnv`, `Save_UseBundledWithoutEnvRejects`.
+> - 2 nuevos tests vitest: panel admin con bundled → cards visibles + active state correcto. Wizard step con bundled → cards visibles + DSN field ausente.
+> - Drift guard `TestOpenAPISpec_RouterCoverage`: 2 rutas nuevas (`/admin/system/db/profiles` y `/setup/db/profiles`).
+> - **Total**: 18/18 vitest verde sobre los specs del feature, 22 packages Go verde, `go vet` clean.
+>
+> **El resultado del flujo "ya tengo SQLite y quiero pg" en home server**:
+> 1. Admin → Sistema → Avanzado → Base de datos.
+> 2. Click en card "PostgreSQL" → backend hace Test bundled DSN + Save + Restart en cadena.
+> 3. Container vuelve en 2-3 s contra pg vacío.
+> 4. (Opcional) Si tenía datos, click "Migrar SQLite → PostgreSQL" en la card de migración. NDJSON stream con progreso por tabla. Cero DSN pegado.
+>
+> Para fresh install (wizard step 0): mismo flow pero las dos cards aparecen como primera pantalla del wizard. "PostgreSQL recomendado", un click, restart, el wizard reanuda automáticamente contra pg ya en step "account".
+>
+> El usuario nunca ve / pega / edita un YAML, una DSN, ni una password.
+>
+> ---
+>
 > 🎬 **Sesión 2026-05-13 (rama `claude/pensive-lehmann-8c13f5`, Sesión H — DB plug-and-play UI + migrator integrado)** — la migración Postgres pasa de "operacional desde YAML" a "operacional desde la web". El operador puede ahora cambiar driver, probar conexión, persistir, reiniciar y migrar datos sqlite→pg sin tocar la terminal.
 >
 > ## 🔌 Sesión H — Plug-and-play DB driver + migrator integrado

@@ -250,6 +250,7 @@ func NewRouter(deps Dependencies) http.Handler {
 			// pick SQLite or Postgres before any data has landed so
 			// the rest of the wizard creates rows in the chosen
 			// backend, not the YAML default.
+			r.Get("/setup/db/profiles", setupHandler.DatabaseProfiles)
 			r.Post("/setup/db/test", setupHandler.TestDatabase)
 			r.Post("/setup/db", setupHandler.SaveDatabase)
 		}
@@ -631,6 +632,7 @@ func NewRouter(deps Dependencies) http.Handler {
 							deps.Logger,
 						)
 						r.Get("/db", dbHandler.Status)
+						r.Get("/db/profiles", dbHandler.Profiles)
 						r.Post("/db/test", dbHandler.Test)
 						r.Put("/db", dbHandler.Save)
 						r.Post("/db/migrate", dbHandler.Migrate)

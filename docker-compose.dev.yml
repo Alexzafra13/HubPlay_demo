@@ -19,9 +19,33 @@ services:
     environment:
       - TZ=Europe/Madrid
       - HUBPLAY_LOGGING_LEVEL=debug
+      - HUBPLAY_POSTGRES_BUNDLED_DSN=postgres://hubplay:hubplay@db:5432/hubplay?sslmode=disable
+    depends_on:
+      db:
+        condition: service_healthy
     restart: unless-stopped
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
+
+  db:
+    image: postgres:16-alpine
+    container_name: hubplay-db-dev
+    environment:
+      - POSTGRES_DB=hubplay
+      - POSTGRES_USER=hubplay
+      - POSTGRES_PASSWORD=hubplay
+    volumes:
+      - hubplay_dev_pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hubplay -d hubplay"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  hubplay_dev_pgdata:

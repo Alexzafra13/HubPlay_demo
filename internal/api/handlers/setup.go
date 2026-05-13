@@ -256,6 +256,17 @@ type completeRequest struct {
 	StartScan bool `json:"start_scan"`
 }
 
+// DatabaseProfiles surfaces the same one-click DB profiles the admin
+// panel uses (today: the docker-compose-bundled Postgres) so the
+// wizard step 0 can hide the raw DSN field behind a toggle. Read-only,
+// no auth — same gate as the rest of /setup/* (NeedsSetup).
+func (h *SetupHandler) DatabaseProfiles(w http.ResponseWriter, r *http.Request) {
+	if !h.requireSetupActive(w, r) {
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"data": detectDBProfiles()})
+}
+
 // TestDatabase probes a candidate database driver+DSN/path so the
 // wizard's first step can show "✓ reachable" before the operator
 // commits to that backend. Shares its core with the admin panel's

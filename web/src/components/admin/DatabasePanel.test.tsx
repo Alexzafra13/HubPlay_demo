@@ -10,6 +10,7 @@ import { api } from "@/api/client";
 vi.mock("@/api/client", () => ({
   api: {
     getAdminDatabase: vi.fn(),
+    getAdminDatabaseProfiles: vi.fn(),
     testAdminDatabase: vi.fn(),
     saveAdminDatabase: vi.fn(),
     restartServer: vi.fn(),
@@ -30,6 +31,12 @@ function renderWithClient(ui: React.ReactElement) {
 describe("DatabasePanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default profile: no bundled (operator running outside the
+    // docker-compose with `db` service). Tests that exercise the
+    // bundled flow override this with another mockResolvedValueOnce.
+    vi.mocked(api.getAdminDatabaseProfiles).mockResolvedValue({
+      bundled_postgres: false,
+    });
   });
 
   it("renders the live driver + path from the status endpoint", async () => {
@@ -88,6 +95,25 @@ describe("DatabasePanel", () => {
     fireEvent.click(screen.getByRole("button", { name: /admin\.database\.test/i }));
     await waitFor(() => expect(saveBtn).toBeEnabled());
     expect(saveAndRestart).toBeEnabled();
+  });
+
+  it("offers one-click SQLite/PostgreSQL cards when bundled profile is detected", async () => {
+    vi.mocked(api.getAdminDatabase).mockResolvedValue({
+      driver: "sqlite",
+      path: "/config/hubplay.db",
+      pool: { max_open: 1, open: 1, in_use: 0, idle: 1, wait_count: 0, wait_duration_ms: 0 },
+    });
+    vi.mocked(api.getAdminDatabaseProfiles).mockResolvedValue({
+      bundled_postgres: true,
+      bundled_label: "PostgreSQL (bundled)",
+    });
+
+    renderWithClient(<DatabasePanel />);
+    // Two cards rendered as buttons: SQLite (active) and PostgreSQL.
+    await waitFor(() => {
+      expect(screen.getByRole("button", { pressed: true, name: /SQLite/i })).toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { pressed: false, name: /PostgreSQL/i })).toBeInTheDocument();
   });
 
   it("hides the migration card when the live driver is already postgres", async () => {

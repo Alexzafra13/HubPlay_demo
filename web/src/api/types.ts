@@ -1256,6 +1256,19 @@ export interface AdminDatabaseTestRequest {
   driver: DatabaseDriver;
   path?: string;
   dsn?: string;
+  // When true with driver=postgres, the server swaps in the
+  // docker-compose-bundled DSN. The UI never sees / sends the
+  // password — the panel just renders a toggle.
+  use_bundled?: boolean;
+}
+
+// Returned by GET /admin/system/db/profiles and /setup/db/profiles.
+// Drives whether the UI offers the one-click "Switch to PostgreSQL"
+// toggle (bundled docker-compose) or falls back to the custom DSN
+// form.
+export interface AdminDatabaseProfiles {
+  bundled_postgres: boolean;
+  bundled_label?: string;
 }
 
 export interface AdminDatabaseTestResponse {
@@ -1269,6 +1282,12 @@ export interface AdminDatabaseTestResponse {
 export interface AdminDatabaseSaveRequest extends AdminDatabaseTestRequest {
   // When true the server triggers a graceful self-restart after
   // persisting the new YAML so the next boot uses the new driver.
+  restart?: boolean;
+}
+
+export interface AdminDatabaseMigrateRequest {
+  target_dsn?: string;
+  use_bundled?: boolean;
   restart?: boolean;
 }
 

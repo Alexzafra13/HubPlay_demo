@@ -225,6 +225,98 @@ func TestAdminDB_Save_RejectsMissingFields(t *testing.T) {
 	}
 }
 
+func TestAdminDB_Profiles_NoBundledByDefault(t *testing.T) {
+	t.Setenv("HUBPLAY_POSTGRES_BUNDLED_DSN", "")
+	h, _, _, _ := newTestAdminDBHandler(t)
+
+	rr := httptest.NewRecorder()
+	h.Profiles(rr, httptest.NewRequest(http.MethodGet, "/admin/system/db/profiles", nil))
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d", rr.Code)
+	}
+	var body struct {
+		Data struct {
+			BundledPostgres bool   `json:"bundled_postgres"`
+			BundledLabel    string `json:"bundled_label"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Data.BundledPostgres {
+		t.Errorf("bundled_postgres should be false when env is unset")
+	}
+}
+
+func TestAdminDB_Profiles_BundledWhenEnvSet(t *testing.T) {
+	t.Setenv("HUBPLAY_POSTGRES_BUNDLED_DSN", "postgres://hubplay:hubplay@db:5432/hubplay?sslmode=disable")
+	h, _, _, _ := newTestAdminDBHandler(t)
+
+	rr := httptest.NewRecorder()
+	h.Profiles(rr, httptest.NewRequest(http.MethodGet, "/admin/system/db/profiles", nil))
+
+	var body struct {
+		Data struct {
+			BundledPostgres bool   `json:"bundled_postgres"`
+			BundledLabel    string `json:"bundled_label"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !body.Data.BundledPostgres {
+		t.Errorf("bundled_postgres should be true with env set")
+	}
+	if body.Data.BundledLabel == "" {
+		t.Errorf("expected a non-empty bundled_label")
+	}
+	// Defence-in-depth: the response must NOT leak the DSN (it
+	// carries the password, even though it lives on an internal
+	// network). The body should only signal availability.
+	if strings.Contains(rr.Body.String(), "hubplay@db") {
+		t.Errorf("response leaks the bundled DSN userinfo: %s", rr.Body.String())
+	}
+}
+
+func TestAdminDB_Save_UseBundledFallsBackToEnv(t *testing.T) {
+	t.Setenv("HUBPLAY_POSTGRES_BUNDLED_DSN", "postgres://hubplay:hubplay@db:5432/hubplay?sslmode=disable")
+	h, saver, _, _ := newTestAdminDBHandler(t)
+
+	body := bytes.NewBufferString(`{"driver":"postgres","use_bundled":true,"restart":false}`)
+	rr := httptest.NewRecorder()
+	h.Save(rr, httptest.NewRequest(http.MethodPut, "/admin/system/db", body))
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	if saver.CallCount() != 1 {
+		t.Fatalf("saver called %d times, want 1", saver.CallCount())
+	}
+	if saver.calls[0].DSN == "" {
+		t.Errorf("DSN should have been substituted from env, got empty")
+	}
+	if !strings.Contains(saver.calls[0].DSN, "hubplay@db") {
+		t.Errorf("DSN does not match env: %q", saver.calls[0].DSN)
+	}
+}
+
+func TestAdminDB_Save_UseBundledWithoutEnvRejects(t *testing.T) {
+	t.Setenv("HUBPLAY_POSTGRES_BUNDLED_DSN", "")
+	h, saver, _, _ := newTestAdminDBHandler(t)
+
+	body := bytes.NewBufferString(`{"driver":"postgres","use_bundled":true}`)
+	rr := httptest.NewRecorder()
+	h.Save(rr, httptest.NewRequest(http.MethodPut, "/admin/system/db", body))
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rr.Code)
+	}
+	if saver.CallCount() != 0 {
+		t.Errorf("saver should not be invoked, got %d calls", saver.CallCount())
+	}
+}
+
 func TestAdminDB_Restart_OneShot(t *testing.T) {
 	h, _, _, cancelled := newTestAdminDBHandler(t)
 	rr := httptest.NewRecorder()

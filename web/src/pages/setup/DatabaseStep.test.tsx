@@ -7,29 +7,53 @@ import DatabaseStep from "./DatabaseStep";
 // hit the network — the wiring is the only thing we want to assert here.
 vi.mock("@/api/client", () => ({
   api: {
+    getSetupDatabaseProfiles: vi.fn(),
     testSetupDatabase: vi.fn(),
     saveSetupDatabase: vi.fn(),
   },
 }));
 
 import { api } from "@/api/client";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+
+function renderWithClient(ui: React.ReactElement) {
+  const qc = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, gcTime: 0 },
+      mutations: { retry: false },
+    },
+  });
+  return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+}
 
 describe("DatabaseStep", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: no bundled — the legacy DSN form is rendered. Tests
+    // that need the bundled flow override per-test.
+    vi.mocked(api.getSetupDatabaseProfiles).mockResolvedValue({
+      bundled_postgres: false,
+    });
   });
 
-  it('shows the SQLite path field by default and lets the operator "skip" to the next step', () => {
+  it('shows the SQLite path field by default and lets the operator "skip" to the next step', async () => {
     const onNext = vi.fn();
-    render(<DatabaseStep onNext={onNext} />);
+    renderWithClient(<DatabaseStep onNext={onNext} />);
+    // Wait for the profiles query to settle so the form renders.
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText(/hubplay\.db/i)).toBeInTheDocument();
+    });
 
     expect(screen.getByPlaceholderText(/hubplay\.db/i)).toBeInTheDocument();
     fireEvent.click(screen.getByText(/setup\.database\.skip/i));
     expect(onNext).toHaveBeenCalledOnce();
   });
 
-  it("renders the postgres DSN field when the operator picks the postgres radio", () => {
-    render(<DatabaseStep onNext={vi.fn()} />);
+  it("renders the postgres DSN field when the operator picks the postgres radio", async () => {
+    renderWithClient(<DatabaseStep onNext={vi.fn()} />);
+    await waitFor(() => {
+      expect(screen.getByRole("radio", { name: /PostgreSQL/ })).toBeInTheDocument();
+    });
     fireEvent.click(screen.getByRole("radio", { name: /PostgreSQL/ }));
     expect(
       screen.getByPlaceholderText(/postgres:\/\/user:pass/i),
@@ -43,7 +67,10 @@ describe("DatabaseStep", () => {
       server_version: "PostgreSQL 16.2 …",
       duration_ms: 42,
     });
-    render(<DatabaseStep onNext={vi.fn()} />);
+    renderWithClient(<DatabaseStep onNext={vi.fn()} />);
+    await waitFor(() => {
+      expect(screen.getByRole("radio", { name: /PostgreSQL/ })).toBeInTheDocument();
+    });
     fireEvent.click(screen.getByRole("radio", { name: /PostgreSQL/ }));
     fireEvent.change(screen.getByPlaceholderText(/postgres:\/\/user:pass/i), {
       target: { value: "postgres://u:p@h/d" },
@@ -71,7 +98,10 @@ describe("DatabaseStep", () => {
       status: "saved",
       restart_scheduled: true,
     });
-    render(<DatabaseStep onNext={vi.fn()} />);
+    renderWithClient(<DatabaseStep onNext={vi.fn()} />);
+    await waitFor(() => {
+      expect(screen.getByRole("radio", { name: /PostgreSQL/ })).toBeInTheDocument();
+    });
     fireEvent.click(screen.getByRole("radio", { name: /PostgreSQL/ }));
     fireEvent.change(screen.getByPlaceholderText(/postgres:\/\/user:pass/i), {
       target: { value: "postgres://u:p@h/d" },
@@ -94,13 +124,32 @@ describe("DatabaseStep", () => {
     });
   });
 
+  it("shows two one-click cards (no DSN field) when bundled is available", async () => {
+    vi.mocked(api.getSetupDatabaseProfiles).mockResolvedValue({
+      bundled_postgres: true,
+      bundled_label: "PostgreSQL (bundled)",
+    });
+    renderWithClient(<DatabaseStep onNext={vi.fn()} />);
+
+    // Wait for the cards. They render as <button> with the labels.
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /SQLite/ })).toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: /PostgreSQL/ })).toBeInTheDocument();
+    // The custom DSN form must NOT be present in this flow.
+    expect(screen.queryByPlaceholderText(/postgres:\/\/user:pass/i)).toBeNull();
+  });
+
   it("renders the test failure inline without crashing the form", async () => {
     vi.mocked(api.testSetupDatabase).mockResolvedValue({
       ok: false,
       duration_ms: 8,
       error: "connection refused",
     });
-    render(<DatabaseStep onNext={vi.fn()} />);
+    renderWithClient(<DatabaseStep onNext={vi.fn()} />);
+    await waitFor(() => {
+      expect(screen.getByRole("radio", { name: /PostgreSQL/ })).toBeInTheDocument();
+    });
     fireEvent.click(screen.getByRole("radio", { name: /PostgreSQL/ }));
     fireEvent.change(screen.getByPlaceholderText(/postgres:\/\/user:pass/i), {
       target: { value: "postgres://u:p@h/d" },

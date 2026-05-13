@@ -1186,7 +1186,14 @@
       "migrateStart": "Empezar migración",
       "migrateInProgress": "Copiando…",
       "migrateDone": "Migración completa. Guarda y reinicia contra el nuevo destino.",
-      "migrateLog": "Ver registro"
+      "migrateLog": "Ver registro",
+      "migrateHintBundled": "Copiará tus datos de SQLite al PostgreSQL incluido en docker-compose. Sin pegar DSN, sin servidor externo que provisionar.",
+      "bundledHint": "Incluido en tu docker-compose. Un click y tus datos viven en un PostgreSQL real — ideal para varios usuarios, bibliotecas grandes o acceso remoto.",
+      "alreadyActive": "Ya es el motor activo.",
+      "activeNow": "activo",
+      "customDSN": "DSN personalizado (avanzado)",
+      "customDSNHint": "Úsalo sólo si tienes un PostgreSQL externo (cloud gestionado, servidor remoto, etc.). En otro caso, las tarjetas de arriba son más cómodas.",
+      "testFailed": "Falló la prueba de conexión."
     },
     "logs": {
       "title": "Logs en vivo",
@@ -1346,7 +1353,11 @@
       "testOK": "Accesible",
       "saveAndRestart": "Guardar y reiniciar",
       "skip": "Continuar con SQLite (por defecto)",
-      "savedAndRestarting": "Guardado. El servidor se está reiniciando con la nueva base — esta página se reanudará en unos segundos."
+      "savedAndRestarting": "Guardado. El servidor se está reiniciando con la nueva base — esta página se reanudará en unos segundos.",
+      "bundledHint": "Incluido en tu docker-compose. Un click y tu servidor usa un PostgreSQL real. Recomendado para varios usuarios o bibliotecas grandes.",
+      "bundledFooter": "Cualquiera de las dos opciones funciona. Puedes cambiarlo más tarde desde Admin → Sistema → Base de datos.",
+      "recommended": "recomendado",
+      "testFailed": "Falló la prueba de conexión."
     },
     "account": {
       "title": "Crear cuenta de administrador",
