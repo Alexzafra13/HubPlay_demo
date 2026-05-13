@@ -1186,7 +1186,14 @@
       "migrateStart": "Start migration",
       "migrateInProgress": "Copying…",
       "migrateDone": "Migration complete. Save & Restart against the new target.",
-      "migrateLog": "Show event log"
+      "migrateLog": "Show event log",
+      "migrateHintBundled": "Will copy your SQLite data into the PostgreSQL service bundled in docker-compose. No DSN to paste, no external server to provision.",
+      "bundledHint": "Bundled in your docker-compose. One click and your data lives in a real PostgreSQL — best for multiple users, larger libraries, or remote access.",
+      "alreadyActive": "Already the active driver.",
+      "activeNow": "active",
+      "customDSN": "Custom DSN (advanced)",
+      "customDSNHint": "Use this only if you have an external PostgreSQL (managed cloud, remote server, etc.). Otherwise the cards above are easier.",
+      "testFailed": "Test connection failed."
     },
     "logs": {
       "title": "Logs en vivo",
@@ -1346,7 +1353,11 @@
       "testOK": "Reachable",
       "saveAndRestart": "Save & Restart",
       "skip": "Continue with SQLite (default)",
-      "savedAndRestarting": "Saved. The server is restarting against the new database — this page will resume in a few seconds."
+      "savedAndRestarting": "Saved. The server is restarting against the new database — this page will resume in a few seconds.",
+      "bundledHint": "Bundled in your docker-compose. One click and your server uses a real PostgreSQL. Recommended for multiple users or larger libraries.",
+      "bundledFooter": "Both options work. You can also switch later from Admin → System → Database.",
+      "recommended": "recommended",
+      "testFailed": "Test connection failed."
     },
     "account": {
       "title": "Create Admin Account",

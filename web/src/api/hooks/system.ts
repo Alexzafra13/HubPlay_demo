@@ -12,6 +12,7 @@ import { api } from "../client";
 import { queryKeys } from "../queryKeys";
 import { useEventStream } from "@/hooks/useEventStream";
 import type {
+  AdminDatabaseProfiles,
   AdminDatabaseSaveRequest,
   AdminDatabaseSaveResponse,
   AdminDatabaseStatus,
@@ -181,6 +182,21 @@ export function useAdminDatabase(
     queryKey: ["admin", "db"],
     queryFn: () => api.getAdminDatabase(),
     refetchInterval: 10_000,
+    ...options,
+  });
+}
+
+// One-click profiles the panel can offer (bundled docker-compose
+// Postgres, mainly). Cached aggressively — operators don't redeploy
+// docker-compose multiple times per session, so a stale answer is
+// fine across page navigations.
+export function useAdminDatabaseProfiles(
+  options?: Partial<UseQueryOptions<AdminDatabaseProfiles>>,
+) {
+  return useQuery<AdminDatabaseProfiles>({
+    queryKey: ["admin", "db", "profiles"],
+    queryFn: () => api.getAdminDatabaseProfiles(),
+    staleTime: 60 * 60 * 1000,
     ...options,
   });
 }

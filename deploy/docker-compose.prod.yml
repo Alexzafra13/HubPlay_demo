@@ -25,6 +25,13 @@ services:
       - HUBPLAY_SERVER_TRUSTED_PROXIES=127.0.0.1
       - HUBPLAY_LOGGING_LEVEL=info
       - HUBPLAY_LOGGING_FORMAT=json
+      # Bundled Postgres DSN — the admin panel surfaces it as a
+      # one-click toggle. SQLite remains the default until the
+      # operator flips the switch explicitly.
+      - HUBPLAY_POSTGRES_BUNDLED_DSN=postgres://hubplay:${HUBPLAY_POSTGRES_PASSWORD:-hubplay}@db:5432/hubplay?sslmode=disable
+    depends_on:
+      db:
+        condition: service_healthy
     restart: unless-stopped
     logging:
       driver: json-file
@@ -42,6 +49,33 @@ services:
     # GPU transcoding (descomentar si tienes Intel iGPU)
     # devices:
     #   - /dev/dri:/dev/dri
+
+  # Bundled Postgres — same rationale as docker-compose.yml. SQLite
+  # is still the default; this exists so a one-click flip in the
+  # admin UI works without provisioning an external DB.
+  db:
+    image: postgres:16-alpine
+    container_name: hubplay-db
+    environment:
+      - POSTGRES_DB=hubplay
+      - POSTGRES_USER=hubplay
+      - POSTGRES_PASSWORD=${HUBPLAY_POSTGRES_PASSWORD:-hubplay}
+    volumes:
+      - hubplay-pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hubplay -d hubplay"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    security_opt:
+      - no-new-privileges:true
 
   nginx:
     image: nginx:alpine
@@ -73,3 +107,4 @@ services:
 volumes:
   hubplay-config:
   hubplay-cache:
+  hubplay-pgdata:

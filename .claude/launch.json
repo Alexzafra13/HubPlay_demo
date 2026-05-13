@@ -25,6 +25,13 @@
       "runtimeArgs": ["--dir", "web", "run", "dev"],
       "port": 3000,
       "env": { "VITE_API_TARGET": "http://localhost:8095" }
+    },
+    {
+      "name": "hubplay-web-be8094",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--dir", "web", "run", "dev"],
+      "port": 3000,
+      "env": { "VITE_API_TARGET": "http://localhost:8094" }
     }
   ]
 }

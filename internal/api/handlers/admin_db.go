@@ -7,12 +7,28 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
 	"hubplay/internal/config"
 	"hubplay/internal/db"
 )
+
+// envBundledPostgresDSN is the docker-compose-provided DSN for the
+// bundled Postgres service. When set, the admin panel and wizard
+// surface a one-click "Switch to PostgreSQL" toggle that hides the
+// DSN field behind an "Advanced — custom DSN" section. Empty when
+// the operator runs the binary outside docker-compose, in which case
+// the UI falls back to the full DSN form.
+const envBundledPostgresDSN = "HUBPLAY_POSTGRES_BUNDLED_DSN"
+
+// BundledPostgresDSN returns the docker-compose-injected DSN, or
+// empty if no bundled Postgres is available. Exported so the setup
+// wizard and admin panel use the same source of truth.
+func BundledPostgresDSN() string {
+	return strings.TrimSpace(os.Getenv(envBundledPostgresDSN))
+}
 
 // AdminDBHandler powers the admin "Database" panel: live driver +
 // pool stats, test-connection for a candidate driver/DSN, persisting
@@ -78,6 +94,51 @@ type dbPoolStats struct {
 	WaitDurationMs int64 `json:"wait_duration_ms"`
 }
 
+// dbProfilesResponse is the shape the panel + wizard read to decide
+// whether to render the one-click PostgreSQL toggle or fall back to
+// the full DSN form. The bundled profile is *offered* — flipping the
+// switch still goes through Test → Save → Restart, the panel just
+// pre-fills the DSN behind the scenes.
+type dbProfilesResponse struct {
+	// BundledPostgres signals that the docker-compose injected a
+	// usable Postgres DSN. The DSN itself is NOT returned (it carries
+	// the password, even though it lives on an internal network) —
+	// the panel just learns "you can offer the toggle".
+	BundledPostgres bool `json:"bundled_postgres"`
+	// BundledLabel is a friendly description for the toggle ("Postgres
+	// bundled in docker-compose"). i18n happens client-side; the
+	// server only signals which profile is active.
+	BundledLabel string `json:"bundled_label,omitempty"`
+}
+
+// Profiles returns which "one-click" DB profiles the panel can
+// offer. Today the only profile is the docker-compose-bundled
+// Postgres detected via HUBPLAY_POSTGRES_BUNDLED_DSN. In the future
+// this is where managed-provider presets (Supabase, RDS) could
+// land if the project ever wants opinionated integrations.
+//
+// Auth-required by the routing layer (same prefix as the rest of
+// /admin/system/*). The corresponding /setup/db/profiles is
+// unauthenticated; both share the same engine below.
+func (h *AdminDBHandler) Profiles(w http.ResponseWriter, r *http.Request) {
+	respondJSON(w, http.StatusOK, map[string]any{"data": detectDBProfiles()})
+}
+
+// detectDBProfiles is the shared engine behind /admin/system/db/profiles
+// and /setup/db/profiles. Kept package-level so the unauthenticated
+// wizard route can call it without depending on the admin handler's
+// full state.
+func detectDBProfiles() dbProfilesResponse {
+	bundled := BundledPostgresDSN()
+	if bundled == "" {
+		return dbProfilesResponse{}
+	}
+	return dbProfilesResponse{
+		BundledPostgres: true,
+		BundledLabel:    "PostgreSQL (bundled in docker-compose)",
+	}
+}
+
 // Status returns the current driver + DSN (password redacted) + live
 // pool stats. Admin-only — the DSN is sensitive even with the password
 // stripped (host names, db names, ports). The panel calls this on
@@ -109,6 +170,12 @@ type dbTestRequest struct {
 	Driver string `json:"driver"`
 	Path   string `json:"path,omitempty"`
 	DSN    string `json:"dsn,omitempty"`
+	// UseBundled, when true with driver=postgres, swaps in the
+	// docker-compose-injected DSN server-side. The client never
+	// sees the password — the panel just sends `{driver:"postgres",
+	// use_bundled:true}`. Falls through to the regular DSN field
+	// when no bundled DSN is configured (env var unset).
+	UseBundled bool `json:"use_bundled,omitempty"`
 }
 
 type dbTestResponse struct {
@@ -158,9 +225,17 @@ func testCandidateDB(ctx context.Context, req dbTestRequest, logger *slog.Logger
 	if driver == db.DriverSQLite {
 		dsnOrPath = req.Path
 	}
+	if driver == db.DriverPostgres && req.UseBundled {
+		// Swap in the docker-compose-injected DSN. Empty env var =
+		// operator running outside the bundled stack; we fall
+		// through to the error below.
+		dsnOrPath = BundledPostgresDSN()
+	}
 	if strings.TrimSpace(dsnOrPath) == "" {
 		if driver == db.DriverSQLite {
 			resp.Error = "path is required for sqlite"
+		} else if req.UseBundled {
+			resp.Error = "no bundled Postgres available — paste a custom DSN instead"
 		} else {
 			resp.Error = "dsn is required for postgres"
 		}
@@ -249,6 +324,11 @@ type dbSaveRequest struct {
 	Driver string `json:"driver"`
 	Path   string `json:"path,omitempty"`
 	DSN    string `json:"dsn,omitempty"`
+	// UseBundled, when true with driver=postgres, persists the
+	// docker-compose bundled DSN. The client never types or sees
+	// the password — the env-injected value goes straight into the
+	// YAML so the next boot opens the bundled DB.
+	UseBundled bool `json:"use_bundled,omitempty"`
 	// Restart, when true, schedules a graceful self-shutdown after
 	// the save so the new driver takes effect on the next boot. The
 	// admin panel sets this explicitly via a separate "Save & Restart"
@@ -282,12 +362,20 @@ func (h *AdminDBHandler) Save(w http.ResponseWriter, r *http.Request) {
 		respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "path is required for sqlite")
 		return
 	}
-	if driver == db.DriverPostgres && strings.TrimSpace(req.DSN) == "" {
+	dsn := req.DSN
+	if driver == db.DriverPostgres && req.UseBundled {
+		dsn = BundledPostgresDSN()
+		if dsn == "" {
+			respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "no bundled Postgres available — paste a custom DSN instead")
+			return
+		}
+	}
+	if driver == db.DriverPostgres && strings.TrimSpace(dsn) == "" {
 		respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "dsn is required for postgres")
 		return
 	}
 
-	if err := h.saveDBConfig(driver, req.Path, req.DSN); err != nil {
+	if err := h.saveDBConfig(driver, req.Path, dsn); err != nil {
 		h.logger.Error("save database config", "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to persist database config")
 		return
@@ -339,12 +427,20 @@ func (h *AdminDBHandler) Migrate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		TargetDSN string `json:"target_dsn"`
-		Restart   bool   `json:"restart"`
+		TargetDSN  string `json:"target_dsn"`
+		UseBundled bool   `json:"use_bundled,omitempty"`
+		Restart    bool   `json:"restart"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
 		return
+	}
+	if req.UseBundled {
+		req.TargetDSN = BundledPostgresDSN()
+		if req.TargetDSN == "" {
+			respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "no bundled Postgres available — paste a custom DSN instead")
+			return
+		}
 	}
 	if strings.TrimSpace(req.TargetDSN) == "" {
 		respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "target_dsn is required")
@@ -407,7 +503,11 @@ func (h *AdminDBHandler) Migrate(w http.ResponseWriter, r *http.Request) {
 	// operator's target now has the data); we log and stream a
 	// warning so the panel can show "data migrated, but the config
 	// flip failed — edit YAML manually before restarting".
-	if err := h.saveDBConfig(db.DriverPostgres, "", req.TargetDSN); err != nil {
+	persistDSN := req.TargetDSN
+	if req.UseBundled {
+		persistDSN = BundledPostgresDSN()
+	}
+	if err := h.saveDBConfig(db.DriverPostgres, "", persistDSN); err != nil {
 		h.logger.Error("migrate: save config after copy", "error", err)
 		emit(map[string]any{
 			"event":   "warning",

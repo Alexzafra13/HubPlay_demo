@@ -39,11 +39,13 @@ import type {
   SystemStats,
   AuthKey,
   RotateAuthKeyResponse,
+  AdminDatabaseProfiles,
   AdminDatabaseStatus,
   AdminDatabaseTestRequest,
   AdminDatabaseTestResponse,
   AdminDatabaseSaveRequest,
   AdminDatabaseSaveResponse,
+  AdminDatabaseMigrateRequest,
   UnhealthyChannel,
   UpdateLibraryRequest,
   UpsertScheduledJobRequest,
@@ -1682,6 +1684,10 @@ export class ApiClient {
     return this.request<AdminDatabaseStatus>("GET", "/admin/system/db");
   }
 
+  async getAdminDatabaseProfiles(): Promise<AdminDatabaseProfiles> {
+    return this.request<AdminDatabaseProfiles>("GET", "/admin/system/db/profiles");
+  }
+
   async testAdminDatabase(req: AdminDatabaseTestRequest): Promise<AdminDatabaseTestResponse> {
     return this.request<AdminDatabaseTestResponse>("POST", "/admin/system/db/test", { body: req });
   }
@@ -1698,7 +1704,7 @@ export class ApiClient {
   // Returns the raw Response so the caller can use the ReadableStream
   // reader to render live progress in the panel.
   async migrateDatabase(
-    req: { target_dsn: string; restart?: boolean },
+    req: AdminDatabaseMigrateRequest,
   ): Promise<Response> {
     // Use the underlying fetch so we get the raw stream; the
     // request<T> helper auto-parses JSON which would buffer the
@@ -1717,6 +1723,10 @@ export class ApiClient {
   }
 
   // ─── Setup wizard: database step ──────────────────────────────────────
+
+  async getSetupDatabaseProfiles(): Promise<AdminDatabaseProfiles> {
+    return this.request<AdminDatabaseProfiles>("GET", "/setup/db/profiles");
+  }
 
   async testSetupDatabase(req: AdminDatabaseTestRequest): Promise<AdminDatabaseTestResponse> {
     return this.request<AdminDatabaseTestResponse>("POST", "/setup/db/test", { body: req });
