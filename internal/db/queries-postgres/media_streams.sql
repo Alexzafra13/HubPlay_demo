@@ -27,9 +27,9 @@ SELECT item_id, stream_index, stream_type,
        COALESCE(sample_rate, 0) AS sample_rate,
        COALESCE(language, '') AS language,
        COALESCE(title, '') AS title,
-       COALESCE(is_default, 0) AS is_default,
-       COALESCE(is_forced, 0) AS is_forced,
-       COALESCE(is_hearing_impaired, 0) AS is_hearing_impaired
+       COALESCE(is_default, FALSE) AS is_default,
+       COALESCE(is_forced, FALSE) AS is_forced,
+       COALESCE(is_hearing_impaired, FALSE) AS is_hearing_impaired
 FROM media_streams
 WHERE item_id = $1
 ORDER BY stream_index;

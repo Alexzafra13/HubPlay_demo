@@ -413,13 +413,17 @@ func (r *LibraryRepository) UserHasAccess(ctx context.Context, userID, libraryID
 	if !r.useSQLite() {
 		driver = DriverPostgres
 	}
+	// `SELECT EXISTS(...)` returns BOOLEAN on Postgres and INTEGER 0/1
+	// on SQLite; wrapping in CASE…WHEN gives both dialects the same
+	// int-shaped result that scans cleanly into Go without driver-
+	// specific bool↔int coercion.
 	query := rewritePlaceholders(driver, `
-		SELECT EXISTS (
+		SELECT CASE WHEN EXISTS (
 			SELECT 1 FROM library_access la
 			JOIN users u ON u.id = ?
 			WHERE la.library_id = ?
 			  AND la.user_id = COALESCE(u.parent_user_id, u.id)
-		)`)
+		) THEN 1 ELSE 0 END`)
 	var has int
 	if err := r.db.QueryRowContext(ctx, query, userID, libraryID).Scan(&has); err != nil {
 		return false, fmt.Errorf("check library access: %w", err)

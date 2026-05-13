@@ -12,7 +12,7 @@ import (
 
 func TestSettingsRepository_GetOr_FallsBackToDefault(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repo := db.NewSettingsRepository("sqlite", database)
+	repo := db.NewSettingsRepository(testutil.Driver(), database)
 
 	// Empty table → fallback wins. This is the load-bearing path
 	// through which YAML / env defaults reach runtime; if it ever
@@ -29,7 +29,7 @@ func TestSettingsRepository_GetOr_FallsBackToDefault(t *testing.T) {
 
 func TestSettingsRepository_SetThenGet_OverridesDefault(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repo := db.NewSettingsRepository("sqlite", database)
+	repo := db.NewSettingsRepository(testutil.Driver(), database)
 	ctx := context.Background()
 
 	if err := repo.Set(ctx, "server.base_url", "https://prod.example/"); err != nil {
@@ -50,7 +50,7 @@ func TestSettingsRepository_SetThenGet_OverridesDefault(t *testing.T) {
 // upsert clause fails here instead of in production.
 func TestSettingsRepository_Set_IsUpsert(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repo := db.NewSettingsRepository("sqlite", database)
+	repo := db.NewSettingsRepository(testutil.Driver(), database)
 	ctx := context.Background()
 
 	if err := repo.Set(ctx, "k", "v1"); err != nil {
@@ -70,7 +70,7 @@ func TestSettingsRepository_Set_IsUpsert(t *testing.T) {
 
 func TestSettingsRepository_Get_NotFound(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repo := db.NewSettingsRepository("sqlite", database)
+	repo := db.NewSettingsRepository(testutil.Driver(), database)
 
 	_, err := repo.Get(context.Background(), "missing")
 	if !errors.Is(err, domain.ErrNotFound) {
@@ -83,7 +83,7 @@ func TestSettingsRepository_Get_NotFound(t *testing.T) {
 // could only be replaced, never explicitly cleared.
 func TestSettingsRepository_Delete_ReturnsToDefault(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repo := db.NewSettingsRepository("sqlite", database)
+	repo := db.NewSettingsRepository(testutil.Driver(), database)
 	ctx := context.Background()
 
 	if err := repo.Set(ctx, "server.base_url", "https://override.example/"); err != nil {
@@ -103,7 +103,7 @@ func TestSettingsRepository_Delete_ReturnsToDefault(t *testing.T) {
 
 func TestSettingsRepository_All_ReturnsAllStored(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repo := db.NewSettingsRepository("sqlite", database)
+	repo := db.NewSettingsRepository(testutil.Driver(), database)
 	ctx := context.Background()
 
 	if err := repo.Set(ctx, "a", "1"); err != nil {

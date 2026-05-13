@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -62,6 +63,7 @@ type LibraryStatsProvider interface {
 //     types that match what the React panel actually consumes.
 type SystemHandler struct {
 	db             *sql.DB
+	driver         string // "sqlite" or "postgres" — drives dialect for raw SQL queries
 	streams        SystemStatsProvider
 	libs           LibraryStatsProvider
 	settings       SettingsReader
@@ -89,6 +91,7 @@ type SettingsReader interface {
 // fields land without a signature change.
 type SystemHandlerConfig struct {
 	DB             *sql.DB
+	Driver         string // "sqlite" or "postgres" — required for the admin raw-SQL queries (TopItems, StreamActivity) to dialect-branch
 	Streams        SystemStatsProvider
 	Libraries      LibraryStatsProvider
 	Settings       SettingsReader
@@ -107,8 +110,13 @@ type SystemHandlerConfig struct {
 // rather than erroring out, so a stripped-down test rig can still call
 // Stats.
 func NewSystemHandler(cfg SystemHandlerConfig) *SystemHandler {
+	driver := cfg.Driver
+	if driver == "" {
+		driver = "sqlite" // backwards-compat default; main.go always passes the real one
+	}
 	return &SystemHandler{
 		db:             cfg.DB,
+		driver:         driver,
 		streams:        cfg.Streams,
 		libs:           cfg.Libraries,
 		settings:       cfg.Settings,
@@ -410,16 +418,22 @@ func (h *SystemHandler) StreamActivity(w http.ResponseWriter, r *http.Request) {
 	}
 	cutoff := time.Now().UTC().Add(-time.Duration(days) * 24 * time.Hour)
 
-	// Per-day rollup. user_data.last_played_at lands in the DB via
-	// modernc.org/sqlite's time.Time formatter, which trails the
-	// stamp with " +0000 UTC" — outside SQLite's strftime grammar,
-	// so we slice the ISO date prefix directly with SUBSTR. ISO8601
-	// is lexicographically ordered so the comparison still holds.
+	// Per-day rollup. The day-extraction grammar diverges across
+	// dialects: SQLite stores last_played_at as text (modernc.org's
+	// time.Time formatter trails ISO with " +0000 UTC", outside
+	// strftime grammar) so we slice the first 10 chars with SUBSTR.
+	// Postgres has a real TIMESTAMPTZ column, so we cast to date
+	// then format. Both produce a YYYY-MM-DD string that the Go side
+	// uses as a map key for backfill.
 	// CASE/MIN keeps us safe when position_ticks runs past the
 	// item's known duration (rounding / restart edge case).
-	const query = `
+	dayExpr := "SUBSTR(ud.last_played_at, 1, 10)"
+	if h.driver == "postgres" {
+		dayExpr = "TO_CHAR(ud.last_played_at, 'YYYY-MM-DD')"
+	}
+	query := db.RewritePlaceholders(h.driver, fmt.Sprintf(`
 		SELECT
-			SUBSTR(ud.last_played_at, 1, 10) AS day,
+			%s AS day,
 			COALESCE(SUM(
 				CASE
 					WHEN i.duration_ticks > 0
@@ -436,7 +450,7 @@ func (h *SystemHandler) StreamActivity(w http.ResponseWriter, r *http.Request) {
 		WHERE ud.last_played_at IS NOT NULL
 		  AND ud.last_played_at >= ?
 		GROUP BY day
-		ORDER BY day ASC`
+		ORDER BY day ASC`, dayExpr))
 
 	// Pass cutoff as time.Time so the driver formats it the same way
 	// last_played_at was written (UTC, no monotonic suffix because
@@ -553,7 +567,11 @@ func (h *SystemHandler) TopItems(w http.ResponseWriter, r *http.Request) {
 	// Same rollup CTE as HomeRepository.Trending but admin-scoped:
 	// no library_access EXISTS guard. Counts each (user, rollup) once
 	// so a single binge-watcher can't dominate the chart.
-	const query = `
+	//
+	// BOOLEAN predicates written as truthy (no `= 1`) so the same query
+	// runs against SQLite's 0/1 INTEGER and Postgres' BOOLEAN. `?`
+	// placeholders rewritten at call time for the active driver.
+	query := db.RewritePlaceholders(h.driver, `
 		WITH plays AS (
 			SELECT
 				ud.user_id,
@@ -569,15 +587,15 @@ func (h *SystemHandler) TopItems(w http.ResponseWriter, r *http.Request) {
 			JOIN items i ON i.id = ud.item_id
 			WHERE ud.last_played_at IS NOT NULL
 			  AND ud.last_played_at >= ?
-			  AND i.is_available = 1
+			  AND i.is_available
 		)
 		SELECT i.id, i.type, i.title, COUNT(DISTINCT p.user_id) AS plays
 		FROM plays p
 		JOIN items i ON i.id = p.rollup_id
-		WHERE i.is_available = 1
+		WHERE i.is_available
 		GROUP BY i.id
 		ORDER BY plays DESC, i.title ASC
-		LIMIT ?`
+		LIMIT ?`)
 
 	rows, err := h.db.QueryContext(r.Context(), query, cutoff, limit)
 	if err != nil {

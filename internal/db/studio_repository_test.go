@@ -40,10 +40,10 @@ func TestSlugify(t *testing.T) {
 
 func TestStudioRepository_EnsureAndList(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository("sqlite", database)
-	itemRepo := db.NewItemRepository("sqlite", database)
-	metaRepo := db.NewMetadataRepository("sqlite", database)
-	studioRepo := db.NewStudioRepository("sqlite", database)
+	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
+	itemRepo := db.NewItemRepository(testutil.Driver(), database)
+	metaRepo := db.NewMetadataRepository(testutil.Driver(), database)
+	studioRepo := db.NewStudioRepository(testutil.Driver(), database)
 	seedLibraryForItems(t, libRepo)
 
 	// Two items linked to Marvel Studios (tmdb_id=420), one to a

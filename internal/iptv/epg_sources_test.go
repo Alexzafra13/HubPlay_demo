@@ -69,7 +69,7 @@ func newEPGTestService(t *testing.T) (*Service, *db.Repositories, string) {
 	unblockLoopback(t)
 
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories("sqlite", database)
+	repos := db.NewRepositories(testutil.Driver(), database)
 	ctx := context.Background()
 
 	now := time.Now()
@@ -349,7 +349,7 @@ func TestReorderEPGSources_RejectsMismatchedList(t *testing.T) {
 func TestRefreshEPG_LegacyEPGURLFallback(t *testing.T) {
 	unblockLoopback(t)
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories("sqlite", database)
+	repos := db.NewRepositories(testutil.Driver(), database)
 	ctx := context.Background()
 
 	srv := fakeEPGServer(t, map[string]string{"la1": "Legacy show"})

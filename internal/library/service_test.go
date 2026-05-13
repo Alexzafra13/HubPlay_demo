@@ -28,7 +28,7 @@ func (m *mockProber) Probe(ctx context.Context, path string) (*probe.Result, err
 func newTestLibraryService(t *testing.T) *library.Service {
 	t.Helper()
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories("sqlite", database)
+	repos := db.NewRepositories(testutil.Driver(), database)
 	bus := event.NewBus(slog.Default())
 	prober := &mockProber{}
 	scnr := scanner.New(repos.Items, repos.MediaStreams, repos.Metadata, repos.ExternalIDs, repos.Images, repos.Chapters, repos.People, repos.ItemValues, repos.Studios, repos.Collections, nil, prober, bus, "", nil, slog.Default())
@@ -206,7 +206,7 @@ func TestService_ItemCount(t *testing.T) {
 // in place, the dedupe code became dead defence and was removed.
 func TestService_SeasonUniqueConstraintRejectsDuplicates(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories("sqlite", database)
+	repos := db.NewRepositories(testutil.Driver(), database)
 	ctx := context.Background()
 
 	now := time.Now()
@@ -246,7 +246,13 @@ func TestService_SeasonUniqueConstraintRejectsDuplicates(t *testing.T) {
 	if err == nil {
 		t.Fatal("inserting a duplicate (parent_id, season_number) should fail; the partial UNIQUE index from migration 018 was bypassed")
 	}
-	if !strings.Contains(err.Error(), "UNIQUE constraint failed") {
-		t.Errorf("expected UNIQUE constraint error, got: %v", err)
+	// SQLite reports "UNIQUE constraint failed"; Postgres reports
+	// "duplicate key value violates unique constraint" (SQLSTATE 23505).
+	// Both forms are accepted — the assertion is "the DB rejected the
+	// dup", not "the message looks like SQLite's wording".
+	msg := err.Error()
+	if !strings.Contains(msg, "UNIQUE constraint failed") &&
+		!strings.Contains(msg, "duplicate key value violates unique constraint") {
+		t.Errorf("expected UNIQUE constraint error (sqlite or postgres form), got: %v", err)
 	}
 }

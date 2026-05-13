@@ -45,7 +45,7 @@ func (f *fakeImageProvider) GetImages(_ context.Context, _ map[string]string, _ 
 func setupManager(t *testing.T) *provider.Manager {
 	t.Helper()
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories("sqlite", database)
+	repos := db.NewRepositories(testutil.Driver(), database)
 	return provider.NewManager(repos.Providers, testutil.TestLogger())
 }
 

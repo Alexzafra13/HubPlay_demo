@@ -11,7 +11,7 @@ import (
 func setupProviderTest(t *testing.T) *db.ProviderRepository {
 	t.Helper()
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories("sqlite", database)
+	repos := db.NewRepositories(testutil.Driver(), database)
 	return repos.Providers
 }
 

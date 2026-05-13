@@ -31,9 +31,9 @@ func seedItemForImages(t *testing.T, database *db.LibraryRepository, itemRepo *d
 
 func TestImageRepository_Create_And_ListByItem(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository("sqlite", database)
-	itemRepo := db.NewItemRepository("sqlite", database)
-	repo := db.NewImageRepository("sqlite", database)
+	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
+	itemRepo := db.NewItemRepository(testutil.Driver(), database)
+	repo := db.NewImageRepository(testutil.Driver(), database)
 	seedItemForImages(t, libRepo, itemRepo)
 
 	now := time.Now()
@@ -70,9 +70,9 @@ func TestImageRepository_Create_And_ListByItem(t *testing.T) {
 
 func TestImageRepository_GetPrimary(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository("sqlite", database)
-	itemRepo := db.NewItemRepository("sqlite", database)
-	repo := db.NewImageRepository("sqlite", database)
+	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
+	itemRepo := db.NewItemRepository(testutil.Driver(), database)
+	repo := db.NewImageRepository(testutil.Driver(), database)
 	seedItemForImages(t, libRepo, itemRepo)
 
 	now := time.Now()
@@ -94,7 +94,7 @@ func TestImageRepository_GetPrimary(t *testing.T) {
 
 func TestImageRepository_GetPrimary_NotFound(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repo := db.NewImageRepository("sqlite", database)
+	repo := db.NewImageRepository(testutil.Driver(), database)
 
 	_, err := repo.GetPrimary(context.Background(), "item-img", "primary")
 	if !errors.Is(err, domain.ErrNotFound) {
@@ -104,9 +104,9 @@ func TestImageRepository_GetPrimary_NotFound(t *testing.T) {
 
 func TestImageRepository_GetByID(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository("sqlite", database)
-	itemRepo := db.NewItemRepository("sqlite", database)
-	repo := db.NewImageRepository("sqlite", database)
+	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
+	itemRepo := db.NewItemRepository(testutil.Driver(), database)
+	repo := db.NewImageRepository(testutil.Driver(), database)
 	seedItemForImages(t, libRepo, itemRepo)
 
 	now := time.Now()
@@ -139,7 +139,7 @@ func TestImageRepository_GetByID(t *testing.T) {
 
 func TestImageRepository_GetByID_NotFound(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repo := db.NewImageRepository("sqlite", database)
+	repo := db.NewImageRepository(testutil.Driver(), database)
 
 	_, err := repo.GetByID(context.Background(), "nonexistent")
 	if !errors.Is(err, domain.ErrNotFound) {
@@ -149,9 +149,9 @@ func TestImageRepository_GetByID_NotFound(t *testing.T) {
 
 func TestImageRepository_DeleteByID(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository("sqlite", database)
-	itemRepo := db.NewItemRepository("sqlite", database)
-	repo := db.NewImageRepository("sqlite", database)
+	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
+	itemRepo := db.NewItemRepository(testutil.Driver(), database)
+	repo := db.NewImageRepository(testutil.Driver(), database)
 	seedItemForImages(t, libRepo, itemRepo)
 
 	now := time.Now()
@@ -184,9 +184,9 @@ func TestImageRepository_DeleteByID(t *testing.T) {
 
 func TestImageRepository_SetPrimary(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository("sqlite", database)
-	itemRepo := db.NewItemRepository("sqlite", database)
-	repo := db.NewImageRepository("sqlite", database)
+	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
+	itemRepo := db.NewItemRepository(testutil.Driver(), database)
+	repo := db.NewImageRepository(testutil.Driver(), database)
 	seedItemForImages(t, libRepo, itemRepo)
 
 	now := time.Now()
@@ -229,9 +229,9 @@ func TestImageRepository_SetPrimary(t *testing.T) {
 
 func TestImageRepository_DeleteByItem(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository("sqlite", database)
-	itemRepo := db.NewItemRepository("sqlite", database)
-	repo := db.NewImageRepository("sqlite", database)
+	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
+	itemRepo := db.NewItemRepository(testutil.Driver(), database)
+	repo := db.NewImageRepository(testutil.Driver(), database)
 	seedItemForImages(t, libRepo, itemRepo)
 
 	now := time.Now()

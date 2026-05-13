@@ -455,7 +455,7 @@ func TestSystemHandler_Stats_LibrariesRollup_SkipsCountErrors(t *testing.T) {
 // rather than "no plays that day".
 func TestSystemHandler_StreamActivity_BackfillsEmptyDays(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories("sqlite", database)
+	repos := db.NewRepositories(testutil.Driver(), database)
 	ctx := context.Background()
 	now := time.Now().UTC()
 
@@ -482,7 +482,7 @@ func TestSystemHandler_StreamActivity_BackfillsEmptyDays(t *testing.T) {
 		t.Fatalf("update progress: %v", err)
 	}
 
-	h := NewSystemHandler(SystemHandlerConfig{DB: database, Version: "v", Logger: newQuietLogger()})
+	h := NewSystemHandler(SystemHandlerConfig{DB: database, Driver: testutil.Driver(), Version: "v", Logger: newQuietLogger()})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/system/stream-activity?days=7", nil)
 	rr := httptest.NewRecorder()
@@ -524,7 +524,7 @@ func TestSystemHandler_StreamActivity_BackfillsEmptyDays(t *testing.T) {
 // series instead of polluting the chart with individual episodes.
 func TestSystemHandler_TopItems_EpisodesRolledUpToSeries(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories("sqlite", database)
+	repos := db.NewRepositories(testutil.Driver(), database)
 	ctx := context.Background()
 	now := time.Now().UTC()
 
@@ -559,7 +559,7 @@ func TestSystemHandler_TopItems_EpisodesRolledUpToSeries(t *testing.T) {
 		t.Fatalf("progress ep-2: %v", err)
 	}
 
-	h := NewSystemHandler(SystemHandlerConfig{DB: database, Version: "v", Logger: newQuietLogger()})
+	h := NewSystemHandler(SystemHandlerConfig{DB: database, Driver: testutil.Driver(), Version: "v", Logger: newQuietLogger()})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/system/top-items?days=7&limit=5", nil)
 	rr := httptest.NewRecorder()

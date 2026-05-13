@@ -27,7 +27,7 @@ func newTestApp(t *testing.T) *testApp {
 	t.Helper()
 
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories("sqlite", database)
+	repos := db.NewRepositories(testutil.Driver(), database)
 	cfg := config.TestConfig()
 	clk := &clock.Mock{CurrentTime: time.Now().UTC()}
 

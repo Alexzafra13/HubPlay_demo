@@ -13,7 +13,7 @@ import (
 func setupEPGTest(t *testing.T) (*db.EPGProgramRepository, *db.ChannelRepository, string) {
 	t.Helper()
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories("sqlite", database)
+	repos := db.NewRepositories(testutil.Driver(), database)
 	ctx := context.Background()
 
 	now := time.Now()
@@ -176,7 +176,7 @@ func TestEPG_BulkSchedule(t *testing.T) {
 // same chunk twice.
 func TestEPG_BulkSchedule_LargeList(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories("sqlite", database)
+	repos := db.NewRepositories(testutil.Driver(), database)
 	ctx := context.Background()
 
 	libID := "lib-epg-large"
@@ -278,8 +278,9 @@ func TestEPG_XMLTVTimeRoundtrip(t *testing.T) {
 // scenario: a user upgrades, has EPG rows from the pre-UTC-fix build,
 // opens the guide before running "Refresh EPG". Those reads must not 500.
 func TestEPG_CoerceSQLiteTime_LegacyString(t *testing.T) {
+	testutil.SkipIfPostgres(t, "exercises a SQLite-specific legacy time string format the coerce helper accepts on read-back; Postgres TIMESTAMPTZ rejects the same literal in the seeding INSERT")
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories("sqlite", database)
+	repos := db.NewRepositories(testutil.Driver(), database)
 	ctx := context.Background()
 
 	now := time.Now()
@@ -327,8 +328,9 @@ func TestEPG_CoerceSQLiteTime_LegacyString(t *testing.T) {
 // on for legacy user_data rows; this test pins the EPG side of the same
 // invariant so a future change to coerceSQLiteTime can't regress it silently.
 func TestEPG_CoerceSQLiteTime_MonotonicSuffix(t *testing.T) {
+	testutil.SkipIfPostgres(t, "pins the SQLite-specific monotonic-suffix parser path; Postgres TIMESTAMPTZ never produces this format")
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories("sqlite", database)
+	repos := db.NewRepositories(testutil.Driver(), database)
 	ctx := context.Background()
 
 	now := time.Now()

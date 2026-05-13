@@ -16,7 +16,7 @@ import (
 func setupHomeTrendingTest(t *testing.T) *db.Repositories {
 	t.Helper()
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories("sqlite", database)
+	repos := db.NewRepositories(testutil.Driver(), database)
 	ctx := context.Background()
 
 	now := time.Now().UTC()
@@ -86,8 +86,9 @@ func TestHomeRepository_Trending_FreshRoundTrip(t *testing.T) {
 // coerces to UTC — the legacy shape can't be reproduced through the public
 // API anymore, by design.
 func TestHomeRepository_Trending_HandlesLegacyMonotonicTimestamp(t *testing.T) {
+	testutil.SkipIfPostgres(t, "seeds a SQLite-specific time literal (monotonic suffix) to exercise the legacy-format coerce path; the same literal is invalid TIMESTAMPTZ in Postgres")
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories("sqlite", database)
+	repos := db.NewRepositories(testutil.Driver(), database)
 	ctx := context.Background()
 
 	now := time.Now().UTC()
@@ -140,7 +141,7 @@ func TestHomeRepository_Trending_HandlesLegacyMonotonicTimestamp(t *testing.T) {
 // because it doesn't share genres with their viewing history.
 func TestHomeRepository_Recommended_ScoresUnwatchedByGenreOverlap(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories("sqlite", database)
+	repos := db.NewRepositories(testutil.Driver(), database)
 	ctx := context.Background()
 	now := time.Now().UTC()
 
@@ -223,7 +224,7 @@ func TestHomeRepository_Recommended_ScoresUnwatchedByGenreOverlap(t *testing.T) 
 // slot in this case.
 func TestHomeRepository_Recommended_ColdStartReturnsNil(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories("sqlite", database)
+	repos := db.NewRepositories(testutil.Driver(), database)
 	ctx := context.Background()
 	now := time.Now().UTC()
 
@@ -250,7 +251,7 @@ func TestHomeRepository_Recommended_ColdStartReturnsNil(t *testing.T) {
 // watched and "barely opened" boundaries.
 func TestHomeRepository_Recommended_FiltersWatchedItems(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories("sqlite", database)
+	repos := db.NewRepositories(testutil.Driver(), database)
 	ctx := context.Background()
 	now := time.Now().UTC()
 

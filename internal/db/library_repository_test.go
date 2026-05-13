@@ -27,7 +27,7 @@ func newTestLibrary(id, name string) *db.Library {
 
 func TestLibraryRepository_Create_And_GetByID(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repo := db.NewLibraryRepository("sqlite", database)
+	repo := db.NewLibraryRepository(testutil.Driver(), database)
 
 	lib := newTestLibrary("lib-1", "Movies")
 	lib.Paths = []string{"/media/movies", "/media/more-movies"}
@@ -54,7 +54,7 @@ func TestLibraryRepository_Create_And_GetByID(t *testing.T) {
 
 func TestLibraryRepository_GetByID_NotFound(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repo := db.NewLibraryRepository("sqlite", database)
+	repo := db.NewLibraryRepository(testutil.Driver(), database)
 
 	_, err := repo.GetByID(context.Background(), "nonexistent")
 	if !errors.Is(err, domain.ErrNotFound) {
@@ -64,7 +64,7 @@ func TestLibraryRepository_GetByID_NotFound(t *testing.T) {
 
 func TestLibraryRepository_List(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repo := db.NewLibraryRepository("sqlite", database)
+	repo := db.NewLibraryRepository(testutil.Driver(), database)
 
 	if err := repo.Create(context.Background(), newTestLibrary("lib-a", "Anime")); err != nil {
 		t.Fatal(err)
@@ -88,7 +88,7 @@ func TestLibraryRepository_List(t *testing.T) {
 
 func TestLibraryRepository_Update(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repo := db.NewLibraryRepository("sqlite", database)
+	repo := db.NewLibraryRepository(testutil.Driver(), database)
 
 	lib := newTestLibrary("lib-1", "Movies")
 	if err := repo.Create(context.Background(), lib); err != nil {
@@ -114,7 +114,7 @@ func TestLibraryRepository_Update(t *testing.T) {
 
 func TestLibraryRepository_Update_NotFound(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repo := db.NewLibraryRepository("sqlite", database)
+	repo := db.NewLibraryRepository(testutil.Driver(), database)
 
 	lib := newTestLibrary("nonexistent", "X")
 	err := repo.Update(context.Background(), lib)
@@ -125,7 +125,7 @@ func TestLibraryRepository_Update_NotFound(t *testing.T) {
 
 func TestLibraryRepository_Delete(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repo := db.NewLibraryRepository("sqlite", database)
+	repo := db.NewLibraryRepository(testutil.Driver(), database)
 
 	lib := newTestLibrary("lib-del", "Delete Me")
 	if err := repo.Create(context.Background(), lib); err != nil {
@@ -144,7 +144,7 @@ func TestLibraryRepository_Delete(t *testing.T) {
 
 func TestLibraryRepository_Delete_NotFound(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repo := db.NewLibraryRepository("sqlite", database)
+	repo := db.NewLibraryRepository(testutil.Driver(), database)
 
 	err := repo.Delete(context.Background(), "nonexistent")
 	if !errors.Is(err, domain.ErrNotFound) {
@@ -158,8 +158,8 @@ func TestLibraryRepository_Delete_NotFound(t *testing.T) {
 // parent — se cubre en TestLibraryRepository_Access_ProfileInherits.
 func TestLibraryRepository_Access(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository("sqlite", database)
-	userRepo := db.NewUserRepository("sqlite", database)
+	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
+	userRepo := db.NewUserRepository(testutil.Driver(), database)
 
 	if err := userRepo.Create(context.Background(), &db.User{
 		ID: "user-1", Username: "alice", DisplayName: "Alice",
@@ -225,8 +225,8 @@ func TestLibraryRepository_Access(t *testing.T) {
 // "miembros del hogar" son profiles bajo el top-level user.
 func TestLibraryRepository_Access_ProfileInherits(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository("sqlite", database)
-	userRepo := db.NewUserRepository("sqlite", database)
+	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
+	userRepo := db.NewUserRepository(testutil.Driver(), database)
 	ctx := context.Background()
 
 	now := time.Now()
@@ -240,14 +240,14 @@ func TestLibraryRepository_Access_ProfileInherits(t *testing.T) {
 	}
 	// Crear profile directo via SQL — el repo expone CreateProfile en
 	// user_repository.go pero para mantener este test minimal lo
-	// hacemos inline.
-	if _, err := database.ExecContext(ctx, `
+	// hacemos inline. testutil.Exec rewrites `?` → `$N` so the same
+	// fixture works against either backend; `TRUE` is portable since
+	// SQLite 3.23 + Postgres always supported it.
+	testutil.Exec(t, database, `
 		INSERT INTO users (id, username, display_name, password_hash, role,
 		                   is_active, created_at, parent_user_id)
-		VALUES (?, ?, ?, ?, 'user', 1, ?, ?)
-	`, "u-child", "maria", "María", "$2a$10$fakehash", now, "u-parent"); err != nil {
-		t.Fatal(err)
-	}
+		VALUES (?, ?, ?, ?, 'user', TRUE, ?, ?)
+	`, "u-child", "maria", "María", "$2a$10$fakehash", now, "u-parent")
 
 	lib := newTestLibrary("lib-tv", "Canales Juanito")
 	lib.ContentType = "livetv"
@@ -296,8 +296,8 @@ func TestLibraryRepository_Access_ProfileInherits(t *testing.T) {
 // pintar exactamente lo que hay en library_access.
 func TestLibraryRepository_ListAccessByUser(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository("sqlite", database)
-	userRepo := db.NewUserRepository("sqlite", database)
+	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
+	userRepo := db.NewUserRepository(testutil.Driver(), database)
 	ctx := context.Background()
 
 	now := time.Now()
@@ -356,8 +356,8 @@ func TestLibraryRepository_ListAccessByUser(t *testing.T) {
 // no debería tocar nada.
 func TestLibraryRepository_ReplaceAccess(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository("sqlite", database)
-	userRepo := db.NewUserRepository("sqlite", database)
+	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
+	userRepo := db.NewUserRepository(testutil.Driver(), database)
 	ctx := context.Background()
 
 	now := time.Now()
@@ -420,8 +420,8 @@ func TestLibraryRepository_ReplaceAccess(t *testing.T) {
 // con LIST y el grant queda persistido (multi-dispositivo).
 func TestLibraryRepository_Create_GrantsPrimaryAdmin(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository("sqlite", database)
-	userRepo := db.NewUserRepository("sqlite", database)
+	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
+	userRepo := db.NewUserRepository(testutil.Driver(), database)
 	ctx := context.Background()
 
 	now := time.Now()
@@ -463,7 +463,7 @@ func TestLibraryRepository_Create_GrantsPrimaryAdmin(t *testing.T) {
 // migración 041 + el siguiente Create resincronizan el estado.
 func TestLibraryRepository_Create_NoAdmin_NoOp(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository("sqlite", database)
+	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
 	ctx := context.Background()
 
 	if err := libRepo.Create(ctx, newTestLibrary("lib-1", "Movies")); err != nil {
@@ -488,8 +488,8 @@ func TestLibraryRepository_Create_NoAdmin_NoOp(t *testing.T) {
 // manualmente).
 func TestLibraryRepository_Create_OnlyPrimaryAdmin(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository("sqlite", database)
-	userRepo := db.NewUserRepository("sqlite", database)
+	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
+	userRepo := db.NewUserRepository(testutil.Driver(), database)
 	ctx := context.Background()
 
 	older := time.Now()
@@ -532,9 +532,10 @@ func TestLibraryRepository_Create_OnlyPrimaryAdmin(t *testing.T) {
 // borrando library_access manualmente y volvemos a correr el SQL de
 // la migración.
 func TestMigration041_BackfillsPrimaryAdmin(t *testing.T) {
+	testutil.SkipIfPostgres(t, "re-runs the SQLite-specific backfill inline with `?` placeholders + INSERT OR IGNORE. The Postgres migration writes the same backfill in its own dialect — covering the pg path needs a dedicated test against pg syntax.")
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository("sqlite", database)
-	userRepo := db.NewUserRepository("sqlite", database)
+	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
+	userRepo := db.NewUserRepository(testutil.Driver(), database)
 	ctx := context.Background()
 
 	now := time.Now()

@@ -7,8 +7,22 @@ server:
     - "172.16.0.0/12"
 
 database:
+  # SQLite is the default — zero-config, file-per-install, perfect for
+  # a single-host self-hosted deployment up to a few thousand items.
   driver: "sqlite"
   path: "./hubplay.db"
+
+  # Postgres is supported as an alternative when you outgrow SQLite
+  # (multi-GB libraries, multiple HubPlay instances against the same
+  # data, or you already run a managed Postgres). Set driver to
+  # "postgres" and provide a libpq-style DSN; `path` is then ignored.
+  #
+  # See docs/operations/postgres.md for the migration runbook
+  # (pgloader for one-shot sqlite → postgres data move, plus the
+  # operational notes on backup/restore which is handled differently).
+  #
+  # driver: "postgres"
+  # dsn: "postgres://hubplay:password@localhost:5432/hubplay?sslmode=disable"
 
 auth:
   jwt_secret: ""             # Auto-generated on first run

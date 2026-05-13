@@ -56,6 +56,46 @@ jobs:
           path: coverage.out
           retention-days: 1
 
+  test-postgres:
+    name: Test Backend (Postgres)
+    runs-on: ubuntu-latest
+    # Re-runs the full backend suite with HUBPLAY_TEST_DRIVER=postgres so
+    # the same assertions are exercised against pgx + the postgres
+    # migrations + queries-postgres + sqlc_pg generated bindings. Tests
+    # that exercise sqlite-only raw SQL skip themselves via
+    # testutil.SkipIfPostgres — that's documented per-test where used.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        # Wait for the server to accept connections before letting the
+        # job proceed — otherwise the first test races the bootstrap and
+        # the whole run flakes.
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run tests against Postgres
+        env:
+          HUBPLAY_TEST_DRIVER: postgres
+          HUBPLAY_TEST_POSTGRES_DSN: postgres://postgres:test@127.0.0.1:5432/postgres?sslmode=disable
+        # Race detector left on — same coverage as the sqlite job. The
+        # `internal/db` package is the bulk of the dual-dialect surface;
+        # other packages exercise it transitively via testutil.
+        run: go test -race -count=1 ./...
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
