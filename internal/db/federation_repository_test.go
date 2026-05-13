@@ -1,4 +1,4 @@
-package db_test
+﻿package db_test
 
 import (
 	"context"
@@ -16,17 +16,17 @@ import (
 // TestFederationRepository_SearchSharedItems exercises the FTS5 search
 // path with the real schema + items_fts triggers. Two libraries; one
 // shared with peer-A (CanBrowse), one not. A query that matches a
-// title in the unshared library must NOT surface — that's the share
+// title in the unshared library must NOT surface â€” that's the share
 // ACL gate.
 func TestFederationRepository_SearchSharedItems(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	ctx := context.Background()
 
 	libRepo := db.NewLibraryRepository("sqlite", database)
-	itemRepo := db.NewItemRepository(database)
+	itemRepo := db.NewItemRepository("sqlite", database)
 	fedRepo := db.NewFederationRepository(database)
 
-	// ── Schema seed ──────────────────────────────────────────────
+	// â”€â”€ Schema seed â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 	now := time.Now().UTC()
 	for _, l := range []db.Library{
 		{ID: "lib-shared", Name: "Shared", ContentType: "movies", ScanMode: "auto", ScanInterval: "6h", CreatedAt: now, UpdatedAt: now, Paths: []string{"/m1"}},
@@ -48,7 +48,7 @@ func TestFederationRepository_SearchSharedItems(t *testing.T) {
 		}
 	}
 
-	// ── User + paired peer + share (only lib-shared) ─────────────
+	// â”€â”€ User + paired peer + share (only lib-shared) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 	insertTestUser(t, database, "u-admin")
 
 	pub, _, err := ed25519.GenerateKey(rand.Reader)
@@ -81,7 +81,7 @@ func TestFederationRepository_SearchSharedItems(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// ── The actual search — query matches one shared item and
+	// â”€â”€ The actual search â€” query matches one shared item and
 	//    one unshared item; only the shared one must surface.
 	hits, err := fedRepo.SearchSharedItems(ctx, "peer-A", "Federation", 10)
 	if err != nil {
@@ -97,7 +97,7 @@ func TestFederationRepository_SearchSharedItems(t *testing.T) {
 		t.Errorf("expected library_id=lib-shared on hit, got %q", hits[0].LibraryID)
 	}
 
-	// ── Empty query short-circuits without touching FTS. ─────────
+	// â”€â”€ Empty query short-circuits without touching FTS. â”€â”€â”€â”€â”€â”€â”€â”€â”€
 	empty, err := fedRepo.SearchSharedItems(ctx, "peer-A", "", 10)
 	if err != nil {
 		t.Fatalf("SearchSharedItems empty: %v", err)
@@ -106,7 +106,7 @@ func TestFederationRepository_SearchSharedItems(t *testing.T) {
 		t.Fatalf("empty query must return zero hits, got %d", len(empty))
 	}
 
-	// ── A query matching nothing returns empty, not error. ──────
+	// â”€â”€ A query matching nothing returns empty, not error. â”€â”€â”€â”€â”€â”€
 	none, err := fedRepo.SearchSharedItems(ctx, "peer-A", "ZZZZNoSuchTitle", 10)
 	if err != nil {
 		t.Fatalf("SearchSharedItems no match: %v", err)
@@ -115,7 +115,7 @@ func TestFederationRepository_SearchSharedItems(t *testing.T) {
 		t.Fatalf("expected zero hits, got %d", len(none))
 	}
 
-	// ── A peer with no share at all sees nothing. ───────────────
+	// â”€â”€ A peer with no share at all sees nothing. â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 	otherPeer := &federation.Peer{
 		ID:         "peer-Z",
 		ServerUUID: "uuid-Z",
@@ -147,9 +147,9 @@ func TestFederationRepository_SearchSharedItems(t *testing.T) {
 // first render and would silently fall back to runtime node-vibrant.
 //
 // Coverage by surface:
-//   - ListSharedItems  → per-library browse (BrowsePeerItems consumer)
-//   - ListRecentSharedItems → "what's new on peers" rail
-//   - SearchSharedItems → federated search (raw SQL holdout)
+//   - ListSharedItems  â†’ per-library browse (BrowsePeerItems consumer)
+//   - ListRecentSharedItems â†’ "what's new on peers" rail
+//   - SearchSharedItems â†’ federated search (raw SQL holdout)
 //
 // Each surface is given one item WITH colors and one item WITHOUT (no
 // matching image row), so the test also blinds against "always emit"
@@ -161,7 +161,7 @@ func TestFederationRepository_SharedItem_ColorsForwarded(t *testing.T) {
 	ctx := context.Background()
 
 	libRepo := db.NewLibraryRepository("sqlite", database)
-	itemRepo := db.NewItemRepository(database)
+	itemRepo := db.NewItemRepository("sqlite", database)
 	imgRepo := db.NewImageRepository(database)
 	fedRepo := db.NewFederationRepository(database)
 
@@ -181,7 +181,7 @@ func TestFederationRepository_SharedItem_ColorsForwarded(t *testing.T) {
 	}
 
 	// Only the first item gets a primary image with colors. The
-	// second item gets nothing — emitter must report ""/"" for it.
+	// second item gets nothing â€” emitter must report ""/"" for it.
 	if err := imgRepo.Create(ctx, &db.Image{
 		ID: "img-1", ItemID: "i-color", Type: "primary", Path: "/m/a.jpg",
 		IsPrimary: true, AddedAt: now,
@@ -251,7 +251,7 @@ func TestFederationRepository_SharedItem_ColorsForwarded(t *testing.T) {
 	})
 
 	t.Run("SearchSharedItems", func(t *testing.T) {
-		// One query that hits both items — FTS prefix match on the
+		// One query that hits both items â€” FTS prefix match on the
 		// shared "a" / "b" first letter would over-match, so search
 		// on the explicit titles instead. Two calls so the test reads
 		// linearly.

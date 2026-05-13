@@ -1,4 +1,4 @@
-package db_test
+﻿package db_test
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 func TestCollectionRepository_EnsureAndList(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	libRepo := db.NewLibraryRepository("sqlite", database)
-	itemRepo := db.NewItemRepository(database)
+	itemRepo := db.NewItemRepository("sqlite", database)
 	metaRepo := db.NewMetadataRepository(database)
 	colRepo := db.NewCollectionRepository(database)
 	seedLibraryForItems(t, libRepo)
@@ -60,7 +60,7 @@ func TestCollectionRepository_EnsureAndList(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Empty name → ("", nil): scanner uses this to keep the link NULL
+	// Empty name â†’ ("", nil): scanner uses this to keep the link NULL
 	// for movies without a TMDb collection match.
 	got, err := colRepo.EnsureCollection(context.Background(), 0, "", "", "", "")
 	if err != nil {
@@ -117,7 +117,7 @@ func TestCollectionRepository_EnsureAndList(t *testing.T) {
 		t.Fatalf("expected 3 movies in x-men, got %d", len(items))
 	}
 
-	// Missing id → (nil, nil) so the handler returns 404 cleanly.
+	// Missing id â†’ (nil, nil) so the handler returns 404 cleanly.
 	missing, err := colRepo.GetByID(context.Background(), "collection:99999999")
 	if err != nil {
 		t.Errorf("missing id returned error: %v", err)

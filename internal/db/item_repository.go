@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"hubplay/internal/db/sqlc"
+	"hubplay/internal/db/sqlc_pg"
 	"hubplay/internal/domain"
 )
 
@@ -58,17 +59,76 @@ type ItemFilter struct {
 	Cursor                string // cursor for keyset pagination (item ID after which to fetch)
 }
 
+// ItemRepository — dual-dialect (Pattern A + Pattern B). The sqlc-backed
+// methods (Create / GetByID / GetByPath / Update / Delete /
+// DeleteByLibrary / CountByLibrary / GetChildren) branch per-call on
+// `useSQLite()`. The four dynamic-SQL methods (List, ChildCountsByParents,
+// LatestItems, LatestSeriesByActivity) build their query strings on
+// the fly and call `r.db` directly with `rewritePlaceholders` to handle
+// `?` → `$N` for Postgres.
+//
+// One last cross-dialect gotcha worth flagging: SQLite stores BOOLEAN
+// as INTEGER so `WHERE is_available = 1` works there but Postgres needs
+// a real boolean predicate. We sidestep with `WHERE is_available` —
+// truthy in both, no rewrite needed.
 type ItemRepository struct {
-	db *sql.DB // kept for List and LatestItems (dynamic WHERE/FTS/cursor)
-	q  *sqlc.Queries
+	db *sql.DB
+	sq *sqlc.Queries
+	pq *sqlc_pg.Queries
 }
 
-func NewItemRepository(database *sql.DB) *ItemRepository {
-	return &ItemRepository{db: database, q: sqlc.New(database)}
+func NewItemRepository(driver string, database *sql.DB) *ItemRepository {
+	r := &ItemRepository{db: database}
+	if IsPostgres(driver) {
+		r.pq = sqlc_pg.New(database)
+	} else {
+		r.sq = sqlc.New(database)
+	}
+	return r
+}
+
+func (r *ItemRepository) useSQLite() bool { return r.sq != nil }
+
+// driver returns the driver string this repo was built with — used
+// by raw-SQL methods that need to call rewritePlaceholders.
+func (r *ItemRepository) driver() string {
+	if r.useSQLite() {
+		return DriverSQLite
+	}
+	return DriverPostgres
 }
 
 func (r *ItemRepository) Create(ctx context.Context, item *Item) error {
-	err := r.q.CreateItem(ctx, sqlc.CreateItemParams{
+	if r.useSQLite() {
+		err := r.sq.CreateItem(ctx, sqlc.CreateItemParams{
+			ID:              item.ID,
+			LibraryID:       item.LibraryID,
+			ParentID:        nullableString(item.ParentID),
+			Type:            item.Type,
+			Title:           item.Title,
+			SortTitle:       item.SortTitle,
+			OriginalTitle:   nullableString(item.OriginalTitle),
+			Year:            sql.NullInt64{Int64: int64(item.Year), Valid: true},
+			Path:            nullableString(item.Path),
+			Size:            sql.NullInt64{Int64: item.Size, Valid: true},
+			DurationTicks:   sql.NullInt64{Int64: item.DurationTicks, Valid: true},
+			Container:       nullableString(item.Container),
+			Fingerprint:     nullableString(item.Fingerprint),
+			SeasonNumber:    nullableIntPtr(item.SeasonNumber),
+			EpisodeNumber:   nullableIntPtr(item.EpisodeNumber),
+			CommunityRating: nullableFloat64Ptr(item.CommunityRating),
+			ContentRating:   nullableString(item.ContentRating),
+			PremiereDate:    nullableTimePtr(item.PremiereDate),
+			AddedAt:         item.AddedAt,
+			UpdatedAt:       item.UpdatedAt,
+			IsAvailable:     item.IsAvailable,
+		})
+		if err != nil {
+			return fmt.Errorf("create item: %w", err)
+		}
+		return nil
+	}
+	err := r.pq.CreateItem(ctx, sqlc_pg.CreateItemParams{
 		ID:              item.ID,
 		LibraryID:       item.LibraryID,
 		ParentID:        nullableString(item.ParentID),
@@ -76,14 +136,14 @@ func (r *ItemRepository) Create(ctx context.Context, item *Item) error {
 		Title:           item.Title,
 		SortTitle:       item.SortTitle,
 		OriginalTitle:   nullableString(item.OriginalTitle),
-		Year:            sql.NullInt64{Int64: int64(item.Year), Valid: true},
+		Year:            sql.NullInt32{Int32: int32(item.Year), Valid: true},
 		Path:            nullableString(item.Path),
 		Size:            sql.NullInt64{Int64: item.Size, Valid: true},
 		DurationTicks:   sql.NullInt64{Int64: item.DurationTicks, Valid: true},
 		Container:       nullableString(item.Container),
 		Fingerprint:     nullableString(item.Fingerprint),
-		SeasonNumber:    nullableIntPtr(item.SeasonNumber),
-		EpisodeNumber:   nullableIntPtr(item.EpisodeNumber),
+		SeasonNumber:    nullableIntPtrInt32(item.SeasonNumber),
+		EpisodeNumber:   nullableIntPtrInt32(item.EpisodeNumber),
 		CommunityRating: nullableFloat64Ptr(item.CommunityRating),
 		ContentRating:   nullableString(item.ContentRating),
 		PremiereDate:    nullableTimePtr(item.PremiereDate),
@@ -98,26 +158,48 @@ func (r *ItemRepository) Create(ctx context.Context, item *Item) error {
 }
 
 func (r *ItemRepository) GetByID(ctx context.Context, id string) (*Item, error) {
-	row, err := r.q.GetItemByID(ctx, id)
+	if r.useSQLite() {
+		row, err := r.sq.GetItemByID(ctx, id)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("item %s: %w", id, domain.ErrNotFound)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("get item %s: %w", id, err)
+		}
+		item := itemFromSqliteModel(row)
+		return &item, nil
+	}
+	row, err := r.pq.GetItemByID(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("item %s: %w", id, domain.ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get item %s: %w", id, err)
 	}
-	item := itemFromSqlcModel(row)
+	item := itemFromPgGetByIDRow(row)
 	return &item, nil
 }
 
 func (r *ItemRepository) GetByPath(ctx context.Context, path string) (*Item, error) {
-	row, err := r.q.GetItemByPath(ctx, sql.NullString{String: path, Valid: path != ""})
+	if r.useSQLite() {
+		row, err := r.sq.GetItemByPath(ctx, sql.NullString{String: path, Valid: path != ""})
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("item path %q: %w", path, domain.ErrNotFound)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("get item by path %q: %w", path, err)
+		}
+		item := itemFromSqliteModel(row)
+		return &item, nil
+	}
+	row, err := r.pq.GetItemByPath(ctx, sql.NullString{String: path, Valid: path != ""})
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("item path %q: %w", path, domain.ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get item by path %q: %w", path, err)
 	}
-	item := itemFromSqlcModel(row)
+	item := itemFromPgByPathRow(row)
 	return &item, nil
 }
 
@@ -162,9 +244,18 @@ func (r *ItemRepository) List(ctx context.Context, filter ItemFilter) ([]*Item, 
 		args = append(args, filter.Type)
 	}
 
+	// Full-text search clause — different physical mechanism per
+	// dialect: SQLite uses the FTS5 virtual table `items_fts`,
+	// Postgres uses the tsvector column `search_vector` populated
+	// by the trigger from migrations/postgres/002_fts_search.sql.
 	if filter.Query != "" {
-		where += " AND rowid IN (SELECT rowid FROM items_fts WHERE items_fts MATCH ?)"
-		args = append(args, filter.Query+"*")
+		if r.useSQLite() {
+			where += " AND rowid IN (SELECT rowid FROM items_fts WHERE items_fts MATCH ?)"
+			args = append(args, filter.Query+"*")
+		} else {
+			where += " AND search_vector @@ to_tsquery('simple', ?)"
+			args = append(args, toTSQueryPrefix(filter.Query))
+		}
 	}
 
 	// Normalized genre lookup: the synthetic value id ("genre:<lower>")
@@ -205,21 +296,22 @@ func (r *ItemRepository) List(ctx context.Context, filter ItemFilter) ([]*Item, 
 		}
 	}
 
+	driver := r.driver()
+
 	var total int
 	if filter.Cursor == "" {
-		countSQL := "SELECT COUNT(*) FROM items " + where
+		countSQL := rewritePlaceholders(driver, "SELECT COUNT(*) FROM items "+where)
 		if err := r.db.QueryRowContext(ctx, countSQL, args...).Scan(&total); err != nil {
 			return nil, 0, fmt.Errorf("count items: %w", err)
 		}
 	}
 
 	if filter.Cursor != "" {
-		var cursorSort string
+		var cursorSort any
 		var cursorID string
-		err := r.db.QueryRowContext(ctx,
-			fmt.Sprintf(`SELECT %s, id FROM items WHERE id = ?`, filter.SortBy),
-			filter.Cursor,
-		).Scan(&cursorSort, &cursorID)
+		cursorSQL := rewritePlaceholders(driver,
+			fmt.Sprintf(`SELECT %s, id FROM items WHERE id = ?`, filter.SortBy))
+		err := r.db.QueryRowContext(ctx, cursorSQL, filter.Cursor).Scan(&cursorSort, &cursorID)
 		if err == nil {
 			op := ">"
 			if filter.SortOrder == "desc" {
@@ -231,13 +323,13 @@ func (r *ItemRepository) List(ctx context.Context, filter ItemFilter) ([]*Item, 
 		}
 	}
 
-	querySQL := fmt.Sprintf(
+	querySQL := rewritePlaceholders(driver, fmt.Sprintf(
 		`SELECT id, library_id, parent_id, type, title, sort_title, original_title,
 		        year, path, size, duration_ticks, container, season_number, episode_number,
 		        community_rating, added_at, updated_at, is_available
 		 FROM items %s ORDER BY %s %s, id ASC LIMIT ? OFFSET ?`,
 		where, filter.SortBy, filter.SortOrder,
-	)
+	))
 	offset := filter.Offset
 	if filter.Cursor != "" {
 		offset = 0
@@ -264,24 +356,49 @@ func (r *ItemRepository) List(ctx context.Context, filter ItemFilter) ([]*Item, 
 }
 
 func (r *ItemRepository) Update(ctx context.Context, item *Item) error {
-	n, err := r.q.UpdateItem(ctx, sqlc.UpdateItemParams{
-		Title:           item.Title,
-		SortTitle:       item.SortTitle,
-		OriginalTitle:   nullableString(item.OriginalTitle),
-		Year:            sql.NullInt64{Int64: int64(item.Year), Valid: true},
-		Size:            sql.NullInt64{Int64: item.Size, Valid: true},
-		DurationTicks:   sql.NullInt64{Int64: item.DurationTicks, Valid: true},
-		Container:       nullableString(item.Container),
-		Fingerprint:     nullableString(item.Fingerprint),
-		SeasonNumber:    nullableIntPtr(item.SeasonNumber),
-		EpisodeNumber:   nullableIntPtr(item.EpisodeNumber),
-		CommunityRating: nullableFloat64Ptr(item.CommunityRating),
-		ContentRating:   nullableString(item.ContentRating),
-		PremiereDate:    nullableTimePtr(item.PremiereDate),
-		UpdatedAt:       item.UpdatedAt,
-		IsAvailable:     item.IsAvailable,
-		ID:              item.ID,
-	})
+	var (
+		n   int64
+		err error
+	)
+	if r.useSQLite() {
+		n, err = r.sq.UpdateItem(ctx, sqlc.UpdateItemParams{
+			Title:           item.Title,
+			SortTitle:       item.SortTitle,
+			OriginalTitle:   nullableString(item.OriginalTitle),
+			Year:            sql.NullInt64{Int64: int64(item.Year), Valid: true},
+			Size:            sql.NullInt64{Int64: item.Size, Valid: true},
+			DurationTicks:   sql.NullInt64{Int64: item.DurationTicks, Valid: true},
+			Container:       nullableString(item.Container),
+			Fingerprint:     nullableString(item.Fingerprint),
+			SeasonNumber:    nullableIntPtr(item.SeasonNumber),
+			EpisodeNumber:   nullableIntPtr(item.EpisodeNumber),
+			CommunityRating: nullableFloat64Ptr(item.CommunityRating),
+			ContentRating:   nullableString(item.ContentRating),
+			PremiereDate:    nullableTimePtr(item.PremiereDate),
+			UpdatedAt:       item.UpdatedAt,
+			IsAvailable:     item.IsAvailable,
+			ID:              item.ID,
+		})
+	} else {
+		n, err = r.pq.UpdateItem(ctx, sqlc_pg.UpdateItemParams{
+			Title:           item.Title,
+			SortTitle:       item.SortTitle,
+			OriginalTitle:   nullableString(item.OriginalTitle),
+			Year:            sql.NullInt32{Int32: int32(item.Year), Valid: true},
+			Size:            sql.NullInt64{Int64: item.Size, Valid: true},
+			DurationTicks:   sql.NullInt64{Int64: item.DurationTicks, Valid: true},
+			Container:       nullableString(item.Container),
+			Fingerprint:     nullableString(item.Fingerprint),
+			SeasonNumber:    nullableIntPtrInt32(item.SeasonNumber),
+			EpisodeNumber:   nullableIntPtrInt32(item.EpisodeNumber),
+			CommunityRating: nullableFloat64Ptr(item.CommunityRating),
+			ContentRating:   nullableString(item.ContentRating),
+			PremiereDate:    nullableTimePtr(item.PremiereDate),
+			UpdatedAt:       item.UpdatedAt,
+			IsAvailable:     item.IsAvailable,
+			ID:              item.ID,
+		})
+	}
 	if err != nil {
 		return fmt.Errorf("update item: %w", err)
 	}
@@ -292,7 +409,15 @@ func (r *ItemRepository) Update(ctx context.Context, item *Item) error {
 }
 
 func (r *ItemRepository) Delete(ctx context.Context, id string) error {
-	n, err := r.q.DeleteItem(ctx, id)
+	var (
+		n   int64
+		err error
+	)
+	if r.useSQLite() {
+		n, err = r.sq.DeleteItem(ctx, id)
+	} else {
+		n, err = r.pq.DeleteItem(ctx, id)
+	}
 	if err != nil {
 		return fmt.Errorf("delete item: %w", err)
 	}
@@ -303,7 +428,12 @@ func (r *ItemRepository) Delete(ctx context.Context, id string) error {
 }
 
 func (r *ItemRepository) DeleteByLibrary(ctx context.Context, libraryID string) error {
-	err := r.q.DeleteItemsByLibrary(ctx, libraryID)
+	var err error
+	if r.useSQLite() {
+		err = r.sq.DeleteItemsByLibrary(ctx, libraryID)
+	} else {
+		err = r.pq.DeleteItemsByLibrary(ctx, libraryID)
+	}
 	if err != nil {
 		return fmt.Errorf("delete items by library: %w", err)
 	}
@@ -311,7 +441,15 @@ func (r *ItemRepository) DeleteByLibrary(ctx context.Context, libraryID string) 
 }
 
 func (r *ItemRepository) CountByLibrary(ctx context.Context, libraryID string) (int, error) {
-	cnt, err := r.q.CountItemsByLibrary(ctx, libraryID)
+	var (
+		cnt int64
+		err error
+	)
+	if r.useSQLite() {
+		cnt, err = r.sq.CountItemsByLibrary(ctx, libraryID)
+	} else {
+		cnt, err = r.pq.CountItemsByLibrary(ctx, libraryID)
+	}
 	if err != nil {
 		return 0, fmt.Errorf("count items by library: %w", err)
 	}
@@ -338,7 +476,8 @@ func (r *ItemRepository) ChildCountsByParents(ctx context.Context, parentIDs []s
 	for i, id := range parentIDs {
 		args[i] = id
 	}
-	q := "SELECT parent_id, COUNT(*) FROM items WHERE parent_id IN (" + placeholders + ") GROUP BY parent_id"
+	q := rewritePlaceholders(r.driver(),
+		"SELECT parent_id, COUNT(*) FROM items WHERE parent_id IN ("+placeholders+") GROUP BY parent_id")
 	rows, err := r.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("child counts: %w", err)
@@ -358,11 +497,18 @@ func (r *ItemRepository) ChildCountsByParents(ctx context.Context, parentIDs []s
 }
 
 func (r *ItemRepository) GetChildren(ctx context.Context, parentID string) ([]*Item, error) {
-	rows, err := r.q.GetItemChildren(ctx, sql.NullString{String: parentID, Valid: parentID != ""})
+	if r.useSQLite() {
+		rows, err := r.sq.GetItemChildren(ctx, sql.NullString{String: parentID, Valid: parentID != ""})
+		if err != nil {
+			return nil, fmt.Errorf("get children: %w", err)
+		}
+		return itemsFromSqliteChildrenRows(rows), nil
+	}
+	rows, err := r.pq.GetItemChildren(ctx, sql.NullString{String: parentID, Valid: parentID != ""})
 	if err != nil {
 		return nil, fmt.Errorf("get children: %w", err)
 	}
-	return itemsFromChildrenRows(rows), nil
+	return itemsFromPgChildrenRows(rows), nil
 }
 
 // LatestItems returns the most recently added items.
@@ -375,7 +521,10 @@ func (r *ItemRepository) LatestItems(ctx context.Context, libraryID string, item
 		limit = 50
 	}
 
-	where := "WHERE is_available = 1"
+	// `is_available` (no `= 1`) — truthy in both SQLite (BOOLEAN
+	// stored as INTEGER) and Postgres (real BOOLEAN), avoids the
+	// `integer = boolean` mismatch the explicit literal would trip.
+	where := "WHERE is_available"
 	args := []any{}
 	if libraryID != "" {
 		where += " AND library_id = ?"
@@ -400,25 +549,47 @@ func (r *ItemRepository) LatestItems(ctx context.Context, libraryID string, item
 	}
 	args = append(args, limit)
 
-	rows, err := r.db.QueryContext(ctx,
-		fmt.Sprintf(
-			`SELECT id, library_id, parent_id, type, title, sort_title, year, path,
-			        duration_ticks, container, added_at, is_available
-			 FROM items %s ORDER BY added_at DESC LIMIT ?`, where,
-		), args...)
+	query := rewritePlaceholders(r.driver(), fmt.Sprintf(
+		`SELECT id, library_id, parent_id, type, title, sort_title, year, path,
+		        duration_ticks, container, added_at, is_available
+		 FROM items %s ORDER BY added_at DESC LIMIT ?`, where,
+	))
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("latest items: %w", err)
 	}
 	defer rows.Close() //nolint:errcheck
 
+	pg := !r.useSQLite()
 	var items []*Item
 	for rows.Next() {
 		item := &Item{}
 		var parentID, path, container sql.NullString
-		if err := rows.Scan(&item.ID, &item.LibraryID, &parentID, &item.Type, &item.Title,
-			&item.SortTitle, &item.Year, &path, &item.DurationTicks, &container,
-			&item.AddedAt, &item.IsAvailable); err != nil {
-			return nil, fmt.Errorf("scan latest item: %w", err)
+		// Year column is INTEGER in both schemas — sqlc maps it to
+		// NullInt64 on SQLite, NullInt32 on Postgres. We don't go
+		// through sqlc here, so scan into the dialect's native size
+		// and project to int.
+		if pg {
+			var year sql.NullInt32
+			if err := rows.Scan(&item.ID, &item.LibraryID, &parentID, &item.Type, &item.Title,
+				&item.SortTitle, &year, &path, &item.DurationTicks, &container,
+				&item.AddedAt, &item.IsAvailable); err != nil {
+				return nil, fmt.Errorf("scan latest item: %w", err)
+			}
+			if year.Valid {
+				item.Year = int(year.Int32)
+			}
+		} else {
+			var year sql.NullInt64
+			if err := rows.Scan(&item.ID, &item.LibraryID, &parentID, &item.Type, &item.Title,
+				&item.SortTitle, &year, &path, &item.DurationTicks, &container,
+				&item.AddedAt, &item.IsAvailable); err != nil {
+				return nil, fmt.Errorf("scan latest item: %w", err)
+			}
+			if year.Valid {
+				item.Year = int(year.Int64)
+			}
 		}
 		item.ParentID = parentID.String
 		item.Path = path.String
@@ -480,7 +651,7 @@ func (r *ItemRepository) LatestSeriesByActivity(ctx context.Context, libraryID s
 	}
 	cutoff := time.Now().UTC().Add(-14 * 24 * time.Hour)
 
-	const query = `
+	query := rewritePlaceholders(r.driver(), `
 		WITH activity AS (
 			SELECT
 				s.id AS series_id,
@@ -491,9 +662,9 @@ func (r *ItemRepository) LatestSeriesByActivity(ctx context.Context, libraryID s
 			LEFT JOIN items season ON season.parent_id = s.id AND season.type = 'season'
 			LEFT JOIN items e ON e.parent_id = season.id
 			                 AND e.type = 'episode'
-			                 AND e.is_available = 1
+			                 AND e.is_available
 			WHERE s.type = 'series'
-			  AND s.is_available = 1
+			  AND s.is_available
 			  AND s.library_id = ?
 			GROUP BY s.id
 		)
@@ -503,7 +674,7 @@ func (r *ItemRepository) LatestSeriesByActivity(ctx context.Context, libraryID s
 		FROM activity a
 		JOIN items s ON s.id = a.series_id
 		ORDER BY a.latest_at DESC, s.added_at DESC
-		LIMIT ?`
+		LIMIT ?`)
 
 	rows, err := r.db.QueryContext(ctx, query, cutoff, libraryID, limit)
 	if err != nil {
@@ -511,18 +682,38 @@ func (r *ItemRepository) LatestSeriesByActivity(ctx context.Context, libraryID s
 	}
 	defer rows.Close() //nolint:errcheck
 
+	pg := !r.useSQLite()
 	var out []*LatestSeriesActivity
 	for rows.Next() {
 		row := &LatestSeriesActivity{}
 		var parentID, path, container sql.NullString
 		var latestAtRaw any
 		var newCount sql.NullInt64
-		if err := rows.Scan(
-			&row.ID, &row.LibraryID, &parentID, &row.Type, &row.Title, &row.SortTitle,
-			&row.Year, &path, &row.DurationTicks, &container, &row.AddedAt, &row.IsAvailable,
-			&latestAtRaw, &newCount,
-		); err != nil {
-			return nil, fmt.Errorf("scan latest series activity: %w", err)
+		// Same Year-column dialect split as LatestItems.
+		if pg {
+			var year sql.NullInt32
+			if err := rows.Scan(
+				&row.ID, &row.LibraryID, &parentID, &row.Type, &row.Title, &row.SortTitle,
+				&year, &path, &row.DurationTicks, &container, &row.AddedAt, &row.IsAvailable,
+				&latestAtRaw, &newCount,
+			); err != nil {
+				return nil, fmt.Errorf("scan latest series activity: %w", err)
+			}
+			if year.Valid {
+				row.Year = int(year.Int32)
+			}
+		} else {
+			var year sql.NullInt64
+			if err := rows.Scan(
+				&row.ID, &row.LibraryID, &parentID, &row.Type, &row.Title, &row.SortTitle,
+				&year, &path, &row.DurationTicks, &container, &row.AddedAt, &row.IsAvailable,
+				&latestAtRaw, &newCount,
+			); err != nil {
+				return nil, fmt.Errorf("scan latest series activity: %w", err)
+			}
+			if year.Valid {
+				row.Year = int(year.Int64)
+			}
 		}
 		row.ParentID = parentID.String
 		row.Path = path.String
@@ -530,7 +721,9 @@ func (r *ItemRepository) LatestSeriesByActivity(ctx context.Context, libraryID s
 		// The MAX() over a heterogeneous column comes back as the
 		// driver's any. coerceSQLiteTime handles the prod-legacy
 		// "+0200 CEST m=+..." monotonic-clock shape too, same path
-		// the trending rail already trusts.
+		// the trending rail already trusts. Pgx returns time.Time
+		// directly — coerceSQLiteTime's `time.Time` case path
+		// passes that straight through.
 		t, err := coerceSQLiteTime(latestAtRaw)
 		if err != nil {
 			return nil, fmt.Errorf("parse latest_activity_at: %w", err)
@@ -551,7 +744,20 @@ func nullableFloat64Ptr(f *float64) sql.NullFloat64 {
 	return sql.NullFloat64{Float64: *f, Valid: true}
 }
 
-func itemFromSqlcModel(r sqlc.Item) Item {
+// nullableIntPtrInt32 is the postgres counterpart to nullableIntPtr —
+// season_number / episode_number are INTEGER in postgres, sqlc maps
+// that to NullInt32.
+func nullableIntPtrInt32(p *int) sql.NullInt32 {
+	if p == nil {
+		return sql.NullInt32{}
+	}
+	return sql.NullInt32{Int32: int32(*p), Valid: true}
+}
+
+// itemFromSqliteModel maps a sqlc.Item (SQLite, INTEGER → NullInt64)
+// into the domain Item. The pg counterpart (itemFromPgGetByIDRow)
+// mirrors this with NullInt32 for the int-sized columns.
+func itemFromSqliteModel(r sqlc.Item) Item {
 	item := Item{
 		ID:            r.ID,
 		LibraryID:     r.LibraryID,
@@ -588,7 +794,52 @@ func itemFromSqlcModel(r sqlc.Item) Item {
 	return item
 }
 
-func itemFromChildrenRow(r sqlc.GetItemChildrenRow) Item {
+// itemFromPgGetByIDRow / itemFromPgByPathRow / itemFromPgChildrenRows —
+// pg-side counterparts. INTEGER columns come back as NullInt32, BIGINT
+// columns as NullInt64. Boolean is_available is a real BOOLEAN.
+func itemFromPgGetByIDRow(r sqlc_pg.GetItemByIDRow) Item {
+	item := Item{
+		ID:            r.ID,
+		LibraryID:     r.LibraryID,
+		ParentID:      r.ParentID.String,
+		Type:          r.Type,
+		Title:         r.Title,
+		SortTitle:     r.SortTitle,
+		OriginalTitle: r.OriginalTitle.String,
+		Year:          int(r.Year.Int32),
+		Path:          r.Path.String,
+		Size:          r.Size.Int64,
+		DurationTicks: r.DurationTicks.Int64,
+		Container:     r.Container.String,
+		Fingerprint:   r.Fingerprint.String,
+		ContentRating: r.ContentRating.String,
+		AddedAt:       r.AddedAt,
+		UpdatedAt:     r.UpdatedAt,
+		IsAvailable:   r.IsAvailable,
+	}
+	if r.SeasonNumber.Valid {
+		v := int(r.SeasonNumber.Int32)
+		item.SeasonNumber = &v
+	}
+	if r.EpisodeNumber.Valid {
+		v := int(r.EpisodeNumber.Int32)
+		item.EpisodeNumber = &v
+	}
+	if r.CommunityRating.Valid {
+		item.CommunityRating = &r.CommunityRating.Float64
+	}
+	if r.PremiereDate.Valid {
+		item.PremiereDate = &r.PremiereDate.Time
+	}
+	return item
+}
+
+func itemFromPgByPathRow(r sqlc_pg.GetItemByPathRow) Item {
+	// Structural cast — both rows share the same column projection.
+	return itemFromPgGetByIDRow(sqlc_pg.GetItemByIDRow(r))
+}
+
+func itemFromSqliteChildRow(r sqlc.GetItemChildrenRow) Item {
 	item := Item{
 		ID:            r.ID,
 		LibraryID:     r.LibraryID,
@@ -620,14 +871,95 @@ func itemFromChildrenRow(r sqlc.GetItemChildrenRow) Item {
 	return item
 }
 
-func itemsFromChildrenRows(rows []sqlc.GetItemChildrenRow) []*Item {
+func itemFromPgChildRow(r sqlc_pg.GetItemChildrenRow) Item {
+	item := Item{
+		ID:            r.ID,
+		LibraryID:     r.LibraryID,
+		ParentID:      r.ParentID.String,
+		Type:          r.Type,
+		Title:         r.Title,
+		SortTitle:     r.SortTitle,
+		OriginalTitle: r.OriginalTitle.String,
+		Year:          int(r.Year.Int32),
+		Path:          r.Path.String,
+		Size:          r.Size.Int64,
+		DurationTicks: r.DurationTicks.Int64,
+		Container:     r.Container.String,
+		AddedAt:       r.AddedAt,
+		UpdatedAt:     r.UpdatedAt,
+		IsAvailable:   r.IsAvailable,
+	}
+	if r.SeasonNumber.Valid {
+		v := int(r.SeasonNumber.Int32)
+		item.SeasonNumber = &v
+	}
+	if r.EpisodeNumber.Valid {
+		v := int(r.EpisodeNumber.Int32)
+		item.EpisodeNumber = &v
+	}
+	if r.CommunityRating.Valid {
+		item.CommunityRating = &r.CommunityRating.Float64
+	}
+	return item
+}
+
+func itemsFromSqliteChildrenRows(rows []sqlc.GetItemChildrenRow) []*Item {
 	if len(rows) == 0 {
 		return nil
 	}
 	out := make([]*Item, len(rows))
 	for i, row := range rows {
-		item := itemFromChildrenRow(row)
+		item := itemFromSqliteChildRow(row)
 		out[i] = &item
 	}
 	return out
+}
+
+func itemsFromPgChildrenRows(rows []sqlc_pg.GetItemChildrenRow) []*Item {
+	if len(rows) == 0 {
+		return nil
+	}
+	out := make([]*Item, len(rows))
+	for i, row := range rows {
+		item := itemFromPgChildRow(row)
+		out[i] = &item
+	}
+	return out
+}
+
+// toTSQueryPrefix turns a free-text search into a Postgres tsquery
+// suitable for `to_tsquery('simple', ?)`. Splits on whitespace, strips
+// any character `to_tsquery`'s parser would reject (`& | ! ( ) : * <`
+// plus a few more), joins surviving tokens with `&`, and tags the
+// final token with `:*` so search-as-you-type matches prefix.
+//
+// We pre-sanitise rather than trust the parser because raw user input
+// like "harry+potter (2001)" would otherwise raise a syntax error. An
+// empty / fully-stripped query becomes `""` which `to_tsquery` accepts
+// and matches nothing — the right semantic for "the user typed only
+// punctuation".
+func toTSQueryPrefix(q string) string {
+	q = strings.TrimSpace(q)
+	if q == "" {
+		return ""
+	}
+	parts := strings.Fields(q)
+	tokens := make([]string, 0, len(parts))
+	for _, p := range parts {
+		clean := strings.Map(func(r rune) rune {
+			switch r {
+			case '&', '|', '!', '(', ')', ':', '*', '<', '>', '\'', '"', '\\', '/', '%', '?', '$', '@', '#':
+				return -1
+			}
+			return r
+		}, p)
+		if clean != "" {
+			tokens = append(tokens, clean)
+		}
+	}
+	if len(tokens) == 0 {
+		return ""
+	}
+	tokens[len(tokens)-1] += ":*"
+	return strings.Join(tokens, " & ")
 }

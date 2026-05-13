@@ -1,4 +1,4 @@
-package scanner
+﻿package scanner
 
 import (
 	"bytes"
@@ -43,7 +43,7 @@ func newTestScanner(t *testing.T) (*Scanner, *db.ItemRepository, *db.MediaStream
 	t.Helper()
 	database := testutil.NewTestDB(t)
 	libRepo := db.NewLibraryRepository("sqlite", database)
-	itemRepo := db.NewItemRepository(database)
+	itemRepo := db.NewItemRepository("sqlite", database)
 	streamRepo := db.NewMediaStreamRepository("sqlite", database)
 	bus := event.NewBus(slog.Default())
 
@@ -204,7 +204,7 @@ func TestScanLibrary_RemovedFiles(t *testing.T) {
 		Paths: []string{dir},
 	}
 
-	// First scan — adds the file
+	// First scan â€” adds the file
 	result, _ := s.ScanLibrary(context.Background(), lib)
 	if result.Added != 1 {
 		t.Fatalf("expected 1 added, got %d", result.Added)
@@ -213,7 +213,7 @@ func TestScanLibrary_RemovedFiles(t *testing.T) {
 	// Remove the file
 	_ = os.Remove(f)
 
-	// Second scan — should mark as removed
+	// Second scan â€” should mark as removed
 	result, _ = s.ScanLibrary(context.Background(), lib)
 	if result.Removed != 1 {
 		t.Errorf("expected 1 removed, got %d", result.Removed)
@@ -250,7 +250,7 @@ func TestScanLibrary_EmptyDir(t *testing.T) {
 func TestScanLibrary_ShowsBuildsHierarchy(t *testing.T) {
 	// Reported by user: a Series library accepted creation but the
 	// /series page stayed empty because the scanner only created
-	// rows of type=episode — never the parent series + season rows.
+	// rows of type=episode â€” never the parent series + season rows.
 	// This test pins the hierarchy: one series row per series dir,
 	// one season row per season dir, episodes link via parent_id.
 	s, itemRepo, _ := newTestScanner(t)
@@ -283,7 +283,7 @@ func TestScanLibrary_ShowsBuildsHierarchy(t *testing.T) {
 		t.Fatalf("scan: %v", err)
 	}
 	// `result.Added` counts processed FILES (not all DB rows), so 4
-	// — the parent series + season rows are infrastructure created
+	// â€” the parent series + season rows are infrastructure created
 	// transparently as a side-effect of episode ingestion.
 	if r.Added != 4 {
 		t.Errorf("added (file count): got %d want 4 episodes", r.Added)
@@ -368,10 +368,10 @@ func TestScanLibrary_ShowsRescanIsIdempotent(t *testing.T) {
 
 	// Sanity: still exactly 1 series + 1 season + 1 episode. The
 	// season check is the regression guard for the
-	// `iterateLibraryItems` filter bug — it used to default to
+	// `iterateLibraryItems` filter bug â€” it used to default to
 	// `parent_id IS NULL`, which silently excluded every season +
 	// episode from the cache pre-population pass. On re-scan the
-	// season cache was empty → ensureSeasonRow → fresh INSERT →
+	// season cache was empty â†’ ensureSeasonRow â†’ fresh INSERT â†’
 	// duplicate season rows for every existing show.
 	series, _, _ := itemRepo.List(context.Background(), db.ItemFilter{
 		LibraryID: "lib-test", Type: "series", Limit: 10,
@@ -394,10 +394,10 @@ func TestScanLibrary_ShowsRescanIsIdempotent(t *testing.T) {
 }
 
 func TestScanLibrary_ShowsRescanWithMultipleSeasons(t *testing.T) {
-	// Reported by user: tras escanear una librería con varias series y
+	// Reported by user: tras escanear una librerÃ­a con varias series y
 	// temporadas, /series mostraba duplicados de cada serie. Esa
-	// versión del test mantiene los rows de series cacheadas pero
-	// también verifica seasons + episodes para que el bug del filtro
+	// versiÃ³n del test mantiene los rows de series cacheadas pero
+	// tambiÃ©n verifica seasons + episodes para que el bug del filtro
 	// `parent_id IS NULL` en iterateLibraryItems no vuelva a colarse.
 	s, itemRepo, _ := newTestScanner(t)
 	root := t.TempDir()
@@ -465,7 +465,7 @@ func TestScanLibrary_Idempotent(t *testing.T) {
 		t.Fatalf("first scan should add 1, got %d", r1.Added)
 	}
 
-	// Second scan — same file, no changes
+	// Second scan â€” same file, no changes
 	r2, _ := s.ScanLibrary(context.Background(), lib)
 	if r2.Added != 0 {
 		t.Errorf("second scan should add 0, got %d", r2.Added)
@@ -482,14 +482,14 @@ func createFile(t *testing.T, path, content string) {
 	}
 }
 
-// ─── Image-ingest contract ──────────────────────────────────────────────────
+// â”€â”€â”€ Image-ingest contract â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 //
 // These tests pin the post-audit invariant: the scanner MUST download
 // every provider image to local storage during enrichment and
 // persist `/api/v1/images/file/{id}` as the path. Storing the upstream
 // URL would leak the user's IP/User-Agent to TMDb on every poster view
 // and break the library the day TMDb is unreachable. The previous
-// behaviour did exactly that — these tests are the regression guard.
+// behaviour did exactly that â€” these tests are the regression guard.
 
 // stubProvider implements scanner.providerFetcher with canned image
 // results. SearchMetadata and FetchMetadata are no-ops because this
@@ -560,7 +560,7 @@ func TestFetchAndStoreImages_PersistsLocalPathNotURL(t *testing.T) {
 	// constructor would build in main.go.
 	database := testutil.NewTestDB(t)
 	libRepo := db.NewLibraryRepository("sqlite", database)
-	itemRepo := db.NewItemRepository(database)
+	itemRepo := db.NewItemRepository("sqlite", database)
 	imgRepo := db.NewImageRepository(database)
 	now := time.Now()
 	if err := libRepo.Create(context.Background(), &db.Library{
@@ -588,7 +588,7 @@ func TestFetchAndStoreImages_PersistsLocalPathNotURL(t *testing.T) {
 		db.NewItemValueRepository(database),
 		db.NewStudioRepository(database),
 		db.NewCollectionRepository(database),
-		nil /* providers — overridden below */, prober, bus,
+		nil /* providers â€” overridden below */, prober, bus,
 		imageDir, pm, slog.Default())
 
 	// Inject the stub. The constructor took *provider.Manager (nil
@@ -599,9 +599,9 @@ func TestFetchAndStoreImages_PersistsLocalPathNotURL(t *testing.T) {
 	// path, not a sniff fallback.
 	s.providers = &stubProvider{images: []provider.ImageResult{
 		{Type: "primary", URL: srv.URL + "/poster.png", Source: "tmdb", Width: 4, Height: 4, Score: 100},
-		{Type: "primary", URL: srv.URL + "/loser.png", Source: "tmdb", Width: 4, Height: 4, Score: 1}, // lower score — must be skipped
+		{Type: "primary", URL: srv.URL + "/loser.png", Source: "tmdb", Width: 4, Height: 4, Score: 1}, // lower score â€” must be skipped
 		{Type: "backdrop", URL: srv.URL + "/backdrop.png", Source: "fanart", Width: 4, Height: 4, Score: 50},
-		{Type: "thumb", URL: srv.URL + "/thumb.png", Source: "fanart"}, // unknown kind — must be ignored
+		{Type: "thumb", URL: srv.URL + "/thumb.png", Source: "fanart"}, // unknown kind â€” must be ignored
 	}}
 
 	// Drive the image-ingest path directly so we don't have to build
@@ -609,7 +609,7 @@ func TestFetchAndStoreImages_PersistsLocalPathNotURL(t *testing.T) {
 	// public ScanLibrary calls this same internal method.
 	s.fetchAndStoreImages(context.Background(), itemID, map[string]string{"tmdb": "123"}, provider.ItemMovie)
 
-	// Two images expected (primary + backdrop) — thumb is skipped, low-
+	// Two images expected (primary + backdrop) â€” thumb is skipped, low-
 	// score primary is suppressed by the per-kind ranking.
 	got, err := imgRepo.ListByItem(context.Background(), itemID)
 	if err != nil {
@@ -660,10 +660,10 @@ func TestFetchAndStoreImages_PersistsLocalPathNotURL(t *testing.T) {
 // cleaned title into the item row, and ingest the still as a primary
 // `backdrop` image attached to the EPISODE (not the series).
 //
-// The bug this test guards against is the empty-episode hero — every
+// The bug this test guards against is the empty-episode hero â€” every
 // field below is one the UI tried to render and got nothing, so a
 // missing metadata.Upsert or missing image row regresses the page to
-// "Media hora en el cielo · 0".
+// "Media hora en el cielo Â· 0".
 func TestEnrichEpisode_PersistsOverviewAndStill(t *testing.T) {
 	prevBlocked := imaging.BlockedIP
 	imaging.BlockedIP = func(ip net.IP) bool {
@@ -683,7 +683,7 @@ func TestEnrichEpisode_PersistsOverviewAndStill(t *testing.T) {
 
 	database := testutil.NewTestDB(t)
 	libRepo := db.NewLibraryRepository("sqlite", database)
-	itemRepo := db.NewItemRepository(database)
+	itemRepo := db.NewItemRepository("sqlite", database)
 	imgRepo := db.NewImageRepository(database)
 	metaRepo := db.NewMetadataRepository(database)
 	extRepo := db.NewExternalIDRepository(database)
@@ -797,12 +797,12 @@ func TestEnrichEpisode_PersistsOverviewAndStill(t *testing.T) {
 
 // TestEnrichEpisode_NoTMDbIDOnSeries pins the failure-mode contract:
 // when the parent series has no tmdb external id (e.g. enriched without
-// API key, or no match found), enrichEpisode must be a no-op — no
+// API key, or no match found), enrichEpisode must be a no-op â€” no
 // provider call, no metadata row, no image row. The next scan retries.
 func TestEnrichEpisode_NoTMDbIDOnSeries(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	libRepo := db.NewLibraryRepository("sqlite", database)
-	itemRepo := db.NewItemRepository(database)
+	itemRepo := db.NewItemRepository("sqlite", database)
 	imgRepo := db.NewImageRepository(database)
 	metaRepo := db.NewMetadataRepository(database)
 	extRepo := db.NewExternalIDRepository(database)
@@ -818,7 +818,7 @@ func TestEnrichEpisode_NoTMDbIDOnSeries(t *testing.T) {
 		ID: seriesID, LibraryID: "lib-shows", Type: "series", Title: "X",
 		AddedAt: now, UpdatedAt: now,
 	})
-	// No external_id row for the series — the case under test.
+	// No external_id row for the series â€” the case under test.
 
 	seasonID := "season-1"
 	seasonNum := 1
@@ -867,7 +867,7 @@ func TestEnrichEpisode_NoTMDbIDOnSeries(t *testing.T) {
 // image attached to the season (not the series).
 //
 // The bug this guards is the "Season 1 / Season 1" double-tab the
-// frontend used to show — without TMDb, two seasons with the same
+// frontend used to show â€” without TMDb, two seasons with the same
 // number rendered identically; with this enrichment they pick up
 // distinct names ("Specials", "The Final Chapter") and posters.
 func TestEnrichSeason_PersistsMetadataAndPoster(t *testing.T) {
@@ -889,7 +889,7 @@ func TestEnrichSeason_PersistsMetadataAndPoster(t *testing.T) {
 
 	database := testutil.NewTestDB(t)
 	libRepo := db.NewLibraryRepository("sqlite", database)
-	itemRepo := db.NewItemRepository(database)
+	itemRepo := db.NewItemRepository("sqlite", database)
 	imgRepo := db.NewImageRepository(database)
 	metaRepo := db.NewMetadataRepository(database)
 	extRepo := db.NewExternalIDRepository(database)
@@ -984,7 +984,7 @@ func TestEnrichSeason_PersistsMetadataAndPoster(t *testing.T) {
 	}
 }
 
-// stubProviderTrackingCalls is a minimal stub for the no-tmdb-id test —
+// stubProviderTrackingCalls is a minimal stub for the no-tmdb-id test â€”
 // records whether FetchEpisodeMetadata was reached. The scanner must
 // short-circuit before that point when the parent series carries no
 // external id, so the recorder stays false on the happy path.
@@ -1018,7 +1018,7 @@ func TestFetchAndStoreImages_SkippedWhenImageDirEmpty(t *testing.T) {
 	// working without spinning up the artwork pipeline.
 	database := testutil.NewTestDB(t)
 	libRepo := db.NewLibraryRepository("sqlite", database)
-	itemRepo := db.NewItemRepository(database)
+	itemRepo := db.NewItemRepository("sqlite", database)
 	imgRepo := db.NewImageRepository(database)
 	now := time.Now()
 	_ = libRepo.Create(context.Background(), &db.Library{

@@ -1,4 +1,4 @@
-package db_test
+﻿package db_test
 
 import (
 	"context"
@@ -41,7 +41,7 @@ func TestSlugify(t *testing.T) {
 func TestStudioRepository_EnsureAndList(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	libRepo := db.NewLibraryRepository("sqlite", database)
-	itemRepo := db.NewItemRepository(database)
+	itemRepo := db.NewItemRepository("sqlite", database)
 	metaRepo := db.NewMetadataRepository(database)
 	studioRepo := db.NewStudioRepository(database)
 	seedLibraryForItems(t, libRepo)
@@ -95,7 +95,7 @@ func TestStudioRepository_EnsureAndList(t *testing.T) {
 		t.Errorf("expected stable id on re-ensure, got %q vs %q", repeated, mcuID)
 	}
 
-	// List: both studios surface, sorted by item count desc — Marvel
+	// List: both studios surface, sorted by item count desc â€” Marvel
 	// (2 items) before Old (1 item).
 	list, err := studioRepo.List(context.Background())
 	if err != nil {
@@ -132,7 +132,7 @@ func TestStudioRepository_EnsureAndList(t *testing.T) {
 		t.Fatalf("expected 2 items for marvel, got %d", len(items))
 	}
 
-	// Missing slug → (nil, nil) so the handler can render 404.
+	// Missing slug â†’ (nil, nil) so the handler can render 404.
 	missing, err := studioRepo.GetBySlug(context.Background(), "does-not-exist")
 	if err != nil {
 		t.Errorf("missing slug returned error: %v", err)
