@@ -15,7 +15,10 @@ RUN pnpm run build
 # ═══════════════════════════════════════════
 # Stage 2: Build backend
 # ═══════════════════════════════════════════
-FROM golang:1.25-alpine AS backend
+FROM golang:1.25.10-alpine AS backend
+# GOTOOLCHAIN=auto lets Go fetch the exact toolchain go.mod requires
+# if a future bump outpaces this base image. Plug-and-play for prod.
+ENV GOTOOLCHAIN=auto
 
 ARG VERSION=dev
 
