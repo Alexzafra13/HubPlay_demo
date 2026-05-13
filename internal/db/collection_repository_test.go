@@ -12,7 +12,7 @@ func TestCollectionRepository_EnsureAndList(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	libRepo := db.NewLibraryRepository("sqlite", database)
 	itemRepo := db.NewItemRepository("sqlite", database)
-	metaRepo := db.NewMetadataRepository(database)
+	metaRepo := db.NewMetadataRepository("sqlite", database)
 	colRepo := db.NewCollectionRepository(database)
 	seedLibraryForItems(t, libRepo)
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"hubplay/internal/db/sqlc"
+	"hubplay/internal/db/sqlc_pg"
 )
 
 // EpisodeSegmentKind enumerates the recognised segment types.
@@ -50,18 +51,27 @@ type EpisodeSegment struct {
 	DetectedAt int64
 }
 
-// EpisodeSegmentRepository wraps the sqlc-generated queries with
-// the Replace() pattern the chapter repo already uses: a single
-// detector run is one transactional clear-then-insert per source,
-// so segments from a different detector survive untouched.
+// EpisodeSegmentRepository — Pattern A dual-dialect. All ticks /
+// detected_at columns are BIGINT in both schemas so the per-backend
+// params are structurally identical; the only branch needed is which
+// generated package to invoke.
 type EpisodeSegmentRepository struct {
 	db *sql.DB
-	q  *sqlc.Queries
+	sq *sqlc.Queries
+	pq *sqlc_pg.Queries
 }
 
-func NewEpisodeSegmentRepository(database *sql.DB) *EpisodeSegmentRepository {
-	return &EpisodeSegmentRepository{db: database, q: sqlc.New(database)}
+func NewEpisodeSegmentRepository(driver string, database *sql.DB) *EpisodeSegmentRepository {
+	r := &EpisodeSegmentRepository{db: database}
+	if IsPostgres(driver) {
+		r.pq = sqlc_pg.New(database)
+	} else {
+		r.sq = sqlc.New(database)
+	}
+	return r
 }
+
+func (r *EpisodeSegmentRepository) useSQLite() bool { return r.sq != nil }
 
 // Replace clears every segment previously written by `source` for
 // the item and inserts the new set in one transaction. Other sources'
@@ -83,24 +93,47 @@ func (r *EpisodeSegmentRepository) Replace(
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	q := r.q.WithTx(tx)
-	if err := q.DeleteEpisodeSegmentsByItemAndSource(ctx, sqlc.DeleteEpisodeSegmentsByItemAndSourceParams{
-		ItemID: itemID,
-		Source: string(source),
-	}); err != nil {
-		return fmt.Errorf("delete prior segments: %w", err)
-	}
-	for _, s := range segments {
-		if err := q.InsertEpisodeSegment(ctx, sqlc.InsertEpisodeSegmentParams{
-			ItemID:     itemID,
-			Kind:       string(s.Kind),
-			Source:     string(source),
-			StartTicks: s.StartTicks,
-			EndTicks:   s.EndTicks,
-			Confidence: s.Confidence,
-			DetectedAt: s.DetectedAt,
+	if r.useSQLite() {
+		qtx := r.sq.WithTx(tx)
+		if err := qtx.DeleteEpisodeSegmentsByItemAndSource(ctx, sqlc.DeleteEpisodeSegmentsByItemAndSourceParams{
+			ItemID: itemID,
+			Source: string(source),
 		}); err != nil {
-			return fmt.Errorf("insert segment %s/%s: %w", s.Kind, source, err)
+			return fmt.Errorf("delete prior segments: %w", err)
+		}
+		for _, s := range segments {
+			if err := qtx.InsertEpisodeSegment(ctx, sqlc.InsertEpisodeSegmentParams{
+				ItemID:     itemID,
+				Kind:       string(s.Kind),
+				Source:     string(source),
+				StartTicks: s.StartTicks,
+				EndTicks:   s.EndTicks,
+				Confidence: s.Confidence,
+				DetectedAt: s.DetectedAt,
+			}); err != nil {
+				return fmt.Errorf("insert segment %s/%s: %w", s.Kind, source, err)
+			}
+		}
+	} else {
+		qtx := r.pq.WithTx(tx)
+		if err := qtx.DeleteEpisodeSegmentsByItemAndSource(ctx, sqlc_pg.DeleteEpisodeSegmentsByItemAndSourceParams{
+			ItemID: itemID,
+			Source: string(source),
+		}); err != nil {
+			return fmt.Errorf("delete prior segments: %w", err)
+		}
+		for _, s := range segments {
+			if err := qtx.InsertEpisodeSegment(ctx, sqlc_pg.InsertEpisodeSegmentParams{
+				ItemID:     itemID,
+				Kind:       string(s.Kind),
+				Source:     string(source),
+				StartTicks: s.StartTicks,
+				EndTicks:   s.EndTicks,
+				Confidence: s.Confidence,
+				DetectedAt: s.DetectedAt,
+			}); err != nil {
+				return fmt.Errorf("insert segment %s/%s: %w", s.Kind, source, err)
+			}
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -119,7 +152,29 @@ func (r *EpisodeSegmentRepository) Replace(
 // job — the API handler picks the highest-confidence row per kind
 // before serialising.
 func (r *EpisodeSegmentRepository) ListByItem(ctx context.Context, itemID string) ([]EpisodeSegment, error) {
-	rows, err := r.q.ListEpisodeSegmentsByItem(ctx, itemID)
+	if r.useSQLite() {
+		rows, err := r.sq.ListEpisodeSegmentsByItem(ctx, itemID)
+		if err != nil {
+			return nil, fmt.Errorf("list segments: %w", err)
+		}
+		if len(rows) == 0 {
+			return nil, nil
+		}
+		out := make([]EpisodeSegment, len(rows))
+		for i, row := range rows {
+			out[i] = EpisodeSegment{
+				ItemID:     row.ItemID,
+				Kind:       EpisodeSegmentKind(row.Kind),
+				Source:     EpisodeSegmentSource(row.Source),
+				StartTicks: row.StartTicks,
+				EndTicks:   row.EndTicks,
+				Confidence: row.Confidence,
+				DetectedAt: row.DetectedAt,
+			}
+		}
+		return out, nil
+	}
+	rows, err := r.pq.ListEpisodeSegmentsByItem(ctx, itemID)
 	if err != nil {
 		return nil, fmt.Errorf("list segments: %w", err)
 	}
@@ -147,7 +202,13 @@ func (r *EpisodeSegmentRepository) ListByItem(ctx context.Context, itemID string
 // away, but explicit cleanup matters for re-detect flows that want
 // a clean slate).
 func (r *EpisodeSegmentRepository) DeleteByItem(ctx context.Context, itemID string) error {
-	if err := r.q.DeleteEpisodeSegmentsByItem(ctx, itemID); err != nil {
+	var err error
+	if r.useSQLite() {
+		err = r.sq.DeleteEpisodeSegmentsByItem(ctx, itemID)
+	} else {
+		err = r.pq.DeleteEpisodeSegmentsByItem(ctx, itemID)
+	}
+	if err != nil {
 		return fmt.Errorf("delete segments: %w", err)
 	}
 	return nil

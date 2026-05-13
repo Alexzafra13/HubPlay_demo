@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"hubplay/internal/db/sqlc"
+	"hubplay/internal/db/sqlc_pg"
 )
 
 // ChannelWatchHistoryRepository persists per-user playback timestamps
@@ -15,16 +16,25 @@ import (
 // refresh so a channel_id-keyed history would CASCADE-die daily. See
 // migration 012 for the full rationale.
 //
-// Sqlc-generated queries handle the row scan; this thin adapter
-// projects the join row into the domain Channel struct that the
-// service layer already consumes.
+// Dual-dialect: sqlc-backed (Pattern A) per call. The Number column
+// is INTEGER → NullInt64 on SQLite, NullInt32 on Postgres; both rows
+// project to the same domain Channel via per-backend mapping helpers.
 type ChannelWatchHistoryRepository struct {
-	q *sqlc.Queries
+	sq *sqlc.Queries
+	pq *sqlc_pg.Queries
 }
 
-func NewChannelWatchHistoryRepository(database *sql.DB) *ChannelWatchHistoryRepository {
-	return &ChannelWatchHistoryRepository{q: sqlc.New(database)}
+func NewChannelWatchHistoryRepository(driver string, database *sql.DB) *ChannelWatchHistoryRepository {
+	r := &ChannelWatchHistoryRepository{}
+	if IsPostgres(driver) {
+		r.pq = sqlc_pg.New(database)
+	} else {
+		r.sq = sqlc.New(database)
+	}
+	return r
 }
+
+func (r *ChannelWatchHistoryRepository) useSQLite() bool { return r.sq != nil }
 
 // RecordByStreamURL upserts the (user, stream_url) pair with the
 // current timestamp. Idempotent — every "playing" event during a
@@ -35,11 +45,21 @@ func NewChannelWatchHistoryRepository(database *sql.DB) *ChannelWatchHistoryRepo
 // without an extra read.
 func (r *ChannelWatchHistoryRepository) RecordByStreamURL(ctx context.Context, userID, streamURL string) (time.Time, error) {
 	now := time.Now().UTC()
-	if err := r.q.RecordChannelWatch(ctx, sqlc.RecordChannelWatchParams{
-		UserID:        userID,
-		StreamUrl:     streamURL,
-		LastWatchedAt: now,
-	}); err != nil {
+	var err error
+	if r.useSQLite() {
+		err = r.sq.RecordChannelWatch(ctx, sqlc.RecordChannelWatchParams{
+			UserID:        userID,
+			StreamUrl:     streamURL,
+			LastWatchedAt: now,
+		})
+	} else {
+		err = r.pq.RecordChannelWatch(ctx, sqlc_pg.RecordChannelWatchParams{
+			UserID:        userID,
+			StreamUrl:     streamURL,
+			LastWatchedAt: now,
+		})
+	}
+	if err != nil {
 		return time.Time{}, fmt.Errorf("record channel watch: %w", err)
 	}
 	return now, nil
@@ -63,17 +83,57 @@ func (r *ChannelWatchHistoryRepository) ListChannelsByUser(ctx context.Context, 
 	// Double the SQL limit as a cheap guard against stream_url
 	// duplicates across libraries — we dedupe in Go below and trim
 	// to the requested limit.
-	rows, err := r.q.ListChannelWatchHistoryByUser(ctx, sqlc.ListChannelWatchHistoryByUserParams{
-		UserID: userID,
-		Limit:  int64(limit * 2),
-	})
-	if err != nil {
-		return nil, nil, fmt.Errorf("list continue-watching: %w", err)
-	}
+	doubled := int64(limit * 2)
 
 	seenURLs := make(map[string]struct{}, limit)
 	channels := make([]*Channel, 0, limit)
 	watched := make([]time.Time, 0, limit)
+
+	if r.useSQLite() {
+		rows, err := r.sq.ListChannelWatchHistoryByUser(ctx, sqlc.ListChannelWatchHistoryByUserParams{
+			UserID: userID,
+			Limit:  doubled,
+		})
+		if err != nil {
+			return nil, nil, fmt.Errorf("list continue-watching: %w", err)
+		}
+		for _, row := range rows {
+			if _, dup := seenURLs[row.StreamUrl]; dup {
+				continue
+			}
+			seenURLs[row.StreamUrl] = struct{}{}
+			ch := &Channel{
+				ID:        row.ID,
+				LibraryID: row.LibraryID,
+				Name:      row.Name,
+				GroupName: row.GroupName,
+				LogoURL:   row.LogoUrl,
+				StreamURL: row.StreamUrl,
+				TvgID:     row.TvgID,
+				Language:  row.Language,
+				Country:   row.Country,
+				IsActive:  row.IsActive,
+				AddedAt:   row.AddedAt,
+			}
+			if row.Number.Valid {
+				ch.Number = int(row.Number.Int64)
+			}
+			channels = append(channels, ch)
+			watched = append(watched, row.LastWatchedAt)
+			if len(channels) >= limit {
+				break
+			}
+		}
+		return channels, watched, nil
+	}
+
+	rows, err := r.pq.ListChannelWatchHistoryByUser(ctx, sqlc_pg.ListChannelWatchHistoryByUserParams{
+		UserID: userID,
+		Limit:  int32(doubled),
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("list continue-watching: %w", err)
+	}
 	for _, row := range rows {
 		if _, dup := seenURLs[row.StreamUrl]; dup {
 			continue
@@ -93,7 +153,7 @@ func (r *ChannelWatchHistoryRepository) ListChannelsByUser(ctx context.Context, 
 			AddedAt:   row.AddedAt,
 		}
 		if row.Number.Valid {
-			ch.Number = int(row.Number.Int64)
+			ch.Number = int(row.Number.Int32)
 		}
 		channels = append(channels, ch)
 		watched = append(watched, row.LastWatchedAt)
@@ -108,9 +168,17 @@ func (r *ChannelWatchHistoryRepository) ListChannelsByUser(ctx context.Context, 
 // Idempotent. Not wired to the UI yet; kept available for a future
 // "remove from continue watching" affordance.
 func (r *ChannelWatchHistoryRepository) DeleteByStreamURL(ctx context.Context, userID, streamURL string) error {
-	if err := r.q.DeleteChannelWatch(ctx, sqlc.DeleteChannelWatchParams{
-		UserID: userID, StreamUrl: streamURL,
-	}); err != nil {
+	var err error
+	if r.useSQLite() {
+		err = r.sq.DeleteChannelWatch(ctx, sqlc.DeleteChannelWatchParams{
+			UserID: userID, StreamUrl: streamURL,
+		})
+	} else {
+		err = r.pq.DeleteChannelWatch(ctx, sqlc_pg.DeleteChannelWatchParams{
+			UserID: userID, StreamUrl: streamURL,
+		})
+	}
+	if err != nil {
 		return fmt.Errorf("delete channel watch: %w", err)
 	}
 	return nil
