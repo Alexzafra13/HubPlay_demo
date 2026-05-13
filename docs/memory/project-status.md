@@ -1,5 +1,52 @@
 # Estado del proyecto
 
+> 🎬 **Sesión 2026-05-13 (rama `claude/pensive-lehmann-8c13f5`, Sesión I — per-user channel order + hide en IPTV)** — la lista IPTV deja de ser uniforme: cada usuario reordena y oculta canales para su cuenta sin afectar al admin ni a otros usuarios.
+>
+> ## 🎚️ Sesión I — Per-user channel ordering + hide (IPTV)
+>
+> El admin ya gestiona las listas IPTV. Ahora cada usuario puede reordenar y ocultar canales para su propia vista. El admin's default es la primera ordenación que todos ven; las personalizaciones son por cuenta.
+>
+> **Modelo**:
+> - Tabla `user_channel_order(user_id, channel_id, position, hidden, updated_at)` con dialect-paired migrations (`migrations/sqlite/042` + `migrations/postgres/042`). PK compuesto, hidden BOOLEAN en pg / INTEGER+CHECK en sqlite, FK CASCADE a `users` y `channels`.
+> - Overlay COALESCE-style: la vista del user es `LEFT JOIN user_channel_order USING (channel_id)` aplicada en memoria (`applyOrderOverlay` en `internal/iptv/service_channel_order.go`). Sin snapshot — un user sin overrides ve la lista del admin verbatim, mover UN canal escribe UNA fila.
+>
+> **Backend nuevo**:
+> - `internal/db/user_channel_order_repository.go` — Pattern B raw SQL (sqlc 1.31.1 truncó las queries con `ORDER BY ASC` en archivo dedicado, así que bypaseado). Métodos: Upsert, Delete, Reset (wipe-all-for-user), List, ReplaceAll (transaction-bulk).
+> - `internal/iptv/service_channel_order.go` — overlay + 4 mutaciones de servicio: `GetChannelsForUser`, `ListChannelOverrides`, `ReplaceChannelOrder`, `SetChannelVisibility`, `ResetChannelOrder`.
+> - `internal/api/handlers/iptv_personalisation.go` — 3 endpoints `/me/iptv/channels/*`:
+>   - `PUT /me/iptv/channels/order` — replace full ordering + hidden set en una tx.
+>   - `DELETE /me/iptv/channels/order` — restaura admin defaults.
+>   - `PUT /me/iptv/channels/{id}/visibility` — toggle hidden de un canal.
+> - `GET /libraries/{id}/channels` modificado: por defecto aplica overlay del user. Con `?include_hidden=true` el panel ve todos los canales (incluidos hidden) más `hidden` y `user_position` en el DTO.
+> - `db.UserChannelOrderEntry` modelo público + wire en `repos.go` y `main.go`.
+>
+> **Frontend nuevo**:
+> - Ruta `/live-tv/customize` → `web/src/pages/LiveTvCustomize.tsx`. Lista de canales con flechas ↑↓, toggle eye/eye-off por canal, contador "1, 2, 3...". Save persiste en una mutación; Reset llama al DELETE con confirm() previo.
+> - Link "Personalizar" en `LiveTV.tsx` (junto a CategoryChips, en la pestaña Inicio).
+> - Tipos `ChannelOrderRequest` + extensión de `Channel` con `hidden?` y `user_position?`.
+> - Hooks: `useChannelsForPersonalisation`, `useReplaceChannelOrder`, `useResetChannelOrder`, `useSetChannelVisibility`.
+> - i18n completo en/es (~15 strings × 2 locales).
+>
+> **Tests escritos (no ejecutados aún por límite de tiempo)**:
+> - `internal/iptv/service_channel_order_test.go` — 5 tests del overlay puro (no-overrides passthrough, reorder, hide, stable sort, no input mutation).
+> - `internal/db/user_channel_order_repository_test.go` — 2 tests del repo (Upsert/List/Delete/Reset + ReplaceAll) parametrizados via `testutil.NewTestDB` (corren contra sqlite y pg en la matrix CI).
+> - `iptv_test.go::iptvFakeService` stubs para los 5 nuevos métodos del interface.
+> - Drift guard `openapi_drift_test.go`: 3 nuevas rutas registradas en `outOfScopeExact`.
+>
+> **Pendiente al cierre de la sesión (next pickup)**:
+> - Ejecutar `go test ./internal/...` para validar los nuevos tests (build limpio + go vet sí verificados).
+> - Vitest spec para `LiveTvCustomize.tsx`.
+> - Smoke pg del repo via `HUBPLAY_TEST_POSTGRES_DSN`.
+> - Verificación visual del panel con backend real.
+>
+> **Verificación al cierre**:
+> - `go build ./...` (cross-compile linux) ✅ clean
+> - `tsc -b` ✅ clean
+> - Tests Go: escritos, NO ejecutados todavía
+> - Smoke pg: pendiente
+>
+> ---
+>
 > 🎬 **Sesión 2026-05-13 (rama `claude/pensive-lehmann-8c13f5`, Sesión H + H.1 — DB plug-and-play UI + bundled Postgres en docker-compose)** — la migración Postgres pasa de "operacional desde YAML" a "operacional desde la web" (Sesión H) y de ahí a "un click sin pegar nada" gracias a Postgres pre-cableado en docker-compose (Sesión H.1).
 >
 > ## 🎯 Sesión H.1 — Bundled Postgres + UI toggle (sin DSN visible)

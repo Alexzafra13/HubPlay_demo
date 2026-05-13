@@ -13,11 +13,18 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"hubplay/internal/auth"
 	"hubplay/internal/db"
 	"hubplay/internal/iptv"
 )
 
-// ListChannels returns all channels for a library.
+// ListChannels returns the channels for a library, with the caller's
+// per-user order + hidden overlay applied (admins included — they
+// can personalise their view too without losing the global defaults).
+//
+// `?include_hidden=true` is an opt-in for the personalisation panel
+// itself, which needs to show every channel (including the ones the
+// user has hidden) so the toggle remains reachable.
 func (h *IPTVHandler) ListChannels(w http.ResponseWriter, r *http.Request) {
 	libraryID := chi.URLParam(r, "id")
 	if !h.canAccessLibrary(r, libraryID) {
@@ -25,16 +32,55 @@ func (h *IPTVHandler) ListChannels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	activeOnly := r.URL.Query().Get("active") != "false"
+	includeHidden := r.URL.Query().Get("include_hidden") == "true"
 
-	channels, err := h.svc.GetChannels(r.Context(), libraryID, activeOnly)
+	userID := ""
+	if claims := auth.GetClaims(r.Context()); claims != nil {
+		userID = claims.UserID
+	}
+
+	var (
+		channels []*db.Channel
+		err      error
+	)
+	if includeHidden || userID == "" {
+		// Personalisation panel: it needs every row, including hidden,
+		// so the user can un-hide. Admin/system callers (userID == "")
+		// also bypass the overlay since they're not viewing as a user.
+		channels, err = h.svc.GetChannels(r.Context(), libraryID, activeOnly)
+	} else {
+		channels, err = h.svc.GetChannelsForUser(r.Context(), libraryID, userID, activeOnly)
+	}
 	if err != nil {
 		handleServiceError(w, r, err)
 		return
 	}
 
+	// When include_hidden=true, surface the user's overrides so the
+	// panel can mark each row visually. Cheap one-query lookup keyed
+	// by user_id; small N (only rows the user has touched).
+	hiddenSet := map[string]bool{}
+	positionSet := map[string]int{}
+	if includeHidden && userID != "" {
+		overrides, _ := h.svc.ListChannelOverrides(r.Context(), userID)
+		for _, o := range overrides {
+			if o.Hidden {
+				hiddenSet[o.ChannelID] = true
+			}
+			positionSet[o.ChannelID] = o.Position
+		}
+	}
+
 	result := make([]channelDTO, 0, len(channels))
 	for _, ch := range channels {
-		result = append(result, toChannelDTO(ch, "/api/v1/channels/"+ch.ID+"/stream"))
+		dto := toChannelDTO(ch, "/api/v1/channels/"+ch.ID+"/stream")
+		if hiddenSet[ch.ID] {
+			dto.Hidden = true
+		}
+		if pos, ok := positionSet[ch.ID]; ok {
+			dto.UserPosition = pos
+		}
+		result = append(result, dto)
 	}
 
 	respondJSON(w, http.StatusOK, map[string]any{"data": result})

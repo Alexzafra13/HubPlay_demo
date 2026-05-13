@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
+import { Sliders } from "lucide-react";
 import { useLiveTvPlayer } from "@/store/liveTvPlayer";
 import {
   useAddChannelFavorite,
@@ -466,11 +467,21 @@ export default function LiveTV() {
               headerOverlay={heroHeaderOverlay}
             />
           ) : null}
-          <CategoryChips
-            counts={counts}
-            active={category}
-            onChange={setCategory}
-          />
+          <div className="flex items-center justify-between gap-3">
+            <CategoryChips
+              counts={counts}
+              active={category}
+              onChange={setCategory}
+            />
+            <Link
+              to="/live-tv/customize"
+              className="inline-flex items-center gap-1 whitespace-nowrap text-sm text-text-muted hover:text-text"
+              aria-label={t("livetv.customize.linkAria")}
+            >
+              <Sliders className="h-4 w-4" />
+              <span className="hidden sm:inline">{t("livetv.customize.link")}</span>
+            </Link>
+          </div>
           <EPGGrid
             channels={filteredChannels}
             scheduleByChannel={scheduleByChannel}

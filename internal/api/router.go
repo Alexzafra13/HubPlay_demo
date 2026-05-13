@@ -792,6 +792,13 @@ func NewRouter(deps Dependencies) http.Handler {
 					// the beacon is POST /channels/{id}/watch above.
 					r.Get("/me/channels/continue-watching", iptvHandler.ListContinueWatching)
 
+					// Per-user channel personalisation: reorder + hide
+					// channels for the caller's own view without
+					// affecting other users or the admin defaults.
+					r.Put("/me/iptv/channels/order", iptvHandler.ReplaceChannelOrder)
+					r.Delete("/me/iptv/channels/order", iptvHandler.ResetChannelOrder)
+					r.Put("/me/iptv/channels/{channelId}/visibility", iptvHandler.SetChannelVisibility)
+
 					// Channel favorites (per-user, requires auth; no admin role).
 					r.Route("/favorites/channels", func(r chi.Router) {
 						r.Get("/", iptvHandler.ListFavorites)

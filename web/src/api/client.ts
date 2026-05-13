@@ -4,6 +4,7 @@ import type {
   AvailableImage,
   BrowseResponse,
   Channel,
+  ChannelOrderRequest,
   ChannelWithoutEPG,
   ChannelHealthSummary,
   ContinueWatchingChannel,
@@ -1009,6 +1010,34 @@ export class ApiClient {
   async getChannels(libraryId?: string): Promise<Channel[]> {
     if (!libraryId) return [];
     return this.request<Channel[]>("GET", `/libraries/${libraryId}/channels`);
+  }
+
+  /** Personalisation-panel variant: returns every channel the user
+   *  can access (including their hidden ones) plus their `hidden` +
+   *  `user_position` fields so the panel can render the full editable
+   *  list. The regular Live TV view uses getChannels() instead. */
+  async getChannelsForPersonalisation(libraryId: string): Promise<Channel[]> {
+    return this.request<Channel[]>("GET", `/libraries/${libraryId}/channels`, {
+      params: { include_hidden: "true" },
+    });
+  }
+
+  async replaceChannelOrder(req: ChannelOrderRequest): Promise<void> {
+    await this.request<{ status: "ok" }>("PUT", "/me/iptv/channels/order", {
+      body: req,
+    });
+  }
+
+  async resetChannelOrder(): Promise<void> {
+    await this.request<{ status: "ok" }>("DELETE", "/me/iptv/channels/order");
+  }
+
+  async setChannelVisibility(channelId: string, hidden: boolean): Promise<void> {
+    await this.request<{ status: "ok" }>(
+      "PUT",
+      `/me/iptv/channels/${encodeURIComponent(channelId)}/visibility`,
+      { body: { hidden } },
+    );
   }
 
   // Channel favorites. Separate from `getFavorites()` above, which lists

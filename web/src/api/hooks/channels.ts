@@ -17,7 +17,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseQueryOptions } from "@tanstack/react-query";
 import { api } from "../client";
 import { queryKeys } from "../queryKeys";
-import type { Channel, ContinueWatchingChannel, EPGProgram } from "../types";
+import type {
+  Channel,
+  ChannelOrderRequest,
+  ContinueWatchingChannel,
+  EPGProgram,
+} from "../types";
 
 export function useChannels(
   libraryId?: string,
@@ -27,6 +32,54 @@ export function useChannels(
     queryKey: queryKeys.channels(libraryId),
     queryFn: () => api.getChannels(libraryId),
     ...options,
+  });
+}
+
+// useChannelsForPersonalisation feeds the personalisation panel —
+// returns every channel including hidden ones plus per-user metadata
+// (`hidden`, `user_position`). Distinct cache key so the regular
+// channel list and the panel don't share data with different filters.
+export function useChannelsForPersonalisation(
+  libraryId: string | undefined,
+  options?: Partial<UseQueryOptions<Channel[]>>,
+) {
+  return useQuery<Channel[]>({
+    queryKey: ["channels", libraryId, "personalise"],
+    queryFn: () => api.getChannelsForPersonalisation(libraryId!),
+    enabled: !!libraryId,
+    ...options,
+  });
+}
+
+export function useReplaceChannelOrder() {
+  const qc = useQueryClient();
+  return useMutation<void, Error, ChannelOrderRequest>({
+    mutationFn: (req) => api.replaceChannelOrder(req),
+    onSuccess: () => {
+      // Both the regular channel list (overlay applied server-side)
+      // and the personalisation view need to refetch after a save.
+      qc.invalidateQueries({ queryKey: ["channels"] });
+    },
+  });
+}
+
+export function useResetChannelOrder() {
+  const qc = useQueryClient();
+  return useMutation<void, Error, void>({
+    mutationFn: () => api.resetChannelOrder(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["channels"] });
+    },
+  });
+}
+
+export function useSetChannelVisibility() {
+  const qc = useQueryClient();
+  return useMutation<void, Error, { channelId: string; hidden: boolean }>({
+    mutationFn: ({ channelId, hidden }) => api.setChannelVisibility(channelId, hidden),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["channels"] });
+    },
   });
 }
 

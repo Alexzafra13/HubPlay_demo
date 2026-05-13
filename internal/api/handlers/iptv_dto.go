@@ -55,6 +55,14 @@ type channelDTO struct {
 	// the small status pill on a channel tile. Always present; never
 	// omitted from the wire so client code can rely on the field.
 	HealthStatus string `json:"health_status"`
+
+	// Hidden + UserPosition are only populated when the panel calls
+	// /channels?include_hidden=true so it can render the personalisation
+	// view. Default-omitted otherwise (omitempty) — the regular Live TV
+	// view never needs these fields because the overlay already
+	// resolves order/visibility server-side.
+	Hidden       bool `json:"hidden,omitempty"`
+	UserPosition int  `json:"user_position,omitempty"`
 }
 
 // toChannelDTO projects a db.Channel onto the wire shape. `streamPath` is

@@ -902,6 +902,26 @@ export interface Channel {
    * Absent on legacy DTOs — treat as "ok".
    */
   health_status?: "ok" | "degraded" | "dead";
+  /** Populated only when the caller passed `?include_hidden=true`
+   *  (personalisation panel). True when the user has hidden this
+   *  channel from their own view. Absent / false everywhere else. */
+  hidden?: boolean;
+  /** Populated only when the caller passed `?include_hidden=true`.
+   *  The user's override position when they have one — distinct from
+   *  `number` (the admin default) so the panel can render both. */
+  user_position?: number;
+}
+
+export interface ChannelOrderRequest {
+  /** Full reordered list of channel IDs. The position each ID gets
+   *  is its index + 1. Omitting a channel removes its override row
+   *  → it falls back to the admin's default position. */
+  ordered_channel_ids: string[];
+  /** Set of channel IDs the user wants hidden. Can overlap with
+   *  `ordered_channel_ids` (a channel that's reordered AND hidden)
+   *  or be exclusive (a channel that's only hidden — keeps its
+   *  admin position when un-hidden). */
+  hidden_channel_ids: string[];
 }
 
 export interface EPGProgram {

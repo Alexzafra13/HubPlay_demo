@@ -461,6 +461,14 @@ type UserChannelFavorite struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+type UserChannelOrder struct {
+	UserID    string    `json:"user_id"`
+	ChannelID string    `json:"channel_id"`
+	Position  int32     `json:"position"`
+	Hidden    bool      `json:"hidden"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 type UserDatum struct {
 	UserID              string        `json:"user_id"`
 	ItemID              string        `json:"item_id"`

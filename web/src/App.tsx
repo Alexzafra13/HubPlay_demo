@@ -25,6 +25,7 @@ const CollectionDetail = lazyWithRetry(() => import("@/pages/CollectionDetail"))
 const Collections = lazyWithRetry(() => import("@/pages/Collections"));
 const Search = lazyWithRetry(() => import("@/pages/Search"));
 const LiveTV = lazyWithRetry(() => import("@/pages/LiveTV"));
+const LiveTvCustomize = lazyWithRetry(() => import("@/pages/LiveTvCustomize"));
 const Settings = lazyWithRetry(() => import("@/pages/Settings"));
 const NotFound = lazyWithRetry(() => import("@/pages/NotFound"));
 const SetupWizard = lazyWithRetry(() => import("@/pages/setup/SetupWizard"));
@@ -163,6 +164,7 @@ export function App() {
             <Route path="collections/:id" element={<CollectionDetail />} />
             <Route path="search" element={<Search />} />
             <Route path="live-tv" element={<LiveTV />} />
+            <Route path="live-tv/customize" element={<LiveTvCustomize />} />
             <Route path="peers" element={<PeersPage />} />
             <Route path="peers/:peerId" element={<PeerLibrariesPage />} />
             <Route path="peers/:peerId/libraries/:libraryId" element={<PeerLibraryItemsPage />} />

@@ -1490,5 +1490,28 @@
     "skipIntro": "Saltar intro",
     "skipCredits": "Saltar créditos",
     "skipRecap": "Saltar resumen"
+  },
+  "livetv": {
+    "customize": {
+      "link": "Personalize",
+      "linkAria": "Personalize the channel list",
+      "title": "Personalize Live TV",
+      "subtitle": "Reorder channels or hide ones you don't watch. Changes only affect your own view — other accounts and the admin defaults stay untouched.",
+      "back": "Back to Live TV",
+      "library": "Library",
+      "moveUp": "Move up",
+      "moveDown": "Move down",
+      "hide": "Hide for me",
+      "show": "Show again",
+      "save": "Save",
+      "saved": "Saved.",
+      "reset": "Restore admin's order",
+      "resetConfirm": "Erase all your customisations and restore the admin's original order?",
+      "resetDone": "Restored.",
+      "empty": "No channels yet.",
+      "emptyHint": "Once the admin refreshes the M3U list, your channels will appear here.",
+      "noLibraries": "No Live TV libraries configured.",
+      "noLibrariesHint": "Ask the admin to set up an IPTV source first."
+    }
   }
 }
