@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"hubplay/internal/db/sqlc"
+	"hubplay/internal/db/sqlc_pg"
 )
 
 // EPGProgram represents a TV program in the electronic program guide.
@@ -23,13 +24,39 @@ type EPGProgram struct {
 	EndTime     time.Time
 }
 
+// EPGProgramRepository — dual-dialect (Pattern A + Pattern B). The
+// sqlc surface (Insert/Delete inside ReplaceForChannel, CleanupOld)
+// branches per-call; the read paths and BulkSchedule stay raw SQL via
+// `r.db` + rewritePlaceholders.
+//
+// Time handling: all writes coerce to UTC at the binding boundary.
+// `coerceSQLiteTime` is misleadingly named at this point — it also
+// handles pgx's clean `time.Time` returns via the `case time.Time:`
+// path. Keeping the name avoids churn across the existing call sites
+// in channel/iptv code.
 type EPGProgramRepository struct {
-	db *sql.DB // kept for BulkSchedule (dynamic IN)
-	q  *sqlc.Queries
+	db *sql.DB
+	sq *sqlc.Queries
+	pq *sqlc_pg.Queries
 }
 
-func NewEPGProgramRepository(database *sql.DB) *EPGProgramRepository {
-	return &EPGProgramRepository{db: database, q: sqlc.New(database)}
+func NewEPGProgramRepository(driver string, database *sql.DB) *EPGProgramRepository {
+	r := &EPGProgramRepository{db: database}
+	if IsPostgres(driver) {
+		r.pq = sqlc_pg.New(database)
+	} else {
+		r.sq = sqlc.New(database)
+	}
+	return r
+}
+
+func (r *EPGProgramRepository) useSQLite() bool { return r.sq != nil }
+
+func (r *EPGProgramRepository) driver() string {
+	if r.useSQLite() {
+		return DriverSQLite
+	}
+	return DriverPostgres
 }
 
 // ReplaceForChannel deletes all programs for a channel and inserts new ones.
@@ -47,25 +74,45 @@ func (r *EPGProgramRepository) ReplaceForChannel(ctx context.Context, channelID 
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	qtx := r.q.WithTx(tx)
-
-	if err := qtx.DeleteEPGProgramsByChannel(ctx, channelID); err != nil {
-		return fmt.Errorf("delete old programs: %w", err)
-	}
-
-	for _, p := range programs {
-		err := qtx.InsertEPGProgram(ctx, sqlc.InsertEPGProgramParams{
-			ID:          p.ID,
-			ChannelID:   p.ChannelID,
-			Title:       p.Title,
-			Description: nullableString(p.Description),
-			Category:    nullableString(p.Category),
-			IconUrl:     nullableString(p.IconURL),
-			StartTime:   p.StartTime.UTC(),
-			EndTime:     p.EndTime.UTC(),
-		})
-		if err != nil {
-			return fmt.Errorf("insert program: %w", err)
+	if r.useSQLite() {
+		qtx := r.sq.WithTx(tx)
+		if err := qtx.DeleteEPGProgramsByChannel(ctx, channelID); err != nil {
+			return fmt.Errorf("delete old programs: %w", err)
+		}
+		for _, p := range programs {
+			err := qtx.InsertEPGProgram(ctx, sqlc.InsertEPGProgramParams{
+				ID:          p.ID,
+				ChannelID:   p.ChannelID,
+				Title:       p.Title,
+				Description: nullableString(p.Description),
+				Category:    nullableString(p.Category),
+				IconUrl:     nullableString(p.IconURL),
+				StartTime:   p.StartTime.UTC(),
+				EndTime:     p.EndTime.UTC(),
+			})
+			if err != nil {
+				return fmt.Errorf("insert program: %w", err)
+			}
+		}
+	} else {
+		qtx := r.pq.WithTx(tx)
+		if err := qtx.DeleteEPGProgramsByChannel(ctx, channelID); err != nil {
+			return fmt.Errorf("delete old programs: %w", err)
+		}
+		for _, p := range programs {
+			err := qtx.InsertEPGProgram(ctx, sqlc_pg.InsertEPGProgramParams{
+				ID:          p.ID,
+				ChannelID:   p.ChannelID,
+				Title:       p.Title,
+				Description: nullableString(p.Description),
+				Category:    nullableString(p.Category),
+				IconUrl:     nullableString(p.IconURL),
+				StartTime:   p.StartTime.UTC(),
+				EndTime:     p.EndTime.UTC(),
+			})
+			if err != nil {
+				return fmt.Errorf("insert program: %w", err)
+			}
 		}
 	}
 
@@ -78,13 +125,13 @@ func (r *EPGProgramRepository) ReplaceForChannel(ctx context.Context, channelID 
 // persisted by older builds in the Go-stringer time format.
 func (r *EPGProgramRepository) NowPlaying(ctx context.Context, channelID string) (*EPGProgram, error) {
 	now := time.Now().UTC()
-
-	row := r.db.QueryRowContext(ctx,
+	query := rewritePlaceholders(r.driver(),
 		`SELECT id, channel_id, title, COALESCE(description,''), COALESCE(category,''),
 		        COALESCE(icon_url,''), start_time, end_time
 		 FROM epg_programs
 		 WHERE channel_id = ? AND start_time <= ? AND end_time > ?
-		 LIMIT 1`, channelID, now, now)
+		 LIMIT 1`)
+	row := r.db.QueryRowContext(ctx, query, channelID, now, now)
 
 	p := &EPGProgram{}
 	var startRaw, endRaw any
@@ -111,12 +158,13 @@ func (r *EPGProgramRepository) NowPlaying(ctx context.Context, channelID string)
 // coerce helper transparently handles legacy rows whose time column
 // was persisted in the Go-stringer format.
 func (r *EPGProgramRepository) Schedule(ctx context.Context, channelID string, from, to time.Time) ([]*EPGProgram, error) {
-	rows, err := r.db.QueryContext(ctx,
+	query := rewritePlaceholders(r.driver(),
 		`SELECT id, channel_id, title, COALESCE(description,''), COALESCE(category,''),
 		        COALESCE(icon_url,''), start_time, end_time
 		 FROM epg_programs
 		 WHERE channel_id = ? AND end_time > ? AND start_time < ?
-		 ORDER BY start_time`, channelID, from.UTC(), to.UTC())
+		 ORDER BY start_time`)
+	rows, err := r.db.QueryContext(ctx, query, channelID, from.UTC(), to.UTC())
 	if err != nil {
 		return nil, fmt.Errorf("schedule: %w", err)
 	}
@@ -146,11 +194,13 @@ func (r *EPGProgramRepository) Schedule(ctx context.Context, channelID string, f
 // builds) or 32k (modern); 500 leaves plenty of headroom for the two
 // time bounds plus whatever variants the driver binds underneath. Live
 // TV libraries with thousands of channels (davidmuma, iptv-org full
-// country dumps) get split into chunks transparently.
+// country dumps) get split into chunks transparently. Postgres has no
+// equivalent variable cap (the protocol limit is 32 767 parameters per
+// statement) but the chunking is harmless there.
 const bulkScheduleChunkSize = 500
 
 // BulkSchedule returns programs for multiple channels within a time range.
-// Uses raw SQL because sqlc doesn't support dynamic IN() on SQLite.
+// Uses raw SQL because sqlc doesn't support dynamic IN().
 //
 // Large channel lists are chunked internally so callers don't have to
 // care about the SQLite variable limit.
@@ -191,13 +241,13 @@ func (r *EPGProgramRepository) bulkScheduleChunk(
 		args = append(args, id)
 	}
 
-	rows, err := r.db.QueryContext(ctx,
+	query := rewritePlaceholders(r.driver(),
 		`SELECT id, channel_id, title, COALESCE(description,''), COALESCE(category,''),
 		        COALESCE(icon_url,''), start_time, end_time
 		 FROM epg_programs
 		 WHERE end_time > ? AND start_time < ? AND channel_id IN (`+placeholders+`)
-		 ORDER BY channel_id, start_time`, args...,
-	)
+		 ORDER BY channel_id, start_time`)
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("bulk schedule: %w", err)
 	}
@@ -210,7 +260,7 @@ func (r *EPGProgramRepository) bulkScheduleChunk(
 		// that modernc.org/sqlite can't deserialise directly. The coerce
 		// helper handles both that legacy string form and the clean
 		// time.Time the driver returns for UTC values inserted by the
-		// current code.
+		// current code (and by pgx for Postgres TIMESTAMP columns).
 		var startRaw, endRaw any
 		if err := rows.Scan(&p.ID, &p.ChannelID, &p.Title, &p.Description, &p.Category,
 			&p.IconURL, &startRaw, &endRaw); err != nil {
@@ -244,10 +294,14 @@ var sqliteTimeStringLayouts = []string{
 	"2006-01-02 15:04:05",
 }
 
-// coerceSQLiteTime accepts whatever modernc.org/sqlite hands us for a
+// coerceSQLiteTime accepts whatever the database driver hands us for a
 // TIMESTAMP column and produces a time.Time. Returns zero value for
 // nil / empty strings; errors only if the value is a non-empty string
 // that doesn't match any known layout.
+//
+// Despite the name, this works on both backends: pgx returns a clean
+// `time.Time` (case `time.Time`), modernc.org/sqlite may return a
+// time.Time, []byte, or string depending on the column write history.
 func coerceSQLiteTime(v any) (time.Time, error) {
 	switch t := v.(type) {
 	case nil:
@@ -305,10 +359,17 @@ func dedupeStrings(in []string) []string {
 
 // CleanupOld removes programs that ended before the given time.
 func (r *EPGProgramRepository) CleanupOld(ctx context.Context, before time.Time) (int64, error) {
-	n, err := r.q.CleanupOldPrograms(ctx, before)
+	var (
+		n   int64
+		err error
+	)
+	if r.useSQLite() {
+		n, err = r.sq.CleanupOldPrograms(ctx, before)
+	} else {
+		n, err = r.pq.CleanupOldPrograms(ctx, before)
+	}
 	if err != nil {
 		return 0, fmt.Errorf("cleanup old programs: %w", err)
 	}
 	return n, nil
 }
-

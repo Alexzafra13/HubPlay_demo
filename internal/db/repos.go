@@ -56,7 +56,7 @@ func NewRepositories(driver string, database *sql.DB) *Repositories {
 		Channels:           NewChannelRepository(driver, database),
 		ChannelFavorites:   NewChannelFavoritesRepository(database),
 		ChannelWatchHistory: NewChannelWatchHistoryRepository(database),
-		EPGPrograms:        NewEPGProgramRepository(database),
+		EPGPrograms:        NewEPGProgramRepository(driver, database),
 		LibraryEPGSources:  NewLibraryEPGSourceRepository(database),
 		ChannelOverrides:   NewChannelOverrideRepository(database),
 		IPTVSchedules:      NewIPTVScheduleRepository(database),
