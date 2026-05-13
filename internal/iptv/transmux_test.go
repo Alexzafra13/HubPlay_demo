@@ -701,7 +701,7 @@ func TestTransmuxManager_PromotesToReencodeOnCodecCrash(t *testing.T) {
 	})
 	t.Cleanup(m.Shutdown)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	// First attempt: direct, ffmpeg crashes with codec stderr.
@@ -709,7 +709,11 @@ func TestTransmuxManager_PromotesToReencodeOnCodecCrash(t *testing.T) {
 		t.Fatalf("first attempt: expected ErrTransmuxFailed, got %v", err)
 	}
 	// Wait for processWatcher to record + promote (async after Wait).
-	deadline := time.Now().Add(2 * time.Second)
+	// Polling deadline is generous (matches the surrounding ctx budget)
+	// because under `-race -coverprofile` the watcher goroutine can be
+	// preempted long enough that a 2s window flakes — see commit 73632ae
+	// for the sibling flake fix in this same test.
+	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if mode := m.pickDecodeMode("ch-codec"); mode == decodeModeReencode {
 			break
