@@ -1,5 +1,73 @@
 # Estado del proyecto
 
+> 🎬 **Sesión 2026-05-13 (rama `claude/beautiful-margulis-3db022`, 4 commits, Sesiones E.5 + E.6 + E.7 — los tres repos grandes cerrados)** — continuando dual-dialect tras los 6 ya mergeados (PRs #260 y #261). Pendiente de merge: 4 commits sobre main en PR [#264](https://github.com/Alexzafra13/HubPlay_demo/pull/264).
+>
+> **Lo entregado en esta tanda (resumen)**:
+>
+> - **[`20e24de`](https://github.com/Alexzafra13/HubPlay_demo/commit/20e24de) E.5 — Items** (633 LOC): Pattern A + Pattern B; FTS dual-mecanismo (FTS5 ↔ tsvector + `to_tsquery`), helper `toTSQueryPrefix`, helper `nullableIntPtrInt32`, BOOLEAN gotcha resuelto via `WHERE is_available` (sin `= 1`). Detalle completo abajo.
+>
+> - **[`175b2b6`](https://github.com/Alexzafra13/HubPlay_demo/commit/175b2b6) E.6 — UserData** (485 LOC) **+ fix masivo BOOLEAN/COLLATE drift**: octavo repo refactor (Pattern A para 10 métodos sqlc + Pattern B para GetBatch dynamic IN y NextUp CTE). EN EL MISMO COMMIT se arregla un drift sistemático que la Sesión D no había detectado: 14 sitios `column = 1` / `column = 0` sobre columnas BOOLEAN reescritos en 8 ficheros queries-postgres (channels, channel_favorites, channel_watch_history, federation, images, iptv_scheduled_jobs, people, user_data) + 3 `ORDER BY x COLLATE NOCASE` reescritos a `ORDER BY LOWER(x)` en federation.sql. `sqlc generate` regenera 8 ficheros sqlc_pg. Sin estos arreglos el postgres backend habría petado al primer Upsert/MarkPlayed/SetFavorite/etc.
+>
+> - **[`5fb1110`](https://github.com/Alexzafra13/HubPlay_demo/commit/5fb1110) E.7 — Channel** (562 LOC): noveno repo, último de los tres grandes. Pattern A para 6 métodos sqlc + Pattern B para 9 raw SQL (incluyendo el tx pattern de `ReplaceForLibrary`, `HealthSummaryByLibrary` con `COUNT(*) FILTER` que SQLite soporta desde 3.30 y por tanto es dialect-portable, y los cuatro health writers con UPDATE inline).
+>
+> **Estado al cierre de la tanda**:
+>
+> | Repo | Estado |
+> |---|---|
+> | Settings | ✅ Pattern B |
+> | Users | ✅ Pattern A + 1 raw SQL holdout |
+> | Sessions | ✅ Pattern A + 2 raw SQL holdouts |
+> | SigningKeys | ✅ Pattern A (alias → struct) |
+> | Library | ✅ Pattern A + 2 raw SQL holdouts + 3 tx |
+> | MediaStreams | ✅ Pattern A + 1 tx + nullableInt32 |
+> | Items | ✅ E.5 — Pattern A + 4 raw SQL (FTS dual + toTSQueryPrefix) |
+> | **UserData** | ✅ **E.6 — Pattern A + 2 raw SQL + 8 fixes BOOLEAN drift en pg queries** |
+> | **Channels** | ✅ **E.7 — Pattern A + 9 raw SQL + tx ReplaceForLibrary** |
+> | EPGPrograms | ⏳ 314 LOC — tiene BulkSchedule raw SQL holdout |
+> | Image | ⏳ 319 LOC — tiene GetPrimaryURLs raw SQL holdout |
+> | Federation | ⏳ enorme con MUCHOS raw SQL holdouts |
+> | 16 repos pequeños/medianos | ⏳ trabajo mecánico |
+>
+> **Drift de Sesión D detectado y arreglado en E.6** (importante para auditoría):
+>
+> - Las queries-postgres traducidas en Sesión D heredaban literales `WHERE column = 1` / `column = 0` de la fuente SQLite. Postgres tiene BOOLEAN real → rechaza el cast implícito. 14 sitios afectados, 8 ficheros tocados. Detección sólo posible al refactorizar UserData y leer las queries pg generadas con cuidado. Patrón aplicado:
+>   - Predicado WHERE `x = 1` → `x` (truthy en ambos dialectos)
+>   - Predicado WHERE `x = 0` → `NOT x`
+>   - Asignación SET `x = 1` → `x = TRUE`
+>   - INSERT VALUES con literal 1/0 sobre columna BOOLEAN → `TRUE` / `FALSE`
+>   - `ORDER BY x COLLATE NOCASE` → `ORDER BY LOWER(x)` (NOCASE es SQLite-only)
+>
+> - **Regla preventiva añadida**: cuando se traduce un nuevo query a queries-postgres/, antes del `sqlc generate`, hacer `grep "= 1\|= 0\|COLLATE NOCASE"` sobre el fichero y resolver cada hit.
+>
+> **Gotchas acumulados a final de la tanda** (todos vivos para los 19 repos siguientes):
+>
+> - **Limit type**: sqlc emite `int64` para SQLite y `int32` para Postgres en LIMIT/OFFSET. Cast inline en cada llamada pg. Aplica también a Year/SeasonNumber/EpisodeNumber/PlayCount/Number en columnas declaradas INTEGER.
+> - **BIGINT** se mantiene int64 en ambos dialectos (Size, DurationTicks, PositionTicks, *_ticks, bytes_*).
+> - **Helpers de nullable INT**: `nullableIntPtr` (NullInt64, sqlite) y `nullableIntPtrInt32` (NullInt32, pg).
+> - **BOOLEAN** : usar `WHERE column` (sin `= 1`) como predicado portable. Para SET/INSERT pg requiere `TRUE`/`FALSE` explícitos.
+> - **FTS** : SQLite usa FTS5 virtual table (`items_fts MATCH 'foo*'`); Postgres usa `tsvector` + `to_tsquery('simple', ?)` con sanitización vía `toTSQueryPrefix(q)`.
+> - **COLLATE NOCASE** : NO existe en Postgres → `LOWER(column)` para case-insensitive sort portable.
+> - **CTE con param duplicado**: sqlc 1.31 no maneja `?` repetido en subqueries — los repos lo dejan como raw SQL Pattern B (NextUp en UserData es el ejemplo canónico).
+> - **Tx pattern**: cada rama abre su `qtx := r.sq.WithTx(tx)` / `qtx := r.pq.WithTx(tx)` localmente; sin abstracción intermedia.
+>
+> **Verificación al cierre**:
+> - `go build ./internal/db/... ./internal/iptv/... ./internal/library/... ./internal/auth/...` clean.
+> - `GOOS=linux go build ./...` clean (cross-compile completo del binario).
+> - `go test -count=1 ./internal/db/` 10.5s, todos verde.
+> - `go test ./internal/iptv/ ./internal/library/... ./internal/scanner/ ./internal/auth/... ./internal/federation/...` todos verde.
+> - `internal/api/...` falla en host Windows por `syscall.Statfs_t` pre-existente (no es del refactor).
+> - `sqlc generate` clean.
+> - 4 commits sobre `claude/beautiful-margulis-3db022`. PR [#264](https://github.com/Alexzafra13/HubPlay_demo/pull/264) abierto, descripción a actualizar con E.6 + E.7.
+>
+> **Próximo arranque sugerido**:
+>
+> 1. **EPGPrograms** o **Image** (los dos restantes con raw SQL holdout, ~314-319 LOC cada uno). Tras esos, **Federation** es el último gigante (raw SQL pesado). Después 16 repos mecánicos.
+> 2. Tiempo restante estimado para Sesión E: ~6-8h en bloques de 2-3h cada uno.
+> 3. **Sesión F** (wiring `pgx/v5/stdlib` + `pgxpool` en main.go, ~3h) sigue después de E. Ese es el primer momento donde el binario puede arrancar contra Postgres real y SE PUEDE VALIDAR end-to-end.
+> 4. Cuando Docker daemon esté arriba en el host: smoke-test E.5/E.6/E.7 contra Postgres real (`docker run postgres:16-alpine` + goose + repo CRUD via Go scratch program). Las firmas Pattern A/B ya están validadas en E.1-E.4 contra Postgres real, lo nuevo aquí es el FTS dual-mecanismo + el FILTER aggregate.
+>
+> ---
+>
 > 🎬 **Sesión 2026-05-13 (rama `claude/beautiful-margulis-3db022`, 1 commit, Sesión E.5 — primer repo grande)** — continuando dual-dialect tras los 6 ya mergeados (PRs #260 y #261). Pendiente de merge: 1 commit sobre main.
 >
 > **Lo entregado**:
