@@ -1,5 +1,65 @@
 # Estado del proyecto
 
+> 🎬 **Sesión 2026-05-13 (rama `claude/musing-bell-cbe1da`, 1 commit, Sesión E.10 — 13 repos pequeños/mini cerrados de un golpe)** — continuando dual-dialect tras los 11 ya mergeados (PRs #260, #261, #264, #265). Pendiente de merge: 1 commit (`43161da`) sobre main.
+>
+> **Lo entregado en esta sesión**:
+>
+> Cierra el "Bloque 1" del handoff anterior — los 13 repos sub-200 LOC en un único commit. Trabajo mecánico: Pattern A / B ya estaban probados contra Postgres real en E.1–E.9, aquí solo aplicar los gotchas conocidos uno por uno. +1169/−342 LOC, 20 ficheros tocados (13 repos + repos.go + 6 test files externos).
+>
+> **Repos cerrados (orden por LOC)**:
+>
+> | Repo | LOC | Pattern | Notas |
+> |---|---|---|---|
+> | UserPreferences | 85 | B puro | Sin sqlc surface, 3 queries pre-rewriteadas. Template Settings |
+> | Chapter | 96 | A + tx Replace | `nullableString` reemplaza inlines |
+> | ExternalID | 113 | A + 1 raw-SQL | GetItemIDByExternalID — sqlc 1.31.1 LIMIT trunc |
+> | DeviceCode | 116 | A + alias→struct | Conversión idéntica al SigningKey de E.2 |
+> | ChannelWatchHistory | 117 | A | Number NullInt64↔NullInt32 + Limit int32 cast |
+> | ChannelFavorites | 120 | A | Number NullInt64↔NullInt32 |
+> | ItemValue | 123 | A + tx-style + 1 raw-SQL | ListGenres (sqlc 1.31.1 ORDER BY trunc) |
+> | ChannelOverride | 130 | A + tx ApplyToLibrary | qtx por rama (mismo que Image.SetPrimary) |
+> | Provider | 152 | A | Priority int64↔int32 |
+> | EpisodeSegment | 154 | A + tx Replace | Sin gotchas (todo BIGINT/text/float64) |
+> | Metadata | 177 | A + 2 raw-SQL batch | GetOverviewBatch, GetMetadataBatch — dynamic IN |
+> | People | 193 | A + tx-style ReplaceItemPeople | SortOrder + Year NullInt64↔NullInt32 |
+>
+> **Verificación al cierre**:
+>
+> - `go build ./internal/db/...` clean.
+> - `GOOS=linux go build ./...` clean (full cross-compile binario).
+> - `go test -count=1 ./internal/db/` 11.5s — todos verde.
+> - `go test ./internal/auth/ ./internal/scanner/ ./internal/iptv/ ./internal/library/ ./internal/federation/` — todos verde.
+> - `TestSQLC_GeneratedFilesMatchQueries` verde (drift test).
+> - `internal/api/...` sigue fallando en host Windows por `syscall.Statfs_t` (preexistente, no del refactor).
+>
+> **Estado al cierre — 24 de 28 repos done, 4 pending**:
+>
+> ✅ **Done** (24): Settings, Users, Sessions, SigningKeys, Library, MediaStreams, Items, UserData, Channels, EPGPrograms, Image, UserPreferences, Chapter, ExternalID, DeviceCode, ChannelWatchHistory, ChannelFavorites, ItemValue, ChannelOverride, Provider, EpisodeSegment, Metadata, People + (también los 6 originales E.1–E.4 que ya estaban verdes antes de E.5).
+>
+> ⏳ **Pending** (4 + 2 grandes = 6 repos):
+>
+> | Repo | LOC | Tier | Notas esperadas |
+> |---|---|---|---|
+> | **Federation** | **862** | 🔴 Gigante | MUCHOS raw SQL holdouts. Sesión propia |
+> | **Home** | **631** | 🟠 Grande | Queries complejas items + user_data agregados |
+> | Studio | 242 | 🟡 Mediano | |
+> | LibraryEPGSources | 235 | 🟡 Mediano | |
+> | IPTVSchedule | 206 | 🟡 Mediano | |
+> | Collection | 201 | 🟡 Mediano | |
+>
+> **Próximo arranque sugerido**:
+>
+> 1. **Los 4 medianos** (Studio + LibraryEPGSources + IPTVSchedule + Collection) en una sesión, ~1h cada uno = ~3-4h. Mismo perfil que E.10 (trabajo mecánico aplicando los gotchas ya conocidos). Cierra los 4 y deja solo Federation + Home.
+> 2. **Home (631 LOC)** sesión propia, ~2-3h. Inspeccionar primero qué queries tiene — el access-predicate post-040 ya está aplicado (auditado 2026-05-11).
+> 3. **Federation (862 LOC)** la última sesión grande, ~3-4h. Inspeccionar el repo Go primero porque la memoria dice "MUCHOS raw SQL holdouts" — puede tener tanto raw SQL como Library + Channels juntos. Los `is_active = 1` / `can_browse = 1` / `COLLATE NOCASE` ya se arreglaron en E.6.
+> 4. **Sesión F** — wiring `pgx/v5/stdlib` + `pgxpool` en `main.go` (~3h). Primera vez que el binario arranca contra Postgres y se valida end-to-end.
+>
+> Tiempo total restante para Sesión E: **~5-8h** (2-3 sesiones).
+>
+> **Cuando Docker daemon esté arriba**: smoke-test E.10 contra Postgres real con `docker run -d -e POSTGRES_PASSWORD=test postgres:16-alpine`, `goose -dir migrations/postgres postgres "..." up`, y un script Go scratch que invoque cada Repository.Get/List sobre datos seedeados. Lo nuevo a validar aquí son las firmas Pattern A/B aplicadas (todas variantes ya conocidas — la confianza es alta porque no hay queries nuevas).
+>
+> ---
+>
 > 🎬 **Sesión 2026-05-13 (rama `claude/beautiful-margulis-3db022`, 6 commits, Sesiones E.5–E.9 — 11 de 28 repos cerrados)** — continuando dual-dialect tras los 6 ya mergeados (PRs #260 y #261). Pendiente de merge: 6 commits sobre main en PR [#264](https://github.com/Alexzafra13/HubPlay_demo/pull/264).
 >
 > **Lo nuevo de esta tanda (E.8 + E.9 sobre lo previo)**:
