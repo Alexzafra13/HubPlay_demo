@@ -372,6 +372,15 @@ func run(configPath string) error {
 	// ═══ Phase 4e: Setup Service ═══
 	setupService := setup.NewService(cfg, configPath, logger)
 
+	// Restart requester: handlers (admin DB panel, setup wizard's
+	// database step) trigger it after saving a new YAML to roll the
+	// process so the next boot reads the updated config. Under the
+	// project's default `restart: unless-stopped` docker-compose
+	// policy this means a 2-3 second outage and the container is
+	// back; on bare metal the operator's supervisor (systemd /
+	// docker swarm / k8s) is expected to do the same.
+	restartRequester := config.NewRestartRequester(cancel, logger)
+
 	// ═══ Phase 5: HTTP Server ═══
 	webFS, _ := fs.Sub(hubplay.WebAssets, "web/dist")
 
@@ -467,8 +476,10 @@ func run(configPath string) error {
 		// (100 global, 5 per-user) are sized for a household-scale
 		// self-hosted server; if a deployment grows, lift these to
 		// config rather than tweaking the constants.
-		SSELimiter:    handlers.NewSSELimiter(handlers.DefaultSSEGlobalMax, handlers.DefaultSSEPerUserMax),
-		HostMetrics:   hostMetrics,
+		SSELimiter:       handlers.NewSSELimiter(handlers.DefaultSSEGlobalMax, handlers.DefaultSSEPerUserMax),
+		HostMetrics:      hostMetrics,
+		ConfigPath:       configPath,
+		RestartRequester: restartRequester,
 	})
 
 	server := &http.Server{

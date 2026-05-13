@@ -84,6 +84,15 @@ type Dependencies struct {
 	// renders as dashes. Production wires a single instance, started
 	// at boot, lifetime bound to the process context.
 	HostMetrics    *sysmetrics.Sampler
+	// ConfigPath is the absolute path to hubplay.yaml. Used by the
+	// admin Database panel to persist driver / DSN changes via
+	// config.Save without making the handler re-derive the path
+	// from the binary args. Empty in tests; production sets it.
+	ConfigPath string
+	// RestartRequester triggers a graceful self-shutdown when the
+	// admin DB panel or wizard saves a new driver. nil-safe — the
+	// handlers degrade to "saved, restart manually" when missing.
+	RestartRequester *config.RestartRequester
 }
 
 func NewRouter(deps Dependencies) http.Handler {
@@ -219,7 +228,17 @@ func NewRouter(deps Dependencies) http.Handler {
 
 		// Setup wizard (no auth for status, auth handled per-step)
 		if deps.SetupService != nil {
-			setupHandler := handlers.NewSetupHandler(deps.SetupService, deps.Auth, deps.Libraries, deps.Users, deps.ProviderRepo, deps.Config, deps.Logger)
+			setupHandler := handlers.NewSetupHandler(handlers.SetupHandlerConfig{
+				Setup:     deps.SetupService,
+				DBSaver:   deps.SetupService,
+				Auth:      deps.Auth,
+				Libraries: deps.Libraries,
+				Users:     deps.Users,
+				Providers: deps.ProviderRepo,
+				Config:    deps.Config,
+				Restart:   deps.RestartRequester,
+				Logger:    deps.Logger,
+			})
 
 			r.Get("/setup/status", setupHandler.Status)
 			r.Get("/setup/capabilities", setupHandler.Capabilities)
@@ -227,6 +246,12 @@ func NewRouter(deps Dependencies) http.Handler {
 			r.Post("/setup/libraries", setupHandler.CreateLibraries)
 			r.Post("/setup/settings", setupHandler.UpdateSettings)
 			r.Post("/setup/complete", setupHandler.Complete)
+			// Step 0 — database driver selector. Lets the operator
+			// pick SQLite or Postgres before any data has landed so
+			// the rest of the wizard creates rows in the chosen
+			// backend, not the YAML default.
+			r.Post("/setup/db/test", setupHandler.TestDatabase)
+			r.Post("/setup/db", setupHandler.SaveDatabase)
 		}
 
 		// Federation public surface. Two flavours:
@@ -587,6 +612,29 @@ func NewRouter(deps Dependencies) http.Handler {
 						)
 						r.Get("/backup", backupHandler.Download)
 						r.Post("/backup/restore", backupHandler.Upload)
+					}
+
+					// Database driver + DSN management. Lets the
+					// admin switch sqlite↔postgres without dropping
+					// to the host shell to edit YAML. The save endpoint
+					// does NOT swap the live connection (driver swap
+					// is a process-boundary concern); the restart
+					// endpoint pairs with it so the panel can finish
+					// the round-trip from the browser.
+					if deps.SetupService != nil && deps.ConfigPath != "" {
+						dbHandler := handlers.NewAdminDBHandler(
+							deps.Config,
+							deps.ConfigPath,
+							deps.Database,
+							deps.SetupService.SaveDatabaseConfig,
+							deps.RestartRequester,
+							deps.Logger,
+						)
+						r.Get("/db", dbHandler.Status)
+						r.Post("/db/test", dbHandler.Test)
+						r.Put("/db", dbHandler.Save)
+						r.Post("/db/migrate", dbHandler.Migrate)
+						r.Post("/restart", dbHandler.Restart)
 					}
 
 					// Logs viewer. Snapshot endpoint for the initial

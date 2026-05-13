@@ -72,7 +72,7 @@ func openPostgres(dsn string, logger *slog.Logger) (*sql.DB, error) {
 
 	logger.Info("database opened",
 		"driver", DriverPostgres,
-		"dsn", redactPostgresDSN(dsn),
+		"dsn", RedactDSN(dsn),
 		"pool_max_open", pgxPoolPoolSize(pgxPoolMaxOpenConns),
 		"conn_max_lifetime", pgxPoolConnMaxLifetime.String())
 	return database, nil
@@ -83,36 +83,46 @@ func openPostgres(dsn string, logger *slog.Logger) (*sql.DB, error) {
 // (rather than a slog.Attr) because the boot log is the only call site.
 func pgxPoolPoolSize(n int) int { return n }
 
-// redactPostgresDSN strips the password from a Postgres URL so the
-// boot log doesn't leak credentials. Handles the `postgres://` URL
-// form (user:password@host); the `key=value` libpq form is a different
-// shape and we don't redact it (logging that whole string would still
-// expose `password=...` in plain — operators using key=value DSNs
-// should rely on env var injection or a secrets file).
+// RedactDSN strips the password from a Postgres URL so logs and the
+// admin Database panel never leak credentials. Handles the
+// `postgres://` URL form (user:password@host); the `key=value` libpq
+// form is a different shape and we partially redact `password=...`
+// in-place so admin logs from connect-failure paths don't carry it.
 //
-// Falls back to the raw value if parsing fails: better to log an
+// Falls back to the raw value if parsing fails: better to surface an
 // imperfect string than a misleading one.
-func redactPostgresDSN(dsn string) string {
+func RedactDSN(dsn string) string {
 	// postgres://user:password@host:port/db?sslmode=...
-	if !startsWith(dsn, "postgres://") && !startsWith(dsn, "postgresql://") {
+	if startsWith(dsn, "postgres://") || startsWith(dsn, "postgresql://") {
+		at := lastIndex(dsn, "@")
+		schemeEnd := indexOf(dsn, "://")
+		if at < 0 || schemeEnd < 0 || schemeEnd >= at {
+			return dsn
+		}
+		userInfo := dsn[schemeEnd+3 : at]
+		colon := indexOf(userInfo, ":")
+		if colon < 0 {
+			return dsn
+		}
+		return dsn[:schemeEnd+3] + userInfo[:colon] + ":***@" + dsn[at+1:]
+	}
+
+	// libpq key=value form: replace any `password=...` token (space or
+	// end-of-string terminated). The admin panel renders this so the
+	// operator's exact DSN shape is preserved minus credentials.
+	idx := indexOf(dsn, "password=")
+	if idx < 0 {
 		return dsn
 	}
-	at := lastIndex(dsn, "@")
-	if at < 0 {
-		return dsn
+	rest := dsn[idx+len("password="):]
+	end := len(rest)
+	for i := 0; i < len(rest); i++ {
+		if rest[i] == ' ' {
+			end = i
+			break
+		}
 	}
-	// Find the first '://' to skip the scheme.
-	schemeEnd := indexOf(dsn, "://")
-	if schemeEnd < 0 || schemeEnd >= at {
-		return dsn
-	}
-	userInfo := dsn[schemeEnd+3 : at]
-	colon := indexOf(userInfo, ":")
-	if colon < 0 {
-		// No password to hide.
-		return dsn
-	}
-	return dsn[:schemeEnd+3] + userInfo[:colon] + ":***@" + dsn[at+1:]
+	return dsn[:idx] + "password=***" + rest[end:]
 }
 
 // Tiny strings helpers — kept private to avoid an explicit `strings`

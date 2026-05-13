@@ -136,6 +136,17 @@ var outOfScopeExact = map[string]string{
 	"GET /admin/system/sessions":         "admin now-playing panel",
 	"DELETE /admin/system/sessions/{id}": "admin now-playing panel",
 
+	// ── Database driver management (admin) ────────────────────────────
+	// Operator-only surface that swaps SQLite ↔ Postgres without
+	// touching hubplay.yaml on disk. None of the user-facing SDKs
+	// (Kotlin TV, federation) reach for these; the web admin panel
+	// drives them directly.
+	"GET /admin/system/db":          "admin DB driver/DSN management",
+	"POST /admin/system/db/test":    "admin DB connection test",
+	"PUT /admin/system/db":          "admin DB driver/DSN save",
+	"POST /admin/system/db/migrate": "admin DB data migration (sqlite→pg)",
+	"POST /admin/system/restart":    "admin self-restart trigger",
+
 	// ── Library admin ─────────────────────────────────────────────────
 	"POST /libraries":              "admin library creation",
 	"GET /libraries/browse":        "admin filesystem picker",
@@ -168,6 +179,8 @@ var outOfScopeExact = map[string]string{
 	"POST /setup/libraries":      "first-run wizard",
 	"POST /setup/settings":       "first-run wizard",
 	"POST /setup/complete":       "first-run wizard",
+	"POST /setup/db/test":        "first-run wizard — DB driver test",
+	"POST /setup/db":             "first-run wizard — DB driver save",
 
 	// ── Peer-to-peer federation (server-to-server) ────────────────────
 	"GET /federation/info":                                      "p2p server info",

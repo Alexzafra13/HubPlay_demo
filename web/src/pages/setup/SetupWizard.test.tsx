@@ -6,6 +6,17 @@ import SetupWizard from "./SetupWizard";
 // via data attributes + a couple of buttons that invoke the callbacks. This
 // isolates the orchestrator from the real step internals (mutations, i18n,
 // validation) so the tests only assert wiring + transitions.
+
+vi.mock("./DatabaseStep", () => ({
+  default: (props: { onNext: () => void }) => (
+    <div data-testid="database-step">
+      <button type="button" onClick={props.onNext}>
+        database-next
+      </button>
+    </div>
+  ),
+}));
+
 vi.mock("./AccountStep", () => ({
   default: (props: {
     onNext: (data: { username: string; password: string }) => void;
@@ -75,10 +86,10 @@ describe("SetupWizard", () => {
     vi.clearAllMocks();
   });
 
-  it("starts on the account step by default", () => {
+  it("starts on the database step by default", () => {
     render(<SetupWizard />);
-    expect(screen.getByTestId("account-step")).toBeInTheDocument();
-    expect(screen.queryByTestId("libraries-step")).toBeNull();
+    expect(screen.getByTestId("database-step")).toBeInTheDocument();
+    expect(screen.queryByTestId("account-step")).toBeNull();
   });
 
   it("respects the initialStep prop when it matches a known key", () => {
@@ -87,18 +98,23 @@ describe("SetupWizard", () => {
     expect(screen.queryByTestId("account-step")).toBeNull();
   });
 
-  it("falls back to step 0 for an unknown initialStep value", () => {
+  it("falls back to step 0 (database) for an unknown initialStep value", () => {
     render(<SetupWizard initialStep="not-a-real-step" />);
-    expect(screen.getByTestId("account-step")).toBeInTheDocument();
+    expect(screen.getByTestId("database-step")).toBeInTheDocument();
   });
 
-  it("advances account → libraries → settings → complete and persists data along the way", () => {
+  it("advances database → account → libraries → settings → complete and persists data along the way", () => {
     render(<SetupWizard />);
 
-    // Account → Libraries (and the data we pass through is preserved).
+    // Database step — clicking next moves on without persisting any
+    // wizard-level state (the database step lives entirely on the
+    // server through /setup/db).
+    fireEvent.click(screen.getByText("database-next"));
+    expect(screen.getByTestId("account-step")).toBeInTheDocument();
+
+    // Account → Libraries.
     fireEvent.click(screen.getByText("account-next"));
-    const librariesStep = screen.getByTestId("libraries-step");
-    expect(librariesStep).toBeInTheDocument();
+    expect(screen.getByTestId("libraries-step")).toBeInTheDocument();
 
     // Libraries → Settings.
     fireEvent.click(screen.getByText("libraries-next"));
@@ -119,44 +135,34 @@ describe("SetupWizard", () => {
   });
 
   it("goBack from libraries returns to account and re-hydrates the saved user data", () => {
-    render(<SetupWizard />);
+    render(<SetupWizard initialStep="account" />);
 
     fireEvent.click(screen.getByText("account-next"));
     fireEvent.click(screen.getByText("libraries-back"));
 
     const account = screen.getByTestId("account-step");
     expect(account).toBeInTheDocument();
-    // initialData on account reflects what was previously submitted —
-    // no data loss when the user steps backwards.
     const initial = JSON.parse(account.getAttribute("data-initial") ?? "null");
     expect(initial).toMatchObject({ username: "alice", password: "12345678" });
   });
 
   it("goBack stops at step 0 (cannot go below the first step)", () => {
-    // Already on account (index 0). The wizard exposes no back button on
-    // AccountStep, but the LibrariesStep one is wired to goBack — clicking
-    // it once lands us on account; clicking again would be a no-op.
-    render(<SetupWizard />);
+    render(<SetupWizard initialStep="account" />);
     fireEvent.click(screen.getByText("account-next"));
-    fireEvent.click(screen.getByText("libraries-back")); // index 0
-    // Now on account — and it stays there even if the orchestrator's goBack
-    // is somehow invoked again (we have no UI for that here, so we just
-    // re-assert we did not crash and we're still on step 0).
+    fireEvent.click(screen.getByText("libraries-back")); // back to account
     expect(screen.getByTestId("account-step")).toBeInTheDocument();
   });
 
-  it("step indicator reflects the active step (3rd circle highlighted on settings)", () => {
+  it("step indicator reflects the active step (4th circle highlighted on settings)", () => {
     render(<SetupWizard initialStep="settings" />);
-    // Step labels come from translations; the orchestrator passes the keys
-    // to t() with no defaultValue. Without an i18n provider, t() returns the
-    // raw key — we assert the number of circles instead, which is the most
-    // stable contract.
+    // The wizard now has 5 steps (database, account, libraries, settings,
+    // complete). Settings is slot 3 (zero-indexed) so steps 1-3 render
+    // as completed (check svg, no digit), step 4 is the active digit,
+    // step 5 is pending.
     const numberedCircles = screen
-      .getAllByText(/^[1-4]$/)
+      .getAllByText(/^[1-5]$/)
       .filter((el) => el.tagName === "DIV");
-    // Steps 1 and 2 are completed (rendered as a check svg, not a digit),
-    // step 3 is active (digit "3"), step 4 is pending (digit "4").
     const visibleDigits = numberedCircles.map((el) => el.textContent);
-    expect(visibleDigits).toEqual(["3", "4"]);
+    expect(visibleDigits).toEqual(["4", "5"]);
   });
 });

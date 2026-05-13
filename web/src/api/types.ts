@@ -1227,6 +1227,68 @@ export interface SystemSettingsResponse {
   settings: SystemSetting[];
 }
 
+// ─── Database driver management (admin + setup wizard) ────────────────
+
+export type DatabaseDriver = "sqlite" | "postgres";
+
+// AdminDatabaseStatus is what GET /admin/system/db returns. Renders
+// the "Database" card in the System panel: live driver, redacted
+// DSN / path, and pool stats so the operator can spot when the
+// pool is exhausted at a glance.
+export interface AdminDatabaseStatus {
+  driver: DatabaseDriver;
+  path?: string;
+  dsn_redacted?: string;
+  pool: {
+    max_open: number;
+    open: number;
+    in_use: number;
+    idle: number;
+    wait_count: number;
+    wait_duration_ms: number;
+  };
+}
+
+// AdminDatabaseTestRequest carries a candidate driver + DSN/path
+// the panel wants to validate before persisting. Path is sqlite-only;
+// dsn is postgres-only — the server ignores the irrelevant one.
+export interface AdminDatabaseTestRequest {
+  driver: DatabaseDriver;
+  path?: string;
+  dsn?: string;
+}
+
+export interface AdminDatabaseTestResponse {
+  ok: boolean;
+  driver_detected?: string;
+  server_version?: string;
+  duration_ms: number;
+  error?: string;
+}
+
+export interface AdminDatabaseSaveRequest extends AdminDatabaseTestRequest {
+  // When true the server triggers a graceful self-restart after
+  // persisting the new YAML so the next boot uses the new driver.
+  restart?: boolean;
+}
+
+export interface AdminDatabaseSaveResponse {
+  status: "saved";
+  restart_scheduled: boolean;
+}
+
+// AdminDatabaseMigrateEvent is one record from the NDJSON stream
+// the migration endpoint emits. The panel parses each line as JSON
+// and routes by `event`.
+export type AdminDatabaseMigrateEvent =
+  | { event: "start"; source: string; target: string }
+  | { event: "progress"; table: string; copied: number; total: number; phase: string }
+  | { event: "config_saved" }
+  | { event: "restart_scheduled" }
+  | { event: "warning"; message: string }
+  | { event: "error"; message: string }
+  | { event: "done"; tables_copied: number; rows_copied: number; duration_ms: number };
+
 // AdminStreamSession is one row of the admin "Now Playing" table.
 // Mirrors the wire shape of GET /admin/system/sessions; the username
 // and item title are best-effort enrichments from the server (empty

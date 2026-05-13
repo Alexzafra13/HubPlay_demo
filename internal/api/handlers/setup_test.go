@@ -85,7 +85,15 @@ func newSetupTestEnv(t *testing.T) *setupTestEnv {
 		users:     &userFakeService{},
 		providers: &providersFakeRepo{getByName: map[string]*db.ProviderConfig{}},
 	}
-	env.handler = NewSetupHandler(env.setup, env.auth, env.libs, env.users, env.providers, &config.Config{}, testutil.NopLogger())
+	env.handler = NewSetupHandler(SetupHandlerConfig{
+		Setup:     env.setup,
+		Auth:      env.auth,
+		Libraries: env.libs,
+		Users:     env.users,
+		Providers: env.providers,
+		Config:    &config.Config{},
+		Logger:    testutil.NopLogger(),
+	})
 
 	r := chi.NewRouter()
 	r.Route("/api/v1/setup", func(r chi.Router) {

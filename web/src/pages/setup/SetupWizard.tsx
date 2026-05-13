@@ -2,6 +2,7 @@ import { useState, useCallback } from "react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import AccountStep from "./AccountStep";
+import DatabaseStep from "./DatabaseStep";
 import LibrariesStep from "./LibrariesStep";
 import SettingsStep from "./SettingsStep";
 import CompleteStep from "./CompleteStep";
@@ -41,10 +42,11 @@ export interface SetupData {
 // ─── Step Definitions ────────────────────────────────────────────────────────
 
 const STEP_KEYS = [
-  { key: "adminAccount", number: 1 },
-  { key: "libraries", number: 2 },
-  { key: "settings", number: 3 },
-  { key: "complete", number: 4 },
+  { key: "database", number: 1 },
+  { key: "adminAccount", number: 2 },
+  { key: "libraries", number: 3 },
+  { key: "settings", number: 4 },
+  { key: "complete", number: 5 },
 ] as const;
 
 // ─── Step Indicator ──────────────────────────────────────────────────────────
@@ -129,11 +131,27 @@ function HubPlayLogo() {
 
 // ─── Main Wizard ─────────────────────────────────────────────────────────────
 
+// STEP_MAP translates the server's notion of "where the wizard is"
+// into our slot index. The server's `current_step` ("account",
+// "libraries", "settings", "complete") was minted before the
+// Database step existed and is derived purely from state (users
+// exist? libraries exist?) — adding a new step for a screen with no
+// persisted side-effect would have meant teaching the server how to
+// track wizard cursor state, which we don't want.
+//
+// So the convention is: the Database step has no server cursor.
+// Every time the wizard mounts it lands on slot 0 (Database) unless
+// the server says otherwise; the operator either configures pg+restart
+// or clicks "skip" and the wizard moves to slot 1 (account). After
+// a restart triggered by /setup/db, the next mount lands on slot 0
+// again — empty Database form, but the test-against-the-new-driver
+// is now a no-op (the binary IS the new driver) so a single skip is
+// the natural path.
 const STEP_MAP: Record<string, number> = {
-  account: 0,
-  libraries: 1,
-  settings: 2,
-  complete: 3,
+  account: 1,
+  libraries: 2,
+  settings: 3,
+  complete: 4,
 };
 
 interface SetupWizardProps {
@@ -181,6 +199,9 @@ export default function SetupWizard({ initialStep }: SetupWizardProps) {
   let stepContent: ReactNode;
   switch (currentStep) {
     case 0:
+      stepContent = <DatabaseStep onNext={goNext} />;
+      break;
+    case 1:
       stepContent = (
         <AccountStep
           onNext={handleAccountNext}
@@ -188,7 +209,7 @@ export default function SetupWizard({ initialStep }: SetupWizardProps) {
         />
       );
       break;
-    case 1:
+    case 2:
       stepContent = (
         <LibrariesStep
           onNext={handleLibrariesNext}
@@ -197,7 +218,7 @@ export default function SetupWizard({ initialStep }: SetupWizardProps) {
         />
       );
       break;
-    case 2:
+    case 3:
       stepContent = (
         <SettingsStep
           onNext={handleSettingsNext}
@@ -206,7 +227,7 @@ export default function SetupWizard({ initialStep }: SetupWizardProps) {
         />
       );
       break;
-    case 3:
+    case 4:
       stepContent = <CompleteStep setupData={setupData} />;
       break;
     default:

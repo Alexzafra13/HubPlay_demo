@@ -24,6 +24,7 @@ import type {
 import { Spinner, Button, EmptyState } from "@/components/common";
 import { AuthKeysPanel } from "@/components/admin/AuthKeysPanel";
 import { BackupPanel } from "@/components/admin/BackupPanel";
+import { DatabasePanel } from "@/components/admin/DatabasePanel";
 import { LogsPanel } from "@/components/admin/LogsPanel";
 import { SectionHeader } from "@/components/admin/SectionHeader";
 import { Sparkline } from "@/components/admin/Sparkline";
@@ -1111,6 +1112,7 @@ function AdvancedSection() {
       </div>
       <LogsPanel />
       <BackupPanel />
+      <DatabasePanel />
       <AuthKeysPanel />
     </section>
   );
