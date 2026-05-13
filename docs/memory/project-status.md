@@ -1,5 +1,136 @@
 # Estado del proyecto
 
+> 🎬 **Sesión 2026-05-13 (rama `claude/beautiful-margulis-3db022`, 6 commits, Sesiones E.5–E.9 — 11 de 28 repos cerrados)** — continuando dual-dialect tras los 6 ya mergeados (PRs #260 y #261). Pendiente de merge: 6 commits sobre main en PR [#264](https://github.com/Alexzafra13/HubPlay_demo/pull/264).
+>
+> **Lo nuevo de esta tanda (E.8 + E.9 sobre lo previo)**:
+>
+> - **[`107f7ca`](https://github.com/Alexzafra13/HubPlay_demo/commit/107f7ca) E.8 — EPGPrograms** (314 LOC): Pattern A para CleanupOld + Insert/Delete dentro del tx ReplaceForChannel; Pattern B para los 3 reads (NowPlaying, Schedule, BulkSchedule chunked en 500 para `SQLITE_LIMIT_VARIABLE_NUMBER`). Sin gotchas BOOLEAN — la tabla `epg_programs` es sólo timestamps + texto. El `coerceSQLiteTime` se queda con su nombre histórico (pgx pasa por el `case time.Time`); doc-comment actualizado.
+>
+> - **[`434a846`](https://github.com/Alexzafra13/HubPlay_demo/commit/434a846) E.9 — Image** (319 LOC): Pattern A para 8 métodos sqlc + Pattern B para GetPrimaryURLs (dynamic IN + el último `is_primary = 1` reescrito a `is_primary`). Tx `SetPrimary` dialectado. Width/Height (INTEGER) → NullInt64 sqlite, NullInt32 pg en Create (helper `nullableInt32` reusado de MediaStreams). 11 callers actualizados en tests via PowerShell sed.
+>
+> **Estado al cierre de la tanda — 11 de 28 repos done, 17 pending**:
+>
+> ✅ **Done** (11):
+>
+> | Repo | LOC | Pattern | Notas |
+> |---|---|---|---|
+> | Settings | 149 | B (raw SQL pre-rewrite) | Template Pattern B |
+> | Users | — | A + 1 raw SQL holdout | |
+> | Sessions | — | A + 2 raw SQL holdouts | |
+> | SigningKeys | — | A (alias → struct) | |
+> | Library | — | A + 2 raw + 3 tx | |
+> | MediaStreams | — | A + 1 tx + nullableInt32 | |
+> | Items | 633 | A + 4 raw SQL | FTS dual-mecanismo + toTSQueryPrefix |
+> | UserData | 485 | A + 2 raw SQL | + fix masivo BOOLEAN drift en 8 ficheros pg |
+> | Channels | 562 | A + 9 raw SQL + tx | FILTER aggregate, ReplaceForLibrary tx |
+> | EPGPrograms | 314 | A + 3 raw SQL + tx | Sólo time/text, sin BOOLEAN |
+> | Images | 319 | A + 1 raw SQL + tx | Width/Height nullableInt32 |
+>
+> ⏳ **Pending** (17 repos, 3953 LOC totales):
+>
+> | Repo | LOC | Tier | Notas esperadas |
+> |---|---|---|---|
+> | **Federation** | **862** | 🔴 Gigante | MUCHOS raw SQL holdouts. Sesión propia. Ya tiene los `is_active = 1` / `can_browse = 1` / `COLLATE NOCASE` arreglados en E.6, pero aún hay raw SQL en el repo Go que necesita rewrite + dialect branch |
+> | **Home** | **631** | 🟠 Grande | Segundo más grande. Probablemente queries complejas sobre items + user_data agregados |
+> | Studio | 242 | 🟡 Mediano | |
+> | LibraryEPGSources | 235 | 🟡 Mediano | |
+> | IPTVSchedule | 206 | 🟡 Mediano | |
+> | Collection | 201 | 🟡 Mediano | |
+> | People | 193 | 🟢 Pequeño | El query con `is_available = 1` ya arreglado en E.6 |
+> | Metadata | 177 | 🟢 Pequeño | Tiene un raw SQL batch (visto en E.5/E.6) |
+> | EpisodeSegment | 154 | 🟢 Pequeño | |
+> | Provider | 152 | 🟢 Pequeño | |
+> | ChannelOverride | 130 | 🟢 Pequeño | |
+> | ItemValue | 123 | 🟢 Pequeño | |
+> | ChannelFavorites | 120 | 🟢 Pequeño | El `c.is_active = 1` ya arreglado en E.6 |
+> | ChannelWatchHistory | 117 | 🟢 Pequeño | El `c.is_active = 1` ya arreglado en E.6 |
+> | DeviceCode | 116 | 🟢 Pequeño | |
+> | ExternalID | 113 | 🟢 Pequeño | |
+> | Chapter | 96 | 🟢 Mini | |
+> | UserPreferences | 85 | 🟢 Mini | |
+>
+> **Próximo arranque sugerido (orden por valor)**:
+>
+> 1. **Empezar por los 11 pequeños/mini (sub-200 LOC)** — son trabajo mecánico, sin riesgo, suman ~1500 LOC y cierran 11 repos rápido. Una sesión de 2-3h debería cerrarlos todos. Beneficio psicológico + reducir lista a sólo Federation + Home + 4 medianos.
+> 2. **Después los 4 medianos** (Studio, LibraryEPGSources, IPTVSchedule, Collection) — ~1h cada uno. Otra sesión.
+> 3. **Home (631 LOC)** — sesión propia. Inspeccionar primero qué queries tiene.
+> 4. **Federation (862 LOC)** — la última sesión grande. Inspeccionar el repo Go primero porque la memoria dice "MUCHOS raw SQL holdouts" — puede tener tanto raw SQL como Library + Channels juntos.
+> 5. **Sesión F** — wiring `pgx/v5/stdlib` + `pgxpool` en main.go (~3h). Es donde el binario por fin puede arrancar contra Postgres y se valida end-to-end.
+>
+> Tiempo total restante estimado para Sesión E: **~6-9h** (3-4 sesiones de 2-3h).
+>
+> **Cuando Docker esté arriba**: smoke-test E.5–E.9 contra Postgres real usando `docker run -d -e POSTGRES_PASSWORD=test postgres:16-alpine`, `goose -dir migrations/postgres postgres "..." up`, y un script Go scratch que invoque cada Repository.GetByID/List sobre datos seedeados. Las firmas Pattern A/B + el FTS-dual + el FILTER aggregate son lo nuevo a validar — todos los demás patrones ya tienen smoke contra Postgres real desde E.1-E.4.
+>
+> ---
+>
+> 🎬 **Sesión 2026-05-13 (rama `claude/beautiful-margulis-3db022`, 4 commits, Sesiones E.5 + E.6 + E.7 — los tres repos grandes cerrados)** — continuando dual-dialect tras los 6 ya mergeados (PRs #260 y #261). Pendiente de merge: 4 commits sobre main en PR [#264](https://github.com/Alexzafra13/HubPlay_demo/pull/264).
+>
+> **Lo entregado en esta tanda (resumen)**:
+>
+> - **[`20e24de`](https://github.com/Alexzafra13/HubPlay_demo/commit/20e24de) E.5 — Items** (633 LOC): Pattern A + Pattern B; FTS dual-mecanismo (FTS5 ↔ tsvector + `to_tsquery`), helper `toTSQueryPrefix`, helper `nullableIntPtrInt32`, BOOLEAN gotcha resuelto via `WHERE is_available` (sin `= 1`). Detalle completo abajo.
+>
+> - **[`175b2b6`](https://github.com/Alexzafra13/HubPlay_demo/commit/175b2b6) E.6 — UserData** (485 LOC) **+ fix masivo BOOLEAN/COLLATE drift**: octavo repo refactor (Pattern A para 10 métodos sqlc + Pattern B para GetBatch dynamic IN y NextUp CTE). EN EL MISMO COMMIT se arregla un drift sistemático que la Sesión D no había detectado: 14 sitios `column = 1` / `column = 0` sobre columnas BOOLEAN reescritos en 8 ficheros queries-postgres (channels, channel_favorites, channel_watch_history, federation, images, iptv_scheduled_jobs, people, user_data) + 3 `ORDER BY x COLLATE NOCASE` reescritos a `ORDER BY LOWER(x)` en federation.sql. `sqlc generate` regenera 8 ficheros sqlc_pg. Sin estos arreglos el postgres backend habría petado al primer Upsert/MarkPlayed/SetFavorite/etc.
+>
+> - **[`5fb1110`](https://github.com/Alexzafra13/HubPlay_demo/commit/5fb1110) E.7 — Channel** (562 LOC): noveno repo, último de los tres grandes. Pattern A para 6 métodos sqlc + Pattern B para 9 raw SQL (incluyendo el tx pattern de `ReplaceForLibrary`, `HealthSummaryByLibrary` con `COUNT(*) FILTER` que SQLite soporta desde 3.30 y por tanto es dialect-portable, y los cuatro health writers con UPDATE inline).
+>
+> **Estado al cierre de la tanda**:
+>
+> | Repo | Estado |
+> |---|---|
+> | Settings | ✅ Pattern B |
+> | Users | ✅ Pattern A + 1 raw SQL holdout |
+> | Sessions | ✅ Pattern A + 2 raw SQL holdouts |
+> | SigningKeys | ✅ Pattern A (alias → struct) |
+> | Library | ✅ Pattern A + 2 raw SQL holdouts + 3 tx |
+> | MediaStreams | ✅ Pattern A + 1 tx + nullableInt32 |
+> | Items | ✅ E.5 — Pattern A + 4 raw SQL (FTS dual + toTSQueryPrefix) |
+> | **UserData** | ✅ **E.6 — Pattern A + 2 raw SQL + 8 fixes BOOLEAN drift en pg queries** |
+> | **Channels** | ✅ **E.7 — Pattern A + 9 raw SQL + tx ReplaceForLibrary** |
+> | EPGPrograms | ⏳ 314 LOC — tiene BulkSchedule raw SQL holdout |
+> | Image | ⏳ 319 LOC — tiene GetPrimaryURLs raw SQL holdout |
+> | Federation | ⏳ enorme con MUCHOS raw SQL holdouts |
+> | 16 repos pequeños/medianos | ⏳ trabajo mecánico |
+>
+> **Drift de Sesión D detectado y arreglado en E.6** (importante para auditoría):
+>
+> - Las queries-postgres traducidas en Sesión D heredaban literales `WHERE column = 1` / `column = 0` de la fuente SQLite. Postgres tiene BOOLEAN real → rechaza el cast implícito. 14 sitios afectados, 8 ficheros tocados. Detección sólo posible al refactorizar UserData y leer las queries pg generadas con cuidado. Patrón aplicado:
+>   - Predicado WHERE `x = 1` → `x` (truthy en ambos dialectos)
+>   - Predicado WHERE `x = 0` → `NOT x`
+>   - Asignación SET `x = 1` → `x = TRUE`
+>   - INSERT VALUES con literal 1/0 sobre columna BOOLEAN → `TRUE` / `FALSE`
+>   - `ORDER BY x COLLATE NOCASE` → `ORDER BY LOWER(x)` (NOCASE es SQLite-only)
+>
+> - **Regla preventiva añadida**: cuando se traduce un nuevo query a queries-postgres/, antes del `sqlc generate`, hacer `grep "= 1\|= 0\|COLLATE NOCASE"` sobre el fichero y resolver cada hit.
+>
+> **Gotchas acumulados a final de la tanda** (todos vivos para los 19 repos siguientes):
+>
+> - **Limit type**: sqlc emite `int64` para SQLite y `int32` para Postgres en LIMIT/OFFSET. Cast inline en cada llamada pg. Aplica también a Year/SeasonNumber/EpisodeNumber/PlayCount/Number en columnas declaradas INTEGER.
+> - **BIGINT** se mantiene int64 en ambos dialectos (Size, DurationTicks, PositionTicks, *_ticks, bytes_*).
+> - **Helpers de nullable INT**: `nullableIntPtr` (NullInt64, sqlite) y `nullableIntPtrInt32` (NullInt32, pg).
+> - **BOOLEAN** : usar `WHERE column` (sin `= 1`) como predicado portable. Para SET/INSERT pg requiere `TRUE`/`FALSE` explícitos.
+> - **FTS** : SQLite usa FTS5 virtual table (`items_fts MATCH 'foo*'`); Postgres usa `tsvector` + `to_tsquery('simple', ?)` con sanitización vía `toTSQueryPrefix(q)`.
+> - **COLLATE NOCASE** : NO existe en Postgres → `LOWER(column)` para case-insensitive sort portable.
+> - **CTE con param duplicado**: sqlc 1.31 no maneja `?` repetido en subqueries — los repos lo dejan como raw SQL Pattern B (NextUp en UserData es el ejemplo canónico).
+> - **Tx pattern**: cada rama abre su `qtx := r.sq.WithTx(tx)` / `qtx := r.pq.WithTx(tx)` localmente; sin abstracción intermedia.
+>
+> **Verificación al cierre**:
+> - `go build ./internal/db/... ./internal/iptv/... ./internal/library/... ./internal/auth/...` clean.
+> - `GOOS=linux go build ./...` clean (cross-compile completo del binario).
+> - `go test -count=1 ./internal/db/` 10.5s, todos verde.
+> - `go test ./internal/iptv/ ./internal/library/... ./internal/scanner/ ./internal/auth/... ./internal/federation/...` todos verde.
+> - `internal/api/...` falla en host Windows por `syscall.Statfs_t` pre-existente (no es del refactor).
+> - `sqlc generate` clean.
+> - 4 commits sobre `claude/beautiful-margulis-3db022`. PR [#264](https://github.com/Alexzafra13/HubPlay_demo/pull/264) abierto, descripción a actualizar con E.6 + E.7.
+>
+> **Próximo arranque sugerido**:
+>
+> 1. **EPGPrograms** o **Image** (los dos restantes con raw SQL holdout, ~314-319 LOC cada uno). Tras esos, **Federation** es el último gigante (raw SQL pesado). Después 16 repos mecánicos.
+> 2. Tiempo restante estimado para Sesión E: ~6-8h en bloques de 2-3h cada uno.
+> 3. **Sesión F** (wiring `pgx/v5/stdlib` + `pgxpool` en main.go, ~3h) sigue después de E. Ese es el primer momento donde el binario puede arrancar contra Postgres real y SE PUEDE VALIDAR end-to-end.
+> 4. Cuando Docker daemon esté arriba en el host: smoke-test E.5/E.6/E.7 contra Postgres real (`docker run postgres:16-alpine` + goose + repo CRUD via Go scratch program). Las firmas Pattern A/B ya están validadas en E.1-E.4 contra Postgres real, lo nuevo aquí es el FTS dual-mecanismo + el FILTER aggregate.
+>
+> ---
+>
 > 🎬 **Sesión 2026-05-13 (rama `claude/beautiful-margulis-3db022`, 1 commit, Sesión E.5 — primer repo grande)** — continuando dual-dialect tras los 6 ya mergeados (PRs #260 y #261). Pendiente de merge: 1 commit sobre main.
 >
 > **Lo entregado**:

@@ -38,7 +38,7 @@ const countSharedItems = `-- name: CountSharedItems :one
 SELECT COUNT(*)
 FROM items i
 JOIN federation_library_shares s ON s.library_id = i.library_id
-WHERE i.library_id = $1 AND s.peer_id = $2 AND s.can_browse = 1
+WHERE i.library_id = $1 AND s.peer_id = $2 AND s.can_browse
   AND i.parent_id IS NULL
 `
 
@@ -488,7 +488,7 @@ SELECT remote_id, type, title,
        has_poster
 FROM federation_item_cache
 WHERE peer_id = $1 AND library_id = $2
-ORDER BY title COLLATE NOCASE ASC
+ORDER BY LOWER(title) ASC
 LIMIT $3 OFFSET $4
 `
 
@@ -621,7 +621,7 @@ JOIN federation_item_cache c
 JOIN federation_peers p
   ON p.id = fp.peer_id
 WHERE fp.user_id = $1
-  AND fp.completed = 0
+  AND NOT fp.completed
   AND fp.position_ticks > 0
   AND p.status = 'paired'
   AND NOT (
@@ -748,13 +748,13 @@ SELECT i.id, i.type, i.title,
          SELECT 1 FROM images img
           WHERE img.item_id = i.id
             AND img.type = 'primary'
-            AND img.is_primary = 1
+            AND img.is_primary
        ) AS has_poster,
        i.library_id
 FROM items i
 JOIN federation_library_shares s ON s.library_id = i.library_id
 LEFT JOIN metadata m ON m.item_id = i.id
-WHERE s.peer_id = $1 AND s.can_browse = 1
+WHERE s.peer_id = $1 AND s.can_browse
   AND i.parent_id IS NULL
 ORDER BY i.added_at DESC
 LIMIT $2
@@ -825,14 +825,14 @@ SELECT i.id, i.type, i.title,
          SELECT 1 FROM images img
           WHERE img.item_id = i.id
             AND img.type = 'primary'
-            AND img.is_primary = 1
+            AND img.is_primary
        ) AS has_poster
 FROM items i
 JOIN federation_library_shares s ON s.library_id = i.library_id
 LEFT JOIN metadata m ON m.item_id = i.id
-WHERE i.library_id = $1 AND s.peer_id = $2 AND s.can_browse = 1
+WHERE i.library_id = $1 AND s.peer_id = $2 AND s.can_browse
   AND i.parent_id IS NULL
-ORDER BY i.sort_title COLLATE NOCASE ASC
+ORDER BY LOWER(i.sort_title) ASC
 LIMIT $3 OFFSET $4
 `
 
@@ -898,7 +898,7 @@ SELECT l.id, l.name, l.content_type,
 FROM federation_library_shares s
 JOIN libraries l ON l.id = s.library_id
 WHERE s.peer_id = $1
-ORDER BY l.name COLLATE NOCASE ASC
+ORDER BY LOWER(l.name) ASC
 `
 
 type ListSharedLibrariesForPeerRow struct {

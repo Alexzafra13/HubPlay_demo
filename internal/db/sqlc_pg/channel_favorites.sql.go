@@ -97,7 +97,7 @@ SELECT c.id, c.library_id, c.name, c.number,
        c.is_active, c.added_at, f.created_at AS favorited_at
 FROM user_channel_favorites f
 JOIN channels c ON c.id = f.channel_id
-WHERE f.user_id = $1 AND c.is_active = 1
+WHERE f.user_id = $1 AND c.is_active
 ORDER BY f.created_at DESC
 `
 

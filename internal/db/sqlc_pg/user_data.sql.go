@@ -46,8 +46,8 @@ FROM user_data ud
 JOIN items i ON i.id = ud.item_id
 LEFT JOIN items season ON season.id = i.parent_id
 LEFT JOIN items series ON series.id = season.parent_id
-WHERE ud.user_id = $1 AND ud.completed = 0 AND ud.position_ticks > 0
-  AND i.is_available = 1
+WHERE ud.user_id = $1 AND NOT ud.completed AND ud.position_ticks > 0
+  AND i.is_available
   AND NOT (
     i.duration_ticks > 0
     AND ud.position_ticks * 100 >= i.duration_ticks * 90
@@ -193,8 +193,8 @@ SELECT ud.item_id, ud.updated_at,
        i.title, i.type, i.year, i.duration_ticks
 FROM user_data ud
 JOIN items i ON i.id = ud.item_id
-WHERE ud.user_id = $1 AND ud.is_favorite = 1
-  AND i.is_available = 1
+WHERE ud.user_id = $1 AND ud.is_favorite
+  AND i.is_available
 ORDER BY ud.updated_at DESC
 LIMIT $2 OFFSET $3
 `
@@ -246,10 +246,10 @@ func (q *Queries) ListFavorites(ctx context.Context, arg ListFavoritesParams) ([
 
 const markPlayed = `-- name: MarkPlayed :exec
 INSERT INTO user_data (user_id, item_id, play_count, completed, last_played_at, updated_at)
-VALUES ($1, $2, 1, 1, $3, $4)
+VALUES ($1, $2, 1, TRUE, $3, $4)
 ON CONFLICT(user_id, item_id) DO UPDATE SET
     play_count = user_data.play_count + 1,
-    completed = 1,
+    completed = TRUE,
     position_ticks = 0,
     last_played_at = excluded.last_played_at,
     updated_at = excluded.updated_at
@@ -275,7 +275,7 @@ func (q *Queries) MarkPlayed(ctx context.Context, arg MarkPlayedParams) error {
 const seriesEpisodeProgress = `-- name: SeriesEpisodeProgress :one
 SELECT
     COUNT(e.id) AS total_episodes,
-    COUNT(CASE WHEN ud.completed = 1 THEN 1 END) AS watched_episodes
+    COUNT(CASE WHEN ud.completed THEN 1 END) AS watched_episodes
 FROM items s
 JOIN items e ON e.parent_id = s.id AND e.type = 'episode'
 LEFT JOIN user_data ud ON ud.user_id = $1 AND ud.item_id = e.id

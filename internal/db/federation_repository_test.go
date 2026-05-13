@@ -162,7 +162,7 @@ func TestFederationRepository_SharedItem_ColorsForwarded(t *testing.T) {
 
 	libRepo := db.NewLibraryRepository("sqlite", database)
 	itemRepo := db.NewItemRepository("sqlite", database)
-	imgRepo := db.NewImageRepository(database)
+	imgRepo := db.NewImageRepository("sqlite", database)
 	fedRepo := db.NewFederationRepository(database)
 
 	now := time.Now().UTC()
