@@ -456,7 +456,7 @@ func TestFederationStream_Subtitles_ForeignPeerSession_Returns404(t *testing.T) 
 	now := env.clk.Now()
 	peer2ID := uuid.NewString()
 	peer2SrvUUID := uuid.NewString()
-	if err := db.NewFederationRepository(env.rawDB).InsertPeer(context.Background(), &federation.Peer{
+	if err := db.NewFederationRepository("sqlite", env.rawDB).InsertPeer(context.Background(), &federation.Peer{
 		ID:         peer2ID,
 		ServerUUID: peer2SrvUUID,
 		Name:       "OtherPeer",
