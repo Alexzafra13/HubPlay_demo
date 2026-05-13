@@ -1,5 +1,47 @@
 # Estado del proyecto
 
+> 🎬 **Sesión 2026-05-13 (rama `claude/objective-swartz-6f9f3c`, 3 commits, Sesiones E.11 + E.12 — 4 medianos + HomeRepository cerrados)** — continuando dual-dialect tras los 24 ya mergeados (PRs #260, #261, #264, #265, #266). Pendiente de merge: 3 commits sobre main en PR [#268](https://github.com/Alexzafra13/HubPlay_demo/pull/268).
+>
+> **Sesión E.12 — HomeRepository (631 LOC, penúltimo)**:
+>
+> Pattern B puro (raw SQL only). 5 queries dialectadas con cuatro mecánicas:
+>
+> 1. **GROUP_CONCAT ↔ STRING_AGG**: `GROUP_CONCAT(DISTINCT col)` (sqlite) vs `STRING_AGG(DISTINCT col, ',')` (pg). Helper `groupConcatExpr(driver, col)` inyecta la versión correcta al construir el template. Aplica a Recommended.items + BecauseYouWatched.{seedMeta,items}.
+>
+> 2. **BOOLEAN drift**: 8 sitios `col = 1` / `col = 0` (is_available, is_active, completed) reescritos a predicados truthy (`col` / `NOT col`).
+>
+> 3. **CAST year**: `CAST(i.year AS BIGINT)` para mantener un sólo Scan target `sql.NullInt64` en ambos dialectos (sqlite INTEGER es int64, pg INTEGER es int32).
+>
+> 4. **Placeholder rewrite dual-path**: Trending/LiveNow/Recommended.genres/BecauseYouWatched.{seed,seedMeta} son strings fijos → rewrite en constructor. Recommended.items + BecauseYouWatched.items tienen IN list dinámica → rewrite POST-`fmt.Sprintf` para que el contador `$N` vea cada `?`.
+>
+> **Estado al cierre — 27/28 repos done, sólo Federation pending**:
+>
+> ✅ **Done** (27): los 24 anteriores + **Collection, IPTVSchedule, LibraryEPGSources, Studio (E.11)** + **Home (E.12)**.
+>
+> ⏳ **Pending** (1):
+>
+> | Repo | LOC | Tier | Notas esperadas |
+> |---|---|---|---|
+> | **Federation** | **862** | 🔴 Gigante | MUCHOS raw SQL holdouts. Predicados is_active/can_browse/COLLATE NOCASE ya arreglados en E.6 — falta el repo Go con rewrite + dialect branch |
+>
+> **Verificación al cierre de E.12**:
+>
+> - `go build ./internal/db/...` clean.
+> - `GOOS=linux go build ./...` clean (cross-compile completo).
+> - `go test -count=1 ./internal/db/` 10.1s todos verde.
+> - `TestSQLC_GeneratedFilesMatchQueries` verde (no drift).
+> - `go test ./internal/auth/ ./internal/scanner/ ./internal/iptv/ ./internal/library/ ./internal/federation/` todos verde.
+> - `go vet ./internal/db/... ./internal/scanner/... ./internal/library/...` clean.
+>
+> **Próximo arranque sugerido**:
+>
+> 1. **Federation (862 LOC)** la última sesión grande, ~3-4h. Inspeccionar el repo Go primero — la nota antigua dice "MUCHOS raw SQL holdouts" y puede tener tanto raw SQL como Library + Channels juntos. Los predicados BOOLEAN/COLLATE ya están en las queries-postgres.
+> 2. **Sesión F** — wiring `pgx/v5/stdlib` + `pgxpool` en `main.go` (~3h). Primer arranque del binario contra Postgres real; valida end-to-end E.5–E.12 (FTS dual-mecanismo, FILTER aggregate, GROUP_CONCAT/STRING_AGG, BOOLEAN drift, isUniqueConstraintError pg).
+>
+> Tiempo total restante para Sesión E: **~3-4h** (1 sesión grande).
+>
+> ---
+>
 > 🎬 **Sesión 2026-05-13 (rama `claude/objective-swartz-6f9f3c`, 1 commit, Sesión E.11 — los 4 medianos cerrados de un golpe)** — continuando dual-dialect tras los 24 ya mergeados (PRs #260, #261, #264, #265, #266). Pendiente de merge: 1 commit (`363d808`) sobre main.
 >
 > **Lo entregado en esta sesión**:
