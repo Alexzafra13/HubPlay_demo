@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"hubplay/internal/db/sqlc"
+	"hubplay/internal/db/sqlc_pg"
 	"hubplay/internal/domain"
 )
 
@@ -36,13 +37,25 @@ type ItemPersonCredit struct {
 	SortOrder     int
 }
 
+// PeopleRepository — Pattern A dual-dialect. SortOrder + Year are
+// INTEGER → NullInt64 in SQLite, NullInt32 / int32 in Postgres; the
+// param paths branch per backend.
 type PeopleRepository struct {
-	q *sqlc.Queries
+	sq *sqlc.Queries
+	pq *sqlc_pg.Queries
 }
 
-func NewPeopleRepository(database *sql.DB) *PeopleRepository {
-	return &PeopleRepository{q: sqlc.New(database)}
+func NewPeopleRepository(driver string, database *sql.DB) *PeopleRepository {
+	r := &PeopleRepository{}
+	if IsPostgres(driver) {
+		r.pq = sqlc_pg.New(database)
+	} else {
+		r.sq = sqlc.New(database)
+	}
+	return r
 }
+
+func (r *PeopleRepository) useSQLite() bool { return r.sq != nil }
 
 // EnsureByName returns the existing person row for `name`, creating
 // one with the supplied type when no row exists. Used by the
@@ -56,7 +69,27 @@ func NewPeopleRepository(database *sql.DB) *PeopleRepository {
 // `created` reports whether this call inserted, so the caller can
 // skip thumb-download work for already-known people.
 func (r *PeopleRepository) EnsureByName(ctx context.Context, name, personType string) (id string, created bool, err error) {
-	row, gerr := r.q.GetPersonByName(ctx, name)
+	if r.useSQLite() {
+		row, gerr := r.sq.GetPersonByName(ctx, name)
+		if gerr == nil {
+			return row.ID, false, nil
+		}
+		if !errors.Is(gerr, sql.ErrNoRows) {
+			return "", false, fmt.Errorf("get person: %w", gerr)
+		}
+		newID := uuid.NewString()
+		if err := r.sq.CreatePerson(ctx, sqlc.CreatePersonParams{
+			ID:        newID,
+			Name:      name,
+			Type:      nullableString(personType),
+			ThumbPath: nullableString(""),
+		}); err != nil {
+			return "", false, fmt.Errorf("create person: %w", err)
+		}
+		return newID, true, nil
+	}
+
+	row, gerr := r.pq.GetPersonByName(ctx, name)
 	if gerr == nil {
 		return row.ID, false, nil
 	}
@@ -64,7 +97,7 @@ func (r *PeopleRepository) EnsureByName(ctx context.Context, name, personType st
 		return "", false, fmt.Errorf("get person: %w", gerr)
 	}
 	newID := uuid.NewString()
-	if err := r.q.CreatePerson(ctx, sqlc.CreatePersonParams{
+	if err := r.pq.CreatePerson(ctx, sqlc_pg.CreatePersonParams{
 		ID:        newID,
 		Name:      name,
 		Type:      nullableString(personType),
@@ -76,7 +109,17 @@ func (r *PeopleRepository) EnsureByName(ctx context.Context, name, personType st
 }
 
 func (r *PeopleRepository) GetByID(ctx context.Context, id string) (*Person, error) {
-	row, err := r.q.GetPersonByID(ctx, id)
+	if r.useSQLite() {
+		row, err := r.sq.GetPersonByID(ctx, id)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("person %s: %w", id, domain.ErrNotFound)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("get person: %w", err)
+		}
+		return &Person{ID: row.ID, Name: row.Name, Type: row.Type, ThumbPath: row.ThumbPath}, nil
+	}
+	row, err := r.pq.GetPersonByID(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("person %s: %w", id, domain.ErrNotFound)
 	}
@@ -87,10 +130,19 @@ func (r *PeopleRepository) GetByID(ctx context.Context, id string) (*Person, err
 }
 
 func (r *PeopleRepository) SetThumbPath(ctx context.Context, id, thumbPath string) error {
-	if err := r.q.SetPersonThumbPath(ctx, sqlc.SetPersonThumbPathParams{
-		ThumbPath: nullableString(thumbPath),
-		ID:        id,
-	}); err != nil {
+	var err error
+	if r.useSQLite() {
+		err = r.sq.SetPersonThumbPath(ctx, sqlc.SetPersonThumbPathParams{
+			ThumbPath: nullableString(thumbPath),
+			ID:        id,
+		})
+	} else {
+		err = r.pq.SetPersonThumbPath(ctx, sqlc_pg.SetPersonThumbPathParams{
+			ThumbPath: nullableString(thumbPath),
+			ID:        id,
+		})
+	}
+	if err != nil {
 		return fmt.Errorf("set person thumb: %w", err)
 	}
 	return nil
@@ -101,16 +153,34 @@ func (r *PeopleRepository) SetThumbPath(ctx context.Context, id, thumbPath strin
 // statements happen in the same connection — so re-scans never
 // expose a half-written cast list to a concurrent reader.
 func (r *PeopleRepository) ReplaceItemPeople(ctx context.Context, itemID string, credits []ItemPersonCredit) error {
-	if err := r.q.DeleteItemPeople(ctx, itemID); err != nil {
+	if r.useSQLite() {
+		if err := r.sq.DeleteItemPeople(ctx, itemID); err != nil {
+			return fmt.Errorf("delete item people: %w", err)
+		}
+		for _, c := range credits {
+			if err := r.sq.InsertItemPerson(ctx, sqlc.InsertItemPersonParams{
+				ItemID:        itemID,
+				PersonID:      c.PersonID,
+				Role:          c.Role,
+				CharacterName: nullableString(c.CharacterName),
+				SortOrder:     nullableInt64(int64(c.SortOrder)),
+			}); err != nil {
+				return fmt.Errorf("insert item person: %w", err)
+			}
+		}
+		return nil
+	}
+
+	if err := r.pq.DeleteItemPeople(ctx, itemID); err != nil {
 		return fmt.Errorf("delete item people: %w", err)
 	}
 	for _, c := range credits {
-		if err := r.q.InsertItemPerson(ctx, sqlc.InsertItemPersonParams{
+		if err := r.pq.InsertItemPerson(ctx, sqlc_pg.InsertItemPersonParams{
 			ItemID:        itemID,
 			PersonID:      c.PersonID,
 			Role:          c.Role,
 			CharacterName: nullableString(c.CharacterName),
-			SortOrder:     nullableInt64(int64(c.SortOrder)),
+			SortOrder:     nullableInt32(int32(c.SortOrder)),
 		}); err != nil {
 			return fmt.Errorf("insert item person: %w", err)
 		}
@@ -143,7 +213,36 @@ type FilmographyEntry struct {
 // sort_order is kept; that's almost always the most prominent role
 // (TMDb pads writer/producer credits with high sort_order values).
 func (r *PeopleRepository) ListFilmographyByPerson(ctx context.Context, personID string) ([]*FilmographyEntry, error) {
-	rows, err := r.q.ListFilmographyByPerson(ctx, personID)
+	if r.useSQLite() {
+		rows, err := r.sq.ListFilmographyByPerson(ctx, personID)
+		if err != nil {
+			return nil, fmt.Errorf("list filmography: %w", err)
+		}
+		out := make([]*FilmographyEntry, 0, len(rows))
+		seen := make(map[string]struct{}, len(rows))
+		for _, row := range rows {
+			if _, ok := seen[row.ItemID]; ok {
+				continue
+			}
+			seen[row.ItemID] = struct{}{}
+			year := 0
+			if row.Year.Valid {
+				year = int(row.Year.Int64)
+			}
+			out = append(out, &FilmographyEntry{
+				ItemID:         row.ItemID,
+				Type:           row.Type,
+				Title:          row.Title,
+				Year:           year,
+				Role:           row.Role,
+				CharacterName:  row.CharacterName,
+				SortOrder:      int(row.SortOrder),
+				PrimaryImageID: row.PrimaryImageID,
+			})
+		}
+		return out, nil
+	}
+	rows, err := r.pq.ListFilmographyByPerson(ctx, personID)
 	if err != nil {
 		return nil, fmt.Errorf("list filmography: %w", err)
 	}
@@ -156,7 +255,7 @@ func (r *PeopleRepository) ListFilmographyByPerson(ctx context.Context, personID
 		seen[row.ItemID] = struct{}{}
 		year := 0
 		if row.Year.Valid {
-			year = int(row.Year.Int64)
+			year = int(row.Year.Int32)
 		}
 		out = append(out, &FilmographyEntry{
 			ItemID:         row.ItemID,
@@ -173,7 +272,26 @@ func (r *PeopleRepository) ListFilmographyByPerson(ctx context.Context, personID
 }
 
 func (r *PeopleRepository) ListByItem(ctx context.Context, itemID string) ([]*ItemPersonCredit, error) {
-	rows, err := r.q.ListItemPeople(ctx, itemID)
+	if r.useSQLite() {
+		rows, err := r.sq.ListItemPeople(ctx, itemID)
+		if err != nil {
+			return nil, fmt.Errorf("list item people: %w", err)
+		}
+		out := make([]*ItemPersonCredit, len(rows))
+		for i, row := range rows {
+			out[i] = &ItemPersonCredit{
+				PersonID:      row.PersonID,
+				Name:          row.Name,
+				PersonType:    row.PersonType,
+				ThumbPath:     row.ThumbPath,
+				Role:          row.Role,
+				CharacterName: row.CharacterName,
+				SortOrder:     int(row.SortOrder),
+			}
+		}
+		return out, nil
+	}
+	rows, err := r.pq.ListItemPeople(ctx, itemID)
 	if err != nil {
 		return nil, fmt.Errorf("list item people: %w", err)
 	}

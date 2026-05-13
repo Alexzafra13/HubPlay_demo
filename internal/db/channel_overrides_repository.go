@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"hubplay/internal/db/sqlc"
+	"hubplay/internal/db/sqlc_pg"
 )
 
 // ChannelOverride captures a hand-edited field that must survive an
@@ -22,19 +23,26 @@ type ChannelOverride struct {
 	UpdatedAt time.Time
 }
 
-// ChannelOverrideRepository persists manual channel edits separately
-// from the `channels` table so a DELETE+INSERT import pass leaves
-// operator intent intact. Sqlc-generated queries for everything except
-// ApplyToLibrary, which still owns the multi-row transaction (sqlc
-// generates per-row primitives; the txn boundary is the repo's job).
+// ChannelOverrideRepository — Pattern A dual-dialect. ApplyToLibrary
+// still owns the multi-row transaction; the tx pattern branches per
+// backend (same shape as ImageRepository.SetPrimary).
 type ChannelOverrideRepository struct {
 	db *sql.DB
-	q  *sqlc.Queries
+	sq *sqlc.Queries
+	pq *sqlc_pg.Queries
 }
 
-func NewChannelOverrideRepository(database *sql.DB) *ChannelOverrideRepository {
-	return &ChannelOverrideRepository{db: database, q: sqlc.New(database)}
+func NewChannelOverrideRepository(driver string, database *sql.DB) *ChannelOverrideRepository {
+	r := &ChannelOverrideRepository{db: database}
+	if IsPostgres(driver) {
+		r.pq = sqlc_pg.New(database)
+	} else {
+		r.sq = sqlc.New(database)
+	}
+	return r
 }
+
+func (r *ChannelOverrideRepository) useSQLite() bool { return r.sq != nil }
 
 // Upsert records an override. Idempotent: re-running with the same
 // fields just bumps updated_at.
@@ -44,13 +52,25 @@ func (r *ChannelOverrideRepository) Upsert(ctx context.Context, o *ChannelOverri
 		o.CreatedAt = now
 	}
 	o.UpdatedAt = now
-	if err := r.q.UpsertChannelOverride(ctx, sqlc.UpsertChannelOverrideParams{
-		LibraryID: o.LibraryID,
-		StreamUrl: o.StreamURL,
-		TvgID:     o.TvgID,
-		CreatedAt: o.CreatedAt,
-		UpdatedAt: o.UpdatedAt,
-	}); err != nil {
+	var err error
+	if r.useSQLite() {
+		err = r.sq.UpsertChannelOverride(ctx, sqlc.UpsertChannelOverrideParams{
+			LibraryID: o.LibraryID,
+			StreamUrl: o.StreamURL,
+			TvgID:     o.TvgID,
+			CreatedAt: o.CreatedAt,
+			UpdatedAt: o.UpdatedAt,
+		})
+	} else {
+		err = r.pq.UpsertChannelOverride(ctx, sqlc_pg.UpsertChannelOverrideParams{
+			LibraryID: o.LibraryID,
+			StreamUrl: o.StreamURL,
+			TvgID:     o.TvgID,
+			CreatedAt: o.CreatedAt,
+			UpdatedAt: o.UpdatedAt,
+		})
+	}
+	if err != nil {
 		return fmt.Errorf("upsert channel override: %w", err)
 	}
 	return nil
@@ -58,9 +78,17 @@ func (r *ChannelOverrideRepository) Upsert(ctx context.Context, o *ChannelOverri
 
 // Delete clears an override by its PK. Idempotent.
 func (r *ChannelOverrideRepository) Delete(ctx context.Context, libraryID, streamURL string) error {
-	if err := r.q.DeleteChannelOverride(ctx, sqlc.DeleteChannelOverrideParams{
-		LibraryID: libraryID, StreamUrl: streamURL,
-	}); err != nil {
+	var err error
+	if r.useSQLite() {
+		err = r.sq.DeleteChannelOverride(ctx, sqlc.DeleteChannelOverrideParams{
+			LibraryID: libraryID, StreamUrl: streamURL,
+		})
+	} else {
+		err = r.pq.DeleteChannelOverride(ctx, sqlc_pg.DeleteChannelOverrideParams{
+			LibraryID: libraryID, StreamUrl: streamURL,
+		})
+	}
+	if err != nil {
 		return fmt.Errorf("delete channel override: %w", err)
 	}
 	return nil
@@ -70,7 +98,25 @@ func (r *ChannelOverrideRepository) Delete(ctx context.Context, libraryID, strea
 // row doesn't exist so callers can pattern-match that without having
 // to sniff for sql.ErrNoRows.
 func (r *ChannelOverrideRepository) Get(ctx context.Context, libraryID, streamURL string) (*ChannelOverride, error) {
-	row, err := r.q.GetChannelOverride(ctx, sqlc.GetChannelOverrideParams{
+	if r.useSQLite() {
+		row, err := r.sq.GetChannelOverride(ctx, sqlc.GetChannelOverrideParams{
+			LibraryID: libraryID, StreamUrl: streamURL,
+		})
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("get channel override: %w", err)
+		}
+		return &ChannelOverride{
+			LibraryID: row.LibraryID,
+			StreamURL: row.StreamUrl,
+			TvgID:     row.TvgID,
+			CreatedAt: row.CreatedAt,
+			UpdatedAt: row.UpdatedAt,
+		}, nil
+	}
+	row, err := r.pq.GetChannelOverride(ctx, sqlc_pg.GetChannelOverrideParams{
 		LibraryID: libraryID, StreamUrl: streamURL,
 	})
 	if errors.Is(err, sql.ErrNoRows) {
@@ -102,26 +148,42 @@ func (r *ChannelOverrideRepository) ApplyToLibrary(ctx context.Context, libraryI
 		return 0, fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck
-	qtx := r.q.WithTx(tx)
 
-	overrides, err := qtx.ListChannelOverridesByLibrary(ctx, libraryID)
-	if err != nil {
-		return 0, fmt.Errorf("read overrides: %w", err)
-	}
 	applied := 0
-	for _, ov := range overrides {
-		// channels.tvg_id is nullable in the schema; sqlc renders the
-		// param as sql.NullString. We always have a value here (the
-		// upsert side normalises empty → string) so just wrap.
-		n, err := qtx.ApplyChannelOverride(ctx, sqlc.ApplyChannelOverrideParams{
-			TvgID:     sql.NullString{String: ov.TvgID, Valid: true},
-			LibraryID: libraryID,
-			StreamUrl: ov.StreamUrl,
-		})
+	if r.useSQLite() {
+		qtx := r.sq.WithTx(tx)
+		overrides, err := qtx.ListChannelOverridesByLibrary(ctx, libraryID)
 		if err != nil {
-			return 0, fmt.Errorf("apply override: %w", err)
+			return 0, fmt.Errorf("read overrides: %w", err)
 		}
-		applied += int(n)
+		for _, ov := range overrides {
+			n, err := qtx.ApplyChannelOverride(ctx, sqlc.ApplyChannelOverrideParams{
+				TvgID:     sql.NullString{String: ov.TvgID, Valid: true},
+				LibraryID: libraryID,
+				StreamUrl: ov.StreamUrl,
+			})
+			if err != nil {
+				return 0, fmt.Errorf("apply override: %w", err)
+			}
+			applied += int(n)
+		}
+	} else {
+		qtx := r.pq.WithTx(tx)
+		overrides, err := qtx.ListChannelOverridesByLibrary(ctx, libraryID)
+		if err != nil {
+			return 0, fmt.Errorf("read overrides: %w", err)
+		}
+		for _, ov := range overrides {
+			n, err := qtx.ApplyChannelOverride(ctx, sqlc_pg.ApplyChannelOverrideParams{
+				TvgID:     sql.NullString{String: ov.TvgID, Valid: true},
+				LibraryID: libraryID,
+				StreamUrl: ov.StreamUrl,
+			})
+			if err != nil {
+				return 0, fmt.Errorf("apply override: %w", err)
+			}
+			applied += int(n)
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("commit overrides: %w", err)

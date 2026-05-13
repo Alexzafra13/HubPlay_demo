@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"hubplay/internal/db/sqlc"
+	"hubplay/internal/db/sqlc_pg"
 )
 
 // Metadata holds extended metadata for an item (overview, tagline, genres, etc.).
@@ -40,27 +41,61 @@ type Metadata struct {
 	CollectionID string
 }
 
+// MetadataRepository — Pattern A dual-dialect plus two raw-SQL
+// batch readers (GetOverviewBatch, GetMetadataBatch) that need the
+// dynamic IN() clause sqlc doesn't support.
 type MetadataRepository struct {
-	db *sql.DB // kept for batch queries with dynamic IN()
-	q  *sqlc.Queries
+	db *sql.DB
+	sq *sqlc.Queries
+	pq *sqlc_pg.Queries
 }
 
-func NewMetadataRepository(database *sql.DB) *MetadataRepository {
-	return &MetadataRepository{db: database, q: sqlc.New(database)}
+func NewMetadataRepository(driver string, database *sql.DB) *MetadataRepository {
+	r := &MetadataRepository{db: database}
+	if IsPostgres(driver) {
+		r.pq = sqlc_pg.New(database)
+	} else {
+		r.sq = sqlc.New(database)
+	}
+	return r
+}
+
+func (r *MetadataRepository) useSQLite() bool { return r.sq != nil }
+
+func (r *MetadataRepository) driver() string {
+	if r.useSQLite() {
+		return DriverSQLite
+	}
+	return DriverPostgres
 }
 
 func (r *MetadataRepository) Upsert(ctx context.Context, m *Metadata) error {
-	err := r.q.UpsertMetadata(ctx, sqlc.UpsertMetadataParams{
-		ItemID:        m.ItemID,
-		Overview:      nullableString(m.Overview),
-		Tagline:       nullableString(m.Tagline),
-		Studio:        nullableString(m.Studio),
-		GenresJson:    nullableString(m.GenresJSON),
-		TagsJson:      nullableString(m.TagsJSON),
-		TrailerKey:    m.TrailerKey,
-		TrailerSite:   m.TrailerSite,
-		StudioLogoUrl: m.StudioLogoURL,
-	})
+	var err error
+	if r.useSQLite() {
+		err = r.sq.UpsertMetadata(ctx, sqlc.UpsertMetadataParams{
+			ItemID:        m.ItemID,
+			Overview:      nullableString(m.Overview),
+			Tagline:       nullableString(m.Tagline),
+			Studio:        nullableString(m.Studio),
+			GenresJson:    nullableString(m.GenresJSON),
+			TagsJson:      nullableString(m.TagsJSON),
+			TrailerKey:    m.TrailerKey,
+			TrailerSite:   m.TrailerSite,
+			StudioLogoUrl: m.StudioLogoURL,
+		})
+	} else {
+		err = r.pq.UpsertMetadata(ctx, sqlc_pg.UpsertMetadataParams{
+			ItemID:        m.ItemID,
+			Overview:      nullableString(m.Overview),
+			Tagline:       nullableString(m.Tagline),
+			Studio:        nullableString(m.Studio),
+			GenresJson:    nullableString(m.GenresJSON),
+			TagsJson:      nullableString(m.TagsJSON),
+			TrailerKey:    m.TrailerKey,
+			TrailerSite:   m.TrailerSite,
+			StudioLogoUrl: m.StudioLogoURL,
+		})
+	}
 	if err != nil {
 		return fmt.Errorf("upsert metadata: %w", err)
 	}
@@ -68,23 +103,57 @@ func (r *MetadataRepository) Upsert(ctx context.Context, m *Metadata) error {
 }
 
 func (r *MetadataRepository) GetByItemID(ctx context.Context, itemID string) (*Metadata, error) {
-	row, err := r.q.GetMetadataByItemID(ctx, itemID)
+	if r.useSQLite() {
+		row, err := r.sq.GetMetadataByItemID(ctx, itemID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("get metadata: %w", err)
+		}
+		return &Metadata{
+			ItemID:        row.ItemID,
+			Overview:      row.Overview,
+			Tagline:       row.Tagline,
+			Studio:        row.Studio,
+			GenresJSON:    row.GenresJson,
+			TagsJSON:      row.TagsJson,
+			TrailerKey:    row.TrailerKey,
+			TrailerSite:   row.TrailerSite,
+			StudioLogoURL: row.StudioLogoUrl,
+			CollectionID:  row.CollectionID,
+		}, nil
+	}
+	row, err := r.pq.GetMetadataByItemID(ctx, itemID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get metadata: %w", err)
 	}
-	m := metadataFromRow(row)
-	return &m, nil
+	return &Metadata{
+		ItemID:        row.ItemID,
+		Overview:      row.Overview,
+		Tagline:       row.Tagline,
+		Studio:        row.Studio,
+		GenresJSON:    row.GenresJson,
+		TagsJSON:      row.TagsJson,
+		TrailerKey:    row.TrailerKey,
+		TrailerSite:   row.TrailerSite,
+		StudioLogoURL: row.StudioLogoUrl,
+		CollectionID:  row.CollectionID,
+	}, nil
 }
 
 func (r *MetadataRepository) Delete(ctx context.Context, itemID string) error {
-	return r.q.DeleteMetadata(ctx, itemID)
+	if r.useSQLite() {
+		return r.sq.DeleteMetadata(ctx, itemID)
+	}
+	return r.pq.DeleteMetadata(ctx, itemID)
 }
 
 // GetOverviewBatch returns overview text for a batch of item IDs.
-// Uses raw SQL because sqlc doesn't support dynamic IN() on SQLite.
+// Uses raw SQL because sqlc doesn't support dynamic IN() on either dialect.
 func (r *MetadataRepository) GetOverviewBatch(ctx context.Context, itemIDs []string) (map[string]string, error) {
 	if len(itemIDs) == 0 {
 		return nil, nil
@@ -97,16 +166,16 @@ func (r *MetadataRepository) GetOverviewBatch(ctx context.Context, itemIDs []str
 		args[i] = id
 	}
 
-	query := fmt.Sprintf(
+	query := rewritePlaceholders(r.driver(), fmt.Sprintf(
 		`SELECT item_id, COALESCE(overview,'') FROM metadata WHERE item_id IN (%s)`,
 		joinStrings(placeholders, ","),
-	)
+	))
 
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("get overview batch: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	result := make(map[string]string)
 	for rows.Next() {
@@ -122,7 +191,7 @@ func (r *MetadataRepository) GetOverviewBatch(ctx context.Context, itemIDs []str
 }
 
 // GetMetadataBatch returns metadata for a batch of item IDs.
-// Uses raw SQL because sqlc doesn't support dynamic IN() on SQLite.
+// Uses raw SQL because sqlc doesn't support dynamic IN() on either dialect.
 func (r *MetadataRepository) GetMetadataBatch(ctx context.Context, itemIDs []string) (map[string]*Metadata, error) {
 	if len(itemIDs) == 0 {
 		return nil, nil
@@ -135,20 +204,20 @@ func (r *MetadataRepository) GetMetadataBatch(ctx context.Context, itemIDs []str
 		args[i] = id
 	}
 
-	query := fmt.Sprintf(
+	query := rewritePlaceholders(r.driver(), fmt.Sprintf(
 		`SELECT item_id, COALESCE(overview,''), COALESCE(tagline,''),
 		        COALESCE(studio,''), COALESCE(genres_json,''), COALESCE(tags_json,''),
 		        COALESCE(trailer_key,''), COALESCE(trailer_site,''),
 		        COALESCE(studio_logo_url,'')
 		 FROM metadata WHERE item_id IN (%s)`,
 		joinStrings(placeholders, ","),
-	)
+	))
 
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("get metadata batch: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	result := make(map[string]*Metadata)
 	for rows.Next() {
@@ -159,19 +228,4 @@ func (r *MetadataRepository) GetMetadataBatch(ctx context.Context, itemIDs []str
 		result[m.ItemID] = m
 	}
 	return result, rows.Err()
-}
-
-func metadataFromRow(r sqlc.GetMetadataByItemIDRow) Metadata {
-	return Metadata{
-		ItemID:        r.ItemID,
-		Overview:      r.Overview,
-		Tagline:       r.Tagline,
-		Studio:        r.Studio,
-		GenresJSON:    r.GenresJson,
-		TagsJSON:      r.TagsJson,
-		TrailerKey:    r.TrailerKey,
-		TrailerSite:   r.TrailerSite,
-		StudioLogoURL: r.StudioLogoUrl,
-		CollectionID:  r.CollectionID,
-	}
 }

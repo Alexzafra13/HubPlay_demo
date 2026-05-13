@@ -70,8 +70,8 @@ func newTestScanner(t *testing.T) (*Scanner, *db.ItemRepository, *db.MediaStream
 		},
 	}
 
-	metaRepo := db.NewMetadataRepository(database)
-	extIDRepo := db.NewExternalIDRepository(database)
+	metaRepo := db.NewMetadataRepository("sqlite", database)
+	extIDRepo := db.NewExternalIDRepository("sqlite", database)
 	imageRepo := db.NewImageRepository("sqlite", database)
 
 	// imageDir + pathmap are nil for tests that don't exercise the
@@ -80,8 +80,8 @@ func newTestScanner(t *testing.T) (*Scanner, *db.ItemRepository, *db.MediaStream
 	// chapters repo is real (not nil) because we want the persistence
 	// path covered by the new TestScanLibrary_PersistsChapters test
 	// without spinning up another fixture.
-	chaptersRepo := db.NewChapterRepository(database)
-	s := New(itemRepo, streamRepo, metaRepo, extIDRepo, imageRepo, chaptersRepo, db.NewPeopleRepository(database), db.NewItemValueRepository(database), db.NewStudioRepository(database), db.NewCollectionRepository(database), nil, prober, bus, "", nil, slog.Default())
+	chaptersRepo := db.NewChapterRepository("sqlite", database)
+	s := New(itemRepo, streamRepo, metaRepo, extIDRepo, imageRepo, chaptersRepo, db.NewPeopleRepository("sqlite", database), db.NewItemValueRepository("sqlite", database), db.NewStudioRepository(database), db.NewCollectionRepository(database), nil, prober, bus, "", nil, slog.Default())
 	return s, itemRepo, streamRepo
 }
 
@@ -583,9 +583,9 @@ func TestFetchAndStoreImages_PersistsLocalPathNotURL(t *testing.T) {
 	bus := event.NewBus(slog.Default())
 	prober := &mockProber{result: &probe.Result{}}
 	s := New(itemRepo, db.NewMediaStreamRepository("sqlite", database),
-		db.NewMetadataRepository(database), db.NewExternalIDRepository(database),
-		imgRepo, db.NewChapterRepository(database), db.NewPeopleRepository(database),
-		db.NewItemValueRepository(database),
+		db.NewMetadataRepository("sqlite", database), db.NewExternalIDRepository("sqlite", database),
+		imgRepo, db.NewChapterRepository("sqlite", database), db.NewPeopleRepository("sqlite", database),
+		db.NewItemValueRepository("sqlite", database),
 		db.NewStudioRepository(database),
 		db.NewCollectionRepository(database),
 		nil /* providers â€” overridden below */, prober, bus,
@@ -685,8 +685,8 @@ func TestEnrichEpisode_PersistsOverviewAndStill(t *testing.T) {
 	libRepo := db.NewLibraryRepository("sqlite", database)
 	itemRepo := db.NewItemRepository("sqlite", database)
 	imgRepo := db.NewImageRepository("sqlite", database)
-	metaRepo := db.NewMetadataRepository(database)
-	extRepo := db.NewExternalIDRepository(database)
+	metaRepo := db.NewMetadataRepository("sqlite", database)
+	extRepo := db.NewExternalIDRepository("sqlite", database)
 
 	now := time.Now()
 	if err := libRepo.Create(context.Background(), &db.Library{
@@ -733,8 +733,8 @@ func TestEnrichEpisode_PersistsOverviewAndStill(t *testing.T) {
 	bus := event.NewBus(slog.Default())
 	prober := &mockProber{result: &probe.Result{}}
 	s := New(itemRepo, db.NewMediaStreamRepository("sqlite", database), metaRepo, extRepo,
-		imgRepo, db.NewChapterRepository(database), db.NewPeopleRepository(database),
-		db.NewItemValueRepository(database),
+		imgRepo, db.NewChapterRepository("sqlite", database), db.NewPeopleRepository("sqlite", database),
+		db.NewItemValueRepository("sqlite", database),
 		db.NewStudioRepository(database),
 		db.NewCollectionRepository(database),
 		nil, prober, bus, imageDir, pm, slog.Default())
@@ -804,8 +804,8 @@ func TestEnrichEpisode_NoTMDbIDOnSeries(t *testing.T) {
 	libRepo := db.NewLibraryRepository("sqlite", database)
 	itemRepo := db.NewItemRepository("sqlite", database)
 	imgRepo := db.NewImageRepository("sqlite", database)
-	metaRepo := db.NewMetadataRepository(database)
-	extRepo := db.NewExternalIDRepository(database)
+	metaRepo := db.NewMetadataRepository("sqlite", database)
+	extRepo := db.NewExternalIDRepository("sqlite", database)
 
 	now := time.Now()
 	_ = libRepo.Create(context.Background(), &db.Library{
@@ -838,8 +838,8 @@ func TestEnrichEpisode_NoTMDbIDOnSeries(t *testing.T) {
 	bus := event.NewBus(slog.Default())
 	prober := &mockProber{result: &probe.Result{}}
 	s := New(itemRepo, db.NewMediaStreamRepository("sqlite", database), metaRepo, extRepo,
-		imgRepo, db.NewChapterRepository(database), db.NewPeopleRepository(database),
-		db.NewItemValueRepository(database),
+		imgRepo, db.NewChapterRepository("sqlite", database), db.NewPeopleRepository("sqlite", database),
+		db.NewItemValueRepository("sqlite", database),
 		db.NewStudioRepository(database),
 		db.NewCollectionRepository(database),
 		nil, prober, bus, t.TempDir(), pathmap.New(t.TempDir()), slog.Default())
@@ -891,8 +891,8 @@ func TestEnrichSeason_PersistsMetadataAndPoster(t *testing.T) {
 	libRepo := db.NewLibraryRepository("sqlite", database)
 	itemRepo := db.NewItemRepository("sqlite", database)
 	imgRepo := db.NewImageRepository("sqlite", database)
-	metaRepo := db.NewMetadataRepository(database)
-	extRepo := db.NewExternalIDRepository(database)
+	metaRepo := db.NewMetadataRepository("sqlite", database)
+	extRepo := db.NewExternalIDRepository("sqlite", database)
 
 	now := time.Now()
 	if err := libRepo.Create(context.Background(), &db.Library{
@@ -930,8 +930,8 @@ func TestEnrichSeason_PersistsMetadataAndPoster(t *testing.T) {
 	bus := event.NewBus(slog.Default())
 	prober := &mockProber{result: &probe.Result{}}
 	s := New(itemRepo, db.NewMediaStreamRepository("sqlite", database), metaRepo, extRepo,
-		imgRepo, db.NewChapterRepository(database), db.NewPeopleRepository(database),
-		db.NewItemValueRepository(database),
+		imgRepo, db.NewChapterRepository("sqlite", database), db.NewPeopleRepository("sqlite", database),
+		db.NewItemValueRepository("sqlite", database),
 		db.NewStudioRepository(database),
 		db.NewCollectionRepository(database),
 		nil, prober, bus, imageDir, pm, slog.Default())
@@ -1035,9 +1035,9 @@ func TestFetchAndStoreImages_SkippedWhenImageDirEmpty(t *testing.T) {
 		{Type: "primary", URL: "http://example.test/poster.png", Score: 1},
 	}}
 	s := New(itemRepo, db.NewMediaStreamRepository("sqlite", database),
-		db.NewMetadataRepository(database), db.NewExternalIDRepository(database),
-		imgRepo, db.NewChapterRepository(database), db.NewPeopleRepository(database),
-		db.NewItemValueRepository(database),
+		db.NewMetadataRepository("sqlite", database), db.NewExternalIDRepository("sqlite", database),
+		imgRepo, db.NewChapterRepository("sqlite", database), db.NewPeopleRepository("sqlite", database),
+		db.NewItemValueRepository("sqlite", database),
 		db.NewStudioRepository(database),
 		db.NewCollectionRepository(database),
 		nil, prober, bus, "", nil, slog.Default())

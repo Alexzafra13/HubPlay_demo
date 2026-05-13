@@ -44,7 +44,7 @@ func newDeviceAuthEnv(t *testing.T) *deviceAuthEnv {
 	userRepo := db.NewUserRepository("sqlite", database)
 	sessionRepo := db.NewSessionRepository("sqlite", database)
 	keyRepo := db.NewSigningKeyRepository("sqlite", database)
-	codeRepo := db.NewDeviceCodeRepository(database)
+	codeRepo := db.NewDeviceCodeRepository("sqlite", database)
 
 	cfg := config.AuthConfig{
 		JWTSecret:          "test-secret-32-bytes-long-enough!",

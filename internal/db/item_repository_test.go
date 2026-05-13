@@ -133,7 +133,7 @@ func TestItemRepository_List_GenreYearRatingFilters(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	libRepo := db.NewLibraryRepository("sqlite", database)
 	repo := db.NewItemRepository("sqlite", database)
-	values := db.NewItemValueRepository(database)
+	values := db.NewItemValueRepository("sqlite", database)
 	seedLibraryForItems(t, libRepo)
 
 	// Three movies with different (genre, year, rating) so each filter
@@ -242,8 +242,8 @@ func TestMigration031_BackfillsGenresFromMetadata(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	libRepo := db.NewLibraryRepository("sqlite", database)
 	itemRepo := db.NewItemRepository("sqlite", database)
-	metaRepo := db.NewMetadataRepository(database)
-	values := db.NewItemValueRepository(database)
+	metaRepo := db.NewMetadataRepository("sqlite", database)
+	values := db.NewItemValueRepository("sqlite", database)
 	seedLibraryForItems(t, libRepo)
 
 	// Pre-existing item with metadata.genres_json present but no
@@ -307,7 +307,7 @@ func TestItemValueRepository_ListGenres(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	libRepo := db.NewLibraryRepository("sqlite", database)
 	itemRepo := db.NewItemRepository("sqlite", database)
-	values := db.NewItemValueRepository(database)
+	values := db.NewItemValueRepository("sqlite", database)
 	seedLibraryForItems(t, libRepo)
 
 	// Two movies with overlapping genres + one series with its own genre,

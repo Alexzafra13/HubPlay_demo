@@ -8,13 +8,27 @@ import (
 	"time"
 
 	"hubplay/internal/db/sqlc"
+	"hubplay/internal/db/sqlc_pg"
 	"hubplay/internal/domain"
 )
 
-// DeviceCode is the sqlc-generated row type for the device_codes table.
-// Aliased so callers in `internal/auth/` use a stable name without
-// importing the sqlc package directly.
-type DeviceCode = sqlc.DeviceCode
+// DeviceCode is the domain shape exposed to internal/auth. Used to
+// live as an alias to sqlc.DeviceCode; now a proper struct so the
+// dual-dialect repo can return the same type regardless of which
+// generated package produced the row. Nullable columns keep their
+// sql.Null* shape so existing callers (`row.UserID.Valid`,
+// `row.ApprovedAt.Time`) don't have to change.
+type DeviceCode struct {
+	DeviceCode   string
+	UserCode     string
+	DeviceName   string
+	UserID       sql.NullString
+	ExpiresAt    time.Time
+	CreatedAt    time.Time
+	ApprovedAt   sql.NullTime
+	ConsumedAt   sql.NullTime
+	LastPolledAt sql.NullTime
+}
 
 // DeviceCodeRepository persists OAuth 2.0 device authorization grants
 // (RFC 8628). The lifecycle: insert → poll/approve → consume → expire.
@@ -29,23 +43,44 @@ type DeviceCode = sqlc.DeviceCode
 // The repository is a thin sqlc adapter; the auth service owns the
 // state-machine logic.
 type DeviceCodeRepository struct {
-	q *sqlc.Queries
+	sq *sqlc.Queries
+	pq *sqlc_pg.Queries
 }
 
-func NewDeviceCodeRepository(database *sql.DB) *DeviceCodeRepository {
-	return &DeviceCodeRepository{q: sqlc.New(database)}
+func NewDeviceCodeRepository(driver string, database *sql.DB) *DeviceCodeRepository {
+	r := &DeviceCodeRepository{}
+	if IsPostgres(driver) {
+		r.pq = sqlc_pg.New(database)
+	} else {
+		r.sq = sqlc.New(database)
+	}
+	return r
 }
+
+func (r *DeviceCodeRepository) useSQLite() bool { return r.sq != nil }
 
 // Insert persists a fresh code pair. Caller generates device_code +
 // user_code; we just write.
 func (r *DeviceCodeRepository) Insert(ctx context.Context, code *DeviceCode) error {
-	if err := r.q.InsertDeviceCode(ctx, sqlc.InsertDeviceCodeParams{
-		DeviceCode: code.DeviceCode,
-		UserCode:   code.UserCode,
-		DeviceName: code.DeviceName,
-		ExpiresAt:  code.ExpiresAt,
-		CreatedAt:  code.CreatedAt,
-	}); err != nil {
+	var err error
+	if r.useSQLite() {
+		err = r.sq.InsertDeviceCode(ctx, sqlc.InsertDeviceCodeParams{
+			DeviceCode: code.DeviceCode,
+			UserCode:   code.UserCode,
+			DeviceName: code.DeviceName,
+			ExpiresAt:  code.ExpiresAt,
+			CreatedAt:  code.CreatedAt,
+		})
+	} else {
+		err = r.pq.InsertDeviceCode(ctx, sqlc_pg.InsertDeviceCodeParams{
+			DeviceCode: code.DeviceCode,
+			UserCode:   code.UserCode,
+			DeviceName: code.DeviceName,
+			ExpiresAt:  code.ExpiresAt,
+			CreatedAt:  code.CreatedAt,
+		})
+	}
+	if err != nil {
 		return fmt.Errorf("insert device code: %w", err)
 	}
 	return nil
@@ -54,27 +89,51 @@ func (r *DeviceCodeRepository) Insert(ctx context.Context, code *DeviceCode) err
 // GetByDeviceCode returns the row by its opaque device_code. Used on
 // poll. Returns domain.ErrNotFound when missing.
 func (r *DeviceCodeRepository) GetByDeviceCode(ctx context.Context, deviceCode string) (*DeviceCode, error) {
-	row, err := r.q.GetDeviceCodeByDeviceCode(ctx, deviceCode)
+	if r.useSQLite() {
+		row, err := r.sq.GetDeviceCodeByDeviceCode(ctx, deviceCode)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("device code: %w", domain.ErrNotFound)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("get device code: %w", err)
+		}
+		dc := deviceCodeFromSqlite(row)
+		return &dc, nil
+	}
+	row, err := r.pq.GetDeviceCodeByDeviceCode(ctx, deviceCode)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("device code: %w", domain.ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get device code: %w", err)
 	}
-	return &row, nil
+	dc := deviceCodeFromPg(row)
+	return &dc, nil
 }
 
 // GetByUserCode returns the row by the operator-typed user_code. Used
 // on approval (the user-facing /link page).
 func (r *DeviceCodeRepository) GetByUserCode(ctx context.Context, userCode string) (*DeviceCode, error) {
-	row, err := r.q.GetDeviceCodeByUserCode(ctx, userCode)
+	if r.useSQLite() {
+		row, err := r.sq.GetDeviceCodeByUserCode(ctx, userCode)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("user code: %w", domain.ErrNotFound)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("get device code by user_code: %w", err)
+		}
+		dc := deviceCodeFromSqlite(row)
+		return &dc, nil
+	}
+	row, err := r.pq.GetDeviceCodeByUserCode(ctx, userCode)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("user code: %w", domain.ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get device code by user_code: %w", err)
 	}
-	return &row, nil
+	dc := deviceCodeFromPg(row)
+	return &dc, nil
 }
 
 // Approve attaches user_id + approved_at to the code. The WHERE clause
@@ -83,18 +142,32 @@ func (r *DeviceCodeRepository) GetByUserCode(ctx context.Context, userCode strin
 // — the caller distinguishes "approved" from "no-op" by re-fetching
 // and checking approved_at.
 func (r *DeviceCodeRepository) Approve(ctx context.Context, userCode, userID string, at time.Time) error {
-	return r.q.ApproveDeviceCode(ctx, sqlc.ApproveDeviceCodeParams{
+	if r.useSQLite() {
+		return r.sq.ApproveDeviceCode(ctx, sqlc.ApproveDeviceCodeParams{
+			UserID:     sql.NullString{String: userID, Valid: true},
+			ApprovedAt: sql.NullTime{Time: at, Valid: true},
+			UserCode:   userCode,
+			ExpiresAt:  at,
+		})
+	}
+	return r.pq.ApproveDeviceCode(ctx, sqlc_pg.ApproveDeviceCodeParams{
 		UserID:     sql.NullString{String: userID, Valid: true},
 		ApprovedAt: sql.NullTime{Time: at, Valid: true},
 		UserCode:   userCode,
-		ExpiresAt:  at, // expires_at > at — the WHERE clause uses this value as "now"
+		ExpiresAt:  at,
 	})
 }
 
 // Consume marks the code as used (single-use after token issuance).
 // Called from the poll path immediately before tokens are returned.
 func (r *DeviceCodeRepository) Consume(ctx context.Context, deviceCode string, at time.Time) error {
-	return r.q.ConsumeDeviceCode(ctx, sqlc.ConsumeDeviceCodeParams{
+	if r.useSQLite() {
+		return r.sq.ConsumeDeviceCode(ctx, sqlc.ConsumeDeviceCodeParams{
+			ConsumedAt: sql.NullTime{Time: at, Valid: true},
+			DeviceCode: deviceCode,
+		})
+	}
+	return r.pq.ConsumeDeviceCode(ctx, sqlc_pg.ConsumeDeviceCodeParams{
 		ConsumedAt: sql.NullTime{Time: at, Valid: true},
 		DeviceCode: deviceCode,
 	})
@@ -103,7 +176,13 @@ func (r *DeviceCodeRepository) Consume(ctx context.Context, deviceCode string, a
 // TouchPollAt updates last_polled_at for slow-down detection. Cheap
 // UPDATE; called on every poll.
 func (r *DeviceCodeRepository) TouchPollAt(ctx context.Context, deviceCode string, at time.Time) error {
-	return r.q.TouchDeviceCodePollAt(ctx, sqlc.TouchDeviceCodePollAtParams{
+	if r.useSQLite() {
+		return r.sq.TouchDeviceCodePollAt(ctx, sqlc.TouchDeviceCodePollAtParams{
+			LastPolledAt: sql.NullTime{Time: at, Valid: true},
+			DeviceCode:   deviceCode,
+		})
+	}
+	return r.pq.TouchDeviceCodePollAt(ctx, sqlc_pg.TouchDeviceCodePollAtParams{
 		LastPolledAt: sql.NullTime{Time: at, Valid: true},
 		DeviceCode:   deviceCode,
 	})
@@ -112,5 +191,38 @@ func (r *DeviceCodeRepository) TouchPollAt(ctx context.Context, deviceCode strin
 // DeleteExpired sweeps rows past their TTL or already consumed. Run by
 // a periodic background job.
 func (r *DeviceCodeRepository) DeleteExpired(ctx context.Context, olderThan time.Time) error {
-	return r.q.DeleteExpiredDeviceCodes(ctx, olderThan)
+	if r.useSQLite() {
+		return r.sq.DeleteExpiredDeviceCodes(ctx, olderThan)
+	}
+	return r.pq.DeleteExpiredDeviceCodes(ctx, olderThan)
+}
+
+// ── row mapping helpers ─────────────────────────────────────────────────
+
+func deviceCodeFromSqlite(r sqlc.DeviceCode) DeviceCode {
+	return DeviceCode{
+		DeviceCode:   r.DeviceCode,
+		UserCode:     r.UserCode,
+		DeviceName:   r.DeviceName,
+		UserID:       r.UserID,
+		ExpiresAt:    r.ExpiresAt,
+		CreatedAt:    r.CreatedAt,
+		ApprovedAt:   r.ApprovedAt,
+		ConsumedAt:   r.ConsumedAt,
+		LastPolledAt: r.LastPolledAt,
+	}
+}
+
+func deviceCodeFromPg(r sqlc_pg.DeviceCode) DeviceCode {
+	return DeviceCode{
+		DeviceCode:   r.DeviceCode,
+		UserCode:     r.UserCode,
+		DeviceName:   r.DeviceName,
+		UserID:       r.UserID,
+		ExpiresAt:    r.ExpiresAt,
+		CreatedAt:    r.CreatedAt,
+		ApprovedAt:   r.ApprovedAt,
+		ConsumedAt:   r.ConsumedAt,
+		LastPolledAt: r.LastPolledAt,
+	}
 }
