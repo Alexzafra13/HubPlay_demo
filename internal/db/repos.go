@@ -68,7 +68,7 @@ func NewRepositories(driver string, database *sql.DB) *Repositories {
 		Settings:           NewSettingsRepository(driver, database),
 		People:             NewPeopleRepository(driver, database),
 		DeviceCodes:        NewDeviceCodeRepository(driver, database),
-		Home:               NewHomeRepository(database),
+		Home:               NewHomeRepository(driver, database),
 		ItemValues:         NewItemValueRepository(driver, database),
 		Studios:            NewStudioRepository(driver, database),
 		Collections:        NewCollectionRepository(driver, database),
