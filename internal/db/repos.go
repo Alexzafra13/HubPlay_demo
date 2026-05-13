@@ -57,9 +57,9 @@ func NewRepositories(driver string, database *sql.DB) *Repositories {
 		ChannelFavorites:   NewChannelFavoritesRepository(driver, database),
 		ChannelWatchHistory: NewChannelWatchHistoryRepository(driver, database),
 		EPGPrograms:        NewEPGProgramRepository(driver, database),
-		LibraryEPGSources:  NewLibraryEPGSourceRepository(database),
+		LibraryEPGSources:  NewLibraryEPGSourceRepository(driver, database),
 		ChannelOverrides:   NewChannelOverrideRepository(driver, database),
-		IPTVSchedules:      NewIPTVScheduleRepository(database),
+		IPTVSchedules:      NewIPTVScheduleRepository(driver, database),
 		UserPreferences:    NewUserPreferenceRepository(driver, database),
 		Providers:          NewProviderRepository(driver, database),
 		Metadata:           NewMetadataRepository(driver, database),
@@ -70,8 +70,8 @@ func NewRepositories(driver string, database *sql.DB) *Repositories {
 		DeviceCodes:        NewDeviceCodeRepository(driver, database),
 		Home:               NewHomeRepository(database),
 		ItemValues:         NewItemValueRepository(driver, database),
-		Studios:            NewStudioRepository(database),
-		Collections:        NewCollectionRepository(database),
+		Studios:            NewStudioRepository(driver, database),
+		Collections:        NewCollectionRepository(driver, database),
 		EpisodeSegments:    NewEpisodeSegmentRepository(driver, database),
 	}
 }

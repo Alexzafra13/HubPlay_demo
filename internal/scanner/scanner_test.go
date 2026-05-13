@@ -81,7 +81,7 @@ func newTestScanner(t *testing.T) (*Scanner, *db.ItemRepository, *db.MediaStream
 	// path covered by the new TestScanLibrary_PersistsChapters test
 	// without spinning up another fixture.
 	chaptersRepo := db.NewChapterRepository("sqlite", database)
-	s := New(itemRepo, streamRepo, metaRepo, extIDRepo, imageRepo, chaptersRepo, db.NewPeopleRepository("sqlite", database), db.NewItemValueRepository("sqlite", database), db.NewStudioRepository(database), db.NewCollectionRepository(database), nil, prober, bus, "", nil, slog.Default())
+	s := New(itemRepo, streamRepo, metaRepo, extIDRepo, imageRepo, chaptersRepo, db.NewPeopleRepository("sqlite", database), db.NewItemValueRepository("sqlite", database), db.NewStudioRepository("sqlite", database), db.NewCollectionRepository("sqlite", database), nil, prober, bus, "", nil, slog.Default())
 	return s, itemRepo, streamRepo
 }
 
@@ -586,8 +586,8 @@ func TestFetchAndStoreImages_PersistsLocalPathNotURL(t *testing.T) {
 		db.NewMetadataRepository("sqlite", database), db.NewExternalIDRepository("sqlite", database),
 		imgRepo, db.NewChapterRepository("sqlite", database), db.NewPeopleRepository("sqlite", database),
 		db.NewItemValueRepository("sqlite", database),
-		db.NewStudioRepository(database),
-		db.NewCollectionRepository(database),
+		db.NewStudioRepository("sqlite", database),
+		db.NewCollectionRepository("sqlite", database),
 		nil /* providers â€” overridden below */, prober, bus,
 		imageDir, pm, slog.Default())
 
@@ -735,8 +735,8 @@ func TestEnrichEpisode_PersistsOverviewAndStill(t *testing.T) {
 	s := New(itemRepo, db.NewMediaStreamRepository("sqlite", database), metaRepo, extRepo,
 		imgRepo, db.NewChapterRepository("sqlite", database), db.NewPeopleRepository("sqlite", database),
 		db.NewItemValueRepository("sqlite", database),
-		db.NewStudioRepository(database),
-		db.NewCollectionRepository(database),
+		db.NewStudioRepository("sqlite", database),
+		db.NewCollectionRepository("sqlite", database),
 		nil, prober, bus, imageDir, pm, slog.Default())
 
 	rating := 8.4
@@ -840,8 +840,8 @@ func TestEnrichEpisode_NoTMDbIDOnSeries(t *testing.T) {
 	s := New(itemRepo, db.NewMediaStreamRepository("sqlite", database), metaRepo, extRepo,
 		imgRepo, db.NewChapterRepository("sqlite", database), db.NewPeopleRepository("sqlite", database),
 		db.NewItemValueRepository("sqlite", database),
-		db.NewStudioRepository(database),
-		db.NewCollectionRepository(database),
+		db.NewStudioRepository("sqlite", database),
+		db.NewCollectionRepository("sqlite", database),
 		nil, prober, bus, t.TempDir(), pathmap.New(t.TempDir()), slog.Default())
 
 	called := false
@@ -932,8 +932,8 @@ func TestEnrichSeason_PersistsMetadataAndPoster(t *testing.T) {
 	s := New(itemRepo, db.NewMediaStreamRepository("sqlite", database), metaRepo, extRepo,
 		imgRepo, db.NewChapterRepository("sqlite", database), db.NewPeopleRepository("sqlite", database),
 		db.NewItemValueRepository("sqlite", database),
-		db.NewStudioRepository(database),
-		db.NewCollectionRepository(database),
+		db.NewStudioRepository("sqlite", database),
+		db.NewCollectionRepository("sqlite", database),
 		nil, prober, bus, imageDir, pm, slog.Default())
 
 	rating := 8.7
@@ -1038,8 +1038,8 @@ func TestFetchAndStoreImages_SkippedWhenImageDirEmpty(t *testing.T) {
 		db.NewMetadataRepository("sqlite", database), db.NewExternalIDRepository("sqlite", database),
 		imgRepo, db.NewChapterRepository("sqlite", database), db.NewPeopleRepository("sqlite", database),
 		db.NewItemValueRepository("sqlite", database),
-		db.NewStudioRepository(database),
-		db.NewCollectionRepository(database),
+		db.NewStudioRepository("sqlite", database),
+		db.NewCollectionRepository("sqlite", database),
 		nil, prober, bus, "", nil, slog.Default())
 	s.providers = stub
 

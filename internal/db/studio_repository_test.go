@@ -43,7 +43,7 @@ func TestStudioRepository_EnsureAndList(t *testing.T) {
 	libRepo := db.NewLibraryRepository("sqlite", database)
 	itemRepo := db.NewItemRepository("sqlite", database)
 	metaRepo := db.NewMetadataRepository("sqlite", database)
-	studioRepo := db.NewStudioRepository(database)
+	studioRepo := db.NewStudioRepository("sqlite", database)
 	seedLibraryForItems(t, libRepo)
 
 	// Two items linked to Marvel Studios (tmdb_id=420), one to a
