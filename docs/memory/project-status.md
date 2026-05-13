@@ -1,5 +1,59 @@
 # Estado del proyecto
 
+> 🎬 **Sesión 2026-05-13 (rama `claude/beautiful-margulis-3db022`, 1 commit, Sesión E.5 — primer repo grande)** — continuando dual-dialect tras los 6 ya mergeados (PRs #260 y #261). Pendiente de merge: 1 commit sobre main.
+>
+> **Lo entregado**:
+>
+> - **[`20e24de`](https://github.com/Alexzafra13/HubPlay_demo/commit/20e24de) Sesión E.5 — ItemRepository dual-dialect**: séptimo repo, primero de los tres grandes (633 LOC). Mezcla Pattern A (sqlc-backed: Create/GetByID/GetByPath/Update/Delete/DeleteByLibrary/CountByLibrary/GetChildren) + Pattern B (raw-SQL con `rewritePlaceholders`: List, ChildCountsByParents, LatestItems, LatestSeriesByActivity).
+>
+> **Gotchas nuevos del Sesión E.5** (válidos para los 21 siguientes):
+>
+> - **FTS dual-mecanismo**: SQLite usa FTS5 (`items_fts MATCH 'foo*'`); Postgres usa la columna `search_vector` tsvector + GIN poblada por trigger en `migrations/postgres/002_fts_search.sql` (`search_vector @@ to_tsquery('simple', ?)`). Helper nuevo `toTSQueryPrefix(q)` sanitiza la entrada del usuario para `to_tsquery` (strip de `& | ! ( ) : * < > ' " etc`) y agrega `:*` al último token para prefix-search. SIN sanitización el parser de `to_tsquery` lanza syntax error con queries reales como "harry+potter (2001)".
+>
+> - **`WHERE is_available = 1` solo funciona en SQLite**: las columnas BOOLEAN se almacenan como INTEGER en SQLite (`= 1` es válido), pero Postgres tiene BOOLEAN real y rechaza `integer = boolean`. Solución uniforme: `WHERE is_available` (sin `= 1`) — truthy en ambos. Aplica a cualquier raw SQL futuro que filtre por columnas BOOLEAN.
+>
+> - **Year/SeasonNumber/EpisodeNumber**: INTEGER en ambos schemas, pero sqlc emite NullInt64 en SQLite y NullInt32 en Postgres. Los métodos sqlc branchéan params; los raw-SQL escanean en el tipo nativo del dialecto y proyectan a `int`. Helper nuevo `nullableIntPtrInt32` paralelo a `nullableIntPtr`. Aplica también a Size/DurationTicks **NO** porque están declarados BIGINT (NullInt64 en ambos).
+>
+> - **Cast estructural entre Row types**: cuando dos row types generados por sqlc son column-by-column idénticos (e.g. `sqlc_pg.GetItemByPathRow` vs `sqlc_pg.GetItemByIDRow`), Go permite el cast `RowA(rowB)` y evita duplicar el row-mapping helper. Útil cuando varias queries proyectan el mismo SELECT.
+>
+> **Verificación al cierre**:
+>
+> - `go build ./internal/db/... ./internal/auth/... ./internal/library/...` clean
+> - `GOOS=linux go build ./...` clean (cross-compile completo del binario)
+> - `go test -count=1 ./internal/db/` 13.9s — todos verde
+> - `go vet ./internal/api/... ./internal/db/... ./internal/library/... ./internal/scanner/... ./internal/stream/...` (con GOOS=linux) clean
+> - 40 callers de `NewItemRepository` actualizados (1 prod en `repos.go` + 39 tests en 8 ficheros)
+> - Local `golangci-lint` bloqueado por App Control de Windows; CI lo correrá en Linux
+> - Postgres real no smoke-testeado esta sesión (Docker daemon no arrancado en el host); Pattern A/B ya validado contra Postgres real en E.1-E.4
+>
+> **Estado real al cierre**:
+>
+> | Repo | Estado |
+> |---|---|
+> | Settings | ✅ Pattern B |
+> | Users | ✅ Pattern A + 1 raw SQL holdout |
+> | Sessions | ✅ Pattern A + 2 raw SQL holdouts |
+> | SigningKeys | ✅ Pattern A (alias → struct) |
+> | Library | ✅ Pattern A + 2 raw SQL holdouts + 3 tx |
+> | MediaStreams | ✅ Pattern A + 1 tx + nullableInt32 |
+> | **Items** | ✅ **E.5 — Pattern A + 4 raw SQL (FTS dual + toTSQueryPrefix)** |
+> | UserData | ⏳ 485 LOC — siguiente recomendado (crítico, el progreso de reproducción) |
+> | Channel | ⏳ 561 LOC — grande |
+> | EPGPrograms | ⏳ 314 LOC — tiene BulkSchedule raw SQL holdout |
+> | Image | ⏳ 319 LOC — tiene GetPrimaryURLs raw SQL holdout |
+> | Federation | ⏳ enorme con MUCHOS raw SQL holdouts |
+> | 16 repos pequeños/medianos | ⏳ trabajo mecánico |
+>
+> **Próximo arranque** (cuando se retome):
+>
+> 1. **UserData** es el siguiente recomendado — sin él no se persiste el progreso de reproducción. 485 LOC. Pattern A esperado para la mayoría; verificar si tiene raw SQL holdouts.
+> 2. Después Channel (561 LOC), luego en cualquier orden los medianos.
+> 3. Tiempo restante estimado para Sesión E: ~10-12h en bloques de 3-4h.
+> 4. **Sesión F** (wiring pgx en main.go, ~3h) sigue después de E.
+> 5. Si Docker daemon está arriba, hacer smoke-test del repo más reciente contra Postgres antes de cerrar la sesión: `docker run -d --name pg-test -e POSTGRES_PASSWORD=test postgres:16-alpine && goose -dir migrations/postgres postgres "..." up && go run ./scripts/smoketest-X.go`.
+>
+> ---
+>
 > 🎬 **Sesión 2026-05-12 noche (rama `claude/gallant-galileo-3c374b`, +5 commits Sesión E parcial)** — continuación de la sesión del día. La rama acumula ahora ~18 commits sobre main, todos pendientes de merge. **Stop point honesto: 6 de 28 repos refactorizados a dual-dialect, patrón A y B probados ambos contra Postgres real.**
 >
 > **Lo nuevo de esta tanda nocturna**:
