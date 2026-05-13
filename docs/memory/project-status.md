@@ -1,5 +1,79 @@
 # Estado del proyecto
 
+> 🎬 **Sesión 2026-05-13 (rama `claude/pensive-lehmann-8c13f5`, Sesión H — DB plug-and-play UI + migrator integrado)** — la migración Postgres pasa de "operacional desde YAML" a "operacional desde la web". El operador puede ahora cambiar driver, probar conexión, persistir, reiniciar y migrar datos sqlite→pg sin tocar la terminal.
+>
+> ## 🔌 Sesión H — Plug-and-play DB driver + migrator integrado
+>
+> Sesiones D/E/F/G dejaron el binario 100% dual-dialect y verificado en CI. El operador que quería pasar de SQLite a Postgres seguía teniendo que: (1) ejecutar pgloader o pg_dump manualmente, (2) editar `hubplay.yaml` a mano, (3) reiniciar el contenedor. Esta sesión cierra ese loop: todo desde el panel admin y desde el wizard de primera ejecución.
+>
+> **Backend nuevo**:
+>
+> 1. **`internal/config/persist.go`** — `Save(cfg, path)` con escritura atómica (temp + rename) y `0600` perms. Refactor de `setup.Service.CompleteSetup` para reusarlo.
+>
+> 2. **`internal/config/restart.go`** — `RestartRequester` one-shot. Handlers llaman `Request("razón")` → atómico CAS + `cancel()` tras 100 ms (deja flush a la respuesta HTTP). Bajo `restart: unless-stopped` (default en todos los docker-compose), el container vuelve en 2-3 segundos.
+>
+> 3. **`internal/api/handlers/admin_db.go`** — handler completo del panel:
+>    - `GET /admin/system/db` — driver activo + DSN redacted + `sql.DB.Stats()` pool.
+>    - `POST /admin/system/db/test` — Open+Ping+Close de candidato sin tocar runtime. Devuelve `{ok, error, server_version, duration_ms}`.
+>    - `PUT /admin/system/db` — persiste a YAML; flag `restart` opcional dispara reinicio.
+>    - `POST /admin/system/restart` — reinicio explícito.
+>    - `POST /admin/system/db/migrate` — NDJSON stream del migrator (start / progress / config_saved / done / error events).
+>
+> 4. **`internal/api/handlers/setup.go` extendido** — endpoints `/setup/db/test` y `/setup/db` para el wizard. Constructor `NewSetupHandler` migrado a `SetupHandlerConfig` (tagged struct) para evitar lista posicional de 8+ args. `SetupService.SaveDatabaseConfig(driver, path, dsn)` nuevo.
+>
+> 5. **`internal/db/migrator.go`** — `MigrateSQLiteToPostgres(ctx, opts)`. Workflow:
+>    - Open target pg + ping (10s bounded).
+>    - Aplica migraciones pg al target (idempotente vía goose).
+>    - `SET session_replication_role = 'replica'` (requiere superuser; emite `ErrMigrateNeedsSuperuser` con puntero al runbook si falla).
+>    - Topological sort de tablas vía `information_schema.referential_constraints` (Kahn's). Self-FKs ignorados (cubiertos por replica role).
+>    - Por cada tabla: COUNT en sqlite (para `total`) → stream `SELECT *` con scan dinámico → `INSERT INTO target` con prepared statement. Batch progress callback cada 500 rows.
+>    - `normalizeValue(v, pgType)` resuelve los 2 gotchas: BOOLEAN (sqlite INTEGER 0/1 → pg bool) y TIMESTAMPTZ (modernc text format → time.Time vía 8 layouts).
+>    - Después: backfill manual de `items.search_vector` (el trigger BEFORE INSERT está skip-eado por replica role).
+>    - `syncSequences` recorre cada SERIAL/IDENTITY columna y hace `setval` al MAX actual (skip si tabla vacía).
+>
+> 6. **`internal/db/postgres.go`** — `redactPostgresDSN` renombrado a `RedactDSN` exported; ahora maneja también el formato `key=value` libpq, no solo `postgres://`.
+>
+> **Frontend nuevo**:
+>
+> 1. **`web/src/components/admin/DatabasePanel.tsx`** (montado en Sistema > Avanzado) — driver activo + pool stats, form Test/Save/Restart, sección de migración (sólo visible cuando driver activo == sqlite) con NDJSON stream parser y log expandible. ~370 líneas.
+>
+> 2. **`web/src/pages/setup/DatabaseStep.tsx`** — paso 0 del wizard. Radio sqlite/postgres + form DSN/path + Test + Save & Restart. Botón "Continuar con SQLite" como skip explícito para el caso por defecto.
+>
+> 3. **`SetupWizard.tsx`**: 5 pasos ahora (database → adminAccount → libraries → settings → complete). `STEP_MAP` mantiene la convención: el server no tiene cursor para el step 0, lo que significa que un wizard re-mounted aterriza siempre en database; el operador hace "skip" si ya configuró.
+>
+> 4. **Hooks + types**: `useAdminDatabase`, `useTestAdminDatabase`, `useSaveAdminDatabase`, `useRestartServer`. Tipos `AdminDatabaseStatus`, `AdminDatabaseTestRequest`, `AdminDatabaseMigrateEvent` (union por `event` discriminator).
+>
+> 5. **i18n** completo en `en` y `es` para `setup.database.*` y `admin.database.*` (29 strings nuevos por locale).
+>
+> **Tests añadidos**:
+>
+> - `internal/config/persist_test.go` (3 tests): round-trip Save, atomic-replace, RestartRequester one-shot semantics.
+> - `internal/db/migrator_test.go` (5 tests): quoteIdent, buildInsertSQL, filterOut, normalizeValue (5 casos BOOLEAN), parseSQLiteTime, RedactDSN (5 formatos).
+> - `internal/db/migrator_smoke_test.go` (gated por `HUBPLAY_TEST_POSTGRES_DSN`): end-to-end seed sqlite → migrate → verify counts en pg real.
+> - `internal/api/handlers/admin_db_test.go` (6 tests): Status SQLite, Test rechaza driver inválido, Test sqlite :memory: real, Save persist + restart, Save valida missing fields, Restart one-shot.
+> - `web/src/pages/setup/DatabaseStep.test.tsx` (5 tests): skip path, postgres radio toggle, test mutation + render, Save habilitado tras Test, error inline.
+> - `web/src/components/admin/DatabasePanel.test.tsx` (4 tests): sqlite status, postgres status + DSN redacted, Test gate antes de Save, migrate card oculta en pg activo.
+> - `web/src/pages/setup/SetupWizard.test.tsx` actualizado para los 5 pasos (database como step 0).
+>
+> **Verificación final**:
+>
+> - `go test ./... -count=1` en container linux: TODOS los paquetes verde (api, db, handlers, config, setup, auth, federation, iptv, library, scanner, …).
+> - `go vet ./...` clean.
+> - `pnpm test`: **541/541 vitest verde** (504 previos + 37 nuevos/adaptados).
+> - Smoke pg real (`docker run postgres:16-alpine` + `HUBPLAY_TEST_POSTGRES_DSN`): `TestMigrateSQLiteToPostgres_EndToEnd` PASS — seed 1 user + 1 library + 1 access en sqlite, migrate, verificar counts en pg.
+> - Drift guard `TestOpenAPISpec_RouterCoverage`: 7 nuevas rutas añadidas a `outOfScopeExact` con justificación.
+>
+> **Limitación conocida documentada**: el migrator requiere superuser en pg (o rol con `bypassrls` + permiso a `session_replication_role`). Operadores en managed pg (RDS, Cloud SQL, Supabase) ven `ErrMigrateNeedsSuperuser` con puntero a `docs/operations/postgres.md` (runbook pgloader/pg_dump). Para self-hosted (target del proyecto) el usuario `postgres` por defecto sí es superuser, así que el camino feliz funciona.
+>
+> **Próximos pasos sugeridos (Sesión I, opcional)**:
+>
+> 1. **COPY-based migration**: usar `pgx.CopyFrom` en vez de prepared INSERTs para 5-10× throughput. Sólo importa para catálogos > 100k items. ~2h.
+> 2. **`database.pool_max_open` configurable**: hoy hardcoded a 25; algunos operadores con pgbouncer quieren otro número. Exponer en `hubplay.yaml`. ~30min.
+> 3. **Comparator precision-aware**: 3 tests Rotate siguen skipeados en pg por divergencia nano vs micro precision. Helper `assertTimeApprox(t, got, want, time.Microsecond)`. ~30min.
+> 4. **Migrator: target presets** — botones "Crear DB en este pg" (CREATE DATABASE primero) y "Reset target" antes de migrate. Útil para retry tras fallo. ~1h.
+>
+> ---
+>
 > 🎬 **Sesión 2026-05-13 (rama `claude/sesion-f-pgx-wire`, 3 commits, Sesión F + G — pgx wire + CI matrix + bug fixes)** — soporte Postgres production-ready. PR [#272](https://github.com/Alexzafra13/HubPlay_demo/pull/272) abierto con Sesión F; ahora extendido con Sesión G (CI matrix sqlite+postgres + 6 bugs reales arreglados + drift guard + admin_backup branch + docs operacionales).
 >
 > ## 🛡️ Sesión G — Hardening: CI matrix + bugs reales pg + docs
