@@ -19,7 +19,7 @@ import (
 func TestSetChannelTvgID_PersistsAcrossM3URefresh(t *testing.T) {
 	unblockLoopback(t)
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories("sqlite", database)
+	repos := db.NewRepositories(testutil.Driver(), database)
 	ctx := context.Background()
 
 	// Fixture M3U server with a single channel; stream URL stays the
@@ -96,7 +96,7 @@ func TestSetChannelTvgID_PersistsAcrossM3URefresh(t *testing.T) {
 func TestSetChannelTvgID_ClearsPersistentOverride(t *testing.T) {
 	unblockLoopback(t)
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories("sqlite", database)
+	repos := db.NewRepositories(testutil.Driver(), database)
 	ctx := context.Background()
 
 	streamURL := "http://upstream.example/a3.m3u8"
@@ -154,7 +154,7 @@ func TestSetChannelTvgID_ClearsPersistentOverride(t *testing.T) {
 func TestListChannelsWithoutEPG_SurfaceOrphansOnly(t *testing.T) {
 	unblockLoopback(t)
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories("sqlite", database)
+	repos := db.NewRepositories(testutil.Driver(), database)
 	ctx := context.Background()
 
 	libID := "lib-orphans"

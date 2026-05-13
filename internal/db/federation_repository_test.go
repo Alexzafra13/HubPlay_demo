@@ -22,9 +22,9 @@ func TestFederationRepository_SearchSharedItems(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	ctx := context.Background()
 
-	libRepo := db.NewLibraryRepository("sqlite", database)
-	itemRepo := db.NewItemRepository("sqlite", database)
-	fedRepo := db.NewFederationRepository("sqlite", database)
+	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
+	itemRepo := db.NewItemRepository(testutil.Driver(), database)
+	fedRepo := db.NewFederationRepository(testutil.Driver(), database)
 
 	// â”€â”€ Schema seed â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 	now := time.Now().UTC()
@@ -160,10 +160,10 @@ func TestFederationRepository_SharedItem_ColorsForwarded(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	ctx := context.Background()
 
-	libRepo := db.NewLibraryRepository("sqlite", database)
-	itemRepo := db.NewItemRepository("sqlite", database)
-	imgRepo := db.NewImageRepository("sqlite", database)
-	fedRepo := db.NewFederationRepository("sqlite", database)
+	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
+	itemRepo := db.NewItemRepository(testutil.Driver(), database)
+	imgRepo := db.NewImageRepository(testutil.Driver(), database)
+	fedRepo := db.NewFederationRepository(testutil.Driver(), database)
 
 	now := time.Now().UTC()
 	lib := db.Library{ID: "lib-1", Name: "Movies", ContentType: "movies", ScanMode: "auto", ScanInterval: "6h", CreatedAt: now, UpdatedAt: now, Paths: []string{"/m"}}
@@ -302,16 +302,15 @@ func TestFederationRepository_SharedItem_ColorsForwarded(t *testing.T) {
 
 // insertTestUser writes a minimal users row so federation_library_shares.
 // created_by FK is satisfiable. The auth tests have richer fixtures;
-// federation just needs the ID present.
+// federation just needs the ID present. testutil.Exec handles the
+// `?` → `$N` rewrite so the same fixture works under both backends.
 func insertTestUser(t *testing.T, database *sql.DB, id string) {
 	t.Helper()
 	now := time.Now().UTC()
-	if _, err := database.ExecContext(context.Background(), `
+	testutil.Exec(t, database, `
 		INSERT INTO users (id, username, display_name, password_hash, role, created_at)
 		VALUES (?, ?, ?, ?, ?, ?)
-	`, id, id, id, "x", "admin", now); err != nil {
-		t.Fatalf("insert test user: %v", err)
-	}
+	`, id, id, id, "x", "admin", now)
 }
 
 // TestFederationRepository_Progress exercises Upsert/Get/Delete +
@@ -321,7 +320,7 @@ func insertTestUser(t *testing.T, database *sql.DB, id string) {
 func TestFederationRepository_Progress(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	ctx := context.Background()
-	fedRepo := db.NewFederationRepository("sqlite", database)
+	fedRepo := db.NewFederationRepository(testutil.Driver(), database)
 
 	insertTestUser(t, database, "u-1")
 
@@ -458,7 +457,7 @@ func TestFederationRepository_Progress(t *testing.T) {
 func TestFederationRepository_Progress_PeerRevokedDropsFromRail(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	ctx := context.Background()
-	fedRepo := db.NewFederationRepository("sqlite", database)
+	fedRepo := db.NewFederationRepository(testutil.Driver(), database)
 
 	insertTestUser(t, database, "u-1")
 

@@ -69,7 +69,7 @@ func newFedTestEnv(t *testing.T) *fedTestEnv {
 	ctx := context.Background()
 	clk := clock.New()
 	rawDB := testutil.NewTestDB(t)
-	fedRepo := db.NewFederationRepository("sqlite", rawDB)
+	fedRepo := db.NewFederationRepository(testutil.Driver(), rawDB)
 
 	if _, err := federation.LoadOrCreate(ctx, fedRepo, clk, "TestServer"); err != nil {
 		t.Fatalf("load or create identity: %v", err)
@@ -112,20 +112,14 @@ func newFedTestEnv(t *testing.T) *fedTestEnv {
 	// what shares key on, item.parent_id is NULL so the catalog
 	// browse path includes it.
 	userID := uuid.NewString()
-	if _, err := rawDB.Exec(`INSERT INTO users (id, username, display_name, password_hash, role, created_at) VALUES (?, 'admin', 'Admin', 'x', 'admin', ?)`, userID, now); err != nil {
-		t.Fatalf("insert user: %v", err)
-	}
+	testutil.Exec(t, rawDB, `INSERT INTO users (id, username, display_name, password_hash, role, created_at) VALUES (?, 'admin', 'Admin', 'x', 'admin', ?)`, userID, now)
 	libraryID := uuid.NewString()
-	if _, err := rawDB.Exec(`INSERT INTO libraries (id, name, content_type) VALUES (?, 'Movies', 'movies')`, libraryID); err != nil {
-		t.Fatalf("insert library: %v", err)
-	}
+	testutil.Exec(t, rawDB, `INSERT INTO libraries (id, name, content_type) VALUES (?, 'Movies', 'movies')`, libraryID)
 	itemID := uuid.NewString()
-	if _, err := rawDB.Exec(`
+	testutil.Exec(t, rawDB, `
 		INSERT INTO items (id, library_id, type, title, sort_title, year, path)
 		VALUES (?, ?, 'movie', 'Test Movie', 'test movie', 2026, '/tmp/test.mkv')
-	`, itemID, libraryID); err != nil {
-		t.Fatalf("insert item: %v", err)
-	}
+	`, itemID, libraryID)
 
 	// Items repo stub backed by a one-row map -- the handler only
 	// reads .ID + .LibraryID.
@@ -456,7 +450,7 @@ func TestFederationStream_Subtitles_ForeignPeerSession_Returns404(t *testing.T) 
 	now := env.clk.Now()
 	peer2ID := uuid.NewString()
 	peer2SrvUUID := uuid.NewString()
-	if err := db.NewFederationRepository("sqlite", env.rawDB).InsertPeer(context.Background(), &federation.Peer{
+	if err := db.NewFederationRepository(testutil.Driver(), env.rawDB).InsertPeer(context.Background(), &federation.Peer{
 		ID:         peer2ID,
 		ServerUUID: peer2SrvUUID,
 		Name:       "OtherPeer",

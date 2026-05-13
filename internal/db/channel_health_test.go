@@ -16,7 +16,7 @@ import (
 func setupChannelHealthTest(t *testing.T) (*db.ChannelRepository, string) {
 	t.Helper()
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories("sqlite", database)
+	repos := db.NewRepositories(testutil.Driver(), database)
 	ctx := context.Background()
 
 	libID := "lib-health"

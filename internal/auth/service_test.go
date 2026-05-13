@@ -20,9 +20,9 @@ import (
 func newTestAuthService(t *testing.T) (*auth.Service, *db.UserRepository, *db.SessionRepository) {
 	t.Helper()
 	database := testutil.NewTestDB(t)
-	userRepo := db.NewUserRepository("sqlite", database)
-	sessionRepo := db.NewSessionRepository("sqlite", database)
-	keyRepo := db.NewSigningKeyRepository("sqlite", database)
+	userRepo := db.NewUserRepository(testutil.Driver(), database)
+	sessionRepo := db.NewSessionRepository(testutil.Driver(), database)
+	keyRepo := db.NewSigningKeyRepository(testutil.Driver(), database)
 
 	cfg := config.AuthConfig{
 		JWTSecret:          "test-secret-32-bytes-long-enough!",
@@ -268,9 +268,9 @@ func TestService_RefreshToken_InvalidToken(t *testing.T) {
 func newTestAuthServiceWithRL(t *testing.T, maxFails int) (*auth.Service, *db.UserRepository, *db.SessionRepository) {
 	t.Helper()
 	database := testutil.NewTestDB(t)
-	userRepo := db.NewUserRepository("sqlite", database)
-	sessionRepo := db.NewSessionRepository("sqlite", database)
-	keyRepo := db.NewSigningKeyRepository("sqlite", database)
+	userRepo := db.NewUserRepository(testutil.Driver(), database)
+	sessionRepo := db.NewSessionRepository(testutil.Driver(), database)
+	keyRepo := db.NewSigningKeyRepository(testutil.Driver(), database)
 
 	cfg := config.AuthConfig{
 		JWTSecret:          "test-secret-32-bytes-long-enough!",

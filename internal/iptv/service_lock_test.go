@@ -21,7 +21,7 @@ import (
 
 func TestService_RefreshEPG_SecondCallIsRejectedWhileFirstRuns(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories("sqlite", database)
+	repos := db.NewRepositories(testutil.Driver(), database)
 
 	// Seed a library with an EPG URL that points to a slow httptest server.
 	// The slow server lets us catch the "in-progress" window.

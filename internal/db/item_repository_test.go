@@ -39,8 +39,8 @@ func newTestItem(id, libraryID, title string) *db.Item {
 
 func TestItemRepository_Create_And_GetByID(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository("sqlite", database)
-	repo := db.NewItemRepository("sqlite", database)
+	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
+	repo := db.NewItemRepository(testutil.Driver(), database)
 	seedLibraryForItems(t, libRepo)
 
 	item := newTestItem("item-1", "lib-1", "The Matrix")
@@ -69,7 +69,7 @@ func TestItemRepository_Create_And_GetByID(t *testing.T) {
 
 func TestItemRepository_GetByID_NotFound(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repo := db.NewItemRepository("sqlite", database)
+	repo := db.NewItemRepository(testutil.Driver(), database)
 
 	_, err := repo.GetByID(context.Background(), "nonexistent")
 	if !errors.Is(err, domain.ErrNotFound) {
@@ -79,8 +79,8 @@ func TestItemRepository_GetByID_NotFound(t *testing.T) {
 
 func TestItemRepository_GetByPath(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository("sqlite", database)
-	repo := db.NewItemRepository("sqlite", database)
+	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
+	repo := db.NewItemRepository(testutil.Driver(), database)
 	seedLibraryForItems(t, libRepo)
 
 	item := newTestItem("item-p", "lib-1", "PathTest")
@@ -99,8 +99,8 @@ func TestItemRepository_GetByPath(t *testing.T) {
 
 func TestItemRepository_List(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository("sqlite", database)
-	repo := db.NewItemRepository("sqlite", database)
+	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
+	repo := db.NewItemRepository(testutil.Driver(), database)
 	seedLibraryForItems(t, libRepo)
 
 	if err := repo.Create(context.Background(), newTestItem("m1", "lib-1", "Alpha")); err != nil {
@@ -131,9 +131,9 @@ func TestItemRepository_List(t *testing.T) {
 
 func TestItemRepository_List_GenreYearRatingFilters(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository("sqlite", database)
-	repo := db.NewItemRepository("sqlite", database)
-	values := db.NewItemValueRepository("sqlite", database)
+	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
+	repo := db.NewItemRepository(testutil.Driver(), database)
+	values := db.NewItemValueRepository(testutil.Driver(), database)
 	seedLibraryForItems(t, libRepo)
 
 	// Three movies with different (genre, year, rating) so each filter
@@ -239,11 +239,12 @@ func TestItemRepository_List_GenreYearRatingFilters(t *testing.T) {
 }
 
 func TestMigration031_BackfillsGenresFromMetadata(t *testing.T) {
+	testutil.SkipIfPostgres(t, "exercises the SQLite-specific backfill SQL inline (INSERT OR IGNORE, json_each, json_valid). The Postgres migration uses the json operators + ON CONFLICT DO NOTHING — a separate test would need to cover that path.")
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository("sqlite", database)
-	itemRepo := db.NewItemRepository("sqlite", database)
-	metaRepo := db.NewMetadataRepository("sqlite", database)
-	values := db.NewItemValueRepository("sqlite", database)
+	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
+	itemRepo := db.NewItemRepository(testutil.Driver(), database)
+	metaRepo := db.NewMetadataRepository(testutil.Driver(), database)
+	values := db.NewItemValueRepository(testutil.Driver(), database)
 	seedLibraryForItems(t, libRepo)
 
 	// Pre-existing item with metadata.genres_json present but no
@@ -284,7 +285,7 @@ func TestMigration031_BackfillsGenresFromMetadata(t *testing.T) {
 
 	// The repository's filter query should now find the legacy item by
 	// genre â€” proving the backfill closes the gap.
-	itemRepoForList := db.NewItemRepository("sqlite", database)
+	itemRepoForList := db.NewItemRepository(testutil.Driver(), database)
 	_, total, err := itemRepoForList.List(context.Background(), db.ItemFilter{Genre: "Action"})
 	if err != nil {
 		t.Fatal(err)
@@ -305,9 +306,9 @@ func TestMigration031_BackfillsGenresFromMetadata(t *testing.T) {
 
 func TestItemValueRepository_ListGenres(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository("sqlite", database)
-	itemRepo := db.NewItemRepository("sqlite", database)
-	values := db.NewItemValueRepository("sqlite", database)
+	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
+	itemRepo := db.NewItemRepository(testutil.Driver(), database)
+	values := db.NewItemValueRepository(testutil.Driver(), database)
 	seedLibraryForItems(t, libRepo)
 
 	// Two movies with overlapping genres + one series with its own genre,
@@ -369,8 +370,8 @@ func TestItemValueRepository_ListGenres(t *testing.T) {
 
 func TestItemRepository_List_ByType(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository("sqlite", database)
-	repo := db.NewItemRepository("sqlite", database)
+	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
+	repo := db.NewItemRepository(testutil.Driver(), database)
 	seedLibraryForItems(t, libRepo)
 
 	movie := newTestItem("m1", "lib-1", "Movie1")
@@ -400,8 +401,8 @@ func TestItemRepository_List_ByType(t *testing.T) {
 
 func TestItemRepository_Hierarchy(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository("sqlite", database)
-	repo := db.NewItemRepository("sqlite", database)
+	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
+	repo := db.NewItemRepository(testutil.Driver(), database)
 	seedLibraryForItems(t, libRepo)
 
 	// Series â†’ Season â†’ Episodes
@@ -462,8 +463,8 @@ func TestItemRepository_Hierarchy(t *testing.T) {
 
 func TestItemRepository_Update(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository("sqlite", database)
-	repo := db.NewItemRepository("sqlite", database)
+	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
+	repo := db.NewItemRepository(testutil.Driver(), database)
 	seedLibraryForItems(t, libRepo)
 
 	item := newTestItem("item-upd", "lib-1", "Old Title")
@@ -487,8 +488,8 @@ func TestItemRepository_Update(t *testing.T) {
 
 func TestItemRepository_Delete(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository("sqlite", database)
-	repo := db.NewItemRepository("sqlite", database)
+	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
+	repo := db.NewItemRepository(testutil.Driver(), database)
 	seedLibraryForItems(t, libRepo)
 
 	item := newTestItem("item-del", "lib-1", "Delete Me")
@@ -508,8 +509,8 @@ func TestItemRepository_Delete(t *testing.T) {
 
 func TestItemRepository_CountByLibrary(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository("sqlite", database)
-	repo := db.NewItemRepository("sqlite", database)
+	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
+	repo := db.NewItemRepository(testutil.Driver(), database)
 	seedLibraryForItems(t, libRepo)
 
 	if err := repo.Create(context.Background(), newTestItem("c1", "lib-1", "A")); err != nil {
@@ -530,8 +531,8 @@ func TestItemRepository_CountByLibrary(t *testing.T) {
 
 func TestItemRepository_List_FTSSearch(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository("sqlite", database)
-	repo := db.NewItemRepository("sqlite", database)
+	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
+	repo := db.NewItemRepository(testutil.Driver(), database)
 	seedLibraryForItems(t, libRepo)
 
 	if err := repo.Create(context.Background(), newTestItem("m1", "lib-1", "The Matrix")); err != nil {
@@ -559,8 +560,8 @@ func TestItemRepository_List_FTSSearch(t *testing.T) {
 
 func TestItemRepository_List_FTSSearch_NoResults(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository("sqlite", database)
-	repo := db.NewItemRepository("sqlite", database)
+	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
+	repo := db.NewItemRepository(testutil.Driver(), database)
 	seedLibraryForItems(t, libRepo)
 
 	if err := repo.Create(context.Background(), newTestItem("m1", "lib-1", "The Matrix")); err != nil {
@@ -581,8 +582,8 @@ func TestItemRepository_List_FTSSearch_NoResults(t *testing.T) {
 
 func TestItemRepository_List_FTSSearch_PrefixMatch(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository("sqlite", database)
-	repo := db.NewItemRepository("sqlite", database)
+	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
+	repo := db.NewItemRepository(testutil.Driver(), database)
 	seedLibraryForItems(t, libRepo)
 
 	if err := repo.Create(context.Background(), newTestItem("m1", "lib-1", "Breaking Bad")); err != nil {
@@ -607,8 +608,8 @@ func TestItemRepository_List_FTSSearch_PrefixMatch(t *testing.T) {
 
 func TestItemRepository_List_FTSSearch_AfterUpdate(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository("sqlite", database)
-	repo := db.NewItemRepository("sqlite", database)
+	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
+	repo := db.NewItemRepository(testutil.Driver(), database)
 	seedLibraryForItems(t, libRepo)
 
 	item := newTestItem("m1", "lib-1", "Old Title")
@@ -645,8 +646,8 @@ func TestItemRepository_List_FTSSearch_AfterUpdate(t *testing.T) {
 
 func TestItemRepository_List_FTSSearch_AfterDelete(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository("sqlite", database)
-	repo := db.NewItemRepository("sqlite", database)
+	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
+	repo := db.NewItemRepository(testutil.Driver(), database)
 	seedLibraryForItems(t, libRepo)
 
 	item := newTestItem("m1", "lib-1", "Delete Me")
@@ -673,8 +674,8 @@ func TestItemRepository_List_FTSSearch_AfterDelete(t *testing.T) {
 
 func TestItemRepository_LatestItems(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository("sqlite", database)
-	repo := db.NewItemRepository("sqlite", database)
+	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
+	repo := db.NewItemRepository(testutil.Driver(), database)
 	seedLibraryForItems(t, libRepo)
 
 	for i, title := range []string{"First", "Second", "Third"} {
@@ -704,8 +705,8 @@ func TestItemRepository_LatestItems(t *testing.T) {
 // added in the trailing 14-day window.
 func TestItemRepository_LatestSeriesByActivity(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	libRepo := db.NewLibraryRepository("sqlite", database)
-	repo := db.NewItemRepository("sqlite", database)
+	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
+	repo := db.NewItemRepository(testutil.Driver(), database)
 
 	now := time.Now().UTC()
 	if err := libRepo.Create(context.Background(), &db.Library{

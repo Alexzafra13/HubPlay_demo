@@ -337,7 +337,7 @@ func (r *ChannelRepository) ListUnhealthyByLibrary(ctx context.Context, libraryI
 		`SELECT id, library_id, name, COALESCE(number, 0), COALESCE(group_name,''),
 		        COALESCE(logo_url,''), stream_url, COALESCE(tvg_id,''),
 		        COALESCE(language,''), COALESCE(country,''), is_active, added_at,
-		        COALESCE(last_probe_at, ''), last_probe_status, last_probe_error,
+		        last_probe_at, last_probe_status, last_probe_error,
 		        consecutive_failures
 		 FROM channels
 		 WHERE library_id = ? AND consecutive_failures >= ?
@@ -425,7 +425,7 @@ func (r *ChannelRepository) ListHealthyByLibrary(ctx context.Context, libraryID 
 		`SELECT id, library_id, name, COALESCE(number, 0), COALESCE(group_name,''),
 		        COALESCE(logo_url,''), stream_url, COALESCE(tvg_id,''),
 		        COALESCE(language,''), COALESCE(country,''), is_active, added_at,
-		        COALESCE(last_probe_at, ''), last_probe_status, last_probe_error,
+		        last_probe_at, last_probe_status, last_probe_error,
 		        consecutive_failures
 		 FROM channels
 		 WHERE library_id = ? AND is_active AND consecutive_failures < ?
@@ -521,7 +521,7 @@ func (r *ChannelRepository) ListWithoutEPGByLibrary(ctx context.Context, library
 		        c.stream_url, COALESCE(c.tvg_id,''),
 		        COALESCE(c.language,''), COALESCE(c.country,''),
 		        c.is_active, c.added_at,
-		        COALESCE(c.last_probe_at, ''), c.last_probe_status,
+		        c.last_probe_at, c.last_probe_status,
 		        c.last_probe_error, c.consecutive_failures
 		 FROM channels c
 		 WHERE c.library_id = ?

@@ -12,7 +12,7 @@ import (
 func setupChannelTest(t *testing.T) (*db.ChannelRepository, string) {
 	t.Helper()
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories("sqlite", database)
+	repos := db.NewRepositories(testutil.Driver(), database)
 
 	now := time.Now()
 	_ = repos.Libraries.Create(context.Background(), &db.Library{
@@ -186,7 +186,7 @@ func TestChannel_Groups(t *testing.T) {
 
 func TestChannel_ListLivetvChannels_FiltersOutNonLivetvLibraries(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories("sqlite", database)
+	repos := db.NewRepositories(testutil.Driver(), database)
 	ctx := context.Background()
 	now := time.Now()
 
@@ -243,7 +243,7 @@ func TestChannel_ListLivetvChannels_FiltersOutNonLivetvLibraries(t *testing.T) {
 
 func TestChannel_ListLivetvChannels_EmptyWhenNoLivetv(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repos := db.NewRepositories("sqlite", database)
+	repos := db.NewRepositories(testutil.Driver(), database)
 	ctx := context.Background()
 	now := time.Now()
 

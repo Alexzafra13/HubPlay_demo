@@ -19,6 +19,14 @@ func IsPostgres(driver string) bool {
 	return driver == DriverPostgres
 }
 
+// RewritePlaceholders is the exported alias of rewritePlaceholders.
+// Tests in other packages (testutil.Exec) need to translate `?` to
+// `$N` to share raw SQL fixture seeds across both backends — the
+// in-package callers keep the lowercase form.
+func RewritePlaceholders(driver, query string) string {
+	return rewritePlaceholders(driver, query)
+}
+
 // rewritePlaceholders converts SQLite-style `?` positional placeholders
 // to PostgreSQL-style `$N` numbered placeholders. Counter increments
 // once per `?` outside of string literals and SQL line comments.

@@ -18,8 +18,8 @@ import (
 // silently regress a future refactor.
 func TestSessionRepository_RotateRefreshToken(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	userRepo := db.NewUserRepository("sqlite", database)
-	repo := db.NewSessionRepository("sqlite", database)
+	userRepo := db.NewUserRepository(testutil.Driver(), database)
+	repo := db.NewSessionRepository(testutil.Driver(), database)
 	seedUserForSessions(t, userRepo)
 
 	created := time.Now().Add(-time.Hour).Truncate(time.Second)
@@ -74,8 +74,8 @@ func TestSessionRepository_RotateRefreshToken(t *testing.T) {
 // still resolve to the session, so the service can revoke it.
 func TestSessionRepository_GetByPreviousRefreshTokenHash(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	userRepo := db.NewUserRepository("sqlite", database)
-	repo := db.NewSessionRepository("sqlite", database)
+	userRepo := db.NewUserRepository(testutil.Driver(), database)
+	repo := db.NewSessionRepository(testutil.Driver(), database)
 	seedUserForSessions(t, userRepo)
 	ctx := context.Background()
 
@@ -130,8 +130,8 @@ func seedUserForSessions(t *testing.T, database *db.UserRepository) {
 
 func TestSessionRepository_Create_And_GetByHash(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	userRepo := db.NewUserRepository("sqlite", database)
-	repo := db.NewSessionRepository("sqlite", database)
+	userRepo := db.NewUserRepository(testutil.Driver(), database)
+	repo := db.NewSessionRepository(testutil.Driver(), database)
 	seedUserForSessions(t, userRepo)
 
 	now := time.Now()
@@ -169,7 +169,7 @@ func TestSessionRepository_Create_And_GetByHash(t *testing.T) {
 
 func TestSessionRepository_GetByHash_NotFound(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	repo := db.NewSessionRepository("sqlite", database)
+	repo := db.NewSessionRepository(testutil.Driver(), database)
 
 	_, err := repo.GetByRefreshTokenHash(context.Background(), "nonexistent")
 	if !errors.Is(err, domain.ErrNotFound) {
@@ -179,8 +179,8 @@ func TestSessionRepository_GetByHash_NotFound(t *testing.T) {
 
 func TestSessionRepository_DeleteByID(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	userRepo := db.NewUserRepository("sqlite", database)
-	repo := db.NewSessionRepository("sqlite", database)
+	userRepo := db.NewUserRepository(testutil.Driver(), database)
+	repo := db.NewSessionRepository(testutil.Driver(), database)
 	seedUserForSessions(t, userRepo)
 
 	now := time.Now()
@@ -205,8 +205,8 @@ func TestSessionRepository_DeleteByID(t *testing.T) {
 
 func TestSessionRepository_DeleteByRefreshTokenHash(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	userRepo := db.NewUserRepository("sqlite", database)
-	repo := db.NewSessionRepository("sqlite", database)
+	userRepo := db.NewUserRepository(testutil.Driver(), database)
+	repo := db.NewSessionRepository(testutil.Driver(), database)
 	seedUserForSessions(t, userRepo)
 
 	now := time.Now()
@@ -231,8 +231,8 @@ func TestSessionRepository_DeleteByRefreshTokenHash(t *testing.T) {
 
 func TestSessionRepository_ListByUser(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	userRepo := db.NewUserRepository("sqlite", database)
-	repo := db.NewSessionRepository("sqlite", database)
+	userRepo := db.NewUserRepository(testutil.Driver(), database)
+	repo := db.NewSessionRepository(testutil.Driver(), database)
 	seedUserForSessions(t, userRepo)
 
 	now := time.Now()
@@ -263,8 +263,8 @@ func TestSessionRepository_ListByUser(t *testing.T) {
 
 func TestSessionRepository_CountByUser(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	userRepo := db.NewUserRepository("sqlite", database)
-	repo := db.NewSessionRepository("sqlite", database)
+	userRepo := db.NewUserRepository(testutil.Driver(), database)
+	repo := db.NewSessionRepository(testutil.Driver(), database)
 	seedUserForSessions(t, userRepo)
 
 	count, err := repo.CountByUser(context.Background(), "user-1")

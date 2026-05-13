@@ -48,7 +48,7 @@ func newSettingsRigWithDetected(t *testing.T, baseURLDefault string, hw config.H
 func newSettingsRigWithStreaming(t *testing.T, baseURLDefault string, hw config.HWAccelConfig, detected []string, streaming StreamingDefaults) *settingsRig {
 	t.Helper()
 	database := testutil.NewTestDB(t)
-	repo := db.NewSettingsRepository("sqlite", database)
+	repo := db.NewSettingsRepository(testutil.Driver(), database)
 	h := NewSettingsHandler(SettingsHandlerConfig{
 		Settings:          repo,
 		BaseURLDefault:    baseURLDefault,
@@ -146,7 +146,7 @@ func TestSettings_Update_PersistsAndReportsOverride(t *testing.T) {
 
 	// Settings GetOr from the repo should now return the override (the
 	// path the rest of the codebase reads through).
-	stored, err := db.NewSettingsRepository("sqlite", testutil.NewTestDB(t)).GetOr(context.Background(), "missing", "fallback")
+	stored, err := db.NewSettingsRepository(testutil.Driver(), testutil.NewTestDB(t)).GetOr(context.Background(), "missing", "fallback")
 	if err != nil {
 		t.Fatalf("unrelated GetOr failure: %v", err)
 	}

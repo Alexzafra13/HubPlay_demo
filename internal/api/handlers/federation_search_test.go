@@ -28,12 +28,10 @@ func newFedSearchEnv(t *testing.T) *fedTestEnv {
 	env := newFedTestEnv(t)
 
 	// Add an item the FTS index will hit on "Test".
-	if _, err := env.rawDB.Exec(`
+	testutil.Exec(t, env.rawDB, `
 		INSERT INTO items (id, library_id, type, title, sort_title, year, path)
 		VALUES (?, ?, 'movie', ?, ?, 2024, ?)
-	`, "extra-1", env.libraryID, "Test Sequel", "test sequel", "/tmp/seq.mkv"); err != nil {
-		t.Fatalf("insert extra item: %v", err)
-	}
+	`, "extra-1", env.libraryID, "Test Sequel", "test sequel", "/tmp/seq.mkv")
 
 	pub := NewFederationPublicHandler(env.mgr, testutil.NopLogger())
 

@@ -40,20 +40,42 @@ import (
 //   - Upload size cap is generous (10 GiB) because real catalogues
 //     do reach single-digit GBs on metadata + thumbnails. Set on
 //     ParseMultipartForm so the body itself is bounded.
+//
+//   - Postgres: both endpoints return 501 Not Implemented with a
+//     message pointing the operator at pg_dump / pg_restore. The
+//     application can't safely orchestrate those (they need cluster
+//     credentials, network access, and the operator's storage
+//     choices) — they live out-of-band.
 const maxRestoreUploadBytes = int64(10 * 1024 * 1024 * 1024)
 
 type AdminBackupHandler struct {
 	db     *sql.DB
+	driver string
 	dbPath string
 	logger *slog.Logger
 }
 
-func NewAdminBackupHandler(database *sql.DB, dbPath string, logger *slog.Logger) *AdminBackupHandler {
+func NewAdminBackupHandler(driver string, database *sql.DB, dbPath string, logger *slog.Logger) *AdminBackupHandler {
 	return &AdminBackupHandler{
 		db:     database,
+		driver: driver,
 		dbPath: dbPath,
 		logger: logger,
 	}
+}
+
+// notImplementedForPostgres centralises the response for the two
+// admin backup endpoints when the binary is running against Postgres.
+// Returns true (and writes the response) when the request should
+// stop; false when the active backend supports the operation and
+// the caller should proceed.
+func (h *AdminBackupHandler) notImplementedForPostgres(w http.ResponseWriter, r *http.Request, op string) bool {
+	if h.driver != db.DriverPostgres {
+		return false
+	}
+	respondError(w, r, http.StatusNotImplemented, "POSTGRES_BACKUP_NOT_SUPPORTED",
+		fmt.Sprintf("%s is not available when the backend is Postgres — use pg_dump / pg_restore against the cluster directly", op))
+	return true
 }
 
 // Download streams a fresh consistent snapshot of the SQLite
@@ -61,6 +83,9 @@ func NewAdminBackupHandler(database *sql.DB, dbPath string, logger *slog.Logger)
 // includes a UTC timestamp so multiple downloads in a session don't
 // overwrite each other in the operator's Downloads folder.
 func (h *AdminBackupHandler) Download(w http.ResponseWriter, r *http.Request) {
+	if h.notImplementedForPostgres(w, r, "Backup download") {
+		return
+	}
 	dir := filepath.Dir(h.dbPath)
 	stamp := time.Now().UTC().Format("20060102-150405")
 	tmpPath := filepath.Join(dir, fmt.Sprintf(".backup-%s.db", stamp))
@@ -115,6 +140,9 @@ func (h *AdminBackupHandler) Download(w http.ResponseWriter, r *http.Request) {
 // next process boot (see db.ApplyPendingRestoreIfAny). The response
 // always tells the operator to restart — there's no live swap mode.
 func (h *AdminBackupHandler) Upload(w http.ResponseWriter, r *http.Request) {
+	if h.notImplementedForPostgres(w, r, "Backup restore") {
+		return
+	}
 	// Cap the body so a malicious or runaway upload doesn't fill the
 	// data volume. ParseMultipartForm reads up to its argument as the
 	// in-memory cutoff; the rest spills to a temp file the stdlib

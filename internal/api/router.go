@@ -512,6 +512,7 @@ func NewRouter(deps Dependencies) http.Handler {
 				}
 				sysHandler := handlers.NewSystemHandler(handlers.SystemHandlerConfig{
 					DB:             deps.Database,
+					Driver:         deps.Config.Database.Driver,
 					Streams:        sysStreams,
 					Libraries:      sysLibs,
 					Settings:       deps.Settings,
@@ -582,7 +583,7 @@ func NewRouter(deps Dependencies) http.Handler {
 					// uses for its other system endpoints.
 					if deps.Database != nil {
 						backupHandler := handlers.NewAdminBackupHandler(
-							deps.Database, deps.Config.Database.Path, deps.Logger,
+							deps.Config.Database.Driver, deps.Database, deps.Config.Database.Path, deps.Logger,
 						)
 						r.Get("/backup", backupHandler.Download)
 						r.Post("/backup/restore", backupHandler.Upload)
