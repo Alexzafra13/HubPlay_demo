@@ -53,7 +53,7 @@ func NewRepositories(driver string, database *sql.DB) *Repositories {
 		MediaStreams:       NewMediaStreamRepository(driver, database),
 		Images:             NewImageRepository(database),
 		UserData:           NewUserDataRepository(driver, database),
-		Channels:           NewChannelRepository(database),
+		Channels:           NewChannelRepository(driver, database),
 		ChannelFavorites:   NewChannelFavoritesRepository(database),
 		ChannelWatchHistory: NewChannelWatchHistoryRepository(database),
 		EPGPrograms:        NewEPGProgramRepository(database),

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"hubplay/internal/db/sqlc"
+	"hubplay/internal/db/sqlc_pg"
 )
 
 // Channel represents an IPTV channel.
@@ -21,31 +22,57 @@ import (
 // really dead, so the operator isn't spammed with transient-error
 // reports and viewers don't click through dead tiles.
 type Channel struct {
-	ID                   string
-	LibraryID            string
-	Name                 string
-	Number               int
-	GroupName            string
-	LogoURL              string
-	StreamURL            string
-	TvgID                string
-	Language             string
-	Country              string
-	IsActive             bool
-	AddedAt              time.Time
-	LastProbeAt          time.Time
-	LastProbeStatus      string // "ok" | "error" | "" (never probed)
-	LastProbeError       string
-	ConsecutiveFailures  int
+	ID                  string
+	LibraryID           string
+	Name                string
+	Number              int
+	GroupName           string
+	LogoURL             string
+	StreamURL           string
+	TvgID               string
+	Language            string
+	Country             string
+	IsActive            bool
+	AddedAt             time.Time
+	LastProbeAt         time.Time
+	LastProbeStatus     string // "ok" | "error" | "" (never probed)
+	LastProbeError      string
+	ConsecutiveFailures int
 }
 
+// ChannelRepository — dual-dialect (Pattern A + Pattern B). The sqlc
+// surface (Create, GetByID, ListByLibrary, SetActive, Groups,
+// ReplaceForLibrary tx) branches per-call on `useSQLite()`. The raw-SQL
+// surface (Listlivetv, the four health writers, ListUnhealthy /
+// HealthSummary / ListHealthy / ListWithoutEPG, UpdateTvgID) uses
+// `rewritePlaceholders` for `?` → `$N`.
+//
+// BOOLEAN gotcha: `is_active = 1` literals are SQLite-only (BOOLEAN
+// stored as INTEGER). The raw-SQL paths use `is_active` (truthy in
+// both dialects) instead.
 type ChannelRepository struct {
 	db *sql.DB
-	q  *sqlc.Queries
+	sq *sqlc.Queries
+	pq *sqlc_pg.Queries
 }
 
-func NewChannelRepository(database *sql.DB) *ChannelRepository {
-	return &ChannelRepository{db: database, q: sqlc.New(database)}
+func NewChannelRepository(driver string, database *sql.DB) *ChannelRepository {
+	r := &ChannelRepository{db: database}
+	if IsPostgres(driver) {
+		r.pq = sqlc_pg.New(database)
+	} else {
+		r.sq = sqlc.New(database)
+	}
+	return r
+}
+
+func (r *ChannelRepository) useSQLite() bool { return r.sq != nil }
+
+func (r *ChannelRepository) driver() string {
+	if r.useSQLite() {
+		return DriverSQLite
+	}
+	return DriverPostgres
 }
 
 // ErrChannelNotFound is returned when a channel doesn't exist.
@@ -53,7 +80,12 @@ var ErrChannelNotFound = fmt.Errorf("channel not found")
 
 // Create inserts a new channel.
 func (r *ChannelRepository) Create(ctx context.Context, ch *Channel) error {
-	err := r.q.CreateChannel(ctx, channelToCreateParams(ch))
+	var err error
+	if r.useSQLite() {
+		err = r.sq.CreateChannel(ctx, channelToSqliteCreateParams(ch))
+	} else {
+		err = r.pq.CreateChannel(ctx, channelToPgCreateParams(ch))
+	}
 	if err != nil {
 		return fmt.Errorf("create channel: %w", err)
 	}
@@ -62,31 +94,56 @@ func (r *ChannelRepository) Create(ctx context.Context, ch *Channel) error {
 
 // GetByID returns a channel by ID.
 func (r *ChannelRepository) GetByID(ctx context.Context, id string) (*Channel, error) {
-	row, err := r.q.GetChannelByID(ctx, id)
+	if r.useSQLite() {
+		row, err := r.sq.GetChannelByID(ctx, id)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("channel %s: %w", id, ErrChannelNotFound)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("get channel: %w", err)
+		}
+		ch := channelFromSqliteGetRow(row)
+		return &ch, nil
+	}
+	row, err := r.pq.GetChannelByID(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("channel %s: %w", id, ErrChannelNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get channel: %w", err)
 	}
-	ch := channelFromGetRow(row)
+	ch := channelFromPgGetRow(row)
 	return &ch, nil
 }
 
 // ListByLibrary returns all channels in a library.
 func (r *ChannelRepository) ListByLibrary(ctx context.Context, libraryID string, activeOnly bool) ([]*Channel, error) {
-	if activeOnly {
-		rows, err := r.q.ListActiveChannelsByLibrary(ctx, libraryID)
+	if r.useSQLite() {
+		if activeOnly {
+			rows, err := r.sq.ListActiveChannelsByLibrary(ctx, libraryID)
+			if err != nil {
+				return nil, fmt.Errorf("list channels: %w", err)
+			}
+			return channelsFromSqliteActiveRows(rows), nil
+		}
+		rows, err := r.sq.ListChannelsByLibrary(ctx, libraryID)
 		if err != nil {
 			return nil, fmt.Errorf("list channels: %w", err)
 		}
-		return channelsFromActiveRows(rows), nil
+		return channelsFromSqliteListRows(rows), nil
 	}
-	rows, err := r.q.ListChannelsByLibrary(ctx, libraryID)
+	if activeOnly {
+		rows, err := r.pq.ListActiveChannelsByLibrary(ctx, libraryID)
+		if err != nil {
+			return nil, fmt.Errorf("list channels: %w", err)
+		}
+		return channelsFromPgActiveRows(rows), nil
+	}
+	rows, err := r.pq.ListChannelsByLibrary(ctx, libraryID)
 	if err != nil {
 		return nil, fmt.Errorf("list channels: %w", err)
 	}
-	return channelsFromListRows(rows), nil
+	return channelsFromPgListRows(rows), nil
 }
 
 // ListLivetvChannels returns every channel that lives in a livetv-
@@ -101,7 +158,7 @@ func (r *ChannelRepository) ListByLibrary(ctx context.Context, libraryID string,
 // project keeps a small allow-list of raw queries (5 today) for
 // exactly this kind of cross-table read.
 func (r *ChannelRepository) ListLivetvChannels(ctx context.Context) ([]*Channel, error) {
-	rows, err := r.db.QueryContext(ctx,
+	query := rewritePlaceholders(r.driver(),
 		`SELECT c.id, c.library_id, c.name, COALESCE(c.number, 0), COALESCE(c.group_name,''),
 		        COALESCE(c.logo_url,''), c.stream_url, COALESCE(c.tvg_id,''),
 		        COALESCE(c.language,''), COALESCE(c.country,''), c.is_active, c.added_at
@@ -109,6 +166,7 @@ func (r *ChannelRepository) ListLivetvChannels(ctx context.Context) ([]*Channel,
 		 INNER JOIN libraries l ON l.id = c.library_id
 		 WHERE l.content_type = 'livetv'
 		 ORDER BY c.library_id, COALESCE(c.number, 999999), c.name`)
+	rows, err := r.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("list livetv channels: %w", err)
 	}
@@ -116,15 +174,11 @@ func (r *ChannelRepository) ListLivetvChannels(ctx context.Context) ([]*Channel,
 
 	var out []*Channel
 	for rows.Next() {
-		var c Channel
-		if err := rows.Scan(
-			&c.ID, &c.LibraryID, &c.Name, &c.Number, &c.GroupName,
-			&c.LogoURL, &c.StreamURL, &c.TvgID,
-			&c.Language, &c.Country, &c.IsActive, &c.AddedAt,
-		); err != nil {
-			return nil, fmt.Errorf("scan channel: %w", err)
+		c, err := scanChannelBasic(rows)
+		if err != nil {
+			return nil, err
 		}
-		out = append(out, &c)
+		out = append(out, c)
 	}
 	return out, rows.Err()
 }
@@ -137,15 +191,25 @@ func (r *ChannelRepository) ReplaceForLibrary(ctx context.Context, libraryID str
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	qtx := r.q.WithTx(tx)
-
-	if err := qtx.DeleteChannelsByLibrary(ctx, libraryID); err != nil {
-		return fmt.Errorf("delete old channels: %w", err)
-	}
-
-	for _, ch := range channels {
-		if err := qtx.CreateChannel(ctx, channelToCreateParams(ch)); err != nil {
-			return fmt.Errorf("insert channel %s: %w", ch.Name, err)
+	if r.useSQLite() {
+		qtx := r.sq.WithTx(tx)
+		if err := qtx.DeleteChannelsByLibrary(ctx, libraryID); err != nil {
+			return fmt.Errorf("delete old channels: %w", err)
+		}
+		for _, ch := range channels {
+			if err := qtx.CreateChannel(ctx, channelToSqliteCreateParams(ch)); err != nil {
+				return fmt.Errorf("insert channel %s: %w", ch.Name, err)
+			}
+		}
+	} else {
+		qtx := r.pq.WithTx(tx)
+		if err := qtx.DeleteChannelsByLibrary(ctx, libraryID); err != nil {
+			return fmt.Errorf("delete old channels: %w", err)
+		}
+		for _, ch := range channels {
+			if err := qtx.CreateChannel(ctx, channelToPgCreateParams(ch)); err != nil {
+				return fmt.Errorf("insert channel %s: %w", ch.Name, err)
+			}
 		}
 	}
 
@@ -154,10 +218,21 @@ func (r *ChannelRepository) ReplaceForLibrary(ctx context.Context, libraryID str
 
 // SetActive enables or disables a channel.
 func (r *ChannelRepository) SetActive(ctx context.Context, id string, active bool) error {
-	n, err := r.q.SetChannelActive(ctx, sqlc.SetChannelActiveParams{
-		IsActive: active,
-		ID:       id,
-	})
+	var (
+		n   int64
+		err error
+	)
+	if r.useSQLite() {
+		n, err = r.sq.SetChannelActive(ctx, sqlc.SetChannelActiveParams{
+			IsActive: active,
+			ID:       id,
+		})
+	} else {
+		n, err = r.pq.SetChannelActive(ctx, sqlc_pg.SetChannelActiveParams{
+			IsActive: active,
+			ID:       id,
+		})
+	}
 	if err != nil {
 		return fmt.Errorf("set active: %w", err)
 	}
@@ -196,13 +271,14 @@ const UnhealthyThreshold = 3
 // that was flaky yesterday comes back automatically.
 func (r *ChannelRepository) RecordProbeSuccess(ctx context.Context, channelID string) error {
 	now := time.Now().UTC()
-	_, err := r.db.ExecContext(ctx,
+	query := rewritePlaceholders(r.driver(),
 		`UPDATE channels SET
 		    last_probe_at        = ?,
 		    last_probe_status    = 'ok',
 		    last_probe_error     = '',
 		    consecutive_failures = 0
-		 WHERE id = ?`, now, channelID)
+		 WHERE id = ?`)
+	_, err := r.db.ExecContext(ctx, query, now, channelID)
 	if err != nil {
 		return fmt.Errorf("record probe success: %w", err)
 	}
@@ -217,13 +293,14 @@ func (r *ChannelRepository) RecordProbeFailure(ctx context.Context, channelID, e
 	if len([]rune(errMsg)) > probeErrorLimit {
 		errMsg = string([]rune(errMsg)[:probeErrorLimit])
 	}
-	_, err := r.db.ExecContext(ctx,
+	query := rewritePlaceholders(r.driver(),
 		`UPDATE channels SET
 		    last_probe_at        = ?,
 		    last_probe_status    = 'error',
 		    last_probe_error     = ?,
 		    consecutive_failures = consecutive_failures + 1
-		 WHERE id = ?`, now, errMsg, channelID)
+		 WHERE id = ?`)
+	_, err := r.db.ExecContext(ctx, query, now, errMsg, channelID)
 	if err != nil {
 		return fmt.Errorf("record probe failure: %w", err)
 	}
@@ -235,13 +312,14 @@ func (r *ChannelRepository) RecordProbeFailure(ctx context.Context, channelID, e
 // channel is working (e.g. they just tested it in a media player
 // outside the app).
 func (r *ChannelRepository) ResetHealth(ctx context.Context, channelID string) error {
-	_, err := r.db.ExecContext(ctx,
+	query := rewritePlaceholders(r.driver(),
 		`UPDATE channels SET
 		    last_probe_at        = NULL,
 		    last_probe_status    = '',
 		    last_probe_error     = '',
 		    consecutive_failures = 0
-		 WHERE id = ?`, channelID)
+		 WHERE id = ?`)
+	_, err := r.db.ExecContext(ctx, query, channelID)
 	if err != nil {
 		return fmt.Errorf("reset health: %w", err)
 	}
@@ -255,7 +333,7 @@ func (r *ChannelRepository) ListUnhealthyByLibrary(ctx context.Context, libraryI
 	if minFailures <= 0 {
 		minFailures = UnhealthyThreshold
 	}
-	rows, err := r.db.QueryContext(ctx,
+	query := rewritePlaceholders(r.driver(),
 		`SELECT id, library_id, name, COALESCE(number, 0), COALESCE(group_name,''),
 		        COALESCE(logo_url,''), stream_url, COALESCE(tvg_id,''),
 		        COALESCE(language,''), COALESCE(country,''), is_active, added_at,
@@ -263,8 +341,8 @@ func (r *ChannelRepository) ListUnhealthyByLibrary(ctx context.Context, libraryI
 		        consecutive_failures
 		 FROM channels
 		 WHERE library_id = ? AND consecutive_failures >= ?
-		 ORDER BY consecutive_failures DESC, name ASC`,
-		libraryID, minFailures)
+		 ORDER BY consecutive_failures DESC, name ASC`)
+	rows, err := r.db.QueryContext(ctx, query, libraryID, minFailures)
 	if err != nil {
 		return nil, fmt.Errorf("list unhealthy channels: %w", err)
 	}
@@ -304,18 +382,20 @@ type ChannelHealthSummary struct {
 // Filtered conditional aggregates (`COUNT(*) FILTER (WHERE ...)`)
 // keep the query a single scan over the channels table; the EPG
 // subquery is correlated per channel, which the existing index on
-// epg_programs(channel_id, start_time, end_time) covers.
+// epg_programs(channel_id, start_time, end_time) covers. SQLite has
+// supported FILTER since 3.30 so the same query parses on both
+// dialects.
 func (r *ChannelRepository) HealthSummaryByLibrary(
 	ctx context.Context,
 	libraryID string,
 	since, until time.Time,
 ) (ChannelHealthSummary, error) {
-	const query = `
-		SELECT
-			COUNT(*) FILTER (WHERE c.is_active = 1)                             AS total_active,
-			COUNT(*) FILTER (WHERE c.consecutive_failures >= ?)                 AS unhealthy,
+	query := rewritePlaceholders(r.driver(),
+		`SELECT
+			COUNT(*) FILTER (WHERE c.is_active)                                  AS total_active,
+			COUNT(*) FILTER (WHERE c.consecutive_failures >= ?)                  AS unhealthy,
 			COUNT(*) FILTER (
-				WHERE c.is_active = 1
+				WHERE c.is_active
 				  AND NOT EXISTS (
 				      SELECT 1 FROM epg_programs p
 				      WHERE p.channel_id = c.id
@@ -324,7 +404,7 @@ func (r *ChannelRepository) HealthSummaryByLibrary(
 				  )
 			) AS without_epg
 		FROM channels c
-		WHERE c.library_id = ?`
+		WHERE c.library_id = ?`)
 
 	var sum ChannelHealthSummary
 	err := r.db.QueryRowContext(ctx, query,
@@ -341,16 +421,16 @@ func (r *ChannelRepository) HealthSummaryByLibrary(
 // ascending — same order the M3U import produces and what viewers
 // expect in the carousel / guide.
 func (r *ChannelRepository) ListHealthyByLibrary(ctx context.Context, libraryID string) ([]*Channel, error) {
-	rows, err := r.db.QueryContext(ctx,
+	query := rewritePlaceholders(r.driver(),
 		`SELECT id, library_id, name, COALESCE(number, 0), COALESCE(group_name,''),
 		        COALESCE(logo_url,''), stream_url, COALESCE(tvg_id,''),
 		        COALESCE(language,''), COALESCE(country,''), is_active, added_at,
 		        COALESCE(last_probe_at, ''), last_probe_status, last_probe_error,
 		        consecutive_failures
 		 FROM channels
-		 WHERE library_id = ? AND is_active = 1 AND consecutive_failures < ?
-		 ORDER BY COALESCE(number, 999999), name`,
-		libraryID, UnhealthyThreshold)
+		 WHERE library_id = ? AND is_active AND consecutive_failures < ?
+		 ORDER BY COALESCE(number, 999999), name`)
+	rows, err := r.db.QueryContext(ctx, query, libraryID, UnhealthyThreshold)
 	if err != nil {
 		return nil, fmt.Errorf("list healthy channels: %w", err)
 	}
@@ -365,6 +445,25 @@ func (r *ChannelRepository) ListHealthyByLibrary(ctx context.Context, libraryID 
 		out = append(out, ch)
 	}
 	return out, rows.Err()
+}
+
+// scanChannelBasic scans a row from a SELECT that returns the 12
+// non-health columns (id, library_id, name, number, group_name,
+// logo_url, stream_url, tvg_id, language, country, is_active,
+// added_at). `number` is INTEGER → int64 SQLite, int32 Postgres after
+// the COALESCE(number, 0) wrap, so we read into the row's `any`
+// variant — both drivers happily decode numeric values into
+// `int` directly when the column is non-NULL after COALESCE.
+func scanChannelBasic(rows *sql.Rows) (*Channel, error) {
+	var c Channel
+	if err := rows.Scan(
+		&c.ID, &c.LibraryID, &c.Name, &c.Number, &c.GroupName,
+		&c.LogoURL, &c.StreamURL, &c.TvgID,
+		&c.Language, &c.Country, &c.IsActive, &c.AddedAt,
+	); err != nil {
+		return nil, fmt.Errorf("scan channel: %w", err)
+	}
+	return &c, nil
 }
 
 func scanChannelWithHealth(rows *sql.Rows) (*Channel, error) {
@@ -395,8 +494,8 @@ func (r *ChannelRepository) UpdateTvgID(ctx context.Context, channelID, tvgID st
 	if tvgID != "" {
 		value = sql.NullString{String: tvgID, Valid: true}
 	}
-	res, err := r.db.ExecContext(ctx,
-		`UPDATE channels SET tvg_id = ? WHERE id = ?`, value, channelID)
+	query := rewritePlaceholders(r.driver(), `UPDATE channels SET tvg_id = ? WHERE id = ?`)
+	res, err := r.db.ExecContext(ctx, query, value, channelID)
 	if err != nil {
 		return fmt.Errorf("update tvg_id: %w", err)
 	}
@@ -416,7 +515,7 @@ func (r *ChannelRepository) UpdateTvgID(ctx context.Context, channelID, tvgID st
 // typical admin use sends now-2h..now+24h to match the user-facing
 // guide window.
 func (r *ChannelRepository) ListWithoutEPGByLibrary(ctx context.Context, libraryID string, since, until time.Time) ([]*Channel, error) {
-	rows, err := r.db.QueryContext(ctx,
+	query := rewritePlaceholders(r.driver(),
 		`SELECT c.id, c.library_id, c.name, COALESCE(c.number, 0),
 		        COALESCE(c.group_name,''), COALESCE(c.logo_url,''),
 		        c.stream_url, COALESCE(c.tvg_id,''),
@@ -426,15 +525,15 @@ func (r *ChannelRepository) ListWithoutEPGByLibrary(ctx context.Context, library
 		        c.last_probe_error, c.consecutive_failures
 		 FROM channels c
 		 WHERE c.library_id = ?
-		   AND c.is_active = 1
+		   AND c.is_active
 		   AND NOT EXISTS (
 		       SELECT 1 FROM epg_programs p
 		       WHERE p.channel_id = c.id
 		         AND p.end_time   > ?
 		         AND p.start_time < ?
 		   )
-		 ORDER BY COALESCE(c.number, 999999), c.name`,
-		libraryID, since.UTC(), until.UTC())
+		 ORDER BY COALESCE(c.number, 999999), c.name`)
+	rows, err := r.db.QueryContext(ctx, query, libraryID, since.UTC(), until.UTC())
 	if err != nil {
 		return nil, fmt.Errorf("list channels without epg: %w", err)
 	}
@@ -453,7 +552,15 @@ func (r *ChannelRepository) ListWithoutEPGByLibrary(ctx context.Context, library
 
 // Groups returns distinct group names for a library.
 func (r *ChannelRepository) Groups(ctx context.Context, libraryID string) ([]string, error) {
-	rows, err := r.q.ListChannelGroups(ctx, libraryID)
+	var (
+		rows []sql.NullString
+		err  error
+	)
+	if r.useSQLite() {
+		rows, err = r.sq.ListChannelGroups(ctx, libraryID)
+	} else {
+		rows, err = r.pq.ListChannelGroups(ctx, libraryID)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("list groups: %w", err)
 	}
@@ -468,7 +575,7 @@ func (r *ChannelRepository) Groups(ctx context.Context, libraryID string) ([]str
 
 // ── row mapping helpers ─────────────────────────────────────────────────
 
-func channelToCreateParams(ch *Channel) sqlc.CreateChannelParams {
+func channelToSqliteCreateParams(ch *Channel) sqlc.CreateChannelParams {
 	return sqlc.CreateChannelParams{
 		ID:        ch.ID,
 		LibraryID: ch.LibraryID,
@@ -485,7 +592,24 @@ func channelToCreateParams(ch *Channel) sqlc.CreateChannelParams {
 	}
 }
 
-func channelFromGetRow(r sqlc.GetChannelByIDRow) Channel {
+func channelToPgCreateParams(ch *Channel) sqlc_pg.CreateChannelParams {
+	return sqlc_pg.CreateChannelParams{
+		ID:        ch.ID,
+		LibraryID: ch.LibraryID,
+		Name:      ch.Name,
+		Number:    sql.NullInt32{Int32: int32(ch.Number), Valid: true},
+		GroupName: nullableString(ch.GroupName),
+		LogoUrl:   nullableString(ch.LogoURL),
+		StreamUrl: ch.StreamURL,
+		TvgID:     nullableString(ch.TvgID),
+		Language:  nullableString(ch.Language),
+		Country:   nullableString(ch.Country),
+		IsActive:  ch.IsActive,
+		AddedAt:   ch.AddedAt,
+	}
+}
+
+func channelFromSqliteGetRow(r sqlc.GetChannelByIDRow) Channel {
 	return Channel{
 		ID:        r.ID,
 		LibraryID: r.LibraryID,
@@ -502,7 +626,24 @@ func channelFromGetRow(r sqlc.GetChannelByIDRow) Channel {
 	}
 }
 
-func channelFromListRow(r sqlc.ListChannelsByLibraryRow) Channel {
+func channelFromPgGetRow(r sqlc_pg.GetChannelByIDRow) Channel {
+	return Channel{
+		ID:        r.ID,
+		LibraryID: r.LibraryID,
+		Name:      r.Name,
+		Number:    int(r.Number.Int32),
+		GroupName: r.GroupName,
+		LogoURL:   r.LogoUrl,
+		StreamURL: r.StreamUrl,
+		TvgID:     r.TvgID,
+		Language:  r.Language,
+		Country:   r.Country,
+		IsActive:  r.IsActive,
+		AddedAt:   r.AddedAt,
+	}
+}
+
+func channelFromSqliteListRow(r sqlc.ListChannelsByLibraryRow) Channel {
 	return Channel{
 		ID:        r.ID,
 		LibraryID: r.LibraryID,
@@ -519,7 +660,24 @@ func channelFromListRow(r sqlc.ListChannelsByLibraryRow) Channel {
 	}
 }
 
-func channelFromActiveRow(r sqlc.ListActiveChannelsByLibraryRow) Channel {
+func channelFromPgListRow(r sqlc_pg.ListChannelsByLibraryRow) Channel {
+	return Channel{
+		ID:        r.ID,
+		LibraryID: r.LibraryID,
+		Name:      r.Name,
+		Number:    int(r.Number.Int32),
+		GroupName: r.GroupName,
+		LogoURL:   r.LogoUrl,
+		StreamURL: r.StreamUrl,
+		TvgID:     r.TvgID,
+		Language:  r.Language,
+		Country:   r.Country,
+		IsActive:  r.IsActive,
+		AddedAt:   r.AddedAt,
+	}
+}
+
+func channelFromSqliteActiveRow(r sqlc.ListActiveChannelsByLibraryRow) Channel {
 	return Channel{
 		ID:        r.ID,
 		LibraryID: r.LibraryID,
@@ -536,25 +694,66 @@ func channelFromActiveRow(r sqlc.ListActiveChannelsByLibraryRow) Channel {
 	}
 }
 
-func channelsFromListRows(rows []sqlc.ListChannelsByLibraryRow) []*Channel {
+func channelFromPgActiveRow(r sqlc_pg.ListActiveChannelsByLibraryRow) Channel {
+	return Channel{
+		ID:        r.ID,
+		LibraryID: r.LibraryID,
+		Name:      r.Name,
+		Number:    int(r.Number.Int32),
+		GroupName: r.GroupName,
+		LogoURL:   r.LogoUrl,
+		StreamURL: r.StreamUrl,
+		TvgID:     r.TvgID,
+		Language:  r.Language,
+		Country:   r.Country,
+		IsActive:  r.IsActive,
+		AddedAt:   r.AddedAt,
+	}
+}
+
+func channelsFromSqliteListRows(rows []sqlc.ListChannelsByLibraryRow) []*Channel {
 	if len(rows) == 0 {
 		return nil
 	}
 	out := make([]*Channel, len(rows))
 	for i, row := range rows {
-		ch := channelFromListRow(row)
+		ch := channelFromSqliteListRow(row)
 		out[i] = &ch
 	}
 	return out
 }
 
-func channelsFromActiveRows(rows []sqlc.ListActiveChannelsByLibraryRow) []*Channel {
+func channelsFromPgListRows(rows []sqlc_pg.ListChannelsByLibraryRow) []*Channel {
 	if len(rows) == 0 {
 		return nil
 	}
 	out := make([]*Channel, len(rows))
 	for i, row := range rows {
-		ch := channelFromActiveRow(row)
+		ch := channelFromPgListRow(row)
+		out[i] = &ch
+	}
+	return out
+}
+
+func channelsFromSqliteActiveRows(rows []sqlc.ListActiveChannelsByLibraryRow) []*Channel {
+	if len(rows) == 0 {
+		return nil
+	}
+	out := make([]*Channel, len(rows))
+	for i, row := range rows {
+		ch := channelFromSqliteActiveRow(row)
+		out[i] = &ch
+	}
+	return out
+}
+
+func channelsFromPgActiveRows(rows []sqlc_pg.ListActiveChannelsByLibraryRow) []*Channel {
+	if len(rows) == 0 {
+		return nil
+	}
+	out := make([]*Channel, len(rows))
+	for i, row := range rows {
+		ch := channelFromPgActiveRow(row)
 		out[i] = &ch
 	}
 	return out
