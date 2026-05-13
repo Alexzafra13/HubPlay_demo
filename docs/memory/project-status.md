@@ -1,6 +1,65 @@
 # Estado del proyecto
 
-> 🎬 **Sesión 2026-05-13 (rama `claude/sesion-f-pgx-wire`, 1 commit, Sesión F — pgx wire end-to-end)** — el binario ya arranca contra Postgres real. La migración dual-dialect (E.1–E.13 + F) está **completa**. Pendiente de merge: 1 commit sobre main.
+> 🎬 **Sesión 2026-05-13 (rama `claude/sesion-f-pgx-wire`, 3 commits, Sesión F + G — pgx wire + CI matrix + bug fixes)** — soporte Postgres production-ready. PR [#272](https://github.com/Alexzafra13/HubPlay_demo/pull/272) abierto con Sesión F; ahora extendido con Sesión G (CI matrix sqlite+postgres + 6 bugs reales arreglados + drift guard + admin_backup branch + docs operacionales).
+>
+> ## 🛡️ Sesión G — Hardening: CI matrix + bugs reales pg + docs
+>
+> Tras Sesión F (wire pgx end-to-end con UN smoke-test manual), Sesión G entrega la infraestructura para detectar regresiones de pg de forma automática y arregla los bugs reales que el primer run-against-pg destapó.
+>
+> **Infraestructura**:
+>
+> 1. **`testutil` parametrizado** (`internal/testutil/testutil.go`):
+>    - `NewTestDB(t)` ramifica por `HUBPLAY_TEST_DRIVER`. Default sqlite; "postgres" → database-per-test contra `HUBPLAY_TEST_POSTGRES_DSN`.
+>    - Helpers: `Driver()`, `Exec(t, db, query, args...)` (auto `?` → `$N`), `SkipIfPostgres(t, reason)`.
+>    - Pool admin pg singleton (`sync.Once`); cleanup `DROP DATABASE WITH (FORCE)` por test.
+>
+> 2. **CI workflow** (`.github/workflows/ci.yml`):
+>    - Job `test-postgres` reusa el suite completo con env vars + service `postgres:16-alpine`. Race + coverage idem que sqlite.
+>
+> 3. **Drift guard** (`internal/db/migrations_parity_test.go`):
+>    - `TestMigrationParity` falla si alguien añade sqlite migration sin gemela postgres (o viceversa).
+>
+> 4. **`admin_backup` branch driver**:
+>    - Download/Upload → 501 limpio en pg con mensaje a `pg_dump`/`pg_restore`. Constructor gana `driver`; router pasa `cfg.Database.Driver`.
+>
+> 5. **Docs operacional**:
+>    - `hubplay.example.yaml`: bloque postgres comentado con DSN ejemplo.
+>    - `docs/operations/postgres.md` (NEW): runbook fresh install, migración con pgloader, pg_dump/pg_restore, pool tuning, known limitations.
+>
+> **Bugs REALES de dual-dialect destapados y arreglados** (afectarían a operadores pg en producción):
+>
+> | Bug | Fichero | Arreglo |
+> |---|---|---|
+> | `COALESCE(is_default, 0)` en BOOLEAN | `queries-postgres/media_streams.sql` | `COALESCE(..., FALSE)` |
+> | `COALESCE(last_probe_at, '')` en TIMESTAMPTZ | `channel_repository.go` (×2) | quitar COALESCE; scanner ya maneja NULL |
+> | `SELECT EXISTS(...)` scan a int | `library_repository.go::UserHasAccess` | `CASE WHEN EXISTS(...) THEN 1 ELSE 0 END` |
+> | `SystemHandler.TopItems` BOOLEAN + `?` | `system.go` | truthy + `RewritePlaceholders`; config gana `Driver` |
+> | `SystemHandler.StreamActivity` SUBSTR sqlite-only | `system.go` | branch sqlite vs `TO_CHAR` pg |
+> | `isUniqueConstraintError` typed | `library_epg_sources_repository.go` | `errors.As(*pgconn.PgError)` + `pgerrcode.UniqueViolation` |
+> | Test assertion sqlite-only msg | `library/service_test.go` | acepta sqlite + pg msg forms |
+>
+> **Bulk refactor (mecánico)**: replace `Repository("sqlite", ...)` → `Repository(testutil.Driver(), ...)` en 19 ficheros (~222 ocurrencias). `database.ExecContext(?,...)` → `testutil.Exec(t, db, ?,...)` en federation + library tests.
+>
+> **Tests sqlite-only marcados con razón** (8 totales): `TestEPG_CoerceSQLiteTime_*` (parser sqlite legacy), `TestHomeRepository_Trending_HandlesLegacyMonotonicTimestamp` (seed sqlite time string), `TestMigration031/041_*` (INSERT OR IGNORE + json_each), `TestKeyStore_Rotate*` + `TestAdminAuth_Rotate_ExplicitZeroOverlap` (precisión nanosegundo vs microsegundo pg TIMESTAMPTZ).
+>
+> **Verificación end-to-end final**:
+>
+> ```
+> # sqlite (default)
+> go test ./...                                     # 22 paquetes OK
+>
+> # postgres
+> docker run -d --name pg --network smoke -e POSTGRES_PASSWORD=test postgres:16-alpine
+> HUBPLAY_TEST_DRIVER=postgres \
+>   HUBPLAY_TEST_POSTGRES_DSN="postgres://postgres:test@pg:5432/postgres?sslmode=disable" \
+>   go test ./...                                   # 22 paquetes OK (8 skipped con razón)
+> ```
+>
+> `TestMigrationParity` verde (41 migrations alineadas). `go vet ./...` clean.
+>
+> ## 🚀 Sesión F — wire pgx/v5/stdlib (binario contra Postgres real)
+>
+> Tras 28/28 repos dual-dialect, esta sesión cierra el ciclo: el binario `hubplay` ya soporta `database.driver: postgres` en `hubplay.yaml`. Sesión E + F = migración Postgres terminada.
 >
 > ## 🚀 Sesión F — wire pgx/v5/stdlib (binario contra Postgres real)
 >
@@ -72,12 +131,13 @@
 >
 > El binario es 100% dual-dialect. `cfg.Database.Driver: postgres` + `dsn: postgres://...` en `hubplay.yaml` es un deployment válido. Operadores actuales (sqlite) no notan nada: el camino por defecto sigue idéntico al pre-Sesión-D.
 >
-> **Próximos pasos sugeridos (post-Sesión F, opcionales)**:
+> **Próximos pasos sugeridos (post-Sesión G, opcionales)**:
 >
-> 1. **Integración postgres en CI** — añadir un job de Github Actions que arranca un `postgres:16-alpine` service y corre `go run ./cmd/pg-smoke` para que cualquier PR regresivo lo detecte.
-> 2. **Postgres backup/restore admin**: hoy `ApplyPendingRestoreIfAny` es sqlite-only. Implementar el equivalente para pg (`pg_dump`/`pg_restore` via subprocess) si los operadores lo piden — no urgente.
-> 3. **Tunear pool size por defecto**: el 25 max conns es seguro para single-instance, pero un operador con un pgbouncer delante quizás quiere otro número. Considerar exponerlo en config como `database.pool_max_open`.
-> 4. **Eliminar el TODO de migración tipada**: ya migrado a `errors.As(*pgconn.PgError)`. Borrar el comentario del repo cuando se confirme.
+> 1. **Setup wizard UI selector de driver**: hoy el wizard de primera ejecución asume sqlite. Añadir radio SQLite/Postgres + form DSN + endpoint `POST /admin/system/db/test` que hace Open+Ping. ~1h. Documentado como known limitation en `docs/operations/postgres.md`.
+> 2. **Comparator precision-aware para tests Rotate**: 3 tests están skipeados por la divergencia de precisión time.Time (nanosegundo) vs Postgres TIMESTAMPTZ (microsegundo). Implementar helper `assertTimeApprox(t, got, want, time.Microsecond)` y eliminar los skips. ~30min.
+> 3. **Coverage de TestMigration031/041 contra pg**: las migrations pg gemelas aplican y backfillean correctamente (verificado en boot), pero falta test específico que ejercite el resultado en pg. ~30min cada una.
+> 4. **Tunear pool size por defecto**: el 25 max conns es seguro para single-instance, pero un operador con pgbouncer delante quizás quiere otro número. Considerar exponerlo en config como `database.pool_max_open`.
+> 5. **Admin UI con pool stats / driver display**: mostrar driver activo + `sql.DB.Stats()` (in_use/idle/wait_count) en el panel system. ~1h, útil pero no bloqueante.
 >
 > ---
 >
