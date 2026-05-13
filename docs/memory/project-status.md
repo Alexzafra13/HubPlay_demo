@@ -1,5 +1,63 @@
 # Estado del proyecto
 
+> 🎬 **Sesión 2026-05-13 (rama `claude/objective-swartz-6f9f3c`, 5 commits, Sesiones E.11 + E.12 + E.13 — Sesión E COMPLETA, 28/28 repos done)** — continuando dual-dialect tras los 24 ya mergeados (PRs #260, #261, #264, #265, #266). Pendiente de merge: 5 commits sobre main en PR [#268](https://github.com/Alexzafra13/HubPlay_demo/pull/268).
+>
+> ## 🎉 Sesión E COMPLETA — 28/28 repos dual-dialect
+>
+> Tras 13 sesiones (E.1–E.13) y 18 meses de trabajo iterativo, **todos los repositorios de `internal/db/` soportan ambos backends**. El siguiente paso es Sesión F (wire `pgx/v5/stdlib` + `pgxpool` en `main.go`, ~3h) — el primer arranque del binario contra Postgres real.
+>
+> **Sesión E.13 — FederationRepository (862 LOC, último)**:
+>
+> Pattern A para ~22 métodos sqlc-backed + 4 raw-SQL holdouts:
+>
+> 1. **SearchSharedItems** — FTS dual-mecanismo: SQLite `i.rowid IN (... items_fts MATCH ?)` vs Postgres `i.search_vector @@ to_tsquery('simple', ?)`. Construcción vía `buildSearchSharedItemsSQL(driver)` + rewrite en constructor. Reusa `toTSQueryPrefix` de item_repository.go.
+>
+> 2. **attachPrimaryImageColors** — IN list dinámica. BOOLEAN drift `is_primary = 1` → `is_primary`. Rewrite POST-`strings.Join`.
+>
+> 3. **UpsertCachedItems** — INSERT raw pre-rewriteado en constructor. Year divergente (NullInt64 vs NullInt32) → branching de `yearArg` en el bind site.
+>
+> 4. **ListCachedItems** — `COLLATE NOCASE` → `LOWER()` en pg vía helper `caseInsensitiveSort(driver, col)`.
+>
+> **Gotchas de tipos divergentes en Federation**:
+>
+> | Campo | sqlite | pg |
+> |---|---|---|
+> | FederationPeer.LastSeenStatusCode | NullInt64 | NullInt32 |
+> | FederationAuditLog.StatusCode | int64 | int32 |
+> | FederationAuditLog.DurationMs | NullInt64 | NullInt32 |
+> | FederationItemCache.Year | NullInt64 | NullInt32 |
+> | ListSharedItems/ListRecent/ContinueWatching Row.Year | int64 | int32 |
+> | Limit/Offset params | int64 | int32 |
+>
+> Todos resueltos por `if r.useSQLite() { ... } else { ... }` en los call sites con tipos divergentes.
+>
+> **Estado al cierre de Sesión E — 28/28 done**:
+>
+> ✅ **Done** (28): Settings, Users, Sessions, SigningKeys, Library, MediaStreams, Items, UserData, Channels, ChannelFavorites, ChannelWatchHistory, ChannelOverride, EPGPrograms, Image, UserPreferences, Chapter, ExternalID, DeviceCode, ItemValue, Provider, EpisodeSegment, Metadata, People, Collection, IPTVSchedule, LibraryEPGSources, Studio, Home, **Federation (E.13)**.
+>
+> **Verificación al cierre de E.13**:
+>
+> - `go build ./internal/db/... ./cmd/hubplay/...` clean.
+> - `GOOS=linux go build ./...` clean (cross-compile completo del binario).
+> - `go test -count=1 ./internal/db/` 9.2s todos verde.
+> - `TestSQLC_GeneratedFilesMatchQueries` verde (no drift).
+> - `go test ./internal/auth/ ./internal/scanner/ ./internal/iptv/ ./internal/library/ ./internal/federation/` todos verde.
+> - `go vet ./internal/db/... ./internal/federation/... ./internal/library/...` clean.
+>
+> **Próximo paso — Sesión F**:
+>
+> 1. **Wire `pgx/v5/stdlib` + `pgxpool` en main.go** (~3h). Driver string del config selecciona `pgx` cuando `cfg.Database.Driver == "postgres"`, `sqlite` (modernc) en otro caso. `sql.Open("pgx", connStr)` para que el `*sql.DB` que se pasa a `NewRepositories(driver, db)` funcione contra ambos.
+> 2. **Smoke-test end-to-end**: `docker run -d -e POSTGRES_PASSWORD=test postgres:16-alpine`, `goose -dir migrations/postgres postgres "..." up`, arranque `make dev` con `database.driver: postgres` y `database.dsn: postgres://...`. Valida:
+>    - FTS dual-mecanismo (`SearchSharedItems`, `Items.List`).
+>    - FILTER aggregate (`Channels.HealthSummaryByLibrary`).
+>    - GROUP_CONCAT/STRING_AGG (`Home.Recommended`, `Home.BecauseYouWatched`).
+>    - BOOLEAN drift, NullInt32 widening, COLLATE NOCASE → LOWER, isUniqueConstraintError pg.
+> 3. **Migrar isUniqueConstraintError a `errors.As(*pgconn.PgError)`** una vez `pgx` esté en go.mod (TODO embebido en `library_epg_sources_repository.go`).
+>
+> Tiempo total Sesión F: **~3h** (1 sesión).
+>
+> ---
+>
 > 🎬 **Sesión 2026-05-13 (rama `claude/objective-swartz-6f9f3c`, 3 commits, Sesiones E.11 + E.12 — 4 medianos + HomeRepository cerrados)** — continuando dual-dialect tras los 24 ya mergeados (PRs #260, #261, #264, #265, #266). Pendiente de merge: 3 commits sobre main en PR [#268](https://github.com/Alexzafra13/HubPlay_demo/pull/268).
 >
 > **Sesión E.12 — HomeRepository (631 LOC, penúltimo)**:
