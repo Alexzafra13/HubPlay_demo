@@ -1,4 +1,4 @@
-package db_test
+﻿package db_test
 
 import (
 	"context"
@@ -32,7 +32,7 @@ func seedItemForImages(t *testing.T, database *db.LibraryRepository, itemRepo *d
 func TestImageRepository_Create_And_ListByItem(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	libRepo := db.NewLibraryRepository("sqlite", database)
-	itemRepo := db.NewItemRepository(database)
+	itemRepo := db.NewItemRepository("sqlite", database)
 	repo := db.NewImageRepository(database)
 	seedItemForImages(t, libRepo, itemRepo)
 
@@ -71,7 +71,7 @@ func TestImageRepository_Create_And_ListByItem(t *testing.T) {
 func TestImageRepository_GetPrimary(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	libRepo := db.NewLibraryRepository("sqlite", database)
-	itemRepo := db.NewItemRepository(database)
+	itemRepo := db.NewItemRepository("sqlite", database)
 	repo := db.NewImageRepository(database)
 	seedItemForImages(t, libRepo, itemRepo)
 
@@ -105,7 +105,7 @@ func TestImageRepository_GetPrimary_NotFound(t *testing.T) {
 func TestImageRepository_GetByID(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	libRepo := db.NewLibraryRepository("sqlite", database)
-	itemRepo := db.NewItemRepository(database)
+	itemRepo := db.NewItemRepository("sqlite", database)
 	repo := db.NewImageRepository(database)
 	seedItemForImages(t, libRepo, itemRepo)
 
@@ -150,7 +150,7 @@ func TestImageRepository_GetByID_NotFound(t *testing.T) {
 func TestImageRepository_DeleteByID(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	libRepo := db.NewLibraryRepository("sqlite", database)
-	itemRepo := db.NewItemRepository(database)
+	itemRepo := db.NewItemRepository("sqlite", database)
 	repo := db.NewImageRepository(database)
 	seedItemForImages(t, libRepo, itemRepo)
 
@@ -185,7 +185,7 @@ func TestImageRepository_DeleteByID(t *testing.T) {
 func TestImageRepository_SetPrimary(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	libRepo := db.NewLibraryRepository("sqlite", database)
-	itemRepo := db.NewItemRepository(database)
+	itemRepo := db.NewItemRepository("sqlite", database)
 	repo := db.NewImageRepository(database)
 	seedItemForImages(t, libRepo, itemRepo)
 
@@ -230,7 +230,7 @@ func TestImageRepository_SetPrimary(t *testing.T) {
 func TestImageRepository_DeleteByItem(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	libRepo := db.NewLibraryRepository("sqlite", database)
-	itemRepo := db.NewItemRepository(database)
+	itemRepo := db.NewItemRepository("sqlite", database)
 	repo := db.NewImageRepository(database)
 	seedItemForImages(t, libRepo, itemRepo)
 

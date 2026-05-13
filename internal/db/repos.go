@@ -49,7 +49,7 @@ func NewRepositories(driver string, database *sql.DB) *Repositories {
 		Sessions:           NewSessionRepository(driver, database),
 		SigningKeys:        NewSigningKeyRepository(driver, database),
 		Libraries:          NewLibraryRepository(driver, database),
-		Items:              NewItemRepository(database),
+		Items:              NewItemRepository(driver, database),
 		MediaStreams:       NewMediaStreamRepository(driver, database),
 		Images:             NewImageRepository(database),
 		UserData:           NewUserDataRepository(database),

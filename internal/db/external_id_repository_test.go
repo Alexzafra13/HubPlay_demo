@@ -1,4 +1,4 @@
-package db_test
+﻿package db_test
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 // regression guard for a sqlc parser bug: v1.31.1 truncates the
 // trailing identifier of the final query in a file, which silently
 // corrupted `LIMIT 1` into `LIMIT` and broke the recommendations
-// rail (every cross-reference returned an error → every suggestion
+// rail (every cross-reference returned an error â†’ every suggestion
 // rendered as a TMDb-only badge even when the user already had it).
 //
 // The repo now sidesteps sqlc with raw SQL, so this test pins the
@@ -22,7 +22,7 @@ import (
 func TestExternalIDRepository_GetItemIDByExternalID_RoundTrip(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	libRepo := db.NewLibraryRepository("sqlite", database)
-	itemRepo := db.NewItemRepository(database)
+	itemRepo := db.NewItemRepository("sqlite", database)
 	extRepo := db.NewExternalIDRepository(database)
 	seedLibraryForItems(t, libRepo)
 
@@ -46,7 +46,7 @@ func TestExternalIDRepository_GetItemIDByExternalID_RoundTrip(t *testing.T) {
 		t.Errorf("expected item-rec, got %q", gotID)
 	}
 
-	// Missing pair must NOT error — the recommendations handler treats
+	// Missing pair must NOT error â€” the recommendations handler treats
 	// any error as "lookup failed" and falls through to "external"
 	// rendering, so the absent-row signal must come back as ("", nil).
 	missingID, err := extRepo.GetItemIDByExternalID(context.Background(), "tmdb", "999999")
