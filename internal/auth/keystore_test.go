@@ -172,7 +172,6 @@ func TestKeyStore_RotateSetsNewPrimary(t *testing.T) {
 }
 
 func TestKeyStore_RotateWithOverlapDelaysRetirement(t *testing.T) {
-	testutil.SkipIfPostgres(t, "asserts exact-nanosecond Time.Equal on retired_at, but Postgres TIMESTAMPTZ truncates to microseconds; a round-trip loses the nanos. Fix in a follow-up by comparing with WithinDuration(microsecond) on both backends.")
 	// Business case: rotate with a 15-minute overlap equal to access token
 	// TTL. The old key's retired_at should be *in the future* so operators
 	// can schedule pruning later; prune-before-now leaves it untouched.
@@ -193,8 +192,11 @@ func TestKeyStore_RotateWithOverlapDelaysRetirement(t *testing.T) {
 		t.Fatal("old key should have retired_at set")
 	}
 	wantRetireAt := clk.Now().Add(15 * time.Minute)
-	if !oldRow.RetiredAt.Time.Equal(wantRetireAt) {
-		t.Errorf("retired_at: got %v, want %v", oldRow.RetiredAt.Time, wantRetireAt)
+	// Compare with microsecond tolerance: Postgres TIMESTAMPTZ rounds
+	// to µs and Go's time.Time keeps ns. Anything tighter than 1µs is
+	// dialect noise, not a semantic difference.
+	if delta := oldRow.RetiredAt.Time.Sub(wantRetireAt); delta < -time.Microsecond || delta > time.Microsecond {
+		t.Errorf("retired_at: got %v, want %v (delta %v)", oldRow.RetiredAt.Time, wantRetireAt, delta)
 	}
 
 	// Prune at "now" must NOT reap the old key — its retired_at is in the
@@ -209,7 +211,6 @@ func TestKeyStore_RotateWithOverlapDelaysRetirement(t *testing.T) {
 }
 
 func TestKeyStore_RotateZeroOverlapRetiresImmediately(t *testing.T) {
-	testutil.SkipIfPostgres(t, "PrunedBefore(now) compares retired_at < now with nanosecond precision, but Postgres TIMESTAMPTZ rounds to microseconds; the round-trip drops the nanos and the WHERE never matches. Same root cause as TestKeyStore_RotateWithOverlapDelaysRetirement — fix together with a precision-aware comparator.")
 	// Compromised-key scenario: operator passes overlap <= 0 to cut every
 	// in-flight token right now. Prune at "now" should immediately reap.
 	ks, _, clk := newKeystore(t, "seed")
@@ -219,10 +220,11 @@ func TestKeyStore_RotateZeroOverlapRetiresImmediately(t *testing.T) {
 	if err != nil {
 		t.Fatalf("rotate: %v", err)
 	}
-	// Nudge the clock forward 1ns so "<" in DeleteRetiredBefore matches the
-	// retired_at=now row. Otherwise the cutoff equals retired_at and the
-	// row stays (strict-less semantics are deliberate — see repository).
-	clk.Advance(1 * time.Nanosecond)
+	// Nudge the clock forward 1µs so "<" in DeleteRetiredBefore matches
+	// the retired_at=now row. We use microsecond (not nanosecond) so this
+	// works on Postgres too — TIMESTAMPTZ rounds to µs, so a 1ns bump
+	// disappears after the round-trip and the WHERE never fires.
+	clk.Advance(1 * time.Microsecond)
 	pruned, err := ks.Prune(ctx, clk.Now())
 	if err != nil {
 		t.Fatalf("prune: %v", err)

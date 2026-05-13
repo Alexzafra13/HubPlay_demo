@@ -532,11 +532,39 @@ func TestLibraryRepository_Create_OnlyPrimaryAdmin(t *testing.T) {
 // borrando library_access manualmente y volvemos a correr el SQL de
 // la migración.
 func TestMigration041_BackfillsPrimaryAdmin(t *testing.T) {
-	testutil.SkipIfPostgres(t, "re-runs the SQLite-specific backfill inline with `?` placeholders + INSERT OR IGNORE. The Postgres migration writes the same backfill in its own dialect — covering the pg path needs a dedicated test against pg syntax.")
 	database := testutil.NewTestDB(t)
 	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
 	userRepo := db.NewUserRepository(testutil.Driver(), database)
 	ctx := context.Background()
+
+	// The two migration dialects do the same thing with different
+	// "ignore-on-conflict" syntax. Mirroring both keeps this test
+	// honest on the pg matrix.
+	backfillSQL := `
+		INSERT OR IGNORE INTO library_access (user_id, library_id)
+		SELECT primary_admin.id, l.id
+		FROM libraries l
+		CROSS JOIN (
+			SELECT id FROM users
+			WHERE role = 'admin' AND parent_user_id IS NULL
+			ORDER BY created_at ASC
+			LIMIT 1
+		) AS primary_admin
+	`
+	if db.IsPostgres(testutil.Driver()) {
+		backfillSQL = `
+			INSERT INTO library_access (user_id, library_id)
+			SELECT primary_admin.id, l.id
+			FROM libraries l
+			CROSS JOIN (
+				SELECT id FROM users
+				WHERE role = 'admin' AND parent_user_id IS NULL
+				ORDER BY created_at ASC
+				LIMIT 1
+			) AS primary_admin
+			ON CONFLICT DO NOTHING
+		`
+	}
 
 	now := time.Now()
 	if err := userRepo.Create(ctx, &db.User{
@@ -562,18 +590,8 @@ func TestMigration041_BackfillsPrimaryAdmin(t *testing.T) {
 		t.Fatalf("setup precondition: expected empty library_access, got %v", pre)
 	}
 
-	// Re-correr el SQL idéntico al de migrations/sqlite/041.
-	if _, err := database.ExecContext(ctx, `
-		INSERT OR IGNORE INTO library_access (user_id, library_id)
-		SELECT primary_admin.id, l.id
-		FROM libraries l
-		CROSS JOIN (
-			SELECT id FROM users
-			WHERE role = 'admin' AND parent_user_id IS NULL
-			ORDER BY created_at ASC
-			LIMIT 1
-		) AS primary_admin
-	`); err != nil {
+	// Re-correr el SQL idéntico al de migrations/{sqlite,postgres}/041.
+	if _, err := database.ExecContext(ctx, backfillSQL); err != nil {
 		t.Fatalf("migration 041 SQL: %v", err)
 	}
 
@@ -586,17 +604,7 @@ func TestMigration041_BackfillsPrimaryAdmin(t *testing.T) {
 	}
 
 	// Idempotente: re-correr la migración no duplica filas.
-	if _, err := database.ExecContext(ctx, `
-		INSERT OR IGNORE INTO library_access (user_id, library_id)
-		SELECT primary_admin.id, l.id
-		FROM libraries l
-		CROSS JOIN (
-			SELECT id FROM users
-			WHERE role = 'admin' AND parent_user_id IS NULL
-			ORDER BY created_at ASC
-			LIMIT 1
-		) AS primary_admin
-	`); err != nil {
+	if _, err := database.ExecContext(ctx, backfillSQL); err != nil {
 		t.Fatalf("migration 041 SQL (re-run): %v", err)
 	}
 	again, _ := libRepo.ListAccessByUser(ctx, "admin-1")
