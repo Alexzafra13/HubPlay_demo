@@ -1,5 +1,86 @@
 # Estado del proyecto
 
+> 🎬 **Sesión 2026-05-13 (rama `claude/sesion-f-pgx-wire`, 1 commit, Sesión F — pgx wire end-to-end)** — el binario ya arranca contra Postgres real. La migración dual-dialect (E.1–E.13 + F) está **completa**. Pendiente de merge: 1 commit sobre main.
+>
+> ## 🚀 Sesión F — wire pgx/v5/stdlib (binario contra Postgres real)
+>
+> Tras 28/28 repos dual-dialect, esta sesión cierra el ciclo: el binario `hubplay` ya soporta `database.driver: postgres` en `hubplay.yaml`. Sesión E + F = migración Postgres terminada.
+>
+> **Cambios estructurales**:
+>
+> 1. **`internal/db/database.go` (NUEVO)** — dispatcher central:
+>    - `db.Open(driver, dsnOrPath, logger)` branches a `openSQLite` o `openPostgres`.
+>    - `db.Migrate(driver, db, fs, logger)` selecciona dialect (`sqlite3` vs `postgres`) + dir (`migrations/sqlite` vs `migrations/postgres`).
+>    - `db.Optimize(ctx, driver, db, logger)` no-op en pg (autovacuum); `PRAGMA optimize` + FTS5 merge en sqlite.
+>    - `db.StartPeriodicOptimize(...)` igual — pg devuelve stop no-op.
+>
+> 2. **`internal/db/postgres.go` (NUEVO)** — wiring pgx:
+>    - `sql.Open("pgx", dsn)` vía `_ "github.com/jackc/pgx/v5/stdlib"`.
+>    - Pool tuning postgres-appropriate: 25 max conns, 25 idle, 5min idle, 1h max lifetime.
+>    - 10s timeout en Ping.
+>    - `redactPostgresDSN(dsn)` enmascara contraseña en logs.
+>
+> 3. **`migrations.go`** — embed dual: `//go:embed migrations/postgres/*.sql` + helper `Migrations(driver) embed.FS`.
+>
+> 4. **`cmd/hubplay/main.go`** — wiring por driver:
+>    - `ApplyPendingRestoreIfAny` solo para sqlite (pg tiene `pg_restore` out-of-band).
+>    - `dbDsnOrPath` switch: sqlite → Path, postgres → DSN.
+>    - `runtime` struct gana `dbDriver` para shutdown.
+>
+> 5. **`internal/db/library_epg_sources_repository.go`** — `isUniqueConstraintError` ahora usa `errors.As(*pgconn.PgError)` + `pgerrcode.UniqueViolation` para pg (típado), mantiene string-match para sqlite.
+>
+> 6. **`cmd/pg-smoke/main.go` (NUEVO)** — herramienta manual:
+>    - Script one-shot: `go run ./cmd/pg-smoke <dsn>` valida open + migrate + repo CRUD + UNIQUE-violation + federation contra Postgres real.
+>    - NO se construye en CI (es manual; útil para validación de releases).
+>
+> **Dependencias añadidas**: `github.com/jackc/pgx/v5/stdlib`, `github.com/jackc/pgx/v5/pgconn`, `github.com/jackc/pgerrcode`.
+>
+> **Verificación end-to-end (smoke contra Postgres 16 real)**:
+>
+> ```
+> docker run -d --rm --name pg --network smoke -e POSTGRES_PASSWORD=test -e POSTGRES_DB=hubplay postgres:16-alpine
+> docker run --rm -v $PWD:/app -w /app --network smoke golang:1.25-alpine \
+>   sh -c "go run ./cmd/pg-smoke 'postgres://postgres:test@pg:5432/hubplay?sslmode=disable'"
+> ```
+>
+> Output:
+> ```
+> ✅ all smoke-test steps passed — pgx wire + dual-dialect repos work against real Postgres
+> ```
+>
+> 6 pasos PASS:
+> 1. open postgres + ping (pool_max_open=25, conn_max_lifetime=1h, DSN redaction).
+> 2. migrations/postgres up (40 migrations vía goose, dialect=postgres).
+> 3. wire repos con driver=postgres.
+> 4. Library Create + List (Pattern A, sqlc_pg).
+> 5. UNIQUE-violation via SQLSTATE 23505 → `ErrEPGSourceAlreadyAttached` (typed).
+> 6. Federation identity Insert + Get (sqlc_pg, FederationPeer projection).
+>
+> **Verificación pasiva**:
+> - `go build ./...` clean en Windows (excepto preexistente `syscall.Statfs_t`).
+> - `GOOS=linux go build ./...` clean (cross-compile completo).
+> - `go test ./internal/db/ ./internal/auth/ ./internal/scanner/ ./internal/iptv/ ./internal/library/... ./internal/federation/...` todos verde en container Linux.
+> - `go vet ./...` clean.
+>
+> **Estado final — migración Postgres completa**:
+>
+> | Sesión | Alcance | Estado |
+> |---|---|---|
+> | D | Traducir migrations + queries-postgres + sqlc_pg gen | ✅ |
+> | E.1–E.13 | Refactor 28 repos a dual-dialect | ✅ |
+> | **F** | **Wire pgx + smoke end-to-end** | ✅ **HOY** |
+>
+> El binario es 100% dual-dialect. `cfg.Database.Driver: postgres` + `dsn: postgres://...` en `hubplay.yaml` es un deployment válido. Operadores actuales (sqlite) no notan nada: el camino por defecto sigue idéntico al pre-Sesión-D.
+>
+> **Próximos pasos sugeridos (post-Sesión F, opcionales)**:
+>
+> 1. **Integración postgres en CI** — añadir un job de Github Actions que arranca un `postgres:16-alpine` service y corre `go run ./cmd/pg-smoke` para que cualquier PR regresivo lo detecte.
+> 2. **Postgres backup/restore admin**: hoy `ApplyPendingRestoreIfAny` es sqlite-only. Implementar el equivalente para pg (`pg_dump`/`pg_restore` via subprocess) si los operadores lo piden — no urgente.
+> 3. **Tunear pool size por defecto**: el 25 max conns es seguro para single-instance, pero un operador con un pgbouncer delante quizás quiere otro número. Considerar exponerlo en config como `database.pool_max_open`.
+> 4. **Eliminar el TODO de migración tipada**: ya migrado a `errors.As(*pgconn.PgError)`. Borrar el comentario del repo cuando se confirme.
+>
+> ---
+>
 > 🎬 **Sesión 2026-05-13 (rama `claude/objective-swartz-6f9f3c`, 5 commits, Sesiones E.11 + E.12 + E.13 — Sesión E COMPLETA, 28/28 repos done)** — continuando dual-dialect tras los 24 ya mergeados (PRs #260, #261, #264, #265, #266). Pendiente de merge: 5 commits sobre main en PR [#268](https://github.com/Alexzafra13/HubPlay_demo/pull/268).
 >
 > ## 🎉 Sesión E COMPLETA — 28/28 repos dual-dialect

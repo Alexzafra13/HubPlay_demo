@@ -4,12 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"io/fs"
 	"log/slog"
 	"strings"
 	"time"
-
-	"github.com/pressly/goose/v3"
 
 	_ "modernc.org/sqlite"
 )
@@ -72,39 +69,38 @@ const sqlitePragmas = "" +
 	"&_pragma=mmap_size(268435456)" +
 	"&_pragma=wal_autocheckpoint(1000)"
 
-// poolMaxOpenConns caps concurrent SQLite connections. SQLite with
-// WAL allows multiple readers + one writer; capping helps avoid
+// sqlitePoolMaxOpenConns caps concurrent SQLite connections. SQLite
+// with WAL allows multiple readers + one writer; capping helps avoid
 // goroutine pile-ups but the real serialisation is in SQLite itself.
 // 8 is enough headroom for two scanners + a UI + the IPTV transmux's
 // EPG queries without queuing.
-const poolMaxOpenConns = 8
+const sqlitePoolMaxOpenConns = 8
 
-// poolMaxIdleConns matches MaxOpenConns so a steady-state workload
-// never reopens a connection. Default would be 2, which causes
-// repeated open/close churn on a server that does sustained traffic.
-const poolMaxIdleConns = 8
+// sqlitePoolMaxIdleConns matches MaxOpenConns so a steady-state
+// workload never reopens a connection. Default would be 2, which
+// causes repeated open/close churn on a server that does sustained
+// traffic.
+const sqlitePoolMaxIdleConns = 8
 
-// poolConnMaxIdleTime caps how long an idle connection stays in the
-// pool. After this it's closed. Prevents stale connections from
-// hanging onto deleted WAL pages or holding the DB open against
-// admin operations like VACUUM.
-const poolConnMaxIdleTime = 5 * time.Minute
+// sqlitePoolConnMaxIdleTime caps how long an idle connection stays in
+// the pool. After this it's closed. Prevents stale connections from
+// hanging onto deleted WAL pages or holding the DB open against admin
+// operations like VACUUM.
+const sqlitePoolConnMaxIdleTime = 5 * time.Minute
 
-// Open creates and configures a SQLite database connection.
-func Open(driver, path string, logger *slog.Logger) (*sql.DB, error) {
-	if driver != "sqlite" {
-		return nil, fmt.Errorf("unsupported driver %q (only sqlite supported in v1)", driver)
-	}
-
+// openSQLite creates and configures a SQLite database connection.
+// Driver-specific arm of db.Open; the dispatcher in database.go picks
+// this when cfg.Database.Driver == "sqlite".
+func openSQLite(path string, logger *slog.Logger) (*sql.DB, error) {
 	dsn := path + "?" + sqlitePragmas
 	database, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("opening sqlite: %w", err)
 	}
 
-	database.SetMaxOpenConns(poolMaxOpenConns)
-	database.SetMaxIdleConns(poolMaxIdleConns)
-	database.SetConnMaxIdleTime(poolConnMaxIdleTime)
+	database.SetMaxOpenConns(sqlitePoolMaxOpenConns)
+	database.SetMaxIdleConns(sqlitePoolMaxIdleConns)
+	database.SetConnMaxIdleTime(sqlitePoolConnMaxIdleTime)
 
 	if err := database.Ping(); err != nil {
 		_ = database.Close()
@@ -112,15 +108,16 @@ func Open(driver, path string, logger *slog.Logger) (*sql.DB, error) {
 	}
 
 	logger.Info("database opened",
-		"driver", driver,
+		"driver", DriverSQLite,
 		"path", path,
 		"pragmas", sqlitePragmas,
-		"pool_max_open", poolMaxOpenConns)
+		"pool_max_open", sqlitePoolMaxOpenConns)
 	return database, nil
 }
 
-// Optimize runs `PRAGMA optimize` plus an FTS5 inverted-index merge.
-// Both refresh data structures the query planner and search rely on:
+// optimizeSQLite runs `PRAGMA optimize` plus an FTS5 inverted-index
+// merge. Both refresh data structures the query planner and search
+// rely on:
 //
 //   - `PRAGMA optimize` recomputes per-table statistics (which
 //     indexes are useful, how skewed the data is). After many INSERTs
@@ -143,7 +140,12 @@ func Open(driver, path string, logger *slog.Logger) (*sql.DB, error) {
 // Best-effort: any failure logs and continues. Stale stats / a
 // fragmented FTS at worst cost a few µs per query until the next
 // successful run; nothing operational depends on this completing.
-func Optimize(ctx context.Context, database *sql.DB, logger *slog.Logger) {
+//
+// Postgres equivalents (ANALYZE, REINDEX) are not driven from here —
+// Postgres auto-vacuum keeps statistics current and FTS uses the
+// regular tsvector index that the trigger maintains on every row
+// write. See Optimize() for the dispatcher.
+func optimizeSQLite(ctx context.Context, database *sql.DB, logger *slog.Logger) {
 	stmts := []string{
 		"PRAGMA analysis_limit=400",
 		"PRAGMA optimize",
@@ -165,64 +167,4 @@ func trimPragma(s string) string {
 		return rest
 	}
 	return s
-}
-
-// optimizeInterval is how often the background tick fires. Six hours
-// is a balance: scans burst writes for ~minutes, then go quiet for
-// hours; running a planner refresh during the quiet window costs
-// nothing and keeps stats current. Daily would also be fine; sub-hour
-// is wasteful.
-const optimizeInterval = 6 * time.Hour
-
-// StartPeriodicOptimize fires `Optimize` every `optimizeInterval` until
-// `ctx` is cancelled. The first tick fires after the interval — never
-// at startup — so app boot doesn't pay the optimize cost on top of
-// the cold-cache overhead it already has.
-//
-// Returns a stop function the caller can defer for clean shutdown
-// (idempotent if the context is already cancelled).
-func StartPeriodicOptimize(ctx context.Context, database *sql.DB, logger *slog.Logger) func() {
-	tick := time.NewTicker(optimizeInterval)
-	stop := make(chan struct{})
-	go func() {
-		defer tick.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-stop:
-				return
-			case <-tick.C:
-				// Bounded ctx so a stuck Optimize can't pile up forever
-				// on top of the next scheduled tick.
-				optCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-				Optimize(optCtx, database, logger)
-				cancel()
-			}
-		}
-	}()
-	return func() {
-		select {
-		case <-stop:
-		default:
-			close(stop)
-		}
-	}
-}
-
-// Migrate runs all pending goose migrations using the provided filesystem.
-func Migrate(database *sql.DB, migrationsFS fs.FS, logger *slog.Logger) error {
-	goose.SetBaseFS(migrationsFS)
-	goose.SetLogger(goose.NopLogger())
-
-	if err := goose.SetDialect("sqlite3"); err != nil {
-		return fmt.Errorf("setting goose dialect: %w", err)
-	}
-
-	if err := goose.Up(database, "migrations/sqlite"); err != nil {
-		return fmt.Errorf("running migrations: %w", err)
-	}
-
-	logger.Info("database migrations complete")
-	return nil
 }
