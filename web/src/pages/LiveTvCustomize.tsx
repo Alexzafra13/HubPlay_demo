@@ -20,7 +20,7 @@
 // the same screen would mean a mode switch with two contradictory
 // filters. A dedicated route is cleaner and easier to bookmark.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 import { ArrowDown, ArrowUp, ArrowLeft, Eye, EyeOff, RotateCcw, Save } from "lucide-react";
@@ -51,39 +51,47 @@ export default function LiveTvCustomize() {
     [libraries],
   );
 
-  // The first library auto-selected once the list resolves. Switching
-  // resets the draft (we don't merge edits across libraries).
-  const [libraryId, setLibraryId] = useState<string>("");
-  useEffect(() => {
-    if (!libraryId && livetvLibs.length > 0) {
-      setLibraryId(livetvLibs[0].id);
-    }
-  }, [libraryId, livetvLibs]);
+  // User-selected library; null means "fall back to the first one".
+  // We derive the effective libraryId during render instead of
+  // syncing it from livetvLibs in an effect — the latter trips the
+  // react-hooks/set-state-in-effect lint and cascades renders.
+  const [selectedLibrary, setSelectedLibrary] = useState<string | null>(null);
+  const libraryId = selectedLibrary ?? livetvLibs[0]?.id ?? "";
 
   const channelsQ = useChannelsForPersonalisation(libraryId || undefined);
   const replaceOrder = useReplaceChannelOrder();
   const resetOrder = useResetChannelOrder();
 
   const [draft, setDraft] = useState<DraftChannel[]>([]);
+  const [seededForLibrary, setSeededForLibrary] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
 
-  // Seed the draft when the channels query resolves. We only seed
-  // once per libraryId — subsequent re-fetches (e.g. after Save)
-  // restart the cycle through the query invalidation in the hook.
-  useEffect(() => {
-    if (!channelsQ.data) return;
-    setDraft(
-      channelsQ.data.map((c) => ({
-        id: c.id,
-        name: c.name,
-        group_name: c.group_name,
-        hidden: !!c.hidden,
-      })),
-    );
-    setDirty(false);
-    setSavedMessage(null);
-  }, [channelsQ.data]);
+  // State-update-during-render: re-seed the draft only when the
+  // library actually changes, not on every channelsQ.data ref. The
+  // previous useEffect-based seed also fired on tab-focus refetches,
+  // which silently clobbered any in-flight edits.
+  if (libraryId && seededForLibrary !== libraryId) {
+    if (channelsQ.data) {
+      setSeededForLibrary(libraryId);
+      setDraft(
+        channelsQ.data.map((c) => ({
+          id: c.id,
+          name: c.name,
+          group_name: c.group_name,
+          hidden: !!c.hidden,
+        })),
+      );
+      setDirty(false);
+      setSavedMessage(null);
+    } else if (draft.length > 0) {
+      // Library switched but the new query hasn't resolved yet —
+      // drop the previous library's rows so the spinner takes over.
+      setDraft([]);
+      setDirty(false);
+      setSavedMessage(null);
+    }
+  }
 
   const move = useCallback((index: number, delta: number) => {
     setDraft((d) => {
@@ -123,9 +131,23 @@ export default function LiveTvCustomize() {
   const handleReset = useCallback(async () => {
     if (!confirm(t("livetv.customize.resetConfirm"))) return;
     await resetOrder.mutateAsync();
+    // The mutation invalidated the personalise query; refetch the
+    // admin defaults explicitly and re-seed. We can't rely on the
+    // render-time seed because libraryId hasn't changed.
+    const result = await channelsQ.refetch();
+    if (result.data) {
+      setDraft(
+        result.data.map((c) => ({
+          id: c.id,
+          name: c.name,
+          group_name: c.group_name,
+          hidden: !!c.hidden,
+        })),
+      );
+      setDirty(false);
+    }
     setSavedMessage(t("livetv.customize.resetDone"));
-    // The query invalidation in the hook will refetch and re-seed.
-  }, [resetOrder, t]);
+  }, [channelsQ, resetOrder, t]);
 
   if (livetvLibs.length === 0) {
     return (
@@ -166,7 +188,7 @@ export default function LiveTvCustomize() {
           </label>
           <select
             value={libraryId}
-            onChange={(e) => setLibraryId(e.target.value)}
+            onChange={(e) => setSelectedLibrary(e.target.value)}
             className="mt-1 w-full rounded-[--radius-md] border border-border bg-bg-card px-3 py-2 text-sm"
           >
             {livetvLibs.map((l) => (
