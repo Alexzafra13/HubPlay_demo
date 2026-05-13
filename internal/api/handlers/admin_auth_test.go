@@ -111,7 +111,6 @@ func TestAdminAuth_Rotate_DefaultOverlap(t *testing.T) {
 }
 
 func TestAdminAuth_Rotate_ExplicitZeroOverlap(t *testing.T) {
-	testutil.SkipIfPostgres(t, "Same nanosecond-precision issue as TestKeyStore_RotateZeroOverlapRetiresImmediately: Postgres TIMESTAMPTZ truncates retired_at to microseconds so the prune-now WHERE never fires. Follow-up: precision-aware comparator.")
 	// Zero overlap is the compromised-key path: the old key must be retired
 	// immediately so a subsequent prune reaps it. Trust the handler to pass
 	// the value straight through to the keystore.
@@ -127,7 +126,9 @@ func TestAdminAuth_Rotate_ExplicitZeroOverlap(t *testing.T) {
 		t.Fatalf("status: got %d", rr.Code)
 	}
 
-	clk.Advance(1 * time.Nanosecond)
+	// 1µs (not 1ns) so the comparison survives the Postgres TIMESTAMPTZ
+	// round-trip — see TestKeyStore_RotateZeroOverlapRetiresImmediately.
+	clk.Advance(1 * time.Microsecond)
 	pruned, err := ks.Prune(context.Background(), clk.Now())
 	if err != nil {
 		t.Fatalf("prune: %v", err)

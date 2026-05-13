@@ -239,7 +239,6 @@ func TestItemRepository_List_GenreYearRatingFilters(t *testing.T) {
 }
 
 func TestMigration031_BackfillsGenresFromMetadata(t *testing.T) {
-	testutil.SkipIfPostgres(t, "exercises the SQLite-specific backfill SQL inline (INSERT OR IGNORE, json_each, json_valid). The Postgres migration uses the json operators + ON CONFLICT DO NOTHING — a separate test would need to cover that path.")
 	database := testutil.NewTestDB(t)
 	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
 	itemRepo := db.NewItemRepository(testutil.Driver(), database)
@@ -248,7 +247,7 @@ func TestMigration031_BackfillsGenresFromMetadata(t *testing.T) {
 	seedLibraryForItems(t, libRepo)
 
 	// Pre-existing item with metadata.genres_json present but no
-	// item_values row â€” this simulates a library scanned before
+	// item_values row — this simulates a library scanned before
 	// migration 031 shipped. The migration's INSERT...SELECT needs to
 	// pick those rows up so users get filtering immediately without
 	// re-scanning their library.
@@ -262,20 +261,43 @@ func TestMigration031_BackfillsGenresFromMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Re-run the backfill statement (idempotent under INSERT OR IGNORE).
-	// Mirrors what the migration runs at upgrade time.
-	const upsertValues = `
+	// Re-run the backfill statements (idempotent under
+	// INSERT OR IGNORE / ON CONFLICT DO NOTHING). Mirrors what the
+	// migration runs at upgrade time. The sqlite + postgres dialects
+	// reach the same end state through different JSON operators —
+	// see migrations/{sqlite,postgres}/031_*.sql for the rationale.
+	upsertValues := `
 		INSERT OR IGNORE INTO item_values (id, type, value, clean_value)
 		SELECT 'genre:' || LOWER(TRIM(je.value)), 'genre', TRIM(je.value), LOWER(TRIM(je.value))
 		FROM metadata m, json_each(m.genres_json) je
 		WHERE m.genres_json IS NOT NULL AND m.genres_json != '' AND json_valid(m.genres_json)
 		      AND TRIM(je.value) != ''`
-	const linkValues = `
+	linkValues := `
 		INSERT OR IGNORE INTO item_value_map (item_id, value_id)
 		SELECT m.item_id, 'genre:' || LOWER(TRIM(je.value))
 		FROM metadata m, json_each(m.genres_json) je
 		WHERE m.genres_json IS NOT NULL AND m.genres_json != '' AND json_valid(m.genres_json)
 		      AND TRIM(je.value) != ''`
+	if db.IsPostgres(testutil.Driver()) {
+		upsertValues = `
+			INSERT INTO item_values (id, type, value, clean_value)
+			SELECT 'genre:' || LOWER(TRIM(je.value)), 'genre', TRIM(je.value), LOWER(TRIM(je.value))
+			FROM metadata m,
+			     LATERAL jsonb_array_elements_text(m.genres_json::jsonb) je(value)
+			WHERE m.genres_json IS NOT NULL AND m.genres_json != ''
+			      AND m.genres_json IS JSON ARRAY
+			      AND TRIM(je.value) != ''
+			ON CONFLICT DO NOTHING`
+		linkValues = `
+			INSERT INTO item_value_map (item_id, value_id)
+			SELECT m.item_id, 'genre:' || LOWER(TRIM(je.value))
+			FROM metadata m,
+			     LATERAL jsonb_array_elements_text(m.genres_json::jsonb) je(value)
+			WHERE m.genres_json IS NOT NULL AND m.genres_json != ''
+			      AND m.genres_json IS JSON ARRAY
+			      AND TRIM(je.value) != ''
+			ON CONFLICT DO NOTHING`
+	}
 	if _, err := database.Exec(upsertValues); err != nil {
 		t.Fatalf("backfill values: %v", err)
 	}
