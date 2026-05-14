@@ -16,23 +16,29 @@
 
 ## Índice
 
-- [Resumen ejecutivo](#resumen-ejecutivo) — se actualiza al final de cada fase.
-- [Fase 1 · Panorama: estructura, dependencias, flujo](#fase-1--panorama)
-- [Fase 2 · `internal/db/`](#fase-2--internaldb) — pendiente
-- [Fase 3 · `internal/api/` + `internal/api/handlers/`](#fase-3--internalapi--handlers) — pendiente
-- [Fase 4 · `internal/library/` + `internal/scanner/`](#fase-4--library--scanner) — pendiente
-- [Fase 5 · `internal/iptv/`](#fase-5--internaliptv) — pendiente
-- [Fase 6 · `internal/stream/`](#fase-6--internalstream) — pendiente
-- [Fase 7 · `internal/auth/` + `internal/federation/`](#fase-7--auth--federation) — pendiente
-- [Fase 8 · `internal/event/` y primitivos sin deps](#fase-8--event--primitivos) — pendiente
-- [Plan de intervención final](#plan-de-intervención-final) — se redacta al cerrar.
+- [Resumen ejecutivo](#resumen-ejecutivo) — actualizado al cierre de F13.
+- Fase 1 · Panorama: estructura, dependencias, flujo · ✅ cerrada
+- Fase 2 · `internal/db/` · ✅ cerrada
+- Fase 3 · `internal/api/` + `internal/api/handlers/` · ✅ cerrada
+- Fase 4 · `internal/library/` + `internal/scanner/` · ✅ cerrada
+- Fase 5 · `internal/iptv/` · ✅ cerrada
+- Fase 6 · `internal/stream/` · ✅ cerrada
+- Fase 7 · `internal/auth/` + `internal/federation/` · ✅ cerrada
+- Fase 8 · `internal/event/` y primitivos sin deps · ✅ cerrada
+- **Fase 9 · `internal/imaging/`** · ✅ cerrada (cobertura extendida)
+- **Fase 10 · middleware + csrf + security_headers + apperror** · ✅ cerrada
+- **Fase 11 · `config` + `setup` + `retention`** · ✅ cerrada
+- **Fase 12 · Migraciones SQLite + Postgres** · ✅ cerrada
+- **Fase 13 · Transversales (error wrapping, ctx, deadlocks, naming, globals)** · ✅ cerrada
+- Plan de intervención final · ✅ cerrado y revisado.
 
 ---
 
 ## Resumen ejecutivo
 
-> Auditoría cerrada al cierre de Fase 8. Plan de intervención
-> consolidado al final del documento.
+> Auditoría cerrada al cierre de **Fase 13** (cobertura completa del
+> brief original). Plan de intervención consolidado al final del
+> documento.
 
 ### Veredicto global
 
@@ -51,25 +57,37 @@ modelos a citar. Los olores son **estructurales pero ortogonales** —
 se atacan por iteraciones independientes, sin requerir
 re-arquitectura.
 
+### Hallazgo crítico (CVE-class)
+
+🚨 **FFF — SSRF redirect bypass en `imaging.SafeGet`** (F9). Cliente
+HTTP sin `CheckRedirect` sigue redirects sin re-validar IP. Vector
+real: atacante con `evilhost.com` redirige a `169.254.169.254` (AWS
+metadata) o IP RFC1918 interna. **Fix urgente, ~20 LOC, modelo en
+`iptv/proxy.go`.**
+
 ### Hallazgos altos (resumen 1-línea)
 
 | # | Olor | Fase |
 |---|------|------|
+| **FFF** | **SSRF redirect bypass en `imaging.SafeGet` (CVE-class)** | **F9** |
 | A+M | `internal/db/` god-package: 13 KLOC, 31 repos, 80 tipos consumidos por 55 ficheros externos | F1, F2 |
-| B+J | `db → federation` invierte capa (única violación real); `federation_repository.go` son 6 repos disfrazados de uno | F1, F2 |
+| B+J | `db → federation` invierte capa; `federation_repository.go` son 6 repos disfrazados de uno | F1, F2 |
 | CC | `iptv.Service` 45 métodos en 11 sub-features con split sólo cosmético por fichero | F5 |
 | P | `ItemHandler` 1 186 LOC, 13 deps, 4 responsabilidades | F3 |
 | W | `scanner.go` 1 270 LOC en un fichero (4 responsabilidades) | F4 |
 | G | `Dependencies` (35+) + `runtime` (14) + `main.run` (645 LOC) sin módulos compuestos | F1, F3 |
 
-### Bugs latentes confirmados (correctness real)
+### Bugs latentes y violaciones de contrato confirmados
 
 | # | Bug | Fase | Coste fix |
 |---|-----|------|-----------|
+| **RRR-mig** | **15 migraciones tienen `-- +goose Down` violando política up-only** | **F12** | **mecánico** |
 | RR | `loginRateLimiter` goroutine sin Stop (goroutine leak en tests integrados) | F7 | ~10 LOC |
 | Y | `SegmentDetector`/`Fingerprinter` no drenan goroutines spawneadas | F4 | ~40 LOC |
-| DD | `iptv.Service.RefreshM3U` detached goroutines con `context.Background()` y sin drain | F5 | ~50 LOC |
+| DD | `iptv.Service.RefreshM3U` detached goroutines sin drain | F5 | ~50 LOC |
+| **GGGG** | **Handlers `iptv_admin.go` detached goroutines sin tracking** | **F13** | **incluido con DD** |
 | Q | `WriteTimeout: 0` global afecta a las 219 rutas (sólo ~10 son streaming) | F3 | middleware |
+| HHH | `pathmap.Read` no valida que el path resulte bajo la raíz | F9 | ~5 LOC |
 
 ### Patrones modelo del proyecto (a replicar)
 
@@ -87,22 +105,25 @@ re-arquitectura.
 
 ### Camino propuesto
 
-7 iteraciones, **~10-11 días de trabajo focalizado**, cada iteración
-deja el repo verde:
+8 iteraciones (0..7), **~12-13 días de trabajo focalizado**, cada
+iteración deja el repo verde:
 
-0. Pre-trabajo: 4 ADRs (incluye **ADR-015 dominio en feature**) + 2
-   updates de `conventions.md`.
-1. **Fixes de correctness** (RR, Y, DD, EE, AAA): cierra los bugs
-   latentes con cero cambios de API.
-2. **Sub-paquetes de db**: resuelve B+J+K+T+L moviendo
-   federation repo + creando ActivityLogRepo + split home.
+0. Pre-trabajo: 6 ADRs (incluye **ADR-015 dominio en feature**,
+   **ADR-019 SSRF CheckRedirect**, **ADR-020 up-only**) + 2 updates
+   de `conventions.md`.
+1. **🚨 Fixes URGENTES de seguridad + correctness**: **FFF (SSRF)**,
+   RRR-mig (up-only), RR (ratelimit leak), Y/DD/GGGG (drain),
+   AAA/EE (comentarios + rename), HHH (pathmap).
+2. **Sub-paquetes de db**: B+J+K+T+L (federation a su feature,
+   ActivityLogRepo, split home).
 3. **Migración Opción B incremental** por feature (iptv → auth →
    library → cleanup `db/`).
 4. **Split de god-handlers/services** (P, Z, QQ).
 5. **Refactor estructural iptv** (CC).
 6. **Composition root**: módulos compuestos (G+H+V), `WithWriteDeadline`
    (Q), `Transcoder` stateless (LL).
-7. **Cosmética**: D, X, W, BB (comentarios).
+7. **Cosmética y schema**: D, X, W, BB, UUU-mig, TTT-mig, VVV-mig,
+   SSS-mig, WWW-trans, XXX-trans, PPP, NNN, OOO, JJJ/III/KKK/LLL.
 
 ### Riesgos y lo que NO se hace
 
@@ -1733,17 +1754,574 @@ package-doc inicial que explica el porqué.
 
 ---
 
+## Fase 9 · `internal/imaging/`
+
+Cerrada · 2026-05-14 (con apoyo de Agent Explore).
+
+### 9.1 Inventario
+
+8 ficheros, 955 LOC:
+
+| Fichero | LOC | Concepto |
+|---|---:|---|
+| `trickplay.go` | 254 | Generación de sprites trickplay con ffmpeg |
+| `safety.go` | 160 | `SafeGet` + `BlockedIP` (SSRF) + `EnforceMaxPixels` |
+| `colors.go` | 148 | HSL bucketing para paleta dominante |
+| `ingest.go` | 111 | `IngestRemoteImage` + `AtomicWriteFile` |
+| `pathmap/pathmap.go` | 101 | UUID-validated `Store` |
+| `thumbnail.go` | 96 | Resize nearest-neighbor + copyFile |
+| `validators.go` | 49 | `IsValidKind`, `IsValidContentType` |
+| `blurhash.go` | 36 | Wrapper sobre `internal/blurhash` |
+
+### 9.2 Hallazgos
+
+#### FFF — SSRF bypass por redirect no validado · **ALTA**
+
+`internal/imaging/safety.go:124-127`:
+
+```go
+client := &http.Client{Timeout: timeout}
+resp, err := client.Get(rawURL) //nolint:gosec // target URL vetted above
+```
+
+- `SafeGet` valida la IP del host **inicial** con `net.LookupIP` +
+  `BlockedIP`.
+- El cliente HTTP **no setea `CheckRedirect`**. `client.Get` sigue
+  por defecto hasta 10 redirects, sin re-validar IP del destino.
+- Vector de ataque real:
+  - Atacante controla `evilhost.com` (público).
+  - Sirve `302 Location: http://10.0.0.1:9200` (Elasticsearch interno) o
+    `http://169.254.169.254/latest/meta-data/...` (AWS metadata).
+  - HubPlay sigue el redirect → GET a recurso interno → devuelve body.
+- **El patrón correcto YA existe en el repo**:
+  `internal/iptv/proxy.go:fetchUpstream` (F5) revalida `isSafeUpstream`
+  en cada hop. **Duplicación olvidada en `imaging`.**
+- Principio violado: **defensa en profundidad + DRY**.
+- Impacto: SSRF a servicios privados; en deployments cloud, exfiltración
+  de credenciales IAM via metadata endpoint.
+- Refactor:
+  ```go
+  client := &http.Client{
+      Timeout: timeout,
+      CheckRedirect: func(req *http.Request, via []*http.Request) error {
+          if len(via) >= 10 { return errors.New("too many redirects") }
+          host := req.URL.Hostname()
+          addrs, err := net.LookupIP(host)
+          if err != nil { return err }
+          for _, ip := range addrs {
+              if BlockedIP(ip) {
+                  return fmt.Errorf("%w: redirect to %s", ErrUnsafeURL, ip)
+              }
+          }
+          return nil
+      },
+  }
+  ```
+- Severidad: **ALTA**. Es el hallazgo de seguridad más serio de la
+  auditoría.
+
+#### GGG — DNS rebinding teóricamente posible · **media**
+
+- `SafeGet` resuelve el host UNA vez con `net.LookupIP` (línea 119) y
+  conecta inmediatamente con `client.Get(rawURL)` que vuelve a
+  resolver internamente. **Ventana de carrera** entre la resolución
+  inicial (validada) y la del transporte HTTP (no validada).
+- Requiere: control DNS del atacante + timing preciso (TTL=0 +
+  cambio entre milisegundos).
+- En la práctica baja probabilidad — `net.Resolver` cachea, Go usa
+  el resolver del sistema.
+- Mitigación: `Transport.DialContext` custom que se conecte a una IP
+  resuelta una sola vez y validada, en vez de re-resolver dentro de
+  `http.Client.Get`. Para sólo "media", no merece la pena por ahora.
+
+#### HHH — `pathmap.Read` con `strings.TrimSpace` sin validar raíz · **media**
+
+- `pathmap/pathmap.go:77` lee el contenido del fichero de mapping,
+  hace `strings.TrimSpace` y retorna el path como-está.
+- No valida que el path resultante esté bajo la raíz `s.dir`.
+- En la práctica el caller construye `LocalPath` con
+  `filepath.Join(dir, filename)` (ingest.go:78), así que la salida
+  es absoluta y bien formada. **Pero el contrato del Store no lo
+  enforza** — un caller futuro que use el path como-está está
+  expuesto.
+- Refactor: `Read` debería retornar **path relativo** (sólo el
+  filename) o validar que está bajo la raíz antes de retornar.
+
+#### III — `BlockedIP` variable global mutable · **baja**
+
+- `safety.go:149`: `var BlockedIP = DefaultBlockedIP`.
+- Comentario:
+  > This is a variable so tests that need to hit an httptest.Server
+  > on 127.0.0.1 can temporarily swap it out. Production callers
+  > MUST NOT reassign it.
+- Justificable (escape hatch para tests), pero un test runtime que
+  olvide restaurar deja la guard rota en tests siguientes.
+- Refactor opcional: pasar `BlockedIP` como parámetro de `SafeGet`
+  (`SafeGet(url, maxBytes, timeout, blockedIPFn)`). Cosmético.
+
+#### JJJ — `fmt.Errorf("status %d", ...)` sin `%w` · **baja**
+
+- `safety.go:132`. Error construido sin wrap. Justificable (no hay
+  error subyacente, solo un status code), pero el caller no puede
+  `errors.Is` para distinguir status codes específicos.
+- Refactor cosmético: declarar `ErrUnexpectedStatus` sentinel y
+  `fmt.Errorf("status %d: %w", code, ErrUnexpectedStatus)`.
+
+#### KKK — `colors.ExtractDominantColors` y `blurhash.ComputeBlurhash` sin `context.Context` · **baja**
+
+- Funciones síncronas; no aceptan ctx; no se pueden cancelar.
+- En la práctica la entrada está acotada por `EnforceMaxPixels`
+  (40 MP) — el trabajo es O(píxeles), bounded.
+- Refactor opcional: añadir `ctx` para permitir cancelar si el HTTP
+  request padre se cancela.
+
+#### LLL — Animated GIF/APNG bombs no detectados · **baja**
+
+- `EnforceMaxPixels` chequea dimensiones de header, no frame count.
+- Una APNG 100×100×1000frames pasa el guard.
+- Mitigado por `MaxUploadBytes = 10 MiB`.
+- Refactor: detectar APNG chunks si content-type es `image/png` y
+  rechazar si frame count > N.
+
+### 9.3 Severidades Fase 9
+
+| # | Olor | Severidad |
+|---|------|-----------|
+| FFF | SSRF redirect bypass en `SafeGet` | **Alta** |
+| GGG | DNS rebinding teórico | Media |
+| HHH | `pathmap.Read` sin validar raíz | Media |
+| III | `BlockedIP` var global mutable | Baja |
+| JJJ | Status code sin `%w` | Baja |
+| KKK | `blurhash`/`colors` sin ctx | Baja |
+| LLL | Animated bombs no detectados | Baja |
+
+### 9.4 Sano
+
+- Atomic writes (`AtomicWriteFile`) correctos para POSIX.
+- `pathmap.Store` con `validID()` que obliga UUID — path traversal
+  bloqueado.
+- Sin symlink dereference.
+- `BlockedIP` cubre loopback + RFC1918 + RFC4193 + link-local
+  (incluye `169.254.169.254`) + multicast + unspecified.
+- `EnforceMaxPixels` (40 MP cap) y `MaxUploadBytes` (10 MiB) bien
+  aplicados.
+- 61/66 `fmt.Errorf` usan `%w` correctamente.
+
+---
+
+## Fase 10 · `internal/api/{middleware,csrf,security_headers}` + `apperror`
+
+Cerrada · 2026-05-14. Total: 526 LOC.
+
+### 10.1 Inventario
+
+| Fichero | LOC | Concepto |
+|---|---:|---|
+| `internal/api/csrf.go` | 112 | Double-submit cookie pattern |
+| `internal/api/security_headers.go` | 100 | CSP + HSTS + frame-ancestors + CORP |
+| `internal/api/apperror/apperror.go` | 84 | Writer canónico de errors HTTP |
+| `internal/api/middleware.go` | 34 | `RequestLogger` |
+
+### 10.2 Hallazgos
+
+#### MMM — `apperror.recorder` global mutable · **baja**
+
+- `apperror.go:39`: `var recorder = func(code string) {}`.
+- `SetRecorder(fn)` lo modifica sin lock.
+- En producción se setea una vez en `router.go` (boot) y no se vuelve
+  a tocar. Race teórica sólo en tests integrados que tocan recorder
+  en paralelo.
+- Justificable como singleton de observability. Documentado.
+- Refactor opcional: pasar el recorder como parámetro a `Write` para
+  eliminar el global.
+
+#### NNN — CSRF token nunca rota · **baja**
+
+- `csrf.go:65-71`: cookie con `MaxAge: 86400`. **El token no se rota
+  tras login.** Vive 24 h.
+- No es agujero (double-submit funciona; el atacante necesita XSS
+  para leer el token de la cookie), pero **post-login rotation** es
+  defensa en profundidad estándar (mitiga XSS-then-CSRF).
+- Refactor: rotar el token en `auth.Login` success. ~5 LOC.
+
+#### OOO — `RequestLogger` siempre `Info` · **baja**
+
+- `middleware.go:23-31`: log único con `logger.Info`, incluso para
+  responses 500.
+- 5xx idealmente serían `Error`, 4xx `Warn`. Trivial pero impacta
+  ergonomía operacional (grep / alerting por nivel).
+- Refactor: branch por `ww.Status()` → nivel.
+
+### 10.3 Sano
+
+- **CSRF double-submit**: implementación correcta (`csrf.go`).
+  Gateado por presencia de cookie `hubplay_access` — endpoints
+  públicos (login, refresh, setup) no son sujetos. Comentario lo
+  documenta.
+- **Security headers**: CSP estrecha, comentada, mantenida en código
+  (no en nginx, ADR-007). HSTS condicional sobre HTTPS. Doble
+  protección `frame-ancestors 'none'` + `X-Frame-Options DENY`.
+- **`script-src 'self'`** sin `unsafe-inline` en JS — bien.
+- **`apperror.Write`** centraliza envelope + Retry-After + request_id
+  + recorder. Cero `http.Error` directos en handlers (verificable con
+  grep).
+- Cero `init()` funcs en `api/`.
+
+### 10.4 Severidades
+
+| # | Olor | Severidad |
+|---|------|-----------|
+| MMM | `apperror.recorder` global | Baja |
+| NNN | CSRF token sin rotación post-login | Baja |
+| OOO | `RequestLogger` siempre Info | Baja |
+
+---
+
+## Fase 11 · `config` + `setup` + `retention`
+
+Cerrada · 2026-05-14. Total: 923 LOC.
+
+### 11.1 Inventario
+
+| Paquete | Ficheros | LOC |
+|---|---:|---:|
+| `internal/config/` | 4 | 606 |
+| `internal/setup/` | 1 | 195 |
+| `internal/retention/` | 1 | 122 |
+
+### 11.2 Hallazgos
+
+#### PPP — `generateSecret()` produce data muerta tras primer boot · **baja**
+
+`config.go:Load` genera `cfg.Auth.JWTSecret` si está vacío:
+
+```go
+if cfg.Auth.JWTSecret == "" {
+    cfg.Auth.JWTSecret = generateSecret()
+}
+```
+
+- En el primer boot, `Bootstrap(ctx, repo, clk, seed)` (auth/keystore)
+  inserta una `db.SigningKey` con `secret = seed` (el generado).
+- En boots siguientes, `Bootstrap` ve `len(existing) > 0` → retorna
+  existente; el secret recién generado **se descarta**.
+- Resultado: `cfg.Auth.JWTSecret` post-bootstrap es **dead data**.
+  El JWT real vive en la DB vía `KeyStore`.
+- **No es bug**, pero invita a confusión: alguien que vea
+  `cfg.Auth.JWTSecret` en un panel admin podría asumir que
+  determina la firma. No lo hace.
+- Refactor: renombrar a `cfg.Auth.JWTSecretBootstrapOnly` o eliminar
+  el campo del config y obligar a tener al menos una key seedable
+  via env (`HUBPLAY_AUTH_JWT_SECRET`).
+
+#### QQQ — `setup.BrowseDirectories` filter `isSensitivePath` no verificado · **a confirmar**
+
+- `setup/service.go:64` bloquea paths "sensitive" antes de listar.
+- **No leí la lista completa de `isSensitivePath`**.
+- Riesgo: si la lista es incompleta (no incluye `/etc`, `/var/log`,
+  `/proc`, `/sys`), el wizard podría leer info del sistema.
+- Acción rápida en intervención: `grep -A 30 isSensitivePath`.
+
+### 11.3 Sano (modelos del proyecto)
+
+- **`config.Save` atomic write con `Chmod 0600` + rename**:
+  `persist.go:25-60`. Modelo perfecto para escrituras atómicas en el
+  proyecto. Documentado con razonamiento explícito (Plex/Jellyfin
+  convention).
+- **`config.Preflight`**: write probe real (no permission bits) —
+  comentario lo justifica explícitamente (Docker bind mounts, ACL,
+  immutable flags). Bien diseñado.
+- **`RestartRequester`**: idempotente con `atomic.Bool.CompareAndSwap`,
+  delay 100ms para flush JSON response antes de cancelar.
+  `restart.go:49-56`.
+- **`retention.Runner`**:
+  - 2 interfaces estrechas (`EPGCleaner`, `AuditPruner`) — minimum
+    capability surface.
+  - nil-safe per dependency.
+  - `Start/Stop` con stopCh + ctx.
+  - `sweep` ejecuta epg y audit independientes — un fallo no para el otro.
+  - **Modelo de "lifecycle correcto + nil-safe + sub-features
+    independientes"**.
+- **`config.Validate`**: usa `errors.Join` (Go 1.20+ idiomático).
+- Cero `init()` funcs.
+- Env overrides con prefijo `HUBPLAY_*` documentados.
+
+### 11.4 Severidades
+
+| # | Olor | Severidad |
+|---|------|-----------|
+| PPP | `JWTSecret` config dead-data post-bootstrap | Baja |
+| QQQ | `isSensitivePath` no auditado | A confirmar |
+
+---
+
+## Fase 12 · Migraciones (`migrations/sqlite/` + `migrations/postgres/`)
+
+Cerrada · 2026-05-14 (con apoyo de Agent Explore + verificación manual).
+
+### 12.1 Inventario
+
+- **43 migraciones SQLite + 43 Postgres en paridad** — verificado por
+  el agente.
+- Goose-managed.
+- `migrations.go` en raíz expone `Migrations(driver)` que devuelve el
+  FS embedido correcto.
+
+### 12.2 Hallazgos
+
+#### RRR-mig — Política "up-only" VIOLADA · **media-alta**
+
+- **15 migraciones contienen secciones `-- +goose Down`**:
+  - 004, 013-014, 015-017, 025, 027, 029, 032-033, 034-036, 038-039,
+    042-043.
+- Esto contradice la política declarada (ADR/conventions).
+- Impacto: alguien que invoque `goose down` puede ejecutar SQL
+  destructivo que no debería existir. Operador hostil o accidental
+  ("hice down por error en producción") tiene una arma cargada.
+- Refactor: eliminar los bloques `-- +goose Down` de las 15
+  migraciones (cambio mecánico).
+
+#### SSS-mig — `api_keys.created_by` FK sin `ON DELETE CASCADE` · **media**
+
+- `migrations/sqlite/001_initial_schema.sql:40`: la FK existe sin
+  cláusula de cascada.
+- Si un usuario se borra, `api_keys` quedan huérfanas.
+- Mitigado parcialmente por DDDD-mig (la tabla `api_keys` parece **no
+  usarse** — sin queries en `internal/db/queries/`).
+- Refactor: si la tabla se mantiene, añadir `ON DELETE CASCADE` en
+  una migración nueva (no editar mig 001).
+
+#### TTT-mig — INTEGER en SQLite vs BIGINT en Postgres para columnas grandes · **media**
+
+- `items.size`, `items.duration_ticks`, `user_data.position_ticks`,
+  `chapters.start_ticks/end_ticks`.
+- SQLite acepta `INTEGER` para 64-bit, pero el contrato visual
+  diverge del schema Postgres y produce confusión cross-team.
+- Impacto práctico: bajo (películas <20 GB en bytes ~ 2.1·10¹⁰ <
+  2^31·2). Pero la sintonía implícita es contractual.
+- Refactor opcional: declarar `INTEGER` SQLite con comment de
+  `BIGINT semantic`, o usar `BIGINT` explícito en SQLite (SQLite
+  acepta el alias).
+
+#### UUU-mig — Índice composite `channels(library_id, number)` ausente · **media**
+
+- Query: `WHERE library_id = ? ORDER BY number, name` (ver
+  `internal/db/queries/channels.sql`).
+- Índice actual: `idx_channels_library` (solo `library_id`).
+- Planner usa el índice pero ordena en memoria. Con 5 000+ canales
+  por library la `ORDER BY` puede ser costosa.
+- Refactor: añadir
+  `CREATE INDEX idx_channels_library_number ON channels(library_id, number)`
+  en migración nueva.
+
+#### VVV-mig — Tablas declaradas sin queries en uso · **baja**
+
+- `api_keys` (mig 001): sin `queries/api_keys.sql`. Dead schema o
+  features futuras.
+- `activity_log` (mig 001): SÍ se usa **pero con SQL raw inline en
+  `internal/api/handlers/system.go`** (olor T de F3). Reconciliar
+  con el plan: crear `ActivityLogRepository` (parte de It. 2 del plan)
+  resuelve el odor visible aquí.
+- Refactor: `api_keys` decidir si se borra (en migración nueva, no
+  retroactiva) o si se materializa con su repo.
+
+### 12.3 Hallazgos retirados (verificación manual)
+
+- ❌ **`PRAGMA foreign_keys = ON` enforced**: confirmado en
+  `internal/db/sqlite.go:66` — DSN incluye
+  `&_pragma=foreign_keys(ON)`. El agente lo flagueó como falso
+  positivo. **No es olor.**
+
+### 12.4 Severidades
+
+| # | Olor | Severidad |
+|---|------|-----------|
+| RRR-mig | Política up-only violada (15 migraciones con `Down`) | Media-alta |
+| SSS-mig | `api_keys.created_by` FK sin CASCADE | Media |
+| TTT-mig | INTEGER vs BIGINT divergencia SQLite/PG | Media |
+| UUU-mig | Falta índice composite en `channels` | Media |
+| VVV-mig | `api_keys` schema sin queries (dead) | Baja |
+
+### 12.5 Sano
+
+- 43↔43 paridad sqlite/postgres.
+- `PRAGMA foreign_keys = ON` enforced vía DSN.
+- ADR-011 partial UNIQUE indexes aplicado (mig 019).
+- ADR-001 reaffirmation cumplida (sweep de raw → sqlc).
+- Cero migraciones con datos hardcoded sensibles.
+
+---
+
+## Fase 13 · Transversales
+
+Cerrada · 2026-05-14. Cubre lo del brief original no mapeado a
+paquete: error wrapping, `context.Context` propagation, deadlocks,
+estado global, naming, tests frágiles.
+
+### 13.1 Error wrapping (105 `fmt.Errorf` sin `%w`)
+
+- **Muestreo manual**: los 105 son **errores construidos desde
+  scratch**, no wrappers perdidos.
+- Ubicaciones típicas:
+  - `internal/provider/{tmdb,fanart,opensubtitles}.go`: errores
+    construidos de HTTP status codes ("status 429", "rate limited").
+  - `internal/config/config.go`: validation errors construidos
+    desde violaciones del schema YAML.
+  - `internal/auth/keystore.go`: "no active signing key", "no primary
+    key" — sentinels semánticos.
+- **Veredicto**: el proyecto **SÍ usa `%w` correctamente** donde hay
+  error subyacente. No es olor.
+- **Excepción real**: `imaging/safety.go:132`
+  `fmt.Errorf("status %d", code)` → JJJ (catalogado en F9).
+- **Severidad: no-olor general**. Buen patrón.
+
+### 13.2 `context.Context` propagation
+
+- **29 hits de `context.Background()` en producción**. Clasificación:
+
+| Tipo | Hits | Veredicto |
+|---|---:|---|
+| Boot / shutdown root context | 5 | Legítimo (main.go, db.Open, hwaccel) |
+| Background workers con `bgCtx` propio | 4 | Legítimo (library.Service, federation.Manager, federation.Auditor, sysmetrics) |
+| Detached intencional para fire-and-forget | 5 | **Olores DD, GGGG** (catalogados) |
+| Test helpers | 1 | OK |
+| Transcoder.Start con timeout propio | 2 | Cuestionable (no toma ctx del caller) |
+| iptv.proxy.reportOutcome | 1 | OK — recibe `ctx` y `fetchCtx` deliberadamente (verificado) |
+| Migrator post-migration tweak | 1 | OK |
+| pg-smoke standalone | 1 | OK |
+
+#### GGGG — Detached goroutines en handlers `iptv_admin.go` · **media** (nuevo)
+
+- `iptv_admin.go:101, 200` lanzan `go func()` con
+  `context.WithTimeout(context.Background(), 2*time.Minute)`.
+- No hay WaitGroup, no hay tracking.
+- Mismo patrón que olor DD (F5) pero **en HTTP handler**, no en
+  service. Si shutdown llega durante un refresh M3U async, escribe
+  a DB cerrada.
+- Refactor: extender `iptv.Service.bgWG` (propuesto en olor DD) y
+  registrar las goroutines de admin ahí.
+
+### 13.3 Deadlocks — heurística de locks anidados
+
+Inspección manual de funciones con múltiples `Lock()`:
+
+- **`stream.Manager.RestartSessionAt`** (`manager.go:600+`): **OK**.
+  El pattern es:
+  ```
+  m.mu.Lock(); ms := m.sessions[key]; m.mu.Unlock();
+  ms.restartMu.Lock(); defer ms.restartMu.Unlock();
+  ```
+  Mutex manager liberado antes de adquirir per-session. Sin
+  anidamiento real.
+- **`library.Service.Scan`**: `mu` adquirido dos veces (set + clear
+  flag), una al inicio y otra en defer al final. Sin anidamiento
+  con otro mutex. **OK**.
+- **`federation.Manager`**: dos mutexes (`peerCache` RWMutex +
+  `streamSessions` Mutex). Por contrato, no se anidan (uno por
+  hot path distinto). Comentado explícitamente (VV de F7). **OK**.
+
+**Veredicto**: no detecto deadlocks en inspección estática.
+Confirmación final requiere `go test -race -count=10 ./...`.
+
+### 13.4 Estado global mutable
+
+Inventario de `var` mutables exportadas:
+
+| Variable | Ubicación | Veredicto |
+|---|---|---|
+| `iptv.AllCategories` | `categories.go:29` | Sintaxis (Go no permite `const []`); inmutable de facto |
+| `imaging.ValidKinds` | `validators.go:11` | Array (no slice) → inmutable de facto |
+| `imaging.BlockedIP` | `safety.go:149` | **III** — test override doc |
+| `db.AbandonedAfter` | `user_data_repository.go:336` | ADR-004 lo declara mutable explícito |
+| `stream.Profiles` | `profiles.go:14` | **WWW-trans** — map exportado mutable |
+| `apperror.recorder` | `apperror.go:39` | **MMM** — global del observability |
+
+#### WWW-trans — `stream.Profiles` map exportado mutable · **baja**
+
+- `var Profiles = map[string]Profile{...}` accedido por 6 sitios
+  externos (handlers, hls.go, decision.go) **como lectura**.
+- Pero cualquier código del proyecto podría hacer
+  `stream.Profiles["foo"] = Profile{...}` y romper otras lecturas
+  concurrentes.
+- Refactor: convertir a `func Profile(name string) (Profile, bool)`
+  con map privado. ~10 LOC. Elimina state global mutable de la API
+  pública de `stream`.
+
+### 13.5 Naming idiomático
+
+- **`auth.AuthToken`** (`auth/service.go`): stutter. Idiomático sería
+  `auth.Token`. Olor menor.
+- `provider.MetadataProvider` / `provider.EpisodeMetadataProvider`:
+  stutter aceptable — son interfaces centrales del paquete; el
+  Go style guide tolera stutter cuando el tipo es el "core" del
+  paquete.
+- `event.Event`, `clock.Clock`, `config.Config`, `probe.Prober`:
+  stutter pero idiomático (cada paquete tiene UN tipo principal con
+  ese nombre).
+- **Receivers**: consistentes (`s` para Service, `m` para Manager,
+  `h` para Handler, `r` para Repository, `q` para Queries del sqlc).
+  Sano.
+- **Interfaces sin sufijo `-er`**: 15 detectadas. Justificable cuando
+  la interface tiene múltiples métodos (`Repo`, `EventBus`,
+  `AuthService`, …). Go idiomático prefiere `-er` para interfaces
+  de un método; aquí casi todas tienen 3+, así que el sufijo no
+  aplica.
+
+#### XXX-trans — `auth.AuthToken` stutter · **baja**
+
+- Renombrar a `auth.Token`. Mecánico con `gopls rename`.
+
+### 13.6 Tests sin `t.Parallel()` (8/122 ≈ 6.6%)
+
+- Razón mayor: SQLite con shared file no paraleliza bien. Pero
+  tests con DB en memoria o con mocks SÍ podrían.
+- **YYY-trans (baja)**: oportunidad de speed-up del CI con
+  `t.Parallel()` selectivo en tests que no compartan filesystem ni
+  DB compartida.
+
+### 13.7 init() funcs
+
+- **Cero** init() funcs en `internal/` ni `cmd/`. **Sano** — sin
+  side effects de import.
+
+### 13.8 Resumen Fase 13
+
+| # | Olor | Severidad |
+|---|------|-----------|
+| GGGG | Detached goroutines en `iptv_admin.go` | Media |
+| WWW-trans | `stream.Profiles` map mutable exportado | Baja |
+| XXX-trans | `auth.AuthToken` stutter | Baja |
+| YYY-trans | Tests sin `t.Parallel()` (8/122) | Baja |
+
+Confirmaciones positivas del brief que faltaban:
+- ✅ Error wrapping correcto en general (105 sin `%w` son legítimos).
+- ✅ No detecto deadlocks por inspección estática.
+- ✅ Cero `init()` funcs.
+- ✅ Naming consistente con buenas prácticas.
+
+Hallazgos del brief que siguen **pendientes de tooling**, no de
+inspección:
+- ❌ `go test -race -count=10 ./...` para confirmar empíricamente
+  race conditions.
+- ❌ `goleak.VerifyNone(t)` integrado en tests para confirmar
+  ausencia de leaks.
+- ❌ `govulncheck` para CVEs en deps.
+
+---
+
 ## Plan de intervención final
 
-Cerrado · 2026-05-14. Sintetiza las 8 fases. Las **letras entre
-paréntesis** referencian olores específicos.
+Cerrado · 2026-05-14, **revisado tras F9-F13**. Sintetiza las 13
+fases. Las **letras entre paréntesis** referencian olores
+específicos.
 
 ### A. Mapa consolidado de olores por severidad
 
-#### Severidad alta
+#### Severidad alta (incluye nuevos de F9-F12)
 
 | # | Olor | Fase | Sub-tareas |
 |---|------|------|-----------|
+| **FFF** | **SSRF redirect bypass en `imaging.SafeGet`** | **F9** | **`CheckRedirect` callback (~15 LOC) — CVE-class** |
 | A+M | `internal/db/` god-package + 80 tipos `db.X` consumidos por 55 ficheros externos | F1, F2 | Decisión Opción B + migración por feature |
 | B | `db → federation` inversión de capa | F1, F2 | Mover repo a `internal/federation/storage/` |
 | CC | `iptv.Service` 45 métodos en 11 sub-features | F5 | Split en sub-paquetes (m3u/, epg/, channels/, transmux/, proxy/, prober/, logo/) |
@@ -1757,6 +2335,7 @@ paréntesis** referencian olores específicos.
 |---|------|------|-----------|
 | G | `Dependencies` + `runtime` + `main.run` 645 LOC | F1, F3 | Módulos compuestos por feature (`<feature>.New(ctx, deps) *Module`) |
 | Q | `WriteTimeout: 0` global aplica a las 219 rutas | F3 | Middleware `WithWriteDeadline(30s)` en sub-router no-streaming |
+| **RRR-mig** | **Política up-only violada (15 migraciones con `Down`)** | **F12** | **Eliminar `-- +goose Down` de 15 ficheros (mecánico)** |
 
 #### Severidad media
 
@@ -1773,6 +2352,12 @@ paréntesis** referencian olores específicos.
 | LL | `stream.Manager` y `Transcoder` con doble session tracking | F6 | Transcoder stateless |
 | QQ | `auth.Service` 18 métodos, 6 responsabilidades | F7 | Split (más fácil que Z/CC por tamaño) |
 | RR | `loginRateLimiter` goroutine sin Stop (bug latente) | F7 | Añadir `stopCh` + invocar desde `StopSessionCleaner` |
+| **GGG** | **DNS rebinding teórico en `SafeGet`** | **F9** | **Custom `DialContext` con IP pinning** |
+| **HHH** | **`pathmap.Read` sin validar raíz** | **F9** | **Retornar path relativo o validar prefix** |
+| **SSS-mig** | **`api_keys.created_by` FK sin `ON DELETE CASCADE`** | **F12** | **Migración nueva si la tabla se mantiene** |
+| **TTT-mig** | **INTEGER vs BIGINT divergencia SQLite/PG** | **F12** | **Alinear con `BIGINT` explícito** |
+| **UUU-mig** | **Falta `idx_channels_library_number`** | **F12** | **Migración nueva** |
+| **GGGG** | **Detached goroutines en `iptv_admin.go`** | **F13** | **Mismo `bgWG` que olor DD** |
 | BB | Comentarios en inglés en todos los `internal/` (transversal) | F1, F4, F5 | Pauta por fase, no big-bang |
 
 #### Severidad baja
@@ -1788,6 +2373,19 @@ paréntesis** referencian olores específicos.
 | JJ | 3 setters post-construcción en `stream.Manager` | F6 | `NewManager(Deps)` |
 | AAA | Comentario `event/bus.go:24-31` desactualizado | F8 | Reescribir |
 | EEE | `event.Bus` sin `Close()` | F8 | Cosmético |
+| **III** | **`imaging.BlockedIP` global mutable (test override)** | **F9** | Pasar como param |
+| **JJJ** | **Status code sin `%w` en `imaging`** | **F9** | Sentinel + `%w` |
+| **KKK** | **`blurhash`/`colors` sin `context`** | **F9** | Añadir ctx |
+| **LLL** | **Animated GIF/APNG bombs no detectados** | **F9** | Cap frame count |
+| **MMM** | **`apperror.recorder` global mutable** | **F10** | Pasar a `Write` |
+| **NNN** | **CSRF token sin rotación post-login** | **F10** | Rotar en `auth.Login` |
+| **OOO** | **`RequestLogger` siempre Info (5xx no es Error)** | **F10** | Branch por status |
+| **PPP** | **`cfg.Auth.JWTSecret` dead data post-bootstrap** | **F11** | Renombrar o eliminar |
+| **VVV-mig** | **`api_keys` schema sin queries (dead)** | **F12** | Decidir mantener o borrar |
+| **WWW-trans** | **`stream.Profiles` map exportado mutable** | **F13** | Getter en lugar de var |
+| **XXX-trans** | **`auth.AuthToken` stutter** | **F13** | Rename a `auth.Token` |
+| **YYY-trans** | **Tests sin `t.Parallel()` (8/122)** | **F13** | Activar donde no haya shared state |
+| **QQQ** | **`setup.isSensitivePath` sin auditar** | **F11** | Confirmar lista en intervención |
 
 #### "Sanos / modelos" a citar al refactorizar
 
@@ -1823,19 +2421,30 @@ empezar el siguiente) y deja el repo en verde.
 4. **Borrar / reescribir** comentario obsoleto en `event/bus.go`
    (AAA).
 
-#### Iteración 1 · Fixes rápidos de correctness (~0.5 día)
+#### Iteración 1 · Fixes URGENTES de seguridad + correctness (~1 día)
 
-5. **RR**: `loginRateLimiter.Stop()` + cablear desde
+5. **🚨 FFF (PRIORIDAD MÁXIMA)**: añadir `CheckRedirect` a
+   `imaging.SafeGet`. Es el único hallazgo con impacto **CVE-class**
+   de la auditoría — SSRF a servicios internos. ~20 LOC, modelo en
+   `iptv/proxy.go`. Test que monte un httptest server que devuelva
+   `302 Location: http://127.0.0.1:9200` y verifique rechazo.
+6. **RRR-mig**: eliminar bloques `-- +goose Down` de las 15
+   migraciones que los tienen. ~15 ficheros, cambio mecánico.
+7. **RR**: `loginRateLimiter.Stop()` + cablear desde
    `auth.Service.StopSessionCleaner`. ~10 LOC.
-6. **Y**: añadir `bgWG sync.WaitGroup` a `SegmentDetector` y
+8. **Y**: añadir `bgWG sync.WaitGroup` a `SegmentDetector` y
    `SegmentFingerprinter`. Modelo `library.Service`. ~40 LOC.
-7. **DD**: añadir `bgCtx/bgCancel/bgWG` a `iptv.Service` + reemplazar
-   `context.Background()` en `service_m3u.go:230,246`. Modelo
-   `library.Service`. ~50 LOC.
-8. **AAA, EE**: comentarios + renombrar `StreamProxy.Shutdown` →
-   `ClearRelays` (o documentar como intencional).
+9. **DD + GGGG**: añadir `bgCtx/bgCancel/bgWG` a `iptv.Service` +
+   reemplazar `context.Background()` en `service_m3u.go:230,246` Y
+   en `handlers/iptv_admin.go:101,200`. Modelo `library.Service`.
+   ~80 LOC totales (resuelve dos olores con un patrón).
+10. **AAA, EE**: comentarios + renombrar `StreamProxy.Shutdown` →
+    `ClearRelays` (o documentar como intencional).
+11. **HHH**: hacer `pathmap.Read` retornar path relativo + validar
+    prefix. ~5 LOC.
 
-**Cero cambios de API. Cierra los 3 bugs latentes de drain.**
+**Cero cambios de API pública. Cierra el SSRF (alta) + 3 bugs
+latentes de drain + violación up-only + leak de ratelimit.**
 
 #### Iteración 2 · Sub-paquetes de db (~1 día)
 
@@ -1902,7 +2511,7 @@ Por feature, una por commit:
     (`SetForceDirectPlayLookup`).
 23. **LL**: hacer `Transcoder` stateless — tracking sólo en `Manager`.
 
-#### Iteración 7 · Cosmética + comentarios (~1 día, paralelizable)
+#### Iteración 7 · Cosmética + comentarios + schema (~1.5 días, paralelizable)
 
 24. **D + X**: promover `scanner` a `internal/library/scan/`.
 25. **W**: split `scanner.go` en `scanner.go` + `enrich.go` +
@@ -1910,6 +2519,20 @@ Por feature, una por commit:
 26. **BB**: traducir / reescribir comentarios largos en español por
     paquete. Pauta: técnico, conciso, explica el porqué.
 27. **EEE**: añadir `Bus.Close()` cosmético (opcional).
+28. **UUU-mig**: migración nueva con
+    `idx_channels_library_number`.
+29. **TTT-mig**: alinear `BIGINT` explícito en SQLite (migración
+    nueva opcional).
+30. **VVV-mig + SSS-mig**: decidir destino de `api_keys` (eliminar
+    en migración nueva o materializar con `queries/api_keys.sql` +
+    `ON DELETE CASCADE`).
+31. **WWW-trans**: `stream.Profiles` map → getter privado.
+32. **XXX-trans**: rename `auth.AuthToken` → `auth.Token`.
+33. **PPP**: renombrar / documentar `cfg.Auth.JWTSecret` como
+    bootstrap-only.
+34. **NNN**: rotar CSRF token tras `auth.Login` success.
+35. **OOO**: `RequestLogger` con nivel según status.
+36. **JJJ + III + KKK + LLL**: cosmética de `imaging`.
 
 ### C. ADRs a abrir
 
@@ -1919,6 +2542,8 @@ Por feature, una por commit:
 | 016 | Composition root con módulos por feature | Parte del wiring de `main.run` |
 | 017 | Timeouts diferenciados streaming vs API | — |
 | 018 | Comentarios en español como convención | — |
+| **019** | **SSRF guard con `CheckRedirect` obligatorio** | Refuerza ADR-002 |
+| **020** | **Política `up-only` con migraciones de rollback positivas** | Refuerza convención existente |
 
 ADR-012 (federación reuse de primitivos) **NO se supersede**: la
 promesa se confirma vigente en F7 (JWT shape, keystore, audit). El
