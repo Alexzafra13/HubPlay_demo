@@ -1,49 +1,70 @@
 # Estado del proyecto
 
-> 🎬 **Sesión 2026-05-14 (rama claude/gracious-dirac-fd009c, Sesión L — admin channel reorder + hide global overlay)** — cierra la asimetría que dejaba Sesión I: el admin ya puede tocar el orden y visibilidad por defecto que ven todos los usuarios, no solo cada user reordenar su propia vista.
+> 🎬 **Sesión 2026-05-14 (rama `claude/review-go-media-backend-37MDe`, Sesiones M + M.1 — auditoría arquitectónica completa del backend Go + Iteración 1 de la intervención)** — auditoría exhaustiva del backend (16 fases, 110+ olores catalogados, 2 CVE-class identificados) seguida de la primera iteración de intervención (12 olores cerrados con tests verdes incluyendo los 2 CVE).
 >
-> ## 🎚️ Sesión L — Admin curation overlay + hidden hard-constraint
+> ## 🧪 Sesión M — Auditoría arquitectónica del backend Go (commits `6e4b9e7` → `47bee5b`)
 >
-> Composición read-time: channels.number (M3U import) → admin overlay (library_channel_order) → user overlay (user_channel_order). Admin-hidden es **HARD CONSTRAINT**: el user overlay corre sobre lo que SOBREVIVE al filtro admin, así que un usuario NO puede deshacer lo que el admin ocultó. Cubierto por TestComposition_AdminHidden_UserCannotUnhide.
+> Auditoría sistemática del backend (~72 KLOC Go en `internal/` + `cmd/`) en **16 fases**, cada una empujada como commit independiente sobre `claude/review-go-media-backend-37MDe`. Salida: `docs/memory/audit-2026-05-14-go-backend-review.md` (3 485 líneas, doc inmutable de referencia).
 >
-> **Backend nuevo**:
-> - Migración 043 (sqlite + pg) library_channel_order — mismo shape que 042 user_channel_order, library-scoped.
-> - db.LibraryChannelOrderRepository — Pattern B raw SQL (sqlc 1.31.x sigue truncando `ORDER BY ASC`).
-> - iptv.applyAdminOverlay + chained dentro de GetChannelsForUser. Nuevos métodos service: GetChannelsForLibraryAdmin, ListLibraryChannelOverrides, ReplaceLibraryChannelOrder, SetLibraryChannelVisibility, ResetLibraryChannelOrder.
-> - 4 endpoints admin-only bajo el route group existente:
->   - `GET    /libraries/{id}/channels/admin-view` — admin view (overlay + filas admin-hidden incluidas para edición).
->   - `PUT    /libraries/{id}/channels/order` — replace full ordering + hidden set en una tx.
->   - `DELETE /libraries/{id}/channels/order` — restaurar orden del M3U.
->   - `PUT    /libraries/{id}/channels/{channelId}/admin-visibility` — toggle surgical.
+> **Fases cubiertas**:
+> - F1 Panorama (estructura, grafo, flujo) · F2 `internal/db/` · F3 `api/` + handlers · F4 `library` + `scanner` · F5 `iptv/` · F6 `stream/` · F7 `auth` + `federation` · F8 `event/` + primitivos · F9 `imaging/` · F10 middleware/csrf/sec/apperror · F11 `config`+`setup`+`retention` · F12 migraciones · F13 transversales · F14 calidad nivel-función · F15 test suite · F16 handlers medianos.
 >
-> **Frontend nuevo**:
-> - ChannelOrderEditor — componente presentacional extraído de LiveTvCustomize (aplicación de la lección K.1). Compartido por `/live-tv/customize` y la pestaña admin.
-> - AdminChannelOrderPanel — consume el editor con hooks admin (useAdminChannelsForOrder, useReplaceLibraryChannelOrder, useResetLibraryChannelOrder).
-> - Nueva pestaña **"Orden de canales"** en LivetvAdminPanel, siempre visible para librerías livetv.
-> - **Frases de scope en ambas superficies** (cierra la confusión "¿por qué tengo dos botones Personalizar?"): user `/live-tv/customize` ahora dice "Solo cambia tu vista..."; admin section dice "Este es el orden por defecto que ven todos los usuarios. Cada usuario puede personalizar el suyo encima, pero NO puede mostrar los canales que ocultes aquí."
-> - i18n en/es completo (~10 strings nuevos × 2 locales).
+> **2 hallazgos CVE-class**:
+> - **FFF** — SSRF redirect bypass en `imaging.SafeGet` (cliente HTTP sin `CheckRedirect` re-validando IP; redirect a `169.254.169.254` o RFC1918 viable).
+> - **F16-1** — Path traversal en `people.isUnderImageDir` (sin `EvalSymlinks`; symlink en imageDir apuntando fuera lo burlaba).
 >
-> **Tests**:
-> - 2 repo tests parametrizados (sqlite + pg via 	estutil.NewTestDB): Upsert/List/Delete/Reset + ReplaceAll happy + empty.
-> - 6 service tests: 3 de pplyAdminOverlay + 3 de composición admin→user (hidden hard-constraint, user-can-hide-more, position layering).
-> - 2 vitest de AdminChannelOrderPanel: save POSTea full reordered + hidden set; reset hace DELETE tras confirm.
+> **Plan de intervención**: 10 iteraciones (0..9), ~15-16 días, cada una mergeable independiente. ADRs 015-023 propuestos. Documento abierto para la intervención: `docs/memory/intervention-2026-05-14.md`.
 >
-> **Verificación al cierre Sesión L**:
-> - go test ./... -count=1 — 22/22 paquetes verde.
-> - `tsc -b`, `pnpm lint`, `pnpm build` — clean (solo 3 warnings preexistentes).
-> - pnpm test — **556/556 vitest**.
-> - OpenAPI drift gate — verde (4 rutas en outOfScopeExact admin-only).
+> ## 🛠️ Sesión M.1 — Iteración 1: fixes urgentes de seguridad + correctness (commits `b5a57ac` + `246339f`)
 >
-> **Estado del flujo IPTV cerrado**:
-> 1. Instalar + cargar lista IPTV ✅
-> 2. Acceso por usuario / hogar (library_access) ✅
-> 3. Lista personal por usuario (Sesiones K + K.1) ✅
-> 4. Admin reordena/oculta default global (Sesión L) ✅
-> 5. User reordena/oculta encima del default (Sesión I), con admin-hide hard-constraint ✅
+> 12 olores cerrados, 78 ficheros tocados, suite Go entera verde. Cero cambios de API HTTP pública.
+>
+> **CVE-class cerrados**:
+> - **FFF** — `imaging/safety.go` ahora setea `CheckRedirect` que revalida IP en cada hop con `validateOutboundURL` extraída. Mismo patrón que `iptv/proxy.go` ya usaba (cierra la duplicación olvidada). Test `TestSafeGet_RejectsRedirectToPrivateIP` con httptest + mock contador.
+> - **F16-1** — Nuevo helper compartido `internal/api/handlers/imagedir.go::isPathUnderImageDir` con `EvalSymlinks` + caminado hacia arriba para destinos no creados (caso thumbnail). `PeopleHandler` e `ImageHandler` ahora delegan al helper — elimina duplicación que tenía exactamente el mismo bug. 6 tests cubren symlink, traversal literal, parent no-creado bajo root, fuera del root, etc.
+>
+> **Lifecycle / drain**:
+> - **RR** — `loginRateLimiter.Stop()` idempotente con `sync.Once + stopCh`; cableado desde `auth.Service.StopSessionCleaner`.
+> - **Y** — `SegmentDetector` y `SegmentFingerprinter` añaden `bgWG`; el `unsub` retornado envuelve `busUnsub() + bgWG.Wait()`.
+> - **DD + GGGG** — `iptv.Service` con `bgCtx/bgCancel/bgWG` + nuevos `SpawnBackground(fn)` + `BackgroundContext()` exportados en el interface `IPTVService`. `service_m3u.go` (auto-EPG, auto-probe) y `handlers/iptv_admin.go` (refresh M3U async, public-IPTV create) reemplazan `go func() { context.Background() }` por `svc.SpawnBackground(func(bgCtx) { … })`. `Service.Shutdown` ya no es no-op.
+>
+> **Política, audit, errores**:
+> - **RRR-mig** — 58 migraciones limpias de `-- +goose Down` (15 SQLite + 43 Postgres).
+> - **F16-7** — `KillSession` exige claims; sin ellas 401 + log ERROR. Audit obligatorio con `by`+`role`. Test pinea el guard.
+> - **F16-6** — `federation_admin.go` (3 sitios) ya no propaga `err.Error()` al cliente; mensajes genéricos por categoría, detalle al log.
+>
+> **Cosmética + defense-in-depth**:
+> - **AAA** — Comentario obsoleto en `event/bus.go` reescrito en español con productor por evento.
+> - **EE** — `StreamProxy.Shutdown` renombrado a `ClearRelays` (el drain real es del `http.Server`). Caller en `main.go` con nota.
+> - **HHH** — `pathmap.Read` rechaza paths corruptos vía nuevo `ErrCorruptMapping` (vacíos, relativos, con `..`). Test de 4 subcasos.
+>
+> **ADRs nuevos en `architecture-decisions.md`**:
+> - **ADR-019** — SSRF guard con `CheckRedirect` obligatorio (refuerza ADR-002).
+> - **ADR-021** — Path traversal: `EvalSymlinks` obligatorio antes de `filepath.Rel`.
+>
+> **Verificación al cierre Sesión M.1**:
+> - `go build ./...` — verde.
+> - `go test ./internal/... -count=1 -timeout=300s` — **22 paquetes verdes** (api, handlers, auth, db, federation, iptv, imaging, library, scanner, stream, etc.).
+> - Tests nuevos añadidos: `TestSafeGet_RejectsRedirectToPrivateIP`, 6× `TestIsPathUnderImageDir_*`, `TestLoginRateLimiter_StopIsIdempotent` + `_StopClosesGoroutine`, 4× `TestRead_RejectsCorruptMapping`, `TestAdminStreams_KillSession_RejectsWithoutClaims`.
+>
+> ## 📍 Próxima sesión: Iteración 2 — Sub-paquetes de `db/`
+>
+> El plan completo está en `docs/memory/audit-2026-05-14-go-backend-review.md` § "Plan de intervención final" + `docs/memory/intervention-2026-05-14.md` § tabla de estado.
+>
+> **Iteración 2** ataca olores **B + J + K + T + L** (~1 día):
+> - **B + J** — Mover `internal/db/federation_repository.go` (1 474 LOC, 6 responsabilidades) a `internal/federation/storage/` con split en sub-ficheros (`identity.go`, `invite.go`, `peer.go`, `audit.go`, `item_cache.go`, `ratelimit.go`). Cierra **la única violación de capa real** del proyecto (`db → federation`).
+> - **K + T** — Crear `db.ActivityLogRepository` y migrar las queries raw inline de `handlers/system.go` (`StreamActivity`, `TopItems`). `Dependencies.Database *sql.DB` se sustituye por interfaces estrechas (`HealthChecker`, `BackupOperator`, `PoolStatsReporter`).
+> - **L** — Split de `db/home_repository.go` (671 LOC, 3 rails) en `home_latest.go`, `home_trending.go`, `home_live.go`. Mantener raw SQL (justificación documentada).
+>
+> **Cómo retomar**:
+> 1. Leer `docs/memory/audit-2026-05-14-go-backend-review.md` (§ Resumen ejecutivo + § F2 + § Plan de intervención final § B.2).
+> 2. Leer `docs/memory/intervention-2026-05-14.md` (tabla de estado de iteraciones).
+> 3. Continuar en `claude/review-go-media-backend-37MDe` o crear rama hija si se prefiere PR aislado.
+> 4. Cada commit: `fix(scope): X — descripción` + añadir párrafo de cierre debajo de la entrada del olor en `intervention-2026-05-14.md`.
 >
 > ---
 >
-> 🎬 **Sesión 2026-05-14 (rama `claude/gracious-dirac-fd009c` + follow-up `claude/review-personal-lists-eosgI`, Sesiones K + K.1 — lista IPTV personal por usuario desde /admin/users)** — el admin puede ahora asignarle a un usuario concreto su propia lista M3U (visible solo para ese hogar, invisible para el resto) en un solo flujo desde la ficha del usuario, sin tener que navegar a `/admin/libraries` y volver al matrix de bibliotecas a tickear el checkbox.
+> 🎬 **Sesión 2026-05-14 anterior (rama `claude/gracious-dirac-fd009c` + follow-up `claude/review-personal-lists-eosgI`, Sesiones K + K.1 — lista IPTV personal por usuario desde /admin/users)** — el admin puede ahora asignarle a un usuario concreto su propia lista M3U (visible solo para ese hogar, invisible para el resto) en un solo flujo desde la ficha del usuario, sin tener que navegar a `/admin/libraries` y volver al matrix de bibliotecas a tickear el checkbox.
 >
 > ## 🧩 Sesión K — Atajo "Lista IPTV personal" en /admin/users (PR [#281](https://github.com/Alexzafra13/HubPlay_demo/pull/281), commit `ef7124c`)
 >

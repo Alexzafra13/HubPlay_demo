@@ -3554,3 +3554,44 @@ los hallazgos originales.
 2. Leer este audit + buscar olores no cerrados.
 3. Elegir el siguiente bloque del plan que no esté cerrado.
 4. Trabajar 1 iteración, commit + PR, marcar cierre en el doc.
+
+---
+
+## Registro de cierres (apéndice vivo)
+
+> Esta sección crece a medida que se cierran olores. **No edita los
+> hallazgos originales** — solo añade la marca de cierre con
+> commit hash + iteración. El cuerpo de la auditoría queda
+> inmutable. Detalle por olor en `intervention-2026-05-14.md`.
+
+### Iteración 1 — 2026-05-14
+
+12 olores cerrados, suite Go verde, cero cambios de API HTTP
+pública.
+
+| Olor | Severidad | Cerrado en | Sub-commit |
+|---|---|---|---|
+| **FFF** SSRF redirect bypass (CVE) | Alta | `b5a57ac` | imaging/safety.go + safety_test.go |
+| **F16-1** Path traversal symlink (CVE) | Alta | `b5a57ac` | handlers/imagedir.go (helper nuevo) + tests |
+| RRR-mig política up-only | Media-alta | `246339f` | 58 migraciones limpias |
+| RR `loginRateLimiter` goroutine sin Stop | Media | `246339f` | auth/ratelimit.go + test |
+| Y SegmentDetector/Fingerprinter sin drain | Media | `246339f` | library/segment_detector.go + fingerprinter.go |
+| DD detached goroutines iptv.Service | Media | `246339f` | iptv/service.go + service_m3u.go |
+| GGGG detached goroutines handlers/iptv_admin | Media | `246339f` | handlers/iptv_admin.go (vía SpawnBackground) |
+| F16-7 audit trail KillSession | Media | `246339f` | handlers/admin_streams.go + test |
+| F16-6 filtración err.Error() federation_admin | Media | `246339f` | handlers/federation_admin.go |
+| AAA comentario bus.go desactualizado | Baja | `246339f` | event/bus.go (reescrito ES) |
+| EE StreamProxy.Shutdown engañoso | Baja | `246339f` | iptv/proxy.go (rename ClearRelays) |
+| HHH pathmap.Read sin validar | Baja | `246339f` | imaging/pathmap/pathmap.go + test |
+
+**Tests nuevos añadidos**: `TestSafeGet_RejectsRedirectToPrivateIP`,
+6 × `TestIsPathUnderImageDir_*`, 2 × `TestLoginRateLimiter_Stop*`,
+4 × `TestRead_RejectsCorruptMapping`,
+`TestAdminStreams_KillSession_RejectsWithoutClaims`.
+
+**ADRs abiertos**: ADR-019 (SSRF `CheckRedirect`), ADR-021
+(`EvalSymlinks` antes de `Rel`).
+
+### Iteraciones 2-9
+
+Pendientes. Ver `intervention-2026-05-14.md` § tabla de estado.
