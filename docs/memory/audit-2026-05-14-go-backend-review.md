@@ -1546,13 +1546,130 @@ go func() {
 
 ## Fase 8 · `event` + primitivos sin deps
 
-> Pendiente. Foco propuesto:
-> - `event.Bus` política "no recover de handlers que cuelgan"
->   (ADR-008): correctness empírica.
-> - Lifecycle de subscribers: cuántos llaman al `unsubscribe()`, cuántos
->   leakean potencialmente.
-> - `clock`, `logging`, `observability`, `probe`, `blurhash`,
->   `sysmetrics`: revisar que su API sigue siendo mínima.
+Cerrada · 2026-05-14.
+
+### 8.1 Inventario
+
+| Paquete | LOC prod | Ficheros | Observación |
+|---|---:|---:|---|
+| `event` | 220 | 1 | Bus pub/sub in-proc, ADR-008 aplicado |
+| `clock` | 24 | 1 | `Clock` interface + Real + Mock |
+| `logging` | 255 | 2 | Wrapper slog + buffer in-memory |
+| `observability` | 516 | 6 | Registry Prometheus dedicado |
+| `probe` | 260 | 1 | Wrapper ffprobe |
+| `blurhash` | 189 | 1 | Hash miniaturas |
+| `sysmetrics` | 343 | 1 | Sampler CPU/RAM/GPU |
+
+Todos sin imports internos (raíces del grafo, F1.2). Todos con
+package-doc inicial que explica el porqué.
+
+### 8.2 Hallazgos
+
+#### ZZ — Bus contract OK; el bug está en los detectors · **eco de Y/DD**
+
+- `event.Bus.Publish` lanza una goroutine por handler. El watchdog
+  emite warning a los 30 s y siempre sale (ADR-008). Si un handler
+  cuelga, leakea **una** goroutine.
+- **Subscribers reales auditados**:
+  - `library/segment_detector.go:78` — handler **no bloquea** (lanza
+    `go d.DetectLibrary(ctx, libID)` y retorna). Bus contract OK.
+  - `library/segment_fingerprinter.go:81` — mismo patrón.
+  - `handlers/auth_device.go:367` — handler hace `select { case
+    eventCh <- e: default: drop }`. Non-blocking, idiomático SSE.
+  - `handlers/me_events.go:116` — mismo patrón, per-user filter.
+  - `handlers/events.go:106` — mismo patrón.
+- **Conclusión**: ningún subscriber bloquea en el handler. El bus
+  contract se cumple. **El problema de olor Y (F4) y DD (F5) NO es
+  del bus — es que las goroutines spawneadas por los handlers no se
+  drenan**.
+- No-acción sobre el bus. Acción ya catalogada en olores Y/DD.
+
+#### AAA — Lista de tipos del bus con comentario desactualizado · **baja**
+
+- `event/bus.go:24-31` declara:
+  > NOTE: as of 2026-04-17 only the five scan/item types are
+  > actually published by the scanner. The others (Metadata*,
+  > Transcode*, Channel*, EPG*, Playlist*, User*) are reserved for
+  > upcoming features.
+- En 2026-05-14 esto **ya no es cierto**. Grep confirma publishers
+  en 8 paquetes:
+  - `scanner` — Library/Item events.
+  - `auth` — User events.
+  - `federation` — peer events.
+  - `iptv` — ChannelHealthChanged, PlaylistRefreshed/Failed,
+    EPGUpdated, ChannelAdded/Removed.
+  - `stream` — TranscodeStarted/Completed.
+  - `library` — LibraryScanProgress + segment detection events.
+  - `handlers/progress` — progress events.
+- Comentario desactualizado por 1 mes. Severidad baja.
+- Refactor trivial: borrar la NOTE o reescribirla acorde.
+
+#### BBB — `observability/` con package-doc modelo · **sano**
+
+- Package-doc explica 4 decisiones de diseño (registry privado,
+  labels low-cardinality, histogram buckets hand-picked, collectors
+  typed) en 15 líneas.
+- Es el ejemplo del proyecto de "documentar la decisión en el
+  código, no sólo en ADR".
+- Modelo a replicar cuando se escriban package-docs nuevos.
+
+#### CCC — `clock` mínimo y útil · **sano, modelo de primitivo**
+
+- 24 LOC: 1 interface, 2 implementaciones (Real + Mock con
+  `Advance(d)`).
+- Inyectado en `auth.Service`, `federation.Manager`, `iptv.Service`,
+  `iptv.RateLimiter`, etc.
+- Modelo de "primitivo correcto en Go": API mínima, sin estado
+  global, tests trivializados.
+
+#### DDD — `logging`/`probe`/`blurhash`/`sysmetrics` como librerías focalizadas · **sano**
+
+- Cada uno cubre una sola responsabilidad. Cada uno con test
+  adyacente. Cero deps internas.
+- `logging.Buffer` es ring in-memory para el panel admin "Logs" — el
+  comentario en `Dependencies.LogBuffer` (`router.go`) lo declara
+  optional/nil-safe.
+- `sysmetrics.Sampler` corre `Start(ctx)` con goroutine + `atomic.Value`
+  para snapshot lock-free (per cmd/hubplay/main.go:431). Pattern
+  correcto.
+- No son olor.
+
+#### EEE — `event.Bus` no expone `Close` · **baja, cosmético**
+
+- El Bus no tiene cleanup. Los handlers viven hasta GC del proceso.
+- En producción funciona — el proceso termina completo.
+- En tests integrados los Bus se construyen de nuevo con `NewBus`,
+  los antiguos son GC'd.
+- **No es bug real.** Mencionado sólo para consistencia con el resto
+  del proyecto (todo lo demás tiene `Shutdown`/`Close`). Añadir un
+  `Bus.Close()` que vacíe el map sería cosmético.
+
+### 8.3 Confirmaciones de `[PENDIENTE]`
+
+- `[PENDIENTE-F8]` Política "no recover de handlers que cuelgan"
+  (ADR-008) → confirmado **sano**, sin subscribers bloqueantes en el
+  repo actual.
+- `[PENDIENTE-F8]` Subscribers que llaman al `unsubscribe()` →
+  confirmado **sano** en los 3 SSE handlers (defer unsub correcto).
+  Los detectors (segment_detector, segment_fingerprinter) lo retornan
+  desde `Start()` y `main.go` lo difiere — el bug es las goroutines
+  spawneadas dentro del handler, no el unsub (ya catalogado en olor Y).
+
+### 8.4 Severidades Fase 8
+
+| # | Problema | Severidad | Prerequisito |
+|---|----------|-----------|--------------|
+| AAA | Comentario `event/bus.go:24-31` desactualizado | Baja | Reescribir |
+| EEE | `event.Bus` sin `Close()` | Baja, cosmético | Añadir o documentar como intencional |
+
+### 8.5 Notas operativas
+
+- `event.Bus` es **el primitivo más crítico del proyecto** después de
+  `*sql.DB`. ADR-008 sigue cumpliéndose; ningún subscriber bloquea.
+- Los 8 paquetes raíz (sin deps internas) representan **el activo
+  arquitectónico más valioso**: la base sobre la que el resto se
+  construye sin acoplamientos circulares. Cualquier import nuevo en
+  uno de ellos debe pasar revisión específica.
 
 ---
 
