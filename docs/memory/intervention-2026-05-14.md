@@ -17,7 +17,7 @@ en este doc (no se edita el audit original).
 |----:|---|---|---|---|
 | 0 | 🔄 en curso | Pre-trabajo: ADRs + conventions.md | — | — |
 | 1 | ✅ cerrada | Fixes urgentes seguridad + correctness | FFF, F16-1, RRR-mig, RR, Y, DD, GGGG, AAA, EE, HHH, F16-6, F16-7 | 12 olores cerrados, suite verde |
-| 2 | ⏳ pendiente | Sub-paquetes de `db/` | B, J, K, T, L | — |
+| 2 | 🔄 en curso | Sub-paquetes de `db/` | B, J ✅ · K, T, L pendientes | B+J cerrados en sesión M.2; K+T+L diferidos a 2.1 |
 | 3 | ⏳ pendiente | Migración Opción B incremental | M (iptv → auth → library) | — |
 | 4 | ⏳ pendiente | Split de god-handlers/services | P, Z, QQ | — |
 | 5 | ⏳ pendiente | Refactor estructural `iptv/` | CC | — |
@@ -171,3 +171,117 @@ menores), 58 migraciones limpiadas, 1 helper nuevo compartido
 (`iptv.Service.SpawnBackground` + `BackgroundContext`). Cero
 cambios de API HTTP pública. Iteración lista para revisión y
 merge.
+
+---
+
+## Iteración 2 — Sub-paquetes de `db/`
+
+Plan original: cerrar olores B + J + K + T + L. Esta sesión (M.2)
+cierra **B + J**; K + T + L se difieren a una sub-iteración 2.1
+para que el PR sea un refactor estructural puro sin mezclar
+cambios de interfaz en `Dependencies`. Cero cambios de API HTTP
+pública; firmas de los repos preservadas vía rename de tipo
+(`FederationRepository` → `storage.Repository`).
+
+### Cierres
+
+- ✅ **B + J** (inversión de capa `db → federation` + god-fichero
+  `federation_repository.go` con 6 responsabilidades) —
+  `internal/db/federation_repository.go` (1 474 LOC) eliminado.
+  Nuevo paquete `internal/federation/storage/` con split en
+  **9 ficheros**:
+
+  | Fichero | Métodos | Responsabilidad |
+  |---|---|---|
+  | `storage.go` | struct `Repository` + `NewRepository` + `useSQLite` + `caseInsensitiveSort` + `buildSearchSharedItemsSQL` | Construcción + helpers de dialecto |
+  | `sql_util.go` | `nullableString` + `toTSQueryPrefix` | Helpers SQL (copias privadas — ver nota) |
+  | `identity.go` | `GetIdentity` + `InsertIdentity` + 2 row mappers | Identity Ed25519 del servidor |
+  | `invite.go` | 4 métodos + 2 row mappers | Códigos `hp-invite-…` |
+  | `peer.go` | 7 métodos + 2 row mappers | Peers linkeados |
+  | `audit.go` | `InsertAuditEntry` + `ListAuditEntries` + `PruneAuditBefore` | Cola de audit log |
+  | `share.go` | 7 métodos + 2 row mappers + `attachPrimaryImageColors` (raw) + `SearchSharedItems` (FTS dual-dialect raw) | Library shares + shared items + búsqueda federada |
+  | `item_cache.go` | `UpsertCachedItems` (tx + raw INSERT) + `ListCachedItems` (raw SELECT) + `PurgeCachedItemsForLibrary` | Item cache cross-peer |
+  | `progress.go` | `UpsertProgress` + `GetProgress` + `DeleteProgress` + `ListContinueWatching` | Cross-peer Continue Watching |
+
+  El plan original del audit mencionaba 6 sub-ficheros
+  (incluyendo `ratelimit.go` para RatelimitState declarado en
+  ADR-012); ese fichero NO se crea porque grep confirmó que
+  `federation_repository.go` jamás tuvo métodos de rate limit
+  (el RatelimitState está fuera de scope hasta que alguien lo
+  implemente). En su lugar el fichero original tenía dos
+  responsabilidades sin mención explícita en el audit:
+  `share.go` (LibraryShare + SharedLibrary + SharedItem listings
+  + búsqueda federada) y `progress.go` (federation_progress de
+  la migración 028). El split refleja la realidad del código,
+  no la lista mental del auditor — cada fichero hace exactamente
+  lo que dice su nombre.
+
+  **Decisiones de implementación**:
+  - **Tipo `Repository`** (no `FederationRepository`) — evita
+    stutter; el call site queda `federationstorage.NewRepository(...)`.
+  - **Constructor sigue en el caller** (`main.go`, `pg-smoke`,
+    tests), NO en `federation.NewManager`. El plan del audit
+    sugería que `federation.NewManager` construyese el storage
+    internamente, pero eso introduciría ciclo
+    `federation ↔ federation/storage` (storage importa
+    `federation` para los tipos). El paquete `federation`
+    consume el repo vía `type Repo interface` (manager.go:34),
+    así que mover la construcción al composition root es
+    coherente con el resto del proyecto y deja cero ciclo.
+  - **Helpers privados copiados en lugar de exportados**:
+    `nullableString` (4 LOC) y `toTSQueryPrefix` (~30 LOC) viven
+    duplicados en `sql_util.go` para no exponer API pública en
+    `db/` por dos call-sites externos. Las versiones en `db/`
+    (`session_repository.go:345`, `item_repository.go:941`)
+    siguen igual para sus propios callers.
+  - **`db.RewritePlaceholders` + `db.IsPostgres` reutilizados**
+    (exportados ya antes) para no duplicar la lógica de dialect
+    rewrite.
+  - **Tests preservados via `git mv`** —
+    `internal/db/federation_repository_test.go` (498 LOC, 4
+    funciones test, 1 helper `insertTestUser`) movido a
+    `internal/federation/storage/repository_test.go` con
+    `package storage_test`. El test sigue usando
+    `db.NewLibraryRepository` / `db.NewItemRepository` /
+    `db.NewImageRepository` para seed (importing `internal/db`),
+    sólo cambia `db.NewFederationRepository(...)` →
+    `storage.NewRepository(...)`. Git tracea el rename
+    automáticamente.
+  - **4 callers actualizados**:
+    - `cmd/hubplay/main.go:392`:
+      `db.NewFederationRepository(...)` →
+      `federationstorage.NewRepository(...)` + import añadido.
+    - `cmd/pg-smoke/main.go:107`: ídem.
+    - `internal/api/handlers/federation_stream_test.go:73,454`:
+      ídem (2 sitios) + import añadido.
+
+  **Cierra olor B** porque `internal/db` ya no importa
+  `internal/federation` (la inversión de capa única del proyecto
+  ha desaparecido). **Cierra olor J** porque el god-fichero de
+  1 474 LOC se ha descompuesto en 7 ficheros temáticos de
+  150–530 LOC cada uno, cada uno con responsabilidad única.
+
+### Verificación final Iteración 2 (B+J)
+
+- `go build ./...` — verde (exitcode 0 en `golang:1.25` container).
+- `go test ./internal/... -count=1 -timeout=300s` — **22
+  paquetes verdes** incluyendo el nuevo `hubplay/internal/federation/storage`
+  (1.6s, las 4 funciones test movidas pasan). `hubplay/internal/db`
+  sigue verde tras la extracción (24.8s); `hubplay/internal/api/handlers`
+  sigue verde (16.2s, federation_stream_test.go incluido);
+  `hubplay/internal/federation` sigue verde (2.5s).
+- Tests pre-existentes preservados: `TestFederationRepository_SearchSharedItems`,
+  `TestFederationRepository_SharedItem_ColorsForwarded`,
+  `TestFederationRepository_Progress`,
+  `TestFederationRepository_Progress_PeerRevokedDropsFromRail`.
+
+### Pendiente sub-iteración 2.1
+
+- **K + T** — Crear `db.ActivityLogRepository` y migrar las
+  queries raw inline de `handlers/system.go` (`StreamActivity`,
+  `TopItems`). `Dependencies.Database *sql.DB` se sustituye por
+  interfaces estrechas (`HealthChecker`, `BackupOperator`,
+  `PoolStatsReporter`).
+- **L** — Split de `db/home_repository.go` (671 LOC, 3 rails) en
+  `home_latest.go`, `home_trending.go`, `home_live.go`.
+  Mantener raw SQL (justificación documentada).

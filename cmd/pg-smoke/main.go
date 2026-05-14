@@ -27,6 +27,7 @@ import (
 	"hubplay"
 	"hubplay/internal/db"
 	"hubplay/internal/federation"
+	federationstorage "hubplay/internal/federation/storage"
 )
 
 func main() {
@@ -104,7 +105,7 @@ func main() {
 	// 6. Federation identity: insert + read back. Exercises
 	// FederationPeer projection (LastSeenStatusCode NullInt32 in pg).
 	logger.Info("step 6: federation identity insert + get")
-	fedRepo := db.NewFederationRepository(db.DriverPostgres, database)
+	fedRepo := federationstorage.NewRepository(db.DriverPostgres, database)
 	identity := &federation.Identity{
 		ServerUUID: "smoke-server-uuid",
 		Name:       "smoke-server",

@@ -37,6 +37,7 @@ import (
 	"hubplay/internal/clock"
 	"hubplay/internal/db"
 	"hubplay/internal/federation"
+	federationstorage "hubplay/internal/federation/storage"
 	"hubplay/internal/stream"
 	"hubplay/internal/testutil"
 )
@@ -69,7 +70,7 @@ func newFedTestEnv(t *testing.T) *fedTestEnv {
 	ctx := context.Background()
 	clk := clock.New()
 	rawDB := testutil.NewTestDB(t)
-	fedRepo := db.NewFederationRepository(testutil.Driver(), rawDB)
+	fedRepo := federationstorage.NewRepository(testutil.Driver(), rawDB)
 
 	if _, err := federation.LoadOrCreate(ctx, fedRepo, clk, "TestServer"); err != nil {
 		t.Fatalf("load or create identity: %v", err)
@@ -450,7 +451,7 @@ func TestFederationStream_Subtitles_ForeignPeerSession_Returns404(t *testing.T) 
 	now := env.clk.Now()
 	peer2ID := uuid.NewString()
 	peer2SrvUUID := uuid.NewString()
-	if err := db.NewFederationRepository(testutil.Driver(), env.rawDB).InsertPeer(context.Background(), &federation.Peer{
+	if err := federationstorage.NewRepository(testutil.Driver(), env.rawDB).InsertPeer(context.Background(), &federation.Peer{
 		ID:         peer2ID,
 		ServerUUID: peer2SrvUUID,
 		Name:       "OtherPeer",
