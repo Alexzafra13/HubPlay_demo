@@ -30,7 +30,8 @@
 - **Fase 11 · `config` + `setup` + `retention`** · ✅ cerrada
 - **Fase 12 · Migraciones SQLite + Postgres** · ✅ cerrada
 - **Fase 13 · Transversales (error wrapping, ctx, deadlocks, naming, globals)** · ✅ cerrada
-- Plan de intervención final · ✅ cerrado y revisado.
+- **Fase 14 · Calidad a nivel código / función (god-functions, struct params, boilerplate, tests frágiles, magic numbers)** · ✅ cerrada
+- Plan de intervención final · ✅ cerrado y revisado tras F14.
 
 ---
 
@@ -105,7 +106,7 @@ metadata) o IP RFC1918 interna. **Fix urgente, ~20 LOC, modelo en
 
 ### Camino propuesto
 
-8 iteraciones (0..7), **~12-13 días de trabajo focalizado**, cada
+9 iteraciones (0..8), **~14-15 días de trabajo focalizado**, cada
 iteración deja el repo verde:
 
 0. Pre-trabajo: 6 ADRs (incluye **ADR-015 dominio en feature**,
@@ -124,6 +125,10 @@ iteración deja el repo verde:
    (Q), `Transcoder` stateless (LL).
 7. **Cosmética y schema**: D, X, W, BB, UUU-mig, TTT-mig, VVV-mig,
    SSS-mig, WWW-trans, XXX-trans, PPP, NNN, OOO, JJJ/III/KKK/LLL.
+8. **Polish de calidad** (F14): struct params (~30 firmas),
+   helpers `respondData`/`requireParam` (~125 sites), tests sin
+   `Sleep`, magic numbers a constantes, dead-code wipe. ~600 LOC
+   eliminadas sin perder funcionalidad.
 
 ### Riesgos y lo que NO se hace
 
@@ -2309,9 +2314,342 @@ inspección:
 
 ---
 
+## Fase 14 · Calidad a nivel código / función
+
+Cerrada · 2026-05-14. Cubre lo que NO se ve a nivel struct/paquete
+pero impacta "esto parece código de profesional o de prototipo":
+funciones gigantes individuales, firmas con muchos parámetros,
+boolean params, boilerplate repetido, magic numbers, tests
+frágiles, naming local.
+
+### 14.1 Funciones gigantes individuales (>100 LOC)
+
+25 funciones superan 100 LOC. Top 10:
+
+| # | Función | LOC | Diagnóstico |
+|---|---|---:|---|
+| **F14-1** | `api.NewRouter` | **626** | Wiring de 219 rutas en un único `Route()` callback. Resuelto por **G/H** (sub-routers). |
+| **F14-2** | `stream.BuildFFmpegArgs` | 192 | Switch gigante por hwAccel/encoder/copy/tonemap. Refactor en F14-2-a. |
+| **F14-3** | `iptv.RunRefreshM3U` | 177 | Pipeline lineal: fetch → parse → diff → persist → publish. Split por etapa. |
+| **F14-4** | `stream.startSessionSlow` | 175 | Path completo de start de sesión. Split por sub-decisión. |
+| **F14-5** | `db.NewHomeRepository` | 175 | **Olor real**: constructor con queries SQL inline. Mover queries a fichero `.sql` o constantes. |
+| **F14-6** | `iptv.RefreshEPG` | 172 | Mismo patrón pipeline que F14-3. |
+| **F14-7** | `scanner.enrichMetadata` | 157 | Sub-caso de W. Split por content type. |
+| **F14-8** | `handlers.ContinueWatching` | 153 | Sub-caso de Z; consume rating-cap + filter + format. |
+| **F14-9** | `db.ItemRepository.List` | 150 | Construye WHERE dinámico con `where += " AND ..."` repetido (ver F14-9-a). |
+| **F14-10** | `provider.TMDbProvider.GetMetadata` | 145 | Fan-out de calls TMDb. Acceptable para "external client" pero split por endpoint mejoraría tests. |
+
+#### F14-2-a · `BuildFFmpegArgs` 192 LOC + 13 params · **alta**
+
+- 13 parámetros + body lineal con 6+ ramas de hwAccel/encoder.
+- Llamada en 30+ sites de tests + 2 en producción.
+- Refactor:
+  ```go
+  type TranscodeRequest struct {
+      Input, OutputDir       string
+      Profile                Profile
+      StartTime              float64
+      HWAccel                HWAccelType
+      Encoder, Libx264Preset string
+      CopyVideo, CopyAudio   bool
+      ToneMap                bool
+      StartSegmentNumber     int
+      AudioStreamIndex       int
+      BurnSub                *BurnSubtitleSpec
+  }
+  func BuildFFmpegArgs(req TranscodeRequest) []string
+  ```
+- Reduce 13 → 1 param. Permite renombrar campos sin tocar 30+ callers
+  de test. Permite añadir nuevos params sin breaking change.
+- Severidad **alta** porque `Transcoder.Start` y `RestartAt` tienen
+  la **misma firma de 11 params** (subset de la de BuildFFmpegArgs).
+  Patrón replicado tres veces.
+
+#### F14-9-a · `where += " AND ..."` para queries dinámicas · **media**
+
+- `db/item_repository.go:233-240`: construye WHERE concatenando
+  strings con `+=`.
+- Olor de "código de prototipo": no usa `strings.Builder` ni
+  `[]string{...}; strings.Join`. Performance OK para tamaños
+  actuales, pero olor visible.
+- Refactor:
+  ```go
+  conds := []string{"1=1"}
+  args := []any{}
+  if filter.LibraryID != "" {
+      conds = append(conds, "library_id = ?")
+      args = append(args, filter.LibraryID)
+  }
+  where := strings.Join(conds, " AND ")
+  ```
+
+### 14.2 Funciones con 7+ parámetros (anti-pattern)
+
+| Función | Params | Sugerencia |
+|---|---:|---|
+| `stream.BuildFFmpegArgs` | 13 | `TranscodeRequest` struct (ver F14-2-a) |
+| `handlers.NewItemHandler` | 13 | Cubierto por **P** (split god-handler) |
+| `stream.Transcoder.Start` | 11 | `TranscodeRequest` |
+| `stream.Transcoder.RestartAt` | 11 | `TranscodeRequest` |
+| `stream.Manager.startSessionSlow` | 9 | `StartSessionRequest` struct |
+| `stream.Manager.StartSession` | 8 | `StartSessionRequest` struct |
+| `handlers.NewIPTVHandler` | 7 | Cubierto por **CC** (split paquete iptv) |
+| `stream.NewTranscoder` | 7 | `TranscoderConfig` struct |
+| `federation.Manager.RecordProgress` | 7 | `ProgressUpdate` struct |
+
+**F14-2-b · severidad: media-alta**. Aplicable a 9 firmas. Cada
+una es ~5 min con `gopls`.
+
+### 14.3 Booleans seguidos en firmas (anti-pattern)
+
+- `Transcoder.Start(..., copyVideo, copyAudio, toneMap bool, ...)` —
+  3 booleanos seguidos. Caller call: `transcoder.Start(..., true,
+  false, true, ...)`. **Ilegible** en review.
+- 1 hit con tres booleans seguidos (`stream/transcode.go`). Otros
+  con 1-2 boolean param mezclados con otros tipos — tolerables.
+- **F14-3-a · severidad: media**. Resuelto naturalmente por
+  `TranscodeRequest` (F14-2-a).
+
+### 14.4 `panic()` en código de producción
+
+- **Único hit**: `internal/iptv/prober_worker.go:87`:
+  ```go
+  panic("iptv.NewProberWorker: nil dependency")
+  ```
+- Justificable como "programmer error caught at construction time".
+- **Pero**: inconsistente con el resto del proyecto. `federation.NewManager`
+  retorna `(nil, err)` cuando init falla; el caller en `main.go`
+  hace fail-soft. Aquí `panic` rompe el patrón.
+- **F14-4-a · severidad: baja**. Refactor: retornar `(*ProberWorker,
+  error)` con `errors.New("nil dependency")`. ~5 LOC.
+
+### 14.5 Helpers con nombres similares en distintos paquetes
+
+| Helper | Paquete | Significado |
+|---|---|---|
+| `isSafeMethod(method)` | `api/csrf.go` | HTTP method en `{GET,HEAD,OPTIONS}` |
+| `isSafeUpstream(url)` | `iptv/proxy.go` | URL outbound segura (SSRF guard) |
+| `IsSafePathSegment(s)` | `imaging/safety.go` | Path segment sin `..`/`/` |
+| `BlockedIP(ip)` | `imaging/safety.go` | IP en rango privado/loopback |
+| (futuro) | `imaging/safety.go::SafeGet CheckRedirect` | El olor **FFF** |
+
+- **No es duplicación funcional** (cada uno valida algo distinto).
+- **Es inconsistencia de naming**:
+  - `is*Safe*` (camelCase) cuando es package-private.
+  - `IsSafe*` cuando es exported.
+  - `BlockedIP` rompe el patrón (no usa "Safe").
+- **F14-5-a · severidad: baja**. Convención: documentar en
+  `conventions.md` el patrón "Is{X}Safe / Is{X}Blocked" según
+  dirección (whitelist vs blacklist).
+
+### 14.6 Boilerplate repetitivo en handlers
+
+#### F14-6-a · `map[string]any{"data": ...}` wrapping · **media**
+
+- **100+ sites** que hacen
+  `respondJSON(w, status, map[string]any{"data": payload})`.
+- Inconsistencia: a veces `{"data": x}`, a veces el payload
+  directo, a veces `{"items": x, "count": n}`. Sin convención de
+  envelope.
+- **Refactor**: helper:
+  ```go
+  // respondData escribe el envelope canonico {data: payload}.
+  func respondData(w http.ResponseWriter, status int, data any) {
+      respondJSON(w, status, struct {
+          Data any `json:"data"`
+      }{data})
+  }
+  ```
+- Elimina ~100 sites de `map[string]any{"data": ...}`. **Mismo wire
+  shape**.
+- Adicional: helper `respondPage(w, status, items, total)` para el
+  patrón paginado.
+
+#### F14-6-b · `chi.URLParam(r, "id")` boilerplate · **baja**
+
+- 15 ficheros repiten:
+  ```go
+  id := chi.URLParam(r, "id")
+  if id == "" {
+      apperror.Write(w, ctx, domain.NewBadRequest("missing id"))
+      return
+  }
+  ```
+- **Refactor**: helper:
+  ```go
+  // requireParam extrae un URL param y responde 400 si falta.
+  // Retorna (value, ok); el handler hace `return` si !ok.
+  func requireParam(w http.ResponseWriter, r *http.Request, name string) (string, bool) {
+      v := chi.URLParam(r, name)
+      if v == "" {
+          apperror.Write(w, r.Context(),
+              domain.NewBadRequest("missing "+name))
+          return "", false
+      }
+      return v, true
+  }
+  ```
+- Elimina ~25 sites de boilerplate.
+
+### 14.7 Logging repetitivo: `library_id` 145 veces como campo
+
+- 145 hits de `"library_id"` como campo del logger.
+- **Patrón correcto YA existe**: `library/scheduler.go:33`
+  `logger.With("module", "scheduler")` enriquece el logger una vez.
+- **No se aplica consistentemente** en hot paths. Cada handler /
+  método pone el campo manualmente.
+- **F14-7-a · severidad: baja**. Convención: cada feature crea su
+  logger sub-named con `.With()`:
+  ```go
+  // En el service:
+  func (s *Service) Scan(ctx, id) {
+      log := s.logger.With("library_id", id)
+      log.Info("scan started")
+      ...
+  }
+  ```
+- Reduce ruido + permite filtrado por feature en grep.
+
+### 14.8 Tests frágiles con `time.Sleep` arbitrarios
+
+10 ficheros de test hacen `time.Sleep(10/50/100ms)` para esperar a
+goroutines. Patrón:
+
+```go
+go someWorkflow()
+time.Sleep(50 * time.Millisecond) // hopefully enough
+assert.Equal(...)
+```
+
+Anti-pattern: **CI flakes** en máquinas lentas; **slow tests** en
+máquinas rápidas.
+
+**Patrón correcto YA existe en el proyecto**:
+- `library.FSWatcher.walksDone atomic.Int64` se expone para tests
+  sin sleep.
+- Test seam pattern documentado en `library/watcher_test.go`.
+
+Sites con `Sleep`:
+- `retention/runner_test.go:102,123`
+- `federation/client_retry_test.go:150, stream_test.go:107`
+- `provider/httpcache_test.go:236`
+- `auth/service_test.go:669`
+- `api/handlers/iptv_test.go:1159,1245`
+- `library/watcher_test.go:148,177` (con comentario "// initial walk")
+- `iptv/scheduler_test.go`
+
+**F14-8-a · severidad: media**. Refactor: cada uno con channel /
+WaitGroup expuesto vía test seam. ~30 min por test.
+
+### 14.9 Magic numbers (HTTP cache headers)
+
+`86400` (1 día), `3600` (1 hora), `604800` (1 semana) hardcoded en
+12+ sites de Cache-Control:
+
+- `handlers/iptv_channels.go:363`
+- `handlers/federation_stream.go:309, 396`
+- `handlers/image.go:441`
+- `handlers/people.go:71`
+- `handlers/openapi.go:65`
+- `handlers/stream.go:420, 643`
+- `api/csrf.go:62` (cookie MaxAge)
+
+**F14-9-a · severidad: baja**. Refactor: constantes nombradas en
+un fichero compartido `handlers/cache.go`:
+```go
+const (
+    cacheOneHour = "max-age=3600"
+    cacheOneDay  = "public, max-age=86400, stale-while-revalidate=604800"
+    cacheOneWeek = "public, max-age=604800"
+)
+```
+
+### 14.10 Funciones que retornan 4 valores
+
+| Función | Retornos | Refactor |
+|---|---|---|
+| `handlers.parseBulkScheduleRequest` | `(ids, from, to, ok)` | `BulkScheduleQuery{}, error` |
+| `federation.BrowsePeerItems` | `([]*Item, count, partial, error)` | `BrowseResult{}, error` |
+| `scanner.extractEpisodeFromFilename` | `(season, episode int, title, ok)` | `*EpisodeInfo, ok` |
+| `db.FederationRepository.ListCachedItems` | `(items, count, lastSync, error)` | `CachedItemPage{}, error` |
+
+**F14-10-a · severidad: baja**. Múltiples retornos son OK en Go,
+pero 4+ valores invitan a errores de orden en callers. Struct
+nombrada por retorno mejora legibilidad.
+
+### 14.11 Código dead-ish
+
+- **`internal/db/scan_helpers.go`**: 52 LOC con `itemNullables`
+  struct. Comentario dice "dead helpers were removed when the
+  linter flagged them" — pero el struct todavía existe. Verificar
+  uso.
+- **`db.api_keys` schema**: VVV-mig (F12) — tabla + índices sin
+  repo ni queries. Confirmado dead.
+- **`internal/db/queries-postgres/`**: directorio listado en F1
+  pero no analizado en profundidad. ¿Vivo o stub?
+
+**F14-11-a · severidad: baja**. Pase de `staticcheck -unused` antes
+del refactor para detectar más dead code.
+
+### 14.12 Concatenación con `+=` vs `strings.Builder`
+
+- 6 sites en producción usan `+=` para concatenar strings (algunos
+  ya catalogados en F14-9-a):
+  - `provider/fanart.go:269` — query string build.
+  - `handlers/iptv_playback_failure.go:153` — error message.
+  - `db/item_repository.go:233-240` — WHERE clause (F14-9-a).
+- Performance OK para tamaño actual (1-5 concatenaciones), pero
+  olor visible al lector.
+- **F14-12-a · severidad: baja**. Convención: usar
+  `strings.Builder` cuando >3 concatenaciones; `fmt.Sprintf` o
+  string + cuando ≤2.
+
+### 14.13 Severidades Fase 14
+
+| # | Olor | Severidad |
+|---|------|-----------|
+| F14-1 | `api.NewRouter` 626 LOC | Alta (resuelto por G/H) |
+| F14-2-a | `BuildFFmpegArgs` 13 params + Start/RestartAt mismo patrón | Alta |
+| F14-5 | `db.NewHomeRepository` 175 LOC con SQL inline | Media (resuelto por L) |
+| F14-6-a | 100+ sites de `map[string]any{"data": ...}` | Media |
+| F14-7-a | Logging `library_id` repetido 145 veces | Baja |
+| F14-8-a | Tests con `time.Sleep` arbitrarios (10 sitios) | Media |
+| F14-2-b | 9 funciones con 7+ params (struct params) | Media-alta |
+| F14-3-a | 3 booleans seguidos en `Transcoder.Start` | Media (subset F14-2-a) |
+| F14-4-a | `panic()` en `prober_worker.go:87` | Baja |
+| F14-5-a | Inconsistencia `is*Safe*` / `IsSafe*` / `Blocked*` | Baja |
+| F14-6-b | `chi.URLParam` boilerplate (25 sites) | Baja |
+| F14-9-a | Magic numbers cache (12 sites) | Baja |
+| F14-10-a | 4-valor returns (4 funciones) | Baja |
+| F14-11-a | `scan_helpers.go` posiblemente dead | Baja |
+| F14-12-a | `+=` para concatenación (6 sites) | Baja |
+
+### 14.14 Notas operativas: qué se puede borrar
+
+**Líneas que se eliminan sin pérdida de funcionalidad** (estimado):
+
+| Acción | LOC reducidos |
+|---|---:|
+| `respondData` helper + reemplazar 100 sites | ~200 LOC |
+| `requireParam` helper + reemplazar 25 sites | ~100 LOC |
+| `cacheOneDay`/`cacheOneHour` constantes (12 sites) | ~24 LOC |
+| `TranscodeRequest` struct (3 funciones con 11-13 params) | ~50 LOC |
+| `db.api_keys` schema + índices removidos | ~30 LOC |
+| `scan_helpers.go itemNullables` si dead | ~52 LOC |
+| Borrado de `-- +goose Down` blocks (RRR-mig, 15 ficheros) | ~150 LOC |
+| **Total estimado** | **~600 LOC eliminados sin perder funcionalidad** |
+
+Es el **0.8% del backend Go** (72 319 LOC). No es revolucionario,
+pero combinado con los splits estructurales (P, Z, CC, J) el
+código resultante baja un ~5-8% en LOC con MEJOR claridad. Eso es
+lo que diferencia "código de prototipo" de "código de
+profesional".
+
+---
+
 ## Plan de intervención final
 
-Cerrado · 2026-05-14, **revisado tras F9-F13**. Sintetiza las 13
+Cerrado · 2026-05-14, **revisado tras F9-F14**. Sintetiza las 14
 fases. Las **letras entre paréntesis** referencian olores
 específicos.
 
@@ -2336,6 +2674,8 @@ específicos.
 | G | `Dependencies` + `runtime` + `main.run` 645 LOC | F1, F3 | Módulos compuestos por feature (`<feature>.New(ctx, deps) *Module`) |
 | Q | `WriteTimeout: 0` global aplica a las 219 rutas | F3 | Middleware `WithWriteDeadline(30s)` en sub-router no-streaming |
 | **RRR-mig** | **Política up-only violada (15 migraciones con `Down`)** | **F12** | **Eliminar `-- +goose Down` de 15 ficheros (mecánico)** |
+| **F14-2-a** | **`BuildFFmpegArgs` 192 LOC + 13 params; `Transcoder.Start`/`RestartAt` con misma firma de 11** | **F14** | **Struct `TranscodeRequest`** |
+| **F14-2-b** | **9 funciones con 7+ parámetros** | **F14** | **Struct params para cada constructor / método público** |
 
 #### Severidad media
 
@@ -2386,6 +2726,19 @@ específicos.
 | **XXX-trans** | **`auth.AuthToken` stutter** | **F13** | Rename a `auth.Token` |
 | **YYY-trans** | **Tests sin `t.Parallel()` (8/122)** | **F13** | Activar donde no haya shared state |
 | **QQQ** | **`setup.isSensitivePath` sin auditar** | **F11** | Confirmar lista en intervención |
+| **F14-3-a** | **3 booleans seguidos en `Transcoder.Start`** | **F14** | Cubierto por F14-2-a |
+| **F14-4-a** | **`panic()` en `prober_worker.go:87`** | **F14** | Retornar `(*ProberWorker, error)` |
+| **F14-5-a** | **Inconsistencia naming `is*Safe*` / `Blocked*`** | **F14** | Convención en `conventions.md` |
+| **F14-6-a** | **100+ sites `map[string]any{"data": ...}`** | **F14** | Helper `respondData` |
+| **F14-6-b** | **`chi.URLParam` boilerplate (25 sites)** | **F14** | Helper `requireParam` |
+| **F14-7-a** | **Logging `library_id` 145 veces sin `.With()`** | **F14** | Sub-loggers per-context |
+| **F14-8-a** | **Tests con `time.Sleep` arbitrarios (10 ficheros)** | **F14** | Test seams determinísticos |
+| **F14-9-a** | **Magic numbers Cache-Control (12 sites)** | **F14** | Constantes nombradas |
+| **F14-10-a** | **4-valor returns (4 funciones)** | **F14** | Structs nombradas |
+| **F14-11-a** | **`scan_helpers.go itemNullables` posiblemente dead** | **F14** | Verificar con `staticcheck` |
+| **F14-12-a** | **`+=` para concatenación (6 sites)** | **F14** | `strings.Builder` |
+| **F14-5** | **`db.NewHomeRepository` constructor 175 LOC con SQL inline** | **F14** | Mover SQL a constantes; split por rail |
+| **F14-9** | **`db.ItemRepository.List` 150 LOC con `where +=`** | **F14** | `[]string` + `strings.Join` |
 
 #### "Sanos / modelos" a citar al refactorizar
 
@@ -2534,6 +2887,50 @@ Por feature, una por commit:
 35. **OOO**: `RequestLogger` con nivel según status.
 36. **JJJ + III + KKK + LLL**: cosmética de `imaging`.
 
+#### Iteración 8 · Polish de calidad de código y "estilo profesional" (~2 días, paralelizable)
+
+Las tareas de F14 no encajan en otras iteraciones y son
+**transversalmente paralelizables** — cada subgrupo es independiente
+y deja el repo verde tras commit.
+
+37. **F14-2-a + F14-3-a**: `TranscodeRequest` struct para
+    `BuildFFmpegArgs` + `Transcoder.Start` + `RestartAt`. Una
+    sola PR resuelve los 3.
+38. **F14-2-b**: structs de params para las 9 funciones con 7+
+    args. Mecánico: `NewItemHandler`, `NewIPTVHandler`,
+    `NewTranscoder`, `Manager.StartSession`, `startSessionSlow`,
+    `RecordProgress`. Una commit por struct.
+39. **F14-6-a**: helper `respondData` + sed-replace de los 100+
+    sites de `map[string]any{"data": ...}`. Mantiene wire shape.
+40. **F14-6-b**: helper `requireParam` + reemplazo de los 25 sites
+    de `chi.URLParam(r, "id")` con guard.
+41. **F14-9-a**: constantes `cacheOneHour`/`cacheOneDay`/
+    `cacheOneWeek` en `handlers/cache.go` + reemplazo en 12
+    sites.
+42. **F14-7-a**: convención de sub-loggers con `.With(...)` en cada
+    feature. Documentar en `conventions.md`. Aplicar en hot paths
+    de iptv/library/auth.
+43. **F14-8-a**: refactor de los 10 tests con `time.Sleep` a test
+    seams determinísticos. Modelo: `FSWatcher.walksDone`.
+44. **F14-9 + F14-5**: split de `db.ItemRepository.List` y
+    `db.NewHomeRepository` con `strings.Builder` o `[]string` +
+    `Join` para WHERE dinámico.
+45. **F14-4-a**: `panic()` en `prober_worker.go:87` → error.
+46. **F14-10-a**: structs nombradas para los 4 retornos múltiples.
+47. **F14-11-a**: ejecutar `staticcheck -unused ./...` y eliminar
+    `scan_helpers.go::itemNullables` si confirmado dead.
+48. **F14-12-a**: `strings.Builder` donde `+=` se repite ≥3 veces
+    (3 sites concretos).
+49. **F14-5-a**: documentar convención `is*Safe*` / `Blocked*` en
+    `conventions.md`.
+
+**Resultado esperado de Iteración 8**:
+- ~600 LOC eliminadas sin pérdida de funcionalidad (ver F14.14).
+- ~30 firmas de función con 7+ params reducidas a 1 param (struct).
+- 100+ sites de boilerplate eliminados.
+- 10 tests sin `time.Sleep` arbitrario.
+- Convenciones documentadas en `conventions.md`.
+
 ### C. ADRs a abrir
 
 | ADR | Título | Supersede |
@@ -2570,9 +2967,14 @@ todavía) se cierra como efecto colateral de B+J en Iteración 2.
   sub-paquetes).
 - `Dependencies` < 15 campos (hoy 35+).
 - `main.run` < 250 LOC (hoy 645).
+- `api.NewRouter` < 100 LOC (hoy 626) — resuelto por sub-routers.
+- Ninguna función pública con > 6 parámetros (hoy 9 con 7+).
+- Ninguna función > 200 LOC (hoy 6 sobre 100 LOC).
 - `handlers/interfaces.go` desaparece — cada sub-paquete lleva sus
   interfaces.
 - `goleak.VerifyNone(t)` pasa en todos los servicios con goroutines.
+- Backend total < 68 000 LOC prod (hoy 72 319) — reducción del
+  ~5-6% por F14 + dedup post-Opción B.
 
 ### F. Riesgos y mitigaciones
 
@@ -2613,3 +3015,34 @@ Cuando se inicie la intervención, recomiendo abrir un documento
 hermano `docs/memory/intervention-2026-05-XX.md` que tracée el
 trabajo iteración por iteración, dejando este como spec inmutable
 del estado inicial.
+
+### Cómo trabajar este plan en sesiones
+
+El plan está diseñado **para sesiones independientes**:
+
+- **Cada iteración (0..8)** deja el repo verde y mergeable. Una
+  sesión = una iteración completa, o un subconjunto. No mezclar
+  iteraciones en un mismo PR.
+- **Cada olor tiene letra única** (A..LLLL, F14-X) que se referencia
+  en el commit y la PR. El commit message dice "fix(security):
+  resuelve FFF — SSRF redirect bypass" y en el doc se escribe el
+  párrafo de cierre debajo de la entrada de FFF.
+- **Iteración 1 es URGENTE** (FFF + correctness). Se hace antes que
+  todo lo demás. Aislada.
+- **Iteraciones 2-5** son secuenciales: cada una desbloquea la
+  siguiente. (db sub-paquetes → Opción B → split god-handlers →
+  refactor iptv.)
+- **Iteración 6** (composition root) requiere que 2-5 estén hechas.
+- **Iteración 7 y 8** son **paralelizables entre sí y con 6**.
+  Cada commit es independiente.
+
+**Estado en el doc**: marcar cada olor cerrado con `· ✅ cerrado en
+PR #N (commit hash)` debajo de su entrada. La auditoría queda como
+spec **inmutable**; las marcas de cierre van **debajo**, no editan
+los hallazgos originales.
+
+**Para retomar entre sesiones**:
+1. Leer `docs/memory/project-status.md` (siempre, primero).
+2. Leer este audit + buscar olores no cerrados.
+3. Elegir el siguiente bloque del plan que no esté cerrado.
+4. Trabajar 1 iteración, commit + PR, marcar cierre en el doc.
