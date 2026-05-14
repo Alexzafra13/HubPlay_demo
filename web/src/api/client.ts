@@ -1036,6 +1036,49 @@ export class ApiClient {
    *  can access (including their hidden ones) plus their `hidden` +
    *  `user_position` fields so the panel can render the full editable
    *  list. The regular Live TV view uses getChannels() instead. */
+  /** Admin curation panel view. Returns every channel (including
+   *  admin-hidden) with the admin overlay's positions and a `hidden`
+   *  flag per row. Distinct from getChannelsForPersonalisation
+   *  because the personalisation panel must NOT see admin-hidden
+   *  channels (hard constraint), but the curation panel must in
+   *  order to un-hide them. */
+  async getChannelsForLibraryAdmin(libraryId: string): Promise<Channel[]> {
+    return this.request<Channel[]>(
+      "GET",
+      `/libraries/${libraryId}/channels/admin-view`,
+    );
+  }
+
+  async replaceLibraryChannelOrder(
+    libraryId: string,
+    req: ChannelOrderRequest,
+  ): Promise<void> {
+    await this.request<{ status: "ok" }>(
+      "PUT",
+      `/libraries/${libraryId}/channels/order`,
+      { body: req },
+    );
+  }
+
+  async resetLibraryChannelOrder(libraryId: string): Promise<void> {
+    await this.request<{ status: "ok" }>(
+      "DELETE",
+      `/libraries/${libraryId}/channels/order`,
+    );
+  }
+
+  async setLibraryChannelVisibility(
+    libraryId: string,
+    channelId: string,
+    hidden: boolean,
+  ): Promise<void> {
+    await this.request<{ status: "ok" }>(
+      "PUT",
+      `/libraries/${libraryId}/channels/${encodeURIComponent(channelId)}/admin-visibility`,
+      { body: { hidden } },
+    );
+  }
+
   async getChannelsForPersonalisation(libraryId: string): Promise<Channel[]> {
     return this.request<Channel[]>("GET", `/libraries/${libraryId}/channels`, {
       params: { include_hidden: "true" },

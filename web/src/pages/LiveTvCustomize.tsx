@@ -23,7 +23,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
-import { ArrowDown, ArrowUp, ArrowLeft, Eye, EyeOff, RotateCcw, Save } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 
 import {
   useChannelsForPersonalisation,
@@ -31,7 +31,8 @@ import {
   useReplaceChannelOrder,
   useResetChannelOrder,
 } from "@/api/hooks";
-import { Button, Spinner, EmptyState } from "@/components/common";
+import { EmptyState } from "@/components/common";
+import { ChannelOrderEditor } from "@/components/livetv/ChannelOrderEditor";
 
 // Working copy of one channel as the user reorders / toggles. Local
 // to the page — once "Guardar" persists, we refetch the canonical
@@ -200,105 +201,22 @@ export default function LiveTvCustomize() {
         </div>
       )}
 
-      {channelsQ.isLoading && (
-        <div className="flex justify-center py-12">
-          <Spinner size="md" />
-        </div>
-      )}
+      <p className="mb-3 text-xs text-text-muted">
+        {t("livetv.customize.scopeHint")}
+      </p>
 
-      {!channelsQ.isLoading && draft.length === 0 && (
-        <EmptyState
-          title={t("livetv.customize.empty")}
-          description={t("livetv.customize.emptyHint")}
-        />
-      )}
-
-      {draft.length > 0 && (
-        <>
-          <ol className="rounded-[--radius-md] border border-border bg-bg-card divide-y divide-border-subtle">
-            {draft.map((c, i) => (
-              <li
-                key={c.id}
-                className={[
-                  "flex items-center gap-3 px-3 py-2 text-sm transition-colors",
-                  c.hidden ? "opacity-50" : "",
-                ].join(" ")}
-                data-testid="customize-row"
-              >
-                <span className="w-8 text-right font-mono text-xs text-text-muted">
-                  {i + 1}
-                </span>
-                <div className="flex flex-1 flex-col">
-                  <span className="text-text">{c.name}</span>
-                  {c.group_name && (
-                    <span className="text-xs text-text-muted">{c.group_name}</span>
-                  )}
-                </div>
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => move(i, -1)}
-                    disabled={i === 0}
-                    aria-label={t("livetv.customize.moveUp")}
-                    className="rounded p-1.5 text-text-muted hover:bg-bg-elevated disabled:opacity-30"
-                  >
-                    <ArrowUp className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => move(i, 1)}
-                    disabled={i === draft.length - 1}
-                    aria-label={t("livetv.customize.moveDown")}
-                    className="rounded p-1.5 text-text-muted hover:bg-bg-elevated disabled:opacity-30"
-                  >
-                    <ArrowDown className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => toggleHidden(i)}
-                    aria-label={c.hidden ? t("livetv.customize.show") : t("livetv.customize.hide")}
-                    aria-pressed={c.hidden}
-                    className={[
-                      "rounded p-1.5 hover:bg-bg-elevated",
-                      c.hidden ? "text-danger" : "text-text-muted",
-                    ].join(" ")}
-                  >
-                    {c.hidden ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ol>
-
-          {savedMessage && (
-            <div
-              role="status"
-              className="mt-3 rounded-[--radius-sm] bg-success/10 px-3 py-2 text-sm text-success"
-            >
-              ✓ {savedMessage}
-            </div>
-          )}
-
-          <div className="mt-4 flex flex-wrap justify-between gap-2">
-            <Button
-              variant="ghost"
-              onClick={handleReset}
-              disabled={resetOrder.isPending}
-            >
-              <RotateCcw className="h-4 w-4" />
-              {t("livetv.customize.reset")}
-            </Button>
-            <Button
-              variant="primary"
-              onClick={handleSave}
-              disabled={!dirty || replaceOrder.isPending}
-            >
-              {replaceOrder.isPending ? <Spinner size="sm" /> : <Save className="h-4 w-4" />}
-              {t("livetv.customize.save")}
-            </Button>
-          </div>
-        </>
-      )}
+      <ChannelOrderEditor
+        draft={draft}
+        loading={channelsQ.isLoading}
+        onMove={move}
+        onToggleHidden={toggleHidden}
+        onSave={handleSave}
+        onReset={handleReset}
+        dirty={dirty}
+        savePending={replaceOrder.isPending}
+        resetPending={resetOrder.isPending}
+        savedMessage={savedMessage}
+      />
     </div>
   );
 }

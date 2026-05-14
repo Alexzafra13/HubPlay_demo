@@ -51,6 +51,12 @@ const apiMock = vi.hoisted(() => ({
   // renders deterministically instead of pegging on a real fetch.
   getPublicCountries: vi.fn(),
   preflightM3U: vi.fn(),
+  // useRefreshM3U calls api.refreshM3U + opens a NoopEventSource via
+  // the jsdom shim, so the mutation never resolves in tests. That's
+  // fine — production fires-and-forgets too, the modal closes on
+  // create.onSuccess without awaiting refresh. Tests just assert the
+  // POST was attempted with the new library id.
+  refreshM3U: vi.fn(),
 }));
 vi.mock("@/api/client", () => ({ api: apiMock }));
 
@@ -142,6 +148,7 @@ beforeEach(() => {
     message: "OK",
     elapsed_ms: 12,
   });
+  apiMock.refreshM3U.mockResolvedValue({ channels_imported: 0 });
   apiMock.createUser.mockResolvedValue({
     id: "u-new",
     username: "newone",
@@ -409,6 +416,13 @@ describe("UsersAdmin (mobile)", () => {
     expect(userId).toBe("u2");
     expect(payload.m3u_url).toBe("https://example.com/bob.m3u");
     expect(payload.name).toMatch(/Bob/);
+
+    // The modal must also kick off the first M3U refresh — otherwise
+    // the user lands on an empty channel list waiting for the next
+    // scheduled job. Mirror the behaviour of /admin/libraries/new.
+    await waitFor(() =>
+      expect(apiMock.refreshM3U).toHaveBeenCalledWith("lib-new"),
+    );
   });
 
   it("constructs the iptv-org URL when the public country tab is used", async () => {

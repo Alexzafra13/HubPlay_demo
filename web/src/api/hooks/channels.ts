@@ -73,6 +73,69 @@ export function useResetChannelOrder() {
   });
 }
 
+// ── Admin curation overlay (library-level) ───────────────────────────
+//
+// Mirrors the per-user hooks above. The admin's edit changes the
+// default every viewer inherits; the per-user overlay still applies
+// on top, but admin-hidden is a hard constraint downstream.
+
+export function useAdminChannelsForOrder(
+  libraryId: string | undefined,
+  options?: Partial<UseQueryOptions<Channel[]>>,
+) {
+  return useQuery<Channel[]>({
+    queryKey: ["channels", libraryId, "admin-order"],
+    queryFn: () => api.getChannelsForLibraryAdmin(libraryId!),
+    enabled: !!libraryId,
+    ...options,
+  });
+}
+
+export function useReplaceLibraryChannelOrder() {
+  const qc = useQueryClient();
+  return useMutation<
+    void,
+    Error,
+    { libraryId: string } & ChannelOrderRequest
+  >({
+    mutationFn: ({ libraryId, ...req }) =>
+      api.replaceLibraryChannelOrder(libraryId, req),
+    onSuccess: (_, { libraryId }) => {
+      // Both the admin curation view and the user-facing channel
+      // queries need to refetch — the admin default changed.
+      qc.invalidateQueries({ queryKey: ["channels", libraryId, "admin-order"] });
+      qc.invalidateQueries({ queryKey: ["channels"] });
+    },
+  });
+}
+
+export function useResetLibraryChannelOrder() {
+  const qc = useQueryClient();
+  return useMutation<void, Error, string>({
+    mutationFn: (libraryId) => api.resetLibraryChannelOrder(libraryId),
+    onSuccess: (_, libraryId) => {
+      qc.invalidateQueries({ queryKey: ["channels", libraryId, "admin-order"] });
+      qc.invalidateQueries({ queryKey: ["channels"] });
+    },
+  });
+}
+
+export function useSetLibraryChannelVisibility() {
+  const qc = useQueryClient();
+  return useMutation<
+    void,
+    Error,
+    { libraryId: string; channelId: string; hidden: boolean }
+  >({
+    mutationFn: ({ libraryId, channelId, hidden }) =>
+      api.setLibraryChannelVisibility(libraryId, channelId, hidden),
+    onSuccess: (_, { libraryId }) => {
+      qc.invalidateQueries({ queryKey: ["channels", libraryId, "admin-order"] });
+      qc.invalidateQueries({ queryKey: ["channels"] });
+    },
+  });
+}
+
 export function useSetChannelVisibility() {
   const qc = useQueryClient();
   return useMutation<void, Error, { channelId: string; hidden: boolean }>({

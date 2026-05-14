@@ -13,9 +13,10 @@ import { ChannelsWithoutEPGPanel } from "./ChannelsWithoutEPGPanel";
 import { EPGSourcesPanel } from "./EPGSourcesPanel";
 import { ScheduledJobsPanel } from "./ScheduledJobsPanel";
 import { UnhealthyChannelsPanel } from "./UnhealthyChannelsPanel";
+import { AdminChannelOrderPanel } from "./AdminChannelOrderPanel";
 
 type HealthStatus = "ok" | "warning" | "critical" | "pending";
-type TabKey = "sources" | "without-epg" | "unhealthy" | "schedule";
+type TabKey = "sources" | "without-epg" | "unhealthy" | "schedule" | "channel-order";
 
 interface HealthReport {
   status: HealthStatus;
@@ -185,6 +186,9 @@ export function LivetvAdminPanel({
         {tab === "schedule" ? (
           <ScheduledJobsPanel libraryId={libraryId} />
         ) : null}
+        {tab === "channel-order" ? (
+          <AdminChannelOrderPanel libraryId={libraryId} />
+        ) : null}
       </div>
     </div>
   );
@@ -264,6 +268,19 @@ function TabBar({
       count: unhealthyCount,
       tone: "warning",
       show: unhealthyCount > 0,
+    },
+    {
+      key: "channel-order",
+      // Show on every livetv library — once the M3U has imported and
+      // the admin wants to curate the order, this tab is always the
+      // right surface. Count omitted (would imply a small set of
+      // touched rows; not useful here).
+      label: t("admin.livetv.tabs.channelOrder", {
+        defaultValue: "Orden de canales",
+      }),
+      count: 0,
+      tone: "default",
+      show: true,
     },
   ];
   const visible = tabs.filter((tb) => tb.show);

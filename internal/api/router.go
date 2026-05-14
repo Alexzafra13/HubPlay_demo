@@ -855,6 +855,14 @@ func NewRouter(deps Dependencies) http.Handler {
 						r.Post("/channels/{channelId}/disable", iptvHandler.DisableChannel)
 						r.Post("/channels/{channelId}/enable", iptvHandler.EnableChannel)
 						r.Patch("/channels/{channelId}", iptvHandler.PatchChannel)
+						// Admin channel curation. Reorder, hide, restore
+						// M3U order. Hidden HERE is a hard constraint:
+						// downstream the per-user overlay can only hide
+						// more, not surface what the admin removed.
+						r.Get("/libraries/{id}/channels/admin-view", iptvHandler.ListLibraryChannelsAdmin)
+						r.Put("/libraries/{id}/channels/order", iptvHandler.ReplaceLibraryChannelOrder)
+						r.Delete("/libraries/{id}/channels/order", iptvHandler.ResetLibraryChannelOrder)
+						r.Put("/libraries/{id}/channels/{channelId}/admin-visibility", iptvHandler.SetLibraryChannelVisibility)
 						r.Route("/libraries/{id}/iptv", func(r chi.Router) {
 							r.Post("/refresh-m3u", iptvHandler.RefreshM3U)
 							r.Post("/refresh-epg", iptvHandler.RefreshEPG)

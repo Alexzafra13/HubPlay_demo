@@ -1271,10 +1271,21 @@
     },
     "livetv": {
       "tabs": {
-        "sources": "Fuentes EPG",
-        "schedule": "Programación",
-        "withoutEPG": "Sin guía",
-        "unhealthy": "Con problemas"
+        "sources": "EPG sources",
+        "schedule": "Schedule",
+        "withoutEPG": "No EPG",
+        "unhealthy": "Issues",
+        "channelOrder": "Channel order"
+      },
+      "channelOrder": {
+        "scopeHint": "This is the default order every user inherits. Each user can customize their own view on top, but they CANNOT show channels you hide here.",
+        "save": "Save order",
+        "saved": "Order saved.",
+        "reset": "Restore M3U order",
+        "resetConfirm": "Restore the original M3U order? Your reorderings and hidden channels will be lost.",
+        "resetDone": "Order restored to the M3U default.",
+        "empty": "No channels yet.",
+        "emptyHint": "Click 'Refresh channels' in the Sources tab to import the M3U."
       },
       "tabsLabel": "Secciones de la biblioteca livetv",
       "stats": {
@@ -1520,7 +1531,8 @@
       "empty": "No channels yet.",
       "emptyHint": "Once the admin refreshes the M3U list, your channels will appear here.",
       "noLibraries": "No Live TV libraries configured.",
-      "noLibrariesHint": "Ask the admin to set up an IPTV source first."
+      "noLibrariesHint": "Ask the admin to set up an IPTV source first.",
+      "scopeHint": "Only changes your view. The admin sets the default order and can hide channels for everyone."
     }
   }
 }
