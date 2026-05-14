@@ -5,6 +5,7 @@ import {
   useUsers,
   useCreateUser,
   useCreatePersonalIPTVLibrary,
+  useRefreshM3U,
   useCreateProfile,
   useDeleteUser,
   useLibraries,
@@ -247,6 +248,13 @@ export default function UsersAdmin() {
   const [iptvLiveState, setIptvLiveState] = useState(makeInitialLiveTvFormState);
   const [iptvError, setIptvError] = useState<string | null>(null);
   const createPersonalIPTV = useCreatePersonalIPTVLibrary();
+  // Auto-fire the first M3U refresh after the lib is created so the
+  // owner doesn't land on an empty channel list waiting for the next
+  // scheduled job to run. Same fire-and-forget pattern LibraryNewPage
+  // uses for the global form: we don't await, the mutation keeps
+  // running while UsersAdmin stays mounted and any LibraryCard the
+  // admin opens later will pick up the in-flight spinner.
+  const refreshM3U = useRefreshM3U();
   function openIptvModal(user: User) {
     setIptvTarget(user);
     const displayName = user.display_name || user.username;
@@ -291,7 +299,12 @@ export default function UsersAdmin() {
         languageFilter: resolved.payload.language_filter,
         tlsInsecure: resolved.payload.tls_insecure,
       },
-      { onSuccess: () => closeIptvModal() },
+      {
+        onSuccess: (lib) => {
+          refreshM3U.mutate(lib.id);
+          closeIptvModal();
+        },
+      },
     );
   }
 
