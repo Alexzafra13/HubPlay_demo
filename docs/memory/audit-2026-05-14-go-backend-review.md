@@ -354,16 +354,189 @@ organización física.
 
 ## Fase 2 · `internal/db/`
 
-> Pendiente. Foco propuesto:
-> - Inventario de repos: cuáles son adapter sqlc puros, cuáles tienen
->   lógica de mapping no trivial, cuáles tienen raw SQL holdouts y por
->   qué.
-> - Validación del olor A (god-package) con detalle: cohesión
->   intra-paquete, qué se queda y qué se separa.
-> - Validación del olor B (`db → federation`) con propuesta concreta.
-> - Patrón dual-dialect (Pattern A): cuántos repos lo honran, cuántos
->   ignoran `driver`, deuda de la "Sesión E" incompleta.
-> - `*sql.DB` raw expuesto en `Dependencies` — quién lo usa.
+Cerrada · 2026-05-14.
+
+### 2.1 Inventario
+
+- **31 repos**, 30 test files (~97 % cobertura de ficheros).
+- **8 ficheros "infra"**: `database.go`, `dialect.go`, `migrator.go`,
+  `postgres.go`, `repos.go`, `restore.go`, `scan_helpers.go`,
+  `sqlite.go`. Cohesión correcta: infra de conexión y migración.
+- **80+ tipos exportados** (modelos públicos: `db.Item`, `db.Channel`,
+  `db.User`, `db.Image`, …) consumidos por **55 ficheros fuera del
+  paquete** (handlers + servicios). Cuantifica el olor A de Fase 1.
+- **Dialectos**:
+  - 26 repos hacen *Pattern A* (importan `sqlc` + `sqlc_pg`, branch
+    `IsPostgres(driver)` por método).
+  - 19 repos hacen *Pattern B* (raw SQL con `RewritePlaceholders` al
+    construir).
+  - 5 repos son **raw puros sin sqlc**: `home`, `settings`,
+    `user_preferences`, `library_channel_order`, `user_channel_order`.
+    Cada uno con comentario que documenta el porqué (cross-cutting
+    joins, bug sqlc 1.31.1 `ORDER BY ASC` per ADR-013, o queries
+    triviales).
+- **Cabezas grandes** (LOC y métodos exportados):
+  - `federation_repository.go` — 1 474 LOC, **31 métodos**.
+  - `item_repository.go` — 965 LOC, 12 métodos.
+  - `user_data_repository.go` — 794 LOC, 12 métodos.
+  - `channel_repository.go` — 760 LOC, 15 métodos.
+  - `home_repository.go` — 671 LOC, 7 raw queries.
+  - `library_repository.go` — 660 LOC, 12 métodos.
+  - `user_repository.go` — 643 LOC, 18 métodos.
+
+### 2.2 Hallazgos
+
+#### J — `federation_repository.go` son 5-6 repos disfrazados de uno · **alta** (sub-caso de A+B)
+
+- **1 474 LOC**, 2× el siguiente repo (`user_repository.go` 643 LOC).
+- Mezcla seis responsabilidades en un fichero:
+  1. Identity (keypair Ed25519 del servidor).
+  2. Invites (códigos `hp-invite-…`).
+  3. Peers (servers linkeados).
+  4. Audit log (cola async).
+  5. Item cache (FTS dual-dialect, raw).
+  6. Rate limit state (declarado en ADR-012 pero no usado).
+- Principio violado: **SRP del fichero** (los demás repos sí son
+  single-responsibility).
+- Impacto: cualquier cambio en una de las seis responsabilidades
+  recompila + arrastra al test de las otras cinco. Es el primer
+  candidato natural para validar la **Opción B del olor A** (mover
+  tipos + repo a la feature). Concretamente: trasladar este fichero
+  a `internal/federation/storage/` resuelve **olor B simultáneamente**
+  porque deja de existir `db → federation`.
+- Refactor sugerido:
+  ```
+  internal/federation/storage/
+    identity.go    (5 métodos)
+    invite.go      (~5 métodos)
+    peer.go        (~6 métodos)
+    audit.go       (~4 métodos + writer async)
+    item_cache.go  (~6 métodos, FTS dual-dialect)
+    ratelimit.go   (~5 métodos, hoy unused)
+  ```
+  Cada fichero hace lo que dice. La factory (`Repositories` en
+  `db/repos.go`) deja de construir `FederationRepository`; en su lugar,
+  `federation.New(...)` construye los suyos. Esto reduce
+  `db.Repositories` en una entrada y elimina el import inverso.
+
+#### K — `*sql.DB` raw expuesto al HTTP layer · **media** (confirma `[PENDIENTE-F3]`)
+
+Cinco handlers reciben `*sql.DB` directamente vía `Dependencies.Database`:
+
+| Handler | Uso | Veredicto |
+|---|---|---|
+| `health.go` | `db.Ping()` para `/health` y `/health/db` | **Legítimo**, pero idealmente `db.HealthChecker` |
+| `system.go:299,459,600` | `PingContext` + `QueryContext` para audit log raw | **No legítimo** — queries directas a `activity_log` deberían ir por un repo |
+| `admin_backup.go:99` | `VACUUM INTO` (SQLite-only) | **Legítimo** — operación meta, no de dominio |
+| `admin_db.go:49,278` | `db.Stats()` + `probeVersion` | **Legítimo** — meta |
+| `iptv_schedule.go:18` | Sólo comentario, no usa | Limpieza |
+
+- Principio violado en `system.go`: **inversión de dependencias** del
+  patrón "handlers consumen interfaces estrechas, no `*sql.DB`".
+  Idéntico al patrón consumer-side correcto en los otros 23 handlers.
+- Impacto: si mañana un audit log se mueve a otra tabla / a otro
+  storage / a un buffer en memoria, `system.go` rompe en runtime y se
+  detecta tarde.
+- Refactor:
+  - Crear `db.ActivityLogRepository` con `List(filter)` típed.
+  - Para los otros usos (`Ping`, `Stats`, `VACUUM`, version), exponer
+    `db.AdminTools` interface estrecha que **no leakea** `*sql.DB`. El
+    `Database *sql.DB` en `Dependencies` desaparece.
+
+#### L — `home_repository.go` es 3 repos disfrazados de uno · **media** (sub-caso de A)
+
+- 671 LOC, **7 raw queries** distintas con joins + aggregations. Por
+  comentarios cubre tres rails distintos:
+  - `latest` per-library.
+  - `trending` server-wide.
+  - `live-now` (channel × EPG join).
+- Justificación raw (no sqlc): correcta — son one-shots con joins
+  dinámicos.
+- Refactor sugerido: tres ficheros en el mismo paquete, no tres repos.
+  Mantener la técnica raw. Al menos separar el código por sección. Es
+  el patrón que ya aplican `image_repository.go` (que mezcla `Image` y
+  `PrimaryImageRef`) y `collection_repository.go`.
+
+#### M — 80 tipos `db.X` consumidos por 55 ficheros: dominio leak · **alta** (cuantifica A)
+
+- Los modelos viven en `db/` por convención histórica; cualquier
+  cambio en `db.Item`, `db.Channel`, `db.User` requiere actualizar 55
+  callers.
+- En la dirección **Opción B** (federation ya lo hace), los tipos del
+  dominio viven en el paquete de feature (`iptv.Channel`,
+  `library.Item`, `auth.User`) y el repo retorna esos tipos. El
+  paquete `db/` queda como adapter sqlc + infra.
+- Refactor incremental:
+  1. Migrar **federation** primero (ya está casi: J resuelve el resto).
+  2. Después `iptv` (todos los tipos `db.Channel*`, `db.EPGProgram`,
+     `db.IPTVScheduledJob`, `db.LibraryEPGSource`,
+     `db.ChannelOverride`, `db.ChannelFavorite`,
+     `db.UserChannelOrderEntry`, `db.LibraryChannelOrderEntry`,
+     `db.ChannelHealthSummary`, `db.ChannelWatchHistory…` → al menos
+     11 tipos).
+  3. Después `library` (Item, MediaStream, Image, Chapter,
+     EpisodeSegment, ItemValue, Studio, Collection, ExternalID,
+     Metadata, Person, ItemPersonCredit → 12 tipos).
+  4. `auth` (User, Session, SigningKey, DeviceCode).
+- Coste estimado: ~1 día por feature si se hace con `goimports -r` y
+  un test suite verde. Beneficio: cada feature owns su contrato; `db`
+  ya no es god-package.
+
+#### N — `Pattern A` / `Pattern B` viven en comments, no en código · **baja**
+
+- 26+19 repos repiten dos patrones de copia/pega. Los términos
+  "Pattern A", "Pattern B" están en comentarios (ej.
+  `federation_repository.go:18`), no en helpers ni docs.
+- Refactor: documentar en `docs/memory/conventions.md` con cuándo
+  elegir cada uno y un *template* mínimo. Ya hay reglas duras en
+  ADR-013, pero falta el patrón nominado.
+
+#### O — `Repositories` struct con 31 campos · **baja**, eco de G
+
+- `db.Repositories` agrupa los 31 repos como factory. Es la
+  composition root de la capa de persistencia y por eso es defendible
+  (equivalente a `pool` en otros proyectos).
+- Pero combinado con G (`Dependencies` con tipos `*db.X` concretos)
+  significa que `Dependencies` reexpone `repos.Items`, `repos.Channels`,
+  etc. — el handler recibe el mismo handle que vive en `Repositories`.
+- Si en Fase 3 decidimos sub-routers con sus propias deps, el
+  refactor podría reorganizar `Repositories` por feature
+  (`repos.IPTV.*`, `repos.Library.*`, `repos.Auth.*`). Pero eso es
+  cosmética — el verdadero olor está en G+H, no aquí.
+
+### 2.3 Confirmaciones de `[PENDIENTE]` de Fase 1
+
+- **`[PENDIENTE-F3]` `*sql.DB` raw en `Dependencies`**: confirmado,
+  ver olor K. Cinco handlers, sólo uno (`system.go` audit log queries)
+  realmente abusa.
+- `[PENDIENTE-F3,F7]` `Federation == nil` nil-checks: no aplica a
+  esta fase, se atacará en F3/F7.
+
+### 2.4 Severidades Fase 2
+
+| # | Problema | Severidad | Prerequisito |
+|---|----------|-----------|--------------|
+| J | `federation_repository.go` (1 474 LOC, 6 responsabilidades) | Alta | Decisión Opción B |
+| K | `*sql.DB` raw vía `Dependencies` (queries en `system.go`) | Media | Crear `ActivityLogRepository` |
+| L | `home_repository.go` con 3 rails mezclados | Media | Split por fichero |
+| M | 80 tipos `db.X` consumidos por 55 ficheros | Alta | Decisión Opción B + migración incremental |
+| N | `Pattern A/B` no documentado como helper | Baja | Documentar en `conventions.md` |
+| O | `db.Repositories` con 31 campos | Baja | Eco de G |
+
+### 2.5 Decisión arquitectónica pendiente para el plan final
+
+**Opción A (split horizontal)** o **Opción B (mover tipos a la
+feature)**. Recomiendo **Opción B**, ya validada de facto por
+`federation`. Es el refactor estructural más alto-impacto del
+proyecto. Si se confirma, abre nuevo ADR que supersede el modelo
+implícito actual ("tipos viven en db/").
+
+Coste-beneficio:
+- Coste: ~4 días de refactor mecánico, ~55 ficheros tocados, alto
+  riesgo de conflictos con PRs en vuelo si se hace big-bang.
+- Beneficio: rompe acoplamiento estructural más alto del proyecto,
+  elimina inversión de capa (olor B), elimina god-package (olor A),
+  cierra la inconsistencia con federation.
 
 ---
 
