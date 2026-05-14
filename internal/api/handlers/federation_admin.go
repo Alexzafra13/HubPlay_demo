@@ -111,8 +111,12 @@ func (h *FederationAdminHandler) ProbePeer(w http.ResponseWriter, r *http.Reques
 	}
 	info, err := h.mgr.ProbePeer(r.Context(), req.BaseURL)
 	if err != nil {
+		// El error detallado va al log (puede contener IPs internas,
+		// status code del peer, etc.); al cliente solo el mensaje
+		// genérico (audit olor F16-6).
 		h.logger.Warn("federation: probe peer failed", "base_url", req.BaseURL, "err", err)
-		respondError(w, r, http.StatusBadGateway, "PEER_PROBE_FAILED", "peer probe failed: "+err.Error())
+		respondError(w, r, http.StatusBadGateway, "PEER_PROBE_FAILED",
+			"could not reach the peer; check the URL and try again")
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]any{"data": infoToWire(info)})
@@ -145,22 +149,32 @@ func (h *FederationAdminHandler) AcceptInvite(w http.ResponseWriter, r *http.Req
 	fallback := deriveURLFromRequest(r)
 	peer, err := h.mgr.AcceptInvite(r.Context(), req.BaseURL, req.Code, fallback)
 	if err != nil {
+		// El detalle del error va al log; al cliente solo el code +
+		// un mensaje fijo por categoría. Sin esto, err.Error() podía
+		// filtrar IPs del peer, status codes upstream, paths de
+		// transport (audit olor F16-6).
 		status, code := http.StatusBadGateway, "PEER_HANDSHAKE_FAILED"
+		msg := "could not complete the handshake with the peer"
 		switch {
 		case errors.Is(err, domain.ErrInviteInvalidFormat):
 			status, code = http.StatusBadRequest, "INVITE_INVALID_FORMAT"
+			msg = "invite code has an invalid format"
 		case errors.Is(err, domain.ErrInviteExpired):
 			status, code = http.StatusForbidden, "INVITE_EXPIRED"
+			msg = "invite code has expired"
 		case errors.Is(err, domain.ErrInviteAlreadyUsed):
 			status, code = http.StatusForbidden, "INVITE_ALREADY_USED"
+			msg = "invite code was already used"
 		case errors.Is(err, domain.ErrInviteNotFound):
 			status, code = http.StatusForbidden, "INVITE_NOT_FOUND"
+			msg = "invite code not recognised by the peer"
 		case errors.Is(err, domain.ErrAlreadyExists):
 			status, code = http.StatusConflict, "PEER_ALREADY_PAIRED"
+			msg = "this peer is already paired"
 		}
 		h.logger.Warn("federation: accept invite failed",
 			"base_url", req.BaseURL, "err", err, "status", status)
-		respondError(w, r, status, code, err.Error())
+		respondError(w, r, status, code, msg)
 		return
 	}
 	respondJSON(w, http.StatusCreated, map[string]any{"data": peerToWire(peer)})
@@ -265,15 +279,20 @@ func (h *FederationAdminHandler) CreateShare(w http.ResponseWriter, r *http.Requ
 		CanLiveTV:   req.CanLiveTV,
 	})
 	if err != nil {
+		// Como en AcceptInvite: detalle al log, mensaje genérico al
+		// cliente (audit olor F16-6).
 		status, code := http.StatusInternalServerError, "INTERNAL_ERROR"
+		msg := "could not share the library"
 		switch {
 		case errors.Is(err, domain.ErrPeerNotFound):
 			status, code = http.StatusNotFound, "PEER_NOT_FOUND"
+			msg = "peer not found"
 		case errors.Is(err, domain.ErrPeerUnauthorized):
 			status, code = http.StatusForbidden, "PEER_NOT_PAIRED"
+			msg = "peer is not paired"
 		}
 		h.logger.Warn("federation: share library failed", "err", err)
-		respondError(w, r, status, code, err.Error())
+		respondError(w, r, status, code, msg)
 		return
 	}
 	respondJSON(w, http.StatusCreated, map[string]any{"data": shareToWire(share)})

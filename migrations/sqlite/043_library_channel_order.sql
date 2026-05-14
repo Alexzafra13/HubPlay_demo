@@ -26,7 +26,3 @@ CREATE TABLE library_channel_order (
 
 CREATE INDEX idx_library_channel_order_library
     ON library_channel_order (library_id, position);
-
--- +goose Down
-DROP INDEX IF EXISTS idx_library_channel_order_library;
-DROP TABLE IF EXISTS library_channel_order;

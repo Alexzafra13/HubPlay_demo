@@ -5,18 +5,25 @@ import (
 	"time"
 )
 
-// loginRateLimiter tracks failed login attempts per username/IP to prevent brute-force.
+// loginRateLimiter trackea login fails por username/IP para frenar
+// brute-force. Cierra su goroutine de cleanup vía Stop() — el dueño
+// (`auth.Service`) lo llama desde StopSessionCleaner para evitar
+// leak de goroutine en tests que crean varios services
+// (audit olor RR).
 type loginRateLimiter struct {
 	mu       sync.Mutex
 	attempts map[string]*attemptRecord
 	window   time.Duration
 	maxFails int
 	lockout  time.Duration
+
+	stopCh chan struct{}
+	once   sync.Once
 }
 
 type attemptRecord struct {
-	failures  int
-	firstFail time.Time
+	failures    int
+	firstFail   time.Time
 	lockedUntil time.Time
 }
 
@@ -26,19 +33,30 @@ func newLoginRateLimiter(maxFails int, window, lockout time.Duration) *loginRate
 		window:   window,
 		maxFails: maxFails,
 		lockout:  lockout,
+		stopCh:   make(chan struct{}),
 	}
-	// Background cleanup of stale entries every 10 minutes
+	// Cleanup periódico de entradas obsoletas. Sale al cerrar stopCh.
 	go func() {
 		ticker := time.NewTicker(10 * time.Minute)
 		defer ticker.Stop()
-		for range ticker.C {
-			rl.cleanup()
+		for {
+			select {
+			case <-ticker.C:
+				rl.cleanup()
+			case <-rl.stopCh:
+				return
+			}
 		}
 	}()
 	return rl
 }
 
-// isLocked returns true if the key (username or IP) is currently locked out.
+// Stop detiene la goroutine de cleanup. Idempotente.
+func (rl *loginRateLimiter) Stop() {
+	rl.once.Do(func() { close(rl.stopCh) })
+}
+
+// isLocked indica si la key (username o IP) está actualmente bloqueada.
 func (rl *loginRateLimiter) isLocked(key string) bool {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
@@ -50,13 +68,13 @@ func (rl *loginRateLimiter) isLocked(key string) bool {
 
 	now := time.Now()
 
-	// Check if lockout has expired
+	// Si el lockout expiró, limpiar.
 	if !rec.lockedUntil.IsZero() && now.After(rec.lockedUntil) {
 		delete(rl.attempts, key)
 		return false
 	}
 
-	// Check if window has expired
+	// Si la ventana expiró, limpiar.
 	if now.Sub(rec.firstFail) > rl.window {
 		delete(rl.attempts, key)
 		return false
@@ -65,7 +83,7 @@ func (rl *loginRateLimiter) isLocked(key string) bool {
 	return !rec.lockedUntil.IsZero() && now.Before(rec.lockedUntil)
 }
 
-// recordFailure records a failed login attempt. Returns true if the account is now locked.
+// recordFailure cuenta un fallo. Devuelve true si la key acaba bloqueada.
 func (rl *loginRateLimiter) recordFailure(key string) bool {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
@@ -85,7 +103,7 @@ func (rl *loginRateLimiter) recordFailure(key string) bool {
 	return false
 }
 
-// recordSuccess clears the failure record for a key.
+// recordSuccess limpia el registro de fallos para una key.
 func (rl *loginRateLimiter) recordSuccess(key string) {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()

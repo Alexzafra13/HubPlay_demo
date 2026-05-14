@@ -14,7 +14,3 @@ CREATE TABLE jwt_signing_keys (
 -- Partial index: hot-path lookups by kid (every token validation).
 CREATE INDEX idx_jwt_signing_keys_active ON jwt_signing_keys(retired_at)
     WHERE retired_at IS NULL;
-
--- +goose Down
-DROP INDEX IF EXISTS idx_jwt_signing_keys_active;
-DROP TABLE IF EXISTS jwt_signing_keys;

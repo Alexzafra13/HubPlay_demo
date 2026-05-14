@@ -222,35 +222,36 @@ func (s *Service) RunRefreshM3U(ctx context.Context, libraryID string) (int, err
 		},
 	})
 
-	// Kick off an EPG refresh for newly-discovered URLs so the guide
-	// populates on the same import cycle. Fire-and-forget with a detached
-	// context: the import response should not block on a potentially-slow
-	// XMLTV download. Errors are logged inside RefreshEPG.
+	// EPG refresh para URLs recién descubiertas, en background para
+	// que el response del import no bloquee con un XMLTV lento.
+	// Usamos SpawnBackground (no context.Background) para que
+	// Shutdown drene la goroutine — antes era leak en shutdown
+	// concurrente con un refresh (audit olores DD + GGGG).
 	if epgDiscovered {
-		go func(id string) {
-			bg, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		id := libraryID
+		s.SpawnBackground(func(bgCtx context.Context) {
+			ctx, cancel := context.WithTimeout(bgCtx, 5*time.Minute)
 			defer cancel()
-			if _, err := s.RefreshEPG(bg, id); err != nil {
+			if _, err := s.RefreshEPG(ctx, id); err != nil {
 				s.logger.Warn("auto-trigger EPG refresh after M3U import",
 					"library", id, "error", err)
 			}
-		}(libraryID)
+		})
 	}
 
-	// Trigger an active probe of the freshly-imported channels in
-	// the background so dead upstreams move to the "Sin señal"
-	// bucket without waiting for the periodic worker tick. Detached
-	// ctx because probing hundreds of channels takes longer than
-	// the HTTP refresh response should.
+	// Probe activo de los canales recién importados para que los
+	// upstreams muertos pasen al bucket "Sin señal" sin esperar al
+	// tick periódico del worker.
 	if s.proberWorker != nil {
-		go func(id string) {
-			bg, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		id := libraryID
+		s.SpawnBackground(func(bgCtx context.Context) {
+			ctx, cancel := context.WithTimeout(bgCtx, 30*time.Minute)
 			defer cancel()
-			if _, err := s.proberWorker.ProbeNow(bg, id); err != nil {
+			if _, err := s.proberWorker.ProbeNow(ctx, id); err != nil {
 				s.logger.Warn("auto-probe after M3U import",
 					"library", id, "error", err)
 			}
-		}(libraryID)
+		})
 	}
 
 	return len(dbChannels), nil

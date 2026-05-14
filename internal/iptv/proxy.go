@@ -784,9 +784,16 @@ func (p *StreamProxy) ActiveRelays() int {
 	return len(p.relays)
 }
 
-// Shutdown drops the per-channel listener counters. Client request contexts
-// do the actual cancellation of in-flight streams — this is just map hygiene.
-func (p *StreamProxy) Shutdown() {
+// ClearRelays vacía el map de contadores de listeners por canal.
+// NO drena las goroutines `ProxyStream` / `streamWithReconnect` en
+// vuelo: éstas se cancelan vía el ctx del request HTTP cuando
+// `http.Server.Shutdown` corta los requests del cliente.
+//
+// Antes este método se llamaba `Shutdown`, lo cual sugería falsamente
+// que aquí ocurría el drain — el drain real vive en el http.Server
+// del binario. Renombrado para alinear nombre con efecto (audit
+// olor EE).
+func (p *StreamProxy) ClearRelays() {
 	p.mu.Lock()
 	for id := range p.relays {
 		delete(p.relays, id)

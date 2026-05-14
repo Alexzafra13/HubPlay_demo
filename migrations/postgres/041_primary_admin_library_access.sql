@@ -16,7 +16,3 @@ CROSS JOIN (
     LIMIT 1
 ) AS primary_admin
 ON CONFLICT DO NOTHING;
-
--- +goose Down
--- No-op: matches the SQLite sibling. Reverting the grants risks
--- removing rows the admin legitimately created post-migration.

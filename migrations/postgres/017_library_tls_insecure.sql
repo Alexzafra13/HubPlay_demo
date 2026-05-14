@@ -12,6 +12,3 @@
 -- relies on identical method signatures. Idiomatically Postgres
 -- prefers BOOLEAN, but parity > idiomatic here.
 ALTER TABLE libraries ADD COLUMN tls_insecure INTEGER NOT NULL DEFAULT 0;
-
--- +goose Down
-ALTER TABLE libraries DROP COLUMN IF EXISTS tls_insecure;

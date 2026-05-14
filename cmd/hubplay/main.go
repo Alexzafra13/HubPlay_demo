@@ -610,8 +610,11 @@ func waitForShutdown(ctx context.Context, cancel context.CancelFunc, rt *runtime
 	sm.Shutdown()
 	logger.Info("stream manager stopped")
 
-	// Stop IPTV
-	iptvProxy.Shutdown()
+	// Stop IPTV. El proxy NO drena goroutines aquí: el drain real
+	// viene del http.Server.Shutdown previo, que cancela los ctx
+	// de los requests en vuelo. ClearRelays solo vacía la
+	// contabilidad (audit olor EE).
+	iptvProxy.ClearRelays()
 	if iptvTransmux != nil {
 		iptvTransmux.Shutdown()
 	}

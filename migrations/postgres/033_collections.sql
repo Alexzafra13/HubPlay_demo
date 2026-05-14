@@ -18,9 +18,3 @@ ALTER TABLE metadata
 
 CREATE INDEX idx_metadata_collection_id ON metadata(collection_id)
     WHERE collection_id IS NOT NULL;
-
--- +goose Down
-DROP INDEX IF EXISTS idx_metadata_collection_id;
-ALTER TABLE metadata DROP COLUMN IF EXISTS collection_id;
-DROP INDEX IF EXISTS idx_collections_name;
-DROP TABLE IF EXISTS collections;

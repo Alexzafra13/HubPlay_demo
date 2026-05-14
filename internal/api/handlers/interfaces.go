@@ -146,6 +146,13 @@ type IPTVService interface {
 	TryAcquireRefresh(libraryID string) (func(), error)
 	RunRefreshM3U(ctx context.Context, libraryID string) (int, error)
 	PublishRefreshFailed(libraryID string, err error)
+	// SpawnBackground lanza una goroutine cuyo ctx (1er argumento de
+	// fn) se cancela en Service.Shutdown y se contabiliza en el WG
+	// interno. Los handlers iptv_admin lo usan para no perder writes
+	// si el shutdown llega durante un refresh async (audit olores
+	// DD + GGGG). El ctx que recibe fn ya está atado al lifecycle
+	// del service — los callers pueden envolverlo con WithTimeout.
+	SpawnBackground(fn func(ctx context.Context))
 	RefreshEPG(ctx context.Context, libraryID string) (int, error)
 	PreflightCheck(ctx context.Context, m3uURL string, tlsInsecure bool) iptv.PreflightResult
 

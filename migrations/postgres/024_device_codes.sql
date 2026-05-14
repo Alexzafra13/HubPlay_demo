@@ -15,8 +15,3 @@ CREATE TABLE device_codes (
 
 CREATE INDEX idx_device_codes_user_code ON device_codes(user_code);
 CREATE INDEX idx_device_codes_expires ON device_codes(expires_at);
-
--- +goose Down
-DROP INDEX IF EXISTS idx_device_codes_expires;
-DROP INDEX IF EXISTS idx_device_codes_user_code;
-DROP TABLE IF EXISTS device_codes;

@@ -198,6 +198,15 @@ func (s *iptvFakeService) PublishRefreshFailed(libraryID string, err error) {
 	s.mu.Unlock()
 }
 
+// SpawnBackground en tests corre fn sincrónicamente con un ctx
+// background — los tests verifican el resultado del refresh
+// (PublishRefreshFailed, logs) sin necesidad de drenar goroutines.
+// El behaviour de drain real está cubierto por tests del paquete
+// `iptv`.
+func (s *iptvFakeService) SpawnBackground(fn func(ctx context.Context)) {
+	fn(context.Background())
+}
+
 func (s *iptvFakeService) RefreshEPG(_ context.Context, _ string) (int, error) {
 	return s.refreshEPGCount, s.refreshEPGErr
 }

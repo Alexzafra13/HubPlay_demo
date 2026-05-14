@@ -14,7 +14,3 @@ CREATE TABLE user_channel_favorites (
 
 CREATE INDEX idx_user_channel_favorites_user_created
     ON user_channel_favorites(user_id, created_at DESC);
-
--- +goose Down
-DROP INDEX IF EXISTS idx_user_channel_favorites_user_created;
-DROP TABLE IF EXISTS user_channel_favorites;

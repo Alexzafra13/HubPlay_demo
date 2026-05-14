@@ -8,6 +8,3 @@ CREATE TABLE user_preferences (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (user_id, key)
 );
-
--- +goose Down
-DROP TABLE IF EXISTS user_preferences;

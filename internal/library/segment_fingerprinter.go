@@ -51,6 +51,11 @@ type SegmentFingerprinter struct {
 	workers int
 
 	mu sync.Mutex
+
+	// bgWG espera a las goroutines de DetectLibrary lanzadas desde
+	// el handler del bus. Patrón paralelo al de SegmentDetector
+	// (audit olor Y).
+	bgWG sync.WaitGroup
 }
 
 func NewSegmentFingerprinter(
@@ -70,26 +75,35 @@ func NewSegmentFingerprinter(
 	}
 }
 
-// Start subscribes to library.scan.completed. When fpcalc isn't
-// available, it logs once and returns a no-op unsubscribe — the
-// chapter detector still runs, the install just skips Phase 2.
+// Start suscribe a library.scan.completed. Cuando fpcalc no está
+// disponible, loggea una vez y devuelve un unsub no-op — el chapter
+// detector sigue corriendo, la instalación simplemente salta Phase 2.
+//
+// El unsub retornado, además de desuscribir del bus, drena las
+// goroutines de DetectLibrary en vuelo (audit olor Y).
 func (f *SegmentFingerprinter) Start(ctx context.Context) (unsub func()) {
 	if !f.prints.Available() {
 		f.logger.Info("fpcalc not on PATH — skipping audio fingerprint detection (install chromaprint-tools to enable)")
 		return func() {}
 	}
-	return f.bus.Subscribe(event.LibraryScanCompleted, func(e event.Event) {
+	busUnsub := f.bus.Subscribe(event.LibraryScanCompleted, func(e event.Event) {
 		libID, _ := e.Data["library_id"].(string)
 		if libID == "" {
 			return
 		}
+		f.bgWG.Add(1)
 		go func() {
+			defer f.bgWG.Done()
 			if err := f.DetectLibrary(ctx, libID); err != nil {
 				f.logger.Warn("fingerprint detection failed",
 					"library_id", libID, "error", err)
 			}
 		}()
 	})
+	return func() {
+		busUnsub()
+		f.bgWG.Wait()
+	}
 }
 
 // DetectLibrary fingerprints every episode in the library and

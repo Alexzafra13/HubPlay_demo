@@ -36,8 +36,3 @@ WHERE u.parent_user_id IS NULL
       SELECT 1 FROM library_access la WHERE la.library_id = l.id
   )
 ON CONFLICT DO NOTHING;
-
--- +goose Down
--- No-op: revertir la promoción de grants no es trivial sin perder
--- información (no sabemos qué grants eran originalmente per-profile).
--- Igual que el lado SQLite, esta migración es up-only en la práctica.

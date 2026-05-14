@@ -3,6 +3,3 @@
 -- See SQLite sibling for the recommendations endpoint use case.
 CREATE INDEX IF NOT EXISTS idx_external_ids_provider_id
     ON external_ids (provider, external_id);
-
--- +goose Down
-DROP INDEX IF EXISTS idx_external_ids_provider_id;

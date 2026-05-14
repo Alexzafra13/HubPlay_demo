@@ -11,7 +11,3 @@ CREATE TABLE channel_watch_history (
 
 CREATE INDEX idx_watch_history_user_recent
     ON channel_watch_history(user_id, last_watched_at DESC);
-
--- +goose Down
-DROP INDEX IF EXISTS idx_watch_history_user_recent;
-DROP TABLE IF EXISTS channel_watch_history;

@@ -14,10 +14,3 @@ ALTER TABLE channels ADD COLUMN consecutive_failures INTEGER NOT NULL DEFAULT 0;
 CREATE INDEX idx_channels_unhealthy
     ON channels(library_id, consecutive_failures)
     WHERE consecutive_failures > 0;
-
--- +goose Down
-DROP INDEX IF EXISTS idx_channels_unhealthy;
-ALTER TABLE channels DROP COLUMN IF EXISTS consecutive_failures;
-ALTER TABLE channels DROP COLUMN IF EXISTS last_probe_error;
-ALTER TABLE channels DROP COLUMN IF EXISTS last_probe_status;
-ALTER TABLE channels DROP COLUMN IF EXISTS last_probe_at;

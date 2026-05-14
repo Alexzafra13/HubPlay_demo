@@ -12,8 +12,16 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"hubplay/internal/api/handlers"
+	"hubplay/internal/auth"
 	"hubplay/internal/stream"
 )
+
+// adminCtx envuelve un ctx con claims de admin para los tests de
+// KillSession. Tras audit olor F16-7, el handler requiere claims
+// presentes; en producción el middleware requireAdmin las inyecta.
+func adminCtx(ctx context.Context) context.Context {
+	return auth.WithClaims(ctx, &auth.Claims{UserID: "admin-1", Role: "admin"})
+}
 
 // injectSession plants a fully-formed session straight into the
 // manager's internal map via the package's exported test seam.
@@ -123,7 +131,7 @@ func TestAdminStreams_KillSession_StopsExistingSession(t *testing.T) {
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/system/sessions/userA:item1:720p", nil)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", "userA:item1:720p")
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	req = req.WithContext(adminCtx(context.WithValue(req.Context(), chi.RouteCtxKey, rctx)))
 
 	h.KillSession(rr, req)
 
@@ -147,7 +155,7 @@ func TestAdminStreams_KillSession_IdempotentOnUnknownID(t *testing.T) {
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/system/sessions/ghost", nil)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", "ghost")
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	req = req.WithContext(adminCtx(context.WithValue(req.Context(), chi.RouteCtxKey, rctx)))
 
 	h.KillSession(rr, req)
 
@@ -195,7 +203,7 @@ func TestAdminStreams_KillSession_DecodesPercentEncodedID(t *testing.T) {
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/system/sessions/userA%3Aitem1%3A720p", nil)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", "userA%3Aitem1%3A720p")
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	req = req.WithContext(adminCtx(context.WithValue(req.Context(), chi.RouteCtxKey, rctx)))
 
 	h.KillSession(rr, req)
 
@@ -204,5 +212,27 @@ func TestAdminStreams_KillSession_DecodesPercentEncodedID(t *testing.T) {
 	}
 	if mgr.ActiveSessions() != 0 {
 		t.Errorf("session not removed (handler must url.PathUnescape); ActiveSessions = %d", mgr.ActiveSessions())
+	}
+}
+
+// TestAdminStreams_KillSession_RejectsWithoutClaims verifica el
+// guard añadido en F16-7: si el endpoint llega sin claims (por un
+// desliz de routing que expusiera el handler sin middleware), el
+// handler responde 401 en vez de matar sesiones anónimamente.
+func TestAdminStreams_KillSession_RejectsWithoutClaims(t *testing.T) {
+	mgr := stream.NewManagerForTest()
+	h := handlers.NewAdminStreamsHandler(mgr, nil, nil, slog.Default())
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/system/sessions/x", nil)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", "x")
+	// Sin adminCtx() — ctx sin claims.
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	h.KillSession(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401; body=%s", rr.Code, rr.Body.String())
 	}
 }

@@ -77,12 +77,3 @@ CREATE INDEX IF NOT EXISTS idx_user_data_continue
 --    per item × every detail click = full scan of 200k rows.
 CREATE INDEX IF NOT EXISTS idx_media_streams_item
     ON media_streams(item_id);
-
--- +goose Down
-DROP INDEX IF EXISTS idx_media_streams_item;
-DROP INDEX IF EXISTS idx_user_data_continue;
-DROP INDEX IF EXISTS idx_epg_channel_end_time;
-DROP INDEX IF EXISTS idx_items_rating;
-DROP INDEX IF EXISTS idx_items_year;
-DROP INDEX IF EXISTS idx_items_added_at;
-DROP INDEX IF EXISTS idx_items_browse_sort;
