@@ -1,5 +1,48 @@
 # Estado del proyecto
 
+> 🎬 **Sesión 2026-05-14 (rama claude/gracious-dirac-fd009c, Sesión L — admin channel reorder + hide global overlay)** — cierra la asimetría que dejaba Sesión I: el admin ya puede tocar el orden y visibilidad por defecto que ven todos los usuarios, no solo cada user reordenar su propia vista.
+>
+> ## 🎚️ Sesión L — Admin curation overlay + hidden hard-constraint
+>
+> Composición read-time: channels.number (M3U import) → admin overlay (library_channel_order) → user overlay (user_channel_order). Admin-hidden es **HARD CONSTRAINT**: el user overlay corre sobre lo que SOBREVIVE al filtro admin, así que un usuario NO puede deshacer lo que el admin ocultó. Cubierto por TestComposition_AdminHidden_UserCannotUnhide.
+>
+> **Backend nuevo**:
+> - Migración 043 (sqlite + pg) library_channel_order — mismo shape que 042 user_channel_order, library-scoped.
+> - db.LibraryChannelOrderRepository — Pattern B raw SQL (sqlc 1.31.x sigue truncando `ORDER BY ASC`).
+> - iptv.applyAdminOverlay + chained dentro de GetChannelsForUser. Nuevos métodos service: GetChannelsForLibraryAdmin, ListLibraryChannelOverrides, ReplaceLibraryChannelOrder, SetLibraryChannelVisibility, ResetLibraryChannelOrder.
+> - 4 endpoints admin-only bajo el route group existente:
+>   - `GET    /libraries/{id}/channels/admin-view` — admin view (overlay + filas admin-hidden incluidas para edición).
+>   - `PUT    /libraries/{id}/channels/order` — replace full ordering + hidden set en una tx.
+>   - `DELETE /libraries/{id}/channels/order` — restaurar orden del M3U.
+>   - `PUT    /libraries/{id}/channels/{channelId}/admin-visibility` — toggle surgical.
+>
+> **Frontend nuevo**:
+> - ChannelOrderEditor — componente presentacional extraído de LiveTvCustomize (aplicación de la lección K.1). Compartido por `/live-tv/customize` y la pestaña admin.
+> - AdminChannelOrderPanel — consume el editor con hooks admin (useAdminChannelsForOrder, useReplaceLibraryChannelOrder, useResetLibraryChannelOrder).
+> - Nueva pestaña **"Orden de canales"** en LivetvAdminPanel, siempre visible para librerías livetv.
+> - **Frases de scope en ambas superficies** (cierra la confusión "¿por qué tengo dos botones Personalizar?"): user `/live-tv/customize` ahora dice "Solo cambia tu vista..."; admin section dice "Este es el orden por defecto que ven todos los usuarios. Cada usuario puede personalizar el suyo encima, pero NO puede mostrar los canales que ocultes aquí."
+> - i18n en/es completo (~10 strings nuevos × 2 locales).
+>
+> **Tests**:
+> - 2 repo tests parametrizados (sqlite + pg via 	estutil.NewTestDB): Upsert/List/Delete/Reset + ReplaceAll happy + empty.
+> - 6 service tests: 3 de pplyAdminOverlay + 3 de composición admin→user (hidden hard-constraint, user-can-hide-more, position layering).
+> - 2 vitest de AdminChannelOrderPanel: save POSTea full reordered + hidden set; reset hace DELETE tras confirm.
+>
+> **Verificación al cierre Sesión L**:
+> - go test ./... -count=1 — 22/22 paquetes verde.
+> - `tsc -b`, `pnpm lint`, `pnpm build` — clean (solo 3 warnings preexistentes).
+> - pnpm test — **556/556 vitest**.
+> - OpenAPI drift gate — verde (4 rutas en outOfScopeExact admin-only).
+>
+> **Estado del flujo IPTV cerrado**:
+> 1. Instalar + cargar lista IPTV ✅
+> 2. Acceso por usuario / hogar (library_access) ✅
+> 3. Lista personal por usuario (Sesiones K + K.1) ✅
+> 4. Admin reordena/oculta default global (Sesión L) ✅
+> 5. User reordena/oculta encima del default (Sesión I), con admin-hide hard-constraint ✅
+>
+> ---
+>
 > 🎬 **Sesión 2026-05-14 (rama `claude/gracious-dirac-fd009c` + follow-up `claude/review-personal-lists-eosgI`, Sesiones K + K.1 — lista IPTV personal por usuario desde /admin/users)** — el admin puede ahora asignarle a un usuario concreto su propia lista M3U (visible solo para ese hogar, invisible para el resto) en un solo flujo desde la ficha del usuario, sin tener que navegar a `/admin/libraries` y volver al matrix de bibliotecas a tickear el checkbox.
 >
 > ## 🧩 Sesión K — Atajo "Lista IPTV personal" en /admin/users (PR [#281](https://github.com/Alexzafra13/HubPlay_demo/pull/281), commit `ef7124c`)
