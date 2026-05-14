@@ -203,6 +203,15 @@ type IPTVService interface {
 	ReplaceChannelOrder(ctx context.Context, userID string, orderedIDs []string, hiddenIDs map[string]bool) error
 	SetChannelVisibility(ctx context.Context, userID, channelID string, hidden bool) error
 	ResetChannelOrder(ctx context.Context, userID string) error
+
+	// Admin channel curation. The admin overlay (library_channel_order)
+	// composes BEFORE the per-user overlay in GetChannelsForUser; admin-
+	// hidden channels are a hard constraint that users cannot un-hide.
+	GetChannelsForLibraryAdmin(ctx context.Context, libraryID string, includeHidden bool) ([]*db.Channel, []db.LibraryChannelOrderEntry, error)
+	ListLibraryChannelOverrides(ctx context.Context, libraryID string) ([]db.LibraryChannelOrderEntry, error)
+	ReplaceLibraryChannelOrder(ctx context.Context, libraryID string, orderedIDs []string, hiddenIDs map[string]bool) error
+	SetLibraryChannelVisibility(ctx context.Context, libraryID, channelID string, hidden bool) error
+	ResetLibraryChannelOrder(ctx context.Context, libraryID string) error
 }
 
 // IPTVStreamProxyService defines IPTV proxy operations needed by handlers.

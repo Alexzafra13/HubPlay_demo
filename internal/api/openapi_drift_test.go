@@ -213,6 +213,16 @@ var outOfScopeExact = map[string]string{
 	// ── Legacy global SSE (replaced by /me/events) ───────────────────
 	"GET /events": "legacy unscoped SSE; spec only documents /me/events",
 
+	// ── IPTV admin channel curation ──────────────────────────────────
+	// Admin overlay of channels per library (Sesión L). Admin-only,
+	// not user-facing; the curation panel at /admin/libraries/{id}
+	// drives them. The matching per-user surface lives at
+	// /me/iptv/channels/* and is also out-of-scope above.
+	"GET /libraries/{id}/channels/admin-view":                         "admin channel curation: view with admin overlay + hidden rows",
+	"PUT /libraries/{id}/channels/order":                              "admin channel reorder + hide",
+	"DELETE /libraries/{id}/channels/order":                           "admin channel reorder reset",
+	"PUT /libraries/{id}/channels/{channelId}/admin-visibility":       "admin channel hide/show",
+
 	// ── IPTV admin operations ─────────────────────────────────────────
 	"POST /iptv/preflight":                              "admin M3U preflight",
 	"POST /iptv/public/import":                          "admin public-source import",

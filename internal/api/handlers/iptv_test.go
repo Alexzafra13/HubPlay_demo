@@ -493,6 +493,34 @@ func (s *iptvFakeService) ResetChannelOrder(_ context.Context, userID string) er
 	return nil
 }
 
+// Admin channel curation — same kind of pass-through stubs as the
+// per-user counterparts. Real coverage lives in the iptv service
+// tests against a real DB.
+
+func (s *iptvFakeService) GetChannelsForLibraryAdmin(ctx context.Context, libraryID string, includeHidden bool) ([]*db.Channel, []db.LibraryChannelOrderEntry, error) {
+	chans, err := s.GetChannels(ctx, libraryID, false)
+	if err != nil {
+		return nil, nil, err
+	}
+	return chans, nil, nil
+}
+
+func (s *iptvFakeService) ListLibraryChannelOverrides(_ context.Context, _ string) ([]db.LibraryChannelOrderEntry, error) {
+	return nil, nil
+}
+
+func (s *iptvFakeService) ReplaceLibraryChannelOrder(_ context.Context, _ string, _ []string, _ map[string]bool) error {
+	return nil
+}
+
+func (s *iptvFakeService) SetLibraryChannelVisibility(_ context.Context, _, _ string, _ bool) error {
+	return nil
+}
+
+func (s *iptvFakeService) ResetLibraryChannelOrder(_ context.Context, _ string) error {
+	return nil
+}
+
 func (s *iptvFakeService) ReorderEPGSources(_ context.Context, libraryID string, orderedIDs []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -18,6 +18,44 @@ import (
 	"hubplay/internal/db"
 )
 
+// applyAdminOverlay applies the library's admin curation
+// (`library_channel_order`) on top of the raw M3U import. Channels
+// with a matching override row take the admin's position; rows
+// flagged hidden are stripped (hard constraint — users cannot
+// un-hide what the admin removed).
+//
+// Channels without an override row keep their M3U-import number.
+// Result is sorted ascending by effective number.
+//
+// Pure: the input slice is not mutated; a fresh slice is returned.
+// O(N + M) where N = channels, M = overrides.
+func applyAdminOverlay(channels []*db.Channel, overrides []db.LibraryChannelOrderEntry) []*db.Channel {
+	if len(overrides) == 0 {
+		return channels
+	}
+	byID := make(map[string]db.LibraryChannelOrderEntry, len(overrides))
+	for _, o := range overrides {
+		byID[o.ChannelID] = o
+	}
+
+	out := make([]*db.Channel, 0, len(channels))
+	for _, c := range channels {
+		o, has := byID[c.ID]
+		if has && o.Hidden {
+			continue
+		}
+		cp := *c
+		if has {
+			cp.Number = o.Position
+		}
+		out = append(out, &cp)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return out[i].Number < out[j].Number
+	})
+	return out
+}
+
 // applyOrderOverlay overlays a user's `user_channel_order` rows onto
 // a channel list returned by `GetChannels`. Channels with a
 // matching override row use the user's position and hidden flag;
@@ -76,6 +114,18 @@ func (s *Service) GetChannelsForUser(ctx context.Context, libraryID, userID stri
 	if err != nil {
 		return nil, err
 	}
+
+	// Admin overlay first — applies the library's curated order and
+	// removes admin-hidden channels (hard constraint, the user cannot
+	// surface them again via their own overlay).
+	if s.libraryChannelOrder != nil {
+		adminRows, err := s.libraryChannelOrder.List(ctx, libraryID)
+		if err != nil {
+			return nil, fmt.Errorf("load library channel order: %w", err)
+		}
+		channels = applyAdminOverlay(channels, adminRows)
+	}
+
 	if userID == "" || s.channelOrder == nil {
 		return channels, nil
 	}
@@ -84,6 +134,120 @@ func (s *Service) GetChannelsForUser(ctx context.Context, libraryID, userID stri
 		return nil, fmt.Errorf("load user channel order: %w", err)
 	}
 	return applyOrderOverlay(channels, overrides), nil
+}
+
+// GetChannelsForLibraryAdmin returns the curation view used by the
+// admin panel at /admin/libraries/{id}: raw channel rows ordered by
+// the admin overlay (so the operator sees the current default), but
+// `includeHidden=true` skips the admin-hidden filter so the panel
+// can render an editable list with a visibility toggle per row.
+//
+// `includeHidden=false` is equivalent to "what every non-admin user
+// sees before their own overlay" — useful for previews.
+func (s *Service) GetChannelsForLibraryAdmin(ctx context.Context, libraryID string, includeHidden bool) ([]*db.Channel, []db.LibraryChannelOrderEntry, error) {
+	channels, err := s.GetChannels(ctx, libraryID, false)
+	if err != nil {
+		return nil, nil, err
+	}
+	var rows []db.LibraryChannelOrderEntry
+	if s.libraryChannelOrder != nil {
+		rows, err = s.libraryChannelOrder.List(ctx, libraryID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("load library channel order: %w", err)
+		}
+	}
+	if includeHidden {
+		// Apply position from overlay but keep hidden rows in the
+		// list so the panel can render the eye-off toggle next to
+		// them. We can't reuse applyAdminOverlay (it filters
+		// hidden); inline the position merge.
+		byID := make(map[string]db.LibraryChannelOrderEntry, len(rows))
+		for _, o := range rows {
+			byID[o.ChannelID] = o
+		}
+		out := make([]*db.Channel, 0, len(channels))
+		for _, ch := range channels {
+			cp := *ch
+			if o, has := byID[ch.ID]; has {
+				cp.Number = o.Position
+			}
+			out = append(out, &cp)
+		}
+		sort.SliceStable(out, func(i, j int) bool { return out[i].Number < out[j].Number })
+		return out, rows, nil
+	}
+	return applyAdminOverlay(channels, rows), rows, nil
+}
+
+// ListLibraryChannelOverrides returns the admin override rows for a
+// library. Used by the curation panel to compute which channels
+// have been touched vs. which still inherit the M3U order.
+func (s *Service) ListLibraryChannelOverrides(ctx context.Context, libraryID string) ([]db.LibraryChannelOrderEntry, error) {
+	if s.libraryChannelOrder == nil {
+		return nil, nil
+	}
+	return s.libraryChannelOrder.List(ctx, libraryID)
+}
+
+// ReplaceLibraryChannelOrder is the admin panel's "Save order"
+// entry point: it receives the full reordered list of channel IDs
+// and persists position = index+1 for each, in a single
+// transaction. `hiddenIDs` is the set of channels the admin marked
+// hidden — applied as a hard constraint downstream of the user
+// overlay.
+//
+// Channels NOT present in `orderedIDs` lose their override row and
+// fall back to channels.number from the M3U import.
+func (s *Service) ReplaceLibraryChannelOrder(ctx context.Context, libraryID string, orderedIDs []string, hiddenIDs map[string]bool) error {
+	if s.libraryChannelOrder == nil {
+		return fmt.Errorf("library channel order repo not wired")
+	}
+	entries := make([]db.LibraryChannelOrderEntry, 0, len(orderedIDs))
+	for _, id := range orderedIDs {
+		entries = append(entries, db.LibraryChannelOrderEntry{
+			ChannelID: id,
+			Hidden:    hiddenIDs[id],
+		})
+	}
+	return s.libraryChannelOrder.ReplaceAll(ctx, libraryID, entries)
+}
+
+// SetLibraryChannelVisibility flips a single channel's hidden state
+// at the admin level (hard constraint). Same surgical-edit pattern
+// as the per-user counterpart: avoids re-uploading the full
+// reordered list when the admin just wants to hide one channel.
+func (s *Service) SetLibraryChannelVisibility(ctx context.Context, libraryID, channelID string, hidden bool) error {
+	if s.libraryChannelOrder == nil {
+		return fmt.Errorf("library channel order repo not wired")
+	}
+	ch, err := s.channels.GetByID(ctx, channelID)
+	if err != nil {
+		return fmt.Errorf("get channel: %w", err)
+	}
+	if ch.LibraryID != libraryID {
+		return fmt.Errorf("channel %s does not belong to library %s", channelID, libraryID)
+	}
+	rows, err := s.libraryChannelOrder.List(ctx, libraryID)
+	if err != nil {
+		return fmt.Errorf("list library channel order: %w", err)
+	}
+	position := ch.Number
+	for _, o := range rows {
+		if o.ChannelID == channelID {
+			position = o.Position
+			break
+		}
+	}
+	return s.libraryChannelOrder.Upsert(ctx, libraryID, channelID, position, hidden)
+}
+
+// ResetLibraryChannelOrder wipes every admin override for a library
+// — channels fall back to channels.number from the M3U import.
+func (s *Service) ResetLibraryChannelOrder(ctx context.Context, libraryID string) error {
+	if s.libraryChannelOrder == nil {
+		return nil
+	}
+	return s.libraryChannelOrder.Reset(ctx, libraryID)
 }
 
 // ListChannelOverrides returns the user's raw override rows for the

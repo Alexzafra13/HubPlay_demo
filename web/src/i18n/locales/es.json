@@ -1274,7 +1274,18 @@
         "sources": "Fuentes EPG",
         "schedule": "Programación",
         "withoutEPG": "Sin guía",
-        "unhealthy": "Con problemas"
+        "unhealthy": "Con problemas",
+        "channelOrder": "Orden de canales"
+      },
+      "channelOrder": {
+        "scopeHint": "Este es el orden por defecto que ven todos los usuarios. Cada usuario puede personalizar el suyo encima, pero NO puede mostrar los canales que ocultes aquí.",
+        "save": "Guardar orden",
+        "saved": "Orden guardado.",
+        "reset": "Restaurar orden del M3U",
+        "resetConfirm": "¿Restaurar el orden original del M3U? Tus reordenaciones y canales ocultos se perderán.",
+        "resetDone": "Orden restaurado al del M3U.",
+        "empty": "Aún no hay canales.",
+        "emptyHint": "Pulsa 'Actualizar canales' en la pestaña Fuentes para importar el M3U."
       },
       "tabsLabel": "Secciones de la biblioteca livetv",
       "stats": {
@@ -1520,7 +1531,8 @@
       "empty": "Aún no hay canales.",
       "emptyHint": "Cuando el administrador refresque la lista M3U, tus canales aparecerán aquí.",
       "noLibraries": "No hay bibliotecas de TV en directo configuradas.",
-      "noLibrariesHint": "Pide al administrador que configure una fuente IPTV primero."
+      "noLibrariesHint": "Pide al administrador que configure una fuente IPTV primero.",
+      "scopeHint": "Solo cambia tu vista. El administrador define el orden por defecto y puede ocultar canales para todos."
     }
   }
 }
