@@ -31,27 +31,87 @@
 
 ## Resumen ejecutivo
 
-> Se actualiza al cierre de cada fase. Fase 1 cerrada — ver hallazgos abajo.
+> Auditoría cerrada al cierre de Fase 8. Plan de intervención
+> consolidado al final del documento.
 
-Estado tras Fase 1 (sólo panorama, sin descender a paquetes):
+### Veredicto global
 
-- Layout *package-por-dominio*, **sin anti-patrones tipo `service/`,
-  `repository/`, `dto/` separados**. Es Go idiomático en lo macro.
-- **Cero ciclos** directos entre paquetes. 8 paquetes raíz sin imports
-  internos (`domain`, `event`, `clock`, `logging`, `observability`,
-  `probe`, `blurhash`, `sysmetrics`) — activo arquitectónico valioso.
-- **Tres olores estructurales con severidad alta-media** detectados a
-  vista de pájaro:
-  1. `internal/db/` es un god-package (13 KLOC, 31 repos, 80 tipos).
-  2. `internal/db/federation_repository.go` invierte la capa
-     (`db → federation`). Única violación de capa real.
-  3. `Dependencies` (35+ campos) + `runtime` (14 campos) + `main.run`
-     (645 LOC) son síntomas de wiring manual sin módulos compuestos.
+HubPlay es un backend Go **sano en lo macro** (layout
+package-por-dominio, cero ciclos directos, 8 paquetes raíz sin
+deps, lifecycle drain bien aplicado en 3 paquetes modelo) con
+**deuda focalizada en 3-4 god-objects** que han crecido
+verticalmente sin que el patrón cambie: `internal/db/`,
+`iptv.Service`, `ItemHandler`, `scanner.go`.
 
-Riesgos altos pendientes de confirmar en fases siguientes: lifecycle de
-subscribers del event bus, nil-checks en `Federation == nil`, 5 setters
-opcionales en `stream.Manager`, `*sql.DB` raw en `Dependencies` como
-backdoor.
+Si el proyecto fuese Java disfrazado de Go (DI containers,
+`service/`, `repository/`, `interfaces/`), esto sería una espiral.
+**No lo es**: las primitivas (`event.Bus`, `clock`, `decision.go`,
+`singleflight`, `federation.Auditor`) están bien diseñadas y son
+modelos a citar. Los olores son **estructurales pero ortogonales** —
+se atacan por iteraciones independientes, sin requerir
+re-arquitectura.
+
+### Hallazgos altos (resumen 1-línea)
+
+| # | Olor | Fase |
+|---|------|------|
+| A+M | `internal/db/` god-package: 13 KLOC, 31 repos, 80 tipos consumidos por 55 ficheros externos | F1, F2 |
+| B+J | `db → federation` invierte capa (única violación real); `federation_repository.go` son 6 repos disfrazados de uno | F1, F2 |
+| CC | `iptv.Service` 45 métodos en 11 sub-features con split sólo cosmético por fichero | F5 |
+| P | `ItemHandler` 1 186 LOC, 13 deps, 4 responsabilidades | F3 |
+| W | `scanner.go` 1 270 LOC en un fichero (4 responsabilidades) | F4 |
+| G | `Dependencies` (35+) + `runtime` (14) + `main.run` (645 LOC) sin módulos compuestos | F1, F3 |
+
+### Bugs latentes confirmados (correctness real)
+
+| # | Bug | Fase | Coste fix |
+|---|-----|------|-----------|
+| RR | `loginRateLimiter` goroutine sin Stop (goroutine leak en tests integrados) | F7 | ~10 LOC |
+| Y | `SegmentDetector`/`Fingerprinter` no drenan goroutines spawneadas | F4 | ~40 LOC |
+| DD | `iptv.Service.RefreshM3U` detached goroutines con `context.Background()` y sin drain | F5 | ~50 LOC |
+| Q | `WriteTimeout: 0` global afecta a las 219 rutas (sólo ~10 son streaming) | F3 | middleware |
+
+### Patrones modelo del proyecto (a replicar)
+
+- **Lifecycle drain con `bgWG`**: `library.Service`, `stream.Manager`,
+  `iptv.TransmuxManager`, `federation.Manager`.
+- **Lógica pura aislada de I/O**: `stream/decision.go`.
+- **Sink pattern anti-cycle**: `auth.keyResolver` función, `api/apperror`
+  cut-set, `iptv.proberRunner`.
+- **Async writer con drop policy**: `federation.Auditor`.
+- **Locking granular justificado**: `federation.Manager` con dos
+  mutexes.
+- **`singleflight.Group`** para colapsar races: `stream.Manager.StartSession`.
+- **Split por sub-fichero con receiver compartido**:
+  `federation/manager_*.go` — modelo para CC.
+
+### Camino propuesto
+
+7 iteraciones, **~10-11 días de trabajo focalizado**, cada iteración
+deja el repo verde:
+
+0. Pre-trabajo: 4 ADRs (incluye **ADR-015 dominio en feature**) + 2
+   updates de `conventions.md`.
+1. **Fixes de correctness** (RR, Y, DD, EE, AAA): cierra los bugs
+   latentes con cero cambios de API.
+2. **Sub-paquetes de db**: resuelve B+J+K+T+L moviendo
+   federation repo + creando ActivityLogRepo + split home.
+3. **Migración Opción B incremental** por feature (iptv → auth →
+   library → cleanup `db/`).
+4. **Split de god-handlers/services** (P, Z, QQ).
+5. **Refactor estructural iptv** (CC).
+6. **Composition root**: módulos compuestos (G+H+V), `WithWriteDeadline`
+   (Q), `Transcoder` stateless (LL).
+7. **Cosmética**: D, X, W, BB (comentarios).
+
+### Riesgos y lo que NO se hace
+
+- Migración Opción B se hace incremental por feature, no big-bang.
+- `auth.ratelimit` y `federation.ratelimit` NO se fusionan (ADR-012
+  vigente).
+- Comentarios NO se traducen en un commit gigante — pauta incremental.
+- Wiring manual NO se cambia por DI container — los módulos
+  compuestos cubren el caso sin perder explicitness.
 
 ---
 
@@ -1675,9 +1735,256 @@ package-doc inicial que explica el porqué.
 
 ## Plan de intervención final
 
-> Se redacta al cerrar Fase 8. Sintetiza:
-> - Refactors a aplicar (orden, dependencias entre ellos, riesgo).
-> - Comentarios a reescribir.
-> - ADRs nuevos a abrir.
-> - Tests a añadir antes de tocar.
-> - Posibles ADRs a superseder.
+Cerrado · 2026-05-14. Sintetiza las 8 fases. Las **letras entre
+paréntesis** referencian olores específicos.
+
+### A. Mapa consolidado de olores por severidad
+
+#### Severidad alta
+
+| # | Olor | Fase | Sub-tareas |
+|---|------|------|-----------|
+| A+M | `internal/db/` god-package + 80 tipos `db.X` consumidos por 55 ficheros externos | F1, F2 | Decisión Opción B + migración por feature |
+| B | `db → federation` inversión de capa | F1, F2 | Mover repo a `internal/federation/storage/` |
+| CC | `iptv.Service` 45 métodos en 11 sub-features | F5 | Split en sub-paquetes (m3u/, epg/, channels/, transmux/, proxy/, prober/, logo/) |
+| J | `federation_repository.go` 1 474 LOC con 6 responsabilidades | F2 | Resuelto por B (mover a feature) |
+| P | `ItemHandler` god-handler 1 186 LOC, 13 deps | F3 | Split en 4 handlers |
+| W | `scanner.go` 1 270 LOC en un fichero | F4 | Split por responsabilidad (no de paquete) |
+
+#### Severidad media-alta
+
+| # | Olor | Fase | Sub-tareas |
+|---|------|------|-----------|
+| G | `Dependencies` + `runtime` + `main.run` 645 LOC | F1, F3 | Módulos compuestos por feature (`<feature>.New(ctx, deps) *Module`) |
+| Q | `WriteTimeout: 0` global aplica a las 219 rutas | F3 | Middleware `WithWriteDeadline(30s)` en sub-router no-streaming |
+
+#### Severidad media
+
+| # | Olor | Fase | Sub-tareas |
+|---|------|------|-----------|
+| C | `api/handlers/` plano, 79 ficheros, 26 interfaces en un fichero | F1, F3 | Sub-paquetes (`handlers/admin/`, `/iptv/`, …) |
+| H | `Dependencies` con tipos `*db.X` concretos | F1, F3 | Eco de G; se va junto |
+| K+T | `*sql.DB` raw → `system.go` con queries SQL raw inline | F2, F3 | `db.ActivityLogRepository` + interfaces estrechas (`HealthChecker`/`BackupOperator`/`PoolStatsReporter`) |
+| L | `home_repository.go` 671 LOC con 3 rails | F2 | Split por fichero (mantener raw) |
+| V | `router.go` lee `deps.Config.*` directo | F3 | Promover campos relevantes a `Dependencies` |
+| Y | SegmentDetector/Fingerprinter sin drain de goroutines | F4 | Añadir `bgWG` (modelo: `library.Service`, `TransmuxManager`) |
+| Z | `library.Service` 27 métodos, 6 responsabilidades | F4 | Split + decorator repo para rating-cap |
+| DD | Detached goroutines en `iptv.Service.RefreshM3U` sin drain | F5 | Mismo patrón que Y |
+| LL | `stream.Manager` y `Transcoder` con doble session tracking | F6 | Transcoder stateless |
+| QQ | `auth.Service` 18 métodos, 6 responsabilidades | F7 | Split (más fácil que Z/CC por tamaño) |
+| RR | `loginRateLimiter` goroutine sin Stop (bug latente) | F7 | Añadir `stopCh` + invocar desde `StopSessionCleaner` |
+| BB | Comentarios en inglés en todos los `internal/` (transversal) | F1, F4, F5 | Pauta por fase, no big-bang |
+
+#### Severidad baja
+
+| # | Olor | Fase | Sub-tareas |
+|---|------|------|-----------|
+| D | `library` vs `scanner` frontera artificial | F1, F4 | Promover `scanner` a sub-paquete de `library` |
+| E | `iptv` con 32 ficheros al límite | F1 | Resuelto por CC |
+| I+R | 26 interfaces en `handlers/interfaces.go` con convención inconsistente | F1, F3 | Documentar regla en `conventions.md` + bajan con P |
+| N | `Pattern A/B` viven en comments, no como helper | F2 | Documentar formalmente en `conventions.md` |
+| O | `db.Repositories` 31 campos | F2 | Eco menor de G |
+| EE | `StreamProxy.Shutdown` engañoso (no drena) | F5 | Renombrar o documentar |
+| JJ | 3 setters post-construcción en `stream.Manager` | F6 | `NewManager(Deps)` |
+| AAA | Comentario `event/bus.go:24-31` desactualizado | F8 | Reescribir |
+| EEE | `event.Bus` sin `Close()` | F8 | Cosmético |
+
+#### "Sanos / modelos" a citar al refactorizar
+
+- **Lifecycle drain con `bgWG`**: `library.Service.Shutdown`,
+  `stream.Manager.Shutdown`, `iptv.TransmuxManager.Shutdown`,
+  `federation.Manager.Close`. Replicar para Y/DD/RR.
+- **Lógica pura aislada de I/O**: `stream/decision.go`. Replicar para
+  cualquier business logic nueva.
+- **Sink pattern anti-cycle**: `internal/auth/jwt.go` con
+  `keyResolver` (función inyectada), `iptv.proberRunner` interface,
+  `api/apperror` como cut-set. Documentado en `conventions.md`.
+- **Async writer**: `federation.Auditor` (UU) — replicar para
+  futuros writers no-críticos.
+- **Locking granular**: `federation.Manager` con dos mutexes (VV).
+- **`singleflight.Group`** para colapsar races: `stream.Manager.StartSession` (NN).
+- **HW detection cacheada al boot**: `stream.Manager.hwAccel` (OO).
+- **Split por sub-fichero con un receiver compartido**:
+  `federation/manager_*.go` (TT) — modelo para CC.
+
+### B. Orden de ejecución sugerido
+
+El orden minimiza riesgo y maximiza valor por iteración. Cada
+bloque es independiente del siguiente (se puede merge antes de
+empezar el siguiente) y deja el repo en verde.
+
+#### Iteración 0 · Pre-trabajo (~0.5 día, sin refactor de código)
+
+1. **ADR nuevo** "ADR-015: tipos de dominio viven en su feature
+   (Opción B)". Supersede el modelo implícito "tipos en db/".
+2. **Documentar** Pattern A/B en `docs/memory/conventions.md` (olor N).
+3. **Documentar** convención de interfaces (consumer-side por
+   handler, olor I+R) en `conventions.md`.
+4. **Borrar / reescribir** comentario obsoleto en `event/bus.go`
+   (AAA).
+
+#### Iteración 1 · Fixes rápidos de correctness (~0.5 día)
+
+5. **RR**: `loginRateLimiter.Stop()` + cablear desde
+   `auth.Service.StopSessionCleaner`. ~10 LOC.
+6. **Y**: añadir `bgWG sync.WaitGroup` a `SegmentDetector` y
+   `SegmentFingerprinter`. Modelo `library.Service`. ~40 LOC.
+7. **DD**: añadir `bgCtx/bgCancel/bgWG` a `iptv.Service` + reemplazar
+   `context.Background()` en `service_m3u.go:230,246`. Modelo
+   `library.Service`. ~50 LOC.
+8. **AAA, EE**: comentarios + renombrar `StreamProxy.Shutdown` →
+   `ClearRelays` (o documentar como intencional).
+
+**Cero cambios de API. Cierra los 3 bugs latentes de drain.**
+
+#### Iteración 2 · Sub-paquetes de db (~1 día)
+
+9. **B + J**: mover `db.federation_repository.go` → `internal/federation/storage/`.
+   - Split en `identity.go`, `invite.go`, `peer.go`, `audit.go`,
+     `item_cache.go`, `ratelimit.go`.
+   - Cada uno como adapter sqlc + raw donde justifique.
+   - `db/repos.go` deja de construir `FederationRepository`.
+   - `federation.NewManager` lo construye internamente.
+   - Tests adyacentes acompañan.
+10. **K+T**: crear `db.ActivityLogRepository`. Sustituir
+    `system.go` queries raw por llamadas al repo. `Dependencies.Database`
+    pasa de `*sql.DB` a interfaces estrechas
+    (`HealthChecker`/`BackupOperator`/`PoolStatsReporter`).
+11. **L**: split `home_repository.go` en tres ficheros (`home_latest.go`,
+    `home_trending.go`, `home_live.go`) — mantener raw, sólo
+    reorganizar.
+
+#### Iteración 3 · Migración Opción B incremental (~3-4 días)
+
+Por feature, una por commit:
+
+12. **iptv** (12 tipos `db.Channel*`, `db.EPGProgram`,
+    `db.IPTVScheduledJob`, etc.). Migración mecánica con `goimports
+    -r`. Bloque más grande del refactor.
+13. **auth** (4 tipos: `db.User`, `db.Session`, `db.SigningKey`,
+    `db.DeviceCode`).
+14. **library** (12 tipos: Item, MediaStream, Image, Chapter,
+    EpisodeSegment, ItemValue, Studio, Collection, ExternalID,
+    Metadata, Person, ItemPersonCredit). El bloque más grande de
+    `library`.
+15. Limpiar `internal/db/` post-migración. Debería quedar reducido a
+    factory + adapter sqlc + dialect helpers + 4-5 repos restantes.
+
+#### Iteración 4 · Split de god-handlers y god-services (~2 días)
+
+16. **P + C**: split `ItemHandler` en
+    `ItemDetailHandler`/`RecommendationsHandler`/`TrickplayHandler`/
+    `SearchHandler`. Sub-paquete `handlers/items/`. **Disminuye
+    automáticamente las interfaces en `handlers/interfaces.go`**
+    (PeopleRepoForItems, CollectionRepoForItems, ChapterRepository,
+    EpisodeSegmentRepository pasan a vivir en sub-paquetes).
+17. **Z**: split `library.Service` en `LibraryManager` +
+    `AccessControl`. Item queries pasan a llamar al repo directo
+    con un decorator `WithRatingCap(cap)`.
+18. **QQ**: split `auth.Service` en `LoginService` + `SessionService`
+    + `AccountService` + `ProfileService`. Más fácil que Z/CC.
+
+#### Iteración 5 · Refactor estructural grande de iptv (~1-2 días)
+
+19. **CC**: split `internal/iptv/` en sub-paquetes
+    (`m3u/`, `epg/`, `channels/`, `transmux/`, `proxy/`, `prober/`,
+    `logo/`). Modelo: `federation/manager_*.go` (TT).
+
+#### Iteración 6 · Composition root (~1 día)
+
+20. **G + H + V**: introducir módulos compuestos
+    (`<feature>.New(ctx, deps) *Module`) que devuelven service +
+    workers + cleanup. `main.run` se reduce sustancialmente.
+    `Dependencies` cambia a interfaces.
+21. **Q**: middleware `WithWriteDeadline(30s)` aplicado al sub-router
+    `/api/v1/*` **excepto** sub-trees streaming.
+22. **JJ**: `stream.NewManager(Deps)` con un único setter runtime
+    (`SetForceDirectPlayLookup`).
+23. **LL**: hacer `Transcoder` stateless — tracking sólo en `Manager`.
+
+#### Iteración 7 · Cosmética + comentarios (~1 día, paralelizable)
+
+24. **D + X**: promover `scanner` a `internal/library/scan/`.
+25. **W**: split `scanner.go` en `scanner.go` + `enrich.go` +
+    `persist.go` + `images.go`.
+26. **BB**: traducir / reescribir comentarios largos en español por
+    paquete. Pauta: técnico, conciso, explica el porqué.
+27. **EEE**: añadir `Bus.Close()` cosmético (opcional).
+
+### C. ADRs a abrir
+
+| ADR | Título | Supersede |
+|---|---|---|
+| 015 | Dominio en feature, no en `db/` (Opción B) | Modelo implícito previo |
+| 016 | Composition root con módulos por feature | Parte del wiring de `main.run` |
+| 017 | Timeouts diferenciados streaming vs API | — |
+| 018 | Comentarios en español como convención | — |
+
+ADR-012 (federación reuse de primitivos) **NO se supersede**: la
+promesa se confirma vigente en F7 (JWT shape, keystore, audit). El
+único punto pendiente que abrió ADR-012 (federation repo no es sqlc
+todavía) se cierra como efecto colateral de B+J en Iteración 2.
+
+### D. Tests a añadir antes de tocar
+
+- **Goroutine-leak tests** para `auth.Service`, `iptv.Service`,
+  `library.SegmentDetector`, `library.SegmentFingerprinter`. Usar
+  `goleak.VerifyNone(t)` al final del test. Sin esto, RR/Y/DD se
+  arreglan a ciegas.
+- **Shutdown test integrado** que simule `SIGTERM` durante un
+  `RefreshM3U` en vuelo — debe terminar sin "sql: database is
+  closed" en logs.
+- **Concurrent StartSession** que verifique `singleflight` colapsa
+  N callers → 1 ffmpeg (probablemente ya existe; auditar).
+
+### E. Métricas de éxito post-refactor
+
+- `internal/db/` LOC < 6 000 (hoy 13 268).
+- Mayor fichero `internal/iptv/` < 600 LOC (hoy `transmux.go` 1 052
+  está justificado, pero `service*.go` se distribuye en
+  sub-paquetes).
+- `Dependencies` < 15 campos (hoy 35+).
+- `main.run` < 250 LOC (hoy 645).
+- `handlers/interfaces.go` desaparece — cada sub-paquete lleva sus
+  interfaces.
+- `goleak.VerifyNone(t)` pasa en todos los servicios con goroutines.
+
+### F. Riesgos y mitigaciones
+
+- **Big-bang en F2.5 (Opción B)**: mitigado por migración incremental
+  por feature (iteración 3, 4 commits).
+- **Tests rotos en cascada**: cada iteración deja el repo verde
+  antes de seguir. CI gate.
+- **Conflictos con features en vuelo**: trabajar en rama
+  `claude/review-go-media-backend-37MDe` ya aislada; rebase
+  semanal contra `main` para detectar deriva temprana.
+- **Reescritura de comentarios**: marcar por paquete; **no** hacer
+  un commit "translate all comments" porque pierde contexto y mezcla
+  con refactor real.
+
+### G. Lo que NO se va a hacer
+
+- **No** se fusiona `auth.ratelimit` y `federation.ratelimit`
+  (ADR-012 lo justifica, decisión sigue vigente).
+- **No** se introduce un microservicio para federation (ADR-012).
+- **No** se cambia el wiring manual por un DI container — Go premia
+  explicitness; los módulos compuestos cubren el caso sin perder
+  claridad.
+- **No** se reescriben tests de `stream/decision.go` ni los del
+  scanner — ya son el modelo del proyecto.
+- **No** se traducen big-bang los comentarios — pauta incremental.
+- **No** se intenta hot-reload de HWAccel (ADR-010).
+
+---
+
+## Cierre
+
+Esta auditoría está cerrada. Documento listo para servir de
+checkpoint inicial de la intervención. Cada iteración del plan B
+debería referenciar este documento por sección y, al cerrarse,
+añadir un párrafo de cierre justo debajo de su entrada en el plan.
+
+Cuando se inicie la intervención, recomiendo abrir un documento
+hermano `docs/memory/intervention-2026-05-XX.md` que tracée el
+trabajo iteración por iteración, dejando este como spec inmutable
+del estado inicial.
