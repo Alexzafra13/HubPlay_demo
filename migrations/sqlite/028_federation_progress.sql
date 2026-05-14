@@ -40,6 +40,3 @@ CREATE INDEX idx_fed_progress_user_recent
     ON federation_progress(user_id, last_played_at DESC);
 
 
--- +goose Down
-DROP INDEX IF EXISTS idx_fed_progress_user_recent;
-DROP TABLE IF EXISTS federation_progress;

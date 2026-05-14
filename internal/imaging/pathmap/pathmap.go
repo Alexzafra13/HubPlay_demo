@@ -27,9 +27,18 @@ import (
 // boundary check against path-traversal attempts like "../etc/passwd".
 var ErrInvalidID = errors.New("pathmap: invalid id")
 
-// ErrNotFound is returned by Read when no mapping exists for the given ID.
-// It wraps os.ErrNotExist so callers can test with errors.Is(err, fs.ErrNotExist).
+// ErrNotFound se devuelve por Read cuando no existe mapping para
+// el ID dado. Envuelve os.ErrNotExist para que los callers puedan
+// testear con errors.Is(err, fs.ErrNotExist).
 var ErrNotFound = fmt.Errorf("pathmap: mapping not found: %w", os.ErrNotExist)
+
+// ErrCorruptMapping se devuelve cuando el fichero de mapping
+// existe pero su contenido no es un path absoluto bien formado:
+// vacío, relativo, o con componentes `..`. Defense-in-depth de
+// ADR-021 — el handler ya valida `isPathUnderImageDir` antes de
+// servir, pero la primera línea es que `Read` no devuelva paths
+// inseguros (audit olor HHH).
+var ErrCorruptMapping = errors.New("pathmap: corrupt mapping")
 
 // Store persists image-id → on-disk-path mappings under a single directory.
 // It is safe for concurrent use — all operations are backed by plain
@@ -60,9 +69,16 @@ func (s *Store) Write(imageID, localPath string) error {
 	return nil
 }
 
-// Read returns the on-disk path stored for imageID, or ErrNotFound when no
-// mapping exists. Invalid (non-UUID) IDs return ErrInvalidID without touching
-// the filesystem.
+// Read devuelve el path on-disk almacenado para imageID, o
+// ErrNotFound si no existe mapping. IDs no-UUID devuelven
+// ErrInvalidID sin tocar el filesystem.
+//
+// Defense-in-depth: si el contenido del fichero no es un path
+// absoluto o contiene `..` literal en algún componente, devuelve
+// ErrCorruptMapping. Sin esta validación, un mapping editado a
+// mano o corrupto podría introducir un path relativo o con `..`
+// que `filepath.Join` resolvería contra `cwd` o un padre
+// arbitrario (audit olor HHH; complementa F16-1).
 func (s *Store) Read(imageID string) (string, error) {
 	if err := validID(imageID); err != nil {
 		return "", err
@@ -74,7 +90,27 @@ func (s *Store) Read(imageID string) (string, error) {
 		}
 		return "", fmt.Errorf("pathmap: read: %w", err)
 	}
-	return strings.TrimSpace(string(data)), nil
+	p := strings.TrimSpace(string(data))
+	if !isWellFormedAbsPath(p) {
+		return "", ErrCorruptMapping
+	}
+	return p, nil
+}
+
+// isWellFormedAbsPath rechaza paths vacíos, relativos o con
+// componentes `..`. El check de symlinks se hace en el handler con
+// EvalSymlinks (ADR-021); aquí solo aseguramos que el path leído
+// no es manifiestamente inseguro.
+func isWellFormedAbsPath(p string) bool {
+	if p == "" || !filepath.IsAbs(p) {
+		return false
+	}
+	for _, seg := range strings.Split(filepath.ToSlash(p), "/") {
+		if seg == ".." {
+			return false
+		}
+	}
+	return true
 }
 
 // Remove deletes the mapping for imageID. Missing mappings are not an error

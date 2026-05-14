@@ -137,9 +137,15 @@ func (s *Service) StartSessionCleaner(ctx context.Context) {
 	}()
 }
 
-// StopSessionCleaner stops the background session cleanup goroutine.
+// StopSessionCleaner detiene tanto la goroutine del session cleaner
+// como la del rate limiter. Ambas son background tasks del Service
+// sin lifecycle propio; cerrarlas juntas evita el leak documentado
+// como audit olor RR.
 func (s *Service) StopSessionCleaner() {
 	close(s.stopCh)
+	if s.rateLimiter != nil {
+		s.rateLimiter.Stop()
+	}
 }
 
 func (s *Service) Register(ctx context.Context, req RegisterRequest) (*db.User, error) {

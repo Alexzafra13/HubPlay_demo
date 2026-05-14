@@ -76,6 +76,16 @@ type Service struct {
 	// service methods that auto-trigger a probe (RefreshM3U) check
 	// before calling.
 	proberWorker proberRunner
+
+	// bgCtx / bgCancel / bgWG forman el lifecycle de las goroutines
+	// detached que el service lanza desde RefreshM3U (auto-EPG +
+	// auto-probe) y desde los handlers de iptv_admin. Antes usaban
+	// context.Background() y no se drenaban: shutdown durante un
+	// refresh escribía contra una DB ya cerrada (audit olores DD +
+	// GGGG). Patrón replica `library.Service`.
+	bgCtx    context.Context
+	bgCancel context.CancelFunc
+	bgWG     sync.WaitGroup
 }
 
 // proberRunner is the minimal capability surface the service needs
@@ -113,6 +123,7 @@ func NewService(
 	watchHistory *db.ChannelWatchHistoryRepository,
 	logger *slog.Logger,
 ) *Service {
+	bgCtx, bgCancel := context.WithCancel(context.Background())
 	return &Service{
 		channels:            channels,
 		epgPrograms:         epgPrograms,
@@ -126,6 +137,8 @@ func NewService(
 		logger:          logger.With("module", "iptv"),
 		refreshes:       make(map[string]bool),
 		lastKnownBucket: make(map[string]string),
+		bgCtx:           bgCtx,
+		bgCancel:        bgCancel,
 		httpClient: &http.Client{
 			// 5 min ceiling: large M3U providers (e.g. MEGAOTT,
 			// 8k+ channels) can take 1–2 min to stream the full
@@ -137,12 +150,41 @@ func NewService(
 	}
 }
 
-// Shutdown is a no-op today — the service has no owned background
-// goroutines. Kept as a symmetric counterpart to the other package
-// services (stream.Manager, auth.Service, library.Service) so main.go
-// keeps a consistent teardown order if long-running workers are added
-// here later (scheduled EPG refresh, catalog poller, …).
-func (s *Service) Shutdown() {}
+// SpawnBackground lanza fn como goroutine de background del service.
+// fn recibe un ctx que se cancela en Shutdown y que tiene como
+// padre el bgCtx del service (no context.Background) — el caller
+// puede aplicarle un WithTimeout si quiere acotar la operación.
+// El service trackea la goroutine en bgWG para drenarla en Shutdown
+// (audit olores DD + GGGG).
+//
+// Exportado para que handlers del paquete `api/handlers` (en
+// particular iptv_admin.go) puedan usar el mismo lifecycle en lugar
+// de spawn-and-forget con context.Background().
+func (s *Service) SpawnBackground(fn func(ctx context.Context)) {
+	s.bgWG.Add(1)
+	go func() {
+		defer s.bgWG.Done()
+		fn(s.bgCtx)
+	}()
+}
+
+// BackgroundContext devuelve el ctx de background del service para
+// que los callers que necesiten encadenar timeouts puedan partir de
+// él. No usar context.Background — se rompe el drain de Shutdown.
+func (s *Service) BackgroundContext() context.Context {
+	return s.bgCtx
+}
+
+// Shutdown cancela el bgCtx y espera a que terminen las goroutines
+// detached lanzadas vía SpawnBackground (auto-EPG / auto-probe tras
+// import M3U, refresh async desde handlers admin). Antes era no-op
+// y el shutdown corría contra una DB que se cerraba a mitad —
+// "sql: database is closed" en logs y, en patológico, writes
+// parciales (audit olores DD + GGGG).
+func (s *Service) Shutdown() {
+	s.bgCancel()
+	s.bgWG.Wait()
+}
 
 // ── HTTP fetching helpers ─────────────────────────────────────────
 //

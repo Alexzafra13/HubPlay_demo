@@ -24,7 +24,3 @@ CREATE TABLE episode_segments (
 );
 
 CREATE INDEX idx_episode_segments_item ON episode_segments(item_id);
-
--- +goose Down
-DROP INDEX IF EXISTS idx_episode_segments_item;
-DROP TABLE IF EXISTS episode_segments;

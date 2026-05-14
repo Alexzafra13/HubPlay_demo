@@ -8,6 +8,3 @@
 -- a clean DROP COLUMN.
 ALTER TABLE federation_item_cache
     ADD COLUMN has_poster BOOLEAN NOT NULL DEFAULT FALSE;
-
--- +goose Down
-ALTER TABLE federation_item_cache DROP COLUMN IF EXISTS has_poster;

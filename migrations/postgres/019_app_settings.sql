@@ -7,6 +7,3 @@ CREATE TABLE app_settings (
     value      TEXT NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-
--- +goose Down
-DROP TABLE IF EXISTS app_settings;

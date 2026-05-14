@@ -41,8 +41,3 @@ SELECT encode(gen_random_bytes(16), 'hex'),
        COALESCE(created_at, CURRENT_TIMESTAMP)
 FROM libraries
 WHERE epg_url IS NOT NULL AND epg_url != '';
-
--- +goose Down
-DROP INDEX IF EXISTS idx_library_epg_sources_lib;
-DROP TABLE IF EXISTS library_epg_sources;
--- pgcrypto stays — other migrations may depend on it.

@@ -9,6 +9,3 @@ CREATE TABLE channel_overrides (
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (library_id, stream_url)
 );
-
--- +goose Down
-DROP TABLE IF EXISTS channel_overrides;

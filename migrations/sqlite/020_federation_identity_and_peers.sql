@@ -77,10 +77,3 @@ CREATE TABLE federation_invites (
 -- don't pollute the hot index).
 CREATE INDEX idx_fed_invites_unused ON federation_invites(code)
     WHERE accepted_at IS NULL;
-
--- +goose Down
-DROP INDEX IF EXISTS idx_fed_invites_unused;
-DROP TABLE IF EXISTS federation_invites;
-DROP INDEX IF EXISTS idx_fed_peers_status;
-DROP TABLE IF EXISTS federation_peers;
-DROP TABLE IF EXISTS server_identity;

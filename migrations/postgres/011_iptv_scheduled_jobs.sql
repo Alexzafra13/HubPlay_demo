@@ -25,7 +25,3 @@ CREATE TABLE iptv_scheduled_jobs (
 CREATE INDEX idx_iptv_jobs_enabled_due
     ON iptv_scheduled_jobs(last_run_at)
     WHERE enabled = TRUE;
-
--- +goose Down
-DROP INDEX IF EXISTS idx_iptv_jobs_enabled_due;
-DROP TABLE IF EXISTS iptv_scheduled_jobs;

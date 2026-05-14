@@ -41,7 +41,3 @@ CREATE INDEX idx_fed_cache_peer_lib ON federation_item_cache(peer_id, library_id
 CREATE INDEX idx_fed_cache_age ON federation_item_cache(cached_at);
 
 
--- +goose Down
-DROP INDEX IF EXISTS idx_fed_cache_age;
-DROP INDEX IF EXISTS idx_fed_cache_peer_lib;
-DROP TABLE IF EXISTS federation_item_cache;

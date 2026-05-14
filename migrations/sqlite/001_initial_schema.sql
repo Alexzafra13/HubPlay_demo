@@ -321,31 +321,3 @@ CREATE TABLE webhook_log (
     created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX idx_webhook_log_webhook ON webhook_log(webhook_id);
-
--- +goose Down
-DROP TABLE IF EXISTS webhook_log;
-DROP TABLE IF EXISTS webhook_configs;
-DROP TABLE IF EXISTS providers;
-DROP TABLE IF EXISTS activity_log;
-DROP TABLE IF EXISTS user_data;
-DROP TABLE IF EXISTS epg_programs;
-DROP TABLE IF EXISTS channels;
-DROP TABLE IF EXISTS images;
-DROP TABLE IF EXISTS item_people;
-DROP TABLE IF EXISTS people;
-DROP TABLE IF EXISTS external_ids;
-DROP TABLE IF EXISTS item_value_map;
-DROP TABLE IF EXISTS item_values;
-DROP TABLE IF EXISTS metadata;
-DROP TABLE IF EXISTS trickplay_info;
-DROP TABLE IF EXISTS media_segments;
-DROP TABLE IF EXISTS chapters;
-DROP TABLE IF EXISTS media_streams;
-DROP TABLE IF EXISTS ancestor_ids;
-DROP TABLE IF EXISTS items;
-DROP TABLE IF EXISTS library_access;
-DROP TABLE IF EXISTS library_paths;
-DROP TABLE IF EXISTS libraries;
-DROP TABLE IF EXISTS api_keys;
-DROP TABLE IF EXISTS sessions;
-DROP TABLE IF EXISTS users;

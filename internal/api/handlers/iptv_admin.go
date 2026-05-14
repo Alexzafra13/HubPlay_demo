@@ -96,9 +96,12 @@ func (h *IPTVHandler) RefreshM3U(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go func() {
+	// SpawnBackground (no `go func` + context.Background) para que
+	// shutdown drene un refresh en vuelo en vez de matarlo a mitad
+	// del write (audit olor GGGG).
+	h.svc.SpawnBackground(func(bgCtx context.Context) {
 		defer release()
-		ctx, cancel := context.WithTimeout(context.Background(), refreshM3UAsyncTimeout)
+		ctx, cancel := context.WithTimeout(bgCtx, refreshM3UAsyncTimeout)
 		defer cancel()
 		count, err := h.svc.RunRefreshM3U(ctx, libraryID)
 		if err != nil {
@@ -107,7 +110,7 @@ func (h *IPTVHandler) RefreshM3U(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.logger.Info("M3U refresh complete (async)", "library", libraryID, "channels", count)
-	}()
+	})
 
 	respondJSON(w, http.StatusAccepted, map[string]any{
 		"data": map[string]any{
@@ -194,10 +197,11 @@ func (h *IPTVHandler) ImportPublicIPTV(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Trigger M3U refresh in background (use detached context)
+	// Refresh M3U en background via el lifecycle del service
+	// (audit olor GGGG): shutdown drena en vez de cortar el write.
 	libID := lib.ID
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	h.svc.SpawnBackground(func(bgCtx context.Context) {
+		ctx, cancel := context.WithTimeout(bgCtx, 2*time.Minute)
 		defer cancel()
 		count, err := h.svc.RefreshM3U(ctx, libID)
 		if err != nil {
@@ -205,7 +209,7 @@ func (h *IPTVHandler) ImportPublicIPTV(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.logger.Info("public IPTV imported", "library", libID, "country", req.Country, "channels", count)
-	}()
+	})
 
 	respondJSON(w, http.StatusCreated, map[string]any{
 		"data": map[string]any{

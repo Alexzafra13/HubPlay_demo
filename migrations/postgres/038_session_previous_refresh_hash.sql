@@ -6,7 +6,3 @@ ALTER TABLE sessions ADD COLUMN previous_refresh_token_hash TEXT NOT NULL DEFAUL
 
 CREATE INDEX idx_sessions_previous_refresh_hash
     ON sessions(previous_refresh_token_hash);
-
--- +goose Down
-DROP INDEX IF EXISTS idx_sessions_previous_refresh_hash;
-ALTER TABLE sessions DROP COLUMN IF EXISTS previous_refresh_token_hash;

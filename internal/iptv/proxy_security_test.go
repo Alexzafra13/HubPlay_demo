@@ -205,7 +205,7 @@ func TestStreamProxy_Shutdown_ClearsRelays(t *testing.T) {
 	p.relays["b"] = &relay{listeners: 3}
 	p.mu.Unlock()
 
-	p.Shutdown()
+	p.ClearRelays()
 	if got := p.ActiveRelays(); got != 0 {
 		t.Errorf("after Shutdown, ActiveRelays = %d want 0", got)
 	}

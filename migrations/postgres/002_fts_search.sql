@@ -50,10 +50,3 @@ CREATE TRIGGER items_search_vector_update
 UPDATE items
 SET search_vector = to_tsvector('simple',
     COALESCE(title, '') || ' ' || COALESCE(original_title, ''));
-
--- +goose Down
-DROP TRIGGER IF EXISTS items_search_vector_update ON items;
-DROP TRIGGER IF EXISTS items_search_vector_insert ON items;
-DROP FUNCTION IF EXISTS items_search_vector_refresh();
-DROP INDEX IF EXISTS idx_items_fts;
-ALTER TABLE items DROP COLUMN IF EXISTS search_vector;

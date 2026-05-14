@@ -19,8 +19,3 @@ CREATE TABLE federation_library_shares (
 
 CREATE INDEX idx_fed_share_peer ON federation_library_shares(peer_id);
 CREATE INDEX idx_fed_share_library ON federation_library_shares(library_id);
-
--- +goose Down
-DROP INDEX IF EXISTS idx_fed_share_library;
-DROP INDEX IF EXISTS idx_fed_share_peer;
-DROP TABLE IF EXISTS federation_library_shares;

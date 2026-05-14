@@ -90,9 +90,3 @@ CREATE UNIQUE INDEX IF NOT EXISTS uniq_series_per_library
 CREATE UNIQUE INDEX IF NOT EXISTS uniq_season_per_series
     ON items(parent_id, season_number)
     WHERE type = 'season' AND season_number IS NOT NULL;
-
--- +goose Down
-DROP INDEX IF EXISTS uniq_season_per_series;
-DROP INDEX IF EXISTS uniq_series_per_library;
--- Re-creating the duplicates that were cleaned up isn't reasonable;
--- the Down side just removes the structural guards.

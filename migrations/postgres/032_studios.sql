@@ -76,10 +76,3 @@ SET studio_id = (
     )
 )
 WHERE COALESCE(metadata.studio, '') <> '';
-
--- +goose Down
-DROP INDEX IF EXISTS idx_metadata_studio_id;
-ALTER TABLE metadata DROP COLUMN IF EXISTS studio_id;
-DROP INDEX IF EXISTS idx_studios_name;
-DROP INDEX IF EXISTS idx_studios_slug;
-DROP TABLE IF EXISTS studios;

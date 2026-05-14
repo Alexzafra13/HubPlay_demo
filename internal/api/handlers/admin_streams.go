@@ -146,11 +146,21 @@ func (h *AdminStreamsHandler) KillSession(w http.ResponseWriter, r *http.Request
 	if decoded, err := url.PathUnescape(rawID); err == nil {
 		id = decoded
 	}
-	h.manager.StopSession(id)
-	if claims := auth.GetClaims(r.Context()); claims != nil {
-		h.logger.Info("admin killed session", "session_id", id, "by", claims.UserID)
-	} else {
-		h.logger.Info("admin killed session", "session_id", id)
+	// Audit trail obligatorio: el endpoint está bajo requireAdmin,
+	// así que claims SIEMPRE debería existir. Si por un desliz de
+	// routing alguien expusiera esto sin auth, preferimos 401 +
+	// log ERROR a un kill anónimo (audit olor F16-7).
+	claims := auth.GetClaims(r.Context())
+	if claims == nil {
+		h.logger.Error("admin KillSession sin claims — endpoint expuesto sin auth?",
+			"session_id", id)
+		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "auth required")
+		return
 	}
+	h.manager.StopSession(id)
+	h.logger.Info("admin killed session",
+		"session_id", id,
+		"by", claims.UserID,
+		"role", claims.Role)
 	w.WriteHeader(http.StatusNoContent)
 }

@@ -55,8 +55,3 @@ WHERE m.genres_json IS NOT NULL
   AND m.genres_json IS JSON ARRAY
   AND TRIM(je.value) != ''
 ON CONFLICT DO NOTHING;
-
--- +goose Down
-DROP INDEX IF EXISTS idx_item_values_type_clean;
--- We intentionally do NOT roll back the backfill rows; the genre
--- data is non-destructive and re-running the migration is idempotent.

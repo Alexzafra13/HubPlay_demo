@@ -48,6 +48,14 @@ type SegmentDetector struct {
 	// thousands) and keeps the implementation tiny. If concurrency
 	// per-library ever matters, swap for a per-library mutex map.
 	mu sync.Mutex
+
+	// bgWG espera a las goroutines de DetectLibrary lanzadas desde
+	// el handler del bus. Sin esto, shutdown podía dejar writes en
+	// vuelo contra una DB ya cerrada — produciendo "sql: database
+	// is closed" en logs y, en patológico, writes parciales (audit
+	// olor Y). El patrón replica `library.Service` y
+	// `iptv.TransmuxManager`.
+	bgWG sync.WaitGroup
 }
 
 func NewSegmentDetector(
@@ -66,21 +74,24 @@ func NewSegmentDetector(
 	}
 }
 
-// Start subscribes the detector to library.scan.completed and
-// returns the unsubscribe handle. The caller (main.go) holds it for
-// the process lifetime; bus.Subscribe leaks the handler if we never
-// unsubscribe, hence the explicit lifecycle.
+// Start suscribe el detector a library.scan.completed y devuelve un
+// handle que desuscribe Y drena las goroutines de DetectLibrary en
+// vuelo. El caller (main.go) lo difiere en shutdown.
 //
-// The handler runs the detection pass in a goroutine so the bus's
-// 30s slow-handler watchdog never trips; a scan over hundreds of
-// episodes can easily exceed 30s.
+// El handler lanza la detección en una goroutine para que el
+// watchdog de 30s del bus nunca se dispare; un scan sobre cientos
+// de episodes puede pasar fácilmente de 30s. La goroutine se
+// registra en bgWG para que Stop espere su finalización (audit
+// olor Y).
 func (d *SegmentDetector) Start(ctx context.Context) (unsub func()) {
-	return d.bus.Subscribe(event.LibraryScanCompleted, func(e event.Event) {
+	busUnsub := d.bus.Subscribe(event.LibraryScanCompleted, func(e event.Event) {
 		libID, _ := e.Data["library_id"].(string)
 		if libID == "" {
 			return
 		}
+		d.bgWG.Add(1)
 		go func() {
+			defer d.bgWG.Done()
 			if err := d.DetectLibrary(ctx, libID); err != nil {
 				d.logger.Warn("segment detection failed",
 					"library_id", libID,
@@ -88,6 +99,10 @@ func (d *SegmentDetector) Start(ctx context.Context) (unsub func()) {
 			}
 		}()
 	})
+	return func() {
+		busUnsub()
+		d.bgWG.Wait()
+	}
 }
 
 // DetectLibrary walks every episode in the given library, runs the

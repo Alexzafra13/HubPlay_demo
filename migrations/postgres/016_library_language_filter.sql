@@ -3,6 +3,3 @@
 -- full rationale (comma-separated ISO 639-1 codes, applied at
 -- import time).
 ALTER TABLE libraries ADD COLUMN language_filter TEXT NOT NULL DEFAULT '';
-
--- +goose Down
-ALTER TABLE libraries DROP COLUMN IF EXISTS language_filter;

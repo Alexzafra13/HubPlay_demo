@@ -16,40 +16,38 @@ type Type string
 
 // Event types — modules emit these, subscribers react to them.
 //
-// NOTE: as of 2026-04-17 only the five scan/item types are actually published
-// by the scanner. The others (Metadata*, Transcode*, Channel*, EPG*, Playlist*,
-// User*) are reserved for upcoming features — keeping the constants prevents
-// churn when those producers land. Subscribers (events.go SSE) listen to all
-// of them safely because Publish is a no-op when no handler is registered.
+// Tipos de eventos publicados por el backend. Cada productor está
+// listado entre paréntesis para localizar el `Publish` real con un
+// `grep`. `Publish` es no-op cuando nadie está suscrito, así que
+// añadir un tipo nuevo no rompe a nadie aunque tarde en cablearse
+// un subscriber.
 const (
-	LibraryScanStarted   Type = "library.scan.started"
-	LibraryScanCompleted Type = "library.scan.completed"
-	// LibraryScanProgress is emitted periodically (every ~50 files)
-	// while a scan is walking. Data: library_id, library_name,
-	// scanned (count so far), current_path. No total because we
-	// don't pre-walk to count — the user-facing UI shows a running
-	// number + spinner rather than a fractional progress bar.
-	LibraryScanProgress  Type = "library.scan.progress"
-	ItemAdded            Type = "item.added"
-	ItemUpdated          Type = "item.updated"
-	ItemRemoved          Type = "item.removed"
-	MetadataUpdated      Type = "metadata.updated"
-	TranscodeStarted     Type = "transcode.started"
-	TranscodeCompleted   Type = "transcode.completed"
-	ChannelAdded         Type = "channel.added"
-	ChannelRemoved       Type = "channel.removed"
-	EPGUpdated           Type = "epg.updated"
-	PlaylistRefreshed    Type = "playlist.refreshed"
-	// PlaylistRefreshFailed is published when an async M3U import gives
-	// up. The handler returns 202 immediately, so the SSE stream is the
-	// only signal the admin UI has that the import didn't reach DB —
-	// otherwise the spinner stays forever.
-	PlaylistRefreshFailed Type = "playlist.refresh_failed"
-	// ChannelHealthChanged is published when a channel transitions
-	// between health buckets (ok / degraded / dead). Emitted only on
-	// transition — not on every probe — so subscribers (admin SSE
-	// stream) get push notifications without flooding on every tick.
-	ChannelHealthChanged Type = "channel.health.changed"
+	LibraryScanStarted   Type = "library.scan.started"   // scanner
+	LibraryScanCompleted Type = "library.scan.completed" // scanner
+	// LibraryScanProgress se emite cada ~50 ficheros durante el
+	// walk. Data: library_id, library_name, scanned (count parcial),
+	// current_path. No hay total porque no pre-walk-eamos para
+	// contar — el UI muestra "scanned N" + spinner, no porcentaje.
+	LibraryScanProgress  Type = "library.scan.progress" // scanner
+	ItemAdded            Type = "item.added"            // scanner
+	ItemUpdated          Type = "item.updated"          // scanner
+	ItemRemoved          Type = "item.removed"          // scanner
+	MetadataUpdated      Type = "metadata.updated"      // library (segment detection)
+	TranscodeStarted     Type = "transcode.started"     // stream.Manager
+	TranscodeCompleted   Type = "transcode.completed"   // stream.Manager
+	ChannelAdded         Type = "channel.added"         // iptv (M3U import)
+	ChannelRemoved       Type = "channel.removed"       // iptv (M3U import)
+	EPGUpdated           Type = "epg.updated"           // iptv (EPG refresh)
+	PlaylistRefreshed    Type = "playlist.refreshed"    // iptv (M3U import)
+	// PlaylistRefreshFailed se emite cuando un import M3U async se
+	// rinde. El handler ya respondió 202, así que la SSE es la
+	// única señal de fallo que ve el admin UI — sin esto el
+	// spinner queda colgado.
+	PlaylistRefreshFailed Type = "playlist.refresh_failed" // iptv
+	// ChannelHealthChanged se emite cuando un canal transita entre
+	// buckets de salud (ok / degraded / dead). Solo en transición,
+	// no en cada probe — evita flood en el SSE del admin.
+	ChannelHealthChanged Type = "channel.health.changed" // iptv
 	UserLoggedIn         Type = "user.logged_in"
 	UserLoggedOut        Type = "user.logged_out"
 

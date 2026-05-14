@@ -93,3 +93,35 @@ func TestStore_InvalidID_NoFilesystemSideEffects(t *testing.T) {
 		t.Fatalf(".mappings/ created for invalid id: %v", err)
 	}
 }
+
+// TestRead_RejectsCorruptMapping ejercita el guard de defensa-en-
+// profundidad: si alguien (admin manual, bug de Write, restore
+// corrupto) deja un fichero de mapping con un path relativo o con
+// `..`, Read lo rechaza con ErrCorruptMapping en vez de devolverlo
+// al handler (audit olor HHH).
+func TestRead_RejectsCorruptMapping(t *testing.T) {
+	dir := t.TempDir()
+	s := New(dir)
+	if err := os.MkdirAll(s.dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	cases := map[string]string{
+		"empty":     "",
+		"relative":  "relative/path.jpg",
+		"with-dot-dot": "/var/lib/hubplay/../etc/passwd",
+		"bare-dot-dot": "..",
+	}
+	id := "00000000-0000-0000-0000-000000000001"
+	for name, payload := range cases {
+		t.Run(name, func(t *testing.T) {
+			if err := os.WriteFile(filepath.Join(s.dir, id), []byte(payload), 0o644); err != nil {
+				t.Fatalf("write fixture: %v", err)
+			}
+			_, err := s.Read(id)
+			if !errors.Is(err, ErrCorruptMapping) {
+				t.Fatalf("payload %q: want ErrCorruptMapping, got %v", payload, err)
+			}
+		})
+	}
+}

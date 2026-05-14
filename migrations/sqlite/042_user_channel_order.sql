@@ -44,7 +44,3 @@ CREATE TABLE user_channel_order (
 
 CREATE INDEX idx_user_channel_order_user
     ON user_channel_order (user_id, position);
-
--- +goose Down
-DROP INDEX IF EXISTS idx_user_channel_order_user;
-DROP TABLE IF EXISTS user_channel_order;

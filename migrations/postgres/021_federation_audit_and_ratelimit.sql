@@ -41,9 +41,3 @@ CREATE TABLE federation_rate_limit_state (
 );
 
 
--- +goose Down
-DROP INDEX IF EXISTS idx_fed_audit_occurred;
-DROP INDEX IF EXISTS idx_fed_audit_endpoint;
-DROP INDEX IF EXISTS idx_fed_audit_peer_time;
-DROP TABLE IF EXISTS federation_audit_log;
-DROP TABLE IF EXISTS federation_rate_limit_state;
