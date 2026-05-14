@@ -6,8 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"path/filepath"
-	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -159,18 +157,8 @@ func (h *PeopleHandler) Get(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]any{"data": resp})
 }
 
+// isUnderImageDir delega en isPathUnderImageDir (ADR-021): el guard
+// real resuelve symlinks antes de comparar contra imageDir.
 func (h *PeopleHandler) isUnderImageDir(p string) bool {
-	rootAbs, err := filepath.Abs(h.imageDir)
-	if err != nil {
-		return false
-	}
-	pAbs, err := filepath.Abs(filepath.Clean(p))
-	if err != nil {
-		return false
-	}
-	rel, err := filepath.Rel(rootAbs, pAbs)
-	if err != nil {
-		return false
-	}
-	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+	return isPathUnderImageDir(h.imageDir, p)
 }

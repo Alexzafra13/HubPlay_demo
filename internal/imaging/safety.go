@@ -89,41 +89,46 @@ func EnforceMaxPixels(data []byte) error {
 // unspecified, multicast). Blocks SSRF against the host's local network.
 var ErrUnsafeURL = errors.New("imaging: unsafe URL")
 
-// SafeGet fetches rawURL with defenses against SSRF:
+// SafeGet descarga rawURL con defensas contra SSRF:
 //
-//   - Scheme must be http or https.
-//   - Host is resolved and every returned address is checked; if ANY address
-//     is private/loopback/link-local/unspecified/multicast, the fetch is
-//     rejected before connecting.
-//   - The resulting response body is capped at maxBytes.
+//   - El esquema debe ser http o https.
+//   - El host se resuelve y se valida CADA dirección devuelta: si
+//     cualquiera cae en rango privado / loopback / link-local /
+//     unspecified / multicast, la descarga se rechaza antes de
+//     conectar.
+//   - Cada redirect HTTP (3xx) se re-valida con el mismo guard:
+//     un servidor externo no puede pivotear hacia un servicio
+//     interno con un 302 (ADR-019). Sin esta segunda capa el
+//     guard inicial no protege contra "302 a 169.254.169.254".
+//   - El cuerpo de la respuesta se trunca a maxBytes.
 //
-// Returns the body bytes, the response Content-Type (server-supplied), and
-// any error. Callers should pass the returned bytes through SniffContentType
-// to re-validate — server Content-Type is hint-only.
+// Devuelve los bytes del body, el Content-Type del servidor (solo
+// pista, no veredicto) y cualquier error. Los callers deben pasar
+// los bytes por SniffContentType para re-validar.
 func SafeGet(rawURL string, maxBytes int64, timeout time.Duration) ([]byte, string, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, "", fmt.Errorf("%w: parse: %v", ErrUnsafeURL, err)
 	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return nil, "", fmt.Errorf("%w: scheme %q", ErrUnsafeURL, u.Scheme)
-	}
-	host := u.Hostname()
-	if host == "" {
-		return nil, "", fmt.Errorf("%w: missing host", ErrUnsafeURL)
-	}
-	addrs, err := net.LookupIP(host)
-	if err != nil {
-		return nil, "", fmt.Errorf("resolve %s: %w", host, err)
-	}
-	for _, ip := range addrs {
-		if BlockedIP(ip) {
-			return nil, "", fmt.Errorf("%w: %s resolves to %s", ErrUnsafeURL, host, ip)
-		}
+	if err := validateOutboundURL(u); err != nil {
+		return nil, "", err
 	}
 
-	client := &http.Client{Timeout: timeout}
-	resp, err := client.Get(rawURL) //nolint:gosec // target URL vetted above
+	client := &http.Client{
+		Timeout: timeout,
+		// CheckRedirect re-valida la IP destino en cada hop. Sin esto,
+		// el cliente seguiría redirects automáticamente y un atacante
+		// con un host público podría servir 302 a una IP privada para
+		// exfiltrar contenido interno (cloud metadata, paneles
+		// internos). Detalle en ADR-019.
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return errors.New("imaging: stopped after 10 redirects")
+			}
+			return validateOutboundURL(req.URL)
+		},
+	}
+	resp, err := client.Get(rawURL) //nolint:gosec // target URL vetted above (incluye redirects)
 	if err != nil {
 		return nil, "", fmt.Errorf("get: %w", err)
 	}
@@ -136,6 +141,30 @@ func SafeGet(rawURL string, maxBytes int64, timeout time.Duration) ([]byte, stri
 		return nil, "", fmt.Errorf("read: %w", err)
 	}
 	return data, resp.Header.Get("Content-Type"), nil
+}
+
+// validateOutboundURL aplica el guard SSRF a una sola URL: esquema
+// permitido + host resoluble a IPs públicas. Extraído para que la
+// validación inicial y la del CheckRedirect compartan exactamente
+// la misma lógica.
+func validateOutboundURL(u *url.URL) error {
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("%w: scheme %q", ErrUnsafeURL, u.Scheme)
+	}
+	host := u.Hostname()
+	if host == "" {
+		return fmt.Errorf("%w: missing host", ErrUnsafeURL)
+	}
+	addrs, err := net.LookupIP(host)
+	if err != nil {
+		return fmt.Errorf("resolve %s: %w", host, err)
+	}
+	for _, ip := range addrs {
+		if BlockedIP(ip) {
+			return fmt.Errorf("%w: %s resolves to %s", ErrUnsafeURL, host, ip)
+		}
+	}
+	return nil
 }
 
 // BlockedIP reports whether ip is in a range that clients MUST NOT reach

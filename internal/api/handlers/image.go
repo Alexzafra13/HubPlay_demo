@@ -500,23 +500,12 @@ func etagMatches(ifNoneMatch, etag string) bool {
 	return false
 }
 
-// isUnderImageDir reports whether p, after cleaning, has h.imageDir as an
-// ancestor. Compares absolute paths so relative/absolute mismatches don't
-// fool the check.
+// isUnderImageDir delega en isPathUnderImageDir (ADR-021): el guard
+// real resuelve symlinks antes de comparar contra imageDir, evitando
+// que un symlink dentro de imageDir apuntando fuera burle la
+// validación textual.
 func (h *ImageHandler) isUnderImageDir(p string) bool {
-	rootAbs, err := filepath.Abs(h.imageDir)
-	if err != nil {
-		return false
-	}
-	pAbs, err := filepath.Abs(filepath.Clean(p))
-	if err != nil {
-		return false
-	}
-	rel, err := filepath.Rel(rootAbs, pAbs)
-	if err != nil {
-		return false
-	}
-	return !strings.HasPrefix(rel, "..") && rel != ".."
+	return isPathUnderImageDir(h.imageDir, p)
 }
 
 // ── Helpers ──

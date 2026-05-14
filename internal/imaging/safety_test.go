@@ -9,6 +9,8 @@ import (
 	"image/color"
 	"image/png"
 	"io"
+	"net"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -168,5 +170,52 @@ func TestSafeGet_RejectsLiteralLoopbackHostname(t *testing.T) {
 	_, _, err := SafeGet("http://localhost:1/x", 1024, time.Second)
 	if !errors.Is(err, ErrUnsafeURL) {
 		t.Fatalf("localhost: want ErrUnsafeURL, got %v", err)
+	}
+}
+
+// TestSafeGet_RejectsRedirectToPrivateIP cubre el vector SSRF que
+// motiva ADR-019: un servidor externo legítimo en su DNS responde
+// con 302 hacia una IP privada (cloud metadata, panel interno).
+// Sin CheckRedirect, http.Client seguía el redirect y SafeGet
+// devolvía el body del recurso interno. Con el guard de ADR-019,
+// el redirect se rechaza antes de conectar.
+//
+// Como httptest sirve siempre en 127.0.0.1, no podemos distinguir el
+// "público" del "privado" por IP. Mockeamos BlockedIP con un
+// contador: la primera invocación (URL inicial) pasa; las
+// siguientes (resoluciones del redirect) bloquean.
+func TestSafeGet_RejectsRedirectToPrivateIP(t *testing.T) {
+	private := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("LEAKED_SECRET"))
+	}))
+	defer private.Close()
+
+	publicSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, private.URL+"/secret", http.StatusFound)
+	}))
+	defer publicSrv.Close()
+
+	originalBlocker := BlockedIP
+	defer func() { BlockedIP = originalBlocker }()
+
+	var calls int
+	BlockedIP = func(ip net.IP) bool {
+		calls++
+		// La primera llamada corresponde al lookup del host público
+		// (URL inicial); la dejamos pasar para llegar al hot path
+		// del redirect. La segunda llamada corresponde al lookup del
+		// destino del 302: aquí el guard debe disparar.
+		return calls >= 2
+	}
+
+	_, _, err := SafeGet(publicSrv.URL+"/redirect", 1024, time.Second)
+	if err == nil {
+		t.Fatal("expected redirect to be rejected; got nil error (CheckRedirect ausente)")
+	}
+	if !errors.Is(err, ErrUnsafeURL) {
+		t.Fatalf("want ErrUnsafeURL on redirect, got %v", err)
+	}
+	if calls < 2 {
+		t.Fatalf("expected at least 2 BlockedIP calls (initial + redirect), got %d", calls)
 	}
 }
