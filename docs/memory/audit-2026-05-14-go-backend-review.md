@@ -542,16 +542,202 @@ Coste-beneficio:
 
 ## Fase 3 · `internal/api/` + handlers
 
-> Pendiente. Foco propuesto:
-> - Las 26 interfaces de `handlers/interfaces.go`: ¿cuáles tienen al
->   menos un fake en tests distinto del runtime? ¿Cuáles son
->   abstracción innecesaria?
-> - Sub-paquetes propuestos (admin, iptv, federation, me, items).
-> - Middleware stack: orden, idempotencia, timeouts por sub-router.
-> - 21 handlers `federation_*.go` con `Federation == nil` posible.
-> - `Dependencies.Database *sql.DB` — usos.
-> - `Dependencies` God-Struct: refactor a sub-routers con sus propias
->   deps.
+Cerrada · 2026-05-14.
+
+### 3.1 Inventario
+
+- **79 ficheros** en `handlers/`, 16 132 LOC, 0 sub-paquetes.
+- `internal/api/`: 4 ficheros (`router.go`, `middleware.go`, `csrf.go`,
+  `security_headers.go`) + sub-paquete `apperror/`.
+- **219 rutas** registradas, **25 `r.Route`/`r.Group`** nested.
+- **26 interfaces** en `handlers/interfaces.go` (397 LOC).
+- Handlers top por tamaño:
+  - `items.go` — 1 186 LOC, **`ItemHandler` único** con 13 deps + 12
+    helpers `attach*` privados.
+  - `auth.go` — 928 LOC, `AuthHandler` con 13 endpoints.
+  - `me_home.go` — 886 LOC.
+  - `system.go` — 755 LOC, sólo 3 métodos pero queries SQL inline.
+  - `stream.go` — 687 LOC.
+  - `image.go` — 647 LOC.
+  - `iptv_channels.go` — 625 LOC.
+  - `library.go` — 623 LOC.
+  - `admin_db.go` — 533 LOC.
+
+### 3.2 Hallazgos
+
+#### P — `ItemHandler` es un god-handler · **alta**
+
+- `items.go:type ItemHandler struct` agrupa **13 dependencies**
+  inyectadas (`lib`, `images`, `metadata`, `userData`, `users`,
+  `chapters`, `segments`, `externalIDs`, `people`, `collections`,
+  `providers`, …) + **3 atributos privados** (`trickplayDir`,
+  `trickplayLocks sync.Map`, `trickplayBG sync.WaitGroup`).
+- Mezcla 4 responsabilidades en un único struct:
+  1. Item detail (`Get` + 8 `attach*` helpers que componen la
+     respuesta consultando 6 repos distintos).
+  2. Recommendations (TMDb passthrough).
+  3. Trickplay (manifest + sprite + ensure + wait, con `sync.Map`
+     para deduplicar generación).
+  4. Children + Search (browsing).
+- Principio violado: **SRP**. El handler "responde sobre un item" se
+  convirtió en "responde cualquier cosa que tenga `itemId`".
+- Impacto futuro: cada cambio cruza un fichero compartido por 4
+  equipos lógicos; los tests del trickplay tienen que setear todas
+  las deps de item-detail aunque no las use; las interfaces
+  consumer-side se inflan en `handlers/interfaces.go`.
+- Refactor sugerido:
+  - `ItemDetailHandler` (`Get`, `Children` + 8 helpers `attach*`,
+    deps: lib, images, metadata, userData, users, chapters,
+    segments, externalIDs, people, collections).
+  - `RecommendationsHandler` (deps: providers, externalIDs).
+  - `TrickplayHandler` (deps: items para path lookup, trickplayDir,
+    locks, BG). Aquí cae también `ItemHandler.WaitTrickplayInflight`.
+  - `SearchHandler` (deps: lib).
+- Beneficio directo: reduce 5+ interfaces consumer-side a 2-3 por
+  handler, y cada constructor toma 3-4 deps en vez de 13.
+
+#### Q — `WriteTimeout: 0` global sin sub-router protegido · **media-alta** (confirma `[PENDIENTE-F3]`)
+
+- `cmd/hubplay/main.go:489` setea `WriteTimeout: 0` "*Streaming
+  endpoints need unlimited write time*". Cierto, pero **se aplica al
+  servidor entero**.
+- **Las 219 rutas heredan el timeout = 0**. Sólo ~10 son streaming
+  (`/stream/{itemId}/...`, `/transmux/...`, `/iptv/channel/{id}/...`,
+  `/peer/stream/...`, `/events`, `/me/events`). Las otras ~210 no lo
+  necesitan.
+- Principio violado: **principle of least privilege** sobre los
+  timeouts del HTTP server.
+- Impacto: un cliente que abre `/api/v1/items?limit=50` y consume el
+  body a 1 byte/segundo puede mantener una goroutine ocupada
+  indefinidamente. No es un DoS práctico contra un servidor self-
+  hosted en LAN, pero sí contra un deployment Tailscale / Cloudflare
+  Tunnel donde el lado upstream es público.
+- Refactor sugerido:
+  - Opción 1: middleware `WithWriteDeadline(30 * time.Second)` aplicado
+    al sub-router `/api/v1/*` **excepto** sub-trees streaming. chi
+    permite encadenar middleware por `r.With(...).Group(...)`.
+  - Opción 2: `http.TimeoutHandler` envolviendo el sub-router
+    no-streaming. Más simple pero retorna un mensaje fijo en caso de
+    timeout (no se ajusta al envelope `apperror`).
+  - Opción 1 es más limpia.
+
+#### R — Interfaces sin fake en tests: 6 de 26 · **baja, requiere convención**
+
+- `IPTVTransmuxer`, `CollectionRepoForItems`,
+  `EpisodeSegmentRepository`, `ImageRefreshService`,
+  `EventBusSubscriber`, `EventBusPublisher` no se mockean en ningún
+  `_test.go`.
+- **No son abstracciones innecesarias**: cada una se usa en al menos
+  un handler real, y abstraer el bus / el transmuxer evita acoplar
+  el handler al paquete concreto.
+- Lo que **sí** es olor es la inconsistencia: la convención del
+  proyecto es "interface consumer-side **por handler**", y aquí
+  conviven dos prácticas (interface por puerto del dominio +
+  interface por handler) en el mismo fichero.
+- Refactor: documentar en `conventions.md` que la regla es "una
+  interface por consumer; si dos handlers necesitan el mismo método,
+  cada uno declara su propia interface, no se comparte." Cierra
+  ambigüedad sin tocar código existente.
+
+#### S — Federation fail-soft vía gating en router · **resuelve `[PENDIENTE-F3,F7]`**
+
+- 5 ficheros `federation_*.go` (48 usos del manager) **no nil-check**
+  internamente.
+- Pero `router.go:270, 441, 493` envuelve cada montaje con
+  `if deps.Federation != nil`. **El gating está en registration
+  time** — si federation init falla, las rutas no existen y los
+  handlers no se construyen.
+- Patrón **seguro**, idiomático y documentado por simetría
+  (`if deps.Database != nil` en línea 170, igual).
+- Resuelto: no es olor.
+
+#### T — `system.go` con queries SQL crudas inline · **media** (consecuencia de K en F2)
+
+- 755 LOC, 3 métodos exportados (`Stats`, `StreamActivity`,
+  `TopItems`), pero **dos de ellos ejecutan `db.QueryContext`** con
+  SELECTs raw sobre `activity_log`.
+- Es la encarnación del olor K (Fase 2): el HTTP layer hace SQL.
+- Refactor recomendado (dependiente de F2):
+  1. Crear `db.ActivityLogRepository` con `ListRecent(filter)` y
+     `Top(filter)` raw (justificación raw correcta: cross-cutting con
+     joins + cutoff).
+  2. `system.go` consume el repo; el campo `*sql.DB` desaparece de
+     `SystemHandler`.
+  3. `Dependencies.Database` deja de ser leído por `system.go`. Queda
+     sólo en `health.go` (Ping legítimo), `admin_backup.go` (VACUUM
+     INTO), `admin_db.go` (Stats + version probe).
+- Tras esto se puede sustituir `Dependencies.Database *sql.DB` por
+  3 interfaces estrechas (`HealthChecker`, `BackupOperator`,
+  `PoolStatsReporter`). Cierra olor K.
+
+#### U — Middleware stack bien ordenado · **sano**
+
+Verificado `internal/api/router.go:110-138`. Orden:
+
+```
+RealIP → RequestID → RequestLogger → Recoverer →
+SecurityHeaders → Metrics → CORS → CSRFProtect
+```
+
+Razonamientos correctos y documentados en código:
+- `SecurityHeaders` después de `Recoverer` para que un 500 todavía
+  los lleve.
+- Antes de `CORS` para que preflight también los lleve.
+- `Metrics` después de `Recoverer` para contar panics como 500.
+
+Auth y rate-limit se aplican **por sub-router** con `r.Use` dentro de
+`r.Group`. Es lo correcto (endpoints públicos como `/health`,
+`/auth/login`, `/setup/*` quedan sin auth pero con todos los demás
+middlewares). No es olor.
+
+#### V — `Config` leído directamente por `router.go` · **media, eco de G/H**
+
+- `router.go` accede a `deps.Config.Database.Path` (l.157),
+  `deps.Config.Database.Driver` (l.168, 392, 618), `deps.Config.Auth`
+  (l.155), `deps.Config.Observability.MetricsEnabled` (l.142),
+  `deps.Config.Observability.MetricsPath` (l.143).
+- Significa que el wiring depende del **shape exacto** de
+  `config.Config`, además del `Dependencies` shape.
+- Cualquier refactor de `Dependencies` tendría que decidir si los
+  campos de config relevantes se promueven (`Dependencies.DBDriver
+  string`) o se siguen leyendo desde `deps.Config.*`. Ambas son
+  defendibles; recomiendo **promover sólo los campos que el HTTP
+  layer realmente usa** para que `Dependencies` no necesite el
+  `*config.Config` entero.
+- No introduce ciclo ni acoplamiento mayor — es coste de claridad,
+  no de correctness.
+
+### 3.3 Confirmación de `[PENDIENTE]`
+
+- `[PENDIENTE-F3]` `WriteTimeout: 0` sin sub-router protegido →
+  confirmado, olor Q.
+- `[PENDIENTE-F3,F7]` `Federation == nil` nil-checks → no es olor:
+  resuelto por gating del router (hallazgo S).
+- `[PENDIENTE-F3]` 26 interfaces → ninguna es "abstracción innecesaria"
+  estricta; la inconsistencia de convención sí lo es (olor R). El
+  problema verdadero es **upstream**: `ItemHandler` inflado (P)
+  arrastra 6 interfaces granulares que sólo se justifican porque un
+  único handler las necesita todas.
+
+### 3.4 Severidades Fase 3
+
+| # | Problema | Severidad | Prerequisito |
+|---|----------|-----------|--------------|
+| P | `ItemHandler` god-handler (1 186 LOC, 13 deps, 4 responsabilidades) | Alta | Split en 4 handlers |
+| Q | `WriteTimeout: 0` global sin sub-router protegido | Media-alta | Middleware `WithWriteDeadline` en sub-router no-streaming |
+| R | Inconsistencia "interface por puerto" vs "por consumer" | Baja | Documentar regla en `conventions.md` |
+| T | `system.go` queries raw inline (consecuencia de K) | Media | `db.ActivityLogRepository` |
+| V | `router.go` lee `deps.Config.*` directo | Media | Eco de G/H, atacar junto |
+| — | Sub-paquetes `handlers/admin/`, `/iptv/`, etc. (C de Fase 1) | Media | Refactor cosmético, hacer junto al de P |
+
+### 3.5 Notas operativas
+
+- **Convención de tests**: 20 de 26 interfaces tienen al menos un
+  fake. El patrón es sano. No tocar.
+- **Cabeza del refactor de C (Fase 1)**: el split de `ItemHandler` (P)
+  arrastra naturalmente la decisión de sub-paquetes —
+  `handlers/items/detail.go`, `handlers/items/trickplay.go`, etc. Es
+  el mejor punto de entrada para validar el patrón sin big-bang.
 
 ---
 
