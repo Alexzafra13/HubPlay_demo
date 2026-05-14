@@ -78,6 +78,31 @@ func TestService_Create_Validation(t *testing.T) {
 		{"missing name", library.CreateRequest{ContentType: "movies", Paths: []string{"/a"}}},
 		{"invalid type", library.CreateRequest{Name: "X", ContentType: "invalid", Paths: []string{"/a"}}},
 		{"no paths", library.CreateRequest{Name: "X", ContentType: "movies"}},
+		// livetv-specific URL validation. The shape check happens at
+		// the create boundary so a typo in /admin/libraries or
+		// /admin/users/{id}/iptv-libraries surfaces as an inline 400
+		// instead of being deferred to the next M3U fetch attempt.
+		{"livetv missing m3u", library.CreateRequest{Name: "X", ContentType: "livetv"}},
+		{"livetv non-http m3u", library.CreateRequest{
+			Name: "X", ContentType: "livetv", M3UURL: "file:///etc/passwd",
+		}},
+		{"livetv gopher m3u", library.CreateRequest{
+			Name: "X", ContentType: "livetv", M3UURL: "gopher://example.com/list.m3u",
+		}},
+		{"livetv typo m3u (no scheme)", library.CreateRequest{
+			Name: "X", ContentType: "livetv", M3UURL: "example.com/list.m3u",
+		}},
+		{"livetv https without host", library.CreateRequest{
+			Name: "X", ContentType: "livetv", M3UURL: "https://",
+		}},
+		{"livetv bad epg URL", library.CreateRequest{
+			Name: "X", ContentType: "livetv",
+			M3UURL: "https://example.com/x.m3u", EPGURL: "not-a-url",
+		}},
+		{"livetv ftp epg URL", library.CreateRequest{
+			Name: "X", ContentType: "livetv",
+			M3UURL: "https://example.com/x.m3u", EPGURL: "ftp://example.com/epg.xml",
+		}},
 	}
 
 	for _, tt := range tests {
@@ -87,6 +112,65 @@ func TestService_Create_Validation(t *testing.T) {
 				t.Errorf("expected ErrValidation, got %v", err)
 			}
 		})
+	}
+}
+
+// TestService_CreatePersonalIPTV_URLValidation pins the URL-shape
+// guard for the admin "personal IPTV list" shortcut so a bogus M3U
+// (or EPG) never reaches the DB. Mirrors the generic Create cases
+// because CreatePersonalIPTV reuses validateCreateRequest after
+// forcing content_type=livetv.
+func TestService_CreatePersonalIPTV_URLValidation(t *testing.T) {
+	svc := newTestLibraryService(t)
+	ctx := context.Background()
+
+	t.Run("rejects file:// M3U", func(t *testing.T) {
+		_, err := svc.CreatePersonalIPTV(ctx, "u-1", library.CreateRequest{
+			Name: "X", M3UURL: "file:///etc/passwd",
+		})
+		if !errors.Is(err, domain.ErrValidation) {
+			t.Errorf("expected ErrValidation, got %v", err)
+		}
+	})
+	t.Run("rejects bad EPG URL", func(t *testing.T) {
+		_, err := svc.CreatePersonalIPTV(ctx, "u-1", library.CreateRequest{
+			Name: "X", M3UURL: "https://example.com/x.m3u", EPGURL: "totally-bogus",
+		})
+		if !errors.Is(err, domain.ErrValidation) {
+			t.Errorf("expected ErrValidation, got %v", err)
+		}
+	})
+}
+
+// Update should reject the same bogus URLs as Create so an admin
+// can't sneak a file:// M3U past the validator by editing an
+// existing library.
+func TestService_Update_URLValidation(t *testing.T) {
+	svc := newTestLibraryService(t)
+	ctx := context.Background()
+
+	lib, err := svc.Create(ctx, library.CreateRequest{
+		Name: "TV", ContentType: "livetv", M3UURL: "https://example.com/a.m3u",
+	})
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	bad := "file:///etc/passwd"
+	if _, err := svc.Update(ctx, lib.ID, library.UpdateRequest{M3UURL: &bad}); !errors.Is(err, domain.ErrValidation) {
+		t.Errorf("expected ErrValidation on M3U file://, got %v", err)
+	}
+
+	badEPG := "javascript:alert(1)"
+	if _, err := svc.Update(ctx, lib.ID, library.UpdateRequest{EPGURL: &badEPG}); !errors.Is(err, domain.ErrValidation) {
+		t.Errorf("expected ErrValidation on bogus EPG, got %v", err)
+	}
+
+	// Clearing both URLs (passing "") must remain legal — that's how
+	// the admin "unset EPG" path works.
+	empty := ""
+	if _, err := svc.Update(ctx, lib.ID, library.UpdateRequest{EPGURL: &empty}); err != nil {
+		t.Errorf("clearing EPG must be allowed, got %v", err)
 	}
 }
 

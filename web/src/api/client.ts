@@ -657,6 +657,7 @@ export class ApiClient {
       name: string;
       m3u_url: string;
       epg_url?: string;
+      language_filter?: string[];
       tls_insecure?: boolean;
     },
   ): Promise<Library> {
