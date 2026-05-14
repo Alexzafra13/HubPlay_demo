@@ -954,3 +954,182 @@ Migración 040 normaliza data existente:
 
 - **Auditar antes de proponer**: la primera lectura del code-base me hizo perder 30 min diseñando `households`+`groups`. Una segunda búsqueda más amplia (`grep parent_user_id`) reveló que media solución ya estaba implementada. Para esta clase de tarea, **el primer paso es siempre "qué hay ya"**, no "qué diseño".
 - **Preguntas que fuerzan al usuario a re-formular ayudan al diseño**. Un `AskUserQuestion` con tres opciones produjo una respuesta natural ("cada usuario puede agregar miembros, el acceso va al grupo") que cristalizó que profiles encajaba. Sin esa pregunta hubiera implementado `households` antes de descubrir el atajo.
+
+
+## ADR-019 — SSRF guard con `CheckRedirect` obligatorio
+
+- **Fecha**: 2026-05-14
+- **Estado**: Aceptado
+- **Supersede**: refuerza ADR-002
+- **Contexto de descubrimiento**: auditoria F9, hallazgo FFF
+
+### Contexto
+
+`internal/imaging/safety.go::SafeGet` validaba la IP del host inicial
+via `net.LookupIP` + `BlockedIP`, pero el `http.Client` no seteaba
+`CheckRedirect`. Por defecto el cliente sigue hasta 10 redirects sin
+re-validar IP. Un atacante con `evilhost.com` que sirviese
+`302 Location: http://169.254.169.254/latest/meta-data/...` o un
+`http://10.0.0.1:9200` haria que HubPlay siguiera el redirect y
+devolviera el body al admin que pidio el poster.
+
+El paquete `internal/iptv/proxy.go::fetchUpstream` ya implementa
+`CheckRedirect` correctamente, validando cada hop. La duplicacion
+de logica entre dos paquetes que necesitan la misma proteccion era
+la raiz del olvido en `imaging`.
+
+### Decision
+
+**Todo cliente HTTP outbound que descargue contenido externo bajo
+control parcial del usuario o del scanner DEBE setear
+`CheckRedirect` con re-validacion de IP por cada hop.**
+
+Implementacion:
+
+1. En `imaging/safety.go::SafeGet`:
+   ```go
+   client := &http.Client{
+       Timeout: timeout,
+       CheckRedirect: func(req *http.Request, via []*http.Request) error {
+           if len(via) >= 10 {
+               return errors.New("too many redirects")
+           }
+           addrs, err := net.LookupIP(req.URL.Hostname())
+           if err != nil {
+               return err
+           }
+           for _, ip := range addrs {
+               if BlockedIP(ip) {
+                   return fmt.Errorf("%w: redirect to %s", ErrUnsafeURL, ip)
+               }
+           }
+           return nil
+       },
+   }
+   ```
+
+2. Test de regresion `TestSafeGet_RejectsRedirectToPrivateIP` que
+   monte un `httptest.Server` que sirva `302` a `http://127.0.0.1:N`
+   y verifique que `SafeGet` retorna `ErrUnsafeURL`.
+
+3. Convenctn en `docs/memory/conventions.md`: cualquier `http.Client`
+   nuevo destinado a outbound de URLs externas reusa el guard
+   compartido. **No re-implementar a mano.**
+
+### Consecuencias
+
+- **Cierra un SSRF CVE-class**. El vector "302 a metadata cloud" o
+  "302 a Elasticsearch interno" deja de funcionar.
+- **Coste runtime adicional**: una `net.LookupIP` extra por cada
+  redirect. En la practica cero redirects en el happy path (TMDb y
+  Fanart no redirigen sus URLs canonicas). Si redirigen, el coste
+  es similar al lookup inicial.
+- **No es 100% inmune a DNS rebinding** (la IP resuelta en el
+  CheckRedirect puede diferir de la del Dial). Mitigacion futura via
+  custom `DialContext` con IP pinning (olor GGG, severidad media,
+  no urgente).
+
+### Alternativas descartadas
+
+- **No usar CheckRedirect, validar en el handler antes de llamar
+  SafeGet**: imposible — el handler no conoce los URLs intermedios
+  que el server externo podria emitir como 302.
+- **`Client.CheckRedirect = func ... { return http.ErrUseLastResponse }`**
+  (rechazar TODOS los redirects): rompe casos legitimos (TMDb
+  ocasionalmente canonicaliza URLs via 301). El re-validate es
+  mas correcto.
+
+
+## ADR-021 — Path traversal: `EvalSymlinks` obligatorio antes de `filepath.Rel`
+
+- **Fecha**: 2026-05-14
+- **Estado**: Aceptado
+- **Contexto de descubrimiento**: auditoria F16, hallazgo F16-1
+
+### Contexto
+
+`internal/api/handlers/people.go::isUnderImageDir` validaba que un
+path estuviera bajo el imageDir asi:
+
+```go
+cleaned := filepath.Clean(p)
+abs, err := filepath.Abs(cleaned)
+if err != nil { return false }
+rel, err := filepath.Rel(root, abs)
+if err != nil || strings.HasPrefix(rel, "..") { return false }
+return true
+```
+
+`filepath.Clean` y `filepath.Abs` solo normalizan textualmente
+componentes `..` y `.`. **No siguen symlinks.** Si el filesystem
+contiene un symlink `imageDir/poster.jpg` que apunta a
+`/etc/passwd`, el path normalizado es `imageDir/poster.jpg`, queda
+"bajo" imageDir y el handler lo sirve.
+
+Vector de explotacion: un admin malicioso (o un compromise de la DB)
+inserta `db.Image.path` apuntando a un symlink ya existente en el
+filesystem. El handler sirve el contenido del target.
+
+Mitigado parcialmente por trust model (solo admin escribe a DB), pero
+el contrato explicito de `isUnderImageDir` -- "el path esta dentro de
+imageDir" -- no se cumple.
+
+### Decision
+
+**Cualquier funcion que valide "path X esta dentro de root Y" DEBE
+resolver symlinks antes de la comparacion final.** Usar
+`filepath.EvalSymlinks` despues de `filepath.Abs` y antes de
+`filepath.Rel`.
+
+Implementacion:
+
+```go
+func isUnderImageDir(p string) bool {
+    cleaned := filepath.Clean(p)
+    abs, err := filepath.Abs(cleaned)
+    if err != nil { return false }
+
+    // EvalSymlinks resuelve cualquier symlink en la cadena. Si el
+    // target apunta fuera de root, Rel lo detecta. Si el path no
+    // existe (Stat falla), EvalSymlinks devuelve error — tratamos
+    // como inseguro por defecto.
+    resolved, err := filepath.EvalSymlinks(abs)
+    if err != nil { return false }
+
+    rel, err := filepath.Rel(root, resolved)
+    if err != nil { return false }
+    return !strings.HasPrefix(rel, "..") && !strings.HasPrefix(rel, "/")
+}
+```
+
+Test de regresion: crear symlink dentro de `t.TempDir()` apuntando a
+otro path absoluto, verificar que `isUnderImageDir` retorna `false`.
+
+### Consecuencias
+
+- **Cierra un path traversal CVE-class** via symlink.
+- **Coste runtime adicional**: `EvalSymlinks` hace `lstat` por
+  componente del path. Para paths cortos (`imageDir/abc.jpg`) es
+  trivial; para paths con 10+ componentes podria notarse en
+  hot-path. Mitigacion futura: cachear paths resueltos en
+  `pathmap.Store`.
+- **Comportamiento ligeramente distinto**: paths que apuntan a
+  ficheros que no existen ahora retornan `false` (antes podian
+  retornar `true` si la normalizacion textual los dejaba bajo
+  root). En la practica el handler ya hace `Stat` o `Open` despues,
+  asi que el comportamiento end-to-end no cambia.
+
+### Alternativas descartadas
+
+- **`os.Stat` + `(FileInfo).Sys().(*syscall.Stat_t)` para chequear
+  inode**: depende del kernel, no portable, mucho mas complejo.
+- **Validar en el scanner antes de insertar el path en DB**: util
+  como defense-in-depth, pero NO sustituye el check del handler —
+  el path podria ser un symlink valido al momento de scan y
+  cambiar despues.
+- **Confiar solo en el trust model "admin only escribe DB"**:
+  rechazado. La auditoria documenta el patron como CVE-class
+  independientemente del threat model actual; un cambio de modelo
+  futuro (multi-admin, federation write, schema migration con
+  paths legacy) lo expondria.
+

@@ -16,32 +16,74 @@
 
 ## Índice
 
-- [Resumen ejecutivo](#resumen-ejecutivo) — actualizado al cierre de F13.
-- Fase 1 · Panorama: estructura, dependencias, flujo · ✅ cerrada
-- Fase 2 · `internal/db/` · ✅ cerrada
-- Fase 3 · `internal/api/` + `internal/api/handlers/` · ✅ cerrada
-- Fase 4 · `internal/library/` + `internal/scanner/` · ✅ cerrada
-- Fase 5 · `internal/iptv/` · ✅ cerrada
-- Fase 6 · `internal/stream/` · ✅ cerrada
-- Fase 7 · `internal/auth/` + `internal/federation/` · ✅ cerrada
-- Fase 8 · `internal/event/` y primitivos sin deps · ✅ cerrada
-- **Fase 9 · `internal/imaging/`** · ✅ cerrada (cobertura extendida)
-- **Fase 10 · middleware + csrf + security_headers + apperror** · ✅ cerrada
-- **Fase 11 · `config` + `setup` + `retention`** · ✅ cerrada
-- **Fase 12 · Migraciones SQLite + Postgres** · ✅ cerrada
-- **Fase 13 · Transversales (error wrapping, ctx, deadlocks, naming, globals)** · ✅ cerrada
-- **Fase 14 · Calidad a nivel código / función (god-functions, struct params, boilerplate, tests frágiles, magic numbers)** · ✅ cerrada
-- **Fase 15 · Calidad del test suite (137 ficheros, fragility, mocks excesivos, error path coverage)** · ✅ cerrada
-- **Fase 16 · Handlers medianos no top-10 (~70 ficheros, path traversal, paginación, SSE drops, audit trail)** · ✅ cerrada
-- Plan de intervención final · ✅ cerrado y revisado tras F16.
+**Cómo leer este documento**:
+
+- Si vienes a **arrancar la intervención** → salta al [Plan de
+  intervención final](#plan-de-intervención-final).
+- Si vienes a **entender el estado del backend** → lee el
+  [Resumen ejecutivo](#resumen-ejecutivo).
+- Si vienes a **resolver un olor concreto** → ve a la fase
+  correspondiente (cada olor tiene letra única referenciada
+  desde el plan).
+
+### Secciones
+
+| § | Sección | Propósito |
+|---|---|---|
+| 1 | [Resumen ejecutivo](#resumen-ejecutivo) | Veredicto, top hallazgos, modelo a replicar |
+| 2 | [Plan de intervención final](#plan-de-intervención-final) | 9 iteraciones ordenadas; **entra aquí para empezar** |
+| 3.1-3.16 | Fases detalladas (referencia) | Hallazgos crudos por paquete / dimensión |
+| 4 | [Cierre y protocolo de sesiones](#cierre) | Cómo trabajar el plan entre sesiones |
+
+### Fases auditadas (16 / 16 ✅)
+
+| # | Fase | Foco |
+|---|---|---|
+| F1 | Panorama | Estructura, grafo de deps, flujo |
+| F2 | `internal/db/` | God-package, 31 repos, dual-dialect |
+| F3 | `internal/api/` + handlers | God-handlers, middleware, interfaces |
+| F4 | `library` + `scanner` | Workers, lifecycle, event bus |
+| F5 | `internal/iptv/` | 11 sub-features, transmux, proxy |
+| F6 | `internal/stream/` | Manager, transcoder, decision tree |
+| F7 | `auth` + `federation` | JWT, keystore, ratelimit, audit |
+| F8 | `event` + primitivos | Bus, clock, logging, observability |
+| F9 | `internal/imaging/` | SSRF, atomic writes, blurhash |
+| F10 | middleware + csrf + sec + apperror | Stack HTTP base |
+| F11 | `config` + `setup` + `retention` | Boot + wizard + sweep |
+| F12 | Migraciones | 43 SQLite + 43 Postgres |
+| F13 | Transversales | Error wrapping, context, deadlocks, naming |
+| F14 | Calidad a nivel función | God-functions, struct params, boilerplate |
+| F15 | Test suite | 137 ficheros, fragility, mocks |
+| F16 | Handlers medianos | Path traversal, paginación, SSE drops |
+
+### Olores catalogados
+
+**110+ olores** identificados, cada uno con letra única (A..LLLL,
+F14-X, F15-X, F16-X). Resumen por severidad:
+
+- **2 CVE-class** (FFF SSRF + F16-1 path traversal).
+- **6 altos** estructurales (A+M, B+J, CC, P, W, F14-2-a).
+- **3 media-alta** (G, Q, RRR-mig, F14-2-b).
+- **~25 medios**.
+- **~75 bajos**.
+
+### Documentos hermanos
+
+- **`intervention-2026-05-XX.md`** — log de trabajo iteración por
+  iteración; se crea al arrancar la intervención. Este audit
+  permanece **inmutable**.
+- `architecture-decisions.md` — recibirá 9 ADRs nuevos (015-023).
+- `conventions.md` — recibirá 5 actualizaciones (Pattern A/B,
+  consumer-side interfaces, naming `is*Safe*/Blocked*`, comentarios
+  en español, sub-loggers con `.With()`).
 
 ---
 
 ## Resumen ejecutivo
 
-> Auditoría cerrada al cierre de **Fase 13** (cobertura completa del
-> brief original). Plan de intervención consolidado al final del
-> documento.
+> Auditoría cerrada al cierre de **Fase 16** (cobertura completa del
+> brief original ~98 %). Plan de intervención consolidado en
+> [Plan de intervención final](#plan-de-intervención-final).
 
 ### Veredicto global
 
@@ -117,8 +159,9 @@ explícito que la función promete. **Fix ~10 LOC.**
 
 ### Camino propuesto
 
-9 iteraciones (0..8), **~15-16 días de trabajo focalizado**, cada
-iteración deja el repo verde:
+10 iteraciones (0..9), **~15.5-16.5 días de trabajo focalizado**,
+cada iteración deja el repo verde. La 9 es verificación empírica
+post-merge, no implementación.
 
 0. Pre-trabajo: 6 ADRs (incluye **ADR-015 dominio en feature**,
    **ADR-019 SSRF CheckRedirect**, **ADR-020 up-only**) + 2 updates
@@ -3364,6 +3407,34 @@ y deja el repo verde tras commit.
 - 3 SSE handlers con métrica de drop.
 - Helpers `parsePagination` + `requirePeer` añadidos.
 - Convenciones documentadas en `conventions.md`.
+
+#### Iteración 9 · Verificación empírica post-intervención (~0.5 día)
+
+Se ejecuta **después** de que las 8 iteraciones anteriores hayan
+mergeado. Es una iteración de QA, no de implementación. Confirma
+empíricamente lo que la auditoría afirmó estáticamente.
+
+61. **`go test -race -count=10 ./...`** — confirmar que no hay
+    races latentes tras los fixes de Iteración 1 (RR, Y, DD,
+    GGGG).
+62. **`goleak.VerifyNone(t)` integrado** en suites donde la
+    auditoría identificó leaks potenciales (auth.Service,
+    iptv.Service, library.SegmentDetector, library.SegmentFingerprinter).
+    Confirmar 0 leaks.
+63. **`govulncheck ./...`** — escanear CVEs en deps (`go.mod`,
+    transitive). Reportar al usuario; no resolver salvo críticos.
+64. **`staticcheck -unused ./...`** — confirmar / refutar el dead
+    code identificado en F14-11-a (`scan_helpers.go::itemNullables`,
+    `db.api_keys` schema). Limpiar lo confirmado.
+65. **Shutdown test integrado**: simular `SIGTERM` durante un
+    `RefreshM3U` en vuelo. Verificar drain limpio sin "sql:
+    database is closed" en logs.
+
+**Resultado esperado de Iteración 9**:
+- CI con `-race` + `goleak` activos por defecto.
+- 0 vulnerabilidades altas en deps reportadas.
+- Dead code confirmado eliminado.
+- Documento de evidencia de que la auditoría se cumple en runtime.
 
 ### C. ADRs a abrir
 
