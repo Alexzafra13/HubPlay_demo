@@ -24,6 +24,7 @@ import (
 	"hubplay/internal/db"
 	"hubplay/internal/event"
 	"hubplay/internal/federation"
+	federationstorage "hubplay/internal/federation/storage"
 	"hubplay/internal/imaging/pathmap"
 	"hubplay/internal/library"
 	"hubplay/internal/logging"
@@ -389,7 +390,7 @@ func run(configPath string) error {
 	// if init fails we run with Federation=nil and the routes are skipped
 	// (the router checks deps.Federation != nil). The admin sees the
 	// federation surface unavailable; everything else keeps working.
-	federationRepo := db.NewFederationRepository(cfg.Database.Driver, database)
+	federationRepo := federationstorage.NewRepository(cfg.Database.Driver, database)
 	federationCfg := federation.DefaultConfig()
 	federationCfg.AdvertisedURL = cfg.Server.BaseURL
 	federationCfg.Version = version

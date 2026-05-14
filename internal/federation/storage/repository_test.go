@@ -1,4 +1,4 @@
-﻿package db_test
+﻿package storage_test
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 
 	"hubplay/internal/db"
 	"hubplay/internal/federation"
+	"hubplay/internal/federation/storage"
 	"hubplay/internal/testutil"
 )
 
@@ -24,7 +25,7 @@ func TestFederationRepository_SearchSharedItems(t *testing.T) {
 
 	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
 	itemRepo := db.NewItemRepository(testutil.Driver(), database)
-	fedRepo := db.NewFederationRepository(testutil.Driver(), database)
+	fedRepo := storage.NewRepository(testutil.Driver(), database)
 
 	// â”€â”€ Schema seed â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 	now := time.Now().UTC()
@@ -163,7 +164,7 @@ func TestFederationRepository_SharedItem_ColorsForwarded(t *testing.T) {
 	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
 	itemRepo := db.NewItemRepository(testutil.Driver(), database)
 	imgRepo := db.NewImageRepository(testutil.Driver(), database)
-	fedRepo := db.NewFederationRepository(testutil.Driver(), database)
+	fedRepo := storage.NewRepository(testutil.Driver(), database)
 
 	now := time.Now().UTC()
 	lib := db.Library{ID: "lib-1", Name: "Movies", ContentType: "movies", ScanMode: "auto", ScanInterval: "6h", CreatedAt: now, UpdatedAt: now, Paths: []string{"/m"}}
@@ -320,7 +321,7 @@ func insertTestUser(t *testing.T, database *sql.DB, id string) {
 func TestFederationRepository_Progress(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	ctx := context.Background()
-	fedRepo := db.NewFederationRepository(testutil.Driver(), database)
+	fedRepo := storage.NewRepository(testutil.Driver(), database)
 
 	insertTestUser(t, database, "u-1")
 
@@ -457,7 +458,7 @@ func TestFederationRepository_Progress(t *testing.T) {
 func TestFederationRepository_Progress_PeerRevokedDropsFromRail(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	ctx := context.Background()
-	fedRepo := db.NewFederationRepository(testutil.Driver(), database)
+	fedRepo := storage.NewRepository(testutil.Driver(), database)
 
 	insertTestUser(t, database, "u-1")
 
