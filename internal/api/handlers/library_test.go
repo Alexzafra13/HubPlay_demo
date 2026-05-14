@@ -53,6 +53,14 @@ type libFakeService struct {
 	listAccessFn       func(ctx context.Context, userID string) ([]string, error)
 	replaceAccessFn    func(ctx context.Context, userID string, libraryIDs []string) error
 	replaceAccessCalls []replaceAccessCall
+	// Personal IPTV shortcut — set by the matching handler test.
+	createPersonalIPTVFn    func(ctx context.Context, ownerUserID string, req library.CreateRequest) (*db.Library, error)
+	createPersonalIPTVCalls []createPersonalIPTVCall
+}
+
+type createPersonalIPTVCall struct {
+	OwnerUserID string
+	Req         library.CreateRequest
 }
 
 type replaceAccessCall struct {
@@ -199,6 +207,14 @@ func (s *libFakeService) ReplaceAccess(ctx context.Context, userID string, libra
 		return s.replaceAccessFn(ctx, userID, libraryIDs)
 	}
 	return nil
+}
+
+func (s *libFakeService) CreatePersonalIPTV(ctx context.Context, ownerUserID string, req library.CreateRequest) (*db.Library, error) {
+	s.createPersonalIPTVCalls = append(s.createPersonalIPTVCalls, createPersonalIPTVCall{OwnerUserID: ownerUserID, Req: req})
+	if s.createPersonalIPTVFn != nil {
+		return s.createPersonalIPTVFn(ctx, ownerUserID, req)
+	}
+	return nil, errors.New("createPersonalIPTV: not configured")
 }
 
 func (s *libFakeService) ListGenres(_ context.Context, _ string) ([]db.GenreCount, error) {

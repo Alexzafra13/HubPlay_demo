@@ -191,6 +191,51 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*db.Library, e
 	return lib, nil
 }
 
+// CreatePersonalIPTV creates a livetv library AND grants access to
+// `ownerUserID` in one transaction. Used by the admin "personal IPTV
+// list" shortcut so the operator can hand a user their own M3U without
+// the two-step "create library → tick checkbox in users matrix"
+// dance. The library is invisible to every other non-admin user
+// because `library_access` is opt-in (INNER JOIN in ListForUser).
+//
+// Forces `content_type = "livetv"` regardless of what the caller
+// passed; `m3u_url` is still required and validated by the shared
+// validator. `paths` is ignored (livetv has no filesystem paths).
+//
+// `ownerUserID` MUST be a top-level user; the handler resolves
+// profile ids to their parent before reaching here.
+func (s *Service) CreatePersonalIPTV(ctx context.Context, ownerUserID string, req CreateRequest) (*db.Library, error) {
+	req.ContentType = "livetv"
+	req.Paths = nil
+	req.ScanMode = "manual"
+	if err := validateCreateRequest(req); err != nil {
+		return nil, err
+	}
+
+	now := time.Now()
+	lib := &db.Library{
+		ID:             uuid.NewString(),
+		Name:           req.Name,
+		ContentType:    req.ContentType,
+		ScanMode:       req.ScanMode,
+		ScanInterval:   "6h",
+		CreatedAt:      now,
+		UpdatedAt:      now,
+		M3UURL:         req.M3UURL,
+		EPGURL:         req.EPGURL,
+		LanguageFilter: normaliseLanguageFilter(req.LanguageFilter),
+		TLSInsecure:    req.TLSInsecure,
+	}
+
+	if err := s.libraries.CreateWithGrant(ctx, lib, ownerUserID); err != nil {
+		return nil, fmt.Errorf("creating personal iptv library: %w", err)
+	}
+
+	s.logger.Info("personal iptv library created",
+		"id", lib.ID, "name", lib.Name, "owner_user_id", ownerUserID)
+	return lib, nil
+}
+
 func (s *Service) GetByID(ctx context.Context, id string) (*db.Library, error) {
 	return s.libraries.GetByID(ctx, id)
 }

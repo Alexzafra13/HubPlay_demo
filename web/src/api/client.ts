@@ -646,6 +646,25 @@ export class ApiClient {
     });
   }
 
+  /** Shortcut for "give user X their own IPTV list": creates a
+   *  livetv library with the supplied M3U/EPG and grants access ONLY
+   *  to this user in one server-side transaction. Saves the admin
+   *  from the two-step "create lib at /admin/libraries → tick the
+   *  checkbox in /admin/users" dance. Returns the created library. */
+  async createPersonalIPTVLibrary(
+    userId: string,
+    data: {
+      name: string;
+      m3u_url: string;
+      epg_url?: string;
+      tls_insecure?: boolean;
+    },
+  ): Promise<Library> {
+    return this.request<Library>("POST", `/users/${userId}/iptv-libraries`, {
+      body: data,
+    });
+  }
+
   // ─── Libraries ────────────────────────────────────────────────────────
 
   async getLibraries(): Promise<Library[]> {

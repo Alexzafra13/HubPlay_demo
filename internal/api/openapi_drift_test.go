@@ -122,6 +122,7 @@ var outOfScopeExact = map[string]string{
 	"PUT /users/{id}/role":            "user role admin",
 	"PUT /users/{id}/active":          "user active toggle admin",
 	"PUT /users/{id}/access":          "user access window admin",
+	"POST /users/{id}/iptv-libraries": "admin shortcut: create livetv lib + grant for this user",
 	"POST /me/password":               "self password change",
 	"GET /me/profiles":                "profile selector listing",
 	"POST /auth/switch-profile":       "profile switch",

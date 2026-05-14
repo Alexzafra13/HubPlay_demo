@@ -613,6 +613,77 @@ func TestMigration041_BackfillsPrimaryAdmin(t *testing.T) {
 	}
 }
 
+// TestLibraryRepository_CreateWithGrant verifica que la creación
+// atómica (lib + grant) deja al owner accediendo a la nueva
+// biblioteca y que un usuario distinto sigue sin acceso. Cubre el
+// path feliz del shortcut "lista IPTV personal" del admin.
+func TestLibraryRepository_CreateWithGrant(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
+	userRepo := db.NewUserRepository(testutil.Driver(), database)
+	ctx := context.Background()
+
+	now := time.Now()
+	for _, id := range []string{"u-owner", "u-other"} {
+		if err := userRepo.Create(ctx, &db.User{
+			ID: id, Username: id, DisplayName: id,
+			PasswordHash: "$2a$10$fakehash", Role: "user", IsActive: true,
+			CreatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	lib := newTestLibrary("lib-personal", "Lista de Owner")
+	lib.ContentType = "livetv"
+	lib.M3UURL = "https://example.com/owner.m3u"
+	lib.Paths = nil
+
+	if err := libRepo.CreateWithGrant(ctx, lib, "u-owner"); err != nil {
+		t.Fatalf("CreateWithGrant: %v", err)
+	}
+
+	if has, _ := libRepo.UserHasAccess(ctx, "u-owner", "lib-personal"); !has {
+		t.Error("owner must have access after CreateWithGrant")
+	}
+	if has, _ := libRepo.UserHasAccess(ctx, "u-other", "lib-personal"); has {
+		t.Error("non-owner must NOT have access — the whole point of the shortcut")
+	}
+
+	libs, err := libRepo.ListForUser(ctx, "u-owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(libs) != 1 || libs[0].ID != "lib-personal" {
+		t.Errorf("owner's library list: %v", libs)
+	}
+	if libs[0].M3UURL != "https://example.com/owner.m3u" {
+		t.Errorf("M3U URL roundtrip: %q", libs[0].M3UURL)
+	}
+}
+
+// CreateWithGrant against an unknown user_id must fail with a FK
+// violation and leave the libraries table clean. Otherwise the admin
+// could end up with phantom libraries pointing at deleted accounts.
+func TestLibraryRepository_CreateWithGrant_UnknownUser_Rollback(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
+	ctx := context.Background()
+
+	lib := newTestLibrary("lib-ghost", "Ghost")
+	lib.ContentType = "livetv"
+	lib.M3UURL = "https://example.com/x.m3u"
+	lib.Paths = nil
+
+	if err := libRepo.CreateWithGrant(ctx, lib, "u-does-not-exist"); err == nil {
+		t.Fatal("expected FK violation, got nil")
+	}
+
+	if _, err := libRepo.GetByID(ctx, "lib-ghost"); !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("expected library rollback, got err=%v", err)
+	}
+}
+
 func equalStringSets(a, b []string) bool {
 	if len(a) != len(b) {
 		return false

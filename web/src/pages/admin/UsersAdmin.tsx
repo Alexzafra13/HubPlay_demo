@@ -4,6 +4,7 @@ import type { User } from "@/api/types";
 import {
   useUsers,
   useCreateUser,
+  useCreatePersonalIPTVLibrary,
   useCreateProfile,
   useDeleteUser,
   useLibraries,
@@ -31,6 +32,7 @@ import {
   Library as LibraryIcon,
   Lock,
   Palette,
+  Tv,
   Trash2,
   UserPlus,
 } from "lucide-react";
@@ -228,6 +230,70 @@ export default function UsersAdmin() {
   const [pinTarget, setPinTarget] = useState<User | null>(null);
   const [pinValue, setPinValue] = useState("");
   const [pinError, setPinError] = useState<string | null>(null);
+
+  // Personal IPTV modal — admin types a name + M3U URL and the
+  // backend creates the library + grant in one transaction. The
+  // default name is seeded from the target's display name so the
+  // admin doesn't have to re-type "Lista de Juan" by hand.
+  const [iptvTarget, setIptvTarget] = useState<User | null>(null);
+  const [iptvName, setIptvName] = useState("");
+  const [iptvM3U, setIptvM3U] = useState("");
+  const [iptvEPG, setIptvEPG] = useState("");
+  const [iptvTLSInsecure, setIptvTLSInsecure] = useState(false);
+  const [iptvError, setIptvError] = useState<string | null>(null);
+  const createPersonalIPTV = useCreatePersonalIPTVLibrary();
+  function openIptvModal(user: User) {
+    setIptvTarget(user);
+    const displayName = user.display_name || user.username;
+    setIptvName(
+      t("admin.users.iptvPersonalDefaultName", {
+        defaultValue: "Lista de {{name}}",
+        name: displayName,
+      }),
+    );
+    setIptvM3U("");
+    setIptvEPG("");
+    setIptvTLSInsecure(false);
+    setIptvError(null);
+    createPersonalIPTV.reset();
+  }
+  function closeIptvModal() {
+    setIptvTarget(null);
+    createPersonalIPTV.reset();
+  }
+  function handleCreatePersonalIPTV(e: FormEvent) {
+    e.preventDefault();
+    if (!iptvTarget) return;
+    const name = iptvName.trim();
+    const m3uUrl = iptvM3U.trim();
+    if (!name) {
+      setIptvError(
+        t("admin.users.iptvPersonalNameRequired", {
+          defaultValue: "Indica un nombre para la lista.",
+        }),
+      );
+      return;
+    }
+    if (!m3uUrl) {
+      setIptvError(
+        t("admin.users.iptvPersonalM3URequired", {
+          defaultValue: "Indica la URL del M3U.",
+        }),
+      );
+      return;
+    }
+    setIptvError(null);
+    createPersonalIPTV.mutate(
+      {
+        userId: iptvTarget.id,
+        name,
+        m3uUrl,
+        epgUrl: iptvEPG.trim() || undefined,
+        tlsInsecure: iptvTLSInsecure || undefined,
+      },
+      { onSuccess: () => closeIptvModal() },
+    );
+  }
 
   function handleCreateProfile(e: FormEvent) {
     e.preventDefault();
@@ -498,6 +564,18 @@ export default function UsersAdmin() {
           : t("admin.users.libraryAccessHint", {
               defaultValue: "Qué bibliotecas ve este hogar.",
             }),
+      },
+      {
+        label: t("admin.users.iptvPersonalAction", {
+          defaultValue: "Lista IPTV personal",
+        }),
+        icon: Tv,
+        onClick: () => openIptvModal(user),
+        hidden: isProfile,
+        hint: t("admin.users.iptvPersonalHint", {
+          defaultValue:
+            "Crea una biblioteca livetv visible solo para este usuario.",
+        }),
       },
       {
         label: t("admin.users.resetPassword", {
@@ -1472,6 +1550,120 @@ export default function UsersAdmin() {
             </>
           )}
         </div>
+      </Modal>
+
+      {/* Personal IPTV list modal. Backend POST creates the library
+          AND the lone library_access grant in one tx so the operator
+          never sees an orphan public library mid-flow. After save we
+          refetch the matrix-access cache for this user — the new
+          library will show ticked the next time they open the access
+          modal. */}
+      <Modal
+        isOpen={iptvTarget !== null}
+        onClose={closeIptvModal}
+        title={t("admin.users.iptvPersonalModalTitle", {
+          defaultValue: "Lista IPTV personal",
+        })}
+      >
+        <form
+          onSubmit={handleCreatePersonalIPTV}
+          className="flex flex-col gap-4"
+        >
+          <p className="text-xs text-text-muted">
+            <Trans
+              i18nKey="admin.users.iptvPersonalModalHint"
+              defaults="Solo <strong>{{name}}</strong> verá esta lista. Para todos los demás, sigue siendo invisible."
+              values={{
+                name:
+                  iptvTarget?.display_name ||
+                  iptvTarget?.username ||
+                  "",
+              }}
+              components={{ strong: <strong className="text-text-primary" /> }}
+            />
+          </p>
+          <Input
+            label={t("admin.users.iptvPersonalName", {
+              defaultValue: "Nombre",
+            })}
+            placeholder={t("admin.users.iptvPersonalNamePlaceholder", {
+              defaultValue: "Lista de Juan",
+            })}
+            value={iptvName}
+            onChange={(e) => {
+              setIptvName(e.target.value);
+              if (iptvError) setIptvError(null);
+            }}
+            required
+          />
+          <Input
+            label={t("admin.users.iptvPersonalM3U", {
+              defaultValue: "URL M3U",
+            })}
+            placeholder="https://ejemplo.com/playlist.m3u"
+            value={iptvM3U}
+            onChange={(e) => {
+              setIptvM3U(e.target.value);
+              if (iptvError) setIptvError(null);
+            }}
+            required
+          />
+          <div className="flex flex-col gap-1">
+            <Input
+              label={t("admin.users.iptvPersonalEPG", {
+                defaultValue: "URL EPG (opcional)",
+              })}
+              placeholder="https://ejemplo.com/epg.xml"
+              value={iptvEPG}
+              onChange={(e) => setIptvEPG(e.target.value)}
+            />
+            <p className="text-[11px] leading-snug text-text-muted">
+              {t("admin.users.iptvPersonalEPGHint", {
+                defaultValue:
+                  "Si el M3U trae url-tvg en su cabecera, se auto-detecta.",
+              })}
+            </p>
+          </div>
+          <label className="flex items-start gap-2 text-xs text-text-muted">
+            <input
+              type="checkbox"
+              checked={iptvTLSInsecure}
+              onChange={(e) => setIptvTLSInsecure(e.target.checked)}
+              className="mt-0.5 accent-accent"
+            />
+            <span>
+              {t("admin.users.iptvPersonalTLSInsecure", {
+                defaultValue:
+                  "TLS inseguro (omitir verificación de certificado). Úsalo solo si el proveedor lo requiere.",
+              })}
+            </span>
+          </label>
+
+          {iptvError && (
+            <p
+              role="alert"
+              className="rounded-[--radius-sm] border border-error/40 bg-error-soft px-3 py-2 text-xs text-error"
+            >
+              {iptvError}
+            </p>
+          )}
+          {createPersonalIPTV.error && (
+            <p className="text-xs text-error">
+              {createPersonalIPTV.error.message}
+            </p>
+          )}
+
+          <div className="flex justify-end gap-3 pt-1">
+            <Button variant="secondary" type="button" onClick={closeIptvModal}>
+              {t("common.cancel")}
+            </Button>
+            <Button type="submit" isLoading={createPersonalIPTV.isPending}>
+              {t("admin.users.iptvPersonalSubmit", {
+                defaultValue: "Crear lista",
+              })}
+            </Button>
+          </div>
+        </form>
       </Modal>
 
       {/* Delete Confirmation Modal */}

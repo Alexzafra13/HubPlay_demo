@@ -44,6 +44,7 @@ const apiMock = vi.hoisted(() => ({
   getLibraries: vi.fn(),
   getUserLibraryAccess: vi.fn(),
   setUserLibraryAccess: vi.fn(),
+  createPersonalIPTVLibrary: vi.fn(),
 }));
 vi.mock("@/api/client", () => ({ api: apiMock }));
 
@@ -120,6 +121,12 @@ beforeEach(() => {
     is_inherited: false,
   });
   apiMock.setUserLibraryAccess.mockResolvedValue(undefined);
+  apiMock.createPersonalIPTVLibrary.mockResolvedValue({
+    id: "lib-new",
+    name: "Lista de Bob",
+    content_type: "livetv",
+    m3u_url: "https://example.com/bob.m3u",
+  });
   apiMock.createUser.mockResolvedValue({
     id: "u-new",
     username: "newone",
@@ -344,5 +351,77 @@ describe("UsersAdmin (mobile)", () => {
     await waitFor(() =>
       expect(apiMock.setUserLibraryAccess).toHaveBeenCalledWith("u2", ["lib-tv"]),
     );
+  });
+
+  // ─── Personal IPTV list shortcut ────────────────────────────────
+
+  it("opens the personal IPTV modal from the kebab and POSTs the form", async () => {
+    render(wrap(<UsersAdmin />));
+    await waitFor(() => expect(screen.getByText("bob")).toBeInTheDocument());
+
+    const bobCard = screen.getByText("bob").closest("li");
+    fireEvent.click(
+      within(bobCard!).getByRole("button", { name: /acciones|actions/i }),
+    );
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: /lista iptv personal|personal iptv/i }),
+    );
+
+    // Modal title surfaces — the name field is seeded with "Lista de Bob".
+    const nameInput = await screen.findByLabelText(/nombre|^name$/i);
+    expect((nameInput as HTMLInputElement).value).toMatch(/Bob/);
+
+    const m3uInput = screen.getByLabelText(/url m3u|m3u url/i);
+    fireEvent.change(m3uInput, {
+      target: { value: "https://example.com/bob.m3u" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /crear lista|create list/i }));
+
+    await waitFor(() => {
+      expect(apiMock.createPersonalIPTVLibrary).toHaveBeenCalledTimes(1);
+    });
+    const [userId, payload] = apiMock.createPersonalIPTVLibrary.mock.calls[0];
+    expect(userId).toBe("u2");
+    expect(payload.m3u_url).toBe("https://example.com/bob.m3u");
+    expect(payload.name).toMatch(/Bob/);
+  });
+
+  it("hides 'Lista IPTV personal' on profile rows (grants only target the household owner)", async () => {
+    render(wrap(<UsersAdmin />));
+    await waitFor(() => expect(screen.getByText("bob")).toBeInTheDocument());
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /mostrar miembros/i }),
+    );
+    const kidCard = screen.getByText("kid").closest("li");
+    fireEvent.click(
+      within(kidCard!).getByRole("button", { name: /acciones|actions/i }),
+    );
+    expect(
+      screen.queryByRole("menuitem", { name: /lista iptv personal|personal iptv/i }),
+    ).toBeNull();
+  });
+
+  it("blocks submit until both name and M3U URL are filled", async () => {
+    render(wrap(<UsersAdmin />));
+    await waitFor(() => expect(screen.getByText("bob")).toBeInTheDocument());
+
+    const bobCard = screen.getByText("bob").closest("li");
+    fireEvent.click(
+      within(bobCard!).getByRole("button", { name: /acciones|actions/i }),
+    );
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: /lista iptv personal|personal iptv/i }),
+    );
+
+    // Default seeded name is non-empty; clear it to drive the empty-name
+    // validation path.
+    const nameInput = await screen.findByLabelText(/nombre|^name$/i);
+    fireEvent.change(nameInput, { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: /crear lista|create list/i }));
+    // The required attribute means the browser blocks submit before
+    // our onSubmit fires — no API call, no error message rendered.
+    expect(apiMock.createPersonalIPTVLibrary).not.toHaveBeenCalled();
   });
 });

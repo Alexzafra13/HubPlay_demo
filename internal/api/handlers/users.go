@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"hubplay/internal/auth"
+	"hubplay/internal/library"
 )
 
 type UserHandler struct {
@@ -425,6 +426,77 @@ func (h *UserHandler) SetLibraryAccess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// createPersonalIPTVRequest is the body for POST
+// /admin/users/{id}/iptv-libraries. All livetv-specific fields from
+// the generic create-library payload are accepted; non-livetv knobs
+// (paths, scan_mode, content_type) are ignored because the service
+// forces them to the personal-IPTV shape.
+type createPersonalIPTVRequest struct {
+	Name           string   `json:"name"`
+	M3UURL         string   `json:"m3u_url"`
+	EPGURL         string   `json:"epg_url,omitempty"`
+	LanguageFilter []string `json:"language_filter,omitempty"`
+	TLSInsecure    bool     `json:"tls_insecure,omitempty"`
+}
+
+// CreatePersonalIPTV creates a livetv library scoped to the target
+// user (the only non-admin grant) in a single transaction. Admin
+// only. The target MUST be a top-level user — profile ids return
+// 400 because library_access never points at a profile (ADR-014);
+// the admin can still hand a profile member an IPTV list by
+// targeting the household's top-level user.
+func (h *UserHandler) CreatePersonalIPTV(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "missing user id")
+		return
+	}
+	if h.libraries == nil {
+		respondError(w, r, http.StatusServiceUnavailable, "UNAVAILABLE",
+			"library access surface is not wired in this deployment")
+		return
+	}
+	var req createPersonalIPTVRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
+		return
+	}
+	target, err := h.users.GetByID(r.Context(), id)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	if target.ParentUserID != "" {
+		respondError(w, r, http.StatusBadRequest, "VALIDATION_ERROR",
+			"personal iptv libraries must target the top-level account, not a profile")
+		return
+	}
+	lib, err := h.libraries.CreatePersonalIPTV(r.Context(), target.ID, library.CreateRequest{
+		Name:           req.Name,
+		M3UURL:         req.M3UURL,
+		EPGURL:         req.EPGURL,
+		LanguageFilter: req.LanguageFilter,
+		TLSInsecure:    req.TLSInsecure,
+	})
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	respondJSON(w, http.StatusCreated, map[string]any{
+		"data": map[string]any{
+			"id":              lib.ID,
+			"name":            lib.Name,
+			"content_type":    lib.ContentType,
+			"m3u_url":         lib.M3UURL,
+			"epg_url":         lib.EPGURL,
+			"language_filter": lib.LanguageFilter,
+			"tls_insecure":    lib.TLSInsecure,
+			"owner_user_id":   target.ID,
+			"created_at":      lib.CreatedAt,
+		},
+	})
 }
 
 // Delete removes a user by ID (admin only).

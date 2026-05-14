@@ -118,6 +118,95 @@ func (r *LibraryRepository) Create(ctx context.Context, lib *Library) error {
 	return tx.Commit()
 }
 
+// CreateWithGrant inserts the library AND a library_access grant for
+// `ownerUserID` in a single transaction. Used by the admin "personal
+// IPTV list" shortcut so the new library is never observable in an
+// orphan (created-but-ungranted) state — if the grant fails, the
+// library insert rolls back too. `ownerUserID` MUST be a top-level
+// user (ADR-014); the handler is responsible for resolving profiles
+// to their parent.
+//
+// The primary admin's automatic grant (same as Create) still happens
+// alongside the owner grant, so the admin keeps visibility of every
+// library they create.
+func (r *LibraryRepository) CreateWithGrant(ctx context.Context, lib *Library, ownerUserID string) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	if r.useSQLite() {
+		qtx := r.sq.WithTx(tx)
+		if err := qtx.InsertLibrary(ctx, sqlc.InsertLibraryParams{
+			ID:              lib.ID,
+			Name:            lib.Name,
+			ContentType:     lib.ContentType,
+			ScanMode:        lib.ScanMode,
+			ScanInterval:    nullableString(lib.ScanInterval),
+			M3uUrl:          nullableString(lib.M3UURL),
+			EpgUrl:          nullableString(lib.EPGURL),
+			RefreshInterval: nullableString(lib.RefreshInterval),
+			LanguageFilter:  lib.LanguageFilter,
+			TlsInsecure:     boolToInt64(lib.TLSInsecure),
+			CreatedAt:       lib.CreatedAt,
+			UpdatedAt:       lib.UpdatedAt,
+		}); err != nil {
+			return fmt.Errorf("insert library: %w", err)
+		}
+		for _, p := range lib.Paths {
+			if err := qtx.InsertLibraryPath(ctx, sqlc.InsertLibraryPathParams{
+				LibraryID: lib.ID, Path: p,
+			}); err != nil {
+				return fmt.Errorf("insert library path: %w", err)
+			}
+		}
+		if err := qtx.GrantPrimaryAdminLibraryAccess(ctx, lib.ID); err != nil {
+			return fmt.Errorf("grant primary admin access: %w", err)
+		}
+		if err := qtx.GrantLibraryAccess(ctx, sqlc.GrantLibraryAccessParams{
+			UserID: ownerUserID, LibraryID: lib.ID,
+		}); err != nil {
+			return fmt.Errorf("grant owner access: %w", err)
+		}
+		return tx.Commit()
+	}
+
+	qtx := r.pq.WithTx(tx)
+	if err := qtx.InsertLibrary(ctx, sqlc_pg.InsertLibraryParams{
+		ID:              lib.ID,
+		Name:            lib.Name,
+		ContentType:     lib.ContentType,
+		ScanMode:        lib.ScanMode,
+		ScanInterval:    nullableString(lib.ScanInterval),
+		M3uUrl:          nullableString(lib.M3UURL),
+		EpgUrl:          nullableString(lib.EPGURL),
+		RefreshInterval: nullableString(lib.RefreshInterval),
+		LanguageFilter:  lib.LanguageFilter,
+		TlsInsecure:     int32(boolToInt64(lib.TLSInsecure)),
+		CreatedAt:       lib.CreatedAt,
+		UpdatedAt:       lib.UpdatedAt,
+	}); err != nil {
+		return fmt.Errorf("insert library: %w", err)
+	}
+	for _, p := range lib.Paths {
+		if err := qtx.InsertLibraryPath(ctx, sqlc_pg.InsertLibraryPathParams{
+			LibraryID: lib.ID, Path: p,
+		}); err != nil {
+			return fmt.Errorf("insert library path: %w", err)
+		}
+	}
+	if err := qtx.GrantPrimaryAdminLibraryAccess(ctx, lib.ID); err != nil {
+		return fmt.Errorf("grant primary admin access: %w", err)
+	}
+	if err := qtx.GrantLibraryAccess(ctx, sqlc_pg.GrantLibraryAccessParams{
+		UserID: ownerUserID, LibraryID: lib.ID,
+	}); err != nil {
+		return fmt.Errorf("grant owner access: %w", err)
+	}
+	return tx.Commit()
+}
+
 func (r *LibraryRepository) GetByID(ctx context.Context, id string) (*Library, error) {
 	if r.useSQLite() {
 		row, err := r.sq.GetLibraryByID(ctx, id)
