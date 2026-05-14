@@ -943,14 +943,217 @@ Apuntado para el plan final.
 
 ## Fase 5 · `internal/iptv/`
 
-> Pendiente. Foco propuesto:
-> - Sub-features (M3U, EPG, scheduler, transmux, proxy, prober, logo
->   cache, channel order) — acoplamiento interno (olor E).
-> - Concurrencia: `TransmuxManager` compartido entre VOD y federation;
->   sesiones compartidas; cooldown breaker compartido entre proxy y
->   transmux.
-> - `ProberWorker` lifecycle.
-> - `LogoCache` fail-soft (nil si falla).
+Cerrada · 2026-05-14.
+
+### 5.1 Inventario
+
+32 ficheros, 7 776 LOC. Cabezas:
+
+| Fichero | LOC | Concepto |
+|---|---:|---|
+| `transmux.go` | 1 052 | `TransmuxManager` + `TransmuxSession` (ffmpeg orchestrator) |
+| `proxy.go` | 795 | `StreamProxy` + relay accounting + breaker |
+| `matcher.go` | 427 | EPG/channel matching helpers |
+| `service_epg.go` | 385 | EPG service methods |
+| `xmltv.go` | 360 | XMLTV parser |
+| `m3u.go` | 342 | M3U parser |
+| `service_channel_order.go` | 326 | Channel-order overlay |
+| `prober.go` | 319 | Active probe one-shot |
+| `m3u_language.go` | 316 | Language filter |
+| `service.go` | 290 | Constructor + struct |
+
+`Service` reparte sus 45 métodos exportados en **11 ficheros
+`service_*.go`** — split cosmético, mismo receiver `s *Service`.
+
+`Service` struct: 9 repos + 2 mutexes + 2 maps + `sync.Once` + 2
+`http.Client` (uno con lazy TLS-insecure) + bus + `proberWorker`
+(post-construction interface).
+
+Setters post-construcción "infraestructurales":
+- `SetEventBus(bus)`.
+- `SetProberWorker(w proberRunner)` — sink pattern documentado.
+
+### 5.2 Hallazgos
+
+#### CC — `iptv.Service` god-service con 45 métodos y 11 sub-features · **alta**
+
+- 45 métodos exportados sobre el mismo `*Service`. Es la encarnación
+  máxima de un *Java service object*.
+- 11 sub-features mezcladas en un único receiver:
+  1. M3U import / refresh (`service_m3u.go`).
+  2. EPG refresh + lookup + sources (`service_epg.go`, `service_epg_sources.go`).
+  3. Favorites (`service_favorites.go`).
+  4. Channel order per-user (`service_channel_order.go`).
+  5. Library channel order admin overlay (mismo fichero).
+  6. Channel CRUD active/inactive (`service_channels.go`).
+  7. Channel overrides (`service_overrides.go`, tvg_id).
+  8. Channel health bucket transitions (`service_health.go`).
+  9. Watch history (`service_watch_history.go`).
+  10. Schedule queries (parte de `service_epg.go`).
+  11. HTTP client pool (TLS-insecure lazy en `service.go`).
+- Principio violado: **SRP**. El split por ficheros oculta el síntoma
+  pero no lo cura — un cambio en una sub-feature recompila el paquete
+  entero, los tests inflados, las interfaces `IPTVService` en handlers
+  con 90+ LOC (`handlers/interfaces.go:134-218`).
+- Refactor sugerido (no big-bang, por sub-feature):
+  ```
+  internal/iptv/
+    m3u/        ← service_m3u, m3u, m3u_language, group_title,
+                  categories, preflight, scheduler, public
+    epg/        ← service_epg, service_epg_sources, xmltv,
+                  epg_catalog, epg_aliases, epg_diagnostic, matcher
+    channels/   ← service_channels, service_overrides, service_favorites,
+                  service_channel_order
+    transmux/   ← transmux, transmux_args, transmux_stderr,
+                  transmux_codec_classify
+    proxy/      ← proxy, circuit_breaker
+    prober/     ← prober, prober_worker, service_health
+    logo/       ← logo, logo_cache
+  ```
+- Beneficio: cada sub-paquete con cohesión real; el namespace `iptv.X`
+  deja de tener 25+ tipos heterogéneos; el constructor de cada sub-
+  servicio toma sólo los repos que necesita (hoy `Service` recibe 9
+  repos aunque la mayoría de métodos usen sólo 1-2).
+- Coste: alto (~1-2 días). Pero es el segundo refactor de mayor
+  impacto del proyecto tras la decisión Opción B sobre `db/`.
+- Severidad alta por tamaño + tasa de crecimiento. Cada nueva
+  sub-feature (channel order per-user, watch history, prober…) ha
+  añadido un fichero `service_X.go`. La inercia es divergente.
+
+#### DD — Detached goroutines en `service_m3u.go` sin drain · **media** (mismo patrón Y de F4)
+
+`service_m3u.go:230, 246` tras un `RefreshM3U`:
+
+```go
+go func(id string) {
+    bg, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+    defer cancel()
+    if _, err := s.RefreshEPG(bg, id); err != nil { ... }
+}(libraryID)
+
+if s.proberWorker != nil {
+    go func(id string) {
+        bg, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+        defer cancel()
+        if _, err := s.proberWorker.ProbeNow(bg, id); err != nil { ... }
+    }(libraryID)
+}
+```
+
+- `context.Background()` desconecta del lifecycle del proceso —
+  intencional ("import response should not block on a slow XMLTV
+  download"), **pero no hay drain**.
+- `Service.Shutdown()` está vacío (`func (s *Service) Shutdown() {}`).
+- Impacto: shutdown llega justo después de un import → goroutines
+  intentan escribir a DB cerrada. Logs ruidosos; en patológico,
+  parciales.
+- Mismo diagnóstico que Y (segment detector/fingerprinter, F4): el
+  paquete no tiene patrón de drain.
+- Refactor: añadir `bgCtx, bgCancel, bgWG` al `Service`. Las
+  goroutines detached pasan a usar `bgCtx` (que se cancela en
+  shutdown) y se registran en `bgWG`. `Service.Shutdown()` llama a
+  `bgCancel(); bgWG.Wait()`. Mismo patrón que `library.Service`.
+
+#### EE — `StreamProxy.Shutdown` engañoso · **baja**
+
+```go
+func (p *StreamProxy) Shutdown() {
+    p.mu.Lock()
+    for id := range p.relays {
+        delete(p.relays, id)
+    }
+    p.mu.Unlock()
+}
+```
+
+- Sólo borra el mapa de contabilidad. **No drena las goroutines de
+  `ProxyStream` / `streamWithReconnect`** en vuelo.
+- En la práctica el drain efectivo lo hace el `http.Server.Shutdown`:
+  cuando los HTTP requests se cancelan, las goroutines reciben ctx
+  cancelado y retornan.
+- Severidad baja porque el drain funcional ya existe; el problema es
+  **claridad**. El método se llama `Shutdown` y no shutdownea — es
+  un `ResetCounters` o `ClearRelays`.
+- Refactor cosmético: renombrar o documentar.
+
+#### FF — TransmuxManager lifecycle bien drenado · **sano**
+
+`transmux.go:847-867` `Shutdown`:
+- `stopOnce.Do(close(m.stop))` para el reaper loop.
+- `<-m.stopped` espera a que el reaper termine.
+- Itera sessions y llama `m.terminate(s)` para cada una.
+- Logging final.
+
+**Patrón a replicar en olores DD y Y** (segment workers + iptv
+goroutines detached). Es el ejemplo de cómo se debe hacer drain en
+este proyecto.
+
+Adicional: el Manager comparte el `breaker` con `StreamProxy` vía
+`iptvProxy.Breaker()` (línea 323 de `main.go`) — **per-channel
+breaker compartido entre HLS proxy y MPEG-TS transmux**. Razonado
+correctamente: un upstream muerto bloquea ambos paths con el mismo
+cooldown.
+
+#### GG — Sink pattern para romper ciclo `Service ↔ ProberWorker` · **sano**
+
+- `proberRunner` interface en `service.go:84` evita que `Service` (que
+  ya implementa `ChannelHealthReporter`) tenga que importar
+  `ProberWorker`. `SetProberWorker` lo wirea post-construction.
+- Patrón documentado en `conventions.md`. Idiomático Go.
+- Tras el refactor CC (split en sub-paquetes), un sub-paquete
+  `iptv/prober/` puede depender unidireccionalmente del de health/
+  channels — el sink se vuelve innecesario. Cosmético.
+
+#### HH — TransmuxSession concurrency primitives · **sano (complejo pero justificado)**
+
+- `cmd *exec.Cmd`, `cancel context.CancelFunc`, `done chan struct{}`,
+  `ready chan struct{}`, `readyOnce sync.Once`, `outcomeOnce
+  sync.Once`, `stderrTail *stderrRing`, `lastTouchUnixNano
+  atomic.Int64`, `stopped atomic.Bool`.
+- **Cada primitiva justificada con comentario inline**: por qué
+  atomic, por qué Once, qué garantiza cada uno.
+- 3 goroutines por sesión (`processWatcher`, `readyWatcher`, `cmd`
+  itself). Todas con paths de salida claros.
+- Es la pieza más concurrente del proyecto y está bien documentada.
+  No es olor — es complejidad inherente al dominio.
+
+#### II — DTOs `iptv.M3UChannel`/`iptv.Playlist` vs modelos `db.Channel*` · **baja, eco de M**
+
+- 7 tipos `db.Channel*` (Channel, ChannelFavorite, ChannelHealthSummary,
+  ChannelOverride, UserChannelOrderEntry, LibraryChannelOrderEntry,
+  ChannelWatchHistory…) viven en `db/`.
+- DTOs del parser (`M3UChannel`, `Playlist`) viven en `iptv/`.
+- Cuando se aplique M (Opción B de F2), los 7 tipos migran a `iptv/`.
+  Es **el bloque más grande del refactor M**.
+
+### 5.3 Confirmaciones de `[PENDIENTE]`
+
+- `[PENDIENTE-F5]` `TransmuxManager` lifecycle → confirmado **sano**,
+  patrón modelo (hallazgo FF).
+- `[PENDIENTE-F5]` `LogoCache` fail-soft → `internal/iptv/logo_cache.go`
+  retorna `nil` en construcción si falla, los handlers tratan nil como
+  "cache disabled". Confirmado **sano**.
+- `[PENDIENTE-F5]` Acoplamiento interno de sub-features → confirmado
+  alto (hallazgo CC); refactor pendiente.
+
+### 5.4 Severidades Fase 5
+
+| # | Problema | Severidad | Prerequisito |
+|---|----------|-----------|--------------|
+| CC | `iptv.Service` god-service, 45 métodos, 11 sub-features | Alta | Split en sub-paquetes |
+| DD | Detached goroutines en `RefreshM3U` sin drain | Media | Replicar patrón `bgWG` |
+| EE | `StreamProxy.Shutdown` engañoso (no drena) | Baja | Renombrar o documentar |
+| II | DTOs `iptv.*` vs modelos `db.Channel*` | Baja | Eco de M; cubre 7 tipos |
+
+### 5.5 Notas operativas
+
+- **Sano**: `TransmuxManager.Shutdown` (FF), `TransmuxSession` (HH),
+  breaker compartido proxy↔transmux (parte de FF), `LogoCache` fail-
+  soft, sink pattern para evitar ciclo `Service↔ProberWorker` (GG).
+- **Patrón modelo** para olores DD/Y: `library.Service` (F4) y
+  `TransmuxManager` (F5) ambos hacen drain correcto. El proyecto
+  tiene la solución idiomática **dos veces**; los detectors y los
+  detached goroutines de iptv son los outliers.
 
 ---
 
