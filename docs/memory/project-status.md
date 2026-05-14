@@ -1,5 +1,64 @@
 # Estado del proyecto
 
+> 🎬 **Sesión 2026-05-14 (rama `claude/gracious-dirac-fd009c` + follow-up `claude/review-personal-lists-eosgI`, Sesiones K + K.1 — lista IPTV personal por usuario desde /admin/users)** — el admin puede ahora asignarle a un usuario concreto su propia lista M3U (visible solo para ese hogar, invisible para el resto) en un solo flujo desde la ficha del usuario, sin tener que navegar a `/admin/libraries` y volver al matrix de bibliotecas a tickear el checkbox.
+>
+> ## 🧩 Sesión K — Atajo "Lista IPTV personal" en /admin/users (PR [#281](https://github.com/Alexzafra13/HubPlay_demo/pull/281), commit `ef7124c`)
+>
+> El modelo ACL ya soportaba "lista por usuario" implícitamente: `library_access` es opt-in (INNER JOIN en `LibraryRepository.ListForUser`), así que una biblioteca `livetv` con un único grant solo la ve ese top-level user (y sus profiles vía `COALESCE(parent_user_id, id)` — ADR-014). Lo que faltaba era UX: el admin tenía que (1) crear la lib en `/admin/libraries/new`, (2) volver a `/admin/users`, (3) abrir el modal de "Bibliotecas accesibles" y tickear la nueva entrada. Tres navegaciones para una acción mental atómica.
+>
+> **Backend nuevo**:
+> - `LibraryRepository.CreateWithGrant(ctx, lib, ownerUserID)` — inserta library + library_access en UNA transacción. Si el FK al user falla, la lib rollbackea junto al grant — nunca queda una biblioteca pública huérfana.
+> - `Service.CreatePersonalIPTV(ctx, ownerUserID, req)` — fuerza `content_type=livetv`, valida `m3u_url`, delega al repo. Ignora `paths` (livetv no tiene rutas de filesystem).
+> - `POST /admin/users/{id}/iptv-libraries` (admin-only). Rechaza target=profile con 400 (ADR-014: grants siempre van al titular del hogar).
+> - Añadido `CreatePersonalIPTV` a la interface `LibraryService` en `interfaces.go`.
+>
+> **Frontend nuevo**:
+> - `useCreatePersonalIPTVLibrary` hook + `api.createPersonalIPTVLibrary(userId, data)`.
+> - Botón "Lista IPTV personal" (icono `Tv`) en el kebab de cada fila de `/admin/users`. Oculto en perfiles.
+> - Modal con nombre auto-seeded `Lista de {{display_name}}` + URL M3U + URL EPG opcional + toggle TLS inseguro.
+> - On success: invalida `userLibraryAccess(userId)` + `libraries` para que la nueva biblioteca aparezca tickeada al abrir el modal de acceso y en la lista general.
+> - i18n completo en/es (~14 strings × 2 locales).
+>
+> **Tests**:
+> - 7 handler tests (happy / perfil 400 / JSON inválido / 404 / 503 / 500 / validation).
+> - 2 repo tests (CreateWithGrant happy + FK-rollback con user inexistente).
+> - 3 vitest (modal abre+POSTea / oculto en profile rows / submit bloqueado por required HTML).
+>
+> **Verificación al cierre Sesión K**:
+> - `go test ./... -count=1` — 22 paquetes verde.
+> - `go vet ./...`, `tsc -b`, `pnpm lint` — clean (solo warnings preexistentes).
+> - `pnpm test` — **553/553 vitest verde**.
+> - OpenAPI drift gate — verde (ruta añadida a `outOfScopeExact` como admin-only no-SDK).
+>
+> ## 🧩 Sesión K.1 — Modal personal IPTV reusa el form completo de livetv + URL validation (PR [#282](https://github.com/Alexzafra13/HubPlay_demo/pull/282), commit `cd241f3`)
+>
+> Follow-up de revisión interna: el modal de K usaba un form trimmed (3 campos), pero `/admin/libraries/new` ofrece para livetv un picker iptv-org rico (país/categoría/idioma/región), preflight, language filter, TLS toggle. Inconsistente — el operador tenía menos affordances al crear la lista personal que al crear una global, sin razón.
+>
+> **Frontend**:
+> - **`LiveTvFormFields` (controlled)** + **`liveTvFormState.ts`** (state shape, initial state factory, pure `resolveLiveTvForm` validator). Split del `.tsx`/`.ts` mantiene Fast Refresh limpio.
+> - `LibraryNewPage` refactorizado para usar el subform compartido — strip ~150 LOC de JSX duplicada + state por campo.
+> - Modal de `UsersAdmin` ahora monta `<LiveTvFormFields />` tras el campo Nombre. Admin ve los mismos pickers iptv-org / EPG / language filter / TLS / preflight que en la página de libraries.
+> - Validación client-side: M3U + EPG deben ser `http(s)://`, error inline si no. Mirror del guard de backend.
+> - Copy corregido: ahora dice **"Solo {{name}} y los miembros de su hogar verán esta lista"** — la copia previa de K mentía: ADR-014 (`COALESCE(parent_user_id, id)`) hace que los profiles del hogar también la vean, no solo el titular.
+> - `useCreatePersonalIPTVLibrary` + `api.createPersonalIPTVLibrary` extendidos con `language_filter` para que el form completo round-tripee.
+>
+> **Backend**:
+> - `validateHTTPURL` helper + `validateCreateRequest` tightened: schemes inválidos (`file://`, `gopher://`), sin esquema, `https://` con host vacío → 400 en el create boundary en vez de diferir al fetch.
+> - `Update` mirrors el mismo guard. Vaciar EPG pasando `""` sigue siendo legal.
+> - 3 nuevos service tests: Create (7 escenarios de URL), CreatePersonalIPTV (2), Update (3).
+>
+> **Verificación al cierre K.1**: 554/554 vitest, 22 paquetes Go verde.
+>
+> ## 📍 Decisión de UX consultada en esta sesión (pendiente)
+>
+> El usuario preguntó por el reordenado de canales: ¿dónde está hoy? ¿dónde lo pondría?
+> - **Usuario** (reordenar/ocultar su propia vista): ya existe — página `/live-tv/customize`, link "Personalizar" en `/live-tv` pestaña Inicio (Sesión I).
+> - **Admin** (cambiar el orden default que ven todos): **NO existe**. El admin solo edita `tvg_id` (`internal/api/handlers/iptv_health.go:63`) y disable/enable. El orden global viene del campo `Number` del M3U importado.
+> - **Recomendación si lo implementamos**: dentro de `/admin/libraries/{id}` (detail page de la biblioteca) como sección "Orden y visibilidad de canales", reusando el componente de `LiveTvCustomize`. NO en `/live-tv` (mete admin en surface de visualización). Estimación: ~1.5h, mismo perfil que Sesión I.
+> - Pendiente decisión: implementar o aparcar.
+>
+> ---
+>
 > 🎬 **Sesión 2026-05-13 (rama `claude/pensive-lehmann-8c13f5`, Sesión I — per-user channel order + hide en IPTV)** — la lista IPTV deja de ser uniforme: cada usuario reordena y oculta canales para su cuenta sin afectar al admin ni a otros usuarios.
 >
 > ## 🎚️ Sesión I — Per-user channel ordering + hide (IPTV)
