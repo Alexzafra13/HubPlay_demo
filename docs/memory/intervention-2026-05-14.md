@@ -17,7 +17,7 @@ en este doc (no se edita el audit original).
 |----:|---|---|---|---|
 | 0 | 🔄 en curso | Pre-trabajo: ADRs + conventions.md | — | — |
 | 1 | ✅ cerrada | Fixes urgentes seguridad + correctness | FFF, F16-1, RRR-mig, RR, Y, DD, GGGG, AAA, EE, HHH, F16-6, F16-7 | 12 olores cerrados, suite verde |
-| 2 | 🔄 en curso | Sub-paquetes de `db/` | B, J ✅ · K, T, L pendientes | B+J cerrados en sesión M.2; K+T+L diferidos a 2.1 |
+| 2 | ✅ cerrada | Sub-paquetes de `db/` | B, J, K, T, L | Sesión M.2 (B+J) + sesión M.3 (L) + sesión M.4 (K+T) |
 | 3 | ⏳ pendiente | Migración Opción B incremental | M (iptv → auth → library) | — |
 | 4 | ⏳ pendiente | Split de god-handlers/services | P, Z, QQ | — |
 | 5 | ⏳ pendiente | Refactor estructural `iptv/` | CC | — |
@@ -275,13 +275,122 @@ pública; firmas de los repos preservadas vía rename de tipo
   `TestFederationRepository_Progress`,
   `TestFederationRepository_Progress_PeerRevokedDropsFromRail`.
 
-### Pendiente sub-iteración 2.1
+### Cierres adicionales (sesiones M.3 + M.4 del 2026-05-14)
 
-- **K + T** — Crear `db.ActivityLogRepository` y migrar las
-  queries raw inline de `handlers/system.go` (`StreamActivity`,
-  `TopItems`). `Dependencies.Database *sql.DB` se sustituye por
-  interfaces estrechas (`HealthChecker`, `BackupOperator`,
-  `PoolStatsReporter`).
-- **L** — Split de `db/home_repository.go` (671 LOC, 3 rails) en
-  `home_latest.go`, `home_trending.go`, `home_live.go`.
-  Mantener raw SQL (justificación documentada).
+- ✅ **L** (sesión M.3, commit `ab0f4c1`) — split textual de
+  `internal/db/home_repository.go` (671 LOC) en 4 ficheros por
+  carril:
+
+  | Fichero | Contenido |
+  |---|---|
+  | `home.go` | struct `HomeRepository` + `NewHomeRepository` (constructor con 7 queries SQL pre-rewritten) + `groupConcatExpr` helper + `splitGroupConcat` helper (compartido entre Recommended y BecauseYouWatched) + `IDsFromTrending` utility |
+  | `home_trending.go` | `HomeTrendingItem` type + `Trending` method |
+  | `home_recommended.go` | `HomeRecommendation` + `HomeBecauseSeed` + `HomeBecauseResult` types + `Recommended` + `BecauseYouWatched` methods |
+  | `home_live.go` | `HomeLiveNowChannel` type + `LiveNow` method |
+
+  El plan original del audit decía split en `home_latest.go`,
+  `home_trending.go`, `home_live.go`, pero el repo no tiene un
+  método `Latest`; la realidad del código son Trending,
+  Recommended, BecauseYouWatched, LiveNow. Recommended y
+  BecauseYouWatched comparten `splitGroupConcat` y la misma
+  estrategia de scoring por género; viven juntos en
+  `home_recommended.go`. Cero cambios de SQL, tipos públicos o
+  comportamiento — split textual puro.
+
+- ✅ **K + T** (sesión M.4) — interfaces estrechas en
+  `Dependencies` + `db.ActivityRepository` para las queries inline
+  de `handlers/system.go`. Cambios:
+
+  **Nuevos ficheros en `internal/db/`**:
+  - `activity_repository.go` — `ActivityRepository` con
+    `DailyWatchActivity(ctx, cutoff)` y
+    `TopItems(ctx, cutoff, limit)`. Tipos `DailyWatchBucket` y
+    `TopItemRow` exportados. Pattern B raw SQL (mismas queries
+    que estaban inline en `system.go:430-540` y `system.go:570-625`,
+    pre-rewritten una vez al construir).
+  - `maintenance.go` — 3 interfaces estrechas
+    (`HealthChecker { PingContext }`, `BackupOperator { VacuumInto }`,
+    `PoolStatsReporter { Stats }`) + struct `Maintenance` que
+    las implementa todas. `MigrationSource()` retorna el `*sql.DB`
+    subyacente exclusivamente para el migrator sqlite→pg (el
+    único caller legítimo que necesita acceso arbitrario).
+
+  **Handlers adaptados**:
+  - `handlers/system.go` — `db *sql.DB` + `driver string`
+    sustituidos por `health db.HealthChecker` + `activity
+    *db.ActivityRepository`. `StreamActivity` y `TopItems` ahora
+    son thin wrappers de las queries del repo; la lógica de
+    coercion de tipos (any → int) que estaba inline ahora vive
+    en el repo. Backfill de días vacíos sigue en el handler
+    (presentación). Cero cambios de wire format JSON.
+  - `handlers/health.go` — `db *sql.DB` → `health
+    db.HealthChecker`. `Ping()` → `PingContext(r.Context())`.
+  - `handlers/admin_backup.go` — `db *sql.DB` → `backup
+    db.BackupOperator`. `ExecContext("VACUUM INTO ...")` →
+    `backup.VacuumInto(ctx, path)`.
+  - `handlers/admin_db.go` — `liveDB *sql.DB` → `maint
+    *db.Maintenance`. `liveDB.Stats()` → `maint.Stats()`;
+    `liveDB` pasado al migrator → `maint.MigrationSource()`.
+
+  **`api.Dependencies` reorganizada**:
+  - **Eliminado** `Database *sql.DB`.
+  - **Añadido** `DB *db.Maintenance` (typed wrapper) y
+    `Activity *db.ActivityRepository` (queries tipadas).
+  - `internal/api/router.go` ya no importa `database/sql`.
+  - 4 call-sites del wireado (`router.go:157,170,546,616,635`)
+    actualizados.
+
+  **`main.go`**: añade
+  `db.NewMaintenance(driver, database)` +
+  `db.NewActivityRepository(driver, database)` al
+  `Dependencies` literal. Sin cambios estructurales más allá.
+
+  **Tests ajustados**:
+  - `internal/api/handlers/system_test.go` — 10 sitios:
+    `DB: database, Driver: testutil.Driver()` →
+    `Health: db.NewMaintenance(...), Activity: db.NewActivityRepository(...)`.
+  - `internal/api/handlers/health_test.go` — 6 sitios:
+    `NewHealthHandler(database, ...)` →
+    `NewHealthHandler(db.NewMaintenance(testutil.Driver(), database), ...)`.
+    Import nuevo de `hubplay/internal/db`.
+  - `internal/api/integration_test.go` +
+    `internal/api/stream_integration_test.go` —
+    `Database: database` → `DB: db.NewMaintenance(...),
+    Activity: db.NewActivityRepository(...)`.
+
+  **Cierra olor K** porque los 4 handlers admin ya no reciben
+  `*sql.DB` raw — consumen interfaces de una sola obligación cada
+  una. **Cierra olor T** porque `Dependencies.Database *sql.DB`
+  desaparece. El único punto que sigue exponiendo el handle crudo
+  (`Maintenance.MigrationSource()`) es controlado, documentado, y
+  con un único caller legítimo (admin_db migrator).
+
+### Verificación final Iteración 2 (L + K + T)
+
+- `go build ./...` — exitcode 0 en `golang:1.25` container.
+- `go test ./internal/... -count=1 -timeout=300s` — **22
+  paquetes verdes** incluyendo `internal/api` (9.9s),
+  `internal/api/handlers` (17.2s), `internal/db` (26.7s),
+  `internal/federation/storage` (3.0s).
+- Tests pre-existentes preservados: `system_test.go` (10
+  funciones), `health_test.go` (6 funciones), `admin_db_test.go`,
+  `admin_backup_test.go`, 2 tests de integración.
+
+### Cierre Iteración 2
+
+5 olores cerrados (B, J, K, T, L) sobre 3 sesiones (M.2 + M.3 +
+M.4):
+
+- **Sesión M.2** (commit `dc988ba`, PR pendiente) — B+J:
+  `federation_repository.go` movido a `internal/federation/storage/`
+  con split en 7 ficheros. Cierra la inversión de capa única +
+  el primer god-fichero.
+- **Sesión M.3** (commit `ab0f4c1`) — L: split textual de
+  `home_repository.go` en 4 ficheros por carril.
+- **Sesión M.4** (este commit) — K+T: interfaces estrechas
+  (`HealthChecker`, `BackupOperator`, `PoolStatsReporter`) +
+  `Maintenance` + `ActivityRepository`. Elimina
+  `Dependencies.Database *sql.DB` por completo.
+
+Cero cambios de API HTTP pública. Iteración lista para
+revisión y merge.

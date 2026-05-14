@@ -2,9 +2,7 @@ package handlers
 
 import (
 	"context"
-	"database/sql"
 	"errors"
-	"fmt"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -62,8 +60,8 @@ type LibraryStatsProvider interface {
 //   - /admin/system/stats is admin-only, can grow over time, and returns
 //     types that match what the React panel actually consumes.
 type SystemHandler struct {
-	db             *sql.DB
-	driver         string // "sqlite" or "postgres" — drives dialect for raw SQL queries
+	health         db.HealthChecker       // optional — nil makes the DB.OK field stay false without erroring
+	activity       *db.ActivityRepository // optional — nil makes Stream/TopItems return 503
 	streams        SystemStatsProvider
 	libs           LibraryStatsProvider
 	settings       SettingsReader
@@ -90,8 +88,13 @@ type SettingsReader interface {
 // site — a tagged struct keeps the wiring readable and lets future
 // fields land without a signature change.
 type SystemHandlerConfig struct {
-	DB             *sql.DB
-	Driver         string // "sqlite" or "postgres" — required for the admin raw-SQL queries (TopItems, StreamActivity) to dialect-branch
+	// Health is the DB liveness probe for the admin Stats panel.
+	// Optional — nil leaves DB.OK = false and DB.Error empty.
+	Health db.HealthChecker
+	// Activity is the typed repo backing the StreamActivity sparkline
+	// and TopItems chart. Optional — nil makes those endpoints return
+	// 503 "activity unavailable" rather than panic.
+	Activity       *db.ActivityRepository
 	Streams        SystemStatsProvider
 	Libraries      LibraryStatsProvider
 	Settings       SettingsReader
@@ -110,13 +113,9 @@ type SystemHandlerConfig struct {
 // rather than erroring out, so a stripped-down test rig can still call
 // Stats.
 func NewSystemHandler(cfg SystemHandlerConfig) *SystemHandler {
-	driver := cfg.Driver
-	if driver == "" {
-		driver = "sqlite" // backwards-compat default; main.go always passes the real one
-	}
 	return &SystemHandler{
-		db:             cfg.DB,
-		driver:         driver,
+		health:         cfg.Health,
+		activity:       cfg.Activity,
 		streams:        cfg.Streams,
 		libs:           cfg.Libraries,
 		settings:       cfg.Settings,
@@ -295,8 +294,8 @@ func (h *SystemHandler) Stats(w http.ResponseWriter, r *http.Request) {
 
 	// ── Database ───────────────────────────────────────────────────────
 	out.Database.Path = h.dbPath
-	if h.db != nil {
-		if err := h.db.PingContext(r.Context()); err != nil {
+	if h.health != nil {
+		if err := h.health.PingContext(r.Context()); err != nil {
 			out.Database.OK = false
 			out.Database.Error = err.Error()
 		} else {
@@ -418,101 +417,27 @@ func (h *SystemHandler) StreamActivity(w http.ResponseWriter, r *http.Request) {
 	}
 	cutoff := time.Now().UTC().Add(-time.Duration(days) * 24 * time.Hour)
 
-	// Per-day rollup. The day-extraction grammar diverges across
-	// dialects: SQLite stores last_played_at as text (modernc.org's
-	// time.Time formatter trails ISO with " +0000 UTC", outside
-	// strftime grammar) so we slice the first 10 chars with SUBSTR.
-	// Postgres has a real TIMESTAMPTZ column, so we cast to date
-	// then format. Both produce a YYYY-MM-DD string that the Go side
-	// uses as a map key for backfill.
-	// CASE/MIN keeps us safe when position_ticks runs past the
-	// item's known duration (rounding / restart edge case).
-	dayExpr := "SUBSTR(ud.last_played_at, 1, 10)"
-	if h.driver == "postgres" {
-		dayExpr = "TO_CHAR(ud.last_played_at, 'YYYY-MM-DD')"
+	if h.activity == nil {
+		respondError(w, r, http.StatusServiceUnavailable, "DB_UNAVAILABLE", "stream activity unavailable")
+		return
 	}
-	query := db.RewritePlaceholders(h.driver, fmt.Sprintf(`
-		SELECT
-			%s AS day,
-			COALESCE(SUM(
-				CASE
-					WHEN i.duration_ticks > 0
-						AND ud.position_ticks <= i.duration_ticks
-						THEN ud.position_ticks / 600000000
-					WHEN i.duration_ticks > 0
-						THEN i.duration_ticks / 600000000
-					ELSE 0
-				END
-			), 0) AS watch_minutes,
-			COUNT(DISTINCT ud.user_id || ':' || ud.item_id) AS session_count
-		FROM user_data ud
-		JOIN items i ON i.id = ud.item_id
-		WHERE ud.last_played_at IS NOT NULL
-		  AND ud.last_played_at >= ?
-		GROUP BY day
-		ORDER BY day ASC`, dayExpr))
-
-	// Pass cutoff as time.Time so the driver formats it the same way
-	// last_played_at was written (UTC, no monotonic suffix because
-	// repos.UserData normalises). String pre-formatting was rejecting
-	// rows that the trending query happily matches.
-	rows, err := h.db.QueryContext(r.Context(), query, cutoff)
+	buckets, err := h.activity.DailyWatchActivity(r.Context(), cutoff)
 	if err != nil {
 		h.logger.Error("stream activity query", "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "stream activity unavailable")
 		return
 	}
-	defer rows.Close() //nolint:errcheck
 
 	// Build a date → bucket map first so we can backfill empty days
 	// with zeros. The sparkline needs a contiguous series — gaps
 	// would render as visual breaks rather than "no plays that day".
-	seen := make(map[string]streamActivityBucket, days)
-	for rows.Next() {
-		var b streamActivityBucket
-		// modernc.org/sqlite + the DATETIME affinity used by user_data
-		// produce result sets where the strftime() output and SUM()
-		// can come back as either string-encoded numbers or native
-		// integers depending on the driver path. Scan into `any` and
-		// coerce, identical pattern to how trending parses
-		// MAX(last_played_at) elsewhere in the repo.
-		var dateRaw, minutesRaw, sessionsRaw any
-		if err := rows.Scan(&dateRaw, &minutesRaw, &sessionsRaw); err != nil {
-			h.logger.Error("stream activity scan", "error", err)
-			respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "stream activity scan failed")
-			return
+	seen := make(map[string]streamActivityBucket, len(buckets))
+	for _, b := range buckets {
+		seen[b.Date] = streamActivityBucket{
+			Date:         b.Date,
+			WatchMinutes: b.WatchMinutes,
+			SessionCount: b.SessionCount,
 		}
-		switch v := dateRaw.(type) {
-		case string:
-			b.Date = v
-		case []byte:
-			b.Date = string(v)
-		}
-		switch v := minutesRaw.(type) {
-		case int64:
-			b.WatchMinutes = int(v)
-		case float64:
-			b.WatchMinutes = int(v)
-		case []byte:
-			if n, perr := strconvAtoiSafe(string(v)); perr == nil {
-				b.WatchMinutes = n
-			}
-		case string:
-			if n, perr := strconvAtoiSafe(v); perr == nil {
-				b.WatchMinutes = n
-			}
-		}
-		switch v := sessionsRaw.(type) {
-		case int64:
-			b.SessionCount = int(v)
-		case float64:
-			b.SessionCount = int(v)
-		}
-		seen[b.Date] = b
-	}
-	if err := rows.Err(); err != nil {
-		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "stream activity row error")
-		return
 	}
 
 	out := make([]streamActivityBucket, 0, days)
@@ -564,59 +489,25 @@ func (h *SystemHandler) TopItems(w http.ResponseWriter, r *http.Request) {
 	}
 	cutoff := time.Now().UTC().Add(-time.Duration(days) * 24 * time.Hour)
 
-	// Same rollup CTE as HomeRepository.Trending but admin-scoped:
-	// no library_access EXISTS guard. Counts each (user, rollup) once
-	// so a single binge-watcher can't dominate the chart.
-	//
-	// BOOLEAN predicates written as truthy (no `= 1`) so the same query
-	// runs against SQLite's 0/1 INTEGER and Postgres' BOOLEAN. `?`
-	// placeholders rewritten at call time for the active driver.
-	query := db.RewritePlaceholders(h.driver, `
-		WITH plays AS (
-			SELECT
-				ud.user_id,
-				CASE
-					WHEN i.type = 'episode' AND i.parent_id IS NOT NULL
-						THEN COALESCE(
-							(SELECT s.parent_id FROM items s WHERE s.id = i.parent_id),
-							i.parent_id
-						)
-					ELSE i.id
-				END AS rollup_id
-			FROM user_data ud
-			JOIN items i ON i.id = ud.item_id
-			WHERE ud.last_played_at IS NOT NULL
-			  AND ud.last_played_at >= ?
-			  AND i.is_available
-		)
-		SELECT i.id, i.type, i.title, COUNT(DISTINCT p.user_id) AS plays
-		FROM plays p
-		JOIN items i ON i.id = p.rollup_id
-		WHERE i.is_available
-		GROUP BY i.id
-		ORDER BY plays DESC, i.title ASC
-		LIMIT ?`)
-
-	rows, err := h.db.QueryContext(r.Context(), query, cutoff, limit)
+	if h.activity == nil {
+		respondError(w, r, http.StatusServiceUnavailable, "DB_UNAVAILABLE", "top items unavailable")
+		return
+	}
+	rows, err := h.activity.TopItems(r.Context(), cutoff, limit)
 	if err != nil {
 		h.logger.Error("top items query", "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "top items unavailable")
 		return
 	}
-	defer rows.Close() //nolint:errcheck
 
-	out := make([]topItem, 0, limit)
-	for rows.Next() {
-		var it topItem
-		if err := rows.Scan(&it.ID, &it.Type, &it.Title, &it.PlayCount); err != nil {
-			respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "top items scan failed")
-			return
-		}
-		out = append(out, it)
-	}
-	if err := rows.Err(); err != nil {
-		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "top items row error")
-		return
+	out := make([]topItem, 0, len(rows))
+	for _, it := range rows {
+		out = append(out, topItem{
+			ID:        it.ID,
+			Type:      it.Type,
+			Title:     it.Title,
+			PlayCount: it.PlayCount,
+		})
 	}
 
 	respondJSON(w, http.StatusOK, map[string]any{

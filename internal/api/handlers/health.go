@@ -1,13 +1,14 @@
 package handlers
 
 import (
-	"database/sql"
 	"net/http"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"syscall"
 	"time"
+
+	"hubplay/internal/db"
 )
 
 // minReadyFreeBytes is the floor below which /health/ready turns red.
@@ -19,7 +20,7 @@ import (
 const minReadyFreeBytes uint64 = 1 << 30 // 1 GiB
 
 type HealthHandler struct {
-	db            *sql.DB
+	health        db.HealthChecker
 	streamManager StreamManagerService
 	startedAt     time.Time
 	version       string
@@ -30,9 +31,12 @@ type HealthHandler struct {
 	dbPath string
 }
 
-func NewHealthHandler(database *sql.DB, sm StreamManagerService, version, dbPath string) *HealthHandler {
+// NewHealthHandler consume db.HealthChecker en lugar de `*sql.DB`. El
+// /health endpoint sólo necesita pinguear; el contrato estrecho cierra
+// el olor K de la auditoría 2026-05-14 (handlers no reciben `*sql.DB` raw).
+func NewHealthHandler(checker db.HealthChecker, sm StreamManagerService, version, dbPath string) *HealthHandler {
 	return &HealthHandler{
-		db:            database,
+		health:        checker,
 		streamManager: sm,
 		startedAt:     time.Now(),
 		version:       version,
@@ -66,7 +70,7 @@ func (h *HealthHandler) Live(w http.ResponseWriter, r *http.Request) {
 func (h *HealthHandler) Ready(w http.ResponseWriter, r *http.Request) {
 	dbStatus := "ok"
 	dbOK := true
-	if err := h.db.Ping(); err != nil {
+	if err := h.health.PingContext(r.Context()); err != nil {
 		dbStatus = "error: " + err.Error()
 		dbOK = false
 	}
@@ -115,7 +119,7 @@ func (h *HealthHandler) Ready(w http.ResponseWriter, r *http.Request) {
 func (h *HealthHandler) Health(w http.ResponseWriter, r *http.Request) {
 	dbStatus := "ok"
 	dbOK := true
-	if err := h.db.Ping(); err != nil {
+	if err := h.health.PingContext(r.Context()); err != nil {
 		dbStatus = "error: " + err.Error()
 		dbOK = false
 	}

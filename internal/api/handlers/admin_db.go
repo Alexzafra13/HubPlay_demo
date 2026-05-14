@@ -44,22 +44,28 @@ func BundledPostgresDSN() string {
 // say "saved, restarting…" and the operator sees the new driver in
 // seconds.
 type AdminDBHandler struct {
-	cfg            *config.Config
-	configPath     string
-	liveDB         *sql.DB // running connection, for stats only
-	saveDBConfig   func(driver, path, dsn string) error
-	restart        *config.RestartRequester
-	logger         *slog.Logger
+	cfg          *config.Config
+	configPath   string
+	maint        *db.Maintenance // pool stats + sqlite→pg migrator source
+	saveDBConfig func(driver, path, dsn string) error
+	restart      *config.RestartRequester
+	logger       *slog.Logger
 }
 
 // NewAdminDBHandler wires the admin Database panel. saveDBConfig is
 // the persistence callback — the wizard's setup.Service implements
 // it for the unauthenticated wizard surface, and the same callback is
 // reused here so both surfaces write through one code path.
+//
+// Recibe *db.Maintenance en lugar del `*sql.DB` raw: stats vía
+// PoolStatsReporter, conexión origen para el migrator vía
+// MigrationSource(). Cierra el olor K (admin handlers no reciben
+// `*sql.DB` directo) preservando el único uso legítimo del handle
+// crudo (la copia masiva de filas sqlite→pg).
 func NewAdminDBHandler(
 	cfg *config.Config,
 	configPath string,
-	liveDB *sql.DB,
+	maintenance *db.Maintenance,
 	saveDBConfig func(driver, path, dsn string) error,
 	restart *config.RestartRequester,
 	logger *slog.Logger,
@@ -67,7 +73,7 @@ func NewAdminDBHandler(
 	return &AdminDBHandler{
 		cfg:          cfg,
 		configPath:   configPath,
-		liveDB:       liveDB,
+		maint:        maintenance,
 		saveDBConfig: saveDBConfig,
 		restart:      restart,
 		logger:       logger.With("module", "admin-db-handler"),
@@ -152,8 +158,8 @@ func (h *AdminDBHandler) Status(w http.ResponseWriter, r *http.Request) {
 	} else {
 		resp.DSNRedacted = db.RedactDSN(h.cfg.Database.DSN)
 	}
-	if h.liveDB != nil {
-		s := h.liveDB.Stats()
+	if h.maint != nil {
+		s := h.maint.Stats()
 		resp.Pool = dbPoolStats{
 			MaxOpen:        s.MaxOpenConnections,
 			Open:           s.OpenConnections,
@@ -473,7 +479,7 @@ func (h *AdminDBHandler) Migrate(w http.ResponseWriter, r *http.Request) {
 	// caller's source SQLite is never touched (migrator only writes
 	// into the target).
 	result, err := db.MigrateSQLiteToPostgres(r.Context(), db.MigrateOptions{
-		SourceDB:  h.liveDB,
+		SourceDB:  h.maint.MigrationSource(),
 		TargetDSN: req.TargetDSN,
 		Logger:    h.logger,
 		Progress: func(p db.MigrateProgress) {

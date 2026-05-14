@@ -46,7 +46,8 @@ func newTestApp(t *testing.T) *testApp {
 	router := api.NewRouter(api.Dependencies{
 		Auth:     authSvc,
 		Users:    userSvc,
-		Database: database,
+		DB:       db.NewMaintenance(testutil.Driver(), database),
+		Activity: db.NewActivityRepository(testutil.Driver(), database),
 		Version:  "test",
 		Config:   cfg,
 		Logger:   slog.Default(),

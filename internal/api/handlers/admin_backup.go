@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -49,15 +48,19 @@ import (
 const maxRestoreUploadBytes = int64(10 * 1024 * 1024 * 1024)
 
 type AdminBackupHandler struct {
-	db     *sql.DB
+	backup db.BackupOperator
 	driver string
 	dbPath string
 	logger *slog.Logger
 }
 
-func NewAdminBackupHandler(driver string, database *sql.DB, dbPath string, logger *slog.Logger) *AdminBackupHandler {
+// NewAdminBackupHandler consume db.BackupOperator (típicamente
+// *db.Maintenance) en lugar de `*sql.DB`. Cierra el olor K: el
+// handler no debe poder ejecutar SQL arbitrario — sólo VacuumInto
+// vía el contrato estrecho.
+func NewAdminBackupHandler(driver string, backupOp db.BackupOperator, dbPath string, logger *slog.Logger) *AdminBackupHandler {
 	return &AdminBackupHandler{
-		db:     database,
+		backup: backupOp,
 		driver: driver,
 		dbPath: dbPath,
 		logger: logger,
@@ -91,12 +94,12 @@ func (h *AdminBackupHandler) Download(w http.ResponseWriter, r *http.Request) {
 	tmpPath := filepath.Join(dir, fmt.Sprintf(".backup-%s.db", stamp))
 
 	// `VACUUM INTO 'path'` is the SQLite-blessed live backup primitive.
-	// We pass the path as a literal (not a parameter) because SQLite
-	// doesn't accept binds in that position; the path is server-built
-	// from a controlled string so there's no injection surface here.
+	// Delegamos en db.BackupOperator que envuelve la llamada; ese
+	// contrato refuse Postgres (devuelve error) y no expone Exec
+	// arbitrario al handler.
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 	defer cancel()
-	if _, err := h.db.ExecContext(ctx, fmt.Sprintf("VACUUM INTO %q", tmpPath)); err != nil {
+	if err := h.backup.VacuumInto(ctx, tmpPath); err != nil {
 		h.logger.Error("backup VACUUM INTO failed", "error", err, "tmp", tmpPath)
 		respondError(w, r, http.StatusInternalServerError, "BACKUP_FAILED",
 			"failed to create backup snapshot")
