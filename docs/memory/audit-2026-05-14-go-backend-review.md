@@ -1334,13 +1334,213 @@ singleflight, hwAccel result, forceDirectPlayLookup).
 
 ## Fase 7 · `auth` + `federation`
 
-> Pendiente. Foco propuesto:
-> - Reuse documentado en ADR-012: ¿se mantiene la promesa?
-> - `auth/ratelimit.go` vs `federation/ratelimit.go` — 50 LOC
->   duplicados; revisar si la divergencia semántica sigue justificando
->   la copia.
-> - JWT EdDSA + HS256 en el mismo `auth/jwt.go` — claims plumbing.
-> - Audit writer async de federation: backpressure, drop policy.
+Cerrada · 2026-05-14.
+
+### 7.1 Inventario
+
+**`internal/auth/` (6 ficheros, 1 683 LOC):**
+
+| Fichero | LOC | Concepto |
+|---|---:|---|
+| `service.go` | 757 | `Service` con 18 métodos (6 responsabilidades) |
+| `device.go` | 368 | `DeviceCodeService` — flujo "device code" |
+| `keystore.go` | 279 | `KeyStore` con rotación + encriptación at-rest |
+| `ratelimit.go` | 107 | `loginRateLimiter` per-key lockout |
+| `jwt.go` | 92 | Claims + sign/validate con `keyResolver` inyectada |
+| `middleware.go` | 80 | HTTP middleware (importa `apperror`) |
+
+**`internal/federation/` (21 ficheros, 3 613 LOC):**
+
+| Fichero | LOC | Concepto |
+|---|---:|---|
+| `client.go` | 603 | HTTP client a peers |
+| `manager.go` | 506 | `Manager` core + lifecycle |
+| `manager_handshake.go` | 262 | pair/handshake (3 métodos del Manager) |
+| `middleware.go` | 251 | `RequirePeerJWT` |
+| `identity.go` | 200 | Ed25519 keypair + `IdentityStore` |
+| `audit.go` | 192 | `Auditor` async writer + drop policy |
+| `jwt.go` | 156 | `PeerClaims` EdDSA + Nonce |
+| `manager_search.go` | 149 | search peers (4 métodos) |
+| `ratelimit.go` | 141 | `RateLimiter` token-bucket per-peer |
+| `nonce.go` | 133 | anti-replay cache |
+| `manager_browse.go` | 130 | browse peer libraries (4 métodos) |
+| `manager_shares.go` | 109 | shares config (6 métodos) |
+| `manager_progress.go` | 74 | continue-watching cross-peer (3 métodos) |
+| … | … | (8 ficheros más, <100 LOC cada uno) |
+
+### 7.2 Hallazgos
+
+#### QQ — `auth.Service` god-service con 18 métodos, 6 responsabilidades · **media** (mismo patrón Z/CC)
+
+- Mezcla:
+  1. Account lifecycle (Register, ResetPassword, ChangePassword).
+  2. Login flow (Login con rate-limit, ValidateToken).
+  3. Token lifecycle (RefreshToken, Logout, KeyStoreOrNil).
+  4. Session management (ListSessions, RevokeSession, CurrentSessionID,
+     InvalidateUserSessions).
+  5. Session cleaner background goroutine
+     (StartSessionCleaner / StopSessionCleaner).
+  6. Profiles per-user (ListProfiles, SwitchProfile, SetPIN).
+- Mismo olor que `library.Service` (Z, F4) y `iptv.Service` (CC, F5).
+- Severidad **media** (es la cabeza más pequeña de los tres god-
+  services: 18 métodos vs 27 vs 45).
+- Refactor:
+  - `auth.LoginService` (Login + RefreshToken + rate-limit).
+  - `auth.AccountService` (Register + ResetPassword + ChangePassword).
+  - `auth.SessionService` (ListSessions + RevokeSession +
+    InvalidateUserSessions + Session cleaner).
+  - `auth.ProfileService` (ListProfiles + SwitchProfile + SetPIN).
+- Coste menor que CC porque `auth/` es 5× más pequeño que `iptv/`.
+
+#### RR — `auth.loginRateLimiter` goroutine sin Stop · **media** (bug latente)
+
+`auth/ratelimit.go:30-36`:
+
+```go
+go func() {
+    ticker := time.NewTicker(10 * time.Minute)
+    defer ticker.Stop()
+    for range ticker.C {
+        rl.cleanup()
+    }
+}()
+```
+
+- **No tiene `stopCh`, no se referencia, no se cancela.** Vive hasta
+  que el proceso muere.
+- En producción no causa daño visible (el proceso completo termina).
+- Pero en **tests integrados** que crean múltiples `auth.Service` →
+  goroutine leak detector lo flagea, y los tests acumulan goroutines
+  zombie entre subtests.
+- Principio violado: **lifecycle management** consistente. El
+  proyecto ya tiene patrón (`Manager.Shutdown`, `TransmuxManager.Shutdown`,
+  `library.Service.Shutdown`). Este es el outlier.
+- Refactor: añadir `stopCh chan struct{}` al `loginRateLimiter` y
+  un `Stop()` que `Service.StopSessionCleaner` (que ya existe y se
+  llama en shutdown) lo invoque.
+- Severidad **media** porque es bug latente, no en producción.
+
+#### SS — `auth.ratelimit.go` (107) vs `federation.ratelimit.go` (141) divergentes · **baja**
+
+- Confirmado, dos implementaciones de "token bucket / lockout".
+- **auth**: fixed-window lockout tras N fails (login attempts).
+  Semántica: "después de 5 fallos en 5 min, bloquea 15 min".
+- **federation**: token-bucket con refill (catalog sync). Semántica:
+  "X requests/sec, burst de Y".
+- ADR-012 admite la duplicación con justificación explícita:
+  > Las semánticas divergen sutilmente — auth ratelimit es per-IP
+  > con burst muy bajo (login attempts), federation es per-peer con
+  > bursts permisivos (catalog sync). Una abstracción unificada
+  > habría llevado opciones que oscurecen call sites.
+- **No es olor** — decisión consciente documentada. Sólo cito para
+  confirmar que la promesa del ADR sigue cumpliéndose.
+
+#### TT — `federation/` con split `manager_*.go` aplicado bien · **sano, modelo**
+
+- `manager.go` + 5 `manager_*.go` (handshake, search, browse, shares,
+  progress). Cada sub-fichero contiene 3-6 métodos del Manager
+  agrupados por feature.
+- **Es el patrón que CC (Fase 5) propone para `iptv.Service`** —
+  aplicado aquí más limpio porque:
+  - Federation tiene 30 métodos, no 45.
+  - Las features no comparten estado mutable (cada uno usa el `repo`
+    + `clock` + `identity`, no maps in-memory de sub-features).
+- Modelo a citar cuando se haga el refactor CC.
+
+#### UU — `federation.Auditor` async writer · **sano, modelo**
+
+- `audit.go:75-184`: cola in-memory + flush periódico + drop policy
+  explícita (`logDropOnce` cuando el canal se llena).
+- `Auditor.Close()` se llama desde `Manager.Close()` → integrado.
+- ADR-012 justifica:
+  > El SQLite write añade ~5-10ms al hot path peer-to-peer; el audit
+  > es por definición no-critical; mejor async + tolerate-drop
+  > documentado.
+- **Modelo del proyecto** de "async writer correcto". Citar cuando se
+  propongan otros writers async (audit log de usuarios, telemetría,
+  etc.).
+
+#### VV — `federation.Manager` con dos mutexes granulares · **sano**
+
+- `mu sync.RWMutex` protege `peerCache` (hot path JWT validation).
+- `streamMu sync.Mutex` protege `streamSessions`.
+- Comentario explícito:
+  > Separate mutex from peerCache because the streaming hot path
+  > doesn't need the peer-cache reader, and holding peerCache's
+  > RWMutex during a stream sweep would block JWT validation.
+- Locking granular **bien razonado y documentado**. Modelo de "no
+  hace falta un único mutex grande".
+
+#### WW — `auth.jwt.go` con `keyResolver` función inyectada · **sano**
+
+- `auth/jwt.go:24`:
+  ```go
+  type keyResolver func(kid string) (*db.SigningKey, error)
+  ```
+- Desacopla el JWT layer del `KeyStore` concreto. Comentario:
+  > Taking a function (rather than a concrete KeyStore) keeps the
+  > JWT layer free of auth-package cycles and trivial to fake in
+  > tests.
+- **Patrón idiomático Go**: función como interfaz mínima de 1
+  método. Más limpio que declarar un `type KeyResolver interface {
+  Resolve(kid string) (*db.SigningKey, error) }` cuando sólo se usa
+  un método.
+- Federation reusa el mismo *shape* (`auth/jwt.go` y `federation/jwt.go`
+  tienen forma paralela pese a no compartir código). ADR-012 lo
+  documenta como "reuse del shape, no del código por divergencia
+  HS256/EdDSA". Trade-off correcto.
+
+#### XX — `auth/middleware.go → internal/api/apperror` · **conocido cut-set**
+
+- Confirma el sano #4 de F1.1. Es la solución al ciclo
+  `auth ↔ handlers`. **No es olor**, pero la "extrañeza" del import
+  (un paquete `auth` que importa algo de `api/`) es intencional y
+  documentada en el package doc de `apperror`.
+
+#### YY — Tipos de auth y federation viven en su feature · **sano** (anticipa Opción B)
+
+- `auth/`: tipos `Claims`, `AuthToken`, `RegisterRequest`,
+  `DeviceCodePair`, `DeviceCodeStatus`, `KeySnapshot` viven en
+  `internal/auth/`.
+- `federation/`: tipos `Peer`, `Invite`, `ServerInfo`,
+  `LibraryShare`, `SharedItem`, `CachedItem`, `Identity`,
+  `AuditEntry`, etc. viven en `internal/federation/`.
+- Pero ambos paquetes **siguen usando** `*db.User`, `*db.Session`,
+  `*db.SigningKey` del paquete `db`. Mezcla pura: los tipos *propios*
+  viven en la feature, los modelos de persistencia siguen en `db/`.
+- Cuando F2.5 (Opción B) se aplique a `auth`, los tipos `db.User`,
+  `db.Session`, `db.SigningKey`, `db.DeviceCode` deberían migrar a
+  `auth.User`, `auth.Session`, `auth.SigningKey`, `auth.DeviceCode`.
+  Federation ya lo hizo con su mitad.
+
+### 7.3 Confirmaciones de `[PENDIENTE]`
+
+- `[PENDIENTE-F7]` ADR-012 reuse documentado → confirmado **sano**.
+  El "reuse del shape" se cumple en JWT (WW), keystore (Bootstrap +
+  NewKeyStore), event bus (ambos publican), audit (modelo nuevo en
+  federation, no en auth — pero auth tampoco lo necesita).
+- `[PENDIENTE-F7]` Ratelimit duplication → confirmado no-olor (SS).
+
+### 7.4 Severidades Fase 7
+
+| # | Problema | Severidad | Prerequisito |
+|---|----------|-----------|--------------|
+| QQ | `auth.Service` 18 métodos, 6 responsabilidades | Media | Split (más fácil que Z/CC por tamaño) |
+| RR | `loginRateLimiter` goroutine sin Stop | Media | Añadir `stopCh` + invocar desde `StopSessionCleaner` |
+| SS | Ratelimit duplicado (ADR-012 lo justifica) | — | No-acción |
+| YY | Tipos `db.User`/`db.Session` en repo (sub-caso de M) | — | Atacar como parte de M para auth |
+
+### 7.5 Notas operativas
+
+- **Modelos a replicar** que viven aquí:
+  - `federation.Auditor` (UU) — async writer con drop policy.
+  - `federation.Manager` lock granular (VV).
+  - `federation/` split `manager_*.go` por feature (TT) — modelo para
+    el refactor CC de F5.
+  - `auth.jwt.keyResolver` función inyectada (WW) — modelo de "una
+    interfaz de un método se reemplaza por `func(...)`".
+- **El bug RR** es el único de Fase 7 que merece fix urgente. Es
+  ~10 LOC de fix, sin impacto en API pública.
 
 ---
 
