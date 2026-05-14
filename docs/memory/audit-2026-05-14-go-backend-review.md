@@ -743,13 +743,201 @@ middlewares). No es olor.
 
 ## Fase 4 · `library` + `scanner`
 
-> Pendiente. Foco propuesto:
-> - Frontera `library` vs `scanner` (olor D).
-> - Lifecycle de workers (`scanScheduler`, `imageRefreshScheduler`,
->   `segmentDetector`, `segmentFingerprinter`, `fsWatcher`): respeto
->   del ctx, drain en shutdown, idempotencia de re-scans.
-> - Patrón anti-ciclo (sink pattern) documentado en
->   `conventions.md` — verificar aplicación.
+Cerrada · 2026-05-14.
+
+### 4.1 Inventario
+
+**`internal/library/` (9 ficheros, 2 714 LOC):**
+
+| Fichero | LOC | Métodos | Notas |
+|---|---:|---:|---|
+| `service.go` | 592 | 27 | `Service`: CRUD + ACL + scan + item queries (6 responsabilidades) |
+| `watcher.go` | 429 | 5 | `FSWatcher`: fsnotify + debounce + reconcile |
+| `imagerefresh.go` | 345 | 2 | `ImageRefresher` (puro) + `ImageRefreshScheduler` |
+| `segment_fingerprinter.go` | 293 | 2 | Subscriber bus + chromaprint runner |
+| `fingerprint.go` | 292 | 2 | Wrapper `fpcalc` + disk cache |
+| `segment_detector.go` | 288 | 2 | Subscriber bus + chapter-based markers |
+| `segment_matcher.go` | 281 | 0 | Helpers puros |
+| `contentrating.go` | 103 | 0 | Tabla + ordinal de ratings |
+| `scheduler.go` | 91 | 2 | Periódico simple |
+
+**`internal/scanner/` (3 ficheros, 1 689 LOC):**
+
+| Fichero | LOC | Notas |
+|---|---:|---|
+| `scanner.go` | **1 270** | `Scanner` con 14 deps + 10 helpers privados |
+| `show_hierarchy.go` | 216 | `showCache` puro |
+| `show_parser.go` | 203 | parser de paths puro |
+
+### 4.2 Hallazgos
+
+#### W — `scanner.go` con 1 270 LOC en un único fichero · **media-alta**
+
+- Es la cabeza más grande del repo junto a `items.go` (Fase 3).
+- `Scanner` recibe **14 repos** (items, streams, metadata, externalIDs,
+  images, chapters, people, itemValues, studios, collections,
+  providers, prober, bus, pathmap). Cuantifica el olor M (Fase 2) en
+  un sólo struct.
+- `ScanLibrary` es **secuencial** por diseño (I/O + writes SQLite
+  serializadas). Bien — paralelizarlo con un worker pool añadiría
+  contención de escritura SQLite por nada.
+- Pero el fichero mezcla **4 responsabilidades**:
+  1. Walk + change detection (`ScanLibrary`, `iterateLibraryItems`,
+     `walkPath`).
+  2. Item create/update (`processFile`, `createItem`, `updateItem`).
+  3. Enrichment (`enrichIfMissing`, `enrichMetadata`).
+  4. Image ingestion (`fetchAndStoreImages`).
+- Principio violado: **SRP** del fichero (no del struct: el struct
+  legítimamente orquesta todo el pipeline).
+- Refactor sugerido (no cambia API):
+  ```
+  internal/scanner/
+    scanner.go        (struct + ScanLibrary + walk, ~400 LOC)
+    enrich.go         (enrichIfMissing, enrichMetadata, ~350 LOC)
+    persist.go        (createItem, updateItem, ~350 LOC)
+    images.go         (fetchAndStoreImages, ~150 LOC)
+    show_hierarchy.go (sin cambios)
+    show_parser.go    (sin cambios)
+  ```
+- Beneficio: cada fichero tiene un responsable claro; los tests
+  pueden mockear sólo las deps que el sub-fichero necesita (hoy el
+  test del scanner construye un Scanner con 14 deps incluso para
+  testar enrich).
+
+#### X — Frontera `library` vs `scanner` artificial · **baja** (confirma D de Fase 1)
+
+- `library.Service` lleva `*scanner.Scanner` como dep (línea 100 del
+  struct).
+- `scanner.Scanner` usa **los mismos 10 repos** que `library.Service`
+  (items, streams, metadata, externalIDs, images, chapters, people,
+  itemValues, studios, collections).
+- El split no aporta test isolation — el scanner se construye con 14
+  deps reales en cualquier test integrado.
+- Refactor sugerido: promover `scanner` a sub-paquete
+  `internal/library/scan/`. La frontera deja de ser package boundary y
+  pasa a ser fichero boundary (más barato, mismo aislamiento lógico).
+  Coste: un `goimports` + reorganizar `cmd/hubplay/main.go:161` y los
+  tests. Cero impacto en el resto del código.
+
+#### Y — Goroutines de `SegmentDetector` y `SegmentFingerprinter` sin drain · **media** (bug latente)
+
+`segment_detector.go:71-83`:
+
+```go
+func (d *SegmentDetector) Start(ctx context.Context) (unsub func()) {
+    return d.bus.Subscribe(event.LibraryScanCompleted, func(e event.Event) {
+        libID, _ := e.Data["library_id"].(string)
+        if libID == "" { return }
+        go func() {                              // ← no tracking
+            if err := d.DetectLibrary(ctx, libID); err != nil {
+                d.logger.Warn(...)
+            }
+        }()
+    })
+}
+```
+
+- El `unsub func()` retornado **sólo desuscribe del bus**. No espera
+  a las goroutines de `DetectLibrary` ya en vuelo.
+- `main.run` defer `unsub()` después del `Wait()` del HTTP server,
+  pero **antes del** `database.Close()`. Si una detection está en
+  medio de un write cuando llega SIGTERM, escribe con ctx cancelado
+  durante un periodo antes de que el `database.Close()` corte.
+- Compárese con `library.Service` (líneas 100-103, 134-138) que
+  tiene `bgWG sync.WaitGroup` y `Shutdown()` que `Wait`. El patrón
+  correcto **ya existe** en el paquete; los segment workers no lo
+  aplican.
+- Impacto real: ruido en logs durante shutdown ("sql: database is
+  closed"); en patológicos, escrituras parciales si la detection
+  está a medio commit.
+- Principio violado: **lifecycle management** consistente. El
+  contrato implícito "`Stop`/`Close`/`unsub` drena trabajo
+  in-flight" se rompe aquí.
+- Refactor sugerido (cualquiera de los dos):
+  - Añadir `wg sync.WaitGroup` al detector y al fingerprinter; el
+    `unsub` cierra el subscribe pero también `wg.Wait()`.
+  - O — más limpio — los detectors se registran en `library.Service`
+    como sub-workers y reusan su `bgWG`.
+
+#### Z — `library.Service` god-service con 27 métodos · **media**
+
+- Cubre **6 responsabilidades**:
+  1. CRUD libraries (`Create`, `CreatePersonalIPTV`, `GetByID`, `List`,
+     `Update`, `Delete`).
+  2. ACL (`ListForUser`, `UserHasAccess`, `GrantAccess`, `RevokeAccess`,
+     `ListAccessByUser`, `ReplaceAccess`).
+  3. Scan orchestration (`Scan`, `ScanSync`, `ScanAll`, `IsScanning`).
+  4. Item queries con rating-cap (`ListItems`, `ListGenres`, `GetItem`,
+     `GetItemChildren`, `GetItemChildCounts`, `GetItemStreams`,
+     `GetItemImages`).
+  5. Latest/rails (`LatestItems`, `LatestSeriesByActivity`).
+  6. Telemetría (`ItemCount`).
+- Principio violado: **SRP**.
+- La mayoría de los métodos del bloque 4 (Item queries) son
+  passthroughs a `db.ItemRepository` con un filtro opcional de
+  rating. **Posible service-anémico** — el handler podría llamar al
+  repo directo y un middleware/helper aplicar el rating cap.
+- Refactor (impacto medio):
+  - `library.LibraryService` ← CRUD + scan orchestration (bloques 1+3).
+  - `library.AccessControl` ← ACL (bloque 2).
+  - Item queries: que el handler llame al repo directamente; el
+    rating-cap se aplica con un helper (`library.FilterByRating`) o,
+    mejor, con un *decorator* del repo (`db.ItemRepository.WithCap(cap
+    string)` → wrapper que añade el WHERE) — esto evita reintroducir
+    una capa de service inútil.
+
+#### AA — Frontend del olor M se manifiesta aquí · **eco de M**
+
+`library.Service` y `scanner.Scanner` reciben **24 punteros `*db.X`
+distintos entre ambos**. Cuando F2.5 (decisión Opción B) se aplique a
+`library`, este paquete será el segundo más impactado tras `iptv` —
+arrastra ~12 tipos (Item, MediaStream, Image, Chapter, EpisodeSegment,
+ItemValue, Studio, Collection, ExternalID, Metadata, Person,
+ItemPersonCredit). El refactor incremental tiene aquí el bloque más
+grande y conviene **trabajarlo en último lugar**, no primero.
+
+#### BB — Comentarios en inglés masivos · **media**, transversal
+
+9 ficheros, casi todos los comentarios largos están en inglés. Ej.:
+- `service.go:91-105` — 10 líneas del Shutdown lifecycle.
+- `scanner.go` — todos los headers de métodos.
+- `watcher.go:1-20` — header del paquete.
+- `contentrating.go:1-25` — doc del paquete.
+
+Apuntado para el plan final.
+
+### 4.3 Confirmaciones de `[PENDIENTE]`
+
+- `[PENDIENTE-F4]` "qué workers respetan ctx para cancelación
+  in-flight" → confirmado:
+  - `library.Service.Scan` usa `scanCtx, cancel := WithTimeout(s.bgCtx,
+    30m)` + `bgWG` → drena en `Shutdown()`. **Correcto.**
+  - `Scheduler` (scan periódico) usa el ctx + stopCh → **correcto.**
+  - `ImageRefreshScheduler` igual → **correcto.**
+  - `FSWatcher` (429 LOC) usa ctx + stopCh + mu+stopped → **correcto y
+    rico**, con `atomic.Int64 walksDone` para tests.
+  - `SegmentDetector` y `SegmentFingerprinter` **NO drenan** → olor Y.
+
+### 4.4 Severidades Fase 4
+
+| # | Problema | Severidad | Prerequisito |
+|---|----------|-----------|--------------|
+| W | `scanner.go` 1 270 LOC en un fichero | Media-alta | Split por responsabilidad |
+| X | Frontera `library` vs `scanner` artificial | Baja | Promover a sub-paquete |
+| Y | Segment detector/fingerprinter sin drain | Media | Añadir `bgWG` (bug latente) |
+| Z | `library.Service` 27 métodos, 6 responsabilidades | Media | Split + repo decorator para rating |
+| AA | Eco de M (cuantifica) | — | Atacar en último lugar al hacer M |
+| BB | Comentarios en inglés | Media | Marcar para plan final |
+
+### 4.5 Notas operativas
+
+- **Sano**: lifecycle de `library.Service` (bgWG + bgCancel + bgCtx),
+  el patrón debería replicarse en los detectors.
+- **Sano**: `Scanner.ScanLibrary` secuencial. No optimizar
+  prematuramente con worker pool — la I/O sequential + SQLite single-
+  writer son la decisión correcta.
+- **Sano**: `FSWatcher` 429 LOC, con su propia complejidad pero bien
+  encapsulada (un único struct, lifecycle explícito).
 
 ---
 
