@@ -31,7 +31,9 @@
 - **Fase 12 · Migraciones SQLite + Postgres** · ✅ cerrada
 - **Fase 13 · Transversales (error wrapping, ctx, deadlocks, naming, globals)** · ✅ cerrada
 - **Fase 14 · Calidad a nivel código / función (god-functions, struct params, boilerplate, tests frágiles, magic numbers)** · ✅ cerrada
-- Plan de intervención final · ✅ cerrado y revisado tras F14.
+- **Fase 15 · Calidad del test suite (137 ficheros, fragility, mocks excesivos, error path coverage)** · ✅ cerrada
+- **Fase 16 · Handlers medianos no top-10 (~70 ficheros, path traversal, paginación, SSE drops, audit trail)** · ✅ cerrada
+- Plan de intervención final · ✅ cerrado y revisado tras F16.
 
 ---
 
@@ -58,7 +60,7 @@ modelos a citar. Los olores son **estructurales pero ortogonales** —
 se atacan por iteraciones independientes, sin requerir
 re-arquitectura.
 
-### Hallazgo crítico (CVE-class)
+### Hallazgos críticos (CVE-class)
 
 🚨 **FFF — SSRF redirect bypass en `imaging.SafeGet`** (F9). Cliente
 HTTP sin `CheckRedirect` sigue redirects sin re-validar IP. Vector
@@ -66,11 +68,18 @@ real: atacante con `evilhost.com` redirige a `169.254.169.254` (AWS
 metadata) o IP RFC1918 interna. **Fix urgente, ~20 LOC, modelo en
 `iptv/proxy.go`.**
 
+🚨 **F16-1 — Path traversal en `people.isUnderImageDir`** (F16).
+`filepath.Clean + Abs` sin `EvalSymlinks` permite leer archivos
+arbitrarios si un symlink apunta fuera de `imageDir`. Mitigado por
+trust model (admin-only writes a DB) pero rompe el contrato
+explícito que la función promete. **Fix ~10 LOC.**
+
 ### Hallazgos altos (resumen 1-línea)
 
 | # | Olor | Fase |
 |---|------|------|
 | **FFF** | **SSRF redirect bypass en `imaging.SafeGet` (CVE-class)** | **F9** |
+| **F16-1** | **Path traversal en `people.isUnderImageDir` (CVE-class)** | **F16** |
 | A+M | `internal/db/` god-package: 13 KLOC, 31 repos, 80 tipos consumidos por 55 ficheros externos | F1, F2 |
 | B+J | `db → federation` invierte capa; `federation_repository.go` son 6 repos disfrazados de uno | F1, F2 |
 | CC | `iptv.Service` 45 métodos en 11 sub-features con split sólo cosmético por fichero | F5 |
@@ -89,6 +98,8 @@ metadata) o IP RFC1918 interna. **Fix urgente, ~20 LOC, modelo en
 | **GGGG** | **Handlers `iptv_admin.go` detached goroutines sin tracking** | **F13** | **incluido con DD** |
 | Q | `WriteTimeout: 0` global afecta a las 219 rutas (sólo ~10 son streaming) | F3 | middleware |
 | HHH | `pathmap.Read` no valida que el path resulte bajo la raíz | F9 | ~5 LOC |
+| **F15-1** | **`time.Sleep` arbitrarios en 19 ficheros de test (CI flakes)** | **F15** | **test seams** |
+| **F16-2..F16-8** | **Paginación sin validar + filtración de errores + `KillSession` sin audit + SSE drops silenciosos** | **F16** | **handlers medianos** |
 
 ### Patrones modelo del proyecto (a replicar)
 
@@ -106,15 +117,16 @@ metadata) o IP RFC1918 interna. **Fix urgente, ~20 LOC, modelo en
 
 ### Camino propuesto
 
-9 iteraciones (0..8), **~14-15 días de trabajo focalizado**, cada
+9 iteraciones (0..8), **~15-16 días de trabajo focalizado**, cada
 iteración deja el repo verde:
 
 0. Pre-trabajo: 6 ADRs (incluye **ADR-015 dominio en feature**,
    **ADR-019 SSRF CheckRedirect**, **ADR-020 up-only**) + 2 updates
    de `conventions.md`.
-1. **🚨 Fixes URGENTES de seguridad + correctness**: **FFF (SSRF)**,
-   RRR-mig (up-only), RR (ratelimit leak), Y/DD/GGGG (drain),
-   AAA/EE (comentarios + rename), HHH (pathmap).
+1. **🚨 Fixes URGENTES de seguridad + correctness**: **FFF (SSRF) +
+   F16-1 (path traversal)**, RRR-mig (up-only), RR (ratelimit leak),
+   Y/DD/GGGG (drain), AAA/EE (comentarios + rename), HHH (pathmap),
+   F16-6 (filtración de errores), F16-7 (audit `KillSession`).
 2. **Sub-paquetes de db**: B+J+K+T+L (federation a su feature,
    ActivityLogRepo, split home).
 3. **Migración Opción B incremental** por feature (iptv → auth →
@@ -2647,9 +2659,393 @@ profesional".
 
 ---
 
+## Fase 15 · Calidad del test suite
+
+Cerrada · 2026-05-14 (con apoyo de Agent Explore + verificación de
+veredictos críticos).
+
+### 15.1 Inventario
+
+- 137 ficheros `_test.go` en `internal/` (≈ 1 288 tests totales).
+- Veredicto global del agente: **MEDIA. Suite funcional pero frágil
+  bajo estrés (CI con carga alta, `-parallel`).**
+- 105 usos de `t.TempDir()` ✓ — consistente.
+- 154 usos de `testutil.NewTestDB` ✓ — DB real preferida sobre mock
+  cuando aplica.
+- 79 ficheros con `t.Helper()` ✓.
+- `go test -race` activo en CI ✓.
+
+### 15.2 Hallazgos
+
+#### F15-1 — `time.Sleep` no determinista en 19 ficheros · **alta**
+
+- Ejemplos críticos:
+  - `library/watcher_test.go:136` — `Sleep(100ms)` antes de FS event.
+  - `library/watcher_test.go:186` — `Sleep(500ms)` esperando debounce.
+  - `retention/runner_test.go` — múltiples `Sleep(50ms/100ms)` en
+    loops de espera.
+- El `Sleep(500ms)` es el más peligroso: en CI con CPU contendida o
+  runner lento, el debounce no llega a disparar y el test falla.
+- Modelo correcto YA existe en `library.FSWatcher.walksDone
+  atomic.Int64` que se expone para tests sin sleep.
+- **Refactor**: cada test seam usa channel/WaitGroup o
+  `clock.Mock.Advance()`. ~30 min por test.
+- **Severidad alta** porque genera CI flakes que cuestan dev-time
+  semanal.
+
+#### F15-2 — `time.Now()` no inyectado (231 instancias) · **media**
+
+- Sólo 2 sitios usan `clock.Mock`: `federation/stream_test.go:14` y
+  `auth/service_test.go`.
+- Los 231 hits restantes hacen `time.Now()` directo en tests.
+- Impacto: tests de TTL/expiración/cleanup no son reproducibles.
+  Cualquier test que pase un timestamp como "now" y luego espera
+  que algo expire en `30 * time.Minute` está atado a wall-clock.
+- **Refactor**: `clock.Clock` ya existe en `internal/clock` —
+  inyectar en cada service/repo que toque tiempo, y mock-ear en
+  test. ~1 día de migración mecánica.
+
+#### F15-3 — Race en setup vía `waitForCount` con polling sleep · **media**
+
+- `auth/service_test.go:270-275`:
+  ```go
+  for time.Now().Before(deadline) {
+      if len(got) >= want { return got }
+      time.Sleep(10 * time.Millisecond)
+  }
+  ```
+- Sub-caso de F15-1, pero patrón replicable. Polling en lugar de
+  event sync.
+- Impacto: passa en serial, puede flakear en `-parallel`.
+- **Refactor**: `chan struct{}` cerrado cuando se cumple condición.
+
+#### F15-4 — Goroutine tests dependientes de timing · **media**
+
+- `federation/stream_test.go:92-120` `TestManager_CloseStopsSweeperGoroutine`:
+  spawnea 25 managers en loop, chequea `runtime.NumGoroutine()`
+  después de `Close()`. Si el sweeper tarda más de lo esperado en
+  unwind, falsifies el conteo.
+- `event/bus_test.go` — publica eventos, espera con `Sleep(50ms)`.
+- **Refactor**: `Close()` retorna sólo cuando todas las goroutines
+  unwind (ya lo hace correctamente — `<-m.sweepDone`). El test
+  puede llamar directamente a la primitiva sin `Sleep`.
+
+#### F15-5 — God-handlers con mocks que mockean 16 métodos · **media**
+
+- `handlers/library_test.go:28-180` declara `libFakeService` que
+  implementa **~16 métodos** de la interface `LibraryService`.
+- `handlers/items_test.go` similar (644 LOC).
+- Impacto: si el handler comienza a llamar un método nuevo, los
+  fakes en cascada se rompen — pero más importante, **el mock NO
+  captura cambios de comportamiento del service real**. Schema
+  change en DB que rompa el service en runtime pasa el mock con
+  éxito.
+- **Refactor**:
+  - Reducir fake a métodos realmente usados por cada test (en lugar
+    de implementar la interface entera).
+  - Añadir tests de **integración** en `api/integration_test.go` que
+    usen DB real (`testutil.NewTestDB`) + servicios reales.
+  - Esta acción se sinergiza con olor P (split de `ItemHandler`):
+    handlers más pequeños tienen menos deps que mockear.
+
+#### F15-6 — Happy path dominante: 3 % de naming de error · **media**
+
+- Sólo **39 tests de 1 288** tienen nombres `*_Error`, `*_Fail`,
+  `*_Invalid` (3 %).
+- Pero hay buenos ejemplos: `auth/service_test.go` tiene
+  `TestService_Login_WrongPassword`,
+  `TestService_Login_DisabledAccount`,
+  `TestService_Login_NonexistentUser` — modelo a replicar.
+- En contraste, `handlers/library_test.go:750+` tiene
+  `TestLibraryHandler_Create_HappyPath` sin equivalentes para empty
+  path, duplicate name, permission denied, DB error.
+- **Refactor**: pasar a table-driven tests con subtest por edge
+  case. Plantilla en `auth/service_test.go`.
+
+#### F15-7 — `t.Parallel()` infrautilizado (8 de 137 ficheros) · **baja**
+
+- Sólo 5,8 % de los ficheros lo usan.
+- Suite tarda ~30 % más de lo que podría.
+- No crítico porque `-race` está activo, pero deja velocidad sobre
+  la mesa.
+- **Refactor**: añadir `t.Parallel()` en tests que usen `t.TempDir()`
+  o que no toquen estado global. Mecánico.
+
+#### F15-8 — `t.TempDir()` excepto un sitio · **baja**
+
+- 105 usos correctos.
+- **`stream/transcode_test.go:81-82`** hardcodea `/tmp/sessions/abc`
+  — único outlier confirmado:
+  ```go
+  s := &stream.Session{OutputDir: "/tmp/sessions/abc"}
+  expected := filepath.Join("/tmp/sessions/abc", "stream.m3u8")
+  ```
+- Es un test de path-joining (no I/O real), funciona; pero la
+  consistencia importa.
+- **Refactor**: `dir := t.TempDir(); …`.
+
+#### F15-9 — `time.After` en 23 tests (leak menor) · **baja**
+
+- Ejemplos: `config/persist_test.go`, `library/watcher_test.go`.
+- Si el timeout salta, el canal queda abierto hasta GC. Anti-pattern
+  pero no causa fugas reales con Go moderno (1.23+).
+- **Refactor**: `context.WithTimeout` + `select { case <-done; case
+  <-ctx.Done() }`. Cosmético.
+
+#### F15-10 — Fixture duplication: 19 fakes inline · **baja**
+
+- `library_test.go`, `items_test.go`, `iptv_test.go`, etc. cada uno
+  define sus propios `fakeImageRepo`, `fakeMetadataProvider`,
+  `fakeUserService` inline.
+- Mismo shape en 3-4 ficheros sin compartir.
+- **Refactor**: mover fakes a `testutil/fakes/` como tipos públicos.
+
+#### F15-11 — Test naming inconsistente · **baja**
+
+- Mezcla `TestX_HappyPath` + `TestX_Success` + `TestX_WrongPassword`
+  + `TestIssueAndValidatePeerToken_HappyPath`.
+- **Refactor**: documentar pauta `TestX_WhenY_ThenZ` en
+  `conventions.md`. Aplicar progresivamente.
+
+#### F15-12 — Concurrency tests escasos · **baja**
+
+- `federation/stream_test.go:92-120` test goroutine leaks
+  explícitamente — buen modelo.
+- `provider/httpcache_test.go` usa `atomic.AddInt64` para conteo.
+- Pero la mayoría no exercita concurrencia real (e.g.,
+  `TestManager_ConcurrentRegister` no existe).
+- **Refactor**: añadir tests `*_Concurrent_*` para métodos
+  thread-unsafe identificados en F8 y F13.
+
+### 15.3 Severidades Fase 15
+
+| # | Olor | Severidad |
+|---|------|-----------|
+| F15-1 | `time.Sleep` arbitrarios en 19 ficheros | Alta |
+| F15-2 | `time.Now()` no inyectado (231 hits) | Media |
+| F15-3 | `waitForCount` con polling sleep | Media |
+| F15-4 | Goroutine tests dependientes de timing | Media |
+| F15-5 | God-handler tests con mock de 16 métodos | Media |
+| F15-6 | Happy path domina (3 % error naming) | Media |
+| F15-7 | `t.Parallel()` infrautilizado (8 / 137) | Baja |
+| F15-8 | `/tmp/sessions/abc` hardcoded | Baja |
+| F15-9 | `time.After` (23 usos) leak menor | Baja |
+| F15-10 | Fixture duplication: 19 fakes inline | Baja |
+| F15-11 | Test naming inconsistente | Baja |
+| F15-12 | Concurrency tests escasos | Baja |
+
+### 15.4 Notas operativas
+
+- **80/20 del agente**: fix `time.Sleep` + inyectar `clock.Mock`
+  resuelve el 50 % del riesgo del suite.
+- `testutil.NewTestDB` (154 usos) es la decisión correcta —
+  evitar mockear `*db.X` cuando se puede usar SQLite real.
+- Iteración 8 ya incluye F15-1 (catálogo F14-8-a coincide). F15-2
+  pide su propia tarea: inyectar `clock` en services que toquen
+  tiempo (sólo 2 lo hacen).
+
+---
+
+## Fase 16 · Handlers medianos no top-10
+
+Cerrada · 2026-05-14 (con apoyo de Agent Explore + verificación
+de hallazgos críticos).
+
+### 16.1 Inventario
+
+~70 ficheros en `internal/api/handlers/` no cubiertos por Fase 3
+(que se centró en god-handlers top-10). El agente Explore audita
+los relevantes; aquí los hallazgos.
+
+### 16.2 Hallazgos
+
+#### F16-1 — Path traversal en `people.go:59-63` · **ALTA**
+
+- `isUnderImageDir()`:
+  ```go
+  cleaned := filepath.Clean(p)
+  abs, err := filepath.Abs(cleaned)
+  // ...
+  rel, err := filepath.Rel(root, abs)
+  ```
+- **No resuelve symlinks** antes de `filepath.Rel`. `filepath.Clean`
+  + `filepath.Abs` solo normalizan, no siguen symlinks.
+- Vector: si la fila `db.Image.path` contiene un path con symlink a
+  `/etc/passwd` (insertado por un admin malicioso o por
+  compromise de DB), el handler **lo sirve**.
+- Mitigado parcialmente: en producción la DB sólo la edita un admin,
+  y los paths normales vienen del scanner. Pero el contrato
+  "imagen ⊆ imageDir" es la única barrera.
+- **Refactor**:
+  ```go
+  resolved, err := filepath.EvalSymlinks(abs)
+  if err != nil { return false }
+  rel, err := filepath.Rel(root, resolved)
+  if err != nil || strings.HasPrefix(rel, "..") { return false }
+  ```
+- **Severidad alta** por simetría con FFF: ambos son CVE-class si
+  el threat model cambia (multi-admin, DB compartida, supply chain).
+
+#### F16-2 — Paginación sin validar negativos · **media**
+
+- `federation_public.go:100-101`:
+  ```go
+  offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+  ```
+- `Atoi` retorna 0 si falla; negativos pasan tal cual al repo.
+- Si el repo en sqlc usa `OFFSET ?`, SQLite/PG rechazan negativos
+  con error opaco. Si en algún path se construye SQL con offset
+  raw, comportamiento indefinido.
+- Sub-caso de F16-4 (inconsistencia entre handlers).
+- **Refactor**: helper compartido:
+  ```go
+  func parsePagination(q url.Values) (offset, limit int, err error) {
+      offset = atoiOrZero(q.Get("offset"))
+      limit = atoiOrZero(q.Get("limit"))
+      if offset < 0 || limit < 0 || limit > maxLimit {
+          return 0, 0, domain.NewBadRequest("invalid pagination")
+      }
+      return
+  }
+  ```
+
+#### F16-3 — `PeerFromContext` puede ser nil sin re-check · **media**
+
+- `federation_public.go:67-82`: el middleware setea `peer` en ctx;
+  el handler hace `peer := federation.PeerFromContext(...)` una vez
+  al inicio y lo usa después sin re-check.
+- En la práctica, si el handler está montado dentro del
+  `r.Use(federation.RequirePeerJWT(...))` group, `peer` nunca es
+  nil al entrar al handler.
+- Pero `InspectDevice` (línea 309) podría llamarse fuera del group
+  protegido — el agente sugiere validar el escenario.
+- **Refactor**: helper `requirePeer(w, ctx) (*Peer, bool)` que
+  responde 401 si falta. Análogo a `requireParam` (F14-6-b).
+
+#### F16-4 — Paginación inconsistente entre endpoints similares · **media**
+
+- `me_peers.go:202-203` hace `offset, _ := strconv.Atoi(...)` sin
+  validar.
+- `SearchPeers` (línea 274) hace
+  `if perPeerLimit <= 0 || perPeerLimit > 50` — sí valida.
+- Dos endpoints del mismo dominio (federation) con sintonía
+  distinta.
+- **Refactor**: resuelto por F16-2 (helper compartido). Eliminar
+  validaciones ad-hoc.
+
+#### F16-5 — Auth check redundante con comentario obsoleto · **media**
+
+- `iptv_admin.go:67-71` ejecuta `canAccessLibrary` con comentario
+  "admins can see every library regardless of the ACL".
+- El router ya gateaba el endpoint con `requireAdmin`. Doble check
+  con comentario que **invalida** la utilidad del check
+  ("regardless of the ACL").
+- Olor: defense-in-depth o código muerto. El comentario sugiere
+  que ya no aplica.
+- **Refactor**: borrar el check si está cubierto por middleware del
+  router; o documentar por qué se mantiene.
+
+#### F16-6 — Filtración de internals en errores expuestos · **media**
+
+- `federation_admin.go:115`: `"peer probe failed: "+err.Error()`.
+- `err.Error()` puede contener IPs internas, paths del filesystem,
+  resoluciones DNS internas, status codes específicos.
+- `federation_admin.go:163`: mismo patrón.
+- **Refactor**: clasificar el error con `errors.Is` / `errors.As`,
+  y devolver mensaje genérico al cliente + detalle al log:
+  ```go
+  if errors.Is(err, ErrPeerUnreachable) {
+      apperror.Write(...,"PEER_UNREACHABLE", "peer no responde")
+      logger.Warn("probe failed", "err", err) // detalle en log
+      return
+  }
+  apperror.Write(..., "PEER_PROBE_FAILED", "fallo el probe del peer")
+  ```
+- Olor de seguridad menor (information disclosure) pero acumulativo.
+
+#### F16-7 — `KillSession` sin audit trail · **media**
+
+- `admin_streams.go:140-149`: el endpoint admin `KillSession`
+  acepta `session_id` y termina la sesión sin **loggear quién la
+  mata**.
+- Compliance: admin puede matar sesiones de cualquier usuario
+  anónimamente desde el punto de vista del audit log.
+- **Refactor**: log obligatorio con `"killed_by", claims.UserID` +
+  emitir evento bus `admin.session.killed`.
+
+#### F16-8 — SSE drops silenciosos · **media**
+
+- `auth_device.go:367+` (también en `me_events.go`, `events.go`)
+  hace `select { case eventCh <- e: default: drop }`.
+- Drop es la decisión correcta (no bloquear el bus).
+- **Pero**: no hay métrica ni log de drops. Si un cliente queda
+  rezagado, el operador no lo ve.
+- **Refactor**: incrementar contador Prometheus
+  `hubplay_sse_dropped_total{handler="..."}` en el branch default.
+  ~5 LOC, instrumentación pura.
+
+#### F16-9 — `iptv_admin.go:198-207` race en M3U refresh async · **eco**
+
+- Ya catalogado como **GGGG (F13)**. El agente lo encuentra
+  independientemente, confirma la severidad media. Misma solución
+  (extender `iptv.Service.bgWG`).
+
+#### F16-10..F16-20 — bajas (lista corta)
+
+| # | Ubicación | Olor | Severidad |
+|---|-----------|------|-----------|
+| F16-10 | `admin_backup.go:99` | `fmt.Sprintf("VACUUM INTO %q", tmpPath)` — defensa-en-profundidad débil | Baja |
+| F16-11 | `admin_logs.go:38` | `buffer == nil` retorna vacío sin 503 | Baja |
+| F16-12 | `preferences.go:81-87` | `Value` no validado UTF-8 / null bytes | Baja |
+| F16-13 | `progress.go:359-373` | `idSet` sin cap de talla (DOS muy bajo) | Baja |
+| F16-14 | `collections.go:79-94` | URL decode fallback confuso | Baja |
+| F16-15 | `progress.go:297` | `images.GetPrimaryURLs` con error ignorado | Baja |
+| F16-16 | `providers.go:43-44` | `json.Unmarshal` con error ignorado | Baja |
+| F16-17 | `federation_public.go:79-82` | Patrón `nil → []` repetido | Baja |
+| F16-18 | `settings.go:419-425` | `hwAccelChoices` validación case-sensitive con `ToLower` previo | Baja |
+| F16-19 | `admin_auth.go:36-37` | Observer opcional silencioso | Baja |
+
+### 16.3 Sanos (sin hallazgos críticos)
+
+- `responses.go`, `me_events.go`, `auth_device.go` (estructura — el
+  drop F16-8 es operacional), `federation_admin.go` (excepto F16-6,
+  F16-9), `admin_backup.go` (excepto F16-10 baja), `setup.go` (la
+  lista `isSensitivePath` quedó pendiente desde Fase 11 olor QQQ —
+  no auditada en este pase).
+
+### 16.4 Severidades Fase 16
+
+| # | Olor | Severidad |
+|---|------|-----------|
+| **F16-1** | **Path traversal en `people.go:isUnderImageDir`** | **Alta** |
+| F16-2 | Paginación sin validar en `federation_public.go` | Media |
+| F16-3 | `PeerFromContext` sin re-check | Media |
+| F16-4 | Paginación inconsistente | Media |
+| F16-5 | Auth check redundante con comentario obsoleto | Media |
+| F16-6 | Filtración de internals en errores | Media |
+| F16-7 | `KillSession` sin audit trail | Media |
+| F16-8 | SSE drops sin observabilidad | Media |
+| F16-9 | Race async iptv_admin (eco GGGG) | Media |
+| F16-10..F16-19 | Bajas (10 items) | Baja |
+
+### 16.5 Nota operativa
+
+Tras Fase 16, **dos** hallazgos de seguridad alta-críticos siguen
+abiertos:
+
+1. **FFF — SSRF redirect bypass en `imaging.SafeGet`** (F9).
+2. **F16-1 — Path traversal en `people.isUnderImageDir`** (F16).
+
+Ambos están **mitigados parcialmente** por trust model actual
+(admin-only para inputs sensibles), pero ambos rompen el contrato
+explícito que el código intenta enforcer. Tratarlos como
+**CVE-class** en Iteración 1.
+
+---
+
 ## Plan de intervención final
 
-Cerrado · 2026-05-14, **revisado tras F9-F14**. Sintetiza las 14
+Cerrado · 2026-05-14, **revisado tras F9-F16**. Sintetiza las 16
 fases. Las **letras entre paréntesis** referencian olores
 específicos.
 
@@ -2774,30 +3170,40 @@ empezar el siguiente) y deja el repo en verde.
 4. **Borrar / reescribir** comentario obsoleto en `event/bus.go`
    (AAA).
 
-#### Iteración 1 · Fixes URGENTES de seguridad + correctness (~1 día)
+#### Iteración 1 · Fixes URGENTES de seguridad + correctness (~1.5 días)
 
 5. **🚨 FFF (PRIORIDAD MÁXIMA)**: añadir `CheckRedirect` a
-   `imaging.SafeGet`. Es el único hallazgo con impacto **CVE-class**
-   de la auditoría — SSRF a servicios internos. ~20 LOC, modelo en
-   `iptv/proxy.go`. Test que monte un httptest server que devuelva
-   `302 Location: http://127.0.0.1:9200` y verifique rechazo.
-6. **RRR-mig**: eliminar bloques `-- +goose Down` de las 15
+   `imaging.SafeGet`. CVE-class — SSRF a servicios internos. ~20
+   LOC, modelo en `iptv/proxy.go`. Test que monte httptest server
+   con `302 Location: http://127.0.0.1:9200` y verifique rechazo.
+6. **🚨 F16-1 (PRIORIDAD MÁXIMA)**: `people.isUnderImageDir` usar
+   `filepath.EvalSymlinks` antes de `filepath.Rel`. ~10 LOC. Test
+   que cree symlink dentro de `imageDir` apuntando fuera y
+   verifique rechazo. CVE-class — path traversal vía symlink.
+7. **RRR-mig**: eliminar bloques `-- +goose Down` de las 15
    migraciones que los tienen. ~15 ficheros, cambio mecánico.
-7. **RR**: `loginRateLimiter.Stop()` + cablear desde
+8. **RR**: `loginRateLimiter.Stop()` + cablear desde
    `auth.Service.StopSessionCleaner`. ~10 LOC.
-8. **Y**: añadir `bgWG sync.WaitGroup` a `SegmentDetector` y
+9. **Y**: añadir `bgWG sync.WaitGroup` a `SegmentDetector` y
    `SegmentFingerprinter`. Modelo `library.Service`. ~40 LOC.
-9. **DD + GGGG**: añadir `bgCtx/bgCancel/bgWG` a `iptv.Service` +
-   reemplazar `context.Background()` en `service_m3u.go:230,246` Y
-   en `handlers/iptv_admin.go:101,200`. Modelo `library.Service`.
-   ~80 LOC totales (resuelve dos olores con un patrón).
-10. **AAA, EE**: comentarios + renombrar `StreamProxy.Shutdown` →
+10. **DD + GGGG**: añadir `bgCtx/bgCancel/bgWG` a `iptv.Service` +
+    reemplazar `context.Background()` en `service_m3u.go:230,246` Y
+    en `handlers/iptv_admin.go:101,200`. Modelo `library.Service`.
+    ~80 LOC totales (resuelve dos olores con un patrón).
+11. **AAA, EE**: comentarios + renombrar `StreamProxy.Shutdown` →
     `ClearRelays` (o documentar como intencional).
-11. **HHH**: hacer `pathmap.Read` retornar path relativo + validar
+12. **HHH**: hacer `pathmap.Read` retornar path relativo + validar
     prefix. ~5 LOC.
+13. **F16-6**: clasificar errores en `federation_admin.go:115,163`
+    con `errors.Is/As` + mensaje genérico al cliente + detalle al
+    log. ~20 LOC.
+14. **F16-7**: `KillSession` (admin_streams.go:140) obligatorio
+    `logger.Info("session killed", "session_id", id, "killed_by",
+    claims.UserID)` + emitir evento bus. ~10 LOC.
 
-**Cero cambios de API pública. Cierra el SSRF (alta) + 3 bugs
-latentes de drain + violación up-only + leak de ratelimit.**
+**Cierre**: 2 CVE-class + 3 bugs latentes de drain + violación
+up-only + leak de ratelimit + 2 olores menores de federation + 1
+de audit trail. **Cero cambios de API pública.**
 
 #### Iteración 2 · Sub-paquetes de db (~1 día)
 
@@ -2923,12 +3329,40 @@ y deja el repo verde tras commit.
     (3 sites concretos).
 49. **F14-5-a**: documentar convención `is*Safe*` / `Blocked*` en
     `conventions.md`.
+50. **F15-2**: inyectar `clock.Clock` en services que tocan tiempo
+    pero no lo usan (231 hits de `time.Now()` en tests). Migración
+    mecánica.
+51. **F15-3 + F15-4**: refactor de `waitForCount` (auth) y
+    `TestManager_CloseStopsSweeperGoroutine` (federation) para
+    eliminar polling sleep.
+52. **F15-5 + F15-10**: consolidar fakes en `testutil/fakes/` y
+    reducir mocks de 16 métodos en `libFakeService`.
+53. **F15-6 + F15-11**: ampliar error path coverage. Empezar por
+    handlers con < 3 tests de error. Documentar pauta
+    `TestX_WhenY_ThenZ`.
+54. **F15-8**: `/tmp/sessions/abc` → `t.TempDir()` en
+    `transcode_test.go:81-82`.
+55. **F15-12**: 1-2 tests `*_Concurrent_*` para
+    `provider.Manager.Register`, `stream.Manager.StartSession`.
+56. **F16-2 + F16-4**: helper `parsePagination` y reemplazar 5+
+    sites con validación negativa ad-hoc.
+57. **F16-3**: helper `requirePeer` análogo a `requireParam`.
+58. **F16-5**: borrar `canAccessLibrary` redundante o documentar.
+59. **F16-8**: contador Prometheus `hubplay_sse_dropped_total{...}`
+    en los 3 SSE handlers (auth_device, me_events, events). ~15
+    LOC, instrumentación pura.
+60. **F16-10..F16-19**: tanda de fixes baja: validar `Value` UTF-8
+    en preferences, cap `idSet` en progress, logear errores
+    ignorados en progress + providers.
 
 **Resultado esperado de Iteración 8**:
 - ~600 LOC eliminadas sin pérdida de funcionalidad (ver F14.14).
 - ~30 firmas de función con 7+ params reducidas a 1 param (struct).
 - 100+ sites de boilerplate eliminados.
-- 10 tests sin `time.Sleep` arbitrario.
+- 19 ficheros de test sin `time.Sleep` arbitrario.
+- `clock.Clock` propagado a services que tocan tiempo.
+- 3 SSE handlers con métrica de drop.
+- Helpers `parsePagination` + `requirePeer` añadidos.
 - Convenciones documentadas en `conventions.md`.
 
 ### C. ADRs a abrir
@@ -2941,6 +3375,9 @@ y deja el repo verde tras commit.
 | 018 | Comentarios en español como convención | — |
 | **019** | **SSRF guard con `CheckRedirect` obligatorio** | Refuerza ADR-002 |
 | **020** | **Política `up-only` con migraciones de rollback positivas** | Refuerza convención existente |
+| **021** | **Path traversal: `EvalSymlinks` obligatorio antes de `Rel`** | — |
+| **022** | **`clock.Clock` inyectado en todo service que toque tiempo** | — |
+| **023** | **Filtración de errores externos: clasificar antes de exponer** | — |
 
 ADR-012 (federación reuse de primitivos) **NO se supersede**: la
 promesa se confirma vigente en F7 (JWT shape, keystore, audit). El
