@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -14,6 +15,29 @@ import (
 
 	"github.com/google/uuid"
 )
+
+// validateHTTPURL rejects empty / non-http(s) URLs so we don't persist
+// payloads like `file:///etc/passwd`, `gopher://...` or plain typos.
+// The downstream fetchers (M3U / EPG) already enforce this when they
+// run, but checking at the create boundary turns a deferred preflight
+// error into an immediate 400 the form can render inline.
+func validateHTTPURL(raw string) bool {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return false
+	}
+	parsed, err := url.Parse(s)
+	if err != nil {
+		return false
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return false
+	}
+	if parsed.Host == "" {
+		return false
+	}
+	return true
+}
 
 // normaliseLanguageFilter trims, lower-cases and de-duplicates the
 // language codes coming from a CreateRequest / UpdateRequest payload,
@@ -339,9 +363,19 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (*db
 		lib.ScanMode = req.ScanMode
 	}
 	if req.M3UURL != nil {
+		if *req.M3UURL != "" && !validateHTTPURL(*req.M3UURL) {
+			return nil, domain.NewValidationError(map[string]string{
+				"m3u_url": "must be a valid http:// or https:// URL",
+			})
+		}
 		lib.M3UURL = *req.M3UURL
 	}
 	if req.EPGURL != nil {
+		if *req.EPGURL != "" && !validateHTTPURL(*req.EPGURL) {
+			return nil, domain.NewValidationError(map[string]string{
+				"epg_url": "must be a valid http:// or https:// URL",
+			})
+		}
 		lib.EPGURL = *req.EPGURL
 	}
 	if req.LanguageFilter != nil {
@@ -542,6 +576,11 @@ func validateCreateRequest(req CreateRequest) error {
 	if req.ContentType == "livetv" {
 		if req.M3UURL == "" {
 			fields["m3u_url"] = "is required for livetv libraries"
+		} else if !validateHTTPURL(req.M3UURL) {
+			fields["m3u_url"] = "must be a valid http:// or https:// URL"
+		}
+		if strings.TrimSpace(req.EPGURL) != "" && !validateHTTPURL(req.EPGURL) {
+			fields["epg_url"] = "must be a valid http:// or https:// URL"
 		}
 	} else if len(req.Paths) == 0 {
 		fields["paths"] = "at least one path is required"

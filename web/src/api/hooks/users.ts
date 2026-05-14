@@ -97,14 +97,17 @@ export function useCreatePersonalIPTVLibrary() {
       name: string;
       m3uUrl: string;
       epgUrl?: string;
+      languageFilter?: string[];
       tlsInsecure?: boolean;
     }
   >({
-    mutationFn: ({ userId, name, m3uUrl, epgUrl, tlsInsecure }) =>
+    mutationFn: ({ userId, name, m3uUrl, epgUrl, languageFilter, tlsInsecure }) =>
       api.createPersonalIPTVLibrary(userId, {
         name,
         m3u_url: m3uUrl,
         epg_url: epgUrl || undefined,
+        language_filter:
+          languageFilter && languageFilter.length > 0 ? languageFilter : undefined,
         tls_insecure: tlsInsecure || undefined,
       }),
     onSuccess: (_lib, vars) => {

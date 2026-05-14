@@ -45,6 +45,12 @@ const apiMock = vi.hoisted(() => ({
   getUserLibraryAccess: vi.fn(),
   setUserLibraryAccess: vi.fn(),
   createPersonalIPTVLibrary: vi.fn(),
+  // The personal-IPTV modal now embeds the same livetv subform the
+  // /admin/libraries page uses, which calls /iptv/countries on
+  // mount when the public tab is active. Mock it so the dropdown
+  // renders deterministically instead of pegging on a real fetch.
+  getPublicCountries: vi.fn(),
+  preflightM3U: vi.fn(),
 }));
 vi.mock("@/api/client", () => ({ api: apiMock }));
 
@@ -126,6 +132,15 @@ beforeEach(() => {
     name: "Lista de Bob",
     content_type: "livetv",
     m3u_url: "https://example.com/bob.m3u",
+  });
+  apiMock.getPublicCountries.mockResolvedValue([
+    { code: "es", name: "España", flag: "🇪🇸" },
+    { code: "fr", name: "Francia", flag: "🇫🇷" },
+  ]);
+  apiMock.preflightM3U.mockResolvedValue({
+    status: "ok",
+    message: "OK",
+    elapsed_ms: 12,
   });
   apiMock.createUser.mockResolvedValue({
     id: "u-new",
@@ -355,7 +370,7 @@ describe("UsersAdmin (mobile)", () => {
 
   // ─── Personal IPTV list shortcut ────────────────────────────────
 
-  it("opens the personal IPTV modal from the kebab and POSTs the form", async () => {
+  it("opens the personal IPTV modal and submits via the custom M3U URL path", async () => {
     render(wrap(<UsersAdmin />));
     await waitFor(() => expect(screen.getByText("bob")).toBeInTheDocument());
 
@@ -367,16 +382,25 @@ describe("UsersAdmin (mobile)", () => {
       screen.getByRole("menuitem", { name: /lista iptv personal|personal iptv/i }),
     );
 
-    // Modal title surfaces — the name field is seeded with "Lista de Bob".
-    const nameInput = await screen.findByLabelText(/nombre|^name$/i);
+    // Modal opens; the name field is seeded with "Lista de Bob".
+    const nameInput = await screen.findByLabelText(/^nombre$|^name$/i);
     expect((nameInput as HTMLInputElement).value).toMatch(/Bob/);
 
-    const m3uInput = screen.getByLabelText(/url m3u|m3u url/i);
+    // Switch to the "Personalizada" tab so the M3U URL input replaces
+    // the public-iptv-org picker. The shared livetv subform defaults
+    // to "Público" on open.
+    fireEvent.click(
+      screen.getByRole("tab", { name: /personalizada|custom/i }),
+    );
+
+    const m3uInput = await screen.findByLabelText(/url m3u|m3u url/i);
     fireEvent.change(m3uInput, {
       target: { value: "https://example.com/bob.m3u" },
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /crear lista|create list/i }));
+    fireEvent.click(
+      screen.getByRole("button", { name: /crear lista|create list/i }),
+    );
 
     await waitFor(() => {
       expect(apiMock.createPersonalIPTVLibrary).toHaveBeenCalledTimes(1);
@@ -385,6 +409,69 @@ describe("UsersAdmin (mobile)", () => {
     expect(userId).toBe("u2");
     expect(payload.m3u_url).toBe("https://example.com/bob.m3u");
     expect(payload.name).toMatch(/Bob/);
+  });
+
+  it("constructs the iptv-org URL when the public country tab is used", async () => {
+    render(wrap(<UsersAdmin />));
+    await waitFor(() => expect(screen.getByText("bob")).toBeInTheDocument());
+
+    const bobCard = screen.getByText("bob").closest("li");
+    fireEvent.click(
+      within(bobCard!).getByRole("button", { name: /acciones|actions/i }),
+    );
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: /lista iptv personal|personal iptv/i }),
+    );
+
+    // Default tab is "Público" + "country". Wait for the public-
+    // countries query to resolve so the dropdown has an "es" option
+    // we can select — without this the change event silently no-ops
+    // against the placeholder "Elige una opción…".
+    await screen.findByRole("option", { name: /españa/i });
+    const countrySelect = screen.getByLabelText(/país|country/i);
+    fireEvent.change(countrySelect, { target: { value: "es" } });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /crear lista|create list/i }),
+    );
+
+    await waitFor(() => {
+      expect(apiMock.createPersonalIPTVLibrary).toHaveBeenCalledTimes(1);
+    });
+    const [, payload] = apiMock.createPersonalIPTVLibrary.mock.calls[0];
+    expect(payload.m3u_url).toBe(
+      "https://iptv-org.github.io/iptv/countries/es.m3u",
+    );
+  });
+
+  it("rejects a non-http(s) M3U URL inline before hitting the API", async () => {
+    render(wrap(<UsersAdmin />));
+    await waitFor(() => expect(screen.getByText("bob")).toBeInTheDocument());
+
+    const bobCard = screen.getByText("bob").closest("li");
+    fireEvent.click(
+      within(bobCard!).getByRole("button", { name: /acciones|actions/i }),
+    );
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: /lista iptv personal|personal iptv/i }),
+    );
+    fireEvent.click(
+      screen.getByRole("tab", { name: /personalizada|custom/i }),
+    );
+
+    const m3uInput = await screen.findByLabelText(/url m3u|m3u url/i);
+    fireEvent.change(m3uInput, { target: { value: "file:///etc/passwd" } });
+    fireEvent.click(
+      screen.getByRole("button", { name: /crear lista|create list/i }),
+    );
+
+    // The inline validator catches it; no network call should fire.
+    await waitFor(() =>
+      expect(
+        screen.getByText(/http:\/\/ o https:\/\/|http:\/\/ or https:\/\//i),
+      ).toBeInTheDocument(),
+    );
+    expect(apiMock.createPersonalIPTVLibrary).not.toHaveBeenCalled();
   });
 
   it("hides 'Lista IPTV personal' on profile rows (grants only target the household owner)", async () => {
@@ -401,27 +488,5 @@ describe("UsersAdmin (mobile)", () => {
     expect(
       screen.queryByRole("menuitem", { name: /lista iptv personal|personal iptv/i }),
     ).toBeNull();
-  });
-
-  it("blocks submit until both name and M3U URL are filled", async () => {
-    render(wrap(<UsersAdmin />));
-    await waitFor(() => expect(screen.getByText("bob")).toBeInTheDocument());
-
-    const bobCard = screen.getByText("bob").closest("li");
-    fireEvent.click(
-      within(bobCard!).getByRole("button", { name: /acciones|actions/i }),
-    );
-    fireEvent.click(
-      screen.getByRole("menuitem", { name: /lista iptv personal|personal iptv/i }),
-    );
-
-    // Default seeded name is non-empty; clear it to drive the empty-name
-    // validation path.
-    const nameInput = await screen.findByLabelText(/nombre|^name$/i);
-    fireEvent.change(nameInput, { target: { value: "" } });
-    fireEvent.click(screen.getByRole("button", { name: /crear lista|create list/i }));
-    // The required attribute means the browser blocks submit before
-    // our onSubmit fires — no API call, no error message rendered.
-    expect(apiMock.createPersonalIPTVLibrary).not.toHaveBeenCalled();
   });
 });

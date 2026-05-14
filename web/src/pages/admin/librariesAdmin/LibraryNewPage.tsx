@@ -25,23 +25,15 @@ import { FolderBrowserContent } from "@/components/setup/FolderBrowser";
 import {
   useCreateLibrary,
   useRefreshM3U,
-  usePublicCountries,
   usePrefetchBrowseLibraryDirectories,
 } from "@/api/hooks";
 import type { ContentType } from "@/api/types";
-import { FilteredSelect } from "./FilteredSelect";
-import { LanguageMultiSelect } from "./LanguageMultiSelect";
-import { PreflightButton } from "./PreflightButton";
-import { TLSInsecureToggle } from "./TLSInsecureToggle";
+import { LiveTvFormFields } from "./LiveTvFormFields";
 import {
-  CONTENT_TYPES,
-  IPTV_ORG_CATEGORIES,
-  IPTV_ORG_LANGUAGES,
-  IPTV_ORG_PATH_BY_KIND,
-  IPTV_ORG_REGIONS,
-  type LiveKind,
-  type LiveSource,
-} from "./constants";
+  makeInitialLiveTvFormState,
+  resolveLiveTvForm,
+} from "./liveTvFormState";
+import { CONTENT_TYPES } from "./constants";
 
 export default function LibraryNewPage() {
   const { t } = useTranslation();
@@ -53,20 +45,8 @@ export default function LibraryNewPage() {
   const [type, setType] = useState<ContentType>("movies");
   const [path, setPath] = useState("");
   const [view, setView] = useState<"form" | "browse">("form");
-  const [liveSource, setLiveSource] = useState<LiveSource>("public");
-  const [liveKind, setLiveKind] = useState<LiveKind>("country");
-  const [liveFilter, setLiveFilter] = useState("");
-  const [country, setCountry] = useState("");
-  const [livePick, setLivePick] = useState("");
-  const [m3uURL, setM3UURL] = useState("");
-  const [epgURL, setEPGURL] = useState("");
-  const [languageFilter, setLanguageFilter] = useState<string[]>([]);
-  const [tlsInsecure, setTLSInsecure] = useState(false);
+  const [liveState, setLiveState] = useState(makeInitialLiveTvFormState);
   const [validationError, setValidationError] = useState<string | null>(null);
-
-  const publicCountries = usePublicCountries({
-    enabled: type === "livetv" && liveSource === "public",
-  });
 
   // Warm the folder-picker cache while the user fills in the form.
   // No-op when already cached.
@@ -81,7 +61,7 @@ export default function LibraryNewPage() {
   useEffect(() => {
     if (validationError) setValidationError(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [name, path, country, livePick, m3uURL, type, liveSource, liveKind]);
+  }, [name, path, type, liveState]);
 
   function close() {
     navigate("/admin/libraries");
@@ -100,39 +80,17 @@ export default function LibraryNewPage() {
     }
 
     if (type === "livetv") {
-      let resolvedM3U = "";
-      if (liveSource === "public") {
-        const pick = liveKind === "country" ? country : livePick;
-        if (!pick) {
-          setValidationError(
-            t("admin.libraries.errors.livePickRequired", {
-              defaultValue:
-                "Selecciona un país, categoría, idioma o región para la lista pública.",
-            }),
-          );
-          return;
-        }
-        resolvedM3U = `https://iptv-org.github.io/iptv/${IPTV_ORG_PATH_BY_KIND[liveKind]}/${pick}.m3u`;
-      } else {
-        if (!m3uURL.trim()) {
-          setValidationError(
-            t("admin.libraries.errors.m3uRequired", {
-              defaultValue: "La URL del M3U es obligatoria.",
-            }),
-          );
-          return;
-        }
-        resolvedM3U = m3uURL.trim();
+      const resolved = resolveLiveTvForm(liveState, t);
+      if (!resolved.ok) {
+        setValidationError(resolved.error);
+        return;
       }
       createLibrary.mutate(
         {
           name: name.trim(),
           content_type: "livetv",
           paths: [],
-          m3u_url: resolvedM3U,
-          epg_url: epgURL.trim() || undefined,
-          language_filter: languageFilter.length > 0 ? languageFilter : undefined,
-          tls_insecure: tlsInsecure || undefined,
+          ...resolved.payload,
         },
         {
           onSuccess: (lib) => {
@@ -234,163 +192,7 @@ export default function LibraryNewPage() {
           </div>
 
           {type === "livetv" ? (
-            <>
-              <div
-                role="tablist"
-                aria-label={t("admin.libraries.livetvSource", { defaultValue: "Fuente" })}
-                className="flex gap-1 rounded-[--radius-md] border border-border bg-bg-surface p-1"
-              >
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={liveSource === "public"}
-                  onClick={() => setLiveSource("public")}
-                  className={[
-                    "flex-1 rounded-[--radius-sm] px-3 py-1.5 text-xs font-medium transition-colors",
-                    liveSource === "public"
-                      ? "bg-accent/15 text-accent"
-                      : "text-text-secondary hover:text-text-primary",
-                  ].join(" ")}
-                >
-                  {t("admin.libraries.livetvPublic", { defaultValue: "Público (iptv-org)" })}
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={liveSource === "custom"}
-                  onClick={() => setLiveSource("custom")}
-                  className={[
-                    "flex-1 rounded-[--radius-sm] px-3 py-1.5 text-xs font-medium transition-colors",
-                    liveSource === "custom"
-                      ? "bg-accent/15 text-accent"
-                      : "text-text-secondary hover:text-text-primary",
-                  ].join(" ")}
-                >
-                  {t("admin.libraries.livetvCustom", { defaultValue: "Personalizada" })}
-                </button>
-              </div>
-
-              {liveSource === "public" ? (
-                <div className="flex flex-col gap-3">
-                  <div
-                    role="tablist"
-                    aria-label="Tipo de lista"
-                    className="grid grid-cols-4 gap-1 rounded-[--radius-md] border border-border bg-bg-surface p-1 text-xs"
-                  >
-                    {(
-                      [
-                        { k: "country", label: "País" },
-                        { k: "category", label: "Categoría" },
-                        { k: "language", label: "Idioma" },
-                        { k: "region", label: "Región" },
-                      ] as const
-                    ).map(({ k, label }) => (
-                      <button
-                        key={k}
-                        type="button"
-                        role="tab"
-                        aria-selected={liveKind === k}
-                        onClick={() => {
-                          setLiveKind(k);
-                          setLiveFilter("");
-                          setCountry("");
-                          setLivePick("");
-                        }}
-                        className={[
-                          "rounded-[--radius-sm] px-2 py-1 font-medium transition-colors",
-                          liveKind === k
-                            ? "bg-accent/15 text-accent"
-                            : "text-text-secondary hover:text-text-primary",
-                        ].join(" ")}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-
-                  <Input
-                    label={t("admin.libraries.searchList", { defaultValue: "Filtrar" })}
-                    placeholder={t("admin.libraries.searchListPlaceholder", {
-                      defaultValue: "Escribe para filtrar…",
-                    })}
-                    value={liveFilter}
-                    onChange={(e) => setLiveFilter(e.target.value)}
-                  />
-
-                  {liveKind === "country" ? (
-                    <FilteredSelect
-                      id="livetv-country"
-                      label={t("admin.libraries.country", { defaultValue: "País" })}
-                      value={country}
-                      onChange={setCountry}
-                      filter={liveFilter}
-                      loading={publicCountries.isLoading}
-                      options={(publicCountries.data ?? []).map((c) => ({
-                        code: c.code,
-                        name: `${c.flag} ${c.name}`,
-                      }))}
-                    />
-                  ) : liveKind === "category" ? (
-                    <FilteredSelect
-                      id="livetv-category"
-                      label="Categoría"
-                      value={livePick}
-                      onChange={setLivePick}
-                      filter={liveFilter}
-                      options={IPTV_ORG_CATEGORIES}
-                    />
-                  ) : liveKind === "language" ? (
-                    <FilteredSelect
-                      id="livetv-language"
-                      label="Idioma"
-                      value={livePick}
-                      onChange={setLivePick}
-                      filter={liveFilter}
-                      options={IPTV_ORG_LANGUAGES}
-                    />
-                  ) : (
-                    <FilteredSelect
-                      id="livetv-region"
-                      label="Región"
-                      value={livePick}
-                      onChange={setLivePick}
-                      filter={liveFilter}
-                      options={IPTV_ORG_REGIONS}
-                    />
-                  )}
-                </div>
-              ) : (
-                <Input
-                  label={t("admin.libraries.m3uUrl", { defaultValue: "URL M3U" })}
-                  placeholder="https://ejemplo.com/playlist.m3u"
-                  value={m3uURL}
-                  onChange={(e) => setM3UURL(e.target.value)}
-                  required
-                />
-              )}
-
-              <div className="flex flex-col gap-1">
-                <Input
-                  label={t("admin.libraries.epgUrl", { defaultValue: "URL EPG (opcional)" })}
-                  placeholder="https://ejemplo.com/epg.xml"
-                  value={epgURL}
-                  onChange={(e) => setEPGURL(e.target.value)}
-                />
-                <p className="text-[11px] leading-snug text-text-muted">
-                  {t("admin.libraries.epgURLHint", {
-                    defaultValue:
-                      "Si el M3U trae url-tvg en su cabecera, se auto-detecta.",
-                  })}
-                </p>
-              </div>
-
-              <LanguageMultiSelect value={languageFilter} onChange={setLanguageFilter} />
-              <TLSInsecureToggle value={tlsInsecure} onChange={setTLSInsecure} />
-
-              {liveSource === "custom" && (
-                <PreflightButton m3uURL={m3uURL} tlsInsecure={tlsInsecure} />
-              )}
-            </>
+            <LiveTvFormFields value={liveState} onChange={setLiveState} />
           ) : (
             <div className="flex items-end gap-2">
               <div className="flex-1">

@@ -39,6 +39,11 @@ import {
 import { Trans, useTranslation } from 'react-i18next';
 import FederationAdmin from "./FederationAdmin";
 import { LibraryAccessCheckboxes } from "./LibraryAccessCheckboxes";
+import { LiveTvFormFields } from "./librariesAdmin/LiveTvFormFields";
+import {
+  makeInitialLiveTvFormState,
+  resolveLiveTvForm,
+} from "./librariesAdmin/liveTvFormState";
 
 export default function UsersAdmin() {
   const { t } = useTranslation();
@@ -231,15 +236,15 @@ export default function UsersAdmin() {
   const [pinValue, setPinValue] = useState("");
   const [pinError, setPinError] = useState<string | null>(null);
 
-  // Personal IPTV modal — admin types a name + M3U URL and the
-  // backend creates the library + grant in one transaction. The
-  // default name is seeded from the target's display name so the
-  // admin doesn't have to re-type "Lista de Juan" by hand.
+  // Personal IPTV modal — admin fills the same livetv form the main
+  // /admin/libraries page uses (source picker public/iptv-org vs
+  // custom, EPG, language allowlist, TLS toggle, preflight) and the
+  // backend creates the library + grant in one transaction. Default
+  // name is seeded from the target's display name so the admin
+  // doesn't have to re-type "Lista de Juan" by hand.
   const [iptvTarget, setIptvTarget] = useState<User | null>(null);
   const [iptvName, setIptvName] = useState("");
-  const [iptvM3U, setIptvM3U] = useState("");
-  const [iptvEPG, setIptvEPG] = useState("");
-  const [iptvTLSInsecure, setIptvTLSInsecure] = useState(false);
+  const [iptvLiveState, setIptvLiveState] = useState(makeInitialLiveTvFormState);
   const [iptvError, setIptvError] = useState<string | null>(null);
   const createPersonalIPTV = useCreatePersonalIPTVLibrary();
   function openIptvModal(user: User) {
@@ -251,9 +256,7 @@ export default function UsersAdmin() {
         name: displayName,
       }),
     );
-    setIptvM3U("");
-    setIptvEPG("");
-    setIptvTLSInsecure(false);
+    setIptvLiveState(makeInitialLiveTvFormState());
     setIptvError(null);
     createPersonalIPTV.reset();
   }
@@ -265,7 +268,6 @@ export default function UsersAdmin() {
     e.preventDefault();
     if (!iptvTarget) return;
     const name = iptvName.trim();
-    const m3uUrl = iptvM3U.trim();
     if (!name) {
       setIptvError(
         t("admin.users.iptvPersonalNameRequired", {
@@ -274,12 +276,9 @@ export default function UsersAdmin() {
       );
       return;
     }
-    if (!m3uUrl) {
-      setIptvError(
-        t("admin.users.iptvPersonalM3URequired", {
-          defaultValue: "Indica la URL del M3U.",
-        }),
-      );
+    const resolved = resolveLiveTvForm(iptvLiveState, t);
+    if (!resolved.ok) {
+      setIptvError(resolved.error);
       return;
     }
     setIptvError(null);
@@ -287,9 +286,10 @@ export default function UsersAdmin() {
       {
         userId: iptvTarget.id,
         name,
-        m3uUrl,
-        epgUrl: iptvEPG.trim() || undefined,
-        tlsInsecure: iptvTLSInsecure || undefined,
+        m3uUrl: resolved.payload.m3u_url,
+        epgUrl: resolved.payload.epg_url,
+        languageFilter: resolved.payload.language_filter,
+        tlsInsecure: resolved.payload.tls_insecure,
       },
       { onSuccess: () => closeIptvModal() },
     );
@@ -1552,12 +1552,16 @@ export default function UsersAdmin() {
         </div>
       </Modal>
 
-      {/* Personal IPTV list modal. Backend POST creates the library
-          AND the lone library_access grant in one tx so the operator
-          never sees an orphan public library mid-flow. After save we
+      {/* Personal IPTV list modal. Renders the SAME livetv subform
+          used at /admin/libraries/new so the admin gets identical
+          options (public iptv-org picker, language allowlist, TLS
+          toggle, preflight) without us maintaining two parallel
+          implementations. Backend POST creates the library AND the
+          lone library_access grant in one tx so the operator never
+          sees an orphan public library mid-flow. After save we
           refetch the matrix-access cache for this user — the new
-          library will show ticked the next time they open the access
-          modal. */}
+          library will show ticked the next time they open the
+          access modal. */}
       <Modal
         isOpen={iptvTarget !== null}
         onClose={closeIptvModal}
@@ -1572,7 +1576,7 @@ export default function UsersAdmin() {
           <p className="text-xs text-text-muted">
             <Trans
               i18nKey="admin.users.iptvPersonalModalHint"
-              defaults="Solo <strong>{{name}}</strong> verá esta lista. Para todos los demás, sigue siendo invisible."
+              defaults="Solo <strong>{{name}}</strong> y los miembros de su hogar verán esta lista. Para el resto de cuentas, sigue siendo invisible."
               values={{
                 name:
                   iptvTarget?.display_name ||
@@ -1596,48 +1600,14 @@ export default function UsersAdmin() {
             }}
             required
           />
-          <Input
-            label={t("admin.users.iptvPersonalM3U", {
-              defaultValue: "URL M3U",
-            })}
-            placeholder="https://ejemplo.com/playlist.m3u"
-            value={iptvM3U}
-            onChange={(e) => {
-              setIptvM3U(e.target.value);
+
+          <LiveTvFormFields
+            value={iptvLiveState}
+            onChange={(updater) => {
+              setIptvLiveState(updater);
               if (iptvError) setIptvError(null);
             }}
-            required
           />
-          <div className="flex flex-col gap-1">
-            <Input
-              label={t("admin.users.iptvPersonalEPG", {
-                defaultValue: "URL EPG (opcional)",
-              })}
-              placeholder="https://ejemplo.com/epg.xml"
-              value={iptvEPG}
-              onChange={(e) => setIptvEPG(e.target.value)}
-            />
-            <p className="text-[11px] leading-snug text-text-muted">
-              {t("admin.users.iptvPersonalEPGHint", {
-                defaultValue:
-                  "Si el M3U trae url-tvg en su cabecera, se auto-detecta.",
-              })}
-            </p>
-          </div>
-          <label className="flex items-start gap-2 text-xs text-text-muted">
-            <input
-              type="checkbox"
-              checked={iptvTLSInsecure}
-              onChange={(e) => setIptvTLSInsecure(e.target.checked)}
-              className="mt-0.5 accent-accent"
-            />
-            <span>
-              {t("admin.users.iptvPersonalTLSInsecure", {
-                defaultValue:
-                  "TLS inseguro (omitir verificación de certificado). Úsalo solo si el proveedor lo requiere.",
-              })}
-            </span>
-          </label>
 
           {iptvError && (
             <p
