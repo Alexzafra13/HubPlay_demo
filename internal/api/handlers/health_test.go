@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"hubplay/internal/db"
 	"hubplay/internal/testutil"
 )
 
@@ -15,7 +16,7 @@ import (
 func TestHealthHandler_Health_ReturnsOK(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	sm := newFakeStreamManager()
-	h := NewHealthHandler(database, sm, "test-1.2.3", ":memory:")
+	h := NewHealthHandler(db.NewMaintenance(testutil.Driver(), database), sm, "test-1.2.3", ":memory:")
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rr := httptest.NewRecorder()
@@ -56,7 +57,7 @@ func TestHealthHandler_Health_ReportsDBError_With503(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	_ = database.Close() // t.Cleanup also closes, which is fine — double-close is ignored
 	sm := newFakeStreamManager()
-	h := NewHealthHandler(database, sm, "v", ":memory:")
+	h := NewHealthHandler(db.NewMaintenance(testutil.Driver(), database), sm, "v", ":memory:")
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rr := httptest.NewRecorder()
@@ -78,7 +79,7 @@ func TestHealthHandler_Health_ReportsDBError_With503(t *testing.T) {
 
 func TestHealthHandler_Health_NilStreamManager_ZeroStreams(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	h := NewHealthHandler(database, nil, "v", ":memory:")
+	h := NewHealthHandler(db.NewMaintenance(testutil.Driver(), database), nil, "v", ":memory:")
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rr := httptest.NewRecorder()
@@ -101,7 +102,7 @@ func TestHealthHandler_Live_AlwaysOK_EvenWithoutDB(t *testing.T) {
 	// transient SQLite hiccup.
 	database := testutil.NewTestDB(t)
 	_ = database.Close()
-	h := NewHealthHandler(database, nil, "v", ":memory:")
+	h := NewHealthHandler(db.NewMaintenance(testutil.Driver(), database), nil, "v", ":memory:")
 
 	req := httptest.NewRequest(http.MethodGet, "/health/live", nil)
 	rr := httptest.NewRecorder()
@@ -121,7 +122,7 @@ func TestHealthHandler_Live_AlwaysOK_EvenWithoutDB(t *testing.T) {
 
 func TestHealthHandler_Ready_DBPingsOK(t *testing.T) {
 	database := testutil.NewTestDB(t)
-	h := NewHealthHandler(database, nil, "v", ":memory:")
+	h := NewHealthHandler(db.NewMaintenance(testutil.Driver(), database), nil, "v", ":memory:")
 
 	req := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
 	rr := httptest.NewRecorder()
@@ -143,7 +144,7 @@ func TestHealthHandler_Ready_DBPingsOK(t *testing.T) {
 func TestHealthHandler_Ready_503OnDBDown(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	_ = database.Close()
-	h := NewHealthHandler(database, nil, "v", ":memory:")
+	h := NewHealthHandler(db.NewMaintenance(testutil.Driver(), database), nil, "v", ":memory:")
 
 	req := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
 	rr := httptest.NewRecorder()

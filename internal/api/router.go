@@ -1,7 +1,6 @@
 package api
 
 import (
-	"database/sql"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -62,7 +61,16 @@ type Dependencies struct {
 	SetupService   *setup.Service
 	EventBus       *event.Bus
 	Federation     *federation.Manager
-	Database       *sql.DB
+	// DB es el wrapper *db.Maintenance con las capacidades estrechas
+	// que necesitan los handlers admin: PingContext (HealthChecker),
+	// Stats (PoolStatsReporter), VacuumInto (BackupOperator) y
+	// MigrationSource() (solo para el migrator sqlite→pg). Sustituye
+	// al antiguo `Database *sql.DB`; cierra los olores K + T (handlers
+	// no reciben raw `*sql.DB`).
+	DB             *db.Maintenance
+	// Activity expone DailyWatchActivity + TopItems para el admin
+	// SystemHandler. Sustituye las queries raw inline en system.go.
+	Activity       *db.ActivityRepository
 	Version        string
 	WebAssets      fs.FS
 	Config         *config.Config
@@ -154,7 +162,7 @@ func NewRouter(deps Dependencies) http.Handler {
 	if deps.StreamManager != nil {
 		streamSvc = deps.StreamManager
 	}
-	healthHandler := handlers.NewHealthHandler(deps.Database, streamSvc, deps.Version, deps.Config.Database.Path)
+	healthHandler := handlers.NewHealthHandler(deps.DB, streamSvc, deps.Version, deps.Config.Database.Path)
 
 	// Image handler is constructed early so the federation peer
 	// surface (under /api/v1/peer/*, mounted BEFORE the user-auth
@@ -167,7 +175,7 @@ func NewRouter(deps Dependencies) http.Handler {
 		fedImgSrv   *handlers.ImageHandler
 		fedImageDir string
 	)
-	if deps.Database != nil && deps.Config != nil && deps.Images != nil && deps.ExternalIDs != nil && deps.Items != nil && deps.Providers != nil {
+	if deps.DB != nil && deps.Config != nil && deps.Images != nil && deps.ExternalIDs != nil && deps.Items != nil && deps.Providers != nil {
 		fedImageDir = filepath.Join(filepath.Dir(deps.Config.Database.Path), "images")
 		fedImgSrv = handlers.NewImageHandler(
 			deps.Images, deps.ExternalIDs, deps.Items, deps.Providers,
@@ -543,8 +551,8 @@ func NewRouter(deps Dependencies) http.Handler {
 					hostInfo = deps.HostMetrics
 				}
 				sysHandler := handlers.NewSystemHandler(handlers.SystemHandlerConfig{
-					DB:             deps.Database,
-					Driver:         deps.Config.Database.Driver,
+					Health:         deps.DB,
+					Activity:       deps.Activity,
 					Streams:        sysStreams,
 					Libraries:      sysLibs,
 					Settings:       deps.Settings,
@@ -613,9 +621,9 @@ func NewRouter(deps Dependencies) http.Handler {
 					// because it's a system-level admin operation —
 					// same RequireAdmin gate, same prefix the dashboard
 					// uses for its other system endpoints.
-					if deps.Database != nil {
+					if deps.DB != nil {
 						backupHandler := handlers.NewAdminBackupHandler(
-							deps.Config.Database.Driver, deps.Database, deps.Config.Database.Path, deps.Logger,
+							deps.Config.Database.Driver, deps.DB, deps.Config.Database.Path, deps.Logger,
 						)
 						r.Get("/backup", backupHandler.Download)
 						r.Post("/backup/restore", backupHandler.Upload)
@@ -632,7 +640,7 @@ func NewRouter(deps Dependencies) http.Handler {
 						dbHandler := handlers.NewAdminDBHandler(
 							deps.Config,
 							deps.ConfigPath,
-							deps.Database,
+							deps.DB,
 							deps.SetupService.SaveDatabaseConfig,
 							deps.RestartRequester,
 							deps.Logger,

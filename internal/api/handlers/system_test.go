@@ -174,7 +174,8 @@ func TestSystemHandler_Stats_ReportsServerAndRuntime(t *testing.T) {
 	}
 
 	h := NewSystemHandler(SystemHandlerConfig{
-		DB:          database,
+		Health:      db.NewMaintenance(testutil.Driver(), database),
+		Activity:    db.NewActivityRepository(testutil.Driver(), database),
 		Streams:     streams,
 		ImageDir:       imageDir,
 		DBPath:         dbPath,
@@ -248,7 +249,8 @@ func TestSystemHandler_Stats_ReportsDBError(t *testing.T) {
 	_ = database.Close() // induce a Ping() error.
 
 	h := NewSystemHandler(SystemHandlerConfig{
-		DB:      database,
+		Health:      db.NewMaintenance(testutil.Driver(), database),
+		Activity:    db.NewActivityRepository(testutil.Driver(), database),
 		Version: "v",
 		Logger:  newQuietLogger(),
 	})
@@ -272,7 +274,8 @@ func TestSystemHandler_Stats_ReportsDBError(t *testing.T) {
 func TestSystemHandler_Stats_NilStreams_ZeroEverything(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	h := NewSystemHandler(SystemHandlerConfig{
-		DB:      database,
+		Health:      db.NewMaintenance(testutil.Driver(), database),
+		Activity:    db.NewActivityRepository(testutil.Driver(), database),
 		Version: "v",
 		Logger:  newQuietLogger(),
 	})
@@ -312,7 +315,8 @@ func TestSystemHandler_Stats_DirSizeWalksImageDir(t *testing.T) {
 	}
 
 	h := NewSystemHandler(SystemHandlerConfig{
-		DB:       database,
+		Health:      db.NewMaintenance(testutil.Driver(), database),
+		Activity:    db.NewActivityRepository(testutil.Driver(), database),
 		ImageDir: imageDir,
 		Version:  "v",
 		Logger:   newQuietLogger(),
@@ -333,7 +337,8 @@ func TestSystemHandler_Stats_MissingImageDir_ZeroBytes(t *testing.T) {
 	// Deliberately point at a non-existent path. dirSizeOrZero must
 	// swallow ErrNotExist and return 0 (typical first-boot scenario).
 	h := NewSystemHandler(SystemHandlerConfig{
-		DB:       database,
+		Health:      db.NewMaintenance(testutil.Driver(), database),
+		Activity:    db.NewActivityRepository(testutil.Driver(), database),
 		ImageDir: filepath.Join(t.TempDir(), "does-not-exist"),
 		Version:  "v",
 		Logger:   newQuietLogger(),
@@ -371,7 +376,8 @@ func TestSystemHandler_Stats_LibrariesRollup(t *testing.T) {
 	}
 
 	h := NewSystemHandler(SystemHandlerConfig{
-		DB:        database,
+		Health:      db.NewMaintenance(testutil.Driver(), database),
+		Activity:    db.NewActivityRepository(testutil.Driver(), database),
 		Libraries: libs,
 		Version:   "v",
 		Logger:    newQuietLogger(),
@@ -427,7 +433,8 @@ func TestSystemHandler_Stats_LibrariesRollup_SkipsCountErrors(t *testing.T) {
 	}
 
 	h := NewSystemHandler(SystemHandlerConfig{
-		DB:        database,
+		Health:      db.NewMaintenance(testutil.Driver(), database),
+		Activity:    db.NewActivityRepository(testutil.Driver(), database),
 		Libraries: libs,
 		Version:   "v",
 		Logger:    newQuietLogger(),
@@ -482,7 +489,7 @@ func TestSystemHandler_StreamActivity_BackfillsEmptyDays(t *testing.T) {
 		t.Fatalf("update progress: %v", err)
 	}
 
-	h := NewSystemHandler(SystemHandlerConfig{DB: database, Driver: testutil.Driver(), Version: "v", Logger: newQuietLogger()})
+	h := NewSystemHandler(SystemHandlerConfig{Health: db.NewMaintenance(testutil.Driver(), database), Activity: db.NewActivityRepository(testutil.Driver(), database), Version: "v", Logger: newQuietLogger()})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/system/stream-activity?days=7", nil)
 	rr := httptest.NewRecorder()
@@ -559,7 +566,7 @@ func TestSystemHandler_TopItems_EpisodesRolledUpToSeries(t *testing.T) {
 		t.Fatalf("progress ep-2: %v", err)
 	}
 
-	h := NewSystemHandler(SystemHandlerConfig{DB: database, Driver: testutil.Driver(), Version: "v", Logger: newQuietLogger()})
+	h := NewSystemHandler(SystemHandlerConfig{Health: db.NewMaintenance(testutil.Driver(), database), Activity: db.NewActivityRepository(testutil.Driver(), database), Version: "v", Logger: newQuietLogger()})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/system/top-items?days=7&limit=5", nil)
 	rr := httptest.NewRecorder()
@@ -611,7 +618,8 @@ func TestSystemHandler_Stats_HostBlock_SerialisesAllFields(t *testing.T) {
 		GPUDriverVersion:    "560.35.03",
 	}}
 	h := NewSystemHandler(SystemHandlerConfig{
-		DB:     database,
+		Health:      db.NewMaintenance(testutil.Driver(), database),
+		Activity:    db.NewActivityRepository(testutil.Driver(), database),
 		Host:   host,
 		Logger: newQuietLogger(),
 	})
@@ -649,7 +657,7 @@ func TestSystemHandler_Stats_HostBlock_SerialisesAllFields(t *testing.T) {
 // 500. The frontend renders dashes for empty rows.
 func TestSystemHandler_Stats_HostBlock_AbsentProviderEmitsZeroes(t *testing.T) {
 	h := NewSystemHandler(SystemHandlerConfig{
-		DB:     testutil.NewTestDB(t),
+		Health: db.NewMaintenance(testutil.Driver(), testutil.NewTestDB(t)),
 		Host:   nil, // explicit — same shape the test rigs use
 		Logger: newQuietLogger(),
 	})
