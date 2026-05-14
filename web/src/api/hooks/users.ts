@@ -9,6 +9,7 @@ import { api } from "../client";
 import { queryKeys } from "../queryKeys";
 import type {
   CreateUserResponse,
+  Library,
   ProfileSummary,
   ResetPasswordResponse,
   User,
@@ -77,6 +78,41 @@ export function useUserLibraryAccess(
     // the hook from firing on every render of the parent page.
     enabled: !!userId,
     ...options,
+  });
+}
+
+// Personal IPTV library shortcut. Creates a livetv library + grants
+// access only to the target user in one server transaction. The
+// matrix-access cache for this user is invalidated so the new lib
+// appears ticked the next time the admin opens the access modal, and
+// the global `libraries` list refreshes so the new entry shows up at
+// /admin/libraries.
+export function useCreatePersonalIPTVLibrary() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    Library,
+    Error,
+    {
+      userId: string;
+      name: string;
+      m3uUrl: string;
+      epgUrl?: string;
+      tlsInsecure?: boolean;
+    }
+  >({
+    mutationFn: ({ userId, name, m3uUrl, epgUrl, tlsInsecure }) =>
+      api.createPersonalIPTVLibrary(userId, {
+        name,
+        m3u_url: m3uUrl,
+        epg_url: epgUrl || undefined,
+        tls_insecure: tlsInsecure || undefined,
+      }),
+    onSuccess: (_lib, vars) => {
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.userLibraryAccess(vars.userId),
+      });
+      queryClient.invalidateQueries({ queryKey: queryKeys.libraries });
+    },
   });
 }
 

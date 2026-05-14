@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -12,6 +13,7 @@ import (
 
 	"hubplay/internal/db"
 	"hubplay/internal/domain"
+	"hubplay/internal/library"
 	"hubplay/internal/testutil"
 )
 
@@ -39,6 +41,7 @@ func newLibraryAccessEnv(t *testing.T) *libraryAccessEnv {
 	r.Route("/api/v1/users", func(r chi.Router) {
 		r.Get("/{id}/library-access", env.handler.GetLibraryAccess)
 		r.Put("/{id}/library-access", env.handler.SetLibraryAccess)
+		r.Post("/{id}/iptv-libraries", env.handler.CreatePersonalIPTV)
 	})
 	env.router = r
 	return env
@@ -297,5 +300,147 @@ func TestUserHandler_SetLibraryAccess_EmptyValue_400(t *testing.T) {
 	}
 	if len(env.libs.replaceAccessCalls) != 0 {
 		t.Error("ReplaceAccess must not run for invalid payload")
+	}
+}
+
+// ─── CreatePersonalIPTV ─────────────────────────────────────────────────────
+
+func TestUserHandler_CreatePersonalIPTV_HappyPath(t *testing.T) {
+	env := newLibraryAccessEnv(t)
+	env.users.getByIDFn = func(_ context.Context, id string) (*db.User, error) {
+		return &db.User{ID: id}, nil
+	}
+	env.libs.createPersonalIPTVFn = func(_ context.Context, ownerID string, req library.CreateRequest) (*db.Library, error) {
+		if ownerID != "u-1" {
+			t.Errorf("expected owner=u-1, got %q", ownerID)
+		}
+		if req.Name != "Lista de Juan" || req.M3UURL != "https://example.com/juan.m3u" {
+			t.Errorf("forwarded req mismatch: %+v", req)
+		}
+		return &db.Library{
+			ID: "lib-new", Name: req.Name, ContentType: "livetv",
+			M3UURL: req.M3UURL, EPGURL: req.EPGURL, TLSInsecure: req.TLSInsecure,
+		}, nil
+	}
+
+	rr := env.do(http.MethodPost, "/api/v1/users/u-1/iptv-libraries", map[string]any{
+		"name":         "Lista de Juan",
+		"m3u_url":      "https://example.com/juan.m3u",
+		"epg_url":      "https://example.com/juan.xml",
+		"tls_insecure": true,
+	})
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	if len(env.libs.createPersonalIPTVCalls) != 1 {
+		t.Fatalf("expected 1 CreatePersonalIPTV call, got %d", len(env.libs.createPersonalIPTVCalls))
+	}
+	var resp struct {
+		Data struct {
+			ID          string `json:"id"`
+			Name        string `json:"name"`
+			ContentType string `json:"content_type"`
+			M3UURL      string `json:"m3u_url"`
+			OwnerUserID string `json:"owner_user_id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Data.ID != "lib-new" || resp.Data.ContentType != "livetv" || resp.Data.OwnerUserID != "u-1" {
+		t.Errorf("response payload: %+v", resp.Data)
+	}
+}
+
+func TestUserHandler_CreatePersonalIPTV_RejectsProfile_400(t *testing.T) {
+	env := newLibraryAccessEnv(t)
+	env.users.getByIDFn = func(_ context.Context, id string) (*db.User, error) {
+		return &db.User{ID: id, ParentUserID: "u-parent"}, nil
+	}
+	rr := env.do(http.MethodPost, "/api/v1/users/u-profile/iptv-libraries", map[string]any{
+		"name":    "Lista",
+		"m3u_url": "https://example.com/p.m3u",
+	})
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	if len(env.libs.createPersonalIPTVCalls) != 0 {
+		t.Error("CreatePersonalIPTV must not be called for profile targets")
+	}
+}
+
+func TestUserHandler_CreatePersonalIPTV_InvalidJSON_400(t *testing.T) {
+	env := newLibraryAccessEnv(t)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/users/u-1/iptv-libraries",
+		bytes.NewBufferString("{not json"))
+	rr := httptest.NewRecorder()
+	env.router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status: %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestUserHandler_CreatePersonalIPTV_ValidationError_PropagatesAs400(t *testing.T) {
+	env := newLibraryAccessEnv(t)
+	env.users.getByIDFn = func(_ context.Context, id string) (*db.User, error) {
+		return &db.User{ID: id}, nil
+	}
+	env.libs.createPersonalIPTVFn = func(_ context.Context, _ string, _ library.CreateRequest) (*db.Library, error) {
+		return nil, domain.NewValidation(map[string]string{"m3u_url": "required"})
+	}
+
+	rr := env.do(http.MethodPost, "/api/v1/users/u-1/iptv-libraries", map[string]any{
+		"name": "Lista sin URL",
+	})
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status: %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestUserHandler_CreatePersonalIPTV_UserNotFound_404(t *testing.T) {
+	env := newLibraryAccessEnv(t)
+	env.users.getByIDFn = func(_ context.Context, _ string) (*db.User, error) {
+		return nil, domain.NewNotFound("user")
+	}
+	rr := env.do(http.MethodPost, "/api/v1/users/u-ghost/iptv-libraries", map[string]any{
+		"name":    "Lista",
+		"m3u_url": "https://example.com/x.m3u",
+	})
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status: %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestUserHandler_CreatePersonalIPTV_NoLibrariesWired_503(t *testing.T) {
+	handler := NewUserHandler(&userFakeService{}, nil, testutil.NopLogger())
+	r := chi.NewRouter()
+	r.Post("/api/v1/users/{id}/iptv-libraries", handler.CreatePersonalIPTV)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/users/u-1/iptv-libraries",
+		bytes.NewBufferString(`{"name":"x","m3u_url":"https://x"}`))
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status: %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// Service errors that don't match a known domain kind should surface
+// as 500, not panic or 200. Keeps the contract for the frontend hook
+// honest.
+func TestUserHandler_CreatePersonalIPTV_UnknownError_500(t *testing.T) {
+	env := newLibraryAccessEnv(t)
+	env.users.getByIDFn = func(_ context.Context, id string) (*db.User, error) {
+		return &db.User{ID: id}, nil
+	}
+	env.libs.createPersonalIPTVFn = func(_ context.Context, _ string, _ library.CreateRequest) (*db.Library, error) {
+		return nil, errors.New("boom")
+	}
+	rr := env.do(http.MethodPost, "/api/v1/users/u-1/iptv-libraries", map[string]any{
+		"name":    "Lista",
+		"m3u_url": "https://example.com/x.m3u",
+	})
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status: %d body=%s", rr.Code, rr.Body.String())
 	}
 }

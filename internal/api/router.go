@@ -390,6 +390,12 @@ func NewRouter(deps Dependencies) http.Handler {
 				// without an extra round-trip.
 				r.Get("/{id}/library-access", userHandler.GetLibraryAccess)
 				r.Put("/{id}/library-access", userHandler.SetLibraryAccess)
+				// Personal IPTV library shortcut. Creates a livetv
+				// library + grants access only to this user in one
+				// tx, so the admin doesn't have to navigate to
+				// /admin/libraries first and then come back to tick
+				// the new lib in the access matrix.
+				r.Post("/{id}/iptv-libraries", userHandler.CreatePersonalIPTV)
 			})
 
 			// PIN management — auth-only (the handler then enforces

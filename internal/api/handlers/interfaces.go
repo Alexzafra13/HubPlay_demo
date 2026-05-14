@@ -88,6 +88,11 @@ type LibraryService interface {
 	RevokeAccess(ctx context.Context, userID, libraryID string) error
 	ListAccessByUser(ctx context.Context, userID string) ([]string, error)
 	ReplaceAccess(ctx context.Context, userID string, libraryIDs []string) error
+	// CreatePersonalIPTV creates a livetv library + a grant for the
+	// owner in one tx. Powers the admin "add personal IPTV list to
+	// user X" shortcut so the operator can skip the two-navigation
+	// dance of creating a library and then ticking a checkbox.
+	CreatePersonalIPTV(ctx context.Context, ownerUserID string, req library.CreateRequest) (*db.Library, error)
 	// ListGenres returns the genre vocabulary across the catalogue,
 	// optionally scoped by item type ("movie", "series", or "" for the
 	// union). Used by the /movies and /series filter panel so the
