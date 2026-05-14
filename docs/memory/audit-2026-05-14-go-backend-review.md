@@ -1159,12 +1159,176 @@ cooldown.
 
 ## Fase 6 · `internal/stream/`
 
-> Pendiente. Foco propuesto:
-> - `stream.Manager` con 5 setters post-construcción (olor en F1.3).
-> - `MaxReencodeSessions` cap compartido entre VOD y federation
->   (ADR-012).
-> - HW accel: detector único al boot (ADR-006).
-> - Decisión direct-play / direct-stream / transcode (`decision.go`).
+Cerrada · 2026-05-14.
+
+### 6.1 Inventario
+
+11 ficheros, 2 722 LOC:
+
+| Fichero | LOC | Concepto |
+|---|---:|---|
+| `manager.go` | 953 | `Manager` + `ManagedSession` + cleanupLoop + StartSession con `singleflight.Group` |
+| `transcode.go` | 572 | `Transcoder` (low-level ffmpeg) + `Session` |
+| `decision.go` | 270 | `PlaybackDecision` + `Decide` / `DecideForceDirectPlay` puro |
+| `hwaccel.go` | 188 | Detector VAAPI/NVENC/QSV/VideoToolbox |
+| `capabilities.go` | 177 | Parse `X-HubPlay-Caps` HTTP header |
+| `hls.go` | 147 | Playlist HLS generation |
+| `autotune.go` | 136 | Auto-tune sessions cap + preset por core count |
+| `subburn.go` | 115 | Burn-in PGS/DVDSUB/ASS |
+| `testseam.go` | 73 | Test hooks |
+| `subtitle.go` | 61 | Sub track extraction |
+| `profiles.go` | 30 | Tabla de perfiles |
+
+`Manager` struct: 14 campos (mu, sessions map, transcoder, items repo,
+streams repo, cfg, logger, stopClean, metrics, bus, startGroup
+singleflight, hwAccel result, forceDirectPlayLookup).
+
+**3 setters post-construcción**: `SetMetrics`, `SetEventBus`,
+`SetForceDirectPlayLookup`. Confirma el riesgo levantado en F1.3.
+
+### 6.2 Hallazgos
+
+#### JJ — 3 setters post-construcción · **baja-media**
+
+- **Implementación correcta**: `SetMetrics` y `SetEventBus` toman
+  `mu.Lock` al escribir; `publish()` re-lee bus bajo lock para
+  evitar race. `SetMetrics` además rehilatra `metrics.SetActiveSessions`
+  para sincronizar el counter inicial. Patrón sano y documentado.
+- **Pero** dos de los tres son dependencias estables (se setean una
+  vez al boot, nunca después): metrics y bus. Sólo
+  `SetForceDirectPlayLookup` justifica el patrón post-construction —
+  es un closure que lee `app_settings` en cada request, naturalmente
+  no encaja en el constructor.
+- Olor real: **Builder Pattern accidental**. La construcción de
+  `Manager` queda artificialmente partida en 4 pasos
+  (`NewManager` + `SetMetrics` + `SetEventBus` + `SetForceDirectPlayLookup`)
+  cuando podrían ser 2 (constructor + un único setter "runtime").
+- Refactor sugerido (cosmético, ~30 min):
+  ```go
+  // Antes:
+  sm := stream.NewManager(items, streams, cfg, logger)
+  sm.SetMetrics(observability.NewStreamSink(metrics))
+  sm.SetEventBus(eventBus)
+  sm.SetForceDirectPlayLookup(...)
+
+  // Después:
+  sm := stream.NewManager(stream.Deps{
+      Items:    repos.Items,
+      Streams:  repos.MediaStreams,
+      Config:   streamingCfg,
+      Logger:   logger,
+      Metrics:  observability.NewStreamSink(metrics),
+      Bus:      eventBus,
+  })
+  sm.SetForceDirectPlayLookup(...)  // único setter runtime
+  ```
+- Severidad baja (no afecta correctness). Lo apunto porque elimina
+  argumento estructural de F1.3 ("5 setters") cuando en realidad
+  sólo uno es genuinamente runtime.
+
+#### KK — `Manager` recibe `*db.X` directos · **eco de M**
+
+- `items *db.ItemRepository`, `streams *db.MediaStreamRepository`.
+- Cuando F2.5 (Opción B) migre tipos, `Manager` también migra. No
+  acción nueva.
+
+#### LL — `Manager` y `Transcoder`: dos capas de session tracking · **media** (over-engineering)
+
+- `Transcoder.sessions map[string]*Session` + `Transcoder.mu`.
+- `Manager.sessions map[string]*ManagedSession` + `Manager.mu`, donde
+  `ManagedSession` embebbe `*Session`.
+- **Dos mutexes, dos maps, dos lifecycles** para el mismo concepto
+  "sesión activa".
+- Concepto del split (defendible):
+  - `Transcoder` = wrapper low-level ffmpeg.
+  - `Manager` = business (decisión, caps per-user, singleflight,
+    reaper).
+- Implementación (problemática):
+  - `Transcoder` expone `GetSession`, `Stop`, `StopAll`,
+    `ActiveSessions` que duplican los métodos del `Manager`. La
+    *única* responsabilidad única del Transcoder son `Start` y
+    `RestartAt`.
+- Principio violado: **DRY** (en el sentido de "una sola fuente de
+  verdad sobre qué sesiones existen"). El bug latente: si `Manager`
+  saca una sesión de su map por idle reap pero `Transcoder` todavía
+  la tiene, queda zombie. Hoy el código evita esto, pero la doble
+  contabilidad es frágil.
+- Refactor sugerido:
+  - `Transcoder` se vuelve **stateless**: funciones puras
+    `StartProcess(...) (*Session, error)` y `RestartAtProcess(...)`.
+  - El tracking vive **sólo en `Manager.sessions`**.
+  - Reduce `transcode.go` de 572 LOC a ~350 LOC y elimina la duplicación.
+- Severidad media. Es la cabeza del paquete `stream/` que más se
+  beneficia de un refactor focalizado.
+
+#### MM — `decision.go` puro y testeable · **sano, modelo**
+
+- Funciones puras: `Decide`, `DecideForceDirectPlay`,
+  `containerInSet`, `splitContainer`, `audioCodecName`,
+  `hdrFormatInSet`. Cero side effects.
+- Es **el ejemplo del proyecto** de "lógica de negocio aislada de
+  I/O". El resto del codebase (auth.Service, library.Service,
+  iptv.Service) mezcla lógica con I/O. Este patrón debería
+  replicarse.
+- Tests probables: `decision_test.go` (existe, 270 LOC = ~mismo
+  tamaño que decision.go).
+
+#### NN — `singleflight.Group` para colapsar StartSession concurrentes · **sano, idiomático**
+
+- `manager.go:51-65` declara `startGroup singleflight.Group`. Comentario
+  excelente:
+  > Two parallel callers for the same userID:itemID:profile (player
+  > init + an immediate auth-retry burst, a double-clicked Play,
+  > hls.js requesting the manifest while the page is still mounting,
+  > etc.) used to BOTH miss the m.sessions fast-path lookup and BOTH
+  > reach transcoder.Start, leaving two ffmpegs alive simultaneously
+  > and writing segments to the same cache dir. singleflight collapses
+  > the racers onto a single execution; late joiners receive the same
+  > ManagedSession the winner built.
+- Patrón **idiomático Go**, dolor real documentado. No es olor.
+
+#### OO — HWAccel: detector único al boot · **sano** (ADR-006 cumplido)
+
+- `Manager.hwAccel HWAccelResult` capturado en construcción, leído
+  por todas las sesiones. Sin re-detect runtime.
+- Admin UI muestra "Reinicia para aplicar" — explícito (ADR-010).
+- `main.go:316-327` reusa el resultado para `TransmuxManager`
+  (ReencodeEncoder + HWAccelInputArgs) → consistency entre VOD y
+  IPTV transmux.
+- No es olor.
+
+#### PP — `cleanupLoop` y `Shutdown` correctos · **sano**
+
+- Una goroutine única (`cleanupLoop`), tick 1 min, idle timeout
+  configurable. Drena en `Shutdown` vía `close(m.stopClean)`.
+- `Shutdown` itera sessions, llama `ms.Stop()` para cada una,
+  resetea active sessions metric. Comparable a `TransmuxManager` (F5).
+- No es olor.
+
+### 6.3 Confirmaciones de `[PENDIENTE]`
+
+- `[PENDIENTE-F6]` 5 setters post-construcción → confirmado, **son
+  3 no 5** (F1 contaba mal). Análisis JJ.
+- `[PENDIENTE-F6]` Decision tree → confirmado, **modelo** del proyecto
+  (MM).
+- `[PENDIENTE-F6]` HWAccel detector único → confirmado (OO).
+
+### 6.4 Severidades Fase 6
+
+| # | Problema | Severidad | Prerequisito |
+|---|----------|-----------|--------------|
+| JJ | 3 setters post-construcción (Builder Pattern accidental) | Baja | `NewManager(Deps)` con un único setter runtime |
+| LL | `Manager` y `Transcoder` con doble session tracking | Media | Transcoder stateless |
+| KK | `Manager` con `*db.X` directos | — | Eco de M |
+
+### 6.5 Notas operativas
+
+- **Patrones modelo del proyecto**: `decision.go` (lógica pura),
+  `singleflight.Group` en StartSession, `cleanupLoop` con drain,
+  HWAccel cacheado al boot. Cuando otros paquetes hagan refactor,
+  citar éste.
+- Confirma que `stream/` es el paquete **mejor diseñado del backend**
+  pese a su tamaño. Los olores aquí son matices, no estructurales.
 
 ---
 
