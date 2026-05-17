@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
+	iptvmodel "hubplay/internal/iptv/model"
 	"hubplay/internal/auth"
-	"hubplay/internal/db"
 )
 
 // Reuses iptvFakeAccess / iptvTestEnv from iptv_test.go.
@@ -37,7 +37,7 @@ func TestIPTVHandler_ListChannels_UserWithoutAccess_404(t *testing.T) {
 	}
 	// Put some channels in the restricted library so we can be certain the
 	// ACL — not an empty list — is what blocks the response.
-	env.svc.channels["lib-restricted"] = []*db.Channel{
+	env.svc.channels["lib-restricted"] = []*iptvmodel.Channel{
 		{ID: "c-secret", LibraryID: "lib-restricted", IsActive: true},
 	}
 	rr := env.doAs(http.MethodGet, "/api/v1/libraries/lib-restricted/channels", "", iptvUserClaims())
@@ -49,7 +49,7 @@ func TestIPTVHandler_ListChannels_UserWithoutAccess_404(t *testing.T) {
 func TestIPTVHandler_ListChannels_UserWithAccess_200(t *testing.T) {
 	env := newIPTVTestEnv(t)
 	env.access.accessFn = func(_, libraryID string) (bool, error) { return libraryID == "lib-ok", nil }
-	env.svc.channels["lib-ok"] = []*db.Channel{{ID: "c-1", LibraryID: "lib-ok", IsActive: true}}
+	env.svc.channels["lib-ok"] = []*iptvmodel.Channel{{ID: "c-1", LibraryID: "lib-ok", IsActive: true}}
 	rr := env.doAs(http.MethodGet, "/api/v1/libraries/lib-ok/channels", "", iptvUserClaims())
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status: got %d want 200", rr.Code)
@@ -58,7 +58,7 @@ func TestIPTVHandler_ListChannels_UserWithAccess_200(t *testing.T) {
 
 func TestIPTVHandler_GetChannel_UserWithoutAccess_404(t *testing.T) {
 	env := newIPTVTestEnv(t)
-	env.svc.channelByID["c-secret"] = &db.Channel{ID: "c-secret", LibraryID: "lib-restricted", IsActive: true}
+	env.svc.channelByID["c-secret"] = &iptvmodel.Channel{ID: "c-secret", LibraryID: "lib-restricted", IsActive: true}
 	env.access.accessFn = func(_, libraryID string) (bool, error) { return libraryID == "lib-ok", nil }
 	rr := env.doAs(http.MethodGet, "/api/v1/channels/c-secret", "", iptvUserClaims())
 	if rr.Code != http.StatusNotFound {
@@ -68,7 +68,7 @@ func TestIPTVHandler_GetChannel_UserWithoutAccess_404(t *testing.T) {
 
 func TestIPTVHandler_Stream_UserWithoutAccess_404_NoProxyInvocation(t *testing.T) {
 	env := newIPTVTestEnv(t)
-	env.svc.channelByID["c-secret"] = &db.Channel{
+	env.svc.channelByID["c-secret"] = &iptvmodel.Channel{
 		ID: "c-secret", LibraryID: "lib-restricted", IsActive: true, StreamURL: "http://x/y",
 	}
 	env.access.accessFn = func(_, libraryID string) (bool, error) { return libraryID == "lib-ok", nil }
@@ -88,7 +88,7 @@ func TestIPTVHandler_Stream_UserWithoutAccess_404_NoProxyInvocation(t *testing.T
 
 func TestIPTVHandler_ProxyURL_UserWithoutAccess_404(t *testing.T) {
 	env := newIPTVTestEnv(t)
-	env.svc.channelByID["c-secret"] = &db.Channel{ID: "c-secret", LibraryID: "lib-restricted"}
+	env.svc.channelByID["c-secret"] = &iptvmodel.Channel{ID: "c-secret", LibraryID: "lib-restricted"}
 	env.access.accessFn = func(_, libraryID string) (bool, error) { return libraryID == "lib-ok", nil }
 	proxyInvoked := false
 	env.proxy.urlFn = func(http.ResponseWriter, string, string) error {
@@ -106,7 +106,7 @@ func TestIPTVHandler_ProxyURL_UserWithoutAccess_404(t *testing.T) {
 
 func TestIPTVHandler_Schedule_UserWithoutAccess_404(t *testing.T) {
 	env := newIPTVTestEnv(t)
-	env.svc.channelByID["c-secret"] = &db.Channel{ID: "c-secret", LibraryID: "lib-restricted"}
+	env.svc.channelByID["c-secret"] = &iptvmodel.Channel{ID: "c-secret", LibraryID: "lib-restricted"}
 	env.access.accessFn = func(_, libraryID string) (bool, error) { return libraryID == "lib-ok", nil }
 	rr := env.doAs(http.MethodGet, "/api/v1/channels/c-secret/schedule", "", iptvUserClaims())
 	if rr.Code != http.StatusNotFound {
@@ -127,14 +127,14 @@ func TestIPTVHandler_Groups_UserWithoutAccess_404(t *testing.T) {
 
 func TestIPTVHandler_BulkSchedule_FiltersInaccessibleChannels(t *testing.T) {
 	env := newIPTVTestEnv(t)
-	env.svc.channelByID["c-ok"] = &db.Channel{ID: "c-ok", LibraryID: "lib-ok"}
-	env.svc.channelByID["c-blocked"] = &db.Channel{ID: "c-blocked", LibraryID: "lib-restricted"}
+	env.svc.channelByID["c-ok"] = &iptvmodel.Channel{ID: "c-ok", LibraryID: "lib-ok"}
+	env.svc.channelByID["c-blocked"] = &iptvmodel.Channel{ID: "c-blocked", LibraryID: "lib-restricted"}
 	env.access.accessFn = func(_, libraryID string) (bool, error) { return libraryID == "lib-ok", nil }
 
 	var passedIDs []string
-	env.svc.bulkFn = func(_ context.Context, ids []string, _, _ time.Time) (map[string][]*db.EPGProgram, error) {
+	env.svc.bulkFn = func(_ context.Context, ids []string, _, _ time.Time) (map[string][]*iptvmodel.EPGProgram, error) {
 		passedIDs = ids
-		return map[string][]*db.EPGProgram{}, nil
+		return map[string][]*iptvmodel.EPGProgram{}, nil
 	}
 
 	rr := env.doAs(http.MethodGet, "/api/v1/iptv/schedule?channels=c-ok,c-blocked,c-ghost", "", iptvUserClaims())
@@ -151,7 +151,7 @@ func TestIPTVHandler_BulkSchedule_FiltersInaccessibleChannels(t *testing.T) {
 
 func TestIPTVHandler_AdminBypassesACL(t *testing.T) {
 	env := newIPTVTestEnv(t)
-	env.svc.channelByID["c-any"] = &db.Channel{ID: "c-any", LibraryID: "lib-any"}
+	env.svc.channelByID["c-any"] = &iptvmodel.Channel{ID: "c-any", LibraryID: "lib-any"}
 	// Access service returns false for everyone — but admin bypasses.
 	env.access.accessFn = func(_, _ string) (bool, error) { return false, nil }
 

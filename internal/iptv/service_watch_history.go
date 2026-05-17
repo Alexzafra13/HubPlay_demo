@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"time"
 
+	iptvmodel "hubplay/internal/iptv/model"
 	"hubplay/internal/db"
 )
 
@@ -53,7 +54,7 @@ func (s *Service) ListContinueWatching(
 	userID string,
 	limit int,
 	accessibleLibraries map[string]bool,
-) ([]*db.Channel, []time.Time, error) {
+) ([]*iptvmodel.Channel, []time.Time, error) {
 	if s.watchHistory == nil {
 		return nil, nil, nil
 	}
@@ -78,7 +79,7 @@ func (s *Service) ListContinueWatching(
 		}
 		return channels, watched, nil
 	}
-	outCh := make([]*db.Channel, 0, len(channels))
+	outCh := make([]*iptvmodel.Channel, 0, len(channels))
 	outTs := make([]time.Time, 0, len(channels))
 	for i, ch := range channels {
 		if accessibleLibraries[ch.LibraryID] {

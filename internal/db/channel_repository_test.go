@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	iptvmodel "hubplay/internal/iptv/model"
 	"hubplay/internal/db"
 	"hubplay/internal/testutil"
 )
@@ -23,8 +24,8 @@ func setupChannelTest(t *testing.T) (*db.ChannelRepository, string) {
 	return repos.Channels, "lib-iptv"
 }
 
-func makeChannel(id, libraryID, name string, number int, active bool) *db.Channel {
-	return &db.Channel{
+func makeChannel(id, libraryID, name string, number int, active bool) *iptvmodel.Channel {
+	return &iptvmodel.Channel{
 		ID: id, LibraryID: libraryID, Name: name, Number: number,
 		GroupName: "News", LogoURL: "http://logo.com/" + id + ".png",
 		StreamURL: "http://stream.com/" + id, TvgID: id + ".tv",
@@ -204,7 +205,7 @@ func TestChannel_ReplaceForLibrary(t *testing.T) {
 	_ = repo.Create(ctx, makeChannel("old-2", libID, "Old 2", 2, true))
 
 	// Replace with new set
-	newChannels := []*db.Channel{
+	newChannels := []*iptvmodel.Channel{
 		makeChannel("new-1", libID, "New 1", 1, true),
 		makeChannel("new-2", libID, "New 2", 2, true),
 		makeChannel("new-3", libID, "New 3", 3, true),

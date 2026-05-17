@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"hubplay/internal/db"
+	iptvmodel "hubplay/internal/iptv/model"
 	"hubplay/internal/event"
 )
 
@@ -102,7 +102,7 @@ func (s *Service) RunRefreshM3U(ctx context.Context, libraryID string) (int, err
 	// of entries.
 	now := time.Now()
 	var (
-		dbChannels      []*db.Channel
+		dbChannels      []*iptvmodel.Channel
 		index           int
 		vodSkipped      int
 		languageSkipped int
@@ -121,7 +121,7 @@ func (s *Service) RunRefreshM3U(ctx context.Context, libraryID string) (int, err
 			return nil
 		}
 		index++
-		dbChannels = append(dbChannels, &db.Channel{
+		dbChannels = append(dbChannels, &iptvmodel.Channel{
 			ID:        generateID(),
 			LibraryID: libraryID,
 			Name:      ch.Name,

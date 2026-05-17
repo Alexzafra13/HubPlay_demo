@@ -3,13 +3,13 @@ package iptv
 import (
 	"testing"
 
-	"hubplay/internal/db"
+	iptvmodel "hubplay/internal/iptv/model"
 )
 
 func TestSampleTvgIDs(t *testing.T) {
 	t.Parallel()
 
-	channels := []*db.Channel{
+	channels := []*iptvmodel.Channel{
 		{TvgID: "a.es"},
 		{TvgID: ""},
 		nil,
@@ -55,7 +55,7 @@ func TestSampleTvgIDs(t *testing.T) {
 func TestCountBlankTvgIDs(t *testing.T) {
 	t.Parallel()
 
-	channels := []*db.Channel{
+	channels := []*iptvmodel.Channel{
 		{TvgID: "a"}, {TvgID: ""}, nil, {TvgID: "b"}, {TvgID: ""},
 	}
 	if got, want := countBlankTvgIDs(channels), 3; got != want {

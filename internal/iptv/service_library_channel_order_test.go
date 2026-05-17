@@ -8,11 +8,11 @@ package iptv
 import (
 	"testing"
 
-	"hubplay/internal/db"
+	iptvmodel "hubplay/internal/iptv/model"
 )
 
 func TestApplyAdminOverlay_NoOverridesPassesThrough(t *testing.T) {
-	channels := []*db.Channel{
+	channels := []*iptvmodel.Channel{
 		{ID: "a", Name: "A", Number: 1},
 		{ID: "b", Name: "B", Number: 2},
 	}
@@ -23,12 +23,12 @@ func TestApplyAdminOverlay_NoOverridesPassesThrough(t *testing.T) {
 }
 
 func TestApplyAdminOverlay_ReordersByAdminPosition(t *testing.T) {
-	channels := []*db.Channel{
+	channels := []*iptvmodel.Channel{
 		{ID: "a", Name: "A", Number: 1},
 		{ID: "b", Name: "B", Number: 2},
 		{ID: "c", Name: "C", Number: 3},
 	}
-	overrides := []db.LibraryChannelOrderEntry{
+	overrides := []iptvmodel.LibraryChannelOrderEntry{
 		{ChannelID: "c", Position: 1},
 		{ChannelID: "a", Position: 99},
 	}
@@ -42,12 +42,12 @@ func TestApplyAdminOverlay_ReordersByAdminPosition(t *testing.T) {
 }
 
 func TestApplyAdminOverlay_HidesChannelsMarkedHidden(t *testing.T) {
-	channels := []*db.Channel{
+	channels := []*iptvmodel.Channel{
 		{ID: "a", Name: "A", Number: 1},
 		{ID: "b", Name: "B", Number: 2},
 		{ID: "c", Name: "C", Number: 3},
 	}
-	overrides := []db.LibraryChannelOrderEntry{
+	overrides := []iptvmodel.LibraryChannelOrderEntry{
 		{ChannelID: "b", Position: 2, Hidden: true},
 	}
 	out := applyAdminOverlay(channels, overrides)
@@ -67,14 +67,14 @@ func TestApplyAdminOverlay_HidesChannelsMarkedHidden(t *testing.T) {
 // channel from the pipeline entirely; downstream the user can't
 // even reference it.
 func TestComposition_AdminHidden_UserCannotUnhide(t *testing.T) {
-	channels := []*db.Channel{
+	channels := []*iptvmodel.Channel{
 		{ID: "a", Name: "A", Number: 1},
 		{ID: "b", Name: "B", Number: 2},
 	}
-	adminRows := []db.LibraryChannelOrderEntry{
+	adminRows := []iptvmodel.LibraryChannelOrderEntry{
 		{ChannelID: "b", Position: 2, Hidden: true},
 	}
-	userOverrides := []db.UserChannelOrderEntry{
+	userOverrides := []iptvmodel.UserChannelOrderEntry{
 		// User explicitly tries to position channel b visible.
 		{ChannelID: "b", Position: 1, Hidden: false},
 	}
@@ -96,15 +96,15 @@ func TestComposition_AdminHidden_UserCannotUnhide(t *testing.T) {
 // User can still hide MORE channels than the admin did. Layered
 // filtering: admin hidden ∪ user hidden = effective hidden set.
 func TestComposition_UserCanHideMore(t *testing.T) {
-	channels := []*db.Channel{
+	channels := []*iptvmodel.Channel{
 		{ID: "a", Number: 1},
 		{ID: "b", Number: 2},
 		{ID: "c", Number: 3},
 	}
-	adminRows := []db.LibraryChannelOrderEntry{
+	adminRows := []iptvmodel.LibraryChannelOrderEntry{
 		{ChannelID: "a", Position: 1, Hidden: true}, // admin hides a
 	}
-	userOverrides := []db.UserChannelOrderEntry{
+	userOverrides := []iptvmodel.UserChannelOrderEntry{
 		{ChannelID: "c", Position: 3, Hidden: true}, // user also hides c
 	}
 
@@ -119,15 +119,15 @@ func TestComposition_UserCanHideMore(t *testing.T) {
 // User overrides position on top of admin order. Admin reorders
 // 'b' to position 1; user accepts that AND moves a different channel.
 func TestComposition_UserPositionOnTopOfAdminPosition(t *testing.T) {
-	channels := []*db.Channel{
+	channels := []*iptvmodel.Channel{
 		{ID: "a", Number: 1},
 		{ID: "b", Number: 2},
 		{ID: "c", Number: 3},
 	}
-	adminRows := []db.LibraryChannelOrderEntry{
+	adminRows := []iptvmodel.LibraryChannelOrderEntry{
 		{ChannelID: "b", Position: 1}, // admin promotes b to position 1
 	}
-	userOverrides := []db.UserChannelOrderEntry{
+	userOverrides := []iptvmodel.UserChannelOrderEntry{
 		{ChannelID: "c", Position: 0}, // user pulls c to the top of their own view
 	}
 

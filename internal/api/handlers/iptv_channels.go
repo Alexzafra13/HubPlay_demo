@@ -13,8 +13,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	iptvmodel "hubplay/internal/iptv/model"
 	"hubplay/internal/auth"
-	"hubplay/internal/db"
 	"hubplay/internal/iptv"
 )
 
@@ -40,7 +40,7 @@ func (h *IPTVHandler) ListChannels(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var (
-		channels []*db.Channel
+		channels []*iptvmodel.Channel
 		err      error
 	)
 	if includeHidden || userID == "" {
@@ -624,7 +624,7 @@ func parseBulkTimeRange(fromRaw, toRaw string) (time.Time, time.Time) {
 	return from, to
 }
 
-func programToJSON(p *db.EPGProgram) map[string]any {
+func programToJSON(p *iptvmodel.EPGProgram) map[string]any {
 	return map[string]any{
 		"id":          p.ID,
 		"title":       p.Title,

@@ -3,7 +3,7 @@ package iptv
 import (
 	"testing"
 
-	"hubplay/internal/db"
+	iptvmodel "hubplay/internal/iptv/model"
 )
 
 func TestNameVariants(t *testing.T) {
@@ -34,7 +34,7 @@ func TestNameVariants(t *testing.T) {
 // indexFrom builds a channelIndex from a slice literal. Helper for
 // matcher tests so each case declares the library shape right next
 // to the assertions.
-func indexFrom(channels ...*db.Channel) *channelIndex {
+func indexFrom(channels ...*iptvmodel.Channel) *channelIndex {
 	return buildChannelIndex(channels)
 }
 
@@ -42,9 +42,9 @@ func TestMatchChannel_ExactPaths(t *testing.T) {
 	t.Parallel()
 
 	idx := indexFrom(
-		&db.Channel{ID: "ch-la1", Name: "La 1 (1080p)", TvgID: "La1.es@HD"},
-		&db.Channel{ID: "ch-3cat", Name: "3Cat Càmeres del temps (1080p) [Geo-blocked]", TvgID: "3CatCameresdeltemps.es@SD"},
-		&db.Channel{ID: "ch-a3", Name: "Antena 3 HD"},
+		&iptvmodel.Channel{ID: "ch-la1", Name: "La 1 (1080p)", TvgID: "La1.es@HD"},
+		&iptvmodel.Channel{ID: "ch-3cat", Name: "3Cat Càmeres del temps (1080p) [Geo-blocked]", TvgID: "3CatCameresdeltemps.es@SD"},
+		&iptvmodel.Channel{ID: "ch-a3", Name: "Antena 3 HD"},
 	)
 
 	t.Run("exact tvg-id wins", func(t *testing.T) {
@@ -86,11 +86,11 @@ func TestMatchChannel_Aliases(t *testing.T) {
 	t.Parallel()
 
 	idx := indexFrom(
-		&db.Channel{ID: "ch-la1", Name: "La 1 HD"},
-		&db.Channel{ID: "ch-a3", Name: "Antena 3"},
-		&db.Channel{ID: "ch-t5", Name: "Telecinco"},
-		&db.Channel{ID: "ch-l6", Name: "laSexta"},
-		&db.Channel{ID: "ch-mll", Name: "Movistar La Liga"},
+		&iptvmodel.Channel{ID: "ch-la1", Name: "La 1 HD"},
+		&iptvmodel.Channel{ID: "ch-a3", Name: "Antena 3"},
+		&iptvmodel.Channel{ID: "ch-t5", Name: "Telecinco"},
+		&iptvmodel.Channel{ID: "ch-l6", Name: "laSexta"},
+		&iptvmodel.Channel{ID: "ch-mll", Name: "Movistar La Liga"},
 	)
 
 	// EPG side spells the digit as a word; index resolves via alias
@@ -140,7 +140,7 @@ func TestMatchChannel_Aliases(t *testing.T) {
 	// canonical at index-build time too.
 	t.Run("reverse direction (hub uses alias, EPG canonical)", func(t *testing.T) {
 		idxAlias := indexFrom(
-			&db.Channel{ID: "ch-la1", Name: "La Uno"},
+			&iptvmodel.Channel{ID: "ch-la1", Name: "La Uno"},
 		)
 		got := matchChannel("la1.es", []string{"La 1"}, idxAlias)
 		if got != "ch-la1" {
@@ -157,9 +157,9 @@ func TestMatchChannel_ChannelNumber(t *testing.T) {
 	// would bind to whichever channel happens to be at that slot.
 	t.Run("positional numbers are ignored", func(t *testing.T) {
 		idx := indexFrom(
-			&db.Channel{ID: "ch-a", Name: "Channel A", Number: 1},
-			&db.Channel{ID: "ch-b", Name: "Channel B", Number: 2},
-			&db.Channel{ID: "ch-c", Name: "Channel C", Number: 3},
+			&iptvmodel.Channel{ID: "ch-a", Name: "Channel A", Number: 1},
+			&iptvmodel.Channel{ID: "ch-b", Name: "Channel B", Number: 2},
+			&iptvmodel.Channel{ID: "ch-c", Name: "Channel C", Number: 3},
 		)
 		if got := matchChannel("chan-2", []string{"2"}, idx); got != "" {
 			t.Errorf("positional number should not match; got %q", got)
@@ -170,9 +170,9 @@ func TestMatchChannel_ChannelNumber(t *testing.T) {
 	// display-name binds by dial number.
 	t.Run("explicit number matches bare-integer display-name", func(t *testing.T) {
 		idx := indexFrom(
-			&db.Channel{ID: "ch-la1", Name: "La 1 HD", Number: 101},
-			&db.Channel{ID: "ch-a3", Name: "Antena 3 HD", Number: 205},
-			&db.Channel{ID: "ch-t5", Name: "Telecinco", Number: 302},
+			&iptvmodel.Channel{ID: "ch-la1", Name: "La 1 HD", Number: 101},
+			&iptvmodel.Channel{ID: "ch-a3", Name: "Antena 3 HD", Number: 205},
+			&iptvmodel.Channel{ID: "ch-t5", Name: "Telecinco", Number: 302},
 		)
 		got := matchChannel("unknown-id", []string{"205"}, idx)
 		if got != "ch-a3" {
@@ -184,9 +184,9 @@ func TestMatchChannel_ChannelNumber(t *testing.T) {
 	// same number, the matcher refuses to bind.
 	t.Run("ambiguous numbers are skipped", func(t *testing.T) {
 		idx := indexFrom(
-			&db.Channel{ID: "ch-x", Name: "X", Number: 500},
-			&db.Channel{ID: "ch-y", Name: "Y", Number: 500},
-			&db.Channel{ID: "ch-z", Name: "Z", Number: 777}, // forces non-positional
+			&iptvmodel.Channel{ID: "ch-x", Name: "X", Number: 500},
+			&iptvmodel.Channel{ID: "ch-y", Name: "Y", Number: 500},
+			&iptvmodel.Channel{ID: "ch-z", Name: "Z", Number: 777}, // forces non-positional
 		)
 		if got := matchChannel("unknown", []string{"500"}, idx); got != "" {
 			t.Errorf("ambiguous number should not bind; got %q", got)
@@ -202,11 +202,11 @@ func TestMatchChannel_FuzzyFallback(t *testing.T) {
 	t.Parallel()
 
 	idx := indexFrom(
-		&db.Channel{ID: "ch-la1", Name: "La 1 HD"},
-		&db.Channel{ID: "ch-a3", Name: "Antena 3"},
-		&db.Channel{ID: "ch-t5", Name: "Telecinco"},
-		&db.Channel{ID: "ch-discovery", Name: "Discovery Channel"},
-		&db.Channel{ID: "ch-eurosport", Name: "Eurosport 1 HD"},
+		&iptvmodel.Channel{ID: "ch-la1", Name: "La 1 HD"},
+		&iptvmodel.Channel{ID: "ch-a3", Name: "Antena 3"},
+		&iptvmodel.Channel{ID: "ch-t5", Name: "Telecinco"},
+		&iptvmodel.Channel{ID: "ch-discovery", Name: "Discovery Channel"},
+		&iptvmodel.Channel{ID: "ch-eurosport", Name: "Eurosport 1 HD"},
 	)
 
 	t.Run("1-edit typo accepted", func(t *testing.T) {
@@ -230,7 +230,7 @@ func TestMatchChannel_FuzzyFallback(t *testing.T) {
 		// "cnn" vs "cin" (both 3 chars) — Levenshtein=1 but both are
 		// below the 5-rune minimum. Should NOT match anything.
 		shortIdx := indexFrom(
-			&db.Channel{ID: "ch-cin", Name: "CIN"},
+			&iptvmodel.Channel{ID: "ch-cin", Name: "CIN"},
 		)
 		got := matchChannel("CNN", []string{"CNN"}, shortIdx)
 		if got != "" {
@@ -254,7 +254,7 @@ func TestMatchChannel_FuzzyFallback(t *testing.T) {
 		// budget; the rune-based pruner lets this through. Typo in
 		// the EPG payload → 1-edit distance, should match.
 		mpIdx := indexFrom(
-			&db.Channel{ID: "ch-mp", Name: "Movistar Plus+"},
+			&iptvmodel.Channel{ID: "ch-mp", Name: "Movistar Plus+"},
 		)
 		got := matchChannel("movistar.plus+", []string{"Movistar Pluz+"}, mpIdx)
 		if got != "ch-mp" {
@@ -266,8 +266,8 @@ func TestMatchChannel_FuzzyFallback(t *testing.T) {
 		// "ABCDEFGH" equidistant from "ABCDEFGX" and "ABCDEFGY" — same
 		// distance (1) to two different ids. Matcher refuses.
 		tieIdx := indexFrom(
-			&db.Channel{ID: "ch-x", Name: "ABCDEFGX"},
-			&db.Channel{ID: "ch-y", Name: "ABCDEFGY"},
+			&iptvmodel.Channel{ID: "ch-x", Name: "ABCDEFGX"},
+			&iptvmodel.Channel{ID: "ch-y", Name: "ABCDEFGY"},
 		)
 		got := matchChannel("abcdefgh", []string{"ABCDEFGH"}, tieIdx)
 		if got != "" {

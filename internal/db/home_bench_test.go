@@ -7,6 +7,7 @@ import (
 	"time"
 
 	authmodel "hubplay/internal/auth/model"
+	iptvmodel "hubplay/internal/iptv/model"
 	"hubplay/internal/db"
 	"hubplay/internal/testutil"
 )
@@ -158,7 +159,7 @@ func newBenchHomeRepoLiveTV(b *testing.B, n int) (*db.HomeRepository, string) {
 
 	chRepo := db.NewChannelRepository(testutil.Driver(), database)
 	for i := 0; i < n; i++ {
-		_ = chRepo.Create(ctx, &db.Channel{
+		_ = chRepo.Create(ctx, &iptvmodel.Channel{
 			ID: fmt.Sprintf("ch-%05d", i), LibraryID: "lib-tv",
 			Name: fmt.Sprintf("Ch %d", i), Number: i + 1,
 			GroupName: "Bench",

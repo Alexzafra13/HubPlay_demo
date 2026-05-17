@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	iptvmodel "hubplay/internal/iptv/model"
 	"hubplay/internal/db"
 
 	"github.com/go-chi/chi/v5"
@@ -17,9 +18,9 @@ import (
 // schedule handler needs. Kept narrow so handler tests can supply a
 // fake without wiring a real *sql.DB.
 type IPTVScheduleRepository interface {
-	ListByLibrary(ctx context.Context, libraryID string) ([]*db.IPTVScheduledJob, error)
-	Get(ctx context.Context, libraryID, kind string) (*db.IPTVScheduledJob, error)
-	Upsert(ctx context.Context, job *db.IPTVScheduledJob) error
+	ListByLibrary(ctx context.Context, libraryID string) ([]*iptvmodel.IPTVScheduledJob, error)
+	Get(ctx context.Context, libraryID, kind string) (*iptvmodel.IPTVScheduledJob, error)
+	Upsert(ctx context.Context, job *iptvmodel.IPTVScheduledJob) error
 	Delete(ctx context.Context, libraryID, kind string) error
 }
 
@@ -70,7 +71,7 @@ type scheduledJobDTO struct {
 	LastDurationMS int    `json:"last_duration_ms"`
 }
 
-func jobToDTO(j *db.IPTVScheduledJob) scheduledJobDTO {
+func jobToDTO(j *iptvmodel.IPTVScheduledJob) scheduledJobDTO {
 	dto := scheduledJobDTO{
 		LibraryID:      j.LibraryID,
 		Kind:           j.Kind,
@@ -101,7 +102,7 @@ func (h *IPTVScheduleHandler) List(w http.ResponseWriter, r *http.Request) {
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL", "")
 		return
 	}
-	byKind := make(map[string]*db.IPTVScheduledJob, 2)
+	byKind := make(map[string]*iptvmodel.IPTVScheduledJob, 2)
 	for _, r := range rows {
 		byKind[r.Kind] = r
 	}
@@ -171,7 +172,7 @@ func (h *IPTVScheduleHandler) Upsert(w http.ResponseWriter, r *http.Request) {
 	if body.Enabled != nil {
 		enabled = *body.Enabled
 	}
-	job := &db.IPTVScheduledJob{
+	job := &iptvmodel.IPTVScheduledJob{
 		LibraryID:     libraryID,
 		Kind:          kind,
 		IntervalHours: body.IntervalHours,

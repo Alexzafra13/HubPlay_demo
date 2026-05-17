@@ -9,6 +9,7 @@ import (
 	"context"
 	"testing"
 
+	iptvmodel "hubplay/internal/iptv/model"
 	"hubplay/internal/db"
 	"hubplay/internal/testutil"
 )
@@ -59,7 +60,7 @@ func TestLibraryChannelOrder_UpsertListDelete(t *testing.T) {
 		t.Fatalf("upsert ch-a (replace): %v", err)
 	}
 	rows, _ = repo.List(ctx, "lib-1")
-	gotA := db.LibraryChannelOrderEntry{}
+	gotA := iptvmodel.LibraryChannelOrderEntry{}
 	for _, r := range rows {
 		if r.ChannelID == "ch-a" {
 			gotA = r
@@ -110,7 +111,7 @@ func TestLibraryChannelOrder_ReplaceAllReplaces(t *testing.T) {
 	}
 
 	// Replace with: ch-b first (visible), ch-a second (hidden).
-	newEntries := []db.LibraryChannelOrderEntry{
+	newEntries := []iptvmodel.LibraryChannelOrderEntry{
 		{ChannelID: "ch-b", Hidden: false},
 		{ChannelID: "ch-a", Hidden: true},
 	}

@@ -8,13 +8,13 @@ import (
 	"context"
 	"fmt"
 
-	"hubplay/internal/db"
+	iptvmodel "hubplay/internal/iptv/model"
 )
 
 // ListEPGSources returns the EPG providers configured for a library,
 // ordered by priority ascending (the order the refresher processes
 // them in). Empty slice if the library has none.
-func (s *Service) ListEPGSources(ctx context.Context, libraryID string) ([]*db.LibraryEPGSource, error) {
+func (s *Service) ListEPGSources(ctx context.Context, libraryID string) ([]*iptvmodel.LibraryEPGSource, error) {
 	return s.epgSources.ListByLibrary(ctx, libraryID)
 }
 
@@ -22,12 +22,12 @@ func (s *Service) ListEPGSources(ctx context.Context, libraryID string) ([]*db.L
 // or url must be non-empty; when both are set the catalog entry's URL
 // wins and the caller's `url` is ignored (prevents drift where the
 // admin pastes a stale URL for a known catalog entry).
-func (s *Service) AddEPGSource(ctx context.Context, libraryID, catalogID, customURL string) (*db.LibraryEPGSource, error) {
+func (s *Service) AddEPGSource(ctx context.Context, libraryID, catalogID, customURL string) (*iptvmodel.LibraryEPGSource, error) {
 	if _, err := s.libraries.GetByID(ctx, libraryID); err != nil {
 		return nil, fmt.Errorf("get library: %w", err)
 	}
 
-	src := &db.LibraryEPGSource{
+	src := &iptvmodel.LibraryEPGSource{
 		ID:        generateID(),
 		LibraryID: libraryID,
 	}

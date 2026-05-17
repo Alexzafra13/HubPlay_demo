@@ -7,38 +7,10 @@ import (
 	"fmt"
 	"time"
 
+	iptvmodel "hubplay/internal/iptv/model"
 	"hubplay/internal/db/sqlc"
 	"hubplay/internal/db/sqlc_pg"
 )
-
-// Channel represents an IPTV channel.
-//
-// Health fields (LastProbeAt, LastProbeStatus, LastProbeError,
-// ConsecutiveFailures) track opportunistic probe outcomes from the
-// stream proxy. They're zero-valued for reads that go through the
-// legacy sqlc path; the raw-SQL reads below populate them.
-// Filtering the user-facing channel list for `consecutive_failures
-// >= N` hides upstreams that have been failing long enough to look
-// really dead, so the operator isn't spammed with transient-error
-// reports and viewers don't click through dead tiles.
-type Channel struct {
-	ID                  string
-	LibraryID           string
-	Name                string
-	Number              int
-	GroupName           string
-	LogoURL             string
-	StreamURL           string
-	TvgID               string
-	Language            string
-	Country             string
-	IsActive            bool
-	AddedAt             time.Time
-	LastProbeAt         time.Time
-	LastProbeStatus     string // "ok" | "error" | "" (never probed)
-	LastProbeError      string
-	ConsecutiveFailures int
-}
 
 // ChannelRepository — dual-dialect (Pattern A + Pattern B). The sqlc
 // surface (Create, GetByID, ListByLibrary, SetActive, Groups,
@@ -79,7 +51,7 @@ func (r *ChannelRepository) driver() string {
 var ErrChannelNotFound = fmt.Errorf("channel not found")
 
 // Create inserts a new channel.
-func (r *ChannelRepository) Create(ctx context.Context, ch *Channel) error {
+func (r *ChannelRepository) Create(ctx context.Context, ch *iptvmodel.Channel) error {
 	var err error
 	if r.useSQLite() {
 		err = r.sq.CreateChannel(ctx, channelToSqliteCreateParams(ch))
@@ -93,7 +65,7 @@ func (r *ChannelRepository) Create(ctx context.Context, ch *Channel) error {
 }
 
 // GetByID returns a channel by ID.
-func (r *ChannelRepository) GetByID(ctx context.Context, id string) (*Channel, error) {
+func (r *ChannelRepository) GetByID(ctx context.Context, id string) (*iptvmodel.Channel, error) {
 	if r.useSQLite() {
 		row, err := r.sq.GetChannelByID(ctx, id)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -131,7 +103,7 @@ func (r *ChannelRepository) GetByID(ctx context.Context, id string) (*Channel, e
 // con 5 000+ canales, el listing pasaba 17 ms / 9 MB por request
 // hidratando todos los rows en Go. Con limit=100 la mejora medida
 // es ×30 (17 ms → 0.5 ms) y baja la presión de GC.
-func (r *ChannelRepository) ListByLibraryPaginated(ctx context.Context, libraryID string, activeOnly bool, offset, limit int) ([]*Channel, int, error) {
+func (r *ChannelRepository) ListByLibraryPaginated(ctx context.Context, libraryID string, activeOnly bool, offset, limit int) ([]*iptvmodel.Channel, int, error) {
 	if offset < 0 {
 		offset = 0
 	}
@@ -184,9 +156,9 @@ func (r *ChannelRepository) ListByLibraryPaginated(ctx context.Context, libraryI
 	}
 	defer rows.Close() //nolint:errcheck
 
-	out := make([]*Channel, 0, limit)
+	out := make([]*iptvmodel.Channel, 0, limit)
 	for rows.Next() {
-		ch := &Channel{}
+		ch := &iptvmodel.Channel{}
 		if err := rows.Scan(
 			&ch.ID, &ch.LibraryID, &ch.Name, &ch.Number,
 			&ch.GroupName, &ch.LogoURL, &ch.StreamURL,
@@ -209,7 +181,7 @@ func (r *ChannelRepository) ListByLibraryPaginated(ctx context.Context, libraryI
 // callers internos que iteran el catálogo entero (EPG matcher,
 // scheduler, scanner). Los endpoints HTTP user-facing prefieren
 // ListByLibraryPaginated; ver hot path #1 del reporte 2026-05-17.
-func (r *ChannelRepository) ListByLibrary(ctx context.Context, libraryID string, activeOnly bool) ([]*Channel, error) {
+func (r *ChannelRepository) ListByLibrary(ctx context.Context, libraryID string, activeOnly bool) ([]*iptvmodel.Channel, error) {
 	if r.useSQLite() {
 		if activeOnly {
 			rows, err := r.sq.ListActiveChannelsByLibrary(ctx, libraryID)
@@ -249,7 +221,7 @@ func (r *ChannelRepository) ListByLibrary(ctx context.Context, libraryID string,
 // Raw SQL because sqlc would need a JOIN-with-WHERE generator and the
 // project keeps a small allow-list of raw queries (5 today) for
 // exactly this kind of cross-table read.
-func (r *ChannelRepository) ListLivetvChannels(ctx context.Context) ([]*Channel, error) {
+func (r *ChannelRepository) ListLivetvChannels(ctx context.Context) ([]*iptvmodel.Channel, error) {
 	query := rewritePlaceholders(r.driver(),
 		`SELECT c.id, c.library_id, c.name, COALESCE(c.number, 0), COALESCE(c.group_name,''),
 		        COALESCE(c.logo_url,''), c.stream_url, COALESCE(c.tvg_id,''),
@@ -264,7 +236,7 @@ func (r *ChannelRepository) ListLivetvChannels(ctx context.Context) ([]*Channel,
 	}
 	defer rows.Close() //nolint:errcheck
 
-	var out []*Channel
+	var out []*iptvmodel.Channel
 	for rows.Next() {
 		c, err := scanChannelBasic(rows)
 		if err != nil {
@@ -276,7 +248,7 @@ func (r *ChannelRepository) ListLivetvChannels(ctx context.Context) ([]*Channel,
 }
 
 // ReplaceForLibrary deletes all channels in a library and inserts new ones (used during M3U refresh).
-func (r *ChannelRepository) ReplaceForLibrary(ctx context.Context, libraryID string, channels []*Channel) error {
+func (r *ChannelRepository) ReplaceForLibrary(ctx context.Context, libraryID string, channels []*iptvmodel.Channel) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
@@ -334,7 +306,7 @@ func (r *ChannelRepository) SetActive(ctx context.Context, id string, active boo
 	return nil
 }
 
-// ── Channel health ──────────────────────────────────────────────
+// ── iptvmodel.Channel health ──────────────────────────────────────────────
 //
 // The proxy records outcomes per request. Reads and aggregates for
 // the admin "unhealthy channels" surface live here. Raw SQL: the
@@ -421,7 +393,7 @@ func (r *ChannelRepository) ResetHealth(ctx context.Context, channelID string) e
 // ListUnhealthyByLibrary returns channels whose consecutive failure
 // count is at or above the caller's threshold. Ordered by worst
 // first so the admin sees the most troubled channels on top.
-func (r *ChannelRepository) ListUnhealthyByLibrary(ctx context.Context, libraryID string, minFailures int) ([]*Channel, error) {
+func (r *ChannelRepository) ListUnhealthyByLibrary(ctx context.Context, libraryID string, minFailures int) ([]*iptvmodel.Channel, error) {
 	if minFailures <= 0 {
 		minFailures = UnhealthyThreshold
 	}
@@ -440,7 +412,7 @@ func (r *ChannelRepository) ListUnhealthyByLibrary(ctx context.Context, libraryI
 	}
 	defer rows.Close() //nolint:errcheck
 
-	var out []*Channel
+	var out []*iptvmodel.Channel
 	for rows.Next() {
 		ch, err := scanChannelWithHealth(rows)
 		if err != nil {
@@ -449,18 +421,6 @@ func (r *ChannelRepository) ListUnhealthyByLibrary(ctx context.Context, libraryI
 		out = append(out, ch)
 	}
 	return out, rows.Err()
-}
-
-// ChannelHealthSummary is the lightweight projection the admin home
-// panel reads to render badges + stats without pulling the full
-// unhealthy / without-epg / total channel lists. Each value is a
-// single COUNT(*) — three tiny aggregates in one round-trip vs.
-// hundreds of KB of full channel rows that the panel previously
-// loaded just to call `.length` on.
-type ChannelHealthSummary struct {
-	TotalChannels   int
-	UnhealthyCount  int
-	WithoutEPGCount int
 }
 
 // HealthSummaryByLibrary computes the three counts the admin Bibliotecas
@@ -481,7 +441,7 @@ func (r *ChannelRepository) HealthSummaryByLibrary(
 	ctx context.Context,
 	libraryID string,
 	since, until time.Time,
-) (ChannelHealthSummary, error) {
+) (iptvmodel.ChannelHealthSummary, error) {
 	query := rewritePlaceholders(r.driver(),
 		`SELECT
 			COUNT(*) FILTER (WHERE c.is_active)                                  AS total_active,
@@ -498,12 +458,12 @@ func (r *ChannelRepository) HealthSummaryByLibrary(
 		FROM channels c
 		WHERE c.library_id = ?`)
 
-	var sum ChannelHealthSummary
+	var sum iptvmodel.ChannelHealthSummary
 	err := r.db.QueryRowContext(ctx, query,
 		UnhealthyThreshold, since.UTC(), until.UTC(), libraryID,
 	).Scan(&sum.TotalChannels, &sum.UnhealthyCount, &sum.WithoutEPGCount)
 	if err != nil {
-		return ChannelHealthSummary{}, fmt.Errorf("health summary: %w", err)
+		return iptvmodel.ChannelHealthSummary{}, fmt.Errorf("health summary: %w", err)
 	}
 	return sum, nil
 }
@@ -512,7 +472,7 @@ func (r *ChannelRepository) HealthSummaryByLibrary(
 // render: active and below the unhealthy threshold. Sorted by number
 // ascending — same order the M3U import produces and what viewers
 // expect in the carousel / guide.
-func (r *ChannelRepository) ListHealthyByLibrary(ctx context.Context, libraryID string) ([]*Channel, error) {
+func (r *ChannelRepository) ListHealthyByLibrary(ctx context.Context, libraryID string) ([]*iptvmodel.Channel, error) {
 	query := rewritePlaceholders(r.driver(),
 		`SELECT id, library_id, name, COALESCE(number, 0), COALESCE(group_name,''),
 		        COALESCE(logo_url,''), stream_url, COALESCE(tvg_id,''),
@@ -528,7 +488,7 @@ func (r *ChannelRepository) ListHealthyByLibrary(ctx context.Context, libraryID 
 	}
 	defer rows.Close() //nolint:errcheck
 
-	var out []*Channel
+	var out []*iptvmodel.Channel
 	for rows.Next() {
 		ch, err := scanChannelWithHealth(rows)
 		if err != nil {
@@ -546,8 +506,8 @@ func (r *ChannelRepository) ListHealthyByLibrary(ctx context.Context, libraryID 
 // the COALESCE(number, 0) wrap, so we read into the row's `any`
 // variant — both drivers happily decode numeric values into
 // `int` directly when the column is non-NULL after COALESCE.
-func scanChannelBasic(rows *sql.Rows) (*Channel, error) {
-	var c Channel
+func scanChannelBasic(rows *sql.Rows) (*iptvmodel.Channel, error) {
+	var c iptvmodel.Channel
 	if err := rows.Scan(
 		&c.ID, &c.LibraryID, &c.Name, &c.Number, &c.GroupName,
 		&c.LogoURL, &c.StreamURL, &c.TvgID,
@@ -558,8 +518,8 @@ func scanChannelBasic(rows *sql.Rows) (*Channel, error) {
 	return &c, nil
 }
 
-func scanChannelWithHealth(rows *sql.Rows) (*Channel, error) {
-	ch := &Channel{}
+func scanChannelWithHealth(rows *sql.Rows) (*iptvmodel.Channel, error) {
+	ch := &iptvmodel.Channel{}
 	var probeRaw any
 	if err := rows.Scan(&ch.ID, &ch.LibraryID, &ch.Name, &ch.Number, &ch.GroupName,
 		&ch.LogoURL, &ch.StreamURL, &ch.TvgID, &ch.Language, &ch.Country,
@@ -606,7 +566,7 @@ func (r *ChannelRepository) UpdateTvgID(ctx context.Context, channelID, tvgID st
 // `since`/`until` bound the window the caller considers "current";
 // typical admin use sends now-2h..now+24h to match the user-facing
 // guide window.
-func (r *ChannelRepository) ListWithoutEPGByLibrary(ctx context.Context, libraryID string, since, until time.Time) ([]*Channel, error) {
+func (r *ChannelRepository) ListWithoutEPGByLibrary(ctx context.Context, libraryID string, since, until time.Time) ([]*iptvmodel.Channel, error) {
 	query := rewritePlaceholders(r.driver(),
 		`SELECT c.id, c.library_id, c.name, COALESCE(c.number, 0),
 		        COALESCE(c.group_name,''), COALESCE(c.logo_url,''),
@@ -631,7 +591,7 @@ func (r *ChannelRepository) ListWithoutEPGByLibrary(ctx context.Context, library
 	}
 	defer rows.Close() //nolint:errcheck
 
-	var out []*Channel
+	var out []*iptvmodel.Channel
 	for rows.Next() {
 		ch, err := scanChannelWithHealth(rows)
 		if err != nil {
@@ -667,7 +627,7 @@ func (r *ChannelRepository) Groups(ctx context.Context, libraryID string) ([]str
 
 // ── row mapping helpers ─────────────────────────────────────────────────
 
-func channelToSqliteCreateParams(ch *Channel) sqlc.CreateChannelParams {
+func channelToSqliteCreateParams(ch *iptvmodel.Channel) sqlc.CreateChannelParams {
 	return sqlc.CreateChannelParams{
 		ID:        ch.ID,
 		LibraryID: ch.LibraryID,
@@ -684,7 +644,7 @@ func channelToSqliteCreateParams(ch *Channel) sqlc.CreateChannelParams {
 	}
 }
 
-func channelToPgCreateParams(ch *Channel) sqlc_pg.CreateChannelParams {
+func channelToPgCreateParams(ch *iptvmodel.Channel) sqlc_pg.CreateChannelParams {
 	return sqlc_pg.CreateChannelParams{
 		ID:        ch.ID,
 		LibraryID: ch.LibraryID,
@@ -701,8 +661,8 @@ func channelToPgCreateParams(ch *Channel) sqlc_pg.CreateChannelParams {
 	}
 }
 
-func channelFromSqliteGetRow(r sqlc.GetChannelByIDRow) Channel {
-	return Channel{
+func channelFromSqliteGetRow(r sqlc.GetChannelByIDRow) iptvmodel.Channel {
+	return iptvmodel.Channel{
 		ID:        r.ID,
 		LibraryID: r.LibraryID,
 		Name:      r.Name,
@@ -718,8 +678,8 @@ func channelFromSqliteGetRow(r sqlc.GetChannelByIDRow) Channel {
 	}
 }
 
-func channelFromPgGetRow(r sqlc_pg.GetChannelByIDRow) Channel {
-	return Channel{
+func channelFromPgGetRow(r sqlc_pg.GetChannelByIDRow) iptvmodel.Channel {
+	return iptvmodel.Channel{
 		ID:        r.ID,
 		LibraryID: r.LibraryID,
 		Name:      r.Name,
@@ -735,8 +695,8 @@ func channelFromPgGetRow(r sqlc_pg.GetChannelByIDRow) Channel {
 	}
 }
 
-func channelFromSqliteListRow(r sqlc.ListChannelsByLibraryRow) Channel {
-	return Channel{
+func channelFromSqliteListRow(r sqlc.ListChannelsByLibraryRow) iptvmodel.Channel {
+	return iptvmodel.Channel{
 		ID:        r.ID,
 		LibraryID: r.LibraryID,
 		Name:      r.Name,
@@ -752,8 +712,8 @@ func channelFromSqliteListRow(r sqlc.ListChannelsByLibraryRow) Channel {
 	}
 }
 
-func channelFromPgListRow(r sqlc_pg.ListChannelsByLibraryRow) Channel {
-	return Channel{
+func channelFromPgListRow(r sqlc_pg.ListChannelsByLibraryRow) iptvmodel.Channel {
+	return iptvmodel.Channel{
 		ID:        r.ID,
 		LibraryID: r.LibraryID,
 		Name:      r.Name,
@@ -769,8 +729,8 @@ func channelFromPgListRow(r sqlc_pg.ListChannelsByLibraryRow) Channel {
 	}
 }
 
-func channelFromSqliteActiveRow(r sqlc.ListActiveChannelsByLibraryRow) Channel {
-	return Channel{
+func channelFromSqliteActiveRow(r sqlc.ListActiveChannelsByLibraryRow) iptvmodel.Channel {
+	return iptvmodel.Channel{
 		ID:        r.ID,
 		LibraryID: r.LibraryID,
 		Name:      r.Name,
@@ -786,8 +746,8 @@ func channelFromSqliteActiveRow(r sqlc.ListActiveChannelsByLibraryRow) Channel {
 	}
 }
 
-func channelFromPgActiveRow(r sqlc_pg.ListActiveChannelsByLibraryRow) Channel {
-	return Channel{
+func channelFromPgActiveRow(r sqlc_pg.ListActiveChannelsByLibraryRow) iptvmodel.Channel {
+	return iptvmodel.Channel{
 		ID:        r.ID,
 		LibraryID: r.LibraryID,
 		Name:      r.Name,
@@ -803,11 +763,11 @@ func channelFromPgActiveRow(r sqlc_pg.ListActiveChannelsByLibraryRow) Channel {
 	}
 }
 
-func channelsFromSqliteListRows(rows []sqlc.ListChannelsByLibraryRow) []*Channel {
+func channelsFromSqliteListRows(rows []sqlc.ListChannelsByLibraryRow) []*iptvmodel.Channel {
 	if len(rows) == 0 {
 		return nil
 	}
-	out := make([]*Channel, len(rows))
+	out := make([]*iptvmodel.Channel, len(rows))
 	for i, row := range rows {
 		ch := channelFromSqliteListRow(row)
 		out[i] = &ch
@@ -815,11 +775,11 @@ func channelsFromSqliteListRows(rows []sqlc.ListChannelsByLibraryRow) []*Channel
 	return out
 }
 
-func channelsFromPgListRows(rows []sqlc_pg.ListChannelsByLibraryRow) []*Channel {
+func channelsFromPgListRows(rows []sqlc_pg.ListChannelsByLibraryRow) []*iptvmodel.Channel {
 	if len(rows) == 0 {
 		return nil
 	}
-	out := make([]*Channel, len(rows))
+	out := make([]*iptvmodel.Channel, len(rows))
 	for i, row := range rows {
 		ch := channelFromPgListRow(row)
 		out[i] = &ch
@@ -827,11 +787,11 @@ func channelsFromPgListRows(rows []sqlc_pg.ListChannelsByLibraryRow) []*Channel 
 	return out
 }
 
-func channelsFromSqliteActiveRows(rows []sqlc.ListActiveChannelsByLibraryRow) []*Channel {
+func channelsFromSqliteActiveRows(rows []sqlc.ListActiveChannelsByLibraryRow) []*iptvmodel.Channel {
 	if len(rows) == 0 {
 		return nil
 	}
-	out := make([]*Channel, len(rows))
+	out := make([]*iptvmodel.Channel, len(rows))
 	for i, row := range rows {
 		ch := channelFromSqliteActiveRow(row)
 		out[i] = &ch
@@ -839,11 +799,11 @@ func channelsFromSqliteActiveRows(rows []sqlc.ListActiveChannelsByLibraryRow) []
 	return out
 }
 
-func channelsFromPgActiveRows(rows []sqlc_pg.ListActiveChannelsByLibraryRow) []*Channel {
+func channelsFromPgActiveRows(rows []sqlc_pg.ListActiveChannelsByLibraryRow) []*iptvmodel.Channel {
 	if len(rows) == 0 {
 		return nil
 	}
-	out := make([]*Channel, len(rows))
+	out := make([]*iptvmodel.Channel, len(rows))
 	for i, row := range rows {
 		ch := channelFromPgActiveRow(row)
 		out[i] = &ch

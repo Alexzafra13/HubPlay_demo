@@ -20,7 +20,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"hubplay/internal/db"
+	iptvmodel "hubplay/internal/iptv/model"
 )
 
 // ── Channels without EPG ─────────────────────────────────────────
@@ -100,7 +100,7 @@ func (h *IPTVHandler) PatchChannel(w http.ResponseWriter, r *http.Request) {
 // needed to render "canal sin guía": identity + current tvg_id +
 // the display-name variants that might help the admin pick the
 // right override value.
-func channelWithoutEPGDTO(ch *db.Channel) map[string]any {
+func channelWithoutEPGDTO(ch *iptvmodel.Channel) map[string]any {
 	return map[string]any{
 		"id":         ch.ID,
 		"library_id": ch.LibraryID,
@@ -245,7 +245,7 @@ func (h *IPTVHandler) EnableChannel(w http.ResponseWriter, r *http.Request) {
 // lets viewers try the channel anyway (a click doesn't commit to a
 // belief the channel is dead; the proxy records another failure if
 // it still is, and resets the counter on first success).
-func channelHealthDTO(ch *db.Channel) map[string]any {
+func channelHealthDTO(ch *iptvmodel.Channel) map[string]any {
 	base := toChannelDTO(ch, "/api/v1/channels/"+ch.ID+"/stream")
 	var lastProbe any
 	if !ch.LastProbeAt.IsZero() {

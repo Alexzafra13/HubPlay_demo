@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	iptvmodel "hubplay/internal/iptv/model"
 	"hubplay/internal/db"
 )
 
@@ -28,13 +29,13 @@ func (f *fakeLibLister) List(_ context.Context) ([]*db.Library, error) {
 // tests can assert which libraries the worker walks.
 type fakeChanLister struct {
 	mu       sync.Mutex
-	byLib    map[string][]*db.Channel
+	byLib    map[string][]*iptvmodel.Channel
 	calls    map[string]int
 	failOnce bool
 	failErr  error
 }
 
-func (f *fakeChanLister) ListByLibrary(_ context.Context, libraryID string, _ bool) ([]*db.Channel, error) {
+func (f *fakeChanLister) ListByLibrary(_ context.Context, libraryID string, _ bool) ([]*iptvmodel.Channel, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.calls == nil {
@@ -81,7 +82,7 @@ func TestProberWorker_OnlyLivetvLibrariesAreProbed(t *testing.T) {
 		{ID: "L3", ContentType: "shows"},
 		{ID: "L4", ContentType: "livetv"},
 	}}
-	chans := &fakeChanLister{byLib: map[string][]*db.Channel{
+	chans := &fakeChanLister{byLib: map[string][]*iptvmodel.Channel{
 		"L2": {{ID: "c1", StreamURL: ""}},
 		"L4": {{ID: "c2", StreamURL: ""}},
 	}}
@@ -113,7 +114,7 @@ func TestProberWorker_OnlyLivetvLibrariesAreProbed(t *testing.T) {
 func TestProberWorker_TickRunsAfterInterval(t *testing.T) {
 	t.Parallel()
 	libs := &fakeLibLister{libs: []*db.Library{{ID: "L1", ContentType: "livetv"}}}
-	chans := &fakeChanLister{byLib: map[string][]*db.Channel{"L1": {}}}
+	chans := &fakeChanLister{byLib: map[string][]*iptvmodel.Channel{"L1": {}}}
 
 	w := NewProberWorker(newCheapProber(), libs, chans, quietLogger())
 	w.SetInterval(40 * time.Millisecond)
@@ -135,7 +136,7 @@ func TestProberWorker_TickRunsAfterInterval(t *testing.T) {
 func TestProberWorker_StopDrainsAndIsIdempotent(t *testing.T) {
 	t.Parallel()
 	libs := &fakeLibLister{libs: []*db.Library{{ID: "L1", ContentType: "livetv"}}}
-	chans := &fakeChanLister{byLib: map[string][]*db.Channel{"L1": {}}}
+	chans := &fakeChanLister{byLib: map[string][]*iptvmodel.Channel{"L1": {}}}
 
 	w := NewProberWorker(newCheapProber(), libs, chans, quietLogger())
 	w.SetInterval(time.Hour)
@@ -183,7 +184,7 @@ type blockingChanLister struct {
 // ListByLibrary blocks on `hang` and ignores ctx — that's the whole
 // point: simulate a wedged downstream call so Stop must rely on its
 // own deadline, not on ctx-cancellation propagating into the work.
-func (b *blockingChanLister) ListByLibrary(_ context.Context, _ string, _ bool) ([]*db.Channel, error) {
+func (b *blockingChanLister) ListByLibrary(_ context.Context, _ string, _ bool) ([]*iptvmodel.Channel, error) {
 	<-b.hang
 	return nil, nil
 }
@@ -243,7 +244,7 @@ func TestProberWorker_ProbeNowReturnsListError(t *testing.T) {
 	t.Parallel()
 	libs := &fakeLibLister{}
 	chans := &fakeChanLister{
-		byLib:    map[string][]*db.Channel{},
+		byLib:    map[string][]*iptvmodel.Channel{},
 		failOnce: true,
 		failErr:  errors.New("table missing"),
 	}

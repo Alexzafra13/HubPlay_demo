@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"hubplay"
+	iptvmodel "hubplay/internal/iptv/model"
 	"hubplay/internal/db"
 	"hubplay/internal/federation"
 	federationstorage "hubplay/internal/federation/storage"
@@ -83,7 +84,7 @@ func main() {
 	// must be ErrEPGSourceAlreadyAttached. Validates
 	// isUniqueConstraintError on the pg pgconn.PgError code 23505 path.
 	logger.Info("step 5: validate UNIQUE-violation detection via pg SQLSTATE 23505")
-	src := &db.LibraryEPGSource{
+	src := &iptvmodel.LibraryEPGSource{
 		ID:        "smoke-src-1",
 		LibraryID: lib.ID,
 		CatalogID: "",

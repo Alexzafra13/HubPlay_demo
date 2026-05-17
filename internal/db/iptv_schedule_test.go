@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	iptvmodel "hubplay/internal/iptv/model"
 	"hubplay/internal/db"
 	"hubplay/internal/testutil"
 )
@@ -28,7 +29,7 @@ func TestIPTVSchedule_UpsertCreatesRow(t *testing.T) {
 	createTestLibrary(t, repos, "lib-a")
 	ctx := context.Background()
 
-	job := &db.IPTVScheduledJob{
+	job := &iptvmodel.IPTVScheduledJob{
 		LibraryID:     "lib-a",
 		Kind:          db.IPTVJobKindM3URefresh,
 		IntervalHours: 12,
@@ -55,7 +56,7 @@ func TestIPTVSchedule_UpsertPreservesLastRun(t *testing.T) {
 	createTestLibrary(t, repos, "lib-a")
 	ctx := context.Background()
 
-	if err := repos.IPTVSchedules.Upsert(ctx, &db.IPTVScheduledJob{
+	if err := repos.IPTVSchedules.Upsert(ctx, &iptvmodel.IPTVScheduledJob{
 		LibraryID: "lib-a", Kind: db.IPTVJobKindEPGRefresh,
 		IntervalHours: 6, Enabled: true,
 	}); err != nil {
@@ -69,7 +70,7 @@ func TestIPTVSchedule_UpsertPreservesLastRun(t *testing.T) {
 	}
 
 	// Change interval; enabled stays true.
-	if err := repos.IPTVSchedules.Upsert(ctx, &db.IPTVScheduledJob{
+	if err := repos.IPTVSchedules.Upsert(ctx, &iptvmodel.IPTVScheduledJob{
 		LibraryID: "lib-a", Kind: db.IPTVJobKindEPGRefresh,
 		IntervalHours: 12, Enabled: true,
 	}); err != nil {
@@ -110,13 +111,13 @@ func TestIPTVSchedule_ListByLibrary(t *testing.T) {
 	// Two rows on lib-a, one on lib-b → list for lib-a returns exactly
 	// the two lib-a rows.
 	for _, kind := range []string{db.IPTVJobKindM3URefresh, db.IPTVJobKindEPGRefresh} {
-		if err := repos.IPTVSchedules.Upsert(ctx, &db.IPTVScheduledJob{
+		if err := repos.IPTVSchedules.Upsert(ctx, &iptvmodel.IPTVScheduledJob{
 			LibraryID: "lib-a", Kind: kind, IntervalHours: 6, Enabled: true,
 		}); err != nil {
 			t.Fatalf("upsert lib-a %s: %v", kind, err)
 		}
 	}
-	if err := repos.IPTVSchedules.Upsert(ctx, &db.IPTVScheduledJob{
+	if err := repos.IPTVSchedules.Upsert(ctx, &iptvmodel.IPTVScheduledJob{
 		LibraryID: "lib-b", Kind: db.IPTVJobKindM3URefresh,
 		IntervalHours: 24, Enabled: false,
 	}); err != nil {
@@ -143,13 +144,13 @@ func TestIPTVSchedule_ListDueDropsDisabled(t *testing.T) {
 	ctx := context.Background()
 
 	// Two jobs, only one enabled.
-	if err := repos.IPTVSchedules.Upsert(ctx, &db.IPTVScheduledJob{
+	if err := repos.IPTVSchedules.Upsert(ctx, &iptvmodel.IPTVScheduledJob{
 		LibraryID: "lib-a", Kind: db.IPTVJobKindM3URefresh,
 		IntervalHours: 1, Enabled: true,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repos.IPTVSchedules.Upsert(ctx, &db.IPTVScheduledJob{
+	if err := repos.IPTVSchedules.Upsert(ctx, &iptvmodel.IPTVScheduledJob{
 		LibraryID: "lib-a", Kind: db.IPTVJobKindEPGRefresh,
 		IntervalHours: 1, Enabled: false,
 	}); err != nil {
@@ -173,7 +174,7 @@ func TestIPTVSchedule_ListDueRespectsInterval(t *testing.T) {
 	createTestLibrary(t, repos, "lib-a")
 	ctx := context.Background()
 
-	if err := repos.IPTVSchedules.Upsert(ctx, &db.IPTVScheduledJob{
+	if err := repos.IPTVSchedules.Upsert(ctx, &iptvmodel.IPTVScheduledJob{
 		LibraryID: "lib-a", Kind: db.IPTVJobKindM3URefresh,
 		IntervalHours: 6, Enabled: true,
 	}); err != nil {
@@ -211,7 +212,7 @@ func TestIPTVSchedule_ListDueIncludesNeverRun(t *testing.T) {
 	createTestLibrary(t, repos, "lib-a")
 	ctx := context.Background()
 
-	if err := repos.IPTVSchedules.Upsert(ctx, &db.IPTVScheduledJob{
+	if err := repos.IPTVSchedules.Upsert(ctx, &iptvmodel.IPTVScheduledJob{
 		LibraryID: "lib-a", Kind: db.IPTVJobKindEPGRefresh,
 		IntervalHours: 24, Enabled: true,
 	}); err != nil {
@@ -233,15 +234,15 @@ func TestIPTVSchedule_UpsertRejectsInvalid(t *testing.T) {
 
 	cases := []struct {
 		name string
-		job  *db.IPTVScheduledJob
+		job  *iptvmodel.IPTVScheduledJob
 	}{
-		{"zero interval", &db.IPTVScheduledJob{
+		{"zero interval", &iptvmodel.IPTVScheduledJob{
 			LibraryID: "lib-a", Kind: db.IPTVJobKindM3URefresh, IntervalHours: 0,
 		}},
-		{"negative interval", &db.IPTVScheduledJob{
+		{"negative interval", &iptvmodel.IPTVScheduledJob{
 			LibraryID: "lib-a", Kind: db.IPTVJobKindM3URefresh, IntervalHours: -5,
 		}},
-		{"unknown kind", &db.IPTVScheduledJob{
+		{"unknown kind", &iptvmodel.IPTVScheduledJob{
 			LibraryID: "lib-a", Kind: "bogus", IntervalHours: 6,
 		}},
 	}
@@ -260,7 +261,7 @@ func TestIPTVSchedule_RecordRunTrimsLongError(t *testing.T) {
 	createTestLibrary(t, repos, "lib-a")
 	ctx := context.Background()
 
-	if err := repos.IPTVSchedules.Upsert(ctx, &db.IPTVScheduledJob{
+	if err := repos.IPTVSchedules.Upsert(ctx, &iptvmodel.IPTVScheduledJob{
 		LibraryID: "lib-a", Kind: db.IPTVJobKindM3URefresh,
 		IntervalHours: 6, Enabled: true,
 	}); err != nil {
@@ -295,7 +296,7 @@ func TestIPTVSchedule_CascadesOnLibraryDelete(t *testing.T) {
 	ctx := context.Background()
 
 	for _, kind := range []string{db.IPTVJobKindM3URefresh, db.IPTVJobKindEPGRefresh} {
-		if err := repos.IPTVSchedules.Upsert(ctx, &db.IPTVScheduledJob{
+		if err := repos.IPTVSchedules.Upsert(ctx, &iptvmodel.IPTVScheduledJob{
 			LibraryID: "lib-a", Kind: kind, IntervalHours: 6, Enabled: true,
 		}); err != nil {
 			t.Fatalf("upsert %s: %v", kind, err)
@@ -330,7 +331,7 @@ func TestIPTVSchedule_DeleteIsIdempotent(t *testing.T) {
 		t.Fatalf("delete missing: %v", err)
 	}
 
-	if err := repos.IPTVSchedules.Upsert(ctx, &db.IPTVScheduledJob{
+	if err := repos.IPTVSchedules.Upsert(ctx, &iptvmodel.IPTVScheduledJob{
 		LibraryID: "lib-a", Kind: db.IPTVJobKindM3URefresh,
 		IntervalHours: 6, Enabled: true,
 	}); err != nil {

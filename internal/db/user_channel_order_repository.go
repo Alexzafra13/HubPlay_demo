@@ -1,23 +1,13 @@
 package db
 
 import (
+	iptvmodel "hubplay/internal/iptv/model"
 	"context"
 	"database/sql"
 	"fmt"
 	"strings"
 	"time"
 )
-
-// UserChannelOrderEntry is one user's override row for a single
-// channel. The personalisation panel renders the rows and lets the
-// user move them up/down (position) or toggle them off (hidden).
-type UserChannelOrderEntry struct {
-	UserID    string
-	ChannelID string
-	Position  int
-	Hidden    bool
-	UpdatedAt time.Time
-}
 
 // UserChannelOrderRepository wraps the `user_channel_order` table
 // dual-dialect. Pattern B (raw SQL with RewritePlaceholders) because
@@ -97,7 +87,7 @@ func (r *UserChannelOrderRepository) Reset(ctx context.Context, userID string) e
 // position. Used by the personalisation panel to render which
 // channels the user has touched and which still inherit the admin
 // defaults.
-func (r *UserChannelOrderRepository) List(ctx context.Context, userID string) ([]UserChannelOrderEntry, error) {
+func (r *UserChannelOrderRepository) List(ctx context.Context, userID string) ([]iptvmodel.UserChannelOrderEntry, error) {
 	query := RewritePlaceholders(r.driver, `
 		SELECT user_id, channel_id, position, hidden, updated_at
 		FROM user_channel_order
@@ -108,9 +98,9 @@ func (r *UserChannelOrderRepository) List(ctx context.Context, userID string) ([
 		return nil, fmt.Errorf("list user_channel_order: %w", err)
 	}
 	defer rows.Close() //nolint:errcheck
-	out := []UserChannelOrderEntry{}
+	out := []iptvmodel.UserChannelOrderEntry{}
 	for rows.Next() {
-		var e UserChannelOrderEntry
+		var e iptvmodel.UserChannelOrderEntry
 		if IsPostgres(r.driver) {
 			if err := rows.Scan(&e.UserID, &e.ChannelID, &e.Position, &e.Hidden, &e.UpdatedAt); err != nil {
 				return nil, fmt.Errorf("scan user_channel_order: %w", err)
@@ -138,7 +128,7 @@ func (r *UserChannelOrderRepository) List(ctx context.Context, userID string) ([
 // row — they fall through to the admin defaults. That's the only
 // way the user can opt back into the admin's ordering for a subset
 // of channels without nuking the entire personalisation.
-func (r *UserChannelOrderRepository) ReplaceAll(ctx context.Context, userID string, entries []UserChannelOrderEntry) error {
+func (r *UserChannelOrderRepository) ReplaceAll(ctx context.Context, userID string, entries []iptvmodel.UserChannelOrderEntry) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)

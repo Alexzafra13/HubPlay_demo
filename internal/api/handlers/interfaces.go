@@ -6,6 +6,7 @@ import (
 	"time"
 
 	authmodel "hubplay/internal/auth/model"
+	iptvmodel "hubplay/internal/iptv/model"
 	"hubplay/internal/auth"
 	"hubplay/internal/db"
 	"hubplay/internal/event"
@@ -133,12 +134,12 @@ type StreamManagerService interface {
 
 // IPTVService defines IPTV operations needed by handlers.
 type IPTVService interface {
-	GetChannels(ctx context.Context, libraryID string, activeOnly bool) ([]*db.Channel, error)
-	GetChannel(ctx context.Context, id string) (*db.Channel, error)
+	GetChannels(ctx context.Context, libraryID string, activeOnly bool) ([]*iptvmodel.Channel, error)
+	GetChannel(ctx context.Context, id string) (*iptvmodel.Channel, error)
 	GetGroups(ctx context.Context, libraryID string) ([]string, error)
-	GetSchedule(ctx context.Context, channelID string, from, to time.Time) ([]*db.EPGProgram, error)
-	GetBulkSchedule(ctx context.Context, channelIDs []string, from, to time.Time) (map[string][]*db.EPGProgram, error)
-	NowPlaying(ctx context.Context, channelID string) (*db.EPGProgram, error)
+	GetSchedule(ctx context.Context, channelID string, from, to time.Time) ([]*iptvmodel.EPGProgram, error)
+	GetBulkSchedule(ctx context.Context, channelIDs []string, from, to time.Time) (map[string][]*iptvmodel.EPGProgram, error)
+	NowPlaying(ctx context.Context, channelID string) (*iptvmodel.EPGProgram, error)
 	RefreshM3U(ctx context.Context, libraryID string) (int, error)
 	// TryAcquireRefresh + RunRefreshM3U + PublishRefreshFailed split
 	// the M3U refresh so the HTTP handler can return 202 immediately
@@ -162,12 +163,12 @@ type IPTVService interface {
 	RemoveFavorite(ctx context.Context, userID, channelID string) error
 	IsFavorite(ctx context.Context, userID, channelID string) (bool, error)
 	ListFavoriteIDs(ctx context.Context, userID string) ([]string, error)
-	ListFavoriteChannels(ctx context.Context, userID string) ([]*db.Channel, error)
+	ListFavoriteChannels(ctx context.Context, userID string) ([]*iptvmodel.Channel, error)
 
 	// EPG sources (per-library, multi-provider config).
 	PublicEPGCatalog() []iptv.PublicEPGSource
-	ListEPGSources(ctx context.Context, libraryID string) ([]*db.LibraryEPGSource, error)
-	AddEPGSource(ctx context.Context, libraryID, catalogID, customURL string) (*db.LibraryEPGSource, error)
+	ListEPGSources(ctx context.Context, libraryID string) ([]*iptvmodel.LibraryEPGSource, error)
+	AddEPGSource(ctx context.Context, libraryID, catalogID, customURL string) (*iptvmodel.LibraryEPGSource, error)
 	RemoveEPGSource(ctx context.Context, libraryID, sourceID string) error
 	ReorderEPGSources(ctx context.Context, libraryID string, orderedIDs []string) error
 
@@ -176,12 +177,12 @@ type IPTVService interface {
 	// the admin UI pairs it with ResetChannelHealth so an operator
 	// can either permanently disable a dead channel or clear its
 	// counter if they know it's actually working.
-	ListUnhealthyChannels(ctx context.Context, libraryID string, threshold int) ([]*db.Channel, error)
+	ListUnhealthyChannels(ctx context.Context, libraryID string, threshold int) ([]*iptvmodel.Channel, error)
 	// ChannelHealthSummary is the lightweight aggregate the admin
 	// Bibliotecas panel reads on first paint (counts only) so the
 	// page doesn't pull every unhealthy / without-EPG row just to
 	// render badges.
-	ChannelHealthSummary(ctx context.Context, libraryID string) (db.ChannelHealthSummary, error)
+	ChannelHealthSummary(ctx context.Context, libraryID string) (iptvmodel.ChannelHealthSummary, error)
 	SetChannelActive(ctx context.Context, id string, active bool) error
 	ResetChannelHealth(ctx context.Context, channelID string) error
 	// RecordProbeFailure is the same hook the proxy uses; the player
@@ -192,7 +193,7 @@ type IPTVService interface {
 	// Manual channel editing — surfaced as the "canales sin guía"
 	// admin panel. The override layer makes SetChannelTvgID survive
 	// the next M3U refresh.
-	ListChannelsWithoutEPG(ctx context.Context, libraryID string) ([]*db.Channel, error)
+	ListChannelsWithoutEPG(ctx context.Context, libraryID string) ([]*iptvmodel.Channel, error)
 	SetChannelTvgID(ctx context.Context, channelID, tvgID string) error
 
 	// Continue watching — per-user recently-played channel rail.
@@ -200,14 +201,14 @@ type IPTVService interface {
 	// current channel rows via stream_url so entries survive M3U
 	// refresh cycles.
 	RecordWatch(ctx context.Context, userID, channelID string) (time.Time, error)
-	ListContinueWatching(ctx context.Context, userID string, limit int, accessibleLibraries map[string]bool) ([]*db.Channel, []time.Time, error)
+	ListContinueWatching(ctx context.Context, userID string, limit int, accessibleLibraries map[string]bool) ([]*iptvmodel.Channel, []time.Time, error)
 
 	// Per-user channel ordering + visibility. The overlay onto a
 	// library's channel list is applied by GetChannelsForUser;
 	// ReplaceChannelOrder / SetChannelVisibility / ResetChannelOrder
 	// drive the personalisation panel's mutations.
-	GetChannelsForUser(ctx context.Context, libraryID, userID string, activeOnly bool) ([]*db.Channel, error)
-	ListChannelOverrides(ctx context.Context, userID string) ([]db.UserChannelOrderEntry, error)
+	GetChannelsForUser(ctx context.Context, libraryID, userID string, activeOnly bool) ([]*iptvmodel.Channel, error)
+	ListChannelOverrides(ctx context.Context, userID string) ([]iptvmodel.UserChannelOrderEntry, error)
 	ReplaceChannelOrder(ctx context.Context, userID string, orderedIDs []string, hiddenIDs map[string]bool) error
 	SetChannelVisibility(ctx context.Context, userID, channelID string, hidden bool) error
 	ResetChannelOrder(ctx context.Context, userID string) error
@@ -215,8 +216,8 @@ type IPTVService interface {
 	// Admin channel curation. The admin overlay (library_channel_order)
 	// composes BEFORE the per-user overlay in GetChannelsForUser; admin-
 	// hidden channels are a hard constraint that users cannot un-hide.
-	GetChannelsForLibraryAdmin(ctx context.Context, libraryID string, includeHidden bool) ([]*db.Channel, []db.LibraryChannelOrderEntry, error)
-	ListLibraryChannelOverrides(ctx context.Context, libraryID string) ([]db.LibraryChannelOrderEntry, error)
+	GetChannelsForLibraryAdmin(ctx context.Context, libraryID string, includeHidden bool) ([]*iptvmodel.Channel, []iptvmodel.LibraryChannelOrderEntry, error)
+	ListLibraryChannelOverrides(ctx context.Context, libraryID string) ([]iptvmodel.LibraryChannelOrderEntry, error)
 	ReplaceLibraryChannelOrder(ctx context.Context, libraryID string, orderedIDs []string, hiddenIDs map[string]bool) error
 	SetLibraryChannelVisibility(ctx context.Context, libraryID, channelID string, hidden bool) error
 	ResetLibraryChannelOrder(ctx context.Context, libraryID string) error

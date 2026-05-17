@@ -14,6 +14,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	iptvmodel "hubplay/internal/iptv/model"
 	"hubplay/internal/auth"
 	"hubplay/internal/db"
 	"hubplay/internal/testutil"
@@ -23,19 +24,19 @@ import (
 
 type fakeScheduleRepo struct {
 	mu   sync.Mutex
-	rows map[string]*db.IPTVScheduledJob // key = libraryID + "\x00" + kind
+	rows map[string]*iptvmodel.IPTVScheduledJob // key = libraryID + "\x00" + kind
 }
 
 func newFakeScheduleRepo() *fakeScheduleRepo {
-	return &fakeScheduleRepo{rows: map[string]*db.IPTVScheduledJob{}}
+	return &fakeScheduleRepo{rows: map[string]*iptvmodel.IPTVScheduledJob{}}
 }
 
 func schedKey(libraryID, kind string) string { return libraryID + "\x00" + kind }
 
-func (r *fakeScheduleRepo) ListByLibrary(_ context.Context, libraryID string) ([]*db.IPTVScheduledJob, error) {
+func (r *fakeScheduleRepo) ListByLibrary(_ context.Context, libraryID string) ([]*iptvmodel.IPTVScheduledJob, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	var out []*db.IPTVScheduledJob
+	var out []*iptvmodel.IPTVScheduledJob
 	for _, row := range r.rows {
 		if row.LibraryID == libraryID {
 			copy := *row
@@ -45,7 +46,7 @@ func (r *fakeScheduleRepo) ListByLibrary(_ context.Context, libraryID string) ([
 	return out, nil
 }
 
-func (r *fakeScheduleRepo) Get(_ context.Context, libraryID, kind string) (*db.IPTVScheduledJob, error) {
+func (r *fakeScheduleRepo) Get(_ context.Context, libraryID, kind string) (*iptvmodel.IPTVScheduledJob, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	row, ok := r.rows[schedKey(libraryID, kind)]
@@ -56,7 +57,7 @@ func (r *fakeScheduleRepo) Get(_ context.Context, libraryID, kind string) (*db.I
 	return &c, nil
 }
 
-func (r *fakeScheduleRepo) Upsert(_ context.Context, job *db.IPTVScheduledJob) error {
+func (r *fakeScheduleRepo) Upsert(_ context.Context, job *iptvmodel.IPTVScheduledJob) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	key := schedKey(job.LibraryID, job.Kind)
@@ -267,7 +268,7 @@ func TestSchedule_Upsert_KeepsEnabledWhenOmitted(t *testing.T) {
 	// Saving just the interval must not toggle the enabled flag.
 	env := newScheduleTestEnv(t)
 	ctx := context.Background()
-	if err := env.repo.Upsert(ctx, &db.IPTVScheduledJob{
+	if err := env.repo.Upsert(ctx, &iptvmodel.IPTVScheduledJob{
 		LibraryID: "lib-a", Kind: db.IPTVJobKindM3URefresh,
 		IntervalHours: 12, Enabled: true,
 	}); err != nil {
@@ -314,7 +315,7 @@ func TestSchedule_Upsert_RejectsUnknownField(t *testing.T) {
 func TestSchedule_Delete_HappyPath(t *testing.T) {
 	env := newScheduleTestEnv(t)
 	ctx := context.Background()
-	_ = env.repo.Upsert(ctx, &db.IPTVScheduledJob{
+	_ = env.repo.Upsert(ctx, &iptvmodel.IPTVScheduledJob{
 		LibraryID: "lib-a", Kind: db.IPTVJobKindM3URefresh, IntervalHours: 6, Enabled: true,
 	})
 	rr := env.do(http.MethodDelete,
@@ -330,7 +331,7 @@ func TestSchedule_Delete_HappyPath(t *testing.T) {
 func TestSchedule_RunNow_HappyPath(t *testing.T) {
 	env := newScheduleTestEnv(t)
 	ctx := context.Background()
-	_ = env.repo.Upsert(ctx, &db.IPTVScheduledJob{
+	_ = env.repo.Upsert(ctx, &iptvmodel.IPTVScheduledJob{
 		LibraryID: "lib-a", Kind: db.IPTVJobKindM3URefresh, IntervalHours: 6, Enabled: true,
 	})
 	rr := env.do(http.MethodPost,

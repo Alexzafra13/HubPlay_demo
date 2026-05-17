@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	iptvmodel "hubplay/internal/iptv/model"
 	"hubplay/internal/db"
 	"hubplay/internal/testutil"
 )
@@ -30,7 +31,7 @@ func TestChannelOverride_UpsertReplacesExisting(t *testing.T) {
 	repos, libID := setupOverrideTest(t)
 	ctx := context.Background()
 
-	first := &db.ChannelOverride{
+	first := &iptvmodel.ChannelOverride{
 		LibraryID: libID,
 		StreamURL: "http://example/la1.m3u8",
 		TvgID:     "La1.ES",
@@ -39,7 +40,7 @@ func TestChannelOverride_UpsertReplacesExisting(t *testing.T) {
 		t.Fatalf("first upsert: %v", err)
 	}
 	// Updating the tvg_id replaces the row in place.
-	second := &db.ChannelOverride{
+	second := &iptvmodel.ChannelOverride{
 		LibraryID: libID,
 		StreamURL: "http://example/la1.m3u8",
 		TvgID:     "La1HD",
@@ -70,7 +71,7 @@ func TestChannelOverride_ApplyToLibraryRewritesTvgID(t *testing.T) {
 	// that so the override row keys cleanly.
 
 	// Admin override written before the import (or persisted across).
-	if err := repos.ChannelOverrides.Upsert(ctx, &db.ChannelOverride{
+	if err := repos.ChannelOverrides.Upsert(ctx, &iptvmodel.ChannelOverride{
 		LibraryID: libID,
 		StreamURL: "http://stream.com/fresh-1",
 		TvgID:     "La1.OVERRIDE",
@@ -104,7 +105,7 @@ func TestChannelOverride_ApplyToLibrary_Orphan(t *testing.T) {
 	ctx := context.Background()
 	_ = repos.Channels.Create(ctx, makeChannel("real-1", libID, "Real", 1, true))
 
-	if err := repos.ChannelOverrides.Upsert(ctx, &db.ChannelOverride{
+	if err := repos.ChannelOverrides.Upsert(ctx, &iptvmodel.ChannelOverride{
 		LibraryID: libID,
 		StreamURL: "http://gone/nothing.m3u8",
 		TvgID:     "ghost",
@@ -130,7 +131,7 @@ func TestChannelOverride_DeleteIsIdempotent(t *testing.T) {
 	}
 
 	// Round-trip.
-	_ = repos.ChannelOverrides.Upsert(ctx, &db.ChannelOverride{
+	_ = repos.ChannelOverrides.Upsert(ctx, &iptvmodel.ChannelOverride{
 		LibraryID: libID, StreamURL: "http://x/y", TvgID: "z",
 	})
 	if err := repos.ChannelOverrides.Delete(ctx, libID, "http://x/y"); err != nil {
@@ -153,14 +154,14 @@ func TestChannel_ListWithoutEPGByLibrary(t *testing.T) {
 	_ = repos.Channels.Create(ctx, makeChannel("ch-orphan", libID, "Orphan", 2, true))
 
 	now := time.Now()
-	prog := &db.EPGProgram{
+	prog := &iptvmodel.EPGProgram{
 		ID:        "p-1",
 		ChannelID: "ch-guide",
 		Title:     "Show",
 		StartTime: now.Add(-30 * time.Minute),
 		EndTime:   now.Add(30 * time.Minute),
 	}
-	if err := repos.EPGPrograms.ReplaceForChannel(ctx, "ch-guide", []*db.EPGProgram{prog}); err != nil {
+	if err := repos.EPGPrograms.ReplaceForChannel(ctx, "ch-guide", []*iptvmodel.EPGProgram{prog}); err != nil {
 		t.Fatal(err)
 	}
 

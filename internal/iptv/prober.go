@@ -39,7 +39,7 @@ import (
 	"sync"
 	"time"
 
-	"hubplay/internal/db"
+	iptvmodel "hubplay/internal/iptv/model"
 )
 
 const (
@@ -107,7 +107,7 @@ func (p *Prober) SetTimeout(d time.Duration) {
 // configured concurrency. Returns a summary that callers can log.
 // Honours ctx — when ctx is cancelled, in-flight probes finish but
 // no new ones start, and the partial summary is returned.
-func (p *Prober) ProbeChannels(ctx context.Context, channels []*db.Channel) ProbeSummary {
+func (p *Prober) ProbeChannels(ctx context.Context, channels []*iptvmodel.Channel) ProbeSummary {
 	summary := ProbeSummary{Total: len(channels)}
 	if len(channels) == 0 || p.reporter == nil {
 		return summary
@@ -145,7 +145,7 @@ schedule:
 		scheduled++
 
 		wg.Add(1)
-		go func(ch *db.Channel) {
+		go func(ch *iptvmodel.Channel) {
 			defer wg.Done()
 			defer func() { <-sem }()
 

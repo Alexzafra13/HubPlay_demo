@@ -9,7 +9,7 @@ package iptv
 import (
 	"context"
 
-	"hubplay/internal/db"
+	iptvmodel "hubplay/internal/iptv/model"
 )
 
 // AddFavorite marks a channel as favorited by a user. Idempotent.
@@ -37,6 +37,6 @@ func (s *Service) ListFavoriteIDs(ctx context.Context, userID string) ([]string,
 // ListFavoriteChannels returns the user's favorite channels with full channel
 // data. Filters out inactive channels — a favorited channel that later went
 // dark shouldn't surface as a dead card.
-func (s *Service) ListFavoriteChannels(ctx context.Context, userID string) ([]*db.Channel, error) {
+func (s *Service) ListFavoriteChannels(ctx context.Context, userID string) ([]*iptvmodel.Channel, error) {
 	return s.favorites.ListChannels(ctx, userID)
 }

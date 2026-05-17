@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"time"
 
-	"hubplay/internal/db"
+	iptvmodel "hubplay/internal/iptv/model"
 	"hubplay/internal/event"
 )
 
@@ -68,7 +68,7 @@ func (s *Service) RefreshEPG(ctx context.Context, libraryID string) (int, error)
 		// the merge path still runs. We do NOT persist this row —
 		// migration 007 does that on upgrade. Only in-memory fallback
 		// to cover "operator edits the column directly after upgrade".
-		sources = []*db.LibraryEPGSource{{
+		sources = []*iptvmodel.LibraryEPGSource{{
 			ID: "", LibraryID: libraryID, URL: lib.EPGURL, Priority: 0,
 		}}
 	}
@@ -107,7 +107,7 @@ func (s *Service) RefreshEPG(ctx context.Context, libraryID string) (int, error)
 
 	// Merge accumulators — persist once at the end so a per-source
 	// failure doesn't leave the DB half-populated.
-	ownedByChannel := make(map[string][]*db.EPGProgram)
+	ownedByChannel := make(map[string][]*iptvmodel.EPGProgram)
 	totalOrphans := 0
 	workedCount := 0
 
@@ -230,11 +230,11 @@ func (s *Service) RefreshEPG(ctx context.Context, libraryID string) (int, error)
 // lazy resolve.
 func (s *Service) refreshOneSource(
 	ctx context.Context,
-	src *db.LibraryEPGSource,
+	src *iptvmodel.LibraryEPGSource,
 	idx *channelIndex,
-	alreadyOwned map[string][]*db.EPGProgram,
+	alreadyOwned map[string][]*iptvmodel.EPGProgram,
 	tlsInsecure bool,
-) (map[string][]*db.EPGProgram, int, int, error) {
+) (map[string][]*iptvmodel.EPGProgram, int, int, error) {
 	body, err := s.fetchURL(ctx, src.URL, tlsInsecure)
 	if err != nil {
 		return nil, 0, 0, fmt.Errorf("fetch EPG: %w", err)
@@ -278,21 +278,21 @@ func (s *Service) refreshOneSource(
 // memoises into the same cache.
 type matchHandler struct {
 	idx          *channelIndex
-	alreadyOwned map[string][]*db.EPGProgram
+	alreadyOwned map[string][]*iptvmodel.EPGProgram
 	candidates   map[string][]string // xmltv channel id → display-name aliases
 	resolved     map[string]string   // xmltv channel id → hub channel id ("" = no match)
 	cacheArmed   bool
-	out          map[string][]*db.EPGProgram
+	out          map[string][]*iptvmodel.EPGProgram
 	orphans      int
 }
 
-func newMatchHandler(idx *channelIndex, alreadyOwned map[string][]*db.EPGProgram) *matchHandler {
+func newMatchHandler(idx *channelIndex, alreadyOwned map[string][]*iptvmodel.EPGProgram) *matchHandler {
 	return &matchHandler{
 		idx:          idx,
 		alreadyOwned: alreadyOwned,
 		candidates:   make(map[string][]string),
 		resolved:     make(map[string]string),
-		out:          make(map[string][]*db.EPGProgram),
+		out:          make(map[string][]*iptvmodel.EPGProgram),
 	}
 }
 
@@ -338,7 +338,7 @@ func (m *matchHandler) OnProgramme(p EPGProgram) error {
 		// A higher-priority source already covered this channel.
 		return nil
 	}
-	m.out[channelID] = append(m.out[channelID], &db.EPGProgram{
+	m.out[channelID] = append(m.out[channelID], &iptvmodel.EPGProgram{
 		ID:          generateID(),
 		ChannelID:   channelID,
 		Title:       p.Title,
@@ -354,17 +354,17 @@ func (m *matchHandler) OnProgramme(p EPGProgram) error {
 // ── EPG query surface (read-side) ─────────────────────────────────
 
 // GetSchedule returns EPG programs for a channel within a time range.
-func (s *Service) GetSchedule(ctx context.Context, channelID string, from, to time.Time) ([]*db.EPGProgram, error) {
+func (s *Service) GetSchedule(ctx context.Context, channelID string, from, to time.Time) ([]*iptvmodel.EPGProgram, error) {
 	return s.epgPrograms.Schedule(ctx, channelID, from, to)
 }
 
 // GetBulkSchedule returns EPG programs for multiple channels.
-func (s *Service) GetBulkSchedule(ctx context.Context, channelIDs []string, from, to time.Time) (map[string][]*db.EPGProgram, error) {
+func (s *Service) GetBulkSchedule(ctx context.Context, channelIDs []string, from, to time.Time) (map[string][]*iptvmodel.EPGProgram, error) {
 	return s.epgPrograms.BulkSchedule(ctx, channelIDs, from, to)
 }
 
 // NowPlaying returns the currently airing program for a channel.
-func (s *Service) NowPlaying(ctx context.Context, channelID string) (*db.EPGProgram, error) {
+func (s *Service) NowPlaying(ctx context.Context, channelID string) (*iptvmodel.EPGProgram, error) {
 	return s.epgPrograms.NowPlaying(ctx, channelID)
 }
 

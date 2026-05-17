@@ -7,21 +7,10 @@ import (
 	"fmt"
 	"time"
 
+	iptvmodel "hubplay/internal/iptv/model"
 	"hubplay/internal/db/sqlc"
 	"hubplay/internal/db/sqlc_pg"
 )
-
-// ChannelOverride captures a hand-edited field that must survive an
-// M3U refresh. Keyed by (library_id, stream_url) because channel IDs
-// are regenerated on every refresh — see migration 009 for the
-// rationale.
-type ChannelOverride struct {
-	LibraryID string
-	StreamURL string
-	TvgID     string
-	CreatedAt time.Time
-	UpdatedAt time.Time
-}
 
 // ChannelOverrideRepository — Pattern A dual-dialect. ApplyToLibrary
 // still owns the multi-row transaction; the tx pattern branches per
@@ -46,7 +35,7 @@ func (r *ChannelOverrideRepository) useSQLite() bool { return r.sq != nil }
 
 // Upsert records an override. Idempotent: re-running with the same
 // fields just bumps updated_at.
-func (r *ChannelOverrideRepository) Upsert(ctx context.Context, o *ChannelOverride) error {
+func (r *ChannelOverrideRepository) Upsert(ctx context.Context, o *iptvmodel.ChannelOverride) error {
 	now := time.Now().UTC()
 	if o.CreatedAt.IsZero() {
 		o.CreatedAt = now
@@ -97,7 +86,7 @@ func (r *ChannelOverrideRepository) Delete(ctx context.Context, libraryID, strea
 // Get returns one override if present. Returns (nil, nil) when the
 // row doesn't exist so callers can pattern-match that without having
 // to sniff for sql.ErrNoRows.
-func (r *ChannelOverrideRepository) Get(ctx context.Context, libraryID, streamURL string) (*ChannelOverride, error) {
+func (r *ChannelOverrideRepository) Get(ctx context.Context, libraryID, streamURL string) (*iptvmodel.ChannelOverride, error) {
 	if r.useSQLite() {
 		row, err := r.sq.GetChannelOverride(ctx, sqlc.GetChannelOverrideParams{
 			LibraryID: libraryID, StreamUrl: streamURL,
@@ -108,7 +97,7 @@ func (r *ChannelOverrideRepository) Get(ctx context.Context, libraryID, streamUR
 		if err != nil {
 			return nil, fmt.Errorf("get channel override: %w", err)
 		}
-		return &ChannelOverride{
+		return &iptvmodel.ChannelOverride{
 			LibraryID: row.LibraryID,
 			StreamURL: row.StreamUrl,
 			TvgID:     row.TvgID,
@@ -125,7 +114,7 @@ func (r *ChannelOverrideRepository) Get(ctx context.Context, libraryID, streamUR
 	if err != nil {
 		return nil, fmt.Errorf("get channel override: %w", err)
 	}
-	return &ChannelOverride{
+	return &iptvmodel.ChannelOverride{
 		LibraryID: row.LibraryID,
 		StreamURL: row.StreamUrl,
 		TvgID:     row.TvgID,

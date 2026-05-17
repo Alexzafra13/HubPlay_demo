@@ -18,7 +18,7 @@ en este doc (no se edita el audit original).
 | 0 | 🔄 en curso | Pre-trabajo: ADRs + conventions.md | — | — |
 | 1 | ✅ cerrada | Fixes urgentes seguridad + correctness | FFF, F16-1, RRR-mig, RR, Y, DD, GGGG, AAA, EE, HHH, F16-6, F16-7 | 12 olores cerrados, suite verde |
 | 2 | ✅ cerrada | Sub-paquetes de `db/` | B, J, K, T, L | Sesión M.2 (B+J) + sesión M.3 (L) + sesión M.4 (K+T) |
-| 3 | 🔄 en curso | Migración Opción B incremental | M (iptv → auth ✅ → library) | sub-bloque auth cerrado en sesión M.6; iptv + library pendientes |
+| 3 | 🔄 en curso | Migración Opción B incremental | M (iptv ✅ → auth ✅ → library) | iptv + auth cerrados (sesiones M.6 + M.7); library pendiente |
 | 4 | ⏳ pendiente | Split de god-handlers/services | P, Z, QQ | — |
 | 5 | ⏳ pendiente | Refactor estructural `iptv/` | CC | — |
 | 6 | ⏳ pendiente | Composition root | G, H, V, Q, LL, JJ | — |
@@ -549,13 +549,72 @@ feature, no en `internal/db/`).
   network roundtrip por test database creation).
 - Cero cambios de API HTTP pública.
 
-### Pendiente — sub-bloques siguientes
+### Sub-bloque iptv ✅ (sesión M.7)
 
-- **iptv** (12 tipos `db.Channel*`, `db.EPGProgram`,
-  `db.IPTVScheduledJob`, etc.) — bloque más grande. Mismo patrón:
-  `internal/iptv/model/` con sub-paquete leaf.
+Movidos 9 tipos del dominio iptv (el audit decía 12, el conteo real
+del repo es 9) de `internal/db/{channel,channel_favorites,channel_overrides,
+epg,library_channel_order,library_epg_sources,user_channel_order,
+iptv_schedule}_repository.go` al nuevo paquete
+`internal/iptv/model/`. Mismo patrón validado en auth.
+
+Tipos:
+- `Channel` + `ChannelHealthSummary`
+- `ChannelFavorite`
+- `ChannelOverride`
+- `EPGProgram`
+- `LibraryChannelOrderEntry`
+- `LibraryEPGSource`
+- `UserChannelOrderEntry`
+- `IPTVScheduledJob`
+
+Grafo resultante:
+
+```
+iptv/model   → ∅ (puro)
+db           → iptv/model (los repos retornan *iptvmodel.X)
+iptv         → db + iptv/model
+composition  → todos los anteriores (main.go)
+```
+
+Cero ciclo. **Cierra "Opción B" del olor A** para el feature iptv:
+los tipos del dominio viven en el feature, no en `internal/db/`.
+
+**Cambios** (~50 ficheros):
+
+- `internal/iptv/model/types.go` (~150 LOC): 9 structs + docs
+  del rationale + cierre del grafo.
+- `internal/db/{channel,channel_favorites,channel_overrides,epg,
+  library_channel_order,library_epg_sources,user_channel_order,
+  iptv_schedule,channel_watch_history}_repository.go` (9 ficheros):
+  borrar `type X struct`; añadir `iptvmodel` import; firmas + row
+  converters adaptados.
+- `internal/iptv/` (~14 productivos + ~6 tests): sweep `db.Channel` →
+  `iptvmodel.Channel` etc. + cleanup de imports `db` que quedaron sin
+  uso (~9 ficheros).
+- `internal/api/handlers/` (~10 productivos + tests): ídem.
+- `cmd/pg-smoke/main.go`: actualizado.
+- 11 ficheros de `internal/db/*_test.go`: sweep en seeds.
+
+**Verificación**:
+- `go build ./...` exitcode 0 en `golang:1.25` container.
+- `go test ./internal/... -count=1 -timeout=300s` — **23 paquetes
+  verdes** contra SQLite (incluyendo nuevo `iptv/model`).
+- `HUBPLAY_TEST_DRIVER=postgres go test ./internal/iptv/... ./internal/api/handlers/...
+  -count=1 -timeout=600s` — verde contra Postgres (iptv tardó
+  145s, handlers 154s).
+- Cero cambios de API HTTP pública.
+
+**Bug encontrado y corregido durante el sweep**: `epg_diagnostic.go`
+tenía `import "hubplay/internal/db"` single-line (no block) — el
+`ensure_import` Python no insertaba en ese estilo. Patcheado a mano.
+Lección para library: contemplar ambos estilos de import desde el
+principio.
+
+### Pendiente — sub-bloque siguiente
+
 - **library** (12 tipos: Item, MediaStream, Image, Chapter,
   EpisodeSegment, ItemValue, Studio, Collection, ExternalID, Metadata,
-  Person, ItemPersonCredit). Otro bloque grande.
-- **Cleanup** de `internal/db/` post-migración. Debería quedar
-  reducido a factory + adapter sqlc + dialect helpers + 4-5 repos.
+  Person, ItemPersonCredit). Otro bloque grande. Mismo patrón
+  `internal/library/model/`.
+- **Cleanup** de `internal/db/` post-migración: factory + adapter
+  sqlc + dialect helpers + 4-5 repos restantes.

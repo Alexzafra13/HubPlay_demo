@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"hubplay/internal/db"
+	iptvmodel "hubplay/internal/iptv/model"
 )
 
 // fakeReporter records the per-channel outcomes the prober pushes.
@@ -63,7 +63,7 @@ func TestProber_HappyPath_HLSManifest(t *testing.T) {
 	p := NewProber(nil, rep)
 	p.SetTimeout(2 * time.Second)
 
-	channels := []*db.Channel{{ID: "c1", StreamURL: srv.URL + "/playlist.m3u8"}}
+	channels := []*iptvmodel.Channel{{ID: "c1", StreamURL: srv.URL + "/playlist.m3u8"}}
 	summary := p.ProbeChannels(context.Background(), channels)
 
 	if summary.OK != 1 || summary.Failed != 0 {
@@ -89,7 +89,7 @@ func TestProber_HLSWithoutMagicIsFailure(t *testing.T) {
 	p := NewProber(nil, rep)
 	p.SetTimeout(2 * time.Second)
 
-	channels := []*db.Channel{{ID: "c1", StreamURL: srv.URL + "/x.m3u8"}}
+	channels := []*iptvmodel.Channel{{ID: "c1", StreamURL: srv.URL + "/x.m3u8"}}
 	summary := p.ProbeChannels(context.Background(), channels)
 
 	if summary.OK != 0 || summary.Failed != 1 {
@@ -112,7 +112,7 @@ func TestProber_HTTPErrorIsFailure(t *testing.T) {
 	p := NewProber(nil, rep)
 	p.SetTimeout(2 * time.Second)
 
-	channels := []*db.Channel{{ID: "c1", StreamURL: srv.URL + "/x"}}
+	channels := []*iptvmodel.Channel{{ID: "c1", StreamURL: srv.URL + "/x"}}
 	summary := p.ProbeChannels(context.Background(), channels)
 
 	if summary.Failed != 1 {
@@ -136,7 +136,7 @@ func TestProber_TimeoutCountsAsFailure(t *testing.T) {
 	p := NewProber(nil, rep)
 	p.SetTimeout(50 * time.Millisecond)
 
-	channels := []*db.Channel{{ID: "c1", StreamURL: srv.URL + "/x"}}
+	channels := []*iptvmodel.Channel{{ID: "c1", StreamURL: srv.URL + "/x"}}
 	summary := p.ProbeChannels(context.Background(), channels)
 
 	if summary.Failed != 1 {
@@ -148,7 +148,7 @@ func TestProber_NonHTTPSchemeIsSkippedAndCountsOk(t *testing.T) {
 	t.Parallel()
 	rep := newFakeReporter()
 	p := NewProber(nil, rep)
-	channels := []*db.Channel{
+	channels := []*iptvmodel.Channel{
 		{ID: "c1", StreamURL: "rtmp://server/live"},
 		{ID: "c2", StreamURL: "udp://239.0.0.1:1234"},
 	}
@@ -166,7 +166,7 @@ func TestProber_EmptyURLFails(t *testing.T) {
 	t.Parallel()
 	rep := newFakeReporter()
 	p := NewProber(nil, rep)
-	channels := []*db.Channel{{ID: "c1", StreamURL: "   "}}
+	channels := []*iptvmodel.Channel{{ID: "c1", StreamURL: "   "}}
 	summary := p.ProbeChannels(context.Background(), channels)
 	if summary.Failed != 1 {
 		t.Fatalf("want failed=1 got %+v", summary)
@@ -201,9 +201,9 @@ func TestProber_ConcurrencyCap(t *testing.T) {
 	p.SetConcurrency(2)
 	p.SetTimeout(2 * time.Second)
 
-	channels := make([]*db.Channel, 12)
+	channels := make([]*iptvmodel.Channel, 12)
 	for i := range channels {
-		channels[i] = &db.Channel{ID: "c", StreamURL: srv.URL + "/p.m3u8"}
+		channels[i] = &iptvmodel.Channel{ID: "c", StreamURL: srv.URL + "/p.m3u8"}
 	}
 	_ = p.ProbeChannels(context.Background(), channels)
 
@@ -229,7 +229,7 @@ func TestProber_ContextCancelStopsScheduling(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // immediate cancel: no probe should ever start
 
-	channels := []*db.Channel{
+	channels := []*iptvmodel.Channel{
 		{ID: "c1", StreamURL: srv.URL + "/x"},
 		{ID: "c2", StreamURL: srv.URL + "/y"},
 	}
@@ -242,7 +242,7 @@ func TestProber_ContextCancelStopsScheduling(t *testing.T) {
 func TestProber_NilReporterIsNoop(t *testing.T) {
 	t.Parallel()
 	p := NewProber(nil, nil)
-	summary := p.ProbeChannels(context.Background(), []*db.Channel{{ID: "c1", StreamURL: "http://x"}})
+	summary := p.ProbeChannels(context.Background(), []*iptvmodel.Channel{{ID: "c1", StreamURL: "http://x"}})
 	if summary.OK != 0 || summary.Failed != 0 {
 		t.Fatalf("nil reporter must short-circuit: %+v", summary)
 	}
@@ -311,7 +311,7 @@ func TestProber_FailureForwardsError(t *testing.T) {
 	rep := newFakeReporter()
 	p := NewProber(nil, rep)
 	p.SetTimeout(time.Second)
-	_ = p.ProbeChannels(context.Background(), []*db.Channel{{ID: "c1", StreamURL: srv.URL}})
+	_ = p.ProbeChannels(context.Background(), []*iptvmodel.Channel{{ID: "c1", StreamURL: srv.URL}})
 	_, fails := rep.snapshot()
 	if fails["c1"] == nil || !errors.Is(fails["c1"], fails["c1"]) {
 		t.Fatal("expected non-nil error forwarded to reporter")

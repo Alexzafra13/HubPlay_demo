@@ -3,11 +3,11 @@ package iptv
 import (
 	"testing"
 
-	"hubplay/internal/db"
+	iptvmodel "hubplay/internal/iptv/model"
 )
 
 func TestApplyOrderOverlay_NoOverridesPassesThrough(t *testing.T) {
-	channels := []*db.Channel{
+	channels := []*iptvmodel.Channel{
 		{ID: "a", Name: "A", Number: 1},
 		{ID: "b", Name: "B", Number: 2},
 	}
@@ -18,13 +18,13 @@ func TestApplyOrderOverlay_NoOverridesPassesThrough(t *testing.T) {
 }
 
 func TestApplyOrderOverlay_ReordersByUserPosition(t *testing.T) {
-	channels := []*db.Channel{
+	channels := []*iptvmodel.Channel{
 		{ID: "a", Name: "A", Number: 1},
 		{ID: "b", Name: "B", Number: 2},
 		{ID: "c", Name: "C", Number: 3},
 	}
 	// User puts channel C first, channel A last. B has no override.
-	overrides := []db.UserChannelOrderEntry{
+	overrides := []iptvmodel.UserChannelOrderEntry{
 		{ChannelID: "c", Position: 1},
 		{ChannelID: "a", Position: 99},
 	}
@@ -45,12 +45,12 @@ func TestApplyOrderOverlay_ReordersByUserPosition(t *testing.T) {
 }
 
 func TestApplyOrderOverlay_HidesChannelsMarkedHidden(t *testing.T) {
-	channels := []*db.Channel{
+	channels := []*iptvmodel.Channel{
 		{ID: "a", Name: "A", Number: 1},
 		{ID: "b", Name: "B", Number: 2},
 		{ID: "c", Name: "C", Number: 3},
 	}
-	overrides := []db.UserChannelOrderEntry{
+	overrides := []iptvmodel.UserChannelOrderEntry{
 		{ChannelID: "b", Position: 2, Hidden: true},
 	}
 	out := applyOrderOverlay(channels, overrides)
@@ -67,11 +67,11 @@ func TestApplyOrderOverlay_HidesChannelsMarkedHidden(t *testing.T) {
 func TestApplyOrderOverlay_StableOrderAmongTies(t *testing.T) {
 	// Two channels share the same admin Number — neither has an
 	// override. They should keep their original relative order.
-	channels := []*db.Channel{
+	channels := []*iptvmodel.Channel{
 		{ID: "first", Name: "F", Number: 1},
 		{ID: "second", Name: "S", Number: 1},
 	}
-	out := applyOrderOverlay(channels, []db.UserChannelOrderEntry{
+	out := applyOrderOverlay(channels, []iptvmodel.UserChannelOrderEntry{
 		// Unrelated override for a non-existent channel so the
 		// function takes the overlay path (not the fast nil-path).
 		{ChannelID: "ghost", Position: 99},
@@ -82,10 +82,10 @@ func TestApplyOrderOverlay_StableOrderAmongTies(t *testing.T) {
 }
 
 func TestApplyOrderOverlay_DoesNotMutateInput(t *testing.T) {
-	channels := []*db.Channel{
+	channels := []*iptvmodel.Channel{
 		{ID: "a", Number: 10},
 	}
-	overrides := []db.UserChannelOrderEntry{
+	overrides := []iptvmodel.UserChannelOrderEntry{
 		{ChannelID: "a", Position: 1},
 	}
 	_ = applyOrderOverlay(channels, overrides)

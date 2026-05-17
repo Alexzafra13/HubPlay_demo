@@ -6,6 +6,7 @@ import (
 	"time"
 
 	authmodel "hubplay/internal/auth/model"
+	iptvmodel "hubplay/internal/iptv/model"
 	"hubplay/internal/db"
 	"hubplay/internal/testutil"
 )
@@ -34,7 +35,7 @@ func seedWatchFixture(t *testing.T, repos *db.Repositories, n int) []string {
 	ids := make([]string, 0, n)
 	for i := 0; i < n; i++ {
 		id := "ch-" + string(rune('a'+i))
-		if err := repos.Channels.Create(ctx, &db.Channel{
+		if err := repos.Channels.Create(ctx, &iptvmodel.Channel{
 			ID: id, LibraryID: "lib-a", Name: "Channel " + id,
 			Number: i + 1, StreamURL: "http://example/" + id,
 			IsActive: true, AddedAt: now,
@@ -221,7 +222,7 @@ func TestChannelWatchHistory_SurvivesM3URefresh(t *testing.T) {
 	// also assert the "URL missing → row stays but joins to nothing"
 	// half of the contract.
 	newID := "ch-renewed"
-	if err := repos.Channels.ReplaceForLibrary(ctx, "lib-a", []*db.Channel{
+	if err := repos.Channels.ReplaceForLibrary(ctx, "lib-a", []*iptvmodel.Channel{
 		{ID: newID, LibraryID: "lib-a", Name: "Renewed",
 			Number: 1, StreamURL: streamB, IsActive: true, AddedAt: now},
 	}); err != nil {
@@ -240,7 +241,7 @@ func TestChannelWatchHistory_SurvivesM3URefresh(t *testing.T) {
 
 	// If streamA comes back later the orphan history row re-joins
 	// and the rail shows both. Verifies the "URL returns" half.
-	if err := repos.Channels.ReplaceForLibrary(ctx, "lib-a", []*db.Channel{
+	if err := repos.Channels.ReplaceForLibrary(ctx, "lib-a", []*iptvmodel.Channel{
 		{ID: newID, LibraryID: "lib-a", Name: "Renewed",
 			Number: 1, StreamURL: streamB, IsActive: true, AddedAt: now},
 		{ID: "ch-returned", LibraryID: "lib-a", Name: "Returned",
@@ -290,7 +291,7 @@ func TestChannelWatchHistory_DedupesAcrossLibraries(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repos.Channels.Create(ctx, &db.Channel{
+	if err := repos.Channels.Create(ctx, &iptvmodel.Channel{
 		ID: "ch-dup", LibraryID: "lib-b", Name: "Dup",
 		Number: 1, StreamURL: streamURLFor(ids[0]),
 		IsActive: true, AddedAt: now,

@@ -29,6 +29,7 @@ import (
 	"sync"
 	"time"
 
+	iptvmodel "hubplay/internal/iptv/model"
 	"hubplay/internal/db"
 )
 
@@ -76,7 +77,7 @@ type libraryLister interface {
 }
 
 type channelLister interface {
-	ListByLibrary(ctx context.Context, libraryID string, activeOnly bool) ([]*db.Channel, error)
+	ListByLibrary(ctx context.Context, libraryID string, activeOnly bool) ([]*iptvmodel.Channel, error)
 }
 
 // NewProberWorker wires a worker around the building blocks. Logger

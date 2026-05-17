@@ -7,16 +7,10 @@ import (
 	"fmt"
 	"time"
 
+	iptvmodel "hubplay/internal/iptv/model"
 	"hubplay/internal/db/sqlc"
 	"hubplay/internal/db/sqlc_pg"
 )
-
-// ChannelFavorite is a single (user, channel, when) tuple.
-type ChannelFavorite struct {
-	UserID    string
-	ChannelID string
-	CreatedAt time.Time
-}
 
 // ChannelFavoritesRepository wraps sqlc-generated queries for the
 // `user_channel_favorites` table — Pattern A dual-dialect. Number is
@@ -138,15 +132,15 @@ func (r *ChannelFavoritesRepository) ListIDs(ctx context.Context, userID string)
 // `channels` table, filtered to active channels only. Inactive or deleted
 // channels are silently skipped — favoriting a channel that later goes
 // inactive shouldn't show up as a dead card.
-func (r *ChannelFavoritesRepository) ListChannels(ctx context.Context, userID string) ([]*Channel, error) {
+func (r *ChannelFavoritesRepository) ListChannels(ctx context.Context, userID string) ([]*iptvmodel.Channel, error) {
 	if r.useSQLite() {
 		rows, err := r.sq.ListChannelFavoritesWithChannel(ctx, userID)
 		if err != nil {
 			return nil, fmt.Errorf("list channel favorites with channel: %w", err)
 		}
-		out := make([]*Channel, 0, len(rows))
+		out := make([]*iptvmodel.Channel, 0, len(rows))
 		for _, row := range rows {
-			ch := &Channel{
+			ch := &iptvmodel.Channel{
 				ID:        row.ID,
 				LibraryID: row.LibraryID,
 				Name:      row.Name,
@@ -170,9 +164,9 @@ func (r *ChannelFavoritesRepository) ListChannels(ctx context.Context, userID st
 	if err != nil {
 		return nil, fmt.Errorf("list channel favorites with channel: %w", err)
 	}
-	out := make([]*Channel, 0, len(rows))
+	out := make([]*iptvmodel.Channel, 0, len(rows))
 	for _, row := range rows {
-		ch := &Channel{
+		ch := &iptvmodel.Channel{
 			ID:        row.ID,
 			LibraryID: row.LibraryID,
 			Name:      row.Name,

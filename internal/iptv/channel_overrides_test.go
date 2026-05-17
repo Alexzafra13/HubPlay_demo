@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	iptvmodel "hubplay/internal/iptv/model"
 	"hubplay/internal/db"
 	"hubplay/internal/testutil"
 )
@@ -163,16 +164,16 @@ func TestListChannelsWithoutEPG_SurfaceOrphansOnly(t *testing.T) {
 		ID: libID, Name: "O", ContentType: "livetv", ScanMode: "manual",
 		CreatedAt: now, UpdatedAt: now,
 	})
-	_ = repos.Channels.Create(ctx, &db.Channel{
+	_ = repos.Channels.Create(ctx, &iptvmodel.Channel{
 		ID: "ch-with-guide", LibraryID: libID, Name: "With",
 		StreamURL: "http://x/a.m3u8", IsActive: true, AddedAt: now,
 	})
-	_ = repos.Channels.Create(ctx, &db.Channel{
+	_ = repos.Channels.Create(ctx, &iptvmodel.Channel{
 		ID: "ch-orphan", LibraryID: libID, Name: "Orphan",
 		StreamURL: "http://x/b.m3u8", IsActive: true, AddedAt: now,
 	})
 
-	_ = repos.EPGPrograms.ReplaceForChannel(ctx, "ch-with-guide", []*db.EPGProgram{{
+	_ = repos.EPGPrograms.ReplaceForChannel(ctx, "ch-with-guide", []*iptvmodel.EPGProgram{{
 		ID: "p-1", ChannelID: "ch-with-guide", Title: "Show",
 		StartTime: now, EndTime: now.Add(time.Hour),
 	}})

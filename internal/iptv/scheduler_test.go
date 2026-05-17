@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	iptvmodel "hubplay/internal/iptv/model"
 	"hubplay/internal/db"
 	"hubplay/internal/testutil"
 )
@@ -80,7 +81,7 @@ func TestScheduler_TickRunsDueJob(t *testing.T) {
 	repos, runner, sched := newSchedFixture(t)
 	ctx := context.Background()
 
-	if err := repos.IPTVSchedules.Upsert(ctx, &db.IPTVScheduledJob{
+	if err := repos.IPTVSchedules.Upsert(ctx, &iptvmodel.IPTVScheduledJob{
 		LibraryID: "lib-a", Kind: db.IPTVJobKindM3URefresh,
 		IntervalHours: 6, Enabled: true,
 	}); err != nil {
@@ -107,7 +108,7 @@ func TestScheduler_TickSkipsDisabled(t *testing.T) {
 	repos, runner, sched := newSchedFixture(t)
 	ctx := context.Background()
 
-	if err := repos.IPTVSchedules.Upsert(ctx, &db.IPTVScheduledJob{
+	if err := repos.IPTVSchedules.Upsert(ctx, &iptvmodel.IPTVScheduledJob{
 		LibraryID: "lib-a", Kind: db.IPTVJobKindM3URefresh,
 		IntervalHours: 6, Enabled: false, // disabled!
 	}); err != nil {
@@ -126,7 +127,7 @@ func TestScheduler_TickSkipsNotYetDue(t *testing.T) {
 
 	// Ran 1 h ago, interval 6 h → 5 h to go. Should NOT run.
 	ranAt := time.Now().UTC().Add(-1 * time.Hour).Truncate(time.Second)
-	if err := repos.IPTVSchedules.Upsert(ctx, &db.IPTVScheduledJob{
+	if err := repos.IPTVSchedules.Upsert(ctx, &iptvmodel.IPTVScheduledJob{
 		LibraryID: "lib-a", Kind: db.IPTVJobKindEPGRefresh,
 		IntervalHours: 6, Enabled: true,
 	}); err != nil {
@@ -150,7 +151,7 @@ func TestScheduler_TickRecordsFailureStatus(t *testing.T) {
 
 	runner.m3uErr = errors.New("upstream 500")
 
-	if err := repos.IPTVSchedules.Upsert(ctx, &db.IPTVScheduledJob{
+	if err := repos.IPTVSchedules.Upsert(ctx, &iptvmodel.IPTVScheduledJob{
 		LibraryID: "lib-a", Kind: db.IPTVJobKindM3URefresh,
 		IntervalHours: 6, Enabled: true,
 	}); err != nil {
@@ -183,7 +184,7 @@ func TestScheduler_RunNowBypassesSchedule(t *testing.T) {
 	}
 
 	// Case 2: row exists but disabled.
-	if err := repos.IPTVSchedules.Upsert(ctx, &db.IPTVScheduledJob{
+	if err := repos.IPTVSchedules.Upsert(ctx, &iptvmodel.IPTVScheduledJob{
 		LibraryID: "lib-a", Kind: db.IPTVJobKindEPGRefresh,
 		IntervalHours: 6, Enabled: false,
 	}); err != nil {
@@ -263,7 +264,7 @@ func TestScheduler_TickLoopSurvivesPanic(t *testing.T) {
 	sched := NewScheduler(repos.IPTVSchedules, runner, testutil.TestLogger())
 	ctx := context.Background()
 
-	if err := repos.IPTVSchedules.Upsert(ctx, &db.IPTVScheduledJob{
+	if err := repos.IPTVSchedules.Upsert(ctx, &iptvmodel.IPTVScheduledJob{
 		LibraryID: "lib-a", Kind: db.IPTVJobKindM3URefresh,
 		IntervalHours: 1, Enabled: true,
 	}); err != nil {
@@ -316,7 +317,7 @@ func TestScheduler_ConcurrentRefreshIsBenign(t *testing.T) {
 	ctx := context.Background()
 	// Seed with a prior successful run so we can check it isn't
 	// clobbered.
-	if err := repos.IPTVSchedules.Upsert(ctx, &db.IPTVScheduledJob{
+	if err := repos.IPTVSchedules.Upsert(ctx, &iptvmodel.IPTVScheduledJob{
 		LibraryID: "lib-a", Kind: db.IPTVJobKindM3URefresh,
 		IntervalHours: 6, Enabled: true,
 	}); err != nil {
@@ -351,7 +352,7 @@ func TestScheduler_StartStopRunsLoop(t *testing.T) {
 	repos, runner, sched := newSchedFixture(t)
 	sched.SetTickInterval(10 * time.Millisecond)
 
-	if err := repos.IPTVSchedules.Upsert(context.Background(), &db.IPTVScheduledJob{
+	if err := repos.IPTVSchedules.Upsert(context.Background(), &iptvmodel.IPTVScheduledJob{
 		LibraryID: "lib-a", Kind: db.IPTVJobKindM3URefresh,
 		IntervalHours: 1, Enabled: true,
 	}); err != nil {

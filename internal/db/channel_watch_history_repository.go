@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	iptvmodel "hubplay/internal/iptv/model"
 	"hubplay/internal/db/sqlc"
 	"hubplay/internal/db/sqlc_pg"
 )
@@ -18,7 +19,7 @@ import (
 //
 // Dual-dialect: sqlc-backed (Pattern A) per call. The Number column
 // is INTEGER → NullInt64 on SQLite, NullInt32 on Postgres; both rows
-// project to the same domain Channel via per-backend mapping helpers.
+// project to the same domain iptvmodel.Channel via per-backend mapping helpers.
 type ChannelWatchHistoryRepository struct {
 	sq *sqlc.Queries
 	pq *sqlc_pg.Queries
@@ -65,7 +66,7 @@ func (r *ChannelWatchHistoryRepository) RecordByStreamURL(ctx context.Context, u
 	return now, nil
 }
 
-// ListChannelsByUser returns the Channel rows for the caller's most
+// ListChannelsByUser returns the iptvmodel.Channel rows for the caller's most
 // recently watched streams, newest first, up to `limit`. Joins by
 // stream_url so rewritten channel UUIDs (post-M3U-refresh) still
 // resolve as long as the stream is still in the playlist.
@@ -76,7 +77,7 @@ func (r *ChannelWatchHistoryRepository) RecordByStreamURL(ctx context.Context, u
 //
 // ACL is NOT applied here — the caller is responsible for library
 // access filtering.
-func (r *ChannelWatchHistoryRepository) ListChannelsByUser(ctx context.Context, userID string, limit int) ([]*Channel, []time.Time, error) {
+func (r *ChannelWatchHistoryRepository) ListChannelsByUser(ctx context.Context, userID string, limit int) ([]*iptvmodel.Channel, []time.Time, error) {
 	if limit <= 0 {
 		return nil, nil, nil
 	}
@@ -86,7 +87,7 @@ func (r *ChannelWatchHistoryRepository) ListChannelsByUser(ctx context.Context, 
 	doubled := int64(limit * 2)
 
 	seenURLs := make(map[string]struct{}, limit)
-	channels := make([]*Channel, 0, limit)
+	channels := make([]*iptvmodel.Channel, 0, limit)
 	watched := make([]time.Time, 0, limit)
 
 	if r.useSQLite() {
@@ -102,7 +103,7 @@ func (r *ChannelWatchHistoryRepository) ListChannelsByUser(ctx context.Context, 
 				continue
 			}
 			seenURLs[row.StreamUrl] = struct{}{}
-			ch := &Channel{
+			ch := &iptvmodel.Channel{
 				ID:        row.ID,
 				LibraryID: row.LibraryID,
 				Name:      row.Name,
@@ -139,7 +140,7 @@ func (r *ChannelWatchHistoryRepository) ListChannelsByUser(ctx context.Context, 
 			continue
 		}
 		seenURLs[row.StreamUrl] = struct{}{}
-		ch := &Channel{
+		ch := &iptvmodel.Channel{
 			ID:        row.ID,
 			LibraryID: row.LibraryID,
 			Name:      row.Name,

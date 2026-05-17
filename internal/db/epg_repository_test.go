@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	iptvmodel "hubplay/internal/iptv/model"
 	"hubplay/internal/db"
 	"hubplay/internal/testutil"
 )
@@ -28,8 +29,8 @@ func setupEPGTest(t *testing.T) (*db.EPGProgramRepository, *db.ChannelRepository
 	return repos.EPGPrograms, repos.Channels, "lib-epg"
 }
 
-func makeProgram(id, channelID, title string, start, end time.Time) *db.EPGProgram {
-	return &db.EPGProgram{
+func makeProgram(id, channelID, title string, start, end time.Time) *iptvmodel.EPGProgram {
+	return &iptvmodel.EPGProgram{
 		ID: id, ChannelID: channelID, Title: title,
 		Description: title + " description", Category: "General",
 		StartTime: start, EndTime: end,
@@ -41,7 +42,7 @@ func TestEPG_ReplaceAndSchedule(t *testing.T) {
 	ctx := context.Background()
 
 	now := time.Now().Truncate(time.Hour)
-	programs := []*db.EPGProgram{
+	programs := []*iptvmodel.EPGProgram{
 		makeProgram("p1", "ch-epg-1", "Morning Show", now.Add(-2*time.Hour), now.Add(-1*time.Hour)),
 		makeProgram("p2", "ch-epg-1", "News", now.Add(-1*time.Hour), now.Add(1*time.Hour)),
 		makeProgram("p3", "ch-epg-1", "Evening Movie", now.Add(1*time.Hour), now.Add(3*time.Hour)),
@@ -80,13 +81,13 @@ func TestEPG_ReplaceDeletesOld(t *testing.T) {
 	ctx := context.Background()
 
 	now := time.Now()
-	old := []*db.EPGProgram{
+	old := []*iptvmodel.EPGProgram{
 		makeProgram("old-1", "ch-epg-1", "Old Show", now, now.Add(time.Hour)),
 	}
 	_ = repo.ReplaceForChannel(ctx, "ch-epg-1", old)
 
 	// Replace with new
-	fresh := []*db.EPGProgram{
+	fresh := []*iptvmodel.EPGProgram{
 		makeProgram("new-1", "ch-epg-1", "New Show", now, now.Add(time.Hour)),
 	}
 	_ = repo.ReplaceForChannel(ctx, "ch-epg-1", fresh)
@@ -105,7 +106,7 @@ func TestEPG_NowPlaying(t *testing.T) {
 	ctx := context.Background()
 
 	now := time.Now()
-	programs := []*db.EPGProgram{
+	programs := []*iptvmodel.EPGProgram{
 		makeProgram("past", "ch-epg-1", "Ended", now.Add(-2*time.Hour), now.Add(-1*time.Hour)),
 		makeProgram("current", "ch-epg-1", "Live Now", now.Add(-30*time.Minute), now.Add(30*time.Minute)),
 		makeProgram("future", "ch-epg-1", "Coming Up", now.Add(1*time.Hour), now.Add(2*time.Hour)),
@@ -138,10 +139,10 @@ func TestEPG_BulkSchedule(t *testing.T) {
 	ctx := context.Background()
 
 	now := time.Now()
-	_ = repo.ReplaceForChannel(ctx, "ch-epg-1", []*db.EPGProgram{
+	_ = repo.ReplaceForChannel(ctx, "ch-epg-1", []*iptvmodel.EPGProgram{
 		makeProgram("p1", "ch-epg-1", "BBC Show", now.Add(-1*time.Hour), now.Add(1*time.Hour)),
 	})
-	_ = repo.ReplaceForChannel(ctx, "ch-epg-2", []*db.EPGProgram{
+	_ = repo.ReplaceForChannel(ctx, "ch-epg-2", []*iptvmodel.EPGProgram{
 		makeProgram("p2", "ch-epg-2", "CNN Show", now.Add(-1*time.Hour), now.Add(1*time.Hour)),
 	})
 
@@ -197,7 +198,7 @@ func TestEPG_BulkSchedule_LargeList(t *testing.T) {
 			t.Fatalf("create channel %s: %v", id, err)
 		}
 		prog := makeProgram("p-"+id, id, "T-"+id, now.Add(-30*time.Minute), now.Add(30*time.Minute))
-		if err := repos.EPGPrograms.ReplaceForChannel(ctx, id, []*db.EPGProgram{prog}); err != nil {
+		if err := repos.EPGPrograms.ReplaceForChannel(ctx, id, []*iptvmodel.EPGProgram{prog}); err != nil {
 			t.Fatalf("seed epg %s: %v", id, err)
 		}
 	}
@@ -241,11 +242,11 @@ func TestEPG_XMLTVTimeRoundtrip(t *testing.T) {
 		t.Fatalf("parse end: %v", err)
 	}
 
-	prog := &db.EPGProgram{
+	prog := &iptvmodel.EPGProgram{
 		ID: "p-xmltv", ChannelID: "ch-epg-1", Title: "Telediario",
 		StartTime: start, EndTime: end,
 	}
-	if err := repo.ReplaceForChannel(ctx, "ch-epg-1", []*db.EPGProgram{prog}); err != nil {
+	if err := repo.ReplaceForChannel(ctx, "ch-epg-1", []*iptvmodel.EPGProgram{prog}); err != nil {
 		t.Fatalf("insert: %v", err)
 	}
 
@@ -373,7 +374,7 @@ func TestEPG_BulkSchedule_DedupesDuplicateIDs(t *testing.T) {
 	ctx := context.Background()
 
 	now := time.Now()
-	_ = repo.ReplaceForChannel(ctx, "ch-epg-1", []*db.EPGProgram{
+	_ = repo.ReplaceForChannel(ctx, "ch-epg-1", []*iptvmodel.EPGProgram{
 		makeProgram("p1", "ch-epg-1", "Show", now.Add(-1*time.Hour), now.Add(1*time.Hour)),
 	})
 
@@ -393,7 +394,7 @@ func TestEPG_CleanupOld(t *testing.T) {
 	ctx := context.Background()
 
 	now := time.Now()
-	programs := []*db.EPGProgram{
+	programs := []*iptvmodel.EPGProgram{
 		makeProgram("old", "ch-epg-1", "Old Show", now.Add(-48*time.Hour), now.Add(-47*time.Hour)),
 		makeProgram("recent", "ch-epg-1", "Recent", now.Add(-1*time.Hour), now.Add(1*time.Hour)),
 	}

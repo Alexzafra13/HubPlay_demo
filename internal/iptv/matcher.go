@@ -30,7 +30,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"hubplay/internal/db"
+	iptvmodel "hubplay/internal/iptv/model"
 )
 
 // runeCount is utf8.RuneCountInString. Kept as a local alias so the
@@ -69,7 +69,7 @@ type channelIndex struct {
 //   - every nameVariants() result + its alias-folded canonical,
 //   - channel numbers (only if they don't look positional),
 //   - the stripped base variant for fuzzy fallback.
-func buildChannelIndex(channels []*db.Channel) *channelIndex {
+func buildChannelIndex(channels []*iptvmodel.Channel) *channelIndex {
 	idx := &channelIndex{
 		tvgMap:    make(map[string]string, len(channels)),
 		nameMap:   make(map[string]string, len(channels)*3),

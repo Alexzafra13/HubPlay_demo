@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"time"
 
+	iptvmodel "hubplay/internal/iptv/model"
 	"hubplay/internal/db"
 )
 
@@ -165,7 +166,7 @@ func (s *Scheduler) RunNow(ctx context.Context, libraryID, kind string) error {
 		return fmt.Errorf("get iptv job: %w", err)
 	}
 	if job == nil {
-		job = &db.IPTVScheduledJob{LibraryID: libraryID, Kind: kind}
+		job = &iptvmodel.IPTVScheduledJob{LibraryID: libraryID, Kind: kind}
 	}
 	return s.runOne(ctx, job)
 }
@@ -182,7 +183,7 @@ func (s *Scheduler) RunNow(ctx context.Context, libraryID, kind string) error {
 // the admin sees "error: panic: …" instead of discovering days later
 // that nothing ran. The surrounding duration + RecordRun still happen
 // via the named return + cleanup pattern below.
-func (s *Scheduler) runOne(ctx context.Context, job *db.IPTVScheduledJob) (runErr error) {
+func (s *Scheduler) runOne(ctx context.Context, job *iptvmodel.IPTVScheduledJob) (runErr error) {
 	runCtx, cancel := context.WithTimeout(ctx, s.runTimeout)
 	defer cancel()
 
@@ -220,7 +221,7 @@ func (s *Scheduler) runOne(ctx context.Context, job *db.IPTVScheduledJob) (runEr
 // but skip updating last_status so the previous real outcome wins.
 func (s *Scheduler) recordOutcome(
 	ctx context.Context,
-	job *db.IPTVScheduledJob,
+	job *iptvmodel.IPTVScheduledJob,
 	runErr error,
 	duration time.Duration,
 	startedAt time.Time,

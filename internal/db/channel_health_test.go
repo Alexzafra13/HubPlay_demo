@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	iptvmodel "hubplay/internal/iptv/model"
 	"hubplay/internal/db"
 	"hubplay/internal/testutil"
 )
@@ -89,7 +90,7 @@ func TestChannel_RecordProbeFailureIsAtomic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var found *db.Channel
+	var found *iptvmodel.Channel
 	for _, ch := range unhealthy {
 		if ch.ID == "ch-dead" {
 			found = ch
