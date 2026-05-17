@@ -11,6 +11,7 @@ import (
 	"time"
 
 	iptvmodel "hubplay/internal/iptv/model"
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db"
 	"hubplay/internal/testutil"
 )
@@ -75,7 +76,7 @@ func newEPGTestService(t *testing.T) (*Service, *db.Repositories, string) {
 
 	now := time.Now()
 	libID := "lib-epg-sources"
-	if err := repos.Libraries.Create(ctx, &db.Library{
+	if err := repos.Libraries.Create(ctx, &librarymodel.Library{
 		ID: libID, Name: "LiveTV", ContentType: "livetv", ScanMode: "manual",
 		CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
@@ -359,7 +360,7 @@ func TestRefreshEPG_LegacyEPGURLFallback(t *testing.T) {
 	libID := "lib-legacy"
 	// Insert directly with epg_url populated, bypassing the multi-source
 	// path to reproduce a pre-upgrade library exactly.
-	if err := repos.Libraries.Create(ctx, &db.Library{
+	if err := repos.Libraries.Create(ctx, &librarymodel.Library{
 		ID: libID, Name: "L", ContentType: "livetv", ScanMode: "manual",
 		EPGURL: srv.URL, CreatedAt: now, UpdatedAt: now,
 	}); err != nil {

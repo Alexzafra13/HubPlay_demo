@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db"
 	"hubplay/internal/domain"
 	"hubplay/internal/event"
@@ -294,7 +295,7 @@ func TestService_SeasonUniqueConstraintRejectsDuplicates(t *testing.T) {
 	ctx := context.Background()
 
 	now := time.Now()
-	if err := repos.Libraries.Create(ctx, &db.Library{
+	if err := repos.Libraries.Create(ctx, &librarymodel.Library{
 		ID: "lib-shows", Name: "Shows", ContentType: "shows",
 		ScanMode: "auto", ScanInterval: "6h",
 		CreatedAt: now, UpdatedAt: now, Paths: []string{"/tv"},
@@ -303,7 +304,7 @@ func TestService_SeasonUniqueConstraintRejectsDuplicates(t *testing.T) {
 	}
 
 	one := 1
-	series := &db.Item{
+	series := &librarymodel.Item{
 		ID: "series-1", LibraryID: "lib-shows", Type: "series",
 		Title: "Show", SortTitle: "show", AddedAt: now, UpdatedAt: now,
 		IsAvailable: true,
@@ -312,7 +313,7 @@ func TestService_SeasonUniqueConstraintRejectsDuplicates(t *testing.T) {
 		t.Fatalf("insert series: %v", err)
 	}
 
-	first := &db.Item{
+	first := &librarymodel.Item{
 		ID: "season-1a", LibraryID: "lib-shows", ParentID: series.ID,
 		Type: "season", Title: "Season 1", SortTitle: "season 1",
 		SeasonNumber: &one, AddedAt: now, UpdatedAt: now, IsAvailable: true,
@@ -321,7 +322,7 @@ func TestService_SeasonUniqueConstraintRejectsDuplicates(t *testing.T) {
 		t.Fatalf("first season insert: %v", err)
 	}
 
-	dup := &db.Item{
+	dup := &librarymodel.Item{
 		ID: "season-1b", LibraryID: "lib-shows", ParentID: series.ID,
 		Type: "season", Title: "Season 1", SortTitle: "season 1",
 		SeasonNumber: &one, AddedAt: now, UpdatedAt: now, IsAvailable: true,

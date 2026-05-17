@@ -7,14 +7,15 @@ import (
 	"time"
 
 	authmodel "hubplay/internal/auth/model"
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db"
 	"hubplay/internal/domain"
 	"hubplay/internal/testutil"
 )
 
-func newTestLibrary(id, name string) *db.Library {
+func newTestLibrary(id, name string) *librarymodel.Library {
 	now := time.Now()
-	return &db.Library{
+	return &librarymodel.Library{
 		ID:           id,
 		Name:         name,
 		ContentType:  "movies",

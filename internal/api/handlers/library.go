@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/auth"
-	"hubplay/internal/db"
 	"hubplay/internal/library"
 
 	"github.com/go-chi/chi/v5"
@@ -72,7 +72,7 @@ func (h *LibraryHandler) Create(w http.ResponseWriter, r *http.Request) {
 func (h *LibraryHandler) List(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r.Context())
 
-	var libs []*db.Library
+	var libs []*librarymodel.Library
 	var err error
 
 	if claims != nil && claims.Role == "admin" {
@@ -235,7 +235,7 @@ func (h *LibraryHandler) Items(w http.ResponseWriter, r *http.Request) {
 	parentID := r.URL.Query().Get("parent_id")
 	cursor := r.URL.Query().Get("cursor")
 
-	items, total, err := h.lib.ListItems(r.Context(), db.ItemFilter{
+	items, total, err := h.lib.ListItems(r.Context(), librarymodel.ItemFilter{
 		LibraryID:             id,
 		ParentID:              parentID,
 		Type:                  itemType,
@@ -295,7 +295,7 @@ func (h *LibraryHandler) AllItems(w http.ResponseWriter, r *http.Request) {
 	yearTo, _ := strconv.Atoi(q.Get("year_to"))
 	minRating, _ := strconv.ParseFloat(q.Get("min_rating"), 64)
 
-	items, total, err := h.lib.ListItems(r.Context(), db.ItemFilter{
+	items, total, err := h.lib.ListItems(r.Context(), librarymodel.ItemFilter{
 		ParentID:              parentID,
 		Type:                  itemType,
 		Query:                 queryStr,
@@ -385,10 +385,10 @@ func (h *LibraryHandler) LatestItems(w http.ResponseWriter, r *http.Request) {
 			rows = filtered
 		}
 		// Adapter layer: we still want the standard image / metadata
-		// enrichment that operates on []*db.Item, then we splice the
+		// enrichment that operates on []*librarymodel.Item, then we splice the
 		// activity stamp + new-episode count back into each entry by
 		// position so the wire stays a flat MediaItem-shaped list.
-		items := make([]*db.Item, len(rows))
+		items := make([]*librarymodel.Item, len(rows))
 		for i, r := range rows {
 			cp := r.Item
 			items[i] = &cp
@@ -432,7 +432,7 @@ func (h *LibraryHandler) LatestItems(w http.ResponseWriter, r *http.Request) {
 }
 
 // enrichItemSummaries adds poster_url, backdrop_url, overview, and genres to item summaries.
-func (h *LibraryHandler) enrichItemSummaries(r *http.Request, items []*db.Item) []map[string]any {
+func (h *LibraryHandler) enrichItemSummaries(r *http.Request, items []*librarymodel.Item) []map[string]any {
 	data := make([]map[string]any, len(items))
 	for i, item := range items {
 		data[i] = itemSummaryResponse(item)
@@ -517,7 +517,7 @@ func (h *LibraryHandler) enrichItemSummaries(r *http.Request, items []*db.Item) 
 	return data
 }
 
-func libraryResponse(lib *db.Library) map[string]any {
+func libraryResponse(lib *librarymodel.Library) map[string]any {
 	// Check which paths are accessible
 	pathStatus := make([]map[string]any, len(lib.Paths))
 	for i, p := range lib.Paths {
@@ -565,7 +565,7 @@ func splitLanguageFilter(stored string) []string {
 	return out
 }
 
-func itemSummaryResponse(item *db.Item) map[string]any {
+func itemSummaryResponse(item *librarymodel.Item) map[string]any {
 	resp := map[string]any{
 		"id":             item.ID,
 		"library_id":     item.LibraryID,

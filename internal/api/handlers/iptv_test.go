@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	iptvmodel "hubplay/internal/iptv/model"
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/auth"
 	"hubplay/internal/db"
 	"hubplay/internal/iptv"
@@ -585,9 +586,9 @@ func (p *iptvFakeProxy) ProxyURL(_ context.Context, w http.ResponseWriter, chann
 // continue-watching filter).
 
 type iptvFakeLibraryRepo struct {
-	created       []*db.Library
+	created       []*librarymodel.Library
 	createErr     error
-	librariesByID map[string]*db.Library
+	librariesByID map[string]*librarymodel.Library
 	// userAccess: if nil the ListForUser fallback returns every
 	// library in librariesByID (admin behaviour). A populated map
 	// keys a userID to the set of library IDs they can see.
@@ -595,31 +596,31 @@ type iptvFakeLibraryRepo struct {
 	listErr    error
 }
 
-func (r *iptvFakeLibraryRepo) Create(_ context.Context, lib *db.Library) error {
+func (r *iptvFakeLibraryRepo) Create(_ context.Context, lib *librarymodel.Library) error {
 	if r.createErr != nil {
 		return r.createErr
 	}
 	r.created = append(r.created, lib)
 	if r.librariesByID == nil {
-		r.librariesByID = map[string]*db.Library{}
+		r.librariesByID = map[string]*librarymodel.Library{}
 	}
 	r.librariesByID[lib.ID] = lib
 	return nil
 }
 
-func (r *iptvFakeLibraryRepo) ListForUser(_ context.Context, userID string) ([]*db.Library, error) {
+func (r *iptvFakeLibraryRepo) ListForUser(_ context.Context, userID string) ([]*librarymodel.Library, error) {
 	if r.listErr != nil {
 		return nil, r.listErr
 	}
 	if r.userAccess == nil {
-		out := make([]*db.Library, 0, len(r.librariesByID))
+		out := make([]*librarymodel.Library, 0, len(r.librariesByID))
 		for _, lib := range r.librariesByID {
 			out = append(out, lib)
 		}
 		return out, nil
 	}
 	set := r.userAccess[userID]
-	out := make([]*db.Library, 0, len(set))
+	out := make([]*librarymodel.Library, 0, len(set))
 	for id := range set {
 		if lib, ok := r.librariesByID[id]; ok {
 			out = append(out, lib)

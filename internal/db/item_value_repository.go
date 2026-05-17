@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db/sqlc"
 	"hubplay/internal/db/sqlc_pg"
 )
@@ -140,14 +141,6 @@ func GenreValueID(name string) string {
 	return ItemValueTypeGenre + ":" + clean
 }
 
-// GenreCount is the {name, count} pair the filter panel renders as a
-// chip. Sorted by count desc on the way out so the panel doesn't have
-// to re-sort.
-type GenreCount struct {
-	Name  string
-	Count int64
-}
-
 // ListGenres returns the genre vocabulary across the catalogue,
 // optionally scoped to an item type ("movie", "series"). Empty
 // `itemType` returns the union — useful if a future "All" page wants
@@ -155,15 +148,15 @@ type GenreCount struct {
 //
 // Raw SQL because sqlc v1.31.1 truncates the trailing identifier of
 // the final query in a file (see item_values.sql for context).
-func (r *ItemValueRepository) ListGenres(ctx context.Context, itemType string) ([]GenreCount, error) {
+func (r *ItemValueRepository) ListGenres(ctx context.Context, itemType string) ([]librarymodel.GenreCount, error) {
 	rows, err := r.db.QueryContext(ctx, r.listGenresSQL, ItemValueTypeGenre, itemType, itemType)
 	if err != nil {
 		return nil, fmt.Errorf("list genres (type=%q): %w", itemType, err)
 	}
 	defer rows.Close() //nolint:errcheck
-	out := make([]GenreCount, 0)
+	out := make([]librarymodel.GenreCount, 0)
 	for rows.Next() {
-		var g GenreCount
+		var g librarymodel.GenreCount
 		if err := rows.Scan(&g.Name, &g.Count); err != nil {
 			return nil, fmt.Errorf("scan genre row: %w", err)
 		}

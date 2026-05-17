@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db"
 	"hubplay/internal/testutil"
 )
@@ -12,13 +13,13 @@ import (
 func seedItemForStreams(t *testing.T, database *db.LibraryRepository, itemRepo *db.ItemRepository) {
 	t.Helper()
 	now := time.Now()
-	if err := database.Create(context.Background(), &db.Library{
+	if err := database.Create(context.Background(), &librarymodel.Library{
 		ID: "lib-s", Name: "Movies", ContentType: "movies", ScanMode: "auto",
 		ScanInterval: "6h", CreatedAt: now, UpdatedAt: now, Paths: []string{"/media"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := itemRepo.Create(context.Background(), &db.Item{
+	if err := itemRepo.Create(context.Background(), &librarymodel.Item{
 		ID: "item-s", LibraryID: "lib-s", Type: "movie", Title: "Test",
 		SortTitle: "test", Path: "/media/test.mkv",
 		AddedAt: now, UpdatedAt: now, IsAvailable: true,
@@ -34,7 +35,7 @@ func TestMediaStreamRepository_ReplaceAndList(t *testing.T) {
 	repo := db.NewMediaStreamRepository(testutil.Driver(), database)
 	seedItemForStreams(t, libRepo, itemRepo)
 
-	streams := []*db.MediaStream{
+	streams := []*librarymodel.MediaStream{
 		{
 			ItemID: "item-s", StreamIndex: 0, StreamType: "video",
 			Codec: "h264", Width: 1920, Height: 1080, FrameRate: 23.976,
@@ -81,7 +82,7 @@ func TestMediaStreamRepository_Replace_OverwritesPrevious(t *testing.T) {
 	seedItemForStreams(t, libRepo, itemRepo)
 
 	// First set
-	if err := repo.ReplaceForItem(context.Background(), "item-s", []*db.MediaStream{
+	if err := repo.ReplaceForItem(context.Background(), "item-s", []*librarymodel.MediaStream{
 		{ItemID: "item-s", StreamIndex: 0, StreamType: "video", Codec: "h264"},
 		{ItemID: "item-s", StreamIndex: 1, StreamType: "audio", Codec: "aac"},
 	}); err != nil {
@@ -89,7 +90,7 @@ func TestMediaStreamRepository_Replace_OverwritesPrevious(t *testing.T) {
 	}
 
 	// Replace with new set
-	if err := repo.ReplaceForItem(context.Background(), "item-s", []*db.MediaStream{
+	if err := repo.ReplaceForItem(context.Background(), "item-s", []*librarymodel.MediaStream{
 		{ItemID: "item-s", StreamIndex: 0, StreamType: "video", Codec: "hevc"},
 	}); err != nil {
 		t.Fatal(err)

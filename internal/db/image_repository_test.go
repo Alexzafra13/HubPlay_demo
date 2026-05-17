@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db"
 	"hubplay/internal/domain"
 	"hubplay/internal/testutil"
@@ -14,13 +15,13 @@ import (
 func seedItemForImages(t *testing.T, database *db.LibraryRepository, itemRepo *db.ItemRepository) {
 	t.Helper()
 	now := time.Now()
-	if err := database.Create(context.Background(), &db.Library{
+	if err := database.Create(context.Background(), &librarymodel.Library{
 		ID: "lib-img", Name: "Movies", ContentType: "movies", ScanMode: "auto",
 		ScanInterval: "6h", CreatedAt: now, UpdatedAt: now, Paths: []string{"/media"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := itemRepo.Create(context.Background(), &db.Item{
+	if err := itemRepo.Create(context.Background(), &librarymodel.Item{
 		ID: "item-img", LibraryID: "lib-img", Type: "movie", Title: "Test",
 		SortTitle: "test", Path: "/media/test.mkv",
 		AddedAt: now, UpdatedAt: now, IsAvailable: true,
@@ -37,12 +38,12 @@ func TestImageRepository_Create_And_ListByItem(t *testing.T) {
 	seedItemForImages(t, libRepo, itemRepo)
 
 	now := time.Now()
-	img1 := &db.Image{
+	img1 := &librarymodel.Image{
 		ID: "img-1", ItemID: "item-img", Type: "primary",
 		Path: "/images/poster.jpg", Width: 300, Height: 450,
 		IsPrimary: true, AddedAt: now,
 	}
-	img2 := &db.Image{
+	img2 := &librarymodel.Image{
 		ID: "img-2", ItemID: "item-img", Type: "backdrop",
 		Path: "/images/backdrop.jpg", Width: 1920, Height: 1080,
 		AddedAt: now,
@@ -76,7 +77,7 @@ func TestImageRepository_GetPrimary(t *testing.T) {
 	seedItemForImages(t, libRepo, itemRepo)
 
 	now := time.Now()
-	if err := repo.Create(context.Background(), &db.Image{
+	if err := repo.Create(context.Background(), &librarymodel.Image{
 		ID: "img-p", ItemID: "item-img", Type: "primary",
 		Path: "/images/poster.jpg", IsPrimary: true, AddedAt: now,
 	}); err != nil {
@@ -110,7 +111,7 @@ func TestImageRepository_GetByID(t *testing.T) {
 	seedItemForImages(t, libRepo, itemRepo)
 
 	now := time.Now()
-	if err := repo.Create(context.Background(), &db.Image{
+	if err := repo.Create(context.Background(), &librarymodel.Image{
 		ID: "img-get", ItemID: "item-img", Type: "primary",
 		Path: "/images/get.jpg", Width: 640, Height: 960,
 		Blurhash: "LEHV6nWB2yk8", Provider: "tmdb",
@@ -155,13 +156,13 @@ func TestImageRepository_DeleteByID(t *testing.T) {
 	seedItemForImages(t, libRepo, itemRepo)
 
 	now := time.Now()
-	if err := repo.Create(context.Background(), &db.Image{
+	if err := repo.Create(context.Background(), &librarymodel.Image{
 		ID: "img-del1", ItemID: "item-img", Type: "primary",
 		Path: "/images/del1.jpg", AddedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Create(context.Background(), &db.Image{
+	if err := repo.Create(context.Background(), &librarymodel.Image{
 		ID: "img-del2", ItemID: "item-img", Type: "backdrop",
 		Path: "/images/del2.jpg", AddedAt: now,
 	}); err != nil {
@@ -190,13 +191,13 @@ func TestImageRepository_SetPrimary(t *testing.T) {
 	seedItemForImages(t, libRepo, itemRepo)
 
 	now := time.Now()
-	if err := repo.Create(context.Background(), &db.Image{
+	if err := repo.Create(context.Background(), &librarymodel.Image{
 		ID: "img-sp1", ItemID: "item-img", Type: "primary",
 		Path: "/images/sp1.jpg", IsPrimary: true, AddedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Create(context.Background(), &db.Image{
+	if err := repo.Create(context.Background(), &librarymodel.Image{
 		ID: "img-sp2", ItemID: "item-img", Type: "primary",
 		Path: "/images/sp2.jpg", IsPrimary: false, AddedAt: now,
 	}); err != nil {
@@ -235,7 +236,7 @@ func TestImageRepository_DeleteByItem(t *testing.T) {
 	seedItemForImages(t, libRepo, itemRepo)
 
 	now := time.Now()
-	if err := repo.Create(context.Background(), &db.Image{
+	if err := repo.Create(context.Background(), &librarymodel.Image{
 		ID: "img-d", ItemID: "item-img", Type: "primary",
 		Path: "/images/del.jpg", AddedAt: now,
 	}); err != nil {

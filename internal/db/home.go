@@ -268,7 +268,7 @@ func splitGroupConcat(s string) []string {
 }
 
 // IDsFromTrending pulls just the ID column out of trending results,
-// used by the home handler to batch-load full Item records and
+// used by the home handler to batch-load full librarymodel.Item records and
 // images for response enrichment.
 func IDsFromTrending(items []HomeTrendingItem) []string {
 	if len(items) == 0 {

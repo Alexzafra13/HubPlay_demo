@@ -6,6 +6,7 @@ import (
 	"time"
 
 	authmodel "hubplay/internal/auth/model"
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db"
 	"hubplay/internal/testutil"
 )
@@ -23,13 +24,13 @@ func setupUserDataTest(t *testing.T) (*db.UserDataRepository, *db.ItemRepository
 	})
 
 	// Create a library
-	_ = repos.Libraries.Create(context.Background(), &db.Library{
+	_ = repos.Libraries.Create(context.Background(), &librarymodel.Library{
 		ID: "lib-ud", Name: "Movies", ContentType: "movies",
 		CreatedAt: now, UpdatedAt: now,
 	})
 
 	// Create items
-	for _, item := range []*db.Item{
+	for _, item := range []*librarymodel.Item{
 		{ID: "movie-1", LibraryID: "lib-ud", Type: "movie", Title: "Movie 1",
 			SortTitle: "movie 1", DurationTicks: 72000000000, Container: "mp4",
 			AddedAt: now, UpdatedAt: now, IsAvailable: true},
@@ -262,10 +263,10 @@ func TestUserData_ContinueWatching_KeepsItemsWithUnknownDuration(t *testing.T) {
 	now := time.Now()
 	old := now.Add(-90 * 24 * time.Hour) // way past AbandonedAfter
 
-	// Patch movie-2 to have unknown duration. Item.Update doesn't
+	// Patch movie-2 to have unknown duration. librarymodel.Item.Update doesn't
 	// exist as a public surface, so we go through the repository's
 	// existing patch path: a fresh row with duration_ticks=0.
-	if err := items.Update(ctx, &db.Item{
+	if err := items.Update(ctx, &librarymodel.Item{
 		ID: "movie-2", LibraryID: "lib-ud", Type: "movie", Title: "Movie 2",
 		SortTitle: "movie 2", DurationTicks: 0, Container: "mkv",
 		AddedAt: now, UpdatedAt: now, IsAvailable: true,
@@ -315,20 +316,20 @@ func TestUserData_SeriesEpisodeProgress(t *testing.T) {
 		ID: "user-1", Username: "testuser", PasswordHash: "hash",
 		Role: "user", CreatedAt: now, IsActive: true,
 	})
-	_ = repos.Libraries.Create(ctx, &db.Library{
+	_ = repos.Libraries.Create(ctx, &librarymodel.Library{
 		ID: "lib-shows", Name: "Shows", ContentType: "shows",
 		CreatedAt: now, UpdatedAt: now,
 	})
 
 	// series → 2 seasons, each with 3 episodes (6 episodes total).
-	_ = repos.Items.Create(ctx, &db.Item{
+	_ = repos.Items.Create(ctx, &librarymodel.Item{
 		ID: "series-1", LibraryID: "lib-shows", Type: "series",
 		Title: "Show", SortTitle: "show", AddedAt: now, UpdatedAt: now, IsAvailable: true,
 	})
 	for s := 1; s <= 2; s++ {
 		seasonID := "season-" + string(rune('0'+s))
 		seasonNum := s
-		_ = repos.Items.Create(ctx, &db.Item{
+		_ = repos.Items.Create(ctx, &librarymodel.Item{
 			ID: seasonID, LibraryID: "lib-shows", Type: "season",
 			ParentID: "series-1", SeasonNumber: &seasonNum,
 			Title: "Season " + string(rune('0'+s)), SortTitle: "season",
@@ -336,7 +337,7 @@ func TestUserData_SeriesEpisodeProgress(t *testing.T) {
 		})
 		for e := 1; e <= 3; e++ {
 			epNum := e
-			_ = repos.Items.Create(ctx, &db.Item{
+			_ = repos.Items.Create(ctx, &librarymodel.Item{
 				ID: seasonID + "-ep-" + string(rune('0'+e)),
 				LibraryID: "lib-shows", Type: "episode",
 				ParentID: seasonID,

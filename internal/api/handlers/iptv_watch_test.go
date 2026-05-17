@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	iptvmodel "hubplay/internal/iptv/model"
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/auth"
 	"hubplay/internal/db"
 )
@@ -31,10 +32,10 @@ func seedChannel(env *iptvTestEnv, chID, libID string) {
 	env.svc.channels[libID] = append(env.svc.channels[libID], ch)
 	env.svc.channelByID[chID] = ch
 	if env.libraries.librariesByID == nil {
-		env.libraries.librariesByID = map[string]*db.Library{}
+		env.libraries.librariesByID = map[string]*librarymodel.Library{}
 	}
 	if _, ok := env.libraries.librariesByID[libID]; !ok {
-		env.libraries.librariesByID[libID] = &db.Library{ID: libID, Name: libID, ContentType: "livetv"}
+		env.libraries.librariesByID[libID] = &librarymodel.Library{ID: libID, Name: libID, ContentType: "livetv"}
 	}
 }
 

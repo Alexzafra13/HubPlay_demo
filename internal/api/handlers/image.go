@@ -17,7 +17,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	"hubplay/internal/db"
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/domain"
 	"hubplay/internal/imaging"
 	"hubplay/internal/imaging/pathmap"
@@ -543,7 +543,7 @@ func (h *ImageHandler) saveImageFile(itemID, filename string, data []byte) (stri
 //   6. If insert fails, remove the file (rollback).
 //   7. Promote the row to primary for its kind.
 //   8. Write the pathmap entry so /images/file/<id> can serve it.
-//   9. Return the populated `*db.Image` so the caller can build the
+//   9. Return the populated `*librarymodel.Image` so the caller can build the
 //      JSON response.
 //
 // The (width, height) pair is optional (0 = unknown) — Select gets it
@@ -555,7 +555,7 @@ func (h *ImageHandler) persistManualImage(
 	data []byte,
 	contentType, providerTag string,
 	width, height int,
-) (*db.Image, error) {
+) (*librarymodel.Image, error) {
 	ext := imaging.ExtensionForContentType(contentType)
 	hash := sha256.Sum256(data)
 	filename := fmt.Sprintf("%s_%s%s", kind, hex.EncodeToString(hash[:8]), ext)
@@ -569,7 +569,7 @@ func (h *ImageHandler) persistManualImage(
 	vibrant, muted := imaging.ExtractDominantColors(data, h.logger)
 
 	imgID := uuid.NewString()
-	img := &db.Image{
+	img := &librarymodel.Image{
 		ID:        imgID,
 		ItemID:    itemID,
 		Type:      kind,

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	authmodel "hubplay/internal/auth/model"
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db"
 	"hubplay/internal/stream"
 	"hubplay/internal/sysmetrics"
@@ -43,13 +44,13 @@ var _ SystemStatsProvider = (*fakeSystemStreams)(nil)
 // library ID; missing IDs return 0 so the inventory rollup degrades
 // cleanly when a single library can't be counted.
 type fakeSystemLibs struct {
-	libs   []*db.Library
+	libs   []*librarymodel.Library
 	counts map[string]int
 	listErr error
 	countErr map[string]error
 }
 
-func (f *fakeSystemLibs) List(_ context.Context) ([]*db.Library, error) {
+func (f *fakeSystemLibs) List(_ context.Context) ([]*librarymodel.Library, error) {
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
@@ -362,7 +363,7 @@ func TestSystemHandler_Stats_LibrariesRollup(t *testing.T) {
 	database := testutil.NewTestDB(t)
 
 	libs := &fakeSystemLibs{
-		libs: []*db.Library{
+		libs: []*librarymodel.Library{
 			{ID: "a", ContentType: "movies"},
 			{ID: "b", ContentType: "movies"},
 			{ID: "c", ContentType: "shows"},
@@ -423,7 +424,7 @@ func TestSystemHandler_Stats_LibrariesRollup_SkipsCountErrors(t *testing.T) {
 	database := testutil.NewTestDB(t)
 
 	libs := &fakeSystemLibs{
-		libs: []*db.Library{
+		libs: []*librarymodel.Library{
 			{ID: "ok", ContentType: "movies"},
 			{ID: "broken", ContentType: "movies"},
 		},
@@ -473,12 +474,12 @@ func TestSystemHandler_StreamActivity_BackfillsEmptyDays(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	if err := repos.Libraries.Create(ctx, &db.Library{
+	if err := repos.Libraries.Create(ctx, &librarymodel.Library{
 		ID: "lib-1", Name: "L", ContentType: "movies", CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("create library: %v", err)
 	}
-	if err := repos.Items.Create(ctx, &db.Item{
+	if err := repos.Items.Create(ctx, &librarymodel.Item{
 		ID: "movie-1", LibraryID: "lib-1", Type: "movie", Title: "M", SortTitle: "m",
 		DurationTicks: 60 * 60 * 10_000_000, AddedAt: now, UpdatedAt: now, IsAvailable: true,
 	}); err != nil {
@@ -542,13 +543,13 @@ func TestSystemHandler_TopItems_EpisodesRolledUpToSeries(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	if err := repos.Libraries.Create(ctx, &db.Library{
+	if err := repos.Libraries.Create(ctx, &librarymodel.Library{
 		ID: "lib-1", Name: "L", ContentType: "shows", CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("create library: %v", err)
 	}
 	mustItem := func(id, parent, kind, title string) {
-		if err := repos.Items.Create(ctx, &db.Item{
+		if err := repos.Items.Create(ctx, &librarymodel.Item{
 			ID: id, LibraryID: "lib-1", ParentID: parent, Type: kind, Title: title, SortTitle: title,
 			DurationTicks: 1, AddedAt: now, UpdatedAt: now, IsAvailable: true,
 		}); err != nil {

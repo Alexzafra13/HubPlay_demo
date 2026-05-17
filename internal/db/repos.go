@@ -1,6 +1,8 @@
 package db
 
-import "database/sql"
+import (
+	"database/sql"
+)
 
 // Repositories groups all repository instances for dependency injection.
 type Repositories struct {

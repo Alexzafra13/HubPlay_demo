@@ -12,7 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	authmodel "hubplay/internal/auth/model"
-	"hubplay/internal/db"
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/domain"
 	"hubplay/internal/library"
 	"hubplay/internal/testutil"
@@ -173,8 +173,8 @@ func TestUserHandler_SetLibraryAccess_HappyPath(t *testing.T) {
 	env.users.getByIDFn = func(_ context.Context, id string) (*authmodel.User, error) {
 		return &authmodel.User{ID: id}, nil
 	}
-	env.libs.getByIDFn = func(_ context.Context, _ string) (*db.Library, error) {
-		return &db.Library{}, nil
+	env.libs.getByIDFn = func(_ context.Context, _ string) (*librarymodel.Library, error) {
+		return &librarymodel.Library{}, nil
 	}
 
 	rr := env.do(http.MethodPut, "/api/v1/users/u-1/library-access", map[string]any{
@@ -216,9 +216,9 @@ func TestUserHandler_SetLibraryAccess_UnknownLibrary_404(t *testing.T) {
 	env.users.getByIDFn = func(_ context.Context, id string) (*authmodel.User, error) {
 		return &authmodel.User{ID: id}, nil
 	}
-	env.libs.getByIDFn = func(_ context.Context, id string) (*db.Library, error) {
+	env.libs.getByIDFn = func(_ context.Context, id string) (*librarymodel.Library, error) {
 		if id == "lib-good" {
-			return &db.Library{ID: id}, nil
+			return &librarymodel.Library{ID: id}, nil
 		}
 		return nil, domain.NewNotFound("library")
 	}
@@ -268,8 +268,8 @@ func TestUserHandler_SetLibraryAccess_DeduplicatesIDs(t *testing.T) {
 	env.users.getByIDFn = func(_ context.Context, id string) (*authmodel.User, error) {
 		return &authmodel.User{ID: id}, nil
 	}
-	env.libs.getByIDFn = func(_ context.Context, _ string) (*db.Library, error) {
-		return &db.Library{}, nil
+	env.libs.getByIDFn = func(_ context.Context, _ string) (*librarymodel.Library, error) {
+		return &librarymodel.Library{}, nil
 	}
 	rr := env.do(http.MethodPut, "/api/v1/users/u-1/library-access", map[string]any{
 		"library_ids": []string{"lib-a", "lib-a", "lib-b"},
@@ -290,8 +290,8 @@ func TestUserHandler_SetLibraryAccess_EmptyValue_400(t *testing.T) {
 	env.users.getByIDFn = func(_ context.Context, id string) (*authmodel.User, error) {
 		return &authmodel.User{ID: id}, nil
 	}
-	env.libs.getByIDFn = func(_ context.Context, _ string) (*db.Library, error) {
-		return &db.Library{}, nil
+	env.libs.getByIDFn = func(_ context.Context, _ string) (*librarymodel.Library, error) {
+		return &librarymodel.Library{}, nil
 	}
 	rr := env.do(http.MethodPut, "/api/v1/users/u-1/library-access", map[string]any{
 		"library_ids": []string{"lib-a", ""},
@@ -311,14 +311,14 @@ func TestUserHandler_CreatePersonalIPTV_HappyPath(t *testing.T) {
 	env.users.getByIDFn = func(_ context.Context, id string) (*authmodel.User, error) {
 		return &authmodel.User{ID: id}, nil
 	}
-	env.libs.createPersonalIPTVFn = func(_ context.Context, ownerID string, req library.CreateRequest) (*db.Library, error) {
+	env.libs.createPersonalIPTVFn = func(_ context.Context, ownerID string, req library.CreateRequest) (*librarymodel.Library, error) {
 		if ownerID != "u-1" {
 			t.Errorf("expected owner=u-1, got %q", ownerID)
 		}
 		if req.Name != "Lista de Juan" || req.M3UURL != "https://example.com/juan.m3u" {
 			t.Errorf("forwarded req mismatch: %+v", req)
 		}
-		return &db.Library{
+		return &librarymodel.Library{
 			ID: "lib-new", Name: req.Name, ContentType: "livetv",
 			M3UURL: req.M3UURL, EPGURL: req.EPGURL, TLSInsecure: req.TLSInsecure,
 		}, nil
@@ -386,7 +386,7 @@ func TestUserHandler_CreatePersonalIPTV_ValidationError_PropagatesAs400(t *testi
 	env.users.getByIDFn = func(_ context.Context, id string) (*authmodel.User, error) {
 		return &authmodel.User{ID: id}, nil
 	}
-	env.libs.createPersonalIPTVFn = func(_ context.Context, _ string, _ library.CreateRequest) (*db.Library, error) {
+	env.libs.createPersonalIPTVFn = func(_ context.Context, _ string, _ library.CreateRequest) (*librarymodel.Library, error) {
 		return nil, domain.NewValidation(map[string]string{"m3u_url": "required"})
 	}
 
@@ -434,7 +434,7 @@ func TestUserHandler_CreatePersonalIPTV_UnknownError_500(t *testing.T) {
 	env.users.getByIDFn = func(_ context.Context, id string) (*authmodel.User, error) {
 		return &authmodel.User{ID: id}, nil
 	}
-	env.libs.createPersonalIPTVFn = func(_ context.Context, _ string, _ library.CreateRequest) (*db.Library, error) {
+	env.libs.createPersonalIPTVFn = func(_ context.Context, _ string, _ library.CreateRequest) (*librarymodel.Library, error) {
 		return nil, errors.New("boom")
 	}
 	rr := env.do(http.MethodPost, "/api/v1/users/u-1/iptv-libraries", map[string]any{

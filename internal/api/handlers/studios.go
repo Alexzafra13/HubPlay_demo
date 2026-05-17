@@ -7,16 +7,16 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"hubplay/internal/db"
+	librarymodel "hubplay/internal/library/model"
 )
 
 // StudioRepository is the slice of db.StudioRepository the handler
 // needs. Inverted-dependency interface so the handler is trivially
 // fakeable in tests.
 type StudioRepository interface {
-	GetBySlug(ctx context.Context, slug string) (*db.Studio, error)
-	List(ctx context.Context) ([]*db.StudioListEntry, error)
-	ListItemsForStudio(ctx context.Context, studioID string) ([]*db.StudioItem, error)
+	GetBySlug(ctx context.Context, slug string) (*librarymodel.Studio, error)
+	List(ctx context.Context) ([]*librarymodel.StudioListEntry, error)
+	ListItemsForStudio(ctx context.Context, studioID string) ([]*librarymodel.StudioItem, error)
 }
 
 // StudioHandler serves the /studios browse + /studios/{slug} detail

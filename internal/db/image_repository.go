@@ -5,37 +5,12 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"time"
 
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db/sqlc"
 	"hubplay/internal/db/sqlc_pg"
 	"hubplay/internal/domain"
 )
-
-type Image struct {
-	ID        string
-	ItemID    string
-	Type      string // primary, backdrop, thumb, logo, banner
-	Path      string
-	Width     int
-	Height    int
-	Blurhash  string
-	Provider  string
-	IsPrimary bool
-	// IsLocked guards a manual choice (admin uploaded a custom poster
-	// or picked a specific candidate) from being overwritten by a
-	// scheduled or scanner-triggered refresh. Plex and Jellyfin both
-	// expose this as "lock". Default is false — refreshes work as
-	// before until the admin explicitly locks something.
-	IsLocked bool
-	AddedAt  time.Time
-	// DominantColor / DominantColorMuted are pre-computed CSS rgb()
-	// strings extracted at ingest time. Empty when extraction failed
-	// (non-decodable formats, undecidable palette) — clients fall back
-	// to runtime extraction or a static colour in that case.
-	DominantColor      string
-	DominantColorMuted string
-}
 
 // ImageRepository — dual-dialect (Pattern A + Pattern B). The sqlc
 // surface (Create / SetLocked / HasLocked / List / GetPrimary /
@@ -69,7 +44,7 @@ func (r *ImageRepository) driver() string {
 	return DriverPostgres
 }
 
-func (r *ImageRepository) Create(ctx context.Context, img *Image) error {
+func (r *ImageRepository) Create(ctx context.Context, img *librarymodel.Image) error {
 	if r.useSQLite() {
 		err := r.sq.CreateImage(ctx, sqlc.CreateImageParams{
 			ID:                 img.ID,
@@ -163,7 +138,7 @@ func (r *ImageRepository) HasLockedForKind(ctx context.Context, itemID, kind str
 	return has, nil
 }
 
-func (r *ImageRepository) ListByItem(ctx context.Context, itemID string) ([]*Image, error) {
+func (r *ImageRepository) ListByItem(ctx context.Context, itemID string) ([]*librarymodel.Image, error) {
 	if r.useSQLite() {
 		rows, err := r.sq.ListImagesByItem(ctx, itemID)
 		if err != nil {
@@ -178,7 +153,7 @@ func (r *ImageRepository) ListByItem(ctx context.Context, itemID string) ([]*Ima
 	return imagesFromPgListRows(rows), nil
 }
 
-func (r *ImageRepository) GetPrimary(ctx context.Context, itemID, imgType string) (*Image, error) {
+func (r *ImageRepository) GetPrimary(ctx context.Context, itemID, imgType string) (*librarymodel.Image, error) {
 	if r.useSQLite() {
 		row, err := r.sq.GetPrimaryImage(ctx, sqlc.GetPrimaryImageParams{
 			ItemID: itemID,
@@ -207,25 +182,12 @@ func (r *ImageRepository) GetPrimary(ctx context.Context, itemID, imgType string
 	return &img, nil
 }
 
-// PrimaryImageRef is the per-(item,type) payload returned by
-// GetPrimaryURLs. Path is always set; the rest are best-effort fields
-// populated at ingest time and may be empty for older rows or formats
-// the extractor couldn't classify. Clients use them as cheap loading
-// placeholders (solid colour fill, blurhash decode) before the real
-// image arrives.
-type PrimaryImageRef struct {
-	Path               string
-	Blurhash           string
-	DominantColor      string
-	DominantColorMuted string
-}
-
 // GetPrimaryURLs returns the primary poster/backdrop/logo/thumb refs
 // for a batch of item IDs. Uses raw SQL because sqlc doesn't support
 // dynamic IN(). Thumb is the 16:9 "miniatura" providers ship alongside
 // the cartel — landscape rails (Continue Watching) use it for movies
 // so the cards stay rectangular like episodes do.
-func (r *ImageRepository) GetPrimaryURLs(ctx context.Context, itemIDs []string) (map[string]map[string]PrimaryImageRef, error) {
+func (r *ImageRepository) GetPrimaryURLs(ctx context.Context, itemIDs []string) (map[string]map[string]librarymodel.PrimaryImageRef, error) {
 	if len(itemIDs) == 0 {
 		return nil, nil
 	}
@@ -250,7 +212,7 @@ func (r *ImageRepository) GetPrimaryURLs(ctx context.Context, itemIDs []string) 
 	}
 	defer rows.Close() //nolint:errcheck
 
-	result := make(map[string]map[string]PrimaryImageRef)
+	result := make(map[string]map[string]librarymodel.PrimaryImageRef)
 	for rows.Next() {
 		var itemID, imgType, path, dominant, dominantMuted string
 		var blurhash sql.NullString
@@ -258,9 +220,9 @@ func (r *ImageRepository) GetPrimaryURLs(ctx context.Context, itemIDs []string) 
 			return nil, fmt.Errorf("scan primary url: %w", err)
 		}
 		if result[itemID] == nil {
-			result[itemID] = make(map[string]PrimaryImageRef)
+			result[itemID] = make(map[string]librarymodel.PrimaryImageRef)
 		}
-		result[itemID][imgType] = PrimaryImageRef{
+		result[itemID][imgType] = librarymodel.PrimaryImageRef{
 			Path:               path,
 			Blurhash:           blurhash.String,
 			DominantColor:      dominant,
@@ -307,7 +269,7 @@ func (r *ImageRepository) DeleteByID(ctx context.Context, id string) error {
 	return nil
 }
 
-func (r *ImageRepository) GetByID(ctx context.Context, id string) (*Image, error) {
+func (r *ImageRepository) GetByID(ctx context.Context, id string) (*librarymodel.Image, error) {
 	if r.useSQLite() {
 		row, err := r.sq.GetImageByID(ctx, id)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -374,8 +336,8 @@ func (r *ImageRepository) SetPrimary(ctx context.Context, itemID, imgType, image
 
 // ── row mapping helpers ─────────────────────────────────────────────────
 
-func imageFromSqliteGetRow(r sqlc.GetImageByIDRow) Image {
-	return Image{
+func imageFromSqliteGetRow(r sqlc.GetImageByIDRow) librarymodel.Image {
+	return librarymodel.Image{
 		ID:                 r.ID,
 		ItemID:             r.ItemID,
 		Type:               r.Type,
@@ -392,8 +354,8 @@ func imageFromSqliteGetRow(r sqlc.GetImageByIDRow) Image {
 	}
 }
 
-func imageFromPgGetRow(r sqlc_pg.GetImageByIDRow) Image {
-	return Image{
+func imageFromPgGetRow(r sqlc_pg.GetImageByIDRow) librarymodel.Image {
+	return librarymodel.Image{
 		ID:                 r.ID,
 		ItemID:             r.ItemID,
 		Type:               r.Type,
@@ -410,8 +372,8 @@ func imageFromPgGetRow(r sqlc_pg.GetImageByIDRow) Image {
 	}
 }
 
-func imageFromSqlitePrimaryRow(r sqlc.GetPrimaryImageRow) Image {
-	return Image{
+func imageFromSqlitePrimaryRow(r sqlc.GetPrimaryImageRow) librarymodel.Image {
+	return librarymodel.Image{
 		ID:                 r.ID,
 		ItemID:             r.ItemID,
 		Type:               r.Type,
@@ -428,8 +390,8 @@ func imageFromSqlitePrimaryRow(r sqlc.GetPrimaryImageRow) Image {
 	}
 }
 
-func imageFromPgPrimaryRow(r sqlc_pg.GetPrimaryImageRow) Image {
-	return Image{
+func imageFromPgPrimaryRow(r sqlc_pg.GetPrimaryImageRow) librarymodel.Image {
+	return librarymodel.Image{
 		ID:                 r.ID,
 		ItemID:             r.ItemID,
 		Type:               r.Type,
@@ -446,8 +408,8 @@ func imageFromPgPrimaryRow(r sqlc_pg.GetPrimaryImageRow) Image {
 	}
 }
 
-func imageFromSqliteListRow(r sqlc.ListImagesByItemRow) Image {
-	return Image{
+func imageFromSqliteListRow(r sqlc.ListImagesByItemRow) librarymodel.Image {
+	return librarymodel.Image{
 		ID:                 r.ID,
 		ItemID:             r.ItemID,
 		Type:               r.Type,
@@ -464,8 +426,8 @@ func imageFromSqliteListRow(r sqlc.ListImagesByItemRow) Image {
 	}
 }
 
-func imageFromPgListRow(r sqlc_pg.ListImagesByItemRow) Image {
-	return Image{
+func imageFromPgListRow(r sqlc_pg.ListImagesByItemRow) librarymodel.Image {
+	return librarymodel.Image{
 		ID:                 r.ID,
 		ItemID:             r.ItemID,
 		Type:               r.Type,
@@ -482,11 +444,11 @@ func imageFromPgListRow(r sqlc_pg.ListImagesByItemRow) Image {
 	}
 }
 
-func imagesFromSqliteListRows(rows []sqlc.ListImagesByItemRow) []*Image {
+func imagesFromSqliteListRows(rows []sqlc.ListImagesByItemRow) []*librarymodel.Image {
 	if len(rows) == 0 {
 		return nil
 	}
-	out := make([]*Image, len(rows))
+	out := make([]*librarymodel.Image, len(rows))
 	for i, row := range rows {
 		img := imageFromSqliteListRow(row)
 		out[i] = &img
@@ -494,11 +456,11 @@ func imagesFromSqliteListRows(rows []sqlc.ListImagesByItemRow) []*Image {
 	return out
 }
 
-func imagesFromPgListRows(rows []sqlc_pg.ListImagesByItemRow) []*Image {
+func imagesFromPgListRows(rows []sqlc_pg.ListImagesByItemRow) []*librarymodel.Image {
 	if len(rows) == 0 {
 		return nil
 	}
-	out := make([]*Image, len(rows))
+	out := make([]*librarymodel.Image, len(rows))
 	for i, row := range rows {
 		img := imageFromPgListRow(row)
 		out[i] = &img

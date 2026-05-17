@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db"
 	"hubplay/internal/event"
 )
@@ -117,7 +118,7 @@ func (f *SegmentFingerprinter) DetectLibrary(ctx context.Context, libraryID stri
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	episodes, _, err := f.items.List(ctx, db.ItemFilter{
+	episodes, _, err := f.items.List(ctx, librarymodel.ItemFilter{
 		LibraryID: libraryID,
 		Type:      "episode",
 		Limit:     100000,
@@ -125,7 +126,7 @@ func (f *SegmentFingerprinter) DetectLibrary(ctx context.Context, libraryID stri
 	if err != nil {
 		return err
 	}
-	bySeason := make(map[string][]*db.Item, 8)
+	bySeason := make(map[string][]*librarymodel.Item, 8)
 	for _, ep := range episodes {
 		if ep.ParentID == "" {
 			continue // orphan episode without season parent — skip
@@ -160,9 +161,9 @@ func (f *SegmentFingerprinter) DetectLibrary(ctx context.Context, libraryID stri
 		introHits, outroHits := f.detectSeason(ctx, eps)
 		now := time.Now().Unix()
 		for i, ep := range eps {
-			segs := make([]db.EpisodeSegment, 0, 2)
+			segs := make([]librarymodel.EpisodeSegment, 0, 2)
 			if r, ok := introHits[i]; ok {
-				segs = append(segs, toSegment(r, db.EpisodeSegmentIntro, now))
+				segs = append(segs, toSegment(r, librarymodel.EpisodeSegmentIntro, now))
 			}
 			if r, ok := outroHits[i]; ok {
 				// outro frames are relative to the tail window, not
@@ -170,9 +171,9 @@ func (f *SegmentFingerprinter) DetectLibrary(ctx context.Context, libraryID stri
 				offset := outroOffsetSeconds(ep.DurationTicks)
 				r.startSec += offset
 				r.endSec += offset
-				segs = append(segs, toSegment(r, db.EpisodeSegmentOutro, now))
+				segs = append(segs, toSegment(r, librarymodel.EpisodeSegmentOutro, now))
 			}
-			if err := f.segments.Replace(ctx, ep.ID, db.EpisodeSegmentSourceFingerprint, segs); err != nil {
+			if err := f.segments.Replace(ctx, ep.ID, librarymodel.EpisodeSegmentSourceFingerprint, segs); err != nil {
 				f.logger.Warn("replace fingerprint segments",
 					"item_id", ep.ID, "season_id", seasonID, "error", err)
 				continue
@@ -205,7 +206,7 @@ func (f *SegmentFingerprinter) DetectLibrary(ctx context.Context, libraryID stri
 // the right item.
 func (f *SegmentFingerprinter) detectSeason(
 	ctx context.Context,
-	eps []*db.Item,
+	eps []*librarymodel.Item,
 ) (intro, outro map[int]segRange) {
 	intro = make(map[int]segRange)
 	outro = make(map[int]segRange)
@@ -241,7 +242,7 @@ func (f *SegmentFingerprinter) detectSeason(
 // also don't poison the pass.
 func (f *SegmentFingerprinter) fingerprintAll(
 	ctx context.Context,
-	eps []*db.Item,
+	eps []*librarymodel.Item,
 	window FingerprintWindow,
 ) [][]uint32 {
 	out := make([][]uint32, len(eps))
@@ -253,7 +254,7 @@ func (f *SegmentFingerprinter) fingerprintAll(
 		}
 		wg.Add(1)
 		sem <- struct{}{}
-		go func(i int, ep *db.Item) {
+		go func(i int, ep *librarymodel.Item) {
 			defer wg.Done()
 			defer func() { <-sem }()
 			hashes, err := f.prints.Compute(ctx, ep.ID, ep.Path, window)
@@ -280,8 +281,8 @@ type segRange struct {
 	confidence float64
 }
 
-func toSegment(r segRange, kind db.EpisodeSegmentKind, now int64) db.EpisodeSegment {
-	return db.EpisodeSegment{
+func toSegment(r segRange, kind librarymodel.EpisodeSegmentKind, now int64) librarymodel.EpisodeSegment {
+	return librarymodel.EpisodeSegment{
 		Kind:       kind,
 		StartTicks: secondsToTicks(r.startSec),
 		EndTicks:   secondsToTicks(r.endSec),

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	iptvmodel "hubplay/internal/iptv/model"
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db"
 	"hubplay/internal/testutil"
 )
@@ -22,7 +23,7 @@ func setupChannelHealthTest(t *testing.T) (*db.ChannelRepository, string) {
 
 	libID := "lib-health"
 	now := time.Now()
-	if err := repos.Libraries.Create(ctx, &db.Library{
+	if err := repos.Libraries.Create(ctx, &librarymodel.Library{
 		ID: libID, Name: "H", ContentType: "livetv", ScanMode: "manual",
 		CreatedAt: now, UpdatedAt: now,
 	}); err != nil {

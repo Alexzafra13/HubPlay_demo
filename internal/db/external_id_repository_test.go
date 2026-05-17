@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db"
 	"hubplay/internal/testutil"
 )
@@ -30,7 +31,7 @@ func TestExternalIDRepository_GetItemIDByExternalID_RoundTrip(t *testing.T) {
 	if err := itemRepo.Create(context.Background(), item); err != nil {
 		t.Fatal(err)
 	}
-	if err := extRepo.Upsert(context.Background(), &db.ExternalID{
+	if err := extRepo.Upsert(context.Background(), &librarymodel.ExternalID{
 		ItemID:     "item-rec",
 		Provider:   "tmdb",
 		ExternalID: "284054",

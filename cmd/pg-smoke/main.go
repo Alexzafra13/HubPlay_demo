@@ -26,6 +26,7 @@ import (
 
 	"hubplay"
 	iptvmodel "hubplay/internal/iptv/model"
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db"
 	"hubplay/internal/federation"
 	federationstorage "hubplay/internal/federation/storage"
@@ -61,7 +62,7 @@ func main() {
 
 	// 4. Library: create + list
 	logger.Info("step 4: library create + list")
-	lib := &db.Library{
+	lib := &librarymodel.Library{
 		ID:          "smoke-lib-1",
 		Name:        "Smoke Library",
 		ContentType: "movies",

@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/auth"
 	"hubplay/internal/db"
 	"hubplay/internal/imaging"
@@ -357,17 +358,17 @@ func (h *ItemHandler) attachSegments(ctx context.Context, resp map[string]any, i
 	if len(rows) == 0 {
 		return
 	}
-	bestByKind := make(map[db.EpisodeSegmentKind]db.EpisodeSegment, 3)
+	bestByKind := make(map[librarymodel.EpisodeSegmentKind]librarymodel.EpisodeSegment, 3)
 	for _, r := range rows {
 		prev, seen := bestByKind[r.Kind]
 		if !seen || r.Confidence > prev.Confidence {
 			bestByKind[r.Kind] = r
 		}
 	}
-	order := []db.EpisodeSegmentKind{
-		db.EpisodeSegmentRecap,
-		db.EpisodeSegmentIntro,
-		db.EpisodeSegmentOutro,
+	order := []librarymodel.EpisodeSegmentKind{
+		librarymodel.EpisodeSegmentRecap,
+		librarymodel.EpisodeSegmentIntro,
+		librarymodel.EpisodeSegmentOutro,
 	}
 	out := make([]map[string]any, 0, len(bestByKind))
 	for _, kind := range order {
@@ -927,7 +928,7 @@ func (h *ItemHandler) Search(w http.ResponseWriter, r *http.Request) {
 	// search bar bypass kid mode entirely.
 	cap := h.callerCapRating(r.Context())
 
-	items, total, err := h.lib.ListItems(r.Context(), db.ItemFilter{
+	items, total, err := h.lib.ListItems(r.Context(), librarymodel.ItemFilter{
 		LibraryID:             libraryID,
 		Type:                  itemType,
 		Query:                 query,
@@ -992,7 +993,7 @@ func (h *ItemHandler) Search(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func itemDetailResponse(item *db.Item) map[string]any {
+func itemDetailResponse(item *librarymodel.Item) map[string]any {
 	resp := map[string]any{
 		"id":             item.ID,
 		"library_id":     item.LibraryID,
@@ -1037,7 +1038,7 @@ func itemDetailResponse(item *db.Item) map[string]any {
 	return resp
 }
 
-func streamResponse(s *db.MediaStream) map[string]any {
+func streamResponse(s *librarymodel.MediaStream) map[string]any {
 	resp := map[string]any{
 		"stream_index": s.StreamIndex,
 		"stream_type":  s.StreamType,
@@ -1117,7 +1118,7 @@ func userDataResponse(ud *db.UserData, durationTicks int64) map[string]any {
 // either "Chapter 3" placeholder or the real name without a presence
 // check; `image_path` is omitted when absent — Plex-style chapter
 // thumbnails (BIF) aren't generated yet.
-func chapterResponse(c *db.Chapter) map[string]any {
+func chapterResponse(c *librarymodel.Chapter) map[string]any {
 	r := map[string]any{
 		"start_ticks": c.StartTicks,
 		"end_ticks":   c.EndTicks,
@@ -1129,7 +1130,7 @@ func chapterResponse(c *db.Chapter) map[string]any {
 	return r
 }
 
-func imageResponse(img *db.Image) map[string]any {
+func imageResponse(img *librarymodel.Image) map[string]any {
 	resp := map[string]any{
 		"id":         img.ID,
 		"type":       img.Type,
@@ -1173,7 +1174,7 @@ func paletteResponse(vibrant, muted string) map[string]any {
 // solid colour as background while the real <img> decodes, so cards
 // don't pop from grey to image. Callers pass the primary-typed
 // PrimaryImageRef they pulled from images.GetPrimaryURLs.
-func attachPosterPlaceholder(entry map[string]any, ref db.PrimaryImageRef) {
+func attachPosterPlaceholder(entry map[string]any, ref librarymodel.PrimaryImageRef) {
 	if ref.DominantColor != "" {
 		entry["poster_color"] = ref.DominantColor
 	}

@@ -16,6 +16,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/auth"
 	"hubplay/internal/db"
 	"hubplay/internal/domain"
@@ -31,22 +32,22 @@ import (
 // return zero values.
 
 type libFakeService struct {
-	createFn        func(ctx context.Context, req library.CreateRequest) (*db.Library, error)
-	getByIDFn       func(ctx context.Context, id string) (*db.Library, error)
-	listFn          func(ctx context.Context) ([]*db.Library, error)
-	listForUserFn   func(ctx context.Context, userID string) ([]*db.Library, error)
-	updateFn        func(ctx context.Context, id string, req library.UpdateRequest) (*db.Library, error)
+	createFn        func(ctx context.Context, req library.CreateRequest) (*librarymodel.Library, error)
+	getByIDFn       func(ctx context.Context, id string) (*librarymodel.Library, error)
+	listFn          func(ctx context.Context) ([]*librarymodel.Library, error)
+	listForUserFn   func(ctx context.Context, userID string) ([]*librarymodel.Library, error)
+	updateFn        func(ctx context.Context, id string, req library.UpdateRequest) (*librarymodel.Library, error)
 	deleteFn        func(ctx context.Context, id string) error
 	scanFn          func(ctx context.Context, id string, refresh ...bool) error
-	listItemsFn     func(ctx context.Context, f db.ItemFilter) ([]*db.Item, int, error)
-	latestFn        func(ctx context.Context, libraryID, itemType string, limit int) ([]*db.Item, error)
-	latestSeriesFn  func(ctx context.Context, libraryID string, limit int) ([]*db.LatestSeriesActivity, error)
+	listItemsFn     func(ctx context.Context, f librarymodel.ItemFilter) ([]*librarymodel.Item, int, error)
+	latestFn        func(ctx context.Context, libraryID, itemType string, limit int) ([]*librarymodel.Item, error)
+	latestSeriesFn  func(ctx context.Context, libraryID string, limit int) ([]*librarymodel.LatestSeriesActivity, error)
 	itemCountFn     func(ctx context.Context, libraryID string) (int, error)
-	getItemFn       func(ctx context.Context, id string) (*db.Item, error)
-	getChildrenFn   func(ctx context.Context, id string) ([]*db.Item, error)
-	getStreamsFn    func(ctx context.Context, id string) ([]*db.MediaStream, error)
-	getItemImagesFn func(ctx context.Context, id string) ([]*db.Image, error)
-	genres          []db.GenreCount
+	getItemFn       func(ctx context.Context, id string) (*librarymodel.Item, error)
+	getChildrenFn   func(ctx context.Context, id string) ([]*librarymodel.Item, error)
+	getStreamsFn    func(ctx context.Context, id string) ([]*librarymodel.MediaStream, error)
+	getItemImagesFn func(ctx context.Context, id string) ([]*librarymodel.Image, error)
+	genres          []librarymodel.GenreCount
 	// Access surface — used by the admin user-libraries matrix tests.
 	grantAccessFn      func(ctx context.Context, userID, libraryID string) error
 	revokeAccessFn     func(ctx context.Context, userID, libraryID string) error
@@ -54,7 +55,7 @@ type libFakeService struct {
 	replaceAccessFn    func(ctx context.Context, userID string, libraryIDs []string) error
 	replaceAccessCalls []replaceAccessCall
 	// Personal IPTV shortcut — set by the matching handler test.
-	createPersonalIPTVFn    func(ctx context.Context, ownerUserID string, req library.CreateRequest) (*db.Library, error)
+	createPersonalIPTVFn    func(ctx context.Context, ownerUserID string, req library.CreateRequest) (*librarymodel.Library, error)
 	createPersonalIPTVCalls []createPersonalIPTVCall
 }
 
@@ -68,35 +69,35 @@ type replaceAccessCall struct {
 	LibraryIDs []string
 }
 
-func (s *libFakeService) Create(ctx context.Context, req library.CreateRequest) (*db.Library, error) {
+func (s *libFakeService) Create(ctx context.Context, req library.CreateRequest) (*librarymodel.Library, error) {
 	if s.createFn != nil {
 		return s.createFn(ctx, req)
 	}
 	return nil, errors.New("create: not configured")
 }
 
-func (s *libFakeService) GetByID(ctx context.Context, id string) (*db.Library, error) {
+func (s *libFakeService) GetByID(ctx context.Context, id string) (*librarymodel.Library, error) {
 	if s.getByIDFn != nil {
 		return s.getByIDFn(ctx, id)
 	}
 	return nil, domain.NewNotFound("library")
 }
 
-func (s *libFakeService) List(ctx context.Context) ([]*db.Library, error) {
+func (s *libFakeService) List(ctx context.Context) ([]*librarymodel.Library, error) {
 	if s.listFn != nil {
 		return s.listFn(ctx)
 	}
 	return nil, nil
 }
 
-func (s *libFakeService) ListForUser(ctx context.Context, userID string) ([]*db.Library, error) {
+func (s *libFakeService) ListForUser(ctx context.Context, userID string) ([]*librarymodel.Library, error) {
 	if s.listForUserFn != nil {
 		return s.listForUserFn(ctx, userID)
 	}
 	return nil, nil
 }
 
-func (s *libFakeService) Update(ctx context.Context, id string, req library.UpdateRequest) (*db.Library, error) {
+func (s *libFakeService) Update(ctx context.Context, id string, req library.UpdateRequest) (*librarymodel.Library, error) {
 	if s.updateFn != nil {
 		return s.updateFn(ctx, id, req)
 	}
@@ -123,20 +124,20 @@ func (s *libFakeService) ScanSync(_ context.Context, _ string) (*scanner.ScanRes
 
 func (s *libFakeService) IsScanning(_ string) bool { return false }
 
-func (s *libFakeService) ListItems(ctx context.Context, f db.ItemFilter) ([]*db.Item, int, error) {
+func (s *libFakeService) ListItems(ctx context.Context, f librarymodel.ItemFilter) ([]*librarymodel.Item, int, error) {
 	if s.listItemsFn != nil {
 		return s.listItemsFn(ctx, f)
 	}
 	return nil, 0, nil
 }
 
-func (s *libFakeService) GetItem(ctx context.Context, id string) (*db.Item, error) {
+func (s *libFakeService) GetItem(ctx context.Context, id string) (*librarymodel.Item, error) {
 	if s.getItemFn != nil {
 		return s.getItemFn(ctx, id)
 	}
 	return nil, domain.NewNotFound("item")
 }
-func (s *libFakeService) GetItemChildren(ctx context.Context, id string) ([]*db.Item, error) {
+func (s *libFakeService) GetItemChildren(ctx context.Context, id string) ([]*librarymodel.Item, error) {
 	if s.getChildrenFn != nil {
 		return s.getChildrenFn(ctx, id)
 	}
@@ -145,27 +146,27 @@ func (s *libFakeService) GetItemChildren(ctx context.Context, id string) ([]*db.
 func (s *libFakeService) GetItemChildCounts(_ context.Context, _ []string) (map[string]int, error) {
 	return map[string]int{}, nil
 }
-func (s *libFakeService) GetItemStreams(ctx context.Context, id string) ([]*db.MediaStream, error) {
+func (s *libFakeService) GetItemStreams(ctx context.Context, id string) ([]*librarymodel.MediaStream, error) {
 	if s.getStreamsFn != nil {
 		return s.getStreamsFn(ctx, id)
 	}
 	return nil, nil
 }
-func (s *libFakeService) GetItemImages(ctx context.Context, id string) ([]*db.Image, error) {
+func (s *libFakeService) GetItemImages(ctx context.Context, id string) ([]*librarymodel.Image, error) {
 	if s.getItemImagesFn != nil {
 		return s.getItemImagesFn(ctx, id)
 	}
 	return nil, nil
 }
 
-func (s *libFakeService) LatestItems(ctx context.Context, libraryID, itemType string, limit int, _ string) ([]*db.Item, error) {
+func (s *libFakeService) LatestItems(ctx context.Context, libraryID, itemType string, limit int, _ string) ([]*librarymodel.Item, error) {
 	if s.latestFn != nil {
 		return s.latestFn(ctx, libraryID, itemType, limit)
 	}
 	return nil, nil
 }
 
-func (s *libFakeService) LatestSeriesByActivity(ctx context.Context, libraryID string, limit int) ([]*db.LatestSeriesActivity, error) {
+func (s *libFakeService) LatestSeriesByActivity(ctx context.Context, libraryID string, limit int) ([]*librarymodel.LatestSeriesActivity, error) {
 	if s.latestSeriesFn != nil {
 		return s.latestSeriesFn(ctx, libraryID, limit)
 	}
@@ -209,7 +210,7 @@ func (s *libFakeService) ReplaceAccess(ctx context.Context, userID string, libra
 	return nil
 }
 
-func (s *libFakeService) CreatePersonalIPTV(ctx context.Context, ownerUserID string, req library.CreateRequest) (*db.Library, error) {
+func (s *libFakeService) CreatePersonalIPTV(ctx context.Context, ownerUserID string, req library.CreateRequest) (*librarymodel.Library, error) {
 	s.createPersonalIPTVCalls = append(s.createPersonalIPTVCalls, createPersonalIPTVCall{OwnerUserID: ownerUserID, Req: req})
 	if s.createPersonalIPTVFn != nil {
 		return s.createPersonalIPTVFn(ctx, ownerUserID, req)
@@ -217,7 +218,7 @@ func (s *libFakeService) CreatePersonalIPTV(ctx context.Context, ownerUserID str
 	return nil, errors.New("createPersonalIPTV: not configured")
 }
 
-func (s *libFakeService) ListGenres(_ context.Context, _ string) ([]db.GenreCount, error) {
+func (s *libFakeService) ListGenres(_ context.Context, _ string) ([]librarymodel.GenreCount, error) {
 	if s.genres == nil {
 		return nil, nil
 	}
@@ -227,18 +228,18 @@ func (s *libFakeService) ListGenres(_ context.Context, _ string) ([]db.GenreCoun
 // ─── Fake MetadataRepository ────────────────────────────────────────────────
 
 type libFakeMetadataRepo struct {
-	byID map[string]*db.Metadata
+	byID map[string]*librarymodel.Metadata
 }
 
-func (r *libFakeMetadataRepo) GetByItemID(_ context.Context, itemID string) (*db.Metadata, error) {
+func (r *libFakeMetadataRepo) GetByItemID(_ context.Context, itemID string) (*librarymodel.Metadata, error) {
 	if m, ok := r.byID[itemID]; ok {
 		return m, nil
 	}
 	return nil, domain.NewNotFound("metadata")
 }
 
-func (r *libFakeMetadataRepo) GetMetadataBatch(_ context.Context, ids []string) (map[string]*db.Metadata, error) {
-	out := map[string]*db.Metadata{}
+func (r *libFakeMetadataRepo) GetMetadataBatch(_ context.Context, ids []string) (map[string]*librarymodel.Metadata, error) {
+	out := map[string]*librarymodel.Metadata{}
 	for _, id := range ids {
 		if m, ok := r.byID[id]; ok {
 			out[id] = m
@@ -271,7 +272,7 @@ func newLibTestEnv(t *testing.T) *libTestEnv {
 		t:        t,
 		svc:      &libFakeService{},
 		images:   newFakeImageRepo(),
-		meta:     &libFakeMetadataRepo{byID: map[string]*db.Metadata{}},
+		meta:     &libFakeMetadataRepo{byID: map[string]*librarymodel.Metadata{}},
 		userData: newProgressFakeUserData(),
 	}
 	env.handler = NewLibraryHandler(env.svc, env.images, env.meta, env.userData, nil, testutil.NopLogger())
@@ -325,8 +326,8 @@ func userClaims() *auth.Claims  { return &auth.Claims{UserID: "u-2", Role: "user
 
 func TestLibraryHandler_Create_HappyPath(t *testing.T) {
 	env := newLibTestEnv(t)
-	env.svc.createFn = func(_ context.Context, req library.CreateRequest) (*db.Library, error) {
-		return &db.Library{
+	env.svc.createFn = func(_ context.Context, req library.CreateRequest) (*librarymodel.Library, error) {
+		return &librarymodel.Library{
 			ID: "lib-new", Name: req.Name, ContentType: req.ContentType,
 			ScanMode: req.ScanMode, Paths: req.Paths,
 			CreatedAt: time.Now(), UpdatedAt: time.Now(),
@@ -353,7 +354,7 @@ func TestLibraryHandler_Create_InvalidJSON_400(t *testing.T) {
 
 func TestLibraryHandler_Create_ServiceError_Mapped(t *testing.T) {
 	env := newLibTestEnv(t)
-	env.svc.createFn = func(_ context.Context, _ library.CreateRequest) (*db.Library, error) {
+	env.svc.createFn = func(_ context.Context, _ library.CreateRequest) (*librarymodel.Library, error) {
 		return nil, domain.NewAlreadyExists("library")
 	}
 	rr := env.do(http.MethodPost, "/api/v1/libraries", `{"name":"X"}`, nil)
@@ -375,11 +376,11 @@ func TestLibraryHandler_List_Unauthenticated_401(t *testing.T) {
 func TestLibraryHandler_List_Admin_UsesListAll(t *testing.T) {
 	env := newLibTestEnv(t)
 	adminHit, userHit := false, false
-	env.svc.listFn = func(_ context.Context) ([]*db.Library, error) {
+	env.svc.listFn = func(_ context.Context) ([]*librarymodel.Library, error) {
 		adminHit = true
-		return []*db.Library{{ID: "lib-1", Name: "L1"}}, nil
+		return []*librarymodel.Library{{ID: "lib-1", Name: "L1"}}, nil
 	}
-	env.svc.listForUserFn = func(_ context.Context, _ string) ([]*db.Library, error) {
+	env.svc.listForUserFn = func(_ context.Context, _ string) ([]*librarymodel.Library, error) {
 		userHit = true
 		return nil, nil
 	}
@@ -394,11 +395,11 @@ func TestLibraryHandler_List_Admin_UsesListAll(t *testing.T) {
 
 func TestLibraryHandler_List_User_UsesListForUser(t *testing.T) {
 	env := newLibTestEnv(t)
-	env.svc.listForUserFn = func(_ context.Context, userID string) ([]*db.Library, error) {
+	env.svc.listForUserFn = func(_ context.Context, userID string) ([]*librarymodel.Library, error) {
 		if userID != "u-2" {
 			t.Errorf("userID: %q", userID)
 		}
-		return []*db.Library{{ID: "lib-1"}}, nil
+		return []*librarymodel.Library{{ID: "lib-1"}}, nil
 	}
 	env.svc.itemCountFn = func(_ context.Context, _ string) (int, error) { return 42, nil }
 
@@ -420,8 +421,8 @@ func TestLibraryHandler_List_User_UsesListForUser(t *testing.T) {
 
 func TestLibraryHandler_Get_HappyPath(t *testing.T) {
 	env := newLibTestEnv(t)
-	env.svc.getByIDFn = func(_ context.Context, id string) (*db.Library, error) {
-		return &db.Library{ID: id, Name: "Movies"}, nil
+	env.svc.getByIDFn = func(_ context.Context, id string) (*librarymodel.Library, error) {
+		return &librarymodel.Library{ID: id, Name: "Movies"}, nil
 	}
 	env.svc.itemCountFn = func(_ context.Context, _ string) (int, error) { return 7, nil }
 	rr := env.do(http.MethodGet, "/api/v1/libraries/lib-1", "", nil)
@@ -447,8 +448,8 @@ func TestLibraryHandler_Get_NotFound_404(t *testing.T) {
 
 func TestLibraryHandler_Update_HappyPath(t *testing.T) {
 	env := newLibTestEnv(t)
-	env.svc.updateFn = func(_ context.Context, id string, req library.UpdateRequest) (*db.Library, error) {
-		return &db.Library{ID: id, Name: req.Name, ContentType: req.ContentType}, nil
+	env.svc.updateFn = func(_ context.Context, id string, req library.UpdateRequest) (*librarymodel.Library, error) {
+		return &librarymodel.Library{ID: id, Name: req.Name, ContentType: req.ContentType}, nil
 	}
 	body := `{"name":"Renamed","content_type":"movies","paths":["/x"],"scan_mode":"manual"}`
 	rr := env.do(http.MethodPut, "/api/v1/libraries/lib-1", body, nil)
@@ -582,10 +583,10 @@ func TestLibraryHandler_Browse_ListsSubdirectories(t *testing.T) {
 
 func TestLibraryHandler_Items_RespectsFilter(t *testing.T) {
 	env := newLibTestEnv(t)
-	var gotFilter db.ItemFilter
-	env.svc.listItemsFn = func(_ context.Context, f db.ItemFilter) ([]*db.Item, int, error) {
+	var gotFilter librarymodel.ItemFilter
+	env.svc.listItemsFn = func(_ context.Context, f librarymodel.ItemFilter) ([]*librarymodel.Item, int, error) {
 		gotFilter = f
-		return []*db.Item{{ID: "it-1", LibraryID: f.LibraryID, Title: "Movie A"}}, 100, nil
+		return []*librarymodel.Item{{ID: "it-1", LibraryID: f.LibraryID, Title: "Movie A"}}, 100, nil
 	}
 	url := "/api/v1/libraries/lib-1/items?limit=25&offset=50&sort_by=title&sort_order=asc&type=movie&parent_id=p-1"
 	rr := env.do(http.MethodGet, url, "", nil)
@@ -605,8 +606,8 @@ func TestLibraryHandler_Items_RespectsFilter(t *testing.T) {
 
 func TestLibraryHandler_Items_NextCursorOnFullPage(t *testing.T) {
 	env := newLibTestEnv(t)
-	env.svc.listItemsFn = func(_ context.Context, _ db.ItemFilter) ([]*db.Item, int, error) {
-		return []*db.Item{
+	env.svc.listItemsFn = func(_ context.Context, _ librarymodel.ItemFilter) ([]*librarymodel.Item, int, error) {
+		return []*librarymodel.Item{
 			{ID: "a"}, {ID: "b"}, {ID: "c"},
 		}, 300, nil
 	}
@@ -619,8 +620,8 @@ func TestLibraryHandler_Items_NextCursorOnFullPage(t *testing.T) {
 
 func TestLibraryHandler_Items_NoCursorWhenPartialPage(t *testing.T) {
 	env := newLibTestEnv(t)
-	env.svc.listItemsFn = func(_ context.Context, _ db.ItemFilter) ([]*db.Item, int, error) {
-		return []*db.Item{{ID: "a"}}, 1, nil
+	env.svc.listItemsFn = func(_ context.Context, _ librarymodel.ItemFilter) ([]*librarymodel.Item, int, error) {
+		return []*librarymodel.Item{{ID: "a"}}, 1, nil
 	}
 	rr := env.do(http.MethodGet, "/api/v1/libraries/lib-1/items?limit=25", "", nil)
 	data, _ := libDecodeData(t, rr).(map[string]any)
@@ -631,10 +632,10 @@ func TestLibraryHandler_Items_NoCursorWhenPartialPage(t *testing.T) {
 
 func TestLibraryHandler_Items_EnrichesWithMetadata(t *testing.T) {
 	env := newLibTestEnv(t)
-	env.svc.listItemsFn = func(_ context.Context, _ db.ItemFilter) ([]*db.Item, int, error) {
-		return []*db.Item{{ID: "it-1", Title: "Movie"}}, 1, nil
+	env.svc.listItemsFn = func(_ context.Context, _ librarymodel.ItemFilter) ([]*librarymodel.Item, int, error) {
+		return []*librarymodel.Item{{ID: "it-1", Title: "Movie"}}, 1, nil
 	}
-	env.meta.byID["it-1"] = &db.Metadata{
+	env.meta.byID["it-1"] = &librarymodel.Metadata{
 		ItemID: "it-1", Overview: "A movie", Tagline: "Big", GenresJSON: `["action","drama"]`,
 	}
 	rr := env.do(http.MethodGet, "/api/v1/libraries/lib-1/items?limit=10", "", nil)
@@ -652,8 +653,8 @@ func TestLibraryHandler_Items_EnrichesWithMetadata(t *testing.T) {
 
 func TestLibraryHandler_Items_IncludesUserDataWhenAuthenticated(t *testing.T) {
 	env := newLibTestEnv(t)
-	env.svc.listItemsFn = func(_ context.Context, _ db.ItemFilter) ([]*db.Item, int, error) {
-		return []*db.Item{
+	env.svc.listItemsFn = func(_ context.Context, _ librarymodel.ItemFilter) ([]*librarymodel.Item, int, error) {
+		return []*librarymodel.Item{
 			{ID: "it-1", Title: "Watched", DurationTicks: 1_000},
 			{ID: "it-2", Title: "InProgress", DurationTicks: 1_000},
 			{ID: "it-3", Title: "Untouched", DurationTicks: 1_000},
@@ -713,8 +714,8 @@ func TestLibraryHandler_Items_IncludesUserDataWhenAuthenticated(t *testing.T) {
 
 func TestLibraryHandler_Items_OmitsUserDataWhenAnonymous(t *testing.T) {
 	env := newLibTestEnv(t)
-	env.svc.listItemsFn = func(_ context.Context, _ db.ItemFilter) ([]*db.Item, int, error) {
-		return []*db.Item{{ID: "it-1", DurationTicks: 1_000}}, 1, nil
+	env.svc.listItemsFn = func(_ context.Context, _ librarymodel.ItemFilter) ([]*librarymodel.Item, int, error) {
+		return []*librarymodel.Item{{ID: "it-1", DurationTicks: 1_000}}, 1, nil
 	}
 	env.userData.data["u-2:it-1"] = &db.UserData{UserID: "u-2", ItemID: "it-1", Completed: true}
 
@@ -736,9 +737,9 @@ func TestLibraryHandler_LatestItems_RespectsQueryParams(t *testing.T) {
 	env := newLibTestEnv(t)
 	var gotLib, gotType string
 	var gotLimit int
-	env.svc.latestFn = func(_ context.Context, libraryID, itemType string, limit int) ([]*db.Item, error) {
+	env.svc.latestFn = func(_ context.Context, libraryID, itemType string, limit int) ([]*librarymodel.Item, error) {
 		gotLib, gotType, gotLimit = libraryID, itemType, limit
-		return []*db.Item{{ID: "it-1"}, {ID: "it-2"}}, nil
+		return []*librarymodel.Item{{ID: "it-1"}, {ID: "it-2"}}, nil
 	}
 	rr := env.do(http.MethodGet, "/api/v1/libraries/latest-items?library_id=lib-1&type=movie&limit=5", "", nil)
 	if rr.Code != http.StatusOK {

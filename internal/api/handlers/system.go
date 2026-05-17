@@ -13,6 +13,7 @@ import (
 	"sort"
 	"time"
 
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db"
 	"hubplay/internal/stream"
 	"hubplay/internal/sysmetrics"
@@ -45,7 +46,7 @@ type HostInfoProvider interface {
 // total items). Kept tiny so test fakes don't have to mock the entire
 // LibraryService surface.
 type LibraryStatsProvider interface {
-	List(ctx context.Context) ([]*db.Library, error)
+	List(ctx context.Context) ([]*librarymodel.Library, error)
 	ItemCount(ctx context.Context, libraryID string) (int, error)
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db"
 	"hubplay/internal/testutil"
 )
@@ -52,14 +53,14 @@ func TestStudioRepository_EnsureAndList(t *testing.T) {
 		if err := itemRepo.Create(context.Background(), newTestItem(id, "lib-1", id)); err != nil {
 			t.Fatal(err)
 		}
-		if err := metaRepo.Upsert(context.Background(), &db.Metadata{ItemID: id, Studio: "Marvel Studios"}); err != nil {
+		if err := metaRepo.Upsert(context.Background(), &librarymodel.Metadata{ItemID: id, Studio: "Marvel Studios"}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if err := itemRepo.Create(context.Background(), newTestItem("item-old", "lib-1", "old")); err != nil {
 		t.Fatal(err)
 	}
-	if err := metaRepo.Upsert(context.Background(), &db.Metadata{ItemID: "item-old", Studio: "Old Studio"}); err != nil {
+	if err := metaRepo.Upsert(context.Background(), &librarymodel.Metadata{ItemID: "item-old", Studio: "Old librarymodel.Studio"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -77,7 +78,7 @@ func TestStudioRepository_EnsureAndList(t *testing.T) {
 		}
 	}
 
-	oldID, err := studioRepo.EnsureStudio(context.Background(), "Old Studio", "", nil)
+	oldID, err := studioRepo.EnsureStudio(context.Background(), "Old librarymodel.Studio", "", nil)
 	if err != nil {
 		t.Fatalf("ensure old: %v", err)
 	}
@@ -107,8 +108,8 @@ func TestStudioRepository_EnsureAndList(t *testing.T) {
 	if list[0].Name != "Marvel Studios" || list[0].ItemCount != 2 {
 		t.Errorf("expected Marvel Studios first with 2 items, got %+v", list[0])
 	}
-	if list[1].Name != "Old Studio" || list[1].ItemCount != 1 {
-		t.Errorf("expected Old Studio second with 1 item, got %+v", list[1])
+	if list[1].Name != "Old librarymodel.Studio" || list[1].ItemCount != 1 {
+		t.Errorf("expected Old librarymodel.Studio second with 1 item, got %+v", list[1])
 	}
 
 	// GetBySlug round-trip drives the /studios/{slug} page.

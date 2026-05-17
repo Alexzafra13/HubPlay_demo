@@ -7,6 +7,7 @@ import (
 	"time"
 
 	authmodel "hubplay/internal/auth/model"
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db"
 	"hubplay/internal/testutil"
 )
@@ -84,7 +85,7 @@ func newBenchActivityRepo(b *testing.B, n int) (*db.ActivityRepository, *db.Repo
 	ctx := context.Background()
 
 	now := time.Now().UTC()
-	if err := repos.Libraries.Create(ctx, &db.Library{
+	if err := repos.Libraries.Create(ctx, &librarymodel.Library{
 		ID: "lib-bench", Name: "Bench Lib", ContentType: "movies",
 		CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
@@ -124,7 +125,7 @@ func newBenchActivityRepo(b *testing.B, n int) (*db.ActivityRepository, *db.Repo
 			parentID = fmt.Sprintf("series-%03d", i/100) // rolls up to one of ~10 series
 			// Seed the parent series + season if not present.
 			if i%100 == 0 {
-				if err := repos.Items.Create(ctx, &db.Item{
+				if err := repos.Items.Create(ctx, &librarymodel.Item{
 					ID: fmt.Sprintf("series-%03d", i/100), LibraryID: "lib-bench",
 					Type: "series", Title: fmt.Sprintf("Series %d", i/100),
 					SortTitle: fmt.Sprintf("Series %d", i/100),
@@ -135,7 +136,7 @@ func newBenchActivityRepo(b *testing.B, n int) (*db.ActivityRepository, *db.Repo
 				}
 			}
 		}
-		if err := repos.Items.Create(ctx, &db.Item{
+		if err := repos.Items.Create(ctx, &librarymodel.Item{
 			ID:            fmt.Sprintf("i-%05d", i),
 			LibraryID:     "lib-bench",
 			ParentID:      parentID,

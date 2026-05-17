@@ -16,7 +16,7 @@ import (
 	"sync"
 	"testing"
 
-	"hubplay/internal/db"
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/imaging"
 	"hubplay/internal/imaging/pathmap"
 	"hubplay/internal/provider"
@@ -25,11 +25,11 @@ import (
 // ─── Fakes satisfying the refresher collaborator interfaces ─────────────────
 
 type fakeItems struct {
-	items []*db.Item
+	items []*librarymodel.Item
 	err   error
 }
 
-func (f *fakeItems) List(_ context.Context, _ db.ItemFilter) ([]*db.Item, int, error) {
+func (f *fakeItems) List(_ context.Context, _ librarymodel.ItemFilter) ([]*librarymodel.Item, int, error) {
 	if f.err != nil {
 		return nil, 0, f.err
 	}
@@ -37,11 +37,11 @@ func (f *fakeItems) List(_ context.Context, _ db.ItemFilter) ([]*db.Item, int, e
 }
 
 type fakeExtIDs struct {
-	byItem map[string][]*db.ExternalID
+	byItem map[string][]*librarymodel.ExternalID
 	err    error
 }
 
-func (f *fakeExtIDs) ListByItem(_ context.Context, itemID string) ([]*db.ExternalID, error) {
+func (f *fakeExtIDs) ListByItem(_ context.Context, itemID string) ([]*librarymodel.ExternalID, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -50,26 +50,26 @@ func (f *fakeExtIDs) ListByItem(_ context.Context, itemID string) ([]*db.Externa
 
 type fakeImagesRepo struct {
 	mu       sync.Mutex
-	byItem   map[string][]*db.Image
-	created  []*db.Image
+	byItem   map[string][]*librarymodel.Image
+	created  []*librarymodel.Image
 	primary  map[string]string // "itemID:type" -> imageID
 	createErr error
 }
 
 func newFakeImagesRepo() *fakeImagesRepo {
 	return &fakeImagesRepo{
-		byItem:  map[string][]*db.Image{},
+		byItem:  map[string][]*librarymodel.Image{},
 		primary: map[string]string{},
 	}
 }
 
-func (f *fakeImagesRepo) ListByItem(_ context.Context, itemID string) ([]*db.Image, error) {
+func (f *fakeImagesRepo) ListByItem(_ context.Context, itemID string) ([]*librarymodel.Image, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return append([]*db.Image(nil), f.byItem[itemID]...), nil
+	return append([]*librarymodel.Image(nil), f.byItem[itemID]...), nil
 }
 
-func (f *fakeImagesRepo) Create(_ context.Context, img *db.Image) error {
+func (f *fakeImagesRepo) Create(_ context.Context, img *librarymodel.Image) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.createErr != nil {
@@ -158,7 +158,7 @@ func newTestRefresher(t *testing.T) (*ImageRefresher, *fakeItems, *fakeExtIDs, *
 		t.Fatalf("mkdir: %v", err)
 	}
 	items := &fakeItems{}
-	extIDs := &fakeExtIDs{byItem: map[string][]*db.ExternalID{}}
+	extIDs := &fakeExtIDs{byItem: map[string][]*librarymodel.ExternalID{}}
 	images := newFakeImagesRepo()
 	providers := &fakeProvider{}
 	r := NewImageRefresher(items, extIDs, images, providers, pathmap.New(imageDir), imageDir, silent())
@@ -185,7 +185,7 @@ func TestImageRefresher_NoItems_ZeroUpdated(t *testing.T) {
 
 func TestImageRefresher_ItemWithoutExternalIDs_Skipped(t *testing.T) {
 	r, items, _, _, _, _ := newTestRefresher(t)
-	items.items = []*db.Item{{ID: "it-1", Type: "movie"}}
+	items.items = []*librarymodel.Item{{ID: "it-1", Type: "movie"}}
 	count, err := r.RefreshForLibrary(context.Background(), "lib-1")
 	if err != nil || count != 0 {
 		t.Fatalf("got (%d, %v)", count, err)
@@ -194,8 +194,8 @@ func TestImageRefresher_ItemWithoutExternalIDs_Skipped(t *testing.T) {
 
 func TestImageRefresher_AddsMissingKinds(t *testing.T) {
 	r, items, ext, images, providers, imageDir := newTestRefresher(t)
-	items.items = []*db.Item{{ID: "it-1", Type: "movie"}}
-	ext.byItem["it-1"] = []*db.ExternalID{{Provider: "tmdb", ExternalID: "42"}}
+	items.items = []*librarymodel.Item{{ID: "it-1", Type: "movie"}}
+	ext.byItem["it-1"] = []*librarymodel.ExternalID{{Provider: "tmdb", ExternalID: "42"}}
 
 	srv := imageServer(t, testJPEG(t))
 	providers.fn = func(_ context.Context, _ map[string]string, _ provider.ItemType) ([]provider.ImageResult, error) {
@@ -227,13 +227,13 @@ func TestImageRefresher_SkipsLockedKinds(t *testing.T) {
 	// available. Locks are per-kind, so a locked primary still
 	// allows backdrop refreshes to run normally on the same item.
 	r, items, ext, images, providers, _ := newTestRefresher(t)
-	items.items = []*db.Item{{ID: "it-1", Type: "movie"}}
-	ext.byItem["it-1"] = []*db.ExternalID{{Provider: "tmdb", ExternalID: "42"}}
+	items.items = []*librarymodel.Item{{ID: "it-1", Type: "movie"}}
+	ext.byItem["it-1"] = []*librarymodel.ExternalID{{Provider: "tmdb", ExternalID: "42"}}
 	// Locked primary already in the library — must be untouched.
 	// Also seed an UNLOCKED placeholder for backdrop kind to verify
 	// the lock check is per-kind, not per-item: backdrop has no
 	// lock, so the refresher must still attempt it.
-	images.byItem["it-1"] = []*db.Image{
+	images.byItem["it-1"] = []*librarymodel.Image{
 		{ID: "manual-poster", ItemID: "it-1", Type: "primary", IsLocked: true},
 	}
 
@@ -267,10 +267,10 @@ func TestImageRefresher_SkipsLockedKinds(t *testing.T) {
 
 func TestImageRefresher_SkipsExistingKinds(t *testing.T) {
 	r, items, ext, images, providers, _ := newTestRefresher(t)
-	items.items = []*db.Item{{ID: "it-1", Type: "movie"}}
-	ext.byItem["it-1"] = []*db.ExternalID{{Provider: "tmdb", ExternalID: "42"}}
+	items.items = []*librarymodel.Item{{ID: "it-1", Type: "movie"}}
+	ext.byItem["it-1"] = []*librarymodel.ExternalID{{Provider: "tmdb", ExternalID: "42"}}
 	// Seed an existing primary so it should be skipped.
-	images.byItem["it-1"] = []*db.Image{{ID: "pre-1", ItemID: "it-1", Type: "primary"}}
+	images.byItem["it-1"] = []*librarymodel.Image{{ID: "pre-1", ItemID: "it-1", Type: "primary"}}
 
 	srv := imageServer(t, testJPEG(t))
 	providers.fn = func(_ context.Context, _ map[string]string, _ provider.ItemType) ([]provider.ImageResult, error) {
@@ -287,8 +287,8 @@ func TestImageRefresher_SkipsExistingKinds(t *testing.T) {
 
 func TestImageRefresher_PicksHighestScorePerKind(t *testing.T) {
 	r, items, ext, images, providers, _ := newTestRefresher(t)
-	items.items = []*db.Item{{ID: "it-1", Type: "movie"}}
-	ext.byItem["it-1"] = []*db.ExternalID{{Provider: "tmdb", ExternalID: "42"}}
+	items.items = []*librarymodel.Item{{ID: "it-1", Type: "movie"}}
+	ext.byItem["it-1"] = []*librarymodel.ExternalID{{Provider: "tmdb", ExternalID: "42"}}
 
 	srv := imageServer(t, testJPEG(t))
 	providers.fn = func(_ context.Context, _ map[string]string, _ provider.ItemType) ([]provider.ImageResult, error) {
@@ -311,8 +311,8 @@ func TestImageRefresher_PicksHighestScorePerKind(t *testing.T) {
 
 func TestImageRefresher_FiltersInvalidKinds(t *testing.T) {
 	r, items, ext, _, providers, _ := newTestRefresher(t)
-	items.items = []*db.Item{{ID: "it-1", Type: "movie"}}
-	ext.byItem["it-1"] = []*db.ExternalID{{Provider: "tmdb", ExternalID: "42"}}
+	items.items = []*librarymodel.Item{{ID: "it-1", Type: "movie"}}
+	ext.byItem["it-1"] = []*librarymodel.ExternalID{{Provider: "tmdb", ExternalID: "42"}}
 
 	srv := imageServer(t, testJPEG(t))
 	providers.fn = func(_ context.Context, _ map[string]string, _ provider.ItemType) ([]provider.ImageResult, error) {
@@ -329,14 +329,14 @@ func TestImageRefresher_FiltersInvalidKinds(t *testing.T) {
 
 func TestImageRefresher_ItemTypeMappedForProviderQuery(t *testing.T) {
 	r, items, ext, _, providers, _ := newTestRefresher(t)
-	items.items = []*db.Item{
+	items.items = []*librarymodel.Item{
 		{ID: "mov-1", Type: "movie"},
 		{ID: "ser-1", Type: "series"},
 		{ID: "sea-1", Type: "season"},
 		{ID: "ep-1", Type: "episode"},
 	}
 	for _, id := range []string{"mov-1", "ser-1", "sea-1", "ep-1"} {
-		ext.byItem[id] = []*db.ExternalID{{Provider: "tmdb", ExternalID: "x"}}
+		ext.byItem[id] = []*librarymodel.ExternalID{{Provider: "tmdb", ExternalID: "x"}}
 	}
 	seen := map[provider.ItemType]bool{}
 	providers.fn = func(_ context.Context, _ map[string]string, tp provider.ItemType) ([]provider.ImageResult, error) {
@@ -355,8 +355,8 @@ func TestImageRefresher_ItemTypeMappedForProviderQuery(t *testing.T) {
 
 func TestImageRefresher_CreateErrorRemovesFile(t *testing.T) {
 	r, items, ext, images, providers, imageDir := newTestRefresher(t)
-	items.items = []*db.Item{{ID: "it-1", Type: "movie"}}
-	ext.byItem["it-1"] = []*db.ExternalID{{Provider: "tmdb", ExternalID: "42"}}
+	items.items = []*librarymodel.Item{{ID: "it-1", Type: "movie"}}
+	ext.byItem["it-1"] = []*librarymodel.ExternalID{{Provider: "tmdb", ExternalID: "42"}}
 	images.createErr = errors.New("db insert failed")
 
 	srv := imageServer(t, testJPEG(t))
@@ -376,8 +376,8 @@ func TestImageRefresher_CreateErrorRemovesFile(t *testing.T) {
 
 func TestImageRefresher_SetsPrimaryMapping(t *testing.T) {
 	r, items, ext, images, providers, _ := newTestRefresher(t)
-	items.items = []*db.Item{{ID: "it-1", Type: "movie"}}
-	ext.byItem["it-1"] = []*db.ExternalID{{Provider: "tmdb", ExternalID: "42"}}
+	items.items = []*librarymodel.Item{{ID: "it-1", Type: "movie"}}
+	ext.byItem["it-1"] = []*librarymodel.ExternalID{{Provider: "tmdb", ExternalID: "42"}}
 
 	srv := imageServer(t, testJPEG(t))
 	providers.fn = func(_ context.Context, _ map[string]string, _ provider.ItemType) ([]provider.ImageResult, error) {

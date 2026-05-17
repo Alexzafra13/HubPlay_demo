@@ -10,6 +10,7 @@ import (
 	"time"
 
 	iptvmodel "hubplay/internal/iptv/model"
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db"
 	"hubplay/internal/testutil"
 )
@@ -37,7 +38,7 @@ func TestSetChannelTvgID_PersistsAcrossM3URefresh(t *testing.T) {
 
 	libID := "lib-ov"
 	now := time.Now()
-	if err := repos.Libraries.Create(ctx, &db.Library{
+	if err := repos.Libraries.Create(ctx, &librarymodel.Library{
 		ID: libID, Name: "L", ContentType: "livetv", ScanMode: "manual",
 		M3UURL:    m3uSrv.URL,
 		CreatedAt: now, UpdatedAt: now,
@@ -112,7 +113,7 @@ func TestSetChannelTvgID_ClearsPersistentOverride(t *testing.T) {
 
 	libID := "lib-clear"
 	now := time.Now()
-	_ = repos.Libraries.Create(ctx, &db.Library{
+	_ = repos.Libraries.Create(ctx, &librarymodel.Library{
 		ID: libID, Name: "C", ContentType: "livetv", ScanMode: "manual",
 		M3UURL:    m3uSrv.URL,
 		CreatedAt: now, UpdatedAt: now,
@@ -160,7 +161,7 @@ func TestListChannelsWithoutEPG_SurfaceOrphansOnly(t *testing.T) {
 
 	libID := "lib-orphans"
 	now := time.Now()
-	_ = repos.Libraries.Create(ctx, &db.Library{
+	_ = repos.Libraries.Create(ctx, &librarymodel.Library{
 		ID: libID, Name: "O", ContentType: "livetv", ScanMode: "manual",
 		CreatedAt: now, UpdatedAt: now,
 	})

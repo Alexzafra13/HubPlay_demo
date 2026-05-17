@@ -8,6 +8,7 @@ import (
 
 	authmodel "hubplay/internal/auth/model"
 	iptvmodel "hubplay/internal/iptv/model"
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db"
 	"hubplay/internal/testutil"
 )
@@ -73,7 +74,7 @@ func newBenchHomeRepo(b *testing.B, n int) (*db.HomeRepository, string) {
 	ctx := context.Background()
 
 	now := time.Now().UTC()
-	if err := repos.Libraries.Create(ctx, &db.Library{
+	if err := repos.Libraries.Create(ctx, &librarymodel.Library{
 		ID: "lib-mov", Name: "Movies", ContentType: "movies",
 		CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
@@ -98,7 +99,7 @@ func newBenchHomeRepo(b *testing.B, n int) (*db.HomeRepository, string) {
 			typ = "episode"
 			parent = fmt.Sprintf("series-%d", i/40)
 			if i%40 == 0 {
-				_ = repos.Items.Create(ctx, &db.Item{
+				_ = repos.Items.Create(ctx, &librarymodel.Item{
 					ID: parent, LibraryID: "lib-mov",
 					Type: "series", Title: parent, SortTitle: parent,
 					Path:    "/m/" + parent,
@@ -106,7 +107,7 @@ func newBenchHomeRepo(b *testing.B, n int) (*db.HomeRepository, string) {
 				})
 			}
 		}
-		_ = repos.Items.Create(ctx, &db.Item{
+		_ = repos.Items.Create(ctx, &librarymodel.Item{
 			ID: fmt.Sprintf("i-%05d", i), LibraryID: "lib-mov",
 			ParentID:    parent,
 			Type:        typ,
@@ -141,7 +142,7 @@ func newBenchHomeRepoLiveTV(b *testing.B, n int) (*db.HomeRepository, string) {
 	ctx := context.Background()
 
 	now := time.Now().UTC()
-	if err := repos.Libraries.Create(ctx, &db.Library{
+	if err := repos.Libraries.Create(ctx, &librarymodel.Library{
 		ID: "lib-tv", Name: "Live TV", ContentType: "livetv",
 		CreatedAt: now, UpdatedAt: now,
 	}); err != nil {

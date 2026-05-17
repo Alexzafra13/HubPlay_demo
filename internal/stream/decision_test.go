@@ -3,12 +3,12 @@ package stream
 import (
 	"testing"
 
-	"hubplay/internal/db"
+	librarymodel "hubplay/internal/library/model"
 )
 
 func TestDecide_DirectPlay_MP4_H264_AAC(t *testing.T) {
-	item := &db.Item{Container: "mov,mp4,m4a,3gp,3g2,mj2"}
-	streams := []*db.MediaStream{
+	item := &librarymodel.Item{Container: "mov,mp4,m4a,3gp,3g2,mj2"}
+	streams := []*librarymodel.MediaStream{
 		{StreamType: "video", Codec: "h264", IsDefault: true},
 		{StreamType: "audio", Codec: "aac", IsDefault: true},
 	}
@@ -20,8 +20,8 @@ func TestDecide_DirectPlay_MP4_H264_AAC(t *testing.T) {
 }
 
 func TestDecide_DirectStream_MKV_H264_AAC(t *testing.T) {
-	item := &db.Item{Container: "matroska"}
-	streams := []*db.MediaStream{
+	item := &librarymodel.Item{Container: "matroska"}
+	streams := []*librarymodel.MediaStream{
 		{StreamType: "video", Codec: "h264", IsDefault: true},
 		{StreamType: "audio", Codec: "aac", IsDefault: true},
 	}
@@ -42,8 +42,8 @@ func TestDecide_DirectStream_MKV_H264_AAC(t *testing.T) {
 // promotes this to DirectStream with CopyVideo=true, CopyAudio=false:
 // ffmpeg copies video bytes and only re-encodes the (cheap) audio.
 func TestDecide_DirectStream_VideoCopyAudioReencode_AC3(t *testing.T) {
-	item := &db.Item{Container: "matroska"}
-	streams := []*db.MediaStream{
+	item := &librarymodel.Item{Container: "matroska"}
+	streams := []*librarymodel.MediaStream{
 		{StreamType: "video", Codec: "h264", IsDefault: true},
 		{StreamType: "audio", Codec: "ac3", IsDefault: true},
 	}
@@ -61,8 +61,8 @@ func TestDecide_DirectStream_VideoCopyAudioReencode_AC3(t *testing.T) {
 }
 
 func TestDecide_Transcode_HEVC(t *testing.T) {
-	item := &db.Item{Container: "matroska"}
-	streams := []*db.MediaStream{
+	item := &librarymodel.Item{Container: "matroska"}
+	streams := []*librarymodel.MediaStream{
 		{StreamType: "video", Codec: "hevc", IsDefault: true},
 		{StreamType: "audio", Codec: "aac", IsDefault: true},
 	}
@@ -76,8 +76,8 @@ func TestDecide_Transcode_HEVC(t *testing.T) {
 // Mirror of the AC3 test for DTS — same outcome, just a different
 // audio codec the browser can't decode natively.
 func TestDecide_DirectStream_VideoCopyAudioReencode_DTS(t *testing.T) {
-	item := &db.Item{Container: "matroska"}
-	streams := []*db.MediaStream{
+	item := &librarymodel.Item{Container: "matroska"}
+	streams := []*librarymodel.MediaStream{
 		{StreamType: "video", Codec: "h264", IsDefault: true},
 		{StreamType: "audio", Codec: "dts", IsDefault: true},
 	}
@@ -101,8 +101,8 @@ func TestDecide_DirectStream_VideoCopyAudioReencode_DTS(t *testing.T) {
 // transcode because the literal "matroska,webm" string doesn't
 // match the map keys.
 func TestDecide_DirectStream_FormatNameCommaList(t *testing.T) {
-	item := &db.Item{Container: "matroska,webm"}
-	streams := []*db.MediaStream{
+	item := &librarymodel.Item{Container: "matroska,webm"}
+	streams := []*librarymodel.MediaStream{
 		{StreamType: "video", Codec: "h264", IsDefault: true},
 		{StreamType: "audio", Codec: "ac3", IsDefault: true},
 	}
@@ -117,8 +117,8 @@ func TestDecide_DirectStream_FormatNameCommaList(t *testing.T) {
 }
 
 func TestDecide_DirectPlay_WebM_VP9_Opus(t *testing.T) {
-	item := &db.Item{Container: "webm"}
-	streams := []*db.MediaStream{
+	item := &librarymodel.Item{Container: "webm"}
+	streams := []*librarymodel.MediaStream{
 		{StreamType: "video", Codec: "vp9", IsDefault: true},
 		{StreamType: "audio", Codec: "opus", IsDefault: true},
 	}
@@ -130,8 +130,8 @@ func TestDecide_DirectPlay_WebM_VP9_Opus(t *testing.T) {
 }
 
 func TestDecide_RequestedProfile(t *testing.T) {
-	item := &db.Item{Container: "matroska"}
-	streams := []*db.MediaStream{
+	item := &librarymodel.Item{Container: "matroska"}
+	streams := []*librarymodel.MediaStream{
 		{StreamType: "video", Codec: "hevc", IsDefault: true},
 		{StreamType: "audio", Codec: "dts", IsDefault: true},
 	}
@@ -146,7 +146,7 @@ func TestDecide_RequestedProfile(t *testing.T) {
 }
 
 func TestDecide_NoStreams(t *testing.T) {
-	item := &db.Item{Container: "mp4"}
+	item := &librarymodel.Item{Container: "mp4"}
 	d := Decide(item, nil, nil, "")
 	if d.Method != MethodTranscode {
 		t.Errorf("expected Transcode for no streams, got %s", d.Method)
@@ -154,8 +154,8 @@ func TestDecide_NoStreams(t *testing.T) {
 }
 
 func TestDecide_AudioOnly(t *testing.T) {
-	item := &db.Item{Container: "mp4"}
-	streams := []*db.MediaStream{
+	item := &librarymodel.Item{Container: "mp4"}
+	streams := []*librarymodel.MediaStream{
 		{StreamType: "audio", Codec: "aac", IsDefault: true},
 	}
 
@@ -172,8 +172,8 @@ func TestDecideForceDirectPlay_BypassesCapsForHEVC(t *testing.T) {
 	// EAC3, no MKV). DecideForceDirectPlay must skip the waterfall
 	// and return DirectPlay with the file's actual codecs in the
 	// response — that's what the player pill renders.
-	item := &db.Item{Container: "matroska,webm"}
-	streams := []*db.MediaStream{
+	item := &librarymodel.Item{Container: "matroska,webm"}
+	streams := []*librarymodel.MediaStream{
 		{StreamType: "video", Codec: "hevc", IsDefault: true},
 		{StreamType: "audio", Codec: "eac3", IsDefault: true},
 	}
@@ -204,8 +204,8 @@ func TestDecideForceDirectPlay_PrefersDefaultStream(t *testing.T) {
 	// flagged default — same convention as Decide() so the player
 	// pill labels the dub the user actually hears, not whichever
 	// stream happened to be first in the container.
-	item := &db.Item{Container: "matroska,webm"}
-	streams := []*db.MediaStream{
+	item := &librarymodel.Item{Container: "matroska,webm"}
+	streams := []*librarymodel.MediaStream{
 		{StreamType: "video", Codec: "h264", IsDefault: true},
 		{StreamType: "audio", Codec: "ac3", Language: "eng"},        // first, non-default
 		{StreamType: "audio", Codec: "eac3", Language: "spa", IsDefault: true},
@@ -233,8 +233,8 @@ func TestDecide_HDR_TonemapsForDefaultWebClient(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			item := &db.Item{Container: "matroska"}
-			streams := []*db.MediaStream{
+			item := &librarymodel.Item{Container: "matroska"}
+			streams := []*librarymodel.MediaStream{
 				{StreamType: "video", Codec: "h264", IsDefault: true, HDRType: tc.hdrType},
 				{StreamType: "audio", Codec: "aac", IsDefault: true},
 			}
@@ -259,8 +259,8 @@ func TestDecide_HDR_TonemapsForDefaultWebClient(t *testing.T) {
 // and ToneMap=false. This is the "native HDR-capable Android TV app"
 // scenario.
 func TestDecide_HDR_DirectStreamsWhenClientDeclaresHDR(t *testing.T) {
-	item := &db.Item{Container: "matroska"}
-	streams := []*db.MediaStream{
+	item := &librarymodel.Item{Container: "matroska"}
+	streams := []*librarymodel.MediaStream{
 		{StreamType: "video", Codec: "h264", IsDefault: true, HDRType: "HDR10"},
 		{StreamType: "audio", Codec: "aac", IsDefault: true},
 	}
@@ -282,8 +282,8 @@ func TestDecide_HDR_DirectStreamsWhenClientDeclaresHDR(t *testing.T) {
 // alias matters because the wire header is informal and a
 // hand-rolled client could send either.
 func TestDecide_HDR_DolbyVisionLongAlias(t *testing.T) {
-	item := &db.Item{Container: "matroska"}
-	streams := []*db.MediaStream{
+	item := &librarymodel.Item{Container: "matroska"}
+	streams := []*librarymodel.MediaStream{
 		{StreamType: "video", Codec: "h264", IsDefault: true, HDRType: "DolbyVision"},
 		{StreamType: "audio", Codec: "aac", IsDefault: true},
 	}
@@ -299,8 +299,8 @@ func TestDecide_HDR_DolbyVisionLongAlias(t *testing.T) {
 // without ToneMap=true the encoder would produce washed-out SDR-sized
 // frames from HDR-coded source data.
 func TestDecide_HDR_HEVCAlsoTonemaps(t *testing.T) {
-	item := &db.Item{Container: "matroska"}
-	streams := []*db.MediaStream{
+	item := &librarymodel.Item{Container: "matroska"}
+	streams := []*librarymodel.MediaStream{
 		{StreamType: "video", Codec: "hevc", IsDefault: true, HDRType: "HDR10"},
 		{StreamType: "audio", Codec: "aac", IsDefault: true},
 	}
@@ -318,8 +318,8 @@ func TestDecide_HDR_HEVCAlsoTonemaps(t *testing.T) {
 // flips ToneMap unconditionally for any client without hdr=... can't
 // re-encode every SDR stream the project serves.
 func TestDecide_SDR_NeverTonemaps(t *testing.T) {
-	item := &db.Item{Container: "matroska"}
-	streams := []*db.MediaStream{
+	item := &librarymodel.Item{Container: "matroska"}
+	streams := []*librarymodel.MediaStream{
 		{StreamType: "video", Codec: "hevc", IsDefault: true}, // HDRType deliberately empty
 		{StreamType: "audio", Codec: "dts", IsDefault: true},
 	}
@@ -334,8 +334,8 @@ func TestDecideForceDirectPlay_AudioOnlyItemEmptyVideoCodec(t *testing.T) {
 	// an empty VideoCodec rather than panicking. The browser will
 	// likely fail to play it, but that's the operator's risk
 	// (force_direct_play is opt-in for a reason).
-	item := &db.Item{Container: "mp4"}
-	streams := []*db.MediaStream{
+	item := &librarymodel.Item{Container: "mp4"}
+	streams := []*librarymodel.MediaStream{
 		{StreamType: "audio", Codec: "aac", IsDefault: true},
 	}
 	d := DecideForceDirectPlay(item, streams)

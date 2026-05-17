@@ -9,6 +9,7 @@ import (
 	"time"
 
 	iptvmodel "hubplay/internal/iptv/model"
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db"
 	"hubplay/internal/testutil"
 )
@@ -66,7 +67,7 @@ func newSchedFixture(t *testing.T) (*db.Repositories, *fakeRunner, *Scheduler) {
 	repos := testutil.NewTestRepos(t)
 	// Create a library so FKs resolve.
 	now := time.Now().UTC()
-	if err := repos.Libraries.Create(context.Background(), &db.Library{
+	if err := repos.Libraries.Create(context.Background(), &librarymodel.Library{
 		ID: "lib-a", Name: "lib-a", ContentType: "livetv", ScanMode: "manual",
 		CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
@@ -232,7 +233,7 @@ func (p *panickyRunner) RefreshEPG(context.Context, string) (int, error) {
 
 func TestScheduler_RunNowRecoversFromPanic(t *testing.T) {
 	repos := testutil.NewTestRepos(t)
-	if err := repos.Libraries.Create(context.Background(), &db.Library{
+	if err := repos.Libraries.Create(context.Background(), &librarymodel.Library{
 		ID: "lib-a", Name: "lib-a", ContentType: "livetv", ScanMode: "manual",
 	}); err != nil {
 		t.Fatal(err)
@@ -255,7 +256,7 @@ func TestScheduler_TickLoopSurvivesPanic(t *testing.T) {
 	// the runner. Verifies the defer/recover path doesn't bleed into
 	// the loop goroutine.
 	repos := testutil.NewTestRepos(t)
-	if err := repos.Libraries.Create(context.Background(), &db.Library{
+	if err := repos.Libraries.Create(context.Background(), &librarymodel.Library{
 		ID: "lib-a", Name: "lib-a", ContentType: "livetv", ScanMode: "manual",
 	}); err != nil {
 		t.Fatal(err)
@@ -309,7 +310,7 @@ func TestScheduler_ConcurrentRefreshIsBenign(t *testing.T) {
 	// That outcome must NOT overwrite a prior successful last_status
 	// with "error" — the refresh actually succeeded on the other path.
 	repos := testutil.NewTestRepos(t)
-	if err := repos.Libraries.Create(context.Background(), &db.Library{
+	if err := repos.Libraries.Create(context.Background(), &librarymodel.Library{
 		ID: "lib-a", Name: "lib-a", ContentType: "livetv", ScanMode: "manual",
 	}); err != nil {
 		t.Fatal(err)

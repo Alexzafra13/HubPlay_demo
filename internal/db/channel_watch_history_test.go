@@ -7,6 +7,7 @@ import (
 
 	authmodel "hubplay/internal/auth/model"
 	iptvmodel "hubplay/internal/iptv/model"
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db"
 	"hubplay/internal/testutil"
 )
@@ -26,7 +27,7 @@ func seedWatchFixture(t *testing.T, repos *db.Repositories, n int) []string {
 	}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	if err := repos.Libraries.Create(ctx, &db.Library{
+	if err := repos.Libraries.Create(ctx, &librarymodel.Library{
 		ID: "lib-a", Name: "lib-a", ContentType: "livetv", ScanMode: "manual",
 		CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
@@ -285,7 +286,7 @@ func TestChannelWatchHistory_DedupesAcrossLibraries(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	if err := repos.Libraries.Create(ctx, &db.Library{
+	if err := repos.Libraries.Create(ctx, &librarymodel.Library{
 		ID: "lib-b", Name: "lib-b", ContentType: "livetv", ScanMode: "manual",
 		CreatedAt: now, UpdatedAt: now,
 	}); err != nil {

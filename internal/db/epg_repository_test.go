@@ -7,6 +7,7 @@ import (
 	"time"
 
 	iptvmodel "hubplay/internal/iptv/model"
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db"
 	"hubplay/internal/testutil"
 )
@@ -18,7 +19,7 @@ func setupEPGTest(t *testing.T) (*db.EPGProgramRepository, *db.ChannelRepository
 	ctx := context.Background()
 
 	now := time.Now()
-	_ = repos.Libraries.Create(ctx, &db.Library{
+	_ = repos.Libraries.Create(ctx, &librarymodel.Library{
 		ID: "lib-epg", Name: "Live TV", ContentType: "livetv",
 		CreatedAt: now, UpdatedAt: now,
 	})
@@ -182,7 +183,7 @@ func TestEPG_BulkSchedule_LargeList(t *testing.T) {
 
 	libID := "lib-epg-large"
 	now := time.Now()
-	_ = repos.Libraries.Create(ctx, &db.Library{
+	_ = repos.Libraries.Create(ctx, &librarymodel.Library{
 		ID: libID, Name: "Large", ContentType: "livetv",
 		CreatedAt: now, UpdatedAt: now,
 	})
@@ -285,7 +286,7 @@ func TestEPG_CoerceSQLiteTime_LegacyString(t *testing.T) {
 	ctx := context.Background()
 
 	now := time.Now()
-	_ = repos.Libraries.Create(ctx, &db.Library{
+	_ = repos.Libraries.Create(ctx, &librarymodel.Library{
 		ID: "lib-legacy", Name: "L", ContentType: "livetv",
 		CreatedAt: now, UpdatedAt: now,
 	})
@@ -335,7 +336,7 @@ func TestEPG_CoerceSQLiteTime_MonotonicSuffix(t *testing.T) {
 	ctx := context.Background()
 
 	now := time.Now()
-	_ = repos.Libraries.Create(ctx, &db.Library{
+	_ = repos.Libraries.Create(ctx, &librarymodel.Library{
 		ID: "lib-mono", Name: "L", ContentType: "livetv",
 		CreatedAt: now, UpdatedAt: now,
 	})

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	iptvmodel "hubplay/internal/iptv/model"
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db"
 	"hubplay/internal/testutil"
 )
@@ -16,7 +17,7 @@ func setupChannelTest(t *testing.T) (*db.ChannelRepository, string) {
 	repos := db.NewRepositories(testutil.Driver(), database)
 
 	now := time.Now()
-	_ = repos.Libraries.Create(context.Background(), &db.Library{
+	_ = repos.Libraries.Create(context.Background(), &librarymodel.Library{
 		ID: "lib-iptv", Name: "Live TV", ContentType: "livetv",
 		CreatedAt: now, UpdatedAt: now,
 	})
@@ -297,15 +298,15 @@ func TestChannel_ListLivetvChannels_FiltersOutNonLivetvLibraries(t *testing.T) {
 	// Two livetv libraries + one non-livetv (movies). The non-livetv
 	// library's channels (if any leaked in) must NOT appear in the
 	// global EPG matcher's view.
-	_ = repos.Libraries.Create(ctx, &db.Library{
+	_ = repos.Libraries.Create(ctx, &librarymodel.Library{
 		ID: "lib-iptv-a", Name: "IPTV A", ContentType: "livetv",
 		CreatedAt: now, UpdatedAt: now,
 	})
-	_ = repos.Libraries.Create(ctx, &db.Library{
+	_ = repos.Libraries.Create(ctx, &librarymodel.Library{
 		ID: "lib-iptv-b", Name: "IPTV B", ContentType: "livetv",
 		CreatedAt: now, UpdatedAt: now,
 	})
-	_ = repos.Libraries.Create(ctx, &db.Library{
+	_ = repos.Libraries.Create(ctx, &librarymodel.Library{
 		ID: "lib-movies", Name: "Movies", ContentType: "movies",
 		CreatedAt: now, UpdatedAt: now,
 	})
@@ -328,7 +329,7 @@ func TestChannel_ListLivetvChannels_FiltersOutNonLivetvLibraries(t *testing.T) {
 		t.Errorf("got %d channels across livetv libs, want 3", len(got))
 	}
 
-	// Library distribution check — both livetv libs must be
+	// librarymodel.Library distribution check — both livetv libs must be
 	// represented; movies library MUST NOT appear.
 	byLib := make(map[string]int)
 	for _, c := range got {
@@ -351,7 +352,7 @@ func TestChannel_ListLivetvChannels_EmptyWhenNoLivetv(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now()
 
-	_ = repos.Libraries.Create(ctx, &db.Library{
+	_ = repos.Libraries.Create(ctx, &librarymodel.Library{
 		ID: "lib-movies", Name: "Movies", ContentType: "movies",
 		CreatedAt: now, UpdatedAt: now,
 	})

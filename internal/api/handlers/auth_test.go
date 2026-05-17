@@ -12,9 +12,9 @@ import (
 	"time"
 
 	authmodel "hubplay/internal/auth/model"
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/auth"
 	"hubplay/internal/config"
-	"hubplay/internal/db"
 	"hubplay/internal/domain"
 )
 
@@ -500,8 +500,8 @@ func TestAuthHandler_Register_AppliesLibraryGrants(t *testing.T) {
 		},
 	}
 	libSvc := &libFakeService{
-		getByIDFn: func(_ context.Context, _ string) (*db.Library, error) {
-			return &db.Library{}, nil
+		getByIDFn: func(_ context.Context, _ string) (*librarymodel.Library, error) {
+			return &librarymodel.Library{}, nil
 		},
 	}
 	handler := NewAuthHandler(authSvc, &mockUserService{}, libSvc, testAuthCfg(), testLogger())
@@ -569,9 +569,9 @@ func TestAuthHandler_Register_GrantsUnknownLibrary_404(t *testing.T) {
 		},
 	}
 	libSvc := &libFakeService{
-		getByIDFn: func(_ context.Context, id string) (*db.Library, error) {
+		getByIDFn: func(_ context.Context, id string) (*librarymodel.Library, error) {
 			if id == "lib-good" {
-				return &db.Library{ID: id}, nil
+				return &librarymodel.Library{ID: id}, nil
 			}
 			return nil, domain.NewNotFound("library")
 		},

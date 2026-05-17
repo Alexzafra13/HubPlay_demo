@@ -7,6 +7,7 @@ import (
 	"time"
 
 	iptvmodel "hubplay/internal/iptv/model"
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db"
 	"hubplay/internal/testutil"
 )
@@ -16,7 +17,7 @@ import (
 func createTestLibrary(t *testing.T, repos *db.Repositories, id string) {
 	t.Helper()
 	now := time.Now().UTC()
-	if err := repos.Libraries.Create(context.Background(), &db.Library{
+	if err := repos.Libraries.Create(context.Background(), &librarymodel.Library{
 		ID: id, Name: id, ContentType: "livetv", ScanMode: "manual",
 		CreatedAt: now, UpdatedAt: now,
 	}); err != nil {

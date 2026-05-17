@@ -6,40 +6,10 @@ import (
 	"errors"
 	"fmt"
 
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db/sqlc"
 	"hubplay/internal/db/sqlc_pg"
 )
-
-// Metadata holds extended metadata for an item (overview, tagline, genres, etc.).
-type Metadata struct {
-	ItemID     string
-	Overview   string
-	Tagline    string
-	Studio     string
-	GenresJSON string
-	TagsJSON   string
-	// TrailerKey is the platform-specific id of the best-matched
-	// trailer/teaser at scan time (typically a YouTube key from TMDb).
-	// Empty when no trailer was returned for the item — the
-	// SeriesHero treats absence as "no preview, just show the
-	// backdrop". TrailerSite is the platform name ("YouTube",
-	// "Vimeo") so the frontend picks the right embed URL.
-	TrailerKey  string
-	TrailerSite string
-	// StudioLogoURL is the absolute image URL of the headline
-	// production company / network logo (Lucasfilm, HBO, Disney+, …).
-	// Built from TMDb's `production_companies[0].logo_path` at scan
-	// time using the configured image base, so the frontend renders
-	// it with a single `<img src>` and falls back to the studio text
-	// when empty (older studios with no TMDb logo, or failed match).
-	StudioLogoURL string
-	// CollectionID is the FK to the saga (TMDb belongs_to_collection)
-	// this movie belongs to — populated at scan time when the
-	// provider returned one. Empty / NULL means "no saga"; the
-	// detail page renders the optional "Part of: X" link only when
-	// non-empty.
-	CollectionID string
-}
 
 // MetadataRepository — Pattern A dual-dialect plus two raw-SQL
 // batch readers (GetOverviewBatch, GetMetadataBatch) that need the
@@ -69,7 +39,7 @@ func (r *MetadataRepository) driver() string {
 	return DriverPostgres
 }
 
-func (r *MetadataRepository) Upsert(ctx context.Context, m *Metadata) error {
+func (r *MetadataRepository) Upsert(ctx context.Context, m *librarymodel.Metadata) error {
 	var err error
 	if r.useSQLite() {
 		err = r.sq.UpsertMetadata(ctx, sqlc.UpsertMetadataParams{
@@ -102,7 +72,7 @@ func (r *MetadataRepository) Upsert(ctx context.Context, m *Metadata) error {
 	return nil
 }
 
-func (r *MetadataRepository) GetByItemID(ctx context.Context, itemID string) (*Metadata, error) {
+func (r *MetadataRepository) GetByItemID(ctx context.Context, itemID string) (*librarymodel.Metadata, error) {
 	if r.useSQLite() {
 		row, err := r.sq.GetMetadataByItemID(ctx, itemID)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -111,7 +81,7 @@ func (r *MetadataRepository) GetByItemID(ctx context.Context, itemID string) (*M
 		if err != nil {
 			return nil, fmt.Errorf("get metadata: %w", err)
 		}
-		return &Metadata{
+		return &librarymodel.Metadata{
 			ItemID:        row.ItemID,
 			Overview:      row.Overview,
 			Tagline:       row.Tagline,
@@ -131,7 +101,7 @@ func (r *MetadataRepository) GetByItemID(ctx context.Context, itemID string) (*M
 	if err != nil {
 		return nil, fmt.Errorf("get metadata: %w", err)
 	}
-	return &Metadata{
+	return &librarymodel.Metadata{
 		ItemID:        row.ItemID,
 		Overview:      row.Overview,
 		Tagline:       row.Tagline,
@@ -192,7 +162,7 @@ func (r *MetadataRepository) GetOverviewBatch(ctx context.Context, itemIDs []str
 
 // GetMetadataBatch returns metadata for a batch of item IDs.
 // Uses raw SQL because sqlc doesn't support dynamic IN() on either dialect.
-func (r *MetadataRepository) GetMetadataBatch(ctx context.Context, itemIDs []string) (map[string]*Metadata, error) {
+func (r *MetadataRepository) GetMetadataBatch(ctx context.Context, itemIDs []string) (map[string]*librarymodel.Metadata, error) {
 	if len(itemIDs) == 0 {
 		return nil, nil
 	}
@@ -219,9 +189,9 @@ func (r *MetadataRepository) GetMetadataBatch(ctx context.Context, itemIDs []str
 	}
 	defer rows.Close() //nolint:errcheck
 
-	result := make(map[string]*Metadata)
+	result := make(map[string]*librarymodel.Metadata)
 	for rows.Next() {
-		m := &Metadata{}
+		m := &librarymodel.Metadata{}
 		if err := rows.Scan(&m.ItemID, &m.Overview, &m.Tagline, &m.Studio, &m.GenresJSON, &m.TagsJSON, &m.TrailerKey, &m.TrailerSite, &m.StudioLogoURL); err != nil {
 			return nil, fmt.Errorf("scan metadata: %w", err)
 		}

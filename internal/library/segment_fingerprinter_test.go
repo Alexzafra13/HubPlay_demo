@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db"
 	"hubplay/internal/event"
 	"hubplay/internal/library"
@@ -48,14 +49,14 @@ func TestSegmentFingerprinter_DetectLibrary_EndToEnd(t *testing.T) {
 	}
 
 	now := time.Now()
-	must(repos.Libraries.Create(context.Background(), &db.Library{
+	must(repos.Libraries.Create(context.Background(), &librarymodel.Library{
 		ID: "lib-fp", Name: "TV", ContentType: "shows",
 		ScanMode: "auto", ScanInterval: "6h",
 		CreatedAt: now, UpdatedAt: now, Paths: []string{"/tv"},
 	}))
 	mustItem := func(id, parent, kind string) {
 		t.Helper()
-		must(repos.Items.Create(context.Background(), &db.Item{
+		must(repos.Items.Create(context.Background(), &librarymodel.Item{
 			ID:            id,
 			LibraryID:     "lib-fp",
 			ParentID:      parent,
@@ -93,10 +94,10 @@ func TestSegmentFingerprinter_DetectLibrary_EndToEnd(t *testing.T) {
 	// Drop a chapter-source segment on ep-fp-1 to verify the
 	// fingerprint pass leaves it alone.
 	must(repos.EpisodeSegments.Replace(context.Background(), "ep-fp-1",
-		db.EpisodeSegmentSourceChapter,
-		[]db.EpisodeSegment{{
-			Kind:       db.EpisodeSegmentRecap,
-			Source:     db.EpisodeSegmentSourceChapter,
+		librarymodel.EpisodeSegmentSourceChapter,
+		[]librarymodel.EpisodeSegment{{
+			Kind:       librarymodel.EpisodeSegmentRecap,
+			Source:     librarymodel.EpisodeSegmentSourceChapter,
 			StartTicks: ticks(5),
 			EndTicks:   ticks(20),
 			Confidence: 0.95,
@@ -114,9 +115,9 @@ func TestSegmentFingerprinter_DetectLibrary_EndToEnd(t *testing.T) {
 		id := fmt.Sprintf("ep-fp-%d", i)
 		segs, err := repos.EpisodeSegments.ListByItem(context.Background(), id)
 		must(err)
-		var fpIntro *db.EpisodeSegment
+		var fpIntro *librarymodel.EpisodeSegment
 		for k := range segs {
-			if segs[k].Kind == db.EpisodeSegmentIntro && segs[k].Source == db.EpisodeSegmentSourceFingerprint {
+			if segs[k].Kind == librarymodel.EpisodeSegmentIntro && segs[k].Source == librarymodel.EpisodeSegmentSourceFingerprint {
 				fpIntro = &segs[k]
 				break
 			}
@@ -139,7 +140,7 @@ func TestSegmentFingerprinter_DetectLibrary_EndToEnd(t *testing.T) {
 	must(err)
 	hasChapterRecap := false
 	for _, s := range ep1 {
-		if s.Source == db.EpisodeSegmentSourceChapter && s.Kind == db.EpisodeSegmentRecap {
+		if s.Source == librarymodel.EpisodeSegmentSourceChapter && s.Kind == librarymodel.EpisodeSegmentRecap {
 			hasChapterRecap = true
 			break
 		}
@@ -158,7 +159,7 @@ func TestSegmentFingerprinter_DetectLibrary_EndToEnd(t *testing.T) {
 	must(err)
 	fpCount := 0
 	for _, s := range ep1Rerun {
-		if s.Source == db.EpisodeSegmentSourceFingerprint {
+		if s.Source == librarymodel.EpisodeSegmentSourceFingerprint {
 			fpCount++
 		}
 	}
@@ -181,12 +182,12 @@ func TestSegmentFingerprinter_SeasonWithOneEpisode(t *testing.T) {
 		}
 	}
 	now := time.Now()
-	must(repos.Libraries.Create(context.Background(), &db.Library{
+	must(repos.Libraries.Create(context.Background(), &librarymodel.Library{
 		ID: "lib-solo", Name: "Solo", ContentType: "shows",
 		ScanMode: "auto", ScanInterval: "6h",
 		CreatedAt: now, UpdatedAt: now, Paths: []string{"/tv"},
 	}))
-	for _, item := range []db.Item{
+	for _, item := range []librarymodel.Item{
 		{ID: "series-solo", LibraryID: "lib-solo", Type: "series", Title: "Solo", Path: "/tv/solo", AddedAt: now, UpdatedAt: now, IsAvailable: true},
 		{ID: "season-solo", LibraryID: "lib-solo", ParentID: "series-solo", Type: "season", Title: "S1", Path: "/tv/solo/s1", AddedAt: now, UpdatedAt: now, IsAvailable: true},
 		{ID: "ep-solo", LibraryID: "lib-solo", ParentID: "season-solo", Type: "episode", Title: "ep1", Path: "/tv/solo/ep1.mkv", AddedAt: now, UpdatedAt: now, IsAvailable: true, DurationTicks: ticks(1800)},

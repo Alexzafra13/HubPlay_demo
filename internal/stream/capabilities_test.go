@@ -4,7 +4,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"hubplay/internal/db"
+	librarymodel "hubplay/internal/library/model"
 )
 
 func TestParseCapabilitiesHeader_Empty(t *testing.T) {
@@ -110,8 +110,8 @@ func TestEffectiveCapabilities_BackfillsMissingBuckets(t *testing.T) {
 // This is the regression test for "current web client must keep working
 // when it doesn't send the header yet".
 func TestDecide_NilCaps_LegacyWebDefaults(t *testing.T) {
-	item := &db.Item{Container: "mp4"}
-	streams := []*db.MediaStream{
+	item := &librarymodel.Item{Container: "mp4"}
+	streams := []*librarymodel.MediaStream{
 		{StreamType: "video", Codec: "h264", IsDefault: true},
 		{StreamType: "audio", Codec: "aac", IsDefault: true},
 	}
@@ -122,8 +122,8 @@ func TestDecide_NilCaps_LegacyWebDefaults(t *testing.T) {
 
 	// HEVC + EAC3 in MKV transcoded under defaults (web doesn't decode
 	// either codec natively). This is the case the new caps unlock.
-	item2 := &db.Item{Container: "matroska"}
-	streams2 := []*db.MediaStream{
+	item2 := &librarymodel.Item{Container: "matroska"}
+	streams2 := []*librarymodel.MediaStream{
 		{StreamType: "video", Codec: "hevc", IsDefault: true},
 		{StreamType: "audio", Codec: "eac3", IsDefault: true},
 	}
@@ -141,8 +141,8 @@ func TestDecide_DeclaredCaps_UnlockDirectPlay(t *testing.T) {
 		AudioCodecs: map[string]bool{"eac3": true, "aac": true},
 		Containers:  map[string]bool{"matroska": true, "mkv": true, "mp4": true},
 	}
-	item := &db.Item{Container: "matroska"}
-	streams := []*db.MediaStream{
+	item := &librarymodel.Item{Container: "matroska"}
+	streams := []*librarymodel.MediaStream{
 		{StreamType: "video", Codec: "hevc", IsDefault: true},
 		{StreamType: "audio", Codec: "eac3", IsDefault: true},
 	}
@@ -164,8 +164,8 @@ func TestDecide_DeclaredCaps_RemuxToCompatibleContainer(t *testing.T) {
 		AudioCodecs: map[string]bool{"aac": true},
 		Containers:  map[string]bool{"mp4": true}, // client cannot play matroska
 	}
-	item := &db.Item{Container: "matroska"}
-	streams := []*db.MediaStream{
+	item := &librarymodel.Item{Container: "matroska"}
+	streams := []*librarymodel.MediaStream{
 		{StreamType: "video", Codec: "h264", IsDefault: true},
 		{StreamType: "audio", Codec: "aac", IsDefault: true},
 	}
@@ -239,8 +239,8 @@ func TestDecide_DeclaredCaps_TranscodeOnUnsupportedCodec(t *testing.T) {
 		AudioCodecs: map[string]bool{"aac": true},
 		Containers:  map[string]bool{"mp4": true},
 	}
-	item := &db.Item{Container: "mp4"}
-	streams := []*db.MediaStream{
+	item := &librarymodel.Item{Container: "mp4"}
+	streams := []*librarymodel.MediaStream{
 		{StreamType: "video", Codec: "av1", IsDefault: true},
 		{StreamType: "audio", Codec: "aac", IsDefault: true},
 	}

@@ -11,17 +11,17 @@ import (
 	"time"
 
 	iptvmodel "hubplay/internal/iptv/model"
-	"hubplay/internal/db"
+	librarymodel "hubplay/internal/library/model"
 )
 
 // fakeLibLister returns a fixed list. Used to drive the worker
 // without spinning up a real DB.
 type fakeLibLister struct {
-	libs []*db.Library
+	libs []*librarymodel.Library
 	err  error
 }
 
-func (f *fakeLibLister) List(_ context.Context) ([]*db.Library, error) {
+func (f *fakeLibLister) List(_ context.Context) ([]*librarymodel.Library, error) {
 	return f.libs, f.err
 }
 
@@ -76,7 +76,7 @@ func newCheapProber() *Prober {
 
 func TestProberWorker_OnlyLivetvLibrariesAreProbed(t *testing.T) {
 	t.Parallel()
-	libs := &fakeLibLister{libs: []*db.Library{
+	libs := &fakeLibLister{libs: []*librarymodel.Library{
 		{ID: "L1", ContentType: "movies"},
 		{ID: "L2", ContentType: "livetv"},
 		{ID: "L3", ContentType: "shows"},
@@ -113,7 +113,7 @@ func TestProberWorker_OnlyLivetvLibrariesAreProbed(t *testing.T) {
 
 func TestProberWorker_TickRunsAfterInterval(t *testing.T) {
 	t.Parallel()
-	libs := &fakeLibLister{libs: []*db.Library{{ID: "L1", ContentType: "livetv"}}}
+	libs := &fakeLibLister{libs: []*librarymodel.Library{{ID: "L1", ContentType: "livetv"}}}
 	chans := &fakeChanLister{byLib: map[string][]*iptvmodel.Channel{"L1": {}}}
 
 	w := NewProberWorker(newCheapProber(), libs, chans, quietLogger())
@@ -135,7 +135,7 @@ func TestProberWorker_TickRunsAfterInterval(t *testing.T) {
 
 func TestProberWorker_StopDrainsAndIsIdempotent(t *testing.T) {
 	t.Parallel()
-	libs := &fakeLibLister{libs: []*db.Library{{ID: "L1", ContentType: "livetv"}}}
+	libs := &fakeLibLister{libs: []*librarymodel.Library{{ID: "L1", ContentType: "livetv"}}}
 	chans := &fakeChanLister{byLib: map[string][]*iptvmodel.Channel{"L1": {}}}
 
 	w := NewProberWorker(newCheapProber(), libs, chans, quietLogger())
@@ -158,7 +158,7 @@ func TestProberWorker_StopHonoursDeadline(t *testing.T) {
 	// Block the channel-list call so a run is in-flight when we Stop.
 	hang := make(chan struct{})
 	defer close(hang)
-	libs := &fakeLibLister{libs: []*db.Library{{ID: "L1", ContentType: "livetv"}}}
+	libs := &fakeLibLister{libs: []*librarymodel.Library{{ID: "L1", ContentType: "livetv"}}}
 	chans := &blockingChanLister{hang: hang}
 
 	w := NewProberWorker(newCheapProber(), libs, chans, quietLogger())
@@ -235,7 +235,7 @@ type panicLibLister struct {
 	calls *atomic.Int32
 }
 
-func (p *panicLibLister) List(_ context.Context) ([]*db.Library, error) {
+func (p *panicLibLister) List(_ context.Context) ([]*librarymodel.Library, error) {
 	p.calls.Add(1)
 	panic("boom")
 }

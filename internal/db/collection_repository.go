@@ -7,33 +7,10 @@ import (
 	"fmt"
 	"strconv"
 
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db/sqlc"
 	"hubplay/internal/db/sqlc_pg"
 )
-
-// Collection is a movie saga (X-Men, MCU, Toy Story, …) surfaced as a
-// first-class entity. Backed by TMDb's `belongs_to_collection` record;
-// TMDbID is the upstream id we dedupe on so the same saga collapses
-// across every member movie.
-type Collection struct {
-	ID          string
-	TMDBID      int64
-	Name        string
-	Overview    string
-	PosterURL   string
-	BackdropURL string
-}
-
-// CollectionListEntry is the {collection + member count} pair the
-// /collections browse page renders. Sorted by member count desc on
-// the way out.
-type CollectionListEntry struct {
-	ID          string
-	Name        string
-	PosterURL   string
-	BackdropURL string
-	ItemCount   int64
-}
 
 // CollectionRepository — Pattern A for GetByID (sqlc-backed) plus four
 // raw-SQL holdouts (EnsureCollection / List / ListItemsForCollection /
@@ -141,7 +118,7 @@ func (r *CollectionRepository) EnsureCollection(ctx context.Context, tmdbID int6
 // GetByID fetches the canonical row for /collections/{id} rendering.
 // Returns (nil, nil) when no collection matches — handler converts
 // to 404 so a stale link reads as "not found" instead of crashing.
-func (r *CollectionRepository) GetByID(ctx context.Context, id string) (*Collection, error) {
+func (r *CollectionRepository) GetByID(ctx context.Context, id string) (*librarymodel.Collection, error) {
 	if r.useSQLite() {
 		row, err := r.sq.GetCollectionByID(ctx, id)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -169,15 +146,15 @@ func (r *CollectionRepository) GetByID(ctx context.Context, id string) (*Collect
 //
 // Raw SQL because the trailing ORDER BY ASC hits the sqlc v1.31.1
 // parser truncation we work around in three other places already.
-func (r *CollectionRepository) List(ctx context.Context) ([]*CollectionListEntry, error) {
+func (r *CollectionRepository) List(ctx context.Context) ([]*librarymodel.CollectionListEntry, error) {
 	rows, err := r.db.QueryContext(ctx, r.listSQL)
 	if err != nil {
 		return nil, fmt.Errorf("list collections: %w", err)
 	}
 	defer rows.Close() //nolint:errcheck
-	out := make([]*CollectionListEntry, 0)
+	out := make([]*librarymodel.CollectionListEntry, 0)
 	for rows.Next() {
-		var e CollectionListEntry
+		var e librarymodel.CollectionListEntry
 		if err := rows.Scan(&e.ID, &e.Name, &e.PosterURL, &e.BackdropURL, &e.ItemCount); err != nil {
 			return nil, fmt.Errorf("scan collection list row: %w", err)
 		}
@@ -186,31 +163,20 @@ func (r *CollectionRepository) List(ctx context.Context) ([]*CollectionListEntry
 	return out, rows.Err()
 }
 
-// CollectionItem mirrors StudioItem — same {id, type, title, year,
-// poster_url} grid shape so the same Tile component can render
-// either surface.
-type CollectionItem struct {
-	ID             string
-	Type           string
-	Title          string
-	Year           int
-	PrimaryImageID string
-}
-
 // ListItemsForCollection returns the catalogue's movies linked to
 // this collection id, sorted year-asc (sagas read in release order
 // the way you'd watch them — Star Wars 1977 first, then 1980, etc).
 // Raw SQL because the trailing ORDER BY hits the sqlc parser
 // truncation we work around in three other places already.
-func (r *CollectionRepository) ListItemsForCollection(ctx context.Context, collectionID string) ([]*CollectionItem, error) {
+func (r *CollectionRepository) ListItemsForCollection(ctx context.Context, collectionID string) ([]*librarymodel.CollectionItem, error) {
 	rows, err := r.db.QueryContext(ctx, r.listItemsSQL, collectionID)
 	if err != nil {
 		return nil, fmt.Errorf("list items for collection %s: %w", collectionID, err)
 	}
 	defer rows.Close() //nolint:errcheck
-	out := make([]*CollectionItem, 0)
+	out := make([]*librarymodel.CollectionItem, 0)
 	for rows.Next() {
-		var it CollectionItem
+		var it librarymodel.CollectionItem
 		if err := rows.Scan(&it.ID, &it.Type, &it.Title, &it.Year, &it.PrimaryImageID); err != nil {
 			return nil, fmt.Errorf("scan collection item: %w", err)
 		}
@@ -229,8 +195,8 @@ func (r *CollectionRepository) SetItemCollection(ctx context.Context, itemID, co
 	return nil
 }
 
-func collectionFromSqliteRow(row sqlc.Collection) Collection {
-	return Collection{
+func collectionFromSqliteRow(row sqlc.Collection) librarymodel.Collection {
+	return librarymodel.Collection{
 		ID:          row.ID,
 		TMDBID:      row.TmdbID,
 		Name:        row.Name,
@@ -240,8 +206,8 @@ func collectionFromSqliteRow(row sqlc.Collection) Collection {
 	}
 }
 
-func collectionFromPgRow(row sqlc_pg.Collection) Collection {
-	return Collection{
+func collectionFromPgRow(row sqlc_pg.Collection) librarymodel.Collection {
+	return librarymodel.Collection{
 		ID:          row.ID,
 		TMDBID:      int64(row.TmdbID),
 		Name:        row.Name,

@@ -15,6 +15,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/auth"
 	"hubplay/internal/db"
 	"hubplay/internal/domain"
@@ -41,14 +42,14 @@ type itemTestEnv struct {
 // fakeExternalIDsRepo is a minimal in-memory ExternalIDsRepository
 // fake. Tests stash a list of provider/external-id pairs per item.
 type fakeExternalIDsRepo struct {
-	byItem map[string][]*db.ExternalID
+	byItem map[string][]*librarymodel.ExternalID
 }
 
 func newFakeExternalIDsRepo() *fakeExternalIDsRepo {
-	return &fakeExternalIDsRepo{byItem: map[string][]*db.ExternalID{}}
+	return &fakeExternalIDsRepo{byItem: map[string][]*librarymodel.ExternalID{}}
 }
 
-func (r *fakeExternalIDsRepo) ListByItem(_ context.Context, itemID string) ([]*db.ExternalID, error) {
+func (r *fakeExternalIDsRepo) ListByItem(_ context.Context, itemID string) ([]*librarymodel.ExternalID, error) {
 	return r.byItem[itemID], nil
 }
 
@@ -67,14 +68,14 @@ func (r *fakeExternalIDsRepo) GetItemIDByExternalID(_ context.Context, provider,
 // per item id; absent entries return nil (handler renders no people
 // section then).
 type fakePeopleForItems struct {
-	byItem map[string][]*db.ItemPersonCredit
+	byItem map[string][]*librarymodel.ItemPersonCredit
 }
 
 func newFakePeopleForItems() *fakePeopleForItems {
-	return &fakePeopleForItems{byItem: map[string][]*db.ItemPersonCredit{}}
+	return &fakePeopleForItems{byItem: map[string][]*librarymodel.ItemPersonCredit{}}
 }
 
-func (r *fakePeopleForItems) ListByItem(_ context.Context, itemID string) ([]*db.ItemPersonCredit, error) {
+func (r *fakePeopleForItems) ListByItem(_ context.Context, itemID string) ([]*librarymodel.ItemPersonCredit, error) {
 	return r.byItem[itemID], nil
 }
 
@@ -82,14 +83,14 @@ func (r *fakePeopleForItems) ListByItem(_ context.Context, itemID string) ([]*db
 // the handler tests. The repo interface only needs ListByItem so the
 // fake can stay this small.
 type fakeChapterRepo struct {
-	byItem map[string][]*db.Chapter
+	byItem map[string][]*librarymodel.Chapter
 }
 
 func newFakeChapterRepo() *fakeChapterRepo {
-	return &fakeChapterRepo{byItem: map[string][]*db.Chapter{}}
+	return &fakeChapterRepo{byItem: map[string][]*librarymodel.Chapter{}}
 }
 
-func (r *fakeChapterRepo) ListByItem(_ context.Context, itemID string) ([]*db.Chapter, error) {
+func (r *fakeChapterRepo) ListByItem(_ context.Context, itemID string) ([]*librarymodel.Chapter, error) {
 	return r.byItem[itemID], nil
 }
 
@@ -99,7 +100,7 @@ func newItemTestEnv(t *testing.T) *itemTestEnv {
 		t:      t,
 		svc:    &libFakeService{},
 		images: newFakeImageRepo(),
-		meta:   &libFakeMetadataRepo{byID: map[string]*db.Metadata{}},
+		meta:   &libFakeMetadataRepo{byID: map[string]*librarymodel.Metadata{}},
 	}
 	env.userData = newProgressFakeUserData()
 	env.chapters = newFakeChapterRepo()
@@ -168,7 +169,7 @@ func TestItemHandler_Get_NotFound_404(t *testing.T) {
 
 func TestItemHandler_Get_ServiceError_500(t *testing.T) {
 	env := newItemTestEnv(t)
-	env.svc.getItemFn = func(_ context.Context, _ string) (*db.Item, error) {
+	env.svc.getItemFn = func(_ context.Context, _ string) (*librarymodel.Item, error) {
 		return nil, errors.New("db down")
 	}
 	rr := env.do(http.MethodGet, "/api/v1/items/x/")
@@ -179,8 +180,8 @@ func TestItemHandler_Get_ServiceError_500(t *testing.T) {
 
 func TestItemHandler_Get_HappyPath_Minimal(t *testing.T) {
 	env := newItemTestEnv(t)
-	env.svc.getItemFn = func(_ context.Context, id string) (*db.Item, error) {
-		return &db.Item{ID: id, LibraryID: "lib-1", Type: "movie", Title: "Foo", Year: 2020}, nil
+	env.svc.getItemFn = func(_ context.Context, id string) (*librarymodel.Item, error) {
+		return &librarymodel.Item{ID: id, LibraryID: "lib-1", Type: "movie", Title: "Foo", Year: 2020}, nil
 	}
 	rr := env.do(http.MethodGet, "/api/v1/items/it-1/")
 	if rr.Code != http.StatusOK {
@@ -194,11 +195,11 @@ func TestItemHandler_Get_HappyPath_Minimal(t *testing.T) {
 
 func TestItemHandler_Get_IncludesStreams(t *testing.T) {
 	env := newItemTestEnv(t)
-	env.svc.getItemFn = func(_ context.Context, id string) (*db.Item, error) {
-		return &db.Item{ID: id, Type: "movie", Title: "Foo"}, nil
+	env.svc.getItemFn = func(_ context.Context, id string) (*librarymodel.Item, error) {
+		return &librarymodel.Item{ID: id, Type: "movie", Title: "Foo"}, nil
 	}
-	env.svc.getStreamsFn = func(_ context.Context, _ string) ([]*db.MediaStream, error) {
-		return []*db.MediaStream{
+	env.svc.getStreamsFn = func(_ context.Context, _ string) ([]*librarymodel.MediaStream, error) {
+		return []*librarymodel.MediaStream{
 			{StreamIndex: 0, StreamType: "video", Codec: "h264", Width: 1920, Height: 1080},
 			{StreamIndex: 1, StreamType: "audio", Codec: "aac", Channels: 6, SampleRate: 48000},
 		}, nil
@@ -213,11 +214,11 @@ func TestItemHandler_Get_IncludesStreams(t *testing.T) {
 
 func TestItemHandler_Get_ExtractsPrimaryPosterFromImages(t *testing.T) {
 	env := newItemTestEnv(t)
-	env.svc.getItemFn = func(_ context.Context, id string) (*db.Item, error) {
-		return &db.Item{ID: id, Title: "Foo"}, nil
+	env.svc.getItemFn = func(_ context.Context, id string) (*librarymodel.Item, error) {
+		return &librarymodel.Item{ID: id, Title: "Foo"}, nil
 	}
-	env.svc.getItemImagesFn = func(_ context.Context, _ string) ([]*db.Image, error) {
-		return []*db.Image{
+	env.svc.getItemImagesFn = func(_ context.Context, _ string) ([]*librarymodel.Image, error) {
+		return []*librarymodel.Image{
 			{ID: "img-p", Type: "primary", Path: "/api/v1/images/file/img-p", IsPrimary: true},
 			{ID: "img-b", Type: "backdrop", Path: "/api/v1/images/file/img-b", IsPrimary: true},
 			{ID: "img-l", Type: "logo", Path: "/api/v1/images/file/img-l", IsPrimary: true},
@@ -239,10 +240,10 @@ func TestItemHandler_Get_ExtractsPrimaryPosterFromImages(t *testing.T) {
 
 func TestItemHandler_Get_AttachesMetadata(t *testing.T) {
 	env := newItemTestEnv(t)
-	env.svc.getItemFn = func(_ context.Context, id string) (*db.Item, error) {
-		return &db.Item{ID: id, Title: "Foo"}, nil
+	env.svc.getItemFn = func(_ context.Context, id string) (*librarymodel.Item, error) {
+		return &librarymodel.Item{ID: id, Title: "Foo"}, nil
 	}
-	env.meta.byID["it-1"] = &db.Metadata{
+	env.meta.byID["it-1"] = &librarymodel.Metadata{
 		ItemID: "it-1", Overview: "The plot", Tagline: "Catchy!",
 		Studio: "Acme", GenresJSON: `["drama","thriller"]`,
 	}
@@ -259,8 +260,8 @@ func TestItemHandler_Get_AttachesMetadata(t *testing.T) {
 
 func TestItemHandler_Get_IncludesUserDataWhenAuthenticated(t *testing.T) {
 	env := newItemTestEnv(t)
-	env.svc.getItemFn = func(_ context.Context, id string) (*db.Item, error) {
-		return &db.Item{ID: id, Type: "movie", Title: "Foo", DurationTicks: 1_000}, nil
+	env.svc.getItemFn = func(_ context.Context, id string) (*librarymodel.Item, error) {
+		return &librarymodel.Item{ID: id, Type: "movie", Title: "Foo", DurationTicks: 1_000}, nil
 	}
 	env.userData.data["u-2:it-1"] = &db.UserData{
 		UserID: "u-2", ItemID: "it-1", PositionTicks: 500, IsFavorite: true,
@@ -286,8 +287,8 @@ func TestItemHandler_Get_IncludesUserDataWhenAuthenticated(t *testing.T) {
 
 func TestItemHandler_Get_OmitsUserDataWhenAnonymous(t *testing.T) {
 	env := newItemTestEnv(t)
-	env.svc.getItemFn = func(_ context.Context, id string) (*db.Item, error) {
-		return &db.Item{ID: id, Title: "Foo"}, nil
+	env.svc.getItemFn = func(_ context.Context, id string) (*librarymodel.Item, error) {
+		return &librarymodel.Item{ID: id, Title: "Foo"}, nil
 	}
 	env.userData.data["u-2:it-1"] = &db.UserData{UserID: "u-2", ItemID: "it-1", IsFavorite: true}
 
@@ -300,10 +301,10 @@ func TestItemHandler_Get_OmitsUserDataWhenAnonymous(t *testing.T) {
 
 func TestItemHandler_Get_IncludesPeopleWithPhotos(t *testing.T) {
 	env := newItemTestEnv(t)
-	env.svc.getItemFn = func(_ context.Context, id string) (*db.Item, error) {
-		return &db.Item{ID: id, Type: "movie", Title: "Foo"}, nil
+	env.svc.getItemFn = func(_ context.Context, id string) (*librarymodel.Item, error) {
+		return &librarymodel.Item{ID: id, Type: "movie", Title: "Foo"}, nil
 	}
-	env.people.byItem["it-1"] = []*db.ItemPersonCredit{
+	env.people.byItem["it-1"] = []*librarymodel.ItemPersonCredit{
 		{PersonID: "p-1", Name: "Alice Actor", Role: "actor",
 			CharacterName: "Hero", ThumbPath: "/img/.people/p-1/profile.jpg",
 			SortOrder: 0},
@@ -341,10 +342,10 @@ func TestItemHandler_Get_IncludesPeopleWithPhotos(t *testing.T) {
 
 func TestItemHandler_Get_IncludesExternalIDs(t *testing.T) {
 	env := newItemTestEnv(t)
-	env.svc.getItemFn = func(_ context.Context, id string) (*db.Item, error) {
-		return &db.Item{ID: id, Type: "movie", Title: "Foo"}, nil
+	env.svc.getItemFn = func(_ context.Context, id string) (*librarymodel.Item, error) {
+		return &librarymodel.Item{ID: id, Type: "movie", Title: "Foo"}, nil
 	}
-	env.extIDs.byItem["it-1"] = []*db.ExternalID{
+	env.extIDs.byItem["it-1"] = []*librarymodel.ExternalID{
 		{ItemID: "it-1", Provider: "imdb", ExternalID: "tt1234567"},
 		{ItemID: "it-1", Provider: "tmdb", ExternalID: "550"},
 	}
@@ -365,8 +366,8 @@ func TestItemHandler_Get_IncludesExternalIDs(t *testing.T) {
 
 func TestItemHandler_Get_OmitsExternalIDsWhenAbsent(t *testing.T) {
 	env := newItemTestEnv(t)
-	env.svc.getItemFn = func(_ context.Context, id string) (*db.Item, error) {
-		return &db.Item{ID: id, Type: "movie", Title: "Foo"}, nil
+	env.svc.getItemFn = func(_ context.Context, id string) (*librarymodel.Item, error) {
+		return &librarymodel.Item{ID: id, Type: "movie", Title: "Foo"}, nil
 	}
 
 	rr := env.do(http.MethodGet, "/api/v1/items/it-1/")
@@ -381,10 +382,10 @@ func TestItemHandler_Get_OmitsExternalIDsWhenAbsent(t *testing.T) {
 
 func TestItemHandler_Get_IncludesChapters(t *testing.T) {
 	env := newItemTestEnv(t)
-	env.svc.getItemFn = func(_ context.Context, id string) (*db.Item, error) {
-		return &db.Item{ID: id, Type: "movie", Title: "Foo", DurationTicks: 60_000_000_000}, nil
+	env.svc.getItemFn = func(_ context.Context, id string) (*librarymodel.Item, error) {
+		return &librarymodel.Item{ID: id, Type: "movie", Title: "Foo", DurationTicks: 60_000_000_000}, nil
 	}
-	env.chapters.byItem["it-1"] = []*db.Chapter{
+	env.chapters.byItem["it-1"] = []*librarymodel.Chapter{
 		{ItemID: "it-1", StartTicks: 0, EndTicks: 30_000_000_000, Title: "Cold Open"},
 		{ItemID: "it-1", StartTicks: 30_000_000_000, EndTicks: 60_000_000_000, Title: ""},
 	}
@@ -415,8 +416,8 @@ func TestItemHandler_Get_IncludesChapters(t *testing.T) {
 
 func TestItemHandler_Get_OmitsChaptersWhenAbsent(t *testing.T) {
 	env := newItemTestEnv(t)
-	env.svc.getItemFn = func(_ context.Context, id string) (*db.Item, error) {
-		return &db.Item{ID: id, Title: "Foo"}, nil
+	env.svc.getItemFn = func(_ context.Context, id string) (*librarymodel.Item, error) {
+		return &librarymodel.Item{ID: id, Title: "Foo"}, nil
 	}
 	// No chapters seeded; handler should omit the key entirely so
 	// the JSON stays compact rather than `"chapters": []`.
@@ -515,8 +516,8 @@ func TestItemHandler_TrickplayManifest_PendingDoesNotBlock(t *testing.T) {
 	// Wire a valid item so the goroutine spawn path runs (it'll fail
 	// behind the scenes because /dev/null isn't a real video, but the
 	// HTTP request must NOT wait for that failure).
-	env.svc.getItemFn = func(_ context.Context, id string) (*db.Item, error) {
-		return &db.Item{ID: id, Type: "movie", Title: "Foo", Path: "/dev/null", DurationTicks: 60 * 10_000_000}, nil
+	env.svc.getItemFn = func(_ context.Context, id string) (*librarymodel.Item, error) {
+		return &librarymodel.Item{ID: id, Type: "movie", Title: "Foo", Path: "/dev/null", DurationTicks: 60 * 10_000_000}, nil
 	}
 
 	start := time.Now()
@@ -546,8 +547,8 @@ func TestItemHandler_TrickplayManifest_StaleCacheReturnsPending(t *testing.T) {
 	env, dir := trickplayEnv(t)
 	itemDir := filepath.Join(dir, "it-stale")
 	trickplayWriteCache(t, itemDir, 0) // legacy v1 stamp
-	env.svc.getItemFn = func(_ context.Context, id string) (*db.Item, error) {
-		return &db.Item{ID: id, Type: "movie", Title: "Foo", Path: "/dev/null"}, nil
+	env.svc.getItemFn = func(_ context.Context, id string) (*librarymodel.Item, error) {
+		return &librarymodel.Item{ID: id, Type: "movie", Title: "Foo", Path: "/dev/null"}, nil
 	}
 
 	rr := env.do(http.MethodGet, "/api/v1/items/it-stale/trickplay.json")
@@ -573,8 +574,8 @@ func TestItemHandler_Children_Empty(t *testing.T) {
 
 func TestItemHandler_Children_HappyPath(t *testing.T) {
 	env := newItemTestEnv(t)
-	env.svc.getChildrenFn = func(_ context.Context, _ string) ([]*db.Item, error) {
-		return []*db.Item{
+	env.svc.getChildrenFn = func(_ context.Context, _ string) ([]*librarymodel.Item, error) {
+		return []*librarymodel.Item{
 			{ID: "c-1", Type: "episode", Title: "E1"},
 			{ID: "c-2", Type: "episode", Title: "E2"},
 		}, nil
@@ -588,7 +589,7 @@ func TestItemHandler_Children_HappyPath(t *testing.T) {
 
 func TestItemHandler_Children_ServiceError(t *testing.T) {
 	env := newItemTestEnv(t)
-	env.svc.getChildrenFn = func(_ context.Context, _ string) ([]*db.Item, error) {
+	env.svc.getChildrenFn = func(_ context.Context, _ string) ([]*librarymodel.Item, error) {
 		return nil, domain.NewNotFound("item")
 	}
 	rr := env.do(http.MethodGet, "/api/v1/items/missing/children")
@@ -609,10 +610,10 @@ func TestItemHandler_Search_MissingQuery_400(t *testing.T) {
 
 func TestItemHandler_Search_PassesFilterAndReturnsTotal(t *testing.T) {
 	env := newItemTestEnv(t)
-	var gotFilter db.ItemFilter
-	env.svc.listItemsFn = func(_ context.Context, f db.ItemFilter) ([]*db.Item, int, error) {
+	var gotFilter librarymodel.ItemFilter
+	env.svc.listItemsFn = func(_ context.Context, f librarymodel.ItemFilter) ([]*librarymodel.Item, int, error) {
 		gotFilter = f
-		return []*db.Item{{ID: "a", Title: "X"}, {ID: "b", Title: "Y"}}, 42, nil
+		return []*librarymodel.Item{{ID: "a", Title: "X"}, {ID: "b", Title: "Y"}}, 42, nil
 	}
 	rr := env.do(http.MethodGet, "/api/v1/items/search?q=foo&limit=5&library_id=lib-1")
 	if rr.Code != http.StatusOK {
@@ -634,7 +635,7 @@ func TestItemHandler_Search_PassesFilterAndReturnsTotal(t *testing.T) {
 
 func TestItemHandler_Search_ServiceError(t *testing.T) {
 	env := newItemTestEnv(t)
-	env.svc.listItemsFn = func(_ context.Context, _ db.ItemFilter) ([]*db.Item, int, error) {
+	env.svc.listItemsFn = func(_ context.Context, _ librarymodel.ItemFilter) ([]*librarymodel.Item, int, error) {
 		return nil, 0, errors.New("fts broken")
 	}
 	rr := env.do(http.MethodGet, "/api/v1/items/search?q=x")

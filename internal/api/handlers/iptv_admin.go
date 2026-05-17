@@ -12,7 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"hubplay/internal/db"
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/iptv"
 )
 
@@ -181,7 +181,7 @@ func (h *IPTVHandler) ImportPublicIPTV(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now()
-	lib := &db.Library{
+	lib := &librarymodel.Library{
 		ID:          generateLibraryID(),
 		Name:        libraryName,
 		ContentType: "livetv",

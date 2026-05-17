@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db"
 	"hubplay/internal/domain"
 	"hubplay/internal/testutil"
@@ -14,7 +15,7 @@ import (
 func seedLibraryForItems(t *testing.T, repo *db.LibraryRepository) {
 	t.Helper()
 	now := time.Now()
-	if err := repo.Create(context.Background(), &db.Library{
+	if err := repo.Create(context.Background(), &librarymodel.Library{
 		ID: "lib-1", Name: "Movies", ContentType: "movies", ScanMode: "auto",
 		ScanInterval: "6h", CreatedAt: now, UpdatedAt: now, Paths: []string{"/media"},
 	}); err != nil {
@@ -22,9 +23,9 @@ func seedLibraryForItems(t *testing.T, repo *db.LibraryRepository) {
 	}
 }
 
-func newTestItem(id, libraryID, title string) *db.Item {
+func newTestItem(id, libraryID, title string) *librarymodel.Item {
 	now := time.Now()
-	return &db.Item{
+	return &librarymodel.Item{
 		ID:          id,
 		LibraryID:   libraryID,
 		Type:        "movie",
@@ -113,7 +114,7 @@ func TestItemRepository_List(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	items, total, err := repo.List(context.Background(), db.ItemFilter{LibraryID: "lib-1", Limit: 2})
+	items, total, err := repo.List(context.Background(), librarymodel.ItemFilter{LibraryID: "lib-1", Limit: 2})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -170,7 +171,7 @@ func TestItemRepository_List_GenreYearRatingFilters(t *testing.T) {
 	}
 
 	t.Run("genre filters case-insensitively", func(t *testing.T) {
-		items, total, err := repo.List(context.Background(), db.ItemFilter{Genre: "drama"})
+		items, total, err := repo.List(context.Background(), librarymodel.ItemFilter{Genre: "drama"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -180,7 +181,7 @@ func TestItemRepository_List_GenreYearRatingFilters(t *testing.T) {
 	})
 
 	t.Run("year_from excludes older items", func(t *testing.T) {
-		_, total, err := repo.List(context.Background(), db.ItemFilter{YearFrom: 2010})
+		_, total, err := repo.List(context.Background(), librarymodel.ItemFilter{YearFrom: 2010})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -190,7 +191,7 @@ func TestItemRepository_List_GenreYearRatingFilters(t *testing.T) {
 	})
 
 	t.Run("year_to excludes newer items", func(t *testing.T) {
-		_, total, err := repo.List(context.Background(), db.ItemFilter{YearTo: 2010})
+		_, total, err := repo.List(context.Background(), librarymodel.ItemFilter{YearTo: 2010})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -200,7 +201,7 @@ func TestItemRepository_List_GenreYearRatingFilters(t *testing.T) {
 	})
 
 	t.Run("min_rating excludes lower-rated items", func(t *testing.T) {
-		_, total, err := repo.List(context.Background(), db.ItemFilter{MinRating: 7.5})
+		_, total, err := repo.List(context.Background(), librarymodel.ItemFilter{MinRating: 7.5})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -210,7 +211,7 @@ func TestItemRepository_List_GenreYearRatingFilters(t *testing.T) {
 	})
 
 	t.Run("filters compose with AND semantics", func(t *testing.T) {
-		_, total, err := repo.List(context.Background(), db.ItemFilter{
+		_, total, err := repo.List(context.Background(), librarymodel.ItemFilter{
 			Genre:     "Drama",
 			MinRating: 8.0,
 		})
@@ -228,7 +229,7 @@ func TestItemRepository_List_GenreYearRatingFilters(t *testing.T) {
 		if err := values.SetGenres(context.Background(), "a", []string{"Action"}); err != nil {
 			t.Fatal(err)
 		}
-		_, dramaTotal, err := repo.List(context.Background(), db.ItemFilter{Genre: "Drama"})
+		_, dramaTotal, err := repo.List(context.Background(), librarymodel.ItemFilter{Genre: "Drama"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -254,7 +255,7 @@ func TestMigration031_BackfillsGenresFromMetadata(t *testing.T) {
 	if err := itemRepo.Create(context.Background(), newTestItem("legacy", "lib-1", "Legacy")); err != nil {
 		t.Fatal(err)
 	}
-	if err := metaRepo.Upsert(context.Background(), &db.Metadata{
+	if err := metaRepo.Upsert(context.Background(), &librarymodel.Metadata{
 		ItemID:     "legacy",
 		GenresJSON: `["Action","Drama"]`,
 	}); err != nil {
@@ -308,7 +309,7 @@ func TestMigration031_BackfillsGenresFromMetadata(t *testing.T) {
 	// The repository's filter query should now find the legacy item by
 	// genre â€” proving the backfill closes the gap.
 	itemRepoForList := db.NewItemRepository(testutil.Driver(), database)
-	_, total, err := itemRepoForList.List(context.Background(), db.ItemFilter{Genre: "Action"})
+	_, total, err := itemRepoForList.List(context.Background(), librarymodel.ItemFilter{Genre: "Action"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -409,7 +410,7 @@ func TestItemRepository_List_ByType(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	items, total, err := repo.List(context.Background(), db.ItemFilter{Type: "movie"})
+	items, total, err := repo.List(context.Background(), librarymodel.ItemFilter{Type: "movie"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -428,7 +429,7 @@ func TestItemRepository_Hierarchy(t *testing.T) {
 	seedLibraryForItems(t, libRepo)
 
 	// Series â†’ Season â†’ Episodes
-	series := &db.Item{
+	series := &librarymodel.Item{
 		ID: "series-1", LibraryID: "lib-1", Type: "series", Title: "Breaking Bad",
 		SortTitle: "breaking bad", AddedAt: time.Now(), UpdatedAt: time.Now(), IsAvailable: true,
 	}
@@ -436,7 +437,7 @@ func TestItemRepository_Hierarchy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	season := &db.Item{
+	season := &librarymodel.Item{
 		ID: "season-1", LibraryID: "lib-1", ParentID: "series-1", Type: "season",
 		Title: "Season 1", SortTitle: "season 1",
 		AddedAt: time.Now(), UpdatedAt: time.Now(), IsAvailable: true,
@@ -447,7 +448,7 @@ func TestItemRepository_Hierarchy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ep1 := &db.Item{
+	ep1 := &librarymodel.Item{
 		ID: "ep-1", LibraryID: "lib-1", ParentID: "season-1", Type: "episode",
 		Title: "Pilot", SortTitle: "pilot", Path: "/media/bb/s01e01.mkv",
 		AddedAt: time.Now(), UpdatedAt: time.Now(), IsAvailable: true,
@@ -458,7 +459,7 @@ func TestItemRepository_Hierarchy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ep2 := &db.Item{
+	ep2 := &librarymodel.Item{
 		ID: "ep-2", LibraryID: "lib-1", ParentID: "season-1", Type: "episode",
 		Title: "Cat's in the Bag", SortTitle: "cat's in the bag", Path: "/media/bb/s01e02.mkv",
 		AddedAt: time.Now(), UpdatedAt: time.Now(), IsAvailable: true,
@@ -568,7 +569,7 @@ func TestItemRepository_List_FTSSearch(t *testing.T) {
 	}
 
 	// Search for "matrix" should find 2 results
-	items, total, err := repo.List(context.Background(), db.ItemFilter{Query: "matrix"})
+	items, total, err := repo.List(context.Background(), librarymodel.ItemFilter{Query: "matrix"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -590,7 +591,7 @@ func TestItemRepository_List_FTSSearch_NoResults(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	items, total, err := repo.List(context.Background(), db.ItemFilter{Query: "nonexistent"})
+	items, total, err := repo.List(context.Background(), librarymodel.ItemFilter{Query: "nonexistent"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -616,7 +617,7 @@ func TestItemRepository_List_FTSSearch_PrefixMatch(t *testing.T) {
 	}
 
 	// Prefix "break" should match both
-	items, total, err := repo.List(context.Background(), db.ItemFilter{Query: "break"})
+	items, total, err := repo.List(context.Background(), librarymodel.ItemFilter{Query: "break"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -640,7 +641,7 @@ func TestItemRepository_List_FTSSearch_AfterUpdate(t *testing.T) {
 	}
 
 	// Should find with old title
-	items, _, _ := repo.List(context.Background(), db.ItemFilter{Query: "Old"})
+	items, _, _ := repo.List(context.Background(), librarymodel.ItemFilter{Query: "Old"})
 	if len(items) != 1 {
 		t.Fatalf("expected 1 result for 'Old', got %d", len(items))
 	}
@@ -654,13 +655,13 @@ func TestItemRepository_List_FTSSearch_AfterUpdate(t *testing.T) {
 	}
 
 	// Old title should not match
-	items, _, _ = repo.List(context.Background(), db.ItemFilter{Query: "Old"})
+	items, _, _ = repo.List(context.Background(), librarymodel.ItemFilter{Query: "Old"})
 	if len(items) != 0 {
 		t.Errorf("expected 0 results for 'Old' after update, got %d", len(items))
 	}
 
 	// New title should match
-	items, _, _ = repo.List(context.Background(), db.ItemFilter{Query: "New"})
+	items, _, _ = repo.List(context.Background(), librarymodel.ItemFilter{Query: "New"})
 	if len(items) != 1 {
 		t.Errorf("expected 1 result for 'New' after update, got %d", len(items))
 	}
@@ -678,7 +679,7 @@ func TestItemRepository_List_FTSSearch_AfterDelete(t *testing.T) {
 	}
 
 	// Should find before delete
-	items, _, _ := repo.List(context.Background(), db.ItemFilter{Query: "Delete"})
+	items, _, _ := repo.List(context.Background(), librarymodel.ItemFilter{Query: "Delete"})
 	if len(items) != 1 {
 		t.Fatalf("expected 1 result before delete, got %d", len(items))
 	}
@@ -688,7 +689,7 @@ func TestItemRepository_List_FTSSearch_AfterDelete(t *testing.T) {
 	}
 
 	// Should not find after delete
-	items, _, _ = repo.List(context.Background(), db.ItemFilter{Query: "Delete"})
+	items, _, _ = repo.List(context.Background(), librarymodel.ItemFilter{Query: "Delete"})
 	if len(items) != 0 {
 		t.Errorf("expected 0 results after delete, got %d", len(items))
 	}
@@ -731,7 +732,7 @@ func TestItemRepository_LatestSeriesByActivity(t *testing.T) {
 	repo := db.NewItemRepository(testutil.Driver(), database)
 
 	now := time.Now().UTC()
-	if err := libRepo.Create(context.Background(), &db.Library{
+	if err := libRepo.Create(context.Background(), &librarymodel.Library{
 		ID: "lib-shows", Name: "Shows", ContentType: "shows",
 		CreatedAt: now, UpdatedAt: now, Paths: []string{"/tv"},
 	}); err != nil {
@@ -741,7 +742,7 @@ func TestItemRepository_LatestSeriesByActivity(t *testing.T) {
 	// Helper: build series / season / episode items. All under the
 	// shows library so the query's library_id filter matches.
 	mustItem := func(id, parentID, kind, title string, addedAt time.Time) {
-		it := &db.Item{
+		it := &librarymodel.Item{
 			ID: id, LibraryID: "lib-shows", ParentID: parentID, Type: kind,
 			Title: title, SortTitle: title,
 			Path:        "/tv/" + id,

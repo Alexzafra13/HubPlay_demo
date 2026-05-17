@@ -18,7 +18,7 @@ en este doc (no se edita el audit original).
 | 0 | 🔄 en curso | Pre-trabajo: ADRs + conventions.md | — | — |
 | 1 | ✅ cerrada | Fixes urgentes seguridad + correctness | FFF, F16-1, RRR-mig, RR, Y, DD, GGGG, AAA, EE, HHH, F16-6, F16-7 | 12 olores cerrados, suite verde |
 | 2 | ✅ cerrada | Sub-paquetes de `db/` | B, J, K, T, L | Sesión M.2 (B+J) + sesión M.3 (L) + sesión M.4 (K+T) |
-| 3 | 🔄 en curso | Migración Opción B incremental | M (iptv ✅ → auth ✅ → library) | iptv + auth cerrados (sesiones M.6 + M.7); library pendiente |
+| 3 | ✅ cerrada | Migración Opción B incremental | M (iptv ✅ + auth ✅ + library ✅) | Cerrada en sesiones M.6 (auth) + M.7 (iptv) + M.8 (library) |
 | 4 | ⏳ pendiente | Split de god-handlers/services | P, Z, QQ | — |
 | 5 | ⏳ pendiente | Refactor estructural `iptv/` | CC | — |
 | 6 | ⏳ pendiente | Composition root | G, H, V, Q, LL, JJ | — |
@@ -610,11 +610,124 @@ tenía `import "hubplay/internal/db"` single-line (no block) — el
 Lección para library: contemplar ambos estilos de import desde el
 principio.
 
-### Pendiente — sub-bloque siguiente
+### Sub-bloque library ✅ (sesión M.8)
 
-- **library** (12 tipos: Item, MediaStream, Image, Chapter,
-  EpisodeSegment, ItemValue, Studio, Collection, ExternalID, Metadata,
-  Person, ItemPersonCredit). Otro bloque grande. Mismo patrón
-  `internal/library/model/`.
-- **Cleanup** de `internal/db/` post-migración: factory + adapter
-  sqlc + dialect helpers + 4-5 repos restantes.
+Movidos **21 tipos del dominio library + 6 constantes** (el audit
+mencionaba 12, pero al inventariar realmente el repo se cuentan 21
+incluyendo variantes de listing y enums) de los 12 repos
+`internal/db/{library,item,media_stream,image,chapter,episode_segment,
+studio,collection,external_id,metadata,people,item_value}_repository.go`
+al nuevo paquete `internal/library/model/`:
+
+Tipos:
+- `Library`
+- `Item`, `ItemFilter`, `LatestSeriesActivity`
+- `MediaStream`
+- `Image`, `PrimaryImageRef`
+- `Chapter`
+- `EpisodeSegmentKind` (+ 3 constants), `EpisodeSegmentSource`
+  (+ 3 constants), `EpisodeSegment`
+- `Studio`, `StudioListEntry`, `StudioItem`
+- `Collection`, `CollectionListEntry`, `CollectionItem`
+- `ExternalID`
+- `Metadata`
+- `Person`, `ItemPersonCredit`, `FilmographyEntry`
+- `GenreCount`
+
+Mismo patrón validado en auth y iptv. El grafo queda:
+
+```
+library/model   → ∅ (puro)
+db              → library/model (los repos retornan *librarymodel.X)
+library         → db + library/model
+stream          → library/model (decisión direct-play / transcode)
+composition     → todos los anteriores (main.go)
+```
+
+**Cambios** (~80 ficheros tocados, blast radius mayor):
+
+- `internal/library/model/types.go` (~370 LOC): 21 structs + 6
+  constants + docs explicativos.
+- 12 ficheros en `internal/db/`: borrar `type X struct`/`type X string`
+  + sus `const` blocks; añadir `librarymodel` import; firmas + row
+  converters adaptados.
+- `internal/library/` (~7 productivos + ~3 tests): sweep.
+- `internal/scanner/` (~3 ficheros): sweep.
+- `internal/api/handlers/` (~25 productivos + tests): sweep.
+- `internal/stream/decision.go` + `capabilities_test.go` + `decision_test.go`:
+  sweep (no estaba en el root list inicial; segundo pass los pilló).
+- `internal/iptv/prober_worker.go`, `internal/iptv/{channel_overrides,
+  epg_sources,scheduler,service_lock,service_tls}_test.go`: sweep.
+- `internal/provider/provider.go`: sweep.
+- `internal/federation/storage/repository_test.go`: sweep (los tests
+  de fed seedean items + libraries).
+- `cmd/pg-smoke/main.go`: sweep.
+- ~15 ficheros `internal/db/*_test.go`: sweep en seeds.
+
+**Bugs descubiertos durante el sweep** (lessons aprendidas):
+
+1. **`internal/db/sqlc/` + `internal/db/sqlc_pg/` generated code se
+   rompió**. Esos paquetes tienen tipos llamados igual (`sqlc.Item`,
+   `sqlc.Image`, etc.) y el sweep los reescribió a `librarymodel.Item`
+   en las definiciones de tipo y en sus campos. Solución: `git restore`
+   de ambos directorios (son generated). Lección: incluir
+   `internal/db/sqlc/` y `internal/db/sqlc_pg/` en una **deny-list**
+   del script de sweep desde el principio.
+
+2. **Field-name reverts incompletos**. El revert original sólo
+   pillaba `prefix.NAME:` (con `:` típico de struct literal con keys).
+   No pillaba:
+   - `prefix.NAME *Type` (declaración de campo en struct sin valor).
+   - `prefix.NAME: value` inline en un struct literal multi-prop
+     (mi regex requería newline + indent).
+   Solución: dos passes:
+   - Pass A: `^\tprefix\.NAME\s+[\*\[\w]` → revert (struct field decl).
+   - Pass B: `prefix\.NAME:` global → revert (struct literal key).
+
+3. **Imports unused tras strip**. Eliminar tipos de un fichero deja
+   `"time"` o `"hubplay/internal/db"` como imports sin uso. El
+   compilador los flagea y hay que stripearlos manualmente. Hice
+   ~25 strips manuales a lo largo del pass (no había goimports en
+   el container Docker).
+
+4. **`internal/stream/`** olvidado en el root list — los handlers
+   de transcoding usan `db.Item`, `db.MediaStream` para tomar
+   decisiones direct-play / direct-stream / transcode. Segundo pass
+   lo cubrió.
+
+**Verificación**:
+- `go build ./...` exitcode 0 en `golang:1.25` container.
+- `go test ./internal/... -count=1 -timeout=300s` — **24 paquetes
+  verdes** contra SQLite (incl. nuevo `library/model`).
+- `HUBPLAY_TEST_DRIVER=postgres go test ./internal/library/...
+  ./internal/scanner/... ./internal/stream/... -count=1 -timeout=600s`
+  — verde contra Postgres (library 55s, scanner 38s, stream 0.1s).
+- Cero cambios de API HTTP pública.
+
+### Cierre de Iteración 3
+
+Tres sub-bloques cerrados:
+- ✅ auth (4 tipos, sesión M.6, commit `ac60ba0`)
+- ✅ iptv (9 tipos, sesión M.7, commit `4c686d0`)
+- ✅ library (21 tipos + 6 constants, sesión M.8)
+
+**Olor A cerrado** ("tipos del dominio leak desde la capa de
+persistencia"): los 34 tipos del dominio (4 + 9 + 21) que el audit
+identificaba en `internal/db/` ahora viven en sus features:
+`internal/auth/model/`, `internal/iptv/model/`, `internal/library/model/`.
+
+`internal/db/` queda como adapter sqlc puro: factory + dialect
+helpers + row converters + repos que devuelven tipos del feature
+correspondiente. Cero changes en wire HTTP, schema SQL ni
+migraciones a lo largo de las 3 sub-iteraciones.
+
+**Cleanup pendiente** (no implementado en esta sesión): el audit
+también pedía que `internal/db/` quedase reducido a "factory +
+adapter sqlc + dialect helpers + 4-5 repos restantes". Lo que
+queda hoy son los repos cross-feature (`HomeRepository`,
+`ActivityRepository`, `Maintenance`, `ChannelWatchHistoryRepository`,
+`UserDataRepository`, `UserPreferenceRepository`, `SettingsRepository`,
+`ProviderRepository`, `IPTVScheduleRepository`) + los repos del
+feature que no migraron sus repos al sub-paquete `storage/`
+(todos los que cerraron el olor A con sub-paquete model/). Movimiento
+de los repos a sus feature dirs es Iter. 6/7 del plan original.

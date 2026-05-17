@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/config"
 	"hubplay/internal/db"
 	"hubplay/internal/domain"
@@ -160,7 +161,7 @@ func TestSetupHandler_Status_NoUsers_AccountStep(t *testing.T) {
 func TestSetupHandler_Status_UserButNoLibs_LibrariesStep(t *testing.T) {
 	env := newSetupTestEnv(t)
 	env.users.countFn = func(_ context.Context) (int, error) { return 1, nil }
-	env.libs.listFn = func(_ context.Context) ([]*db.Library, error) { return nil, nil }
+	env.libs.listFn = func(_ context.Context) ([]*librarymodel.Library, error) { return nil, nil }
 	rr := env.do(http.MethodGet, "/api/v1/setup/status", "")
 	d := setupDecodeData(t, rr)
 	if d["current_step"] != "libraries" {
@@ -171,8 +172,8 @@ func TestSetupHandler_Status_UserButNoLibs_LibrariesStep(t *testing.T) {
 func TestSetupHandler_Status_LibsExist_SettingsStep(t *testing.T) {
 	env := newSetupTestEnv(t)
 	env.users.countFn = func(_ context.Context) (int, error) { return 1, nil }
-	env.libs.listFn = func(_ context.Context) ([]*db.Library, error) {
-		return []*db.Library{{ID: "lib-1"}}, nil
+	env.libs.listFn = func(_ context.Context) ([]*librarymodel.Library, error) {
+		return []*librarymodel.Library{{ID: "lib-1"}}, nil
 	}
 	rr := env.do(http.MethodGet, "/api/v1/setup/status", "")
 	d := setupDecodeData(t, rr)
@@ -239,9 +240,9 @@ func TestSetupHandler_CreateLibraries_InvalidJSON_400(t *testing.T) {
 func TestSetupHandler_CreateLibraries_Happy_CreatesEach(t *testing.T) {
 	env := newSetupTestEnv(t)
 	var created []library.CreateRequest
-	env.libs.createFn = func(_ context.Context, req library.CreateRequest) (*db.Library, error) {
+	env.libs.createFn = func(_ context.Context, req library.CreateRequest) (*librarymodel.Library, error) {
 		created = append(created, req)
-		return &db.Library{ID: "new-" + req.Name}, nil
+		return &librarymodel.Library{ID: "new-" + req.Name}, nil
 	}
 	body := `{"libraries":[
 		{"name":"Movies","content_type":"movies","paths":["/m"]},
@@ -259,12 +260,12 @@ func TestSetupHandler_CreateLibraries_Happy_CreatesEach(t *testing.T) {
 func TestSetupHandler_CreateLibraries_ServiceError_StopsAtFailure(t *testing.T) {
 	env := newSetupTestEnv(t)
 	calls := 0
-	env.libs.createFn = func(_ context.Context, _ library.CreateRequest) (*db.Library, error) {
+	env.libs.createFn = func(_ context.Context, _ library.CreateRequest) (*librarymodel.Library, error) {
 		calls++
 		if calls == 2 {
 			return nil, domain.NewValidation(nil)
 		}
-		return &db.Library{ID: "ok"}, nil
+		return &librarymodel.Library{ID: "ok"}, nil
 	}
 	body := `{"libraries":[
 		{"name":"A"},{"name":"B"},{"name":"C"}

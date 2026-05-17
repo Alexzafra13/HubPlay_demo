@@ -8,34 +8,11 @@ import (
 
 	"github.com/google/uuid"
 
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db/sqlc"
 	"hubplay/internal/db/sqlc_pg"
 	"hubplay/internal/domain"
 )
-
-// Person is the dominio shape for a cast/crew row. Type holds the
-// TMDb-style category (actor/director/writer/...); empty when the
-// scanner couldn't classify a result.
-type Person struct {
-	ID        string
-	Name      string
-	Type      string
-	ThumbPath string
-}
-
-// ItemPersonCredit is the join row exposed to handlers: who appears
-// in this item, in what role, and as which character. SortOrder
-// preserves TMDb billing order so the UI can render the cast in a
-// stable, recognisable sequence.
-type ItemPersonCredit struct {
-	PersonID      string
-	Name          string
-	PersonType    string
-	ThumbPath     string
-	Role          string
-	CharacterName string
-	SortOrder     int
-}
 
 // PeopleRepository — Pattern A dual-dialect. SortOrder + Year are
 // INTEGER → NullInt64 in SQLite, NullInt32 / int32 in Postgres; the
@@ -108,7 +85,7 @@ func (r *PeopleRepository) EnsureByName(ctx context.Context, name, personType st
 	return newID, true, nil
 }
 
-func (r *PeopleRepository) GetByID(ctx context.Context, id string) (*Person, error) {
+func (r *PeopleRepository) GetByID(ctx context.Context, id string) (*librarymodel.Person, error) {
 	if r.useSQLite() {
 		row, err := r.sq.GetPersonByID(ctx, id)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -117,7 +94,7 @@ func (r *PeopleRepository) GetByID(ctx context.Context, id string) (*Person, err
 		if err != nil {
 			return nil, fmt.Errorf("get person: %w", err)
 		}
-		return &Person{ID: row.ID, Name: row.Name, Type: row.Type, ThumbPath: row.ThumbPath}, nil
+		return &librarymodel.Person{ID: row.ID, Name: row.Name, Type: row.Type, ThumbPath: row.ThumbPath}, nil
 	}
 	row, err := r.pq.GetPersonByID(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -126,7 +103,7 @@ func (r *PeopleRepository) GetByID(ctx context.Context, id string) (*Person, err
 	if err != nil {
 		return nil, fmt.Errorf("get person: %w", err)
 	}
-	return &Person{ID: row.ID, Name: row.Name, Type: row.Type, ThumbPath: row.ThumbPath}, nil
+	return &librarymodel.Person{ID: row.ID, Name: row.Name, Type: row.Type, ThumbPath: row.ThumbPath}, nil
 }
 
 func (r *PeopleRepository) SetThumbPath(ctx context.Context, id, thumbPath string) error {
@@ -152,7 +129,7 @@ func (r *PeopleRepository) SetThumbPath(ctx context.Context, id, thumbPath strin
 // inserts the supplied list. Atomic at the SQL level — both
 // statements happen in the same connection — so re-scans never
 // expose a half-written cast list to a concurrent reader.
-func (r *PeopleRepository) ReplaceItemPeople(ctx context.Context, itemID string, credits []ItemPersonCredit) error {
+func (r *PeopleRepository) ReplaceItemPeople(ctx context.Context, itemID string, credits []librarymodel.ItemPersonCredit) error {
 	if r.useSQLite() {
 		if err := r.sq.DeleteItemPeople(ctx, itemID); err != nil {
 			return fmt.Errorf("delete item people: %w", err)
@@ -188,37 +165,19 @@ func (r *PeopleRepository) ReplaceItemPeople(ctx context.Context, itemID string,
 	return nil
 }
 
-// FilmographyEntry is one row of a person's filmography: a movie or
-// series the person has a direct credit on, plus the role/character
-// that surfaced for them in that title. Year is optional (provider
-// may not have a release year for very-old or in-progress titles).
-// PrimaryImageID is the id of the item's primary poster image (empty
-// when the item has no primary poster on disk yet); the handler
-// resolves it to a `/api/v1/images/file/{id}` URL.
-type FilmographyEntry struct {
-	ItemID         string
-	Type           string
-	Title          string
-	Year           int
-	Role           string
-	CharacterName  string
-	SortOrder      int
-	PrimaryImageID string
-}
-
 // ListFilmographyByPerson returns the deduped, sorted filmography for
 // a person — one row per (movie | series) the person has a credit on.
 // When the same person has multiple credits on the same title (e.g.
 // directed AND wrote the same movie), only the row with the lowest
 // sort_order is kept; that's almost always the most prominent role
 // (TMDb pads writer/producer credits with high sort_order values).
-func (r *PeopleRepository) ListFilmographyByPerson(ctx context.Context, personID string) ([]*FilmographyEntry, error) {
+func (r *PeopleRepository) ListFilmographyByPerson(ctx context.Context, personID string) ([]*librarymodel.FilmographyEntry, error) {
 	if r.useSQLite() {
 		rows, err := r.sq.ListFilmographyByPerson(ctx, personID)
 		if err != nil {
 			return nil, fmt.Errorf("list filmography: %w", err)
 		}
-		out := make([]*FilmographyEntry, 0, len(rows))
+		out := make([]*librarymodel.FilmographyEntry, 0, len(rows))
 		seen := make(map[string]struct{}, len(rows))
 		for _, row := range rows {
 			if _, ok := seen[row.ItemID]; ok {
@@ -229,7 +188,7 @@ func (r *PeopleRepository) ListFilmographyByPerson(ctx context.Context, personID
 			if row.Year.Valid {
 				year = int(row.Year.Int64)
 			}
-			out = append(out, &FilmographyEntry{
+			out = append(out, &librarymodel.FilmographyEntry{
 				ItemID:         row.ItemID,
 				Type:           row.Type,
 				Title:          row.Title,
@@ -246,7 +205,7 @@ func (r *PeopleRepository) ListFilmographyByPerson(ctx context.Context, personID
 	if err != nil {
 		return nil, fmt.Errorf("list filmography: %w", err)
 	}
-	out := make([]*FilmographyEntry, 0, len(rows))
+	out := make([]*librarymodel.FilmographyEntry, 0, len(rows))
 	seen := make(map[string]struct{}, len(rows))
 	for _, row := range rows {
 		if _, ok := seen[row.ItemID]; ok {
@@ -257,7 +216,7 @@ func (r *PeopleRepository) ListFilmographyByPerson(ctx context.Context, personID
 		if row.Year.Valid {
 			year = int(row.Year.Int32)
 		}
-		out = append(out, &FilmographyEntry{
+		out = append(out, &librarymodel.FilmographyEntry{
 			ItemID:         row.ItemID,
 			Type:           row.Type,
 			Title:          row.Title,
@@ -271,15 +230,15 @@ func (r *PeopleRepository) ListFilmographyByPerson(ctx context.Context, personID
 	return out, nil
 }
 
-func (r *PeopleRepository) ListByItem(ctx context.Context, itemID string) ([]*ItemPersonCredit, error) {
+func (r *PeopleRepository) ListByItem(ctx context.Context, itemID string) ([]*librarymodel.ItemPersonCredit, error) {
 	if r.useSQLite() {
 		rows, err := r.sq.ListItemPeople(ctx, itemID)
 		if err != nil {
 			return nil, fmt.Errorf("list item people: %w", err)
 		}
-		out := make([]*ItemPersonCredit, len(rows))
+		out := make([]*librarymodel.ItemPersonCredit, len(rows))
 		for i, row := range rows {
-			out[i] = &ItemPersonCredit{
+			out[i] = &librarymodel.ItemPersonCredit{
 				PersonID:      row.PersonID,
 				Name:          row.Name,
 				PersonType:    row.PersonType,
@@ -295,9 +254,9 @@ func (r *PeopleRepository) ListByItem(ctx context.Context, itemID string) ([]*It
 	if err != nil {
 		return nil, fmt.Errorf("list item people: %w", err)
 	}
-	out := make([]*ItemPersonCredit, len(rows))
+	out := make([]*librarymodel.ItemPersonCredit, len(rows))
 	for i, row := range rows {
-		out[i] = &ItemPersonCredit{
+		out[i] = &librarymodel.ItemPersonCredit{
 			PersonID:      row.PersonID,
 			Name:          row.Name,
 			PersonType:    row.PersonType,
