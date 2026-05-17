@@ -4,25 +4,19 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-// IPTVTransmuxSink adapts the Metrics struct to the
-// iptv.TransmuxMetrics interface (Allow / RecordSuccess / RecordFailure
-// for the breaker is its own thing — this sink only handles the
-// transmux-side counters defined in metrics.go).
+// IPTVTransmuxSink: adapta Metrics a iptv.TransmuxMetrics (counters de
+// transmux; el breaker Allow/RecordSuccess/Failure va por su lado).
 //
-// Kept as a separate type instead of methods on *Metrics so the
-// adapter stays explicit at the wiring site and the metrics.go fields
-// remain a flat list of collectors. The sink itself is stateless: it
-// only forwards to the underlying counters.
+// Tipo aparte en vez de methods en *Metrics para que el adapter sea explícito
+// en el wiring y metrics.go quede como lista plana de collectors. Stateless.
 type IPTVTransmuxSink struct {
 	starts        *prometheus.CounterVec
 	decodeMode    *prometheus.CounterVec
 	reencodePromo prometheus.Counter
 }
 
-// NewIPTVTransmuxSink builds a sink that forwards to the IPTV transmux
-// counters on the given Metrics. Returns nil if m is nil so callers
-// can pass the result of a maybe-nil Metrics straight into
-// TransmuxManagerConfig without a guard.
+// NewIPTVTransmuxSink: nil Metrics → nil sink, así callers pueden pasar el
+// resultado de un Metrics maybe-nil directo a TransmuxManagerConfig sin guard.
 func NewIPTVTransmuxSink(m *Metrics) *IPTVTransmuxSink {
 	if m == nil {
 		return nil
@@ -55,18 +49,14 @@ func (s *IPTVTransmuxSink) IncReencodePromotions() {
 	s.reencodePromo.Inc()
 }
 
-// IPTVTransmuxSessions is the minimal view of TransmuxManager the
-// metrics layer needs to expose the active-sessions gauge at scrape
-// time. Same pattern as KeyStoreCounts: the DB / runtime is source of
-// truth, and a missed Set() during a future refactor would silently
-// poison a dashboard.
+// IPTVTransmuxSessions: vista mínima del TransmuxManager para el gauge de
+// sesiones activas. Mismo patrón que KeyStoreCounts.
 type IPTVTransmuxSessions interface {
 	ActiveSessions() int
 }
 
-// RegisterIPTVTransmuxGauges attaches the gauge-func that reads the
-// transmux manager's session count live on every scrape. Returns an
-// error only if the gauge name collides (test misuse).
+// RegisterIPTVTransmuxGauges: gauge-func que lee sesiones del manager en
+// cada scrape. Error sólo si choca el nombre (mal uso en tests).
 func RegisterIPTVTransmuxGauges(m *Metrics, t IPTVTransmuxSessions) error {
 	if m == nil || t == nil {
 		return nil

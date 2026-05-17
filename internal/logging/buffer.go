@@ -7,12 +7,9 @@ import (
 	"time"
 )
 
-// Entry is the wire-shape we hand to the admin logs surface. Sized
-// for tail-style UIs: timestamp + level + free-form message + a
-// small map of structured attributes. We deliberately don't surface
-// source-file info (slog can produce it) because the admin log
-// viewer is for ops debugging at a glance, not stack-trace forensics
-// — that's what the JSON stream to stdout is for.
+// Entry es lo que ve el panel admin "Logs". No incluye el fichero de
+// origen porque el panel es para echar un vistazo rápido, no para hacer
+// forense — para eso está el log JSON de stdout.
 type Entry struct {
 	Time    time.Time      `json:"ts"`
 	Level   string         `json:"level"`
@@ -20,20 +17,12 @@ type Entry struct {
 	Attrs   map[string]any `json:"attrs,omitempty"`
 }
 
-// Buffer is a slog.Handler that keeps the last `capacity` log
-// entries in a ring AND fans new entries out to subscribed
-// channels. Wraps a delegate handler (typically the JSON/text
-// handler that already writes to stdout) so it's a drop-in: the
-// existing log destination keeps working, the buffer is purely
-// additive.
+// Buffer guarda las últimas N entradas de log en un anillo y las reparte
+// a quien esté suscrito. Envuelve el handler real (JSON o texto a stdout)
+// sin reemplazarlo — sigue funcionando todo igual, esto es un añadido.
 //
-// Concurrency: writes lock; reads (Snapshot) take a read lock and
-// copy. Subscribers receive on a buffered channel — slow readers
-// drop entries past their channel buffer rather than blocking the
-// log path, since blocking inside Handle would stall every goroutine
-// that logs. The choice to drop-on-slow over block matches Linux's
-// `dmesg` behaviour: an admin watching logs on a laggy connection
-// shouldn't be able to deadlock the server's request handlers.
+// Si un suscriptor va lento, las entradas se le caen al suelo en vez de
+// bloquear; bloquear el logger congelaría toda la aplicación.
 type Buffer struct {
 	delegate slog.Handler
 	capacity int
@@ -48,12 +37,9 @@ type Buffer struct {
 	nextID int
 }
 
-// NewBuffer wraps `delegate` so every record is forwarded to it
-// AND captured in the ring. Capacity is the max number of entries
-// retained — past that the ring overwrites oldest. Set the cap
-// generous enough to debug a single incident (a few hundred) but
-// small enough that the per-process memory cost stays trivial
-// (each entry < 1 KB, 500 = ~500 KB worst case).
+// NewBuffer: cada log va al destino real Y al anillo. Capacity es el
+// número máximo de entradas guardadas; pasado eso se sobreescribe la
+// más antigua. 500 entradas ≈ 500 KB, suficiente para una incidencia.
 func NewBuffer(delegate slog.Handler, capacity int) *Buffer {
 	if capacity <= 0 {
 		capacity = 500
@@ -66,18 +52,15 @@ func NewBuffer(delegate slog.Handler, capacity int) *Buffer {
 	}
 }
 
-// Enabled defers to the delegate so the same level filter applies
-// to both the stdout destination and the ring. Without this, the
-// admin viewer would show entries the rest of the system threw away.
+// Enabled delega en el destino real para que el filtro de nivel sea el
+// mismo en stdout y en el panel.
 func (b *Buffer) Enabled(ctx context.Context, level slog.Level) bool {
 	return b.delegate.Enabled(ctx, level)
 }
 
-// Handle records the entry into the ring, fans it out to
-// subscribers, then forwards to the delegate. Order matters: the
-// delegate may block briefly on stdout flush, but the ring write
-// has to happen first so a Snapshot taken concurrently sees this
-// entry before subsequent ones rather than after.
+// Handle guarda primero en el anillo, después reparte a los suscriptores
+// y por último escribe en stdout. El orden importa para que un Snapshot
+// concurrente vea las entradas en el orden real, no al revés.
 func (b *Buffer) Handle(ctx context.Context, r slog.Record) error {
 	entry := Entry{
 		Time:    r.Time,
@@ -110,17 +93,15 @@ func (b *Buffer) Handle(ctx context.Context, r slog.Record) error {
 	return b.delegate.Handle(ctx, r)
 }
 
-// WithAttrs / WithGroup just decorate the delegate. The ring
-// captures what Handle sees, which already includes the prebound
-// attrs — no need to track them separately.
+// WithAttrs / WithGroup sólo decoran el destino real. El anillo se
+// comparte entre el handler padre y los hijos a propósito; si los
+// separásemos, los suscriptores no verían los logs del hijo.
 func (b *Buffer) WithAttrs(attrs []slog.Attr) slog.Handler {
 	return &Buffer{
 		delegate: b.delegate.WithAttrs(attrs),
 		capacity: b.capacity,
-		entries:  b.entries, // shared ring; this is the "child" handler for With()
-		// subs map is shared via pointer; re-pointing here would split
-		// fan-out between parents and children. We deliberately don't.
-		subs: b.subs,
+		entries:  b.entries,
+		subs:     b.subs,
 	}
 }
 
@@ -133,9 +114,8 @@ func (b *Buffer) WithGroup(name string) slog.Handler {
 	}
 }
 
-// Snapshot returns the most-recent entries up to `limit`, oldest
-// first. Cheap (one RLock + a copy) so the SSE handler's initial
-// payload doesn't need a separate code path.
+// Snapshot devuelve hasta `limit` entradas, las más antiguas primero.
+// Es barato; se usa para mandar el bloque inicial cuando se abre el panel.
 func (b *Buffer) Snapshot(limit int) []Entry {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
@@ -155,10 +135,9 @@ func (b *Buffer) Snapshot(limit int) []Entry {
 	return ordered
 }
 
-// Subscribe returns a channel that receives every new entry until
-// the returned cancel is called. Buffered (16) so a momentarily
-// laggy reader doesn't drop the next dozen entries; past that, the
-// fan-out drops rather than blocks (see Buffer doc).
+// Subscribe devuelve un canal con buffer pequeño que absorbe tirones
+// puntuales. Si el lector va más lento, las entradas siguientes se
+// pierden en vez de bloquear el logger.
 func (b *Buffer) Subscribe() (<-chan Entry, func()) {
 	b.subsMu.Lock()
 	id := b.nextID
@@ -177,9 +156,8 @@ func (b *Buffer) Subscribe() (<-chan Entry, func()) {
 	}
 }
 
-// fanout pushes the entry to every subscriber. Non-blocking:
-// subscribers whose channel is full drop the entry on the floor.
-// Trade-off documented at the type level — never block a logger.
+// fanout reparte la entrada sin bloquear; los suscriptores con el canal
+// lleno la pierden, pero el logger nunca se para.
 func (b *Buffer) fanout(e Entry) {
 	b.subsMu.Lock()
 	defer b.subsMu.Unlock()
@@ -187,7 +165,7 @@ func (b *Buffer) fanout(e Entry) {
 		select {
 		case ch <- e:
 		default:
-			// Slow consumer; skip rather than stall the logger.
+			// suscriptor lento, saltamos.
 		}
 	}
 }

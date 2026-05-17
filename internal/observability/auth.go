@@ -4,22 +4,17 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-// KeyStoreCounts is the minimal view of auth.KeyStore that the metrics
-// layer needs to expose gauge values at scrape time. Declaring it here
-// avoids pulling `internal/auth` into `internal/observability`, which
-// would be a loop in reverse; callers pass their real keystore.
+// KeyStoreCounts: vista mínima de auth.KeyStore que el metrics layer necesita.
+// Declarada aquí para evitar `observability → auth` (sería ciclo inverso).
 type KeyStoreCounts interface {
 	ActiveCount() int
 	RetiredCount() int
 }
 
-// RegisterKeyStoreGauges attaches two gauges that read live from the
-// keystore every time Prometheus scrapes. Using GaugeFunc (rather than a
-// regular Gauge we Set() after every mutation) means we cannot drift out
-// of sync with reality: the DB is source of truth, and a missed Set()
-// during a future refactor would silently poison a dashboard.
-//
-// Returns an error if registration fails (duplicate metric name).
+// RegisterKeyStoreGauges: dos gauges leídos en vivo del keystore en cada
+// scrape. GaugeFunc (en vez de Gauge + Set() tras cada mutación) elimina el
+// riesgo de drift — un Set() olvidado en un refactor futuro envenenaría el
+// dashboard en silencio.
 func RegisterKeyStoreGauges(m *Metrics, ks KeyStoreCounts) error {
 	if m == nil || ks == nil {
 		return nil

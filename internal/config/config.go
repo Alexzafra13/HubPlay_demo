@@ -31,92 +31,76 @@ type Config struct {
 	SetupCompleted bool                `yaml:"setup_completed"`
 }
 
-// RetentionConfig caps the lifetime of append-only diagnostic and
-// programming tables. Without these the EPG and federation audit log
-// grow monotonically forever — a long-lived install with IPTV +
-// federation paired peers can hit multi-GB SQLite in weeks. Defaults
-// are sane for a single-tenant self-hosted server; operators with
-// higher traffic can extend or shorten via YAML / env.
-//
-// Zero or negative values disable the corresponding sweep.
+// RetentionConfig: vida útil de tablas append-only (EPG + audit federation).
+// Sin esto, un install con IPTV + federation paired llega a GB de SQLite en
+// semanas. Valores ≤0 desactivan el sweep correspondiente.
 type RetentionConfig struct {
-	// EPGPrograms keeps EPG rows whose end_time is within this window
-	// of `now`; older rows are deleted on every tick. Default 24h —
-	// matches the existing 24h cutoff that CleanupOldPrograms hard-coded.
+	// EPGPrograms: ventana relativa a `now`; rows con end_time anterior se
+	// borran cada tick. Default 24h.
 	EPGPrograms time.Duration `yaml:"epg_programs"`
 
-	// FederationAuditLog keeps audit rows newer than this window. The
-	// federation audit table grows on every cross-peer request (search,
-	// stream, progress, share). Default 30d.
+	// FederationAuditLog: ventana de audit. La tabla crece en cada request
+	// cross-peer (search, stream, progress, share). Default 30d.
 	FederationAuditLog time.Duration `yaml:"federation_audit_log"`
 
-	// SweepInterval is how often the background ticker runs. Default
-	// 24h. Lowering this trades steadier DB load for fresher cleanup;
-	// raising it batches more deletions per tick.
+	// SweepInterval: cadencia del ticker. Default 24h. Más bajo = carga
+	// DB más estable; más alto = más deletes batch por tick.
 	SweepInterval time.Duration `yaml:"sweep_interval"`
 }
 
-// IPTVConfig groups runtime knobs for the IPTV subsystem. Only
-// transmux is exposed today; other subsystems (proxy timeouts,
-// scheduler intervals) are still hard-coded in their respective
-// packages and will move here when they need operator-facing tuning.
+// IPTVConfig: knobs runtime del subsistema IPTV. Sólo transmux expuesto hoy;
+// el resto (proxy timeouts, scheduler) sigue hard-coded y migrará cuando
+// necesite tuning operator-facing.
 type IPTVConfig struct {
 	Transmux IPTVTransmuxConfig `yaml:"transmux"`
 }
 
-// IPTVTransmuxConfig controls the live MPEG-TS → HLS transmux
-// session manager (internal/iptv/transmux.go). Defaults are
-// production-sane for a single-host self-hosted deployment.
+// IPTVTransmuxConfig: controla el session manager de MPEG-TS → HLS en vivo
+// (internal/iptv/transmux.go). Defaults sanos para single-host self-hosted.
 type IPTVTransmuxConfig struct {
-	// Enabled gates the entire transmux subsystem. When false, the
-	// channel-stream handler falls back to the raw passthrough proxy
-	// and MPEG-TS upstreams break in browsers (HLS upstreams keep
-	// working). Default true.
+	// Enabled: false → channel-stream cae al passthrough raw y los upstreams
+	// MPEG-TS dejan de funcionar en navegadores (HLS sigue ok). Default true.
 	Enabled bool `yaml:"enabled"`
 
-	// MaxSessions caps simultaneous ffmpeg processes. One session is
-	// shared by all viewers of the same channel, so a household of 5
-	// watching different channels needs 5 sessions. Default 10.
+	// MaxSessions: tope de ffmpegs simultáneos. Una sesión la comparten todos
+	// los viewers del mismo canal — 5 personas viendo 5 canales = 5 sesiones.
+	// Default 10.
 	MaxSessions int `yaml:"max_sessions"`
 
-	// MaxReencodeSessions caps how many active sessions can run in
-	// re-encode mode (the codec-rescue path). Reencode is the only
-	// path that costs real CPU / GPU, so capping it separately
-	// prevents a codec-crash storm from saturating every encoder
-	// slot. Zero = default to MaxSessions/2 (with a floor of 1).
+	// MaxReencodeSessions: tope en re-encode (la única ruta con coste real
+	// CPU/GPU). Cap separado evita que una tormenta de codec-crash sature
+	// todos los encoder slots. 0 = MaxSessions/2 (floor 1).
 	MaxReencodeSessions int `yaml:"max_reencode_sessions"`
 
-	// IdleTimeout is how long a session stays alive with no segment
-	// requests before the reaper kills it. Lower trades faster
-	// cleanup for more spawn churn on rapid channel-zap. Default 30s.
+	// IdleTimeout: vida sin segment requests antes de que el reaper mate.
+	// Más bajo = cleanup más rápido pero más spawn churn en zap rápido.
+	// Default 30s.
 	IdleTimeout time.Duration `yaml:"idle_timeout"`
 
-	// ReadyTimeout is how long the manifest handler waits for ffmpeg
-	// to produce its first segment before declaring the session
-	// failed. Default 15s — bigger than typical first-segment latency
-	// (3-5s) for healthy upstreams; bounded so dead providers don't
-	// hang the player UI. Default 15s.
+	// ReadyTimeout: espera del manifest handler al primer segmento de ffmpeg
+	// antes de fallar la sesión. Default 15s — más alto que la latencia
+	// típica (3-5s) en upstreams sanos; acotado para que providers muertos
+	// no cuelguen el player UI.
 	ReadyTimeout time.Duration `yaml:"ready_timeout"`
 }
 
-// ObservabilityConfig controls the Prometheus /metrics endpoint. Defaults are
-// applied in Load: metrics are enabled out of the box and exposed at /metrics.
-// Operators who do not want to expose them can set enabled: false; those who
-// want to move the path for reverse-proxy hygiene can override it.
+// ObservabilityConfig: endpoint Prometheus /metrics. Default activado en
+// /metrics. enabled:false para no exponerlos; metrics_path para moverlos por
+// higiene de reverse-proxy.
 type ObservabilityConfig struct {
 	MetricsEnabled bool   `yaml:"metrics_enabled"`
 	MetricsPath    string `yaml:"metrics_path"`
 }
 
 type StreamingConfig struct {
-	SegmentDuration             int           `yaml:"segment_duration"`                 // seconds, default 6
-	MaxTranscodeSessions        int           `yaml:"max_transcode_sessions"`           // global cap, default 4
-	MaxTranscodeSessionsPerUser int           `yaml:"max_transcode_sessions_per_user"`  // per-user cap, default 2 — prevents one user soaking the whole pool with seek-loops or fanout
+	SegmentDuration             int           `yaml:"segment_duration"`                 // segundos, default 6
+	MaxTranscodeSessions        int           `yaml:"max_transcode_sessions"`           // cap global, default 4
+	MaxTranscodeSessionsPerUser int           `yaml:"max_transcode_sessions_per_user"`  // cap per-user, default 2 — evita que 1 user agote el pool con seek-loops o fanout
 	TranscodePreset             string        `yaml:"transcode_preset"`                 // veryfast, fast, medium
-	DefaultAudioBitrate         string        `yaml:"default_audio_bitrate"`            // e.g. "192k"
-	CacheDir                    string        `yaml:"cache_dir"`                        // directory for transcode output
-	IdleTimeout                 time.Duration `yaml:"idle_timeout"`                     // cleanup idle sessions, default 90s
-	TranscodeTimeout            time.Duration `yaml:"transcode_timeout"`                // max duration per transcode, default 4h
+	DefaultAudioBitrate         string        `yaml:"default_audio_bitrate"`            // p.ej. "192k"
+	CacheDir                    string        `yaml:"cache_dir"`                        // directorio de salida del transcode
+	IdleTimeout                 time.Duration `yaml:"idle_timeout"`                     // limpieza de sesiones idle, default 90s
+	TranscodeTimeout            time.Duration `yaml:"transcode_timeout"`                // duración máxima por transcode, default 4h
 	HWAccel                     HWAccelConfig `yaml:"hardware_acceleration"`
 }
 
@@ -155,28 +139,25 @@ type RateLimitConfig struct {
 	LoginAttempts  int           `yaml:"login_attempts"`
 	LoginWindow    time.Duration `yaml:"login_window"`
 	LoginLockout   time.Duration `yaml:"login_lockout"`
-	TrustedSubnets []string      `yaml:"trusted_subnets"` // subnets exempt from rate limiting (e.g. LAN)
+	TrustedSubnets []string      `yaml:"trusted_subnets"` // subnets exentas (p.ej. LAN)
 }
 
-// Load reads and parses the config file at path. Environment variables
-// in the form ${VAR} are expanded before parsing.
-// When no config file exists, defaults are used and the database path
-// is placed in the same directory as the config file (so Docker volumes work).
+// Load: lee/parsea el YAML expandiendo ${VAR} antes. Si el fichero no
+// existe, defaults + DB junto al config path (para que vol. Docker funcione).
 func Load(path string) (*Config, error) {
 	cfg := defaults()
 
 	data, err := os.ReadFile(path)
 	switch {
 	case err == nil:
-		// Expand environment variables (${TMDB_API_KEY} etc.)
+		// Expande ${TMDB_API_KEY} etc.
 		data = []byte(os.ExpandEnv(string(data)))
 		if err := yaml.Unmarshal(data, cfg); err != nil {
 			return nil, fmt.Errorf("parsing config: %w", err)
 		}
 	case os.IsNotExist(err):
-		// No config file — fall through with defaults. Place the DB
-		// alongside the (missing) config file so it lands in the
-		// mounted volume (e.g. /config/).
+		// Sin fichero — usamos defaults. DB junto al config path para que
+		// caiga en el volumen montado (p.ej. /config/).
 		configDir := filepath.Dir(path)
 		if configDir != "." {
 			cfg.Database.Path = filepath.Join(configDir, "hubplay.db")
@@ -185,19 +166,19 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("reading config: %w", err)
 	}
 
-	// Env overrides apply regardless of whether a file existed --
-	// HUBPLAY_SERVER_BASE_URL / HUBPLAY_AUTH_JWT_SECRET / etc. on a
-	// fresh deploy without yaml have to land somewhere.
+	// Env overrides aplican aunque no haya fichero — HUBPLAY_SERVER_BASE_URL
+	// / HUBPLAY_AUTH_JWT_SECRET en deploys fresh sin yaml tienen que ir
+	// a algún sitio.
 	applyEnvOverrides(cfg)
 
-	// Generate JWT secret if neither the file nor the env supplied one.
+	// JWT secret auto-gen si ni file ni env lo dieron.
 	if cfg.Auth.JWTSecret == "" {
 		cfg.Auth.JWTSecret = generateSecret()
 	}
 
-	// YAML merge can leave sub-structs half-populated (e.g. user set
-	// observability.metrics_enabled: true but omitted path). Fill gaps so
-	// every downstream consumer has a usable value.
+	// El merge YAML puede dejar sub-structs a medias (p.ej. usuario puso
+	// metrics_enabled:true pero omitió path). Rellenamos huecos para que
+	// downstream tenga siempre valor utilizable.
 	if cfg.Observability.MetricsEnabled && cfg.Observability.MetricsPath == "" {
 		cfg.Observability.MetricsPath = "/metrics"
 	}
@@ -280,13 +261,11 @@ func defaults() *Config {
 		Streaming: StreamingConfig{
 			SegmentDuration: 6,
 			// MaxTranscodeSessions / MaxTranscodeSessionsPerUser /
-			// TranscodePreset default to zero / empty on purpose:
-			// stream.AutoTuneStreaming (called from NewManager after
-			// HW detection) fills them with hardware-aware
-			// recommendations on every boot. Operators who want
-			// explicit control override these from hubplay.yaml or the
-			// admin settings panel; the auto-tuner only touches
-			// sentinel zeros so explicit values survive untouched.
+			// TranscodePreset default a 0 / "" a propósito:
+			// stream.AutoTuneStreaming (lo llama NewManager tras detectar HW)
+			// los rellena con valores HW-aware en cada boot. Si el operador
+			// los pone explícitos en yaml/panel, el auto-tuner sólo toca los
+			// que siguen en sentinel-zero — los explícitos sobreviven.
 			DefaultAudioBitrate: "192k",
 			CacheDir:            "",
 			IdleTimeout:         90 * time.Second,
@@ -300,7 +279,7 @@ func defaults() *Config {
 			Transmux: IPTVTransmuxConfig{
 				Enabled:             true,
 				MaxSessions:         10,
-				MaxReencodeSessions: 0, // 0 = derive from MaxSessions in transmux mgr
+				MaxReencodeSessions: 0, // 0 = el transmux mgr lo deriva de MaxSessions
 				IdleTimeout:         30 * time.Second,
 				ReadyTimeout:        15 * time.Second,
 			},
@@ -320,8 +299,8 @@ func defaults() *Config {
 func generateSecret() string {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
-		// Fallback: combine multiple entropy sources and hash with SHA-256.
-		// This should never happen on a healthy system, but avoids crashing the server.
+		// Fallback: combinamos varias fuentes de entropía + SHA-256. No
+		// debería pasar en un sistema sano, pero evita crashear el server.
 		hostname, _ := os.Hostname()
 		entropy := fmt.Sprintf("%d:%d:%s:%d", time.Now().UnixNano(), os.Getpid(), hostname, time.Now().UnixNano())
 		hash := sha256.Sum256([]byte(entropy))
@@ -337,13 +316,12 @@ func applyEnvOverrides(cfg *Config) {
 		}
 	}
 	if v := os.Getenv("HUBPLAY_SERVER_BASE_URL"); v != "" {
-		// Federation advertises this URL in /federation/info — peers
-		// outbound to us go through it. Env override is the explicit
-		// escape hatch; the federation layer also auto-derives from
-		// the inbound request when this is empty (the plug-and-play
-		// default). Set this only when the URL the admin uses is
-		// different from the URL peers should use (e.g. internal
-		// Tailscale vs public domain).
+		// Federation publica esta URL en /federation/info — los peers la
+		// usan para venir a nosotros. La env override es el escape hatch
+		// explícito; si está vacía, federation la deriva del request
+		// inbound (default plug-and-play). Usar sólo cuando el admin entra
+		// por una URL distinta a la que deben usar los peers (p.ej.
+		// Tailscale interno vs dominio público).
 		cfg.Server.BaseURL = v
 	}
 	if v := os.Getenv("HUBPLAY_SERVER_BIND"); v != "" {
@@ -380,7 +358,7 @@ func applyEnvOverrides(cfg *Config) {
 	}
 }
 
-// TestConfig returns a config suitable for tests.
+// TestConfig: config segura para tests.
 func TestConfig() *Config {
 	cfg := defaults()
 	cfg.Database.Path = ":memory:"

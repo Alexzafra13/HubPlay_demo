@@ -10,9 +10,8 @@ import (
 	"strings"
 )
 
-// GenerateThumbnail reads the source image, resizes it to maxWidth (preserving
-// aspect ratio) using nearest-neighbor interpolation, and writes the result to
-// dstPath. Only JPEG and PNG are supported (standard library only).
+// GenerateThumbnail: resize a maxWidth (aspect-ratio preservado, vecino más
+// cercano) y escribe a dstPath. Sólo JPEG y PNG (std-lib).
 func GenerateThumbnail(srcPath, dstPath string, maxWidth int) error {
 	src, err := os.Open(srcPath)
 	if err != nil {
@@ -30,7 +29,7 @@ func GenerateThumbnail(srcPath, dstPath string, maxWidth int) error {
 	srcH := bounds.Dy()
 
 	if srcW <= maxWidth {
-		// Image is already smaller; just copy the file.
+		// Imagen ya más pequeña; copiamos tal cual.
 		return copyFile(srcPath, dstPath)
 	}
 
@@ -42,7 +41,6 @@ func GenerateThumbnail(srcPath, dstPath string, maxWidth int) error {
 
 	resized := nearestNeighborResize(img, dstW, dstH)
 
-	// Ensure parent directory exists.
 	if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
 		return fmt.Errorf("create thumbnail dir: %w", err)
 	}
@@ -59,7 +57,7 @@ func GenerateThumbnail(srcPath, dstPath string, maxWidth int) error {
 			return fmt.Errorf("encode png thumbnail: %w", err)
 		}
 	default:
-		// Default to JPEG for everything else (including jpeg).
+		// Default JPEG para todo lo demás (incluido jpeg).
 		if err := jpeg.Encode(out, resized, &jpeg.Options{Quality: 80}); err != nil {
 			return fmt.Errorf("encode jpeg thumbnail: %w", err)
 		}

@@ -54,14 +54,12 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-// Count returns the total number of users. Used during setup to check if
-// the first admin account needs to be created.
+// Count: lo usa el wizard de setup para saber si toca crear el primer admin.
 func (s *Service) Count(ctx context.Context) (int, error) {
 	return s.users.Count(ctx)
 }
 
-// SetMaxContentRating updates a user's per-profile content cap.
-// Empty string clears the cap (= no restriction).
+// SetMaxContentRating: cap de contenido por perfil. "" = sin restricción.
 func (s *Service) SetMaxContentRating(ctx context.Context, id, rating string) error {
 	if err := s.users.SetMaxContentRating(ctx, id, rating); err != nil {
 		return fmt.Errorf("set max content rating: %w", err)
@@ -70,17 +68,10 @@ func (s *Service) SetMaxContentRating(ctx context.Context, id, rating string) er
 	return nil
 }
 
-// allowedAvatarHexes mirrors the 14-entry palette in
-// `web/src/utils/avatarColor.ts`. Service-side validation so a
-// stray frontend can't write an arbitrary hex (or worse, a CSS
-// expression) into the column. Empty string is also valid — it
-// clears the override, falling back to the deterministic helper.
-//
-// Keep in lock-step with the frontend palette: when one changes,
-// the other must too. We accept this slight duplication because
-// the alternative (serving the palette from a backend endpoint
-// the frontend fetches) adds an HTTP round-trip on every Settings
-// load for a list of 14 strings that move twice a year.
+// allowedAvatarHexes: paleta de 14 entradas replicada en web/src/utils/avatarColor.ts.
+// Validación server-side para que un frontend rogue no escriba hex arbitrario.
+// Mantener en lock-step con el frontend (cambia ~2 veces al año; servir por HTTP
+// añadiría round-trip en cada Settings y no compensa).
 var allowedAvatarHexes = map[string]struct{}{
 	"#3d5a40": {}, "#7a3d2e": {}, "#1e3252": {}, "#5c3d6e": {},
 	"#2e5c5a": {}, "#7a5c2e": {}, "#5a3d3d": {}, "#3d4a5c": {},
@@ -88,10 +79,8 @@ var allowedAvatarHexes = map[string]struct{}{
 	"#2e4a5c": {}, "#5c5c2e": {},
 }
 
-// SetAvatarColor updates the per-user avatar colour override.
-// Empty string clears the override → frontend falls back to the
-// FNV-1a → palette helper. Non-empty must be one of the 14 known
-// palette entries; anything else is a 400.
+// SetAvatarColor: "" = limpia override (frontend cae al helper FNV-1a → paleta).
+// Cualquier hex fuera de las 14 entradas conocidas es 400.
 func (s *Service) SetAvatarColor(ctx context.Context, id, hex string) error {
 	trimmed := strings.TrimSpace(strings.ToLower(hex))
 	if trimmed != "" {
@@ -108,14 +97,9 @@ func (s *Service) SetAvatarColor(ctx context.Context, id, hex string) error {
 	return nil
 }
 
-// SetDisplayName renames the user. The username + parent_user_id
-// stay put — this only changes the human label that the picker
-// and the admin table show.
-//
-// Validation lives at the boundary (length 1..64, no leading/
-// trailing whitespace) instead of at the repo to keep the SQL
-// column free of opinions; downstream callers that already have a
-// trusted name can write it directly via the repo.
+// SetDisplayName: sólo cambia la etiqueta humana; username + parent_user_id intactos.
+// Validación en el service (1..64 sin whitespace) y no en el repo, así callers
+// confiables pueden escribir directo sin pasar por la validación.
 func (s *Service) SetDisplayName(ctx context.Context, id, name string) error {
 	trimmed := strings.TrimSpace(name)
 	if len(trimmed) == 0 || len(trimmed) > 64 {
@@ -130,8 +114,8 @@ func (s *Service) SetDisplayName(ctx context.Context, id, name string) error {
 	return nil
 }
 
-// SetRole promotes / demotes a user between "user" and "admin". The
-// handler is responsible for the primary-admin gate.
+// SetRole: promueve/degrada entre "user" y "admin". El gate del primary-admin
+// vive en el handler, no aquí.
 func (s *Service) SetRole(ctx context.Context, id, role string) error {
 	if err := s.users.SetRole(ctx, id, role); err != nil {
 		return fmt.Errorf("set role: %w", err)
@@ -140,9 +124,8 @@ func (s *Service) SetRole(ctx context.Context, id, role string) error {
 	return nil
 }
 
-// SetActive flips the is_active flag. False = login rejected, JWT
-// middleware rejects subsequent requests; row stays in the DB so
-// flipping back true restores everything.
+// SetActive: false → login rechazado y middleware JWT rechaza requests siguientes.
+// Row no se borra: re-activar restaura todo.
 func (s *Service) SetActive(ctx context.Context, id string, active bool) error {
 	if err := s.users.SetActive(ctx, id, active); err != nil {
 		return fmt.Errorf("set active: %w", err)
@@ -151,15 +134,14 @@ func (s *Service) SetActive(ctx context.Context, id string, active bool) error {
 	return nil
 }
 
-// PrimaryAdminID returns the oldest admin's id. Used by the admin
-// users table to disable destructive actions on the bootstrap admin.
+// PrimaryAdminID: id del admin más antiguo. El admin UI lo usa para bloquear
+// acciones destructivas contra el bootstrap admin.
 func (s *Service) PrimaryAdminID(ctx context.Context) (string, error) {
 	return s.users.PrimaryAdminID(ctx)
 }
 
-// SetAccessExpiresAt sets / clears the temporary-access deadline.
-// Pass nil for permanent. The auth service is the consumer: Login
-// + middleware reject after this stamp.
+// SetAccessExpiresAt: nil = acceso permanente. Login + middleware rechazan
+// tras este stamp.
 func (s *Service) SetAccessExpiresAt(ctx context.Context, id string, expiresAt *time.Time) error {
 	if err := s.users.SetAccessExpiresAt(ctx, id, expiresAt); err != nil {
 		return fmt.Errorf("set access expires at: %w", err)

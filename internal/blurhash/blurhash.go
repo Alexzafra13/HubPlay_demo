@@ -9,15 +9,12 @@ import (
 
 const base83Chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz#$%*+,-.:;=?@[]^_{|}~"
 
-// Encode computes a blurhash string from the given image.
-// xComponents and yComponents control the level of detail (typical: 4, 3).
+// Encode genera el blurhash. xComponents/yComponents controlan el detalle (típico 4×3).
 func Encode(xComponents, yComponents int, img image.Image) string {
-	// Downsample to a small image for speed.
 	small := downsample(img, 32, 32)
 	w := small.Bounds().Dx()
 	h := small.Bounds().Dy()
 
-	// Extract linear RGB values.
 	pixels := make([][3]float64, w*h)
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
@@ -30,7 +27,6 @@ func Encode(xComponents, yComponents int, img image.Image) string {
 		}
 	}
 
-	// Compute DCT components.
 	components := make([][3]float64, xComponents*yComponents)
 	for j := 0; j < yComponents; j++ {
 		for i := 0; i < xComponents; i++ {
@@ -53,14 +49,12 @@ func Encode(xComponents, yComponents int, img image.Image) string {
 		}
 	}
 
-	// Encode to base83.
 	var buf strings.Builder
 
-	// Size flag: (xComponents - 1) + (yComponents - 1) * 9
+	// size flag = (x-1) + (y-1)*9
 	sizeFlag := (xComponents - 1) + (yComponents-1)*9
 	buf.WriteString(encodeBase83(sizeFlag, 1))
 
-	// Quantised maximum AC value.
 	var maximumValue float64
 	if len(components) > 1 {
 		for _, c := range components[1:] {
@@ -79,11 +73,9 @@ func Encode(xComponents, yComponents int, img image.Image) string {
 
 	realMaximumValue := (float64(quantisedMaximumValue) + 1) / 167.0
 
-	// DC value.
 	dc := components[0]
 	buf.WriteString(encodeBase83(encodeDC(dc), 4))
 
-	// AC values.
 	for _, ac := range components[1:] {
 		buf.WriteString(encodeBase83(encodeAC(ac, realMaximumValue), 2))
 	}
@@ -155,7 +147,7 @@ func pow83(exp int) int {
 	return result
 }
 
-// downsample resizes an image to the given dimensions using nearest-neighbor.
+// downsample reescala por vecino más cercano.
 func downsample(src image.Image, dstW, dstH int) image.Image {
 	bounds := src.Bounds()
 	srcW := bounds.Dx()
@@ -172,12 +164,10 @@ func downsample(src image.Image, dstW, dstH int) image.Image {
 	return dst
 }
 
-// EncodeFromRGBA is a convenience wrapper that accepts an *image.RGBA.
 func EncodeFromRGBA(img *image.RGBA) string {
 	return Encode(4, 3, img)
 }
 
-// GenerateTestImage creates a simple solid-color image for testing.
 func GenerateTestImage(w, h int, c color.Color) *image.RGBA {
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
 	for y := 0; y < h; y++ {

@@ -12,18 +12,15 @@ import (
 	"hubplay/internal/blurhash"
 )
 
-// ComputeBlurhash decodes raw image bytes and returns a blurhash string.
-// Callers pass already-read bytes (e.g. from an upload) — this function only
-// touches memory, never disk.
+// ComputeBlurhash calcula la cadena blurhash de una imagen ya cargada en
+// memoria (no toca disco).
 //
-// Decoders registered: JPEG, PNG, WebP. Fanart logo assets in particular
-// arrive as WebP — without the explicit registration above the std-lib
-// image package would refuse them and ComputeBlurhash silently returned
-// "" for every Fanart logo, which then made the frontend fall back to
-// the grey-tile placeholder instead of a low-frequency preview.
+// Acepta JPEG, PNG y WebP. WebP hace falta para los logos de Fanart —
+// si se quita ese decoder, devolvería cadena vacía silenciosamente y el
+// frontend pintaría el placeholder gris en su lugar.
 //
-// Returns an empty string for genuinely unsupported formats (animated
-// GIF, AVIF, BMP, …). A nil logger is tolerated.
+// Devuelve cadena vacía para formatos no soportados (GIF animado, AVIF,
+// BMP, etc.). Se admite un logger nulo.
 func ComputeBlurhash(data []byte, logger *slog.Logger) string {
 	img, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {

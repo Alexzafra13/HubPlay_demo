@@ -1,16 +1,14 @@
 package observability
 
-// StreamSink adapts Metrics to the small sink interface the stream.Manager
-// expects, without forcing the stream package to import observability. This
-// keeps the dependency direction one-way (observability → stream) and lets
-// tests for stream stay free of Prometheus.
+// StreamSink: adapta Metrics al sink que stream.Manager espera, sin forzar a
+// stream a importar observability. Arrow one-way: observability → stream;
+// tests de stream quedan libres de Prometheus.
 type StreamSink struct {
 	m *Metrics
 }
 
-// NewStreamSink builds a sink backed by the given Metrics. Passing a nil
-// Metrics returns a nil sink; callers should guard or rely on the
-// stream.Manager's own nil-safe fallback.
+// NewStreamSink: nil Metrics → nil sink. El caller guarda o se apoya en el
+// fallback nil-safe del stream.Manager.
 func NewStreamSink(m *Metrics) *StreamSink {
 	if m == nil {
 		return nil
