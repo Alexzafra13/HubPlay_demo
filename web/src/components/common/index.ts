@@ -37,3 +37,6 @@ export { HorizontalScroller } from "./HorizontalScroller";
 
 export { KebabMenu } from "./KebabMenu";
 export type { KebabMenuItem } from "./KebabMenu";
+
+export { UserAvatar } from "./UserAvatar";
+export type { UserAvatarProps, UserAvatarSize } from "./UserAvatar";
