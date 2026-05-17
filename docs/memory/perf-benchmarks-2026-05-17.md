@@ -1,7 +1,21 @@
 # Perf benchmarks — hot-path baseline (2026-05-17)
 
-> Setup: `golang:1.25` container, SQLite WAL, AMD Ryzen 7 7800X3D 8-Core.
-> Comando: `go test -bench='Benchmark(ChannelRepository|HomeRepository|ActivityRepository)' -benchmem -run=^$ -benchtime=2s ./internal/db/...`
+> Setup: `golang:1.25` container, AMD Ryzen 7 7800X3D 8-Core.
+>
+> **Dual-backend**: SQLite WAL + Postgres 16-alpine (container dedicado
+> en network bridge, no la prod). Comando base:
+>
+> ```bash
+> # SQLite (default)
+> go test -bench='Benchmark(ChannelRepository|HomeRepository|ActivityRepository)' \
+>     -benchmem -run=^$ -benchtime=2s ./internal/db/...
+>
+> # Postgres
+> HUBPLAY_TEST_DRIVER=postgres \
+> HUBPLAY_TEST_POSTGRES_DSN="postgres://postgres:test@hubplay-bench-pg:5432/postgres?sslmode=disable" \
+> go test -bench=... ./internal/db/...
+> ```
+>
 > Fichero de benches: `internal/db/{channel,home,activity}_bench_test.go`.
 
 Objetivo de la sesión: dejar de **intuir** los hot paths y **medir** los
@@ -181,6 +195,93 @@ servicio para usar la nueva primitiva. Decisiones de UX requeridas:
   nivel SQL, no aplicar overlays post-fetch.
 - Endpoint nuevo `?paginated=true&offset=&limit=` vs flag de feature.
 
+## Comparativa SQLite vs Postgres (mismo run)
+
+El reporte original sólo cubría SQLite. Postgres (16-alpine en container
+dedicado, network bridge, no la prod) re-bench-eado con `HUBPLAY_TEST_DRIVER=postgres`
+contra el mismo hardware y mismo benchtime=2s.
+
+### Listing (ChannelRepository)
+
+| Bench | N | SQLite μs | Postgres μs | Δ | SQLite B/op | Postgres B/op |
+|---|---:|---:|---:|---:|---:|---:|
+| `ListByLibrary` | 100 | 317 | 336 | +6 % SQLite | 153 KB | 127 KB |
+| `ListByLibrary` | 1 000 | 2 835 | 1 518 | **-46 % Postgres** | 1 330 KB | 1 367 KB |
+| `ListByLibrary` | 5 000 | 16 631 | 9 312 | **-44 % Postgres** | 9 187 KB | 7 814 KB |
+| `ListByLibraryPaginated` (limit=100) | 1 000 | 740 | 853 | +15 % SQLite | 72 KB | 62 KB |
+| `ListByLibraryPaginated` (limit=100) | 5 000 | 2 379 | 2 368 | ≈ igual | 78 KB | 64 KB |
+
+### Admin queries (ActivityRepository)
+
+| Bench | rows | SQLite μs | Postgres μs | Δ |
+|---|---:|---:|---:|---:|
+| `DailyWatchActivity` | 1 000 | 1 855 | 1 674 | -10 % Postgres |
+| `DailyWatchActivity` | 5 000 | 10 295 | 8 530 | **-17 % Postgres** |
+| `TopItems` | 1 000 | 1 408 | 1 399 | ≈ igual |
+| `TopItems` | 5 000 | 6 891 | 5 712 | **-17 % Postgres** |
+
+### Home rails (HomeRepository)
+
+| Bench | N | SQLite μs | Postgres μs | Δ |
+|---|---:|---:|---:|---:|
+| `Trending` | 500 | 795 | 2 712 | **+241 % SQLite** |
+| `Trending` | 2 000 | 2 573 | 2 279 | -11 % Postgres |
+| `LiveNow` | 500 | 1 122 | 1 559 | +39 % SQLite |
+| `LiveNow` | 2 000 | 4 104 | 4 698 | +14 % SQLite |
+
+### Hallazgos cross-backend
+
+1. **Postgres bate a SQLite ×~2 en listings grandes.** `ListByLibrary 5 000 channels`
+   pasa de 16.6 ms (SQLite) → 9.3 ms (Postgres). El planner Postgres usa
+   los índices nuevos (UUU-mig 044 + idx_user_data 045) más
+   agresivamente; el page management de Postgres también es más eficiente
+   con tablas grandes. **Confirma la elección de Postgres como backend
+   recomendado para deployments con catálogos IPTV grandes.**
+
+2. **SQLite bate a Postgres en datasets pequeños / Home rails.**
+   `HomeRepository.Trending` con 500 items: SQLite 0.8 ms vs Postgres
+   2.7 ms (+241 %). El network roundtrip (~0.3-0.5 ms) + planner overhead
+   dominan cuando el query real costaría microsegundos. Cuando el dataset
+   crece (2 000 items), Postgres recupera (-11 %). **Para deployments
+   single-user con < 1 000 items, SQLite es defensible.**
+
+3. **`ListByLibraryPaginated` es ≈ igual en ambos backends a 5 k rows.**
+   La ventaja del index lookup + LIMIT en Postgres se compensa con el
+   roundtrip cost. La mejora real (memoria/allocs ×118) se mantiene
+   en ambos.
+
+4. **El índice #2 (idx_user_data_last_played_at) escala MEJOR en Postgres
+   que en SQLite** (-17 % vs -8 % a 5 000 rows). Era la hipótesis del
+   commit `e079038` ("en producción con tablas más grandes el beneficio
+   escala"). Postgres + dataset 5k ya muestra el doble de mejora que
+   SQLite mismo dataset — confirma la dirección, no la magnitud absoluta
+   (en producción con 50 k+ rows el efecto debería ser aún mayor en
+   Postgres).
+
+5. **Postgres tiene MENOS allocs/op en general.** El driver pgx hace
+   menos string copies que modernc.org/sqlite — `ListByLibrary 5k` baja
+   de 149 019 allocs (SQLite) → 115 024 (Postgres). El sqlc-generated
+   code es el mismo; el driver del backend hace la diferencia. Bueno
+   saber: parte del coste "30 allocs/row" que vi en el reporte original
+   es driver-dependent, no fundamental al code path.
+
+### Implicación para producción
+
+- **Deployment recomendado por carga**:
+  - Single-user, < 1 000 items + < 1 000 canales: SQLite es óptimo.
+  - Multi-user, > 1 000 items o > 1 000 canales: Postgres ya bate a
+    SQLite en los hot paths que más se llaman.
+  - IPTV con catálogos grandes (5 000+ canales por playlist): Postgres
+    obligatorio si la rail LiveTV se carga frecuente.
+
+- **Re-evaluar las prioridades del reporte original**:
+  - El #1 (paginación) sigue siendo importante en ambos backends — la
+    palanca real es memoria/GC pressure, no tiempo.
+  - El #2 (índice user_data) tiene más impacto en Postgres que en
+    SQLite — vale la pena en cualquier caso, escala mejor.
+  - UUU-mig (índice channels) similar: efectivo en ambos, mejor en
+    Postgres.
+
 ## Lo que NO se midió aquí (siguiente baseline si interesa)
 
 - **HTTP boundary**: estos benches son al repo, no al endpoint
@@ -193,8 +294,10 @@ servicio para usar la nueva primitiva. Decisiones de UX requeridas:
   query. Diferente shape de medición.
 - **Image pipeline**: blurhash + dominant color extraction. CPU-bound,
   no DB-bound.
-- **Postgres**: estos benches son SQLite. Postgres puede comportarse
-  distinto en el sort y el CTE.
+- **Postgres tuning real**: el bench corre contra un Postgres con
+  defaults (256 MB shared_buffers, autovacuum default). Tuning de
+  producción (más buffers, workers, prepared statements) cambiaría
+  los números.
 
 Para todo lo anterior, el approach correcto es `pprof` contra una
 carga real, no benchmarks sintéticos.
