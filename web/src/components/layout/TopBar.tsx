@@ -11,10 +11,9 @@ import {
   Smartphone,
   UserCog,
 } from "lucide-react";
-import { useProfiles } from "@/api/hooks";
+import { useMe, useProfiles } from "@/api/hooks";
 import { useAuthStore } from "@/store/auth";
-import { getInitials } from "@/utils/userDisplay";
-import { avatarColorForUser } from "@/utils/avatarColor";
+import { UserAvatar } from "@/components/common";
 import { BrandWordmark } from "./BrandWordmark";
 import { SearchBar } from "./SearchBar";
 import { MainNav } from "./MainNav";
@@ -45,7 +44,10 @@ export function TopBar({ onMobileMenuClick }: TopBarProps) {
     }
   };
 
-  const initials = getInitials(user);
+  // No calculamos iniciales aquí — UserAvatar las deriva sólo
+  // cuando el usuario no tiene foto subida. El componente vive
+  // dentro de UserAvatarMenu y se entera del color/imagen vía
+  // useMe (datos frescos en lugar del cache de login).
 
   return (
     <header
@@ -112,7 +114,6 @@ export function TopBar({ onMobileMenuClick }: TopBarProps) {
       {/* User avatar dropdown — single home for all personal/admin actions */}
       <UserAvatarMenu
         user={user}
-        initials={initials}
         onLogout={() => {
           logout();
           navigate("/login");
@@ -127,12 +128,10 @@ export function TopBar({ onMobileMenuClick }: TopBarProps) {
 
 function UserAvatarMenu({
   user,
-  initials,
   isAdmin,
   onLogout,
 }: {
   user: { display_name?: string | null; username: string; role: string } | null;
-  initials: string;
   isAdmin: boolean;
   onLogout: () => void;
 }) {
@@ -159,23 +158,23 @@ function UserAvatarMenu({
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [open]);
 
-  // Solid avatar colour deterministically derived from the username so
-  // the same user reads identical across every device with no DB
-  // round-trip. Falls through to the first palette entry while the
-  // /me query is still resolving so the circle never pops in blank.
-  const palette = avatarColorForUser(user);
+  // useMe da datos frescos (incluye avatar_image_url cuando el usuario
+  // sube foto desde Settings); useAuthStore.user es el cache del login
+  // y no incluye la foto, así que sirve sólo de fallback para el
+  // username/role mientras /me todavía está resolviendo.
+  const { data: me } = useMe();
+  const avatarUser = me ?? (user ? { username: user.username, display_name: user.display_name ?? "" } : null);
 
   return (
     <div ref={ref} className="relative flex-shrink-0">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="relative flex items-center justify-center h-9 w-9 rounded-full text-[12px] font-semibold text-white ring-1 ring-white/15 hover:ring-white/35 transition-all"
-        style={{ background: palette.background }}
+        className="relative flex items-center justify-center h-9 w-9 rounded-full ring-1 ring-white/15 hover:ring-white/35 transition-all"
         aria-label={t("topbar.userMenu")}
         aria-haspopup="menu"
         aria-expanded={open}
       >
-        {initials}
+        <UserAvatar user={avatarUser} size="md" />
         <span
           className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-bg-base"
           style={{ background: "var(--color-success)" }}
