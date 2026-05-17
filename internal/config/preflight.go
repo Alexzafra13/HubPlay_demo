@@ -9,21 +9,20 @@ import (
 	"path/filepath"
 )
 
-// Preflight runs the runtime checks that Validate (schema) cannot cover:
-// external binaries present on PATH, filesystem permissions, etc.
+// Preflight: checks runtime que Validate (schema) no cubre — binarios en
+// PATH, permisos de FS, etc.
 //
-// Called at startup right after Load and before any service is
-// constructed, so configuration problems surface as a clear boot error
-// instead of as an opaque 500 during the first user request.
+// Se llama tras Load y antes de construir services, así un problema de
+// config sale como error de boot claro y no como 500 opaco en el primer
+// request.
 //
-// Every check runs regardless of previous failures — operators shouldn't
-// have to fix problems one boot at a time. Errors are combined with
-// errors.Join so the message prints all of them at once.
+// Cada check corre aunque otros fallen — el operador no debería arreglar
+// problemas boot a boot. errors.Join junta todos los mensajes.
 func (c *Config) Preflight(logger *slog.Logger) error {
 	var errs []error
 
-	// External binaries. Streaming is the core feature; missing ffmpeg is
-	// not a warning, it's a fatal.
+	// Binarios externos. Streaming es la feature core; sin ffmpeg es fatal,
+	// no warning.
 	for _, bin := range []string{"ffmpeg", "ffprobe"} {
 		if _, err := exec.LookPath(bin); err != nil {
 			errs = append(errs, fmt.Errorf("%s not found in PATH (required for streaming)", bin))
@@ -34,10 +33,9 @@ func (c *Config) Preflight(logger *slog.Logger) error {
 		}
 	}
 
-	// Database directory: Validate() already checks existence. Preflight
-	// adds the actual write-permission check, which is what matters in
-	// practice on Docker with a read-only bind mount or a volume owned by
-	// the wrong uid.
+	// Dir de DB: Validate() ya chequea existencia. Aquí va el check real de
+	// write — lo que importa en Docker con bind-mount RO o volumen del uid
+	// equivocado.
 	if c.Database.Driver == "sqlite" && c.Database.Path != "" {
 		dir := filepath.Dir(c.Database.Path)
 		if err := checkWritableDir(dir); err != nil {
@@ -45,10 +43,9 @@ func (c *Config) Preflight(logger *slog.Logger) error {
 		}
 	}
 
-	// Transcode cache directory. If the operator overrode it, require the
-	// full path to already be usable; otherwise we fall back to the
-	// default under the user's home and create it proactively so the
-	// first transcode doesn't block on MkdirAll failures later.
+	// Dir de cache de transcode. Si el operador lo override-ó, debe estar
+	// ya usable; si no, fallback al default bajo $HOME y lo creamos ya para
+	// que el primer transcode no falle en MkdirAll.
 	cacheDir := c.Streaming.EffectiveCacheDir()
 	if cacheDir == "" {
 		errs = append(errs, errors.New("streaming.cache_dir: cannot resolve default (no home directory)"))
@@ -59,11 +56,9 @@ func (c *Config) Preflight(logger *slog.Logger) error {
 	return errors.Join(errs...)
 }
 
-// EffectiveCacheDir returns CacheDir if set, otherwise the default
-// location under the current user's home. Shared between preflight and
-// stream.Manager so both agree on where transcodes land. An empty return
-// means the default could not be resolved (no home dir); callers should
-// treat that as a hard configuration error.
+// EffectiveCacheDir: CacheDir si está, si no el default bajo $HOME.
+// Compartido entre preflight y stream.Manager para que coincidan.
+// "" significa que no se pudo resolver el default (sin home) — fatal.
 func (s StreamingConfig) EffectiveCacheDir() string {
 	if s.CacheDir != "" {
 		return s.CacheDir
@@ -75,10 +70,9 @@ func (s StreamingConfig) EffectiveCacheDir() string {
 	return filepath.Join(home, ".hubplay", "cache", "transcode")
 }
 
-// checkWritableDir ensures dir exists (creating it if needed) and that we
-// can actually write in it. A real write probe is the only portable
-// signal — mode bits don't account for ACLs, immutable flags, bind
-// mounts, stale SMB sessions, etc.
+// checkWritableDir: asegura que existe (lo crea si falta) y que podemos
+// escribir. Un write probe real es la única señal portable — los mode bits
+// no cubren ACLs, flags immutable, bind mounts, sesiones SMB stale, etc.
 func checkWritableDir(dir string) error {
 	if dir == "" {
 		return errors.New("empty path")

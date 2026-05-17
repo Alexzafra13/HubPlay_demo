@@ -7,23 +7,18 @@ import (
 	"time"
 )
 
-// RestartRequester triggers a graceful self-shutdown from a handler.
+// RestartRequester: dispara graceful shutdown desde un handler.
 //
-// Under Docker (the deployment shape this project targets) the
-// `restart: unless-stopped` policy brings the container back up
-// automatically, which is what makes the admin "Restart" button a
-// real button — the operator does not have to touch the host shell
-// to apply a config change that requires re-init (driver swap, JWT
-// rotation seeds, etc.).
+// En Docker (el target del proyecto) `restart: unless-stopped` resube el
+// container — eso convierte el botón admin "Reiniciar" en una acción real
+// sin que el operador toque el shell del host.
 //
-// The trigger is one-shot: subsequent calls are silent no-ops so a
-// double-click on the panel or a retry from a flaky proxy can't
-// schedule two cancellations.
+// Trigger one-shot: llamadas posteriores son no-op silenciosas (un doble
+// click o retry de proxy flaky no programa dos cancels).
 //
-// The delay before cancel gives the HTTP handler a chance to flush
-// the JSON 202 response — without it the operator sees a connection
-// reset on the restart click, which looks like a failure even though
-// the server is shutting down correctly.
+// El delay antes de cancel da tiempo al handler a flushear el 202 — sin él
+// el operador ve connection reset, que parece error aunque el shutdown
+// vaya bien.
 type RestartRequester struct {
 	cancel    context.CancelFunc
 	delay     time.Duration
@@ -31,9 +26,8 @@ type RestartRequester struct {
 	logger    *slog.Logger
 }
 
-// NewRestartRequester wires the cancel function the main run loop
-// listens on. Delay is the wait before cancel fires; 100ms is enough
-// for any reasonable HTTP framework to flush the response.
+// NewRestartRequester: cablea el cancel que escucha el run loop principal.
+// 100 ms basta para que cualquier framework HTTP flushee la respuesta.
 func NewRestartRequester(cancel context.CancelFunc, logger *slog.Logger) *RestartRequester {
 	return &RestartRequester{
 		cancel: cancel,
@@ -42,10 +36,8 @@ func NewRestartRequester(cancel context.CancelFunc, logger *slog.Logger) *Restar
 	}
 }
 
-// Request schedules a graceful shutdown after the configured delay.
-// Idempotent — subsequent calls return false and do not re-trigger.
-// Reason is recorded in the log line so the operator can grep for
-// what flipped the switch.
+// Request: programa shutdown tras el delay. Idempotente — siguientes calls
+// devuelven false. `reason` queda en el log para greppear qué disparó.
 func (r *RestartRequester) Request(reason string) bool {
 	if !r.triggered.CompareAndSwap(false, true) {
 		return false

@@ -4,24 +4,16 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-// FederationStatsSource is the minimal view of federation.Manager the
-// observability layer needs to read live gauge values. Declared with
-// three plain int accessors (rather than a shared struct) so the
-// federation package does not need to import observability — the
-// dependency arrow stays one-way: observability → federation.
+// FederationStatsSource: vista mínima de federation.Manager con 3 accessors
+// para mantener el arrow one-way (observability → federation).
 type FederationStatsSource interface {
 	PairedPeers() int
 	PeerStreamSessions() int
 	NonceCacheSize() int
 }
 
-// RegisterFederationGauges wires three GaugeFuncs sourced live from
-// the manager. GaugeFunc avoids the drift risk of a regular Gauge we
-// would have to .Set() after every mutation — the manager's in-memory
-// state is the source of truth, queried once per scrape.
-//
-// Returns an error on duplicate registration (typically a test misuse).
-// Safe to pass nil src or nil m: both short-circuit to no-op.
+// RegisterFederationGauges: 3 GaugeFuncs leídos en vivo del manager.
+// GaugeFunc evita drift por Set() olvidado en refactors. nil src/m → no-op.
 func RegisterFederationGauges(m *Metrics, src FederationStatsSource) error {
 	if m == nil || src == nil {
 		return nil
@@ -57,16 +49,14 @@ func RegisterFederationGauges(m *Metrics, src FederationStatsSource) error {
 	return nil
 }
 
-// FederationSink adapts Metrics to the federation.MetricsSink
-// interface, mirroring the StreamSink pattern. Kept in this package
-// so the federation package remains free of Prometheus.
+// FederationSink: adapta Metrics a federation.MetricsSink. Vive aquí para
+// que federation no importe Prometheus (espejo del patrón de StreamSink).
 type FederationSink struct {
 	m *Metrics
 }
 
-// NewFederationSink builds a sink backed by the given Metrics. Passing
-// a nil Metrics returns a nil sink; the federation Manager's
-// SetMetricsSink replaces a nil with its own no-op.
+// NewFederationSink: nil Metrics → nil sink (federation.Manager.SetMetricsSink
+// lo reemplaza por su propio no-op).
 func NewFederationSink(m *Metrics) *FederationSink {
 	if m == nil {
 		return nil

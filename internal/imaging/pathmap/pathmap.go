@@ -1,15 +1,16 @@
-// Package pathmap persists the mapping from an image ID to its on-disk path.
+// Package pathmap guarda la correspondencia entre el ID de una imagen y
+// la ruta donde está realmente en disco.
 //
-// The upload handler stores each uploaded/downloaded image under
-// <imageDir>/<itemID>/<filename> but the public URL is keyed by the image's
-// UUID. Since filenames are content-addressed (and can't be derived back from
-// the ID alone), we write one tiny file per image under a .mappings/ directory
-// that contains just the absolute on-disk path. Readers load the mapping, then
-// stream the referenced file.
+// Cada imagen subida o descargada vive en una carpeta por elemento, pero
+// la URL pública usa el UUID de la imagen. Como el nombre del fichero
+// depende del contenido y no se puede deducir desde el ID, escribimos un
+// fichero diminuto por cada imagen dentro de `.mappings/` que contiene
+// sólo la ruta absoluta. Para servir una imagen, primero se carga ese
+// mapping y luego se lee el fichero que apunta.
 //
-// Returning errors — rather than silently swallowing them — is the intentional
-// change vs. the previous ad-hoc helpers in handlers/image.go: callers can now
-// log a warning without hiding real failures (full disk, permission denied).
+// Aquí devolvemos errores en vez de tragarlos (como hacían los antiguos
+// helpers en `handlers/image.go`) para que quien llame pueda loguear el
+// problema sin esconder fallos reales como disco lleno o falta de permisos.
 package pathmap
 
 import (
@@ -22,39 +23,42 @@ import (
 	"github.com/google/uuid"
 )
 
-// ErrInvalidID is returned when an ID fails UUID validation. The store never
-// touches the filesystem for invalid IDs, so callers can use this as a
-// boundary check against path-traversal attempts like "../etc/passwd".
+// ErrInvalidID se devuelve cuando el ID no es un UUID válido. Como no
+// llegamos a tocar el sistema de ficheros para IDs inválidos, sirve
+// como protección contra intentos de salir del directorio raíz
+// (por ejemplo, IDs como "../etc/passwd").
 var ErrInvalidID = errors.New("pathmap: invalid id")
 
-// ErrNotFound se devuelve por Read cuando no existe mapping para
-// el ID dado. Envuelve os.ErrNotExist para que los callers puedan
-// testear con errors.Is(err, fs.ErrNotExist).
+// ErrNotFound se devuelve cuando no existe mapping para ese ID. Envuelve
+// el error estándar de "fichero no existe" para poder comprobarlo con
+// `errors.Is(err, fs.ErrNotExist)`.
 var ErrNotFound = fmt.Errorf("pathmap: mapping not found: %w", os.ErrNotExist)
 
-// ErrCorruptMapping se devuelve cuando el fichero de mapping
-// existe pero su contenido no es un path absoluto bien formado:
-// vacío, relativo, o con componentes `..`. Defense-in-depth de
-// ADR-021 — el handler ya valida `isPathUnderImageDir` antes de
-// servir, pero la primera línea es que `Read` no devuelva paths
-// inseguros (audit olor HHH).
+// ErrCorruptMapping se devuelve cuando el fichero de mapping existe
+// pero su contenido no es una ruta absoluta bien formada (está vacía,
+// es relativa, o contiene `..`). Es una defensa extra: aunque el
+// handler ya valida la ruta antes de servir, conviene que la lectura
+// nunca devuelva una ruta peligrosa de entrada.
 var ErrCorruptMapping = errors.New("pathmap: corrupt mapping")
 
-// Store persists image-id → on-disk-path mappings under a single directory.
-// It is safe for concurrent use — all operations are backed by plain
-// filesystem calls with no shared in-memory state.
+// Store guarda los mappings ID → ruta en disco bajo un único
+// directorio. Es seguro usarlo desde varias goroutines a la vez
+// porque sólo hace llamadas al sistema de ficheros, sin estado en
+// memoria.
 type Store struct {
-	dir string // directory that contains one file per mapping
+	dir string // un fichero por mapping
 }
 
-// New returns a Store that writes mappings under "<parent>/.mappings/".
-// The directory is created lazily on the first Write call.
+// New devuelve un Store que escribe los mappings dentro de
+// `<parent>/.mappings/`. El directorio se crea la primera vez que se
+// escribe.
 func New(parent string) *Store {
 	return &Store{dir: filepath.Join(parent, ".mappings")}
 }
 
-// Write records that imageID resolves to localPath. The directory is created
-// on demand. Returns ErrInvalidID for non-UUID imageIDs.
+// Write registra que `imageID` apunta a `localPath`. El directorio se
+// crea si no existe. IDs que no son UUID devuelven ErrInvalidID sin
+// tocar el disco.
 func (s *Store) Write(imageID, localPath string) error {
 	if err := validID(imageID); err != nil {
 		return err

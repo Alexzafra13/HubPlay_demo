@@ -13,21 +13,18 @@ import (
 	librarymodel "hubplay/internal/library/model"
 )
 
-// showCache: series + season rows ya conocidos durante un ScanLibrary.
-// Pre-poblado desde DB al arrancar y extendido on-the-fly por el walker.
+// showCache guarda en memoria las series y temporadas que ya conocemos
+// durante un scan, para no buscarlas en la BD una y otra vez.
 //
-// checkedEnrichment: dedupe per-scan del self-heal — sin él, una serie de
-// 100 caps quemaría 100 image-list lookups (uno por episode).
-//
-// Concurrencia: el cache es per-library, así dos scans paralelos en
-// libraries distintas no interleavan. El mutex es por simetría con el
-// callback de iteración (también single-threaded hoy, barato endurecerlo).
+// checkedEnrichment evita repetir el chequeo de metadatos faltantes: sin
+// él, una serie de 100 capítulos haría 100 consultas a la BD para
+// preguntar lo mismo.
 type showCache struct {
 	mu                      sync.Mutex
-	series                  map[string]string // seriesName → series item id
-	season                  map[string]string // "<seriesID>|<seasonNum>" → season item id
-	checkedEnrichment       map[string]bool   // series id → ya chequeado este scan
-	checkedSeasonEnrichment map[string]bool   // season id → ya chequeado este scan
+	series                  map[string]string // nombre de serie → id
+	season                  map[string]string // "<seriesID>|<num>" → id
+	checkedEnrichment       map[string]bool   // serie ya repasada en este scan
+	checkedSeasonEnrichment map[string]bool   // temporada ya repasada en este scan
 }
 
 func newShowCache() *showCache {
@@ -39,8 +36,8 @@ func newShowCache() *showCache {
 	}
 }
 
-// rememberSeries / rememberSeason: las llama la pasada inicial de DB para
-// sembrar el cache; el walker luego muta los mismos maps vía ensure*Row.
+// rememberSeries y rememberSeason rellenan el caché con lo que ya hay
+// en la BD al arrancar el scan.
 func (c *showCache) rememberSeries(name, id string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -57,20 +54,14 @@ func seasonKey(seriesID string, seasonNum int) string {
 	return seriesID + "|" + strconv.Itoa(seasonNum)
 }
 
-// ensureSeriesRow: id del row series matching, creándolo si falta, Y dispara
-// enrichment cuando falta metadata (brand new o pre-existente sin metadata).
-// Self-healing: una library scanneada sin TMDb completa posters automático
-// en el siguiente scan con TMDb — sin acción de admin.
+// ensureSeriesRow devuelve el id de la serie, creándola si no existe, y
+// además dispara la búsqueda de metadatos si no los tiene. Esto hace que
+// una biblioteca escaneada sin TMDb configurado se "cure sola" la
+// siguiente vez que escanee con TMDb disponible.
 //
-// Por qué metadata va a nivel series, no per-episode:
-//   - El usuario abre /series primero; necesita poster + backdrop.
-//   - Search TMDb per-episode destroza títulos ("Breaking.Bad.S01E01.Pilot"
-//     → 0 matches). Search a nivel series usa el dir limpio ("Breaking Bad").
-//   - El image refresher itera root items (parent_id IS NULL); sin enrichment
-//     a nivel series, external_ids quedan vacíos y "Refresh images" reporta 0.
-//
-// Best-effort: provider caído / sin API key / sin match → row visible sin
-// metadata, el siguiente scan retry.
+// Los metadatos se buscan a nivel serie y no a nivel episodio porque la
+// vista /series necesita el póster, y porque buscar episodio a episodio
+// con títulos como "Breaking.Bad.S01E01" no encuentra nada en TMDb.
 func (s *Scanner) ensureSeriesRow(ctx context.Context, lib *librarymodel.Library, cache *showCache, seriesName string) (string, error) {
 	cache.mu.Lock()
 	if id, ok := cache.series[seriesName]; ok {
@@ -107,8 +98,9 @@ func (s *Scanner) ensureSeriesRow(ctx context.Context, lib *librarymodel.Library
 	return id, nil
 }
 
-// checkAndEnrichSeries: como máximo 1 vez per series per scan. Convierte
-// "100 enrichIfMissing per scan" en "1 per scan" en series largas.
+// checkAndEnrichSeries intenta rellenar metadatos como mucho una vez por
+// serie en cada scan. Sin esto, una serie de 100 capítulos haría 100
+// comprobaciones idénticas.
 func (s *Scanner) checkAndEnrichSeries(ctx context.Context, cache *showCache, seriesID string) {
 	cache.mu.Lock()
 	cache.checkedEnrichment[seriesID] = true
@@ -120,10 +112,9 @@ func (s *Scanner) checkAndEnrichSeries(ctx context.Context, cache *showCache, se
 	s.enrichIfMissing(ctx, item)
 }
 
-// ensureSeasonRow: idem para season bajo una series. Title default
-// "Season N" — TMDb lo sobreescribe en la misma call si hay API key
-// (nombres más amigables: "Specials", "The Final Chapter"). Self-heal
-// captura seasons creadas en scans previos sin TMDb.
+// ensureSeasonRow hace lo mismo que ensureSeriesRow pero para una
+// temporada. El título por defecto es "Temporada N"; TMDb lo cambia por
+// uno más bonito ("Especiales", "Capítulo final") si hay API key.
 func (s *Scanner) ensureSeasonRow(ctx context.Context, lib *librarymodel.Library, cache *showCache, seriesID string, seasonNum int) (string, error) {
 	key := seasonKey(seriesID, seasonNum)
 	cache.mu.Lock()
@@ -161,16 +152,16 @@ func (s *Scanner) ensureSeasonRow(ctx context.Context, lib *librarymodel.Library
 	cache.checkedSeasonEnrichment[id] = true
 	cache.mu.Unlock()
 
-	// Enrich síncrono al crear: TMDb da título limpio, overview, premiere,
-	// rating y poster en 1 sola call. La SeasonGrid renderiza bien ya en
-	// el primer hit tras el scan.
+	// Pedimos los metadatos a TMDb ya al crearla: en una sola llamada
+	// caen título, sinopsis, fecha, valoración y póster. Así la vista de
+	// temporadas se ve bien ya en la primera carga tras el scan.
 	s.enrichSeason(ctx, item, seriesID, seasonNum)
 	return id, nil
 }
 
-// checkAndEnrichSeason: espejo de checkAndEnrichSeries — máx. 1 enrichment
-// per season per scan. Sin esto, una season de 22 caps refetchearía TMDb
-// 22 veces.
+// checkAndEnrichSeason es el equivalente para temporadas: como mucho una
+// vez por temporada en cada scan. Sin esto, una temporada de 22
+// capítulos pediría 22 veces los mismos metadatos a TMDb.
 func (s *Scanner) checkAndEnrichSeason(ctx context.Context, cache *showCache, seasonID, seriesID string, seasonNum int) {
 	cache.mu.Lock()
 	cache.checkedSeasonEnrichment[seasonID] = true
@@ -179,7 +170,7 @@ func (s *Scanner) checkAndEnrichSeason(ctx context.Context, cache *showCache, se
 	if err != nil || item == nil {
 		return
 	}
-	// Solo re-enrich si la season sigue sin imágenes.
+	// Sólo lo reintentamos si la temporada sigue sin ninguna imagen.
 	imgs, err := s.images.ListByItem(ctx, seasonID)
 	if err == nil && len(imgs) > 0 {
 		return

@@ -8,33 +8,19 @@ import (
 	"math"
 )
 
-// ExtractDominantColors decodes raw image bytes and returns two CSS rgb()
-// strings — a vibrant accent and a dark-muted complement — suitable for
-// driving the SeriesHero gradient without a runtime palette extraction.
+// ExtractDominantColors devuelve dos colores CSS — uno vibrante y otro
+// apagado oscuro — que el frontend usa para pintar el degradado del hero
+// de cada serie/película sin tener que procesar la imagen en el navegador.
 //
-// Algorithm (deliberately tiny, no new deps):
+// El algoritmo es muy ligero a propósito: muestrea unos pocos píxeles a lo
+// largo de la imagen, los agrupa por color parecido, y elige dos ganadores:
+//   - el vibrante: el color más saturado dentro de un rango de luminosidad
+//     intermedia, para evitar zonas demasiado claras o demasiado oscuras.
+//   - el apagado oscuro: el color con tono más neutro entre los oscuros,
+//     para que se vea bien junto al fondo gris de la página.
 //
-//  1. Decode the image with the std-lib decoders already registered for
-//     blurhash. We sample pixels on a fixed grid (~32 across the longer
-//     axis) so cost stays O(1) regardless of image size.
-//  2. Bucket each pixel into a 16×16×16 RGB cube (4096 bins). Each bin
-//     accumulates an average colour and a count.
-//  3. Compute HSL (just S and L — we don't need hue) per bin and score
-//     each bin twice:
-//
-//       vibrant = saturation × count, restricted to mid-luminance
-//                 (0.20–0.80) so we don't pick out blown highlights or
-//                 jet-black pixels.
-//       muted   = (1 − saturation/2) × count, restricted to dark
-//                 luminance (≤ 0.40) so the panel-fade colour stays
-//                 readable next to the page background.
-//
-//     Both winners are rendered as "rgb(r, g, b)" strings — that's the
-//     literal shape the frontend feeds into a CSS custom property.
-//
-// Returns ("", "") when the decoder cannot understand the image (same
-// contract as ComputeBlurhash for non-PNG/JPEG inputs); callers persist
-// the empty values and the frontend falls back to runtime extraction.
+// Devuelve cadenas vacías si la imagen no se puede decodificar; en ese
+// caso el frontend extrae los colores al vuelo.
 func ExtractDominantColors(data []byte, logger *slog.Logger) (vibrant, muted string) {
 	img, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
@@ -53,8 +39,9 @@ func paletteFromImage(img image.Image) (vibrant, muted string) {
 		return "", ""
 	}
 
-	// Sample a ~32-cell grid along the longer axis. Caps the work at
-	// ~1024 pixel reads regardless of source size.
+	// Muestreamos unos 32 pasos a lo largo del eje más grande. Así el
+	// coste se mantiene constante (~1024 píxeles leídos) por mucho que
+	// crezca la imagen original.
 	long := w
 	if h > long {
 		long = h
@@ -74,7 +61,7 @@ func paletteFromImage(img image.Image) (vibrant, muted string) {
 		for x := bounds.Min.X; x < bounds.Max.X; x += step {
 			r16, g16, b16, a16 := img.At(x, y).RGBA()
 			if a16 < 0x8000 {
-				continue // skip mostly-transparent pixels
+				continue // píxel casi transparente, no nos sirve
 			}
 			r := int(r16 >> 8)
 			g := int(g16 >> 8)

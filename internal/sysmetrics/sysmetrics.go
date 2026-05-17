@@ -1,13 +1,9 @@
-// Package sysmetrics: sampler de CPU%/RAM + probe de modelos CPU/GPU para
-// el panel admin. Usa gopsutil (pure-Go, multiplataforma) + nvidia-smi opcional.
+// Package sysmetrics mide CPU y RAM del equipo y averigua el modelo de
+// CPU y GPU para mostrarlos en el panel admin. Usa gopsutil (que
+// funciona en Linux, Windows y macOS) y opcionalmente nvidia-smi.
 //
-// Sampler en background (no en el handler) por dos razones:
-//   - cpu.Percent() necesita 2 reads espaciados ≥100 ms; medir en el handler
-//     añadiría 100 ms a cada poll y serializaría samples tras la latencia.
-//   - cadencia fija independiente del polling del admin — la sparkline mantiene
-//     ritmo limpio aunque se cierre y reabra la página.
-//
-// Snapshot vía atomic.Value: reads del handler no bloquean al sampler ni viceversa.
+// La medida corre en segundo plano, no dentro del handler, para no
+// añadir latencia a cada llamada del panel.
 package sysmetrics
 
 import (
@@ -23,98 +19,83 @@ import (
 	"github.com/shirou/gopsutil/v4/mem"
 )
 
-// HostInfo: snapshot de un ciclo de probe. Mezcla campos estáticos (modelos,
-// RAM total) con live (CPU%, RAM used) para que el handler haga 1 sola lectura
-// atómica. Tags JSON → emitible directo al wire.
+// HostInfo es lo que el panel admin lee de una vez. Mezcla datos fijos
+// (modelo de CPU, RAM total) con datos vivos (uso de CPU y RAM).
 type HostInfo struct {
-	// CPUModel: ModelName del primer CPU físico vía cpu.Info()
-	// ("AMD Ryzen 5 5600..."). "" si el probe falla.
+	// Nombre del CPU. Vacío si no se pudo leer.
 	CPUModel string `json:"cpu_model"`
-	// CPUCoresPhysical: cores físicos (en hyper-threaded = mitad de los lógicos).
-	// gopsutil lo lee de /proc/cpuinfo o WMI. 0 si falla.
+	// Núcleos físicos. En procesadores con hyper-threading, la mitad
+	// de los lógicos. 0 si no se pudo leer.
 	CPUCoresPhysical int `json:"cpu_cores_physical"`
-	// CPUCoresLogical: threads lógicos (== runtime.NumCPU() casi siempre).
-	// Explícito para que la label diga "6 cores / 12 threads". Nunca 0 — fallback
-	// a runtime.NumCPU().
+	// Núcleos lógicos (hilos). El panel muestra "6 núcleos / 12 hilos".
 	CPUCoresLogical int `json:"cpu_cores_logical"`
-	// CPUPercent: utilización host-wide 0-100. Sample por tick; en el primer
-	// tick es 0 (necesita delta). Host-wide a propósito: "¿puedo añadir otro
-	// transcode?" depende de quién sea quien esté consumiendo, no solo hubplay.
+	// Uso de CPU del equipo entero (0-100). En el primer tick es 0
+	// porque hace falta un intervalo entre dos lecturas.
 	CPUPercent float64 `json:"cpu_percent"`
-	// RAMTotalBytes: estático durante la vida del proceso.
+	// RAM total. No cambia mientras corra el proceso.
 	RAMTotalBytes uint64 `json:"ram_total_bytes"`
-	// RAMUsedBytes: Total - Available. El campo "Used" de gopsutil engaña en
-	// Linux porque cuenta cache como usado; "Available" es la estimación honesta
-	// del kernel de "lo que se puede reclamar". Total-Available = lo que `free -h`
-	// reporta como used.
+	// RAM realmente en uso (no cuenta cache, igual que `free -h`).
 	RAMUsedBytes uint64 `json:"ram_used_bytes"`
-	// GPUModel: descripción de la NVIDIA probe (ej. "NVIDIA GeForce GTX 1660").
-	// "" en hosts sin NVIDIA (Intel/AMD/Apple Silicon no tienen probe estándar;
-	// los badges "VAAPI"/"VideoToolbox" los cubren igual).
+	// Modelo de GPU NVIDIA si la hay (ej. "NVIDIA GeForce GTX 1660").
+	// Vacío en equipos sin NVIDIA — para Intel/AMD/Apple no tenemos
+	// forma estándar de leerlo.
 	GPUModel string `json:"gpu_model"`
-	// GPUMemoryTotalBytes: VRAM de la primera NVIDIA. 0 si no hay.
+	// VRAM de la primera GPU NVIDIA. 0 si no hay.
 	GPUMemoryTotalBytes uint64 `json:"gpu_memory_total_bytes"`
-	// GPUDriverVersion: driver NVIDIA. "" en hosts no-NVIDIA.
+	// Versión del driver NVIDIA. Vacío en equipos no-NVIDIA.
 	GPUDriverVersion string `json:"gpu_driver_version"`
 }
 
-// Sampler: probe periódico en background; expone el último snapshot.
-// New() → Start(ctx) → Snapshot().
+// Sampler mide el equipo cada cierto tiempo y expone la última lectura.
+// Flujo: New() → Start(ctx) → Snapshot().
 type Sampler struct {
-	// snapshot: último HostInfo. atomic.Value → reads del handler no compiten
-	// con writes del sampler.
+	// Última lectura completa.
 	snapshot atomic.Value // HostInfo
 	interval time.Duration
 	logger   *slog.Logger
-	// nvidiaSMI: path al binario nvidia-smi. "" desactiva el probe NVIDIA.
-	// Capturado en construcción para no repetir LookPath en cada probe.
+	// Ruta al binario nvidia-smi. Vacío si no está instalado.
 	nvidiaSMI string
-	// staticInfo: campos que no cambian en la vida del proceso. Capturados 1
-	// vez en Start() para que el tick no repita probes lentos (cpu.Info()
-	// spawnea wmic en Windows).
+	// Datos que no cambian durante la vida del proceso (modelos, RAM total).
+	// Se leen una sola vez al arrancar para no repetir trabajo lento.
 	staticInfo HostInfo
 }
 
-// New: interval entre samples (default 5 s = cadencia del panel admin).
-// Construcción barata — los probes lentos (cpu.Info, nvidia-smi) corren en
-// Start(), así un test puede New() sin Start().
+// New construye un Sampler. interval es cada cuánto se toma muestra
+// (por defecto, 5 s). La construcción es barata — el trabajo lento se
+// hace en Start(), así un test puede crear uno sin arrancarlo.
 func New(interval time.Duration, logger *slog.Logger) *Sampler {
 	if interval <= 0 {
 		interval = 5 * time.Second
 	}
-	// LookPath 1 vez en construcción — el probe sigue corriendo aunque exista
-	// el binario (puede haber driver sin tarjeta).
 	smi, _ := exec.LookPath("nvidia-smi")
 	s := &Sampler{
 		interval:  interval,
 		logger:    logger.With("module", "sysmetrics"),
 		nvidiaSMI: smi,
 	}
-	// Seed con fallback a runtime.NumCPU() para que un Snapshot() pre-Start()
-	// no devuelva struct vacío.
+	// Valor inicial: al menos el número de núcleos lógicos, por si alguien
+	// llama a Snapshot() antes de Start().
 	s.snapshot.Store(HostInfo{
 		CPUCoresLogical: runtime.NumCPU(),
 	})
 	return s
 }
 
-// Start: bloquea brevemente para los probes estáticos (modelos, RAM total) y
-// para un primer probe dinámico, así el primer Snapshot() ya viene poblado.
-// Goroutine periódica corre hasta cancel del ctx.
-//
-// No idempotente: 2º Start es no-op pero la vida de la goroutine va atada
-// al primer ctx.
+// Start arranca el muestreo en segundo plano. Bloquea un momento al
+// principio para leer los datos estáticos y una primera muestra, así el
+// primer Snapshot() ya devuelve algo útil.
 func (s *Sampler) Start(ctx context.Context) {
 	s.staticInfo = s.probeStatic()
-	// Probe dinámico inicial: cpu.Percent con interval>0 bloquea hasta tener
-	// un delta. Pagamos el peaje al boot 1 vez en vez de en cada handler.
+	// La primera lectura de CPU necesita un intervalo para tener
+	// referencia; lo pagamos una vez al arrancar.
 	first := s.probeDynamic(250 * time.Millisecond)
 	s.snapshot.Store(s.merge(first))
 
 	go s.run(ctx)
 }
 
-// Snapshot: thread-safe y no-bloqueante.
+// Snapshot devuelve la última lectura. Es seguro llamarla desde cualquier
+// sitio sin bloqueo.
 func (s *Sampler) Snapshot() HostInfo {
 	if v := s.snapshot.Load(); v != nil {
 		return v.(HostInfo)
@@ -122,9 +103,8 @@ func (s *Sampler) Snapshot() HostInfo {
 	return HostInfo{CPUCoresLogical: runtime.NumCPU()}
 }
 
-// run: loop periódico hasta cancel del ctx. Cada tick mide CPU% (delta vs
-// tick previo) + RAM used. Los campos estáticos vienen de s.staticInfo —
-// los probes lentos no se repiten.
+// run es el bucle periódico que mide CPU y RAM. Termina cuando se
+// cancela el contexto.
 func (s *Sampler) run(ctx context.Context) {
 	t := time.NewTicker(s.interval)
 	defer t.Stop()
@@ -139,8 +119,8 @@ func (s *Sampler) run(ctx context.Context) {
 	}
 }
 
-// probeStatic: probes lentos one-shot. Fallos degradan suave (campos en zero
-// value → el panel pinta "—" en esa fila).
+// probeStatic lee los datos lentos que sólo se calculan una vez. Si algo
+// falla, el campo se queda a cero y el panel pinta "—" en esa fila.
 func (s *Sampler) probeStatic() HostInfo {
 	info := HostInfo{
 		CPUCoresLogical: runtime.NumCPU(),
@@ -148,8 +128,8 @@ func (s *Sampler) probeStatic() HostInfo {
 
 	if cpus, err := cpu.Info(); err == nil && len(cpus) > 0 {
 		info.CPUModel = strings.TrimSpace(cpus[0].ModelName)
-		// Cores físicos: gopsutil suma Cores de cada entry. Single-socket = 1
-		// entry, dual-socket = 2.
+		// Equipos con dos zócalos devuelven una entrada por zócalo;
+		// sumamos para sacar el total de núcleos físicos.
 		var physical int
 		for _, c := range cpus {
 			physical += int(c.Cores)
@@ -159,14 +139,13 @@ func (s *Sampler) probeStatic() HostInfo {
 		s.logger.Debug("cpu.Info failed", "error", err)
 	}
 
-	// RAM total estático; Used + Available vienen del probe dinámico.
 	if vm, err := mem.VirtualMemory(); err == nil {
 		info.RAMTotalBytes = vm.Total
 	} else {
 		s.logger.Debug("mem.VirtualMemory failed", "error", err)
 	}
 
-	// Probe NVIDIA best-effort; sin nvidia-smi → campos GPU vacíos.
+	// Si no hay nvidia-smi, los campos GPU se quedan vacíos.
 	if s.nvidiaSMI != "" {
 		if model, vram, driver := probeNVIDIA(s.nvidiaSMI, s.logger); model != "" {
 			info.GPUModel = model
@@ -178,10 +157,10 @@ func (s *Sampler) probeStatic() HostInfo {
 	return info
 }
 
-// probeDynamic: CPU% (host-wide) + RAM used. cpuInterval=0 → delta desde la
-// llamada previa (o 0 en la primera). >0 → bloquea ese tiempo y devuelve la
-// media. El tick pasa 0; Start() pasa intervalo corto para que el primer
-// snapshot no sea 0.
+// probeDynamic lee uso de CPU y RAM. Si cpuInterval es 0, calcula el
+// uso respecto a la lectura anterior; si es mayor, bloquea ese tiempo
+// y devuelve la media. El bucle pasa 0; Start() pasa un intervalo
+// corto para que la primera muestra no sea 0.
 func (s *Sampler) probeDynamic(cpuInterval time.Duration) HostInfo {
 	var dyn HostInfo
 	if pcts, err := cpu.Percent(cpuInterval, false); err == nil && len(pcts) > 0 {
@@ -190,7 +169,6 @@ func (s *Sampler) probeDynamic(cpuInterval time.Duration) HostInfo {
 		s.logger.Debug("cpu.Percent failed", "error", err)
 	}
 	if vm, err := mem.VirtualMemory(); err == nil {
-		// Total - Available = columna "used" de `free -h` (ver HostInfo.RAMUsedBytes).
 		if vm.Total >= vm.Available {
 			dyn.RAMUsedBytes = vm.Total - vm.Available
 		}
@@ -198,7 +176,7 @@ func (s *Sampler) probeDynamic(cpuInterval time.Duration) HostInfo {
 	return dyn
 }
 
-// merge: junta static + dynamic en un solo snapshot — Snapshot() es 1 read.
+// merge junta los datos fijos y los vivos en una sola lectura.
 func (s *Sampler) merge(dyn HostInfo) HostInfo {
 	out := s.staticInfo
 	out.CPUPercent = dyn.CPUPercent
@@ -206,14 +184,12 @@ func (s *Sampler) merge(dyn HostInfo) HostInfo {
 	return out
 }
 
-// probeNVIDIA: 1 sola llamada a nvidia-smi en CSV. Devuelve "" / 0 ante
-// cualquier fallo. No retry: si falló al boot, la GPU no es usable para
-// HubPlay igual.
+// probeNVIDIA llama a nvidia-smi una sola vez y devuelve modelo, VRAM
+// y versión del driver. Si algo falla, devuelve valores vacíos sin
+// reintentar.
 //
-// Output (--format=csv,noheader,nounits):
+// La salida de nvidia-smi tiene este aspecto:
 //	NVIDIA GeForce GTX 1660, 6144, 560.35.03
-//
-// Memory en MiB → bytes para consistencia con RAMTotalBytes.
 func probeNVIDIA(smiPath string, logger *slog.Logger) (model string, vramBytes uint64, driver string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -235,7 +211,7 @@ func probeNVIDIA(smiPath string, logger *slog.Logger) (model string, vramBytes u
 		return "", 0, ""
 	}
 	model = strings.TrimSpace(fields[0])
-	// MiB → bytes. Si no parsea, el panel pinta "—" en VRAM.
+	// nvidia-smi devuelve la VRAM en MiB; la convertimos a bytes.
 	if mib, perr := atoiUint(strings.TrimSpace(fields[1])); perr == nil {
 		vramBytes = mib * 1024 * 1024
 	}
@@ -243,7 +219,8 @@ func probeNVIDIA(smiPath string, logger *slog.Logger) (model string, vramBytes u
 	return model, vramBytes, driver
 }
 
-// atoiUint: parse de uint sin importar strconv (input acotado, nunca usuario).
+// atoiUint convierte un entero positivo sin tener que importar strconv;
+// la entrada viene de nvidia-smi, nunca del usuario.
 func atoiUint(s string) (uint64, error) {
 	if s == "" {
 		return 0, errEmptyNumber
@@ -258,7 +235,7 @@ func atoiUint(s string) (uint64, error) {
 	return n, nil
 }
 
-// Sentinels package-local — fuera del hot path.
+// Errores locales del paquete, fuera de la ruta caliente.
 var (
 	errEmptyNumber = &probeError{"empty number"}
 	errBadNumber   = &probeError{"non-numeric byte"}

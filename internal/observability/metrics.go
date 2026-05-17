@@ -1,20 +1,14 @@
-// Package observability owns the Prometheus registry and the metrics exposed
-// at /metrics.
+// Package observability: registry Prometheus + métricas que expone /metrics.
 //
-// Design decisions:
-//
-//   - A dedicated registry (not prometheus.DefaultRegisterer) keeps tests
-//     isolated: each Metrics instance is self-contained so a parallel test
-//     cannot accidentally collide with another's counter state.
-//   - Labels are kept strictly low-cardinality. The HTTP route label is the
-//     chi route pattern ("/libraries/{id}"), never the raw path, because the
-//     raw path produces one time series per item id and blows up storage.
-//   - Histogram buckets are hand-picked for an HTTP API (sub-5ms up to 10s);
-//     defaults (0.005..10) are fine for general RPCs but waste resolution at
-//     both ends for our traffic mix (sub-ms health checks vs long transcodes).
-//   - Collectors are created at construction time and exposed as typed
-//     struct fields — callers call metrics.HTTPRequests.WithLabelValues(...).Inc()
-//     directly, no map lookups, no string-keyed indirection.
+// Decisiones:
+//   - Registry dedicado (no DefaultRegisterer) para aislar tests paralelos.
+//   - Labels low-cardinality. La label `route` es chi RoutePattern
+//     ("/libraries/{id}"), nunca el path crudo — el crudo crea 1 serie por
+//     item id y revienta el storage.
+//   - Buckets de histogram a mano para una API HTTP (sub-5ms hasta 10s); los
+//     default (0.005..10) malgastan resolución en ambos extremos.
+//   - Collectors expuestos como struct fields tipados — no map lookup ni
+//     indirección por string.
 package observability
 
 import (
@@ -24,8 +18,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus/collectors"
 )
 
-// Metrics is the collection of Prometheus collectors used across HubPlay.
-// It owns a private registry so tests and production do not share state.
+// Metrics: collectors Prometheus. Registry privado — tests y prod no
+// comparten estado.
 type Metrics struct {
 	Registry *prometheus.Registry
 
@@ -48,8 +42,8 @@ type Metrics struct {
 	FederationOutboundRequests  *prometheus.CounterVec
 }
 
-// NewMetrics creates and registers every collector. It returns an error if
-// any registration fails (duplicate name, typically a test misuse).
+// NewMetrics: crea y registra todos los collectors. Error si choca un nombre
+// (típicamente mal uso en tests).
 func NewMetrics(version string) (*Metrics, error) {
 	reg := prometheus.NewRegistry()
 
@@ -76,8 +70,8 @@ func NewMetrics(version string) (*Metrics, error) {
 			prometheus.HistogramOpts{
 				Name: "hubplay_http_request_duration_seconds",
 				Help: "HTTP request duration, in seconds.",
-				// Buckets tuned for an HTTP API: very fast (cached health
-				// checks) to very slow (first transcode manifest wait ~10s).
+				// Health checks cacheados sub-ms hasta espera del primer
+				// manifest de transcode ~10s.
 				Buckets: []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10},
 			},
 			[]string{"method", "route"},
@@ -143,9 +137,8 @@ func NewMetrics(version string) (*Metrics, error) {
 			prometheus.HistogramOpts{
 				Name: "hubplay_federation_handshake_duration_seconds",
 				Help: "Outbound + inbound federation handshake latency, by direction and outcome.",
-				// Wider than HTTP API buckets — handshakes do crypto +
-				// DB + at least one network round-trip; sub-50ms is a
-				// LAN peer, multi-second is a slow WAN one.
+				// Más amplio que HTTP — handshakes hacen crypto + DB + ≥1
+				// round-trip; sub-50ms = peer LAN, multi-segundo = WAN lento.
 				Buckets: []float64{0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30},
 			},
 			// direction: "outbound" | "inbound"; outcome: "ok" | "error"
@@ -163,8 +156,8 @@ func NewMetrics(version string) (*Metrics, error) {
 		),
 	}
 
-	// Register everything. Any failure (e.g. name collision in tests) is
-	// returned so callers can decide to fail fast at startup.
+	// Registra todo. Fallo (p.ej. choque de nombre en tests) lo devolvemos
+	// para que el caller falle al boot.
 	for _, c := range []prometheus.Collector{
 		m.BuildInfo,
 		m.HTTPRequests,
@@ -178,8 +171,8 @@ func NewMetrics(version string) (*Metrics, error) {
 		m.AuthKeyRotations,
 		m.FederationHandshakeDuration,
 		m.FederationOutboundRequests,
-		// Also surface process + Go runtime metrics — free and universally
-		// useful (goroutines, gc pauses, fds).
+		// Process + Go runtime — gratis y universalmente útil (goroutines, gc
+		// pauses, fds).
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	} {
@@ -188,8 +181,8 @@ func NewMetrics(version string) (*Metrics, error) {
 		}
 	}
 
-	// Set the build info gauge once; its presence is the signal, the value is
-	// always 1. Partitioning by version lets Grafana alerts notice rollouts.
+	// build_info: la presencia es la señal, el valor siempre 1. Particionar
+	// por version permite que las alertas de Grafana detecten rollouts.
 	m.BuildInfo.WithLabelValues(version, runtime.Version()).Set(1)
 
 	return m, nil

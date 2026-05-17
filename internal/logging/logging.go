@@ -11,16 +11,16 @@ type Config struct {
 	LogIPs bool   `yaml:"log_ips"`
 }
 
-// New: logger sin ring buffer. Casi todos los callers deben usar NewWithBuffer;
-// esto queda para tests y herramientas que no necesitan el admin SSE.
+// New devuelve un logger sin anillo en memoria. Casi siempre interesa
+// usar NewWithBuffer; esto queda para tests y herramientas que no
+// necesitan el panel admin de logs.
 func New(cfg Config) *slog.Logger {
 	logger, _ := NewWithBuffer(cfg)
 	return logger
 }
 
-// NewWithBuffer: logger + ring buffer en memoria para el panel admin "Logs".
-// Cada record va a stdout Y al ring (fan-out por SSE). Capacidad fija 500
-// (~500 KB worst-case) — encaja una incidencia sin inflar el proceso.
+// NewWithBuffer devuelve un logger y un anillo en memoria que alimenta
+// el panel admin "Logs". Cada log va a stdout y también al anillo.
 func NewWithBuffer(cfg Config) (*slog.Logger, *Buffer) {
 	opts := &slog.HandlerOptions{
 		Level: parseLevel(cfg.Level),

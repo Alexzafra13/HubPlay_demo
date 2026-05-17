@@ -6,16 +6,15 @@ import (
 	"time"
 )
 
-// slowHandlerThreshold: watchdog sólo para log — el dispatch sigue cuando el
-// handler retorna. Un handler colgado fuga 1 goroutine, y el bus no puede
-// recuperarse de eso (sería matar código arbitrario de terceros).
+// slowHandlerThreshold: si un handler tarda más, se loguea aviso. Sólo es
+// un chivato; no se cancela nada.
 const slowHandlerThreshold = 30 * time.Second
 
 type Type string
 
-// Tipos de eventos publicados por el backend. Cada productor está en
-// paréntesis para localizar el Publish con grep. Publish es no-op si nadie
-// está suscrito, así que añadir un tipo nuevo no rompe nada.
+// Tipos de eventos del backend. El paréntesis indica el productor (para
+// poder grepar el Publish). Añadir tipos nuevos no rompe nada — si nadie
+// está suscrito, Publish no hace nada.
 const (
 	LibraryScanStarted   Type = "library.scan.started"   // scanner
 	LibraryScanCompleted Type = "library.scan.completed" // scanner
@@ -46,37 +45,21 @@ const (
 	UserLoggedIn         Type = "user.logged_in"
 	UserLoggedOut        Type = "user.logged_out"
 
-	// DeviceCodeApproved: lo publica DeviceCodeService.ApproveDevice al
-	// vincular operador → device-code pendiente. Lo escucha el SSE auth/device
-	// para que el UI del pairing (QR + user_code) reaccione al instante en vez
-	// de polear /poll (RFC 8628).
-	//
-	// Data: device_code (string, token opaco — el SSE filtra por este antes de
-	// fan-out), user_id (informativo; no se reenvía al cliente).
+	// DeviceCodeApproved se emite cuando el admin aprueba un dispositivo
+	// nuevo. La pantalla de emparejado (QR + código) reacciona al instante
+	// en vez de tener que estar preguntando cada poco.
 	DeviceCodeApproved Type = "device_code.approved"
 
-	// ── Detección de segmentos (skip-intro / skip-credits). Las publica el
-	// detector al recorrer episodios derivando markers de títulos de capítulos.
-	// El SSE admin las usa para banner de progreso, igual que library.scan.*.
-	//
-	// Data: library_id, library_name (Started/Completed), scanned (Progress),
-	// detected (Progress/Completed).
+	// ── Detección de segmentos (skip-intro / skip-credits). El panel admin
+	// muestra una barra de progreso igual que con los escaneos de biblioteca.
 	SegmentDetectStarted   Type = "library.segments.started"
 	SegmentDetectProgress  Type = "library.segments.progress"
 	SegmentDetectCompleted Type = "library.segments.completed"
 
-	// ── User watch state: publicado por ProgressHandler para que OTROS
-	// dispositivos del MISMO user sincronicen UI sin polear.
-	//
-	// Data: user_id (filtrar contra el authed user antes de fan-out — lo hace
-	// el SSE per-user), item_id, position_ticks (ProgressUpdated; ticks =
-	// segundos × 10_000_000), completed (Progress/Played), played (Played —
-	// true=mark, false=unmark), is_favorite (Favorite).
-	//
-	// 3 tipos en vez de uno único "user_data.changed" porque el frontend
-	// invalida queries distintas según qué cambió (progress→Continue Watching,
-	// played→Up Next + CW, favorite→Favorites). Separar por tipo permite a
-	// cada subscriber escuchar sólo lo suyo y mantiene el payload mínimo.
+	// ── Cambios en el estado de "visto" de un usuario. Sirven para que los
+	// otros dispositivos del MISMO usuario reflejen el cambio sin tener que
+	// estar consultando. Hay tres tipos en vez de uno único porque el
+	// frontend refresca pantallas distintas según qué cambió.
 	ProgressUpdated  Type = "user.progress.updated"
 	PlayedToggled    Type = "user.played.toggled"
 	FavoriteToggled  Type = "user.favorite.toggled"
@@ -108,9 +91,9 @@ func NewBus(logger *slog.Logger) *Bus {
 	}
 }
 
-// Subscribe: devuelve func de unsub. Hay que LLAMARLA cuando el subscriber
-// se va (p.ej. cliente SSE desconecta), o el handler fuga y cada Publish
-// futuro corre un closure muerto. La func es idempotente y goroutine-safe.
+// Subscribe devuelve una función para darse de baja. Hay que llamarla
+// cuando el suscriptor desaparece, o el handler se queda colgado para
+// siempre y cada Publish ejecuta código muerto.
 func (b *Bus) Subscribe(eventType Type, handler Handler) func() {
 	b.mu.Lock()
 	b.nextID++
@@ -131,14 +114,11 @@ func (b *Bus) Subscribe(eventType Type, handler Handler) func() {
 	}
 }
 
-// Publish: dispatch async. Cada handler en su goroutine con panic recovery,
-// más un watchdog que loguea (no bloquea) si supera slowHandlerThreshold.
+// Publish entrega el evento a todos los handlers en paralelo. Cada handler
+// va en su propia goroutine, con recuperación de panics.
 //
-// Contrato del subscriber: NO bloquear dentro del handler. El SSE in-tree
-// hace send no-bloqueante (drop on backpressure); cualquier subscriber nuevo
-// debe seguir la misma regla. Handler colgado = 1 goroutine fugada por
-// Publish — el bus no intenta recuperarse (no hay forma segura de abortar
-// código arbitrario del caller).
+// Regla para quien escriba un handler: no bloquear nunca dentro. Si el
+// handler se cuelga, el bus no puede hacer nada por él.
 func (b *Bus) Publish(e Event) {
 	b.mu.RLock()
 	subs := append([]subscription(nil), b.handlers[e.Type]...)
@@ -148,8 +128,8 @@ func (b *Bus) Publish(e Event) {
 		go func(handler Handler) {
 			done := make(chan struct{})
 
-			// Watchdog: máx. 1 warning por handler lento, y siempre sale —
-			// incluso si el handler cuelga. Cero bloqueo en el dispatch.
+			// Si el handler tarda más de la cuenta, loguea aviso; siempre
+			// termina, aunque el handler se quede colgado.
 			go func() {
 				timer := time.NewTimer(slowHandlerThreshold)
 				defer timer.Stop()
@@ -174,7 +154,7 @@ func (b *Bus) Publish(e Event) {
 	}
 }
 
-// HandlerCount: para tests y diagnóstico — no es parte del contrato runtime.
+// HandlerCount es sólo para tests y diagnóstico.
 func (b *Bus) HandlerCount(eventType Type) int {
 	b.mu.RLock()
 	defer b.mu.RUnlock()

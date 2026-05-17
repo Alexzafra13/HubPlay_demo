@@ -10,25 +10,22 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-// Handler returns an http.Handler that serves the Prometheus exposition
-// format. It is safe to mount at a public path: the registry contains no
-// secrets and the collectors are read-only.
+// Handler: sirve formato Prometheus. Safe en path público — el registry no
+// tiene secretos y los collectors son read-only.
 func (m *Metrics) Handler() http.Handler {
 	return promhttp.HandlerFor(m.Registry, promhttp.HandlerOpts{
-		// EnableOpenMetrics keeps compatibility with scrapers that negotiate
-		// the newer format while falling back to text/plain for older ones.
+		// Mantiene compat con scrapers que negocian formato nuevo, con fallback
+		// a text/plain para los viejos.
 		EnableOpenMetrics: true,
 	})
 }
 
-// MetricsMiddleware observes every request with counters + a duration
-// histogram. It is safe to chain before or after logging, but should come
-// after chi's Router.Route definitions so RoutePattern is populated for
-// matched requests.
+// MetricsMiddleware: cuenta requests + histogram de duración. Debe ir DESPUÉS
+// de las Router.Route definitions para que RoutePattern esté poblado.
 //
-// The route label uses chi's RoutePattern ("/libraries/{id}") rather than the
-// raw URL path to keep cardinality bounded; unmatched requests (404s that
-// never hit a handler) fall back to a stable sentinel "_other".
+// La label `route` usa el RoutePattern de chi ("/libraries/{id}") en vez del
+// URL crudo para acotar cardinality; requests sin match (404 directos) caen al
+// sentinel "_other".
 func (m *Metrics) MetricsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -43,9 +40,8 @@ func (m *Metrics) MetricsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// routeLabel extracts the chi route pattern for the matched request. Requests
-// that did not match any route (chi RouteContext empty) are bucketed under
-// "_other" so scraping shows them without creating per-URL time series.
+// routeLabel: RoutePattern de chi del request matched. Sin match → "_other"
+// (evita serie de tiempo per-URL).
 func routeLabel(r *http.Request) string {
 	rctx := chi.RouteContext(r.Context())
 	if rctx == nil {
@@ -57,9 +53,8 @@ func routeLabel(r *http.Request) string {
 	return "_other"
 }
 
-// statusOr200 normalises the status code recorded by chi's wrapped
-// ResponseWriter: if the handler never called WriteHeader explicitly, chi
-// reports 0 and net/http treats it as 200.
+// statusOr200: si el handler no llamó WriteHeader, chi devuelve 0 y net/http
+// lo trata como 200.
 func statusOr200(code int) int {
 	if code == 0 {
 		return http.StatusOK

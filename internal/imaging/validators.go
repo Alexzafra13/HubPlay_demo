@@ -2,15 +2,14 @@ package imaging
 
 import "strings"
 
-// MaxUploadBytes is the largest multipart body accepted by the image upload
-// handler. Shared here so callers (and future helpers) agree on a single value.
+// MaxUploadBytes es el tamaño máximo que aceptamos al subir una imagen.
 const MaxUploadBytes = 10 << 20 // 10 MiB
 
-// ValidKinds is the canonical set of image kinds HubPlay stores per item.
-// The same list is enforced at the DB layer (see images.type column).
+// ValidKinds enumera los tipos de imagen que HubPlay guarda por cada
+// elemento. La misma lista la enforza la columna `type` en la tabla
+// de imágenes.
 var ValidKinds = [...]string{"primary", "backdrop", "logo", "thumb", "banner"}
 
-// IsValidKind reports whether t is one of the accepted image kinds.
 func IsValidKind(t string) bool {
 	for _, k := range ValidKinds {
 		if t == k {
@@ -20,11 +19,10 @@ func IsValidKind(t string) bool {
 	return false
 }
 
-// IsValidContentType reports whether ct describes an image MIME type the
-// handler accepts for upload. The match is a prefix check so charset
-// parameters (e.g. "image/jpeg; charset=binary") are tolerated.
-//
-// Accepted: image/jpeg, image/png, image/webp.
+// IsValidContentType comprueba si el tipo MIME es una imagen que
+// aceptamos al subir. La comprobación es por prefijo para que valores
+// como "image/jpeg; charset=binary" sigan funcionando. Acepta JPEG,
+// PNG y WebP.
 func IsValidContentType(ct string) bool {
 	switch {
 	case strings.HasPrefix(ct, "image/jpeg"),
@@ -35,8 +33,9 @@ func IsValidContentType(ct string) bool {
 	return false
 }
 
-// ExtensionForContentType maps a MIME type to the on-disk file extension.
-// Unknown types fall back to ".jpg" to preserve historical handler behavior.
+// ExtensionForContentType traduce el tipo MIME a la extensión de
+// fichero correspondiente. Si no lo reconoce, devuelve ".jpg" para
+// mantener compatibilidad con cómo se comportaba antes.
 func ExtensionForContentType(ct string) string {
 	switch {
 	case strings.Contains(ct, "png"):

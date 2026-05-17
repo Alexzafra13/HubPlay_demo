@@ -8,20 +8,13 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Save persists cfg to path atomically (write-temp + rename) with mode
-// 0600. The atomic rename means a crash mid-write can never leave a
-// half-written YAML the next boot would fail to parse — either the old
-// file survives or the new one is fully in place.
+// Save: persiste cfg en path atómico (write-temp + rename) con modo 0600.
+// El rename atómico evita que un crash a mitad de write deje un YAML medio
+// escrito que el próximo boot no parsearía.
 //
-// Mode 0600 matches the convention every other secret-bearing config
-// file in self-hosted media servers uses (Plex Preferences.xml,
-// Jellyfin server.json) and lines up with what setup.CompleteSetup
-// used before it was extracted here.
+// Modo 0600 = convención de Plex/Jellyfin para configs con secretos.
 //
-// Callers must validate cfg before calling — Save is the persistence
-// layer, not the validation layer. The admin DB editor and the setup
-// wizard both validate first, then call Save, then ask the operator
-// to restart so the new values take effect.
+// Callers deben validar antes — Save es persistencia, no validación.
 func Save(cfg *Config, path string) error {
 	data, err := yaml.Marshal(cfg)
 	if err != nil {
@@ -34,10 +27,9 @@ func Save(cfg *Config, path string) error {
 		return fmt.Errorf("creating temp file: %w", err)
 	}
 	tmpPath := tmp.Name()
-	// Clean up the temp on every error path; the rename below removes
-	// it from the FS on success so the deferred Remove turns into a
-	// no-op (os.Remove on a missing path returns ErrNotExist, which
-	// we ignore).
+	// Limpieza del temp en cualquier rama de error. En éxito el rename ya
+	// lo movió, y os.Remove de un path inexistente devuelve ErrNotExist
+	// (lo ignoramos).
 	defer func() {
 		_ = os.Remove(tmpPath)
 	}()

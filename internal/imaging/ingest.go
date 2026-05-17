@@ -10,55 +10,27 @@ import (
 	"time"
 )
 
-// IngestedImage describes an image that has been downloaded, validated,
-// and atomically written to local storage. The caller turns this struct
-// into a `db.Image` (or any other persistence layer) — keeping that
-// mapping outside `imaging` keeps this package free of database imports
-// and reusable from both the scanner and the refresher without an
-// import cycle.
+// IngestedImage describe una imagen ya descargada y guardada en disco.
+// El que la llama decide si persistirla en base de datos.
 type IngestedImage struct {
-	// Absolute path on disk under the configured image root.
+	// Ruta absoluta del fichero.
 	LocalPath string
-	// Filename only (no directory) — handy for path-mapping tables that
-	// don't want to store the full path twice.
+	// Sólo el nombre del fichero.
 	Filename string
-	// Detected by SafeGet's content-type sniff. Useful for the served
-	// MIME header later and for picking an extension.
+	// Tipo MIME detectado al descargar.
 	ContentType string
-	// May be empty when the format isn't decodable as PNG/JPEG (the
-	// blurhash library only handles those today). Callers should treat
-	// "" as "no preview placeholder available", not as an error.
+	// Vista previa borrosa. Vacío si el formato no es PNG ni JPEG.
 	Blurhash string
-	// Hex-encoded SHA-256 of the bytes that landed on disk. The first
-	// 16 chars are used in the filename to keep distinct content under
-	// the same kind from colliding; the full hash is exposed so future
-	// dedup work has a stable key without re-hashing.
+	// Hash del fichero; los primeros 16 caracteres están en el nombre.
 	SHA256 string
-	// Pre-computed dominant + dark-muted colours formatted as CSS
-	// rgb() strings. Empty when extraction failed or the format wasn't
-	// decodable — mirrors the Blurhash field's "" sentinel so callers
-	// don't need a separate present/absent check.
+	// Colores para el degradado del hero. Vacíos si no se pudo extraer.
 	DominantColor      string
 	DominantColorMuted string
 }
 
-// IngestRemoteImage fetches `url`, runs it through the same SSRF +
-// pixel-bomb guards used by uploads (SafeGet + EnforceMaxPixels),
-// computes a blurhash placeholder, and writes the bytes into
-// `<dir>/<kind>_<hash16>.<ext>` atomically.
-//
-// "Atomically" means: a server crash, disk-full, or context cancellation
-// mid-download can never leave a half-written file at the destination.
-// The bytes go to `dst+".tmp"` first and are then renamed; rename(2) is
-// atomic on POSIX, so a concurrent reader either sees no file or the
-// fully-written one.
-//
-// Errors returned wrap the failing stage so the caller can log a useful
-// message without re-deriving cause:
-//
-//	download:           SafeGet failed (network, content-type, size)
-//	validate dimensions: EnforceMaxPixels rejected the image
-//	create dir / write file: filesystem refused the operation
+// IngestRemoteImage descarga una imagen remota y la guarda en local de
+// forma segura: protege contra URLs maliciosas e imágenes "bomba", y si
+// algo falla a medias no deja un fichero corrupto en disco.
 func IngestRemoteImage(dir, kind, url string, logger *slog.Logger) (*IngestedImage, error) {
 	data, contentType, err := SafeGet(url, MaxUploadBytes, 30*time.Second)
 	if err != nil {
@@ -92,12 +64,8 @@ func IngestRemoteImage(dir, kind, url string, logger *slog.Logger) (*IngestedIma
 	}, nil
 }
 
-// AtomicWriteFile writes `data` to `dst` so that a partial or failed
-// write never leaves a corrupt file in place. It writes to `dst+".tmp"`
-// first (with the requested perm), then renames over `dst`. Cleanup of
-// the .tmp on rename failure is best-effort; an OS that can't rename a
-// freshly-written file usually can't unlink either, but trying costs
-// nothing and avoids leaking under transient errors.
+// AtomicWriteFile escribe primero a un temporal y luego lo renombra al
+// destino, así un fallo a mitad de escritura nunca deja basura.
 func AtomicWriteFile(dst string, data []byte, perm os.FileMode) error {
 	tmp := dst + ".tmp"
 	if err := os.WriteFile(tmp, data, perm); err != nil {
