@@ -283,6 +283,9 @@ func (h *DeviceAuthHandler) Approve(w http.ResponseWriter, r *http.Request) {
 // Auth: the opaque `device_code` query parameter is the secret — same
 // threat model as POST /auth/device/poll. No bearer required.
 func (h *DeviceAuthHandler) Events(w http.ResponseWriter, r *http.Request) {
+	// Streaming endpoint: opt-out del WriteTimeout 30s global
+	// (cierre olor Q). El segmento puede tardar > 30s con HW accel cold-start.
+	_ = DisableWriteDeadline(w)
 	if h.bus == nil {
 		respondError(w, r, http.StatusServiceUnavailable, "SSE_UNAVAILABLE",
 			"event stream not wired")

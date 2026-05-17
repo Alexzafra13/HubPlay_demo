@@ -485,10 +485,17 @@ func run(configPath string) error {
 	})
 
 	server := &http.Server{
-		Addr:         cfg.Server.Addr(),
-		Handler:      router,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 0, // Streaming endpoints need unlimited write time
+		Addr:        cfg.Server.Addr(),
+		Handler:     router,
+		ReadTimeout: 15 * time.Second,
+		// WriteTimeout default 30s. Cubre el 95 % de los handlers
+		// (JSON CRUD bajo /api/v1/*) y evita que un cliente lento
+		// consumiendo a 1 byte/segundo deje una goroutine de servidor
+		// viva indefinidamente. Los ~15 handlers streaming (HLS,
+		// SSE, file download, peer stream proxy) llaman
+		// `handlers.DisableWriteDeadline(w)` al inicio para opt-out
+		// explícito. Cierra el olor Q de la auditoría 2026-05-14.
+		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
 

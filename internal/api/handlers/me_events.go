@@ -68,6 +68,9 @@ var userScopedEventTypes = []event.Type{
 // matches what the global /events handler emits, so the same frontend
 // EventSource code path consumes both.
 func (h *MeEventsHandler) Stream(w http.ResponseWriter, r *http.Request) {
+	// Streaming endpoint: opt-out del WriteTimeout 30s global
+	// (cierre olor Q). El segmento puede tardar > 30s con HW accel cold-start.
+	_ = DisableWriteDeadline(w)
 	claims := auth.GetClaims(r.Context())
 	if claims == nil {
 		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")

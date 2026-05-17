@@ -25,6 +25,7 @@ en este doc (no se edita el audit original).
 | 7 | ⏳ pendiente | Cosmética + schema | D, X, W, BB, UUU-mig, etc. | — |
 | 8 | ⏳ pendiente | Polish de calidad de código | F14-X, F15-X, F16-X | — |
 | 9 | ⏳ pendiente | Verificación empírica | `-race`, `goleak`, `govulncheck` | post-merge |
+| — | ✅ cerrada | Sweep de perf oportunista | UUU-mig, Q | Sesión M.5 — fuera del orden 0-9, ataque dirigido a las dos palancas de perf más claras del audit |
 
 ---
 
@@ -394,3 +395,88 @@ M.4):
 
 Cero cambios de API HTTP pública. Iteración lista para
 revisión y merge.
+
+---
+
+## Sweep de perf oportunista (sesión M.5)
+
+Ataque dirigido a las dos palancas de perf más claras del audit
+fuera del orden 0-9 (que es mayormente estructural). Cero
+cambios de API pública.
+
+### Cierres
+
+- ✅ **UUU-mig** (commit `bf20df4`) — nuevo índice composite
+  `idx_channels_library_number ON channels(library_id, number)`
+  vía migración 044 (dual SQLite + Postgres). Las queries
+  calientes `ListChannelsByLibrary` y `ListActiveChannelsByLibrary`
+  (en `internal/db/queries/channels.sql:25,34`) hacían
+  `WHERE library_id = ? ORDER BY number, name` con sólo
+  `idx_channels_library(library_id)` cubriendo la cláusula; el
+  planner tenía que ordenar en memoria. En libraries IPTV con
+  5 000+ canales por playlist (el caso real) el sort domina
+  la latencia de la rail "LiveTV home" + el listado del panel
+  `/admin/libraries/{id}/channels`. El índice composite permite
+  walk del B-tree ya ordenado y elimina el sort.
+  - `IF NOT EXISTS` para idempotencia bajo re-runs del goose.
+  - `idx_channels_library` pre-existente preservado (sigue
+    sirviendo a counts / EXISTS gates).
+  - Verificación: `go test ./internal/db/...` verde (19.2 s).
+
+- ✅ **Q** (commit `<este commit>`) — `WriteTimeout: 0` global
+  reemplazado por **default seguro + opt-out explícito**.
+  - `cmd/hubplay/main.go`: `WriteTimeout: 0` → `WriteTimeout:
+    30 * time.Second`. Cubre el 95 % de las rutas
+    (JSON CRUD bajo `/api/v1/*`). Un cliente lento consumiendo
+    el body a 1 byte/segundo deja de poder mantener una
+    goroutine de servidor viva indefinidamente.
+  - Nuevo helper `handlers.DisableWriteDeadline(w http.ResponseWriter)
+    error` en `internal/api/handlers/streaming_deadline.go` —
+    invoca `http.NewResponseController(w).SetWriteDeadline(time.Time{})`
+    para anular el deadline en handlers streaming. Documentado
+    en el package doc con el rationale completo.
+  - Aplicado opt-out en 25 sitios (cada handler que sirve HLS,
+    SSE, file download o peer-stream proxy):
+    `stream.go` (6: MasterPlaylist, QualityPlaylist, Segment,
+    DirectPlay, Subtitles, SubtitleTrack),
+    `iptv_channels.go` (4: Stream, HLSManifest, HLSSegment,
+    ChannelLogo),
+    `federation_stream.go` (5: MasterPlaylist, QualityPlaylist,
+    Segment, Subtitles, SubtitleTrack),
+    `me_peer_stream.go` (5: ProxyPeerStream* familia),
+    `events.go` (Stream — SSE),
+    `me_events.go` (Stream — SSE),
+    `auth_device.go` (Events — SSE),
+    `admin_logs.go` (Stream — SSE),
+    `admin_backup.go` (Download — multi-GB SQLite snapshot).
+  - 2 tests nuevos en `streaming_deadline_test.go`:
+    - `TestDisableWriteDeadline_RecorderReturnsUnsupported` pinea
+      el contrato no-op-safe (httptest.ResponseRecorder no
+      implementa SetWriteDeadline → retorna `errors.ErrUnsupported`,
+      caller puede ignorar).
+    - `TestDisableWriteDeadline_OnRealServer` monta httptest
+      con `WriteTimeout = 50ms`, verifica que el handler puede
+      escribir 150 ms después sin fallar — el contrato que
+      producción depende.
+  - Verificación: `go test ./internal/... -count=1 -timeout=300s`
+    — 22 paquetes verdes, cero regresiones en los handlers
+    streaming pre-existentes.
+
+### Por qué fuera del orden 0-9
+
+El plan principal (iteraciones 0..9) es mayormente refactor
+estructural. UUU-mig y Q son las dos palancas de perf medibles
+y de bajo blast-radius — vale la pena cerrarlas oportunísticamente
+en cuanto la oportunidad surge (la rama de Iteración 2 ya estaba
+en review, añadir 2 commits perf en la misma rama es trivial y
+no aumenta la superficie del PR significativamente).
+
+Otras palancas de perf candidatas (no auditadas a fondo):
+- N+1 queries en handlers — sin auditoría sistemática.
+- Hot-path allocations — requiere profiling con pprof.
+- Caches faltantes (settings.GetOr en hot paths, image pipeline).
+- Hardware accel cache cold-start (ya cubierto en stream.Manager
+  por OO del audit — sano).
+
+Para esas, el approach correcto es **medir primero** (pprof +
+benchmarks) y atacar lo que el profiler indique, no la intuición.

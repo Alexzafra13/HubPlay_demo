@@ -173,6 +173,9 @@ func (h *FederationStreamHandler) StartSession(w http.ResponseWriter, r *http.Re
 //
 // GET /api/v1/peer/stream/session/{sessionId}/master.m3u8
 func (h *FederationStreamHandler) MasterPlaylist(w http.ResponseWriter, r *http.Request) {
+	// Streaming endpoint: opt-out del WriteTimeout 30s global
+	// (cierre olor Q). El segmento puede tardar > 30s con HW accel cold-start.
+	_ = DisableWriteDeadline(w)
 	peer := federation.PeerFromContext(r.Context())
 	if peer == nil {
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "peer context missing")
@@ -207,6 +210,9 @@ func (h *FederationStreamHandler) MasterPlaylist(w http.ResponseWriter, r *http.
 //
 // GET /api/v1/peer/stream/session/{sessionId}/{quality}/index.m3u8
 func (h *FederationStreamHandler) QualityPlaylist(w http.ResponseWriter, r *http.Request) {
+	// Streaming endpoint: opt-out del WriteTimeout 30s global
+	// (cierre olor Q). El segmento puede tardar > 30s con HW accel cold-start.
+	_ = DisableWriteDeadline(w)
 	peer := federation.PeerFromContext(r.Context())
 	if peer == nil {
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "peer context missing")
@@ -259,6 +265,9 @@ func (h *FederationStreamHandler) QualityPlaylist(w http.ResponseWriter, r *http
 //
 // GET /api/v1/peer/stream/session/{sessionId}/{quality}/{segment}
 func (h *FederationStreamHandler) Segment(w http.ResponseWriter, r *http.Request) {
+	// Streaming endpoint: opt-out del WriteTimeout 30s global
+	// (cierre olor Q). El segmento puede tardar > 30s con HW accel cold-start.
+	_ = DisableWriteDeadline(w)
 	peer := federation.PeerFromContext(r.Context())
 	if peer == nil {
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "peer context missing")
@@ -317,6 +326,9 @@ func (h *FederationStreamHandler) Segment(w http.ResponseWriter, r *http.Request
 //
 // GET /api/v1/peer/stream/session/{sessionId}/subtitles
 func (h *FederationStreamHandler) Subtitles(w http.ResponseWriter, r *http.Request) {
+	// Streaming endpoint: opt-out del WriteTimeout 30s global
+	// (cierre olor Q). El segmento puede tardar > 30s con HW accel cold-start.
+	_ = DisableWriteDeadline(w)
 	peer := federation.PeerFromContext(r.Context())
 	if peer == nil {
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "peer context missing")
@@ -360,6 +372,9 @@ func (h *FederationStreamHandler) Subtitles(w http.ResponseWriter, r *http.Reque
 //
 // GET /api/v1/peer/stream/session/{sessionId}/subtitles/{trackIndex}
 func (h *FederationStreamHandler) SubtitleTrack(w http.ResponseWriter, r *http.Request) {
+	// Streaming endpoint: opt-out del WriteTimeout 30s global
+	// (cierre olor Q). El segmento puede tardar > 30s con HW accel cold-start.
+	_ = DisableWriteDeadline(w)
 	peer := federation.PeerFromContext(r.Context())
 	if peer == nil {
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "peer context missing")

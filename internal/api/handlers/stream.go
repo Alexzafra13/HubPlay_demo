@@ -136,6 +136,9 @@ func (h *StreamHandler) Info(w http.ResponseWriter, r *http.Request) {
 
 // MasterPlaylist returns the HLS master playlist (M3U8) with adaptive bitrate variants.
 func (h *StreamHandler) MasterPlaylist(w http.ResponseWriter, r *http.Request) {
+	// Streaming endpoint: opt-out del WriteTimeout 30s global
+	// (cierre olor Q). El segmento puede tardar > 30s con HW accel cold-start.
+	_ = DisableWriteDeadline(w)
 	itemID := chi.URLParam(r, "itemId")
 
 	// Verify item exists
@@ -179,6 +182,9 @@ func (h *StreamHandler) MasterPlaylist(w http.ResponseWriter, r *http.Request) {
 const segmentDurationSeconds float64 = 6
 
 func (h *StreamHandler) QualityPlaylist(w http.ResponseWriter, r *http.Request) {
+	// Streaming endpoint: opt-out del WriteTimeout 30s global
+	// (cierre olor Q). El segmento puede tardar > 30s con HW accel cold-start.
+	_ = DisableWriteDeadline(w)
 	itemID := chi.URLParam(r, "itemId")
 	quality := chi.URLParam(r, "quality")
 
@@ -312,6 +318,9 @@ var segmentIndexPattern = regexp.MustCompile(`^segment(\d+)\.ts$`)
 //  4. If still nothing, give up with 404. The synthesized manifest
 //     keeps offering the URL, so the player will retry.
 func (h *StreamHandler) Segment(w http.ResponseWriter, r *http.Request) {
+	// Streaming endpoint: opt-out del WriteTimeout 30s global
+	// (cierre olor Q). El segmento puede tardar > 30s con HW accel cold-start.
+	_ = DisableWriteDeadline(w)
 	itemID := chi.URLParam(r, "itemId")
 	quality := chi.URLParam(r, "quality")
 	segmentFile := chi.URLParam(r, "segment")
@@ -423,6 +432,9 @@ func serveSegment(w http.ResponseWriter, r *http.Request, path string) {
 
 // DirectPlay serves the original media file via progressive download / range requests.
 func (h *StreamHandler) DirectPlay(w http.ResponseWriter, r *http.Request) {
+	// Streaming endpoint: opt-out del WriteTimeout 30s global
+	// (cierre olor Q). El segmento puede tardar > 30s con HW accel cold-start.
+	_ = DisableWriteDeadline(w)
 	itemID := chi.URLParam(r, "itemId")
 
 	item, err := h.items.GetByID(r.Context(), itemID)
@@ -502,6 +514,9 @@ func containerToMIME(container string) string {
 
 // Subtitles returns available subtitle tracks for an item.
 func (h *StreamHandler) Subtitles(w http.ResponseWriter, r *http.Request) {
+	// Streaming endpoint: opt-out del WriteTimeout 30s global
+	// (cierre olor Q). El segmento puede tardar > 30s con HW accel cold-start.
+	_ = DisableWriteDeadline(w)
 	itemID := chi.URLParam(r, "itemId")
 
 	mediaStreams, err := h.streams.ListByItem(r.Context(), itemID)
@@ -660,6 +675,9 @@ func subtitleItemType(t string) provider.ItemType {
 
 // SubtitleTrack extracts and serves a subtitle track as WebVTT.
 func (h *StreamHandler) SubtitleTrack(w http.ResponseWriter, r *http.Request) {
+	// Streaming endpoint: opt-out del WriteTimeout 30s global
+	// (cierre olor Q). El segmento puede tardar > 30s con HW accel cold-start.
+	_ = DisableWriteDeadline(w)
 	itemID := chi.URLParam(r, "itemId")
 	trackIndex, _ := strconv.Atoi(chi.URLParam(r, "trackIndex"))
 
