@@ -449,6 +449,14 @@ type Querier interface {
 	// override. Service-layer enforces the value is in the known
 	// palette (or empty) before reaching the repo.
 	UpdateUserAvatarColor(ctx context.Context, arg UpdateUserAvatarColorParams) error
+	// Quita el avatar subido. El fichero en disco lo borra el service
+	// antes de llamar; aquí sólo desreferenciamos.
+	ClearUserAvatarPath(ctx context.Context, id string) error
+	// Sube/actualiza la ruta en disco del avatar subido por el usuario.
+	// El path es relativo al directorio de avatares (config/avatars/<file>),
+	// no absoluto, para que la migración del volumen no rompa nada.
+	// Service-layer escribe el fichero antes de llamar a esta query.
+	UpdateUserAvatarPath(ctx context.Context, arg UpdateUserAvatarPathParams) error
 	// Per-field update so callers (renaming a profile, an admin
 	// relabelling a user) don't need to round-trip the rest of the
 	// mutable surface.

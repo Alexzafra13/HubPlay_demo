@@ -2,8 +2,10 @@ package handlers
 
 import (
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"strconv"
 	"time"
 
@@ -11,6 +13,7 @@ import (
 
 	"hubplay/internal/auth"
 	"hubplay/internal/library"
+	"hubplay/internal/user"
 )
 
 type UserHandler struct {
@@ -56,6 +59,7 @@ func (h *UserHandler) Me(w http.ResponseWriter, r *http.Request) {
 			"password_change_required": u.PasswordChangeRequired,
 			"parent_user_id":           u.ParentUserID,
 			"avatar_color":             u.AvatarColor,
+			"avatar_image_url":         avatarPublicURL(u.ID, u.AvatarPath),
 		},
 	})
 }
@@ -94,6 +98,7 @@ func (h *UserHandler) List(w http.ResponseWriter, r *http.Request) {
 			"parent_user_id":           u.ParentUserID,
 			"max_content_rating":       u.MaxContentRating,
 			"avatar_color":             u.AvatarColor,
+			"avatar_image_url":         avatarPublicURL(u.ID, u.AvatarPath),
 			"has_pin":                  u.PINHash != "",
 			"is_primary":               primaryID != "" && u.ID == primaryID,
 			"access_expires_at":        u.AccessExpiresAt,
@@ -497,6 +502,131 @@ func (h *UserHandler) CreatePersonalIPTV(w http.ResponseWriter, r *http.Request)
 			"created_at":      lib.CreatedAt,
 		},
 	})
+}
+
+// UploadMyAvatar acepta una imagen multipart en POST /me/avatar, la
+// procesa (validar MIME/tamaño, recortar cuadrado, resize a 256×256
+// JPEG) y la guarda en disco + DB. Devuelve la URL pública lista
+// para consumir en el frontend.
+func (h *UserHandler) UploadMyAvatar(w http.ResponseWriter, r *http.Request) {
+	claims := auth.GetClaims(r.Context())
+	if claims == nil {
+		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+		return
+	}
+	// Cap el cuerpo total con http.MaxBytesReader: si el cliente
+	// envía más, ParseMultipartForm devuelve un error claro y no
+	// hemos cargado nada en memoria todavía.
+	r.Body = http.MaxBytesReader(w, r.Body, user.AvatarMaxBytes+1024)
+	if err := r.ParseMultipartForm(user.AvatarMaxBytes + 1024); err != nil {
+		respondError(w, r, http.StatusRequestEntityTooLarge, "PAYLOAD_TOO_LARGE",
+			"avatar exceeds the maximum allowed size")
+		return
+	}
+	file, header, err := r.FormFile("avatar")
+	if err != nil {
+		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST",
+			"multipart form must include an 'avatar' file part")
+		return
+	}
+	defer file.Close() //nolint:errcheck
+
+	data, err := io.ReadAll(io.LimitReader(file, user.AvatarMaxBytes+1))
+	if err != nil {
+		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "could not read uploaded file")
+		return
+	}
+	contentType := header.Header.Get("Content-Type")
+	if contentType == "" {
+		// Sin Content-Type del cliente caemos a detección por bytes.
+		contentType = http.DetectContentType(data)
+	}
+
+	relName, err := h.users.UploadAvatar(r.Context(), claims.UserID, data, contentType)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{
+		"avatar_image_url": avatarPublicURL(claims.UserID, relName),
+	})
+}
+
+// DeleteMyAvatar borra el avatar subido del usuario autenticado.
+// Idempotente: 204 incluso si no había avatar previo.
+func (h *UserHandler) DeleteMyAvatar(w http.ResponseWriter, r *http.Request) {
+	claims := auth.GetClaims(r.Context())
+	if claims == nil {
+		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+		return
+	}
+	if err := h.users.DeleteAvatar(r.Context(), claims.UserID); err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ServeUserAvatar sirve los bytes del avatar de un usuario. Público
+// para que peers federados y clientes anónimos (login screen) puedan
+// renderizarlo sin auth. El user_id es UUID, no enumerable.
+//
+// 404 si el usuario no tiene avatar subido — el frontend cae al
+// círculo de iniciales sobre color en ese caso.
+func (h *UserHandler) ServeUserAvatar(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "missing user id")
+		return
+	}
+	target, err := h.users.GetByID(r.Context(), id)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	if target.AvatarPath == "" {
+		respondError(w, r, http.StatusNotFound, "NOT_FOUND", "user has no avatar")
+		return
+	}
+	full, err := h.users.AvatarFilePath(target.AvatarPath)
+	if err != nil {
+		respondError(w, r, http.StatusInternalServerError, "AVATAR_PATH", err.Error())
+		return
+	}
+	f, err := os.Open(full)
+	if err != nil {
+		if os.IsNotExist(err) {
+			respondError(w, r, http.StatusNotFound, "NOT_FOUND", "avatar file missing")
+			return
+		}
+		respondError(w, r, http.StatusInternalServerError, "AVATAR_READ", err.Error())
+		return
+	}
+	defer f.Close() //nolint:errcheck
+
+	stat, err := f.Stat()
+	if err != nil {
+		respondError(w, r, http.StatusInternalServerError, "AVATAR_STAT", err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "image/jpeg")
+	// Cache 5 min en cliente; cuando el usuario re-suba, la URL
+	// cambia (nuevo sufijo en relName) y el navegador refetchea
+	// igualmente. ServeContent también pone ETag/Last-Modified
+	// para revalidación con If-Modified-Since.
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	http.ServeContent(w, r, target.AvatarPath, stat.ModTime(), f)
+}
+
+// avatarPublicURL devuelve la URL pública para un avatar dado el
+// userID + relName. Embebe el relName como query param para que el
+// cliente la use como cache-buster sin que el server tenga que
+// despachar por path.
+func avatarPublicURL(userID, relName string) string {
+	if relName == "" {
+		return ""
+	}
+	return "/api/v1/users/" + userID + "/avatar?v=" + relName
 }
 
 // Delete removes a user by ID (admin only).

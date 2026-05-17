@@ -160,6 +160,16 @@ func (m *mockUserService) SetAccessExpiresAt(_ context.Context, _ string, _ *tim
 	return nil
 }
 
+func (m *mockUserService) UploadAvatar(_ context.Context, _ string, _ []byte, _ string) (string, error) {
+	return "", nil
+}
+
+func (m *mockUserService) DeleteAvatar(_ context.Context, _ string) error { return nil }
+
+func (m *mockUserService) AvatarsDir() string { return "" }
+
+func (m *mockUserService) AvatarFilePath(_ string) (string, error) { return "", nil }
+
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 func testLogger() *slog.Logger {

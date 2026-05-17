@@ -316,3 +316,34 @@ export function useSetUserAccess() {
     },
   });
 }
+
+// Sube imagen → backend resize 256x256 JPEG → DB. Invalidamos /me +
+// /users + /me/profiles para que cualquier sitio que renderice el
+// avatar (TopBar, lista admin, picker de perfil) refresque ya con
+// la nueva URL (que cambia en cada upload, así que el navegador
+// refetchea aunque tuviera cache).
+export function useUploadMyAvatar() {
+  const queryClient = useQueryClient();
+  return useMutation<{ avatar_image_url: string }, Error, File>({
+    mutationFn: (file) => api.uploadMyAvatar(file),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.me });
+      queryClient.invalidateQueries({ queryKey: queryKeys.users });
+      queryClient.invalidateQueries({ queryKey: ["me", "profiles"] });
+    },
+  });
+}
+
+// Borra el avatar subido (idempotente). Tras esto el frontend vuelve
+// a renderizar el círculo de iniciales sobre color.
+export function useDeleteMyAvatar() {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, void>({
+    mutationFn: () => api.deleteMyAvatar(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.me });
+      queryClient.invalidateQueries({ queryKey: queryKeys.users });
+      queryClient.invalidateQueries({ queryKey: ["me", "profiles"] });
+    },
+  });
+}

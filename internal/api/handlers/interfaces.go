@@ -54,6 +54,10 @@ type UserService interface {
 	SetActive(ctx context.Context, id string, active bool) error
 	SetAccessExpiresAt(ctx context.Context, id string, expiresAt *time.Time) error
 	PrimaryAdminID(ctx context.Context) (string, error)
+	UploadAvatar(ctx context.Context, userID string, data []byte, contentType string) (string, error)
+	DeleteAvatar(ctx context.Context, userID string) error
+	AvatarsDir() string
+	AvatarFilePath(relName string) (string, error)
 }
 
 // ─── Library service ────────────────────────────────────────────────────────

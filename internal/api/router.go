@@ -357,6 +357,12 @@ func NewRouter(deps Dependencies) http.Handler {
 			// Current user
 			r.Get("/me", userHandler.Me)
 			r.Post("/me/password", authHandler.ChangeMyPassword)
+			// Avatar subido por el propio usuario. POST recibe el
+			// multipart (campo "avatar"); el service resize + persiste
+			// y devuelve la URL pública nueva (cambia en cada upload
+			// para forzar refetch del navegador). DELETE es idempotente.
+			r.Post("/me/avatar", userHandler.UploadMyAvatar)
+			r.Delete("/me/avatar", userHandler.DeleteMyAvatar)
 			r.Get("/me/profiles", authHandler.ListProfiles)
 			r.Post("/auth/switch-profile", authHandler.SwitchProfile)
 			r.Get("/me/sessions", authHandler.ListMySessions)
@@ -422,6 +428,13 @@ func NewRouter(deps Dependencies) http.Handler {
 			// block so a parent can recolour their own profile
 			// member without holding the admin role.
 			r.Put("/users/{id}/avatar-color", userHandler.SetAvatarColor)
+			// Servir el avatar subido. Auth-gated igual que el resto
+			// del bloque — los clientes ya tienen sesión cuando lo
+			// renderizan (lista admin, picker de perfil, TopBar). El
+			// path es uniforme para todos los avatares aunque cambie
+			// el fichero subyacente: la URL incluye ?v=<rel> como
+			// cache-buster, no en el path.
+			r.Get("/users/{id}/avatar", userHandler.ServeUserAvatar)
 
 			// Signing key lifecycle (admin only). Every route here is
 			// destructive — guarded at the group level so a single

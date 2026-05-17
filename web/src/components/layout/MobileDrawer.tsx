@@ -5,8 +5,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { ChevronDown, X, LogOut, Settings, ShieldCheck, Smartphone } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { useAllPeerLibraries } from "@/api/hooks/federation";
-import { getInitials } from "@/utils/userDisplay";
-import { avatarColorForUser } from "@/utils/avatarColor";
+import { useMe } from "@/api/hooks";
+import { UserAvatar } from "@/components/common";
 import { MAIN_NAV, PEERS_NAV, type NavItem } from "./navConfig";
 
 // MobileDrawer — replaces the legacy mobile sidebar drawer. Renders
@@ -26,9 +26,13 @@ interface MobileDrawerProps {
 export function MobileDrawer({ onClose, onLogout }: MobileDrawerProps) {
   const { t } = useTranslation();
   const { user } = useAuthStore();
+  const { data: me } = useMe();
   const isAdmin = user?.role === "admin";
-  const initials = getInitials(user);
-  const palette = avatarColorForUser(user);
+  // useMe trae avatar_image_url cuando el usuario sube foto desde
+  // Settings; useAuthStore.user es el cache del login y sirve sólo
+  // de fallback mientras /me resuelve.
+  const avatarUser =
+    me ?? (user ? { username: user.username, display_name: user.display_name ?? "" } : null);
 
   const { data: peerLibs } = useAllPeerLibraries();
   const showPeers = isAdmin && (peerLibs?.length ?? 0) > 0;
@@ -107,12 +111,7 @@ export function MobileDrawer({ onClose, onLogout }: MobileDrawerProps) {
       {/* User pod — pinned bottom; "Cerrar sesión" lives here. */}
       <div className="px-3 pb-3 flex-shrink-0">
         <div className="flex items-center gap-3 p-3 rounded-xl border border-border-subtle bg-bg-card/40">
-          <span
-            className="relative flex h-9 w-9 items-center justify-center rounded-full text-[12px] font-semibold text-white ring-1 ring-white/15 flex-shrink-0"
-            style={{ background: palette.background }}
-          >
-            {initials}
-          </span>
+          <UserAvatar user={avatarUser} size="md" className="flex-shrink-0" />
           <div className="flex-1 min-w-0">
             <p className="text-[13px] font-medium text-text-primary truncate leading-tight">
               {user?.display_name || user?.username}

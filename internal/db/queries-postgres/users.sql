@@ -103,6 +103,17 @@ UPDATE users SET access_expires_at = $1 WHERE id = $2;
 -- palette (or empty) before reaching the repo.
 UPDATE users SET avatar_color = $1 WHERE id = $2;
 
+-- name: UpdateUserAvatarPath :exec
+-- Sube/actualiza la ruta en disco del avatar subido por el usuario.
+-- El path es relativo al directorio de avatares (config/avatars/<file>),
+-- no absoluto, para que la migración del volumen no rompa nada.
+UPDATE users SET avatar_path = $1 WHERE id = $2;
+
+-- name: ClearUserAvatarPath :exec
+-- Quita el avatar subido. El fichero en disco lo borra el service
+-- antes de llamar; aquí sólo desreferenciamos.
+UPDATE users SET avatar_path = NULL WHERE id = $1;
+
 -- ListProfilesForOwner: hand-rolled in user_repository.go, not sqlc.
 -- See the long comment on UserRepository.ListProfilesForOwner for the
 -- sqlc 1.31.x parser bug that forced the move.

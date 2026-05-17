@@ -15,11 +15,13 @@
 // generous (14 entries) so a household of 4-6 users gets distinct
 // colours and even shared deployments rarely repeat at a glance.
 //
-// Palette: deep, saturated tones in the same brightness register so
-// white initials read consistently. Mix of warm and cool — earthy
-// (terracotta / bronze / olive), greens (moss / teal / cyan), blues
-// (navy / slate / petrol), and warm purples (plum / wine / violet)
-// — keeps the assignment feeling intentional, never neon.
+// Palette: 8 tonos saturados, ~45° apart en el círculo cromático, en la
+// misma franja de luminosidad para que las iniciales blancas se lean
+// igual en todas. Reducida desde 14 a 8 para que el picker muestre
+// opciones claramente distintas en lugar de pares casi idénticos
+// (moss/olive, terracotta/garnet, navy/slate/petrol). Los hex que
+// quedaron fuera siguen funcionando en avatarColorForUser porque
+// caen al helper FNV cuando no matchean — no hay backfill.
 
 export interface AvatarPalette {
   readonly background: string;
@@ -27,20 +29,14 @@ export interface AvatarPalette {
 }
 
 export const AVATAR_PALETTE: readonly AvatarPalette[] = [
-  { background: "#3d5a40", label: "moss" },       // verde musgo
-  { background: "#7a3d2e", label: "terracotta" }, // terracota
-  { background: "#1e3252", label: "navy" },       // azul marino
-  { background: "#5c3d6e", label: "plum" },       // morado
-  { background: "#2e5c5a", label: "teal" },       // verde azulado
-  { background: "#7a5c2e", label: "bronze" },     // bronce
-  { background: "#5a3d3d", label: "garnet" },     // granate apagado
-  { background: "#3d4a5c", label: "slate" },      // pizarra
-  { background: "#6e3d5c", label: "wine" },       // vino borgoña
-  { background: "#3d6e6e", label: "cyan-deep" },  // cian apagado
-  { background: "#5c4a2e", label: "coffee" },     // café oscuro
-  { background: "#4a2e5c", label: "violet" },     // violeta profundo
-  { background: "#2e4a5c", label: "petrol" },     // petróleo
-  { background: "#5c5c2e", label: "olive" },      // olivo oscuro
+  { background: "#b91c1c", label: "rojo" },
+  { background: "#c2410c", label: "naranja" },
+  { background: "#a16207", label: "ámbar" },
+  { background: "#15803d", label: "verde" },
+  { background: "#0f766e", label: "turquesa" },
+  { background: "#1d4ed8", label: "azul" },
+  { background: "#6d28d9", label: "violeta" },
+  { background: "#be185d", label: "rosa" },
 ];
 
 // avatarColorForUser is the higher-level helper most callers should

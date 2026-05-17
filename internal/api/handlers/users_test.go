@@ -79,6 +79,16 @@ func (s *userFakeService) SetAccessExpiresAt(_ context.Context, _ string, _ *tim
 	return nil
 }
 
+func (s *userFakeService) UploadAvatar(_ context.Context, _ string, _ []byte, _ string) (string, error) {
+	return "", nil
+}
+
+func (s *userFakeService) DeleteAvatar(_ context.Context, _ string) error { return nil }
+
+func (s *userFakeService) AvatarsDir() string { return "" }
+
+func (s *userFakeService) AvatarFilePath(_ string) (string, error) { return "", nil }
+
 var _ UserService = (*userFakeService)(nil)
 
 // ─── Env ────────────────────────────────────────────────────────────────────
