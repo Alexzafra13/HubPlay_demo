@@ -7,7 +7,6 @@
 // Tests pin:
 //   - When isMobile, no <table> is rendered (cards-only).
 //   - When isMobile, the kebab opens the actions menu.
-//   - The kebab "Personalizar" item opens the rename modal.
 //   - Profile-row actions (`+ Perfil`) are hidden on profile rows.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -63,12 +62,6 @@ vi.mock("@/api/client", () => ({ api: apiMock }));
 // Force the mobile breakpoint regardless of jsdom's matchMedia.
 vi.mock("@/hooks/useIsMobile", () => ({
   useIsMobile: () => true,
-}));
-
-// FederationAdmin is a heavy descendant unrelated to the path we
-// care about. Stub it so the test stays focused.
-vi.mock("./FederationAdmin", () => ({
-  default: () => <div data-testid="federation-stub" />,
 }));
 
 import UsersAdmin from "./UsersAdmin";
@@ -197,10 +190,11 @@ describe("UsersAdmin (mobile)", () => {
     });
     fireEvent.click(kebab);
 
-    // Now the menu is open — Personalizar / + Perfil / Poner PIN /
-    // Reiniciar contraseña / Eliminar visible.
+    // Menu open — + Perfil / Poner PIN / Reiniciar contraseña /
+    // Eliminar visible. "Personalizar" se quitó: el usuario edita
+    // su propio nombre y avatar desde su página de ajustes.
     expect(screen.getByRole("menu")).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: /personalizar/i })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /personalizar/i })).toBeNull();
     expect(screen.getByRole("menuitem", { name: /\+ perfil/i })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: /poner pin/i })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: /reiniciar contraseña/i })).toBeInTheDocument();
@@ -223,10 +217,7 @@ describe("UsersAdmin (mobile)", () => {
     });
     fireEvent.click(kebab);
 
-    // Personalizar + Cambiar PIN + Eliminar still visible.
-    expect(
-      screen.getByRole("menuitem", { name: /personalizar/i }),
-    ).toBeInTheDocument();
+    // Cambiar PIN + Eliminar still visible.
     expect(
       screen.getByRole("menuitem", { name: /cambiar pin/i }),
     ).toBeInTheDocument();
@@ -238,24 +229,6 @@ describe("UsersAdmin (mobile)", () => {
     expect(
       screen.queryByRole("menuitem", { name: /reiniciar contraseña/i }),
     ).toBeNull();
-  });
-
-  it("opens the Personalizar modal from the kebab", async () => {
-    render(wrap(<UsersAdmin />));
-    await waitFor(() => expect(screen.getByText("bob")).toBeInTheDocument());
-
-    const bobCard = screen.getByText("bob").closest("li");
-    fireEvent.click(
-      within(bobCard!).getByRole("button", { name: /acciones|actions/i }),
-    );
-    fireEvent.click(
-      screen.getByRole("menuitem", { name: /personalizar/i }),
-    );
-
-    // Modal title surfaces.
-    await waitFor(() =>
-      expect(screen.getByText(/personalizar perfil/i)).toBeInTheDocument(),
-    );
   });
 
   // ─── Library access matrix ──────────────────────────────────────

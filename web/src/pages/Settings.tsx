@@ -5,6 +5,7 @@ import { useLibraries, useScanLibrary, useProviders, useUpdateProvider } from "@
 import type { Library } from "@/api/types";
 import { Badge, Button, Spinner } from "@/components/common";
 import { HomeLayoutSettings } from "@/components/home";
+import { AccountPanel } from "@/components/settings/AccountPanel";
 import { DevicesPanel } from "@/components/settings/DevicesPanel";
 import { PlaybackSettings } from "@/components/settings/PlaybackSettings";
 
@@ -222,28 +223,21 @@ export default function Settings() {
         <DevicesPanel />
       </section>
 
-      {/* Account Info */}
+      {/* Mi cuenta \u2014 el usuario edita aqu\u00ed su nombre visible y el
+          color de su avatar. Antes viv\u00eda como modal "Personalizar"
+          en el panel admin; movido al perfil del propio usuario
+          para que cada uno decida c\u00f3mo aparece. El rol se sigue
+          mostrando como informaci\u00f3n de s\u00f3lo lectura. */}
       <section className="flex flex-col gap-4">
-        <h2 className="text-lg font-semibold text-text-primary">{t('settings.account')}</h2>
-        <div className="rounded-[--radius-lg] border border-border bg-bg-card divide-y divide-border">
-          <div className="flex items-center justify-between px-4 py-3">
-            <span className="text-sm text-text-muted">{t('settings.username')}</span>
-            <span className="text-sm font-medium text-text-primary">
-              {user?.username}
-            </span>
-          </div>
-          <div className="flex items-center justify-between px-4 py-3">
-            <span className="text-sm text-text-muted">{t('settings.displayName')}</span>
-            <span className="text-sm font-medium text-text-primary">
-              {user?.display_name || "\u2014"}
-            </span>
-          </div>
-          <div className="flex items-center justify-between px-4 py-3">
-            <span className="text-sm text-text-muted">{t('settings.role')}</span>
-            <Badge variant={user?.role === "admin" ? "warning" : "default"}>
-              {user?.role}
-            </Badge>
-          </div>
+        <h2 className="text-lg font-semibold text-text-primary">
+          {t("settings.account")}
+        </h2>
+        <AccountPanel />
+        <div className="rounded-[--radius-lg] border border-border bg-bg-card px-4 py-3 flex items-center justify-between">
+          <span className="text-sm text-text-muted">{t("settings.role")}</span>
+          <Badge variant={user?.role === "admin" ? "warning" : "default"}>
+            {user?.role}
+          </Badge>
         </div>
       </section>
 

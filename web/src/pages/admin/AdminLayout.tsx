@@ -1,21 +1,16 @@
 import { NavLink, Outlet } from "react-router";
 import { useTranslation } from 'react-i18next';
 
-// Top-level admin tabs. Collapsed from the previous six (Dashboard,
-// Libraries, Providers, Users, Federation, System) to four because:
-//   - Providers is a property of the catalogue, not its own entity →
-//     merged inside "Biblioteca" as a section under the libraries grid.
-//   - Federation is an advanced feature most installs never touch →
-//     merged inside "Usuarios" as a "Servidores conectados" section.
-//   - System lost its sub-tabs (Status / Activity / Advanced) and
-//     became a single page modelled after macOS Settings: stacked
-//     sections with the destructive ones at the bottom.
-//   - Dashboard renamed to "Resumen" because the page is no longer a
-//     bento of stat cards — it's an editorial overview.
+// Pestañas raíz del admin. La pestaña "Servidores" (federación) vivía
+// como sección al final de "Usuarios", pero conceptualmente son
+// cosas distintas: usuarios = personas con login en este servidor;
+// servidores = peers HubPlay que comparten catálogo. Las separo
+// para que cada panel tenga un único modelo mental.
 const tabs = [
   { key: "admin.tabs.summary", to: "/admin/dashboard" },
   { key: "admin.tabs.library", to: "/admin/libraries" },
   { key: "admin.tabs.users", to: "/admin/users" },
+  { key: "admin.tabs.servers", to: "/admin/federation" },
   { key: "admin.tabs.system", to: "/admin/system" },
 ] as const;
 

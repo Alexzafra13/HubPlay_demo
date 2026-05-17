@@ -592,10 +592,18 @@
       "subtitleLangDescription": "Si hay subtítulos en este idioma, se activarán al empezar la reproducción.",
       "subtitlesOff": "Sin subtítulos"
     },
-    "account": "Cuenta",
+    "account": "Mi cuenta",
     "username": "Usuario",
     "displayName": "Nombre para mostrar",
     "role": "Rol",
+    "accountPanel": {
+      "avatarColor": "Color del avatar",
+      "avatarColorHint": "Elige un color o deja Auto para que se asigne uno único a partir de tu usuario.",
+      "avatarColorAuto": "Auto",
+      "avatarColorAutoHint": "Color automático según tu usuario.",
+      "nameRequired": "El nombre no puede estar vacío.",
+      "saved": "Guardado."
+    },
     "metadataProviders": "Proveedores de metadatos",
     "mediaLibraries": "Bibliotecas de medios",
     "scanNow": "Escanear ahora",
@@ -645,6 +653,7 @@
       "summary": "Resumen",
       "library": "Biblioteca",
       "users": "Usuarios",
+      "servers": "Servidores",
       "system": "Sistema",
       "dashboard": "Inicio",
       "libraries": "Bibliotecas",

@@ -13,32 +13,26 @@ import {
   useResetUserPassword,
   useSetUserAccess,
   useSetUserActive,
-  useSetUserAvatarColor,
   useSetUserContentRating,
-  useSetUserDisplayName,
   useSetUserLibraryAccess,
   useSetUserPIN,
   useSetUserRole,
   useUserLibraryAccess,
 } from "@/api/hooks";
-import { Button, KebabMenu, Modal, Input, EmptyState, Skeleton } from "@/components/common";
+import { Button, KebabMenu, Modal, Input, EmptyState, Skeleton, UserAvatar } from "@/components/common";
 import type { KebabMenuItem } from "@/components/common";
-import { AVATAR_PALETTE, avatarColorForUser } from "@/utils/avatarColor";
 import { useIsMobile } from "@/hooks/useIsMobile";
-import { getInitials } from "@/utils/userDisplay";
 import {
   ChevronDown,
   ChevronRight,
   KeyRound,
   Library as LibraryIcon,
   Lock,
-  Palette,
   Tv,
   Trash2,
   UserPlus,
 } from "lucide-react";
 import { Trans, useTranslation } from 'react-i18next';
-import FederationAdmin from "./FederationAdmin";
 import { LibraryAccessCheckboxes } from "./LibraryAccessCheckboxes";
 import { LiveTvFormFields } from "./librariesAdmin/LiveTvFormFields";
 import {
@@ -108,76 +102,7 @@ export default function UsersAdmin() {
   const createProfile = useCreateProfile();
   const setUserPIN = useSetUserPIN();
   const setUserContentRating = useSetUserContentRating();
-  const setUserDisplayName = useSetUserDisplayName();
-  const setUserAvatarColor = useSetUserAvatarColor();
 
-  // Personalize modal — admin (or parent of profile, or self) edits
-  // both the display_name AND the avatar colour override here. We
-  // keep both controls in one place because the operator's mental
-  // model is "edit this profile" rather than "rename" + "recolour"
-  // as separate actions. On submit, only the dirty fields fire
-  // their respective mutations.
-  const [renameTarget, setRenameTarget] = useState<User | null>(null);
-  const [renameValue, setRenameValue] = useState("");
-  const [renameColor, setRenameColor] = useState<string>("");
-  const [renameError, setRenameError] = useState<string | null>(null);
-
-  function openRename(user: User) {
-    setRenameTarget(user);
-    setRenameValue(user.display_name || user.username.split("/").pop() || "");
-    setRenameColor(user.avatar_color ?? "");
-    setRenameError(null);
-  }
-
-  function handleRename(e: FormEvent) {
-    e.preventDefault();
-    if (!renameTarget) return;
-    const nextName = renameValue.trim();
-    if (!nextName) {
-      setRenameError(t("admin.users.renameValidation", {
-        defaultValue: "El nombre no puede estar vacío.",
-      }));
-      return;
-    }
-
-    const nameDirty = nextName !== renameTarget.display_name;
-    const colorDirty = renameColor !== (renameTarget.avatar_color ?? "");
-
-    if (!nameDirty && !colorDirty) {
-      // Nothing changed; just close.
-      setRenameTarget(null);
-      return;
-    }
-
-    // Fire both mutations in parallel when both are dirty. Each
-    // invalidates the same queryKeys; TanStack Query will collapse
-    // the refetches.
-    const tasks: Promise<unknown>[] = [];
-    if (nameDirty) {
-      tasks.push(
-        setUserDisplayName.mutateAsync({
-          userId: renameTarget.id,
-          displayName: nextName,
-        }),
-      );
-    }
-    if (colorDirty) {
-      tasks.push(
-        setUserAvatarColor.mutateAsync({
-          userId: renameTarget.id,
-          hex: renameColor,
-        }),
-      );
-    }
-    Promise.all(tasks)
-      .then(() => {
-        setRenameTarget(null);
-        setRenameValue("");
-        setRenameColor("");
-        setRenameError(null);
-      })
-      .catch((err: Error) => setRenameError(err.message));
-  }
   const setUserRole = useSetUserRole();
   const setUserActive = useSetUserActive();
   const setUserAccess = useSetUserAccess();
@@ -530,14 +455,6 @@ export default function UsersAdmin() {
     const isProfile = !!user.parent_user_id;
     return [
       {
-        label: t("admin.users.rename", { defaultValue: "Personalizar" }),
-        icon: Palette,
-        onClick: () => openRename(user),
-        hint: t("admin.users.renameHint", {
-          defaultValue: "Editar el nombre y el color del avatar",
-        }),
-      },
-      {
         label: t("admin.users.addProfile", { defaultValue: "+ Perfil" }),
         icon: UserPlus,
         onClick: () => setProfileParent(user),
@@ -662,16 +579,18 @@ export default function UsersAdmin() {
         expanded?: boolean;
         memberCount?: number;
         onToggle?: () => void;
+        /** Cabecera de un grupo expandido (parent con hijos
+         *  visibles): borde acentuado y fondo tintado para que
+         *  lea como "Hogar de X". */
+        isGroupHeader?: boolean;
+        /** Tarjeta hija dentro de un grupo expandido: sangría
+         *  y rail acentuado que continúa visualmente desde el
+         *  parent. */
         inGroup?: boolean;
       },
     ) => {
       const isSelf = me?.id === user.id;
       const isProfile = !!user.parent_user_id;
-      const palette = avatarColorForUser(user);
-      const initials = getInitials({
-        display_name: user.display_name,
-        username: user.username,
-      });
       const username = isProfile
         ? user.username.split("/").pop() ?? user.username
         : user.username;
@@ -680,10 +599,12 @@ export default function UsersAdmin() {
         <li
           key={user.id}
           className={[
-            "flex flex-col gap-3 rounded-[--radius-lg] border bg-bg-card p-4",
-            opts.inGroup
-              ? "border-l-2 border-l-accent/50 border-border bg-bg-elevated/60"
-              : "border-border",
+            "flex flex-col gap-3 rounded-[--radius-lg] border p-4 transition-colors",
+            opts.isGroupHeader
+              ? "border-accent/40 bg-accent/[0.05] border-l-4 border-l-accent"
+              : opts.inGroup
+                ? "ml-6 border-border-subtle bg-bg-elevated/40 border-l-4 border-l-accent/40"
+                : "border-border bg-bg-card",
           ].join(" ")}
         >
           {/* Header row */}
@@ -711,12 +632,11 @@ export default function UsersAdmin() {
                 )}
               </button>
             )}
-            <div
-              className="relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full text-base font-semibold text-white shadow-sm"
-              style={{ background: palette.background }}
-              aria-hidden
-            >
-              {initials}
+            <div className="relative shrink-0">
+              <UserAvatar
+                user={user}
+                size={isProfile ? "md" : "lg"}
+              />
               {user.has_pin && (
                 <span
                   className="absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-black/70 text-white shadow ring-1 ring-bg-card"
@@ -930,13 +850,14 @@ export default function UsersAdmin() {
     for (const parent of parents) {
       const kids = childrenByParent.get(parent.id) ?? [];
       const expanded = expandedParents.has(parent.id);
+      const isExpandedGroup = expanded && kids.length > 0;
       cards.push(
         renderCard(parent, {
           expandable: kids.length > 0,
           expanded,
           memberCount: kids.length,
           onToggle: () => toggleParent(parent.id),
-          inGroup: expanded && kids.length > 0,
+          isGroupHeader: isExpandedGroup,
         }),
       );
       if (expanded) {
@@ -1045,144 +966,132 @@ export default function UsersAdmin() {
                     expanded?: boolean;
                     memberCount?: number;
                     onToggle?: () => void;
-                    /** Row sits inside a currently-expanded parent
-                     *  group (either the parent itself or one of its
-                     *  children). Drives the left accent rail that
-                     *  visually ties parent and children together. */
+                    /** Cabecera de un grupo expandido: el parent
+                     *  funciona como banda "hogar de X" con borde
+                     *  acentuado y fondo tintado. */
+                    isGroupHeader?: boolean;
+                    /** Hijo dentro de un grupo expandido: sangría
+                     *  fuerte, avatar pequeño y rail acentuado que
+                     *  continúa visualmente desde el parent. */
                     inGroup?: boolean;
                   },
                 ) => {
                   const isSelf = me?.id === user.id;
+                  const isProfile = !!user.parent_user_id;
+                  const username = isProfile
+                    ? user.username.split("/").pop() ?? user.username
+                    : user.username;
                   return (
                   <tr
                     key={user.id}
                     className={[
                       'transition-colors',
-                      opts.inGroup
-                        ? 'bg-bg-elevated/60 hover:bg-bg-elevated'
-                        : 'bg-bg-card hover:bg-bg-elevated',
+                      opts.isGroupHeader
+                        ? 'bg-accent/[0.06] hover:bg-accent/[0.09]'
+                        : opts.inGroup
+                          ? 'bg-bg-elevated/40 hover:bg-bg-elevated/70'
+                          : 'bg-bg-card hover:bg-bg-elevated',
                     ].join(' ')}
                   >
                     <td
                       className={[
-                        'px-4 py-3 font-medium text-text-primary',
+                        'py-3 font-medium text-text-primary',
                         opts.inGroup
-                          ? 'border-l-2 border-accent/50'
-                          : '',
+                          ? 'pl-10 pr-4 border-l-4 border-accent/40'
+                          : opts.isGroupHeader
+                            ? 'pl-4 pr-4 border-l-4 border-accent'
+                            : 'px-4',
                       ].join(' ')}
                     >
-                      {/* Chevron only on parent rows that actually
-                          have profile members. Click toggles their
-                          children's visibility. Parents without
-                          members never render the button so there's
-                          no inert affordance. */}
-                      {opts.expandable && opts.onToggle && (
-                        <button
-                          type="button"
-                          onClick={opts.onToggle}
-                          aria-expanded={opts.expanded}
-                          aria-label={
-                            opts.expanded
-                              ? t('admin.users.collapseMembers', {
-                                  defaultValue: 'Ocultar miembros',
-                                })
-                              : t('admin.users.expandMembers', {
-                                  defaultValue: 'Mostrar miembros',
-                                })
-                          }
-                          className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded text-text-muted hover:bg-bg-elevated hover:text-text-primary transition-colors"
-                        >
-                          <svg
-                            className={[
-                              'h-3.5 w-3.5 transition-transform',
-                              opts.expanded ? 'rotate-90' : '',
-                            ].join(' ')}
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth={2.5}
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
+                      <div className="flex items-center gap-3 min-w-0">
+                        {/* Chevron sólo en parents con miembros.
+                            Click alterna visibilidad de hijos. */}
+                        {opts.expandable && opts.onToggle ? (
+                          <button
+                            type="button"
+                            onClick={opts.onToggle}
+                            aria-expanded={opts.expanded}
+                            aria-label={
+                              opts.expanded
+                                ? t('admin.users.collapseMembers', {
+                                    defaultValue: 'Ocultar miembros',
+                                  })
+                                : t('admin.users.expandMembers', {
+                                    defaultValue: 'Mostrar miembros',
+                                  })
+                            }
+                            className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-text-muted hover:bg-bg-elevated hover:text-text-primary transition-colors"
                           >
-                            <path d="M9 6l6 6-6 6" />
-                          </svg>
-                        </button>
-                      )}
-                      {/* Profiles are visually nested under their
-                          parent — easier to read than scanning the
-                          parent_user_id column. */}
-                      {user.parent_user_id && (
-                        <span className="mr-2 text-text-muted" aria-hidden>
-                          ↳
+                            {opts.expanded ? (
+                              <ChevronDown className="h-3.5 w-3.5" />
+                            ) : (
+                              <ChevronRight className="h-3.5 w-3.5" />
+                            )}
+                          </button>
+                        ) : (
+                          // Reserva espacio para alinear nombres
+                          // cuando el grupo no es expandible.
+                          <span className="inline-block w-5 shrink-0" aria-hidden />
+                        )}
+                        <UserAvatar user={user} size={isProfile ? "sm" : "md"} />
+                        <span className="truncate">
+                          {username}
                         </span>
-                      )}
-                      {/* Profile usernames carry the synthetic
-                          "<parent>/<name>" prefix the server uses to
-                          keep UNIQUE happy; show only the suffix. */}
-                      {user.parent_user_id
-                        ? user.username.split("/").pop()
-                        : user.username}
-                      {user.parent_user_id && (
-                        <span className="ml-2 text-[10px] uppercase tracking-wider text-accent">
-                          {t('admin.users.profileTag', { defaultValue: 'perfil' })}
-                        </span>
-                      )}
-                      {user.has_pin && (
-                        <span
-                          className="ml-2 inline-flex h-4 w-4 items-center justify-center text-text-muted"
-                          aria-label={t('admin.users.pinSet', { defaultValue: 'PIN configurado' })}
-                          title={t('admin.users.pinSet', { defaultValue: 'PIN configurado' })}
-                        >
-                          <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                            <rect x="5" y="11" width="14" height="9" rx="2" />
-                            <path d="M8 11V7a4 4 0 0 1 8 0v4" />
-                          </svg>
-                        </span>
-                      )}
-                      {isSelf && (
-                        <span className="ml-2 text-xs text-text-muted">
-                          {t('admin.users.you')}
-                        </span>
-                      )}
-                      {user.is_primary && (
-                        <span
-                          className="ml-2 rounded-full bg-warning/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-warning"
-                          title={t('admin.users.primaryHint', {
-                            defaultValue:
-                              'Cuenta principal del servidor — no se puede eliminar ni cambiar de rol desde aquí.',
-                          })}
-                        >
-                          {t('admin.users.primaryTag', { defaultValue: 'Principal' })}
-                        </span>
-                      )}
-                      {/* Member count pill — only when this account
-                          actually has profile members. Lets the admin
-                          read "how many people share this login" at a
-                          glance without expanding the row. */}
-                      {opts.memberCount !== undefined && opts.memberCount > 0 && (
-                        <span className="ml-2 inline-flex items-center gap-1 rounded-full border border-border-subtle bg-bg-elevated px-2 py-0.5 text-[10px] font-medium text-text-secondary">
-                          <svg
-                            className="h-3 w-3"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth={2}
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
+                        {isProfile && (
+                          <span className="text-[10px] uppercase tracking-wider text-accent shrink-0">
+                            {t('admin.users.profileTag', { defaultValue: 'perfil' })}
+                          </span>
+                        )}
+                        {user.has_pin && (
+                          <span
+                            className="inline-flex h-4 w-4 shrink-0 items-center justify-center text-text-muted"
+                            aria-label={t('admin.users.pinSet', { defaultValue: 'PIN configurado' })}
+                            title={t('admin.users.pinSet', { defaultValue: 'PIN configurado' })}
                           >
-                            <circle cx="12" cy="8" r="3.5" />
-                            <path d="M5 20a7 7 0 0 1 14 0" />
-                          </svg>
-                          {opts.memberCount === 1
-                            ? t('admin.users.memberCountOne', {
-                                defaultValue: '1 miembro',
-                              })
-                            : t('admin.users.memberCountOther', {
-                                defaultValue: '{{count}} miembros',
-                                count: opts.memberCount,
-                              })}
-                        </span>
-                      )}
+                            <Lock className="h-3 w-3" />
+                          </span>
+                        )}
+                        {isSelf && (
+                          <span className="text-xs text-text-muted shrink-0">
+                            {t('admin.users.you')}
+                          </span>
+                        )}
+                        {user.is_primary && (
+                          <span
+                            className="rounded-full bg-warning/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-warning shrink-0"
+                            title={t('admin.users.primaryHint', {
+                              defaultValue:
+                                'Cuenta principal del servidor — no se puede eliminar ni cambiar de rol desde aquí.',
+                            })}
+                          >
+                            {t('admin.users.primaryTag', { defaultValue: 'Principal' })}
+                          </span>
+                        )}
+                        {opts.memberCount !== undefined && opts.memberCount > 0 && (
+                          <span className="inline-flex items-center gap-1 rounded-full border border-border-subtle bg-bg-elevated px-2 py-0.5 text-[10px] font-medium text-text-secondary shrink-0">
+                            <svg
+                              className="h-3 w-3"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth={2}
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              <circle cx="12" cy="8" r="3.5" />
+                              <path d="M5 20a7 7 0 0 1 14 0" />
+                            </svg>
+                            {opts.memberCount === 1
+                              ? t('admin.users.memberCountOne', {
+                                  defaultValue: '1 miembro',
+                                })
+                              : t('admin.users.memberCountOther', {
+                                  defaultValue: '{{count}} miembros',
+                                  count: opts.memberCount,
+                                })}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-text-secondary">
                       {user.display_name}
@@ -1358,13 +1267,14 @@ export default function UsersAdmin() {
                 for (const parent of parents) {
                   const kids = childrenByParent.get(parent.id) ?? [];
                   const expanded = expandedParents.has(parent.id);
+                  const isExpandedGroup = expanded && kids.length > 0;
                   rows.push(
                     renderRow(parent, {
                       expandable: kids.length > 0,
                       expanded,
                       memberCount: kids.length,
                       onToggle: () => toggleParent(parent.id),
-                      inGroup: expanded && kids.length > 0,
+                      isGroupHeader: isExpandedGroup,
                     }),
                   );
                   if (expanded) {
@@ -1834,121 +1744,6 @@ export default function UsersAdmin() {
         )}
       </Modal>
 
-      {/* Rename modal — change display_name (visible label).
-          Username + parent linkage stay put so logins / avatar
-          colours / profile membership are unaffected. */}
-      <Modal
-        isOpen={renameTarget !== null}
-        onClose={() => {
-          setRenameTarget(null);
-          setRenameValue("");
-          setRenameColor("");
-          setRenameError(null);
-        }}
-        title={t("admin.users.renameModalTitle", {
-          defaultValue: "Personalizar perfil",
-        })}
-        size="sm"
-      >
-        {renameTarget && (
-          <form onSubmit={handleRename} className="flex flex-col gap-4">
-            <p className="text-sm text-text-secondary">
-              {t("admin.users.renameModalHint", {
-                defaultValue:
-                  "Cambia el nombre y el color del avatar. El usuario interno (login) no cambia, así que las contraseñas y permisos siguen igual.",
-              })}
-            </p>
-            <Input
-              label={t("admin.users.displayName")}
-              value={renameValue}
-              onChange={(e) => setRenameValue(e.target.value)}
-              autoFocus
-              required
-              maxLength={64}
-            />
-
-            {/* Colour picker — 14 swatches matching the avatar
-                palette + an "auto" tile that clears the override
-                so the deterministic FNV helper picks for you. */}
-            <div className="flex flex-col gap-2">
-              <span className="text-sm font-medium text-text-secondary">
-                {t("admin.users.avatarColorLabel", {
-                  defaultValue: "Color del avatar",
-                })}
-              </span>
-              <div className="grid grid-cols-7 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setRenameColor("")}
-                  className={[
-                    "h-9 w-9 rounded-full border-2 text-[10px] font-medium transition-all",
-                    renameColor === ""
-                      ? "border-accent ring-2 ring-accent/30 text-text-primary"
-                      : "border-border-subtle text-text-muted hover:border-border",
-                  ].join(" ")}
-                  title={t("admin.users.avatarColorAutoHint", {
-                    defaultValue:
-                      "Color automático según el nombre de usuario.",
-                  })}
-                  aria-label={t("admin.users.avatarColorAuto", {
-                    defaultValue: "Auto",
-                  })}
-                >
-                  A
-                </button>
-                {AVATAR_PALETTE.map((p) => {
-                  const selected =
-                    renameColor.toLowerCase() === p.background.toLowerCase();
-                  return (
-                    <button
-                      type="button"
-                      key={p.background}
-                      onClick={() => setRenameColor(p.background)}
-                      className={[
-                        "h-9 w-9 rounded-full border-2 transition-all",
-                        selected
-                          ? "border-white scale-110 ring-2 ring-white/30"
-                          : "border-transparent hover:scale-105",
-                      ].join(" ")}
-                      style={{ background: p.background }}
-                      title={p.label}
-                      aria-label={p.label}
-                      aria-pressed={selected}
-                    />
-                  );
-                })}
-              </div>
-            </div>
-
-            {renameError && (
-              <p className="text-xs text-error">{renameError}</p>
-            )}
-            <div className="flex justify-end gap-3">
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => {
-                  setRenameTarget(null);
-                  setRenameValue("");
-                  setRenameColor("");
-                  setRenameError(null);
-                }}
-              >
-                {t("common.cancel")}
-              </Button>
-              <Button
-                type="submit"
-                isLoading={
-                  setUserDisplayName.isPending || setUserAvatarColor.isPending
-                }
-              >
-                {t("common.save", { defaultValue: "Guardar" })}
-              </Button>
-            </div>
-          </form>
-        )}
-      </Modal>
-
       {/* PIN modal — type 4 digits or leave empty to clear. */}
       <Modal
         isOpen={pinTarget !== null}
@@ -2004,15 +1799,6 @@ export default function UsersAdmin() {
         )}
       </Modal>
 
-      {/* Federation lived as its own top-level admin tab. It's a
-          niche feature most installs never touch, but it IS about
-          who's allowed to access this server's catalogue — so it
-          fits naturally as a "Servidores conectados" section under
-          the Users page. The dedicated /admin/federation route still
-          works for direct links. */}
-      <section className="mt-8 pt-6 border-t border-border-subtle">
-        <FederationAdmin />
-      </section>
     </div>
   );
 }
