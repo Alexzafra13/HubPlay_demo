@@ -7,26 +7,11 @@ import (
 	"fmt"
 	"time"
 
+	authmodel "hubplay/internal/auth/model"
 	"hubplay/internal/db/sqlc"
 	"hubplay/internal/db/sqlc_pg"
 	"hubplay/internal/domain"
 )
-
-// Session is the domain shape exposed to auth/. IPAddress is a plain
-// string (empty = "unknown"); conversion to/from nullable column
-// happens at the adapter boundary.
-type Session struct {
-	ID                       string
-	UserID                   string
-	DeviceName               string
-	DeviceID                 string
-	IPAddress                string
-	RefreshTokenHash         string
-	PreviousRefreshTokenHash string
-	CreatedAt                time.Time
-	LastActiveAt             time.Time
-	ExpiresAt                time.Time
-}
 
 // SessionRepository — Pattern A dual-dialect. db is kept for the two
 // raw-SQL holdouts (RotateRefreshToken + GetByPreviousRefreshTokenHash)
@@ -49,7 +34,7 @@ func NewSessionRepository(driver string, database *sql.DB) *SessionRepository {
 
 func (r *SessionRepository) useSQLite() bool { return r.sq != nil }
 
-func (r *SessionRepository) Create(ctx context.Context, s *Session) error {
+func (r *SessionRepository) Create(ctx context.Context, s *authmodel.Session) error {
 	if r.useSQLite() {
 		if err := r.sq.CreateSession(ctx, sqlc.CreateSessionParams{
 			ID:               s.ID,
@@ -82,7 +67,7 @@ func (r *SessionRepository) Create(ctx context.Context, s *Session) error {
 	return nil
 }
 
-func (r *SessionRepository) GetByRefreshTokenHash(ctx context.Context, hash string) (*Session, error) {
+func (r *SessionRepository) GetByRefreshTokenHash(ctx context.Context, hash string) (*authmodel.Session, error) {
 	if r.useSQLite() {
 		row, err := r.sq.GetSessionByRefreshTokenHash(ctx, hash)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -105,7 +90,7 @@ func (r *SessionRepository) GetByRefreshTokenHash(ctx context.Context, hash stri
 	return &s, nil
 }
 
-func (r *SessionRepository) GetByID(ctx context.Context, id string) (*Session, error) {
+func (r *SessionRepository) GetByID(ctx context.Context, id string) (*authmodel.Session, error) {
 	if r.useSQLite() {
 		row, err := r.sq.GetSessionByID(ctx, id)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -154,7 +139,7 @@ func (r *SessionRepository) DeleteByRefreshTokenHash(ctx context.Context, hash s
 	return nil
 }
 
-func (r *SessionRepository) ListByUser(ctx context.Context, userID string) ([]*Session, error) {
+func (r *SessionRepository) ListByUser(ctx context.Context, userID string) ([]*authmodel.Session, error) {
 	if r.useSQLite() {
 		rows, err := r.sq.ListSessionsByUser(ctx, userID)
 		if err != nil {
@@ -163,7 +148,7 @@ func (r *SessionRepository) ListByUser(ctx context.Context, userID string) ([]*S
 		if len(rows) == 0 {
 			return nil, nil
 		}
-		out := make([]*Session, len(rows))
+		out := make([]*authmodel.Session, len(rows))
 		for i, row := range rows {
 			s := sessionFromSqliteRow(row)
 			out[i] = &s
@@ -177,7 +162,7 @@ func (r *SessionRepository) ListByUser(ctx context.Context, userID string) ([]*S
 	if len(rows) == 0 {
 		return nil, nil
 	}
-	out := make([]*Session, len(rows))
+	out := make([]*authmodel.Session, len(rows))
 	for i, row := range rows {
 		s := sessionFromPgRow(row)
 		out[i] = &s
@@ -264,7 +249,7 @@ func (r *SessionRepository) RotateRefreshToken(ctx context.Context, id, newHash 
 // GetByPreviousRefreshTokenHash — raw SQL holdout (column added in
 // migration 038 post-dating most sqlc queries; matches the
 // RotateRefreshToken precedent).
-func (r *SessionRepository) GetByPreviousRefreshTokenHash(ctx context.Context, hash string) (*Session, error) {
+func (r *SessionRepository) GetByPreviousRefreshTokenHash(ctx context.Context, hash string) (*authmodel.Session, error) {
 	if hash == "" {
 		return nil, domain.ErrNotFound
 	}
@@ -274,7 +259,7 @@ func (r *SessionRepository) GetByPreviousRefreshTokenHash(ctx context.Context, h
 	}
 	query := rewritePlaceholders(driver,
 		`SELECT id, user_id, device_name, device_id, ip_address, refresh_token_hash, previous_refresh_token_hash, created_at, last_active_at, expires_at FROM sessions WHERE previous_refresh_token_hash = ? LIMIT 1`)
-	var s Session
+	var s authmodel.Session
 	var ip sql.NullString
 	err := r.db.QueryRowContext(ctx, query, hash).Scan(
 		&s.ID, &s.UserID, &s.DeviceName, &s.DeviceID, &ip,
@@ -310,8 +295,8 @@ func (r *SessionRepository) UpdateLastActive(ctx context.Context, id string, t t
 
 // ── row mapping helpers ─────────────────────────────────────────────────
 
-func sessionFromSqliteRow(r sqlc.Session) Session {
-	return Session{
+func sessionFromSqliteRow(r sqlc.Session) authmodel.Session {
+	return authmodel.Session{
 		ID:                       r.ID,
 		UserID:                   r.UserID,
 		DeviceName:               r.DeviceName,
@@ -325,8 +310,8 @@ func sessionFromSqliteRow(r sqlc.Session) Session {
 	}
 }
 
-func sessionFromPgRow(r sqlc_pg.Session) Session {
-	return Session{
+func sessionFromPgRow(r sqlc_pg.Session) authmodel.Session {
+	return authmodel.Session{
 		ID:                       r.ID,
 		UserID:                   r.UserID,
 		DeviceName:               r.DeviceName,

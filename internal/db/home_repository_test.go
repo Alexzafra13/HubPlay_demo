@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	authmodel "hubplay/internal/auth/model"
 	"hubplay/internal/db"
 	"hubplay/internal/testutil"
 )
@@ -20,7 +21,7 @@ func setupHomeTrendingTest(t *testing.T) *db.Repositories {
 	ctx := context.Background()
 
 	now := time.Now().UTC()
-	if err := repos.Users.Create(ctx, &db.User{
+	if err := repos.Users.Create(ctx, &authmodel.User{
 		ID: "u-1", Username: "u", PasswordHash: "h",
 		Role: "user", CreatedAt: now, IsActive: true,
 	}); err != nil {
@@ -92,7 +93,7 @@ func TestHomeRepository_Trending_HandlesLegacyMonotonicTimestamp(t *testing.T) {
 	ctx := context.Background()
 
 	now := time.Now().UTC()
-	_ = repos.Users.Create(ctx, &db.User{
+	_ = repos.Users.Create(ctx, &authmodel.User{
 		ID: "u-1", Username: "u", PasswordHash: "h",
 		Role: "user", CreatedAt: now, IsActive: true,
 	})
@@ -145,7 +146,7 @@ func TestHomeRepository_Recommended_ScoresUnwatchedByGenreOverlap(t *testing.T) 
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	if err := repos.Users.Create(ctx, &db.User{
+	if err := repos.Users.Create(ctx, &authmodel.User{
 		ID: "u-1", Username: "u", PasswordHash: "h",
 		Role: "user", CreatedAt: now, IsActive: true,
 	}); err != nil {
@@ -228,7 +229,7 @@ func TestHomeRepository_Recommended_ColdStartReturnsNil(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	if err := repos.Users.Create(ctx, &db.User{
+	if err := repos.Users.Create(ctx, &authmodel.User{
 		ID: "u-cold", Username: "cold", PasswordHash: "h",
 		Role: "user", CreatedAt: now, IsActive: true,
 	}); err != nil {
@@ -255,7 +256,7 @@ func TestHomeRepository_Recommended_FiltersWatchedItems(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	if err := repos.Users.Create(ctx, &db.User{
+	if err := repos.Users.Create(ctx, &authmodel.User{
 		ID: "u-1", Username: "u", PasswordHash: "h",
 		Role: "user", CreatedAt: now, IsActive: true,
 	}); err != nil {

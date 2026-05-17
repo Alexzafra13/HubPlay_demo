@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	authmodel "hubplay/internal/auth/model"
 	"hubplay/internal/db"
 	"hubplay/internal/testutil"
 )
@@ -77,7 +78,7 @@ func newBenchHomeRepo(b *testing.B, n int) (*db.HomeRepository, string) {
 	}); err != nil {
 		b.Fatalf("create library: %v", err)
 	}
-	if err := repos.Users.Create(ctx, &db.User{
+	if err := repos.Users.Create(ctx, &authmodel.User{
 		ID: "u-1", Username: "u1", DisplayName: "U1",
 		PasswordHash: "x", Role: "admin", IsActive: true, CreatedAt: now,
 	}); err != nil {
@@ -145,7 +146,7 @@ func newBenchHomeRepoLiveTV(b *testing.B, n int) (*db.HomeRepository, string) {
 	}); err != nil {
 		b.Fatalf("create library: %v", err)
 	}
-	if err := repos.Users.Create(ctx, &db.User{
+	if err := repos.Users.Create(ctx, &authmodel.User{
 		ID: "u-1", Username: "u1", DisplayName: "U1",
 		PasswordHash: "x", Role: "admin", IsActive: true, CreatedAt: now,
 	}); err != nil {

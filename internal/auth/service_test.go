@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	authmodel "hubplay/internal/auth/model"
 	"hubplay/internal/auth"
 	"hubplay/internal/clock"
 	"hubplay/internal/config"
@@ -50,7 +51,7 @@ func newTestAuthService(t *testing.T) (*auth.Service, *db.UserRepository, *db.Se
 	return svc, userRepo, sessionRepo
 }
 
-func registerTestUser(t *testing.T, svc *auth.Service) *db.User {
+func registerTestUser(t *testing.T, svc *auth.Service) *authmodel.User {
 	t.Helper()
 	u, err := svc.Register(context.Background(), auth.RegisterRequest{
 		Username:    "testuser",
@@ -418,9 +419,9 @@ func TestService_ValidateToken_Invalid(t *testing.T) {
 func registerProfileWithPIN(
 	t *testing.T,
 	svc *auth.Service,
-	parent *db.User,
+	parent *authmodel.User,
 	username, pin string,
-) *db.User {
+) *authmodel.User {
 	t.Helper()
 	child, err := svc.Register(context.Background(), auth.RegisterRequest{
 		Username:     parent.Username + "/" + username,

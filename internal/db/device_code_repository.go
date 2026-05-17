@@ -7,28 +7,11 @@ import (
 	"fmt"
 	"time"
 
+	authmodel "hubplay/internal/auth/model"
 	"hubplay/internal/db/sqlc"
 	"hubplay/internal/db/sqlc_pg"
 	"hubplay/internal/domain"
 )
-
-// DeviceCode is the domain shape exposed to internal/auth. Used to
-// live as an alias to sqlc.DeviceCode; now a proper struct so the
-// dual-dialect repo can return the same type regardless of which
-// generated package produced the row. Nullable columns keep their
-// sql.Null* shape so existing callers (`row.UserID.Valid`,
-// `row.ApprovedAt.Time`) don't have to change.
-type DeviceCode struct {
-	DeviceCode   string
-	UserCode     string
-	DeviceName   string
-	UserID       sql.NullString
-	ExpiresAt    time.Time
-	CreatedAt    time.Time
-	ApprovedAt   sql.NullTime
-	ConsumedAt   sql.NullTime
-	LastPolledAt sql.NullTime
-}
 
 // DeviceCodeRepository persists OAuth 2.0 device authorization grants
 // (RFC 8628). The lifecycle: insert → poll/approve → consume → expire.
@@ -61,7 +44,7 @@ func (r *DeviceCodeRepository) useSQLite() bool { return r.sq != nil }
 
 // Insert persists a fresh code pair. Caller generates device_code +
 // user_code; we just write.
-func (r *DeviceCodeRepository) Insert(ctx context.Context, code *DeviceCode) error {
+func (r *DeviceCodeRepository) Insert(ctx context.Context, code *authmodel.DeviceCode) error {
 	var err error
 	if r.useSQLite() {
 		err = r.sq.InsertDeviceCode(ctx, sqlc.InsertDeviceCodeParams{
@@ -88,7 +71,7 @@ func (r *DeviceCodeRepository) Insert(ctx context.Context, code *DeviceCode) err
 
 // GetByDeviceCode returns the row by its opaque device_code. Used on
 // poll. Returns domain.ErrNotFound when missing.
-func (r *DeviceCodeRepository) GetByDeviceCode(ctx context.Context, deviceCode string) (*DeviceCode, error) {
+func (r *DeviceCodeRepository) GetByDeviceCode(ctx context.Context, deviceCode string) (*authmodel.DeviceCode, error) {
 	if r.useSQLite() {
 		row, err := r.sq.GetDeviceCodeByDeviceCode(ctx, deviceCode)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -113,7 +96,7 @@ func (r *DeviceCodeRepository) GetByDeviceCode(ctx context.Context, deviceCode s
 
 // GetByUserCode returns the row by the operator-typed user_code. Used
 // on approval (the user-facing /link page).
-func (r *DeviceCodeRepository) GetByUserCode(ctx context.Context, userCode string) (*DeviceCode, error) {
+func (r *DeviceCodeRepository) GetByUserCode(ctx context.Context, userCode string) (*authmodel.DeviceCode, error) {
 	if r.useSQLite() {
 		row, err := r.sq.GetDeviceCodeByUserCode(ctx, userCode)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -199,8 +182,8 @@ func (r *DeviceCodeRepository) DeleteExpired(ctx context.Context, olderThan time
 
 // ── row mapping helpers ─────────────────────────────────────────────────
 
-func deviceCodeFromSqlite(r sqlc.DeviceCode) DeviceCode {
-	return DeviceCode{
+func deviceCodeFromSqlite(r sqlc.DeviceCode) authmodel.DeviceCode {
+	return authmodel.DeviceCode{
 		DeviceCode:   r.DeviceCode,
 		UserCode:     r.UserCode,
 		DeviceName:   r.DeviceName,
@@ -213,8 +196,8 @@ func deviceCodeFromSqlite(r sqlc.DeviceCode) DeviceCode {
 	}
 }
 
-func deviceCodeFromPg(r sqlc_pg.DeviceCode) DeviceCode {
-	return DeviceCode{
+func deviceCodeFromPg(r sqlc_pg.DeviceCode) authmodel.DeviceCode {
+	return authmodel.DeviceCode{
 		DeviceCode:   r.DeviceCode,
 		UserCode:     r.UserCode,
 		DeviceName:   r.DeviceName,

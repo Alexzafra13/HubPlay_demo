@@ -10,8 +10,8 @@ import (
 
 	"github.com/google/uuid"
 
+	authmodel "hubplay/internal/auth/model"
 	"hubplay/internal/clock"
-	"hubplay/internal/db"
 	"hubplay/internal/domain"
 )
 
@@ -19,10 +19,10 @@ import (
 // needs. Declaring it here keeps the auth package testable with a fake repo
 // and decoupled from SQL details.
 type signingKeyRepo interface {
-	Insert(ctx context.Context, k *db.SigningKey) error
-	GetByID(ctx context.Context, id string) (*db.SigningKey, error)
-	ListActive(ctx context.Context) ([]*db.SigningKey, error)
-	ListAll(ctx context.Context) ([]*db.SigningKey, error)
+	Insert(ctx context.Context, k *authmodel.SigningKey) error
+	GetByID(ctx context.Context, id string) (*authmodel.SigningKey, error)
+	ListActive(ctx context.Context) ([]*authmodel.SigningKey, error)
+	ListAll(ctx context.Context) ([]*authmodel.SigningKey, error)
 	SetRetiredAt(ctx context.Context, id string, retiredAt time.Time) error
 	DeleteRetiredBefore(ctx context.Context, cutoff time.Time) (int64, error)
 }
@@ -39,9 +39,9 @@ type KeyStore struct {
 	clock clock.Clock
 
 	mu       sync.RWMutex
-	active   map[string]*db.SigningKey // kid → key, includes overlap keys
-	primary  *db.SigningKey            // most recent active key
-	retired  map[string]*db.SigningKey // kid → retired key (still useful until pruned)
+	active   map[string]*authmodel.SigningKey // kid → key, includes overlap keys
+	primary  *authmodel.SigningKey            // most recent active key
+	retired  map[string]*authmodel.SigningKey // kid → retired key (still useful until pruned)
 }
 
 // NewKeyStore creates a keystore and loads the current key set. Returns an
@@ -65,7 +65,7 @@ func NewKeyStore(ctx context.Context, repo signingKeyRepo, clk clock.Clock) (*Ke
 // A non-empty seed is used verbatim (so existing tokens signed with the
 // config secret keep validating). An empty seed falls back to a fresh
 // random key.
-func Bootstrap(ctx context.Context, repo signingKeyRepo, clk clock.Clock, seed string) (*db.SigningKey, error) {
+func Bootstrap(ctx context.Context, repo signingKeyRepo, clk clock.Clock, seed string) (*authmodel.SigningKey, error) {
 	existing, err := repo.ListAll(ctx)
 	if err != nil {
 		return nil, err
@@ -83,7 +83,7 @@ func Bootstrap(ctx context.Context, repo signingKeyRepo, clk clock.Clock, seed s
 			return nil, err
 		}
 	}
-	k := &db.SigningKey{
+	k := &authmodel.SigningKey{
 		ID:        uuid.New().String(),
 		Secret:    secret,
 		CreatedAt: clk.Now(),
@@ -107,11 +107,11 @@ func (ks *KeyStore) Reload(ctx context.Context) error {
 		return err
 	}
 
-	activeMap := make(map[string]*db.SigningKey, len(active))
+	activeMap := make(map[string]*authmodel.SigningKey, len(active))
 	for _, k := range active {
 		activeMap[k.ID] = k
 	}
-	retiredMap := make(map[string]*db.SigningKey)
+	retiredMap := make(map[string]*authmodel.SigningKey)
 	for _, k := range all {
 		if k.RetiredAt.Valid {
 			retiredMap[k.ID] = k
@@ -131,7 +131,7 @@ func (ks *KeyStore) Reload(ctx context.Context) error {
 }
 
 // Current returns the primary signing key used for new tokens.
-func (ks *KeyStore) Current() (*db.SigningKey, error) {
+func (ks *KeyStore) Current() (*authmodel.SigningKey, error) {
 	ks.mu.RLock()
 	defer ks.mu.RUnlock()
 	if ks.primary == nil {
@@ -144,7 +144,7 @@ func (ks *KeyStore) Current() (*db.SigningKey, error) {
 // retired ones; retired keys still resolve so in-flight tokens keep working
 // until the admin prunes them. Returns domain.ErrNotFound when the kid is
 // unknown, so callers can render a 401 consistently.
-func (ks *KeyStore) Lookup(kid string) (*db.SigningKey, error) {
+func (ks *KeyStore) Lookup(kid string) (*authmodel.SigningKey, error) {
 	ks.mu.RLock()
 	defer ks.mu.RUnlock()
 	if k, ok := ks.active[kid]; ok {
@@ -164,13 +164,13 @@ func (ks *KeyStore) Lookup(kid string) (*db.SigningKey, error) {
 // what you want when you suspect the key was compromised.
 //
 // Returns the new primary key.
-func (ks *KeyStore) Rotate(ctx context.Context, overlap time.Duration) (*db.SigningKey, error) {
+func (ks *KeyStore) Rotate(ctx context.Context, overlap time.Duration) (*authmodel.SigningKey, error) {
 	secret, err := randomSecret()
 	if err != nil {
 		return nil, err
 	}
 	now := ks.clock.Now()
-	k := &db.SigningKey{
+	k := &authmodel.SigningKey{
 		ID:        uuid.New().String(),
 		Secret:    secret,
 		CreatedAt: now,

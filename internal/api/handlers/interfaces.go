@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	authmodel "hubplay/internal/auth/model"
 	"hubplay/internal/auth"
 	"hubplay/internal/db"
 	"hubplay/internal/event"
@@ -23,15 +24,15 @@ type AuthService interface {
 	Login(ctx context.Context, username, password, deviceName, deviceID, ip string) (*auth.AuthToken, error)
 	RefreshToken(ctx context.Context, refreshToken, ip string) (*auth.AuthToken, error)
 	Logout(ctx context.Context, refreshToken string) error
-	Register(ctx context.Context, req auth.RegisterRequest) (*db.User, error)
+	Register(ctx context.Context, req auth.RegisterRequest) (*authmodel.User, error)
 	ResetPassword(ctx context.Context, userID string) (string, error)
 	ChangePassword(ctx context.Context, userID, current, next string) error
-	ListProfiles(ctx context.Context, userID string) ([]*db.User, error)
+	ListProfiles(ctx context.Context, userID string) ([]*authmodel.User, error)
 	SwitchProfile(ctx context.Context, currentUserID, targetProfileID, pin, deviceName, deviceID, ip string) (*auth.AuthToken, error)
 	SetPIN(ctx context.Context, userID, pin string) error
 	ValidateToken(ctx context.Context, tokenStr string) (*auth.Claims, error)
 	Middleware(next http.Handler) http.Handler
-	ListSessions(ctx context.Context, userID string) ([]*db.Session, error)
+	ListSessions(ctx context.Context, userID string) ([]*authmodel.Session, error)
 	RevokeSession(ctx context.Context, userID, sessionID string) error
 	CurrentSessionID(ctx context.Context, refreshToken string) string
 }
@@ -40,8 +41,8 @@ type AuthService interface {
 
 // UserService defines user operations needed by handlers.
 type UserService interface {
-	GetByID(ctx context.Context, id string) (*db.User, error)
-	List(ctx context.Context, limit, offset int) ([]*db.User, int, error)
+	GetByID(ctx context.Context, id string) (*authmodel.User, error)
+	List(ctx context.Context, limit, offset int) ([]*authmodel.User, int, error)
 	Delete(ctx context.Context, id string) error
 	Count(ctx context.Context) (int, error)
 	SetMaxContentRating(ctx context.Context, id, rating string) error

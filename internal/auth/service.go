@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 
+	authmodel "hubplay/internal/auth/model"
 	"hubplay/internal/clock"
 	"hubplay/internal/config"
 	"hubplay/internal/db"
@@ -148,7 +149,7 @@ func (s *Service) StopSessionCleaner() {
 	}
 }
 
-func (s *Service) Register(ctx context.Context, req RegisterRequest) (*db.User, error) {
+func (s *Service) Register(ctx context.Context, req RegisterRequest) (*authmodel.User, error) {
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), s.cfg.BCryptCost)
 	if err != nil {
 		return nil, fmt.Errorf("hashing password: %w", err)
@@ -159,7 +160,7 @@ func (s *Service) Register(ctx context.Context, req RegisterRequest) (*db.User, 
 		role = "user"
 	}
 
-	user := &db.User{
+	user := &authmodel.User{
 		ID:                     uuid.New().String(),
 		Username:               req.Username,
 		DisplayName:            req.DisplayName,
@@ -376,7 +377,7 @@ func (s *Service) RefreshToken(ctx context.Context, refreshToken, ip string) (*A
 }
 
 func (s *Service) ValidateToken(ctx context.Context, tokenStr string) (*Claims, error) {
-	claims, err := validateAccessToken(func(kid string) (*db.SigningKey, error) {
+	claims, err := validateAccessToken(func(kid string) (*authmodel.SigningKey, error) {
 		return s.keys.Lookup(kid)
 	}, tokenStr)
 	if err != nil {
@@ -416,7 +417,7 @@ func (s *Service) InvalidateUserSessions(ctx context.Context, userID string) err
 // by the user-facing "Your devices" panel — distinct from the admin
 // "Now Playing" surface, which lists playback sessions across the
 // whole server. Returns sessions sorted newest-first by last_active.
-func (s *Service) ListSessions(ctx context.Context, userID string) ([]*db.Session, error) {
+func (s *Service) ListSessions(ctx context.Context, userID string) ([]*authmodel.Session, error) {
 	rows, err := s.sessions.ListByUser(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -489,7 +490,7 @@ func (s *Service) Logout(ctx context.Context, refreshToken string) error {
 	return nil
 }
 
-func (s *Service) createSession(ctx context.Context, user *db.User, deviceName, deviceID, ip string) (*AuthToken, error) {
+func (s *Service) createSession(ctx context.Context, user *authmodel.User, deviceName, deviceID, ip string) (*AuthToken, error) {
 	// Enforce max sessions per user (expired sessions cleaned by background job)
 	if s.cfg.MaxSessionsPerUser > 0 {
 		count, err := s.sessions.CountByUser(ctx, user.ID)
@@ -524,7 +525,7 @@ func (s *Service) createSession(ctx context.Context, user *db.User, deviceName, 
 	}
 	now := s.clock.Now()
 
-	session := &db.Session{
+	session := &authmodel.Session{
 		ID:               uuid.New().String(),
 		UserID:           user.ID,
 		DeviceName:       deviceName,
@@ -619,7 +620,7 @@ func (s *Service) ResetPassword(ctx context.Context, userID string) (string, err
 // owner via parent_user_id and returns the right tree, but the
 // public surface only ever reaches this with the caller's own
 // claims.
-func (s *Service) ListProfiles(ctx context.Context, userID string) ([]*db.User, error) {
+func (s *Service) ListProfiles(ctx context.Context, userID string) ([]*authmodel.User, error) {
 	user, err := s.users.GetByID(ctx, userID)
 	if err != nil {
 		return nil, err

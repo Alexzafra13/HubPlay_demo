@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	authmodel "hubplay/internal/auth/model"
 	"hubplay/internal/db"
 	"hubplay/internal/domain"
 	"hubplay/internal/library"
@@ -69,8 +70,8 @@ func (e *libraryAccessEnv) do(method, path string, body any) *httptest.ResponseR
 
 func TestUserHandler_GetLibraryAccess_HappyPath(t *testing.T) {
 	env := newLibraryAccessEnv(t)
-	env.users.getByIDFn = func(_ context.Context, id string) (*db.User, error) {
-		return &db.User{ID: id}, nil
+	env.users.getByIDFn = func(_ context.Context, id string) (*authmodel.User, error) {
+		return &authmodel.User{ID: id}, nil
 	}
 	env.libs.listAccessFn = func(_ context.Context, userID string) ([]string, error) {
 		if userID != "u-1" {
@@ -106,11 +107,11 @@ func TestUserHandler_GetLibraryAccess_HappyPath(t *testing.T) {
 // admin UI can render the inherited set in one round-trip.
 func TestUserHandler_GetLibraryAccess_NormalisesProfileToParent(t *testing.T) {
 	env := newLibraryAccessEnv(t)
-	env.users.getByIDFn = func(_ context.Context, id string) (*db.User, error) {
+	env.users.getByIDFn = func(_ context.Context, id string) (*authmodel.User, error) {
 		if id != "u-profile" {
 			t.Errorf("unexpected user lookup: %q", id)
 		}
-		return &db.User{ID: id, ParentUserID: "u-parent"}, nil
+		return &authmodel.User{ID: id, ParentUserID: "u-parent"}, nil
 	}
 	env.libs.listAccessFn = func(_ context.Context, userID string) ([]string, error) {
 		if userID != "u-parent" {
@@ -140,7 +141,7 @@ func TestUserHandler_GetLibraryAccess_NormalisesProfileToParent(t *testing.T) {
 
 func TestUserHandler_GetLibraryAccess_UserNotFound_404(t *testing.T) {
 	env := newLibraryAccessEnv(t)
-	env.users.getByIDFn = func(_ context.Context, _ string) (*db.User, error) {
+	env.users.getByIDFn = func(_ context.Context, _ string) (*authmodel.User, error) {
 		return nil, domain.NewNotFound("user")
 	}
 	rr := env.do(http.MethodGet, "/api/v1/users/u-ghost/library-access", nil)
@@ -169,8 +170,8 @@ func TestUserHandler_GetLibraryAccess_NoLibrariesWired_503(t *testing.T) {
 
 func TestUserHandler_SetLibraryAccess_HappyPath(t *testing.T) {
 	env := newLibraryAccessEnv(t)
-	env.users.getByIDFn = func(_ context.Context, id string) (*db.User, error) {
-		return &db.User{ID: id}, nil
+	env.users.getByIDFn = func(_ context.Context, id string) (*authmodel.User, error) {
+		return &authmodel.User{ID: id}, nil
 	}
 	env.libs.getByIDFn = func(_ context.Context, _ string) (*db.Library, error) {
 		return &db.Library{}, nil
@@ -196,8 +197,8 @@ func TestUserHandler_SetLibraryAccess_HappyPath(t *testing.T) {
 
 func TestUserHandler_SetLibraryAccess_RejectsProfile_400(t *testing.T) {
 	env := newLibraryAccessEnv(t)
-	env.users.getByIDFn = func(_ context.Context, id string) (*db.User, error) {
-		return &db.User{ID: id, ParentUserID: "u-parent"}, nil
+	env.users.getByIDFn = func(_ context.Context, id string) (*authmodel.User, error) {
+		return &authmodel.User{ID: id, ParentUserID: "u-parent"}, nil
 	}
 	rr := env.do(http.MethodPut, "/api/v1/users/u-profile/library-access", map[string]any{
 		"library_ids": []string{"lib-a"},
@@ -212,8 +213,8 @@ func TestUserHandler_SetLibraryAccess_RejectsProfile_400(t *testing.T) {
 
 func TestUserHandler_SetLibraryAccess_UnknownLibrary_404(t *testing.T) {
 	env := newLibraryAccessEnv(t)
-	env.users.getByIDFn = func(_ context.Context, id string) (*db.User, error) {
-		return &db.User{ID: id}, nil
+	env.users.getByIDFn = func(_ context.Context, id string) (*authmodel.User, error) {
+		return &authmodel.User{ID: id}, nil
 	}
 	env.libs.getByIDFn = func(_ context.Context, id string) (*db.Library, error) {
 		if id == "lib-good" {
@@ -234,8 +235,8 @@ func TestUserHandler_SetLibraryAccess_UnknownLibrary_404(t *testing.T) {
 
 func TestUserHandler_SetLibraryAccess_EmptyClearsAll(t *testing.T) {
 	env := newLibraryAccessEnv(t)
-	env.users.getByIDFn = func(_ context.Context, id string) (*db.User, error) {
-		return &db.User{ID: id}, nil
+	env.users.getByIDFn = func(_ context.Context, id string) (*authmodel.User, error) {
+		return &authmodel.User{ID: id}, nil
 	}
 	rr := env.do(http.MethodPut, "/api/v1/users/u-1/library-access", map[string]any{
 		"library_ids": []string{},
@@ -264,8 +265,8 @@ func TestUserHandler_SetLibraryAccess_InvalidJSON_400(t *testing.T) {
 
 func TestUserHandler_SetLibraryAccess_DeduplicatesIDs(t *testing.T) {
 	env := newLibraryAccessEnv(t)
-	env.users.getByIDFn = func(_ context.Context, id string) (*db.User, error) {
-		return &db.User{ID: id}, nil
+	env.users.getByIDFn = func(_ context.Context, id string) (*authmodel.User, error) {
+		return &authmodel.User{ID: id}, nil
 	}
 	env.libs.getByIDFn = func(_ context.Context, _ string) (*db.Library, error) {
 		return &db.Library{}, nil
@@ -286,8 +287,8 @@ func TestUserHandler_SetLibraryAccess_DeduplicatesIDs(t *testing.T) {
 
 func TestUserHandler_SetLibraryAccess_EmptyValue_400(t *testing.T) {
 	env := newLibraryAccessEnv(t)
-	env.users.getByIDFn = func(_ context.Context, id string) (*db.User, error) {
-		return &db.User{ID: id}, nil
+	env.users.getByIDFn = func(_ context.Context, id string) (*authmodel.User, error) {
+		return &authmodel.User{ID: id}, nil
 	}
 	env.libs.getByIDFn = func(_ context.Context, _ string) (*db.Library, error) {
 		return &db.Library{}, nil
@@ -307,8 +308,8 @@ func TestUserHandler_SetLibraryAccess_EmptyValue_400(t *testing.T) {
 
 func TestUserHandler_CreatePersonalIPTV_HappyPath(t *testing.T) {
 	env := newLibraryAccessEnv(t)
-	env.users.getByIDFn = func(_ context.Context, id string) (*db.User, error) {
-		return &db.User{ID: id}, nil
+	env.users.getByIDFn = func(_ context.Context, id string) (*authmodel.User, error) {
+		return &authmodel.User{ID: id}, nil
 	}
 	env.libs.createPersonalIPTVFn = func(_ context.Context, ownerID string, req library.CreateRequest) (*db.Library, error) {
 		if ownerID != "u-1" {
@@ -354,8 +355,8 @@ func TestUserHandler_CreatePersonalIPTV_HappyPath(t *testing.T) {
 
 func TestUserHandler_CreatePersonalIPTV_RejectsProfile_400(t *testing.T) {
 	env := newLibraryAccessEnv(t)
-	env.users.getByIDFn = func(_ context.Context, id string) (*db.User, error) {
-		return &db.User{ID: id, ParentUserID: "u-parent"}, nil
+	env.users.getByIDFn = func(_ context.Context, id string) (*authmodel.User, error) {
+		return &authmodel.User{ID: id, ParentUserID: "u-parent"}, nil
 	}
 	rr := env.do(http.MethodPost, "/api/v1/users/u-profile/iptv-libraries", map[string]any{
 		"name":    "Lista",
@@ -382,8 +383,8 @@ func TestUserHandler_CreatePersonalIPTV_InvalidJSON_400(t *testing.T) {
 
 func TestUserHandler_CreatePersonalIPTV_ValidationError_PropagatesAs400(t *testing.T) {
 	env := newLibraryAccessEnv(t)
-	env.users.getByIDFn = func(_ context.Context, id string) (*db.User, error) {
-		return &db.User{ID: id}, nil
+	env.users.getByIDFn = func(_ context.Context, id string) (*authmodel.User, error) {
+		return &authmodel.User{ID: id}, nil
 	}
 	env.libs.createPersonalIPTVFn = func(_ context.Context, _ string, _ library.CreateRequest) (*db.Library, error) {
 		return nil, domain.NewValidation(map[string]string{"m3u_url": "required"})
@@ -399,7 +400,7 @@ func TestUserHandler_CreatePersonalIPTV_ValidationError_PropagatesAs400(t *testi
 
 func TestUserHandler_CreatePersonalIPTV_UserNotFound_404(t *testing.T) {
 	env := newLibraryAccessEnv(t)
-	env.users.getByIDFn = func(_ context.Context, _ string) (*db.User, error) {
+	env.users.getByIDFn = func(_ context.Context, _ string) (*authmodel.User, error) {
 		return nil, domain.NewNotFound("user")
 	}
 	rr := env.do(http.MethodPost, "/api/v1/users/u-ghost/iptv-libraries", map[string]any{
@@ -430,8 +431,8 @@ func TestUserHandler_CreatePersonalIPTV_NoLibrariesWired_503(t *testing.T) {
 // honest.
 func TestUserHandler_CreatePersonalIPTV_UnknownError_500(t *testing.T) {
 	env := newLibraryAccessEnv(t)
-	env.users.getByIDFn = func(_ context.Context, id string) (*db.User, error) {
-		return &db.User{ID: id}, nil
+	env.users.getByIDFn = func(_ context.Context, id string) (*authmodel.User, error) {
+		return &authmodel.User{ID: id}, nil
 	}
 	env.libs.createPersonalIPTVFn = func(_ context.Context, _ string, _ library.CreateRequest) (*db.Library, error) {
 		return nil, errors.New("boom")

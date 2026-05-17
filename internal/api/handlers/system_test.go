@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	authmodel "hubplay/internal/auth/model"
 	"hubplay/internal/db"
 	"hubplay/internal/stream"
 	"hubplay/internal/sysmetrics"
@@ -466,7 +467,7 @@ func TestSystemHandler_StreamActivity_BackfillsEmptyDays(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	if err := repos.Users.Create(ctx, &db.User{
+	if err := repos.Users.Create(ctx, &authmodel.User{
 		ID: "u-1", Username: "u", PasswordHash: "h",
 		Role: "user", CreatedAt: now, IsActive: true,
 	}); err != nil {
@@ -535,7 +536,7 @@ func TestSystemHandler_TopItems_EpisodesRolledUpToSeries(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	if err := repos.Users.Create(ctx, &db.User{
+	if err := repos.Users.Create(ctx, &authmodel.User{
 		ID: "u-1", Username: "u", PasswordHash: "h",
 		Role: "user", CreatedAt: now, IsActive: true,
 	}); err != nil {

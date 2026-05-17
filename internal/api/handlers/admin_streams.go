@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	authmodel "hubplay/internal/auth/model"
 	"hubplay/internal/auth"
 	"hubplay/internal/db"
 	"hubplay/internal/stream"
@@ -22,7 +23,7 @@ import (
 // dependency on either concrete type. Mirrors the sink-pattern the
 // rest of the codebase uses to keep handlers test-isolated.
 type adminUserLookup interface {
-	GetByID(ctx context.Context, id string) (*db.User, error)
+	GetByID(ctx context.Context, id string) (*authmodel.User, error)
 }
 
 // AdminStreamsHandler exposes the admin "Now Playing" surface — a live

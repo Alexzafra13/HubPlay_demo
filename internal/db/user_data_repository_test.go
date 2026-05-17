@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	authmodel "hubplay/internal/auth/model"
 	"hubplay/internal/db"
 	"hubplay/internal/testutil"
 )
@@ -16,7 +17,7 @@ func setupUserDataTest(t *testing.T) (*db.UserDataRepository, *db.ItemRepository
 
 	// Create a user
 	now := time.Now()
-	_ = repos.Users.Create(context.Background(), &db.User{
+	_ = repos.Users.Create(context.Background(), &authmodel.User{
 		ID: "user-1", Username: "testuser", PasswordHash: "hash",
 		Role: "user", CreatedAt: now, IsActive: true,
 	})
@@ -310,7 +311,7 @@ func TestUserData_SeriesEpisodeProgress(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now()
 
-	_ = repos.Users.Create(ctx, &db.User{
+	_ = repos.Users.Create(ctx, &authmodel.User{
 		ID: "user-1", Username: "testuser", PasswordHash: "hash",
 		Role: "user", CreatedAt: now, IsActive: true,
 	})

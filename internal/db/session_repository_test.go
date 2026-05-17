@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	authmodel "hubplay/internal/auth/model"
 	"hubplay/internal/db"
 	"hubplay/internal/domain"
 	"hubplay/internal/testutil"
@@ -23,7 +24,7 @@ func TestSessionRepository_RotateRefreshToken(t *testing.T) {
 	seedUserForSessions(t, userRepo)
 
 	created := time.Now().Add(-time.Hour).Truncate(time.Second)
-	original := &db.Session{
+	original := &authmodel.Session{
 		ID:               "session-1",
 		UserID:           "user-1",
 		DeviceName:       "Chrome",
@@ -80,7 +81,7 @@ func TestSessionRepository_GetByPreviousRefreshTokenHash(t *testing.T) {
 	ctx := context.Background()
 
 	now := time.Now().Truncate(time.Second)
-	s := &db.Session{
+	s := &authmodel.Session{
 		ID: "session-x", UserID: "user-1", DeviceName: "Chrome", DeviceID: "d",
 		RefreshTokenHash: "hash-current", CreatedAt: now, LastActiveAt: now,
 		ExpiresAt: now.Add(time.Hour),
@@ -114,7 +115,7 @@ func TestSessionRepository_GetByPreviousRefreshTokenHash(t *testing.T) {
 
 func seedUserForSessions(t *testing.T, database *db.UserRepository) {
 	t.Helper()
-	u := &db.User{
+	u := &authmodel.User{
 		ID:           "user-1",
 		Username:     "testuser",
 		DisplayName:  "Test",
@@ -135,7 +136,7 @@ func TestSessionRepository_Create_And_GetByHash(t *testing.T) {
 	seedUserForSessions(t, userRepo)
 
 	now := time.Now()
-	s := &db.Session{
+	s := &authmodel.Session{
 		ID:               "session-1",
 		UserID:           "user-1",
 		DeviceName:       "Chrome on Linux",
@@ -184,7 +185,7 @@ func TestSessionRepository_DeleteByID(t *testing.T) {
 	seedUserForSessions(t, userRepo)
 
 	now := time.Now()
-	s := &db.Session{
+	s := &authmodel.Session{
 		ID: "session-del", UserID: "user-1", DeviceName: "Test", DeviceID: "dev",
 		RefreshTokenHash: "hash-del", CreatedAt: now, LastActiveAt: now,
 		ExpiresAt: now.Add(time.Hour),
@@ -210,7 +211,7 @@ func TestSessionRepository_DeleteByRefreshTokenHash(t *testing.T) {
 	seedUserForSessions(t, userRepo)
 
 	now := time.Now()
-	s := &db.Session{
+	s := &authmodel.Session{
 		ID: "session-hash-del", UserID: "user-1", DeviceName: "Test", DeviceID: "dev",
 		RefreshTokenHash: "hash-to-delete", CreatedAt: now, LastActiveAt: now,
 		ExpiresAt: now.Add(time.Hour),
@@ -237,7 +238,7 @@ func TestSessionRepository_ListByUser(t *testing.T) {
 
 	now := time.Now()
 	for i, name := range []string{"Chrome", "Firefox", "Safari"} {
-		s := &db.Session{
+		s := &authmodel.Session{
 			ID: name, UserID: "user-1", DeviceName: name, DeviceID: name,
 			RefreshTokenHash: "hash-" + name, CreatedAt: now, LastActiveAt: now.Add(time.Duration(i) * time.Minute),
 			ExpiresAt: now.Add(time.Hour),
@@ -276,7 +277,7 @@ func TestSessionRepository_CountByUser(t *testing.T) {
 	}
 
 	now := time.Now()
-	s := &db.Session{
+	s := &authmodel.Session{
 		ID: "s1", UserID: "user-1", DeviceName: "Test", DeviceID: "dev",
 		RefreshTokenHash: "hash1", CreatedAt: now, LastActiveAt: now,
 		ExpiresAt: now.Add(time.Hour),

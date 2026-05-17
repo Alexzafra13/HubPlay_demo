@@ -8,7 +8,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
-	"hubplay/internal/db"
+	authmodel "hubplay/internal/auth/model"
 )
 
 type Claims struct {
@@ -21,14 +21,14 @@ type Claims struct {
 // keyResolver is the lookup function token validation uses to resolve a kid
 // into its secret. Taking a function (rather than a concrete KeyStore) keeps
 // the JWT layer free of auth-package cycles and trivial to fake in tests.
-type keyResolver func(kid string) (*db.SigningKey, error)
+type keyResolver func(kid string) (*authmodel.SigningKey, error)
 
 // generateAccessToken signs a new access token with the provided key and
 // stamps the key's id into the JWT header so validators can resolve the
 // secret by kid. Doing the lookup by kid (rather than trying every active
 // key) keeps validation O(1) and lets rotation retire keys without breaking
 // in-flight tokens signed with the previous primary.
-func generateAccessToken(key *db.SigningKey, userID, username, role string, ttl time.Duration, now time.Time) (string, time.Time, error) {
+func generateAccessToken(key *authmodel.SigningKey, userID, username, role string, ttl time.Duration, now time.Time) (string, time.Time, error) {
 	if key == nil {
 		return "", time.Time{}, fmt.Errorf("generateAccessToken: nil signing key")
 	}

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	authmodel "hubplay/internal/auth/model"
 	"hubplay/internal/db"
 	"hubplay/internal/testutil"
 )
@@ -18,7 +19,7 @@ func seedWatchFixture(t *testing.T, repos *db.Repositories, n int) []string {
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	if err := repos.Users.Create(ctx, &db.User{
+	if err := repos.Users.Create(ctx, &authmodel.User{
 		ID: "u-alice", Username: "alice", PasswordHash: "hash",
 		DisplayName: "Alice", Role: "user", IsActive: true, CreatedAt: now,
 	}); err != nil {
@@ -174,7 +175,7 @@ func TestChannelWatchHistory_IsolatedPerUser(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	if err := repos.Users.Create(ctx, &db.User{
+	if err := repos.Users.Create(ctx, &authmodel.User{
 		ID: "u-bob", Username: "bob", PasswordHash: "hash",
 		DisplayName: "Bob", Role: "user", IsActive: true, CreatedAt: now,
 	}); err != nil {

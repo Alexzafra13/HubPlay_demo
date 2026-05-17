@@ -18,7 +18,7 @@ en este doc (no se edita el audit original).
 | 0 | 🔄 en curso | Pre-trabajo: ADRs + conventions.md | — | — |
 | 1 | ✅ cerrada | Fixes urgentes seguridad + correctness | FFF, F16-1, RRR-mig, RR, Y, DD, GGGG, AAA, EE, HHH, F16-6, F16-7 | 12 olores cerrados, suite verde |
 | 2 | ✅ cerrada | Sub-paquetes de `db/` | B, J, K, T, L | Sesión M.2 (B+J) + sesión M.3 (L) + sesión M.4 (K+T) |
-| 3 | ⏳ pendiente | Migración Opción B incremental | M (iptv → auth → library) | — |
+| 3 | 🔄 en curso | Migración Opción B incremental | M (iptv → auth ✅ → library) | sub-bloque auth cerrado en sesión M.6; iptv + library pendientes |
 | 4 | ⏳ pendiente | Split de god-handlers/services | P, Z, QQ | — |
 | 5 | ⏳ pendiente | Refactor estructural `iptv/` | CC | — |
 | 6 | ⏳ pendiente | Composition root | G, H, V, Q, LL, JJ | — |
@@ -480,3 +480,82 @@ Otras palancas de perf candidatas (no auditadas a fondo):
 
 Para esas, el approach correcto es **medir primero** (pprof +
 benchmarks) y atacar lo que el profiler indique, no la intuición.
+
+---
+
+## Iteración 3 — Migración Opción B incremental (en curso)
+
+Plan original: por feature, una commit por bloque
+(iptv → auth → library). ~3-4 días estimados según el audit.
+
+### Sub-bloque auth ✅ (sesión M.6)
+
+Movidos los 4 tipos del dominio `User`, `Session`, `SigningKey`,
+`DeviceCode` (más el helper `(User).IsProfile()`) de
+`internal/db/{user,session,signing_key,device_code}_repository.go`
+al nuevo paquete `internal/auth/model/`.
+
+**Por qué sub-paquete `auth/model/` y no `auth/` directo**: el feature
+`auth` ya importaba `db` (auth.Service depende de los repos
+concretos). Si los tipos también vivían en `auth/` y `db.*Repository`
+los retornaba, se cerraba un ciclo `auth ↔ db`. Sub-paquete leaf
+(`auth/model/`, cero imports más allá de stdlib) lo rompe:
+
+```
+auth/model   → ∅ (puro)
+db           → auth/model (los repos retornan *authmodel.User etc.)
+auth         → db + auth/model
+composition  → todos los anteriores (main.go)
+```
+
+Cero ciclo. **Cierra "Opción B" del olor A** (tipos del dominio en el
+feature, no en `internal/db/`).
+
+**Cambios**:
+- `internal/auth/model/types.go` (105 LOC): `User`, `Session`,
+  `SigningKey`, `DeviceCode` + `(User).IsProfile()` con docs del
+  rationale.
+- `internal/db/{user,session,signing_key,device_code}_repository.go`:
+  borrar los `type X struct`; añadir
+  `authmodel "hubplay/internal/auth/model"`; reemplazar `*User` por
+  `*authmodel.User` etc. en firmas + row converters.
+- `internal/auth/` (4 ficheros productivos + 3 tests):
+  `db.User` → `authmodel.User` etc.; remover imports de `db` que
+  quedaron sin uso.
+- `internal/api/handlers/` (3 productivos + 5 tests):
+  ídem en handlers + tests.
+- `internal/user/service.go`: ídem.
+
+**Decisiones**:
+- Tipos `sql.Null*` (en `Session`, `SigningKey`, `DeviceCode`)
+  preservados verbatim — un refactor a `*string`/`*time.Time` puro
+  queda fuera de scope (otro chunk).
+- Repos NO se mueven (siguen en `internal/db/`). Difiere del patrón
+  federation/storage donde sí se movieron. Razones: (a) auth.Service
+  los importa por nombre concreto en 4 sitios (vs federation que ya
+  usaba interface `Repo`), mover requería interfaces nuevas
+  (~40 métodos); (b) la mejora del olor A se obtiene SOLO con mover
+  los tipos — el grafo queda sano.
+- Bulk rewrite con Python (regex con word-boundary + guards para
+  field names que se llamen igual que el tipo, ej. `DeviceCode.DeviceCode`).
+
+**Verificación**:
+- `go build ./...` exitcode 0 en `golang:1.25` container.
+- `go test ./internal/... -count=1 -timeout=300s` — **22 paquetes
+  verdes** contra SQLite (incluyendo nuevo `auth/model`).
+- `HUBPLAY_TEST_DRIVER=postgres go test ./internal/db/... ./internal/auth/...
+  ./internal/api/handlers/... -count=1 -timeout=600s` — verde
+  contra Postgres también (db tardó 310s vs SQLite 26s — esperado:
+  network roundtrip por test database creation).
+- Cero cambios de API HTTP pública.
+
+### Pendiente — sub-bloques siguientes
+
+- **iptv** (12 tipos `db.Channel*`, `db.EPGProgram`,
+  `db.IPTVScheduledJob`, etc.) — bloque más grande. Mismo patrón:
+  `internal/iptv/model/` con sub-paquete leaf.
+- **library** (12 tipos: Item, MediaStream, Image, Chapter,
+  EpisodeSegment, ItemValue, Studio, Collection, ExternalID, Metadata,
+  Person, ItemPersonCredit). Otro bloque grande.
+- **Cleanup** de `internal/db/` post-migración. Debería quedar
+  reducido a factory + adapter sqlc + dialect helpers + 4-5 repos.

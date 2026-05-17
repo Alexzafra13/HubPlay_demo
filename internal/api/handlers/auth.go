@@ -8,9 +8,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	authmodel "hubplay/internal/auth/model"
 	"hubplay/internal/auth"
 	"hubplay/internal/config"
-	"hubplay/internal/db"
 	"hubplay/internal/domain"
 )
 
@@ -19,7 +19,7 @@ const (
 	refreshCookieName = "hubplay_refresh"
 )
 
-func authTokenResponse(token *auth.AuthToken, u *db.User) map[string]any {
+func authTokenResponse(token *auth.AuthToken, u *authmodel.User) map[string]any {
 	return map[string]any{
 		"access_token":  token.AccessToken,
 		"refresh_token": token.RefreshToken,
@@ -204,7 +204,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 // "Who's watching?" screen and the topbar switcher need: identity +
 // avatar attribution + PIN flag + parent linkage. Crucially leaves
 // `password_hash` and `pin_hash` on the floor.
-func profileListResponse(profiles []*db.User) []map[string]any {
+func profileListResponse(profiles []*authmodel.User) []map[string]any {
 	out := make([]map[string]any, len(profiles))
 	for i, p := range profiles {
 		out[i] = map[string]any{

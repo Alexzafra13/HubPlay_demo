@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	authmodel "hubplay/internal/auth/model"
 	"hubplay/internal/db"
 	"hubplay/internal/domain"
 	"hubplay/internal/testutil"
@@ -161,7 +162,7 @@ func TestLibraryRepository_Access(t *testing.T) {
 	libRepo := db.NewLibraryRepository(testutil.Driver(), database)
 	userRepo := db.NewUserRepository(testutil.Driver(), database)
 
-	if err := userRepo.Create(context.Background(), &db.User{
+	if err := userRepo.Create(context.Background(), &authmodel.User{
 		ID: "user-1", Username: "alice", DisplayName: "Alice",
 		PasswordHash: "$2a$10$fakehash", Role: "user", IsActive: true,
 		CreatedAt: time.Now(),
@@ -230,7 +231,7 @@ func TestLibraryRepository_Access_ProfileInherits(t *testing.T) {
 	ctx := context.Background()
 
 	now := time.Now()
-	parent := &db.User{
+	parent := &authmodel.User{
 		ID: "u-parent", Username: "juanito", DisplayName: "Juanito",
 		PasswordHash: "$2a$10$fakehash", Role: "user", IsActive: true,
 		CreatedAt: now,
@@ -301,7 +302,7 @@ func TestLibraryRepository_ListAccessByUser(t *testing.T) {
 	ctx := context.Background()
 
 	now := time.Now()
-	user := &db.User{
+	user := &authmodel.User{
 		ID: "u-1", Username: "alice", DisplayName: "Alice",
 		PasswordHash: "$2a$10$fakehash", Role: "user", IsActive: true,
 		CreatedAt: now,
@@ -361,7 +362,7 @@ func TestLibraryRepository_ReplaceAccess(t *testing.T) {
 	ctx := context.Background()
 
 	now := time.Now()
-	if err := userRepo.Create(ctx, &db.User{
+	if err := userRepo.Create(ctx, &authmodel.User{
 		ID: "u-1", Username: "alice", DisplayName: "Alice",
 		PasswordHash: "$2a$10$fakehash", Role: "user", IsActive: true,
 		CreatedAt: now,
@@ -425,7 +426,7 @@ func TestLibraryRepository_Create_GrantsPrimaryAdmin(t *testing.T) {
 	ctx := context.Background()
 
 	now := time.Now()
-	if err := userRepo.Create(ctx, &db.User{
+	if err := userRepo.Create(ctx, &authmodel.User{
 		ID: "admin-1", Username: "boss", DisplayName: "Boss",
 		PasswordHash: "$2a$10$fakehash", Role: "admin", IsActive: true,
 		CreatedAt: now,
@@ -494,14 +495,14 @@ func TestLibraryRepository_Create_OnlyPrimaryAdmin(t *testing.T) {
 
 	older := time.Now()
 	newer := older.Add(time.Hour)
-	if err := userRepo.Create(ctx, &db.User{
+	if err := userRepo.Create(ctx, &authmodel.User{
 		ID: "admin-old", Username: "founder", DisplayName: "Founder",
 		PasswordHash: "$2a$10$fakehash", Role: "admin", IsActive: true,
 		CreatedAt: older,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := userRepo.Create(ctx, &db.User{
+	if err := userRepo.Create(ctx, &authmodel.User{
 		ID: "admin-new", Username: "second", DisplayName: "Second",
 		PasswordHash: "$2a$10$fakehash", Role: "admin", IsActive: true,
 		CreatedAt: newer,
@@ -567,7 +568,7 @@ func TestMigration041_BackfillsPrimaryAdmin(t *testing.T) {
 	}
 
 	now := time.Now()
-	if err := userRepo.Create(ctx, &db.User{
+	if err := userRepo.Create(ctx, &authmodel.User{
 		ID: "admin-1", Username: "boss", DisplayName: "Boss",
 		PasswordHash: "$2a$10$fakehash", Role: "admin", IsActive: true,
 		CreatedAt: now,
@@ -625,7 +626,7 @@ func TestLibraryRepository_CreateWithGrant(t *testing.T) {
 
 	now := time.Now()
 	for _, id := range []string{"u-owner", "u-other"} {
-		if err := userRepo.Create(ctx, &db.User{
+		if err := userRepo.Create(ctx, &authmodel.User{
 			ID: id, Username: id, DisplayName: id,
 			PasswordHash: "$2a$10$fakehash", Role: "user", IsActive: true,
 			CreatedAt: now,

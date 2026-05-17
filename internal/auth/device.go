@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	authmodel "hubplay/internal/auth/model"
 	"hubplay/internal/db"
 	"hubplay/internal/domain"
 	"hubplay/internal/event"
@@ -111,7 +112,7 @@ func (s *DeviceCodeService) StartDevice(ctx context.Context, deviceName, verific
 		return nil, fmt.Errorf("device code: gen user_code: %w", err)
 	}
 
-	row := &db.DeviceCode{
+	row := &authmodel.DeviceCode{
 		DeviceCode: deviceCode,
 		UserCode:   userCode,
 		DeviceName: deviceName,

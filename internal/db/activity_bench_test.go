@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	authmodel "hubplay/internal/auth/model"
 	"hubplay/internal/db"
 	"hubplay/internal/testutil"
 )
@@ -100,7 +101,7 @@ func newBenchActivityRepo(b *testing.B, n int) (*db.ActivityRepository, *db.Repo
 		numUsers = 50
 	}
 	for i := 0; i < numUsers; i++ {
-		if err := repos.Users.Create(ctx, &db.User{
+		if err := repos.Users.Create(ctx, &authmodel.User{
 			ID:           fmt.Sprintf("u-%03d", i),
 			Username:     fmt.Sprintf("user%03d", i),
 			DisplayName:  fmt.Sprintf("User %d", i),
