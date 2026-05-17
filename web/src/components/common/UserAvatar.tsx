@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import type { User } from "@/api/types";
 import { avatarColorForUser } from "@/utils/avatarColor";
 import { getInitials } from "@/utils/userDisplay";
@@ -53,30 +54,22 @@ export function UserAvatar({
   const imageSrc =
     src !== undefined ? src : user?.avatar_image_url ?? null;
 
+  // Si la <img> falla (URL 404, fichero borrado del disco, cache-buster
+  // contra una versión inexistente...) caemos a iniciales en lugar de
+  // dejar el círculo de color vacío. Reseteamos el flag cuando la URL
+  // cambia para que un nuevo upload tenga otra oportunidad de cargar.
+  const [broken, setBroken] = useState(false);
+  useEffect(() => {
+    setBroken(false);
+  }, [imageSrc]);
+
   const base = [
-    "inline-flex items-center justify-center overflow-hidden rounded-full font-semibold text-white ring-1 ring-white/15",
+    "inline-flex items-center justify-center overflow-hidden rounded-full font-semibold text-white ring-1 ring-white/15 select-none",
     SIZE_CLASS[size],
     className ?? "",
   ].join(" ");
 
-  if (imageSrc) {
-    return (
-      <span
-        className={base}
-        style={{ background: palette.background }}
-        role={label ? "img" : undefined}
-        aria-label={label}
-        aria-hidden={label ? undefined : true}
-      >
-        <img
-          src={imageSrc}
-          alt=""
-          className="h-full w-full object-cover"
-          draggable={false}
-        />
-      </span>
-    );
-  }
+  const showImage = !!imageSrc && !broken;
 
   return (
     <span
@@ -86,7 +79,17 @@ export function UserAvatar({
       aria-label={label}
       aria-hidden={label ? undefined : true}
     >
-      {initials}
+      {showImage ? (
+        <img
+          src={imageSrc}
+          alt=""
+          className="h-full w-full object-cover"
+          draggable={false}
+          onError={() => setBroken(true)}
+        />
+      ) : (
+        initials
+      )}
     </span>
   );
 }
