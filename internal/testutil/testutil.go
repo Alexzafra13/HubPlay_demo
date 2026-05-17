@@ -44,21 +44,21 @@ const (
 // SQLite (file-per-test under t.TempDir); set to "postgres" to use
 // the Postgres path (database-per-test against the cluster at
 // HUBPLAY_TEST_POSTGRES_DSN).
-func NewTestDB(t *testing.T) *sql.DB {
-	t.Helper()
+func NewTestDB(tb testing.TB) *sql.DB {
+	tb.Helper()
 
 	if os.Getenv(envTestDriver) == db.DriverPostgres {
-		return newTestPostgresDB(t)
+		return newTestPostgresDB(tb)
 	}
-	return newTestSQLiteDB(t)
+	return newTestSQLiteDB(tb)
 }
 
 // NewTestRepos creates repositories backed by a fresh test database.
 // Driver is the one NewTestDB picked (sqlite by default, postgres
 // when HUBPLAY_TEST_DRIVER=postgres).
-func NewTestRepos(t *testing.T) *db.Repositories {
-	t.Helper()
-	return db.NewRepositories(Driver(), NewTestDB(t))
+func NewTestRepos(tb testing.TB) *db.Repositories {
+	tb.Helper()
+	return db.NewRepositories(Driver(), NewTestDB(tb))
 }
 
 // Driver returns whichever backend NewTestDB will use this run.
@@ -81,11 +81,11 @@ func Driver() string {
 // The Postgres-specific result is identical to ExecContext's: any
 // error fails the test directly so the caller does not have to wrap
 // `if err != nil { t.Fatal }` around every fixture.
-func Exec(t *testing.T, database *sql.DB, query string, args ...any) {
-	t.Helper()
+func Exec(tb testing.TB, database *sql.DB, query string, args ...any) {
+	tb.Helper()
 	q := db.RewritePlaceholders(Driver(), query)
 	if _, err := database.ExecContext(context.Background(), q, args...); err != nil {
-		t.Fatalf("testutil.Exec: %v\nquery: %s", err, q)
+		tb.Fatalf("testutil.Exec: %v\nquery: %s", err, q)
 	}
 }
 
@@ -94,32 +94,32 @@ func Exec(t *testing.T, database *sql.DB, query string, args ...any) {
 // inspection, sqlite-specific helpers, etc.). Centralised so a
 // future migration to dual-dialect for that test removes the call
 // in one place.
-func SkipIfPostgres(t *testing.T, reason string) {
-	t.Helper()
+func SkipIfPostgres(tb testing.TB, reason string) {
+	tb.Helper()
 	if Driver() == db.DriverPostgres {
-		t.Skipf("skipping under HUBPLAY_TEST_DRIVER=postgres: %s", reason)
+		tb.Skipf("skipping under HUBPLAY_TEST_DRIVER=postgres: %s", reason)
 	}
 }
 
 // newTestSQLiteDB is the legacy path: a fresh file under t.TempDir
 // with WAL + pragmas via db.Open.
-func newTestSQLiteDB(t *testing.T) *sql.DB {
-	t.Helper()
+func newTestSQLiteDB(tb testing.TB) *sql.DB {
+	tb.Helper()
 
-	dir := t.TempDir()
+	dir := tb.TempDir()
 	dbPath := filepath.Join(dir, fmt.Sprintf("test_%d.db", os.Getpid()))
 
 	database, err := db.Open(db.DriverSQLite, dbPath, slog.Default())
 	if err != nil {
-		t.Fatalf("opening test db: %v", err)
+		tb.Fatalf("opening test db: %v", err)
 	}
 
 	if err := db.Migrate(db.DriverSQLite, database, hubplay.SQLiteMigrations, slog.Default()); err != nil {
 		_ = database.Close()
-		t.Fatalf("migrating test db: %v", err)
+		tb.Fatalf("migrating test db: %v", err)
 	}
 
-	t.Cleanup(func() { _ = database.Close() })
+	tb.Cleanup(func() { _ = database.Close() })
 	return database
 }
 
@@ -136,11 +136,11 @@ var (
 	pgTestCount  atomic.Int64
 )
 
-func newTestPostgresDB(t *testing.T) *sql.DB {
-	t.Helper()
+func newTestPostgresDB(tb testing.TB) *sql.DB {
+	tb.Helper()
 	pgAdminOnce.Do(initPostgresAdmin)
 	if pgAdminError != nil {
-		t.Fatalf("postgres test setup: %v", pgAdminError)
+		tb.Fatalf("postgres test setup: %v", pgAdminError)
 	}
 
 	// One database per test. The combination of test PID and an atomic
@@ -150,7 +150,7 @@ func newTestPostgresDB(t *testing.T) *sql.DB {
 	dbName := fmt.Sprintf("hubplay_test_%d_%d", os.Getpid(), pgTestCount.Add(1))
 
 	if _, err := pgAdminDB.Exec(fmt.Sprintf(`CREATE DATABASE %q`, dbName)); err != nil {
-		t.Fatalf("create test database %q: %v", dbName, err)
+		tb.Fatalf("create test database %q: %v", dbName, err)
 	}
 
 	// Build a DSN that points at the new database. url.URL.Path takes
@@ -162,16 +162,16 @@ func newTestPostgresDB(t *testing.T) *sql.DB {
 	testDB, err := db.Open(db.DriverPostgres, testURL.String(), slog.Default())
 	if err != nil {
 		_, _ = pgAdminDB.Exec(fmt.Sprintf(`DROP DATABASE IF EXISTS %q`, dbName))
-		t.Fatalf("open test database %q: %v", dbName, err)
+		tb.Fatalf("open test database %q: %v", dbName, err)
 	}
 
 	if err := db.Migrate(db.DriverPostgres, testDB, hubplay.PostgresMigrations, slog.Default()); err != nil {
 		_ = testDB.Close()
 		_, _ = pgAdminDB.Exec(fmt.Sprintf(`DROP DATABASE IF EXISTS %q WITH (FORCE)`, dbName))
-		t.Fatalf("migrate test database %q: %v", dbName, err)
+		tb.Fatalf("migrate test database %q: %v", dbName, err)
 	}
 
-	t.Cleanup(func() {
+	tb.Cleanup(func() {
 		_ = testDB.Close()
 		// WITH (FORCE) terminates any leftover backends from the test
 		// (Postgres 13+). Without it a misbehaving test that leaks a
@@ -181,7 +181,7 @@ func newTestPostgresDB(t *testing.T) *sql.DB {
 			// Cleanup failure isn't a test failure — log via t.Logf so
 			// it shows up but the test verdict reflects its own
 			// assertions.
-			t.Logf("warning: drop test database %q: %v", dbName, err)
+			tb.Logf("warning: drop test database %q: %v", dbName, err)
 		}
 	})
 
