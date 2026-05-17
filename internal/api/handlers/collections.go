@@ -8,15 +8,15 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"hubplay/internal/db"
+	librarymodel "hubplay/internal/library/model"
 )
 
 // CollectionRepository is the slice of db.CollectionRepository the
 // handler needs.
 type CollectionRepository interface {
-	GetByID(ctx context.Context, id string) (*db.Collection, error)
-	List(ctx context.Context) ([]*db.CollectionListEntry, error)
-	ListItemsForCollection(ctx context.Context, collectionID string) ([]*db.CollectionItem, error)
+	GetByID(ctx context.Context, id string) (*librarymodel.Collection, error)
+	List(ctx context.Context) ([]*librarymodel.CollectionListEntry, error)
+	ListItemsForCollection(ctx context.Context, collectionID string) ([]*librarymodel.CollectionItem, error)
 }
 
 // CollectionHandler serves /collections (browse) and /collections/{id}

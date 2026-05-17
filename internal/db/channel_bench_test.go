@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	iptvmodel "hubplay/internal/iptv/model"
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db"
 	"hubplay/internal/testutil"
 )
@@ -107,7 +109,7 @@ func newBenchChannelRepo(b *testing.B, n int) (*db.ChannelRepository, string) {
 	ctx := context.Background()
 
 	now := time.Now().UTC()
-	if err := repos.Libraries.Create(ctx, &db.Library{
+	if err := repos.Libraries.Create(ctx, &librarymodel.Library{
 		ID: "lib-bench", Name: "Bench TV", ContentType: "livetv",
 		CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
@@ -116,7 +118,7 @@ func newBenchChannelRepo(b *testing.B, n int) (*db.ChannelRepository, string) {
 
 	repo := db.NewChannelRepository(testutil.Driver(), database)
 	for i := 0; i < n; i++ {
-		ch := &db.Channel{
+		ch := &iptvmodel.Channel{
 			ID:        fmt.Sprintf("ch-%05d", i),
 			LibraryID: "lib-bench",
 			Name:      fmt.Sprintf("Channel %05d", i),

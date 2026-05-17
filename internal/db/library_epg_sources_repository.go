@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	iptvmodel "hubplay/internal/iptv/model"
 	"hubplay/internal/db/sqlc"
 	"hubplay/internal/db/sqlc_pg"
 )
@@ -21,29 +22,6 @@ import (
 // 409 Conflict — previously the raw "UNIQUE constraint failed" SQLite
 // error bubbled all the way to the user.
 var ErrEPGSourceAlreadyAttached = errors.New("epg source with that url already attached")
-
-// LibraryEPGSource is one configured XMLTV provider attached to a
-// livetv library. Priority is "lower first": the refresher processes
-// sources in ascending priority order and a channel covered by an
-// earlier source is not overwritten by a later one.
-//
-// CatalogID is nullable. When set, it names an entry in
-// `internal/iptv/epg_catalog.go` PublicEPGSources(); the URL column
-// holds the snapshot at the time the source was added so a stale row
-// keeps working even if the catalog entry is later retired.
-type LibraryEPGSource struct {
-	ID               string
-	LibraryID        string
-	CatalogID        string // empty = custom URL
-	URL              string
-	Priority         int
-	LastRefreshedAt  time.Time
-	LastStatus       string // "ok" | "error" | "" (never refreshed)
-	LastError        string
-	LastProgramCount int
-	LastChannelCount int
-	CreatedAt        time.Time
-}
 
 // LibraryEPGSourceRepository — Pattern A dual-dialect. Priority +
 // last_*_count are declared INTEGER, surfacing as int64 in SQLite and
@@ -72,13 +50,13 @@ func (r *LibraryEPGSourceRepository) useSQLite() bool { return r.sq != nil }
 // (lowest number first). An empty slice means the library has no
 // sources configured — the service layer decides how to handle that
 // (e.g. fall back to `libraries.epg_url` for backwards compat).
-func (r *LibraryEPGSourceRepository) ListByLibrary(ctx context.Context, libraryID string) ([]*LibraryEPGSource, error) {
+func (r *LibraryEPGSourceRepository) ListByLibrary(ctx context.Context, libraryID string) ([]*iptvmodel.LibraryEPGSource, error) {
 	if r.useSQLite() {
 		rows, err := r.sq.ListLibraryEPGSourcesByLibrary(ctx, libraryID)
 		if err != nil {
 			return nil, fmt.Errorf("list epg sources: %w", err)
 		}
-		out := make([]*LibraryEPGSource, 0, len(rows))
+		out := make([]*iptvmodel.LibraryEPGSource, 0, len(rows))
 		for _, row := range rows {
 			src := epgSourceFromSqliteListRow(row)
 			out = append(out, &src)
@@ -89,7 +67,7 @@ func (r *LibraryEPGSourceRepository) ListByLibrary(ctx context.Context, libraryI
 	if err != nil {
 		return nil, fmt.Errorf("list epg sources: %w", err)
 	}
-	out := make([]*LibraryEPGSource, 0, len(rows))
+	out := make([]*iptvmodel.LibraryEPGSource, 0, len(rows))
 	for _, row := range rows {
 		src := epgSourceFromPgListRow(row)
 		out = append(out, &src)
@@ -99,7 +77,7 @@ func (r *LibraryEPGSourceRepository) ListByLibrary(ctx context.Context, libraryI
 
 // GetByID is used by the DELETE / UPDATE handlers to load a row and
 // verify the caller actually has access to its library.
-func (r *LibraryEPGSourceRepository) GetByID(ctx context.Context, id string) (*LibraryEPGSource, error) {
+func (r *LibraryEPGSourceRepository) GetByID(ctx context.Context, id string) (*iptvmodel.LibraryEPGSource, error) {
 	if r.useSQLite() {
 		row, err := r.sq.GetLibraryEPGSourceByID(ctx, id)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -125,7 +103,7 @@ func (r *LibraryEPGSourceRepository) GetByID(ctx context.Context, id string) (*L
 // Create inserts a new source. Priority defaults to one past the
 // current maximum for the library so a freshly-added source runs last
 // and can be reordered from the UI if needed.
-func (r *LibraryEPGSourceRepository) Create(ctx context.Context, src *LibraryEPGSource) error {
+func (r *LibraryEPGSourceRepository) Create(ctx context.Context, src *iptvmodel.LibraryEPGSource) error {
 	if src.Priority == 0 {
 		next, err := r.nextPriority(ctx, src.LibraryID)
 		if err != nil {
@@ -301,8 +279,8 @@ func (r *LibraryEPGSourceRepository) RecordRefresh(
 	return nil
 }
 
-func epgSourceFromSqliteListRow(row sqlc.ListLibraryEPGSourcesByLibraryRow) LibraryEPGSource {
-	src := LibraryEPGSource{
+func epgSourceFromSqliteListRow(row sqlc.ListLibraryEPGSourcesByLibraryRow) iptvmodel.LibraryEPGSource {
+	src := iptvmodel.LibraryEPGSource{
 		ID:               row.ID,
 		LibraryID:        row.LibraryID,
 		CatalogID:        row.CatalogID,
@@ -320,8 +298,8 @@ func epgSourceFromSqliteListRow(row sqlc.ListLibraryEPGSourcesByLibraryRow) Libr
 	return src
 }
 
-func epgSourceFromPgListRow(row sqlc_pg.ListLibraryEPGSourcesByLibraryRow) LibraryEPGSource {
-	src := LibraryEPGSource{
+func epgSourceFromPgListRow(row sqlc_pg.ListLibraryEPGSourcesByLibraryRow) iptvmodel.LibraryEPGSource {
+	src := iptvmodel.LibraryEPGSource{
 		ID:               row.ID,
 		LibraryID:        row.LibraryID,
 		CatalogID:        row.CatalogID,
@@ -339,8 +317,8 @@ func epgSourceFromPgListRow(row sqlc_pg.ListLibraryEPGSourcesByLibraryRow) Libra
 	return src
 }
 
-func epgSourceFromSqliteGetRow(row sqlc.GetLibraryEPGSourceByIDRow) LibraryEPGSource {
-	src := LibraryEPGSource{
+func epgSourceFromSqliteGetRow(row sqlc.GetLibraryEPGSourceByIDRow) iptvmodel.LibraryEPGSource {
+	src := iptvmodel.LibraryEPGSource{
 		ID:               row.ID,
 		LibraryID:        row.LibraryID,
 		CatalogID:        row.CatalogID,
@@ -358,8 +336,8 @@ func epgSourceFromSqliteGetRow(row sqlc.GetLibraryEPGSourceByIDRow) LibraryEPGSo
 	return src
 }
 
-func epgSourceFromPgGetRow(row sqlc_pg.GetLibraryEPGSourceByIDRow) LibraryEPGSource {
-	src := LibraryEPGSource{
+func epgSourceFromPgGetRow(row sqlc_pg.GetLibraryEPGSourceByIDRow) iptvmodel.LibraryEPGSource {
+	src := iptvmodel.LibraryEPGSource{
 		ID:               row.ID,
 		LibraryID:        row.LibraryID,
 		CatalogID:        row.CatalogID,

@@ -11,8 +11,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	authmodel "hubplay/internal/auth/model"
 	"hubplay/internal/auth"
-	"hubplay/internal/db"
 	"hubplay/internal/domain"
 	"hubplay/internal/testutil"
 )
@@ -20,19 +20,19 @@ import (
 // ─── Fake UserService ───────────────────────────────────────────────────────
 
 type userFakeService struct {
-	getByIDFn func(ctx context.Context, id string) (*db.User, error)
-	listFn    func(ctx context.Context, limit, offset int) ([]*db.User, int, error)
+	getByIDFn func(ctx context.Context, id string) (*authmodel.User, error)
+	listFn    func(ctx context.Context, limit, offset int) ([]*authmodel.User, int, error)
 	deleteFn  func(ctx context.Context, id string) error
 	countFn   func(ctx context.Context) (int, error)
 }
 
-func (s *userFakeService) GetByID(ctx context.Context, id string) (*db.User, error) {
+func (s *userFakeService) GetByID(ctx context.Context, id string) (*authmodel.User, error) {
 	if s.getByIDFn != nil {
 		return s.getByIDFn(ctx, id)
 	}
 	return nil, domain.NewNotFound("user")
 }
-func (s *userFakeService) List(ctx context.Context, limit, offset int) ([]*db.User, int, error) {
+func (s *userFakeService) List(ctx context.Context, limit, offset int) ([]*authmodel.User, int, error) {
 	if s.listFn != nil {
 		return s.listFn(ctx, limit, offset)
 	}
@@ -128,8 +128,8 @@ func TestUserHandler_Me_Unauthenticated_401(t *testing.T) {
 
 func TestUserHandler_Me_HappyPath(t *testing.T) {
 	env := newUserTestEnv(t)
-	env.svc.getByIDFn = func(_ context.Context, id string) (*db.User, error) {
-		return &db.User{ID: id, Username: "alice", DisplayName: "Alice", Role: "admin", IsActive: true}, nil
+	env.svc.getByIDFn = func(_ context.Context, id string) (*authmodel.User, error) {
+		return &authmodel.User{ID: id, Username: "alice", DisplayName: "Alice", Role: "admin", IsActive: true}, nil
 	}
 	rr := env.do(http.MethodGet, "/api/v1/me", &auth.Claims{UserID: "u-1"})
 	if rr.Code != http.StatusOK {
@@ -171,9 +171,9 @@ func TestUserHandler_List_Empty(t *testing.T) {
 func TestUserHandler_List_RespectsPagination(t *testing.T) {
 	env := newUserTestEnv(t)
 	var gotLimit, gotOffset int
-	env.svc.listFn = func(_ context.Context, limit, offset int) ([]*db.User, int, error) {
+	env.svc.listFn = func(_ context.Context, limit, offset int) ([]*authmodel.User, int, error) {
 		gotLimit, gotOffset = limit, offset
-		return []*db.User{{ID: "u-1", Username: "alice"}}, 25, nil
+		return []*authmodel.User{{ID: "u-1", Username: "alice"}}, 25, nil
 	}
 	rr := env.do(http.MethodGet, "/api/v1/users?limit=10&offset=5", nil)
 	if rr.Code != http.StatusOK {
@@ -191,7 +191,7 @@ func TestUserHandler_List_RespectsPagination(t *testing.T) {
 
 func TestUserHandler_List_ServiceError_500(t *testing.T) {
 	env := newUserTestEnv(t)
-	env.svc.listFn = func(_ context.Context, _, _ int) ([]*db.User, int, error) {
+	env.svc.listFn = func(_ context.Context, _, _ int) ([]*authmodel.User, int, error) {
 		return nil, 0, errors.New("db down")
 	}
 	rr := env.do(http.MethodGet, "/api/v1/users", nil)

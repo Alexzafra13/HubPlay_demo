@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/api"
 	"hubplay/internal/auth"
 	"hubplay/internal/clock"
@@ -87,7 +88,7 @@ func (a *streamTestApp) setupUser(t *testing.T) string {
 func (a *streamTestApp) createItem(t *testing.T, id, container, path string) {
 	t.Helper()
 	now := time.Now()
-	err := a.repos.Items.Create(context.Background(), &db.Item{
+	err := a.repos.Items.Create(context.Background(), &librarymodel.Item{
 		ID: id, LibraryID: "lib-1", Type: "movie", Title: "Test Movie",
 		SortTitle: "test movie", Container: container, Path: path,
 		AddedAt: now, UpdatedAt: now, IsAvailable: true,
@@ -99,7 +100,7 @@ func (a *streamTestApp) createItem(t *testing.T, id, container, path string) {
 
 func (a *streamTestApp) createLibrary(t *testing.T) {
 	t.Helper()
-	err := a.repos.Libraries.Create(context.Background(), &db.Library{
+	err := a.repos.Libraries.Create(context.Background(), &librarymodel.Library{
 		ID: "lib-1", Name: "Movies", ContentType: "movies",
 		CreatedAt: time.Now(), UpdatedAt: time.Now(),
 	})
@@ -108,7 +109,7 @@ func (a *streamTestApp) createLibrary(t *testing.T) {
 	}
 }
 
-func (a *streamTestApp) addStreams(t *testing.T, itemID string, streams []*db.MediaStream) {
+func (a *streamTestApp) addStreams(t *testing.T, itemID string, streams []*librarymodel.MediaStream) {
 	t.Helper()
 	err := a.repos.MediaStreams.ReplaceForItem(context.Background(), itemID, streams)
 	if err != nil {
@@ -143,7 +144,7 @@ func TestStreamInfo_DirectPlayMP4(t *testing.T) {
 	token := app.setupUser(t)
 	app.createLibrary(t)
 	app.createItem(t, "movie-1", "mov,mp4,m4a,3gp,3g2,mj2", "/media/test.mp4")
-	app.addStreams(t, "movie-1", []*db.MediaStream{
+	app.addStreams(t, "movie-1", []*librarymodel.MediaStream{
 		{ItemID: "movie-1", StreamIndex: 0, StreamType: "video", Codec: "h264", IsDefault: true},
 		{ItemID: "movie-1", StreamIndex: 1, StreamType: "audio", Codec: "aac", IsDefault: true},
 	})
@@ -169,7 +170,7 @@ func TestStreamInfo_TranscodeHEVC(t *testing.T) {
 	token := app.setupUser(t)
 	app.createLibrary(t)
 	app.createItem(t, "movie-2", "matroska", "/media/test.mkv")
-	app.addStreams(t, "movie-2", []*db.MediaStream{
+	app.addStreams(t, "movie-2", []*librarymodel.MediaStream{
 		{ItemID: "movie-2", StreamIndex: 0, StreamType: "video", Codec: "hevc", IsDefault: true},
 		{ItemID: "movie-2", StreamIndex: 1, StreamType: "audio", Codec: "dts", IsDefault: true},
 	})
@@ -211,7 +212,7 @@ func TestSubtitles_ListWithTracks(t *testing.T) {
 	token := app.setupUser(t)
 	app.createLibrary(t)
 	app.createItem(t, "movie-4", "matroska", "/media/test.mkv")
-	app.addStreams(t, "movie-4", []*db.MediaStream{
+	app.addStreams(t, "movie-4", []*librarymodel.MediaStream{
 		{ItemID: "movie-4", StreamIndex: 0, StreamType: "video", Codec: "h264"},
 		{ItemID: "movie-4", StreamIndex: 1, StreamType: "audio", Codec: "aac"},
 		{ItemID: "movie-4", StreamIndex: 2, StreamType: "subtitle", Codec: "srt", Language: "eng", Title: "English"},

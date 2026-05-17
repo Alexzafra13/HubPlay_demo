@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db"
 	"hubplay/internal/testutil"
 )
@@ -37,7 +38,7 @@ func TestService_RefreshEPG_SecondCallIsRejectedWhileFirstRuns(t *testing.T) {
 	// guard is not involved here but the EPG fetcher still hits 127.0.0.1.
 	unblockLoopback(t)
 
-	lib := &db.Library{
+	lib := &librarymodel.Library{
 		ID: "lib-1", Name: "L1", ContentType: "livetv", ScanMode: "manual",
 		EPGURL:    slow.URL,
 		CreatedAt: time.Now(), UpdatedAt: time.Now(),

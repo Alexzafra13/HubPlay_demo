@@ -18,7 +18,7 @@ en este doc (no se edita el audit original).
 | 0 | 🔄 en curso | Pre-trabajo: ADRs + conventions.md | — | — |
 | 1 | ✅ cerrada | Fixes urgentes seguridad + correctness | FFF, F16-1, RRR-mig, RR, Y, DD, GGGG, AAA, EE, HHH, F16-6, F16-7 | 12 olores cerrados, suite verde |
 | 2 | ✅ cerrada | Sub-paquetes de `db/` | B, J, K, T, L | Sesión M.2 (B+J) + sesión M.3 (L) + sesión M.4 (K+T) |
-| 3 | ⏳ pendiente | Migración Opción B incremental | M (iptv → auth → library) | — |
+| 3 | ✅ cerrada | Migración Opción B incremental | M (iptv ✅ + auth ✅ + library ✅) | Cerrada en sesiones M.6 (auth) + M.7 (iptv) + M.8 (library) |
 | 4 | ⏳ pendiente | Split de god-handlers/services | P, Z, QQ | — |
 | 5 | ⏳ pendiente | Refactor estructural `iptv/` | CC | — |
 | 6 | ⏳ pendiente | Composition root | G, H, V, Q, LL, JJ | — |
@@ -480,3 +480,254 @@ Otras palancas de perf candidatas (no auditadas a fondo):
 
 Para esas, el approach correcto es **medir primero** (pprof +
 benchmarks) y atacar lo que el profiler indique, no la intuición.
+
+---
+
+## Iteración 3 — Migración Opción B incremental (en curso)
+
+Plan original: por feature, una commit por bloque
+(iptv → auth → library). ~3-4 días estimados según el audit.
+
+### Sub-bloque auth ✅ (sesión M.6)
+
+Movidos los 4 tipos del dominio `User`, `Session`, `SigningKey`,
+`DeviceCode` (más el helper `(User).IsProfile()`) de
+`internal/db/{user,session,signing_key,device_code}_repository.go`
+al nuevo paquete `internal/auth/model/`.
+
+**Por qué sub-paquete `auth/model/` y no `auth/` directo**: el feature
+`auth` ya importaba `db` (auth.Service depende de los repos
+concretos). Si los tipos también vivían en `auth/` y `db.*Repository`
+los retornaba, se cerraba un ciclo `auth ↔ db`. Sub-paquete leaf
+(`auth/model/`, cero imports más allá de stdlib) lo rompe:
+
+```
+auth/model   → ∅ (puro)
+db           → auth/model (los repos retornan *authmodel.User etc.)
+auth         → db + auth/model
+composition  → todos los anteriores (main.go)
+```
+
+Cero ciclo. **Cierra "Opción B" del olor A** (tipos del dominio en el
+feature, no en `internal/db/`).
+
+**Cambios**:
+- `internal/auth/model/types.go` (105 LOC): `User`, `Session`,
+  `SigningKey`, `DeviceCode` + `(User).IsProfile()` con docs del
+  rationale.
+- `internal/db/{user,session,signing_key,device_code}_repository.go`:
+  borrar los `type X struct`; añadir
+  `authmodel "hubplay/internal/auth/model"`; reemplazar `*User` por
+  `*authmodel.User` etc. en firmas + row converters.
+- `internal/auth/` (4 ficheros productivos + 3 tests):
+  `db.User` → `authmodel.User` etc.; remover imports de `db` que
+  quedaron sin uso.
+- `internal/api/handlers/` (3 productivos + 5 tests):
+  ídem en handlers + tests.
+- `internal/user/service.go`: ídem.
+
+**Decisiones**:
+- Tipos `sql.Null*` (en `Session`, `SigningKey`, `DeviceCode`)
+  preservados verbatim — un refactor a `*string`/`*time.Time` puro
+  queda fuera de scope (otro chunk).
+- Repos NO se mueven (siguen en `internal/db/`). Difiere del patrón
+  federation/storage donde sí se movieron. Razones: (a) auth.Service
+  los importa por nombre concreto en 4 sitios (vs federation que ya
+  usaba interface `Repo`), mover requería interfaces nuevas
+  (~40 métodos); (b) la mejora del olor A se obtiene SOLO con mover
+  los tipos — el grafo queda sano.
+- Bulk rewrite con Python (regex con word-boundary + guards para
+  field names que se llamen igual que el tipo, ej. `DeviceCode.DeviceCode`).
+
+**Verificación**:
+- `go build ./...` exitcode 0 en `golang:1.25` container.
+- `go test ./internal/... -count=1 -timeout=300s` — **22 paquetes
+  verdes** contra SQLite (incluyendo nuevo `auth/model`).
+- `HUBPLAY_TEST_DRIVER=postgres go test ./internal/db/... ./internal/auth/...
+  ./internal/api/handlers/... -count=1 -timeout=600s` — verde
+  contra Postgres también (db tardó 310s vs SQLite 26s — esperado:
+  network roundtrip por test database creation).
+- Cero cambios de API HTTP pública.
+
+### Sub-bloque iptv ✅ (sesión M.7)
+
+Movidos 9 tipos del dominio iptv (el audit decía 12, el conteo real
+del repo es 9) de `internal/db/{channel,channel_favorites,channel_overrides,
+epg,library_channel_order,library_epg_sources,user_channel_order,
+iptv_schedule}_repository.go` al nuevo paquete
+`internal/iptv/model/`. Mismo patrón validado en auth.
+
+Tipos:
+- `Channel` + `ChannelHealthSummary`
+- `ChannelFavorite`
+- `ChannelOverride`
+- `EPGProgram`
+- `LibraryChannelOrderEntry`
+- `LibraryEPGSource`
+- `UserChannelOrderEntry`
+- `IPTVScheduledJob`
+
+Grafo resultante:
+
+```
+iptv/model   → ∅ (puro)
+db           → iptv/model (los repos retornan *iptvmodel.X)
+iptv         → db + iptv/model
+composition  → todos los anteriores (main.go)
+```
+
+Cero ciclo. **Cierra "Opción B" del olor A** para el feature iptv:
+los tipos del dominio viven en el feature, no en `internal/db/`.
+
+**Cambios** (~50 ficheros):
+
+- `internal/iptv/model/types.go` (~150 LOC): 9 structs + docs
+  del rationale + cierre del grafo.
+- `internal/db/{channel,channel_favorites,channel_overrides,epg,
+  library_channel_order,library_epg_sources,user_channel_order,
+  iptv_schedule,channel_watch_history}_repository.go` (9 ficheros):
+  borrar `type X struct`; añadir `iptvmodel` import; firmas + row
+  converters adaptados.
+- `internal/iptv/` (~14 productivos + ~6 tests): sweep `db.Channel` →
+  `iptvmodel.Channel` etc. + cleanup de imports `db` que quedaron sin
+  uso (~9 ficheros).
+- `internal/api/handlers/` (~10 productivos + tests): ídem.
+- `cmd/pg-smoke/main.go`: actualizado.
+- 11 ficheros de `internal/db/*_test.go`: sweep en seeds.
+
+**Verificación**:
+- `go build ./...` exitcode 0 en `golang:1.25` container.
+- `go test ./internal/... -count=1 -timeout=300s` — **23 paquetes
+  verdes** contra SQLite (incluyendo nuevo `iptv/model`).
+- `HUBPLAY_TEST_DRIVER=postgres go test ./internal/iptv/... ./internal/api/handlers/...
+  -count=1 -timeout=600s` — verde contra Postgres (iptv tardó
+  145s, handlers 154s).
+- Cero cambios de API HTTP pública.
+
+**Bug encontrado y corregido durante el sweep**: `epg_diagnostic.go`
+tenía `import "hubplay/internal/db"` single-line (no block) — el
+`ensure_import` Python no insertaba en ese estilo. Patcheado a mano.
+Lección para library: contemplar ambos estilos de import desde el
+principio.
+
+### Sub-bloque library ✅ (sesión M.8)
+
+Movidos **21 tipos del dominio library + 6 constantes** (el audit
+mencionaba 12, pero al inventariar realmente el repo se cuentan 21
+incluyendo variantes de listing y enums) de los 12 repos
+`internal/db/{library,item,media_stream,image,chapter,episode_segment,
+studio,collection,external_id,metadata,people,item_value}_repository.go`
+al nuevo paquete `internal/library/model/`:
+
+Tipos:
+- `Library`
+- `Item`, `ItemFilter`, `LatestSeriesActivity`
+- `MediaStream`
+- `Image`, `PrimaryImageRef`
+- `Chapter`
+- `EpisodeSegmentKind` (+ 3 constants), `EpisodeSegmentSource`
+  (+ 3 constants), `EpisodeSegment`
+- `Studio`, `StudioListEntry`, `StudioItem`
+- `Collection`, `CollectionListEntry`, `CollectionItem`
+- `ExternalID`
+- `Metadata`
+- `Person`, `ItemPersonCredit`, `FilmographyEntry`
+- `GenreCount`
+
+Mismo patrón validado en auth y iptv. El grafo queda:
+
+```
+library/model   → ∅ (puro)
+db              → library/model (los repos retornan *librarymodel.X)
+library         → db + library/model
+stream          → library/model (decisión direct-play / transcode)
+composition     → todos los anteriores (main.go)
+```
+
+**Cambios** (~80 ficheros tocados, blast radius mayor):
+
+- `internal/library/model/types.go` (~370 LOC): 21 structs + 6
+  constants + docs explicativos.
+- 12 ficheros en `internal/db/`: borrar `type X struct`/`type X string`
+  + sus `const` blocks; añadir `librarymodel` import; firmas + row
+  converters adaptados.
+- `internal/library/` (~7 productivos + ~3 tests): sweep.
+- `internal/scanner/` (~3 ficheros): sweep.
+- `internal/api/handlers/` (~25 productivos + tests): sweep.
+- `internal/stream/decision.go` + `capabilities_test.go` + `decision_test.go`:
+  sweep (no estaba en el root list inicial; segundo pass los pilló).
+- `internal/iptv/prober_worker.go`, `internal/iptv/{channel_overrides,
+  epg_sources,scheduler,service_lock,service_tls}_test.go`: sweep.
+- `internal/provider/provider.go`: sweep.
+- `internal/federation/storage/repository_test.go`: sweep (los tests
+  de fed seedean items + libraries).
+- `cmd/pg-smoke/main.go`: sweep.
+- ~15 ficheros `internal/db/*_test.go`: sweep en seeds.
+
+**Bugs descubiertos durante el sweep** (lessons aprendidas):
+
+1. **`internal/db/sqlc/` + `internal/db/sqlc_pg/` generated code se
+   rompió**. Esos paquetes tienen tipos llamados igual (`sqlc.Item`,
+   `sqlc.Image`, etc.) y el sweep los reescribió a `librarymodel.Item`
+   en las definiciones de tipo y en sus campos. Solución: `git restore`
+   de ambos directorios (son generated). Lección: incluir
+   `internal/db/sqlc/` y `internal/db/sqlc_pg/` en una **deny-list**
+   del script de sweep desde el principio.
+
+2. **Field-name reverts incompletos**. El revert original sólo
+   pillaba `prefix.NAME:` (con `:` típico de struct literal con keys).
+   No pillaba:
+   - `prefix.NAME *Type` (declaración de campo en struct sin valor).
+   - `prefix.NAME: value` inline en un struct literal multi-prop
+     (mi regex requería newline + indent).
+   Solución: dos passes:
+   - Pass A: `^\tprefix\.NAME\s+[\*\[\w]` → revert (struct field decl).
+   - Pass B: `prefix\.NAME:` global → revert (struct literal key).
+
+3. **Imports unused tras strip**. Eliminar tipos de un fichero deja
+   `"time"` o `"hubplay/internal/db"` como imports sin uso. El
+   compilador los flagea y hay que stripearlos manualmente. Hice
+   ~25 strips manuales a lo largo del pass (no había goimports en
+   el container Docker).
+
+4. **`internal/stream/`** olvidado en el root list — los handlers
+   de transcoding usan `db.Item`, `db.MediaStream` para tomar
+   decisiones direct-play / direct-stream / transcode. Segundo pass
+   lo cubrió.
+
+**Verificación**:
+- `go build ./...` exitcode 0 en `golang:1.25` container.
+- `go test ./internal/... -count=1 -timeout=300s` — **24 paquetes
+  verdes** contra SQLite (incl. nuevo `library/model`).
+- `HUBPLAY_TEST_DRIVER=postgres go test ./internal/library/...
+  ./internal/scanner/... ./internal/stream/... -count=1 -timeout=600s`
+  — verde contra Postgres (library 55s, scanner 38s, stream 0.1s).
+- Cero cambios de API HTTP pública.
+
+### Cierre de Iteración 3
+
+Tres sub-bloques cerrados:
+- ✅ auth (4 tipos, sesión M.6, commit `ac60ba0`)
+- ✅ iptv (9 tipos, sesión M.7, commit `4c686d0`)
+- ✅ library (21 tipos + 6 constants, sesión M.8)
+
+**Olor A cerrado** ("tipos del dominio leak desde la capa de
+persistencia"): los 34 tipos del dominio (4 + 9 + 21) que el audit
+identificaba en `internal/db/` ahora viven en sus features:
+`internal/auth/model/`, `internal/iptv/model/`, `internal/library/model/`.
+
+`internal/db/` queda como adapter sqlc puro: factory + dialect
+helpers + row converters + repos que devuelven tipos del feature
+correspondiente. Cero changes en wire HTTP, schema SQL ni
+migraciones a lo largo de las 3 sub-iteraciones.
+
+**Cleanup pendiente** (no implementado en esta sesión): el audit
+también pedía que `internal/db/` quedase reducido a "factory +
+adapter sqlc + dialect helpers + 4-5 repos restantes". Lo que
+queda hoy son los repos cross-feature (`HomeRepository`,
+`ActivityRepository`, `Maintenance`, `ChannelWatchHistoryRepository`,
+`UserDataRepository`, `UserPreferenceRepository`, `SettingsRepository`,
+`ProviderRepository`, `IPTVScheduleRepository`) + los repos del
+feature que no migraron sus repos al sub-paquete `storage/`
+(todos los que cerraron el olor A con sub-paquete model/). Movimiento
+de los repos a sus feature dirs es Iter. 6/7 del plan original.

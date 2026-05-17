@@ -7,7 +7,7 @@ package iptv
 import (
 	"context"
 
-	"hubplay/internal/db"
+	iptvmodel "hubplay/internal/iptv/model"
 )
 
 // GetChannels returns channels for a library.
@@ -17,7 +17,7 @@ import (
 // probe UnhealthyThreshold times in a row are hidden so viewers
 // don't click dead tiles. Admin callers pass activeOnly=false and
 // get the full set including disabled and unhealthy rows.
-func (s *Service) GetChannels(ctx context.Context, libraryID string, activeOnly bool) ([]*db.Channel, error) {
+func (s *Service) GetChannels(ctx context.Context, libraryID string, activeOnly bool) ([]*iptvmodel.Channel, error) {
 	if activeOnly {
 		return s.channels.ListHealthyByLibrary(ctx, libraryID)
 	}
@@ -25,7 +25,7 @@ func (s *Service) GetChannels(ctx context.Context, libraryID string, activeOnly 
 }
 
 // GetChannel returns a single channel by ID.
-func (s *Service) GetChannel(ctx context.Context, id string) (*db.Channel, error) {
+func (s *Service) GetChannel(ctx context.Context, id string) (*iptvmodel.Channel, error) {
 	return s.channels.GetByID(ctx, id)
 }
 

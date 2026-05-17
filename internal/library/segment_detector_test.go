@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db"
 	"hubplay/internal/event"
 	"hubplay/internal/library"
@@ -28,7 +29,7 @@ func TestDetectFromChapters_ClassicEpisodeLayout(t *testing.T) {
 	// Recap → Opening → content → Credits — the textbook BD/Plex
 	// chapter layout. Should yield three segments at confidence 0.95
 	// in (recap, intro, outro) order.
-	chapters := []*db.Chapter{
+	chapters := []*librarymodel.Chapter{
 		{StartTicks: ticks(0), EndTicks: ticks(45), Title: "Recap"},
 		{StartTicks: ticks(45), EndTicks: ticks(135), Title: "Opening Credits"},
 		{StartTicks: ticks(135), EndTicks: ticks(1700), Title: "Episode"},
@@ -39,16 +40,16 @@ func TestDetectFromChapters_ClassicEpisodeLayout(t *testing.T) {
 	if len(got) != 3 {
 		t.Fatalf("expected 3 segments, got %d", len(got))
 	}
-	if got[0].Kind != db.EpisodeSegmentRecap {
+	if got[0].Kind != librarymodel.EpisodeSegmentRecap {
 		t.Errorf("expected first segment to be recap, got %q", got[0].Kind)
 	}
-	if got[1].Kind != db.EpisodeSegmentIntro {
+	if got[1].Kind != librarymodel.EpisodeSegmentIntro {
 		t.Errorf("expected second segment to be intro, got %q", got[1].Kind)
 	}
 	if got[1].StartTicks != ticks(45) || got[1].EndTicks != ticks(135) {
 		t.Errorf("intro range mismatch: got [%d, %d]", got[1].StartTicks, got[1].EndTicks)
 	}
-	if got[2].Kind != db.EpisodeSegmentOutro {
+	if got[2].Kind != librarymodel.EpisodeSegmentOutro {
 		t.Errorf("expected third segment to be outro, got %q", got[2].Kind)
 	}
 	if got[2].StartTicks != ticks(1700) {
@@ -69,7 +70,7 @@ func TestDetectFromChapters_OutroPositionGuard(t *testing.T) {
 	// of a 30-min episode is a real edge case from anthology shows.
 	// We pick the LAST outro match in the second half — a leading
 	// "Opening Credits" line should NOT be misread as an outro.
-	chapters := []*db.Chapter{
+	chapters := []*librarymodel.Chapter{
 		{StartTicks: ticks(120), EndTicks: ticks(150), Title: "Opening Credits"}, // mid-episode flashback
 		{StartTicks: ticks(1700), EndTicks: ticks(1800), Title: "Credits"},       // real outro
 	}
@@ -81,10 +82,10 @@ func TestDetectFromChapters_OutroPositionGuard(t *testing.T) {
 	// First match is "Opening Credits" → intro (since title starts
 	// with "Opening"). The flashback is in the first half so it
 	// passes the position guard for intros.
-	if got[0].Kind != db.EpisodeSegmentIntro {
+	if got[0].Kind != librarymodel.EpisodeSegmentIntro {
 		t.Errorf("expected intro from flashback, got %q", got[0].Kind)
 	}
-	if got[1].Kind != db.EpisodeSegmentOutro {
+	if got[1].Kind != librarymodel.EpisodeSegmentOutro {
 		t.Errorf("expected outro at end, got %q", got[1].Kind)
 	}
 	if got[1].StartTicks != ticks(1700) {
@@ -97,7 +98,7 @@ func TestDetectFromChapters_NoMatchingTitles(t *testing.T) {
 	// Returns no segments — false positives are worse than misses
 	// for this feature (a "Skip intro" button at the wrong moment
 	// is a worse UX than no button).
-	chapters := []*db.Chapter{
+	chapters := []*librarymodel.Chapter{
 		{StartTicks: ticks(0), EndTicks: ticks(600), Title: "Chapter 1"},
 		{StartTicks: ticks(600), EndTicks: ticks(1200), Title: "Chapter 2"},
 		{StartTicks: ticks(1200), EndTicks: ticks(1800), Title: "Chapter 3"},
@@ -112,7 +113,7 @@ func TestDetectFromChapters_FixesMissingEndTicks(t *testing.T) {
 	// Some encoders emit chapters with end_ticks == 0. The CHECK
 	// constraint requires end > start, so the detector's emit step
 	// substitutes a 1-second window so the segment can be persisted.
-	chapters := []*db.Chapter{
+	chapters := []*librarymodel.Chapter{
 		{StartTicks: ticks(60), EndTicks: 0, Title: "Intro"},
 	}
 	got := library.DetectFromChapters(ticks(1800), chapters, 0)
@@ -131,7 +132,7 @@ func TestDetectFromChapters_FixesMissingEndTicks(t *testing.T) {
 func TestDetectFromChapters_ZeroDurationSkipsPositionGuard(t *testing.T) {
 	// Item with durationTicks=0 (e.g. unprobed) — we still want title
 	// matching to work, just without the position sanity check.
-	chapters := []*db.Chapter{
+	chapters := []*librarymodel.Chapter{
 		{StartTicks: ticks(60), EndTicks: ticks(150), Title: "Intro"},
 		{StartTicks: ticks(200), EndTicks: ticks(220), Title: "Credits"},
 	}
@@ -158,14 +159,14 @@ func TestSegmentDetector_DetectLibrary_EndToEnd(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	must(repos.Libraries.Create(context.Background(), &db.Library{
+	must(repos.Libraries.Create(context.Background(), &librarymodel.Library{
 		ID: "lib-1", Name: "TV", ContentType: "shows",
 		ScanMode: "auto", ScanInterval: "6h",
 		CreatedAt: now, UpdatedAt: now, Paths: []string{"/tv"},
 	}))
 	mustItem := func(id, parent, kind, title string) {
 		t.Helper()
-		must(repos.Items.Create(context.Background(), &db.Item{
+		must(repos.Items.Create(context.Background(), &librarymodel.Item{
 			ID:            id,
 			LibraryID:     "lib-1",
 			ParentID:      parent,
@@ -184,7 +185,7 @@ func TestSegmentDetector_DetectLibrary_EndToEnd(t *testing.T) {
 	mustItem("ep-2", "season-1", "episode", "S01E02")
 
 	// ep-1 has chapters → should produce intro + outro.
-	must(repos.Chapters.Replace(context.Background(), "ep-1", []db.Chapter{
+	must(repos.Chapters.Replace(context.Background(), "ep-1", []librarymodel.Chapter{
 		{ItemID: "ep-1", StartTicks: ticks(45), EndTicks: ticks(135), Title: "Intro"},
 		{ItemID: "ep-1", StartTicks: ticks(1700), EndTicks: ticks(1800), Title: "Credits"},
 	}))
@@ -208,7 +209,7 @@ func TestSegmentDetector_DetectLibrary_EndToEnd(t *testing.T) {
 
 	// Re-run with a different chapter set on ep-1 — the prior
 	// chapter-source rows must be replaced, not duplicated.
-	must(repos.Chapters.Replace(context.Background(), "ep-1", []db.Chapter{
+	must(repos.Chapters.Replace(context.Background(), "ep-1", []librarymodel.Chapter{
 		{ItemID: "ep-1", StartTicks: ticks(60), EndTicks: ticks(150), Title: "Opening"},
 	}))
 	if err := det.DetectLibrary(context.Background(), "lib-1"); err != nil {

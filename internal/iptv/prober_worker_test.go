@@ -10,17 +10,18 @@ import (
 	"testing"
 	"time"
 
-	"hubplay/internal/db"
+	iptvmodel "hubplay/internal/iptv/model"
+	librarymodel "hubplay/internal/library/model"
 )
 
 // fakeLibLister returns a fixed list. Used to drive the worker
 // without spinning up a real DB.
 type fakeLibLister struct {
-	libs []*db.Library
+	libs []*librarymodel.Library
 	err  error
 }
 
-func (f *fakeLibLister) List(_ context.Context) ([]*db.Library, error) {
+func (f *fakeLibLister) List(_ context.Context) ([]*librarymodel.Library, error) {
 	return f.libs, f.err
 }
 
@@ -28,13 +29,13 @@ func (f *fakeLibLister) List(_ context.Context) ([]*db.Library, error) {
 // tests can assert which libraries the worker walks.
 type fakeChanLister struct {
 	mu       sync.Mutex
-	byLib    map[string][]*db.Channel
+	byLib    map[string][]*iptvmodel.Channel
 	calls    map[string]int
 	failOnce bool
 	failErr  error
 }
 
-func (f *fakeChanLister) ListByLibrary(_ context.Context, libraryID string, _ bool) ([]*db.Channel, error) {
+func (f *fakeChanLister) ListByLibrary(_ context.Context, libraryID string, _ bool) ([]*iptvmodel.Channel, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.calls == nil {
@@ -75,13 +76,13 @@ func newCheapProber() *Prober {
 
 func TestProberWorker_OnlyLivetvLibrariesAreProbed(t *testing.T) {
 	t.Parallel()
-	libs := &fakeLibLister{libs: []*db.Library{
+	libs := &fakeLibLister{libs: []*librarymodel.Library{
 		{ID: "L1", ContentType: "movies"},
 		{ID: "L2", ContentType: "livetv"},
 		{ID: "L3", ContentType: "shows"},
 		{ID: "L4", ContentType: "livetv"},
 	}}
-	chans := &fakeChanLister{byLib: map[string][]*db.Channel{
+	chans := &fakeChanLister{byLib: map[string][]*iptvmodel.Channel{
 		"L2": {{ID: "c1", StreamURL: ""}},
 		"L4": {{ID: "c2", StreamURL: ""}},
 	}}
@@ -112,8 +113,8 @@ func TestProberWorker_OnlyLivetvLibrariesAreProbed(t *testing.T) {
 
 func TestProberWorker_TickRunsAfterInterval(t *testing.T) {
 	t.Parallel()
-	libs := &fakeLibLister{libs: []*db.Library{{ID: "L1", ContentType: "livetv"}}}
-	chans := &fakeChanLister{byLib: map[string][]*db.Channel{"L1": {}}}
+	libs := &fakeLibLister{libs: []*librarymodel.Library{{ID: "L1", ContentType: "livetv"}}}
+	chans := &fakeChanLister{byLib: map[string][]*iptvmodel.Channel{"L1": {}}}
 
 	w := NewProberWorker(newCheapProber(), libs, chans, quietLogger())
 	w.SetInterval(40 * time.Millisecond)
@@ -134,8 +135,8 @@ func TestProberWorker_TickRunsAfterInterval(t *testing.T) {
 
 func TestProberWorker_StopDrainsAndIsIdempotent(t *testing.T) {
 	t.Parallel()
-	libs := &fakeLibLister{libs: []*db.Library{{ID: "L1", ContentType: "livetv"}}}
-	chans := &fakeChanLister{byLib: map[string][]*db.Channel{"L1": {}}}
+	libs := &fakeLibLister{libs: []*librarymodel.Library{{ID: "L1", ContentType: "livetv"}}}
+	chans := &fakeChanLister{byLib: map[string][]*iptvmodel.Channel{"L1": {}}}
 
 	w := NewProberWorker(newCheapProber(), libs, chans, quietLogger())
 	w.SetInterval(time.Hour)
@@ -157,7 +158,7 @@ func TestProberWorker_StopHonoursDeadline(t *testing.T) {
 	// Block the channel-list call so a run is in-flight when we Stop.
 	hang := make(chan struct{})
 	defer close(hang)
-	libs := &fakeLibLister{libs: []*db.Library{{ID: "L1", ContentType: "livetv"}}}
+	libs := &fakeLibLister{libs: []*librarymodel.Library{{ID: "L1", ContentType: "livetv"}}}
 	chans := &blockingChanLister{hang: hang}
 
 	w := NewProberWorker(newCheapProber(), libs, chans, quietLogger())
@@ -183,7 +184,7 @@ type blockingChanLister struct {
 // ListByLibrary blocks on `hang` and ignores ctx — that's the whole
 // point: simulate a wedged downstream call so Stop must rely on its
 // own deadline, not on ctx-cancellation propagating into the work.
-func (b *blockingChanLister) ListByLibrary(_ context.Context, _ string, _ bool) ([]*db.Channel, error) {
+func (b *blockingChanLister) ListByLibrary(_ context.Context, _ string, _ bool) ([]*iptvmodel.Channel, error) {
 	<-b.hang
 	return nil, nil
 }
@@ -234,7 +235,7 @@ type panicLibLister struct {
 	calls *atomic.Int32
 }
 
-func (p *panicLibLister) List(_ context.Context) ([]*db.Library, error) {
+func (p *panicLibLister) List(_ context.Context) ([]*librarymodel.Library, error) {
 	p.calls.Add(1)
 	panic("boom")
 }
@@ -243,7 +244,7 @@ func TestProberWorker_ProbeNowReturnsListError(t *testing.T) {
 	t.Parallel()
 	libs := &fakeLibLister{}
 	chans := &fakeChanLister{
-		byLib:    map[string][]*db.Channel{},
+		byLib:    map[string][]*iptvmodel.Channel{},
 		failOnce: true,
 		failErr:  errors.New("table missing"),
 	}

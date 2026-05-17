@@ -10,7 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"hubplay/internal/db"
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/imaging"
 	"hubplay/internal/imaging/pathmap"
 	"hubplay/internal/provider"
@@ -43,7 +43,7 @@ type ImageRefreshScheduler struct {
 // pointing into library/, consistent with the rest of the schedulers
 // in this package.
 type ImageRefreshLibrariesRepo interface {
-	List(ctx context.Context) ([]*db.Library, error)
+	List(ctx context.Context) ([]*librarymodel.Library, error)
 }
 
 // NewImageRefreshScheduler wires the loop. interval=0 picks the
@@ -135,18 +135,18 @@ func (s *ImageRefreshScheduler) runSweep(ctx context.Context) {
 
 // ImageRefresherItemRepo is the subset of item operations the refresher needs.
 type ImageRefresherItemRepo interface {
-	List(ctx context.Context, filter db.ItemFilter) ([]*db.Item, int, error)
+	List(ctx context.Context, filter librarymodel.ItemFilter) ([]*librarymodel.Item, int, error)
 }
 
 // ImageRefresherExternalIDRepo is the subset for external-id lookup per item.
 type ImageRefresherExternalIDRepo interface {
-	ListByItem(ctx context.Context, itemID string) ([]*db.ExternalID, error)
+	ListByItem(ctx context.Context, itemID string) ([]*librarymodel.ExternalID, error)
 }
 
 // ImageRefresherImagesRepo is the subset of image-repository operations used.
 type ImageRefresherImagesRepo interface {
-	ListByItem(ctx context.Context, itemID string) ([]*db.Image, error)
-	Create(ctx context.Context, img *db.Image) error
+	ListByItem(ctx context.Context, itemID string) ([]*librarymodel.Image, error)
+	Create(ctx context.Context, img *librarymodel.Image) error
 	SetPrimary(ctx context.Context, itemID, imgType, imageID string) error
 	HasLockedForKind(ctx context.Context, itemID, kind string) (bool, error)
 }
@@ -204,7 +204,7 @@ func NewImageRefresher(
 // item is logged and skipped, not propagated. Only a failure to enumerate the
 // library's items surfaces as an error.
 func (r *ImageRefresher) RefreshForLibrary(ctx context.Context, libraryID string) (int, error) {
-	items, _, err := r.items.List(ctx, db.ItemFilter{
+	items, _, err := r.items.List(ctx, librarymodel.ItemFilter{
 		LibraryID: libraryID,
 		Limit:     50,
 	})
@@ -221,7 +221,7 @@ func (r *ImageRefresher) RefreshForLibrary(ctx context.Context, libraryID string
 
 // refreshForItem is the per-item loop extracted for readability. Errors are
 // logged and counted as zero updates — the caller keeps going.
-func (r *ImageRefresher) refreshForItem(ctx context.Context, item *db.Item) int {
+func (r *ImageRefresher) refreshForItem(ctx context.Context, item *librarymodel.Item) int {
 	extIDs, err := r.externalIDs.ListByItem(ctx, item.ID)
 	if err != nil || len(extIDs) == 0 {
 		return 0
@@ -297,7 +297,7 @@ func (r *ImageRefresher) downloadAndPersist(ctx context.Context, itemID, imgType
 	}
 
 	imgID := uuid.NewString()
-	dbImg := &db.Image{
+	dbImg := &librarymodel.Image{
 		ID:                 imgID,
 		ItemID:             itemID,
 		Type:               imgType,
@@ -331,7 +331,7 @@ func (r *ImageRefresher) downloadAndPersist(ctx context.Context, itemID, imgType
 
 // itemTypeOf maps the DB-level item type string onto the provider-level enum.
 // Unknown values default to Movie (matches the original handler behaviour).
-func itemTypeOf(item *db.Item) provider.ItemType {
+func itemTypeOf(item *librarymodel.Item) provider.ItemType {
 	switch item.Type {
 	case "series":
 		return provider.ItemSeries

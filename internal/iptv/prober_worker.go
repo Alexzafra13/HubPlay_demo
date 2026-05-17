@@ -29,7 +29,8 @@ import (
 	"sync"
 	"time"
 
-	"hubplay/internal/db"
+	iptvmodel "hubplay/internal/iptv/model"
+	librarymodel "hubplay/internal/library/model"
 )
 
 const (
@@ -72,11 +73,11 @@ type ProberWorker struct {
 // types. Mirrors the sink-pattern used elsewhere (signingKeys,
 // MetricsSink).
 type libraryLister interface {
-	List(ctx context.Context) ([]*db.Library, error)
+	List(ctx context.Context) ([]*librarymodel.Library, error)
 }
 
 type channelLister interface {
-	ListByLibrary(ctx context.Context, libraryID string, activeOnly bool) ([]*db.Channel, error)
+	ListByLibrary(ctx context.Context, libraryID string, activeOnly bool) ([]*iptvmodel.Channel, error)
 }
 
 // NewProberWorker wires a worker around the building blocks. Logger

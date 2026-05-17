@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db"
 	"hubplay/internal/testutil"
 )
@@ -40,7 +41,7 @@ http://upstream.example/x.m3u8
 
 	libID := "lib-strict"
 	now := time.Now()
-	if err := repos.Libraries.Create(ctx, &db.Library{
+	if err := repos.Libraries.Create(ctx, &librarymodel.Library{
 		ID: libID, Name: "L", ContentType: "livetv", ScanMode: "manual",
 		M3UURL:    srv.URL,
 		CreatedAt: now, UpdatedAt: now,
@@ -86,7 +87,7 @@ http://upstream.example/la1.m3u8
 
 	libID := "lib-insecure"
 	now := time.Now()
-	if err := repos.Libraries.Create(ctx, &db.Library{
+	if err := repos.Libraries.Create(ctx, &librarymodel.Library{
 		ID: libID, Name: "L", ContentType: "livetv", ScanMode: "manual",
 		M3UURL:      srv.URL,
 		TLSInsecure: true,
@@ -129,7 +130,7 @@ http://upstream.example/t.m3u8
 
 	libID := "lib-toggle"
 	now := time.Now()
-	lib := &db.Library{
+	lib := &librarymodel.Library{
 		ID: libID, Name: "L", ContentType: "livetv", ScanMode: "manual",
 		M3UURL: srv.URL, CreatedAt: now, UpdatedAt: now,
 	}

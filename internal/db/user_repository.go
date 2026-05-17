@@ -7,41 +7,11 @@ import (
 	"fmt"
 	"time"
 
+	authmodel "hubplay/internal/auth/model"
 	"hubplay/internal/db/sqlc"
 	"hubplay/internal/db/sqlc_pg"
 	"hubplay/internal/domain"
 )
-
-type User struct {
-	ID           string
-	Username     string
-	DisplayName  string
-	PasswordHash string
-	AvatarPath   string
-	Role         string
-	IsActive     bool
-	MaxSessions  int
-	CreatedAt    time.Time
-	LastLoginAt  *time.Time
-
-	// Profile tree fields (migration 034). See repo docs above for the
-	// invariants — top-level account = parent_user_id empty; profile =
-	// child row sharing parent's password.
-	ParentUserID           string
-	PINHash                string
-	MaxContentRating       string
-	PasswordChangeRequired bool
-
-	// AccessExpiresAt is the temp-access deadline. nil = permanent.
-	AccessExpiresAt *time.Time
-
-	// AvatarColor — optional per-user override. Empty = deterministic
-	// FNV-1a → palette fallback in the frontend.
-	AvatarColor string
-}
-
-// IsProfile is the canonical readability helper around `ParentUserID`.
-func (u User) IsProfile() bool { return u.ParentUserID != "" }
 
 // UserRepository — dual-dialect repo using Pattern A (dual q
 // pointers, branching per method). Exactly one of sq / pq is non-nil
@@ -68,7 +38,7 @@ func NewUserRepository(driver string, database *sql.DB) *UserRepository {
 // helper to keep each method's branching one-liner readable.
 func (r *UserRepository) useSQLite() bool { return r.sq != nil }
 
-func (r *UserRepository) GetByID(ctx context.Context, id string) (*User, error) {
+func (r *UserRepository) GetByID(ctx context.Context, id string) (*authmodel.User, error) {
 	if r.useSQLite() {
 		row, err := r.sq.GetUserByID(ctx, id)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -91,7 +61,7 @@ func (r *UserRepository) GetByID(ctx context.Context, id string) (*User, error) 
 	return &u, nil
 }
 
-func (r *UserRepository) GetByUsername(ctx context.Context, username string) (*User, error) {
+func (r *UserRepository) GetByUsername(ctx context.Context, username string) (*authmodel.User, error) {
 	if r.useSQLite() {
 		row, err := r.sq.GetUserByUsername(ctx, username)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -114,7 +84,7 @@ func (r *UserRepository) GetByUsername(ctx context.Context, username string) (*U
 	return &u, nil
 }
 
-func (r *UserRepository) Create(ctx context.Context, u *User) error {
+func (r *UserRepository) Create(ctx context.Context, u *authmodel.User) error {
 	if r.useSQLite() {
 		if err := r.sq.CreateUser(ctx, sqlc.CreateUserParams{
 			ID:                     u.ID,
@@ -325,7 +295,7 @@ func (r *UserRepository) PrimaryAdminID(ctx context.Context) (string, error) {
 // ListProfilesForOwner — raw SQL holdout. See the original SQLite-only
 // version's long comment about the sqlc 1.31.x parser bug. The query
 // is dialect-aware via rewritePlaceholders.
-func (r *UserRepository) ListProfilesForOwner(ctx context.Context, ownerID string) ([]*User, error) {
+func (r *UserRepository) ListProfilesForOwner(ctx context.Context, ownerID string) ([]*authmodel.User, error) {
 	driver := DriverSQLite
 	if !r.useSQLite() {
 		driver = DriverPostgres
@@ -345,9 +315,9 @@ ORDER BY parent_user_id IS NOT NULL, LOWER(display_name)`)
 	}
 	defer rows.Close() //nolint:errcheck
 
-	var out []*User
+	var out []*authmodel.User
 	for rows.Next() {
-		var u User
+		var u authmodel.User
 		var avatarPath string
 		var lastLoginAt, accessExpiresAt sql.NullTime
 		var parentUserID, pinHash, maxContentRating, avatarColor sql.NullString
@@ -402,7 +372,7 @@ func (r *UserRepository) UpdateLastLogin(ctx context.Context, id string, t time.
 	return nil
 }
 
-func (r *UserRepository) List(ctx context.Context, limit, offset int) ([]*User, int, error) {
+func (r *UserRepository) List(ctx context.Context, limit, offset int) ([]*authmodel.User, int, error) {
 	if r.useSQLite() {
 		cnt, err := r.sq.CountUsers(ctx)
 		if err != nil {
@@ -414,7 +384,7 @@ func (r *UserRepository) List(ctx context.Context, limit, offset int) ([]*User, 
 		if err != nil {
 			return nil, 0, fmt.Errorf("list users: %w", err)
 		}
-		out := make([]*User, len(rows))
+		out := make([]*authmodel.User, len(rows))
 		for i, row := range rows {
 			u := userFromSqliteListRow(row)
 			out[i] = &u
@@ -435,7 +405,7 @@ func (r *UserRepository) List(ctx context.Context, limit, offset int) ([]*User, 
 	if err != nil {
 		return nil, 0, fmt.Errorf("list users: %w", err)
 	}
-	out := make([]*User, len(rows))
+	out := make([]*authmodel.User, len(rows))
 	for i, row := range rows {
 		u := userFromPgListRow(row)
 		out[i] = &u
@@ -459,7 +429,7 @@ func (r *UserRepository) Count(ctx context.Context) (int, error) {
 	return int(cnt), nil
 }
 
-func (r *UserRepository) Update(ctx context.Context, u *User) error {
+func (r *UserRepository) Update(ctx context.Context, u *authmodel.User) error {
 	if r.useSQLite() {
 		if err := r.sq.UpdateUser(ctx, sqlc.UpdateUserParams{
 			DisplayName: u.DisplayName,
@@ -520,8 +490,8 @@ func nullStringFromOptional(s string) sql.NullString {
 	return sql.NullString{String: s, Valid: true}
 }
 
-func userFromSqliteGetRow(r sqlc.GetUserByIDRow) User {
-	return User{
+func userFromSqliteGetRow(r sqlc.GetUserByIDRow) authmodel.User {
+	return authmodel.User{
 		ID:                     r.ID,
 		Username:               r.Username,
 		DisplayName:            r.DisplayName,
@@ -541,8 +511,8 @@ func userFromSqliteGetRow(r sqlc.GetUserByIDRow) User {
 	}
 }
 
-func userFromSqliteGetByUsernameRow(r sqlc.GetUserByUsernameRow) User {
-	return User{
+func userFromSqliteGetByUsernameRow(r sqlc.GetUserByUsernameRow) authmodel.User {
+	return authmodel.User{
 		ID:                     r.ID,
 		Username:               r.Username,
 		DisplayName:            r.DisplayName,
@@ -562,8 +532,8 @@ func userFromSqliteGetByUsernameRow(r sqlc.GetUserByUsernameRow) User {
 	}
 }
 
-func userFromSqliteListRow(r sqlc.ListUsersRow) User {
-	return User{
+func userFromSqliteListRow(r sqlc.ListUsersRow) authmodel.User {
+	return authmodel.User{
 		ID:                     r.ID,
 		Username:               r.Username,
 		DisplayName:            r.DisplayName,
@@ -581,29 +551,8 @@ func userFromSqliteListRow(r sqlc.ListUsersRow) User {
 	}
 }
 
-func userFromPgGetRow(r sqlc_pg.GetUserByIDRow) User {
-	return User{
-		ID:                     r.ID,
-		Username:               r.Username,
-		DisplayName:            r.DisplayName,
-		PasswordHash:           r.PasswordHash,
-		AvatarPath:             r.AvatarPath,
-		Role:                   r.Role,
-		IsActive:               r.IsActive,
-		MaxSessions:            int(r.MaxSessions),
-		CreatedAt:              r.CreatedAt,
-		LastLoginAt:            nullTimeToPtr(r.LastLoginAt),
-		ParentUserID:           r.ParentUserID.String,
-		PINHash:                r.PinHash.String,
-		MaxContentRating:       r.MaxContentRating.String,
-		PasswordChangeRequired: r.PasswordChangeRequired,
-		AccessExpiresAt:        nullTimeToPtr(r.AccessExpiresAt),
-		AvatarColor:            r.AvatarColor.String,
-	}
-}
-
-func userFromPgGetByUsernameRow(r sqlc_pg.GetUserByUsernameRow) User {
-	return User{
+func userFromPgGetRow(r sqlc_pg.GetUserByIDRow) authmodel.User {
+	return authmodel.User{
 		ID:                     r.ID,
 		Username:               r.Username,
 		DisplayName:            r.DisplayName,
@@ -623,8 +572,29 @@ func userFromPgGetByUsernameRow(r sqlc_pg.GetUserByUsernameRow) User {
 	}
 }
 
-func userFromPgListRow(r sqlc_pg.ListUsersRow) User {
-	return User{
+func userFromPgGetByUsernameRow(r sqlc_pg.GetUserByUsernameRow) authmodel.User {
+	return authmodel.User{
+		ID:                     r.ID,
+		Username:               r.Username,
+		DisplayName:            r.DisplayName,
+		PasswordHash:           r.PasswordHash,
+		AvatarPath:             r.AvatarPath,
+		Role:                   r.Role,
+		IsActive:               r.IsActive,
+		MaxSessions:            int(r.MaxSessions),
+		CreatedAt:              r.CreatedAt,
+		LastLoginAt:            nullTimeToPtr(r.LastLoginAt),
+		ParentUserID:           r.ParentUserID.String,
+		PINHash:                r.PinHash.String,
+		MaxContentRating:       r.MaxContentRating.String,
+		PasswordChangeRequired: r.PasswordChangeRequired,
+		AccessExpiresAt:        nullTimeToPtr(r.AccessExpiresAt),
+		AvatarColor:            r.AvatarColor.String,
+	}
+}
+
+func userFromPgListRow(r sqlc_pg.ListUsersRow) authmodel.User {
+	return authmodel.User{
 		ID:                     r.ID,
 		Username:               r.Username,
 		DisplayName:            r.DisplayName,

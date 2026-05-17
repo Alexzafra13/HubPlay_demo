@@ -1,6 +1,6 @@
 package stream
 
-import "hubplay/internal/db"
+import librarymodel "hubplay/internal/library/model"
 
 // PlaybackMethod describes how the server will deliver a media item.
 type PlaybackMethod string
@@ -73,8 +73,8 @@ var remuxableContainers = map[string]bool{
 // returns a zero-value DirectPlay decision when streams are empty,
 // which the player will then attempt to play with whatever the
 // browser can do.
-func DecideForceDirectPlay(item *db.Item, streams []*db.MediaStream) PlaybackDecision {
-	var videoStream, audioStream *db.MediaStream
+func DecideForceDirectPlay(item *librarymodel.Item, streams []*librarymodel.MediaStream) PlaybackDecision {
+	var videoStream, audioStream *librarymodel.MediaStream
 	for _, s := range streams {
 		switch s.StreamType {
 		case "video":
@@ -107,8 +107,8 @@ func DecideForceDirectPlay(item *db.Item, streams []*db.MediaStream) PlaybackDec
 // the function falls back to DefaultWebCapabilities, matching the
 // behaviour the original hard-coded version had so legacy web clients
 // see no change.
-func Decide(item *db.Item, streams []*db.MediaStream, caps *Capabilities, requestedProfile string) PlaybackDecision {
-	var videoStream, audioStream *db.MediaStream
+func Decide(item *librarymodel.Item, streams []*librarymodel.MediaStream, caps *Capabilities, requestedProfile string) PlaybackDecision {
+	var videoStream, audioStream *librarymodel.MediaStream
 	for _, s := range streams {
 		switch s.StreamType {
 		case "video":
@@ -262,7 +262,7 @@ func splitContainer(c string) []string {
 	return parts
 }
 
-func audioCodecName(s *db.MediaStream) string {
+func audioCodecName(s *librarymodel.MediaStream) string {
 	if s == nil {
 		return ""
 	}

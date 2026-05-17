@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	iptvmodel "hubplay/internal/iptv/model"
 	"hubplay/internal/db"
 	"hubplay/internal/iptv"
 )
@@ -65,14 +66,14 @@ type channelDTO struct {
 	UserPosition int  `json:"user_position,omitempty"`
 }
 
-// toChannelDTO projects a db.Channel onto the wire shape. `streamPath` is
+// toChannelDTO projects a iptvmodel.Channel onto the wire shape. `streamPath` is
 // injected rather than built inside because list and detail endpoints differ
 // (list exposes the client-facing proxy URL; detail omits it and relies on a
 // separate stream endpoint). Pass "" to omit `stream_url`.
 //
-// Accepts a pointer to match the service layer's return type (*db.Channel);
+// Accepts a pointer to match the service layer's return type (*iptvmodel.Channel);
 // callers never need to dereference.
-func toChannelDTO(ch *db.Channel, streamPath string) channelDTO {
+func toChannelDTO(ch *iptvmodel.Channel, streamPath string) channelDTO {
 	if ch == nil {
 		return channelDTO{}
 	}
@@ -119,7 +120,7 @@ func toChannelDTO(ch *db.Channel, streamPath string) channelDTO {
 // the upstream is unfetchable, and the React `onError` handler
 // flips back to initials, so the UI degrades gracefully without
 // the caller having to coordinate.
-func logoProxyURL(ch *db.Channel) string {
+func logoProxyURL(ch *iptvmodel.Channel) string {
 	if ch == nil || ch.LogoURL == "" {
 		return ""
 	}
@@ -131,7 +132,7 @@ func logoProxyURL(ch *db.Channel) string {
 // (vs in the SQL or in JS) keeps a single source of truth — bumping
 // db.UnhealthyThreshold flips the wire bucket atomically and the UI
 // follows without a separate change.
-func deriveHealthStatus(ch *db.Channel) string {
+func deriveHealthStatus(ch *iptvmodel.Channel) string {
 	if ch == nil {
 		return "ok"
 	}

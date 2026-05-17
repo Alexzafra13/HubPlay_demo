@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	iptvmodel "hubplay/internal/iptv/model"
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db"
 	"hubplay/internal/testutil"
 )
@@ -21,21 +23,21 @@ func TestLibraryEPGSources_DuplicateURLReturnsSentinel(t *testing.T) {
 
 	now := time.Now()
 	libID := "lib-dup"
-	if err := repos.Libraries.Create(ctx, &db.Library{
+	if err := repos.Libraries.Create(ctx, &librarymodel.Library{
 		ID: libID, Name: "D", ContentType: "livetv", ScanMode: "manual",
 		CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	first := &db.LibraryEPGSource{
+	first := &iptvmodel.LibraryEPGSource{
 		ID: "src-a", LibraryID: libID, URL: "https://example/epg.xml",
 	}
 	if err := repos.LibraryEPGSources.Create(ctx, first); err != nil {
 		t.Fatalf("first create: %v", err)
 	}
 
-	second := &db.LibraryEPGSource{
+	second := &iptvmodel.LibraryEPGSource{
 		ID: "src-b", LibraryID: libID, URL: "https://example/epg.xml",
 	}
 	err := repos.LibraryEPGSources.Create(ctx, second)

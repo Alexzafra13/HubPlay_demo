@@ -1,6 +1,97 @@
 # Estado del proyecto
 
-> 🎬 **Sesión 2026-05-14 (rama `claude/review-go-media-backend-37MDe`, Sesiones M + M.1 — auditoría arquitectónica completa del backend Go + Iteración 1 de la intervención)** — auditoría exhaustiva del backend (16 fases, 110+ olores catalogados, 2 CVE-class identificados) seguida de la primera iteración de intervención (12 olores cerrados con tests verdes incluyendo los 2 CVE).
+> 🎬 **Sesión 2026-05-17 (rama `claude/heuristic-wilson-d7afa4`, Sesiones M.2–M.8 — Iteraciones 2 + 3 completas + sweep de perf con benchmarks dual SQLite/Postgres)** — 13 commits sobre `main` cerrando 3 iteraciones del plan post-auditoría 2026-05-14: Iter. 2 (sub-paquetes db/), sweep perf oportunista (índices + paginación + WriteTimeout + benchmarks baseline) e Iter. 3 (Opción B — tipos del dominio a `internal/{auth,iptv,library}/model/`). 8 commits ya mergeados a main vía PRs #288/293/294/295/296; 5 ahead en la rama (Iter. 3 + perf doc Postgres + cleanup).
+>
+> ## 🛠️ Sesión M.2 — Iter. 2 sub-bloque B+J: `federation_repository.go` → `internal/federation/storage/` (commit `dc988ba`, mergeado PR #288)
+>
+> Mover el repo de 1 474 LOC con 6 responsabilidades a un sub-paquete `internal/federation/storage/` con split en 9 ficheros temáticos (`storage.go`, `sql_util.go`, `identity.go`, `invite.go`, `peer.go`, `audit.go`, `share.go`, `item_cache.go`, `progress.go` + tests). Tipo renombrado `*FederationRepository` → `*Repository` (evita stutter). Construcción sigue en composition root porque `federation.Manager` ya consumía vía `type Repo interface` (cero ciclo). 4 callers actualizados (main.go, pg-smoke, federation_stream_test.go ×2). `internal/db` ya **no importa** `internal/federation` — cierra la única violación de capa real del proyecto (olor B) y el primer god-fichero (olor J). 22 paquetes verdes contra SQLite.
+>
+> ## 🛠️ Sesión M.3 — Iter. 2 sub-bloque L: split de `home_repository.go` (commit `ab0f4c1`, mergeado en PR #293)
+>
+> Split textual puro de `internal/db/home_repository.go` (671 LOC, 3 carriles) en 4 ficheros: `home.go` (struct + constructor + helpers + `splitGroupConcat` compartido + `IDsFromTrending` utility), `home_trending.go`, `home_recommended.go` (Recommended + BecauseYouWatched comparten scoring por género), `home_live.go`. El plan del audit decía `home_latest.go`/`home_trending.go`/`home_live.go` pero el repo realmente tiene Trending/Recommended/BecauseYouWatched/LiveNow — el split refleja la realidad. Cero cambios de SQL, tipos públicos o comportamiento.
+>
+> ## 🛠️ Sesión M.4 — Iter. 2 sub-bloque K+T: interfaces estrechas + `ActivityRepository` (commit `13fcff6`, mergeado PR #293)
+>
+> Creados `db.HealthChecker`, `db.BackupOperator`, `db.PoolStatsReporter` (3 interfaces estrechas) + struct `Maintenance` que las implementa + `MigrationSource()` para el caso especial del migrator sqlite→pg. Nuevo `db.ActivityRepository` con `DailyWatchActivity` + `TopItems` reemplaza las queries raw inline de `handlers/system.go`. **`Dependencies.Database *sql.DB` eliminado** de `api.Dependencies` — sustituido por `DB *db.Maintenance` + `Activity *db.ActivityRepository`. 4 handlers afectados (`system`, `health`, `admin_backup`, `admin_db`); 10 sitios de tests adaptados. Cero cambios de wire HTTP. Cierra olores K (handlers reciben `*sql.DB` raw) y T (`Dependencies` con `*sql.DB`).
+>
+> ## 🛠️ Sesión M.5 — Sweep de perf oportunista UUU-mig + Q (commits `bf20df4` + `6035f8f`, mergeados PR #294)
+>
+> Dos optimizaciones medibles fuera del orden 0-9:
+> - **UUU-mig**: nuevo índice composite `idx_channels_library_number ON channels(library_id, number)` (migración 044, dual SQLite + Postgres). Elimina el sort en memoria del listing de canales — en libraries IPTV con 5 000+ canales pasa de "barato" a "barato y correcto".
+> - **Q**: `cmd/hubplay/main.go:WriteTimeout: 0` → `30s` (default seguro). Helper nuevo `handlers.DisableWriteDeadline(w)` en `internal/api/handlers/streaming_deadline.go` con 2 tests. Aplicado opt-out explícito en 25 sitios (HLS, SSE, file download, peer-stream proxy, IPTV streaming). Cliente lento dejando una goroutine viva indefinidamente deja de ser DoS-grade.
+>
+> ## 🛠️ Sesión M.5b — Baseline de benchmarks Go (commit `2563af2`, mergeado PR #295)
+>
+> Tres bench files (`internal/db/{channel,activity,home}_bench_test.go`) con seeds realistas (100-5000 canales, 500-5000 items, 50 usuarios). `internal/testutil` refactor de `*testing.T` → `testing.TB` para reutilizar setup desde Benchmark*. Reporte completo en `docs/memory/perf-benchmarks-2026-05-17.md` (377 LOC) con números estabilizados, propuesta priorizada de 4 optimizaciones y la sección honest "lo que no se midió aquí" (HTTP boundary, federation hot paths, HLS streaming throughput).
+>
+> **Hallazgo principal**: `ChannelRepository.ListByLibrary` 5000 channels = 17 ms / **9.2 MB / 149 000 allocs** — el cuello de botella es la materialización de structs en Go, no el sort SQL (UUU-mig acelera el plan pero las allocs dominan).
+>
+> ## 🛠️ Sesión M.5c — Combo perf #1 + #2 (commits `e079038` + `1ca2a25`, mergeados PR #296)
+>
+> - **#2 (`idx_user_data_last_played_at`)**: migración 045 partial index. Validado con bench: SQLite mejora -3 a -8% (page cache absorbe full scan a 5 k rows); en producción con 10 k-100 k rows el beneficio escala. Honestidad documentada — la estimación original era ×5-10.
+> - **#1 (`ListByLibraryPaginated`)**: nueva primitiva del repo + 6 tests + bench validation. **Mejora real medida**: ×7 tiempo, **×118 memoria, ×50 allocs** (a 5 k channels, limit=100). La palanca clave es **GC pressure**, no time: 9 MB/req → 78 KB/req = 540 MB/min → 4.7 MB/min de garbage. **No migrado el handler todavía** — el handler `IPTVHandler.ListChannels` tiene capa de overlays per-user incompatible con paginación 100% SQL. Spawneado task en UI para sesión futura.
+>
+> ## 🛠️ Sesión M.5d — Comparativa SQLite vs Postgres (commit `46780cf`, ahead en la rama)
+>
+> Re-corrida de todos los benches contra Postgres 16-alpine (container dedicado en network bridge). Sección nueva en `perf-benchmarks-2026-05-17.md` con tabla comparativa + hallazgos. **Postgres BATE a SQLite ×~2 en listings grandes** (`ListByLibrary 5k channels`: 16.6 ms → 9.3 ms, -44%) — el planner pg + UUU-mig se complementan mejor. **SQLite bate a Postgres en datasets pequeños / Home rails** (`Trending 500 items`: 0.8 ms vs 2.7 ms, +241% — network roundtrip domina). Allocs/op -22% en Postgres (driver pgx más eficiente que modernc.org/sqlite). Recomendación: SQLite para single-user < 1 k items; Postgres obligatorio para catálogos IPTV grandes.
+>
+> ## 🛠️ Sesión M.6 — Iter. 3 sub-bloque auth (commit `ac60ba0`, ahead en la rama)
+>
+> Primer sub-bloque de Iter. 3 (Opción B incremental). 4 tipos del dominio (`User`, `Session`, `SigningKey`, `DeviceCode` + helper `(User).IsProfile()`) movidos de `internal/db/*_repository.go` al nuevo paquete leaf `internal/auth/model/`. **Sub-paquete** en lugar de `auth/` directo para romper ciclo `auth ↔ db` sin mover repos. Grafo: `auth/model → ∅`; `db → auth/model`; `auth → db + auth/model`. 31 ficheros tocados.
+>
+> ## 🛠️ Sesión M.7 — Iter. 3 sub-bloque iptv (commit `4c686d0`, ahead en la rama)
+>
+> 9 tipos del dominio iptv (audit decía 12, conteo real 9): `Channel`, `ChannelHealthSummary`, `ChannelFavorite`, `ChannelOverride`, `EPGProgram`, `LibraryChannelOrderEntry`, `LibraryEPGSource`, `UserChannelOrderEntry`, `IPTVScheduledJob` → `internal/iptv/model/`. 58 ficheros tocados. Edge cases pillados: (a) `channel_watch_history_repository.go` también usa `Channel`; (b) `epg_diagnostic.go` con `import "single"` style — el helper Python no lo cubría.
+>
+> ## 🛠️ Sesión M.8 — Iter. 3 sub-bloque library (commit `026949a`, ahead en la rama)
+>
+> **Sub-bloque más grande**: 21 tipos del dominio + 6 constantes (audit decía 12 — al inventariar realmente hay 21 incluyendo variantes de listing y enums). Tipos: `Library`, `Item`, `ItemFilter`, `LatestSeriesActivity`, `MediaStream`, `Image`, `PrimaryImageRef`, `Chapter`, `EpisodeSegmentKind`+`Source` (+ 6 consts), `EpisodeSegment`, `Studio`+`ListEntry`+`Item`, `Collection`+`ListEntry`+`Item`, `ExternalID`, `Metadata`, `Person`, `ItemPersonCredit`, `FilmographyEntry`, `GenreCount` → `internal/library/model/`. 87 ficheros tocados.
+>
+> **Bugs descubiertos durante el sweep** (lessons aprendidas, documentados):
+> 1. `internal/db/sqlc/` + `sqlc_pg/` generated code se rompió (tipos con mismo nombre `sqlc.Item`, `sqlc.Image`). Git restore + añadir a deny-list del script.
+> 2. Field-name reverts necesitan dos passes (struct field decl + struct literal key).
+> 3. `internal/stream/` olvidado en root list — `decision.go` usa `db.Item` + `db.MediaStream`. Segundo pass.
+> 4. ~25 imports `db` quedaron sin uso post-sweep — no había goimports en el container Docker.
+>
+> ## 🏁 Olor A cerrado tras Iter. 3
+>
+> Los **34 tipos del dominio** (4 auth + 9 iptv + 21 library) que el audit identificaba en `internal/db/` ahora viven en sus features. `internal/db/` queda como **adapter sqlc puro**: factory + dialect helpers + row converters + repos que devuelven tipos del feature correspondiente. Cero cambios de wire HTTP, schema SQL ni migraciones a lo largo de las 3 sub-iteraciones.
+>
+> ## 🧪 Verificación final dual-backend
+>
+> - **SQLite** (default): 24 paquetes verdes (incluyendo los 3 nuevos `*/model/`).
+> - **Postgres** 16-alpine (container dedicado): sub-paquetes verificados independientemente (auth + handlers / iptv + handlers / library + scanner + stream). Tiempos: ~150-300s por paquete (network roundtrip por test DB creation domina).
+> - `go build ./...` exitcode 0 en `golang:1.25` con `GOTOOLCHAIN=auto`.
+>
+> ## 📍 Estado del plan post-auditoría tras esta sesión
+>
+> - ✅ Iter. 0 (pre-trabajo, ADRs 015-023).
+> - ✅ Iter. 1 (12 olores seguridad + correctness, sesión M.1 previa).
+> - ✅ Iter. 2 (sub-paquetes de db/: B+J+K+T+L).
+> - ✅ **Iter. 3 (Opción B incremental: auth + iptv + library).** ← cerrado esta sesión.
+> - ⏳ Iter. 4 (god-handlers + god-services: P+C, Z, QQ).
+> - ⏳ Iter. 5 (refactor estructural `iptv/` en sub-paquetes: CC).
+> - ⏳ Iter. 6 (composition root: G+H+V, JJ, LL).
+> - ⏳ Iter. 7 (cosmética + schema: D+X, W, BB, RRR-mig+).
+> - ⏳ Iter. 8 (polish F14-F16).
+> - ⏳ Iter. 9 (verificación empírica `-race` + `goleak` + `govulncheck`).
+> - ✅ **Sweep de perf oportunista** (UUU-mig + Q + #1 paginated + #2 índice + baseline benchmarks dual SQLite/Postgres). Fuera del orden 0-9.
+>
+> ## 📍 Pendientes spawneados como tasks separados
+>
+> 1. **Migrar `IPTVHandler.ListChannels` a `ListByLibraryPaginated`**: la primitiva ya existe en el repo + tests + bench validan ×7 tiempo, ×118 memoria. Bloqueado por decisiones de UX (paginación clásica vs infinite scroll vs page-size selector) + rediseño del overlay user (hide / reorder) para que pague vía JOIN SQL en lugar de filtro post-fetch.
+>
+> ## 📍 Cómo retomar en la próxima sesión
+>
+> 1. **Estado git**: rama `claude/heuristic-wilson-d7afa4` con 5 commits ahead de `origin/main` (Iter. 3 entero + perf-doc Postgres + cleanup). 8 commits anteriores ya mergeados a main vía PRs #288/293/294/295/296.
+> 2. **PR pendiente**: abrir uno nuevo para los 5 commits ahead — URL https://github.com/Alexzafra13/HubPlay_demo/pull/new/claude/heuristic-wilson-d7afa4 (o si está abierto desde el cierre previo, simplemente actualizarlo).
+> 3. **Próximas iteraciones**: Iter. 4 (god-handlers, ~2 días) es el siguiente bloque estructural natural. Alternativamente: migrar el handler `ListChannels` cuando haya decisión UX (~3-4h cuando se aclare).
+> 4. **Docs de referencia para retomar**:
+>    - `docs/memory/audit-2026-05-14-go-backend-review.md` (inmutable; 3 597 LOC).
+>    - `docs/memory/intervention-2026-05-14.md` (tabla de estado de iteraciones + cierres por commit).
+>    - `docs/memory/perf-benchmarks-2026-05-17.md` (números bench dual-backend + propuestas).
+>
+> ---
 >
 > ## 🧪 Sesión M — Auditoría arquitectónica del backend Go (commits `6e4b9e7` → `47bee5b`)
 >

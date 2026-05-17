@@ -15,6 +15,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	authmodel "hubplay/internal/auth/model"
 	"hubplay/internal/api/handlers"
 	"hubplay/internal/auth"
 	"hubplay/internal/clock"
@@ -32,7 +33,7 @@ import (
 type deviceAuthEnv struct {
 	svc     *auth.DeviceCodeService
 	authSvc *auth.Service
-	user    *db.User
+	user    *authmodel.User
 	bus     *event.Bus
 	server  *httptest.Server
 	authCfg config.AuthConfig

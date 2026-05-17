@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	authmodel "hubplay/internal/auth/model"
 	"hubplay/internal/auth"
 	"hubplay/internal/clock"
 	"hubplay/internal/config"
@@ -48,7 +49,7 @@ func newTestDeviceCodeService(t *testing.T) (*auth.DeviceCodeService, *auth.Serv
 	return devSvc, authSvc, userRepo, clk
 }
 
-func registerDeviceUser(t *testing.T, svc *auth.Service) *db.User {
+func registerDeviceUser(t *testing.T, svc *auth.Service) *authmodel.User {
 	t.Helper()
 	u, err := svc.Register(context.Background(), auth.RegisterRequest{
 		Username:    "operator",

@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	iptvmodel "hubplay/internal/iptv/model"
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db"
 	"hubplay/internal/testutil"
 )
@@ -74,21 +76,21 @@ func newEPGTestService(t *testing.T) (*Service, *db.Repositories, string) {
 
 	now := time.Now()
 	libID := "lib-epg-sources"
-	if err := repos.Libraries.Create(ctx, &db.Library{
+	if err := repos.Libraries.Create(ctx, &librarymodel.Library{
 		ID: libID, Name: "LiveTV", ContentType: "livetv", ScanMode: "manual",
 		CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("seed library: %v", err)
 	}
 	// Seed a channel the XMLTV fixtures will match against by tvg-id.
-	if err := repos.Channels.Create(ctx, &db.Channel{
+	if err := repos.Channels.Create(ctx, &iptvmodel.Channel{
 		ID: "ch-la1", LibraryID: libID, Name: "La 1 HD", Number: 1,
 		StreamURL: "http://example/la1.m3u8", TvgID: "la1",
 		IsActive: true, AddedAt: now,
 	}); err != nil {
 		t.Fatalf("seed channel la1: %v", err)
 	}
-	if err := repos.Channels.Create(ctx, &db.Channel{
+	if err := repos.Channels.Create(ctx, &iptvmodel.Channel{
 		ID: "ch-a3", LibraryID: libID, Name: "Antena 3", Number: 2,
 		StreamURL: "http://example/a3.m3u8", TvgID: "a3",
 		IsActive: true, AddedAt: now,
@@ -358,13 +360,13 @@ func TestRefreshEPG_LegacyEPGURLFallback(t *testing.T) {
 	libID := "lib-legacy"
 	// Insert directly with epg_url populated, bypassing the multi-source
 	// path to reproduce a pre-upgrade library exactly.
-	if err := repos.Libraries.Create(ctx, &db.Library{
+	if err := repos.Libraries.Create(ctx, &librarymodel.Library{
 		ID: libID, Name: "L", ContentType: "livetv", ScanMode: "manual",
 		EPGURL: srv.URL, CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	_ = repos.Channels.Create(ctx, &db.Channel{
+	_ = repos.Channels.Create(ctx, &iptvmodel.Channel{
 		ID: "ch-la1", LibraryID: libID, Name: "La 1", Number: 1,
 		StreamURL: "http://x", TvgID: "la1", IsActive: true, AddedAt: now,
 	})

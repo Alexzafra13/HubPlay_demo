@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db"
 	"hubplay/internal/testutil"
 )
@@ -24,18 +25,18 @@ func TestCollectionRepository_EnsureAndList(t *testing.T) {
 		if err := itemRepo.Create(context.Background(), newTestItem(id, "lib-1", id)); err != nil {
 			t.Fatal(err)
 		}
-		if err := metaRepo.Upsert(context.Background(), &db.Metadata{ItemID: id}); err != nil {
+		if err := metaRepo.Upsert(context.Background(), &librarymodel.Metadata{ItemID: id}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if err := itemRepo.Create(context.Background(), newTestItem("item-toystory", "lib-1", "ts")); err != nil {
 		t.Fatal(err)
 	}
-	if err := metaRepo.Upsert(context.Background(), &db.Metadata{ItemID: "item-toystory"}); err != nil {
+	if err := metaRepo.Upsert(context.Background(), &librarymodel.Metadata{ItemID: "item-toystory"}); err != nil {
 		t.Fatal(err)
 	}
 
-	xmenID, err := colRepo.EnsureCollection(context.Background(), 748, "X-Men Collection",
+	xmenID, err := colRepo.EnsureCollection(context.Background(), 748, "X-Men librarymodel.Collection",
 		"Mutants band together.", "https://image.tmdb.org/p.png", "https://image.tmdb.org/b.png")
 	if err != nil {
 		t.Fatalf("ensure xmen: %v", err)
@@ -52,7 +53,7 @@ func TestCollectionRepository_EnsureAndList(t *testing.T) {
 		}
 	}
 
-	tsID, err := colRepo.EnsureCollection(context.Background(), 10194, "Toy Story Collection", "", "", "")
+	tsID, err := colRepo.EnsureCollection(context.Background(), 10194, "Toy Story librarymodel.Collection", "", "", "")
 	if err != nil {
 		t.Fatalf("ensure ts: %v", err)
 	}
@@ -74,7 +75,7 @@ func TestCollectionRepository_EnsureAndList(t *testing.T) {
 	// keeps the existing row but refreshes overview / artwork (the
 	// CASE clauses on the upsert preserve non-empty values rather
 	// than overwriting with empty strings).
-	repeated, err := colRepo.EnsureCollection(context.Background(), 748, "X-Men Collection",
+	repeated, err := colRepo.EnsureCollection(context.Background(), 748, "X-Men librarymodel.Collection",
 		"Updated overview.", "https://image.tmdb.org/p2.png", "https://image.tmdb.org/b2.png")
 	if err != nil {
 		t.Fatalf("re-ensure: %v", err)
@@ -101,10 +102,10 @@ func TestCollectionRepository_EnsureAndList(t *testing.T) {
 	if len(list) != 2 {
 		t.Fatalf("expected 2 collections, got %d", len(list))
 	}
-	if list[0].Name != "X-Men Collection" || list[0].ItemCount != 3 {
+	if list[0].Name != "X-Men librarymodel.Collection" || list[0].ItemCount != 3 {
 		t.Errorf("expected X-Men first with 3 items, got %+v", list[0])
 	}
-	if list[1].Name != "Toy Story Collection" || list[1].ItemCount != 1 {
+	if list[1].Name != "Toy Story librarymodel.Collection" || list[1].ItemCount != 1 {
 		t.Errorf("expected Toy Story second with 1 item, got %+v", list[1])
 	}
 

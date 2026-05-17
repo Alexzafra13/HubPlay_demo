@@ -14,6 +14,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	iptvmodel "hubplay/internal/iptv/model"
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/auth"
 	"hubplay/internal/db"
 	"hubplay/internal/iptv"
@@ -25,12 +27,12 @@ import (
 type iptvFakeService struct {
 	mu sync.Mutex
 
-	channels     map[string][]*db.Channel      // by libraryID
-	channelByID  map[string]*db.Channel        // by channelID
+	channels     map[string][]*iptvmodel.Channel      // by libraryID
+	channelByID  map[string]*iptvmodel.Channel        // by channelID
 	groups       map[string][]string           // by libraryID
-	nowPlayingFn func(ctx context.Context, channelID string) (*db.EPGProgram, error)
-	scheduleFn   func(ctx context.Context, channelID string, from, to time.Time) ([]*db.EPGProgram, error)
-	bulkFn       func(ctx context.Context, ids []string, from, to time.Time) (map[string][]*db.EPGProgram, error)
+	nowPlayingFn func(ctx context.Context, channelID string) (*iptvmodel.EPGProgram, error)
+	scheduleFn   func(ctx context.Context, channelID string, from, to time.Time) ([]*iptvmodel.EPGProgram, error)
+	bulkFn       func(ctx context.Context, ids []string, from, to time.Time) (map[string][]*iptvmodel.EPGProgram, error)
 
 	refreshM3UCount int
 	refreshEPGCount int
@@ -56,13 +58,13 @@ type iptvFakeService struct {
 	favoritesByUser map[string]map[string]struct{}
 
 	// EPG source fixtures, keyed by libraryID.
-	epgSources map[string][]*db.LibraryEPGSource
+	epgSources map[string][]*iptvmodel.LibraryEPGSource
 	epgCatalog []iptv.PublicEPGSource
 
 	// Channel health fixtures, keyed by libraryID. Tests append Channel
 	// pointers with the health fields set; ListUnhealthyChannels filters
 	// on consecutive_failures >= threshold.
-	unhealthyByLibrary map[string][]*db.Channel
+	unhealthyByLibrary map[string][]*iptvmodel.Channel
 	resetHealthCalls   []string
 	setActiveCalls     []struct {
 		ID     string
@@ -70,14 +72,14 @@ type iptvFakeService struct {
 	}
 
 	// Channels-without-EPG fixtures + edit capture.
-	withoutEPGByLibrary map[string][]*db.Channel
+	withoutEPGByLibrary map[string][]*iptvmodel.Channel
 	tvgIDEdits          []struct {
 		ChannelID string
 		TvgID     string
 	}
 
 	// Watch-history fixtures + capture.
-	watchedByUser    map[string][]*db.Channel
+	watchedByUser    map[string][]*iptvmodel.Channel
 	recordWatchCalls []struct {
 		UserID    string
 		ChannelID string
@@ -93,16 +95,16 @@ type iptvFakeService struct {
 
 func newIPTVFakeService() *iptvFakeService {
 	return &iptvFakeService{
-		channels:    map[string][]*db.Channel{},
-		channelByID: map[string]*db.Channel{},
+		channels:    map[string][]*iptvmodel.Channel{},
+		channelByID: map[string]*iptvmodel.Channel{},
 		groups:      map[string][]string{},
 	}
 }
 
-func (s *iptvFakeService) GetChannels(_ context.Context, libraryID string, activeOnly bool) ([]*db.Channel, error) {
+func (s *iptvFakeService) GetChannels(_ context.Context, libraryID string, activeOnly bool) ([]*iptvmodel.Channel, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := []*db.Channel{}
+	out := []*iptvmodel.Channel{}
 	for _, ch := range s.channels[libraryID] {
 		if activeOnly && !ch.IsActive {
 			continue
@@ -112,7 +114,7 @@ func (s *iptvFakeService) GetChannels(_ context.Context, libraryID string, activ
 	return out, nil
 }
 
-func (s *iptvFakeService) GetChannel(_ context.Context, id string) (*db.Channel, error) {
+func (s *iptvFakeService) GetChannel(_ context.Context, id string) (*iptvmodel.Channel, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if ch, ok := s.channelByID[id]; ok {
@@ -125,21 +127,21 @@ func (s *iptvFakeService) GetGroups(_ context.Context, libraryID string) ([]stri
 	return s.groups[libraryID], nil
 }
 
-func (s *iptvFakeService) GetSchedule(ctx context.Context, channelID string, from, to time.Time) ([]*db.EPGProgram, error) {
+func (s *iptvFakeService) GetSchedule(ctx context.Context, channelID string, from, to time.Time) ([]*iptvmodel.EPGProgram, error) {
 	if s.scheduleFn != nil {
 		return s.scheduleFn(ctx, channelID, from, to)
 	}
 	return nil, nil
 }
 
-func (s *iptvFakeService) GetBulkSchedule(ctx context.Context, ids []string, from, to time.Time) (map[string][]*db.EPGProgram, error) {
+func (s *iptvFakeService) GetBulkSchedule(ctx context.Context, ids []string, from, to time.Time) (map[string][]*iptvmodel.EPGProgram, error) {
 	if s.bulkFn != nil {
 		return s.bulkFn(ctx, ids, from, to)
 	}
-	return map[string][]*db.EPGProgram{}, nil
+	return map[string][]*iptvmodel.EPGProgram{}, nil
 }
 
-func (s *iptvFakeService) NowPlaying(ctx context.Context, channelID string) (*db.EPGProgram, error) {
+func (s *iptvFakeService) NowPlaying(ctx context.Context, channelID string) (*iptvmodel.EPGProgram, error) {
 	if s.nowPlayingFn != nil {
 		return s.nowPlayingFn(ctx, channelID)
 	}
@@ -262,10 +264,10 @@ func (s *iptvFakeService) ListFavoriteIDs(_ context.Context, userID string) ([]s
 	return out, nil
 }
 
-func (s *iptvFakeService) ListFavoriteChannels(_ context.Context, userID string) ([]*db.Channel, error) {
+func (s *iptvFakeService) ListFavoriteChannels(_ context.Context, userID string) ([]*iptvmodel.Channel, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := []*db.Channel{}
+	out := []*iptvmodel.Channel{}
 	for id := range s.favoritesByUser[userID] {
 		if ch, ok := s.channelByID[id]; ok && ch.IsActive {
 			out = append(out, ch)
@@ -285,21 +287,21 @@ func (s *iptvFakeService) PublicEPGCatalog() []iptv.PublicEPGSource {
 	}
 }
 
-func (s *iptvFakeService) ListEPGSources(_ context.Context, libraryID string) ([]*db.LibraryEPGSource, error) {
+func (s *iptvFakeService) ListEPGSources(_ context.Context, libraryID string) ([]*iptvmodel.LibraryEPGSource, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]*db.LibraryEPGSource, 0, len(s.epgSources[libraryID]))
+	out := make([]*iptvmodel.LibraryEPGSource, 0, len(s.epgSources[libraryID]))
 	out = append(out, s.epgSources[libraryID]...)
 	return out, nil
 }
 
-func (s *iptvFakeService) AddEPGSource(_ context.Context, libraryID, catalogID, customURL string) (*db.LibraryEPGSource, error) {
+func (s *iptvFakeService) AddEPGSource(_ context.Context, libraryID, catalogID, customURL string) (*iptvmodel.LibraryEPGSource, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if catalogID == "" && customURL == "" {
 		return nil, errors.New("either catalog_id or url required")
 	}
-	src := &db.LibraryEPGSource{
+	src := &iptvmodel.LibraryEPGSource{
 		ID:        "src-" + fmt.Sprintf("%d", len(s.epgSources[libraryID])+1),
 		LibraryID: libraryID,
 		CatalogID: catalogID,
@@ -310,7 +312,7 @@ func (s *iptvFakeService) AddEPGSource(_ context.Context, libraryID, catalogID, 
 		src.URL = "http://catalog/" + catalogID + ".xml"
 	}
 	if s.epgSources == nil {
-		s.epgSources = map[string][]*db.LibraryEPGSource{}
+		s.epgSources = map[string][]*iptvmodel.LibraryEPGSource{}
 	}
 	// Mirror the repo's UNIQUE(library_id, url) so handler-level
 	// tests can exercise the 409 mapping without a real DB.
@@ -338,13 +340,13 @@ func (s *iptvFakeService) RemoveEPGSource(_ context.Context, libraryID, sourceID
 
 // ─── Channel health (fake) ──────────────────────────────────────────────────
 
-func (s *iptvFakeService) ListUnhealthyChannels(_ context.Context, libraryID string, threshold int) ([]*db.Channel, error) {
+func (s *iptvFakeService) ListUnhealthyChannels(_ context.Context, libraryID string, threshold int) ([]*iptvmodel.Channel, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if threshold <= 0 {
 		threshold = db.UnhealthyThreshold
 	}
-	out := []*db.Channel{}
+	out := []*iptvmodel.Channel{}
 	for _, ch := range s.unhealthyByLibrary[libraryID] {
 		if ch.ConsecutiveFailures >= threshold {
 			out = append(out, ch)
@@ -353,10 +355,10 @@ func (s *iptvFakeService) ListUnhealthyChannels(_ context.Context, libraryID str
 	return out, nil
 }
 
-func (s *iptvFakeService) ChannelHealthSummary(_ context.Context, libraryID string) (db.ChannelHealthSummary, error) {
+func (s *iptvFakeService) ChannelHealthSummary(_ context.Context, libraryID string) (iptvmodel.ChannelHealthSummary, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	sum := db.ChannelHealthSummary{}
+	sum := iptvmodel.ChannelHealthSummary{}
 	for _, ch := range s.channels[libraryID] {
 		if ch.IsActive {
 			sum.TotalChannels++
@@ -384,10 +386,10 @@ func (s *iptvFakeService) SetChannelActive(_ context.Context, id string, active 
 	return nil
 }
 
-func (s *iptvFakeService) ListChannelsWithoutEPG(_ context.Context, libraryID string) ([]*db.Channel, error) {
+func (s *iptvFakeService) ListChannelsWithoutEPG(_ context.Context, libraryID string) ([]*iptvmodel.Channel, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := []*db.Channel{}
+	out := []*iptvmodel.Channel{}
 	out = append(out, s.withoutEPGByLibrary[libraryID]...)
 	return out, nil
 }
@@ -438,7 +440,7 @@ func (s *iptvFakeService) RecordWatch(_ context.Context, userID, channelID strin
 		ChannelID string
 	}{userID, channelID})
 	if s.watchedByUser == nil {
-		s.watchedByUser = map[string][]*db.Channel{}
+		s.watchedByUser = map[string][]*iptvmodel.Channel{}
 	}
 	ch, ok := s.channelByID[channelID]
 	if !ok {
@@ -446,7 +448,7 @@ func (s *iptvFakeService) RecordWatch(_ context.Context, userID, channelID strin
 	}
 	// Put the freshly-watched channel at the head of the user's list.
 	existing := s.watchedByUser[userID]
-	filtered := make([]*db.Channel, 0, len(existing)+1)
+	filtered := make([]*iptvmodel.Channel, 0, len(existing)+1)
 	filtered = append(filtered, ch)
 	for _, c := range existing {
 		if c.ID != channelID {
@@ -458,11 +460,11 @@ func (s *iptvFakeService) RecordWatch(_ context.Context, userID, channelID strin
 	return ts, nil
 }
 
-func (s *iptvFakeService) ListContinueWatching(_ context.Context, userID string, limit int, accessible map[string]bool) ([]*db.Channel, []time.Time, error) {
+func (s *iptvFakeService) ListContinueWatching(_ context.Context, userID string, limit int, accessible map[string]bool) ([]*iptvmodel.Channel, []time.Time, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	entries := s.watchedByUser[userID]
-	var channels []*db.Channel
+	var channels []*iptvmodel.Channel
 	var watched []time.Time
 	for _, ch := range entries {
 		if accessible != nil && !accessible[ch.LibraryID] {
@@ -482,11 +484,11 @@ func (s *iptvFakeService) ListContinueWatching(_ context.Context, userID string,
 // service against a real DB, so the fake only needs to satisfy the
 // interface for tests that don't exercise these methods.
 
-func (s *iptvFakeService) GetChannelsForUser(ctx context.Context, libraryID, userID string, activeOnly bool) ([]*db.Channel, error) {
+func (s *iptvFakeService) GetChannelsForUser(ctx context.Context, libraryID, userID string, activeOnly bool) ([]*iptvmodel.Channel, error) {
 	return s.GetChannels(ctx, libraryID, activeOnly)
 }
 
-func (s *iptvFakeService) ListChannelOverrides(_ context.Context, userID string) ([]db.UserChannelOrderEntry, error) {
+func (s *iptvFakeService) ListChannelOverrides(_ context.Context, userID string) ([]iptvmodel.UserChannelOrderEntry, error) {
 	return nil, nil
 }
 
@@ -506,7 +508,7 @@ func (s *iptvFakeService) ResetChannelOrder(_ context.Context, userID string) er
 // per-user counterparts. Real coverage lives in the iptv service
 // tests against a real DB.
 
-func (s *iptvFakeService) GetChannelsForLibraryAdmin(ctx context.Context, libraryID string, includeHidden bool) ([]*db.Channel, []db.LibraryChannelOrderEntry, error) {
+func (s *iptvFakeService) GetChannelsForLibraryAdmin(ctx context.Context, libraryID string, includeHidden bool) ([]*iptvmodel.Channel, []iptvmodel.LibraryChannelOrderEntry, error) {
 	chans, err := s.GetChannels(ctx, libraryID, false)
 	if err != nil {
 		return nil, nil, err
@@ -514,7 +516,7 @@ func (s *iptvFakeService) GetChannelsForLibraryAdmin(ctx context.Context, librar
 	return chans, nil, nil
 }
 
-func (s *iptvFakeService) ListLibraryChannelOverrides(_ context.Context, _ string) ([]db.LibraryChannelOrderEntry, error) {
+func (s *iptvFakeService) ListLibraryChannelOverrides(_ context.Context, _ string) ([]iptvmodel.LibraryChannelOrderEntry, error) {
 	return nil, nil
 }
 
@@ -537,11 +539,11 @@ func (s *iptvFakeService) ReorderEPGSources(_ context.Context, libraryID string,
 	if len(orderedIDs) != len(list) {
 		return errors.New("mismatched id list")
 	}
-	byID := map[string]*db.LibraryEPGSource{}
+	byID := map[string]*iptvmodel.LibraryEPGSource{}
 	for _, src := range list {
 		byID[src.ID] = src
 	}
-	out := make([]*db.LibraryEPGSource, 0, len(orderedIDs))
+	out := make([]*iptvmodel.LibraryEPGSource, 0, len(orderedIDs))
 	for i, id := range orderedIDs {
 		src, ok := byID[id]
 		if !ok {
@@ -584,9 +586,9 @@ func (p *iptvFakeProxy) ProxyURL(_ context.Context, w http.ResponseWriter, chann
 // continue-watching filter).
 
 type iptvFakeLibraryRepo struct {
-	created       []*db.Library
+	created       []*librarymodel.Library
 	createErr     error
-	librariesByID map[string]*db.Library
+	librariesByID map[string]*librarymodel.Library
 	// userAccess: if nil the ListForUser fallback returns every
 	// library in librariesByID (admin behaviour). A populated map
 	// keys a userID to the set of library IDs they can see.
@@ -594,31 +596,31 @@ type iptvFakeLibraryRepo struct {
 	listErr    error
 }
 
-func (r *iptvFakeLibraryRepo) Create(_ context.Context, lib *db.Library) error {
+func (r *iptvFakeLibraryRepo) Create(_ context.Context, lib *librarymodel.Library) error {
 	if r.createErr != nil {
 		return r.createErr
 	}
 	r.created = append(r.created, lib)
 	if r.librariesByID == nil {
-		r.librariesByID = map[string]*db.Library{}
+		r.librariesByID = map[string]*librarymodel.Library{}
 	}
 	r.librariesByID[lib.ID] = lib
 	return nil
 }
 
-func (r *iptvFakeLibraryRepo) ListForUser(_ context.Context, userID string) ([]*db.Library, error) {
+func (r *iptvFakeLibraryRepo) ListForUser(_ context.Context, userID string) ([]*librarymodel.Library, error) {
 	if r.listErr != nil {
 		return nil, r.listErr
 	}
 	if r.userAccess == nil {
-		out := make([]*db.Library, 0, len(r.librariesByID))
+		out := make([]*librarymodel.Library, 0, len(r.librariesByID))
 		for _, lib := range r.librariesByID {
 			out = append(out, lib)
 		}
 		return out, nil
 	}
 	set := r.userAccess[userID]
-	out := make([]*db.Library, 0, len(set))
+	out := make([]*librarymodel.Library, 0, len(set))
 	for id := range set {
 		if lib, ok := r.librariesByID[id]; ok {
 			out = append(out, lib)
@@ -756,7 +758,7 @@ func TestIPTVHandler_ListChannels_Empty(t *testing.T) {
 
 func TestIPTVHandler_ListChannels_ActiveOnlyDefault(t *testing.T) {
 	env := newIPTVTestEnv(t)
-	env.svc.channels["lib-1"] = []*db.Channel{
+	env.svc.channels["lib-1"] = []*iptvmodel.Channel{
 		{ID: "c-1", LibraryID: "lib-1", Name: "Active", IsActive: true},
 		{ID: "c-2", LibraryID: "lib-1", Name: "Inactive", IsActive: false},
 	}
@@ -769,7 +771,7 @@ func TestIPTVHandler_ListChannels_ActiveOnlyDefault(t *testing.T) {
 
 func TestIPTVHandler_ListChannels_IncludeInactive(t *testing.T) {
 	env := newIPTVTestEnv(t)
-	env.svc.channels["lib-1"] = []*db.Channel{
+	env.svc.channels["lib-1"] = []*iptvmodel.Channel{
 		{ID: "c-1", LibraryID: "lib-1", IsActive: true},
 		{ID: "c-2", LibraryID: "lib-1", IsActive: false},
 	}
@@ -782,7 +784,7 @@ func TestIPTVHandler_ListChannels_IncludeInactive(t *testing.T) {
 
 func TestIPTVHandler_ListChannels_DerivesCategoryAndLogoFallback(t *testing.T) {
 	env := newIPTVTestEnv(t)
-	env.svc.channels["lib-1"] = []*db.Channel{
+	env.svc.channels["lib-1"] = []*iptvmodel.Channel{
 		{ID: "c-1", LibraryID: "lib-1", Name: "Real Madrid TV", GroupName: "Deportes HD", IsActive: true},
 	}
 	rr := env.do(http.MethodGet, "/api/v1/libraries/lib-1/channels", "")
@@ -819,9 +821,9 @@ func TestIPTVHandler_ListChannels_DerivesCategoryAndLogoFallback(t *testing.T) {
 
 func TestIPTVHandler_GetChannel_WithNowPlaying(t *testing.T) {
 	env := newIPTVTestEnv(t)
-	env.svc.channelByID["c-1"] = &db.Channel{ID: "c-1", Name: "Foo", IsActive: true}
-	env.svc.nowPlayingFn = func(_ context.Context, _ string) (*db.EPGProgram, error) {
-		return &db.EPGProgram{Title: "On Now", Category: "News"}, nil
+	env.svc.channelByID["c-1"] = &iptvmodel.Channel{ID: "c-1", Name: "Foo", IsActive: true}
+	env.svc.nowPlayingFn = func(_ context.Context, _ string) (*iptvmodel.EPGProgram, error) {
+		return &iptvmodel.EPGProgram{Title: "On Now", Category: "News"}, nil
 	}
 	rr := env.do(http.MethodGet, "/api/v1/channels/c-1", "")
 	if rr.Code != http.StatusOK {
@@ -862,7 +864,7 @@ func TestIPTVHandler_Groups_ReturnsList(t *testing.T) {
 
 func TestIPTVHandler_Stream_ProxiesWhenActive(t *testing.T) {
 	env := newIPTVTestEnv(t)
-	env.svc.channelByID["c-1"] = &db.Channel{ID: "c-1", IsActive: true, StreamURL: "http://live/x"}
+	env.svc.channelByID["c-1"] = &iptvmodel.Channel{ID: "c-1", IsActive: true, StreamURL: "http://live/x"}
 	var gotURL string
 	env.proxy.streamFn = func(w http.ResponseWriter, _, streamURL string) error {
 		gotURL = streamURL
@@ -883,7 +885,7 @@ func TestIPTVHandler_Stream_ProxiesWhenActive(t *testing.T) {
 
 func TestIPTVHandler_Stream_InactiveChannel_404(t *testing.T) {
 	env := newIPTVTestEnv(t)
-	env.svc.channelByID["c-1"] = &db.Channel{ID: "c-1", IsActive: false}
+	env.svc.channelByID["c-1"] = &iptvmodel.Channel{ID: "c-1", IsActive: false}
 	rr := env.do(http.MethodGet, "/api/v1/channels/c-1/stream", "")
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("status: got %d want 404", rr.Code)
@@ -894,7 +896,7 @@ func TestIPTVHandler_Stream_InactiveChannel_404(t *testing.T) {
 
 func TestIPTVHandler_ProxyURL_HappyPath(t *testing.T) {
 	env := newIPTVTestEnv(t)
-	env.svc.channelByID["c-1"] = &db.Channel{ID: "c-1", LibraryID: "lib-1", IsActive: true}
+	env.svc.channelByID["c-1"] = &iptvmodel.Channel{ID: "c-1", LibraryID: "lib-1", IsActive: true}
 	var gotURL string
 	env.proxy.urlFn = func(w http.ResponseWriter, _, url string) error {
 		gotURL = url
@@ -922,9 +924,9 @@ func TestIPTVHandler_ProxyURL_MissingURL_400(t *testing.T) {
 
 func TestIPTVHandler_Schedule_ShapesPrograms(t *testing.T) {
 	env := newIPTVTestEnv(t)
-	env.svc.channelByID["c-1"] = &db.Channel{ID: "c-1", LibraryID: "lib-1"}
-	env.svc.scheduleFn = func(_ context.Context, _ string, _, _ time.Time) ([]*db.EPGProgram, error) {
-		return []*db.EPGProgram{
+	env.svc.channelByID["c-1"] = &iptvmodel.Channel{ID: "c-1", LibraryID: "lib-1"}
+	env.svc.scheduleFn = func(_ context.Context, _ string, _, _ time.Time) ([]*iptvmodel.EPGProgram, error) {
+		return []*iptvmodel.EPGProgram{
 			{ID: "p-1", Title: "Show A", Category: "Drama"},
 			{ID: "p-2", Title: "Show B"},
 		}, nil
@@ -938,9 +940,9 @@ func TestIPTVHandler_Schedule_ShapesPrograms(t *testing.T) {
 
 func TestIPTVHandler_Schedule_ParsesTimeRangeHours(t *testing.T) {
 	env := newIPTVTestEnv(t)
-	env.svc.channelByID["c-1"] = &db.Channel{ID: "c-1", LibraryID: "lib-1"}
+	env.svc.channelByID["c-1"] = &iptvmodel.Channel{ID: "c-1", LibraryID: "lib-1"}
 	var gotFrom, gotTo time.Time
-	env.svc.scheduleFn = func(_ context.Context, _ string, from, to time.Time) ([]*db.EPGProgram, error) {
+	env.svc.scheduleFn = func(_ context.Context, _ string, from, to time.Time) ([]*iptvmodel.EPGProgram, error) {
 		gotFrom, gotTo = from, to
 		return nil, nil
 	}
@@ -957,12 +959,12 @@ func TestIPTVHandler_Schedule_ParsesTimeRangeHours(t *testing.T) {
 
 func TestIPTVHandler_BulkSchedule_HappyPath(t *testing.T) {
 	env := newIPTVTestEnv(t)
-	env.svc.channelByID["c-1"] = &db.Channel{ID: "c-1", LibraryID: "lib-1"}
-	env.svc.channelByID["c-2"] = &db.Channel{ID: "c-2", LibraryID: "lib-1"}
-	env.svc.bulkFn = func(_ context.Context, ids []string, _, _ time.Time) (map[string][]*db.EPGProgram, error) {
-		out := map[string][]*db.EPGProgram{}
+	env.svc.channelByID["c-1"] = &iptvmodel.Channel{ID: "c-1", LibraryID: "lib-1"}
+	env.svc.channelByID["c-2"] = &iptvmodel.Channel{ID: "c-2", LibraryID: "lib-1"}
+	env.svc.bulkFn = func(_ context.Context, ids []string, _, _ time.Time) (map[string][]*iptvmodel.EPGProgram, error) {
+		out := map[string][]*iptvmodel.EPGProgram{}
 		for _, id := range ids {
-			out[id] = []*db.EPGProgram{{ID: "p-" + id, Title: "T-" + id}}
+			out[id] = []*iptvmodel.EPGProgram{{ID: "p-" + id, Title: "T-" + id}}
 		}
 		return out, nil
 	}
@@ -983,12 +985,12 @@ func TestIPTVHandler_BulkSchedule_MissingChannels_400(t *testing.T) {
 
 func TestIPTVHandler_BulkSchedule_POST_HappyPath(t *testing.T) {
 	env := newIPTVTestEnv(t)
-	env.svc.channelByID["c-1"] = &db.Channel{ID: "c-1", LibraryID: "lib-1"}
-	env.svc.channelByID["c-2"] = &db.Channel{ID: "c-2", LibraryID: "lib-1"}
-	env.svc.bulkFn = func(_ context.Context, ids []string, _, _ time.Time) (map[string][]*db.EPGProgram, error) {
-		out := map[string][]*db.EPGProgram{}
+	env.svc.channelByID["c-1"] = &iptvmodel.Channel{ID: "c-1", LibraryID: "lib-1"}
+	env.svc.channelByID["c-2"] = &iptvmodel.Channel{ID: "c-2", LibraryID: "lib-1"}
+	env.svc.bulkFn = func(_ context.Context, ids []string, _, _ time.Time) (map[string][]*iptvmodel.EPGProgram, error) {
+		out := map[string][]*iptvmodel.EPGProgram{}
 		for _, id := range ids {
-			out[id] = []*db.EPGProgram{{ID: "p-" + id, Title: "T-" + id}}
+			out[id] = []*iptvmodel.EPGProgram{{ID: "p-" + id, Title: "T-" + id}}
 		}
 		return out, nil
 	}
@@ -1012,12 +1014,12 @@ func TestIPTVHandler_BulkSchedule_POST_LargeList(t *testing.T) {
 	for i := range ids {
 		id := fmt.Sprintf("c-%04d", i)
 		ids[i] = id
-		env.svc.channelByID[id] = &db.Channel{ID: id, LibraryID: "lib-1"}
+		env.svc.channelByID[id] = &iptvmodel.Channel{ID: id, LibraryID: "lib-1"}
 	}
 	var gotIDs []string
-	env.svc.bulkFn = func(_ context.Context, in []string, _, _ time.Time) (map[string][]*db.EPGProgram, error) {
+	env.svc.bulkFn = func(_ context.Context, in []string, _, _ time.Time) (map[string][]*iptvmodel.EPGProgram, error) {
 		gotIDs = in
-		return map[string][]*db.EPGProgram{}, nil
+		return map[string][]*iptvmodel.EPGProgram{}, nil
 	}
 
 	body, err := json.Marshal(map[string]any{"channels": ids})
@@ -1381,7 +1383,7 @@ func TestIPTVHandler_RemoveEPGSource_Works(t *testing.T) {
 
 func TestIPTVHandler_ListUnhealthy_FiltersByThreshold(t *testing.T) {
 	env := newIPTVTestEnv(t)
-	env.svc.unhealthyByLibrary = map[string][]*db.Channel{
+	env.svc.unhealthyByLibrary = map[string][]*iptvmodel.Channel{
 		"lib-1": {
 			{ID: "c-dead", LibraryID: "lib-1", Name: "Dead", ConsecutiveFailures: 5},
 			{ID: "c-flaky", LibraryID: "lib-1", Name: "Flaky", ConsecutiveFailures: 3},
@@ -1401,7 +1403,7 @@ func TestIPTVHandler_ListUnhealthy_FiltersByThreshold(t *testing.T) {
 
 func TestIPTVHandler_ListUnhealthy_CustomThreshold(t *testing.T) {
 	env := newIPTVTestEnv(t)
-	env.svc.unhealthyByLibrary = map[string][]*db.Channel{
+	env.svc.unhealthyByLibrary = map[string][]*iptvmodel.Channel{
 		"lib-1": {
 			{ID: "c-dead", LibraryID: "lib-1", Name: "Dead", ConsecutiveFailures: 5},
 			{ID: "c-flaky", LibraryID: "lib-1", Name: "Flaky", ConsecutiveFailures: 3},
@@ -1416,7 +1418,7 @@ func TestIPTVHandler_ListUnhealthy_CustomThreshold(t *testing.T) {
 
 func TestIPTVHandler_ResetChannelHealth_Works(t *testing.T) {
 	env := newIPTVTestEnv(t)
-	env.svc.channelByID["c-1"] = &db.Channel{ID: "c-1", LibraryID: "lib-1"}
+	env.svc.channelByID["c-1"] = &iptvmodel.Channel{ID: "c-1", LibraryID: "lib-1"}
 	rr := env.do(http.MethodPost, "/api/v1/channels/c-1/reset-health", "")
 	if rr.Code != http.StatusNoContent {
 		t.Fatalf("status: %d", rr.Code)
@@ -1428,7 +1430,7 @@ func TestIPTVHandler_ResetChannelHealth_Works(t *testing.T) {
 
 func TestIPTVHandler_DisableChannel_Works(t *testing.T) {
 	env := newIPTVTestEnv(t)
-	env.svc.channelByID["c-1"] = &db.Channel{ID: "c-1", LibraryID: "lib-1"}
+	env.svc.channelByID["c-1"] = &iptvmodel.Channel{ID: "c-1", LibraryID: "lib-1"}
 	rr := env.do(http.MethodPost, "/api/v1/channels/c-1/disable", "")
 	if rr.Code != http.StatusNoContent {
 		t.Fatalf("status: %d", rr.Code)
@@ -1442,7 +1444,7 @@ func TestIPTVHandler_DisableChannel_Works(t *testing.T) {
 
 func TestIPTVHandler_EnableChannel_Works(t *testing.T) {
 	env := newIPTVTestEnv(t)
-	env.svc.channelByID["c-1"] = &db.Channel{ID: "c-1", LibraryID: "lib-1"}
+	env.svc.channelByID["c-1"] = &iptvmodel.Channel{ID: "c-1", LibraryID: "lib-1"}
 	rr := env.do(http.MethodPost, "/api/v1/channels/c-1/enable", "")
 	if rr.Code != http.StatusNoContent {
 		t.Fatalf("status: %d", rr.Code)
@@ -1455,7 +1457,7 @@ func TestIPTVHandler_EnableChannel_Works(t *testing.T) {
 
 func TestIPTVHandler_ResetChannelHealth_InaccessibleLibrary_404(t *testing.T) {
 	env := newIPTVTestEnv(t)
-	env.svc.channelByID["c-secret"] = &db.Channel{ID: "c-secret", LibraryID: "lib-restricted"}
+	env.svc.channelByID["c-secret"] = &iptvmodel.Channel{ID: "c-secret", LibraryID: "lib-restricted"}
 	env.access.accessFn = func(_, libraryID string) (bool, error) { return libraryID == "lib-ok", nil }
 	rr := env.doAs(http.MethodPost, "/api/v1/channels/c-secret/reset-health", "", iptvUserClaims())
 	if rr.Code != http.StatusNotFound {
@@ -1467,7 +1469,7 @@ func TestIPTVHandler_ResetChannelHealth_InaccessibleLibrary_404(t *testing.T) {
 
 func TestIPTVHandler_ListChannelsWithoutEPG(t *testing.T) {
 	env := newIPTVTestEnv(t)
-	env.svc.withoutEPGByLibrary = map[string][]*db.Channel{
+	env.svc.withoutEPGByLibrary = map[string][]*iptvmodel.Channel{
 		"lib-1": {
 			{ID: "c-orphan-1", LibraryID: "lib-1", Name: "Orphan 1", TvgID: ""},
 			{ID: "c-orphan-2", LibraryID: "lib-1", Name: "Orphan 2", TvgID: "wrong.id"},
@@ -1485,7 +1487,7 @@ func TestIPTVHandler_ListChannelsWithoutEPG(t *testing.T) {
 
 func TestIPTVHandler_PatchChannel_SetsTvgID(t *testing.T) {
 	env := newIPTVTestEnv(t)
-	env.svc.channelByID["c-1"] = &db.Channel{
+	env.svc.channelByID["c-1"] = &iptvmodel.Channel{
 		ID: "c-1", LibraryID: "lib-1", Name: "La 1", TvgID: "",
 	}
 	rr := env.do(http.MethodPatch, "/api/v1/channels/c-1", `{"tvg_id":"La1.ES"}`)
@@ -1503,7 +1505,7 @@ func TestIPTVHandler_PatchChannel_SetsTvgID(t *testing.T) {
 
 func TestIPTVHandler_PatchChannel_EmptyTvgID_Clears(t *testing.T) {
 	env := newIPTVTestEnv(t)
-	env.svc.channelByID["c-1"] = &db.Channel{
+	env.svc.channelByID["c-1"] = &iptvmodel.Channel{
 		ID: "c-1", LibraryID: "lib-1", Name: "La 1", TvgID: "old.id",
 	}
 	rr := env.do(http.MethodPatch, "/api/v1/channels/c-1", `{"tvg_id":""}`)
@@ -1517,7 +1519,7 @@ func TestIPTVHandler_PatchChannel_EmptyTvgID_Clears(t *testing.T) {
 
 func TestIPTVHandler_PatchChannel_OmittedTvgID_NoOp(t *testing.T) {
 	env := newIPTVTestEnv(t)
-	env.svc.channelByID["c-1"] = &db.Channel{ID: "c-1", LibraryID: "lib-1"}
+	env.svc.channelByID["c-1"] = &iptvmodel.Channel{ID: "c-1", LibraryID: "lib-1"}
 	rr := env.do(http.MethodPatch, "/api/v1/channels/c-1", `{}`)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status: %d", rr.Code)
@@ -1529,7 +1531,7 @@ func TestIPTVHandler_PatchChannel_OmittedTvgID_NoOp(t *testing.T) {
 
 func TestIPTVHandler_PatchChannel_InvalidBody_400(t *testing.T) {
 	env := newIPTVTestEnv(t)
-	env.svc.channelByID["c-1"] = &db.Channel{ID: "c-1", LibraryID: "lib-1"}
+	env.svc.channelByID["c-1"] = &iptvmodel.Channel{ID: "c-1", LibraryID: "lib-1"}
 	rr := env.do(http.MethodPatch, "/api/v1/channels/c-1", `{bad`)
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("status: %d", rr.Code)
@@ -1538,7 +1540,7 @@ func TestIPTVHandler_PatchChannel_InvalidBody_400(t *testing.T) {
 
 func TestIPTVHandler_PatchChannel_ACLDeny_404(t *testing.T) {
 	env := newIPTVTestEnv(t)
-	env.svc.channelByID["c-secret"] = &db.Channel{ID: "c-secret", LibraryID: "lib-restricted"}
+	env.svc.channelByID["c-secret"] = &iptvmodel.Channel{ID: "c-secret", LibraryID: "lib-restricted"}
 	env.access.accessFn = func(_, libraryID string) (bool, error) { return libraryID == "lib-ok", nil }
 	rr := env.doAs(http.MethodPatch, "/api/v1/channels/c-secret",
 		`{"tvg_id":"X"}`, iptvUserClaims())
@@ -1549,7 +1551,7 @@ func TestIPTVHandler_PatchChannel_ACLDeny_404(t *testing.T) {
 
 func TestIPTVHandler_PatchChannel_TrimsSpaces(t *testing.T) {
 	env := newIPTVTestEnv(t)
-	env.svc.channelByID["c-1"] = &db.Channel{ID: "c-1", LibraryID: "lib-1"}
+	env.svc.channelByID["c-1"] = &iptvmodel.Channel{ID: "c-1", LibraryID: "lib-1"}
 	rr := env.do(http.MethodPatch, "/api/v1/channels/c-1", `{"tvg_id":"  La1.ES  "}`)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status: %d", rr.Code)

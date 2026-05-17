@@ -8,21 +8,10 @@ import (
 	"regexp"
 	"time"
 
+	iptvmodel "hubplay/internal/iptv/model"
 	"hubplay/internal/db/sqlc"
 	"hubplay/internal/db/sqlc_pg"
 )
-
-// EPGProgram represents a TV program in the electronic program guide.
-type EPGProgram struct {
-	ID          string
-	ChannelID   string
-	Title       string
-	Description string
-	Category    string
-	IconURL     string
-	StartTime   time.Time
-	EndTime     time.Time
-}
 
 // EPGProgramRepository — dual-dialect (Pattern A + Pattern B). The
 // sqlc surface (Insert/Delete inside ReplaceForChannel, CleanupOld)
@@ -67,7 +56,7 @@ func (r *EPGProgramRepository) driver() string {
 // default Scan path cannot parse back into a time.Time. UTC round-trips
 // cleanly. XMLTV feeds always carry a zone offset (davidmuma, iptv-org,
 // epg.pw) so the raw time from ParseXMLTV would otherwise trip this.
-func (r *EPGProgramRepository) ReplaceForChannel(ctx context.Context, channelID string, programs []*EPGProgram) error {
+func (r *EPGProgramRepository) ReplaceForChannel(ctx context.Context, channelID string, programs []*iptvmodel.EPGProgram) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
@@ -123,7 +112,7 @@ func (r *EPGProgramRepository) ReplaceForChannel(ctx context.Context, channelID 
 //
 // Reads via raw SQL (not sqlc) so the coerce helper can rescue rows
 // persisted by older builds in the Go-stringer time format.
-func (r *EPGProgramRepository) NowPlaying(ctx context.Context, channelID string) (*EPGProgram, error) {
+func (r *EPGProgramRepository) NowPlaying(ctx context.Context, channelID string) (*iptvmodel.EPGProgram, error) {
 	now := time.Now().UTC()
 	query := rewritePlaceholders(r.driver(),
 		`SELECT id, channel_id, title, COALESCE(description,''), COALESCE(category,''),
@@ -133,7 +122,7 @@ func (r *EPGProgramRepository) NowPlaying(ctx context.Context, channelID string)
 		 LIMIT 1`)
 	row := r.db.QueryRowContext(ctx, query, channelID, now, now)
 
-	p := &EPGProgram{}
+	p := &iptvmodel.EPGProgram{}
 	var startRaw, endRaw any
 	if err := row.Scan(&p.ID, &p.ChannelID, &p.Title, &p.Description, &p.Category,
 		&p.IconURL, &startRaw, &endRaw); err != nil {
@@ -157,7 +146,7 @@ func (r *EPGProgramRepository) NowPlaying(ctx context.Context, channelID string)
 // Reads via raw SQL (not sqlc) for the same reason as NowPlaying: the
 // coerce helper transparently handles legacy rows whose time column
 // was persisted in the Go-stringer format.
-func (r *EPGProgramRepository) Schedule(ctx context.Context, channelID string, from, to time.Time) ([]*EPGProgram, error) {
+func (r *EPGProgramRepository) Schedule(ctx context.Context, channelID string, from, to time.Time) ([]*iptvmodel.EPGProgram, error) {
 	query := rewritePlaceholders(r.driver(),
 		`SELECT id, channel_id, title, COALESCE(description,''), COALESCE(category,''),
 		        COALESCE(icon_url,''), start_time, end_time
@@ -170,9 +159,9 @@ func (r *EPGProgramRepository) Schedule(ctx context.Context, channelID string, f
 	}
 	defer rows.Close() //nolint:errcheck
 
-	var result []*EPGProgram
+	var result []*iptvmodel.EPGProgram
 	for rows.Next() {
-		p := &EPGProgram{}
+		p := &iptvmodel.EPGProgram{}
 		var startRaw, endRaw any
 		if err := rows.Scan(&p.ID, &p.ChannelID, &p.Title, &p.Description, &p.Category,
 			&p.IconURL, &startRaw, &endRaw); err != nil {
@@ -204,8 +193,8 @@ const bulkScheduleChunkSize = 500
 //
 // Large channel lists are chunked internally so callers don't have to
 // care about the SQLite variable limit.
-func (r *EPGProgramRepository) BulkSchedule(ctx context.Context, channelIDs []string, from, to time.Time) (map[string][]*EPGProgram, error) {
-	result := make(map[string][]*EPGProgram)
+func (r *EPGProgramRepository) BulkSchedule(ctx context.Context, channelIDs []string, from, to time.Time) (map[string][]*iptvmodel.EPGProgram, error) {
+	result := make(map[string][]*iptvmodel.EPGProgram)
 	if len(channelIDs) == 0 {
 		return result, nil
 	}
@@ -230,7 +219,7 @@ func (r *EPGProgramRepository) bulkScheduleChunk(
 	ctx context.Context,
 	channelIDs []string,
 	from, to time.Time,
-	result map[string][]*EPGProgram,
+	result map[string][]*iptvmodel.EPGProgram,
 ) error {
 	placeholders := "?"
 	args := []any{from.UTC(), to.UTC()}
@@ -254,7 +243,7 @@ func (r *EPGProgramRepository) bulkScheduleChunk(
 	defer rows.Close() //nolint:errcheck
 
 	for rows.Next() {
-		p := &EPGProgram{}
+		p := &iptvmodel.EPGProgram{}
 		// start_time / end_time are scanned as `any` because rows from an
 		// older build may still be persisted in the Go-stringer format
 		// that modernc.org/sqlite can't deserialise directly. The coerce

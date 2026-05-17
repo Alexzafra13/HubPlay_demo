@@ -1,24 +1,13 @@
 package db
 
 import (
+	iptvmodel "hubplay/internal/iptv/model"
 	"context"
 	"database/sql"
 	"fmt"
 	"strings"
 	"time"
 )
-
-// LibraryChannelOrderEntry is one admin override row for a single
-// channel within a library. The admin curation panel renders these
-// alongside the channel list so the operator can see which channels
-// they've moved or hidden vs. which still match the M3U import.
-type LibraryChannelOrderEntry struct {
-	LibraryID string
-	ChannelID string
-	Position  int
-	Hidden    bool
-	UpdatedAt time.Time
-}
 
 // LibraryChannelOrderRepository wraps the `library_channel_order`
 // table dual-dialect. Pattern B (raw SQL with RewritePlaceholders)
@@ -93,7 +82,7 @@ func (r *LibraryChannelOrderRepository) Reset(ctx context.Context, libraryID str
 // chosen position. Used by the curation panel to render which
 // channels the admin has touched and which still inherit the M3U
 // number.
-func (r *LibraryChannelOrderRepository) List(ctx context.Context, libraryID string) ([]LibraryChannelOrderEntry, error) {
+func (r *LibraryChannelOrderRepository) List(ctx context.Context, libraryID string) ([]iptvmodel.LibraryChannelOrderEntry, error) {
 	query := RewritePlaceholders(r.driver, `
 		SELECT library_id, channel_id, position, hidden, updated_at
 		FROM library_channel_order
@@ -104,9 +93,9 @@ func (r *LibraryChannelOrderRepository) List(ctx context.Context, libraryID stri
 		return nil, fmt.Errorf("list library_channel_order: %w", err)
 	}
 	defer rows.Close() //nolint:errcheck
-	out := []LibraryChannelOrderEntry{}
+	out := []iptvmodel.LibraryChannelOrderEntry{}
 	for rows.Next() {
-		var e LibraryChannelOrderEntry
+		var e iptvmodel.LibraryChannelOrderEntry
 		if IsPostgres(r.driver) {
 			if err := rows.Scan(&e.LibraryID, &e.ChannelID, &e.Position, &e.Hidden, &e.UpdatedAt); err != nil {
 				return nil, fmt.Errorf("scan library_channel_order: %w", err)
@@ -125,7 +114,7 @@ func (r *LibraryChannelOrderRepository) List(ctx context.Context, libraryID stri
 
 // ReplaceAll wipes every override for a library and re-installs the
 // provided ordering atomically.
-func (r *LibraryChannelOrderRepository) ReplaceAll(ctx context.Context, libraryID string, entries []LibraryChannelOrderEntry) error {
+func (r *LibraryChannelOrderRepository) ReplaceAll(ctx context.Context, libraryID string, entries []iptvmodel.LibraryChannelOrderEntry) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)

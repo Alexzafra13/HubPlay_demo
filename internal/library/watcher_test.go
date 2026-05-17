@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db"
 	"hubplay/internal/event"
 	"hubplay/internal/library"
@@ -93,7 +94,7 @@ func newTestServiceWithRoot(t *testing.T, root string) (*library.Service, string
 	t.Cleanup(svc.Shutdown)
 
 	now := time.Now()
-	if err := repos.Libraries.Create(context.Background(), &db.Library{
+	if err := repos.Libraries.Create(context.Background(), &librarymodel.Library{
 		ID: "lib-watch", Name: "Watch", ContentType: "movies",
 		ScanMode: "auto", ScanInterval: "6h",
 		CreatedAt: now, UpdatedAt: now, Paths: []string{root},

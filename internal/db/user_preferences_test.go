@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	authmodel "hubplay/internal/auth/model"
 	"hubplay/internal/db"
 	"hubplay/internal/testutil"
 )
@@ -15,7 +16,7 @@ func setupPreferencesTest(t *testing.T) (*db.Repositories, string) {
 	repos := db.NewRepositories(testutil.Driver(), database)
 	ctx := context.Background()
 
-	user := &db.User{
+	user := &authmodel.User{
 		ID:           "user-prefs",
 		Username:     "prefs",
 		PasswordHash: "x",
@@ -63,7 +64,7 @@ func TestUserPreferences_ListByUserIsolatesUsers(t *testing.T) {
 	repos, uid := setupPreferencesTest(t)
 	ctx := context.Background()
 
-	other := &db.User{
+	other := &authmodel.User{
 		ID:           "user-other",
 		Username:     "other",
 		PasswordHash: "x",

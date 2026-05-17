@@ -34,8 +34,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/clock"
-	"hubplay/internal/db"
 	"hubplay/internal/federation"
 	federationstorage "hubplay/internal/federation/storage"
 	"hubplay/internal/stream"
@@ -124,7 +124,7 @@ func newFedTestEnv(t *testing.T) *fedTestEnv {
 
 	// Items repo stub backed by a one-row map -- the handler only
 	// reads .ID + .LibraryID.
-	items := &streamFakeItemRepo{byID: map[string]*db.Item{
+	items := &streamFakeItemRepo{byID: map[string]*librarymodel.Item{
 		itemID: {ID: itemID, LibraryID: libraryID, Type: "movie", Title: "Test Movie"},
 	}}
 
@@ -141,7 +141,7 @@ func newFedTestEnv(t *testing.T) *fedTestEnv {
 	// Router mounting the handler under the same RequirePeerJWT
 	// middleware production uses. Skipping the rate-limit + audit
 	// middlewares -- they have their own dedicated tests.
-	mediaStreams := &fakeMediaStreamRepoForFedTest{byItem: map[string][]*db.MediaStream{}}
+	mediaStreams := &fakeMediaStreamRepoForFedTest{byItem: map[string][]*librarymodel.MediaStream{}}
 	fedHandler := NewFederationStreamHandler(mgr, streams, items, mediaStreams, testutil.NopLogger())
 
 	imageDir := t.TempDir()
@@ -277,26 +277,26 @@ type fakeImageRepoForFedTest struct {
 	primaryByItem map[string]string // item_id -> image_id (empty = no poster → 404)
 }
 
-func (r *fakeImageRepoForFedTest) GetPrimaryURLs(_ context.Context, ids []string) (map[string]map[string]db.PrimaryImageRef, error) {
-	out := make(map[string]map[string]db.PrimaryImageRef, len(ids))
+func (r *fakeImageRepoForFedTest) GetPrimaryURLs(_ context.Context, ids []string) (map[string]map[string]librarymodel.PrimaryImageRef, error) {
+	out := make(map[string]map[string]librarymodel.PrimaryImageRef, len(ids))
 	for _, id := range ids {
 		fn, ok := r.primaryByItem[id]
 		if !ok {
 			continue
 		}
-		out[id] = map[string]db.PrimaryImageRef{
+		out[id] = map[string]librarymodel.PrimaryImageRef{
 			"primary": {Path: "/api/v1/images/file/" + fn},
 		}
 	}
 	return out, nil
 }
-func (r *fakeImageRepoForFedTest) ListByItem(context.Context, string) ([]*db.Image, error) {
+func (r *fakeImageRepoForFedTest) ListByItem(context.Context, string) ([]*librarymodel.Image, error) {
 	return nil, nil
 }
-func (r *fakeImageRepoForFedTest) Create(context.Context, *db.Image) error                  { return nil }
+func (r *fakeImageRepoForFedTest) Create(context.Context, *librarymodel.Image) error                  { return nil }
 func (r *fakeImageRepoForFedTest) SetPrimary(context.Context, string, string, string) error { return nil }
 func (r *fakeImageRepoForFedTest) SetLocked(context.Context, string, bool) error            { return nil }
-func (r *fakeImageRepoForFedTest) GetByID(context.Context, string) (*db.Image, error) {
+func (r *fakeImageRepoForFedTest) GetByID(context.Context, string) (*librarymodel.Image, error) {
 	return nil, nil
 }
 func (r *fakeImageRepoForFedTest) DeleteByID(context.Context, string) error { return nil }
@@ -329,10 +329,10 @@ var _ ImageRepository = (*fakeImageRepoForFedTest)(nil)
 // subtitle handler is the only consumer in these tests, so we don't
 // need to model anything else.
 type fakeMediaStreamRepoForFedTest struct {
-	byItem map[string][]*db.MediaStream
+	byItem map[string][]*librarymodel.MediaStream
 }
 
-func (r *fakeMediaStreamRepoForFedTest) ListByItem(_ context.Context, itemID string) ([]*db.MediaStream, error) {
+func (r *fakeMediaStreamRepoForFedTest) ListByItem(_ context.Context, itemID string) ([]*librarymodel.MediaStream, error) {
 	return r.byItem[itemID], nil
 }
 
@@ -384,7 +384,7 @@ func TestFederationStream_Subtitles_ReturnsOnlySubtitleStreams(t *testing.T) {
 	// Mixed media-stream rows: video, audio, two subtitle tracks.
 	// The handler must return only the subtitle ones, in the same
 	// shape as the local /stream/{itemId}/subtitles handler.
-	env.mediaStreams.byItem[env.itemID] = []*db.MediaStream{
+	env.mediaStreams.byItem[env.itemID] = []*librarymodel.MediaStream{
 		{StreamType: "video", StreamIndex: 0, Codec: "h264"},
 		{StreamType: "audio", StreamIndex: 1, Codec: "ac3", Language: "eng"},
 		{StreamType: "subtitle", StreamIndex: 2, Codec: "subrip", Language: "eng", Title: "English", IsDefault: true},
@@ -491,7 +491,7 @@ func TestFederationStream_Subtitles_NoMatchingTracks_ReturnsEmpty(t *testing.T) 
 	// Only audio + video, no subs. Handler must respond 200 with
 	// an empty data array (NOT 404 -- the item exists, it just has
 	// no embedded subs).
-	env.mediaStreams.byItem[env.itemID] = []*db.MediaStream{
+	env.mediaStreams.byItem[env.itemID] = []*librarymodel.MediaStream{
 		{StreamType: "video", StreamIndex: 0, Codec: "h264"},
 		{StreamType: "audio", StreamIndex: 1, Codec: "aac"},
 	}

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db"
 	"hubplay/internal/federation"
 	"hubplay/internal/federation/storage"
@@ -29,7 +30,7 @@ func TestFederationRepository_SearchSharedItems(t *testing.T) {
 
 	// â”€â”€ Schema seed â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 	now := time.Now().UTC()
-	for _, l := range []db.Library{
+	for _, l := range []librarymodel.Library{
 		{ID: "lib-shared", Name: "Shared", ContentType: "movies", ScanMode: "auto", ScanInterval: "6h", CreatedAt: now, UpdatedAt: now, Paths: []string{"/m1"}},
 		{ID: "lib-private", Name: "Private", ContentType: "movies", ScanMode: "auto", ScanInterval: "6h", CreatedAt: now, UpdatedAt: now, Paths: []string{"/m2"}},
 	} {
@@ -38,7 +39,7 @@ func TestFederationRepository_SearchSharedItems(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, it := range []db.Item{
+	for _, it := range []librarymodel.Item{
 		{ID: "i-shared-match", LibraryID: "lib-shared", Type: "movie", Title: "Federation Forever", SortTitle: "Federation Forever", Path: "/m1/a.mkv", AddedAt: now, UpdatedAt: now, IsAvailable: true},
 		{ID: "i-shared-miss", LibraryID: "lib-shared", Type: "movie", Title: "Quantum Drift", SortTitle: "Quantum Drift", Path: "/m1/b.mkv", AddedAt: now, UpdatedAt: now, IsAvailable: true},
 		{ID: "i-private-match", LibraryID: "lib-private", Type: "movie", Title: "Federation Underground", SortTitle: "Federation Underground", Path: "/m2/c.mkv", AddedAt: now, UpdatedAt: now, IsAvailable: true},
@@ -167,14 +168,14 @@ func TestFederationRepository_SharedItem_ColorsForwarded(t *testing.T) {
 	fedRepo := storage.NewRepository(testutil.Driver(), database)
 
 	now := time.Now().UTC()
-	lib := db.Library{ID: "lib-1", Name: "Movies", ContentType: "movies", ScanMode: "auto", ScanInterval: "6h", CreatedAt: now, UpdatedAt: now, Paths: []string{"/m"}}
+	lib := librarymodel.Library{ID: "lib-1", Name: "Movies", ContentType: "movies", ScanMode: "auto", ScanInterval: "6h", CreatedAt: now, UpdatedAt: now, Paths: []string{"/m"}}
 	if err := libRepo.Create(ctx, &lib); err != nil {
 		t.Fatal(err)
 	}
 
-	withColors := db.Item{ID: "i-color", LibraryID: "lib-1", Type: "movie", Title: "Aurora", SortTitle: "Aurora", Path: "/m/a.mkv", AddedAt: now, UpdatedAt: now, IsAvailable: true}
-	noColors := db.Item{ID: "i-bare", LibraryID: "lib-1", Type: "movie", Title: "Bare", SortTitle: "Bare", Path: "/m/b.mkv", AddedAt: now, UpdatedAt: now, IsAvailable: true}
-	for _, it := range []db.Item{withColors, noColors} {
+	withColors := librarymodel.Item{ID: "i-color", LibraryID: "lib-1", Type: "movie", Title: "Aurora", SortTitle: "Aurora", Path: "/m/a.mkv", AddedAt: now, UpdatedAt: now, IsAvailable: true}
+	noColors := librarymodel.Item{ID: "i-bare", LibraryID: "lib-1", Type: "movie", Title: "Bare", SortTitle: "Bare", Path: "/m/b.mkv", AddedAt: now, UpdatedAt: now, IsAvailable: true}
+	for _, it := range []librarymodel.Item{withColors, noColors} {
 		it := it
 		if err := itemRepo.Create(ctx, &it); err != nil {
 			t.Fatal(err)
@@ -183,7 +184,7 @@ func TestFederationRepository_SharedItem_ColorsForwarded(t *testing.T) {
 
 	// Only the first item gets a primary image with colors. The
 	// second item gets nothing â€” emitter must report ""/"" for it.
-	if err := imgRepo.Create(ctx, &db.Image{
+	if err := imgRepo.Create(ctx, &librarymodel.Image{
 		ID: "img-1", ItemID: "i-color", Type: "primary", Path: "/m/a.jpg",
 		IsPrimary: true, AddedAt: now,
 		DominantColor: "rgb(120, 30, 40)", DominantColorMuted: "rgb(20, 10, 12)",

@@ -25,6 +25,8 @@ import (
 	"time"
 
 	"hubplay"
+	iptvmodel "hubplay/internal/iptv/model"
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db"
 	"hubplay/internal/federation"
 	federationstorage "hubplay/internal/federation/storage"
@@ -60,7 +62,7 @@ func main() {
 
 	// 4. Library: create + list
 	logger.Info("step 4: library create + list")
-	lib := &db.Library{
+	lib := &librarymodel.Library{
 		ID:          "smoke-lib-1",
 		Name:        "Smoke Library",
 		ContentType: "movies",
@@ -83,7 +85,7 @@ func main() {
 	// must be ErrEPGSourceAlreadyAttached. Validates
 	// isUniqueConstraintError on the pg pgconn.PgError code 23505 path.
 	logger.Info("step 5: validate UNIQUE-violation detection via pg SQLSTATE 23505")
-	src := &db.LibraryEPGSource{
+	src := &iptvmodel.LibraryEPGSource{
 		ID:        "smoke-src-1",
 		LibraryID: lib.ID,
 		CatalogID: "",

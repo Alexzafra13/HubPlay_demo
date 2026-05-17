@@ -3,13 +3,13 @@ package handlers
 import (
 	"testing"
 
-	"hubplay/internal/db"
+	iptvmodel "hubplay/internal/iptv/model"
 )
 
 func TestLogoProxyURL(t *testing.T) {
 	cases := []struct {
 		name string
-		ch   *db.Channel
+		ch   *iptvmodel.Channel
 		want string
 	}{
 		{
@@ -19,7 +19,7 @@ func TestLogoProxyURL(t *testing.T) {
 		},
 		{
 			name: "no upstream logo returns empty",
-			ch:   &db.Channel{ID: "ch-1", LogoURL: ""},
+			ch:   &iptvmodel.Channel{ID: "ch-1", LogoURL: ""},
 			want: "",
 		},
 		{
@@ -29,12 +29,12 @@ func TestLogoProxyURL(t *testing.T) {
 			// channels/{id}/logo") is what registers the route in
 			// router.go, and the test pins both ends together.
 			name: "upstream present rewrites to proxy URL",
-			ch:   &db.Channel{ID: "ch-1", LogoURL: "https://lo1.in/sp/antena3hd.png"},
+			ch:   &iptvmodel.Channel{ID: "ch-1", LogoURL: "https://lo1.in/sp/antena3hd.png"},
 			want: "/api/v1/channels/ch-1/logo",
 		},
 		{
 			name: "upstream URL does not leak into proxy URL",
-			ch:   &db.Channel{ID: "ch-2", LogoURL: "https://i.imgur.com/secret-token.png"},
+			ch:   &iptvmodel.Channel{ID: "ch-2", LogoURL: "https://i.imgur.com/secret-token.png"},
 			want: "/api/v1/channels/ch-2/logo",
 		},
 	}
@@ -52,7 +52,7 @@ func TestToChannelDTO_LogoURLIsProxiedNotUpstream(t *testing.T) {
 	// Regression guard: if anyone reverts toChannelDTO to set
 	// LogoURL: ch.LogoURL the upstream URL would leak back into
 	// the API and CSP would block image loads again.
-	ch := &db.Channel{
+	ch := &iptvmodel.Channel{
 		ID:        "ch-42",
 		Name:      "Antena 3 HD",
 		LibraryID: "lib-x",

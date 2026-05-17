@@ -193,7 +193,7 @@ type ImageResult struct {
 	// implementation that produced the result. The aggregator
 	// (`Manager.FetchImages`) does not sort or merge by Source, but
 	// the persistence layer (scanner, refresher) records it on
-	// `db.Image.provider` so the admin UI can filter by source and
+	// `librarymodel.Image.provider` so the admin UI can filter by source and
 	// surface bad providers without sniffing the URL.
 	Source string
 }

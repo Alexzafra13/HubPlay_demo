@@ -13,7 +13,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"hubplay/internal/db"
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/domain"
 )
 
@@ -23,13 +23,13 @@ import (
 // repo's behaviour is covered by people_repository_test.go (which DOES
 // hit a real DB).
 type fakePeopleRepo struct {
-	people     map[string]*db.Person
-	filmography map[string][]*db.FilmographyEntry
+	people     map[string]*librarymodel.Person
+	filmography map[string][]*librarymodel.FilmographyEntry
 	getErr     error
 	listErr    error
 }
 
-func (f *fakePeopleRepo) GetByID(_ context.Context, id string) (*db.Person, error) {
+func (f *fakePeopleRepo) GetByID(_ context.Context, id string) (*librarymodel.Person, error) {
 	if f.getErr != nil {
 		return nil, f.getErr
 	}
@@ -40,7 +40,7 @@ func (f *fakePeopleRepo) GetByID(_ context.Context, id string) (*db.Person, erro
 	return p, nil
 }
 
-func (f *fakePeopleRepo) ListFilmographyByPerson(_ context.Context, id string) ([]*db.FilmographyEntry, error) {
+func (f *fakePeopleRepo) ListFilmographyByPerson(_ context.Context, id string) ([]*librarymodel.FilmographyEntry, error) {
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
@@ -58,7 +58,7 @@ func newPeopleRig(t *testing.T, repo *fakePeopleRepo) (http.Handler, string) {
 
 func TestPeople_Get_404WhenPersonMissing(t *testing.T) {
 	router, _ := newPeopleRig(t, &fakePeopleRepo{
-		people: map[string]*db.Person{},
+		people: map[string]*librarymodel.Person{},
 	})
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/people/p-missing", nil)
 	rr := httptest.NewRecorder()
@@ -70,7 +70,7 @@ func TestPeople_Get_404WhenPersonMissing(t *testing.T) {
 
 func TestPeople_Get_500WhenFilmographyLookupFails(t *testing.T) {
 	router, _ := newPeopleRig(t, &fakePeopleRepo{
-		people: map[string]*db.Person{
+		people: map[string]*librarymodel.Person{
 			"p-1": {ID: "p-1", Name: "Tom", Type: "actor"},
 		},
 		listErr: errors.New("db disappeared"),
@@ -85,10 +85,10 @@ func TestPeople_Get_500WhenFilmographyLookupFails(t *testing.T) {
 
 func TestPeople_Get_ReturnsCoreFields(t *testing.T) {
 	router, _ := newPeopleRig(t, &fakePeopleRepo{
-		people: map[string]*db.Person{
+		people: map[string]*librarymodel.Person{
 			"p-1": {ID: "p-1", Name: "Tom Hanks", Type: "actor"},
 		},
-		filmography: map[string][]*db.FilmographyEntry{
+		filmography: map[string][]*librarymodel.FilmographyEntry{
 			"p-1": {
 				{ItemID: "m-1", Type: "movie", Title: "Forrest Gump", Year: 1994,
 					Role: "actor", CharacterName: "Forrest Gump", SortOrder: 0},
@@ -152,10 +152,10 @@ func TestPeople_Get_ReturnsCoreFields(t *testing.T) {
 // a wasted round-trip.
 func TestPeople_Get_ImageURLGatedByOnDiskFile(t *testing.T) {
 	repo := &fakePeopleRepo{
-		people: map[string]*db.Person{
+		people: map[string]*librarymodel.Person{
 			"p-1": {ID: "p-1", Name: "Tom", Type: "actor"},
 		},
-		filmography: map[string][]*db.FilmographyEntry{},
+		filmography: map[string][]*librarymodel.FilmographyEntry{},
 	}
 	router, imageDir := newPeopleRig(t, repo)
 

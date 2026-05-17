@@ -15,7 +15,7 @@ import (
 	"fmt"
 	"sort"
 
-	"hubplay/internal/db"
+	iptvmodel "hubplay/internal/iptv/model"
 )
 
 // applyAdminOverlay applies the library's admin curation
@@ -29,16 +29,16 @@ import (
 //
 // Pure: the input slice is not mutated; a fresh slice is returned.
 // O(N + M) where N = channels, M = overrides.
-func applyAdminOverlay(channels []*db.Channel, overrides []db.LibraryChannelOrderEntry) []*db.Channel {
+func applyAdminOverlay(channels []*iptvmodel.Channel, overrides []iptvmodel.LibraryChannelOrderEntry) []*iptvmodel.Channel {
 	if len(overrides) == 0 {
 		return channels
 	}
-	byID := make(map[string]db.LibraryChannelOrderEntry, len(overrides))
+	byID := make(map[string]iptvmodel.LibraryChannelOrderEntry, len(overrides))
 	for _, o := range overrides {
 		byID[o.ChannelID] = o
 	}
 
-	out := make([]*db.Channel, 0, len(channels))
+	out := make([]*iptvmodel.Channel, 0, len(channels))
 	for _, c := range channels {
 		o, has := byID[c.ID]
 		if has && o.Hidden {
@@ -66,16 +66,16 @@ func applyAdminOverlay(channels []*db.Channel, overrides []db.LibraryChannelOrde
 //
 // Pure: the input slice is not mutated; a fresh slice is returned.
 // O(N + M) where N = channels, M = overrides.
-func applyOrderOverlay(channels []*db.Channel, overrides []db.UserChannelOrderEntry) []*db.Channel {
+func applyOrderOverlay(channels []*iptvmodel.Channel, overrides []iptvmodel.UserChannelOrderEntry) []*iptvmodel.Channel {
 	if len(overrides) == 0 {
 		return channels
 	}
-	byID := make(map[string]db.UserChannelOrderEntry, len(overrides))
+	byID := make(map[string]iptvmodel.UserChannelOrderEntry, len(overrides))
 	for _, o := range overrides {
 		byID[o.ChannelID] = o
 	}
 
-	out := make([]*db.Channel, 0, len(channels))
+	out := make([]*iptvmodel.Channel, 0, len(channels))
 	for _, c := range channels {
 		o, has := byID[c.ID]
 		if has && o.Hidden {
@@ -109,7 +109,7 @@ func applyOrderOverlay(channels []*db.Channel, overrides []db.UserChannelOrderEn
 //
 // When userID is empty (no authenticated user, admin contexts) the
 // overlay step is skipped and this returns the admin view.
-func (s *Service) GetChannelsForUser(ctx context.Context, libraryID, userID string, activeOnly bool) ([]*db.Channel, error) {
+func (s *Service) GetChannelsForUser(ctx context.Context, libraryID, userID string, activeOnly bool) ([]*iptvmodel.Channel, error) {
 	channels, err := s.GetChannels(ctx, libraryID, activeOnly)
 	if err != nil {
 		return nil, err
@@ -144,12 +144,12 @@ func (s *Service) GetChannelsForUser(ctx context.Context, libraryID, userID stri
 //
 // `includeHidden=false` is equivalent to "what every non-admin user
 // sees before their own overlay" — useful for previews.
-func (s *Service) GetChannelsForLibraryAdmin(ctx context.Context, libraryID string, includeHidden bool) ([]*db.Channel, []db.LibraryChannelOrderEntry, error) {
+func (s *Service) GetChannelsForLibraryAdmin(ctx context.Context, libraryID string, includeHidden bool) ([]*iptvmodel.Channel, []iptvmodel.LibraryChannelOrderEntry, error) {
 	channels, err := s.GetChannels(ctx, libraryID, false)
 	if err != nil {
 		return nil, nil, err
 	}
-	var rows []db.LibraryChannelOrderEntry
+	var rows []iptvmodel.LibraryChannelOrderEntry
 	if s.libraryChannelOrder != nil {
 		rows, err = s.libraryChannelOrder.List(ctx, libraryID)
 		if err != nil {
@@ -161,11 +161,11 @@ func (s *Service) GetChannelsForLibraryAdmin(ctx context.Context, libraryID stri
 		// list so the panel can render the eye-off toggle next to
 		// them. We can't reuse applyAdminOverlay (it filters
 		// hidden); inline the position merge.
-		byID := make(map[string]db.LibraryChannelOrderEntry, len(rows))
+		byID := make(map[string]iptvmodel.LibraryChannelOrderEntry, len(rows))
 		for _, o := range rows {
 			byID[o.ChannelID] = o
 		}
-		out := make([]*db.Channel, 0, len(channels))
+		out := make([]*iptvmodel.Channel, 0, len(channels))
 		for _, ch := range channels {
 			cp := *ch
 			if o, has := byID[ch.ID]; has {
@@ -182,7 +182,7 @@ func (s *Service) GetChannelsForLibraryAdmin(ctx context.Context, libraryID stri
 // ListLibraryChannelOverrides returns the admin override rows for a
 // library. Used by the curation panel to compute which channels
 // have been touched vs. which still inherit the M3U order.
-func (s *Service) ListLibraryChannelOverrides(ctx context.Context, libraryID string) ([]db.LibraryChannelOrderEntry, error) {
+func (s *Service) ListLibraryChannelOverrides(ctx context.Context, libraryID string) ([]iptvmodel.LibraryChannelOrderEntry, error) {
 	if s.libraryChannelOrder == nil {
 		return nil, nil
 	}
@@ -202,9 +202,9 @@ func (s *Service) ReplaceLibraryChannelOrder(ctx context.Context, libraryID stri
 	if s.libraryChannelOrder == nil {
 		return fmt.Errorf("library channel order repo not wired")
 	}
-	entries := make([]db.LibraryChannelOrderEntry, 0, len(orderedIDs))
+	entries := make([]iptvmodel.LibraryChannelOrderEntry, 0, len(orderedIDs))
 	for _, id := range orderedIDs {
-		entries = append(entries, db.LibraryChannelOrderEntry{
+		entries = append(entries, iptvmodel.LibraryChannelOrderEntry{
 			ChannelID: id,
 			Hidden:    hiddenIDs[id],
 		})
@@ -254,7 +254,7 @@ func (s *Service) ResetLibraryChannelOrder(ctx context.Context, libraryID string
 // personalisation panel. The panel renders these alongside the
 // channel list so the user can see which channels they've touched
 // (highlighted) vs. which still inherit the admin defaults.
-func (s *Service) ListChannelOverrides(ctx context.Context, userID string) ([]db.UserChannelOrderEntry, error) {
+func (s *Service) ListChannelOverrides(ctx context.Context, userID string) ([]iptvmodel.UserChannelOrderEntry, error) {
 	if s.channelOrder == nil {
 		return nil, nil
 	}
@@ -274,9 +274,9 @@ func (s *Service) ReplaceChannelOrder(ctx context.Context, userID string, ordere
 	if s.channelOrder == nil {
 		return fmt.Errorf("channel order repo not wired")
 	}
-	entries := make([]db.UserChannelOrderEntry, 0, len(orderedIDs))
+	entries := make([]iptvmodel.UserChannelOrderEntry, 0, len(orderedIDs))
 	for _, id := range orderedIDs {
-		entries = append(entries, db.UserChannelOrderEntry{
+		entries = append(entries, iptvmodel.UserChannelOrderEntry{
 			ChannelID: id,
 			Hidden:    hiddenIDs[id],
 		})

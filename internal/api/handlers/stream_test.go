@@ -15,8 +15,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/auth"
-	"hubplay/internal/db"
 	"hubplay/internal/domain"
 	"hubplay/internal/stream"
 	"hubplay/internal/testutil"
@@ -89,25 +89,25 @@ func (m *fakeStreamManager) ActiveSessions() int {
 // streamFakeItemRepo is distinct from image_test.go's fakeItemRepo because
 // both live in the same test package.
 type streamFakeItemRepo struct {
-	byID map[string]*db.Item
+	byID map[string]*librarymodel.Item
 }
 
-func (r *streamFakeItemRepo) GetByID(_ context.Context, id string) (*db.Item, error) {
+func (r *streamFakeItemRepo) GetByID(_ context.Context, id string) (*librarymodel.Item, error) {
 	if it, ok := r.byID[id]; ok {
 		return it, nil
 	}
 	return nil, domain.NewNotFound("item")
 }
 
-func (r *streamFakeItemRepo) List(_ context.Context, _ db.ItemFilter) ([]*db.Item, int, error) {
+func (r *streamFakeItemRepo) List(_ context.Context, _ librarymodel.ItemFilter) ([]*librarymodel.Item, int, error) {
 	return nil, 0, nil
 }
 
 type streamFakeMediaStreamRepo struct {
-	byItem map[string][]*db.MediaStream
+	byItem map[string][]*librarymodel.MediaStream
 }
 
-func (r *streamFakeMediaStreamRepo) ListByItem(_ context.Context, itemID string) ([]*db.MediaStream, error) {
+func (r *streamFakeMediaStreamRepo) ListByItem(_ context.Context, itemID string) ([]*librarymodel.MediaStream, error) {
 	return r.byItem[itemID], nil
 }
 
@@ -134,8 +134,8 @@ func newStreamTestEnv(t *testing.T) *streamTestEnv {
 	env := &streamTestEnv{
 		t:       t,
 		manager: newFakeStreamManager(),
-		items:   &streamFakeItemRepo{byID: map[string]*db.Item{}},
-		streams: &streamFakeMediaStreamRepo{byItem: map[string][]*db.MediaStream{}},
+		items:   &streamFakeItemRepo{byID: map[string]*librarymodel.Item{}},
+		streams: &streamFakeMediaStreamRepo{byItem: map[string][]*librarymodel.MediaStream{}},
 	}
 	// nil externalIDs + providers — existing stream tests don't hit
 	// the external-subtitle endpoints, so the new handlers short-
@@ -189,8 +189,8 @@ func (e *streamTestEnv) doWithClaims(method, path string, claims *auth.Claims) *
 
 func TestStreamHandler_Info_HappyPath(t *testing.T) {
 	env := newStreamTestEnv(t)
-	env.items.byID["item-1"] = &db.Item{ID: "item-1", Type: "movie", Container: "mp4"}
-	env.streams.byItem["item-1"] = []*db.MediaStream{
+	env.items.byID["item-1"] = &librarymodel.Item{ID: "item-1", Type: "movie", Container: "mp4"}
+	env.streams.byItem["item-1"] = []*librarymodel.MediaStream{
 		{StreamType: "video", Codec: "h264", IsDefault: true},
 		{StreamType: "audio", Codec: "aac", IsDefault: true},
 	}
@@ -230,7 +230,7 @@ func TestStreamHandler_Info_ItemNotFound(t *testing.T) {
 
 func TestStreamHandler_MasterPlaylist_HappyPath(t *testing.T) {
 	env := newStreamTestEnv(t)
-	env.items.byID["item-1"] = &db.Item{ID: "item-1", Type: "movie"}
+	env.items.byID["item-1"] = &librarymodel.Item{ID: "item-1", Type: "movie"}
 
 	resp, err := http.Get(env.server.URL + "/api/v1/stream/item-1/master.m3u8")
 	if err != nil {
@@ -319,7 +319,7 @@ func TestStreamHandler_QualityPlaylist_ManifestServed(t *testing.T) {
 func TestStreamHandler_QualityPlaylist_PropagatesAudioToSegments(t *testing.T) {
 	env := newStreamTestEnv(t)
 	// Item with a known duration → triggers the synthesized VOD path.
-	env.items.byID["item-1"] = &db.Item{
+	env.items.byID["item-1"] = &librarymodel.Item{
 		ID:            "item-1",
 		Path:          "/tmp/x.mkv",
 		IsAvailable:   true,
@@ -467,7 +467,7 @@ func TestStreamHandler_DirectPlay_ItemNotFound(t *testing.T) {
 
 func TestStreamHandler_DirectPlay_Unavailable(t *testing.T) {
 	env := newStreamTestEnv(t)
-	env.items.byID["item-1"] = &db.Item{ID: "item-1", Path: "", IsAvailable: false}
+	env.items.byID["item-1"] = &librarymodel.Item{ID: "item-1", Path: "", IsAvailable: false}
 
 	resp, err := http.Get(env.server.URL + "/api/v1/stream/item-1/direct")
 	if err != nil {
@@ -486,7 +486,7 @@ func TestStreamHandler_DirectPlay_ServesFile(t *testing.T) {
 	if err := os.WriteFile(p, payload, 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	env.items.byID["item-1"] = &db.Item{ID: "item-1", Path: p, Container: "mp4", IsAvailable: true}
+	env.items.byID["item-1"] = &librarymodel.Item{ID: "item-1", Path: p, Container: "mp4", IsAvailable: true}
 
 	resp, err := http.Get(env.server.URL + "/api/v1/stream/item-1/direct")
 	if err != nil {
@@ -549,7 +549,7 @@ func TestStreamHandler_StopSession_HappyPath(t *testing.T) {
 
 func TestStreamHandler_Subtitles_FiltersAndShapes(t *testing.T) {
 	env := newStreamTestEnv(t)
-	env.streams.byItem["item-1"] = []*db.MediaStream{
+	env.streams.byItem["item-1"] = []*librarymodel.MediaStream{
 		{StreamType: "video", Codec: "h264"},
 		{StreamType: "audio", Codec: "aac"},
 		{StreamType: "subtitle", Codec: "subrip", Language: "en", Title: "English", IsDefault: true},
@@ -583,7 +583,7 @@ func TestStreamHandler_SubtitleTrack_ItemNotFound(t *testing.T) {
 
 func TestStreamHandler_SubtitleTrack_FileUnavailable(t *testing.T) {
 	env := newStreamTestEnv(t)
-	env.items.byID["item-1"] = &db.Item{ID: "item-1", Path: ""}
+	env.items.byID["item-1"] = &librarymodel.Item{ID: "item-1", Path: ""}
 	resp, err := http.Get(env.server.URL + "/api/v1/stream/item-1/subtitles/0")
 	if err != nil {
 		t.Fatalf("get: %v", err)

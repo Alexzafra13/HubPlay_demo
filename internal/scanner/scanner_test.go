@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db"
 	"hubplay/internal/event"
 	"hubplay/internal/imaging"
@@ -49,7 +50,7 @@ func newTestScanner(t *testing.T) (*Scanner, *db.ItemRepository, *db.MediaStream
 
 	// Seed library
 	now := time.Now()
-	if err := libRepo.Create(context.Background(), &db.Library{
+	if err := libRepo.Create(context.Background(), &librarymodel.Library{
 		ID: "lib-test", Name: "Test", ContentType: "movies", ScanMode: "auto",
 		ScanInterval: "6h", CreatedAt: now, UpdatedAt: now, Paths: []string{"/dummy"},
 	}); err != nil {
@@ -155,7 +156,7 @@ func TestScanLibrary_NewFiles(t *testing.T) {
 	createFile(t, filepath.Join(dir, "movie2.mp4"), "fake video data 2")
 	createFile(t, filepath.Join(dir, "readme.txt"), "not a video")
 
-	lib := &db.Library{
+	lib := &librarymodel.Library{
 		ID:          "lib-test",
 		Name:        "Test",
 		ContentType: "movies",
@@ -175,7 +176,7 @@ func TestScanLibrary_NewFiles(t *testing.T) {
 	}
 
 	// Verify items in DB
-	items, total, _ := itemRepo.List(context.Background(), db.ItemFilter{LibraryID: "lib-test", Limit: 10})
+	items, total, _ := itemRepo.List(context.Background(), librarymodel.ItemFilter{LibraryID: "lib-test", Limit: 10})
 	if total != 2 {
 		t.Errorf("expected 2 items in DB, got %d", total)
 	}
@@ -199,7 +200,7 @@ func TestScanLibrary_RemovedFiles(t *testing.T) {
 	f := filepath.Join(dir, "temp.mkv")
 	createFile(t, f, "temp data")
 
-	lib := &db.Library{
+	lib := &librarymodel.Library{
 		ID: "lib-test", Name: "Test", ContentType: "movies",
 		Paths: []string{dir},
 	}
@@ -220,7 +221,7 @@ func TestScanLibrary_RemovedFiles(t *testing.T) {
 	}
 
 	// Verify the item is marked unavailable
-	items, _, _ := itemRepo.List(context.Background(), db.ItemFilter{LibraryID: "lib-test", Limit: 10})
+	items, _, _ := itemRepo.List(context.Background(), librarymodel.ItemFilter{LibraryID: "lib-test", Limit: 10})
 	for _, item := range items {
 		if item.IsAvailable {
 			t.Error("expected item to be unavailable after removal")
@@ -233,7 +234,7 @@ func TestScanLibrary_EmptyDir(t *testing.T) {
 
 	dir := t.TempDir()
 
-	lib := &db.Library{
+	lib := &librarymodel.Library{
 		ID: "lib-test", Name: "Test", ContentType: "movies",
 		Paths: []string{dir},
 	}
@@ -274,7 +275,7 @@ func TestScanLibrary_ShowsBuildsHierarchy(t *testing.T) {
 		createFile(t, full, "x")
 	}
 
-	lib := &db.Library{
+	lib := &librarymodel.Library{
 		ID: "lib-test", Name: "Test", ContentType: "shows",
 		Paths: []string{root},
 	}
@@ -290,7 +291,7 @@ func TestScanLibrary_ShowsBuildsHierarchy(t *testing.T) {
 	}
 
 	// Series rows: one per top-level dir.
-	series, _, _ := itemRepo.List(context.Background(), db.ItemFilter{
+	series, _, _ := itemRepo.List(context.Background(), librarymodel.ItemFilter{
 		LibraryID: "lib-test", Type: "series", Limit: 100,
 	})
 	titles := make(map[string]bool, len(series))
@@ -305,7 +306,7 @@ func TestScanLibrary_ShowsBuildsHierarchy(t *testing.T) {
 
 	// Season rows: each scoped to its series via parent_id.
 	for _, sr := range series {
-		seasons, _, _ := itemRepo.List(context.Background(), db.ItemFilter{
+		seasons, _, _ := itemRepo.List(context.Background(), librarymodel.ItemFilter{
 			LibraryID: "lib-test", Type: "season", ParentID: sr.ID, Limit: 10,
 		})
 		if sr.Title == "Breaking Bad" && len(seasons) != 2 {
@@ -319,7 +320,7 @@ func TestScanLibrary_ShowsBuildsHierarchy(t *testing.T) {
 	// Episodes carry season + episode numbers AND link to a season
 	// via parent_id (the bug being fixed: previously parent_id was
 	// always empty for shows).
-	episodes, _, _ := itemRepo.List(context.Background(), db.ItemFilter{
+	episodes, _, _ := itemRepo.List(context.Background(), librarymodel.ItemFilter{
 		LibraryID: "lib-test", Type: "episode", Limit: 100,
 	})
 	if len(episodes) != 4 {
@@ -349,7 +350,7 @@ func TestScanLibrary_ShowsRescanIsIdempotent(t *testing.T) {
 	}
 	createFile(t, full, "x")
 
-	lib := &db.Library{
+	lib := &librarymodel.Library{
 		ID: "lib-test", Name: "Test", ContentType: "shows",
 		Paths: []string{root},
 	}
@@ -373,19 +374,19 @@ func TestScanLibrary_ShowsRescanIsIdempotent(t *testing.T) {
 	// episode from the cache pre-population pass. On re-scan the
 	// season cache was empty â†’ ensureSeasonRow â†’ fresh INSERT â†’
 	// duplicate season rows for every existing show.
-	series, _, _ := itemRepo.List(context.Background(), db.ItemFilter{
+	series, _, _ := itemRepo.List(context.Background(), librarymodel.ItemFilter{
 		LibraryID: "lib-test", Type: "series", Limit: 10,
 	})
 	if len(series) != 1 {
 		t.Errorf("series count after rescan: got %d want 1", len(series))
 	}
-	seasons, _, _ := itemRepo.List(context.Background(), db.ItemFilter{
+	seasons, _, _ := itemRepo.List(context.Background(), librarymodel.ItemFilter{
 		LibraryID: "lib-test", Type: "season", ParentID: series[0].ID, Limit: 10,
 	})
 	if len(seasons) != 1 {
 		t.Errorf("season count after rescan: got %d want 1 (duplicate seasons = cache pre-pop bug)", len(seasons))
 	}
-	episodes, _, _ := itemRepo.List(context.Background(), db.ItemFilter{
+	episodes, _, _ := itemRepo.List(context.Background(), librarymodel.ItemFilter{
 		LibraryID: "lib-test", Type: "episode", Limit: 10,
 	})
 	if len(episodes) != 1 {
@@ -414,7 +415,7 @@ func TestScanLibrary_ShowsRescanWithMultipleSeasons(t *testing.T) {
 		}
 		createFile(t, full, "x")
 	}
-	lib := &db.Library{
+	lib := &librarymodel.Library{
 		ID: "lib-test", Name: "Test", ContentType: "shows",
 		Paths: []string{root},
 	}
@@ -432,7 +433,7 @@ func TestScanLibrary_ShowsRescanWithMultipleSeasons(t *testing.T) {
 	// re-scan added a new copy of every season because cache.season
 	// was empty).
 	got := func(t string) int {
-		items, _, _ := itemRepo.List(context.Background(), db.ItemFilter{
+		items, _, _ := itemRepo.List(context.Background(), librarymodel.ItemFilter{
 			LibraryID: "lib-test", Type: t, Limit: 100,
 		})
 		return len(items)
@@ -454,7 +455,7 @@ func TestScanLibrary_Idempotent(t *testing.T) {
 	dir := t.TempDir()
 	createFile(t, filepath.Join(dir, "movie.mkv"), "stable content")
 
-	lib := &db.Library{
+	lib := &librarymodel.Library{
 		ID: "lib-test", Name: "Test", ContentType: "movies",
 		Paths: []string{dir},
 	}
@@ -563,14 +564,14 @@ func TestFetchAndStoreImages_PersistsLocalPathNotURL(t *testing.T) {
 	itemRepo := db.NewItemRepository(testutil.Driver(), database)
 	imgRepo := db.NewImageRepository(testutil.Driver(), database)
 	now := time.Now()
-	if err := libRepo.Create(context.Background(), &db.Library{
+	if err := libRepo.Create(context.Background(), &librarymodel.Library{
 		ID: "lib-test", Name: "Test", ContentType: "movies", ScanMode: "auto",
 		ScanInterval: "6h", CreatedAt: now, UpdatedAt: now, Paths: []string{"/dummy"},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	itemID := "item-1"
-	if err := itemRepo.Create(context.Background(), &db.Item{
+	if err := itemRepo.Create(context.Background(), &librarymodel.Item{
 		ID: itemID, LibraryID: "lib-test", Type: "movie", Title: "Test",
 		AddedAt: now, UpdatedAt: now,
 	}); err != nil {
@@ -689,7 +690,7 @@ func TestEnrichEpisode_PersistsOverviewAndStill(t *testing.T) {
 	extRepo := db.NewExternalIDRepository(testutil.Driver(), database)
 
 	now := time.Now()
-	if err := libRepo.Create(context.Background(), &db.Library{
+	if err := libRepo.Create(context.Background(), &librarymodel.Library{
 		ID: "lib-shows", Name: "Shows", ContentType: "shows", ScanMode: "auto",
 		ScanInterval: "6h", CreatedAt: now, UpdatedAt: now, Paths: []string{"/dummy"},
 	}); err != nil {
@@ -697,13 +698,13 @@ func TestEnrichEpisode_PersistsOverviewAndStill(t *testing.T) {
 	}
 
 	seriesID := "series-1"
-	if err := itemRepo.Create(context.Background(), &db.Item{
+	if err := itemRepo.Create(context.Background(), &librarymodel.Item{
 		ID: seriesID, LibraryID: "lib-shows", Type: "series", Title: "Daredevil",
 		AddedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := extRepo.Upsert(context.Background(), &db.ExternalID{
+	if err := extRepo.Upsert(context.Background(), &librarymodel.ExternalID{
 		ItemID: seriesID, Provider: "tmdb", ExternalID: "12345",
 	}); err != nil {
 		t.Fatal(err)
@@ -711,7 +712,7 @@ func TestEnrichEpisode_PersistsOverviewAndStill(t *testing.T) {
 
 	seasonID := "season-1"
 	seasonNum := 1
-	if err := itemRepo.Create(context.Background(), &db.Item{
+	if err := itemRepo.Create(context.Background(), &librarymodel.Item{
 		ID: seasonID, LibraryID: "lib-shows", ParentID: seriesID, Type: "season",
 		Title: "Season 1", SeasonNumber: &seasonNum, AddedAt: now, UpdatedAt: now,
 	}); err != nil {
@@ -720,7 +721,7 @@ func TestEnrichEpisode_PersistsOverviewAndStill(t *testing.T) {
 
 	episodeID := "ep-1"
 	episodeNum := 1
-	if err := itemRepo.Create(context.Background(), &db.Item{
+	if err := itemRepo.Create(context.Background(), &librarymodel.Item{
 		ID: episodeID, LibraryID: "lib-shows", ParentID: seasonID, Type: "episode",
 		Title: "S01E01", SeasonNumber: &seasonNum, EpisodeNumber: &episodeNum,
 		AddedAt: now, UpdatedAt: now,
@@ -808,13 +809,13 @@ func TestEnrichEpisode_NoTMDbIDOnSeries(t *testing.T) {
 	extRepo := db.NewExternalIDRepository(testutil.Driver(), database)
 
 	now := time.Now()
-	_ = libRepo.Create(context.Background(), &db.Library{
+	_ = libRepo.Create(context.Background(), &librarymodel.Library{
 		ID: "lib-shows", Name: "Shows", ContentType: "shows", ScanMode: "auto",
 		ScanInterval: "6h", CreatedAt: now, UpdatedAt: now, Paths: []string{"/dummy"},
 	})
 
 	seriesID := "series-1"
-	_ = itemRepo.Create(context.Background(), &db.Item{
+	_ = itemRepo.Create(context.Background(), &librarymodel.Item{
 		ID: seriesID, LibraryID: "lib-shows", Type: "series", Title: "X",
 		AddedAt: now, UpdatedAt: now,
 	})
@@ -822,14 +823,14 @@ func TestEnrichEpisode_NoTMDbIDOnSeries(t *testing.T) {
 
 	seasonID := "season-1"
 	seasonNum := 1
-	_ = itemRepo.Create(context.Background(), &db.Item{
+	_ = itemRepo.Create(context.Background(), &librarymodel.Item{
 		ID: seasonID, LibraryID: "lib-shows", ParentID: seriesID, Type: "season",
 		Title: "Season 1", SeasonNumber: &seasonNum, AddedAt: now, UpdatedAt: now,
 	})
 
 	episodeID := "ep-1"
 	episodeNum := 1
-	_ = itemRepo.Create(context.Background(), &db.Item{
+	_ = itemRepo.Create(context.Background(), &librarymodel.Item{
 		ID: episodeID, LibraryID: "lib-shows", ParentID: seasonID, Type: "episode",
 		Title: "Pilot", SeasonNumber: &seasonNum, EpisodeNumber: &episodeNum,
 		AddedAt: now, UpdatedAt: now,
@@ -895,7 +896,7 @@ func TestEnrichSeason_PersistsMetadataAndPoster(t *testing.T) {
 	extRepo := db.NewExternalIDRepository(testutil.Driver(), database)
 
 	now := time.Now()
-	if err := libRepo.Create(context.Background(), &db.Library{
+	if err := libRepo.Create(context.Background(), &librarymodel.Library{
 		ID: "lib-shows", Name: "Shows", ContentType: "shows", ScanMode: "auto",
 		ScanInterval: "6h", CreatedAt: now, UpdatedAt: now, Paths: []string{"/dummy"},
 	}); err != nil {
@@ -903,13 +904,13 @@ func TestEnrichSeason_PersistsMetadataAndPoster(t *testing.T) {
 	}
 
 	seriesID := "series-1"
-	if err := itemRepo.Create(context.Background(), &db.Item{
+	if err := itemRepo.Create(context.Background(), &librarymodel.Item{
 		ID: seriesID, LibraryID: "lib-shows", Type: "series", Title: "Daredevil",
 		AddedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := extRepo.Upsert(context.Background(), &db.ExternalID{
+	if err := extRepo.Upsert(context.Background(), &librarymodel.ExternalID{
 		ItemID: seriesID, Provider: "tmdb", ExternalID: "12345",
 	}); err != nil {
 		t.Fatal(err)
@@ -917,7 +918,7 @@ func TestEnrichSeason_PersistsMetadataAndPoster(t *testing.T) {
 
 	seasonID := "season-1"
 	seasonNum := 1
-	if err := itemRepo.Create(context.Background(), &db.Item{
+	if err := itemRepo.Create(context.Background(), &librarymodel.Item{
 		ID: seasonID, LibraryID: "lib-shows", ParentID: seriesID, Type: "season",
 		Title: "Season 1", SortTitle: "season 1", SeasonNumber: &seasonNum,
 		AddedAt: now, UpdatedAt: now,
@@ -1021,11 +1022,11 @@ func TestFetchAndStoreImages_SkippedWhenImageDirEmpty(t *testing.T) {
 	itemRepo := db.NewItemRepository(testutil.Driver(), database)
 	imgRepo := db.NewImageRepository(testutil.Driver(), database)
 	now := time.Now()
-	_ = libRepo.Create(context.Background(), &db.Library{
+	_ = libRepo.Create(context.Background(), &librarymodel.Library{
 		ID: "lib-test", Name: "Test", ContentType: "movies", ScanMode: "auto",
 		ScanInterval: "6h", CreatedAt: now, UpdatedAt: now, Paths: []string{"/dummy"},
 	})
-	_ = itemRepo.Create(context.Background(), &db.Item{
+	_ = itemRepo.Create(context.Background(), &librarymodel.Item{
 		ID: "item-1", LibraryID: "lib-test", Type: "movie", Title: "T", AddedAt: now, UpdatedAt: now,
 	})
 

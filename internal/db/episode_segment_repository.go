@@ -5,51 +5,10 @@ import (
 	"database/sql"
 	"fmt"
 
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db/sqlc"
 	"hubplay/internal/db/sqlc_pg"
 )
-
-// EpisodeSegmentKind enumerates the recognised segment types.
-// Mirrored as a CHECK constraint at the DB layer (migration 037)
-// so unknown values never make it past Replace().
-type EpisodeSegmentKind string
-
-const (
-	EpisodeSegmentIntro EpisodeSegmentKind = "intro"
-	EpisodeSegmentOutro EpisodeSegmentKind = "outro"
-	EpisodeSegmentRecap EpisodeSegmentKind = "recap"
-)
-
-// EpisodeSegmentSource is the detector that produced the segment.
-// 'chapter' is the only one wired today; 'fingerprint' is reserved
-// for the audio-fingerprint detector and 'manual' for an admin
-// override path that doesn't exist yet but will share this storage.
-type EpisodeSegmentSource string
-
-const (
-	EpisodeSegmentSourceChapter     EpisodeSegmentSource = "chapter"
-	EpisodeSegmentSourceFingerprint EpisodeSegmentSource = "fingerprint"
-	EpisodeSegmentSourceManual      EpisodeSegmentSource = "manual"
-)
-
-// EpisodeSegment is one detected intro / outro / recap range.
-//
-// StartTicks and EndTicks use the same 10M-ticks-per-second encoding
-// the rest of the schema speaks (chapters, items.duration_ticks).
-// Confidence is 0..1 — chapter-title matches use 0.95 because a
-// chapter literally titled "Intro" is essentially ground truth, but
-// detectors that infer from waveform similarity will surface lower
-// numbers and the player can decide whether to auto-show or hide
-// the skip button accordingly.
-type EpisodeSegment struct {
-	ItemID     string
-	Kind       EpisodeSegmentKind
-	Source     EpisodeSegmentSource
-	StartTicks int64
-	EndTicks   int64
-	Confidence float64
-	DetectedAt int64
-}
 
 // EpisodeSegmentRepository — Pattern A dual-dialect. All ticks /
 // detected_at columns are BIGINT in both schemas so the per-backend
@@ -84,8 +43,8 @@ func (r *EpisodeSegmentRepository) useSQLite() bool { return r.sq != nil }
 func (r *EpisodeSegmentRepository) Replace(
 	ctx context.Context,
 	itemID string,
-	source EpisodeSegmentSource,
-	segments []EpisodeSegment,
+	source librarymodel.EpisodeSegmentSource,
+	segments []librarymodel.EpisodeSegment,
 ) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -151,7 +110,7 @@ func (r *EpisodeSegmentRepository) Replace(
 // returned. Resolution to a single "best" segment is the caller's
 // job — the API handler picks the highest-confidence row per kind
 // before serialising.
-func (r *EpisodeSegmentRepository) ListByItem(ctx context.Context, itemID string) ([]EpisodeSegment, error) {
+func (r *EpisodeSegmentRepository) ListByItem(ctx context.Context, itemID string) ([]librarymodel.EpisodeSegment, error) {
 	if r.useSQLite() {
 		rows, err := r.sq.ListEpisodeSegmentsByItem(ctx, itemID)
 		if err != nil {
@@ -160,12 +119,12 @@ func (r *EpisodeSegmentRepository) ListByItem(ctx context.Context, itemID string
 		if len(rows) == 0 {
 			return nil, nil
 		}
-		out := make([]EpisodeSegment, len(rows))
+		out := make([]librarymodel.EpisodeSegment, len(rows))
 		for i, row := range rows {
-			out[i] = EpisodeSegment{
+			out[i] = librarymodel.EpisodeSegment{
 				ItemID:     row.ItemID,
-				Kind:       EpisodeSegmentKind(row.Kind),
-				Source:     EpisodeSegmentSource(row.Source),
+				Kind:       librarymodel.EpisodeSegmentKind(row.Kind),
+				Source:     librarymodel.EpisodeSegmentSource(row.Source),
 				StartTicks: row.StartTicks,
 				EndTicks:   row.EndTicks,
 				Confidence: row.Confidence,
@@ -181,12 +140,12 @@ func (r *EpisodeSegmentRepository) ListByItem(ctx context.Context, itemID string
 	if len(rows) == 0 {
 		return nil, nil
 	}
-	out := make([]EpisodeSegment, len(rows))
+	out := make([]librarymodel.EpisodeSegment, len(rows))
 	for i, row := range rows {
-		out[i] = EpisodeSegment{
+		out[i] = librarymodel.EpisodeSegment{
 			ItemID:     row.ItemID,
-			Kind:       EpisodeSegmentKind(row.Kind),
-			Source:     EpisodeSegmentSource(row.Source),
+			Kind:       librarymodel.EpisodeSegmentKind(row.Kind),
+			Source:     librarymodel.EpisodeSegmentSource(row.Source),
 			StartTicks: row.StartTicks,
 			EndTicks:   row.EndTicks,
 			Confidence: row.Confidence,

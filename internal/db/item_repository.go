@@ -8,56 +8,11 @@ import (
 	"strings"
 	"time"
 
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db/sqlc"
 	"hubplay/internal/db/sqlc_pg"
 	"hubplay/internal/domain"
 )
-
-type Item struct {
-	ID              string
-	LibraryID       string
-	ParentID        string // empty if root item (movie, series)
-	Type            string // movie, series, season, episode, audio, album, artist
-	Title           string
-	SortTitle       string
-	OriginalTitle   string
-	Year            int
-	Path            string
-	Size            int64
-	DurationTicks   int64
-	Container       string
-	Fingerprint     string
-	SeasonNumber    *int
-	EpisodeNumber   *int
-	CommunityRating *float64
-	ContentRating   string
-	PremiereDate    *time.Time
-	AddedAt         time.Time
-	UpdatedAt       time.Time
-	IsAvailable     bool
-}
-
-type ItemFilter struct {
-	LibraryID string
-	ParentID  string // filter by parent (e.g., episodes of a season)
-	Type      string // filter by type
-	Query     string // FTS search
-	Genre     string // genre name (case-insensitive); resolved against item_values
-	YearFrom  int    // inclusive lower year bound; 0 disables
-	YearTo    int    // inclusive upper year bound; 0 disables
-	MinRating float64 // inclusive lower community_rating bound; 0 disables
-	// AllowedContentRatings, when non-nil, restricts the result set
-	// to items whose `content_rating` matches one of the values.
-	// Built upstream from the caller's profile via
-	// library.AllowedRatingsAtMost(profile.max_content_rating). nil
-	// = no restriction (caller has no cap or unknown cap → fail-open).
-	AllowedContentRatings []string
-	Limit                 int
-	Offset                int
-	SortBy                string // sort_title, added_at, year
-	SortOrder             string // asc, desc
-	Cursor                string // cursor for keyset pagination (item ID after which to fetch)
-}
 
 // ItemRepository — dual-dialect (Pattern A + Pattern B). The sqlc-backed
 // methods (Create / GetByID / GetByPath / Update / Delete /
@@ -98,7 +53,7 @@ func (r *ItemRepository) driver() string {
 	return DriverPostgres
 }
 
-func (r *ItemRepository) Create(ctx context.Context, item *Item) error {
+func (r *ItemRepository) Create(ctx context.Context, item *librarymodel.Item) error {
 	if r.useSQLite() {
 		err := r.sq.CreateItem(ctx, sqlc.CreateItemParams{
 			ID:              item.ID,
@@ -157,7 +112,7 @@ func (r *ItemRepository) Create(ctx context.Context, item *Item) error {
 	return nil
 }
 
-func (r *ItemRepository) GetByID(ctx context.Context, id string) (*Item, error) {
+func (r *ItemRepository) GetByID(ctx context.Context, id string) (*librarymodel.Item, error) {
 	if r.useSQLite() {
 		row, err := r.sq.GetItemByID(ctx, id)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -180,7 +135,7 @@ func (r *ItemRepository) GetByID(ctx context.Context, id string) (*Item, error) 
 	return &item, nil
 }
 
-func (r *ItemRepository) GetByPath(ctx context.Context, path string) (*Item, error) {
+func (r *ItemRepository) GetByPath(ctx context.Context, path string) (*librarymodel.Item, error) {
 	if r.useSQLite() {
 		row, err := r.sq.GetItemByPath(ctx, sql.NullString{String: path, Valid: path != ""})
 		if errors.Is(err, sql.ErrNoRows) {
@@ -203,7 +158,7 @@ func (r *ItemRepository) GetByPath(ctx context.Context, path string) (*Item, err
 	return &item, nil
 }
 
-func (r *ItemRepository) List(ctx context.Context, filter ItemFilter) ([]*Item, int, error) {
+func (r *ItemRepository) List(ctx context.Context, filter librarymodel.ItemFilter) ([]*librarymodel.Item, int, error) {
 	if filter.Limit <= 0 {
 		filter.Limit = 20
 	}
@@ -342,9 +297,9 @@ func (r *ItemRepository) List(ctx context.Context, filter ItemFilter) ([]*Item, 
 	}
 	defer rows.Close() //nolint:errcheck
 
-	var items []*Item
+	var items []*librarymodel.Item
 	for rows.Next() {
-		item := &Item{}
+		item := &librarymodel.Item{}
 		var n itemNullables
 		if err := rows.Scan(listScanDests(item, &n)...); err != nil {
 			return nil, 0, fmt.Errorf("scan item: %w", err)
@@ -355,7 +310,7 @@ func (r *ItemRepository) List(ctx context.Context, filter ItemFilter) ([]*Item, 
 	return items, total, rows.Err()
 }
 
-func (r *ItemRepository) Update(ctx context.Context, item *Item) error {
+func (r *ItemRepository) Update(ctx context.Context, item *librarymodel.Item) error {
 	var (
 		n   int64
 		err error
@@ -496,7 +451,7 @@ func (r *ItemRepository) ChildCountsByParents(ctx context.Context, parentIDs []s
 	return out, rows.Err()
 }
 
-func (r *ItemRepository) GetChildren(ctx context.Context, parentID string) ([]*Item, error) {
+func (r *ItemRepository) GetChildren(ctx context.Context, parentID string) ([]*librarymodel.Item, error) {
 	if r.useSQLite() {
 		rows, err := r.sq.GetItemChildren(ctx, sql.NullString{String: parentID, Valid: parentID != ""})
 		if err != nil {
@@ -513,7 +468,7 @@ func (r *ItemRepository) GetChildren(ctx context.Context, parentID string) ([]*I
 
 // LatestItems returns the most recently added items.
 // Uses raw SQL because of dynamic WHERE clauses.
-func (r *ItemRepository) LatestItems(ctx context.Context, libraryID string, itemType string, limit int, allowedRatings ...string) ([]*Item, error) {
+func (r *ItemRepository) LatestItems(ctx context.Context, libraryID string, itemType string, limit int, allowedRatings ...string) ([]*librarymodel.Item, error) {
 	if limit <= 0 {
 		limit = 20
 	}
@@ -562,9 +517,9 @@ func (r *ItemRepository) LatestItems(ctx context.Context, libraryID string, item
 	defer rows.Close() //nolint:errcheck
 
 	pg := !r.useSQLite()
-	var items []*Item
+	var items []*librarymodel.Item
 	for rows.Next() {
-		item := &Item{}
+		item := &librarymodel.Item{}
 		var parentID, path, container sql.NullString
 		// Year column is INTEGER in both schemas — sqlc maps it to
 		// NullInt64 on SQLite, NullInt32 on Postgres. We don't go
@@ -599,27 +554,6 @@ func (r *ItemRepository) LatestItems(ctx context.Context, libraryID string, item
 	return items, rows.Err()
 }
 
-// LatestSeriesActivity is one row from `LatestSeriesByActivity`. The
-// embedded Item is the series itself; the two extra fields encode how
-// the rail should render it. Naming mirrors what the wire ends up
-// emitting so the handler can pluck fields by name without a second
-// adapter struct.
-type LatestSeriesActivity struct {
-	Item
-	// LatestActivityAt is the most recent timestamp from either the
-	// series row's own added_at or any of its descendants' (seasons /
-	// episodes). Drives the rail order so a show that just received a
-	// new weekly episode sorts above a show added six months ago that
-	// hasn't moved since.
-	LatestActivityAt time.Time
-	// NewEpisodesCount is how many episodes under this series were
-	// added inside the rolling 14-day window. Zero for shows that
-	// haven't received anything in two weeks. The frontend only
-	// renders the "+N nuevos" badge when this is > 0, so the field
-	// is optional from the wire perspective.
-	NewEpisodesCount int
-}
-
 // LatestSeriesByActivity is the curated rail used by the home page's
 // "Reciente en <library>" tier on shows libraries. It returns series
 // rows (no episodes / seasons) ordered by the most recent activity
@@ -642,7 +576,7 @@ type LatestSeriesActivity struct {
 // since shows-only have a fixed two-level depth.
 //
 // Limit caps at 50 to match `LatestItems`.
-func (r *ItemRepository) LatestSeriesByActivity(ctx context.Context, libraryID string, limit int) ([]*LatestSeriesActivity, error) {
+func (r *ItemRepository) LatestSeriesByActivity(ctx context.Context, libraryID string, limit int) ([]*librarymodel.LatestSeriesActivity, error) {
 	if limit <= 0 {
 		limit = 20
 	}
@@ -683,9 +617,9 @@ func (r *ItemRepository) LatestSeriesByActivity(ctx context.Context, libraryID s
 	defer rows.Close() //nolint:errcheck
 
 	pg := !r.useSQLite()
-	var out []*LatestSeriesActivity
+	var out []*librarymodel.LatestSeriesActivity
 	for rows.Next() {
-		row := &LatestSeriesActivity{}
+		row := &librarymodel.LatestSeriesActivity{}
 		var parentID, path, container sql.NullString
 		var latestAtRaw any
 		var newCount sql.NullInt64
@@ -755,10 +689,10 @@ func nullableIntPtrInt32(p *int) sql.NullInt32 {
 }
 
 // itemFromSqliteModel maps a sqlc.Item (SQLite, INTEGER → NullInt64)
-// into the domain Item. The pg counterpart (itemFromPgGetByIDRow)
+// into the domain librarymodel.Item. The pg counterpart (itemFromPgGetByIDRow)
 // mirrors this with NullInt32 for the int-sized columns.
-func itemFromSqliteModel(r sqlc.Item) Item {
-	item := Item{
+func itemFromSqliteModel(r sqlc.Item) librarymodel.Item {
+	item := librarymodel.Item{
 		ID:            r.ID,
 		LibraryID:     r.LibraryID,
 		ParentID:      r.ParentID.String,
@@ -797,8 +731,8 @@ func itemFromSqliteModel(r sqlc.Item) Item {
 // itemFromPgGetByIDRow / itemFromPgByPathRow / itemFromPgChildrenRows —
 // pg-side counterparts. INTEGER columns come back as NullInt32, BIGINT
 // columns as NullInt64. Boolean is_available is a real BOOLEAN.
-func itemFromPgGetByIDRow(r sqlc_pg.GetItemByIDRow) Item {
-	item := Item{
+func itemFromPgGetByIDRow(r sqlc_pg.GetItemByIDRow) librarymodel.Item {
+	item := librarymodel.Item{
 		ID:            r.ID,
 		LibraryID:     r.LibraryID,
 		ParentID:      r.ParentID.String,
@@ -834,13 +768,13 @@ func itemFromPgGetByIDRow(r sqlc_pg.GetItemByIDRow) Item {
 	return item
 }
 
-func itemFromPgByPathRow(r sqlc_pg.GetItemByPathRow) Item {
+func itemFromPgByPathRow(r sqlc_pg.GetItemByPathRow) librarymodel.Item {
 	// Structural cast — both rows share the same column projection.
 	return itemFromPgGetByIDRow(sqlc_pg.GetItemByIDRow(r))
 }
 
-func itemFromSqliteChildRow(r sqlc.GetItemChildrenRow) Item {
-	item := Item{
+func itemFromSqliteChildRow(r sqlc.GetItemChildrenRow) librarymodel.Item {
+	item := librarymodel.Item{
 		ID:            r.ID,
 		LibraryID:     r.LibraryID,
 		ParentID:      r.ParentID.String,
@@ -871,8 +805,8 @@ func itemFromSqliteChildRow(r sqlc.GetItemChildrenRow) Item {
 	return item
 }
 
-func itemFromPgChildRow(r sqlc_pg.GetItemChildrenRow) Item {
-	item := Item{
+func itemFromPgChildRow(r sqlc_pg.GetItemChildrenRow) librarymodel.Item {
+	item := librarymodel.Item{
 		ID:            r.ID,
 		LibraryID:     r.LibraryID,
 		ParentID:      r.ParentID.String,
@@ -903,11 +837,11 @@ func itemFromPgChildRow(r sqlc_pg.GetItemChildrenRow) Item {
 	return item
 }
 
-func itemsFromSqliteChildrenRows(rows []sqlc.GetItemChildrenRow) []*Item {
+func itemsFromSqliteChildrenRows(rows []sqlc.GetItemChildrenRow) []*librarymodel.Item {
 	if len(rows) == 0 {
 		return nil
 	}
-	out := make([]*Item, len(rows))
+	out := make([]*librarymodel.Item, len(rows))
 	for i, row := range rows {
 		item := itemFromSqliteChildRow(row)
 		out[i] = &item
@@ -915,11 +849,11 @@ func itemsFromSqliteChildrenRows(rows []sqlc.GetItemChildrenRow) []*Item {
 	return out
 }
 
-func itemsFromPgChildrenRows(rows []sqlc_pg.GetItemChildrenRow) []*Item {
+func itemsFromPgChildrenRows(rows []sqlc_pg.GetItemChildrenRow) []*librarymodel.Item {
 	if len(rows) == 0 {
 		return nil
 	}
-	out := make([]*Item, len(rows))
+	out := make([]*librarymodel.Item, len(rows))
 	for i, row := range rows {
 		item := itemFromPgChildRow(row)
 		out[i] = &item

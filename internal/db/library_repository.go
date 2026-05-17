@@ -5,28 +5,12 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"time"
 
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db/sqlc"
 	"hubplay/internal/db/sqlc_pg"
 	"hubplay/internal/domain"
 )
-
-type Library struct {
-	ID              string
-	Name            string
-	ContentType     string // movies, shows, music, livetv
-	ScanMode        string // auto, manual
-	ScanInterval    string
-	M3UURL          string
-	EPGURL          string
-	RefreshInterval string
-	LanguageFilter  string
-	TLSInsecure     bool
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	Paths           []string // populated by GetByID/List
-}
 
 // LibraryRepository — Pattern A dual-dialect. Mixes sqlc methods
 // (Create/Update/Get/...) with raw SQL holdouts (UserHasAccess,
@@ -50,7 +34,7 @@ func NewLibraryRepository(driver string, database *sql.DB) *LibraryRepository {
 
 func (r *LibraryRepository) useSQLite() bool { return r.sq != nil }
 
-func (r *LibraryRepository) Create(ctx context.Context, lib *Library) error {
+func (r *LibraryRepository) Create(ctx context.Context, lib *librarymodel.Library) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
@@ -129,7 +113,7 @@ func (r *LibraryRepository) Create(ctx context.Context, lib *Library) error {
 // The primary admin's automatic grant (same as Create) still happens
 // alongside the owner grant, so the admin keeps visibility of every
 // library they create.
-func (r *LibraryRepository) CreateWithGrant(ctx context.Context, lib *Library, ownerUserID string) error {
+func (r *LibraryRepository) CreateWithGrant(ctx context.Context, lib *librarymodel.Library, ownerUserID string) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
@@ -207,7 +191,7 @@ func (r *LibraryRepository) CreateWithGrant(ctx context.Context, lib *Library, o
 	return tx.Commit()
 }
 
-func (r *LibraryRepository) GetByID(ctx context.Context, id string) (*Library, error) {
+func (r *LibraryRepository) GetByID(ctx context.Context, id string) (*librarymodel.Library, error) {
 	if r.useSQLite() {
 		row, err := r.sq.GetLibraryByID(ctx, id)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -240,14 +224,14 @@ func (r *LibraryRepository) GetByID(ctx context.Context, id string) (*Library, e
 	return &lib, nil
 }
 
-func (r *LibraryRepository) List(ctx context.Context) ([]*Library, error) {
-	var libs []*Library
+func (r *LibraryRepository) List(ctx context.Context) ([]*librarymodel.Library, error) {
+	var libs []*librarymodel.Library
 	if r.useSQLite() {
 		rows, err := r.sq.ListLibraries(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("list libraries: %w", err)
 		}
-		libs = make([]*Library, len(rows))
+		libs = make([]*librarymodel.Library, len(rows))
 		for i, row := range rows {
 			lib := libraryFromSqliteListRow(row)
 			libs[i] = &lib
@@ -257,7 +241,7 @@ func (r *LibraryRepository) List(ctx context.Context) ([]*Library, error) {
 		if err != nil {
 			return nil, fmt.Errorf("list libraries: %w", err)
 		}
-		libs = make([]*Library, len(rows))
+		libs = make([]*librarymodel.Library, len(rows))
 		for i, row := range rows {
 			lib := libraryFromPgListRow(row)
 			libs[i] = &lib
@@ -269,7 +253,7 @@ func (r *LibraryRepository) List(ctx context.Context) ([]*Library, error) {
 	return libs, nil
 }
 
-func (r *LibraryRepository) Update(ctx context.Context, lib *Library) error {
+func (r *LibraryRepository) Update(ctx context.Context, lib *librarymodel.Library) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
@@ -522,7 +506,7 @@ func (r *LibraryRepository) UserHasAccess(ctx context.Context, userID, libraryID
 
 // ListForUser — raw SQL holdout (JOIN+COALESCE+ORDER BY trips sqlc).
 // Dialect-aware via rewritePlaceholders.
-func (r *LibraryRepository) ListForUser(ctx context.Context, userID string) ([]*Library, error) {
+func (r *LibraryRepository) ListForUser(ctx context.Context, userID string) ([]*librarymodel.Library, error) {
 	driver := DriverSQLite
 	if !r.useSQLite() {
 		driver = DriverPostgres
@@ -547,9 +531,9 @@ func (r *LibraryRepository) ListForUser(ctx context.Context, userID string) ([]*
 	}
 	defer rows.Close() //nolint:errcheck
 
-	var libs []*Library
+	var libs []*librarymodel.Library
 	for rows.Next() {
-		var lib Library
+		var lib librarymodel.Library
 		var langFilter sql.NullString
 		var tlsInsecure int64
 		if err := rows.Scan(
@@ -576,7 +560,7 @@ func (r *LibraryRepository) ListForUser(ctx context.Context, userID string) ([]*
 }
 
 // loadPaths fetches paths for all given libraries in a single query.
-func (r *LibraryRepository) loadPaths(ctx context.Context, libs []*Library) error {
+func (r *LibraryRepository) loadPaths(ctx context.Context, libs []*librarymodel.Library) error {
 	if len(libs) == 0 {
 		return nil
 	}
@@ -609,8 +593,8 @@ func (r *LibraryRepository) loadPaths(ctx context.Context, libs []*Library) erro
 
 // ── row mapping helpers ─────────────────────────────────────────────────
 
-func libraryFromSqliteGetRow(r sqlc.GetLibraryByIDRow) Library {
-	return Library{
+func libraryFromSqliteGetRow(r sqlc.GetLibraryByIDRow) librarymodel.Library {
+	return librarymodel.Library{
 		ID: r.ID, Name: r.Name, ContentType: r.ContentType, ScanMode: r.ScanMode,
 		ScanInterval: r.ScanInterval, M3UURL: r.M3uUrl, EPGURL: r.EpgUrl,
 		RefreshInterval: r.RefreshInterval, LanguageFilter: r.LanguageFilter,
@@ -619,8 +603,8 @@ func libraryFromSqliteGetRow(r sqlc.GetLibraryByIDRow) Library {
 	}
 }
 
-func libraryFromSqliteListRow(r sqlc.ListLibrariesRow) Library {
-	return Library{
+func libraryFromSqliteListRow(r sqlc.ListLibrariesRow) librarymodel.Library {
+	return librarymodel.Library{
 		ID: r.ID, Name: r.Name, ContentType: r.ContentType, ScanMode: r.ScanMode,
 		ScanInterval: r.ScanInterval, M3UURL: r.M3uUrl, EPGURL: r.EpgUrl,
 		RefreshInterval: r.RefreshInterval, LanguageFilter: r.LanguageFilter,
@@ -629,8 +613,8 @@ func libraryFromSqliteListRow(r sqlc.ListLibrariesRow) Library {
 	}
 }
 
-func libraryFromPgGetRow(r sqlc_pg.GetLibraryByIDRow) Library {
-	return Library{
+func libraryFromPgGetRow(r sqlc_pg.GetLibraryByIDRow) librarymodel.Library {
+	return librarymodel.Library{
 		ID: r.ID, Name: r.Name, ContentType: r.ContentType, ScanMode: r.ScanMode,
 		ScanInterval: r.ScanInterval, M3UURL: r.M3uUrl, EPGURL: r.EpgUrl,
 		RefreshInterval: r.RefreshInterval, LanguageFilter: r.LanguageFilter,
@@ -639,8 +623,8 @@ func libraryFromPgGetRow(r sqlc_pg.GetLibraryByIDRow) Library {
 	}
 }
 
-func libraryFromPgListRow(r sqlc_pg.ListLibrariesRow) Library {
-	return Library{
+func libraryFromPgListRow(r sqlc_pg.ListLibrariesRow) librarymodel.Library {
+	return librarymodel.Library{
 		ID: r.ID, Name: r.Name, ContentType: r.ContentType, ScanMode: r.ScanMode,
 		ScanInterval: r.ScanInterval, M3UURL: r.M3uUrl, EPGURL: r.EpgUrl,
 		RefreshInterval: r.RefreshInterval, LanguageFilter: r.LanguageFilter,

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	authmodel "hubplay/internal/auth/model"
 	"hubplay/internal/db"
 	"hubplay/internal/domain"
 )
@@ -23,11 +24,11 @@ func NewService(users *db.UserRepository, logger *slog.Logger) *Service {
 	}
 }
 
-func (s *Service) GetByID(ctx context.Context, id string) (*db.User, error) {
+func (s *Service) GetByID(ctx context.Context, id string) (*authmodel.User, error) {
 	return s.users.GetByID(ctx, id)
 }
 
-func (s *Service) List(ctx context.Context, limit, offset int) ([]*db.User, int, error) {
+func (s *Service) List(ctx context.Context, limit, offset int) ([]*authmodel.User, int, error) {
 	if limit <= 0 {
 		limit = 20
 	}
@@ -37,7 +38,7 @@ func (s *Service) List(ctx context.Context, limit, offset int) ([]*db.User, int,
 	return s.users.List(ctx, limit, offset)
 }
 
-func (s *Service) Update(ctx context.Context, u *db.User) error {
+func (s *Service) Update(ctx context.Context, u *authmodel.User) error {
 	if err := s.users.Update(ctx, u); err != nil {
 		return fmt.Errorf("updating user: %w", err)
 	}

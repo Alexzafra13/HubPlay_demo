@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	iptvmodel "hubplay/internal/iptv/model"
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/auth"
 	"hubplay/internal/db"
 )
@@ -23,17 +25,17 @@ func watchDecode(t *testing.T, rr *httptest.ResponseRecorder) any {
 // seedChannel adds one channel to the fake service + library repo so
 // the handlers can resolve it.
 func seedChannel(env *iptvTestEnv, chID, libID string) {
-	ch := &db.Channel{
+	ch := &iptvmodel.Channel{
 		ID: chID, LibraryID: libID, Name: chID,
 		StreamURL: "http://example/" + chID, IsActive: true,
 	}
 	env.svc.channels[libID] = append(env.svc.channels[libID], ch)
 	env.svc.channelByID[chID] = ch
 	if env.libraries.librariesByID == nil {
-		env.libraries.librariesByID = map[string]*db.Library{}
+		env.libraries.librariesByID = map[string]*librarymodel.Library{}
 	}
 	if _, ok := env.libraries.librariesByID[libID]; !ok {
-		env.libraries.librariesByID[libID] = &db.Library{ID: libID, Name: libID, ContentType: "livetv"}
+		env.libraries.librariesByID[libID] = &librarymodel.Library{ID: libID, Name: libID, ContentType: "livetv"}
 	}
 }
 
@@ -111,7 +113,7 @@ func TestIPTVHandler_ListContinueWatching_HappyPathAsUser(t *testing.T) {
 	seedChannel(env, "ch-2", "lib-a")
 
 	// Simulate prior plays: ch-1 then ch-2 (most recent first in fake).
-	env.svc.watchedByUser = map[string][]*db.Channel{
+	env.svc.watchedByUser = map[string][]*iptvmodel.Channel{
 		"u-alice": {
 			env.svc.channelByID["ch-2"],
 			env.svc.channelByID["ch-1"],
@@ -147,7 +149,7 @@ func TestIPTVHandler_ListContinueWatching_FiltersByAccess(t *testing.T) {
 	seedChannel(env, "ch-a1", "lib-a")
 	seedChannel(env, "ch-b1", "lib-b")
 
-	env.svc.watchedByUser = map[string][]*db.Channel{
+	env.svc.watchedByUser = map[string][]*iptvmodel.Channel{
 		"u-alice": {
 			env.svc.channelByID["ch-b1"], // most recent but denied
 			env.svc.channelByID["ch-a1"],
@@ -178,7 +180,7 @@ func TestIPTVHandler_ListContinueWatching_AdminSkipsFilter(t *testing.T) {
 	env := newIPTVTestEnv(t)
 	seedChannel(env, "ch-a1", "lib-a")
 	seedChannel(env, "ch-b1", "lib-b")
-	env.svc.watchedByUser = map[string][]*db.Channel{
+	env.svc.watchedByUser = map[string][]*iptvmodel.Channel{
 		"u-admin": {
 			env.svc.channelByID["ch-a1"],
 			env.svc.channelByID["ch-b1"],
@@ -202,13 +204,13 @@ func TestIPTVHandler_ListContinueWatching_RespectsLimitCap(t *testing.T) {
 	// this test watches that the handler clamps before calling the
 	// service — we seed 25 channels and expect ≤20.
 	env := newIPTVTestEnv(t)
-	history := make([]*db.Channel, 0, 25)
+	history := make([]*iptvmodel.Channel, 0, 25)
 	for i := 0; i < 25; i++ {
 		id := "ch-" + string(rune('a'+i%26)) + string(rune('0'+i/26))
 		seedChannel(env, id, "lib-a")
 		history = append(history, env.svc.channelByID[id])
 	}
-	env.svc.watchedByUser = map[string][]*db.Channel{"u-alice": history}
+	env.svc.watchedByUser = map[string][]*iptvmodel.Channel{"u-alice": history}
 
 	rr := env.doAs(http.MethodGet, "/api/v1/me/channels/continue-watching?limit=9999", "",
 		&auth.Claims{UserID: "u-alice", Role: "admin"})
@@ -232,13 +234,13 @@ func TestIPTVHandler_ListContinueWatching_UnauthenticatedReturns401(t *testing.T
 func TestIPTVHandler_ListContinueWatching_UsesDefaultLimit(t *testing.T) {
 	// No `limit` query param → default 10. Seed 15 entries; expect 10.
 	env := newIPTVTestEnv(t)
-	history := make([]*db.Channel, 0, 15)
+	history := make([]*iptvmodel.Channel, 0, 15)
 	for i := 0; i < 15; i++ {
 		id := "ch-" + string(rune('a'+i))
 		seedChannel(env, id, "lib-a")
 		history = append(history, env.svc.channelByID[id])
 	}
-	env.svc.watchedByUser = map[string][]*db.Channel{"u-alice": history}
+	env.svc.watchedByUser = map[string][]*iptvmodel.Channel{"u-alice": history}
 
 	rr := env.doAs(http.MethodGet, "/api/v1/me/channels/continue-watching", "",
 		&auth.Claims{UserID: "u-alice", Role: "admin"})

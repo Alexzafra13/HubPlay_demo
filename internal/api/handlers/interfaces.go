@@ -5,6 +5,9 @@ import (
 	"net/http"
 	"time"
 
+	authmodel "hubplay/internal/auth/model"
+	iptvmodel "hubplay/internal/iptv/model"
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/auth"
 	"hubplay/internal/db"
 	"hubplay/internal/event"
@@ -23,15 +26,15 @@ type AuthService interface {
 	Login(ctx context.Context, username, password, deviceName, deviceID, ip string) (*auth.AuthToken, error)
 	RefreshToken(ctx context.Context, refreshToken, ip string) (*auth.AuthToken, error)
 	Logout(ctx context.Context, refreshToken string) error
-	Register(ctx context.Context, req auth.RegisterRequest) (*db.User, error)
+	Register(ctx context.Context, req auth.RegisterRequest) (*authmodel.User, error)
 	ResetPassword(ctx context.Context, userID string) (string, error)
 	ChangePassword(ctx context.Context, userID, current, next string) error
-	ListProfiles(ctx context.Context, userID string) ([]*db.User, error)
+	ListProfiles(ctx context.Context, userID string) ([]*authmodel.User, error)
 	SwitchProfile(ctx context.Context, currentUserID, targetProfileID, pin, deviceName, deviceID, ip string) (*auth.AuthToken, error)
 	SetPIN(ctx context.Context, userID, pin string) error
 	ValidateToken(ctx context.Context, tokenStr string) (*auth.Claims, error)
 	Middleware(next http.Handler) http.Handler
-	ListSessions(ctx context.Context, userID string) ([]*db.Session, error)
+	ListSessions(ctx context.Context, userID string) ([]*authmodel.Session, error)
 	RevokeSession(ctx context.Context, userID, sessionID string) error
 	CurrentSessionID(ctx context.Context, refreshToken string) string
 }
@@ -40,8 +43,8 @@ type AuthService interface {
 
 // UserService defines user operations needed by handlers.
 type UserService interface {
-	GetByID(ctx context.Context, id string) (*db.User, error)
-	List(ctx context.Context, limit, offset int) ([]*db.User, int, error)
+	GetByID(ctx context.Context, id string) (*authmodel.User, error)
+	List(ctx context.Context, limit, offset int) ([]*authmodel.User, int, error)
 	Delete(ctx context.Context, id string) error
 	Count(ctx context.Context) (int, error)
 	SetMaxContentRating(ctx context.Context, id, rating string) error
@@ -57,26 +60,26 @@ type UserService interface {
 
 // LibraryService defines library and item operations needed by handlers.
 type LibraryService interface {
-	Create(ctx context.Context, req library.CreateRequest) (*db.Library, error)
-	GetByID(ctx context.Context, id string) (*db.Library, error)
-	List(ctx context.Context) ([]*db.Library, error)
-	ListForUser(ctx context.Context, userID string) ([]*db.Library, error)
-	Update(ctx context.Context, id string, req library.UpdateRequest) (*db.Library, error)
+	Create(ctx context.Context, req library.CreateRequest) (*librarymodel.Library, error)
+	GetByID(ctx context.Context, id string) (*librarymodel.Library, error)
+	List(ctx context.Context) ([]*librarymodel.Library, error)
+	ListForUser(ctx context.Context, userID string) ([]*librarymodel.Library, error)
+	Update(ctx context.Context, id string, req library.UpdateRequest) (*librarymodel.Library, error)
 	Delete(ctx context.Context, id string) error
 	Scan(ctx context.Context, id string, refreshMetadata ...bool) error
 	ScanSync(ctx context.Context, id string) (*scanner.ScanResult, error)
 	IsScanning(id string) bool
-	ListItems(ctx context.Context, filter db.ItemFilter) ([]*db.Item, int, error)
-	GetItem(ctx context.Context, id string) (*db.Item, error)
-	GetItemChildren(ctx context.Context, id string) ([]*db.Item, error)
+	ListItems(ctx context.Context, filter librarymodel.ItemFilter) ([]*librarymodel.Item, int, error)
+	GetItem(ctx context.Context, id string) (*librarymodel.Item, error)
+	GetItemChildren(ctx context.Context, id string) ([]*librarymodel.Item, error)
 	// GetItemChildCounts returns how many direct children each parent
 	// id has in one round-trip. Used by the Children handler to inject
 	// `episode_count` into season summaries.
 	GetItemChildCounts(ctx context.Context, parentIDs []string) (map[string]int, error)
-	GetItemStreams(ctx context.Context, itemID string) ([]*db.MediaStream, error)
-	GetItemImages(ctx context.Context, itemID string) ([]*db.Image, error)
-	LatestItems(ctx context.Context, libraryID string, itemType string, limit int, capRating string) ([]*db.Item, error)
-	LatestSeriesByActivity(ctx context.Context, libraryID string, limit int) ([]*db.LatestSeriesActivity, error)
+	GetItemStreams(ctx context.Context, itemID string) ([]*librarymodel.MediaStream, error)
+	GetItemImages(ctx context.Context, itemID string) ([]*librarymodel.Image, error)
+	LatestItems(ctx context.Context, libraryID string, itemType string, limit int, capRating string) ([]*librarymodel.Item, error)
+	LatestSeriesByActivity(ctx context.Context, libraryID string, limit int) ([]*librarymodel.LatestSeriesActivity, error)
 	ItemCount(ctx context.Context, libraryID string) (int, error)
 	UserHasAccess(ctx context.Context, userID, libraryID string) (bool, error)
 	// GrantAccess / RevokeAccess / ListAccessByUser / ReplaceAccess
@@ -92,13 +95,13 @@ type LibraryService interface {
 	// owner in one tx. Powers the admin "add personal IPTV list to
 	// user X" shortcut so the operator can skip the two-navigation
 	// dance of creating a library and then ticking a checkbox.
-	CreatePersonalIPTV(ctx context.Context, ownerUserID string, req library.CreateRequest) (*db.Library, error)
+	CreatePersonalIPTV(ctx context.Context, ownerUserID string, req library.CreateRequest) (*librarymodel.Library, error)
 	// ListGenres returns the genre vocabulary across the catalogue,
 	// optionally scoped by item type ("movie", "series", or "" for the
 	// union). Used by the /movies and /series filter panel so the
 	// available chips reflect the entire library, not just the loaded
 	// page.
-	ListGenres(ctx context.Context, itemType string) ([]db.GenreCount, error)
+	ListGenres(ctx context.Context, itemType string) ([]librarymodel.GenreCount, error)
 }
 
 // LibraryAccessService is the minimal surface the IPTV handler uses to gate
@@ -132,12 +135,12 @@ type StreamManagerService interface {
 
 // IPTVService defines IPTV operations needed by handlers.
 type IPTVService interface {
-	GetChannels(ctx context.Context, libraryID string, activeOnly bool) ([]*db.Channel, error)
-	GetChannel(ctx context.Context, id string) (*db.Channel, error)
+	GetChannels(ctx context.Context, libraryID string, activeOnly bool) ([]*iptvmodel.Channel, error)
+	GetChannel(ctx context.Context, id string) (*iptvmodel.Channel, error)
 	GetGroups(ctx context.Context, libraryID string) ([]string, error)
-	GetSchedule(ctx context.Context, channelID string, from, to time.Time) ([]*db.EPGProgram, error)
-	GetBulkSchedule(ctx context.Context, channelIDs []string, from, to time.Time) (map[string][]*db.EPGProgram, error)
-	NowPlaying(ctx context.Context, channelID string) (*db.EPGProgram, error)
+	GetSchedule(ctx context.Context, channelID string, from, to time.Time) ([]*iptvmodel.EPGProgram, error)
+	GetBulkSchedule(ctx context.Context, channelIDs []string, from, to time.Time) (map[string][]*iptvmodel.EPGProgram, error)
+	NowPlaying(ctx context.Context, channelID string) (*iptvmodel.EPGProgram, error)
 	RefreshM3U(ctx context.Context, libraryID string) (int, error)
 	// TryAcquireRefresh + RunRefreshM3U + PublishRefreshFailed split
 	// the M3U refresh so the HTTP handler can return 202 immediately
@@ -161,12 +164,12 @@ type IPTVService interface {
 	RemoveFavorite(ctx context.Context, userID, channelID string) error
 	IsFavorite(ctx context.Context, userID, channelID string) (bool, error)
 	ListFavoriteIDs(ctx context.Context, userID string) ([]string, error)
-	ListFavoriteChannels(ctx context.Context, userID string) ([]*db.Channel, error)
+	ListFavoriteChannels(ctx context.Context, userID string) ([]*iptvmodel.Channel, error)
 
 	// EPG sources (per-library, multi-provider config).
 	PublicEPGCatalog() []iptv.PublicEPGSource
-	ListEPGSources(ctx context.Context, libraryID string) ([]*db.LibraryEPGSource, error)
-	AddEPGSource(ctx context.Context, libraryID, catalogID, customURL string) (*db.LibraryEPGSource, error)
+	ListEPGSources(ctx context.Context, libraryID string) ([]*iptvmodel.LibraryEPGSource, error)
+	AddEPGSource(ctx context.Context, libraryID, catalogID, customURL string) (*iptvmodel.LibraryEPGSource, error)
 	RemoveEPGSource(ctx context.Context, libraryID, sourceID string) error
 	ReorderEPGSources(ctx context.Context, libraryID string, orderedIDs []string) error
 
@@ -175,12 +178,12 @@ type IPTVService interface {
 	// the admin UI pairs it with ResetChannelHealth so an operator
 	// can either permanently disable a dead channel or clear its
 	// counter if they know it's actually working.
-	ListUnhealthyChannels(ctx context.Context, libraryID string, threshold int) ([]*db.Channel, error)
+	ListUnhealthyChannels(ctx context.Context, libraryID string, threshold int) ([]*iptvmodel.Channel, error)
 	// ChannelHealthSummary is the lightweight aggregate the admin
 	// Bibliotecas panel reads on first paint (counts only) so the
 	// page doesn't pull every unhealthy / without-EPG row just to
 	// render badges.
-	ChannelHealthSummary(ctx context.Context, libraryID string) (db.ChannelHealthSummary, error)
+	ChannelHealthSummary(ctx context.Context, libraryID string) (iptvmodel.ChannelHealthSummary, error)
 	SetChannelActive(ctx context.Context, id string, active bool) error
 	ResetChannelHealth(ctx context.Context, channelID string) error
 	// RecordProbeFailure is the same hook the proxy uses; the player
@@ -191,7 +194,7 @@ type IPTVService interface {
 	// Manual channel editing — surfaced as the "canales sin guía"
 	// admin panel. The override layer makes SetChannelTvgID survive
 	// the next M3U refresh.
-	ListChannelsWithoutEPG(ctx context.Context, libraryID string) ([]*db.Channel, error)
+	ListChannelsWithoutEPG(ctx context.Context, libraryID string) ([]*iptvmodel.Channel, error)
 	SetChannelTvgID(ctx context.Context, channelID, tvgID string) error
 
 	// Continue watching — per-user recently-played channel rail.
@@ -199,14 +202,14 @@ type IPTVService interface {
 	// current channel rows via stream_url so entries survive M3U
 	// refresh cycles.
 	RecordWatch(ctx context.Context, userID, channelID string) (time.Time, error)
-	ListContinueWatching(ctx context.Context, userID string, limit int, accessibleLibraries map[string]bool) ([]*db.Channel, []time.Time, error)
+	ListContinueWatching(ctx context.Context, userID string, limit int, accessibleLibraries map[string]bool) ([]*iptvmodel.Channel, []time.Time, error)
 
 	// Per-user channel ordering + visibility. The overlay onto a
 	// library's channel list is applied by GetChannelsForUser;
 	// ReplaceChannelOrder / SetChannelVisibility / ResetChannelOrder
 	// drive the personalisation panel's mutations.
-	GetChannelsForUser(ctx context.Context, libraryID, userID string, activeOnly bool) ([]*db.Channel, error)
-	ListChannelOverrides(ctx context.Context, userID string) ([]db.UserChannelOrderEntry, error)
+	GetChannelsForUser(ctx context.Context, libraryID, userID string, activeOnly bool) ([]*iptvmodel.Channel, error)
+	ListChannelOverrides(ctx context.Context, userID string) ([]iptvmodel.UserChannelOrderEntry, error)
 	ReplaceChannelOrder(ctx context.Context, userID string, orderedIDs []string, hiddenIDs map[string]bool) error
 	SetChannelVisibility(ctx context.Context, userID, channelID string, hidden bool) error
 	ResetChannelOrder(ctx context.Context, userID string) error
@@ -214,8 +217,8 @@ type IPTVService interface {
 	// Admin channel curation. The admin overlay (library_channel_order)
 	// composes BEFORE the per-user overlay in GetChannelsForUser; admin-
 	// hidden channels are a hard constraint that users cannot un-hide.
-	GetChannelsForLibraryAdmin(ctx context.Context, libraryID string, includeHidden bool) ([]*db.Channel, []db.LibraryChannelOrderEntry, error)
-	ListLibraryChannelOverrides(ctx context.Context, libraryID string) ([]db.LibraryChannelOrderEntry, error)
+	GetChannelsForLibraryAdmin(ctx context.Context, libraryID string, includeHidden bool) ([]*iptvmodel.Channel, []iptvmodel.LibraryChannelOrderEntry, error)
+	ListLibraryChannelOverrides(ctx context.Context, libraryID string) ([]iptvmodel.LibraryChannelOrderEntry, error)
 	ReplaceLibraryChannelOrder(ctx context.Context, libraryID string, orderedIDs []string, hiddenIDs map[string]bool) error
 	SetLibraryChannelVisibility(ctx context.Context, libraryID, channelID string, hidden bool) error
 	ResetLibraryChannelOrder(ctx context.Context, libraryID string) error
@@ -248,30 +251,30 @@ type IPTVTransmuxer interface {
 
 // ItemRepository defines item data access needed by handlers.
 type ItemRepository interface {
-	GetByID(ctx context.Context, id string) (*db.Item, error)
-	List(ctx context.Context, filter db.ItemFilter) ([]*db.Item, int, error)
+	GetByID(ctx context.Context, id string) (*librarymodel.Item, error)
+	List(ctx context.Context, filter librarymodel.ItemFilter) ([]*librarymodel.Item, int, error)
 }
 
 // MediaStreamRepository defines media stream data access needed by handlers.
 type MediaStreamRepository interface {
-	ListByItem(ctx context.Context, itemID string) ([]*db.MediaStream, error)
+	ListByItem(ctx context.Context, itemID string) ([]*librarymodel.MediaStream, error)
 }
 
 // ImageRepository defines image data access needed by handlers.
 type ImageRepository interface {
-	GetPrimaryURLs(ctx context.Context, itemIDs []string) (map[string]map[string]db.PrimaryImageRef, error)
-	ListByItem(ctx context.Context, itemID string) ([]*db.Image, error)
-	Create(ctx context.Context, img *db.Image) error
+	GetPrimaryURLs(ctx context.Context, itemIDs []string) (map[string]map[string]librarymodel.PrimaryImageRef, error)
+	ListByItem(ctx context.Context, itemID string) ([]*librarymodel.Image, error)
+	Create(ctx context.Context, img *librarymodel.Image) error
 	SetPrimary(ctx context.Context, itemID, imgType, imageID string) error
 	SetLocked(ctx context.Context, imageID string, locked bool) error
-	GetByID(ctx context.Context, id string) (*db.Image, error)
+	GetByID(ctx context.Context, id string) (*librarymodel.Image, error)
 	DeleteByID(ctx context.Context, id string) error
 }
 
 // MetadataRepository defines metadata access needed by handlers.
 type MetadataRepository interface {
-	GetByItemID(ctx context.Context, itemID string) (*db.Metadata, error)
-	GetMetadataBatch(ctx context.Context, itemIDs []string) (map[string]*db.Metadata, error)
+	GetByItemID(ctx context.Context, itemID string) (*librarymodel.Metadata, error)
+	GetMetadataBatch(ctx context.Context, itemIDs []string) (map[string]*librarymodel.Metadata, error)
 }
 
 // ExternalIDsRepository defines the per-item external-id lookup
@@ -279,7 +282,7 @@ type MetadataRepository interface {
 // links in the detail response so the client can render "Open in
 // IMDb" / "Open in TMDb" affordances without a second round-trip.
 type ExternalIDsRepository interface {
-	ListByItem(ctx context.Context, itemID string) ([]*db.ExternalID, error)
+	ListByItem(ctx context.Context, itemID string) ([]*librarymodel.ExternalID, error)
 	// GetItemIDByExternalID is the reverse lookup used by the
 	// recommendations endpoint to mark TMDb candidates that the user
 	// already has locally. Returns "" when no item carries that
@@ -290,7 +293,7 @@ type ExternalIDsRepository interface {
 // PeopleRepoForItems is the per-item people lookup used by the
 // items handler to fold cast/crew into the detail response.
 type PeopleRepoForItems interface {
-	ListByItem(ctx context.Context, itemID string) ([]*db.ItemPersonCredit, error)
+	ListByItem(ctx context.Context, itemID string) ([]*librarymodel.ItemPersonCredit, error)
 }
 
 // CollectionRepoForItems is the per-collection lookup used by the
@@ -298,7 +301,7 @@ type PeopleRepoForItems interface {
 // detail page. nil-safe at the handler level so deployments without
 // the collections feature wired keep returning the same shape.
 type CollectionRepoForItems interface {
-	GetByID(ctx context.Context, id string) (*db.Collection, error)
+	GetByID(ctx context.Context, id string) (*librarymodel.Collection, error)
 }
 
 // ChapterRepository defines chapter data access needed by handlers.
@@ -306,7 +309,7 @@ type CollectionRepoForItems interface {
 // `chapters` field — older test environments and bare deployments
 // keep working without one wired.
 type ChapterRepository interface {
-	ListByItem(ctx context.Context, itemID string) ([]*db.Chapter, error)
+	ListByItem(ctx context.Context, itemID string) ([]*librarymodel.Chapter, error)
 }
 
 // EpisodeSegmentRepository surfaces skip-intro / skip-credits markers
@@ -317,7 +320,7 @@ type ChapterRepository interface {
 // query result; the handler picks the highest-confidence row per
 // kind before serialising.
 type EpisodeSegmentRepository interface {
-	ListByItem(ctx context.Context, itemID string) ([]db.EpisodeSegment, error)
+	ListByItem(ctx context.Context, itemID string) ([]librarymodel.EpisodeSegment, error)
 }
 
 // UserDataRepository defines user data access needed by handlers.
@@ -391,14 +394,14 @@ type ProviderRepository interface {
 
 // LibraryRepository defines library data access for handlers that need direct repo access.
 type LibraryRepository interface {
-	Create(ctx context.Context, lib *db.Library) error
+	Create(ctx context.Context, lib *librarymodel.Library) error
 	// ListForUser returns every library the given user has explicit
 	// access to. Used by handlers that need to materialise the
 	// library-access set (e.g. continue-watching filter).
-	ListForUser(ctx context.Context, userID string) ([]*db.Library, error)
+	ListForUser(ctx context.Context, userID string) ([]*librarymodel.Library, error)
 }
 
 // ExternalIDRepository defines external ID data access.
 type ExternalIDRepository interface {
-	ListByItem(ctx context.Context, itemID string) ([]*db.ExternalID, error)
+	ListByItem(ctx context.Context, itemID string) ([]*librarymodel.ExternalID, error)
 }

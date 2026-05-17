@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	iptvmodel "hubplay/internal/iptv/model"
 	"hubplay/internal/db/sqlc"
 	"hubplay/internal/db/sqlc_pg"
 )
@@ -21,22 +22,6 @@ const (
 
 // ErrIPTVScheduledJobNotFound signals a missing (library_id, kind) row.
 var ErrIPTVScheduledJobNotFound = errors.New("iptv scheduled job not found")
-
-// IPTVScheduledJob is one (library, kind) schedule entry. Absent rows
-// are equivalent to "not scheduled"; enabled=false + a row is "saved
-// but paused" so the admin doesn't lose the interval they configured.
-type IPTVScheduledJob struct {
-	LibraryID      string
-	Kind           string
-	IntervalHours  int
-	Enabled        bool
-	LastRunAt      time.Time
-	LastStatus     string // "ok" | "error" | "" (never run)
-	LastError      string
-	LastDurationMS int
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-}
 
 // IPTVScheduleRepository persists automation schedules for IPTV
 // libraries. Pattern A dual-dialect: sqlc-generated queries do the
@@ -65,13 +50,13 @@ func (r *IPTVScheduleRepository) useSQLite() bool { return r.sq != nil }
 // slice means no rows; the handler layer synthesises "disabled, 24 h
 // default" placeholders for the UI so the admin always sees both
 // kinds.
-func (r *IPTVScheduleRepository) ListByLibrary(ctx context.Context, libraryID string) ([]*IPTVScheduledJob, error) {
+func (r *IPTVScheduleRepository) ListByLibrary(ctx context.Context, libraryID string) ([]*iptvmodel.IPTVScheduledJob, error) {
 	if r.useSQLite() {
 		rows, err := r.sq.ListIPTVScheduledJobsByLibrary(ctx, libraryID)
 		if err != nil {
 			return nil, fmt.Errorf("list iptv scheduled jobs: %w", err)
 		}
-		out := make([]*IPTVScheduledJob, 0, len(rows))
+		out := make([]*iptvmodel.IPTVScheduledJob, 0, len(rows))
 		for _, row := range rows {
 			j := iptvJobFromSqliteRow(row)
 			out = append(out, &j)
@@ -82,7 +67,7 @@ func (r *IPTVScheduleRepository) ListByLibrary(ctx context.Context, libraryID st
 	if err != nil {
 		return nil, fmt.Errorf("list iptv scheduled jobs: %w", err)
 	}
-	out := make([]*IPTVScheduledJob, 0, len(rows))
+	out := make([]*iptvmodel.IPTVScheduledJob, 0, len(rows))
 	for _, row := range rows {
 		j := iptvJobFromPgRow(row)
 		out = append(out, &j)
@@ -93,7 +78,7 @@ func (r *IPTVScheduleRepository) ListByLibrary(ctx context.Context, libraryID st
 // Get returns a single (library_id, kind) row. Returns
 // ErrIPTVScheduledJobNotFound when missing so the handler can respond
 // 404 without wrapping the sql.ErrNoRows.
-func (r *IPTVScheduleRepository) Get(ctx context.Context, libraryID, kind string) (*IPTVScheduledJob, error) {
+func (r *IPTVScheduleRepository) Get(ctx context.Context, libraryID, kind string) (*iptvmodel.IPTVScheduledJob, error) {
 	if r.useSQLite() {
 		row, err := r.sq.GetIPTVScheduledJob(ctx, sqlc.GetIPTVScheduledJobParams{
 			LibraryID: libraryID, Kind: kind,
@@ -128,14 +113,14 @@ func (r *IPTVScheduleRepository) Get(ctx context.Context, libraryID, kind string
 // Computation is done in Go rather than SQL because modernc.org/sqlite
 // date arithmetic has rough edges with the multiple time serialisation
 // formats the rest of the codebase has to tolerate.
-func (r *IPTVScheduleRepository) ListDue(ctx context.Context, now time.Time) ([]*IPTVScheduledJob, error) {
-	var jobs []IPTVScheduledJob
+func (r *IPTVScheduleRepository) ListDue(ctx context.Context, now time.Time) ([]*iptvmodel.IPTVScheduledJob, error) {
+	var jobs []iptvmodel.IPTVScheduledJob
 	if r.useSQLite() {
 		rows, err := r.sq.ListEnabledIPTVScheduledJobs(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("list due jobs: %w", err)
 		}
-		jobs = make([]IPTVScheduledJob, 0, len(rows))
+		jobs = make([]iptvmodel.IPTVScheduledJob, 0, len(rows))
 		for _, row := range rows {
 			jobs = append(jobs, iptvJobFromSqliteRow(row))
 		}
@@ -144,13 +129,13 @@ func (r *IPTVScheduleRepository) ListDue(ctx context.Context, now time.Time) ([]
 		if err != nil {
 			return nil, fmt.Errorf("list due jobs: %w", err)
 		}
-		jobs = make([]IPTVScheduledJob, 0, len(rows))
+		jobs = make([]iptvmodel.IPTVScheduledJob, 0, len(rows))
 		for _, row := range rows {
 			jobs = append(jobs, iptvJobFromPgRow(row))
 		}
 	}
 
-	out := make([]*IPTVScheduledJob, 0, len(jobs))
+	out := make([]*iptvmodel.IPTVScheduledJob, 0, len(jobs))
 	for i := range jobs {
 		j := jobs[i]
 		if j.IntervalHours <= 0 {
@@ -174,7 +159,7 @@ func (r *IPTVScheduleRepository) ListDue(ctx context.Context, now time.Time) ([]
 // Upsert inserts or updates a (library_id, kind) row. Caller sets
 // IntervalHours + Enabled; runtime fields (last_*) are not overwritten
 // so a reconfiguration doesn't reset the history.
-func (r *IPTVScheduleRepository) Upsert(ctx context.Context, job *IPTVScheduledJob) error {
+func (r *IPTVScheduleRepository) Upsert(ctx context.Context, job *iptvmodel.IPTVScheduledJob) error {
 	if job.IntervalHours <= 0 {
 		return fmt.Errorf("interval_hours must be > 0")
 	}
@@ -273,8 +258,8 @@ func (r *IPTVScheduleRepository) Delete(ctx context.Context, libraryID, kind str
 	return nil
 }
 
-func iptvJobFromSqliteRow(row sqlc.IptvScheduledJob) IPTVScheduledJob {
-	out := IPTVScheduledJob{
+func iptvJobFromSqliteRow(row sqlc.IptvScheduledJob) iptvmodel.IPTVScheduledJob {
+	out := iptvmodel.IPTVScheduledJob{
 		LibraryID:      row.LibraryID,
 		Kind:           row.Kind,
 		IntervalHours:  int(row.IntervalHours),
@@ -291,8 +276,8 @@ func iptvJobFromSqliteRow(row sqlc.IptvScheduledJob) IPTVScheduledJob {
 	return out
 }
 
-func iptvJobFromPgRow(row sqlc_pg.IptvScheduledJob) IPTVScheduledJob {
-	out := IPTVScheduledJob{
+func iptvJobFromPgRow(row sqlc_pg.IptvScheduledJob) iptvmodel.IPTVScheduledJob {
+	out := iptvmodel.IPTVScheduledJob{
 		LibraryID:      row.LibraryID,
 		Kind:           row.Kind,
 		IntervalHours:  int(row.IntervalHours),

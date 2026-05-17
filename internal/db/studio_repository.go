@@ -8,35 +8,11 @@ import (
 	"regexp"
 	"strings"
 
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db/sqlc"
 	"hubplay/internal/db/sqlc_pg"
 	"hubplay/internal/domain"
 )
-
-// Studio is a production company / TV network surfaced as a first-class
-// entity. The same table backs both because to a viewer they are the
-// same brand mark — Marvel Studios for movies, HBO for TV. TMDbID is
-// the upstream id when the scanner had a provider match (NULL means
-// the row is a backfill from the legacy free-form `metadata.studio`
-// text, which carries no provider id).
-type Studio struct {
-	ID      string
-	TMDBID  *int64
-	Name    string
-	Slug    string
-	LogoURL string
-}
-
-// StudioListEntry is the {studio + item count} pair the browse page
-// renders. Sorted server-side by count desc so the UI doesn't need
-// a second pass.
-type StudioListEntry struct {
-	ID        string
-	Name      string
-	Slug      string
-	LogoURL   string
-	ItemCount int64
-}
 
 // StudioRepository — Pattern A for the five sqlc-backed methods plus
 // two raw-SQL holdouts (ListItemsForStudio / SetItemStudio) that go
@@ -203,7 +179,7 @@ func (r *StudioRepository) EnsureStudio(ctx context.Context, name, logoURL strin
 
 // GetBySlug fetches the canonical row for /studios/<slug> rendering.
 // Returns (nil, nil) when no studio matches — handler converts to 404.
-func (r *StudioRepository) GetBySlug(ctx context.Context, slug string) (*Studio, error) {
+func (r *StudioRepository) GetBySlug(ctx context.Context, slug string) (*librarymodel.Studio, error) {
 	if r.useSQLite() {
 		row, err := r.sq.GetStudioBySlug(ctx, slug)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -228,15 +204,15 @@ func (r *StudioRepository) GetBySlug(ctx context.Context, slug string) (*Studio,
 
 // List returns every studio that has at least one item linked to it,
 // sorted by item count desc. Drives the /studios browse page.
-func (r *StudioRepository) List(ctx context.Context) ([]*StudioListEntry, error) {
+func (r *StudioRepository) List(ctx context.Context) ([]*librarymodel.StudioListEntry, error) {
 	if r.useSQLite() {
 		rows, err := r.sq.ListStudios(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("list studios: %w", err)
 		}
-		out := make([]*StudioListEntry, 0, len(rows))
+		out := make([]*librarymodel.StudioListEntry, 0, len(rows))
 		for _, row := range rows {
-			out = append(out, &StudioListEntry{
+			out = append(out, &librarymodel.StudioListEntry{
 				ID:        row.ID,
 				Name:      row.Name,
 				Slug:      row.Slug,
@@ -250,9 +226,9 @@ func (r *StudioRepository) List(ctx context.Context) ([]*StudioListEntry, error)
 	if err != nil {
 		return nil, fmt.Errorf("list studios: %w", err)
 	}
-	out := make([]*StudioListEntry, 0, len(rows))
+	out := make([]*librarymodel.StudioListEntry, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, &StudioListEntry{
+		out = append(out, &librarymodel.StudioListEntry{
 			ID:        row.ID,
 			Name:      row.Name,
 			Slug:      row.Slug,
@@ -263,31 +239,19 @@ func (r *StudioRepository) List(ctx context.Context) ([]*StudioListEntry, error)
 	return out, nil
 }
 
-// StudioItem is the slim row /studios/<slug> renders in its grid:
-// just enough to plot a poster + title + year card with a deep-link
-// to /items/{id}. The poster image id resolves through
-// /api/v1/images/file/{id} same as the recommendations rail.
-type StudioItem struct {
-	ID             string
-	Type           string
-	Title          string
-	Year           int
-	PrimaryImageID string
-}
-
 // ListItemsForStudio returns the catalogue's items linked to this
 // studio id, sorted year-desc. Raw SQL because the trailing ORDER BY
 // hits the sqlc v1.31.1 truncation bug we work around in two other
 // places already.
-func (r *StudioRepository) ListItemsForStudio(ctx context.Context, studioID string) ([]*StudioItem, error) {
+func (r *StudioRepository) ListItemsForStudio(ctx context.Context, studioID string) ([]*librarymodel.StudioItem, error) {
 	rows, err := r.db.QueryContext(ctx, r.listItemsSQL, studioID)
 	if err != nil {
 		return nil, fmt.Errorf("list items for studio %s: %w", studioID, err)
 	}
 	defer rows.Close() //nolint:errcheck
-	out := make([]*StudioItem, 0)
+	out := make([]*librarymodel.StudioItem, 0)
 	for rows.Next() {
-		var it StudioItem
+		var it librarymodel.StudioItem
 		if err := rows.Scan(&it.ID, &it.Type, &it.Title, &it.Year, &it.PrimaryImageID); err != nil {
 			return nil, fmt.Errorf("scan studio item: %w", err)
 		}
@@ -306,8 +270,8 @@ func (r *StudioRepository) SetItemStudio(ctx context.Context, itemID, studioID s
 	return nil
 }
 
-func studioFromSqliteRow(row sqlc.Studio) Studio {
-	s := Studio{
+func studioFromSqliteRow(row sqlc.Studio) librarymodel.Studio {
+	s := librarymodel.Studio{
 		ID:      row.ID,
 		Name:    row.Name,
 		Slug:    row.Slug,
@@ -320,8 +284,8 @@ func studioFromSqliteRow(row sqlc.Studio) Studio {
 	return s
 }
 
-func studioFromPgRow(row sqlc_pg.Studio) Studio {
-	s := Studio{
+func studioFromPgRow(row sqlc_pg.Studio) librarymodel.Studio {
+	s := librarymodel.Studio{
 		ID:      row.ID,
 		Name:    row.Name,
 		Slug:    row.Slug,

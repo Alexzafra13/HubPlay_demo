@@ -6,6 +6,9 @@ import (
 	"testing"
 	"time"
 
+	authmodel "hubplay/internal/auth/model"
+	iptvmodel "hubplay/internal/iptv/model"
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db"
 	"hubplay/internal/testutil"
 )
@@ -71,13 +74,13 @@ func newBenchHomeRepo(b *testing.B, n int) (*db.HomeRepository, string) {
 	ctx := context.Background()
 
 	now := time.Now().UTC()
-	if err := repos.Libraries.Create(ctx, &db.Library{
+	if err := repos.Libraries.Create(ctx, &librarymodel.Library{
 		ID: "lib-mov", Name: "Movies", ContentType: "movies",
 		CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		b.Fatalf("create library: %v", err)
 	}
-	if err := repos.Users.Create(ctx, &db.User{
+	if err := repos.Users.Create(ctx, &authmodel.User{
 		ID: "u-1", Username: "u1", DisplayName: "U1",
 		PasswordHash: "x", Role: "admin", IsActive: true, CreatedAt: now,
 	}); err != nil {
@@ -96,7 +99,7 @@ func newBenchHomeRepo(b *testing.B, n int) (*db.HomeRepository, string) {
 			typ = "episode"
 			parent = fmt.Sprintf("series-%d", i/40)
 			if i%40 == 0 {
-				_ = repos.Items.Create(ctx, &db.Item{
+				_ = repos.Items.Create(ctx, &librarymodel.Item{
 					ID: parent, LibraryID: "lib-mov",
 					Type: "series", Title: parent, SortTitle: parent,
 					Path:    "/m/" + parent,
@@ -104,7 +107,7 @@ func newBenchHomeRepo(b *testing.B, n int) (*db.HomeRepository, string) {
 				})
 			}
 		}
-		_ = repos.Items.Create(ctx, &db.Item{
+		_ = repos.Items.Create(ctx, &librarymodel.Item{
 			ID: fmt.Sprintf("i-%05d", i), LibraryID: "lib-mov",
 			ParentID:    parent,
 			Type:        typ,
@@ -139,13 +142,13 @@ func newBenchHomeRepoLiveTV(b *testing.B, n int) (*db.HomeRepository, string) {
 	ctx := context.Background()
 
 	now := time.Now().UTC()
-	if err := repos.Libraries.Create(ctx, &db.Library{
+	if err := repos.Libraries.Create(ctx, &librarymodel.Library{
 		ID: "lib-tv", Name: "Live TV", ContentType: "livetv",
 		CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		b.Fatalf("create library: %v", err)
 	}
-	if err := repos.Users.Create(ctx, &db.User{
+	if err := repos.Users.Create(ctx, &authmodel.User{
 		ID: "u-1", Username: "u1", DisplayName: "U1",
 		PasswordHash: "x", Role: "admin", IsActive: true, CreatedAt: now,
 	}); err != nil {
@@ -157,7 +160,7 @@ func newBenchHomeRepoLiveTV(b *testing.B, n int) (*db.HomeRepository, string) {
 
 	chRepo := db.NewChannelRepository(testutil.Driver(), database)
 	for i := 0; i < n; i++ {
-		_ = chRepo.Create(ctx, &db.Channel{
+		_ = chRepo.Create(ctx, &iptvmodel.Channel{
 			ID: fmt.Sprintf("ch-%05d", i), LibraryID: "lib-tv",
 			Name: fmt.Sprintf("Ch %d", i), Number: i + 1,
 			GroupName: "Bench",

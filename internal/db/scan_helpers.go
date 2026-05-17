@@ -1,6 +1,9 @@
 package db
 
-import "database/sql"
+import (
+	"database/sql"
+	librarymodel "hubplay/internal/library/model"
+)
 
 // itemNullables holds the sql.Null* intermediaries used when scanning an
 // item row for the list/children raw-SQL queries (the two queries that
@@ -21,9 +24,9 @@ type itemNullables struct {
 	communityRating sql.NullFloat64
 }
 
-// applyList writes nullable values into the Item for list-query rows
+// applyList writes nullable values into the librarymodel.Item for list-query rows
 // (18 columns — no fingerprint, content_rating or premiere_date).
-func (n *itemNullables) applyList(item *Item) {
+func (n *itemNullables) applyList(item *librarymodel.Item) {
 	item.ParentID = n.parentID.String
 	item.OriginalTitle = n.originalTitle.String
 	item.Path = n.path.String
@@ -42,7 +45,7 @@ func (n *itemNullables) applyList(item *Item) {
 }
 
 // listScanDests returns the Scan destinations for the list/children query.
-func listScanDests(item *Item, n *itemNullables) []any {
+func listScanDests(item *librarymodel.Item, n *itemNullables) []any {
 	return []any{
 		&item.ID, &item.LibraryID, &n.parentID, &item.Type, &item.Title,
 		&item.SortTitle, &n.originalTitle, &item.Year, &n.path, &item.Size, &item.DurationTicks,

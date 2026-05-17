@@ -7,21 +7,11 @@ import (
 	"fmt"
 	"time"
 
+	authmodel "hubplay/internal/auth/model"
 	"hubplay/internal/db/sqlc"
 	"hubplay/internal/db/sqlc_pg"
 	"hubplay/internal/domain"
 )
-
-// SigningKey is the domain shape exposed to internal/auth. Used to
-// live as an alias to sqlc.JwtSigningKey; now a proper struct so the
-// dual-dialect repo can return the same type regardless of which
-// generated package produced the row.
-type SigningKey struct {
-	ID        string
-	Secret    string
-	CreatedAt time.Time
-	RetiredAt sql.NullTime
-}
 
 // SigningKeyRepository — Pattern A dual-dialect. The rotation policy
 // + caching lives in internal/auth/keystore.go; this file only
@@ -43,7 +33,7 @@ func NewSigningKeyRepository(driver string, database *sql.DB) *SigningKeyReposit
 
 func (r *SigningKeyRepository) useSQLite() bool { return r.sq != nil }
 
-func (r *SigningKeyRepository) Insert(ctx context.Context, k *SigningKey) error {
+func (r *SigningKeyRepository) Insert(ctx context.Context, k *authmodel.SigningKey) error {
 	if r.useSQLite() {
 		if err := r.sq.CreateSigningKey(ctx, sqlc.CreateSigningKeyParams{
 			ID:        k.ID,
@@ -66,7 +56,7 @@ func (r *SigningKeyRepository) Insert(ctx context.Context, k *SigningKey) error 
 	return nil
 }
 
-func (r *SigningKeyRepository) GetByID(ctx context.Context, id string) (*SigningKey, error) {
+func (r *SigningKeyRepository) GetByID(ctx context.Context, id string) (*authmodel.SigningKey, error) {
 	if r.useSQLite() {
 		row, err := r.sq.GetSigningKey(ctx, id)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -89,7 +79,7 @@ func (r *SigningKeyRepository) GetByID(ctx context.Context, id string) (*Signing
 	return &k, nil
 }
 
-func (r *SigningKeyRepository) ListActive(ctx context.Context) ([]*SigningKey, error) {
+func (r *SigningKeyRepository) ListActive(ctx context.Context) ([]*authmodel.SigningKey, error) {
 	if r.useSQLite() {
 		rows, err := r.sq.ListActiveSigningKeys(ctx)
 		if err != nil {
@@ -104,7 +94,7 @@ func (r *SigningKeyRepository) ListActive(ctx context.Context) ([]*SigningKey, e
 	return mapSigningKeysFromPg(rows), nil
 }
 
-func (r *SigningKeyRepository) ListAll(ctx context.Context) ([]*SigningKey, error) {
+func (r *SigningKeyRepository) ListAll(ctx context.Context) ([]*authmodel.SigningKey, error) {
 	if r.useSQLite() {
 		rows, err := r.sq.ListSigningKeys(ctx)
 		if err != nil {
@@ -165,19 +155,19 @@ func (r *SigningKeyRepository) DeleteRetiredBefore(ctx context.Context, cutoff t
 
 // ── row mapping helpers ─────────────────────────────────────────────────
 
-func signingKeyFromSqlite(r sqlc.JwtSigningKey) SigningKey {
-	return SigningKey{ID: r.ID, Secret: r.Secret, CreatedAt: r.CreatedAt, RetiredAt: r.RetiredAt}
+func signingKeyFromSqlite(r sqlc.JwtSigningKey) authmodel.SigningKey {
+	return authmodel.SigningKey{ID: r.ID, Secret: r.Secret, CreatedAt: r.CreatedAt, RetiredAt: r.RetiredAt}
 }
 
-func signingKeyFromPg(r sqlc_pg.JwtSigningKey) SigningKey {
-	return SigningKey{ID: r.ID, Secret: r.Secret, CreatedAt: r.CreatedAt, RetiredAt: r.RetiredAt}
+func signingKeyFromPg(r sqlc_pg.JwtSigningKey) authmodel.SigningKey {
+	return authmodel.SigningKey{ID: r.ID, Secret: r.Secret, CreatedAt: r.CreatedAt, RetiredAt: r.RetiredAt}
 }
 
-func mapSigningKeysFromSqlite(rows []sqlc.JwtSigningKey) []*SigningKey {
+func mapSigningKeysFromSqlite(rows []sqlc.JwtSigningKey) []*authmodel.SigningKey {
 	if len(rows) == 0 {
 		return nil
 	}
-	out := make([]*SigningKey, len(rows))
+	out := make([]*authmodel.SigningKey, len(rows))
 	for i, row := range rows {
 		k := signingKeyFromSqlite(row)
 		out[i] = &k
@@ -185,11 +175,11 @@ func mapSigningKeysFromSqlite(rows []sqlc.JwtSigningKey) []*SigningKey {
 	return out
 }
 
-func mapSigningKeysFromPg(rows []sqlc_pg.JwtSigningKey) []*SigningKey {
+func mapSigningKeysFromPg(rows []sqlc_pg.JwtSigningKey) []*authmodel.SigningKey {
 	if len(rows) == 0 {
 		return nil
 	}
-	out := make([]*SigningKey, len(rows))
+	out := make([]*authmodel.SigningKey, len(rows))
 	for i, row := range rows {
 		k := signingKeyFromPg(row)
 		out[i] = &k

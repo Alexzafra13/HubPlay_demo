@@ -12,7 +12,7 @@ import (
 	"fmt"
 	"time"
 
-	"hubplay/internal/db"
+	iptvmodel "hubplay/internal/iptv/model"
 )
 
 // ChannelWithoutEPGWindow is how far forward the "does this channel
@@ -24,7 +24,7 @@ const ChannelWithoutEPGWindow = 24 * time.Hour
 // have no programmes overlapping the next ChannelWithoutEPGWindow.
 // Admin-only use: surfaces the long tail of channels that the EPG
 // match didn't cover.
-func (s *Service) ListChannelsWithoutEPG(ctx context.Context, libraryID string) ([]*db.Channel, error) {
+func (s *Service) ListChannelsWithoutEPG(ctx context.Context, libraryID string) ([]*iptvmodel.Channel, error) {
 	now := time.Now().UTC()
 	return s.channels.ListWithoutEPGByLibrary(ctx, libraryID,
 		now.Add(-2*time.Hour), now.Add(ChannelWithoutEPGWindow))
@@ -54,7 +54,7 @@ func (s *Service) SetChannelTvgID(ctx context.Context, channelID, tvgID string) 
 		}
 		return nil
 	}
-	return s.overrides.Upsert(ctx, &db.ChannelOverride{
+	return s.overrides.Upsert(ctx, &iptvmodel.ChannelOverride{
 		LibraryID: ch.LibraryID,
 		StreamURL: ch.StreamURL,
 		TvgID:     tvgID,

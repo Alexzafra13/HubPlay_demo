@@ -6,14 +6,15 @@ import (
 	"testing"
 	"time"
 
+	authmodel "hubplay/internal/auth/model"
 	"hubplay/internal/db"
 	"hubplay/internal/domain"
 	"hubplay/internal/testutil"
 )
 
-func createTestUser(t *testing.T, repo *db.UserRepository, username string) *db.User {
+func createTestUser(t *testing.T, repo *db.UserRepository, username string) *authmodel.User {
 	t.Helper()
-	u := &db.User{
+	u := &authmodel.User{
 		ID:           "user-" + username,
 		Username:     username,
 		DisplayName:  username,
@@ -224,7 +225,7 @@ func TestUserRepository_ListProfilesForOwner(t *testing.T) {
 	ctx := context.Background()
 
 	// Parent account.
-	parent := &db.User{
+	parent := &authmodel.User{
 		ID: "parent-1", Username: "alex", DisplayName: "Alex",
 		PasswordHash: "$2a$10$fake", Role: "admin", IsActive: true,
 		CreatedAt: time.Now(),
@@ -236,7 +237,7 @@ func TestUserRepository_ListProfilesForOwner(t *testing.T) {
 	// Three child profiles in non-alphabetical order so we can assert
 	// the ORDER BY actually sorts them. Names mix case to exercise
 	// LOWER()-based collation.
-	for _, p := range []*db.User{
+	for _, p := range []*authmodel.User{
 		{ID: "p-charlie", Username: "alex:charlie", DisplayName: "charlie",
 			PasswordHash: "", Role: "user", IsActive: true,
 			ParentUserID: parent.ID, CreatedAt: time.Now()},

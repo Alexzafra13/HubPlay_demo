@@ -5,30 +5,10 @@ import (
 	"database/sql"
 	"fmt"
 
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db/sqlc"
 	"hubplay/internal/db/sqlc_pg"
 )
-
-type MediaStream struct {
-	ItemID            string
-	StreamIndex       int
-	StreamType        string // video, audio, subtitle
-	Codec             string
-	Profile           string
-	Bitrate           int
-	Width             int
-	Height            int
-	FrameRate         float64
-	HDRType           string
-	ColorSpace        string
-	Channels          int
-	SampleRate        int
-	Language          string
-	Title             string
-	IsDefault         bool
-	IsForced          bool
-	IsHearingImpaired bool
-}
 
 // MediaStreamRepository — Pattern A dual-dialect. 2 methods +
 // transaction in ReplaceForItem.
@@ -52,7 +32,7 @@ func (r *MediaStreamRepository) useSQLite() bool { return r.sq != nil }
 
 // ReplaceForItem deletes all existing streams for the item and
 // inserts the new set inside a single transaction.
-func (r *MediaStreamRepository) ReplaceForItem(ctx context.Context, itemID string, streams []*MediaStream) error {
+func (r *MediaStreamRepository) ReplaceForItem(ctx context.Context, itemID string, streams []*librarymodel.MediaStream) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
@@ -84,7 +64,7 @@ func (r *MediaStreamRepository) ReplaceForItem(ctx context.Context, itemID strin
 	return tx.Commit()
 }
 
-func (r *MediaStreamRepository) ListByItem(ctx context.Context, itemID string) ([]*MediaStream, error) {
+func (r *MediaStreamRepository) ListByItem(ctx context.Context, itemID string) ([]*librarymodel.MediaStream, error) {
 	if r.useSQLite() {
 		rows, err := r.sq.ListMediaStreamsByItem(ctx, itemID)
 		if err != nil {
@@ -93,7 +73,7 @@ func (r *MediaStreamRepository) ListByItem(ctx context.Context, itemID string) (
 		if len(rows) == 0 {
 			return nil, nil
 		}
-		out := make([]*MediaStream, len(rows))
+		out := make([]*librarymodel.MediaStream, len(rows))
 		for i, row := range rows {
 			s := mediaStreamFromSqliteRow(row)
 			out[i] = &s
@@ -107,7 +87,7 @@ func (r *MediaStreamRepository) ListByItem(ctx context.Context, itemID string) (
 	if len(rows) == 0 {
 		return nil, nil
 	}
-	out := make([]*MediaStream, len(rows))
+	out := make([]*librarymodel.MediaStream, len(rows))
 	for i, row := range rows {
 		s := mediaStreamFromPgRow(row)
 		out[i] = &s
@@ -117,7 +97,7 @@ func (r *MediaStreamRepository) ListByItem(ctx context.Context, itemID string) (
 
 // ── row mapping helpers ─────────────────────────────────────────────────
 
-func mediaStreamToSqliteInsertParams(s *MediaStream) sqlc.InsertMediaStreamParams {
+func mediaStreamToSqliteInsertParams(s *librarymodel.MediaStream) sqlc.InsertMediaStreamParams {
 	return sqlc.InsertMediaStreamParams{
 		ItemID:            s.ItemID,
 		StreamIndex:       int64(s.StreamIndex),
@@ -140,7 +120,7 @@ func mediaStreamToSqliteInsertParams(s *MediaStream) sqlc.InsertMediaStreamParam
 	}
 }
 
-func mediaStreamToPgInsertParams(s *MediaStream) sqlc_pg.InsertMediaStreamParams {
+func mediaStreamToPgInsertParams(s *librarymodel.MediaStream) sqlc_pg.InsertMediaStreamParams {
 	return sqlc_pg.InsertMediaStreamParams{
 		ItemID:            s.ItemID,
 		StreamIndex:       int32(s.StreamIndex),
@@ -163,8 +143,8 @@ func mediaStreamToPgInsertParams(s *MediaStream) sqlc_pg.InsertMediaStreamParams
 	}
 }
 
-func mediaStreamFromSqliteRow(r sqlc.ListMediaStreamsByItemRow) MediaStream {
-	return MediaStream{
+func mediaStreamFromSqliteRow(r sqlc.ListMediaStreamsByItemRow) librarymodel.MediaStream {
+	return librarymodel.MediaStream{
 		ItemID:            r.ItemID,
 		StreamIndex:       int(r.StreamIndex),
 		StreamType:        r.StreamType,
@@ -186,8 +166,8 @@ func mediaStreamFromSqliteRow(r sqlc.ListMediaStreamsByItemRow) MediaStream {
 	}
 }
 
-func mediaStreamFromPgRow(r sqlc_pg.ListMediaStreamsByItemRow) MediaStream {
-	return MediaStream{
+func mediaStreamFromPgRow(r sqlc_pg.ListMediaStreamsByItemRow) librarymodel.MediaStream {
+	return librarymodel.MediaStream{
 		ItemID:            r.ItemID,
 		StreamIndex:       int(r.StreamIndex),
 		StreamType:        r.StreamType,

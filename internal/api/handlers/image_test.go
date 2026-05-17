@@ -23,7 +23,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"hubplay/internal/db"
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/domain"
 	"hubplay/internal/imaging"
 	"hubplay/internal/imaging/pathmap"
@@ -39,24 +39,24 @@ import (
 
 type fakeImageRepo struct {
 	mu     sync.Mutex
-	images map[string]*db.Image // by image ID
+	images map[string]*librarymodel.Image // by image ID
 	// primaryURLs lets tests stub GetPrimaryURLs cheaply without
 	// having to back the repo with a real images table. Keyed by
 	// itemID then by image type ("primary" / "backdrop" / "logo").
-	primaryURLs map[string]map[string]db.PrimaryImageRef
+	primaryURLs map[string]map[string]librarymodel.PrimaryImageRef
 }
 
 func newFakeImageRepo() *fakeImageRepo {
-	return &fakeImageRepo{images: map[string]*db.Image{}}
+	return &fakeImageRepo{images: map[string]*librarymodel.Image{}}
 }
 
-func (r *fakeImageRepo) GetPrimaryURLs(_ context.Context, ids []string) (map[string]map[string]db.PrimaryImageRef, error) {
+func (r *fakeImageRepo) GetPrimaryURLs(_ context.Context, ids []string) (map[string]map[string]librarymodel.PrimaryImageRef, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	out := make(map[string]map[string]db.PrimaryImageRef, len(ids))
+	out := make(map[string]map[string]librarymodel.PrimaryImageRef, len(ids))
 	for _, id := range ids {
 		if urls, ok := r.primaryURLs[id]; ok {
-			cp := make(map[string]db.PrimaryImageRef, len(urls))
+			cp := make(map[string]librarymodel.PrimaryImageRef, len(urls))
 			for k, v := range urls {
 				cp[k] = v
 			}
@@ -66,10 +66,10 @@ func (r *fakeImageRepo) GetPrimaryURLs(_ context.Context, ids []string) (map[str
 	return out, nil
 }
 
-func (r *fakeImageRepo) ListByItem(_ context.Context, itemID string) ([]*db.Image, error) {
+func (r *fakeImageRepo) ListByItem(_ context.Context, itemID string) ([]*librarymodel.Image, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	out := []*db.Image{}
+	out := []*librarymodel.Image{}
 	for _, img := range r.images {
 		if img.ItemID == itemID {
 			out = append(out, img)
@@ -78,7 +78,7 @@ func (r *fakeImageRepo) ListByItem(_ context.Context, itemID string) ([]*db.Imag
 	return out, nil
 }
 
-func (r *fakeImageRepo) Create(_ context.Context, img *db.Image) error {
+func (r *fakeImageRepo) Create(_ context.Context, img *librarymodel.Image) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	cp := *img
@@ -101,7 +101,7 @@ func (r *fakeImageRepo) SetPrimary(_ context.Context, itemID, imgType, imageID s
 	return domain.NewNotFound("image")
 }
 
-func (r *fakeImageRepo) GetByID(_ context.Context, id string) (*db.Image, error) {
+func (r *fakeImageRepo) GetByID(_ context.Context, id string) (*librarymodel.Image, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if img, ok := r.images[id]; ok {
@@ -144,26 +144,26 @@ func (r *fakeImageRepo) HasLockedForKind(_ context.Context, itemID, kind string)
 }
 
 type fakeExternalIDRepo struct {
-	byItem map[string][]*db.ExternalID
+	byItem map[string][]*librarymodel.ExternalID
 }
 
-func (r *fakeExternalIDRepo) ListByItem(_ context.Context, itemID string) ([]*db.ExternalID, error) {
+func (r *fakeExternalIDRepo) ListByItem(_ context.Context, itemID string) ([]*librarymodel.ExternalID, error) {
 	return r.byItem[itemID], nil
 }
 
 type fakeItemRepo struct {
-	byID map[string]*db.Item
+	byID map[string]*librarymodel.Item
 }
 
-func (r *fakeItemRepo) GetByID(_ context.Context, id string) (*db.Item, error) {
+func (r *fakeItemRepo) GetByID(_ context.Context, id string) (*librarymodel.Item, error) {
 	if it, ok := r.byID[id]; ok {
 		return it, nil
 	}
 	return nil, domain.NewNotFound("item")
 }
 
-func (r *fakeItemRepo) List(_ context.Context, filter db.ItemFilter) ([]*db.Item, int, error) {
-	out := []*db.Item{}
+func (r *fakeItemRepo) List(_ context.Context, filter librarymodel.ItemFilter) ([]*librarymodel.Item, int, error) {
+	out := []*librarymodel.Item{}
 	for _, it := range r.byID {
 		if filter.LibraryID != "" && it.LibraryID != filter.LibraryID {
 			continue
@@ -225,8 +225,8 @@ func newImageTestEnv(t *testing.T) *imageTestEnv {
 		t:         t,
 		imageDir:  imageDir,
 		images:    newFakeImageRepo(),
-		externals: &fakeExternalIDRepo{byItem: map[string][]*db.ExternalID{}},
-		items:     &fakeItemRepo{byID: map[string]*db.Item{}},
+		externals: &fakeExternalIDRepo{byItem: map[string][]*librarymodel.ExternalID{}},
+		items:     &fakeItemRepo{byID: map[string]*librarymodel.Item{}},
 		providers: &fakeProviderManager{},
 	}
 	// Build a real library.ImageRefresher over the same fakes so the
@@ -357,9 +357,9 @@ func TestImageHandler_List_Empty(t *testing.T) {
 
 func TestImageHandler_List_PopulatedReturnsImages(t *testing.T) {
 	env := newImageTestEnv(t)
-	env.images.images["img-1"] = &db.Image{ID: "img-1", ItemID: "item-1", Type: "primary", Path: "/api/v1/images/file/img-1"}
-	env.images.images["img-2"] = &db.Image{ID: "img-2", ItemID: "item-1", Type: "backdrop", Path: "/api/v1/images/file/img-2"}
-	env.images.images["img-3"] = &db.Image{ID: "img-3", ItemID: "item-other", Type: "primary"}
+	env.images.images["img-1"] = &librarymodel.Image{ID: "img-1", ItemID: "item-1", Type: "primary", Path: "/api/v1/images/file/img-1"}
+	env.images.images["img-2"] = &librarymodel.Image{ID: "img-2", ItemID: "item-1", Type: "backdrop", Path: "/api/v1/images/file/img-2"}
+	env.images.images["img-3"] = &librarymodel.Image{ID: "img-3", ItemID: "item-other", Type: "primary"}
 
 	resp := env.do(http.MethodGet, "/api/v1/items/item-1/images/", nil, "")
 	if resp.StatusCode != http.StatusOK {
@@ -389,8 +389,8 @@ func TestImageHandler_Available_NoExternalIDs_EmptyData(t *testing.T) {
 
 func TestImageHandler_Available_ReturnsProviderImages(t *testing.T) {
 	env := newImageTestEnv(t)
-	env.externals.byItem["item-1"] = []*db.ExternalID{{Provider: "tmdb", ExternalID: "42"}}
-	env.items.byID["item-1"] = &db.Item{ID: "item-1", Type: "movie"}
+	env.externals.byItem["item-1"] = []*librarymodel.ExternalID{{Provider: "tmdb", ExternalID: "42"}}
+	env.items.byID["item-1"] = &librarymodel.Item{ID: "item-1", Type: "movie"}
 	env.providers.fetchImagesFn = func(_ context.Context, ids map[string]string, _ provider.ItemType) ([]provider.ImageResult, error) {
 		if ids["tmdb"] != "42" {
 			t.Errorf("unexpected ids: %v", ids)
@@ -414,8 +414,8 @@ func TestImageHandler_Available_ReturnsProviderImages(t *testing.T) {
 
 func TestImageHandler_Available_FilterByType(t *testing.T) {
 	env := newImageTestEnv(t)
-	env.externals.byItem["item-1"] = []*db.ExternalID{{Provider: "tmdb", ExternalID: "42"}}
-	env.items.byID["item-1"] = &db.Item{ID: "item-1", Type: "movie"}
+	env.externals.byItem["item-1"] = []*librarymodel.ExternalID{{Provider: "tmdb", ExternalID: "42"}}
+	env.items.byID["item-1"] = &librarymodel.Item{ID: "item-1", Type: "movie"}
 	env.providers.fetchImagesFn = func(_ context.Context, _ map[string]string, _ provider.ItemType) ([]provider.ImageResult, error) {
 		return []provider.ImageResult{
 			{URL: "a.jpg", Type: "primary"},
@@ -505,7 +505,7 @@ func TestImageHandler_Upload_MissingFileField_Rejected(t *testing.T) {
 
 func TestImageHandler_SetPrimary_ExistingImage(t *testing.T) {
 	env := newImageTestEnv(t)
-	env.images.images["img-1"] = &db.Image{ID: "img-1", ItemID: "item-1", Type: "primary"}
+	env.images.images["img-1"] = &librarymodel.Image{ID: "img-1", ItemID: "item-1", Type: "primary"}
 	resp := env.do(http.MethodPut, "/api/v1/items/item-1/images/img-1/primary", nil, "")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status: got %d want 200", resp.StatusCode)
@@ -525,7 +525,7 @@ func TestImageHandler_SetPrimary_UnknownImage_404(t *testing.T) {
 
 func TestImageHandler_SetPrimary_WrongItem_404(t *testing.T) {
 	env := newImageTestEnv(t)
-	env.images.images["img-1"] = &db.Image{ID: "img-1", ItemID: "item-A", Type: "primary"}
+	env.images.images["img-1"] = &librarymodel.Image{ID: "img-1", ItemID: "item-A", Type: "primary"}
 	resp := env.do(http.MethodPut, "/api/v1/items/item-B/images/img-1/primary", nil, "")
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("wrong item: got %d want 404", resp.StatusCode)
@@ -688,8 +688,8 @@ func TestImageHandler_RefreshLibraryImages_AddsMissingTypes(t *testing.T) {
 	t.Cleanup(func() { imaging.BlockedIP = prev })
 
 	env := newImageTestEnv(t)
-	env.items.byID["item-r1"] = &db.Item{ID: "item-r1", LibraryID: "lib-1", Type: "movie"}
-	env.externals.byItem["item-r1"] = []*db.ExternalID{{Provider: "tmdb", ExternalID: "100"}}
+	env.items.byID["item-r1"] = &librarymodel.Item{ID: "item-r1", LibraryID: "lib-1", Type: "movie"}
+	env.externals.byItem["item-r1"] = []*librarymodel.ExternalID{{Provider: "tmdb", ExternalID: "100"}}
 
 	// Small JPEG served by an httptest server so downloadImage succeeds.
 	imgBytes := makeJPEG(t, 60, 60)

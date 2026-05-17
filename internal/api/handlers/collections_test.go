@@ -10,8 +10,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/api/handlers"
-	"hubplay/internal/db"
 )
 
 // fakeCollectionRepo records the id passed to GetByID so the test can
@@ -20,19 +20,19 @@ import (
 // a positive GetByID with no children.
 type fakeCollectionRepo struct {
 	gotID  string
-	result *db.Collection
+	result *librarymodel.Collection
 }
 
-func (f *fakeCollectionRepo) GetByID(_ context.Context, id string) (*db.Collection, error) {
+func (f *fakeCollectionRepo) GetByID(_ context.Context, id string) (*librarymodel.Collection, error) {
 	f.gotID = id
 	return f.result, nil
 }
 
-func (f *fakeCollectionRepo) List(_ context.Context) ([]*db.CollectionListEntry, error) {
+func (f *fakeCollectionRepo) List(_ context.Context) ([]*librarymodel.CollectionListEntry, error) {
 	return nil, nil
 }
 
-func (f *fakeCollectionRepo) ListItemsForCollection(_ context.Context, _ string) ([]*db.CollectionItem, error) {
+func (f *fakeCollectionRepo) ListItemsForCollection(_ context.Context, _ string) ([]*librarymodel.CollectionItem, error) {
 	return nil, nil
 }
 
@@ -46,7 +46,7 @@ func (f *fakeCollectionRepo) ListItemsForCollection(_ context.Context, _ string)
 // regress the saga page back into a "Colección no encontrada" loop.
 func TestCollectionHandler_Get_DecodesPercentEncodedID(t *testing.T) {
 	repo := &fakeCollectionRepo{
-		result: &db.Collection{
+		result: &librarymodel.Collection{
 			ID:     "collection:9485",
 			TMDBID: 9485,
 			Name:   "A todo gas - Colección",
@@ -90,7 +90,7 @@ func TestCollectionHandler_Get_DecodesPercentEncodedID(t *testing.T) {
 // row.
 func TestCollectionHandler_Get_PassesUnescapedIDThrough(t *testing.T) {
 	repo := &fakeCollectionRepo{
-		result: &db.Collection{
+		result: &librarymodel.Collection{
 			ID:     "collection:9485",
 			TMDBID: 9485,
 			Name:   "A todo gas",

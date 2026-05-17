@@ -47,7 +47,7 @@ type HomeRecommendation struct {
 // the cold-start case. Caller decides whether to fall back to a
 // generic "newest in catalogue" rail or hide the slot.
 //
-// Library access enforced via the same EXISTS pattern as Trending.
+// librarymodel.Library access enforced via the same EXISTS pattern as Trending.
 func (r *HomeRepository) Recommended(ctx context.Context, userID string, limit int) ([]HomeRecommendation, error) {
 	if limit <= 0 || limit > 30 {
 		limit = 5

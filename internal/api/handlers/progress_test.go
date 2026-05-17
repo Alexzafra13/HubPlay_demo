@@ -13,6 +13,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/auth"
 	"hubplay/internal/db"
 	"hubplay/internal/event"
@@ -522,7 +523,7 @@ func TestProgressHandler_ContinueWatching_EpisodeSurfacesSeasonAndSeriesArt(t *t
 	// backdrop, series poster + backdrop + logo. The handler should
 	// promote season art onto the wire so the Home hero can render
 	// a "Sigue viendo" slide that mirrors the season detail page.
-	env.images.primaryURLs = map[string]map[string]db.PrimaryImageRef{
+	env.images.primaryURLs = map[string]map[string]librarymodel.PrimaryImageRef{
 		"ep-1": {
 			"primary":  {Path: "/img/ep-still.jpg"},
 			"backdrop": {Path: "/img/ep-still-bd.jpg"},
@@ -591,7 +592,7 @@ func TestProgressHandler_ContinueWatching_MovieSkipsSeasonEnrichment(t *testing.
 			{ItemID: "movie-1", PositionTicks: 50, LastPlayedAt: &now, Title: "Foo", Type: "movie", DurationTicks: 1000},
 		}, nil
 	}
-	env.images.primaryURLs = map[string]map[string]db.PrimaryImageRef{
+	env.images.primaryURLs = map[string]map[string]librarymodel.PrimaryImageRef{
 		"movie-1": {"primary": {Path: "/img/movie.jpg"}},
 	}
 

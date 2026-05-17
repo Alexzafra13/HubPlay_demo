@@ -10,10 +10,10 @@ import (
 
 	"github.com/google/uuid"
 
-	"hubplay/internal/db"
+	librarymodel "hubplay/internal/library/model"
 )
 
-// showCache holds the series + season `db.Item` rows already known to
+// showCache holds the series + season `librarymodel.Item` rows already known to
 // the scanner during one ScanLibrary run. Pre-populated from the DB
 // at the start of the scan (same pass as `existingPaths`), then
 // extended in-place as the walker discovers new series.
@@ -91,7 +91,7 @@ func seasonKey(seriesID string, seasonNum int) string {
 // Enrichment is best-effort: provider down / no API key / no match
 // leave the row visible in DB without metadata, and the NEXT scan
 // retries automatically.
-func (s *Scanner) ensureSeriesRow(ctx context.Context, lib *db.Library, cache *showCache, seriesName string) (string, error) {
+func (s *Scanner) ensureSeriesRow(ctx context.Context, lib *librarymodel.Library, cache *showCache, seriesName string) (string, error) {
 	cache.mu.Lock()
 	if id, ok := cache.series[seriesName]; ok {
 		alreadyChecked := cache.checkedEnrichment[id]
@@ -105,7 +105,7 @@ func (s *Scanner) ensureSeriesRow(ctx context.Context, lib *db.Library, cache *s
 
 	id := uuid.NewString()
 	now := time.Now()
-	item := &db.Item{
+	item := &librarymodel.Item{
 		ID:          id,
 		LibraryID:   lib.ID,
 		Type:        "series",
@@ -148,7 +148,7 @@ func (s *Scanner) checkAndEnrichSeries(ctx context.Context, cache *showCache, se
 // same call when an api key is configured (friendlier names like
 // "Specials" or "The Final Chapter"), and a separate self-healing pass
 // catches seasons created on a previous TMDb-less scan.
-func (s *Scanner) ensureSeasonRow(ctx context.Context, lib *db.Library, cache *showCache, seriesID string, seasonNum int) (string, error) {
+func (s *Scanner) ensureSeasonRow(ctx context.Context, lib *librarymodel.Library, cache *showCache, seriesID string, seasonNum int) (string, error) {
 	key := seasonKey(seriesID, seasonNum)
 	cache.mu.Lock()
 	if id, ok := cache.season[key]; ok {
@@ -165,7 +165,7 @@ func (s *Scanner) ensureSeasonRow(ctx context.Context, lib *db.Library, cache *s
 	now := time.Now()
 	title := fmt.Sprintf("Season %d", seasonNum)
 	sn := seasonNum
-	item := &db.Item{
+	item := &librarymodel.Item{
 		ID:           id,
 		LibraryID:    lib.ID,
 		ParentID:     seriesID,

@@ -4,25 +4,25 @@ import (
 	"testing"
 	"time"
 
-	"hubplay/internal/db"
+	authmodel "hubplay/internal/auth/model"
 	"hubplay/internal/domain"
 )
 
 // newTestKey builds a signing key with a stable id and secret for assertions
 // that need a deterministic kid in the token header.
-func newTestKey(id, secret string) *db.SigningKey {
-	return &db.SigningKey{ID: id, Secret: secret, CreatedAt: time.Unix(0, 0)}
+func newTestKey(id, secret string) *authmodel.SigningKey {
+	return &authmodel.SigningKey{ID: id, Secret: secret, CreatedAt: time.Unix(0, 0)}
 }
 
 // resolverFor returns a keyResolver that recognises the provided keys and
 // fails with domain.ErrNotFound for any other kid — exactly the semantics
 // the real KeyStore.Lookup exposes.
-func resolverFor(keys ...*db.SigningKey) keyResolver {
-	index := make(map[string]*db.SigningKey, len(keys))
+func resolverFor(keys ...*authmodel.SigningKey) keyResolver {
+	index := make(map[string]*authmodel.SigningKey, len(keys))
 	for _, k := range keys {
 		index[k.ID] = k
 	}
-	return func(kid string) (*db.SigningKey, error) {
+	return func(kid string) (*authmodel.SigningKey, error) {
 		if k, ok := index[kid]; ok {
 			return k, nil
 		}
@@ -141,7 +141,7 @@ func TestGenerateAccessToken_StampsKidHeader(t *testing.T) {
 
 	// Validation through a resolver that records the kid asked for.
 	var seenKid string
-	resolve := func(kid string) (*db.SigningKey, error) {
+	resolve := func(kid string) (*authmodel.SigningKey, error) {
 		seenKid = kid
 		return key, nil
 	}

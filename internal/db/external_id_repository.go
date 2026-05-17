@@ -6,16 +6,10 @@ import (
 	"errors"
 	"fmt"
 
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db/sqlc"
 	"hubplay/internal/db/sqlc_pg"
 )
-
-// ExternalID links an item to an external provider ID (tmdb, imdb, tvdb).
-type ExternalID struct {
-	ItemID     string
-	Provider   string
-	ExternalID string
-}
 
 // ExternalIDRepository — Pattern A dual-dialect plus one raw-SQL
 // holdout (GetItemIDByExternalID — sqlc 1.31.1 truncates the trailing
@@ -44,7 +38,7 @@ func NewExternalIDRepository(driver string, database *sql.DB) *ExternalIDReposit
 
 func (r *ExternalIDRepository) useSQLite() bool { return r.sq != nil }
 
-func (r *ExternalIDRepository) Upsert(ctx context.Context, e *ExternalID) error {
+func (r *ExternalIDRepository) Upsert(ctx context.Context, e *librarymodel.ExternalID) error {
 	var err error
 	if r.useSQLite() {
 		err = r.sq.UpsertExternalID(ctx, sqlc.UpsertExternalIDParams{
@@ -65,7 +59,7 @@ func (r *ExternalIDRepository) Upsert(ctx context.Context, e *ExternalID) error 
 	return nil
 }
 
-func (r *ExternalIDRepository) ListByItem(ctx context.Context, itemID string) ([]*ExternalID, error) {
+func (r *ExternalIDRepository) ListByItem(ctx context.Context, itemID string) ([]*librarymodel.ExternalID, error) {
 	if r.useSQLite() {
 		rows, err := r.sq.ListExternalIDsByItem(ctx, itemID)
 		if err != nil {
@@ -80,7 +74,7 @@ func (r *ExternalIDRepository) ListByItem(ctx context.Context, itemID string) ([
 	return externalIDsFromPgRows(rows), nil
 }
 
-func (r *ExternalIDRepository) GetByProvider(ctx context.Context, itemID, prov string) (*ExternalID, error) {
+func (r *ExternalIDRepository) GetByProvider(ctx context.Context, itemID, prov string) (*librarymodel.ExternalID, error) {
 	if r.useSQLite() {
 		row, err := r.sq.GetExternalIDByProvider(ctx, sqlc.GetExternalIDByProviderParams{
 			ItemID:   itemID,
@@ -92,7 +86,7 @@ func (r *ExternalIDRepository) GetByProvider(ctx context.Context, itemID, prov s
 		if err != nil {
 			return nil, fmt.Errorf("get external id: %w", err)
 		}
-		e := ExternalID{ItemID: row.ItemID, Provider: row.Provider, ExternalID: row.ExternalID}
+		e := librarymodel.ExternalID{ItemID: row.ItemID, Provider: row.Provider, ExternalID: row.ExternalID}
 		return &e, nil
 	}
 	row, err := r.pq.GetExternalIDByProvider(ctx, sqlc_pg.GetExternalIDByProviderParams{
@@ -105,7 +99,7 @@ func (r *ExternalIDRepository) GetByProvider(ctx context.Context, itemID, prov s
 	if err != nil {
 		return nil, fmt.Errorf("get external id: %w", err)
 	}
-	e := ExternalID{ItemID: row.ItemID, Provider: row.Provider, ExternalID: row.ExternalID}
+	e := librarymodel.ExternalID{ItemID: row.ItemID, Provider: row.Provider, ExternalID: row.ExternalID}
 	return &e, nil
 }
 
@@ -148,24 +142,24 @@ func (r *ExternalIDRepository) GetItemIDByExternalID(ctx context.Context, provid
 	return id, nil
 }
 
-func externalIDsFromSqliteRows(rows []sqlc.ExternalID) []*ExternalID {
+func externalIDsFromSqliteRows(rows []sqlc.ExternalID) []*librarymodel.ExternalID {
 	if len(rows) == 0 {
 		return nil
 	}
-	out := make([]*ExternalID, len(rows))
+	out := make([]*librarymodel.ExternalID, len(rows))
 	for i, row := range rows {
-		out[i] = &ExternalID{ItemID: row.ItemID, Provider: row.Provider, ExternalID: row.ExternalID}
+		out[i] = &librarymodel.ExternalID{ItemID: row.ItemID, Provider: row.Provider, ExternalID: row.ExternalID}
 	}
 	return out
 }
 
-func externalIDsFromPgRows(rows []sqlc_pg.ExternalID) []*ExternalID {
+func externalIDsFromPgRows(rows []sqlc_pg.ExternalID) []*librarymodel.ExternalID {
 	if len(rows) == 0 {
 		return nil
 	}
-	out := make([]*ExternalID, len(rows))
+	out := make([]*librarymodel.ExternalID, len(rows))
 	for i, row := range rows {
-		out[i] = &ExternalID{ItemID: row.ItemID, Provider: row.Provider, ExternalID: row.ExternalID}
+		out[i] = &librarymodel.ExternalID{ItemID: row.ItemID, Provider: row.Provider, ExternalID: row.ExternalID}
 	}
 	return out
 }

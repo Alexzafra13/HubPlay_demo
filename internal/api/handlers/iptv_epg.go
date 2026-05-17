@@ -19,6 +19,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	iptvmodel "hubplay/internal/iptv/model"
 	"hubplay/internal/db"
 )
 
@@ -144,7 +145,7 @@ func (h *IPTVHandler) ReorderEPGSources(w http.ResponseWriter, r *http.Request) 
 	respondJSON(w, http.StatusOK, map[string]any{"data": epgSourcesToJSON(sources)})
 }
 
-func epgSourcesToJSON(sources []*db.LibraryEPGSource) []map[string]any {
+func epgSourcesToJSON(sources []*iptvmodel.LibraryEPGSource) []map[string]any {
 	out := make([]map[string]any, 0, len(sources))
 	for _, s := range sources {
 		out = append(out, epgSourceToJSON(s))
@@ -152,7 +153,7 @@ func epgSourcesToJSON(sources []*db.LibraryEPGSource) []map[string]any {
 	return out
 }
 
-func epgSourceToJSON(s *db.LibraryEPGSource) map[string]any {
+func epgSourceToJSON(s *iptvmodel.LibraryEPGSource) map[string]any {
 	var lastRefreshed any
 	if !s.LastRefreshedAt.IsZero() {
 		lastRefreshed = s.LastRefreshedAt

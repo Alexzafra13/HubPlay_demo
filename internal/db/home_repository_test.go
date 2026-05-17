@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	authmodel "hubplay/internal/auth/model"
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db"
 	"hubplay/internal/testutil"
 )
@@ -20,13 +22,13 @@ func setupHomeTrendingTest(t *testing.T) *db.Repositories {
 	ctx := context.Background()
 
 	now := time.Now().UTC()
-	if err := repos.Users.Create(ctx, &db.User{
+	if err := repos.Users.Create(ctx, &authmodel.User{
 		ID: "u-1", Username: "u", PasswordHash: "h",
 		Role: "user", CreatedAt: now, IsActive: true,
 	}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	if err := repos.Libraries.Create(ctx, &db.Library{
+	if err := repos.Libraries.Create(ctx, &librarymodel.Library{
 		ID: "lib-h", Name: "Movies", ContentType: "movies",
 		CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
@@ -38,7 +40,7 @@ func setupHomeTrendingTest(t *testing.T) *db.Repositories {
 	if err := repos.Libraries.GrantAccess(ctx, "u-1", "lib-h"); err != nil {
 		t.Fatalf("grant library access: %v", err)
 	}
-	if err := repos.Items.Create(ctx, &db.Item{
+	if err := repos.Items.Create(ctx, &librarymodel.Item{
 		ID: "movie-trending", LibraryID: "lib-h", Type: "movie",
 		Title: "Trending Movie", SortTitle: "trending movie",
 		DurationTicks: 72000000000, Container: "mp4",
@@ -92,16 +94,16 @@ func TestHomeRepository_Trending_HandlesLegacyMonotonicTimestamp(t *testing.T) {
 	ctx := context.Background()
 
 	now := time.Now().UTC()
-	_ = repos.Users.Create(ctx, &db.User{
+	_ = repos.Users.Create(ctx, &authmodel.User{
 		ID: "u-1", Username: "u", PasswordHash: "h",
 		Role: "user", CreatedAt: now, IsActive: true,
 	})
-	_ = repos.Libraries.Create(ctx, &db.Library{
+	_ = repos.Libraries.Create(ctx, &librarymodel.Library{
 		ID: "lib-h", Name: "Movies", ContentType: "movies",
 		CreatedAt: now, UpdatedAt: now,
 	})
 	_ = repos.Libraries.GrantAccess(ctx, "u-1", "lib-h")
-	_ = repos.Items.Create(ctx, &db.Item{
+	_ = repos.Items.Create(ctx, &librarymodel.Item{
 		ID: "movie-legacy", LibraryID: "lib-h", Type: "movie",
 		Title: "Legacy Movie", SortTitle: "legacy movie",
 		DurationTicks: 72000000000, Container: "mp4",
@@ -145,13 +147,13 @@ func TestHomeRepository_Recommended_ScoresUnwatchedByGenreOverlap(t *testing.T) 
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	if err := repos.Users.Create(ctx, &db.User{
+	if err := repos.Users.Create(ctx, &authmodel.User{
 		ID: "u-1", Username: "u", PasswordHash: "h",
 		Role: "user", CreatedAt: now, IsActive: true,
 	}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	if err := repos.Libraries.Create(ctx, &db.Library{
+	if err := repos.Libraries.Create(ctx, &librarymodel.Library{
 		ID: "lib-rec", Name: "Movies", ContentType: "movies",
 		CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
@@ -166,7 +168,7 @@ func TestHomeRepository_Recommended_ScoresUnwatchedByGenreOverlap(t *testing.T) 
 	// overlap). Ordered so that without the genre filter the comedy
 	// would still rank above the drama by added_at.
 	mustItem := func(id, title, sortKey string, addedDelta time.Duration) {
-		if err := repos.Items.Create(ctx, &db.Item{
+		if err := repos.Items.Create(ctx, &librarymodel.Item{
 			ID: id, LibraryID: "lib-rec", Type: "movie",
 			Title: title, SortTitle: sortKey,
 			DurationTicks: 72000000000, Container: "mp4",
@@ -228,7 +230,7 @@ func TestHomeRepository_Recommended_ColdStartReturnsNil(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	if err := repos.Users.Create(ctx, &db.User{
+	if err := repos.Users.Create(ctx, &authmodel.User{
 		ID: "u-cold", Username: "cold", PasswordHash: "h",
 		Role: "user", CreatedAt: now, IsActive: true,
 	}); err != nil {
@@ -255,13 +257,13 @@ func TestHomeRepository_Recommended_FiltersWatchedItems(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	if err := repos.Users.Create(ctx, &db.User{
+	if err := repos.Users.Create(ctx, &authmodel.User{
 		ID: "u-1", Username: "u", PasswordHash: "h",
 		Role: "user", CreatedAt: now, IsActive: true,
 	}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	if err := repos.Libraries.Create(ctx, &db.Library{
+	if err := repos.Libraries.Create(ctx, &librarymodel.Library{
 		ID: "lib-rec", Name: "Movies", ContentType: "movies",
 		CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
@@ -275,7 +277,7 @@ func TestHomeRepository_Recommended_FiltersWatchedItems(t *testing.T) {
 	// (should be filtered as "in progress"), one barely touched (1%,
 	// should still surface).
 	mustItem := func(id string) {
-		if err := repos.Items.Create(ctx, &db.Item{
+		if err := repos.Items.Create(ctx, &librarymodel.Item{
 			ID: id, LibraryID: "lib-rec", Type: "movie",
 			Title: id, SortTitle: id,
 			DurationTicks: 1000_000_000, Container: "mp4",

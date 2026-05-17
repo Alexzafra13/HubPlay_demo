@@ -1,11 +1,11 @@
 package iptv
 
-import "hubplay/internal/db"
+import iptvmodel "hubplay/internal/iptv/model"
 
 // sampleTvgIDs returns up to `max` non-empty tvg-id strings from a
 // channel list, for diagnostic logs. Pure helper so it's easy to
 // unit-test (see epg_diagnostic_test.go).
-func sampleTvgIDs(channels []*db.Channel, max int) []string {
+func sampleTvgIDs(channels []*iptvmodel.Channel, max int) []string {
 	if max <= 0 {
 		return nil
 	}
@@ -26,7 +26,7 @@ func sampleTvgIDs(channels []*db.Channel, max int) []string {
 // the most actionable signal for the "zero-match" warning: if the
 // number is high, the operator's M3U is missing tvg-id attributes
 // and no XMLTV match could ever succeed.
-func countBlankTvgIDs(channels []*db.Channel) int {
+func countBlankTvgIDs(channels []*iptvmodel.Channel) int {
 	n := 0
 	for _, ch := range channels {
 		if ch == nil || ch.TvgID == "" {

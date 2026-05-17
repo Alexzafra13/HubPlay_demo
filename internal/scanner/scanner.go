@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db"
 	"hubplay/internal/event"
 	"hubplay/internal/imaging"
@@ -135,7 +136,7 @@ type ScanResult struct {
 }
 
 // ScanLibrary scans all paths for a library and updates the database.
-func (s *Scanner) ScanLibrary(ctx context.Context, lib *db.Library) (*ScanResult, error) {
+func (s *Scanner) ScanLibrary(ctx context.Context, lib *librarymodel.Library) (*ScanResult, error) {
 	start := time.Now()
 	result := &ScanResult{}
 
@@ -156,8 +157,8 @@ func (s *Scanner) ScanLibrary(ctx context.Context, lib *db.Library) (*ScanResult
 	// aggregate rows with no file path, so processFile never visits
 	// them. Without this sweep a season row created on a previous
 	// (TMDb-less) scan would stay poster-less forever.
-	var existingSeasons []*db.Item
-	if err := s.iterateLibraryItems(ctx, lib.ID, func(item *db.Item) {
+	var existingSeasons []*librarymodel.Item
+	if err := s.iterateLibraryItems(ctx, lib.ID, func(item *librarymodel.Item) {
 		if item.Path != "" {
 			existingPaths[item.Path] = true
 		}
@@ -245,23 +246,23 @@ func (s *Scanner) ScanLibrary(ctx context.Context, lib *db.Library) (*ScanResult
 
 // iterateLibraryItems pages through every item in a library — series,
 // season, episode, movie — calling fn for each. The default
-// `db.ItemFilter` projects to root items only (parent_id IS NULL),
+// `librarymodel.ItemFilter` projects to root items only (parent_id IS NULL),
 // which used to silently miss every season + episode in shows
 // libraries; we explicitly enumerate by type so the iteration
 // returns the full graph.
 //
 // Pagination uses the actual returned slice length to detect the
-// last page, NOT the requested pageSize — `db.ItemFilter.List`
+// last page, NOT the requested pageSize — `librarymodel.ItemFilter.List`
 // caps Limit at 100 internally, so requesting 500 returns 100, and
 // a `len < requested` check would always fire after the first batch
 // (the bug that caused libraries with >100 items to lose cache
 // entries on re-scan).
-func (s *Scanner) iterateLibraryItems(ctx context.Context, libraryID string, fn func(*db.Item)) error {
+func (s *Scanner) iterateLibraryItems(ctx context.Context, libraryID string, fn func(*librarymodel.Item)) error {
 	const pageSize = 100 // matches the upper bound enforced by ItemFilter.
 	for _, t := range []string{"series", "season", "episode", "movie", "audio"} {
 		offset := 0
 		for {
-			items, _, err := s.items.List(ctx, db.ItemFilter{
+			items, _, err := s.items.List(ctx, librarymodel.ItemFilter{
 				LibraryID: libraryID,
 				Type:      t,
 				Limit:     pageSize,
@@ -282,7 +283,7 @@ func (s *Scanner) iterateLibraryItems(ctx context.Context, libraryID string, fn 
 	return nil
 }
 
-func (s *Scanner) walkPath(ctx context.Context, lib *db.Library, root string, seenPaths map[string]bool, cache *showCache, result *ScanResult) error {
+func (s *Scanner) walkPath(ctx context.Context, lib *librarymodel.Library, root string, seenPaths map[string]bool, cache *showCache, result *ScanResult) error {
 	// Resolve the root to a real absolute path for symlink boundary checks.
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
@@ -365,11 +366,11 @@ func (s *Scanner) walkPath(ctx context.Context, lib *db.Library, root string, se
 // series → season → episode → movie → audio (see scanner.go), which
 // means series/external_ids land first; by the time we hit a season
 // or episode the parent's tmdb id is fresh in the database.
-func (s *Scanner) RefreshMetadata(ctx context.Context, lib *db.Library) error {
+func (s *Scanner) RefreshMetadata(ctx context.Context, lib *librarymodel.Library) error {
 	s.logger.Info("refreshing metadata for library", "library", lib.Name)
 
 	count := 0
-	err := s.iterateLibraryItems(ctx, lib.ID, func(item *db.Item) {
+	err := s.iterateLibraryItems(ctx, lib.ID, func(item *librarymodel.Item) {
 		// Delete old images and metadata so the enrichment call below
 		// repopulates them. Best-effort — a failed delete still lets
 		// enrichment overwrite via Upsert.
@@ -398,7 +399,7 @@ func (s *Scanner) RefreshMetadata(ctx context.Context, lib *db.Library) error {
 	return nil
 }
 
-func (s *Scanner) processFile(ctx context.Context, lib *db.Library, libRoot, path string, cache *showCache, result *ScanResult) error {
+func (s *Scanner) processFile(ctx context.Context, lib *librarymodel.Library, libRoot, path string, cache *showCache, result *ScanResult) error {
 	// Check if item already exists
 	existing, err := s.items.GetByPath(ctx, path)
 	if err == nil {
@@ -421,7 +422,7 @@ func (s *Scanner) processFile(ctx context.Context, lib *db.Library, libRoot, pat
 	return s.createItem(ctx, lib, libRoot, path, cache, result)
 }
 
-func (s *Scanner) createItem(ctx context.Context, lib *db.Library, libRoot, path string, cache *showCache, result *ScanResult) error {
+func (s *Scanner) createItem(ctx context.Context, lib *librarymodel.Library, libRoot, path string, cache *showCache, result *ScanResult) error {
 	probeResult, err := s.prober.Probe(ctx, path)
 	if err != nil {
 		return fmt.Errorf("probing %q: %w", path, err)
@@ -474,7 +475,7 @@ func (s *Scanner) createItem(ctx context.Context, lib *db.Library, libRoot, path
 		// keep the file visible somewhere than drop it on the floor.
 	}
 
-	item := &db.Item{
+	item := &librarymodel.Item{
 		ID:            itemID,
 		LibraryID:     lib.ID,
 		ParentID:      parentID,
@@ -538,7 +539,7 @@ func (s *Scanner) createItem(ctx context.Context, lib *db.Library, libRoot, path
 	return nil
 }
 
-func (s *Scanner) updateItem(ctx context.Context, item *db.Item, path, fp string, result *ScanResult) error {
+func (s *Scanner) updateItem(ctx context.Context, item *librarymodel.Item, path, fp string, result *ScanResult) error {
 	probeResult, err := s.prober.Probe(ctx, path)
 	if err != nil {
 		return fmt.Errorf("probing %q: %w", path, err)
@@ -586,13 +587,13 @@ func (s *Scanner) updateItem(ctx context.Context, item *db.Item, path, fp string
 // nil for an empty input so the caller can pass it straight to
 // Replace without a length check — Replace's transactional
 // clear-then-insert handles the empty case.
-func probeResultToChapters(pr *probe.Result) []db.Chapter {
+func probeResultToChapters(pr *probe.Result) []librarymodel.Chapter {
 	if len(pr.Chapters) == 0 {
 		return nil
 	}
-	out := make([]db.Chapter, len(pr.Chapters))
+	out := make([]librarymodel.Chapter, len(pr.Chapters))
 	for i, c := range pr.Chapters {
-		out[i] = db.Chapter{
+		out[i] = librarymodel.Chapter{
 			StartTicks: probe.DurationTicks(c.Start),
 			EndTicks:   probe.DurationTicks(c.End),
 			Title:      c.Title,
@@ -601,10 +602,10 @@ func probeResultToChapters(pr *probe.Result) []db.Chapter {
 	return out
 }
 
-func probeResultToStreams(itemID string, pr *probe.Result) []*db.MediaStream {
-	var streams []*db.MediaStream
+func probeResultToStreams(itemID string, pr *probe.Result) []*librarymodel.MediaStream {
+	var streams []*librarymodel.MediaStream
 	for _, s := range pr.Streams {
-		streams = append(streams, &db.MediaStream{
+		streams = append(streams, &librarymodel.MediaStream{
 			ItemID:            itemID,
 			StreamIndex:       s.Index,
 			StreamType:        s.CodecType,
@@ -668,7 +669,7 @@ func parseTitleYear(filename string) (string, int) {
 // metadata (e.g. because the TMDB API key was not configured during the
 // initial scan, or because the parent series wasn't enriched yet at the
 // time the episode was first inserted).
-func (s *Scanner) enrichIfMissing(ctx context.Context, item *db.Item) {
+func (s *Scanner) enrichIfMissing(ctx context.Context, item *librarymodel.Item) {
 	if s.providers == nil {
 		return
 	}
@@ -701,7 +702,7 @@ func (s *Scanner) enrichIfMissing(ctx context.Context, item *db.Item) {
 // posters, not episode posters. RefreshMetadata iterates every row in
 // the library, so this guard is what keeps the admin "Refresh metadata"
 // button from melting the TMDb quota.
-func (s *Scanner) enrichMetadata(ctx context.Context, item *db.Item) {
+func (s *Scanner) enrichMetadata(ctx context.Context, item *librarymodel.Item) {
 	if s.providers == nil {
 		return
 	}
@@ -766,7 +767,7 @@ func (s *Scanner) enrichMetadata(ctx context.Context, item *db.Item) {
 	// round-trip per item just to get the YouTube id.
 	genresJSON, _ := json.Marshal(meta.Genres)
 	tagsJSON, _ := json.Marshal(meta.Tags)
-	if err := s.metadata.Upsert(ctx, &db.Metadata{
+	if err := s.metadata.Upsert(ctx, &librarymodel.Metadata{
 		ItemID:        item.ID,
 		Overview:      meta.Overview,
 		Tagline:       meta.Tagline,
@@ -830,7 +831,7 @@ func (s *Scanner) enrichMetadata(ctx context.Context, item *db.Item) {
 
 	// Store external IDs
 	for prov, extID := range meta.ExternalIDs {
-		if err := s.externalIDs.Upsert(ctx, &db.ExternalID{
+		if err := s.externalIDs.Upsert(ctx, &librarymodel.ExternalID{
 			ItemID:     item.ID,
 			Provider:   prov,
 			ExternalID: extID,
@@ -863,7 +864,7 @@ func (s *Scanner) enrichMetadata(ctx context.Context, item *db.Item) {
 // fetchAndStoreImages picks the highest-scored candidate for each kind
 // (primary, backdrop, logo) the providers return, downloads it via
 // imaging.IngestRemoteImage (SSRF + size + blurhash + atomic write),
-// and persists a db.Image row pointing at the local file.
+// and persists a librarymodel.Image row pointing at the local file.
 //
 // Errors per image are logged and skipped — losing one poster is
 // strictly better than failing the whole scan. The first stored image
@@ -914,7 +915,7 @@ func (s *Scanner) fetchAndStoreImages(ctx context.Context, itemID string, extern
 		if providerName == "" {
 			providerName = "unknown"
 		}
-		dbImg := &db.Image{
+		dbImg := &librarymodel.Image{
 			ID:                 imgID,
 			ItemID:             itemID,
 			Type:               kind,
@@ -951,7 +952,7 @@ func (s *Scanner) fetchAndStoreImages(ctx context.Context, itemID string, extern
 // the canonical title — this fixes the user-visible "Season 1 / Season
 // 1" duplicate label in shows where the placeholder slipped through
 // without the TMDb id at first scan.
-func (s *Scanner) enrichSeason(ctx context.Context, item *db.Item, seriesID string, seasonNum int) {
+func (s *Scanner) enrichSeason(ctx context.Context, item *librarymodel.Item, seriesID string, seasonNum int) {
 	if s.providers == nil || s.externalIDs == nil {
 		return
 	}
@@ -994,7 +995,7 @@ func (s *Scanner) enrichSeason(ctx context.Context, item *db.Item, seriesID stri
 	}
 
 	if meta.Overview != "" {
-		if err := s.metadata.Upsert(ctx, &db.Metadata{
+		if err := s.metadata.Upsert(ctx, &librarymodel.Metadata{
 			ItemID:   item.ID,
 			Overview: meta.Overview,
 		}); err != nil {
@@ -1022,7 +1023,7 @@ func (s *Scanner) fetchAndStoreSeasonPoster(ctx context.Context, itemID, posterU
 	}
 
 	imgID := uuid.NewString()
-	dbImg := &db.Image{
+	dbImg := &librarymodel.Image{
 		ID:                 imgID,
 		ItemID:             itemID,
 		Type:               "primary",
@@ -1054,7 +1055,7 @@ func (s *Scanner) fetchAndStoreSeasonPoster(ctx context.Context, itemID, posterU
 // `seasonItemID` is the season row that owns the episode; we climb one
 // link up to the series to read its external_ids. The walker already
 // hands us this id when the show-hierarchy match succeeded.
-func (s *Scanner) enrichEpisode(ctx context.Context, item *db.Item, seasonItemID string, seasonNum, episodeNum int) {
+func (s *Scanner) enrichEpisode(ctx context.Context, item *librarymodel.Item, seasonItemID string, seasonNum, episodeNum int) {
 	if s.providers == nil || s.externalIDs == nil {
 		return
 	}
@@ -1118,7 +1119,7 @@ func (s *Scanner) enrichEpisode(ctx context.Context, item *db.Item, seasonItemID
 	}
 
 	if meta.Overview != "" {
-		if err := s.metadata.Upsert(ctx, &db.Metadata{
+		if err := s.metadata.Upsert(ctx, &librarymodel.Metadata{
 			ItemID:   item.ID,
 			Overview: meta.Overview,
 		}); err != nil {
@@ -1151,7 +1152,7 @@ func (s *Scanner) fetchAndStoreEpisodeStill(ctx context.Context, itemID, stillUR
 	}
 
 	imgID := uuid.NewString()
-	dbImg := &db.Image{
+	dbImg := &librarymodel.Image{
 		ID:                 imgID,
 		ItemID:             itemID,
 		Type:               "backdrop",
@@ -1230,7 +1231,7 @@ func (s *Scanner) syncPeople(ctx context.Context, itemID string, people []provid
 		return
 	}
 
-	credits := make([]db.ItemPersonCredit, 0, len(people))
+	credits := make([]librarymodel.ItemPersonCredit, 0, len(people))
 	for _, p := range people {
 		if p.Name == "" {
 			continue
@@ -1254,7 +1255,7 @@ func (s *Scanner) syncPeople(ctx context.Context, itemID string, people []provid
 				s.logger.Debug("person thumb download failed", "name", p.Name, "url", p.ThumbURL, "error", err)
 			}
 		}
-		credits = append(credits, db.ItemPersonCredit{
+		credits = append(credits, librarymodel.ItemPersonCredit{
 			PersonID:      personID,
 			Role:          p.Role,
 			CharacterName: p.Character,

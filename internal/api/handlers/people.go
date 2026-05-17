@@ -9,7 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"hubplay/internal/db"
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/domain"
 )
 
@@ -17,8 +17,8 @@ import (
 // needs. Defined here to keep the dependency arrow pointing inward
 // and to make the handler trivially fakeable from tests.
 type PeopleRepository interface {
-	GetByID(ctx context.Context, id string) (*db.Person, error)
-	ListFilmographyByPerson(ctx context.Context, personID string) ([]*db.FilmographyEntry, error)
+	GetByID(ctx context.Context, id string) (*librarymodel.Person, error)
+	ListFilmographyByPerson(ctx context.Context, personID string) ([]*librarymodel.FilmographyEntry, error)
 }
 
 // PeopleHandler serves cast/crew profile photos. The thumb file

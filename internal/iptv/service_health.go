@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	iptvmodel "hubplay/internal/iptv/model"
 	"hubplay/internal/db"
 	"hubplay/internal/event"
 )
@@ -132,7 +133,7 @@ func sanitiseProbeError(err error) string {
 // ListUnhealthyChannels returns channels whose consecutive-failure
 // count is at or above the threshold. Threshold 0 uses the repo
 // default (db.UnhealthyThreshold).
-func (s *Service) ListUnhealthyChannels(ctx context.Context, libraryID string, threshold int) ([]*db.Channel, error) {
+func (s *Service) ListUnhealthyChannels(ctx context.Context, libraryID string, threshold int) ([]*iptvmodel.Channel, error) {
 	return s.channels.ListUnhealthyByLibrary(ctx, libraryID, threshold)
 }
 
@@ -145,7 +146,7 @@ func (s *Service) ListUnhealthyChannels(ctx context.Context, libraryID string, t
 // Window matches ChannelWithoutEPGWindow on the read path so the
 // "without EPG" count agrees with what ListChannelsWithoutEPG would
 // return if called for the same library.
-func (s *Service) ChannelHealthSummary(ctx context.Context, libraryID string) (db.ChannelHealthSummary, error) {
+func (s *Service) ChannelHealthSummary(ctx context.Context, libraryID string) (iptvmodel.ChannelHealthSummary, error) {
 	now := time.Now().UTC()
 	return s.channels.HealthSummaryByLibrary(ctx, libraryID,
 		now.Add(-2*time.Hour), now.Add(ChannelWithoutEPGWindow))

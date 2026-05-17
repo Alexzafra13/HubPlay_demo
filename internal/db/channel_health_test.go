@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	iptvmodel "hubplay/internal/iptv/model"
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db"
 	"hubplay/internal/testutil"
 )
@@ -21,7 +23,7 @@ func setupChannelHealthTest(t *testing.T) (*db.ChannelRepository, string) {
 
 	libID := "lib-health"
 	now := time.Now()
-	if err := repos.Libraries.Create(ctx, &db.Library{
+	if err := repos.Libraries.Create(ctx, &librarymodel.Library{
 		ID: libID, Name: "H", ContentType: "livetv", ScanMode: "manual",
 		CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
@@ -89,7 +91,7 @@ func TestChannel_RecordProbeFailureIsAtomic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var found *db.Channel
+	var found *iptvmodel.Channel
 	for _, ch := range unhealthy {
 		if ch.ID == "ch-dead" {
 			found = ch

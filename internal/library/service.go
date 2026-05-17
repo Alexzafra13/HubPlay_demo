@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db"
 	"hubplay/internal/domain"
 	"hubplay/internal/scanner"
@@ -157,12 +158,12 @@ type CreateRequest struct {
 	// TLSInsecure, when true, makes the M3U / EPG fetcher skip TLS
 	// certificate verification for THIS library's HTTPS URLs. Used
 	// for IPTV providers that ship expired Let's Encrypt or self-
-	// signed certs. See db.Library.TLSInsecure for the security
+	// signed certs. See librarymodel.Library.TLSInsecure for the security
 	// caveat.
 	TLSInsecure bool `json:"tls_insecure,omitempty"`
 }
 
-func (s *Service) Create(ctx context.Context, req CreateRequest) (*db.Library, error) {
+func (s *Service) Create(ctx context.Context, req CreateRequest) (*librarymodel.Library, error) {
 	if err := validateCreateRequest(req); err != nil {
 		return nil, err
 	}
@@ -172,7 +173,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*db.Library, e
 	}
 
 	now := time.Now()
-	lib := &db.Library{
+	lib := &librarymodel.Library{
 		ID:             uuid.NewString(),
 		Name:           req.Name,
 		ContentType:    req.ContentType,
@@ -228,7 +229,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*db.Library, e
 //
 // `ownerUserID` MUST be a top-level user; the handler resolves
 // profile ids to their parent before reaching here.
-func (s *Service) CreatePersonalIPTV(ctx context.Context, ownerUserID string, req CreateRequest) (*db.Library, error) {
+func (s *Service) CreatePersonalIPTV(ctx context.Context, ownerUserID string, req CreateRequest) (*librarymodel.Library, error) {
 	req.ContentType = "livetv"
 	req.Paths = nil
 	req.ScanMode = "manual"
@@ -237,7 +238,7 @@ func (s *Service) CreatePersonalIPTV(ctx context.Context, ownerUserID string, re
 	}
 
 	now := time.Now()
-	lib := &db.Library{
+	lib := &librarymodel.Library{
 		ID:             uuid.NewString(),
 		Name:           req.Name,
 		ContentType:    req.ContentType,
@@ -260,15 +261,15 @@ func (s *Service) CreatePersonalIPTV(ctx context.Context, ownerUserID string, re
 	return lib, nil
 }
 
-func (s *Service) GetByID(ctx context.Context, id string) (*db.Library, error) {
+func (s *Service) GetByID(ctx context.Context, id string) (*librarymodel.Library, error) {
 	return s.libraries.GetByID(ctx, id)
 }
 
-func (s *Service) List(ctx context.Context) ([]*db.Library, error) {
+func (s *Service) List(ctx context.Context) ([]*librarymodel.Library, error) {
 	return s.libraries.List(ctx)
 }
 
-func (s *Service) ListForUser(ctx context.Context, userID string) ([]*db.Library, error) {
+func (s *Service) ListForUser(ctx context.Context, userID string) ([]*librarymodel.Library, error) {
 	return s.libraries.ListForUser(ctx, userID)
 }
 
@@ -344,7 +345,7 @@ type UpdateRequest struct {
 	TLSInsecure *bool `json:"tls_insecure,omitempty"`
 }
 
-func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (*db.Library, error) {
+func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (*librarymodel.Library, error) {
 	lib, err := s.libraries.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
@@ -463,7 +464,7 @@ func (s *Service) IsScanning(id string) bool {
 }
 
 // Items delegates to the item repository with filters.
-func (s *Service) ListItems(ctx context.Context, filter db.ItemFilter) ([]*db.Item, int, error) {
+func (s *Service) ListItems(ctx context.Context, filter librarymodel.ItemFilter) ([]*librarymodel.Item, int, error) {
 	if filter.Limit <= 0 {
 		filter.Limit = 20
 	}
@@ -475,18 +476,18 @@ func (s *Service) ListItems(ctx context.Context, filter db.ItemFilter) ([]*db.It
 
 // ListGenres delegates to the normalized tag store. Optional itemType
 // scopes the vocabulary so /movies and /series only see relevant chips.
-func (s *Service) ListGenres(ctx context.Context, itemType string) ([]db.GenreCount, error) {
+func (s *Service) ListGenres(ctx context.Context, itemType string) ([]librarymodel.GenreCount, error) {
 	if s.itemValues == nil {
 		return nil, nil
 	}
 	return s.itemValues.ListGenres(ctx, itemType)
 }
 
-func (s *Service) GetItem(ctx context.Context, id string) (*db.Item, error) {
+func (s *Service) GetItem(ctx context.Context, id string) (*librarymodel.Item, error) {
 	return s.items.GetByID(ctx, id)
 }
 
-func (s *Service) GetItemChildren(ctx context.Context, id string) ([]*db.Item, error) {
+func (s *Service) GetItemChildren(ctx context.Context, id string) ([]*librarymodel.Item, error) {
 	return s.items.GetChildren(ctx, id)
 }
 
@@ -498,11 +499,11 @@ func (s *Service) GetItemChildCounts(ctx context.Context, parentIDs []string) (m
 	return s.items.ChildCountsByParents(ctx, parentIDs)
 }
 
-func (s *Service) GetItemStreams(ctx context.Context, itemID string) ([]*db.MediaStream, error) {
+func (s *Service) GetItemStreams(ctx context.Context, itemID string) ([]*librarymodel.MediaStream, error) {
 	return s.streams.ListByItem(ctx, itemID)
 }
 
-func (s *Service) GetItemImages(ctx context.Context, itemID string) ([]*db.Image, error) {
+func (s *Service) GetItemImages(ctx context.Context, itemID string) ([]*librarymodel.Image, error) {
 	return s.images.ListByItem(ctx, itemID)
 }
 
@@ -510,7 +511,7 @@ func (s *Service) GetItemImages(ctx context.Context, itemID string) ([]*db.Image
 // (or globally when libraryID == ""). When `capRating` is non-empty
 // the result set is filtered to ratings at-or-below the cap; pass
 // "" to disable the filter (unrestricted profile / admin context).
-func (s *Service) LatestItems(ctx context.Context, libraryID string, itemType string, limit int, capRating string) ([]*db.Item, error) {
+func (s *Service) LatestItems(ctx context.Context, libraryID string, itemType string, limit int, capRating string) ([]*librarymodel.Item, error) {
 	allowed := AllowedRatingsAtMost(capRating)
 	return s.items.LatestItems(ctx, libraryID, itemType, limit, allowed...)
 }
@@ -518,7 +519,7 @@ func (s *Service) LatestItems(ctx context.Context, libraryID string, itemType st
 // LatestSeriesByActivity wraps the dedicated shows-library rail query.
 // Returned to the API handler so the wire can surface the per-series
 // activity stamp + new-episode count without an extra round-trip.
-func (s *Service) LatestSeriesByActivity(ctx context.Context, libraryID string, limit int) ([]*db.LatestSeriesActivity, error) {
+func (s *Service) LatestSeriesByActivity(ctx context.Context, libraryID string, limit int) ([]*librarymodel.LatestSeriesActivity, error) {
 	return s.items.LatestSeriesByActivity(ctx, libraryID, limit)
 }
 

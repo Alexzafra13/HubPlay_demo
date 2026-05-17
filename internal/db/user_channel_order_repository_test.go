@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	iptvmodel "hubplay/internal/iptv/model"
 	"hubplay/internal/db"
 	"hubplay/internal/testutil"
 )
@@ -65,7 +66,7 @@ func TestUserChannelOrder_UpsertListDelete(t *testing.T) {
 		t.Fatalf("upsert ch-a (replace): %v", err)
 	}
 	rows, _ = repo.List(ctx, "u-1")
-	gotA := db.UserChannelOrderEntry{}
+	gotA := iptvmodel.UserChannelOrderEntry{}
 	for _, r := range rows {
 		if r.ChannelID == "ch-a" {
 			gotA = r
@@ -114,7 +115,7 @@ func TestUserChannelOrder_ReplaceAllReplaces(t *testing.T) {
 
 	// Replace with fresh ordering: c, a (b is dropped from override —
 	// it falls back to admin defaults).
-	if err := repo.ReplaceAll(ctx, "u-1", []db.UserChannelOrderEntry{
+	if err := repo.ReplaceAll(ctx, "u-1", []iptvmodel.UserChannelOrderEntry{
 		{ChannelID: "ch-c", Hidden: false},
 		{ChannelID: "ch-a", Hidden: true},
 	}); err != nil {

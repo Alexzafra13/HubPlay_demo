@@ -31,6 +31,7 @@ import (
 	"net/http"
 	"strconv"
 
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/auth"
 	"hubplay/internal/db"
 	"hubplay/internal/library"
@@ -57,15 +58,15 @@ type HomeHandler struct {
 // handler needs — kept narrow so tests can stub without dragging in
 // the entire library service.
 type HomeLibraryLister interface {
-	ListForUser(ctx context.Context, userID string) ([]*db.Library, error)
-	GetByID(ctx context.Context, id string) (*db.Library, error)
+	ListForUser(ctx context.Context, userID string) ([]*librarymodel.Library, error)
+	GetByID(ctx context.Context, id string) (*librarymodel.Library, error)
 }
 
 // HomeMetadataRepo is the slice of MetadataRepository this handler
 // uses to enrich trending cards with overview/genres/poster colour
 // hints. Optional — handler degrades gracefully when nil.
 type HomeMetadataRepo interface {
-	GetMetadataBatch(ctx context.Context, itemIDs []string) (map[string]*db.Metadata, error)
+	GetMetadataBatch(ctx context.Context, itemIDs []string) (map[string]*librarymodel.Metadata, error)
 }
 
 func NewHomeHandler(
@@ -625,8 +626,8 @@ func (h *HomeHandler) loadStoredLayout(ctx context.Context, userID string) (*Hom
 	return nil, nil
 }
 
-func indexLibraries(libs []*db.Library) map[string]*db.Library {
-	out := make(map[string]*db.Library, len(libs))
+func indexLibraries(libs []*librarymodel.Library) map[string]*librarymodel.Library {
+	out := make(map[string]*librarymodel.Library, len(libs))
 	for _, l := range libs {
 		out[l.ID] = l
 	}
@@ -637,7 +638,7 @@ func indexLibraries(libs []*db.Library) map[string]*db.Library {
 // customised theirs. Order matches the most common Jellyfin /
 // Plex web layout: continue → next-up → trending → live → catalog
 // rails (one per non-livetv library).
-func defaultLayout(libs []*db.Library) HomeLayout {
+func defaultLayout(libs []*librarymodel.Library) HomeLayout {
 	sections := []HomeSection{
 		{ID: "continue_watching", Type: "continue_watching", Visible: true},
 		{ID: "next_up", Type: "next_up", Visible: true},
@@ -676,7 +677,7 @@ func defaultLayout(libs []*db.Library) HomeLayout {
 // library set. Sections referencing dead libraries get dropped;
 // libraries that have no section yet get appended (visible by
 // default), preserving the user's manual order for everything else.
-func reconcileLayout(stored []HomeSection, libs []*db.Library) []HomeSection {
+func reconcileLayout(stored []HomeSection, libs []*librarymodel.Library) []HomeSection {
 	libByID := indexLibraries(libs)
 	seenLib := make(map[string]bool, len(stored))
 

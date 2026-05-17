@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/db"
 	"hubplay/internal/event"
 )
@@ -116,7 +117,7 @@ func (d *SegmentDetector) DetectLibrary(ctx context.Context, libraryID string) e
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	episodes, _, err := d.items.List(ctx, db.ItemFilter{
+	episodes, _, err := d.items.List(ctx, librarymodel.ItemFilter{
 		LibraryID: libraryID,
 		Type:      "episode",
 		Limit:     100000, // upper bound; libraries this size are pathological
@@ -149,7 +150,7 @@ func (d *SegmentDetector) DetectLibrary(ctx context.Context, libraryID string) e
 			continue
 		}
 		segs := DetectFromChapters(ep.DurationTicks, chapters, time.Now().Unix())
-		if err := d.segments.Replace(ctx, ep.ID, db.EpisodeSegmentSourceChapter, segs); err != nil {
+		if err := d.segments.Replace(ctx, ep.ID, librarymodel.EpisodeSegmentSourceChapter, segs); err != nil {
 			d.logger.Warn("replace segments",
 				"item_id", ep.ID,
 				"error", err)
@@ -226,7 +227,7 @@ var (
 // Returns segments in (kind) order: recap, intro, outro. The order
 // is mostly cosmetic since the repo writes them all in one tx, but
 // keeps test golden output deterministic.
-func DetectFromChapters(durationTicks int64, chapters []*db.Chapter, now int64) []db.EpisodeSegment {
+func DetectFromChapters(durationTicks int64, chapters []*librarymodel.Chapter, now int64) []librarymodel.EpisodeSegment {
 	if len(chapters) == 0 {
 		return nil
 	}
@@ -237,15 +238,15 @@ func DetectFromChapters(durationTicks int64, chapters []*db.Chapter, now int64) 
 	hasDuration := durationTicks > 0
 	mid := durationTicks / 2
 
-	matchKind := func(title string) (db.EpisodeSegmentKind, bool) {
+	matchKind := func(title string) (librarymodel.EpisodeSegmentKind, bool) {
 		t := strings.TrimSpace(title)
 		switch {
 		case introPattern.MatchString(t):
-			return db.EpisodeSegmentIntro, true
+			return librarymodel.EpisodeSegmentIntro, true
 		case outroPattern.MatchString(t):
-			return db.EpisodeSegmentOutro, true
+			return librarymodel.EpisodeSegmentOutro, true
 		case recapPattern.MatchString(t):
-			return db.EpisodeSegmentRecap, true
+			return librarymodel.EpisodeSegmentRecap, true
 		}
 		return "", false
 	}
@@ -253,30 +254,30 @@ func DetectFromChapters(durationTicks int64, chapters []*db.Chapter, now int64) 
 	// Pick first match for intro/recap (earliest in file) and last
 	// match for outro (latest in file). We pre-classify into three
 	// buckets to keep the loop linear and avoid re-scanning.
-	var firstIntro, firstRecap, lastOutro *db.Chapter
+	var firstIntro, firstRecap, lastOutro *librarymodel.Chapter
 	for _, c := range chapters {
 		kind, ok := matchKind(c.Title)
 		if !ok {
 			continue
 		}
 		switch kind {
-		case db.EpisodeSegmentIntro:
+		case librarymodel.EpisodeSegmentIntro:
 			if firstIntro == nil && (!hasDuration || c.StartTicks < mid) {
 				firstIntro = c
 			}
-		case db.EpisodeSegmentRecap:
+		case librarymodel.EpisodeSegmentRecap:
 			if firstRecap == nil && (!hasDuration || c.StartTicks < mid) {
 				firstRecap = c
 			}
-		case db.EpisodeSegmentOutro:
+		case librarymodel.EpisodeSegmentOutro:
 			if !hasDuration || c.StartTicks >= mid {
 				lastOutro = c
 			}
 		}
 	}
 
-	out := make([]db.EpisodeSegment, 0, 3)
-	emit := func(c *db.Chapter, kind db.EpisodeSegmentKind) {
+	out := make([]librarymodel.EpisodeSegment, 0, 3)
+	emit := func(c *librarymodel.Chapter, kind librarymodel.EpisodeSegmentKind) {
 		if c == nil {
 			return
 		}
@@ -288,7 +289,7 @@ func DetectFromChapters(durationTicks int64, chapters []*db.Chapter, now int64) 
 		if end <= c.StartTicks {
 			end = c.StartTicks + 10_000_000 // 1s in ticks
 		}
-		out = append(out, db.EpisodeSegment{
+		out = append(out, librarymodel.EpisodeSegment{
 			Kind:       kind,
 			StartTicks: c.StartTicks,
 			EndTicks:   end,
@@ -296,8 +297,8 @@ func DetectFromChapters(durationTicks int64, chapters []*db.Chapter, now int64) 
 			DetectedAt: now,
 		})
 	}
-	emit(firstRecap, db.EpisodeSegmentRecap)
-	emit(firstIntro, db.EpisodeSegmentIntro)
-	emit(lastOutro, db.EpisodeSegmentOutro)
+	emit(firstRecap, librarymodel.EpisodeSegmentRecap)
+	emit(firstIntro, librarymodel.EpisodeSegmentIntro)
+	emit(lastOutro, librarymodel.EpisodeSegmentOutro)
 	return out
 }

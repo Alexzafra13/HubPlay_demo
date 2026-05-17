@@ -11,9 +11,10 @@ import (
 	"testing"
 	"time"
 
+	authmodel "hubplay/internal/auth/model"
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/auth"
 	"hubplay/internal/config"
-	"hubplay/internal/db"
 	"hubplay/internal/domain"
 )
 
@@ -23,7 +24,7 @@ type mockAuthService struct {
 	loginFn        func(ctx context.Context, username, password, deviceName, deviceID, ip string) (*auth.AuthToken, error)
 	refreshTokenFn func(ctx context.Context, refreshToken, ip string) (*auth.AuthToken, error)
 	logoutFn       func(ctx context.Context, refreshToken string) error
-	registerFn     func(ctx context.Context, req auth.RegisterRequest) (*db.User, error)
+	registerFn     func(ctx context.Context, req auth.RegisterRequest) (*authmodel.User, error)
 }
 
 func (m *mockAuthService) Login(ctx context.Context, username, password, deviceName, deviceID, ip string) (*auth.AuthToken, error) {
@@ -47,7 +48,7 @@ func (m *mockAuthService) Logout(ctx context.Context, refreshToken string) error
 	return nil
 }
 
-func (m *mockAuthService) Register(ctx context.Context, req auth.RegisterRequest) (*db.User, error) {
+func (m *mockAuthService) Register(ctx context.Context, req auth.RegisterRequest) (*authmodel.User, error) {
 	if m.registerFn != nil {
 		return m.registerFn(ctx, req)
 	}
@@ -66,7 +67,7 @@ func (m *mockAuthService) ChangePassword(_ context.Context, _, _, _ string) erro
 	return nil
 }
 
-func (m *mockAuthService) ListProfiles(_ context.Context, _ string) ([]*db.User, error) {
+func (m *mockAuthService) ListProfiles(_ context.Context, _ string) ([]*authmodel.User, error) {
 	return nil, nil
 }
 
@@ -82,7 +83,7 @@ func (m *mockAuthService) Middleware(next http.Handler) http.Handler {
 	return next
 }
 
-func (m *mockAuthService) ListSessions(_ context.Context, _ string) ([]*db.Session, error) {
+func (m *mockAuthService) ListSessions(_ context.Context, _ string) ([]*authmodel.Session, error) {
 	return nil, nil
 }
 
@@ -97,20 +98,20 @@ func (m *mockAuthService) CurrentSessionID(_ context.Context, _ string) string {
 // ─── Mock user service ──────────────────────────────────────────────────────
 
 type mockUserService struct {
-	getByIDFn func(ctx context.Context, id string) (*db.User, error)
-	listFn    func(ctx context.Context, limit, offset int) ([]*db.User, int, error)
+	getByIDFn func(ctx context.Context, id string) (*authmodel.User, error)
+	listFn    func(ctx context.Context, limit, offset int) ([]*authmodel.User, int, error)
 	deleteFn  func(ctx context.Context, id string) error
 	countFn   func(ctx context.Context) (int, error)
 }
 
-func (m *mockUserService) GetByID(ctx context.Context, id string) (*db.User, error) {
+func (m *mockUserService) GetByID(ctx context.Context, id string) (*authmodel.User, error) {
 	if m.getByIDFn != nil {
 		return m.getByIDFn(ctx, id)
 	}
 	return nil, errors.New("not implemented")
 }
 
-func (m *mockUserService) List(ctx context.Context, limit, offset int) ([]*db.User, int, error) {
+func (m *mockUserService) List(ctx context.Context, limit, offset int) ([]*authmodel.User, int, error) {
 	if m.listFn != nil {
 		return m.listFn(ctx, limit, offset)
 	}
@@ -179,7 +180,7 @@ func TestAuthHandler_Login_Success(t *testing.T) {
 		UserID:       "u1",
 		Role:         "admin",
 	}
-	user := &db.User{
+	user := &authmodel.User{
 		ID:          "u1",
 		Username:    "admin",
 		DisplayName: "Admin",
@@ -195,7 +196,7 @@ func TestAuthHandler_Login_Success(t *testing.T) {
 		},
 	}
 	userSvc := &mockUserService{
-		getByIDFn: func(_ context.Context, id string) (*db.User, error) {
+		getByIDFn: func(_ context.Context, id string) (*authmodel.User, error) {
 			if id == "u1" {
 				return user, nil
 			}
@@ -294,7 +295,7 @@ func TestAuthHandler_Login_InvalidBody(t *testing.T) {
 // caller can create the first admin. This is the legitimate "first run"
 // path that the React wizard hits.
 func TestAuthHandler_Setup_AllowedWhenNoUsers(t *testing.T) {
-	created := &db.User{
+	created := &authmodel.User{
 		ID:          "u1",
 		Username:    "admin",
 		DisplayName: "Admin",
@@ -302,7 +303,7 @@ func TestAuthHandler_Setup_AllowedWhenNoUsers(t *testing.T) {
 		IsActive:    true,
 	}
 	authSvc := &mockAuthService{
-		registerFn: func(_ context.Context, req auth.RegisterRequest) (*db.User, error) {
+		registerFn: func(_ context.Context, req auth.RegisterRequest) (*authmodel.User, error) {
 			if req.Role != "admin" {
 				t.Errorf("setup must register the first user as admin, got role=%q", req.Role)
 			}
@@ -314,7 +315,7 @@ func TestAuthHandler_Setup_AllowedWhenNoUsers(t *testing.T) {
 	}
 	userSvc := &mockUserService{
 		countFn: func(_ context.Context) (int, error) { return 0, nil },
-		getByIDFn: func(_ context.Context, id string) (*db.User, error) {
+		getByIDFn: func(_ context.Context, id string) (*authmodel.User, error) {
 			if id == "u1" {
 				return created, nil
 			}
@@ -345,7 +346,7 @@ func TestAuthHandler_Setup_AllowedWhenNoUsers(t *testing.T) {
 // pins the contract so that cannot regress.
 func TestAuthHandler_Setup_BlockedWhenUsersExist(t *testing.T) {
 	authSvc := &mockAuthService{
-		registerFn: func(_ context.Context, _ auth.RegisterRequest) (*db.User, error) {
+		registerFn: func(_ context.Context, _ auth.RegisterRequest) (*authmodel.User, error) {
 			t.Fatal("Register must NOT be called when users already exist")
 			return nil, nil
 		},
@@ -384,7 +385,7 @@ func TestAuthHandler_Setup_BlockedWhenUsersExist(t *testing.T) {
 // "off-by-one" refactor mistake (changing `> 0` to `> 1`, etc.).
 func TestAuthHandler_Setup_BlockedWhenManyUsersExist(t *testing.T) {
 	authSvc := &mockAuthService{
-		registerFn: func(_ context.Context, _ auth.RegisterRequest) (*db.User, error) {
+		registerFn: func(_ context.Context, _ auth.RegisterRequest) (*authmodel.User, error) {
 			t.Fatal("Register must NOT be called")
 			return nil, nil
 		},
@@ -407,7 +408,7 @@ func TestAuthHandler_Setup_BlockedWhenManyUsersExist(t *testing.T) {
 }
 
 func TestUserHandler_Me(t *testing.T) {
-	user := &db.User{
+	user := &authmodel.User{
 		ID:          "u1",
 		Username:    "admin",
 		DisplayName: "Admin",
@@ -416,7 +417,7 @@ func TestUserHandler_Me(t *testing.T) {
 	}
 
 	userSvc := &mockUserService{
-		getByIDFn: func(_ context.Context, id string) (*db.User, error) {
+		getByIDFn: func(_ context.Context, id string) (*authmodel.User, error) {
 			if id == "u1" {
 				return user, nil
 			}
@@ -463,7 +464,7 @@ func TestUserHandler_Me_Unauthenticated(t *testing.T) {
 
 func TestUserHandler_Me_NotFound(t *testing.T) {
 	userSvc := &mockUserService{
-		getByIDFn: func(_ context.Context, _ string) (*db.User, error) {
+		getByIDFn: func(_ context.Context, _ string) (*authmodel.User, error) {
 			return nil, domain.ErrNotFound
 		},
 	}
@@ -492,15 +493,15 @@ func TestUserHandler_Me_NotFound(t *testing.T) {
 // library service must be probed for existence before user creation so
 // a typo doesn't strand a half-created account.
 func TestAuthHandler_Register_AppliesLibraryGrants(t *testing.T) {
-	createdUser := &db.User{ID: "new-u", Username: "alice", DisplayName: "Alice", Role: "user"}
+	createdUser := &authmodel.User{ID: "new-u", Username: "alice", DisplayName: "Alice", Role: "user"}
 	authSvc := &mockAuthService{
-		registerFn: func(_ context.Context, _ auth.RegisterRequest) (*db.User, error) {
+		registerFn: func(_ context.Context, _ auth.RegisterRequest) (*authmodel.User, error) {
 			return createdUser, nil
 		},
 	}
 	libSvc := &libFakeService{
-		getByIDFn: func(_ context.Context, _ string) (*db.Library, error) {
-			return &db.Library{}, nil
+		getByIDFn: func(_ context.Context, _ string) (*librarymodel.Library, error) {
+			return &librarymodel.Library{}, nil
 		},
 	}
 	handler := NewAuthHandler(authSvc, &mockUserService{}, libSvc, testAuthCfg(), testLogger())
@@ -532,14 +533,14 @@ func TestAuthHandler_Register_AppliesLibraryGrants(t *testing.T) {
 func TestAuthHandler_Register_GrantsOnProfile_400(t *testing.T) {
 	libSvc := &libFakeService{}
 	authSvc := &mockAuthService{
-		registerFn: func(_ context.Context, _ auth.RegisterRequest) (*db.User, error) {
+		registerFn: func(_ context.Context, _ auth.RegisterRequest) (*authmodel.User, error) {
 			t.Fatal("Register must NOT be called when validation fails")
 			return nil, nil
 		},
 	}
 	userSvc := &mockUserService{
-		getByIDFn: func(_ context.Context, _ string) (*db.User, error) {
-			return &db.User{ID: "parent-1", Username: "parent"}, nil
+		getByIDFn: func(_ context.Context, _ string) (*authmodel.User, error) {
+			return &authmodel.User{ID: "parent-1", Username: "parent"}, nil
 		},
 	}
 	handler := NewAuthHandler(authSvc, userSvc, libSvc, testAuthCfg(), testLogger())
@@ -562,15 +563,15 @@ func TestAuthHandler_Register_GrantsOnProfile_400(t *testing.T) {
 // user row is created. The mock Register fatals if invoked.
 func TestAuthHandler_Register_GrantsUnknownLibrary_404(t *testing.T) {
 	authSvc := &mockAuthService{
-		registerFn: func(_ context.Context, _ auth.RegisterRequest) (*db.User, error) {
+		registerFn: func(_ context.Context, _ auth.RegisterRequest) (*authmodel.User, error) {
 			t.Fatal("Register must NOT be called when library validation fails")
 			return nil, nil
 		},
 	}
 	libSvc := &libFakeService{
-		getByIDFn: func(_ context.Context, id string) (*db.Library, error) {
+		getByIDFn: func(_ context.Context, id string) (*librarymodel.Library, error) {
 			if id == "lib-good" {
-				return &db.Library{ID: id}, nil
+				return &librarymodel.Library{ID: id}, nil
 			}
 			return nil, domain.NewNotFound("library")
 		},
@@ -595,9 +596,9 @@ func TestAuthHandler_Register_GrantsUnknownLibrary_404(t *testing.T) {
 // nil (test setups don't always wire the library service). The grants
 // branch is purely opt-in.
 func TestAuthHandler_Register_NoGrants_NilLibraries_OK(t *testing.T) {
-	created := &db.User{ID: "u1", Username: "alice", DisplayName: "Alice", Role: "user"}
+	created := &authmodel.User{ID: "u1", Username: "alice", DisplayName: "Alice", Role: "user"}
 	authSvc := &mockAuthService{
-		registerFn: func(_ context.Context, _ auth.RegisterRequest) (*db.User, error) {
+		registerFn: func(_ context.Context, _ auth.RegisterRequest) (*authmodel.User, error) {
 			return created, nil
 		},
 	}
