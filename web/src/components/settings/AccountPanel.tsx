@@ -6,8 +6,9 @@ import {
   useSetUserAvatarColor,
   useSetUserDisplayName,
 } from "@/api/hooks";
-import { Button, Input, UserAvatar } from "@/components/common";
+import { Badge, Button, Input, UserAvatar } from "@/components/common";
 import { AVATAR_PALETTE } from "@/utils/avatarColor";
+import { Check } from "lucide-react";
 
 // Panel "Mi cuenta" — el usuario edita aquí su nombre visible y el
 // color de su avatar. Antes vivía como modal "Personalizar" en el
@@ -24,10 +25,10 @@ export function AccountPanel() {
   const [color, setColor] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
-  // Identidad del /me que ya sembramos al formulario. Si cambia
-  // (login distinto, switch de perfil), reseedeamos en render —
-  // patrón oficial de React para "adjusting state when prop
-  // changes" sin caer en useEffect → setState cascada.
+  // Identidad del /me ya sembrada al formulario. Si cambia (login
+  // distinto, switch de perfil), reseedeamos en render — patrón
+  // oficial de React para "adjusting state when prop changes" sin
+  // caer en useEffect → setState cascada.
   const [seededId, setSeededId] = useState<string | null>(null);
 
   if (me && me.id !== seededId) {
@@ -79,28 +80,38 @@ export function AccountPanel() {
       .catch((err: Error) => setError(err.message));
   }
 
-  // Vista en vivo: el avatar de la izquierda usa los valores del
-  // formulario (no los del servidor) para que el cambio de color
-  // sea inmediato al hacer click en un swatch.
+  // Preview en vivo: el avatar de la cabecera usa los valores del
+  // formulario (no los del servidor) para que el cambio sea visible
+  // al hacer click en un swatch.
   const previewUser = {
     username: me.username,
     display_name: name || me.display_name,
     avatar_color: color,
   };
+  const displayName = name.trim() || me.username;
 
   return (
     <form
       onSubmit={handleSubmit}
       className="rounded-[--radius-lg] border border-border bg-bg-card p-6 flex flex-col gap-6"
     >
+      {/* Cabecera del panel: avatar grande + nombre + rol como
+          badge. La etiqueta "Usuario" + el username crudo van
+          debajo, pequeños, porque son referencia técnica (login)
+          mientras que display_name es la identidad visible. */}
       <div className="flex items-center gap-4">
         <UserAvatar user={previewUser} size="xl" />
-        <div className="flex flex-col gap-0.5 min-w-0">
-          <span className="text-sm text-text-muted">
-            {t("settings.username", { defaultValue: "Usuario" })}
-          </span>
-          <span className="font-medium text-text-primary truncate">
-            {me.username}
+        <div className="flex flex-col gap-1 min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-lg font-semibold text-text-primary truncate">
+              {displayName}
+            </span>
+            <Badge variant={me.role === "admin" ? "warning" : "default"}>
+              {me.role}
+            </Badge>
+          </div>
+          <span className="text-xs text-text-muted">
+            {t("settings.username", { defaultValue: "Usuario" })}: {me.username}
           </span>
         </div>
       </div>
@@ -113,37 +124,30 @@ export function AccountPanel() {
         placeholder={me.username}
       />
 
-      <div className="flex flex-col gap-2">
-        <span className="text-sm font-medium text-text-secondary">
-          {t("settings.accountPanel.avatarColor", {
-            defaultValue: "Color del avatar",
-          })}
-        </span>
-        <p className="text-xs text-text-muted">
-          {t("settings.accountPanel.avatarColorHint", {
-            defaultValue:
-              "Elige un color o deja Auto para que se asigne uno único a partir de tu usuario.",
-          })}
-        </p>
-        <div className="grid grid-cols-7 gap-2 sm:grid-cols-8">
-          <button
-            type="button"
-            onClick={() => setColor("")}
-            className={[
-              "h-9 w-9 rounded-full border-2 text-[10px] font-medium transition-all",
-              color === ""
-                ? "border-accent ring-2 ring-accent/30 text-text-primary"
-                : "border-border-subtle text-text-muted hover:border-border",
-            ].join(" ")}
-            title={t("settings.accountPanel.avatarColorAutoHint", {
-              defaultValue: "Color automático según tu usuario.",
+      <div className="flex flex-col gap-3">
+        <div className="flex items-baseline justify-between gap-3">
+          <span className="text-sm font-medium text-text-secondary">
+            {t("settings.accountPanel.avatarColor", {
+              defaultValue: "Color del avatar",
             })}
-            aria-label={t("settings.accountPanel.avatarColorAuto", {
-              defaultValue: "Auto",
-            })}
-          >
-            A
-          </button>
+          </span>
+          {/* Botón "limpiar" sólo aparece cuando hay un color
+              elegido. Limpiar = volver al color automático derivado
+              del usuario; equivale al antiguo botón "A" pero como
+              acción explícita en vez de tile siempre presente. */}
+          {color !== "" && (
+            <button
+              type="button"
+              onClick={() => setColor("")}
+              className="text-xs text-text-muted hover:text-text-primary underline-offset-2 hover:underline transition-colors"
+            >
+              {t("settings.accountPanel.clearColor", {
+                defaultValue: "Quitar selección (automático)",
+              })}
+            </button>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-3">
           {AVATAR_PALETTE.map((p) => {
             const selected = color.toLowerCase() === p.background.toLowerCase();
             return (
@@ -152,19 +156,29 @@ export function AccountPanel() {
                 key={p.background}
                 onClick={() => setColor(p.background)}
                 className={[
-                  "h-9 w-9 rounded-full border-2 transition-all",
+                  "relative flex h-10 w-10 items-center justify-center rounded-full transition-all",
                   selected
-                    ? "border-white scale-110 ring-2 ring-white/30"
-                    : "border-transparent hover:scale-105",
+                    ? "ring-2 ring-white ring-offset-2 ring-offset-bg-card scale-110"
+                    : "ring-1 ring-white/10 hover:scale-105 hover:ring-white/30",
                 ].join(" ")}
                 style={{ background: p.background }}
                 title={p.label}
                 aria-label={p.label}
                 aria-pressed={selected}
-              />
+              >
+                {selected && <Check className="h-5 w-5 text-white" strokeWidth={3} />}
+              </button>
             );
           })}
         </div>
+        {color === "" && (
+          <p className="text-xs text-text-muted">
+            {t("settings.accountPanel.autoHint", {
+              defaultValue:
+                "Sin color elegido — se usa uno automático único derivado de tu usuario.",
+            })}
+          </p>
+        )}
       </div>
 
       {error && <p className="text-xs text-error">{error}</p>}

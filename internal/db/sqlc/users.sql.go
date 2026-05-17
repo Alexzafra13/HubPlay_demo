@@ -332,7 +332,7 @@ func (q *Queries) UpdateUserActive(ctx context.Context, arg UpdateUserActivePara
 }
 
 const updateUserAvatarColor = `-- name: UpdateUserAvatarColor :exec
-UPDATE users SET avatar_color = ? WHERE id =
+UPDATE users SET avatar_color = ? WHERE id = ?
 `
 
 type UpdateUserAvatarColorParams struct {

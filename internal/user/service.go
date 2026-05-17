@@ -68,15 +68,21 @@ func (s *Service) SetMaxContentRating(ctx context.Context, id, rating string) er
 	return nil
 }
 
-// allowedAvatarHexes: paleta de 14 entradas replicada en web/src/utils/avatarColor.ts.
+// allowedAvatarHexes: paleta de 8 entradas replicada en web/src/utils/avatarColor.ts.
 // Validación server-side para que un frontend rogue no escriba hex arbitrario.
-// Mantener en lock-step con el frontend (cambia ~2 veces al año; servir por HTTP
-// añadiría round-trip en cada Settings y no compensa).
+// Reducida desde 14 a 8 colores claramente distintos (antes había pares casi
+// idénticos como moss/olive, terracotta/garnet, navy/slate/petrol) para que el
+// picker ofrezca opciones que se distinguen de un vistazo en lugar de variantes
+// del mismo tono. Mantener en lock-step con el frontend.
 var allowedAvatarHexes = map[string]struct{}{
-	"#3d5a40": {}, "#7a3d2e": {}, "#1e3252": {}, "#5c3d6e": {},
-	"#2e5c5a": {}, "#7a5c2e": {}, "#5a3d3d": {}, "#3d4a5c": {},
-	"#6e3d5c": {}, "#3d6e6e": {}, "#5c4a2e": {}, "#4a2e5c": {},
-	"#2e4a5c": {}, "#5c5c2e": {},
+	"#b91c1c": {}, // rojo
+	"#c2410c": {}, // naranja
+	"#a16207": {}, // ámbar
+	"#15803d": {}, // verde
+	"#0f766e": {}, // turquesa
+	"#1d4ed8": {}, // azul
+	"#6d28d9": {}, // violeta
+	"#be185d": {}, // rosa
 }
 
 // SetAvatarColor: "" = limpia override (frontend cae al helper FNV-1a → paleta).

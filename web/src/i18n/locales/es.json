@@ -598,11 +598,21 @@
     "role": "Rol",
     "accountPanel": {
       "avatarColor": "Color del avatar",
-      "avatarColorHint": "Elige un color o deja Auto para que se asigne uno único a partir de tu usuario.",
-      "avatarColorAuto": "Auto",
-      "avatarColorAutoHint": "Color automático según tu usuario.",
+      "clearColor": "Quitar selección (automático)",
+      "autoHint": "Sin color elegido — se usa uno automático único derivado de tu usuario.",
       "nameRequired": "El nombre no puede estar vacío.",
       "saved": "Guardado."
+    },
+    "passwordPanel": {
+      "title": "Cambiar contraseña",
+      "hint": "Te pedirá la actual para confirmar. La nueva se guarda inmediatamente.",
+      "current": "Contraseña actual",
+      "new": "Nueva contraseña",
+      "confirm": "Confirmar nueva contraseña",
+      "cta": "Cambiar contraseña",
+      "saved": "Contraseña actualizada.",
+      "fieldsRequired": "Rellena la contraseña actual y la nueva.",
+      "mismatch": "La nueva contraseña y la confirmación no coinciden."
     },
     "metadataProviders": "Proveedores de metadatos",
     "mediaLibraries": "Bibliotecas de medios",

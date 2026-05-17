@@ -598,11 +598,21 @@
     "role": "Role",
     "accountPanel": {
       "avatarColor": "Avatar color",
-      "avatarColorHint": "Pick a colour or leave Auto to derive one from your username.",
-      "avatarColorAuto": "Auto",
-      "avatarColorAutoHint": "Automatic colour derived from your username.",
+      "clearColor": "Clear selection (automatic)",
+      "autoHint": "No colour picked — an automatic one derived from your username is used.",
       "nameRequired": "Name cannot be empty.",
       "saved": "Saved."
+    },
+    "passwordPanel": {
+      "title": "Change password",
+      "hint": "You'll need your current password to confirm. The new one applies immediately.",
+      "current": "Current password",
+      "new": "New password",
+      "confirm": "Confirm new password",
+      "cta": "Change password",
+      "saved": "Password updated.",
+      "fieldsRequired": "Fill in both the current and the new password.",
+      "mismatch": "New password and confirmation do not match."
     },
     "metadataProviders": "Metadata Providers",
     "mediaLibraries": "Media Libraries",
