@@ -1,15 +1,6 @@
-// Package retention runs the daily background sweep that prunes
-// append-only diagnostic and programming tables. Without it the EPG
-// programmes table and the federation audit log grow monotonically,
-// turning a long-lived single-tenant install into a multi-GB SQLite
-// over weeks.
-//
-// The Runner is intentionally tiny: it owns a ticker, calls the two
-// existing repository-level cleaners, and logs counts. No retry, no
-// backoff — a missed tick is harmless because the next tick re-runs
-// the whole sweep. It does not depend on the IPTV or federation
-// packages directly so the wiring layer in cmd/hubplay can compose
-// it without pulling in import cycles.
+// Package retention: sweep diario de tablas append-only (EPG + audit federation).
+// Sin esto, en semanas el SQLite crece a varios GB. Runner mínimo: ticker + 2
+// cleaners + log; sin retry/backoff (un tick perdido lo arregla el siguiente).
 package retention
 
 import (
@@ -20,19 +11,16 @@ import (
 	"hubplay/internal/config"
 )
 
-// EPGCleaner is the subset of the IPTV service the runner needs.
 type EPGCleaner interface {
 	CleanupOldPrograms(ctx context.Context, window time.Duration) (int64, error)
 }
 
-// AuditPruner is the subset of the federation repository the runner needs.
 type AuditPruner interface {
 	PruneAuditBefore(ctx context.Context, cutoff time.Time) (int64, error)
 }
 
-// Runner sweeps EPG and federation audit rows on a fixed cadence.
-// All dependencies are nil-safe so an operator who runs without IPTV
-// or federation can still wire the runner without panics.
+// Runner: sweep periódico de EPG + audit federation. Dependencias nil-safe
+// (operador sin IPTV o sin federation puede cablear esto sin pánicos).
 type Runner struct {
 	cfg    config.RetentionConfig
 	epg    EPGCleaner
@@ -41,8 +29,7 @@ type Runner struct {
 	stopCh chan struct{}
 }
 
-// New builds a runner. epg and audit may be nil — the runner skips the
-// corresponding sweep when its dependency is missing.
+// New: epg y audit pueden ser nil — se omite el sweep correspondiente.
 func New(cfg config.RetentionConfig, epg EPGCleaner, audit AuditPruner, logger *slog.Logger) *Runner {
 	if logger == nil {
 		logger = slog.Default()
@@ -56,26 +43,19 @@ func New(cfg config.RetentionConfig, epg EPGCleaner, audit AuditPruner, logger *
 	}
 }
 
-// Start kicks off the background loop. It blocks the caller for the
-// initial sweep so a fresh restart immediately reflects the
-// configured retention window in observability dashboards. Subsequent
-// sweeps run on the configured interval.
-//
-// Use Stop or cancel ctx to terminate.
+// Start: lanza el loop en background. El primer sweep corre síncrono al boot
+// para que el dashboard refleje ya la retention window. Stop o cancel del ctx
+// para terminar.
 func (r *Runner) Start(ctx context.Context) {
 	interval := r.cfg.SweepInterval
 	if interval <= 0 {
-		// Defensive: refuse to spin a 0-duration ticker. An operator
-		// who explicitly disables retention should not also lose the
-		// ticker goroutine to a runtime panic.
+		// interval=0 desactiva retention; no spawneamos ticker (ticker(0) panic).
 		r.logger.Info("retention disabled: sweep_interval <= 0")
 		return
 	}
 
 	go func() {
-		// Run once at startup so the deletion happens immediately on
-		// boot rather than waiting a full interval. Fits the same
-		// pattern as auth.StartSessionCleaner.
+		// Sweep inicial síncrono — mismo patrón que auth.StartSessionCleaner.
 		r.sweep(ctx)
 
 		ticker := time.NewTicker(interval)
@@ -93,11 +73,10 @@ func (r *Runner) Start(ctx context.Context) {
 	}()
 }
 
-// Stop halts the background loop. Safe to call once.
+// Stop: idempotente sólo si se llama una vez.
 func (r *Runner) Stop() { close(r.stopCh) }
 
-// sweep runs a single retention pass. Each cleaner is independent —
-// if EPG fails we still try federation audit and vice versa.
+// sweep: cada cleaner es independiente — si EPG falla, audit sigue, y viceversa.
 func (r *Runner) sweep(ctx context.Context) {
 	if r.epg != nil && r.cfg.EPGPrograms > 0 {
 		n, err := r.epg.CleanupOldPrograms(ctx, r.cfg.EPGPrograms)

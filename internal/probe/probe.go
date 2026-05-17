@@ -11,17 +11,15 @@ import (
 	"time"
 )
 
-// Result contains the parsed output from ffprobe.
 type Result struct {
 	Format   Format
 	Streams  []Stream
 	Chapters []Chapter
 }
 
-// Chapter is one named segment of a media file's playback timeline.
-// Start/End are absolute durations from the file origin; Title may be
-// empty when ffprobe didn't find a `tags.title` (common for chapters
-// generated automatically by Handbrake/MakeMKV vs. authored ones).
+// Chapter: Start/End absolutos desde el origen del fichero. Title vacío si
+// ffprobe no encontró `tags.title` (común en chapters auto-generados por
+// Handbrake/MakeMKV vs. los manuales).
 type Chapter struct {
 	Start time.Duration
 	End   time.Duration
@@ -56,24 +54,22 @@ type Stream struct {
 	IsHearingImpaired bool
 }
 
-// DurationTicks converts a duration to ticks (10,000 ticks = 1ms, 10M ticks = 1s).
+// DurationTicks: 10 000 ticks = 1 ms, 10 M ticks = 1 s.
 func DurationTicks(d time.Duration) int64 {
 	return d.Microseconds() * 10
 }
 
-// TicksToDuration converts ticks back to a duration.
 func TicksToDuration(ticks int64) time.Duration {
 	return time.Duration(ticks/10) * time.Microsecond
 }
 
-// Prober runs ffprobe on media files. Implemented as an interface for testing.
+// Prober: interfaz para poder mockear ffprobe en tests.
 type Prober interface {
 	Probe(ctx context.Context, path string) (*Result, error)
 }
 
-// FFprobe is the real implementation that shells out to ffprobe.
 type FFprobe struct {
-	BinPath string // path to ffprobe binary, defaults to "ffprobe"
+	BinPath string // binario ffprobe; default "ffprobe"
 }
 
 func New() *FFprobe {
@@ -103,7 +99,7 @@ func (f *FFprobe) Probe(ctx context.Context, path string) (*Result, error) {
 	return parseOutput(out)
 }
 
-// ffprobeOutput maps the JSON structure from ffprobe.
+// ffprobeOutput: shape JSON de ffprobe.
 type ffprobeOutput struct {
 	Format   ffprobeFormat    `json:"format"`
 	Streams  []ffprobeStream  `json:"streams"`
@@ -175,10 +171,8 @@ func parseOutput(data []byte) (*Result, error) {
 			SampleRate: parseInt(s.SampleRate),
 		}
 
-		// HDR detection
 		stream.HDRType = detectHDR(s.ColorTransfer, s.Profile)
 
-		// Tags
 		if s.Tags != nil {
 			if lang, ok := s.Tags["language"].(string); ok {
 				stream.Language = lang
@@ -188,7 +182,6 @@ func parseOutput(data []byte) (*Result, error) {
 			}
 		}
 
-		// Disposition
 		if s.Disposition != nil {
 			stream.IsDefault = s.Disposition["default"] == 1
 			stream.IsForced = s.Disposition["forced"] == 1
@@ -198,10 +191,9 @@ func parseOutput(data []byte) (*Result, error) {
 		result.Streams = append(result.Streams, stream)
 	}
 
-	// Chapters. ffprobe emits start_time / end_time as decimal seconds
-	// strings (`"42.000000"`); a parse failure on either side drops the
-	// chapter rather than the whole probe — better to lose one marker
-	// than the entire stream metadata.
+	// Chapters: ffprobe emite start/end_time como string de segundos
+	// ("42.000000"). Si falla el parse de uno, dropea sólo ese chapter —
+	// mejor perder un marker que toda la metadata del stream.
 	for _, c := range raw.Chapters {
 		start, err1 := strconv.ParseFloat(c.StartTime, 64)
 		end, err2 := strconv.ParseFloat(c.EndTime, 64)

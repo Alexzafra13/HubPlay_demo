@@ -12,34 +12,29 @@ import (
 	"hubplay/internal/config"
 )
 
-// DirEntry represents a single directory in a browse result.
 type DirEntry struct {
 	Name string `json:"name"`
 	Path string `json:"path"`
 }
 
-// BrowseResult is returned by BrowseDirectories.
 type BrowseResult struct {
 	Current     string     `json:"current"`
 	Parent      string     `json:"parent"`
 	Directories []DirEntry `json:"directories"`
 }
 
-// SystemCapabilities describes what the host system supports.
 type SystemCapabilities struct {
 	FFmpegPath string   `json:"ffmpeg_path"`
 	FFmpegFound bool    `json:"ffmpeg_found"`
 	HWAccels    []string `json:"hw_accels"`
 }
 
-// Service handles setup wizard logic.
 type Service struct {
 	config     *config.Config
 	configPath string
 	logger     *slog.Logger
 }
 
-// NewService creates a new setup service.
 func NewService(cfg *config.Config, configPath string, logger *slog.Logger) *Service {
 	return &Service{
 		config:     cfg,
@@ -48,21 +43,18 @@ func NewService(cfg *config.Config, configPath string, logger *slog.Logger) *Ser
 	}
 }
 
-// NeedsSetup returns true if the initial setup has not been completed.
 func (s *Service) NeedsSetup(ctx context.Context) bool {
 	return !s.config.SetupCompleted
 }
 
-// BrowseDirectories lists directories at the given path.
-// Hidden directories (starting with .) are filtered out.
-// Sensitive system paths are blocked to prevent information disclosure.
+// BrowseDirectories: lista directorios. Oculta `.` y bloquea paths sensibles
+// del sistema para evitar information disclosure.
 func (s *Service) BrowseDirectories(path string) (*BrowseResult, error) {
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return nil, fmt.Errorf("resolving path: %w", err)
 	}
 
-	// Block access to sensitive system directories
 	if isSensitivePath(absPath) {
 		return nil, fmt.Errorf("access denied: cannot browse system directory %q", absPath)
 	}
@@ -88,7 +80,7 @@ func (s *Service) BrowseDirectories(path string) (*BrowseResult, error) {
 
 	parent := filepath.Dir(absPath)
 	if parent == absPath {
-		// At root, no parent
+		// raíz, sin parent
 		parent = ""
 	}
 
@@ -99,7 +91,7 @@ func (s *Service) BrowseDirectories(path string) (*BrowseResult, error) {
 	}, nil
 }
 
-// DetectCapabilities checks for FFmpeg and available hardware accelerators.
+// DetectCapabilities: presencia de FFmpeg + lista de hwaccels.
 func (s *Service) DetectCapabilities() *SystemCapabilities {
 	caps := &SystemCapabilities{}
 
@@ -112,7 +104,7 @@ func (s *Service) DetectCapabilities() *SystemCapabilities {
 	caps.FFmpegPath = ffmpegPath
 	caps.FFmpegFound = true
 
-	// Detect hardware accelerators (stdout only — stderr has the version banner)
+	// hwaccels: leemos sólo stdout (stderr trae el version banner).
 	out, err := exec.Command("ffmpeg", "-hwaccels").Output()
 	if err != nil {
 		s.logger.Warn("failed to query ffmpeg hardware accelerators", "error", err)
@@ -127,7 +119,7 @@ func (s *Service) DetectCapabilities() *SystemCapabilities {
 			continue
 		}
 		if !pastHeader {
-			// The first non-empty line is the header "Hardware acceleration methods:"
+			// la primera línea no vacía es el header "Hardware acceleration methods:"
 			pastHeader = true
 			continue
 		}
@@ -137,13 +129,12 @@ func (s *Service) DetectCapabilities() *SystemCapabilities {
 	return caps
 }
 
-// sensitivePaths are system directories that should not be browsable.
+// sensitivePaths: directorios de sistema que no se pueden navegar.
 var sensitivePaths = []string{
 	"/etc", "/proc", "/sys", "/dev", "/boot", "/root",
 	"/var/run", "/var/log", "/run", "/sbin", "/usr/sbin",
 }
 
-// isSensitivePath returns true if the path is inside a sensitive system directory.
 func isSensitivePath(absPath string) bool {
 	cleaned := filepath.Clean(absPath)
 	for _, sp := range sensitivePaths {
@@ -154,11 +145,9 @@ func isSensitivePath(absPath string) bool {
 	return false
 }
 
-// CompleteSetup marks the setup as done and persists the config to
-// disk via the shared config.Save helper (atomic write, 0600 perms).
-// The YAML carries secrets the runtime treats as sensitive — JWT
-// signing seed, provider API keys (TMDb, Fanart, OpenSubtitles), and
-// the DB path or DSN — so the file is never world-readable.
+// CompleteSetup: marca setup hecho y persiste el YAML vía config.Save
+// (write atómico, 0600). Nunca world-readable: contiene secretos (JWT signing
+// seed, API keys de TMDb/Fanart/OpenSubtitles, DSN).
 func (s *Service) CompleteSetup(startScan bool) error {
 	s.config.SetupCompleted = true
 
@@ -170,14 +159,10 @@ func (s *Service) CompleteSetup(startScan bool) error {
 	return nil
 }
 
-// SaveDatabaseConfig persists a new database driver + DSN/path to the
-// YAML so the next boot picks it up. Used by the wizard step 0 and the
-// admin Database panel after the candidate connection passes the Open
-// + Ping test. Does not validate the connection itself — callers must
-// have tested it first; this is the persistence-only path.
-//
-// The change is not applied to the running process. The operator is
-// expected to call Restart afterwards so the new driver takes effect.
+// SaveDatabaseConfig: persiste driver + DSN/path al YAML para el próximo boot.
+// Lo usan el wizard step 0 y el panel admin Database tras pasar Open + Ping.
+// NO valida la conexión (eso es del caller) — esto es ruta de persistencia pura.
+// Tampoco aplica al proceso vivo: el operador llama Restart después.
 func (s *Service) SaveDatabaseConfig(driver, path, dsn string) error {
 	s.config.Database.Driver = driver
 	s.config.Database.Path = path

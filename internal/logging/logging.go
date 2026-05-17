@@ -11,21 +11,16 @@ type Config struct {
 	LogIPs bool   `yaml:"log_ips"`
 }
 
-// New returns a logger that writes to stdout with the configured
-// level/format. Most callers should use NewWithBuffer instead — this
-// constructor stays around for tests and tools that don't need the
-// in-memory ring + admin SSE surface.
+// New: logger sin ring buffer. Casi todos los callers deben usar NewWithBuffer;
+// esto queda para tests y herramientas que no necesitan el admin SSE.
 func New(cfg Config) *slog.Logger {
 	logger, _ := NewWithBuffer(cfg)
 	return logger
 }
 
-// NewWithBuffer returns a logger plus the in-memory ring buffer
-// the admin "Logs" surface tails. The ring wraps the configured
-// JSON/text handler — every record still hits stdout, AND it lands
-// in the ring + fans out to any SSE subscriber. Capacity is fixed
-// at 500 entries (about 500 KB worst-case) which fits a single
-// incident's noise window without bloating the process.
+// NewWithBuffer: logger + ring buffer en memoria para el panel admin "Logs".
+// Cada record va a stdout Y al ring (fan-out por SSE). Capacidad fija 500
+// (~500 KB worst-case) — encaja una incidencia sin inflar el proceso.
 func NewWithBuffer(cfg Config) (*slog.Logger, *Buffer) {
 	opts := &slog.HandlerOptions{
 		Level: parseLevel(cfg.Level),

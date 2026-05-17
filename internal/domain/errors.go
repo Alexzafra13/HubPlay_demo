@@ -7,14 +7,14 @@ import (
 	"time"
 )
 
-// Sentinel errors (for errors.Is)
+// Sentinels para errors.Is
 var (
-	// Resource errors
+	// Recursos
 	ErrNotFound      = errors.New("not found")
 	ErrAlreadyExists = errors.New("already exists")
 	ErrConflict      = errors.New("conflict")
 
-	// Auth errors
+	// Auth
 	ErrUnauthorized    = errors.New("unauthorized")
 	ErrForbidden       = errors.New("forbidden")
 	ErrInvalidToken    = errors.New("invalid token")
@@ -23,14 +23,14 @@ var (
 	ErrAccountDisabled = errors.New("account disabled")
 	ErrAccessExpired   = errors.New("access expired")
 
-	// Validation
+	// Validación
 	ErrValidation = errors.New("validation error")
 
 	// Streaming
 	ErrTranscodeBusy    = errors.New("transcode slots full")
 	ErrUnsupportedCodec = errors.New("unsupported codec")
 
-	// Federation
+	// Federación
 	ErrPeerOffline           = errors.New("peer offline")
 	ErrPeerUnauthorized      = errors.New("peer not authorized")
 	ErrPeerNotFound          = errors.New("peer not found")
@@ -51,7 +51,6 @@ var (
 	ErrPluginTimeout = errors.New("plugin timeout")
 )
 
-// ValidationError contains details about which fields failed validation.
 type ValidationError struct {
 	Fields map[string]string
 }
@@ -68,21 +67,15 @@ func NewValidationError(fields map[string]string) *ValidationError {
 	return &ValidationError{Fields: fields}
 }
 
-// AppError is a rich, typed error meant to be rendered as an HTTP response.
+// AppError: error tipado que la API renderiza como JSON consistente sin
+// filtrar internals. Code (estable, machine-readable) + HTTP status + Message
+// + Hint/Details/RetryAfter opcionales. `kind` (unexported) lo enlaza al
+// sentinel para que errors.Is siga funcionando; `cause` (unexported) lleva
+// el error interno para logs/tests — nunca al cliente.
 //
-// It carries everything the API layer needs to produce a consistent JSON error
-// without leaking internal messages: a stable machine-readable Code, the HTTP
-// status, a user-facing Message, and optional Hint/Details/RetryAfter. The
-// unexported kind links the AppError to a sentinel so existing errors.Is
-// checks keep working (backward compatibility). The unexported cause carries
-// the wrapped internal error for logs and tests, never for the client.
-//
-// Usage:
-//
-//	return nil, domain.NewTranscodeBusy(active, max)
-//
-// At the API layer, handleServiceError renders *AppError directly; any other
-// error falls back to the sentinel switch.
+// Uso: `return nil, domain.NewTranscodeBusy(active, max)`. En la API,
+// handleServiceError renderiza *AppError directo; otros errores caen al
+// switch de sentinels.
 type AppError struct {
 	Code       string
 	HTTPStatus int
@@ -91,12 +84,11 @@ type AppError struct {
 	Details    map[string]any
 	RetryAfter time.Duration
 
-	kind  error // sentinel for errors.Is (may be nil for ad-hoc errors)
-	cause error // wrapped internal cause for logs/tests
+	kind  error // sentinel para errors.Is (nil en errores ad-hoc)
+	cause error // causa interna envuelta para logs/tests
 }
 
-// Error implements the error interface. It returns the user-facing message
-// (suitable for logs); the cause, if any, is appended for operator context.
+// Error: message user-facing; si hay cause, lo concatena para contexto del operador.
 func (e *AppError) Error() string {
 	if e.cause != nil {
 		return fmt.Sprintf("%s: %s: %v", e.Code, e.Message, e.cause)
@@ -104,14 +96,12 @@ func (e *AppError) Error() string {
 	return fmt.Sprintf("%s: %s", e.Code, e.Message)
 }
 
-// Unwrap exposes the internal cause so errors.Is/As can traverse the chain.
 func (e *AppError) Unwrap() error {
 	return e.cause
 }
 
-// Is reports whether target matches the AppError's sentinel kind. This keeps
-// legacy checks like errors.Is(err, domain.ErrNotFound) working after a
-// service switches to returning *AppError.
+// Is: matchea contra el sentinel para que `errors.Is(err, domain.ErrNotFound)`
+// siga funcionando tras migrar un service a *AppError.
 func (e *AppError) Is(target error) bool {
 	if e.kind == nil {
 		return false
@@ -119,33 +109,28 @@ func (e *AppError) Is(target error) bool {
 	return errors.Is(e.kind, target)
 }
 
-// WithCause attaches an internal cause. Callers pass the upstream error
-// (DB, FFmpeg, provider, ...) so it shows up in logs without leaking to the
-// client. Returns the same *AppError for chaining.
+// WithCause: adjunta error upstream (DB, FFmpeg, provider...) — sale en logs,
+// no al cliente. Chainable.
 func (e *AppError) WithCause(cause error) *AppError {
 	e.cause = cause
 	return e
 }
 
-// WithDetails attaches structured details. Prefer small, bounded maps.
+// WithDetails: detalles estructurados. Mapas pequeños y acotados.
 func (e *AppError) WithDetails(details map[string]any) *AppError {
 	e.Details = details
 	return e
 }
 
-// WithHint attaches an actionable hint for the client.
 func (e *AppError) WithHint(hint string) *AppError {
 	e.Hint = hint
 	return e
 }
 
 // --- Constructors ----------------------------------------------------------
-//
-// Each constructor binds a sentinel (kind) + HTTP status + stable code, so
-// adopting them at a call site is a one-liner and the API error catalog stays
-// consistent across handlers.
+// Cada uno fija sentinel + HTTP status + code estable, así adoptarlos en un
+// call site es one-liner y el catálogo de errores queda consistente.
 
-// NewNotFound returns a 404 AppError for a missing resource.
 func NewNotFound(resource string) *AppError {
 	return &AppError{
 		Code:       "NOT_FOUND",
@@ -155,7 +140,6 @@ func NewNotFound(resource string) *AppError {
 	}
 }
 
-// NewAlreadyExists returns a 409 AppError when a resource already exists.
 func NewAlreadyExists(resource string) *AppError {
 	return &AppError{
 		Code:       "ALREADY_EXISTS",
@@ -165,7 +149,6 @@ func NewAlreadyExists(resource string) *AppError {
 	}
 }
 
-// NewConflict returns a 409 AppError for a state conflict.
 func NewConflict(message string) *AppError {
 	return &AppError{
 		Code:       "CONFLICT",
@@ -175,7 +158,6 @@ func NewConflict(message string) *AppError {
 	}
 }
 
-// NewUnauthorized returns a 401 AppError for an unauthenticated request.
 func NewUnauthorized(message string) *AppError {
 	if message == "" {
 		message = "authentication required"
@@ -188,8 +170,8 @@ func NewUnauthorized(message string) *AppError {
 	}
 }
 
-// NewInvalidCredentials returns a 401 AppError for a failed login.
-// Message is deliberately vague to avoid leaking which field was wrong.
+// NewInvalidCredentials: mensaje deliberadamente vago para no filtrar
+// qué campo falló.
 func NewInvalidCredentials() *AppError {
 	return &AppError{
 		Code:       "INVALID_CREDENTIALS",
@@ -199,7 +181,6 @@ func NewInvalidCredentials() *AppError {
 	}
 }
 
-// NewTokenExpired returns a 401 AppError signalling the access token expired.
 func NewTokenExpired() *AppError {
 	return &AppError{
 		Code:       "TOKEN_EXPIRED",
@@ -210,7 +191,6 @@ func NewTokenExpired() *AppError {
 	}
 }
 
-// NewForbidden returns a 403 AppError for a rejected authorization.
 func NewForbidden(message string) *AppError {
 	if message == "" {
 		message = "insufficient permissions"
@@ -223,7 +203,6 @@ func NewForbidden(message string) *AppError {
 	}
 }
 
-// NewAccountDisabled returns a 403 AppError for a disabled account.
 func NewAccountDisabled() *AppError {
 	return &AppError{
 		Code:       "ACCOUNT_DISABLED",
@@ -233,12 +212,9 @@ func NewAccountDisabled() *AppError {
 	}
 }
 
-// NewAccessExpired returns a 403 AppError for an account whose
-// temporary-access window has elapsed. Distinct from
-// AccountDisabled so the frontend can surface a tailored message
-// ("contact the admin to extend access") instead of the generic
-// "account disabled" copy that fits a manually-deactivated user
-// better.
+// NewAccessExpired: ventana de acceso temporal agotada. Distinto de
+// AccountDisabled para que el frontend muestre "contacta al admin para
+// extender" en lugar del genérico "cuenta desactivada".
 func NewAccessExpired() *AppError {
 	return &AppError{
 		Code:       "ACCESS_EXPIRED",
@@ -248,7 +224,6 @@ func NewAccessExpired() *AppError {
 	}
 }
 
-// NewValidation returns a 400 AppError from per-field validation errors.
 func NewValidation(fields map[string]string) *AppError {
 	details := map[string]any{"fields": fields}
 	return &AppError{
@@ -260,8 +235,8 @@ func NewValidation(fields map[string]string) *AppError {
 	}
 }
 
-// NewTranscodeBusy returns a 503 AppError when no transcode slots are free.
-// active and max are reported as details so clients can surface them.
+// NewTranscodeBusy: 503 sin slots libres. active/max en Details para que
+// el cliente los muestre.
 func NewTranscodeBusy(active, max int) *AppError {
 	return &AppError{
 		Code:       "STREAM_TRANSCODE_BUSY",
@@ -274,7 +249,7 @@ func NewTranscodeBusy(active, max int) *AppError {
 	}
 }
 
-// NewTranscodePending returns a 503 AppError when the manifest is not ready yet.
+// NewTranscodePending: 503 mientras el manifest aún no está listo.
 func NewTranscodePending() *AppError {
 	return &AppError{
 		Code:       "STREAM_TRANSCODE_PENDING",
@@ -284,7 +259,6 @@ func NewTranscodePending() *AppError {
 	}
 }
 
-// NewUnsupportedCodec returns a 415 AppError for a codec the server cannot play.
 func NewUnsupportedCodec(codec string) *AppError {
 	return &AppError{
 		Code:       "STREAM_UNSUPPORTED_CODEC",
@@ -295,7 +269,6 @@ func NewUnsupportedCodec(codec string) *AppError {
 	}
 }
 
-// NewFileNotAvailable returns a 404 AppError when the media file is missing on disk.
 func NewFileNotAvailable(itemID string) *AppError {
 	return &AppError{
 		Code:       "FILE_NOT_FOUND",
@@ -306,8 +279,7 @@ func NewFileNotAvailable(itemID string) *AppError {
 	}
 }
 
-// NewInvalidInput returns a 400 AppError for a malformed client input
-// (bad JSON body, bad path parameter, bad filename, ...).
+// NewInvalidInput: input malformado (JSON, path param, filename...).
 func NewInvalidInput(code, message string) *AppError {
 	if code == "" {
 		code = "INVALID_INPUT"
@@ -319,9 +291,8 @@ func NewInvalidInput(code, message string) *AppError {
 	}
 }
 
-// NewInternal returns a 500 AppError. The cause is stored for logs but never
-// rendered to the client. Use this at the last line of defense — prefer a
-// more specific constructor when you can.
+// NewInternal: 500 de último recurso. Cause queda en logs, nunca al cliente.
+// Preferir un constructor más específico si existe.
 func NewInternal(cause error) *AppError {
 	return &AppError{
 		Code:       "INTERNAL_ERROR",

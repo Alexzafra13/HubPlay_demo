@@ -26,7 +26,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// Known media file extensions.
+// Extensiones de media conocidas.
 var mediaExtensions = map[string]bool{
 	".mkv": true, ".mp4": true, ".avi": true, ".mov": true, ".wmv": true,
 	".flv": true, ".webm": true, ".m4v": true, ".ts": true, ".mpg": true,
@@ -36,16 +36,14 @@ var mediaExtensions = map[string]bool{
 	".wav": true, ".m4a": true, ".opus": true, ".alac": true,
 }
 
-// IsMediaFile returns true if the file extension is a known media format.
 func IsMediaFile(path string) bool {
 	ext := strings.ToLower(filepath.Ext(path))
 	return mediaExtensions[ext]
 }
 
-// providerFetcher is the slice of provider.Manager the scanner actually
-// uses. Defined as an interface so a test can swap it out without
-// constructing a full Manager + provider registration cycle (the same
-// pattern ImageRefresher uses for ImageRefresherProvider).
+// providerFetcher: subset de provider.Manager que el scanner usa. Interfaz
+// para que un test pueda mockear sin construir el Manager completo (mismo
+// patrón que ImageRefresher con ImageRefresherProvider).
 type providerFetcher interface {
 	SearchMetadata(ctx context.Context, query provider.SearchQuery) ([]provider.SearchResult, error)
 	FetchMetadata(ctx context.Context, externalID string, itemType provider.ItemType) (*provider.MetadataResult, error)
@@ -54,14 +52,12 @@ type providerFetcher interface {
 	FetchSeasonMetadata(ctx context.Context, showExternalID string, seasonNumber int) (*provider.SeasonMetadataResult, error)
 }
 
-// Scanner walks library paths and creates/updates items in the database.
+// Scanner: recorre paths de biblioteca y crea/actualiza items en DB.
 //
-// `imageDir` and `pathmap` are optional; when both are wired the scanner
-// downloads provider artwork to local storage during enrichment instead
-// of persisting remote URLs. When either is nil (e.g. older test
-// environments) image enrichment is skipped silently — never persists
-// remote URLs that would leak the user's IP to TMDb on every poster
-// view.
+// `imageDir` y `pathmap` opcionales: si ambos cableados, el scanner descarga
+// el artwork a local en lugar de persistir URLs remotas. Si alguno es nil
+// (tests viejos), se omite el image enrichment silenciosamente — NUNCA
+// persiste URLs remotas que filtrarían la IP del user a TMDb en cada poster.
 type Scanner struct {
 	items       *db.ItemRepository
 	streams     *db.MediaStreamRepository
@@ -99,9 +95,9 @@ func New(
 	pm *pathmap.Store,
 	logger *slog.Logger,
 ) *Scanner {
-	// `providers` is typed as the concrete *provider.Manager in the
-	// public API to keep the wiring in main.go obvious; internally we
-	// store it under a small interface so tests can fake it.
+	// providers tipado como *provider.Manager en la API pública para que el
+	// wiring en main.go sea obvio; internamente lo guardamos bajo interfaz
+	// pequeña para poder fakear en tests.
 	var pf providerFetcher
 	if providers != nil {
 		pf = providers
@@ -126,7 +122,6 @@ func New(
 	}
 }
 
-// ScanResult contains statistics from a library scan.
 type ScanResult struct {
 	Added   int
 	Updated int
@@ -135,7 +130,6 @@ type ScanResult struct {
 	Elapsed time.Duration
 }
 
-// ScanLibrary scans all paths for a library and updates the database.
 func (s *Scanner) ScanLibrary(ctx context.Context, lib *librarymodel.Library) (*ScanResult, error) {
 	start := time.Now()
 	result := &ScanResult{}
@@ -145,18 +139,14 @@ func (s *Scanner) ScanLibrary(ctx context.Context, lib *librarymodel.Library) (*
 		Data: map[string]any{"library_id": lib.ID, "library_name": lib.Name},
 	})
 
-	// Collect all existing paths for this library to detect removals.
-	// Same pass populates the show-hierarchy cache (series + season
-	// rows that already exist) so the scan doesn't re-create them
-	// for each episode it walks.
+	// Colecta paths existentes (para detectar removals) y, en la misma pasada,
+	// pre-puebla el showCache (series + season ya en DB) para no re-crearlos.
 	existingPaths := make(map[string]bool)
 	cache := newShowCache()
-	// Collect existing season rows here so we can run a self-healing
-	// enrichment pass *after* iteration completes — episodes are
-	// enriched lazily via processFile→enrichIfMissing, but seasons are
-	// aggregate rows with no file path, so processFile never visits
-	// them. Without this sweep a season row created on a previous
-	// (TMDb-less) scan would stay poster-less forever.
+	// Snapshot de seasons existentes: el self-heal corre AL FINAL, cuando el
+	// walker ya ha enriquecido las series (que llevan el tmdb id). Episodes
+	// se auto-curan vía processFile→enrichIfMissing, pero seasons no tienen
+	// path → processFile no las visita.
 	var existingSeasons []*librarymodel.Item
 	if err := s.iterateLibraryItems(ctx, lib.ID, func(item *librarymodel.Item) {
 		if item.Path != "" {
@@ -168,9 +158,6 @@ func (s *Scanner) ScanLibrary(ctx context.Context, lib *librarymodel.Library) (*
 		case "season":
 			if item.ParentID != "" && item.SeasonNumber != nil {
 				cache.rememberSeason(item.ParentID, *item.SeasonNumber, item.ID)
-				// Snapshot — sweep runs below, after the walker has
-				// had a chance to enrich the parent series (which is
-				// what holds the tmdb id we need).
 				copy := *item
 				existingSeasons = append(existingSeasons, &copy)
 			}
@@ -179,7 +166,6 @@ func (s *Scanner) ScanLibrary(ctx context.Context, lib *librarymodel.Library) (*
 		return nil, fmt.Errorf("listing existing items: %w", err)
 	}
 
-	// Walk each library path
 	seenPaths := make(map[string]bool)
 	for _, libPath := range lib.Paths {
 		if err := s.walkPath(ctx, lib, libPath, seenPaths, cache, result); err != nil {
@@ -188,16 +174,14 @@ func (s *Scanner) ScanLibrary(ctx context.Context, lib *librarymodel.Library) (*
 		}
 	}
 
-	// Self-heal seasons that pre-existed without metadata. enrichIfMissing
-	// is a no-op when the row already has images, so this re-pass is cheap
-	// for fully-enriched libraries. Critical for users who scanned without
-	// TMDb configured or before the season-enrichment code shipped — the
-	// SeasonGrid card needs the poster/title/rating that this populates.
+	// Self-heal de seasons pre-existentes sin metadata. enrichIfMissing es
+	// no-op si ya hay imágenes — barato en libraries enriquecidas. Crítico
+	// para usuarios que escanearon sin TMDb: la SeasonGrid necesita el poster.
 	for _, season := range existingSeasons {
 		s.enrichIfMissing(ctx, season)
 	}
 
-	// Mark missing files as unavailable
+	// Marcar ficheros que ya no aparecen como unavailable.
 	for path := range existingPaths {
 		if !seenPaths[path] {
 			item, err := s.items.GetByPath(ctx, path)
@@ -244,21 +228,17 @@ func (s *Scanner) ScanLibrary(ctx context.Context, lib *librarymodel.Library) (*
 	return result, nil
 }
 
-// iterateLibraryItems pages through every item in a library — series,
-// season, episode, movie — calling fn for each. The default
-// `librarymodel.ItemFilter` projects to root items only (parent_id IS NULL),
-// which used to silently miss every season + episode in shows
-// libraries; we explicitly enumerate by type so the iteration
-// returns the full graph.
+// iterateLibraryItems: pagina TODOS los items (series, season, episode,
+// movie, audio) llamando fn por cada uno. Enumera por tipo a propósito —
+// el ItemFilter por defecto sólo trae root items (parent_id IS NULL), lo
+// que silenciaba todas las seasons + episodes.
 //
-// Pagination uses the actual returned slice length to detect the
-// last page, NOT the requested pageSize — `librarymodel.ItemFilter.List`
-// caps Limit at 100 internally, so requesting 500 returns 100, and
-// a `len < requested` check would always fire after the first batch
-// (the bug that caused libraries with >100 items to lose cache
-// entries on re-scan).
+// La paginación usa el len() real del slice devuelto, NO el pageSize pedido:
+// ItemFilter.List capa Limit a 100 internamente, así que pedir 500 devuelve
+// 100 y `len < requested` siempre dispararía tras la primera batch (bug
+// histórico que perdía entradas de cache en libraries >100 items).
 func (s *Scanner) iterateLibraryItems(ctx context.Context, libraryID string, fn func(*librarymodel.Item)) error {
-	const pageSize = 100 // matches the upper bound enforced by ItemFilter.
+	const pageSize = 100 // tope interno de ItemFilter
 	for _, t := range []string{"series", "season", "episode", "movie", "audio"} {
 		offset := 0
 		for {
@@ -284,7 +264,7 @@ func (s *Scanner) iterateLibraryItems(ctx context.Context, libraryID string, fn 
 }
 
 func (s *Scanner) walkPath(ctx context.Context, lib *librarymodel.Library, root string, seenPaths map[string]bool, cache *showCache, result *ScanResult) error {
-	// Resolve the root to a real absolute path for symlink boundary checks.
+	// Resolución a path absoluto real para los checks de boundary de symlinks.
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
 		return fmt.Errorf("resolving library root %q: %w", root, err)
@@ -297,7 +277,7 @@ func (s *Scanner) walkPath(ctx context.Context, lib *librarymodel.Library, root 
 	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			s.logger.Warn("walk error", "path", path, "error", err)
-			return nil // continue walking
+			return nil // seguir el walk
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -309,7 +289,7 @@ func (s *Scanner) walkPath(ctx context.Context, lib *librarymodel.Library, root 
 			return nil
 		}
 
-		// Resolve symlinks to prevent path traversal attacks.
+		// Resuelve symlinks para evitar path-traversal.
 		realPath, err := filepath.EvalSymlinks(path)
 		if err != nil {
 			s.logger.Warn("cannot resolve symlink, skipping", "path", path, "error", err)
@@ -328,12 +308,10 @@ func (s *Scanner) walkPath(ctx context.Context, lib *librarymodel.Library, root 
 			result.Errors++
 		}
 
-		// Progress beat every 50 files. Cheap (publish is async)
-		// and frequent enough that a slow disk's 5 fps feels live
-		// in the admin panel without flooding the bus on a hot
-		// SSD's hundreds-per-second walk. The current relative
-		// path lets the UI surface "scanning Action/2024/foo.mkv"
-		// — much more reassuring than a bare counter.
+		// Progress cada 50 ficheros. Publish es async (barato), y suficiente
+		// para que un disco lento (5 fps) sienta live en el panel admin sin
+		// floodear en SSD (cientos/seg). El relative path muestra "scanning
+		// Action/2024/foo.mkv" — más informativo que un contador pelado.
 		if len(seenPaths)%50 == 0 {
 			rel, _ := filepath.Rel(root, path)
 			s.bus.Publish(event.Event{
@@ -350,30 +328,22 @@ func (s *Scanner) walkPath(ctx context.Context, lib *librarymodel.Library, root 
 	})
 }
 
-// RefreshMetadata re-fetches metadata and images for all items in a library.
-// It deletes existing images/metadata and re-enriches from providers.
+// RefreshMetadata: borra images+metadata y re-enriquece desde los providers.
 //
-// Dispatch by item type matters: enrichMetadata only handles movies and
-// series (TMDb search by title). Episodes need enrichEpisode (TMDb
-// /tv/.../season/N/episode/M, keyed off the parent series' tmdb id);
-// seasons need enrichSeason (TMDb /tv/.../season/N). Without the
-// dispatch, RefreshMetadata wipes episode/season images + overviews
-// and never restores them — the previous behaviour, which is why a
-// "Refrescar metadatos" run left the SeasonDetail page with no stills
-// and no synopses on episode rows.
+// Dispatch por tipo importa: enrichMetadata sólo cubre movies+series (TMDb
+// search por título). Episodes → enrichEpisode (TMDb /tv/../season/N/ep/M);
+// seasons → enrichSeason. Sin el dispatch, refrescar deja episode/season sin
+// stills ni sinopsis.
 //
-// Iteration order: iterateLibraryItems already walks
-// series → season → episode → movie → audio (see scanner.go), which
-// means series/external_ids land first; by the time we hit a season
-// or episode the parent's tmdb id is fresh in the database.
+// Orden: iterateLibraryItems pasa series → season → episode → movie → audio,
+// así cuando llegamos a season/episode el tmdb id del parent ya está en DB.
 func (s *Scanner) RefreshMetadata(ctx context.Context, lib *librarymodel.Library) error {
 	s.logger.Info("refreshing metadata for library", "library", lib.Name)
 
 	count := 0
 	err := s.iterateLibraryItems(ctx, lib.ID, func(item *librarymodel.Item) {
-		// Delete old images and metadata so the enrichment call below
-		// repopulates them. Best-effort — a failed delete still lets
-		// enrichment overwrite via Upsert.
+		// Borra images/metadata para que enrichment las recree. Best-effort:
+		// un delete fallido aún deja que Upsert sobrescriba.
 		_ = s.images.DeleteByItem(ctx, item.ID)
 		_ = s.metadata.Delete(ctx, item.ID)
 
@@ -400,25 +370,22 @@ func (s *Scanner) RefreshMetadata(ctx context.Context, lib *librarymodel.Library
 }
 
 func (s *Scanner) processFile(ctx context.Context, lib *librarymodel.Library, libRoot, path string, cache *showCache, result *ScanResult) error {
-	// Check if item already exists
 	existing, err := s.items.GetByPath(ctx, path)
 	if err == nil {
-		// Item exists — check if file changed via fingerprint
 		fp, fpErr := fingerprint(path)
 		if fpErr != nil {
 			return fpErr
 		}
 		if existing.Fingerprint == fp && existing.IsAvailable {
-			// File unchanged — re-enrich if metadata is missing
-			// (e.g. provider API key was added after initial scan).
+			// Fichero sin cambios — re-enrich si falta metadata
+			// (p.ej. provider API key añadida después del scan inicial).
 			s.enrichIfMissing(ctx, existing)
 			return nil
 		}
-		// File changed or was unavailable — re-probe and update
+		// Fichero cambiado o estaba unavailable — re-probe + update.
 		return s.updateItem(ctx, existing, path, fp, result)
 	}
 
-	// New file — probe and create
 	return s.createItem(ctx, lib, libRoot, path, cache, result)
 }
 
@@ -438,11 +405,10 @@ func (s *Scanner) createItem(ctx context.Context, lib *librarymodel.Library, lib
 	itemID := uuid.NewString()
 	itemType := itemTypeFromLibrary(lib.ContentType)
 
-	// For shows libraries, build the series → season → episode
-	// hierarchy. Each episode points at its season via parent_id;
-	// the series_id link is implicit (episode → season.parent_id →
-	// series). The series + season rows are created lazily on first
-	// encounter and cached for the rest of the scan.
+	// En libraries de shows: jerarquía series → season → episode. Episode
+	// apunta a su season vía parent_id; series_id es implícito (episode
+	// → season.parent_id → series). Series + season se crean lazy en el
+	// primer encuentro y van al cache durante el resto del scan.
 	var (
 		parentID      string
 		seasonNumber  *int
@@ -470,9 +436,8 @@ func (s *Scanner) createItem(ctx context.Context, lib *librarymodel.Library, lib
 				}
 			}
 		}
-		// `match.OK == false` (flat layout): the episode lands as a
-		// type=episode row with no parent. Deliberate — better to
-		// keep the file visible somewhere than drop it on the floor.
+		// match.OK == false (layout plano): episode queda como type=episode
+		// sin parent. A propósito — mejor verlo suelto que perderlo.
 	}
 
 	item := &librarymodel.Item{
@@ -498,7 +463,6 @@ func (s *Scanner) createItem(ctx context.Context, lib *librarymodel.Library, lib
 		return fmt.Errorf("creating item: %w", err)
 	}
 
-	// Store streams
 	streams := probeResultToStreams(itemID, probeResult)
 	if len(streams) > 0 {
 		if err := s.streams.ReplaceForItem(ctx, itemID, streams); err != nil {
@@ -506,8 +470,7 @@ func (s *Scanner) createItem(ctx context.Context, lib *librarymodel.Library, lib
 		}
 	}
 
-	// Store chapters. Optional dependency — older test environments
-	// build a Scanner without one and skip the persistence silently.
+	// chapters es dependencia opcional — tests viejos lo construyen sin él.
 	if s.chapters != nil && len(probeResult.Chapters) > 0 {
 		if err := s.chapters.Replace(ctx, itemID, probeResultToChapters(probeResult)); err != nil {
 			s.logger.Warn("failed to store chapters", "item_id", itemID, "error", err)
@@ -520,14 +483,11 @@ func (s *Scanner) createItem(ctx context.Context, lib *librarymodel.Library, lib
 		Data: map[string]any{"item_id": itemID, "title": title, "library_id": lib.ID},
 	})
 
-	// Metadata + image fetching:
-	//   - Movies, series and audio go through enrichMetadata —
-	//     for them the item title IS the searchable name.
-	//   - Episodes use a different path: enrichMetadata's TMDb search
-	//     would butcher the title ("Breaking.Bad.S01E01") and never
-	//     match. Instead we look up the parent series' tmdb id and
-	//     query /tv/{id}/season/{n}/episode/{m} directly — clean
-	//     overview, still image and air-date with one call.
+	// Enrichment:
+	//   - Movies/series/audio → enrichMetadata (title del item = nombre buscable).
+	//   - Episodes → ruta distinta: el search TMDb de enrichMetadata destroza
+	//     títulos tipo "Breaking.Bad.S01E01". Vamos directos a /tv/{id}/season/
+	//     {n}/episode/{m} usando el tmdb id del parent series.
 	if itemType == "episode" {
 		if seasonNumber != nil && episodeNumber != nil && parentID != "" {
 			s.enrichEpisode(ctx, item, parentID, *seasonNumber, *episodeNumber)
@@ -563,10 +523,9 @@ func (s *Scanner) updateItem(ctx context.Context, item *librarymodel.Item, path,
 		}
 	}
 
-	// Re-derive chapters: a re-encode may have shifted markers, and
-	// `Replace` clears the old set transactionally before inserting,
-	// so a probe with zero chapters intentionally clears any stale
-	// markers from a previous version of the file.
+	// Re-derivar chapters: un re-encode puede haber movido markers. Replace
+	// limpia el set viejo transaccionalmente antes de insertar, así un probe
+	// con 0 chapters borra markers stale de versiones previas del fichero.
 	if s.chapters != nil {
 		if err := s.chapters.Replace(ctx, item.ID, probeResultToChapters(probeResult)); err != nil {
 			s.logger.Warn("failed to update chapters", "item_id", item.ID, "error", err)
@@ -582,11 +541,9 @@ func (s *Scanner) updateItem(ctx context.Context, item *librarymodel.Item, path,
 	return nil
 }
 
-// probeResultToChapters converts the probe-time Chapter slice to the
-// DB shape (item_id-keyed, ticks instead of time.Duration). Returns
-// nil for an empty input so the caller can pass it straight to
-// Replace without a length check — Replace's transactional
-// clear-then-insert handles the empty case.
+// probeResultToChapters: shape de probe → DB (item_id-keyed, ticks).
+// Nil input → nil output: caller puede pasarlo directo a Replace, que ya
+// trata el caso vacío transaccionalmente.
 func probeResultToChapters(pr *probe.Result) []librarymodel.Chapter {
 	if len(pr.Chapters) == 0 {
 		return nil
@@ -629,24 +586,23 @@ func probeResultToStreams(itemID string, pr *probe.Result) []*librarymodel.Media
 	return streams
 }
 
-// titleFromPath extracts a human-readable title from the file path.
 func titleFromPath(path string) string {
 	base := filepath.Base(path)
 	ext := filepath.Ext(base)
 	return strings.TrimSuffix(base, ext)
 }
 
-// yearPattern matches (2023), [2023], or just 2023 in a filename.
+// yearPattern: matchea (2023), [2023], o 2023 suelto.
 var yearPattern = regexp.MustCompile(`[\(\[\s]?((?:19|20)\d{2})[\)\]\s]?`)
 
-// parseTitleYear extracts a clean title and year from a filename.
-// Examples: "Transformers El despertar (2023)" -> ("Transformers El despertar", 2023)
-//           "Toy Story 3 [2010]" -> ("Toy Story 3", 2010)
+// parseTitleYear: separa título y año.
+// Ej: "Transformers El despertar (2023)" → ("Transformers El despertar", 2023)
+//     "Toy Story 3 [2010]"               → ("Toy Story 3", 2010)
 func parseTitleYear(filename string) (string, int) {
 	ext := filepath.Ext(filename)
 	name := strings.TrimSuffix(filepath.Base(filename), ext)
 
-	// Find the last year match (most likely the release year)
+	// El último match suele ser el año de release.
 	matches := yearPattern.FindAllStringSubmatchIndex(name, -1)
 	if len(matches) == 0 {
 		return name, 0
@@ -656,7 +612,7 @@ func parseTitleYear(filename string) (string, int) {
 	yearStr := name[last[2]:last[3]]
 	year, _ := strconv.Atoi(yearStr)
 
-	// Title is everything before the year match
+	// Título = todo lo anterior al match del año.
 	title := strings.TrimSpace(name[:last[0]])
 	if title == "" {
 		title = name
@@ -665,18 +621,16 @@ func parseTitleYear(filename string) (string, int) {
 	return title, year
 }
 
-// enrichIfMissing re-runs metadata enrichment for existing items that lack
-// metadata (e.g. because the TMDB API key was not configured during the
-// initial scan, or because the parent series wasn't enriched yet at the
-// time the episode was first inserted).
+// enrichIfMissing: re-enrich para items sin metadata (p.ej. TMDb sin API key
+// en el scan inicial, o parent series sin enrich cuando se creó el episode).
 func (s *Scanner) enrichIfMissing(ctx context.Context, item *librarymodel.Item) {
 	if s.providers == nil {
 		return
 	}
-	// Check if this item already has images (poster/still) — if so, skip
+	// Si ya tiene imágenes, lo damos por enriquecido.
 	imgs, err := s.images.ListByItem(ctx, item.ID)
 	if err == nil && len(imgs) > 0 {
-		return // already enriched
+		return
 	}
 	s.logger.Info("re-enriching item missing metadata", "title", item.Title, "id", item.ID)
 	switch item.Type {
@@ -693,15 +647,13 @@ func (s *Scanner) enrichIfMissing(ctx context.Context, item *librarymodel.Item) 
 	}
 }
 
-// enrichMetadata searches TMDB for the item and stores metadata + images.
+// enrichMetadata: busca en TMDb y guarda metadata + imágenes.
 //
-// Only series and movies hit TMDb. Episodes and seasons are intentionally
-// skipped: their titles are noisy ("Pilot", "Breaking.Bad.S01E01.Pilot",
-// "Season 1") and a per-episode lookup of a 100-episode show would burn
-// 100 search calls for results we never display — the UI shows series
-// posters, not episode posters. RefreshMetadata iterates every row in
-// the library, so this guard is what keeps the admin "Refresh metadata"
-// button from melting the TMDb quota.
+// Sólo series y movies van a TMDb. Episodes/seasons se saltan a propósito:
+// sus títulos son ruidosos ("Pilot", "Breaking.Bad.S01E01") y un lookup
+// per-episode de una serie de 100 caps quemaría 100 search calls para
+// resultados que nunca mostramos (el UI usa posters de series). Este guard
+// es lo que evita que "Refresh metadata" funda la quota de TMDb.
 func (s *Scanner) enrichMetadata(ctx context.Context, item *librarymodel.Item) {
 	if s.providers == nil {
 		return
@@ -710,7 +662,6 @@ func (s *Scanner) enrichMetadata(ctx context.Context, item *librarymodel.Item) {
 		return
 	}
 
-	// Parse title and year from filename for better TMDB search
 	cleanTitle, year := parseTitleYear(item.Title)
 	if year == 0 {
 		year = item.Year
@@ -721,7 +672,6 @@ func (s *Scanner) enrichMetadata(ctx context.Context, item *librarymodel.Item) {
 		itemType = provider.ItemSeries
 	}
 
-	// Search TMDB
 	results, err := s.providers.SearchMetadata(ctx, provider.SearchQuery{
 		Title:    cleanTitle,
 		Year:     year,
@@ -734,14 +684,12 @@ func (s *Scanner) enrichMetadata(ctx context.Context, item *librarymodel.Item) {
 
 	best := results[0]
 
-	// Fetch full metadata
 	meta, err := s.providers.FetchMetadata(ctx, best.ExternalID, itemType)
 	if err != nil || meta == nil {
 		s.logger.Debug("TMDB metadata fetch failed", "id", best.ExternalID, "error", err)
 		return
 	}
 
-	// Update item fields
 	if meta.Title != "" {
 		item.OriginalTitle = meta.OriginalTitle
 	}
@@ -762,9 +710,8 @@ func (s *Scanner) enrichMetadata(ctx context.Context, item *librarymodel.Item) {
 		s.logger.Warn("failed to update item with metadata", "id", item.ID, "error", err)
 	}
 
-	// Store extended metadata. Trailer key + site come straight from
-	// the same TMDb call (videos appended) so we don't pay a second
-	// round-trip per item just to get the YouTube id.
+	// Metadata extendida. TrailerKey/Site vienen de la misma call de TMDb
+	// (videos appended) — sin round-trip extra para el YouTube id.
 	genresJSON, _ := json.Marshal(meta.Genres)
 	tagsJSON, _ := json.Marshal(meta.Tags)
 	if err := s.metadata.Upsert(ctx, &librarymodel.Metadata{
@@ -781,21 +728,18 @@ func (s *Scanner) enrichMetadata(ctx context.Context, item *librarymodel.Item) {
 		s.logger.Warn("failed to store metadata", "id", item.ID, "error", err)
 	}
 
-	// Mirror genres into the normalized tag store so the /movies and
-	// /series filter query can find matches with an indexed lookup
-	// instead of scanning every metadata row's JSON. Replace-semantics
-	// means a TMDb refresh that drops a genre also drops the chip from
-	// the filter — readers see the same set as `genres_json`.
+	// Replica géneros en el tag store normalizado para que los filtros de
+	// /movies y /series usen lookup indexado en vez de escanear el JSON.
+	// Replace-semantics: TMDb refresh que tira un género tira el chip.
 	if s.itemValues != nil {
 		if err := s.itemValues.SetGenres(ctx, item.ID, meta.Genres); err != nil {
 			s.logger.Warn("failed to mirror genres into item_values", "id", item.ID, "error", err)
 		}
 	}
 
-	// Link this item to the canonical studio row (production company /
-	// network) so the detail page's brand mark can deep-link to a
-	// per-studio collection page. Empty Studio leaves metadata.studio_id
-	// NULL — no chip on the detail page, no entry in the studios index.
+	// Enlaza al studio (producer/network) para que el brand mark del detalle
+	// haga deep-link a la página per-studio. Studio="" → studio_id NULL,
+	// sin chip ni entrada en /studios.
 	if s.studios != nil {
 		var tmdbIDPtr *int64
 		if meta.StudioTMDBID > 0 {
@@ -809,10 +753,10 @@ func (s *Scanner) enrichMetadata(ctx context.Context, item *librarymodel.Item) {
 		}
 	}
 
-	// Link this movie to its TMDb collection (saga) so /collections/{id}
-	// can render the X-Men / MCU / Toy Story page Jellyfin-style. TV
-	// items never carry belongs_to_collection (TMDb scope is movies);
-	// for those CollectionTMDBID stays 0 and the link stays NULL.
+	// Enlaza la movie a su collection (saga) — X-Men/MCU/Toy Story estilo
+	// Jellyfin en /collections/{id}. Items TV nunca tienen
+	// belongs_to_collection (TMDb scope = movies): CollectionTMDBID=0,
+	// link NULL.
 	if s.collections != nil {
 		collectionID, cErr := s.collections.EnsureCollection(
 			ctx,
@@ -829,7 +773,6 @@ func (s *Scanner) enrichMetadata(ctx context.Context, item *librarymodel.Item) {
 		}
 	}
 
-	// Store external IDs
 	for prov, extID := range meta.ExternalIDs {
 		if err := s.externalIDs.Upsert(ctx, &librarymodel.ExternalID{
 			ItemID:     item.ID,
@@ -840,20 +783,17 @@ func (s *Scanner) enrichMetadata(ctx context.Context, item *librarymodel.Item) {
 		}
 	}
 
-	// Persist cast/crew. Best-effort like every other enrichment step;
-	// failures inside syncPeople are logged but never stop the scan.
+	// Cast/crew best-effort: fallos en syncPeople se loguean, no paran el scan.
 	s.syncPeople(ctx, item.ID, meta.People)
 
-	// Fetch and store images. The scanner downloads each candidate to
-	// local storage and records `/api/v1/images/file/{id}` as the
-	// path — never the upstream URL. Persisting remote URLs would
-	// leak the user's IP/User-Agent to TMDb on every poster view and
-	// break the library the day TMDb is unreachable.
+	// Imágenes: descargamos cada candidato a local y guardamos
+	// `/api/v1/images/file/{id}` como path, NUNCA la URL remota. Persistir
+	// URLs filtraría IP/User-Agent del user a TMDb en cada poster y rompería
+	// la library el día que TMDb no responda.
 	//
-	// imageDir + pathmap are optional dependencies: tests that don't
-	// exercise the artwork pipeline can construct a Scanner without
-	// them, and image enrichment is skipped silently rather than
-	// falling back to URL persistence.
+	// imageDir + pathmap son opcionales: tests sin pipeline de artwork
+	// construyen Scanner sin ellos y el enrichment se omite silencioso
+	// en lugar de caer a URL persistence.
 	if len(meta.ExternalIDs) > 0 && s.imageDir != "" && s.pathmap != nil {
 		s.fetchAndStoreImages(ctx, item.ID, meta.ExternalIDs, itemType)
 	}
@@ -861,15 +801,11 @@ func (s *Scanner) enrichMetadata(ctx context.Context, item *librarymodel.Item) {
 	s.logger.Info("enriched metadata", "title", item.Title, "tmdb_id", best.ExternalID, "year", item.Year)
 }
 
-// fetchAndStoreImages picks the highest-scored candidate for each kind
-// (primary, backdrop, logo) the providers return, downloads it via
-// imaging.IngestRemoteImage (SSRF + size + blurhash + atomic write),
-// and persists a librarymodel.Image row pointing at the local file.
-//
-// Errors per image are logged and skipped — losing one poster is
-// strictly better than failing the whole scan. The first stored image
-// of each kind becomes that kind's primary; subsequent items of the
-// same kind in the same call are dropped.
+// fetchAndStoreImages: para cada kind (primary, backdrop, logo) coge el
+// candidato mejor puntuado, lo ingesta vía imaging.IngestRemoteImage
+// (SSRF + size + blurhash + atomic write) y persiste una Image row apuntando
+// al fichero local. Errores per-image se loguean y se saltan — perder un
+// poster es mejor que tumbar el scan entero.
 func (s *Scanner) fetchAndStoreImages(ctx context.Context, itemID string, externalIDs map[string]string, itemType provider.ItemType) {
 	results, err := s.providers.FetchImages(ctx, externalIDs, itemType)
 	if err != nil {
@@ -880,11 +816,9 @@ func (s *Scanner) fetchAndStoreImages(ctx context.Context, itemID string, extern
 		return
 	}
 
-	// Pick the best-scored candidate per kind so the scanner doesn't
-	// settle for whatever happened to come first in the merged
-	// provider response. Mirrors the selection logic ImageRefresher
-	// already uses for manual refreshes — same input shape, same
-	// ranking, so re-runs are stable.
+	// Mejor score por kind — sin esto cogeríamos el primero del merge de
+	// providers. Mismo ranking que usa ImageRefresher en refreshes manuales,
+	// así re-runs son estables.
 	bestByKind := make(map[string]provider.ImageResult)
 	for _, img := range results {
 		switch img.Type {
@@ -906,11 +840,9 @@ func (s *Scanner) fetchAndStoreImages(ctx context.Context, itemID string, extern
 		}
 
 		imgID := uuid.NewString()
-		// Provider name comes straight from the Manager-stamped
-		// `Source` field on the result — no URL sniffing. Falls back
-		// to "unknown" only if a future provider implementation forgets
-		// to surface its name through the manager (today neither
-		// TMDb nor Fanart can hit this branch).
+		// Provider name viene del Source que el Manager estampa — sin sniff
+		// de URL. Fallback a "unknown" sólo si un provider futuro olvida
+		// exponer su nombre (hoy ni TMDb ni Fanart caen aquí).
 		providerName := best.Source
 		if providerName == "" {
 			providerName = "unknown"
@@ -941,17 +873,13 @@ func (s *Scanner) fetchAndStoreImages(ctx context.Context, itemID string, extern
 }
 
 
-// enrichSeason fetches per-season metadata (clean title, overview,
-// premiere date, rating, poster) from the configured provider via the
-// parent series' TMDb id. Same best-effort discipline as enrichEpisode:
-// missing series tmdb id, no provider, or a TMDb 404 leaves the row
-// untouched and the next scan retries via checkAndEnrichSeason.
+// enrichSeason: metadata per-season vía el tmdb id del parent series.
+// Best-effort como enrichEpisode: sin tmdb id, sin provider, o TMDb 404 →
+// row intacto y el siguiente scan retry (via checkAndEnrichSeason).
 //
-// Title overwrite policy: we always replace the placeholder "Season N"
-// with whatever TMDb returns, including back to "Season N" when that's
-// the canonical title — this fixes the user-visible "Season 1 / Season
-// 1" duplicate label in shows where the placeholder slipped through
-// without the TMDb id at first scan.
+// Title overwrite: SIEMPRE reemplaza el placeholder "Season N" por lo que
+// devuelva TMDb (incluso si TMDb también dice "Season N"). Arregla el
+// "Season 1 / Season 1" duplicado cuando el placeholder se coló sin tmdb id.
 func (s *Scanner) enrichSeason(ctx context.Context, item *librarymodel.Item, seriesID string, seasonNum int) {
 	if s.providers == nil || s.externalIDs == nil {
 		return
@@ -1010,10 +938,9 @@ func (s *Scanner) enrichSeason(ctx context.Context, item *librarymodel.Item, ser
 	s.logger.Info("enriched season metadata", "title", item.Title, "id", item.ID, "tmdb_show", tmdbID, "season", seasonNum, "episodes_known", meta.EpisodeCount)
 }
 
-// fetchAndStoreSeasonPoster ingests one TMDb season poster URL into the
-// local image store and writes a single primary `primary` (poster) row
-// for the season. Mirrors fetchAndStoreEpisodeStill — same SSRF / size /
-// blurhash pipeline, different `Type` and target item.
+// fetchAndStoreSeasonPoster: ingest de 1 URL de poster TMDb + Image row
+// `primary` para la season. Espejo de fetchAndStoreEpisodeStill — mismo
+// pipeline SSRF/size/blurhash, distinto Type y target.
 func (s *Scanner) fetchAndStoreSeasonPoster(ctx context.Context, itemID, posterURL string) {
 	dir := filepath.Join(s.imageDir, itemID)
 	ing, err := imaging.IngestRemoteImage(dir, "primary", posterURL, s.logger)
@@ -1045,16 +972,12 @@ func (s *Scanner) fetchAndStoreSeasonPoster(ctx context.Context, itemID, posterU
 	}
 }
 
-// enrichEpisode fetches per-episode metadata (overview, air date, rating,
-// runtime, still image) from the configured provider via the parent
-// series' TMDb id. Best-effort: missing series tmdb id, missing provider,
-// or a 404 from TMDb leave the row visible without metadata, and the
-// next scan re-tries automatically (enrichIfMissing keys off the absence
-// of any image row, just like the series path).
+// enrichEpisode: metadata per-episode vía el tmdb id del parent series.
+// Best-effort: sin tmdb id, sin provider, o 404 → row visible sin metadata,
+// el siguiente scan reintenta (enrichIfMissing chequea ausencia de imágenes).
 //
-// `seasonItemID` is the season row that owns the episode; we climb one
-// link up to the series to read its external_ids. The walker already
-// hands us this id when the show-hierarchy match succeeded.
+// seasonItemID: row de la season; subimos un link para leer external_ids
+// del series. El walker nos lo pasa cuando el match de show-hierarchy va bien.
 func (s *Scanner) enrichEpisode(ctx context.Context, item *librarymodel.Item, seasonItemID string, seasonNum, episodeNum int) {
 	if s.providers == nil || s.externalIDs == nil {
 		return
@@ -1078,9 +1001,8 @@ func (s *Scanner) enrichEpisode(ctx context.Context, item *librarymodel.Item, se
 		}
 	}
 	if tmdbID == "" {
-		// Series wasn't enriched yet (no TMDb match or API key absent
-		// at series-creation time). The next scan will retry once the
-		// series picks up its tmdb id.
+		// Series sin enriquecer aún. El siguiente scan reintenta cuando la
+		// series tenga su tmdb id.
 		return
 	}
 
@@ -1090,11 +1012,9 @@ func (s *Scanner) enrichEpisode(ctx context.Context, item *librarymodel.Item, se
 		return
 	}
 
-	// Update item fields. Title swap is conditional: TMDb's title is
-	// usually cleaner than the file-derived one ("S01E01" → "Pilot"),
-	// but we don't want to overwrite a name the user might have curated.
-	// The file-derived title only sticks when it isn't a generic
-	// SxxExx code.
+	// Title swap condicional: el de TMDb suele ser más limpio (S01E01 → "Pilot"),
+	// pero no queremos pisar nombres curados a mano. El file-derived sólo se
+	// queda si no es un código genérico SxxExx.
 	if meta.Title != "" {
 		item.Title = meta.Title
 		item.SortTitle = strings.ToLower(meta.Title)
@@ -1106,10 +1026,8 @@ func (s *Scanner) enrichEpisode(ctx context.Context, item *librarymodel.Item, se
 		item.PremiereDate = meta.PremiereDate
 		item.Year = meta.PremiereDate.Year()
 	}
-	// RuntimeMinutes from TMDb is rarely accurate enough to overwrite
-	// the probe-derived DurationTicks (TMDb rounds to whole minutes,
-	// the probe knows the file to the millisecond). We only fill it
-	// when the probe didn't get a duration at all — better than zero.
+	// RuntimeMinutes de TMDb no es preciso (redondea a minutos) — el probe
+	// sabe el ms. Sólo lo usamos como fallback si el probe no dio duración.
 	if item.DurationTicks == 0 && meta.RuntimeMinutes > 0 {
 		item.DurationTicks = int64(meta.RuntimeMinutes) * 60 * 10_000_000
 	}
@@ -1127,11 +1045,10 @@ func (s *Scanner) enrichEpisode(ctx context.Context, item *librarymodel.Item, se
 		}
 	}
 
-	// Persist the still as the episode's "backdrop" so the existing
-	// item-detail handler (which keys off type=backdrop for the hero
-	// image) renders it without any client-side knowledge of episode
-	// vs. series visuals. SSRF + size + blurhash all flow through the
-	// same imaging.IngestRemoteImage path the series enrichment uses.
+	// Guardamos el still como "backdrop" del episode para que el item-detail
+	// handler (que indexa por type=backdrop para el hero) lo pinte sin
+	// distinguir episode/series client-side. SSRF/size/blurhash van por el
+	// mismo IngestRemoteImage que series.
 	if meta.StillURL != "" && s.imageDir != "" && s.pathmap != nil {
 		s.fetchAndStoreEpisodeStill(ctx, item.ID, meta.StillURL)
 	}
@@ -1139,10 +1056,8 @@ func (s *Scanner) enrichEpisode(ctx context.Context, item *librarymodel.Item, se
 	s.logger.Info("enriched episode metadata", "title", item.Title, "id", item.ID, "tmdb_show", tmdbID, "season", seasonNum, "episode", episodeNum)
 }
 
-// fetchAndStoreEpisodeStill ingests one TMDb still URL into the local
-// image store and writes a single primary `backdrop` row for the episode.
-// Single-image counterpart to fetchAndStoreImages — episodes don't have
-// posters or logos on TMDb, so we skip the per-kind selection loop.
+// fetchAndStoreEpisodeStill: ingest de 1 still TMDb + Image row `backdrop`
+// del episode. Sin loop per-kind: episodes no tienen poster ni logo en TMDb.
 func (s *Scanner) fetchAndStoreEpisodeStill(ctx context.Context, itemID, stillURL string) {
 	dir := filepath.Join(s.imageDir, itemID)
 	ing, err := imaging.IngestRemoteImage(dir, "backdrop", stillURL, s.logger)
@@ -1174,7 +1089,7 @@ func (s *Scanner) fetchAndStoreEpisodeStill(ctx context.Context, itemID, stillUR
 	}
 }
 
-// itemTypeFromLibrary maps library content types to item types.
+// itemTypeFromLibrary: library.content_type → item.type.
 func itemTypeFromLibrary(contentType string) string {
 	switch contentType {
 	case "movies":
@@ -1188,7 +1103,7 @@ func itemTypeFromLibrary(contentType string) string {
 	}
 }
 
-// fingerprint computes a fast fingerprint of a file using size + first 64KB hash.
+// fingerprint: size + sha256 de los primeros 64 KB — barato y bastante único.
 func fingerprint(path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -1202,7 +1117,6 @@ func fingerprint(path string) (string, error) {
 	}
 
 	h := sha256.New()
-	// Hash first 64KB for speed
 	if _, err := io.CopyN(h, f, 65536); err != nil && err != io.EOF {
 		return "", fmt.Errorf("hashing %q: %w", path, err)
 	}
@@ -1210,22 +1124,18 @@ func fingerprint(path string) (string, error) {
 	return fmt.Sprintf("%d:%x", info.Size(), h.Sum(nil)[:16]), nil
 }
 
-// syncPeople persists the cast/crew the metadata provider returned
-// for an item. Idempotent: existing item_people rows are wiped before
-// re-insert so re-scans pick up cast changes (e.g. an episode's
-// guest-star list updating in TMDb) without leaving stale rows.
+// syncPeople: persiste cast/crew del provider. Idempotente: limpia
+// item_people antes de re-insert, así re-scans recogen cambios (p.ej.
+// guest-star nueva en TMDb) sin dejar rows stale.
 //
-// Photos: people are deduplicated by name, so the FIRST item that
-// surfaces a person triggers the profile photo download. Subsequent
-// items reuse the existing row and skip the network. Failed photo
-// downloads are logged and swallowed — the cast row still gets
-// persisted with an empty thumb_path so the UI can fall back to the
-// initial-letter chip.
+// Photos: people dedupeados por nombre — el PRIMER item que ve a una persona
+// dispara la descarga. Items siguientes reusan el row sin red. Fallos de
+// descarga se loguean; el cast row se persiste con thumb_path vacío y el UI
+// cae a la chip de inicial.
 //
-// People are stored under <imageDir>/.people/<personID>/ — the dot
-// prefix keeps them out of regular per-item directories during
-// listing, and the per-person subdir means delete-by-person is a
-// single os.RemoveAll.
+// Storage: <imageDir>/.people/<personID>/ — el prefijo "." los saca del
+// listado per-item, y un subdir per-person hace `delete-by-person` = 1 sola
+// os.RemoveAll.
 func (s *Scanner) syncPeople(ctx context.Context, itemID string, people []provider.Person) {
 	if s.people == nil || len(people) == 0 {
 		return
@@ -1241,10 +1151,8 @@ func (s *Scanner) syncPeople(ctx context.Context, itemID string, people []provid
 			s.logger.Warn("person upsert failed", "name", p.Name, "error", err)
 			continue
 		}
-		// Photo download: only for newly created people, and only when
-		// the provider supplied a URL. The IngestRemoteImage helper
-		// runs the same SSRF / max-bytes / atomic-write pipeline used
-		// by item posters so we don't re-implement safety here.
+		// Descarga sólo para people recién creados con URL. IngestRemoteImage
+		// reusa el pipeline SSRF/size/atomic-write — sin re-implementar.
 		if created && p.ThumbURL != "" && s.imageDir != "" {
 			dir := filepath.Join(s.imageDir, ".people", personID)
 			if ing, err := imaging.IngestRemoteImage(dir, "profile", p.ThumbURL, s.logger); err == nil {

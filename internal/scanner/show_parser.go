@@ -7,15 +7,11 @@ import (
 	"strings"
 )
 
-// EpisodeMatch captures what the filename + parent dir of a TV episode
-// can tell us before we look at metadata: which series it belongs to
-// (just the on-disk name, the matcher fills in the canonical title
-// later from TMDb), which season, which episode, and the human-friendly
-// episode title if the filename includes one.
+// EpisodeMatch: lo que el filename + dir parent nos dicen sin tocar
+// metadata. SeriesName es el dir on-disk (TMDb dará el canónico después).
 //
-// `OK == false` means the path doesn't look like an episode at all
-// (flat lib root, weird structure) — the caller should fall back to
-// the "single item, no parents" code path so the file isn't lost.
+// OK==false: el path no parece episode (lib root plano, estructura rara) —
+// el caller debe caer al "single item sin parents" para no perder el fichero.
 type EpisodeMatch struct {
 	SeriesName    string
 	SeasonNumber  int
@@ -24,48 +20,35 @@ type EpisodeMatch struct {
 	OK            bool
 }
 
-// Common patterns Plex / Jellyfin / Kodi all parse:
-//
-//	"S01E05"           — the standard
-//	"s01e05"           — case insensitive
-//	"S1E5"             — single-digit
-//	"1x05" / "01x05"   — alternative notation
-//	"S01.E05"          — dotted variant some scrapers emit
-//
-// Captured: $1 = season, $2 = episode. Anchored to a non-digit boundary
-// on either side so we don't gobble part of a year ("2024 1x05" works).
+// Patrones comunes (Plex/Jellyfin/Kodi):
+//   "S01E05" / "s01e05" / "S1E5" / "1x05" / "01x05" / "S01.E05"
+// Captura $1=season, $2=episode. Anclado a boundary no-dígito para no
+// tragarse parte de un año ("2024 1x05" funciona).
 var epPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)(?:^|[^a-z\d])s(\d{1,3})[\.\s_-]?e(\d{1,3})(?:[^a-z\d]|$)`),
 	regexp.MustCompile(`(?:^|\D)(\d{1,3})x(\d{1,3})(?:\D|$)`),
 }
 
-// Season-only patterns for the parent dir. The episode regex above
-// catches season+ep together when both live in the filename, but the
-// season number sometimes only lives in the dir name ("Season 03/01.mkv").
+// Patrones de season-only para el dir parent (caso "Season 03/01.mkv"
+// donde el filename no lleva SxxExx).
 var seasonDirPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)^(?:season|temporada|saison|staffel)[\.\s_-]*(\d{1,3})$`),
 	regexp.MustCompile(`(?i)^s(\d{1,3})$`),
 }
 
-// titleStripChars are the characters we trim around the extracted
-// episode title. Filenames frequently use any of these as separators
-// between the SxxExx token and the title proper.
+// titleStripChars: separadores que recortamos del título extraído.
 const titleStripChars = " .-_[]()"
 
-// ParseEpisode extracts the episode coordinates from a file path.
+// ParseEpisode: extrae coordenadas de episode del path.
 //
-// `libraryRoot` is the absolute path of the library; we use it to know
-// when we've walked off the end (so a file directly at root doesn't
-// pretend to belong to a non-existent series).
-//
-// The expected layout is the de-facto Plex/Jellyfin convention:
+// libraryRoot evita que un fichero en la raíz pretenda pertenecer a una
+// series inexistente. Layout esperado (convención Plex/Jellyfin):
 //
 //	<libRoot>/<Series Name>/<Season N>/<file>.ext
-//	<libRoot>/<Series Name>/<file>.ext            (rare, but supported)
+//	<libRoot>/<Series Name>/<file>.ext            (raro pero soportado)
 //
-// In the second form season number is read from the filename when the
-// SxxExx pattern is present, and defaults to 1 if only the episode
-// number is encoded.
+// En el segundo, season sale del SxxExx en el filename si está; si no,
+// default 1.
 func ParseEpisode(libraryRoot, filePath string) EpisodeMatch {
 	rel, err := filepath.Rel(libraryRoot, filePath)
 	if err != nil || strings.HasPrefix(rel, "..") {
@@ -73,16 +56,15 @@ func ParseEpisode(libraryRoot, filePath string) EpisodeMatch {
 	}
 	parts := strings.Split(filepath.ToSlash(rel), "/")
 	if len(parts) < 2 {
-		// File at lib root — no series dir to read.
+		// fichero en la raíz — sin dir de series.
 		return EpisodeMatch{OK: false}
 	}
 
-	// parts[0] is always the immediate child of the lib root. We treat
-	// it as the series dir; deeper dirs are season(s).
+	// parts[0] = hijo directo del lib root → dir de la series; lo más
+	// profundo son season(s).
 	seriesDir := parts[0]
 	fileName := parts[len(parts)-1]
-	// All segments between series and file count as candidates for the
-	// season name. In the typical 3-part layout there's exactly one.
+	// Segmentos entre series y file = candidatos a season. Típicamente 1.
 	var seasonDirs []string
 	if len(parts) >= 3 {
 		seasonDirs = parts[1 : len(parts)-1]
@@ -101,9 +83,9 @@ func ParseEpisode(libraryRoot, filePath string) EpisodeMatch {
 
 	switch {
 	case hasSE:
-		// Filename has SxxExx. Prefer season-from-dir when present (it
-		// disambiguates re-numbered shows like Doctor Who 2005), but
-		// fall back to the filename season otherwise.
+		// SxxExx en filename. Preferimos season-from-dir si existe
+		// (desambigua shows re-numerados tipo Doctor Who 2005); si no,
+		// el de filename.
 		if hasSeasonDir {
 			se = seasonFromDir
 		}
@@ -115,8 +97,8 @@ func ParseEpisode(libraryRoot, filePath string) EpisodeMatch {
 			OK:            true,
 		}
 	case hasSeasonDir:
-		// Filename has no SxxExx — try to extract just the episode
-		// number from the filename (e.g. "01.mkv" inside Season 03).
+		// Sin SxxExx en filename — probar a sacar sólo el número de episode
+		// (p.ej. "01.mkv" dentro de Season 03).
 		if epOnly, ok := extractTrailingEpisodeNumber(fileName); ok {
 			return EpisodeMatch{
 				SeriesName:    seriesDir,
@@ -131,9 +113,8 @@ func ParseEpisode(libraryRoot, filePath string) EpisodeMatch {
 	return EpisodeMatch{OK: false}
 }
 
-// extractEpisodeFromFilename tries every pattern in turn. Returns the
-// season, episode, an attempt at the episode title (everything after
-// the SxxExx token), and a flag.
+// extractEpisodeFromFilename: prueba cada patrón. Devuelve season, episode,
+// intento de título (lo que viene tras el token SxxExx) y flag.
 func extractEpisodeFromFilename(name string) (season, episode int, title string, ok bool) {
 	base := strings.TrimSuffix(name, filepath.Ext(name))
 	for _, re := range epPatterns {
@@ -143,9 +124,7 @@ func extractEpisodeFromFilename(name string) (season, episode int, title string,
 		}
 		s, _ := strconv.Atoi(base[m[2]:m[3]])
 		e, _ := strconv.Atoi(base[m[4]:m[5]])
-		// The matched range is m[0]..m[1]; everything after is a
-		// candidate episode title. Strip leading separators that the
-		// release packager left behind.
+		// Match en m[0]..m[1]; lo posterior es candidato a título.
 		tail := ""
 		if m[1] < len(base) {
 			tail = cleanTitle(base[m[1]:])
@@ -155,8 +134,8 @@ func extractEpisodeFromFilename(name string) (season, episode int, title string,
 	return 0, 0, "", false
 }
 
-// extractTrailingEpisodeNumber catches files like "01.mkv" that only
-// encode the episode number (season comes from the parent dir).
+// extractTrailingEpisodeNumber: captura ficheros tipo "01.mkv" donde sólo
+// está el número de episode (la season viene del dir parent).
 var trailingNumRE = regexp.MustCompile(`^(\d{1,3})(?:[\.\s_-].*)?$`)
 
 func extractTrailingEpisodeNumber(name string) (int, bool) {
@@ -169,9 +148,8 @@ func extractTrailingEpisodeNumber(name string) (int, bool) {
 	return n, true
 }
 
-// parseSeasonDir reads a season number out of a directory name. Returns
-// false when the dir name doesn't match any known pattern (so the
-// caller can keep looking up the chain).
+// parseSeasonDir: número de season desde el nombre del dir. false si no
+// matchea ningún patrón conocido (el caller sigue probando arriba).
 func parseSeasonDir(name string) (int, bool) {
 	trimmed := strings.TrimSpace(name)
 	for _, re := range seasonDirPatterns {
@@ -185,17 +163,12 @@ func parseSeasonDir(name string) (int, bool) {
 	return 0, false
 }
 
-// cleanTitle strips leading/trailing separators and replaces internal
-// dots / underscores with spaces (the standard release-naming
-// convention uses dots between words: "S01E05.Halloween.Party"). The
-// resulting title is what we hand to the user before TMDb metadata
-// lands; "" is acceptable when nothing is left after trimming.
+// cleanTitle: trim separadores y sustituye . / _ por espacios (los release
+// packagers usan puntos: "S01E05.Halloween.Party"). "" es válido si tras el
+// trim no queda nada.
 func cleanTitle(raw string) string {
 	out := strings.TrimLeft(raw, titleStripChars)
 	out = strings.TrimRight(out, titleStripChars)
-	// Word separators commonly used by release packagers. Replaced
-	// inline rather than with a regex because we don't need pattern
-	// matching here, just translation.
 	out = strings.ReplaceAll(out, ".", " ")
 	out = strings.ReplaceAll(out, "_", " ")
 	out = strings.Join(strings.Fields(out), " ")
