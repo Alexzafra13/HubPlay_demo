@@ -116,6 +116,71 @@ aceptables (single-digit ms). Si llegan a 50 000+, hay que revisar
 | 3 | Reducir allocs por row en Channel struct (sync.Pool / pointer-less) | L | **Bajo a medio** — solo aplica si paginación no se hace; high overhead |
 | 4 | pprof endpoints admin-gated para profiling de producción | S | **Habilitador** — para hallazgos no-obvios sin más auditoría |
 
+## Post-fix: mediciones empíricas (mismo run, 2026-05-17)
+
+Las dos optimizaciones implementadas en esta misma sesión con
+verificación bench. Honestidad obligatoria: los números reales
+divergen de las estimaciones del reporte original.
+
+### #2 — `idx_user_data_last_played_at` (commit `e079038`)
+
+| Bench | Antes idx | Después idx | Mejora |
+|---|---:|---:|---:|
+| `DailyWatchActivity` rows=1000 | 1 855 μs | 1 761 μs | **-5 %** |
+| `DailyWatchActivity` rows=5000 | 10 295 μs | 9 500 μs | **-8 %** |
+| `TopItems` rows=1000 | 1 408 μs | 1 366 μs | **-3 %** |
+| `TopItems` rows=5000 | 6 891 μs | 6 705 μs | **-3 %** |
+
+Estimación original era ×5-10. Real: -3 a -8 %.
+
+Por qué: a 5 000 rows el "full scan" cabe en page cache de SQLite WAL —
+es CPU-bound, no I/O-bound, y comparable en coste al index lookup. El
+índice escala en producción con tablas más grandes (10 k-100 k rows),
+no en bench sintético en 5 k. La conclusión es que **el bench
+sintético subestima el beneficio** del índice — y el revés también es
+verdad: bench que muestra mucha mejora puede no traducir a producción
+si los datasets reales son más pequeños.
+
+Mantenido en producción porque (a) es teóricamente correcto, (b) el
+coste de mantenimiento del índice es trivial (write amplification mínima
+— user_data hace UPSERT one-shot), (c) en deployments con catálogos
+grandes el beneficio es real.
+
+### #1 — `ListByLibraryPaginated` (commit pendiente)
+
+Nueva primitiva del repo (`ChannelRepository.ListByLibraryPaginated(ctx, libID, activeOnly, offset, limit) ([]*Channel, total int, error)`),
+implementada en raw SQL para evitar el ciclo sqlc. **No** migra todavía
+el handler `IPTVHandler.ListChannels` — ese tiene capa de overlays
+(hide / reorder por usuario) incompatible con paginación 100 % SQL.
+
+Comparativa directa con el bench original:
+
+| Caso | Legacy `ListByLibrary` | Paginated (`limit=100`) | Ratio |
+|---|---|---|---|
+| 1 000 channels | 3 055 μs / 1 330 KB / 29 013 allocs | 740 μs / 72 KB / 2 908 allocs | **4.1× tiempo, 18× memoria, 10× allocs** |
+| 5 000 channels | 16 631 μs / 9 187 KB / 149 019 allocs | 2 379 μs / 78 KB / 3 008 allocs | **7× tiempo, 118× memoria, 50× allocs** |
+
+Mejora de **tiempo** es 4-7× (no el ×30 estimado — el `SELECT COUNT(*)`
+añade overhead que el legacy se ahorra). Mejora de **memoria + allocs**
+es la palanca real: en libraries IPTV grandes la GC pressure cae
+~×50-118.
+
+Por qué importa GC más que time:
+- 17 ms vs 2.4 ms por request es importante, sí.
+- Pero 9 MB de garbage por request × 1 request/sec × 60 sec = **540 MB/min
+  de garbage que el GC tiene que limpiar**. Eso pause-stops el resto del
+  servidor (HLS streams, federation handshakes, etc.) periódicamente.
+- 78 KB por request hace que la GC apenas note la carga: 4.7 MB/min.
+
+**Pendiente — siguiente sesión**: migración del handler /
+servicio para usar la nueva primitiva. Decisiones de UX requeridas:
+
+- ¿Paginación clásica (page X/N) vs infinite scroll vs page size selector?
+- ¿Cómo manejar overlays user (hidden/position) cuando paginas en SQL?
+  El approach correcto es probablemente JOIN con `user_channel_order` a
+  nivel SQL, no aplicar overlays post-fetch.
+- Endpoint nuevo `?paginated=true&offset=&limit=` vs flag de feature.
+
 ## Lo que NO se midió aquí (siguiente baseline si interesa)
 
 - **HTTP boundary**: estos benches son al repo, no al endpoint

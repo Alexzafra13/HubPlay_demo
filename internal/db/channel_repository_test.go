@@ -92,6 +92,109 @@ func TestChannel_ListByLibrary(t *testing.T) {
 	}
 }
 
+// TestChannel_ListByLibraryPaginated pinea el contrato del método
+// añadido para cerrar el hot path #1 del reporte 2026-05-17: paginación
+// + total count en una sola respuesta. Cubre los tres ejes:
+//   - offset / limit válidos devuelven la página correcta y el total
+//   - límites clamped (negativo, 0, > 1000)
+//   - activeOnly filtra antes de paginar
+func TestChannel_ListByLibraryPaginated(t *testing.T) {
+	repo, libID := setupChannelTest(t)
+	ctx := context.Background()
+
+	// 5 canales: 3 activos, 2 inactivos. Numerados 1..5 para que
+	// el ORDER BY number sea estable y predecible.
+	_ = repo.Create(ctx, makeChannel("ch-1", libID, "Channel 1", 1, true))
+	_ = repo.Create(ctx, makeChannel("ch-2", libID, "Channel 2", 2, true))
+	_ = repo.Create(ctx, makeChannel("ch-3", libID, "Channel 3", 3, false))
+	_ = repo.Create(ctx, makeChannel("ch-4", libID, "Channel 4", 4, true))
+	_ = repo.Create(ctx, makeChannel("ch-5", libID, "Channel 5", 5, false))
+
+	t.Run("first_page_returns_total", func(t *testing.T) {
+		page, total, err := repo.ListByLibraryPaginated(ctx, libID, false, 0, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if total != 5 {
+			t.Errorf("total = %d, want 5", total)
+		}
+		if len(page) != 2 {
+			t.Fatalf("page len = %d, want 2", len(page))
+		}
+		if page[0].ID != "ch-1" || page[1].ID != "ch-2" {
+			t.Errorf("page order wrong: %s, %s (want ch-1, ch-2)", page[0].ID, page[1].ID)
+		}
+	})
+
+	t.Run("offset_skips_rows", func(t *testing.T) {
+		page, total, err := repo.ListByLibraryPaginated(ctx, libID, false, 3, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if total != 5 {
+			t.Errorf("total = %d, want 5", total)
+		}
+		if len(page) != 2 {
+			t.Fatalf("page len = %d, want 2 (rows 4, 5)", len(page))
+		}
+		if page[0].ID != "ch-4" || page[1].ID != "ch-5" {
+			t.Errorf("page order wrong: %s, %s", page[0].ID, page[1].ID)
+		}
+	})
+
+	t.Run("active_only_filters_before_paginating", func(t *testing.T) {
+		page, total, err := repo.ListByLibraryPaginated(ctx, libID, true, 0, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if total != 3 {
+			t.Errorf("active total = %d, want 3", total)
+		}
+		if len(page) != 3 {
+			t.Fatalf("page len = %d, want 3", len(page))
+		}
+		for _, ch := range page {
+			if !ch.IsActive {
+				t.Errorf("inactive channel %s leaked: %+v", ch.ID, ch)
+			}
+		}
+	})
+
+	t.Run("limit_zero_falls_back_to_default", func(t *testing.T) {
+		// limit = 0 → 100 default. Con 5 rows seed la página entera cabe.
+		page, total, err := repo.ListByLibraryPaginated(ctx, libID, false, 0, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if total != 5 || len(page) != 5 {
+			t.Fatalf("limit=0 default: page=%d total=%d, want 5/5", len(page), total)
+		}
+	})
+
+	t.Run("negative_offset_clamped_to_zero", func(t *testing.T) {
+		page, _, err := repo.ListByLibraryPaginated(ctx, libID, false, -10, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(page) != 1 || page[0].ID != "ch-1" {
+			t.Errorf("negative offset not clamped: got %+v", page)
+		}
+	})
+
+	t.Run("empty_page_returns_total", func(t *testing.T) {
+		page, total, err := repo.ListByLibraryPaginated(ctx, libID, false, 100, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if total != 5 {
+			t.Errorf("total = %d, want 5", total)
+		}
+		if len(page) != 0 {
+			t.Errorf("expected empty page past total, got %d rows", len(page))
+		}
+	})
+}
+
 func TestChannel_ReplaceForLibrary(t *testing.T) {
 	repo, libID := setupChannelTest(t)
 	ctx := context.Background()

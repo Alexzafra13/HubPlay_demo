@@ -62,6 +62,40 @@ func BenchmarkChannelRepository_ListByLibrary(b *testing.B) {
 	}
 }
 
+// BenchmarkChannelRepository_ListByLibraryPaginated measures the
+// paginated variant introduced to close hot path #1 of the 2026-05-17
+// perf report. Run alongside BenchmarkChannelRepository_ListByLibrary
+// to see the impact of capping the page size.
+//
+// Same seed sizes as the legacy bench so the numbers are directly
+// comparable: with 5 000 channels seeded, the legacy listing
+// materialises all 5 000 *Channel structs (~17 ms, 9 MB, 149 k allocs).
+// The paginated variant hidrata sólo `limit` rows + 1 count round-trip.
+func BenchmarkChannelRepository_ListByLibraryPaginated(b *testing.B) {
+	for _, n := range []int{1000, 5000} {
+		for _, limit := range []int{50, 100} {
+			b.Run(fmt.Sprintf("size=%d/limit=%d", n, limit), func(b *testing.B) {
+				repo, libID := newBenchChannelRepo(b, n)
+				ctx := context.Background()
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					page, total, err := repo.ListByLibraryPaginated(ctx, libID, false, 0, limit)
+					if err != nil {
+						b.Fatalf("paginated: %v", err)
+					}
+					if total != n {
+						b.Fatalf("total = %d, want %d", total, n)
+					}
+					if len(page) != limit {
+						b.Fatalf("page len = %d, want %d", len(page), limit)
+					}
+				}
+			})
+		}
+	}
+}
+
 // newBenchChannelRepo creates a fresh test DB + seeds N channels in
 // one library. Returns the repo + the library id. The seed phase
 // dominates setup time (each Create is one INSERT round-trip) but it's
