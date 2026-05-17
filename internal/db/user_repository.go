@@ -174,6 +174,43 @@ func (r *UserRepository) SetAvatarColor(ctx context.Context, id, hex string) err
 	return nil
 }
 
+// SetAvatarPath: ruta relativa al directorio de avatares; el service
+// la calcula tras escribir el fichero en disco. Vacío → ClearAvatarPath
+// (preferimos esa API explícita para que el caller exprese intención).
+func (r *UserRepository) SetAvatarPath(ctx context.Context, id, path string) error {
+	if r.useSQLite() {
+		if err := r.sq.UpdateUserAvatarPath(ctx, sqlc.UpdateUserAvatarPathParams{
+			ID:         id,
+			AvatarPath: nullStringFromOptional(path),
+		}); err != nil {
+			return fmt.Errorf("set avatar path: %w", err)
+		}
+		return nil
+	}
+	if err := r.pq.UpdateUserAvatarPath(ctx, sqlc_pg.UpdateUserAvatarPathParams{
+		ID:         id,
+		AvatarPath: nullStringFromOptional(path),
+	}); err != nil {
+		return fmt.Errorf("set avatar path: %w", err)
+	}
+	return nil
+}
+
+// ClearAvatarPath: pone avatar_path = NULL. El service borra el
+// fichero de disco antes (best-effort) y luego llama aquí.
+func (r *UserRepository) ClearAvatarPath(ctx context.Context, id string) error {
+	if r.useSQLite() {
+		if err := r.sq.ClearUserAvatarPath(ctx, id); err != nil {
+			return fmt.Errorf("clear avatar path: %w", err)
+		}
+		return nil
+	}
+	if err := r.pq.ClearUserAvatarPath(ctx, id); err != nil {
+		return fmt.Errorf("clear avatar path: %w", err)
+	}
+	return nil
+}
+
 func (r *UserRepository) SetDisplayName(ctx context.Context, id, name string) error {
 	if r.useSQLite() {
 		if err := r.sq.UpdateUserDisplayName(ctx, sqlc.UpdateUserDisplayNameParams{

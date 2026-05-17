@@ -234,6 +234,10 @@ export interface User {
   // = use the deterministic FNV → palette fallback in
   // `avatarColorForUser`.
   avatar_color?: string;
+  // URL pública del avatar subido por el usuario, ya con cache-buster
+  // embebido (`?v=<filename>`). Cuando es null/undefined el frontend
+  // cae a iniciales sobre color como antes.
+  avatar_image_url?: string | null;
 }
 
 export interface CreateUserResponse {

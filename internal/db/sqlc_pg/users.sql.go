@@ -349,6 +349,34 @@ func (q *Queries) UpdateUserAvatarColor(ctx context.Context, arg UpdateUserAvata
 	return err
 }
 
+const clearUserAvatarPath = `-- name: ClearUserAvatarPath :exec
+UPDATE users SET avatar_path = NULL WHERE id = $1
+`
+
+// Quita el avatar subido. El fichero en disco lo borra el service
+// antes de llamar; aquí sólo desreferenciamos.
+func (q *Queries) ClearUserAvatarPath(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, clearUserAvatarPath, id)
+	return err
+}
+
+const updateUserAvatarPath = `-- name: UpdateUserAvatarPath :exec
+UPDATE users SET avatar_path = $1 WHERE id = $2
+`
+
+type UpdateUserAvatarPathParams struct {
+	AvatarPath sql.NullString `json:"avatar_path"`
+	ID         string         `json:"id"`
+}
+
+// Sube/actualiza la ruta en disco del avatar subido por el usuario.
+// El path es relativo al directorio de avatares (config/avatars/<file>),
+// no absoluto, para que la migración del volumen no rompa nada.
+func (q *Queries) UpdateUserAvatarPath(ctx context.Context, arg UpdateUserAvatarPathParams) error {
+	_, err := q.db.ExecContext(ctx, updateUserAvatarPath, arg.AvatarPath, arg.ID)
+	return err
+}
+
 const updateUserDisplayName = `-- name: UpdateUserDisplayName :exec
 UPDATE users SET display_name = $1 WHERE id = $2
 `

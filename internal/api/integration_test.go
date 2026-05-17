@@ -41,7 +41,7 @@ func newTestApp(t *testing.T) *testApp {
 	}
 
 	authSvc := auth.NewService(repos.Users, repos.Sessions, keyStore, cfg.Auth, clk, slog.Default())
-	userSvc := user.NewService(repos.Users, slog.Default())
+	userSvc := user.NewService(repos.Users, slog.Default(), "")
 
 	router := api.NewRouter(api.Dependencies{
 		Auth:     authSvc,

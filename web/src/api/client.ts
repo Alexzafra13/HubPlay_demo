@@ -171,9 +171,16 @@ export class ApiClient {
     // Build headers
     const headers: Record<string, string> = { ...extraHeaders };
 
-    if (body !== undefined && (method === "POST" || method === "PUT" || method === "PATCH")) {
+    // Para FormData (avatares u otros uploads multipart) NO ponemos
+    // Content-Type: el navegador genera el boundary automáticamente y
+    // sobreescribirlo aquí lo rompe. Y tampoco hacemos JSON.stringify
+    // — lo pasamos en bruto a fetch.
+    const isFormData = typeof FormData !== "undefined" && body instanceof FormData;
+    if (body !== undefined && !isFormData && (method === "POST" || method === "PUT" || method === "PATCH")) {
       headers["Content-Type"] = "application/json";
     }
+    const serializedBody: BodyInit | undefined =
+      body === undefined ? undefined : isFormData ? (body as FormData) : JSON.stringify(body);
 
     // Declare the browser's codec/container capabilities so the server's
     // playback waterfall (DirectPlay → DirectStream → Transcode) can
@@ -209,7 +216,7 @@ export class ApiClient {
             method,
             headers,
             credentials: "include",
-            body: body !== undefined ? JSON.stringify(body) : undefined,
+            body: serializedBody,
             keepalive,
           },
           REQUEST_TIMEOUT_MS,
@@ -595,6 +602,22 @@ export class ApiClient {
     return this.request<void>("PUT", `/users/${userId}/avatar-color`, {
       body: { avatar_color: hex },
     });
+  }
+
+  /** Sube una imagen como avatar del usuario autenticado. El navegador
+   *  pone el boundary multipart automáticamente cuando el body es un
+   *  FormData; nosotros sólo metemos el File en el campo "avatar". */
+  async uploadMyAvatar(file: File): Promise<{ avatar_image_url: string }> {
+    const form = new FormData();
+    form.append("avatar", file);
+    return this.request<{ avatar_image_url: string }>("POST", "/me/avatar", {
+      body: form,
+    });
+  }
+
+  /** Quita el avatar subido. Idempotente: 204 también si no había. */
+  async deleteMyAvatar(): Promise<void> {
+    return this.request<void>("DELETE", "/me/avatar");
   }
 
   /** Promote / demote between user and admin. The primary admin

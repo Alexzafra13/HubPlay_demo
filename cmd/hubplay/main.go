@@ -141,7 +141,14 @@ func run(configPath string) error {
 	authService.SetEventBus(eventBus)
 	authService.StartSessionCleaner(ctx)
 	deviceCodeService := auth.NewDeviceCodeService(authService, repos.DeviceCodes, repos.Users, logger)
-	userService := user.NewService(repos.Users, logger)
+	// avatarsDir vive junto a la DB para compartir volumen docker.
+	// Si el operador no tiene la DB en disco (modo :memory: en
+	// tests), pasamos "" y el service deshabilita uploads.
+	avatarsDir := ""
+	if cfg.Database.Path != "" && cfg.Database.Path != ":memory:" {
+		avatarsDir = filepath.Join(filepath.Dir(cfg.Database.Path), "avatars")
+	}
+	userService := user.NewService(repos.Users, logger, avatarsDir)
 
 	prober := probe.New()
 

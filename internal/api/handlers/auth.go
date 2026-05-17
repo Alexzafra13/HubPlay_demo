@@ -222,6 +222,9 @@ func profileListResponse(profiles []*authmodel.User) []map[string]any {
 		if p.AvatarColor != "" {
 			out[i]["avatar_color"] = p.AvatarColor
 		}
+		if p.AvatarPath != "" {
+			out[i]["avatar_image_url"] = avatarPublicURL(p.ID, p.AvatarPath)
+		}
 	}
 	return out
 }
