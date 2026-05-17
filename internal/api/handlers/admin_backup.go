@@ -86,6 +86,9 @@ func (h *AdminBackupHandler) notImplementedForPostgres(w http.ResponseWriter, r 
 // includes a UTC timestamp so multiple downloads in a session don't
 // overwrite each other in the operator's Downloads folder.
 func (h *AdminBackupHandler) Download(w http.ResponseWriter, r *http.Request) {
+	// Streaming endpoint: opt-out del WriteTimeout 30s global
+	// (cierre olor Q). El segmento puede tardar > 30s con HW accel cold-start.
+	_ = DisableWriteDeadline(w)
 	if h.notImplementedForPostgres(w, r, "Backup download") {
 		return
 	}

@@ -65,6 +65,9 @@ func (h *AdminLogsHandler) Snapshot(w http.ResponseWriter, r *http.Request) {
 // nginx / cloudflare from coalescing chunks into 1 KB blocks that
 // ruin the live feel.
 func (h *AdminLogsHandler) Stream(w http.ResponseWriter, r *http.Request) {
+	// Streaming endpoint: opt-out del WriteTimeout 30s global
+	// (cierre olor Q). El segmento puede tardar > 30s con HW accel cold-start.
+	_ = DisableWriteDeadline(w)
 	if h.buffer == nil {
 		respondError(w, r, http.StatusServiceUnavailable, "LOGS_UNAVAILABLE",
 			"log buffer is not configured for this build")

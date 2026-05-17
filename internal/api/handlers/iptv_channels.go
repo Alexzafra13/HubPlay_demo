@@ -171,6 +171,9 @@ func (h *IPTVHandler) Groups(w http.ResponseWriter, r *http.Request) {
 // users keep the broken-on-MPEG-TS state we shipped before transmux,
 // but at least HLS providers continue to work.
 func (h *IPTVHandler) Stream(w http.ResponseWriter, r *http.Request) {
+	// Streaming endpoint: opt-out del WriteTimeout 30s global
+	// (cierre olor Q). El segmento puede tardar > 30s con HW accel cold-start.
+	_ = DisableWriteDeadline(w)
 	channelID := chi.URLParam(r, "channelId")
 
 	ch, err := h.svc.GetChannel(r.Context(), channelID)
@@ -212,6 +215,9 @@ func (h *IPTVHandler) Stream(w http.ResponseWriter, r *http.Request) {
 // window and any client-side cache breaks the player's ability to see
 // new segments.
 func (h *IPTVHandler) HLSManifest(w http.ResponseWriter, r *http.Request) {
+	// Streaming endpoint: opt-out del WriteTimeout 30s global
+	// (cierre olor Q). El segmento puede tardar > 30s con HW accel cold-start.
+	_ = DisableWriteDeadline(w)
 	if h.transmux == nil {
 		respondError(w, r, http.StatusNotImplemented, "TRANSMUX_DISABLED",
 			"live transmux is not enabled on this server")
@@ -294,6 +300,9 @@ func (h *IPTVHandler) HLSManifest(w http.ResponseWriter, r *http.Request) {
 // initials/colour avatar, so the UI degrades gracefully without
 // any extra client wiring.
 func (h *IPTVHandler) ChannelLogo(w http.ResponseWriter, r *http.Request) {
+	// Streaming endpoint: opt-out del WriteTimeout 30s global
+	// (cierre olor Q). El segmento puede tardar > 30s con HW accel cold-start.
+	_ = DisableWriteDeadline(w)
 	if h.logoCache == nil {
 		respondError(w, r, http.StatusNotFound, "NO_LOGO", "logo cache disabled")
 		return
@@ -373,6 +382,9 @@ func (h *IPTVHandler) ChannelLogo(w http.ResponseWriter, r *http.Request) {
 // paused for 60+ s and we reaped it): hls.js handles it by reloading
 // the manifest, which respawns the session and resumes playback.
 func (h *IPTVHandler) HLSSegment(w http.ResponseWriter, r *http.Request) {
+	// Streaming endpoint: opt-out del WriteTimeout 30s global
+	// (cierre olor Q). El segmento puede tardar > 30s con HW accel cold-start.
+	_ = DisableWriteDeadline(w)
 	if h.transmux == nil {
 		respondError(w, r, http.StatusNotImplemented, "TRANSMUX_DISABLED",
 			"live transmux is not enabled on this server")

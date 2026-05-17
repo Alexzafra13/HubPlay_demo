@@ -39,6 +39,9 @@ func NewEventHandler(bus EventBusSubscriber, limiter *SSELimiter, logger *slog.L
 
 // Stream opens an SSE connection and forwards events to the client.
 func (h *EventHandler) Stream(w http.ResponseWriter, r *http.Request) {
+	// Streaming endpoint: opt-out del WriteTimeout 30s global
+	// (cierre olor Q). El segmento puede tardar > 30s con HW accel cold-start.
+	_ = DisableWriteDeadline(w)
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		respondError(w, r, http.StatusInternalServerError, "SSE_NOT_SUPPORTED", "streaming not supported")
