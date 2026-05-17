@@ -200,33 +200,41 @@ export function SearchBar() {
     <>
       {/* Reserved 36×36 slot in the topbar flex flow — the expanded
           search panel is absolute right-0 inside it, so growing left
-          to 280px never displaces the centered MainNav (the previous
-          layout pushed siblings every time the bar opened). */}
+          to 320px never displaces the centered MainNav (the previous
+          layout pushed siblings every time the bar opened).
+          Estilo expandido: pill (rounded-full) con ring sutil en
+          reposo y glow del color accent cuando el input tiene foco,
+          para que enseñar el campo no sea una caja gris cualquiera. */}
       <div ref={wrapRef} className="relative w-9 h-9 flex-shrink-0">
         <motion.div
           layout
           initial={false}
-          animate={{ width: open ? 280 : 36 }}
+          animate={{ width: open ? 320 : 36 }}
           transition={{ type: "spring", stiffness: 380, damping: 32, mass: 0.6 }}
           className={[
-            "absolute right-0 top-0 h-9 flex items-center rounded-lg overflow-hidden border transition-colors",
+            "group absolute right-0 top-0 h-9 flex items-center rounded-full overflow-hidden transition-[background-color,box-shadow] duration-200",
             open
-              ? "bg-bg-overlay border-border-strong shadow-lg shadow-black/30"
-              : "bg-bg-hover/40 border-border-subtle hover:border-border",
+              ? "bg-bg-overlay/95 backdrop-blur-xl shadow-[0_4px_16px_-4px_rgba(0,0,0,0.45)] ring-1 ring-white/10 focus-within:ring-accent/45 focus-within:shadow-[0_0_0_4px_rgba(20,184,166,0.12),0_4px_18px_-4px_rgba(0,0,0,0.5)]"
+              : "bg-bg-hover/40 ring-1 ring-white/8 hover:ring-white/20",
           ].join(" ")}
         >
           <button
             type="button"
             onClick={() => (open ? inputRef.current?.focus() : openSearch())}
-            className="flex items-center justify-center w-9 h-9 flex-shrink-0 text-text-secondary hover:text-text-primary transition-colors"
+            className={[
+              "flex items-center justify-center w-9 h-9 flex-shrink-0 transition-colors",
+              open
+                ? "text-text-secondary group-focus-within:text-accent"
+                : "text-text-secondary hover:text-text-primary",
+            ].join(" ")}
             aria-label={t("nav.search")}
             aria-expanded={open}
           >
-            <SearchIcon className="h-[17px] w-[17px]" strokeWidth={1.7} />
+            <SearchIcon className="h-[17px] w-[17px]" strokeWidth={1.8} />
           </button>
 
           {open && (
-            <form onSubmit={handleSubmit} className="flex-1 flex items-center">
+            <form onSubmit={handleSubmit} className="flex-1 flex items-center pr-1.5">
               <input
                 ref={inputRef}
                 value={query}
@@ -242,7 +250,7 @@ export function SearchBar() {
                   }
                 }}
                 placeholder={placeholder}
-                className="flex-1 min-w-0 bg-transparent border-none outline-none text-[13px] text-text-primary placeholder:text-text-muted px-0 py-0"
+                className="flex-1 min-w-0 bg-transparent border-none outline-none text-[13px] text-text-primary placeholder:text-text-muted/80 px-0 py-0"
                 autoComplete="off"
                 spellCheck={false}
               />
@@ -253,19 +261,21 @@ export function SearchBar() {
                 <button
                   type="button"
                   onClick={() => setQuery("")}
-                  className="flex items-center justify-center w-7 h-7 mr-1 rounded-md text-text-muted hover:text-text-primary hover:bg-bg-hover transition-colors flex-shrink-0"
+                  className="flex items-center justify-center w-6 h-6 rounded-full text-text-muted hover:text-text-primary hover:bg-white/8 transition-colors flex-shrink-0"
                   aria-label={t("common.cancel")}
                 >
-                  <X className="h-3.5 w-3.5" strokeWidth={1.8} />
+                  <X className="h-3.5 w-3.5" strokeWidth={2} />
                 </button>
               ) : (
                 <button
                   type="button"
                   onClick={closeAndClear}
-                  className="flex items-center justify-center px-1.5 mr-1 text-[10px] font-medium text-text-muted hover:text-text-primary transition-colors flex-shrink-0"
+                  className="flex items-center justify-center flex-shrink-0"
                   aria-label={t("nav.closeMenu")}
                 >
-                  Esc
+                  <kbd className="px-1.5 py-0.5 rounded-md text-[10px] font-medium text-text-muted bg-white/5 ring-1 ring-white/10 hover:text-text-primary hover:ring-white/25 transition-colors">
+                    Esc
+                  </kbd>
                 </button>
               )}
             </form>

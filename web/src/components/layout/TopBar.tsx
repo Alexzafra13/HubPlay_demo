@@ -175,11 +175,6 @@ function UserAvatarMenu({
         aria-expanded={open}
       >
         <UserAvatar user={avatarUser} size="md" />
-        <span
-          className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-bg-base"
-          style={{ background: "var(--color-success)" }}
-          aria-hidden
-        />
       </button>
 
       <AnimatePresence>
