@@ -1533,6 +1533,20 @@
     "errorApply": "Could not apply the match. Please try again.",
     "candidatesAriaLabel": "TMDb candidates"
   },
+  "metadataEditor": {
+    "menuLabel": "Edit metadata…",
+    "title": "Edit metadata",
+    "lockHint": "When you save, this item gets locked: future automatic refreshes won't overwrite your changes.",
+    "fieldTitle": "Title",
+    "fieldOriginalTitle": "Original title",
+    "fieldYear": "Year",
+    "fieldTagline": "Tagline",
+    "fieldOverview": "Overview",
+    "save": "Save",
+    "lock": "Lock metadata",
+    "unlock": "Unlock metadata",
+    "errorGeneric": "Could not save. Please try again."
+  },
   "channelLogo": {
     "title": "Channel logo",
     "previewHint": "Preview of the currently active logo (admin override or M3U tvg-logo).",

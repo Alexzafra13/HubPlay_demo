@@ -1533,6 +1533,20 @@
     "errorApply": "No se ha podido aplicar el match. Inténtalo de nuevo.",
     "candidatesAriaLabel": "Candidatos TMDb"
   },
+  "metadataEditor": {
+    "menuLabel": "Editar metadatos…",
+    "title": "Editar metadatos",
+    "lockHint": "Al guardar, el item queda bloqueado: los siguientes refreshes automáticos no pisarán tus cambios.",
+    "fieldTitle": "Título",
+    "fieldOriginalTitle": "Título original",
+    "fieldYear": "Año",
+    "fieldTagline": "Tagline",
+    "fieldOverview": "Sinopsis",
+    "save": "Guardar",
+    "lock": "Bloquear metadatos",
+    "unlock": "Desbloquear metadatos",
+    "errorGeneric": "No se ha podido guardar. Inténtalo de nuevo."
+  },
   "channelLogo": {
     "title": "Logo del canal",
     "previewHint": "Vista previa con el logo actualmente activo (override admin o tvg-logo del M3U).",

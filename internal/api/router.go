@@ -995,6 +995,10 @@ func NewRouter(deps Dependencies) http.Handler {
 						r.Route("/libraries/{id}/iptv", func(r chi.Router) {
 							r.Post("/refresh-m3u", iptvHandler.RefreshM3U)
 							r.Post("/refresh-epg", iptvHandler.RefreshEPG)
+							// Auto-discovery de logos contra iptv-org
+							// (database pública con miles de canales
+							// mapeados por tvg-id → logo URL).
+							r.Post("/refresh-logos-from-iptv-org", iptvHandler.RefreshLogosFromIPTVOrg)
 						})
 						if iptvScheduleHandler != nil {
 							r.Put("/libraries/{id}/schedule/{kind}", iptvScheduleHandler.Upsert)
@@ -1043,6 +1047,13 @@ func NewRouter(deps Dependencies) http.Handler {
 						r.Use(auth.RequireAdmin)
 						r.Get("/identify/candidates", itemHandler.IdentifyCandidates)
 						r.Post("/identify", itemHandler.Identify)
+						// Editor manual de metadatos. Distinto de
+						// identify: no consulta TMDb, sólo escribe los
+						// campos que el operador suministra. Bloquea
+						// el item al guardar para que el siguiente
+						// "Refresh metadata" no pise la edición.
+						r.Patch("/metadata", itemHandler.UpdateItemMetadata)
+						r.Put("/metadata/lock", itemHandler.SetMetadataLock)
 					})
 				})
 			}

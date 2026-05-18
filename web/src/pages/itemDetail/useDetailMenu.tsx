@@ -8,7 +8,7 @@ import {
   RefreshIcon,
   InfoIcon,
 } from "@/components/media/icons";
-import { Search } from "lucide-react";
+import { Search, Edit3, Lock, Unlock } from "lucide-react";
 
 // Builds the hero kebab menu rows for a detail page. Lives here as a
 // hook (not a useMemo inside the page) because the result depends on
@@ -39,6 +39,13 @@ export interface UseDetailMenuArgs {
   // diálogo, el item del menú no se renderiza — sin diálogo no hay
   // acción que disparar.
   onOpenIdentify?: () => void;
+  // Editor manual de metadatos. Opcional, mismo razonamiento.
+  onOpenMetadataEditor?: () => void;
+  // Toggle del lock de metadatos. Opcional. Cuando se pulsa, la UI
+  // dispara el PUT /metadata/lock; el padre refresca el item y este
+  // hook re-renderiza con el otro label (lock ↔ unlock).
+  metadataLocked?: boolean;
+  onToggleMetadataLock?: () => void;
 }
 
 export function useDetailMenu({
@@ -47,6 +54,9 @@ export function useDetailMenu({
   isAdmin,
   onOpenImageManager,
   onOpenIdentify,
+  onOpenMetadataEditor,
+  metadataLocked,
+  onToggleMetadataLock,
 }: UseDetailMenuArgs): HeroMenuItem[] {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -71,6 +81,26 @@ export function useDetailMenu({
         label: t("identify.menuLabel", { defaultValue: "Identify…" }),
         icon: <Search className="h-4 w-4" />,
         onClick: onOpenIdentify,
+      });
+    }
+
+    if (canIdentify && onOpenMetadataEditor) {
+      items.push({
+        label: t("metadataEditor.menuLabel", { defaultValue: "Editar metadatos…" }),
+        icon: <Edit3 className="h-4 w-4" />,
+        onClick: onOpenMetadataEditor,
+      });
+    }
+
+    if (canIdentify && onToggleMetadataLock) {
+      items.push({
+        label: metadataLocked
+          ? t("metadataEditor.unlock", { defaultValue: "Desbloquear metadatos" })
+          : t("metadataEditor.lock", { defaultValue: "Bloquear metadatos" }),
+        icon: metadataLocked
+          ? <Unlock className="h-4 w-4" />
+          : <Lock className="h-4 w-4" />,
+        onClick: onToggleMetadataLock,
       });
     }
 

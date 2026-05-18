@@ -15,6 +15,8 @@ import { RecommendationsRail } from "@/components/media/RecommendationsRail";
 import { VideoPlayer } from "@/components/player";
 import { ImageManager } from "@/components/ImageManager";
 import { IdentifyDialog } from "@/components/IdentifyDialog";
+import { MetadataEditorDialog } from "@/components/MetadataEditorDialog";
+import { useSetItemMetadataLock } from "@/api/hooks";
 import { useAuthStore } from "@/store/auth";
 import { useResumeTarget } from "@/hooks/useSeriesResumeTarget";
 import { useVibrantColors } from "@/hooks/useVibrantColors";
@@ -54,6 +56,9 @@ export default function ItemDetail() {
   // Identify (admin rematch) modal — abierto desde el kebab. Sólo
   // películas y series; el hook del menú ya filtra el resto.
   const [identifyOpen, setIdentifyOpen] = useState(false);
+  // Metadata editor (admin) — para editar campos a mano sin TMDb.
+  const [metadataEditorOpen, setMetadataEditorOpen] = useState(false);
+  const setMetadataLock = useSetItemMetadataLock(id ?? "");
 
   // Sibling episodes for auto-advance + the resume rail. Pure
   // derivation (filter + sort) — useMemo-able. Episodes-only;
@@ -145,6 +150,11 @@ export default function ItemDetail() {
     isAdmin,
     onOpenImageManager: () => setImageManagerOpen(true),
     onOpenIdentify: () => setIdentifyOpen(true),
+    onOpenMetadataEditor: () => setMetadataEditorOpen(true),
+    metadataLocked: item?.metadata_locked ?? false,
+    onToggleMetadataLock: () => {
+      setMetadataLock.mutate(!(item?.metadata_locked ?? false));
+    },
   });
 
   // Convert backend ticks → seconds at this boundary so the player
@@ -503,6 +513,17 @@ export default function ItemDetail() {
         <IdentifyDialog
           isOpen={identifyOpen}
           onClose={() => setIdentifyOpen(false)}
+          item={item}
+        />
+      )}
+
+      {/* Metadata editor (admin only). Mismo gate de tipo: episodios
+          y temporadas heredan su metadata del padre, así que el editor
+          no aplica. */}
+      {isAdmin && item && (item.type === "movie" || item.type === "series") && (
+        <MetadataEditorDialog
+          isOpen={metadataEditorOpen}
+          onClose={() => setMetadataEditorOpen(false)}
           item={item}
         />
       )}

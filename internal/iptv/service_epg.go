@@ -358,6 +358,17 @@ func (s *Service) GetSchedule(ctx context.Context, channelID string, from, to ti
 	return s.epgPrograms.Schedule(ctx, channelID, from, to)
 }
 
+// GetChannelEPGIcon devuelve cualquier icon_url no vacío que el EPG
+// tenga para programas de este canal — fallback de logo cuando ni hay
+// override admin ni tvg-logo en el M3U. "" sin error cuando no hay
+// EPG con icono (canal sin programación o feed que no trae iconos).
+func (s *Service) GetChannelEPGIcon(ctx context.Context, channelID string) (string, error) {
+	if s.epgPrograms == nil {
+		return "", nil
+	}
+	return s.epgPrograms.GetChannelIcon(ctx, channelID)
+}
+
 // GetBulkSchedule returns EPG programs for multiple channels.
 func (s *Service) GetBulkSchedule(ctx context.Context, channelIDs []string, from, to time.Time) (map[string][]*iptvmodel.EPGProgram, error) {
 	return s.epgPrograms.BulkSchedule(ctx, channelIDs, from, to)

@@ -12,7 +12,9 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"hubplay/internal/domain"
+	librarymodel "hubplay/internal/library/model"
 	"hubplay/internal/provider"
+	"hubplay/internal/scanner"
 	"hubplay/internal/testutil"
 )
 
@@ -45,6 +47,18 @@ func (f *fakeIdentifier) IdentifyAndApply(_ context.Context, itemID, externalID 
 	f.applyCalledWith.itemID = itemID
 	f.applyCalledWith.externalID = externalID
 	return f.applyErr
+}
+
+func (f *fakeIdentifier) UpdateItemMetadata(_ context.Context, _ string, _ scanner.ItemMetadataPatch) (*librarymodel.Item, error) {
+	return &librarymodel.Item{}, nil
+}
+
+func (f *fakeIdentifier) SetMetadataLock(_ context.Context, _ string, _ bool) error {
+	return nil
+}
+
+func (f *fakeIdentifier) IsMetadataLocked(_ context.Context, _ string) (bool, error) {
+	return false, nil
 }
 
 // identifyEnv monta un router mínimo con sólo los dos endpoints de

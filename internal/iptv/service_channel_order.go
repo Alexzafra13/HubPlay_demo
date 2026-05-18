@@ -14,6 +14,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 
 	iptvmodel "hubplay/internal/iptv/model"
 )
@@ -495,4 +496,69 @@ func (s *Service) GetChannelLogoOverride(ctx context.Context, channelID string) 
 		return nil, err
 	}
 	return s.logoOverrides.Get(ctx, ch.LibraryID, ch.StreamURL)
+}
+
+// RefreshLogosFromIPTVOrg busca logos en la base pública de iptv-org
+// (mapeo por tvg_id) para cada canal de la biblioteca que:
+//   - No tenga ya un override admin (URL o archivo).
+//   - No traiga tvg-logo del M3U.
+//   - Tenga un tvg_id no vacío que se pueda usar como clave de búsqueda.
+//
+// Los hallazgos se guardan como overrides URL (no se tocan los datos
+// originales del M3U). El admin puede borrarlos uno a uno desde el
+// modal de logo del canal — "Restaurar logo del M3U" deja el override
+// en blanco y vuelve al estado anterior.
+//
+// Devuelve el número de canales actualizados. Cero significa: o todos
+// los canales tienen ya logo (M3U / override), o ninguno cuadró por
+// tvg_id contra el lookup.
+func (s *Service) RefreshLogosFromIPTVOrg(ctx context.Context, libraryID string) (int, error) {
+	if s.iptvOrgLogos == nil {
+		return 0, fmt.Errorf("iptv: iptv-org lookup not configured")
+	}
+	if s.logoOverrides == nil {
+		return 0, fmt.Errorf("iptv: logo overrides repository not wired")
+	}
+
+	lookup, err := s.iptvOrgLogos.Load(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("load iptv-org lookup: %w", err)
+	}
+
+	channels, err := s.GetChannels(ctx, libraryID, false)
+	if err != nil {
+		return 0, err
+	}
+
+	// Bulk-load overrides previos para no tener que consultarlos uno
+	// a uno (sería N+1 contra DB para libraries grandes).
+	existing, err := s.logoOverrides.ListByLibrary(ctx, libraryID)
+	if err != nil {
+		return 0, fmt.Errorf("load existing logo overrides: %w", err)
+	}
+	hasOverride := make(map[string]bool, len(existing))
+	for _, o := range existing {
+		hasOverride[o.StreamURL] = true
+	}
+
+	updated := 0
+	for _, ch := range channels {
+		if ch.LogoURL != "" || ch.TvgID == "" {
+			continue
+		}
+		if hasOverride[ch.StreamURL] {
+			continue
+		}
+		logo, ok := lookup[strings.ToLower(ch.TvgID)]
+		if !ok || logo == "" {
+			continue
+		}
+		if err := s.logoOverrides.UpsertURL(ctx, libraryID, ch.StreamURL, logo); err != nil {
+			s.logger.Warn("iptv-org logo upsert failed",
+				"library", libraryID, "tvg_id", ch.TvgID, "error", err)
+			continue
+		}
+		updated++
+	}
+	return updated, nil
 }

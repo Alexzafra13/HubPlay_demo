@@ -793,6 +793,47 @@ export class ApiClient {
     );
   }
 
+  // Admin: edición manual de metadatos. Bloquea el item al guardar
+  // para que el siguiente "Refresh metadata" no pise la edición.
+  // Todos los campos son opcionales; sólo los suministrados se aplican.
+  async updateItemMetadata(
+    id: string,
+    patch: {
+      title?: string;
+      original_title?: string;
+      year?: number;
+      overview?: string;
+      tagline?: string;
+    },
+  ): Promise<{
+    item_id: string;
+    title: string;
+    original_title: string;
+    year: number;
+    metadata_locked: boolean;
+  }> {
+    return this.request("PATCH", `/items/${id}/metadata`, { body: patch });
+  }
+
+  // Admin: toggle del candado de metadatos sin tocar el contenido.
+  async setItemMetadataLock(
+    id: string,
+    locked: boolean,
+  ): Promise<{ item_id: string; metadata_locked: boolean }> {
+    return this.request("PUT", `/items/${id}/metadata/lock`, {
+      body: { locked },
+    });
+  }
+
+  // Admin: busca logos en la base pública de iptv-org y los aplica
+  // como overrides URL a los canales sin logo. Devuelve el count.
+  async refreshLogosFromIPTVOrg(libraryId: string): Promise<{ library_id: string; updated: number }> {
+    return this.request(
+      "POST",
+      `/libraries/${encodeURIComponent(libraryId)}/iptv/refresh-logos-from-iptv-org`,
+    );
+  }
+
   // Admin: aplica un match TMDb concreto al item. El backend borra
   // imágenes y metadata previos y reescribe título, overview, géneros,
   // estudio, reparto e imágenes con los del externalID elegido.

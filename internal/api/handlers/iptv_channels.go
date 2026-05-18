@@ -339,6 +339,16 @@ func (h *IPTVHandler) ChannelLogo(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Último fallback antes del 404: el icono que el EPG haya recolectado
+	// para programas de este canal (XMLTV `<icon>`). Cubre el caso muy
+	// común de feeds M3U sin tvg-logo cuyo XMLTV asociado sí trae
+	// iconos por canal. Mismo cache remoto + proxy CSP que el resto.
+	if effectiveLogoURL == "" {
+		if epgIcon, eErr := h.svc.GetChannelEPGIcon(r.Context(), channelID); eErr == nil && epgIcon != "" {
+			effectiveLogoURL = epgIcon
+		}
+	}
+
 	if effectiveLogoURL == "" {
 		respondError(w, r, http.StatusNotFound, "NO_LOGO", "channel has no upstream logo")
 		return

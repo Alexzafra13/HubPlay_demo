@@ -887,6 +887,10 @@ export interface IdentifyCandidate {
 
 export interface ItemDetail extends MediaItem {
   media_streams: MediaStream[];
+  /** Admin-only: cuando true, el scanner se salta este item en
+   *  enrichMetadata / RefreshMetadata. Sólo se incluye cuando el
+   *  caller es admin y el identifier está cableado en el backend. */
+  metadata_locked?: boolean;
   // Cast / crew. Server omits the key entirely when no rows are
   // stored, so the field is optional on the wire side too. Detail
   // page guards on `?.length > 0` already; absent === empty list.

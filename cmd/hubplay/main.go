@@ -175,7 +175,7 @@ func run(configPath string) error {
 	imageDir := filepath.Join(filepath.Dir(cfg.Database.Path), "images")
 	scannerPathmap := pathmap.New(imageDir)
 
-	scnr := scanner.New(repos.Items, repos.MediaStreams, repos.Metadata, repos.ExternalIDs, repos.Images, repos.Chapters, repos.People, repos.ItemValues, repos.Studios, repos.Collections, providerManager, prober, eventBus, imageDir, scannerPathmap, logger)
+	scnr := scanner.New(repos.Items, repos.MediaStreams, repos.Metadata, repos.ExternalIDs, repos.Images, repos.Chapters, repos.People, repos.ItemValues, repos.Studios, repos.Collections, repos.ItemMetadataLocks, providerManager, prober, eventBus, imageDir, scannerPathmap, logger)
 	libraryService := library.NewService(repos.Libraries, repos.Items, repos.MediaStreams, repos.Images, repos.Channels, repos.ItemValues, scnr, logger)
 
 	// Periodic SQLite query-planner refresh + FTS5 merge. Fires every
@@ -368,6 +368,13 @@ func run(configPath string) error {
 		iptvLogoCache = lc
 		logger.Info("iptv logo cache enabled", "cache_dir", logoCacheDir)
 	}
+
+	// iptv-org logo auto-discovery — fetcher + cache compartido con
+	// el resto de assets de imagen. La descarga se hace lazy (en la
+	// primera llamada del admin) para no pegar a iptv-org.github.io
+	// durante el arranque.
+	iptvOrgLogosCachePath := filepath.Join(filepath.Dir(cfg.Database.Path), "images", "iptv-org-channels.json")
+	iptvService.SetIPTVOrgLogos(iptv.NewIPTVOrgLogoLookup(iptvOrgLogosCachePath))
 
 	// ═══ Phase 4d: IPTV Scheduler ═══
 	// Runs periodic M3U + EPG refreshes per configured schedule so the

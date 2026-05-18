@@ -184,6 +184,54 @@ export function useIdentifyCandidates(
   });
 }
 
+// Editor manual de metadatos. Distinto del flujo identify: no consulta
+// TMDb, sólo escribe los campos que el operador suministra. Bloquea
+// el item al guardar para que el siguiente "Refresh metadata" no pise
+// la edición. Invalida las mismas queries que identify para mantener
+// la página detalle reactiva.
+export function useUpdateItemMetadata(itemId: string) {
+  const queryClient = useQueryClient();
+  return useMutation<
+    {
+      item_id: string;
+      title: string;
+      original_title: string;
+      year: number;
+      metadata_locked: boolean;
+    },
+    Error,
+    {
+      title?: string;
+      original_title?: string;
+      year?: number;
+      overview?: string;
+      tagline?: string;
+    }
+  >({
+    mutationFn: (patch) => api.updateItemMetadata(itemId, patch),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.item(itemId) });
+      queryClient.invalidateQueries({ queryKey: ["items"] });
+    },
+  });
+}
+
+// Toggle del lock sin tocar el contenido — el admin "suelta" un item
+// identificado a mano para que vuelva a recibir refreshes automáticos.
+export function useSetItemMetadataLock(itemId: string) {
+  const queryClient = useQueryClient();
+  return useMutation<
+    { item_id: string; metadata_locked: boolean },
+    Error,
+    boolean
+  >({
+    mutationFn: (locked) => api.setItemMetadataLock(itemId, locked),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.item(itemId) });
+    },
+  });
+}
+
 export function useApplyIdentify(itemId: string) {
   const queryClient = useQueryClient();
   return useMutation<

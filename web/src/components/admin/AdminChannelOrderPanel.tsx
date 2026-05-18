@@ -13,9 +13,12 @@ import { useTranslation } from "react-i18next";
 
 import {
   useAdminChannelsForOrder,
+  useRefreshLogosFromIPTVOrg,
   useReplaceLibraryChannelOrder,
   useResetLibraryChannelOrder,
 } from "@/api/hooks";
+import { Button, Spinner } from "@/components/common";
+import { Sparkles } from "lucide-react";
 import { arrayMove } from "@dnd-kit/sortable";
 import {
   ChannelOrderEditor,
@@ -149,8 +152,66 @@ export function AdminChannelOrderPanel({ libraryId }: Props) {
     ? draft.find((c) => c.id === editingLogoFor)
     : null;
 
+  const refreshLogos = useRefreshLogosFromIPTVOrg();
+  const [iptvOrgMessage, setIPTVOrgMessage] = useState<string | null>(null);
+
+  const handleIPTVOrgRefresh = useCallback(async () => {
+    setIPTVOrgMessage(null);
+    try {
+      const res = await refreshLogos.mutateAsync(libraryId);
+      // Re-seed para que la UI muestre los logos recién aplicados.
+      await channelsQ.refetch();
+      setSeededFor(null);
+      setIPTVOrgMessage(
+        t("admin.livetv.channelOrder.iptvOrgDone", {
+          defaultValue: "Se han añadido logos a {{count}} canales desde iptv-org.",
+          count: res.updated,
+        }),
+      );
+    } catch {
+      setIPTVOrgMessage(
+        t("admin.livetv.channelOrder.iptvOrgError", {
+          defaultValue: "No se ha podido contactar con iptv-org. Inténtalo de nuevo.",
+        }),
+      );
+    }
+  }, [channelsQ, libraryId, refreshLogos, t]);
+
   return (
     <>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-[--radius-md] border border-accent/20 bg-accent/5 px-3 py-2">
+        <div className="text-xs text-text-muted">
+          <strong className="text-text">iptv-org</strong> ·{" "}
+          {t("admin.livetv.channelOrder.iptvOrgHint", {
+            defaultValue:
+              "Busca logos en la base pública de iptv-org para los canales que no tengan tvg-logo en el M3U.",
+          })}
+        </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleIPTVOrgRefresh}
+          disabled={refreshLogos.isPending}
+        >
+          {refreshLogos.isPending ? (
+            <Spinner size="sm" />
+          ) : (
+            <Sparkles className="h-3.5 w-3.5" />
+          )}
+          {t("admin.livetv.channelOrder.iptvOrgButton", {
+            defaultValue: "Buscar logos en iptv-org",
+          })}
+        </Button>
+      </div>
+      {iptvOrgMessage && (
+        <div
+          role="status"
+          className="mb-3 rounded-[--radius-sm] bg-success/10 px-3 py-2 text-sm text-success"
+        >
+          {iptvOrgMessage}
+        </div>
+      )}
+
       <ChannelOrderEditor
         draft={draft}
         loading={channelsQ.isLoading}

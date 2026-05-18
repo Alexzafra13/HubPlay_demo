@@ -316,6 +316,20 @@ export function useUploadChannelLogo() {
   });
 }
 
+// Auto-discovery contra iptv-org. Devuelve el número de canales
+// actualizados; el frontend lo enseña como toast ("47 logos añadidos
+// desde iptv-org"). Invalida los listados para que las miniaturas
+// refresquen.
+export function useRefreshLogosFromIPTVOrg() {
+  const qc = useQueryClient();
+  return useMutation<{ library_id: string; updated: number }, Error, string>({
+    mutationFn: (libraryId) => api.refreshLogosFromIPTVOrg(libraryId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["channels"] });
+    },
+  });
+}
+
 export function useClearChannelLogo() {
   const qc = useQueryClient();
   return useMutation<void, Error, string>({

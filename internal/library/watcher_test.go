@@ -84,7 +84,7 @@ func newTestServiceWithRoot(t *testing.T, root string) (*library.Service, string
 	scnr := scanner.New(
 		repos.Items, repos.MediaStreams, repos.Metadata, repos.ExternalIDs,
 		repos.Images, repos.Chapters, repos.People, repos.ItemValues,
-		repos.Studios, repos.Collections,
+		repos.Studios, repos.Collections, repos.ItemMetadataLocks,
 		nil, prober, bus, "", nil, slog.Default(),
 	)
 	svc := library.NewService(

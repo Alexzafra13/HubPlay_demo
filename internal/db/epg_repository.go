@@ -362,3 +362,27 @@ func (r *EPGProgramRepository) CleanupOld(ctx context.Context, before time.Time)
 	}
 	return n, nil
 }
+
+// GetChannelIcon devuelve cualquier icon_url no vacío que el EPG haya
+// guardado para programas de este canal. Lo usa el proxy del logo
+// (handlers/iptv_channels.go) como último fallback cuando ni el admin
+// ha puesto override ni el M3U trajo tvg-logo. Devuelve "" sin error
+// cuando no hay ninguno — el handler responde 404 y el frontend cae
+// a las iniciales.
+//
+// Indexado por channel_id (PK lookup en un índice secundario), barato
+// suficiente para llamarse una vez por petición de logo sin notarlo.
+// MAX() porque cualquier icon_url no vacío sirve — son los mismos
+// bytes del XMLTV propagados por todos los programas de ese canal,
+// no nos importa cuál exacto.
+func (r *EPGProgramRepository) GetChannelIcon(ctx context.Context, channelID string) (string, error) {
+	query := RewritePlaceholders(r.driver(), `
+		SELECT COALESCE(MAX(icon_url), '')
+		FROM epg_programs
+		WHERE channel_id = ? AND icon_url IS NOT NULL AND icon_url <> ''`)
+	var url string
+	if err := r.db.QueryRowContext(ctx, query, channelID).Scan(&url); err != nil {
+		return "", fmt.Errorf("get epg channel icon: %w", err)
+	}
+	return url, nil
+}

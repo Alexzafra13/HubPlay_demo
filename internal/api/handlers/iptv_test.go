@@ -537,6 +537,14 @@ func (s *iptvFakeService) ResetLibraryChannelOrder(_ context.Context, _ string) 
 // override (eso lo cubre iptv_channel_logo_test.go). Los stubs sólo
 // satisfacen la interfaz para que el compile-time check pase.
 
+func (s *iptvFakeService) GetChannelEPGIcon(_ context.Context, _ string) (string, error) {
+	return "", nil
+}
+
+func (s *iptvFakeService) RefreshLogosFromIPTVOrg(_ context.Context, _ string) (int, error) {
+	return 0, nil
+}
+
 func (s *iptvFakeService) SetChannelLogoURL(_ context.Context, _ string, _ string) error {
 	return nil
 }

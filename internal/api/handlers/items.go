@@ -177,6 +177,16 @@ func (h *ItemHandler) buildItemDetail(ctx context.Context, id, userID string) (m
 	h.attachPeople(ctx, resp, id)
 	h.attachExternalIDs(ctx, resp, id)
 
+	// metadata_locked: el frontend pinta un candado en el detalle y
+	// usa el flag para alternar entre "Bloquear" y "Desbloquear" en
+	// el kebab. nil-safe: si el identifier no está cableado el campo
+	// se omite y el kebab oculta la entrada del toggle.
+	if h.identifier != nil {
+		if locked, err := h.identifier.IsMetadataLocked(ctx, id); err == nil {
+			resp["metadata_locked"] = locked
+		}
+	}
+
 	// Episode and season pages both need a "what show is this?" anchor
 	// and the show's backdrop as a fallback hero image. Episodes climb
 	// episode → season → series; seasons climb season → series.

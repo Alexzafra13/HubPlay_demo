@@ -37,6 +37,7 @@ type Repositories struct {
 	Studios            *StudioRepository
 	Collections        *CollectionRepository
 	EpisodeSegments    *EpisodeSegmentRepository
+	ItemMetadataLocks  *ItemMetadataLockRepository
 }
 
 // NewRepositories creates all repositories from a database connection.
@@ -81,5 +82,6 @@ func NewRepositories(driver string, database *sql.DB) *Repositories {
 		Studios:            NewStudioRepository(driver, database),
 		Collections:        NewCollectionRepository(driver, database),
 		EpisodeSegments:    NewEpisodeSegmentRepository(driver, database),
+		ItemMetadataLocks:  NewItemMetadataLockRepository(driver, database),
 	}
 }

@@ -269,3 +269,36 @@ func extensionForContentType(ct string) string {
 		return ".jpg"
 	}
 }
+
+// RefreshLogosFromIPTVOrg dispara el lookup masivo contra iptv-org
+// (https://iptv-org.github.io/api/channels.json) para todos los canales
+// de una biblioteca que aún no tengan logo. Cada match se persiste
+// como override de URL en channel_logo_overrides — el operador puede
+// borrarlos individualmente con DELETE /channels/{id}/logo.
+//
+// Idempotente: una segunda llamada no reescribe los que ya tienen
+// override (incluso si vinieron de un run anterior de este endpoint).
+//
+// POST /libraries/{libraryId}/iptv/refresh-logos-from-iptv-org
+// Admin-only. Retorna el count de canales actualizados.
+func (h *IPTVHandler) RefreshLogosFromIPTVOrg(w http.ResponseWriter, r *http.Request) {
+	libraryID := chi.URLParam(r, "id")
+	updated, err := h.svc.RefreshLogosFromIPTVOrg(r.Context(), libraryID)
+	if err != nil {
+		// "not configured" colapsa a 503 igual que el resto del flujo
+		// (el operador puede no haber montado el lookup en tests).
+		if strings.Contains(err.Error(), "not configured") {
+			respondError(w, r, http.StatusServiceUnavailable, "NO_IPTV_ORG", err.Error())
+			return
+		}
+		h.logger.Error("iptv-org refresh failed", "library", libraryID, "error", err)
+		respondError(w, r, http.StatusBadGateway, "IPTV_ORG_ERROR", "could not refresh logos from iptv-org")
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{
+		"data": map[string]any{
+			"library_id": libraryID,
+			"updated":    updated,
+		},
+	})
+}
