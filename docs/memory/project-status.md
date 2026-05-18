@@ -1,5 +1,52 @@
 # Estado del proyecto
 
+> 🎬 **Sesión 2026-05-18 ter (rama `claude/review-project-progress-snmmo`) — cierra TODO el backlog del bloque "servidores": branding del peer remoto en PeersTable con migration 047 + handler `RefreshPeer`, polish visual de InviteSection (contador de expiry con severidad) + AcceptSection (hint pre-pair), y palabras fonéticas de 4 → 6 (32 → 48 bits de entropía oral).** Branch ahead de main, PR pendiente que el user abre manualmente.
+>
+> ## 🛠️ Branding del peer remoto en PeersTable (Block A)
+>
+> Antes: la PeersTable pintaba cada peer con un círculo derivado solo del UUID + iniciales del nombre. El branding (color + foto) que el remoto admin configuraba con la sesión anterior se enviaba en `/federation/info`, se recibía en el handshake, y se descartaba — la columna no existía en BD.
+>
+> **Backend**:
+> - Migración 047 (sqlite + postgres): `ALTER TABLE federation_peers ADD COLUMN avatar_color/avatar_image_url TEXT NOT NULL DEFAULT ''`. Defaults vacíos para no romper filas existentes; se rellenan en el próximo handshake o refresh.
+> - `Peer` struct + `peerWire` admin + tipo TS `FederationPeer` con los dos campos nuevos.
+> - sqlc queries actualizadas (`InsertPeer` recibe los dos campos; `GetPeerByID/GetPeerByServerUUID/ListPeers` los devuelven; nuevo `UpdatePeerBranding`). **Aviso de gotcha resuelto**: la sesión anterior documentó que sqlc v1.31.1 corrompe `*.sql.go` cuando hay caracteres no-ASCII en `queries/*.sql`. La regen tropezó con un `→` legado en `users.sql` línea 100 — corregido a `->` y todo el código generado restaurado limpio.
+> - `manager_handshake.go::AcceptInvite` + `HandleInboundHandshake` ahora copian `theirs.AvatarColor` y `theirs.AvatarImageURL` al `Peer` que persisten.
+> - Nuevo `Manager.RefreshPeerBranding(ctx, peerID)` que re-probea `/federation/info` del peer, valida que el `server_uuid` coincide (rechaza si difiere — alguien podría haber tomado control del URL), y persiste el branding nuevo. Handler admin `POST /admin/peers/{id}/refresh` en `federation_admin.go`. Ruta añadida a `router.go` + OpenAPI drift gate.
+>
+> **Frontend**:
+> - `api.refreshPeer(id)` + `useRefreshPeer()` hook (invalida `federationPeers` para que la tabla repinte).
+> - `PeersTable.tsx` usa `<UserAvatar>` en vez del círculo determinista, alimentado con `peer.avatar_color`/`peer.avatar_image_url` (fallback automático a iniciales sobre paleta determinista derivada del `server_uuid`). Botón refresh icono junto al botón "Revocar" — gira mientras la mutation está pending, banner de error inline si falla. La helper `initialsFor` ya no se usa — eliminada.
+>
+> **Tests**: 3 nuevos tests Go (`HappyPath` con httptest, `RejectsUuidMismatch`, `RejectsNonPaired`). `inMemoryFedRepo` test fake gana `UpdatePeerBranding`. Suite Go entera verde (24 paquetes). 562/562 vitest verde.
+>
+> ## 🛠️ Polish visual de Invite/Accept (Block B)
+>
+> **InviteSection** rediseñado:
+> - El código más reciente vive ahora en un **card destacado** (`LatestInviteCard`) con tipografía mono grande, copy button visible y hint "compártelo por canal seguro".
+> - **`ExpiryChip`**: contador de tiempo restante con severidad de color — verde si quedan ≥ 12h, ámbar 1-12h, rojo < 1h, "Expirado" si pasó la fecha. Se re-renderiza cada minuto via `setInterval` (sub-minuto no aporta para invites de 24h y haría re-renders constantes).
+> - Botón "Generar otro código" cuando ya hay activos, "Generar nuevo invite" cuando no — copy ajustada al contexto.
+> - Los códigos extra (no el más reciente) se listan compactos debajo bajo "Otros códigos activos".
+>
+> **AcceptSection**: añadido hint pre-pair encima del checkbox/código: *"Compara la huella o las palabras con el otro admin por chat encriptado o teléfono. Sólo cuando coincidan exactamente..."*. Refuerza que el confirm checkbox no es burocracia.
+>
+> ## 🛠️ Palabras fonéticas 4 → 6 (Block C)
+>
+> `FingerprintWords` ahora emite **6 palabras en vez de 4** — ganando 16 bits de entropía oral (32 → 48 bits, 1 en ~280 billones de colisiones). El lista de 288 palabras pronunciables sigue igual; solo cambiamos cuántas se truncan del SHA-256 ÷ pubkey. Tests + tipo TS (`pubkey_words: string[]; // 6 short words`) actualizados.
+>
+> ## 📍 Backlog actualizado
+>
+> El bloque "federation servers + device pairing" está completamente cerrado:
+>
+> 1. ✅ Foto del servidor (sesión bis)
+> 2. ✅ QR scanner en `/link` (sesión bis)
+> 3. ✅ Branding del remoto en PeersTable (esta sesión)
+> 4. ✅ Polish Invite/Accept (esta sesión)
+> 5. ✅ Palabras 4 → 6 (esta sesión)
+>
+> Lo único arquitectónico que queda es **Iter. 4 del plan post-auditoría** (god-handlers + god-services, P+C+Z+QQ, ~2 días) y las iteraciones 5-9 menores.
+>
+> ---
+>
 > 🎬 **Sesión 2026-05-18 bis (rama `claude/review-project-progress-snmmo`) — DOS bloques cerrados: (1) foto del servidor para federation, (2) QR scanner en `/link` que cierra el flow Device Code al 100 %.** Branch ahead de main, PR pendiente que el user abre manualmente.
 >
 > ## 🛠️ QR scanner en `/link` (cierre del Device Code flow al 100 %)
