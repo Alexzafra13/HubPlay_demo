@@ -159,15 +159,60 @@ export function AdminChannelOrderPanel({ libraryId }: Props) {
     setIPTVOrgMessage(null);
     try {
       const res = await refreshLogos.mutateAsync(libraryId);
-      // Re-seed para que la UI muestre los logos recién aplicados.
       await channelsQ.refetch();
       setSeededFor(null);
-      setIPTVOrgMessage(
-        t("admin.livetv.channelOrder.iptvOrgDone", {
-          defaultValue: "Se han añadido logos a {{count}} canales desde iptv-org.",
-          count: res.updated,
-        }),
-      );
+      // Mensaje rico: explica el "por qué" cuando updated=0. Sin esto
+      // el operador ve "0 canales actualizados" sin pista de si es
+      // porque ya tenía logos, sin tvg-id, o no hay match en la base.
+      if (res.updated > 0) {
+        setIPTVOrgMessage(
+          t("admin.livetv.channelOrder.iptvOrgDone", {
+            defaultValue: "Se han añadido logos a {{count}} canales desde iptv-org.",
+            count: res.updated,
+          }),
+        );
+      } else {
+        const parts: string[] = [];
+        if (res.already_have_logo > 0) {
+          parts.push(
+            t("admin.livetv.channelOrder.iptvOrgAlreadyHave", {
+              defaultValue: "{{count}} ya tenían logo del M3U",
+              count: res.already_have_logo,
+            }),
+          );
+        }
+        if (res.without_tvg_id > 0) {
+          parts.push(
+            t("admin.livetv.channelOrder.iptvOrgNoTvgID", {
+              defaultValue: "{{count}} sin tvg-id (necesario para buscar)",
+              count: res.without_tvg_id,
+            }),
+          );
+        }
+        if (res.not_in_database > 0) {
+          parts.push(
+            t("admin.livetv.channelOrder.iptvOrgNotInDB", {
+              defaultValue: "{{count}} sin coincidencia en iptv-org",
+              count: res.not_in_database,
+            }),
+          );
+        }
+        if (res.skipped_has_override > 0) {
+          parts.push(
+            t("admin.livetv.channelOrder.iptvOrgHasOverride", {
+              defaultValue: "{{count}} ya tenían override manual",
+              count: res.skipped_has_override,
+            }),
+          );
+        }
+        const breakdown = parts.length > 0 ? ` (${parts.join(", ")})` : "";
+        setIPTVOrgMessage(
+          t("admin.livetv.channelOrder.iptvOrgNoneUpdated", {
+            defaultValue: "Ningún canal actualizado{{breakdown}}.",
+            breakdown,
+          }),
+        );
+      }
     } catch {
       setIPTVOrgMessage(
         t("admin.livetv.channelOrder.iptvOrgError", {

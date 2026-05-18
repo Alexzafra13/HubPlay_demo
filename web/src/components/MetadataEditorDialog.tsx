@@ -10,12 +10,13 @@
 
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { AlertCircle, Check, Lock } from "lucide-react";
+import { AlertCircle, Check, Lock, Search } from "lucide-react";
 
 import { useUpdateItemMetadata } from "@/api/hooks";
 import type { ItemDetail } from "@/api/types";
 import { Button, Spinner } from "@/components/common";
 import { Modal } from "@/components/common/Modal";
+import { IdentifyDialog } from "./IdentifyDialog";
 
 interface Props {
   isOpen: boolean;
@@ -25,6 +26,11 @@ interface Props {
 
 export function MetadataEditorDialog({ isOpen, onClose, item }: Props) {
   const { t } = useTranslation();
+  // Identify dialog stacked sobre el editor — el operador edita,
+  // se da cuenta de que el ítem está mal identificado, salta al
+  // Identify, elige el match, vuelve al editor con los datos
+  // actualizados (la query del item ya invalidó al cerrar Identify).
+  const [identifyOpen, setIdentifyOpen] = useState(false);
 
   const [title, setTitle] = useState(item.title ?? "");
   const [originalTitle, setOriginalTitle] = useState(item.original_title ?? "");
@@ -98,6 +104,27 @@ export function MetadataEditorDialog({ isOpen, onClose, item }: Props) {
           </span>
         </div>
 
+        {/* Atajo a Identify: el operador puede estar editando un item
+            mal identificado de raíz; en vez de teclear todos los campos
+            a mano, salta a TMDb, elige el match correcto, y vuelve aquí
+            con los datos auto-rellenos para ajustar lo que falte. */}
+        <div className="flex items-center justify-between gap-2 rounded-[--radius-md] border border-border bg-bg-card px-3 py-2">
+          <span className="text-xs text-text-muted">
+            {t("metadataEditor.identifyHint", {
+              defaultValue: "¿El item está mal identificado? Busca el correcto en TMDb.",
+            })}
+          </span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setIdentifyOpen(true)}
+          >
+            <Search className="h-3.5 w-3.5" />
+            {t("identify.menuLabel", { defaultValue: "Identificar…" })}
+          </Button>
+        </div>
+
         <Field
           id="md-title"
           label={t("metadataEditor.fieldTitle", { defaultValue: "Título" })}
@@ -163,6 +190,15 @@ export function MetadataEditorDialog({ isOpen, onClose, item }: Props) {
           </Button>
         </div>
       </div>
+
+      {/* Identify stacked sobre el editor. El componente Modal soporta
+          stack vía useModalStack — el focus trap del nuevo modal toma
+          relevo y al cerrar vuelve al editor. */}
+      <IdentifyDialog
+        isOpen={identifyOpen}
+        onClose={() => setIdentifyOpen(false)}
+        item={item}
+      />
     </Modal>
   );
 }

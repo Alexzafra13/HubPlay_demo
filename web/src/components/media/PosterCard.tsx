@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import type { MediaItem } from "@/api/types";
 import { thumb } from "@/utils/imageUrl";
 import { BlurhashPlaceholder } from "@/components/common/BlurhashPlaceholder";
+import { ItemKebab } from "./ItemKebab";
 
 // DOM size of a poster card on lg screens is ~220px wide; double for
 // HiDPI / Retina so the served file still has detail under 2x scale.
@@ -117,6 +118,13 @@ const PosterCard: FC<PosterCardProps> = memo(({ item, progress, href, cornerBadg
               <path d="M8 5v14l11-7z" />
             </svg>
           </div>
+        </div>
+
+        {/* Admin kebab — top right (encima del rating cuando ambos
+            existen; el kebab sólo aparece en hover/focus, así que no
+            pelean en estado idle). Sólo admin lo ve. */}
+        <div className="absolute top-2 right-2 z-10">
+          <ItemKebab itemID={item.id} itemType={item.type} />
         </div>
 
         {/* Rating badge — top right */}

@@ -541,8 +541,12 @@ func (s *iptvFakeService) GetChannelEPGIcon(_ context.Context, _ string) (string
 	return "", nil
 }
 
-func (s *iptvFakeService) RefreshLogosFromIPTVOrg(_ context.Context, _ string) (int, error) {
-	return 0, nil
+func (s *iptvFakeService) GetChannelsForUserPersonalisation(ctx context.Context, libraryID, _ string) ([]*iptvmodel.Channel, error) {
+	return s.GetChannels(ctx, libraryID, false)
+}
+
+func (s *iptvFakeService) RefreshLogosFromIPTVOrg(_ context.Context, _ string) (iptv.IPTVOrgRefreshSummary, error) {
+	return iptv.IPTVOrgRefreshSummary{}, nil
 }
 
 func (s *iptvFakeService) SetChannelLogoURL(_ context.Context, _ string, _ string) error {

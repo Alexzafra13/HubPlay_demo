@@ -203,6 +203,65 @@ func (s *Service) GetChannelsForUser(ctx context.Context, libraryID, userID stri
 	return applyOrderOverlay(channels, overrides), nil
 }
 
+// GetChannelsForUserPersonalisation devuelve la vista que muestra
+// /live-tv/customize: TODAS las channels (incluso las que el usuario
+// haya ocultado, para que pueda volver a mostrarlas) ordenadas según
+// SU overlay personal. La cascada que aplica es la misma que
+// GetChannelsForUser (logo overlay → admin overlay → user overlay)
+// pero sin filtrar hidden por usuario — el panel de personalización
+// es justamente donde el usuario gestiona su lista hidden.
+//
+// Las channels admin-hidden SÍ se filtran (regla dura: el usuario no
+// puede surfear lo que el admin ocultó para todos). Esa es la única
+// diferencia frente a "el usuario podría meter mano en todo".
+func (s *Service) GetChannelsForUserPersonalisation(ctx context.Context, libraryID, userID string) ([]*iptvmodel.Channel, error) {
+	channels, err := s.GetChannels(ctx, libraryID, false)
+	if err != nil {
+		return nil, err
+	}
+	if s.logoOverrides != nil {
+		logoRows, lErr := s.logoOverrides.ListByLibrary(ctx, libraryID)
+		if lErr != nil {
+			return nil, fmt.Errorf("load channel logo overrides: %w", lErr)
+		}
+		channels = applyLogoOverlay(channels, logoRows)
+	}
+	// Admin overlay aplica orden + remueve admin-hidden (hard
+	// constraint). El usuario sigue sin poder mostrar lo que el
+	// admin ocultó — eso es propiedad del admin, no negociable.
+	if s.libraryChannelOrder != nil {
+		adminRows, aErr := s.libraryChannelOrder.List(ctx, libraryID)
+		if aErr != nil {
+			return nil, fmt.Errorf("load library channel order: %w", aErr)
+		}
+		channels = applyAdminOverlay(channels, adminRows)
+	}
+	if userID == "" || s.channelOrder == nil {
+		return channels, nil
+	}
+	overrides, err := s.channelOrder.List(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("load user channel order: %w", err)
+	}
+	// Aplica posición del usuario manteniendo TODOS los rows
+	// (incluso los hidden por user), para que el panel los muestre.
+	// Mismo trick que GetChannelsForLibraryAdmin con includeHidden.
+	byID := make(map[string]iptvmodel.UserChannelOrderEntry, len(overrides))
+	for _, o := range overrides {
+		byID[o.ChannelID] = o
+	}
+	out := make([]*iptvmodel.Channel, 0, len(channels))
+	for _, c := range channels {
+		cp := *c
+		if o, has := byID[c.ID]; has {
+			cp.Number = o.Position
+		}
+		out = append(out, &cp)
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Number < out[j].Number })
+	return out, nil
+}
+
 // GetChannelsForLibraryAdmin returns the curation view used by the
 // admin panel at /admin/libraries/{id}: raw channel rows ordered by
 // the admin overlay (so the operator sees the current default), but
@@ -498,6 +557,20 @@ func (s *Service) GetChannelLogoOverride(ctx context.Context, channelID string) 
 	return s.logoOverrides.Get(ctx, ch.LibraryID, ch.StreamURL)
 }
 
+// IPTVOrgRefreshSummary cuenta lo que pasó en una corrida de
+// RefreshLogosFromIPTVOrg. Sirve para que la UI explique por qué un
+// run no actualizó nada (caso muy común: el M3U ya trae todos los
+// logos, o los tvg-id del proveedor no son del estándar iptv-org y
+// no matchean).
+type IPTVOrgRefreshSummary struct {
+	Total            int `json:"total"`
+	AlreadyHaveLogo  int `json:"already_have_logo"`
+	WithoutTvgID     int `json:"without_tvg_id"`
+	SkippedHasOverride int `json:"skipped_has_override"`
+	NotInDatabase    int `json:"not_in_database"`
+	Updated          int `json:"updated"`
+}
+
 // RefreshLogosFromIPTVOrg busca logos en la base pública de iptv-org
 // (mapeo por tvg_id) para cada canal de la biblioteca que:
 //   - No tenga ya un override admin (URL o archivo).
@@ -509,48 +582,57 @@ func (s *Service) GetChannelLogoOverride(ctx context.Context, channelID string) 
 // modal de logo del canal — "Restaurar logo del M3U" deja el override
 // en blanco y vuelve al estado anterior.
 //
-// Devuelve el número de canales actualizados. Cero significa: o todos
-// los canales tienen ya logo (M3U / override), o ninguno cuadró por
-// tvg_id contra el lookup.
-func (s *Service) RefreshLogosFromIPTVOrg(ctx context.Context, libraryID string) (int, error) {
+// Devuelve un summary con desglose para que la UI explique qué pasó:
+// "47 canales actualizados", o "0 actualizados porque tus 120 canales
+// ya tienen logo del M3U", o "0 actualizados porque tus tvg-ids no
+// coinciden con los de iptv-org".
+func (s *Service) RefreshLogosFromIPTVOrg(ctx context.Context, libraryID string) (IPTVOrgRefreshSummary, error) {
+	var sum IPTVOrgRefreshSummary
 	if s.iptvOrgLogos == nil {
-		return 0, fmt.Errorf("iptv: iptv-org lookup not configured")
+		return sum, fmt.Errorf("iptv: iptv-org lookup not configured")
 	}
 	if s.logoOverrides == nil {
-		return 0, fmt.Errorf("iptv: logo overrides repository not wired")
+		return sum, fmt.Errorf("iptv: logo overrides repository not wired")
 	}
 
 	lookup, err := s.iptvOrgLogos.Load(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("load iptv-org lookup: %w", err)
+		return sum, fmt.Errorf("load iptv-org lookup: %w", err)
 	}
 
 	channels, err := s.GetChannels(ctx, libraryID, false)
 	if err != nil {
-		return 0, err
+		return sum, err
 	}
+	sum.Total = len(channels)
 
 	// Bulk-load overrides previos para no tener que consultarlos uno
 	// a uno (sería N+1 contra DB para libraries grandes).
 	existing, err := s.logoOverrides.ListByLibrary(ctx, libraryID)
 	if err != nil {
-		return 0, fmt.Errorf("load existing logo overrides: %w", err)
+		return sum, fmt.Errorf("load existing logo overrides: %w", err)
 	}
 	hasOverride := make(map[string]bool, len(existing))
 	for _, o := range existing {
 		hasOverride[o.StreamURL] = true
 	}
 
-	updated := 0
 	for _, ch := range channels {
-		if ch.LogoURL != "" || ch.TvgID == "" {
+		if ch.LogoURL != "" {
+			sum.AlreadyHaveLogo++
+			continue
+		}
+		if ch.TvgID == "" {
+			sum.WithoutTvgID++
 			continue
 		}
 		if hasOverride[ch.StreamURL] {
+			sum.SkippedHasOverride++
 			continue
 		}
 		logo, ok := lookup[strings.ToLower(ch.TvgID)]
 		if !ok || logo == "" {
+			sum.NotInDatabase++
 			continue
 		}
 		if err := s.logoOverrides.UpsertURL(ctx, libraryID, ch.StreamURL, logo); err != nil {
@@ -558,7 +640,7 @@ func (s *Service) RefreshLogosFromIPTVOrg(ctx context.Context, libraryID string)
 				"library", libraryID, "tvg_id", ch.TvgID, "error", err)
 			continue
 		}
-		updated++
+		sum.Updated++
 	}
-	return updated, nil
+	return sum, nil
 }

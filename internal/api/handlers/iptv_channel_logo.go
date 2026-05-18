@@ -283,7 +283,7 @@ func extensionForContentType(ct string) string {
 // Admin-only. Retorna el count de canales actualizados.
 func (h *IPTVHandler) RefreshLogosFromIPTVOrg(w http.ResponseWriter, r *http.Request) {
 	libraryID := chi.URLParam(r, "id")
-	updated, err := h.svc.RefreshLogosFromIPTVOrg(r.Context(), libraryID)
+	sum, err := h.svc.RefreshLogosFromIPTVOrg(r.Context(), libraryID)
 	if err != nil {
 		// "not configured" colapsa a 503 igual que el resto del flujo
 		// (el operador puede no haber montado el lookup en tests).
@@ -297,8 +297,13 @@ func (h *IPTVHandler) RefreshLogosFromIPTVOrg(w http.ResponseWriter, r *http.Req
 	}
 	respondJSON(w, http.StatusOK, map[string]any{
 		"data": map[string]any{
-			"library_id": libraryID,
-			"updated":    updated,
+			"library_id":           libraryID,
+			"total":                sum.Total,
+			"already_have_logo":    sum.AlreadyHaveLogo,
+			"without_tvg_id":       sum.WithoutTvgID,
+			"skipped_has_override": sum.SkippedHasOverride,
+			"not_in_database":      sum.NotInDatabase,
+			"updated":              sum.Updated,
 		},
 	})
 }

@@ -696,8 +696,27 @@ func (s *Scanner) enrichMetadata(ctx context.Context, item *librarymodel.Item) {
 		Year:     year,
 		ItemType: itemType,
 	})
-	if err != nil || len(results) == 0 {
-		s.logger.Debug("no TMDB results", "title", cleanTitle, "year", year, "error", err)
+	if err != nil {
+		s.logger.Debug("TMDB search failed", "title", cleanTitle, "year", year, "error", err)
+		return
+	}
+	// Fallback: muchos M3U / filenames traen el año entre paréntesis
+	// como pista del operador y NO el año oficial de estreno
+	// (ej. "Toy Story (2020).mkv" cuando la peli es de 1995). Si el
+	// filtro de año no devuelve nada, reintentamos sólo con el título —
+	// mucho mejor un match aproximado que dejar el item sin metadatos.
+	if len(results) == 0 && year > 0 {
+		retry, retryErr := s.providers.SearchMetadata(ctx, provider.SearchQuery{
+			Title:    cleanTitle,
+			ItemType: itemType,
+		})
+		if retryErr == nil && len(retry) > 0 {
+			results = retry
+			s.logger.Debug("TMDB matched after year-less retry", "title", cleanTitle, "skipped_year", year)
+		}
+	}
+	if len(results) == 0 {
+		s.logger.Debug("no TMDB results", "title", cleanTitle, "year", year)
 		return
 	}
 
