@@ -18,6 +18,7 @@ import type {
   AdminDatabaseStatus,
   AdminDatabaseTestRequest,
   AdminDatabaseTestResponse,
+  AdminStorageDisksResponse,
   AdminStreamActivityResponse,
   AdminStreamSession,
   AdminTopItemsResponse,
@@ -43,6 +44,22 @@ export function useSystemStats(options?: Partial<UseQueryOptions<SystemStats>>) 
   return useQuery<SystemStats>({
     queryKey: queryKeys.systemStats,
     queryFn: () => api.getSystemStats(),
+    ...options,
+  });
+}
+
+// useAdminStorageDisks expone el breakdown de disco fisico + peso
+// por biblioteca. Cadencia mas lenta que stats (los discos cambian
+// con cada scan, no en tiempo real): staleTime 60s para que el
+// dashboard no haga round-trip cada render. Refetch on focus para
+// que el operador que vuelve tras un scan vea el dato actualizado.
+export function useAdminStorageDisks(
+  options?: Partial<UseQueryOptions<AdminStorageDisksResponse>>,
+) {
+  return useQuery<AdminStorageDisksResponse>({
+    queryKey: queryKeys.systemStorageDisks,
+    queryFn: () => api.getAdminStorageDisks(),
+    staleTime: 60_000,
     ...options,
   });
 }

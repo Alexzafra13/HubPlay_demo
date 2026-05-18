@@ -254,6 +254,48 @@ func (q *Queries) GetItemChildren(ctx context.Context, parentID sql.NullString) 
 	return items, nil
 }
 
+const sumItemSizesByLibrary = `-- name: SumItemSizesByLibrary :many
+SELECT library_id, CAST(COALESCE(SUM(size), 0) AS INTEGER) AS total_bytes, COUNT(*) AS file_count
+FROM items
+WHERE size > 0
+GROUP BY library_id
+`
+
+type SumItemSizesByLibraryRow struct {
+	LibraryID  string `json:"library_id"`
+	TotalBytes int64  `json:"total_bytes"`
+	FileCount  int64  `json:"file_count"`
+}
+
+// Suma el peso total en bytes y cuenta los ficheros reales por
+// biblioteca. Filtra `size > 0` para excluir nodos jerarquicos
+// (series, seasons) que no tienen fichero propio - solo los
+// "leaves" (movies, episodes, channels) tienen size>0. El indice
+// existente idx_items_library hace que el GROUP BY sea barato
+// incluso con millones de items.
+func (q *Queries) SumItemSizesByLibrary(ctx context.Context) ([]SumItemSizesByLibraryRow, error) {
+	rows, err := q.db.QueryContext(ctx, sumItemSizesByLibrary)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SumItemSizesByLibraryRow{}
+	for rows.Next() {
+		var i SumItemSizesByLibraryRow
+		if err := rows.Scan(&i.LibraryID, &i.TotalBytes, &i.FileCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateItem = `-- name: UpdateItem :execrows
 UPDATE items SET title = ?, sort_title = ?, original_title = ?,
        year = ?, size = ?, duration_ticks = ?, container = ?,

@@ -29,8 +29,26 @@ export interface RefreshMessage {
   libId: string;
 }
 
+// LibraryDiskInfo — peso de la biblioteca + stats del mount donde
+// vive. Llega desde GET /admin/system/storage/disks, agrupado por
+// disco fisico. La parent page (LibrariesAdmin) construye un
+// map<libId, LibraryDiskInfo> a partir del response. Es undefined
+// cuando:
+//   - el endpoint todavia esta cargando (1ª render)
+//   - la library no tiene paths (livetv M3U remoto)
+//   - el endpoint fallo (degrade gracefully)
+export interface LibraryDiskInfo {
+  sizeBytes: number;
+  fileCount: number;
+  mount: string;
+  mountTotalBytes: number;
+  mountUsedBytes: number;
+  mountUsedPercent: number;
+}
+
 interface LibraryCardProps {
   library: Library;
+  diskInfo?: LibraryDiskInfo;
   onEdit: (lib: Library) => void;
   onDelete: (lib: Library) => void;
   onShowMessage: (msg: RefreshMessage) => void;
@@ -38,6 +56,7 @@ interface LibraryCardProps {
 
 export function LibraryCard({
   library: lib,
+  diskInfo,
   onEdit,
   onDelete,
   onShowMessage,
@@ -267,6 +286,93 @@ export function LibraryCard({
           </Button>
         </div>
       </div>
+      {/* Disk usage row — peso de la biblioteca (SQL SUM) + ocupacion
+          del disco fisico donde vive (gopsutil statfs). Solo se
+          renderiza cuando el endpoint /admin/system/storage/disks ha
+          devuelto datos para esta library. Vive en su propia row
+          al fondo del card con un fondo bg-bg-base muted para
+          diferenciarse de la cabecera (no compite con el nombre +
+          acciones de arriba). */}
+      {diskInfo && <DiskUsageRow info={diskInfo} t={t} />}
     </li>
+  );
+}
+
+// formatBytes compacto. "8.2 TB" / "320 GB" / "0 B". Local al
+// LibraryCard - no merece su propio helpers.ts para 12 LOC.
+function formatBytesCompact(n: number): string {
+  if (!n || n <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  let v = n;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return i <= 1 ? `${Math.round(v)} ${units[i]}` : `${v.toFixed(1)} ${units[i]}`;
+}
+
+function DiskUsageRow({
+  info,
+  t,
+}: {
+  info: LibraryDiskInfo;
+  t: (k: string, opts?: Record<string, unknown>) => string;
+}) {
+  const pct = info.mountUsedPercent;
+  // Severity para la barra del mount (no de la biblioteca):
+  // - verde < 75% del disco usado
+  // - ambar 75-90
+  // - rojo  >= 90 (¡toca borrar cosas!)
+  const tone =
+    pct < 75 ? "var(--color-success)"
+      : pct < 90 ? "var(--color-warning)"
+        : "var(--color-error)";
+  return (
+    <div className="border-t border-border-subtle bg-bg-base/40 px-4 py-2.5">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-[11px]">
+        <span className="flex items-baseline gap-1.5">
+          <span className="text-text-muted">
+            {t("admin.libraries.diskWeight", { defaultValue: "Peso:" })}
+          </span>
+          <span className="font-medium text-text-secondary tabular-nums">
+            {formatBytesCompact(info.sizeBytes)}
+          </span>
+          {info.fileCount > 0 && (
+            <span className="text-text-muted">
+              {t("admin.libraries.fileCount", {
+                defaultValue: "({{n}} ficheros)",
+                n: info.fileCount.toLocaleString(),
+              })}
+            </span>
+          )}
+        </span>
+        <span className="flex items-baseline gap-1.5 min-w-0">
+          <span className="text-text-muted">
+            {t("admin.libraries.diskMount", { defaultValue: "Disco:" })}
+          </span>
+          <span
+            className="font-mono truncate max-w-[20ch] text-text-secondary"
+            title={info.mount}
+          >
+            {info.mount}
+          </span>
+          <span className="text-text-muted">
+            {t("admin.libraries.diskUsedOfTotal", {
+              defaultValue: "{{used}} / {{total}} ({{pct}}%)",
+              used: formatBytesCompact(info.mountUsedBytes),
+              total: formatBytesCompact(info.mountTotalBytes),
+              pct: pct.toFixed(0),
+            })}
+          </span>
+        </span>
+      </div>
+      <div className="mt-1.5 h-0.5 w-full overflow-hidden rounded-full bg-bg-elevated">
+        <div
+          className="h-full transition-all"
+          style={{ width: `${Math.min(100, pct)}%`, background: tone }}
+        />
+      </div>
+    </div>
   );
 }

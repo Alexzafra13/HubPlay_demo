@@ -1,10 +1,15 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { useNavigate } from "react-router";
-import { useDeleteLibrary, useLibraries } from "@/api/hooks";
+import {
+  useAdminStorageDisks,
+  useDeleteLibrary,
+  useLibraries,
+} from "@/api/hooks";
 import { ScanProgressBanner } from "@/components/admin/ScanProgressBanner";
 import { Button, EmptyState, Modal, Skeleton } from "@/components/common";
 import type { ContentType, Library } from "@/api/types";
+import type { LibraryDiskInfo } from "./librariesAdmin/LibraryCard";
 import { LIBRARY_SECTIONS } from "./librariesAdmin/constants";
 import { SectionChevron } from "./librariesAdmin/SectionChevron";
 import {
@@ -19,6 +24,27 @@ export default function LibrariesAdmin() {
   const navigate = useNavigate();
   const { data: libraries, isLoading, error } = useLibraries();
   const deleteLibrary = useDeleteLibrary();
+  // Storage breakdown: per-library size (SUM(items.size) en SQL) +
+  // mount point del disco fisico (gopsutil). Cadencia lenta (60s);
+  // refetch automatico cuando el admin vuelve al panel tras un scan.
+  // Si el endpoint falla, las cards caen a "—" en lugar de romper.
+  const { data: storage } = useAdminStorageDisks();
+  const diskByLibrary = useMemo(() => {
+    const m = new Map<string, LibraryDiskInfo>();
+    for (const disk of storage?.disks ?? []) {
+      for (const lib of disk.libraries) {
+        m.set(lib.id, {
+          sizeBytes: lib.size_bytes,
+          fileCount: lib.file_count,
+          mount: disk.mount,
+          mountTotalBytes: disk.total_bytes,
+          mountUsedBytes: disk.used_bytes,
+          mountUsedPercent: disk.used_percent,
+        });
+      }
+    }
+    return m;
+  }, [storage]);
 
   // Page-level UI state. "New" lives at /admin/libraries/new now
   // (URL = state), so the page only owns row-scoped overlays:
@@ -183,6 +209,7 @@ export default function LibrariesAdmin() {
                       <LibraryCard
                         key={lib.id}
                         library={lib}
+                        diskInfo={diskByLibrary.get(lib.id)}
                         onEdit={setEditTarget}
                         onDelete={setDeleteTarget}
                         onShowMessage={setRefreshMessage}

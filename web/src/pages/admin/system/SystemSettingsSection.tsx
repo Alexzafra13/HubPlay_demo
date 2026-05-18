@@ -47,13 +47,87 @@ export function SystemSettingsSection() {
     );
   }
 
+  // Agrupacion por categoria - el panel anterior apilaba 6+ cards
+  // full-width que con la descripcion + control + save sumaban
+  // ~750px de scroll. La gente con muchos setting trabajan en
+  // categorias mentales ("queria ajustar streaming"); agrupandolos
+  // visualmente vamos directos a esa lectura y los cards pasan a
+  // un grid 2-col compacto.
+  const grouped = groupSettings(data.settings);
+
   return (
-    <div className="flex flex-col gap-3">
-      {data.settings.map((s) => (
-        <SettingRow key={s.key} setting={s} />
+    <div className="flex flex-col gap-6">
+      {grouped.map((group) => (
+        <div key={group.id} className="flex flex-col gap-3">
+          <h4 className="text-[10px] font-semibold uppercase tracking-[0.1em] text-text-muted">
+            {t(`admin.system.settingsGroup.${group.id}`, {
+              defaultValue: group.fallbackLabel,
+            })}
+          </h4>
+          <div className="grid gap-3 lg:grid-cols-2">
+            {group.settings.map((s) => (
+              <SettingRow key={s.key} setting={s} />
+            ))}
+          </div>
+        </div>
       ))}
     </div>
   );
+}
+
+// groupSettings asigna cada setting a una categoria mental segun el
+// prefijo del key del backend. Settings desconocidos van al grupo
+// "general" - mejor mostrarlos que perderlos si añadimos un setting
+// nuevo en backend y este grouper no se actualiza.
+function groupSettings(settings: SystemSetting[]): SettingGroup[] {
+  const buckets: Record<string, SystemSetting[]> = {
+    connection: [],
+    streaming: [],
+    playback: [],
+    other: [],
+  };
+  for (const s of settings) {
+    if (s.key.startsWith("server.")) buckets.connection.push(s);
+    else if (
+      s.key.startsWith("hardware_acceleration.") ||
+      s.key.startsWith("streaming.")
+    )
+      buckets.streaming.push(s);
+    else if (s.key.startsWith("playback.")) buckets.playback.push(s);
+    else buckets.other.push(s);
+  }
+  const groups: SettingGroup[] = [];
+  if (buckets.connection.length > 0)
+    groups.push({
+      id: "connection",
+      fallbackLabel: "Conexión",
+      settings: buckets.connection,
+    });
+  if (buckets.streaming.length > 0)
+    groups.push({
+      id: "streaming",
+      fallbackLabel: "Streaming",
+      settings: buckets.streaming,
+    });
+  if (buckets.playback.length > 0)
+    groups.push({
+      id: "playback",
+      fallbackLabel: "Reproducción",
+      settings: buckets.playback,
+    });
+  if (buckets.other.length > 0)
+    groups.push({
+      id: "other",
+      fallbackLabel: "Otros",
+      settings: buckets.other,
+    });
+  return groups;
+}
+
+interface SettingGroup {
+  id: string;
+  fallbackLabel: string;
+  settings: SystemSetting[];
 }
 
 interface SettingRowProps {
@@ -147,11 +221,12 @@ function SettingRow({ setting }: SettingRowProps) {
   );
 
   return (
-    <div className="flex flex-col gap-4 rounded-[--radius-lg] bg-bg-card border border-border p-5 sm:flex-row sm:items-start sm:gap-6">
-      {/* Left column — label + hint + (optional) override badge.
-          Stacks above the control on narrow viewports, sits beside
-          it on sm+. */}
-      <div className="flex flex-col gap-1 sm:flex-1 sm:min-w-0">
+    <div className="flex h-full flex-col gap-3 rounded-[--radius-lg] bg-bg-card border border-border p-4">
+      {/* Label + badge (top row). Hint queda debajo en texto fino
+          - mas legible que en columna izquierda al lado del control,
+          y deja el card uniforme en altura entre todos los settings
+          del grid 2-col. */}
+      <div className="flex flex-col gap-1">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-medium text-text-primary">
             {labelText}
@@ -165,16 +240,15 @@ function SettingRow({ setting }: SettingRowProps) {
           )}
         </div>
         {hintText && (
-          <span className="text-xs text-text-muted leading-relaxed">
+          <span className="text-[11px] text-text-muted leading-relaxed">
             {hintText}
           </span>
         )}
       </div>
 
-      {/* Right column — control + actions + footer hint. Fixed width
-          on sm+ so every row's control aligns at the same x position
-          (Vercel / macOS Settings convention). */}
-      <div className="flex flex-col gap-2 sm:w-[280px]">
+      {/* Control + actions + footer. Flex-col en el card vertical
+          para que cada card del grid tenga la misma estructura. */}
+      <div className="flex flex-col gap-2 mt-auto">
         {/* Force-direct-play danger banner. Renders only when the
             override is currently active so the row visually stands
             out from the rest — the operator should never miss that
