@@ -1,58 +1,74 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Activity,
+  Box,
   Cpu,
+  Database,
   HardDrive,
   KeyRound,
+  MemoryStick,
+  MonitorPlay,
   Network,
   RefreshCw,
+  Server,
   Settings2,
   Square,
+  Trophy,
+  Users,
   Zap,
 } from "lucide-react";
 import {
+  useAdminStreamActivity,
   useAdminStreamSessions,
+  useAdminTopItems,
   useKillAdminStreamSession,
   useSystemStats,
 } from "@/api/hooks";
+import { usePeers } from "@/api/hooks/federation";
 import type {
   AdminStreamSession,
-  SystemHostStats,
-  SystemRuntimeStats,
+  AdminTopItem,
   SystemStats,
 } from "@/api/types";
-import { Spinner, Button, EmptyState } from "@/components/common";
+import { Button, EmptyState, Spinner } from "@/components/common";
 import { AuthKeysPanel } from "@/components/admin/AuthKeysPanel";
 import { BackupPanel } from "@/components/admin/BackupPanel";
 import { DatabasePanel } from "@/components/admin/DatabasePanel";
 import { LogsPanel } from "@/components/admin/LogsPanel";
 import { SectionHeader } from "@/components/admin/SectionHeader";
-import { Sparkline } from "@/components/admin/Sparkline";
+import { AreaTimeline } from "@/components/admin/dashboard/AreaTimeline";
+import { BarTimeline } from "@/components/admin/dashboard/BarTimeline";
+import { ChartCard } from "@/components/admin/dashboard/ChartCard";
+import {
+  HealthPill,
+  type HealthTone,
+} from "@/components/admin/dashboard/HealthPill";
+import { KpiTile } from "@/components/admin/dashboard/KpiTile";
 import { useTranslation } from "react-i18next";
 
 import { SystemSettingsSection } from "./SystemSettingsSection";
 
-// Refresh cadence for the live stats. 30 s feels live without
-// hammering the dir-walks (image cache + transcode cache are FS
-// scans). Stream sessions poll separately at 5 s — they're cheap
-// (in-memory map) and the inline "Sesiones activas" panel needs to
-// look truly live or it doesn't pull its weight.
-const REFETCH_MS = 30_000;
+// SystemStatus — admin "Sistema" page, rediseño bento.
+//
+// Layout top-to-bottom:
+//
+//   1. IdentityStrip      — quien soy + version + uptime + hardware
+//   2. HealthStrip        — pills horizontales: DB · FFmpeg · Federation · URL
+//   3. KpiRow             — 5 tiles uniformes: CPU · RAM · GPU · Sessions · Bibliotecas
+//   4. HostChartsRow      — 2 area charts (CPU 1h + RAM 1h) lado a lado
+//   5. ActiveSessionsList — tabla full-width (queda como estaba)
+//   6. ActivityRow        — bar chart de minutos vistos 14d + lista top items 7d
+//   7. InfraRow           — 3 cards: Storage, Database, Connection
+//   8. RuntimeSection     — 3 tiles del proceso Go (compacto)
+//   9. SettingsSection    — editor runtime
+//  10. AdvancedSection    — collapsibles: logs, backup, db, auth keys
+//
+// El refetch de stats es 30 s; el ring buffer cliente captura un
+// sample por refetch -> ~120 samples en 1 h. Para historicos largos
+// (24h/7d) el operador puede activar /metrics + Grafana externo
+// (hubplay.yaml -> observability.metrics_enabled, default true).
 
-// SystemStatus — admin Sistema page.
-//
-// Editorial layout with live sparklines next to the metrics that
-// actually move (transcode sessions, process memory). The page
-// reads top-to-bottom as: who you are → is anything broken → how
-// are you reachable → what's playing right now → where is the disk
-// going → how do I configure it → and finally, the dangerous bits.
-//
-// The sparklines are populated by a client-side ring buffer that
-// captures one sample per stats refetch (so ~120 samples over an
-// hour). No backend changes — the goal is "feel premium" not
-// "build an APM". When we want true CPU% we'll add a backend
-// sampler; for now memory_alloc + sessions cover the meaningful
-// axes (Go heap pressure + concurrent transcodes).
+const REFETCH_MS = 30_000;
 
 // ─── Helpers ────────────────────────────────────────────────────────
 
@@ -70,7 +86,7 @@ function formatUptime(seconds: number): string {
 
 function formatBytes(n: number): string {
   if (!n || n <= 0) return "0 B";
-  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+  const units = ["B", "KB", "MB", "GB", "TB"];
   let i = 0;
   let v = n;
   while (v >= 1024 && i < units.length - 1) {
@@ -88,25 +104,15 @@ function formatServerTime(iso: string): string {
 // ─── Metrics ring buffer ────────────────────────────────────────────
 
 interface MetricsSample {
-  /** ms epoch — unused for plotting but kept so we can render an
-   *  "X samples" caption later if needed. */
   ts: number;
   sessions: number;
   memMb: number;
-  /** Host-wide CPU% (0-100). NaN-safe: the sampler returns 0 when
-   *  gopsutil can't read /proc/stat (sandboxed CI runners). */
   cpuPercent: number;
-  /** Host RAM used as a fraction of total (0-1). 0 when unknown. */
-  ramRatio: number;
+  ramPercent: number;
 }
 
 const MAX_SAMPLES = 120; // ≈ 1 h at 30 s cadence
 
-// useMetricsHistory — captures a sample on every stats update and
-// keeps the last MAX_SAMPLES in a sliding window. Pure client-side
-// state: reload resets the buffer, which is fine for a "is the
-// number going up or down right now" view. We use a ref-based
-// dedupe so React's strict-mode double-effect doesn't double-push.
 function useMetricsHistory(
   stats: SystemStats | undefined,
   dataUpdatedAt: number,
@@ -114,12 +120,6 @@ function useMetricsHistory(
   const [samples, setSamples] = useState<MetricsSample[]>([]);
   const lastTsRef = useRef(0);
 
-  // Subscribe to TanStack Query updates and append a sample to the
-  // ring whenever a fresh response lands. The lint rule
-  // (set-state-in-effect) flags the setSamples call inside the
-  // effect, but this IS the canonical "subscribe to an external
-  // system" shape — react-query owns the source of truth and the
-  // effect is the bridge into local state.
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!stats || dataUpdatedAt === 0 || dataUpdatedAt === lastTsRef.current) {
@@ -134,7 +134,7 @@ function useMetricsHistory(
         sessions: stats.streaming.transcode_sessions_active,
         memMb: stats.runtime.memory_alloc_mb,
         cpuPercent: stats.host?.cpu_percent ?? 0,
-        ramRatio: ramTotal > 0 ? Math.min(1, ramUsed / ramTotal) : 0,
+        ramPercent: ramTotal > 0 ? Math.min(100, (ramUsed / ramTotal) * 100) : 0,
       });
       return next.length > MAX_SAMPLES ? next.slice(-MAX_SAMPLES) : next;
     });
@@ -181,7 +181,7 @@ export default function SystemStatus() {
   }
 
   return (
-    <div className="flex flex-col gap-10">
+    <div className="flex flex-col gap-6">
       <IdentityStrip
         stats={stats}
         dataUpdatedAt={dataUpdatedAt}
@@ -189,17 +189,19 @@ export default function SystemStatus() {
         onRefresh={() => refetch()}
       />
 
-      <HealthSection stats={stats} />
+      <HealthStrip stats={stats} />
 
-      <HostSection host={stats.host} history={history} />
+      <KpiRow stats={stats} history={history} />
 
-      <ConnectionSection stats={stats} />
+      <HostChartsRow history={history} />
 
-      <StreamingSection stats={stats} history={history} />
+      <ActiveSessionsList />
 
-      <RuntimeSection runtime={stats.runtime} history={history} />
+      <ActivityRow />
 
-      <StorageSection stats={stats} />
+      <InfraRow stats={stats} />
+
+      <RuntimeRow stats={stats} history={history} />
 
       <SettingsSection />
 
@@ -208,62 +210,23 @@ export default function SystemStatus() {
   );
 }
 
-// SeverityDot — coloured circle + label, replaces the larger Badge
-// component in the health rows. Same information, lighter visual
-// footprint, more macOS-Settings-like.
-function SeverityDot({
-  tone,
-  label,
-}: {
-  tone: "success" | "warning" | "error" | "neutral";
-  label: string;
-}) {
-  const colour =
-    tone === "success"
-      ? "var(--color-success)"
-      : tone === "warning"
-        ? "var(--color-warning)"
-        : tone === "error"
-          ? "var(--color-error)"
-          : "var(--color-text-muted)";
-  return (
-    <span className="inline-flex items-center gap-1.5 text-xs font-medium text-text-secondary">
-      <span
-        aria-hidden
-        className="h-2 w-2 rounded-full"
-        style={{ background: colour }}
-      />
-      {label}
-    </span>
-  );
-}
-
 // ─── Identity strip ────────────────────────────────────────────────
-
-interface IdentityStripProps {
-  stats: SystemStats;
-  dataUpdatedAt: number;
-  isFetching: boolean;
-  onRefresh: () => void;
-}
 
 function IdentityStrip({
   stats,
   dataUpdatedAt,
   isFetching,
   onRefresh,
-}: IdentityStripProps) {
+}: {
+  stats: SystemStats;
+  dataUpdatedAt: number;
+  isFetching: boolean;
+  onRefresh: () => void;
+}) {
   const { t } = useTranslation();
   const allHealthy = stats.database.ok && stats.ffmpeg.found;
-  // Build the hardware hint shown alongside the version/uptime strip
-  // so the operator gets the "what's under the hood" answer without
-  // scrolling. Examples:
-  //   "Ryzen 5 5600 · 6c/12t · NVENC"
-  //   "Apple M2 · 8c"
-  //   ""   (probe failed, hide the row to keep the chrome clean)
   const hostBits: string[] = [];
   if (stats.host?.cpu_model) {
-    // Trim the marketing suffix that adds no value on a narrow header.
     const clean = stats.host.cpu_model
       .replace(/\s+\d+-Core Processor.*$/i, "")
       .replace(/\(R\)|\(TM\)|CPU @ .*$/g, "")
@@ -338,161 +301,85 @@ function IdentityStrip({
   );
 }
 
-// ─── Estado ─────────────────────────────────────────────────────────
+// ─── Health strip ───────────────────────────────────────────────────
+//
+// Cuatro pills horizontales con el estado de los subsistemas que
+// pueden romperse. Sustituye al HealthSection antiguo (lista de 3
+// filas full-width que ocupaba muchisimo para 3 booleans).
 
-function HealthSection({ stats }: { stats: SystemStats }) {
+function HealthStrip({ stats }: { stats: SystemStats }) {
   const { t } = useTranslation();
-
-  const rows: HealthRowProps[] = [
-    {
-      label: t("admin.system.database"),
-      ok: stats.database.ok,
-      okText: t("admin.systemHealth.dbOk", {
-        defaultValue: "Operativo · {{size}}",
-        size: formatBytes(stats.database.size_bytes),
-      }),
-      errorText: stats.database.error ?? t("admin.system.degraded"),
-      detail: stats.database.path,
-    },
-    {
-      label: "FFmpeg",
-      ok: stats.ffmpeg.found,
-      okText: t("admin.systemHealth.ffmpegOk", {
-        defaultValue: "Encontrado · {{path}}",
-        path: stats.ffmpeg.path,
-      }),
-      errorText: t("admin.system.ffmpegMissing"),
-      detail: stats.ffmpeg.found
-        ? undefined
-        : t("admin.systemHealth.ffmpegMissingHint", {
-            defaultValue:
-              "Instala ffmpeg en el host o monta el binario en el contenedor — sin él no hay transcodificación.",
-          }),
-    },
-    {
-      label: t("admin.system.baseURL"),
-      ok: !!stats.server.base_url,
-      okText: stats.server.base_url || "—",
-      errorText: t("admin.systemHealth.baseURLMissing", {
-        defaultValue: "Sin configurar",
-      }),
-      detail: stats.server.base_url
-        ? undefined
-        : t("admin.system.baseURLUnset"),
-    },
-  ];
+  const peers = usePeers();
+  const pairedCount = (peers.data ?? []).filter(
+    (p) => p.status === "paired",
+  ).length;
+  const peersTone: HealthTone =
+    peers.isLoading
+      ? "neutral"
+      : peers.error
+        ? "warning"
+        : pairedCount > 0
+          ? "success"
+          : "neutral";
 
   return (
-    <section className="flex flex-col gap-4">
-      <SectionHeader
-        icon={Activity}
-        title={t("admin.systemHealth.title", { defaultValue: "Estado" })}
-        subtitle={t("admin.systemHealth.subtitle", {
-          defaultValue:
-            "Comprobaciones rápidas de los componentes que tienen que estar arriba para que HubPlay funcione.",
-        })}
+    <section
+      className="flex flex-wrap items-center gap-2"
+      aria-label={t("admin.systemHealth.title", { defaultValue: "Estado" })}
+    >
+      <HealthPill
+        label={t("admin.system.database", { defaultValue: "Base de datos" })}
+        tone={stats.database.ok ? "success" : "error"}
+        detail={
+          stats.database.ok
+            ? `${stats.database.path} · ${formatBytes(stats.database.size_bytes)}`
+            : (stats.database.error ?? t("admin.system.degraded"))
+        }
       />
-      <ul className="flex flex-col divide-y divide-border-subtle rounded-[--radius-lg] border border-border bg-bg-card">
-        {rows.map((r) => (
-          <HealthRow key={r.label} {...r} />
-        ))}
-      </ul>
+      <HealthPill
+        label="FFmpeg"
+        tone={stats.ffmpeg.found ? "success" : "error"}
+        detail={
+          stats.ffmpeg.found
+            ? `${stats.ffmpeg.path}`
+            : t("admin.system.ffmpegMissing")
+        }
+      />
+      <HealthPill
+        label={t("admin.federation.title", { defaultValue: "Federation" })}
+        tone={peersTone}
+        detail={
+          peers.isLoading
+            ? "…"
+            : peers.error
+              ? String(peers.error)
+              : pairedCount === 0
+                ? t("admin.systemHealth.federationNoPeers", {
+                    defaultValue: "Sin peers emparejados",
+                  })
+                : t("admin.systemHealth.federationPaired", {
+                    defaultValue: "{{n}} peers emparejados",
+                    n: pairedCount,
+                  })
+        }
+        trailing={pairedCount > 0 ? String(pairedCount) : undefined}
+      />
+      <HealthPill
+        label={t("admin.system.baseURL", { defaultValue: "URL pública" })}
+        tone={stats.server.base_url ? "success" : "warning"}
+        detail={stats.server.base_url || t("admin.system.baseURLUnset")}
+      />
     </section>
   );
 }
 
-interface HealthRowProps {
-  label: string;
-  ok: boolean;
-  okText: string;
-  errorText: string;
-  detail?: string;
-}
+// ─── KPI row ────────────────────────────────────────────────────────
+//
+// 5 tiles uniformes. El user pidio explicitamente "muchos
+// contenedores cogen todo el ancho y se quedan muy grande para
+// lo que ofrecen" — los KPIs son la respuesta directa.
 
-function HealthRow({ label, ok, okText, errorText, detail }: HealthRowProps) {
-  return (
-    <li className="flex flex-wrap items-center gap-3 px-5 py-3.5 text-sm">
-      <SeverityDot
-        tone={ok ? "success" : "error"}
-        label={ok ? "OK" : "FALLO"}
-      />
-      <span className="min-w-[110px] font-medium text-text-primary">
-        {label}
-      </span>
-      <span className="text-text-secondary truncate flex-1 min-w-0 font-mono text-xs">
-        {ok ? okText : errorText}
-      </span>
-      {detail && (
-        <span className="basis-full pl-5 text-xs text-text-muted">
-          {detail}
-        </span>
-      )}
-    </li>
-  );
-}
-
-// ─── Conexión ──────────────────────────────────────────────────────
-
-function ConnectionSection({ stats }: { stats: SystemStats }) {
-  const { t } = useTranslation();
-  return (
-    <section className="flex flex-col gap-4">
-      <SectionHeader
-        icon={Network}
-        title={t("admin.systemConnection.title", { defaultValue: "Conexión" })}
-        subtitle={t("admin.systemConnection.hint", {
-          defaultValue:
-            "El servidor escucha en la dirección de abajo y se identifica externamente con la URL pública.",
-        })}
-      />
-      <div className="grid gap-3 sm:grid-cols-2">
-        <ConnectionField
-          label={t("admin.system.bindAddress")}
-          value={stats.server.bind_address || "—"}
-          hint={t("admin.systemConnection.bindHint", {
-            defaultValue:
-              "Configurada vía hubplay.yaml o $HUBPLAY_SERVER_HOST/PORT.",
-          })}
-        />
-        <ConnectionField
-          label={t("admin.system.baseURL")}
-          value={stats.server.base_url || "—"}
-          hint={
-            stats.server.base_url
-              ? undefined
-              : t("admin.system.baseURLUnset")
-          }
-        />
-      </div>
-    </section>
-  );
-}
-
-function ConnectionField({
-  label,
-  value,
-  hint,
-}: {
-  label: string;
-  value: string;
-  hint?: string;
-}) {
-  return (
-    <div className="flex flex-col gap-1 rounded-[--radius-md] border border-border bg-bg-card px-4 py-3">
-      <span className="text-xs font-medium uppercase tracking-wider text-text-muted">
-        {label}
-      </span>
-      <span className="text-base font-mono text-text-primary break-all">
-        {value}
-      </span>
-      {hint && <span className="text-xs text-text-muted">{hint}</span>}
-    </div>
-  );
-}
-
-// ─── Streaming ──────────────────────────────────────────────────────
-
-function StreamingSection({
+function KpiRow({
   stats,
   history,
 }: {
@@ -500,132 +387,193 @@ function StreamingSection({
   history: MetricsSample[];
 }) {
   const { t } = useTranslation();
-  const { transcode_sessions_active, transcode_sessions_max } = stats.streaming;
-  const max = transcode_sessions_max;
-  const active = transcode_sessions_active;
-  const pct = max > 0 ? Math.min(100, (active / max) * 100) : 0;
+  const cpuPct = stats.host?.cpu_percent ?? 0;
+  const ramTotal = stats.host?.ram_total_bytes ?? 0;
+  const ramUsed = stats.host?.ram_used_bytes ?? 0;
+  const ramRatio = ramTotal > 0 ? ramUsed / ramTotal : 0;
+  const sessionsMax = stats.streaming.transcode_sessions_max;
+  const sessionsActive = stats.streaming.transcode_sessions_active;
+  const sessionsRatio =
+    sessionsMax > 0 ? Math.min(1, sessionsActive / sessionsMax) : undefined;
 
-  const accelEnabled = stats.ffmpeg.hw_accel_enabled;
-  const selected = stats.ffmpeg.hw_accel_selected;
-  const available = stats.ffmpeg.hw_accels_available ?? [];
-  let accelLabel: string;
-  let accelTone: "success" | "warning" | "neutral";
-  if (!accelEnabled) {
-    accelLabel = t("admin.system.hwAccelDisabledLabel");
-    accelTone = "neutral";
-  } else if (!selected || selected === "none") {
-    accelLabel = t("admin.system.hwAccelNone");
-    accelTone = "warning";
-  } else {
-    accelLabel = selected.toUpperCase();
-    accelTone = "success";
-  }
+  // Storage: usamos image + transcode + DB como aproximacion a "lo
+  // que HubPlay ocupa". Si quisieramos disk-total-vs-free habria
+  // que añadirlo en /admin/system/stats (futuro).
+  const storageUsed =
+    (stats.storage?.image_dir_bytes ?? 0) +
+    (stats.storage?.transcode_cache_bytes ?? 0) +
+    stats.database.size_bytes;
+
+  const itemsTotal = stats.libraries?.items_total ?? 0;
+  const librariesCount = stats.libraries?.total ?? 0;
 
   return (
-    <section className="flex flex-col gap-4">
-      <SectionHeader
-        icon={Zap}
-        title={t("admin.system.sectionStreaming")}
-        subtitle={t("admin.systemStreaming.subtitle", {
-          defaultValue:
-            "Sesiones de transcodificación activas y backend de aceleración por hardware.",
-        })}
+    <section
+      aria-label={t("admin.systemKpi.title", { defaultValue: "Resumen" })}
+      className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5"
+    >
+      <KpiTile
+        label={t("admin.systemHost.cpu", { defaultValue: "CPU" })}
+        icon={Cpu}
+        value={cpuPct.toFixed(1)}
+        unit="%"
+        ratio={cpuPct / 100}
+        sparkline={history.map((h) => h.cpuPercent)}
       />
-      <div className="grid gap-4 lg:grid-cols-2">
-        {/* Sessions meter — sparkline charts the last hour of
-            concurrent transcodes so the admin can spot peaks at a
-            glance, not just the current value. */}
-        <div className="flex flex-col gap-3 rounded-[--radius-lg] border border-border bg-bg-card p-5">
-          <div className="flex items-baseline justify-between">
-            <span className="text-xs font-medium uppercase tracking-wider text-text-muted">
-              {t("admin.system.activeTranscodes")}
-            </span>
-            <span className="text-xs text-text-muted tabular-nums">
-              {max > 0
-                ? t("admin.system.transcodeSlots", { active, max })
-                : t("admin.system.transcodeUnlimited", { active })}
-            </span>
-          </div>
-          <div className="flex items-end justify-between gap-3">
-            <div className="flex items-baseline gap-2">
-              <span className="text-3xl font-semibold text-text-primary tabular-nums">
-                {active}
-              </span>
-              {max > 0 && (
-                <span className="text-base text-text-muted tabular-nums">
-                  / {max}
-                </span>
-              )}
-            </div>
-            <Sparkline
-              values={history.map((h) => h.sessions)}
-              width={120}
-              height={32}
-            />
-          </div>
-          {max > 0 && (
-            <div className="h-1 w-full overflow-hidden rounded-full bg-bg-elevated">
-              <div
-                className="h-full transition-all"
-                style={{
-                  width: `${pct}%`,
-                  background:
-                    pct < 70
-                      ? "var(--color-success)"
-                      : pct < 95
-                        ? "var(--color-warning)"
-                        : "var(--color-error)",
-                }}
-              />
-            </div>
-          )}
-        </div>
-
-        {/* HW accel */}
-        <div className="flex flex-col gap-3 rounded-[--radius-lg] border border-border bg-bg-card p-5">
-          <div className="flex items-baseline justify-between">
-            <span className="text-xs font-medium uppercase tracking-wider text-text-muted">
-              {t("admin.system.hwAccelSelected")}
-            </span>
-            {available.length > 0 && (
-              <span className="text-xs text-text-muted truncate">
-                {t("admin.system.hwAccelAvailable")}:{" "}
-                {available.map((a) => a.toUpperCase()).join(", ")}
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="text-2xl font-semibold text-text-primary">
-              {accelLabel}
-            </span>
-            <SeverityDot
-              tone={accelTone}
-              label={
-                accelEnabled
-                  ? t("admin.system.hwAccelEnabled", { defaultValue: "Activado" })
-                  : t("admin.system.hwAccelDisabledLabel")
-              }
-            />
-          </div>
-          <p className="text-xs text-text-muted">
-            {accelEnabled
-              ? stats.ffmpeg.hw_accel_encoder
-                ? `${t("admin.system.hwAccelEncoder")}: ${stats.ffmpeg.hw_accel_encoder}`
-                : t("admin.system.hwAccelNoneHint")
-              : t("admin.system.hwAccelDisabledPointer")}
-          </p>
-        </div>
-      </div>
-
-      {/* Live "Now Playing" — uses the existing /admin/system/sessions
-          5 s endpoint. Inline here so the admin sees what's actually
-          consuming a slot, not just a number. */}
-      <ActiveSessionsList />
+      <KpiTile
+        label={t("admin.systemHost.ram", { defaultValue: "RAM" })}
+        icon={MemoryStick}
+        value={formatBytes(ramUsed)}
+        unit={`/ ${formatBytes(ramTotal)}`}
+        ratio={ramRatio}
+        sparkline={history.map((h) => h.ramPercent)}
+      />
+      <KpiTile
+        label={t("admin.systemHost.gpu", { defaultValue: "GPU" })}
+        icon={Zap}
+        value={
+          stats.ffmpeg.hw_accel_selected &&
+          stats.ffmpeg.hw_accel_selected !== "none"
+            ? stats.ffmpeg.hw_accel_selected.toUpperCase()
+            : "—"
+        }
+        hint={
+          stats.host?.gpu_model
+            ? stats.host.gpu_model
+            : stats.ffmpeg.hw_accel_enabled
+              ? t("admin.systemHost.gpuSoftware", {
+                  defaultValue: "Sin GPU dedicada",
+                })
+              : t("admin.system.hwAccelDisabledLabel")
+        }
+        tone={
+          stats.ffmpeg.hw_accel_enabled &&
+          stats.ffmpeg.hw_accel_selected &&
+          stats.ffmpeg.hw_accel_selected !== "none"
+            ? "success"
+            : "neutral"
+        }
+      />
+      <KpiTile
+        label={t("admin.systemKpi.sessions", { defaultValue: "Sesiones" })}
+        icon={MonitorPlay}
+        value={sessionsActive}
+        unit={sessionsMax > 0 ? `/ ${sessionsMax}` : undefined}
+        ratio={sessionsRatio}
+        sparkline={history.map((h) => h.sessions)}
+        hint={
+          sessionsMax > 0
+            ? t("admin.systemKpi.sessionsHint", {
+                defaultValue: "{{a}} activas · {{m}} max",
+                a: sessionsActive,
+                m: sessionsMax,
+              })
+            : t("admin.systemKpi.sessionsUnlimitedHint", {
+                defaultValue: "Sin límite configurado",
+              })
+        }
+      />
+      <KpiTile
+        label={t("admin.systemKpi.library", { defaultValue: "Biblioteca" })}
+        icon={Box}
+        value={itemsTotal.toLocaleString()}
+        unit={t("admin.systemKpi.items", { defaultValue: "items" })}
+        hint={
+          librariesCount > 0
+            ? t("admin.systemKpi.libraries", {
+                defaultValue: "{{n}} bibliotecas · {{size}} en disco",
+                n: librariesCount,
+                size: formatBytes(storageUsed),
+              })
+            : t("admin.systemKpi.libraryEmpty", {
+                defaultValue: "Sin bibliotecas configuradas",
+              })
+        }
+        tone="neutral"
+      />
     </section>
   );
 }
 
-// ─── Sesiones activas ──────────────────────────────────────────────
+// ─── Host charts row (CPU + RAM) ────────────────────────────────────
+//
+// Dos area charts grandes lado a lado para que el operador vea
+// tendencia de la ultima hora de un vistazo. Empty state hasta
+// que el ring buffer junta 2+ samples.
+
+function HostChartsRow({ history }: { history: MetricsSample[] }) {
+  const { t } = useTranslation();
+  const empty = history.length < 2;
+  // Recharts necesita data plana - mapeamos a {label, value}.
+  const cpuData = history.map((h) => ({
+    label: new Date(h.ts).toLocaleTimeString(undefined, {
+      hour: "2-digit",
+      minute: "2-digit",
+    }),
+    value: h.cpuPercent,
+  }));
+  const ramData = history.map((h) => ({
+    label: new Date(h.ts).toLocaleTimeString(undefined, {
+      hour: "2-digit",
+      minute: "2-digit",
+    }),
+    value: h.ramPercent,
+  }));
+  return (
+    <div className="grid gap-3 lg:grid-cols-2">
+      <ChartCard
+        icon={Cpu}
+        title={t("admin.systemCharts.cpuTitle", {
+          defaultValue: "CPU últimos minutos",
+        })}
+        subtitle={t("admin.systemCharts.cpuSubtitle", {
+          defaultValue: "Carga del host, ventana de ~1 h en el cliente.",
+        })}
+        empty={empty}
+        emptyText={t("admin.systemCharts.collecting", {
+          defaultValue: "Recogiendo datos…",
+        })}
+        height={180}
+      >
+        <AreaTimeline
+          data={cpuData}
+          xKey="label"
+          yKey="value"
+          color="var(--color-accent)"
+          unit="%"
+          yDomain={[0, 100]}
+          formatY={(v) => `${v.toFixed(1)}%`}
+        />
+      </ChartCard>
+      <ChartCard
+        icon={MemoryStick}
+        title={t("admin.systemCharts.ramTitle", {
+          defaultValue: "RAM últimos minutos",
+        })}
+        subtitle={t("admin.systemCharts.ramSubtitle", {
+          defaultValue: "% del total. Sube con scans y transcodes activos.",
+        })}
+        empty={empty}
+        emptyText={t("admin.systemCharts.collecting", {
+          defaultValue: "Recogiendo datos…",
+        })}
+        height={180}
+      >
+        <AreaTimeline
+          data={ramData}
+          xKey="label"
+          yKey="value"
+          color="var(--color-success)"
+          unit="%"
+          yDomain={[0, 100]}
+          formatY={(v) => `${v.toFixed(1)}%`}
+        />
+      </ChartCard>
+    </div>
+  );
+}
+
+// ─── Active sessions list ──────────────────────────────────────────
 
 function ActiveSessionsList() {
   const { t } = useTranslation();
@@ -648,438 +596,468 @@ function ActiveSessionsList() {
     kill.mutate({ sessionID: s.session_id });
   };
 
-  if (data.length === 0) {
-    return (
-      <div className="rounded-[--radius-lg] border border-dashed border-border bg-bg-card px-5 py-6 text-center text-xs text-text-muted">
-        {t("admin.systemSessions.empty", {
-          defaultValue: "Nadie está reproduciendo nada ahora mismo.",
-        })}
-      </div>
-    );
-  }
-
   return (
-    <div className="overflow-hidden rounded-[--radius-lg] border border-border bg-bg-card">
-      <div className="flex items-center justify-between border-b border-border-subtle px-5 py-2.5">
-        <span className="text-xs font-medium uppercase tracking-wider text-text-muted">
-          {t("admin.systemSessions.title", {
-            defaultValue: "Sesiones activas",
-          })}
-        </span>
-        <span className="text-[10px] text-text-muted">
-          {t("admin.systemSessions.refreshHint", {
-            defaultValue: "Actualiza cada 5 s",
-          })}
-        </span>
-      </div>
-      <ul className="divide-y divide-border-subtle">
-        {data.map((s) => (
-          <li
-            key={s.session_id}
-            className="flex flex-wrap items-center gap-3 px-5 py-3 text-sm"
-          >
-            <span className="font-medium text-text-primary">
-              {s.username || s.user_id}
-            </span>
-            <span className="text-text-muted">·</span>
-            <span className="truncate text-text-secondary">
-              {s.item_title || s.item_id}
-            </span>
-            <span className="ml-auto inline-flex items-center gap-2 text-xs text-text-muted">
-              <span
-                className={[
-                  "rounded-full px-2 py-0.5 text-[10px] font-medium",
-                  s.method === "Transcode"
-                    ? "bg-warning/15 text-warning"
-                    : "bg-success/15 text-success",
-                ].join(" ")}
-              >
-                {s.method}
-              </span>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => handleKill(s)}
-                isLoading={kill.isPending}
-                title={t("admin.systemSessions.kill", {
-                  defaultValue: "Cerrar sesión",
-                })}
-              >
-                <Square className="h-3.5 w-3.5" />
-              </Button>
-            </span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-// ─── Host (CPU/RAM/GPU) ────────────────────────────────────────────
-//
-// Distinct from the "Proceso" section below. Host = "the box" (CPU
-// model, RAM total/used, GPU model). Proceso = "this Go process"
-// (heap, goroutines). Both are useful; conflating them led to the
-// previous version showing only Go heap, which doesn't tell the
-// operator if their CPU is saturated.
-//
-// Empty fields render as "—". A host without nvidia-smi has no GPU
-// row; a sandboxed runtime where gopsutil can't read /proc/cpuinfo
-// just shows the cores count without a model string.
-
-function HostSection({
-  host,
-  history,
-}: {
-  host: SystemHostStats;
-  history: MetricsSample[];
-}) {
-  const { t } = useTranslation();
-
-  const cpuPct = host.cpu_percent ?? 0;
-  const cpuTone =
-    cpuPct < 60 ? "success" : cpuPct < 85 ? "warning" : "error";
-  const cpuColour =
-    cpuTone === "success"
-      ? "var(--color-success)"
-      : cpuTone === "warning"
-        ? "var(--color-warning)"
-        : "var(--color-error)";
-
-  const ramTotal = host.ram_total_bytes ?? 0;
-  const ramUsed = host.ram_used_bytes ?? 0;
-  const ramPct = ramTotal > 0 ? Math.min(100, (ramUsed / ramTotal) * 100) : 0;
-  const ramTone =
-    ramPct < 75 ? "success" : ramPct < 90 ? "warning" : "error";
-  const ramColour =
-    ramTone === "success"
-      ? "var(--color-success)"
-      : ramTone === "warning"
-        ? "var(--color-warning)"
-        : "var(--color-error)";
-
-  // Compose the CPU sub-label: "6 cores · 12 threads" when both are
-  // known and differ, "6 cores" otherwise. Saves a vertical row vs
-  // showing them as separate fields.
-  const coresLabel = (() => {
-    const p = host.cpu_cores_physical;
-    const l = host.cpu_cores_logical;
-    if (p > 0 && l > 0 && p !== l) {
-      return t("admin.systemHost.coresWithThreads", {
-        defaultValue: "{{physical}} núcleos · {{logical}} hilos",
-        physical: p,
-        logical: l,
-      });
-    }
-    if (l > 0) {
-      return t("admin.systemHost.coresOnly", {
-        defaultValue: "{{count}} núcleos",
-        count: l,
-      });
-    }
-    return "—";
-  })();
-
-  return (
-    <section className="flex flex-col gap-4">
+    <section className="flex flex-col gap-3">
       <SectionHeader
-        icon={Cpu}
-        title={t("admin.systemHost.title", { defaultValue: "Host" })}
-        subtitle={t("admin.systemHost.subtitle", {
-          defaultValue:
-            "Hardware del servidor donde corre HubPlay y carga real ahora mismo.",
+        icon={MonitorPlay}
+        title={t("admin.systemSessions.title", {
+          defaultValue: "Sesiones activas",
         })}
-      />
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        {/* CPU card — model + cores + live % with sparkline */}
-        <div className="flex flex-col gap-3 rounded-[--radius-lg] border border-border bg-bg-card p-5">
-          <div className="flex items-baseline justify-between">
-            <span className="text-xs font-medium uppercase tracking-wider text-text-muted">
-              {t("admin.systemHost.cpu", { defaultValue: "CPU" })}
-            </span>
-            <span className="text-xs text-text-muted">{coresLabel}</span>
-          </div>
-          <div className="text-sm font-medium text-text-primary truncate" title={host.cpu_model}>
-            {host.cpu_model || "—"}
-          </div>
-          <div className="flex items-end justify-between gap-3">
-            <div className="flex items-baseline gap-2">
-              <span
-                className="text-3xl font-semibold tabular-nums"
-                style={{ color: cpuColour }}
-              >
-                {cpuPct.toFixed(1)}
-              </span>
-              <span className="text-base text-text-muted">%</span>
-            </div>
-            <Sparkline
-              values={history.map((h) => h.cpuPercent)}
-              width={120}
-              height={32}
-            />
-          </div>
-          <div className="h-1.5 w-full overflow-hidden rounded-full bg-bg-elevated">
-            <div
-              className="h-full transition-all"
-              style={{ width: `${Math.min(100, cpuPct)}%`, background: cpuColour }}
-            />
-          </div>
-        </div>
-
-        {/* RAM card — total / used + bar */}
-        <div className="flex flex-col gap-3 rounded-[--radius-lg] border border-border bg-bg-card p-5">
-          <div className="flex items-baseline justify-between">
-            <span className="text-xs font-medium uppercase tracking-wider text-text-muted">
-              {t("admin.systemHost.ram", { defaultValue: "RAM" })}
-            </span>
-            <span className="text-xs text-text-muted tabular-nums">
-              {ramPct.toFixed(0)}%
-            </span>
-          </div>
-          <div className="flex items-end justify-between gap-3">
-            <div className="flex items-baseline gap-2">
-              <span
-                className="text-3xl font-semibold tabular-nums"
-                style={{ color: ramColour }}
-              >
-                {formatBytes(ramUsed)}
-              </span>
-              <span className="text-base text-text-muted tabular-nums">
-                / {formatBytes(ramTotal)}
-              </span>
-            </div>
-          </div>
-          <div className="h-1.5 w-full overflow-hidden rounded-full bg-bg-elevated">
-            <div
-              className="h-full transition-all"
-              style={{ width: `${ramPct}%`, background: ramColour }}
-            />
-          </div>
-          <p className="text-[11px] text-text-muted leading-relaxed">
-            {t("admin.systemHost.ramHint", {
-              defaultValue:
-                "RAM usada = total − disponible (como `free -h`). Sube cuando hay scans / transcodes en vuelo.",
-            })}
-          </p>
-        </div>
-      </div>
-
-      {/* GPU row — collapses to a single line when present, hidden
-          when not (no nvidia-smi / non-NVIDIA host). The HW accel
-          card in StreamingSection already shows the accelerator
-          family for non-NVIDIA hosts. */}
-      {host.gpu_model && (
-        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 rounded-[--radius-lg] border border-border bg-bg-card px-5 py-3 text-sm">
-          <span className="text-xs font-medium uppercase tracking-wider text-text-muted">
-            GPU
-          </span>
-          <span className="font-medium text-text-primary">
-            {host.gpu_model}
-          </span>
-          {host.gpu_memory_total_bytes > 0 && (
-            <span className="text-text-secondary tabular-nums">
-              · {formatBytes(host.gpu_memory_total_bytes)} VRAM
-            </span>
-          )}
-          {host.gpu_driver_version && (
-            <span className="text-text-muted">
-              · {t("admin.systemHost.driverVersion", {
-                defaultValue: "driver {{v}}",
-                v: host.gpu_driver_version,
-              })}
-            </span>
-          )}
-        </div>
-      )}
-    </section>
-  );
-}
-
-// ─── Runtime (proceso) ─────────────────────────────────────────────
-
-function RuntimeSection({
-  runtime,
-  history,
-}: {
-  runtime: SystemRuntimeStats;
-  history: MetricsSample[];
-}) {
-  const { t } = useTranslation();
-  return (
-    <section className="flex flex-col gap-4">
-      <SectionHeader
-        icon={Cpu}
-        title={t("admin.systemRuntime.title", {
-          defaultValue: "Proceso",
-        })}
-        subtitle={t("admin.systemRuntime.subtitle", {
+        subtitle={t("admin.systemSessions.subtitle", {
           defaultValue:
-            "Memoria que el runtime de Go tiene reservada y goroutines vivas en este momento.",
-        })}
-      />
-      <div className="grid gap-4 sm:grid-cols-3">
-        <MetricCard
-          label={t("admin.systemRuntime.memAlloc", {
-            defaultValue: "Memoria asignada",
-          })}
-          value={`${runtime.memory_alloc_mb.toFixed(1)} MB`}
-          sparkValues={history.map((h) => h.memMb)}
-          hint={t("admin.systemRuntime.memAllocHint", {
-            defaultValue: "Heap de Go en uso (no la RAM total del host).",
-          })}
-        />
-        <MetricCard
-          label={t("admin.systemRuntime.memSys", {
-            defaultValue: "Memoria reservada",
-          })}
-          value={`${runtime.memory_sys_mb.toFixed(1)} MB`}
-          hint={t("admin.systemRuntime.memSysHint", {
-            defaultValue: "Lo que el runtime ha pedido al SO.",
-          })}
-        />
-        <MetricCard
-          label={t("admin.systemRuntime.goroutines", {
-            defaultValue: "Goroutines",
-          })}
-          value={String(runtime.goroutines)}
-          hint={`${runtime.cpu_count} CPU · ${runtime.os}/${runtime.arch}`}
-        />
-      </div>
-    </section>
-  );
-}
-
-function MetricCard({
-  label,
-  value,
-  sparkValues,
-  hint,
-}: {
-  label: string;
-  value: string;
-  sparkValues?: number[];
-  hint: string;
-}) {
-  return (
-    <div className="flex flex-col gap-2 rounded-[--radius-lg] border border-border bg-bg-card p-5">
-      <span className="text-xs font-medium uppercase tracking-wider text-text-muted">
-        {label}
-      </span>
-      <div className="flex items-end justify-between gap-3">
-        <span className="text-2xl font-semibold text-text-primary tabular-nums">
-          {value}
-        </span>
-        {sparkValues && (
-          <Sparkline values={sparkValues} width={100} height={28} />
-        )}
-      </div>
-      <p className="text-[11px] text-text-muted leading-relaxed">{hint}</p>
-    </div>
-  );
-}
-
-// ─── Almacenamiento ─────────────────────────────────────────────────
-
-function StorageSection({ stats }: { stats: SystemStats }) {
-  const { t } = useTranslation();
-  const s = stats.storage;
-  const dbBytes = stats.database.size_bytes;
-  const total = (s.image_dir_bytes ?? 0) + (s.transcode_cache_bytes ?? 0) + dbBytes;
-  // Bars share the same denominator (the largest of the three) so
-  // the eye registers relative size at a glance.
-  const denom = Math.max(s.image_dir_bytes, s.transcode_cache_bytes, dbBytes, 1);
-  const rows = [
-    {
-      label: t("admin.system.imageDir"),
-      bytes: s.image_dir_bytes,
-      path: s.image_dir_path,
-    },
-    {
-      label: t("admin.system.transcodeCache"),
-      bytes: s.transcode_cache_bytes,
-      path: s.transcode_cache_path,
-    },
-    {
-      label: t("admin.system.databaseSize"),
-      bytes: dbBytes,
-      path: stats.database.path,
-    },
-  ];
-  return (
-    <section className="flex flex-col gap-4">
-      <SectionHeader
-        icon={HardDrive}
-        title={t("admin.system.sectionStorage")}
-        subtitle={t("admin.systemStorage.subtitle", {
-          defaultValue:
-            "Espacio que ocupan los caches y la base de datos en disco.",
+            "Quién está reproduciendo qué ahora mismo. Refresca cada 5 s.",
         })}
         trailing={
-          <span className="text-sm text-text-muted tabular-nums">
-            {t("admin.systemStorage.total", {
-              defaultValue: "Total {{size}}",
-              size: formatBytes(total),
-            })}
+          <span className="rounded-full border border-border-subtle bg-bg-elevated px-2 py-0.5 text-[10px] font-medium tabular-nums text-text-secondary">
+            {data.length}
           </span>
         }
       />
-      <div className="flex flex-col gap-3 rounded-[--radius-lg] border border-border bg-bg-card p-5">
-        {rows.map((r) => (
-          <StorageRow
-            key={r.label}
-            label={r.label}
-            bytes={r.bytes}
-            path={r.path}
-            denom={denom}
+      {data.length === 0 ? (
+        <div className="rounded-[--radius-lg] border border-dashed border-border bg-bg-card px-5 py-6 text-center text-xs text-text-muted">
+          {t("admin.systemSessions.empty", {
+            defaultValue: "Nadie está reproduciendo nada ahora mismo.",
+          })}
+        </div>
+      ) : (
+        <div className="overflow-hidden rounded-[--radius-lg] border border-border bg-bg-card">
+          <ul className="divide-y divide-border-subtle">
+            {data.map((s) => (
+              <li
+                key={s.session_id}
+                className="flex flex-wrap items-center gap-3 px-5 py-3 text-sm"
+              >
+                <span className="font-medium text-text-primary">
+                  {s.username || s.user_id}
+                </span>
+                <span className="text-text-muted">·</span>
+                <span className="truncate text-text-secondary">
+                  {s.item_title || s.item_id}
+                </span>
+                <span className="ml-auto inline-flex items-center gap-2 text-xs text-text-muted">
+                  <span
+                    className={[
+                      "rounded-full px-2 py-0.5 text-[10px] font-medium",
+                      s.method === "Transcode"
+                        ? "bg-warning/15 text-warning"
+                        : "bg-success/15 text-success",
+                    ].join(" ")}
+                  >
+                    {s.method}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleKill(s)}
+                    isLoading={kill.isPending}
+                    title={t("admin.systemSessions.kill", {
+                      defaultValue: "Cerrar sesión",
+                    })}
+                  >
+                    <Square className="h-3.5 w-3.5" />
+                  </Button>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </section>
+  );
+}
+
+// ─── Activity row (watch days + top items) ──────────────────────────
+
+function ActivityRow() {
+  const { t } = useTranslation();
+  const activity = useAdminStreamActivity(14);
+  const top = useAdminTopItems(7, 5);
+
+  const buckets = activity.data?.buckets ?? [];
+  const totalMinutes = buckets.reduce((s, b) => s + b.watch_minutes, 0);
+  const activityData = buckets.map((b) => ({
+    date: b.date,
+    minutes: b.watch_minutes,
+  }));
+  const topItems = top.data?.items ?? [];
+
+  return (
+    <div className="grid gap-3 lg:grid-cols-[3fr_2fr]">
+      <ChartCard
+        icon={Activity}
+        title={t("admin.systemActivity.title", {
+          defaultValue: "Actividad de visionado",
+        })}
+        subtitle={t("admin.systemActivity.subtitle", {
+          defaultValue: "Minutos totales por día (últimos 14 días).",
+        })}
+        trailing={
+          <span className="text-[11px] text-text-muted tabular-nums">
+            {t("admin.systemActivity.total", {
+              defaultValue: "{{n}} min totales",
+              n: totalMinutes.toLocaleString(),
+            })}
+          </span>
+        }
+        loading={activity.isLoading}
+        empty={!activity.isLoading && totalMinutes === 0}
+        emptyText={t("admin.systemActivity.empty", {
+          defaultValue: "Nadie ha reproducido nada en estos 14 días.",
+        })}
+        height={200}
+      >
+        <BarTimeline
+          data={activityData}
+          xKey="date"
+          yKey="minutes"
+          color="var(--color-accent)"
+          unit=" min"
+          formatX={(v) => {
+            const d = new Date(String(v));
+            return d.toLocaleDateString(undefined, {
+              day: "2-digit",
+              month: "2-digit",
+            });
+          }}
+          formatY={(n) => `${n} min`}
+        />
+      </ChartCard>
+      <ChartCard
+        icon={Trophy}
+        title={t("admin.systemTopItems.title", {
+          defaultValue: "Top reproducciones",
+        })}
+        subtitle={t("admin.systemTopItems.subtitle", {
+          defaultValue: "Lo más visto en los últimos 7 días.",
+        })}
+        loading={top.isLoading}
+        empty={!top.isLoading && topItems.length === 0}
+        emptyText={t("admin.systemTopItems.empty", {
+          defaultValue: "Sin reproducciones en la última semana.",
+        })}
+        height={200}
+      >
+        <TopItemsList items={topItems} />
+      </ChartCard>
+    </div>
+  );
+}
+
+function TopItemsList({ items }: { items: AdminTopItem[] }) {
+  const max = items.reduce((m, x) => Math.max(m, x.play_count), 1);
+  return (
+    <ol className="flex h-full flex-col justify-around gap-1.5 px-1">
+      {items.map((it, idx) => {
+        const pct = (it.play_count / max) * 100;
+        return (
+          <li key={it.id} className="flex flex-col gap-1">
+            <div className="flex items-baseline justify-between gap-2 text-xs">
+              <span className="flex min-w-0 items-baseline gap-1.5">
+                <span className="tabular-nums text-text-muted/70">
+                  {idx + 1}
+                </span>
+                <span className="truncate font-medium text-text-primary">
+                  {it.title}
+                </span>
+              </span>
+              <span className="tabular-nums text-text-secondary">
+                {it.play_count}
+              </span>
+            </div>
+            <div className="h-1 w-full overflow-hidden rounded-full bg-bg-elevated">
+              <div
+                className="h-full bg-accent/70 transition-all"
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+// ─── Infra row (Storage + Database + Connection) ───────────────────
+
+function InfraRow({ stats }: { stats: SystemStats }) {
+  const { t } = useTranslation();
+  const s = stats.storage;
+  const dbBytes = stats.database.size_bytes;
+  const imageBytes = s?.image_dir_bytes ?? 0;
+  const transcodeBytes = s?.transcode_cache_bytes ?? 0;
+  const total = imageBytes + transcodeBytes + dbBytes;
+  const denom = Math.max(imageBytes, transcodeBytes, dbBytes, 1);
+  return (
+    <div className="grid gap-3 lg:grid-cols-3">
+      <InfraCard
+        icon={HardDrive}
+        title={t("admin.system.sectionStorage", {
+          defaultValue: "Almacenamiento",
+        })}
+        trailing={formatBytes(total)}
+      >
+        <StorageBars
+          rows={[
+            {
+              label: t("admin.system.imageDir", {
+                defaultValue: "Imágenes",
+              }),
+              bytes: imageBytes,
+              path: s?.image_dir_path,
+            },
+            {
+              label: t("admin.system.transcodeCache", {
+                defaultValue: "Caché de transcodificación",
+              }),
+              bytes: transcodeBytes,
+              path: s?.transcode_cache_path,
+            },
+            {
+              label: t("admin.system.databaseSize", {
+                defaultValue: "Base de datos",
+              }),
+              bytes: dbBytes,
+              path: stats.database.path,
+            },
+          ]}
+          denom={denom}
+        />
+      </InfraCard>
+      <InfraCard
+        icon={Database}
+        title={t("admin.systemInfra.databaseTitle", {
+          defaultValue: "Base de datos",
+        })}
+      >
+        <dl className="flex flex-col gap-2 text-xs">
+          <InfraRowKV
+            label={t("admin.systemInfra.dbStatus", { defaultValue: "Estado" })}
+            value={
+              <HealthPill
+                label={stats.database.ok ? "OK" : "FALLO"}
+                tone={stats.database.ok ? "success" : "error"}
+              />
+            }
           />
-        ))}
+          <InfraRowKV
+            label={t("admin.systemInfra.dbSize", { defaultValue: "Tamaño" })}
+            value={formatBytes(dbBytes)}
+            mono
+          />
+          <InfraRowKV
+            label={t("admin.systemInfra.dbPath", { defaultValue: "Ruta" })}
+            value={stats.database.path}
+            mono
+            truncate
+          />
+        </dl>
+      </InfraCard>
+      <InfraCard
+        icon={Network}
+        title={t("admin.systemInfra.networkTitle", {
+          defaultValue: "Conexión",
+        })}
+      >
+        <dl className="flex flex-col gap-2 text-xs">
+          <InfraRowKV
+            label={t("admin.system.bindAddress", {
+              defaultValue: "Bind address",
+            })}
+            value={stats.server.bind_address || "—"}
+            mono
+          />
+          <InfraRowKV
+            label={t("admin.system.baseURL", {
+              defaultValue: "URL pública",
+            })}
+            value={stats.server.base_url || "—"}
+            mono
+            truncate
+          />
+          <InfraRowKV
+            label="FFmpeg"
+            value={stats.ffmpeg.found ? stats.ffmpeg.path : "—"}
+            mono
+            truncate
+          />
+        </dl>
+      </InfraCard>
+    </div>
+  );
+}
+
+function InfraCard({
+  icon: Icon,
+  title,
+  trailing,
+  children,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  title: string;
+  trailing?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex h-full flex-col gap-3 rounded-[--radius-lg] border border-border bg-bg-card p-4">
+      <header className="flex items-baseline justify-between gap-3">
+        <div className="flex items-center gap-2 text-text-muted">
+          <Icon className="h-3.5 w-3.5" />
+          <span className="text-[10px] font-medium uppercase tracking-wider">
+            {title}
+          </span>
+        </div>
+        {trailing && (
+          <span className="text-xs tabular-nums text-text-secondary">
+            {trailing}
+          </span>
+        )}
+      </header>
+      {children}
+    </div>
+  );
+}
+
+function InfraRowKV({
+  label,
+  value,
+  mono,
+  truncate,
+}: {
+  label: string;
+  value: React.ReactNode;
+  mono?: boolean;
+  truncate?: boolean;
+}) {
+  return (
+    <div className="flex items-baseline justify-between gap-3 min-w-0">
+      <dt className="flex-none text-text-muted">{label}</dt>
+      <dd
+        className={[
+          "min-w-0 text-text-secondary text-right",
+          mono ? "font-mono" : "",
+          truncate ? "truncate" : "break-all",
+        ].join(" ")}
+      >
+        {value}
+      </dd>
+    </div>
+  );
+}
+
+function StorageBars({
+  rows,
+  denom,
+}: {
+  rows: { label: string; bytes: number; path?: string }[];
+  denom: number;
+}) {
+  return (
+    <ul className="flex flex-col gap-2.5 text-xs">
+      {rows.map((r) => {
+        const pct = denom > 0 ? (r.bytes / denom) * 100 : 0;
+        return (
+          <li key={r.label} className="flex flex-col gap-1">
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="font-medium text-text-primary truncate">
+                {r.label}
+              </span>
+              <span className="tabular-nums text-text-secondary">
+                {formatBytes(r.bytes)}
+              </span>
+            </div>
+            <div className="h-1 w-full overflow-hidden rounded-full bg-bg-elevated">
+              <div
+                className="h-full bg-accent transition-all"
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+            {r.path && (
+              <span
+                className="font-mono text-[10px] text-text-muted truncate"
+                title={r.path}
+              >
+                {r.path}
+              </span>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+// ─── Runtime row (Go process internals) ────────────────────────────
+
+function RuntimeRow({
+  stats,
+  history,
+}: {
+  stats: SystemStats;
+  history: MetricsSample[];
+}) {
+  const { t } = useTranslation();
+  const r = stats.runtime;
+  return (
+    <section className="flex flex-col gap-3">
+      <SectionHeader
+        icon={Server}
+        title={t("admin.systemRuntime.title", { defaultValue: "Proceso" })}
+        subtitle={t("admin.systemRuntime.subtitle", {
+          defaultValue:
+            "Internals del runtime de Go. Diferente de la RAM total del host de arriba.",
+        })}
+      />
+      <div className="grid gap-3 sm:grid-cols-3">
+        <KpiTile
+          label={t("admin.systemRuntime.memAlloc", {
+            defaultValue: "Heap usado",
+          })}
+          icon={MemoryStick}
+          value={r.memory_alloc_mb.toFixed(1)}
+          unit="MB"
+          sparkline={history.map((h) => h.memMb)}
+          hint={t("admin.systemRuntime.memAllocHint", {
+            defaultValue: "Heap de Go activo, no la RAM del host.",
+          })}
+          tone="neutral"
+        />
+        <KpiTile
+          label={t("admin.systemRuntime.memSys", {
+            defaultValue: "Reservado al SO",
+          })}
+          icon={MemoryStick}
+          value={r.memory_sys_mb.toFixed(1)}
+          unit="MB"
+          hint={t("admin.systemRuntime.memSysHint", {
+            defaultValue: "Memoria que el runtime ha pedido al sistema.",
+          })}
+          tone="neutral"
+        />
+        <KpiTile
+          label={t("admin.systemRuntime.goroutines", {
+            defaultValue: "Goroutines",
+          })}
+          icon={Users}
+          value={r.goroutines.toLocaleString()}
+          hint={`${r.cpu_count} CPU · ${r.os}/${r.arch}`}
+          tone="neutral"
+        />
       </div>
     </section>
   );
 }
 
-interface StorageRowProps {
-  label: string;
-  bytes: number;
-  path?: string;
-  denom: number;
-}
-
-function StorageRow({ label, bytes, path, denom }: StorageRowProps) {
-  const pct = denom > 0 ? (bytes / denom) * 100 : 0;
-  return (
-    <div className="flex flex-col gap-1.5">
-      <div className="flex items-baseline justify-between gap-3 text-sm">
-        <span className="font-medium text-text-primary">{label}</span>
-        <span className="tabular-nums text-text-secondary">
-          {formatBytes(bytes)}
-        </span>
-      </div>
-      <div className="h-1.5 w-full overflow-hidden rounded-full bg-bg-elevated">
-        <div
-          className="h-full bg-accent transition-all"
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-      {path && (
-        <span className="text-[11px] font-mono text-text-muted truncate">
-          {path}
-        </span>
-      )}
-    </div>
-  );
-}
-
-// ─── Configuración ─────────────────────────────────────────────────
+// ─── Settings ───────────────────────────────────────────────────────
 
 function SettingsSection() {
   const { t } = useTranslation();
   return (
-    <section className="flex flex-col gap-4">
+    <section className="flex flex-col gap-3 pt-3 border-t border-border-subtle">
       <SectionHeader
         icon={Settings2}
-        title={t("admin.systemSettings.title", { defaultValue: "Configuración" })}
+        title={t("admin.systemSettings.title", {
+          defaultValue: "Configuración",
+        })}
         subtitle={t("admin.systemSettings.subtitle", {
           defaultValue:
             "Valores en tiempo de ejecución que se aplican sin reiniciar el servidor.",
@@ -1090,15 +1068,17 @@ function SettingsSection() {
   );
 }
 
-// ─── Avanzado ──────────────────────────────────────────────────────
+// ─── Advanced ──────────────────────────────────────────────────────
 
 function AdvancedSection() {
   const { t } = useTranslation();
   return (
-    <section className="flex flex-col gap-4 pt-6 border-t border-border-subtle">
+    <section className="flex flex-col gap-3 pt-3 border-t border-border-subtle">
       <SectionHeader
         icon={KeyRound}
-        title={t("admin.system.sectionAdvanced")}
+        title={t("admin.system.sectionAdvanced", {
+          defaultValue: "Avanzado",
+        })}
         subtitle={t("admin.systemAdvanced.subtitle", {
           defaultValue:
             "Operaciones destructivas y rotación de llaves. Nada que tocar en el día a día.",
@@ -1117,4 +1097,3 @@ function AdvancedSection() {
     </section>
   );
 }
-
