@@ -1,6 +1,24 @@
 # Estado del proyecto
 
-> 🎬 **Sesión 2026-05-18 bis (rama `claude/review-project-progress-snmmo`) — cierre del bloque "servidor": foto del servidor subible + servida pública para peers**. Completa los tres pendientes #1 del status anterior (foto, helper disco, handlers admin+público, UI editor). Branch ahead de main, PR pendiente que el user abre manualmente.
+> 🎬 **Sesión 2026-05-18 bis (rama `claude/review-project-progress-snmmo`) — DOS bloques cerrados: (1) foto del servidor para federation, (2) QR scanner en `/link` que cierra el flow Device Code al 100 %.** Branch ahead de main, PR pendiente que el user abre manualmente.
+>
+> ## 🛠️ QR scanner en `/link` (cierre del Device Code flow al 100 %)
+>
+> El flow RFC 8628 ya estaba al 95 %: la TV en `/pair` muestra QR + SSE espera; el móvil en `/link` tecleaba el código de 8 chars. Faltaba el último paso de UX: que el móvil pueda **escanear** el QR directamente sin tipear nada.
+>
+> **Frontend**:
+> - Nueva dependencia: `@yudiel/react-qr-scanner` 2.6.0 (~38 KB gzipped). Usa `BarcodeDetector` nativo cuando está disponible (Chrome ≥83, Safari ≥16.4) + polyfill `barcode-detector`/`zxing-wasm` para Firefox.
+> - Nuevo componente `web/src/components/devices/QRScannerModal.tsx`: modal fullscreen con `<Scanner>` de la librería, overlay con marco visual + hint, manejo de errores (`NotAllowedError` permisos, `NotFoundError` sin cámara, genérico para HTTPS-only). Helper puro `extractCode(raw)` que acepta tanto `https://host/link?code=ABCD-EFGH` (el `verification_uri_complete` que `/pair` codifica en el QR) como código pelado, rechaza vCards/URLs aleatorias.
+> - `LinkDevice.tsx`: import dinámico del modal con `React.lazy` para no cargar los ~38 KB hasta que el usuario pulse el botón. Botón "Escanear código QR" sólo se renderiza si `navigator.mediaDevices.getUserMedia` existe (HTTPS o localhost — en HTTP plano se oculta). Al detectar código se mete en el input + auto-submit (objetivo "0 typing" — si el código es inválido cae al mismo error del flow manual).
+>
+> **Tests**:
+> - 7 tests para `extractCode` (parte pura: URL feliz con/sin dash, código pelado, URLs sin code, vCards, longitudes inválidas, trim de espacios).
+> - 9/9 tests verdes en `src/pages/LinkDevice` + `src/components/devices`. **562/562 vitest verde** (sube de 555 a 562).
+> - El modal en sí necesitaría jsdom con `MediaStream` faking → fuera de scope para una mejora UX.
+>
+> **Sin cambios backend**: el endpoint `POST /auth/device/approve` ya acepta tanto `ABCD-EFGH` como `ABCDEFGH` (`canonicalUserCode` normaliza). El scanner solo automatiza el "pegar" del código.
+>
+> ## 🛠️ Foto del servidor (federation identity avatar)
 >
 > ## 🛠️ Foto del servidor (federation identity avatar)
 >
@@ -24,17 +42,17 @@
 > - Suite Go entera verde (1 flake preexistente en `iptv.TestTransmuxManager_Touch_KeepsSessionAlive` no relacionado — pasa en aislado).
 > - `pnpm tsc -b` verde, **555/555 vitest verde**.
 >
-> ## ⏸️ Pendiente para próxima sesión (continuación del bloque "servidores" + nuevas piezas)
+> ## ⏸️ Pendiente para próxima sesión
 >
-> El pendiente #1 del status anterior queda **cerrado**. Quedan:
+> Pendientes #1 (foto del servidor) y #3 (QR scanner) del status anterior **cerrados**. Quedan:
 >
 > 1. **Polish visual de Invite/Accept/PeersTable más allá del avatar** (~30-60 min) — sigue intacto.
 >
 > 2. **Branding del remoto en PeersTable** (~1-2 h, requiere migration) — persistir `avatar_color`/`avatar_image_url` del peer en `federation_peers` + refetch periódico de `/identity`.
 >
-> 3. **QR scanner en `/link` para emparejar dispositivos** (~2-3h) — el flujo Device Code RFC 8628 ya está al 95 % (TV en `/pair` muestra QR + SSE espera aprobación; móvil en `/link` teclea el código). Falta sólo añadir librería tipo `html5-qrcode` o `@yudiel/react-qr-scanner` + modal de cámara en `/link` para que el móvil escanee el QR de la TV en vez de teclear. Sin cambios backend.
+> 3. *(Opcional)* Subir las palabras fonéticas de 4 a 6 si nos preocupa MITM en canal de voz (ganar 16 bits de entropía a cambio de leer 2 palabras más).
 >
-> 4. *(Opcional)* Subir las palabras fonéticas de 4 a 6 si nos preocupa MITM en canal de voz (ganar 16 bits de entropía a cambio de leer 2 palabras más).
+> 4. **Iter. 4 del plan post-auditoría** — god-handlers + god-services (olores P+C, Z, QQ) — ~2 días, siguiente bloque estructural natural si se prioriza arquitectura.
 >
 > ---
 >
