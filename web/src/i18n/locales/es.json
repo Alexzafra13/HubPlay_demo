@@ -1533,6 +1533,18 @@
     "errorApply": "No se ha podido aplicar el match. Inténtalo de nuevo.",
     "candidatesAriaLabel": "Candidatos TMDb"
   },
+  "channelLogo": {
+    "title": "Logo del canal",
+    "previewHint": "Vista previa con el logo actualmente activo (override admin o tvg-logo del M3U).",
+    "urlLabel": "URL externa",
+    "applyURL": "Aplicar URL",
+    "uploadLabel": "Subir imagen (PNG, JPG, WebP — máx 10MB)",
+    "chooseFile": "Elegir archivo",
+    "reset": "Restaurar logo del M3U",
+    "done": "Hecho",
+    "or": "O",
+    "errorGeneric": "No se ha podido aplicar el cambio. Comprueba que el archivo es una imagen válida o que la URL devuelve un PNG/JPG/WebP."
+  },
   "imageManager": {
     "title": "Gestionar imágenes",
     "poster": "Poster",
@@ -1608,6 +1620,7 @@
       "counts": "{{visible}} de {{total}} · {{hidden}} ocultos",
       "selectAll": "Seleccionar todo lo visible",
       "selectRow": "Seleccionar {{name}}",
+      "editLogo": "Cambiar logo de {{name}}",
       "bulkAriaLabel": "Acciones en bloque",
       "bulkSelected": "{{count}} seleccionados",
       "bulkHide": "Ocultar",

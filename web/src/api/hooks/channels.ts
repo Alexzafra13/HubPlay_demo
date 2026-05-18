@@ -285,3 +285,43 @@ export function useRecordChannelWatch() {
     // them silently — the rail just won't update this time around.
   });
 }
+
+// ── Channel logo overrides (admin) ───────────────────────────────
+// Admin reemplaza el tvg-logo del M3U con una URL externa o un
+// archivo subido. Tras el éxito invalidamos los listados de canales
+// para que el thumbnail del editor refresque, pero NO bumpeamos la
+// URL del proxy (es estable, /api/v1/channels/{id}/logo) — el browser
+// la re-pide naturalmente cuando la React Query refetch dispara un
+// re-render con la misma URL.
+
+export function useSetChannelLogoURL() {
+  const qc = useQueryClient();
+  return useMutation<void, Error, { channelId: string; logoURL: string }>({
+    mutationFn: ({ channelId, logoURL }) =>
+      api.setChannelLogoURL(channelId, logoURL),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["channels"] });
+    },
+  });
+}
+
+export function useUploadChannelLogo() {
+  const qc = useQueryClient();
+  return useMutation<void, Error, { channelId: string; file: File }>({
+    mutationFn: ({ channelId, file }) =>
+      api.uploadChannelLogo(channelId, file),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["channels"] });
+    },
+  });
+}
+
+export function useClearChannelLogo() {
+  const qc = useQueryClient();
+  return useMutation<void, Error, string>({
+    mutationFn: (channelId) => api.clearChannelLogo(channelId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["channels"] });
+    },
+  });
+}

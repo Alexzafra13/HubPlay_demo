@@ -43,6 +43,7 @@ type Service struct {
 	libraryChannelOrder *db.LibraryChannelOrderRepository
 	epgSources          *db.LibraryEPGSourceRepository
 	overrides           *db.ChannelOverrideRepository
+	logoOverrides       *db.ChannelLogoOverrideRepository
 	watchHistory        *db.ChannelWatchHistoryRepository
 	logger              *slog.Logger
 
@@ -120,6 +121,7 @@ func NewService(
 	libraryChannelOrder *db.LibraryChannelOrderRepository,
 	epgSources *db.LibraryEPGSourceRepository,
 	overrides *db.ChannelOverrideRepository,
+	logoOverrides *db.ChannelLogoOverrideRepository,
 	watchHistory *db.ChannelWatchHistoryRepository,
 	logger *slog.Logger,
 ) *Service {
@@ -133,6 +135,7 @@ func NewService(
 		libraryChannelOrder: libraryChannelOrder,
 		epgSources:          epgSources,
 		overrides:           overrides,
+		logoOverrides:       logoOverrides,
 		watchHistory:        watchHistory,
 		logger:          logger.With("module", "iptv"),
 		refreshes:       make(map[string]bool),

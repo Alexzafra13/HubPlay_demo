@@ -80,6 +80,23 @@ type ChannelOverride struct {
 	UpdatedAt time.Time
 }
 
+// ChannelLogoOverride es el override del logo de un canal — URL externa
+// pegada por el admin o archivo subido a local. Una de las dos está
+// poblada, nunca ambas (el handler limpia la otra al escribir). Clave
+// (library_id, stream_url) mismo patrón que ChannelOverride para que el
+// override sobreviva el siguiente re-import del M3U.
+type ChannelLogoOverride struct {
+	LibraryID string
+	StreamURL string
+	// URL externa absoluta. Vacía cuando el override es un archivo subido.
+	LogoURL string
+	// Basename del archivo bajo <imageDir>/channel-logos/. Vacío cuando el
+	// override es una URL externa.
+	LogoFile  string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
 // EPGProgram es un único programa del EPG con sus tiempos UTC y
 // metadatos opcionales. `IconURL` vacío = sin icono específico (el
 // frontend cae a un placeholder).

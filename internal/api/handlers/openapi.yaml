@@ -2056,6 +2056,7 @@ paths:
         cache so a strict `img-src 'self'` CSP can stay locked. 404 when
         the upstream is unfetchable; the client should fall back to the
         deterministic initials placeholder shipped in the channel DTO.
+        Resolution cascade: admin upload → admin URL override → M3U `tvg-logo`.
       responses:
         "200":
           description: Logo
@@ -2063,6 +2064,52 @@ paths:
             image/png:  { schema: { type: string, format: binary } }
             image/jpeg: { schema: { type: string, format: binary } }
             image/webp: { schema: { type: string, format: binary } }
+    put:
+      tags: [admin, livetv]
+      summary: 'Admin: set a custom external URL as the channel logo'
+      description: |
+        Replaces the M3U `tvg-logo` for this channel with the supplied
+        URL. Survives the next M3U refresh (override row keyed by
+        `(library_id, stream_url)`). Clears any previously uploaded
+        file from local storage. Admin-only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [logo_url]
+              properties:
+                logo_url: { type: string, format: uri }
+      responses:
+        "200":
+          description: Override saved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      channel_id: { type: string }
+                      logo_url:   { type: string }
+        "400": { description: Missing or invalid `logo_url` }
+        "401": { description: Unauthorized }
+        "403": { description: Forbidden — admin required }
+        "404": { description: Channel not found }
+    delete:
+      tags: [admin, livetv]
+      summary: 'Admin: clear the channel logo override'
+      description: |
+        Removes the URL or uploaded-file override for this channel.
+        The next GET falls back to the M3U `tvg-logo`. Idempotent —
+        clearing an absent override is a no-op. Admin-only.
+      responses:
+        "204": { description: Override cleared }
+        "401": { description: Unauthorized }
+        "403": { description: Forbidden — admin required }
+        "404": { description: Channel not found }
 
   /channels/{channelId}/schedule:
     parameters:

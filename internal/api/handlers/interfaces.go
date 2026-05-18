@@ -226,6 +226,17 @@ type IPTVService interface {
 	ReplaceLibraryChannelOrder(ctx context.Context, libraryID string, orderedIDs []string, hiddenIDs map[string]bool) error
 	SetLibraryChannelVisibility(ctx context.Context, libraryID, channelID string, hidden bool) error
 	ResetLibraryChannelOrder(ctx context.Context, libraryID string) error
+
+	// Admin channel logo overrides — manual replacement of the M3U
+	// tvg-logo with either an external URL or an uploaded file.
+	// Survives M3U refreshes (keyed by stream_url, not channel UUID).
+	// SetChannelLogoFile + ClearChannelLogo return the previous
+	// file basename so the handler can delete the orphaned file
+	// from imageDir without a second round trip.
+	SetChannelLogoURL(ctx context.Context, channelID, logoURL string) error
+	SetChannelLogoFile(ctx context.Context, channelID, basename string) (previousFile string, err error)
+	ClearChannelLogo(ctx context.Context, channelID string) (previousFile string, err error)
+	GetChannelLogoOverride(ctx context.Context, channelID string) (*iptvmodel.ChannelLogoOverride, error)
 }
 
 // IPTVStreamProxyService defines IPTV proxy operations needed by handlers.

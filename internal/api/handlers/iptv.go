@@ -39,6 +39,11 @@ type IPTVHandler struct {
 	proxy     IPTVStreamProxyService
 	transmux  IPTVTransmuxer  // optional; nil disables MPEG-TS → HLS transmux
 	logoCache *iptv.LogoCache // optional; nil falls back to upstream URLs in DTO
+	// imageDir es la raíz donde se sirven imágenes (pósters, fanart,
+	// logos de canal subidos). El subdir "channel-logos/" se crea bajo
+	// este path para las subidas de logos del admin. Vacío deshabilita
+	// el flujo de subida (los endpoints devuelven 503).
+	imageDir  string
 	libraries LibraryRepository
 	access    LibraryAccessService
 	logger    *slog.Logger
@@ -56,12 +61,13 @@ type IPTVHandler struct {
 //     Functional but wasteful (N×404 per grid paint); the cache is
 //     constructed best-effort in main.go and only ends up nil if the
 //     cache directory can't be created.
-func NewIPTVHandler(svc IPTVService, proxy IPTVStreamProxyService, transmux IPTVTransmuxer, logoCache *iptv.LogoCache, libraries LibraryRepository, access LibraryAccessService, logger *slog.Logger) *IPTVHandler {
+func NewIPTVHandler(svc IPTVService, proxy IPTVStreamProxyService, transmux IPTVTransmuxer, logoCache *iptv.LogoCache, imageDir string, libraries LibraryRepository, access LibraryAccessService, logger *slog.Logger) *IPTVHandler {
 	return &IPTVHandler{
 		svc:       svc,
 		proxy:     proxy,
 		transmux:  transmux,
 		logoCache: logoCache,
+		imageDir:  imageDir,
 		libraries: libraries,
 		access:    access,
 		logger:    logger.With("module", "iptv-handler"),

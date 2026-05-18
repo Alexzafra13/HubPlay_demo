@@ -881,7 +881,7 @@ func NewRouter(deps Dependencies) http.Handler {
 					// falls back to the raw passthrough proxy, which is
 					// the correct degraded-but-functional behaviour for
 					// HLS-only deployments without ffmpeg.
-					iptvHandler := handlers.NewIPTVHandler(deps.IPTV, deps.IPTVProxy, deps.IPTVTransmux, deps.IPTVLogoCache, deps.LibraryRepo, deps.Libraries, deps.Logger)
+					iptvHandler := handlers.NewIPTVHandler(deps.IPTV, deps.IPTVProxy, deps.IPTVTransmux, deps.IPTVLogoCache, fedImageDir, deps.LibraryRepo, deps.Libraries, deps.Logger)
 
 					r.Route("/libraries/{id}/channels", func(r chi.Router) {
 						r.Get("/", iptvHandler.ListChannels)
@@ -976,6 +976,14 @@ func NewRouter(deps Dependencies) http.Handler {
 						r.Post("/channels/{channelId}/disable", iptvHandler.DisableChannel)
 						r.Post("/channels/{channelId}/enable", iptvHandler.EnableChannel)
 						r.Patch("/channels/{channelId}", iptvHandler.PatchChannel)
+						// Override del logo del canal (URL externa o
+						// archivo subido). El GET del logo (proxy) NO
+						// está aquí — vive arriba con los demás endpoints
+						// de canal porque cualquier usuario autenticado lo
+						// pide; sólo escritura es admin-only.
+						r.Put("/channels/{channelId}/logo", iptvHandler.SetChannelLogo)
+						r.Post("/channels/{channelId}/logo/upload", iptvHandler.UploadChannelLogo)
+						r.Delete("/channels/{channelId}/logo", iptvHandler.ClearChannelLogo)
 						// Admin channel curation. Reorder, hide, restore
 						// M3U order. Hidden HERE is a hard constraint:
 						// downstream the per-user overlay can only hide

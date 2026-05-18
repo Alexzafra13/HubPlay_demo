@@ -1101,6 +1101,38 @@ export class ApiClient {
    *  because the personalisation panel must NOT see admin-hidden
    *  channels (hard constraint), but the curation panel must in
    *  order to un-hide them. */
+  // Admin: override del logo de un canal con una URL externa. Survives
+  // M3U refreshes (override row keyed por stream_url). Limpia cualquier
+  // archivo subido anteriormente del disco.
+  async setChannelLogoURL(channelId: string, logoURL: string): Promise<void> {
+    await this.request<{ channel_id: string; logo_url: string }>(
+      "PUT",
+      `/channels/${encodeURIComponent(channelId)}/logo`,
+      { body: { logo_url: logoURL } },
+    );
+  }
+
+  // Admin: sube un archivo de logo. Multipart con campo `file`. Reusa
+  // las mismas validaciones del upload de pósters (MaxUploadBytes 10MB,
+  // MIME sniffeado de los bytes, decompression-bomb guard).
+  async uploadChannelLogo(channelId: string, file: File): Promise<void> {
+    const fd = new FormData();
+    fd.append("file", file);
+    await this.request<{ channel_id: string; logo_file: string }>(
+      "POST",
+      `/channels/${encodeURIComponent(channelId)}/logo/upload`,
+      { body: fd },
+    );
+  }
+
+  // Admin: borra el override de logo. Idempotente.
+  async clearChannelLogo(channelId: string): Promise<void> {
+    await this.request<void>(
+      "DELETE",
+      `/channels/${encodeURIComponent(channelId)}/logo`,
+    );
+  }
+
   async getChannelsForLibraryAdmin(libraryId: string): Promise<Channel[]> {
     return this.request<Channel[]>(
       "GET",

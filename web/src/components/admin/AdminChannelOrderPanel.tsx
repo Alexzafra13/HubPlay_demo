@@ -21,6 +21,7 @@ import {
   ChannelOrderEditor,
   type DraftChannel,
 } from "@/components/livetv/ChannelOrderEditor";
+import { ChannelLogoEditor } from "./ChannelLogoEditor";
 
 interface Props {
   libraryId: string;
@@ -36,6 +37,10 @@ export function AdminChannelOrderPanel({ libraryId }: Props) {
   const [seededFor, setSeededFor] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
+  // Logo override modal state. `editingLogoFor` guarda el id del canal
+  // que el operador acaba de clickar; el modal se renderiza con su
+  // metadata (nombre, iniciales, colores). null = modal cerrado.
+  const [editingLogoFor, setEditingLogoFor] = useState<string | null>(null);
 
   // Render-time seed (same trick LiveTvCustomize uses): re-seed
   // only when libraryId actually changes, not on every channelsQ.data
@@ -50,6 +55,10 @@ export function AdminChannelOrderPanel({ libraryId }: Props) {
         name: c.name,
         group_name: c.group_name,
         hidden: !!c.hidden,
+        logo_url: c.logo_url ?? undefined,
+        logo_initials: c.logo_initials,
+        logo_bg: c.logo_bg,
+        logo_fg: c.logo_fg,
       })),
     );
     setDirty(false);
@@ -136,24 +145,43 @@ export function AdminChannelOrderPanel({ libraryId }: Props) {
     [t],
   );
 
+  const editingChannel = editingLogoFor
+    ? draft.find((c) => c.id === editingLogoFor)
+    : null;
+
   return (
-    <ChannelOrderEditor
-      draft={draft}
-      loading={channelsQ.isLoading}
-      onReorder={reorder}
-      onToggleHidden={toggleHidden}
-      onBulkSetHidden={bulkSetHidden}
-      onSave={handleSave}
-      onReset={handleReset}
-      dirty={dirty}
-      savePending={replaceOrder.isPending}
-      resetPending={resetOrder.isPending}
-      savedMessage={savedMessage}
-      hint={hint}
-      saveLabelKey="admin.livetv.channelOrder.save"
-      resetLabelKey="admin.livetv.channelOrder.reset"
-      emptyTitleKey="admin.livetv.channelOrder.empty"
-      emptyHintKey="admin.livetv.channelOrder.emptyHint"
-    />
+    <>
+      <ChannelOrderEditor
+        draft={draft}
+        loading={channelsQ.isLoading}
+        onReorder={reorder}
+        onToggleHidden={toggleHidden}
+        onBulkSetHidden={bulkSetHidden}
+        onEditLogo={setEditingLogoFor}
+        onSave={handleSave}
+        onReset={handleReset}
+        dirty={dirty}
+        savePending={replaceOrder.isPending}
+        resetPending={resetOrder.isPending}
+        savedMessage={savedMessage}
+        hint={hint}
+        saveLabelKey="admin.livetv.channelOrder.save"
+        resetLabelKey="admin.livetv.channelOrder.reset"
+        emptyTitleKey="admin.livetv.channelOrder.empty"
+        emptyHintKey="admin.livetv.channelOrder.emptyHint"
+      />
+      {editingChannel && (
+        <ChannelLogoEditor
+          isOpen={true}
+          onClose={() => setEditingLogoFor(null)}
+          channelID={editingChannel.id}
+          channelName={editingChannel.name}
+          proxyLogoURL={editingChannel.logo_url ?? `/api/v1/channels/${encodeURIComponent(editingChannel.id)}/logo`}
+          initials={editingChannel.logo_initials ?? "?"}
+          initialsBg={editingChannel.logo_bg ?? "#1f2937"}
+          initialsFg={editingChannel.logo_fg ?? "#ffffff"}
+        />
+      )}
+    </>
   );
 }
