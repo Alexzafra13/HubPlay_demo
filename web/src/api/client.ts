@@ -1529,6 +1529,63 @@ export class ApiClient {
     return this.request("POST", `/admin/peers/${id}/refresh`);
   }
 
+  // ─── Pairing requests "Steam-style" (migration 048) ──────────────────
+
+  /** Lista todas las pairing requests (incoming + outgoing). */
+  async listPairingRequests(): Promise<
+    import("./types").FederationPendingRequest[]
+  > {
+    return this.request("GET", "/admin/peers/pairing-requests");
+  }
+
+  /** Envia una pairing request al servidor en `baseURL`. */
+  async sendPairingRequest(
+    baseURL: string,
+  ): Promise<import("./types").FederationPendingRequest> {
+    return this.request("POST", "/admin/peers/pairing-requests/send", {
+      body: { base_url: baseURL },
+    });
+  }
+
+  /** Acepta una incoming pending. Devuelve el Peer ya paired. */
+  async acceptPairingRequest(
+    id: string,
+  ): Promise<import("./types").FederationPeer> {
+    return this.request("POST", `/admin/peers/pairing-requests/${id}/accept`);
+  }
+
+  /** Rechaza una incoming pending. */
+  async declinePairingRequest(id: string): Promise<void> {
+    return this.request<void>(
+      "POST",
+      `/admin/peers/pairing-requests/${id}/decline`,
+    );
+  }
+
+  /** Cancela una outgoing pending. Notifica best-effort al remoto. */
+  async cancelPairingRequest(id: string): Promise<void> {
+    return this.request<void>("DELETE", `/admin/peers/pairing-requests/${id}`);
+  }
+
+  // ─── Notifications inbox (migration 049) ─────────────────────────────
+
+  /** Lista las ultimas N notificaciones del usuario + unread_count. */
+  async listMyNotifications(): Promise<
+    import("./types").NotificationsResponse
+  > {
+    return this.request("GET", "/me/notifications");
+  }
+
+  /** Marca una notificacion como leida. Idempotente. */
+  async markNotificationRead(id: string): Promise<void> {
+    return this.request<void>("POST", `/me/notifications/${id}/read`);
+  }
+
+  /** Marca todas las del usuario como leidas. Devuelve marked_count. */
+  async markAllNotificationsRead(): Promise<{ marked_count: number }> {
+    return this.request("POST", "/me/notifications/read-all");
+  }
+
   async probePeer(baseURL: string): Promise<import("./types").FederationServerInfo> {
     return this.request("POST", "/admin/peers/probe", { body: { base_url: baseURL } });
   }

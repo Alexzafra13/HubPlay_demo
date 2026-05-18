@@ -14,6 +14,7 @@ import {
 import { useMe, useProfiles } from "@/api/hooks";
 import { useAuthStore } from "@/store/auth";
 import { UserAvatar } from "@/components/common";
+import { NotificationsBell } from "@/components/notifications/NotificationsBell";
 import { BrandWordmark } from "./BrandWordmark";
 import { SearchBar } from "./SearchBar";
 import { MainNav } from "./MainNav";
@@ -110,6 +111,12 @@ export function TopBar({ onMobileMenuClick }: TopBarProps) {
           /movies and /series already use). See FILTER_ROUTES inside
           SearchBar for the routing list. */}
       <SearchBar />
+
+      {/* Notifications bell — el componente devuelve null cuando no
+          hay notificaciones (leidas + no leidas en cero). Posicion
+          deliberada justo a la izquierda del avatar para que se lea
+          como parte del cluster de "tu perfil" en la derecha. */}
+      <NotificationsBell />
 
       {/* User avatar dropdown — single home for all personal/admin actions */}
       <UserAvatarMenu
