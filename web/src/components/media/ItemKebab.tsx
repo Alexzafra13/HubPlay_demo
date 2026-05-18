@@ -1,38 +1,62 @@
 // ItemKebab — menú flotante de acciones admin sobre un item, pensado
 // para vivir en cualquier card de poster (PosterCard, LandscapeCard,
-// search results). Click → dropdown con Identify / Editar metadatos.
-// La selección abre el modal correspondiente vía useItemActions, que
-// los hostea de forma centralizada en App root.
+// search results). Click → dropdown con todas las acciones que el
+// detalle ofrece, sin tener que abrir la página.
 //
-// Visibilidad: sólo para admins, y sólo para tipos identificables
-// (movie / series). Episodios / temporadas no aplican.
+// Acciones (filtradas por tipo y rol):
+//   - Identificar          (admin, movie/series)
+//   - Editar metadatos     (admin, movie/series)
+//   - Cambiar imágenes     (admin, todos los tipos — incluye seasons y
+//                           episodes, que tienen su propio póster +
+//                           fondo editable)
+//   - Refrescar metadatos  (admin, todos los tipos)
+//   - Información del archivo (todos los usuarios, sólo cuando hay
+//                              detailHref + tipo con media_streams)
+//
+// Visibilidad: el kebab entero se oculta cuando no hay ninguna acción
+// aplicable (usuario no admin sobre canal IPTV, etc.).
 //
 // Comportamiento dentro de un <Link>: stopPropagation + preventDefault
-// en cada handler para que el click en el kebab no dispare la navegación
-// del card.
+// en cada handler para que el click en el kebab no dispare la
+// navegación del card.
 
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { MoreVertical, Search, Edit3 } from "lucide-react";
+import { useNavigate } from "react-router";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+  MoreVertical,
+  Search,
+  Edit3,
+  ImageIcon as ImagePicto,
+  RefreshCw,
+  Info,
+} from "lucide-react";
 import { useItemActions } from "@/store/itemActions";
 import { useAuthStore } from "@/store/auth";
+import { queryKeys } from "@/api/hooks";
 
 interface Props {
   itemID: string;
   itemType: string;
+  /** Path al detalle del item — usado para "Información del archivo"
+   *  cuando el kebab está en un poster fuera de la página detail.
+   *  Cuando lo omitimos, esa entrada del menú no se renderiza. */
+  detailHref?: string;
 }
 
-export function ItemKebab({ itemID, itemType }: Props) {
+export function ItemKebab({ itemID, itemType, detailHref }: Props) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const isAdmin = useAuthStore((s) => s.user?.role === "admin");
   const openIdentify = useItemActions((s) => s.openIdentify);
   const openEditor = useItemActions((s) => s.openEditor);
+  const openImages = useItemActions((s) => s.openImages);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
-  // Cierra al click fuera y al Escape — mismo patrón que KebabMenu
-  // (no lo reusamos directo porque ése es para grids admin y vive
-  // con estilo distinto; queremos un kebab flotante sobre el poster).
+  // Cierra al click fuera y al Escape — mismo patrón que KebabMenu.
   useEffect(() => {
     if (!open) return;
     const handleDown = (e: MouseEvent) => {
@@ -51,13 +75,22 @@ export function ItemKebab({ itemID, itemType }: Props) {
     };
   }, [open]);
 
-  if (!isAdmin) return null;
-  if (itemType !== "movie" && itemType !== "series") return null;
-
   const stopAll = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
   };
+
+  // Determina qué acciones aplican. Si no hay ninguna, devolvemos null
+  // — el botón del kebab desaparece y la card queda limpia.
+  const canIdentify = isAdmin && (itemType === "movie" || itemType === "series");
+  const canEditImages = isAdmin; // todos los tipos incluyen seasons + episodes
+  const canRefresh = isAdmin;
+  const canShowFileInfo =
+    !!detailHref && (itemType === "movie" || itemType === "episode");
+
+  if (!canIdentify && !canEditImages && !canRefresh && !canShowFileInfo) {
+    return null;
+  }
 
   return (
     <div ref={ref} className="relative" onClick={stopAll}>
@@ -78,36 +111,93 @@ export function ItemKebab({ itemID, itemType }: Props) {
       {open && (
         <div
           role="menu"
-          className="absolute right-0 top-full z-20 mt-1 min-w-[180px] overflow-hidden rounded-[--radius-md] border border-border bg-bg-card shadow-lg"
+          className="absolute right-0 top-full z-20 mt-1 min-w-[200px] overflow-hidden rounded-[--radius-md] border border-border bg-bg-card shadow-lg"
         >
-          <button
-            type="button"
-            role="menuitem"
-            onClick={(e) => {
-              stopAll(e);
-              openIdentify(itemID);
-              setOpen(false);
-            }}
-            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-text hover:bg-bg-elevated"
-          >
-            <Search className="h-3.5 w-3.5" />
-            {t("identify.menuLabel", { defaultValue: "Identificar…" })}
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={(e) => {
-              stopAll(e);
-              openEditor(itemID);
-              setOpen(false);
-            }}
-            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-text hover:bg-bg-elevated"
-          >
-            <Edit3 className="h-3.5 w-3.5" />
-            {t("metadataEditor.menuLabel", { defaultValue: "Editar metadatos…" })}
-          </button>
+          {canEditImages && (
+            <MenuButton
+              icon={<ImagePicto className="h-3.5 w-3.5" />}
+              label={t("itemKebab.images", { defaultValue: "Cambiar imágenes…" })}
+              onClick={(e) => {
+                stopAll(e);
+                openImages(itemID);
+                setOpen(false);
+              }}
+            />
+          )}
+          {canIdentify && (
+            <MenuButton
+              icon={<Search className="h-3.5 w-3.5" />}
+              label={t("identify.menuLabel", { defaultValue: "Identificar…" })}
+              onClick={(e) => {
+                stopAll(e);
+                openIdentify(itemID);
+                setOpen(false);
+              }}
+            />
+          )}
+          {canIdentify && (
+            <MenuButton
+              icon={<Edit3 className="h-3.5 w-3.5" />}
+              label={t("metadataEditor.menuLabel", {
+                defaultValue: "Editar metadatos…",
+              })}
+              onClick={(e) => {
+                stopAll(e);
+                openEditor(itemID);
+                setOpen(false);
+              }}
+            />
+          )}
+          {canRefresh && (
+            <MenuButton
+              icon={<RefreshCw className="h-3.5 w-3.5" />}
+              label={t("itemDetail.refreshMetadata", {
+                defaultValue: "Actualizar metadatos",
+              })}
+              onClick={(e) => {
+                stopAll(e);
+                queryClient.invalidateQueries({
+                  queryKey: queryKeys.item(itemID),
+                });
+                setOpen(false);
+              }}
+            />
+          )}
+          {canShowFileInfo && detailHref && (
+            <MenuButton
+              icon={<Info className="h-3.5 w-3.5" />}
+              label={t("itemKebab.fileInfo", {
+                defaultValue: "Información del archivo",
+              })}
+              onClick={(e) => {
+                stopAll(e);
+                navigate(`${detailHref}#media-info-section`);
+                setOpen(false);
+              }}
+            />
+          )}
         </div>
       )}
     </div>
+  );
+}
+
+interface MenuButtonProps {
+  icon: React.ReactNode;
+  label: string;
+  onClick: (e: React.MouseEvent) => void;
+}
+
+function MenuButton({ icon, label, onClick }: MenuButtonProps) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-text hover:bg-bg-elevated"
+    >
+      {icon}
+      {label}
+    </button>
   );
 }

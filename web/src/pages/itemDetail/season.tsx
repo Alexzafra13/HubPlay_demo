@@ -18,6 +18,7 @@ import { useTranslation } from "react-i18next";
 import { useItemChildren } from "@/api/hooks";
 import { Spinner } from "@/components/common";
 import { EpisodeCard, EpisodeRow } from "@/components/media";
+import { ItemKebab } from "@/components/media/ItemKebab";
 import type { MediaItem } from "@/api/types";
 import { thumb } from "@/utils/imageUrl";
 
@@ -134,6 +135,16 @@ function SeasonCard({ season }: SeasonCardProps) {
             {rating.toFixed(1)}
           </div>
         )}
+
+        {/* Admin kebab — sólo "Cambiar imágenes" y "Actualizar
+            metadatos" aplican aquí. Identify/Edit no se renderizan
+            (filtro interno del ItemKebab) porque las seasons heredan
+            metadata del padre. La parte clave para el operador es
+            poder cambiar póster + fondo de cada temporada en su grid,
+            sin entrar al detalle. */}
+        <div className="absolute top-2 right-2 z-10">
+          <ItemKebab itemID={season.id} itemType="season" />
+        </div>
       </div>
 
       <div className="flex flex-col gap-0.5 px-0.5">
