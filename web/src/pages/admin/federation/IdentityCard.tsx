@@ -1,11 +1,31 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { ChangeEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { Check, Fingerprint, Pencil, Volume2, X } from "lucide-react";
+import {
+  Check,
+  Fingerprint,
+  ImagePlus,
+  Loader2,
+  Pencil,
+  Trash2,
+  Volume2,
+  X,
+} from "lucide-react";
 import type { FederationServerInfo } from "@/api/types";
-import { useUpdateServerIdentity } from "@/api/hooks/federation";
+import {
+  useDeleteServerAvatar,
+  useUpdateServerIdentity,
+  useUploadServerAvatar,
+} from "@/api/hooks/federation";
 import { Button, Input, UserAvatar } from "@/components/common";
 import { AVATAR_PALETTE } from "@/utils/avatarColor";
 import { CopyButton, Label } from "./_shared";
+
+// Mismos límites que el backend (internal/federation/identity_avatar.go)
+// y que el avatar de usuario. El navegador rechaza pronto y el admin
+// no tiene que esperar al round-trip.
+const AVATAR_ACCEPT_MIME = "image/jpeg,image/png,image/webp";
+const AVATAR_MAX_BYTES = 5 * 1024 * 1024;
 
 // IdentityCard renders this server's federation identity. La huella
 // es el ancla de confianza del protocolo, así que sigue siendo el
@@ -138,15 +158,27 @@ function IdentityEditor({
 }) {
   const { t } = useTranslation();
   const update = useUpdateServerIdentity();
+  const uploadAvatar = useUploadServerAvatar();
+  const deleteAvatar = useDeleteServerAvatar();
   const [name, setName] = useState(info.name);
   const [color, setColor] = useState(info.avatar_color ?? "");
   const [error, setError] = useState<string | null>(null);
+  // Preview en vivo del fichero recién elegido. Se crea con
+  // FileReader como data: URL para no depender del backend (todavía
+  // no subido). null = sin selección activa.
+  const [pendingPreview, setPendingPreview] = useState<string | null>(null);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     setName(info.name);
     setColor(info.avatar_color ?? "");
     setError(null);
-  }, [info.name, info.avatar_color]);
+    setPendingPreview(null);
+    setPendingFile(null);
+    setAvatarError(null);
+  }, [info.name, info.avatar_color, info.avatar_image_url]);
 
   const previewUser = {
     username: info.name,
@@ -157,6 +189,73 @@ function IdentityEditor({
 
   const dirty = name.trim() !== info.name || color !== (info.avatar_color ?? "");
   const saving = update.isPending;
+  const uploading = uploadAvatar.isPending;
+  const deleting = deleteAvatar.isPending;
+  const hasUploadedAvatar = !!info.avatar_image_url;
+
+  function onFilePicked(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    // Reset siempre, así re-elegir el mismo fichero vuelve a
+    // disparar onChange (los <input type=file> no lo hacen por
+    // defecto si seleccionas el mismo).
+    e.target.value = "";
+    if (!file) return;
+
+    if (!AVATAR_ACCEPT_MIME.split(",").includes(file.type)) {
+      setAvatarError(
+        t("admin.federation.identity.avatarUnsupportedType", {
+          defaultValue: "Formato no admitido — usa JPEG, PNG o WebP.",
+        }),
+      );
+      return;
+    }
+    if (file.size > AVATAR_MAX_BYTES) {
+      setAvatarError(
+        t("admin.federation.identity.avatarTooLarge", {
+          defaultValue: "Imagen demasiado grande (máx 5 MB).",
+        }),
+      );
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setPendingFile(file);
+      setPendingPreview(typeof reader.result === "string" ? reader.result : null);
+      setAvatarError(null);
+    };
+    reader.onerror = () =>
+      setAvatarError(
+        t("admin.federation.identity.avatarReadError", {
+          defaultValue: "No se pudo leer el fichero.",
+        }),
+      );
+    reader.readAsDataURL(file);
+  }
+
+  function handleUpload() {
+    if (!pendingFile) return;
+    setAvatarError(null);
+    uploadAvatar.mutate(pendingFile, {
+      onSuccess: () => {
+        setPendingFile(null);
+        setPendingPreview(null);
+      },
+      onError: (err) => setAvatarError(err.message),
+    });
+  }
+
+  function handleCancelPending() {
+    setPendingFile(null);
+    setPendingPreview(null);
+    setAvatarError(null);
+  }
+
+  function handleRemoveAvatar() {
+    setAvatarError(null);
+    deleteAvatar.mutate(undefined, {
+      onError: (err) => setAvatarError(err.message),
+    });
+  }
 
   function handleSave() {
     const trimmed = name.trim();
@@ -181,7 +280,13 @@ function IdentityEditor({
   return (
     <div className="border-b border-border-subtle pb-5">
       <div className="flex items-start gap-4">
-        <UserAvatar user={previewUser} size="xl" />
+        {/* src= sólo cuando hay un fichero pendiente; si no,
+            UserAvatar usa lo persistido o iniciales. */}
+        <UserAvatar
+          user={previewUser}
+          size="xl"
+          src={pendingPreview ?? undefined}
+        />
         <div className="flex-1 space-y-3">
           <Input
             label={t("admin.federation.identity.nameLabel", {
@@ -192,6 +297,96 @@ function IdentityEditor({
             maxLength={80}
             placeholder={info.name}
           />
+          {/* Foto del servidor: mismo flujo que AccountPanel pero
+              compacto e inline con el editor del nombre/color. */}
+          <div>
+            <Label>
+              {t("admin.federation.identity.photoLabel", {
+                defaultValue: "Foto del servidor",
+              })}
+            </Label>
+            <p className="mt-1 text-[11px] leading-relaxed text-text-muted">
+              {t("admin.federation.identity.photoHint", {
+                defaultValue:
+                  "Visible para peers cuando hagan probe. JPEG, PNG o WebP, máx 5 MB.",
+              })}
+            </p>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept={AVATAR_ACCEPT_MIME}
+              onChange={onFilePicked}
+              className="hidden"
+            />
+            <div className="mt-2 flex flex-wrap gap-2">
+              {!pendingFile && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploading || deleting}
+                >
+                  <ImagePlus className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                  {hasUploadedAvatar
+                    ? t("admin.federation.identity.changePhoto", {
+                        defaultValue: "Cambiar foto",
+                      })
+                    : t("admin.federation.identity.uploadPhoto", {
+                        defaultValue: "Subir foto",
+                      })}
+                </Button>
+              )}
+              {pendingFile && (
+                <>
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={handleUpload}
+                    isLoading={uploading}
+                    disabled={uploading}
+                  >
+                    {t("admin.federation.identity.confirmUpload", {
+                      defaultValue: "Subir esta foto",
+                    })}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={handleCancelPending}
+                    disabled={uploading}
+                  >
+                    {t("common.cancel", { defaultValue: "Cancelar" })}
+                  </Button>
+                </>
+              )}
+              {hasUploadedAvatar && !pendingFile && (
+                <Button
+                  type="button"
+                  variant="danger"
+                  size="sm"
+                  onClick={handleRemoveAvatar}
+                  disabled={uploading || deleting}
+                >
+                  {deleting ? (
+                    <Loader2
+                      className="mr-1.5 h-3.5 w-3.5 animate-spin"
+                      aria-hidden
+                    />
+                  ) : (
+                    <Trash2 className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                  )}
+                  {t("admin.federation.identity.removePhoto", {
+                    defaultValue: "Quitar foto",
+                  })}
+                </Button>
+              )}
+            </div>
+            {avatarError && (
+              <p className="mt-2 text-[11px] text-error">{avatarError}</p>
+            )}
+          </div>
           <div>
             <div className="flex items-baseline justify-between gap-3">
               <Label>
@@ -242,6 +437,14 @@ function IdentityEditor({
                 );
               })}
             </div>
+            {hasUploadedAvatar && (
+              <p className="mt-2 text-[11px] text-text-muted">
+                {t("admin.federation.identity.colorBehindPhoto", {
+                  defaultValue:
+                    "Con foto cargada el color queda detrás como reserva si la imagen no se puede mostrar.",
+                })}
+              </p>
+            )}
           </div>
         </div>
       </div>

@@ -108,6 +108,8 @@ var outOfScopeExact = map[string]string{
 	"GET /admin/peers":                    "federation pairing admin",
 	"GET /admin/peers/identity":           "federation pairing admin",
 	"PUT /admin/peers/identity":           "federation pairing admin",
+	"POST /admin/peers/identity/avatar":   "federation pairing admin",
+	"DELETE /admin/peers/identity/avatar": "federation pairing admin",
 	"POST /admin/peers/probe":             "federation pairing admin",
 	"POST /admin/peers/accept":            "federation pairing admin",
 	"GET /admin/peers/{id}":               "federation pairing admin",
@@ -200,6 +202,7 @@ var outOfScopeExact = map[string]string{
 
 	// ── Peer-to-peer federation (server-to-server) ────────────────────
 	"GET /federation/info":                                      "p2p server info",
+	"GET /federation/identity/avatar":                            "p2p server avatar bytes",
 	"POST /peer/handshake":                                      "p2p pairing",
 	"GET /peer/ping":                                            "p2p liveness",
 	"GET /peer/libraries":                                       "p2p catalog",

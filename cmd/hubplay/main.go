@@ -401,6 +401,11 @@ func run(configPath string) error {
 	federationCfg := federation.DefaultConfig()
 	federationCfg.AdvertisedURL = cfg.Server.BaseURL
 	federationCfg.Version = version
+	// Comparte el avatarsDir con users: namespace disjunto (los
+	// nombres del servidor llevan prefijo "server-", los de usuario
+	// son UUIDs), pero el mismo volumen docker. Vacío = uploads
+	// del servidor deshabilitados (handler 503).
+	federationCfg.AvatarsDir = avatarsDir
 	if _, err := federation.LoadOrCreate(ctx, federationRepo, clk, "HubPlay Server"); err != nil {
 		logger.Error("federation: identity load/create failed; federation disabled", "err", err)
 	}

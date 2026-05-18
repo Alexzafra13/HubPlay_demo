@@ -114,6 +114,13 @@ type Config struct {
 	PeerRequestsPerMinute int
 	// PeerBurst is the bucket ceiling above the steady rate. Defaults to 30.
 	PeerBurst int
+	// AvatarsDir es el directorio donde se persiste la foto del
+	// servidor (subida por el admin desde el panel federation).
+	// Compartido con el avatarsDir de usuarios para reutilizar
+	// volumen docker; los nombres tienen prefijo "server-" para
+	// no colisionar con los UUIDs de usuario. Vacío = uploads
+	// del servidor deshabilitados (handler 503).
+	AvatarsDir string
 }
 
 // DefaultConfig returns sensible defaults for new deployments. Caller
@@ -163,6 +170,10 @@ type Manager struct {
 	// when the goroutine has returned, so Close can wait on it.
 	sweepCancel context.CancelFunc
 	sweepDone   chan struct{}
+
+	// avatarsDir donde se guarda la foto del servidor. Vacío =
+	// uploads deshabilitados; el handler responde 503.
+	avatarsDir string
 }
 
 // streamSweepInterval is how often we scan streamSessions for entries
@@ -194,6 +205,7 @@ func NewManager(ctx context.Context, cfg Config, repo Repo, clk clock.Clock, log
 		nonces:         newNonceCache(clk),
 		metrics:        noopMetricsSink{},
 		streamSessions: make(map[string]*PeerStreamSession),
+		avatarsDir:     cfg.AvatarsDir,
 	}
 	if err := m.refreshPeerCache(ctx); err != nil {
 		// Tear down the auditor we just spawned so we don't leak the
