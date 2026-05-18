@@ -1,6 +1,58 @@
 # Estado del proyecto
 
-> 🎬 **Sesión 2026-05-17 (rama `claude/heuristic-wilson-d7afa4`, Sesiones M.2–M.8 — Iteraciones 2 + 3 completas + sweep de perf con benchmarks dual SQLite/Postgres)** — 13 commits sobre `main` cerrando 3 iteraciones del plan post-auditoría 2026-05-14: Iter. 2 (sub-paquetes db/), sweep perf oportunista (índices + paginación + WriteTimeout + benchmarks baseline) e Iter. 3 (Opción B — tipos del dominio a `internal/{auth,iptv,library}/model/`). 8 commits ya mergeados a main vía PRs #288/293/294/295/296; 5 ahead en la rama (Iter. 3 + perf doc Postgres + cleanup).
+> 🎬 **Sesión 2026-05-18 (rama `claude/friendly-wilson-dfdb3f`) — UI polish (avatar fallback + searchbar) + identidad de servidor editable (nombre + color)**. PR #301 ya mergeado a main; branch tiene 2 commits ahead (`e81c8bf` searchbar revert + `da54aee` server identity) pendientes de mergear en un PR aparte que el user abre manualmente.
+>
+> ## 🛠️ UI polish (commits `f7ec3da` + `e81c8bf`, PR #301 mergeado a main)
+>
+> Tres mejoras de plantilla:
+> - **UserAvatar fallback a iniciales**: si la `<img>` falla (URL rota, fichero borrado, cache-buster contra versión inexistente) cae a iniciales del display name sobre el color en vez de dejar el círculo de color vacío. `onError` + flag `broken` reseteado por `useEffect` cuando cambia la URL.
+> - **TopBar sin dot verde**: eliminado el indicador "online" de `var(--color-success)` sobre el avatar del header — no representaba estado real, solo ruido visual.
+> - **SearchBar pulido**: expandido pasa a `rounded-full` con `ring-1 ring-white/10` sutil. Primer intento añadió glow accent turquesa en focus que el user rechazó ("no le pongas los bordes cian esos") → revertido en commit follow-up. Ancho expandido 280 → 320 px. "Esc" pasa de texto pelado a `<kbd>` consistente con el del dropdown.
+>
+> ## 🛠️ Federation: identidad de servidor editable (commit `da54aee`, branch `claude/friendly-wilson-dfdb3f`, PR pendiente)
+>
+> El admin puede personalizar cómo aparece su servidor frente a peers desde el panel Federation: nombre visible + color de la misma paleta que los avatares de usuario. El color va en `/federation/info` y los peers que hagan probe ven el avatar con el branding configurado.
+>
+> **Backend**:
+> - Migración 046 sqlite + postgres: `avatar_color` + `avatar_image_path` en `server_identity` (el image_path queda dormido — el uploader es para PR siguiente).
+> - `federation.Identity` + `IdentityStore.UpdateProfile/SetAvatarPath` con cache copy-on-write.
+> - `storage/identity.go` lee/escribe los dos nuevos campos via sqlc queries `UpdateServerIdentityProfile` + `SetServerAvatarPath`.
+> - `ServerInfo` + `infoWire` emiten `avatar_color` + `avatar_image_url`; la URL se compone con `AdvertisedURL` + endpoint serving para que el peer lo pinte directo.
+> - Handler `PUT /api/v1/admin/peers/identity` con validación nombre (1-80 chars) + color hex `#rrggbb` o vacío.
+> - `Manager.UpdateIdentityProfile/SetIdentityAvatarPath` wrapping del store.
+>
+> **Frontend**:
+> - `FederationServerInfo` types + `useUpdateServerIdentity` hook + `api.updateServerIdentity`.
+> - `IdentityCard` reescrito: cabecera con avatar (color + iniciales) + botón "Editar" → editor inline con `UserAvatar` preview en vivo + `Input` nombre + picker `AVATAR_PALETTE`.
+> - `AcceptSection`: cabecera de la card de verificación muestra ahora el avatar del peer probado con su color/foto.
+>
+> **Tests**: verdes en `internal/api`, `internal/federation`, `internal/federation/storage`, `internal/api/handlers`. Tsc verde.
+>
+> **Gotcha del repo (re-confirmado)**: sqlc v1.31.1 corrompe `*.sql.go` cuando los `.sql` source tienen chars no-ASCII (—, →) en comentarios. El bug ya estaba documentado en `internal/db/queries/collections.sql:26`. **Acción**: NO usar em-dash en comentarios de queries `.sql`; si pasa, editar el generated code a mano. Esta sesión perdió ~30 min ahí antes de identificarlo.
+>
+> ## ⏸️ Pendiente para próxima sesión (continuación del bloque "servidores")
+>
+> El user pidió originalmente "todo: nombre + color + foto + pulido pairing" pero recortamos a name+color cuando se vio el alcance real. Queda:
+>
+> 1. **Foto del servidor** (~1-2 h):
+>    - Helper de disco análogo a `user.Service.UploadAvatar` pero para single-instance `server-<rand8>.jpg`.
+>    - Handlers admin: `POST /api/v1/admin/peers/identity/avatar` (multipart) + `DELETE` para limpiarla.
+>    - Handler público (sin auth): `GET /api/v1/federation/identity/avatar` — sirve los bytes para que peers los pinten.
+>    - Wire en `router.go`.
+>    - Frontend: extender `IdentityCard` editor con botones "Cambiar/Quitar foto" y preview en vivo via `FileReader` (mirror exacto de `AccountPanel`).
+>    - La columna `avatar_image_path` en DB ya existe y el camino `Manager.SetIdentityAvatarPath` ya está cableado — solo falta el HTTP + storage + UI.
+>
+> 2. **Polish visual de Invite/Accept/PeersTable más allá del avatar** (~30-60 min):
+>    - El user dijo *"tema generar invitación lo de la huella y todo, o aceptar invitación, que quede un poco más bonito"*. Solo se tocó la cabecera de AcceptSection (avatar). InviteSection y la card de huella + chips de palabras siguen como estaban.
+>
+> 3. **Branding del remoto en PeersTable** (~1-2 h, requiere migration):
+>    - Los peers ya emparejados muestran círculo derivado del UUID. Habría que persistir `avatar_color`/`avatar_image_url` del remoto en `federation_peers` (nueva migration) y refetchar `/identity` periódicamente para no servir branding stale.
+>
+> ---
+>
+> ## 🎬 Sesión previa 2026-05-17 (rama `claude/heuristic-wilson-d7afa4`, Sesiones M.2–M.8 — Iteraciones 2 + 3 completas + sweep de perf con benchmarks dual SQLite/Postgres)
+>
+> 13 commits sobre `main` cerrando 3 iteraciones del plan post-auditoría 2026-05-14: Iter. 2 (sub-paquetes db/), sweep perf oportunista (índices + paginación + WriteTimeout + benchmarks baseline) e Iter. 3 (Opción B — tipos del dominio a `internal/{auth,iptv,library}/model/`). 8 commits ya mergeados a main vía PRs #288/293/294/295/296; 5 ahead en la rama (Iter. 3 + perf doc Postgres + cleanup).
 >
 > ## 🛠️ Sesión M.2 — Iter. 2 sub-bloque B+J: `federation_repository.go` → `internal/federation/storage/` (commit `dc988ba`, mergeado PR #288)
 >
