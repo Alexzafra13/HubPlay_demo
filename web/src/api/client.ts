@@ -1498,6 +1498,23 @@ export class ApiClient {
     return this.request("PUT", "/admin/peers/identity", { body: input });
   }
 
+  /** Sube una imagen como foto del servidor (visible para peers
+   *  cuando hagan probe). Mismo formato que uploadMyAvatar: el
+   *  navegador pone el boundary multipart automáticamente cuando
+   *  el body es un FormData. */
+  async uploadServerAvatar(
+    file: File,
+  ): Promise<import("./types").FederationServerInfo> {
+    const form = new FormData();
+    form.append("avatar", file);
+    return this.request("POST", "/admin/peers/identity/avatar", { body: form });
+  }
+
+  /** Quita la foto del servidor. Idempotente: 204 también si no había. */
+  async deleteServerAvatar(): Promise<void> {
+    return this.request<void>("DELETE", "/admin/peers/identity/avatar");
+  }
+
   async listPeers(): Promise<import("./types").FederationPeer[]> {
     return this.request("GET", "/admin/peers");
   }

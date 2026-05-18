@@ -278,6 +278,10 @@ func NewRouter(deps Dependencies) http.Handler {
 		if deps.Federation != nil {
 			pubFed := handlers.NewFederationPublicHandler(deps.Federation, deps.Logger)
 			r.Get("/federation/info", pubFed.ServerInfo)
+			// Foto del servidor — público a propósito: los peers la
+			// consumen sin firmar JWT desde el avatar_image_url que
+			// reciben en /federation/info.
+			r.Get("/federation/identity/avatar", pubFed.ServeIdentityAvatar)
 			r.Post("/peer/handshake", pubFed.Handshake)
 
 			r.Group(func(r chi.Router) {
@@ -518,6 +522,11 @@ func NewRouter(deps Dependencies) http.Handler {
 						r.Get("/", adminFed.ListPeers)
 						r.Get("/identity", adminFed.GetServerIdentity)
 						r.Put("/identity", adminFed.UpdateServerIdentity)
+						// Foto del servidor: upload multipart + delete
+						// idempotente. El serve público vive bajo
+						// /federation/identity/avatar (sin auth).
+						r.Post("/identity/avatar", adminFed.UploadServerAvatar)
+						r.Delete("/identity/avatar", adminFed.DeleteServerAvatar)
 						r.Post("/probe", adminFed.ProbePeer)
 						r.Post("/accept", adminFed.AcceptInvite)
 						r.Get("/{id}", adminFed.GetPeer)

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -87,6 +88,59 @@ func (h *FederationAdminHandler) UpdateServerIdentity(w http.ResponseWriter, r *
 		info.AdvertisedURL = deriveURLFromRequest(r)
 	}
 	respondJSON(w, http.StatusOK, map[string]any{"data": infoToWire(info)})
+}
+
+// UploadServerAvatar acepta una imagen multipart en POST
+// /admin/peers/identity/avatar. Misma validación que el avatar de
+// usuario (5 MB, JPEG/PNG/WebP, decompression-bomb guard), normaliza
+// a 256×256 JPEG y persiste el path en la identidad del servidor.
+// Devuelve el ServerInfo actualizado para que la UI repinte sin
+// re-llamar a GET /identity.
+func (h *FederationAdminHandler) UploadServerAvatar(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, federation.IdentityAvatarMaxBytes+1024)
+	if err := r.ParseMultipartForm(federation.IdentityAvatarMaxBytes + 1024); err != nil {
+		respondError(w, r, http.StatusRequestEntityTooLarge, "PAYLOAD_TOO_LARGE",
+			"avatar exceeds the maximum allowed size")
+		return
+	}
+	file, header, err := r.FormFile("avatar")
+	if err != nil {
+		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST",
+			"multipart form must include an 'avatar' file part")
+		return
+	}
+	defer file.Close() //nolint:errcheck
+
+	data, err := io.ReadAll(io.LimitReader(file, federation.IdentityAvatarMaxBytes+1))
+	if err != nil {
+		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "could not read uploaded file")
+		return
+	}
+	contentType := header.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = http.DetectContentType(data)
+	}
+
+	if _, err := h.mgr.UploadIdentityAvatar(r.Context(), data, contentType); err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	info := h.mgr.PublicServerInfo()
+	if info.AdvertisedURL == "" {
+		info.AdvertisedURL = deriveURLFromRequest(r)
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"data": infoToWire(info)})
+}
+
+// DeleteServerAvatar borra la foto del servidor. Idempotente:
+// 204 incluso si no había avatar previo. Tras esto los peers verán
+// el avatar derivado del color (o el automático) en su próximo probe.
+func (h *FederationAdminHandler) DeleteServerAvatar(w http.ResponseWriter, r *http.Request) {
+	if err := h.mgr.DeleteIdentityAvatar(r.Context()); err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // isValidHexColor acepta solo el formato #rrggbb (7 chars, hex). Suficiente

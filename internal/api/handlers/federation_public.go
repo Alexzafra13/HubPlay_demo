@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"os"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
@@ -49,6 +50,51 @@ func (h *FederationPublicHandler) ServerInfo(w http.ResponseWriter, r *http.Requ
 		info.AdvertisedURL = deriveURLFromRequest(r)
 	}
 	respondJSON(w, http.StatusOK, infoToWire(info))
+}
+
+// ServeIdentityAvatar sirve los bytes del avatar del servidor.
+// Público a propósito: cualquier peer que recibe nuestro
+// /federation/info ve el campo avatar_image_url apuntando aquí, y
+// tiene que poder pintarlo sin firmar JWT (la foto no es secreta
+// — es lo mismo que se ve en las apps del admin remoto).
+//
+// 404 si no hay avatar subido — el peer cae al fallback de
+// color/iniciales que ya tiene en su frontend.
+func (h *FederationPublicHandler) ServeIdentityAvatar(w http.ResponseWriter, r *http.Request) {
+	relName := h.mgr.IdentityAvatarPath()
+	if relName == "" {
+		respondError(w, r, http.StatusNotFound, "NOT_FOUND", "server has no avatar")
+		return
+	}
+	full, err := h.mgr.IdentityAvatarFilePath(relName)
+	if err != nil {
+		respondError(w, r, http.StatusInternalServerError, "AVATAR_PATH", err.Error())
+		return
+	}
+	f, err := os.Open(full)
+	if err != nil {
+		if os.IsNotExist(err) {
+			respondError(w, r, http.StatusNotFound, "NOT_FOUND", "avatar file missing")
+			return
+		}
+		respondError(w, r, http.StatusInternalServerError, "AVATAR_READ", err.Error())
+		return
+	}
+	defer f.Close() //nolint:errcheck
+
+	stat, err := f.Stat()
+	if err != nil {
+		respondError(w, r, http.StatusInternalServerError, "AVATAR_STAT", err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "image/jpeg")
+	// Cache 5 min en cliente; cuando el admin re-sube, el path
+	// (relName) cambia y los peers refetchean igualmente porque
+	// la URL publicada en /federation/info incluye el nombre
+	// nuevo como query param. ServeContent también pone ETag /
+	// Last-Modified para revalidación.
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	http.ServeContent(w, r, relName, stat.ModTime(), f)
 }
 
 // ListLibraries returns the libraries we've shared with the calling

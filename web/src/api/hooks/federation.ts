@@ -51,6 +51,33 @@ export function useUpdateServerIdentity() {
   });
 }
 
+// useUploadServerAvatar sube la foto del servidor. El backend
+// devuelve el ServerInfo entero (mismo shape que update), así que
+// pisamos directamente la cache de useServerIdentity para que la
+// UI repinte sin round-trip extra.
+export function useUploadServerAvatar() {
+  const queryClient = useQueryClient();
+  return useMutation<FederationServerInfo, Error, File>({
+    mutationFn: (file) => api.uploadServerAvatar(file),
+    onSuccess: (info) => {
+      queryClient.setQueryData(queryKeys.federationIdentity, info);
+    },
+  });
+}
+
+// useDeleteServerAvatar quita la foto. Idempotente. Invalidamos
+// la cache de identity para que IdentityCard refresque el avatar
+// (que ahora cae al color/iniciales).
+export function useDeleteServerAvatar() {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, void>({
+    mutationFn: () => api.deleteServerAvatar(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.federationIdentity });
+    },
+  });
+}
+
 export function usePeers() {
   return useQuery<FederationPeer[]>({
     queryKey: queryKeys.federationPeers,
