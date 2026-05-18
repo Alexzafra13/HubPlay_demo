@@ -106,19 +106,42 @@ describe("LiveTvCustomize", () => {
     expect(rows[2]).toHaveTextContent("Gamma");
   });
 
-  it("reorders rows when the move-down button is pressed", async () => {
+  it("reorders rows via the position-jump input", async () => {
     render(wrap(<LiveTvCustomize />));
 
     const rows = await screen.findAllByTestId("customize-row");
-    const moveDown = within(rows[0]).getByRole("button", {
-      name: /move down|bajar/i,
+    // Move Alpha (row 0) to position 2.
+    fireEvent.click(
+      within(rows[0]).getByRole("button", {
+        name: /cambiar posición de alpha|change position of alpha/i,
+      }),
+    );
+    const input = within(rows[0]).getByRole("spinbutton", {
+      name: /mover a posición|move to position/i,
     });
-    fireEvent.click(moveDown);
+    fireEvent.change(input, { target: { value: "2" } });
+    fireEvent.keyDown(input, { key: "Enter" });
 
     const reordered = screen.getAllByTestId("customize-row");
     expect(reordered[0]).toHaveTextContent("Beta");
     expect(reordered[1]).toHaveTextContent("Alpha");
     expect(reordered[2]).toHaveTextContent("Gamma");
+  });
+
+  it("moves a channel to the top with the move-to-top button", async () => {
+    render(wrap(<LiveTvCustomize />));
+
+    const rows = await screen.findAllByTestId("customize-row");
+    fireEvent.click(
+      within(rows[2]).getByRole("button", {
+        name: /move to top|mover al principio/i,
+      }),
+    );
+
+    const reordered = screen.getAllByTestId("customize-row");
+    expect(reordered[0]).toHaveTextContent("Gamma");
+    expect(reordered[1]).toHaveTextContent("Alpha");
+    expect(reordered[2]).toHaveTextContent("Beta");
   });
 
   it("submits the current order + hidden set on save", async () => {
@@ -131,11 +154,8 @@ describe("LiveTvCustomize", () => {
     );
     // Move Gamma to the top.
     fireEvent.click(
-      within(rows[2]).getByRole("button", { name: /move up|subir/i }),
-    );
-    fireEvent.click(
-      within(screen.getAllByTestId("customize-row")[1]).getByRole("button", {
-        name: /move up|subir/i,
+      within(rows[2]).getByRole("button", {
+        name: /move to top|mover al principio/i,
       }),
     );
 

@@ -31,6 +31,7 @@ import {
   useReplaceChannelOrder,
   useResetChannelOrder,
 } from "@/api/hooks";
+import { arrayMove } from "@dnd-kit/sortable";
 import { EmptyState } from "@/components/common";
 import { ChannelOrderEditor } from "@/components/livetv/ChannelOrderEditor";
 
@@ -94,15 +95,12 @@ export default function LiveTvCustomize() {
     }
   }
 
-  const move = useCallback((index: number, delta: number) => {
+  const reorder = useCallback((from: number, to: number) => {
     setDraft((d) => {
-      const target = index + delta;
-      if (target < 0 || target >= d.length) return d;
-      const next = d.slice();
-      const tmp = next[index];
-      next[index] = next[target];
-      next[target] = tmp;
-      return next;
+      if (from === to || from < 0 || to < 0 || from >= d.length || to >= d.length) {
+        return d;
+      }
+      return arrayMove(d, from, to);
     });
     setDirty(true);
     setSavedMessage(null);
@@ -114,6 +112,16 @@ export default function LiveTvCustomize() {
       next[index] = { ...next[index], hidden: !next[index].hidden };
       return next;
     });
+    setDirty(true);
+    setSavedMessage(null);
+  }, []);
+
+  const bulkSetHidden = useCallback((ids: string[], hidden: boolean) => {
+    if (ids.length === 0) return;
+    const idSet = new Set(ids);
+    setDraft((d) =>
+      d.map((c) => (idSet.has(c.id) ? { ...c, hidden } : c)),
+    );
     setDirty(true);
     setSavedMessage(null);
   }, []);
@@ -208,8 +216,9 @@ export default function LiveTvCustomize() {
       <ChannelOrderEditor
         draft={draft}
         loading={channelsQ.isLoading}
-        onMove={move}
+        onReorder={reorder}
         onToggleHidden={toggleHidden}
+        onBulkSetHidden={bulkSetHidden}
         onSave={handleSave}
         onReset={handleReset}
         dirty={dirty}
