@@ -1,5 +1,43 @@
 # Estado del proyecto
 
+> 🎬 **Sesión 2026-05-18 bis (rama `claude/review-project-progress-snmmo`) — cierre del bloque "servidor": foto del servidor subible + servida pública para peers**. Completa los tres pendientes #1 del status anterior (foto, helper disco, handlers admin+público, UI editor). Branch ahead de main, PR pendiente que el user abre manualmente.
+>
+> ## 🛠️ Foto del servidor (federation identity avatar)
+>
+> Cierre del bloque que dejamos a medias el 2026-05-18 (sesión `friendly-wilson-dfdb3f`). El admin ya podía editar nombre + color del servidor desde el panel Federation; ahora puede también subir/quitar una foto que los peers ven cuando hacen probe a `/federation/info`.
+>
+> **Backend**:
+> - `federation.Config.AvatarsDir` + campo `avatarsDir` en `Manager`. Cableado en `main.go` reutilizando el mismo dir que usuarios (namespace disjunto: usuarios = UUID, servidor = prefijo `server-`).
+> - Nuevo `internal/federation/identity_avatar.go` con `UploadIdentityAvatar / DeleteIdentityAvatar / IdentityAvatarFilePath`. Mirror exacto de `user.Service.UploadAvatar`: validación tamaño (5 MB) + MIME (jpeg/png/webp) + decompression-bomb guard (`imaging.EnforceMaxPixels`) + `imaging.GenerateAvatar` (center-crop 256×256 JPEG q85) + `imaging.AtomicWriteFile` + best-effort cleanup del anterior + cache-buster aleatorio en el nombre (`server-<rand8>.jpg`).
+> - 2 handlers admin nuevos en `federation_admin.go`: `UploadServerAvatar` (multipart, devuelve `ServerInfo` actualizado para repintar sin round-trip extra) + `DeleteServerAvatar` (idempotente 204).
+> - 1 handler público en `federation_public.go`: `ServeIdentityAvatar` (sirve bytes con `Cache-Control: public, max-age=300` + ETag/Last-Modified vía `http.ServeContent`). Público a propósito — los peers consumen el `avatar_image_url` que publicamos en `/federation/info` sin firmar JWT.
+> - 3 rutas nuevas en `router.go`: `GET /federation/identity/avatar`, `POST /admin/peers/identity/avatar`, `DELETE /admin/peers/identity/avatar`.
+> - OpenAPI drift gate: añadidas las 3 rutas a `outOfScopeExact` (federation pairing admin + p2p server avatar bytes — siguen la política existente del namespace).
+>
+> **Frontend**:
+> - `api.uploadServerAvatar(file)` + `api.deleteServerAvatar()` en `client.ts` (multipart con `FormData`, el navegador pone el boundary).
+> - Hooks `useUploadServerAvatar()` + `useDeleteServerAvatar()` en `api/hooks/federation.ts`. Upload pisa la cache de `useServerIdentity` con el `ServerInfo` que devuelve el handler; delete invalida.
+> - `IdentityCard.tsx` → `IdentityEditor` extendido con bloque "Foto del servidor" entre el input de nombre y el color picker: input file oculto + `FileReader` para preview en vivo + botones "Subir foto / Cambiar foto / Subir esta foto / Cancelar / Quitar foto" (mismo patrón compacto que `AccountPanel` de usuario). El `<UserAvatar src={pendingPreview ?? undefined}>` pinta la preview sin tocar la cache. Validación cliente espejo de la del backend (5 MB, MIMEs).
+>
+> **Tests**:
+> - `internal/federation/identity_avatar_test.go` con 4 tests (1 round-trip + 1 disabled + 1 idempotent + 1 path-traversal con 5 sub-casos). Reusa `inMemoryFedRepo` del middleware_test.
+> - Suite Go entera verde (1 flake preexistente en `iptv.TestTransmuxManager_Touch_KeepsSessionAlive` no relacionado — pasa en aislado).
+> - `pnpm tsc -b` verde, **555/555 vitest verde**.
+>
+> ## ⏸️ Pendiente para próxima sesión (continuación del bloque "servidores" + nuevas piezas)
+>
+> El pendiente #1 del status anterior queda **cerrado**. Quedan:
+>
+> 1. **Polish visual de Invite/Accept/PeersTable más allá del avatar** (~30-60 min) — sigue intacto.
+>
+> 2. **Branding del remoto en PeersTable** (~1-2 h, requiere migration) — persistir `avatar_color`/`avatar_image_url` del peer en `federation_peers` + refetch periódico de `/identity`.
+>
+> 3. **QR scanner en `/link` para emparejar dispositivos** (~2-3h) — el flujo Device Code RFC 8628 ya está al 95 % (TV en `/pair` muestra QR + SSE espera aprobación; móvil en `/link` teclea el código). Falta sólo añadir librería tipo `html5-qrcode` o `@yudiel/react-qr-scanner` + modal de cámara en `/link` para que el móvil escanee el QR de la TV en vez de teclear. Sin cambios backend.
+>
+> 4. *(Opcional)* Subir las palabras fonéticas de 4 a 6 si nos preocupa MITM en canal de voz (ganar 16 bits de entropía a cambio de leer 2 palabras más).
+>
+> ---
+>
 > 🎬 **Sesión 2026-05-18 (rama `claude/friendly-wilson-dfdb3f`) — UI polish (avatar fallback + searchbar) + identidad de servidor editable (nombre + color)**. PR #301 ya mergeado a main; branch tiene 2 commits ahead (`e81c8bf` searchbar revert + `da54aee` server identity) pendientes de mergear en un PR aparte que el user abre manualmente.
 >
 > ## 🛠️ UI polish (commits `f7ec3da` + `e81c8bf`, PR #301 mergeado a main)
