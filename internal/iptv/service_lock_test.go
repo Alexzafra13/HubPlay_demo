@@ -48,7 +48,7 @@ func TestService_RefreshEPG_SecondCallIsRejectedWhileFirstRuns(t *testing.T) {
 	}
 
 	svc := NewService(repos.Channels, repos.EPGPrograms, repos.Libraries,
-		repos.ChannelFavorites, repos.ChannelOrder, repos.LibraryChannelOrder, repos.LibraryEPGSources, repos.ChannelOverrides,
+		repos.ChannelFavorites, repos.ChannelOrder, repos.LibraryChannelOrder, repos.LibraryEPGSources, repos.ChannelOverrides, repos.ChannelLogoOverrides,
 		repos.ChannelWatchHistory,
 		slog.New(slog.NewTextHandler(new(discard), nil)))
 

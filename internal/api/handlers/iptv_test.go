@@ -532,6 +532,32 @@ func (s *iptvFakeService) ResetLibraryChannelOrder(_ context.Context, _ string) 
 	return nil
 }
 
+// ── Channel logo overrides (admin) ────────────────────────────────
+// Stubs simples: los tests existentes no ejercitan el flujo de logo
+// override (eso lo cubre iptv_channel_logo_test.go). Los stubs sólo
+// satisfacen la interfaz para que el compile-time check pase.
+
+func (s *iptvFakeService) GetChannelEPGIcon(_ context.Context, _ string) (string, error) {
+	return "", nil
+}
+
+func (s *iptvFakeService) RefreshLogosFromIPTVOrg(_ context.Context, _ string) (int, error) {
+	return 0, nil
+}
+
+func (s *iptvFakeService) SetChannelLogoURL(_ context.Context, _ string, _ string) error {
+	return nil
+}
+func (s *iptvFakeService) SetChannelLogoFile(_ context.Context, _ string, _ string) (string, error) {
+	return "", nil
+}
+func (s *iptvFakeService) ClearChannelLogo(_ context.Context, _ string) (string, error) {
+	return "", nil
+}
+func (s *iptvFakeService) GetChannelLogoOverride(_ context.Context, _ string) (*iptvmodel.ChannelLogoOverride, error) {
+	return nil, nil
+}
+
 func (s *iptvFakeService) ReorderEPGSources(_ context.Context, libraryID string, orderedIDs []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -675,7 +701,7 @@ func newIPTVTestEnv(t *testing.T) *iptvTestEnv {
 	// transmux is nil in tests: the existing tests cover passthrough
 	// proxy / refresh / EPG / favorites paths only. Transmux-specific
 	// behaviour is covered by transmux_test.go in the iptv package.
-	env.handler = NewIPTVHandler(env.svc, env.proxy, nil, nil, env.libraries, env.access, testutil.NopLogger())
+	env.handler = NewIPTVHandler(env.svc, env.proxy, nil, nil, "", env.libraries, env.access, testutil.NopLogger())
 
 	r := chi.NewRouter()
 	r.Route("/api/v1", func(r chi.Router) {

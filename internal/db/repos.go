@@ -22,6 +22,7 @@ type Repositories struct {
 	EPGPrograms        *EPGProgramRepository
 	LibraryEPGSources  *LibraryEPGSourceRepository
 	ChannelOverrides   *ChannelOverrideRepository
+	ChannelLogoOverrides *ChannelLogoOverrideRepository
 	IPTVSchedules      *IPTVScheduleRepository
 	UserPreferences    *UserPreferenceRepository
 	Providers          *ProviderRepository
@@ -36,6 +37,7 @@ type Repositories struct {
 	Studios            *StudioRepository
 	Collections        *CollectionRepository
 	EpisodeSegments    *EpisodeSegmentRepository
+	ItemMetadataLocks  *ItemMetadataLockRepository
 }
 
 // NewRepositories creates all repositories from a database connection.
@@ -65,6 +67,7 @@ func NewRepositories(driver string, database *sql.DB) *Repositories {
 		EPGPrograms:        NewEPGProgramRepository(driver, database),
 		LibraryEPGSources:  NewLibraryEPGSourceRepository(driver, database),
 		ChannelOverrides:   NewChannelOverrideRepository(driver, database),
+		ChannelLogoOverrides: NewChannelLogoOverrideRepository(driver, database),
 		IPTVSchedules:      NewIPTVScheduleRepository(driver, database),
 		UserPreferences:    NewUserPreferenceRepository(driver, database),
 		Providers:          NewProviderRepository(driver, database),
@@ -79,5 +82,6 @@ func NewRepositories(driver string, database *sql.DB) *Repositories {
 		Studios:            NewStudioRepository(driver, database),
 		Collections:        NewCollectionRepository(driver, database),
 		EpisodeSegments:    NewEpisodeSegmentRepository(driver, database),
+		ItemMetadataLocks:  NewItemMetadataLockRepository(driver, database),
 	}
 }

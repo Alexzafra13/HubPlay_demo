@@ -82,7 +82,7 @@ func newTestScanner(t *testing.T) (*Scanner, *db.ItemRepository, *db.MediaStream
 	// path covered by the new TestScanLibrary_PersistsChapters test
 	// without spinning up another fixture.
 	chaptersRepo := db.NewChapterRepository(testutil.Driver(), database)
-	s := New(itemRepo, streamRepo, metaRepo, extIDRepo, imageRepo, chaptersRepo, db.NewPeopleRepository(testutil.Driver(), database), db.NewItemValueRepository(testutil.Driver(), database), db.NewStudioRepository(testutil.Driver(), database), db.NewCollectionRepository(testutil.Driver(), database), nil, prober, bus, "", nil, slog.Default())
+	s := New(itemRepo, streamRepo, metaRepo, extIDRepo, imageRepo, chaptersRepo, db.NewPeopleRepository(testutil.Driver(), database), db.NewItemValueRepository(testutil.Driver(), database), db.NewStudioRepository(testutil.Driver(), database), db.NewCollectionRepository(testutil.Driver(), database), nil, nil, prober, bus, "", nil, slog.Default())
 	return s, itemRepo, streamRepo
 }
 
@@ -589,7 +589,7 @@ func TestFetchAndStoreImages_PersistsLocalPathNotURL(t *testing.T) {
 		db.NewItemValueRepository(testutil.Driver(), database),
 		db.NewStudioRepository(testutil.Driver(), database),
 		db.NewCollectionRepository(testutil.Driver(), database),
-		nil /* providers â€” overridden below */, prober, bus,
+		nil /* metaLocks */, nil /* providers — overridden below */, prober, bus,
 		imageDir, pm, slog.Default())
 
 	// Inject the stub. The constructor took *provider.Manager (nil
@@ -738,7 +738,7 @@ func TestEnrichEpisode_PersistsOverviewAndStill(t *testing.T) {
 		db.NewItemValueRepository(testutil.Driver(), database),
 		db.NewStudioRepository(testutil.Driver(), database),
 		db.NewCollectionRepository(testutil.Driver(), database),
-		nil, prober, bus, imageDir, pm, slog.Default())
+		nil, nil, prober, bus, imageDir, pm, slog.Default())
 
 	rating := 8.4
 	premiere, _ := time.Parse("2006-01-02", "2025-03-04")
@@ -843,7 +843,7 @@ func TestEnrichEpisode_NoTMDbIDOnSeries(t *testing.T) {
 		db.NewItemValueRepository(testutil.Driver(), database),
 		db.NewStudioRepository(testutil.Driver(), database),
 		db.NewCollectionRepository(testutil.Driver(), database),
-		nil, prober, bus, t.TempDir(), pathmap.New(t.TempDir()), slog.Default())
+		nil, nil, prober, bus, t.TempDir(), pathmap.New(t.TempDir()), slog.Default())
 
 	called := false
 	s.providers = &stubProviderTrackingCalls{onEpisode: func() { called = true }}
@@ -935,7 +935,7 @@ func TestEnrichSeason_PersistsMetadataAndPoster(t *testing.T) {
 		db.NewItemValueRepository(testutil.Driver(), database),
 		db.NewStudioRepository(testutil.Driver(), database),
 		db.NewCollectionRepository(testutil.Driver(), database),
-		nil, prober, bus, imageDir, pm, slog.Default())
+		nil, nil, prober, bus, imageDir, pm, slog.Default())
 
 	rating := 8.7
 	premiere, _ := time.Parse("2006-01-02", "2025-03-04")
@@ -1041,7 +1041,7 @@ func TestFetchAndStoreImages_SkippedWhenImageDirEmpty(t *testing.T) {
 		db.NewItemValueRepository(testutil.Driver(), database),
 		db.NewStudioRepository(testutil.Driver(), database),
 		db.NewCollectionRepository(testutil.Driver(), database),
-		nil, prober, bus, "", nil, slog.Default())
+		nil, nil, prober, bus, "", nil, slog.Default())
 	s.providers = stub
 
 	// Re-run a minimal version of the enrichItemWithMetadata image

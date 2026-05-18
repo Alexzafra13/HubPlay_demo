@@ -318,12 +318,43 @@ func (h *IPTVHandler) ChannelLogo(w http.ResponseWriter, r *http.Request) {
 		h.denyForbidden(w, r)
 		return
 	}
-	if ch.LogoURL == "" {
+
+	// Cascada de resolución del logo:
+	//   1. override.logo_file → fichero local subido por el admin
+	//   2. override.logo_url  → URL externa pegada por el admin
+	//   3. channels.logo_url  → tvg-logo del M3U
+	// El override desempata frente al M3U porque la intención del admin
+	// (rematch manual) siempre gana.
+	effectiveLogoURL := ch.LogoURL
+	if override, oErr := h.svc.GetChannelLogoOverride(r.Context(), channelID); oErr == nil && override != nil {
+		if override.LogoFile != "" && h.imageDir != "" {
+			// Local file route: bypass el cache remoto, sirve directo
+			// desde disco. El basename ya fue validado en el upload
+			// (IsSafePathSegment) así que no puede ser path traversal.
+			h.serveLocalChannelLogo(w, r, channelID, override.LogoFile)
+			return
+		}
+		if override.LogoURL != "" {
+			effectiveLogoURL = override.LogoURL
+		}
+	}
+
+	// Último fallback antes del 404: el icono que el EPG haya recolectado
+	// para programas de este canal (XMLTV `<icon>`). Cubre el caso muy
+	// común de feeds M3U sin tvg-logo cuyo XMLTV asociado sí trae
+	// iconos por canal. Mismo cache remoto + proxy CSP que el resto.
+	if effectiveLogoURL == "" {
+		if epgIcon, eErr := h.svc.GetChannelEPGIcon(r.Context(), channelID); eErr == nil && epgIcon != "" {
+			effectiveLogoURL = epgIcon
+		}
+	}
+
+	if effectiveLogoURL == "" {
 		respondError(w, r, http.StatusNotFound, "NO_LOGO", "channel has no upstream logo")
 		return
 	}
 
-	path, err := h.logoCache.Path(r.Context(), ch.LogoURL)
+	path, err := h.logoCache.Path(r.Context(), effectiveLogoURL)
 	if err != nil {
 		// Fetch / SSRF / decode failures collapse to 404 by design:
 		// the frontend's onError fallback is the right answer for

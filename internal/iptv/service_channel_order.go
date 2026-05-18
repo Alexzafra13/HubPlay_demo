@@ -14,9 +14,64 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 
 	iptvmodel "hubplay/internal/iptv/model"
 )
+
+// applyLogoOverlay swaps Channel.LogoURL with the admin's custom logo
+// when there's a matching row in `channel_logo_overrides`. Two cases:
+//
+//   - logo_file set → the local-file route: emit a sentinel URL that
+//     the frontend keeps untouched (the channel-logo proxy resolves
+//     it to disk on GET). Format: "hubplay-local:channel-logos/<file>".
+//   - logo_url set  → the external-URL route: replace LogoURL with the
+//     admin's URL, which the existing logo cache will fetch on demand
+//     just like any other upstream image.
+//
+// Pure: the input slice is not mutated; a fresh slice is returned.
+// O(N + M) where N = channels, M = overrides. Channels without a
+// matching override row are passed through with their M3U LogoURL.
+//
+// Indexed by (library_id, stream_url) — same key the override table
+// uses — so the M3U refresh (which regenerates channel UUIDs) doesn't
+// orphan overrides on the next import. Two channels sharing a stream
+// URL inside the same library would also share the override; in
+// practice the M3U importer dedupes by stream URL so this is moot.
+func applyLogoOverlay(channels []*iptvmodel.Channel, overrides []iptvmodel.ChannelLogoOverride) []*iptvmodel.Channel {
+	if len(overrides) == 0 {
+		return channels
+	}
+	byURL := make(map[string]iptvmodel.ChannelLogoOverride, len(overrides))
+	for _, o := range overrides {
+		byURL[o.StreamURL] = o
+	}
+	out := make([]*iptvmodel.Channel, 0, len(channels))
+	for _, c := range channels {
+		o, has := byURL[c.StreamURL]
+		if !has {
+			out = append(out, c)
+			continue
+		}
+		cp := *c
+		switch {
+		case o.LogoFile != "":
+			cp.LogoURL = LocalLogoSentinel + o.LogoFile
+		case o.LogoURL != "":
+			cp.LogoURL = o.LogoURL
+		}
+		out = append(out, &cp)
+	}
+	return out
+}
+
+// LocalLogoSentinel is the prefix the logo overlay tags onto
+// Channel.LogoURL when the admin uploaded a file. The channel-logo
+// proxy detects this prefix and serves the file directly from
+// <imageDir>/channel-logos/ instead of going through the remote cache.
+// Exported so the handler that serves /channels/{id}/logo can switch
+// on it without re-deriving the convention.
+const LocalLogoSentinel = "hubplay-local:channel-logos/"
 
 // applyAdminOverlay applies the library's admin curation
 // (`library_channel_order`) on top of the raw M3U import. Channels
@@ -115,9 +170,21 @@ func (s *Service) GetChannelsForUser(ctx context.Context, libraryID, userID stri
 		return nil, err
 	}
 
-	// Admin overlay first — applies the library's curated order and
-	// removes admin-hidden channels (hard constraint, the user cannot
-	// surface them again via their own overlay).
+	// Logo overlay primero — antes que cualquier filtro de orden /
+	// visibilidad para que el LogoURL final lo vean todas las capas
+	// (incluido el continue-watching que clona Channel sin volver a
+	// pasar por aquí).
+	if s.logoOverrides != nil {
+		logoRows, err := s.logoOverrides.ListByLibrary(ctx, libraryID)
+		if err != nil {
+			return nil, fmt.Errorf("load channel logo overrides: %w", err)
+		}
+		channels = applyLogoOverlay(channels, logoRows)
+	}
+
+	// Admin overlay — applies the library's curated order and removes
+	// admin-hidden channels (hard constraint, the user cannot surface
+	// them again via their own overlay).
 	if s.libraryChannelOrder != nil {
 		adminRows, err := s.libraryChannelOrder.List(ctx, libraryID)
 		if err != nil {
@@ -148,6 +215,16 @@ func (s *Service) GetChannelsForLibraryAdmin(ctx context.Context, libraryID stri
 	channels, err := s.GetChannels(ctx, libraryID, false)
 	if err != nil {
 		return nil, nil, err
+	}
+	// Logo overlay también para el admin: el panel de curación muestra
+	// el logo efectivo (con override aplicado) para que el operador vea
+	// el estado real, no el M3U bruto.
+	if s.logoOverrides != nil {
+		logoRows, lErr := s.logoOverrides.ListByLibrary(ctx, libraryID)
+		if lErr != nil {
+			return nil, nil, fmt.Errorf("load channel logo overrides: %w", lErr)
+		}
+		channels = applyLogoOverlay(channels, logoRows)
 	}
 	var rows []iptvmodel.LibraryChannelOrderEntry
 	if s.libraryChannelOrder != nil {
@@ -323,4 +400,165 @@ func (s *Service) ResetChannelOrder(ctx context.Context, userID string) error {
 		return nil
 	}
 	return s.channelOrder.Reset(ctx, userID)
+}
+
+// ── Channel logo overrides ─────────────────────────────────────────
+//
+// Admin-only flow para reemplazar el logo de un canal. La row vive en
+// channel_logo_overrides indexada por (library_id, stream_url) — misma
+// invariante que ChannelOverride — para sobrevivir al re-import del M3U
+// (los UUIDs de canales se regeneran en cada refresh).
+
+// SetChannelLogoURL escribe (o reemplaza) un override de URL externa
+// para el canal. El stream_url se resuelve desde la row de channels en
+// el momento de la escritura — si el M3U se ha refrescado entre dos
+// llamadas el nuevo stream_url cuenta a partir de ese instante.
+func (s *Service) SetChannelLogoURL(ctx context.Context, channelID, logoURL string) error {
+	if s.logoOverrides == nil {
+		return fmt.Errorf("iptv: channel logo overrides repository not wired")
+	}
+	if logoURL == "" {
+		return fmt.Errorf("iptv: logo_url required (use ClearChannelLogo to remove)")
+	}
+	ch, err := s.GetChannel(ctx, channelID)
+	if err != nil {
+		return err
+	}
+	return s.logoOverrides.UpsertURL(ctx, ch.LibraryID, ch.StreamURL, logoURL)
+}
+
+// SetChannelLogoFile guarda un override de archivo subido para el
+// canal. Devuelve el basename del archivo PREVIO (si lo había), así el
+// handler que orquesta la subida puede borrar el archivo viejo del
+// disco sin tener que hacer un Get aparte. Devuelve "" cuando no había
+// override previo o el previo era una URL.
+func (s *Service) SetChannelLogoFile(ctx context.Context, channelID, basename string) (previousFile string, err error) {
+	if s.logoOverrides == nil {
+		return "", fmt.Errorf("iptv: channel logo overrides repository not wired")
+	}
+	if basename == "" {
+		return "", fmt.Errorf("iptv: file basename required")
+	}
+	ch, err := s.GetChannel(ctx, channelID)
+	if err != nil {
+		return "", err
+	}
+	prev, err := s.logoOverrides.Get(ctx, ch.LibraryID, ch.StreamURL)
+	if err != nil {
+		return "", err
+	}
+	previousFile = ""
+	if prev != nil {
+		previousFile = prev.LogoFile
+	}
+	if err := s.logoOverrides.UpsertFile(ctx, ch.LibraryID, ch.StreamURL, basename); err != nil {
+		return "", err
+	}
+	return previousFile, nil
+}
+
+// ClearChannelLogo borra el override (URL o file) del canal — el
+// listado vuelve a usar el tvg-logo del M3U a partir del siguiente
+// fetch. Devuelve el basename del archivo previo (si lo había) para
+// que el handler borre el archivo huérfano del disco.
+func (s *Service) ClearChannelLogo(ctx context.Context, channelID string) (previousFile string, err error) {
+	if s.logoOverrides == nil {
+		return "", fmt.Errorf("iptv: channel logo overrides repository not wired")
+	}
+	ch, err := s.GetChannel(ctx, channelID)
+	if err != nil {
+		return "", err
+	}
+	prev, err := s.logoOverrides.Get(ctx, ch.LibraryID, ch.StreamURL)
+	if err != nil {
+		return "", err
+	}
+	previousFile = ""
+	if prev != nil {
+		previousFile = prev.LogoFile
+	}
+	if err := s.logoOverrides.Delete(ctx, ch.LibraryID, ch.StreamURL); err != nil {
+		return "", err
+	}
+	return previousFile, nil
+}
+
+// GetChannelLogoOverride devuelve el override actual del canal (URL,
+// archivo, o nil si no hay). El handler GET /channels/{id}/logo lo
+// consulta para decidir entre servir desde disco (file) o pasar por el
+// cache remoto (url o M3U).
+func (s *Service) GetChannelLogoOverride(ctx context.Context, channelID string) (*iptvmodel.ChannelLogoOverride, error) {
+	if s.logoOverrides == nil {
+		return nil, nil
+	}
+	ch, err := s.GetChannel(ctx, channelID)
+	if err != nil {
+		return nil, err
+	}
+	return s.logoOverrides.Get(ctx, ch.LibraryID, ch.StreamURL)
+}
+
+// RefreshLogosFromIPTVOrg busca logos en la base pública de iptv-org
+// (mapeo por tvg_id) para cada canal de la biblioteca que:
+//   - No tenga ya un override admin (URL o archivo).
+//   - No traiga tvg-logo del M3U.
+//   - Tenga un tvg_id no vacío que se pueda usar como clave de búsqueda.
+//
+// Los hallazgos se guardan como overrides URL (no se tocan los datos
+// originales del M3U). El admin puede borrarlos uno a uno desde el
+// modal de logo del canal — "Restaurar logo del M3U" deja el override
+// en blanco y vuelve al estado anterior.
+//
+// Devuelve el número de canales actualizados. Cero significa: o todos
+// los canales tienen ya logo (M3U / override), o ninguno cuadró por
+// tvg_id contra el lookup.
+func (s *Service) RefreshLogosFromIPTVOrg(ctx context.Context, libraryID string) (int, error) {
+	if s.iptvOrgLogos == nil {
+		return 0, fmt.Errorf("iptv: iptv-org lookup not configured")
+	}
+	if s.logoOverrides == nil {
+		return 0, fmt.Errorf("iptv: logo overrides repository not wired")
+	}
+
+	lookup, err := s.iptvOrgLogos.Load(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("load iptv-org lookup: %w", err)
+	}
+
+	channels, err := s.GetChannels(ctx, libraryID, false)
+	if err != nil {
+		return 0, err
+	}
+
+	// Bulk-load overrides previos para no tener que consultarlos uno
+	// a uno (sería N+1 contra DB para libraries grandes).
+	existing, err := s.logoOverrides.ListByLibrary(ctx, libraryID)
+	if err != nil {
+		return 0, fmt.Errorf("load existing logo overrides: %w", err)
+	}
+	hasOverride := make(map[string]bool, len(existing))
+	for _, o := range existing {
+		hasOverride[o.StreamURL] = true
+	}
+
+	updated := 0
+	for _, ch := range channels {
+		if ch.LogoURL != "" || ch.TvgID == "" {
+			continue
+		}
+		if hasOverride[ch.StreamURL] {
+			continue
+		}
+		logo, ok := lookup[strings.ToLower(ch.TvgID)]
+		if !ok || logo == "" {
+			continue
+		}
+		if err := s.logoOverrides.UpsertURL(ctx, libraryID, ch.StreamURL, logo); err != nil {
+			s.logger.Warn("iptv-org logo upsert failed",
+				"library", libraryID, "tvg_id", ch.TvgID, "error", err)
+			continue
+		}
+		updated++
+	}
+	return updated, nil
 }

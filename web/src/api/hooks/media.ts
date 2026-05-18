@@ -165,6 +165,96 @@ export function useItemRecommendations(id: string) {
   });
 }
 
+// Identify (admin rematch). Disabled hasta que el modal entra en su
+// estado "searching" — la query trae candidatos TMDb. Sin `enabled`
+// gate la lista TMDb saltaría en cuanto el menú del detalle se abre.
+export function useIdentifyCandidates(
+  id: string,
+  options: { query?: string; year?: number; enabled?: boolean } = {},
+) {
+  const { query, year, enabled } = options;
+  return useQuery<import("../types").IdentifyCandidate[]>({
+    queryKey: ["items", id, "identify", "candidates", { query, year }] as const,
+    queryFn: () => api.getIdentifyCandidates(id, { query, year }),
+    enabled: !!id && (enabled ?? false),
+    // Una búsqueda en TMDb dura segundos. No la re-disparamos por
+    // window focus — sería ruidoso y costoso.
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+}
+
+// Editor manual de metadatos. Distinto del flujo identify: no consulta
+// TMDb, sólo escribe los campos que el operador suministra. Bloquea
+// el item al guardar para que el siguiente "Refresh metadata" no pise
+// la edición. Invalida las mismas queries que identify para mantener
+// la página detalle reactiva.
+export function useUpdateItemMetadata(itemId: string) {
+  const queryClient = useQueryClient();
+  return useMutation<
+    {
+      item_id: string;
+      title: string;
+      original_title: string;
+      year: number;
+      metadata_locked: boolean;
+    },
+    Error,
+    {
+      title?: string;
+      original_title?: string;
+      year?: number;
+      overview?: string;
+      tagline?: string;
+    }
+  >({
+    mutationFn: (patch) => api.updateItemMetadata(itemId, patch),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.item(itemId) });
+      queryClient.invalidateQueries({ queryKey: ["items"] });
+    },
+  });
+}
+
+// Toggle del lock sin tocar el contenido — el admin "suelta" un item
+// identificado a mano para que vuelva a recibir refreshes automáticos.
+export function useSetItemMetadataLock(itemId: string) {
+  const queryClient = useQueryClient();
+  return useMutation<
+    { item_id: string; metadata_locked: boolean },
+    Error,
+    boolean
+  >({
+    mutationFn: (locked) => api.setItemMetadataLock(itemId, locked),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.item(itemId) });
+    },
+  });
+}
+
+export function useApplyIdentify(itemId: string) {
+  const queryClient = useQueryClient();
+  return useMutation<
+    { item_id: string; provider: string; external_id: string },
+    Error,
+    { provider?: string; external_id: string }
+  >({
+    mutationFn: (payload) => api.applyIdentify(itemId, payload),
+    onSuccess: () => {
+      // Hard refresh: el item entero, sus imágenes, y los recommendations
+      // (la rail de "more like this" cuelga del tmdb id que acabamos de
+      // cambiar). Invalidamos también listados que muestran el título —
+      // página de biblioteca, latest, búsquedas — pero no inventamos un
+      // tag genérico: con item + listados de items + images cubrimos los
+      // sitios donde el cambio se ve.
+      queryClient.invalidateQueries({ queryKey: queryKeys.item(itemId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.itemImages(itemId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.itemRecommendations(itemId) });
+      queryClient.invalidateQueries({ queryKey: ["items"] });
+    },
+  });
+}
+
 export function usePerson(
   id: string,
   options?: Partial<UseQueryOptions<PersonDetail>>,

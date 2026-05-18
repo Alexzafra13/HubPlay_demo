@@ -24,6 +24,7 @@ import (
 	"hubplay/internal/notification"
 	"hubplay/internal/observability"
 	"hubplay/internal/provider"
+	"hubplay/internal/scanner"
 	"hubplay/internal/setup"
 	"hubplay/internal/stream"
 	"hubplay/internal/sysmetrics"
@@ -55,6 +56,13 @@ type Dependencies struct {
 	UserPreferences *db.UserPreferenceRepository
 	Home            *db.HomeRepository
 	Providers      *provider.Manager
+	// Scanner expone SearchCandidates + IdentifyAndApply para el flujo
+	// admin de "Identify" (rematch manual contra TMDb). Opcional — si
+	// nil los endpoints /items/{id}/identify devuelven 503 y el resto
+	// del item handler sigue funcionando. Comparte instancia con la
+	// que dispara los scans periódicos: una sola fuente de verdad para
+	// la aplicación de metadatos en disco.
+	Scanner        *scanner.Scanner
 	ExternalIDs    *db.ExternalIDRepository
 	LibraryRepo    *db.LibraryRepository
 	ProviderRepo   *db.ProviderRepository
@@ -836,7 +844,15 @@ func NewRouter(deps Dependencies) http.Handler {
 				// layout clustered (one tree the operator can backup,
 				// rsync, or `du` to size the cache).
 				trickplayDir := filepath.Join(filepath.Dir(deps.Config.Database.Path), "images", "trickplay")
-				itemHandler := handlers.NewItemHandler(deps.Libraries, deps.Images, deps.Metadata, deps.UserData, deps.Users, deps.Chapters, deps.EpisodeSegments, deps.ExternalIDs, deps.People, deps.Collections, deps.Providers, trickplayDir, deps.Logger)
+				// scanner ↔ MetadataIdentifier: deps.Scanner es *scanner.Scanner;
+				// el handler sólo necesita la pequeña interfaz MetadataIdentifier.
+				// Pasarlo como nil cuando no esté wired hace que los endpoints
+				// /identify devuelvan 503 sin tumbar el resto del handler.
+				var identifier handlers.MetadataIdentifier
+				if deps.Scanner != nil {
+					identifier = deps.Scanner
+				}
+				itemHandler := handlers.NewItemHandler(deps.Libraries, deps.Images, deps.Metadata, deps.UserData, deps.Users, deps.Chapters, deps.EpisodeSegments, deps.ExternalIDs, deps.People, deps.Collections, deps.Providers, identifier, trickplayDir, deps.Logger)
 
 				// Libraries
 				r.Get("/libraries", libHandler.List)
@@ -865,7 +881,7 @@ func NewRouter(deps Dependencies) http.Handler {
 					// falls back to the raw passthrough proxy, which is
 					// the correct degraded-but-functional behaviour for
 					// HLS-only deployments without ffmpeg.
-					iptvHandler := handlers.NewIPTVHandler(deps.IPTV, deps.IPTVProxy, deps.IPTVTransmux, deps.IPTVLogoCache, deps.LibraryRepo, deps.Libraries, deps.Logger)
+					iptvHandler := handlers.NewIPTVHandler(deps.IPTV, deps.IPTVProxy, deps.IPTVTransmux, deps.IPTVLogoCache, fedImageDir, deps.LibraryRepo, deps.Libraries, deps.Logger)
 
 					r.Route("/libraries/{id}/channels", func(r chi.Router) {
 						r.Get("/", iptvHandler.ListChannels)
@@ -960,6 +976,14 @@ func NewRouter(deps Dependencies) http.Handler {
 						r.Post("/channels/{channelId}/disable", iptvHandler.DisableChannel)
 						r.Post("/channels/{channelId}/enable", iptvHandler.EnableChannel)
 						r.Patch("/channels/{channelId}", iptvHandler.PatchChannel)
+						// Override del logo del canal (URL externa o
+						// archivo subido). El GET del logo (proxy) NO
+						// está aquí — vive arriba con los demás endpoints
+						// de canal porque cualquier usuario autenticado lo
+						// pide; sólo escritura es admin-only.
+						r.Put("/channels/{channelId}/logo", iptvHandler.SetChannelLogo)
+						r.Post("/channels/{channelId}/logo/upload", iptvHandler.UploadChannelLogo)
+						r.Delete("/channels/{channelId}/logo", iptvHandler.ClearChannelLogo)
 						// Admin channel curation. Reorder, hide, restore
 						// M3U order. Hidden HERE is a hard constraint:
 						// downstream the per-user overlay can only hide
@@ -971,6 +995,10 @@ func NewRouter(deps Dependencies) http.Handler {
 						r.Route("/libraries/{id}/iptv", func(r chi.Router) {
 							r.Post("/refresh-m3u", iptvHandler.RefreshM3U)
 							r.Post("/refresh-epg", iptvHandler.RefreshEPG)
+							// Auto-discovery de logos contra iptv-org
+							// (database pública con miles de canales
+							// mapeados por tvg-id → logo URL).
+							r.Post("/refresh-logos-from-iptv-org", iptvHandler.RefreshLogosFromIPTVOrg)
 						})
 						if iptvScheduleHandler != nil {
 							r.Put("/libraries/{id}/schedule/{kind}", iptvScheduleHandler.Upsert)
@@ -1010,6 +1038,23 @@ func NewRouter(deps Dependencies) http.Handler {
 					// endpoints serve from disk on subsequent hits.
 					r.Get("/trickplay.json", itemHandler.TrickplayManifest)
 					r.Get("/trickplay.png", itemHandler.TrickplaySprite)
+
+					// Identify / rematch contra TMDb (admin-only).
+					// Mismo patrón Plex/Jellyfin: el operador busca,
+					// elige el match correcto y se aplica sobrescribiendo
+					// metadatos + imágenes del item.
+					r.Group(func(r chi.Router) {
+						r.Use(auth.RequireAdmin)
+						r.Get("/identify/candidates", itemHandler.IdentifyCandidates)
+						r.Post("/identify", itemHandler.Identify)
+						// Editor manual de metadatos. Distinto de
+						// identify: no consulta TMDb, sólo escribe los
+						// campos que el operador suministra. Bloquea
+						// el item al guardar para que el siguiente
+						// "Refresh metadata" no pise la edición.
+						r.Patch("/metadata", itemHandler.UpdateItemMetadata)
+						r.Put("/metadata/lock", itemHandler.SetMetadataLock)
+					})
 				})
 			}
 

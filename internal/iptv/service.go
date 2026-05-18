@@ -43,6 +43,11 @@ type Service struct {
 	libraryChannelOrder *db.LibraryChannelOrderRepository
 	epgSources          *db.LibraryEPGSourceRepository
 	overrides           *db.ChannelOverrideRepository
+	logoOverrides       *db.ChannelLogoOverrideRepository
+	// iptvOrgLogos resuelve tvg-ids contra la base pública iptv-org
+	// para rellenar logos faltantes en bulk. nil-safe: si no se cablea,
+	// el endpoint /iptv-org/refresh-logos devuelve 503.
+	iptvOrgLogos        *IPTVOrgLogoLookup
 	watchHistory        *db.ChannelWatchHistoryRepository
 	logger              *slog.Logger
 
@@ -99,6 +104,10 @@ type proberRunner interface {
 // / EPGUpdated events at the end of the respective refresh. Nil-safe.
 func (s *Service) SetEventBus(bus *event.Bus) { s.bus = bus }
 
+// SetIPTVOrgLogos wires the iptv-org logo lookup post-construction —
+// nil-safe, sin él el endpoint de auto-discovery devuelve 503.
+func (s *Service) SetIPTVOrgLogos(l *IPTVOrgLogoLookup) { s.iptvOrgLogos = l }
+
 // SetProberWorker wires the active prober worker. Optional: a service
 // without one still works, it just won't auto-probe channels after an
 // M3U refresh — the periodic worker tick will catch them eventually.
@@ -120,6 +129,7 @@ func NewService(
 	libraryChannelOrder *db.LibraryChannelOrderRepository,
 	epgSources *db.LibraryEPGSourceRepository,
 	overrides *db.ChannelOverrideRepository,
+	logoOverrides *db.ChannelLogoOverrideRepository,
 	watchHistory *db.ChannelWatchHistoryRepository,
 	logger *slog.Logger,
 ) *Service {
@@ -133,6 +143,7 @@ func NewService(
 		libraryChannelOrder: libraryChannelOrder,
 		epgSources:          epgSources,
 		overrides:           overrides,
+		logoOverrides:       logoOverrides,
 		watchHistory:        watchHistory,
 		logger:          logger.With("module", "iptv"),
 		refreshes:       make(map[string]bool),

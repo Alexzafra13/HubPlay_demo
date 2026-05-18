@@ -184,6 +184,8 @@ var outOfScopeExact = map[string]string{
 	"PUT /items/{id}/images/{imageId}/lock":        "image authoring (admin)",
 	"DELETE /items/{id}/images/{imageId}":          "image authoring (admin)",
 	"POST /libraries/{id}/images/refresh":          "image authoring (admin)",
+	"POST /channels/{channelId}/logo/upload":       "channel logo upload (admin, multipart)",
+	"POST /libraries/{id}/iptv/refresh-logos-from-iptv-org": "admin iptv-org logo auto-discovery",
 
 	// ── Provider config (admin) + provider search (admin authoring) ──
 	"GET /providers":            "admin provider config",

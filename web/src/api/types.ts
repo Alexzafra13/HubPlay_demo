@@ -862,8 +862,35 @@ export interface Recommendation {
   local_id?: string;
 }
 
+// IdentifyCandidate — un match TMDb propuesto para el flujo admin de
+// "Identify". Distinto de Recommendation porque (a) no se cruza con la
+// biblioteca local — siempre apunta al provider externo — y (b) lleva
+// el external_id directo + nombre del provider, ya que el frontend lo
+// vuelve a enviar al POST /identify para confirmar la elección.
+export interface IdentifyCandidate {
+  /** ID externo del provider (TMDb id hoy). */
+  external_id: string;
+  /** Nombre del provider; hoy siempre "tmdb". */
+  provider: string;
+  title: string;
+  /** 0 cuando el provider no devuelve fecha (estrenos lejanos, contenido
+   *  borrado). El diálogo lo oculta cuando vale 0. */
+  year: number;
+  overview?: string;
+  /** Absoluta. Vacía cuando el candidato no tiene póster en el provider;
+   *  el diálogo cae a un placeholder en ese caso. */
+  poster_url?: string;
+  /** Ranking de relevancia normalizado 0-1. Sólo informativo: la lista
+   *  ya viene ordenada por el backend. */
+  score: number;
+}
+
 export interface ItemDetail extends MediaItem {
   media_streams: MediaStream[];
+  /** Admin-only: cuando true, el scanner se salta este item en
+   *  enrichMetadata / RefreshMetadata. Sólo se incluye cuando el
+   *  caller es admin y el identifier está cableado en el backend. */
+  metadata_locked?: boolean;
   // Cast / crew. Server omits the key entirely when no rows are
   // stored, so the field is optional on the wire side too. Detail
   // page guards on `?.length > 0` already; absent === empty list.

@@ -64,6 +64,14 @@ export interface DraftChannel {
   name: string;
   group_name: string | null;
   hidden: boolean;
+  // Optional logo metadata — only populated by the admin curation
+  // surface, not the per-user customize flow (users don't edit logos).
+  // When set, the row renders the actual logo thumbnail + a small
+  // "edit logo" affordance; when undefined the row uses only initials.
+  logo_url?: string;
+  logo_initials?: string;
+  logo_bg?: string;
+  logo_fg?: string;
 }
 
 interface Props {
@@ -77,6 +85,10 @@ interface Props {
    *  Used by the bulk-action bar; the editor never mutates the draft
    *  directly. */
   onBulkSetHidden: (ids: string[], hidden: boolean) => void;
+  /** Optional: open the per-channel logo override editor. Wired only
+   *  by the admin curation surface. When undefined, the row hides the
+   *  "edit logo" affordance entirely (per-user customize flow). */
+  onEditLogo?: (channelID: string) => void;
   onSave: () => void;
   onReset: () => void;
   dirty: boolean;
@@ -99,6 +111,7 @@ export function ChannelOrderEditor({
   onReorder,
   onToggleHidden,
   onBulkSetHidden,
+  onEditLogo,
   onSave,
   onReset,
   dirty,
@@ -337,6 +350,7 @@ export function ChannelOrderEditor({
                   onToggleHidden={() => onToggleHidden(realIndex)}
                   onMoveToTop={() => onReorder(realIndex, 0)}
                   onMoveToBottom={() => onReorder(realIndex, draft.length - 1)}
+                  onEditLogo={onEditLogo ? () => onEditLogo(channel.id) : undefined}
                   editingPos={editingPos === channel.id}
                   onStartEditPos={() => setEditingPos(channel.id)}
                   onCancelEditPos={() => setEditingPos(null)}
@@ -394,6 +408,9 @@ interface SortableRowProps {
   onToggleHidden: () => void;
   onMoveToTop: () => void;
   onMoveToBottom: () => void;
+  /** Undefined disables the logo edit affordance — the per-user
+   *  surface passes nothing because users don't curate logos. */
+  onEditLogo?: () => void;
   editingPos: boolean;
   onStartEditPos: () => void;
   onCancelEditPos: () => void;
@@ -409,6 +426,7 @@ function SortableRow({
   onToggleHidden,
   onMoveToTop,
   onMoveToBottom,
+  onEditLogo,
   editingPos,
   onStartEditPos,
   onCancelEditPos,
@@ -511,6 +529,18 @@ function SortableRow({
         </button>
       )}
 
+      {/* Logo thumbnail. Click → abre el modal de override (sólo en
+          el panel admin; en customize per-user esta función se omite y
+          el thumbnail se renderiza como decoración no interactiva). El
+          fallback de iniciales sustituye al <img> cuando falla el load
+          — mismo patrón que ChannelCard. */}
+      {(channel.logo_url || channel.logo_initials) && (
+        <ChannelRowLogo
+          channel={channel}
+          onEdit={onEditLogo}
+        />
+      )}
+
       <div className="flex flex-1 flex-col min-w-0">
         <span className="truncate text-text">{channel.name}</span>
         {channel.group_name && (
@@ -562,3 +592,57 @@ function SortableRow({
   );
 }
 
+
+
+// ChannelRowLogo — thumbnail circular del logo del canal con fallback
+// a iniciales coloreadas (mismo patrón que ChannelCard). Click abre el
+// modal de override cuando onEdit está cableado; sin onEdit es puramente
+// decorativo (caso per-user customize).
+function ChannelRowLogo({
+  channel,
+  onEdit,
+}: {
+  channel: DraftChannel;
+  onEdit?: () => void;
+}) {
+  const { t } = useTranslation();
+  const [broken, setBroken] = useState(false);
+  const showImg = channel.logo_url && !broken;
+  const fallbackStyle = {
+    backgroundColor: channel.logo_bg || "#1f2937",
+    color: channel.logo_fg || "#ffffff",
+  };
+  const inner = (
+    <span
+      className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full text-[11px] font-semibold"
+      style={fallbackStyle}
+      aria-hidden={onEdit ? "true" : undefined}
+    >
+      {showImg ? (
+        <img
+          src={channel.logo_url || undefined}
+          alt=""
+          className="h-full w-full object-cover"
+          onError={() => setBroken(true)}
+          loading="lazy"
+        />
+      ) : (
+        <span>{channel.logo_initials || "?"}</span>
+      )}
+    </span>
+  );
+  if (!onEdit) return inner;
+  return (
+    <button
+      type="button"
+      onClick={onEdit}
+      aria-label={t("livetv.customize.editLogo", {
+        defaultValue: "Cambiar logo de {{name}}",
+        name: channel.name,
+      })}
+      className="rounded-full focus:outline-none focus:ring-2 focus:ring-accent"
+    >
+      {inner}
+    </button>
+  );
+}

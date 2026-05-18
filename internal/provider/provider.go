@@ -147,6 +147,12 @@ type SearchResult struct {
 	Year       int
 	Overview   string
 	Score      float64 // relevance 0-1
+	// PosterURL is the absolute image URL of the candidate's poster.
+	// Empty when the provider has no poster for the entry (e.g. very
+	// recent listings, foreign-language obscure titles). The identify
+	// dialog uses it for the visual candidate cards — without it the
+	// admin would be picking matches blind from a list of titles.
+	PosterURL string
 }
 
 // RecommendationResult is one entry in a "more like this" list from a

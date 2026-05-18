@@ -1519,6 +1519,46 @@
       "generatedPasswordHint": "Cópiala ahora a tu gestor de contraseñas. Solo se mostrará una vez. Si la pierdes, tendrás que recuperar la cuenta a mano desde la base de datos."
     }
   },
+  "identify": {
+    "menuLabel": "Identificar…",
+    "title": "Identificar elemento",
+    "subtitle": "Si el match es incorrecto, busca el título correcto y aplícalo. Esto sobrescribe título, sinopsis, géneros, reparto y póster.",
+    "queryLabel": "Título",
+    "yearLabel": "Año",
+    "search": "Buscar",
+    "apply": "Aplicar match",
+    "hintNoSearch": "Escribe el título correcto y pulsa Buscar para ver candidatos en TMDb.",
+    "empty": "Ningún match. Prueba con otro título o quita el año.",
+    "errorSearch": "No se ha podido consultar TMDb. Revisa la configuración del provider o intenta de nuevo.",
+    "errorApply": "No se ha podido aplicar el match. Inténtalo de nuevo.",
+    "candidatesAriaLabel": "Candidatos TMDb"
+  },
+  "metadataEditor": {
+    "menuLabel": "Editar metadatos…",
+    "title": "Editar metadatos",
+    "lockHint": "Al guardar, el item queda bloqueado: los siguientes refreshes automáticos no pisarán tus cambios.",
+    "fieldTitle": "Título",
+    "fieldOriginalTitle": "Título original",
+    "fieldYear": "Año",
+    "fieldTagline": "Tagline",
+    "fieldOverview": "Sinopsis",
+    "save": "Guardar",
+    "lock": "Bloquear metadatos",
+    "unlock": "Desbloquear metadatos",
+    "errorGeneric": "No se ha podido guardar. Inténtalo de nuevo."
+  },
+  "channelLogo": {
+    "title": "Logo del canal",
+    "previewHint": "Vista previa con el logo actualmente activo (override admin o tvg-logo del M3U).",
+    "urlLabel": "URL externa",
+    "applyURL": "Aplicar URL",
+    "uploadLabel": "Subir imagen (PNG, JPG, WebP — máx 10MB)",
+    "chooseFile": "Elegir archivo",
+    "reset": "Restaurar logo del M3U",
+    "done": "Hecho",
+    "or": "O",
+    "errorGeneric": "No se ha podido aplicar el cambio. Comprueba que el archivo es una imagen válida o que la URL devuelve un PNG/JPG/WebP."
+  },
   "imageManager": {
     "title": "Gestionar imágenes",
     "poster": "Poster",
@@ -1594,6 +1634,7 @@
       "counts": "{{visible}} de {{total}} · {{hidden}} ocultos",
       "selectAll": "Seleccionar todo lo visible",
       "selectRow": "Seleccionar {{name}}",
+      "editLogo": "Cambiar logo de {{name}}",
       "bulkAriaLabel": "Acciones en bloque",
       "bulkSelected": "{{count}} seleccionados",
       "bulkHide": "Ocultar",

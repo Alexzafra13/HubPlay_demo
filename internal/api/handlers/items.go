@@ -47,6 +47,11 @@ type ItemHandler struct {
 	// metadata provider's recommendations endpoint (TMDb today). nil
 	// disables the feature — the endpoint returns 503 in that case.
 	providers ProviderManager
+	// identifier powers the admin-only "Identify" rematch flow. Wraps
+	// the scanner (which already knows how to apply a TMDb metadata
+	// result end-to-end including images). nil disables the endpoints
+	// with a 503 — the rest of the handler keeps working.
+	identifier MetadataIdentifier
 	// trickplayDir is the root for generated trickplay sprites
 	// (`<dir>/<itemID>/sprite.png` + `manifest.json`). Empty disables
 	// the feature; the endpoint returns 503 in that case.
@@ -68,13 +73,14 @@ type ItemHandler struct {
 	logger      *slog.Logger
 }
 
-func NewItemHandler(lib LibraryService, images ImageRepository, metadata MetadataRepository, userData UserDataRepository, users UserService, chapters ChapterRepository, segments EpisodeSegmentRepository, externalIDs ExternalIDsRepository, people PeopleRepoForItems, collections CollectionRepoForItems, providers ProviderManager, trickplayDir string, logger *slog.Logger) *ItemHandler {
+func NewItemHandler(lib LibraryService, images ImageRepository, metadata MetadataRepository, userData UserDataRepository, users UserService, chapters ChapterRepository, segments EpisodeSegmentRepository, externalIDs ExternalIDsRepository, people PeopleRepoForItems, collections CollectionRepoForItems, providers ProviderManager, identifier MetadataIdentifier, trickplayDir string, logger *slog.Logger) *ItemHandler {
 	return &ItemHandler{
 		lib: lib, images: images, metadata: metadata, userData: userData,
 		users:    users,
 		chapters: chapters, segments: segments, externalIDs: externalIDs, people: people,
 		collections: collections,
 		providers:   providers,
+		identifier:  identifier,
 		trickplayDir: trickplayDir, logger: logger,
 	}
 }
@@ -170,6 +176,16 @@ func (h *ItemHandler) buildItemDetail(ctx context.Context, id, userID string) (m
 	h.attachSegments(ctx, resp, id)
 	h.attachPeople(ctx, resp, id)
 	h.attachExternalIDs(ctx, resp, id)
+
+	// metadata_locked: el frontend pinta un candado en el detalle y
+	// usa el flag para alternar entre "Bloquear" y "Desbloquear" en
+	// el kebab. nil-safe: si el identifier no está cableado el campo
+	// se omite y el kebab oculta la entrada del toggle.
+	if h.identifier != nil {
+		if locked, err := h.identifier.IsMetadataLocked(ctx, id); err == nil {
+			resp["metadata_locked"] = locked
+		}
+	}
 
 	// Episode and season pages both need a "what show is this?" anchor
 	// and the show's backdrop as a fallback hero image. Episodes climb

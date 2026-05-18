@@ -773,6 +773,83 @@ export class ApiClient {
     );
   }
 
+  // Admin: candidatos TMDb para reidentificar un item. La query y el año
+  // son opcionales — sin ellos el backend usa el título y año actuales
+  // del item como semilla. Cada candidato trae poster_url para que el
+  // diálogo pueda renderizar la lista visual estilo Plex/Jellyfin.
+  async getIdentifyCandidates(
+    id: string,
+    options?: { query?: string; year?: number },
+  ): Promise<import("./types").IdentifyCandidate[]> {
+    return this.request<import("./types").IdentifyCandidate[]>(
+      "GET",
+      `/items/${id}/identify/candidates`,
+      {
+        params: {
+          query: options?.query,
+          year: options?.year,
+        },
+      },
+    );
+  }
+
+  // Admin: edición manual de metadatos. Bloquea el item al guardar
+  // para que el siguiente "Refresh metadata" no pise la edición.
+  // Todos los campos son opcionales; sólo los suministrados se aplican.
+  async updateItemMetadata(
+    id: string,
+    patch: {
+      title?: string;
+      original_title?: string;
+      year?: number;
+      overview?: string;
+      tagline?: string;
+    },
+  ): Promise<{
+    item_id: string;
+    title: string;
+    original_title: string;
+    year: number;
+    metadata_locked: boolean;
+  }> {
+    return this.request("PATCH", `/items/${id}/metadata`, { body: patch });
+  }
+
+  // Admin: toggle del candado de metadatos sin tocar el contenido.
+  async setItemMetadataLock(
+    id: string,
+    locked: boolean,
+  ): Promise<{ item_id: string; metadata_locked: boolean }> {
+    return this.request("PUT", `/items/${id}/metadata/lock`, {
+      body: { locked },
+    });
+  }
+
+  // Admin: busca logos en la base pública de iptv-org y los aplica
+  // como overrides URL a los canales sin logo. Devuelve el count.
+  async refreshLogosFromIPTVOrg(libraryId: string): Promise<{ library_id: string; updated: number }> {
+    return this.request(
+      "POST",
+      `/libraries/${encodeURIComponent(libraryId)}/iptv/refresh-logos-from-iptv-org`,
+    );
+  }
+
+  // Admin: aplica un match TMDb concreto al item. El backend borra
+  // imágenes y metadata previos y reescribe título, overview, géneros,
+  // estudio, reparto e imágenes con los del externalID elegido.
+  async applyIdentify(
+    id: string,
+    payload: { provider?: string; external_id: string },
+  ): Promise<{ item_id: string; provider: string; external_id: string }> {
+    return this.request<{
+      item_id: string;
+      provider: string;
+      external_id: string;
+    }>("POST", `/items/${id}/identify`, {
+      body: { provider: payload.provider ?? "tmdb", external_id: payload.external_id },
+    });
+  }
+
   async getPerson(id: string): Promise<PersonDetail> {
     return this.request<PersonDetail>("GET", `/people/${id}`);
   }
@@ -1065,6 +1142,38 @@ export class ApiClient {
    *  because the personalisation panel must NOT see admin-hidden
    *  channels (hard constraint), but the curation panel must in
    *  order to un-hide them. */
+  // Admin: override del logo de un canal con una URL externa. Survives
+  // M3U refreshes (override row keyed por stream_url). Limpia cualquier
+  // archivo subido anteriormente del disco.
+  async setChannelLogoURL(channelId: string, logoURL: string): Promise<void> {
+    await this.request<{ channel_id: string; logo_url: string }>(
+      "PUT",
+      `/channels/${encodeURIComponent(channelId)}/logo`,
+      { body: { logo_url: logoURL } },
+    );
+  }
+
+  // Admin: sube un archivo de logo. Multipart con campo `file`. Reusa
+  // las mismas validaciones del upload de pósters (MaxUploadBytes 10MB,
+  // MIME sniffeado de los bytes, decompression-bomb guard).
+  async uploadChannelLogo(channelId: string, file: File): Promise<void> {
+    const fd = new FormData();
+    fd.append("file", file);
+    await this.request<{ channel_id: string; logo_file: string }>(
+      "POST",
+      `/channels/${encodeURIComponent(channelId)}/logo/upload`,
+      { body: fd },
+    );
+  }
+
+  // Admin: borra el override de logo. Idempotente.
+  async clearChannelLogo(channelId: string): Promise<void> {
+    await this.request<void>(
+      "DELETE",
+      `/channels/${encodeURIComponent(channelId)}/logo`,
+    );
+  }
+
   async getChannelsForLibraryAdmin(libraryId: string): Promise<Channel[]> {
     return this.request<Channel[]>(
       "GET",

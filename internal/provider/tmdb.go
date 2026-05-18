@@ -85,12 +85,18 @@ func (t *TMDbProvider) Search(ctx context.Context, query SearchQuery) ([]SearchR
 			year = extractYear(r.FirstAirDate)
 		}
 
+		posterURL := ""
+		if r.PosterPath != "" {
+			posterURL = tmdbImageURL + "w342" + r.PosterPath
+		}
+
 		results = append(results, SearchResult{
 			ExternalID: strconv.Itoa(r.ID),
 			Title:      title,
 			Year:       year,
 			Overview:   r.Overview,
 			Score:      r.Popularity / 100, // normalize
+			PosterURL:  posterURL,
 		})
 	}
 
@@ -588,6 +594,7 @@ type tmdbSearchResponse struct {
 		ReleaseDate  string  `json:"release_date"`
 		FirstAirDate string  `json:"first_air_date"`
 		Popularity   float64 `json:"popularity"`
+		PosterPath   string  `json:"poster_path"`
 	} `json:"results"`
 }
 

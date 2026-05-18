@@ -1519,6 +1519,46 @@
       "generatedPasswordHint": "Cópiala ahora a tu gestor de contraseñas. Solo se mostrará una vez. Si la pierdes, tendrás que recuperar la cuenta a mano desde la base de datos."
     }
   },
+  "identify": {
+    "menuLabel": "Identify…",
+    "title": "Identify item",
+    "subtitle": "If the match is wrong, search for the correct title and apply it. This overwrites title, overview, genres, cast and poster.",
+    "queryLabel": "Title",
+    "yearLabel": "Year",
+    "search": "Search",
+    "apply": "Apply match",
+    "hintNoSearch": "Type the correct title and press Search to see TMDb candidates.",
+    "empty": "No matches. Try a different title or drop the year.",
+    "errorSearch": "Could not query TMDb. Check the provider configuration or try again.",
+    "errorApply": "Could not apply the match. Please try again.",
+    "candidatesAriaLabel": "TMDb candidates"
+  },
+  "metadataEditor": {
+    "menuLabel": "Edit metadata…",
+    "title": "Edit metadata",
+    "lockHint": "When you save, this item gets locked: future automatic refreshes won't overwrite your changes.",
+    "fieldTitle": "Title",
+    "fieldOriginalTitle": "Original title",
+    "fieldYear": "Year",
+    "fieldTagline": "Tagline",
+    "fieldOverview": "Overview",
+    "save": "Save",
+    "lock": "Lock metadata",
+    "unlock": "Unlock metadata",
+    "errorGeneric": "Could not save. Please try again."
+  },
+  "channelLogo": {
+    "title": "Channel logo",
+    "previewHint": "Preview of the currently active logo (admin override or M3U tvg-logo).",
+    "urlLabel": "External URL",
+    "applyURL": "Apply URL",
+    "uploadLabel": "Upload image (PNG, JPG, WebP — max 10MB)",
+    "chooseFile": "Choose file",
+    "reset": "Restore M3U logo",
+    "done": "Done",
+    "or": "OR",
+    "errorGeneric": "Could not apply the change. Make sure the file is a valid image or the URL returns a PNG/JPG/WebP."
+  },
   "imageManager": {
     "title": "Manage Images",
     "poster": "Poster",
@@ -1594,6 +1634,7 @@
       "counts": "{{visible}} of {{total}} · {{hidden}} hidden",
       "selectAll": "Select all visible",
       "selectRow": "Select {{name}}",
+      "editLogo": "Change logo for {{name}}",
       "bulkAriaLabel": "Bulk actions",
       "bulkSelected": "{{count}} selected",
       "bulkHide": "Hide",

@@ -23,7 +23,7 @@ func newPreflightSvc(t *testing.T) *Service {
 	database := testutil.NewTestDB(t)
 	repos := db.NewRepositories(testutil.Driver(), database)
 	return NewService(repos.Channels, repos.EPGPrograms, repos.Libraries,
-		repos.ChannelFavorites, repos.ChannelOrder, repos.LibraryChannelOrder, repos.LibraryEPGSources, repos.ChannelOverrides,
+		repos.ChannelFavorites, repos.ChannelOrder, repos.LibraryChannelOrder, repos.LibraryEPGSources, repos.ChannelOverrides, repos.ChannelLogoOverrides,
 		repos.ChannelWatchHistory,
 		slog.New(slog.NewTextHandler(new(discard), nil)))
 }
