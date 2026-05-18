@@ -32,6 +32,25 @@ export function useServerIdentity() {
   });
 }
 
+// useUpdateServerIdentity persiste el nombre visible + color hex
+// del avatar del servidor desde el panel de Federation. Invalida la
+// cache de identity para que IdentityCard repinte con los valores
+// nuevos sin tener que refrescar la pagina.
+export function useUpdateServerIdentity() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    FederationServerInfo,
+    Error,
+    { name: string; avatarColor: string }
+  >({
+    mutationFn: ({ name, avatarColor }) =>
+      api.updateServerIdentity({ name, avatar_color: avatarColor }),
+    onSuccess: (info) => {
+      queryClient.setQueryData(queryKeys.federationIdentity, info);
+    },
+  });
+}
+
 export function usePeers() {
   return useQuery<FederationPeer[]>({
     queryKey: queryKeys.federationPeers,

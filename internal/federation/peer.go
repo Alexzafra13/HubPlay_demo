@@ -100,4 +100,12 @@ type ServerInfo struct {
 	SupportedScopes   []string `json:"supported_scopes"`
 	AdvertisedURL     string   `json:"advertised_url"`
 	AdminContact      string   `json:"admin_contact,omitempty"`
+	// AvatarColor: hex tipo "#1d4ed8" elegido por el admin como
+	// fallback para el círculo del avatar cuando no hay foto. Vacío
+	// significa que el peer cae a su propia paleta determinista.
+	AvatarColor string `json:"avatar_color,omitempty"`
+	// AvatarImageURL: URL absoluta (incluye scheme/host) servida
+	// desde este servidor. El peer la mete tal cual en <img src>.
+	// Vacío significa que no hay foto subida.
+	AvatarImageURL string `json:"avatar_image_url,omitempty"`
 }

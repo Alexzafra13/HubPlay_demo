@@ -1491,6 +1491,13 @@ export class ApiClient {
     return this.request("GET", "/admin/peers/identity");
   }
 
+  async updateServerIdentity(input: {
+    name: string;
+    avatar_color: string;
+  }): Promise<import("./types").FederationServerInfo> {
+    return this.request("PUT", "/admin/peers/identity", { body: input });
+  }
+
   async listPeers(): Promise<import("./types").FederationPeer[]> {
     return this.request("GET", "/admin/peers");
   }

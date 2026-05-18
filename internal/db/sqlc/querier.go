@@ -424,6 +424,7 @@ type Querier interface {
 	SetImagePrimary(ctx context.Context, arg SetImagePrimaryParams) error
 	SetPersonThumbPath(ctx context.Context, arg SetPersonThumbPathParams) error
 	SetProviderStatus(ctx context.Context, arg SetProviderStatusParams) (int64, error)
+	SetServerAvatarPath(ctx context.Context, avatarImagePath string) error
 	SetSigningKeyRetiredAt(ctx context.Context, arg SetSigningKeyRetiredAtParams) (int64, error)
 	TouchDeviceCodePollAt(ctx context.Context, arg TouchDeviceCodePollAtParams) error
 	UnsetPrimaryImages(ctx context.Context, arg UnsetPrimaryImagesParams) error
@@ -435,6 +436,11 @@ type Querier interface {
 	UpdatePeerPaired(ctx context.Context, arg UpdatePeerPairedParams) error
 	UpdatePeerRevoked(ctx context.Context, arg UpdatePeerRevokedParams) (int64, error)
 	UpdateProgress(ctx context.Context, arg UpdateProgressParams) error
+	// Personalizacion editable del servidor: nombre visible para peers
+	// y color hex de fallback para el avatar. La foto se actualiza por
+	// separado con SetServerAvatarPath para no reenviar los otros
+	// campos en cada upload.
+	UpdateServerIdentityProfile(ctx context.Context, arg UpdateServerIdentityProfileParams) error
 	UpdateSessionLastActive(ctx context.Context, arg UpdateSessionLastActiveParams) error
 	UpdateUser(ctx context.Context, arg UpdateUserParams) error
 	// NULL = no expiry (permanent). Non-null = JWT middleware + login

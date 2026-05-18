@@ -393,13 +393,15 @@ type Provider struct {
 }
 
 type ServerIdentity struct {
-	ID         string       `json:"id"`
-	ServerUuid string       `json:"server_uuid"`
-	Name       string       `json:"name"`
-	PrivateKey []byte       `json:"private_key"`
-	PublicKey  []byte       `json:"public_key"`
-	CreatedAt  time.Time    `json:"created_at"`
-	RotatedAt  sql.NullTime `json:"rotated_at"`
+	ID              string       `json:"id"`
+	ServerUuid      string       `json:"server_uuid"`
+	Name            string       `json:"name"`
+	PrivateKey      []byte       `json:"private_key"`
+	PublicKey       []byte       `json:"public_key"`
+	CreatedAt       time.Time    `json:"created_at"`
+	RotatedAt       sql.NullTime `json:"rotated_at"`
+	AvatarColor     string       `json:"avatar_color"`
+	AvatarImagePath string       `json:"avatar_image_path"`
 }
 
 type Session struct {

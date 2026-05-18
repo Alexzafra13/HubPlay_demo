@@ -26,6 +26,21 @@ func (f *fakeRepo) InsertIdentity(_ context.Context, id *Identity) error {
 	return nil
 }
 
+func (f *fakeRepo) UpdateIdentityProfile(_ context.Context, name, color string) error {
+	if f.identity != nil {
+		f.identity.Name = name
+		f.identity.AvatarColor = color
+	}
+	return nil
+}
+
+func (f *fakeRepo) SetAvatarPath(_ context.Context, path string) error {
+	if f.identity != nil {
+		f.identity.AvatarImagePath = path
+	}
+	return nil
+}
+
 func TestFingerprint_DeterministicForSamePubkey(t *testing.T) {
 	pub, _, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {

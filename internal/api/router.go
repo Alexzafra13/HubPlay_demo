@@ -517,6 +517,7 @@ func NewRouter(deps Dependencies) http.Handler {
 						r.Use(auth.RequireAdmin)
 						r.Get("/", adminFed.ListPeers)
 						r.Get("/identity", adminFed.GetServerIdentity)
+						r.Put("/identity", adminFed.UpdateServerIdentity)
 						r.Post("/probe", adminFed.ProbePeer)
 						r.Post("/accept", adminFed.AcceptInvite)
 						r.Get("/{id}", adminFed.GetPeer)

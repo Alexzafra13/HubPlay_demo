@@ -27,13 +27,20 @@ import (
 // first boot, persisted, and pinned by every peer who handshakes with
 // us. Rotation is explicit (Phase 2+); for v1, this keypair is held
 // for the life of the server.
+//
+// AvatarColor + AvatarImagePath son personalizacion editable desde
+// el panel admin (PUT /admin/peers/identity y POST .../avatar). Se
+// exponen a peers via /federation/info para que pinten el servidor
+// con su color/foto en lugar de un genérico.
 type Identity struct {
-	ServerUUID string
-	Name       string
-	PublicKey  ed25519.PublicKey
-	PrivateKey ed25519.PrivateKey
-	CreatedAt  time.Time
-	RotatedAt  *time.Time
+	ServerUUID      string
+	Name            string
+	PublicKey       ed25519.PublicKey
+	PrivateKey      ed25519.PrivateKey
+	CreatedAt       time.Time
+	RotatedAt       *time.Time
+	AvatarColor     string
+	AvatarImagePath string
 }
 
 // Fingerprint renders the Ed25519 public key as four hex groups of four
@@ -133,6 +140,13 @@ type IdentityStore struct {
 type IdentityRepo interface {
 	GetIdentity(ctx context.Context) (*Identity, error)
 	InsertIdentity(ctx context.Context, id *Identity) error
+	// UpdateIdentityProfile persiste cambios al nombre visible y al color
+	// hex del avatar. La foto se gestiona por separado en SetAvatarPath.
+	UpdateIdentityProfile(ctx context.Context, name, avatarColor string) error
+	// SetAvatarPath guarda la ruta relativa al avatar subido (nombre
+	// de fichero dentro de avatarsDir). Cadena vacia significa "sin
+	// avatar"; el frontend cae a iniciales sobre el color.
+	SetAvatarPath(ctx context.Context, path string) error
 }
 
 // NewIdentityStore loads the persisted identity into memory.
@@ -178,6 +192,43 @@ func (is *IdentityStore) Current() *Identity {
 	is.mu.RLock()
 	defer is.mu.RUnlock()
 	return is.identity
+}
+
+// UpdateProfile persiste el nombre visible + color hex y refresca la
+// cache en memoria. El nombre se valida en el caller (handler) — aqui
+// solo dejamos pasar lo que ya está saneado.
+func (is *IdentityStore) UpdateProfile(ctx context.Context, name, avatarColor string) error {
+	if name == "" {
+		return errors.New("federation: identity name required")
+	}
+	if err := is.repo.UpdateIdentityProfile(ctx, name, avatarColor); err != nil {
+		return fmt.Errorf("federation: update identity profile: %w", err)
+	}
+	is.mu.Lock()
+	if is.identity != nil {
+		cp := *is.identity
+		cp.Name = name
+		cp.AvatarColor = avatarColor
+		is.identity = &cp
+	}
+	is.mu.Unlock()
+	return nil
+}
+
+// SetAvatarPath actualiza la ruta de la foto del servidor (relativa
+// al avatarsDir) y refresca la cache. Cadena vacia limpia el avatar.
+func (is *IdentityStore) SetAvatarPath(ctx context.Context, path string) error {
+	if err := is.repo.SetAvatarPath(ctx, path); err != nil {
+		return fmt.Errorf("federation: set avatar path: %w", err)
+	}
+	is.mu.Lock()
+	if is.identity != nil {
+		cp := *is.identity
+		cp.AvatarImagePath = path
+		is.identity = &cp
+	}
+	is.mu.Unlock()
+	return nil
 }
 
 // newIdentity generates a fresh Ed25519 keypair + UUID. Pure helper;
