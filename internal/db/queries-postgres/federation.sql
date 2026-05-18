@@ -333,3 +333,53 @@ WHERE fp.user_id = $1
   )
 ORDER BY fp.last_played_at DESC
 LIMIT $2;
+
+-- ============================================================
+-- pending requests (pairing-request inbox, migration 048)
+-- ============================================================
+
+-- name: InsertPendingRequest :exec
+INSERT INTO federation_pending_requests
+    (id, direction, peer_server_uuid, peer_name, peer_base_url,
+     peer_public_key, peer_avatar_color, peer_avatar_image_url,
+     request_token, created_at, expires_at, status)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending');
+
+-- name: GetPendingRequestByID :one
+SELECT id, direction, peer_server_uuid, peer_name, peer_base_url,
+       peer_public_key, peer_avatar_color, peer_avatar_image_url,
+       request_token, created_at, expires_at, status,
+       responded_at, responded_by_user_id
+FROM federation_pending_requests
+WHERE id = $1;
+
+-- name: GetActivePendingRequestByPeer :one
+SELECT id, direction, peer_server_uuid, peer_name, peer_base_url,
+       peer_public_key, peer_avatar_color, peer_avatar_image_url,
+       request_token, created_at, expires_at, status,
+       responded_at, responded_by_user_id
+FROM federation_pending_requests
+WHERE direction = $1 AND peer_server_uuid = $2 AND status = 'pending';
+
+-- name: ListPendingRequests :many
+SELECT id, direction, peer_server_uuid, peer_name, peer_base_url,
+       peer_public_key, peer_avatar_color, peer_avatar_image_url,
+       request_token, created_at, expires_at, status,
+       responded_at, responded_by_user_id
+FROM federation_pending_requests
+ORDER BY created_at DESC
+LIMIT $1;
+
+-- name: MarkPendingRequestResponded :execrows
+UPDATE federation_pending_requests
+SET status = $1, responded_at = $2, responded_by_user_id = $3
+WHERE id = $4 AND status = 'pending';
+
+-- name: ExpirePendingRequests :execrows
+UPDATE federation_pending_requests
+SET status = 'expired'
+WHERE status = 'pending' AND expires_at < $1;
+
+-- name: CountUnreadIncomingPendingRequests :one
+SELECT COUNT(*) FROM federation_pending_requests
+WHERE direction = 'incoming' AND status = 'pending';

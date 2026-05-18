@@ -70,6 +70,15 @@ WHERE role = 'admin' AND parent_user_id IS NULL
 ORDER BY created_at ASC
 LIMIT 1;
 
+-- name: ListAdminIDs :many
+-- Returns every admin (role='admin', household head) so a feature
+-- can fan-out a notification to all of them at once. Used by the
+-- notification service when federation receives a pairing request
+-- and every admin in the install should see the badge.
+SELECT id FROM users
+WHERE role = 'admin' AND parent_user_id IS NULL AND is_active = 1
+ORDER BY created_at ASC;
+
 -- name: DeleteUser :execrows
 DELETE FROM users WHERE id = ?;
 

@@ -29,6 +29,7 @@ import (
 	"hubplay/internal/library"
 	"hubplay/internal/logging"
 	"hubplay/internal/iptv"
+	"hubplay/internal/notification"
 	"hubplay/internal/observability"
 	"hubplay/internal/probe"
 	"hubplay/internal/provider"
@@ -149,6 +150,14 @@ func run(configPath string) error {
 		avatarsDir = filepath.Join(filepath.Dir(cfg.Database.Path), "avatars")
 	}
 	userService := user.NewService(repos.Users, logger, avatarsDir)
+
+	// Inbox de notificaciones generico (migration 049). El service
+	// vive como singleton para que cualquier feature (federation,
+	// stream, library, ...) emita con un solo handle. El bus opcional
+	// hace que Create publique un evento que /me/events empuja al
+	// frontend del destinatario - badge en vivo sin polling.
+	notificationRepo := notification.NewRepository(cfg.Database.Driver, database)
+	notificationService := notification.NewService(notificationRepo, repos.Users, eventBus, clk, logger)
 
 	prober := probe.New()
 
@@ -427,6 +436,15 @@ func run(configPath string) error {
 		// Flush the audit log queue on graceful shutdown so the last
 		// few peer requests aren't lost.
 		defer federationManager.Close()
+
+		// Hook event-bus -> notifications: cuando llega una pairing
+		// request o se resuelve una outbound, creamos las entradas
+		// correspondientes en el inbox del admin (badge en TopBar).
+		// El federation manager publica los eventos; el wire vive
+		// aqui en main.go para mantener federation desacoplado del
+		// paquete notification (acoplamiento solo va de notification
+		// hacia event, no al reves).
+		registerFederationNotifications(ctx, eventBus, notificationService, logger)
 	}
 
 	// Retention sweep: prune EPG programmes and federation audit log on
@@ -478,6 +496,7 @@ func run(configPath string) error {
 		SetupService:  setupService,
 		EventBus:      eventBus,
 		Federation:    federationManager,
+		Notifications: notificationService,
 		DB:            db.NewMaintenance(cfg.Database.Driver, database),
 		Activity:      db.NewActivityRepository(cfg.Database.Driver, database),
 		Version:       version,

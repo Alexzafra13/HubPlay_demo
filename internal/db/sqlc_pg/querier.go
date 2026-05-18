@@ -63,6 +63,8 @@ type Querier interface {
 	CountItemsByLibrary(ctx context.Context, libraryID string) (int64, error)
 	CountSessionsByUser(ctx context.Context, userID string) (int64, error)
 	CountSharedItems(ctx context.Context, arg CountSharedItemsParams) (int64, error)
+	CountUnreadIncomingPendingRequests(ctx context.Context) (int64, error)
+	CountUnreadNotificationsForUser(ctx context.Context, userID string) (int64, error)
 	CountUsers(ctx context.Context) (int64, error)
 	// IPTV channels per library.
 	//
@@ -128,6 +130,7 @@ type Querier interface {
 	// PK: (item_id, stream_index).
 	DeleteMediaStreamsByItem(ctx context.Context, itemID string) error
 	DeleteMetadata(ctx context.Context, itemID string) error
+	DeleteOldReadNotifications(ctx context.Context, readAt sql.NullTime) (int64, error)
 	// Subquery aliased to 's' because sqlc needs unambiguous column resolution
 	// when the same table appears twice in scope.
 	DeleteOldestSessionByUser(ctx context.Context, userID string) error
@@ -138,6 +141,8 @@ type Querier interface {
 	DeleteSessionByRefreshTokenHash(ctx context.Context, refreshTokenHash string) error
 	DeleteUser(ctx context.Context, id string) (int64, error)
 	DeleteUserData(ctx context.Context, arg DeleteUserDataParams) error
+	ExpirePendingRequests(ctx context.Context, expiresAt time.Time) (int64, error)
+	GetActivePendingRequestByPeer(ctx context.Context, arg GetActivePendingRequestByPeerParams) (FederationPendingRequest, error)
 	GetChannelByID(ctx context.Context, id string) (GetChannelByIDRow, error)
 	GetChannelOverride(ctx context.Context, arg GetChannelOverrideParams) (ChannelOverride, error)
 	// Movie collections (sagas).
@@ -164,6 +169,7 @@ type Querier interface {
 	GetNowPlaying(ctx context.Context, arg GetNowPlayingParams) (GetNowPlayingRow, error)
 	GetPeerByID(ctx context.Context, id string) (FederationPeer, error)
 	GetPeerByServerUUID(ctx context.Context, serverUuid string) (FederationPeer, error)
+	GetPendingRequestByID(ctx context.Context, id string) (FederationPendingRequest, error)
 	GetPersonByID(ctx context.Context, id string) (GetPersonByIDRow, error)
 	// People (cast + crew) and the join table that links them to items.
 	//
@@ -263,10 +269,16 @@ type Querier interface {
 	InsertLibrary(ctx context.Context, arg InsertLibraryParams) error
 	InsertLibraryPath(ctx context.Context, arg InsertLibraryPathParams) error
 	InsertMediaStream(ctx context.Context, arg InsertMediaStreamParams) error
+	// Notifications: inbox por usuario. Ver hermano SQLite para rationale.
+	InsertNotification(ctx context.Context, arg InsertNotificationParams) error
 	// ============================================================
 	// peers
 	// ============================================================
 	InsertPeer(ctx context.Context, arg InsertPeerParams) error
+	// ============================================================
+	// pending requests (pairing-request inbox, migration 048)
+	// ============================================================
+	InsertPendingRequest(ctx context.Context, arg InsertPendingRequestParams) error
 	InsertServerIdentity(ctx context.Context, arg InsertServerIdentityParams) error
 	IsChannelFavorite(ctx context.Context, arg IsChannelFavoriteParams) (int32, error)
 	// Postgres: INSERT OR IGNORE → ON CONFLICT DO NOTHING. La PK
@@ -276,6 +288,8 @@ type Querier interface {
 	ListActiveInvites(ctx context.Context, expiresAt time.Time) ([]FederationInvite, error)
 	ListActiveProviders(ctx context.Context) ([]Provider, error)
 	ListActiveSigningKeys(ctx context.Context) ([]JwtSigningKey, error)
+	// Fan-out destination for cross-admin notifications.
+	ListAdminIDs(ctx context.Context) ([]string, error)
 	ListAllPaths(ctx context.Context) ([]LibraryPath, error)
 	ListCachedItems(ctx context.Context, arg ListCachedItemsParams) ([]ListCachedItemsRow, error)
 	ListChannelFavorites(ctx context.Context, userID string) ([]ListChannelFavoritesRow, error)
@@ -365,8 +379,10 @@ type Querier interface {
 	// string). Falling back to sql.NullTime there.
 	ListLibraryEPGSourcesByLibrary(ctx context.Context, libraryID string) ([]ListLibraryEPGSourcesByLibraryRow, error)
 	ListMediaStreamsByItem(ctx context.Context, itemID string) ([]ListMediaStreamsByItemRow, error)
+	ListNotificationsForUser(ctx context.Context, arg ListNotificationsForUserParams) ([]Notification, error)
 	ListPathsByLibrary(ctx context.Context, libraryID string) ([]string, error)
 	ListPeers(ctx context.Context) ([]FederationPeer, error)
+	ListPendingRequests(ctx context.Context, limit int32) ([]FederationPendingRequest, error)
 	ListProviders(ctx context.Context) ([]Provider, error)
 	ListProvidersByType(ctx context.Context, type_ string) ([]Provider, error)
 	// NOTE: SearchSharedItems is implemented as raw SQL in
@@ -398,7 +414,10 @@ type Querier interface {
 	// to (studio_id) which we already created in 032_studios.sql.
 	ListStudios(ctx context.Context) ([]ListStudiosRow, error)
 	ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUsersRow, error)
+	MarkAllNotificationsReadForUser(ctx context.Context, arg MarkAllNotificationsReadForUserParams) (int64, error)
 	MarkInviteUsed(ctx context.Context, arg MarkInviteUsedParams) error
+	MarkNotificationRead(ctx context.Context, arg MarkNotificationReadParams) (int64, error)
+	MarkPendingRequestResponded(ctx context.Context, arg MarkPendingRequestRespondedParams) (int64, error)
 	MarkPlayed(ctx context.Context, arg MarkPlayedParams) error
 	// The default-priority slot for a freshly-added source: one past the
 	// current max, so it runs last and can be reordered from the UI.

@@ -460,6 +460,180 @@ func shareToWire(s *federation.LibraryShare) shareWire {
 	}
 }
 
+// ─── Pairing requests "Steam-style" (migration 048) ────────────────
+
+// pendingRequestWire es el shape JSON que devolvemos al admin para
+// pintar el inbox de peticiones (incoming + outgoing).
+type pendingRequestWire struct {
+	ID                 string   `json:"id"`
+	Direction          string   `json:"direction"`
+	PeerServerUUID     string   `json:"peer_server_uuid"`
+	PeerName           string   `json:"peer_name"`
+	PeerBaseURL        string   `json:"peer_base_url"`
+	PeerPublicKey      string   `json:"peer_public_key"`
+	PeerAvatarColor    string   `json:"peer_avatar_color,omitempty"`
+	PeerAvatarImageURL string   `json:"peer_avatar_image_url,omitempty"`
+	Fingerprint        string   `json:"fingerprint"`
+	FingerprintWords   []string `json:"fingerprint_words"`
+	CreatedAt          string   `json:"created_at"`
+	ExpiresAt          string   `json:"expires_at"`
+	Status             string   `json:"status"`
+	RespondedAt        *string  `json:"responded_at,omitempty"`
+}
+
+func pendingRequestToWire(p *federation.PendingRequest) pendingRequestWire {
+	out := pendingRequestWire{
+		ID:                 p.ID,
+		Direction:          string(p.Direction),
+		PeerServerUUID:     p.PeerServerUUID,
+		PeerName:           p.PeerName,
+		PeerBaseURL:        p.PeerBaseURL,
+		PeerPublicKey:      federation.EncodePublicKey([]byte(p.PeerPublicKey)),
+		PeerAvatarColor:    p.PeerAvatarColor,
+		PeerAvatarImageURL: p.PeerAvatarImageURL,
+		Fingerprint:        p.Fingerprint(),
+		FingerprintWords:   p.FingerprintWords(),
+		CreatedAt:          p.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+		ExpiresAt:          p.ExpiresAt.UTC().Format("2006-01-02T15:04:05Z"),
+		Status:             string(p.Status),
+	}
+	if p.RespondedAt != nil {
+		s := p.RespondedAt.UTC().Format("2006-01-02T15:04:05Z")
+		out.RespondedAt = &s
+	}
+	return out
+}
+
+type sendPairingRequestBody struct {
+	BaseURL string `json:"base_url"`
+}
+
+// SendPairingRequest — POST /admin/peers/pairing-requests/send.
+// El admin pega la URL del servidor remoto; nosotros probamos y le
+// enviamos una peticion. Devuelve la peticion outgoing recien creada.
+func (h *FederationAdminHandler) SendPairingRequest(w http.ResponseWriter, r *http.Request) {
+	claims := auth.GetClaims(r.Context())
+	if claims == nil {
+		respondError(w, r, http.StatusUnauthorized, "AUTH_REQUIRED", "unauthenticated")
+		return
+	}
+	var body sendPairingRequestBody
+	if err := decodeJSON(r, &body); err != nil {
+		respondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
+		return
+	}
+	body.BaseURL = strings.TrimSpace(body.BaseURL)
+	if body.BaseURL == "" {
+		respondError(w, r, http.StatusBadRequest, "FEDERATION_BASE_URL_REQUIRED", "base_url required")
+		return
+	}
+	pending, err := h.mgr.SendPairingRequest(r.Context(), body.BaseURL, claims.UserID)
+	if err != nil {
+		// Detalle al log; mensaje generico al cliente (audit olor F16-6).
+		status, code := http.StatusBadGateway, "PEER_PROBE_FAILED"
+		msg := "could not reach the peer; check the URL and try again"
+		if errors.Is(err, domain.ErrAlreadyExists) {
+			status, code = http.StatusConflict, "PEER_ALREADY_PAIRED"
+			msg = "this peer is already paired or has a pending request"
+		}
+		h.logger.Warn("federation: send pairing request failed", "base_url", body.BaseURL, "err", err)
+		respondError(w, r, status, code, msg)
+		return
+	}
+	respondJSON(w, http.StatusCreated, map[string]any{"data": pendingRequestToWire(pending)})
+}
+
+// ListPairingRequests — GET /admin/peers/pairing-requests.
+// Devuelve ambas direcciones, ordenadas por created_at desc.
+func (h *FederationAdminHandler) ListPairingRequests(w http.ResponseWriter, r *http.Request) {
+	reqs, err := h.mgr.ListPendingRequests(r.Context(), 100)
+	if err != nil {
+		h.logger.Error("federation: list pairing requests", "err", err)
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list pairing requests")
+		return
+	}
+	out := make([]pendingRequestWire, 0, len(reqs))
+	for _, p := range reqs {
+		out = append(out, pendingRequestToWire(p))
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"data": out})
+}
+
+// AcceptPairingRequest — POST /admin/peers/pairing-requests/{id}/accept.
+// Solo aplica a incoming. Crea Peer paired + notifica callback a A.
+func (h *FederationAdminHandler) AcceptPairingRequest(w http.ResponseWriter, r *http.Request) {
+	claims := auth.GetClaims(r.Context())
+	if claims == nil {
+		respondError(w, r, http.StatusUnauthorized, "AUTH_REQUIRED", "unauthenticated")
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "id required")
+		return
+	}
+	peer, err := h.mgr.AcceptPairingRequest(r.Context(), id, claims.UserID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			respondError(w, r, http.StatusNotFound, "REQUEST_NOT_FOUND", "request not found or expired")
+			return
+		}
+		h.logger.Warn("federation: accept pairing request", "id", id, "err", err)
+		respondError(w, r, http.StatusBadRequest, "ACCEPT_FAILED", "could not accept pairing request")
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"data": peerToWire(peer)})
+}
+
+// DeclinePairingRequest — POST /admin/peers/pairing-requests/{id}/decline.
+func (h *FederationAdminHandler) DeclinePairingRequest(w http.ResponseWriter, r *http.Request) {
+	claims := auth.GetClaims(r.Context())
+	if claims == nil {
+		respondError(w, r, http.StatusUnauthorized, "AUTH_REQUIRED", "unauthenticated")
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "id required")
+		return
+	}
+	if err := h.mgr.DeclinePairingRequest(r.Context(), id, claims.UserID); err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			respondError(w, r, http.StatusNotFound, "REQUEST_NOT_FOUND", "request not found or expired")
+			return
+		}
+		h.logger.Warn("federation: decline pairing request", "id", id, "err", err)
+		respondError(w, r, http.StatusBadRequest, "DECLINE_FAILED", "could not decline pairing request")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// CancelPairingRequest — DELETE /admin/peers/pairing-requests/{id}.
+// Solo outgoing. Marca local cancelled + best-effort notifica a B.
+func (h *FederationAdminHandler) CancelPairingRequest(w http.ResponseWriter, r *http.Request) {
+	claims := auth.GetClaims(r.Context())
+	if claims == nil {
+		respondError(w, r, http.StatusUnauthorized, "AUTH_REQUIRED", "unauthenticated")
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "id required")
+		return
+	}
+	if err := h.mgr.CancelPairingRequest(r.Context(), id, claims.UserID); err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			respondError(w, r, http.StatusNotFound, "REQUEST_NOT_FOUND", "request not found")
+			return
+		}
+		h.logger.Warn("federation: cancel pairing request", "id", id, "err", err)
+		respondError(w, r, http.StatusBadRequest, "CANCEL_FAILED", "could not cancel pairing request")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // RefreshPeer re-probea el /federation/info del peer y persiste su
 // branding (nombre + color + URL de la foto) actualizado. Idempotente.
 // 200 con el peer actualizado; 502 si el remoto no responde.

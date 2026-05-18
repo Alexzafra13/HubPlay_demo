@@ -9,6 +9,7 @@ import (
 
 	"hubplay/internal/auth"
 	"hubplay/internal/event"
+	"hubplay/internal/notification"
 )
 
 // MeEventsHandler exposes user-scoped events as a Server-Sent Events
@@ -59,6 +60,10 @@ var userScopedEventTypes = []event.Type{
 	// them like any other user-scoped event.
 	event.UserLoggedIn,
 	event.UserLoggedOut,
+	// Inbox de notificaciones generico (migration 049). El service
+	// estampa user_id en Data, asi que el filtro per-user de abajo
+	// despacha solo a la sesion del destinatario.
+	notification.EventCreated,
 }
 
 // Stream opens an SSE connection scoped to the authenticated user.

@@ -52,6 +52,147 @@ func (h *FederationPublicHandler) ServerInfo(w http.ResponseWriter, r *http.Requ
 	respondJSON(w, http.StatusOK, infoToWire(info))
 }
 
+// pairingRequestWire es el wire format del POST inicial al inbox
+// del peer. Espejo del federation.pairingRequestBody.
+type pairingRequestWire struct {
+	RequestID    string   `json:"request_id"`
+	RequestToken string   `json:"request_token"`
+	Requester    infoWire `json:"requester"`
+}
+
+// pairingCallbackWire es el wire format del POST de callback.
+type pairingCallbackWire struct {
+	Outcome      string   `json:"outcome"`
+	RequestToken string   `json:"request_token"`
+	Accepter     infoWire `json:"accepter"`
+	Signature    string   `json:"signature"`
+}
+
+// pairingCancelWire es el wire format del POST de cancelacion.
+type pairingCancelWire struct {
+	RequestToken string `json:"request_token"`
+}
+
+// pairingRequestResponse es lo que devolvemos al sender de la
+// peticion para que persista el id confirmado + el expires.
+type pairingRequestResponse struct {
+	ID        string `json:"id"`
+	ExpiresAt string `json:"expires_at"`
+}
+
+// ReceivePairingRequest recibe el POST inicial A -> B. Persiste
+// como INCOMING pending + publica evento (notification service
+// fan-outea a los admins). Rate-limited por el middleware general
+// del router para evitar spam de peers desconocidos.
+func (h *FederationPublicHandler) ReceivePairingRequest(w http.ResponseWriter, r *http.Request) {
+	var body pairingRequestWire
+	if err := decodeJSON(r, &body); err != nil {
+		respondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
+		return
+	}
+	requester, err := wireToInfo(body.Requester)
+	if err != nil {
+		respondError(w, r, http.StatusBadRequest, "INVALID_REQUESTER", "requester info malformed")
+		return
+	}
+	pending, err := h.mgr.HandleIncomingPairingRequest(r.Context(), body.RequestID, body.RequestToken, requester)
+	if err != nil {
+		if errors.Is(err, domain.ErrAlreadyExists) {
+			respondError(w, r, http.StatusConflict, "PEER_ALREADY_PAIRED", "this peer is already paired")
+			return
+		}
+		var ve *domain.ValidationError
+		if errors.As(err, &ve) {
+			respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "request body validation failed")
+			return
+		}
+		h.logger.Warn("federation: receive pairing request failed", "err", err)
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "could not accept the request")
+		return
+	}
+	respondJSON(w, http.StatusAccepted, pairingRequestResponse{
+		ID:        pending.ID,
+		ExpiresAt: pending.ExpiresAt.UTC().Format("2006-01-02T15:04:05Z"),
+	})
+}
+
+// ReceivePairingCallback recibe la respuesta de B tras accept/decline
+// (B -> A). Verifica la firma Ed25519 con el pubkey pineado en step 1.
+func (h *FederationPublicHandler) ReceivePairingCallback(w http.ResponseWriter, r *http.Request) {
+	requestID := chi.URLParam(r, "id")
+	if requestID == "" {
+		respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "missing request id")
+		return
+	}
+	var body pairingCallbackWire
+	if err := decodeJSON(r, &body); err != nil {
+		respondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
+		return
+	}
+	accepter, err := wireToInfo(body.Accepter)
+	if err != nil {
+		respondError(w, r, http.StatusBadRequest, "INVALID_ACCEPTER", "accepter info malformed")
+		return
+	}
+	sig, err := federation.DecodePublicKey(body.Signature)
+	if err != nil {
+		respondError(w, r, http.StatusBadRequest, "INVALID_SIGNATURE", "signature base64 invalid")
+		return
+	}
+	if err := h.mgr.HandlePairingCallback(r.Context(), requestID, body.Outcome, body.RequestToken, accepter, sig); err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			respondError(w, r, http.StatusNotFound, "REQUEST_NOT_FOUND", "request not found")
+			return
+		}
+		// Cualquier otro fallo es protocolo/firma invalida.
+		h.logger.Warn("federation: pairing callback rejected", "request_id", requestID, "err", err)
+		respondError(w, r, http.StatusBadRequest, "CALLBACK_REJECTED", "callback validation failed")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ReceivePairingCancel recibe la notificacion de cancelacion A -> B.
+// Best-effort: si no encontramos la peticion (ya respondida, expirada,
+// purgada), devolvemos 204 igualmente para que A no haga retries.
+func (h *FederationPublicHandler) ReceivePairingCancel(w http.ResponseWriter, r *http.Request) {
+	requestID := chi.URLParam(r, "id")
+	if requestID == "" {
+		respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "missing request id")
+		return
+	}
+	var body pairingCancelWire
+	if err := decodeJSON(r, &body); err != nil {
+		respondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
+		return
+	}
+	pending, err := h.mgr.GetPendingRequest(r.Context(), requestID)
+	if err != nil || pending == nil {
+		// Idempotente: nada que cancelar, todo OK.
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if pending.Direction != federation.PendingDirectionIncoming {
+		respondError(w, r, http.StatusBadRequest, "WRONG_DIRECTION", "only incoming requests can be cancelled")
+		return
+	}
+	if pending.RequestToken != body.RequestToken {
+		respondError(w, r, http.StatusForbidden, "TOKEN_MISMATCH", "request token mismatch")
+		return
+	}
+	if pending.Status != federation.PendingStatusPending {
+		// Ya respondida/expirada; idempotente.
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if err := h.mgr.CancelIncomingPairingRequest(r.Context(), requestID); err != nil {
+		h.logger.Warn("federation: cancel incoming pairing request failed", "id", requestID, "err", err)
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "could not cancel")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // ServeIdentityAvatar sirve los bytes del avatar del servidor.
 // Público a propósito: cualquier peer que recibe nuestro
 // /federation/info ve el campo avatar_image_url apuntando aquí, y

@@ -69,6 +69,15 @@ type Repo interface {
 	GetProgress(ctx context.Context, userID, peerID, remoteItemID string) (*Progress, error)
 	DeleteProgress(ctx context.Context, userID, peerID, remoteItemID string) error
 	ListContinueWatching(ctx context.Context, userID string, limit int) ([]*PeerContinueWatchingItem, error)
+
+	// Pairing requests (migration 048) - flow Steam-style sin codigo.
+	InsertPendingRequest(ctx context.Context, p *PendingRequest) error
+	GetPendingRequestByID(ctx context.Context, id string) (*PendingRequest, error)
+	GetActivePendingRequestByPeer(ctx context.Context, direction PendingRequestDirection, serverUUID string) (*PendingRequest, bool, error)
+	ListPendingRequests(ctx context.Context, limit int) ([]*PendingRequest, error)
+	MarkPendingRequestResponded(ctx context.Context, id string, status PendingRequestStatus, by string, at time.Time) error
+	ExpirePendingRequests(ctx context.Context, before time.Time) (int, error)
+	CountUnreadIncomingPendingRequests(ctx context.Context) (int, error)
 }
 
 // EventBus is the slice of internal/event the Manager publishes to.

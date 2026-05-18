@@ -334,3 +334,70 @@ WHERE fp.user_id = ?
   )
 ORDER BY fp.last_played_at DESC
 LIMIT ?;
+
+-- ============================================================
+-- pending requests (pairing-request inbox, migration 048)
+-- ============================================================
+
+-- name: InsertPendingRequest :exec
+INSERT INTO federation_pending_requests
+    (id, direction, peer_server_uuid, peer_name, peer_base_url,
+     peer_public_key, peer_avatar_color, peer_avatar_image_url,
+     request_token, created_at, expires_at, status)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending');
+
+-- name: GetPendingRequestByID :one
+SELECT id, direction, peer_server_uuid, peer_name, peer_base_url,
+       peer_public_key, peer_avatar_color, peer_avatar_image_url,
+       request_token, created_at, expires_at, status,
+       responded_at, responded_by_user_id
+FROM federation_pending_requests
+WHERE id = ?;
+
+-- name: GetActivePendingRequestByPeer :one
+-- Lookup para el lado receptor: si A reenvia la peticion antes
+-- de que B la acepte/declino, devolvemos el id existente en vez
+-- de duplicar (el indice unico parcial sobre status='pending' lo
+-- haria fallar igualmente, esto solo es mas legible).
+SELECT id, direction, peer_server_uuid, peer_name, peer_base_url,
+       peer_public_key, peer_avatar_color, peer_avatar_image_url,
+       request_token, created_at, expires_at, status,
+       responded_at, responded_by_user_id
+FROM federation_pending_requests
+WHERE direction = ? AND peer_server_uuid = ? AND status = 'pending';
+
+-- name: ListPendingRequests :many
+-- Listado para el panel admin: ambas direcciones, mas recientes
+-- arriba. Devuelve TODOS los estados terminales (accepted/declined/
+-- cancelled/expired) tambien porque el admin quiere ver el historial
+-- corto - el frontend lo separa en "Activas" vs "Resueltas".
+SELECT id, direction, peer_server_uuid, peer_name, peer_base_url,
+       peer_public_key, peer_avatar_color, peer_avatar_image_url,
+       request_token, created_at, expires_at, status,
+       responded_at, responded_by_user_id
+FROM federation_pending_requests
+ORDER BY created_at DESC
+LIMIT ?;
+
+-- name: MarkPendingRequestResponded :execrows
+-- Transicion de pending al estado terminal. execrows = el manager
+-- detecta la condicion "no encontrado o ya respondida" sin tener
+-- que hacer un GET previo (race-free).
+UPDATE federation_pending_requests
+SET status = ?, responded_at = ?, responded_by_user_id = ?
+WHERE id = ? AND status = 'pending';
+
+-- name: ExpirePendingRequests :execrows
+-- Barrido periodico: marca como 'expired' las pendientes que han
+-- pasado su TTL. Lo invoca un job (lo wireamos en Phase 5) o se
+-- puede llamar a mano en testing.
+UPDATE federation_pending_requests
+SET status = 'expired'
+WHERE status = 'pending' AND expires_at < ?;
+
+-- name: CountUnreadIncomingPendingRequests :one
+-- El admin badge cuenta esto: cuantas peticiones entrantes hay
+-- todavia sin responder. Las salientes propias no cuentan
+-- (el admin las inicio, ya las "sabe").
+SELECT COUNT(*) FROM federation_pending_requests
+WHERE direction = 'incoming' AND status = 'pending';

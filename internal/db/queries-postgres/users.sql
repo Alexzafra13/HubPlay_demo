@@ -70,6 +70,12 @@ WHERE role = 'admin' AND parent_user_id IS NULL
 ORDER BY created_at ASC
 LIMIT 1;
 
+-- name: ListAdminIDs :many
+-- Fan-out destination for cross-admin notifications.
+SELECT id FROM users
+WHERE role = 'admin' AND parent_user_id IS NULL AND is_active = TRUE
+ORDER BY created_at ASC;
+
 -- name: DeleteUser :execrows
 DELETE FROM users WHERE id = $1;
 

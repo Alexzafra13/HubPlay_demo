@@ -206,6 +206,39 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (GetUs
 	return i, err
 }
 
+const listAdminIDs = `-- name: ListAdminIDs :many
+SELECT id FROM users
+WHERE role = 'admin' AND parent_user_id IS NULL AND is_active = 1
+ORDER BY created_at ASC
+`
+
+// Returns every admin (role='admin', household head) so a feature
+// can fan-out a notification to all of them at once. Used by the
+// notification service when federation receives a pairing request
+// and every admin in the install should see the badge.
+func (q *Queries) ListAdminIDs(ctx context.Context) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listAdminIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUsers = `-- name: ListUsers :many
 SELECT id, username, display_name, COALESCE(avatar_path, '') AS avatar_path,
        role, is_active, created_at, last_login_at,
