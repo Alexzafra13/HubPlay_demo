@@ -43,12 +43,19 @@ func (h *IPTVHandler) ListChannels(w http.ResponseWriter, r *http.Request) {
 		channels []*iptvmodel.Channel
 		err      error
 	)
-	if includeHidden || userID == "" {
-		// Personalisation panel: it needs every row, including hidden,
-		// so the user can un-hide. Admin/system callers (userID == "")
-		// also bypass the overlay since they're not viewing as a user.
+	switch {
+	case userID == "":
+		// Admin/system caller sin auth: lista cruda sin overlays.
 		channels, err = h.svc.GetChannels(r.Context(), libraryID, activeOnly)
-	} else {
+	case includeHidden:
+		// Panel /live-tv/customize: necesita TODAS las rows (incluso
+		// las hidden por el usuario) ordenadas según SU overlay personal
+		// — no según el admin. Antes este path caía al GetChannels
+		// crudo y la página mostraba el orden del admin aunque el
+		// usuario ya tuviera personalización, que era exactamente lo
+		// contrario de lo que el panel debe enseñar.
+		channels, err = h.svc.GetChannelsForUserPersonalisation(r.Context(), libraryID, userID)
+	default:
 		channels, err = h.svc.GetChannelsForUser(r.Context(), libraryID, userID, activeOnly)
 	}
 	if err != nil {

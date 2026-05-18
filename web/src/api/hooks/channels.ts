@@ -320,9 +320,19 @@ export function useUploadChannelLogo() {
 // actualizados; el frontend lo enseña como toast ("47 logos añadidos
 // desde iptv-org"). Invalida los listados para que las miniaturas
 // refresquen.
+export interface IPTVOrgRefreshSummary {
+  library_id: string;
+  total: number;
+  already_have_logo: number;
+  without_tvg_id: number;
+  skipped_has_override: number;
+  not_in_database: number;
+  updated: number;
+}
+
 export function useRefreshLogosFromIPTVOrg() {
   const qc = useQueryClient();
-  return useMutation<{ library_id: string; updated: number }, Error, string>({
+  return useMutation<IPTVOrgRefreshSummary, Error, string>({
     mutationFn: (libraryId) => api.refreshLogosFromIPTVOrg(libraryId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["channels"] });

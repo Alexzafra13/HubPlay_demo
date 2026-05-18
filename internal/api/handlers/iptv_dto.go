@@ -13,9 +13,22 @@ import (
 // at request time from the raw M3U data in the DB. That placement is
 // intentional — see comment on `Category` below.
 type channelDTO struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Number    int    `json:"number"`
+	ID string `json:"id"`
+	// Name es el nombre saneado para mostrar (sin tags `[geo-blocked]`,
+	// `[VIP]`, `(HD)`, |ES|, ni símbolos decorativos). El nombre crudo
+	// del M3U se preserva en la DB intocado — la sanitización vive en
+	// el wire para que un cambio de reglas no requiera rescan.
+	Name string `json:"name"`
+	// RawName es el nombre EXACTO del M3U sin sanear. Útil para tests
+	// y para mostrar tooltip "el M3U decía: X" si alguna sanitización
+	// agresiva confunde al operador. Omitido cuando coincide con Name
+	// (la gran mayoría de canales bien etiquetados).
+	RawName string `json:"raw_name,omitempty"`
+	// Quality es la etiqueta canónica de resolución extraída del nombre
+	// crudo: "UHD", "FHD", "HD", "SD" o "". El frontend la renderiza
+	// como badge sutil en la esquina del logo cuando no es "".
+	Quality string `json:"quality,omitempty"`
+	Number  int    `json:"number"`
 	// Group and GroupName are both the raw M3U `group-title`. `group` is kept
 	// as a historical alias for older frontend code; prefer `group_name`.
 	Group     string `json:"group"`
@@ -77,14 +90,23 @@ func toChannelDTO(ch *iptvmodel.Channel, streamPath string) channelDTO {
 	if ch == nil {
 		return channelDTO{}
 	}
-	logo := iptv.DeriveLogoFallback(ch.Name)
+	displayName, quality := iptv.SanitizeChannelName(ch.Name)
+	// Las iniciales del fallback se derivan del nombre LIMPIO — sin
+	// esto un canal "[VIP] ESPN HD" daría iniciales "[V" que sale fatal.
+	logo := iptv.DeriveLogoFallback(displayName)
 	var addedAt string
 	if !ch.AddedAt.IsZero() {
 		addedAt = ch.AddedAt.UTC().Format("2006-01-02T15:04:05Z")
 	}
+	rawName := ""
+	if displayName != ch.Name {
+		rawName = ch.Name
+	}
 	return channelDTO{
 		ID:           ch.ID,
-		Name:         ch.Name,
+		Name:         displayName,
+		RawName:      rawName,
+		Quality:      quality,
 		Number:       ch.Number,
 		// Normalise the group label on the wire so legacy rows
 		// imported before iptv.NormalizeGroupTitle landed in the

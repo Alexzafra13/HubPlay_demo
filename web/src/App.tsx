@@ -7,6 +7,7 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { ProtectedRoute } from "@/components/layout/ProtectedRoute";
 import { Spinner, ErrorBoundary } from "@/components/common";
 import { DebugOverlay } from "@/components/common/DebugOverlay";
+import { ItemActionModals } from "@/components/ItemActionModals";
 import { lazyWithRetry } from "@/utils/lazyWithRetry";
 import Login from "@/pages/Login";
 const ChangePassword = lazyWithRetry(() => import("@/pages/ChangePassword"));
@@ -92,6 +93,10 @@ export function App() {
   return (
     <ErrorBoundary>
     <DebugOverlay />
+    {/* Host global de modales de acciones sobre items (Identify, Edit
+        metadata). Vive aquí para que cualquier ItemKebab en cualquier
+        ruta los pueda abrir sin tener que hostearlos en cada surface. */}
+    <ItemActionModals />
     <Suspense fallback={<LazyFallback />}>
       <Routes>
         {/* Setup wizard — only accessible when setup is needed */}

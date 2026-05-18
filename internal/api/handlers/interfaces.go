@@ -213,6 +213,11 @@ type IPTVService interface {
 	// ReplaceChannelOrder / SetChannelVisibility / ResetChannelOrder
 	// drive the personalisation panel's mutations.
 	GetChannelsForUser(ctx context.Context, libraryID, userID string, activeOnly bool) ([]*iptvmodel.Channel, error)
+	// GetChannelsForUserPersonalisation devuelve la vista del panel
+	// /live-tv/customize: todas las channels (incluso hidden por user)
+	// ordenadas con SU overlay personal aplicado, para que el panel
+	// pueda renderizar la lista que el usuario está editando.
+	GetChannelsForUserPersonalisation(ctx context.Context, libraryID, userID string) ([]*iptvmodel.Channel, error)
 	ListChannelOverrides(ctx context.Context, userID string) ([]iptvmodel.UserChannelOrderEntry, error)
 	ReplaceChannelOrder(ctx context.Context, userID string, orderedIDs []string, hiddenIDs map[string]bool) error
 	SetChannelVisibility(ctx context.Context, userID, channelID string, hidden bool) error
@@ -246,7 +251,7 @@ type IPTVService interface {
 	// RefreshLogosFromIPTVOrg busca logos en la base pública de
 	// iptv-org y rellena los canales sin logo. Devuelve el número
 	// de canales actualizados.
-	RefreshLogosFromIPTVOrg(ctx context.Context, libraryID string) (int, error)
+	RefreshLogosFromIPTVOrg(ctx context.Context, libraryID string) (iptv.IPTVOrgRefreshSummary, error)
 }
 
 // IPTVStreamProxyService defines IPTV proxy operations needed by handlers.

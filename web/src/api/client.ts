@@ -827,7 +827,15 @@ export class ApiClient {
 
   // Admin: busca logos en la base pública de iptv-org y los aplica
   // como overrides URL a los canales sin logo. Devuelve el count.
-  async refreshLogosFromIPTVOrg(libraryId: string): Promise<{ library_id: string; updated: number }> {
+  async refreshLogosFromIPTVOrg(libraryId: string): Promise<{
+    library_id: string;
+    total: number;
+    already_have_logo: number;
+    without_tvg_id: number;
+    skipped_has_override: number;
+    not_in_database: number;
+    updated: number;
+  }> {
     return this.request(
       "POST",
       `/libraries/${encodeURIComponent(libraryId)}/iptv/refresh-logos-from-iptv-org`,

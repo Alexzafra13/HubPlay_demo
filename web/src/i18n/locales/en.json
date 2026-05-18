@@ -1533,8 +1533,12 @@
     "errorApply": "Could not apply the match. Please try again.",
     "candidatesAriaLabel": "TMDb candidates"
   },
+  "itemKebab": {
+    "label": "Item actions"
+  },
   "metadataEditor": {
     "menuLabel": "Edit metadata…",
+    "identifyHint": "Wrong item? Search for the correct one on TMDb.",
     "title": "Edit metadata",
     "lockHint": "When you save, this item gets locked: future automatic refreshes won't overwrite your changes.",
     "fieldTitle": "Title",
