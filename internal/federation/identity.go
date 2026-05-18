@@ -74,11 +74,17 @@ func Fingerprint(pub ed25519.PublicKey) string {
 	return sb.String()
 }
 
-// FingerprintWords returns 4 short pronounceable words derived from the
-// fingerprint bytes. Useful for voice confirmation ("the fingerprint
-// starts with aardvark, barbados…"). The list is tiny (256 entries)
-// and pseudo-randomly mapped per byte; collision-resistance is the same
-// as the underlying 8-byte truncated SHA-256.
+// FingerprintWords returns 6 short pronounceable words derived from the
+// fingerprint bytes. Útil para confirmación por voz: "the fingerprint
+// starts with aardvark, barbados…". La lista es pequeña (288 entradas)
+// y se mapea pseudo-aleatoriamente por byte; resistencia a colisión
+// igual al SHA-256 truncado de 8 bytes subyacente.
+//
+// 6 palabras = 48 bits efectivos de confirmación oral (1 en ~280
+// billones), suficiente margen para un canal de voz con confusión
+// potencial. Antes eran 4 palabras (~32 bits, 1 en 4 mil millones)
+// que ya era seguro contra ataques cazapalabra, pero 6 deja margen
+// si el atacante puede lanzar diccionario sobre la transmisión.
 func (i *Identity) FingerprintWords() []string {
 	return FingerprintWords(i.PublicKey)
 }
@@ -89,11 +95,12 @@ func FingerprintWords(pub ed25519.PublicKey) []string {
 		return nil
 	}
 	sum := sha256First8(pub)
-	out := make([]string, 4)
-	// Use the first 4 bytes (each maps to one word) for a 4-word phrase.
-	// More words add length without security; the underlying entropy is
-	// still the full pubkey via SHA-256.
-	for idx := 0; idx < 4; idx++ {
+	out := make([]string, 6)
+	// Usamos los 6 primeros bytes del SHA-256 truncado a 8 (cada uno
+	// mapea a una palabra). Quedan 2 bytes sin usar — la entropía
+	// criptográfica está en la pubkey entera, no en los bytes
+	// individuales, así que truncar más no debilita el protocolo.
+	for idx := 0; idx < 6; idx++ {
 		out[idx] = phoneticWords[int(sum[idx])%len(phoneticWords)]
 	}
 	return out

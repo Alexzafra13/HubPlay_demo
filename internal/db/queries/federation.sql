@@ -67,8 +67,9 @@ ORDER BY created_at DESC;
 
 -- name: InsertPeer :exec
 INSERT INTO federation_peers
-    (id, server_uuid, name, base_url, public_key, status, created_at, paired_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+    (id, server_uuid, name, base_url, public_key, status, created_at,
+     paired_at, avatar_color, avatar_image_url)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: UpdatePeerPaired :exec
 UPDATE federation_peers
@@ -85,21 +86,32 @@ UPDATE federation_peers
 SET last_seen_at = ?, last_seen_status_code = ?
 WHERE id = ?;
 
+-- UpdatePeerBranding refresca el name + color + image_url del peer
+-- con lo que devuelva su proximo /federation/info. Lo llama el admin
+-- desde la PeersTable cuando pulsa el boton refresh (idempotente).
+-- name: UpdatePeerBranding :exec
+UPDATE federation_peers
+SET name = ?, avatar_color = ?, avatar_image_url = ?
+WHERE id = ?;
+
 -- name: GetPeerByID :one
 SELECT id, server_uuid, name, base_url, public_key, status,
-       created_at, paired_at, last_seen_at, last_seen_status_code, revoked_at
+       created_at, paired_at, last_seen_at, last_seen_status_code,
+       revoked_at, avatar_color, avatar_image_url
 FROM federation_peers
 WHERE id = ?;
 
 -- name: GetPeerByServerUUID :one
 SELECT id, server_uuid, name, base_url, public_key, status,
-       created_at, paired_at, last_seen_at, last_seen_status_code, revoked_at
+       created_at, paired_at, last_seen_at, last_seen_status_code,
+       revoked_at, avatar_color, avatar_image_url
 FROM federation_peers
 WHERE server_uuid = ?;
 
 -- name: ListPeers :many
 SELECT id, server_uuid, name, base_url, public_key, status,
-       created_at, paired_at, last_seen_at, last_seen_status_code, revoked_at
+       created_at, paired_at, last_seen_at, last_seen_status_code,
+       revoked_at, avatar_color, avatar_image_url
 FROM federation_peers
 ORDER BY created_at DESC;
 

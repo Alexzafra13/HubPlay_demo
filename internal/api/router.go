@@ -530,6 +530,7 @@ func NewRouter(deps Dependencies) http.Handler {
 						r.Post("/probe", adminFed.ProbePeer)
 						r.Post("/accept", adminFed.AcceptInvite)
 						r.Get("/{id}", adminFed.GetPeer)
+						r.Post("/{id}/refresh", adminFed.RefreshPeer)
 						r.Delete("/{id}", adminFed.RevokePeer)
 						r.Route("/invites", func(r chi.Router) {
 							r.Get("/", adminFed.ListActiveInvites)

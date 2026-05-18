@@ -138,17 +138,23 @@ func (m *Manager) AcceptInvite(ctx context.Context, baseURL, code, fallbackAdver
 		return nil, fmt.Errorf("federation: handshake %s: malformed response", baseURL)
 	}
 
-	// Persist them as a paired peer.
+	// Persist them as a paired peer. Capturamos el branding (color +
+	// URL de la foto) que el remoto publica en su ServerInfo para
+	// que PeersTable lo pinte sin tener que volver a pegarlo cada
+	// vez. Si el remoto los cambia luego, el admin pulsa el boton
+	// "Actualizar" y se refresca via Manager.RefreshPeerBranding.
 	now := m.clock.Now()
 	peer := &Peer{
-		ID:         uuid.NewString(),
-		ServerUUID: theirs.ServerUUID,
-		Name:       theirs.Name,
-		BaseURL:    baseURL,
-		PublicKey:  theirs.PublicKey,
-		Status:     PeerPaired,
-		CreatedAt:  now,
-		PairedAt:   &now,
+		ID:             uuid.NewString(),
+		ServerUUID:     theirs.ServerUUID,
+		Name:           theirs.Name,
+		BaseURL:        baseURL,
+		PublicKey:      theirs.PublicKey,
+		Status:         PeerPaired,
+		CreatedAt:      now,
+		PairedAt:       &now,
+		AvatarColor:    theirs.AvatarColor,
+		AvatarImageURL: theirs.AvatarImageURL,
 	}
 	if err := m.repo.InsertPeer(ctx, peer); err != nil {
 		return nil, fmt.Errorf("federation: persist peer: %w", err)
@@ -169,6 +175,44 @@ func (m *Manager) AcceptInvite(ctx context.Context, baseURL, code, fallbackAdver
 // Inbound handshake (a remote admin pasted OUR invite into THEIR UI;
 // their server is calling US to complete the link)
 // ────────────────────────────────────────────────────────────────────
+
+// RefreshPeerBranding re-probea /federation/info del peer y persiste
+// los campos visuales (nombre + color + URL de la foto) en BD. El
+// admin lo invoca desde el boton "Actualizar" de PeersTable cuando
+// el remoto ha cambiado su marca y queremos que la nuestra refleje
+// el cambio sin tener que revocar + re-pair.
+//
+// El pubkey + server_uuid + base_url NO se actualizan — esos son
+// la identidad criptografica del peer y solo se establecen via
+// handshake. Si el remoto rota su keypair (Phase 2+) hace falta
+// un flow distinto.
+func (m *Manager) RefreshPeerBranding(ctx context.Context, peerID string) (*Peer, error) {
+	peer, err := m.repo.GetPeerByID(ctx, peerID)
+	if err != nil {
+		return nil, err
+	}
+	if peer.Status != PeerPaired {
+		return nil, fmt.Errorf("federation: cannot refresh branding of non-paired peer (status=%s)", peer.Status)
+	}
+	info, err := m.ProbePeer(ctx, peer.BaseURL)
+	if err != nil {
+		return nil, err
+	}
+	// Sanity check: el server_uuid del peer probed tiene que coincidir
+	// con el que tenemos pinneado. Si no, alguien ha tomado control de
+	// la URL o el peer ha rotado su identidad — en ambos casos no
+	// queremos sobreescribir su branding silenciosamente.
+	if info.ServerUUID != peer.ServerUUID {
+		return nil, fmt.Errorf("federation: refreshed info server_uuid mismatch (got %s, expected %s)", info.ServerUUID, peer.ServerUUID)
+	}
+	if err := m.repo.UpdatePeerBranding(ctx, peerID, info.Name, info.AvatarColor, info.AvatarImageURL); err != nil {
+		return nil, err
+	}
+	peer.Name = info.Name
+	peer.AvatarColor = info.AvatarColor
+	peer.AvatarImageURL = info.AvatarImageURL
+	return peer, nil
+}
 
 // HandleInboundHandshake validates the code, persists the remote as a
 // paired peer, marks the invite consumed, and returns our own
@@ -223,15 +267,20 @@ func (m *Manager) HandleInboundHandshake(ctx context.Context, code string, remot
 		return nil, nil, fmt.Errorf("%w: server_uuid already paired", domain.ErrAlreadyExists)
 	}
 
+	// Mismo motivo que en AcceptInvite: capturamos el branding del
+	// remoto que recibimos en su ServerInfo para no perderlo. Si
+	// luego lo cambia, se refresca desde PeersTable manualmente.
 	peer := &Peer{
-		ID:         uuid.NewString(),
-		ServerUUID: remote.ServerUUID,
-		Name:       remote.Name,
-		BaseURL:    remote.AdvertisedURL,
-		PublicKey:  remote.PublicKey,
-		Status:     PeerPaired,
-		CreatedAt:  now,
-		PairedAt:   &now,
+		ID:             uuid.NewString(),
+		ServerUUID:     remote.ServerUUID,
+		Name:           remote.Name,
+		BaseURL:        remote.AdvertisedURL,
+		PublicKey:      remote.PublicKey,
+		Status:         PeerPaired,
+		CreatedAt:      now,
+		PairedAt:       &now,
+		AvatarColor:    remote.AvatarColor,
+		AvatarImageURL: remote.AvatarImageURL,
 	}
 	if err := m.repo.InsertPeer(ctx, peer); err != nil {
 		return nil, nil, fmt.Errorf("federation: persist inbound peer: %w", err)

@@ -133,6 +133,19 @@ export function useRevokePeer() {
   });
 }
 
+// useRefreshPeer re-probea al remoto y refresca su branding en
+// nuestra BD. Invalida federationPeers para que PeersTable repinte
+// con los valores nuevos (color + foto + nombre).
+export function useRefreshPeer() {
+  const queryClient = useQueryClient();
+  return useMutation<FederationPeer, Error, string>({
+    mutationFn: (id) => api.refreshPeer(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.federationPeers });
+    },
+  });
+}
+
 // usePeerShares lists every library share row attached to a peer.
 // Powers the per-peer expansion panel in FederationAdmin.
 export function usePeerShares(peerID: string, enabled = true) {

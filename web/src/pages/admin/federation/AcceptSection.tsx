@@ -152,6 +152,12 @@ export function AcceptSection() {
               card so the admin doesn't visually disconnect "the thing
               I just saw" from "the action I'm about to take". */}
           <div className="mt-5 border-t border-accent/20 pt-4">
+            <p className="mb-3 text-xs leading-relaxed text-text-muted">
+              {t("admin.federation.accept.beforePairHint", {
+                defaultValue:
+                  "Compara la huella o las palabras con el otro admin por chat encriptado o teléfono. Sólo cuando coincidan exactamente, pega su código de invitación abajo y empareja.",
+              })}
+            </p>
             <div className="flex flex-col gap-3">
               <FieldInput
                 label={t("admin.federation.accept.codeLabel")}

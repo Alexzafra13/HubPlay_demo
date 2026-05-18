@@ -97,7 +97,7 @@ UPDATE users SET max_content_rating = $1 WHERE id = $2;
 UPDATE users SET access_expires_at = $1 WHERE id = $2;
 
 -- name: UpdateUserAvatarColor :exec
--- avatar_color NULL = use the deterministic FNV-1a → palette
+-- avatar_color NULL = use the deterministic FNV-1a -> palette
 -- fallback the frontend already has. Non-null = explicit hex
 -- override. Service-layer enforces the value is in the known
 -- palette (or empty) before reaching the repo.

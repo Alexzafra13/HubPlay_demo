@@ -80,8 +80,8 @@ func TestFingerprint_EmptyKey(t *testing.T) {
 func TestFingerprintWords_LengthAndPronounceable(t *testing.T) {
 	pub, _, _ := ed25519.GenerateKey(rand.Reader)
 	words := FingerprintWords(pub)
-	if len(words) != 4 {
-		t.Fatalf("want 4 words, got %d", len(words))
+	if len(words) != 6 {
+		t.Fatalf("want 6 words, got %d", len(words))
 	}
 	for _, w := range words {
 		if w == "" {

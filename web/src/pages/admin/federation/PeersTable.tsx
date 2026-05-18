@@ -5,23 +5,24 @@ import {
   ChevronRight,
   Globe,
   Inbox,
+  RefreshCw,
   ShieldOff,
 } from "lucide-react";
 import {
   useCreatePeerShare,
   useDeletePeerShare,
   usePeerShares,
+  useRefreshPeer,
   useRevokePeer,
 } from "@/api/hooks/federation";
 import { useLibraries } from "@/api/hooks/media";
-import { Spinner } from "@/components/common";
+import { Spinner, UserAvatar } from "@/components/common";
 import { Button } from "@/components/common/Button";
 import type {
   FederationLibraryShare,
   FederationPeer,
   Library,
 } from "@/api/types";
-import { avatarColorFor } from "@/utils/avatarColor";
 import { ErrorBanner } from "./_shared";
 
 // PeersTable lists every paired (and revoked) peer with status,
@@ -34,7 +35,9 @@ import { ErrorBanner } from "./_shared";
 export function PeersTable({ peers }: { peers: FederationPeer[] }) {
   const { t } = useTranslation();
   const revoke = useRevokePeer();
+  const refresh = useRefreshPeer();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [refreshingId, setRefreshingId] = useState<string | null>(null);
 
   if (peers.length === 0) {
     return <EmptyPeers />;
@@ -51,6 +54,13 @@ export function PeersTable({ peers }: { peers: FederationPeer[] }) {
     revoke.mutate(peer.id);
   };
 
+  const handleRefresh = (peer: FederationPeer) => {
+    setRefreshingId(peer.id);
+    refresh.mutate(peer.id, {
+      onSettled: () => setRefreshingId(null),
+    });
+  };
+
   const toggle = (peerId: string) => {
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -64,14 +74,22 @@ export function PeersTable({ peers }: { peers: FederationPeer[] }) {
   };
 
   return (
-    <div className="overflow-hidden rounded-lg border border-border">
-      <ul className="divide-y divide-border">
+    <div className="flex flex-col gap-2">
+      {refresh.error && (
+        <ErrorBanner
+          message={t("admin.federation.peers.refreshFailed", {
+            defaultValue:
+              "No se pudo refrescar el branding del peer. Comprueba que esté online y vuelve a intentarlo.",
+          })}
+        />
+      )}
+      <div className="overflow-hidden rounded-lg border border-border">
+        <ul className="divide-y divide-border">
         {peers.map((peer) => {
           const isPaired = peer.status === "paired";
           const isExpanded = expanded.has(peer.id);
-          const palette = avatarColorFor(peer.server_uuid || peer.name);
-          const initials = initialsFor(peer.name);
           const lastSeen = peerLastSeen(peer);
+          const isRefreshing = refreshingId === peer.id;
 
           return (
             <Fragment key={peer.id}>
@@ -98,16 +116,21 @@ export function PeersTable({ peers }: { peers: FederationPeer[] }) {
                     )}
                   </button>
 
-                  {/* Avatar bubble. Initials over a deterministic
-                      palette colour so two different peers never
-                      look identical at a glance. */}
-                  <div
-                    className="flex h-9 w-9 flex-none items-center justify-center rounded-full text-sm font-semibold text-white"
-                    style={{ backgroundColor: palette.background }}
-                    aria-hidden
-                  >
-                    {initials}
-                  </div>
+                  {/* Avatar del remoto: si el peer subió foto la
+                      pintamos directa; si solo tiene color hex,
+                      iniciales sobre ese color; si nada, UserAvatar
+                      cae a la paleta determinista derivada del
+                      server_uuid + iniciales del nombre — mismo
+                      patrón que para usuarios. */}
+                  <UserAvatar
+                    user={{
+                      username: peer.server_uuid || peer.name,
+                      display_name: peer.name,
+                      avatar_color: peer.avatar_color,
+                      avatar_image_url: peer.avatar_image_url ?? null,
+                    }}
+                    size="md"
+                  />
 
                   {/* Name + URL stack. Name is the primary read
                       target; URL is metadata, smaller and muted. */}
@@ -134,7 +157,30 @@ export function PeersTable({ peers }: { peers: FederationPeer[] }) {
                     </p>
                   </div>
 
-                  <div className="flex flex-none flex-wrap justify-end gap-2">
+                  <div className="flex flex-none flex-wrap items-center justify-end gap-2">
+                    {isPaired && (
+                      <button
+                        type="button"
+                        onClick={() => handleRefresh(peer)}
+                        disabled={isRefreshing}
+                        title={t("admin.federation.peers.refreshHint", {
+                          defaultValue:
+                            "Re-probea al peer y refresca su nombre / color / foto",
+                        })}
+                        aria-label={t("admin.federation.peers.refresh", {
+                          defaultValue: "Actualizar",
+                        })}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-bg-base hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <RefreshCw
+                          className={[
+                            "h-4 w-4",
+                            isRefreshing ? "animate-spin" : "",
+                          ].join(" ")}
+                          aria-hidden
+                        />
+                      </button>
+                    )}
                     {peer.status !== "revoked" && (
                       <Button
                         variant="danger"
@@ -156,7 +202,8 @@ export function PeersTable({ peers }: { peers: FederationPeer[] }) {
             </Fragment>
           );
         })}
-      </ul>
+        </ul>
+      </div>
     </div>
   );
 }
@@ -269,17 +316,6 @@ function peerLastSeen(peer: FederationPeer): {
   else label = `hace ${Math.floor(ageMin / (60 * 24))} d`;
 
   return { label, online };
-}
-
-// initialsFor — first letter of up to two leading words. "HubPlay
-// Server" → "HS"; "alex" → "A". We avoid a server-side `name`
-// breakdown because peer names are free-form.
-function initialsFor(name: string): string {
-  const parts = name.trim().split(/\s+/).slice(0, 2);
-  return parts
-    .map((p) => p.charAt(0).toUpperCase())
-    .join("")
-    .slice(0, 2);
 }
 
 // SharesPanel — per-peer expansion that lists every local library

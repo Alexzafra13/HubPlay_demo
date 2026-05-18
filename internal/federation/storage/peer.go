@@ -21,29 +21,60 @@ func (r *Repository) InsertPeer(ctx context.Context, p *federation.Peer) error {
 	var err error
 	if r.useSQLite() {
 		err = r.sq.InsertPeer(ctx, sqlc.InsertPeerParams{
-			ID:         p.ID,
-			ServerUuid: p.ServerUUID,
-			Name:       p.Name,
-			BaseUrl:    p.BaseURL,
-			PublicKey:  []byte(p.PublicKey),
-			Status:     string(p.Status),
-			CreatedAt:  p.CreatedAt,
-			PairedAt:   pairedAt,
+			ID:             p.ID,
+			ServerUuid:     p.ServerUUID,
+			Name:           p.Name,
+			BaseUrl:        p.BaseURL,
+			PublicKey:      []byte(p.PublicKey),
+			Status:         string(p.Status),
+			CreatedAt:      p.CreatedAt,
+			PairedAt:       pairedAt,
+			AvatarColor:    p.AvatarColor,
+			AvatarImageUrl: p.AvatarImageURL,
 		})
 	} else {
 		err = r.pq.InsertPeer(ctx, sqlc_pg.InsertPeerParams{
-			ID:         p.ID,
-			ServerUuid: p.ServerUUID,
-			Name:       p.Name,
-			BaseUrl:    p.BaseURL,
-			PublicKey:  []byte(p.PublicKey),
-			Status:     string(p.Status),
-			CreatedAt:  p.CreatedAt,
-			PairedAt:   pairedAt,
+			ID:             p.ID,
+			ServerUuid:     p.ServerUUID,
+			Name:           p.Name,
+			BaseUrl:        p.BaseURL,
+			PublicKey:      []byte(p.PublicKey),
+			Status:         string(p.Status),
+			CreatedAt:      p.CreatedAt,
+			PairedAt:       pairedAt,
+			AvatarColor:    p.AvatarColor,
+			AvatarImageUrl: p.AvatarImageURL,
 		})
 	}
 	if err != nil {
 		return fmt.Errorf("insert peer: %w", err)
+	}
+	return nil
+}
+
+// UpdatePeerBranding refresca name + color + image_url del peer.
+// El admin lo invoca via "Actualizar" en PeersTable: el manager
+// re-probea /federation/info del remoto y persiste lo que recibe.
+// Idempotente — si nada ha cambiado el UPDATE es no-op semantico.
+func (r *Repository) UpdatePeerBranding(ctx context.Context, peerID, name, avatarColor, avatarImageURL string) error {
+	var err error
+	if r.useSQLite() {
+		err = r.sq.UpdatePeerBranding(ctx, sqlc.UpdatePeerBrandingParams{
+			Name:           name,
+			AvatarColor:    avatarColor,
+			AvatarImageUrl: avatarImageURL,
+			ID:             peerID,
+		})
+	} else {
+		err = r.pq.UpdatePeerBranding(ctx, sqlc_pg.UpdatePeerBrandingParams{
+			Name:           name,
+			AvatarColor:    avatarColor,
+			AvatarImageUrl: avatarImageURL,
+			ID:             peerID,
+		})
+	}
+	if err != nil {
+		return fmt.Errorf("update peer branding: %w", err)
 	}
 	return nil
 }
@@ -184,13 +215,15 @@ func (r *Repository) ListPeers(ctx context.Context) ([]*federation.Peer, error) 
 
 func peerFromSqliteRow(row sqlc.FederationPeer) *federation.Peer {
 	p := &federation.Peer{
-		ID:         row.ID,
-		ServerUUID: row.ServerUuid,
-		Name:       row.Name,
-		BaseURL:    row.BaseUrl,
-		PublicKey:  row.PublicKey,
-		Status:     federation.PeerStatus(row.Status),
-		CreatedAt:  row.CreatedAt,
+		ID:             row.ID,
+		ServerUUID:     row.ServerUuid,
+		Name:           row.Name,
+		BaseURL:        row.BaseUrl,
+		PublicKey:      row.PublicKey,
+		Status:         federation.PeerStatus(row.Status),
+		CreatedAt:      row.CreatedAt,
+		AvatarColor:    row.AvatarColor,
+		AvatarImageURL: row.AvatarImageUrl,
 	}
 	if row.PairedAt.Valid {
 		t := row.PairedAt.Time
@@ -213,13 +246,15 @@ func peerFromSqliteRow(row sqlc.FederationPeer) *federation.Peer {
 
 func peerFromPgRow(row sqlc_pg.FederationPeer) *federation.Peer {
 	p := &federation.Peer{
-		ID:         row.ID,
-		ServerUUID: row.ServerUuid,
-		Name:       row.Name,
-		BaseURL:    row.BaseUrl,
-		PublicKey:  row.PublicKey,
-		Status:     federation.PeerStatus(row.Status),
-		CreatedAt:  row.CreatedAt,
+		ID:             row.ID,
+		ServerUUID:     row.ServerUuid,
+		Name:           row.Name,
+		BaseURL:        row.BaseUrl,
+		PublicKey:      row.PublicKey,
+		Status:         federation.PeerStatus(row.Status),
+		CreatedAt:      row.CreatedAt,
+		AvatarColor:    row.AvatarColor,
+		AvatarImageURL: row.AvatarImageUrl,
 	}
 	if row.PairedAt.Valid {
 		t := row.PairedAt.Time

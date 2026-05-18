@@ -113,6 +113,7 @@ var outOfScopeExact = map[string]string{
 	"POST /admin/peers/probe":             "federation pairing admin",
 	"POST /admin/peers/accept":            "federation pairing admin",
 	"GET /admin/peers/{id}":               "federation pairing admin",
+	"POST /admin/peers/{id}/refresh":      "federation pairing admin",
 	"DELETE /admin/peers/{id}":            "federation pairing admin",
 	"GET /admin/peers/invites":            "federation pairing admin",
 	"POST /admin/peers/invites":           "federation pairing admin",

@@ -120,6 +120,18 @@ func (r *inMemoryFedRepo) UpdatePeerRevoked(_ context.Context, peerID string, _ 
 func (r *inMemoryFedRepo) UpdatePeerLastSeen(_ context.Context, _ string, _ time.Time, _ int) error {
 	return nil
 }
+func (r *inMemoryFedRepo) UpdatePeerBranding(_ context.Context, peerID, name, color, imageURL string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, p := range r.peers {
+		if p.ID == peerID {
+			p.Name = name
+			p.AvatarColor = color
+			p.AvatarImageURL = imageURL
+		}
+	}
+	return nil
+}
 func (r *inMemoryFedRepo) GetPeerByID(_ context.Context, id string) (*Peer, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

@@ -185,6 +185,8 @@ type FederationPeer struct {
 	LastSeenAt         sql.NullTime  `json:"last_seen_at"`
 	LastSeenStatusCode sql.NullInt32 `json:"last_seen_status_code"`
 	RevokedAt          sql.NullTime  `json:"revoked_at"`
+	AvatarColor        string        `json:"avatar_color"`
+	AvatarImageUrl     string        `json:"avatar_image_url"`
 }
 
 type FederationProgress struct {
@@ -305,6 +307,14 @@ type Library struct {
 type LibraryAccess struct {
 	UserID    string `json:"user_id"`
 	LibraryID string `json:"library_id"`
+}
+
+type LibraryChannelOrder struct {
+	LibraryID string    `json:"library_id"`
+	ChannelID string    `json:"channel_id"`
+	Position  int32     `json:"position"`
+	Hidden    bool      `json:"hidden"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type LibraryEpgSource struct {

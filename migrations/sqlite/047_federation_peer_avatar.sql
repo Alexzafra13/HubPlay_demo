@@ -1,0 +1,31 @@
+-- +goose Up
+--
+-- 047_federation_peer_avatar.sql - branding del peer REMOTO.
+--
+-- La migration 046 anyadio avatar_color + avatar_image_path al
+-- server_identity (la identidad LOCAL del servidor). Ahora hace falta
+-- el espejo en federation_peers para guardar el branding que el
+-- remoto nos envia en /federation/info. Sin esto el handshake recibe
+-- el AvatarColor/AvatarImageURL del peer pero los descarta - la
+-- PeersTable solo veria el circulo de iniciales sobre color
+-- deterministico, perdiendo la marca que el otro admin configuro.
+--
+-- Aniade:
+--
+--   avatar_color     - hex tipo "#1d4ed8" que el remoto ha elegido
+--                      desde su propio panel de Federation. Vacio =
+--                      el frontend cae a la paleta deterministica
+--                      derivada del server_uuid.
+--
+--   avatar_image_url - URL ABSOLUTA (incluye scheme/host del remoto)
+--                      servida por /federation/identity/avatar del
+--                      otro servidor. La metemos tal cual en <img>.
+--                      Vacio = no hay foto subida.
+--
+-- Defaults vacios para que la migration no rompa filas existentes.
+-- Las dos columnas se rellenan en el siguiente handshake; si nunca
+-- se reemparejan, la fila se queda con strings vacios y la UI cae
+-- al fallback que ya tenia.
+
+ALTER TABLE federation_peers ADD COLUMN avatar_color TEXT NOT NULL DEFAULT '';
+ALTER TABLE federation_peers ADD COLUMN avatar_image_url TEXT NOT NULL DEFAULT '';

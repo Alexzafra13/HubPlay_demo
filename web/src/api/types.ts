@@ -11,7 +11,7 @@ export interface FederationServerInfo {
   version: string;
   public_key: string;            // base64
   pubkey_fingerprint: string;    // "a8f3:k2m9:x4p1:c7e2"
-  pubkey_words: string[];        // 4 short words for voice confirmation
+  pubkey_words: string[];        // 6 short words for voice confirmation
   supported_scopes: string[];
   advertised_url: string;
   admin_contact?: string;
@@ -39,6 +39,11 @@ export interface FederationPeer {
   last_seen_at?: string;
   last_seen_status_code?: number;
   revoked_at?: string;
+  // Branding del peer remoto, capturado en el handshake y refrescable
+  // con POST /admin/peers/{id}/refresh. Vacío = PeersTable cae a la
+  // paleta determinista derivada del server_uuid + iniciales.
+  avatar_color?: string;
+  avatar_image_url?: string;
 }
 
 export interface FederationInvite {
