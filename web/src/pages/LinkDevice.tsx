@@ -1,9 +1,18 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router";
+import { QrCode } from "lucide-react";
 import { useApproveDeviceCode } from "@/api/hooks/deviceAuth";
 import { useMySessions } from "@/api/hooks";
 import { LinkedDevicesList } from "@/components/settings/LinkedDevicesList";
+
+// Lazy import del modal del scanner: la librería (~38 KB gzipped
+// + polyfills de BarcodeDetector cuando Safari < 16.4) sólo se
+// baja si el operador pulsa "Escanear QR". El resto del bundle
+// de /link no la incluye.
+const QRScannerModal = lazy(
+  () => import("@/components/devices/QRScannerModal"),
+);
 
 // LinkDevice — /link route. The operator landed here from the verification
 // URL displayed on a TV / CLI / headless device that's polling our
@@ -30,7 +39,17 @@ export default function LinkDevice() {
   const [searchParams] = useSearchParams();
   const [code, setCode] = useState(() => searchParams.get("code") ?? "");
   const [success, setSuccess] = useState(false);
+  const [scannerOpen, setScannerOpen] = useState(false);
   const sessions = useMySessions();
+
+  // El scanner sólo aparece cuando navigator.mediaDevices existe
+  // (HTTPS o localhost). En HTTP plano Safari/Chrome lo bloquean,
+  // así que mejor ocultar el botón que mostrar un error útil para
+  // pocos casos. SSR-safe: typeof window check.
+  const cameraAvailable =
+    typeof window !== "undefined" &&
+    typeof navigator !== "undefined" &&
+    !!navigator.mediaDevices?.getUserMedia;
 
   // Keep the input in sync with the URL — if the operator scans a
   // second QR without leaving the page, the field updates.
@@ -50,6 +69,20 @@ export default function LinkDevice() {
       onSuccess: () => {
         setSuccess(true);
       },
+    });
+  }
+
+  // Cuando el scanner detecta un código, lo metemos en el input
+  // (para que el operador lo vea) y disparamos approve directo:
+  // el objetivo de escanear es "cero tecleo", obligar a un click
+  // extra rompería esa promesa. Si el código fuera inválido, el
+  // mismo error que con el flow manual se muestra abajo.
+  function handleScannedCode(scanned: string) {
+    setScannerOpen(false);
+    setCode(scanned);
+    setSuccess(false);
+    approve.mutate(canonicalise(scanned), {
+      onSuccess: () => setSuccess(true),
     });
   }
 
@@ -91,6 +124,22 @@ export default function LinkDevice() {
         >
           {approve.isPending ? t("link.approving") : t("link.approve")}
         </button>
+
+        {/* Atajo "escanear QR" — sólo se muestra si el navegador
+            expone getUserMedia (HTTPS o localhost). El modal se
+            carga lazy: la librería no entra al bundle hasta que
+            el operador la pide. */}
+        {cameraAvailable && (
+          <button
+            type="button"
+            onClick={() => setScannerOpen(true)}
+            disabled={approve.isPending || success}
+            className="flex items-center justify-center gap-2 rounded-lg border border-border bg-bg-elevated px-4 py-3 text-sm font-medium text-text-primary transition-colors hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <QrCode className="h-4 w-4" aria-hidden />
+            {t("link.scanQR", { defaultValue: "Escanear código QR" })}
+          </button>
+        )}
       </form>
 
       {success ? (
@@ -120,6 +169,19 @@ export default function LinkDevice() {
        * empty section on first paint.
        */}
       <LinkedDevicesList sessions={sessions.data ?? []} />
+
+      {/* Scanner modal — lazy. Sin fallback de loading porque el
+          dynamic import resuelve en ms desde cache de Vite tras el
+          primer abrir, y antes de eso el botón ya da feedback
+          visual al pulsar. */}
+      {scannerOpen && (
+        <Suspense fallback={null}>
+          <QRScannerModal
+            onCode={handleScannedCode}
+            onClose={() => setScannerOpen(false)}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }
