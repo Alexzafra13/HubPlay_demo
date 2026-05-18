@@ -1534,7 +1534,9 @@
     "candidatesAriaLabel": "TMDb candidates"
   },
   "itemKebab": {
-    "label": "Item actions"
+    "label": "Item actions",
+    "images": "Change images…",
+    "fileInfo": "File information"
   },
   "metadataEditor": {
     "menuLabel": "Edit metadata…",

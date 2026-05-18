@@ -122,9 +122,11 @@ const PosterCard: FC<PosterCardProps> = memo(({ item, progress, href, cornerBadg
 
         {/* Admin kebab — top right (encima del rating cuando ambos
             existen; el kebab sólo aparece en hover/focus, así que no
-            pelean en estado idle). Sólo admin lo ve. */}
+            pelean en estado idle). Sólo admin lo ve.
+            detailHref = la misma URL del card para que "Información del
+            archivo" navegue al detalle con anchor a la sección. */}
         <div className="absolute top-2 right-2 z-10">
-          <ItemKebab itemID={item.id} itemType={item.type} />
+          <ItemKebab itemID={item.id} itemType={item.type} detailHref={resolvedHref} />
         </div>
 
         {/* Rating badge — top right */}

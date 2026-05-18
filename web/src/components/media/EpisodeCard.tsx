@@ -2,6 +2,7 @@ import { Link } from "react-router";
 import type { FC } from "react";
 import type { MediaItem } from "@/api/types";
 import { thumb } from "@/utils/imageUrl";
+import { ItemKebab } from "./ItemKebab";
 
 // Episode thumbs are 16:9; cards are ~280-360px wide on most grids.
 // 720 covers HiDPI without requesting the full 1280-1920px backdrop.
@@ -58,6 +59,13 @@ const EpisodeCard: FC<EpisodeCardProps> = ({ item, progress, onClick }) => {
             </span>
           </div>
         )}
+
+        {/* Admin kebab — top-right. Para episodes: ImageManager (cambiar
+            still/screencap del episodio) + Refresh. Identify/Edit no
+            aplican (heredan de la serie). El kebab se filtra solo. */}
+        <div className="absolute top-2 right-2 z-10">
+          <ItemKebab itemID={item.id} itemType={item.type} detailHref={href} />
+        </div>
 
         {/* Hover play icon */}
         <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity duration-300 group-hover:opacity-100">

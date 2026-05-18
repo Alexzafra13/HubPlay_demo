@@ -12,6 +12,7 @@ import { useItem } from "@/api/hooks";
 import { useItemActions } from "@/store/itemActions";
 import { IdentifyDialog } from "./IdentifyDialog";
 import { MetadataEditorDialog } from "./MetadataEditorDialog";
+import { ImageManager } from "./ImageManager";
 
 export function ItemActionModals() {
   const action = useItemActions((s) => s.action);
@@ -24,11 +25,22 @@ export function ItemActionModals() {
   // ya visitó el item antes.
   const itemQ = useItem(itemID ?? "", { enabled: !!itemID });
 
-  if (!itemID || !action || !itemQ.data) return null;
+  if (!itemID || !action) return null;
+
+  // ImageManager funciona sobre cualquier tipo (también seasons y
+  // episodes, que tienen su propio poster/backdrop editable). Por eso
+  // no esperamos a tener el itemQ resuelto — basta con el id.
+  if (action === "images") {
+    return <ImageManager itemId={itemID} isOpen={true} onClose={close} />;
+  }
+
+  // Identify / Edit metadata sí necesitan el item resuelto porque el
+  // modal pre-rellena los inputs con title/year/overview actuales.
+  if (!itemQ.data) return null;
   const item = itemQ.data;
 
-  // Episodios y temporadas no aplican (heredan metadata del padre).
-  // Si el kebab los emite por error, no abrimos nada.
+  // Sólo películas y series para identify/editor — episodios y
+  // temporadas heredan metadata del padre.
   if (item.type !== "movie" && item.type !== "series") return null;
 
   if (action === "identify") {

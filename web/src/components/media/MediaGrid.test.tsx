@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "@/i18n";
 import type { MediaItem } from "@/api/types";
 import { MediaGrid } from "./MediaGrid";
@@ -98,11 +99,22 @@ function makeItems(n: number, prefix = "it"): MediaItem[] {
   }));
 }
 
+// Helper común para los tests: las cards (vía ItemKebab) necesitan
+// un QueryClient en context para el botón "Actualizar metadatos",
+// aunque los tests no ejerciten ese flujo. retry: false evita esperas.
+function makeClient() {
+  return new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+}
+
 function renderGrid(items: MediaItem[], loading = false, emptyMessage?: string) {
   return render(
-    <MemoryRouter>
-      <MediaGrid items={items} loading={loading} emptyMessage={emptyMessage} />
-    </MemoryRouter>,
+    <QueryClientProvider client={makeClient()}>
+      <MemoryRouter>
+        <MediaGrid items={items} loading={loading} emptyMessage={emptyMessage} />
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
@@ -142,18 +154,22 @@ describe("MediaGrid", () => {
 
   it("does not mount the sentinel when items < BATCH_SIZE", () => {
     // 30 items < BATCH_SIZE (40), so all fit in the first slice and
-    // the sentinel never needs to render. The sentinel is the only
-    // [aria-hidden] in the grid subtree, so its absence is the
-    // assertion.
+    // the sentinel never needs to render. La aserción busca el div
+    // específico del sentinel (className="h-1" + aria-hidden) — el
+    // resto de [aria-hidden] son iconos de las cards (kebab, etc.)
+    // que no nos interesa contar aquí.
     const { container } = renderGrid(makeItems(30));
-    expect(container.querySelectorAll('[aria-hidden="true"]')).toHaveLength(0);
+    expect(container.querySelectorAll('div.h-1[aria-hidden="true"]')).toHaveLength(0);
   });
 
   it("resets visibleCount when the items reference changes (new search/filter)", () => {
+    const client = makeClient();
     const { rerender } = render(
-      <MemoryRouter>
-        <MediaGrid items={makeItems(120, "first")} loading={false} />
-      </MemoryRouter>,
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <MediaGrid items={makeItems(120, "first")} loading={false} />
+        </MemoryRouter>
+      </QueryClientProvider>,
     );
     triggerLatestIntersect();
     triggerLatestIntersect();
@@ -164,9 +180,11 @@ describe("MediaGrid", () => {
     // back to BATCH_SIZE so the user lands at the top of the new
     // result set, not deep inside the previous one.
     rerender(
-      <MemoryRouter>
-        <MediaGrid items={makeItems(80, "second")} loading={false} />
-      </MemoryRouter>,
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <MediaGrid items={makeItems(80, "second")} loading={false} />
+        </MemoryRouter>
+      </QueryClientProvider>,
     );
     expect(screen.getAllByRole("link")).toHaveLength(40);
   });

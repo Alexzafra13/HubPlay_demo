@@ -15,7 +15,7 @@
 
 import { create } from "zustand";
 
-export type ItemAction = "identify" | "edit-metadata";
+export type ItemAction = "identify" | "edit-metadata" | "images";
 
 interface ItemActionsState {
   // Acción activa + id del item al que aplica. null cuando no hay
@@ -24,6 +24,7 @@ interface ItemActionsState {
   itemID: string | null;
   openIdentify: (itemID: string) => void;
   openEditor: (itemID: string) => void;
+  openImages: (itemID: string) => void;
   close: () => void;
 }
 
@@ -32,5 +33,6 @@ export const useItemActions = create<ItemActionsState>((set) => ({
   itemID: null,
   openIdentify: (itemID) => set({ action: "identify", itemID }),
   openEditor: (itemID) => set({ action: "edit-metadata", itemID }),
+  openImages: (itemID) => set({ action: "images", itemID }),
   close: () => set({ action: null, itemID: null }),
 }));

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router";
 import "@/i18n";
 import type { MediaItem, UserData } from "@/api/types";
@@ -49,10 +50,20 @@ function makeUserData(overrides: Partial<UserData> = {}): UserData {
 }
 
 function renderCard(item: MediaItem, progress?: number) {
+  // ItemKebab dentro del card consume useQueryClient para el botón
+  // "Actualizar metadatos" — el provider tiene que estar montado
+  // aunque el kebab esté oculto (no admin) porque el hook se llama
+  // en el render. retry: false evita que los tests cuelguen si una
+  // mutación fallara en el futuro.
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
   return render(
-    <MemoryRouter>
-      <PosterCard item={item} progress={progress} />
-    </MemoryRouter>,
+    <QueryClientProvider client={client}>
+      <MemoryRouter>
+        <PosterCard item={item} progress={progress} />
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
