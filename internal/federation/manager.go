@@ -44,6 +44,7 @@ type Repo interface {
 	UpdatePeerPaired(ctx context.Context, peerID string, at time.Time) error
 	UpdatePeerRevoked(ctx context.Context, peerID string, at time.Time) error
 	UpdatePeerLastSeen(ctx context.Context, peerID string, at time.Time, statusCode int) error
+	UpdatePeerBranding(ctx context.Context, peerID, name, avatarColor, avatarImageURL string) error
 	GetPeerByID(ctx context.Context, id string) (*Peer, error)
 	GetPeerByServerUUID(ctx context.Context, serverUUID string) (*Peer, error)
 	ListPeers(ctx context.Context) ([]*Peer, error)

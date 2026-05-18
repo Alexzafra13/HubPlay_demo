@@ -187,7 +187,8 @@ func (q *Queries) GetLibraryShare(ctx context.Context, arg GetLibraryShareParams
 
 const getPeerByID = `-- name: GetPeerByID :one
 SELECT id, server_uuid, name, base_url, public_key, status,
-       created_at, paired_at, last_seen_at, last_seen_status_code, revoked_at
+       created_at, paired_at, last_seen_at, last_seen_status_code,
+       revoked_at, avatar_color, avatar_image_url
 FROM federation_peers
 WHERE id = $1
 `
@@ -207,13 +208,16 @@ func (q *Queries) GetPeerByID(ctx context.Context, id string) (FederationPeer, e
 		&i.LastSeenAt,
 		&i.LastSeenStatusCode,
 		&i.RevokedAt,
+		&i.AvatarColor,
+		&i.AvatarImageUrl,
 	)
 	return i, err
 }
 
 const getPeerByServerUUID = `-- name: GetPeerByServerUUID :one
 SELECT id, server_uuid, name, base_url, public_key, status,
-       created_at, paired_at, last_seen_at, last_seen_status_code, revoked_at
+       created_at, paired_at, last_seen_at, last_seen_status_code,
+       revoked_at, avatar_color, avatar_image_url
 FROM federation_peers
 WHERE server_uuid = $1
 `
@@ -233,6 +237,8 @@ func (q *Queries) GetPeerByServerUUID(ctx context.Context, serverUuid string) (F
 		&i.LastSeenAt,
 		&i.LastSeenStatusCode,
 		&i.RevokedAt,
+		&i.AvatarColor,
+		&i.AvatarImageUrl,
 	)
 	return i, err
 }
@@ -280,36 +286,6 @@ func (q *Queries) GetServerIdentity(ctx context.Context) (GetServerIdentityRow, 
 		&i.AvatarImagePath,
 	)
 	return i, err
-}
-
-const updateServerIdentityProfile = `-- name: UpdateServerIdentityProfile :exec
-UPDATE server_identity
-SET name = $1, avatar_color = $2
-WHERE id = 1
-`
-
-type UpdateServerIdentityProfileParams struct {
-	Name        string `json:"name"`
-	AvatarColor string `json:"avatar_color"`
-}
-
-// Personalizacion editable del servidor: nombre visible para peers
-// y color hex de fallback para el avatar. La foto se actualiza por
-// separado para no reenviar los otros campos en cada upload.
-func (q *Queries) UpdateServerIdentityProfile(ctx context.Context, arg UpdateServerIdentityProfileParams) error {
-	_, err := q.db.ExecContext(ctx, updateServerIdentityProfile, arg.Name, arg.AvatarColor)
-	return err
-}
-
-const setServerAvatarPath = `-- name: SetServerAvatarPath :exec
-UPDATE server_identity
-SET avatar_image_path = $1
-WHERE id = 1
-`
-
-func (q *Queries) SetServerAvatarPath(ctx context.Context, avatarImagePath string) error {
-	_, err := q.db.ExecContext(ctx, setServerAvatarPath, avatarImagePath)
-	return err
 }
 
 const insertCachedItem = `-- name: InsertCachedItem :exec
@@ -420,19 +396,22 @@ func (q *Queries) InsertInvite(ctx context.Context, arg InsertInviteParams) erro
 const insertPeer = `-- name: InsertPeer :exec
 
 INSERT INTO federation_peers
-    (id, server_uuid, name, base_url, public_key, status, created_at, paired_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    (id, server_uuid, name, base_url, public_key, status, created_at,
+     paired_at, avatar_color, avatar_image_url)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 `
 
 type InsertPeerParams struct {
-	ID         string       `json:"id"`
-	ServerUuid string       `json:"server_uuid"`
-	Name       string       `json:"name"`
-	BaseUrl    string       `json:"base_url"`
-	PublicKey  []byte       `json:"public_key"`
-	Status     string       `json:"status"`
-	CreatedAt  time.Time    `json:"created_at"`
-	PairedAt   sql.NullTime `json:"paired_at"`
+	ID             string       `json:"id"`
+	ServerUuid     string       `json:"server_uuid"`
+	Name           string       `json:"name"`
+	BaseUrl        string       `json:"base_url"`
+	PublicKey      []byte       `json:"public_key"`
+	Status         string       `json:"status"`
+	CreatedAt      time.Time    `json:"created_at"`
+	PairedAt       sql.NullTime `json:"paired_at"`
+	AvatarColor    string       `json:"avatar_color"`
+	AvatarImageUrl string       `json:"avatar_image_url"`
 }
 
 // ============================================================
@@ -448,6 +427,8 @@ func (q *Queries) InsertPeer(ctx context.Context, arg InsertPeerParams) error {
 		arg.Status,
 		arg.CreatedAt,
 		arg.PairedAt,
+		arg.AvatarColor,
+		arg.AvatarImageUrl,
 	)
 	return err
 }
@@ -734,7 +715,8 @@ func (q *Queries) ListFederationContinueWatching(ctx context.Context, arg ListFe
 
 const listPeers = `-- name: ListPeers :many
 SELECT id, server_uuid, name, base_url, public_key, status,
-       created_at, paired_at, last_seen_at, last_seen_status_code, revoked_at
+       created_at, paired_at, last_seen_at, last_seen_status_code,
+       revoked_at, avatar_color, avatar_image_url
 FROM federation_peers
 ORDER BY created_at DESC
 `
@@ -760,6 +742,8 @@ func (q *Queries) ListPeers(ctx context.Context) ([]FederationPeer, error) {
 			&i.LastSeenAt,
 			&i.LastSeenStatusCode,
 			&i.RevokedAt,
+			&i.AvatarColor,
+			&i.AvatarImageUrl,
 		); err != nil {
 			return nil, err
 		}
@@ -1049,6 +1033,43 @@ func (q *Queries) PruneFederationAuditBefore(ctx context.Context, occurredAt tim
 	return result.RowsAffected()
 }
 
+const setServerAvatarPath = `-- name: SetServerAvatarPath :exec
+UPDATE server_identity
+SET avatar_image_path = $1
+WHERE id = 1
+`
+
+func (q *Queries) SetServerAvatarPath(ctx context.Context, avatarImagePath string) error {
+	_, err := q.db.ExecContext(ctx, setServerAvatarPath, avatarImagePath)
+	return err
+}
+
+const updatePeerBranding = `-- name: UpdatePeerBranding :exec
+UPDATE federation_peers
+SET name = $1, avatar_color = $2, avatar_image_url = $3
+WHERE id = $4
+`
+
+type UpdatePeerBrandingParams struct {
+	Name           string `json:"name"`
+	AvatarColor    string `json:"avatar_color"`
+	AvatarImageUrl string `json:"avatar_image_url"`
+	ID             string `json:"id"`
+}
+
+// UpdatePeerBranding refresca el name + color + image_url del peer
+// cuando el admin pulsa el boton refresh en PeersTable. Ver hermano
+// SQLite para detalle.
+func (q *Queries) UpdatePeerBranding(ctx context.Context, arg UpdatePeerBrandingParams) error {
+	_, err := q.db.ExecContext(ctx, updatePeerBranding,
+		arg.Name,
+		arg.AvatarColor,
+		arg.AvatarImageUrl,
+		arg.ID,
+	)
+	return err
+}
+
 const updatePeerLastSeen = `-- name: UpdatePeerLastSeen :exec
 UPDATE federation_peers
 SET last_seen_at = $1, last_seen_status_code = $2
@@ -1099,6 +1120,25 @@ func (q *Queries) UpdatePeerRevoked(ctx context.Context, arg UpdatePeerRevokedPa
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const updateServerIdentityProfile = `-- name: UpdateServerIdentityProfile :exec
+UPDATE server_identity
+SET name = $1, avatar_color = $2
+WHERE id = 1
+`
+
+type UpdateServerIdentityProfileParams struct {
+	Name        string `json:"name"`
+	AvatarColor string `json:"avatar_color"`
+}
+
+// Personalizacion editable del servidor: nombre visible para peers
+// y color hex de fallback para el avatar. La foto se actualiza por
+// separado para no reenviar los otros campos en cada upload.
+func (q *Queries) UpdateServerIdentityProfile(ctx context.Context, arg UpdateServerIdentityProfileParams) error {
+	_, err := q.db.ExecContext(ctx, updateServerIdentityProfile, arg.Name, arg.AvatarColor)
+	return err
 }
 
 const upsertFederationProgress = `-- name: UpsertFederationProgress :exec

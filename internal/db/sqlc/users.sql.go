@@ -11,6 +11,19 @@ import (
 	"time"
 )
 
+const clearUserAvatarPath = `-- name: ClearUserAvatarPath :exec
+;
+
+UPDATE users SET avatar_path = NULL WHERE id
+`
+
+// Quita el avatar subido. El fichero en disco lo borra el service
+// antes de llamar; aquí sólo desreferenciamos.
+func (q *Queries) ClearUserAvatarPath(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, clearUserAvatarPath, id)
+	return err
+}
+
 const countUsers = `-- name: CountUsers :one
 SELECT COUNT(*) AS cnt FROM users
 `
@@ -340,7 +353,7 @@ type UpdateUserAvatarColorParams struct {
 	ID          string         `json:"id"`
 }
 
-// avatar_color NULL = use the deterministic FNV-1a → palette
+// avatar_color NULL = use the deterministic FNV-1a -> palette
 // fallback the frontend already has. Non-null = explicit hex
 // override. Service-layer enforces the value is in the known
 // palette (or empty) before reaching the repo.
@@ -349,19 +362,8 @@ func (q *Queries) UpdateUserAvatarColor(ctx context.Context, arg UpdateUserAvata
 	return err
 }
 
-const clearUserAvatarPath = `-- name: ClearUserAvatarPath :exec
-UPDATE users SET avatar_path = NULL WHERE id = ?
-`
-
-// Quita el avatar subido. El fichero en disco lo borra el service
-// antes de llamar; aquí sólo desreferenciamos.
-func (q *Queries) ClearUserAvatarPath(ctx context.Context, id string) error {
-	_, err := q.db.ExecContext(ctx, clearUserAvatarPath, id)
-	return err
-}
-
 const updateUserAvatarPath = `-- name: UpdateUserAvatarPath :exec
-UPDATE users SET avatar_path = ? WHERE id = ?
+UPDATE users SET avatar_path = ? WHERE id =
 `
 
 type UpdateUserAvatarPathParams struct {

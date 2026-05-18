@@ -31,6 +31,9 @@ type Querier interface {
 	// from the rail; everything else stays intact so a future Play resumes
 	// the play-count history and a favorited title remains favorited.
 	ClearProgress(ctx context.Context, arg ClearProgressParams) error
+	// Quita el avatar subido. El fichero en disco lo borra el service
+	// antes de llamar; aquí sólo desreferenciamos.
+	ClearUserAvatarPath(ctx context.Context, id string) error
 	ConsumeDeviceCode(ctx context.Context, arg ConsumeDeviceCodeParams) error
 	// Two extra filters vs. the obvious "started but not completed" rail:
 	//   1. Near-complete drop: position >= 90% of duration. Treat as
@@ -432,6 +435,10 @@ type Querier interface {
 	UpdateLastLogin(ctx context.Context, arg UpdateLastLoginParams) error
 	UpdateLibrary(ctx context.Context, arg UpdateLibraryParams) (int64, error)
 	UpdateLibraryEPGSourcePriority(ctx context.Context, arg UpdateLibraryEPGSourcePriorityParams) error
+	// UpdatePeerBranding refresca el name + color + image_url del peer
+	// con lo que devuelva su proximo /federation/info. Lo llama el admin
+	// desde la PeersTable cuando pulsa el boton refresh (idempotente).
+	UpdatePeerBranding(ctx context.Context, arg UpdatePeerBrandingParams) error
 	UpdatePeerLastSeen(ctx context.Context, arg UpdatePeerLastSeenParams) error
 	UpdatePeerPaired(ctx context.Context, arg UpdatePeerPairedParams) error
 	UpdatePeerRevoked(ctx context.Context, arg UpdatePeerRevokedParams) (int64, error)
@@ -450,14 +457,11 @@ type Querier interface {
 	// is_active=false; the row + every per-user table stays intact so
 	// re-enabling is a one-flag flip.
 	UpdateUserActive(ctx context.Context, arg UpdateUserActiveParams) error
-	// avatar_color NULL = use the deterministic FNV-1a → palette
+	// avatar_color NULL = use the deterministic FNV-1a -> palette
 	// fallback the frontend already has. Non-null = explicit hex
 	// override. Service-layer enforces the value is in the known
 	// palette (or empty) before reaching the repo.
 	UpdateUserAvatarColor(ctx context.Context, arg UpdateUserAvatarColorParams) error
-	// Quita el avatar subido. El fichero en disco lo borra el service
-	// antes de llamar; aquí sólo desreferenciamos.
-	ClearUserAvatarPath(ctx context.Context, id string) error
 	// Sube/actualiza la ruta en disco del avatar subido por el usuario.
 	// El path es relativo al directorio de avatares (config/avatars/<file>),
 	// no absoluto, para que la migración del volumen no rompa nada.

@@ -1523,6 +1523,12 @@ export class ApiClient {
     return this.request<void>("DELETE", `/admin/peers/${id}`);
   }
 
+  /** Re-probea el /federation/info del peer y persiste el nombre +
+   *  color + URL de la foto actualizados. Idempotente. */
+  async refreshPeer(id: string): Promise<import("./types").FederationPeer> {
+    return this.request("POST", `/admin/peers/${id}/refresh`);
+  }
+
   async probePeer(baseURL: string): Promise<import("./types").FederationServerInfo> {
     return this.request("POST", "/admin/peers/probe", { body: { base_url: baseURL } });
   }

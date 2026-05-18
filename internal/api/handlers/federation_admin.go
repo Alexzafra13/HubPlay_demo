@@ -460,6 +460,32 @@ func shareToWire(s *federation.LibraryShare) shareWire {
 	}
 }
 
+// RefreshPeer re-probea el /federation/info del peer y persiste su
+// branding (nombre + color + URL de la foto) actualizado. Idempotente.
+// 200 con el peer actualizado; 502 si el remoto no responde.
+func (h *FederationAdminHandler) RefreshPeer(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		respondError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "id required")
+		return
+	}
+	peer, err := h.mgr.RefreshPeerBranding(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, domain.ErrPeerNotFound) {
+			respondError(w, r, http.StatusNotFound, "PEER_NOT_FOUND", "peer not found")
+			return
+		}
+		// Detalle al log; al cliente solo mensaje generico para no
+		// filtrar IPs o status codes del peer (mismo patron que en
+		// ProbePeer/AcceptInvite — audit olor F16-6).
+		h.logger.Warn("federation: refresh peer branding", "peer_id", id, "err", err)
+		respondError(w, r, http.StatusBadGateway, "PEER_REFRESH_FAILED",
+			"could not reach the peer to refresh its branding")
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"data": peerToWire(peer)})
+}
+
 // RevokePeer terminates a peer. 204 on success, 404 on unknown id.
 func (h *FederationAdminHandler) RevokePeer(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
@@ -483,6 +509,11 @@ func (h *FederationAdminHandler) RevokePeer(w http.ResponseWriter, r *http.Reque
 
 // peerWire is the JSON shape of a peer for admin listings. Renders
 // fingerprint server-side so the UI doesn't have to compute it.
+//
+// AvatarColor + AvatarImageURL son el branding del remoto capturado
+// en el handshake (y refrescable con RefreshPeerBranding). Permiten
+// que PeersTable pinte el avatar del peer con su marca real en vez
+// de un circulo deterministico.
 type peerWire struct {
 	ID                 string  `json:"id"`
 	ServerUUID         string  `json:"server_uuid"`
@@ -496,18 +527,22 @@ type peerWire struct {
 	LastSeenAt         *string `json:"last_seen_at,omitempty"`
 	LastSeenStatusCode *int    `json:"last_seen_status_code,omitempty"`
 	RevokedAt          *string `json:"revoked_at,omitempty"`
+	AvatarColor        string  `json:"avatar_color,omitempty"`
+	AvatarImageURL     string  `json:"avatar_image_url,omitempty"`
 }
 
 func peerToWire(p *federation.Peer) peerWire {
 	wire := peerWire{
-		ID:          p.ID,
-		ServerUUID:  p.ServerUUID,
-		Name:        p.Name,
-		BaseURL:     p.BaseURL,
-		Status:      string(p.Status),
-		Fingerprint: p.Fingerprint(),
-		PublicKey:   federation.EncodePublicKey([]byte(p.PublicKey)),
-		CreatedAt:   p.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+		ID:             p.ID,
+		ServerUUID:     p.ServerUUID,
+		Name:           p.Name,
+		BaseURL:        p.BaseURL,
+		Status:         string(p.Status),
+		Fingerprint:    p.Fingerprint(),
+		PublicKey:      federation.EncodePublicKey([]byte(p.PublicKey)),
+		CreatedAt:      p.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+		AvatarColor:    p.AvatarColor,
+		AvatarImageURL: p.AvatarImageURL,
 	}
 	if p.PairedAt != nil {
 		s := p.PairedAt.UTC().Format("2006-01-02T15:04:05Z")

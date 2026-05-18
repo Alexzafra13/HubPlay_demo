@@ -41,6 +41,14 @@ type Peer struct {
 	LastSeenAt         *time.Time
 	LastSeenStatusCode *int
 	RevokedAt          *time.Time
+	// AvatarColor + AvatarImageURL son el branding que el remoto
+	// publica en /federation/info. Se capturan en el handshake
+	// (outbound y inbound) y se refrescan cuando el admin pulsa
+	// "actualizar" en la PeersTable. Vacios = el frontend cae a
+	// la paleta deterministica derivada del server_uuid +
+	// iniciales del nombre.
+	AvatarColor    string
+	AvatarImageURL string
 }
 
 // Fingerprint returns the same SSH-style hex fingerprint of the peer's
