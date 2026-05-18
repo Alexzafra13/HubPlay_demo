@@ -10,7 +10,8 @@
 -- ============================================================
 
 -- name: GetServerIdentity :one
-SELECT server_uuid, name, private_key, public_key, created_at, rotated_at
+SELECT server_uuid, name, private_key, public_key, created_at, rotated_at,
+       avatar_color, avatar_image_path
 FROM server_identity
 WHERE id = 1;
 
@@ -18,6 +19,19 @@ WHERE id = 1;
 INSERT INTO server_identity
     (id, server_uuid, name, private_key, public_key, created_at)
 VALUES (1, $1, $2, $3, $4, $5);
+
+-- name: UpdateServerIdentityProfile :exec
+-- Personalizacion editable del servidor: nombre visible para peers
+-- y color hex de fallback para el avatar. La foto se actualiza por
+-- separado para no reenviar los otros campos en cada upload.
+UPDATE server_identity
+SET name = $1, avatar_color = $2
+WHERE id = 1;
+
+-- name: SetServerAvatarPath :exec
+UPDATE server_identity
+SET avatar_image_path = $1
+WHERE id = 1;
 
 -- ============================================================
 -- invites

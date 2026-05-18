@@ -107,6 +107,7 @@ var outOfScopeExact = map[string]string{
 	// ── Federation admin (admin) ──────────────────────────────────────
 	"GET /admin/peers":                    "federation pairing admin",
 	"GET /admin/peers/identity":           "federation pairing admin",
+	"PUT /admin/peers/identity":           "federation pairing admin",
 	"POST /admin/peers/probe":             "federation pairing admin",
 	"POST /admin/peers/accept":            "federation pairing admin",
 	"GET /admin/peers/{id}":               "federation pairing admin",
@@ -124,6 +125,9 @@ var outOfScopeExact = map[string]string{
 	"PUT /users/{id}/access":          "user access window admin",
 	"POST /users/{id}/iptv-libraries": "admin shortcut: create livetv lib + grant for this user",
 	"POST /me/password":               "self password change",
+	"POST /me/avatar":                 "self avatar upload (multipart)",
+	"DELETE /me/avatar":               "self avatar removal",
+	"GET /users/{id}/avatar":          "avatar serving — public per-user image",
 	"GET /me/profiles":                "profile selector listing",
 	"POST /auth/switch-profile":       "profile switch",
 

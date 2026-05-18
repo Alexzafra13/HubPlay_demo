@@ -37,11 +37,13 @@ func (r *Repository) GetIdentity(ctx context.Context) (*federation.Identity, err
 
 func identityFromSqliteRow(row sqlc.GetServerIdentityRow) *federation.Identity {
 	id := &federation.Identity{
-		ServerUUID: row.ServerUuid,
-		Name:       row.Name,
-		PrivateKey: row.PrivateKey,
-		PublicKey:  row.PublicKey,
-		CreatedAt:  row.CreatedAt,
+		ServerUUID:      row.ServerUuid,
+		Name:            row.Name,
+		PrivateKey:      row.PrivateKey,
+		PublicKey:       row.PublicKey,
+		CreatedAt:       row.CreatedAt,
+		AvatarColor:     row.AvatarColor,
+		AvatarImagePath: row.AvatarImagePath,
 	}
 	if row.RotatedAt.Valid {
 		t := row.RotatedAt.Time
@@ -52,11 +54,13 @@ func identityFromSqliteRow(row sqlc.GetServerIdentityRow) *federation.Identity {
 
 func identityFromPgRow(row sqlc_pg.GetServerIdentityRow) *federation.Identity {
 	id := &federation.Identity{
-		ServerUUID: row.ServerUuid,
-		Name:       row.Name,
-		PrivateKey: row.PrivateKey,
-		PublicKey:  row.PublicKey,
-		CreatedAt:  row.CreatedAt,
+		ServerUUID:      row.ServerUuid,
+		Name:            row.Name,
+		PrivateKey:      row.PrivateKey,
+		PublicKey:       row.PublicKey,
+		CreatedAt:       row.CreatedAt,
+		AvatarColor:     row.AvatarColor,
+		AvatarImagePath: row.AvatarImagePath,
 	}
 	if row.RotatedAt.Valid {
 		t := row.RotatedAt.Time
@@ -88,6 +92,43 @@ func (r *Repository) InsertIdentity(ctx context.Context, id *federation.Identity
 	}
 	if err != nil {
 		return fmt.Errorf("insert server identity: %w", err)
+	}
+	return nil
+}
+
+// UpdateIdentityProfile actualiza el nombre visible + el color hex
+// elegidos por el admin. Solo toca esos dos campos para que el
+// uploader de foto sea idempotente con respecto a estos.
+func (r *Repository) UpdateIdentityProfile(ctx context.Context, name, avatarColor string) error {
+	if r.useSQLite() {
+		if err := r.sq.UpdateServerIdentityProfile(ctx, sqlc.UpdateServerIdentityProfileParams{
+			Name:        name,
+			AvatarColor: avatarColor,
+		}); err != nil {
+			return fmt.Errorf("update server identity profile: %w", err)
+		}
+		return nil
+	}
+	if err := r.pq.UpdateServerIdentityProfile(ctx, sqlc_pg.UpdateServerIdentityProfileParams{
+		Name:        name,
+		AvatarColor: avatarColor,
+	}); err != nil {
+		return fmt.Errorf("update server identity profile: %w", err)
+	}
+	return nil
+}
+
+// SetAvatarPath registra el nombre del fichero del avatar del servidor
+// (relativo a avatarsDir). Cadena vacía limpia el campo.
+func (r *Repository) SetAvatarPath(ctx context.Context, path string) error {
+	if r.useSQLite() {
+		if err := r.sq.SetServerAvatarPath(ctx, path); err != nil {
+			return fmt.Errorf("set server avatar path: %w", err)
+		}
+		return nil
+	}
+	if err := r.pq.SetServerAvatarPath(ctx, path); err != nil {
+		return fmt.Errorf("set server avatar path: %w", err)
 	}
 	return nil
 }

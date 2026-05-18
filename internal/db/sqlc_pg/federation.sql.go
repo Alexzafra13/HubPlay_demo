@@ -240,18 +240,21 @@ func (q *Queries) GetPeerByServerUUID(ctx context.Context, serverUuid string) (F
 const getServerIdentity = `-- name: GetServerIdentity :one
 
 
-SELECT server_uuid, name, private_key, public_key, created_at, rotated_at
+SELECT server_uuid, name, private_key, public_key, created_at, rotated_at,
+       avatar_color, avatar_image_path
 FROM server_identity
 WHERE id = 1
 `
 
 type GetServerIdentityRow struct {
-	ServerUuid string       `json:"server_uuid"`
-	Name       string       `json:"name"`
-	PrivateKey []byte       `json:"private_key"`
-	PublicKey  []byte       `json:"public_key"`
-	CreatedAt  time.Time    `json:"created_at"`
-	RotatedAt  sql.NullTime `json:"rotated_at"`
+	ServerUuid      string       `json:"server_uuid"`
+	Name            string       `json:"name"`
+	PrivateKey      []byte       `json:"private_key"`
+	PublicKey       []byte       `json:"public_key"`
+	CreatedAt       time.Time    `json:"created_at"`
+	RotatedAt       sql.NullTime `json:"rotated_at"`
+	AvatarColor     string       `json:"avatar_color"`
+	AvatarImagePath string       `json:"avatar_image_path"`
 }
 
 // Federation: server identity, peers, invites, library shares, audit
@@ -273,8 +276,40 @@ func (q *Queries) GetServerIdentity(ctx context.Context) (GetServerIdentityRow, 
 		&i.PublicKey,
 		&i.CreatedAt,
 		&i.RotatedAt,
+		&i.AvatarColor,
+		&i.AvatarImagePath,
 	)
 	return i, err
+}
+
+const updateServerIdentityProfile = `-- name: UpdateServerIdentityProfile :exec
+UPDATE server_identity
+SET name = $1, avatar_color = $2
+WHERE id = 1
+`
+
+type UpdateServerIdentityProfileParams struct {
+	Name        string `json:"name"`
+	AvatarColor string `json:"avatar_color"`
+}
+
+// Personalizacion editable del servidor: nombre visible para peers
+// y color hex de fallback para el avatar. La foto se actualiza por
+// separado para no reenviar los otros campos en cada upload.
+func (q *Queries) UpdateServerIdentityProfile(ctx context.Context, arg UpdateServerIdentityProfileParams) error {
+	_, err := q.db.ExecContext(ctx, updateServerIdentityProfile, arg.Name, arg.AvatarColor)
+	return err
+}
+
+const setServerAvatarPath = `-- name: SetServerAvatarPath :exec
+UPDATE server_identity
+SET avatar_image_path = $1
+WHERE id = 1
+`
+
+func (q *Queries) SetServerAvatarPath(ctx context.Context, avatarImagePath string) error {
+	_, err := q.db.ExecContext(ctx, setServerAvatarPath, avatarImagePath)
+	return err
 }
 
 const insertCachedItem = `-- name: InsertCachedItem :exec

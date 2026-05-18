@@ -307,9 +307,14 @@ func (m *Manager) IssuePeerToken(ctx context.Context, audiencePeerID string) (st
 // PublicServerInfo renders the ServerInfo this server advertises on
 // GET /federation/info. Called frequently — the result is read-only
 // and cheap to assemble.
+//
+// AvatarImageURL se compone con AdvertisedURL + path serving público
+// para que el peer la pinte directamente. El sufijo "?v=<filename>"
+// actúa de cache-buster: cada upload reemplaza el nombre y el peer
+// refetchea sin negociar ETag.
 func (m *Manager) PublicServerInfo() *ServerInfo {
 	id := m.identity.Current()
-	return &ServerInfo{
+	info := &ServerInfo{
 		ServerUUID:        id.ServerUUID,
 		Name:              id.Name,
 		Version:           m.cfg.Version,
@@ -319,7 +324,38 @@ func (m *Manager) PublicServerInfo() *ServerInfo {
 		SupportedScopes:   m.cfg.SupportedScopes,
 		AdvertisedURL:     m.cfg.AdvertisedURL,
 		AdminContact:      m.cfg.AdminContact,
+		AvatarColor:       id.AvatarColor,
 	}
+	if id.AvatarImagePath != "" && m.cfg.AdvertisedURL != "" {
+		info.AvatarImageURL = strings.TrimRight(m.cfg.AdvertisedURL, "/") +
+			"/api/v1/federation/identity/avatar?v=" + id.AvatarImagePath
+	}
+	return info
+}
+
+// UpdateIdentityProfile cambia el nombre visible y el color hex del
+// avatar del servidor. Pasa por el IdentityStore para que la cache
+// en memoria + la DB queden consistentes en una sola operación.
+func (m *Manager) UpdateIdentityProfile(ctx context.Context, name, avatarColor string) error {
+	return m.identity.UpdateProfile(ctx, name, avatarColor)
+}
+
+// SetIdentityAvatarPath registra (o limpia, con cadena vacía) la
+// ruta relativa del avatar subido. El handler escribe primero el
+// fichero a disco y luego llama aquí para persistir el nombre.
+func (m *Manager) SetIdentityAvatarPath(ctx context.Context, path string) error {
+	return m.identity.SetAvatarPath(ctx, path)
+}
+
+// IdentityAvatarPath devuelve la ruta relativa del avatar actual o
+// cadena vacía si no hay. Útil para que el servidor sirva el binario
+// público y para que el admin lo previsualice.
+func (m *Manager) IdentityAvatarPath() string {
+	id := m.identity.Current()
+	if id == nil {
+		return ""
+	}
+	return id.AvatarImagePath
 }
 
 // ────────────────────────────────────────────────────────────────────

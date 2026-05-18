@@ -42,6 +42,73 @@ func (h *FederationAdminHandler) GetServerIdentity(w http.ResponseWriter, r *htt
 	respondJSON(w, http.StatusOK, map[string]any{"data": infoToWire(info)})
 }
 
+// UpdateServerIdentityRequest es el body aceptado por el PUT del
+// admin para editar como aparece este servidor frente a peers: el
+// nombre visible y el color hex de su avatar. El uploader de foto
+// vive en una ruta aparte para no obligar a reenviar estos campos
+// en cada cambio de imagen.
+type updateServerIdentityRequest struct {
+	Name        string `json:"name"`
+	AvatarColor string `json:"avatar_color"`
+}
+
+// UpdateServerIdentity persiste el nombre visible + el color hex
+// elegidos por el admin. Validación mínima: nombre no vacío y
+// longitud razonable; el color hex se acepta tal cual (la UI ya
+// solo expone la paleta acordada) o vacío para resetear al
+// fallback determinista del frontend.
+func (h *FederationAdminHandler) UpdateServerIdentity(w http.ResponseWriter, r *http.Request) {
+	var body updateServerIdentityRequest
+	if err := decodeJSON(r, &body); err != nil {
+		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "invalid JSON body")
+		return
+	}
+	name := strings.TrimSpace(body.Name)
+	if name == "" {
+		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "name required")
+		return
+	}
+	if len(name) > 80 {
+		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "name too long (max 80 chars)")
+		return
+	}
+	color := strings.TrimSpace(body.AvatarColor)
+	if color != "" && !isValidHexColor(color) {
+		respondError(w, r, http.StatusBadRequest, "BAD_REQUEST", "avatar_color must be a hex like #rrggbb")
+		return
+	}
+	if err := h.mgr.UpdateIdentityProfile(r.Context(), name, color); err != nil {
+		h.logger.Error("update server identity", "err", err)
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL", "failed to update server identity")
+		return
+	}
+	info := h.mgr.PublicServerInfo()
+	if info.AdvertisedURL == "" {
+		info.AdvertisedURL = deriveURLFromRequest(r)
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"data": infoToWire(info)})
+}
+
+// isValidHexColor acepta solo el formato #rrggbb (7 chars, hex). Suficiente
+// porque la UI ya expone la paleta cerrada de AVATAR_PALETTE; este check
+// solo bloquea entradas accidentales o llamadas API desde curl con basura.
+func isValidHexColor(s string) bool {
+	if len(s) != 7 || s[0] != '#' {
+		return false
+	}
+	for i := 1; i < 7; i++ {
+		c := s[i]
+		switch {
+		case c >= '0' && c <= '9':
+		case c >= 'a' && c <= 'f':
+		case c >= 'A' && c <= 'F':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // ─── Invites ────────────────────────────────────────────────────────
 
 type inviteWire struct {
@@ -418,6 +485,8 @@ type infoWire struct {
 	SupportedScopes   []string `json:"supported_scopes"`
 	AdvertisedURL     string   `json:"advertised_url"`
 	AdminContact      string   `json:"admin_contact,omitempty"`
+	AvatarColor       string   `json:"avatar_color,omitempty"`
+	AvatarImageURL    string   `json:"avatar_image_url,omitempty"`
 }
 
 func infoToWire(info *federation.ServerInfo) infoWire {
@@ -431,6 +500,8 @@ func infoToWire(info *federation.ServerInfo) infoWire {
 		SupportedScopes:   info.SupportedScopes,
 		AdvertisedURL:     info.AdvertisedURL,
 		AdminContact:      info.AdminContact,
+		AvatarColor:       info.AvatarColor,
+		AvatarImageURL:    info.AvatarImageURL,
 	}
 }
 
@@ -451,5 +522,7 @@ func wireToInfo(w infoWire) (*federation.ServerInfo, error) {
 		SupportedScopes:   w.SupportedScopes,
 		AdvertisedURL:     w.AdvertisedURL,
 		AdminContact:      w.AdminContact,
+		AvatarColor:       w.AvatarColor,
+		AvatarImageURL:    w.AvatarImageURL,
 	}, nil
 }

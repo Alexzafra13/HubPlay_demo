@@ -15,6 +15,13 @@ export interface FederationServerInfo {
   supported_scopes: string[];
   advertised_url: string;
   admin_contact?: string;
+  // avatar_color: hex tipo "#1d4ed8" elegido por el admin como
+  // fallback del avatar del servidor cuando no hay foto subida.
+  // Vacío = el peer cae a su paleta determinista a partir del nombre.
+  avatar_color?: string;
+  // avatar_image_url: URL absoluta servida por el propio servidor
+  // (incluye scheme/host). Vacío significa "sin foto subida".
+  avatar_image_url?: string;
 }
 
 export type FederationPeerStatus = "pending" | "paired" | "revoked";

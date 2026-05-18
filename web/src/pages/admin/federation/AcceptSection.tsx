@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CheckCircle2, Fingerprint, Search, Volume2 } from "lucide-react";
 import { useAcceptInvite, useProbePeer } from "@/api/hooks/federation";
-import { Button } from "@/components/common/Button";
+import { Button, UserAvatar } from "@/components/common";
 import { ErrorBanner, FieldInput, Label, Value } from "./_shared";
 
 // AcceptSection — inbound side of the handshake. Renders bare (no
@@ -77,15 +77,36 @@ export function AcceptSection() {
 
       {/* Stage 2 — verification. Only after a successful probe.
           The accent border + tinted bg makes the "this is the
-          remote you're about to trust" moment unmissable. */}
+          remote you're about to trust" moment unmissable.
+          Cabecera con avatar/color del remoto (su branding,
+          tal como lo configuró su admin) para que el operador
+          confirme visualmente que esta es la marca esperada. */}
       {probedInfo && (
         <div className="rounded-md border border-accent/40 bg-accent/5 p-4">
-          <p className="flex items-center gap-2 text-sm font-semibold text-text-primary">
-            <CheckCircle2 className="h-4 w-4 text-accent" />
-            {t("admin.federation.accept.foundServer", {
-              name: probedInfo.name,
-            })}
-          </p>
+          <div className="flex items-start gap-3">
+            <UserAvatar
+              user={{
+                username: probedInfo.name,
+                display_name: probedInfo.name,
+                avatar_color: probedInfo.avatar_color ?? undefined,
+                avatar_image_url: probedInfo.avatar_image_url ?? null,
+              }}
+              size="lg"
+            />
+            <div className="min-w-0 flex-1">
+              <p className="flex items-center gap-2 text-sm font-semibold text-text-primary">
+                <CheckCircle2 className="h-4 w-4 text-accent" />
+                {t("admin.federation.accept.foundServer", {
+                  name: probedInfo.name,
+                })}
+              </p>
+              {probedInfo.advertised_url && (
+                <p className="mt-1 truncate text-xs text-text-muted">
+                  {probedInfo.advertised_url}
+                </p>
+              )}
+            </div>
+          </div>
 
           <div className="mt-4 flex flex-col gap-4">
             <div>

@@ -49,6 +49,25 @@ func (r *inMemoryFedRepo) InsertIdentity(_ context.Context, id *Identity) error 
 	return nil
 }
 
+func (r *inMemoryFedRepo) UpdateIdentityProfile(_ context.Context, name, color string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.id != nil {
+		r.id.Name = name
+		r.id.AvatarColor = color
+	}
+	return nil
+}
+
+func (r *inMemoryFedRepo) SetAvatarPath(_ context.Context, path string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.id != nil {
+		r.id.AvatarImagePath = path
+	}
+	return nil
+}
+
 func (r *inMemoryFedRepo) InsertAuditEntry(_ context.Context, e *AuditEntry) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
