@@ -94,7 +94,7 @@ describe("LogsPanel pause / drain", () => {
     expect(screen.queryByText("second")).toBeNull();
   });
 
-  it("filter='ERROR' hides INFO + WARN entries from the view", () => {
+  it("toggling INFO/WARN off leaves only ERROR entries visible", () => {
     render(<LogsPanel />);
     emitInfo("info one");
     const es = MockEventSource.instances[0];
@@ -103,8 +103,11 @@ describe("LogsPanel pause / drain", () => {
       es.emit({ ts: new Date().toISOString(), level: "ERROR", msg: "error one" });
     });
 
-    // Switch the dropdown to "Solo Error".
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "ERROR" } });
+    // El nuevo filter UI son toggle buttons por level en vez de un
+    // dropdown. Por defecto DEBUG esta off, INFO/WARN/ERROR on. Para
+    // dejar "solo ERROR" desactivamos INFO y WARN.
+    fireEvent.click(screen.getByRole("button", { name: /^INFO$/i, pressed: true }));
+    fireEvent.click(screen.getByRole("button", { name: /^WARN$/i, pressed: true }));
 
     expect(screen.queryByText("info one")).toBeNull();
     expect(screen.queryByText("warn one")).toBeNull();
@@ -118,5 +121,68 @@ describe("LogsPanel pause / drain", () => {
     expect(screen.getByText(/^en vivo$/i)).toBeInTheDocument();
     act(() => es.onerror?.());
     expect(screen.getByText(/reconectando/i)).toBeInTheDocument();
+  });
+
+  // El search box filtra cliente-side substring sobre msg + module
+  // + attrs. Es el feature mas pedido del rediseño - pin con un
+  // test para que no se rompa silenciosamente.
+  it("search filters entries by substring over message + attrs", () => {
+    render(<LogsPanel />);
+    const es = MockEventSource.instances[0];
+    act(() => {
+      es.emit({
+        ts: new Date().toISOString(),
+        level: "INFO",
+        msg: "user logged in",
+        attrs: { module: "auth", username: "alice" },
+      });
+      es.emit({
+        ts: new Date().toISOString(),
+        level: "INFO",
+        msg: "library scan completed",
+        attrs: { module: "scanner" },
+      });
+    });
+    // Ambos visibles antes del filtro.
+    expect(screen.getByText("user logged in")).toBeInTheDocument();
+    expect(screen.getByText("library scan completed")).toBeInTheDocument();
+
+    // Search "alice" -> solo el de auth.
+    fireEvent.change(screen.getByPlaceholderText(/buscar/i), {
+      target: { value: "alice" },
+    });
+    expect(screen.getByText("user logged in")).toBeInTheDocument();
+    expect(screen.queryByText("library scan completed")).toBeNull();
+  });
+
+  // Click en chip de modulo activa el filtro - cero entries de
+  // modulos distintos al clicado.
+  it("clicking a module chip filters entries to that module", () => {
+    render(<LogsPanel />);
+    const es = MockEventSource.instances[0];
+    act(() => {
+      es.emit({
+        ts: new Date().toISOString(),
+        level: "INFO",
+        msg: "user logged in",
+        attrs: { module: "auth" },
+      });
+      es.emit({
+        ts: new Date().toISOString(),
+        level: "INFO",
+        msg: "scan started",
+        attrs: { module: "scanner" },
+      });
+    });
+
+    // Click el chip "auth" (boton dentro de un <li> con texto "auth").
+    // Hay 2 botones con texto "auth": el chip del toolbar arriba y
+    // el chip inline en la entrada. Cualquiera de los dos activa.
+    const authChips = screen.getAllByRole("button", { name: /^auth$/ });
+    expect(authChips.length).toBeGreaterThan(0);
+    fireEvent.click(authChips[0]);
+
+    expect(screen.getByText("user logged in")).toBeInTheDocument();
+    expect(screen.queryByText("scan started")).toBeNull();
   });
 });

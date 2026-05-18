@@ -19,13 +19,14 @@ import { useTranslation } from "react-i18next";
 import { Library, PlayCircle, TrendingUp } from "lucide-react";
 import {
   useAdminStreamActivity,
+  useAdminStreamSessions,
   useAdminTopItems,
   useSystemStats,
 } from "@/api/hooks";
 import type { SystemStats } from "@/api/types";
 import { Spinner, EmptyState } from "@/components/common";
 import { SectionHeader } from "@/components/admin/SectionHeader";
-import { Sparkline } from "@/components/admin/Sparkline";
+import { AreaTimeline } from "@/components/admin/dashboard/AreaTimeline";
 import { NowPlayingPanel } from "./dashboard/NowPlayingPanel";
 
 // formatUptime — Plex-style "12d 3h 7m". Reused in SystemStatus too;
@@ -80,6 +81,15 @@ export default function DashboardAdmin() {
   } = useSystemStats({ refetchInterval: 30_000 });
   const { data: activity } = useAdminStreamActivity(14);
   const { data: topItems } = useAdminTopItems(7, 5);
+  // Inspeccionamos las sesiones aqui solo para decidir si el bloque
+  // "Now Playing" merece existir. La query se dedupea con la que
+  // hace NowPlayingPanel internamente (TanStack Query las junta por
+  // queryKey), asi que no hay double-fetch. Si no hay nadie viendo
+  // nada, devolvemos null para esa seccion entera y la pagina pasa
+  // de health-strip directo a "Esta semana" sin un panel vacio en
+  // medio.
+  const { data: liveSessions } = useAdminStreamSessions();
+  const hasLiveSessions = (liveSessions?.length ?? 0) > 0;
 
   if (isLoading) {
     return (
@@ -103,7 +113,7 @@ export default function DashboardAdmin() {
   const allHealthy = dbOk && ffmpegOk;
 
   return (
-    <div className="flex flex-col gap-12">
+    <div className="flex flex-col gap-8">
       {/* Health strip — one line of trust. No card chrome, no
           padding around its own bg — just a row of facts ending in
           a "ver detalles" link. The dot uses the success / error
@@ -137,19 +147,25 @@ export default function DashboardAdmin() {
         </span>
       </header>
 
-      {/* Now Playing — kept as its own well-tested panel because it
-          owns a polling cycle + kill mutation. The redesign happens
-          inside NowPlayingPanel itself if/when we touch it. */}
-      <section className="flex flex-col gap-4">
-        <SectionHeader
-          icon={PlayCircle}
-          title={t("admin.summary.nowPlaying")}
-          subtitle={t("admin.summary.nowPlayingSubtitle", {
-            defaultValue: "Reproducciones en curso ahora mismo.",
-          })}
-        />
-        <NowPlayingPanel />
-      </section>
+      {/* Now Playing — solo aparece cuando hay alguien reproduciendo.
+          Si el server esta idle (caso comun en uso casero), nos
+          ahorramos un panel vacio con header + descripcion + empty
+          state, y la pagina pasa directa de "salud" a "esta semana".
+          Cuando alguien arranca un stream, la seccion entera se
+          monta (el panel internamente sigue siendo el de siempre,
+          con SSE + kill mutation propios). */}
+      {hasLiveSessions && (
+        <section className="flex flex-col gap-4">
+          <SectionHeader
+            icon={PlayCircle}
+            title={t("admin.summary.nowPlaying")}
+            subtitle={t("admin.summary.nowPlayingSubtitle", {
+              defaultValue: "Reproducciones en curso ahora mismo.",
+            })}
+          />
+          <NowPlayingPanel />
+        </section>
+      )}
 
       {/* This-week panel — sparkline of watch activity + top-5
           most-watched leaderboard, side by side on lg. */}
@@ -192,8 +208,14 @@ interface ActivityPanelProps {
 function ActivityPanel({ activity, t }: ActivityPanelProps) {
   const totalMinutes = activity.reduce((s, b) => s + b.watch_minutes, 0);
   const totalSessions = activity.reduce((s, b) => s + b.session_count, 0);
-  const series = activity.map((b) => b.watch_minutes);
   const headline = formatHoursMinutes(totalMinutes, t);
+  // Recharts come una array plana - mapeamos las buckets del backend
+  // a la shape {date, minutes} para que el tooltip muestre el dia
+  // legible y el valor formateado en minutos.
+  const chartData = activity.map((b) => ({
+    date: b.date,
+    minutes: b.watch_minutes,
+  }));
 
   return (
     <div className="flex flex-col gap-3 rounded-[--radius-lg] border border-border bg-bg-card p-5">
@@ -205,15 +227,35 @@ function ActivityPanel({ activity, t }: ActivityPanelProps) {
           {t("admin.summary.lastDays", { count: activity.length })}
         </span>
       </div>
-      <div className="flex items-end justify-between gap-4">
+      <div className="flex items-baseline justify-between gap-4">
         <span className="text-2xl font-semibold text-text-primary tabular-nums">
           {headline}
         </span>
-        <Sparkline values={series} width={180} height={42} />
+        <span className="text-xs text-text-muted">
+          {t("admin.summary.sessionsCaption", { count: totalSessions })}
+        </span>
       </div>
-      <p className="text-xs text-text-muted">
-        {t("admin.summary.sessionsCaption", { count: totalSessions })}
-      </p>
+      {/* AreaTimeline en lugar del Sparkline puro: misma silueta
+          pero con tooltip on-hover (dia + minutos), gradient fill
+          que comunica "magnitud" sin necesitar un eje Y explicito,
+          y mismo color que el resto de charts del proyecto. */}
+      <div className="h-24 w-full">
+        <AreaTimeline
+          data={chartData}
+          xKey="date"
+          yKey="minutes"
+          color="var(--color-accent)"
+          unit=" min"
+          formatX={(v) => {
+            const d = new Date(String(v));
+            return d.toLocaleDateString(undefined, {
+              day: "2-digit",
+              month: "2-digit",
+            });
+          }}
+          formatY={(n) => `${n} min`}
+        />
+      </div>
     </div>
   );
 }
@@ -224,6 +266,10 @@ interface TopItemsPanelProps {
 }
 
 function TopItemsPanel({ items, t }: TopItemsPanelProps) {
+  // El leader tiene el max - lo usamos como denominador para que las
+  // barras finas debajo de cada titulo comuniquen "este se ha visto
+  // el doble que este otro" de un vistazo sin tener que leer numeros.
+  const max = items.reduce((m, x) => Math.max(m, x.play_count), 1);
   return (
     <div className="flex flex-col gap-3 rounded-[--radius-lg] border border-border bg-bg-card p-5">
       <div className="flex items-baseline justify-between gap-3">
@@ -239,24 +285,33 @@ function TopItemsPanel({ items, t }: TopItemsPanelProps) {
           {t("admin.summary.noPlaysYet")}
         </p>
       ) : (
-        <ol className="flex flex-col gap-2.5">
+        <ol className="flex flex-col gap-2">
           {items.map((item, i) => {
             const href =
               item.type === "series" ? `/series/${item.id}` : `/movies/${item.id}`;
+            const pct = (item.play_count / max) * 100;
             return (
-              <li key={item.id} className="flex items-center gap-3">
-                <span className="w-5 text-right text-xs font-semibold tabular-nums text-text-muted">
-                  {i + 1}
-                </span>
-                <Link
-                  to={href}
-                  className="flex-1 truncate text-sm text-text-primary hover:text-accent transition-colors"
-                >
-                  {item.title}
-                </Link>
-                <span className="text-xs tabular-nums text-text-muted">
-                  {t("admin.summary.playCount", { count: item.play_count })}
-                </span>
+              <li key={item.id} className="flex flex-col gap-1">
+                <div className="flex items-baseline gap-3">
+                  <span className="w-5 text-right text-xs font-semibold tabular-nums text-text-muted">
+                    {i + 1}
+                  </span>
+                  <Link
+                    to={href}
+                    className="flex-1 truncate text-sm text-text-primary hover:text-accent transition-colors"
+                  >
+                    {item.title}
+                  </Link>
+                  <span className="text-xs tabular-nums text-text-muted">
+                    {t("admin.summary.playCount", { count: item.play_count })}
+                  </span>
+                </div>
+                <div className="h-1 ml-8 overflow-hidden rounded-full bg-bg-elevated">
+                  <div
+                    className="h-full bg-accent/70 transition-all"
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
               </li>
             );
           })}

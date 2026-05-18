@@ -1,6 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Pause, Play, Trash2 } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  Maximize2,
+  Minimize2,
+  Pause,
+  Play,
+  Search,
+  Trash2,
+  X,
+} from "lucide-react";
 import { Button } from "@/components/common";
 
 // LogsPanel — admin "Logs" surface, mounted under /admin/system →
@@ -9,16 +21,26 @@ import { Button } from "@/components/common";
 //      empty for the first few seconds, then
 //   2. pushes every new log entry as it lands.
 //
-// UI shape: a single scrollable log box with a small toolbar
-// (level filter, pause toggle, clear). Auto-scrolls to the bottom
-// while live; pause stops the auto-scroll AND visually freezes the
-// "feels live" indicator so the operator can read a stack trace
-// without it being yanked away by fresh entries.
+// Rediseño con semantica visual (versus el dump monocromo previo):
 //
-// EventSource — not fetch+ReadableStream — because cookie auth is
-// already in place and EventSource handles reconnect for us when
-// the proxy in front kills idle SSE conns. We don't pass a token
-// anywhere; the cookie rides along automatically (`withCredentials`).
+//   - Borde-izquierda coloreado por level (info/warn/error). Mas
+//     escaneable que prefijar "WARN" en monocromo.
+//   - Chip de `module` extraido de attrs (auth, federation, iptv,
+//     library, scanner...) - click filtra solo a ese module.
+//   - Search box que filtra substring sobre msg + module + attrs
+//     serializados. Cliente-side, cero round-trip.
+//   - Multi-toggle de niveles (DEBUG/INFO/WARN/ERROR) en vez del
+//     dropdown de 3 opciones. Cliclar cada uno on/off independiente.
+//   - Click en entrada -> expande attrs como tabla key/value. Ahora
+//     se aplastan a "k=v k2=v2" y la informacion util se pierde.
+//   - Boton "copiar JSON" por entrada para compartir en un chat
+//     o issue de GitHub sin reescribir.
+//   - Boton fullscreen (overlay del viewport completo) para depurar
+//     casos serios sin la limitacion de altura del panel.
+//
+// EventSource — not fetch+ReadableStream — porque cookie auth ya
+// esta in place y EventSource maneja reconnect cuando un proxy mata
+// idle SSE conns. Cero token pass-through (`withCredentials`).
 
 interface LogEntry {
   ts: string;
@@ -28,40 +50,39 @@ interface LogEntry {
 }
 
 const MAX_ENTRIES = 800;
-
-// Subset filter — admins almost always want "errors only" or "all";
-// granular debug filtering would be a lot of UI for little gain.
-type LevelFilter = "ALL" | "WARN" | "ERROR";
+const ALL_LEVELS = ["DEBUG", "INFO", "WARN", "ERROR"] as const;
+type Level = (typeof ALL_LEVELS)[number];
 
 export function LogsPanel() {
   const { t } = useTranslation();
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [paused, setPaused] = useState(false);
-  const [filter, setFilter] = useState<LevelFilter>("ALL");
   const [connected, setConnected] = useState(false);
+  const [search, setSearch] = useState("");
+  // Niveles activos: por defecto INFO/WARN/ERROR. DEBUG fuera para
+  // que un servidor con DEBUG abierto no inunde la vista; el admin
+  // lo activa cuando quiere mirar bajo el capó.
+  const [activeLevels, setActiveLevels] = useState<Set<Level>>(
+    () => new Set<Level>(["INFO", "WARN", "ERROR"]),
+  );
+  // Filter por modulo: vacio = todos. Se rellena al click en un chip
+  // de cualquier entrada.
+  const [moduleFilter, setModuleFilter] = useState<string | null>(null);
+  const [fullscreen, setFullscreen] = useState(false);
 
   // Buffered new entries while paused so the operator catches up
   // when they un-pause instead of missing whatever happened during.
-  // Stored in a ref so SSE writes don't re-render every entry, with
-  // a parallel counter in state so the UI can react when we want
-  // to surface "N entradas en cola" without reading the ref during
-  // render (which violates React's rules — refs aren't reactive).
   const bufferRef = useRef<LogEntry[]>([]);
   const [bufferedCount, setBufferedCount] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   const pausedRef = useRef(paused);
 
-  // Keep the SSE callback's view of `paused` fresh without
-  // re-establishing the EventSource on every toggle. Sync via
-  // useEffect rather than a render-phase assignment so React
-  // strict-mode / the React Compiler stop warning.
   useEffect(() => {
     pausedRef.current = paused;
   }, [paused]);
 
   // SSE wiring. Recreated only on mount/unmount; pause is handled
-  // in the consumer rather than by tearing down the connection
-  // (cheaper + the server keeps a stable subscription).
+  // in the consumer rather than by tearing down the connection.
   useEffect(() => {
     const es = new EventSource("/api/v1/admin/system/logs/stream", {
       withCredentials: true,
@@ -73,8 +94,6 @@ export function LogsPanel() {
         const e = JSON.parse(ev.data) as LogEntry;
         if (pausedRef.current) {
           bufferRef.current.push(e);
-          // Cap the pause buffer too — a forgotten paused tab
-          // shouldn't grow without bound.
           if (bufferRef.current.length > MAX_ENTRIES) {
             bufferRef.current = bufferRef.current.slice(-MAX_ENTRIES);
           }
@@ -94,16 +113,9 @@ export function LogsPanel() {
     return () => es.close();
   }, []);
 
-  // Toggle pause + drain the buffer atomically when leaving paused
-  // mode. This was an effect reacting to `paused` before; React's
-  // strict rules flag setState-in-effect because the drain is
-  // really an event response, not a synchronisation. Moving it into
-  // the click handler removes the effect entirely and React batches
-  // the three setState calls into a single re-render.
   const onTogglePause = () => {
     setPaused((prev) => {
       if (prev) {
-        // un-pausing
         const drained = bufferRef.current;
         bufferRef.current = [];
         setBufferedCount(0);
@@ -120,26 +132,68 @@ export function LogsPanel() {
     });
   };
 
-  // Auto-scroll. Only when not paused so the operator's read
-  // position stays put while they investigate.
+  // Filtrado memoizado: levels + module + search en cascada.
+  const visible = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return entries.filter((e) => {
+      if (!activeLevels.has(e.level as Level)) return false;
+      const mod = moduleOf(e);
+      if (moduleFilter && mod !== moduleFilter) return false;
+      if (q.length > 0) {
+        const hay = `${e.level} ${mod} ${e.msg} ${JSON.stringify(e.attrs ?? {})}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [entries, activeLevels, moduleFilter, search]);
+
+  // Modulos vistos en el buffer actual — chips arriba para click-
+  // filter sin tener que escribir el nombre.
+  const knownModules = useMemo(() => {
+    const set = new Set<string>();
+    for (const e of entries) {
+      const m = moduleOf(e);
+      if (m) set.add(m);
+    }
+    return Array.from(set).sort();
+  }, [entries]);
+
+  // Auto-scroll a la nueva entrada solo cuando NO esta pausado y NO
+  // estamos en plena exploracion (el user ha scrolleado hacia arriba).
+  // Heuristica simple: si el scroll esta a menos de 32 px del fondo,
+  // se asume "siguiendo en vivo"; si no, el user esta leyendo y no
+  // queremos saltarle el cursor.
   useEffect(() => {
     if (paused) return;
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [entries, paused]);
-
-  const visible = useMemo(() => {
-    if (filter === "ALL") return entries;
-    if (filter === "WARN") {
-      return entries.filter((e) => e.level === "WARN" || e.level === "ERROR");
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (distanceFromBottom < 32) {
+      el.scrollTop = el.scrollHeight;
     }
-    return entries.filter((e) => e.level === "ERROR");
-  }, [entries, filter]);
+  }, [visible, paused]);
+
+  const toggleLevel = (lvl: Level) => {
+    setActiveLevels((prev) => {
+      const next = new Set(prev);
+      if (next.has(lvl)) {
+        next.delete(lvl);
+      } else {
+        next.add(lvl);
+      }
+      return next;
+    });
+  };
+
+  const containerCls = fullscreen
+    ? "fixed inset-4 z-50 flex flex-col gap-3 rounded-[--radius-lg] border border-border bg-bg-card p-5 shadow-2xl"
+    : "flex flex-col gap-3 rounded-[--radius-lg] border border-border bg-bg-card p-5";
 
   return (
-    <div className="flex flex-col gap-3 rounded-[--radius-lg] border border-border bg-bg-card p-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
+    <div className={containerCls}>
+      {/* Header */}
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
           <h3 className="text-sm font-semibold text-text-primary">
             {t("admin.logs.title", { defaultValue: "Logs en vivo" })}
           </h3>
@@ -151,52 +205,7 @@ export function LogsPanel() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <span
-            className={[
-              "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-medium",
-              connected
-                ? "bg-success/15 text-success"
-                : "bg-warning/15 text-warning",
-            ].join(" ")}
-            title={
-              connected
-                ? t("admin.logs.connected", { defaultValue: "Conectado" })
-                : t("admin.logs.disconnected", {
-                    defaultValue: "Reconectando…",
-                  })
-            }
-          >
-            <span
-              className={[
-                "h-1.5 w-1.5 rounded-full",
-                connected ? "bg-success" : "bg-warning",
-              ].join(" ")}
-            />
-            {connected
-              ? t("admin.logs.live", { defaultValue: "En vivo" })
-              : t("admin.logs.reconnecting", {
-                  defaultValue: "Reconectando",
-                })}
-          </span>
-
-          <select
-            value={filter}
-            onChange={(e) => setFilter(e.target.value as LevelFilter)}
-            className="rounded-md border border-border bg-bg-elevated px-2 py-1 text-xs text-text-primary focus:border-accent focus:outline-none"
-          >
-            <option value="ALL">
-              {t("admin.logs.filterAll", { defaultValue: "Todo" })}
-            </option>
-            <option value="WARN">
-              {t("admin.logs.filterWarn", {
-                defaultValue: "Warn + Error",
-              })}
-            </option>
-            <option value="ERROR">
-              {t("admin.logs.filterError", { defaultValue: "Solo Error" })}
-            </option>
-          </select>
-
+          <ConnectionPill connected={connected} t={t} />
           <Button
             size="sm"
             variant="ghost"
@@ -223,46 +232,261 @@ export function LogsPanel() {
           >
             <Trash2 className="h-3.5 w-3.5" />
           </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setFullscreen((f) => !f)}
+            title={
+              fullscreen
+                ? t("admin.logs.exitFullscreen", {
+                    defaultValue: "Salir de pantalla completa",
+                  })
+                : t("admin.logs.fullscreen", {
+                    defaultValue: "Pantalla completa",
+                  })
+            }
+          >
+            {fullscreen ? (
+              <Minimize2 className="h-3.5 w-3.5" />
+            ) : (
+              <Maximize2 className="h-3.5 w-3.5" />
+            )}
+          </Button>
         </div>
       </div>
 
+      {/* Toolbar: search + level toggles */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative flex-1 min-w-[200px]">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-text-muted" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={t("admin.logs.searchPlaceholder", {
+              defaultValue: "Buscar en mensaje, módulo, atributos…",
+            })}
+            className="w-full rounded-md border border-border bg-bg-elevated pl-8 pr-8 py-1.5 text-xs text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none"
+          />
+          {search && (
+            <button
+              type="button"
+              onClick={() => setSearch("")}
+              aria-label={t("admin.logs.clearSearch", {
+                defaultValue: "Limpiar búsqueda",
+              })}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          )}
+        </div>
+        <div className="flex items-center gap-1 rounded-md border border-border bg-bg-elevated p-0.5">
+          {ALL_LEVELS.map((lvl) => (
+            <LevelToggle
+              key={lvl}
+              level={lvl}
+              active={activeLevels.has(lvl)}
+              onClick={() => toggleLevel(lvl)}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* Module chips — solo se muestran si hay modules en el buffer
+          actual. Click activa el filtro; el chip activo lleva una X
+          para limpiarlo. */}
+      {knownModules.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[10px] uppercase tracking-wider text-text-muted">
+            {t("admin.logs.modulesLabel", { defaultValue: "Módulos" })}
+          </span>
+          {knownModules.map((m) => {
+            const active = moduleFilter === m;
+            return (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setModuleFilter(active ? null : m)}
+                className={[
+                  "inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-mono text-[10px] transition-colors",
+                  active
+                    ? "bg-accent/15 text-accent ring-1 ring-accent/30"
+                    : "bg-bg-elevated text-text-secondary hover:bg-bg-hover hover:text-text-primary",
+                ].join(" ")}
+              >
+                {m}
+                {active && <X className="h-2.5 w-2.5" />}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Log box */}
       <div
         ref={scrollRef}
-        className="h-72 overflow-y-auto rounded-md border border-border-subtle bg-bg-base p-3 font-mono text-[11px] leading-relaxed"
+        className={[
+          "overflow-y-auto rounded-md border border-border-subtle bg-bg-base",
+          fullscreen ? "flex-1" : "h-80",
+        ].join(" ")}
       >
         {visible.length === 0 ? (
-          <p className="text-text-muted">
-            {t("admin.logs.empty", {
-              defaultValue: "No hay entradas todavía. Se mostrarán aquí en cuanto el servidor escriba algo.",
-            })}
+          <p className="px-4 py-8 text-center text-xs text-text-muted">
+            {entries.length === 0
+              ? t("admin.logs.empty", {
+                  defaultValue:
+                    "No hay entradas todavía. Se mostrarán aquí en cuanto el servidor escriba algo.",
+                })
+              : t("admin.logs.emptyFiltered", {
+                  defaultValue:
+                    "Ningún log coincide con los filtros actuales.",
+                })}
           </p>
         ) : (
-          visible.map((e, i) => <LogRow key={i} entry={e} />)
+          <ul className="flex flex-col divide-y divide-border-subtle/40">
+            {visible.map((e, i) => (
+              <LogRow
+                key={`${e.ts}-${i}`}
+                entry={e}
+                onModuleClick={(m) => setModuleFilter(m)}
+              />
+            ))}
+          </ul>
         )}
       </div>
 
-      {paused && bufferedCount > 0 && (
-        <p className="text-[11px] text-text-muted">
-          {t("admin.logs.pausedHint", {
-            defaultValue:
-              "Pausado · {{n}} entrada(s) en cola, se aplicarán al reanudar.",
-            n: bufferedCount,
+      {/* Footer hints */}
+      <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-text-muted">
+        <span>
+          {t("admin.logs.counter", {
+            defaultValue: "{{v}} / {{n}} entradas",
+            v: visible.length,
+            n: entries.length,
           })}
-        </p>
-      )}
+        </span>
+        {paused && bufferedCount > 0 && (
+          <span>
+            {t("admin.logs.pausedHint", {
+              defaultValue:
+                "Pausado · {{n}} entrada(s) en cola, se aplicarán al reanudar.",
+              n: bufferedCount,
+            })}
+          </span>
+        )}
+      </div>
     </div>
   );
 }
 
-function LogRow({ entry }: { entry: LogEntry }) {
-  const tone =
-    entry.level === "ERROR"
-      ? "text-error"
-      : entry.level === "WARN"
-        ? "text-warning"
-        : entry.level === "DEBUG"
-          ? "text-text-muted"
-          : "text-text-secondary";
+// ─── Connection pill ───────────────────────────────────────────────
+
+function ConnectionPill({
+  connected,
+  t,
+}: {
+  connected: boolean;
+  t: (key: string, opts?: Record<string, unknown>) => string;
+}) {
+  return (
+    <span
+      className={[
+        "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-medium",
+        connected
+          ? "bg-success/15 text-success"
+          : "bg-warning/15 text-warning",
+      ].join(" ")}
+      title={
+        connected
+          ? t("admin.logs.connected", { defaultValue: "Conectado" })
+          : t("admin.logs.disconnected", {
+              defaultValue: "Reconectando…",
+            })
+      }
+    >
+      <span
+        className={[
+          "h-1.5 w-1.5 rounded-full",
+          connected ? "bg-success" : "bg-warning",
+        ].join(" ")}
+      />
+      {connected
+        ? t("admin.logs.live", { defaultValue: "En vivo" })
+        : t("admin.logs.reconnecting", {
+            defaultValue: "Reconectando",
+          })}
+    </span>
+  );
+}
+
+// ─── Level toggle (compact pill-button) ─────────────────────────────
+
+const LEVEL_STYLE: Record<Level, { active: string; inactive: string }> = {
+  DEBUG: {
+    active: "bg-bg-base text-text-muted",
+    inactive: "text-text-muted/50",
+  },
+  INFO: {
+    active: "bg-bg-base text-text-secondary",
+    inactive: "text-text-muted/50",
+  },
+  WARN: {
+    active: "bg-warning/15 text-warning",
+    inactive: "text-text-muted/50",
+  },
+  ERROR: {
+    active: "bg-error/15 text-error",
+    inactive: "text-text-muted/50",
+  },
+};
+
+function LevelToggle({
+  level,
+  active,
+  onClick,
+}: {
+  level: Level;
+  active: boolean;
+  onClick: () => void;
+}) {
+  const cls = LEVEL_STYLE[level];
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={[
+        "rounded px-2 py-0.5 text-[10px] font-bold uppercase transition-colors",
+        active ? cls.active : cls.inactive,
+      ].join(" ")}
+    >
+      {level}
+    </button>
+  );
+}
+
+// ─── LogRow ─────────────────────────────────────────────────────────
+
+function LogRow({
+  entry,
+  onModuleClick,
+}: {
+  entry: LogEntry;
+  onModuleClick: (mod: string) => void;
+}) {
+  const { t } = useTranslation();
+  const [expanded, setExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const mod = moduleOf(entry);
+  const attrsWithoutModule = useMemo(() => {
+    if (!entry.attrs) return null;
+    const copy: Record<string, unknown> = { ...entry.attrs };
+    delete copy.module;
+    return Object.keys(copy).length > 0 ? copy : null;
+  }, [entry.attrs]);
+  const hasDetail = !!attrsWithoutModule;
+
   const time = (() => {
     try {
       return new Date(entry.ts).toLocaleTimeString();
@@ -270,28 +494,188 @@ function LogRow({ entry }: { entry: LogEntry }) {
       return entry.ts;
     }
   })();
+
+  const borderColour = (() => {
+    switch (entry.level) {
+      case "ERROR":
+        return "var(--color-error)";
+      case "WARN":
+        return "var(--color-warning)";
+      case "DEBUG":
+        return "var(--color-border-subtle)";
+      default:
+        return "var(--color-accent)";
+    }
+  })();
+
+  const levelTextCls = (() => {
+    switch (entry.level) {
+      case "ERROR":
+        return "text-error";
+      case "WARN":
+        return "text-warning";
+      case "DEBUG":
+        return "text-text-muted/70";
+      default:
+        return "text-text-secondary";
+    }
+  })();
+
+  const handleCopy = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      const payload = JSON.stringify(entry, null, 2);
+      navigator.clipboard.writeText(payload);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1200);
+    } catch {
+      // navigator.clipboard puede fallar en contextos no-secure;
+      // silenciamos en lugar de petar el row.
+    }
+  };
+
   return (
-    <div className={`break-words ${tone}`}>
-      <span className="text-text-muted">{time}</span>{" "}
-      <span className="font-semibold uppercase">{entry.level}</span>{" "}
-      <span className="text-text-primary">{entry.msg}</span>
-      {entry.attrs && Object.keys(entry.attrs).length > 0 && (
-        <span className="ml-1 text-text-muted">
-          {Object.entries(entry.attrs)
-            .map(([k, v]) => `${k}=${formatAttr(v)}`)
-            .join(" ")}
-        </span>
+    <li
+      className="group relative"
+      style={{ borderLeft: `2px solid ${borderColour}` }}
+    >
+      <button
+        type="button"
+        onClick={() => hasDetail && setExpanded((e) => !e)}
+        className={[
+          "w-full px-3 py-2 text-left font-mono text-[11px] leading-relaxed",
+          "hover:bg-bg-elevated/40 transition-colors",
+          hasDetail ? "cursor-pointer" : "cursor-default",
+        ].join(" ")}
+      >
+        <div className="flex items-baseline gap-2">
+          <span className="flex-none text-text-muted tabular-nums">
+            {time}
+          </span>
+          <span
+            className={[
+              "flex-none text-[9px] font-bold uppercase tracking-wider tabular-nums",
+              levelTextCls,
+            ].join(" ")}
+            style={{ width: "44px" }}
+          >
+            {entry.level}
+          </span>
+          {mod && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onModuleClick(mod);
+              }}
+              className="flex-none rounded bg-bg-elevated px-1.5 py-0.5 text-[9px] font-mono text-text-secondary hover:bg-accent/10 hover:text-accent transition-colors"
+            >
+              {mod}
+            </button>
+          )}
+          <span className="min-w-0 flex-1 break-words text-text-primary">
+            {entry.msg}
+          </span>
+          {/* Acciones por entrada — solo visibles en hover para no
+              competir con el contenido principal. */}
+          <span className="flex-none flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <span
+              role="button"
+              tabIndex={0}
+              onClick={handleCopy}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.stopPropagation();
+                  handleCopy(e as unknown as React.MouseEvent);
+                }
+              }}
+              title={t("admin.logs.copy", {
+                defaultValue: "Copiar JSON",
+              })}
+              className="rounded p-1 text-text-muted hover:bg-bg-hover hover:text-text-primary cursor-pointer"
+            >
+              {copied ? (
+                <Check className="h-3 w-3 text-success" />
+              ) : (
+                <Copy className="h-3 w-3" />
+              )}
+            </span>
+            {hasDetail &&
+              (expanded ? (
+                <ChevronDown className="h-3 w-3 text-text-muted" />
+              ) : (
+                <ChevronRight className="h-3 w-3 text-text-muted" />
+              ))}
+          </span>
+        </div>
+        {/* Preview de attrs cuando NO esta expandido — formato
+            compacto k=v para no romper la lectura rapida del msg. */}
+        {!expanded && attrsWithoutModule && (
+          <div className="mt-0.5 pl-[140px] text-text-muted/80 truncate">
+            {Object.entries(attrsWithoutModule)
+              .slice(0, 6)
+              .map(([k, v]) => `${k}=${formatAttr(v)}`)
+              .join(" · ")}
+          </div>
+        )}
+      </button>
+      {/* Detalle expandido: tabla key/value de TODOS los attrs en
+          formato legible. Cubre el caso en el que el preview de arriba
+          oculta info que el admin necesita ver (errores con stack
+          traces, payloads largos). */}
+      {expanded && attrsWithoutModule && (
+        <div className="mx-3 mb-2 rounded-md border border-border-subtle bg-bg-elevated px-3 py-2">
+          <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 font-mono text-[11px]">
+            {Object.entries(attrsWithoutModule).map(([k, v]) => (
+              <div
+                key={k}
+                className="contents"
+              >
+                <dt className="text-text-muted">{k}</dt>
+                <dd className="text-text-primary break-all whitespace-pre-wrap">
+                  {formatAttrPretty(v)}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </div>
       )}
-    </div>
+    </li>
   );
+}
+
+// ─── Helpers ────────────────────────────────────────────────────────
+
+// moduleOf extrae el campo "module" de attrs si esta presente. Los
+// loggers del proyecto añaden module via .With("module", "auth")
+// asi que es una convencion estable que podemos explotar.
+function moduleOf(e: LogEntry): string {
+  const v = e.attrs?.module;
+  return typeof v === "string" ? v : "";
 }
 
 function formatAttr(v: unknown): string {
   if (v === null || v === undefined) return "";
+  if (typeof v === "string") {
+    return v.length > 60 ? `${v.slice(0, 57)}…` : v;
+  }
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  try {
+    const s = JSON.stringify(v);
+    return s.length > 60 ? `${s.slice(0, 57)}…` : s;
+  } catch {
+    return String(v);
+  }
+}
+
+// formatAttrPretty se usa SOLO en el panel expandido, sin truncar
+// para que el admin pueda leer stack traces / payloads enteros.
+function formatAttrPretty(v: unknown): string {
+  if (v === null || v === undefined) return "";
   if (typeof v === "string") return v;
   if (typeof v === "number" || typeof v === "boolean") return String(v);
   try {
-    return JSON.stringify(v);
+    return JSON.stringify(v, null, 2);
   } catch {
     return String(v);
   }
