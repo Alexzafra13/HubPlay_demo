@@ -214,19 +214,14 @@ export function SearchBar() {
           className={[
             "group absolute right-0 top-0 h-9 flex items-center rounded-full overflow-hidden transition-[background-color,box-shadow] duration-200",
             open
-              ? "bg-bg-overlay/95 backdrop-blur-xl shadow-[0_4px_16px_-4px_rgba(0,0,0,0.45)] ring-1 ring-white/10 focus-within:ring-accent/45 focus-within:shadow-[0_0_0_4px_rgba(20,184,166,0.12),0_4px_18px_-4px_rgba(0,0,0,0.5)]"
+              ? "bg-bg-overlay/95 backdrop-blur-xl ring-1 ring-white/10 shadow-[0_6px_20px_-6px_rgba(0,0,0,0.55)]"
               : "bg-bg-hover/40 ring-1 ring-white/8 hover:ring-white/20",
           ].join(" ")}
         >
           <button
             type="button"
             onClick={() => (open ? inputRef.current?.focus() : openSearch())}
-            className={[
-              "flex items-center justify-center w-9 h-9 flex-shrink-0 transition-colors",
-              open
-                ? "text-text-secondary group-focus-within:text-accent"
-                : "text-text-secondary hover:text-text-primary",
-            ].join(" ")}
+            className="flex items-center justify-center w-9 h-9 flex-shrink-0 text-text-secondary hover:text-text-primary transition-colors"
             aria-label={t("nav.search")}
             aria-expanded={open}
           >
