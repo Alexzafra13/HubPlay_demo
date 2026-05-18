@@ -656,6 +656,18 @@ func NewRouter(deps Dependencies) http.Handler {
 						r.Get("/sessions", adminStreams.ListSessions)
 						r.Delete("/sessions/{id}", adminStreams.KillSession)
 					}
+
+					// Storage breakdown — disco fisico + peso por
+					// biblioteca. Endpoint dedicado (no parte de
+					// /stats) porque la cadencia es distinta: stats
+					// cada 30s, storage cada minuto - cambia solo
+					// con scans.
+					if deps.Libraries != nil && deps.Items != nil {
+						adminStorage := handlers.NewAdminStorageHandler(
+							deps.Libraries, deps.Items, deps.Logger,
+						)
+						r.Get("/storage/disks", adminStorage.Disks)
+					}
 					if deps.Settings != nil {
 						// Surface the host's actually-detected accelerators to the
 						// settings handler so the panel only offers choices that have

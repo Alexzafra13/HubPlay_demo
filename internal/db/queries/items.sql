@@ -49,3 +49,15 @@ SELECT id, library_id, parent_id, type, title, sort_title, original_title,
 FROM items
 WHERE parent_id = ?
 ORDER BY COALESCE(season_number, 0), COALESCE(episode_number, 0), sort_title;
+
+-- name: SumItemSizesByLibrary :many
+-- Suma el peso total en bytes y cuenta los ficheros reales por
+-- biblioteca. Filtra `size > 0` para excluir nodos jerarquicos
+-- (series, seasons) que no tienen fichero propio - solo los
+-- "leaves" (movies, episodes, channels) tienen size>0. El indice
+-- existente idx_items_library hace que el GROUP BY sea barato
+-- incluso con millones de items.
+SELECT library_id, CAST(COALESCE(SUM(size), 0) AS INTEGER) AS total_bytes, COUNT(*) AS file_count
+FROM items
+WHERE size > 0
+GROUP BY library_id;

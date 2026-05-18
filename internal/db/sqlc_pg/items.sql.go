@@ -302,6 +302,44 @@ func (q *Queries) GetItemChildren(ctx context.Context, parentID sql.NullString) 
 	return items, nil
 }
 
+const sumItemSizesByLibrary = `-- name: SumItemSizesByLibrary :many
+SELECT library_id, COALESCE(SUM(size), 0)::BIGINT AS total_bytes, COUNT(*)::BIGINT AS file_count
+FROM items
+WHERE size > 0
+GROUP BY library_id
+`
+
+type SumItemSizesByLibraryRow struct {
+	LibraryID  string `json:"library_id"`
+	TotalBytes int64  `json:"total_bytes"`
+	FileCount  int64  `json:"file_count"`
+}
+
+// Suma el peso total en bytes y cuenta los ficheros reales por
+// biblioteca. Ver hermano SQLite para rationale.
+func (q *Queries) SumItemSizesByLibrary(ctx context.Context) ([]SumItemSizesByLibraryRow, error) {
+	rows, err := q.db.QueryContext(ctx, sumItemSizesByLibrary)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SumItemSizesByLibraryRow{}
+	for rows.Next() {
+		var i SumItemSizesByLibraryRow
+		if err := rows.Scan(&i.LibraryID, &i.TotalBytes, &i.FileCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateItem = `-- name: UpdateItem :execrows
 UPDATE items SET title = $1, sort_title = $2, original_title = $3,
        year = $4, size = $5, duration_ticks = $6, container = $7,

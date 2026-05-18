@@ -16,14 +16,25 @@
 
 import { Link } from "react-router";
 import { useTranslation } from "react-i18next";
-import { Library, PlayCircle, TrendingUp } from "lucide-react";
 import {
+  Film,
+  HardDrive,
+  Library,
+  PlayCircle,
+  Radio,
+  Sparkles,
+  Tv,
+  TrendingUp,
+} from "lucide-react";
+import {
+  useAdminStorageDisks,
   useAdminStreamActivity,
   useAdminStreamSessions,
   useAdminTopItems,
+  useLatestItems,
   useSystemStats,
 } from "@/api/hooks";
-import type { SystemStats } from "@/api/types";
+import type { AdminDisk, MediaItem, SystemStats } from "@/api/types";
 import { Spinner, EmptyState } from "@/components/common";
 import { SectionHeader } from "@/components/admin/SectionHeader";
 import { AreaTimeline } from "@/components/admin/dashboard/AreaTimeline";
@@ -90,6 +101,21 @@ export default function DashboardAdmin() {
   // medio.
   const { data: liveSessions } = useAdminStreamSessions();
   const hasLiveSessions = (liveSessions?.length ?? 0) > 0;
+  // Storage breakdown: peso por biblioteca + uso del disco fisico.
+  // Cadencia 60s (los discos no cambian en tiempo real, solo con
+  // scans). Si el endpoint falla por cualquier motivo, los bloques
+  // que lo usan caen a "—" en vez de romper la pagina.
+  const { data: storage } = useAdminStorageDisks();
+  // "Recientemente añadido" - ultimos 12 items en cualquier biblioteca.
+  // El hook ya existe y lo usa Home; React Query dedupe por queryKey
+  // asi que no hay double-fetch si el admin tambien tiene Home en
+  // cache.
+  const { data: latestRaw } = useLatestItems();
+  // 12 posters caben en una fila en desktop sin saturar. El backend
+  // devuelve default ~20; slice cliente-side mantiene la opcion
+  // abierta de mostrar mas en una pagina futura "ver todos los
+  // ultimos" sin tocar el hook.
+  const latestItems = (latestRaw ?? []).slice(0, 12);
 
   if (isLoading) {
     return (
@@ -147,6 +173,27 @@ export default function DashboardAdmin() {
         </span>
       </header>
 
+      {/* Recientemente añadido — strip horizontal de posters de lo
+          ultimo escaneado en cualquier biblioteca. Solo aparece si
+          hay items; en un server vacio se omite la seccion entera
+          (mismo principio que Now Playing - cero ruido cuando no
+          hay nada que decir). */}
+      {latestItems.length > 0 && (
+        <section className="flex flex-col gap-4">
+          <SectionHeader
+            icon={Sparkles}
+            title={t("admin.summary.recentlyAdded", {
+              defaultValue: "Recientemente añadido",
+            })}
+            subtitle={t("admin.summary.recentlyAddedSubtitle", {
+              defaultValue:
+                "Lo último que ha procesado el scanner en cualquier biblioteca.",
+            })}
+          />
+          <RecentlyAddedStrip items={latestItems} />
+        </section>
+      )}
+
       {/* Now Playing — solo aparece cuando hay alguien reproduciendo.
           Si el server esta idle (caso comun en uso casero), nos
           ahorramos un panel vacio con header + descripcion + empty
@@ -184,8 +231,10 @@ export default function DashboardAdmin() {
         </div>
       </section>
 
-      {/* Catalogue summary — one prose line + a small action chip.
-          Plain-language copy beats four stat cards for skimming. */}
+      {/* Catalogue — mini cards por content_type + linea inferior
+          con el uso del disco fisico (gopsutil/disk.Usage). Es el
+          "ultimo bloque editorial" - cuanto contenido tienes,
+          repartido por tipo, y cuanto disco te queda. */}
       <section className="flex flex-col gap-4">
         <SectionHeader
           icon={Library}
@@ -194,7 +243,7 @@ export default function DashboardAdmin() {
             defaultValue: "Tamaño del catálogo y de la base de datos.",
           })}
         />
-        <CatalogueLine stats={stats} />
+        <CatalogueBlock stats={stats} disks={storage?.disks ?? []} />
       </section>
     </div>
   );
@@ -321,11 +370,117 @@ function TopItemsPanel({ items, t }: TopItemsPanelProps) {
   );
 }
 
-// CatalogueLine — single sentence rendering the catalogue size in
-// plain language. The previous iteration shipped four stat cards
-// for the same information; one prose line reads at a glance and
-// keeps the page scrollable.
-function CatalogueLine({ stats }: { stats: SystemStats }) {
+// RecentlyAddedStrip — carrusel horizontal de posters de los items
+// mas recientes (cualquier biblioteca). Diseño "Plex feel" sin
+// imitar Plex: posters compactos con titulo debajo, scroll horizontal
+// nativo en mobile, grid en desktop. Click va al detalle.
+//
+// Por que un strip y no un grid: el bloque tiene que dar "el server
+// acaba de procesar estas cosas" sin canibalizar la pagina. Un grid
+// 4x3 ocuparia demasiado; un strip de altura fija comunica lo mismo
+// con la mitad de pixels. Si el operador quiere ver mas, hay un link
+// "ver biblioteca completa" implicito al hacer click en cualquier
+// item.
+function RecentlyAddedStrip({ items }: { items: MediaItem[] }) {
+  const { t } = useTranslation();
+  return (
+    <div className="-mx-1 overflow-x-auto pb-1">
+      <ul className="flex gap-3 px-1">
+        {items.map((it) => {
+          const href = recentlyAddedHref(it);
+          return (
+            <li key={it.id} className="flex-none w-28 sm:w-32">
+              <Link
+                to={href}
+                className="group flex flex-col gap-1.5"
+              >
+                <div className="relative aspect-[2/3] overflow-hidden rounded-md border border-border-subtle bg-bg-elevated">
+                  {it.poster_url ? (
+                    <img
+                      src={it.poster_url}
+                      alt=""
+                      loading="lazy"
+                      className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                    />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center text-text-muted">
+                      <Film className="h-6 w-6" />
+                    </div>
+                  )}
+                </div>
+                <p
+                  className="truncate text-xs font-medium text-text-primary group-hover:text-accent transition-colors"
+                  title={it.title}
+                >
+                  {it.title}
+                </p>
+                {it.year ? (
+                  <p className="text-[10px] text-text-muted tabular-nums">
+                    {it.year}
+                  </p>
+                ) : (
+                  <p className="text-[10px] text-text-muted">
+                    {prettyType(it.type, t)}
+                  </p>
+                )}
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+function recentlyAddedHref(it: MediaItem): string {
+  if (it.type === "series" || it.type === "season") {
+    // Para temporadas, queremos llevar al detalle de la serie padre.
+    // El backend devuelve parent_id solo a veces; si no tenemos
+    // contexto suficiente, caemos al series id directo - puede
+    // ser el del item o el de su parent.
+    return `/series/${it.parent_id || it.id}`;
+  }
+  if (it.type === "episode") {
+    return `/items/${it.id}`;
+  }
+  return `/movies/${it.id}`;
+}
+
+function prettyType(
+  type: string,
+  t: (k: string, opts?: Record<string, unknown>) => string,
+): string {
+  switch (type) {
+    case "movie":
+      return t("admin.summary.typeMovie", { defaultValue: "Película" });
+    case "series":
+      return t("admin.summary.typeSeries", { defaultValue: "Serie" });
+    case "season":
+      return t("admin.summary.typeSeason", { defaultValue: "Temporada" });
+    case "episode":
+      return t("admin.summary.typeEpisode", { defaultValue: "Episodio" });
+    default:
+      return type;
+  }
+}
+
+// CatalogueBlock — el bloque inferior del dashboard. Reemplaza la
+// prosa plana anterior por:
+//
+//   1. 3 mini cards (Películas / Series / Canales) con icon + count
+//      + bar relativa al mayor. Click va a /admin/libraries.
+//   2. Una linea fina con DB size + total bibliotecas + (si hay datos
+//      de storage) "X TB usados / Y TB en N discos".
+//
+// Si el catalogo esta vacio (total === 0) cae a un empty state con
+// CTA "Crear biblioteca", mismo patron que la version anterior.
+function CatalogueBlock({
+  stats,
+  disks,
+}: {
+  stats: SystemStats;
+  disks: AdminDisk[];
+}) {
   const { t } = useTranslation();
   const l = stats.libraries;
 
@@ -345,43 +500,143 @@ function CatalogueLine({ stats }: { stats: SystemStats }) {
     );
   }
 
-  // Build the per-type tail: "·  4 720 películas, 230 series, 80 canales".
-  // Skips empty buckets so the sentence stays compact.
-  const typeFragments = l.by_type
-    .filter((b) => b.items > 0)
-    .map((b) => {
-      const labelKey =
-        b.content_type === "movies"
-          ? "admin.summary.moviesCount"
-          : b.content_type === "shows"
-            ? "admin.summary.seriesCount"
-            : b.content_type === "livetv"
-              ? "admin.summary.channelsCount"
-              : "admin.summary.itemsCount";
-      return t(labelKey, { count: b.items });
-    });
+  // Solo las buckets con items > 0 para no pintar "0 series" cuando
+  // el operador todavia no ha creado esa biblioteca.
+  const buckets = l.by_type.filter((b) => b.items > 0);
+  const maxItems = buckets.reduce((m, b) => Math.max(m, b.items), 1);
 
-  const dbSize = formatBytesCompact(stats.database.size_bytes);
+  // Agregado de discos: sumamos used + total de TODOS los mounts
+  // unicos. Si una biblioteca vive en /mnt/media y otra en /mnt/livetv,
+  // mostramos suma. Mas honesto que reportar solo un disco.
+  const diskTotal = disks.reduce((s, d) => s + d.total_bytes, 0);
+  const diskUsed = disks.reduce((s, d) => s + d.used_bytes, 0);
+  const diskPct = diskTotal > 0 ? (diskUsed / diskTotal) * 100 : 0;
 
   return (
-    <p className="text-base leading-relaxed text-text-secondary">
-      <span className="font-semibold text-text-primary tabular-nums">
-        {l.items_total.toLocaleString()}
-      </span>{" "}
-      {t("admin.summary.itemsIn", { count: l.total })}{" "}
-      {typeFragments.length > 0 && (
-        <span className="text-text-muted">· {typeFragments.join(", ")}</span>
-      )}{" "}
-      <Link
-        to="/admin/libraries"
-        className="text-sm font-medium text-accent hover:underline"
-      >
-        {t("admin.summary.manageLibraries")} ›
-      </Link>
-      <br />
-      <span className="text-sm text-text-muted">
-        {t("admin.summary.databaseSize", { size: dbSize })}
-      </span>
-    </p>
+    <div className="flex flex-col gap-3">
+      <div className="grid gap-3 sm:grid-cols-3">
+        {buckets.map((b) => (
+          <ContentTypeCard
+            key={b.content_type}
+            contentType={b.content_type}
+            items={b.items}
+            max={maxItems}
+            t={t}
+          />
+        ))}
+      </div>
+
+      {/* Footer: DB + total bibliotecas + (opcional) disk usage.
+          Una sola linea, muted, separada por punto medio. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-muted">
+        <span>
+          {t("admin.summary.librariesCount", {
+            defaultValue: "{{count}} bibliotecas",
+            count: l.total,
+          })}
+        </span>
+        <span>·</span>
+        <span>
+          {t("admin.summary.databaseSize", {
+            size: formatBytesCompact(stats.database.size_bytes),
+          })}
+        </span>
+        {disks.length > 0 && diskTotal > 0 && (
+          <>
+            <span>·</span>
+            <span className="inline-flex items-center gap-1.5">
+              <HardDrive className="h-3 w-3" />
+              {t("admin.summary.diskUsage", {
+                defaultValue: "{{used}} de {{total}} ({{pct}}%)",
+                used: formatBytesCompact(diskUsed),
+                total: formatBytesCompact(diskTotal),
+                pct: diskPct.toFixed(0),
+              })}
+            </span>
+          </>
+        )}
+        <span className="ml-auto">
+          <Link
+            to="/admin/libraries"
+            className="text-accent hover:underline"
+          >
+            {t("admin.summary.manageLibraries")} ›
+          </Link>
+        </span>
+      </div>
+    </div>
   );
+}
+
+// ContentTypeCard — uno de los 3 mini cards del catalogo. Icono
+// tinted por tipo + count grande + bar relativa al maximo del row.
+function ContentTypeCard({
+  contentType,
+  items,
+  max,
+  t,
+}: {
+  contentType: string;
+  items: number;
+  max: number;
+  t: (k: string, opts?: Record<string, unknown>) => string;
+}) {
+  const meta = contentTypeMeta(contentType, t);
+  const Icon = meta.icon;
+  const pct = max > 0 ? (items / max) * 100 : 0;
+  return (
+    <Link
+      to="/admin/libraries"
+      className="group flex flex-col gap-2.5 rounded-[--radius-lg] border border-border bg-bg-card p-4 transition-colors hover:border-border-strong"
+    >
+      <div className="flex items-center gap-2">
+        <div className="rounded-md bg-bg-elevated p-1.5 text-text-secondary group-hover:text-accent transition-colors">
+          <Icon className="h-3.5 w-3.5" />
+        </div>
+        <span className="text-xs font-medium uppercase tracking-wider text-text-muted">
+          {meta.label}
+        </span>
+      </div>
+      <span className="text-2xl font-semibold text-text-primary tabular-nums">
+        {items.toLocaleString()}
+      </span>
+      <div className="h-1 w-full overflow-hidden rounded-full bg-bg-elevated">
+        <div
+          className="h-full bg-accent/70 transition-all"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </Link>
+  );
+}
+
+function contentTypeMeta(
+  contentType: string,
+  t: (k: string, opts?: Record<string, unknown>) => string,
+): { icon: typeof Film; label: string } {
+  switch (contentType) {
+    case "movies":
+      return {
+        icon: Film,
+        label: t("admin.summary.typeMoviesLabel", {
+          defaultValue: "Películas",
+        }),
+      };
+    case "shows":
+      return {
+        icon: Tv,
+        label: t("admin.summary.typeShowsLabel", {
+          defaultValue: "Series",
+        }),
+      };
+    case "livetv":
+      return {
+        icon: Radio,
+        label: t("admin.summary.typeLiveTVLabel", {
+          defaultValue: "Live TV",
+        }),
+      };
+    default:
+      return { icon: Library, label: contentType };
+  }
 }

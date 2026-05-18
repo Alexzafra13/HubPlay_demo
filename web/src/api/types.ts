@@ -1623,6 +1623,35 @@ export interface ApiErrorBody {
   };
 }
 
+// ─── Storage (admin disk usage + per-library size) ─────────────────────────
+
+// AdminLibraryDisk — una biblioteca dentro de un mount fisico, con
+// su peso (sum de items.size) y file_count.
+export interface AdminLibraryDisk {
+  id: string;
+  name: string;
+  content_type: string;
+  path: string;
+  size_bytes: number;
+  file_count: number;
+}
+
+// AdminDisk — un mount-point fisico con sus stats agregados +
+// las bibliotecas que viven en el.
+export interface AdminDisk {
+  mount: string;
+  filesystem?: string;
+  total_bytes: number;
+  used_bytes: number;
+  free_bytes: number;
+  used_percent: number;
+  libraries: AdminLibraryDisk[];
+}
+
+export interface AdminStorageDisksResponse {
+  disks: AdminDisk[];
+}
+
 // ─── Notifications ─────────────────────────────────────────────────────────
 
 // NotificationKind: identificador del tipo de notificacion. El frontend

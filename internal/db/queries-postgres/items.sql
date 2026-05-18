@@ -49,3 +49,11 @@ SELECT id, library_id, parent_id, type, title, sort_title, original_title,
 FROM items
 WHERE parent_id = $1
 ORDER BY COALESCE(season_number, 0), COALESCE(episode_number, 0), sort_title;
+
+-- name: SumItemSizesByLibrary :many
+-- Suma el peso total en bytes y cuenta los ficheros reales por
+-- biblioteca. Ver hermano SQLite para rationale.
+SELECT library_id, COALESCE(SUM(size), 0)::BIGINT AS total_bytes, COUNT(*)::BIGINT AS file_count
+FROM items
+WHERE size > 0
+GROUP BY library_id;

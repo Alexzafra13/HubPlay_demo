@@ -452,6 +452,9 @@ type Querier interface {
 	SetProviderStatus(ctx context.Context, arg SetProviderStatusParams) (int64, error)
 	SetServerAvatarPath(ctx context.Context, avatarImagePath string) error
 	SetSigningKeyRetiredAt(ctx context.Context, arg SetSigningKeyRetiredAtParams) (int64, error)
+	// Suma el peso total en bytes y cuenta los ficheros reales por
+	// biblioteca. Ver hermano SQLite para rationale.
+	SumItemSizesByLibrary(ctx context.Context) ([]SumItemSizesByLibraryRow, error)
 	TouchDeviceCodePollAt(ctx context.Context, arg TouchDeviceCodePollAtParams) error
 	UnsetPrimaryImages(ctx context.Context, arg UnsetPrimaryImagesParams) error
 	UpdateItem(ctx context.Context, arg UpdateItemParams) (int64, error)

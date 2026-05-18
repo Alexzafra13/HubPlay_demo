@@ -1828,6 +1828,15 @@ export class ApiClient {
     return this.request<SystemStats>("GET", "/admin/system/stats");
   }
 
+  /** Storage breakdown: disco fisico via statfs (gopsutil) + peso
+   *  por biblioteca via SUM(items.size). Cero filesystem I/O para
+   *  el peso - el scanner ya captura Size en cada item. */
+  async getAdminStorageDisks(): Promise<
+    import("./types").AdminStorageDisksResponse
+  > {
+    return this.request("GET", "/admin/system/storage/disks");
+  }
+
   async getAdminStreamActivity(days = 14): Promise<AdminStreamActivityResponse> {
     return this.request<AdminStreamActivityResponse>(
       "GET",
