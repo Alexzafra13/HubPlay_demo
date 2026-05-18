@@ -113,6 +113,7 @@ var outOfScopeExact = map[string]string{
 	"GET /admin/peers/settings":           "federation toggles admin",
 	"PUT /admin/peers/settings":           "federation toggles admin",
 	"GET /admin/system/storage/disks":     "admin disk usage + per-library size",
+	"GET /admin/system/recently-added":    "admin recently-added (movies + series rolled-up)",
 	"POST /admin/peers/probe":             "federation pairing admin",
 	"POST /admin/peers/accept":            "federation pairing admin",
 	"GET /admin/peers/{id}":               "federation pairing admin",

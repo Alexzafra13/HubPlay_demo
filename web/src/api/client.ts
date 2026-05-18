@@ -1837,6 +1837,17 @@ export class ApiClient {
     return this.request("GET", "/admin/system/storage/disks");
   }
 
+  /** Recientemente añadido del dashboard admin. Mezcla movies +
+   *  series rolled-up por actividad (con conteo de nuevos episodios).
+   *  Nunca devuelve episodios sueltos. */
+  async getAdminRecentlyAdded(
+    limit = 12,
+  ): Promise<import("./types").AdminRecentlyAddedResponse> {
+    return this.request("GET", "/admin/system/recently-added", {
+      params: { limit },
+    });
+  }
+
   async getAdminStreamActivity(days = 14): Promise<AdminStreamActivityResponse> {
     return this.request<AdminStreamActivityResponse>(
       "GET",

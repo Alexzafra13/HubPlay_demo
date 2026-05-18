@@ -632,7 +632,19 @@ func (r *ItemRepository) LatestSeriesByActivity(ctx context.Context, libraryID s
 	}
 	cutoff := time.Now().UTC().Add(-14 * 24 * time.Hour)
 
-	query := rewritePlaceholders(r.driver(), `
+	// libraryID == "" significa "todas las bibliotecas" - usado por
+	// el strip "Recientemente añadido" del dashboard admin, que
+	// agrega series con actividad reciente cross-library. El filtro
+	// por library se incluye solo cuando viene un id.
+	libraryFilter := ""
+	args := []any{cutoff}
+	if libraryID != "" {
+		libraryFilter = " AND s.library_id = ?"
+		args = append(args, libraryID)
+	}
+	args = append(args, limit)
+
+	query := rewritePlaceholders(r.driver(), fmt.Sprintf(`
 		WITH activity AS (
 			SELECT
 				s.id AS series_id,
@@ -645,8 +657,7 @@ func (r *ItemRepository) LatestSeriesByActivity(ctx context.Context, libraryID s
 			                 AND e.type = 'episode'
 			                 AND e.is_available
 			WHERE s.type = 'series'
-			  AND s.is_available
-			  AND s.library_id = ?
+			  AND s.is_available%s
 			GROUP BY s.id
 		)
 		SELECT s.id, s.library_id, s.parent_id, s.type, s.title, s.sort_title, s.year, s.path,
@@ -655,9 +666,9 @@ func (r *ItemRepository) LatestSeriesByActivity(ctx context.Context, libraryID s
 		FROM activity a
 		JOIN items s ON s.id = a.series_id
 		ORDER BY a.latest_at DESC, s.added_at DESC
-		LIMIT ?`)
+		LIMIT ?`, libraryFilter))
 
-	rows, err := r.db.QueryContext(ctx, query, cutoff, libraryID, limit)
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("latest series by activity: %w", err)
 	}

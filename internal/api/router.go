@@ -644,6 +644,16 @@ func NewRouter(deps Dependencies) http.Handler {
 					r.Get("/stats", sysHandler.Stats)
 					r.Get("/stream-activity", sysHandler.StreamActivity)
 					r.Get("/top-items", sysHandler.TopItems)
+					// "Recientemente añadido" del dashboard. Mezcla
+					// movies + series rolled-up por actividad (no
+					// episodios sueltos como hacia /items/latest).
+					if deps.Libraries != nil {
+						libAdminHandler := handlers.NewLibraryHandler(
+							deps.Libraries, deps.Images, deps.Metadata,
+							deps.UserData, deps.Users, deps.Logger,
+						)
+						r.Get("/recently-added", libAdminHandler.AdminRecentlyAdded)
+					}
 					// "Now Playing" admin panel — list every active stream
 					// session and let the operator kill any of them. Routed
 					// here (rather than next to the player streaming routes)
