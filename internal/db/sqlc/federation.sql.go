@@ -54,6 +54,21 @@ func (q *Queries) CountSharedItems(ctx context.Context, arg CountSharedItemsPara
 	return count, err
 }
 
+const countUnreadIncomingPendingRequests = `-- name: CountUnreadIncomingPendingRequests :one
+SELECT COUNT(*) FROM federation_pending_requests
+WHERE direction = 'incoming' AND status = 'pending'
+`
+
+// El admin badge cuenta esto: cuantas peticiones entrantes hay
+// todavia sin responder. Las salientes propias no cuentan
+// (el admin las inicio, ya las "sabe").
+func (q *Queries) CountUnreadIncomingPendingRequests(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countUnreadIncomingPendingRequests)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const deleteCachedItemsForLibrary = `-- name: DeleteCachedItemsForLibrary :exec
 
 DELETE FROM federation_item_cache
@@ -102,6 +117,63 @@ type DeleteLibraryShareParams struct {
 func (q *Queries) DeleteLibraryShare(ctx context.Context, arg DeleteLibraryShareParams) error {
 	_, err := q.db.ExecContext(ctx, deleteLibraryShare, arg.PeerID, arg.ID)
 	return err
+}
+
+const expirePendingRequests = `-- name: ExpirePendingRequests :execrows
+UPDATE federation_pending_requests
+SET status = 'expired'
+WHERE status = 'pending' AND expires_at < ?
+`
+
+// Barrido periodico: marca como 'expired' las pendientes que han
+// pasado su TTL. Lo invoca un job (lo wireamos en Phase 5) o se
+// puede llamar a mano en testing.
+func (q *Queries) ExpirePendingRequests(ctx context.Context, expiresAt time.Time) (int64, error) {
+	result, err := q.db.ExecContext(ctx, expirePendingRequests, expiresAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const getActivePendingRequestByPeer = `-- name: GetActivePendingRequestByPeer :one
+SELECT id, direction, peer_server_uuid, peer_name, peer_base_url,
+       peer_public_key, peer_avatar_color, peer_avatar_image_url,
+       request_token, created_at, expires_at, status,
+       responded_at, responded_by_user_id
+FROM federation_pending_requests
+WHERE direction = ? AND peer_server_uuid = ? AND status = 'pending'
+`
+
+type GetActivePendingRequestByPeerParams struct {
+	Direction      string `json:"direction"`
+	PeerServerUuid string `json:"peer_server_uuid"`
+}
+
+// Lookup para el lado receptor: si A reenvia la peticion antes
+// de que B la acepte/declino, devolvemos el id existente en vez
+// de duplicar (el indice unico parcial sobre status='pending' lo
+// haria fallar igualmente, esto solo es mas legible).
+func (q *Queries) GetActivePendingRequestByPeer(ctx context.Context, arg GetActivePendingRequestByPeerParams) (FederationPendingRequest, error) {
+	row := q.db.QueryRowContext(ctx, getActivePendingRequestByPeer, arg.Direction, arg.PeerServerUuid)
+	var i FederationPendingRequest
+	err := row.Scan(
+		&i.ID,
+		&i.Direction,
+		&i.PeerServerUuid,
+		&i.PeerName,
+		&i.PeerBaseUrl,
+		&i.PeerPublicKey,
+		&i.PeerAvatarColor,
+		&i.PeerAvatarImageUrl,
+		&i.RequestToken,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.Status,
+		&i.RespondedAt,
+		&i.RespondedByUserID,
+	)
+	return i, err
 }
 
 const getFederationProgress = `-- name: GetFederationProgress :one
@@ -239,6 +311,37 @@ func (q *Queries) GetPeerByServerUUID(ctx context.Context, serverUuid string) (F
 		&i.RevokedAt,
 		&i.AvatarColor,
 		&i.AvatarImageUrl,
+	)
+	return i, err
+}
+
+const getPendingRequestByID = `-- name: GetPendingRequestByID :one
+SELECT id, direction, peer_server_uuid, peer_name, peer_base_url,
+       peer_public_key, peer_avatar_color, peer_avatar_image_url,
+       request_token, created_at, expires_at, status,
+       responded_at, responded_by_user_id
+FROM federation_pending_requests
+WHERE id = ?
+`
+
+func (q *Queries) GetPendingRequestByID(ctx context.Context, id string) (FederationPendingRequest, error) {
+	row := q.db.QueryRowContext(ctx, getPendingRequestByID, id)
+	var i FederationPendingRequest
+	err := row.Scan(
+		&i.ID,
+		&i.Direction,
+		&i.PeerServerUuid,
+		&i.PeerName,
+		&i.PeerBaseUrl,
+		&i.PeerPublicKey,
+		&i.PeerAvatarColor,
+		&i.PeerAvatarImageUrl,
+		&i.RequestToken,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.Status,
+		&i.RespondedAt,
+		&i.RespondedByUserID,
 	)
 	return i, err
 }
@@ -429,6 +532,49 @@ func (q *Queries) InsertPeer(ctx context.Context, arg InsertPeerParams) error {
 		arg.PairedAt,
 		arg.AvatarColor,
 		arg.AvatarImageUrl,
+	)
+	return err
+}
+
+const insertPendingRequest = `-- name: InsertPendingRequest :exec
+
+INSERT INTO federation_pending_requests
+    (id, direction, peer_server_uuid, peer_name, peer_base_url,
+     peer_public_key, peer_avatar_color, peer_avatar_image_url,
+     request_token, created_at, expires_at, status)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+`
+
+type InsertPendingRequestParams struct {
+	ID                 string    `json:"id"`
+	Direction          string    `json:"direction"`
+	PeerServerUuid     string    `json:"peer_server_uuid"`
+	PeerName           string    `json:"peer_name"`
+	PeerBaseUrl        string    `json:"peer_base_url"`
+	PeerPublicKey      []byte    `json:"peer_public_key"`
+	PeerAvatarColor    string    `json:"peer_avatar_color"`
+	PeerAvatarImageUrl string    `json:"peer_avatar_image_url"`
+	RequestToken       string    `json:"request_token"`
+	CreatedAt          time.Time `json:"created_at"`
+	ExpiresAt          time.Time `json:"expires_at"`
+}
+
+// ============================================================
+// pending requests (pairing-request inbox, migration 048)
+// ============================================================
+func (q *Queries) InsertPendingRequest(ctx context.Context, arg InsertPendingRequestParams) error {
+	_, err := q.db.ExecContext(ctx, insertPendingRequest,
+		arg.ID,
+		arg.Direction,
+		arg.PeerServerUuid,
+		arg.PeerName,
+		arg.PeerBaseUrl,
+		arg.PeerPublicKey,
+		arg.PeerAvatarColor,
+		arg.PeerAvatarImageUrl,
+		arg.RequestToken,
+		arg.CreatedAt,
+		arg.ExpiresAt,
 	)
 	return err
 }
@@ -758,6 +904,58 @@ func (q *Queries) ListPeers(ctx context.Context) ([]FederationPeer, error) {
 	return items, nil
 }
 
+const listPendingRequests = `-- name: ListPendingRequests :many
+SELECT id, direction, peer_server_uuid, peer_name, peer_base_url,
+       peer_public_key, peer_avatar_color, peer_avatar_image_url,
+       request_token, created_at, expires_at, status,
+       responded_at, responded_by_user_id
+FROM federation_pending_requests
+ORDER BY created_at DESC
+LIMIT ?
+`
+
+// Listado para el panel admin: ambas direcciones, mas recientes
+// arriba. Devuelve TODOS los estados terminales (accepted/declined/
+// cancelled/expired) tambien porque el admin quiere ver el historial
+// corto - el frontend lo separa en "Activas" vs "Resueltas".
+func (q *Queries) ListPendingRequests(ctx context.Context, limit int64) ([]FederationPendingRequest, error) {
+	rows, err := q.db.QueryContext(ctx, listPendingRequests, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []FederationPendingRequest{}
+	for rows.Next() {
+		var i FederationPendingRequest
+		if err := rows.Scan(
+			&i.ID,
+			&i.Direction,
+			&i.PeerServerUuid,
+			&i.PeerName,
+			&i.PeerBaseUrl,
+			&i.PeerPublicKey,
+			&i.PeerAvatarColor,
+			&i.PeerAvatarImageUrl,
+			&i.RequestToken,
+			&i.CreatedAt,
+			&i.ExpiresAt,
+			&i.Status,
+			&i.RespondedAt,
+			&i.RespondedByUserID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRecentSharedItems = `-- name: ListRecentSharedItems :many
 
 SELECT i.id, i.type, i.title,
@@ -1018,6 +1216,35 @@ type MarkInviteUsedParams struct {
 func (q *Queries) MarkInviteUsed(ctx context.Context, arg MarkInviteUsedParams) error {
 	_, err := q.db.ExecContext(ctx, markInviteUsed, arg.AcceptedByPeerID, arg.AcceptedAt, arg.ID)
 	return err
+}
+
+const markPendingRequestResponded = `-- name: MarkPendingRequestResponded :execrows
+UPDATE federation_pending_requests
+SET status = ?, responded_at = ?, responded_by_user_id = ?
+WHERE id = ? AND status = 'pending'
+`
+
+type MarkPendingRequestRespondedParams struct {
+	Status            string         `json:"status"`
+	RespondedAt       sql.NullTime   `json:"responded_at"`
+	RespondedByUserID sql.NullString `json:"responded_by_user_id"`
+	ID                string         `json:"id"`
+}
+
+// Transicion de pending al estado terminal. execrows = el manager
+// detecta la condicion "no encontrado o ya respondida" sin tener
+// que hacer un GET previo (race-free).
+func (q *Queries) MarkPendingRequestResponded(ctx context.Context, arg MarkPendingRequestRespondedParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, markPendingRequestResponded,
+		arg.Status,
+		arg.RespondedAt,
+		arg.RespondedByUserID,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const pruneFederationAuditBefore = `-- name: PruneFederationAuditBefore :execrows

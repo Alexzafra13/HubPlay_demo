@@ -63,6 +63,15 @@ type Querier interface {
 	CountItemsByLibrary(ctx context.Context, libraryID string) (int64, error)
 	CountSessionsByUser(ctx context.Context, userID string) (int64, error)
 	CountSharedItems(ctx context.Context, arg CountSharedItemsParams) (int64, error)
+	// El admin badge cuenta esto: cuantas peticiones entrantes hay
+	// todavia sin responder. Las salientes propias no cuentan
+	// (el admin las inicio, ya las "sabe").
+	CountUnreadIncomingPendingRequests(ctx context.Context) (int64, error)
+	// Lo consulta el badge del header cada vez que llega un evento de
+	// notification.created por SSE. El indice parcial sobre read_at IS NULL
+	// (migration 049) hace que esto sea O(1) incluso con miles de leidas
+	// acumuladas.
+	CountUnreadNotificationsForUser(ctx context.Context, userID string) (int64, error)
 	CountUsers(ctx context.Context) (int64, error)
 	// IPTV channels per library.
 	//
@@ -128,6 +137,9 @@ type Querier interface {
 	// PK: (item_id, stream_index).
 	DeleteMediaStreamsByItem(ctx context.Context, itemID string) error
 	DeleteMetadata(ctx context.Context, itemID string) error
+	// Limpieza periodica: borrar las leidas con mas de 30 dias para que
+	// la tabla no crezca sin limite. Las no-leidas se conservan siempre.
+	DeleteOldReadNotifications(ctx context.Context, readAt sql.NullTime) (int64, error)
 	// Subquery aliased to 's' because sqlc needs unambiguous column resolution
 	// when the same table appears twice in scope.
 	DeleteOldestSessionByUser(ctx context.Context, userID string) error
@@ -138,6 +150,15 @@ type Querier interface {
 	DeleteSessionByRefreshTokenHash(ctx context.Context, refreshTokenHash string) error
 	DeleteUser(ctx context.Context, id string) (int64, error)
 	DeleteUserData(ctx context.Context, arg DeleteUserDataParams) error
+	// Barrido periodico: marca como 'expired' las pendientes que han
+	// pasado su TTL. Lo invoca un job (lo wireamos en Phase 5) o se
+	// puede llamar a mano en testing.
+	ExpirePendingRequests(ctx context.Context, expiresAt time.Time) (int64, error)
+	// Lookup para el lado receptor: si A reenvia la peticion antes
+	// de que B la acepte/declino, devolvemos el id existente en vez
+	// de duplicar (el indice unico parcial sobre status='pending' lo
+	// haria fallar igualmente, esto solo es mas legible).
+	GetActivePendingRequestByPeer(ctx context.Context, arg GetActivePendingRequestByPeerParams) (FederationPendingRequest, error)
 	GetChannelByID(ctx context.Context, id string) (GetChannelByIDRow, error)
 	GetChannelOverride(ctx context.Context, arg GetChannelOverrideParams) (ChannelOverride, error)
 	// Movie collections (sagas).
@@ -164,6 +185,7 @@ type Querier interface {
 	GetNowPlaying(ctx context.Context, arg GetNowPlayingParams) (GetNowPlayingRow, error)
 	GetPeerByID(ctx context.Context, id string) (FederationPeer, error)
 	GetPeerByServerUUID(ctx context.Context, serverUuid string) (FederationPeer, error)
+	GetPendingRequestByID(ctx context.Context, id string) (FederationPendingRequest, error)
 	GetPersonByID(ctx context.Context, id string) (GetPersonByIDRow, error)
 	// People (cast + crew) and the join table that links them to items.
 	//
@@ -261,10 +283,18 @@ type Querier interface {
 	InsertLibrary(ctx context.Context, arg InsertLibraryParams) error
 	InsertLibraryPath(ctx context.Context, arg InsertLibraryPathParams) error
 	InsertMediaStream(ctx context.Context, arg InsertMediaStreamParams) error
+	// Notifications: inbox por usuario. Feature-agnostico - el discriminador
+	// es la columna `kind` (string libre) y el `payload` JSON. Schema en
+	// migrations/sqlite/049.
+	InsertNotification(ctx context.Context, arg InsertNotificationParams) error
 	// ============================================================
 	// peers
 	// ============================================================
 	InsertPeer(ctx context.Context, arg InsertPeerParams) error
+	// ============================================================
+	// pending requests (pairing-request inbox, migration 048)
+	// ============================================================
+	InsertPendingRequest(ctx context.Context, arg InsertPendingRequestParams) error
 	InsertServerIdentity(ctx context.Context, arg InsertServerIdentityParams) error
 	IsChannelFavorite(ctx context.Context, arg IsChannelFavoriteParams) (int64, error)
 	LinkItemValue(ctx context.Context, arg LinkItemValueParams) error
@@ -272,6 +302,11 @@ type Querier interface {
 	ListActiveInvites(ctx context.Context, expiresAt time.Time) ([]FederationInvite, error)
 	ListActiveProviders(ctx context.Context) ([]Provider, error)
 	ListActiveSigningKeys(ctx context.Context) ([]JwtSigningKey, error)
+	// Returns every admin (role='admin', household head) so a feature
+	// can fan-out a notification to all of them at once. Used by the
+	// notification service when federation receives a pairing request
+	// and every admin in the install should see the badge.
+	ListAdminIDs(ctx context.Context) ([]string, error)
 	ListAllPaths(ctx context.Context) ([]LibraryPath, error)
 	ListCachedItems(ctx context.Context, arg ListCachedItemsParams) ([]ListCachedItemsRow, error)
 	ListChannelFavorites(ctx context.Context, userID string) ([]ListChannelFavoritesRow, error)
@@ -361,8 +396,17 @@ type Querier interface {
 	// string). Falling back to sql.NullTime there.
 	ListLibraryEPGSourcesByLibrary(ctx context.Context, libraryID string) ([]ListLibraryEPGSourcesByLibraryRow, error)
 	ListMediaStreamsByItem(ctx context.Context, itemID string) ([]ListMediaStreamsByItemRow, error)
+	// Listado del dropdown: ultimas N notificaciones del usuario, mas
+	// recientes arriba. El frontend pagina con limit alto (50) - el
+	// dropdown solo muestra ~10, pero el "ver todas" usa la misma query.
+	ListNotificationsForUser(ctx context.Context, arg ListNotificationsForUserParams) ([]Notification, error)
 	ListPathsByLibrary(ctx context.Context, libraryID string) ([]string, error)
 	ListPeers(ctx context.Context) ([]FederationPeer, error)
+	// Listado para el panel admin: ambas direcciones, mas recientes
+	// arriba. Devuelve TODOS los estados terminales (accepted/declined/
+	// cancelled/expired) tambien porque el admin quiere ver el historial
+	// corto - el frontend lo separa en "Activas" vs "Resueltas".
+	ListPendingRequests(ctx context.Context, limit int64) ([]FederationPendingRequest, error)
 	ListProviders(ctx context.Context) ([]Provider, error)
 	ListProvidersByType(ctx context.Context, type_ string) ([]Provider, error)
 	// NOTE: SearchSharedItems is implemented as raw SQL in
@@ -394,7 +438,15 @@ type Querier interface {
 	// to (studio_id) which we already created in 032_studios.sql.
 	ListStudios(ctx context.Context) ([]ListStudiosRow, error)
 	ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUsersRow, error)
+	MarkAllNotificationsReadForUser(ctx context.Context, arg MarkAllNotificationsReadForUserParams) (int64, error)
 	MarkInviteUsed(ctx context.Context, arg MarkInviteUsedParams) error
+	// execrows: el handler distingue "ya estaba leida o no existia" de
+	// "marcada ahora" para no devolver 404 espurio.
+	MarkNotificationRead(ctx context.Context, arg MarkNotificationReadParams) (int64, error)
+	// Transicion de pending al estado terminal. execrows = el manager
+	// detecta la condicion "no encontrado o ya respondida" sin tener
+	// que hacer un GET previo (race-free).
+	MarkPendingRequestResponded(ctx context.Context, arg MarkPendingRequestRespondedParams) (int64, error)
 	MarkPlayed(ctx context.Context, arg MarkPlayedParams) error
 	// The default-priority slot for a freshly-added source: one past the
 	// current max, so it runs last and can be reordered from the UI.

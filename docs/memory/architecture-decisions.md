@@ -1133,3 +1133,183 @@ otro path absoluto, verificar que `isUnderImageDir` retorna `false`.
   futuro (multi-admin, federation write, schema migration con
   paths legacy) lo expondria.
 
+
+---
+
+## ADR-024 — Pairing requests "Steam-style" coexisten con codigos de invitacion legacy
+
+### Contexto
+
+El flow original de federation (ADR-012) requiere copy-paste de un
+codigo single-use por canal seguro out-of-band: admin A genera codigo,
+lo pasa por chat/voz al admin B, B lo pega en su panel. Funciona pero
+es tedioso comparado con la experiencia social "pulsa un boton y
+listo" de plataformas tipo Steam/Discord.
+
+Pediamos un flow opcional donde el admin local pulsa "enviar peticion
+a esta URL" y al otro lado aparece directamente en un inbox visible
+con badge en el header, similar a una friend request. Sin codigos.
+
+### Decision
+
+Añadir un flow alternativo CONVIVIENDO con el legacy (no reemplazo).
+Protocolo de 4 pasos con callback firmado Ed25519:
+
+1. A probea `B/federation/info` para pinear pubkey + branding de B.
+2. A POSTea `B/federation/pairing-requests` con su ServerInfo + un
+   `request_token` aleatorio. B persiste como `incoming pending`,
+   publica `EventPairingRequestReceived` -> notification fan-out a
+   sus admins.
+3. Admin B compara huella out-of-band con A (igual que en el flow
+   legacy - la huella sigue siendo el ancla de confianza). Acepta;
+   B crea Peer paired + POSTea callback firmado a A.
+4. A verifica firma con el pubkey pineado en step 1 + marca su
+   `outgoing pending` como accepted + crea Peer paired su lado.
+
+La identidad criptografica se sigue estableciendo con la misma
+ceremonia que el flow legacy: comparacion de huella OOB.
+La diferencia es UX: cero copy-paste de codigos.
+
+### Tres capas de defense vs abuse
+
+Endpoints publicos sin auth obligan a layering:
+
+- **Per-IP rate limit** (`handlers.IPRateLimitMiddleware` envolviendo
+  los 3 endpoints publicos): 5 req/min, burst 3. Bloquea bots
+  desde una IP. X-Forwarded-For honored para deployments detras de
+  proxy.
+- **Cap de incoming pending** (`Manager.MaxIncomingPendingRequests`,
+  default 100): si la tabla esta llena de pending sin resolver, 429.
+  Anti-flood incluso con botnet que burla el rate-limit por IP.
+- **Toggle admin** `federation.accept_pairing_requests` (boolean en
+  `app_settings`, default `true`). Permite al admin cerrar la puerta
+  con un click si esta siendo acosado o si quiere usar solo el flow
+  legacy.
+
+### Por que no reemplazar el flow legacy
+
+- Compatibilidad con installs ya emparejados — el flow nuevo
+  introduce 4 endpoints y 2 tablas nuevas; el viejo sigue
+  funcionando sin tocar nada.
+- Casos de uso paranoid: hay admins que prefieren no exponer un
+  inbox a peers desconocidos. El toggle + el flow legacy son su
+  via de escape.
+- Los dos flows comparten el codigo critico (handshake handlers,
+  pubkey pinning, Peer creation). El nuevo no introduce nuevas
+  primitivas criptograficas - solo nueva orquestacion.
+
+### Consecuencias
+
+- Dos UX para emparejar - el admin elige cual usar desde el panel.
+  El flow nuevo es el default (tab "Petición directa"); el legacy
+  vive en tabs separados ("Generar invite" / "Aceptar invite").
+- 2 migrations nuevas (048 pending requests + 049 notifications).
+- El inbox de notificaciones es generico: cualquier feature futura
+  (scan completed, peer offline, alert system) puede emitir entradas
+  sin modificar el schema.
+- Cron sweepers nuevos: 1h para expirar pending requests,
+  24h para purgar notifs leidas >30 dias.
+
+### Alternativas descartadas
+
+- **Reemplazar el flow legacy**: descartado por compatibilidad +
+  los casos paranoid descritos arriba.
+- **Permitir aceptar sin verificar huella OOB** (Steam-mode puro):
+  descartado. Steam confia en su servidor central para garantizar
+  identidad; HubPlay es p2p sin autoridad central, sin OOB un
+  atacante puede enviarte una pairing request haciendose pasar
+  por tu colega y firmar el handshake porque tu nunca comparaste
+  pubkeys.
+- **JWT-auth en los endpoints publicos**: chicken-and-egg. El JWT
+  solo existe DESPUES de pairing; necesitamos un canal antes-de-
+  pairing para iniciarlo. La autorizacion va por contenido
+  (request_token + firma Ed25519 cuando aplica), no por bearer.
+
+---
+
+## ADR-025 — Notificaciones genericas como capa cross-feature
+
+### Contexto
+
+El bell del header pide poder mostrar peticiones de federation
+(ADR-024) pero tambien va a usarse para mas cosas a futuro: scans
+completados, peers offline, alertas de sistema, "tu amigo empezo
+una serie nueva", etc. La pregunta: ¿modelar cada tipo como
+endpoint propio (federation tiene su badge, scan tiene el suyo) o
+unificarlas en un inbox generico?
+
+### Decision
+
+**Tabla unica `notifications` con `kind` discriminator + `payload`
+JSON arbitrario.** El frontend mapea `kind` a icono + texto + link;
+el backend solo persiste y publica un evento al bus para que el SSE
+de `/me/events` empuje al destinatario.
+
+```sql
+CREATE TABLE notifications (
+  id, user_id, kind, title, body, link, payload TEXT, created_at, read_at
+);
+```
+
+- `kind` es string libre (`federation.pairing_request_received`,
+  `library.scan.completed`, etc.). Añadir un kind nuevo NO toca
+  schema ni Service.
+- `payload` JSON serializado; cada kind define su shape.
+- `title` + `body` ya vienen formateados/traducidos por el productor.
+  Esto pone la decision de localizacion en el productor en lugar
+  de en el consumidor (mas codigo en el productor pero zero
+  acoplamiento con i18n del frontend para kinds nuevos).
+- Indice parcial sobre `WHERE read_at IS NULL` para que el badge
+  count sea O(1) incluso con miles de leidas acumuladas.
+
+### Por que no per-feature endpoints
+
+- Acoplamiento explosivo: el bell del header tendria que conocer
+  N tipos de notification con N hooks distintos.
+- Cross-cutting concerns (marcar leida, listar todas, badge count)
+  se duplicarian.
+- "Sistema de notificaciones" es un patron bien establecido —
+  inventar uno especifico es trabajo extra sin beneficio.
+
+### Wire-up: composition root para evitar dependencias circulares
+
+El paquete `notification` NO sabe nada de federation. Federation
+publica eventos al bus generico (`pairing_request_received`); el
+wire-up en `cmd/hubplay/notifications_wiring.go` se suscribe a esos
+eventos y traduce a entradas concretas via `Service.FanOutToAdmins`.
+
+```
+event.Bus
+   ^
+   |  publish                 subscribe
+federation.Manager  --->  registerFederationNotifications  --->  notification.Service
+```
+
+Ambos paquetes son independientes; el acoplamiento vive en main.go
+(composition root). Añadir un nuevo emisor de notifs (e.g. scan
+completed) es solo un nuevo Subscribe en el wire-up.
+
+### Consecuencias
+
+- Inbox extensible: cada feature nueva añade un `Kind` y un
+  Subscribe en composition root. Zero cambios al frontend para
+  ver entradas (solo si quiere icono / link especificos).
+- SSE `/me/events` ya entrega `notification.created` filtrado por
+  user_id - el bell se actualiza en vivo sin polling.
+- Cron sweeper `notification.StartReadCleanupSweeper` borra leidas
+  con read_at > 30d para que la tabla no crezca eternamente. Las
+  no-leidas se conservan siempre.
+
+### Alternativas descartadas
+
+- **Notifications transitorias solo via SSE (sin persistencia)**:
+  descartado. Si el user no esta conectado cuando llega una
+  pairing request, nunca la veria. La persistencia es indispensable.
+- **`payload` como JSONB con columnas tipadas en pg + STRING en
+  sqlite**: descartado por la complejidad dual-driver. El payload
+  JSON-as-text funciona en ambos backends; el frontend hace
+  JSON.parse al consumir.
+- **Schema con FK explicito a la feature origen (e.g. pairing_request_id
+  apuntando a federation_pending_requests)**: descartado. Acopla el
+  schema cross-feature y dificulta el modelo "cualquier feature
+  puede emitir". El payload JSON cubre lo mismo sin acoplar tablas.

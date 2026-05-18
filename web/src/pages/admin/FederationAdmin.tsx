@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import * as Tabs from "@radix-ui/react-tabs";
-import { Inbox, Send, Shield } from "lucide-react";
+import { Handshake, Inbox, Send, Shield } from "lucide-react";
 import { usePeers, useServerIdentity } from "@/api/hooks/federation";
 import { Spinner } from "@/components/common";
 import { AcceptSection } from "./federation/AcceptSection";
@@ -8,6 +8,8 @@ import { ErrorBanner } from "./federation/_shared";
 import { IdentityCard } from "./federation/IdentityCard";
 import { InviteSection } from "./federation/InviteSection";
 import { PeersTable } from "./federation/PeersTable";
+import { PendingRequestsSection } from "./federation/PendingRequestsSection";
+import { SendPairingSection } from "./federation/SendPairingSection";
 
 // FederationAdmin — admin tab for HubPlay-to-HubPlay peering. Pure
 // orchestrator. The page reads as three blocks of decreasing
@@ -79,6 +81,20 @@ export default function FederationAdmin() {
         </section>
       </div>
 
+      {/* Pending pairing requests — incoming awaiting OUR decision +
+          outgoing we sent waiting for THEIRS. Encima de la tabla de
+          paired peers para que el admin la vea antes que el listado
+          ya estable: una peticion entrante recien llegada es lo mas
+          accionable de la pagina. */}
+      <section>
+        <SectionHeading>
+          {t("admin.federation.pending.heading", {
+            defaultValue: "Peticiones pendientes",
+          })}
+        </SectionHeading>
+        <PendingRequestsSection />
+      </section>
+
       <section>
         <div className="mb-3 flex items-center justify-between">
           <SectionHeading className="mb-0">
@@ -131,31 +147,36 @@ function SectionHeading({
 // keeping a duplicate heading inside would just add noise.
 function ConnectTabs() {
   const { t } = useTranslation();
+  const triggerCls =
+    "group flex flex-1 items-center justify-center gap-2 px-4 py-3 text-sm font-medium text-text-muted transition-colors hover:text-text-primary data-[state=active]:bg-bg-elevated data-[state=active]:text-text-primary data-[state=active]:shadow-[inset_0_-2px_0_0_var(--color-accent)]";
   return (
     <Tabs.Root
-      defaultValue="invite"
+      defaultValue="send"
       className="overflow-hidden rounded-lg border border-border bg-bg-elevated"
     >
       <Tabs.List className="flex border-b border-border bg-bg-card/40">
-        <Tabs.Trigger
-          value="invite"
-          className="group flex flex-1 items-center justify-center gap-2 px-4 py-3 text-sm font-medium text-text-muted transition-colors hover:text-text-primary data-[state=active]:bg-bg-elevated data-[state=active]:text-text-primary data-[state=active]:shadow-[inset_0_-2px_0_0_var(--color-accent)]"
-        >
+        <Tabs.Trigger value="send" className={triggerCls}>
+          <Handshake className="h-4 w-4" />
+          {t("admin.federation.sendRequest.tab", {
+            defaultValue: "Petición directa",
+          })}
+        </Tabs.Trigger>
+        <Tabs.Trigger value="invite" className={triggerCls}>
           <Send className="h-4 w-4" />
           {t("admin.federation.invite.tab", {
             defaultValue: "Generar invite",
           })}
         </Tabs.Trigger>
-        <Tabs.Trigger
-          value="accept"
-          className="group flex flex-1 items-center justify-center gap-2 px-4 py-3 text-sm font-medium text-text-muted transition-colors hover:text-text-primary data-[state=active]:bg-bg-elevated data-[state=active]:text-text-primary data-[state=active]:shadow-[inset_0_-2px_0_0_var(--color-accent)]"
-        >
+        <Tabs.Trigger value="accept" className={triggerCls}>
           <Inbox className="h-4 w-4" />
           {t("admin.federation.accept.tab", {
             defaultValue: "Aceptar invite",
           })}
         </Tabs.Trigger>
       </Tabs.List>
+      <Tabs.Content value="send" className="p-5 focus:outline-none">
+        <SendPairingSection />
+      </Tabs.Content>
       <Tabs.Content value="invite" className="p-5 focus:outline-none">
         <InviteSection />
       </Tabs.Content>

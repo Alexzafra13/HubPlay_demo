@@ -59,7 +59,12 @@ export const queryKeys = {
   federationIdentity: ["federation", "identity"] as const,
   federationPeers: ["federation", "peers"] as const,
   federationInvites: ["federation", "invites"] as const,
+  federationPairingRequests: ["federation", "pairing-requests"] as const,
   federationPeerShares: (peerID: string) => ["federation", "peers", peerID, "shares"] as const,
+  // Notifications inbox (migration 049). El badge del header y el
+  // dropdown comparten la misma queryKey - una sola consulta hidrata
+  // ambos sitios.
+  myNotifications: ["me", "notifications"] as const,
   myPeers: ["me", "peers"] as const,
   myPeerLibrariesUnified: ["me", "peers", "libraries-unified"] as const,
   myPeerLibraries: (peerID: string) => ["me", "peers", peerID, "libraries"] as const,

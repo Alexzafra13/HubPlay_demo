@@ -1,5 +1,84 @@
 # Estado del proyecto
 
+> 🎬 **Sesión 2026-05-18 cinco (rama `claude/review-project-progress-snmmo`) — pasada "como página grande" sobre el flow Steam-style: anti-abuse (rate-limit + cap + admin toggle), cron sweepers, página /me/notifications full, i18n proper, a11y, tests + ADR-024/025.**
+>
+> ## 🛠️ Anti-abuse en endpoints públicos (3 capas)
+>
+> - **`IPRateLimitMiddleware`** nuevo (`internal/api/handlers/iprate_middleware.go`): token bucket per-IP via X-Forwarded-For/X-Real-IP, 5 req/min burst 3 sobre los 3 endpoints públicos de pairing requests. 429 + `Retry-After: 60`.
+> - **Cap defensivo `MaxIncomingPendingRequests`** (default 100): `Manager.HandleIncomingPairingRequest` rechaza con `ErrPairingRequestQuotaExceeded` → handler 429 + `Retry-After: 300`. Anti-flood aunque burlen el rate-limit con botnet.
+> - **Toggle admin `federation.accept_pairing_requests`** persistido en `app_settings` via `SettingsReader` inyectado. Default true. Endpoints `GET/PUT /admin/peers/settings`. Cuando off, 403 + mensaje genérico.
+>
+> ## ⏲️ Cron sweepers (patrón `StartPeriodicOptimize`)
+>
+> - **`federation.StartPendingRequestSweeper`** cada 1h: expira `pending` con `expires_at < ahora` (libera cap defensivo + limpia badge admin).
+> - **`notification.StartReadCleanupSweeper`** cada 24h: purga notifs leídas con `read_at > 30d` (`DefaultReadRetention`). No-leídas se conservan siempre. Wired en `main.go` con `defer stop`.
+>
+> ## 📄 Página `/me/notifications` completa
+>
+> Nueva `MyNotifications.tsx` lazy-loaded. Header con "N sin leer" o "Todo al día". Chips filtro **All / Unread** con `aria-pressed`. Filas con icon-per-kind, click marca leída + navega al link, X explícito sin navegar. Empty states amigables ambos casos. Dropdown del bell ahora siempre muestra "Ver todas (N)" cuando hay notifs.
+>
+> ## 🌐 i18n proper
+>
+> Añadidas las claves `notifications.*` y `link.scanner.*` / `link.scanQR` a **en.json + es.json** (estaban con `defaultValue` inline). Time-relative + filter chips + empty states + scanner errors localizados en ambos idiomas.
+>
+> ## ♿ A11y polish
+>
+> - `NotificationsBell` aria-label dinámico: `"Notificaciones, 3 sin leer"` vs solo `"Notificaciones"`. Anuncio correcto en screen reader sin tener que leer el badge visual.
+>
+> ## 🧪 Tests
+>
+> - `NotificationsBell.test.tsx` (4 tests): hides truly empty, shows badge+count, opens dropdown, sigue visible si hay histórico con unread=0. Mock del SSE para no abrir conexión real en jsdom.
+> - **566/566 vitest verde** (+4 nuevos). **24 paquetes Go verdes** (el flake conocido `iptv.TestTransmuxManager_Touch` pasa aislado, no relacionado).
+>
+> ## 📚 ADRs documentados
+>
+> - **ADR-024** — Pairing requests Steam-style coexisten con códigos de invitación legacy. Protocolo 4 pasos con callback firmado Ed25519. Las 3 capas de defense-in-depth explicadas.
+> - **ADR-025** — Notificaciones genéricas como capa cross-feature. Tabla única con `kind` discriminator + JSON payload. Wire-up en composition root para evitar acoplamiento `federation ↔ notification`.
+>
+> ---
+>
+> 🎬 **Sesión 2026-05-18 cuatro (rama `claude/review-project-progress-snmmo`) — pairing requests "Steam-style" sin código + sistema de notificaciones genérico con bell en TopBar.** Re-imagina el flow de federation: copy-paste de invitación → enviar petición que aparece en el inbox del otro admin con badge en el header. Base extensible para más kinds de notificación (scan completed, peer offline, etc.).
+>
+> ## 🛠️ Pairing requests Steam-style + notifications (migrations 048 + 049)
+>
+> ### Migrations + dominios
+> - **048 `federation_pending_requests`**: tabla única para ambas direcciones (incoming/outgoing). Branding del peer + pubkey pineada + request_token compartido + TTL 7 días + status enum (`pending/accepted/declined/cancelled/expired`). Índice único parcial `WHERE status='pending'` impide duplicados con el mismo `(direction, server_uuid)`.
+> - **049 `notifications`**: inbox genérico por usuario. `kind` string libre + `payload` JSON arbitrario → cualquier feature puede emitir sin tocar el schema. Índice parcial `WHERE read_at IS NULL` para que el badge count sea O(1).
+>
+> ### Backend
+> - **`internal/notification/`** nuevo paquete: `Service.Create / FanOutToAdmins / ListForUser / MarkRead / UnreadCount`. Publica `EventCreated` al bus con `user_id` en Data → el SSE de `/me/events` lo filtra y empuja al frontend del destinatario en vivo. Interface `AdminLister` minimal para fan-out (acoplamiento al revés con `internal/db` evitado).
+> - **`internal/federation/manager_pairing.go`**: 4 métodos del flow Steam-style (`SendPairingRequest / HandleIncomingPairingRequest / AcceptPairingRequest / DeclinePairingRequest / CancelPairingRequest / HandlePairingCallback`). Protocolo de 4 pasos con callback firmado Ed25519 (pubkey pineado en step 1 valida la identidad de B en step 3 → MITM bloqueado). 3 eventos al bus (`pairing_request_received / accepted / declined`).
+> - **3 endpoints públicos** + **5 admin**: `POST /federation/pairing-requests` (initial), `POST /federation/pairing-requests/{id}/callback` (firma verificada), `POST .../cancel` (idempotente). Admin: `GET /admin/peers/pairing-requests`, `POST .../send`, `POST .../{id}/accept`, `POST .../{id}/decline`, `DELETE .../{id}`.
+> - **3 endpoints notifications**: `GET /me/notifications` (listing + unread_count en un solo payload), `POST .../{id}/read`, `POST .../read-all`. Defense-in-depth: el repo añade `WHERE user_id` por si el handler guard falla.
+> - **Wire-up federation→notification** en `cmd/hubplay/notifications_wiring.go` (composition root): los 3 eventos de pairing crean entradas en el inbox de TODOS los admins via `FanOutToAdmins`. Mantiene a federation desacoplado de notification (acoplamiento solo en una dirección, ambos paquetes son independientes).
+> - **Query nueva** `ListAdminIDs` en `users.sql` (admin role + sin parent_user_id + activo).
+>
+> ### Frontend
+> - **`NotificationsBell`** (entre SearchBar y UserAvatarMenu): devuelve `null` cuando `unread=0` y nunca ha habido notifs — el header queda limpio para usuarios sin actividad ("si no hay no aparezca nada"). Badge con número (99+ cap), dropdown con animation Motion.
+> - **`NotificationsDropdown`**: iconografía por kind (`Handshake` para pairing), entrada con title+body+timestamp relativo, marcar leída individual con X o todas con CheckCheck. Empty state amistoso.
+> - **`useMyNotifications` hook**: combina `useQuery` + `useUserEventStream("notification.created", invalidate)` — el badge se actualiza en vivo sin polling cuando el backend publica.
+> - **`SendPairingSection`** (nuevo tab "Petición directa" en FederationAdmin, default): formulario simple URL + "Enviar petición". Confirmación visual con avatar del peer tras el envío.
+> - **`PendingRequestsSection`** (nueva sección encima de PeersTable): incoming + outgoing pendientes con acciones inline. Las incoming muestran fingerprint + palabras expandibles para verificación OOB antes de aceptar.
+> - **`FederationAdmin`** rediseñado: 3 tabs (Petición directa / Generar invite / Aceptar invite) + nueva sección "Peticiones pendientes" + PeersTable existente.
+>
+> ### Tests
+> - **5 tests backend pairing** (`manager_pairing_test.go`): send happy path con stub httptest, idempotencia en duplicate, incoming publish event, accept crea Peer paired, reject already-paired.
+> - **5 tests notification service**: create + publish, fan-out a admins, mark-read flips count, cross-user access denegado, mark-all-read scoped al user.
+> - **24 paquetes Go verdes** + **562/562 vitest verde** + **tsc verde** + OpenAPI drift gate actualizado con las 11 rutas nuevas.
+>
+> ### Gotchas resueltos
+> - El SSRF guard de federation rechaza `127.0.0.1` por defecto. Los tests usan `allowLoopbackForTests(t)` (ya existía) para swap el gate.
+> - `event.NewBus` requiere logger non-nil — usar `slog.New(slog.NewTextHandler(io.Discard, nil))` en tests.
+>
+> ## 📍 Backlog
+>
+> Todo el bloque "federation + dispositivos + notificaciones" está cerrado. Lo único arquitectónico que queda es **Iter. 4 del plan post-auditoría** (god-handlers + god-services P+C+Z+QQ, ~2 días). Trabajo opcional adicional:
+> - Página `/me/notifications` full-list (futuro, el dropdown solo muestra 10).
+> - Job periódico de barrido `ExpirePendingRequests` (existe método, falta cron en main.go).
+> - Settings toggle para deshabilitar peticiones entrantes (anti-spam admin-controlled).
+>
+> ---
+>
 > 🎬 **Sesión 2026-05-18 ter (rama `claude/review-project-progress-snmmo`) — cierra TODO el backlog del bloque "servidores": branding del peer remoto en PeersTable con migration 047 + handler `RefreshPeer`, polish visual de InviteSection (contador de expiry con severidad) + AcceptSection (hint pre-pair), y palabras fonéticas de 4 → 6 (32 → 48 bits de entropía oral).** Branch ahead de main, PR pendiente que el user abre manualmente.
 >
 > ## 🛠️ Branding del peer remoto en PeersTable (Block A)

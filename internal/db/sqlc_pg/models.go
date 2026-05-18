@@ -189,6 +189,23 @@ type FederationPeer struct {
 	AvatarImageUrl     string        `json:"avatar_image_url"`
 }
 
+type FederationPendingRequest struct {
+	ID                 string         `json:"id"`
+	Direction          string         `json:"direction"`
+	PeerServerUuid     string         `json:"peer_server_uuid"`
+	PeerName           string         `json:"peer_name"`
+	PeerBaseUrl        string         `json:"peer_base_url"`
+	PeerPublicKey      []byte         `json:"peer_public_key"`
+	PeerAvatarColor    string         `json:"peer_avatar_color"`
+	PeerAvatarImageUrl string         `json:"peer_avatar_image_url"`
+	RequestToken       string         `json:"request_token"`
+	CreatedAt          time.Time      `json:"created_at"`
+	ExpiresAt          time.Time      `json:"expires_at"`
+	Status             string         `json:"status"`
+	RespondedAt        sql.NullTime   `json:"responded_at"`
+	RespondedByUserID  sql.NullString `json:"responded_by_user_id"`
+}
+
 type FederationProgress struct {
 	UserID        string    `json:"user_id"`
 	PeerID        string    `json:"peer_id"`
@@ -377,6 +394,18 @@ type Metadata struct {
 	StudioLogoUrl string         `json:"studio_logo_url"`
 	StudioID      sql.NullString `json:"studio_id"`
 	CollectionID  sql.NullString `json:"collection_id"`
+}
+
+type Notification struct {
+	ID        string       `json:"id"`
+	UserID    string       `json:"user_id"`
+	Kind      string       `json:"kind"`
+	Title     string       `json:"title"`
+	Body      string       `json:"body"`
+	Link      string       `json:"link"`
+	Payload   string       `json:"payload"`
+	CreatedAt time.Time    `json:"created_at"`
+	ReadAt    sql.NullTime `json:"read_at"`
 }
 
 type Person struct {

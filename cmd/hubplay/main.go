@@ -29,6 +29,7 @@ import (
 	"hubplay/internal/library"
 	"hubplay/internal/logging"
 	"hubplay/internal/iptv"
+	"hubplay/internal/notification"
 	"hubplay/internal/observability"
 	"hubplay/internal/probe"
 	"hubplay/internal/provider"
@@ -149,6 +150,14 @@ func run(configPath string) error {
 		avatarsDir = filepath.Join(filepath.Dir(cfg.Database.Path), "avatars")
 	}
 	userService := user.NewService(repos.Users, logger, avatarsDir)
+
+	// Inbox de notificaciones generico (migration 049). El service
+	// vive como singleton para que cualquier feature (federation,
+	// stream, library, ...) emita con un solo handle. El bus opcional
+	// hace que Create publique un evento que /me/events empuja al
+	// frontend del destinatario - badge en vivo sin polling.
+	notificationRepo := notification.NewRepository(cfg.Database.Driver, database)
+	notificationService := notification.NewService(notificationRepo, repos.Users, eventBus, clk, logger)
 
 	prober := probe.New()
 
@@ -414,6 +423,10 @@ func run(configPath string) error {
 		logger.Error("federation: manager init failed; federation disabled", "err", err)
 		federationManager = nil
 	} else {
+		// Inyectar el reader de settings persistentes para que el
+		// manager pueda leer/escribir el toggle
+		// federation.accept_pairing_requests sin tocar SQL crudo.
+		federationManager.SetSettings(repos.Settings)
 		logger.Info("federation: manager initialised",
 			"server_uuid", federationManager.PublicServerInfo().ServerUUID,
 			"fingerprint", federationManager.PublicServerInfo().PubkeyFingerprint)
@@ -427,7 +440,29 @@ func run(configPath string) error {
 		// Flush the audit log queue on graceful shutdown so the last
 		// few peer requests aren't lost.
 		defer federationManager.Close()
+
+		// Hook event-bus -> notifications: cuando llega una pairing
+		// request o se resuelve una outbound, creamos las entradas
+		// correspondientes en el inbox del admin (badge en TopBar).
+		// El federation manager publica los eventos; el wire vive
+		// aqui en main.go para mantener federation desacoplado del
+		// paquete notification (acoplamiento solo va de notification
+		// hacia event, no al reves).
+		registerFederationNotifications(ctx, eventBus, notificationService, logger)
+
+		// Job periodico: cada 1h expira las pairing requests cuyo
+		// TTL ha pasado. Sin esto las filas se acumulan eternamente
+		// y el cap defensivo nunca recicla espacio.
+		stopPendingSweeper := federation.StartPendingRequestSweeper(ctx, federationManager, logger, time.Hour)
+		defer stopPendingSweeper()
 	}
+
+	// Job periodico: cada 24h purga notificaciones leidas con > 30d.
+	// Vive fuera del bloque federation porque el inbox es independiente
+	// (otras features podran emitir en el futuro). Las no-leidas se
+	// conservan siempre.
+	stopNotifSweeper := notification.StartReadCleanupSweeper(ctx, notificationRepo, logger, 24*time.Hour, notification.DefaultReadRetention)
+	defer stopNotifSweeper()
 
 	// Retention sweep: prune EPG programmes and federation audit log on
 	// a fixed cadence so append-only tables don't grow forever. Both
@@ -478,6 +513,7 @@ func run(configPath string) error {
 		SetupService:  setupService,
 		EventBus:      eventBus,
 		Federation:    federationManager,
+		Notifications: notificationService,
 		DB:            db.NewMaintenance(cfg.Database.Driver, database),
 		Activity:      db.NewActivityRepository(cfg.Database.Driver, database),
 		Version:       version,

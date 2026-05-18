@@ -21,6 +21,7 @@ import (
 	"hubplay/internal/iptv"
 	"hubplay/internal/library"
 	"hubplay/internal/logging"
+	"hubplay/internal/notification"
 	"hubplay/internal/observability"
 	"hubplay/internal/provider"
 	"hubplay/internal/setup"
@@ -61,6 +62,12 @@ type Dependencies struct {
 	SetupService   *setup.Service
 	EventBus       *event.Bus
 	Federation     *federation.Manager
+	// Notifications es el inbox por usuario (migration 049). Cualquier
+	// feature emite con svc.Create / FanOutToAdmins; los handlers
+	// /me/notifications + el SSE de /me/events consumen. Opcional:
+	// si nil, los endpoints devuelven 503 — tests que no quieren
+	// notif lo pasan asi.
+	Notifications  *notification.Service
 	// DB es el wrapper *db.Maintenance con las capacidades estrechas
 	// que necesitan los handlers admin: PingContext (HealthChecker),
 	// Stats (PoolStatsReporter), VacuumInto (BackupOperator) y
@@ -283,6 +290,25 @@ func NewRouter(deps Dependencies) http.Handler {
 			// reciben en /federation/info.
 			r.Get("/federation/identity/avatar", pubFed.ServeIdentityAvatar)
 			r.Post("/peer/handshake", pubFed.Handshake)
+			// Pairing requests "Steam-style" (migration 048). Tres
+			// endpoints publicos en par a /peer/handshake:
+			//   POST /federation/pairing-requests          (A -> B inicial)
+			//   POST /federation/pairing-requests/{id}/callback (B -> A)
+			//   POST /federation/pairing-requests/{id}/cancel   (A -> B)
+			// La autorizacion va por contenido (request_token + firma
+			// Ed25519 cuando aplica), no por JWT del peer - el JWT solo
+			// existe DESPUES de pairing.
+			//
+			// Rate-limit per-IP: 5 req/min/IP, burst 3. Defense vs
+			// flood; el admin toggle "accept_pairing_requests" + el
+			// cap de incoming pending son las otras dos capas.
+			pairingRL := handlers.NewPairingRequestRateLimiter()
+			r.Group(func(r chi.Router) {
+				r.Use(handlers.IPRateLimitMiddleware(pairingRL))
+				r.Post("/federation/pairing-requests", pubFed.ReceivePairingRequest)
+				r.Post("/federation/pairing-requests/{id}/callback", pubFed.ReceivePairingCallback)
+				r.Post("/federation/pairing-requests/{id}/cancel", pubFed.ReceivePairingCancel)
+			})
 
 			r.Group(func(r chi.Router) {
 				r.Use(federation.RequirePeerJWT(deps.Federation))
@@ -371,6 +397,17 @@ func NewRouter(deps Dependencies) http.Handler {
 			r.Post("/auth/switch-profile", authHandler.SwitchProfile)
 			r.Get("/me/sessions", authHandler.ListMySessions)
 			r.Delete("/me/sessions/{id}", authHandler.RevokeMySession)
+
+			// Inbox de notificaciones por usuario (migration 049).
+			// Generico: cualquier feature puede emitir via el
+			// notification.Service; el frontend pinta un dropdown
+			// en el header con badge de unread_count.
+			if deps.Notifications != nil {
+				notifHandler := handlers.NewNotificationsHandler(deps.Notifications, deps.Logger)
+				r.Get("/me/notifications", notifHandler.List)
+				r.Post("/me/notifications/{id}/read", notifHandler.MarkRead)
+				r.Post("/me/notifications/read-all", notifHandler.MarkAllRead)
+			}
 
 			// Per-user preferences (hero mode, theme overrides, etc.)
 			// Authenticated; the handler derives userID from claims so
@@ -522,6 +559,9 @@ func NewRouter(deps Dependencies) http.Handler {
 						r.Get("/", adminFed.ListPeers)
 						r.Get("/identity", adminFed.GetServerIdentity)
 						r.Put("/identity", adminFed.UpdateServerIdentity)
+						// Toggles admin de federation (anti-spam, etc.).
+						r.Get("/settings", adminFed.GetFederationSettings)
+						r.Put("/settings", adminFed.UpdateFederationSettings)
 						// Foto del servidor: upload multipart + delete
 						// idempotente. El serve público vive bajo
 						// /federation/identity/avatar (sin auth).
@@ -529,6 +569,17 @@ func NewRouter(deps Dependencies) http.Handler {
 						r.Delete("/identity/avatar", adminFed.DeleteServerAvatar)
 						r.Post("/probe", adminFed.ProbePeer)
 						r.Post("/accept", adminFed.AcceptInvite)
+						// Pairing requests Steam-style: 5 admin endpoints
+						// (migration 048). Reemplazan funcionalmente el
+						// flow de Invite + AcceptInvite + handshake para
+						// admins que prefieran "0 copy-paste".
+						r.Route("/pairing-requests", func(r chi.Router) {
+							r.Get("/", adminFed.ListPairingRequests)
+							r.Post("/send", adminFed.SendPairingRequest)
+							r.Post("/{id}/accept", adminFed.AcceptPairingRequest)
+							r.Post("/{id}/decline", adminFed.DeclinePairingRequest)
+							r.Delete("/{id}", adminFed.CancelPairingRequest)
+						})
 						r.Get("/{id}", adminFed.GetPeer)
 						r.Post("/{id}/refresh", adminFed.RefreshPeer)
 						r.Delete("/{id}", adminFed.RevokePeer)

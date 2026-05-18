@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"hubplay/internal/clock"
+	"hubplay/internal/domain"
 )
 
 // inMemoryAuditRepo + inMemoryFedRepo glue together what the
@@ -20,15 +22,16 @@ import (
 // the only consumer for now.
 
 type inMemoryFedRepo struct {
-	mu      sync.Mutex
-	id      *Identity
-	peers   []*Peer
-	audit   []*AuditEntry
-	invites []*Invite
-	shares  []*LibraryShare
-	libs    []*SharedLibrary
-	items   map[string][]*SharedItem // library_id → items
-	cache   map[string]cacheEntry    // (peer_id|library_id) → entry
+	mu       sync.Mutex
+	id       *Identity
+	peers    []*Peer
+	audit    []*AuditEntry
+	invites  []*Invite
+	shares   []*LibraryShare
+	libs     []*SharedLibrary
+	items    map[string][]*SharedItem // library_id → items
+	cache    map[string]cacheEntry    // (peer_id|library_id) → entry
+	pendings []*PendingRequest        // pairing-request inbox
 }
 
 type cacheEntry struct {
@@ -158,6 +161,99 @@ func (r *inMemoryFedRepo) ListPeers(_ context.Context) ([]*Peer, error) {
 	cp := make([]*Peer, len(r.peers))
 	copy(cp, r.peers)
 	return cp, nil
+}
+
+// Pairing requests (migration 048).
+func (r *inMemoryFedRepo) InsertPendingRequest(_ context.Context, p *PendingRequest) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	// Enforce the partial unique index logic in-memory: si ya hay
+	// pending con (dir, server_uuid), devolver duplicate-like error.
+	for _, existing := range r.pendings {
+		if existing.Direction == p.Direction && existing.PeerServerUUID == p.PeerServerUUID && existing.Status == PendingStatusPending {
+			return fmt.Errorf("federation: pending request already exists")
+		}
+	}
+	cp := *p
+	r.pendings = append(r.pendings, &cp)
+	return nil
+}
+
+func (r *inMemoryFedRepo) GetPendingRequestByID(_ context.Context, id string) (*PendingRequest, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, p := range r.pendings {
+		if p.ID == id {
+			cp := *p
+			return &cp, nil
+		}
+	}
+	return nil, domain.ErrNotFound
+}
+
+func (r *inMemoryFedRepo) GetActivePendingRequestByPeer(_ context.Context, dir PendingRequestDirection, serverUUID string) (*PendingRequest, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, p := range r.pendings {
+		if p.Direction == dir && p.PeerServerUUID == serverUUID && p.Status == PendingStatusPending {
+			cp := *p
+			return &cp, true, nil
+		}
+	}
+	return nil, false, nil
+}
+
+func (r *inMemoryFedRepo) ListPendingRequests(_ context.Context, limit int) ([]*PendingRequest, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	cp := make([]*PendingRequest, 0, len(r.pendings))
+	for _, p := range r.pendings {
+		dup := *p
+		cp = append(cp, &dup)
+	}
+	if limit > 0 && len(cp) > limit {
+		cp = cp[:limit]
+	}
+	return cp, nil
+}
+
+func (r *inMemoryFedRepo) MarkPendingRequestResponded(_ context.Context, id string, status PendingRequestStatus, by string, at time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, p := range r.pendings {
+		if p.ID == id && p.Status == PendingStatusPending {
+			p.Status = status
+			p.RespondedAt = &at
+			p.RespondedByUserID = by
+			return nil
+		}
+	}
+	return domain.ErrNotFound
+}
+
+func (r *inMemoryFedRepo) ExpirePendingRequests(_ context.Context, before time.Time) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for _, p := range r.pendings {
+		if p.Status == PendingStatusPending && p.ExpiresAt.Before(before) {
+			p.Status = PendingStatusExpired
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (r *inMemoryFedRepo) CountUnreadIncomingPendingRequests(_ context.Context) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for _, p := range r.pendings {
+		if p.Direction == PendingDirectionIncoming && p.Status == PendingStatusPending {
+			n++
+		}
+	}
+	return n, nil
 }
 
 func (r *inMemoryFedRepo) UpsertLibraryShare(_ context.Context, s *LibraryShare) error {

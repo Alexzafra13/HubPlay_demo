@@ -329,6 +329,26 @@ func (r *UserRepository) PrimaryAdminID(ctx context.Context) (string, error) {
 	return id, nil
 }
 
+// ListAdminIDs devuelve los IDs de todos los admins activos (role=admin
+// y sin parent_user_id, es decir titulares de hogar, no perfiles). Lo
+// usa el servicio de notificaciones para hacer fan-out a todos los
+// admins cuando una notificacion es admin-target (e.g. ha entrado una
+// pairing request federation).
+func (r *UserRepository) ListAdminIDs(ctx context.Context) ([]string, error) {
+	if r.useSQLite() {
+		ids, err := r.sq.ListAdminIDs(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("list admin ids: %w", err)
+		}
+		return ids, nil
+	}
+	ids, err := r.pq.ListAdminIDs(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list admin ids: %w", err)
+	}
+	return ids, nil
+}
+
 // ListProfilesForOwner — raw SQL holdout. See the original SQLite-only
 // version's long comment about the sqlc 1.31.x parser bug. The query
 // is dialect-aware via rewritePlaceholders.

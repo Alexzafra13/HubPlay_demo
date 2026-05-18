@@ -12,6 +12,7 @@ import type {
   FederationInvite,
   FederationLibraryShare,
   FederationPeer,
+  FederationPendingRequest,
   FederationRemoteItemsResponse,
   FederationRemoteLibrary,
   FederationSearchResponse,
@@ -142,6 +143,70 @@ export function useRefreshPeer() {
     mutationFn: (id) => api.refreshPeer(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.federationPeers });
+    },
+  });
+}
+
+// ─── Pairing requests "Steam-style" (migration 048) ──────────────────
+
+// usePairingRequests lista todas (incoming + outgoing). El admin
+// las separa en el panel; aqui se devuelven planas. Refetch corto
+// porque incluso si el SSE empuja, queremos un poll en background
+// como fallback ante perdida de conexion (raro pero pasa).
+export function usePairingRequests() {
+  return useQuery<FederationPendingRequest[]>({
+    queryKey: queryKeys.federationPairingRequests,
+    queryFn: () => api.listPairingRequests(),
+    staleTime: 30 * 1000,
+  });
+}
+
+export function useSendPairingRequest() {
+  const queryClient = useQueryClient();
+  return useMutation<FederationPendingRequest, Error, string>({
+    mutationFn: (baseURL) => api.sendPairingRequest(baseURL),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.federationPairingRequests,
+      });
+    },
+  });
+}
+
+export function useAcceptPairingRequest() {
+  const queryClient = useQueryClient();
+  return useMutation<FederationPeer, Error, string>({
+    mutationFn: (id) => api.acceptPairingRequest(id),
+    onSuccess: () => {
+      // Aceptar crea un Peer paired - invalidamos peers tambien.
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.federationPairingRequests,
+      });
+      queryClient.invalidateQueries({ queryKey: queryKeys.federationPeers });
+    },
+  });
+}
+
+export function useDeclinePairingRequest() {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, string>({
+    mutationFn: (id) => api.declinePairingRequest(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.federationPairingRequests,
+      });
+    },
+  });
+}
+
+export function useCancelPairingRequest() {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, string>({
+    mutationFn: (id) => api.cancelPairingRequest(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.federationPairingRequests,
+      });
     },
   });
 }

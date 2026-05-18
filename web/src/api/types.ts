@@ -52,6 +52,35 @@ export interface FederationInvite {
   expires_at: string;
 }
 
+// FederationPendingRequest — una entrada del inbox de pairing
+// requests (flow Steam-style, sin codigo). incoming = alguien
+// nos quiere emparejar; outgoing = nosotros le enviamos peticion
+// a alguien y esperamos respuesta.
+export type FederationPendingRequestDirection = "incoming" | "outgoing";
+export type FederationPendingRequestStatus =
+  | "pending"
+  | "accepted"
+  | "declined"
+  | "cancelled"
+  | "expired";
+
+export interface FederationPendingRequest {
+  id: string;
+  direction: FederationPendingRequestDirection;
+  peer_server_uuid: string;
+  peer_name: string;
+  peer_base_url: string;
+  peer_public_key: string; // base64
+  peer_avatar_color?: string;
+  peer_avatar_image_url?: string;
+  fingerprint: string;
+  fingerprint_words: string[];
+  created_at: string;
+  expires_at: string;
+  status: FederationPendingRequestStatus;
+  responded_at?: string;
+}
+
 // FederationLibraryShare — per-library opt-in. The presence of a row
 // for (peer_id, library_id) means the peer can see that library; the
 // boolean scopes refine what they can do (browse/play/download/livetv).
@@ -1592,6 +1621,40 @@ export interface ApiErrorBody {
     message: string;
     details?: Record<string, unknown>;
   };
+}
+
+// ─── Notifications ─────────────────────────────────────────────────────────
+
+// NotificationKind: identificador del tipo de notificacion. El frontend
+// mapea esto a icono + traduccion + link de fallback. Strings libres -
+// añadir un kind nuevo no requiere update del tipo, solo el switch del
+// renderizado.
+export type NotificationKind =
+  | "federation.pairing_request_received"
+  | "federation.pairing_request_accepted"
+  | "federation.pairing_request_declined"
+  | string;
+
+// AppNotification — entrada del inbox del usuario. Renombrada con
+// prefijo "App" para no chocar con el global `Notification` del
+// browser (que es la Notifications API nativa).
+export interface AppNotification {
+  id: string;
+  kind: NotificationKind;
+  title: string;
+  body?: string;
+  link?: string;
+  payload?: unknown;
+  created_at: string;
+  read_at?: string;
+}
+
+// NotificationsResponse — el listing devuelve tanto las notifs como
+// el contador de no-leidas en el mismo payload para hidratar el
+// dropdown y el badge con un solo fetch.
+export interface NotificationsResponse {
+  data: AppNotification[];
+  unread_count: number;
 }
 
 export class ApiError extends Error {
