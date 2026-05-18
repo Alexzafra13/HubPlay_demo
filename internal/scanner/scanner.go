@@ -741,7 +741,14 @@ func (s *Scanner) enrichMetadata(ctx context.Context, item *librarymodel.Item) {
 // scanner lo obtiene de Search→Fetch y el handler de Identify lo obtiene
 // llamando a FetchMetadata directo con el TMDb id que eligió el operador.
 func (s *Scanner) applyMetadata(ctx context.Context, item *librarymodel.Item, meta *provider.MetadataResult, itemType provider.ItemType, primaryExternalID string) {
+	// Title = nombre canónico que ve el usuario. Antes este flujo
+	// SÓLO actualizaba OriginalTitle y dejaba Title con el nombre
+	// crudo del filename ("Toy Story (2020).mkv" → Title="Toy Story
+	// (2020)") — por eso los grids enseñaban el filename aunque el
+	// match contra TMDb hubiera funcionado. El identify manual SÍ lo
+	// hacía, sólo el scan automático estaba roto.
 	if meta.Title != "" {
+		item.Title = meta.Title
 		item.OriginalTitle = meta.OriginalTitle
 	}
 	if meta.Year > 0 {

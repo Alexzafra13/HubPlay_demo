@@ -208,6 +208,25 @@ export function ChannelCard({
               {channel.country}
             </span>
           )}
+          {channel.quality && (
+            <span
+              className={[
+                "rounded-tv-xs px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-white backdrop-blur",
+                // Color por tier de calidad — el ojo distingue las
+                // 4K de un vistazo en un grid grande.
+                channel.quality === "UHD"
+                  ? "bg-amber-500/80"
+                  : channel.quality === "FHD"
+                    ? "bg-sky-500/70"
+                    : channel.quality === "HD"
+                      ? "bg-emerald-500/70"
+                      : "bg-black/50",
+              ].join(" ")}
+              title={channel.raw_name ? `M3U: ${channel.raw_name}` : undefined}
+            >
+              {channel.quality}
+            </span>
+          )}
         </div>
 
         {/* Top-right: favorite heart */}

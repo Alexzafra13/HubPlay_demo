@@ -936,7 +936,17 @@ export type ChannelCategory =
 
 export interface Channel {
   id: string;
+  /** Nombre saneado para mostrar (sin `[geo-blocked]`, `[VIP]`, `(HD)`,
+   *  `|ES|`, símbolos decorativos). Backend deriva esto en cada
+   *  serialización; el nombre crudo del M3U queda en `raw_name`. */
   name: string;
+  /** Nombre EXACTO del M3U cuando difiere del saneado. Útil como
+   *  tooltip o para tests. Omitido cuando el M3U ya venía limpio. */
+  raw_name?: string;
+  /** Etiqueta de resolución detectada en el nombre crudo: "UHD"
+   *  (4K/2160p), "FHD" (1080p), "HD" (720p), "SD" (480p) o undefined
+   *  cuando no hay marca. El frontend la pinta como badge sutil. */
+  quality?: "UHD" | "FHD" | "HD" | "SD";
   number: number;
   /** Upstream logo URL from the M3U. May be missing, broken, or slow. */
   logo_url: string | null;
