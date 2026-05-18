@@ -1,5 +1,42 @@
 # Estado del proyecto
 
+> 🎬 **Sesión 2026-05-18 cinco (rama `claude/review-project-progress-snmmo`) — pasada "como página grande" sobre el flow Steam-style: anti-abuse (rate-limit + cap + admin toggle), cron sweepers, página /me/notifications full, i18n proper, a11y, tests + ADR-024/025.**
+>
+> ## 🛠️ Anti-abuse en endpoints públicos (3 capas)
+>
+> - **`IPRateLimitMiddleware`** nuevo (`internal/api/handlers/iprate_middleware.go`): token bucket per-IP via X-Forwarded-For/X-Real-IP, 5 req/min burst 3 sobre los 3 endpoints públicos de pairing requests. 429 + `Retry-After: 60`.
+> - **Cap defensivo `MaxIncomingPendingRequests`** (default 100): `Manager.HandleIncomingPairingRequest` rechaza con `ErrPairingRequestQuotaExceeded` → handler 429 + `Retry-After: 300`. Anti-flood aunque burlen el rate-limit con botnet.
+> - **Toggle admin `federation.accept_pairing_requests`** persistido en `app_settings` via `SettingsReader` inyectado. Default true. Endpoints `GET/PUT /admin/peers/settings`. Cuando off, 403 + mensaje genérico.
+>
+> ## ⏲️ Cron sweepers (patrón `StartPeriodicOptimize`)
+>
+> - **`federation.StartPendingRequestSweeper`** cada 1h: expira `pending` con `expires_at < ahora` (libera cap defensivo + limpia badge admin).
+> - **`notification.StartReadCleanupSweeper`** cada 24h: purga notifs leídas con `read_at > 30d` (`DefaultReadRetention`). No-leídas se conservan siempre. Wired en `main.go` con `defer stop`.
+>
+> ## 📄 Página `/me/notifications` completa
+>
+> Nueva `MyNotifications.tsx` lazy-loaded. Header con "N sin leer" o "Todo al día". Chips filtro **All / Unread** con `aria-pressed`. Filas con icon-per-kind, click marca leída + navega al link, X explícito sin navegar. Empty states amigables ambos casos. Dropdown del bell ahora siempre muestra "Ver todas (N)" cuando hay notifs.
+>
+> ## 🌐 i18n proper
+>
+> Añadidas las claves `notifications.*` y `link.scanner.*` / `link.scanQR` a **en.json + es.json** (estaban con `defaultValue` inline). Time-relative + filter chips + empty states + scanner errors localizados en ambos idiomas.
+>
+> ## ♿ A11y polish
+>
+> - `NotificationsBell` aria-label dinámico: `"Notificaciones, 3 sin leer"` vs solo `"Notificaciones"`. Anuncio correcto en screen reader sin tener que leer el badge visual.
+>
+> ## 🧪 Tests
+>
+> - `NotificationsBell.test.tsx` (4 tests): hides truly empty, shows badge+count, opens dropdown, sigue visible si hay histórico con unread=0. Mock del SSE para no abrir conexión real en jsdom.
+> - **566/566 vitest verde** (+4 nuevos). **24 paquetes Go verdes** (el flake conocido `iptv.TestTransmuxManager_Touch` pasa aislado, no relacionado).
+>
+> ## 📚 ADRs documentados
+>
+> - **ADR-024** — Pairing requests Steam-style coexisten con códigos de invitación legacy. Protocolo 4 pasos con callback firmado Ed25519. Las 3 capas de defense-in-depth explicadas.
+> - **ADR-025** — Notificaciones genéricas como capa cross-feature. Tabla única con `kind` discriminator + JSON payload. Wire-up en composition root para evitar acoplamiento `federation ↔ notification`.
+>
+> ---
+>
 > 🎬 **Sesión 2026-05-18 cuatro (rama `claude/review-project-progress-snmmo`) — pairing requests "Steam-style" sin código + sistema de notificaciones genérico con bell en TopBar.** Re-imagina el flow de federation: copy-paste de invitación → enviar petición que aparece en el inbox del otro admin con badge en el header. Base extensible para más kinds de notificación (scan completed, peer offline, etc.).
 >
 > ## 🛠️ Pairing requests Steam-style + notifications (migrations 048 + 049)
