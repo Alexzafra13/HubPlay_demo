@@ -24,6 +24,7 @@ import (
 	"hubplay/internal/notification"
 	"hubplay/internal/observability"
 	"hubplay/internal/provider"
+	"hubplay/internal/scanner"
 	"hubplay/internal/setup"
 	"hubplay/internal/stream"
 	"hubplay/internal/sysmetrics"
@@ -55,6 +56,13 @@ type Dependencies struct {
 	UserPreferences *db.UserPreferenceRepository
 	Home            *db.HomeRepository
 	Providers      *provider.Manager
+	// Scanner expone SearchCandidates + IdentifyAndApply para el flujo
+	// admin de "Identify" (rematch manual contra TMDb). Opcional — si
+	// nil los endpoints /items/{id}/identify devuelven 503 y el resto
+	// del item handler sigue funcionando. Comparte instancia con la
+	// que dispara los scans periódicos: una sola fuente de verdad para
+	// la aplicación de metadatos en disco.
+	Scanner        *scanner.Scanner
 	ExternalIDs    *db.ExternalIDRepository
 	LibraryRepo    *db.LibraryRepository
 	ProviderRepo   *db.ProviderRepository
@@ -836,7 +844,15 @@ func NewRouter(deps Dependencies) http.Handler {
 				// layout clustered (one tree the operator can backup,
 				// rsync, or `du` to size the cache).
 				trickplayDir := filepath.Join(filepath.Dir(deps.Config.Database.Path), "images", "trickplay")
-				itemHandler := handlers.NewItemHandler(deps.Libraries, deps.Images, deps.Metadata, deps.UserData, deps.Users, deps.Chapters, deps.EpisodeSegments, deps.ExternalIDs, deps.People, deps.Collections, deps.Providers, trickplayDir, deps.Logger)
+				// scanner ↔ MetadataIdentifier: deps.Scanner es *scanner.Scanner;
+				// el handler sólo necesita la pequeña interfaz MetadataIdentifier.
+				// Pasarlo como nil cuando no esté wired hace que los endpoints
+				// /identify devuelvan 503 sin tumbar el resto del handler.
+				var identifier handlers.MetadataIdentifier
+				if deps.Scanner != nil {
+					identifier = deps.Scanner
+				}
+				itemHandler := handlers.NewItemHandler(deps.Libraries, deps.Images, deps.Metadata, deps.UserData, deps.Users, deps.Chapters, deps.EpisodeSegments, deps.ExternalIDs, deps.People, deps.Collections, deps.Providers, identifier, trickplayDir, deps.Logger)
 
 				// Libraries
 				r.Get("/libraries", libHandler.List)
@@ -1010,6 +1026,16 @@ func NewRouter(deps Dependencies) http.Handler {
 					// endpoints serve from disk on subsequent hits.
 					r.Get("/trickplay.json", itemHandler.TrickplayManifest)
 					r.Get("/trickplay.png", itemHandler.TrickplaySprite)
+
+					// Identify / rematch contra TMDb (admin-only).
+					// Mismo patrón Plex/Jellyfin: el operador busca,
+					// elige el match correcto y se aplica sobrescribiendo
+					// metadatos + imágenes del item.
+					r.Group(func(r chi.Router) {
+						r.Use(auth.RequireAdmin)
+						r.Get("/identify/candidates", itemHandler.IdentifyCandidates)
+						r.Post("/identify", itemHandler.Identify)
+					})
 				})
 			}
 

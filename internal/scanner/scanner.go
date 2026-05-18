@@ -658,10 +658,7 @@ func (s *Scanner) enrichMetadata(ctx context.Context, item *librarymodel.Item) {
 		year = item.Year
 	}
 
-	itemType := provider.ItemMovie
-	if item.Type == "episode" || item.Type == "series" {
-		itemType = provider.ItemSeries
-	}
+	itemType := itemTypeForProvider(item.Type)
 
 	results, err := s.providers.SearchMetadata(ctx, provider.SearchQuery{
 		Title:    cleanTitle,
@@ -681,6 +678,19 @@ func (s *Scanner) enrichMetadata(ctx context.Context, item *librarymodel.Item) {
 		return
 	}
 
+	s.applyMetadata(ctx, item, meta, itemType, best.ExternalID)
+}
+
+// applyMetadata aplica un MetadataResult ya obtenido sobre un item en BD:
+// actualiza la fila de `items`, hace upsert de `metadata`, enlaza estudio y
+// saga, persiste external_ids, sincroniza el reparto y descarga imágenes.
+//
+// Se extrajo de enrichMetadata para que el flujo de "Identify" (rematch
+// manual desde la UI admin) reutilice exactamente la misma maquinaria.
+// Ambos caminos llegan aquí con un meta válido — la diferencia es que el
+// scanner lo obtiene de Search→Fetch y el handler de Identify lo obtiene
+// llamando a FetchMetadata directo con el TMDb id que eligió el operador.
+func (s *Scanner) applyMetadata(ctx context.Context, item *librarymodel.Item, meta *provider.MetadataResult, itemType provider.ItemType, primaryExternalID string) {
 	if meta.Title != "" {
 		item.OriginalTitle = meta.OriginalTitle
 	}
@@ -785,7 +795,104 @@ func (s *Scanner) enrichMetadata(ctx context.Context, item *librarymodel.Item) {
 		s.fetchAndStoreImages(ctx, item.ID, meta.ExternalIDs, itemType)
 	}
 
-	s.logger.Info("enriched metadata", "title", item.Title, "tmdb_id", best.ExternalID, "year", item.Year)
+	s.logger.Info("enriched metadata", "title", item.Title, "tmdb_id", primaryExternalID, "year", item.Year)
+}
+
+// itemTypeForProvider mapea el tipo interno de un item al tipo que entiende
+// el provider de metadatos. Movies → ItemMovie, series/episodios → ItemSeries
+// (TMDb agrupa los episodios bajo /tv/{id}, el episodio concreto se resuelve
+// con GetEpisodeMetadata aparte).
+func itemTypeForProvider(itemType string) provider.ItemType {
+	if itemType == "series" || itemType == "season" || itemType == "episode" {
+		return provider.ItemSeries
+	}
+	return provider.ItemMovie
+}
+
+// SearchCandidates ejecuta una búsqueda en los providers de metadatos
+// usando el título y año del propio item como semilla por defecto, o
+// los que el operador haya escrito en el diálogo de "Identify". Devuelve
+// los candidatos en bruto para que el frontend pueda renderizar la lista
+// con pósters; la decisión de cuál aplicar la toma la persona, no el
+// algoritmo. Sólo películas y series — episodios/temporadas no tienen
+// flujo de identify (su match cuelga del padre).
+func (s *Scanner) SearchCandidates(ctx context.Context, itemID, query string, year int) ([]provider.SearchResult, error) {
+	if s.providers == nil {
+		return nil, fmt.Errorf("scanner: no metadata providers configured")
+	}
+	item, err := s.items.GetByID(ctx, itemID)
+	if err != nil {
+		return nil, fmt.Errorf("scanner: load item %s: %w", itemID, err)
+	}
+	if item.Type == "episode" || item.Type == "season" {
+		return nil, fmt.Errorf("scanner: identify not supported for %s items", item.Type)
+	}
+	if query == "" {
+		query, _ = parseTitleYear(item.Title)
+		if query == "" {
+			query = item.Title
+		}
+	}
+	if year == 0 {
+		year = item.Year
+	}
+	return s.providers.SearchMetadata(ctx, provider.SearchQuery{
+		Title:    query,
+		Year:     year,
+		ItemType: itemTypeForProvider(item.Type),
+	})
+}
+
+// IdentifyAndApply forza el emparejamiento del item con un externalID
+// concreto elegido por el operador (TMDb id que se ha visto en el diálogo
+// de "Identify"). Borra las imágenes y metadatos previos antes de aplicar
+// los nuevos — un rematch manual implica que los datos viejos eran
+// incorrectos y queremos un estado limpio, no una fusión silenciosa.
+//
+// Sólo películas y series. Episodios y temporadas no se reidentifican por
+// id propio: heredan el match de la serie padre vía season/episode number,
+// así que el flujo correcto para arreglar un episodio mal nombrado es
+// identificar la serie y dejar que el siguiente refresh recree las hojas.
+func (s *Scanner) IdentifyAndApply(ctx context.Context, itemID, externalID string) error {
+	if s.providers == nil {
+		return fmt.Errorf("scanner: no metadata providers configured")
+	}
+	if externalID == "" {
+		return fmt.Errorf("scanner: external_id required")
+	}
+	item, err := s.items.GetByID(ctx, itemID)
+	if err != nil {
+		return fmt.Errorf("scanner: load item %s: %w", itemID, err)
+	}
+	if item.Type == "episode" || item.Type == "season" {
+		return fmt.Errorf("scanner: identify not supported for %s items", item.Type)
+	}
+
+	itemType := itemTypeForProvider(item.Type)
+	meta, err := s.providers.FetchMetadata(ctx, externalID, itemType)
+	if err != nil {
+		return fmt.Errorf("scanner: fetch metadata for %s/%s: %w", item.Type, externalID, err)
+	}
+	if meta == nil {
+		return fmt.Errorf("scanner: provider returned no metadata for %s", externalID)
+	}
+
+	// Limpia el estado previo antes de aplicar: imágenes locales pueden
+	// estar apuntando al match equivocado y la metadata textual (overview,
+	// género, reparto) la regenera applyMetadata completa. Si el borrado
+	// falla no es bloqueante — el upsert posterior sobrescribe la fila.
+	_ = s.images.DeleteByItem(ctx, item.ID)
+	_ = s.metadata.Delete(ctx, item.ID)
+
+	// Aplica el título del nuevo match como Title también — sin esto el
+	// item conserva el nombre crudo del fichero ("Pelicula.2024.BRRip")
+	// que es justo lo que el operador estaba intentando arreglar.
+	if meta.Title != "" {
+		item.Title = meta.Title
+	}
+
+	s.applyMetadata(ctx, item, meta, itemType, externalID)
+	return nil
 }
 
 // fetchAndStoreImages descarga la mejor candidata de cada tipo de imagen

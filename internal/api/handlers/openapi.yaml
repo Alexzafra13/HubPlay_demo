@@ -566,6 +566,89 @@ paths:
                             in_library: { type: boolean }
                             local_id: { type: string }
 
+  /items/{id}/identify/candidates:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+      - { name: query, in: query, schema: { type: string }, description: 'Search terms; defaults to the item title when omitted.' }
+      - { name: year, in: query, schema: { type: integer }, description: 'Release year filter; defaults to the item year when omitted.' }
+    get:
+      tags: [admin]
+      summary: 'Admin: list TMDb candidates for re-identifying an item'
+      description: |
+        Returns a ranked list of TMDb matches for the item, each with a
+        poster URL so the admin can pick visually. Used by the
+        "Identify" modal in the detail page kebab. Admin-only.
+        Episodes/seasons return 400 — they inherit the match from their
+        parent series. 503 when no metadata provider is configured.
+      responses:
+        "200":
+          description: Candidates
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        external_id: { type: string }
+                        provider:    { type: string }
+                        title:       { type: string }
+                        year:        { type: integer }
+                        overview:    { type: string }
+                        poster_url:  { type: string }
+                        score:       { type: number, format: float }
+        "401": { description: Unauthorized }
+        "403": { description: Forbidden — admin required }
+        "404": { description: Item not found }
+        "502": { description: Provider error }
+        "503": { description: No metadata provider configured }
+
+  /items/{id}/identify:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [admin]
+      summary: 'Admin: apply a TMDb match to an item (rematch / identify)'
+      description: |
+        Force-applies the metadata of the given external id onto the
+        item. Wipes existing images + metadata first (a manual rematch
+        implies the previous match was wrong), then refetches title,
+        overview, genres, studio, cast and images from the provider.
+        Admin-only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [external_id]
+              properties:
+                provider:    { type: string, enum: [tmdb], default: tmdb }
+                external_id: { type: string }
+      responses:
+        "200":
+          description: Match applied
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      item_id:     { type: string }
+                      provider:    { type: string }
+                      external_id: { type: string }
+        "400": { description: Invalid body or unsupported provider }
+        "401": { description: Unauthorized }
+        "403": { description: Forbidden — admin required }
+        "404": { description: Item not found }
+        "502": { description: Provider error }
+        "503": { description: No metadata provider configured }
+
   /items/genres:
     get:
       tags: [browse]

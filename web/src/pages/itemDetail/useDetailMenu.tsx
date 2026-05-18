@@ -8,6 +8,7 @@ import {
   RefreshIcon,
   InfoIcon,
 } from "@/components/media/icons";
+import { Search } from "lucide-react";
 
 // Builds the hero kebab menu rows for a detail page. Lives here as a
 // hook (not a useMemo inside the page) because the result depends on
@@ -34,6 +35,10 @@ export interface UseDetailMenuArgs {
   itemId: string | undefined;
   isAdmin: boolean;
   onOpenImageManager: () => void;
+  // Identify (admin rematch). Opcional: si el padre no monta el
+  // diálogo, el item del menú no se renderiza — sin diálogo no hay
+  // acción que disparar.
+  onOpenIdentify?: () => void;
 }
 
 export function useDetailMenu({
@@ -41,10 +46,18 @@ export function useDetailMenu({
   itemId,
   isAdmin,
   onOpenImageManager,
+  onOpenIdentify,
 }: UseDetailMenuArgs): HeroMenuItem[] {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const items: HeroMenuItem[] = [];
+
+  // El flujo de "Identify" sólo aplica a películas y series — los
+  // episodios y temporadas heredan el match del padre, y los canales
+  // IPTV viven en una jerarquía paralela sin TMDb. Filtramos aquí en
+  // el frontend para no enseñar una acción que el backend rechazaría.
+  const canIdentify =
+    item?.type === "movie" || item?.type === "series";
 
   if (isAdmin && itemId) {
     items.push({
@@ -52,6 +65,14 @@ export function useDetailMenu({
       icon: <ImageIcon />,
       onClick: onOpenImageManager,
     });
+
+    if (canIdentify && onOpenIdentify) {
+      items.push({
+        label: t("identify.menuLabel", { defaultValue: "Identify…" }),
+        icon: <Search className="h-4 w-4" />,
+        onClick: onOpenIdentify,
+      });
+    }
 
     items.push({
       label: t("itemDetail.refreshMetadata"),

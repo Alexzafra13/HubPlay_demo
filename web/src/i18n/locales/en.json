@@ -1519,6 +1519,20 @@
       "generatedPasswordHint": "Cópiala ahora a tu gestor de contraseñas. Solo se mostrará una vez. Si la pierdes, tendrás que recuperar la cuenta a mano desde la base de datos."
     }
   },
+  "identify": {
+    "menuLabel": "Identify…",
+    "title": "Identify item",
+    "subtitle": "If the match is wrong, search for the correct title and apply it. This overwrites title, overview, genres, cast and poster.",
+    "queryLabel": "Title",
+    "yearLabel": "Year",
+    "search": "Search",
+    "apply": "Apply match",
+    "hintNoSearch": "Type the correct title and press Search to see TMDb candidates.",
+    "empty": "No matches. Try a different title or drop the year.",
+    "errorSearch": "Could not query TMDb. Check the provider configuration or try again.",
+    "errorApply": "Could not apply the match. Please try again.",
+    "candidatesAriaLabel": "TMDb candidates"
+  },
   "imageManager": {
     "title": "Manage Images",
     "poster": "Poster",

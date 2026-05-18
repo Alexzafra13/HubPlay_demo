@@ -506,6 +506,7 @@ func run(configPath string) error {
 		UserPreferences: repos.UserPreferences,
 		Home:            repos.Home,
 		Providers:     providerManager,
+		Scanner:       scnr,
 		ExternalIDs:   repos.ExternalIDs,
 		LibraryRepo:   repos.Libraries,
 		ProviderRepo:  repos.Providers,

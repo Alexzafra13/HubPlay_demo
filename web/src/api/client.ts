@@ -773,6 +773,42 @@ export class ApiClient {
     );
   }
 
+  // Admin: candidatos TMDb para reidentificar un item. La query y el año
+  // son opcionales — sin ellos el backend usa el título y año actuales
+  // del item como semilla. Cada candidato trae poster_url para que el
+  // diálogo pueda renderizar la lista visual estilo Plex/Jellyfin.
+  async getIdentifyCandidates(
+    id: string,
+    options?: { query?: string; year?: number },
+  ): Promise<import("./types").IdentifyCandidate[]> {
+    return this.request<import("./types").IdentifyCandidate[]>(
+      "GET",
+      `/items/${id}/identify/candidates`,
+      {
+        params: {
+          query: options?.query,
+          year: options?.year,
+        },
+      },
+    );
+  }
+
+  // Admin: aplica un match TMDb concreto al item. El backend borra
+  // imágenes y metadata previos y reescribe título, overview, géneros,
+  // estudio, reparto e imágenes con los del externalID elegido.
+  async applyIdentify(
+    id: string,
+    payload: { provider?: string; external_id: string },
+  ): Promise<{ item_id: string; provider: string; external_id: string }> {
+    return this.request<{
+      item_id: string;
+      provider: string;
+      external_id: string;
+    }>("POST", `/items/${id}/identify`, {
+      body: { provider: payload.provider ?? "tmdb", external_id: payload.external_id },
+    });
+  }
+
   async getPerson(id: string): Promise<PersonDetail> {
     return this.request<PersonDetail>("GET", `/people/${id}`);
   }
