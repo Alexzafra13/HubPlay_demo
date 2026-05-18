@@ -42,6 +42,7 @@ const PeerLibrariesPage = lazyWithRetry(() => import("@/pages/PeerLibrariesPage"
 const PeerLibraryItemsPage = lazyWithRetry(() => import("@/pages/PeerLibraryItemsPage"));
 const PeerItemDetail = lazyWithRetry(() => import("@/pages/PeerItemDetail"));
 const LinkDevice = lazyWithRetry(() => import("@/pages/LinkDevice"));
+const MyNotifications = lazyWithRetry(() => import("@/pages/MyNotifications"));
 const PairThisDevice = lazyWithRetry(() => import("@/pages/PairThisDevice"));
 const SystemStatus = lazyWithRetry(() => import("@/pages/admin/system/SystemStatus"));
 
@@ -170,6 +171,7 @@ export function App() {
             <Route path="peers/:peerId/libraries/:libraryId" element={<PeerLibraryItemsPage />} />
             <Route path="peers/:peerId/libraries/:libraryId/items/:itemId" element={<PeerItemDetail />} />
             <Route path="link" element={<LinkDevice />} />
+            <Route path="me/notifications" element={<MyNotifications />} />
             <Route path="settings" element={<Settings />} />
 
             {/* Admin routes.

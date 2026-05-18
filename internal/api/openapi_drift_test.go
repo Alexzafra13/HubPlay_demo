@@ -110,6 +110,8 @@ var outOfScopeExact = map[string]string{
 	"PUT /admin/peers/identity":           "federation pairing admin",
 	"POST /admin/peers/identity/avatar":   "federation pairing admin",
 	"DELETE /admin/peers/identity/avatar": "federation pairing admin",
+	"GET /admin/peers/settings":           "federation toggles admin",
+	"PUT /admin/peers/settings":           "federation toggles admin",
 	"POST /admin/peers/probe":             "federation pairing admin",
 	"POST /admin/peers/accept":            "federation pairing admin",
 	"GET /admin/peers/{id}":               "federation pairing admin",

@@ -195,6 +195,39 @@
     "linked": {
       "title": "Linked devices",
       "subtitle": "Devices you have already authorised here. Sign one out if you lent it or no longer use it."
+    },
+    "scanQR": "Scan QR code",
+    "scanner": {
+      "title": "Scan QR code",
+      "hint": "Point the camera at the QR shown on your TV.",
+      "retry": "Retry",
+      "invalidQR": "The QR code does not contain a valid device code. Make sure you are scanning the one shown on your TV.",
+      "permissionDenied": "We need camera permission. Allow it in your browser and try again.",
+      "noCamera": "No camera available on this device.",
+      "genericError": "Could not start the camera. Make sure you are on HTTPS and try again."
+    }
+  },
+  "notifications": {
+    "title": "Notifications",
+    "empty": "No notifications",
+    "markAllRead": "Mark all read",
+    "markRead": "Mark as read",
+    "viewAll": "View all",
+    "viewAllWithCount": "View all ({{n}})",
+    "now": "now",
+    "minAgo": "{{n}}m ago",
+    "hourAgo": "{{n}}h ago",
+    "dayAgo": "{{n}}d ago",
+    "unreadCount": "{{n}} unread",
+    "allRead": "All caught up",
+    "backHome": "Back to home",
+    "emptyAllTitle": "No notifications yet",
+    "emptyAllHint": "When you receive pairing requests or system events, they will appear here.",
+    "emptyUnreadTitle": "All caught up",
+    "emptyUnreadHint": "Nothing new to read. We will let you know when something happens.",
+    "filter": {
+      "all": "All",
+      "unread": "Unread"
     }
   },
   "pair": {

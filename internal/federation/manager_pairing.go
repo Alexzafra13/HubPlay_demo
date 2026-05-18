@@ -323,6 +323,21 @@ func (m *Manager) HandleIncomingPairingRequest(ctx context.Context, requestID, r
 	if requestID == "" || requestToken == "" {
 		return nil, domain.NewValidationError(map[string]string{"request_id": "id+token required"})
 	}
+	// Admin toggle: si "no aceptar peticiones" esta activado,
+	// rechazamos aqui antes de tocar ningun guard mas pesado.
+	if !m.AcceptingPairingRequests(ctx) {
+		return nil, domain.ErrPairingRequestsDisabled
+	}
+	// Defense-in-depth contra flood: cap el numero de incoming
+	// pending. Si esta por encima del umbral, rechazamos. Aun con
+	// rate-limit por IP burlado (botnet), la tabla no crece sin
+	// limite.
+	if cap := m.cfg.MaxIncomingPendingRequests; cap > 0 {
+		count, err := m.repo.CountUnreadIncomingPendingRequests(ctx)
+		if err == nil && count >= cap {
+			return nil, domain.ErrPairingRequestQuotaExceeded
+		}
+	}
 	// Si ya estamos paired con este server_uuid, conflicto.
 	if existing, err := m.repo.GetPeerByServerUUID(ctx, requester.ServerUUID); err == nil && existing != nil {
 		return nil, fmt.Errorf("%w: server_uuid already paired", domain.ErrAlreadyExists)

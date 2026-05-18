@@ -80,6 +80,15 @@ type Repo interface {
 	CountUnreadIncomingPendingRequests(ctx context.Context) (int, error)
 }
 
+// SettingsReader es el slice del settings repo que la Manager
+// necesita para leer toggles persistentes (e.g. "aceptar peticiones
+// entrantes"). Interface estrecha local para no atar federation a
+// internal/db.
+type SettingsReader interface {
+	Get(ctx context.Context, key string) (string, error)
+	Set(ctx context.Context, key, value string) error
+}
+
 // EventBus is the slice of internal/event the Manager publishes to.
 // nil bus is a valid no-op so test rigs and bare-bones startup don't
 // have to wire one.
@@ -131,6 +140,13 @@ type Config struct {
 	// no colisionar con los UUIDs de usuario. Vacío = uploads
 	// del servidor deshabilitados (handler 503).
 	AvatarsDir string
+	// MaxIncomingPendingRequests es el cap defensivo de filas
+	// pending en federation_pending_requests con direction=incoming.
+	// Si se alcanza, nuevas peticiones se rechazan con 429. Default
+	// 100 (suficiente para uso legitimo - el admin no va a tener
+	// 100 amigos pidiendo emparejarse a la vez - pero corta de raiz
+	// un flood). 0 = sin cap (NO recomendado en prod abierto).
+	MaxIncomingPendingRequests int
 }
 
 // DefaultConfig returns sensible defaults for new deployments. Caller
@@ -140,10 +156,11 @@ func DefaultConfig() Config {
 		AdvertisedURL:         "",
 		Version:               "0.1.0",
 		SupportedScopes:       []string{"browse", "play"},
-		InviteTTL:             24 * time.Hour,
-		HTTPTimeout:           15 * time.Second,
-		PeerRequestsPerMinute: 60,
-		PeerBurst:             30,
+		InviteTTL:                  24 * time.Hour,
+		HTTPTimeout:                15 * time.Second,
+		PeerRequestsPerMinute:      60,
+		PeerBurst:                  30,
+		MaxIncomingPendingRequests: 100,
 	}
 }
 
@@ -184,6 +201,11 @@ type Manager struct {
 	// avatarsDir donde se guarda la foto del servidor. Vacío =
 	// uploads deshabilitados; el handler responde 503.
 	avatarsDir string
+
+	// settings es el slice del SettingsRepository inyectado en
+	// composition root. Nil-safe: si no lo wireamos, los toggles
+	// usan su default.
+	settings SettingsReader
 }
 
 // streamSweepInterval is how often we scan streamSessions for entries
@@ -286,6 +308,49 @@ func (m *Manager) recordAudit(entry AuditEntry) {
 // having to pass clock around separately.
 func (m *Manager) NowUTC() time.Time {
 	return m.clock.Now().UTC()
+}
+
+// SetSettings inyecta el reader de settings persistentes para que
+// el manager pueda leer toggles admin (e.g. accept_pairing_requests).
+// Llamada en composition root tras construir el manager (la API
+// principal no la usa - mantenemos NewManager sin nuevas deps).
+func (m *Manager) SetSettings(s SettingsReader) {
+	m.settings = s
+}
+
+// SettingAcceptPairingRequests es la key del toggle admin
+// "aceptar peticiones de emparejamiento entrantes". Valor: "true"
+// o "false". Default ausente = true (puerta abierta).
+const SettingAcceptPairingRequests = "federation.accept_pairing_requests"
+
+// AcceptingPairingRequests reporta si el endpoint publico debe
+// admitir nuevas peticiones entrantes. Default true cuando no hay
+// settings configurado o el toggle no esta puesto. Lo consulta el
+// manager.HandleIncomingPairingRequest antes de persistir.
+func (m *Manager) AcceptingPairingRequests(ctx context.Context) bool {
+	if m.settings == nil {
+		return true
+	}
+	v, err := m.settings.Get(ctx, SettingAcceptPairingRequests)
+	if err != nil {
+		// ErrNotFound = key sin setear, asumimos default "true".
+		return true
+	}
+	return v != "false"
+}
+
+// SetAcceptingPairingRequests persiste el toggle. El admin lo
+// alterna desde el panel cuando quiere bloquear nuevas peticiones
+// (anti-harassment / migracion / mantenimiento).
+func (m *Manager) SetAcceptingPairingRequests(ctx context.Context, enabled bool) error {
+	if m.settings == nil {
+		return fmt.Errorf("federation: settings not configured")
+	}
+	value := "true"
+	if !enabled {
+		value = "false"
+	}
+	return m.settings.Set(ctx, SettingAcceptPairingRequests, value)
 }
 
 // SetAdvertisedURL updates the URL this server advertises in its

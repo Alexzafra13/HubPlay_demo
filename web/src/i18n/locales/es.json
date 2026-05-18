@@ -195,6 +195,39 @@
     "linked": {
       "title": "Dispositivos vinculados",
       "subtitle": "Aparatos que ya autorizaste desde aquí. Cierra la sesión de uno si lo prestaste o si ya no lo usas."
+    },
+    "scanQR": "Escanear código QR",
+    "scanner": {
+      "title": "Escanear código QR",
+      "hint": "Apunta a la pantalla de tu TV con el código QR.",
+      "retry": "Reintentar",
+      "invalidQR": "El QR no contiene un código válido. Asegúrate de escanear el QR que muestra la TV.",
+      "permissionDenied": "Necesitamos permiso para la cámara. Acéptalo en el navegador y vuelve a intentarlo.",
+      "noCamera": "No se ha encontrado ninguna cámara en este dispositivo.",
+      "genericError": "No se pudo iniciar la cámara. Asegúrate de estar en HTTPS y vuelve a intentarlo."
+    }
+  },
+  "notifications": {
+    "title": "Notificaciones",
+    "empty": "No tienes notificaciones",
+    "markAllRead": "Marcar todas leídas",
+    "markRead": "Marcar como leída",
+    "viewAll": "Ver todas",
+    "viewAllWithCount": "Ver todas ({{n}})",
+    "now": "ahora",
+    "minAgo": "hace {{n}}m",
+    "hourAgo": "hace {{n}}h",
+    "dayAgo": "hace {{n}}d",
+    "unreadCount": "{{n}} sin leer",
+    "allRead": "Todo al día",
+    "backHome": "Volver al inicio",
+    "emptyAllTitle": "Aún no tienes notificaciones",
+    "emptyAllHint": "Cuando recibas peticiones de emparejamiento o eventos del sistema, las verás listadas aquí.",
+    "emptyUnreadTitle": "Todo al día",
+    "emptyUnreadHint": "No hay nada nuevo. Cuando ocurra algo importante aparecerá aquí.",
+    "filter": {
+      "all": "Todas",
+      "unread": "No leídas"
     }
   },
   "pair": {

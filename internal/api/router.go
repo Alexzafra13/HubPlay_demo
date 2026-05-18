@@ -298,9 +298,17 @@ func NewRouter(deps Dependencies) http.Handler {
 			// La autorizacion va por contenido (request_token + firma
 			// Ed25519 cuando aplica), no por JWT del peer - el JWT solo
 			// existe DESPUES de pairing.
-			r.Post("/federation/pairing-requests", pubFed.ReceivePairingRequest)
-			r.Post("/federation/pairing-requests/{id}/callback", pubFed.ReceivePairingCallback)
-			r.Post("/federation/pairing-requests/{id}/cancel", pubFed.ReceivePairingCancel)
+			//
+			// Rate-limit per-IP: 5 req/min/IP, burst 3. Defense vs
+			// flood; el admin toggle "accept_pairing_requests" + el
+			// cap de incoming pending son las otras dos capas.
+			pairingRL := handlers.NewPairingRequestRateLimiter()
+			r.Group(func(r chi.Router) {
+				r.Use(handlers.IPRateLimitMiddleware(pairingRL))
+				r.Post("/federation/pairing-requests", pubFed.ReceivePairingRequest)
+				r.Post("/federation/pairing-requests/{id}/callback", pubFed.ReceivePairingCallback)
+				r.Post("/federation/pairing-requests/{id}/cancel", pubFed.ReceivePairingCancel)
+			})
 
 			r.Group(func(r chi.Router) {
 				r.Use(federation.RequirePeerJWT(deps.Federation))
@@ -551,6 +559,9 @@ func NewRouter(deps Dependencies) http.Handler {
 						r.Get("/", adminFed.ListPeers)
 						r.Get("/identity", adminFed.GetServerIdentity)
 						r.Put("/identity", adminFed.UpdateServerIdentity)
+						// Toggles admin de federation (anti-spam, etc.).
+						r.Get("/settings", adminFed.GetFederationSettings)
+						r.Put("/settings", adminFed.UpdateFederationSettings)
 						// Foto del servidor: upload multipart + delete
 						// idempotente. El serve público vive bajo
 						// /federation/identity/avatar (sin auth).

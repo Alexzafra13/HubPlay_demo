@@ -97,6 +97,19 @@ func (h *FederationPublicHandler) ReceivePairingRequest(w http.ResponseWriter, r
 	}
 	pending, err := h.mgr.HandleIncomingPairingRequest(r.Context(), body.RequestID, body.RequestToken, requester)
 	if err != nil {
+		if errors.Is(err, domain.ErrPairingRequestsDisabled) {
+			// 403 con mensaje generico — el remoto no necesita saber
+			// si es "disabled por admin" o "el server no soporta".
+			respondError(w, r, http.StatusForbidden, "PAIRING_REQUESTS_DISABLED",
+				"this server is not accepting pairing requests")
+			return
+		}
+		if errors.Is(err, domain.ErrPairingRequestQuotaExceeded) {
+			w.Header().Set("Retry-After", "300")
+			respondError(w, r, http.StatusTooManyRequests, "QUOTA_EXCEEDED",
+				"too many pending requests; retry later")
+			return
+		}
 		if errors.Is(err, domain.ErrAlreadyExists) {
 			respondError(w, r, http.StatusConflict, "PEER_ALREADY_PAIRED", "this peer is already paired")
 			return

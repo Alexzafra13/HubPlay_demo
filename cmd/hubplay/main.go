@@ -423,6 +423,10 @@ func run(configPath string) error {
 		logger.Error("federation: manager init failed; federation disabled", "err", err)
 		federationManager = nil
 	} else {
+		// Inyectar el reader de settings persistentes para que el
+		// manager pueda leer/escribir el toggle
+		// federation.accept_pairing_requests sin tocar SQL crudo.
+		federationManager.SetSettings(repos.Settings)
 		logger.Info("federation: manager initialised",
 			"server_uuid", federationManager.PublicServerInfo().ServerUUID,
 			"fingerprint", federationManager.PublicServerInfo().PubkeyFingerprint)
@@ -445,7 +449,20 @@ func run(configPath string) error {
 		// paquete notification (acoplamiento solo va de notification
 		// hacia event, no al reves).
 		registerFederationNotifications(ctx, eventBus, notificationService, logger)
+
+		// Job periodico: cada 1h expira las pairing requests cuyo
+		// TTL ha pasado. Sin esto las filas se acumulan eternamente
+		// y el cap defensivo nunca recicla espacio.
+		stopPendingSweeper := federation.StartPendingRequestSweeper(ctx, federationManager, logger, time.Hour)
+		defer stopPendingSweeper()
 	}
+
+	// Job periodico: cada 24h purga notificaciones leidas con > 30d.
+	// Vive fuera del bloque federation porque el inbox es independiente
+	// (otras features podran emitir en el futuro). Las no-leidas se
+	// conservan siempre.
+	stopNotifSweeper := notification.StartReadCleanupSweeper(ctx, notificationRepo, logger, 24*time.Hour, notification.DefaultReadRetention)
+	defer stopNotifSweeper()
 
 	// Retention sweep: prune EPG programmes and federation audit log on
 	// a fixed cadence so append-only tables don't grow forever. Both

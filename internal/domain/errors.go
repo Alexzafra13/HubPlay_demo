@@ -46,6 +46,19 @@ var (
 	ErrInviteInvalidFormat   = errors.New("invite invalid format")
 	ErrServerIdentityMissing = errors.New("server identity not initialised")
 
+	// ErrPairingRequestsDisabled: el admin local ha apagado el toggle
+	// federation.accept_pairing_requests. Los endpoints publicos
+	// devuelven 403 + mensaje generico ("not accepting"); el sender
+	// ve un error claro para que sepa que tiene que probar otro
+	// canal (codigo invite legacy, llamar al admin, etc.).
+	ErrPairingRequestsDisabled = errors.New("pairing requests are disabled")
+
+	// ErrPairingRequestQuotaExceeded: cap defensivo sobre el numero
+	// de incoming pending. Defense-in-depth contra un atacante que
+	// burla el rate-limit (e.g. usando muchos servidores remotos
+	// distintos) y llena la tabla.
+	ErrPairingRequestQuotaExceeded = errors.New("pairing request quota exceeded")
+
 	// Plugin
 	ErrPluginCrashed = errors.New("plugin crashed")
 	ErrPluginTimeout = errors.New("plugin timeout")

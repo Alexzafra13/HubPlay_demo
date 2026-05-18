@@ -460,6 +460,40 @@ func shareToWire(s *federation.LibraryShare) shareWire {
 	}
 }
 
+// ─── Federation settings (toggle anti-spam) ─────────────────────────
+
+// federationSettingsWire es el shape JSON del GET/PUT /admin/peers/settings.
+type federationSettingsWire struct {
+	AcceptPairingRequests bool `json:"accept_pairing_requests"`
+}
+
+// GetFederationSettings devuelve los toggles admin de federation
+// (de momento solo accept_pairing_requests; mas adelante se sumaran
+// otros sin romper el shape - cualquier feature nueva se añade como
+// campo opcional).
+func (h *FederationAdminHandler) GetFederationSettings(w http.ResponseWriter, r *http.Request) {
+	respondJSON(w, http.StatusOK, map[string]any{"data": federationSettingsWire{
+		AcceptPairingRequests: h.mgr.AcceptingPairingRequests(r.Context()),
+	}})
+}
+
+// UpdateFederationSettings persiste el toggle. Idempotente.
+func (h *FederationAdminHandler) UpdateFederationSettings(w http.ResponseWriter, r *http.Request) {
+	var body federationSettingsWire
+	if err := decodeJSON(r, &body); err != nil {
+		respondError(w, r, http.StatusBadRequest, "INVALID_JSON", "invalid or malformed JSON body")
+		return
+	}
+	if err := h.mgr.SetAcceptingPairingRequests(r.Context(), body.AcceptPairingRequests); err != nil {
+		h.logger.Error("federation: update settings", "err", err)
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL", "failed to update settings")
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"data": federationSettingsWire{
+		AcceptPairingRequests: h.mgr.AcceptingPairingRequests(r.Context()),
+	}})
+}
+
 // ─── Pairing requests "Steam-style" (migration 048) ────────────────
 
 // pendingRequestWire es el shape JSON que devolvemos al admin para

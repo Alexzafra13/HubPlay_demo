@@ -153,14 +153,19 @@ export function NotificationsDropdown({
         )}
       </div>
 
-      {notifications.length > 10 && (
+      {notifications.length > 0 && (
         <footer className="px-4 py-2 border-t border-border-subtle text-center">
           <Link
             to="/me/notifications"
             onClick={onClose}
             className="text-xs text-accent hover:underline"
           >
-            {t("notifications.viewAll", { defaultValue: "Ver todas" })}
+            {notifications.length > 10
+              ? t("notifications.viewAllWithCount", {
+                  defaultValue: "Ver todas ({{n}})",
+                  n: notifications.length,
+                })
+              : t("notifications.viewAll", { defaultValue: "Ver todas" })}
           </Link>
         </footer>
       )}

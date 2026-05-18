@@ -65,9 +65,16 @@ export function NotificationsBell() {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        aria-label={t("notifications.title", {
-          defaultValue: "Notificaciones",
-        })}
+        aria-label={
+          unread > 0
+            ? t("notifications.titleWithCount", {
+                defaultValue: "Notificaciones, {{n}} sin leer",
+                n: unread,
+              })
+            : t("notifications.title", {
+                defaultValue: "Notificaciones",
+              })
+        }
         aria-expanded={open}
         aria-haspopup="menu"
         className={[
