@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -427,6 +428,132 @@ func (h *LibraryHandler) LatestItems(w http.ResponseWriter, r *http.Request) {
 			"total":  len(items),
 			"offset": 0,
 			"limit":  limit,
+		},
+	})
+}
+
+// AdminRecentlyAdded — GET /admin/system/recently-added. Lo que el
+// dashboard admin pinta en el strip "Recientemente añadido".
+//
+// Por que un endpoint dedicado en vez de reusar /items/latest:
+//
+//   1. /items/latest sin filtros devuelve episodios sueltos porque
+//      es lo que mas se añade en bibliotecas de series. Un strip
+//      saturado de "Show X · S2E5, Show X · S2E6, Show X · S2E7"
+//      no es lo que el operador quiere ver - quiere ver "Show X
+//      con 3 nuevos episodios" como hace Plex.
+//
+//   2. Hace falta MEZCLAR movies + series ordenadas por recency.
+//      Movies vienen de LatestItems(type=movie); series vienen de
+//      LatestSeriesByActivity (que ya rollupea por serie con un
+//      contador new_episodes_count en una ventana de 14 dias).
+//      Ningun endpoint del dashboard hacia esta mezcla.
+//
+//   3. Hereda el cap por content_rating del caller automatico.
+//
+// Eficiencia: 2 queries SQL en serie (no paralelas porque no merece
+// la complejidad de goroutines + sync para un endpoint admin que
+// se llama una vez por minuto). Cada una es indexed por added_at +
+// type. Merge + sort en memoria sobre N+M items = trivial.
+func (h *LibraryHandler) AdminRecentlyAdded(w http.ResponseWriter, r *http.Request) {
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit <= 0 {
+		limit = 12
+	}
+	if limit > 50 {
+		limit = 50
+	}
+	cap := h.callerCapRating(r.Context())
+
+	// Pedimos a cada query un poco mas que `limit` para tener margen
+	// tras filtrar por content_rating + del merge. 2x es generoso y
+	// barato (las queries siguen siendo indexed).
+	overfetch := limit * 2
+
+	// 1. Movies recientes - solo type=movie cross-library. El cap se
+	//    aplica en SQL para no traer rows que despues descartamos.
+	movies, err := h.lib.LatestItems(r.Context(), "", "movie", overfetch, cap)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+
+	// 2. Series con actividad reciente cross-library. El cap se
+	//    aplica post-fetch porque la query ya tiene JOIN con season
+	//    + episode.
+	seriesRows, err := h.lib.LatestSeriesByActivity(r.Context(), "", overfetch)
+	if err != nil {
+		handleServiceError(w, r, err)
+		return
+	}
+	if cap != "" {
+		filtered := seriesRows[:0]
+		for _, row := range seriesRows {
+			if library.AllowedRating(row.ContentRating, cap) {
+				filtered = append(filtered, row)
+			}
+		}
+		seriesRows = filtered
+	}
+
+	// 3. Merge: unimos ambas listas con su "timestamp efectivo"
+	//    (added_at para movies, latest_activity_at para series),
+	//    ordenamos desc, tomamos top limit. Mantenemos un map
+	//    paralelo de new_episodes_count para que el wire la incluya
+	//    solo en las entries de tipo serie.
+	type merged struct {
+		item             *librarymodel.Item
+		latestAt         time.Time
+		newEpisodesCount int
+	}
+	all := make([]merged, 0, len(movies)+len(seriesRows))
+	for _, m := range movies {
+		all = append(all, merged{item: m, latestAt: m.AddedAt})
+	}
+	for _, s := range seriesRows {
+		item := s.Item
+		latest := s.LatestActivityAt
+		if latest.IsZero() {
+			latest = s.AddedAt
+		}
+		all = append(all, merged{
+			item:             &item,
+			latestAt:         latest,
+			newEpisodesCount: s.NewEpisodesCount,
+		})
+	}
+	sort.Slice(all, func(i, j int) bool {
+		return all[i].latestAt.After(all[j].latestAt)
+	})
+	if len(all) > limit {
+		all = all[:limit]
+	}
+
+	// 4. Enrich (poster, backdrop, overview...) sobre los items
+	//    finales en una sola pasada — h.enrichItemSummaries hace
+	//    una query JOIN para imagenes + metadatos.
+	items := make([]*librarymodel.Item, len(all))
+	for i, m := range all {
+		items[i] = m.item
+	}
+	data := h.enrichItemSummaries(r, items)
+	// 5. Splice new_episodes_count + latest_activity_at de vuelta a
+	//    cada row por posicion (mismo patron que LatestItems lo
+	//    hace para el caso series-by-library).
+	for i, m := range all {
+		if m.newEpisodesCount > 0 {
+			data[i]["new_episodes_count"] = m.newEpisodesCount
+		}
+		if !m.latestAt.IsZero() {
+			data[i]["latest_activity_at"] = m.latestAt.UTC().Format(time.RFC3339)
+		}
+	}
+
+	respondJSON(w, http.StatusOK, map[string]any{
+		"data": map[string]any{
+			"items": data,
+			"total": len(all),
+			"limit": limit,
 		},
 	})
 }

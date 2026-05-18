@@ -1652,6 +1652,28 @@ export interface AdminStorageDisksResponse {
   disks: AdminDisk[];
 }
 
+// AdminRecentlyAddedItem — entrada del strip "Recientemente añadido"
+// del dashboard. Es un MediaItem (con poster_url, backdrop_url,
+// overview, etc.) MÁS dos campos opcionales:
+//
+//   - latest_activity_at: timestamp efectivo de "actividad" (added_at
+//     para movies; max(added_at) de descendants para series).
+//   - new_episodes_count: solo para series con actividad en los
+//     últimos 14 días. La UI muestra "+N nuevos" en el card si > 0.
+//
+// El backend agrupa episodes a su serie padre - este endpoint nunca
+// devuelve type=episode, solo movie + series.
+export interface AdminRecentlyAddedItem extends MediaItem {
+  latest_activity_at?: string;
+  new_episodes_count?: number;
+}
+
+export interface AdminRecentlyAddedResponse {
+  items: AdminRecentlyAddedItem[];
+  total: number;
+  limit: number;
+}
+
 // ─── Notifications ─────────────────────────────────────────────────────────
 
 // NotificationKind: identificador del tipo de notificacion. El frontend

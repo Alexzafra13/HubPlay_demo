@@ -83,6 +83,8 @@ export const queryKeys = {
   homeLiveNow: ["home", "live-now"] as const,
   systemStats: ["system-stats"] as const,
   systemStorageDisks: ["system-storage", "disks"] as const,
+  systemRecentlyAdded: (limit: number) =>
+    ["system-recently-added", limit] as const,
   adminStreamSessions: ["admin-stream-sessions"] as const,
   systemSettings: ["system-settings"] as const,
   authKeys: ["auth-keys"] as const,

@@ -27,14 +27,18 @@ import {
   TrendingUp,
 } from "lucide-react";
 import {
+  useAdminRecentlyAdded,
   useAdminStorageDisks,
   useAdminStreamActivity,
   useAdminStreamSessions,
   useAdminTopItems,
-  useLatestItems,
   useSystemStats,
 } from "@/api/hooks";
-import type { AdminDisk, MediaItem, SystemStats } from "@/api/types";
+import type {
+  AdminDisk,
+  AdminRecentlyAddedItem,
+  SystemStats,
+} from "@/api/types";
 import { Spinner, EmptyState } from "@/components/common";
 import { SectionHeader } from "@/components/admin/SectionHeader";
 import { AreaTimeline } from "@/components/admin/dashboard/AreaTimeline";
@@ -110,12 +114,14 @@ export default function DashboardAdmin() {
   // El hook ya existe y lo usa Home; React Query dedupe por queryKey
   // asi que no hay double-fetch si el admin tambien tiene Home en
   // cache.
-  const { data: latestRaw } = useLatestItems();
-  // 12 posters caben en una fila en desktop sin saturar. El backend
-  // devuelve default ~20; slice cliente-side mantiene la opcion
-  // abierta de mostrar mas en una pagina futura "ver todos los
-  // ultimos" sin tocar el hook.
-  const latestItems = (latestRaw ?? []).slice(0, 12);
+  // "Recientemente añadido" - endpoint dedicado admin que mezcla
+  // movies + series rolled-up por actividad. NO usar useLatestItems
+  // (devuelve episodios sueltos saturando el strip). El backend
+  // agrupa al nivel correcto: cada card es una pelicula o una serie,
+  // y las series con actividad en 14d llevan new_episodes_count >0
+  // que pintamos como badge "+N nuevos".
+  const { data: recentlyAdded } = useAdminRecentlyAdded(12);
+  const latestItems = recentlyAdded?.items ?? [];
 
   if (isLoading) {
     return (
@@ -381,19 +387,17 @@ function TopItemsPanel({ items, t }: TopItemsPanelProps) {
 // con la mitad de pixels. Si el operador quiere ver mas, hay un link
 // "ver biblioteca completa" implicito al hacer click en cualquier
 // item.
-function RecentlyAddedStrip({ items }: { items: MediaItem[] }) {
+function RecentlyAddedStrip({ items }: { items: AdminRecentlyAddedItem[] }) {
   const { t } = useTranslation();
   return (
     <div className="-mx-1 overflow-x-auto pb-1">
       <ul className="flex gap-3 px-1">
         {items.map((it) => {
           const href = recentlyAddedHref(it);
+          const newCount = it.new_episodes_count ?? 0;
           return (
             <li key={it.id} className="flex-none w-28 sm:w-32">
-              <Link
-                to={href}
-                className="group flex flex-col gap-1.5"
-              >
+              <Link to={href} className="group flex flex-col gap-1.5">
                 <div className="relative aspect-[2/3] overflow-hidden rounded-md border border-border-subtle bg-bg-elevated">
                   {it.poster_url ? (
                     <img
@@ -407,6 +411,22 @@ function RecentlyAddedStrip({ items }: { items: MediaItem[] }) {
                       <Film className="h-6 w-6" />
                     </div>
                   )}
+                  {/* Badge "+N nuevos" en la esquina sup-der del
+                      poster cuando una serie ha recibido capitulos
+                      en los ultimos 14 dias. Plex-feel literal -
+                      el operador ve al instante donde hay novedad
+                      sin tener que abrir la serie. */}
+                  {newCount > 0 && (
+                    <span
+                      className="absolute top-1.5 right-1.5 rounded-full bg-accent px-1.5 py-0.5 text-[9px] font-bold leading-none text-bg-base shadow-md"
+                      title={t("admin.summary.newEpisodesTooltip", {
+                        defaultValue: "{{n}} episodios nuevos en 14 días",
+                        n: newCount,
+                      })}
+                    >
+                      +{newCount}
+                    </span>
+                  )}
                 </div>
                 <p
                   className="truncate text-xs font-medium text-text-primary group-hover:text-accent transition-colors"
@@ -414,7 +434,18 @@ function RecentlyAddedStrip({ items }: { items: MediaItem[] }) {
                 >
                   {it.title}
                 </p>
-                {it.year ? (
+                {/* Subtitle: si la serie tiene actividad, contamos
+                    los capitulos nuevos en texto. Si es una pelicula
+                    o serie sin actividad reciente, mostramos
+                    año / tipo como antes. */}
+                {newCount > 0 ? (
+                  <p className="text-[10px] text-accent">
+                    {t("admin.summary.newEpisodes", {
+                      defaultValue: "{{n}} episodios nuevos",
+                      n: newCount,
+                    })}
+                  </p>
+                ) : it.year ? (
                   <p className="text-[10px] text-text-muted tabular-nums">
                     {it.year}
                   </p>
@@ -432,17 +463,11 @@ function RecentlyAddedStrip({ items }: { items: MediaItem[] }) {
   );
 }
 
-function recentlyAddedHref(it: MediaItem): string {
-  if (it.type === "series" || it.type === "season") {
-    // Para temporadas, queremos llevar al detalle de la serie padre.
-    // El backend devuelve parent_id solo a veces; si no tenemos
-    // contexto suficiente, caemos al series id directo - puede
-    // ser el del item o el de su parent.
-    return `/series/${it.parent_id || it.id}`;
-  }
-  if (it.type === "episode") {
-    return `/items/${it.id}`;
-  }
+function recentlyAddedHref(it: AdminRecentlyAddedItem): string {
+  // El endpoint /admin/system/recently-added solo devuelve types
+  // "movie" o "series" (los episodios estan rolled-up a su serie
+  // padre). Routeo simple:
+  if (it.type === "series") return `/series/${it.id}`;
   return `/movies/${it.id}`;
 }
 

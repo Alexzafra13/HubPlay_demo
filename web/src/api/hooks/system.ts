@@ -18,6 +18,7 @@ import type {
   AdminDatabaseStatus,
   AdminDatabaseTestRequest,
   AdminDatabaseTestResponse,
+  AdminRecentlyAddedResponse,
   AdminStorageDisksResponse,
   AdminStreamActivityResponse,
   AdminStreamSession,
@@ -59,6 +60,23 @@ export function useAdminStorageDisks(
   return useQuery<AdminStorageDisksResponse>({
     queryKey: queryKeys.systemStorageDisks,
     queryFn: () => api.getAdminStorageDisks(),
+    staleTime: 60_000,
+    ...options,
+  });
+}
+
+// useAdminRecentlyAdded — strip del dashboard. NO usar useLatestItems
+// que devuelve episodios sueltos saturando el strip; este hook llama
+// al endpoint /admin/system/recently-added que rolea episodios a su
+// serie padre con un contador "+N nuevos episodios". Mezcla movies +
+// series ordenados por actividad reciente.
+export function useAdminRecentlyAdded(
+  limit = 12,
+  options?: Partial<UseQueryOptions<AdminRecentlyAddedResponse>>,
+) {
+  return useQuery<AdminRecentlyAddedResponse>({
+    queryKey: queryKeys.systemRecentlyAdded(limit),
+    queryFn: () => api.getAdminRecentlyAdded(limit),
     staleTime: 60_000,
     ...options,
   });
