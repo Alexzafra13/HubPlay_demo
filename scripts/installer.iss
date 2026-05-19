@@ -26,13 +26,18 @@
 ; el operador no ve consola; abre el icono PWA del escritorio y entra
 ; al panel.
 
-#ifndef AppVersion
+; Valores del build via env vars (las /D dan problemas con el quoting
+; de la action). Si no están, fallback dev.
+#define AppVersion GetEnv("HUBPLAY_APP_VERSION")
+#if AppVersion == ""
   #define AppVersion "dev"
 #endif
-#ifndef SourceDir
+#define SourceDir GetEnv("HUBPLAY_SOURCE_DIR")
+#if SourceDir == ""
   #define SourceDir "..\stage\hubplay-dev-windows-amd64"
 #endif
-#ifndef OutputDir
+#define OutputDir GetEnv("HUBPLAY_OUTPUT_DIR")
+#if OutputDir == ""
   #define OutputDir "..\dist"
 #endif
 

@@ -296,23 +296,14 @@ jobs:
           cp nssm-2.24/win64/nssm.exe scripts/vendor/nssm.exe
 
       - name: Compile installer with Inno Setup
-        # Action mantenida que wraps ISCC.exe; el runner windows-latest
-        # ya viene con Inno Setup 6 preinstalado, así que esto sólo
-        # resuelve la sintaxis de paths y los /D defines.
-        #
-        # IMPORTANTE: NO usar comillas dobles en /D — la action las
-        # propaga literales al preprocessor y {#AppVersion} acaba
-        # siendo "v0.x.y" con comillas, que rompen OutputBaseFilename
-        # (las " son chars inválidos en filenames Windows).
-        # github.workspace en runners Windows no tiene espacios
-        # (D:\a\repo\repo) → no necesitamos quotes para los paths.
+        # El .iss lee las vars vía GetEnv (las /D dan problemas de quoting).
         uses: Minionguyjpro/Inno-Setup-Action@v1.2.8
+        env:
+          HUBPLAY_APP_VERSION: ${{ steps.meta.outputs.version }}
+          HUBPLAY_SOURCE_DIR: ${{ github.workspace }}\stage\source
+          HUBPLAY_OUTPUT_DIR: ${{ github.workspace }}\dist
         with:
           path: scripts/installer.iss
-          options: >-
-            /DAppVersion=${{ steps.meta.outputs.version }}
-            /DSourceDir=${{ github.workspace }}\stage\source
-            /DOutputDir=${{ github.workspace }}\dist
 
       - name: Hash the installer
         shell: bash
