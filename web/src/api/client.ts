@@ -815,6 +815,57 @@ export class ApiClient {
     return this.request("PATCH", `/items/${id}/metadata`, { body: patch });
   }
 
+  // ─── Collection image overrides (admin) ──────────────────
+  //
+  // El backend acepta type ∈ {"poster", "backdrop"}. Cada operación
+  // limpia automáticamente el otro modo (url vs file) si lo había.
+
+  async setCollectionImageURL(collectionId: string, type: "poster" | "backdrop", url: string): Promise<void> {
+    await this.request<{ collection_id: string; image_type: string; url: string }>(
+      "PUT",
+      `/collections/${encodeURIComponent(collectionId)}/images/${type}`,
+      { body: { url } },
+    );
+  }
+
+  async uploadCollectionImage(collectionId: string, type: "poster" | "backdrop", file: File): Promise<void> {
+    const fd = new FormData();
+    fd.append("file", file);
+    await this.request<{ collection_id: string; image_type: string; file: string }>(
+      "POST",
+      `/collections/${encodeURIComponent(collectionId)}/images/${type}/upload`,
+      { body: fd },
+    );
+  }
+
+  async clearCollectionImage(collectionId: string, type: "poster" | "backdrop"): Promise<void> {
+    await this.request<void>(
+      "DELETE",
+      `/collections/${encodeURIComponent(collectionId)}/images/${type}`,
+    );
+  }
+
+  // Admin: lista las imágenes que TMDb tiene para esta saga, filtradas
+  // por tipo. El modal de edición las enseña como cuadrícula y el
+  // admin elige una con un click — patrón "Browse images" de Jellyfin.
+  async getAvailableCollectionImages(
+    collectionId: string,
+    type: "poster" | "backdrop",
+  ): Promise<{ url: string; width: number; height: number; language: string; score: number; source: string }[]> {
+    return this.request(
+      "GET",
+      `/collections/${encodeURIComponent(collectionId)}/images/${type}/available`,
+    );
+  }
+
+  // Admin: re-corre el enrich del scanner sobre un item concreto.
+  // Sustituye el "Actualizar metadatos" del kebab que antes sólo
+  // invalidaba caché del cliente. Respeta el lock — locked items
+  // devuelven 200 sin tocar nada.
+  async refreshItemMetadata(id: string): Promise<{ item_id: string; refreshed: boolean }> {
+    return this.request("POST", `/items/${id}/refresh-metadata`);
+  }
+
   // Admin: toggle del candado de metadatos sin tocar el contenido.
   async setItemMetadataLock(
     id: string,

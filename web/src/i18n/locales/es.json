@@ -423,9 +423,10 @@
     "notFoundTitle": "Colección no encontrada",
     "notFoundDescription": "Esta saga no existe o no tiene contenido en tu biblioteca.",
     "noItems": "Sin películas de esta saga en tu biblioteca.",
-    "titlesCount_one": "{{count}} película en tu biblioteca",
-    "titlesCount_other": "{{count}} películas en tu biblioteca",
-    "partOf": "Parte de"
+    "titlesCount_one": "{{count}} película",
+    "titlesCount_other": "{{count}} películas",
+    "partOf": "Parte de",
+    "kind": "Saga"
   },
   "collections": {
     "title": "Colecciones",
@@ -1555,6 +1556,25 @@
     "lock": "Bloquear metadatos",
     "unlock": "Desbloquear metadatos",
     "errorGeneric": "No se ha podido guardar. Inténtalo de nuevo."
+  },
+  "collectionImage": {
+    "menuLabel": "Cambiar imágenes",
+    "title": "Imágenes de la colección",
+    "tabPoster": "Póster",
+    "tabBackdrop": "Fondo",
+    "urlLabel": "URL externa",
+    "applyURL": "Aplicar URL",
+    "uploadLabel": "Subir imagen (PNG, JPG, WebP — máx 10MB)",
+    "chooseFile": "Elegir archivo",
+    "reset": "Restaurar imagen de TMDb",
+    "done": "Hecho",
+    "or": "O",
+    "noImage": "Sin imagen (TMDb no provee esta para esta colección).",
+    "errorGeneric": "No se ha podido aplicar el cambio. Comprueba que el archivo o la URL son válidos.",
+    "availableLabel": "Imágenes disponibles en TMDb",
+    "availableEmpty": "TMDb no tiene imágenes alternativas para esta colección.",
+    "availableError": "No se ha podido contactar con TMDb. Reintenta más tarde o usa URL/Subir.",
+    "orManual": "O manualmente"
   },
   "channelLogo": {
     "title": "Logo del canal",

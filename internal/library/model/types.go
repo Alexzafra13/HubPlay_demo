@@ -290,6 +290,24 @@ type CollectionListEntry struct {
 	ItemCount   int64
 }
 
+// CollectionImageOverride es el override de una imagen (poster o
+// backdrop) de una colección/saga TMDb. URL o archivo, nunca ambos
+// (CHECK en la migration enforca). Clave compuesta (collection_id,
+// image_type) — una saga puede tener override sólo de uno o de ambos.
+//
+// ImageType acepta "poster" | "backdrop".
+type CollectionImageOverride struct {
+	CollectionID string
+	ImageType    string
+	// URL externa absoluta. Vacía cuando el override es un archivo subido.
+	URL string
+	// Basename del archivo bajo <imageDir>/collection-images/. Vacío
+	// cuando el override es URL externa.
+	File      string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
 // CollectionItem es el "card" de un item dentro de la página de una
 // collection.
 type CollectionItem struct {

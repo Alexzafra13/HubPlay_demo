@@ -268,6 +268,42 @@ func (m *Manager) FetchImages(ctx context.Context, externalIDs map[string]string
 	return allImages, nil
 }
 
+// FetchCollectionImages obtiene los pósters + backdrops disponibles
+// para una colección/saga TMDb. Sólo consulta a TMDb (otros providers
+// como Fanart no soportan colecciones por id propio). Devuelve lista
+// vacía sin error cuando no hay TMDb registrado — el panel del frontend
+// muestra "sin imágenes disponibles" en ese caso.
+func (m *Manager) FetchCollectionImages(ctx context.Context, tmdbCollectionID string) ([]ImageResult, error) {
+	m.mu.RLock()
+	providers := m.images
+	m.mu.RUnlock()
+	for _, p := range providers {
+		if p.Name() != "tmdb" {
+			continue
+		}
+		tmdb, ok := p.(interface {
+			GetCollectionImages(ctx context.Context, tmdbCollectionID string) ([]ImageResult, error)
+		})
+		if !ok {
+			continue
+		}
+		images, err := tmdb.GetCollectionImages(ctx, tmdbCollectionID)
+		if err != nil {
+			return nil, err
+		}
+		for i := range images {
+			if images[i].Source == "" {
+				images[i].Source = p.Name()
+			}
+		}
+		sort.Slice(images, func(i, j int) bool {
+			return images[i].Score > images[j].Score
+		})
+		return images, nil
+	}
+	return nil, nil
+}
+
 // DownloadSubtitle locates the named provider and downloads the
 // subtitle bytes for the given file ID. The bytes returned are in
 // whatever format the provider serves (typically SRT, sometimes ASS) —

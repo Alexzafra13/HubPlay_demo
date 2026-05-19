@@ -69,19 +69,15 @@ const PosterCard: FC<PosterCardProps> = memo(({ item, progress, href, cornerBadg
       className="group flex flex-col outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg-card rounded-[--radius-lg]"
     >
       {/* Poster image stack:
-          1. The wrapper is tinted with the precomputed dominant colour
-             (server-side at ingest time) so the card never flashes
-             grey before anything paints.
-          2. If the row carries `poster_blurhash`, render a tiny canvas
-             on top of the tint that decodes the BlurHash to a 32×32
-             low-frequency preview — readable enough to recognise the
-             poster before the real <img> decodes. Compounded across a
-             30-card grid this is a perceptible LCP win.
-          3. The real <img> paints over both once it finishes decoding,
-             at which point we fade the BlurHash canvas out instead of
-             cutting it abruptly. */}
+          1. Wrapper tinted con el dominant colour pre-calculado.
+          2. BlurHash placeholder mientras el <img> decodifica.
+          3. Real <img>. El wrapper escala + el ring cambia de border
+             a accent en hover — mismo "feel" que las cards de
+             /collections, que el usuario notó como más vivo que
+             "sólo agrandar la imagen". El ring es lo que hace que
+             la card parezca responder en su totalidad. */}
       <div
-        className="relative aspect-[2/3] overflow-hidden rounded-[--radius-lg] bg-bg-elevated transition-transform duration-300 group-hover:scale-[1.03]"
+        className="relative aspect-[2/3] overflow-hidden rounded-[--radius-lg] bg-bg-elevated ring-1 ring-border/40 transition-all duration-300 group-hover:scale-[1.03] group-hover:ring-accent/40"
         style={item.poster_color ? { backgroundColor: item.poster_color } : undefined}
       >
         {item.poster_blurhash && !imageLoaded && (

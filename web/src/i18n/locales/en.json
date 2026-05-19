@@ -423,9 +423,10 @@
     "notFoundTitle": "Collection not found",
     "notFoundDescription": "This saga doesn't exist or has no content in your library.",
     "noItems": "No movies from this saga in your library.",
-    "titlesCount_one": "{{count}} movie in your library",
-    "titlesCount_other": "{{count}} movies in your library",
-    "partOf": "Part of"
+    "titlesCount_one": "{{count}} movie",
+    "titlesCount_other": "{{count}} movies",
+    "partOf": "Part of",
+    "kind": "Saga"
   },
   "collections": {
     "title": "Collections",
@@ -1555,6 +1556,25 @@
     "lock": "Lock metadata",
     "unlock": "Unlock metadata",
     "errorGeneric": "Could not save. Please try again."
+  },
+  "collectionImage": {
+    "menuLabel": "Change images",
+    "title": "Collection images",
+    "tabPoster": "Poster",
+    "tabBackdrop": "Backdrop",
+    "urlLabel": "External URL",
+    "applyURL": "Apply URL",
+    "uploadLabel": "Upload image (PNG, JPG, WebP — max 10MB)",
+    "chooseFile": "Choose file",
+    "reset": "Restore TMDb image",
+    "done": "Done",
+    "or": "OR",
+    "noImage": "No image (TMDb doesn't provide this for this collection).",
+    "errorGeneric": "Could not apply the change. Make sure the file or URL is valid.",
+    "availableLabel": "Available on TMDb",
+    "availableEmpty": "TMDb has no alternative images for this collection.",
+    "availableError": "Could not contact TMDb. Retry later or use URL/Upload.",
+    "orManual": "Or manually"
   },
   "channelLogo": {
     "title": "Channel logo",

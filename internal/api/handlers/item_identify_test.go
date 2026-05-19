@@ -61,6 +61,10 @@ func (f *fakeIdentifier) IsMetadataLocked(_ context.Context, _ string) (bool, er
 	return false, nil
 }
 
+func (f *fakeIdentifier) RefreshItemMetadata(_ context.Context, _ string) error {
+	return nil
+}
+
 // identifyEnv monta un router mínimo con sólo los dos endpoints de
 // identify. Reusa el ItemHandler real porque la única dep que importa
 // para estos tests es `identifier`; el resto se pasa nil.

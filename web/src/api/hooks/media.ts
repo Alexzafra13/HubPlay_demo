@@ -216,6 +216,24 @@ export function useUpdateItemMetadata(itemId: string) {
   });
 }
 
+// Re-scan del enrich sobre un item. El backend hace el work pesado
+// (TMDb Search→Fetch→apply, link a estudio/saga, descarga de
+// imágenes). Tras éxito invalidamos los listados para que las
+// thumbnails refresquen sin recargar.
+export function useRefreshItemMetadata(itemId: string) {
+  const queryClient = useQueryClient();
+  return useMutation<{ item_id: string; refreshed: boolean }, Error, void>({
+    mutationFn: () => api.refreshItemMetadata(itemId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.item(itemId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.itemImages(itemId) });
+      queryClient.invalidateQueries({ queryKey: ["items"] });
+      queryClient.invalidateQueries({ queryKey: ["studios"] });
+      queryClient.invalidateQueries({ queryKey: ["collections"] });
+    },
+  });
+}
+
 // Toggle del lock sin tocar el contenido — el admin "suelta" un item
 // identificado a mano para que vuelva a recibir refreshes automáticos.
 export function useSetItemMetadataLock(itemId: string) {
@@ -425,5 +443,71 @@ export function useScanLibrary() {
       queryClient.invalidateQueries({ queryKey: queryKeys.library(id) });
       queryClient.invalidateQueries({ queryKey: queryKeys.libraries });
     },
+  });
+}
+
+// ── Collection image overrides (admin) ───────────────────────────
+// Invalidan tanto el collection(id) (el hero del CollectionDetail)
+// como ["collections"] (el listado de cards), porque el hero del
+// listado también enseña poster_url de cada colección.
+
+export function useSetCollectionImageURL(collectionId: string) {
+  const qc = useQueryClient();
+  return useMutation<void, Error, { type: "poster" | "backdrop"; url: string }>({
+    mutationFn: ({ type, url }) => api.setCollectionImageURL(collectionId, type, url),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.collection(collectionId) });
+      qc.invalidateQueries({ queryKey: queryKeys.collections });
+    },
+  });
+}
+
+export function useUploadCollectionImage(collectionId: string) {
+  const qc = useQueryClient();
+  return useMutation<void, Error, { type: "poster" | "backdrop"; file: File }>({
+    mutationFn: ({ type, file }) => api.uploadCollectionImage(collectionId, type, file),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.collection(collectionId) });
+      qc.invalidateQueries({ queryKey: queryKeys.collections });
+    },
+  });
+}
+
+export function useClearCollectionImage(collectionId: string) {
+  const qc = useQueryClient();
+  return useMutation<void, Error, "poster" | "backdrop">({
+    mutationFn: (type) => api.clearCollectionImage(collectionId, type),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.collection(collectionId) });
+      qc.invalidateQueries({ queryKey: queryKeys.collections });
+    },
+  });
+}
+
+// Browse de imágenes alternativas que TMDb tiene para la colección.
+// Devuelve [] cuando no hay TMDb configurado (503 silencioso) o cuando
+// la colección no tiene tmdb_id (colecciones legacy).
+export interface AvailableCollectionImage {
+  url: string;
+  width: number;
+  height: number;
+  language: string;
+  score: number;
+  source: string;
+}
+export function useAvailableCollectionImages(
+  collectionId: string,
+  type: "poster" | "backdrop",
+  options: { enabled?: boolean } = {},
+) {
+  return useQuery<AvailableCollectionImage[]>({
+    queryKey: ["collection", collectionId, "images", type, "available"] as const,
+    queryFn: () => api.getAvailableCollectionImages(collectionId, type),
+    enabled: !!collectionId && (options.enabled ?? true),
+    // El catálogo de imágenes TMDb cambia poco. 10 min cubre una
+    // sesión de navegación sin re-fetchear cada vez que el operador
+    // cambia entre tabs poster/backdrop.
+    staleTime: 10 * 60_000,
+    retry: false,
   });
 }

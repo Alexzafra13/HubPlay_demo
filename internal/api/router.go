@@ -53,6 +53,11 @@ type Dependencies struct {
 	People          *db.PeopleRepository
 	Studios        *db.StudioRepository
 	Collections    *db.CollectionRepository
+	// CollectionImageOverrides es opcional. nil deshabilita los
+	// endpoints de edición de carátula/fondo de colección con 503;
+	// el listado y el detail siguen funcionando con la imagen TMDb
+	// original.
+	CollectionImageOverrides *db.CollectionImageOverrideRepository
 	UserPreferences *db.UserPreferenceRepository
 	Home            *db.HomeRepository
 	Providers      *provider.Manager
@@ -1054,6 +1059,12 @@ func NewRouter(deps Dependencies) http.Handler {
 						// "Refresh metadata" no pise la edición.
 						r.Patch("/metadata", itemHandler.UpdateItemMetadata)
 						r.Put("/metadata/lock", itemHandler.SetMetadataLock)
+						// Re-corre el enrich del scanner sobre este
+						// item (mismo flujo que el library refresh,
+						// pero para un solo item). Lo dispara el
+						// kebab "Actualizar metadatos" del poster /
+						// del detalle. Respeta el lock.
+						r.Post("/refresh-metadata", itemHandler.RefreshItemMetadata)
 					})
 				})
 			}
@@ -1108,9 +1119,28 @@ func NewRouter(deps Dependencies) http.Handler {
 				// release order under a hero pulled from the
 				// collection's own poster + backdrop.
 				if deps.Collections != nil {
-					collectionHandler := handlers.NewCollectionHandler(deps.Collections, deps.Logger)
+					var collectionOverrides handlers.CollectionImageOverrideRepo
+					if deps.CollectionImageOverrides != nil {
+						collectionOverrides = deps.CollectionImageOverrides
+					}
+					var collectionImages handlers.CollectionImageProvider
+					if deps.Providers != nil {
+						collectionImages = deps.Providers
+					}
+					collectionHandler := handlers.NewCollectionHandler(deps.Collections, collectionOverrides, collectionImages, fedImageDir, deps.Logger)
 					r.Get("/collections", collectionHandler.List)
 					r.Get("/collections/{id}", collectionHandler.Get)
+					// Cualquier usuario autenticado puede GET el archivo
+					// (img-src 'self' del CSP del proyecto lo requiere).
+					r.Get("/collections/{id}/images/{type}/file", collectionHandler.ServeCollectionImage)
+					// Admin: gestión del override.
+					r.Group(func(r chi.Router) {
+						r.Use(auth.RequireAdmin)
+						r.Get("/collections/{id}/images/{type}/available", collectionHandler.AvailableCollectionImages)
+						r.Put("/collections/{id}/images/{type}", collectionHandler.SetCollectionImage)
+						r.Post("/collections/{id}/images/{type}/upload", collectionHandler.UploadCollectionImage)
+						r.Delete("/collections/{id}/images/{type}", collectionHandler.ClearCollectionImage)
+					})
 				}
 
 				// Admin: batch refresh images for a library

@@ -533,6 +533,61 @@ func (t *TMDbProvider) GetImages(ctx context.Context, externalIDs map[string]str
 	return images, nil
 }
 
+// GetCollectionImages devuelve TODAS las imágenes (posters + backdrops)
+// que TMDb tiene para una colección/saga (Star Wars, MCU, etc.). El
+// endpoint `/collection/{id}/images` devuelve dos arrays separados;
+// los aplanamos a una sola lista con `Type` ∈ {"primary","backdrop"}
+// para que el handler los pueda filtrar/agrupar sin lógica adicional.
+//
+// Las colecciones NO tienen logos en TMDb (al contrario que películas
+// y series). Si en el futuro las llegan a tener, basta con añadir un
+// loop más aquí.
+//
+// Aplicamos el mismo langScore que GetImages para que el idioma del
+// usuario aparezca primero — los posters de una saga en castellano
+// son distintos de los en inglés, y el operador casi siempre quiere
+// el que coincide con la región del catálogo.
+func (t *TMDbProvider) GetCollectionImages(ctx context.Context, tmdbCollectionID string) ([]ImageResult, error) {
+	if tmdbCollectionID == "" {
+		return nil, nil
+	}
+
+	langCode := strings.Split(t.lang, "-")[0]
+	params := url.Values{
+		"include_image_language": {langCode + ",en,null"},
+	}
+
+	var raw tmdbImagesResponse
+	if err := t.get(ctx, fmt.Sprintf("/collection/%s/images", tmdbCollectionID), params, &raw); err != nil {
+		return nil, err
+	}
+
+	var images []ImageResult
+	for _, img := range raw.Posters {
+		images = append(images, ImageResult{
+			URL:      tmdbImageURL + "original" + img.FilePath,
+			Type:     "primary",
+			Language: img.Language,
+			Width:    img.Width,
+			Height:   img.Height,
+			Score:    t.langScore(img, langCode),
+			Source:   "tmdb",
+		})
+	}
+	for _, img := range raw.Backdrops {
+		images = append(images, ImageResult{
+			URL:      tmdbImageURL + "original" + img.FilePath,
+			Type:     "backdrop",
+			Language: img.Language,
+			Width:    img.Width,
+			Height:   img.Height,
+			Score:    t.langScore(img, langCode),
+			Source:   "tmdb",
+		})
+	}
+	return images, nil
+}
+
 // langScore boosts images that match the preferred language so they sort first.
 // Preferred language → +1000, language-neutral (no text) → +500, English fallback → +100.
 func (t *TMDbProvider) langScore(img tmdbImage, langCode string) float64 {

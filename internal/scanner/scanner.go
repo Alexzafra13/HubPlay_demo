@@ -1045,6 +1045,54 @@ func (s *Scanner) UpdateItemMetadata(ctx context.Context, itemID string, patch I
 	return item, nil
 }
 
+// RefreshItemMetadata re-corre el flujo de enrichMetadata sobre un
+// item concreto. Se usa desde el kebab "Actualizar metadatos" del
+// detalle / posters: el operador acaba de arreglar metadata source
+// (e.g. configuró TMDb api_key, o el fix del año-mismatch del scanner
+// llegó después del scan inicial) y quiere que el item se re-empareje
+// SIN tener que dispararse un full library refresh.
+//
+// Respeta el lock — locked items no se tocan, igual que el resto del
+// scanner. La diferencia frente a IdentifyAndApply es que aquí NO se
+// fuerza un externalID; el scanner decide vía Search→Fetch como en el
+// scan normal. Para imponer un match concreto, IdentifyAndApply sigue
+// siendo el camino.
+func (s *Scanner) RefreshItemMetadata(ctx context.Context, itemID string) error {
+	if s.providers == nil {
+		return fmt.Errorf("scanner: no metadata providers configured")
+	}
+	item, err := s.items.GetByID(ctx, itemID)
+	if err != nil {
+		return fmt.Errorf("scanner: load item %s: %w", itemID, err)
+	}
+	if s.metaLocks != nil {
+		if locked, lErr := s.metaLocks.IsLocked(ctx, itemID); lErr == nil && locked {
+			// Locked: no-op silencioso. El kebab tiene un toggle de
+			// lock distinto si el operador quiere soltarlo.
+			return nil
+		}
+	}
+	// Limpia el estado previo (igual que RefreshMetadata global) — un
+	// "Actualizar metadatos" implica que lo que había podía estar
+	// estale; mejor partir limpio que mergear incoherencias.
+	_ = s.images.DeleteByItem(ctx, item.ID)
+	_ = s.metadata.Delete(ctx, item.ID)
+
+	switch item.Type {
+	case "episode":
+		if item.SeasonNumber != nil && item.EpisodeNumber != nil && item.ParentID != "" {
+			s.enrichEpisode(ctx, item, item.ParentID, *item.SeasonNumber, *item.EpisodeNumber)
+		}
+	case "season":
+		if item.SeasonNumber != nil && item.ParentID != "" {
+			s.enrichSeason(ctx, item, item.ParentID, *item.SeasonNumber)
+		}
+	default:
+		s.enrichMetadata(ctx, item)
+	}
+	return nil
+}
+
 // SetMetadataLock cambia el estado del lock de un item directamente,
 // sin pasar por un identify. Lo usan el editor manual de metadatos
 // (para que la edición sobreviva refreshes) y el toggle del kebab

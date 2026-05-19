@@ -38,6 +38,7 @@ type Repositories struct {
 	Collections        *CollectionRepository
 	EpisodeSegments    *EpisodeSegmentRepository
 	ItemMetadataLocks  *ItemMetadataLockRepository
+	CollectionImageOverrides *CollectionImageOverrideRepository
 }
 
 // NewRepositories creates all repositories from a database connection.
@@ -83,5 +84,6 @@ func NewRepositories(driver string, database *sql.DB) *Repositories {
 		Collections:        NewCollectionRepository(driver, database),
 		EpisodeSegments:    NewEpisodeSegmentRepository(driver, database),
 		ItemMetadataLocks:  NewItemMetadataLockRepository(driver, database),
+		CollectionImageOverrides: NewCollectionImageOverrideRepository(driver, database),
 	}
 }
