@@ -581,6 +581,8 @@ func run(configPath string) error {
 		RestartRequester: restartRequester,
 		Uploads:          uploadsHandler,
 		UploadsAudit:     repos.UploadAudit,
+		Permissions:      auth.NewPermissionChecker(repos.Users),
+		UserRepo:         repos.Users,
 	})
 
 	server := &http.Server{

@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"hubplay/internal/auth"
+	authmodel "hubplay/internal/auth/model"
 	"hubplay/internal/library"
 	"hubplay/internal/user"
 )
@@ -60,6 +61,21 @@ func (h *UserHandler) Me(w http.ResponseWriter, r *http.Request) {
 			"parent_user_id":           u.ParentUserID,
 			"avatar_color":             u.AvatarColor,
 			"avatar_image_url":         avatarPublicURL(u.ID, u.AvatarPath),
+			// Permission flags (migración 055). El frontend los usa
+			// para mostrar/esconder pestañas del panel admin sin
+			// tener que pedir /users/{id} para sí mismo. Owner los
+			// recibe todos como true vía User.Can(), pero también
+			// exponemos is_owner para que la UI marque la cuenta
+			// con un badge "Owner".
+			"is_owner":             u.IsOwner,
+			"can_manage_admins":    u.Can(authmodel.PermManageAdmins),
+			"can_manage_users":     u.Can(authmodel.PermManageUsers),
+			"can_manage_libraries": u.Can(authmodel.PermManageLibraries),
+			"can_manage_iptv":      u.Can(authmodel.PermManageIPTV),
+			"can_edit_metadata":    u.Can(authmodel.PermEditMetadata),
+			"can_change_artwork":   u.Can(authmodel.PermChangeArtwork),
+			"can_view_audit":       u.Can(authmodel.PermViewAudit),
+			"can_upload":           u.Can(authmodel.PermUpload),
 		},
 	})
 }
@@ -102,6 +118,20 @@ func (h *UserHandler) List(w http.ResponseWriter, r *http.Request) {
 			"has_pin":                  u.PINHash != "",
 			"is_primary":               primaryID != "" && u.ID == primaryID,
 			"access_expires_at":        u.AccessExpiresAt,
+			// Permission flags (migración 055) — el panel admin los usa
+			// para pintar la matriz user × permission. is_owner aparte
+			// porque marca un badge distinto en la UI ("Owner") y porque
+			// el frontend lo necesita para deshabilitar las casillas de
+			// esa fila (los flags del owner son inmutables).
+			"is_owner":             u.IsOwner,
+			"can_manage_admins":    u.CanManageAdmins,
+			"can_manage_users":     u.CanManageUsers,
+			"can_manage_libraries": u.CanManageLibraries,
+			"can_manage_iptv":      u.CanManageIPTV,
+			"can_edit_metadata":    u.CanEditMetadata,
+			"can_change_artwork":   u.CanChangeArtwork,
+			"can_view_audit":       u.CanViewAudit,
+			"can_upload":           u.CanUpload,
 		}
 	}
 

@@ -285,6 +285,13 @@ var outOfScopeExact = map[string]string{
 	// que sí son específicos del frontend (panel "tus uploads").
 	"GET /uploads/mine":   "frontend upload panel, listará audit del propio usuario",
 	"GET /uploads/events": "SSE filtrado a uploads del propio usuario",
+
+	// ── Admin permissions (PR3) ───────────────────────────────────────
+	// Panel admin de gestión de permisos granulares. El frontend la
+	// llama desde el detalle de usuario; no es superficie pública.
+	"GET /users/{id}/permissions":            "admin panel — lee flags del usuario",
+	"PUT /users/{id}/permissions":            "admin panel — modifica flags (gated can_manage_admins)",
+	"POST /users/{id}/transfer-ownership":    "owner-only — transfiere is_owner a otro admin",
 }
 
 // TestOpenAPISpec_RouterCoverage walks the AST of router.go to enumerate
