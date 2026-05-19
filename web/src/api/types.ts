@@ -1383,6 +1383,10 @@ export interface SystemHostStats {
 
 export interface SystemServerStats {
   version: string;
+  /** Short git SHA inyectado en build. "none" en dev builds. */
+  commit?: string;
+  /** Fecha de build RFC3339. "unknown" en dev builds. */
+  build_date?: string;
   go_version: string;
   started_at: string;
   uptime_seconds: number;

@@ -2,8 +2,19 @@
 
 # Binary name
 BINARY=hubplay
-VERSION?=dev
-LDFLAGS=-ldflags "-X main.version=$(VERSION)"
+
+# Versionado. Si no se pasa VERSION desde fuera (CI), lo derivamos de git:
+# - tag exacto    → "v0.1.0"
+# - post-tag      → "v0.1.0-23-g59c926a"
+# - sin commits   → "dev"
+# - dirty (cambios sin commitear) → "...-dirty"
+VERSION?=$(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+COMMIT?=$(shell git rev-parse --short HEAD 2>/dev/null || echo none)
+BUILD_DATE?=$(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+LDFLAGS=-ldflags "-s -w \
+	-X main.version=$(VERSION) \
+	-X main.commit=$(COMMIT) \
+	-X main.buildDate=$(BUILD_DATE)"
 
 # sqlc version pin. Bumping this is a deliberate decision — every release
 # of sqlc has historically introduced subtle changes to the generated

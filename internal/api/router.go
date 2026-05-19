@@ -93,6 +93,11 @@ type Dependencies struct {
 	// SystemHandler. Sustituye las queries raw inline en system.go.
 	Activity       *db.ActivityRepository
 	Version        string
+	// Commit es el short SHA inyectado por el linker. Se renderiza en
+	// el panel system → server.commit. Vacío en dev builds.
+	Commit         string
+	// BuildDate es la fecha de compilación (RFC3339). Vacío en dev.
+	BuildDate      string
 	WebAssets      fs.FS
 	Config         *config.Config
 	Logger         *slog.Logger
@@ -783,6 +788,8 @@ func NewRouter(deps Dependencies) http.Handler {
 					BindAddress:    bindAddress,
 					BaseURLDefault: baseURL,
 					Version:        deps.Version,
+					Commit:         deps.Commit,
+					BuildDate:      deps.BuildDate,
 					Logger:         deps.Logger,
 				})
 				r.Route("/admin/system", func(r chi.Router) {
