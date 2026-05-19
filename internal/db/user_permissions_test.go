@@ -123,6 +123,111 @@ func TestUserRepository_GetOwnerID_EmptyOnFreshDB(t *testing.T) {
 	}
 }
 
+// ─── EnsureOwner ────────────────────────────────────────────────────
+
+func TestUserRepository_EnsureOwner_PromotesWhenNoneExists(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	repo := db.NewUserRepository(testutil.Driver(), database)
+	newAdmin(t, repo, "u-first", "first", time.Now())
+
+	promoted, err := repo.EnsureOwner(context.Background(), "u-first")
+	if err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	if !promoted {
+		t.Fatal("expected promoted=true on fresh DB")
+	}
+	got, _ := repo.GetByID(context.Background(), "u-first")
+	if !got.IsOwner {
+		t.Error("is_owner not set")
+	}
+	// Owner debe recibir todos los flags al promoverse.
+	if !got.CanManageAdmins || !got.CanEditMetadata || !got.CanChangeArtwork {
+		t.Errorf("owner missing flags after promotion: %+v", got)
+	}
+}
+
+func TestUserRepository_EnsureOwner_IdempotentWhenOwnerExists(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	repo := db.NewUserRepository(testutil.Driver(), database)
+	now := time.Now()
+	newAdmin(t, repo, "u-first", "first", now)
+	newAdmin(t, repo, "u-second", "second", now.Add(time.Hour))
+
+	// Primera llamada promueve.
+	if _, err := repo.EnsureOwner(context.Background(), "u-first"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Segunda llamada con OTRO target — no debe sobreescribir.
+	promoted, err := repo.EnsureOwner(context.Background(), "u-second")
+	if err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	if promoted {
+		t.Error("second EnsureOwner promoted despite existing owner")
+	}
+	gotID, _ := repo.GetOwnerID(context.Background())
+	if gotID != "u-first" {
+		t.Errorf("owner moved: %s, want u-first", gotID)
+	}
+	second, _ := repo.GetByID(context.Background(), "u-second")
+	if second.IsOwner {
+		t.Error("u-second got owner promotion despite existing owner")
+	}
+}
+
+func TestUserRepository_EnsureOwner_RejectsNonAdmin(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	repo := db.NewUserRepository(testutil.Driver(), database)
+	plain := &authmodel.User{
+		ID: "u-plain", Username: "plain", DisplayName: "p",
+		PasswordHash: "x", Role: "user", IsActive: true,
+		CreatedAt: time.Now(),
+	}
+	if err := repo.Create(context.Background(), plain); err != nil {
+		t.Fatal(err)
+	}
+
+	promoted, err := repo.EnsureOwner(context.Background(), "u-plain")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if promoted {
+		t.Error("plain user accepted as owner candidate")
+	}
+}
+
+func TestUserRepository_EnsureOwner_RejectsProfile(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	repo := db.NewUserRepository(testutil.Driver(), database)
+	parent := &authmodel.User{
+		ID: "u-parent", Username: "parent", DisplayName: "p",
+		PasswordHash: "x", Role: "admin", IsActive: true,
+		CreatedAt: time.Now(),
+	}
+	if err := repo.Create(context.Background(), parent); err != nil {
+		t.Fatal(err)
+	}
+	profile := &authmodel.User{
+		ID: "u-profile", Username: "profile", DisplayName: "kid",
+		PasswordHash: "x", Role: "admin", IsActive: true,
+		ParentUserID: "u-parent",
+		CreatedAt:    time.Now(),
+	}
+	if err := repo.Create(context.Background(), profile); err != nil {
+		t.Fatal(err)
+	}
+
+	promoted, err := repo.EnsureOwner(context.Background(), "u-profile")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if promoted {
+		t.Error("profile accepted as owner — owner must be household head")
+	}
+}
+
 func TestUserRepository_GetOwnerID_FindsBackfilledAdmin(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	repo := db.NewUserRepository(testutil.Driver(), database)

@@ -58,6 +58,11 @@ type UserService interface {
 	DeleteAvatar(ctx context.Context, userID string) error
 	AvatarsDir() string
 	AvatarFilePath(relName string) (string, error)
+	// EnsureOwner promueve a userID como owner si no hay owner aún
+	// (migración 055). Idempotente — la llama el setup wizard tras
+	// crear el primer admin para que un install fresh no quede sin
+	// owner. Devuelve promoted=true sólo cuando la fila se modificó.
+	EnsureOwner(ctx context.Context, userID string) (bool, error)
 }
 
 // ─── Library service ────────────────────────────────────────────────────────
