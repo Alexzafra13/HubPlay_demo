@@ -63,6 +63,28 @@ const (
 	ProgressUpdated  Type = "user.progress.updated"
 	PlayedToggled    Type = "user.played.toggled"
 	FavoriteToggled  Type = "user.favorite.toggled"
+
+	// ── Subidas de media (PR2 de la feature upload).
+	//
+	// Bytes-in-flight: el cliente conoce mejor el progreso que el
+	// servidor durante la subida, así que UploadBytes se publica con
+	// throttle (2 Hz por upload) para sincronizar entre pestañas /
+	// dispositivos del mismo usuario, no para alimentar la barra del
+	// cliente que está enviando los bytes.
+	//
+	// UploadPhase marca transiciones del pipeline post-bytes
+	// (validating / probing / moving / indexing). Es la fase más
+	// valiosa de SSE: el cliente ve "100%" al cerrar el último
+	// chunk y necesita saber qué pasa después para no quedarse con
+	// un spinner ciego.
+	//
+	// UploadDone y UploadError son terminales — tras emitir uno
+	// (nunca los dos) el upload deja de generar más eventos. Data
+	// incluye `id` (upload tus) en todos.
+	UploadBytes Type = "upload.bytes"
+	UploadPhase Type = "upload.phase"
+	UploadDone  Type = "upload.done"
+	UploadError Type = "upload.error"
 )
 
 type Event struct {

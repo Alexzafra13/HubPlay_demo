@@ -30,6 +30,11 @@ var (
 	ErrTranscodeBusy    = errors.New("transcode slots full")
 	ErrUnsupportedCodec = errors.New("unsupported codec")
 
+	// Uploads — el usuario no cabe en su cuota o no tiene permiso.
+	// Una sola sentinel cubre ambos casos porque desde el cliente
+	// el remedio es idéntico (pedir al admin más espacio o el flag).
+	ErrUploadQuotaExceeded = errors.New("upload quota exceeded")
+
 	// Federación
 	ErrPeerOffline           = errors.New("peer offline")
 	ErrPeerUnauthorized      = errors.New("peer not authorized")
@@ -276,6 +281,25 @@ func NewUnsupportedCodec(codec string) *AppError {
 		Message:    "codec not supported for playback",
 		Details:    map[string]any{"codec": codec},
 		kind:       ErrUnsupportedCodec,
+	}
+}
+
+// NewUploadQuotaExceeded se devuelve cuando el reserve atómico no toca
+// fila — sea porque can_upload está apagado, sea porque (used+delta)
+// excede quota. El detalle entra en Details para que el frontend pueda
+// pintar un mensaje útil ("ocupado 9/10 GB, este archivo son 2 GB").
+func NewUploadQuotaExceeded(requested, used, quota int64) *AppError {
+	return &AppError{
+		Code:       "UPLOAD_QUOTA_EXCEEDED",
+		HTTPStatus: http.StatusForbidden,
+		Message:    "upload would exceed quota or permission is revoked",
+		Hint:       "ask an administrator to increase your upload quota",
+		Details: map[string]any{
+			"requested_bytes": requested,
+			"used_bytes":      used,
+			"quota_bytes":     quota,
+		},
+		kind: ErrUploadQuotaExceeded,
 	}
 }
 

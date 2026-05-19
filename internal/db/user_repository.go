@@ -287,6 +287,108 @@ func (r *UserRepository) SetActive(ctx context.Context, id string, active bool) 
 	return nil
 }
 
+// SetCanUpload flips the permission flag. The decision (who can,
+// primary-admin gate, etc.) lives in the service.
+//
+// Raw SQL via rewritePlaceholders — see the long comment on
+// ListProfilesForOwner for the sqlc 1.31.1 parser bug that forces
+// hand-rolling the upload-permission mutations.
+func (r *UserRepository) SetCanUpload(ctx context.Context, id string, canUpload bool) error {
+	driver := DriverSQLite
+	if !r.useSQLite() {
+		driver = DriverPostgres
+	}
+	query := rewritePlaceholders(driver, `UPDATE users SET can_upload = ? WHERE id = ?`)
+	// SQLite stores BOOLEAN as 0/1 INTEGER; modernc.org/sqlite handles
+	// the bool→int marshal natively, so we don't need a coerce here.
+	if _, err := r.db.ExecContext(ctx, query, canUpload, id); err != nil {
+		return fmt.Errorf("set can upload: %w", err)
+	}
+	return nil
+}
+
+// SetUploadQuota fija el tope absoluto en bytes. El service valida
+// >=0 y >= upload_used_bytes (no podemos bajar la cuota por debajo
+// de lo ya ocupado — quedaría inconsistente).
+func (r *UserRepository) SetUploadQuota(ctx context.Context, id string, quotaBytes int64) error {
+	driver := DriverSQLite
+	if !r.useSQLite() {
+		driver = DriverPostgres
+	}
+	query := rewritePlaceholders(driver, `UPDATE users SET upload_quota_bytes = ? WHERE id = ?`)
+	if _, err := r.db.ExecContext(ctx, query, quotaBytes, id); err != nil {
+		return fmt.Errorf("set upload quota: %w", err)
+	}
+	return nil
+}
+
+// ReserveUploadBytes incrementa upload_used_bytes en `delta` si y
+// solo si la fila cumple can_upload=true y (used+delta) <= quota.
+// Devuelve domain.ErrUploadQuotaExceeded cuando la condición falla
+// (la query ENFORCA todo en el WHERE — no hay window race entre un
+// SELECT y un UPDATE).
+//
+// Caller responsibility: invocar ReleaseUploadBytes(delta) si el
+// upload se aborta o falla downstream, para no dejar reservados
+// bytes que nunca se materializaron en disco.
+//
+// El comparador `can_upload = 1` aquí asume SQLite-style 0/1; en
+// Postgres BOOLEAN se compara igual con 1 vía TRUE → 1 via implicit
+// cast? No — Postgres es estricto. Branch por driver.
+func (r *UserRepository) ReserveUploadBytes(ctx context.Context, id string, delta int64) error {
+	var query string
+	if r.useSQLite() {
+		query = `UPDATE users
+			SET upload_used_bytes = upload_used_bytes + ?
+			WHERE id = ?
+			  AND can_upload = 1
+			  AND upload_used_bytes + ? <= upload_quota_bytes`
+	} else {
+		query = rewritePlaceholders(DriverPostgres, `UPDATE users
+			SET upload_used_bytes = upload_used_bytes + ?
+			WHERE id = ?
+			  AND can_upload = TRUE
+			  AND upload_used_bytes + ? <= upload_quota_bytes`)
+	}
+	res, err := r.db.ExecContext(ctx, query, delta, id, delta)
+	if err != nil {
+		return fmt.Errorf("reserve upload bytes: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("reserve upload bytes (rows affected): %w", err)
+	}
+	if rows == 0 {
+		// Sentinel sin envoltorio rico para que callers que solo
+		// quieren distinguir quota-exceeded de errores reales
+		// funcionen con errors.Is. El service re-envuelve con
+		// NewUploadQuotaExceeded antes de exponerlo al HTTP layer.
+		return domain.ErrUploadQuotaExceeded
+	}
+	return nil
+}
+
+// ReleaseUploadBytes decrementa la contabilidad cuando un upload se
+// cancela, falla la validación post-bytes, o se borra. El cap a 0
+// vive en la query (MAX en SQLite, GREATEST en Postgres) para que
+// sea robusto frente a llamadas duplicadas o un drift contable.
+func (r *UserRepository) ReleaseUploadBytes(ctx context.Context, id string, delta int64) error {
+	if delta <= 0 {
+		return nil // no-op: liberar 0 o negativo es contrato silencioso
+	}
+	var query string
+	if r.useSQLite() {
+		query = `UPDATE users SET upload_used_bytes = MAX(upload_used_bytes - ?, 0) WHERE id = ?`
+	} else {
+		query = rewritePlaceholders(DriverPostgres,
+			`UPDATE users SET upload_used_bytes = GREATEST(upload_used_bytes - ?, 0) WHERE id = ?`)
+	}
+	if _, err := r.db.ExecContext(ctx, query, delta, id); err != nil {
+		return fmt.Errorf("release upload bytes: %w", err)
+	}
+	return nil
+}
+
 func (r *UserRepository) SetAccessExpiresAt(ctx context.Context, id string, expiresAt *time.Time) error {
 	var nt sql.NullTime
 	if expiresAt != nil {
@@ -361,7 +463,8 @@ func (r *UserRepository) ListProfilesForOwner(ctx context.Context, ownerID strin
 SELECT id, username, display_name, COALESCE(avatar_path, '') AS avatar_path,
        role, is_active, created_at, last_login_at,
        parent_user_id, pin_hash, max_content_rating, password_change_required,
-       access_expires_at, avatar_color
+       access_expires_at, avatar_color,
+       can_upload, upload_quota_bytes, upload_used_bytes
 FROM users
 WHERE id = ? OR parent_user_id = ?
 ORDER BY parent_user_id IS NOT NULL, LOWER(display_name)`)
@@ -393,6 +496,9 @@ ORDER BY parent_user_id IS NOT NULL, LOWER(display_name)`)
 			&u.PasswordChangeRequired,
 			&accessExpiresAt,
 			&avatarColor,
+			&u.CanUpload,
+			&u.UploadQuotaBytes,
+			&u.UploadUsedBytes,
 		); err != nil {
 			return nil, fmt.Errorf("scan profile row: %w", err)
 		}
@@ -565,6 +671,9 @@ func userFromSqliteGetRow(r sqlc.GetUserByIDRow) authmodel.User {
 		PasswordChangeRequired: r.PasswordChangeRequired,
 		AccessExpiresAt:        nullTimeToPtr(r.AccessExpiresAt),
 		AvatarColor:            r.AvatarColor.String,
+		CanUpload:              r.CanUpload,
+		UploadQuotaBytes:       r.UploadQuotaBytes,
+		UploadUsedBytes:        r.UploadUsedBytes,
 	}
 }
 
@@ -586,6 +695,9 @@ func userFromSqliteGetByUsernameRow(r sqlc.GetUserByUsernameRow) authmodel.User 
 		PasswordChangeRequired: r.PasswordChangeRequired,
 		AccessExpiresAt:        nullTimeToPtr(r.AccessExpiresAt),
 		AvatarColor:            r.AvatarColor.String,
+		CanUpload:              r.CanUpload,
+		UploadQuotaBytes:       r.UploadQuotaBytes,
+		UploadUsedBytes:        r.UploadUsedBytes,
 	}
 }
 
@@ -605,6 +717,9 @@ func userFromSqliteListRow(r sqlc.ListUsersRow) authmodel.User {
 		PasswordChangeRequired: r.PasswordChangeRequired,
 		AccessExpiresAt:        nullTimeToPtr(r.AccessExpiresAt),
 		AvatarColor:            r.AvatarColor.String,
+		CanUpload:              r.CanUpload,
+		UploadQuotaBytes:       r.UploadQuotaBytes,
+		UploadUsedBytes:        r.UploadUsedBytes,
 	}
 }
 
@@ -626,6 +741,9 @@ func userFromPgGetRow(r sqlc_pg.GetUserByIDRow) authmodel.User {
 		PasswordChangeRequired: r.PasswordChangeRequired,
 		AccessExpiresAt:        nullTimeToPtr(r.AccessExpiresAt),
 		AvatarColor:            r.AvatarColor.String,
+		CanUpload:              r.CanUpload,
+		UploadQuotaBytes:       r.UploadQuotaBytes,
+		UploadUsedBytes:        r.UploadUsedBytes,
 	}
 }
 
@@ -647,6 +765,9 @@ func userFromPgGetByUsernameRow(r sqlc_pg.GetUserByUsernameRow) authmodel.User {
 		PasswordChangeRequired: r.PasswordChangeRequired,
 		AccessExpiresAt:        nullTimeToPtr(r.AccessExpiresAt),
 		AvatarColor:            r.AvatarColor.String,
+		CanUpload:              r.CanUpload,
+		UploadQuotaBytes:       r.UploadQuotaBytes,
+		UploadUsedBytes:        r.UploadUsedBytes,
 	}
 }
 
@@ -666,5 +787,8 @@ func userFromPgListRow(r sqlc_pg.ListUsersRow) authmodel.User {
 		PasswordChangeRequired: r.PasswordChangeRequired,
 		AccessExpiresAt:        nullTimeToPtr(r.AccessExpiresAt),
 		AvatarColor:            r.AvatarColor.String,
+		CanUpload:              r.CanUpload,
+		UploadQuotaBytes:       r.UploadQuotaBytes,
+		UploadUsedBytes:        r.UploadUsedBytes,
 	}
 }

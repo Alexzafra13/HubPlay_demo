@@ -50,6 +50,15 @@ type Channel struct {
 	ConsecutiveFailures int64          `json:"consecutive_failures"`
 }
 
+type ChannelLogoOverride struct {
+	LibraryID string    `json:"library_id"`
+	StreamUrl string    `json:"stream_url"`
+	LogoUrl   string    `json:"logo_url"`
+	LogoFile  string    `json:"logo_file"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 type ChannelOverride struct {
 	LibraryID string    `json:"library_id"`
 	StreamUrl string    `json:"stream_url"`
@@ -80,6 +89,15 @@ type Collection struct {
 	PosterUrl   string    `json:"poster_url"`
 	BackdropUrl string    `json:"backdrop_url"`
 	CreatedAt   time.Time `json:"created_at"`
+}
+
+type CollectionImageOverride struct {
+	CollectionID string    `json:"collection_id"`
+	ImageType    string    `json:"image_type"`
+	Url          string    `json:"url"`
+	File         string    `json:"file"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 type DeviceCode struct {
@@ -276,6 +294,11 @@ type Item struct {
 	AddedAt         time.Time       `json:"added_at"`
 	UpdatedAt       time.Time       `json:"updated_at"`
 	IsAvailable     bool            `json:"is_available"`
+}
+
+type ItemMetadataLock struct {
+	ItemID   string    `json:"item_id"`
+	LockedAt time.Time `json:"locked_at"`
 }
 
 type ItemPerson struct {
@@ -498,6 +521,9 @@ type User struct {
 	PasswordChangeRequired bool           `json:"password_change_required"`
 	AccessExpiresAt        sql.NullTime   `json:"access_expires_at"`
 	AvatarColor            sql.NullString `json:"avatar_color"`
+	CanUpload              bool           `json:"can_upload"`
+	UploadQuotaBytes       int64          `json:"upload_quota_bytes"`
+	UploadUsedBytes        int64          `json:"upload_used_bytes"`
 }
 
 type UserChannelFavorite struct {
