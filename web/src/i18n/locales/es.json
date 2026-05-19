@@ -1754,7 +1754,25 @@
       "dropHint": "Suelta ficheros aquí para subir a esta carpeta",
       "newFolderCta": "Nueva carpeta",
       "newFolderPlaceholder": "Nombre de la carpeta",
-      "createError": "No se pudo crear la carpeta."
+      "createError": "No se pudo crear la carpeta.",
+      "renameAction": "Renombrar",
+      "deleteAction": "Eliminar",
+      "renameError": "No se pudo renombrar.",
+      "deleteError": "No se pudo borrar.",
+      "confirmDeleteFile": "¿Borrar \"{{name}}\"? Esta acción no se puede deshacer.",
+      "confirmDeleteDir": "¿Borrar la carpeta \"{{name}}\" y TODO su contenido? Esta acción no se puede deshacer."
+    },
+    "collision": {
+      "title_one": "{{count}} fichero ya existe en el destino",
+      "title_other": "{{count}} ficheros ya existen en el destino",
+      "title": "{{count}} ficheros ya existen en el destino",
+      "hint": "Decide qué hacer con cada uno. Sobrescribir reemplaza el fichero existente; renombrar añade un sufijo automático; saltar cancela esa subida.",
+      "applyAll": "Aplicar a todos:",
+      "overwrite": "Sobrescribir",
+      "rename": "Renombrar",
+      "skip": "Saltar",
+      "confirm": "Aplicar",
+      "summary": "{{count}} total · {{overwrite}} sobrescribir · {{skip}} saltar"
     }
   }
 }

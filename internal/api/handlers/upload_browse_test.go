@@ -203,3 +203,187 @@ func TestUploadBrowse_CreateFolder_RejectsTraversal(t *testing.T) {
 		t.Errorf("status %d (want 400)", rr.Code)
 	}
 }
+
+// ─── DeleteEntry ────────────────────────────────────────────────────
+
+func mountBrowseFull(h *handlers.UploadBrowseHandler) http.Handler {
+	r := chi.NewRouter()
+	r.Get("/libraries/{id}/upload-browse", h.Browse)
+	r.Post("/libraries/{id}/folders", h.CreateFolder)
+	r.Delete("/libraries/{id}/files", h.DeleteEntry)
+	r.Post("/libraries/{id}/files/rename", h.RenameEntry)
+	return r
+}
+
+func TestUploadBrowse_DeleteFile(t *testing.T) {
+	lib, root := makeLib(t, "lib-mov", "Movies")
+	path := filepath.Join(root, "movie.mkv")
+	_ = os.WriteFile(path, []byte("data"), 0o640)
+
+	svc := &fakeListForUserSvc{libs: []*librarymodel.Library{lib}}
+	h := handlers.NewUploadBrowseHandler(svc, testutil.NopLogger())
+
+	rr := doBrowseRequest(mountBrowseFull(h), http.MethodDelete,
+		"/libraries/lib-mov/files?path=movie.mkv", "", "u-alex")
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status %d body %s", rr.Code, rr.Body.String())
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("file not deleted: %v", err)
+	}
+}
+
+func TestUploadBrowse_DeleteEmptyDir(t *testing.T) {
+	lib, root := makeLib(t, "lib-mov", "Movies")
+	_ = os.MkdirAll(filepath.Join(root, "empty"), 0o755)
+
+	svc := &fakeListForUserSvc{libs: []*librarymodel.Library{lib}}
+	h := handlers.NewUploadBrowseHandler(svc, testutil.NopLogger())
+
+	rr := doBrowseRequest(mountBrowseFull(h), http.MethodDelete,
+		"/libraries/lib-mov/files?path=empty", "", "u-alex")
+	if rr.Code != http.StatusNoContent {
+		t.Errorf("status %d (empty dir delete should succeed)", rr.Code)
+	}
+}
+
+func TestUploadBrowse_DeleteNonEmptyDir_RequiresRecursive(t *testing.T) {
+	lib, root := makeLib(t, "lib-mov", "Movies")
+	_ = os.MkdirAll(filepath.Join(root, "movies", "drama"), 0o755)
+	_ = os.WriteFile(filepath.Join(root, "movies", "drama", "x.mkv"), []byte("x"), 0o640)
+
+	svc := &fakeListForUserSvc{libs: []*librarymodel.Library{lib}}
+	h := handlers.NewUploadBrowseHandler(svc, testutil.NopLogger())
+
+	// Sin recursive: 409 CONFLICT.
+	rr := doBrowseRequest(mountBrowseFull(h), http.MethodDelete,
+		"/libraries/lib-mov/files?path=movies", "", "u-alex")
+	if rr.Code != http.StatusConflict {
+		t.Errorf("status %d (want 409 without recursive)", rr.Code)
+	}
+	if _, err := os.Stat(filepath.Join(root, "movies")); err != nil {
+		t.Errorf("dir was deleted despite the conflict: %v", err)
+	}
+
+	// Con recursive: borra entero.
+	rr = doBrowseRequest(mountBrowseFull(h), http.MethodDelete,
+		"/libraries/lib-mov/files?path=movies&recursive=true", "", "u-alex")
+	if rr.Code != http.StatusNoContent {
+		t.Errorf("status %d (want 204 with recursive)", rr.Code)
+	}
+	if _, err := os.Stat(filepath.Join(root, "movies")); !os.IsNotExist(err) {
+		t.Errorf("dir not deleted: %v", err)
+	}
+}
+
+func TestUploadBrowse_DeleteMissing_Idempotent(t *testing.T) {
+	lib, _ := makeLib(t, "lib-mov", "Movies")
+	svc := &fakeListForUserSvc{libs: []*librarymodel.Library{lib}}
+	h := handlers.NewUploadBrowseHandler(svc, testutil.NopLogger())
+
+	rr := doBrowseRequest(mountBrowseFull(h), http.MethodDelete,
+		"/libraries/lib-mov/files?path=ghost.mkv", "", "u-alex")
+	if rr.Code != http.StatusNoContent {
+		t.Errorf("status %d (idempotent delete should be 204)", rr.Code)
+	}
+}
+
+func TestUploadBrowse_DeleteRoot_Rejected(t *testing.T) {
+	lib, _ := makeLib(t, "lib-mov", "Movies")
+	svc := &fakeListForUserSvc{libs: []*librarymodel.Library{lib}}
+	h := handlers.NewUploadBrowseHandler(svc, testutil.NopLogger())
+
+	rr := doBrowseRequest(mountBrowseFull(h), http.MethodDelete,
+		"/libraries/lib-mov/files?path=", "", "u-alex")
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status %d (want 400 — cannot delete root)", rr.Code)
+	}
+}
+
+// ─── RenameEntry ────────────────────────────────────────────────────
+
+func TestUploadBrowse_Rename_File(t *testing.T) {
+	lib, root := makeLib(t, "lib-mov", "Movies")
+	_ = os.WriteFile(filepath.Join(root, "old.mkv"), []byte("data"), 0o640)
+
+	svc := &fakeListForUserSvc{libs: []*librarymodel.Library{lib}}
+	h := handlers.NewUploadBrowseHandler(svc, testutil.NopLogger())
+
+	rr := doBrowseRequest(mountBrowseFull(h), http.MethodPost,
+		"/libraries/lib-mov/files/rename",
+		`{"from":"old.mkv","to":"new.mkv"}`, "u-alex")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", rr.Code, rr.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, "new.mkv")); err != nil {
+		t.Errorf("renamed file not at destination: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "old.mkv")); !os.IsNotExist(err) {
+		t.Errorf("source still exists after rename: %v", err)
+	}
+}
+
+func TestUploadBrowse_Rename_RejectsExistingTarget(t *testing.T) {
+	lib, root := makeLib(t, "lib-mov", "Movies")
+	_ = os.WriteFile(filepath.Join(root, "old.mkv"), []byte("a"), 0o640)
+	_ = os.WriteFile(filepath.Join(root, "new.mkv"), []byte("b"), 0o640)
+
+	svc := &fakeListForUserSvc{libs: []*librarymodel.Library{lib}}
+	h := handlers.NewUploadBrowseHandler(svc, testutil.NopLogger())
+
+	rr := doBrowseRequest(mountBrowseFull(h), http.MethodPost,
+		"/libraries/lib-mov/files/rename",
+		`{"from":"old.mkv","to":"new.mkv"}`, "u-alex")
+	if rr.Code != http.StatusConflict {
+		t.Errorf("status %d (want 409 TO_EXISTS)", rr.Code)
+	}
+	// Source intacto, no se pisó.
+	body, _ := os.ReadFile(filepath.Join(root, "old.mkv"))
+	if string(body) != "a" {
+		t.Errorf("source mutated despite conflict: %q", body)
+	}
+}
+
+func TestUploadBrowse_Rename_MissingSource(t *testing.T) {
+	lib, _ := makeLib(t, "lib-mov", "Movies")
+	svc := &fakeListForUserSvc{libs: []*librarymodel.Library{lib}}
+	h := handlers.NewUploadBrowseHandler(svc, testutil.NopLogger())
+
+	rr := doBrowseRequest(mountBrowseFull(h), http.MethodPost,
+		"/libraries/lib-mov/files/rename",
+		`{"from":"ghost.mkv","to":"new.mkv"}`, "u-alex")
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("status %d (want 404 FROM_NOT_FOUND)", rr.Code)
+	}
+}
+
+func TestUploadBrowse_Rename_SamePath_Rejected(t *testing.T) {
+	lib, root := makeLib(t, "lib-mov", "Movies")
+	_ = os.WriteFile(filepath.Join(root, "same.mkv"), []byte("x"), 0o640)
+	svc := &fakeListForUserSvc{libs: []*librarymodel.Library{lib}}
+	h := handlers.NewUploadBrowseHandler(svc, testutil.NopLogger())
+
+	rr := doBrowseRequest(mountBrowseFull(h), http.MethodPost,
+		"/libraries/lib-mov/files/rename",
+		`{"from":"same.mkv","to":"same.mkv"}`, "u-alex")
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status %d (want 400 SAME_PATH)", rr.Code)
+	}
+}
+
+func TestUploadBrowse_Rename_CreatesIntermediateDirs(t *testing.T) {
+	lib, root := makeLib(t, "lib-mov", "Movies")
+	_ = os.WriteFile(filepath.Join(root, "loose.mkv"), []byte("x"), 0o640)
+	svc := &fakeListForUserSvc{libs: []*librarymodel.Library{lib}}
+	h := handlers.NewUploadBrowseHandler(svc, testutil.NopLogger())
+
+	rr := doBrowseRequest(mountBrowseFull(h), http.MethodPost,
+		"/libraries/lib-mov/files/rename",
+		`{"from":"loose.mkv","to":"2024/Movie/loose.mkv"}`, "u-alex")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", rr.Code, rr.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, "2024", "Movie", "loose.mkv")); err != nil {
+		t.Errorf("file not at nested destination: %v", err)
+	}
+}

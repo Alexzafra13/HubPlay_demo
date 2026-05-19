@@ -478,6 +478,8 @@ func NewRouter(deps Dependencies) http.Handler {
 						}
 						r.Get("/libraries/{id}/upload-browse", browseHandler.Browse)
 						r.Post("/libraries/{id}/folders", browseHandler.CreateFolder)
+						r.Delete("/libraries/{id}/files", browseHandler.DeleteEntry)
+						r.Post("/libraries/{id}/files/rename", browseHandler.RenameEntry)
 					})
 				}
 			}

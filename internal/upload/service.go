@@ -233,6 +233,12 @@ type FinishInput struct {
 	LibraryIDHint  string
 	// Subpath dentro de la librería destino. Vacío = raíz.
 	Subpath        string
+	// Overwrite: si true y el fichero destino existe, lo pisa en vez
+	// de añadir sufijo -NNN. Lo decide el cliente vía metadata tras
+	// preguntar al usuario en un modal de colisión. Default false
+	// (sufijo) — sin esta opción explícita NUNCA se pisa, evita
+	// pérdidas de datos por race u olvido del modal.
+	Overwrite      bool
 	Size           int64
 	SourcePath     string
 	StartedAt      time.Time
@@ -372,9 +378,30 @@ func (s *Service) Finish(ctx context.Context, in FinishInput) FinishResult {
 	if err := os.MkdirAll(targetDir, 0o755); err != nil {
 		return finalize("error", "create target dir: "+err.Error(), lib.ID, "")
 	}
-	target, err := s.resolveTargetPath(targetDir, in.SanitizedName)
-	if err != nil {
-		return finalize("error", "resolve target: "+err.Error(), lib.ID, "")
+	// Path destino del fichero. Dos modos:
+	//   1) Overwrite=true: el cliente ya preguntó al usuario, pisamos
+	//      el fichero existente (borra antes para que MoveTo no
+	//      vea colisión y mantengamos la semántica atómica del rename).
+	//   2) Overwrite=false (default): resolveTargetPath añade sufijo
+	//      -NNN ante colisión — comportamiento histórico que protege
+	//      contra subir dos veces el mismo fichero sin querer.
+	var target string
+	if in.Overwrite {
+		target = filepath.Join(targetDir, in.SanitizedName)
+		// Borra el destino si existe — IGNORANDO error si no estaba.
+		// MoveTo rechaza con ErrTargetExists; el overwrite REQUIERE
+		// que esa precondición no se dispare.
+		if _, err := os.Stat(target); err == nil {
+			if err := os.Remove(target); err != nil {
+				return finalize("error", "remove for overwrite: "+err.Error(), lib.ID, "")
+			}
+		}
+	} else {
+		t, err := s.resolveTargetPath(targetDir, in.SanitizedName)
+		if err != nil {
+			return finalize("error", "resolve target: "+err.Error(), lib.ID, "")
+		}
+		target = t
 	}
 	if err := s.staging.MoveTo(in.SourcePath, target); err != nil {
 		return finalize("error", "move: "+err.Error(), lib.ID, "")

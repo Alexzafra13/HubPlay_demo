@@ -1754,7 +1754,25 @@
       "dropHint": "Drop files here to upload to this folder",
       "newFolderCta": "New folder",
       "newFolderPlaceholder": "Folder name",
-      "createError": "Could not create folder."
+      "createError": "Could not create folder.",
+      "renameAction": "Rename",
+      "deleteAction": "Delete",
+      "renameError": "Could not rename.",
+      "deleteError": "Could not delete.",
+      "confirmDeleteFile": "Delete \"{{name}}\"? This cannot be undone.",
+      "confirmDeleteDir": "Delete folder \"{{name}}\" and ALL its contents? This cannot be undone."
+    },
+    "collision": {
+      "title_one": "{{count}} file already exists at destination",
+      "title_other": "{{count}} files already exist at destination",
+      "title": "{{count}} files already exist at destination",
+      "hint": "Pick what to do with each. Overwrite replaces the existing file; rename adds an automatic suffix; skip cancels that upload.",
+      "applyAll": "Apply to all:",
+      "overwrite": "Overwrite",
+      "rename": "Rename",
+      "skip": "Skip",
+      "confirm": "Apply",
+      "summary": "{{count}} total · {{overwrite}} overwrite · {{skip}} skip"
     }
   }
 }

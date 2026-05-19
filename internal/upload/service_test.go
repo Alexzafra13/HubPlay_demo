@@ -501,6 +501,44 @@ func TestService_Finish_NameCollisionSuffixes(t *testing.T) {
 	}
 }
 
+// TestService_Finish_OverwriteFlag verifica que con Overwrite=true el
+// pipeline PISA el fichero destino en vez de añadir sufijo -NNN. Es el
+// camino del modal de colisión cuando el operador elige "Sobrescribir".
+func TestService_Finish_OverwriteFlag(t *testing.T) {
+	svc, _, _, _, stagingRoot, libDir := newServiceFixture(t)
+
+	existing := filepath.Join(libDir, "Movie.mkv")
+	if err := os.WriteFile(existing, []byte("prev"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _ = svc.PreCreate(context.Background(), upload.PreCreateInput{
+		UserID: "u-alex", UploadID: "up-1", OriginalName: "Movie.mkv", Size: 1024,
+	})
+	src := filepath.Join(stagingRoot, "u-alex", "up-1", "Movie.mkv")
+	writeFakeMKV(t, src, 1024)
+
+	got := svc.Finish(context.Background(), upload.FinishInput{
+		UserID: "u-alex", UploadID: "up-1",
+		OriginalName: "Movie.mkv", SanitizedName: "Movie.mkv",
+		Overwrite:    true,
+		Size: 1024, SourcePath: src,
+	})
+	if got.Outcome != "accepted" {
+		t.Fatalf("outcome = %s msg=%s", got.Outcome, got.ErrorMessage)
+	}
+	// Final path: el mismo Movie.mkv original — sin sufijo.
+	want := filepath.Join(libDir, "Movie.mkv")
+	if got.FinalPath != want {
+		t.Errorf("final = %s, want %s", got.FinalPath, want)
+	}
+	// El contenido nuevo (cuerpo del fake MKV) reemplaza al "prev".
+	body, _ := os.ReadFile(want)
+	if string(body) == "prev" {
+		t.Errorf("overwrite did NOT replace content: %q", body)
+	}
+}
+
 // ─── Aborted ────────────────────────────────────────────────────────
 
 func TestService_Aborted_ReleasesQuotaAndAudits(t *testing.T) {

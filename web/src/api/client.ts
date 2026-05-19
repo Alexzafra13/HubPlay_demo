@@ -755,6 +755,37 @@ export class ApiClient {
     });
   }
 
+  /** Borra un fichero o carpeta dentro de la librería. Carpetas no
+   *  vacías requieren recursive=true (el backend devuelve 409 sin él
+   *  como defensa contra borrar masivamente por accidente). */
+  async deleteUploadEntry(
+    libraryID: string,
+    path: string,
+    recursive: boolean,
+  ): Promise<void> {
+    const qs = new URLSearchParams({ path });
+    if (recursive) qs.set("recursive", "true");
+    return this.request<void>(
+      "DELETE",
+      `/libraries/${libraryID}/files?${qs.toString()}`,
+    );
+  }
+
+  /** Renombra (o mueve) un fichero/carpeta dentro de la librería.
+   *  El backend rechaza si `to` ya existe — pisar requiere delete
+   *  previo + rename (o overwrite vía upload). */
+  async renameUploadEntry(
+    libraryID: string,
+    from: string,
+    to: string,
+  ): Promise<void> {
+    return this.request<void>(
+      "POST",
+      `/libraries/${libraryID}/files/rename`,
+      { body: { from, to } },
+    );
+  }
+
   /** Owner-only: lista de orígenes CORS (statics YAML + dynamics DB). */
   async listCorsOrigins(): Promise<CorsOriginsListResponse> {
     return this.request<CorsOriginsListResponse>("GET", "/admin/system/cors-origins");

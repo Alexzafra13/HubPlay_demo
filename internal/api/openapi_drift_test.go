@@ -312,6 +312,8 @@ var outOfScopeExact = map[string]string{
 	// dentro de la librería antes de subir. Gateado por can_upload.
 	"GET /libraries/{id}/upload-browse":  "upload UI — lista subdirs dentro de la librería",
 	"POST /libraries/{id}/folders":       "upload UI — crea carpeta nueva dentro de la librería",
+	"DELETE /libraries/{id}/files":       "upload UI — borrar fichero/carpeta dentro de la librería",
+	"POST /libraries/{id}/files/rename":  "upload UI — renombrar fichero/carpeta",
 }
 
 // TestOpenAPISpec_RouterCoverage walks the AST of router.go to enumerate

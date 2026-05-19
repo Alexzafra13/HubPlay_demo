@@ -54,6 +54,45 @@ export function useCreateUploadFolder() {
   });
 }
 
+export function useDeleteUploadEntry() {
+  const qc = useQueryClient();
+  return useMutation<
+    void,
+    Error,
+    { libraryID: string; path: string; recursive: boolean; parentPath: string }
+  >({
+    mutationFn: ({ libraryID, path, recursive }) =>
+      api.deleteUploadEntry(libraryID, path, recursive),
+    onSuccess: (_d, vars) => {
+      // El padre se invalida para que la fila desaparezca. Idempotente
+      // — borrar un fichero que ya no estaba sigue devolviendo 204.
+      qc.invalidateQueries({
+        queryKey: queryKeys.uploadBrowse(vars.libraryID, vars.parentPath),
+      });
+    },
+  });
+}
+
+export function useRenameUploadEntry() {
+  const qc = useQueryClient();
+  return useMutation<
+    void,
+    Error,
+    { libraryID: string; from: string; to: string; parentPath: string }
+  >({
+    mutationFn: ({ libraryID, from, to }) =>
+      api.renameUploadEntry(libraryID, from, to),
+    onSuccess: (_d, vars) => {
+      // El parent path es donde el operador VIO la fila. Si el rename
+      // mueve a un sub-dir distinto, ambos paths deberían refrescar;
+      // aquí simplificamos invalidando subtree entero "uploads/browse".
+      qc.invalidateQueries({
+        queryKey: queryKeys.uploadBrowse(vars.libraryID, vars.parentPath),
+      });
+    },
+  });
+}
+
 export function useMyUploads(limit = 50, enabled = true) {
   return useQuery<UploadAuditEntry[]>({
     queryKey: queryKeys.myUploads(limit),
