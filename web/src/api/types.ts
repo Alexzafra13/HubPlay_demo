@@ -296,6 +296,14 @@ export interface User {
   can_change_artwork?: boolean;
   can_view_audit?: boolean;
   can_upload?: boolean;
+
+  // Cuota de upload (migración 053). Sólo /me las devuelve; el
+  // listado /users también las incluiría si fuera necesario, pero
+  // el panel admin de uploads aún no está montado en el frontend.
+  // bytes — números enteros, JS los maneja hasta 2^53 sin pérdida
+  // de precisión, suficiente para librerías de cientos de TiB.
+  upload_quota_bytes?: number;
+  upload_used_bytes?: number;
 }
 
 export interface CreateUserResponse {
@@ -354,6 +362,42 @@ export interface UserPermissions {
   can_view_audit: boolean;
   can_upload: boolean;
 }
+
+/**
+ * Una fila del audit log de uploads (tabla upload_audit, migración
+ * 054). Se inserta UNA SOLA VEZ por upload, en su estado final.
+ * Las fases intermedias (validating, probing, moving, indexing)
+ * fluyen por SSE en /uploads/events, no quedan en la DB.
+ *
+ * outcome semantics:
+ *   accepted  todas las fases pasaron, fichero en su librería
+ *   rejected  fallo de validación binaria (extensión, magic bytes,
+ *             ffprobe, cuota o librería no elegible)
+ *   aborted   el cliente canceló o se desconectó sin terminar
+ *   error     fallo no atribuible al cliente (disco, move, panic)
+ */
+export interface UploadAuditEntry {
+  id: string;
+  library_id: string;
+  original_name: string;
+  final_path: string;
+  bytes: number;
+  mime_detected: string;
+  outcome: "accepted" | "rejected" | "aborted" | "error";
+  error_message: string;
+  started_at: string;
+  finished_at: string;
+  duration_ms: number;
+}
+
+/**
+ * Las fases que el backend publica por SSE en /uploads/events tras
+ * cerrar el último PATCH. Coinciden con upload.Service.Finish.
+ * El cliente las consume para mostrar progreso post-bytes —
+ * "100% subido" no significa "listo", el pipeline aún tiene
+ * trabajo después (ffprobe, move atómico).
+ */
+export type UploadPhase = "validating" | "probing" | "moving" | "indexing";
 
 /**
  * One row of the user-facing "Tus dispositivos" panel — every active
