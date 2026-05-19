@@ -1,8 +1,11 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
+import { ImageIcon } from "lucide-react";
 import { useCollection } from "@/api/hooks";
-import { Spinner, EmptyState } from "@/components/common";
+import { Button, Spinner, EmptyState } from "@/components/common";
+import { CollectionImageEditor } from "@/components/CollectionImageEditor";
+import { useAuthStore } from "@/store/auth";
 import type { StudioItem } from "@/api/types";
 
 // /collections/:id — saga collection page (Jellyfin-style "Movie
@@ -58,6 +61,8 @@ export default function CollectionDetail() {
   const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const { data: collection, isLoading, isError } = useCollection(id ?? "");
+  const isAdmin = useAuthStore((s) => s.user?.role === "admin");
+  const [imagesOpen, setImagesOpen] = useState(false);
 
   if (isLoading) {
     return (
@@ -139,6 +144,25 @@ export default function CollectionDetail() {
           className="absolute inset-x-0 bottom-0 -z-10 h-64 bg-gradient-to-t from-bg-canvas via-bg-canvas/70 to-transparent"
         />
 
+        {/* Admin shortcut — esquina superior derecha del hero. Sólo
+            visible para admin; abre el editor de imágenes (póster +
+            fondo, URL externa o subida desde disco). */}
+        {isAdmin && (
+          <div className="absolute right-4 top-4 z-10 sm:right-8 sm:top-6">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setImagesOpen(true)}
+              className="bg-black/50 text-white backdrop-blur hover:bg-black/70"
+            >
+              <ImageIcon className="h-3.5 w-3.5" />
+              {t("collectionImage.menuLabel", {
+                defaultValue: "Cambiar imágenes",
+              })}
+            </Button>
+          </div>
+        )}
+
         <header className="relative flex flex-col items-center gap-8 px-6 pt-12 pb-10 text-center sm:flex-row sm:items-end sm:gap-10 sm:px-10 sm:pt-16 sm:pb-12 sm:text-left">
           <div className="flex h-64 w-44 shrink-0 items-center justify-center overflow-hidden rounded-[--radius-lg] bg-bg-elevated ring-1 ring-white/10 shadow-2xl shadow-black/60 sm:h-80 sm:w-56">
             {collection.poster_url ? (
@@ -197,6 +221,17 @@ export default function CollectionDetail() {
           </div>
         )}
       </div>
+
+      {/* Editor de imágenes (admin) — el botón del hero lo dispara.
+          Se monta sólo cuando el operador lo abre para no consumir
+          render gratis en cada visita a la página. */}
+      {isAdmin && imagesOpen && (
+        <CollectionImageEditor
+          isOpen={imagesOpen}
+          onClose={() => setImagesOpen(false)}
+          collection={collection}
+        />
+      )}
     </div>
   );
 }

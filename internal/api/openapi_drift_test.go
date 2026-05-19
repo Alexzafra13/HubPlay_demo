@@ -185,6 +185,10 @@ var outOfScopeExact = map[string]string{
 	"DELETE /items/{id}/images/{imageId}":          "image authoring (admin)",
 	"POST /libraries/{id}/images/refresh":          "image authoring (admin)",
 	"POST /channels/{channelId}/logo/upload":       "channel logo upload (admin, multipart)",
+	"POST /collections/{id}/images/{type}/upload":  "collection image upload (admin, multipart)",
+	"PUT /collections/{id}/images/{type}":          "collection image override URL (admin)",
+	"DELETE /collections/{id}/images/{type}":       "clear collection image override (admin)",
+	"GET /collections/{id}/images/{type}/file":     "serve uploaded collection image (auth)",
 	"POST /libraries/{id}/iptv/refresh-logos-from-iptv-org": "admin iptv-org logo auto-discovery",
 
 	// ── Provider config (admin) + provider search (admin authoring) ──

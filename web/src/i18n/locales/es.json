@@ -1557,6 +1557,21 @@
     "unlock": "Desbloquear metadatos",
     "errorGeneric": "No se ha podido guardar. Inténtalo de nuevo."
   },
+  "collectionImage": {
+    "menuLabel": "Cambiar imágenes",
+    "title": "Imágenes de la colección",
+    "tabPoster": "Póster",
+    "tabBackdrop": "Fondo",
+    "urlLabel": "URL externa",
+    "applyURL": "Aplicar URL",
+    "uploadLabel": "Subir imagen (PNG, JPG, WebP — máx 10MB)",
+    "chooseFile": "Elegir archivo",
+    "reset": "Restaurar imagen de TMDb",
+    "done": "Hecho",
+    "or": "O",
+    "noImage": "Sin imagen (TMDb no provee esta para esta colección).",
+    "errorGeneric": "No se ha podido aplicar el cambio. Comprueba que el archivo o la URL son válidos."
+  },
   "channelLogo": {
     "title": "Logo del canal",
     "previewHint": "Vista previa con el logo actualmente activo (override admin o tvg-logo del M3U).",

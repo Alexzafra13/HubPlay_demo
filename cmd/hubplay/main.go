@@ -510,6 +510,7 @@ func run(configPath string) error {
 		People:          repos.People,
 		Studios:         repos.Studios,
 		Collections:     repos.Collections,
+		CollectionImageOverrides: repos.CollectionImageOverrides,
 		UserPreferences: repos.UserPreferences,
 		Home:            repos.Home,
 		Providers:     providerManager,

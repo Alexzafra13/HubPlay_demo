@@ -445,3 +445,41 @@ export function useScanLibrary() {
     },
   });
 }
+
+// ── Collection image overrides (admin) ───────────────────────────
+// Invalidan tanto el collection(id) (el hero del CollectionDetail)
+// como ["collections"] (el listado de cards), porque el hero del
+// listado también enseña poster_url de cada colección.
+
+export function useSetCollectionImageURL(collectionId: string) {
+  const qc = useQueryClient();
+  return useMutation<void, Error, { type: "poster" | "backdrop"; url: string }>({
+    mutationFn: ({ type, url }) => api.setCollectionImageURL(collectionId, type, url),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.collection(collectionId) });
+      qc.invalidateQueries({ queryKey: queryKeys.collections });
+    },
+  });
+}
+
+export function useUploadCollectionImage(collectionId: string) {
+  const qc = useQueryClient();
+  return useMutation<void, Error, { type: "poster" | "backdrop"; file: File }>({
+    mutationFn: ({ type, file }) => api.uploadCollectionImage(collectionId, type, file),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.collection(collectionId) });
+      qc.invalidateQueries({ queryKey: queryKeys.collections });
+    },
+  });
+}
+
+export function useClearCollectionImage(collectionId: string) {
+  const qc = useQueryClient();
+  return useMutation<void, Error, "poster" | "backdrop">({
+    mutationFn: (type) => api.clearCollectionImage(collectionId, type),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.collection(collectionId) });
+      qc.invalidateQueries({ queryKey: queryKeys.collections });
+    },
+  });
+}
