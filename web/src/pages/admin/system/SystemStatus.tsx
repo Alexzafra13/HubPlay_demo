@@ -32,6 +32,7 @@ import type {
 } from "@/api/types";
 import { Button, EmptyState, Spinner } from "@/components/common";
 import { AuditLogPanel } from "@/components/admin/AuditLogPanel";
+import { UpdateBanner } from "@/components/admin/UpdateBanner";
 import { AuthKeysPanel } from "@/components/admin/AuthKeysPanel";
 import { BackupPanel } from "@/components/admin/BackupPanel";
 import { CorsOriginsPanel } from "@/components/admin/CorsOriginsPanel";
@@ -190,6 +191,8 @@ export default function SystemStatus() {
         isFetching={isFetching}
         onRefresh={() => refetch()}
       />
+
+      <UpdateBanner />
 
       <HealthStrip stats={stats} />
 

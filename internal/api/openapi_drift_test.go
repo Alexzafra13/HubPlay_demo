@@ -155,6 +155,8 @@ var outOfScopeExact = map[string]string{
 	"DELETE /admin/system/settings/{key}": "admin runtime config",
 	"GET /admin/system/sessions":         "admin now-playing panel",
 	"DELETE /admin/system/sessions/{id}": "admin now-playing panel",
+	"GET /admin/system/updates":          "admin update-checker status",
+	"POST /admin/system/updates/check":   "admin update-checker force refresh",
 
 	// ── Database driver management (admin) ────────────────────────────
 	// Operator-only surface that swaps SQLite ↔ Postgres without

@@ -446,6 +446,34 @@ export interface AuditLogQueryResponse {
 }
 
 /**
+ * Estado del update checker (PR2). Snapshot cacheado del último poll
+ * a GitHub Releases. El frontend lo lee con TanStack Query y muestra
+ * un banner cuando has_update es true.
+ */
+export interface UpdateStatus {
+  /** Versión actualmente corriendo (inyectada por ldflags). "dev" en
+   *  builds de desarrollo, donde el checker queda deshabilitado. */
+  current: string;
+  /** Última versión estable conocida en GitHub. Vacía si nunca se
+   *  hizo un check exitoso aún (e.g. acabamos de arrancar). */
+  latest: string;
+  /** True si latest > current según semver. */
+  has_update: boolean;
+  /** URL de la página del release en GitHub. */
+  release_url?: string;
+  /** Release notes en markdown crudas. */
+  release_notes?: string;
+  /** Cuando GitHub publicó el release. ISO. */
+  published_at?: string;
+  /** Cuando hicimos el último check exitoso. ISO. */
+  last_checked?: string;
+  /** Mensaje del último fallo si lo hubo. */
+  last_error?: string;
+  /** False si el checker está deshabilitado (dev build / sin repo). */
+  check_enabled: boolean;
+}
+
+/**
  * Una subcarpeta dentro de una librería (PR6 file explorer). El
  * backend devuelve el path canónico relativo a la raíz de la
  * librería (sin leading slash, separador "/"), no la ruta absoluta

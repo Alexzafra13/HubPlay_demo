@@ -40,6 +40,7 @@ import (
 	"hubplay/internal/setup"
 	"hubplay/internal/stream"
 	"hubplay/internal/sysmetrics"
+	"hubplay/internal/updates"
 	"hubplay/internal/upload"
 	"hubplay/internal/user"
 )
@@ -600,6 +601,13 @@ func run(configPath string) error {
 	// fallido NO bloquea el flujo principal.
 	auditService := audit.NewService(repos.AuditLog, logger)
 
+	// Update checker (PR2 update-notifier): goroutine en background que
+	// sondea GitHub Releases cada 24h con ETag para detectar versiones
+	// nuevas. Si version=="dev" o repo=="" el servicio queda no-op.
+	// El context del run() cancela la goroutine al shutdown.
+	updateService := updates.New(version, "Alexzafra13/HubPlay_demo", logger)
+	updateService.Start(ctx)
+
 	// CORS registry (PR4 feature CORS-dynamic): combina statics del
 	// YAML + dynamics del DB en un atomic.Pointer.  Lo construimos
 	// AQUÍ (antes del router) para que NewRouter lo reciba listo.
@@ -679,6 +687,7 @@ func run(configPath string) error {
 		CorsOriginsRepo:  repos.CorsOrigins,
 		AuditLog:         repos.AuditLog,
 		Audit:            auditService,
+		Updates:          updateService,
 	})
 
 	server := &http.Server{
