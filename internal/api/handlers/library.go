@@ -29,11 +29,19 @@ type LibraryHandler struct {
 	// see. Optional — when nil the rating filter is skipped (admin
 	// or unknown context, fail-open is the right default).
 	users  UserService
+	audit  AuditEmitter
 	logger *slog.Logger
 }
 
-func NewLibraryHandler(lib LibraryService, images ImageRepository, metadata MetadataRepository, userData UserDataRepository, users UserService, logger *slog.Logger) *LibraryHandler {
-	return &LibraryHandler{lib: lib, images: images, metadata: metadata, userData: userData, users: users, logger: logger}
+func NewLibraryHandler(lib LibraryService, images ImageRepository, metadata MetadataRepository, userData UserDataRepository, users UserService, audit AuditEmitter, logger *slog.Logger) *LibraryHandler {
+	return &LibraryHandler{lib: lib, images: images, metadata: metadata, userData: userData, users: users, audit: audit, logger: logger}
+}
+
+func (h *LibraryHandler) auditEmit() AuditEmitter {
+	if h.audit != nil {
+		return h.audit
+	}
+	return noopAudit{}
 }
 
 // callerCapRating resolves the authenticated user's content cap, or
@@ -66,6 +74,7 @@ func (h *LibraryHandler) Create(w http.ResponseWriter, r *http.Request) {
 		handleServiceError(w, r, err)
 		return
 	}
+	h.auditEmit().LogLibraryCreated(r.Context(), r, lib.ID, lib.Name, lib.ContentType)
 
 	respondJSON(w, http.StatusCreated, map[string]any{"data": libraryResponse(lib)})
 }
@@ -136,10 +145,16 @@ func (h *LibraryHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 func (h *LibraryHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	// Capturamos nombre pre-delete para el audit.
+	var name string
+	if lib, err := h.lib.GetByID(r.Context(), id); err == nil {
+		name = lib.Name
+	}
 	if err := h.lib.Delete(r.Context(), id); err != nil {
 		handleServiceError(w, r, err)
 		return
 	}
+	h.auditEmit().LogLibraryDeleted(r.Context(), r, id, name)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -150,6 +165,7 @@ func (h *LibraryHandler) Scan(w http.ResponseWriter, r *http.Request) {
 		handleServiceError(w, r, err)
 		return
 	}
+	h.auditEmit().LogLibraryScanStarted(r.Context(), r, id)
 	respondJSON(w, http.StatusAccepted, map[string]any{
 		"data": map[string]any{"status": "scanning", "library_id": id},
 	})

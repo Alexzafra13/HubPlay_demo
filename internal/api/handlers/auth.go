@@ -54,15 +54,35 @@ type AuthHandler struct {
 // cableado (tests, deploys legacy), todas las llamadas son no-op.
 // Métodos coinciden con los del internal/audit.Service.
 type AuditEmitter interface {
+	// auth
 	LogAuthLogin(ctx context.Context, r *http.Request, actorUserID, username string)
 	LogAuthLoginFailed(ctx context.Context, r *http.Request, attemptedUsername, reason string)
 	LogAuthLogout(ctx context.Context, r *http.Request, actorUserID, sessionID string)
+	// permission / user management
 	LogPermissionChanged(ctx context.Context, r *http.Request, targetUserID string, changes map[string]bool)
 	LogRoleChanged(ctx context.Context, r *http.Request, targetUserID, oldRole, newRole string)
 	LogUserCreated(ctx context.Context, r *http.Request, newUserID, username, role string)
 	LogUserDeleted(ctx context.Context, r *http.Request, deletedUserID, deletedUsername string)
 	LogUserActiveChanged(ctx context.Context, r *http.Request, targetUserID string, active bool)
 	LogPasswordReset(ctx context.Context, r *http.Request, targetUserID string)
+	// libraries / catalog
+	LogLibraryCreated(ctx context.Context, r *http.Request, libraryID, name, contentType string)
+	LogLibraryDeleted(ctx context.Context, r *http.Request, libraryID, name string)
+	LogLibraryScanStarted(ctx context.Context, r *http.Request, libraryID string)
+	LogMetadataEdited(ctx context.Context, r *http.Request, itemID, kind string)
+	LogArtworkChanged(ctx context.Context, r *http.Request, targetType, targetID, kind string)
+	// iptv
+	LogIPTVImported(ctx context.Context, r *http.Request, libraryID string, channelCount int)
+	LogChannelDisabled(ctx context.Context, r *http.Request, channelID string)
+	LogChannelEnabled(ctx context.Context, r *http.Request, channelID string)
+	// cors
+	LogCorsOriginAdded(ctx context.Context, r *http.Request, origin, note string)
+	LogCorsOriginRemoved(ctx context.Context, r *http.Request, origin string)
+	// system
+	LogBackupDownloaded(ctx context.Context, r *http.Request)
+	LogBackupRestored(ctx context.Context, r *http.Request)
+	LogSystemRestart(ctx context.Context, r *http.Request, reason string)
+	LogDBSwap(ctx context.Context, r *http.Request, oldDriver, newDriver string)
 }
 
 // auditOrNoop devuelve el emitter si está cableado o un sink no-op si
@@ -82,11 +102,25 @@ func (noopAudit) LogAuthLoginFailed(_ context.Context, _ *http.Request, _, _ str
 func (noopAudit) LogAuthLogout(_ context.Context, _ *http.Request, _, _ string)             {}
 func (noopAudit) LogPermissionChanged(_ context.Context, _ *http.Request, _ string, _ map[string]bool) {
 }
-func (noopAudit) LogRoleChanged(_ context.Context, _ *http.Request, _, _, _ string)       {}
-func (noopAudit) LogUserCreated(_ context.Context, _ *http.Request, _, _, _ string)       {}
-func (noopAudit) LogUserDeleted(_ context.Context, _ *http.Request, _, _ string)          {}
+func (noopAudit) LogRoleChanged(_ context.Context, _ *http.Request, _, _, _ string)         {}
+func (noopAudit) LogUserCreated(_ context.Context, _ *http.Request, _, _, _ string)         {}
+func (noopAudit) LogUserDeleted(_ context.Context, _ *http.Request, _, _ string)            {}
 func (noopAudit) LogUserActiveChanged(_ context.Context, _ *http.Request, _ string, _ bool) {}
-func (noopAudit) LogPasswordReset(_ context.Context, _ *http.Request, _ string)           {}
+func (noopAudit) LogPasswordReset(_ context.Context, _ *http.Request, _ string)             {}
+func (noopAudit) LogLibraryCreated(_ context.Context, _ *http.Request, _, _, _ string)      {}
+func (noopAudit) LogLibraryDeleted(_ context.Context, _ *http.Request, _, _ string)         {}
+func (noopAudit) LogLibraryScanStarted(_ context.Context, _ *http.Request, _ string)        {}
+func (noopAudit) LogMetadataEdited(_ context.Context, _ *http.Request, _, _ string)         {}
+func (noopAudit) LogArtworkChanged(_ context.Context, _ *http.Request, _, _, _ string)      {}
+func (noopAudit) LogIPTVImported(_ context.Context, _ *http.Request, _ string, _ int)       {}
+func (noopAudit) LogChannelDisabled(_ context.Context, _ *http.Request, _ string)           {}
+func (noopAudit) LogChannelEnabled(_ context.Context, _ *http.Request, _ string)            {}
+func (noopAudit) LogCorsOriginAdded(_ context.Context, _ *http.Request, _, _ string)        {}
+func (noopAudit) LogCorsOriginRemoved(_ context.Context, _ *http.Request, _ string)         {}
+func (noopAudit) LogBackupDownloaded(_ context.Context, _ *http.Request)                    {}
+func (noopAudit) LogBackupRestored(_ context.Context, _ *http.Request)                      {}
+func (noopAudit) LogSystemRestart(_ context.Context, _ *http.Request, _ string)             {}
+func (noopAudit) LogDBSwap(_ context.Context, _ *http.Request, _, _ string)                 {}
 
 // NewAuthHandler wires the auth handler. libraries may be nil (the setup
 // wizard reuses a slimmer handler that never receives grant_library_ids);

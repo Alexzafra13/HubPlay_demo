@@ -126,7 +126,7 @@ func rejectValidator(s string) (string, error) {
 func TestCorsOriginsHandler_List_EmptyDynamics(t *testing.T) {
 	store := &fakeCorsStore{}
 	reg := &fakeRegistry{statics: []string{"https://static.example.com"}}
-	h := handlers.NewCorsOriginsHandler(store, reg, okValidator, slog.Default())
+	h := handlers.NewCorsOriginsHandler(store, reg, okValidator, nil, slog.Default())
 
 	rr := corsRequest(mountCors(h), http.MethodGet, "/cors", "", "")
 	if rr.Code != http.StatusOK {
@@ -150,7 +150,7 @@ func TestCorsOriginsHandler_List_EmptyDynamics(t *testing.T) {
 func TestCorsOriginsHandler_Add_HappyPath(t *testing.T) {
 	store := &fakeCorsStore{}
 	reg := &fakeRegistry{}
-	h := handlers.NewCorsOriginsHandler(store, reg, okValidator, slog.Default())
+	h := handlers.NewCorsOriginsHandler(store, reg, okValidator, nil, slog.Default())
 
 	rr := corsRequest(mountCors(h), http.MethodPost, "/cors",
 		`{"origin":"https://new.example.com","note":"hello"}`, "u-owner")
@@ -175,7 +175,7 @@ func TestCorsOriginsHandler_Add_HappyPath(t *testing.T) {
 func TestCorsOriginsHandler_Add_RejectsBadValidator(t *testing.T) {
 	store := &fakeCorsStore{}
 	reg := &fakeRegistry{}
-	h := handlers.NewCorsOriginsHandler(store, reg, rejectValidator, slog.Default())
+	h := handlers.NewCorsOriginsHandler(store, reg, rejectValidator, nil, slog.Default())
 
 	rr := corsRequest(mountCors(h), http.MethodPost, "/cors", `{"origin":"anything"}`, "u-1")
 	if rr.Code != http.StatusBadRequest {
@@ -189,7 +189,7 @@ func TestCorsOriginsHandler_Add_RejectsBadValidator(t *testing.T) {
 func TestCorsOriginsHandler_Add_RejectsDuplicateStatic(t *testing.T) {
 	store := &fakeCorsStore{}
 	reg := &fakeRegistry{statics: []string{"https://yaml.example.com"}}
-	h := handlers.NewCorsOriginsHandler(store, reg, okValidator, slog.Default())
+	h := handlers.NewCorsOriginsHandler(store, reg, okValidator, nil, slog.Default())
 
 	rr := corsRequest(mountCors(h), http.MethodPost, "/cors",
 		`{"origin":"https://yaml.example.com"}`, "u-owner")
@@ -208,7 +208,7 @@ func TestCorsOriginsHandler_Add_RejectsDuplicateDynamic(t *testing.T) {
 		},
 	}
 	reg := &fakeRegistry{}
-	h := handlers.NewCorsOriginsHandler(store, reg, okValidator, slog.Default())
+	h := handlers.NewCorsOriginsHandler(store, reg, okValidator, nil, slog.Default())
 
 	rr := corsRequest(mountCors(h), http.MethodPost, "/cors",
 		`{"origin":"https://existing.example.com"}`, "u-owner")
@@ -224,7 +224,7 @@ func TestCorsOriginsHandler_Delete_HappyPath(t *testing.T) {
 		},
 	}
 	reg := &fakeRegistry{}
-	h := handlers.NewCorsOriginsHandler(store, reg, okValidator, slog.Default())
+	h := handlers.NewCorsOriginsHandler(store, reg, okValidator, nil, slog.Default())
 
 	rr := corsRequest(mountCors(h), http.MethodDelete,
 		"/cors?origin=https%3A%2F%2Fto-remove.example.com", "", "u-owner")
@@ -239,7 +239,7 @@ func TestCorsOriginsHandler_Delete_HappyPath(t *testing.T) {
 func TestCorsOriginsHandler_Delete_RejectsStatic(t *testing.T) {
 	store := &fakeCorsStore{}
 	reg := &fakeRegistry{statics: []string{"https://yaml.example.com"}}
-	h := handlers.NewCorsOriginsHandler(store, reg, okValidator, slog.Default())
+	h := handlers.NewCorsOriginsHandler(store, reg, okValidator, nil, slog.Default())
 
 	rr := corsRequest(mountCors(h), http.MethodDelete,
 		"/cors?origin=https%3A%2F%2Fyaml.example.com", "", "u-owner")
@@ -251,7 +251,7 @@ func TestCorsOriginsHandler_Delete_RejectsStatic(t *testing.T) {
 func TestCorsOriginsHandler_Delete_MissingOriginParam(t *testing.T) {
 	store := &fakeCorsStore{}
 	reg := &fakeRegistry{}
-	h := handlers.NewCorsOriginsHandler(store, reg, okValidator, slog.Default())
+	h := handlers.NewCorsOriginsHandler(store, reg, okValidator, nil, slog.Default())
 
 	rr := corsRequest(mountCors(h), http.MethodDelete, "/cors", "", "u-owner")
 	if rr.Code != http.StatusBadRequest {

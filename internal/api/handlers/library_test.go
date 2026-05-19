@@ -275,7 +275,7 @@ func newLibTestEnv(t *testing.T) *libTestEnv {
 		meta:     &libFakeMetadataRepo{byID: map[string]*librarymodel.Metadata{}},
 		userData: newProgressFakeUserData(),
 	}
-	env.handler = NewLibraryHandler(env.svc, env.images, env.meta, env.userData, nil, testutil.NopLogger())
+	env.handler = NewLibraryHandler(env.svc, env.images, env.meta, env.userData, nil, nil, testutil.NopLogger())
 
 	r := chi.NewRouter()
 	r.Route("/api/v1", func(r chi.Router) {

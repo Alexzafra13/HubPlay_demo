@@ -790,7 +790,7 @@ func NewRouter(deps Dependencies) http.Handler {
 					if deps.Libraries != nil {
 						libAdminHandler := handlers.NewLibraryHandler(
 							deps.Libraries, deps.Images, deps.Metadata,
-							deps.UserData, deps.Users, deps.Logger,
+							deps.UserData, deps.Users, deps.Audit, deps.Logger,
 						)
 						r.Get("/recently-added", libAdminHandler.AdminRecentlyAdded)
 					}
@@ -872,7 +872,7 @@ func NewRouter(deps Dependencies) http.Handler {
 						}
 						if deps.DB != nil {
 							backupHandler := handlers.NewAdminBackupHandler(
-								deps.Config.Database.Driver, deps.DB, deps.Config.Database.Path, deps.Logger,
+								deps.Config.Database.Driver, deps.DB, deps.Config.Database.Path, deps.Audit, deps.Logger,
 							)
 							r.Get("/backup", backupHandler.Download)
 							r.Post("/backup/restore", backupHandler.Upload)
@@ -884,6 +884,7 @@ func NewRouter(deps Dependencies) http.Handler {
 								deps.DB,
 								deps.SetupService.SaveDatabaseConfig,
 								deps.RestartRequester,
+								deps.Audit,
 								deps.Logger,
 							)
 							r.Get("/db", dbHandler.Status)
@@ -904,6 +905,7 @@ func NewRouter(deps Dependencies) http.Handler {
 								deps.CorsOriginsRepo,
 								deps.CorsRegistry,
 								ValidateCorsOrigin,
+								deps.Audit,
 								deps.Logger,
 							)
 							r.Get("/cors-origins", corsHandler.List)
@@ -1008,7 +1010,7 @@ func NewRouter(deps Dependencies) http.Handler {
 
 			// Libraries & Items (only if service is wired)
 			if deps.Libraries != nil {
-				libHandler := handlers.NewLibraryHandler(deps.Libraries, deps.Images, deps.Metadata, deps.UserData, deps.Users, deps.Logger)
+				libHandler := handlers.NewLibraryHandler(deps.Libraries, deps.Images, deps.Metadata, deps.UserData, deps.Users, deps.Audit, deps.Logger)
 				// Trickplay sprites land under <imageDir>/trickplay/ —
 				// reusing the image-storage root keeps the on-disk
 				// layout clustered (one tree the operator can backup,
@@ -1022,7 +1024,7 @@ func NewRouter(deps Dependencies) http.Handler {
 				if deps.Scanner != nil {
 					identifier = deps.Scanner
 				}
-				itemHandler := handlers.NewItemHandler(deps.Libraries, deps.Images, deps.Metadata, deps.UserData, deps.Users, deps.Chapters, deps.EpisodeSegments, deps.ExternalIDs, deps.People, deps.Collections, deps.Providers, identifier, trickplayDir, deps.Logger)
+				itemHandler := handlers.NewItemHandler(deps.Libraries, deps.Images, deps.Metadata, deps.UserData, deps.Users, deps.Chapters, deps.EpisodeSegments, deps.ExternalIDs, deps.People, deps.Collections, deps.Providers, identifier, trickplayDir, deps.Audit, deps.Logger)
 
 				// Libraries
 				r.Get("/libraries", libHandler.List)
@@ -1060,7 +1062,7 @@ func NewRouter(deps Dependencies) http.Handler {
 					// falls back to the raw passthrough proxy, which is
 					// the correct degraded-but-functional behaviour for
 					// HLS-only deployments without ffmpeg.
-					iptvHandler := handlers.NewIPTVHandler(deps.IPTV, deps.IPTVProxy, deps.IPTVTransmux, deps.IPTVLogoCache, fedImageDir, deps.LibraryRepo, deps.Libraries, deps.Logger)
+					iptvHandler := handlers.NewIPTVHandler(deps.IPTV, deps.IPTVProxy, deps.IPTVTransmux, deps.IPTVLogoCache, fedImageDir, deps.LibraryRepo, deps.Libraries, deps.Audit, deps.Logger)
 
 					r.Route("/libraries/{id}/channels", func(r chi.Router) {
 						r.Get("/", iptvHandler.ListChannels)
@@ -1312,7 +1314,7 @@ func NewRouter(deps Dependencies) http.Handler {
 					if deps.Providers != nil {
 						collectionImages = deps.Providers
 					}
-					collectionHandler := handlers.NewCollectionHandler(deps.Collections, collectionOverrides, collectionImages, fedImageDir, deps.Logger)
+					collectionHandler := handlers.NewCollectionHandler(deps.Collections, collectionOverrides, collectionImages, fedImageDir, deps.Audit, deps.Logger)
 					r.Get("/collections", collectionHandler.List)
 					r.Get("/collections/{id}", collectionHandler.Get)
 					// Cualquier usuario autenticado puede GET el archivo

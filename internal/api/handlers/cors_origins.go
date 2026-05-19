@@ -47,6 +47,7 @@ type CorsOriginsHandler struct {
 	// asumir un validator no-op y centrar el test en el repo + reload.
 	// En producción se pasa api.ValidateCorsOrigin.
 	validate func(string) (string, error)
+	audit    AuditEmitter
 	logger   *slog.Logger
 }
 
@@ -54,14 +55,23 @@ func NewCorsOriginsHandler(
 	store CorsOriginStore,
 	registry CorsRegistryReloader,
 	validate func(string) (string, error),
+	audit AuditEmitter,
 	logger *slog.Logger,
 ) *CorsOriginsHandler {
 	return &CorsOriginsHandler{
 		store:    store,
 		registry: registry,
 		validate: validate,
+		audit:    audit,
 		logger:   logger.With("module", "cors-origins-handler"),
 	}
+}
+
+func (h *CorsOriginsHandler) auditEmit() AuditEmitter {
+	if h.audit != nil {
+		return h.audit
+	}
+	return noopAudit{}
 }
 
 // List devuelve los orígenes statics (YAML, read-only) + dynamics
@@ -171,6 +181,7 @@ func (h *CorsOriginsHandler) Add(w http.ResponseWriter, r *http.Request) {
 
 	h.logger.Info("cors origin added",
 		"origin", canonical, "created_by", createdBy, "note", row.Note)
+	h.auditEmit().LogCorsOriginAdded(r.Context(), r, canonical, row.Note)
 	// Devolvemos la lista completa — mismo shape que List, para que
 	// el frontend repinte sin un GET extra.
 	h.List(w, r)
@@ -225,6 +236,7 @@ func (h *CorsOriginsHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		deletedBy = claims.UserID
 	}
 	h.logger.Info("cors origin removed", "origin", decoded, "by", deletedBy)
+	h.auditEmit().LogCorsOriginRemoved(r.Context(), r, decoded)
 	w.WriteHeader(http.StatusNoContent)
 }
 

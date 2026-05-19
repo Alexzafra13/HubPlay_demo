@@ -130,6 +130,7 @@ func (h *ItemHandler) Identify(w http.ResponseWriter, r *http.Request) {
 		respondError(w, r, http.StatusBadGateway, "IDENTIFY_FAILED", "could not apply metadata from provider")
 		return
 	}
+	h.auditEmit().LogMetadataEdited(r.Context(), r, id, "identify_tmdb")
 
 	respondJSON(w, http.StatusOK, map[string]any{
 		"data": map[string]any{
@@ -194,6 +195,7 @@ func (h *ItemHandler) UpdateItemMetadata(w http.ResponseWriter, r *http.Request)
 		respondError(w, r, http.StatusInternalServerError, "UPDATE_FAILED", "could not apply metadata patch")
 		return
 	}
+	h.auditEmit().LogMetadataEdited(r.Context(), r, id, "manual")
 
 	respondJSON(w, http.StatusOK, map[string]any{
 		"data": map[string]any{
@@ -261,6 +263,7 @@ func (h *ItemHandler) RefreshItemMetadata(w http.ResponseWriter, r *http.Request
 		respondError(w, r, http.StatusBadGateway, "REFRESH_FAILED", "could not refresh metadata")
 		return
 	}
+	h.auditEmit().LogMetadataEdited(r.Context(), r, id, "refresh")
 	respondJSON(w, http.StatusOK, map[string]any{
 		"data": map[string]any{"item_id": id, "refreshed": true},
 	})

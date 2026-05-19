@@ -70,10 +70,11 @@ type ItemHandler struct {
 	// shutdown doesn't currently wait on this; the cancelled bg
 	// contexts inside the goroutine bound the work to its own deadline.
 	trickplayBG sync.WaitGroup
+	audit       AuditEmitter
 	logger      *slog.Logger
 }
 
-func NewItemHandler(lib LibraryService, images ImageRepository, metadata MetadataRepository, userData UserDataRepository, users UserService, chapters ChapterRepository, segments EpisodeSegmentRepository, externalIDs ExternalIDsRepository, people PeopleRepoForItems, collections CollectionRepoForItems, providers ProviderManager, identifier MetadataIdentifier, trickplayDir string, logger *slog.Logger) *ItemHandler {
+func NewItemHandler(lib LibraryService, images ImageRepository, metadata MetadataRepository, userData UserDataRepository, users UserService, chapters ChapterRepository, segments EpisodeSegmentRepository, externalIDs ExternalIDsRepository, people PeopleRepoForItems, collections CollectionRepoForItems, providers ProviderManager, identifier MetadataIdentifier, trickplayDir string, audit AuditEmitter, logger *slog.Logger) *ItemHandler {
 	return &ItemHandler{
 		lib: lib, images: images, metadata: metadata, userData: userData,
 		users:    users,
@@ -81,8 +82,15 @@ func NewItemHandler(lib LibraryService, images ImageRepository, metadata Metadat
 		collections: collections,
 		providers:   providers,
 		identifier:  identifier,
-		trickplayDir: trickplayDir, logger: logger,
+		trickplayDir: trickplayDir, audit: audit, logger: logger,
 	}
+}
+
+func (h *ItemHandler) auditEmit() AuditEmitter {
+	if h.audit != nil {
+		return h.audit
+	}
+	return noopAudit{}
 }
 
 // callerCapRating mirrors the LibraryHandler helper. nil-safe: when
