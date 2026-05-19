@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { User } from "@/api/types";
 import { avatarColorForUser } from "@/utils/avatarColor";
 import { getInitials } from "@/utils/userDisplay";
@@ -57,11 +57,15 @@ export function UserAvatar({
   // Si la <img> falla (URL 404, fichero borrado del disco, cache-buster
   // contra una versión inexistente...) caemos a iniciales en lugar de
   // dejar el círculo de color vacío. Reseteamos el flag cuando la URL
-  // cambia para que un nuevo upload tenga otra oportunidad de cargar.
+  // cambia (patrón "derive state with previous tracking" — evita
+  // useEffect+setState que la nueva regla react-hooks/set-state-in-effect
+  // marca como cascading render).
   const [broken, setBroken] = useState(false);
-  useEffect(() => {
+  const [prevSrc, setPrevSrc] = useState(imageSrc);
+  if (prevSrc !== imageSrc) {
+    setPrevSrc(imageSrc);
     setBroken(false);
-  }, [imageSrc]);
+  }
 
   const base = [
     "inline-flex items-center justify-center overflow-hidden rounded-full font-semibold text-white ring-1 ring-white/15 select-none",

@@ -147,16 +147,17 @@ func (s *Service) Start(ctx context.Context) {
 			"reason", "no repo configured or dev build")
 		return
 	}
-	go s.run(ctx)
+	// Capturar el jitter ANTES de spawnear la goroutine. Si lo
+	// leyéramos dentro de run() vs un test que sobrescribe
+	// MaxInitialJitter en defer habría data race (-race lo cazaba).
+	jitter := time.Duration(rand.Int64N(int64(MaxInitialJitter)))
+	interval := CheckInterval
+	go s.run(ctx, jitter, interval)
 }
 
-func (s *Service) run(ctx context.Context) {
-	// Jitter del primer check para repartir carga si muchas instancias
-	// arrancan a la vez. La fuente entropía rand/v2 (Go 1.22+) ya está
-	// seedada globalmente — no hace falta seed manual.
-	jitter := time.Duration(rand.Int64N(int64(MaxInitialJitter)))
+func (s *Service) run(ctx context.Context, jitter, interval time.Duration) {
 	s.logger.Info("update checker started",
-		"interval", CheckInterval,
+		"interval", interval,
 		"first_check_in", jitter)
 
 	select {
@@ -170,7 +171,7 @@ func (s *Service) run(ctx context.Context) {
 		s.logger.Warn("initial update check failed", "error", err)
 	}
 
-	ticker := time.NewTicker(CheckInterval)
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {

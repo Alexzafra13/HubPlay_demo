@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { extractCode } from "./QRScannerModal";
+import { extractCode } from "./extractCode";
 
 // extractCode es la parte pura del modal — vale la pena pinearla
 // porque define qué QRs son "válidos" desde la perspectiva de

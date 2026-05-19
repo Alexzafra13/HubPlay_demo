@@ -239,6 +239,12 @@ jobs:
     if: always() && !cancelled()
     steps:
       - uses: actions/checkout@v4
+        # fetch-depth 0 → git describe necesita ver el tag "nightly"
+        # para producir el mismo string de versión que el job build
+        # (e.g. "nightly-7-g971ff38"). Sin esto degrada a sólo el SHA
+        # y el nombre del zip no coincide.
+        with:
+          fetch-depth: 0
 
       - name: Download windows-amd64 archive
         uses: actions/download-artifact@v4

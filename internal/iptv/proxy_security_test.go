@@ -98,8 +98,10 @@ func TestStreamProxy_FetchUpstream_RedirectIntoLoopbackBlocked(t *testing.T) {
 	//
 	// To make this testable we stand up a single server and have its handler
 	// redirect to a literal private-IP URL that would resolve without a DNS hit.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		http.Redirect(w, nil, "http://169.254.169.254/", http.StatusFound)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// http.Redirect en Go 1.25 dereferencia r.Method para decidir
+		// si añade body HTML — pasar nil panica. Antes era tolerante.
+		http.Redirect(w, r, "http://169.254.169.254/", http.StatusFound)
 	}))
 	defer srv.Close()
 
