@@ -186,10 +186,97 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # ─── Installer Windows .exe (Inno Setup) ───────────────────────────
+  # Toma el .zip del build de windows-amd64, le añade NSSM (BSD-licensed
+  # service manager para que hubplay arranque sin consola al boot), y
+  # compila scripts/installer.iss con ISCC.exe sobre runner Windows.
+  #
+  # El installer resultante (HubPlay-Setup-vX.Y.Z-windows-amd64.exe):
+  #   - copia hubplay+ffmpeg+ffprobe a C:\Program Files\HubPlay
+  #   - crea icono en Escritorio + Menú Inicio (apunta a localhost:8096)
+  #   - opcionalmente registra HubPlay como servicio (vía NSSM) —
+  #     arranca con el PC, sin consola visible
+  #   - al final abre el navegador en localhost:8096 si el user lo marcó
+  windows-installer:
+    name: Build Windows installer
+    needs: build
+    runs-on: windows-latest
+    # Sólo si el build de windows-amd64 tuvo éxito y produjo el zip.
+    if: always() && !cancelled()
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download windows-amd64 archive
+        uses: actions/download-artifact@v4
+        with:
+          pattern: hubplay-*-windows-amd64
+          path: artifacts
+          merge-multiple: true
+
+      - name: Compute version
+        id: meta
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            VERSION="$GITHUB_REF_NAME"
+          else
+            VERSION="$(git describe --tags --always --dirty)"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Extract zip + fetch NSSM
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.meta.outputs.version }}"
+          ZIP="artifacts/hubplay-${VERSION}-windows-amd64.zip"
+          ls -la artifacts/
+          unzip -q "$ZIP" -d stage
+          # Estructura ahora: stage/hubplay-${VERSION}-windows-amd64/
+          mv "stage/hubplay-${VERSION}-windows-amd64" "stage/source"
+
+          # NSSM 2.24 — última release estable, BSD-licensed, redist OK.
+          mkdir -p scripts/vendor
+          curl -fsSL https://nssm.cc/release/nssm-2.24.zip -o nssm.zip
+          unzip -q nssm.zip
+          cp nssm-2.24/win64/nssm.exe scripts/vendor/nssm.exe
+
+      - name: Compile installer with Inno Setup
+        # Action mantenida que wraps ISCC.exe; el runner windows-latest
+        # ya viene con Inno Setup 6 preinstalado, así que esto sólo
+        # resuelve la sintaxis de paths y los /D defines.
+        uses: Minionguyjpro/Inno-Setup-Action@v1
+        with:
+          path: scripts/installer.iss
+          options: >-
+            /DAppVersion="${{ steps.meta.outputs.version }}"
+            /DSourceDir="${{ github.workspace }}\stage\source"
+            /DOutputDir="${{ github.workspace }}\dist"
+
+      - name: Hash the installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.meta.outputs.version }}"
+          cd dist
+          ls -la
+          # En windows-runner, sha256sum viene de git-bash.
+          sha256sum "HubPlay-Setup-${VERSION}-windows-amd64.exe" \
+            > "HubPlay-Setup-${VERSION}-windows-amd64.exe.sha256"
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hubplay-installer-windows-amd64
+          path: |
+            dist/HubPlay-Setup-*.exe
+            dist/HubPlay-Setup-*.exe.sha256
+          retention-days: 7
+
   # ─── Release estable (sólo tags v*) ────────────────────────────────
   release-tag:
     name: Publish stable release
-    needs: build
+    needs: [build, windows-installer]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
@@ -207,32 +294,55 @@ jobs:
           files: |
             artifacts/*.tar.gz
             artifacts/*.zip
+            artifacts/*.exe
             artifacts/*.sha256
           generate_release_notes: true
           draft: false
           prerelease: false
           body: |
-            ## Descarga
+            ## Descarga rápida
 
-            Cada archivo incluye `hubplay`, `ffmpeg` y `ffprobe` listos para
-            correr — no requiere instalar nada más. Descomprime, edita
-            `hubplay.example.yaml` y lanza `./hubplay --config hubplay.yaml`.
+            ### Windows (recomendado)
+            **`HubPlay-Setup-*-windows-amd64.exe`** — installer plug-and-play.
+            Doble-click → siguiente → al terminar tienes icono en escritorio
+            y HubPlay arrancando como servicio (sin consola visible). Abre
+            el icono → se abre el navegador en la app.
+
+            ### Linux / macOS
+            Archivo `.tar.gz` con `hubplay` + `ffmpeg` + `ffprobe`. Descomprime,
+            edita `hubplay.example.yaml`, lanza `./hubplay --config hubplay.yaml`.
+
+            Una vez en la app, **el navegador te ofrece "Instalar HubPlay"**
+            en la barra de direcciones — click → icono en escritorio, abre
+            en ventana standalone como app nativa (PWA).
+
+            ### Avanzado (Windows .zip)
+            `hubplay-*-windows-amd64.zip` — mismo contenido que el installer
+            pero sin registrar servicio. Útil si quieres correrlo manualmente
+            o portable desde USB.
 
             ### Plataformas
 
+            - **Windows x64** — installer `.exe` o `.zip` portable
             - **Linux amd64** — `hubplay-*-linux-amd64.tar.gz`
             - **Linux arm64** — `hubplay-*-linux-arm64.tar.gz`
             - **macOS Intel** — `hubplay-*-darwin-amd64.tar.gz`
             - **macOS Apple Silicon** — `hubplay-*-darwin-arm64.tar.gz`
-            - **Windows x64** — `hubplay-*-windows-amd64.zip`
 
             Cada archivo tiene su `.sha256` adjunto para verificación.
+
+            ### Aviso de SmartScreen en Windows
+            El installer no está firmado todavía. Windows mostrará un aviso
+            "SmartScreen protegió tu PC" — click en **"Más información" →
+            "Ejecutar de todas formas"** la primera vez. Soluble en el
+            futuro firmando con SignPath Foundation (gratis para OSS).
 
             ### Licencia
 
             HubPlay se distribuye bajo su licencia propia (`LICENSE`).
             Los binarios FFmpeg bundleados son LGPL — ver
-            `LICENSE-ffmpeg.txt` dentro del archivo.
+            `LICENSE-ffmpeg.txt` dentro del archivo. NSSM (gestor del
+            servicio Windows) es BSD — incluido sólo en el installer.
 
   # ─── Nightly rolling (push a main + workflow_dispatch) ─────────────
   # Mantiene un release público llamado "nightly" siempre actualizado
@@ -243,7 +353,7 @@ jobs:
   # como "latest" (eso queda reservado para los tags v*).
   release-nightly:
     name: Update nightly release
-    needs: build
+    needs: [build, windows-installer]
     runs-on: ubuntu-latest
     if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
     steps:
@@ -271,6 +381,7 @@ jobs:
           files: |
             artifacts/*.tar.gz
             artifacts/*.zip
+            artifacts/*.exe
             artifacts/*.sha256
           draft: false
           prerelease: true
@@ -282,18 +393,24 @@ jobs:
             Commit: `${{ github.sha }}`
             Fecha:  build automático de la última run
 
-            ## Descarga
+            ## Descarga rápida
 
-            Cada archivo incluye `hubplay`, `ffmpeg` y `ffprobe` listos para
-            correr — no requiere instalar nada más. Descomprime, edita
-            `hubplay.example.yaml` y lanza `./hubplay --config hubplay.yaml`.
+            **Windows** — usa `HubPlay-Setup-*-windows-amd64.exe` (installer
+            plug-and-play: icono en escritorio + servicio sin consola).
+            Si SmartScreen avisa, click en **"Más información" → "Ejecutar
+            de todas formas"**.
+
+            **Linux / macOS** — descomprime el `.tar.gz`, edita el yaml de
+            ejemplo, lanza `./hubplay --config hubplay.yaml`. Luego en el
+            navegador click en **"Instalar HubPlay"** para añadirlo como
+            PWA con icono propio.
 
             ### Plataformas
 
+            - **Windows x64** — installer `.exe` (recomendado) o `.zip` portable
             - **Linux amd64** — `hubplay-*-linux-amd64.tar.gz`
             - **Linux arm64** — `hubplay-*-linux-arm64.tar.gz`
             - **macOS Intel** — `hubplay-*-darwin-amd64.tar.gz`
             - **macOS Apple Silicon** — `hubplay-*-darwin-arm64.tar.gz`
-            - **Windows x64** — `hubplay-*-windows-amd64.zip`
 
             Cada archivo tiene su `.sha256` adjunto para verificación.
