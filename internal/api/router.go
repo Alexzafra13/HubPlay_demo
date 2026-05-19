@@ -137,6 +137,15 @@ type Dependencies struct {
 	// PermissionsHandler. Interface estrecha definida en el paquete
 	// handlers; el *db.UserRepository concreto la satisface.
 	UserRepo       handlers.PermissionsStore
+	// CorsRegistry — combinador atómico statics(YAML) + dynamics(DB)
+	// que el middleware CORS consulta en cada preflight. nil = router
+	// cae al handler estático de chi-cors con la lista del YAML
+	// (comportamiento pre-PR4).
+	CorsRegistry   *CorsRegistry
+	// CorsOriginsRepo expone List/Insert/Delete/ListOrigins al handler
+	// del panel admin de CORS. nil = los endpoints /admin/cors-origins
+	// no se montan.
+	CorsOriginsRepo handlers.CorsOriginStore
 }
 
 func NewRouter(deps Dependencies) http.Handler {
@@ -168,35 +177,36 @@ func NewRouter(deps Dependencies) http.Handler {
 	if deps.Metrics != nil {
 		r.Use(deps.Metrics.MetricsMiddleware)
 	}
-	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins: allowedOrigins(deps.Config),
-		// PATCH es REQUERIDO por el protocolo tus (uploads resumables
-		// envían cada chunk via PATCH). HEAD también lo usa para
-		// consultar el offset actual. Sin estos métodos en CORS, los
-		// uploads cross-origin fallan en el preflight.
-		AllowedMethods: []string{"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		// Tus-* y Upload-* son los headers del protocolo tus 1.0.0
-		// (https://tus.io/protocols/resumable-upload). Sin ellos, los
-		// chunks con metadata legítima fallan preflight cross-origin.
-		AllowedHeaders: []string{
-			"Authorization", "Content-Type", "X-CSRF-Token",
-			"Tus-Resumable", "Upload-Length", "Upload-Offset",
-			"Upload-Metadata", "Upload-Concat", "Upload-Defer-Length",
-			"Upload-Checksum",
-		},
-		// ExposedHeaders: el navegador sólo deja al JS leer estos
-		// headers en respuestas cross-origin. tus-js-client necesita
-		// Location (para correlacionar el upload id tras POST de
-		// creación), Upload-Offset (tras cada PATCH), Tus-* y
-		// Retry-After (rate limiting).
-		ExposedHeaders: []string{
-			"Retry-After",
-			"Location", "Tus-Resumable", "Tus-Version", "Tus-Extension",
-			"Tus-Max-Size", "Upload-Offset", "Upload-Length",
-		},
-		AllowCredentials: true,
-		MaxAge:           300,
-	}))
+	// CORS middleware. Si deps.CorsRegistry está cableado (caso default
+	// post-PR4-CORS-dynamic), usamos el middleware custom que combina
+	// statics del YAML + dynamics del DB con un atomic.Pointer; el panel
+	// admin puede añadir/quitar orígenes sin restart. Si NO está
+	// (tests minimalistas o flag de compatibilidad), caemos al handler
+	// estático de chi-cors con la lista del YAML.
+	corsMethods := []string{"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}
+	corsAllowedHeaders := []string{
+		"Authorization", "Content-Type", "X-CSRF-Token",
+		"Tus-Resumable", "Upload-Length", "Upload-Offset",
+		"Upload-Metadata", "Upload-Concat", "Upload-Defer-Length",
+		"Upload-Checksum",
+	}
+	corsExposedHeaders := []string{
+		"Retry-After",
+		"Location", "Tus-Resumable", "Tus-Version", "Tus-Extension",
+		"Tus-Max-Size", "Upload-Offset", "Upload-Length",
+	}
+	if deps.CorsRegistry != nil {
+		r.Use(CorsMiddleware(deps.CorsRegistry, corsMethods, corsAllowedHeaders, corsExposedHeaders, true, 300))
+	} else {
+		r.Use(cors.Handler(cors.Options{
+			AllowedOrigins:   allowedOrigins(deps.Config),
+			AllowedMethods:   corsMethods,
+			AllowedHeaders:   corsAllowedHeaders,
+			ExposedHeaders:   corsExposedHeaders,
+			AllowCredentials: true,
+			MaxAge:           300,
+		}))
+	}
 	r.Use(CSRFProtect)
 
 	// Prometheus /metrics endpoint. Mounted outside /api/v1 because metrics
@@ -875,6 +885,23 @@ func NewRouter(deps Dependencies) http.Handler {
 							r.Put("/db", dbHandler.Save)
 							r.Post("/db/migrate", dbHandler.Migrate)
 							r.Post("/restart", dbHandler.Restart)
+						}
+
+						// CORS origins panel (migración 056). Same owner-only
+						// gate: añadir un origen es expandir la superficie
+						// de CSRF cross-origin. Va dentro de /admin/system
+						// para que el dashboard tenga un único hogar de
+						// "configuración del servidor".
+						if deps.CorsOriginsRepo != nil && deps.CorsRegistry != nil {
+							corsHandler := handlers.NewCorsOriginsHandler(
+								deps.CorsOriginsRepo,
+								deps.CorsRegistry,
+								ValidateCorsOrigin,
+								deps.Logger,
+							)
+							r.Get("/cors-origins", corsHandler.List)
+							r.Post("/cors-origins", corsHandler.Add)
+							r.Delete("/cors-origins", corsHandler.Delete)
 						}
 					})
 

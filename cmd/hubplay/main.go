@@ -528,6 +528,24 @@ func run(configPath string) error {
 		logger.Info("uploads disabled (config.upload.enabled=false)")
 	}
 
+	// CORS registry (PR4 feature CORS-dynamic): combina statics del
+	// YAML + dynamics del DB en un atomic.Pointer.  Lo construimos
+	// AQUÍ (antes del router) para que NewRouter lo reciba listo.
+	// Pre-carga inicial de dynamics — los siguientes Add/Delete del
+	// panel admin recargan vía el handler.
+	corsRegistry := api.NewCorsRegistry(api.AllowedOrigins(cfg))
+	if initialDynamics, err := repos.CorsOrigins.ListOrigins(ctx); err == nil {
+		corsRegistry.SetDynamics(initialDynamics)
+		logger.Info("cors registry loaded",
+			"statics", len(api.AllowedOrigins(cfg)),
+			"dynamics", len(initialDynamics))
+	} else {
+		// Si el pre-load falla, arrancamos con dynamics vacíos. El
+		// operador verá la lista vacía en el panel y al reiniciar se
+		// llenará. No abortamos boot — CORS estático del YAML basta.
+		logger.Warn("cors registry: failed initial dynamics load", "error", err)
+	}
+
 	router := api.NewRouter(api.Dependencies{
 		Auth:          authService,
 		DeviceCode:    deviceCodeService,
@@ -583,6 +601,8 @@ func run(configPath string) error {
 		UploadsAudit:     repos.UploadAudit,
 		Permissions:      auth.NewPermissionChecker(repos.Users),
 		UserRepo:         repos.Users,
+		CorsRegistry:     corsRegistry,
+		CorsOriginsRepo:  repos.CorsOrigins,
 	})
 
 	server := &http.Server{

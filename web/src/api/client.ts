@@ -58,6 +58,7 @@ import type {
   UserLibraryAccess,
   UserPermissions,
   UploadAuditEntry,
+  CorsOriginsListResponse,
   UserData,
   ApiErrorBody,
   ExternalSubtitleResult,
@@ -732,6 +733,29 @@ export class ApiClient {
     // this.baseUrl ya incluye el prefijo /api/v1 (ver factory al pie
     // del archivo). Compone "<base>/uploads/" sin duplicar el prefijo.
     return `${this.baseUrl}/uploads/`;
+  }
+
+  /** Owner-only: lista de orígenes CORS (statics YAML + dynamics DB). */
+  async listCorsOrigins(): Promise<CorsOriginsListResponse> {
+    return this.request<CorsOriginsListResponse>("GET", "/admin/system/cors-origins");
+  }
+
+  /** Owner-only: añade un origen dynamic. El backend lo valida + lo
+   *  inserta + recarga el registry CORS en caliente. Devuelve la
+   *  lista completa (mismo shape que listCorsOrigins) para que el
+   *  cliente repinte sin un GET extra. */
+  async addCorsOrigin(origin: string, note: string): Promise<CorsOriginsListResponse> {
+    return this.request<CorsOriginsListResponse>("POST", "/admin/system/cors-origins", {
+      body: { origin, note },
+    });
+  }
+
+  /** Owner-only: quita un origen dynamic. El origen viaja en query
+   *  string porque chi no maneja URLs completas en path params sin
+   *  escapado agresivo. Idempotente: borrar uno inexistente es 204. */
+  async deleteCorsOrigin(origin: string): Promise<void> {
+    const enc = encodeURIComponent(origin);
+    return this.request<void>("DELETE", `/admin/system/cors-origins?origin=${enc}`);
   }
 
   /** Shortcut for "give user X their own IPTV list": creates a

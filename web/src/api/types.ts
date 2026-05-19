@@ -400,6 +400,23 @@ export interface UploadAuditEntry {
 export type UploadPhase = "validating" | "probing" | "moving" | "indexing";
 
 /**
+ * Una entrada de la lista de orígenes CORS dinámicos (PR4 feature).
+ * Los `statics` del YAML no llevan metadata — son strings; los
+ * `dynamics` añadidos via panel sí.
+ */
+export interface CorsOriginEntry {
+  origin: string;
+  created_by: string;
+  created_at: string;
+  note: string;
+}
+
+export interface CorsOriginsListResponse {
+  statics: string[];
+  dynamics: CorsOriginEntry[];
+}
+
+/**
  * One row of the user-facing "Tus dispositivos" panel — every active
  * auth session (refresh token alive in DB) for the calling user.
  * Distinct from AdminStreamSession (the admin's "Now Playing" surface

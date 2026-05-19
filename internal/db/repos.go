@@ -43,6 +43,10 @@ type Repositories struct {
 	// el service de upload inserta una fila al cerrar el pipeline. El
 	// admin panel lo consulta via /admin/uploads/audit (no expuesto en v1).
 	UploadAudit        *UploadAuditRepository
+	// CorsOrigins gestiona los orígenes CORS añadidos en runtime
+	// via el panel admin (migración 056). Combinado con los del YAML
+	// por el middleware al validar cada preflight.
+	CorsOrigins        *CorsOriginRepository
 }
 
 // NewRepositories creates all repositories from a database connection.
@@ -90,5 +94,6 @@ func NewRepositories(driver string, database *sql.DB) *Repositories {
 		ItemMetadataLocks:  NewItemMetadataLockRepository(driver, database),
 		CollectionImageOverrides: NewCollectionImageOverrideRepository(driver, database),
 		UploadAudit:        NewUploadAuditRepository(driver, database),
+		CorsOrigins:        NewCorsOriginRepository(driver, database),
 	}
 }
