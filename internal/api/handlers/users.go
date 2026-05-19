@@ -76,6 +76,12 @@ func (h *UserHandler) Me(w http.ResponseWriter, r *http.Request) {
 			"can_change_artwork":   u.Can(authmodel.PermChangeArtwork),
 			"can_view_audit":       u.Can(authmodel.PermViewAudit),
 			"can_upload":           u.Can(authmodel.PermUpload),
+			// Cuota de upload (migración 053). El frontend la usa
+			// para pintar la línea "X de Y usados" en /uploads y
+			// rechazar cliente-side ficheros que no caben antes
+			// de empezar a subir bytes.
+			"upload_quota_bytes": u.UploadQuotaBytes,
+			"upload_used_bytes":  u.UploadUsedBytes,
 		},
 	})
 }

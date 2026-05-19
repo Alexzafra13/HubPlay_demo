@@ -89,6 +89,10 @@ func (s *userFakeService) AvatarsDir() string { return "" }
 
 func (s *userFakeService) AvatarFilePath(_ string) (string, error) { return "", nil }
 
+func (s *userFakeService) EnsureOwner(_ context.Context, _ string) (bool, error) {
+	return false, nil
+}
+
 var _ UserService = (*userFakeService)(nil)
 
 // ─── Env ────────────────────────────────────────────────────────────────────

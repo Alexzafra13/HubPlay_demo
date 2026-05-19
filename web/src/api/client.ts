@@ -57,6 +57,7 @@ import type {
   ResetPasswordResponse,
   UserLibraryAccess,
   UserPermissions,
+  UploadAuditEntry,
   UserData,
   ApiErrorBody,
   ExternalSubtitleResult,
@@ -699,6 +700,38 @@ export class ApiClient {
       `/users/${userId}/permissions`,
       { body: flags },
     );
+  }
+
+  /** Las últimas N filas del audit de uploads del propio usuario.
+   *  El backend usa default 50 + cap 200. El cliente lo invoca al
+   *  abrir la página de uploads (snapshot inicial); los nuevos
+   *  uploads que aterricen mientras está abierta llegan vía SSE.
+   *
+   *  No es global — sólo expone los DEL usuario que llama. El admin
+   *  tendrá un endpoint separado /admin/uploads/audit en el futuro
+   *  cuando aterrice el panel admin de uploads. */
+  async listMyUploads(limit = 50): Promise<UploadAuditEntry[]> {
+    return this.request<UploadAuditEntry[]>(
+      "GET",
+      `/uploads/mine?limit=${limit}`,
+    );
+  }
+
+  /** URL absoluta del endpoint tus para que tus-js-client la use
+   *  como `endpoint` del Upload. Centralizado aquí para que un
+   *  cambio futuro de basePath (p.ej. detrás de un subpath proxy)
+   *  no obligue a tocar el componente UploadDropzone.
+   *
+   *  El trailing slash importa: tusd compone Location:<base><id>
+   *  tras POST de creación, y el cliente PATCH-ea ese path tal cual.
+   *
+   *  La auth viaja en el cookie hubplay_access (mismo origen, mismo
+   *  patrón que el resto del API). tus-js-client necesita
+   *  `withCredentials: true` en su config para incluirlo. */
+  uploadsEndpoint(): string {
+    // this.baseUrl ya incluye el prefijo /api/v1 (ver factory al pie
+    // del archivo). Compone "<base>/uploads/" sin duplicar el prefijo.
+    return `${this.baseUrl}/uploads/`;
   }
 
   /** Shortcut for "give user X their own IPTV list": creates a

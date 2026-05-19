@@ -565,6 +565,32 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	if req.DisplayName == "" {
 		req.DisplayName = req.Username
 	}
+
+	// Creación de admin requiere ser owner (migración 055). El gate
+	// del router (Require(PermManageUsers)) deja entrar a admins con
+	// ese flag, pero crear NUEVOS admins desde uno secundario abriría
+	// "admin sprawl". Sólo el owner puede convocar nuevos admins.
+	// Profile creation no aplica este chequeo — los profiles heredan
+	// rol del parent y nunca son admin.
+	if !isProfile && req.Role == "admin" {
+		claims := auth.GetClaims(r.Context())
+		if claims == nil {
+			respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			return
+		}
+		requester, err := h.users.GetByID(r.Context(), claims.UserID)
+		if err != nil {
+			respondError(w, r, http.StatusInternalServerError, "USER_LOOKUP_FAILED",
+				"could not resolve requester")
+			return
+		}
+		if !requester.IsOwner {
+			respondError(w, r, http.StatusForbidden, "OWNER_ONLY",
+				"only the instance owner can create new admins")
+			return
+		}
+	}
+
 	// For profiles, synthesise a username from the parent's
 	// username + a UUID prefix so the UNIQUE constraint stays happy
 	// without making the admin invent unique handles for kids. The
@@ -817,6 +843,19 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		handleServiceError(w, r, err)
 		return
+	}
+
+	// Promover al primer admin como owner (migración 055). EnsureOwner
+	// es idempotente: si ya existe owner (caso re-setup tras
+	// recuperación manual de DB), no toca nada. Sin esta llamada un
+	// install fresh quedaría con role='admin' pero sin is_owner, y
+	// RequireOwner devolvería 403 en backup/keystore/federation/restart.
+	// El error lo logueamos pero no abortamos el setup — el usuario
+	// puede arreglarlo después con un comando manual; lo crítico
+	// (cuenta creada + auto-login) ya está hecho.
+	if _, ownerErr := h.users.EnsureOwner(r.Context(), u.ID); ownerErr != nil {
+		h.logger.Error("setup: could not promote first admin to owner",
+			"user_id", u.ID, "error", ownerErr)
 	}
 
 	h.logger.Info("setup completed — admin user created",

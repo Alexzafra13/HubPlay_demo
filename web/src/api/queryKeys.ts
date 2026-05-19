@@ -19,6 +19,7 @@ export const queryKeys = {
     ["users", userId, "library-access"] as const,
   userPermissions: (userId: string) =>
     ["users", userId, "permissions"] as const,
+  myUploads: (limit: number) => ["uploads", "mine", limit] as const,
   libraries: ["libraries"] as const,
   library: (id: string) => ["libraries", id] as const,
   items: (params?: Record<string, unknown>) => ["items", params] as const,

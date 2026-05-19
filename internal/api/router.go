@@ -472,7 +472,20 @@ func NewRouter(deps Dependencies) http.Handler {
 			// PIN therefore lives under the auth-only group below
 			// while the rest stay admin-gated.
 			r.Route("/users", func(r chi.Router) {
-				r.Use(auth.RequireAdmin)
+				// can_manage_users (migración 055). El gate cubre
+				// alta/baja/edición de usuarios normales + perfiles.
+				// Casos especiales (que siguen gated más fino):
+				//  - POST /users con role=admin → handler chequea owner.
+				//  - PUT  /users/{id}/role     → RequireOwner explícito.
+				//  - PUT  /users/{id}/permissions → can_manage_admins.
+				// El GET / (List) también pasa este gate; admins sin
+				// can_manage_users no pueden listar — preferimos eso
+				// a leaks de info entre admins parcialmente trusted.
+				if deps.Permissions != nil {
+					r.Use(deps.Permissions.Require(authmodel.PermManageUsers))
+				} else {
+					r.Use(auth.RequireAdmin)
+				}
 				r.Get("/", userHandler.List)
 				r.Post("/", authHandler.Register)
 				r.Delete("/{id}", userHandler.Delete)
@@ -719,6 +732,16 @@ func NewRouter(deps Dependencies) http.Handler {
 					Logger:         deps.Logger,
 				})
 				r.Route("/admin/system", func(r chi.Router) {
+					// /admin/system es mixed bag (migración 055):
+					// la mayoría son reads del dashboard (stats,
+					// stream-activity, top-items, recently-added,
+					// storage) — fine para cualquier admin. Las
+					// destructivas (DELETE /sessions/{id}, settings
+					// writes) cruzan múltiples capabilities y no
+					// encajan bien con un flag único. Refinar cada
+					// endpoint de aquí queda para una iteración
+					// futura; backup/db/restart YA están en un
+					// sub-Group con RequireOwner más abajo.
 					r.Use(auth.RequireAdmin)
 					r.Get("/stats", sysHandler.Stats)
 					r.Get("/stream-activity", sysHandler.StreamActivity)
@@ -936,9 +959,13 @@ func NewRouter(deps Dependencies) http.Handler {
 					r.Get("/", libHandler.Get)
 					r.Get("/items", libHandler.Items)
 
-					// Admin-only library management
+					// Library mutations (migración 055): can_manage_libraries.
 					r.Group(func(r chi.Router) {
-						r.Use(auth.RequireAdmin)
+						if deps.Permissions != nil {
+							r.Use(deps.Permissions.Require(authmodel.PermManageLibraries))
+						} else {
+							r.Use(auth.RequireAdmin)
+						}
 						r.Put("/", libHandler.Update)
 						r.Delete("/", libHandler.Delete)
 						r.Post("/scan", libHandler.Scan)
@@ -946,7 +973,12 @@ func NewRouter(deps Dependencies) http.Handler {
 
 				})
 				r.Group(func(r chi.Router) {
-					r.Use(auth.RequireAdmin)
+					// Library create / browse (migración 055): can_manage_libraries.
+					if deps.Permissions != nil {
+						r.Use(deps.Permissions.Require(authmodel.PermManageLibraries))
+					} else {
+						r.Use(auth.RequireAdmin)
+					}
 					r.Post("/libraries", libHandler.Create)
 					r.Get("/libraries/browse", libHandler.Browse)
 				})
@@ -1040,9 +1072,13 @@ func NewRouter(deps Dependencies) http.Handler {
 						r.Get("/libraries/{id}/schedule", iptvScheduleHandler.List)
 					}
 
-					// Admin IPTV operations
+					// Admin IPTV operations (migración 055): can_manage_iptv.
 					r.Group(func(r chi.Router) {
-						r.Use(auth.RequireAdmin)
+						if deps.Permissions != nil {
+							r.Use(deps.Permissions.Require(authmodel.PermManageIPTV))
+						} else {
+							r.Use(auth.RequireAdmin)
+						}
 						r.Post("/iptv/preflight", iptvHandler.PreflightM3U)
 						r.Post("/iptv/public/import", iptvHandler.ImportPublicIPTV)
 						r.Post("/libraries/{id}/epg-sources", iptvHandler.AddEPGSource)
@@ -1119,8 +1155,15 @@ func NewRouter(deps Dependencies) http.Handler {
 					// Mismo patrón Plex/Jellyfin: el operador busca,
 					// elige el match correcto y se aplica sobrescribiendo
 					// metadatos + imágenes del item.
+					// Item identify + metadata edits (migración 055):
+					// can_edit_metadata. Cubre el flujo Plex-style de
+					// rematch contra TMDb + el editor manual.
 					r.Group(func(r chi.Router) {
-						r.Use(auth.RequireAdmin)
+						if deps.Permissions != nil {
+							r.Use(deps.Permissions.Require(authmodel.PermEditMetadata))
+						} else {
+							r.Use(auth.RequireAdmin)
+						}
 						r.Get("/identify/candidates", itemHandler.IdentifyCandidates)
 						r.Post("/identify", itemHandler.Identify)
 						// Editor manual de metadatos. Distinto de
@@ -1204,9 +1247,13 @@ func NewRouter(deps Dependencies) http.Handler {
 					// Cualquier usuario autenticado puede GET el archivo
 					// (img-src 'self' del CSP del proyecto lo requiere).
 					r.Get("/collections/{id}/images/{type}/file", collectionHandler.ServeCollectionImage)
-					// Admin: gestión del override.
+					// Override de carátula/fondo (migración 055): can_change_artwork.
 					r.Group(func(r chi.Router) {
-						r.Use(auth.RequireAdmin)
+						if deps.Permissions != nil {
+							r.Use(deps.Permissions.Require(authmodel.PermChangeArtwork))
+						} else {
+							r.Use(auth.RequireAdmin)
+						}
 						r.Get("/collections/{id}/images/{type}/available", collectionHandler.AvailableCollectionImages)
 						r.Put("/collections/{id}/images/{type}", collectionHandler.SetCollectionImage)
 						r.Post("/collections/{id}/images/{type}/upload", collectionHandler.UploadCollectionImage)
@@ -1215,8 +1262,16 @@ func NewRouter(deps Dependencies) http.Handler {
 				}
 
 				// Admin: batch refresh images for a library
+				// Batch image refresh por librería (migración 055):
+				// can_change_artwork. Reescritura masiva de carátulas
+				// vía TMDb/Fanart — cae en "cambiar artwork" pese a
+				// tocar varios items a la vez.
 				r.Group(func(r chi.Router) {
-					r.Use(auth.RequireAdmin)
+					if deps.Permissions != nil {
+						r.Use(deps.Permissions.Require(authmodel.PermChangeArtwork))
+					} else {
+						r.Use(auth.RequireAdmin)
+					}
 					r.Post("/libraries/{id}/images/refresh", imgHandler.RefreshLibraryImages)
 				})
 			}
@@ -1230,9 +1285,17 @@ func NewRouter(deps Dependencies) http.Handler {
 				r.Get("/providers/images", providerHandler.GetImages)
 				r.Get("/providers/search/subtitles", providerHandler.SearchSubtitles)
 
-				// Admin provider management
+				// Provider management (migración 055): can_manage_libraries.
+				// El sourcing de metadatos es config de instalación de
+				// librerías (qué TMDb key usar, qué providers activar),
+				// así que cae bajo la misma capability que crear y
+				// editar librerías.
 				r.Group(func(r chi.Router) {
-					r.Use(auth.RequireAdmin)
+					if deps.Permissions != nil {
+						r.Use(deps.Permissions.Require(authmodel.PermManageLibraries))
+					} else {
+						r.Use(auth.RequireAdmin)
+					}
 					r.Get("/providers", providerHandler.List)
 					r.Put("/providers/{name}", providerHandler.Update)
 				})

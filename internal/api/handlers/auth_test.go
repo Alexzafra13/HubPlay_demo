@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -98,10 +99,11 @@ func (m *mockAuthService) CurrentSessionID(_ context.Context, _ string) string {
 // ─── Mock user service ──────────────────────────────────────────────────────
 
 type mockUserService struct {
-	getByIDFn func(ctx context.Context, id string) (*authmodel.User, error)
-	listFn    func(ctx context.Context, limit, offset int) ([]*authmodel.User, int, error)
-	deleteFn  func(ctx context.Context, id string) error
-	countFn   func(ctx context.Context) (int, error)
+	getByIDFn     func(ctx context.Context, id string) (*authmodel.User, error)
+	listFn        func(ctx context.Context, limit, offset int) ([]*authmodel.User, int, error)
+	deleteFn      func(ctx context.Context, id string) error
+	countFn       func(ctx context.Context) (int, error)
+	ensureOwnerFn func(ctx context.Context, id string) (bool, error)
 }
 
 func (m *mockUserService) GetByID(ctx context.Context, id string) (*authmodel.User, error) {
@@ -169,6 +171,13 @@ func (m *mockUserService) DeleteAvatar(_ context.Context, _ string) error { retu
 func (m *mockUserService) AvatarsDir() string { return "" }
 
 func (m *mockUserService) AvatarFilePath(_ string) (string, error) { return "", nil }
+
+func (m *mockUserService) EnsureOwner(ctx context.Context, id string) (bool, error) {
+	if m.ensureOwnerFn != nil {
+		return m.ensureOwnerFn(ctx, id)
+	}
+	return false, nil
+}
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
@@ -323,6 +332,7 @@ func TestAuthHandler_Setup_AllowedWhenNoUsers(t *testing.T) {
 			return &auth.AuthToken{AccessToken: "a", RefreshToken: "r", UserID: "u1", Role: "admin"}, nil
 		},
 	}
+	var ensureOwnerCalledWith string
 	userSvc := &mockUserService{
 		countFn: func(_ context.Context) (int, error) { return 0, nil },
 		getByIDFn: func(_ context.Context, id string) (*authmodel.User, error) {
@@ -330,6 +340,10 @@ func TestAuthHandler_Setup_AllowedWhenNoUsers(t *testing.T) {
 				return created, nil
 			}
 			return nil, domain.ErrNotFound
+		},
+		ensureOwnerFn: func(_ context.Context, id string) (bool, error) {
+			ensureOwnerCalledWith = id
+			return true, nil
 		},
 	}
 
@@ -343,6 +357,52 @@ func TestAuthHandler_Setup_AllowedWhenNoUsers(t *testing.T) {
 
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
+	}
+	// Pin del fix del bug "fresh install sin owner": tras Register el
+	// handler DEBE llamar a EnsureOwner con el id del nuevo admin.
+	// Sin esto la app fresca arranca sin nadie capaz de tocar las
+	// rutas owner-only.
+	if ensureOwnerCalledWith != "u1" {
+		t.Errorf("EnsureOwner not called with new admin id, got %q", ensureOwnerCalledWith)
+	}
+}
+
+// TestAuthHandler_Setup_SurvivesEnsureOwnerFailure: si EnsureOwner
+// falla por un motivo transitorio (DB blip), el setup DEBE seguir
+// adelante — el usuario ya tiene cuenta y debe poder loguear. El bug
+// del owner es recuperable manualmente; perder el auto-login no.
+func TestAuthHandler_Setup_SurvivesEnsureOwnerFailure(t *testing.T) {
+	created := &authmodel.User{
+		ID: "u1", Username: "admin", DisplayName: "Admin",
+		Role: "admin", IsActive: true,
+	}
+	authSvc := &mockAuthService{
+		registerFn: func(_ context.Context, _ auth.RegisterRequest) (*authmodel.User, error) {
+			return created, nil
+		},
+		loginFn: func(_ context.Context, _, _, _, _, _ string) (*auth.AuthToken, error) {
+			return &auth.AuthToken{AccessToken: "a", RefreshToken: "r", UserID: "u1", Role: "admin"}, nil
+		},
+	}
+	userSvc := &mockUserService{
+		countFn: func(_ context.Context) (int, error) { return 0, nil },
+		getByIDFn: func(_ context.Context, _ string) (*authmodel.User, error) {
+			return created, nil
+		},
+		ensureOwnerFn: func(_ context.Context, _ string) (bool, error) {
+			return false, fmt.Errorf("transient db error")
+		},
+	}
+
+	handler := NewAuthHandler(authSvc, userSvc, nil, testAuthCfg(), testLogger())
+	body := `{"username":"admin","password":"password123"}`
+	req := httptest.NewRequest("POST", "/auth/setup", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	handler.Setup(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Errorf("setup aborted on EnsureOwner failure: status=%d body=%s", rr.Code, rr.Body.String())
 	}
 }
 
@@ -491,6 +551,106 @@ func TestUserHandler_Me_NotFound(t *testing.T) {
 
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// ─── Register: owner-only check para crear admins ──────────────────────────
+
+// TestAuthHandler_Register_BlocksNonOwnerCreatingAdmin pin la defensa de
+// "admin sprawl" añadida en PR3-D: un admin con can_manage_users entra
+// por el middleware del grupo /users, pero NO puede crear OTRO admin.
+// Sólo el owner. Sin este check, un admin comprometido escala
+// privilegios creando admins paralelos a placer.
+func TestAuthHandler_Register_BlocksNonOwnerCreatingAdmin(t *testing.T) {
+	authSvc := &mockAuthService{
+		registerFn: func(_ context.Context, _ auth.RegisterRequest) (*authmodel.User, error) {
+			t.Fatal("Register must NOT be called when non-owner asks for an admin")
+			return nil, nil
+		},
+	}
+	userSvc := &mockUserService{
+		getByIDFn: func(_ context.Context, _ string) (*authmodel.User, error) {
+			return &authmodel.User{
+				ID: "u-secondary", Role: "admin", IsActive: true,
+				CanManageUsers: true,
+				// is_owner: false
+			}, nil
+		},
+	}
+	handler := NewAuthHandler(authSvc, userSvc, nil, testAuthCfg(), testLogger())
+
+	body := `{"username":"newadmin","password":"password123","role":"admin"}`
+	req := httptest.NewRequest("POST", "/users", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(auth.WithClaims(req.Context(), &auth.Claims{UserID: "u-secondary"}))
+	rr := httptest.NewRecorder()
+	handler.Register(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("status %d (want 403): %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestAuthHandler_Register_OwnerCanCreateAdmin(t *testing.T) {
+	created := &authmodel.User{ID: "new-admin", Username: "bob", DisplayName: "Bob", Role: "admin"}
+	authSvc := &mockAuthService{
+		registerFn: func(_ context.Context, req auth.RegisterRequest) (*authmodel.User, error) {
+			if req.Role != "admin" {
+				t.Errorf("role lost: %q", req.Role)
+			}
+			return created, nil
+		},
+	}
+	userSvc := &mockUserService{
+		getByIDFn: func(_ context.Context, _ string) (*authmodel.User, error) {
+			return &authmodel.User{
+				ID: "u-owner", Role: "admin", IsActive: true, IsOwner: true,
+			}, nil
+		},
+	}
+	handler := NewAuthHandler(authSvc, userSvc, nil, testAuthCfg(), testLogger())
+
+	body := `{"username":"bob","password":"password123","role":"admin"}`
+	req := httptest.NewRequest("POST", "/users", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(auth.WithClaims(req.Context(), &auth.Claims{UserID: "u-owner"}))
+	rr := httptest.NewRecorder()
+	handler.Register(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Errorf("status %d (want 201): %s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestAuthHandler_Register_NonOwnerCanStillCreateNormalUsers pin la otra
+// cara: can_manage_users sigue siendo suficiente para crear usuarios
+// normales — sólo crear admins requiere ser owner.
+func TestAuthHandler_Register_NonOwnerCanStillCreateNormalUsers(t *testing.T) {
+	created := &authmodel.User{ID: "u-regular", Username: "alice", DisplayName: "Alice", Role: "user"}
+	authSvc := &mockAuthService{
+		registerFn: func(_ context.Context, _ auth.RegisterRequest) (*authmodel.User, error) {
+			return created, nil
+		},
+	}
+	userSvc := &mockUserService{
+		getByIDFn: func(_ context.Context, _ string) (*authmodel.User, error) {
+			return &authmodel.User{
+				ID: "u-secondary", Role: "admin", IsActive: true,
+				CanManageUsers: true,
+			}, nil
+		},
+	}
+	handler := NewAuthHandler(authSvc, userSvc, nil, testAuthCfg(), testLogger())
+
+	body := `{"username":"alice","password":"password123","role":"user"}`
+	req := httptest.NewRequest("POST", "/users", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(auth.WithClaims(req.Context(), &auth.Claims{UserID: "u-secondary"}))
+	rr := httptest.NewRecorder()
+	handler.Register(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Errorf("status %d (want 201): %s", rr.Code, rr.Body.String())
 	}
 }
 

@@ -18,6 +18,7 @@ const WhoIsWatching = lazyWithRetry(() => import("@/pages/WhoIsWatching"));
 // helper triggers one hard reload so the new index.html resolves.
 const Home = lazyWithRetry(() => import("@/pages/Home"));
 const Movies = lazyWithRetry(() => import("@/pages/Movies"));
+const Uploads = lazyWithRetry(() => import("@/pages/Uploads"));
 const Series = lazyWithRetry(() => import("@/pages/Series"));
 const ItemDetail = lazyWithRetry(() => import("@/pages/ItemDetail"));
 const PersonDetail = lazyWithRetry(() => import("@/pages/PersonDetail"));
@@ -172,6 +173,7 @@ export function App() {
             <Route path="live-tv" element={<LiveTV />} />
             <Route path="live-tv/customize" element={<LiveTvCustomize />} />
             <Route path="peers" element={<PeersPage />} />
+            <Route path="uploads" element={<Uploads />} />
             <Route path="peers/:peerId" element={<PeerLibrariesPage />} />
             <Route path="peers/:peerId/libraries/:libraryId" element={<PeerLibraryItemsPage />} />
             <Route path="peers/:peerId/libraries/:libraryId/items/:itemId" element={<PeerItemDetail />} />

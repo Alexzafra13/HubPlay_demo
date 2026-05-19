@@ -237,7 +237,7 @@ export function AdminPermissionsMatrix({
                 >
                   <td className="sticky left-0 bg-neutral-900/60 px-3 py-2 z-10">
                     <div className="flex items-center gap-2 min-w-[180px]">
-                      <UserAvatar user={u} size={28} />
+                      <UserAvatar user={u} size="sm" />
                       <div className="flex flex-col">
                         <span className="font-medium truncate">
                           {u.display_name || u.username}

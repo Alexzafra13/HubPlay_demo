@@ -469,6 +469,65 @@ func (r *UserRepository) GetOwnerID(ctx context.Context) (string, error) {
 // comando CLI fuera del HTTP path (hubplay set-owner <user_id>),
 // nunca por API. Ver GetOwnerID para el rationale.
 
+// EnsureOwner promueve a `userID` como owner SI Y SOLO SI no existe
+// owner aún. Idempotente: si ya hay owner (de un backfill previo o
+// de otra llamada anterior a esta función), no toca nada. Devuelve
+// `promoted=true` cuando la fila se modificó.
+//
+// La llama el setup wizard tras crear el primer admin de un install
+// fresh. La migración 055 sólo promueve al admin más antiguo si la
+// tabla ya tenía admins en el momento de aplicarse; en un install
+// nuevo la migración corre sobre tabla vacía y nadie acaba con
+// is_owner=true. Sin este método, la app fresca quedaría sin owner
+// y RequireOwner devolvería 403 en backup, keystore, federation y
+// restart — instalación rota.
+//
+// La operación es atómica: una sola UPDATE con dos condiciones —
+//   1. El target debe ser admin cuenta-titular.
+//   2. NO debe existir ya un owner en la DB.
+// El índice parcial UNIQUE WHERE is_owner=1 garantiza que ninguna
+// race (dos setups concurrentes en una instalación rara) cree dos
+// owners — la segunda UPDATE fallaría con constraint violation.
+func (r *UserRepository) EnsureOwner(ctx context.Context, userID string) (bool, error) {
+	driver := DriverSQLite
+	if !r.useSQLite() {
+		driver = DriverPostgres
+	}
+	trueVal := "1"
+	if driver == DriverPostgres {
+		trueVal = "TRUE"
+	}
+
+	// La condición "no existe owner aún" la metemos como un subselect
+	// dentro del WHERE; SQLite y Postgres aceptan NOT EXISTS en UPDATE.
+	// Al promover, otorgamos también TODOS los flags granulares para
+	// que el owner pueda operar todo sin pasos extra.
+	q := rewritePlaceholders(driver, fmt.Sprintf(
+		`UPDATE users SET is_owner = %s,
+			can_manage_admins = %s,
+			can_manage_users = %s,
+			can_manage_libraries = %s,
+			can_manage_iptv = %s,
+			can_edit_metadata = %s,
+			can_change_artwork = %s,
+			can_view_audit = %s
+		WHERE id = ?
+		  AND role = 'admin'
+		  AND parent_user_id IS NULL
+		  AND NOT EXISTS (SELECT 1 FROM users WHERE is_owner = %s)`,
+		trueVal, trueVal, trueVal, trueVal, trueVal, trueVal, trueVal, trueVal, trueVal))
+
+	res, err := r.db.ExecContext(ctx, q, userID)
+	if err != nil {
+		return false, fmt.Errorf("ensure owner: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("ensure owner rows: %w", err)
+	}
+	return n > 0, nil
+}
+
 func (r *UserRepository) SetAccessExpiresAt(ctx context.Context, id string, expiresAt *time.Time) error {
 	var nt sql.NullTime
 	if expiresAt != nil {

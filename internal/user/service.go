@@ -169,6 +169,23 @@ func (s *Service) PrimaryAdminID(ctx context.Context) (string, error) {
 	return s.users.PrimaryAdminID(ctx)
 }
 
+// EnsureOwner promueve a `userID` como owner si nadie lo es aún
+// (migración 055). El setup wizard lo llama tras crear el primer
+// admin del install — sin esto, una instalación fresca acaba sin
+// owner porque la migración corre sobre tabla vacía y no hay backfill
+// posible. Idempotente: si ya hay owner, devuelve promoted=false y
+// no toca nada.
+func (s *Service) EnsureOwner(ctx context.Context, userID string) (bool, error) {
+	promoted, err := s.users.EnsureOwner(ctx, userID)
+	if err != nil {
+		return false, fmt.Errorf("ensure owner: %w", err)
+	}
+	if promoted {
+		s.logger.Info("first admin promoted to owner", "user_id", userID)
+	}
+	return promoted, nil
+}
+
 // SetAccessExpiresAt: nil = acceso permanente. Login + middleware rechazan
 // tras este stamp.
 func (s *Service) SetAccessExpiresAt(ctx context.Context, id string, expiresAt *time.Time) error {

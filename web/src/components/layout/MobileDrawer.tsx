@@ -2,7 +2,7 @@ import { useState } from "react";
 import { NavLink, useLocation } from "react-router";
 import { useTranslation } from "react-i18next";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronDown, X, LogOut, Settings, ShieldCheck, Smartphone } from "lucide-react";
+import { ChevronDown, X, LogOut, Settings, ShieldCheck, Smartphone, Upload } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { useAllPeerLibraries } from "@/api/hooks/federation";
 import { useMe } from "@/api/hooks";
@@ -94,6 +94,16 @@ export function MobileDrawer({ onClose, onLogout }: MobileDrawerProps) {
                 onClick={onClose}
               />
             </li>
+            {me?.can_upload && (
+              <li>
+                <DrawerLink
+                  to="/uploads"
+                  icon={<Upload className="h-[18px] w-[18px]" strokeWidth={1.6} />}
+                  label={t("nav.uploads")}
+                  onClick={onClose}
+                />
+              </li>
+            )}
             {isAdmin && (
               <li>
                 <DrawerLink

@@ -9,6 +9,7 @@ import {
   Settings as SettingsIcon,
   ShieldCheck,
   Smartphone,
+  Upload,
   UserCog,
 } from "lucide-react";
 import { useMe, useProfiles } from "@/api/hooks";
@@ -220,6 +221,17 @@ function UserAvatarMenu({
               <Smartphone className="h-[15px] w-[15px]" strokeWidth={1.6} />
               {t("nav.linkDevice")}
             </NavLink>
+            {me?.can_upload && (
+              <NavLink
+                to="/uploads"
+                onClick={() => setOpen(false)}
+                className="flex items-center gap-2.5 px-3 py-2.5 text-[13px] text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
+                role="menuitem"
+              >
+                <Upload className="h-[15px] w-[15px]" strokeWidth={1.6} />
+                {t("nav.uploads")}
+              </NavLink>
+            )}
             {canSwitchProfile && (
               <NavLink
                 to="/select-profile"
