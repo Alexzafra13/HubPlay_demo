@@ -99,7 +99,8 @@ const getUserByID = `-- name: GetUserByID :one
 SELECT id, username, display_name, password_hash, COALESCE(avatar_path, '') AS avatar_path,
        role, is_active, max_sessions, created_at, last_login_at,
        parent_user_id, pin_hash, max_content_rating, password_change_required,
-       access_expires_at, avatar_color
+       access_expires_at, avatar_color,
+       can_upload, upload_quota_bytes, upload_used_bytes
 FROM users
 WHERE id = $1
 `
@@ -121,6 +122,9 @@ type GetUserByIDRow struct {
 	PasswordChangeRequired bool           `json:"password_change_required"`
 	AccessExpiresAt        sql.NullTime   `json:"access_expires_at"`
 	AvatarColor            sql.NullString `json:"avatar_color"`
+	CanUpload              bool           `json:"can_upload"`
+	UploadQuotaBytes       int64          `json:"upload_quota_bytes"`
+	UploadUsedBytes        int64          `json:"upload_used_bytes"`
 }
 
 // User accounts.
@@ -148,6 +152,9 @@ func (q *Queries) GetUserByID(ctx context.Context, id string) (GetUserByIDRow, e
 		&i.PasswordChangeRequired,
 		&i.AccessExpiresAt,
 		&i.AvatarColor,
+		&i.CanUpload,
+		&i.UploadQuotaBytes,
+		&i.UploadUsedBytes,
 	)
 	return i, err
 }
@@ -156,7 +163,8 @@ const getUserByUsername = `-- name: GetUserByUsername :one
 SELECT id, username, display_name, password_hash, COALESCE(avatar_path, '') AS avatar_path,
        role, is_active, max_sessions, created_at, last_login_at,
        parent_user_id, pin_hash, max_content_rating, password_change_required,
-       access_expires_at, avatar_color
+       access_expires_at, avatar_color,
+       can_upload, upload_quota_bytes, upload_used_bytes
 FROM users
 WHERE username = $1
 `
@@ -178,6 +186,9 @@ type GetUserByUsernameRow struct {
 	PasswordChangeRequired bool           `json:"password_change_required"`
 	AccessExpiresAt        sql.NullTime   `json:"access_expires_at"`
 	AvatarColor            sql.NullString `json:"avatar_color"`
+	CanUpload              bool           `json:"can_upload"`
+	UploadQuotaBytes       int64          `json:"upload_quota_bytes"`
+	UploadUsedBytes        int64          `json:"upload_used_bytes"`
 }
 
 func (q *Queries) GetUserByUsername(ctx context.Context, username string) (GetUserByUsernameRow, error) {
@@ -200,6 +211,9 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (GetUs
 		&i.PasswordChangeRequired,
 		&i.AccessExpiresAt,
 		&i.AvatarColor,
+		&i.CanUpload,
+		&i.UploadQuotaBytes,
+		&i.UploadUsedBytes,
 	)
 	return i, err
 }
@@ -238,7 +252,8 @@ const listUsers = `-- name: ListUsers :many
 SELECT id, username, display_name, COALESCE(avatar_path, '') AS avatar_path,
        role, is_active, created_at, last_login_at,
        parent_user_id, pin_hash, max_content_rating, password_change_required,
-       access_expires_at, avatar_color
+       access_expires_at, avatar_color,
+       can_upload, upload_quota_bytes, upload_used_bytes
 FROM users
 ORDER BY username
 LIMIT $1 OFFSET $2
@@ -264,6 +279,9 @@ type ListUsersRow struct {
 	PasswordChangeRequired bool           `json:"password_change_required"`
 	AccessExpiresAt        sql.NullTime   `json:"access_expires_at"`
 	AvatarColor            sql.NullString `json:"avatar_color"`
+	CanUpload              bool           `json:"can_upload"`
+	UploadQuotaBytes       int64          `json:"upload_quota_bytes"`
+	UploadUsedBytes        int64          `json:"upload_used_bytes"`
 }
 
 func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUsersRow, error) {
@@ -290,6 +308,9 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUse
 			&i.PasswordChangeRequired,
 			&i.AccessExpiresAt,
 			&i.AvatarColor,
+			&i.CanUpload,
+			&i.UploadQuotaBytes,
+			&i.UploadUsedBytes,
 		); err != nil {
 			return nil, err
 		}

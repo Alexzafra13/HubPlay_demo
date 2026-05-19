@@ -322,3 +322,179 @@ func TestUserRepository_UpdateLastLogin(t *testing.T) {
 		t.Fatal("expected last_login_at to be set")
 	}
 }
+
+// ── Upload permission + quota (migration 053) ───────────────────────
+
+// TestUserRepository_UploadDefaults pins el contrato post-053: un user
+// recién creado tiene can_upload=false, quota=0, used=0 — el permiso
+// se otorga explícitamente, nunca por defecto.
+func TestUserRepository_UploadDefaults(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	repo := db.NewUserRepository(testutil.Driver(), database)
+	ctx := context.Background()
+
+	u := createTestUser(t, repo, "alex")
+	got, err := repo.GetByID(ctx, u.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.CanUpload {
+		t.Error("expected CanUpload=false by default")
+	}
+	if got.UploadQuotaBytes != 0 {
+		t.Errorf("expected UploadQuotaBytes=0, got %d", got.UploadQuotaBytes)
+	}
+	if got.UploadUsedBytes != 0 {
+		t.Errorf("expected UploadUsedBytes=0, got %d", got.UploadUsedBytes)
+	}
+}
+
+func TestUserRepository_SetCanUpload(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	repo := db.NewUserRepository(testutil.Driver(), database)
+	ctx := context.Background()
+
+	u := createTestUser(t, repo, "alex")
+	if err := repo.SetCanUpload(ctx, u.ID, true); err != nil {
+		t.Fatalf("set true: %v", err)
+	}
+	got, _ := repo.GetByID(ctx, u.ID)
+	if !got.CanUpload {
+		t.Error("expected CanUpload=true after set")
+	}
+
+	if err := repo.SetCanUpload(ctx, u.ID, false); err != nil {
+		t.Fatalf("set false: %v", err)
+	}
+	got, _ = repo.GetByID(ctx, u.ID)
+	if got.CanUpload {
+		t.Error("expected CanUpload=false after revoke")
+	}
+}
+
+func TestUserRepository_SetUploadQuota(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	repo := db.NewUserRepository(testutil.Driver(), database)
+	ctx := context.Background()
+
+	u := createTestUser(t, repo, "alex")
+	if err := repo.SetUploadQuota(ctx, u.ID, 10*1024*1024*1024); err != nil {
+		t.Fatalf("set quota: %v", err)
+	}
+	got, _ := repo.GetByID(ctx, u.ID)
+	if got.UploadQuotaBytes != 10*1024*1024*1024 {
+		t.Errorf("got quota %d", got.UploadQuotaBytes)
+	}
+}
+
+// TestUserRepository_ReserveUploadBytes_HappyPath: con can_upload=true
+// y quota suficiente, la reserva incrementa used_bytes.
+func TestUserRepository_ReserveUploadBytes_HappyPath(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	repo := db.NewUserRepository(testutil.Driver(), database)
+	ctx := context.Background()
+
+	u := createTestUser(t, repo, "alex")
+	if err := repo.SetCanUpload(ctx, u.ID, true); err != nil {
+		t.Fatalf("set can upload: %v", err)
+	}
+	if err := repo.SetUploadQuota(ctx, u.ID, 1000); err != nil {
+		t.Fatalf("set quota: %v", err)
+	}
+
+	if err := repo.ReserveUploadBytes(ctx, u.ID, 400); err != nil {
+		t.Fatalf("reserve 400: %v", err)
+	}
+	got, _ := repo.GetByID(ctx, u.ID)
+	if got.UploadUsedBytes != 400 {
+		t.Errorf("expected used=400, got %d", got.UploadUsedBytes)
+	}
+
+	// Una segunda reserva dentro de cuota debe acumularse.
+	if err := repo.ReserveUploadBytes(ctx, u.ID, 300); err != nil {
+		t.Fatalf("reserve 300: %v", err)
+	}
+	got, _ = repo.GetByID(ctx, u.ID)
+	if got.UploadUsedBytes != 700 {
+		t.Errorf("expected used=700, got %d", got.UploadUsedBytes)
+	}
+}
+
+// TestUserRepository_ReserveUploadBytes_ExceedsQuota: cuando la
+// reserva pasaría de la cuota, el repo devuelve ErrUploadQuotaExceeded
+// y el contador NO se mueve.
+func TestUserRepository_ReserveUploadBytes_ExceedsQuota(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	repo := db.NewUserRepository(testutil.Driver(), database)
+	ctx := context.Background()
+
+	u := createTestUser(t, repo, "alex")
+	_ = repo.SetCanUpload(ctx, u.ID, true)
+	_ = repo.SetUploadQuota(ctx, u.ID, 1000)
+	_ = repo.ReserveUploadBytes(ctx, u.ID, 800)
+
+	err := repo.ReserveUploadBytes(ctx, u.ID, 500)
+	if !errors.Is(err, domain.ErrUploadQuotaExceeded) {
+		t.Fatalf("want ErrUploadQuotaExceeded, got %v", err)
+	}
+	got, _ := repo.GetByID(ctx, u.ID)
+	if got.UploadUsedBytes != 800 {
+		t.Errorf("used_bytes leaked: got %d, want 800", got.UploadUsedBytes)
+	}
+}
+
+// TestUserRepository_ReserveUploadBytes_PermissionRevoked: aunque la
+// cuota daría, can_upload=false debe rechazar la reserva con el mismo
+// sentinel. El cliente no distingue (ver doc en errors.go).
+func TestUserRepository_ReserveUploadBytes_PermissionRevoked(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	repo := db.NewUserRepository(testutil.Driver(), database)
+	ctx := context.Background()
+
+	u := createTestUser(t, repo, "alex")
+	// can_upload sigue en false (default).
+	_ = repo.SetUploadQuota(ctx, u.ID, 1_000_000)
+
+	err := repo.ReserveUploadBytes(ctx, u.ID, 100)
+	if !errors.Is(err, domain.ErrUploadQuotaExceeded) {
+		t.Fatalf("want ErrUploadQuotaExceeded, got %v", err)
+	}
+}
+
+// TestUserRepository_ReleaseUploadBytes: devuelve bytes y, ante una
+// llamada que llevaría el contador a negativo, lo deja en 0.
+func TestUserRepository_ReleaseUploadBytes(t *testing.T) {
+	database := testutil.NewTestDB(t)
+	repo := db.NewUserRepository(testutil.Driver(), database)
+	ctx := context.Background()
+
+	u := createTestUser(t, repo, "alex")
+	_ = repo.SetCanUpload(ctx, u.ID, true)
+	_ = repo.SetUploadQuota(ctx, u.ID, 1000)
+	_ = repo.ReserveUploadBytes(ctx, u.ID, 500)
+
+	if err := repo.ReleaseUploadBytes(ctx, u.ID, 200); err != nil {
+		t.Fatalf("release 200: %v", err)
+	}
+	got, _ := repo.GetByID(ctx, u.ID)
+	if got.UploadUsedBytes != 300 {
+		t.Errorf("want 300, got %d", got.UploadUsedBytes)
+	}
+
+	// Liberar más de lo reservado: el cap en SQL evita negativos.
+	if err := repo.ReleaseUploadBytes(ctx, u.ID, 9999); err != nil {
+		t.Fatalf("release 9999: %v", err)
+	}
+	got, _ = repo.GetByID(ctx, u.ID)
+	if got.UploadUsedBytes != 0 {
+		t.Errorf("expected cap to 0, got %d", got.UploadUsedBytes)
+	}
+
+	// delta <= 0 es no-op por contrato — no toca la fila ni 500's.
+	if err := repo.ReleaseUploadBytes(ctx, u.ID, 0); err != nil {
+		t.Fatalf("release 0: %v", err)
+	}
+	if err := repo.ReleaseUploadBytes(ctx, u.ID, -5); err != nil {
+		t.Fatalf("release negative: %v", err)
+	}
+}

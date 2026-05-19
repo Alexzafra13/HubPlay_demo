@@ -8,7 +8,8 @@
 SELECT id, username, display_name, password_hash, COALESCE(avatar_path, '') AS avatar_path,
        role, is_active, max_sessions, created_at, last_login_at,
        parent_user_id, pin_hash, max_content_rating, password_change_required,
-       access_expires_at, avatar_color
+       access_expires_at, avatar_color,
+       can_upload, upload_quota_bytes, upload_used_bytes
 FROM users
 WHERE id = ?;
 
@@ -16,7 +17,8 @@ WHERE id = ?;
 SELECT id, username, display_name, password_hash, COALESCE(avatar_path, '') AS avatar_path,
        role, is_active, max_sessions, created_at, last_login_at,
        parent_user_id, pin_hash, max_content_rating, password_change_required,
-       access_expires_at, avatar_color
+       access_expires_at, avatar_color,
+       can_upload, upload_quota_bytes, upload_used_bytes
 FROM users
 WHERE username = ?;
 
@@ -35,7 +37,8 @@ SELECT COUNT(*) AS cnt FROM users;
 SELECT id, username, display_name, COALESCE(avatar_path, '') AS avatar_path,
        role, is_active, created_at, last_login_at,
        parent_user_id, pin_hash, max_content_rating, password_change_required,
-       access_expires_at, avatar_color
+       access_expires_at, avatar_color,
+       can_upload, upload_quota_bytes, upload_used_bytes
 FROM users
 ORDER BY username
 LIMIT ? OFFSET ?;
@@ -127,3 +130,10 @@ UPDATE users SET avatar_path = NULL WHERE id = ?;
 -- ListProfilesForOwner: hand-rolled in user_repository.go, not sqlc.
 -- See the long comment on UserRepository.ListProfilesForOwner for the
 -- sqlc 1.31.x parser bug that forced the move.
+--
+-- Upload-permission + quota mutations (migration 053) are also raw SQL
+-- in user_repository.go (SetCanUpload, SetUploadQuota, Reserve / Release
+-- UploadBytes) — sqlc 1.31.1 truncates these UPDATE queries the same
+-- way it does ListProfilesForOwner. The SELECT side (GetUserByID,
+-- GetUserByUsername, ListUsers) still picks up can_upload + the two
+-- byte counters from sqlc — only the mutations are hand-rolled.

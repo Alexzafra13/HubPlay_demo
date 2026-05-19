@@ -183,6 +183,59 @@ func (s *Service) SetAccessExpiresAt(ctx context.Context, id string, expiresAt *
 	return nil
 }
 
+// SetCanUpload togglea el permiso de subir media desde la app.
+// Admin-only en el handler; el service sólo audita y delega.
+//
+// Nota: NO desactiva uploads en curso. La quota check vive en
+// ReserveUploadBytes y se reevalúa por cada chunk reservado, así que
+// flipar el flag a false interrumpe efectivamente los siguientes
+// reserves (rows-affected = 0 → ErrUploadQuotaExceeded) — pero los
+// bytes ya reservados no se devuelven hasta que el upload pipeline
+// libere por error o cancelación.
+func (s *Service) SetCanUpload(ctx context.Context, id string, canUpload bool) error {
+	if err := s.users.SetCanUpload(ctx, id, canUpload); err != nil {
+		return fmt.Errorf("set can upload: %w", err)
+	}
+	s.logger.Info("user upload permission changed", "user_id", id, "can_upload", canUpload)
+	return nil
+}
+
+// SetUploadQuota fija el tope de bytes que el usuario puede ocupar
+// con sus subidas. Reglas:
+//   - quotaBytes < 0           → ValidationError ("must be ≥ 0")
+//   - quotaBytes < usedBytes   → Conflict (no podemos bajar la cuota
+//                                 por debajo de lo ya ocupado; el
+//                                 admin tendría que borrar los uploads
+//                                 antiguos antes)
+//
+// quotaBytes = 0 es válido: deja al usuario sin permiso efectivo
+// (Reserve rechaza cualquier delta > 0) sin tocar can_upload — es la
+// forma rápida de "congelar" subidas futuras sin perder el flag.
+func (s *Service) SetUploadQuota(ctx context.Context, id string, quotaBytes int64) error {
+	if quotaBytes < 0 {
+		return domain.NewValidationError(map[string]string{
+			"upload_quota_bytes": "must be ≥ 0",
+		})
+	}
+	current, err := s.users.GetByID(ctx, id)
+	if err != nil {
+		return fmt.Errorf("load user for quota update: %w", err)
+	}
+	if quotaBytes < current.UploadUsedBytes {
+		return domain.NewConflict(fmt.Sprintf(
+			"cannot lower quota below currently used bytes (used=%d, requested=%d)",
+			current.UploadUsedBytes, quotaBytes))
+	}
+	if err := s.users.SetUploadQuota(ctx, id, quotaBytes); err != nil {
+		return fmt.Errorf("set upload quota: %w", err)
+	}
+	s.logger.Info("user upload quota updated",
+		"user_id", id,
+		"quota_bytes", quotaBytes,
+		"used_bytes", current.UploadUsedBytes)
+	return nil
+}
+
 // AvatarsDir devuelve el directorio donde se persisten los avatares.
 // Vacío = la feature está deshabilitada (NewService recibió "").
 func (s *Service) AvatarsDir() string { return s.avatarsDir }

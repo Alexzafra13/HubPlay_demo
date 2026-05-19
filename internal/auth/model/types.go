@@ -59,6 +59,16 @@ type User struct {
 	// AvatarColor — override opcional per-user. Empty = fallback
 	// determinista FNV-1a → paleta en el frontend.
 	AvatarColor string
+
+	// Upload gate (migración 053). CanUpload = permiso explícito,
+	// off por defecto. UploadQuotaBytes = tope absoluto en disco
+	// que sus subidas pueden ocupar; 0 = sin permiso efectivo
+	// (aunque CanUpload sea true). UploadUsedBytes = espacio ya
+	// ocupado por uploads suyos; lo mantiene el upload service
+	// vía Reserve/Release atómicos en el repo.
+	CanUpload        bool
+	UploadQuotaBytes int64
+	UploadUsedBytes  int64
 }
 
 // IsProfile is the canonical readability helper around `ParentUserID`.
