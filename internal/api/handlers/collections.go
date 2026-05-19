@@ -64,17 +64,26 @@ type CollectionHandler struct {
 	// imageDir es donde se guardan los archivos subidos. Vacío
 	// deshabilita el upload (las URLs sí funcionan sin esto).
 	imageDir string
+	audit    AuditEmitter
 	logger   *slog.Logger
 }
 
-func NewCollectionHandler(collections CollectionRepository, overrides CollectionImageOverrideRepo, images CollectionImageProvider, imageDir string, logger *slog.Logger) *CollectionHandler {
+func NewCollectionHandler(collections CollectionRepository, overrides CollectionImageOverrideRepo, images CollectionImageProvider, imageDir string, audit AuditEmitter, logger *slog.Logger) *CollectionHandler {
 	return &CollectionHandler{
 		collections: collections,
 		overrides:   overrides,
 		images:      images,
+		audit:       audit,
 		imageDir:    imageDir,
 		logger:      logger,
 	}
+}
+
+func (h *CollectionHandler) auditEmit() AuditEmitter {
+	if h.audit != nil {
+		return h.audit
+	}
+	return noopAudit{}
 }
 
 const collectionImagesSubdir = "collection-images"
@@ -267,6 +276,7 @@ func (h *CollectionHandler) SetCollectionImage(w http.ResponseWriter, r *http.Re
 	if prev != nil && prev.File != "" {
 		h.deleteCollectionImageFile(prev.File)
 	}
+	h.auditEmit().LogArtworkChanged(r.Context(), r, "collection", collectionID, imageType)
 
 	respondJSON(w, http.StatusOK, map[string]any{
 		"data": map[string]any{
@@ -356,6 +366,7 @@ func (h *CollectionHandler) UploadCollectionImage(w http.ResponseWriter, r *http
 	if prev != nil && prev.File != "" && prev.File != basename {
 		h.deleteCollectionImageFile(prev.File)
 	}
+	h.auditEmit().LogArtworkChanged(r.Context(), r, "collection", collectionID, imageType)
 
 	respondJSON(w, http.StatusOK, map[string]any{
 		"data": map[string]any{
@@ -387,6 +398,7 @@ func (h *CollectionHandler) ClearCollectionImage(w http.ResponseWriter, r *http.
 	if prev != nil && prev.File != "" {
 		h.deleteCollectionImageFile(prev.File)
 	}
+	h.auditEmit().LogArtworkChanged(r.Context(), r, "collection", collectionID, imageType+"_cleared")
 	w.WriteHeader(http.StatusNoContent)
 }
 

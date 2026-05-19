@@ -49,6 +49,7 @@ type AdminDBHandler struct {
 	maint        *db.Maintenance // pool stats + sqlite→pg migrator source
 	saveDBConfig func(driver, path, dsn string) error
 	restart      *config.RestartRequester
+	audit        AuditEmitter
 	logger       *slog.Logger
 }
 
@@ -68,6 +69,7 @@ func NewAdminDBHandler(
 	maintenance *db.Maintenance,
 	saveDBConfig func(driver, path, dsn string) error,
 	restart *config.RestartRequester,
+	audit AuditEmitter,
 	logger *slog.Logger,
 ) *AdminDBHandler {
 	return &AdminDBHandler{
@@ -76,8 +78,16 @@ func NewAdminDBHandler(
 		maint:        maintenance,
 		saveDBConfig: saveDBConfig,
 		restart:      restart,
+		audit:        audit,
 		logger:       logger.With("module", "admin-db-handler"),
 	}
+}
+
+func (h *AdminDBHandler) auditEmit() AuditEmitter {
+	if h.audit != nil {
+		return h.audit
+	}
+	return noopAudit{}
 }
 
 // statusResponse mirrors what the admin Database panel renders. It's
@@ -381,10 +391,14 @@ func (h *AdminDBHandler) Save(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	oldDriver := h.cfg.Database.Driver
 	if err := h.saveDBConfig(driver, req.Path, dsn); err != nil {
 		h.logger.Error("save database config", "error", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to persist database config")
 		return
+	}
+	if oldDriver != driver {
+		h.auditEmit().LogDBSwap(r.Context(), r, oldDriver, driver)
 	}
 
 	resp := map[string]any{"status": "saved", "restart_scheduled": false}
@@ -406,6 +420,9 @@ func (h *AdminDBHandler) Restart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	scheduled := h.restart.Request("admin requested restart")
+	if scheduled {
+		h.auditEmit().LogSystemRestart(r.Context(), r, "admin_panel")
+	}
 	respondJSON(w, http.StatusAccepted, map[string]any{
 		"data": map[string]any{
 			"restart_scheduled": scheduled,

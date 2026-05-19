@@ -293,6 +293,25 @@ var outOfScopeExact = map[string]string{
 	// transferencia por diseño.
 	"GET /users/{id}/permissions": "admin panel — lee flags del usuario",
 	"PUT /users/{id}/permissions": "admin panel — modifica flags (gated can_manage_admins)",
+
+	// ── CORS origins panel (PR4) ──────────────────────────────────────
+	// Owner-only management de orígenes CORS dinámicos. Sólo lo usa el
+	// panel admin del propio frontend; un consumer externo (Kotlin TV,
+	// SDK third-party) no toca esto.
+	"GET /admin/system/cors-origins":    "admin panel — lista statics(YAML) + dynamics(DB)",
+	"POST /admin/system/cors-origins":   "admin panel — añade un origen dynamic (owner-only)",
+	"DELETE /admin/system/cors-origins": "admin panel — quita un dynamic (owner-only)",
+
+	// ── Audit log unificado (PR5) ───────────────────────────────────
+	// Endpoints del panel admin /admin/system. Gated por can_view_audit.
+	"GET /admin/system/audit-log":       "admin panel — query del audit log con filtros",
+	"GET /admin/system/audit-log/types": "admin panel — distinct event types para el dropdown",
+
+	// ── Upload folder explorer (PR6) ─────────────────────────────────
+	// File-explorer SFTP-style para que el cliente navegue carpetas
+	// dentro de la librería antes de subir. Gateado por can_upload.
+	"GET /libraries/{id}/upload-browse":  "upload UI — lista subdirs dentro de la librería",
+	"POST /libraries/{id}/folders":       "upload UI — crea carpeta nueva dentro de la librería",
 }
 
 // TestOpenAPISpec_RouterCoverage walks the AST of router.go to enumerate

@@ -20,18 +20,27 @@ import (
 type UserHandler struct {
 	users     UserService
 	libraries LibraryService
+	audit     AuditEmitter
 	logger    *slog.Logger
 }
 
 // NewUserHandler wires the user handler. libraries may be nil in test
 // setups that don't exercise the library-access surface; production
-// always passes the real service.
-func NewUserHandler(users UserService, libraries LibraryService, logger *slog.Logger) *UserHandler {
+// always passes the real service. audit nil-safe.
+func NewUserHandler(users UserService, libraries LibraryService, audit AuditEmitter, logger *slog.Logger) *UserHandler {
 	return &UserHandler{
 		users:     users,
 		libraries: libraries,
+		audit:     audit,
 		logger:    logger,
 	}
+}
+
+func (h *UserHandler) auditEmit() AuditEmitter {
+	if h.audit != nil {
+		return h.audit
+	}
+	return noopAudit{}
 }
 
 // Me returns the currently authenticated user's profile.
@@ -175,10 +184,18 @@ func (h *UserHandler) SetRole(w http.ResponseWriter, r *http.Request) {
 			"the primary admin cannot be demoted")
 		return
 	}
+	// Capturamos el role anterior para el audit. Si falla la lectura
+	// (race con un delete concurrent), seguimos igual — el audit no
+	// debe abortar la mutación.
+	var oldRole string
+	if cur, err := h.users.GetByID(r.Context(), id); err == nil {
+		oldRole = cur.Role
+	}
 	if err := h.users.SetRole(r.Context(), id, req.Role); err != nil {
 		handleServiceError(w, r, err)
 		return
 	}
+	h.auditEmit().LogRoleChanged(r.Context(), r, id, oldRole, req.Role)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -356,6 +373,7 @@ func (h *UserHandler) SetActive(w http.ResponseWriter, r *http.Request) {
 		handleServiceError(w, r, err)
 		return
 	}
+	h.auditEmit().LogUserActiveChanged(r.Context(), r, id, req.IsActive)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -680,10 +698,17 @@ func (h *UserHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Capturamos username antes del Delete para enriquecer el audit.
+	var username string
+	if u, err := h.users.GetByID(r.Context(), id); err == nil {
+		username = u.Username
+	}
+
 	if err := h.users.Delete(r.Context(), id); err != nil {
 		handleServiceError(w, r, err)
 		return
 	}
 
+	h.auditEmit().LogUserDeleted(r.Context(), r, id, username)
 	w.WriteHeader(http.StatusNoContent)
 }

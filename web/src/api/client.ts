@@ -58,6 +58,9 @@ import type {
   UserLibraryAccess,
   UserPermissions,
   UploadAuditEntry,
+  CorsOriginsListResponse,
+  AuditLogQueryResponse,
+  UploadBrowseResponse,
   UserData,
   ApiErrorBody,
   ExternalSubtitleResult,
@@ -732,6 +735,76 @@ export class ApiClient {
     // this.baseUrl ya incluye el prefijo /api/v1 (ver factory al pie
     // del archivo). Compone "<base>/uploads/" sin duplicar el prefijo.
     return `${this.baseUrl}/uploads/`;
+  }
+
+  /** Lista subdirs dentro de una librería destino (PR6 file
+   *  explorer). path es relativo a la librería (vacío = raíz). */
+  async browseUploadFolders(libraryID: string, path: string): Promise<UploadBrowseResponse> {
+    const qs = path ? `?path=${encodeURIComponent(path)}` : "";
+    return this.request<UploadBrowseResponse>(
+      "GET",
+      `/libraries/${libraryID}/upload-browse${qs}`,
+    );
+  }
+
+  /** Crea una carpeta nueva dentro de la librería. Idempotente —
+   *  si ya existe, el backend devuelve 201 igualmente. */
+  async createUploadFolder(libraryID: string, path: string): Promise<void> {
+    return this.request<void>("POST", `/libraries/${libraryID}/folders`, {
+      body: { path },
+    });
+  }
+
+  /** Owner-only: lista de orígenes CORS (statics YAML + dynamics DB). */
+  async listCorsOrigins(): Promise<CorsOriginsListResponse> {
+    return this.request<CorsOriginsListResponse>("GET", "/admin/system/cors-origins");
+  }
+
+  /** Owner-only: añade un origen dynamic. El backend lo valida + lo
+   *  inserta + recarga el registry CORS en caliente. Devuelve la
+   *  lista completa (mismo shape que listCorsOrigins) para que el
+   *  cliente repinte sin un GET extra. */
+  async addCorsOrigin(origin: string, note: string): Promise<CorsOriginsListResponse> {
+    return this.request<CorsOriginsListResponse>("POST", "/admin/system/cors-origins", {
+      body: { origin, note },
+    });
+  }
+
+  /** Owner-only: quita un origen dynamic. El origen viaja en query
+   *  string porque chi no maneja URLs completas en path params sin
+   *  escapado agresivo. Idempotente: borrar uno inexistente es 204. */
+  async deleteCorsOrigin(origin: string): Promise<void> {
+    const enc = encodeURIComponent(origin);
+    return this.request<void>("DELETE", `/admin/system/cors-origins?origin=${enc}`);
+  }
+
+  /** Query del audit log unificado. Todos los filtros son opcionales;
+   *  el backend interpreta vacío como "no filtrar por ese eje". */
+  async queryAuditLog(params: {
+    type?: string;
+    actor?: string;
+    from?: string;
+    to?: string;
+    q?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<AuditLogQueryResponse> {
+    const qs = new URLSearchParams();
+    if (params.type) qs.set("type", params.type);
+    if (params.actor) qs.set("actor", params.actor);
+    if (params.from) qs.set("from", params.from);
+    if (params.to) qs.set("to", params.to);
+    if (params.q) qs.set("q", params.q);
+    if (params.limit) qs.set("limit", String(params.limit));
+    if (params.offset) qs.set("offset", String(params.offset));
+    const path = `/admin/system/audit-log${qs.toString() ? "?" + qs.toString() : ""}`;
+    return this.request<AuditLogQueryResponse>("GET", path);
+  }
+
+  /** Lista de event_type distintos presentes en la tabla. El panel
+   *  lo usa para el dropdown del filtro sin hardcodear la lista. */
+  async listAuditEventTypes(): Promise<string[]> {
+    return this.request<string[]>("GET", "/admin/system/audit-log/types");
   }
 
   /** Shortcut for "give user X their own IPTV list": creates a

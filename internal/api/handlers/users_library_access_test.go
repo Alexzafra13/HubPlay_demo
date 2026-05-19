@@ -37,7 +37,7 @@ func newLibraryAccessEnv(t *testing.T) *libraryAccessEnv {
 		users: &userFakeService{},
 		libs:  &libFakeService{},
 	}
-	env.handler = NewUserHandler(env.users, env.libs, testutil.NopLogger())
+	env.handler = NewUserHandler(env.users, env.libs, nil, testutil.NopLogger())
 	r := chi.NewRouter()
 	r.Route("/api/v1/users", func(r chi.Router) {
 		r.Get("/{id}/library-access", env.handler.GetLibraryAccess)
@@ -154,7 +154,7 @@ func TestUserHandler_GetLibraryAccess_UserNotFound_404(t *testing.T) {
 // future test setups that forget to pass libraries don't crash the
 // process.
 func TestUserHandler_GetLibraryAccess_NoLibrariesWired_503(t *testing.T) {
-	handler := NewUserHandler(&userFakeService{}, nil, testutil.NopLogger())
+	handler := NewUserHandler(&userFakeService{}, nil, nil, testutil.NopLogger())
 	r := chi.NewRouter()
 	r.Get("/api/v1/users/{id}/library-access", handler.GetLibraryAccess)
 
@@ -413,7 +413,7 @@ func TestUserHandler_CreatePersonalIPTV_UserNotFound_404(t *testing.T) {
 }
 
 func TestUserHandler_CreatePersonalIPTV_NoLibrariesWired_503(t *testing.T) {
-	handler := NewUserHandler(&userFakeService{}, nil, testutil.NopLogger())
+	handler := NewUserHandler(&userFakeService{}, nil, nil, testutil.NopLogger())
 	r := chi.NewRouter()
 	r.Post("/api/v1/users/{id}/iptv-libraries", handler.CreatePersonalIPTV)
 

@@ -3,9 +3,7 @@ package handlers
 import (
 	"net/http"
 	"os/exec"
-	"path/filepath"
 	"runtime"
-	"syscall"
 	"time"
 
 	"hubplay/internal/db"
@@ -160,21 +158,12 @@ func (h *HealthHandler) Health(w http.ResponseWriter, r *http.Request) {
 }
 
 // freeDiskBytes reports the bytes available to a non-root caller on
-// the filesystem hosting `path`'s containing directory. Linux-only
-// today; building for non-Unix would need a build tag and a Windows
-// equivalent (GetDiskFreeSpaceEx) — out of scope while HubPlay's
-// only supported runtime is Linux/Docker.
-func freeDiskBytes(path string) (uint64, error) {
-	dir := filepath.Dir(path)
-	if dir == "" {
-		dir = "."
-	}
-	var stat syscall.Statfs_t
-	if err := syscall.Statfs(dir, &stat); err != nil {
-		return 0, err
-	}
-	// Bavail is "blocks available to non-root" — the right number to
-	// surface, since HubPlay typically runs as a non-root user. Bfree
-	// would over-report by including the root reserve.
-	return stat.Bavail * uint64(stat.Bsize), nil
-}
+// the filesystem hosting `path`'s containing directory.
+//
+// La implementación es per-platform (build tags):
+//   - health_unix.go    Linux / Darwin / FreeBSD via syscall.Statfs
+//   - health_windows.go Windows via GetDiskFreeSpaceExW
+//
+// El interfaz es el mismo: input ruta absoluta o relativa, output bytes
+// libres. Los callers (Stats, Ready) usan el mismo path code y no
+// saben en qué plataforma corren.

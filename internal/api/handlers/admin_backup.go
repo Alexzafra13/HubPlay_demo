@@ -51,20 +51,29 @@ type AdminBackupHandler struct {
 	backup db.BackupOperator
 	driver string
 	dbPath string
+	audit  AuditEmitter
 	logger *slog.Logger
 }
 
 // NewAdminBackupHandler consume db.BackupOperator (típicamente
 // *db.Maintenance) en lugar de `*sql.DB`. Cierra el olor K: el
 // handler no debe poder ejecutar SQL arbitrario — sólo VacuumInto
-// vía el contrato estrecho.
-func NewAdminBackupHandler(driver string, backupOp db.BackupOperator, dbPath string, logger *slog.Logger) *AdminBackupHandler {
+// vía el contrato estrecho. audit nil-safe.
+func NewAdminBackupHandler(driver string, backupOp db.BackupOperator, dbPath string, audit AuditEmitter, logger *slog.Logger) *AdminBackupHandler {
 	return &AdminBackupHandler{
 		backup: backupOp,
 		driver: driver,
+		audit:  audit,
 		dbPath: dbPath,
 		logger: logger,
 	}
+}
+
+func (h *AdminBackupHandler) auditEmit() AuditEmitter {
+	if h.audit != nil {
+		return h.audit
+	}
+	return noopAudit{}
 }
 
 // notImplementedForPostgres centralises the response for the two
@@ -133,6 +142,9 @@ func (h *AdminBackupHandler) Download(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", stat.Size()))
+	// Audit ANTES de empezar el stream — si el cliente se desconecta
+	// a mitad, el log igual queda: alguien autenticado pidió un dump.
+	h.auditEmit().LogBackupDownloaded(r.Context(), r)
 	w.WriteHeader(http.StatusOK)
 	if _, err := io.Copy(w, f); err != nil {
 		// Connection probably gone; nothing to recover. Log and let
@@ -209,6 +221,7 @@ func (h *AdminBackupHandler) Upload(w http.ResponseWriter, r *http.Request) {
 
 	h.logger.Info("backup staged for restore on next restart",
 		"path", pendingPath, "size_bytes", written, "uploaded_filename", header.Filename)
+	h.auditEmit().LogBackupRestored(r.Context(), r)
 
 	respondJSON(w, http.StatusOK, map[string]any{
 		"data": map[string]any{

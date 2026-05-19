@@ -137,6 +137,22 @@ type Dependencies struct {
 	// PermissionsHandler. Interface estrecha definida en el paquete
 	// handlers; el *db.UserRepository concreto la satisface.
 	UserRepo       handlers.PermissionsStore
+	// CorsRegistry — combinador atómico statics(YAML) + dynamics(DB)
+	// que el middleware CORS consulta en cada preflight. nil = router
+	// cae al handler estático de chi-cors con la lista del YAML
+	// (comportamiento pre-PR4).
+	CorsRegistry   *CorsRegistry
+	// CorsOriginsRepo expone List/Insert/Delete/ListOrigins al handler
+	// del panel admin de CORS. nil = los endpoints /admin/cors-origins
+	// no se montan.
+	CorsOriginsRepo handlers.CorsOriginStore
+	// AuditLog expone Query + DistinctEventTypes al panel admin de
+	// auditoría (PR5). nil = los endpoints /admin/audit-log no se
+	// montan (tests minimalistas).
+	AuditLog        handlers.AuditLogStore
+	// Audit es el productor de eventos al audit log unificado (PR5).
+	// nil-safe en los handlers (caen a un sink no-op).
+	Audit           handlers.AuditEmitter
 }
 
 func NewRouter(deps Dependencies) http.Handler {
@@ -168,14 +184,36 @@ func NewRouter(deps Dependencies) http.Handler {
 	if deps.Metrics != nil {
 		r.Use(deps.Metrics.MetricsMiddleware)
 	}
-	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   allowedOrigins(deps.Config),
-		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Authorization", "Content-Type", "X-CSRF-Token"},
-		ExposedHeaders:   []string{"Retry-After"},
-		AllowCredentials: true,
-		MaxAge:           300,
-	}))
+	// CORS middleware. Si deps.CorsRegistry está cableado (caso default
+	// post-PR4-CORS-dynamic), usamos el middleware custom que combina
+	// statics del YAML + dynamics del DB con un atomic.Pointer; el panel
+	// admin puede añadir/quitar orígenes sin restart. Si NO está
+	// (tests minimalistas o flag de compatibilidad), caemos al handler
+	// estático de chi-cors con la lista del YAML.
+	corsMethods := []string{"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}
+	corsAllowedHeaders := []string{
+		"Authorization", "Content-Type", "X-CSRF-Token",
+		"Tus-Resumable", "Upload-Length", "Upload-Offset",
+		"Upload-Metadata", "Upload-Concat", "Upload-Defer-Length",
+		"Upload-Checksum",
+	}
+	corsExposedHeaders := []string{
+		"Retry-After",
+		"Location", "Tus-Resumable", "Tus-Version", "Tus-Extension",
+		"Tus-Max-Size", "Upload-Offset", "Upload-Length",
+	}
+	if deps.CorsRegistry != nil {
+		r.Use(CorsMiddleware(deps.CorsRegistry, corsMethods, corsAllowedHeaders, corsExposedHeaders, true, 300))
+	} else {
+		r.Use(cors.Handler(cors.Options{
+			AllowedOrigins:   allowedOrigins(deps.Config),
+			AllowedMethods:   corsMethods,
+			AllowedHeaders:   corsAllowedHeaders,
+			ExposedHeaders:   corsExposedHeaders,
+			AllowCredentials: true,
+			MaxAge:           300,
+		}))
+	}
 	r.Use(CSRFProtect)
 
 	// Prometheus /metrics endpoint. Mounted outside /api/v1 because metrics
@@ -190,8 +228,8 @@ func NewRouter(deps Dependencies) http.Handler {
 	}
 
 	// Handlers
-	authHandler := handlers.NewAuthHandler(deps.Auth, deps.Users, deps.Libraries, deps.Config.Auth, deps.Logger)
-	userHandler := handlers.NewUserHandler(deps.Users, deps.Libraries, deps.Logger)
+	authHandler := handlers.NewAuthHandler(deps.Auth, deps.Users, deps.Libraries, deps.Config.Auth, deps.Audit, deps.Logger)
+	userHandler := handlers.NewUserHandler(deps.Users, deps.Libraries, deps.Audit, deps.Logger)
 
 	// Avoid wrapping a nil concrete pointer in a non-nil interface.
 	var streamSvc handlers.StreamManagerService
@@ -219,7 +257,7 @@ func NewRouter(deps Dependencies) http.Handler {
 				deps.Items, deps.ExternalIDs, deps.Images, deps.Providers,
 				pathmap.New(fedImageDir), fedImageDir, deps.Logger,
 			),
-			fedImageDir, deps.Logger,
+			fedImageDir, deps.Audit, deps.Logger,
 		)
 	}
 
@@ -428,6 +466,20 @@ func NewRouter(deps Dependencies) http.Handler {
 				// final — tusd compone Location: /api/v1/uploads/<id> tras
 				// el POST de creación, y el cliente PATCH-ea ahí mismo.
 				r.Mount("/uploads/", deps.Uploads)
+
+				// Upload folder explorer (PR6 file explorer). Gateado por
+				// can_upload — un user sin permiso de subir no necesita
+				// el browser. Owner pasa automático via User.Can().
+				if deps.Libraries != nil {
+					browseHandler := handlers.NewUploadBrowseHandler(deps.Libraries, deps.Logger)
+					r.Group(func(r chi.Router) {
+						if deps.Permissions != nil {
+							r.Use(deps.Permissions.Require(authmodel.PermUpload))
+						}
+						r.Get("/libraries/{id}/upload-browse", browseHandler.Browse)
+						r.Post("/libraries/{id}/folders", browseHandler.CreateFolder)
+					})
+				}
 			}
 
 			// Current user
@@ -522,7 +574,7 @@ func NewRouter(deps Dependencies) http.Handler {
 				// genérico; el write está gated por can_manage_admins.
 				// El owner es inmutable — sin endpoint de transferencia.
 				if deps.Permissions != nil && deps.UserRepo != nil {
-					permHandler := handlers.NewPermissionsHandler(deps.UserRepo, deps.Logger)
+					permHandler := handlers.NewPermissionsHandler(deps.UserRepo, deps.Audit, deps.Logger)
 					r.Get("/{id}/permissions", permHandler.GetPermissions)
 					r.With(deps.Permissions.Require(authmodel.PermManageAdmins)).
 						Put("/{id}/permissions", permHandler.PutPermissions)
@@ -752,7 +804,7 @@ func NewRouter(deps Dependencies) http.Handler {
 					if deps.Libraries != nil {
 						libAdminHandler := handlers.NewLibraryHandler(
 							deps.Libraries, deps.Images, deps.Metadata,
-							deps.UserData, deps.Users, deps.Logger,
+							deps.UserData, deps.Users, deps.Audit, deps.Logger,
 						)
 						r.Get("/recently-added", libAdminHandler.AdminRecentlyAdded)
 					}
@@ -834,7 +886,7 @@ func NewRouter(deps Dependencies) http.Handler {
 						}
 						if deps.DB != nil {
 							backupHandler := handlers.NewAdminBackupHandler(
-								deps.Config.Database.Driver, deps.DB, deps.Config.Database.Path, deps.Logger,
+								deps.Config.Database.Driver, deps.DB, deps.Config.Database.Path, deps.Audit, deps.Logger,
 							)
 							r.Get("/backup", backupHandler.Download)
 							r.Post("/backup/restore", backupHandler.Upload)
@@ -846,6 +898,7 @@ func NewRouter(deps Dependencies) http.Handler {
 								deps.DB,
 								deps.SetupService.SaveDatabaseConfig,
 								deps.RestartRequester,
+								deps.Audit,
 								deps.Logger,
 							)
 							r.Get("/db", dbHandler.Status)
@@ -854,6 +907,24 @@ func NewRouter(deps Dependencies) http.Handler {
 							r.Put("/db", dbHandler.Save)
 							r.Post("/db/migrate", dbHandler.Migrate)
 							r.Post("/restart", dbHandler.Restart)
+						}
+
+						// CORS origins panel (migración 056). Same owner-only
+						// gate: añadir un origen es expandir la superficie
+						// de CSRF cross-origin. Va dentro de /admin/system
+						// para que el dashboard tenga un único hogar de
+						// "configuración del servidor".
+						if deps.CorsOriginsRepo != nil && deps.CorsRegistry != nil {
+							corsHandler := handlers.NewCorsOriginsHandler(
+								deps.CorsOriginsRepo,
+								deps.CorsRegistry,
+								ValidateCorsOrigin,
+								deps.Audit,
+								deps.Logger,
+							)
+							r.Get("/cors-origins", corsHandler.List)
+							r.Post("/cors-origins", corsHandler.Add)
+							r.Delete("/cors-origins", corsHandler.Delete)
 						}
 					})
 
@@ -864,6 +935,22 @@ func NewRouter(deps Dependencies) http.Handler {
 					logsHandler := handlers.NewAdminLogsHandler(deps.LogBuffer, deps.SSELimiter)
 					r.Get("/logs", logsHandler.Snapshot)
 					r.Get("/logs/stream", logsHandler.Stream)
+
+					// Audit log unificado (PR5). Gateado por can_view_audit
+					// — un admin con sólo este flag puede revisar el
+					// historial sin tocar nada. El owner también pasa
+					// (User.Can() devuelve true para todo). Sub-Group
+					// adicional sobre el RequireAdmin del padre.
+					if deps.AuditLog != nil {
+						auditHandler := handlers.NewAuditLogHandler(deps.AuditLog, deps.Logger)
+						r.Group(func(r chi.Router) {
+							if deps.Permissions != nil {
+								r.Use(deps.Permissions.Require(authmodel.PermViewAudit))
+							}
+							r.Get("/audit-log", auditHandler.Query)
+							r.Get("/audit-log/types", auditHandler.EventTypes)
+						})
+					}
 				})
 			}
 
@@ -937,7 +1024,7 @@ func NewRouter(deps Dependencies) http.Handler {
 
 			// Libraries & Items (only if service is wired)
 			if deps.Libraries != nil {
-				libHandler := handlers.NewLibraryHandler(deps.Libraries, deps.Images, deps.Metadata, deps.UserData, deps.Users, deps.Logger)
+				libHandler := handlers.NewLibraryHandler(deps.Libraries, deps.Images, deps.Metadata, deps.UserData, deps.Users, deps.Audit, deps.Logger)
 				// Trickplay sprites land under <imageDir>/trickplay/ —
 				// reusing the image-storage root keeps the on-disk
 				// layout clustered (one tree the operator can backup,
@@ -951,7 +1038,7 @@ func NewRouter(deps Dependencies) http.Handler {
 				if deps.Scanner != nil {
 					identifier = deps.Scanner
 				}
-				itemHandler := handlers.NewItemHandler(deps.Libraries, deps.Images, deps.Metadata, deps.UserData, deps.Users, deps.Chapters, deps.EpisodeSegments, deps.ExternalIDs, deps.People, deps.Collections, deps.Providers, identifier, trickplayDir, deps.Logger)
+				itemHandler := handlers.NewItemHandler(deps.Libraries, deps.Images, deps.Metadata, deps.UserData, deps.Users, deps.Chapters, deps.EpisodeSegments, deps.ExternalIDs, deps.People, deps.Collections, deps.Providers, identifier, trickplayDir, deps.Audit, deps.Logger)
 
 				// Libraries
 				r.Get("/libraries", libHandler.List)
@@ -989,7 +1076,7 @@ func NewRouter(deps Dependencies) http.Handler {
 					// falls back to the raw passthrough proxy, which is
 					// the correct degraded-but-functional behaviour for
 					// HLS-only deployments without ffmpeg.
-					iptvHandler := handlers.NewIPTVHandler(deps.IPTV, deps.IPTVProxy, deps.IPTVTransmux, deps.IPTVLogoCache, fedImageDir, deps.LibraryRepo, deps.Libraries, deps.Logger)
+					iptvHandler := handlers.NewIPTVHandler(deps.IPTV, deps.IPTVProxy, deps.IPTVTransmux, deps.IPTVLogoCache, fedImageDir, deps.LibraryRepo, deps.Libraries, deps.Audit, deps.Logger)
 
 					r.Route("/libraries/{id}/channels", func(r chi.Router) {
 						r.Get("/", iptvHandler.ListChannels)
@@ -1241,7 +1328,7 @@ func NewRouter(deps Dependencies) http.Handler {
 					if deps.Providers != nil {
 						collectionImages = deps.Providers
 					}
-					collectionHandler := handlers.NewCollectionHandler(deps.Collections, collectionOverrides, collectionImages, fedImageDir, deps.Logger)
+					collectionHandler := handlers.NewCollectionHandler(deps.Collections, collectionOverrides, collectionImages, fedImageDir, deps.Audit, deps.Logger)
 					r.Get("/collections", collectionHandler.List)
 					r.Get("/collections/{id}", collectionHandler.Get)
 					// Cualquier usuario autenticado puede GET el archivo

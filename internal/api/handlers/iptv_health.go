@@ -212,6 +212,7 @@ func (h *IPTVHandler) DisableChannel(w http.ResponseWriter, r *http.Request) {
 		handleServiceError(w, r, err)
 		return
 	}
+	h.auditEmit().LogChannelDisabled(r.Context(), r, channelID)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -232,6 +233,7 @@ func (h *IPTVHandler) EnableChannel(w http.ResponseWriter, r *http.Request) {
 		handleServiceError(w, r, err)
 		return
 	}
+	h.auditEmit().LogChannelEnabled(r.Context(), r, channelID)
 	w.WriteHeader(http.StatusNoContent)
 }
 

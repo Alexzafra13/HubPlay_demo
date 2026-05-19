@@ -18,6 +18,7 @@ import (
 	hubplay "hubplay"
 	"hubplay/internal/api"
 	"hubplay/internal/api/handlers"
+	"hubplay/internal/audit"
 	"hubplay/internal/auth"
 	"hubplay/internal/clock"
 	"hubplay/internal/config"
@@ -524,8 +525,41 @@ func run(configPath string) error {
 		logger.Info("uploads enabled",
 			"staging_dir", stagingDir.Root(),
 			"max_bytes", cfg.Upload.MaxBytesPerUpload)
+
+		// GC de uploads huérfanos. Si el binario cae mientras un
+		// upload está en vuelo, los chunks + .info quedan en
+		// <staging>/<user>/<id>/ sin que Service.Finish/Aborted
+		// recupere espacio. El GC barre cada hora dirs con TODOS
+		// sus ficheros más antiguos que 24h — tiempo suficiente
+		// para que un "upload pausado" legítimo sobreviva un par
+		// de timeouts de red sin perderse, pero corto para que un
+		// blob abandonado no acumule días.
+		upload.NewGC(stagingDir, time.Hour, 24*time.Hour, logger).Start(ctx)
 	} else {
 		logger.Info("uploads disabled (config.upload.enabled=false)")
+	}
+
+	// Audit service (PR5). Cableado antes que los handlers para que
+	// el router lo reciba. Sink fire-and-forget — un INSERT lento o
+	// fallido NO bloquea el flujo principal.
+	auditService := audit.NewService(repos.AuditLog, logger)
+
+	// CORS registry (PR4 feature CORS-dynamic): combina statics del
+	// YAML + dynamics del DB en un atomic.Pointer.  Lo construimos
+	// AQUÍ (antes del router) para que NewRouter lo reciba listo.
+	// Pre-carga inicial de dynamics — los siguientes Add/Delete del
+	// panel admin recargan vía el handler.
+	corsRegistry := api.NewCorsRegistry(api.AllowedOrigins(cfg))
+	if initialDynamics, err := repos.CorsOrigins.ListOrigins(ctx); err == nil {
+		corsRegistry.SetDynamics(initialDynamics)
+		logger.Info("cors registry loaded",
+			"statics", len(api.AllowedOrigins(cfg)),
+			"dynamics", len(initialDynamics))
+	} else {
+		// Si el pre-load falla, arrancamos con dynamics vacíos. El
+		// operador verá la lista vacía en el panel y al reiniciar se
+		// llenará. No abortamos boot — CORS estático del YAML basta.
+		logger.Warn("cors registry: failed initial dynamics load", "error", err)
 	}
 
 	router := api.NewRouter(api.Dependencies{
@@ -583,6 +617,10 @@ func run(configPath string) error {
 		UploadsAudit:     repos.UploadAudit,
 		Permissions:      auth.NewPermissionChecker(repos.Users),
 		UserRepo:         repos.Users,
+		CorsRegistry:     corsRegistry,
+		CorsOriginsRepo:  repos.CorsOrigins,
+		AuditLog:         repos.AuditLog,
+		Audit:            auditService,
 	})
 
 	server := &http.Server{

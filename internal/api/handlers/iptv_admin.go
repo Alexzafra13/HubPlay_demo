@@ -196,10 +196,19 @@ func (h *IPTVHandler) ImportPublicIPTV(w http.ResponseWriter, r *http.Request) {
 		respondError(w, r, http.StatusInternalServerError, "CREATE_ERROR", "failed to create library")
 		return
 	}
+	// Audit de la creación inmediata. El evento M3U se emite cuando
+	// el refresh background completa con su count real.
+	h.auditEmit().LogLibraryCreated(r.Context(), r, lib.ID, lib.Name, lib.ContentType)
 
 	// Refresh M3U en background via el lifecycle del service
 	// (audit olor GGGG): shutdown drena en vez de cortar el write.
 	libID := lib.ID
+	// Captura el actor + meta del request HTTP ANTES de spawn — la
+	// goroutine NO debe usar el r.Context() del request (se cancela
+	// al cerrar la respuesta). El audit emit acepta nil request, así
+	// que IP/UA quedarán vacíos; el actor_user_id se preserva via
+	// claims que pasamos en un ctx propio.
+	actorCtx := r.Context()
 	h.svc.SpawnBackground(func(bgCtx context.Context) {
 		ctx, cancel := context.WithTimeout(bgCtx, 2*time.Minute)
 		defer cancel()
@@ -209,6 +218,10 @@ func (h *IPTVHandler) ImportPublicIPTV(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.logger.Info("public IPTV imported", "library", libID, "country", req.Country, "channels", count)
+		// Audit del M3U import con el count REAL de canales. Usamos
+		// actorCtx (con las claims preservadas) pero pasamos nil
+		// request porque ya no tenemos el HTTP r en este punto.
+		h.auditEmit().LogIPTVImported(actorCtx, nil, libID, count)
 	})
 
 	respondJSON(w, http.StatusCreated, map[string]any{

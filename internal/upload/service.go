@@ -127,6 +127,11 @@ type PreCreateInput struct {
 	OriginalName    string
 	Size            int64
 	LibraryIDHint   string
+	// Subpath dentro de la librería destino (PR6 feature file
+	// explorer).  Vacío = raíz de la librería. Si viene un valor,
+	// SanitizeSubpath lo valida en PreCreate y Finish lo usa para
+	// componer el target path.
+	Subpath         string
 }
 
 // PreCreateResult es lo que el handler tusd usa para responder. Si
@@ -182,6 +187,14 @@ func (s *Service) PreCreate(ctx context.Context, in PreCreateInput) (PreCreateRe
 	}
 	res.ExtensionOK = true
 
+	// Validación del subpath ANTES de reservar cuota — un subpath
+	// inválido debe rechazar el upload entero sin gastar slots de
+	// cuota. La forma canónica se guardará junto con la metadata
+	// tusd y Finish la reusará tal cual.
+	if _, err := SanitizeSubpath(in.Subpath); err != nil {
+		return res, err
+	}
+
 	// Quota reserve: atómica en el repo, devuelve ErrUploadQuotaExceeded
 	// si excede o si can_upload fue revocado entre el lookup de arriba
 	// y este punto (race-safe).
@@ -218,6 +231,8 @@ type FinishInput struct {
 	OriginalName   string
 	SanitizedName  string
 	LibraryIDHint  string
+	// Subpath dentro de la librería destino. Vacío = raíz.
+	Subpath        string
 	Size           int64
 	SourcePath     string
 	StartedAt      time.Time
@@ -340,7 +355,24 @@ func (s *Service) Finish(ctx context.Context, in FinishInput) FinishResult {
 	if err != nil {
 		return finalize("rejected", "pick library: "+err.Error(), "", "")
 	}
-	target, err := s.resolveTargetPath(lib.Paths[0], in.SanitizedName)
+	// Subpath: si el cliente especificó una carpeta dentro de la
+	// librería (vía el file explorer), aterrizamos ahí. Sin subpath,
+	// va a la raíz (comportamiento pre-PR6).  ResolveSubpath crea la
+	// ruta absoluta + verifica que vive dentro de la librería; si
+	// hubiera traversal lo rechazamos como error de pipeline (no
+	// "rejected" — los chequeos eran cliente-side y PreCreate, llegar
+	// aquí con subpath inválido sería bug del propio backend).
+	targetDir, err := ResolveSubpath(lib.Paths[0], in.Subpath)
+	if err != nil {
+		return finalize("error", "resolve subpath: "+err.Error(), lib.ID, "")
+	}
+	// Aseguramos que el sub-dir destino existe — primer upload a una
+	// carpeta nueva creada via "New folder" del cliente cae aquí si
+	// el endpoint POST /folders no lo creó antes.
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		return finalize("error", "create target dir: "+err.Error(), lib.ID, "")
+	}
+	target, err := s.resolveTargetPath(targetDir, in.SanitizedName)
 	if err != nil {
 		return finalize("error", "resolve target: "+err.Error(), lib.ID, "")
 	}

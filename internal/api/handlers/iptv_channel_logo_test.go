@@ -63,7 +63,7 @@ func (f *fakeLogoIPTVService) GetChannelLogoOverride(_ context.Context, _ string
 func newLogoTestEnv(t *testing.T, imageDir string) (*IPTVHandler, *fakeLogoIPTVService, chi.Router) {
 	t.Helper()
 	fake := &fakeLogoIPTVService{iptvFakeService: *newIPTVFakeService()}
-	h := NewIPTVHandler(fake, &iptvFakeProxy{}, nil, nil, imageDir, &iptvFakeLibraryRepo{}, &iptvFakeAccess{}, testutil.NopLogger())
+	h := NewIPTVHandler(fake, &iptvFakeProxy{}, nil, nil, imageDir, &iptvFakeLibraryRepo{}, &iptvFakeAccess{}, nil, testutil.NopLogger())
 	r := chi.NewRouter()
 	r.Route("/api/v1/channels/{channelId}", func(r chi.Router) {
 		r.Put("/logo", h.SetChannelLogo)

@@ -39,11 +39,24 @@ type PermissionsStore interface {
 // auto-otorgarse can_manage_admins.
 type PermissionsHandler struct {
 	store  PermissionsStore
+	audit  AuditEmitter
 	logger *slog.Logger
 }
 
-func NewPermissionsHandler(store PermissionsStore, logger *slog.Logger) *PermissionsHandler {
-	return &PermissionsHandler{store: store, logger: logger.With("module", "permissions-handler")}
+// NewPermissionsHandler — audit nil-safe.
+func NewPermissionsHandler(store PermissionsStore, audit AuditEmitter, logger *slog.Logger) *PermissionsHandler {
+	return &PermissionsHandler{
+		store:  store,
+		audit:  audit,
+		logger: logger.With("module", "permissions-handler"),
+	}
+}
+
+func (h *PermissionsHandler) auditEmit() AuditEmitter {
+	if h.audit != nil {
+		return h.audit
+	}
+	return noopAudit{}
 }
 
 // GetPermissions devuelve los flags del usuario indicado. El frontend
@@ -177,6 +190,7 @@ func (h *PermissionsHandler) PutPermissions(w http.ResponseWriter, r *http.Reque
 		{"can_upload", req.CanUpload},
 	}
 	applied := 0
+	changes := make(map[string]bool)
 	for _, op := range ops {
 		if op.val == nil {
 			continue
@@ -189,10 +203,17 @@ func (h *PermissionsHandler) PutPermissions(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		applied++
+		changes[op.col] = *op.val
 	}
 
 	h.logger.Info("permissions updated",
 		"requester", claims.UserID, "target", targetID, "fields_applied", applied)
+	// Audit del cambio: payload incluye sólo los flags modificados.
+	// Si no cambió ninguno (body vacío), no emitimos para no ensuciar
+	// el log con no-ops.
+	if applied > 0 {
+		h.auditEmit().LogPermissionChanged(r.Context(), r, targetID, changes)
+	}
 	// Re-fetch para devolver el estado final.
 	h.GetPermissions(w, r)
 }

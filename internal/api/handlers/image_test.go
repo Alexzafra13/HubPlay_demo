@@ -237,7 +237,7 @@ func newImageTestEnv(t *testing.T) *imageTestEnv {
 		pathmap.New(imageDir), imageDir, testutil.NopLogger(),
 	)
 	env.handler = NewImageHandler(env.images, env.externals, env.items, env.providers,
-		refresher, imageDir, testutil.NopLogger())
+		refresher, imageDir, nil, testutil.NopLogger())
 
 	r := chi.NewRouter()
 	r.Route("/api/v1", func(r chi.Router) {

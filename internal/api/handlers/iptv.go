@@ -46,6 +46,7 @@ type IPTVHandler struct {
 	imageDir  string
 	libraries LibraryRepository
 	access    LibraryAccessService
+	audit     AuditEmitter
 	logger    *slog.Logger
 }
 
@@ -61,7 +62,7 @@ type IPTVHandler struct {
 //     Functional but wasteful (N×404 per grid paint); the cache is
 //     constructed best-effort in main.go and only ends up nil if the
 //     cache directory can't be created.
-func NewIPTVHandler(svc IPTVService, proxy IPTVStreamProxyService, transmux IPTVTransmuxer, logoCache *iptv.LogoCache, imageDir string, libraries LibraryRepository, access LibraryAccessService, logger *slog.Logger) *IPTVHandler {
+func NewIPTVHandler(svc IPTVService, proxy IPTVStreamProxyService, transmux IPTVTransmuxer, logoCache *iptv.LogoCache, imageDir string, libraries LibraryRepository, access LibraryAccessService, audit AuditEmitter, logger *slog.Logger) *IPTVHandler {
 	return &IPTVHandler{
 		svc:       svc,
 		proxy:     proxy,
@@ -70,8 +71,16 @@ func NewIPTVHandler(svc IPTVService, proxy IPTVStreamProxyService, transmux IPTV
 		imageDir:  imageDir,
 		libraries: libraries,
 		access:    access,
+		audit:     audit,
 		logger:    logger.With("module", "iptv-handler"),
 	}
+}
+
+func (h *IPTVHandler) auditEmit() AuditEmitter {
+	if h.audit != nil {
+		return h.audit
+	}
+	return noopAudit{}
 }
 
 // canAccessLibrary delegates to the package-level helper. Thin wrapper

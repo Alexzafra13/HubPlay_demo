@@ -21,11 +21,38 @@
 //                                                   no la emite todavía.
 
 import { useEffect, useRef } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../client";
 import { queryKeys } from "../queryKeys";
 import { subscribeSse } from "@/hooks/eventBus";
-import type { UploadAuditEntry, UploadPhase } from "../types";
+import type { UploadAuditEntry, UploadBrowseResponse, UploadPhase } from "../types";
+
+// ─── File explorer (PR6) ─────────────────────────────────────────────
+
+export function useUploadBrowse(libraryID: string, path: string, enabled = true) {
+  return useQuery<UploadBrowseResponse>({
+    queryKey: queryKeys.uploadBrowse(libraryID, path),
+    queryFn: () => api.browseUploadFolders(libraryID, path),
+    enabled: enabled && !!libraryID,
+    // 15s — el listado de carpetas es estable; clicar para entrar y
+    // volver no debe hacer un round-trip a cada paso.
+    staleTime: 15_000,
+  });
+}
+
+export function useCreateUploadFolder() {
+  const qc = useQueryClient();
+  return useMutation<void, Error, { libraryID: string; path: string; parentPath: string }>({
+    mutationFn: ({ libraryID, path }) => api.createUploadFolder(libraryID, path),
+    onSuccess: (_d, vars) => {
+      // Invalida el listado del directorio padre — la nueva carpeta
+      // aparece sin que el cliente tenga que pulsar refresh.
+      qc.invalidateQueries({
+        queryKey: queryKeys.uploadBrowse(vars.libraryID, vars.parentPath),
+      });
+    },
+  });
+}
 
 export function useMyUploads(limit = 50, enabled = true) {
   return useQuery<UploadAuditEntry[]>({

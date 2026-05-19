@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -44,18 +45,93 @@ type AuthHandler struct {
 	users     UserService
 	libraries LibraryService
 	authCfg   config.AuthConfig
+	audit     AuditEmitter
 	logger    *slog.Logger
 }
 
+// AuditEmitter es la mínima superficie del audit service que los
+// handlers usan. nil-safe: cuando el binario arranca sin audit
+// cableado (tests, deploys legacy), todas las llamadas son no-op.
+// Métodos coinciden con los del internal/audit.Service.
+type AuditEmitter interface {
+	// auth
+	LogAuthLogin(ctx context.Context, r *http.Request, actorUserID, username string)
+	LogAuthLoginFailed(ctx context.Context, r *http.Request, attemptedUsername, reason string)
+	LogAuthLogout(ctx context.Context, r *http.Request, actorUserID, sessionID string)
+	// permission / user management
+	LogPermissionChanged(ctx context.Context, r *http.Request, targetUserID string, changes map[string]bool)
+	LogRoleChanged(ctx context.Context, r *http.Request, targetUserID, oldRole, newRole string)
+	LogUserCreated(ctx context.Context, r *http.Request, newUserID, username, role string)
+	LogUserDeleted(ctx context.Context, r *http.Request, deletedUserID, deletedUsername string)
+	LogUserActiveChanged(ctx context.Context, r *http.Request, targetUserID string, active bool)
+	LogPasswordReset(ctx context.Context, r *http.Request, targetUserID string)
+	// libraries / catalog
+	LogLibraryCreated(ctx context.Context, r *http.Request, libraryID, name, contentType string)
+	LogLibraryDeleted(ctx context.Context, r *http.Request, libraryID, name string)
+	LogLibraryScanStarted(ctx context.Context, r *http.Request, libraryID string)
+	LogMetadataEdited(ctx context.Context, r *http.Request, itemID, kind string)
+	LogArtworkChanged(ctx context.Context, r *http.Request, targetType, targetID, kind string)
+	// iptv
+	LogIPTVImported(ctx context.Context, r *http.Request, libraryID string, channelCount int)
+	LogChannelDisabled(ctx context.Context, r *http.Request, channelID string)
+	LogChannelEnabled(ctx context.Context, r *http.Request, channelID string)
+	// cors
+	LogCorsOriginAdded(ctx context.Context, r *http.Request, origin, note string)
+	LogCorsOriginRemoved(ctx context.Context, r *http.Request, origin string)
+	// system
+	LogBackupDownloaded(ctx context.Context, r *http.Request)
+	LogBackupRestored(ctx context.Context, r *http.Request)
+	LogSystemRestart(ctx context.Context, r *http.Request, reason string)
+	LogDBSwap(ctx context.Context, r *http.Request, oldDriver, newDriver string)
+}
+
+// auditOrNoop devuelve el emitter si está cableado o un sink no-op si
+// no. Centraliza el nil-check para que cada handler no tenga que
+// repetirlo en cada call site.
+func (h *AuthHandler) auditEmit() AuditEmitter {
+	if h.audit != nil {
+		return h.audit
+	}
+	return noopAudit{}
+}
+
+type noopAudit struct{}
+
+func (noopAudit) LogAuthLogin(_ context.Context, _ *http.Request, _, _ string)             {}
+func (noopAudit) LogAuthLoginFailed(_ context.Context, _ *http.Request, _, _ string)        {}
+func (noopAudit) LogAuthLogout(_ context.Context, _ *http.Request, _, _ string)             {}
+func (noopAudit) LogPermissionChanged(_ context.Context, _ *http.Request, _ string, _ map[string]bool) {
+}
+func (noopAudit) LogRoleChanged(_ context.Context, _ *http.Request, _, _, _ string)         {}
+func (noopAudit) LogUserCreated(_ context.Context, _ *http.Request, _, _, _ string)         {}
+func (noopAudit) LogUserDeleted(_ context.Context, _ *http.Request, _, _ string)            {}
+func (noopAudit) LogUserActiveChanged(_ context.Context, _ *http.Request, _ string, _ bool) {}
+func (noopAudit) LogPasswordReset(_ context.Context, _ *http.Request, _ string)             {}
+func (noopAudit) LogLibraryCreated(_ context.Context, _ *http.Request, _, _, _ string)      {}
+func (noopAudit) LogLibraryDeleted(_ context.Context, _ *http.Request, _, _ string)         {}
+func (noopAudit) LogLibraryScanStarted(_ context.Context, _ *http.Request, _ string)        {}
+func (noopAudit) LogMetadataEdited(_ context.Context, _ *http.Request, _, _ string)         {}
+func (noopAudit) LogArtworkChanged(_ context.Context, _ *http.Request, _, _, _ string)      {}
+func (noopAudit) LogIPTVImported(_ context.Context, _ *http.Request, _ string, _ int)       {}
+func (noopAudit) LogChannelDisabled(_ context.Context, _ *http.Request, _ string)           {}
+func (noopAudit) LogChannelEnabled(_ context.Context, _ *http.Request, _ string)            {}
+func (noopAudit) LogCorsOriginAdded(_ context.Context, _ *http.Request, _, _ string)        {}
+func (noopAudit) LogCorsOriginRemoved(_ context.Context, _ *http.Request, _ string)         {}
+func (noopAudit) LogBackupDownloaded(_ context.Context, _ *http.Request)                    {}
+func (noopAudit) LogBackupRestored(_ context.Context, _ *http.Request)                      {}
+func (noopAudit) LogSystemRestart(_ context.Context, _ *http.Request, _ string)             {}
+func (noopAudit) LogDBSwap(_ context.Context, _ *http.Request, _, _ string)                 {}
+
 // NewAuthHandler wires the auth handler. libraries may be nil (the setup
 // wizard reuses a slimmer handler that never receives grant_library_ids);
-// the main router always passes the real service.
-func NewAuthHandler(authSvc AuthService, userSvc UserService, libraries LibraryService, authCfg config.AuthConfig, logger *slog.Logger) *AuthHandler {
+// the main router always passes the real service. audit nil-safe.
+func NewAuthHandler(authSvc AuthService, userSvc UserService, libraries LibraryService, authCfg config.AuthConfig, audit AuditEmitter, logger *slog.Logger) *AuthHandler {
 	return &AuthHandler{
 		auth:      authSvc,
 		users:     userSvc,
 		libraries: libraries,
 		authCfg:   authCfg,
+		audit:     audit,
 		logger:    logger,
 	}
 }
@@ -175,6 +251,10 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 	token, err := h.auth.Login(r.Context(), req.Username, req.Password, req.DeviceName, req.DeviceID, r.RemoteAddr)
 	if err != nil {
+		// Audit del intento fallido. Sólo logueamos el username y el
+		// error class — NUNCA la contraseña intentada (ni siquiera
+		// hash) para que el log no se convierta en superficie de leak.
+		h.auditEmit().LogAuthLoginFailed(r.Context(), r, req.Username, classifyAuthError(err))
 		handleServiceError(w, r, err)
 		return
 	}
@@ -184,6 +264,11 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		handleServiceError(w, r, err)
 		return
 	}
+
+	// Audit del login exitoso. Va después de GetByID para tener el
+	// username canónico (la entrada del usuario puede haber sido el
+	// alias o el username con case raro).
+	h.auditEmit().LogAuthLogin(r.Context(), r, u.ID, u.Username)
 
 	setAuthCookies(w, r, token, int(h.authCfg.AccessTokenTTL.Seconds()), int(h.authCfg.RefreshTokenTTL.Seconds()))
 
@@ -476,9 +561,19 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Captura sessionID antes del Logout — tras el revoke ya no
+	// podríamos resolverlo.
+	sessionID := h.auth.CurrentSessionID(r.Context(), req.RefreshToken)
+
 	if err := h.auth.Logout(r.Context(), req.RefreshToken); err != nil {
 		handleServiceError(w, r, err)
 		return
+	}
+
+	// Audit del logout. El actor sale de las claims del request (el
+	// user iba autenticado para llegar al endpoint).
+	if claims := auth.GetClaims(r.Context()); claims != nil {
+		h.auditEmit().LogAuthLogout(r.Context(), r, claims.UserID, sessionID)
 	}
 
 	clearAuthCookies(w, r)
@@ -676,6 +771,10 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Audit. Tipo "user.created" cubre tanto cuentas top-level como
+	// profiles — el payload distingue por role.
+	h.auditEmit().LogUserCreated(r.Context(), r, u.ID, u.Username, u.Role)
+
 	// Best-effort grant application. The user already exists at this
 	// point: a grant failure is logged but does not 500 the create —
 	// the admin can retry via PUT /users/{id}/library-access without
@@ -723,6 +822,10 @@ func (h *AuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 		handleServiceError(w, r, err)
 		return
 	}
+	// Audit. NO incluimos la nueva contraseña en el payload — el
+	// admin la ve UNA VEZ en la respuesta; el log es trazabilidad,
+	// no recuperación.
+	h.auditEmit().LogPasswordReset(r.Context(), r, id)
 	respondJSON(w, http.StatusOK, map[string]any{
 		"data": map[string]any{
 			"user_id":            id,
@@ -860,6 +963,7 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 
 	h.logger.Info("setup completed — admin user created",
 		"username", u.Username, "auto_generated_password", autoGenerated)
+	h.auditEmit().LogUserCreated(r.Context(), r, u.ID, u.Username, "admin")
 
 	// Auto-login the new admin user
 	token, err := h.auth.Login(r.Context(), req.Username, req.Password, r.UserAgent(), "setup", r.RemoteAddr)
@@ -867,6 +971,7 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		handleServiceError(w, r, err)
 		return
 	}
+	h.auditEmit().LogAuthLogin(r.Context(), r, u.ID, u.Username)
 
 	resp := authTokenResponse(token, u)
 	if autoGenerated {
@@ -966,5 +1071,52 @@ func (h *AuthHandler) RevokeMySession(w http.ResponseWriter, r *http.Request) {
 	if revokedSelf {
 		clearAuthCookies(w, r)
 	}
+	// Audit. Tipo "auth.session.revoked"; el actor es el caller (que
+	// auth.GetClaims devuelve), el target es el sessionID.
+	if claims := auth.GetClaims(r.Context()); claims != nil {
+		// Reusamos LogAuthLogout porque revocar una sesión vía API es
+		// semánticamente equivalente al logout — el panel admin las
+		// puede mostrar juntas si quiere. Si en el futuro un evento
+		// separado importa, lo separamos.
+		h.auditEmit().LogAuthLogout(r.Context(), r, claims.UserID, sessionID)
+	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// classifyAuthError extrae una etiqueta corta del error que el auth
+// service devuelve, para meter en el audit log de logins fallidos.
+// La idea es que el operador vea "wrong_password" o "user_locked"
+// en el panel, no el mensaje crudo (que cambia entre releases) ni
+// el error.Error() completo (que puede leak detalles internos).
+func classifyAuthError(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	switch {
+	case stringsContains(msg, "invalid credentials"):
+		return "wrong_password"
+	case stringsContains(msg, "not found"):
+		return "user_not_found"
+	case stringsContains(msg, "locked"):
+		return "user_locked"
+	case stringsContains(msg, "not active"), stringsContains(msg, "inactive"):
+		return "user_disabled"
+	case stringsContains(msg, "rate"):
+		return "rate_limited"
+	default:
+		return "other"
+	}
+}
+
+// stringsContains es un alias trivial para evitar importar "strings"
+// sólo para esta función (auth.go ya tiene varios imports; mantener
+// el listado más corto ayuda al diff).
+func stringsContains(haystack, needle string) bool {
+	for i := 0; i+len(needle) <= len(haystack); i++ {
+		if haystack[i:i+len(needle)] == needle {
+			return true
+		}
+	}
+	return false
 }

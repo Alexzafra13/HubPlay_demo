@@ -46,6 +46,7 @@ import {
   FileVideo,
 } from "lucide-react";
 
+import { FolderBrowser } from "@/components/uploads/FolderBrowser";
 import { api } from "@/api/client";
 import {
   useMe,
@@ -154,7 +155,7 @@ export default function Uploads() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // mount/unmount only
 
-  function startUpload(file: File, libraryID: string) {
+  function startUpload(file: File, libraryID: string, subpath: string) {
     const localID = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const initial: ActiveUpload = {
       localID,
@@ -188,6 +189,10 @@ export default function Uploads() {
         filename: file.name,
         filetype: file.type || "application/octet-stream",
         library_id: libraryID,
+        // Subpath dentro de la librería (PR6 file explorer). Vacío =
+        // raíz, mismo comportamiento pre-PR6. tusd lo persiste en su
+        // .info y el pipeline post-bytes lo lee desde ahí.
+        subpath: subpath,
       },
       onError: (err) => {
         setActive((prev) =>
@@ -306,7 +311,7 @@ interface DropzoneProps {
   libraries: Library[];
   quotaUsed?: number;
   quotaTotal?: number;
-  onUpload: (file: File, libraryID: string) => void;
+  onUpload: (file: File, libraryID: string, subpath: string) => void;
 }
 
 function UploadDropzone({
@@ -321,6 +326,9 @@ function UploadDropzone({
   const [libraryID, setLibraryID] = useState<string>(
     libraries[0]?.id ?? "",
   );
+  // Subpath dentro de la librería elegida (PR6 file explorer). Vacío
+  // = raíz. El FolderBrowser lo actualiza cuando el usuario navega.
+  const [subpath, setSubpath] = useState<string>("");
   const [rejectReason, setRejectReason] = useState<string | null>(null);
 
   // Mantén el library seleccionado coherente con la lista (puede
@@ -331,7 +339,12 @@ function UploadDropzone({
     setLibraryID(libraries[0]?.id ?? "");
   }, [libraries, libraryID]);
 
-  function validateAndStage(incoming: FileList | File[]) {
+  // validateFiles aplica las dos reglas cliente-side (extensión +
+  // cuota) y devuelve la slice de aceptados.  Side-effect: pone
+  // rejectReason si alguno falla — el caller decide si seguir.
+  // Separado de validateAndStage para poder reutilizarlo desde el
+  // drop-on-folder (que valida y sube DIRECTO, sin pasar por la cola).
+  function validateFiles(incoming: FileList | File[]): File[] {
     setRejectReason(null);
     const arr = Array.from(incoming);
     const valid: File[] = [];
@@ -353,7 +366,26 @@ function UploadDropzone({
       }
       valid.push(f);
     }
+    return valid;
+  }
+
+  function validateAndStage(incoming: FileList | File[]) {
+    const valid = validateFiles(incoming);
     setFiles((prev) => [...prev, ...valid]);
+  }
+
+  // Drop directo sobre una carpeta del FolderBrowser (Termius-style):
+  // los ficheros válidos se suben INMEDIATAMENTE a esa carpeta sin
+  // pasar por la cola visible. El subpath puede ser distinto del
+  // path actual del browser (si arrastras a "Drama" estando en
+  // "Movies/", aterriza en "Drama" directo). Si algún fichero falla
+  // la validación, los demás suben igual y el rejectReason se ve.
+  function handleDropOnFolder(incoming: File[], targetSubpath: string) {
+    if (!libraryID) return;
+    const valid = validateFiles(incoming);
+    for (const f of valid) {
+      onUpload(f, libraryID, targetSubpath);
+    }
   }
 
   function onDrop(e: React.DragEvent<HTMLDivElement>) {
@@ -380,7 +412,7 @@ function UploadDropzone({
   function startAll() {
     if (!libraryID) return;
     for (const f of files) {
-      onUpload(f, libraryID);
+      onUpload(f, libraryID, subpath);
     }
     setFiles([]);
   }
@@ -424,6 +456,12 @@ function UploadDropzone({
             onChange={onPickerChange}
           />
         </label>
+        <p className="text-xs text-text-muted/70">
+          {t("uploads.dropzoneSecondaryHint", {
+            defaultValue:
+              "O arrastra los ficheros directamente sobre una carpeta del explorador de abajo para subir ahí.",
+          })}
+        </p>
       </div>
 
       {rejectReason && (
@@ -431,6 +469,21 @@ function UploadDropzone({
           {rejectReason}
         </p>
       )}
+
+      {/* Folder browser SIEMPRE visible — el drop-on-folder es el
+          flujo principal Termius-style, no requiere encolar antes.
+          La cola visible aparece SOLO si el usuario suelta en el
+          dropzone general (que stage en lugar de subir directo). */}
+      <FolderBrowser
+        libraries={libraries}
+        libraryID={libraryID}
+        path={subpath}
+        onChange={(libID, p) => {
+          setLibraryID(libID);
+          setSubpath(p);
+        }}
+        onDropFiles={handleDropOnFolder}
+      />
 
       {files.length > 0 && (
         <div className="flex flex-col gap-3 rounded-[--radius-md] border border-border bg-bg-elevated p-4">
@@ -459,21 +512,19 @@ function UploadDropzone({
             ))}
           </ul>
 
-          <div className="flex flex-wrap items-end gap-3">
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-text-muted">{t("uploads.libraryLabel")}</span>
-              <select
-                value={libraryID}
-                onChange={(e) => setLibraryID(e.target.value)}
-                className="rounded-md border border-border bg-bg-base px-2 py-1.5 text-sm"
-              >
-                {libraries.map((lib) => (
-                  <option key={lib.id} value={lib.id}>
-                    {lib.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+          <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+            <span className="text-text-muted">
+              {subpath ? (
+                <>
+                  {t("uploads.targetHere", { defaultValue: "Subir a" })}{" "}
+                  <span className="font-mono text-text-secondary">/{subpath}</span>
+                </>
+              ) : (
+                t("uploads.targetRoot", {
+                  defaultValue: "Subir a la raíz de la biblioteca",
+                })
+              )}
+            </span>
             <Button onClick={startAll} disabled={!libraryID || files.length === 0}>
               {t("uploads.startCta", { count: files.length })}
             </Button>

@@ -400,6 +400,66 @@ export interface UploadAuditEntry {
 export type UploadPhase = "validating" | "probing" | "moving" | "indexing";
 
 /**
+ * Una entrada de la lista de orígenes CORS dinámicos (PR4 feature).
+ * Los `statics` del YAML no llevan metadata — son strings; los
+ * `dynamics` añadidos via panel sí.
+ */
+export interface CorsOriginEntry {
+  origin: string;
+  created_by: string;
+  created_at: string;
+  note: string;
+}
+
+export interface CorsOriginsListResponse {
+  statics: string[];
+  dynamics: CorsOriginEntry[];
+}
+
+/**
+ * Una fila del audit log unificado (PR5). El payload es JSON
+ * schemaless en el backend; en el cliente lo dejamos como string
+ * y cada renderer decide cómo formatearlo (algunos lo pintan tal
+ * cual, otros parsean campos conocidos como changes o reason).
+ */
+export interface AuditLogEntry {
+  id: string;
+  actor_user_id: string;
+  event_type: string;
+  target_type: string;
+  target_id: string;
+  payload: string;
+  ip_address: string;
+  user_agent: string;
+  created_at: string;
+}
+
+export interface AuditLogQueryResponse {
+  rows: AuditLogEntry[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+/**
+ * Una subcarpeta dentro de una librería (PR6 file explorer). El
+ * backend devuelve el path canónico relativo a la raíz de la
+ * librería (sin leading slash, separador "/"), no la ruta absoluta
+ * en disco.
+ */
+export interface LibraryFolder {
+  name: string;
+  path: string;
+}
+
+export interface UploadBrowseResponse {
+  library_id: string;
+  library_name: string;
+  path: string;
+  directories: LibraryFolder[];
+}
+
+/**
  * One row of the user-facing "Tus dispositivos" panel — every active
  * auth session (refresh token alive in DB) for the calling user.
  * Distinct from AdminStreamSession (the admin's "Now Playing" surface

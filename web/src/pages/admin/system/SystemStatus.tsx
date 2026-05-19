@@ -31,8 +31,10 @@ import type {
   SystemStats,
 } from "@/api/types";
 import { Button, EmptyState, Spinner } from "@/components/common";
+import { AuditLogPanel } from "@/components/admin/AuditLogPanel";
 import { AuthKeysPanel } from "@/components/admin/AuthKeysPanel";
 import { BackupPanel } from "@/components/admin/BackupPanel";
+import { CorsOriginsPanel } from "@/components/admin/CorsOriginsPanel";
 import { DatabasePanel } from "@/components/admin/DatabasePanel";
 import { LogsPanel } from "@/components/admin/LogsPanel";
 import { SectionHeader } from "@/components/admin/SectionHeader";
@@ -1090,10 +1092,12 @@ function AdvancedSection() {
       >
         {t("admin.advanced.warning")}
       </div>
+      <AuditLogPanel />
       <LogsPanel />
       <BackupPanel />
       <DatabasePanel />
       <AuthKeysPanel />
+      <CorsOriginsPanel />
     </section>
   );
 }

@@ -106,6 +106,7 @@ func (t *TusdHandler) preCreate(hook tushandler.HookEvent) (tushandler.HTTPRespo
 		OriginalName:  md["filename"],
 		Size:          hook.Upload.Size,
 		LibraryIDHint: md["library_id"],
+		Subpath:       md["subpath"],
 	}
 
 	res, err := t.svc.PreCreate(hook.Context, in)
@@ -147,6 +148,7 @@ func (t *TusdHandler) preCreate(hook tushandler.HookEvent) (tushandler.HTTPRespo
 			"filename":       md["filename"],
 			"sanitized_name": res.SanitizedName,
 			"library_id":     md["library_id"],
+			"subpath":        md["subpath"],
 			"user_id":        claims.UserID,
 			"started_at":     now,
 		},
@@ -231,6 +233,7 @@ func finishInputFromHook(evt tushandler.HookEvent, stagingRoot string) FinishInp
 		OriginalName:  md["filename"],
 		SanitizedName: md["sanitized_name"],
 		LibraryIDHint: md["library_id"],
+		Subpath:       md["subpath"],
 		Size:          evt.Upload.Size,
 		SourcePath:    binPath,
 		StartedAt:     started,

@@ -68,7 +68,7 @@ func newTestAdminDBHandler(t *testing.T) (*handlers.AdminDBHandler, *fakeDBSaver
 	cfg.Database.Driver = "sqlite"
 	cfg.Database.Path = t.TempDir() + "/hubplay.db"
 	h := handlers.NewAdminDBHandler(
-		cfg, t.TempDir()+"/hubplay.yaml", nil, saver.Save, restart, newSilentLogger(),
+		cfg, t.TempDir()+"/hubplay.yaml", nil, saver.Save, restart, nil, newSilentLogger(),
 	)
 	return h, saver, restart, cancelled
 }
