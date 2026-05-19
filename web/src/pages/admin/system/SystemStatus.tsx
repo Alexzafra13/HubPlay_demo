@@ -255,6 +255,18 @@ function IdentityStrip({
       <span className="font-semibold text-text-primary">
         HubPlay {stats.server.version}
       </span>
+      {stats.server.commit && stats.server.commit !== "none" && (
+        <span
+          className="text-text-muted font-mono text-xs"
+          title={
+            stats.server.build_date && stats.server.build_date !== "unknown"
+              ? `build ${stats.server.build_date}`
+              : undefined
+          }
+        >
+          ({stats.server.commit})
+        </span>
+      )}
       <span className="text-text-muted">·</span>
       <span className="text-text-secondary">
         {t("admin.summary.uptime", {

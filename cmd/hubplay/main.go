@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -43,7 +44,20 @@ import (
 	"hubplay/internal/user"
 )
 
-var version = "dev"
+// Variables de release. Inyectadas por el linker en CI:
+//
+//	go build -ldflags="
+//	    -X main.version=$(git describe --tags --always --dirty)
+//	    -X main.commit=$(git rev-parse --short HEAD)
+//	    -X main.buildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+//
+// En desarrollo (go run, make dev) quedan en sus defaults — útil para
+// distinguir builds locales en logs y en el endpoint /api/v1/version.
+var (
+	version   = "dev"
+	commit    = "none"
+	buildDate = "unknown"
+)
 
 func main() {
 	configPath := flag.String("config", "hubplay.yaml", "path to config file")
@@ -69,7 +83,26 @@ func run(configPath string) error {
 	slog.SetDefault(logger)
 	clk := clock.New()
 
-	logger.Info("starting HubPlay", "version", version, "addr", cfg.Server.Addr())
+	logger.Info("starting HubPlay", "version", version, "commit", commit, "addr", cfg.Server.Addr())
+
+	// Bundled binaries lookup. Cuando el release ship ffmpeg+ffprobe
+	// junto a hubplay.exe, prepender el directorio del ejecutable al
+	// PATH hace que cualquier exec.LookPath/exec.Command los encuentre
+	// sin tocar call-sites individuales. En instalaciones donde el
+	// operador ya tiene ffmpeg en PATH del sistema, prevalece el
+	// bundled (intencional — distribuimos una build conocida estable).
+	// Errores aquí son fatales sólo si interrumpen el boot — failure
+	// silencioso del prepend cae al preflight habitual.
+	if exe, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exe)
+		curPath := os.Getenv("PATH")
+		if curPath == "" {
+			_ = os.Setenv("PATH", exeDir)
+		} else if !strings.Contains(string(os.PathListSeparator)+curPath+string(os.PathListSeparator),
+			string(os.PathListSeparator)+exeDir+string(os.PathListSeparator)) {
+			_ = os.Setenv("PATH", exeDir+string(os.PathListSeparator)+curPath)
+		}
+	}
 
 	// Preflight: validate external binaries and filesystem permissions
 	// before any service is built. Catching these here means "ffmpeg not
@@ -614,6 +647,8 @@ func run(configPath string) error {
 		DB:            db.NewMaintenance(cfg.Database.Driver, database),
 		Activity:      db.NewActivityRepository(cfg.Database.Driver, database),
 		Version:       version,
+		Commit:        commit,
+		BuildDate:     buildDate,
 		WebAssets:     webFS,
 		Config:        cfg,
 		Logger:        logger,

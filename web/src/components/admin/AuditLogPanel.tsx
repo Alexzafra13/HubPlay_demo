@@ -312,21 +312,10 @@ export function AuditLogPanel() {
                       {row.event_type}
                     </td>
                     <td className="px-2 py-2 text-xs">
-                      {row.actor_user_id || (
-                        <span className="text-text-muted italic">anónimo</span>
-                      )}
+                      <ActorCell row={row} />
                     </td>
                     <td className="px-2 py-2 text-xs">
-                      {row.target_type && (
-                        <span className="text-text-muted">
-                          {row.target_type}
-                        </span>
-                      )}
-                      {row.target_id && (
-                        <span className="ml-1 font-mono text-xs">
-                          {truncate(row.target_id, 24)}
-                        </span>
-                      )}
+                      <TargetCell row={row} />
                     </td>
                     <td className="px-2 py-2 text-xs text-text-muted">
                       {new Date(row.created_at).toLocaleString()}
@@ -474,14 +463,37 @@ function RowDetail({
             {new Date(row.created_at).toLocaleString()}
           </DLine>
           <DLine label={t("admin.audit.detailActor", { defaultValue: "Actor" })}>
-            {row.actor_user_id || (
+            {row.actor_user_id ? (
+              <div>
+                {row.actor_username && (
+                  <div className="font-medium">{row.actor_username}</div>
+                )}
+                <div className="font-mono text-xs text-text-muted">
+                  {row.actor_user_id}
+                </div>
+              </div>
+            ) : (
               <span className="text-text-muted italic">anónimo</span>
             )}
           </DLine>
           <DLine label={t("admin.audit.detailTarget", { defaultValue: "Sobre" })}>
-            {row.target_type
-              ? `${row.target_type} · ${row.target_id}`
-              : <span className="text-text-muted italic">—</span>}
+            {row.target_type || row.target_id ? (
+              <div>
+                <div className="text-text-muted text-xs uppercase tracking-wide">
+                  {row.target_type}
+                </div>
+                {row.target_type === "user" && row.target_username && (
+                  <div className="font-medium">{row.target_username}</div>
+                )}
+                {row.target_id && (
+                  <div className="font-mono text-xs text-text-muted break-all">
+                    {row.target_id}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <span className="text-text-muted italic">—</span>
+            )}
           </DLine>
           <DLine label="IP">{row.ip_address || "—"}</DLine>
           <DLine label={t("admin.audit.detailUA", { defaultValue: "Navegador" })} wide>
@@ -524,4 +536,62 @@ function DLine({
 function truncate(s: string, max: number): string {
   if (s.length <= max) return s;
   return s.slice(0, max - 1) + "…";
+}
+
+// ActorCell / TargetCell — preferimos pintar el username (legible) con
+// el UUID truncado debajo en gris. Si no hay username (user borrado o
+// evento sin actor), caemos al UUID truncado solo. El UUID completo
+// queda en title= para que el operador pueda copiarlo si hace falta.
+function ActorCell({ row }: { row: AuditLogEntry }) {
+  if (!row.actor_user_id) {
+    return <span className="text-text-muted italic">anónimo</span>;
+  }
+  if (row.actor_username) {
+    return (
+      <div className="leading-tight">
+        <div className="font-medium text-text-primary">{row.actor_username}</div>
+        <div
+          className="font-mono text-[10px] text-text-muted"
+          title={row.actor_user_id}
+        >
+          {truncate(row.actor_user_id, 12)}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <span className="font-mono" title={row.actor_user_id}>
+      {truncate(row.actor_user_id, 16)}
+    </span>
+  );
+}
+
+function TargetCell({ row }: { row: AuditLogEntry }) {
+  if (!row.target_type && !row.target_id) {
+    return <span className="text-text-muted">—</span>;
+  }
+  const name =
+    row.target_type === "user" && row.target_username
+      ? row.target_username
+      : null;
+  return (
+    <div className="leading-tight">
+      <div className="flex items-center gap-1">
+        <span className="text-text-muted text-[10px] uppercase tracking-wide">
+          {row.target_type}
+        </span>
+        {name && (
+          <span className="font-medium text-text-primary">{name}</span>
+        )}
+      </div>
+      {row.target_id && (
+        <div
+          className="font-mono text-[10px] text-text-muted"
+          title={row.target_id}
+        >
+          {truncate(row.target_id, 16)}
+        </div>
+      )}
+    </div>
+  );
 }

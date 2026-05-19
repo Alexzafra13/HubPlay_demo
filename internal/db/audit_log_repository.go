@@ -23,17 +23,21 @@ func NewAuditLogRepository(driver string, database *sql.DB) *AuditLogRepository 
 }
 
 // AuditLogRow representa una fila in-memory.  Mapea 1-a-1 con la
-// migración 057.
+// migración 057, más dos campos resueltos via JOIN sólo en lectura:
+// ActorUsername (del actor) y TargetUsername (cuando target_type='user').
+// La UI muestra nombre legible en vez del UUID crudo.
 type AuditLogRow struct {
-	ID          string
-	ActorUserID string
-	EventType   string
-	TargetType  string
-	TargetID    string
-	Payload     string // JSON o cadena vacía
-	IPAddress   string
-	UserAgent   string
-	CreatedAt   time.Time
+	ID             string
+	ActorUserID    string
+	ActorUsername  string
+	EventType      string
+	TargetType     string
+	TargetID       string
+	TargetUsername string
+	Payload        string // JSON o cadena vacía
+	IPAddress      string
+	UserAgent      string
+	CreatedAt      time.Time
 }
 
 // Insert append a la tabla. Append-only: no se actualizan ni borran
@@ -120,13 +124,27 @@ func (r *AuditLogRepository) Query(ctx context.Context, q AuditQuery) (rows []Au
 	// SELECT con paginación. ORDER BY created_at DESC + id como
 	// desempate determinístico (dos eventos en el mismo timestamp
 	// es posible si dos requests aterrizan simultáneamente).
-	listQ := `SELECT id, actor_user_id, event_type, target_type, target_id,
-	                 payload, ip_address, user_agent, created_at
-	          FROM audit_log`
+	//
+	// Dos LEFT JOIN a users para resolver UUIDs a nombres legibles:
+	//   - actor: siempre que actor_user_id no sea NULL.
+	//   - target: sólo cuando target_type='user' (otros target_type
+	//     apuntan a libraries/items/etc., no a users).
+	// Si el user fue eliminado entretanto, el JOIN no hace match y
+	// el username queda vacío — la UI hace fallback al UUID truncado.
+	listQ := `SELECT a.id, a.actor_user_id, ua.username,
+	                 a.event_type, a.target_type, a.target_id, ut.username,
+	                 a.payload, a.ip_address, a.user_agent, a.created_at
+	          FROM audit_log a
+	          LEFT JOIN users ua ON ua.id = a.actor_user_id
+	          LEFT JOIN users ut ON ut.id = a.target_id AND a.target_type = 'user'`
 	if where != "" {
-		listQ += " WHERE " + where
+		// El WHERE original referencia columnas sin prefix; al unir
+		// con JOINs hay que cualificarlas para evitar ambigüedad.
+		// buildAuditWhere produce columnas que sólo existen en
+		// audit_log, así que el alias 'a.' las califica bien.
+		listQ += " WHERE " + qualifyAuditWhere(where)
 	}
-	listQ += " ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
+	listQ += " ORDER BY a.created_at DESC, a.id DESC LIMIT ? OFFSET ?"
 	listQ = rewritePlaceholders(r.driver, listQ)
 	listArgs := append(append([]any(nil), args...), q.Limit, q.Offset)
 
@@ -138,20 +156,70 @@ func (r *AuditLogRepository) Query(ctx context.Context, q AuditQuery) (rows []Au
 
 	for cur.Next() {
 		var row AuditLogRow
-		var actor sql.NullString
+		var actor, actorUsername, targetUsername sql.NullString
 		if err := cur.Scan(
-			&row.ID, &actor, &row.EventType, &row.TargetType, &row.TargetID,
+			&row.ID, &actor, &actorUsername,
+			&row.EventType, &row.TargetType, &row.TargetID, &targetUsername,
 			&row.Payload, &row.IPAddress, &row.UserAgent, &row.CreatedAt,
 		); err != nil {
 			return nil, 0, fmt.Errorf("scan audit log: %w", err)
 		}
 		row.ActorUserID = actor.String
+		row.ActorUsername = actorUsername.String
+		row.TargetUsername = targetUsername.String
 		rows = append(rows, row)
 	}
 	if err := cur.Err(); err != nil {
 		return nil, 0, fmt.Errorf("iterate audit log: %w", err)
 	}
 	return rows, total, nil
+}
+
+// qualifyAuditWhere prefija con "a." las columnas que buildAuditWhere
+// genera (event_type, actor_user_id, created_at, target_id, payload,
+// ip_address, user_agent) — necesario cuando se usa en un SELECT con
+// JOINs donde varias tablas tienen columnas homónimas. El reemplazo
+// es token-aware (asegura límite de palabra) para no tocar literales
+// dentro de placeholders que el rewriter de drivers gestiona aparte.
+func qualifyAuditWhere(where string) string {
+	cols := []string{
+		"event_type", "actor_user_id", "created_at",
+		"target_id", "payload", "ip_address", "user_agent",
+	}
+	out := where
+	for _, c := range cols {
+		out = replaceWord(out, c, "a."+c)
+	}
+	return out
+}
+
+func replaceWord(s, word, repl string) string {
+	var b strings.Builder
+	i := 0
+	for i < len(s) {
+		j := strings.Index(s[i:], word)
+		if j < 0 {
+			b.WriteString(s[i:])
+			break
+		}
+		j += i
+		// Verificar bordes de palabra (no estamos dentro de otro identificador).
+		left := j == 0 || !isIdent(s[j-1])
+		right := j+len(word) == len(s) || !isIdent(s[j+len(word)])
+		b.WriteString(s[i:j])
+		if left && right {
+			b.WriteString(repl)
+		} else {
+			b.WriteString(word)
+		}
+		i = j + len(word)
+	}
+	return b.String()
+}
+
+func isIdent(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+		(c >= '0' && c <= '9') || c == '_' || c == '.'
 }
 
 // buildAuditWhere compone el WHERE dinámico con sólo los filtros que

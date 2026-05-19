@@ -425,9 +425,13 @@ export interface CorsOriginsListResponse {
 export interface AuditLogEntry {
   id: string;
   actor_user_id: string;
+  /** Resuelto via JOIN en el backend; vacío si el user fue borrado. */
+  actor_username: string;
   event_type: string;
   target_type: string;
   target_id: string;
+  /** Sólo poblado cuando target_type === "user". */
+  target_username: string;
   payload: string;
   ip_address: string;
   user_agent: string;
@@ -1379,6 +1383,10 @@ export interface SystemHostStats {
 
 export interface SystemServerStats {
   version: string;
+  /** Short git SHA inyectado en build. "none" en dev builds. */
+  commit?: string;
+  /** Fecha de build RFC3339. "unknown" en dev builds. */
+  build_date?: string;
   go_version: string;
   started_at: string;
   uptime_seconds: number;

@@ -73,6 +73,8 @@ type SystemHandler struct {
 	baseURLDefault string           // YAML fallback for server.base_url (overridden by app_settings).
 	startedAt      time.Time
 	version        string
+	commit         string
+	buildDate      string
 	logger         *slog.Logger
 }
 
@@ -105,6 +107,8 @@ type SystemHandlerConfig struct {
 	BindAddress    string
 	BaseURLDefault string // YAML / env value; runtime override lives in app_settings.
 	Version        string
+	Commit         string // git short SHA inyectado en build
+	BuildDate      string // RFC3339 del build inyectado en build
 	Logger         *slog.Logger
 }
 
@@ -127,6 +131,8 @@ func NewSystemHandler(cfg SystemHandlerConfig) *SystemHandler {
 		baseURLDefault: cfg.BaseURLDefault,
 		startedAt:      time.Now(),
 		version:        cfg.Version,
+		commit:         cfg.Commit,
+		buildDate:      cfg.BuildDate,
 		logger:         cfg.Logger.With("module", "system-handler"),
 	}
 }
@@ -188,6 +194,10 @@ type hostStats struct {
 
 type serverStats struct {
 	Version       string    `json:"version"`
+	// Commit es el short SHA del HEAD en build time. "none" en dev builds.
+	Commit        string    `json:"commit,omitempty"`
+	// BuildDate es la fecha de compilación en RFC3339. "unknown" en dev.
+	BuildDate     string    `json:"build_date,omitempty"`
 	GoVersion     string    `json:"go_version"`
 	StartedAt     time.Time `json:"started_at"`
 	UptimeSeconds int64     `json:"uptime_seconds"`
@@ -283,6 +293,8 @@ func (h *SystemHandler) Stats(w http.ResponseWriter, r *http.Request) {
 	out := systemStats{
 		Server: serverStats{
 			Version:       h.version,
+			Commit:        h.commit,
+			BuildDate:     h.buildDate,
 			GoVersion:     runtime.Version(),
 			StartedAt:     h.startedAt,
 			UptimeSeconds: int64(time.Since(h.startedAt).Seconds()),
