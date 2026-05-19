@@ -19,23 +19,21 @@ import (
 type PermissionsStore interface {
 	GetByID(ctx context.Context, id string) (*authmodel.User, error)
 	SetPermission(ctx context.Context, id, column string, value bool) error
-	TransferOwnership(ctx context.Context, currentOwnerID, newOwnerID string) error
 }
 
 // PermissionsHandler hospeda los endpoints de gestión de permisos de
 // admins:
 //
-//   GET  /users/{id}/permissions     — lee los flags (auth: el propio
-//                                       usuario, o cualquiera con
-//                                       can_view_audit / can_manage_admins).
-//   PUT  /users/{id}/permissions     — modifica flags. Owner-only para
-//                                       cambios sobre otro owner-candidate;
-//                                       can_manage_admins para el resto.
-//   POST /users/{id}/transfer-ownership — owner-only. Mueve el flag
-//                                       is_owner al target.
+//   GET /users/{id}/permissions — lee los flags (admin-only via grupo).
+//   PUT /users/{id}/permissions — modifica flags. Owner inmutable;
+//                                 sólo el owner puede otorgar
+//                                 can_manage_admins a otros.
 //
-// Las decisiones de gate hard (owner-only) van en el router via
-// PermissionChecker.RequireOwner. Aquí dentro hacemos los chequeos
+// Owner-transfer NO existe — el owner es inmutable de por vida. Si
+// hace falta ceder la instalación, va por CLI fuera de HTTP.
+//
+// Las decisiones de gate hard (can_manage_admins) van en el router
+// via PermissionChecker.Require. Aquí dentro hacemos los chequeos
 // FINOS: que el target sea legítimo, que el body no traiga keys
 // fuera del whitelist, que un admin con can_manage_admins NO pueda
 // auto-otorgarse can_manage_admins.
@@ -199,61 +197,6 @@ func (h *PermissionsHandler) PutPermissions(w http.ResponseWriter, r *http.Reque
 	h.GetPermissions(w, r)
 }
 
-// TransferOwnershipRequest mapea el body POST.
-type TransferOwnershipRequest struct {
-	NewOwnerID  string `json:"new_owner_id"`
-	Confirmation string `json:"confirmation"`
-}
-
-// TransferOwnership mueve is_owner al usuario indicado. Gate del
-// middleware: RequireOwner (sólo el owner actual puede invocarlo).
-// Validaciones adicionales aquí:
-//
-//   - confirmation == "TRANSFER" (string literal) — defensa contra
-//     POST accidentales del frontend; obligar un texto explícito en
-//     el body evita misclicks.
-//   - El target tiene que ser admin activo cuenta-titular (el repo
-//     lo enforza también, pero damos un error claro antes).
-//
-// Tras éxito, el owner ANTERIOR se queda con todos sus flags
-// granulares como estaban (no se los limpia automáticamente — si
-// el ex-owner quiere convertirse en "sólo admin con todo" o "admin
-// sin nada", el NUEVO owner decide via PUT /permissions).
-func (h *PermissionsHandler) TransferOwnership(w http.ResponseWriter, r *http.Request) {
-	claims := auth.GetClaims(r.Context())
-	if claims == nil {
-		respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
-		return
-	}
-
-	var req TransferOwnershipRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, r, http.StatusBadRequest, "BAD_BODY", err.Error())
-		return
-	}
-	if req.Confirmation != "TRANSFER" {
-		respondError(w, r, http.StatusBadRequest, "CONFIRMATION_REQUIRED",
-			`body must include "confirmation": "TRANSFER"`)
-		return
-	}
-	if req.NewOwnerID == "" || req.NewOwnerID == claims.UserID {
-		respondError(w, r, http.StatusBadRequest, "BAD_TARGET",
-			"new_owner_id must be a different user")
-		return
-	}
-
-	if err := h.store.TransferOwnership(r.Context(), claims.UserID, req.NewOwnerID); err != nil {
-		h.logger.Error("transfer ownership failed",
-			"from", claims.UserID, "to", req.NewOwnerID, "error", err)
-		respondError(w, r, http.StatusBadRequest, "TRANSFER_FAILED", err.Error())
-		return
-	}
-
-	h.logger.Warn("ownership transferred",
-		"from", claims.UserID, "to", req.NewOwnerID)
-	respondJSON(w, http.StatusOK, map[string]any{
-		"data": map[string]any{
-			"new_owner_id": req.NewOwnerID,
-		},
-	})
-}
+// Owner-transfer: deliberately NOT implemented. El owner es inmutable
+// de por vida. Cualquier necesidad operativa de "ceder la app a otro"
+// se resuelve por canal admin (CLI / edición DB), no por HTTP.

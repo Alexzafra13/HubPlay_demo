@@ -506,16 +506,13 @@ func NewRouter(deps Dependencies) http.Handler {
 				r.Post("/{id}/iptv-libraries", userHandler.CreatePersonalIPTV)
 
 				// Permission flags (migración 055). El read es admin-only
-				// genérico; los writes están gated finos:
-				//   PUT  /users/{id}/permissions     → can_manage_admins
-				//   POST /users/{id}/transfer-ownership → owner-only
+				// genérico; el write está gated por can_manage_admins.
+				// El owner es inmutable — sin endpoint de transferencia.
 				if deps.Permissions != nil && deps.UserRepo != nil {
 					permHandler := handlers.NewPermissionsHandler(deps.UserRepo, deps.Logger)
 					r.Get("/{id}/permissions", permHandler.GetPermissions)
 					r.With(deps.Permissions.Require(authmodel.PermManageAdmins)).
 						Put("/{id}/permissions", permHandler.PutPermissions)
-					r.With(deps.Permissions.RequireOwner).
-						Post("/{id}/transfer-ownership", permHandler.TransferOwnership)
 				}
 			})
 

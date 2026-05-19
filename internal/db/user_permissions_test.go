@@ -108,7 +108,7 @@ func TestUserRepository_SetPermission_RejectsUnknownColumn(t *testing.T) {
 	}
 }
 
-// ─── Owner + TransferOwnership ──────────────────────────────────────
+// ─── Owner lookup ───────────────────────────────────────────────────
 
 func TestUserRepository_GetOwnerID_EmptyOnFreshDB(t *testing.T) {
 	database := testutil.NewTestDB(t)
@@ -123,98 +123,30 @@ func TestUserRepository_GetOwnerID_EmptyOnFreshDB(t *testing.T) {
 	}
 }
 
-func TestUserRepository_TransferOwnership_HappyPath(t *testing.T) {
+func TestUserRepository_GetOwnerID_FindsBackfilledAdmin(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	repo := db.NewUserRepository(testutil.Driver(), database)
+	newAdmin(t, repo, "u-alice", "alice", time.Now())
 
-	now := time.Now()
-	newAdmin(t, repo, "u-alice", "alice", now)
-	newAdmin(t, repo, "u-bob", "bob", now.Add(time.Hour))
-
-	// Promote alice to owner manually (mimics setup wizard).
+	// La migración 055 promueve "el admin más antiguo" a is_owner=true.
+	// Pero esa promoción corre cuando la migración SE APLICA — en
+	// tests, primero corre la migración (sobre tabla vacía) y luego
+	// creamos al admin, así que el flag no está. Simulamos lo que
+	// haría el setup wizard.
 	driver := testutil.Driver()
-	_, err := database.ExecContext(context.Background(), rewritePlaceholdersForTest(driver, `UPDATE users SET is_owner = 1 WHERE id = ?`), "u-alice")
+	_, err := database.ExecContext(context.Background(),
+		rewritePlaceholdersForTest(driver, `UPDATE users SET is_owner = 1 WHERE id = ?`),
+		"u-alice")
 	if err != nil {
 		t.Fatalf("seed owner: %v", err)
 	}
 
-	if err := repo.TransferOwnership(context.Background(), "u-alice", "u-bob"); err != nil {
-		t.Fatalf("transfer: %v", err)
+	id, err := repo.GetOwnerID(context.Background())
+	if err != nil {
+		t.Fatalf("get: %v", err)
 	}
-
-	gotID, _ := repo.GetOwnerID(context.Background())
-	if gotID != "u-bob" {
-		t.Errorf("after transfer owner=%s, want u-bob", gotID)
-	}
-	alice, _ := repo.GetByID(context.Background(), "u-alice")
-	bob, _ := repo.GetByID(context.Background(), "u-bob")
-	if alice.IsOwner {
-		t.Error("alice still owner")
-	}
-	if !bob.IsOwner {
-		t.Error("bob is not owner")
-	}
-	// Bob receives full permission set on becoming owner.
-	if !bob.CanManageAdmins || !bob.CanEditMetadata || !bob.CanChangeArtwork {
-		t.Errorf("new owner missing flags: %+v", bob)
-	}
-}
-
-func TestUserRepository_TransferOwnership_RejectsSelf(t *testing.T) {
-	database := testutil.NewTestDB(t)
-	repo := db.NewUserRepository(testutil.Driver(), database)
-	newAdmin(t, repo, "u-alice", "alice", time.Now())
-
-	err := repo.TransferOwnership(context.Background(), "u-alice", "u-alice")
-	if err == nil {
-		t.Error("self-transfer accepted")
-	}
-}
-
-func TestUserRepository_TransferOwnership_RejectsNonAdminTarget(t *testing.T) {
-	database := testutil.NewTestDB(t)
-	repo := db.NewUserRepository(testutil.Driver(), database)
-	newAdmin(t, repo, "u-alice", "alice", time.Now())
-
-	// Crear un usuario NO admin.
-	plain := &authmodel.User{
-		ID: "u-plain", Username: "plain", DisplayName: "p",
-		PasswordHash: "x", Role: "user", IsActive: true,
-		CreatedAt: time.Now(),
-	}
-	if err := repo.Create(context.Background(), plain); err != nil {
-		t.Fatal(err)
-	}
-
-	driver := testutil.Driver()
-	_, _ = database.ExecContext(context.Background(), rewritePlaceholdersForTest(driver, `UPDATE users SET is_owner = 1 WHERE id = ?`), "u-alice")
-
-	err := repo.TransferOwnership(context.Background(), "u-alice", "u-plain")
-	if err == nil {
-		t.Error("transfer to non-admin accepted")
-	}
-	// Alice sigue siendo owner.
-	gotID, _ := repo.GetOwnerID(context.Background())
-	if gotID != "u-alice" {
-		t.Errorf("ownership leaked: owner=%s", gotID)
-	}
-}
-
-func TestUserRepository_TransferOwnership_RejectsWrongCurrent(t *testing.T) {
-	database := testutil.NewTestDB(t)
-	repo := db.NewUserRepository(testutil.Driver(), database)
-
-	now := time.Now()
-	newAdmin(t, repo, "u-alice", "alice", now)
-	newAdmin(t, repo, "u-bob", "bob", now.Add(time.Hour))
-
-	driver := testutil.Driver()
-	_, _ = database.ExecContext(context.Background(), rewritePlaceholdersForTest(driver, `UPDATE users SET is_owner = 1 WHERE id = ?`), "u-alice")
-
-	// Bob (no owner) intenta transferirse a sí mismo desde "u-bob".
-	err := repo.TransferOwnership(context.Background(), "u-bob", "u-alice")
-	if err == nil {
-		t.Error("transfer from non-owner accepted — anti-race broken")
+	if id != "u-alice" {
+		t.Errorf("got owner=%q, want u-alice", id)
 	}
 }
 

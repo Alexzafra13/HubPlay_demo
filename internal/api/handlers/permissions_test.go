@@ -1,7 +1,6 @@
 package handlers_test
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -23,15 +22,13 @@ import (
 // ─── Test double ────────────────────────────────────────────────────
 
 type fakePermissionsStore struct {
-	mu        sync.Mutex
-	users     map[string]*authmodel.User
-	setCalls  []struct {
+	mu       sync.Mutex
+	users    map[string]*authmodel.User
+	setCalls []struct {
 		ID     string
 		Column string
 		Value  bool
 	}
-	transferCalls []struct{ From, To string }
-	transferErr   error
 }
 
 func newStore(users ...*authmodel.User) *fakePermissionsStore {
@@ -87,30 +84,12 @@ func (f *fakePermissionsStore) SetPermission(_ context.Context, id, column strin
 	return nil
 }
 
-func (f *fakePermissionsStore) TransferOwnership(_ context.Context, from, to string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.transferCalls = append(f.transferCalls, struct{ From, To string }{from, to})
-	if f.transferErr != nil {
-		return f.transferErr
-	}
-	fromU := f.users[from]
-	toU := f.users[to]
-	if fromU == nil || toU == nil {
-		return errors.New("not found")
-	}
-	fromU.IsOwner = false
-	toU.IsOwner = true
-	return nil
-}
-
 // ─── Helpers ────────────────────────────────────────────────────────
 
 func mount(h *handlers.PermissionsHandler) http.Handler {
 	r := chi.NewRouter()
 	r.Get("/users/{id}/permissions", h.GetPermissions)
 	r.Put("/users/{id}/permissions", h.PutPermissions)
-	r.Post("/users/{id}/transfer-ownership", h.TransferOwnership)
 	return r
 }
 
@@ -255,54 +234,4 @@ func TestPutPermissions_RejectsNonAdminTarget(t *testing.T) {
 	}
 }
 
-// ─── TransferOwnership ──────────────────────────────────────────────
-
-func TestTransferOwnership_HappyPath(t *testing.T) {
-	store := newStore(
-		&authmodel.User{ID: "u-owner", Role: "admin", IsActive: true, IsOwner: true},
-		&authmodel.User{ID: "u-target", Role: "admin", IsActive: true},
-	)
-	h := handlers.NewPermissionsHandler(store, slog.Default())
-
-	rr := doRequest(mount(h), http.MethodPost, "/users/u-target/transfer-ownership",
-		bytes.NewBufferString(`{"new_owner_id":"u-target","confirmation":"TRANSFER"}`), "u-owner")
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status %d body %s", rr.Code, rr.Body.String())
-	}
-	if len(store.transferCalls) != 1 {
-		t.Errorf("transfer calls = %d", len(store.transferCalls))
-	}
-}
-
-func TestTransferOwnership_RequiresConfirmation(t *testing.T) {
-	store := newStore(
-		&authmodel.User{ID: "u-owner", Role: "admin", IsActive: true, IsOwner: true},
-		&authmodel.User{ID: "u-target", Role: "admin", IsActive: true},
-	)
-	h := handlers.NewPermissionsHandler(store, slog.Default())
-
-	for _, body := range []string{
-		`{"new_owner_id":"u-target"}`,
-		`{"new_owner_id":"u-target","confirmation":"yes"}`,
-	} {
-		rr := doRequest(mount(h), http.MethodPost, "/users/u-target/transfer-ownership",
-			strings.NewReader(body), "u-owner")
-		if rr.Code != http.StatusBadRequest {
-			t.Errorf("body %s → status %d (want 400)", body, rr.Code)
-		}
-	}
-	if len(store.transferCalls) != 0 {
-		t.Errorf("transfer called despite bad confirmation: %d", len(store.transferCalls))
-	}
-}
-
-func TestTransferOwnership_RejectsSelf(t *testing.T) {
-	store := newStore(&authmodel.User{ID: "u-owner", Role: "admin", IsActive: true, IsOwner: true})
-	h := handlers.NewPermissionsHandler(store, slog.Default())
-
-	rr := doRequest(mount(h), http.MethodPost, "/users/u-owner/transfer-ownership",
-		strings.NewReader(`{"new_owner_id":"u-owner","confirmation":"TRANSFER"}`), "u-owner")
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("status %d (want 400)", rr.Code)
-	}
-}
+// Owner-transfer NO se testea — el endpoint NO existe por diseño.

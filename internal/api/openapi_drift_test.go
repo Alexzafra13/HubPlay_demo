@@ -289,9 +289,10 @@ var outOfScopeExact = map[string]string{
 	// ── Admin permissions (PR3) ───────────────────────────────────────
 	// Panel admin de gestión de permisos granulares. El frontend la
 	// llama desde el detalle de usuario; no es superficie pública.
-	"GET /users/{id}/permissions":            "admin panel — lee flags del usuario",
-	"PUT /users/{id}/permissions":            "admin panel — modifica flags (gated can_manage_admins)",
-	"POST /users/{id}/transfer-ownership":    "owner-only — transfiere is_owner a otro admin",
+	// is_owner es inmutable de por vida — no hay endpoint de
+	// transferencia por diseño.
+	"GET /users/{id}/permissions": "admin panel — lee flags del usuario",
+	"PUT /users/{id}/permissions": "admin panel — modifica flags (gated can_manage_admins)",
 }
 
 // TestOpenAPISpec_RouterCoverage walks the AST of router.go to enumerate

@@ -435,6 +435,15 @@ func (r *UserRepository) SetPermission(ctx context.Context, id, column string, v
 
 // GetOwnerID devuelve el id del usuario con is_owner=true. Vacío si
 // no hay owner aún (instalación fresca antes del setup wizard).
+//
+// El owner es INMUTABLE de por vida — quien instala la app y crea la
+// primera cuenta es el dueño y no hay UI para transferirlo. Si el
+// owner pierde acceso (contraseña perdida, cuenta borrada
+// accidentalmente), la recuperación va vía acceso al servidor +
+// edición directa de la DB (es self-hosted; el operador tiene
+// shell). Decisión consciente para no exponer una vía de "ceder
+// instalación" que abre superficie de errores (admin secundario
+// comprometido convenciendo al owner de transferir, etc.).
 func (r *UserRepository) GetOwnerID(ctx context.Context) (string, error) {
 	driver := DriverSQLite
 	if !r.useSQLite() {
@@ -455,75 +464,10 @@ func (r *UserRepository) GetOwnerID(ctx context.Context) (string, error) {
 	return id, nil
 }
 
-// TransferOwnership mueve el flag is_owner=true de currentOwnerID a
-// newOwnerID en UNA transacción. Validaciones:
-//   - currentOwnerID DEBE ser actualmente el owner (anti-race).
-//   - newOwnerID DEBE existir y ser activo y NO ser un profile.
-//   - newOwnerID no puede coincidir con currentOwnerID (no-op).
-// Si cualquiera falla, la TX revierte y nada cambia. La unicidad del
-// owner la garantiza el índice parcial UNIQUE WHERE is_owner=1.
-func (r *UserRepository) TransferOwnership(ctx context.Context, currentOwnerID, newOwnerID string) error {
-	if currentOwnerID == newOwnerID {
-		return fmt.Errorf("cannot transfer ownership to self")
-	}
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
-	}
-	defer tx.Rollback() //nolint:errcheck
-
-	driver := DriverSQLite
-	if !r.useSQLite() {
-		driver = DriverPostgres
-	}
-	trueVal := "1"
-	falseVal := "0"
-	if driver == DriverPostgres {
-		trueVal = "TRUE"
-		falseVal = "FALSE"
-	}
-
-	// 1. Confirmar que currentOwnerID es el owner actual.
-	q1 := rewritePlaceholders(driver, fmt.Sprintf(
-		"SELECT 1 FROM users WHERE id = ? AND is_owner = %s", trueVal))
-	var n int
-	if err := tx.QueryRowContext(ctx, q1, currentOwnerID).Scan(&n); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("user %s is not the current owner", currentOwnerID)
-		}
-		return fmt.Errorf("verify current owner: %w", err)
-	}
-
-	// 2. Confirmar que newOwnerID es elegible (existe, activo, no
-	//    profile, role admin).
-	q2 := rewritePlaceholders(driver, fmt.Sprintf(
-		"SELECT 1 FROM users WHERE id = ? AND is_active = %s AND parent_user_id IS NULL AND role = 'admin'", trueVal))
-	if err := tx.QueryRowContext(ctx, q2, newOwnerID).Scan(&n); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("user %s is not eligible (must be active admin, household head)", newOwnerID)
-		}
-		return fmt.Errorf("verify new owner: %w", err)
-	}
-
-	// 3. Clear old, set new — el índice UNIQUE WHERE is_owner=1
-	//    permite estas dos statements consecutivas dentro de la TX.
-	q3 := rewritePlaceholders(driver, fmt.Sprintf(
-		"UPDATE users SET is_owner = %s WHERE id = ?", falseVal))
-	if _, err := tx.ExecContext(ctx, q3, currentOwnerID); err != nil {
-		return fmt.Errorf("clear old owner: %w", err)
-	}
-	q4 := rewritePlaceholders(driver, fmt.Sprintf(
-		"UPDATE users SET is_owner = %s, can_manage_admins = %s, can_manage_users = %s, can_manage_libraries = %s, can_manage_iptv = %s, can_edit_metadata = %s, can_change_artwork = %s, can_view_audit = %s WHERE id = ?",
-		trueVal, trueVal, trueVal, trueVal, trueVal, trueVal, trueVal, trueVal))
-	if _, err := tx.ExecContext(ctx, q4, newOwnerID); err != nil {
-		return fmt.Errorf("set new owner: %w", err)
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit ownership transfer: %w", err)
-	}
-	return nil
-}
+// TransferOwnership NO existe — el owner es inmutable de por vida.
+// Si en algún momento futuro hace falta cederlo, se hará vía un
+// comando CLI fuera del HTTP path (hubplay set-owner <user_id>),
+// nunca por API. Ver GetOwnerID para el rationale.
 
 func (r *UserRepository) SetAccessExpiresAt(ctx context.Context, id string, expiresAt *time.Time) error {
 	var nt sql.NullTime
