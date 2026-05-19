@@ -524,6 +524,16 @@ func run(configPath string) error {
 		logger.Info("uploads enabled",
 			"staging_dir", stagingDir.Root(),
 			"max_bytes", cfg.Upload.MaxBytesPerUpload)
+
+		// GC de uploads huérfanos. Si el binario cae mientras un
+		// upload está en vuelo, los chunks + .info quedan en
+		// <staging>/<user>/<id>/ sin que Service.Finish/Aborted
+		// recupere espacio. El GC barre cada hora dirs con TODOS
+		// sus ficheros más antiguos que 24h — tiempo suficiente
+		// para que un "upload pausado" legítimo sobreviva un par
+		// de timeouts de red sin perderse, pero corto para que un
+		// blob abandonado no acumule días.
+		upload.NewGC(stagingDir, time.Hour, 24*time.Hour, logger).Start(ctx)
 	} else {
 		logger.Info("uploads disabled (config.upload.enabled=false)")
 	}
