@@ -26,6 +26,7 @@ type MetadataIdentifier interface {
 	UpdateItemMetadata(ctx context.Context, itemID string, patch scanner.ItemMetadataPatch) (*librarymodel.Item, error)
 	SetMetadataLock(ctx context.Context, itemID string, locked bool) error
 	IsMetadataLocked(ctx context.Context, itemID string) (bool, error)
+	RefreshItemMetadata(ctx context.Context, itemID string) error
 }
 
 // IdentifyCandidates devuelve la lista de candidatos TMDb para reidentificar
@@ -235,5 +236,32 @@ func (h *ItemHandler) SetMetadataLock(w http.ResponseWriter, r *http.Request) {
 	}
 	respondJSON(w, http.StatusOK, map[string]any{
 		"data": map[string]any{"item_id": id, "metadata_locked": req.Locked},
+	})
+}
+
+// RefreshItemMetadata re-corre el enrich del scanner sobre un item
+// concreto. A diferencia del refresh-metadata global del admin
+// (POST /libraries/{id}/refresh-metadata) que recorre toda la
+// biblioteca, éste vive en el kebab del item y trabaja sobre uno solo.
+//
+// POST /items/{id}/refresh-metadata
+// Admin-only.
+func (h *ItemHandler) RefreshItemMetadata(w http.ResponseWriter, r *http.Request) {
+	if h.identifier == nil {
+		respondError(w, r, http.StatusServiceUnavailable, "NO_REFRESH", "metadata refresh not configured")
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if err := h.identifier.RefreshItemMetadata(r.Context(), id); err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			respondAppError(w, r.Context(), domain.NewNotFound("item"))
+			return
+		}
+		h.logger.Error("refresh item metadata failed", "id", id, "error", err)
+		respondError(w, r, http.StatusBadGateway, "REFRESH_FAILED", "could not refresh metadata")
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{
+		"data": map[string]any{"item_id": id, "refreshed": true},
 	})
 }

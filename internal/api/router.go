@@ -1054,6 +1054,12 @@ func NewRouter(deps Dependencies) http.Handler {
 						// "Refresh metadata" no pise la edición.
 						r.Patch("/metadata", itemHandler.UpdateItemMetadata)
 						r.Put("/metadata/lock", itemHandler.SetMetadataLock)
+						// Re-corre el enrich del scanner sobre este
+						// item (mismo flujo que el library refresh,
+						// pero para un solo item). Lo dispara el
+						// kebab "Actualizar metadatos" del poster /
+						// del detalle. Respeta el lock.
+						r.Post("/refresh-metadata", itemHandler.RefreshItemMetadata)
 					})
 				})
 			}

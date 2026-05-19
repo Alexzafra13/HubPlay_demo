@@ -423,9 +423,10 @@
     "notFoundTitle": "Collection not found",
     "notFoundDescription": "This saga doesn't exist or has no content in your library.",
     "noItems": "No movies from this saga in your library.",
-    "titlesCount_one": "{{count}} movie in your library",
-    "titlesCount_other": "{{count}} movies in your library",
-    "partOf": "Part of"
+    "titlesCount_one": "{{count}} movie",
+    "titlesCount_other": "{{count}} movies",
+    "partOf": "Part of",
+    "kind": "Saga"
   },
   "collections": {
     "title": "Collections",

@@ -23,7 +23,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router";
-import { useQueryClient } from "@tanstack/react-query";
 import {
   MoreVertical,
   Search,
@@ -34,7 +33,7 @@ import {
 } from "lucide-react";
 import { useItemActions } from "@/store/itemActions";
 import { useAuthStore } from "@/store/auth";
-import { queryKeys } from "@/api/hooks";
+import { useRefreshItemMetadata } from "@/api/hooks";
 
 interface Props {
   itemID: string;
@@ -48,11 +47,11 @@ interface Props {
 export function ItemKebab({ itemID, itemType, detailHref }: Props) {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const isAdmin = useAuthStore((s) => s.user?.role === "admin");
   const openIdentify = useItemActions((s) => s.openIdentify);
   const openEditor = useItemActions((s) => s.openEditor);
   const openImages = useItemActions((s) => s.openImages);
+  const refresh = useRefreshItemMetadata(itemID);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -150,15 +149,18 @@ export function ItemKebab({ itemID, itemType, detailHref }: Props) {
           )}
           {canRefresh && (
             <MenuButton
-              icon={<RefreshCw className="h-3.5 w-3.5" />}
+              icon={<RefreshCw className={`h-3.5 w-3.5 ${refresh.isPending ? "animate-spin" : ""}`} />}
               label={t("itemDetail.refreshMetadata", {
                 defaultValue: "Actualizar metadatos",
               })}
               onClick={(e) => {
                 stopAll(e);
-                queryClient.invalidateQueries({
-                  queryKey: queryKeys.item(itemID),
-                });
+                // Llama al backend — re-corre el enrich del scanner
+                // y actualiza items/imágenes en DB. Antes esto sólo
+                // invalidaba caché del cliente y por eso no resolvía
+                // los items con metadata stale (filename como título,
+                // sin póster, sin estudio enlazado, etc.).
+                refresh.mutate();
                 setOpen(false);
               }}
             />

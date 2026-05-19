@@ -815,6 +815,14 @@ export class ApiClient {
     return this.request("PATCH", `/items/${id}/metadata`, { body: patch });
   }
 
+  // Admin: re-corre el enrich del scanner sobre un item concreto.
+  // Sustituye el "Actualizar metadatos" del kebab que antes sólo
+  // invalidaba caché del cliente. Respeta el lock — locked items
+  // devuelven 200 sin tocar nada.
+  async refreshItemMetadata(id: string): Promise<{ item_id: string; refreshed: boolean }> {
+    return this.request("POST", `/items/${id}/refresh-metadata`);
+  }
+
   // Admin: toggle del candado de metadatos sin tocar el contenido.
   async setItemMetadataLock(
     id: string,

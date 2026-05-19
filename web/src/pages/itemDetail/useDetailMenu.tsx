@@ -1,7 +1,6 @@
 import { useTranslation } from "react-i18next";
-import { useQueryClient } from "@tanstack/react-query";
 import type { ItemDetail } from "@/api/types";
-import { queryKeys } from "@/api/hooks";
+import { useRefreshItemMetadata } from "@/api/hooks";
 import type { HeroMenuItem } from "@/components/media/HeroSection";
 import {
   ImageIcon,
@@ -59,7 +58,7 @@ export function useDetailMenu({
   onToggleMetadataLock,
 }: UseDetailMenuArgs): HeroMenuItem[] {
   const { t } = useTranslation();
-  const queryClient = useQueryClient();
+  const refresh = useRefreshItemMetadata(itemId ?? "");
   const items: HeroMenuItem[] = [];
 
   // El flujo de "Identify" sólo aplica a películas y series — los
@@ -107,8 +106,11 @@ export function useDetailMenu({
     items.push({
       label: t("itemDetail.refreshMetadata"),
       icon: <RefreshIcon />,
+      // Llamada real al backend (no sólo invalidar caché como antes).
+      // Re-corre el enrich del scanner: nuevo match TMDb, re-link
+      // a estudio/saga, descarga de imágenes. Lock-aware.
       onClick: () => {
-        queryClient.invalidateQueries({ queryKey: queryKeys.item(itemId) });
+        refresh.mutate();
       },
     });
   }

@@ -216,6 +216,24 @@ export function useUpdateItemMetadata(itemId: string) {
   });
 }
 
+// Re-scan del enrich sobre un item. El backend hace el work pesado
+// (TMDb Search→Fetch→apply, link a estudio/saga, descarga de
+// imágenes). Tras éxito invalidamos los listados para que las
+// thumbnails refresquen sin recargar.
+export function useRefreshItemMetadata(itemId: string) {
+  const queryClient = useQueryClient();
+  return useMutation<{ item_id: string; refreshed: boolean }, Error, void>({
+    mutationFn: () => api.refreshItemMetadata(itemId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.item(itemId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.itemImages(itemId) });
+      queryClient.invalidateQueries({ queryKey: ["items"] });
+      queryClient.invalidateQueries({ queryKey: ["studios"] });
+      queryClient.invalidateQueries({ queryKey: ["collections"] });
+    },
+  });
+}
+
 // Toggle del lock sin tocar el contenido — el admin "suelta" un item
 // identificado a mano para que vuelva a recibir refreshes automáticos.
 export function useSetItemMetadataLock(itemId: string) {

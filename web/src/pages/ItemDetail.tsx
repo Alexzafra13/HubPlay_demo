@@ -99,6 +99,29 @@ export default function ItemDetail() {
   // hero's Reproducir button uses, then forward to the episode's own
   // route so audio-track / next-up state hydrates correctly.
   const autoPlayConsumed = useRef(false);
+  // Hash-anchor scroll: cuando el kebab del poster lanza
+  // "Información del archivo" navegamos a `{detail}#media-info-section`.
+  // El browser normalmente scrollearía solo, pero el detail page tiene
+  // un hero gigante y un layout que aplica scroll-restoration al
+  // montar — el anchor llega "ignorado" y el operador acaba en la
+  // parte de arriba mirando el hero. Forzamos el scroll cuando el
+  // item carga, no antes (la sección sólo se monta cuando hay
+  // media_streams).
+  useEffect(() => {
+    if (!item) return;
+    if (window.location.hash !== "#media-info-section") return;
+    // Doble RAF: primero el item monta, después el browser pinta y
+    // sólo entonces el target tiene posición correcta. Sin esto el
+    // scrollIntoView salta a 0 porque la sección aún no tenía altura.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        document
+          .getElementById("media-info-section")
+          ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    });
+  }, [item]);
+
   useEffect(() => {
     if (autoPlayConsumed.current) return;
     if (searchParams.get("play") !== "1") return;

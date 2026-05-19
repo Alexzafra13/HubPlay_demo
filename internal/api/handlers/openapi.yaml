@@ -606,6 +606,38 @@ paths:
         "502": { description: Provider error }
         "503": { description: No metadata provider configured }
 
+  /items/{id}/refresh-metadata:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [admin]
+      summary: 'Admin: re-run TMDb enrichment for a single item'
+      description: |
+        Re-corre el enrich del scanner sobre el item: borra metadata e
+        imágenes previas y vuelve a ejecutar Search→Fetch→apply. Útil
+        cuando el match inicial fue incorrecto (filename con año
+        editorial mal, item escaneado antes de configurar TMDb api_key,
+        etc.). Respeta el lock — locked items devuelven 200 sin
+        tocar nada. Admin-only.
+      responses:
+        "200":
+          description: Refresh disparado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      item_id:   { type: string }
+                      refreshed: { type: boolean }
+        "401": { description: Unauthorized }
+        "403": { description: Forbidden — admin required }
+        "404": { description: Item not found }
+        "502": { description: Provider error }
+        "503": { description: No metadata provider configured }
+
   /items/{id}/metadata:
     parameters:
       - { name: id, in: path, required: true, schema: { type: string } }
