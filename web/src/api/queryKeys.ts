@@ -21,6 +21,9 @@ export const queryKeys = {
     ["users", userId, "permissions"] as const,
   myUploads: (limit: number) => ["uploads", "mine", limit] as const,
   corsOrigins: ["admin", "cors-origins"] as const,
+  auditLog: (params: Record<string, unknown>) =>
+    ["admin", "audit-log", params] as const,
+  auditEventTypes: ["admin", "audit-log", "types"] as const,
   libraries: ["libraries"] as const,
   library: (id: string) => ["libraries", id] as const,
   items: (params?: Record<string, unknown>) => ["items", params] as const,

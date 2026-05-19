@@ -14,6 +14,7 @@ export * from "./hooks/setup";
 export * from "./hooks/users";
 export * from "./hooks/uploads";
 export * from "./hooks/cors-origins";
+export * from "./hooks/audit-log";
 export * from "./hooks/media";
 export * from "./hooks/progress";
 export * from "./hooks/channels";

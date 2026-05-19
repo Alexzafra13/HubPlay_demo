@@ -417,6 +417,31 @@ export interface CorsOriginsListResponse {
 }
 
 /**
+ * Una fila del audit log unificado (PR5). El payload es JSON
+ * schemaless en el backend; en el cliente lo dejamos como string
+ * y cada renderer decide cómo formatearlo (algunos lo pintan tal
+ * cual, otros parsean campos conocidos como changes o reason).
+ */
+export interface AuditLogEntry {
+  id: string;
+  actor_user_id: string;
+  event_type: string;
+  target_type: string;
+  target_id: string;
+  payload: string;
+  ip_address: string;
+  user_agent: string;
+  created_at: string;
+}
+
+export interface AuditLogQueryResponse {
+  rows: AuditLogEntry[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+/**
  * One row of the user-facing "Tus dispositivos" panel — every active
  * auth session (refresh token alive in DB) for the calling user.
  * Distinct from AdminStreamSession (the admin's "Now Playing" surface

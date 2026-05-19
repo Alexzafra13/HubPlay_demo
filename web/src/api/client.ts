@@ -59,6 +59,7 @@ import type {
   UserPermissions,
   UploadAuditEntry,
   CorsOriginsListResponse,
+  AuditLogQueryResponse,
   UserData,
   ApiErrorBody,
   ExternalSubtitleResult,
@@ -756,6 +757,35 @@ export class ApiClient {
   async deleteCorsOrigin(origin: string): Promise<void> {
     const enc = encodeURIComponent(origin);
     return this.request<void>("DELETE", `/admin/system/cors-origins?origin=${enc}`);
+  }
+
+  /** Query del audit log unificado. Todos los filtros son opcionales;
+   *  el backend interpreta vacío como "no filtrar por ese eje". */
+  async queryAuditLog(params: {
+    type?: string;
+    actor?: string;
+    from?: string;
+    to?: string;
+    q?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<AuditLogQueryResponse> {
+    const qs = new URLSearchParams();
+    if (params.type) qs.set("type", params.type);
+    if (params.actor) qs.set("actor", params.actor);
+    if (params.from) qs.set("from", params.from);
+    if (params.to) qs.set("to", params.to);
+    if (params.q) qs.set("q", params.q);
+    if (params.limit) qs.set("limit", String(params.limit));
+    if (params.offset) qs.set("offset", String(params.offset));
+    const path = `/admin/system/audit-log${qs.toString() ? "?" + qs.toString() : ""}`;
+    return this.request<AuditLogQueryResponse>("GET", path);
+  }
+
+  /** Lista de event_type distintos presentes en la tabla. El panel
+   *  lo usa para el dropdown del filtro sin hardcodear la lista. */
+  async listAuditEventTypes(): Promise<string[]> {
+    return this.request<string[]>("GET", "/admin/system/audit-log/types");
   }
 
   /** Shortcut for "give user X their own IPTV list": creates a
