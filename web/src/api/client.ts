@@ -56,6 +56,7 @@ import type {
   ProfileSummary,
   ResetPasswordResponse,
   UserLibraryAccess,
+  UserPermissions,
   UserData,
   ApiErrorBody,
   ExternalSubtitleResult,
@@ -667,6 +668,37 @@ export class ApiClient {
     return this.request<void>("PUT", `/users/${userId}/library-access`, {
       body: { library_ids: libraryIds },
     });
+  }
+
+  /** Lee los 8 flags granulares del admin (migración 055). El frontend
+   *  lo usa al abrir el editor de permisos; /users (List) ya los
+   *  trae embebidos para la matriz, así que normalmente este endpoint
+   *  sólo se llama si queremos refrescar tras un PUT. */
+  async getUserPermissions(userId: string): Promise<UserPermissions> {
+    return this.request<UserPermissions>(
+      "GET",
+      `/users/${userId}/permissions`,
+    );
+  }
+
+  /** Modifica los flags granulares. Body parcial — sólo los flags
+   *  incluidos cambian. Las reglas se enforcan en el backend:
+   *    - owner es inmutable: PUT contra is_owner=true devuelve
+   *      OWNER_IMMUTABLE.
+   *    - sólo el owner puede otorgar can_manage_admins; un admin
+   *      con can_manage_admins puede otorgar los DEMÁS flags pero
+   *      no replicar el suyo.
+   *    - target debe ser admin (role=admin); si es usuario normal
+   *      devuelve TARGET_NOT_ADMIN. */
+  async setUserPermissions(
+    userId: string,
+    flags: Partial<UserPermissions>,
+  ): Promise<UserPermissions> {
+    return this.request<UserPermissions>(
+      "PUT",
+      `/users/${userId}/permissions`,
+      { body: flags },
+    );
   }
 
   /** Shortcut for "give user X their own IPTV list": creates a

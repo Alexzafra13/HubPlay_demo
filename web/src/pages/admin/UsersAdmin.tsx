@@ -33,6 +33,7 @@ import {
   UserPlus,
 } from "lucide-react";
 import { Trans, useTranslation } from 'react-i18next';
+import { AdminPermissionsMatrix } from "./AdminPermissionsMatrix";
 import { LibraryAccessCheckboxes } from "./LibraryAccessCheckboxes";
 import { LiveTvFormFields } from "./librariesAdmin/LiveTvFormFields";
 import {
@@ -1294,6 +1295,18 @@ export default function UsersAdmin() {
           title={t('admin.users.noUsers')}
           description={t('admin.users.noUsersHint')}
         />
+      )}
+
+      {/* Admin permissions matrix (migración 055). Sólo se pinta en
+          desktop — la tabla son 8 columnas y no caben en mobile.
+          En mobile el operador tiene que usar otro dispositivo para
+          editar permisos; los demás flujos (crear admin, listar,
+          borrar) sí funcionan en mobile via las cards de arriba.
+          Va aquí (después de la tabla, antes de los modales) para
+          que la gestión "quién es admin" y "qué puede tocar cada
+          uno" estén en la misma pantalla. */}
+      {!isMobile && users && (users.some((u) => u.role === 'admin' && !u.parent_user_id)) && (
+        <AdminPermissionsMatrix users={users} me={me} />
       )}
 
       {/* Add User Modal */}

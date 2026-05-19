@@ -14,6 +14,7 @@ import type {
   ResetPasswordResponse,
   User,
   UserLibraryAccess,
+  UserPermissions,
 } from "../types";
 
 export function useUsers(options?: Partial<UseQueryOptions<User[]>>) {
@@ -115,6 +116,40 @@ export function useCreatePersonalIPTVLibrary() {
         queryKey: queryKeys.userLibraryAccess(vars.userId),
       });
       queryClient.invalidateQueries({ queryKey: queryKeys.libraries });
+    },
+  });
+}
+
+// Admin permission flags (migración 055). El hook de lectura cae al
+// listado /users (que ya trae los flags por fila) — sólo refresca
+// vía /users/{id}/permissions cuando hay un PUT que invalida.
+export function useUserPermissions(userId: string, enabled = true) {
+  return useQuery<UserPermissions>({
+    queryKey: queryKeys.userPermissions(userId),
+    queryFn: () => api.getUserPermissions(userId),
+    enabled: enabled && !!userId,
+  });
+}
+
+export function useSetUserPermissions() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    UserPermissions,
+    Error,
+    { userId: string; flags: Partial<UserPermissions> }
+  >({
+    mutationFn: ({ userId, flags }) => api.setUserPermissions(userId, flags),
+    onSuccess: (_data, vars) => {
+      // El PUT cambia flags que el listado /users muestra; tiramos
+      // todo el subtree "users" para que la matriz se repinte con
+      // los valores nuevos sin un GET extra.
+      queryClient.invalidateQueries({ queryKey: queryKeys.users });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.userPermissions(vars.userId),
+      });
+      // Si el target soy yo, /me también cambia (puede haber añadido
+      // o quitado un permiso al requester en su propio detalle).
+      queryClient.invalidateQueries({ queryKey: queryKeys.me });
     },
   });
 }
