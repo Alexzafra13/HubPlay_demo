@@ -52,7 +52,6 @@ AppSupportURL=https://github.com/Alexzafra13/HubPlay_demo/issues
 DefaultDirName={autopf}\HubPlay
 DefaultGroupName=HubPlay
 DisableProgramGroupPage=yes
-LicenseFile={#SourceDir}\LICENSE
 OutputDir={#OutputDir}
 OutputBaseFilename=HubPlay-Setup-{#AppVersion}-windows-amd64
 Compression=lzma
@@ -82,8 +81,8 @@ Source: "{#SourceDir}\hubplay.exe";              DestDir: "{app}"; Flags: ignore
 Source: "{#SourceDir}\ffmpeg.exe";               DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\ffprobe.exe";              DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\hubplay.example.yaml";     DestDir: "{app}"; Flags: ignoreversion
-Source: "{#SourceDir}\LICENSE";                  DestDir: "{app}"; Flags: ignoreversion
-Source: "{#SourceDir}\LICENSE-ffmpeg.txt";       DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourceDir}\LICENSE";                  DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "{#SourceDir}\LICENSE-ffmpeg.txt";       DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 ; NSSM — service manager. El workflow lo descarga a scripts/vendor/nssm.exe
 ; antes de invocar ISCC.
 Source: "vendor\nssm.exe";                       DestDir: "{app}"; Flags: ignoreversion; Tasks: service
