@@ -565,6 +565,32 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	if req.DisplayName == "" {
 		req.DisplayName = req.Username
 	}
+
+	// Creación de admin requiere ser owner (migración 055). El gate
+	// del router (Require(PermManageUsers)) deja entrar a admins con
+	// ese flag, pero crear NUEVOS admins desde uno secundario abriría
+	// "admin sprawl". Sólo el owner puede convocar nuevos admins.
+	// Profile creation no aplica este chequeo — los profiles heredan
+	// rol del parent y nunca son admin.
+	if !isProfile && req.Role == "admin" {
+		claims := auth.GetClaims(r.Context())
+		if claims == nil {
+			respondError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			return
+		}
+		requester, err := h.users.GetByID(r.Context(), claims.UserID)
+		if err != nil {
+			respondError(w, r, http.StatusInternalServerError, "USER_LOOKUP_FAILED",
+				"could not resolve requester")
+			return
+		}
+		if !requester.IsOwner {
+			respondError(w, r, http.StatusForbidden, "OWNER_ONLY",
+				"only the instance owner can create new admins")
+			return
+		}
+	}
+
 	// For profiles, synthesise a username from the parent's
 	// username + a UUID prefix so the UNIQUE constraint stays happy
 	// without making the admin invent unique handles for kids. The

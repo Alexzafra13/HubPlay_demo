@@ -554,6 +554,106 @@ func TestUserHandler_Me_NotFound(t *testing.T) {
 	}
 }
 
+// ─── Register: owner-only check para crear admins ──────────────────────────
+
+// TestAuthHandler_Register_BlocksNonOwnerCreatingAdmin pin la defensa de
+// "admin sprawl" añadida en PR3-D: un admin con can_manage_users entra
+// por el middleware del grupo /users, pero NO puede crear OTRO admin.
+// Sólo el owner. Sin este check, un admin comprometido escala
+// privilegios creando admins paralelos a placer.
+func TestAuthHandler_Register_BlocksNonOwnerCreatingAdmin(t *testing.T) {
+	authSvc := &mockAuthService{
+		registerFn: func(_ context.Context, _ auth.RegisterRequest) (*authmodel.User, error) {
+			t.Fatal("Register must NOT be called when non-owner asks for an admin")
+			return nil, nil
+		},
+	}
+	userSvc := &mockUserService{
+		getByIDFn: func(_ context.Context, _ string) (*authmodel.User, error) {
+			return &authmodel.User{
+				ID: "u-secondary", Role: "admin", IsActive: true,
+				CanManageUsers: true,
+				// is_owner: false
+			}, nil
+		},
+	}
+	handler := NewAuthHandler(authSvc, userSvc, nil, testAuthCfg(), testLogger())
+
+	body := `{"username":"newadmin","password":"password123","role":"admin"}`
+	req := httptest.NewRequest("POST", "/users", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(auth.WithClaims(req.Context(), &auth.Claims{UserID: "u-secondary"}))
+	rr := httptest.NewRecorder()
+	handler.Register(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("status %d (want 403): %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestAuthHandler_Register_OwnerCanCreateAdmin(t *testing.T) {
+	created := &authmodel.User{ID: "new-admin", Username: "bob", DisplayName: "Bob", Role: "admin"}
+	authSvc := &mockAuthService{
+		registerFn: func(_ context.Context, req auth.RegisterRequest) (*authmodel.User, error) {
+			if req.Role != "admin" {
+				t.Errorf("role lost: %q", req.Role)
+			}
+			return created, nil
+		},
+	}
+	userSvc := &mockUserService{
+		getByIDFn: func(_ context.Context, _ string) (*authmodel.User, error) {
+			return &authmodel.User{
+				ID: "u-owner", Role: "admin", IsActive: true, IsOwner: true,
+			}, nil
+		},
+	}
+	handler := NewAuthHandler(authSvc, userSvc, nil, testAuthCfg(), testLogger())
+
+	body := `{"username":"bob","password":"password123","role":"admin"}`
+	req := httptest.NewRequest("POST", "/users", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(auth.WithClaims(req.Context(), &auth.Claims{UserID: "u-owner"}))
+	rr := httptest.NewRecorder()
+	handler.Register(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Errorf("status %d (want 201): %s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestAuthHandler_Register_NonOwnerCanStillCreateNormalUsers pin la otra
+// cara: can_manage_users sigue siendo suficiente para crear usuarios
+// normales — sólo crear admins requiere ser owner.
+func TestAuthHandler_Register_NonOwnerCanStillCreateNormalUsers(t *testing.T) {
+	created := &authmodel.User{ID: "u-regular", Username: "alice", DisplayName: "Alice", Role: "user"}
+	authSvc := &mockAuthService{
+		registerFn: func(_ context.Context, _ auth.RegisterRequest) (*authmodel.User, error) {
+			return created, nil
+		},
+	}
+	userSvc := &mockUserService{
+		getByIDFn: func(_ context.Context, _ string) (*authmodel.User, error) {
+			return &authmodel.User{
+				ID: "u-secondary", Role: "admin", IsActive: true,
+				CanManageUsers: true,
+			}, nil
+		},
+	}
+	handler := NewAuthHandler(authSvc, userSvc, nil, testAuthCfg(), testLogger())
+
+	body := `{"username":"alice","password":"password123","role":"user"}`
+	req := httptest.NewRequest("POST", "/users", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(auth.WithClaims(req.Context(), &auth.Claims{UserID: "u-secondary"}))
+	rr := httptest.NewRecorder()
+	handler.Register(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Errorf("status %d (want 201): %s", rr.Code, rr.Body.String())
+	}
+}
+
 // ─── Register w/ grant_library_ids ──────────────────────────────────────────
 
 // TestAuthHandler_Register_AppliesLibraryGrants verifies the one-shot
