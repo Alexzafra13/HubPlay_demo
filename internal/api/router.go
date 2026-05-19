@@ -257,7 +257,7 @@ func NewRouter(deps Dependencies) http.Handler {
 				deps.Items, deps.ExternalIDs, deps.Images, deps.Providers,
 				pathmap.New(fedImageDir), fedImageDir, deps.Logger,
 			),
-			fedImageDir, deps.Logger,
+			fedImageDir, deps.Audit, deps.Logger,
 		)
 	}
 

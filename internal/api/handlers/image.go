@@ -32,6 +32,7 @@ type ImageHandler struct {
 	refresher   ImageRefreshService
 	imageDir    string
 	pathmap     *pathmap.Store
+	audit       AuditEmitter
 	logger      *slog.Logger
 }
 
@@ -42,6 +43,7 @@ func NewImageHandler(
 	providers ProviderManager,
 	refresher ImageRefreshService,
 	imageDir string,
+	audit AuditEmitter,
 	logger *slog.Logger,
 ) *ImageHandler {
 	return &ImageHandler{
@@ -52,8 +54,16 @@ func NewImageHandler(
 		refresher:   refresher,
 		imageDir:    imageDir,
 		pathmap:     pathmap.New(imageDir),
+		audit:       audit,
 		logger:      logger.With("handler", "images"),
 	}
+}
+
+func (h *ImageHandler) auditEmit() AuditEmitter {
+	if h.audit != nil {
+		return h.audit
+	}
+	return noopAudit{}
 }
 
 // List returns all images stored for an item.
@@ -191,6 +201,7 @@ func (h *ImageHandler) Select(w http.ResponseWriter, r *http.Request) {
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to save image")
 		return
 	}
+	h.auditEmit().LogArtworkChanged(r.Context(), r, "item", itemID, imgType)
 
 	respondJSON(w, http.StatusOK, map[string]any{"data": imageResponse(img)})
 }
@@ -262,6 +273,7 @@ func (h *ImageHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to save image")
 		return
 	}
+	h.auditEmit().LogArtworkChanged(r.Context(), r, "item", itemID, imgType)
 
 	respondJSON(w, http.StatusOK, map[string]any{"data": imageResponse(img)})
 }

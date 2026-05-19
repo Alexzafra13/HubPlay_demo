@@ -145,7 +145,7 @@ func newFedTestEnv(t *testing.T) *fedTestEnv {
 	fedHandler := NewFederationStreamHandler(mgr, streams, items, mediaStreams, testutil.NopLogger())
 
 	imageDir := t.TempDir()
-	imgSrv := NewImageHandler(nil, nil, nil, nil, nil, imageDir, testutil.NopLogger())
+	imgSrv := NewImageHandler(nil, nil, nil, nil, nil, imageDir, nil, testutil.NopLogger())
 	fedImg := NewFederationImageHandler(mgr, items,
 		&fakeImageRepoForFedTest{primaryByItem: map[string]string{}},
 		imgSrv, testutil.NopLogger())
