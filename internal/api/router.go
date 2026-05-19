@@ -466,6 +466,20 @@ func NewRouter(deps Dependencies) http.Handler {
 				// final — tusd compone Location: /api/v1/uploads/<id> tras
 				// el POST de creación, y el cliente PATCH-ea ahí mismo.
 				r.Mount("/uploads/", deps.Uploads)
+
+				// Upload folder explorer (PR6 file explorer). Gateado por
+				// can_upload — un user sin permiso de subir no necesita
+				// el browser. Owner pasa automático via User.Can().
+				if deps.Libraries != nil {
+					browseHandler := handlers.NewUploadBrowseHandler(deps.Libraries, deps.Logger)
+					r.Group(func(r chi.Router) {
+						if deps.Permissions != nil {
+							r.Use(deps.Permissions.Require(authmodel.PermUpload))
+						}
+						r.Get("/libraries/{id}/upload-browse", browseHandler.Browse)
+						r.Post("/libraries/{id}/folders", browseHandler.CreateFolder)
+					})
+				}
 			}
 
 			// Current user

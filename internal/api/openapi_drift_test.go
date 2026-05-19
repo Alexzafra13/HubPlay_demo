@@ -306,6 +306,12 @@ var outOfScopeExact = map[string]string{
 	// Endpoints del panel admin /admin/system. Gated por can_view_audit.
 	"GET /admin/system/audit-log":       "admin panel — query del audit log con filtros",
 	"GET /admin/system/audit-log/types": "admin panel — distinct event types para el dropdown",
+
+	// ── Upload folder explorer (PR6) ─────────────────────────────────
+	// File-explorer SFTP-style para que el cliente navegue carpetas
+	// dentro de la librería antes de subir. Gateado por can_upload.
+	"GET /libraries/{id}/upload-browse":  "upload UI — lista subdirs dentro de la librería",
+	"POST /libraries/{id}/folders":       "upload UI — crea carpeta nueva dentro de la librería",
 }
 
 // TestOpenAPISpec_RouterCoverage walks the AST of router.go to enumerate
