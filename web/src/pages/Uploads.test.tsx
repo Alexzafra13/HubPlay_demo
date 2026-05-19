@@ -134,7 +134,10 @@ describe("Uploads page — permission gate", () => {
   it("muestra el dropzone cuando can_upload está activo", () => {
     render(wrap(<Uploads />));
     expect(
-      screen.getByText(/arrastra ficheros|drag files/i),
+      // Hay dos hints con "arrastra ficheros" — el principal del
+      // dropzone y el secundario que apunta al folder browser. Basta
+      // con verificar que ALGUNO está presente.
+      screen.getAllByText(/arrastra ficheros|drag files/i)[0],
     ).toBeInTheDocument();
   });
 });

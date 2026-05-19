@@ -170,6 +170,118 @@ describe("FolderBrowser", () => {
     expect(onChange).toHaveBeenCalledWith("lib-mov", "Sci-Fi");
   });
 
+  // ─── Drop-on-folder (Termius-style) ───────────────────────────────
+
+  it("dispara onDropFiles con el subpath de la carpeta arrastrada", async () => {
+    vi.mocked(api.browseUploadFolders).mockResolvedValue({
+      library_id: "lib-mov",
+      library_name: "Movies",
+      path: "",
+      directories: [
+        { name: "Action", path: "Action" },
+        { name: "Drama", path: "Drama" },
+      ],
+    });
+
+    const onDropFiles = vi.fn();
+    render(
+      wrap(
+        <FolderBrowser
+          libraries={LIBS}
+          libraryID="lib-mov"
+          path=""
+          onChange={vi.fn()}
+          onDropFiles={onDropFiles}
+        />,
+      ),
+    );
+
+    await screen.findByText("Drama");
+    const dramaRow = screen.getByText("Drama").closest("li")!;
+
+    // Simula drop con un fichero. jsdom no implementa DataTransfer
+    // completo, así que construimos un objeto mínimo.
+    const file = new File(["x"], "movie.mkv", { type: "video/x-matroska" });
+    const event = new Event("drop", { bubbles: true }) as Event & {
+      dataTransfer: { files: File[] };
+      preventDefault: () => void;
+    };
+    Object.defineProperty(event, "dataTransfer", {
+      value: { files: [file] },
+    });
+    dramaRow.dispatchEvent(event);
+
+    expect(onDropFiles).toHaveBeenCalledWith([file], "Drama");
+  });
+
+  it("dispara onDropFiles con path vacío al soltar en el Home", async () => {
+    vi.mocked(api.browseUploadFolders).mockResolvedValue({
+      library_id: "lib-mov",
+      library_name: "Movies",
+      path: "Movies/Drama",
+      directories: [],
+    });
+
+    const onDropFiles = vi.fn();
+    render(
+      wrap(
+        <FolderBrowser
+          libraries={LIBS}
+          libraryID="lib-mov"
+          path="Movies/Drama"
+          onChange={vi.fn()}
+          onDropFiles={onDropFiles}
+        />,
+      ),
+    );
+
+    await waitFor(() => expect(api.browseUploadFolders).toHaveBeenCalled());
+
+    const homeBtn = screen.getByRole("button", { name: /raíz|root/i });
+    const file = new File(["x"], "movie.mkv", { type: "video/x-matroska" });
+    const event = new Event("drop", { bubbles: true }) as Event & {
+      dataTransfer: { files: File[] };
+    };
+    Object.defineProperty(event, "dataTransfer", {
+      value: { files: [file] },
+    });
+    homeBtn.dispatchEvent(event);
+
+    expect(onDropFiles).toHaveBeenCalledWith([file], "");
+  });
+
+  it("no soporta drop si el padre no pasa onDropFiles", async () => {
+    // Sin onDropFiles, ningún elemento debería tener affordances de
+    // drop visibles. Verifica que el empty-state textual sigue
+    // siendo el original (no el drop hint nuevo).
+    vi.mocked(api.browseUploadFolders).mockResolvedValue({
+      library_id: "lib-mov",
+      library_name: "Movies",
+      path: "",
+      directories: [],
+    });
+
+    render(
+      wrap(
+        <FolderBrowser
+          libraries={LIBS}
+          libraryID="lib-mov"
+          path=""
+          onChange={vi.fn()}
+        />,
+      ),
+    );
+
+    // El empty state textual del modo sin-drag aparece tras el load.
+    expect(
+      await screen.findByText(/no tiene subcarpetas|has no subfolders/i),
+    ).toBeInTheDocument();
+    // El drop hint del modo drag NO aparece.
+    expect(
+      screen.queryByText(/suelta ficheros aquí|drop files here/i),
+    ).toBeNull();
+  });
+
   it("muestra error inline si el backend rechaza la carpeta", async () => {
     const user = userEvent.setup();
     vi.mocked(api.browseUploadFolders).mockResolvedValue({

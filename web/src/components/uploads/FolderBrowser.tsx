@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Folder,
+  FolderOpen,
   FolderPlus,
   ChevronRight,
   ChevronUp,
@@ -43,6 +44,15 @@ interface FolderBrowserProps {
   libraryID: string;
   path: string;
   onChange: (libraryID: string, path: string) => void;
+  /**
+   * Callback opcional: cuando el usuario arrastra ficheros DIRECTAMENTE
+   * sobre una carpeta del browser (o el home/breadcrumb), el componente
+   * llama aquí con el subpath de destino. El padre decide qué hacer —
+   * típicamente encolar + autoarrancar el upload sin pasar por el
+   * dropzone general. Sin este callback, drop sobre carpetas se ignora
+   * silenciosamente.
+   */
+  onDropFiles?: (files: File[], subpath: string) => void;
 }
 
 export function FolderBrowser({
@@ -50,6 +60,7 @@ export function FolderBrowser({
   libraryID,
   path,
   onChange,
+  onDropFiles,
 }: FolderBrowserProps) {
   const { t } = useTranslation();
   const { data, isLoading, error } = useUploadBrowse(libraryID, path, !!libraryID);
@@ -58,6 +69,46 @@ export function FolderBrowser({
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
   const [folderError, setFolderError] = useState<string | null>(null);
+  // dropTarget: subpath que está siendo hovered con un drag activo.
+  // Necesario porque cuando un fichero pasa SOBRE una carpeta, los
+  // eventos dragOver burbujean y queremos pintar exactamente UNA
+  // carpeta destacada (la que está debajo del cursor), no todas.
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+
+  // dragSupported: el padre wireó onDropFiles. Si no, no pintamos los
+  // affordances de drop (sería confuso ver carpetas que parecen drop
+  // targets pero no responden).
+  const dragSupported = !!onDropFiles;
+
+  function handleFolderDragOver(e: React.DragEvent<HTMLElement>, target: string) {
+    if (!dragSupported) return;
+    // Sin preventDefault, el navegador rechaza el drop por default.
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = "copy";
+    setDropTarget(target);
+  }
+
+  function handleFolderDragLeave(e: React.DragEvent<HTMLElement>) {
+    if (!dragSupported) return;
+    e.stopPropagation();
+    // Sólo limpiamos si salimos del propio elemento — los hijos
+    // generan leave events espurios que harían parpadear el estado.
+    if (e.currentTarget === e.target) {
+      setDropTarget(null);
+    }
+  }
+
+  function handleFolderDrop(e: React.DragEvent<HTMLElement>, target: string) {
+    if (!dragSupported || !onDropFiles) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setDropTarget(null);
+    const files = Array.from(e.dataTransfer.files ?? []);
+    if (files.length > 0) {
+      onDropFiles(files, target);
+    }
+  }
 
   // Breadcrumb segments. Si path es "Movies/Drama", devuelve
   // [{name: "Movies", path: "Movies"}, {name: "Drama", path: "Movies/Drama"}].
@@ -132,13 +183,24 @@ export function FolderBrowser({
         </select>
       </header>
 
-      {/* Breadcrumb + back */}
+      {/* Breadcrumb + back. Cada segmento es ADEMÁS drop target del
+          drag&drop: el operador puede arrastrar a "Movies" estando
+          dentro de "Movies/Drama" para subir un nivel arriba sin
+          tener que navegar. */}
       <div className="flex items-center gap-1 border-b border-border bg-bg-base px-3 py-2 text-sm overflow-x-auto">
         <button
           type="button"
           onClick={() => enterFolder("")}
+          onDragOver={(e) => handleFolderDragOver(e, "")}
+          onDragLeave={handleFolderDragLeave}
+          onDrop={(e) => handleFolderDrop(e, "")}
           aria-label={t("uploads.folder.root", { defaultValue: "Raíz" })}
-          className="flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 hover:bg-bg-hover"
+          className={[
+            "flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 transition-all",
+            dropTarget === "" && dragSupported
+              ? "bg-accent/20 ring-2 ring-accent scale-110"
+              : "hover:bg-bg-hover",
+          ].join(" ")}
         >
           <Home size={13} aria-hidden />
         </button>
@@ -148,7 +210,15 @@ export function FolderBrowser({
             <button
               type="button"
               onClick={() => enterFolder(bc.path)}
-              className="rounded px-1.5 py-0.5 hover:bg-bg-hover truncate max-w-[160px]"
+              onDragOver={(e) => handleFolderDragOver(e, bc.path)}
+              onDragLeave={handleFolderDragLeave}
+              onDrop={(e) => handleFolderDrop(e, bc.path)}
+              className={[
+                "rounded px-1.5 py-0.5 truncate max-w-[160px] transition-all",
+                dropTarget === bc.path && dragSupported
+                  ? "bg-accent/20 ring-2 ring-accent text-accent font-medium"
+                  : "hover:bg-bg-hover",
+              ].join(" ")}
             >
               {bc.name}
             </button>
@@ -180,7 +250,7 @@ export function FolderBrowser({
           </p>
         )}
 
-        {data && data.directories.length === 0 && !isLoading && (
+        {data && data.directories.length === 0 && !isLoading && !dragSupported && (
           <p className="px-3 py-3 text-xs text-text-muted italic">
             {t("uploads.folder.empty", {
               defaultValue: "Esta carpeta no tiene subcarpetas. Sube aquí o crea una nueva.",
@@ -190,23 +260,80 @@ export function FolderBrowser({
 
         {data && data.directories.length > 0 && (
           <ul className="py-1">
-            {data.directories.map((d) => (
-              <li key={d.path}>
-                <button
-                  type="button"
-                  onClick={() => enterFolder(d.path)}
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-bg-hover"
+            {data.directories.map((d) => {
+              const isDropOver = dropTarget === d.path && dragSupported;
+              return (
+                <li
+                  key={d.path}
+                  onDragOver={(e) => handleFolderDragOver(e, d.path)}
+                  onDragLeave={handleFolderDragLeave}
+                  onDrop={(e) => handleFolderDrop(e, d.path)}
+                  className={[
+                    "transition-all duration-150",
+                    isDropOver
+                      ? "bg-accent/15 ring-1 ring-inset ring-accent scale-[1.01]"
+                      : "",
+                  ].join(" ")}
                 >
-                  <Folder
-                    size={14}
-                    className="text-text-muted shrink-0"
-                    aria-hidden
-                  />
-                  <span className="truncate">{d.name}</span>
-                </button>
-              </li>
-            ))}
+                  <button
+                    type="button"
+                    onClick={() => enterFolder(d.path)}
+                    className={[
+                      "flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors",
+                      isDropOver
+                        ? "text-accent font-medium"
+                        : "hover:bg-bg-hover",
+                    ].join(" ")}
+                  >
+                    {isDropOver ? (
+                      <FolderOpen
+                        size={16}
+                        className="text-accent shrink-0 drop-shadow-[0_0_4px_rgba(var(--accent-rgb,234,179,8),0.4)]"
+                        aria-hidden
+                      />
+                    ) : (
+                      <Folder
+                        size={14}
+                        className="text-text-muted shrink-0"
+                        aria-hidden
+                      />
+                    )}
+                    <span className="truncate">{d.name}</span>
+                    {isDropOver && (
+                      <span className="ml-auto text-[10px] font-semibold uppercase tracking-wide text-accent">
+                        {t("uploads.folder.dropHere", {
+                          defaultValue: "Soltar aquí",
+                        })}
+                      </span>
+                    )}
+                  </button>
+                </li>
+              );
+            })}
           </ul>
+        )}
+
+        {/* Empty-state también es drop target: si la carpeta no tiene
+            subdirs, el operador puede arrastrar al CUERPO del browser y
+            aterriza en el path actual. */}
+        {data && data.directories.length === 0 && dragSupported && (
+          <div
+            onDragOver={(e) => handleFolderDragOver(e, path)}
+            onDragLeave={handleFolderDragLeave}
+            onDrop={(e) => handleFolderDrop(e, path)}
+            className={[
+              "mx-3 my-2 rounded-md border-2 border-dashed py-4 text-center text-xs transition-all",
+              dropTarget === path
+                ? "border-accent bg-accent/10 text-accent"
+                : "border-border/60 text-text-muted",
+            ].join(" ")}
+          >
+            {dropTarget === path
+              ? t("uploads.folder.dropHere", { defaultValue: "Soltar aquí" })
+              : t("uploads.folder.dropHint", {
+                  defaultValue: "Suelta ficheros aquí para subir a esta carpeta",
+                })}
+          </div>
         )}
       </div>
 

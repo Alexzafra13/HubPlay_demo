@@ -1744,11 +1744,14 @@
     "outcome_error": "Error",
     "targetHere": "Upload to",
     "targetRoot": "Upload to the library root",
+    "dropzoneSecondaryHint": "Or drag files directly onto a folder in the explorer below to upload there.",
     "folder": {
       "libraryLabel": "Library",
       "root": "Root",
       "up": "Up one level",
       "empty": "This folder has no subfolders. Upload here or create a new one.",
+      "dropHere": "Drop here",
+      "dropHint": "Drop files here to upload to this folder",
       "newFolderCta": "New folder",
       "newFolderPlaceholder": "Folder name",
       "createError": "Could not create folder."

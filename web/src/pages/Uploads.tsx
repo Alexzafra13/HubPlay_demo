@@ -339,7 +339,12 @@ function UploadDropzone({
     setLibraryID(libraries[0]?.id ?? "");
   }, [libraries, libraryID]);
 
-  function validateAndStage(incoming: FileList | File[]) {
+  // validateFiles aplica las dos reglas cliente-side (extensión +
+  // cuota) y devuelve la slice de aceptados.  Side-effect: pone
+  // rejectReason si alguno falla — el caller decide si seguir.
+  // Separado de validateAndStage para poder reutilizarlo desde el
+  // drop-on-folder (que valida y sube DIRECTO, sin pasar por la cola).
+  function validateFiles(incoming: FileList | File[]): File[] {
     setRejectReason(null);
     const arr = Array.from(incoming);
     const valid: File[] = [];
@@ -361,7 +366,26 @@ function UploadDropzone({
       }
       valid.push(f);
     }
+    return valid;
+  }
+
+  function validateAndStage(incoming: FileList | File[]) {
+    const valid = validateFiles(incoming);
     setFiles((prev) => [...prev, ...valid]);
+  }
+
+  // Drop directo sobre una carpeta del FolderBrowser (Termius-style):
+  // los ficheros válidos se suben INMEDIATAMENTE a esa carpeta sin
+  // pasar por la cola visible. El subpath puede ser distinto del
+  // path actual del browser (si arrastras a "Drama" estando en
+  // "Movies/", aterriza en "Drama" directo). Si algún fichero falla
+  // la validación, los demás suben igual y el rejectReason se ve.
+  function handleDropOnFolder(incoming: File[], targetSubpath: string) {
+    if (!libraryID) return;
+    const valid = validateFiles(incoming);
+    for (const f of valid) {
+      onUpload(f, libraryID, targetSubpath);
+    }
   }
 
   function onDrop(e: React.DragEvent<HTMLDivElement>) {
@@ -432,6 +456,12 @@ function UploadDropzone({
             onChange={onPickerChange}
           />
         </label>
+        <p className="text-xs text-text-muted/70">
+          {t("uploads.dropzoneSecondaryHint", {
+            defaultValue:
+              "O arrastra los ficheros directamente sobre una carpeta del explorador de abajo para subir ahí.",
+          })}
+        </p>
       </div>
 
       {rejectReason && (
@@ -439,6 +469,21 @@ function UploadDropzone({
           {rejectReason}
         </p>
       )}
+
+      {/* Folder browser SIEMPRE visible — el drop-on-folder es el
+          flujo principal Termius-style, no requiere encolar antes.
+          La cola visible aparece SOLO si el usuario suelta en el
+          dropzone general (que stage en lugar de subir directo). */}
+      <FolderBrowser
+        libraries={libraries}
+        libraryID={libraryID}
+        path={subpath}
+        onChange={(libID, p) => {
+          setLibraryID(libID);
+          setSubpath(p);
+        }}
+        onDropFiles={handleDropOnFolder}
+      />
 
       {files.length > 0 && (
         <div className="flex flex-col gap-3 rounded-[--radius-md] border border-border bg-bg-elevated p-4">
@@ -466,16 +511,6 @@ function UploadDropzone({
               </li>
             ))}
           </ul>
-
-          <FolderBrowser
-            libraries={libraries}
-            libraryID={libraryID}
-            path={subpath}
-            onChange={(libID, p) => {
-              setLibraryID(libID);
-              setSubpath(p);
-            }}
-          />
 
           <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
             <span className="text-text-muted">
