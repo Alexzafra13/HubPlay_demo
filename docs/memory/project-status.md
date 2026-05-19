@@ -1,5 +1,112 @@
 # Estado del proyecto
 
+> 📦 **Sesión 2026-05-19 / rama `claude/add-smtp-upload-feature-LpOi3` — Dos features grandes end-to-end: (1) Subida de media via tus protocol con pipeline ffprobe + audit + SSE, (2) Permisos granulares de admin con owner inmutable. 12 commits, 26/26 paquetes Go con -race verdes, 593/593 frontend, build de producción limpio.**
+>
+> ## 🎯 Feature 1 — Subida de media (PR2)
+>
+> Frontend (`/uploads`) + backend completo. El usuario con `can_upload` arrastra ficheros, los valida cliente-side (extensión + cuota), tus-js-client los sube resumable, y el server corre una pipeline post-bytes con eventos SSE en tiempo real (validating → probing ffprobe → moving atómico → indexing). Audit log append-only registra cada upload en su outcome final (accepted/rejected/aborted/error).
+>
+> **Backend** (`internal/upload/`):
+> - `sanitize.go` — strip de path traversal, control chars, exotic chars, collapse de runs, truncado preservando extensión (ASCII + acentos + ñ aceptados).
+> - `validator.go` — whitelist de 13 extensiones; magic bytes para MKV (EBML), MP4 (ftyp), AVI (RIFF), MPEG-PS, MPEG-TS (sync byte doble strict para evitar falso positivo), SRT/WebVTT/ASS por marcadores de texto.
+> - `staging.go` — gestor del staging dir per-(user,upload); rename atómico intra-fs + fallback copy/remove cross-device (EXDEV detectado por mensaje del LinkError, portable). `ResolveFinalPath` con doble validación de path-inside; `RandomID` hex 16 bytes.
+> - `service.go` (orchestrator) — `PreCreate` valida + reserva cuota atómico, `Finish` corre la pipeline síncrona (en goroutine spawn-and-forget desde el hook PostFinish de tusd), `Aborted` libera cuota + audit row aborted. Cada fase publica `event.UploadPhase` con user_id para el SSE filtrado.
+> - `library_picker.go` — hint por metadata `library_id` o auto-pick primera librería movies/shows del usuario. Subtítulos requieren librería compatible (no inferimos item destino en v1).
+> - `tusd_handler.go` — wrapper de `tusd.NewHandler`. PreUploadCreateCallback extrae claims del JWT, llama `service.PreCreate`, redirige el binPath del FileStore a `<staging>/<user>/<upload>/<sanitized>`. Drena `CompleteUploads` / `TerminatedUploads` en goroutines separadas por upload (un ffprobe lento no encola al resto).
+>
+> **HTTP** (`internal/api/handlers/uploads.go`):
+> - `GET /api/v1/uploads/mine` — últimas N filas del audit del usuario (default 50, cap 200).
+> - `GET /api/v1/uploads/events` — SSE filtrado por user_id; suscribe a UploadPhase/Done/Error/Bytes, drop server-side cuando data.user_id no case.
+> - Mount tusd en `/api/v1/uploads/` (POST/PATCH/HEAD/DELETE del protocolo).
+>
+> **Frontend** (`web/src/pages/Uploads.tsx`):
+> - Dropzone con drag&drop + file picker + selector de librería destino + línea de cuota usada/total.
+> - Cliente-side: rechazo de extensiones no whitelisted + ficheros que no caben en cuota.
+> - `useUploadEvents` (SSE) correlaciona events server-side con `ActiveUpload` local via serverID (capturado del Location header tras POST de creación tus).
+> - State machine: queued → uploading (% por tus onProgress) → validating → probing → moving → indexing → done|error. Tras terminal, 3s de gracia visible y `invalidateQueries(['uploads'])` para repoblar el historial.
+> - Cleanup en unmount aborta uploads en vuelo (best-effort).
+> - 10 tests cubriendo permission gate, validación cliente, mock de tus.Upload, config (chunkSize 8 MiB, retryDelays).
+>
+> **Migraciones**:
+> - 053 (PR1): columnas `can_upload`, `upload_quota_bytes`, `upload_used_bytes` en users + `ReserveUploadBytes` atómico.
+> - 054: tabla `upload_audit` append-only con CHECK constraint en outcome + índices (user_id, started_at DESC) y parcial (outcome != accepted).
+>
+> **Eventos nuevos en event bus**: `UploadBytes`, `UploadPhase`, `UploadDone`, `UploadError`. Todos llevan `user_id` en data para el filtrado SSE.
+>
+> **Config** (`UploadConfig`): enabled, staging_dir (default `<config>/uploads/staging`), max_bytes_per_upload (50 GiB), min_duration_ms (1000ms — defensa anti-payload trivial).
+>
+> **Dependencia nueva**: `github.com/tus/tusd/v2 v2.9.2` en backend, `tus-js-client@^4.3.1` en frontend.
+>
+> ## 🎯 Feature 2 — Permisos granulares de admin (PR3)
+>
+> Modelo RBAC plano: 8 flags BOOLEAN en `users` + `is_owner` inmutable (índice parcial UNIQUE WHERE is_owner=1). Sustituye el `RequireAdmin` en bloque por capability middlewares finos. El **owner** (quien instala la app) tiene todo implícito y es **inmutable de por vida** — no hay endpoint de transfer, recovery vía DB shell access.
+>
+> **Migración 055** añade:
+> - `is_owner`, `can_manage_admins`, `can_manage_users`, `can_manage_libraries`, `can_manage_iptv`, `can_edit_metadata`, `can_change_artwork`, `can_view_audit`.
+> - Backfill: admins existentes reciben TODOS los flags (preserva comportamiento previo); admin más antiguo se promueve a owner.
+> - **Fresh install** queda sin owner (tabla vacía cuando la migración corre). Fix vía `users.EnsureOwner(id)` llamado desde el handler `/auth/setup` tras crear el primer admin — idempotente.
+>
+> **Modelo** (`internal/auth/model/types.go`):
+> - `User.Can(perm)` centraliza la regla "owner tiene todo" — ningún caller la replica.
+> - `User.IsAdmin()` reemplaza el check `Role == "admin"` cuando el caller sólo quiere "¿tiene UI de admin?".
+> - `Permission` typedef + `AllPermissions()` para que el frontend pinte la matriz y el handler valide PUT body.
+>
+> **Middlewares** (`internal/auth/permissions.go`):
+> - `PermissionChecker.Require(perm)` — fetch del user en cada request (admin surfaces low-frequency; cache TTL queda si latencia se nota).
+> - `PermissionChecker.RequireOwner` — ni un super-admin con todos los flags lo pasa.
+>
+> **Aplicación en router** (`internal/api/router.go`):
+> - `/users` POST/DELETE/PUT* (excepto SetRole) → `Require(PermManageUsers)`.
+> - PUT `/users/{id}/role` (promover/degradar admin) → `RequireOwner`.
+> - PUT `/users/{id}/permissions` → `Require(PermManageAdmins)` + reglas finas en handler (owner inmutable, sólo owner replica can_manage_admins, target debe ser admin).
+> - POST `/users` con `role=admin` → handler chequea `requester.IsOwner` (defensa anti-sprawl). can_manage_users sigue suficiente para crear usuarios normales.
+> - `/admin/auth/keys` (signing keys JWT), `/admin/peers` (federation pairing), `/admin/system/{backup,db,restart}` → `RequireOwner`.
+> - Librerías CRUD → `Require(PermManageLibraries)`.
+> - IPTV admin (M3U, EPG, channels) → `Require(PermManageIPTV)`.
+> - Item identify + metadata → `Require(PermEditMetadata)`.
+> - Collection image overrides + batch image refresh → `Require(PermChangeArtwork)`.
+> - Providers config → `Require(PermManageLibraries)` (provider config es library-adjacent).
+> - `/admin/system` (stats, top-items, kill session) sigue en `RequireAdmin` en bloque — mixed bag, refinar endpoint-por-endpoint queda para otra iteración.
+>
+> **Endpoints nuevos**:
+> - `GET /api/v1/users/{id}/permissions` — lee los 8 flags.
+> - `PUT /api/v1/users/{id}/permissions` — body parcial *bool, refresca + devuelve estado.
+> - `/me` extendido con los 8 flags + is_owner + upload_quota_bytes + upload_used_bytes.
+>
+> **UI** (`web/src/pages/admin/AdminPermissionsMatrix.tsx`):
+> - Tabla 7 columnas × N filas; owner siempre primero con badge dorado "Principal" + celdas marcadas y disabled.
+> - Columna `can_manage_admins` editable sólo si viewer es owner (los admins secundarios la ven disabled con tooltip).
+> - Click → mutación inmediata (no hay botón Guardar, consistente con active/content-rating/library-access del proyecto).
+> - Solo desktop (8 columnas no caben en mobile; el contrato del test "mobile renders cards no table" se preserva).
+> - 7 tests: empty state, ordering, owner disabled, owner toggles, can_manage_admins gated, read-only sin flag.
+>
+> ## 🐛 Bug crítico arreglado durante PR3
+>
+> El backfill de la migración 055 promueve "el admin más antiguo" sólo si la tabla tenía admins cuando la migración aplicó. Una instalación NUEVA queda con tabla vacía + el setup wizard crea el primer admin DESPUÉS, sin tocar is_owner. Sin fix: ningún admin tiene is_owner=true → RequireOwner devuelve 403 en backup/keystore/federation/restart → app rota sin recovery vía UI.
+>
+> **Fix**: nuevo método `users.EnsureOwner(ctx, userID)` (atómico, idempotente: NOT EXISTS owner ya). El handler `/auth/setup` lo llama tras Register. Tests pin: "EnsureOwner se llama con el id del nuevo admin" + "fallo transitorio no aborta el setup".
+>
+> ## 📦 Comandos útiles añadidos por la sesión
+>
+> - `pnpm test --run Uploads` — tests del componente Uploads aislados.
+> - `pnpm test --run AdminPermissionsMatrix` — tests de la matriz.
+> - El backend repo `UploadAuditRepository` expone `Insert` + `ListByUser(userID, limit)` con cap 500.
+>
+> ## ⚠️ Deuda conocida (out of scope v1, documentada)
+>
+> 1. **No probé tusd end-to-end con cliente real** — tus-js está mockeado en tests. La integración debería funcionar pero hay margen para sorpresas con metadata propagation que sólo aparezcan con tráfico real.
+> 2. **Crash recovery del pipeline**: si el server cae con un upload mid-pipeline, el blob queda en `<staging>/<user>/<id>/`. Sin GC programado. Mitigación: rm -rf manual periódico.
+> 3. **`/admin/system`** sigue en RequireAdmin en bloque (sessions kill, settings writes). Refinar endpoint-por-endpoint es decisión de producto.
+> 4. **Cross-origin auth con tus**: en deploys SPA-en-host-distinto, hay que añadir `onBeforeRequest` al tus.Upload que marque credentials=include. Same-origin (binario Go default) funciona sin cambios.
+> 5. **Audio puro** (.mp3/.flac/.opus) no está en el whitelist — la app es de vídeo en v1.
+>
+> ## 📚 Docs nuevas
+>
+> - `docs/architecture/uploads.md` — pipeline + audit + SSE + decisiones.
+> - `docs/architecture/admin-permissions.md` — modelo flags, middlewares, bootstrap, recovery, rationale.
+
+---
+
 > 🎬 **Sesión 2026-05-19 (rama `claude/improve-channel-ordering-cKC8q`) — barrido grande de UX guiado por feedback de uso real: reordenación de canales drag&drop, identify/rematch Plex-style, overrides de logo/imagen (canales + colecciones), sanado de nombres IPTV, EPG icon fallback, iptv-org auto-discovery, lock + editor manual de metadatos, kebab admin en cada poster (home/listados/seasons/episodes) con todas las acciones, hero de colección rediseñado, y un bug crítico del scanner (item.Title no se actualizaba desde TMDb).**
 >
 > ## 🎯 Reordenación de canales — drag & drop completo (migration ya existía: 043)
