@@ -18,6 +18,7 @@ import (
 	hubplay "hubplay"
 	"hubplay/internal/api"
 	"hubplay/internal/api/handlers"
+	"hubplay/internal/audit"
 	"hubplay/internal/auth"
 	"hubplay/internal/clock"
 	"hubplay/internal/config"
@@ -538,6 +539,11 @@ func run(configPath string) error {
 		logger.Info("uploads disabled (config.upload.enabled=false)")
 	}
 
+	// Audit service (PR5). Cableado antes que los handlers para que
+	// el router lo reciba. Sink fire-and-forget — un INSERT lento o
+	// fallido NO bloquea el flujo principal.
+	auditService := audit.NewService(repos.AuditLog, logger)
+
 	// CORS registry (PR4 feature CORS-dynamic): combina statics del
 	// YAML + dynamics del DB en un atomic.Pointer.  Lo construimos
 	// AQUÍ (antes del router) para que NewRouter lo reciba listo.
@@ -614,6 +620,7 @@ func run(configPath string) error {
 		CorsRegistry:     corsRegistry,
 		CorsOriginsRepo:  repos.CorsOrigins,
 		AuditLog:         repos.AuditLog,
+		Audit:            auditService,
 	})
 
 	server := &http.Server{

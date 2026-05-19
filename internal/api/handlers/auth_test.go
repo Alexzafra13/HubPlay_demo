@@ -223,7 +223,7 @@ func TestAuthHandler_Login_Success(t *testing.T) {
 		},
 	}
 
-	handler := NewAuthHandler(authSvc, userSvc, nil, testAuthCfg(), testLogger())
+	handler := NewAuthHandler(authSvc, userSvc, nil, testAuthCfg(), nil, testLogger())
 
 	body := `{"username":"admin","password":"password"}`
 	req := httptest.NewRequest("POST", "/auth/login", strings.NewReader(body))
@@ -281,7 +281,7 @@ func TestAuthHandler_Login_InvalidCredentials(t *testing.T) {
 	}
 	userSvc := &mockUserService{}
 
-	handler := NewAuthHandler(authSvc, userSvc, nil, testAuthCfg(), testLogger())
+	handler := NewAuthHandler(authSvc, userSvc, nil, testAuthCfg(), nil, testLogger())
 
 	body := `{"username":"bad","password":"wrong"}`
 	req := httptest.NewRequest("POST", "/auth/login", strings.NewReader(body))
@@ -296,7 +296,7 @@ func TestAuthHandler_Login_InvalidCredentials(t *testing.T) {
 }
 
 func TestAuthHandler_Login_InvalidBody(t *testing.T) {
-	handler := NewAuthHandler(&mockAuthService{}, &mockUserService{}, nil, testAuthCfg(), testLogger())
+	handler := NewAuthHandler(&mockAuthService{}, &mockUserService{}, nil, testAuthCfg(), nil, testLogger())
 
 	req := httptest.NewRequest("POST", "/auth/login", strings.NewReader("not json"))
 	req.Header.Set("Content-Type", "application/json")
@@ -347,7 +347,7 @@ func TestAuthHandler_Setup_AllowedWhenNoUsers(t *testing.T) {
 		},
 	}
 
-	handler := NewAuthHandler(authSvc, userSvc, nil, testAuthCfg(), testLogger())
+	handler := NewAuthHandler(authSvc, userSvc, nil, testAuthCfg(), nil, testLogger())
 	body := `{"username":"admin","password":"password123","display_name":"Admin"}`
 	req := httptest.NewRequest("POST", "/auth/setup", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -394,7 +394,7 @@ func TestAuthHandler_Setup_SurvivesEnsureOwnerFailure(t *testing.T) {
 		},
 	}
 
-	handler := NewAuthHandler(authSvc, userSvc, nil, testAuthCfg(), testLogger())
+	handler := NewAuthHandler(authSvc, userSvc, nil, testAuthCfg(), nil, testLogger())
 	body := `{"username":"admin","password":"password123"}`
 	req := httptest.NewRequest("POST", "/auth/setup", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -429,7 +429,7 @@ func TestAuthHandler_Setup_BlockedWhenUsersExist(t *testing.T) {
 		countFn: func(_ context.Context) (int, error) { return 1, nil },
 	}
 
-	handler := NewAuthHandler(authSvc, userSvc, nil, testAuthCfg(), testLogger())
+	handler := NewAuthHandler(authSvc, userSvc, nil, testAuthCfg(), nil, testLogger())
 	body := `{"username":"attacker","password":"password123"}`
 	req := httptest.NewRequest("POST", "/auth/setup", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -464,7 +464,7 @@ func TestAuthHandler_Setup_BlockedWhenManyUsersExist(t *testing.T) {
 		countFn: func(_ context.Context) (int, error) { return 42, nil },
 	}
 
-	handler := NewAuthHandler(authSvc, userSvc, nil, testAuthCfg(), testLogger())
+	handler := NewAuthHandler(authSvc, userSvc, nil, testAuthCfg(), nil, testLogger())
 	body := `{"username":"attacker","password":"password123"}`
 	req := httptest.NewRequest("POST", "/auth/setup", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -495,7 +495,7 @@ func TestUserHandler_Me(t *testing.T) {
 		},
 	}
 
-	handler := NewUserHandler(userSvc, nil, testLogger())
+	handler := NewUserHandler(userSvc, nil, nil, testLogger())
 
 	req := httptest.NewRequest("GET", "/me", nil)
 	// Inject claims into context
@@ -521,7 +521,7 @@ func TestUserHandler_Me(t *testing.T) {
 }
 
 func TestUserHandler_Me_Unauthenticated(t *testing.T) {
-	handler := NewUserHandler(&mockUserService{}, nil, testLogger())
+	handler := NewUserHandler(&mockUserService{}, nil, nil, testLogger())
 
 	req := httptest.NewRequest("GET", "/me", nil)
 	rr := httptest.NewRecorder()
@@ -539,7 +539,7 @@ func TestUserHandler_Me_NotFound(t *testing.T) {
 		},
 	}
 
-	handler := NewUserHandler(userSvc, nil, testLogger())
+	handler := NewUserHandler(userSvc, nil, nil, testLogger())
 
 	req := httptest.NewRequest("GET", "/me", nil)
 	claims := &auth.Claims{UserID: "nonexistent", Role: "user"}
@@ -577,7 +577,7 @@ func TestAuthHandler_Register_BlocksNonOwnerCreatingAdmin(t *testing.T) {
 			}, nil
 		},
 	}
-	handler := NewAuthHandler(authSvc, userSvc, nil, testAuthCfg(), testLogger())
+	handler := NewAuthHandler(authSvc, userSvc, nil, testAuthCfg(), nil, testLogger())
 
 	body := `{"username":"newadmin","password":"password123","role":"admin"}`
 	req := httptest.NewRequest("POST", "/users", strings.NewReader(body))
@@ -608,7 +608,7 @@ func TestAuthHandler_Register_OwnerCanCreateAdmin(t *testing.T) {
 			}, nil
 		},
 	}
-	handler := NewAuthHandler(authSvc, userSvc, nil, testAuthCfg(), testLogger())
+	handler := NewAuthHandler(authSvc, userSvc, nil, testAuthCfg(), nil, testLogger())
 
 	body := `{"username":"bob","password":"password123","role":"admin"}`
 	req := httptest.NewRequest("POST", "/users", strings.NewReader(body))
@@ -640,7 +640,7 @@ func TestAuthHandler_Register_NonOwnerCanStillCreateNormalUsers(t *testing.T) {
 			}, nil
 		},
 	}
-	handler := NewAuthHandler(authSvc, userSvc, nil, testAuthCfg(), testLogger())
+	handler := NewAuthHandler(authSvc, userSvc, nil, testAuthCfg(), nil, testLogger())
 
 	body := `{"username":"alice","password":"password123","role":"user"}`
 	req := httptest.NewRequest("POST", "/users", strings.NewReader(body))
@@ -674,7 +674,7 @@ func TestAuthHandler_Register_AppliesLibraryGrants(t *testing.T) {
 			return &librarymodel.Library{}, nil
 		},
 	}
-	handler := NewAuthHandler(authSvc, &mockUserService{}, libSvc, testAuthCfg(), testLogger())
+	handler := NewAuthHandler(authSvc, &mockUserService{}, libSvc, testAuthCfg(), nil, testLogger())
 
 	body := `{"username":"alice","password":"password123","grant_library_ids":["lib-a","lib-b","lib-a"]}`
 	req := httptest.NewRequest("POST", "/users", strings.NewReader(body))
@@ -713,7 +713,7 @@ func TestAuthHandler_Register_GrantsOnProfile_400(t *testing.T) {
 			return &authmodel.User{ID: "parent-1", Username: "parent"}, nil
 		},
 	}
-	handler := NewAuthHandler(authSvc, userSvc, libSvc, testAuthCfg(), testLogger())
+	handler := NewAuthHandler(authSvc, userSvc, libSvc, testAuthCfg(), nil, testLogger())
 
 	body := `{"parent_user_id":"parent-1","display_name":"Kid","grant_library_ids":["lib-a"]}`
 	req := httptest.NewRequest("POST", "/users", strings.NewReader(body))
@@ -746,7 +746,7 @@ func TestAuthHandler_Register_GrantsUnknownLibrary_404(t *testing.T) {
 			return nil, domain.NewNotFound("library")
 		},
 	}
-	handler := NewAuthHandler(authSvc, &mockUserService{}, libSvc, testAuthCfg(), testLogger())
+	handler := NewAuthHandler(authSvc, &mockUserService{}, libSvc, testAuthCfg(), nil, testLogger())
 
 	body := `{"username":"alice","password":"password123","grant_library_ids":["lib-good","lib-missing"]}`
 	req := httptest.NewRequest("POST", "/users", strings.NewReader(body))
@@ -772,7 +772,7 @@ func TestAuthHandler_Register_NoGrants_NilLibraries_OK(t *testing.T) {
 			return created, nil
 		},
 	}
-	handler := NewAuthHandler(authSvc, &mockUserService{}, nil, testAuthCfg(), testLogger())
+	handler := NewAuthHandler(authSvc, &mockUserService{}, nil, testAuthCfg(), nil, testLogger())
 
 	body := `{"username":"alice","password":"password123"}`
 	req := httptest.NewRequest("POST", "/users", strings.NewReader(body))

@@ -125,7 +125,7 @@ func TestPermissionsHandler_GetPermissions(t *testing.T) {
 		ID: "u-1", Role: "admin", IsActive: true,
 		CanEditMetadata: true, CanViewAudit: true,
 	})
-	h := handlers.NewPermissionsHandler(store, slog.Default())
+	h := handlers.NewPermissionsHandler(store, nil, slog.Default())
 
 	rr := doRequest(mount(h), http.MethodGet, "/users/u-1/permissions", nil, "")
 	if rr.Code != http.StatusOK {
@@ -147,7 +147,7 @@ func TestPutPermissions_OwnerCanGrantManageAdmins(t *testing.T) {
 		&authmodel.User{ID: "u-owner", Role: "admin", IsActive: true, IsOwner: true},
 		&authmodel.User{ID: "u-tgt", Role: "admin", IsActive: true},
 	)
-	h := handlers.NewPermissionsHandler(store, slog.Default())
+	h := handlers.NewPermissionsHandler(store, nil, slog.Default())
 
 	rr := doRequest(mount(h), http.MethodPut, "/users/u-tgt/permissions",
 		strings.NewReader(`{"can_manage_admins": true, "can_edit_metadata": true}`), "u-owner")
@@ -170,7 +170,7 @@ func TestPutPermissions_NonOwnerCannotGrantManageAdmins(t *testing.T) {
 		&authmodel.User{ID: "u-admin", Role: "admin", IsActive: true, CanManageAdmins: true},
 		&authmodel.User{ID: "u-tgt", Role: "admin", IsActive: true},
 	)
-	h := handlers.NewPermissionsHandler(store, slog.Default())
+	h := handlers.NewPermissionsHandler(store, nil, slog.Default())
 
 	rr := doRequest(mount(h), http.MethodPut, "/users/u-tgt/permissions",
 		strings.NewReader(`{"can_manage_admins": true}`), "u-admin")
@@ -190,7 +190,7 @@ func TestPutPermissions_OtherFlagsByManageAdmins(t *testing.T) {
 		&authmodel.User{ID: "u-admin", Role: "admin", IsActive: true, CanManageAdmins: true},
 		&authmodel.User{ID: "u-tgt", Role: "admin", IsActive: true},
 	)
-	h := handlers.NewPermissionsHandler(store, slog.Default())
+	h := handlers.NewPermissionsHandler(store, nil, slog.Default())
 
 	rr := doRequest(mount(h), http.MethodPut, "/users/u-tgt/permissions",
 		strings.NewReader(`{"can_edit_metadata": true, "can_change_artwork": true}`), "u-admin")
@@ -211,7 +211,7 @@ func TestPutPermissions_RejectsOwnerTarget(t *testing.T) {
 	// Note: store no enforce unicidad — es un fake. La cuestión que
 	// testeamos es que el HANDLER niega tocar a un usuario con
 	// is_owner=true, no la unicidad SQL.
-	h := handlers.NewPermissionsHandler(store, slog.Default())
+	h := handlers.NewPermissionsHandler(store, nil, slog.Default())
 
 	rr := doRequest(mount(h), http.MethodPut, "/users/u-owner/permissions",
 		strings.NewReader(`{"can_edit_metadata": false}`), "u-other")
@@ -225,7 +225,7 @@ func TestPutPermissions_RejectsNonAdminTarget(t *testing.T) {
 		&authmodel.User{ID: "u-owner", Role: "admin", IsActive: true, IsOwner: true},
 		&authmodel.User{ID: "u-plain", Role: "user", IsActive: true},
 	)
-	h := handlers.NewPermissionsHandler(store, slog.Default())
+	h := handlers.NewPermissionsHandler(store, nil, slog.Default())
 
 	rr := doRequest(mount(h), http.MethodPut, "/users/u-plain/permissions",
 		strings.NewReader(`{"can_edit_metadata": true}`), "u-owner")

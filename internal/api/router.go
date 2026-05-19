@@ -150,6 +150,9 @@ type Dependencies struct {
 	// auditoría (PR5). nil = los endpoints /admin/audit-log no se
 	// montan (tests minimalistas).
 	AuditLog        handlers.AuditLogStore
+	// Audit es el productor de eventos al audit log unificado (PR5).
+	// nil-safe en los handlers (caen a un sink no-op).
+	Audit           handlers.AuditEmitter
 }
 
 func NewRouter(deps Dependencies) http.Handler {
@@ -225,8 +228,8 @@ func NewRouter(deps Dependencies) http.Handler {
 	}
 
 	// Handlers
-	authHandler := handlers.NewAuthHandler(deps.Auth, deps.Users, deps.Libraries, deps.Config.Auth, deps.Logger)
-	userHandler := handlers.NewUserHandler(deps.Users, deps.Libraries, deps.Logger)
+	authHandler := handlers.NewAuthHandler(deps.Auth, deps.Users, deps.Libraries, deps.Config.Auth, deps.Audit, deps.Logger)
+	userHandler := handlers.NewUserHandler(deps.Users, deps.Libraries, deps.Audit, deps.Logger)
 
 	// Avoid wrapping a nil concrete pointer in a non-nil interface.
 	var streamSvc handlers.StreamManagerService
@@ -557,7 +560,7 @@ func NewRouter(deps Dependencies) http.Handler {
 				// genérico; el write está gated por can_manage_admins.
 				// El owner es inmutable — sin endpoint de transferencia.
 				if deps.Permissions != nil && deps.UserRepo != nil {
-					permHandler := handlers.NewPermissionsHandler(deps.UserRepo, deps.Logger)
+					permHandler := handlers.NewPermissionsHandler(deps.UserRepo, deps.Audit, deps.Logger)
 					r.Get("/{id}/permissions", permHandler.GetPermissions)
 					r.With(deps.Permissions.Require(authmodel.PermManageAdmins)).
 						Put("/{id}/permissions", permHandler.PutPermissions)
