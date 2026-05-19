@@ -500,6 +500,7 @@ export default function ItemDetail() {
       {isAdmin && id && (
         <ImageManager
           itemId={id}
+          itemType={item?.type}
           isOpen={imageManagerOpen}
           onClose={() => setImageManagerOpen(false)}
         />

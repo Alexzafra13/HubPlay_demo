@@ -18,21 +18,30 @@ import { create } from "zustand";
 export type ItemAction = "identify" | "edit-metadata" | "images";
 
 interface ItemActionsState {
-  // Acción activa + id del item al que aplica. null cuando no hay
-  // modal de acción abierto (estado por defecto).
+  // Acción activa + id + tipo del item al que aplica. null cuando no
+  // hay modal de acción abierto (estado por defecto).
+  // itemType se guarda para que el ImageManager pueda filtrar las
+  // pestañas (poster/backdrop/...) sin tener que esperar el round-
+  // trip de useItem cada vez que se abre el modal desde un poster
+  // del listado.
   action: ItemAction | null;
   itemID: string | null;
-  openIdentify: (itemID: string) => void;
-  openEditor: (itemID: string) => void;
-  openImages: (itemID: string) => void;
+  itemType: string | null;
+  openIdentify: (itemID: string, itemType: string) => void;
+  openEditor: (itemID: string, itemType: string) => void;
+  openImages: (itemID: string, itemType: string) => void;
   close: () => void;
 }
 
 export const useItemActions = create<ItemActionsState>((set) => ({
   action: null,
   itemID: null,
-  openIdentify: (itemID) => set({ action: "identify", itemID }),
-  openEditor: (itemID) => set({ action: "edit-metadata", itemID }),
-  openImages: (itemID) => set({ action: "images", itemID }),
-  close: () => set({ action: null, itemID: null }),
+  itemType: null,
+  openIdentify: (itemID, itemType) =>
+    set({ action: "identify", itemID, itemType }),
+  openEditor: (itemID, itemType) =>
+    set({ action: "edit-metadata", itemID, itemType }),
+  openImages: (itemID, itemType) =>
+    set({ action: "images", itemID, itemType }),
+  close: () => set({ action: null, itemID: null, itemType: null }),
 }));
