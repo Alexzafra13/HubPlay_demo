@@ -186,6 +186,40 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # ─── Install script Linux (asset suelto del release) ───────────────
+  # Sube scripts/install.sh y scripts/hubplay.service como assets del
+  # release para que el operador pueda hacer:
+  #
+  #   curl -fsSL .../releases/latest/download/install.sh | sudo bash
+  #
+  # El script descarga el .tar.gz del binario que coincida con su
+  # plataforma, lo extrae, crea usuario, registra systemd, arranca.
+  linux-installer-assets:
+    name: Stage Linux installer assets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Copy install assets
+        run: |
+          mkdir -p dist
+          cp scripts/install.sh       dist/install.sh
+          cp scripts/hubplay.service  dist/hubplay.service
+          chmod +x dist/install.sh
+          sha256sum dist/install.sh       > dist/install.sh.sha256
+          sha256sum dist/hubplay.service  > dist/hubplay.service.sha256
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hubplay-linux-installer-assets
+          path: |
+            dist/install.sh
+            dist/hubplay.service
+            dist/install.sh.sha256
+            dist/hubplay.service.sha256
+          retention-days: 7
+
   # ─── Installer Windows .exe (Inno Setup) ───────────────────────────
   # Toma el .zip del build de windows-amd64, le añade NSSM (BSD-licensed
   # service manager para que hubplay arranque sin consola al boot), y
@@ -276,7 +310,7 @@ jobs:
   # ─── Release estable (sólo tags v*) ────────────────────────────────
   release-tag:
     name: Publish stable release
-    needs: [build, windows-installer]
+    needs: [build, windows-installer, linux-installer-assets]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
@@ -295,6 +329,8 @@ jobs:
             artifacts/*.tar.gz
             artifacts/*.zip
             artifacts/*.exe
+            artifacts/install.sh
+            artifacts/hubplay.service
             artifacts/*.sha256
           generate_release_notes: true
           draft: false
@@ -302,13 +338,25 @@ jobs:
           body: |
             ## Descarga rápida
 
+            ### Linux server (recomendado)
+            Un solo comando — descarga, instala como servicio systemd,
+            crea usuario sistema, arranca. Probado en Ubuntu/Debian/Fedora/Arch
+            y Raspberry Pi OS (amd64 + arm64).
+
+            ```bash
+            curl -fsSL https://github.com/Alexzafra13/HubPlay_demo/releases/latest/download/install.sh | sudo bash
+            ```
+
+            Para actualizar más adelante: vuelve a ejecutar el mismo comando —
+            detecta versión instalada y hace upgrade in-place.
+
             ### Windows (recomendado)
             **`HubPlay-Setup-*-windows-amd64.exe`** — installer plug-and-play.
             Doble-click → siguiente → al terminar tienes icono en escritorio
             y HubPlay arrancando como servicio (sin consola visible). Abre
             el icono → se abre el navegador en la app.
 
-            ### Linux / macOS
+            ### macOS
             Archivo `.tar.gz` con `hubplay` + `ffmpeg` + `ffprobe`. Descomprime,
             edita `hubplay.example.yaml`, lanza `./hubplay --config hubplay.yaml`.
 
@@ -316,10 +364,16 @@ jobs:
             en la barra de direcciones — click → icono en escritorio, abre
             en ventana standalone como app nativa (PWA).
 
-            ### Avanzado (Windows .zip)
-            `hubplay-*-windows-amd64.zip` — mismo contenido que el installer
-            pero sin registrar servicio. Útil si quieres correrlo manualmente
-            o portable desde USB.
+            ### NAS y plataformas no soportadas nativamente
+            Synology, Unraid, QNAP, TrueNAS, Alpine: usa la **imagen Docker**.
+            ```bash
+            docker pull ghcr.io/alexzafra13/hubplay_demo:latest
+            ```
+
+            ### Avanzado (Windows .zip, Linux portable)
+            Los `.zip`/`.tar.gz` traen los binarios sin registrar servicio.
+            Útiles para correr manualmente, desde USB, o si tienes una
+            estructura de servidor a medida.
 
             ### Plataformas
 
@@ -353,7 +407,7 @@ jobs:
   # como "latest" (eso queda reservado para los tags v*).
   release-nightly:
     name: Update nightly release
-    needs: [build, windows-installer]
+    needs: [build, windows-installer, linux-installer-assets]
     runs-on: ubuntu-latest
     if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
     steps:
@@ -382,6 +436,8 @@ jobs:
             artifacts/*.tar.gz
             artifacts/*.zip
             artifacts/*.exe
+            artifacts/install.sh
+            artifacts/hubplay.service
             artifacts/*.sha256
           draft: false
           prerelease: true
@@ -395,12 +451,17 @@ jobs:
 
             ## Descarga rápida
 
+            **Linux server** — un comando, instala como servicio systemd:
+            ```bash
+            curl -fsSL https://github.com/Alexzafra13/HubPlay_demo/releases/download/nightly/install.sh | sudo bash
+            ```
+
             **Windows** — usa `HubPlay-Setup-*-windows-amd64.exe` (installer
             plug-and-play: icono en escritorio + servicio sin consola).
             Si SmartScreen avisa, click en **"Más información" → "Ejecutar
             de todas formas"**.
 
-            **Linux / macOS** — descomprime el `.tar.gz`, edita el yaml de
+            **macOS** — descomprime el `.tar.gz`, edita el yaml de
             ejemplo, lanza `./hubplay --config hubplay.yaml`. Luego en el
             navegador click en **"Instalar HubPlay"** para añadirlo como
             PWA con icono propio.

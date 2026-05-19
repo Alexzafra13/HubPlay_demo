@@ -61,7 +61,16 @@ var (
 
 func main() {
 	configPath := flag.String("config", "hubplay.yaml", "path to config file")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		// Output one-line — scripts (install.sh, monitoring, etc.) parsean
+		// stdout. Formato estable: "hubplay <version> (commit <sha>, built <date>)".
+		// dev builds quedan "hubplay dev (commit none, built unknown)" — parseable.
+		fmt.Printf("hubplay %s (commit %s, built %s)\n", version, commit, buildDate)
+		return
+	}
 
 	if err := run(*configPath); err != nil {
 		fmt.Fprintf(os.Stderr, "hubplay: %v\n", err)

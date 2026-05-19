@@ -1,0 +1,60 @@
+[Unit]
+# Unit de systemd para HubPlay. Lo despliega scripts/install.sh
+# sustituyendo los placeholders @HUBPLAY_*@. Si lo manejas a mano,
+# reemplaza los placeholders y copia a /etc/systemd/system/.
+Description=HubPlay media server
+Documentation=https://github.com/Alexzafra13/HubPlay_demo
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@HUBPLAY_USER@
+Group=@HUBPLAY_USER@
+ExecStart=@HUBPLAY_BIN@ --config @HUBPLAY_CONF@
+WorkingDirectory=@HUBPLAY_DATA@
+
+# Restart policy. on-failure es lo correcto para un media server:
+# si el binario sale con código 0 (e.g. shutdown intencional vía
+# panel admin) NO reiniciamos; si crashea sí. RestartSec=5 evita
+# que un crash-loop sature la CPU si algo está mal de config.
+Restart=on-failure
+RestartSec=5
+
+# Límites de recursos. Defaults sensatos — el operador puede
+# ajustar editando /etc/systemd/system/hubplay.service.d/override.conf
+# (que systemd respeta sin tocar el unit principal).
+LimitNOFILE=65536
+TimeoutStopSec=30
+
+# Endurecimiento systemd. Bloquea capacidades innecesarias para
+# reducir blast-radius en caso de exploit. Hubplay es un proceso
+# user-space normal: no necesita raw sockets, ni montar fs, ni
+# crear namespaces.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=@HUBPLAY_DATA@ /var/log/hubplay
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+SystemCallArchitectures=native
+# AF_INET/AF_INET6 para HTTP, AF_UNIX para sockets locales si los
+# usamos en el futuro, AF_NETLINK para algunas llamadas de Go.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+
+# Logging: stdout/stderr van al journal. `journalctl -u hubplay -f`
+# para tailing. El propio hubplay sigue escribiendo a su log file en
+# /var/log/hubplay si el yaml lo configura — independiente.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hubplay
+
+[Install]
+WantedBy=multi-user.target
