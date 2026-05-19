@@ -425,9 +425,13 @@ export interface CorsOriginsListResponse {
 export interface AuditLogEntry {
   id: string;
   actor_user_id: string;
+  /** Resuelto via JOIN en el backend; vacío si el user fue borrado. */
+  actor_username: string;
   event_type: string;
   target_type: string;
   target_id: string;
+  /** Sólo poblado cuando target_type === "user". */
+  target_username: string;
   payload: string;
   ip_address: string;
   user_agent: string;

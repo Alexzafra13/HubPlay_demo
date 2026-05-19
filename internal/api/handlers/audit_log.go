@@ -102,15 +102,17 @@ func (h *AuditLogHandler) Query(w http.ResponseWriter, r *http.Request) {
 	out := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, map[string]any{
-			"id":            row.ID,
-			"actor_user_id": row.ActorUserID,
-			"event_type":    row.EventType,
-			"target_type":   row.TargetType,
-			"target_id":     row.TargetID,
-			"payload":       row.Payload,
-			"ip_address":    row.IPAddress,
-			"user_agent":    row.UserAgent,
-			"created_at":    row.CreatedAt.Format(time.RFC3339),
+			"id":              row.ID,
+			"actor_user_id":   row.ActorUserID,
+			"actor_username":  row.ActorUsername,
+			"event_type":      row.EventType,
+			"target_type":     row.TargetType,
+			"target_id":       row.TargetID,
+			"target_username": row.TargetUsername,
+			"payload":         row.Payload,
+			"ip_address":      row.IPAddress,
+			"user_agent":      row.UserAgent,
+			"created_at":      row.CreatedAt.Format(time.RFC3339),
 		})
 	}
 
