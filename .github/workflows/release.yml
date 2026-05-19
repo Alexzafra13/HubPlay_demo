@@ -245,7 +245,7 @@ jobs:
         # Action mantenida que wraps ISCC.exe; el runner windows-latest
         # ya viene con Inno Setup 6 preinstalado, así que esto sólo
         # resuelve la sintaxis de paths y los /D defines.
-        uses: Minionguyjpro/Inno-Setup-Action@v1
+        uses: Minionguyjpro/Inno-Setup-Action@v1.2.8
         with:
           path: scripts/installer.iss
           options: >-
