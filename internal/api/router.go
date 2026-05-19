@@ -169,10 +169,31 @@ func NewRouter(deps Dependencies) http.Handler {
 		r.Use(deps.Metrics.MetricsMiddleware)
 	}
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   allowedOrigins(deps.Config),
-		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Authorization", "Content-Type", "X-CSRF-Token"},
-		ExposedHeaders:   []string{"Retry-After"},
+		AllowedOrigins: allowedOrigins(deps.Config),
+		// PATCH es REQUERIDO por el protocolo tus (uploads resumables
+		// envían cada chunk via PATCH). HEAD también lo usa para
+		// consultar el offset actual. Sin estos métodos en CORS, los
+		// uploads cross-origin fallan en el preflight.
+		AllowedMethods: []string{"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		// Tus-* y Upload-* son los headers del protocolo tus 1.0.0
+		// (https://tus.io/protocols/resumable-upload). Sin ellos, los
+		// chunks con metadata legítima fallan preflight cross-origin.
+		AllowedHeaders: []string{
+			"Authorization", "Content-Type", "X-CSRF-Token",
+			"Tus-Resumable", "Upload-Length", "Upload-Offset",
+			"Upload-Metadata", "Upload-Concat", "Upload-Defer-Length",
+			"Upload-Checksum",
+		},
+		// ExposedHeaders: el navegador sólo deja al JS leer estos
+		// headers en respuestas cross-origin. tus-js-client necesita
+		// Location (para correlacionar el upload id tras POST de
+		// creación), Upload-Offset (tras cada PATCH), Tus-* y
+		// Retry-After (rate limiting).
+		ExposedHeaders: []string{
+			"Retry-After",
+			"Location", "Tus-Resumable", "Tus-Version", "Tus-Extension",
+			"Tus-Max-Size", "Upload-Offset", "Upload-Length",
+		},
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
