@@ -186,6 +186,7 @@ var outOfScopeExact = map[string]string{
 	"POST /libraries/{id}/images/refresh":          "image authoring (admin)",
 	"POST /channels/{channelId}/logo/upload":       "channel logo upload (admin, multipart)",
 	"POST /collections/{id}/images/{type}/upload":  "collection image upload (admin, multipart)",
+	"GET /collections/{id}/images/{type}/available": "collection image browse from provider (admin)",
 	"PUT /collections/{id}/images/{type}":          "collection image override URL (admin)",
 	"DELETE /collections/{id}/images/{type}":       "clear collection image override (admin)",
 	"GET /collections/{id}/images/{type}/file":     "serve uploaded collection image (auth)",

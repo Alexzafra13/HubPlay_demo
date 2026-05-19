@@ -1123,7 +1123,11 @@ func NewRouter(deps Dependencies) http.Handler {
 					if deps.CollectionImageOverrides != nil {
 						collectionOverrides = deps.CollectionImageOverrides
 					}
-					collectionHandler := handlers.NewCollectionHandler(deps.Collections, collectionOverrides, fedImageDir, deps.Logger)
+					var collectionImages handlers.CollectionImageProvider
+					if deps.Providers != nil {
+						collectionImages = deps.Providers
+					}
+					collectionHandler := handlers.NewCollectionHandler(deps.Collections, collectionOverrides, collectionImages, fedImageDir, deps.Logger)
 					r.Get("/collections", collectionHandler.List)
 					r.Get("/collections/{id}", collectionHandler.Get)
 					// Cualquier usuario autenticado puede GET el archivo
@@ -1132,6 +1136,7 @@ func NewRouter(deps Dependencies) http.Handler {
 					// Admin: gestión del override.
 					r.Group(func(r chi.Router) {
 						r.Use(auth.RequireAdmin)
+						r.Get("/collections/{id}/images/{type}/available", collectionHandler.AvailableCollectionImages)
 						r.Put("/collections/{id}/images/{type}", collectionHandler.SetCollectionImage)
 						r.Post("/collections/{id}/images/{type}/upload", collectionHandler.UploadCollectionImage)
 						r.Delete("/collections/{id}/images/{type}", collectionHandler.ClearCollectionImage)

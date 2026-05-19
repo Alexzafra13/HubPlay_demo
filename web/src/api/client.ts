@@ -845,6 +845,19 @@ export class ApiClient {
     );
   }
 
+  // Admin: lista las imágenes que TMDb tiene para esta saga, filtradas
+  // por tipo. El modal de edición las enseña como cuadrícula y el
+  // admin elige una con un click — patrón "Browse images" de Jellyfin.
+  async getAvailableCollectionImages(
+    collectionId: string,
+    type: "poster" | "backdrop",
+  ): Promise<{ url: string; width: number; height: number; language: string; score: number; source: string }[]> {
+    return this.request(
+      "GET",
+      `/collections/${encodeURIComponent(collectionId)}/images/${type}/available`,
+    );
+  }
+
   // Admin: re-corre el enrich del scanner sobre un item concreto.
   // Sustituye el "Actualizar metadatos" del kebab que antes sólo
   // invalidaba caché del cliente. Respeta el lock — locked items

@@ -52,7 +52,7 @@ func TestCollectionHandler_Get_DecodesPercentEncodedID(t *testing.T) {
 			Name:   "A todo gas - Colección",
 		},
 	}
-	h := handlers.NewCollectionHandler(repo, nil, "", slog.Default())
+	h := handlers.NewCollectionHandler(repo, nil, nil, "", slog.Default())
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/collections/collection%3A9485", nil)
 	rctx := chi.NewRouteContext()
@@ -96,7 +96,7 @@ func TestCollectionHandler_Get_PassesUnescapedIDThrough(t *testing.T) {
 			Name:   "A todo gas",
 		},
 	}
-	h := handlers.NewCollectionHandler(repo, nil, "", slog.Default())
+	h := handlers.NewCollectionHandler(repo, nil, nil, "", slog.Default())
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/collections/collection:9485", nil)
 	rctx := chi.NewRouteContext()

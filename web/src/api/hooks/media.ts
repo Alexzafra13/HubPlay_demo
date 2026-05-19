@@ -483,3 +483,31 @@ export function useClearCollectionImage(collectionId: string) {
     },
   });
 }
+
+// Browse de imágenes alternativas que TMDb tiene para la colección.
+// Devuelve [] cuando no hay TMDb configurado (503 silencioso) o cuando
+// la colección no tiene tmdb_id (colecciones legacy).
+export interface AvailableCollectionImage {
+  url: string;
+  width: number;
+  height: number;
+  language: string;
+  score: number;
+  source: string;
+}
+export function useAvailableCollectionImages(
+  collectionId: string,
+  type: "poster" | "backdrop",
+  options: { enabled?: boolean } = {},
+) {
+  return useQuery<AvailableCollectionImage[]>({
+    queryKey: ["collection", collectionId, "images", type, "available"] as const,
+    queryFn: () => api.getAvailableCollectionImages(collectionId, type),
+    enabled: !!collectionId && (options.enabled ?? true),
+    // El catálogo de imágenes TMDb cambia poco. 10 min cubre una
+    // sesión de navegación sin re-fetchear cada vez que el operador
+    // cambia entre tabs poster/backdrop.
+    staleTime: 10 * 60_000,
+    retry: false,
+  });
+}

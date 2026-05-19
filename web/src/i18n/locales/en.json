@@ -1570,7 +1570,11 @@
     "done": "Done",
     "or": "OR",
     "noImage": "No image (TMDb doesn't provide this for this collection).",
-    "errorGeneric": "Could not apply the change. Make sure the file or URL is valid."
+    "errorGeneric": "Could not apply the change. Make sure the file or URL is valid.",
+    "availableLabel": "Available on TMDb",
+    "availableEmpty": "TMDb has no alternative images for this collection.",
+    "availableError": "Could not contact TMDb. Retry later or use URL/Upload.",
+    "orManual": "Or manually"
   },
   "channelLogo": {
     "title": "Channel logo",

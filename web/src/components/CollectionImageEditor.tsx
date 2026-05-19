@@ -14,6 +14,7 @@ import { useTranslation } from "react-i18next";
 import { AlertCircle, Check, RotateCcw, Upload } from "lucide-react";
 
 import {
+  useAvailableCollectionImages,
   useClearCollectionImage,
   useSetCollectionImageURL,
   useUploadCollectionImage,
@@ -43,6 +44,12 @@ export function CollectionImageEditor({ isOpen, onClose, collection }: Props) {
   const uploadFile = useUploadCollectionImage(collection.id);
   const clear = useClearCollectionImage(collection.id);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  // Browse TMDb. Lazy — sólo se dispara cuando el modal está abierto;
+  // cambia de query key al cambiar de tab para que el cache de la otra
+  // pestaña no se pise.
+  const available = useAvailableCollectionImages(collection.id, activeTab, {
+    enabled: isOpen,
+  });
 
   const handleApplyURL = useCallback(async () => {
     const trimmed = urlInput.trim();
@@ -64,6 +71,18 @@ export function CollectionImageEditor({ isOpen, onClose, collection }: Props) {
     await clear.mutateAsync(activeTab);
     setPreviewBuster(Date.now());
   }, [activeTab, clear]);
+
+  // Click en una imagen del browser TMDb → la persistimos como
+  // override URL. Reusa el flujo de SetURL — no descargamos el
+  // archivo, sólo guardamos la URL TMDb. El proxy del browser ya
+  // cachea la imagen del lado CDN.
+  const handlePickAvailable = useCallback(
+    async (url: string) => {
+      await setURL.mutateAsync({ type: activeTab, url });
+      setPreviewBuster(Date.now());
+    },
+    [activeTab, setURL],
+  );
 
   // URL para la preview. Para poster el aspect ratio del card es 2:3;
   // para backdrop, 16:9. El src lleva el cache-buster cuando ya hemos
@@ -126,6 +145,82 @@ export function CollectionImageEditor({ isOpen, onClose, collection }: Props) {
               })}
             </div>
           )}
+        </div>
+
+        {/* Browse TMDb — todas las imágenes que TMDb tiene de la saga,
+            filtradas por tipo activo. Click sobre cualquiera la
+            aplica como override URL (cero descarga: usamos la URL
+            TMDb que es estable). Estado vacío cuando TMDb no provee
+            o cuando el provider no está configurado. */}
+        <div className="flex flex-col gap-2">
+          <p className="text-xs font-medium text-text-muted">
+            {t("collectionImage.availableLabel", {
+              defaultValue: "Imágenes disponibles en TMDb",
+            })}
+          </p>
+          {available.isLoading ? (
+            <div className="flex justify-center py-6">
+              <Spinner size="md" />
+            </div>
+          ) : available.isError ? (
+            <p className="text-xs text-text-muted">
+              {t("collectionImage.availableError", {
+                defaultValue:
+                  "No se ha podido contactar con TMDb. Reintenta más tarde o usa URL/Subir.",
+              })}
+            </p>
+          ) : !available.data || available.data.length === 0 ? (
+            <p className="text-xs text-text-muted">
+              {t("collectionImage.availableEmpty", {
+                defaultValue:
+                  "TMDb no tiene imágenes alternativas para esta colección.",
+              })}
+            </p>
+          ) : (
+            <div
+              className={[
+                "grid gap-2 max-h-[260px] overflow-y-auto",
+                activeTab === "poster"
+                  ? "grid-cols-3 sm:grid-cols-4 md:grid-cols-5"
+                  : "grid-cols-2 sm:grid-cols-3",
+              ].join(" ")}
+            >
+              {available.data.map((img) => (
+                <button
+                  key={img.url}
+                  type="button"
+                  onClick={() => handlePickAvailable(img.url)}
+                  disabled={busy}
+                  className={[
+                    "group relative overflow-hidden rounded-[--radius-md] border border-border bg-bg-elevated transition-transform hover:scale-[1.03] focus:outline-none focus:ring-2 focus:ring-accent",
+                    activeTab === "poster" ? "aspect-[2/3]" : "aspect-video",
+                  ].join(" ")}
+                  title={img.language ? `${img.language.toUpperCase()} · ${img.width}×${img.height}` : `${img.width}×${img.height}`}
+                >
+                  <img
+                    src={img.url}
+                    alt=""
+                    loading="lazy"
+                    className="h-full w-full object-cover"
+                  />
+                  {img.language && (
+                    <span className="absolute bottom-1 left-1 rounded bg-black/70 px-1 py-0 text-[9px] font-mono font-semibold uppercase text-white">
+                      {img.language}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Separador antes del input URL — la sección de arriba es
+            visualmente densa y este corte ayuda a leer las dos rutas
+            como alternativas. */}
+        <div className="flex items-center gap-2 text-[10px] uppercase tracking-wide text-text-muted">
+          <span className="h-px flex-1 bg-border" />
+          {t("collectionImage.orManual", { defaultValue: "O manualmente" })}
+          <span className="h-px flex-1 bg-border" />
         </div>
 
         {/* URL input */}

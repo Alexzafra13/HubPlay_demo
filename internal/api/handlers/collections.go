@@ -19,6 +19,7 @@ import (
 
 	"hubplay/internal/imaging"
 	librarymodel "hubplay/internal/library/model"
+	"hubplay/internal/provider"
 )
 
 // CollectionRepository is the slice of db.CollectionRepository the
@@ -27,6 +28,15 @@ type CollectionRepository interface {
 	GetByID(ctx context.Context, id string) (*librarymodel.Collection, error)
 	List(ctx context.Context) ([]*librarymodel.CollectionListEntry, error)
 	ListItemsForCollection(ctx context.Context, collectionID string) ([]*librarymodel.CollectionItem, error)
+}
+
+// CollectionImageProvider expone el lookup de imágenes alternativas en
+// el provider de metadatos (hoy TMDb). El handler lo usa en
+// /collections/{id}/images/{type}/available para enseñar al admin
+// todas las opciones que TMDb tiene de la saga, mismo flujo que
+// Jellyfin con "Browse images".
+type CollectionImageProvider interface {
+	FetchCollectionImages(ctx context.Context, tmdbCollectionID string) ([]provider.ImageResult, error)
 }
 
 // CollectionImageOverrideRepo es el subset que el handler usa para
@@ -47,16 +57,21 @@ type CollectionHandler struct {
 	// overrides es opcional — nil-safe deja la página detail con las
 	// imágenes TMDb originales y los endpoints de edit devuelven 503.
 	overrides CollectionImageOverrideRepo
+	// images consulta TMDb para listar pósters/backdrops alternativos.
+	// Opcional: sin esto el endpoint /available devuelve 503 y el
+	// admin sólo puede pegar URL o subir archivo (sin browse).
+	images CollectionImageProvider
 	// imageDir es donde se guardan los archivos subidos. Vacío
 	// deshabilita el upload (las URLs sí funcionan sin esto).
 	imageDir string
 	logger   *slog.Logger
 }
 
-func NewCollectionHandler(collections CollectionRepository, overrides CollectionImageOverrideRepo, imageDir string, logger *slog.Logger) *CollectionHandler {
+func NewCollectionHandler(collections CollectionRepository, overrides CollectionImageOverrideRepo, images CollectionImageProvider, imageDir string, logger *slog.Logger) *CollectionHandler {
 	return &CollectionHandler{
 		collections: collections,
 		overrides:   overrides,
+		images:      images,
 		imageDir:    imageDir,
 		logger:      logger,
 	}
@@ -456,3 +471,70 @@ func (h *CollectionHandler) deleteCollectionImageFile(basename string) {
 		h.logger.Warn("delete orphan collection-image", "path", path, "error", err)
 	}
 }
+
+// AvailableCollectionImages devuelve las imágenes que TMDb tiene para
+// la saga, filtradas por tipo. El admin las ve como cuadrícula en el
+// modal del editor y elige una con un click — patrón Jellyfin "Browse
+// images". Se guardan como override URL (no se descargan), así un
+// futuro cambio de imagen es un PUT trivial y mantenemos cero coste
+// de almacenamiento por estas elecciones.
+//
+// GET /collections/{id}/images/{type}/available
+// Admin-only.
+func (h *CollectionHandler) AvailableCollectionImages(w http.ResponseWriter, r *http.Request) {
+	collectionID, imageType, ok := h.parseCollectionImageRoute(w, r)
+	if !ok {
+		return
+	}
+	if h.images == nil {
+		respondError(w, r, http.StatusServiceUnavailable, "NO_PROVIDER", "image provider not configured")
+		return
+	}
+	col, err := h.collections.GetByID(r.Context(), collectionID)
+	if err != nil || col == nil {
+		respondError(w, r, http.StatusNotFound, "NOT_FOUND", "collection not found")
+		return
+	}
+	if col.TMDBID == 0 {
+		// Colección sin tmdb_id (caso raro: row legacy o creada sin
+		// match). Sin id no hay forma de pedirle imágenes a TMDb.
+		respondJSON(w, http.StatusOK, map[string]any{"data": []any{}})
+		return
+	}
+
+	images, err := h.images.FetchCollectionImages(r.Context(), fmt.Sprintf("%d", col.TMDBID))
+	if err != nil {
+		h.logger.Warn("fetch collection images", "id", collectionID, "error", err)
+		respondError(w, r, http.StatusBadGateway, "PROVIDER_ERROR", "could not list images from provider")
+		return
+	}
+
+	// Filtra por tipo (poster ↔ primary, backdrop ↔ backdrop). El
+	// provider habla "primary" para pósters por consistencia con
+	// items; el frontend habla "poster" porque es más natural para
+	// colecciones. Mapa local sin más.
+	target := "primary"
+	if imageType == "backdrop" {
+		target = "backdrop"
+	}
+	data := make([]map[string]any, 0, len(images))
+	for _, img := range images {
+		if img.Type != target {
+			continue
+		}
+		data = append(data, map[string]any{
+			"url":      img.URL,
+			"width":    img.Width,
+			"height":   img.Height,
+			"language": img.Language,
+			"score":    img.Score,
+			"source":   img.Source,
+		})
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"data": data})
+}
+
+// Compile-time check: el Manager del provider package es lo que se
+// inyecta en producción, así que verificamos la conformidad aquí
+// (los tests inyectan un mock que también satisface la interfaz).
+var _ CollectionImageProvider = (*provider.Manager)(nil)
