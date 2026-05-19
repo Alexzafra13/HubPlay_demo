@@ -521,7 +521,21 @@ func run(configPath string) error {
 			logger.Error("upload tusd handler setup failed", "error", err)
 			os.Exit(1)
 		}
-		uploadsHandler = tusd
+		// http.StripPrefix es REQUERIDO entre chi y tusd. Razón:
+		// chi.Mount NO modifica r.URL.Path — sólo actualiza un
+		// RouteContext interno que tusd no consulta. tusd, dentro
+		// de su Handler.ServeHTTP, hace `strings.Trim(r.URL.Path, "/")`
+		// y compara contra "" para decidir si es POST de creación.
+		// Sin strip, tusd ve "/api/v1/uploads/" → no coincide con ""
+		// → cae al default que devuelve 405 method not allowed.  Con
+		// strip, r.URL.Path queda "/", tusd lo trimea a "" → POST
+		// creación OK; en los chunks queda "/<id>", tusd extrae el
+		// id correctamente y rutea a PatchFile.
+		//
+		// El BasePath de la config tusd (/api/v1/uploads/) se preserva
+		// porque tusd lo usa SÓLO para componer el Location: header
+		// que devuelve al cliente — no para route matching.
+		uploadsHandler = http.StripPrefix("/api/v1/uploads", tusd)
 		logger.Info("uploads enabled",
 			"staging_dir", stagingDir.Root(),
 			"max_bytes", cfg.Upload.MaxBytesPerUpload)
