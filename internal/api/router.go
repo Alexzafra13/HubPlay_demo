@@ -121,6 +121,12 @@ type Dependencies struct {
 	// admin DB panel or wizard saves a new driver. nil-safe — the
 	// handlers degrade to "saved, restart manually" when missing.
 	RestartRequester *config.RestartRequester
+	// Uploads sirve el protocolo tus + endpoints custom de uploads
+	// (PR2 feature upload). nil-safe: si está apagado en config, el
+	// binario arranca sin él y las rutas /api/v1/uploads* simplemente
+	// no se montan (cliente recibe 404).
+	Uploads        http.Handler
+	UploadsAudit   handlers.UploadAuditLister
 }
 
 func NewRouter(deps Dependencies) http.Handler {
@@ -395,6 +401,23 @@ func NewRouter(deps Dependencies) http.Handler {
 				// so other users on the same server never see these events.
 				meEventsHandler := handlers.NewMeEventsHandler(deps.EventBus, deps.SSELimiter, deps.Logger)
 				r.Get("/me/events", meEventsHandler.Stream)
+			}
+
+			// Uploads (PR2 feature). Tres superficies:
+			//   POST/PATCH/HEAD/DELETE /uploads/         → protocolo tus
+			//   GET                    /uploads/mine     → audit del usuario
+			//   GET                    /uploads/events   → SSE filtrado
+			// El tus handler se monta con chi.Mount para que el path-routing
+			// (basePath + uploadID) lo lleve tusd internamente sin que chi
+			// le pise el id como param.
+			if deps.Uploads != nil && deps.UploadsAudit != nil && deps.EventBus != nil {
+				uploadsAPI := handlers.NewUploadsHandler(deps.UploadsAudit, deps.EventBus, deps.SSELimiter, deps.Logger)
+				r.Get("/uploads/mine", uploadsAPI.ListMine)
+				r.Get("/uploads/events", uploadsAPI.Stream)
+				// tus handler. Importante: bajo /api/v1/uploads/ con el slash
+				// final — tusd compone Location: /api/v1/uploads/<id> tras
+				// el POST de creación, y el cliente PATCH-ea ahí mismo.
+				r.Mount("/uploads/", deps.Uploads)
 			}
 
 			// Current user

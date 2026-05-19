@@ -51,3 +51,18 @@ retention:
   epg_programs: "24h"            # drop EPG rows whose end_time is older
   federation_audit_log: "720h"   # 30 days of cross-peer audit history
   sweep_interval: "24h"
+
+# Media uploads (feature PR2). Subidas resumables via protocolo tus
+# (POST/PATCH/HEAD/DELETE bajo /api/v1/uploads/). El pipeline post-bytes:
+# magic-byte sniff → ffprobe → move atómico a librería → audit row.
+# Permiso por usuario via can_upload + cuota per-user (PR1, columnas
+# users.upload_quota_bytes / upload_used_bytes).
+upload:
+  enabled: true
+  # Vacío = <config dir>/uploads/staging. Debe estar en el MISMO
+  # filesystem que las librerías destino para que el move final sea
+  # rename atómico — cross-fs cae a copy+remove, mismo resultado
+  # pero más lento.
+  staging_dir: ""
+  max_bytes_per_upload: 53687091200  # 50 GiB. 0 = sin tope (no recomendado).
+  min_duration_ms: 1000              # rechaza < 1s, defensa anti-payload trivial.

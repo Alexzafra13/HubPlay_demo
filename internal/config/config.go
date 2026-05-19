@@ -28,7 +28,38 @@ type Config struct {
 	IPTV           IPTVConfig          `yaml:"iptv"`
 	Observability  ObservabilityConfig `yaml:"observability"`
 	Retention      RetentionConfig     `yaml:"retention"`
+	Upload         UploadConfig        `yaml:"upload"`
 	SetupCompleted bool                `yaml:"setup_completed"`
+}
+
+// UploadConfig: knobs runtime para subidas de media (PR2 feature upload).
+// El cero-valor de cada knob deja al servicio aplicar sus defaults
+// internos en `upload.DefaultConfig`; este struct sólo añade lo que es
+// específicamente operator-facing (path del staging, switch enabled).
+type UploadConfig struct {
+	// Enabled gobierna el cableado del feature al completo. False ⇒ los
+	// handlers HTTP no se montan y el binario arranca sin staging dir.
+	// Default true.
+	Enabled bool `yaml:"enabled"`
+
+	// StagingDir: directorio donde tusd escribe los chunks antes de
+	// validar + mover a librería. Default <config dir>/uploads/staging
+	// si vacío. Debe estar en el MISMO volumen que las librerías destino
+	// para que el move sea rename atómico — cross-fs cae a copy+remove.
+	StagingDir string `yaml:"staging_dir"`
+
+	// MaxBytesPerUpload tope absoluto por fichero. Independiente de la
+	// cuota per-user (que es agregada). Default 50 GiB. 0 = sin tope
+	// (riesgoso: un cliente puede anunciar 100 PB y reservar toda la
+	// cuota antes de pegar un byte; el service rechaza igualmente
+	// porque ReserveUploadBytes mira la cuota, pero un tope explícito
+	// es mejor que un fallo en cascada).
+	MaxBytesPerUpload int64 `yaml:"max_bytes_per_upload"`
+
+	// MinDurationMs duración mínima reportada por ffprobe para que un
+	// upload de video se acepte. Defensa contra payloads de 1s que
+	// pasan magic-bytes + ffprobe pero no son media real. Default 1000.
+	MinDurationMs int64 `yaml:"min_duration_ms"`
 }
 
 // RetentionConfig: vida útil de tablas append-only (EPG + audit federation).
@@ -183,6 +214,20 @@ func Load(path string) (*Config, error) {
 		cfg.Observability.MetricsPath = "/metrics"
 	}
 
+	// Upload staging dir: si el operador no lo especificó, lo dejamos
+	// junto a la DB en el mismo volumen montado. Es CRÍTICO que viva en
+	// el mismo filesystem que las librerías destino para que el move
+	// final sea rename atómico — si no, cae a copy+remove cross-device.
+	if cfg.Upload.Enabled && cfg.Upload.StagingDir == "" {
+		configDir := filepath.Dir(path)
+		if configDir == "" || configDir == "." {
+			configDir = "./uploads"
+		} else {
+			configDir = filepath.Join(configDir, "uploads")
+		}
+		cfg.Upload.StagingDir = filepath.Join(configDir, "staging")
+	}
+
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
@@ -292,6 +337,12 @@ func defaults() *Config {
 			EPGPrograms:        24 * time.Hour,
 			FederationAuditLog: 30 * 24 * time.Hour,
 			SweepInterval:      24 * time.Hour,
+		},
+		Upload: UploadConfig{
+			Enabled:           true,
+			StagingDir:        "", // resolved relative to config dir in Load
+			MaxBytesPerUpload: 50 * 1024 * 1024 * 1024, // 50 GiB
+			MinDurationMs:     1000,
 		},
 	}
 }
