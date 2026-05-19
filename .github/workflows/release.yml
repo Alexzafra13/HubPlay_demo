@@ -276,8 +276,22 @@ jobs:
           mv "stage/hubplay-${VERSION}-windows-amd64" "stage/source"
 
           # NSSM 2.24 — última release estable, BSD-licensed, redist OK.
+          # nssm.cc da 503 con frecuencia (host pequeño). Intentamos
+          # primero el origen oficial con --retry para flakes
+          # transitorios; si insiste, fallback a un snapshot
+          # estable de archive.org del mismo zip canonical.
           mkdir -p scripts/vendor
-          curl -fsSL https://nssm.cc/release/nssm-2.24.zip -o nssm.zip
+          if ! curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors \
+                 https://nssm.cc/release/nssm-2.24.zip -o nssm.zip; then
+            echo "nssm.cc no responde, fallback a archive.org mirror..."
+            curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors \
+              "https://web.archive.org/web/2024/https://nssm.cc/release/nssm-2.24.zip" \
+              -o nssm.zip
+          fi
+          # Log del sha256 para auditar — si en runs sucesivas el hash
+          # cambia significa que el host (nssm.cc o archive mirror) está
+          # sirviendo algo distinto y el operador debe investigar.
+          sha256sum nssm.zip || shasum -a 256 nssm.zip
           unzip -q nssm.zip
           cp nssm-2.24/win64/nssm.exe scripts/vendor/nssm.exe
 
