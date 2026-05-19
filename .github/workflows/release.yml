@@ -1,0 +1,238 @@
+name: Release
+
+# Dispara la matriz de builds cross-platform + publica los artefactos en
+# un GitHub Release. Triggers:
+#   - push de un tag v* (e.g. v0.1.0 → release público con todos los
+#     binarios + ffmpeg bundled)
+#   - workflow_dispatch (manual desde la UI) para validar el pipeline
+#     antes de hacer un tag oficial. En este modo NO crea release, sólo
+#     sube los archivos como artefactos de la run.
+#
+# El binario de hubplay queda emparejado con ffmpeg + ffprobe del mismo
+# release para que el operador descomprima y ejecute, sin instalar
+# nada más. El binding lo hace cmd/hubplay/main.go al arrancar:
+# prepende el directorio del ejecutable al PATH, así cualquier
+# exec.LookPath("ffmpeg") los encuentra primero.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write # publicar release + subir assets
+
+jobs:
+  build:
+    name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      # fail-fast off — si un target rompe (e.g. mirror de ffmpeg
+      # down), el resto sigue para que el release no quede a medias.
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux,   goarch: amd64, runner: ubuntu-latest,  ext: "",     archive: "tar.gz" }
+          - { goos: linux,   goarch: arm64, runner: ubuntu-latest,  ext: "",     archive: "tar.gz" }
+          - { goos: windows, goarch: amd64, runner: ubuntu-latest,  ext: ".exe", archive: "zip"    }
+          - { goos: darwin,  goarch: amd64, runner: macos-latest,   ext: "",     archive: "tar.gz" }
+          - { goos: darwin,  goarch: arm64, runner: macos-latest,   ext: "",     archive: "tar.gz" }
+    steps:
+      - uses: actions/checkout@v4
+        # fetch-depth 0 → git describe necesita el historial completo
+        # para resolver tags y la distancia hasta el último.
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Frontend build
+        working-directory: web
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build
+
+      - name: Compute version / commit / build date
+        id: meta
+        # Si el run viene de un tag, GITHUB_REF_NAME es el tag (v0.1.0).
+        # Si es workflow_dispatch, usamos `git describe` para obtener el
+        # nombre derivado del último tag. Mismo formato en ambos casos
+        # — el binario muestra siempre algo identificable.
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            VERSION="$GITHUB_REF_NAME"
+          else
+            VERSION="$(git describe --tags --always --dirty)"
+          fi
+          COMMIT="$(git rev-parse --short HEAD)"
+          BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "version=$VERSION"     >> "$GITHUB_OUTPUT"
+          echo "commit=$COMMIT"       >> "$GITHUB_OUTPUT"
+          echo "build_date=$BUILD_DATE" >> "$GITHUB_OUTPUT"
+
+      - name: Go build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+          VERSION: ${{ steps.meta.outputs.version }}
+          COMMIT: ${{ steps.meta.outputs.commit }}
+          BUILD_DATE: ${{ steps.meta.outputs.build_date }}
+        run: |
+          mkdir -p dist
+          go build \
+            -trimpath \
+            -ldflags "-s -w \
+              -X main.version=$VERSION \
+              -X main.commit=$COMMIT \
+              -X main.buildDate=$BUILD_DATE" \
+            -o "dist/hubplay${{ matrix.ext }}" \
+            ./cmd/hubplay
+
+      - name: Bundle ffmpeg + ffprobe
+        run: |
+          ./scripts/fetch-ffmpeg.sh \
+            "${{ matrix.goos }}" \
+            "${{ matrix.goarch }}" \
+            dist
+
+      - name: Stage release files
+        run: |
+          # Estructura del archivo final:
+          #   hubplay-<version>-<os>-<arch>/
+          #     hubplay(.exe)
+          #     ffmpeg(.exe)
+          #     ffprobe(.exe)
+          #     LICENSE
+          #     LICENSE-ffmpeg.txt
+          #     README.md (si existe)
+          #     hubplay.example.yaml
+          #
+          # Las migraciones y el frontend ya van embebidos en el binario
+          # (//go:embed en migrations.go), así que no los copiamos al
+          # archivo — el operador sólo necesita el ejecutable + ffmpeg
+          # + el yaml de ejemplo.
+          VERSION="${{ steps.meta.outputs.version }}"
+          NAME="hubplay-${VERSION}-${{ matrix.goos }}-${{ matrix.goarch }}"
+          mkdir -p "stage/$NAME"
+          mv "dist/hubplay${{ matrix.ext }}"  "stage/$NAME/"
+          mv "dist/ffmpeg${{ matrix.ext }}"   "stage/$NAME/"
+          mv "dist/ffprobe${{ matrix.ext }}"  "stage/$NAME/"
+          cp hubplay.example.yaml             "stage/$NAME/" 2>/dev/null || true
+          [[ -f LICENSE ]] && cp LICENSE      "stage/$NAME/" || true
+          [[ -f README.md ]] && cp README.md  "stage/$NAME/" || true
+          # FFmpeg LGPL build notice — obligación legal de incluir el
+          # disclaimer aunque no shippeemos sources (LGPL permite el
+          # dynamic-link/separate-binary pattern que usamos).
+          cat > "stage/$NAME/LICENSE-ffmpeg.txt" <<'EOF'
+          This distribution includes FFmpeg (ffmpeg, ffprobe) compiled
+          under LGPL terms by BtbN/FFmpeg-Builds (Linux/Windows) or
+          evermeet.cx (macOS). FFmpeg is licensed under the GNU Lesser
+          General Public License v2.1 or later. Source code and license
+          terms: https://ffmpeg.org/legal.html
+          EOF
+          echo "NAME=$NAME" >> "$GITHUB_ENV"
+
+      - name: Package (tar.gz)
+        if: matrix.archive == 'tar.gz'
+        run: |
+          cd stage
+          tar -czf "../${NAME}.tar.gz" "$NAME"
+          cd ..
+          # sha256sum existe en ubuntu; macOS usa shasum -a 256.
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256"
+          else
+            shasum -a 256 "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256"
+          fi
+
+      - name: Package (zip)
+        if: matrix.archive == 'zip'
+        run: |
+          cd stage
+          # zip viene preinstalado en runners ubuntu y macOS.
+          zip -qr "../${NAME}.zip" "$NAME"
+          cd ..
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "${NAME}.zip" > "${NAME}.zip.sha256"
+          else
+            shasum -a 256 "${NAME}.zip" > "${NAME}.zip.sha256"
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.NAME }}
+          path: |
+            ${{ env.NAME }}.tar.gz
+            ${{ env.NAME }}.zip
+            ${{ env.NAME }}.tar.gz.sha256
+            ${{ env.NAME }}.zip.sha256
+          if-no-files-found: ignore
+          retention-days: 7
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    # Sólo crea release público cuando el trigger es un tag. Manual
+    # dispatch deja los artefactos en la run para inspección.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -la artifacts/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/*.tar.gz
+            artifacts/*.zip
+            artifacts/*.sha256
+          generate_release_notes: true
+          # `draft: true` da un paso de revisión humano antes de
+          # publicar — útil mientras el pipeline esté madurando.
+          # Cambia a false cuando confíes en él.
+          draft: true
+          body: |
+            ## Descarga
+
+            Cada archivo incluye `hubplay`, `ffmpeg` y `ffprobe` listos para
+            correr — no requiere instalar nada más. Descomprime, edita
+            `hubplay.example.yaml` y lanza `./hubplay --config hubplay.yaml`.
+
+            ### Plataformas
+
+            - **Linux amd64** — `hubplay-*-linux-amd64.tar.gz`
+            - **Linux arm64** — `hubplay-*-linux-arm64.tar.gz`
+            - **macOS Intel** — `hubplay-*-darwin-amd64.tar.gz`
+            - **macOS Apple Silicon** — `hubplay-*-darwin-arm64.tar.gz`
+            - **Windows x64** — `hubplay-*-windows-amd64.zip`
+
+            Cada archivo tiene su `.sha256` adjunto para verificación.
+
+            ### Licencia
+
+            HubPlay se distribuye bajo su licencia propia (`LICENSE`).
+            Los binarios FFmpeg bundleados son LGPL — ver
+            `LICENSE-ffmpeg.txt` dentro del archivo.
