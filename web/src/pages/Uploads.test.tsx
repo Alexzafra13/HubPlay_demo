@@ -46,6 +46,7 @@ vi.mock("@/api/client", () => ({
       library_name: "",
       path: "",
       directories: [],
+      files: [],
     }),
     createUploadFolder: vi.fn().mockResolvedValue(undefined),
   },

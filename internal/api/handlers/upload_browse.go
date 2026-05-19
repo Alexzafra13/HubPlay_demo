@@ -108,27 +108,43 @@ func (h *UploadBrowseHandler) Browse(w http.ResponseWriter, r *http.Request) {
 		Name string `json:"name"`
 		Path string `json:"path"`
 	}
-	dirs := make([]dirEntry, 0, len(entries))
+	type fileEntry struct {
+		Name string `json:"name"`
+		Size int64  `json:"size"`
+	}
+	dirs := make([]dirEntry, 0)
+	files := make([]fileEntry, 0)
 	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
 		name := e.Name()
-		// Filtra dotfiles (cualquier dir que empieza por . es de
-		// sistema: .DS_Store, .git, .stfolder...). El operador no
-		// los necesita en el browser.
+		// Filtra dotfiles (cualquier dir/fichero que empieza por . es
+		// de sistema: .DS_Store, .git, .stfolder, .nfo a veces...).
 		if len(name) > 0 && name[0] == '.' {
 			continue
 		}
-		var childPath string
-		if canonical == "" {
-			childPath = name
+		if e.IsDir() {
+			var childPath string
+			if canonical == "" {
+				childPath = name
+			} else {
+				childPath = canonical + "/" + name
+			}
+			dirs = append(dirs, dirEntry{Name: name, Path: childPath})
 		} else {
-			childPath = canonical + "/" + name
+			// Ficheros: incluimos size para que el cliente pinte algo
+			// como "Pelicula.mkv · 2.4 GiB" y el operador pueda ver de
+			// un vistazo qué hay ya en la carpeta sin tener que ir al
+			// catálogo. Si stat falla, size=0 y seguimos — un fichero
+			// que no podemos statear (race con un borrado) no debería
+			// tirar el browse entero.
+			var size int64
+			if info, err := e.Info(); err == nil {
+				size = info.Size()
+			}
+			files = append(files, fileEntry{Name: name, Size: size})
 		}
-		dirs = append(dirs, dirEntry{Name: name, Path: childPath})
 	}
 	sort.Slice(dirs, func(i, j int) bool { return dirs[i].Name < dirs[j].Name })
+	sort.Slice(files, func(i, j int) bool { return files[i].Name < files[j].Name })
 
 	// Cache corta — el operador navega rápido entre carpetas y NO
 	// queremos re-readdir por cada click si está en el mismo nivel.
@@ -139,6 +155,7 @@ func (h *UploadBrowseHandler) Browse(w http.ResponseWriter, r *http.Request) {
 			"library_name": lib.Name,
 			"path":         canonical,
 			"directories":  dirs,
+			"files":        files,
 		},
 	})
 }

@@ -93,6 +93,10 @@ func TestUploadBrowse_ListsSubdirs(t *testing.T) {
 				Name string `json:"name"`
 				Path string `json:"path"`
 			} `json:"directories"`
+			Files []struct {
+				Name string `json:"name"`
+				Size int64  `json:"size"`
+			} `json:"files"`
 		} `json:"data"`
 	}
 	_ = json.NewDecoder(rr.Body).Decode(&payload)
@@ -103,11 +107,17 @@ func TestUploadBrowse_ListsSubdirs(t *testing.T) {
 		t.Errorf("root path should be empty, got %q", payload.Data.Path)
 	}
 	if len(payload.Data.Directories) != 2 {
-		t.Fatalf("dirs = %v (want 2: Action, Drama; hidden + file filtrados)", payload.Data.Directories)
+		t.Fatalf("dirs = %v (want 2: Action, Drama; hidden filtrado)", payload.Data.Directories)
 	}
 	// Orden alfabético: Action antes que Drama.
 	if payload.Data.Directories[0].Name != "Action" {
 		t.Errorf("order: %v", payload.Data.Directories)
+	}
+	// readme.txt aparece en files (dotfiles filtrados, ficheros normales sí).
+	if len(payload.Data.Files) != 1 {
+		t.Errorf("files = %v (want 1: readme.txt)", payload.Data.Files)
+	} else if payload.Data.Files[0].Name != "readme.txt" {
+		t.Errorf("file name = %q", payload.Data.Files[0].Name)
 	}
 }
 

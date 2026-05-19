@@ -4,6 +4,7 @@ import {
   Folder,
   FolderOpen,
   FolderPlus,
+  FileVideo,
   ChevronRight,
   ChevronUp,
   Home,
@@ -313,6 +314,27 @@ export function FolderBrowser({
           </ul>
         )}
 
+        {/* Ficheros existentes en la carpeta — read-only. El operador
+            los ve para saber "ya está aquí, no lo vuelvo a subir" sin
+            tener que ir al catálogo. Sólo subdirs son clicables /
+            drop targets; los ficheros no hacen nada al hover. */}
+        {data && data.files && data.files.length > 0 && (
+          <ul className="border-t border-border/40 py-1">
+            {data.files.map((f) => (
+              <li
+                key={f.name}
+                className="flex items-center gap-2 px-3 py-1.5 text-sm text-text-muted"
+              >
+                <FileVideo size={13} className="shrink-0 opacity-60" aria-hidden />
+                <span className="truncate flex-1">{f.name}</span>
+                <span className="text-xs shrink-0 opacity-70">
+                  {formatFileSize(f.size)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+
         {/* Empty-state también es drop target: si la carpeta no tiene
             subdirs, el operador puede arrastrar al CUERPO del browser y
             aterriza en el path actual. */}
@@ -389,4 +411,22 @@ export function FolderBrowser({
       </footer>
     </section>
   );
+}
+
+// formatFileSize convierte bytes a la representación binaria humana
+// más corta. Inline porque sólo lo usa este componente — la otra
+// instancia (humanBytes en Uploads.tsx) tiene la misma lógica pero
+// con mayor verbosidad de comentarios. Cuando exista un tercer
+// llamante, extraer a utils.
+function formatFileSize(n: number): string {
+  if (!Number.isFinite(n) || n < 0) return "—";
+  if (n < 1024) return `${n} B`;
+  const units = ["KiB", "MiB", "GiB", "TiB"];
+  let val = n / 1024;
+  let i = 0;
+  while (val >= 1024 && i < units.length - 1) {
+    val /= 1024;
+    i++;
+  }
+  return `${val.toFixed(1)} ${units[i]}`;
 }

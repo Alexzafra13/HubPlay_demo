@@ -168,8 +168,18 @@ export default function Uploads() {
     };
     setActive((prev) => [...prev, initial]);
 
+    // CSRF token. El middleware CSRFProtect del backend rechaza
+    // cualquier mutación con cookie auth si NO trae X-CSRF-Token con
+    // el valor del cookie hubplay_csrf — defensa contra CSRF
+    // cross-origin que un atacante podría dispararar via un <form>
+    // o fetch hostil.  tus-js-client no sabe del CSRF, así que se lo
+    // pasamos en `headers` y lo añade a TODAS las peticiones
+    // (POST creación, PATCH chunks, HEAD, DELETE).
+    const csrfToken = readCookie("hubplay_csrf");
+
     const upload = new tus.Upload(file, {
       endpoint: api.uploadsEndpoint(),
+      headers: csrfToken ? { "X-CSRF-Token": csrfToken } : {},
       // Auth via cookie hubplay_access — los XHR de tus-js-client
       // envían cookies automáticamente en same-origin (caso producción:
       // el SPA y el API viven en el mismo binario Go). Para deploys
@@ -685,6 +695,16 @@ function OutcomeIcon({
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────
+
+// readCookie lee un cookie por nombre del document.cookie. tus-js-client
+// necesita el valor del CSRF para pasarlo en X-CSRF-Token; en el resto
+// del cliente la función equivalente vive en client.ts (no exportada).
+// Aquí no la importamos para no acoplar Uploads.tsx con el módulo del
+// API client por algo tan pequeño.
+function readCookie(name: string): string {
+  const m = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
+  return m ? decodeURIComponent(m[1]) : "";
+}
 
 // humanBytes formatea bytes a "X.Y MiB" / "X.Y GiB". Suficiente para
 // la página de uploads donde el rango va de KB a decenas de GB; no

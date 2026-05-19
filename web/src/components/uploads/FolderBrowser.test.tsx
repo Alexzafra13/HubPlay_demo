@@ -56,6 +56,7 @@ describe("FolderBrowser", () => {
         { name: "Action", path: "Action" },
         { name: "Drama", path: "Drama" },
       ],
+      files: [],
     });
 
     const onChange = vi.fn();
@@ -83,6 +84,7 @@ describe("FolderBrowser", () => {
       library_name: "Movies",
       path: "Movies/Drama",
       directories: [],
+      files: [],
     });
 
     render(
@@ -109,6 +111,7 @@ describe("FolderBrowser", () => {
       library_name: "Movies",
       path: "Movies/Drama",
       directories: [],
+      files: [],
     });
 
     const onChange = vi.fn();
@@ -137,6 +140,7 @@ describe("FolderBrowser", () => {
       library_name: "Movies",
       path: "",
       directories: [],
+      files: [],
     });
     vi.mocked(api.createUploadFolder).mockResolvedValue();
 
@@ -181,6 +185,7 @@ describe("FolderBrowser", () => {
         { name: "Action", path: "Action" },
         { name: "Drama", path: "Drama" },
       ],
+      files: [],
     });
 
     const onDropFiles = vi.fn();
@@ -220,6 +225,7 @@ describe("FolderBrowser", () => {
       library_name: "Movies",
       path: "Movies/Drama",
       directories: [],
+      files: [],
     });
 
     const onDropFiles = vi.fn();
@@ -259,6 +265,7 @@ describe("FolderBrowser", () => {
       library_name: "Movies",
       path: "",
       directories: [],
+      files: [],
     });
 
     render(
@@ -289,6 +296,7 @@ describe("FolderBrowser", () => {
       library_name: "Movies",
       path: "",
       directories: [],
+      files: [],
     });
     vi.mocked(api.createUploadFolder).mockRejectedValue(
       new Error("upload subpath is invalid"),
