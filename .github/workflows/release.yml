@@ -2,11 +2,13 @@ name: Release
 
 # Dispara la matriz de builds cross-platform + publica los artefactos en
 # un GitHub Release. Triggers:
-#   - push de un tag v* (e.g. v0.1.0 → release público con todos los
-#     binarios + ffmpeg bundled)
-#   - workflow_dispatch (manual desde la UI) para validar el pipeline
-#     antes de hacer un tag oficial. En este modo NO crea release, sólo
-#     sube los archivos como artefactos de la run.
+#   - push de un tag v* (e.g. v0.1.0 → release ESTABLE público, visible
+#     en la pestaña "Releases" con su número de versión propio).
+#   - push a main → actualiza una pre-release rolling "nightly". El tag
+#     "nightly" se reescribe en cada build; el operador siempre tiene
+#     el último binario descargable desde la página Releases sin que
+#     tengamos que tagear.
+#   - workflow_dispatch — igual que push a main: refresca "nightly".
 #
 # El binario de hubplay queda emparejado con ffmpeg + ffprobe del mismo
 # release para que el operador descomprima y ejecute, sin instalar
@@ -16,6 +18,7 @@ name: Release
 
 on:
   push:
+    branches: [main]
     tags: ["v*"]
   workflow_dispatch:
 
@@ -183,13 +186,12 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  release:
-    name: Publish GitHub Release
+  # ─── Release estable (sólo tags v*) ────────────────────────────────
+  release-tag:
+    name: Publish stable release
     needs: build
     runs-on: ubuntu-latest
-    # Sólo crea release público cuando el trigger es un tag. Manual
-    # dispatch deja los artefactos en la run para inspección.
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/v')
     steps:
       - uses: actions/checkout@v4
 
@@ -199,10 +201,7 @@ jobs:
           path: artifacts
           merge-multiple: true
 
-      - name: List artifacts
-        run: ls -la artifacts/
-
-      - name: Create GitHub Release
+      - name: Create stable GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
@@ -210,10 +209,8 @@ jobs:
             artifacts/*.zip
             artifacts/*.sha256
           generate_release_notes: true
-          # `draft: true` da un paso de revisión humano antes de
-          # publicar — útil mientras el pipeline esté madurando.
-          # Cambia a false cuando confíes en él.
-          draft: true
+          draft: false
+          prerelease: false
           body: |
             ## Descarga
 
@@ -236,3 +233,67 @@ jobs:
             HubPlay se distribuye bajo su licencia propia (`LICENSE`).
             Los binarios FFmpeg bundleados son LGPL — ver
             `LICENSE-ffmpeg.txt` dentro del archivo.
+
+  # ─── Nightly rolling (push a main + workflow_dispatch) ─────────────
+  # Mantiene un release público llamado "nightly" siempre actualizado
+  # con el último build de main. Cada vez se borra el tag/release
+  # anterior y se recrea con los binarios nuevos — el operador puede
+  # descargar en cualquier momento sin esperar a que hagamos un tag
+  # oficial.  Marcado como pre-release para que GitHub no lo muestre
+  # como "latest" (eso queda reservado para los tags v*).
+  release-nightly:
+    name: Update nightly release
+    needs: build
+    runs-on: ubuntu-latest
+    if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Delete previous nightly release + tag
+        # gh CLI viene preinstalado en runners ubuntu. `|| true` para
+        # que la primera run (cuando aún no existe el release) no falle.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete nightly --yes --cleanup-tag --repo "$GITHUB_REPOSITORY" || true
+
+      - name: Publish nightly pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nightly
+          name: "Nightly (último build de main)"
+          files: |
+            artifacts/*.tar.gz
+            artifacts/*.zip
+            artifacts/*.sha256
+          draft: false
+          prerelease: true
+          body: |
+            > Build automático del último commit de `main` —
+            > **no es un release estable**. Para producción usa una
+            > versión taggeada (`v0.1.0`, etc.) cuando esté disponible.
+
+            Commit: `${{ github.sha }}`
+            Fecha:  build automático de la última run
+
+            ## Descarga
+
+            Cada archivo incluye `hubplay`, `ffmpeg` y `ffprobe` listos para
+            correr — no requiere instalar nada más. Descomprime, edita
+            `hubplay.example.yaml` y lanza `./hubplay --config hubplay.yaml`.
+
+            ### Plataformas
+
+            - **Linux amd64** — `hubplay-*-linux-amd64.tar.gz`
+            - **Linux arm64** — `hubplay-*-linux-arm64.tar.gz`
+            - **macOS Intel** — `hubplay-*-darwin-amd64.tar.gz`
+            - **macOS Apple Silicon** — `hubplay-*-darwin-arm64.tar.gz`
+            - **Windows x64** — `hubplay-*-windows-amd64.zip`
+
+            Cada archivo tiene su `.sha256` adjunto para verificación.
