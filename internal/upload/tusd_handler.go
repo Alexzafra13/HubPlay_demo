@@ -149,6 +149,7 @@ func (t *TusdHandler) preCreate(hook tushandler.HookEvent) (tushandler.HTTPRespo
 			"sanitized_name": res.SanitizedName,
 			"library_id":     md["library_id"],
 			"subpath":        md["subpath"],
+			"overwrite":      md["overwrite"],
 			"user_id":        claims.UserID,
 			"started_at":     now,
 		},
@@ -234,6 +235,11 @@ func finishInputFromHook(evt tushandler.HookEvent, stagingRoot string) FinishInp
 		SanitizedName: md["sanitized_name"],
 		LibraryIDHint: md["library_id"],
 		Subpath:       md["subpath"],
+		// El cliente marca overwrite=true cuando el modal de
+		// colisión confirma "Sobrescribir". Cualquier otro valor
+		// (incluido vacío) se interpreta como false — política
+		// segura: pisar requiere intent explícito.
+		Overwrite:     md["overwrite"] == "true",
 		Size:          evt.Upload.Size,
 		SourcePath:    binPath,
 		StartedAt:     started,

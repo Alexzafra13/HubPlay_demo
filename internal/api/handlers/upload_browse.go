@@ -108,27 +108,43 @@ func (h *UploadBrowseHandler) Browse(w http.ResponseWriter, r *http.Request) {
 		Name string `json:"name"`
 		Path string `json:"path"`
 	}
-	dirs := make([]dirEntry, 0, len(entries))
+	type fileEntry struct {
+		Name string `json:"name"`
+		Size int64  `json:"size"`
+	}
+	dirs := make([]dirEntry, 0)
+	files := make([]fileEntry, 0)
 	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
 		name := e.Name()
-		// Filtra dotfiles (cualquier dir que empieza por . es de
-		// sistema: .DS_Store, .git, .stfolder...). El operador no
-		// los necesita en el browser.
+		// Filtra dotfiles (cualquier dir/fichero que empieza por . es
+		// de sistema: .DS_Store, .git, .stfolder, .nfo a veces...).
 		if len(name) > 0 && name[0] == '.' {
 			continue
 		}
-		var childPath string
-		if canonical == "" {
-			childPath = name
+		if e.IsDir() {
+			var childPath string
+			if canonical == "" {
+				childPath = name
+			} else {
+				childPath = canonical + "/" + name
+			}
+			dirs = append(dirs, dirEntry{Name: name, Path: childPath})
 		} else {
-			childPath = canonical + "/" + name
+			// Ficheros: incluimos size para que el cliente pinte algo
+			// como "Pelicula.mkv · 2.4 GiB" y el operador pueda ver de
+			// un vistazo qué hay ya en la carpeta sin tener que ir al
+			// catálogo. Si stat falla, size=0 y seguimos — un fichero
+			// que no podemos statear (race con un borrado) no debería
+			// tirar el browse entero.
+			var size int64
+			if info, err := e.Info(); err == nil {
+				size = info.Size()
+			}
+			files = append(files, fileEntry{Name: name, Size: size})
 		}
-		dirs = append(dirs, dirEntry{Name: name, Path: childPath})
 	}
 	sort.Slice(dirs, func(i, j int) bool { return dirs[i].Name < dirs[j].Name })
+	sort.Slice(files, func(i, j int) bool { return files[i].Name < files[j].Name })
 
 	// Cache corta — el operador navega rápido entre carpetas y NO
 	// queremos re-readdir por cada click si está en el mismo nivel.
@@ -139,6 +155,7 @@ func (h *UploadBrowseHandler) Browse(w http.ResponseWriter, r *http.Request) {
 			"library_name": lib.Name,
 			"path":         canonical,
 			"directories":  dirs,
+			"files":        files,
 		},
 	})
 }
@@ -191,6 +208,191 @@ func (h *UploadBrowseHandler) CreateFolder(w http.ResponseWriter, r *http.Reques
 			"library_id": lib.ID,
 			"path":       canonical,
 			"abs_path":   filepath.ToSlash(abs),
+		},
+	})
+}
+
+// DeleteEntry borra un fichero o una carpeta dentro de la librería.
+//
+//   DELETE /libraries/{id}/files?path=Movies/Drama/old.mkv
+//   DELETE /libraries/{id}/files?path=Movies/Drama&recursive=true
+//
+// Reglas:
+//   - path REQUERIDO y no puede ser "" (no borramos la librería entera).
+//   - Si el path es una carpeta NO VACÍA, requiere ?recursive=true.
+//     Defensa contra borrar accidentalmente cientos de GB.
+//   - Idempotente: borrar algo inexistente devuelve 204 igual (mismo
+//     contrato que el repo de cors_origins).
+//
+// Permiso: can_upload (el operador que sube también puede limpiar).
+// Para borrados masivos / library-level CRUD el flag correcto es
+// can_manage_libraries, pero borrar un fichero individual cae en
+// "gestionar mi propia subida".
+func (h *UploadBrowseHandler) DeleteEntry(w http.ResponseWriter, r *http.Request) {
+	lib, ok := h.resolveLibrary(w, r)
+	if !ok {
+		return
+	}
+
+	rawPath := r.URL.Query().Get("path")
+	recursive := r.URL.Query().Get("recursive") == "true"
+
+	canonical, err := upload.SanitizeSubpath(rawPath)
+	if err != nil {
+		respondError(w, r, http.StatusBadRequest, "INVALID_PATH", err.Error())
+		return
+	}
+	if canonical == "" {
+		respondError(w, r, http.StatusBadRequest, "EMPTY_PATH",
+			"path required (cannot delete the library root)")
+		return
+	}
+
+	abs, err := upload.ResolveSubpath(lib.Paths[0], canonical)
+	if err != nil {
+		respondError(w, r, http.StatusBadRequest, "INVALID_PATH", err.Error())
+		return
+	}
+
+	info, err := os.Stat(abs)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// Idempotente: borrar lo que ya no está es éxito.
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		respondError(w, r, http.StatusInternalServerError, "STAT_FAILED", err.Error())
+		return
+	}
+
+	if info.IsDir() && !recursive {
+		// Comprueba si está vacío — un dir vacío SÍ se borra sin
+		// recursive. Defensa solo para "tiene contenido dentro".
+		entries, err := os.ReadDir(abs)
+		if err != nil {
+			respondError(w, r, http.StatusInternalServerError, "READ_DIR_FAILED", err.Error())
+			return
+		}
+		if len(entries) > 0 {
+			respondError(w, r, http.StatusConflict, "DIR_NOT_EMPTY",
+				"directory not empty; pass ?recursive=true to confirm")
+			return
+		}
+	}
+
+	if err := os.RemoveAll(abs); err != nil {
+		respondError(w, r, http.StatusInternalServerError, "DELETE_FAILED", err.Error())
+		return
+	}
+
+	h.logger.Info("upload entry deleted",
+		"library", lib.ID, "path", canonical, "was_dir", info.IsDir())
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// RenameRequest mapea el body POST.
+type RenameRequest struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
+// RenameEntry renombra o mueve un fichero/carpeta dentro de la
+// librería.
+//
+//   POST /libraries/{id}/files/rename body: {from: "old.mkv", to: "new.mkv"}
+//
+// Reglas:
+//   - Ambos paths se sanitizan + se validan que viven dentro de la
+//     librería.
+//   - From debe existir; To no debe existir (no permitimos pisar
+//     ficheros con rename — eso es delete + rename).
+//   - Idempotente NO: si from==to devuelve 400 BAD_REQUEST. Si el
+//     usuario quería confirmar "no cambies" no debería llamar al
+//     endpoint.
+//   - Funciona para ficheros y carpetas — os.Rename los acepta
+//     ambos en el mismo filesystem.  Cross-fs rename falla; lo
+//     señalamos como CROSS_DEVICE — el operador típicamente NO
+//     puede mover entre librerías con paths en discos distintos
+//     desde la UI (otra librería = otra API call).
+func (h *UploadBrowseHandler) RenameEntry(w http.ResponseWriter, r *http.Request) {
+	lib, ok := h.resolveLibrary(w, r)
+	if !ok {
+		return
+	}
+
+	var req RenameRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, r, http.StatusBadRequest, "BAD_BODY", err.Error())
+		return
+	}
+
+	fromCanon, err := upload.SanitizeSubpath(req.From)
+	if err != nil || fromCanon == "" {
+		respondError(w, r, http.StatusBadRequest, "INVALID_FROM",
+			"from path is invalid or empty")
+		return
+	}
+	toCanon, err := upload.SanitizeSubpath(req.To)
+	if err != nil || toCanon == "" {
+		respondError(w, r, http.StatusBadRequest, "INVALID_TO",
+			"to path is invalid or empty")
+		return
+	}
+	if fromCanon == toCanon {
+		respondError(w, r, http.StatusBadRequest, "SAME_PATH",
+			"from and to resolve to the same path")
+		return
+	}
+
+	fromAbs, err := upload.ResolveSubpath(lib.Paths[0], fromCanon)
+	if err != nil {
+		respondError(w, r, http.StatusBadRequest, "INVALID_FROM", err.Error())
+		return
+	}
+	toAbs, err := upload.ResolveSubpath(lib.Paths[0], toCanon)
+	if err != nil {
+		respondError(w, r, http.StatusBadRequest, "INVALID_TO", err.Error())
+		return
+	}
+
+	if _, err := os.Stat(fromAbs); err != nil {
+		if os.IsNotExist(err) {
+			respondError(w, r, http.StatusNotFound, "FROM_NOT_FOUND",
+				"source path does not exist")
+			return
+		}
+		respondError(w, r, http.StatusInternalServerError, "STAT_FAILED", err.Error())
+		return
+	}
+	if _, err := os.Stat(toAbs); err == nil {
+		respondError(w, r, http.StatusConflict, "TO_EXISTS",
+			"destination already exists; delete it first")
+		return
+	}
+
+	// Asegúrate de que el dir destino existe (caso típico: rename
+	// movie.mkv → 2024/Movie/movie.mkv requiere mkdir intermedio).
+	if err := os.MkdirAll(filepath.Dir(toAbs), 0o755); err != nil {
+		respondError(w, r, http.StatusInternalServerError, "MKDIR_FAILED", err.Error())
+		return
+	}
+
+	if err := os.Rename(fromAbs, toAbs); err != nil {
+		// Cross-device errors se identifican por mensaje (mismo
+		// patrón que upload.staging.isCrossDevice). Para v1 lo
+		// señalamos como UNSUPPORTED — mover entre filesystems
+		// requiere copy+remove que no haremos en este endpoint.
+		respondError(w, r, http.StatusInternalServerError, "RENAME_FAILED", err.Error())
+		return
+	}
+
+	h.logger.Info("upload entry renamed",
+		"library", lib.ID, "from", fromCanon, "to", toCanon)
+	respondJSON(w, http.StatusOK, map[string]any{
+		"data": map[string]any{
+			"library_id": lib.ID,
+			"from":       fromCanon,
+			"to":         toCanon,
 		},
 	})
 }

@@ -4,14 +4,24 @@ import {
   Folder,
   FolderOpen,
   FolderPlus,
+  FileVideo,
   ChevronRight,
   ChevronUp,
+  Check,
+  Pencil,
+  Trash2,
+  X,
   Home,
   Library as LibraryIcon,
   Loader2,
 } from "lucide-react";
 
-import { useUploadBrowse, useCreateUploadFolder } from "@/api/hooks";
+import {
+  useUploadBrowse,
+  useCreateUploadFolder,
+  useDeleteUploadEntry,
+  useRenameUploadEntry,
+} from "@/api/hooks";
 import type { Library } from "@/api/types";
 import { Button, Input } from "@/components/common";
 
@@ -74,6 +84,97 @@ export function FolderBrowser({
   // eventos dragOver burbujean y queremos pintar exactamente UNA
   // carpeta destacada (la que está debajo del cursor), no todas.
   const [dropTarget, setDropTarget] = useState<string | null>(null);
+
+  // Inline rename — guarda el subpath de la entry siendo renombrada
+  // y el nombre nuevo que el usuario escribe.  Una sola entry a la
+  // vez (cancela cualquier rename previo si el usuario empieza otro).
+  const [renameTarget, setRenameTarget] = useState<{
+    fullPath: string;
+    isDir: boolean;
+    newName: string;
+  } | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const deleteEntry = useDeleteUploadEntry();
+  const renameEntry = useRenameUploadEntry();
+
+  function beginRename(fullPath: string, currentName: string, isDir: boolean) {
+    setActionError(null);
+    setRenameTarget({ fullPath, isDir, newName: currentName });
+  }
+
+  function cancelRename() {
+    setRenameTarget(null);
+    setActionError(null);
+  }
+
+  async function confirmRename() {
+    if (!renameTarget) return;
+    const newName = renameTarget.newName.trim();
+    if (!newName) return;
+    // Compone el path destino reemplazando sólo el último segmento
+    // del fullPath. Permite mover-en-sitio sin tener que recordar
+    // los segmentos parent.
+    const parts = renameTarget.fullPath.split("/").filter(Boolean);
+    parts.pop();
+    parts.push(newName);
+    const newFullPath = parts.join("/");
+    if (newFullPath === renameTarget.fullPath) {
+      cancelRename();
+      return;
+    }
+    setActionError(null);
+    try {
+      await renameEntry.mutateAsync({
+        libraryID,
+        from: renameTarget.fullPath,
+        to: newFullPath,
+        parentPath: path,
+      });
+      cancelRename();
+    } catch (err) {
+      setActionError(
+        err instanceof Error && err.message
+          ? err.message
+          : t("uploads.folder.renameError", {
+              defaultValue: "No se pudo renombrar.",
+            }),
+      );
+    }
+  }
+
+  async function handleDelete(fullPath: string, name: string, isDir: boolean) {
+    setActionError(null);
+    const msg = isDir
+      ? t("uploads.folder.confirmDeleteDir", {
+          name,
+          defaultValue: `¿Borrar la carpeta "${name}" y todo su contenido?`,
+        })
+      : t("uploads.folder.confirmDeleteFile", {
+          name,
+          defaultValue: `¿Borrar "${name}"?`,
+        });
+    if (!confirm(msg)) return;
+    try {
+      await deleteEntry.mutateAsync({
+        libraryID,
+        path: fullPath,
+        // Carpetas siempre recursive desde la UI — el usuario YA
+        // confirmó el modal ("y todo su contenido"). Para ficheros
+        // el flag es irrelevante (no-op).
+        recursive: isDir,
+        parentPath: path,
+      });
+    } catch (err) {
+      setActionError(
+        err instanceof Error && err.message
+          ? err.message
+          : t("uploads.folder.deleteError", {
+              defaultValue: "No se pudo borrar.",
+            }),
+      );
+    }
+  }
 
   // dragSupported: el padre wireó onDropFiles. Si no, no pintamos los
   // affordances de drop (sería confuso ver carpetas que parecen drop
@@ -262,6 +363,7 @@ export function FolderBrowser({
           <ul className="py-1">
             {data.directories.map((d) => {
               const isDropOver = dropTarget === d.path && dragSupported;
+              const isRenaming = renameTarget?.fullPath === d.path;
               return (
                 <li
                   key={d.path}
@@ -269,48 +371,148 @@ export function FolderBrowser({
                   onDragLeave={handleFolderDragLeave}
                   onDrop={(e) => handleFolderDrop(e, d.path)}
                   className={[
-                    "transition-all duration-150",
+                    "group/row relative transition-all duration-150",
                     isDropOver
                       ? "bg-accent/15 ring-1 ring-inset ring-accent scale-[1.01]"
                       : "",
                   ].join(" ")}
                 >
-                  <button
-                    type="button"
-                    onClick={() => enterFolder(d.path)}
-                    className={[
-                      "flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors",
-                      isDropOver
-                        ? "text-accent font-medium"
-                        : "hover:bg-bg-hover",
-                    ].join(" ")}
-                  >
-                    {isDropOver ? (
-                      <FolderOpen
-                        size={16}
-                        className="text-accent shrink-0 drop-shadow-[0_0_4px_rgba(var(--accent-rgb,234,179,8),0.4)]"
-                        aria-hidden
-                      />
-                    ) : (
-                      <Folder
-                        size={14}
-                        className="text-text-muted shrink-0"
-                        aria-hidden
-                      />
-                    )}
-                    <span className="truncate">{d.name}</span>
-                    {isDropOver && (
-                      <span className="ml-auto text-[10px] font-semibold uppercase tracking-wide text-accent">
-                        {t("uploads.folder.dropHere", {
-                          defaultValue: "Soltar aquí",
-                        })}
-                      </span>
-                    )}
-                  </button>
+                  {isRenaming ? (
+                    <RenameRow
+                      icon={
+                        <Folder
+                          size={14}
+                          className="text-text-muted shrink-0"
+                          aria-hidden
+                        />
+                      }
+                      value={renameTarget!.newName}
+                      onChange={(v) =>
+                        setRenameTarget({ ...renameTarget!, newName: v })
+                      }
+                      onConfirm={confirmRename}
+                      onCancel={cancelRename}
+                      isPending={renameEntry.isPending}
+                    />
+                  ) : (
+                    <div className="flex items-center">
+                      <button
+                        type="button"
+                        onClick={() => enterFolder(d.path)}
+                        className={[
+                          "flex flex-1 items-center gap-2 px-3 py-2 text-left text-sm transition-colors",
+                          isDropOver
+                            ? "text-accent font-medium"
+                            : "hover:bg-bg-hover",
+                        ].join(" ")}
+                      >
+                        {isDropOver ? (
+                          <FolderOpen
+                            size={16}
+                            className="text-accent shrink-0 drop-shadow-[0_0_4px_rgba(var(--accent-rgb,234,179,8),0.4)]"
+                            aria-hidden
+                          />
+                        ) : (
+                          <Folder
+                            size={14}
+                            className="text-text-muted shrink-0"
+                            aria-hidden
+                          />
+                        )}
+                        <span className="truncate">{d.name}</span>
+                        {isDropOver && (
+                          <span className="ml-auto text-[10px] font-semibold uppercase tracking-wide text-accent">
+                            {t("uploads.folder.dropHere", {
+                              defaultValue: "Soltar aquí",
+                            })}
+                          </span>
+                        )}
+                      </button>
+                      {!isDropOver && (
+                        <RowActions
+                          onRename={() => beginRename(d.path, d.name, true)}
+                          onDelete={() => handleDelete(d.path, d.name, true)}
+                          renameLabel={t("uploads.folder.renameAction", {
+                            defaultValue: "Renombrar",
+                          })}
+                          deleteLabel={t("uploads.folder.deleteAction", {
+                            defaultValue: "Eliminar",
+                          })}
+                        />
+                      )}
+                    </div>
+                  )}
                 </li>
               );
             })}
           </ul>
+        )}
+
+        {/* Ficheros existentes en la carpeta — read-only. El operador
+            los ve para saber "ya está aquí, no lo vuelvo a subir" sin
+            tener que ir al catálogo. Sólo subdirs son clicables /
+            drop targets; los ficheros no hacen nada al hover. */}
+        {data && data.files && data.files.length > 0 && (
+          <ul className="border-t border-border/40 py-1">
+            {data.files.map((f) => {
+              const fullPath = path ? `${path}/${f.name}` : f.name;
+              const isRenaming = renameTarget?.fullPath === fullPath;
+              return (
+                <li
+                  key={f.name}
+                  className="group/row flex items-center gap-2 px-3 py-1.5 text-sm text-text-muted hover:bg-bg-hover/40"
+                >
+                  {isRenaming ? (
+                    <RenameRow
+                      icon={
+                        <FileVideo
+                          size={13}
+                          className="shrink-0 opacity-60"
+                          aria-hidden
+                        />
+                      }
+                      value={renameTarget!.newName}
+                      onChange={(v) =>
+                        setRenameTarget({ ...renameTarget!, newName: v })
+                      }
+                      onConfirm={confirmRename}
+                      onCancel={cancelRename}
+                      isPending={renameEntry.isPending}
+                      inline
+                    />
+                  ) : (
+                    <>
+                      <FileVideo
+                        size={13}
+                        className="shrink-0 opacity-60"
+                        aria-hidden
+                      />
+                      <span className="truncate flex-1">{f.name}</span>
+                      <span className="text-xs shrink-0 opacity-70">
+                        {formatFileSize(f.size)}
+                      </span>
+                      <RowActions
+                        onRename={() => beginRename(fullPath, f.name, false)}
+                        onDelete={() => handleDelete(fullPath, f.name, false)}
+                        renameLabel={t("uploads.folder.renameAction", {
+                          defaultValue: "Renombrar",
+                        })}
+                        deleteLabel={t("uploads.folder.deleteAction", {
+                          defaultValue: "Eliminar",
+                        })}
+                      />
+                    </>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+
+        {actionError && (
+          <p className="px-3 py-2 text-xs text-red-400" role="alert">
+            {actionError}
+          </p>
         )}
 
         {/* Empty-state también es drop target: si la carpeta no tiene
@@ -389,4 +591,144 @@ export function FolderBrowser({
       </footer>
     </section>
   );
+}
+
+// ─── RowActions ──────────────────────────────────────────────────────
+//
+// Iconos secundarios (rename + delete) que aparecen al hacer hover en
+// una fila. group-hover:opacity-100 los esconde por defecto para que
+// la fila normal se vea limpia — el operador descubre que existen al
+// pasar el ratón. Pequeños + accent on hover de cada uno; sin
+// confirmaciones visuales aquí — la confirmación del delete vive en
+// el handler con confirm(). Mismo lenguaje visual que el resto del
+// proyecto (kebab menu admin).
+function RowActions({
+  onRename,
+  onDelete,
+  renameLabel,
+  deleteLabel,
+}: {
+  onRename: () => void;
+  onDelete: () => void;
+  renameLabel: string;
+  deleteLabel: string;
+}) {
+  return (
+    <div className="flex items-center gap-0.5 pr-2 opacity-0 group-hover/row:opacity-100 focus-within:opacity-100 transition-opacity">
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onRename();
+        }}
+        aria-label={renameLabel}
+        title={renameLabel}
+        className="rounded p-1 text-text-muted hover:bg-bg-base hover:text-accent transition-colors"
+      >
+        <Pencil size={12} aria-hidden />
+      </button>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onDelete();
+        }}
+        aria-label={deleteLabel}
+        title={deleteLabel}
+        className="rounded p-1 text-text-muted hover:bg-bg-base hover:text-red-400 transition-colors"
+      >
+        <Trash2 size={12} aria-hidden />
+      </button>
+    </div>
+  );
+}
+
+// ─── RenameRow ───────────────────────────────────────────────────────
+//
+// Reemplaza la fila normal cuando se está renombrando. autoFocus +
+// select all para que el operador pueda escribir el nombre nuevo
+// directamente o usar Enter/Esc para confirmar/cancelar sin click.
+function RenameRow({
+  icon,
+  value,
+  onChange,
+  onConfirm,
+  onCancel,
+  isPending,
+  inline,
+}: {
+  icon: React.ReactNode;
+  value: string;
+  onChange: (v: string) => void;
+  onConfirm: () => void;
+  onCancel: () => void;
+  isPending: boolean;
+  inline?: boolean;
+}) {
+  return (
+    <div
+      className={[
+        "flex items-center gap-2",
+        inline ? "" : "px-3 py-1.5",
+      ].join(" ")}
+    >
+      {icon}
+      <input
+        autoFocus
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            onConfirm();
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            onCancel();
+          }
+        }}
+        onFocus={(e) => {
+          // Select all para que escribir reemplace el nombre actual
+          // — es lo que el operador típicamente quiere.
+          e.target.select();
+        }}
+        className="flex-1 rounded-sm border border-accent/60 bg-bg-base px-1.5 py-0.5 text-sm text-text-primary outline-none focus:border-accent"
+      />
+      <button
+        type="button"
+        onClick={onConfirm}
+        disabled={isPending || !value.trim()}
+        aria-label="confirm"
+        className="rounded p-1 text-green-500 hover:bg-bg-base disabled:opacity-30"
+      >
+        <Check size={13} aria-hidden />
+      </button>
+      <button
+        type="button"
+        onClick={onCancel}
+        aria-label="cancel"
+        className="rounded p-1 text-text-muted hover:bg-bg-base"
+      >
+        <X size={13} aria-hidden />
+      </button>
+    </div>
+  );
+}
+
+// formatFileSize convierte bytes a la representación binaria humana
+// más corta. Inline porque sólo lo usa este componente — la otra
+// instancia (humanBytes en Uploads.tsx) tiene la misma lógica pero
+// con mayor verbosidad de comentarios. Cuando exista un tercer
+// llamante, extraer a utils.
+function formatFileSize(n: number): string {
+  if (!Number.isFinite(n) || n < 0) return "—";
+  if (n < 1024) return `${n} B`;
+  const units = ["KiB", "MiB", "GiB", "TiB"];
+  let val = n / 1024;
+  let i = 0;
+  while (val >= 1024 && i < units.length - 1) {
+    val /= 1024;
+    i++;
+  }
+  return `${val.toFixed(1)} ${units[i]}`;
 }

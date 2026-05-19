@@ -452,11 +452,22 @@ export interface LibraryFolder {
   path: string;
 }
 
+/**
+ * Un fichero ya existente en la carpeta navegada. El backend lo
+ * devuelve junto a las subdirs para que el operador vea de un
+ * vistazo qué hay ya antes de subir un duplicado.
+ */
+export interface LibraryFile {
+  name: string;
+  size: number;
+}
+
 export interface UploadBrowseResponse {
   library_id: string;
   library_name: string;
   path: string;
   directories: LibraryFolder[];
+  files: LibraryFile[];
 }
 
 /**

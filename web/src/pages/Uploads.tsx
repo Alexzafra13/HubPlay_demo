@@ -155,7 +155,7 @@ export default function Uploads() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // mount/unmount only
 
-  function startUpload(file: File, libraryID: string, subpath: string) {
+  function startUpload(file: File, libraryID: string, subpath: string, overwrite: boolean = false) {
     const localID = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const initial: ActiveUpload = {
       localID,
@@ -168,8 +168,18 @@ export default function Uploads() {
     };
     setActive((prev) => [...prev, initial]);
 
+    // CSRF token. El middleware CSRFProtect del backend rechaza
+    // cualquier mutación con cookie auth si NO trae X-CSRF-Token con
+    // el valor del cookie hubplay_csrf — defensa contra CSRF
+    // cross-origin que un atacante podría dispararar via un <form>
+    // o fetch hostil.  tus-js-client no sabe del CSRF, así que se lo
+    // pasamos en `headers` y lo añade a TODAS las peticiones
+    // (POST creación, PATCH chunks, HEAD, DELETE).
+    const csrfToken = readCookie("hubplay_csrf");
+
     const upload = new tus.Upload(file, {
       endpoint: api.uploadsEndpoint(),
+      headers: csrfToken ? { "X-CSRF-Token": csrfToken } : {},
       // Auth via cookie hubplay_access — los XHR de tus-js-client
       // envían cookies automáticamente en same-origin (caso producción:
       // el SPA y el API viven en el mismo binario Go). Para deploys
@@ -193,6 +203,11 @@ export default function Uploads() {
         // raíz, mismo comportamiento pre-PR6. tusd lo persiste en su
         // .info y el pipeline post-bytes lo lee desde ahí.
         subpath: subpath,
+        // Overwrite: marca explícita del modal de colisión. Sin esta
+        // metadata el pipeline añade sufijo -NNN ante choque; con
+        // "true" pisa. tus persiste strings, así que el backend lee
+        // overwrite=="true".
+        overwrite: overwrite ? "true" : "",
       },
       onError: (err) => {
         setActive((prev) =>
@@ -311,7 +326,26 @@ interface DropzoneProps {
   libraries: Library[];
   quotaUsed?: number;
   quotaTotal?: number;
-  onUpload: (file: File, libraryID: string, subpath: string) => void;
+  onUpload: (file: File, libraryID: string, subpath: string, overwrite?: boolean) => void;
+}
+
+// CollisionDecision: qué hacer con un fichero concreto que ya existe
+// en el destino. El modal pre-arranque colecta una decisión por
+// fichero (o aplica una a todos con los botones globales).
+type CollisionDecision = "overwrite" | "rename" | "skip";
+
+// CollisionItem: pareja fichero local + nombre que choca + decisión
+// actual. Lo mantenemos como estructura porque el modal puede mostrar
+// múltiples colisiones a la vez con cada una en su estado.
+interface CollisionItem {
+  file: File;
+  libraryID: string;
+  subpath: string;
+  // existingName == file.name si el sanitizer no lo modificó. Lo
+  // duplicamos en la struct para que el modal pinte el nombre tal
+  // cual se compara contra el server.
+  existingName: string;
+  decision: CollisionDecision;
 }
 
 function UploadDropzone({
@@ -330,6 +364,36 @@ function UploadDropzone({
   // = raíz. El FolderBrowser lo actualiza cuando el usuario navega.
   const [subpath, setSubpath] = useState<string>("");
   const [rejectReason, setRejectReason] = useState<string | null>(null);
+
+  // Modal de colisión: cuando el operador suelta ficheros que ya
+  // existen en el destino, pausa los uploads y pregunta una decisión
+  // por fichero antes de continuar.
+  const [collisions, setCollisions] = useState<CollisionItem[] | null>(null);
+
+  // detectCollisions consulta los ficheros existentes del subpath
+  // destino y devuelve los nombres que ya están. Lo invocamos en
+  // mismo momento que el upload se va a iniciar — TanStack Query
+  // cachea la respuesta del browse, así que typically no genera
+  // red extra. Si el query NO está cacheado (caso edge), hacemos
+  // un fetch via api.browseUploadFolders directo.
+  async function detectCollisions(
+    libID: string,
+    sub: string,
+    candidates: File[],
+  ): Promise<File[]> {
+    if (!libID) return [];
+    try {
+      const data = await api.browseUploadFolders(libID, sub);
+      const existing = new Set((data.files ?? []).map((f) => f.name));
+      return candidates.filter((f) => existing.has(f.name));
+    } catch {
+      // Si el browse falla, asumimos "no hay colisión conocida" y
+      // dejamos que el backend resuelva (con sufijo -NNN). Mejor un
+      // upload que aterriza con sufijo que bloquear la operación
+      // entera por un fallo de red transitorio del browse.
+      return [];
+    }
+  }
 
   // Mantén el library seleccionado coherente con la lista (puede
   // cambiar si el admin crea/borra librerías mientras la página está
@@ -374,6 +438,48 @@ function UploadDropzone({
     setFiles((prev) => [...prev, ...valid]);
   }
 
+  // launchOrCollide es el camino común a TODOS los uploads (drop
+  // dropzone, drop-on-folder, click "Subir N").  Detecta colisiones
+  // con los ficheros existentes en el destino y, si las hay, abre
+  // el modal. Sin colisiones inicia directo. Los ficheros sin
+  // colisión se lanzan inmediatamente; los conflictivos esperan
+  // la decisión del modal.
+  async function launchOrCollide(filesToUpload: File[], libID: string, sub: string) {
+    if (filesToUpload.length === 0 || !libID) return;
+    const colliding = await detectCollisions(libID, sub, filesToUpload);
+    const collidingSet = new Set(colliding.map((f) => f.name));
+
+    // Lanza inmediatamente los que NO chocan.
+    for (const f of filesToUpload) {
+      if (!collidingSet.has(f.name)) {
+        onUpload(f, libID, sub, false);
+      }
+    }
+
+    // Para los que chocan, abre el modal de decisión por fichero.
+    if (colliding.length > 0) {
+      setCollisions(
+        colliding.map((f) => ({
+          file: f,
+          libraryID: libID,
+          subpath: sub,
+          existingName: f.name,
+          decision: "rename",
+        })),
+      );
+    }
+  }
+
+  // resolveCollisions aplica las decisiones del modal y lanza los
+  // uploads correspondientes. Llamada al confirmar el modal.
+  function resolveCollisions(items: CollisionItem[]) {
+    for (const it of items) {
+      if (it.decision === "skip") continue;
+      onUpload(it.file, it.libraryID, it.subpath, it.decision === "overwrite");
+    }
+    setCollisions(null);
+  }
+
   // Drop directo sobre una carpeta del FolderBrowser (Termius-style):
   // los ficheros válidos se suben INMEDIATAMENTE a esa carpeta sin
   // pasar por la cola visible. El subpath puede ser distinto del
@@ -383,9 +489,7 @@ function UploadDropzone({
   function handleDropOnFolder(incoming: File[], targetSubpath: string) {
     if (!libraryID) return;
     const valid = validateFiles(incoming);
-    for (const f of valid) {
-      onUpload(f, libraryID, targetSubpath);
-    }
+    launchOrCollide(valid, libraryID, targetSubpath);
   }
 
   function onDrop(e: React.DragEvent<HTMLDivElement>) {
@@ -411,9 +515,7 @@ function UploadDropzone({
 
   function startAll() {
     if (!libraryID) return;
-    for (const f of files) {
-      onUpload(f, libraryID, subpath);
-    }
+    launchOrCollide(files, libraryID, subpath);
     setFiles([]);
   }
 
@@ -530,6 +632,14 @@ function UploadDropzone({
             </Button>
           </div>
         </div>
+      )}
+
+      {collisions && (
+        <CollisionModal
+          items={collisions}
+          onCancel={() => setCollisions(null)}
+          onConfirm={resolveCollisions}
+        />
       )}
 
       {quotaTotal !== undefined && quotaTotal > 0 && (
@@ -684,7 +794,220 @@ function OutcomeIcon({
   return <XCircle size={14} className="text-red-500 shrink-0" aria-hidden />;
 }
 
+// ─── CollisionModal ──────────────────────────────────────────────────
+//
+// Cuando el operador suelta ficheros que ya existen en el destino, este
+// modal pide una decisión por fichero antes de continuar. Tres acciones
+// por fila:
+//   - Sobrescribir: el upload pisa el fichero existente.
+//   - Renombrar: el backend añade sufijo "-1", "-2"... (comportamiento
+//     por defecto pre-modal, mantenido como red de seguridad).
+//   - Saltar: el upload no se inicia para ese fichero.
+//
+// Tres botones globales arriba: "Sobrescribir todos", "Renombrar
+// todos", "Saltar todos" — para subidas masivas con muchas colisiones
+// (re-importar una librería desde otro servidor) hacer click por
+// fichero sería tedioso.
+
+function CollisionModal({
+  items,
+  onCancel,
+  onConfirm,
+}: {
+  items: CollisionItem[];
+  onCancel: () => void;
+  onConfirm: (items: CollisionItem[]) => void;
+}) {
+  const { t } = useTranslation();
+  const [state, setState] = useState(items);
+
+  function applyAll(d: CollisionDecision) {
+    setState((prev) => prev.map((it) => ({ ...it, decision: d })));
+  }
+
+  function setDecision(idx: number, d: CollisionDecision) {
+    setState((prev) => {
+      const next = [...prev];
+      next[idx] = { ...next[idx], decision: d };
+      return next;
+    });
+  }
+
+  const skipCount = state.filter((s) => s.decision === "skip").length;
+  const overwriteCount = state.filter((s) => s.decision === "overwrite").length;
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      onClick={onCancel}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-2xl max-h-[80vh] overflow-hidden rounded-lg border border-border bg-bg-base shadow-2xl flex flex-col"
+      >
+        <header className="border-b border-border px-5 py-4">
+          <h3 className="text-base font-semibold text-text-primary">
+            {t("uploads.collision.title", {
+              count: state.length,
+              defaultValue: "{{count}} fichero(s) ya existen en el destino",
+            })}
+          </h3>
+          <p className="mt-1 text-sm text-text-muted">
+            {t("uploads.collision.hint", {
+              defaultValue:
+                "Decide qué hacer con cada uno. Sobrescribir reemplaza el fichero; renombrar añade un sufijo; saltar cancela esa subida.",
+            })}
+          </p>
+        </header>
+
+        <div className="flex flex-wrap items-center gap-2 border-b border-border bg-bg-elevated px-5 py-2 text-xs">
+          <span className="text-text-muted mr-2">
+            {t("uploads.collision.applyAll", {
+              defaultValue: "Aplicar a todos:",
+            })}
+          </span>
+          <button
+            type="button"
+            onClick={() => applyAll("overwrite")}
+            className="rounded-md border border-red-700/50 bg-red-900/20 px-2 py-1 text-red-200 hover:bg-red-900/40"
+          >
+            {t("uploads.collision.overwrite", { defaultValue: "Sobrescribir" })}
+          </button>
+          <button
+            type="button"
+            onClick={() => applyAll("rename")}
+            className="rounded-md border border-border bg-bg-base px-2 py-1 text-text-secondary hover:bg-bg-hover"
+          >
+            {t("uploads.collision.rename", { defaultValue: "Renombrar" })}
+          </button>
+          <button
+            type="button"
+            onClick={() => applyAll("skip")}
+            className="rounded-md border border-border bg-bg-base px-2 py-1 text-text-muted hover:bg-bg-hover"
+          >
+            {t("uploads.collision.skip", { defaultValue: "Saltar" })}
+          </button>
+        </div>
+
+        <ul className="flex-1 overflow-y-auto divide-y divide-border/40">
+          {state.map((it, i) => (
+            <li key={i} className="flex flex-col gap-2 px-5 py-3 sm:flex-row sm:items-center sm:gap-3">
+              <span className="flex flex-1 items-center gap-2 truncate text-sm">
+                <FileVideo
+                  size={14}
+                  className="shrink-0 text-text-muted"
+                  aria-hidden
+                />
+                <span className="truncate font-mono">{it.existingName}</span>
+                {it.subpath && (
+                  <span className="text-xs text-text-muted shrink-0">
+                    /{it.subpath}
+                  </span>
+                )}
+              </span>
+              <div className="flex gap-1 shrink-0">
+                <CollisionDecisionPill
+                  active={it.decision === "overwrite"}
+                  tone="danger"
+                  label={t("uploads.collision.overwrite", {
+                    defaultValue: "Sobrescribir",
+                  })}
+                  onClick={() => setDecision(i, "overwrite")}
+                />
+                <CollisionDecisionPill
+                  active={it.decision === "rename"}
+                  tone="default"
+                  label={t("uploads.collision.rename", {
+                    defaultValue: "Renombrar",
+                  })}
+                  onClick={() => setDecision(i, "rename")}
+                />
+                <CollisionDecisionPill
+                  active={it.decision === "skip"}
+                  tone="muted"
+                  label={t("uploads.collision.skip", {
+                    defaultValue: "Saltar",
+                  })}
+                  onClick={() => setDecision(i, "skip")}
+                />
+              </div>
+            </li>
+          ))}
+        </ul>
+
+        <footer className="flex items-center justify-between gap-3 border-t border-border bg-bg-elevated px-5 py-3">
+          <p className="text-xs text-text-muted">
+            {t("uploads.collision.summary", {
+              count: state.length,
+              skip: skipCount,
+              overwrite: overwriteCount,
+              defaultValue:
+                "{{count}} total · {{overwrite}} sobrescribir · {{skip}} saltar",
+            })}
+          </p>
+          <div className="flex gap-2">
+            <Button variant="secondary" onClick={onCancel}>
+              {t("common.cancel", { defaultValue: "Cancelar" })}
+            </Button>
+            <Button onClick={() => onConfirm(state)}>
+              {t("uploads.collision.confirm", { defaultValue: "Aplicar" })}
+            </Button>
+          </div>
+        </footer>
+      </div>
+    </div>
+  );
+}
+
+function CollisionDecisionPill({
+  active,
+  tone,
+  label,
+  onClick,
+}: {
+  active: boolean;
+  tone: "default" | "danger" | "muted";
+  label: string;
+  onClick: () => void;
+}) {
+  const tones: Record<typeof tone, string> = {
+    default: active
+      ? "border-accent bg-accent/15 text-accent"
+      : "border-border bg-bg-base text-text-secondary hover:bg-bg-hover",
+    danger: active
+      ? "border-red-500 bg-red-900/40 text-red-200"
+      : "border-border bg-bg-base text-text-secondary hover:bg-red-900/20",
+    muted: active
+      ? "border-text-muted bg-bg-base text-text-primary"
+      : "border-border bg-bg-base text-text-muted hover:bg-bg-hover",
+  };
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={[
+        "rounded-md border px-2 py-1 text-xs font-medium transition-all",
+        tones[tone],
+      ].join(" ")}
+    >
+      {label}
+    </button>
+  );
+}
+
 // ─── helpers ─────────────────────────────────────────────────────────
+
+// readCookie lee un cookie por nombre del document.cookie. tus-js-client
+// necesita el valor del CSRF para pasarlo en X-CSRF-Token; en el resto
+// del cliente la función equivalente vive en client.ts (no exportada).
+// Aquí no la importamos para no acoplar Uploads.tsx con el módulo del
+// API client por algo tan pequeño.
+function readCookie(name: string): string {
+  const m = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
+  return m ? decodeURIComponent(m[1]) : "";
+}
 
 // humanBytes formatea bytes a "X.Y MiB" / "X.Y GiB". Suficiente para
 // la página de uploads donde el rango va de KB a decenas de GB; no
