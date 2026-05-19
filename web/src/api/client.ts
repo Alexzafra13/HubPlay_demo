@@ -60,6 +60,7 @@ import type {
   UploadAuditEntry,
   CorsOriginsListResponse,
   AuditLogQueryResponse,
+  UpdateStatus,
   UploadBrowseResponse,
   UserData,
   ApiErrorBody,
@@ -836,6 +837,19 @@ export class ApiClient {
    *  lo usa para el dropdown del filtro sin hardcodear la lista. */
   async listAuditEventTypes(): Promise<string[]> {
     return this.request<string[]>("GET", "/admin/system/audit-log/types");
+  }
+
+  /** Estado del update checker (PR2). Snapshot cacheado del último
+   *  poll a GitHub Releases — lectura barata, sin IO. */
+  async getUpdateStatus(): Promise<UpdateStatus> {
+    return this.request<UpdateStatus>("GET", "/admin/system/updates");
+  }
+
+  /** Fuerza una comprobación manual de updates. Rate-limited a
+   *  1/min server-side; respeta el cooldown devolviendo el estado
+   *  actual con 429 traducido a error normal. */
+  async checkUpdates(): Promise<UpdateStatus> {
+    return this.request<UpdateStatus>("POST", "/admin/system/updates/check");
   }
 
   /** Shortcut for "give user X their own IPTV list": creates a

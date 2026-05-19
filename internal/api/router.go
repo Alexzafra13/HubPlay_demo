@@ -158,6 +158,10 @@ type Dependencies struct {
 	// Audit es el productor de eventos al audit log unificado (PR5).
 	// nil-safe en los handlers (caen a un sink no-op).
 	Audit           handlers.AuditEmitter
+	// Updates expone el estado del update checker al panel admin. nil
+	// deja los endpoints /admin/system/updates devolviendo "feature
+	// no disponible" en lugar de 500. Esperado en dev builds.
+	Updates         handlers.UpdatesProvider
 }
 
 func NewRouter(deps Dependencies) http.Handler {
@@ -807,6 +811,14 @@ func NewRouter(deps Dependencies) http.Handler {
 					r.Get("/stats", sysHandler.Stats)
 					r.Get("/stream-activity", sysHandler.StreamActivity)
 					r.Get("/top-items", sysHandler.TopItems)
+					// Update checker (PR2 update-notifier). Si deps.Updates
+					// es nil (dev build / repo no configurado) las rutas
+					// devuelven cached zero-state vía el handler.
+					if deps.Updates != nil {
+						updHandler := handlers.NewUpdatesHandler(deps.Updates, deps.Logger)
+						r.Get("/updates", updHandler.Status)
+						r.Post("/updates/check", updHandler.Check)
+					}
 					// "Recientemente añadido" del dashboard. Mezcla
 					// movies + series rolled-up por actividad (no
 					// episodios sueltos como hacia /items/latest).

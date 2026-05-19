@@ -40,6 +40,7 @@ import (
 	"hubplay/internal/setup"
 	"hubplay/internal/stream"
 	"hubplay/internal/sysmetrics"
+	"hubplay/internal/updates"
 	"hubplay/internal/upload"
 	"hubplay/internal/user"
 )
@@ -61,7 +62,16 @@ var (
 
 func main() {
 	configPath := flag.String("config", "hubplay.yaml", "path to config file")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		// Output one-line — scripts (install.sh, monitoring, etc.) parsean
+		// stdout. Formato estable: "hubplay <version> (commit <sha>, built <date>)".
+		// dev builds quedan "hubplay dev (commit none, built unknown)" — parseable.
+		fmt.Printf("hubplay %s (commit %s, built %s)\n", version, commit, buildDate)
+		return
+	}
 
 	if err := run(*configPath); err != nil {
 		fmt.Fprintf(os.Stderr, "hubplay: %v\n", err)
@@ -591,6 +601,13 @@ func run(configPath string) error {
 	// fallido NO bloquea el flujo principal.
 	auditService := audit.NewService(repos.AuditLog, logger)
 
+	// Update checker (PR2 update-notifier): goroutine en background que
+	// sondea GitHub Releases cada 24h con ETag para detectar versiones
+	// nuevas. Si version=="dev" o repo=="" el servicio queda no-op.
+	// El context del run() cancela la goroutine al shutdown.
+	updateService := updates.New(version, "Alexzafra13/HubPlay_demo", logger)
+	updateService.Start(ctx)
+
 	// CORS registry (PR4 feature CORS-dynamic): combina statics del
 	// YAML + dynamics del DB en un atomic.Pointer.  Lo construimos
 	// AQUÍ (antes del router) para que NewRouter lo reciba listo.
@@ -670,6 +687,7 @@ func run(configPath string) error {
 		CorsOriginsRepo:  repos.CorsOrigins,
 		AuditLog:         repos.AuditLog,
 		Audit:            auditService,
+		Updates:          updateService,
 	})
 
 	server := &http.Server{
