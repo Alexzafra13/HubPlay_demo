@@ -146,6 +146,10 @@ type Dependencies struct {
 	// del panel admin de CORS. nil = los endpoints /admin/cors-origins
 	// no se montan.
 	CorsOriginsRepo handlers.CorsOriginStore
+	// AuditLog expone Query + DistinctEventTypes al panel admin de
+	// auditoría (PR5). nil = los endpoints /admin/audit-log no se
+	// montan (tests minimalistas).
+	AuditLog        handlers.AuditLogStore
 }
 
 func NewRouter(deps Dependencies) http.Handler {
@@ -912,6 +916,22 @@ func NewRouter(deps Dependencies) http.Handler {
 					logsHandler := handlers.NewAdminLogsHandler(deps.LogBuffer, deps.SSELimiter)
 					r.Get("/logs", logsHandler.Snapshot)
 					r.Get("/logs/stream", logsHandler.Stream)
+
+					// Audit log unificado (PR5). Gateado por can_view_audit
+					// — un admin con sólo este flag puede revisar el
+					// historial sin tocar nada. El owner también pasa
+					// (User.Can() devuelve true para todo). Sub-Group
+					// adicional sobre el RequireAdmin del padre.
+					if deps.AuditLog != nil {
+						auditHandler := handlers.NewAuditLogHandler(deps.AuditLog, deps.Logger)
+						r.Group(func(r chi.Router) {
+							if deps.Permissions != nil {
+								r.Use(deps.Permissions.Require(authmodel.PermViewAudit))
+							}
+							r.Get("/audit-log", auditHandler.Query)
+							r.Get("/audit-log/types", auditHandler.EventTypes)
+						})
+					}
 				})
 			}
 

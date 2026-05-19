@@ -47,6 +47,10 @@ type Repositories struct {
 	// via el panel admin (migración 056). Combinado con los del YAML
 	// por el middleware al validar cada preflight.
 	CorsOrigins        *CorsOriginRepository
+	// AuditLog es el audit log unificado (migración 057). Productores
+	// en internal/audit emiten via este repo; el panel admin lo lee
+	// con filtros por tipo/usuario/ventana.
+	AuditLog           *AuditLogRepository
 }
 
 // NewRepositories creates all repositories from a database connection.
@@ -95,5 +99,6 @@ func NewRepositories(driver string, database *sql.DB) *Repositories {
 		CollectionImageOverrides: NewCollectionImageOverrideRepository(driver, database),
 		UploadAudit:        NewUploadAuditRepository(driver, database),
 		CorsOrigins:        NewCorsOriginRepository(driver, database),
+		AuditLog:           NewAuditLogRepository(driver, database),
 	}
 }

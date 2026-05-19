@@ -613,6 +613,7 @@ func run(configPath string) error {
 		UserRepo:         repos.Users,
 		CorsRegistry:     corsRegistry,
 		CorsOriginsRepo:  repos.CorsOrigins,
+		AuditLog:         repos.AuditLog,
 	})
 
 	server := &http.Server{

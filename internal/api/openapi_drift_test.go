@@ -301,6 +301,11 @@ var outOfScopeExact = map[string]string{
 	"GET /admin/system/cors-origins":    "admin panel — lista statics(YAML) + dynamics(DB)",
 	"POST /admin/system/cors-origins":   "admin panel — añade un origen dynamic (owner-only)",
 	"DELETE /admin/system/cors-origins": "admin panel — quita un dynamic (owner-only)",
+
+	// ── Audit log unificado (PR5) ───────────────────────────────────
+	// Endpoints del panel admin /admin/system. Gated por can_view_audit.
+	"GET /admin/system/audit-log":       "admin panel — query del audit log con filtros",
+	"GET /admin/system/audit-log/types": "admin panel — distinct event types para el dropdown",
 }
 
 // TestOpenAPISpec_RouterCoverage walks the AST of router.go to enumerate
