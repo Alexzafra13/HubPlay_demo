@@ -1741,6 +1741,17 @@
     "outcome_accepted": "Accepted",
     "outcome_rejected": "Rejected",
     "outcome_aborted": "Aborted",
-    "outcome_error": "Error"
+    "outcome_error": "Error",
+    "targetHere": "Upload to",
+    "targetRoot": "Upload to the library root",
+    "folder": {
+      "libraryLabel": "Library",
+      "root": "Root",
+      "up": "Up one level",
+      "empty": "This folder has no subfolders. Upload here or create a new one.",
+      "newFolderCta": "New folder",
+      "newFolderPlaceholder": "Folder name",
+      "createError": "Could not create folder."
+    }
   }
 }

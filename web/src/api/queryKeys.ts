@@ -24,6 +24,8 @@ export const queryKeys = {
   auditLog: (params: Record<string, unknown>) =>
     ["admin", "audit-log", params] as const,
   auditEventTypes: ["admin", "audit-log", "types"] as const,
+  uploadBrowse: (libraryID: string, path: string) =>
+    ["uploads", "browse", libraryID, path] as const,
   libraries: ["libraries"] as const,
   library: (id: string) => ["libraries", id] as const,
   items: (params?: Record<string, unknown>) => ["items", params] as const,

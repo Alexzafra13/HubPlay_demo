@@ -442,6 +442,24 @@ export interface AuditLogQueryResponse {
 }
 
 /**
+ * Una subcarpeta dentro de una librería (PR6 file explorer). El
+ * backend devuelve el path canónico relativo a la raíz de la
+ * librería (sin leading slash, separador "/"), no la ruta absoluta
+ * en disco.
+ */
+export interface LibraryFolder {
+  name: string;
+  path: string;
+}
+
+export interface UploadBrowseResponse {
+  library_id: string;
+  library_name: string;
+  path: string;
+  directories: LibraryFolder[];
+}
+
+/**
  * One row of the user-facing "Tus dispositivos" panel — every active
  * auth session (refresh token alive in DB) for the calling user.
  * Distinct from AdminStreamSession (the admin's "Now Playing" surface

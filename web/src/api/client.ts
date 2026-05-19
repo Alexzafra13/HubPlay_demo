@@ -60,6 +60,7 @@ import type {
   UploadAuditEntry,
   CorsOriginsListResponse,
   AuditLogQueryResponse,
+  UploadBrowseResponse,
   UserData,
   ApiErrorBody,
   ExternalSubtitleResult,
@@ -734,6 +735,24 @@ export class ApiClient {
     // this.baseUrl ya incluye el prefijo /api/v1 (ver factory al pie
     // del archivo). Compone "<base>/uploads/" sin duplicar el prefijo.
     return `${this.baseUrl}/uploads/`;
+  }
+
+  /** Lista subdirs dentro de una librería destino (PR6 file
+   *  explorer). path es relativo a la librería (vacío = raíz). */
+  async browseUploadFolders(libraryID: string, path: string): Promise<UploadBrowseResponse> {
+    const qs = path ? `?path=${encodeURIComponent(path)}` : "";
+    return this.request<UploadBrowseResponse>(
+      "GET",
+      `/libraries/${libraryID}/upload-browse${qs}`,
+    );
+  }
+
+  /** Crea una carpeta nueva dentro de la librería. Idempotente —
+   *  si ya existe, el backend devuelve 201 igualmente. */
+  async createUploadFolder(libraryID: string, path: string): Promise<void> {
+    return this.request<void>("POST", `/libraries/${libraryID}/folders`, {
+      body: { path },
+    });
   }
 
   /** Owner-only: lista de orígenes CORS (statics YAML + dynamics DB). */

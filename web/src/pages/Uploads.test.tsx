@@ -37,6 +37,17 @@ vi.mock("@/api/client", () => ({
   api: {
     listMyUploads: vi.fn().mockResolvedValue([]),
     uploadsEndpoint: vi.fn(() => "/api/v1/uploads/"),
+    // El FolderBrowser dentro del UploadDropzone lo invoca al elegir
+    // una librería. Devolver lista vacía es suficiente para los
+    // tests del Uploads page (los tests del FolderBrowser
+    // específicos están en su propio archivo).
+    browseUploadFolders: vi.fn().mockResolvedValue({
+      library_id: "",
+      library_name: "",
+      path: "",
+      directories: [],
+    }),
+    createUploadFolder: vi.fn().mockResolvedValue(undefined),
   },
 }));
 
@@ -228,11 +239,14 @@ describe("Uploads page — start upload", () => {
     expect(callArgs[0]).toBe(file);
     const opts = callArgs[1] as {
       endpoint: string;
-      metadata: { filename: string; library_id: string };
+      metadata: { filename: string; library_id: string; subpath: string };
     };
     expect(opts.endpoint).toBe("/api/v1/uploads/");
     expect(opts.metadata.filename).toBe("movie.mkv");
     expect(opts.metadata.library_id).toBe("lib-mov"); // primer destino
+    // Sin navegar el browser, el subpath empieza vacío = raíz de la
+    // librería. Pin del comportamiento default.
+    expect(opts.metadata.subpath).toBe("");
 
     // El componente llamó start() en la instancia recién construida.
     // vi.fn constructor expone .mock.instances con los `this` capturados.

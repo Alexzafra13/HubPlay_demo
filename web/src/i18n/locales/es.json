@@ -1741,6 +1741,17 @@
     "outcome_accepted": "Aceptado",
     "outcome_rejected": "Rechazado",
     "outcome_aborted": "Cancelado",
-    "outcome_error": "Error"
+    "outcome_error": "Error",
+    "targetHere": "Subir a",
+    "targetRoot": "Subir a la raíz de la biblioteca",
+    "folder": {
+      "libraryLabel": "Biblioteca",
+      "root": "Raíz",
+      "up": "Subir un nivel",
+      "empty": "Esta carpeta no tiene subcarpetas. Sube aquí o crea una nueva.",
+      "newFolderCta": "Nueva carpeta",
+      "newFolderPlaceholder": "Nombre de la carpeta",
+      "createError": "No se pudo crear la carpeta."
+    }
   }
 }

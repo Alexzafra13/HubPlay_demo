@@ -46,6 +46,7 @@ import {
   FileVideo,
 } from "lucide-react";
 
+import { FolderBrowser } from "@/components/uploads/FolderBrowser";
 import { api } from "@/api/client";
 import {
   useMe,
@@ -154,7 +155,7 @@ export default function Uploads() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // mount/unmount only
 
-  function startUpload(file: File, libraryID: string) {
+  function startUpload(file: File, libraryID: string, subpath: string) {
     const localID = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const initial: ActiveUpload = {
       localID,
@@ -188,6 +189,10 @@ export default function Uploads() {
         filename: file.name,
         filetype: file.type || "application/octet-stream",
         library_id: libraryID,
+        // Subpath dentro de la librería (PR6 file explorer). Vacío =
+        // raíz, mismo comportamiento pre-PR6. tusd lo persiste en su
+        // .info y el pipeline post-bytes lo lee desde ahí.
+        subpath: subpath,
       },
       onError: (err) => {
         setActive((prev) =>
@@ -306,7 +311,7 @@ interface DropzoneProps {
   libraries: Library[];
   quotaUsed?: number;
   quotaTotal?: number;
-  onUpload: (file: File, libraryID: string) => void;
+  onUpload: (file: File, libraryID: string, subpath: string) => void;
 }
 
 function UploadDropzone({
@@ -321,6 +326,9 @@ function UploadDropzone({
   const [libraryID, setLibraryID] = useState<string>(
     libraries[0]?.id ?? "",
   );
+  // Subpath dentro de la librería elegida (PR6 file explorer). Vacío
+  // = raíz. El FolderBrowser lo actualiza cuando el usuario navega.
+  const [subpath, setSubpath] = useState<string>("");
   const [rejectReason, setRejectReason] = useState<string | null>(null);
 
   // Mantén el library seleccionado coherente con la lista (puede
@@ -380,7 +388,7 @@ function UploadDropzone({
   function startAll() {
     if (!libraryID) return;
     for (const f of files) {
-      onUpload(f, libraryID);
+      onUpload(f, libraryID, subpath);
     }
     setFiles([]);
   }
@@ -459,21 +467,29 @@ function UploadDropzone({
             ))}
           </ul>
 
-          <div className="flex flex-wrap items-end gap-3">
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-text-muted">{t("uploads.libraryLabel")}</span>
-              <select
-                value={libraryID}
-                onChange={(e) => setLibraryID(e.target.value)}
-                className="rounded-md border border-border bg-bg-base px-2 py-1.5 text-sm"
-              >
-                {libraries.map((lib) => (
-                  <option key={lib.id} value={lib.id}>
-                    {lib.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+          <FolderBrowser
+            libraries={libraries}
+            libraryID={libraryID}
+            path={subpath}
+            onChange={(libID, p) => {
+              setLibraryID(libID);
+              setSubpath(p);
+            }}
+          />
+
+          <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+            <span className="text-text-muted">
+              {subpath ? (
+                <>
+                  {t("uploads.targetHere", { defaultValue: "Subir a" })}{" "}
+                  <span className="font-mono text-text-secondary">/{subpath}</span>
+                </>
+              ) : (
+                t("uploads.targetRoot", {
+                  defaultValue: "Subir a la raíz de la biblioteca",
+                })
+              )}
+            </span>
             <Button onClick={startAll} disabled={!libraryID || files.length === 0}>
               {t("uploads.startCta", { count: files.length })}
             </Button>
