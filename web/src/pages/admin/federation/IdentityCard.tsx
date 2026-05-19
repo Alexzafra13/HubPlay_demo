@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -171,14 +171,22 @@ function IdentityEditor({
   const [avatarError, setAvatarError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  useEffect(() => {
+  // Reset del formulario cuando el prop "info" del backend cambia
+  // (e.g. tras un PATCH exitoso del peer remoto). Patrón "derive
+  // state with previous tracking" para cumplir con
+  // react-hooks/set-state-in-effect — el useEffect+setState
+  // equivalente está prohibido por la regla.
+  const infoKey = `${info.name}|${info.avatar_color ?? ""}|${info.avatar_image_url ?? ""}`;
+  const [prevInfoKey, setPrevInfoKey] = useState(infoKey);
+  if (prevInfoKey !== infoKey) {
+    setPrevInfoKey(infoKey);
     setName(info.name);
     setColor(info.avatar_color ?? "");
     setError(null);
     setPendingPreview(null);
     setPendingFile(null);
     setAvatarError(null);
-  }, [info.name, info.avatar_color, info.avatar_image_url]);
+  }
 
   const previewUser = {
     username: info.name,

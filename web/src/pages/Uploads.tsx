@@ -397,11 +397,16 @@ function UploadDropzone({
 
   // Mantén el library seleccionado coherente con la lista (puede
   // cambiar si el admin crea/borra librerías mientras la página está
-  // abierta).
-  useEffect(() => {
-    if (libraryID && libraries.find((l) => l.id === libraryID)) return;
-    setLibraryID(libraries[0]?.id ?? "");
-  }, [libraries, libraryID]);
+  // abierta).  Patrón "derive state with previous tracking" — la regla
+  // react-hooks/set-state-in-effect prohíbe useEffect + setState.
+  const libsKey = libraries.map((l) => l.id).join(",");
+  const [prevLibsKey, setPrevLibsKey] = useState(libsKey);
+  if (prevLibsKey !== libsKey) {
+    setPrevLibsKey(libsKey);
+    if (!libraryID || !libraries.find((l) => l.id === libraryID)) {
+      setLibraryID(libraries[0]?.id ?? "");
+    }
+  }
 
   // validateFiles aplica las dos reglas cliente-side (extensión +
   // cuota) y devuelve la slice de aceptados.  Side-effect: pone

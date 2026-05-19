@@ -239,8 +239,11 @@ func TestUserRepository_GetOwnerID_FindsBackfilledAdmin(t *testing.T) {
 	// creamos al admin, así que el flag no está. Simulamos lo que
 	// haría el setup wizard.
 	driver := testutil.Driver()
+	// is_owner es BOOLEAN en ambos dialectos. SQLite acepta 1/0 por
+	// duck-typing pero Postgres es estricto y devuelve "boolean but
+	// expression is of type integer". TRUE es portable en los dos.
 	_, err := database.ExecContext(context.Background(),
-		rewritePlaceholdersForTest(driver, `UPDATE users SET is_owner = 1 WHERE id = ?`),
+		rewritePlaceholdersForTest(driver, `UPDATE users SET is_owner = TRUE WHERE id = ?`),
 		"u-alice")
 	if err != nil {
 		t.Fatalf("seed owner: %v", err)
