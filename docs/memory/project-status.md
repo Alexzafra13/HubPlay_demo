@@ -1,5 +1,146 @@
 # Estado del proyecto
 
+> 🎬 **Sesión 2026-05-19 (rama `claude/improve-channel-ordering-cKC8q`) — barrido grande de UX guiado por feedback de uso real: reordenación de canales drag&drop, identify/rematch Plex-style, overrides de logo/imagen (canales + colecciones), sanado de nombres IPTV, EPG icon fallback, iptv-org auto-discovery, lock + editor manual de metadatos, kebab admin en cada poster (home/listados/seasons/episodes) con todas las acciones, hero de colección rediseñado, y un bug crítico del scanner (item.Title no se actualizaba desde TMDb).**
+>
+> ## 🎯 Reordenación de canales — drag & drop completo (migration ya existía: 043)
+>
+> El editor antiguo movía un canal por click de flecha → 50 clicks para mover algo 50 posiciones. Sustituido por `ChannelOrderEditor` v2:
+> - **Drag & drop** con `@dnd-kit/core` + `@dnd-kit/sortable` (ratón, táctil, teclado: focus handle → Space → flechas → Space).
+> - **Salto de posición**: click en el `#` de la fila → input editable → Enter para saltar a cualquier puesto.
+> - **Buscador integrado** (nombre + grupo); el orden subyacente no cambia, drags durante filtrado siguen funcionando contra índices reales.
+> - **Selección múltiple** con checkboxes + barra de acciones contextual ("Ocultar N", "Mostrar N").
+> - **Move-to-top / move-to-bottom** explícitos para saltos largos.
+> - **Barra sticky de guardar** con contador "X cambios sin guardar".
+> - API del componente cambia: `onMove(idx, delta)` → `onReorder(from, to)` + `onBulkSetHidden(ids, hidden)`. Los dos consumers (admin curation + per-user customize) actualizados.
+>
+> ## 🎯 Identify / rematch contra TMDb (Plex-style) — items.go
+>
+> Modal admin para reidentificar películas/series cuando el match automático del scanner se equivocó:
+> - **Refactor del scanner**: `enrichMetadata` se parte en Search→Fetch→`applyMetadata`. Nuevo método público `IdentifyAndApply(itemID, externalID)` que reusa la maquinaria existente (estudios, sagas, reparto, descarga de imágenes) — cero duplicación.
+> - **Provider.SearchResult gana `PosterURL`** para que la lista de candidatos se renderice con cartas visuales (no texto plano).
+> - **2 endpoints admin** bajo `RequireAdmin`:
+>   - `GET /items/{id}/identify/candidates?query=...&year=...` — devuelve top candidatos TMDb con póster.
+>   - `POST /items/{id}/identify` body `{provider, external_id}` — aplica el match elegido + borra metadata previa.
+> - **Identify auto-bloquea el item** (ver "Lock de metadatos" abajo) para que el siguiente refresh no deshaga la elección.
+> - Frontend: `IdentifyDialog` con buscador + año + lista de candidatos como tarjetas.
+>
+> ## 🎯 BUG crítico arreglado — scanner.applyMetadata no actualizaba item.Title
+>
+> Causa raíz de que TODAS las películas se vieran con el nombre crudo del archivo ("Indiana Jones (2008).mkv") aunque el match TMDb hubiera funcionado: el flujo del scan automático sólo escribía `item.OriginalTitle`, **nunca `item.Title`**. El identify manual sí lo hacía (línea aparte explícita) — sólo el camino automático estaba roto. Fix: `applyMetadata` ahora actualiza ambos.
+>
+> **Retroactividad**: items ya escaneados quedaron con Title=filename. Solucionable con:
+> 1. Admin → biblioteca → "Refresh metadata" (corre sobre todo).
+> 2. Kebab → "Actualizar metadatos" en cada item (per-item, ahora SÍ hace rescan real — antes era un placebo).
+>
+> ## 🎯 Auto-identify retry-sin-año
+>
+> Para casos "Toy Story (2020).mkv" donde el (2020) es del usuario (TMDb dice 1995): si la search con title+year devuelve 0 results, **retry automático sólo con title**. Mucho mejor un match aproximado que dejar el item con el filename crudo.
+>
+> ## 🎯 Lock + editor manual de metadatos (Plex pattern — migration 051)
+>
+> Patrón Plex (single boolean per item, no per-field como Jellyfin):
+> - **Tabla separada `item_metadata_locks`** (PK item_id, presence = locked). En tabla separada en vez de columna en `items` para no regenerar sqlc + tocar la cadena de Update. FK CASCADE limpia auto al borrar item.
+> - **Scanner respeta el lock** en 3 caminos: `enrichMetadata`, `enrichIfMissing`, `RefreshMetadata` (library-wide). Locked items se saltan completos.
+> - **`IdentifyAndApply` + `UpdateItemMetadata` (editor manual) ponen el lock al guardar**: cualquier intervención humana queda fija hasta que el admin desbloquea.
+> - **2 endpoints nuevos**:
+>   - `PATCH /items/{id}/metadata` body `{title?, original_title?, year?, overview?, tagline?}` — campos opcionales (nil = no tocar, "" = borrar).
+>   - `PUT /items/{id}/metadata/lock` body `{locked: bool}` — toggle sin tocar contenido.
+> - **3er endpoint**: `POST /items/{id}/refresh-metadata` — re-corre el enrich sobre UN item (antes el "Actualizar metadatos" del kebab era cosmético, sólo invalidaba caché cliente).
+> - **`MetadataEditorDialog`**: form con title/original_title/year/overview/tagline + atajo "Identificar…" interno para saltar al IdentifyDialog si te das cuenta del raíz del problema mientras editas.
+>
+> ## 🎯 Override de logo por canal IPTV (migration 050)
+>
+> El admin sustituye el `tvg-logo` del M3U por su propio logo (URL externa o archivo subido), por canal individual. Patrón Jellyfin "Edit channel":
+> - **Tabla `channel_logo_overrides`** indexada por `(library_id, stream_url)` — mismo patrón que `channel_overrides` (migración 009) para sobrevivir al re-import del M3U que regenera UUIDs.
+> - **CHECK constraint**: `url <> '' OR file <> ''` — "clear" se modela como DELETE row, no UPDATE a empties.
+> - **Cascada en el proxy `/channels/{id}/logo`**:
+>   1. override.logo_file → servido directo desde `<imageDir>/channel-logos/`
+>   2. override.logo_url → vía cache remoto (existing LogoCache)
+>   3. channels.logo_url → M3U tvg-logo
+>   4. **EPG XMLTV `<icon>`** → fallback nuevo: `EPGProgramRepository.GetChannelIcon` (any non-empty de programas del canal). El dato YA se extraía en xmltv.go pero no se usaba.
+>   5. 404 → frontend cae a iniciales coloreadas.
+> - **3 endpoints admin** (PUT URL / POST upload multipart / DELETE) + reuso de imaging.* (MaxUploadBytes 10MB, SniffContentType, EnforceMaxPixels).
+> - **Sentinel `hubplay-local:channel-logos/<basename>`**: el overlay aplicado en `applyLogoOverlay` tagea LogoURL con este prefijo cuando es archivo subido; el proxy lo detecta y sirve directo desde disco. Validación defensiva de path traversal (`imaging.IsSafePathSegment`).
+> - Frontend: `ChannelLogoEditor` modal — preview con cache-buster, URL input, file picker, restaurar al M3U. Botón clickable en cada fila del editor de orden.
+>
+> ## 🎯 Auto-discovery de logos contra iptv-org
+>
+> Más allá de Plex/Jellyfin (que sólo lo ofrecen vía plugin). Botón admin "Buscar logos en iptv-org":
+> - **`IPTVOrgLogoLookup`** descarga + cachea (atomic rename) `https://iptv-org.github.io/api/channels.json` (~5MB). Match por `tvg_id` (lowercase). Cache lazy + manual refresh (no cron — el JSON cambia despacio).
+> - **`Service.RefreshLogosFromIPTVOrg`** itera canales que no tengan logo ni override + tengan tvg_id. Los hallazgos se persisten como override URL.
+> - **Respuesta rica**: `{total, already_have_logo, without_tvg_id, skipped_has_override, not_in_database, updated}`. Sin desglose el operador ve "0 actualizados" sin pista de por qué — el feedback indica si es por tvg-ids ausentes, sin coincidencia, o porque ya tenían logo.
+> - Frontend: botón "Buscar logos en iptv-org" en el panel admin de canales con mensaje compositivo según el desglose.
+>
+> ## 🎯 Sanitización de nombres de canales IPTV (canales con basura del M3U)
+>
+> `iptv.SanitizeChannelName(raw) → (clean, quality)` en wire:
+> - Elimina `[geo-blocked]`, `[VIP]`, `[Premium]`, `[HD]`, `[1080p]`, `[HEVC]`, `(HD)`, `|ES|`, símbolos `★ ▶ ●` etc.
+> - Extrae **quality canónica** para badge: `UHD` (4K/2160p), `FHD` (1080p), `HD` (720p), `SD` (480p). El frontend renderiza badge con color por tier en el ChannelCard.
+> - **Mid-name 4K respetado** (parte del branding tipo "Studio 4K Network"). Trailing quality (`ESPN HD`) sí se quita.
+> - DTO gana `quality` + `raw_name` (sólo cuando difiere). 25 tests cubren casos reales del campo.
+>
+> ## 🎯 Override de imágenes de COLECCIÓN (poster + backdrop, migration 052)
+>
+> Nivel saga, no item. TMDb provee `poster_path` Y `backdrop_path` por colección — el scanner ya las extraía en `EnsureCollection`, los dos son editables:
+> - **Tabla `collection_image_overrides`** PK `(collection_id, image_type)`, image_type ∈ `{poster, backdrop}`. CHECK url o file no vacío. FK CASCADE.
+> - **Cascada en CollectionHandler.Get**: override.file → endpoint local serve; override.url → URL tal cual; collections.{poster_url,backdrop_url} → TMDb.
+> - **5 endpoints**: PUT (URL), POST (upload multipart), DELETE, GET file (auth — sirve archivo subido con cache-buster `?v=updated_at.UnixNano`), **GET available** (admin) que lista pósters/backdrops alternativos desde TMDb (provider.Manager.FetchCollectionImages → tmdb /collection/{id}/images).
+> - Frontend: `CollectionImageEditor` modal con tabs Póster/Fondo. Cada tab: **browse TMDb arriba** (grid clickable con idioma + dimensiones, langScore prioriza locale del usuario), URL input, upload, "Restaurar imagen de TMDb". Botón flotante "Cambiar imágenes" en el hero del CollectionDetail (admin only).
+>
+> ## 🎯 Hero de colección rediseñado
+>
+> Patrón ItemDetail pero sin tráiler ni descripción (lo que el usuario pidió: "algo bonito, no feo"):
+> - `min-height: clamp(360px, 50vh, 520px)` para que respire.
+> - Doble gradient (top + bottom) para legibilidad sobre cualquier backdrop.
+> - Poster a h-80 w-56 (antes h-64 w-44), con ring blanco sutil + shadow fuerte → "flotando".
+> - Eyebrow "SAGA" en accent uppercase tracking, h1 bold tracking-tight.
+> - Meta-pill: count + **rango de años** ("1981 – 2008") en mono.
+> - Fallback de backdrop: gradient con accent en vez de gris plano cuando TMDb no provee.
+> - Overview eliminado del hero (el usuario lo pidió).
+>
+> ## 🎯 Kebab admin en CADA poster (no sólo en detalle)
+>
+> Plex/Jellyfin pattern: el admin puede actuar sobre cualquier card desde cualquier surface sin entrar a detail:
+> - **`useItemActions` (zustand)** + **`<ItemActionModals />`** montado una sola vez en App root → cualquier kebab abre Identify / Editor / ImageManager sin hospedar modales por card (sería 200 modales en una página con 200 cards).
+> - **`<ItemKebab />`** en `components/media`: botón flotante esquina superior-derecha del PosterCard, sólo visible en hover y sólo para admin + tipos identificables. stopPropagation para no disparar el `<Link>` del card.
+> - Acciones por tipo:
+>   - movie/series: Cambiar imágenes + Identificar + Editar metadatos + Actualizar metadatos + Info archivo
+>   - season: Cambiar imágenes + Actualizar metadatos
+>   - episode: Cambiar imágenes (still del episodio) + Actualizar metadatos + Info archivo
+> - Se auto-oculta cuando ninguna acción aplica (no admin sobre canal IPTV, etc.).
+> - **ImageManager filtra pestañas por tipo**: season → sólo "Poster", episode → sólo "thumb", movie → primary+backdrop+logo+thumb, series → primary+backdrop+logo+banner. Antes mostraba 5 tabs vacíos en seasons.
+>
+> ## 🎯 Sub-fixes de UX del feedback de uso
+>
+> - **BUG: `/live-tv/customize` mostraba el orden del admin, no del usuario.** El handler `ListChannels` caía a `GetChannels` (sin overlay) cuando `include_hidden=true` (lo que el panel siempre pide). Nuevo método `Service.GetChannelsForUserPersonalisation` que aplica el overlay del usuario preservando hidden rows.
+> - **Rating del poster movido a bottom-left** para no chocar con el kebab admin (top-right en hover).
+> - **Hover ring**: PosterCard gana el mismo `ring-1 ring-border/40 → group-hover:ring-accent/40` que /collections — efecto "card responde entera", sólo era anillo de profundidad faltante.
+> - **Image refresh inmediato**: mutaciones de imagen invalidan ahora `["items"]` + continueWatching + homeTrending + homeRecommended además de item(id). Cache-buster global vía nonce zustand para el preview del ImageManager (URL estable, bytes nuevos).
+> - **3 tarjetas "Películas/Series/TV en vivo"** del panel de búsqueda → reemplazadas por una rail **"Recomendados"** (los tabs de la topbar ya ofrecen esos atajos).
+> - **Focus ring agresivo del buscador**: global `*:focus-visible` añadía un box-shadow de 4px accent a TODOS los focused. Excepción para input/textarea/select.
+> - **"Información del archivo" del kebab** ahora SÍ scrollea al anchor (doble RAF en mount para esperar a que la sección tenga altura).
+>
+> ## 📋 Migraciones nuevas
+>
+> - **050 `channel_logo_overrides`** (sqlite + postgres) — override de tvg-logo por canal.
+> - **051 `item_metadata_locks`** (sqlite + postgres) — lock binario per-item.
+> - **052 `collection_image_overrides`** (sqlite + postgres) — override poster/backdrop por saga.
+>
+> ## 🧪 Tests
+>
+> - Backend: todos los paquetes verdes. 8 tests del Identify handler + 7 del ChannelLogo + 25 del SanitizeChannelName.
+> - Frontend: **576/576 vitest verde**. Tests del ChannelOrderEditor (12), IdentifyDialog (5). PosterCard/MediaGrid wrappean ahora con QueryClientProvider (ItemKebab llama `useQueryClient`).
+>
+> ## 📝 Patrones reusables que dejamos
+>
+> - **Read-time overlay table** keyed by stable identifier (stream_url para canales) para overrides admin que sobreviven a regeneraciones de UUID. Ya 4 tablas: `channel_overrides` (tvg_id), `library_channel_order`, `user_channel_order`, `channel_logo_overrides`. Pattern descrito en migration 009.
+> - **Tabla separada de opt-out** (presencia = activado): `item_metadata_locks`. Evita regenerar sqlc + cadena de Update. FK CASCADE = GC gratis.
+> - **Global modal store via zustand** (`useItemActions` + `<ItemActionModals/>`) para que cards/widgets puedan abrir modales sin hospedarlos. Patrón generalizable a otros tipos de "acción contextual sobre un objeto".
+> - **Sentinel URL `hubplay-local:.../<basename>`** para que el overlay marque "este logo viene de disco local"; el proxy lo detecta y sirve directo. Evita una columna extra en el modelo.
+> - **Refactor del scanner**: `enrichMetadata` se parte en `Search→Fetch→applyMetadata` para que el flujo identify reuse la maquinaria existente. Cero duplicación de lógica de estudios/sagas/imágenes/reparto.
+>
+> ---
+>
 > 🎬 **Sesión 2026-05-18 cinco (rama `claude/review-project-progress-snmmo`) — pasada "como página grande" sobre el flow Steam-style: anti-abuse (rate-limit + cap + admin toggle), cron sweepers, página /me/notifications full, i18n proper, a11y, tests + ADR-024/025.**
 >
 > ## 🛠️ Anti-abuse en endpoints públicos (3 capas)
