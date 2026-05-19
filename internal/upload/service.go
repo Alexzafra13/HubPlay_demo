@@ -282,6 +282,7 @@ func (s *Service) Finish(ctx context.Context, in FinishInput) FinishResult {
 		if outcome == "accepted" {
 			s.publish(event.UploadDone, map[string]any{
 				"id":         in.UploadID,
+				"user_id":    in.UserID,
 				"library_id": libraryID,
 				"final_path": finalPath,
 			})
@@ -289,15 +290,16 @@ func (s *Service) Finish(ctx context.Context, in FinishInput) FinishResult {
 			// En cualquier fallo devolvemos los bytes a la cuota.
 			s.users.ReleaseUploadBytes(ctx, in.UserID, in.Size) //nolint:errcheck
 			s.publish(event.UploadError, map[string]any{
-				"id":     in.UploadID,
-				"reason": errMsg,
+				"id":      in.UploadID,
+				"user_id": in.UserID,
+				"reason":  errMsg,
 			})
 		}
 		return res
 	}
 
 	// ── Phase 1: validating (magic bytes + extension recheck) ───────
-	s.publish(event.UploadPhase, map[string]any{"id": in.UploadID, "phase": "validating"})
+	s.publish(event.UploadPhase, map[string]any{"id": in.UploadID, "user_id": in.UserID, "phase": "validating"})
 	if err := ValidateExtension(in.SanitizedName); err != nil {
 		return finalize("rejected", err.Error(), "", "")
 	}
@@ -310,7 +312,7 @@ func (s *Service) Finish(ctx context.Context, in FinishInput) FinishResult {
 	// ── Phase 2: probing (ffprobe) ──────────────────────────────────
 	// Subtítulos saltan ffprobe — no son media decodificable.
 	if kind == KindVideo {
-		s.publish(event.UploadPhase, map[string]any{"id": in.UploadID, "phase": "probing"})
+		s.publish(event.UploadPhase, map[string]any{"id": in.UploadID, "user_id": in.UserID, "phase": "probing"})
 		result, err := s.prober.Probe(ctx, in.SourcePath)
 		if err != nil {
 			return finalize("rejected", "ffprobe: "+err.Error(), "", "")
@@ -333,7 +335,7 @@ func (s *Service) Finish(ctx context.Context, in FinishInput) FinishResult {
 	}
 
 	// ── Phase 3: moving ─────────────────────────────────────────────
-	s.publish(event.UploadPhase, map[string]any{"id": in.UploadID, "phase": "moving"})
+	s.publish(event.UploadPhase, map[string]any{"id": in.UploadID, "user_id": in.UserID, "phase": "moving"})
 	lib, err := s.picker.PickDestination(ctx, in.UserID, in.LibraryIDHint, kind)
 	if err != nil {
 		return finalize("rejected", "pick library: "+err.Error(), "", "")
@@ -348,7 +350,7 @@ func (s *Service) Finish(ctx context.Context, in FinishInput) FinishResult {
 
 	// ── Phase 4: indexing — fire-and-forget event so the scanner ────
 	// picks it up on its next pass / immediately if it's listening.
-	s.publish(event.UploadPhase, map[string]any{"id": in.UploadID, "phase": "indexing"})
+	s.publish(event.UploadPhase, map[string]any{"id": in.UploadID, "user_id": in.UserID, "phase": "indexing"})
 	s.publish(event.ItemAdded, map[string]any{
 		"library_id": lib.ID,
 		"path":       target,
@@ -390,8 +392,9 @@ func (s *Service) Aborted(ctx context.Context, in FinishInput) {
 	}
 	_ = s.staging.RemoveUpload(in.UserID, in.UploadID)
 	s.publish(event.UploadError, map[string]any{
-		"id":     in.UploadID,
-		"reason": "aborted",
+		"id":      in.UploadID,
+		"user_id": in.UserID,
+		"reason":  "aborted",
 	})
 }
 

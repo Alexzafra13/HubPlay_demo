@@ -9,7 +9,9 @@ SELECT id, username, display_name, password_hash, COALESCE(avatar_path, '') AS a
        role, is_active, max_sessions, created_at, last_login_at,
        parent_user_id, pin_hash, max_content_rating, password_change_required,
        access_expires_at, avatar_color,
-       can_upload, upload_quota_bytes, upload_used_bytes
+       can_upload, upload_quota_bytes, upload_used_bytes,
+       is_owner, can_manage_admins, can_manage_users, can_manage_libraries,
+       can_manage_iptv, can_edit_metadata, can_change_artwork, can_view_audit
 FROM users
 WHERE id = $1;
 
@@ -18,7 +20,9 @@ SELECT id, username, display_name, password_hash, COALESCE(avatar_path, '') AS a
        role, is_active, max_sessions, created_at, last_login_at,
        parent_user_id, pin_hash, max_content_rating, password_change_required,
        access_expires_at, avatar_color,
-       can_upload, upload_quota_bytes, upload_used_bytes
+       can_upload, upload_quota_bytes, upload_used_bytes,
+       is_owner, can_manage_admins, can_manage_users, can_manage_libraries,
+       can_manage_iptv, can_edit_metadata, can_change_artwork, can_view_audit
 FROM users
 WHERE username = $1;
 
@@ -38,7 +42,9 @@ SELECT id, username, display_name, COALESCE(avatar_path, '') AS avatar_path,
        role, is_active, created_at, last_login_at,
        parent_user_id, pin_hash, max_content_rating, password_change_required,
        access_expires_at, avatar_color,
-       can_upload, upload_quota_bytes, upload_used_bytes
+       can_upload, upload_quota_bytes, upload_used_bytes,
+       is_owner, can_manage_admins, can_manage_users, can_manage_libraries,
+       can_manage_iptv, can_edit_metadata, can_change_artwork, can_view_audit
 FROM users
 ORDER BY username
 LIMIT $1 OFFSET $2;

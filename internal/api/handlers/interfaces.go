@@ -382,6 +382,13 @@ type EventBusSubscriber interface {
 	Subscribe(eventType event.Type, handler event.Handler) func()
 }
 
+// UploadAuditLister es la mínima superficie del repo de auditoría que
+// el handler /api/uploads/mine usa. Interface en vez del concreto para
+// que tests pasen un fake sin DB.
+type UploadAuditLister interface {
+	ListByUser(ctx context.Context, userID string, limit int) ([]db.UploadAuditRow, error)
+}
+
 // EventBusPublisher is the publish-only side of the bus, used by
 // handlers that emit events but never consume them (progress handler
 // fans out user-scoped events to other clients of the same user).

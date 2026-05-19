@@ -13,6 +13,7 @@ import (
 
 	"hubplay/internal/api/handlers"
 	"hubplay/internal/auth"
+	authmodel "hubplay/internal/auth/model"
 	"hubplay/internal/config"
 	"hubplay/internal/db"
 	"hubplay/internal/event"
@@ -121,6 +122,21 @@ type Dependencies struct {
 	// admin DB panel or wizard saves a new driver. nil-safe — the
 	// handlers degrade to "saved, restart manually" when missing.
 	RestartRequester *config.RestartRequester
+	// Uploads sirve el protocolo tus + endpoints custom de uploads
+	// (PR2 feature upload). nil-safe: si está apagado en config, el
+	// binario arranca sin él y las rutas /api/v1/uploads* simplemente
+	// no se montan (cliente recibe 404).
+	Uploads        http.Handler
+	UploadsAudit   handlers.UploadAuditLister
+	// Permissions enforza los flags granulares de admin (migración 055).
+	// nil = router cae al gate de RequireAdmin para todo (comportamiento
+	// pre-migración); en producción se pasa siempre y los endpoints
+	// owner-only + can_manage_admins lo aprovechan.
+	Permissions    *auth.PermissionChecker
+	// UserRepo expone GetByID + SetPermission + TransferOwnership al
+	// PermissionsHandler. Interface estrecha definida en el paquete
+	// handlers; el *db.UserRepository concreto la satisface.
+	UserRepo       handlers.PermissionsStore
 }
 
 func NewRouter(deps Dependencies) http.Handler {
@@ -397,6 +413,23 @@ func NewRouter(deps Dependencies) http.Handler {
 				r.Get("/me/events", meEventsHandler.Stream)
 			}
 
+			// Uploads (PR2 feature). Tres superficies:
+			//   POST/PATCH/HEAD/DELETE /uploads/         → protocolo tus
+			//   GET                    /uploads/mine     → audit del usuario
+			//   GET                    /uploads/events   → SSE filtrado
+			// El tus handler se monta con chi.Mount para que el path-routing
+			// (basePath + uploadID) lo lleve tusd internamente sin que chi
+			// le pise el id como param.
+			if deps.Uploads != nil && deps.UploadsAudit != nil && deps.EventBus != nil {
+				uploadsAPI := handlers.NewUploadsHandler(deps.UploadsAudit, deps.EventBus, deps.SSELimiter, deps.Logger)
+				r.Get("/uploads/mine", uploadsAPI.ListMine)
+				r.Get("/uploads/events", uploadsAPI.Stream)
+				// tus handler. Importante: bajo /api/v1/uploads/ con el slash
+				// final — tusd compone Location: /api/v1/uploads/<id> tras
+				// el POST de creación, y el cliente PATCH-ea ahí mismo.
+				r.Mount("/uploads/", deps.Uploads)
+			}
+
 			// Current user
 			r.Get("/me", userHandler.Me)
 			r.Post("/me/password", authHandler.ChangeMyPassword)
@@ -445,7 +478,14 @@ func NewRouter(deps Dependencies) http.Handler {
 				r.Delete("/{id}", userHandler.Delete)
 				r.Post("/{id}/reset-password", authHandler.ResetPassword)
 				r.Put("/{id}/content-rating", authHandler.SetContentRating)
-				r.Put("/{id}/role", userHandler.SetRole)
+				// SetRole es owner-only (migración 055): sólo el owner
+				// promueve a admin o degrada uno. can_manage_admins gestiona
+				// FLAGS de admins ya existentes, no el role.
+				if deps.Permissions != nil {
+					r.With(deps.Permissions.RequireOwner).Put("/{id}/role", userHandler.SetRole)
+				} else {
+					r.Put("/{id}/role", userHandler.SetRole)
+				}
 				r.Put("/{id}/active", userHandler.SetActive)
 				r.Put("/{id}/access", userHandler.SetAccess)
 				// Library access matrix. GET paints the admin UI
@@ -464,6 +504,16 @@ func NewRouter(deps Dependencies) http.Handler {
 				// /admin/libraries first and then come back to tick
 				// the new lib in the access matrix.
 				r.Post("/{id}/iptv-libraries", userHandler.CreatePersonalIPTV)
+
+				// Permission flags (migración 055). El read es admin-only
+				// genérico; el write está gated por can_manage_admins.
+				// El owner es inmutable — sin endpoint de transferencia.
+				if deps.Permissions != nil && deps.UserRepo != nil {
+					permHandler := handlers.NewPermissionsHandler(deps.UserRepo, deps.Logger)
+					r.Get("/{id}/permissions", permHandler.GetPermissions)
+					r.With(deps.Permissions.Require(authmodel.PermManageAdmins)).
+						Put("/{id}/permissions", permHandler.PutPermissions)
+				}
 			})
 
 			// PIN management — auth-only (the handler then enforces
@@ -503,7 +553,15 @@ func NewRouter(deps Dependencies) http.Handler {
 				adminAuth := handlers.NewAdminAuthHandler(ks, nil, observe, deps.Logger)
 
 				r.Route("/admin/auth/keys", func(r chi.Router) {
-					r.Use(auth.RequireAdmin)
+					// Owner-only (migración 055): JWT signing keys protegen
+					// la autenticación de todo el server. Rotar/podar es
+					// una operación que sólo el dueño de la instalación
+					// debería tocar.
+					if deps.Permissions != nil {
+						r.Use(deps.Permissions.RequireOwner)
+					} else {
+						r.Use(auth.RequireAdmin)
+					}
 					r.Get("/", adminAuth.ListKeys)
 					r.Post("/rotate", adminAuth.Rotate)
 					r.Post("/prune", adminAuth.Prune)
@@ -568,7 +626,15 @@ func NewRouter(deps Dependencies) http.Handler {
 				if deps.Federation != nil {
 					adminFed := handlers.NewFederationAdminHandler(deps.Federation, deps.Logger)
 					r.Route("/admin/peers", func(r chi.Router) {
-						r.Use(auth.RequireAdmin)
+						// Owner-only (migración 055): pairing con peers
+						// remotos abre superficie de salida de datos
+						// (catálogo, posters proxied). Operación de
+						// instalación, no de admin de día a día.
+						if deps.Permissions != nil {
+							r.Use(deps.Permissions.RequireOwner)
+						} else {
+							r.Use(auth.RequireAdmin)
+						}
 						r.Get("/", adminFed.ListPeers)
 						r.Get("/identity", adminFed.GetServerIdentity)
 						r.Put("/identity", adminFed.UpdateServerIdentity)
@@ -727,41 +793,46 @@ func NewRouter(deps Dependencies) http.Handler {
 						r.Delete("/settings/{key}", settingsHandler.Reset)
 					}
 
-					// DB backup / restore. Lives under /admin/system
-					// because it's a system-level admin operation —
-					// same RequireAdmin gate, same prefix the dashboard
-					// uses for its other system endpoints.
-					if deps.DB != nil {
-						backupHandler := handlers.NewAdminBackupHandler(
-							deps.Config.Database.Driver, deps.DB, deps.Config.Database.Path, deps.Logger,
-						)
-						r.Get("/backup", backupHandler.Download)
-						r.Post("/backup/restore", backupHandler.Upload)
-					}
-
-					// Database driver + DSN management. Lets the
-					// admin switch sqlite↔postgres without dropping
-					// to the host shell to edit YAML. The save endpoint
-					// does NOT swap the live connection (driver swap
-					// is a process-boundary concern); the restart
-					// endpoint pairs with it so the panel can finish
-					// the round-trip from the browser.
-					if deps.SetupService != nil && deps.ConfigPath != "" {
-						dbHandler := handlers.NewAdminDBHandler(
-							deps.Config,
-							deps.ConfigPath,
-							deps.DB,
-							deps.SetupService.SaveDatabaseConfig,
-							deps.RestartRequester,
-							deps.Logger,
-						)
-						r.Get("/db", dbHandler.Status)
-						r.Get("/db/profiles", dbHandler.Profiles)
-						r.Post("/db/test", dbHandler.Test)
-						r.Put("/db", dbHandler.Save)
-						r.Post("/db/migrate", dbHandler.Migrate)
-						r.Post("/restart", dbHandler.Restart)
-					}
+					// DB backup / restore + DB driver swap + restart.
+					// OWNER-ONLY (migración 055) — son operaciones que
+					// pueden:
+					//   - Exfiltrar TODA la DB en un fichero (backup
+					//     download).
+					//   - Reemplazar la DB con un sqlite arbitrario
+					//     (restore upload).
+					//   - Cambiar el driver de DB (swap a una DSN
+					//     externa controlada por el atacante).
+					//   - Reiniciar el server.
+					// Las metemos en un sub-Group con permCheck.RequireOwner
+					// encima del RequireAdmin del padre.
+					r.Group(func(r chi.Router) {
+						if deps.Permissions != nil {
+							r.Use(deps.Permissions.RequireOwner)
+						}
+						if deps.DB != nil {
+							backupHandler := handlers.NewAdminBackupHandler(
+								deps.Config.Database.Driver, deps.DB, deps.Config.Database.Path, deps.Logger,
+							)
+							r.Get("/backup", backupHandler.Download)
+							r.Post("/backup/restore", backupHandler.Upload)
+						}
+						if deps.SetupService != nil && deps.ConfigPath != "" {
+							dbHandler := handlers.NewAdminDBHandler(
+								deps.Config,
+								deps.ConfigPath,
+								deps.DB,
+								deps.SetupService.SaveDatabaseConfig,
+								deps.RestartRequester,
+								deps.Logger,
+							)
+							r.Get("/db", dbHandler.Status)
+							r.Get("/db/profiles", dbHandler.Profiles)
+							r.Post("/db/test", dbHandler.Test)
+							r.Put("/db", dbHandler.Save)
+							r.Post("/db/migrate", dbHandler.Migrate)
+							r.Post("/restart", dbHandler.Restart)
+						}
+					})
 
 					// Logs viewer. Snapshot endpoint for the initial
 					// fill, SSE stream for the live tail. The handler

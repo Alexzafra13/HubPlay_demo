@@ -39,6 +39,10 @@ type Repositories struct {
 	EpisodeSegments    *EpisodeSegmentRepository
 	ItemMetadataLocks  *ItemMetadataLockRepository
 	CollectionImageOverrides *CollectionImageOverrideRepository
+	// UploadAudit registra cada upload (PR2 feature upload). Append-only;
+	// el service de upload inserta una fila al cerrar el pipeline. El
+	// admin panel lo consulta via /admin/uploads/audit (no expuesto en v1).
+	UploadAudit        *UploadAuditRepository
 }
 
 // NewRepositories creates all repositories from a database connection.
@@ -85,5 +89,6 @@ func NewRepositories(driver string, database *sql.DB) *Repositories {
 		EpisodeSegments:    NewEpisodeSegmentRepository(driver, database),
 		ItemMetadataLocks:  NewItemMetadataLockRepository(driver, database),
 		CollectionImageOverrides: NewCollectionImageOverrideRepository(driver, database),
+		UploadAudit:        NewUploadAuditRepository(driver, database),
 	}
 }

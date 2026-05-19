@@ -38,6 +38,7 @@ import (
 	"hubplay/internal/setup"
 	"hubplay/internal/stream"
 	"hubplay/internal/sysmetrics"
+	"hubplay/internal/upload"
 	"hubplay/internal/user"
 )
 
@@ -488,6 +489,45 @@ func run(configPath string) error {
 	hostMetrics := sysmetrics.New(5*time.Second, logger)
 	hostMetrics.Start(ctx)
 
+	// Uploads (PR2 feature). El handler se cablea sólo si está
+	// activado en config — si no, deps.Uploads queda nil y el router
+	// no monta /api/v1/uploads*.
+	var uploadsHandler http.Handler
+	if cfg.Upload.Enabled {
+		stagingDir, err := upload.NewStagingDir(cfg.Upload.StagingDir)
+		if err != nil {
+			logger.Error("upload staging dir setup failed", "error", err)
+			os.Exit(1)
+		}
+		upSvc := upload.NewService(
+			upload.Config{
+				MaxUploadBytes: cfg.Upload.MaxBytesPerUpload,
+				MinDurationMs:  cfg.Upload.MinDurationMs,
+			},
+			stagingDir,
+			repos.Users,
+			repos.UploadAudit,
+			eventBus,
+			upload.NewLibraryPicker(repos.Libraries),
+			prober,
+			logger,
+		)
+		// basePath debe casar EXACTAMENTE con el path bajo el que se
+		// monta en chi (/api/v1/uploads/). tusd usa este string para
+		// generar el Location: <basePath><id> tras el POST de creación.
+		tusd, err := upload.NewTusdHandler(upSvc, "/api/v1/uploads/")
+		if err != nil {
+			logger.Error("upload tusd handler setup failed", "error", err)
+			os.Exit(1)
+		}
+		uploadsHandler = tusd
+		logger.Info("uploads enabled",
+			"staging_dir", stagingDir.Root(),
+			"max_bytes", cfg.Upload.MaxBytesPerUpload)
+	} else {
+		logger.Info("uploads disabled (config.upload.enabled=false)")
+	}
+
 	router := api.NewRouter(api.Dependencies{
 		Auth:          authService,
 		DeviceCode:    deviceCodeService,
@@ -539,6 +579,10 @@ func run(configPath string) error {
 		HostMetrics:      hostMetrics,
 		ConfigPath:       configPath,
 		RestartRequester: restartRequester,
+		Uploads:          uploadsHandler,
+		UploadsAudit:     repos.UploadAudit,
+		Permissions:      auth.NewPermissionChecker(repos.Users),
+		UserRepo:         repos.Users,
 	})
 
 	server := &http.Server{

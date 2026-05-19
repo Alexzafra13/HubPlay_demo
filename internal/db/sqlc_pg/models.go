@@ -495,6 +495,22 @@ type TrickplayInfo struct {
 	SpritePath string `json:"sprite_path"`
 }
 
+type UploadAudit struct {
+	ID           string         `json:"id"`
+	UserID       string         `json:"user_id"`
+	LibraryID    sql.NullString `json:"library_id"`
+	OriginalName string         `json:"original_name"`
+	FinalPath    sql.NullString `json:"final_path"`
+	Bytes        int64          `json:"bytes"`
+	Sha256       sql.NullString `json:"sha256"`
+	MimeDetected sql.NullString `json:"mime_detected"`
+	Outcome      string         `json:"outcome"`
+	ErrorMessage sql.NullString `json:"error_message"`
+	StartedAt    time.Time      `json:"started_at"`
+	FinishedAt   time.Time      `json:"finished_at"`
+	DurationMs   int64          `json:"duration_ms"`
+}
+
 type User struct {
 	ID                     string         `json:"id"`
 	Username               string         `json:"username"`
@@ -520,6 +536,14 @@ type User struct {
 	CanUpload              bool           `json:"can_upload"`
 	UploadQuotaBytes       int64          `json:"upload_quota_bytes"`
 	UploadUsedBytes        int64          `json:"upload_used_bytes"`
+	IsOwner                bool           `json:"is_owner"`
+	CanManageAdmins        bool           `json:"can_manage_admins"`
+	CanManageUsers         bool           `json:"can_manage_users"`
+	CanManageLibraries     bool           `json:"can_manage_libraries"`
+	CanManageIptv          bool           `json:"can_manage_iptv"`
+	CanEditMetadata        bool           `json:"can_edit_metadata"`
+	CanChangeArtwork       bool           `json:"can_change_artwork"`
+	CanViewAudit           bool           `json:"can_view_audit"`
 }
 
 type UserChannelFavorite struct {

@@ -275,6 +275,24 @@ var outOfScopeExact = map[string]string{
 	"GET /libraries/{id}/channels/without-epg":         "admin channel health panel",
 	"GET /libraries/{id}/channels/health-summary":      "admin channel health panel",
 	"GET /libraries/{id}/epg-sources":                  "admin: read of EPG source list",
+
+	// ── Uploads (feature PR2) ─────────────────────────────────────────
+	// Las rutas POST/PATCH/HEAD/DELETE /uploads/* las sirve tusd vía
+	// chi.Mount (protocolo tus, no es REST clásico — el cliente usa
+	// la lib tus-js-client / tus-android, no un SDK derivado del
+	// OpenAPI). Documentadas en docs/architecture/uploads.md cuando
+	// aterrice. Aquí listamos los dos endpoints custom de lectura,
+	// que sí son específicos del frontend (panel "tus uploads").
+	"GET /uploads/mine":   "frontend upload panel, listará audit del propio usuario",
+	"GET /uploads/events": "SSE filtrado a uploads del propio usuario",
+
+	// ── Admin permissions (PR3) ───────────────────────────────────────
+	// Panel admin de gestión de permisos granulares. El frontend la
+	// llama desde el detalle de usuario; no es superficie pública.
+	// is_owner es inmutable de por vida — no hay endpoint de
+	// transferencia por diseño.
+	"GET /users/{id}/permissions": "admin panel — lee flags del usuario",
+	"PUT /users/{id}/permissions": "admin panel — modifica flags (gated can_manage_admins)",
 }
 
 // TestOpenAPISpec_RouterCoverage walks the AST of router.go to enumerate

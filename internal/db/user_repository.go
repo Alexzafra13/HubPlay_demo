@@ -389,6 +389,86 @@ func (r *UserRepository) ReleaseUploadBytes(ctx context.Context, id string, delt
 	return nil
 }
 
+// ─── Admin permissions (migración 055) ──────────────────────────────
+//
+// Raw SQL por la misma razón que las mutaciones de upload: sqlc 1.31.1
+// trunca queries con whitelists largas + WHERE compuestos como el de
+// TransferOwnership. Las superficies son pocas y estables, así que el
+// coste de mantenimiento es bajo.
+
+// validPermissionColumn: whitelist de columnas que SetPermission puede
+// tocar. Definida aquí (en el repo) para que ningún caller pueda meter
+// SQL via el campo `permission` — incluso aunque el handler validara,
+// la defensa en profundidad es barata.
+var validPermissionColumn = map[string]struct{}{
+	"can_manage_admins":    {},
+	"can_manage_users":     {},
+	"can_manage_libraries": {},
+	"can_manage_iptv":      {},
+	"can_edit_metadata":    {},
+	"can_change_artwork":   {},
+	"can_view_audit":       {},
+	"can_upload":           {},
+}
+
+// SetPermission flipea un flag granular. column DEBE estar en el
+// whitelist; cualquier otro valor devuelve error (defense in depth
+// — el handler valida también, pero queremos doble candado).
+//
+// is_owner NO es modificable por esta función — la transferencia va
+// por TransferOwnership que es atómica y respeta la unicidad.
+func (r *UserRepository) SetPermission(ctx context.Context, id, column string, value bool) error {
+	if _, ok := validPermissionColumn[column]; !ok {
+		return fmt.Errorf("invalid permission column %q", column)
+	}
+	driver := DriverSQLite
+	if !r.useSQLite() {
+		driver = DriverPostgres
+	}
+	// Safe: column ya pasó el whitelist; no hay inyección posible.
+	q := rewritePlaceholders(driver, fmt.Sprintf("UPDATE users SET %s = ? WHERE id = ?", column))
+	if _, err := r.db.ExecContext(ctx, q, value, id); err != nil {
+		return fmt.Errorf("set permission %s: %w", column, err)
+	}
+	return nil
+}
+
+// GetOwnerID devuelve el id del usuario con is_owner=true. Vacío si
+// no hay owner aún (instalación fresca antes del setup wizard).
+//
+// El owner es INMUTABLE de por vida — quien instala la app y crea la
+// primera cuenta es el dueño y no hay UI para transferirlo. Si el
+// owner pierde acceso (contraseña perdida, cuenta borrada
+// accidentalmente), la recuperación va vía acceso al servidor +
+// edición directa de la DB (es self-hosted; el operador tiene
+// shell). Decisión consciente para no exponer una vía de "ceder
+// instalación" que abre superficie de errores (admin secundario
+// comprometido convenciendo al owner de transferir, etc.).
+func (r *UserRepository) GetOwnerID(ctx context.Context) (string, error) {
+	driver := DriverSQLite
+	if !r.useSQLite() {
+		driver = DriverPostgres
+	}
+	q := rewritePlaceholders(driver, `SELECT id FROM users WHERE is_owner = 1 LIMIT 1`)
+	if driver == DriverPostgres {
+		q = `SELECT id FROM users WHERE is_owner = TRUE LIMIT 1`
+	}
+	var id string
+	err := r.db.QueryRowContext(ctx, q).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("get owner id: %w", err)
+	}
+	return id, nil
+}
+
+// TransferOwnership NO existe — el owner es inmutable de por vida.
+// Si en algún momento futuro hace falta cederlo, se hará vía un
+// comando CLI fuera del HTTP path (hubplay set-owner <user_id>),
+// nunca por API. Ver GetOwnerID para el rationale.
+
 func (r *UserRepository) SetAccessExpiresAt(ctx context.Context, id string, expiresAt *time.Time) error {
 	var nt sql.NullTime
 	if expiresAt != nil {
@@ -674,6 +754,14 @@ func userFromSqliteGetRow(r sqlc.GetUserByIDRow) authmodel.User {
 		CanUpload:              r.CanUpload,
 		UploadQuotaBytes:       r.UploadQuotaBytes,
 		UploadUsedBytes:        r.UploadUsedBytes,
+		IsOwner:                r.IsOwner,
+		CanManageAdmins:        r.CanManageAdmins,
+		CanManageUsers:         r.CanManageUsers,
+		CanManageLibraries:     r.CanManageLibraries,
+		CanManageIPTV:          r.CanManageIptv,
+		CanEditMetadata:        r.CanEditMetadata,
+		CanChangeArtwork:       r.CanChangeArtwork,
+		CanViewAudit:           r.CanViewAudit,
 	}
 }
 
@@ -698,6 +786,14 @@ func userFromSqliteGetByUsernameRow(r sqlc.GetUserByUsernameRow) authmodel.User 
 		CanUpload:              r.CanUpload,
 		UploadQuotaBytes:       r.UploadQuotaBytes,
 		UploadUsedBytes:        r.UploadUsedBytes,
+		IsOwner:                r.IsOwner,
+		CanManageAdmins:        r.CanManageAdmins,
+		CanManageUsers:         r.CanManageUsers,
+		CanManageLibraries:     r.CanManageLibraries,
+		CanManageIPTV:          r.CanManageIptv,
+		CanEditMetadata:        r.CanEditMetadata,
+		CanChangeArtwork:       r.CanChangeArtwork,
+		CanViewAudit:           r.CanViewAudit,
 	}
 }
 
@@ -720,6 +816,14 @@ func userFromSqliteListRow(r sqlc.ListUsersRow) authmodel.User {
 		CanUpload:              r.CanUpload,
 		UploadQuotaBytes:       r.UploadQuotaBytes,
 		UploadUsedBytes:        r.UploadUsedBytes,
+		IsOwner:                r.IsOwner,
+		CanManageAdmins:        r.CanManageAdmins,
+		CanManageUsers:         r.CanManageUsers,
+		CanManageLibraries:     r.CanManageLibraries,
+		CanManageIPTV:          r.CanManageIptv,
+		CanEditMetadata:        r.CanEditMetadata,
+		CanChangeArtwork:       r.CanChangeArtwork,
+		CanViewAudit:           r.CanViewAudit,
 	}
 }
 
@@ -744,6 +848,14 @@ func userFromPgGetRow(r sqlc_pg.GetUserByIDRow) authmodel.User {
 		CanUpload:              r.CanUpload,
 		UploadQuotaBytes:       r.UploadQuotaBytes,
 		UploadUsedBytes:        r.UploadUsedBytes,
+		IsOwner:                r.IsOwner,
+		CanManageAdmins:        r.CanManageAdmins,
+		CanManageUsers:         r.CanManageUsers,
+		CanManageLibraries:     r.CanManageLibraries,
+		CanManageIPTV:          r.CanManageIptv,
+		CanEditMetadata:        r.CanEditMetadata,
+		CanChangeArtwork:       r.CanChangeArtwork,
+		CanViewAudit:           r.CanViewAudit,
 	}
 }
 
@@ -768,6 +880,14 @@ func userFromPgGetByUsernameRow(r sqlc_pg.GetUserByUsernameRow) authmodel.User {
 		CanUpload:              r.CanUpload,
 		UploadQuotaBytes:       r.UploadQuotaBytes,
 		UploadUsedBytes:        r.UploadUsedBytes,
+		IsOwner:                r.IsOwner,
+		CanManageAdmins:        r.CanManageAdmins,
+		CanManageUsers:         r.CanManageUsers,
+		CanManageLibraries:     r.CanManageLibraries,
+		CanManageIPTV:          r.CanManageIptv,
+		CanEditMetadata:        r.CanEditMetadata,
+		CanChangeArtwork:       r.CanChangeArtwork,
+		CanViewAudit:           r.CanViewAudit,
 	}
 }
 
@@ -790,5 +910,13 @@ func userFromPgListRow(r sqlc_pg.ListUsersRow) authmodel.User {
 		CanUpload:              r.CanUpload,
 		UploadQuotaBytes:       r.UploadQuotaBytes,
 		UploadUsedBytes:        r.UploadUsedBytes,
+		IsOwner:                r.IsOwner,
+		CanManageAdmins:        r.CanManageAdmins,
+		CanManageUsers:         r.CanManageUsers,
+		CanManageLibraries:     r.CanManageLibraries,
+		CanManageIPTV:          r.CanManageIptv,
+		CanEditMetadata:        r.CanEditMetadata,
+		CanChangeArtwork:       r.CanChangeArtwork,
+		CanViewAudit:           r.CanViewAudit,
 	}
 }

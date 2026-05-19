@@ -279,6 +279,23 @@ export interface User {
   // embebido (`?v=<filename>`). Cuando es null/undefined el frontend
   // cae a iniciales sobre color como antes.
   avatar_image_url?: string | null;
+
+  // Admin permission flags (migración 055). Opcionales en el wire
+  // para que responses pre-055 no rompan el parser. is_owner es
+  // inmutable de por vida (el que instala la app) — la UI marca al
+  // owner con badge y deshabilita TODAS sus celdas en la matriz.
+  // Los demás flags son editables vía PUT /users/{id}/permissions
+  // si el requester tiene can_manage_admins (y can_manage_admins
+  // mismo, sólo si el requester es el owner).
+  is_owner?: boolean;
+  can_manage_admins?: boolean;
+  can_manage_users?: boolean;
+  can_manage_libraries?: boolean;
+  can_manage_iptv?: boolean;
+  can_edit_metadata?: boolean;
+  can_change_artwork?: boolean;
+  can_view_audit?: boolean;
+  can_upload?: boolean;
 }
 
 export interface CreateUserResponse {
@@ -312,6 +329,30 @@ export interface UserLibraryAccess {
   owner_id: string;
   library_ids: string[];
   is_inherited: boolean;
+}
+
+/**
+ * Flags granulares del admin (migración 055). is_owner es inmutable
+ * de por vida (no hay endpoint para cambiarlo, ver
+ * docs/architecture/admin-permissions.md cuando aterrice). Los
+ * demás flags son editables vía PUT /users/{id}/permissions con las
+ * reglas:
+ *   - el owner es inmutable: pasarlo como target devuelve 403.
+ *   - sólo el owner puede otorgar can_manage_admins a otros admins.
+ *   - el target debe ser admin (role=admin); usuarios normales se
+ *     rechazan con TARGET_NOT_ADMIN.
+ */
+export interface UserPermissions {
+  id: string;
+  is_owner: boolean;
+  can_manage_admins: boolean;
+  can_manage_users: boolean;
+  can_manage_libraries: boolean;
+  can_manage_iptv: boolean;
+  can_edit_metadata: boolean;
+  can_change_artwork: boolean;
+  can_view_audit: boolean;
+  can_upload: boolean;
 }
 
 /**
