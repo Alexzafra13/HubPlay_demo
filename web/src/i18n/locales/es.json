@@ -54,7 +54,10 @@
     "noResultsFor": "Sin resultados para",
     "viewAllResults": "Ver todos los resultados",
     "switchProfile": "Cambiar perfil",
-    "browse": "Explorar"
+    "browse": "Explorar",
+    "suggestionContinue": "Continúa viendo",
+    "suggestionTrending": "Tendencias",
+    "suggestionRecommended": "Recomendados"
   },
   "navMenu": {
     "explore": "Explorar",

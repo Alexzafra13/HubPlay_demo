@@ -179,6 +179,20 @@ body::before {
   border-radius: var(--radius-sm);
 }
 
+/* Inputs y textareas tienen ya su propio focus indicator (border-
+   color + ring fino) en sus componentes Tailwind — el ring global
+   se siente agresivo encima, sobre todo el del buscador de la
+   topbar, que el usuario reportó como "borde feo al hacer click".
+   Aquí limpiamos el ring global SÓLO para text inputs y dejamos
+   que el styling componente-por-componente haga su trabajo. Los
+   botones, links y demás siguen con el ring accesible para que
+   la navegación por teclado siga siendo evidente. */
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  box-shadow: none;
+}
+
 ::selection {
   background-color: var(--color-accent-soft);
   color: var(--color-accent-light);

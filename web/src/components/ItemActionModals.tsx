@@ -17,6 +17,7 @@ import { ImageManager } from "./ImageManager";
 export function ItemActionModals() {
   const action = useItemActions((s) => s.action);
   const itemID = useItemActions((s) => s.itemID);
+  const itemType = useItemActions((s) => s.itemType);
   const close = useItemActions((s) => s.close);
 
   // useItem está gated por el id. Cuando action=null el id es null
@@ -29,9 +30,19 @@ export function ItemActionModals() {
 
   // ImageManager funciona sobre cualquier tipo (también seasons y
   // episodes, que tienen su propio poster/backdrop editable). Por eso
-  // no esperamos a tener el itemQ resuelto — basta con el id.
+  // no esperamos a tener el itemQ resuelto — basta con el id. El
+  // itemType lo recibimos del store (lo guarda el kebab al abrir)
+  // para que el modal filtre las pestañas correctamente sin un
+  // round-trip extra.
   if (action === "images") {
-    return <ImageManager itemId={itemID} isOpen={true} onClose={close} />;
+    return (
+      <ImageManager
+        itemId={itemID}
+        itemType={itemType ?? undefined}
+        isOpen={true}
+        onClose={close}
+      />
+    );
   }
 
   // Identify / Edit metadata sí necesitan el item resuelto porque el

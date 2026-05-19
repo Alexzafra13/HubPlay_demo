@@ -119,7 +119,7 @@ export function ItemKebab({ itemID, itemType, detailHref }: Props) {
               label={t("itemKebab.images", { defaultValue: "Cambiar imágenes…" })}
               onClick={(e) => {
                 stopAll(e);
-                openImages(itemID);
+                openImages(itemID, itemType);
                 setOpen(false);
               }}
             />
@@ -130,7 +130,7 @@ export function ItemKebab({ itemID, itemType, detailHref }: Props) {
               label={t("identify.menuLabel", { defaultValue: "Identificar…" })}
               onClick={(e) => {
                 stopAll(e);
-                openIdentify(itemID);
+                openIdentify(itemID, itemType);
                 setOpen(false);
               }}
             />
@@ -143,7 +143,7 @@ export function ItemKebab({ itemID, itemType, detailHref }: Props) {
               })}
               onClick={(e) => {
                 stopAll(e);
-                openEditor(itemID);
+                openEditor(itemID, itemType);
                 setOpen(false);
               }}
             />

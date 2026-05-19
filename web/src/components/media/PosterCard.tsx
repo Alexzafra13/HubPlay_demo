@@ -129,9 +129,13 @@ const PosterCard: FC<PosterCardProps> = memo(({ item, progress, href, cornerBadg
           <ItemKebab itemID={item.id} itemType={item.type} detailHref={resolvedHref} />
         </div>
 
-        {/* Rating badge — top right */}
+        {/* Rating badge — bottom-left del thumbnail. Antes vivía arriba-
+            derecha pero ese sitio es ahora del kebab admin (que sale
+            en hover). Bottom-left va alineado con la barra de
+            progreso cuando ésta existe (progress es full-width, 1px
+            alto, así que no pelean). */}
         {item.community_rating != null && (
-          <div className="absolute top-2 right-2 flex items-center gap-1 rounded-[--radius-sm] bg-black/70 backdrop-blur-sm px-1.5 py-0.5 text-[11px] font-semibold text-white">
+          <div className="absolute bottom-2 left-2 flex items-center gap-1 rounded-[--radius-sm] bg-black/70 backdrop-blur-sm px-1.5 py-0.5 text-[11px] font-semibold text-white">
             <svg className="h-2.5 w-2.5 text-warning" viewBox="0 0 24 24" fill="currentColor">
               <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
             </svg>

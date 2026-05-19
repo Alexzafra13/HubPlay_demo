@@ -7,13 +7,15 @@ import {
   X,
   ArrowRight,
   Loader2,
-  Film,
-  Tv,
-  Radio,
 } from "lucide-react";
-import { useSearch, useContinueWatching, useHomeTrending } from "@/api/hooks";
+import {
+  useSearch,
+  useContinueWatching,
+  useHomeTrending,
+  useHomeRecommended,
+} from "@/api/hooks";
 import { usePeersSearch } from "@/api/hooks/federation";
-import type { MediaItem, HomeTrendingItem } from "@/api/types";
+import type { MediaItem, HomeTrendingItem, HomeRecommendedItem } from "@/api/types";
 import { useDebounce } from "@/hooks/useDebounce";
 import {
   SearchResultsView,
@@ -371,18 +373,18 @@ export function SearchBar() {
 // the section tiles — same behaviour as before but enriched.
 
 function SuggestionsPanel({ onPick }: { onPick: (href: string) => void }) {
-  const { t } = useTranslation();
   const { data: continueWatching } = useContinueWatching({ staleTime: 60_000 });
   const { data: trending } = useHomeTrending({ staleTime: 60_000 });
+  // Recomendados sustituye a las tarjetas "Películas / Series / TV en
+  // vivo" que vivían al final del panel — los tabs de la topbar ya
+  // ofrecen esos atajos y duplicarlos aquí no aportaba nada útil.
+  // Recomendados sí es contenido genuino: una rail de títulos
+  // sugeridos para el usuario.
+  const { data: recommended } = useHomeRecommended({ staleTime: 60_000 });
 
   const continueRow = (continueWatching ?? []).slice(0, 6);
   const trendingRow = (trending ?? []).slice(0, 8);
-
-  const sectionItems = [
-    { href: "/movies", icon: Film, label: t("nav.movies") },
-    { href: "/series", icon: Tv, label: t("nav.series") },
-    { href: "/live-tv", icon: Radio, label: t("nav.liveTV") },
-  ];
+  const recommendedRow = (recommended ?? []).slice(0, 8);
 
   return (
     <div className="flex flex-col gap-7">
@@ -404,30 +406,14 @@ function SuggestionsPanel({ onPick }: { onPick: (href: string) => void }) {
         />
       )}
 
-      <div>
-        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-text-muted mb-3">
-          {t("topbar.browse", { defaultValue: "Explorar" })}
-        </p>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {sectionItems.map((item) => {
-            const Icon = item.icon;
-            return (
-              <button
-                key={item.href}
-                onClick={() => onPick(item.href)}
-                className="flex items-center gap-3 p-3 rounded-xl border border-border-subtle bg-bg-card/40 hover:bg-bg-card hover:border-border transition-colors text-left"
-              >
-                <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-accent/10 ring-1 ring-accent/20">
-                  <Icon className="h-4 w-4 text-accent" strokeWidth={1.7} />
-                </span>
-                <span className="text-[13.5px] font-semibold text-text-primary">
-                  {item.label}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
+      {recommendedRow.length > 0 && (
+        <SuggestionRail
+          labelKey="topbar.suggestionRecommended"
+          fallbackLabel="Recomendados"
+          items={recommendedRow.map(recommendedToPick)}
+          onPick={onPick}
+        />
+      )}
     </div>
   );
 }
@@ -454,6 +440,18 @@ function mediaToPick(it: MediaItem): PickItem {
 }
 
 function trendingToPick(it: HomeTrendingItem): PickItem {
+  const href = it.type === "series" ? `/series/${it.id}` : `/movies/${it.id}`;
+  return {
+    id: it.id,
+    title: it.title,
+    href,
+    posterUrl: it.poster_url,
+    posterColor: it.poster_color,
+    year: it.year,
+  };
+}
+
+function recommendedToPick(it: HomeRecommendedItem): PickItem {
   const href = it.type === "series" ? `/series/${it.id}` : `/movies/${it.id}`;
   return {
     id: it.id,

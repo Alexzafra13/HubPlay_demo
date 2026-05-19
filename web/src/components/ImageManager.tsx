@@ -11,6 +11,7 @@ import {
   useSetImagePrimary,
   useDeleteImage,
 } from "@/api/hooks";
+import { useImageCacheNonce } from "@/api/hooks/images";
 import type { ImageInfo, AvailableImage } from "@/api/types";
 import { Spinner } from "@/components/common";
 import { Button } from "@/components/common/Button";
@@ -19,6 +20,15 @@ interface ImageManagerProps {
   itemId: string;
   isOpen: boolean;
   onClose: () => void;
+  /** Tipo del item (movie/series/season/episode). Cuando se suministra,
+   *  las pestañas se filtran a las que tienen sentido para ese tipo:
+   *   movie    → primary, backdrop, logo, thumb
+   *   series   → primary, backdrop, logo, banner
+   *   season   → primary (TMDb no provee backdrop per-season)
+   *   episode  → thumb (es el still del episodio)
+   *  Omitido = todas las pestañas (comportamiento antiguo, para back-
+   *  compat con callers que aún no propagan el tipo). */
+  itemType?: string;
 }
 
 const IMAGE_TYPES = [
@@ -29,13 +39,31 @@ const IMAGE_TYPES = [
   { key: "thumb", label: "imageManager.thumb" },
 ] as const;
 
+// Subset de IMAGE_TYPES aplicable por tipo de item. Lo que TMDb provee
+// y lo que tiene sentido editar a mano se solapa así. Cuando el caller
+// no pasa itemType usamos el array completo (back-compat).
+const TYPES_FOR_ITEM: Record<string, ReadonlyArray<string>> = {
+  movie:   ["primary", "backdrop", "logo", "thumb"],
+  series:  ["primary", "backdrop", "logo", "banner"],
+  season:  ["primary"],
+  episode: ["thumb"],
+};
+
 function getAspectRatioClass(imageType: string): string {
   return imageType === "primary" ? "aspect-[2/3]" : "aspect-video";
 }
 
-const ImageManager: FC<ImageManagerProps> = ({ itemId, isOpen, onClose }) => {
+const ImageManager: FC<ImageManagerProps> = ({ itemId, isOpen, onClose, itemType }) => {
   const { t } = useTranslation();
-  const [activeTab, setActiveTab] = useState<string>("primary");
+  // Pestañas visibles según el tipo del item. Si el caller no propaga
+  // el tipo, caemos a las 5 pestañas históricas — no rompemos a quien
+  // aún no haya migrado, pero a partir del kebab del poster ya lo
+  // pasamos siempre.
+  const visibleTypes = itemType && TYPES_FOR_ITEM[itemType]
+    ? IMAGE_TYPES.filter((t) => TYPES_FOR_ITEM[itemType].includes(t.key))
+    : IMAGE_TYPES;
+  const defaultTab = visibleTypes[0]?.key ?? "primary";
+  const [activeTab, setActiveTab] = useState<string>(defaultTab);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -185,7 +213,7 @@ const ImageManager: FC<ImageManagerProps> = ({ itemId, isOpen, onClose }) => {
 
         {/* Tabs */}
         <div className="flex gap-2 px-6 pt-4 pb-2 shrink-0 overflow-x-auto">
-          {IMAGE_TYPES.map((type) => (
+          {visibleTypes.map((type) => (
             <button
               key={type.key}
               type="button"
@@ -317,10 +345,20 @@ const CurrentImageCard: FC<CurrentImageCardProps> = ({
   onDeleteConfirm,
   onDeleteCancel,
   t,
-}) => (
+}) => {
+  // Cache-buster: cuando el operador acaba de subir/seleccionar una
+  // imagen y este card re-renderiza con la misma image.path (porque
+  // el backend reusa la URL del proxy aunque los bytes hayan cambiado),
+  // el browser sirve la cacheada. Concatenamos un nonce que se bumpea
+  // en cada mutación de imagen → src cambia → browser refetchea.
+  const nonce = useImageCacheNonce();
+  const src = nonce > 0
+    ? `${image.path}${image.path.includes("?") ? "&" : "?"}v=${nonce}`
+    : image.path;
+  return (
   <div className="group relative rounded-[--radius-md] border border-border bg-bg-elevated overflow-hidden">
     <img
-      src={image.path}
+      src={src}
       alt={image.type}
       className={`w-full ${aspectRatioClass} object-cover`}
       loading="lazy"
@@ -371,7 +409,8 @@ const CurrentImageCard: FC<CurrentImageCardProps> = ({
       )}
     </div>
   </div>
-);
+  );
+};
 
 interface AvailableImageCardProps {
   image: AvailableImage;
