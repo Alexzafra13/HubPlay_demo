@@ -100,7 +100,9 @@ SELECT id, username, display_name, password_hash, COALESCE(avatar_path, '') AS a
        role, is_active, max_sessions, created_at, last_login_at,
        parent_user_id, pin_hash, max_content_rating, password_change_required,
        access_expires_at, avatar_color,
-       can_upload, upload_quota_bytes, upload_used_bytes
+       can_upload, upload_quota_bytes, upload_used_bytes,
+       is_owner, can_manage_admins, can_manage_users, can_manage_libraries,
+       can_manage_iptv, can_edit_metadata, can_change_artwork, can_view_audit
 FROM users
 WHERE id = $1
 `
@@ -125,6 +127,14 @@ type GetUserByIDRow struct {
 	CanUpload              bool           `json:"can_upload"`
 	UploadQuotaBytes       int64          `json:"upload_quota_bytes"`
 	UploadUsedBytes        int64          `json:"upload_used_bytes"`
+	IsOwner                bool           `json:"is_owner"`
+	CanManageAdmins        bool           `json:"can_manage_admins"`
+	CanManageUsers         bool           `json:"can_manage_users"`
+	CanManageLibraries     bool           `json:"can_manage_libraries"`
+	CanManageIptv          bool           `json:"can_manage_iptv"`
+	CanEditMetadata        bool           `json:"can_edit_metadata"`
+	CanChangeArtwork       bool           `json:"can_change_artwork"`
+	CanViewAudit           bool           `json:"can_view_audit"`
 }
 
 // User accounts.
@@ -155,6 +165,14 @@ func (q *Queries) GetUserByID(ctx context.Context, id string) (GetUserByIDRow, e
 		&i.CanUpload,
 		&i.UploadQuotaBytes,
 		&i.UploadUsedBytes,
+		&i.IsOwner,
+		&i.CanManageAdmins,
+		&i.CanManageUsers,
+		&i.CanManageLibraries,
+		&i.CanManageIptv,
+		&i.CanEditMetadata,
+		&i.CanChangeArtwork,
+		&i.CanViewAudit,
 	)
 	return i, err
 }
@@ -164,7 +182,9 @@ SELECT id, username, display_name, password_hash, COALESCE(avatar_path, '') AS a
        role, is_active, max_sessions, created_at, last_login_at,
        parent_user_id, pin_hash, max_content_rating, password_change_required,
        access_expires_at, avatar_color,
-       can_upload, upload_quota_bytes, upload_used_bytes
+       can_upload, upload_quota_bytes, upload_used_bytes,
+       is_owner, can_manage_admins, can_manage_users, can_manage_libraries,
+       can_manage_iptv, can_edit_metadata, can_change_artwork, can_view_audit
 FROM users
 WHERE username = $1
 `
@@ -189,6 +209,14 @@ type GetUserByUsernameRow struct {
 	CanUpload              bool           `json:"can_upload"`
 	UploadQuotaBytes       int64          `json:"upload_quota_bytes"`
 	UploadUsedBytes        int64          `json:"upload_used_bytes"`
+	IsOwner                bool           `json:"is_owner"`
+	CanManageAdmins        bool           `json:"can_manage_admins"`
+	CanManageUsers         bool           `json:"can_manage_users"`
+	CanManageLibraries     bool           `json:"can_manage_libraries"`
+	CanManageIptv          bool           `json:"can_manage_iptv"`
+	CanEditMetadata        bool           `json:"can_edit_metadata"`
+	CanChangeArtwork       bool           `json:"can_change_artwork"`
+	CanViewAudit           bool           `json:"can_view_audit"`
 }
 
 func (q *Queries) GetUserByUsername(ctx context.Context, username string) (GetUserByUsernameRow, error) {
@@ -214,6 +242,14 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (GetUs
 		&i.CanUpload,
 		&i.UploadQuotaBytes,
 		&i.UploadUsedBytes,
+		&i.IsOwner,
+		&i.CanManageAdmins,
+		&i.CanManageUsers,
+		&i.CanManageLibraries,
+		&i.CanManageIptv,
+		&i.CanEditMetadata,
+		&i.CanChangeArtwork,
+		&i.CanViewAudit,
 	)
 	return i, err
 }
@@ -253,7 +289,9 @@ SELECT id, username, display_name, COALESCE(avatar_path, '') AS avatar_path,
        role, is_active, created_at, last_login_at,
        parent_user_id, pin_hash, max_content_rating, password_change_required,
        access_expires_at, avatar_color,
-       can_upload, upload_quota_bytes, upload_used_bytes
+       can_upload, upload_quota_bytes, upload_used_bytes,
+       is_owner, can_manage_admins, can_manage_users, can_manage_libraries,
+       can_manage_iptv, can_edit_metadata, can_change_artwork, can_view_audit
 FROM users
 ORDER BY username
 LIMIT $1 OFFSET $2
@@ -282,6 +320,14 @@ type ListUsersRow struct {
 	CanUpload              bool           `json:"can_upload"`
 	UploadQuotaBytes       int64          `json:"upload_quota_bytes"`
 	UploadUsedBytes        int64          `json:"upload_used_bytes"`
+	IsOwner                bool           `json:"is_owner"`
+	CanManageAdmins        bool           `json:"can_manage_admins"`
+	CanManageUsers         bool           `json:"can_manage_users"`
+	CanManageLibraries     bool           `json:"can_manage_libraries"`
+	CanManageIptv          bool           `json:"can_manage_iptv"`
+	CanEditMetadata        bool           `json:"can_edit_metadata"`
+	CanChangeArtwork       bool           `json:"can_change_artwork"`
+	CanViewAudit           bool           `json:"can_view_audit"`
 }
 
 func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUsersRow, error) {
@@ -311,6 +357,14 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUse
 			&i.CanUpload,
 			&i.UploadQuotaBytes,
 			&i.UploadUsedBytes,
+			&i.IsOwner,
+			&i.CanManageAdmins,
+			&i.CanManageUsers,
+			&i.CanManageLibraries,
+			&i.CanManageIptv,
+			&i.CanEditMetadata,
+			&i.CanChangeArtwork,
+			&i.CanViewAudit,
 		); err != nil {
 			return nil, err
 		}

@@ -69,6 +69,106 @@ type User struct {
 	CanUpload        bool
 	UploadQuotaBytes int64
 	UploadUsedBytes  int64
+
+	// Admin permissions (migración 055). RBAC plano:
+	//   IsOwner          → admin raíz inmutable. Sólo existe UNO.
+	//                      Tiene TODO implícito; los demás flags
+	//                      se ignoran cuando IsOwner=true.
+	//   CanManageAdmins  → otorgar/revocar flags a otros admins,
+	//                      promover/degradar role. Solo el owner
+	//                      lo tiene de salida.
+	//   CanManageUsers   → alta/baja usuarios no-admin, reset pwd,
+	//                      library_access, perfiles.
+	//   CanManageLibraries → CRUD librerías, paths, scans.
+	//   CanManageIPTV    → M3U, EPG, canales, schedules.
+	//   CanEditMetadata  → títulos, descripciones, identify TMDb.
+	//   CanChangeArtwork → posters, fondos, overrides.
+	//   CanViewAudit     → /admin/uploads/audit y similares.
+	//
+	// Para checks de capability: usar User.Can(perm) — incluye la
+	// regla "owner tiene todo" sin que cada caller la replique.
+	IsOwner             bool
+	CanManageAdmins     bool
+	CanManageUsers      bool
+	CanManageLibraries  bool
+	CanManageIPTV       bool
+	CanEditMetadata     bool
+	CanChangeArtwork    bool
+	CanViewAudit        bool
+}
+
+// Permission es uno de los flags granulares. Definido como string
+// (no const-int) para que serialice limpio en endpoints / logs y para
+// que el handler pueda iterar sobre los keys que llegan en un PUT
+// body { "can_manage_users": true, ... }.
+type Permission string
+
+const (
+	PermManageAdmins    Permission = "can_manage_admins"
+	PermManageUsers     Permission = "can_manage_users"
+	PermManageLibraries Permission = "can_manage_libraries"
+	PermManageIPTV      Permission = "can_manage_iptv"
+	PermEditMetadata    Permission = "can_edit_metadata"
+	PermChangeArtwork   Permission = "can_change_artwork"
+	PermViewAudit       Permission = "can_view_audit"
+	PermUpload          Permission = "can_upload"
+)
+
+// AllPermissions devuelve todos los flags granulares conocidos. El
+// frontend lo usa para pintar la matriz; el handler de PUT lo usa
+// para validar que las keys del body están en el set permitido.
+func AllPermissions() []Permission {
+	return []Permission{
+		PermManageAdmins,
+		PermManageUsers,
+		PermManageLibraries,
+		PermManageIPTV,
+		PermEditMetadata,
+		PermChangeArtwork,
+		PermViewAudit,
+		PermUpload,
+	}
+}
+
+// Can devuelve true si el usuario tiene la capability. IsOwner==true
+// implica TODOS los permisos automáticamente — el chequeo aquí
+// centraliza esa regla para que ningún caller la olvide.
+//
+// Nota: Can(PermUpload) IGNORA la lógica de cuota (used vs quota); eso
+// vive en el repo (ReserveUploadBytes hace el chequeo atómico). Aquí
+// sólo respondemos "¿tiene permiso?", no "¿le cabe?".
+func (u User) Can(p Permission) bool {
+	if u.IsOwner {
+		return true
+	}
+	switch p {
+	case PermManageAdmins:
+		return u.CanManageAdmins
+	case PermManageUsers:
+		return u.CanManageUsers
+	case PermManageLibraries:
+		return u.CanManageLibraries
+	case PermManageIPTV:
+		return u.CanManageIPTV
+	case PermEditMetadata:
+		return u.CanEditMetadata
+	case PermChangeArtwork:
+		return u.CanChangeArtwork
+	case PermViewAudit:
+		return u.CanViewAudit
+	case PermUpload:
+		return u.CanUpload
+	default:
+		return false
+	}
+}
+
+// IsAdmin: el usuario tiene capacidades de administración. Cubre
+// tanto al owner como a admins con cualquier flag activo. Sustituye
+// al antiguo `Role == "admin"` cuando el caller sólo quiere saber
+// "¿tiene UI de admin?" sin importar exactamente qué puede tocar.
+func (u User) IsAdmin() bool {
+	return u.IsOwner || u.Role == "admin"
 }
 
 // IsProfile is the canonical readability helper around `ParentUserID`.

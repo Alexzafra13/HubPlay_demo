@@ -389,6 +389,142 @@ func (r *UserRepository) ReleaseUploadBytes(ctx context.Context, id string, delt
 	return nil
 }
 
+// ─── Admin permissions (migración 055) ──────────────────────────────
+//
+// Raw SQL por la misma razón que las mutaciones de upload: sqlc 1.31.1
+// trunca queries con whitelists largas + WHERE compuestos como el de
+// TransferOwnership. Las superficies son pocas y estables, así que el
+// coste de mantenimiento es bajo.
+
+// validPermissionColumn: whitelist de columnas que SetPermission puede
+// tocar. Definida aquí (en el repo) para que ningún caller pueda meter
+// SQL via el campo `permission` — incluso aunque el handler validara,
+// la defensa en profundidad es barata.
+var validPermissionColumn = map[string]struct{}{
+	"can_manage_admins":    {},
+	"can_manage_users":     {},
+	"can_manage_libraries": {},
+	"can_manage_iptv":      {},
+	"can_edit_metadata":    {},
+	"can_change_artwork":   {},
+	"can_view_audit":       {},
+	"can_upload":           {},
+}
+
+// SetPermission flipea un flag granular. column DEBE estar en el
+// whitelist; cualquier otro valor devuelve error (defense in depth
+// — el handler valida también, pero queremos doble candado).
+//
+// is_owner NO es modificable por esta función — la transferencia va
+// por TransferOwnership que es atómica y respeta la unicidad.
+func (r *UserRepository) SetPermission(ctx context.Context, id, column string, value bool) error {
+	if _, ok := validPermissionColumn[column]; !ok {
+		return fmt.Errorf("invalid permission column %q", column)
+	}
+	driver := DriverSQLite
+	if !r.useSQLite() {
+		driver = DriverPostgres
+	}
+	// Safe: column ya pasó el whitelist; no hay inyección posible.
+	q := rewritePlaceholders(driver, fmt.Sprintf("UPDATE users SET %s = ? WHERE id = ?", column))
+	if _, err := r.db.ExecContext(ctx, q, value, id); err != nil {
+		return fmt.Errorf("set permission %s: %w", column, err)
+	}
+	return nil
+}
+
+// GetOwnerID devuelve el id del usuario con is_owner=true. Vacío si
+// no hay owner aún (instalación fresca antes del setup wizard).
+func (r *UserRepository) GetOwnerID(ctx context.Context) (string, error) {
+	driver := DriverSQLite
+	if !r.useSQLite() {
+		driver = DriverPostgres
+	}
+	q := rewritePlaceholders(driver, `SELECT id FROM users WHERE is_owner = 1 LIMIT 1`)
+	if driver == DriverPostgres {
+		q = `SELECT id FROM users WHERE is_owner = TRUE LIMIT 1`
+	}
+	var id string
+	err := r.db.QueryRowContext(ctx, q).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("get owner id: %w", err)
+	}
+	return id, nil
+}
+
+// TransferOwnership mueve el flag is_owner=true de currentOwnerID a
+// newOwnerID en UNA transacción. Validaciones:
+//   - currentOwnerID DEBE ser actualmente el owner (anti-race).
+//   - newOwnerID DEBE existir y ser activo y NO ser un profile.
+//   - newOwnerID no puede coincidir con currentOwnerID (no-op).
+// Si cualquiera falla, la TX revierte y nada cambia. La unicidad del
+// owner la garantiza el índice parcial UNIQUE WHERE is_owner=1.
+func (r *UserRepository) TransferOwnership(ctx context.Context, currentOwnerID, newOwnerID string) error {
+	if currentOwnerID == newOwnerID {
+		return fmt.Errorf("cannot transfer ownership to self")
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	driver := DriverSQLite
+	if !r.useSQLite() {
+		driver = DriverPostgres
+	}
+	trueVal := "1"
+	falseVal := "0"
+	if driver == DriverPostgres {
+		trueVal = "TRUE"
+		falseVal = "FALSE"
+	}
+
+	// 1. Confirmar que currentOwnerID es el owner actual.
+	q1 := rewritePlaceholders(driver, fmt.Sprintf(
+		"SELECT 1 FROM users WHERE id = ? AND is_owner = %s", trueVal))
+	var n int
+	if err := tx.QueryRowContext(ctx, q1, currentOwnerID).Scan(&n); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("user %s is not the current owner", currentOwnerID)
+		}
+		return fmt.Errorf("verify current owner: %w", err)
+	}
+
+	// 2. Confirmar que newOwnerID es elegible (existe, activo, no
+	//    profile, role admin).
+	q2 := rewritePlaceholders(driver, fmt.Sprintf(
+		"SELECT 1 FROM users WHERE id = ? AND is_active = %s AND parent_user_id IS NULL AND role = 'admin'", trueVal))
+	if err := tx.QueryRowContext(ctx, q2, newOwnerID).Scan(&n); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("user %s is not eligible (must be active admin, household head)", newOwnerID)
+		}
+		return fmt.Errorf("verify new owner: %w", err)
+	}
+
+	// 3. Clear old, set new — el índice UNIQUE WHERE is_owner=1
+	//    permite estas dos statements consecutivas dentro de la TX.
+	q3 := rewritePlaceholders(driver, fmt.Sprintf(
+		"UPDATE users SET is_owner = %s WHERE id = ?", falseVal))
+	if _, err := tx.ExecContext(ctx, q3, currentOwnerID); err != nil {
+		return fmt.Errorf("clear old owner: %w", err)
+	}
+	q4 := rewritePlaceholders(driver, fmt.Sprintf(
+		"UPDATE users SET is_owner = %s, can_manage_admins = %s, can_manage_users = %s, can_manage_libraries = %s, can_manage_iptv = %s, can_edit_metadata = %s, can_change_artwork = %s, can_view_audit = %s WHERE id = ?",
+		trueVal, trueVal, trueVal, trueVal, trueVal, trueVal, trueVal, trueVal))
+	if _, err := tx.ExecContext(ctx, q4, newOwnerID); err != nil {
+		return fmt.Errorf("set new owner: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit ownership transfer: %w", err)
+	}
+	return nil
+}
+
 func (r *UserRepository) SetAccessExpiresAt(ctx context.Context, id string, expiresAt *time.Time) error {
 	var nt sql.NullTime
 	if expiresAt != nil {
@@ -674,6 +810,14 @@ func userFromSqliteGetRow(r sqlc.GetUserByIDRow) authmodel.User {
 		CanUpload:              r.CanUpload,
 		UploadQuotaBytes:       r.UploadQuotaBytes,
 		UploadUsedBytes:        r.UploadUsedBytes,
+		IsOwner:                r.IsOwner,
+		CanManageAdmins:        r.CanManageAdmins,
+		CanManageUsers:         r.CanManageUsers,
+		CanManageLibraries:     r.CanManageLibraries,
+		CanManageIPTV:          r.CanManageIptv,
+		CanEditMetadata:        r.CanEditMetadata,
+		CanChangeArtwork:       r.CanChangeArtwork,
+		CanViewAudit:           r.CanViewAudit,
 	}
 }
 
@@ -698,6 +842,14 @@ func userFromSqliteGetByUsernameRow(r sqlc.GetUserByUsernameRow) authmodel.User 
 		CanUpload:              r.CanUpload,
 		UploadQuotaBytes:       r.UploadQuotaBytes,
 		UploadUsedBytes:        r.UploadUsedBytes,
+		IsOwner:                r.IsOwner,
+		CanManageAdmins:        r.CanManageAdmins,
+		CanManageUsers:         r.CanManageUsers,
+		CanManageLibraries:     r.CanManageLibraries,
+		CanManageIPTV:          r.CanManageIptv,
+		CanEditMetadata:        r.CanEditMetadata,
+		CanChangeArtwork:       r.CanChangeArtwork,
+		CanViewAudit:           r.CanViewAudit,
 	}
 }
 
@@ -720,6 +872,14 @@ func userFromSqliteListRow(r sqlc.ListUsersRow) authmodel.User {
 		CanUpload:              r.CanUpload,
 		UploadQuotaBytes:       r.UploadQuotaBytes,
 		UploadUsedBytes:        r.UploadUsedBytes,
+		IsOwner:                r.IsOwner,
+		CanManageAdmins:        r.CanManageAdmins,
+		CanManageUsers:         r.CanManageUsers,
+		CanManageLibraries:     r.CanManageLibraries,
+		CanManageIPTV:          r.CanManageIptv,
+		CanEditMetadata:        r.CanEditMetadata,
+		CanChangeArtwork:       r.CanChangeArtwork,
+		CanViewAudit:           r.CanViewAudit,
 	}
 }
 
@@ -744,6 +904,14 @@ func userFromPgGetRow(r sqlc_pg.GetUserByIDRow) authmodel.User {
 		CanUpload:              r.CanUpload,
 		UploadQuotaBytes:       r.UploadQuotaBytes,
 		UploadUsedBytes:        r.UploadUsedBytes,
+		IsOwner:                r.IsOwner,
+		CanManageAdmins:        r.CanManageAdmins,
+		CanManageUsers:         r.CanManageUsers,
+		CanManageLibraries:     r.CanManageLibraries,
+		CanManageIPTV:          r.CanManageIptv,
+		CanEditMetadata:        r.CanEditMetadata,
+		CanChangeArtwork:       r.CanChangeArtwork,
+		CanViewAudit:           r.CanViewAudit,
 	}
 }
 
@@ -768,6 +936,14 @@ func userFromPgGetByUsernameRow(r sqlc_pg.GetUserByUsernameRow) authmodel.User {
 		CanUpload:              r.CanUpload,
 		UploadQuotaBytes:       r.UploadQuotaBytes,
 		UploadUsedBytes:        r.UploadUsedBytes,
+		IsOwner:                r.IsOwner,
+		CanManageAdmins:        r.CanManageAdmins,
+		CanManageUsers:         r.CanManageUsers,
+		CanManageLibraries:     r.CanManageLibraries,
+		CanManageIPTV:          r.CanManageIptv,
+		CanEditMetadata:        r.CanEditMetadata,
+		CanChangeArtwork:       r.CanChangeArtwork,
+		CanViewAudit:           r.CanViewAudit,
 	}
 }
 
@@ -790,5 +966,13 @@ func userFromPgListRow(r sqlc_pg.ListUsersRow) authmodel.User {
 		CanUpload:              r.CanUpload,
 		UploadQuotaBytes:       r.UploadQuotaBytes,
 		UploadUsedBytes:        r.UploadUsedBytes,
+		IsOwner:                r.IsOwner,
+		CanManageAdmins:        r.CanManageAdmins,
+		CanManageUsers:         r.CanManageUsers,
+		CanManageLibraries:     r.CanManageLibraries,
+		CanManageIPTV:          r.CanManageIptv,
+		CanEditMetadata:        r.CanEditMetadata,
+		CanChangeArtwork:       r.CanChangeArtwork,
+		CanViewAudit:           r.CanViewAudit,
 	}
 }
