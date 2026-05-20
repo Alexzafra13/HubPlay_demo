@@ -26,8 +26,43 @@ permissions:
   contents: write # publicar release + subir assets
 
 jobs:
+  # ─── Metadatos del release ─────────────────────────────────────────
+  # Centraliza `git describe` en un único job. Los demás jobs lo
+  # consumen como output. Sin esto, cada job recalculaba la versión
+  # con `git describe` y el resultado dependía de si el tag `nightly`
+  # ya había sido reescrito al HEAD actual o seguía apuntando al
+  # commit anterior — race entre `build` y `windows-installer` que
+  # rompía el unzip del job de instalador cuando los nombres no
+  # coincidían (`hubplay-nightly-N-gSHA-...` vs `hubplay-nightly-...`).
+  meta:
+    name: Compute release metadata
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      commit: ${{ steps.meta.outputs.commit }}
+      build_date: ${{ steps.meta.outputs.build_date }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute version / commit / build date
+        id: meta
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            VERSION="$GITHUB_REF_NAME"
+          else
+            VERSION="$(git describe --tags --always --dirty)"
+          fi
+          COMMIT="$(git rev-parse --short HEAD)"
+          BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "version=$VERSION"       >> "$GITHUB_OUTPUT"
+          echo "commit=$COMMIT"         >> "$GITHUB_OUTPUT"
+          echo "build_date=$BUILD_DATE" >> "$GITHUB_OUTPUT"
+
   build:
     name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
+    needs: meta
     runs-on: ${{ matrix.runner }}
     strategy:
       # fail-fast off — si un target rompe (e.g. mirror de ffmpeg
@@ -42,10 +77,6 @@ jobs:
           - { goos: darwin,  goarch: arm64, runner: macos-latest,   ext: "",     archive: "tar.gz" }
     steps:
       - uses: actions/checkout@v4
-        # fetch-depth 0 → git describe necesita el historial completo
-        # para resolver tags y la distancia hasta el último.
-        with:
-          fetch-depth: 0
 
       - uses: actions/setup-go@v5
         with:
@@ -67,32 +98,14 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm run build
 
-      - name: Compute version / commit / build date
-        id: meta
-        # Si el run viene de un tag, GITHUB_REF_NAME es el tag (v0.1.0).
-        # Si es workflow_dispatch, usamos `git describe` para obtener el
-        # nombre derivado del último tag. Mismo formato en ambos casos
-        # — el binario muestra siempre algo identificable.
-        run: |
-          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
-            VERSION="$GITHUB_REF_NAME"
-          else
-            VERSION="$(git describe --tags --always --dirty)"
-          fi
-          COMMIT="$(git rev-parse --short HEAD)"
-          BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          echo "version=$VERSION"     >> "$GITHUB_OUTPUT"
-          echo "commit=$COMMIT"       >> "$GITHUB_OUTPUT"
-          echo "build_date=$BUILD_DATE" >> "$GITHUB_OUTPUT"
-
       - name: Go build
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
-          VERSION: ${{ steps.meta.outputs.version }}
-          COMMIT: ${{ steps.meta.outputs.commit }}
-          BUILD_DATE: ${{ steps.meta.outputs.build_date }}
+          VERSION: ${{ needs.meta.outputs.version }}
+          COMMIT: ${{ needs.meta.outputs.commit }}
+          BUILD_DATE: ${{ needs.meta.outputs.build_date }}
         run: |
           mkdir -p dist
           go build \
@@ -127,7 +140,7 @@ jobs:
           # (//go:embed en migrations.go), así que no los copiamos al
           # archivo — el operador sólo necesita el ejecutable + ffmpeg
           # + el yaml de ejemplo.
-          VERSION="${{ steps.meta.outputs.version }}"
+          VERSION="${{ needs.meta.outputs.version }}"
           NAME="hubplay-${VERSION}-${{ matrix.goos }}-${{ matrix.goarch }}"
           mkdir -p "stage/$NAME"
           mv "dist/hubplay${{ matrix.ext }}"  "stage/$NAME/"
@@ -233,18 +246,12 @@ jobs:
   #   - al final abre el navegador en localhost:8096 si el user lo marcó
   windows-installer:
     name: Build Windows installer
-    needs: build
+    needs: [meta, build]
     runs-on: windows-latest
     # Sólo si el build de windows-amd64 tuvo éxito y produjo el zip.
     if: always() && !cancelled()
     steps:
       - uses: actions/checkout@v4
-        # fetch-depth 0 → git describe necesita ver el tag "nightly"
-        # para producir el mismo string de versión que el job build
-        # (e.g. "nightly-7-g971ff38"). Sin esto degrada a sólo el SHA
-        # y el nombre del zip no coincide.
-        with:
-          fetch-depth: 0
 
       - name: Download windows-amd64 archive
         uses: actions/download-artifact@v4
@@ -253,22 +260,11 @@ jobs:
           path: artifacts
           merge-multiple: true
 
-      - name: Compute version
-        id: meta
-        shell: bash
-        run: |
-          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
-            VERSION="$GITHUB_REF_NAME"
-          else
-            VERSION="$(git describe --tags --always --dirty)"
-          fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-
       - name: Extract zip + fetch NSSM
         shell: bash
         run: |
           set -euo pipefail
-          VERSION="${{ steps.meta.outputs.version }}"
+          VERSION="${{ needs.meta.outputs.version }}"
           ZIP="artifacts/hubplay-${VERSION}-windows-amd64.zip"
           ls -la artifacts/
           unzip -q "$ZIP" -d stage
@@ -299,7 +295,7 @@ jobs:
         # El .iss lee las vars vía GetEnv (las /D dan problemas de quoting).
         uses: Minionguyjpro/Inno-Setup-Action@v1.2.8
         env:
-          HUBPLAY_APP_VERSION: ${{ steps.meta.outputs.version }}
+          HUBPLAY_APP_VERSION: ${{ needs.meta.outputs.version }}
           HUBPLAY_SOURCE_DIR: ${{ github.workspace }}\stage\source
           HUBPLAY_OUTPUT_DIR: ${{ github.workspace }}\dist
         with:
@@ -309,7 +305,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          VERSION="${{ steps.meta.outputs.version }}"
+          VERSION="${{ needs.meta.outputs.version }}"
           cd dist
           ls -la
           # En windows-runner, sha256sum viene de git-bash.
