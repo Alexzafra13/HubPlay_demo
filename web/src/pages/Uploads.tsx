@@ -847,7 +847,6 @@ function CollisionModal({
   // decisiones del usuario en `state` hasta que pulse Confirmar.
   // Derivarlo en render reiniciaría las decisiones en cada re-render
   // del padre, perdiendo el trabajo del usuario.
-  // eslint-disable-next-line react-doctor/no-derived-useState
   const [state, setState] = useState(items);
 
   function applyAll(d: CollisionDecision) {
