@@ -24,7 +24,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
-import { motion } from "framer-motion";
+import { m } from "framer-motion";
 import { LogOut, Pencil } from "lucide-react";
 import { ArrowLeft } from "lucide-react";
 import {
@@ -205,15 +205,15 @@ export default function WhoIsWatching() {
         alignment === "center" ? "items-center text-center" : "items-start text-left",
       ].join(" ")}
     >
-      <motion.h1
+      <m.h1
         initial={{ opacity: 0, y: -6 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, ease: [0.22, 0.61, 0.36, 1] }}
         className="mb-3 text-5xl font-extralight tracking-[-0.015em] text-text-primary sm:text-6xl"
       >
         {t("whoIsWatching.title")}
-      </motion.h1>
-      <motion.p
+      </m.h1>
+      <m.p
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.5, delay: 0.15 }}
@@ -222,8 +222,8 @@ export default function WhoIsWatching() {
         {t("whoIsWatching.subtitle", {
           defaultValue: "Selecciona tu perfil para continuar.",
         })}
-      </motion.p>
-      <motion.div
+      </m.p>
+      <m.div
         initial="hidden"
         animate="show"
         variants={{
@@ -257,9 +257,9 @@ export default function WhoIsWatching() {
             compact={alignment === "start"}
           />
         ))}
-      </motion.div>
+      </m.div>
 
-      <motion.div
+      <m.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.5, delay: 0.5 }}
@@ -290,7 +290,7 @@ export default function WhoIsWatching() {
             defaultValue: "Cerrar sesión",
           })}
         </button>
-      </motion.div>
+      </m.div>
     </div>
   );
 
@@ -310,7 +310,7 @@ export default function WhoIsWatching() {
           which traps the user. "/" is the right answer in both
           flows because ProtectedRoute will keep them
           authenticated. */}
-      <motion.button
+      <m.button
         type="button"
         onClick={() => navigate("/")}
         initial={{ opacity: 0, x: -8 }}
@@ -321,19 +321,19 @@ export default function WhoIsWatching() {
       >
         <ArrowLeft className="size-3.5" />
         {t("whoIsWatching.back", { defaultValue: "Volver" })}
-      </motion.button>
+      </m.button>
 
       {/* Logo — sized big enough to read as a brand mark, not a
           favicon. Keeps to the top of the viewport so the picker
           doesn't fight for attention with it. */}
-      <motion.div
+      <m.div
         initial={{ opacity: 0, y: -8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
         className="relative z-10 mb-10 sm:mb-14"
       >
         <BrandWordmark height={56} className="opacity-95" />
-      </motion.div>
+      </m.div>
 
       <div className="relative z-10 flex w-full flex-1 items-center justify-center">
         {selected && selected.has_pin ? (
@@ -468,7 +468,7 @@ function PosterWall({
   posters: { id: string; src: string; title: string }[];
 }) {
   return (
-    <motion.div
+    <m.div
       initial="hidden"
       animate="show"
       variants={{
@@ -490,7 +490,7 @@ function PosterWall({
         const tilt = i % 3 === 0 ? -2 : i % 3 === 2 ? 2 : 0;
         const offsetY = i % 3 === 1 ? -8 : 0;
         return (
-          <motion.div
+          <m.div
             key={p.id}
             variants={{
               hidden: { opacity: 0, y: 18, rotate: tilt },
@@ -505,10 +505,10 @@ function PosterWall({
               loading="lazy"
               className="size-full object-cover"
             />
-          </motion.div>
+          </m.div>
         );
       })}
-    </motion.div>
+    </m.div>
   );
 }
 
@@ -541,7 +541,7 @@ function ProfileCard({
   // and matches HBO Max / Disney+ TV-shaped surfaces.
   if (compact) {
     return (
-      <motion.button
+      <m.button
         type="button"
         onClick={onClick}
         onMouseEnter={() => onHoverChange?.(true)}
@@ -612,14 +612,14 @@ function ProfileCard({
             </p>
           )}
         </div>
-      </motion.button>
+      </m.button>
     );
   }
 
   // Hero-tile variant — used when the picker is centred (no
   // poster wall). Big circular avatar with name underneath.
   return (
-    <motion.button
+    <m.button
       type="button"
       onClick={onClick}
       onMouseEnter={() => onHoverChange?.(true)}
@@ -678,7 +678,7 @@ function ProfileCard({
       <span className="relative max-w-[10rem] truncate text-base font-light tracking-wide text-text-secondary transition-colors group-hover:text-text-primary">
         {profile.display_name || profile.username.split("/").pop()}
       </span>
-    </motion.button>
+    </m.button>
   );
 }
 
@@ -723,13 +723,13 @@ function PinPad({
   }, [errorMessage]);
 
   return (
-    <motion.div
+    <m.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
       className="flex w-full max-w-sm flex-col items-center gap-6"
     >
-      <motion.div
+      <m.div
         className="relative flex size-28 items-center justify-center overflow-hidden rounded-full text-3xl font-extralight text-white shadow-2xl"
         style={{
           background: `linear-gradient(160deg, ${lighten(palette.background, 0.12)}, ${palette.background} 45%, ${darken(palette.background, 0.18)})`,
@@ -742,7 +742,7 @@ function PinPad({
           className="pointer-events-none absolute inset-0 bg-gradient-to-b from-white/10 via-transparent to-transparent"
         />
         {initials}
-      </motion.div>
+      </m.div>
 
       <div className="flex flex-col items-center gap-1">
         <h2 className="text-2xl font-light tracking-wide text-text-primary">
@@ -786,7 +786,7 @@ function PinPad({
                 ].join(" ")}
               >
                 {filled && (
-                  <motion.span
+                  <m.span
                     initial={{ scale: 0 }}
                     animate={{ scale: 1 }}
                     transition={{ type: "spring", stiffness: 500, damping: 25 }}
@@ -817,13 +817,13 @@ function PinPad({
 
       <div className="h-5">
         {errorMessage && (
-          <motion.p
+          <m.p
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             className="text-center text-sm text-error"
           >
             {errorMessage}
-          </motion.p>
+          </m.p>
         )}
         {isLoading && !errorMessage && (
           <p className="text-center text-sm text-text-muted">
@@ -840,7 +840,7 @@ function PinPad({
       >
         {t("common.cancel")}
       </button>
-    </motion.div>
+    </m.div>
   );
 }
 

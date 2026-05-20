@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { NavLink, useLocation } from "react-router";
 import { useTranslation } from "react-i18next";
-import { motion, AnimatePresence } from "framer-motion";
+import { m, AnimatePresence } from "framer-motion";
 import { ChevronDown, Tv as TvIcon, Users as UsersIcon } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { useAllPeerLibraries } from "@/api/hooks/federation";
@@ -291,7 +291,7 @@ function DropdownPanel({
   const totalCols = groups.length + (hasExtra ? 1 : 0);
 
   return (
-    <motion.div
+    <m.div
       initial={{ opacity: 0, y: -6, scale: 0.985 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: -6, scale: 0.985 }}
@@ -341,7 +341,7 @@ function DropdownPanel({
           )}
         </div>
       </div>
-    </motion.div>
+    </m.div>
   );
 }
 
@@ -405,7 +405,7 @@ function PeersNavItem({
 
       <AnimatePresence>
         {isOpen && (
-          <motion.div
+          <m.div
             initial={{ opacity: 0, y: -6, scale: 0.985 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -6, scale: 0.985 }}
@@ -458,7 +458,7 @@ function PeersNavItem({
                 <span aria-hidden>→</span>
               </NavLink>
             </div>
-          </motion.div>
+          </m.div>
         )}
       </AnimatePresence>
     </div>

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { motion, AnimatePresence } from "framer-motion";
+import { m, AnimatePresence } from "framer-motion";
 import { Bell } from "lucide-react";
 import { useMyNotifications } from "@/api/hooks/notifications";
 import { NotificationsDropdown } from "./NotificationsDropdown";
@@ -96,7 +96,7 @@ export function NotificationsBell() {
       </button>
       <AnimatePresence>
         {open && (
-          <motion.div
+          <m.div
             initial={{ opacity: 0, y: -4, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -4, scale: 0.98 }}
@@ -108,7 +108,7 @@ export function NotificationsBell() {
               unreadCount={unread}
               onClose={() => setOpen(false)}
             />
-          </motion.div>
+          </m.div>
         )}
       </AnimatePresence>
     </div>
