@@ -49,6 +49,8 @@ AppVerName=HubPlay {#AppVersion}
 AppPublisher=HubPlay
 AppPublisherURL=https://github.com/Alexzafra13/HubPlay_demo
 AppSupportURL=https://github.com/Alexzafra13/HubPlay_demo/issues
+AppUpdatesURL=https://github.com/Alexzafra13/HubPlay_demo/releases
+AppContact=https://github.com/Alexzafra13/HubPlay_demo/issues
 DefaultDirName={autopf}\HubPlay
 DefaultGroupName=HubPlay
 DisableProgramGroupPage=yes
@@ -57,11 +59,15 @@ OutputBaseFilename=HubPlay-Setup-{#AppVersion}-windows-amd64
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
+SetupIconFile=hubplay.ico
+WizardImageFile=wizard-large.png
+WizardSmallImageFile=wizard-small.png
+WizardImageAlphaFormat=premultiplied
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 ; Solicitar admin: necesitamos escribir a Program Files + registrar servicio.
 PrivilegesRequired=admin
-UninstallDisplayIcon={app}\hubplay.exe
+UninstallDisplayIcon={app}\hubplay.ico
 ; Mostrar versión en Add/Remove Programs sin la "v" inicial si la tiene.
 VersionInfoVersion=0.0.0.0
 VersionInfoProductName=HubPlay
@@ -71,10 +77,25 @@ VersionInfoCompany=HubPlay
 Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
+[Messages]
+spanish.WelcomeLabel1=Instalación de HubPlay
+spanish.WelcomeLabel2=Se va a instalar HubPlay en este equipo.%n%nEn pocos pasos tendrás un servidor de media corriendo en segundo plano, accesible desde el navegador y desde otros dispositivos de tu red.
+spanish.WizardReady=Resumen
+spanish.ReadyLabel1=Setup va a aplicar los siguientes cambios:
+spanish.ReadyLabel2a=Pulsa Instalar para continuar o Atrás para revisar las opciones.
+spanish.FinishedHeadingLabel=HubPlay está listo
+spanish.FinishedLabelNoIcons=HubPlay se ha instalado correctamente.
+spanish.FinishedLabel=HubPlay se ha instalado correctamente. El servicio arranca con el equipo; accede al panel desde el icono del escritorio o en http://localhost:8096.
+spanish.ClickFinish=Pulsa Finalizar para cerrar el instalador.
+english.WelcomeLabel1=Install HubPlay
+english.WelcomeLabel2=HubPlay will be installed on this computer.%n%nIn a few steps you will have a media server running in the background, reachable from the browser and from other devices on your network.
+english.FinishedHeadingLabel=HubPlay is ready
+english.FinishedLabel=HubPlay was installed successfully. The service starts with the computer; open it from the desktop icon or at http://localhost:8096.
+
 [Tasks]
-Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checkedonce
-Name: "service"; Description: "Instalar HubPlay como servicio de Windows (recomendado — arranca con el PC, sin consola visible)"; GroupDescription: "Modo de ejecución:"; Flags: checkedonce
-Name: "openbrowser"; Description: "Abrir HubPlay en el navegador al terminar"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checkedonce
+Name: "desktopicon"; Description: "Crear icono en el escritorio"; GroupDescription: "Accesos directos:"; Flags: checkedonce
+Name: "service"; Description: "Arrancar HubPlay con el equipo (servicio de Windows)"; GroupDescription: "Modo de ejecución:"; Flags: checkedonce
+Name: "openbrowser"; Description: "Abrir HubPlay al terminar"; GroupDescription: "Accesos directos:"; Flags: checkedonce
 
 [Files]
 Source: "{#SourceDir}\hubplay.exe";              DestDir: "{app}"; Flags: ignoreversion
@@ -83,17 +104,19 @@ Source: "{#SourceDir}\ffprobe.exe";              DestDir: "{app}"; Flags: ignore
 Source: "{#SourceDir}\hubplay.example.yaml";     DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\LICENSE";                  DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "{#SourceDir}\LICENSE-ffmpeg.txt";       DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "hubplay.ico";                           DestDir: "{app}"; Flags: ignoreversion
+Source: "launch-hubplay.vbs";                    DestDir: "{app}"; Flags: ignoreversion
 ; NSSM — service manager. El workflow lo descarga a scripts/vendor/nssm.exe
 ; antes de invocar ISCC.
 Source: "vendor\nssm.exe";                       DestDir: "{app}"; Flags: ignoreversion; Tasks: service
 
 [Icons]
-; Menú inicio — siempre.
-Name: "{group}\HubPlay (Panel web)";            Filename: "http://localhost:8096"; IconFilename: "{app}\hubplay.exe"
-Name: "{group}\HubPlay (arrancar manual)";      Filename: "{app}\hubplay.exe";     Parameters: "--config ""{app}\hubplay.yaml"""; WorkingDir: "{app}"
+; Lanzador principal: VBS que intenta Edge/Chrome --app (modo PWA standalone,
+; ventana sin barra ni tabs) y cae al navegador por defecto si no.
+Name: "{group}\HubPlay";                        Filename: "wscript.exe"; Parameters: """{app}\launch-hubplay.vbs"""; IconFilename: "{app}\hubplay.ico"; WorkingDir: "{app}"
+Name: "{group}\HubPlay (arrancar manual)";      Filename: "{app}\hubplay.exe"; Parameters: "--config ""{app}\hubplay.yaml"""; WorkingDir: "{app}"; IconFilename: "{app}\hubplay.ico"
 Name: "{group}\Desinstalar HubPlay";            Filename: "{uninstallexe}"
-; Escritorio — opcional.
-Name: "{autodesktop}\HubPlay";                  Filename: "http://localhost:8096"; IconFilename: "{app}\hubplay.exe"; Tasks: desktopicon
+Name: "{autodesktop}\HubPlay";                  Filename: "wscript.exe"; Parameters: """{app}\launch-hubplay.vbs"""; IconFilename: "{app}\hubplay.ico"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
 ; Copiar el yaml de ejemplo a hubplay.yaml si no existe (primer install).
@@ -110,7 +133,8 @@ Filename: "{app}\nssm.exe"; Parameters: "start HubPlay"; Flags: runhidden waitun
 
 ; Abrir el navegador al final si el usuario marcó la opción. Espera
 ; 3 segundos para dar tiempo al servicio a levantarse y aceptar conexiones.
-Filename: "cmd.exe"; Parameters: "/C timeout /T 3 /NOBREAK > nul && start http://localhost:8096"; Flags: runhidden nowait; Tasks: openbrowser
+; Pequeño delay para que el servicio acepte conexiones, luego abre como app.
+Filename: "cmd.exe"; Parameters: "/C timeout /T 3 /NOBREAK > nul && wscript ""{app}\launch-hubplay.vbs"""; Flags: runhidden nowait; Tasks: openbrowser
 
 [UninstallRun]
 ; Parar y desinstalar el servicio antes de borrar los archivos. ||

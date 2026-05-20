@@ -1,5 +1,76 @@
 # Estado del proyecto
 
+> 📦 **Sesión 2026-05-19/20 (continuación) — Distribución y empaquetado.** Cerramos el flujo "descargar y usar" para tres públicos: PC desktop, servidor Linux y NAS. 8 PRs mergeadas. Nada toca la lógica de negocio — todo es plumbing alrededor del binario.
+>
+> **Audit panel — usernames en vez de UUIDs.** LEFT JOIN a users en el SELECT del audit log. Pinta `alice` y `bob → carol` en lugar de `bd91…/4def…`; UUID truncado en gris debajo, tooltip con el ID completo para copiar.
+>
+> **Versión inyectable.** `version`, `commit`, `buildDate` como `var` en main package, inyectadas por `-ldflags` en Makefile y CI vía `git describe`. Se exponen en `/admin/system/stats` y en `hubplay --version`. Builds locales muestran `v0.1.0-N-gSHA-dirty`, build de tag muestra el tag limpio.
+>
+> **PATH prepend del exe-dir al arranque.** Una línea en `main.go` que mete `filepath.Dir(os.Executable())` al inicio del `$PATH`. Con eso, cualquier `exec.LookPath("ffmpeg")` o `exec.Command("ffmpeg", …)` (probe, stream, imaging, iptv, library) encuentra el `ffmpeg` bundleado en la misma carpeta que `hubplay.exe` sin tocar ningún call-site.
+>
+> **Release workflow cross-platform** (`.github/workflows/release.yml`):
+> - Matrix 5 targets: linux/darwin × amd64/arm64, windows × amd64. `CGO_ENABLED=0` (modernc.org/sqlite es pure-Go).
+> - `scripts/fetch-ffmpeg.sh` descarga ffmpeg LGPL por plataforma — BtbN/FFmpeg-Builds (Linux/Windows), evermeet.cx (macOS).
+> - Empaqueta `.tar.gz`/`.zip` + `.sha256` con `hubplay` + `ffmpeg` + `ffprobe` + `hubplay.example.yaml` + `LICENSE-ffmpeg.txt`.
+> - Job `release-nightly`: en cada push a `main` borra el tag `nightly` y lo recrea con los binarios del último commit. Pre-release público, visible en la pestaña Releases sin esperar a taguear.
+> - Job `release-tag`: en push de `v*` publica release ESTABLE (no draft, no prerelease).
+> - `fetch-depth: 0` en todos los checkouts que llaman a `git describe` — sin esto el job downstream calculaba una versión distinta y el unzip fallaba.
+>
+> **Installer Windows** (`scripts/installer.iss` + `Minionguyjpro/Inno-Setup-Action@v1.2.8`):
+> - Genera `HubPlay-Setup-vXXX-windows-amd64.exe`.
+> - Bundlea NSSM (BSD) para registrar `HubPlay` como servicio Windows; arranca con el PC, sin consola.
+> - Icono multi-resolución (16/32/48/64/128/256), banner del wizard con marca integrada (logo + "HubPlay" + tagline) — todo generado desde `web/public/hubplay_icon_mark.svg` con `web/scripts/gen-installer-assets.mjs` (sharp + to-ico).
+> - Shortcut Escritorio + Menú Inicio apunta a `launch-hubplay.vbs` que intenta `msedge --app`, luego `chrome --app`, fallback al navegador por defecto → abre como ventana standalone sin chrome del browser.
+> - Textos del wizard en español (welcome/finish/ready) sobreescritos en `[Messages]`, sin tono de marketing.
+> - Caveats que arrastramos hasta dejarlo verde: pin `@v1.2.8` (no existe `@v1` floating), `fetch-depth: 0`, NSSM con retry+fallback a archive.org (nssm.cc da 503), env vars en lugar de `/D` (la action propaga las comillas literales y rompía `OutputBaseFilename`), `LICENSE` opcional (`skipifsourcedoesntexist`) porque el repo aún no tiene fichero LICENSE.
+>
+> **Install script Linux** (`scripts/install.sh` + `scripts/hubplay.service`):
+> - One-liner estilo Tailscale/k3s: `curl -fsSL https://github.com/Alexzafra13/HubPlay_demo/releases/latest/download/install.sh | sudo bash`.
+> - Detecta arch (amd64/arm64), exige systemd, refusa con instrucciones a Docker en Synology/Unraid/QNAP/TrueNAS/Alpine.
+> - Resuelve "latest" vía GitHub API, descarga `.tar.gz`, verifica `sha256`, crea usuario sistema `hubplay`, instala binarios en `/usr/local/bin/`, config en `/etc/hubplay/`, datos en `/var/lib/hubplay/`, registra systemd unit endurecido (NoNewPrivileges, ProtectSystem, PrivateTmp, RestrictAddressFamilies…), `enable --now`.
+> - Idempotente: correrlo dos veces hace upgrade in-place. Preserva el `hubplay.yaml` editado por el operador.
+> - El job `linux-installer-assets` del workflow sube `install.sh` y `hubplay.service` como assets sueltos del release para que el `curl` funcione.
+>
+> **PWA** (`vite-plugin-pwa` + `@vite-pwa/assets-generator`):
+> - Manifest + service worker injectados automáticamente. Workbox precachea JS/CSS/assets, no HTML (evita stale tras swap de server).
+> - Iconos generados desde `public/hubplay_icon_mark.svg` con `pnpm gen:pwa-assets`.
+> - Browser detecta "instalable" en `localhost` o HTTPS → botón "Instalar" → icono propio en escritorio/home + ventana standalone.
+> - **Caveat conocido**: en LAN sobre HTTP plano (192.168.x.y) los browsers NO ofrecen instalar la PWA — requieren secure context. La app funciona, sólo no se instala como PWA. Documentado en el panel admin.
+>
+> **Update notifier** (`internal/updates/`):
+> - Goroutine background con ticker de 24h y jitter inicial 0-30min (evita thundering-herd si muchas instancias arrancan juntas).
+> - GET a `api.github.com/repos/.../releases/latest` con `If-None-Match` (ETag) → 304 cuando no hay versión nueva, ~200B por check.
+> - Comparador semver inline (sin nuevas deps), tolerante a `v` prefix, prereleases y build metadata.
+> - Auto-deshabilitado en `version=="dev"` o `repo==""`.
+> - Endpoints: `GET /admin/system/updates`, `POST /admin/system/updates/check` (rate-limit 1/min).
+> - Banner en `/admin/system` (`UpdateBanner.tsx`): tarjeta accent si hay update + link al release + botón refresh; tarjeta neutra "al día" si no.
+>
+> **mDNS auto-anuncio** (`internal/mdns/` con `grandcat/zeroconf`):
+> - El server registra `_http._tcp` con hostname forzado `<cfg.MDNS.Hostname>.local` (default `hubplay.local`).
+> - Cualquier dispositivo de la LAN (Windows 10+, macOS, móviles modernos, Linux con Avahi) resuelve `http://hubplay.local:8096` sin tocar router ni DNS.
+> - Config `mdns.enabled` (default true) y `mdns.hostname` en `hubplay.yaml`. Fallos UDP/5353 bloqueado no son fatales — log warn y server sigue.
+> - Fuera de scope: certificados TLS estilo `*.plex.direct`. Operadores que quieran HTTPS en LAN siguen necesitando Caddy/reverse-proxy.
+>
+> **Fixes diversos descubiertos en CI:**
+> - 4 errores `react-hooks/set-state-in-effect` de eslint v5+ (pre-existentes): `UserAvatar`, `Uploads`, `IdentityCard`, `QRScannerModal` → patrón "derive state with previous tracking" en lugar de `useEffect` + `setState`.
+> - `react-refresh/only-export-components` en `QRScannerModal` → utility extraída a `extractCode.ts`.
+> - Postgres strict typing: `UPDATE users SET is_owner=1` rompía en Postgres (boolean strict) — cambiado a `TRUE` portable.
+> - Go 1.25 nilcheck en `http.Redirect` con `r=nil` → pasar el request real en `proxy_security_test.go`.
+> - Data race en `updates` test: jitter capturado en `Start()` antes de spawnear la goroutine.
+> - `TestTransmuxManager_FFmpegStderrSurfacedOnCrash` flaky (depende del wording exacto de stderr ffmpeg) → relajado a "stderr_tail aparece" + skip si vacío.
+> - Fix `405 Method Not Allowed` en uploads: `http.StripPrefix("/api/v1/uploads", tusd)` antes del `chi.Mount` (chi no modifica `r.URL.Path` y tusd routea por path internamente).
+> - Fix `CSRF_FAILED 403` en uploads: `tus.Upload({ headers: { "X-CSRF-Token": csrfToken } })` con la cookie `hubplay_csrf`.
+>
+> **PRs:** #327 (uploads UX completo) → #328 (nightly visible) → #329 (PWA + Windows installer + fixes lint) → #331 (Inno pin + install script Linux + update notifier) → #332 (race + lints + tests cross-platform) → #333 (nssm retry) → #334 (env vars del installer + LICENSE opcional + icono multi-res + wizard banner + textos + mDNS). Cada una con tests verdes antes de mergear.
+>
+> **Lo que queda pendiente para retomar más adelante:**
+> - Firma de código del installer Windows (SmartScreen sigue avisando). SignPath Foundation (free OSS) o Azure Trusted Signing (~10$/mes).
+> - Opt-out del update checker desde el panel admin (ahora sólo vía repo="" en build).
+> - Mostrar la URL mDNS (`hubplay.local:8096`) en `/admin/system` para que el operador pueda compartirla.
+> - Refactor del Service de updates para aceptar `BaseURL` configurable y poder hacer test E2E HTTP con httptest.
+> - LICENSE real en el repo (mientras tanto el wizard de Inno no muestra licencia, está marcado `skipifsourcedoesntexist`).
+> - Auto-update: `*.plex.direct`-style cert TLS en LAN, instalación de actualizaciones one-click. No urgente.
+
 > 📦 **Sesión 2026-05-19 / rama `claude/add-smtp-upload-feature-LpOi3` — Dos features grandes end-to-end: (1) Subida de media via tus protocol con pipeline ffprobe + audit + SSE, (2) Permisos granulares de admin con owner inmutable. 12 commits, 26/26 paquetes Go con -race verdes, 593/593 frontend, build de producción limpio.**
 >
 > ## 🎯 Feature 1 — Subida de media (PR2)

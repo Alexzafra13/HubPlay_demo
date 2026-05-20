@@ -39,6 +39,7 @@ import (
 	"hubplay/internal/scanner"
 	"hubplay/internal/setup"
 	"hubplay/internal/stream"
+	"hubplay/internal/mdns"
 	"hubplay/internal/sysmetrics"
 	"hubplay/internal/updates"
 	"hubplay/internal/upload"
@@ -607,6 +608,18 @@ func run(configPath string) error {
 	// El context del run() cancela la goroutine al shutdown.
 	updateService := updates.New(version, "Alexzafra13/HubPlay_demo", logger)
 	updateService.Start(ctx)
+
+	// mDNS: anuncia el server en la LAN como "<hostname>.local". Errores
+	// no son fatales — firewall bloqueando UDP/5353 o falta de soporte
+	// multicast no debe impedir el arranque del server.
+	if _, err := mdns.Start(ctx, mdns.Config{
+		Enabled:  cfg.MDNS.Enabled,
+		Hostname: cfg.MDNS.Hostname,
+		Port:     cfg.Server.Port,
+		Version:  version,
+	}, logger); err != nil {
+		logger.Warn("mdns disabled", "error", err)
+	}
 
 	// CORS registry (PR4 feature CORS-dynamic): combina statics del
 	// YAML + dynamics del DB en un atomic.Pointer.  Lo construimos
