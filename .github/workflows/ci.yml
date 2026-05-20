@@ -110,7 +110,7 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - uses: golangci/golangci-lint-action@v7
+      - uses: golangci/golangci-lint-action@v9
         with:
           # Pinned to avoid CI breaking on every upstream release. We're
           # on the v2 line because go.mod targets Go 1.25 and the last
