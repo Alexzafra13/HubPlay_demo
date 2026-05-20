@@ -67,7 +67,7 @@ describe("NowPlayingCard", () => {
     );
     expect(screen.getByText("Ahora en antena")).toBeInTheDocument();
     expect(
-      screen.getByText(/Sin guía disponible — La 1 HD/),
+      screen.getByText(/Sin guía disponible · La 1 HD/),
     ).toBeInTheDocument();
   });
 
