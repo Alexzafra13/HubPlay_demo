@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router";
 import { QrCode } from "lucide-react";
@@ -52,14 +52,17 @@ export default function LinkDevice() {
     !!navigator.mediaDevices?.getUserMedia;
 
   // Keep the input in sync with the URL — if the operator scans a
-  // second QR without leaving the page, the field updates.
-  useEffect(() => {
-    const fromURL = searchParams.get("code");
+  // second QR without leaving the page, the field updates. Render-time
+  // guarded setState: only react when the URL's `code` actually changes,
+  // never on every render.
+  const fromURL = searchParams.get("code");
+  const [lastFromURL, setLastFromURL] = useState(fromURL);
+  if (fromURL !== lastFromURL) {
+    setLastFromURL(fromURL);
     if (fromURL && fromURL !== code && !approve.isPending) {
       setCode(fromURL);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
+  }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();

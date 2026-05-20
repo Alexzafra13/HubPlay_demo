@@ -35,17 +35,16 @@ export default function PeerLibraryItemsPage() {
 
   // Adapt the peer's item rows to the canonical MediaItem shape so
   // PosterCard renders them like any local title. Memoised on the
-  // raw items pointer + peerId so paging doesn't recompute O(n) per
+  // items query data pointer so paging doesn't recompute O(n) per
   // render.
-  const remoteItems: FederationRemoteItem[] = items.data?.items ?? [];
   const total = items.data?.total ?? 0;
   const fromCache = items.data?.from_cache ?? false;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
-  const mediaItems = useMemo<MediaItem[]>(
-    () => remoteItems.map(federationItemToMediaItem),
-    [remoteItems],
-  );
+  const mediaItems = useMemo<MediaItem[]>(() => {
+    const remoteItems: FederationRemoteItem[] = items.data?.items ?? [];
+    return remoteItems.map(federationItemToMediaItem);
+  }, [items.data]);
 
   const hrefFor = (item: MediaItem) =>
     `/peers/${peerId}/libraries/${libraryId}/items/${item.id}`;

@@ -143,6 +143,20 @@ interface VideoPlayerProps {
   onEnded?: () => void;
 }
 
+// Codecs the browser can't decode natively — listed here are the ones
+// we burn into the video via ffmpeg on the transcoder side. SRT/WebVTT
+// ride as HLS sub tracks and are deliberately NOT included to avoid
+// duplicate entries in the subtitle picker. Module-scope so the Set
+// identity stays stable across renders for the burnInSubtitleEntries
+// useMemo deps.
+const BURNABLE_CODECS = new Set([
+  "hdmv_pgs_subtitle", "pgs",
+  "dvd_subtitle", "dvdsub",
+  "dvb_subtitle", "dvbsub",
+  "xsub",
+  "ass", "ssa",
+]);
+
 // ─── Component ───────────────────────────────────────────────────────────────
 
 const VideoPlayer: FC<VideoPlayerProps> = ({
@@ -696,16 +710,8 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
   // MediaStream rows. Each row gets a stable per-type index (the
   // 0-based position among subtitle streams) so the URL param
   // ?subtitle=N matches the index ffmpeg's 0:s:N reference uses.
-  // Filter is "is this codec something the browser can't render
-  // natively?" — SRT / WebVTT subs ride as HLS sub tracks and are
-  // intentionally NOT listed here (they'd duplicate entries).
-  const BURNABLE_CODECS = new Set([
-    "hdmv_pgs_subtitle", "pgs",
-    "dvd_subtitle", "dvdsub",
-    "dvb_subtitle", "dvbsub",
-    "xsub",
-    "ass", "ssa",
-  ]);
+  // BURNABLE_CODECS lives at module scope (top of file) so the Set
+  // identity is stable and the useMemo deps stay correct.
   const burnInSubtitleEntries = useMemo(() => {
     if (!subtitleStreams || !onBurnSubtitleSelected) return [];
     const out: { id: number; name: string; lang: string; burnIn: true }[] = [];

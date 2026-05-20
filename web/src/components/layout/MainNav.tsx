@@ -95,10 +95,23 @@ export function MainNav() {
   }, [clearTimers]);
 
   // Close when route changes (the user clicked a link inside the panel).
-  useEffect(() => {
-    closeNow();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.pathname, location.search]);
+  // Render-time guarded setState — pattern recommended by React 19 docs
+  // for "adjust state when a prop changes". Calling clearTimers() here
+  // touches refs in render; that's intentional — without cancelling
+  // the pending hover-open timer, it would fire after navigation and
+  // re-open the menu the user just left. The ref access is functionally
+  // safe (writes nullable scalar fields, no concurrent reader during
+  // render) so we suppress the rule narrowly with justification.
+  const routeKey = location.pathname + location.search;
+  const [lastRouteKey, setLastRouteKey] = useState(routeKey);
+  if (lastRouteKey !== routeKey) {
+    setLastRouteKey(routeKey);
+    if (openId !== null) {
+      // eslint-disable-next-line react-hooks/refs
+      clearTimers();
+      setOpenId(null);
+    }
+  }
 
   // Escape closes from anywhere.
   useEffect(() => {

@@ -128,7 +128,6 @@ function useMetricsHistory(
   const [samples, setSamples] = useState<MetricsSample[]>([]);
   const lastTsRef = useRef(0);
 
-  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!stats || dataUpdatedAt === 0 || dataUpdatedAt === lastTsRef.current) {
       return;
@@ -147,7 +146,6 @@ function useMetricsHistory(
       return next.length > MAX_SAMPLES ? next.slice(-MAX_SAMPLES) : next;
     });
   }, [stats, dataUpdatedAt]);
-  /* eslint-enable react-hooks/set-state-in-effect */
 
   return samples;
 }

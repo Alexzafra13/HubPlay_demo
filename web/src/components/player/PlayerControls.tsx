@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import type { FC, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { TimeDisplay } from "./TimeDisplay";
@@ -899,12 +899,21 @@ const PlayerControls: FC<PlayerControlsProps> = ({
   // Settings) into one boolean and bubble it up. The parent uses
   // it to pin the controls overlay so the auto-hide timer can't
   // evict the sheet mid-interaction.
+  //
+  // `reportMenu` returns an event handler — it's wired into Radix
+  // `onOpenChange`, which fires from user interaction, never during
+  // render. useCallback keeps the identity stable for the React 19
+  // ref-access rule, which would otherwise flag the inner closure
+  // as accessing `openMenusRef.current` during render.
   const openMenusRef = useRef(new Set<string>());
-  const reportMenu = (key: string) => (open: boolean) => {
-    if (open) openMenusRef.current.add(key);
-    else openMenusRef.current.delete(key);
-    onMenuOpenChange?.(openMenusRef.current.size > 0);
-  };
+  const reportMenu = useCallback(
+    (key: string) => (open: boolean) => {
+      if (open) openMenusRef.current.add(key);
+      else openMenusRef.current.delete(key);
+      onMenuOpenChange?.(openMenusRef.current.size > 0);
+    },
+    [onMenuOpenChange],
+  );
 
   // Audio picker labels enriched with codec + channels when the
   // DB-side stream list is available. Match by language + index

@@ -36,13 +36,14 @@ export default function MyNotifications() {
   const markAllRead = useMarkAllNotificationsRead();
   const [filter, setFilter] = useState<Filter>("all");
 
-  const all = data?.data ?? [];
   const unreadCount = data?.unread_count ?? 0;
+  const totalCount = data?.data?.length ?? 0;
 
   const visible = useMemo(() => {
+    const all = data?.data ?? [];
     if (filter === "unread") return all.filter((n) => !n.read_at);
     return all;
-  }, [all, filter]);
+  }, [data, filter]);
 
   if (isLoading && !data) {
     return (
@@ -95,7 +96,7 @@ export default function MyNotifications() {
           active={filter === "all"}
           onClick={() => setFilter("all")}
           label={t("notifications.filter.all", { defaultValue: "Todas" })}
-          count={all.length}
+          count={totalCount}
         />
         <FilterChip
           active={filter === "unread"}
