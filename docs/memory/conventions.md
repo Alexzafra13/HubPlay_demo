@@ -1137,3 +1137,11 @@ Tras la integración de [React Doctor](https://github.com/millionco/react-doctor
 - `react-compiler-healthcheck` — hard gate, 100% requerido.
 - `react-doctor` — visibility-only, comenta inline en cada PR con regresiones/mejoras del score.
 - `knip` — info-only, `--no-exit-code` (cuando lleguemos a 0 unused, elevar a hard).
+
+### Squash merge audit (regla nueva 2026-05-20)
+
+Tras descubrir que el squash merge de PR #360 descartó silenciosamente 54 líneas de un commit (migración LazyMotion sobre 7 archivos) — se mergeó la activación de `LazyMotion strict` en `App.tsx` pero NO los cambios `motion` → `m` en los call sites, lo que habría roto runtime al primer render con animación:
+
+- **Tras mergear cualquier PR que aplica un script masivo** (sed-like changes, code mods, migraciones cross-archivo), `git diff origin/main~1 origin/main -- <archivo_clave>` para verificar que los cambios reales aterrizaron. El visor de "files changed" del PR de GitHub puede esconder conflict resolutions silenciosas durante el squash.
+- **Si una regla del lint que se eliminó vuelve a aparecer** en un PR posterior, primero auditar main (`git show origin/main:<file>`) antes de asumir que el autor del nuevo PR la introdujo. La regresión puede venir del merge anterior.
+- **Para scripts masivos próximamente**: idealmente, hacerlos en commits separados pequeños o usar `git merge --no-ff` en lugar de squash si la PR contiene scripts de mass-edit, para que el historial preserve la atomicidad del cambio.
