@@ -30,7 +30,15 @@ updates:
     schedule:
       interval: weekly
       day: monday
-    open-pull-requests-limit: 5
+    # IMPORTANT: kept at 1 deliberately. GitHub squash-merge no detecta
+    # conflictos semánticos en pnpm-lock.yaml cuando dos PRs añaden la
+    # misma dependencia transitiva por caminos distintos — la corrupción
+    # se manifiesta como `ERR_PNPM_BROKEN_LOCKFILE  duplicated mapping
+    # key`. Ver PR #349 (lru-cache@11.5.0 triplicado tras mergear
+    # #290 → #338 → #248 → #141 en sucesión rápida). Con limit=1
+    # dependabot serializa: solo hay 1 PR npm abierta a la vez, y la
+    # siguiente se abre con el lockfile actualizado.
+    open-pull-requests-limit: 1
     groups:
       web-deps:
         update-types:
