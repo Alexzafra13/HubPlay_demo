@@ -108,7 +108,6 @@ export default function LinkDevice() {
             value={code}
             onChange={(e) => setCode(e.target.value)}
             placeholder="ABCD-EFGH"
-            autoFocus
             spellCheck={false}
             autoComplete="off"
             inputMode="text"

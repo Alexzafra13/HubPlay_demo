@@ -181,7 +181,6 @@ function OrphanRow({
               aria-label={t("admin.withoutEPG.tvgIDLabel", {
                 defaultValue: "Nuevo tvg-id",
               })}
-              autoFocus
             />
             <Button
               size="sm"

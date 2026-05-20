@@ -492,10 +492,10 @@ function RowDetail({
                 )}
               </div>
             ) : (
-              <span className="text-text-muted italic">—</span>
+              <span className="text-text-muted italic">–</span>
             )}
           </DLine>
-          <DLine label="IP">{row.ip_address || "—"}</DLine>
+          <DLine label="IP">{row.ip_address || "–"}</DLine>
           <DLine label={t("admin.audit.detailUA", { defaultValue: "Navegador" })} wide>
             <span className="text-xs">{row.user_agent || "—"}</span>
           </DLine>
@@ -568,7 +568,7 @@ function ActorCell({ row }: { row: AuditLogEntry }) {
 
 function TargetCell({ row }: { row: AuditLogEntry }) {
   if (!row.target_type && !row.target_id) {
-    return <span className="text-text-muted">—</span>;
+    return <span className="text-text-muted">–</span>;
   }
   const name =
     row.target_type === "user" && row.target_username

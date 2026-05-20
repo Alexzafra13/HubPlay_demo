@@ -544,7 +544,6 @@ export function FolderBrowser({
         {showNewFolder ? (
           <form onSubmit={handleCreateFolder} className="flex gap-2">
             <Input
-              autoFocus
               value={newFolderName}
               onChange={(e) => setNewFolderName(e.target.value)}
               placeholder={t("uploads.folder.newFolderPlaceholder", {
@@ -674,7 +673,6 @@ function RenameRow({
     >
       {icon}
       <input
-        autoFocus
         type="text"
         value={value}
         onChange={(e) => onChange(e.target.value)}

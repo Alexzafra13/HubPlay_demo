@@ -115,7 +115,6 @@ export function IdentifyDialog({ isOpen, onClose, item }: IdentifyDialogProps) {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               className="mt-1 w-full rounded-[--radius-md] border border-border bg-bg-card px-3 py-2 text-sm text-text focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30"
-              autoFocus
             />
           </div>
           <div className="w-24">
@@ -262,7 +261,7 @@ function CandidateCard({ candidate, selected, onSelect }: CandidateCardProps) {
             />
           ) : (
             <div className="flex size-full items-center justify-center text-xs text-text-muted">
-              —
+              –
             </div>
           )}
         </div>
