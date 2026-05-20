@@ -24,17 +24,27 @@ const BottomSheet: FC<BottomSheetProps> = ({ open, title, onClose, children }) =
   // Escape-to-close. Bound at the window so the sheet doesn't need
   // focus to be reachable — the user may have just tapped a button
   // and the focus is on a now-hidden element.
+  //
+  // Patrón "latest onClose vía ref": el listener se monta UNA vez por
+  // apertura (deps = [open]). Si lo añadiéramos a `onClose` como
+  // dep, cada re-render del padre re-suscribiría el listener, lo cual
+  // es trabajo perdido y rompe la captura de teclas durante el
+  // re-subscribe.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();
-        onClose();
+        onCloseRef.current();
       }
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [open, onClose]);
+  }, [open]);
 
   // Body-scroll lock while open. The player itself is already
   // fullscreen so the page underneath rarely matters, but on iOS

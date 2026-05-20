@@ -75,6 +75,11 @@ const ACCEPTED_EXTENSIONS = [
   ".srt", ".ass", ".vtt",
 ];
 
+// Set para lookups O(1) en validateFiles() que recorre cada fichero
+// del drop. El array de arriba se conserva para el `accept=` del input
+// (el atributo nativo necesita la lista comma-separated).
+const ACCEPTED_EXTENSIONS_SET = new Set(ACCEPTED_EXTENSIONS);
+
 export default function Uploads() {
   const { t } = useTranslation();
   const { data: me } = useMe();
@@ -430,7 +435,7 @@ function UploadDropzone({
     for (const f of arr) {
       const dot = f.name.lastIndexOf(".");
       const ext = dot >= 0 ? f.name.slice(dot).toLowerCase() : "";
-      if (!ACCEPTED_EXTENSIONS.includes(ext)) {
+      if (!ACCEPTED_EXTENSIONS_SET.has(ext)) {
         setRejectReason(
           t("uploads.rejectExtension", { name: f.name, ext: ext || "—" }),
         );
@@ -838,6 +843,11 @@ function CollisionModal({
   onConfirm: (items: CollisionItem[]) => void;
 }) {
   const { t } = useTranslation();
+  // `items` se usa SÓLO como semilla inicial — el modal acumula las
+  // decisiones del usuario en `state` hasta que pulse Confirmar.
+  // Derivarlo en render reiniciaría las decisiones en cada re-render
+  // del padre, perdiendo el trabajo del usuario.
+  // eslint-disable-next-line react-doctor/no-derived-useState
   const [state, setState] = useState(items);
 
   function applyAll(d: CollisionDecision) {

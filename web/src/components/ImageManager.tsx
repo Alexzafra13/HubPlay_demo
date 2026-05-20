@@ -86,23 +86,27 @@ const ImageManager: FC<ImageManagerProps> = ({ itemId, isOpen, onClose, itemType
     return () => clearTimeout(timer);
   }, [statusMessage]);
 
-  // Handle escape key
-  const handleEscape = useCallback(
-    (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    },
-    [onClose],
-  );
+  // Patrón "latest onClose vía ref": el listener se monta una vez
+  // por apertura (deps = [isOpen]). Con onClose en deps, cada
+  // re-render del padre re-suscribiría keydown + recalcularía el
+  // overflow del body.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   useEffect(() => {
     if (!isOpen) return;
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onCloseRef.current();
+    };
     document.addEventListener("keydown", handleEscape);
     document.body.style.overflow = "hidden";
     return () => {
       document.removeEventListener("keydown", handleEscape);
       document.body.style.overflow = "";
     };
-  }, [isOpen, handleEscape]);
+  }, [isOpen]);
 
   const handleSelectImage = useCallback(
     (img: AvailableImage) => {

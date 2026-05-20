@@ -46,6 +46,11 @@ import { BrandWordmark } from "@/components/layout/BrandWordmark";
 // look sparse and we get a better-looking single-column instead.
 const MIN_POSTERS_FOR_WALL = 4;
 
+// Identificadores estables para los 4 slots del PIN. Los usamos como
+// React key en lugar del índice del map: las posiciones son fijas y
+// el lint penaliza key={i}.
+const PIN_DIGIT_SLOTS = ["pin-1", "pin-2", "pin-3", "pin-4"] as const;
+
 export default function WhoIsWatching() {
   const { t } = useTranslation();
   const { data: profiles, isLoading, error } = useProfiles();
@@ -196,103 +201,11 @@ export default function WhoIsWatching() {
 
   // The picker block (title + avatars + rail) is shared between
   // the single-column and split layouts. Pulled to a local
-  // closure rather than a child component to keep the hover /
-  // commit handlers in scope without prop-drilling.
-  const renderPicker = (alignment: "center" | "start") => (
-    <div
-      className={[
-        "flex flex-col",
-        alignment === "center" ? "items-center text-center" : "items-start text-left",
-      ].join(" ")}
-    >
-      <m.h1
-        initial={{ opacity: 0, y: -6 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, ease: [0.22, 0.61, 0.36, 1] }}
-        className="mb-3 text-5xl font-extralight tracking-[-0.015em] text-text-primary sm:text-6xl"
-      >
-        {t("whoIsWatching.title")}
-      </m.h1>
-      <m.p
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.5, delay: 0.15 }}
-        className="mb-12 text-sm tracking-wider text-text-muted"
-      >
-        {t("whoIsWatching.subtitle", {
-          defaultValue: "Selecciona tu perfil para continuar.",
-        })}
-      </m.p>
-      <m.div
-        initial="hidden"
-        animate="show"
-        variants={{
-          hidden: {},
-          show: {
-            transition: {
-              staggerChildren: 0.08,
-              delayChildren: 0.2,
-            },
-          },
-        }}
-        className={[
-          // Stacked vertically when in the split-layout (alignment="start")
-          // so the picker reads as a side rail next to the poster wall;
-          // the centred fallback layout still wraps a horizontal row for
-          // installations with no catalogue art on the right. This
-          // matches the "list usuarios arriba a abajo" pattern HBO and
-          // Disney+ use on TV-shaped surfaces, while the centred row
-          // covers the desktop-like Netflix shape.
-          alignment === "start"
-            ? "flex flex-col gap-6"
-            : "flex flex-wrap justify-center gap-8 sm:gap-10",
-        ].join(" ")}
-      >
-        {profiles?.map((p) => (
-          <ProfileCard
-            key={p.id}
-            profile={p}
-            onClick={() => void pickProfile(p)}
-            onHoverChange={(h) => setHoveredProfileId(h ? p.id : null)}
-            compact={alignment === "start"}
-          />
-        ))}
-      </m.div>
-
-      <m.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.5, delay: 0.5 }}
-        className={[
-          "mt-12 flex flex-wrap items-center gap-3 text-xs",
-          alignment === "center" ? "justify-center" : "justify-start",
-        ].join(" ")}
-      >
-        {canManage && (
-          <button
-            type="button"
-            onClick={() => navigate("/admin/users")}
-            className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-text-secondary backdrop-blur-md transition-all hover:border-white/20 hover:bg-white/10 hover:text-text-primary"
-          >
-            <Pencil className="size-3.5" />
-            {t("whoIsWatching.manageProfiles", {
-              defaultValue: "Gestionar perfiles",
-            })}
-          </button>
-        )}
-        <button
-          type="button"
-          onClick={() => void handleSignOut()}
-          className="inline-flex items-center gap-1.5 rounded-full border border-red-500/20 bg-red-500/5 px-4 py-2 text-red-400/85 backdrop-blur-md transition-all hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-400"
-        >
-          <LogOut className="size-3.5" />
-          {t("whoIsWatching.signOut", {
-            defaultValue: "Cerrar sesión",
-          })}
-        </button>
-      </m.div>
-    </div>
-  );
+  // Render del picker movido al componente <ProfilePicker /> debajo;
+  // antes vivía como closure inline (`const renderPicker = …`) en
+  // render, lo que rompía la reconciliación y disparaba la regla
+  // `react-doctor/no-render-in-render`. Como componente real React
+  // puede memoizarlo y diff-arlo correctamente entre renders.
 
   return (
     <div
@@ -362,7 +275,15 @@ export default function WhoIsWatching() {
           // width, posters fill whatever's left up to a sensible
           // cap (max-w-3xl).
           <div className="grid w-full max-w-7xl items-center gap-12 lg:grid-cols-[auto_minmax(0,1fr)] lg:gap-20">
-            {renderPicker("start")}
+            <ProfilePicker
+              alignment="start"
+              profiles={profiles}
+              canManage={canManage}
+              onPickProfile={pickProfile}
+              onHoverProfile={setHoveredProfileId}
+              onSignOut={handleSignOut}
+              onManageProfiles={() => navigate("/admin/users")}
+            />
             <div className="flex justify-center lg:justify-end">
               <PosterWall posters={posters} />
             </div>
@@ -371,7 +292,15 @@ export default function WhoIsWatching() {
           // Single column when there isn't enough catalogue art
           // to fill a wall. The aurora carries the canvas alone
           // so the page still feels deliberate, not under-built.
-          renderPicker("center")
+          <ProfilePicker
+            alignment="center"
+            profiles={profiles}
+            canManage={canManage}
+            onPickProfile={pickProfile}
+            onHoverProfile={setHoveredProfileId}
+            onSignOut={handleSignOut}
+            onManageProfiles={() => navigate("/admin/users")}
+          />
         )}
       </div>
     </div>
@@ -682,6 +611,121 @@ function ProfileCard({
   );
 }
 
+// ProfilePicker — encabezado + grid de tarjetas de perfil + acciones
+// secundarias (gestionar / cerrar sesión). Extraído del closure inline
+// que vivía en WhoIsWatching para que React pueda diff-arlo bien y
+// para satisfacer la regla `react-doctor/no-render-in-render` (el
+// closure inline rompe la reconciliación en cada render del padre).
+interface ProfilePickerProps {
+  alignment: "center" | "start";
+  profiles: ProfileSummary[] | undefined;
+  canManage: boolean;
+  onPickProfile: (p: ProfileSummary) => void | Promise<void>;
+  onHoverProfile: (id: string | null) => void;
+  onSignOut: () => void | Promise<void>;
+  onManageProfiles: () => void;
+}
+
+function ProfilePicker({
+  alignment,
+  profiles,
+  canManage,
+  onPickProfile,
+  onHoverProfile,
+  onSignOut,
+  onManageProfiles,
+}: ProfilePickerProps) {
+  const { t } = useTranslation();
+  return (
+    <div
+      className={[
+        "flex flex-col",
+        alignment === "center" ? "items-center text-center" : "items-start text-left",
+      ].join(" ")}
+    >
+      <m.h1
+        initial={{ opacity: 0, y: -6 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, ease: [0.22, 0.61, 0.36, 1] }}
+        className="mb-3 text-5xl font-extralight tracking-[-0.015em] text-text-primary sm:text-6xl"
+      >
+        {t("whoIsWatching.title")}
+      </m.h1>
+      <m.p
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.5, delay: 0.15 }}
+        className="mb-12 text-sm tracking-wider text-text-muted"
+      >
+        {t("whoIsWatching.subtitle", {
+          defaultValue: "Selecciona tu perfil para continuar.",
+        })}
+      </m.p>
+      <m.div
+        initial="hidden"
+        animate="show"
+        variants={{
+          hidden: {},
+          show: {
+            transition: { staggerChildren: 0.08, delayChildren: 0.2 },
+          },
+        }}
+        className={[
+          // En el split-layout (alignment="start") el picker es una
+          // columna vertical al lado del wall — patrón HBO/Disney+ en
+          // TV. La fila centrada cubre la forma de escritorio Netflix.
+          alignment === "start"
+            ? "flex flex-col gap-6"
+            : "flex flex-wrap justify-center gap-8 sm:gap-10",
+        ].join(" ")}
+      >
+        {profiles?.map((p) => (
+          <ProfileCard
+            key={p.id}
+            profile={p}
+            onClick={() => void onPickProfile(p)}
+            onHoverChange={(h) => onHoverProfile(h ? p.id : null)}
+            compact={alignment === "start"}
+          />
+        ))}
+      </m.div>
+
+      <m.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.5, delay: 0.5 }}
+        className={[
+          "mt-12 flex flex-wrap items-center gap-3 text-xs",
+          alignment === "center" ? "justify-center" : "justify-start",
+        ].join(" ")}
+      >
+        {canManage && (
+          <button
+            type="button"
+            onClick={onManageProfiles}
+            className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-text-secondary backdrop-blur-md transition-all hover:border-white/20 hover:bg-white/10 hover:text-text-primary"
+          >
+            <Pencil className="size-3.5" />
+            {t("whoIsWatching.manageProfiles", {
+              defaultValue: "Gestionar perfiles",
+            })}
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => void onSignOut()}
+          className="inline-flex items-center gap-1.5 rounded-full border border-red-500/20 bg-red-500/5 px-4 py-2 text-red-400/85 backdrop-blur-md transition-all hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-400"
+        >
+          <LogOut className="size-3.5" />
+          {t("whoIsWatching.signOut", {
+            defaultValue: "Cerrar sesión",
+          })}
+        </button>
+      </m.div>
+    </div>
+  );
+}
+
 interface PinPadProps {
   profile: ProfileSummary;
   pin: string;
@@ -767,15 +811,14 @@ function PinPad({
         }}
       >
         <div className="flex gap-3">
-          {[0, 1, 2, 3].map((i) => {
+          {PIN_DIGIT_SLOTS.map((slot, i) => {
             const filled = i < pin.length;
             const active = i === pin.length && !isLoading;
             return (
-              // El PIN tiene siempre 4 dígitos en posiciones fijas;
-              // un prefijo descriptivo deja claro el propósito de la
-              // key en el árbol.
               <div
-                key={`pin-digit-${i}`}
+                // Slots con key string estable y única, no derivada del
+                // índice (satisface no-array-index-as-key).
+                key={slot}
                 className={[
                   "flex h-14 w-12 items-center justify-center rounded-lg border-2 transition-all",
                   filled
@@ -787,8 +830,8 @@ function PinPad({
               >
                 {filled && (
                   <m.span
-                    initial={{ scale: 0 }}
-                    animate={{ scale: 1 }}
+                    initial={{ scale: 0.95, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
                     transition={{ type: "spring", stiffness: 500, damping: 25 }}
                     className="block size-3 rounded-full bg-text-primary"
                   />

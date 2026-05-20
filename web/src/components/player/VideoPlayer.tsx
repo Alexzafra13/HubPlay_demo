@@ -497,6 +497,15 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
 
   // ─── Video event listeners ───────────────────────────────────────────────
 
+  // Patrón "latest onEnded vía ref": el listener se monta una vez por
+  // sesión de playback (deps abajo). Si añadiéramos `onEndedCallback`
+  // a las deps, cada re-render del padre re-suscribiría todos los
+  // listeners del <video>, perdiendo eventos durante el churn.
+  const onEndedCallbackRef = useRef(onEndedCallback);
+  useEffect(() => {
+    onEndedCallbackRef.current = onEndedCallback;
+  }, [onEndedCallback]);
+
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -584,10 +593,11 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
       // Two paths: with a known next item, gate the auto-advance
       // behind the countdown overlay so the user can cancel; without
       // one, fire the callback immediately like the legacy flow.
-      if (nextUp && onEndedCallback) {
+      const cb = onEndedCallbackRef.current;
+      if (nextUp && cb) {
         setUpNextActive(true);
       } else {
-        onEndedCallback?.();
+        cb?.();
       }
     };
 
@@ -606,7 +616,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
       video.removeEventListener("timeupdate", onTimeUpdate);
       video.removeEventListener("ended", onEnded);
     };
-  }, [itemId, knownDuration, showControls, keepControlsVisible, updateTime, onEndedCallback, nextUp]);
+  }, [itemId, knownDuration, showControls, keepControlsVisible, updateTime, nextUp]);
 
   // Reset upNextActive + firstFrameReady whenever the source changes
   // — the parent's auto-advance switches `itemId`, and the new
