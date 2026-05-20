@@ -152,8 +152,10 @@ export default function PairThisDevice() {
       src.close();
       sourceRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pair]);
+    // poll/navigate son identidades estables (tanstack-query mutate +
+    // react-router navigate); incluirlas en las deps no re-corre el
+    // effect en la práctica y satisface el linter del compiler.
+  }, [pair, poll, navigate]);
 
   return (
     <main className="mx-auto flex min-h-screen max-w-2xl flex-col items-center gap-6 p-6 sm:p-10">
