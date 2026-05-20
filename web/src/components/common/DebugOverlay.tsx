@@ -87,57 +87,38 @@ export function DebugOverlay() {
 
   return (
     <div
-      style={{
-        position: "fixed",
-        bottom: 8,
-        right: 8,
-        zIndex: 100000,
-        maxWidth: 360,
-        maxHeight: "60vh",
-        overflowY: "auto",
-        padding: "8px 10px",
-        fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-        fontSize: 11,
-        lineHeight: 1.4,
-        color: "#e7eb",
-        background: "rgba(15,18,25,0.92)",
-        border: "1px solid #2a313f",
-        borderRadius: 6,
-        boxShadow: "0 4px 14px rgba(0,0,0,0.4)",
-        pointerEvents: "auto",
-      }}
+      className="fixed bottom-2 right-2 z-[60] max-w-[360px] max-h-[60vh] overflow-y-auto px-2.5 py-2 font-mono text-xs leading-snug text-slate-200 bg-[rgba(15,18,25,0.92)] border border-[#2a313f] rounded-md shadow-lg pointer-events-auto"
       role="status"
       aria-live="polite"
     >
-      <div style={{ fontWeight: 600, marginBottom: 4, color: "#7dd3fc" }}>
+      <div className="font-semibold mb-1 text-sky-300">
         debug · {location.pathname}
       </div>
       <div>
         stack: <b>{stackCount}</b> · dom: <b>{dialogs.length}</b>
-        {drift && <span style={{ color: "#fca5a5" }}> ← drift</span>}
+        {drift && <span className="text-red-300"> ← drift</span>}
       </div>
       <div>
         body scroll lock: <b>{scrollLocked ? "ON" : "off"}</b>
         {scrollLocked && stackCount === 0 && (
-          <span style={{ color: "#fca5a5" }}> ← stale</span>
+          <span className="text-red-300"> ← stale</span>
         )}
       </div>
-      <div style={{ marginTop: 6, fontWeight: 600, color: "#7dd3fc" }}>
+      <div className="mt-1.5 font-semibold text-sky-300">
         active queries ({queries.length})
       </div>
-      {queries.length === 0 && <div style={{ opacity: 0.6 }}>(none in flight)</div>}
+      {queries.length === 0 && <div className="opacity-60">(none in flight)</div>}
       {queries.map((q) => (
         // El queryKey ya es único por query (tanstack lo garantiza).
-        <div key={q.key} style={{ wordBreak: "break-all" }}>
+        <div key={q.key} className="break-all">
           <span
-            style={{
-              color:
-                q.status === "error"
-                  ? "#fca5a5"
-                  : q.fetchStatus === "fetching"
-                    ? "#fde68a"
-                    : "#cbd5e1",
-            }}
+            className={
+              q.status === "error"
+                ? "text-red-300"
+                : q.fetchStatus === "fetching"
+                  ? "text-amber-200"
+                  : "text-slate-300"
+            }
           >
             {q.fetchStatus}/{q.status}
           </span>{" "}

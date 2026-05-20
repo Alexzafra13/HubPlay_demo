@@ -121,7 +121,7 @@ export default function PairThisDevice() {
     const src = new EventSource(url);
     sourceRef.current = src;
 
-    src.addEventListener("approved", () => {
+    const onApproved = () => {
       setStatus("approved");
       // One poll consumes the code + sets the auth cookies. After
       // that the browser is logged in for every subsequent /api/v1.
@@ -135,20 +135,26 @@ export default function PairThisDevice() {
         },
       });
       src.close();
-    });
-    src.addEventListener("expired", () => {
+    };
+    const onExpired = () => {
       setStatus("expired");
       src.close();
-    });
-    src.addEventListener("consumed", () => {
+    };
+    const onConsumed = () => {
       setStatus("expired");
       src.close();
-    });
+    };
+    src.addEventListener("approved", onApproved);
+    src.addEventListener("expired", onExpired);
+    src.addEventListener("consumed", onConsumed);
     src.onerror = () => {
       // EventSource auto-reconnects on transient errors, so don't
       // flip to "error" here — only the explicit terminal events do.
     };
     return () => {
+      src.removeEventListener("approved", onApproved);
+      src.removeEventListener("expired", onExpired);
+      src.removeEventListener("consumed", onConsumed);
       src.close();
       sourceRef.current = null;
     };

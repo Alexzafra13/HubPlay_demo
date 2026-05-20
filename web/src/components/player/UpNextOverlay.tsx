@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FC } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -82,20 +82,24 @@ const UpNextOverlay: FC<UpNextOverlayProps> = ({
     return () => window.clearInterval(interval);
   }, [durationSeconds]);
 
-  const handleEsc = useCallback(
-    (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        onCancel();
-      }
-    },
-    [onCancel],
-  );
+  // Patrón "latest value via ref" — el listener se monta una vez en
+  // mount/unmount, no se re-suscribe cada vez que el padre cambia la
+  // identidad de onCancel.
+  const cancelRef = useRef(onCancel);
+  useEffect(() => {
+    cancelRef.current = onCancel;
+  }, [onCancel]);
 
   useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        cancelRef.current();
+      }
+    };
     document.addEventListener("keydown", handleEsc);
     return () => document.removeEventListener("keydown", handleEsc);
-  }, [handleEsc]);
+  }, []);
 
   const code = formatEpisodeCode(nextUp.seasonNumber, nextUp.episodeNumber);
   const progress = 1 - Math.min(1, Math.max(0, remaining / durationSeconds));

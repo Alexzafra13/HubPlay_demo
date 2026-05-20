@@ -354,7 +354,7 @@ function CinematicBackdrop({
         <div
           aria-hidden="true"
           className="pointer-events-none absolute inset-0 overflow-hidden opacity-[0.07]"
-          style={{ filter: "blur(28px) saturate(1.4)" }}
+          style={{ filter: "blur(10px) saturate(1.4)" }}
         >
           <div className="grid size-full grid-cols-2 gap-0 sm:grid-cols-3 md:grid-cols-4">
             {backdrops.map((url) => (

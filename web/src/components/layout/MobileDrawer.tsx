@@ -43,7 +43,7 @@ export function MobileDrawer({ onClose, onLogout }: MobileDrawerProps) {
       style={{
         background:
           "linear-gradient(180deg, rgba(11,15,23,0.96) 0%, rgba(7,9,14,0.98) 100%)",
-        backdropFilter: "blur(20px) saturate(140%)",
+        backdropFilter: "blur(8px) saturate(140%)",
         borderRight: "1px solid var(--color-border-subtle)",
       }}
     >

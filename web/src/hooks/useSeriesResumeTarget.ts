@@ -107,9 +107,18 @@ export function useResumeTarget(scope: ResumeScope, id: string | null): SeriesRe
     // the first season (caller decides whether to navigate or auto-
     // resolve E01); for a season we go straight to the first episode.
     if (scope === "series") {
-      const firstSeason = (children ?? [])
-        .filter((c) => c.type === "season" && c.season_number != null)
-        .sort((a, b) => (a.season_number ?? 0) - (b.season_number ?? 0))[0];
+      // Reduce O(n) en lugar de filter+sort O(n log n): basta con el
+      // mínimo, no necesitamos ordenar toda la lista.
+      let firstSeason: MediaItem | undefined;
+      for (const c of children ?? []) {
+        if (c.type !== "season" || c.season_number == null) continue;
+        if (
+          !firstSeason ||
+          (c.season_number ?? 0) < (firstSeason.season_number ?? 0)
+        ) {
+          firstSeason = c;
+        }
+      }
       if (firstSeason) {
         return {
           mode: "start",
@@ -120,9 +129,16 @@ export function useResumeTarget(scope: ResumeScope, id: string | null): SeriesRe
         };
       }
     } else {
-      const firstEpisode = (children ?? [])
-        .filter((c) => c.type === "episode" && c.episode_number != null)
-        .sort((a, b) => (a.episode_number ?? 0) - (b.episode_number ?? 0))[0];
+      let firstEpisode: MediaItem | undefined;
+      for (const c of children ?? []) {
+        if (c.type !== "episode" || c.episode_number == null) continue;
+        if (
+          !firstEpisode ||
+          (c.episode_number ?? 0) < (firstEpisode.episode_number ?? 0)
+        ) {
+          firstEpisode = c;
+        }
+      }
       if (firstEpisode) {
         return {
           mode: "start",

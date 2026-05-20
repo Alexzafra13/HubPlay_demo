@@ -47,10 +47,10 @@ function isFilterRoute(pathname: string): boolean {
 export function SearchBar() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const location = useLocation();
+  const { pathname } = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const filterMode = isFilterRoute(location.pathname);
+  const filterMode = isFilterRoute(pathname);
   const urlQuery = searchParams.get("q") ?? "";
   const [open, setOpen] = useState(urlQuery.length > 0);
 
@@ -181,15 +181,15 @@ export function SearchBar() {
   // Page-aware placeholder.
   const placeholder = useMemo(() => {
     if (filterMode) {
-      if (location.pathname.startsWith("/search")) {
+      if (pathname.startsWith("/search")) {
         return t("topbar.searchPlaceholder");
       }
-      if (location.pathname.startsWith("/live-tv")) {
+      if (pathname.startsWith("/live-tv")) {
         return t("liveTV.searchPlaceholder", {
           defaultValue: "Busca canales o programas…",
         });
       }
-      const section = location.pathname.startsWith("/series")
+      const section = pathname.startsWith("/series")
         ? t("nav.series")
         : t("nav.movies");
       return t("topbar.filterPlaceholder", {
@@ -198,7 +198,7 @@ export function SearchBar() {
       });
     }
     return t("topbar.searchPlaceholder");
-  }, [filterMode, location.pathname, t]);
+  }, [filterMode, pathname, t]);
 
   const panelOpen = dropdownActive || suggestionsActive;
 

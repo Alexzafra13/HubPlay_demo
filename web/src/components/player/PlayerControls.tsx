@@ -45,6 +45,11 @@ interface QualityLevel {
   label: string;
 }
 
+// Default vacío para `qualityLevels`. Constante de módulo en lugar de
+// `= []` inline para que la identidad se mantenga estable entre renders
+// y los hooks que la reciben no se invaliden.
+const NO_QUALITY_LEVELS: QualityLevel[] = [];
+
 // One chapter marker on the seek bar. `startSeconds` is duration-in-
 // seconds (already converted from ticks at the call site) so SeekBar
 // stays unit-agnostic and doesn't need to know about the 10-million-
@@ -871,7 +876,7 @@ const PlayerControls: FC<PlayerControlsProps> = ({
   audioTracks,
   audioStreams,
   subtitleTracks,
-  qualityLevels = [],
+  qualityLevels = NO_QUALITY_LEVELS,
   chapters,
   trickplay,
   currentAudioTrack,

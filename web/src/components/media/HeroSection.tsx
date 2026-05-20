@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import type { FC, ReactNode } from "react";
 import { Link } from "react-router";
 import { useTranslation } from "react-i18next";
@@ -20,6 +20,11 @@ import { formatPremiereDate } from "@/utils/heroMeta";
 // URL directly so the browser receives the largest available
 // ingest size and scales DOWN at most.
 const HERO_POSTER_WIDTH = 720;
+
+// Default vacío para `menuItems`. Constante de módulo en lugar de `= []`
+// inline en la prop para que la identidad sea estable entre renders y
+// el `useMemo` de filtrado no se invalide.
+const NO_MENU_ITEMS: HeroMenuItem[] = [];
 
 // ─── Menu item type ─────────────────────────────────────────────────────────
 
@@ -92,17 +97,18 @@ const KebabMenu: FC<{ items: HeroMenuItem[] }> = ({ items }) => {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  const close = useCallback(() => setOpen(false), []);
-
+  // close se llama solo desde dentro de los listeners, así que en vez
+  // de pasarla como dep (donde el linter pediría una identidad estable
+  // con useCallback) la inlinearemos: `setOpen(false)` directo.
   useEffect(() => {
     if (!open) return;
     const onClickOutside = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        close();
+        setOpen(false);
       }
     };
     const onEsc = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
+      if (e.key === "Escape") setOpen(false);
     };
     document.addEventListener("mousedown", onClickOutside);
     document.addEventListener("keydown", onEsc);
@@ -110,7 +116,7 @@ const KebabMenu: FC<{ items: HeroMenuItem[] }> = ({ items }) => {
       document.removeEventListener("mousedown", onClickOutside);
       document.removeEventListener("keydown", onEsc);
     };
-  }, [open, close]);
+  }, [open]);
 
   if (items.length === 0) return null;
 
@@ -142,7 +148,7 @@ const KebabMenu: FC<{ items: HeroMenuItem[] }> = ({ items }) => {
               type="button"
               role="menuitem"
               onClick={() => {
-                close();
+                setOpen(false);
                 item.onClick();
               }}
               className={[
@@ -189,7 +195,7 @@ const HeroSection: FC<HeroSectionProps> = ({
   playLabel,
   onToggleFavorite,
   isFavorite = false,
-  menuItems = [],
+  menuItems = NO_MENU_ITEMS,
   people,
 }) => {
   const { t, i18n } = useTranslation();
