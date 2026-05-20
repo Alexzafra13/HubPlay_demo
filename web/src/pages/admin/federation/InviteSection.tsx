@@ -5,6 +5,7 @@ import { useGenerateInvite, useListInvites } from "@/api/hooks/federation";
 import { Button } from "@/components/common/Button";
 import { CopyButton, ErrorBanner } from "./_shared";
 import type { FederationInvite } from "@/api/types";
+import { formatDateTime } from "@/utils/dateFormat";
 
 // InviteSection — el panel donde el admin local genera un codigo de
 // un solo uso y se lo pasa por canal seguro al admin del otro
@@ -173,7 +174,7 @@ function ExpiryChip({ expiresAt }: { expiresAt: string }) {
         "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium",
         cls,
       ].join(" ")}
-      title={new Date(expiresAt).toLocaleString()}
+      title={formatDateTime(expiresAt)}
     >
       <Clock className="size-3" />
       {formatRemaining(remainingMs, t)}

@@ -64,6 +64,7 @@ import {
   PageHeader,
   ProgressBar,
 } from "@/components/common";
+import { formatDateTime } from "@/utils/dateFormat";
 
 // Extensiones aceptadas — espejo cliente-side del whitelist del backend.
 // Aquí sólo gatea el file picker / drag-drop antes de iniciar tus, para
@@ -780,7 +781,7 @@ function UploadHistoryList({ entries }: { entries: UploadAuditEntry[] }) {
             {humanBytes(e.bytes)}
           </span>
           <span className="text-xs text-text-muted">
-            {new Date(e.started_at).toLocaleString()}
+            {formatDateTime(e.started_at)}
           </span>
           <span className="text-xs text-text-muted sm:ml-auto">
             {t(`uploads.outcome_${e.outcome}`)}

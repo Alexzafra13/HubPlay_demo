@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { NavLink, useLocation } from "react-router";
 import { useTranslation } from "react-i18next";
-import { motion, AnimatePresence } from "framer-motion";
+import { m, AnimatePresence } from "framer-motion";
 import { ChevronDown, X, LogOut, Settings, ShieldCheck, Smartphone, Upload } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { useAllPeerLibraries } from "@/api/hooks/federation";
@@ -266,7 +266,7 @@ function DrawerAccordion({
 
       <AnimatePresence initial={false}>
         {open && (
-          <motion.div
+          <m.div
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
@@ -295,7 +295,7 @@ function DrawerAccordion({
                 </div>
               ))}
             </div>
-          </motion.div>
+          </m.div>
         )}
       </AnimatePresence>
     </div>
@@ -351,7 +351,7 @@ function PeersDrawerItem({
 
       <AnimatePresence initial={false}>
         {open && (
-          <motion.div
+          <m.div
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
@@ -390,7 +390,7 @@ function PeersDrawerItem({
                 {t("navMenu.peers.viewAll", { defaultValue: "Ver todos" })} →
               </NavLink>
             </div>
-          </motion.div>
+          </m.div>
         )}
       </AnimatePresence>
     </li>

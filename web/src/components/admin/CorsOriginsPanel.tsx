@@ -8,6 +8,7 @@ import {
   useDeleteCorsOrigin,
 } from "@/api/hooks";
 import { Button, EmptyState, Input, Spinner } from "@/components/common";
+import { formatDateTime } from "@/utils/dateFormat";
 
 // CorsOriginsPanel — owner-only management de orígenes CORS añadidos
 // en runtime via el panel admin (PR4 feature).
@@ -176,7 +177,7 @@ export function CorsOriginsPanel() {
                           {e.note && <span>{e.note}</span>}
                           {e.note && e.created_at && <span> · </span>}
                           {e.created_at && (
-                            <span>{new Date(e.created_at).toLocaleString()}</span>
+                            <span>{formatDateTime(e.created_at)}</span>
                           )}
                         </p>
                       )}

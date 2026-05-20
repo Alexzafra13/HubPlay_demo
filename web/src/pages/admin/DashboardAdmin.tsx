@@ -41,6 +41,7 @@ import type {
 } from "@/api/types";
 import { Spinner, EmptyState } from "@/components/common";
 import { SectionHeader } from "@/components/admin/SectionHeader";
+import { formatDate } from "@/utils/dateFormat";
 import { AreaTimeline } from "@/components/admin/dashboard/AreaTimeline";
 import { NowPlayingPanel } from "./dashboard/NowPlayingPanel";
 
@@ -301,13 +302,9 @@ function ActivityPanel({ activity, t }: ActivityPanelProps) {
           yKey="minutes"
           color="var(--color-accent)"
           unit=" min"
-          formatX={(v) => {
-            const d = new Date(String(v));
-            return d.toLocaleDateString(undefined, {
-              day: "2-digit",
-              month: "2-digit",
-            });
-          }}
+          formatX={(v) =>
+            formatDate(String(v), { day: "2-digit", month: "2-digit" })
+          }
           formatY={(n) => `${n} min`}
         />
       </div>

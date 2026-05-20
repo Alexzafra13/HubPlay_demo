@@ -24,6 +24,7 @@ import {
 import { useAuditLog, useAuditEventTypes } from "@/api/hooks";
 import type { AuditLogEntry } from "@/api/types";
 import { Button, EmptyState, Input, Spinner } from "@/components/common";
+import { formatDateTime } from "@/utils/dateFormat";
 
 // AuditLogPanel — owner-OR-can_view_audit panel para consultar el
 // audit log unificado (PR5).
@@ -318,7 +319,7 @@ export function AuditLogPanel() {
                       <TargetCell row={row} />
                     </td>
                     <td className="p-2 text-xs text-text-muted">
-                      {new Date(row.created_at).toLocaleString()}
+                      {formatDateTime(row.created_at)}
                     </td>
                     <td className="p-2 text-xs font-mono text-text-muted">
                       {row.ip_address}
@@ -460,7 +461,7 @@ function RowDetail({
 
         <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-sm mb-4">
           <DLine label={t("admin.audit.detailWhen", { defaultValue: "Cuándo" })}>
-            {new Date(row.created_at).toLocaleString()}
+            {formatDateTime(row.created_at)}
           </DLine>
           <DLine label={t("admin.audit.detailActor", { defaultValue: "Actor" })}>
             {row.actor_user_id ? (

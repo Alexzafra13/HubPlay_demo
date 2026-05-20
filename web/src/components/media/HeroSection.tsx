@@ -11,6 +11,7 @@ import { useUserPreference } from "@/api/hooks";
 import { TRAILERS_ENABLED_PREF_KEY } from "@/utils/playbackPrefs";
 import { ExternalIdRow, OverviewWithReadMore, StudioMark } from "./heroMeta";
 import { formatPremiereDate } from "@/utils/heroMeta";
+import { formatDate } from "@/utils/dateFormat";
 
 // Posters are small enough (≤340px tall) that a 720px-wide variant
 // covers 2x DPR comfortably — worth the bandwidth save. The hero
@@ -461,11 +462,11 @@ const HeroSection: FC<HeroSectionProps> = ({
                     misleading. */}
                 {isEpisode && item.premiere_date ? (
                   <span className="font-medium">
-                    {new Date(item.premiere_date).toLocaleDateString(i18n.language, {
-                      day: "numeric",
-                      month: "short",
-                      year: "numeric",
-                    })}
+                    {formatDate(
+                      item.premiere_date,
+                      { day: "numeric", month: "short", year: "numeric" },
+                      i18n.language,
+                    )}
                   </span>
                 ) : movieReleaseDate ? (
                   <span className="font-medium">{movieReleaseDate}</span>

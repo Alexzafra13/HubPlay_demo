@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, NavLink, useLocation } from "react-router";
 import { useTranslation } from "react-i18next";
-import { motion, AnimatePresence } from "framer-motion";
+import { m, AnimatePresence } from "framer-motion";
 import {
   Menu,
   ArrowLeft,
@@ -187,7 +187,7 @@ function UserAvatarMenu({
 
       <AnimatePresence>
         {open && (
-          <motion.div
+          <m.div
             initial={{ opacity: 0, y: -6, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -6, scale: 0.98 }}
@@ -266,7 +266,7 @@ function UserAvatarMenu({
               <LogOut className="size-[15px]" strokeWidth={1.6} />
               {t("common.logOut")}
             </button>
-          </motion.div>
+          </m.div>
         )}
       </AnimatePresence>
     </div>

@@ -7,6 +7,7 @@ import { ChannelPlayer } from "./ChannelPlayer";
 import { NowPlayingCard } from "./NowPlayingCard";
 import { OverlayHeader } from "./OverlayHeader";
 import { formatTime, getNowPlaying, getUpNext } from "./epgHelpers";
+import { epochOf } from "@/utils/dateFormat";
 
 interface PlayerOverlayProps {
   channel: Channel;
@@ -168,8 +169,8 @@ function UpcomingList({ items }: { items: EPGProgram[] }) {
   return (
     <ul className="flex flex-col gap-1">
       {items.map((p) => {
-        const start = new Date(p.start_time).getTime();
-        const end = new Date(p.end_time).getTime();
+        const start = epochOf(p.start_time);
+        const end = epochOf(p.end_time);
         const durationMin = Math.max(1, Math.round((end - start) / 60_000));
         return (
           <li

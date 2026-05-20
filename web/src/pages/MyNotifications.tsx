@@ -16,6 +16,7 @@ import {
 } from "@/api/hooks/notifications";
 import { Spinner } from "@/components/common";
 import type { AppNotification, NotificationKind } from "@/api/types";
+import { formatDateTime } from "@/utils/dateFormat";
 
 // MyNotifications — /me/notifications. Pagina completa del inbox.
 //
@@ -224,7 +225,7 @@ function NotificationRow({ notif }: { notif: AppNotification }) {
             </p>
           )}
           <p className="mt-1.5 text-[10px] text-text-muted/70">
-            {new Date(notif.created_at).toLocaleString()}
+            {formatDateTime(notif.created_at)}
           </p>
         </div>
       </button>

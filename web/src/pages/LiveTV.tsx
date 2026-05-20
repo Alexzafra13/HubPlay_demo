@@ -24,6 +24,7 @@ import {
   getNowPlaying,
   useHeroSpotlight,
 } from "@/components/livetv";
+import { epochOf } from "@/utils/dateFormat";
 
 // Map from legacy ?tab values (pre 2026-05-08, when Live TV had 4
 // tabs: Now / Discover / Guide / Favorites) onto the current 2-tab
@@ -546,9 +547,7 @@ export default function LiveTV() {
           detail
             ? (scheduleByChannel[detail.channel.id] ?? [])
                 .filter(
-                  (p) =>
-                    new Date(p.start_time).getTime() >=
-                    new Date(detail.program.end_time).getTime(),
+                  (p) => epochOf(p.start_time) >= epochOf(detail.program.end_time),
                 )
                 .slice(0, 3)
             : []

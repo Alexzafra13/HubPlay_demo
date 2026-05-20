@@ -53,6 +53,7 @@ import {
 } from "@/components/admin/dashboard/HealthPill";
 import { KpiTile } from "@/components/admin/dashboard/KpiTile";
 import { useTranslation } from "react-i18next";
+import { formatDate, formatTime } from "@/utils/dateFormat";
 
 import { SystemSettingsSection } from "./SystemSettingsSection";
 
@@ -105,8 +106,11 @@ function formatBytes(n: number): string {
 }
 
 function formatServerTime(iso: string): string {
+  // Wrapping del helper común: si el ISO viene vacío preservamos el
+  // glifo "—" en lugar de string vacío para que la fila siga visible
+  // con un placeholder en lugar de hueco.
   if (!iso) return "—";
-  return new Date(iso).toLocaleTimeString();
+  return formatTime(iso);
 }
 
 // ─── Metrics ring buffer ────────────────────────────────────────────
@@ -298,7 +302,7 @@ function IdentityStrip({
         {dataUpdatedAt > 0 && (
           <span>
             {t("admin.system.updated", {
-              time: new Date(dataUpdatedAt).toLocaleTimeString(),
+              time: formatTime(dataUpdatedAt),
             })}
           </span>
         )}
@@ -526,17 +530,11 @@ function HostChartsRow({ history }: { history: MetricsSample[] }) {
   const empty = history.length < 2;
   // Recharts necesita data plana - mapeamos a {label, value}.
   const cpuData = history.map((h) => ({
-    label: new Date(h.ts).toLocaleTimeString(undefined, {
-      hour: "2-digit",
-      minute: "2-digit",
-    }),
+    label: formatTime(h.ts, { hour: "2-digit", minute: "2-digit" }),
     value: h.cpuPercent,
   }));
   const ramData = history.map((h) => ({
-    label: new Date(h.ts).toLocaleTimeString(undefined, {
-      hour: "2-digit",
-      minute: "2-digit",
-    }),
+    label: formatTime(h.ts, { hour: "2-digit", minute: "2-digit" }),
     value: h.ramPercent,
   }));
   return (
@@ -732,13 +730,9 @@ function ActivityRow() {
           yKey="minutes"
           color="var(--color-accent)"
           unit=" min"
-          formatX={(v) => {
-            const d = new Date(String(v));
-            return d.toLocaleDateString(undefined, {
-              day: "2-digit",
-              month: "2-digit",
-            });
-          }}
+          formatX={(v) =>
+            formatDate(String(v), { day: "2-digit", month: "2-digit" })
+          }
           formatY={(n) => `${n} min`}
         />
       </ChartCard>

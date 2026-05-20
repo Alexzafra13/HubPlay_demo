@@ -3,6 +3,7 @@ import { ArrowUpCircle, ExternalLink, RefreshCw, ShieldCheck } from "lucide-reac
 
 import { useUpdateStatus, useCheckUpdatesNow } from "@/api/hooks";
 import { Button } from "@/components/common";
+import { formatDateTime } from "@/utils/dateFormat";
 
 /**
  * UpdateBanner — banner discreto que aparece en el panel admin cuando
@@ -113,7 +114,7 @@ export function UpdateBanner() {
           {data.last_checked && (
             <p className="text-text-muted text-xs mt-0.5">
               {t("admin.updates.lastChecked", {
-                when: new Date(data.last_checked).toLocaleString(),
+                when: formatDateTime(data.last_checked),
                 defaultValue: "Última comprobación: {{when}}",
               })}
             </p>

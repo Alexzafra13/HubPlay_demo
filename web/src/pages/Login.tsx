@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
-import { motion } from "framer-motion";
+import { m } from "framer-motion";
 import { useLogin } from "@/api/hooks";
 import { ApiError } from "@/api/types";
 import { useAuthStore } from "@/store/auth";
@@ -136,7 +136,7 @@ export default function Login() {
           and there's no surrounding hero copy: the brand mark
           alone carries the page identity, and the GhostPosters
           drifting behind do the cinematic lifting. */}
-      <motion.div
+      <m.div
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{
@@ -204,7 +204,7 @@ export default function Login() {
             {t("login.pairCta", { defaultValue: "Vincula este dispositivo" })}
           </a>
         </p>
-      </motion.div>
+      </m.div>
     </div>
   );
 }
@@ -247,7 +247,7 @@ function GhostPosters() {
         // Cada ghost tiene posición top+left única (lo garantiza el
         // generador del array, no son posibles colisiones). El índice
         // se usa sólo para escalonar la duración de la animación.
-        <motion.div
+        <m.div
           key={`${g.top}-${g.left}`}
           className="absolute rounded-2xl shadow-2xl"
           style={{

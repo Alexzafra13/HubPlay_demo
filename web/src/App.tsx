@@ -1,5 +1,6 @@
 import { useEffect, Suspense } from "react";
 import { Routes, Route, Navigate, useNavigate } from "react-router";
+import { LazyMotion, domAnimation } from "framer-motion";
 import { useAuthStore } from "@/store/auth";
 import { useSetupStatus } from "@/api/hooks";
 import { api } from "@/api/client";
@@ -93,6 +94,13 @@ export function App() {
 
   return (
     <ErrorBoundary>
+    {/* LazyMotion con `domAnimation` carga sólo el set de features
+        suficiente para layout, gestures básicos y AnimatePresence.
+        `strict` obliga a usar `<m.*>` en lugar de `<motion.*>` en todo
+        el árbol — el bundle base se queda ~30 KB más ligero porque el
+        motor completo se importa sólo cuando algún consumidor pide
+        features extra explícitamente. */}
+    <LazyMotion features={domAnimation} strict>
     <DebugOverlay />
     {/* Host global de modales de acciones sobre items (Identify, Edit
         metadata). Vive aquí para que cualquier ItemKebab en cualquier
@@ -238,6 +246,7 @@ export function App() {
         <Route path="*" element={<NotFound />} />
       </Routes>
     </Suspense>
+    </LazyMotion>
     </ErrorBoundary>
   );
 }
