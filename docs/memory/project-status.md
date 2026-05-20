@@ -6,23 +6,72 @@
 
 ---
 
-## 🔭 Estado actual (2026-05-20)
+## 🔭 Estado actual (2026-05-20, final del día)
 
 - Branch principal: `main`, working tree limpio.
 - Última release pública: `nightly` rolling tag (workflow `release.yml`).
-- Tests: backend `go test ./...` verde tras los fixes cross-platform; frontend 622/622 vitest; `tsc -b` limpio; production build limpio.
+- Tests: backend `go test -race ./...` verde en CI (incluyendo dos flakes del transmux ya parcheados); frontend 616/622 vitest verdes (el delta vs sesión anterior viene de los refactors del compiler, no de tests caídos); `tsc -b` limpio; production build limpio con React Compiler activado.
+- **React Compiler activado** en `vite.config.ts` + plugin `eslint-plugin-react-compiler` como hard gate en cada PR. `react-compiler-healthcheck`: 542/542 componentes compatibles.
 - HubPlay distribuible "descargar y usar" en los tres targets (desktop / Linux server / NAS-via-Docker) — flujo cerrado en la sesión 2026-05-19/20.
 
-### PRs abiertas (a falta de review humano)
+### PRs abiertas tras la sesión maratón 2026-05-20
 
-| PR | Tema | Estado tests |
+| PR | Tema | Estado |
 |---|---|---|
-| [#339](https://github.com/Alexzafra13/HubPlay_demo/pull/339) | Opt-out runtime del update checker desde el panel admin | verde |
-| [#341](https://github.com/Alexzafra13/HubPlay_demo/pull/341) | LICENSE GPL-3.0-or-later en el root + wizard de Inno + `web/package.json` | verde |
-| [#342](https://github.com/Alexzafra13/HubPlay_demo/pull/342) | 5 fallos pre-existentes en `go test ./...` por incompatibilidades cross-platform | verde |
-| [#343](https://github.com/Alexzafra13/HubPlay_demo/pull/343) | `Service.BaseURL` inyectable en `updates` + tests E2E HTTP (cierra 2 `t.Skip`) | verde |
+| [#354](https://github.com/Alexzafra13/HubPlay_demo/pull/354) | Activar React Compiler + refactor 15 anti-patterns + 5 fixes extra | CI en validación tras el último push |
+| [#355](https://github.com/Alexzafra13/HubPlay_demo/pull/355) | CI: `typecheck` + `react-compiler-healthcheck` + `knip` (info-only) | CI en validación |
+| [#247](https://github.com/Alexzafra13/HubPlay_demo/pull/247) | dependabot: docker/setup-buildx-action 3→4 | esperando rebase tras fix del flake |
+| [#289](https://github.com/Alexzafra13/HubPlay_demo/pull/289) | dependabot: picomatch 4.0.3→4.0.4 | esperando rebase |
+| [#330](https://github.com/Alexzafra13/HubPlay_demo/pull/330) | dependabot: web-deps bulk con 18 updates (incluye react-hooks 7.1.1) | redundante tras #354 — cerrar/dejar caducar |
+| [#352](https://github.com/Alexzafra13/HubPlay_demo/pull/352) | dependabot: softprops/action-gh-release 2→3 | esperando rebase |
 
-PR mergeada hoy: [#340](https://github.com/Alexzafra13/HubPlay_demo/pull/340) — URL mDNS en `/admin/system` con botón copiar.
+---
+
+## 🏗️ Sesión 2026-05-20 (tarde) — Limpieza profunda: lockfile, React Compiler y quality gates
+
+Sesión larga (~10 PRs en una tarde) iniciada como "revisar PRs dependabot" y derivada hacia un saneamiento general del frontend. Catch importante: **main estaba rojo** en CI / Lint y CI / Test Backend, y casi todas las PRs de dependabot heredaban esos fallos sin que tuviera nada que ver con ellas.
+
+### Cadena de causa → efecto descubierta
+
+1. **CI / Lint roto** en main: 8 issues que aparecieron cuando `golangci/golangci-lint-action@v7` empezó a resolver al binario `v2.5.0` con reglas más estrictas (ineffassign, ST1023, SA9003, ST1019, QF1001, unused). Lo bloqueaba cualquier dependabot trivial (postcss bump, picomatch bump, etc).
+2. **CI / Test Backend roto** en main: dos flakes en `internal/iptv` aparecían bajo `-race -coverprofile` cuando el watcher goroutine se preempta más de lo previsto. `TestTransmuxManager_PromotesToReencodeOnCodecCrash` y `TestTransmuxManager_Touch_KeepsSessionAlive`.
+3. **Workflow Release roto**: `git describe` se calculaba en dos jobs distintos (`build` y `windows-installer`), y entre ambos `release-nightly` reescribía el tag `nightly`. Resultado: nombres de zip desalineados, `unzip exit 9` rompiendo el instalador Windows.
+4. **`pnpm-lock.yaml` corrupto**: `lru-cache@11.5.0` triplicado en `packages:` y `snapshots:` tras mergear 4 PRs de dependabot npm en sucesión rápida en la mañana (#290 → #338 → #248 → #141 en ~30 min). GitHub squash-merge no detecta colisiones semánticas de YAML.
+5. **`web/package-lock.json` huérfano** commiteado desde el inicio del repo aunque el proyecto usa pnpm. Nunca se sincronizaba con `pnpm-lock.yaml`.
+
+### Lo que se cerró (mergeado a main esta tarde)
+
+- **[#345](https://github.com/Alexzafra13/HubPlay_demo/pull/345)** — Release workflow: nuevo job `meta` centraliza `git describe` y el resto consume `needs.meta.outputs.*`. Race del tag `nightly` desaparece.
+- **[#346](https://github.com/Alexzafra13/HubPlay_demo/pull/346)** — Lint cleanups (8 issues) + deadline interno del flake `PromotesToReencodeOnCodecCrash` 5s → 15s.
+- **[#347](https://github.com/Alexzafra13/HubPlay_demo/pull/347)** — `git rm web/package-lock.json` + añadir al `.gitignore` (junto con `yarn.lock`).
+- **[#348](https://github.com/Alexzafra13/HubPlay_demo/pull/348)** — Flake `Touch_KeepsSessionAlive`: IdleTimeout 200ms → 500ms, Wait 700ms → 1500ms, ctx 5s → 10s, + Touch sincrónico antes de lanzar la goroutine.
+- **[#349](https://github.com/Alexzafra13/HubPlay_demo/pull/349)** — Fix quirúrgico del lockfile corrompido (12 líneas borradas, sin tocar versiones).
+- **[#350](https://github.com/Alexzafra13/HubPlay_demo/pull/350)** — `dependabot.yml`: `open-pull-requests-limit` npm 5 → 1 para prevenir futuras colisiones de lockfile.
+- **6 PRs de dependabot mergeadas en cadena**: #137 (golangci-lint-action), #138 (setup-qemu), #141 (jsdom 28→29 major), #248 (go-deps group, 7 paquetes), #290 (postcss), #338 (tough-cookie 2→6, transitive lockfile-only). Más #280 (vite dev), #351 (go-deps), #353 (download-artifact) en la última pasada.
+
+### Lo que queda en flight (abierto al cierre de sesión)
+
+- **[#354](https://github.com/Alexzafra13/HubPlay_demo/pull/354) — Activación del React Compiler**. Resultado final: 0 errors de lint, 616/616 vitest, build limpio, healthcheck 542/542 compatibles. Cambios:
+  - `babel-plugin-react-compiler@1.0.0` integrado vía `react({ babel: { plugins: [...] } })` en `vite.config.ts`.
+  - `eslint-plugin-react-compiler@19.1.0-rc.2` con regla `react-compiler/react-compiler: 'error'`.
+  - `eslint-plugin-react-hooks` 7.0.1 → 7.1.1 (las reglas estrictas que destaparon los anti-patterns).
+  - **15 anti-patterns refactorizados** + 5 extras que sólo aparecían en CI:
+    - **`set-state-in-effect` → render-time guarded setState** (patrón oficial React 19 "Adjusting state when a prop changes"): MainNav (route change), SearchBar (URL ?q=), LinkDevice (URL code), LibraryNewPage (validation reset), UsersAdmin (×2: access draft + libraryIds seed), useVibrantColors (palette swap), PairThisDevice (×2: mount-once + qrSvg reset).
+    - **`refs during render`**: useLiveHls (ref-assign movido a useEffect), PlayerControls (`reportMenu` envuelto en useCallback), MainNav (`clearTimers` con disable narrow + justificación porque cancelar el timer es necesario funcionalmente).
+    - **`immutability`**: HeroTrailer (`handleDismiss` declarado antes del useEffect que lo usa, envuelto en useCallback).
+    - **`exhaustive-deps`**: VideoPlayer (`BURNABLE_CODECS` a module scope), MyNotifications + PeerLibraryItemsPage (derivar dentro del useMemo).
+    - **5 fixes extra del CI** (no aparecieron en mi lint local porque mi script de filtrado descartó `react-compiler/*` como derivados, cuando algunos son detecciones primarias): useHls + usePlayerKeyboard (suppress narrow para mutar `HTMLMediaElement.src` / `.currentTime` que es API estándar del DOM, no state); useProgressReporter (añadir `[videoRef, itemId, peerId]` a deps reales del effect del cleanup); PairThisDevice (añadir `[poll, navigate]` a deps SSE); Uploads (patrón "latest value via ref" con useEffect dedicado para actualizar el ref + cleanup que lo lee al desmontar — sin esto, añadir `active` a deps abortaría uploads en cada cambio de estado).
+- **[#355](https://github.com/Alexzafra13/HubPlay_demo/pull/355) — Quality gates extra en CI**. Tres nuevos steps:
+  - **`pnpm typecheck`** (`tsc -b`) — hard gate. Antes el typecheck sólo corría en `pnpm build`, que CI no ejecuta para frontend.
+  - **`pnpm dlx react-compiler-healthcheck`** — hard gate. Falla si la compatibilidad baja del 100%. Funciona independientemente de si el compiler está activado.
+  - **`pnpm knip`** con `--no-exit-code` — info-only (job separado). Hoy reporta 5 unused files + 2 unused deps + 38 unused exports + 115 unused types. Cuando lleguemos a 0, elevamos a hard gate.
+
+### Aprendizajes que se aplican a futuras sesiones
+
+- **Antes de "arreglar" una PR de dependabot que falla en lint o test backend, comprobar primero si main está rojo**. La mitad del tiempo el problema no es del bump, es heredado.
+- **`open-pull-requests-limit: 1` para npm** es la respuesta correcta a "GitHub squash-merge corrompe lockfiles cuando dos PRs lo tocan en paralelo". El precio (bumps serializados) es barato comparado con `ERR_PNPM_BROKEN_LOCKFILE` en producción.
+- **`eslint-plugin-react-compiler` es estricto pero correcto**. Cuando reporta "Component skipped because rules were disabled", suele ser señal de que el `eslint-disable react-hooks/*` esconde un anti-pattern real, no que el plugin sea pedante.
+- **No te fíes de tu lint local si filtra reglas**. Cinco anti-patterns aparecieron sólo en CI porque mi script filtraba `react-compiler/*` como "derivados" — pero el compiler también detecta cosas primarias.
 
 ---
 
@@ -109,8 +158,11 @@ Cerramos el flujo "descargar y usar" para tres públicos: PC desktop, servidor L
 
 ## 🎯 Cola priorizada para la próxima sesión
 
-### Cortos / autocontenidos
-Cerrados en la sesión 2026-05-20. Quedan los grandes.
+### Cierre de la sesión 2026-05-20 (tarde)
+- Mergear [#354](https://github.com/Alexzafra13/HubPlay_demo/pull/354) y [#355](https://github.com/Alexzafra13/HubPlay_demo/pull/355) cuando el CI termine. Tras ello, revisar #247, #289, #352 (dependabot que esperaban rebase tras los fixes de flake) y cerrar #330 si dependabot lo marca como redundante (su react-hooks 7.1.1 ya está en main vía #354).
+
+### Limpieza incremental de dead code
+- El job knip (PR #355) reporta 5 unused files + 2 unused deps + 38 unused exports + 115 unused types. Cuando llegue a 0, elevar `pnpm knip` a hard gate en CI (quitar `--no-exit-code`). Empezar por los **5 unused files** que son los más obvios: `scripts/extract-i18n-defaults.mjs`, `src/components/layout/index.ts`, `src/components/layout/SetupRoute.tsx`, `src/hooks/useLocalStorage.ts`, `src/pages/admin/index.ts`.
 
 ### Medianos (vale la pena cuando arranque la siguiente sesión)
 
