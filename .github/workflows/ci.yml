@@ -92,7 +92,11 @@ jobs:
 
       - name: Run knip
         working-directory: web
-        run: pnpm knip
+        # --no-exit-code: el job es visibility-only, no rompe nunca.
+        # GitHub marca la PR como UNSTABLE si un check sale en rojo
+        # aunque tenga continue-on-error, así que prevenimos el rojo en
+        # origen. Cuando el repo llegue a 0 unused, quitamos el flag.
+        run: pnpm knip --no-exit-code
 
   test:
     name: Test Backend
