@@ -339,19 +339,26 @@ func TestTransmuxManager_IdleReaper_TerminatesUntouchedSession(t *testing.T) {
 }
 
 func TestTransmuxManager_Touch_KeepsSessionAlive(t *testing.T) {
-	// Tight IdleTimeout so the test confirms Touch is the thing
-	// keeping the session alive (not a generous default that would
-	// keep it alive regardless).
-	m := newTestManager(t, "ok", 200*time.Millisecond)
+	// IdleTimeout small enough that an un-touched session would die
+	// within Wait below, but large enough to tolerate scheduler jitter
+	// under `-race -coverprofile` (where the Touch goroutine + ticker
+	// can take >200ms to fire the first tick; observed in run
+	// 26154465278). The Touch interval / IdleTimeout ratio (1:10) keeps
+	// the intent: each Touch resets the idle timer well before expiry.
+	m := newTestManager(t, "ok", 500*time.Millisecond)
 	t.Cleanup(m.Shutdown)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	if _, err := m.GetOrStart(ctx, "ch-touch", "http://upstream/touch"); err != nil {
 		t.Fatalf("GetOrStart: %v", err)
 	}
-	// Touch repeatedly across an interval longer than IdleTimeout.
+	// Sync Touch before launching the goroutine so the session has a
+	// fresh idle timestamp even if the goroutine/ticker boot is slow.
+	if _, err := m.Touch("ch-touch"); err != nil {
+		t.Fatalf("initial Touch: %v", err)
+	}
 	stop := make(chan struct{})
 	done := make(chan struct{})
 	go func() {
@@ -371,7 +378,7 @@ func TestTransmuxManager_Touch_KeepsSessionAlive(t *testing.T) {
 	}()
 
 	// Wait long enough that an un-touched session would have been reaped.
-	time.Sleep(700 * time.Millisecond)
+	time.Sleep(1500 * time.Millisecond)
 	if got := m.ActiveSessions(); got != 1 {
 		t.Errorf("expected session kept alive by Touch, got %d active", got)
 	}
