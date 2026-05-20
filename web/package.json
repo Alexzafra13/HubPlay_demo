@@ -18,6 +18,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "typecheck": "tsc -b",
+    "knip": "knip",
     "gen:pwa-assets": "pwa-assets-generator --preset minimal-2023 public/hubplay_icon_mark.svg",
     "gen:installer-assets": "node scripts/gen-installer-assets.mjs"
   },
@@ -67,6 +69,7 @@
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.4.0",
     "jsdom": "^29.1.1",
+    "knip": "^6.14.1",
     "sharp": "^0.34.5",
     "tailwindcss": "^4.2.1",
     "to-ico": "^1.1.5",
