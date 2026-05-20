@@ -437,10 +437,15 @@ function RowDetail({
       role="dialog"
       aria-modal="true"
       onClick={onClose}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") onClose();
+      }}
       className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
     >
       <div
+        role="presentation"
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
         className="w-full max-w-2xl max-h-[80vh] overflow-auto rounded-lg border border-border bg-bg-base p-5 shadow-xl"
       >
         <div className="mb-3 flex items-start justify-between gap-3">

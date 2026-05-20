@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router";
+import { useTranslation } from "react-i18next";
 import { TopBar } from "./TopBar";
 import { MobileDrawer } from "./MobileDrawer";
 import { MiniPlayer } from "@/components/livetv/MiniPlayer";
@@ -11,6 +12,7 @@ import { useAuthStore } from "@/store/auth";
 // ─── AppLayout ──────────────────────────────────────────────────────────────
 
 export function AppLayout() {
+  const { t } = useTranslation();
   // App-wide listener for IPTV M3U refresh completion. Mounted here so
   // every authenticated route picks up backend invalidations regardless
   // of which page kicked off the import (or whether the kick came from
@@ -66,11 +68,14 @@ export function AppLayout() {
           center MainNav (desktop), search, avatar dropdown. */}
       <TopBar onMobileMenuClick={toggleMobile} />
 
-      {/* Mobile drawer — sliding panel below the topbar. Hidden on
-          md+ so it can't accidentally render once we widen the layout. */}
-      <div
+      {/* Backdrop del drawer móvil. Usamos <button> en lugar de <div>
+          para que el cierre sea accesible por teclado (Enter / Space)
+          y los lectores de pantalla lo anuncien como acción. */}
+      <button
+        type="button"
+        aria-label={t("common.close", { defaultValue: "Cerrar" })}
         className={[
-          "fixed inset-0 z-30 bg-black/60 backdrop-blur-sm transition-opacity duration-300 md:hidden",
+          "fixed inset-0 z-30 bg-black/60 backdrop-blur-sm transition-opacity duration-300 md:hidden cursor-default",
           mobileOpen ? "opacity-100" : "opacity-0 pointer-events-none",
         ].join(" ")}
         style={{ top: "var(--topbar-height)" }}

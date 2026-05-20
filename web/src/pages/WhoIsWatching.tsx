@@ -751,9 +751,20 @@ function PinPad({
         <p className="text-sm text-text-muted">{t("whoIsWatching.enterPin")}</p>
       </div>
 
+      {/* role="presentation" + onKeyDown espejo del onClick: el wrapper
+          permite clickar/teclar cualquier parte de los dígitos del PIN
+          para enfocar el input invisible que está debajo. No es un
+          elemento interactivo propio; sólo redirige el foco. */}
       <div
+        role="presentation"
         className="relative flex flex-col items-center gap-3"
         onClick={focusInput}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            focusInput();
+          }
+        }}
       >
         <div className="flex gap-3">
           {[0, 1, 2, 3].map((i) => {

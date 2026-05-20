@@ -428,7 +428,23 @@ const AvailableImageCard: FC<AvailableImageCardProps> = ({
   onSelect,
   t,
 }) => (
-  <div className="group relative rounded-[--radius-md] border border-border bg-bg-elevated overflow-hidden cursor-pointer" onClick={onSelect}>
+  // Tarjeta clicable accesible. No usamos <button> nativo porque la
+  // tarjeta contiene a su vez un <Button> en el hover overlay y un
+  // botón dentro de otro botón es HTML inválido. role="button" +
+  // tabIndex={0} + onKeyDown da el mismo soporte de teclado y
+  // anuncio de rol sin anidar.
+  <div
+    role="button"
+    tabIndex={0}
+    onClick={onSelect}
+    onKeyDown={(e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        onSelect();
+      }
+    }}
+    className="group relative rounded-[--radius-md] border border-border bg-bg-elevated overflow-hidden cursor-pointer"
+  >
     <img
       src={image.url}
       alt={image.type}

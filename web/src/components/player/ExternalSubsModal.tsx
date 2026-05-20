@@ -85,14 +85,19 @@ const ExternalSubsModal: FC<ExternalSubsModalProps> = ({
 
   return (
     <div
+      role="presentation"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
       onClick={onClose}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") onClose();
+      }}
     >
       <div
         role="dialog"
         aria-label={t("externalSubs.title")}
         className="w-full max-w-lg max-h-[80vh] flex flex-col rounded-[--radius-lg] border border-border bg-bg-card shadow-2xl shadow-black/50 overflow-hidden"
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3 border-b border-border">

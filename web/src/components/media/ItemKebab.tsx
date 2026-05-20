@@ -74,7 +74,7 @@ export function ItemKebab({ itemID, itemType, detailHref }: Props) {
     };
   }, [open]);
 
-  const stopAll = (e: React.MouseEvent) => {
+  const stopAll = (e: React.MouseEvent | React.KeyboardEvent) => {
     e.preventDefault();
     e.stopPropagation();
   };
@@ -92,7 +92,16 @@ export function ItemKebab({ itemID, itemType, detailHref }: Props) {
   }
 
   return (
-    <div ref={ref} className="relative" onClick={stopAll}>
+    // role="presentation" + onKeyDown: el wrapper sólo evita que los
+    // clicks/teclas que dispara el menú interno burbujeen al elemento
+    // padre (poster card / row entera), no es interactivo por sí mismo.
+    <div
+      ref={ref}
+      role="presentation"
+      className="relative"
+      onClick={stopAll}
+      onKeyDown={stopAll}
+    >
       <button
         type="button"
         onClick={(e) => {

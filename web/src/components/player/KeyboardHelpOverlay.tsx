@@ -108,15 +108,25 @@ export function KeyboardHelpOverlay({ onClose }: KeyboardHelpOverlayProps) {
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
       className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
       onClick={(e) => {
         e.stopPropagation();
         onClose();
       }}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          e.stopPropagation();
+          onClose();
+        }
+      }}
     >
       <div
+        role="presentation"
         className="max-h-[80vh] w-full max-w-lg overflow-y-auto rounded-xl border border-white/10 bg-bg-card/95 p-6 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-text-primary">
