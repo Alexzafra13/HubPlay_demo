@@ -860,10 +860,15 @@ function CollisionModal({
       role="dialog"
       aria-modal="true"
       onClick={onCancel}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") onCancel();
+      }}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
     >
       <div
+        role="presentation"
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
         className="w-full max-w-2xl max-h-[80vh] overflow-hidden rounded-lg border border-border bg-bg-base shadow-2xl flex flex-col"
       >
         <header className="border-b border-border px-5 py-4">

@@ -62,6 +62,13 @@ const BottomSheet: FC<BottomSheetProps> = ({ open, title, onClose, children }) =
         // Backdrop tap closes; sheet body taps are stopped below.
         if (e.target === e.currentTarget) onClose();
       }}
+      onKeyDown={(e) => {
+        // Espejo a11y del onClick: Escape sobre el dialog dispara
+        // onClose por teclado. Cumple click-events-have-key-events
+        // sin tocar la UX existente (el modal global también
+        // escucha Escape; doble seguro).
+        if (e.key === "Escape") onClose();
+      }}
     >
       {/* Backdrop — slightly translucent so the player chrome behind
           stays visible but darkens enough to focus attention. */}
@@ -71,8 +78,13 @@ const BottomSheet: FC<BottomSheetProps> = ({ open, title, onClose, children }) =
           stretch the full width and look like a heavy modal. */}
       <div
         ref={dialogRef}
+        // role="presentation" indica que es contenedor visual; los
+        // handlers sólo evitan que clicks/teclas dentro del sheet
+        // burbujeen al backdrop y lo cierren accidentalmente.
+        role="presentation"
         className="relative w-full max-w-md mx-auto rounded-t-2xl border-t border-x border-border bg-bg-card/95 backdrop-blur-md shadow-2xl text-text-primary max-h-[75vh] flex flex-col animate-[sheet-up_180ms_ease-out]"
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
       >
         {/* Drag handle visual — non-functional today (no swipe-down
             gesture), but it telegraphs "this is a sheet you can

@@ -863,12 +863,24 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
   // ─── Render ──────────────────────────────────────────────────────────────
 
   return (
+    // role="application" indica al lector de pantalla que es un widget
+    // interactivo (el player). El onClick gestiona tap-to-pause /
+    // tap-to-show-controls; los atajos de teclado los maneja
+    // usePlayerKeyboard a nivel window.
     <div
       ref={containerRef}
+      role="application"
+      aria-label={t("player.label", { defaultValue: "Reproductor de video" })}
       className="fixed inset-0 z-50 bg-black select-none"
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
       onClick={handleSurfaceTap}
+      onKeyDown={(e) => {
+        // Tap/Space sobre la superficie despierta los controles
+        // (espejo del onClick). El resto de atajos los maneja
+        // usePlayerKeyboard a nivel window.
+        if (e.key === " " || e.key === "Enter") handleSurfaceTap();
+      }}
     >
       {/* Video element. External subtitles ride as a child <track>:
           the browser decodes the WebVTT and renders cues natively, so
@@ -1008,13 +1020,18 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
         </div>
       )}
 
-      {/* Controls overlay */}
+      {/* Capa de controles. Sólo intercepta clicks/teclas para que no
+          burbujeen al video (que dispararía play/pause). role="toolbar"
+          comunica que contiene controles agrupados al lector de pantalla. */}
       <div
+        role="toolbar"
+        aria-label={t("player.controlsLabel", { defaultValue: "Controles del reproductor" })}
         className={[
           "absolute inset-0 transition-opacity duration-300",
           controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none",
         ].join(" ")}
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
       >
         <PlayerControls
           isPlaying={isPlaying}
@@ -1108,9 +1125,14 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
           user's first focus target is the auto-advance prompt rather
           than the (now-stuck) play button. */}
       {upNextActive && nextUp && (
+        // role="presentation": el wrapper sólo evita que clicks/teclas
+        // burbujeen al video (que dispararía play/pause); el botón
+        // interno del overlay es el elemento interactivo real.
         <div
+          role="presentation"
           className="absolute inset-0 z-40 flex items-end justify-end p-6 sm:p-10 bg-gradient-to-t from-black/70 via-black/30 to-transparent"
           onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
         >
           <UpNextOverlay
             nextUp={nextUp}
