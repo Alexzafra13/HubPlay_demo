@@ -36,7 +36,6 @@ const ExternalSubsModal: FC<ExternalSubsModalProps> = ({
   // el modal antes de buscar y `langs` mantiene esa selección viva.
   // Derivar en render reiniciaría la selección en cada re-render del
   // padre.
-  // eslint-disable-next-line react-doctor/no-derived-useState
   const [langs, setLangs] = useState<string[]>(preferredLangs);
   const [results, setResults] = useState<ExternalSubtitleResult[] | null>(null);
   const [loading, setLoading] = useState(false);

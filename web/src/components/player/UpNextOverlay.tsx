@@ -145,7 +145,6 @@ const UpNextOverlay: FC<UpNextOverlayProps> = ({
             // Foco automático intencionado: el overlay aparece al final
             // del episodio y queremos que Enter confirme "Reproducir
             // ahora" sin tocar el ratón. Test cubre este orden.
-            // eslint-disable-next-line jsx-a11y/no-autofocus
             autoFocus
             onClick={onPlayNow}
             className="flex flex-1 items-center justify-center gap-2 rounded-[--radius-md] bg-accent px-3 py-1.5 text-sm font-semibold text-white transition-colors hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg-card cursor-pointer"
