@@ -72,6 +72,16 @@ UninstallDisplayIcon={app}\hubplay.ico
 VersionInfoVersion=0.0.0.0
 VersionInfoProductName=HubPlay
 VersionInfoCompany=HubPlay
+; LICENSE viene del root del repo via cp en el release workflow
+; (release.yml: stage/$NAME/LICENSE). Mostrarla en el wizard cumple
+; la sección 4 de la GPL-3 ("conspicuously and appropriately publish
+; on each copy an appropriate copyright notice and disclaimer of
+; warranty"). Inno usa el preprocessor para no romper builds en
+; entornos donde el LICENSE no se ha copiado todavía (e.g. dry-run
+; local sin el workflow).
+#if FileExists(AddBackslash(SourceDir) + "LICENSE")
+  LicenseFile={#SourceDir}\LICENSE
+#endif
 
 [Languages]
 Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"
