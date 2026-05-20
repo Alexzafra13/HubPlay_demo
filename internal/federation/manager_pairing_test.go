@@ -22,11 +22,9 @@ import (
 // happy path de SendPairingRequest sin tener que montar un segundo
 // Manager.
 type stubRemote struct {
-	srv          *httptest.Server
-	info         *ServerInfo
-	receivedReq  *pairingRequestBody
-	receivedCB   *pairingCallbackBody
-	receivedCanc *pairingCancelBody
+	srv         *httptest.Server
+	info        *ServerInfo
+	receivedReq *pairingRequestBody
 }
 
 func newStubRemote(t *testing.T) *stubRemote {

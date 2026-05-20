@@ -157,7 +157,7 @@ func newBenchActivityRepo(b *testing.B, n int) (*db.ActivityRepository, *db.Repo
 		userID := fmt.Sprintf("u-%03d", i%numUsers)
 		playedAt := now.AddDate(0, 0, -((i * 13) % 14)) // pseudo-random 0..13 days ago
 		// Half the rows are 50 % watched, the rest 5 % (cold open).
-		var pos int64 = ticks90min / 20
+		pos := ticks90min / 20
 		if i%2 == 0 {
 			pos = ticks90min / 2
 		}

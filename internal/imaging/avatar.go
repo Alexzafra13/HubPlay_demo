@@ -4,9 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"image"
-	"image/jpeg"
-	_ "image/png"  // registra el decoder PNG
-	_ "image/jpeg" // registra el decoder JPEG (defensivo: lo registra image.Decode usuarios externos)
+	"image/jpeg" // registra el decoder JPEG y exporta jpeg.Encode usado por GenerateAvatar
+	_ "image/png" // registra el decoder PNG
 
 	_ "golang.org/x/image/webp" // registra el decoder WebP
 )
