@@ -17,7 +17,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "gen:pwa-assets": "pwa-assets-generator --preset minimal-2023 public/hubplay_icon_mark.svg"
+    "gen:pwa-assets": "pwa-assets-generator --preset minimal-2023 public/hubplay_icon_mark.svg",
+    "gen:installer-assets": "node scripts/gen-installer-assets.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -63,7 +64,9 @@
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.4.0",
     "jsdom": "^28.1.0",
+    "sharp": "^0.34.5",
     "tailwindcss": "^4.2.1",
+    "to-ico": "^1.1.5",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.56.1",
     "vite": "^7.3.1",

@@ -57,6 +57,10 @@ OutputBaseFilename=HubPlay-Setup-{#AppVersion}-windows-amd64
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
+SetupIconFile=hubplay.ico
+WizardImageFile=wizard-large.png
+WizardSmallImageFile=wizard-small.png
+WizardImageAlphaFormat=premultiplied
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 ; Solicitar admin: necesitamos escribir a Program Files + registrar servicio.
