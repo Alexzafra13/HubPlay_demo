@@ -16,16 +16,29 @@ complementa con contexto, decisiones y pendientes.
 
 ## Contenido
 
+**Vivos** — se leen al inicio de cada sesión:
+
 - `project-status.md` — estado actual de la rama, qué se hizo en la última
-  iteración, qué falta, próximos pasos concretos.
+  iteración, qué falta, próximos pasos concretos. **Entrypoint principal.**
 - `architecture-decisions.md` — ADRs cortos (Contexto → Decisión →
   Consecuencias → Alternativas) de las decisiones no triviales ya tomadas.
 - `conventions.md` — patrones del codebase descubiertos al trabajar:
   anti-ciclos, helpers de test, gotchas, reglas de dependencia entre paquetes.
-- `archive/` — sesiones antiguas que ya no aportan al entrypoint de sesión.
-  No se lee al inicio; sólo cuando hace falta arqueología sobre una decisión
-  vieja. Cada fichero cubre un rango temporal cerrado
-  (p.ej. `2026-pre-04-28.md`).
+
+**Documentos vivos específicos** — referenciados cuando aplica:
+
+- `audit-2026-05-14-go-backend-review.md` — review arquitectónico por fases
+  (vivo). Iteraciones 4-7 abiertas.
+- `intervention-2026-05-14.md` — tracker iteración por iteración del audit
+  anterior. Se actualiza al cerrar cada olor.
+- `perf-benchmarks-2026-05-17.md` — baseline benchmarks dual-backend
+  (SQLite + Postgres) para repos del hot-path.
+- `per-user-channel-order-pending.md` — spec de feature pendiente Live TV.
+
+**Archivo** (`archive/`) — sesiones cerradas, conservadas para arqueología.
+No se lee al inicio; sólo cuando hace falta consultar una decisión vieja.
+Cada fichero cubre un rango temporal cerrado o un tema autocontenido
+(audits cerrados, sesiones específicas).
 
 ## Política de actualización
 

@@ -80,13 +80,12 @@ Config de ejemplo: `hubplay.example.yaml` (puerto 8096, SQLite local, JWT auto-g
 
 ---
 
-## Métricas rápidas (verificadas 2026-05-11)
+## Métricas rápidas (verificadas 2026-05-20)
 
-- **224** ficheros `.go` de producción en `internal/`+`cmd/` · **137** `_test.go` (~61%)
-- **67** test files en frontend, **504/504** vitest verdes — admin panels y auth ya cubiertos; quedan páginas grandes (Home, LiveTV, Search, Movies, Series).
-- **26** docs de arquitectura en `docs/architecture/`
-- **217** rutas HTTP registradas en `internal/api/router.go` (3× lo de Apr 17).
-- **29** handler files con `_test.go`; **21** sin (mayoría son thin wrappers, admin-only o federation passthroughs): `admin_backup`, `admin_logs`, `auth_device`, `federation_admin/image/public/url`, `iptv_access/admin/channels/epg/favorites/health`, `me_home`, `me_peer_image/progress/stream`, `me_peers`, `preferences`, `studios`.
+- **337** ficheros `.go` de producción en `internal/`+`cmd/` · **191** `_test.go` (~57%)
+- **85** test files en frontend, **622/622** vitest verdes — admin panels, auth y componentes comunes cubiertos; quedan páginas grandes (Home, LiveTV, Search, Movies, Series).
+- **30** docs de arquitectura en `docs/architecture/`
+- **272** rutas HTTP registradas en `internal/api/router.go`.
 
 ---
 
@@ -106,11 +105,14 @@ Config de ejemplo: `hubplay.example.yaml` (puerto 8096, SQLite local, JWT auto-g
 ## Memoria de proyecto
 
 Ver `docs/memory/` (versionado en git) para contexto entre sesiones:
-- `project-status.md` — estado actual, qué se hizo, qué falta, próximos pasos
-- `architecture-decisions.md` — ADRs: AppError, observability, keystore, sink pattern, preflight
+- `project-status.md` — estado actual, PRs abiertas, cola priorizada. **Entrypoint.**
+- `architecture-decisions.md` — ADRs (AppError, observability, keystore, sink pattern, preflight, sqlc adapter…)
 - `conventions.md` — patrones del codebase, reglas de test, anti-ciclo
-- `audit-2026-04-15.md` — snapshot del review senior inicial
-- `README.md` — política de docs/memory/ y diferencia con docs/architecture/
+- `audit-2026-05-14-go-backend-review.md` + `intervention-2026-05-14.md` — review arquitectónico vivo (iteraciones 4-7 pendientes)
+- `perf-benchmarks-2026-05-17.md` — baseline benchmarks dual-backend
+- `per-user-channel-order-pending.md` — spec de feature pendiente Live TV
+- `archive/` — sesiones cerradas (audits viejos, snapshots históricos)
+- `README.md` — política de docs/memory/
 
 **Leer `docs/memory/project-status.md` al inicio de cada sesión** para retomar contexto.
 
