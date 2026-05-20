@@ -9,7 +9,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../client";
 import { queryKeys } from "../queryKeys";
-import type { UpdateStatus } from "../types";
+import type { UpdateStatus, UpdatesConfig } from "../types";
 
 export function useUpdateStatus(enabled = true) {
   return useQuery<UpdateStatus>({
@@ -40,6 +40,36 @@ export function useCheckUpdatesNow() {
       // Pisamos la cache con la respuesta — evita un round-trip
       // adicional para refrescar el badge tras el check manual.
       qc.setQueryData(queryKeys.updateStatus, fresh);
+    },
+  });
+}
+
+/**
+ * Estado del toggle runtime del admin. Lectura barata — el handler lee
+ * de memoria. Sin polling agresivo, igual que useUpdateStatus.
+ */
+export function useUpdatesConfig(enabled = true) {
+  return useQuery<UpdatesConfig>({
+    queryKey: queryKeys.updatesConfig,
+    queryFn: () => api.getUpdatesConfig(),
+    enabled,
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+}
+
+/**
+ * Mutation para cambiar el toggle. Persiste server-side y, en
+ * onSuccess, invalida `updateStatus` para que el banner refleje el
+ * nuevo estado sin esperar al staleTime.
+ */
+export function useSetUpdatesConfig() {
+  const qc = useQueryClient();
+  return useMutation<UpdatesConfig, Error, boolean>({
+    mutationFn: (enabled: boolean) => api.setUpdatesConfig(enabled),
+    onSuccess: (fresh) => {
+      qc.setQueryData(queryKeys.updatesConfig, fresh);
+      void qc.invalidateQueries({ queryKey: queryKeys.updateStatus });
     },
   });
 }

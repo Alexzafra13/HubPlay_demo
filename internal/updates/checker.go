@@ -99,9 +99,17 @@ type Status struct {
 	// reciente). Útil para diagnosticar — no debería romper la UI.
 	LastError string `json:"last_error,omitempty"`
 
-	// CheckEnabled es false si el checker está deshabilitado
-	// (Start nunca arrancó por config o repo vacío).
+	// CheckEnabled es false si el checker está deshabilitado por
+	// CAPABILITY: dev build o repo vacío. Cuando es false, el toggle
+	// del panel admin es irrelevante — el checker nunca podrá funcionar
+	// en este binario. Cuando es true, el checker puede correr.
 	CheckEnabled bool `json:"check_enabled"`
+
+	// UserDisabled es true si el admin apagó el checker desde el panel.
+	// Solo tiene sentido cuando CheckEnabled=true; cuando es true, el
+	// ticker sigue armado pero cada tick es un no-op (no hay request a
+	// GitHub) y el banner del panel ofrece reactivarlo.
+	UserDisabled bool `json:"user_disabled"`
 }
 
 // Service es el checker. Construirlo con New, arrancarlo con Start.
@@ -111,9 +119,10 @@ type Service struct {
 	client  *http.Client
 	logger  *slog.Logger
 
-	mu    sync.RWMutex
-	state Status
-	etag  string // último ETag de la API, para If-None-Match
+	mu          sync.RWMutex
+	state       Status
+	etag        string // último ETag de la API, para If-None-Match
+	userEnabled bool   // toggle runtime del panel admin (default true)
 }
 
 // New construye el checker. currentVersion es la versión inyectada al
@@ -127,13 +136,34 @@ func New(currentVersion, repo string, logger *slog.Logger) *Service {
 		client: &http.Client{
 			Timeout: requestTimeout,
 		},
-		logger: logger.With("module", "updates"),
+		logger:      logger.With("module", "updates"),
+		userEnabled: true,
 	}
 	s.state = Status{
 		Current:      currentVersion,
 		CheckEnabled: repo != "" && currentVersion != "dev",
 	}
 	return s
+}
+
+// SetUserEnabled cambia el toggle runtime del admin. Pasar false hace
+// que Check() retorne sin tocar la red (la goroutine del ticker sigue
+// armada, pero cada tick es un no-op). Pasar true reactiva el checker
+// inmediatamente sin necesidad de reiniciar el binario. Llamada antes
+// de Start aplica al primer check. Seguro concurrentemente.
+func (s *Service) SetUserEnabled(enabled bool) {
+	s.mu.Lock()
+	s.userEnabled = enabled
+	s.state.UserDisabled = !enabled
+	s.mu.Unlock()
+}
+
+// IsUserEnabled devuelve el estado actual del toggle. Útil para el
+// handler GET que pinta el switch del panel.
+func (s *Service) IsUserEnabled() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.userEnabled
 }
 
 // Start arranca la goroutine del checker en background. El context se
@@ -192,6 +222,13 @@ func (s *Service) run(ctx context.Context, jitter, interval time.Duration) {
 func (s *Service) Check(ctx context.Context) error {
 	if !s.state.CheckEnabled {
 		return errors.New("update check disabled")
+	}
+	// Toggle runtime del admin: si está apagado, retorno nil silencioso.
+	// El ticker sigue armado pero gastamos cero requests a GitHub. No es
+	// un error desde el punto de vista del caller — el chequeo ocurrió
+	// y la respuesta es "configurado para no chequear".
+	if !s.IsUserEnabled() {
+		return nil
 	}
 
 	url := fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", s.repo)

@@ -25,6 +25,7 @@ export const queryKeys = {
     ["admin", "audit-log", params] as const,
   auditEventTypes: ["admin", "audit-log", "types"] as const,
   updateStatus: ["admin", "updates", "status"] as const,
+  updatesConfig: ["admin", "updates", "config"] as const,
   uploadBrowse: (libraryID: string, path: string) =>
     ["uploads", "browse", libraryID, path] as const,
   libraries: ["libraries"] as const,

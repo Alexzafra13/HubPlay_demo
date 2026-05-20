@@ -469,8 +469,20 @@ export interface UpdateStatus {
   last_checked?: string;
   /** Mensaje del último fallo si lo hubo. */
   last_error?: string;
-  /** False si el checker está deshabilitado (dev build / sin repo). */
+  /** False si el checker está deshabilitado por CAPABILITY (dev build
+   *  / sin repo configurado). Cuando es false, el toggle del admin
+   *  (user_disabled) es irrelevante — el binario no puede chequear. */
   check_enabled: boolean;
+  /** True si el admin apagó el checker desde el panel. Sólo tiene
+   *  sentido cuando check_enabled=true. El banner ofrece reactivarlo
+   *  con un click. */
+  user_disabled?: boolean;
+}
+
+/** Estado del toggle runtime del admin para el update checker.
+ *  GET /admin/system/updates/config devuelve este shape. */
+export interface UpdatesConfig {
+  enabled: boolean;
 }
 
 /**

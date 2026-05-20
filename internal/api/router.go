@@ -815,9 +815,11 @@ func NewRouter(deps Dependencies) http.Handler {
 					// es nil (dev build / repo no configurado) las rutas
 					// devuelven cached zero-state vía el handler.
 					if deps.Updates != nil {
-						updHandler := handlers.NewUpdatesHandler(deps.Updates, deps.Logger)
+						updHandler := handlers.NewUpdatesHandler(deps.Updates, deps.Settings, deps.Logger)
 						r.Get("/updates", updHandler.Status)
 						r.Post("/updates/check", updHandler.Check)
+						r.Get("/updates/config", updHandler.GetConfig)
+						r.Put("/updates/config", updHandler.UpdateConfig)
 					}
 					// "Recientemente añadido" del dashboard. Mezcla
 					// movies + series rolled-up por actividad (no

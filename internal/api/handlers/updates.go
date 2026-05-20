@@ -2,12 +2,21 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
+	"hubplay/internal/db"
 	"hubplay/internal/updates"
 )
+
+// settingKeyUpdatesEnabled es la key persistida en app_settings que
+// representa el toggle runtime del checker. "true"/"false". Vive aquí
+// (no en settings.go) porque la edición no pasa por el SettingsHandler
+// genérico — se hace desde el panel de updates, al lado del banner.
+const settingKeyUpdatesEnabled = "updates.check_enabled"
 
 // UpdatesProvider es la mínima superficie del service que este handler
 // necesita. Tener una interface aísla el handler del *updates.Service
@@ -15,26 +24,35 @@ import (
 type UpdatesProvider interface {
 	Status() updates.Status
 	Check(ctx context.Context) error
+	SetUserEnabled(enabled bool)
+	IsUserEnabled() bool
 }
 
-// UpdatesHandler expone dos endpoints en /api/v1/system/updates:
+// UpdatesHandler expone los endpoints en /api/v1/admin/system/updates:
 //
 //	GET    /admin/system/updates           → estado cacheado, lectura barata
 //	POST   /admin/system/updates/check     → fuerza un check inmediato
+//	GET    /admin/system/updates/config    → estado del toggle del admin
+//	PUT    /admin/system/updates/config    → cambia el toggle del admin
 //
-// Ambos admin-only (el router los gateaa con auth.RequireAdmin).
+// Todos admin-only (el router los gateaa con auth.RequireAdmin).
 // El check forzado está rate-limited a 1/min para que un click frenético
 // del operador no spamee la API de GitHub.
 type UpdatesHandler struct {
-	svc     UpdatesProvider
-	logger  *slog.Logger
-	lastMan time.Time // último check manual (rate-limit)
+	svc      UpdatesProvider
+	settings *db.SettingsRepository
+	logger   *slog.Logger
+	lastMan  time.Time // último check manual (rate-limit)
 }
 
-func NewUpdatesHandler(svc UpdatesProvider, logger *slog.Logger) *UpdatesHandler {
+// NewUpdatesHandler construye el handler. settings puede ser nil — en
+// ese caso los endpoints /config devuelven 503 (la persistencia del
+// toggle requiere DB). El check de Status/Check sigue funcionando.
+func NewUpdatesHandler(svc UpdatesProvider, settings *db.SettingsRepository, logger *slog.Logger) *UpdatesHandler {
 	return &UpdatesHandler{
-		svc:    svc,
-		logger: logger.With("module", "updates-handler"),
+		svc:      svc,
+		settings: settings,
+		logger:   logger.With("module", "updates-handler"),
 	}
 }
 
@@ -68,5 +86,60 @@ func (h *UpdatesHandler) Check(w http.ResponseWriter, r *http.Request) {
 	}
 	respondJSON(w, http.StatusOK, map[string]any{
 		"data": h.svc.Status(),
+	})
+}
+
+// updatesConfigResponse es el shape del GET/PUT /config. Mantengo "data"
+// envelope para casar con el resto de admin endpoints.
+type updatesConfigResponse struct {
+	Enabled bool `json:"enabled"`
+}
+
+// GetConfig devuelve el estado actual del toggle runtime del admin.
+// No lee de la DB en caliente — el bootstrap ya cargó el setting al
+// arrancar y lo aplicó al Service; aquí leemos del Service directamente.
+func (h *UpdatesHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
+	respondJSON(w, http.StatusOK, map[string]any{
+		"data": updatesConfigResponse{Enabled: h.svc.IsUserEnabled()},
+	})
+}
+
+// UpdateConfig persiste el toggle y lo propaga al Service. Body:
+//
+//	{"enabled": true|false}
+//
+// Cuando enabled=false el ticker sigue armado pero cada tick es no-op.
+// Cuando enabled=true el ticker vuelve a chequear al siguiente disparo
+// (no fuerza un check inmediato — el admin tiene el botón "Comprobar
+// ahora" justo al lado si lo quiere).
+func (h *UpdatesHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
+	if h.settings == nil {
+		respondError(w, r, http.StatusServiceUnavailable, "SETTINGS_UNAVAILABLE",
+			"persistencia de configuración no disponible")
+		return
+	}
+	var body struct {
+		Enabled bool `json:"enabled"`
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1024)
+	defer r.Body.Close() //nolint:errcheck
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&body); err != nil {
+		respondError(w, r, http.StatusBadRequest, "INVALID_BODY", "JSON inválido")
+		return
+	}
+
+	if err := h.settings.Set(r.Context(), settingKeyUpdatesEnabled, strconv.FormatBool(body.Enabled)); err != nil {
+		h.logger.Error("persist updates toggle", "error", err)
+		respondError(w, r, http.StatusInternalServerError, "INTERNAL",
+			"no se pudo persistir el ajuste")
+		return
+	}
+	h.svc.SetUserEnabled(body.Enabled)
+	h.logger.Info("updates toggle changed", "enabled", body.Enabled)
+
+	respondJSON(w, http.StatusOK, map[string]any{
+		"data": updatesConfigResponse{Enabled: body.Enabled},
 	})
 }

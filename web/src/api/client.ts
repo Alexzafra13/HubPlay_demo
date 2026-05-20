@@ -61,6 +61,7 @@ import type {
   CorsOriginsListResponse,
   AuditLogQueryResponse,
   UpdateStatus,
+  UpdatesConfig,
   UploadBrowseResponse,
   UserData,
   ApiErrorBody,
@@ -850,6 +851,21 @@ export class ApiClient {
    *  actual con 429 traducido a error normal. */
   async checkUpdates(): Promise<UpdateStatus> {
     return this.request<UpdateStatus>("POST", "/admin/system/updates/check");
+  }
+
+  /** Estado del toggle runtime del admin para el update checker.
+   *  GET barato — el handler lee del Service en memoria. */
+  async getUpdatesConfig(): Promise<UpdatesConfig> {
+    return this.request<UpdatesConfig>("GET", "/admin/system/updates/config");
+  }
+
+  /** Cambia el toggle runtime del admin. Persiste en app_settings
+   *  y propaga al Service en memoria — el siguiente tick del ticker
+   *  respeta el nuevo valor. */
+  async setUpdatesConfig(enabled: boolean): Promise<UpdatesConfig> {
+    return this.request<UpdatesConfig>("PUT", "/admin/system/updates/config", {
+      body: { enabled },
+    });
   }
 
   /** Shortcut for "give user X their own IPTV list": creates a

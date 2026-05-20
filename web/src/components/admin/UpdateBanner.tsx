@@ -1,18 +1,26 @@
 import { useTranslation } from "react-i18next";
-import { ArrowUpCircle, ExternalLink, RefreshCw, ShieldCheck } from "lucide-react";
+import { ArrowUpCircle, BellOff, ExternalLink, RefreshCw, ShieldCheck } from "lucide-react";
 
-import { useUpdateStatus, useCheckUpdatesNow } from "@/api/hooks";
+import {
+  useCheckUpdatesNow,
+  useSetUpdatesConfig,
+  useUpdateStatus,
+} from "@/api/hooks";
 import { Button } from "@/components/common";
 
 /**
- * UpdateBanner — banner discreto que aparece en el panel admin cuando
- * el update checker detecta una versión nueva. Pintamos tres estados:
+ * UpdateBanner — banner discreto que aparece en el panel admin. Cuatro
+ * estados, en orden de prioridad de render:
  *
- *   1. has_update=true               → tarjeta llamativa con CTA.
- *   2. check_enabled=false           → mensaje informativo (dev build /
- *                                      checker deshabilitado).
- *   3. up-to-date (default)          → tarjeta neutra "estás al día"
- *                                      con botón "Comprobar ahora".
+ *   1. check_enabled=false  → "Build dev / sin repo": mensaje informativo
+ *                             permanente. El toggle del admin no aplica
+ *                             porque el binario no tiene capability.
+ *   2. user_disabled=true   → "Desactivado por el admin · [Activar]":
+ *                             el operador apagó el checker desde el panel.
+ *                             Botón reactivar llama al PUT.
+ *   3. has_update=true      → Tarjeta llamativa con CTA al release.
+ *   4. up-to-date (default) → Tarjeta neutra "estás al día" con botones
+ *                             [Comprobar ahora] y [Deshabilitar].
  *
  * Rate-limit del backend: el botón "Comprobar ahora" puede devolver
  * error 429 si el operador clicka más rápido que 1/minuto. El mensaje
@@ -22,11 +30,13 @@ export function UpdateBanner() {
   const { t } = useTranslation();
   const { data, isLoading } = useUpdateStatus();
   const check = useCheckUpdatesNow();
+  const setConfig = useSetUpdatesConfig();
 
   if (isLoading || !data) return null;
 
-  // Checker deshabilitado (dev build, repo no configurado): mensaje
-  // sutil informando — no spammeamos al developer.
+  // 1) Checker deshabilitado por CAPABILITY (dev build, repo no
+  //    configurado): mensaje sutil informando, sin acciones — el
+  //    toggle del admin no aplica.
   if (!data.check_enabled) {
     return (
       <div className="rounded-[--radius-md] border border-border bg-bg-elevated px-4 py-3 text-sm text-text-muted flex items-center gap-2">
@@ -42,7 +52,45 @@ export function UpdateBanner() {
     );
   }
 
-  // Update disponible — banner llamativo.
+  // 2) Admin lo apagó desde el panel. Banner neutro con botón "Activar".
+  if (data.user_disabled) {
+    return (
+      <div
+        className="rounded-[--radius-md] border border-border bg-bg-elevated px-4 py-3 text-sm"
+        data-testid="updates-disabled-by-admin"
+      >
+        <div className="flex items-center gap-3">
+          <BellOff size={18} className="text-text-muted shrink-0" aria-hidden />
+          <div className="flex-1 min-w-0">
+            <p className="text-text-primary">
+              {t("admin.updates.userDisabled", {
+                defaultValue: "Comprobación de actualizaciones desactivada.",
+              })}
+            </p>
+            <p className="text-text-muted text-xs mt-0.5">
+              {t("admin.updates.userDisabledHint", {
+                defaultValue:
+                  "El servidor no contactará GitHub hasta que se reactive.",
+              })}
+            </p>
+            {setConfig.error && (
+              <p className="text-red-500 text-xs mt-1">{setConfig.error.message}</p>
+            )}
+          </div>
+          <Button
+            size="sm"
+            variant="primary"
+            onClick={() => setConfig.mutate(true)}
+            disabled={setConfig.isPending}
+          >
+            {t("admin.updates.enable", { defaultValue: "Activar" })}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  // 3) Update disponible — banner llamativo.
   if (data.has_update) {
     return (
       <div
@@ -98,7 +146,7 @@ export function UpdateBanner() {
     );
   }
 
-  // Al día — tarjeta neutra con botón de comprobación manual.
+  // 4) Al día — tarjeta neutra con [Comprobar ahora] + [Deshabilitar].
   return (
     <div className="rounded-[--radius-md] border border-border bg-bg-elevated px-4 py-3 text-sm">
       <div className="flex items-center gap-3">
@@ -127,22 +175,41 @@ export function UpdateBanner() {
                 : check.error.message}
             </p>
           )}
+          {setConfig.error && (
+            <p className="text-red-500 text-xs mt-1">{setConfig.error.message}</p>
+          )}
         </div>
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={() => check.mutate()}
-          disabled={check.isPending}
-          aria-label={t("admin.updates.checkNow", {
-            defaultValue: "Comprobar ahora",
-          })}
-        >
-          <RefreshCw
-            size={14}
-            className={check.isPending ? "animate-spin" : ""}
-            aria-hidden
-          />
-        </Button>
+        <div className="flex items-center gap-1 shrink-0">
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => check.mutate()}
+            disabled={check.isPending}
+            aria-label={t("admin.updates.checkNow", {
+              defaultValue: "Comprobar ahora",
+            })}
+          >
+            <RefreshCw
+              size={14}
+              className={check.isPending ? "animate-spin" : ""}
+              aria-hidden
+            />
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setConfig.mutate(false)}
+            disabled={setConfig.isPending}
+            aria-label={t("admin.updates.disable", {
+              defaultValue: "Deshabilitar comprobación automática",
+            })}
+            title={t("admin.updates.disable", {
+              defaultValue: "Deshabilitar comprobación automática",
+            })}
+          >
+            <BellOff size={14} aria-hidden />
+          </Button>
+        </div>
       </div>
     </div>
   );

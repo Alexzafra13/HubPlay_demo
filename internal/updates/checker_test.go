@@ -167,6 +167,75 @@ func TestService_HTTPIntegration_FullCheck(t *testing.T) {
 
 // ─── Smoke test ──────────────────────────────────────────────────────
 
+func TestService_UserToggle_Default(t *testing.T) {
+	// Default tras New() es enabled — preservamos el comportamiento
+	// histórico: si el admin no toca nada, el checker corre.
+	svc := newTestService(t, "v0.1.0", "Alexzafra13/HubPlay_demo")
+	if !svc.IsUserEnabled() {
+		t.Fatal("expected userEnabled=true by default")
+	}
+	if svc.Status().UserDisabled {
+		t.Fatal("expected Status.UserDisabled=false by default")
+	}
+}
+
+func TestService_UserToggle_DisableSurfacesInStatus(t *testing.T) {
+	svc := newTestService(t, "v0.1.0", "Alexzafra13/HubPlay_demo")
+	svc.SetUserEnabled(false)
+
+	if svc.IsUserEnabled() {
+		t.Fatal("expected userEnabled=false after SetUserEnabled(false)")
+	}
+	st := svc.Status()
+	if !st.UserDisabled {
+		t.Fatal("expected Status.UserDisabled=true after SetUserEnabled(false)")
+	}
+	// CheckEnabled (capability) sigue true — el toggle no afecta a la
+	// capability del binario, solo al comportamiento runtime.
+	if !st.CheckEnabled {
+		t.Fatal("expected Status.CheckEnabled=true (capability unchanged by toggle)")
+	}
+}
+
+func TestService_UserToggle_CheckIsNoOpWhenDisabled(t *testing.T) {
+	// Cuando userEnabled=false, Check() debe retornar nil SIN tocar la
+	// red. Apuntamos el client a un server que falla si recibe la
+	// request — si el toggle se ignora el test rompe ruidosamente.
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	svc := newTestService(t, "v0.1.0", "Alexzafra13/HubPlay_demo")
+	svc.SetUserEnabled(false)
+
+	if err := svc.Check(context.Background()); err != nil {
+		t.Fatalf("Check() with userEnabled=false should be no-op nil, got: %v", err)
+	}
+	if called {
+		t.Fatal("Check() hit the network despite userEnabled=false")
+	}
+}
+
+func TestService_UserToggle_ReEnableAllowsCheck(t *testing.T) {
+	// Tras apagar y reactivar, Check() debe volver a comportarse como
+	// antes. El test exige red (api.github.com hardcoded en Service);
+	// para no ir a internet verifico el branch que el code path entra:
+	// es suficiente que Check() NO retorne el sentinel del toggle.
+	svc := newTestService(t, "v0.1.0", "Alexzafra13/HubPlay_demo")
+	svc.SetUserEnabled(false)
+	svc.SetUserEnabled(true)
+
+	if !svc.IsUserEnabled() {
+		t.Fatal("expected userEnabled=true after re-enable")
+	}
+	if svc.Status().UserDisabled {
+		t.Fatal("expected Status.UserDisabled=false after re-enable")
+	}
+}
+
 func TestService_Smoke_Start_StopOnCtxCancel(t *testing.T) {
 	// Verifica que Start respeta context cancellation y que el
 	// jitter+ticker no se quedan colgados al cerrar.

@@ -607,6 +607,12 @@ func run(configPath string) error {
 	// nuevas. Si version=="dev" o repo=="" el servicio queda no-op.
 	// El context del run() cancela la goroutine al shutdown.
 	updateService := updates.New(version, "Alexzafra13/HubPlay_demo", logger)
+	// Aplicar el toggle persistido por el admin (si lo hay) antes de
+	// arrancar el ticker. La key vive en app_settings; ausente = true
+	// (comportamiento default histórico: chequear activado).
+	if v, err := repos.Settings.GetOr(ctx, "updates.check_enabled", "true"); err == nil {
+		updateService.SetUserEnabled(v != "false")
+	}
 	updateService.Start(ctx)
 
 	// mDNS: anuncia el server en la LAN como "<hostname>.local". Errores
