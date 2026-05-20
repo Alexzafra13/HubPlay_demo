@@ -40,20 +40,42 @@ async function genIco() {
 }
 
 async function genWizardLarge() {
-  // Banner vertical del wizard. Tamaño 3x del mínimo (164x314) para
-  // que Inno haga downscale nítido en pantallas hi-dpi.
+  // Banner vertical del wizard (3x del mínimo 164x314 para downscale nítido).
+  // Composición: icono → "HubPlay" → tagline, sobre fondo del logo con un
+  // sutil degradado para que el banner respire.
   const W = 492;
   const H = 942;
-  const iconSize = 280;
+  const iconSize = 260;
   const icon = await svgPng(iconSize);
+
+  const overlay = `
+<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a2238" stop-opacity="0.6"/>
+      <stop offset="60%" stop-color="#0d1220" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect width="${W}" height="${H}" fill="url(#g)"/>
+  <text x="${W / 2}" y="${H * 0.62}" text-anchor="middle"
+        font-family="Segoe UI, Helvetica, Arial, sans-serif"
+        font-size="72" font-weight="700" fill="#ffffff"
+        letter-spacing="-1">HubPlay</text>
+  <text x="${W / 2}" y="${H * 0.68}" text-anchor="middle"
+        font-family="Segoe UI, Helvetica, Arial, sans-serif"
+        font-size="22" font-weight="400" fill="#a8b3cf"
+        letter-spacing="2">SERVIDOR DE MEDIA · SELF-HOSTED</text>
+</svg>`;
+
   const out = await sharp({
     create: { width: W, height: H, channels: 4, background: BG },
   })
     .composite([
+      { input: Buffer.from(overlay), top: 0, left: 0 },
       {
         input: icon,
         left: Math.round((W - iconSize) / 2),
-        top: Math.round(H * 0.32),
+        top: Math.round(H * 0.18),
       },
     ])
     .png()

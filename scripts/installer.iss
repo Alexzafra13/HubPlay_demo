@@ -49,6 +49,8 @@ AppVerName=HubPlay {#AppVersion}
 AppPublisher=HubPlay
 AppPublisherURL=https://github.com/Alexzafra13/HubPlay_demo
 AppSupportURL=https://github.com/Alexzafra13/HubPlay_demo/issues
+AppUpdatesURL=https://github.com/Alexzafra13/HubPlay_demo/releases
+AppContact=https://github.com/Alexzafra13/HubPlay_demo/issues
 DefaultDirName={autopf}\HubPlay
 DefaultGroupName=HubPlay
 DisableProgramGroupPage=yes
@@ -75,10 +77,25 @@ VersionInfoCompany=HubPlay
 Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
+[Messages]
+spanish.WelcomeLabel1=Instalación de HubPlay
+spanish.WelcomeLabel2=Se va a instalar HubPlay en este equipo.%n%nEn pocos pasos tendrás un servidor de media corriendo en segundo plano, accesible desde el navegador y desde otros dispositivos de tu red.
+spanish.WizardReady=Resumen
+spanish.ReadyLabel1=Setup va a aplicar los siguientes cambios:
+spanish.ReadyLabel2a=Pulsa Instalar para continuar o Atrás para revisar las opciones.
+spanish.FinishedHeadingLabel=HubPlay está listo
+spanish.FinishedLabelNoIcons=HubPlay se ha instalado correctamente.
+spanish.FinishedLabel=HubPlay se ha instalado correctamente. El servicio arranca con el equipo; accede al panel desde el icono del escritorio o en http://localhost:8096.
+spanish.ClickFinish=Pulsa Finalizar para cerrar el instalador.
+english.WelcomeLabel1=Install HubPlay
+english.WelcomeLabel2=HubPlay will be installed on this computer.%n%nIn a few steps you will have a media server running in the background, reachable from the browser and from other devices on your network.
+english.FinishedHeadingLabel=HubPlay is ready
+english.FinishedLabel=HubPlay was installed successfully. The service starts with the computer; open it from the desktop icon or at http://localhost:8096.
+
 [Tasks]
-Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checkedonce
-Name: "service"; Description: "Instalar HubPlay como servicio de Windows (recomendado — arranca con el PC, sin consola visible)"; GroupDescription: "Modo de ejecución:"; Flags: checkedonce
-Name: "openbrowser"; Description: "Abrir HubPlay al terminar"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checkedonce
+Name: "desktopicon"; Description: "Crear icono en el escritorio"; GroupDescription: "Accesos directos:"; Flags: checkedonce
+Name: "service"; Description: "Arrancar HubPlay con el equipo (servicio de Windows)"; GroupDescription: "Modo de ejecución:"; Flags: checkedonce
+Name: "openbrowser"; Description: "Abrir HubPlay al terminar"; GroupDescription: "Accesos directos:"; Flags: checkedonce
 
 [Files]
 Source: "{#SourceDir}\hubplay.exe";              DestDir: "{app}"; Flags: ignoreversion
