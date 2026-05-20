@@ -6,13 +6,13 @@
 
 ---
 
-## 🔭 Estado actual (2026-05-20, tras la tarde de React Doctor)
+## 🔭 Estado actual (2026-05-20, cierre de la noche)
 
 - Branch principal: `main`, working tree limpio.
 - Última release pública: `nightly` rolling tag (workflow `release.yml`).
-- Tests: `go test -race ./...` verde en CI (incluyendo los dos flakes del transmux ya parcheados); frontend **616/616** vitest verdes; `tsc -b` limpio; production build limpio (24.83 s con React Compiler + LazyMotion activados).
+- Tests: `go test -race ./...` verde en CI; frontend **616/616** vitest verdes; `tsc -b` limpio; production build limpio (~25 s con React Compiler + LazyMotion activados).
 - **React Compiler activado** + `eslint-plugin-react-compiler` como hard gate. `react-compiler-healthcheck`: 542/542 componentes compatibles. Quality gates en CI: `typecheck`, `react-compiler-healthcheck` (hard), `knip` (info-only), `react-doctor` (visibility-only con comentarios inline en PRs).
-- **Score React Doctor: 71/100 ("Needs work" en 50-74, cerca del umbral 75 = "Great")**. 9 reglas únicas eliminadas, 196 issues totales.
+- **Score React Doctor: 75/100 ("Great" — umbral cruzado)**. 13 reglas únicas eliminadas, 166 issues totales (de 645 iniciales).
 - HubPlay distribuible "descargar y usar" en los tres targets (desktop / Linux server / NAS-via-Docker) — flujo cerrado en la sesión 2026-05-19/20.
 
 ---
@@ -22,7 +22,7 @@
 **[React Doctor](https://github.com/millionco/react-doctor)** (de millionco, MIT, basado en Oxlint) audita 60+ reglas en performance, correctness, accessibility, architecture, security y bundle size, y resume todo en un score 0-100. Integrado en CI como visibility-only (PR #358) — la GitHub Action comenta inline en cada PR con las regresiones/mejoras del score. Fórmula: `score = 100 - (errores únicos × 1.5) - (warnings únicos × 0.75)`. Bandas: 75+ "Great" / 50-74 "Needs work" / <50 "Critical".
 
 **Baseline al integrar**: 67/100, 645 issues, 47 reglas únicas.
-**Final tras dos PRs de quick wins**: **71/100, 196 issues, 39 reglas únicas**.
+**Final tras 5 PRs de quick wins + el fix del squash bug**: **75/100 ("Great"), 166 issues, 34 reglas únicas**.
 
 ### PRs cerradas
 
@@ -30,8 +30,11 @@
 |---|---|---|
 | [#358](https://github.com/Alexzafra13/HubPlay_demo/pull/358) | — | Integración CI (job nuevo `react-doctor`, visibility-only con `continue-on-error`) |
 | [#359](https://github.com/Alexzafra13/HubPlay_demo/pull/359) | `js-tosorted-immutable`, `js-combine-iterations`, `design-no-redundant-size-axes` | ~430 reemplazos en ~140 archivos |
-| [#360](https://github.com/Alexzafra13/HubPlay_demo/pull/360) | `design-no-redundant-padding-axes`, `design-no-bold-heading`, `no-autofocus`, `design-no-em-dash-in-jsx-text`, `use-lazy-motion`, `rendering-hydration-mismatch-time` | 6 reglas mecánicas, −30 KB bundle, helper `dateFormat` nuevo |
-| [#363](https://github.com/Alexzafra13/HubPlay_demo/pull/363) | `click-events-have-key-events`, `no-static-element-interactions` | 17 + 13 casos de a11y. Backdrops de modal con `onKeyDown` (Escape), bodies con `role="presentation"`, VideoPlayer container con `role="application"` + `aria-label`. También fix del squash-merge bug de #360 (ver abajo). |
+| [#360](https://github.com/Alexzafra13/HubPlay_demo/pull/360) | `design-no-redundant-padding-axes`, `design-no-bold-heading`, `no-autofocus`, `design-no-em-dash-in-jsx-text`, `use-lazy-motion`, `rendering-hydration-mismatch-time` | 6 reglas mecánicas, −30 KB bundle, helper `dateFormat` nuevo. **Squash merge perdió 54 líneas del LazyMotion — fixed en #364** (ver abajo) |
+| [#363](https://github.com/Alexzafra13/HubPlay_demo/pull/363) | `click-events-have-key-events`, `no-static-element-interactions` | 17 + 13 casos de a11y. Backdrops de modal con `onKeyDown` (Escape), bodies con `role="presentation"`, VideoPlayer container con `role="application"` + `aria-label` |
+| [#364](https://github.com/Alexzafra13/HubPlay_demo/pull/364) | `use-lazy-motion` (otra vez) | Re-aplicar los 54 reemplazos `motion` → `m` que perdió el squash de #360 |
+| [#365](https://github.com/Alexzafra13/HubPlay_demo/pull/365) | — | Memoria: bug del squash + regla "audit del merge" en conventions |
+| [#367](https://github.com/Alexzafra13/HubPlay_demo/pull/367) | `no-array-index-as-key` (×2), `no-render-in-render`, `js-set-map-lookups`, `prefer-use-effect-event` (×2), `advanced-event-handler-refs`, `no-react19-deprecated-apis` (`forwardRef`), `no-scale-from-zero` | **Cruza el umbral 75 ("Great")**. Patrón "latest value via ref" (sustituto pragmático de `useEffectEvent`), `<ProfilePicker />` extraído del closure inline, `forwardRef` → `ref` prop |
 
 ### ⚠️ Bug del squash merge — 54 líneas de LazyMotion perdidas en #360
 
@@ -57,6 +60,23 @@ Descubierto el 2026-05-20 noche por el CI report de React Doctor en PR #363: la 
 - **`font-semibold` (no `font-bold`)** en headings `<hN>`: peso 700+ aplasta las contraformas a display sizes.
 - **Em-dash (—) en JSX text NUNCA**: usar en-dash (–) para "sin valor" o bullet (·) para separadores inline. Em-dash lee como output AI.
 - **`autoFocus` evitado**: interfere con lectores de pantalla. Cuando es UX-crítico (UpNextOverlay, WhoIsWatching PIN), patrón `useEffect + ref.current.focus()`.
+- **Patrón "latest value via ref"** (sustituto pragmático de `useEffectEvent`, que aún es experimental en React 19): cuando un effect monta un listener cuyo handler depende de un prop/state pero el effect NO debería re-suscribirse al cambiar esa identidad:
+  ```tsx
+  const cbRef = useRef(onClose);
+  useEffect(() => { cbRef.current = onClose; }, [onClose]);
+  useEffect(() => {
+    if (!isOpen) return;
+    const handle = (e: Event) => { /* … */ cbRef.current(); };
+    el.addEventListener("event", handle);
+    return () => el.removeEventListener("event", handle);
+  }, [isOpen]); // onClose ya NO es dep
+  ```
+  Aplicado en BottomSheet (escape), VideoPlayer (onEndedCallback) y ImageManager (escape). Sin esto, cada re-render del padre re-suscribiría el listener y perdería eventos durante el churn.
+- **`forwardRef` eliminado de Button/Input** (React 19): ahora `ref` es prop normal en componentes función. Declarar `ref?: Ref<HTML*Element>` en la interfaz de props y desestructurar en el componente.
+- **Closures de render → componente real**: ejemplo `WhoIsWatching`, donde `const renderPicker = (...)` inline se extrajo a `<ProfilePicker />` con props explícitas. Mejora reconciliación y satisface `react-doctor/no-render-in-render`.
+- **Set para lookups en bucles**: `ACCEPTED_EXTENSIONS_SET = new Set(ACCEPTED_EXTENSIONS)` en `Uploads.tsx`. `.includes()` en loop = O(n²); Set = O(1).
+- **Backdrops de modal accesibles**: `<button>` semántico cuando es posible, o `<div role="dialog">` con `onClick`+`onKeyDown` (Escape) + body interno `role="presentation"` con `stopPropagation` en ambos handlers.
+- **`<video>` container con `role="application"`**: comunica al lector de pantalla que es un widget interactivo; añade `aria-label`.
 
 ### Reglas no eliminadas (decisiones documentadas como deuda técnica)
 
@@ -64,19 +84,20 @@ Descubierto el 2026-05-20 noche por el CI report de React Doctor en PR #363: la 
 |---|---|---|
 | `no-pure-black-background` | 7 | `bg-black` en contenedores de video. Cambiar a `bg-bg-base` dejaría borde gris alrededor. |
 | `query-mutation-missing-invalidation` | 12 | Falsos positivos: mutations read-only (probe peer, test DB, preflight M3U, deviceAuth tres) o invalidación vía helper indirecto que el lint no detecta (images.ts). |
+| `rerender-state-only-in-handlers` | 23 | **Conflicto irreconciliable** entre `react-hooks/refs` (no asignar `ref.current` en render) y `react-doctor` (que pide ese patrón). El `useState` de tracking del patrón "Adjusting state when a prop changes" satisface las dos reglas de react-hooks aunque viole esta de react-doctor. |
+| `no-derived-useState` | ~6 falsos positivos | Casos donde `useState` se inicializa de un prop PERO el estado representa edición local del usuario (CollisionPicker decisiones, ExternalSubsModal langs). Derivar en render reiniciaría el trabajo del usuario en cada re-render del padre. Suprimidos narrow con justificación. |
 
 ### Reglas pendientes para próxima(s) sesión(es)
 
-Requieren refactor caso a caso (no auto-fix):
+Requieren refactor estructural (no auto-fix mecánico):
 
-1. **`rerender-state-only-in-handlers`** (23): `useState`→`useRef` cuando el valor sólo se actualiza en handlers y NUNCA se lee en JSX. Cada caso requiere verificar que el valor efectivamente no se renderiza.
-2. **`prefer-useReducer`** (22): consolidar grupos de `useState` relacionados en un `useReducer`. Refactor mayor por componente.
-3. **`click-events-have-key-events`** (17) + **`no-static-element-interactions`** (13): accesibilidad real — convertir `<div onClick>` a `<button>` semántico, o añadir `onKeyDown` + `role`.
-4. **`no-giant-component`** (16): split de componentes grandes (UsersAdmin, VideoPlayer, etc.) en sub-componentes.
-5. **`no-array-index-as-key`** (15 restantes): los más complejos donde añadir un ID estable requiere refactor del data source.
-6. **`prefer-use-effect-event`** (7): reemplazar el patrón `useRef + assign` con `useEffectEvent` (React 19 experimental).
-7. **`no-derived-useState`** (8): derivar el state del prop en render en vez de duplicarlo en state local.
-8. **`no-cascading-set-state`** (7): refactor con `useReducer` o derivación.
+1. **`prefer-useReducer`** (22): consolidar grupos de `useState` relacionados en un `useReducer`. Refactor mayor por componente.
+2. **`no-giant-component`** (15): split de componentes grandes (UsersAdmin, VideoPlayer, AuditLogPanel, WhoIsWatching) en sub-componentes.
+3. **`rendering-hydration-mismatch-time`** (15 cases más complejos): los que NO encajaban en `formatDateTime` helper (callbacks de Recharts con datos paginated, etc).
+4. **`no-array-index-as-key`** (13 restantes): los más complejos donde añadir un ID estable requiere refactor del data source.
+5. **`no-cascading-set-state`** (7): refactor con `useReducer` o derivación.
+6. **`label-has-associated-control`** (6): añadir `htmlFor`/`id` en forms o envolver el input dentro del label.
+7. **`prefer-use-effect-event`** (5 restantes): ya aplicamos el patrón "ref" en los más importantes; los que quedan requieren mismo treatment caso por caso.
 
 ### PRs dependabot abiertas (estado)
 

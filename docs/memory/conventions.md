@@ -1145,3 +1145,37 @@ Tras descubrir que el squash merge de PR #360 descartó silenciosamente 54 líne
 - **Tras mergear cualquier PR que aplica un script masivo** (sed-like changes, code mods, migraciones cross-archivo), `git diff origin/main~1 origin/main -- <archivo_clave>` para verificar que los cambios reales aterrizaron. El visor de "files changed" del PR de GitHub puede esconder conflict resolutions silenciosas durante el squash.
 - **Si una regla del lint que se eliminó vuelve a aparecer** en un PR posterior, primero auditar main (`git show origin/main:<file>`) antes de asumir que el autor del nuevo PR la introdujo. La regresión puede venir del merge anterior.
 - **Para scripts masivos próximamente**: idealmente, hacerlos en commits separados pequeños o usar `git merge --no-ff` en lugar de squash si la PR contiene scripts de mass-edit, para que el historial preserve la atomicidad del cambio.
+
+### Patrones añadidos en el push final a 75 ("Great")
+
+Una segunda tanda de patrones que vinieron al cruzar el umbral del 75 con PR #367:
+
+- **`forwardRef` PROHIBIDO en componentes nuevos**. React 19 acepta `ref` como prop normal en componentes función. Declarar `ref?: Ref<HTML*Element>` en la interfaz de props y desestructurar en el componente. Migrados: Button, Input.
+
+- **Patrón "latest value via ref"** sustituye a `useEffectEvent` (aún experimental):
+  ```tsx
+  const cbRef = useRef(cb);
+  useEffect(() => { cbRef.current = cb; }, [cb]);
+  useEffect(() => {
+    const handle = () => cbRef.current();
+    el.addEventListener("x", handle);
+    return () => el.removeEventListener("x", handle);
+  }, [/* SIN cb */]);
+  ```
+  Aplica cuando un listener depende de un prop callable pero el effect NO debería re-suscribirse al cambiar la identidad del callable. Aplicado en BottomSheet, VideoPlayer, ImageManager.
+
+- **NUNCA closures `const renderX = (...) => <jsx>` en cuerpo de render**. Extraer a un componente real (`<X />` con props explícitas). Mejora reconciliación y satisface `react-doctor/no-render-in-render`.
+
+- **`Set` para lookups en bucles**: si un array se consulta con `.includes()` dentro de un loop, exponer también un `Set` del mismo dataset. Caso real: `ACCEPTED_EXTENSIONS_SET = new Set(ACCEPTED_EXTENSIONS)` en Uploads.tsx (array para el `accept=` del `<input>`, Set para validación O(1) en `validateFiles()`).
+
+- **Animaciones**: `scale: 0` PROHIBIDO en entradas. Usar `{ scale: 0.95, opacity: 0 }` → `{ scale: 1, opacity: 1 }`. Los elementos deben "desinflar" naturalmente, no aparecer de la nada.
+
+- **`<video>` containers y otros widgets de pantalla completa**: `role="application"` + `aria-label` para que lectores de pantalla los anuncien correctamente como widgets interactivos.
+
+- **Backdrops de modal con `<button>` siempre que sea posible**. Si no (porque contiene otros botones internos), `<div role="dialog">` con `onClick` + `onKeyDown` (Escape) + body interno `role="presentation"` con `stopPropagation` en ambos.
+
+### Conflicto documentado: `rerender-state-only-in-handlers`
+
+React Doctor pide reemplazar `useState` que nunca se lee en JSX por `useRef`. Pero el patrón canónico para "Adjusting state when a prop changes" (recomendado por React docs + `react-hooks/set-state-in-effect`) usa `useState` tracking. Cambiar a `useRef` con `ref.current = value` durante render viola `react-hooks/refs`.
+
+**Decisión**: ignorar la regla `rerender-state-only-in-handlers` para este patrón. La consistencia con react-hooks importa más que el score numérico de react-doctor.
