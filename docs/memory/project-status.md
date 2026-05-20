@@ -89,15 +89,56 @@ Descubierto el 2026-05-20 noche por el CI report de React Doctor en PR #363: la 
 
 ### Reglas pendientes para próxima(s) sesión(es)
 
-Requieren refactor estructural (no auto-fix mecánico):
+**Decisión 2026-05-20 noche**: aplazar la segunda ola **hasta que la web
+esté en estado "terminada"** (menos churn de componentes). El criterio de
+entrada para la segunda ola es:
 
-1. **`prefer-useReducer`** (22): consolidar grupos de `useState` relacionados en un `useReducer`. Refactor mayor por componente.
-2. **`no-giant-component`** (15): split de componentes grandes (UsersAdmin, VideoPlayer, AuditLogPanel, WhoIsWatching) en sub-componentes.
-3. **`rendering-hydration-mismatch-time`** (15 cases más complejos): los que NO encajaban en `formatDateTime` helper (callbacks de Recharts con datos paginated, etc).
-4. **`no-array-index-as-key`** (13 restantes): los más complejos donde añadir un ID estable requiere refactor del data source.
-5. **`no-cascading-set-state`** (7): refactor con `useReducer` o derivación.
-6. **`label-has-associated-control`** (6): añadir `htmlFor`/`id` en forms o envolver el input dentro del label.
-7. **`prefer-use-effect-event`** (5 restantes): ya aplicamos el patrón "ref" en los más importantes; los que quedan requieren mismo treatment caso por caso.
+1. **Subir el gate del CI** a `min-score: 80` o `85` en
+   `.github/workflows/ci.yml` y quitar `continue-on-error`. Convierte
+   visibility-only en hard gate y bloquea regresiones.
+2. **Refactor mayor de los grandes**: aquí es donde hay rendimiento real,
+   no en los micro-quick-wins.
+   - `no-giant-component` (15): UsersAdmin, VideoPlayer, AuditLogPanel,
+     WhoIsWatching, LogsPanel — split por sub-componentes con
+     responsabilidad única.
+   - `prefer-useReducer` (22) + `no-cascading-set-state` (7): consolidar.
+     **useHls (23 setState en un effect)** es el más urgente — cada
+     setState dispara un render durante la carga del stream, un reducer
+     único lo colapsa a uno.
+3. **`no-array-index-as-key` restantes** (13) cuando el backend exponga
+   IDs estables o se generen con `crypto.randomUUID()` al ingest.
+4. **`rendering-hydration-mismatch-time` complejos** (15): callbacks de
+   Recharts y datos paginated. No hacemos SSR; riesgo real bajo, pero
+   limpia.
+
+### Reglas que NUNCA se van a eliminar (falsos positivos legítimos)
+
+Documentar aquí para que ningún PR futuro pierda tiempo:
+
+- `rerender-state-only-in-handlers` (23): **conflicto irreconciliable**
+  con `react-hooks/refs`. El patrón "Adjusting state when a prop changes"
+  viola esta regla pero satisface las dos de react-hooks (que son
+  hard-gates). Ganan los hooks.
+- `query-mutation-missing-invalidation` (12): falsos positivos —
+  mutations read-only (probe peer, test DB, preflight M3U, deviceAuth) o
+  invalidación vía helper indirecto que el lint no detecta (images.ts).
+- `no-derived-useState` (6 de 8): casos donde el `useState` representa
+  edición local del usuario (CollisionPicker decisiones, ExternalSubsModal
+  langs). Derivar en render reiniciaría el trabajo del usuario en cada
+  re-render del padre. Suprimidos narrow con justificación.
+- `no-pure-black-background` (7): `bg-black` en contenedores de video.
+  Cambiar a `bg-bg-base` dejaría borde gris alrededor.
+- `label-has-associated-control` (6): asociación implícita (`<label>`
+  envolviendo `<input>`) **ES a11y válida**. Falso positivo del lint.
+- `async-await-in-loop` (2): stream reader (DatabasePanel SSE) + retry
+  loop con backoff (api/client). Secuencial por diseño.
+- `async-defer-await` (2): la awaited value SÍ se usa después del
+  early-return (ItemDetail onClose, useVibrantColors swatches).
+- `no-derived-state-effect` (1): VideoPlayer:628 con `key={itemId}` re-
+  montaría hls.js. Documentado in-line con eslint-disable.
+- `client-localstorage-no-version` (2) + `js-cache-storage` (1): test
+  files. Cambiar la key rompe migración real (production usa
+  `hubplay_user`).
 
 ### PRs dependabot abiertas (estado)
 
