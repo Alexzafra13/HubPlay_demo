@@ -31,6 +31,19 @@
 | [#358](https://github.com/Alexzafra13/HubPlay_demo/pull/358) | — | Integración CI (job nuevo `react-doctor`, visibility-only con `continue-on-error`) |
 | [#359](https://github.com/Alexzafra13/HubPlay_demo/pull/359) | `js-tosorted-immutable`, `js-combine-iterations`, `design-no-redundant-size-axes` | ~430 reemplazos en ~140 archivos |
 | [#360](https://github.com/Alexzafra13/HubPlay_demo/pull/360) | `design-no-redundant-padding-axes`, `design-no-bold-heading`, `no-autofocus`, `design-no-em-dash-in-jsx-text`, `use-lazy-motion`, `rendering-hydration-mismatch-time` | 6 reglas mecánicas, −30 KB bundle, helper `dateFormat` nuevo |
+| [#363](https://github.com/Alexzafra13/HubPlay_demo/pull/363) | `click-events-have-key-events`, `no-static-element-interactions` | 17 + 13 casos de a11y. Backdrops de modal con `onKeyDown` (Escape), bodies con `role="presentation"`, VideoPlayer container con `role="application"` + `aria-label`. También fix del squash-merge bug de #360 (ver abajo). |
+
+### ⚠️ Bug del squash merge — 54 líneas de LazyMotion perdidas en #360
+
+Descubierto el 2026-05-20 noche por el CI report de React Doctor en PR #363: la regla `use-lazy-motion` reapareció en `WhoIsWatching.tsx:27` aunque PR #360 supuestamente la había eliminado.
+
+**Qué pasó**: el commit `LazyMotion + helper de fechas` migró 7 archivos de `motion` → `m` (54 reemplazos verificados localmente). Pero el squash merge de la PR a main aplicó SÓLO las modificaciones de otro commit anterior (autoFocus → useEffect+ref, ~8 líneas) y descartó silenciosamente las 54 líneas de LazyMotion sobre los mismos 7 archivos. `App.tsx` SÍ se mergeó con `LazyMotion strict` activado, dejando los archivos rotos: el primer usuario que llegase a Login, WhoIsWatching, MainNav, etc, vería `Error: You are rendering "motion" without LazyMotion features loaded`.
+
+**Cómo se cazó**: React Doctor en CI dice "Score unavailable in offline mode" pero sí lista los issues. La regla `use-lazy-motion` apareció DE NUEVO en `WhoIsWatching.tsx:27` cuando ya debería estar resuelta. Auditados los 7 archivos del PR original: ninguno tenía la migración. Re-aplicado el mismo script en PR #363.
+
+**Lección aprendida** (en `conventions.md`):
+- Tras cualquier squash merge donde un script modifica decenas de archivos, **verificar en main** que los cambios reales coinciden con el diff del commit local. El visor de PR de GitHub puede ocultar conflict resolutions silenciosas.
+- Si una regla del lint que se eliminó vuelve a aparecer en un PR posterior, NO asumir que es un regreso nuevo del autor — comprobar si el bug del lint ya estaba en main por un merge previo malo.
 
 ### Patrones nuevos en el proyecto
 
