@@ -11,6 +11,12 @@ coverage.html
 # Frontend
 web/node_modules/
 
+# Foreign JS lockfiles. El proyecto usa pnpm (web/package.json declara
+# packageManager: pnpm@…); si alguien hace `npm install` por accidente
+# y genera un package-lock.json, no debe commitearse.
+web/package-lock.json
+web/yarn.lock
+
 # Vite build output. The directory is tracked (via web/dist/.gitkeep) so
 # the `go:embed all:web/dist` directive in migrations.go compiles on a
 # fresh clone. Only build artifacts are ignored; rebuild with
