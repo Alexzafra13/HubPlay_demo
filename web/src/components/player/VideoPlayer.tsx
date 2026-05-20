@@ -879,7 +879,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
           is same-origin (cookie auth flows automatically). */}
       <video
         ref={videoRef}
-        className="absolute inset-0 w-full h-full object-contain"
+        className="absolute inset-0 size-full object-contain"
         playsInline
         // We DO want Picture-in-Picture (the `p` shortcut +
         // future toolbar button rely on it), so disablePictureInPicture
@@ -988,7 +988,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
         <div className="absolute inset-0 flex items-center justify-center z-30 bg-black/80">
           <div className="flex flex-col items-center gap-4 max-w-md px-6 text-center">
             <svg
-              className="h-12 w-12 text-error"
+              className="size-12 text-error"
               viewBox="0 0 24 24"
               fill="currentColor"
             >

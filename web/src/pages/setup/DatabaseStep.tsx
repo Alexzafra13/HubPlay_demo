@@ -134,7 +134,7 @@ export default function DatabaseStep({ onNext }: DatabaseStepProps) {
     <div className="flex flex-col gap-5">
       <header className="flex items-start gap-3">
         <span className="rounded-[--radius-md] bg-accent/15 p-2 text-accent">
-          <Database className="h-6 w-6" />
+          <Database className="size-6" />
         </span>
         <div>
           <h2 className="text-lg font-semibold text-text">

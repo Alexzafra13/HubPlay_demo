@@ -71,7 +71,7 @@ export function pickWatchTonight(
   // size of a billboard — a poster fallback looks broken at this scale.
   const recoCandidates = latest.filter((i) => !!i.backdrop_url);
   if (recoCandidates.length === 0) return null;
-  const sorted = [...recoCandidates].sort(
+  const sorted = recoCandidates.toSorted(
     (a, b) => (b.community_rating ?? 0) - (a.community_rating ?? 0),
   );
   return { item: sorted[0], reason: "recommended" };
@@ -96,7 +96,7 @@ const WatchTonightTile: FC<WatchTonightTileProps> = ({ pick }) => {
         <img
           src={item.backdrop_url}
           alt=""
-          className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-[1.02]"
+          className="size-full object-cover transition-transform duration-700 group-hover:scale-[1.02]"
           style={{ aspectRatio: "21 / 9" }}
         />
       )}
@@ -122,7 +122,7 @@ const WatchTonightTile: FC<WatchTonightTileProps> = ({ pick }) => {
           </p>
         )}
         <span className="mt-4 inline-flex items-center gap-2 rounded-full bg-white px-5 py-2 text-sm font-semibold text-black transition-colors group-hover:bg-white/90">
-          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+          <svg className="size-4" viewBox="0 0 24 24" fill="currentColor">
             <path d="M8 5v14l11-7z" />
           </svg>
           {t(reason === "resume" ? "watchTonight.resumeAction" : "watchTonight.playAction")}

@@ -33,10 +33,10 @@ function SummaryItem({
   return (
     <div className="flex items-center gap-3 py-2">
       <div
-        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${iconColors[variant]}`}
+        className={`flex size-7 shrink-0 items-center justify-center rounded-full ${iconColors[variant]}`}
       >
         {icon === "check" && (
-          <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+          <svg className="size-3.5" viewBox="0 0 20 20" fill="currentColor">
             <path
               fillRule="evenodd"
               d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
@@ -45,7 +45,7 @@ function SummaryItem({
           </svg>
         )}
         {icon === "info" && (
-          <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+          <svg className="size-3.5" viewBox="0 0 20 20" fill="currentColor">
             <path
               fillRule="evenodd"
               d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a.75.75 0 000 1.5h.253a.25.25 0 01.244.304l-.459 2.066A1.75 1.75 0 0010.747 15H11a.75.75 0 000-1.5h-.253a.25.25 0 01-.244-.304l.459-2.066A1.75 1.75 0 009.253 9H9z"
@@ -54,7 +54,7 @@ function SummaryItem({
           </svg>
         )}
         {icon === "warning" && (
-          <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+          <svg className="size-3.5" viewBox="0 0 20 20" fill="currentColor">
             <path
               fillRule="evenodd"
               d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.168 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 9a1 1 0 100-2 1 1 0 000 2z"
@@ -107,9 +107,9 @@ export default function CompleteStep({ setupData }: CompleteStepProps) {
     <div>
       {/* Header */}
       <div className="mb-6 text-center">
-        <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-success/10">
+        <div className="mx-auto mb-4 flex size-14 items-center justify-center rounded-full bg-success/10">
           <svg
-            className="h-7 w-7 text-success"
+            className="size-7 text-success"
             viewBox="0 0 20 20"
             fill="currentColor"
           >
@@ -183,9 +183,9 @@ export default function CompleteStep({ setupData }: CompleteStepProps) {
           {libraries.length > 0 ? (
             <div className="py-2">
               <div className="flex items-center gap-3">
-                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-success/10">
+                <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-success/10">
                   <svg
-                    className="h-3.5 w-3.5 text-success"
+                    className="size-3.5 text-success"
                     viewBox="0 0 20 20"
                     fill="currentColor"
                   >
@@ -204,13 +204,15 @@ export default function CompleteStep({ setupData }: CompleteStepProps) {
                 </div>
               </div>
               <div className="ml-10 mt-1.5 flex flex-col gap-1">
-                {libraries.map((lib, i) => (
+                {libraries.map((lib) => (
+                  // El nombre de la biblioteca es único en la lista de
+                  // setup (la UI lo valida al añadir).
                   <div
-                    key={i}
+                    key={lib.name}
                     className="flex items-center gap-2 text-xs text-text-secondary"
                   >
                     <svg
-                      className="h-3 w-3 shrink-0 text-accent"
+                      className="size-3 shrink-0 text-accent"
                       viewBox="0 0 20 20"
                       fill="currentColor"
                     >
@@ -262,7 +264,7 @@ export default function CompleteStep({ setupData }: CompleteStepProps) {
             type="checkbox"
             checked={scanLibraries}
             onChange={(e) => setScanLibraries(e.target.checked)}
-            className="h-4 w-4 rounded text-accent focus:ring-accent border-border"
+            className="size-4 rounded text-accent focus:ring-accent border-border"
           />
           <div>
             <p className="text-sm font-medium text-text-primary">

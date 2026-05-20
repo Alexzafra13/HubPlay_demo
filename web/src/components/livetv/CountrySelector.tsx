@@ -68,7 +68,7 @@ export function CountrySelector({ hasLibrary }: CountrySelectorProps) {
     <div className="flex min-h-[60vh] items-center justify-center px-4">
       <div className="w-full max-w-lg">
         <div className="mb-8 text-center">
-          <div className="mx-auto mb-5 w-20 h-20 rounded-2xl bg-accent/10 flex items-center justify-center">
+          <div className="mx-auto mb-5 size-20 rounded-2xl bg-accent/10 flex items-center justify-center">
             <svg
               width="40"
               height="40"

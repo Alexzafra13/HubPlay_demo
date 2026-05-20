@@ -167,7 +167,7 @@ export function ChannelCard({
               bg={channel.logo_bg}
               fg={channel.logo_fg}
               name={channel.name}
-              className="h-14 w-14 rounded-tv-md ring-2 ring-white/10"
+              className="size-14 rounded-tv-md ring-2 ring-white/10"
               textClassName="text-base font-bold"
             />
           )}
@@ -199,7 +199,7 @@ export function ChannelCard({
             </span>
           ) : nowPlaying ? (
             <span className="flex items-center gap-1 rounded-tv-xs bg-tv-live/90 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
+              <span className="size-1.5 animate-pulse rounded-full bg-white" />
               Live
             </span>
           ) : null}
@@ -250,7 +250,7 @@ export function ChannelCard({
               }
             }}
             className={[
-              "absolute right-2 top-2 flex h-7 w-7 cursor-pointer items-center justify-center rounded-full bg-black/50 backdrop-blur transition hover:bg-black/70",
+              "absolute right-2 top-2 flex size-7 cursor-pointer items-center justify-center rounded-full bg-black/50 backdrop-blur transition hover:bg-black/70",
               isFavorite ? "text-tv-live" : "text-tv-fg-1",
             ].join(" ")}
           >

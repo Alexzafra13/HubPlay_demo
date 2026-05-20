@@ -65,7 +65,7 @@ export function SeasonEpisodes({ seriesId }: { seriesId: string }) {
 function SeasonGrid({ seasons }: { seasons: MediaItem[] }) {
   const { t } = useTranslation();
   const sorted = useMemo(
-    () => [...seasons].sort((a, b) => (a.season_number ?? 0) - (b.season_number ?? 0)),
+    () => seasons.toSorted((a, b) => (a.season_number ?? 0) - (b.season_number ?? 0)),
     [seasons],
   );
 
@@ -115,10 +115,10 @@ function SeasonCard({ season }: SeasonCardProps) {
             src={thumb(season.poster_url, SEASON_THUMB_WIDTH) ?? season.poster_url}
             alt={season.title}
             loading="lazy"
-            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+            className="size-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
           />
         ) : (
-          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-bg-card to-bg-elevated">
+          <div className="flex size-full items-center justify-center bg-gradient-to-br from-bg-card to-bg-elevated">
             <span className="text-2xl font-bold text-text-muted">
               {season.season_number != null
                 ? `S${String(season.season_number).padStart(2, "0")}`
@@ -129,7 +129,7 @@ function SeasonCard({ season }: SeasonCardProps) {
 
         {rating != null && (
           <div className="absolute top-2 right-2 flex items-center gap-1 rounded-full bg-black/70 px-2 py-1 text-xs font-semibold text-warning backdrop-blur-sm">
-            <svg className="h-3 w-3" viewBox="0 0 24 24" fill="currentColor">
+            <svg className="size-3" viewBox="0 0 24 24" fill="currentColor">
               <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
             </svg>
             {rating.toFixed(1)}

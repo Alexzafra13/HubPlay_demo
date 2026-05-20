@@ -50,10 +50,10 @@ const EpisodeCard: FC<EpisodeCardProps> = ({ item, progress, onClick }) => {
             }
             alt={`${item.title} thumbnail`}
             loading="lazy"
-            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+            className="size-full object-cover transition-transform duration-300 group-hover:scale-105"
           />
         ) : (
-          <div className="flex h-full w-full items-center justify-center bg-bg-card">
+          <div className="flex size-full items-center justify-center bg-bg-card">
             <span className="text-lg font-bold text-text-muted">
               {episodeCode}
             </span>
@@ -69,9 +69,9 @@ const EpisodeCard: FC<EpisodeCardProps> = ({ item, progress, onClick }) => {
 
         {/* Hover play icon */}
         <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity duration-300 group-hover:opacity-100">
-          <div className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-white bg-white/10 backdrop-blur-sm">
+          <div className="flex size-10 items-center justify-center rounded-full border-2 border-white bg-white/10 backdrop-blur-sm">
             <svg
-              className="h-4 w-4 text-white"
+              className="size-4 text-white"
               viewBox="0 0 24 24"
               fill="currentColor"
             >

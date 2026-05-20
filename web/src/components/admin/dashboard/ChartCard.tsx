@@ -47,7 +47,7 @@ export function ChartCard({
         <div className="flex items-start gap-2 min-w-0">
           {Icon && (
             <div className="flex-none rounded-md bg-bg-elevated p-1.5 text-text-secondary">
-              <Icon className="h-3.5 w-3.5" />
+              <Icon className="size-3.5" />
             </div>
           )}
           <div className="min-w-0">

@@ -49,8 +49,8 @@ describe("CompleteStep", () => {
       <CompleteStep
         setupData={{
           libraries: [
-            { name: "Movies", contentType: "movies", path: "/mnt/movies" },
-            { name: "Shows", contentType: "shows", path: "/mnt/shows" },
+            { localId: "lib1", name: "Movies", contentType: "movies", path: "/mnt/movies" },
+            { localId: "lib2", name: "Shows", contentType: "shows", path: "/mnt/shows" },
           ],
         }}
       />,
@@ -71,7 +71,7 @@ describe("CompleteStep", () => {
     render(
       <CompleteStep
         setupData={{
-          libraries: [{ name: "M", contentType: "movies", path: "/m" }],
+          libraries: [{ localId: "m", name: "M", contentType: "movies", path: "/m" }],
         }}
       />,
     );
@@ -83,7 +83,7 @@ describe("CompleteStep", () => {
     render(
       <CompleteStep
         setupData={{
-          libraries: [{ name: "M", contentType: "movies", path: "/m" }],
+          libraries: [{ localId: "m", name: "M", contentType: "movies", path: "/m" }],
         }}
       />,
     );
@@ -97,7 +97,7 @@ describe("CompleteStep", () => {
     render(
       <CompleteStep
         setupData={{
-          libraries: [{ name: "M", contentType: "movies", path: "/m" }],
+          libraries: [{ localId: "m", name: "M", contentType: "movies", path: "/m" }],
         }}
       />,
     );

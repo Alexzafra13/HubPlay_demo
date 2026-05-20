@@ -253,7 +253,7 @@ function IdentityStrip({
     <header className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
       <span
         aria-hidden
-        className="h-2 w-2 rounded-full"
+        className="size-2 rounded-full"
         style={{
           background: allHealthy ? "var(--color-success)" : "var(--color-error)",
         }}
@@ -310,7 +310,7 @@ function IdentityStrip({
         >
           <RefreshCw
             className={[
-              "-ml-0.5 mr-1 h-3.5 w-3.5",
+              "-ml-0.5 mr-1 size-3.5",
               isFetching ? "animate-spin" : "",
             ].join(" ")}
           />
@@ -674,7 +674,7 @@ function ActiveSessionsList() {
                       defaultValue: "Cerrar sesión",
                     })}
                   >
-                    <Square className="h-3.5 w-3.5" />
+                    <Square className="size-3.5" />
                   </Button>
                 </span>
               </li>
@@ -941,7 +941,7 @@ function InfraCard({
     <div className="flex h-full flex-col gap-3 rounded-[--radius-lg] border border-border bg-bg-card p-4">
       <header className="flex items-baseline justify-between gap-3">
         <div className="flex items-center gap-2 text-text-muted">
-          <Icon className="h-3.5 w-3.5" />
+          <Icon className="size-3.5" />
           <span className="text-[10px] font-medium uppercase tracking-wider">
             {title}
           </span>

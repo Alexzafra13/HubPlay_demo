@@ -55,7 +55,7 @@ export default function PeerLibraryItemsPage() {
           className="inline-flex items-center gap-1 rounded-full bg-black/65 px-2 py-0.5 text-[10px] font-medium text-white shadow-sm backdrop-blur-sm"
           title={t("peers.sharedBy", { name: peer.name })}
         >
-          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" aria-hidden />
+          <span className="size-1.5 rounded-full bg-emerald-400" aria-hidden />
           <span className="max-w-[120px] truncate">{peer.name}</span>
         </span>
       )
@@ -96,7 +96,7 @@ export default function PeerLibraryItemsPage() {
             <p className="mt-1 text-sm text-text-muted">
               <span className="inline-flex items-center gap-1.5">
                 <span
-                  className="h-1.5 w-1.5 rounded-full bg-emerald-500"
+                  className="size-1.5 rounded-full bg-emerald-500"
                   aria-hidden
                 />
                 {t("peers.sharedBy", { name: peer.name })}

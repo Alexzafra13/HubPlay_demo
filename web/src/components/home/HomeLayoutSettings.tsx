@@ -199,7 +199,7 @@ function SectionRow({
 }
 
 function SectionIcon({ type }: { type: HomeSection["type"] }) {
-  const cls = "h-4 w-4 text-accent-light";
+  const cls = "size-4 text-accent-light";
   switch (type) {
     case "continue_watching":
       return (
@@ -286,7 +286,7 @@ function Toggle({ checked, onChange, disabled }: ToggleProps) {
     >
       <span
         className={[
-          "inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform",
+          "inline-block size-4 rounded-full bg-white shadow-sm transition-transform",
           checked ? "translate-x-6" : "translate-x-1",
         ].join(" ")}
       />

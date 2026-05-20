@@ -94,10 +94,14 @@ function computeHeader(): string | null {
     }
   };
 
+  // Una pasada: para cada par [codec, mime], conserva el codec si el
+  // navegador soporta ese mime. Antes filtraba y luego mapeaba (dos
+  // recorridos sobre la misma lista).
   const probe = (entries: Array<[string, string]>) =>
-    entries
-      .filter(([, mime]) => isSupported(mime))
-      .map(([codec]) => codec);
+    entries.reduce<string[]>((acc, [codec, mime]) => {
+      if (isSupported(mime)) acc.push(codec);
+      return acc;
+    }, []);
 
   const video = probe(VIDEO_PROBES);
   const audio = probe(AUDIO_PROBES);

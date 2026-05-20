@@ -26,7 +26,7 @@ export function ScanProgressBanner() {
           key={s.libraryId}
           className="flex flex-wrap items-center gap-3 text-sm"
         >
-          <Loader2 className="h-4 w-4 flex-none animate-spin text-accent" />
+          <Loader2 className="size-4 flex-none animate-spin text-accent" />
           <span className="font-medium text-text-primary">
             {t("admin.scan.scanning", {
               defaultValue: "Escaneando '{{name}}'",

@@ -128,7 +128,7 @@ export function BackupPanel() {
           isLoading={downloading}
           disabled={uploading}
         >
-          <Download className="-ml-0.5 mr-1.5 h-3.5 w-3.5" />
+          <Download className="-ml-0.5 mr-1.5 size-3.5" />
           {t("admin.backup.download", { defaultValue: "Descargar backup" })}
         </Button>
         <Button
@@ -138,7 +138,7 @@ export function BackupPanel() {
           isLoading={uploading}
           disabled={downloading}
         >
-          <Upload className="-ml-0.5 mr-1.5 h-3.5 w-3.5" />
+          <Upload className="-ml-0.5 mr-1.5 size-3.5" />
           {t("admin.backup.restore", { defaultValue: "Restaurar copia" })}
         </Button>
         <input

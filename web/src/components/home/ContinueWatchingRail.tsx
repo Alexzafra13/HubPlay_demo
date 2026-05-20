@@ -36,7 +36,7 @@ export function ContinueWatchingRail() {
     return (
       <HomeRail title={t("home.continueWatching")}>
         {Array.from({ length: 5 }, (_, i) => (
-          <div key={i} className="w-[300px] md:w-[340px] lg:w-[380px] xl:w-[420px] shrink-0">
+          <div key={`continue-skeleton-${i}`} className="w-[300px] md:w-[340px] lg:w-[380px] xl:w-[420px] shrink-0">
             <Skeleton
               variant="rectangular"
               className="aspect-[16/9] w-full rounded-md"

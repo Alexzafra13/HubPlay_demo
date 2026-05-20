@@ -197,10 +197,9 @@ export function AuthKeysPanel() {
 function KeysTable({ keys }: { keys: AuthKey[] }) {
   const { t } = useTranslation();
 
-  // Sort: primary first, then by created_at desc. Snapshot is unordered
-  // from the backend's perspective so we impose a stable ordering here
-  // — admins always want to see the active key at the top.
-  const sorted = [...keys].sort((a, b) => {
+  // Ordena: la clave primaria primero, luego por fecha de creación
+  // descendente. El admin siempre quiere ver la activa arriba.
+  const sorted = keys.toSorted((a, b) => {
     if (a.is_primary !== b.is_primary) return a.is_primary ? -1 : 1;
     return b.created_at.localeCompare(a.created_at);
   });

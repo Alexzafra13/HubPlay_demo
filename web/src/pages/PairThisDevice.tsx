@@ -206,7 +206,7 @@ export default function PairThisDevice() {
       {pair && (status === "waiting" || status === "approved") ? (
         <section className="flex w-full flex-col items-center gap-6 rounded-2xl border border-border bg-bg-card p-6 sm:flex-row sm:items-stretch sm:gap-8">
           <div
-            className="flex h-56 w-56 items-center justify-center rounded-xl bg-white p-3"
+            className="flex size-56 items-center justify-center rounded-xl bg-white p-3"
             aria-label={t("pair.qrAlt", {
               defaultValue: "Código QR para vincular este dispositivo",
             })}
@@ -214,7 +214,7 @@ export default function PairThisDevice() {
             {qrSvg ? (
               <div
                 dangerouslySetInnerHTML={{ __html: qrSvg }}
-                className="h-full w-full"
+                className="size-full"
               />
             ) : (
               <div className="text-xs text-text-muted">

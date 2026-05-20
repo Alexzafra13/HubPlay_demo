@@ -134,9 +134,9 @@ function ScrollArrow({ direction, visible, onClick }: ScrollArrowProps) {
         "opacity-0 transition-opacity duration-200 group-hover/scroller:opacity-100 focus-visible:opacity-100",
       ].join(" ")}
     >
-      <span className="flex h-10 w-10 items-center justify-center rounded-full bg-black/60 text-white shadow-lg backdrop-blur-sm transition-transform hover:scale-110">
+      <span className="flex size-10 items-center justify-center rounded-full bg-black/60 text-white shadow-lg backdrop-blur-sm transition-transform hover:scale-110">
         <svg
-          className="h-5 w-5"
+          className="size-5"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"

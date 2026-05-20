@@ -292,7 +292,7 @@ const SeekBar: FC<{
             onSeek(v);
           }
         }}
-        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+        className="absolute inset-0 size-full opacity-0 cursor-pointer z-10"
         aria-label={t("playerControls.seek")}
       />
       <div className="relative w-full h-1 group-hover/seek:h-1.5 bg-white/20 rounded-full transition-all duration-150">
@@ -308,8 +308,10 @@ const SeekBar: FC<{
           if (c.startSeconds <= 0 || c.startSeconds >= duration) return null;
           const left = (c.startSeconds / duration) * 100;
           return (
+            // startSeconds + title da una key única por capítulo
+            // estable aunque el array se reordene.
             <div
-              key={i}
+              key={`chapter-${c.startSeconds}-${c.title ?? ""}`}
               className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 h-3 w-1 cursor-pointer pointer-events-auto"
               style={{ left: `${left}%` }}
               onMouseEnter={() => setHoveredChapter(i)}
@@ -335,7 +337,7 @@ const SeekBar: FC<{
           />
         )}
         <div
-          className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 h-3 w-3 bg-accent rounded-full opacity-0 group-hover/seek:opacity-100 transition-opacity duration-150"
+          className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 size-3 bg-accent rounded-full opacity-0 group-hover/seek:opacity-100 transition-opacity duration-150"
           style={{ left: `${progress}%` }}
         />
       </div>
@@ -955,7 +957,7 @@ const PlayerControls: FC<PlayerControlsProps> = ({
       }}
       className="w-full flex items-center gap-3 px-3 py-3 mt-1 rounded-[--radius-md] text-left text-sm text-accent hover:bg-accent/10 transition-colors cursor-pointer"
     >
-      <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+      <svg className="size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
         <circle cx="11" cy="11" r="7" />
         <path d="M21 21l-4.35-4.35" strokeLinecap="round" />
       </svg>

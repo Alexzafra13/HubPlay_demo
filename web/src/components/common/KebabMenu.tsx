@@ -83,9 +83,9 @@ export function KebabMenu({ items, ariaLabel }: KebabMenuProps) {
         aria-label={ariaLabel}
         aria-haspopup="menu"
         aria-expanded={open}
-        className="inline-flex h-9 w-9 items-center justify-center rounded-full text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        className="inline-flex size-9 items-center justify-center rounded-full text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
       >
-        <MoreVertical className="h-4 w-4" />
+        <MoreVertical className="size-4" />
       </button>
 
       {open && (
@@ -93,7 +93,7 @@ export function KebabMenu({ items, ariaLabel }: KebabMenuProps) {
           role="menu"
           className="absolute right-0 top-full z-30 mt-1 min-w-[200px] overflow-hidden rounded-md border border-border bg-bg-card shadow-xl"
         >
-          {visible.map((it, i) => {
+          {visible.map((it) => {
             const Icon = it.icon;
             const baseClass = [
               "flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors",
@@ -104,8 +104,9 @@ export function KebabMenu({ items, ariaLabel }: KebabMenuProps) {
                   : "text-text-primary hover:bg-bg-hover",
             ].join(" ");
             return (
+              // El label es visible al usuario y único dentro del menú.
               <button
-                key={i}
+                key={it.label}
                 type="button"
                 role="menuitem"
                 disabled={it.disabled}
@@ -117,7 +118,7 @@ export function KebabMenu({ items, ariaLabel }: KebabMenuProps) {
                 className={baseClass}
               >
                 {Icon && (
-                  <Icon className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                  <Icon className="size-3.5 shrink-0 opacity-70" />
                 )}
                 <span className="flex-1">
                   <span className="block">{it.label}</span>

@@ -84,7 +84,7 @@ export function LibraryCard({
             </span>
             {originLabel(lib) && (
               <>
-                <span aria-hidden className="h-0.5 w-0.5 rounded-full bg-border shrink-0" />
+                <span aria-hidden className="size-0.5 rounded-full bg-border shrink-0" />
                 <span className="font-mono truncate max-w-full" title={originTitle(lib)}>
                   {originLabel(lib)}
                 </span>
@@ -92,7 +92,7 @@ export function LibraryCard({
             )}
             {!isLivetv && lib.scan_status && (
               <>
-                <span aria-hidden className="h-0.5 w-0.5 rounded-full bg-border shrink-0" />
+                <span aria-hidden className="size-0.5 rounded-full bg-border shrink-0" />
                 <Badge variant={scanStatusVariant(lib.scan_status)}>
                   {lib.scan_status}
                 </Badge>

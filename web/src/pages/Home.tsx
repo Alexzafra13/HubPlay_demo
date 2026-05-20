@@ -117,7 +117,7 @@ export default function Home() {
     return (
       <div className="flex flex-col items-center justify-center gap-4 py-32 text-center">
         <svg
-          className="h-12 w-12 text-white/20"
+          className="size-12 text-white/20"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"

@@ -121,7 +121,7 @@ export default function QRScannerModal({ onCode, onClose }: Props) {
           aria-label={t("common.close", { defaultValue: "Cerrar" })}
           className="rounded-full p-2 text-text-muted transition-colors hover:bg-bg-base hover:text-text-primary"
         >
-          <X className="h-5 w-5" />
+          <X className="size-5" />
         </button>
       </header>
 
@@ -141,7 +141,7 @@ export default function QRScannerModal({ onCode, onClose }: Props) {
         {/* Overlay con hint y guía visual: marco central para
             que el usuario sepa dónde encuadrar el QR. */}
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-4 p-6">
-          <div className="h-56 w-56 rounded-2xl border-2 border-white/70 shadow-[0_0_0_9999px_rgba(0,0,0,0.45)]" />
+          <div className="size-56 rounded-2xl border-2 border-white/70 shadow-[0_0_0_9999px_rgba(0,0,0,0.45)]" />
           <p className="max-w-xs rounded-full bg-black/60 px-4 py-2 text-center text-sm text-white">
             {t("link.scanner.hint", {
               defaultValue: "Apunta a la pantalla de tu TV con el código QR.",

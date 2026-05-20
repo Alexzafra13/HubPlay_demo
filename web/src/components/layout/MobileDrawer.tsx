@@ -54,7 +54,7 @@ export function MobileDrawer({ onClose, onLogout }: MobileDrawerProps) {
           className="p-2 rounded-lg text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
           aria-label={t("nav.closeMenu")}
         >
-          <X className="h-[18px] w-[18px]" strokeWidth={1.6} />
+          <X className="size-[18px]" strokeWidth={1.6} />
         </button>
       </div>
 
@@ -81,7 +81,7 @@ export function MobileDrawer({ onClose, onLogout }: MobileDrawerProps) {
             <li>
               <DrawerLink
                 to="/settings"
-                icon={<Settings className="h-[18px] w-[18px]" strokeWidth={1.6} />}
+                icon={<Settings className="size-[18px]" strokeWidth={1.6} />}
                 label={t("nav.settings")}
                 onClick={onClose}
               />
@@ -89,7 +89,7 @@ export function MobileDrawer({ onClose, onLogout }: MobileDrawerProps) {
             <li>
               <DrawerLink
                 to="/link"
-                icon={<Smartphone className="h-[18px] w-[18px]" strokeWidth={1.6} />}
+                icon={<Smartphone className="size-[18px]" strokeWidth={1.6} />}
                 label={t("nav.linkDevice")}
                 onClick={onClose}
               />
@@ -98,7 +98,7 @@ export function MobileDrawer({ onClose, onLogout }: MobileDrawerProps) {
               <li>
                 <DrawerLink
                   to="/uploads"
-                  icon={<Upload className="h-[18px] w-[18px]" strokeWidth={1.6} />}
+                  icon={<Upload className="size-[18px]" strokeWidth={1.6} />}
                   label={t("nav.uploads")}
                   onClick={onClose}
                 />
@@ -108,7 +108,7 @@ export function MobileDrawer({ onClose, onLogout }: MobileDrawerProps) {
               <li>
                 <DrawerLink
                   to="/admin/dashboard"
-                  icon={<ShieldCheck className="h-[18px] w-[18px]" strokeWidth={1.6} />}
+                  icon={<ShieldCheck className="size-[18px]" strokeWidth={1.6} />}
                   label={t("common.administration")}
                   onClick={onClose}
                 />
@@ -139,7 +139,7 @@ export function MobileDrawer({ onClose, onLogout }: MobileDrawerProps) {
             aria-label={t("common.logOut")}
             title={t("common.logOut")}
           >
-            <LogOut className="h-[16px] w-[16px]" strokeWidth={1.6} />
+            <LogOut className="size-[16px]" strokeWidth={1.6} />
           </button>
         </div>
       </div>
@@ -166,7 +166,7 @@ function DrawerItem({
         <DrawerLink
           to={item.to}
           end={item.end}
-          icon={<Icon className="h-[18px] w-[18px]" strokeWidth={1.6} />}
+          icon={<Icon className="size-[18px]" strokeWidth={1.6} />}
           label={label}
           onClick={onNavigate}
         />
@@ -178,7 +178,7 @@ function DrawerItem({
     <li>
       <DrawerAccordion
         triggerLabel={label}
-        triggerIcon={<Icon className="h-[18px] w-[18px]" strokeWidth={1.6} />}
+        triggerIcon={<Icon className="size-[18px]" strokeWidth={1.6} />}
         primaryHref={item.to}
         groups={item.groups}
         onNavigate={onNavigate}
@@ -257,7 +257,7 @@ function DrawerAccordion({
         <span className="flex-1 truncate text-left">{triggerLabel}</span>
         <ChevronDown
           className={[
-            "h-3.5 w-3.5 flex-shrink-0 transition-transform duration-200",
+            "size-3.5 flex-shrink-0 transition-transform duration-200",
             open ? "rotate-180" : "rotate-0",
           ].join(" ")}
           strokeWidth={1.7}
@@ -337,12 +337,12 @@ function PeersDrawerItem({
         className="w-full flex items-center gap-3 h-10 px-3 rounded-lg text-[13.5px] font-medium text-text-secondary hover:text-text-primary hover:bg-bg-hover/60 transition-colors"
       >
         <span className="flex-shrink-0">
-          <Icon className="h-[18px] w-[18px]" strokeWidth={1.6} />
+          <Icon className="size-[18px]" strokeWidth={1.6} />
         </span>
         <span className="flex-1 truncate text-left">{label}</span>
         <ChevronDown
           className={[
-            "h-3.5 w-3.5 flex-shrink-0 transition-transform duration-200",
+            "size-3.5 flex-shrink-0 transition-transform duration-200",
             open ? "rotate-180" : "rotate-0",
           ].join(" ")}
           strokeWidth={1.7}

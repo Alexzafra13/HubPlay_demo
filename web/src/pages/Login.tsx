@@ -244,8 +244,11 @@ function GhostPosters() {
       className="pointer-events-none absolute inset-0 hidden md:block"
     >
       {ghosts.map((g, i) => (
+        // Cada ghost tiene posición top+left única (lo garantiza el
+        // generador del array, no son posibles colisiones). El índice
+        // se usa sólo para escalonar la duración de la animación.
         <motion.div
-          key={i}
+          key={`${g.top}-${g.left}`}
           className="absolute rounded-2xl shadow-2xl"
           style={{
             top: g.top,

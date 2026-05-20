@@ -58,7 +58,7 @@ export function IdentityCard({ info }: Props) {
         <div className="flex items-center justify-between gap-2">
           <Label>
             <span className="inline-flex items-center gap-1.5">
-              <Fingerprint className="h-3 w-3" />
+              <Fingerprint className="size-3" />
               {t("admin.federation.identity.fingerprint")}
             </span>
           </Label>
@@ -78,7 +78,7 @@ export function IdentityCard({ info }: Props) {
       <div className="mt-5 border-t border-border-subtle pt-5">
         <Label>
           <span className="inline-flex items-center gap-1.5">
-            <Volume2 className="h-3 w-3" />
+            <Volume2 className="size-3" />
             {t("admin.federation.identity.words")}
           </span>
         </Label>
@@ -138,7 +138,7 @@ function IdentityHeader({
         onClick={onEdit}
         className="flex-shrink-0"
       >
-        <Pencil className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+        <Pencil className="mr-1.5 size-3.5" aria-hidden />
         {t("common.edit", { defaultValue: "Editar" })}
       </Button>
     </div>
@@ -335,7 +335,7 @@ function IdentityEditor({
                   onClick={() => fileInputRef.current?.click()}
                   disabled={uploading || deleting}
                 >
-                  <ImagePlus className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                  <ImagePlus className="mr-1.5 size-3.5" aria-hidden />
                   {hasUploadedAvatar
                     ? t("admin.federation.identity.changePhoto", {
                         defaultValue: "Cambiar foto",
@@ -379,11 +379,11 @@ function IdentityEditor({
                 >
                   {deleting ? (
                     <Loader2
-                      className="mr-1.5 h-3.5 w-3.5 animate-spin"
+                      className="mr-1.5 size-3.5 animate-spin"
                       aria-hidden
                     />
                   ) : (
-                    <Trash2 className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                    <Trash2 className="mr-1.5 size-3.5" aria-hidden />
                   )}
                   {t("admin.federation.identity.removePhoto", {
                     defaultValue: "Quitar foto",
@@ -424,7 +424,7 @@ function IdentityEditor({
                     key={p.background}
                     onClick={() => setColor(p.background)}
                     className={[
-                      "relative flex h-9 w-9 items-center justify-center rounded-full transition-all",
+                      "relative flex size-9 items-center justify-center rounded-full transition-all",
                       selected
                         ? "scale-110 ring-2 ring-white ring-offset-2 ring-offset-bg-elevated"
                         : "ring-1 ring-white/10 hover:scale-105 hover:ring-white/30",
@@ -436,7 +436,7 @@ function IdentityEditor({
                   >
                     {selected && (
                       <Check
-                        className="h-4 w-4 text-white"
+                        className="size-4 text-white"
                         strokeWidth={3}
                         aria-hidden
                       />
@@ -465,7 +465,7 @@ function IdentityEditor({
           onClick={onClose}
           disabled={saving}
         >
-          <X className="mr-1 h-3.5 w-3.5" aria-hidden />
+          <X className="mr-1 size-3.5" aria-hidden />
           {t("common.cancel", { defaultValue: "Cancelar" })}
         </Button>
         <Button

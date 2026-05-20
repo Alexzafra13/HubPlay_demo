@@ -44,7 +44,7 @@ export function HealthPill({ label, tone, detail, trailing }: HealthPillProps) {
     >
       <span
         aria-hidden
-        className="h-1.5 w-1.5 rounded-full"
+        className="size-1.5 rounded-full"
         style={{ background: TONE_DOT[tone] }}
       />
       <span>{label}</span>

@@ -17,7 +17,7 @@ interface ChannelLogoProps {
   bg: string;
   fg: string;
   name: string;
-  /** Tailwind classes for outer sizing + optional rounding, e.g. "w-10 h-10 rounded-lg". */
+  /** Tailwind classes for outer sizing + optional rounding, e.g. "size-10 rounded-lg". */
   className?: string;
   /** Font sizing for the initials text, e.g. "text-sm font-bold". */
   textClassName?: string;
@@ -29,7 +29,7 @@ export function ChannelLogo({
   bg,
   fg,
   name,
-  className = "w-10 h-10 rounded-lg",
+  className = "size-10 rounded-lg",
   textClassName = "text-xs font-bold",
 }: ChannelLogoProps) {
   const [failed, setFailed] = useState(false);
@@ -51,7 +51,7 @@ export function ChannelLogo({
         <img
           src={logoUrl}
           alt=""
-          className="absolute inset-0 h-full w-full object-contain p-1"
+          className="absolute inset-0 size-full object-contain p-1"
           loading="lazy"
           onError={() => setFailed(true)}
         />

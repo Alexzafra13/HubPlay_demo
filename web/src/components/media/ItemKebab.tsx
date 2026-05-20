@@ -102,9 +102,9 @@ export function ItemKebab({ itemID, itemType, detailHref }: Props) {
         aria-label={t("itemKebab.label", { defaultValue: "Acciones del item" })}
         aria-expanded={open}
         aria-haspopup="menu"
-        className="flex h-7 w-7 items-center justify-center rounded-full bg-black/60 text-white opacity-0 backdrop-blur-sm transition-opacity hover:bg-black/80 focus:outline-none focus:ring-2 focus:ring-accent group-hover:opacity-100 focus:opacity-100"
+        className="flex size-7 items-center justify-center rounded-full bg-black/60 text-white opacity-0 backdrop-blur-sm transition-opacity hover:bg-black/80 focus:outline-none focus:ring-2 focus:ring-accent group-hover:opacity-100 focus:opacity-100"
       >
-        <MoreVertical className="h-4 w-4" />
+        <MoreVertical className="size-4" />
       </button>
 
       {open && (
@@ -114,7 +114,7 @@ export function ItemKebab({ itemID, itemType, detailHref }: Props) {
         >
           {canEditImages && (
             <MenuButton
-              icon={<ImagePicto className="h-3.5 w-3.5" />}
+              icon={<ImagePicto className="size-3.5" />}
               label={t("itemKebab.images", { defaultValue: "Cambiar imágenes…" })}
               onClick={(e) => {
                 stopAll(e);
@@ -125,7 +125,7 @@ export function ItemKebab({ itemID, itemType, detailHref }: Props) {
           )}
           {canIdentify && (
             <MenuButton
-              icon={<Search className="h-3.5 w-3.5" />}
+              icon={<Search className="size-3.5" />}
               label={t("identify.menuLabel", { defaultValue: "Identificar…" })}
               onClick={(e) => {
                 stopAll(e);
@@ -136,7 +136,7 @@ export function ItemKebab({ itemID, itemType, detailHref }: Props) {
           )}
           {canIdentify && (
             <MenuButton
-              icon={<Edit3 className="h-3.5 w-3.5" />}
+              icon={<Edit3 className="size-3.5" />}
               label={t("metadataEditor.menuLabel", {
                 defaultValue: "Editar metadatos…",
               })}
@@ -149,7 +149,7 @@ export function ItemKebab({ itemID, itemType, detailHref }: Props) {
           )}
           {canRefresh && (
             <MenuButton
-              icon={<RefreshCw className={`h-3.5 w-3.5 ${refresh.isPending ? "animate-spin" : ""}`} />}
+              icon={<RefreshCw className={`size-3.5 ${refresh.isPending ? "animate-spin" : ""}`} />}
               label={t("itemDetail.refreshMetadata", {
                 defaultValue: "Actualizar metadatos",
               })}
@@ -167,7 +167,7 @@ export function ItemKebab({ itemID, itemType, detailHref }: Props) {
           )}
           {canShowFileInfo && detailHref && (
             <MenuButton
-              icon={<Info className="h-3.5 w-3.5" />}
+              icon={<Info className="size-3.5" />}
               label={t("itemKebab.fileInfo", {
                 defaultValue: "Información del archivo",
               })}

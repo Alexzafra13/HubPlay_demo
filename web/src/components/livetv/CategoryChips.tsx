@@ -98,7 +98,7 @@ export function CategoryChips({
             style={{ ["--chip-swatch" as string]: swatch }}
           >
             <span
-              className="h-1.5 w-1.5 rounded-full"
+              className="size-1.5 rounded-full"
               style={{
                 backgroundColor: swatch,
                 boxShadow:

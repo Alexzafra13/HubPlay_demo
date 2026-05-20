@@ -156,7 +156,7 @@ export function EPGGrid({
           onClick={jumpToNow}
           className="flex items-center gap-2 rounded-full border border-tv-accent/40 bg-tv-accent/[0.12] px-3 py-1.5 text-xs font-semibold text-tv-fg-0 transition-colors hover:bg-tv-accent/[0.2]"
         >
-          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-tv-live shadow-[0_0_6px_var(--tv-live)]" />
+          <span className="size-1.5 animate-pulse rounded-full bg-tv-live shadow-[0_0_6px_var(--tv-live)]" />
           {t("liveTV.now", { defaultValue: "Ahora" })} · {nowLabel}
         </button>
       </div>
@@ -275,7 +275,7 @@ function NowLine({ offset }: { offset: number }) {
       aria-hidden="true"
     >
       <div className="h-full w-0.5 bg-tv-live shadow-[0_0_8px_var(--tv-live)]" />
-      <div className="absolute -top-1 -left-[3px] h-2 w-2 rounded-full bg-tv-live" />
+      <div className="absolute -top-1 -left-[3px] size-2 rounded-full bg-tv-live" />
     </div>
   );
 }
@@ -409,7 +409,7 @@ function ChannelRow({
           bg={channel.logo_bg}
           fg={channel.logo_fg}
           name={channel.name}
-          className="h-12 w-12 rounded-tv-sm shadow-sm ring-1 ring-black/30"
+          className="size-12 rounded-tv-sm shadow-sm ring-1 ring-black/30"
           textClassName="text-[12px] font-bold"
         />
         <div className="min-w-0 flex-1">

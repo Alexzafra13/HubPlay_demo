@@ -115,7 +115,7 @@ export function ChannelLogoEditor({
         {/* Preview + identidad del canal. */}
         <div className="flex items-center gap-3 rounded-[--radius-md] border border-border bg-bg-card p-3">
           <span
-            className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full text-base font-semibold"
+            className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-full text-base font-semibold"
             style={{ backgroundColor: initialsBg, color: initialsFg }}
             aria-hidden="true"
           >
@@ -125,7 +125,7 @@ export function ChannelLogoEditor({
               <img
                 src={previewSrc}
                 alt=""
-                className="h-full w-full object-cover"
+                className="size-full object-cover"
                 onError={() => setPreviewBroken(true)}
               />
             )}
@@ -169,7 +169,7 @@ export function ChannelLogoEditor({
               variant="primary"
               disabled={!urlInput.trim() || busy}
             >
-              {setURL.isPending ? <Spinner size="sm" /> : <Check className="h-4 w-4" />}
+              {setURL.isPending ? <Spinner size="sm" /> : <Check className="size-4" />}
               {t("channelLogo.applyURL", { defaultValue: "Aplicar URL" })}
             </Button>
           </div>
@@ -212,7 +212,7 @@ export function ChannelLogoEditor({
               {uploadFile.isPending ? (
                 <Spinner size="sm" />
               ) : (
-                <Upload className="h-4 w-4" />
+                <Upload className="size-4" />
               )}
               {t("channelLogo.chooseFile", { defaultValue: "Elegir archivo" })}
             </Button>
@@ -221,7 +221,7 @@ export function ChannelLogoEditor({
 
         {anyError && (
           <div className="flex items-start gap-2 rounded-[--radius-md] border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
-            <AlertCircle className="h-4 w-4 shrink-0" />
+            <AlertCircle className="size-4 shrink-0" />
             <span>
               {t("channelLogo.errorGeneric", {
                 defaultValue:
@@ -242,12 +242,12 @@ export function ChannelLogoEditor({
             {clear.isPending ? (
               <Spinner size="sm" />
             ) : (
-              <RotateCcw className="h-4 w-4" />
+              <RotateCcw className="size-4" />
             )}
             {t("channelLogo.reset", { defaultValue: "Restaurar logo del M3U" })}
           </Button>
           <Button type="button" variant="primary" onClick={onClose} disabled={busy}>
-            <ImageIcon className="h-4 w-4" />
+            <ImageIcon className="size-4" />
             {t("channelLogo.done", { defaultValue: "Hecho" })}
           </Button>
         </div>

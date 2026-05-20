@@ -118,7 +118,7 @@ export function HeroSettings({ mode, modeOptions, onModeChange }: HeroSettingsPr
               >
                 <span
                   className={[
-                    "mt-0.5 inline-block h-4 w-4 shrink-0 rounded-full border-2",
+                    "mt-0.5 inline-block size-4 shrink-0 rounded-full border-2",
                     selected
                       ? "border-tv-accent bg-tv-accent"
                       : "border-tv-line",

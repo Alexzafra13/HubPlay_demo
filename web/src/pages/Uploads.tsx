@@ -606,8 +606,12 @@ function UploadDropzone({
         <div className="flex flex-col gap-3 rounded-[--radius-md] border border-border bg-bg-elevated p-4">
           <ul className="flex flex-col gap-1">
             {files.map((f, i) => (
+              // name+size+lastModified hace la key única por fichero
+              // sin depender del índice (varios ficheros con mismo
+              // nombre pero distinto tamaño no colisionan). El índice
+              // sigue haciendo falta para removeFromQueue().
               <li
-                key={`${f.name}-${i}`}
+                key={`${f.name}-${f.size}-${f.lastModified}`}
                 className="flex items-center justify-between gap-3 text-sm"
               >
                 <span className="flex items-center gap-2 truncate">
@@ -908,7 +912,13 @@ function CollisionModal({
 
         <ul className="flex-1 overflow-y-auto divide-y divide-border/40">
           {state.map((it, i) => (
-            <li key={i} className="flex flex-col gap-2 px-5 py-3 sm:flex-row sm:items-center sm:gap-3">
+            // libraryID + subpath + nombre = ruta destino única, no
+            // hay dos colisiones distintas que apunten al mismo path.
+            // El índice sigue haciendo falta para setDecision(i, …).
+            <li
+              key={`${it.libraryID}:${it.subpath}/${it.existingName}`}
+              className="flex flex-col gap-2 px-5 py-3 sm:flex-row sm:items-center sm:gap-3"
+            >
               <span className="flex flex-1 items-center gap-2 truncate text-sm">
                 <FileVideo
                   size={14}

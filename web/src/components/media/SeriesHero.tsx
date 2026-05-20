@@ -146,7 +146,7 @@ const SeriesHero: FC<SeriesHeroProps> = ({
             alt=""
             loading="eager"
             className={[
-              "absolute inset-y-0 right-0 h-full w-full sm:w-4/5 lg:w-2/3 object-cover transition-opacity duration-700",
+              "absolute inset-y-0 right-0 size-full sm:w-4/5 lg:w-2/3 object-cover transition-opacity duration-700",
               // Fade the static backdrop out when the trailer
               // reveals so the two layers don't fight for attention.
               // The transition matches HeroTrailer's own 700ms
@@ -270,7 +270,7 @@ const SeriesHero: FC<SeriesHeroProps> = ({
                 ) : null}
                 {item.community_rating != null && (
                   <Badge variant="warning">
-                    <svg className="h-3 w-3" viewBox="0 0 24 24" fill="currentColor">
+                    <svg className="size-3" viewBox="0 0 24 24" fill="currentColor">
                       <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
                     </svg>
                     {formatRating(item.community_rating)}
@@ -335,7 +335,7 @@ const SeriesHero: FC<SeriesHeroProps> = ({
                   disabled={resumeMode === "none"}
                   className="group relative flex items-center gap-2 overflow-hidden rounded-[--radius-md] bg-accent px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-accent/30 transition-all hover:bg-accent-hover hover:shadow-accent/40 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none cursor-pointer"
                 >
-                  <svg className="h-5 w-5 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+                  <svg className="size-5 shrink-0" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M8 5v14l11-7z" />
                   </svg>
                   <span>{resumeLabel}</span>
@@ -351,7 +351,7 @@ const SeriesHero: FC<SeriesHeroProps> = ({
                 <button
                   type="button"
                   onClick={onToggleFavorite}
-                  className="flex h-10 w-10 items-center justify-center rounded-full border border-border bg-bg-card/60 backdrop-blur-sm transition-colors hover:bg-bg-elevated cursor-pointer"
+                  className="flex size-10 items-center justify-center rounded-full border border-border bg-bg-card/60 backdrop-blur-sm transition-colors hover:bg-bg-elevated cursor-pointer"
                   aria-label={
                     isFavorite
                       ? t("itemDetail.removeFromFavorites")
@@ -359,7 +359,7 @@ const SeriesHero: FC<SeriesHeroProps> = ({
                   }
                 >
                   <svg
-                    className={`h-5 w-5 transition-colors ${isFavorite ? "text-error fill-error" : "text-text-secondary"}`}
+                    className={`size-5 transition-colors ${isFavorite ? "text-error fill-error" : "text-text-secondary"}`}
                     viewBox="0 0 24 24"
                     fill={isFavorite ? "currentColor" : "none"}
                     stroke="currentColor"
@@ -413,11 +413,11 @@ const SeriesHeroKebab: FC<{ items: HeroMenuItem[] }> = ({ items }) => {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex h-10 w-10 items-center justify-center rounded-full border border-border bg-bg-card/60 backdrop-blur-sm transition-colors hover:bg-bg-elevated cursor-pointer"
+        className="flex size-10 items-center justify-center rounded-full border border-border bg-bg-card/60 backdrop-blur-sm transition-colors hover:bg-bg-elevated cursor-pointer"
         aria-label={t("common.moreOptions")}
         aria-expanded={open}
       >
-        <svg className="h-5 w-5 text-text-secondary" viewBox="0 0 24 24" fill="currentColor">
+        <svg className="size-5 text-text-secondary" viewBox="0 0 24 24" fill="currentColor">
           <circle cx="12" cy="5" r="1.5" />
           <circle cx="12" cy="12" r="1.5" />
           <circle cx="12" cy="19" r="1.5" />
@@ -425,9 +425,10 @@ const SeriesHeroKebab: FC<{ items: HeroMenuItem[] }> = ({ items }) => {
       </button>
       {open && (
         <div className="absolute bottom-full mb-2 left-0 z-50 min-w-[200px] rounded-[--radius-lg] border border-border bg-bg-card shadow-xl shadow-black/40 backdrop-blur-xl overflow-hidden">
-          {items.map((mi, i) => (
+          {items.map((mi) => (
             <button
-              key={i}
+              // El label es visible al usuario y único dentro del menú.
+              key={mi.label}
               type="button"
               onClick={() => {
                 setOpen(false);
@@ -440,7 +441,7 @@ const SeriesHeroKebab: FC<{ items: HeroMenuItem[] }> = ({ items }) => {
                   : "text-text-secondary hover:text-text-primary hover:bg-bg-elevated",
               ].join(" ")}
             >
-              <span className="flex h-5 w-5 shrink-0 items-center justify-center">{mi.icon}</span>
+              <span className="flex size-5 shrink-0 items-center justify-center">{mi.icon}</span>
               {mi.label}
             </button>
           ))}

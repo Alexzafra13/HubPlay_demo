@@ -78,7 +78,7 @@ export function useDetailMenu({
     if (canIdentify && onOpenIdentify) {
       items.push({
         label: t("identify.menuLabel", { defaultValue: "Identify…" }),
-        icon: <Search className="h-4 w-4" />,
+        icon: <Search className="size-4" />,
         onClick: onOpenIdentify,
       });
     }
@@ -86,7 +86,7 @@ export function useDetailMenu({
     if (canIdentify && onOpenMetadataEditor) {
       items.push({
         label: t("metadataEditor.menuLabel", { defaultValue: "Editar metadatos…" }),
-        icon: <Edit3 className="h-4 w-4" />,
+        icon: <Edit3 className="size-4" />,
         onClick: onOpenMetadataEditor,
       });
     }
@@ -97,8 +97,8 @@ export function useDetailMenu({
           ? t("metadataEditor.unlock", { defaultValue: "Desbloquear metadatos" })
           : t("metadataEditor.lock", { defaultValue: "Bloquear metadatos" }),
         icon: metadataLocked
-          ? <Unlock className="h-4 w-4" />
-          : <Lock className="h-4 w-4" />,
+          ? <Unlock className="size-4" />
+          : <Lock className="size-4" />,
         onClick: onToggleMetadataLock,
       });
     }

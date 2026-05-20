@@ -131,8 +131,14 @@ describe("LibrariesStep", () => {
     const [, handlers] = mutateMock.mock.calls[0];
     handlers.onSuccess();
 
+    // El entry mantiene su localId (uuid generado al añadir la fila);
+    // no asumimos un valor concreto, sólo que es un string.
     expect(onNext).toHaveBeenCalledWith([
-      { name: "Movies", contentType: "movies", path: "/mnt/movies" },
+      expect.objectContaining({
+        name: "Movies",
+        contentType: "movies",
+        path: "/mnt/movies",
+      }),
     ]);
   });
 
@@ -222,8 +228,8 @@ describe("LibrariesStep", () => {
         onNext={vi.fn()}
         onBack={vi.fn()}
         initialData={[
-          { name: "A", contentType: "movies", path: "/a" },
-          { name: "B", contentType: "livetv", path: "/b" },
+          { localId: "a", name: "A", contentType: "movies", path: "/a" },
+          { localId: "b", name: "B", contentType: "livetv", path: "/b" },
         ]}
       />,
     );

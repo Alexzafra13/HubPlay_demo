@@ -83,11 +83,19 @@ export function DiscoverView({
   // "see all 5000 in a vertical grid", which is the right surface for
   // exhaustive browsing.
   const RAIL_PREVIEW_SIZE = 30;
+  // Una pasada: por cada categoría, mete el par sólo si tiene canales.
+  // Antes hacíamos map + filter (dos recorridos) sobre la lista de
+  // categorías. El tipo del primer elemento se preserva (ChannelCategory)
+  // para que `onCategoryChange(cat)` siga aceptándolo aguas abajo.
   const visibleRails = isAggregate
-    ? CHANNEL_CATEGORY_ORDER.map(
-        (c) =>
-          [c, channelsByCategory.get(c) ?? ([] as Channel[])] as const,
-      ).filter(([, list]) => list.length > 0)
+    ? CHANNEL_CATEGORY_ORDER.reduce<(readonly [ChannelCategory, Channel[]])[]>(
+        (acc, c) => {
+          const list = channelsByCategory.get(c) ?? [];
+          if (list.length > 0) acc.push([c, list] as const);
+          return acc;
+        },
+        [],
+      )
     : [];
   // useMemo so the array reference stays stable across renders when
   // the inputs haven't changed — `usePagedItems` keys its

@@ -66,7 +66,7 @@ export function AcceptSection() {
           onClick={handleProbe}
           disabled={probe.isPending || !baseURL.trim()}
         >
-          <Search className="-ml-1 mr-1.5 h-4 w-4" />
+          <Search className="-ml-1 mr-1.5 size-4" />
           {probe.isPending
             ? t("admin.federation.accept.probing")
             : t("admin.federation.accept.probe")}
@@ -95,7 +95,7 @@ export function AcceptSection() {
             />
             <div className="min-w-0 flex-1">
               <p className="flex items-center gap-2 text-sm font-semibold text-text-primary">
-                <CheckCircle2 className="h-4 w-4 text-accent" />
+                <CheckCircle2 className="size-4 text-accent" />
                 {t("admin.federation.accept.foundServer", {
                   name: probedInfo.name,
                 })}
@@ -112,7 +112,7 @@ export function AcceptSection() {
             <div>
               <Label>
                 <span className="inline-flex items-center gap-1.5">
-                  <Fingerprint className="h-3 w-3" />
+                  <Fingerprint className="size-3" />
                   {t("admin.federation.identity.fingerprint")}
                 </span>
               </Label>
@@ -126,7 +126,7 @@ export function AcceptSection() {
             <div>
               <Label>
                 <span className="inline-flex items-center gap-1.5">
-                  <Volume2 className="h-3 w-3" />
+                  <Volume2 className="size-3" />
                   {t("admin.federation.identity.words")}
                 </span>
               </Label>

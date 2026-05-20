@@ -26,7 +26,7 @@ function ChannelCardSkeleton() {
   return (
     <div className="flex w-[260px] shrink-0 flex-col gap-2">
       <ShimmerBox className="aspect-[16/9] w-full" />
-      <ShimmerBox className="h-3 w-3/4" />
+      <ShimmerBox className="size-3/4" />
       <ShimmerBox className="h-2.5 w-1/2" />
     </div>
   );

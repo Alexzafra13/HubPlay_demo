@@ -67,17 +67,19 @@ export function DebugOverlay() {
   const stackCount = modalStack.length;
   const drift = stackCount !== dialogs.length;
 
+  // Sólo nos interesan queries que no estén durmiendo en cache. Una
+  // query "success + idle" es ruido; pending / fetching / error son
+  // las pistas útiles. Una pasada única para mapear + filtrar.
   const queries: QuerySnapshot[] = queryClient
     .getQueryCache()
     .getAll()
-    .map((q) => ({
-      key: JSON.stringify(q.queryKey),
-      status: q.state.status,
-      fetchStatus: q.state.fetchStatus,
-    }))
-    // Only surface things that aren't sleeping in cache. A successful
-    // idle query is noise; a fetching / pending / error one is a clue.
-    .filter((q) => q.fetchStatus !== "idle" || q.status !== "success");
+    .reduce<QuerySnapshot[]>((acc, q) => {
+      const status = q.state.status;
+      const fetchStatus = q.state.fetchStatus;
+      if (fetchStatus === "idle" && status === "success") return acc;
+      acc.push({ key: JSON.stringify(q.queryKey), status, fetchStatus });
+      return acc;
+    }, []);
 
   // Reference tick so React doesn't elide the re-render while we
   // refresh the DOM-derived snapshot.
@@ -124,8 +126,9 @@ export function DebugOverlay() {
         active queries ({queries.length})
       </div>
       {queries.length === 0 && <div style={{ opacity: 0.6 }}>(none in flight)</div>}
-      {queries.map((q, i) => (
-        <div key={`${q.key}-${i}`} style={{ wordBreak: "break-all" }}>
+      {queries.map((q) => (
+        // El queryKey ya es único por query (tanstack lo garantiza).
+        <div key={q.key} style={{ wordBreak: "break-all" }}>
           <span
             style={{
               color:

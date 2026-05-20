@@ -43,7 +43,7 @@ export function InviteSection() {
           onClick={() => generate.mutate()}
           disabled={generate.isPending}
         >
-          <Plus className="-ml-1 mr-1.5 h-4 w-4" />
+          <Plus className="-ml-1 mr-1.5 size-4" />
           {generate.isPending
             ? t("admin.federation.invite.generating")
             : activeInvites.length > 0
@@ -99,7 +99,7 @@ function LatestInviteCard({ invite }: { invite: FederationInvite }) {
   return (
     <div className="rounded-lg border border-accent/40 bg-accent/5 p-4">
       <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-text-muted">
-        <Shield className="h-3 w-3 text-accent" />
+        <Shield className="size-3 text-accent" />
         {t("admin.federation.invite.latestLabel", {
           defaultValue: "Código activo",
         })}
@@ -113,7 +113,7 @@ function LatestInviteCard({ invite }: { invite: FederationInvite }) {
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <ExpiryChip expiresAt={invite.expires_at} />
         <p className="flex-1 text-xs leading-relaxed text-text-muted">
-          <Mail className="-mt-0.5 mr-1 inline h-3 w-3" />
+          <Mail className="-mt-0.5 mr-1 inline size-3" />
           {t("admin.federation.invite.shareHint", {
             defaultValue:
               "Pásaselo al admin del otro servidor por chat encriptado o por teléfono. No lo publiques: cualquiera que lo tenga puede emparejarse.",
@@ -147,7 +147,7 @@ function ExpiryChip({ expiresAt }: { expiresAt: string }) {
   if (expired) {
     return (
       <span className="inline-flex items-center gap-1.5 rounded-full bg-error/10 px-2.5 py-0.5 text-[11px] font-medium text-error">
-        <AlertCircle className="h-3 w-3" />
+        <AlertCircle className="size-3" />
         {t("admin.federation.invite.expired", {
           defaultValue: "Expirado",
         })}
@@ -175,7 +175,7 @@ function ExpiryChip({ expiresAt }: { expiresAt: string }) {
       ].join(" ")}
       title={new Date(expiresAt).toLocaleString()}
     >
-      <Clock className="h-3 w-3" />
+      <Clock className="size-3" />
       {formatRemaining(remainingMs, t)}
     </span>
   );
@@ -185,7 +185,7 @@ function ExpiryChip({ expiresAt }: { expiresAt: string }) {
 // tiempo de vida útil restante; los invites tienen TTL idéntico
 // (24h) así que esto equivale a "creado más recientemente".
 function sortByExpiry(invs: FederationInvite[]): FederationInvite[] {
-  return [...invs].sort(
+  return invs.toSorted(
     (a, b) => new Date(b.expires_at).getTime() - new Date(a.expires_at).getTime(),
   );
 }

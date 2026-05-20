@@ -27,7 +27,7 @@ export function CastChip({ person }: { person: Person }) {
       to={`/people/${person.id}`}
       className="group flex w-[120px] flex-col items-center gap-2 text-center outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg-card rounded-[--radius-lg]"
     >
-      <div className="flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-full bg-bg-elevated text-xl font-bold text-text-muted ring-1 ring-border/40 transition-transform duration-200 group-hover:scale-[1.05] sm:h-28 sm:w-28">
+      <div className="flex size-24 shrink-0 items-center justify-center overflow-hidden rounded-full bg-bg-elevated text-xl font-bold text-text-muted ring-1 ring-border/40 transition-transform duration-200 group-hover:scale-[1.05] sm:h-28 sm:w-28">
         {showImage ? (
           <img
             src={person.image_url}
@@ -36,7 +36,7 @@ export function CastChip({ person }: { person: Person }) {
             decoding="async"
             width={112}
             height={112}
-            className="h-full w-full object-cover"
+            className="size-full object-cover"
             onError={() => setFailedUrl(person.image_url ?? null)}
           />
         ) : (

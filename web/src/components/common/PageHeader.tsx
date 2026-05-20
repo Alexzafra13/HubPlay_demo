@@ -82,8 +82,10 @@ function Breadcrumbs({ items }: { items: BreadcrumbItem[] }) {
     <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-[12px] text-text-muted">
       {items.map((item, i) => {
         const isLast = i === items.length - 1;
+        // Key estable: el label (visible al usuario) es único dentro de
+        // la breadcrumb. Si no, lo combinamos con el destino.
         return (
-          <span key={i} className="flex items-center gap-1.5">
+          <span key={item.label + (item.to ?? "")} className="flex items-center gap-1.5">
             {item.to && !isLast ? (
               <Link
                 to={item.to}
@@ -97,7 +99,7 @@ function Breadcrumbs({ items }: { items: BreadcrumbItem[] }) {
               </span>
             )}
             {!isLast && (
-              <ChevronRight className="h-3 w-3 opacity-60" strokeWidth={1.6} />
+              <ChevronRight className="size-3 opacity-60" strokeWidth={1.6} />
             )}
           </span>
         );

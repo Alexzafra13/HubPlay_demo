@@ -43,11 +43,11 @@ function FilmographyTile({ entry }: { entry: FilmographyEntry }) {
             alt={entry.title}
             loading="lazy"
             decoding="async"
-            className="h-full w-full object-cover"
+            className="size-full object-cover"
             onError={() => setImageFailed(true)}
           />
         ) : (
-          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-bg-elevated to-bg-card">
+          <div className="flex size-full items-center justify-center bg-gradient-to-br from-bg-elevated to-bg-card">
             <span className="text-4xl font-bold text-text-muted">
               {entry.title.charAt(0).toUpperCase()}
             </span>
@@ -169,7 +169,7 @@ export default function PersonDetail() {
         <div className="absolute inset-0 -z-10 bg-gradient-to-b from-bg-card/60 via-bg-card/85 to-bg-canvas" />
 
         <header className="flex flex-col items-center gap-6 px-6 py-10 text-center sm:flex-row sm:items-end sm:gap-8 sm:px-10 sm:py-12 sm:text-left">
-          <div className="flex h-44 w-44 shrink-0 items-center justify-center overflow-hidden rounded-full bg-bg-elevated text-5xl font-bold text-text-muted ring-2 ring-border/60 shadow-xl shadow-black/40 sm:h-56 sm:w-56">
+          <div className="flex size-44 shrink-0 items-center justify-center overflow-hidden rounded-full bg-bg-elevated text-5xl font-bold text-text-muted ring-2 ring-border/60 shadow-xl shadow-black/40 sm:h-56 sm:w-56">
             {showPhoto ? (
               <img
                 src={person.image_url}
@@ -178,7 +178,7 @@ export default function PersonDetail() {
                 decoding="async"
                 width={224}
                 height={224}
-                className="h-full w-full object-cover"
+                className="size-full object-cover"
                 onError={() => setPhotoFailed(true)}
               />
             ) : (

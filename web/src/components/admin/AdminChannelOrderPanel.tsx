@@ -100,8 +100,14 @@ export function AdminChannelOrderPanel({ libraryId }: Props) {
   }, []);
 
   const handleSave = useCallback(async () => {
-    const orderedIDs = draft.map((c) => c.id);
-    const hiddenIDs = draft.filter((c) => c.hidden).map((c) => c.id);
+    // Una sola pasada para los dos arrays — antes hacíamos map + filter
+    // + map (3 recorridos sobre la misma lista, hasta cientos de canales).
+    const orderedIDs: string[] = [];
+    const hiddenIDs: string[] = [];
+    for (const c of draft) {
+      orderedIDs.push(c.id);
+      if (c.hidden) hiddenIDs.push(c.id);
+    }
     await replaceOrder.mutateAsync({
       libraryId,
       ordered_channel_ids: orderedIDs,
@@ -241,7 +247,7 @@ export function AdminChannelOrderPanel({ libraryId }: Props) {
           {refreshLogos.isPending ? (
             <Spinner size="sm" />
           ) : (
-            <Sparkles className="h-3.5 w-3.5" />
+            <Sparkles className="size-3.5" />
           )}
           {t("admin.livetv.channelOrder.iptvOrgButton", {
             defaultValue: "Buscar logos en iptv-org",

@@ -245,7 +245,7 @@ function MainNavItem({
         </span>
         <ChevronDown
           className={[
-            "h-3.5 w-3.5 transition-transform duration-200",
+            "size-3.5 transition-transform duration-200",
             isOpen ? "rotate-180" : "rotate-0",
           ].join(" ")}
           strokeWidth={1.7}
@@ -303,7 +303,7 @@ function DropdownPanel({
       {/* Connector arrow — small visual anchor between trigger and panel. */}
       <span
         aria-hidden
-        className="absolute left-1/2 -top-1.5 h-3 w-3 -translate-x-1/2 rotate-45 rounded-sm bg-bg-overlay border-l border-t border-border"
+        className="absolute left-1/2 -top-1.5 size-3 -translate-x-1/2 rotate-45 rounded-sm bg-bg-overlay border-l border-t border-border"
       />
       <div
         className="relative rounded-2xl border border-border bg-bg-overlay/95 backdrop-blur-2xl shadow-2xl shadow-black/50 overflow-hidden"
@@ -396,7 +396,7 @@ function PeersNavItem({
         {label}
         <ChevronDown
           className={[
-            "h-3.5 w-3.5 transition-transform duration-200",
+            "size-3.5 transition-transform duration-200",
             isOpen ? "rotate-180" : "rotate-0",
           ].join(" ")}
           strokeWidth={1.7}
@@ -416,7 +416,7 @@ function PeersNavItem({
           >
             <span
               aria-hidden
-              className="absolute left-1/2 -top-1.5 h-3 w-3 -translate-x-1/2 rotate-45 rounded-sm bg-bg-overlay border-l border-t border-border"
+              className="absolute left-1/2 -top-1.5 size-3 -translate-x-1/2 rotate-45 rounded-sm bg-bg-overlay border-l border-t border-border"
             />
             <div
               className="relative rounded-2xl border border-border bg-bg-overlay/95 backdrop-blur-2xl shadow-2xl shadow-black/50 overflow-hidden"
@@ -644,7 +644,7 @@ function MoviesExtra({ onItemClick }: { onItemClick: () => void }) {
                   onClick={onItemClick}
                   leading={
                     <UsersIcon
-                      className="h-3.5 w-3.5 text-text-muted flex-shrink-0"
+                      className="size-3.5 text-text-muted flex-shrink-0"
                       strokeWidth={1.7}
                     />
                   }
@@ -711,7 +711,7 @@ function SeriesExtra({ onItemClick }: { onItemClick: () => void }) {
                   onClick={onItemClick}
                   leading={
                     <UsersIcon
-                      className="h-3.5 w-3.5 text-text-muted flex-shrink-0"
+                      className="size-3.5 text-text-muted flex-shrink-0"
                       strokeWidth={1.7}
                     />
                   }
@@ -794,9 +794,9 @@ function ChannelLogo({ url, alt }: { url: string | null; alt: string }) {
     return (
       <span
         aria-hidden
-        className="flex-shrink-0 h-6 w-6 rounded bg-bg-hover/60 flex items-center justify-center"
+        className="flex-shrink-0 size-6 rounded bg-bg-hover/60 flex items-center justify-center"
       >
-        <TvIcon className="h-3 w-3 text-text-muted" strokeWidth={1.7} />
+        <TvIcon className="size-3 text-text-muted" strokeWidth={1.7} />
       </span>
     );
   }
@@ -805,7 +805,7 @@ function ChannelLogo({ url, alt }: { url: string | null; alt: string }) {
       src={url}
       alt={alt}
       loading="lazy"
-      className="flex-shrink-0 h-6 w-6 rounded object-contain bg-bg-hover/40 p-0.5"
+      className="flex-shrink-0 size-6 rounded object-contain bg-bg-hover/40 p-0.5"
     />
   );
 }

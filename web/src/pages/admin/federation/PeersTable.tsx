@@ -107,12 +107,12 @@ export function PeersTable({ peers }: { peers: FederationPeer[] }) {
                         ? t("admin.federation.peers.collapseShares")
                         : t("admin.federation.peers.manageShares")
                     }
-                    className="inline-flex h-6 w-6 flex-none items-center justify-center rounded text-text-muted hover:bg-bg-base hover:text-text-primary disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+                    className="inline-flex size-6 flex-none items-center justify-center rounded text-text-muted hover:bg-bg-base hover:text-text-primary disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
                   >
                     {isExpanded ? (
-                      <ChevronDown className="h-4 w-4" />
+                      <ChevronDown className="size-4" />
                     ) : (
-                      <ChevronRight className="h-4 w-4" />
+                      <ChevronRight className="size-4" />
                     )}
                   </button>
 
@@ -143,7 +143,7 @@ export function PeersTable({ peers }: { peers: FederationPeer[] }) {
                     </div>
                     <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-text-muted">
                       <span className="inline-flex items-center gap-1">
-                        <Globe className="h-3 w-3" />
+                        <Globe className="size-3" />
                         <span className="truncate">{peer.base_url}</span>
                       </span>
                       {lastSeen && (
@@ -170,11 +170,11 @@ export function PeersTable({ peers }: { peers: FederationPeer[] }) {
                         aria-label={t("admin.federation.peers.refresh", {
                           defaultValue: "Actualizar",
                         })}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-bg-base hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
+                        className="inline-flex size-8 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-bg-base hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         <RefreshCw
                           className={[
-                            "h-4 w-4",
+                            "size-4",
                             isRefreshing ? "animate-spin" : "",
                           ].join(" ")}
                           aria-hidden
@@ -216,7 +216,7 @@ function EmptyPeers() {
   return (
     <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-border bg-bg-elevated px-6 py-12 text-center">
       <div className="rounded-full bg-bg-base p-3 text-text-muted">
-        <Inbox className="h-6 w-6" />
+        <Inbox className="size-6" />
       </div>
       <div>
         <p className="text-sm font-medium text-text-primary">
@@ -251,7 +251,7 @@ function StatusDot({
   if (status === "revoked") {
     return (
       <span className="inline-flex items-center gap-1.5 rounded-full bg-error/10 px-2 py-0.5 text-[10px] font-medium text-error">
-        <ShieldOff className="h-3 w-3" />
+        <ShieldOff className="size-3" />
         {t("admin.federation.peers.status.revoked")}
       </span>
     );
@@ -259,7 +259,7 @@ function StatusDot({
   if (status === "pending") {
     return (
       <span className="inline-flex items-center gap-1.5 rounded-full bg-warning/10 px-2 py-0.5 text-[10px] font-medium text-warning">
-        <span className="h-1.5 w-1.5 rounded-full bg-warning" />
+        <span className="size-1.5 rounded-full bg-warning" />
         {t("admin.federation.peers.status.pending")}
       </span>
     );
@@ -277,7 +277,7 @@ function StatusDot({
     >
       <span
         className={[
-          "h-1.5 w-1.5 rounded-full",
+          "size-1.5 rounded-full",
           online ? "bg-success" : "bg-text-muted",
         ].join(" ")}
       />

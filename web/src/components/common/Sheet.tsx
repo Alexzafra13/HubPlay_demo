@@ -199,7 +199,7 @@ const Sheet: FC<SheetProps> = ({
               aria-label="Close"
             >
               <svg
-                className="h-4 w-4"
+                className="size-4"
                 viewBox="0 0 20 20"
                 fill="none"
                 stroke="currentColor"

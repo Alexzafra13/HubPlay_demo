@@ -54,10 +54,10 @@ export function DevicesPanel() {
     );
   }
 
-  // Group device-linked rows ahead of password ones so a household
-  // with several paired devices doesn't bury them under "current
-  // browser" duplicates.
-  const sorted = [...rows].sort((a, b) => {
+  // Agrupa primero los dispositivos vinculados y luego las sesiones por
+  // contraseña, para que un hogar con varios dispositivos no quede
+  // sepultado bajo duplicados del navegador actual.
+  const sorted = rows.toSorted((a, b) => {
     if (a.auth_method !== b.auth_method) {
       return a.auth_method === "device_link" ? -1 : 1;
     }
