@@ -98,6 +98,36 @@ jobs:
         # origen. Cuando el repo llegue a 0 unused, quitamos el flag.
         run: pnpm knip --no-exit-code
 
+  react-doctor:
+    name: React Doctor (score)
+    runs-on: ubuntu-latest
+    # Visibility-only: el step compila un score numérico (0-100) del
+    # codebase React y lo publica en el log + summary del run. Baseline
+    # actual: 67/100 ("Needs work"). No bloquea hoy — la idea es ver
+    # cómo evoluciona el score con cada PR y empezar a remediar las
+    # categorías más numerosas (a11y, perf, correctness). Cuando
+    # subamos a 75+ ("Great"), podemos elevar a hard gate añadiendo
+    # `min-score: 75` y quitando continue-on-error.
+    permissions:
+      contents: read
+      pull-requests: write # para que la action comente en la PR
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Necesario para que `--diff main` calcule sólo los cambios de
+          # la PR en runs de pull_request — el push a main usa el snapshot
+          # completo igualmente.
+          fetch-depth: 0
+
+      - name: Run React Doctor
+        uses: millionco/react-doctor@main
+        continue-on-error: true
+        with:
+          # En pull_request: comenta inline en los hunks introducidos.
+          # En push a main: sólo el score en el summary del run.
+          diff: ${{ github.event_name == 'pull_request' && github.base_ref || '' }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
   test:
     name: Test Backend
     runs-on: ubuntu-latest
