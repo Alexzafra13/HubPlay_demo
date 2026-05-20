@@ -64,6 +64,11 @@ var MaxInitialJitter = 30 * time.Minute
 // lento, no queremos que la goroutine quede colgada.
 const requestTimeout = 15 * time.Second
 
+// defaultBaseURL es el endpoint canónico de la GitHub Releases API.
+// Lo extraemos a const para que SetBaseURL pueda apuntar a un
+// httptest.Server en tests E2E sin tener que mockear el http.Client.
+const defaultBaseURL = "https://api.github.com"
+
 // Status es el snapshot público del checker. Lo serializa el handler
 // a JSON tal cual; los nombres de campo van con tags json explícitos
 // para evitar drift accidental al renombrar.
@@ -111,9 +116,10 @@ type Service struct {
 	client  *http.Client
 	logger  *slog.Logger
 
-	mu    sync.RWMutex
-	state Status
-	etag  string // último ETag de la API, para If-None-Match
+	mu      sync.RWMutex
+	baseURL string // raíz de la GitHub API (apuntable a httptest en tests)
+	state   Status
+	etag    string // último ETag de la API, para If-None-Match
 }
 
 // New construye el checker. currentVersion es la versión inyectada al
@@ -127,13 +133,32 @@ func New(currentVersion, repo string, logger *slog.Logger) *Service {
 		client: &http.Client{
 			Timeout: requestTimeout,
 		},
-		logger: logger.With("module", "updates"),
+		logger:  logger.With("module", "updates"),
+		baseURL: defaultBaseURL,
 	}
 	s.state = Status{
 		Current:      currentVersion,
 		CheckEnabled: repo != "" && currentVersion != "dev",
 	}
 	return s
+}
+
+// SetBaseURL apunta el checker a un endpoint distinto de
+// api.github.com. Pensado para tests E2E que levantan un httptest
+// server con el shape de /repos/<owner>/<repo>/releases/latest;
+// llamar a SetBaseURL("") restaura el default. Seguro concurrentemente.
+//
+// NO está pensado para apuntar a proxies de GitHub en producción
+// (entre otras cosas porque el User-Agent y los rate-limits de la
+// real API son los que asumen los tests del comparador semver).
+func (s *Service) SetBaseURL(u string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if u == "" {
+		s.baseURL = defaultBaseURL
+		return
+	}
+	s.baseURL = strings.TrimRight(u, "/")
 }
 
 // Start arranca la goroutine del checker en background. El context se
@@ -194,16 +219,17 @@ func (s *Service) Check(ctx context.Context) error {
 		return errors.New("update check disabled")
 	}
 
-	url := fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", s.repo)
+	s.mu.RLock()
+	url := fmt.Sprintf("%s/repos/%s/releases/latest", s.baseURL, s.repo)
+	etag := s.etag
+	s.mu.RUnlock()
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("User-Agent", "HubPlay/"+s.current+" (update-check)")
-	s.mu.RLock()
-	etag := s.etag
-	s.mu.RUnlock()
 	if etag != "" {
 		req.Header.Set("If-None-Match", etag)
 	}
