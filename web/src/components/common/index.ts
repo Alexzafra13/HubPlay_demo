@@ -40,3 +40,6 @@ export type { KebabMenuItem } from "./KebabMenu";
 
 export { UserAvatar } from "./UserAvatar";
 export type { UserAvatarProps, UserAvatarSize } from "./UserAvatar";
+
+export { CopyToClipboardButton } from "./CopyToClipboardButton";
+export type { CopyToClipboardButtonProps } from "./CopyToClipboardButton";

@@ -71,6 +71,7 @@ type SystemHandler struct {
 	dbPath         string           // raw SQLite file path; "" disables disk size readout
 	bind           string           // configured listen address (host:port). Empty hides.
 	baseURLDefault string           // YAML fallback for server.base_url (overridden by app_settings).
+	mdnsURL        string           // "http://<host>.local:<port>" o "" si mDNS off.
 	startedAt      time.Time
 	version        string
 	commit         string
@@ -106,6 +107,10 @@ type SystemHandlerConfig struct {
 	DBPath         string
 	BindAddress    string
 	BaseURLDefault string // YAML / env value; runtime override lives in app_settings.
+	// MDNSURL es el URL completo "http://<host>.local:<port>" que el
+	// announcer publica. Vacía cuando mDNS está deshabilitado — el
+	// caller (main.go) decide si construirla.
+	MDNSURL string
 	Version        string
 	Commit         string // git short SHA inyectado en build
 	BuildDate      string // RFC3339 del build inyectado en build
@@ -129,6 +134,7 @@ func NewSystemHandler(cfg SystemHandlerConfig) *SystemHandler {
 		dbPath:         cfg.DBPath,
 		bind:           cfg.BindAddress,
 		baseURLDefault: cfg.BaseURLDefault,
+		mdnsURL:        cfg.MDNSURL,
 		startedAt:      time.Now(),
 		version:        cfg.Version,
 		commit:         cfg.Commit,
@@ -209,6 +215,11 @@ type serverStats struct {
 	// not configured — the panel renders an actionable hint pointing at
 	// the right config key.
 	BaseURL string `json:"base_url"`
+	// MDNSURL is the human-shareable LAN URL the server announces via
+	// multicast DNS, formato "http://<host>.local:<port>". Vacía cuando
+	// mDNS está deshabilitado en la config. El operador la copia y la
+	// comparte con la familia sin tocar router ni DNS.
+	MDNSURL string `json:"mdns_url,omitempty"`
 	// ServerTime is the server's local time at the moment of this snapshot.
 	// Useful when the server clock drifts from the client's — a Plex-style
 	// "is the box's clock right?" check.
@@ -300,6 +311,7 @@ func (h *SystemHandler) Stats(w http.ResponseWriter, r *http.Request) {
 			UptimeSeconds: int64(time.Since(h.startedAt).Seconds()),
 			BindAddress:   h.bind,
 			BaseURL:       h.effectiveBaseURL(r.Context()),
+			MDNSURL:       h.mdnsURL,
 			ServerTime:    now,
 			Timezone:      tz,
 		},

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -767,11 +768,19 @@ func NewRouter(deps Dependencies) http.Handler {
 				imageDir := ""
 				bindAddress := ""
 				baseURL := ""
+				mdnsURL := ""
 				if deps.Config != nil {
 					dbPath = deps.Config.Database.Path
 					imageDir = filepath.Join(filepath.Dir(deps.Config.Database.Path), "images")
 					bindAddress = deps.Config.Server.Addr()
 					baseURL = deps.Config.Server.BaseURL
+					if deps.Config.MDNS.Enabled {
+						host := deps.Config.MDNS.Hostname
+						if host == "" {
+							host = "hubplay"
+						}
+						mdnsURL = fmt.Sprintf("http://%s.local:%d", host, deps.Config.Server.Port)
+					}
 				}
 				// Host info sampler — optional. nil providers degrade to
 				// an empty host section so the test rig + minimal startup
@@ -791,6 +800,7 @@ func NewRouter(deps Dependencies) http.Handler {
 					DBPath:         dbPath,
 					BindAddress:    bindAddress,
 					BaseURLDefault: baseURL,
+					MDNSURL:        mdnsURL,
 					Version:        deps.Version,
 					Commit:         deps.Commit,
 					BuildDate:      deps.BuildDate,

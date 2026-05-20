@@ -1420,6 +1420,11 @@ export interface SystemServerStats {
   uptime_seconds: number;
   bind_address: string;
   base_url: string;
+  /** URL completa "http://<host>.local:<port>" que el servidor anuncia
+   *  vía multicast DNS. Vacía cuando mDNS está deshabilitado en la
+   *  config. El panel pinta una tarjeta "comparte con tu familia"
+   *  cuando viene poblada. */
+  mdns_url?: string;
   /** ISO timestamp of the server's clock at the moment of the snapshot. */
   server_time: string;
   /** IANA timezone name the server's runtime uses. */

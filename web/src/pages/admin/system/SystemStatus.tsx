@@ -30,7 +30,12 @@ import type {
   AdminTopItem,
   SystemStats,
 } from "@/api/types";
-import { Button, EmptyState, Spinner } from "@/components/common";
+import {
+  Button,
+  CopyToClipboardButton,
+  EmptyState,
+  Spinner,
+} from "@/components/common";
 import { AuditLogPanel } from "@/components/admin/AuditLogPanel";
 import { UpdateBanner } from "@/components/admin/UpdateBanner";
 import { AuthKeysPanel } from "@/components/admin/AuthKeysPanel";
@@ -883,6 +888,26 @@ function InfraRow({ stats }: { stats: SystemStats }) {
             value={stats.server.bind_address || "—"}
             mono
           />
+          {stats.server.mdns_url && (
+            <InfraRowKV
+              label={t("admin.system.mdnsURL", {
+                defaultValue: "LAN (mDNS)",
+              })}
+              value={
+                <span className="inline-flex items-center gap-1.5 min-w-0">
+                  <span className="truncate">{stats.server.mdns_url}</span>
+                  <CopyToClipboardButton
+                    value={stats.server.mdns_url}
+                    label={t("admin.system.copyMdnsURL", {
+                      defaultValue: "Copiar URL de la LAN",
+                    })}
+                  />
+                </span>
+              }
+              mono
+              truncate
+            />
+          )}
           <InfraRowKV
             label={t("admin.system.baseURL", {
               defaultValue: "URL pública",

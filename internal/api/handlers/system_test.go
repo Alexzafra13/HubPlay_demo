@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -92,6 +93,7 @@ type systemStatsResponse struct {
 			UptimeSeconds int64  `json:"uptime_seconds"`
 			BindAddress   string `json:"bind_address"`
 			BaseURL       string `json:"base_url"`
+			MDNSURL       string `json:"mdns_url"`
 			Timezone      string `json:"timezone"`
 		} `json:"server"`
 		Database struct {
@@ -672,5 +674,45 @@ func TestSystemHandler_Stats_HostBlock_AbsentProviderEmitsZeroes(t *testing.T) {
 	host := decodeStats(t, rr.Body).Data.Host
 	if host.CPUModel != "" || host.GPUModel != "" || host.RAMTotalBytes != 0 || host.CPUPercent != 0 {
 		t.Errorf("nil host provider should yield zero-value section; got %+v", host)
+	}
+}
+
+func TestSystemHandler_Stats_MDNSURL_PresentWhenConfigured(t *testing.T) {
+	h := NewSystemHandler(SystemHandlerConfig{
+		Health:  db.NewMaintenance(testutil.Driver(), testutil.NewTestDB(t)),
+		MDNSURL: "http://hubplay.local:8096",
+		Logger:  newQuietLogger(),
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/system/stats", nil)
+	rr := httptest.NewRecorder()
+	h.Stats(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	got := decodeStats(t, rr.Body).Data.Server.MDNSURL
+	if got != "http://hubplay.local:8096" {
+		t.Errorf("mdns_url: got %q, want %q", got, "http://hubplay.local:8096")
+	}
+}
+
+func TestSystemHandler_Stats_MDNSURL_OmittedWhenEmpty(t *testing.T) {
+	// Cuando el operador desactiva mDNS en config el caller construye
+	// MDNSURL="". El wire debe omitir el campo (json:omitempty) para que
+	// el panel no pinte la tarjeta de compartir.
+	h := NewSystemHandler(SystemHandlerConfig{
+		Health:  db.NewMaintenance(testutil.Driver(), testutil.NewTestDB(t)),
+		MDNSURL: "",
+		Logger:  newQuietLogger(),
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/system/stats", nil)
+	rr := httptest.NewRecorder()
+	h.Stats(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: %d body=%s", rr.Code, rr.Body.String())
+	}
+	// Verifico ausencia en el JSON crudo — omitempty debería dejar el
+	// campo fuera, no como "mdns_url":"".
+	if strings.Contains(rr.Body.String(), `"mdns_url"`) {
+		t.Errorf("expected mdns_url to be omitted from JSON, body=%s", rr.Body.String())
 	}
 }
