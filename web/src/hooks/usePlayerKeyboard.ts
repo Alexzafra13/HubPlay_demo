@@ -49,6 +49,12 @@ export function usePlayerKeyboard({
       if (/^[0-9]$/.test(e.key) && video.duration > 0) {
         e.preventDefault();
         const pct = parseInt(e.key, 10) / 10;
+        // Mutar `video.currentTime` es la API estándar de
+        // HTMLMediaElement para hacer seek — no es state mutation
+        // sino un side-effect sobre el DOM node. El compiler lo
+        // detecta como mutación de "props del hook" (videoRef
+        // pasado como argumento) pero no lo es semánticamente.
+        // eslint-disable-next-line react-compiler/react-compiler
         video.currentTime = video.duration * pct;
         onActivity();
         return;

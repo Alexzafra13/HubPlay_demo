@@ -73,14 +73,18 @@ export function useLiveHls({
   const [loading, setLoading] = useState(true);
   const [reloadToken, setReloadToken] = useState(0);
 
-  // Keep onFirstPlay reference stable inside the effect without
-  // forcing the effect to re-run on every render (a fresh closure
-  // from the caller would otherwise tear down the HLS instance and
-  // fire the beacon again).
+  // Keep onFirstPlay / onFatalError references stable inside the
+  // HLS effect without forcing it to re-run on every render — a
+  // fresh closure from the caller would otherwise tear down the
+  // HLS instance and fire the beacon again. Refs are updated in
+  // an effect (not during render) so they survive React 19's
+  // strict ref-access rules.
   const onFirstPlayRef = useRef(onFirstPlay);
-  onFirstPlayRef.current = onFirstPlay;
   const onFatalErrorRef = useRef(onFatalError);
-  onFatalErrorRef.current = onFatalError;
+  useEffect(() => {
+    onFirstPlayRef.current = onFirstPlay;
+    onFatalErrorRef.current = onFatalError;
+  }, [onFirstPlay, onFatalError]);
 
   const reload = useCallback(() => setReloadToken((n) => n + 1), []);
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import type { User } from "@/api/types";
 import {
@@ -125,14 +125,17 @@ export default function UsersAdmin() {
   const { data: accessData, isLoading: accessLoading } = useUserLibraryAccess(
     accessTarget?.id,
   );
-  useEffect(() => {
-    // Seed the draft once when the server response lands. If the admin
-    // already edited the draft, leave it alone — re-seeding would
-    // discard their in-progress changes when the query refetches.
+  // Seed the draft once when the server response lands. If the admin
+  // already edited the draft, leave it alone — re-seeding would
+  // discard their in-progress changes when the query refetches.
+  // Render-time guarded setState reacting to accessData transitions.
+  const [lastAccessData, setLastAccessData] = useState(accessData);
+  if (accessData !== lastAccessData) {
+    setLastAccessData(accessData);
     if (accessData && accessDraft === null) {
       setAccessDraft(accessData.library_ids);
     }
-  }, [accessData, accessDraft]);
+  }
 
   function closeAccessModal() {
     setAccessTarget(null);
@@ -376,16 +379,23 @@ export default function UsersAdmin() {
   // the default. We only seed when the modal is open AND the local
   // state is still the initial empty array, so an admin who explicitly
   // un-checks everything before submitting doesn't get auto-re-checked.
-  useEffect(() => {
-    if (!showAddModal) return;
-    if (newGrantLibraryIds.length > 0) return;
-    if (allLibraries.length === 0) return;
-    setNewGrantLibraryIds(allLibraries.map((l) => l.id));
-    // We deliberately omit newGrantLibraryIds from deps: this seed is a
-    // ONE-shot when the modal opens, not a reactive sync, otherwise
-    // un-ticking everything would immediately re-tick everything.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showAddModal, allLibraries]);
+  // ONE-shot seed when the modal opens, NOT a reactive sync — once
+  // the admin un-ticks anything, the change must stick instead of
+  // being re-seeded. Render-time guarded setState on the modal-open
+  // transition: only fires when showAddModal flips from false to true
+  // (or when allLibraries arrives after the modal was already open).
+  const seedKey = showAddModal ? `open|${allLibraries.length}` : "closed";
+  const [lastSeedKey, setLastSeedKey] = useState(seedKey);
+  if (seedKey !== lastSeedKey) {
+    setLastSeedKey(seedKey);
+    if (
+      showAddModal &&
+      newGrantLibraryIds.length === 0 &&
+      allLibraries.length > 0
+    ) {
+      setNewGrantLibraryIds(allLibraries.map((l) => l.id));
+    }
+  }
 
   function handleCreate(e: FormEvent) {
     e.preventDefault();

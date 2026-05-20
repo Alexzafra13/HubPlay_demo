@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 // sessionStorage key used to remember a session-wide dismissal of the
@@ -256,6 +256,19 @@ export function HeroTrailer({
     return () => clearTimeout(revealTimer);
   }, [loaded, iframeLoaded, revealed, dismissed, skipped, onReveal]);
 
+  const handleDismiss = useCallback(() => {
+    setDismissed(true);
+    // Restore the static backdrop in the parent so the page doesn't
+    // go blank on the right when the trailer disappears.
+    onDismiss?.();
+    try {
+      sessionStorage.setItem(TRAILER_DISMISSED_KEY, "1");
+    } catch {
+      // No storage = no persistence; the dismissal still holds for
+      // this mount via the dismissed state.
+    }
+  }, [onDismiss]);
+
   // Watchdog: if the iframe doesn't fire onLoad within 6s of mount
   // we treat it as a hard fail and dismiss. Cross-origin iframes
   // don't always fire onError on CSP / X-Frame-Options blocks
@@ -270,24 +283,7 @@ export function HeroTrailer({
       handleDismiss();
     }, 6000);
     return () => clearTimeout(watchdog);
-    // handleDismiss only touches local state setters and
-    // sessionStorage — it's stable for the life of the component,
-    // so omitting it from deps is intentional.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loaded, iframeLoaded, dismissed, skipped]);
-
-  const handleDismiss = () => {
-    setDismissed(true);
-    // Restore the static backdrop in the parent so the page doesn't
-    // go blank on the right when the trailer disappears.
-    onDismiss?.();
-    try {
-      sessionStorage.setItem(TRAILER_DISMISSED_KEY, "1");
-    } catch {
-      // No storage = no persistence; the dismissal still holds for
-      // this mount via the dismissed state.
-    }
-  };
+  }, [loaded, iframeLoaded, dismissed, skipped, handleDismiss]);
 
   const embedUrl = trailerEmbedURL(siteKey, videoKey);
   if (!embedUrl || dismissed || skipped || embeddable === false) {

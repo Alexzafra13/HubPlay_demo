@@ -67,22 +67,31 @@ export default function PairThisDevice() {
     });
   }, [start, deviceName]);
 
-  // Kick off the flow once on mount.
-  useEffect(() => {
+  // Kick off the flow once on mount. Tracked via useState so React 19's
+  // ref-access-during-render rule stays satisfied; the guarded setState
+  // pattern is the canonical replacement for an empty-deps useEffect
+  // mount initialiser. StrictMode double-invokes still trip a single
+  // beginFlow because the second invocation finds started === true.
+  const [started, setStarted] = useState(false);
+  if (!started) {
+    setStarted(true);
     beginFlow();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }
+
+  // Reset the QR immediately when `pair` changes — render-time guarded
+  // so the stale svg doesn't flash while the new one renders. The
+  // async render of the new svg still lives inside the effect below.
+  const [lastPair, setLastPair] = useState(pair);
+  if (pair !== lastPair) {
+    setLastPair(pair);
+    setQrSvg(null);
+  }
 
   // Render the QR whenever the pair URL changes. SVG mode keeps the
   // bundle light and avoids canvas issues on older smart-TV browsers.
   useEffect(() => {
+    if (!pair) return;
     let cancelled = false;
-    if (!pair) {
-      setQrSvg(null);
-      return () => {
-        cancelled = true;
-      };
-    }
     QRCode.toString(pair.verificationURIComplete, {
       type: "svg",
       margin: 1,
@@ -143,8 +152,10 @@ export default function PairThisDevice() {
       src.close();
       sourceRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pair]);
+    // poll/navigate son identidades estables (tanstack-query mutate +
+    // react-router navigate); incluirlas en las deps no re-corre el
+    // effect en la práctica y satisface el linter del compiler.
+  }, [pair, poll, navigate]);
 
   return (
     <main className="mx-auto flex min-h-screen max-w-2xl flex-col items-center gap-6 p-6 sm:p-10">

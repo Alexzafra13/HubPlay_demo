@@ -33,7 +33,7 @@
 // Cuando done/error: el upload "se gradúa" — se quita del panel
 // Activos y se invalida la query del Historial para que aparezca.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import * as tus from "tus-js-client";
@@ -140,9 +140,20 @@ export default function Uploads() {
   // Cleanup en unmount: abortar uploads activos para no dejar bytes
   // huérfanos en el staging. La pipeline.Aborted del server libera
   // la cuota y borra el blob.
+  //
+  // Patrón "latest value via ref": el unmount cleanup necesita leer
+  // el estado actualizado de `active`. Añadirlo a deps re-ejecutaría
+  // el cleanup en cada cambio (abortando uploads activos cada vez
+  // que cambian estado). El ref se actualiza en un effect dedicado
+  // y el cleanup lee `.current` al disparar, garantizando snapshot
+  // fresco — todo dentro de effects, satisfaciendo react-hooks/refs.
+  const activeRef = useRef(active);
+  useEffect(() => {
+    activeRef.current = active;
+  }, [active]);
   useEffect(() => {
     return () => {
-      for (const u of active) {
+      for (const u of activeRef.current) {
         if (u.tusUpload && (u.status === "uploading" || u.status === "queued")) {
           try {
             u.tusUpload.abort(true);
@@ -152,8 +163,7 @@ export default function Uploads() {
         }
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // mount/unmount only
+  }, []);
 
   function startUpload(file: File, libraryID: string, subpath: string, overwrite: boolean = false) {
     const localID = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;

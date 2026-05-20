@@ -82,12 +82,16 @@ export function SearchBar() {
 
   // Auto-expand if the URL already has ?q= when the page mounts
   // (filter route deep link, or user reloaded the tab mid-search).
-  useEffect(() => {
+  // Render-time guarded setState — derives `open` from URL state
+  // instead of running an effect on every render.
+  const urlKey = (filterMode ? "f:" : "") + urlQuery;
+  const [lastUrlKey, setLastUrlKey] = useState(urlKey);
+  if (lastUrlKey !== urlKey) {
+    setLastUrlKey(urlKey);
     if (filterMode && urlQuery.length > 0 && !open) {
       setOpen(true);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterMode, urlQuery]);
+  }
 
   // ⌘K / Ctrl+K opens from anywhere.
   useEffect(() => {

@@ -290,6 +290,12 @@ export function useHls({
           );
         });
       } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+        // Native HLS path (Safari/iOS). Mutar `video.src` es la API
+        // estándar del HTMLMediaElement — no estamos mutando un valor
+        // que React considere inmutable (el ref), sino una propiedad
+        // del DOM node. Suprimido narrow para que el compiler no
+        // confunda el patrón con state mutation.
+        // eslint-disable-next-line react-compiler/react-compiler
         video.src = url;
         video.addEventListener(
           "loadedmetadata",
