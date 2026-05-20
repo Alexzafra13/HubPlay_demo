@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Scanner, type IDetectedBarcode } from "@yudiel/react-qr-scanner";
 import { X } from "lucide-react";
@@ -23,10 +23,37 @@ interface Props {
   onClose: () => void;
 }
 
+// Conjunto de DOMException.name que SÍ rompen la cámara — todos los
+// demás los tratamos como ruido (la librería @yudiel emite errores
+// por frame cuando no decodifica, y eso no debería plantarse en la UI
+// como "no se pudo iniciar la cámara → asegúrate de HTTPS"). Lista
+// curada de la spec MediaStream + experiencia con la librería.
+const FATAL_CAMERA_ERRORS = new Set([
+  "NotAllowedError",
+  "PermissionDeniedError",
+  "NotFoundError",
+  "DevicesNotFoundError",
+  "NotReadableError",      // cámara en uso por otra app
+  "OverconstrainedError",  // facingMode "environment" no disponible
+  "SecurityError",         // HTTP en producción
+  "TypeError",              // constraints malformados
+]);
+
 export default function QRScannerModal({ onCode, onClose }: Props) {
   const { t } = useTranslation();
   const [error, setError] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
+  const [showHint, setShowHint] = useState(false);
+  // Si nunca decodificamos en N segundos, mostramos hint de "no detecta?
+  // acércate o usa el código manual". Mucho mejor UX que silencio infinito
+  // mientras el usuario apunta a un QR que el descodificador no resuelve.
+  const hintTimerRef = useRef<number | null>(null);
+  useEffect(() => {
+    hintTimerRef.current = window.setTimeout(() => setShowHint(true), 8000);
+    return () => {
+      if (hintTimerRef.current != null) window.clearTimeout(hintTimerRef.current);
+    };
+  }, []);
 
   // Bloquea el scroll del body mientras el modal está abierto —
   // típico de modales fullscreen en móvil, evita pull-to-refresh
@@ -72,13 +99,26 @@ export default function QRScannerModal({ onCode, onClose }: Props) {
   }
 
   function handleError(err: unknown) {
-    // Errores típicos de getUserMedia: permiso denegado, sin cámara,
-    // HTTP en producción (Safari). Damos un mensaje genérico — el
-    // log del navegador tiene el detalle si hace falta debug.
+    // La librería dispara onError tanto para fallos de getUserMedia
+    // (fatales — sin cámara, permiso denegado, HTTP) como para
+    // errores transitorios de decodificación frame a frame
+    // (no fatales — pasan todo el rato cuando el QR no entra en
+    // foco). Filtramos por DOMException.name: sólo los que sabemos
+    // que rompen la sesión de cámara llegan a la UI; el resto va al
+    // console para debug sin asustar al usuario.
     const name =
       err && typeof err === "object" && "name" in err
         ? String((err as { name: unknown }).name)
         : "";
+    if (!FATAL_CAMERA_ERRORS.has(name)) {
+      // Cámara activa, simplemente no decodificó este frame. Lo
+      // dejamos pasar — el hint de "no detecta?" salta a los 8s si
+      // realmente no llega a leer nada.
+      if (import.meta.env.DEV) {
+        console.debug("QRScanner non-fatal error", err);
+      }
+      return;
+    }
     if (name === "NotAllowedError" || name === "PermissionDeniedError") {
       setError(
         t("link.scanner.permissionDenied", {
@@ -96,10 +136,37 @@ export default function QRScannerModal({ onCode, onClose }: Props) {
       );
       return;
     }
+    if (name === "NotReadableError") {
+      setError(
+        t("link.scanner.cameraInUse", {
+          defaultValue:
+            "Otra aplicación está usando la cámara. Ciérrala y vuelve a intentarlo.",
+        }),
+      );
+      return;
+    }
+    if (name === "OverconstrainedError") {
+      setError(
+        t("link.scanner.noRearCamera", {
+          defaultValue:
+            "No se pudo abrir la cámara trasera de este dispositivo.",
+        }),
+      );
+      return;
+    }
+    if (name === "SecurityError") {
+      setError(
+        t("link.scanner.httpsRequired", {
+          defaultValue:
+            "El navegador necesita HTTPS para abrir la cámara. Accede por la URL segura del servidor.",
+        }),
+      );
+      return;
+    }
     setError(
       t("link.scanner.genericError", {
         defaultValue:
-          "No se pudo iniciar la cámara. Asegúrate de estar en HTTPS y vuelve a intentarlo.",
+          "No se pudo iniciar la cámara. Cierra y vuelve a intentarlo.",
       }),
     );
   }
@@ -147,6 +214,14 @@ export default function QRScannerModal({ onCode, onClose }: Props) {
               defaultValue: "Apunta a la pantalla de tu TV con el código QR.",
             })}
           </p>
+          {showHint && (
+            <p className="max-w-sm rounded-lg bg-black/70 px-4 py-3 text-center text-sm text-white/90">
+              {t("link.scanner.noDetectHint", {
+                defaultValue:
+                  "¿No detecta? Acerca el móvil al QR de la TV o cierra y escribe el código manualmente.",
+              })}
+            </p>
+          )}
         </div>
       </div>
 
