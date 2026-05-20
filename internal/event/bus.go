@@ -64,6 +64,15 @@ const (
 	PlayedToggled    Type = "user.played.toggled"
 	FavoriteToggled  Type = "user.favorite.toggled"
 
+	// ── Cambios al overlay personal de canales (orden + hidden). Lo
+	// emiten los handlers de personalización tras un PUT/DELETE exitoso
+	// para que los demás dispositivos del mismo usuario refresquen su
+	// lista de Live TV sin tener que renavegar. Data lleva `user_id` y
+	// los handlers que disparan el evento son atómicos de su lado
+	// (replace / single-channel visibility / reset), así que un evento
+	// = una transición coherente.
+	ChannelOrderUpdated Type = "user.channel.order.updated"
+
 	// ── Subidas de media (PR2 de la feature upload).
 	//
 	// Bytes-in-flight: el cliente conoce mejor el progreso que el
