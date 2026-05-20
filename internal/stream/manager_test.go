@@ -269,11 +269,22 @@ func newTestManager(t *testing.T) *Manager {
 		IdleTimeout:          5 * time.Minute,
 	}
 
+	// ffmpeg path apuntado a un binario que NO existe — los tests
+	// asumen que toda llamada al transcoder real falla con un error
+	// determinista en cmd.Start() (executable not found). Si dejásemos
+	// "" el constructor cae a "ffmpeg" del PATH, y en hosts donde
+	// ffmpeg SÍ está instalado (mi máquina, runners modernos)
+	// cmd.Start() arrancaría el proceso, retornaría nil, y los tests
+	// del coalesce que esperan un error de restart-real verían
+	// silencio. Con un path inexistente el cmd.Start() siempre falla
+	// sin importar el OS o el PATH del host.
+	const sentinelFFmpeg = "__hubplay_nonexistent_ffmpeg__"
+
 	return &Manager{
 		sessions:   make(map[string]*ManagedSession),
 		// HWAccelNone + libx264 — software path, matches what the
 		// existing tests assumed before HW accel detection was wired.
-		transcoder: NewTranscoder(t.TempDir(), "", 4*time.Hour, HWAccelNone, "libx264", "", logger),
+		transcoder: NewTranscoder(t.TempDir(), sentinelFFmpeg, 4*time.Hour, HWAccelNone, "libx264", "", logger),
 		cfg:        cfg,
 		logger:     logger.With("module", "stream-manager"),
 		stopClean:  make(chan struct{}),

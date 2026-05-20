@@ -31,6 +31,18 @@ type AppSetting struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+type AuditLog struct {
+	ID          string         `json:"id"`
+	ActorUserID sql.NullString `json:"actor_user_id"`
+	EventType   string         `json:"event_type"`
+	TargetType  string         `json:"target_type"`
+	TargetID    string         `json:"target_id"`
+	Payload     string         `json:"payload"`
+	IpAddress   string         `json:"ip_address"`
+	UserAgent   string         `json:"user_agent"`
+	CreatedAt   time.Time      `json:"created_at"`
+}
+
 type Channel struct {
 	ID                  string         `json:"id"`
 	LibraryID           string         `json:"library_id"`
@@ -98,6 +110,13 @@ type CollectionImageOverride struct {
 	File         string    `json:"file"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+type CorsOrigin struct {
+	Origin    string         `json:"origin"`
+	CreatedBy sql.NullString `json:"created_by"`
+	CreatedAt time.Time      `json:"created_at"`
+	Note      string         `json:"note"`
 }
 
 type DeviceCode struct {

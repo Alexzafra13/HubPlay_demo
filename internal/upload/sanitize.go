@@ -6,6 +6,7 @@
 package upload
 
 import (
+	"path"
 	"path/filepath"
 	"strings"
 	"unicode"
@@ -40,10 +41,14 @@ const maxFilenameLength = 220
 // Returns "" when the input is unsalvageable; the caller treats "" as
 // "reject with VALIDATION_ERROR" rather than silently rewriting it.
 func SanitizeFilename(raw string) string {
-	// (1) strip path. filepath.Base on "" returns "."; we'll filter that.
-	base := filepath.Base(strings.TrimSpace(raw))
-	base = filepath.Base(strings.ReplaceAll(base, "\\", "/"))
-
+	// (1) strip path. Normalizamos separadores a "/" y usamos path.Base
+	// (POSIX) en lugar de filepath.Base — el input es el nombre que un
+	// usuario subió, no un filesystem path local. En Windows
+	// filepath.Base("a:::b.mkv") devuelve "::b.mkv" porque trata "a:"
+	// como drive prefix, y eso pierde caracteres semánticamente válidos
+	// del nombre. path.Base aplica la misma regla en todos los OS.
+	normalized := strings.ReplaceAll(strings.TrimSpace(raw), "\\", "/")
+	base := path.Base(normalized)
 	if base == "" || base == "." || base == ".." {
 		return ""
 	}
