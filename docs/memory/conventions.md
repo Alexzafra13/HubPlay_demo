@@ -1078,3 +1078,62 @@ Queries que viven como raw SQL en el repo porque sqlc 1.31.1 las trunca o las pa
 8. `LibraryRepository.ListForUser` — JOIN + COALESCE + ORDER BY trip (2026-05-11).
 
 Cuando upstream publique sqlc 1.32+ con el parser fix, abrir tarea "migrate raw-SQL holdouts back to sqlc" — son ~15 min cada una.
+
+## Frontend — Patrones React Doctor (añadidos 2026-05-20)
+
+Tras la integración de [React Doctor](https://github.com/millionco/react-doctor) en CI (PR #358) y las dos PRs de quick wins (#359 + #360), el repo adopta los siguientes patrones obligatorios para que el score se mantenga ≥71 y no introduzcamos regresiones:
+
+### Iteración + ordenación
+
+- `arr.toSorted((a,b) => …)` en lugar de `[...arr].sort((a,b) => …)`. ES2023, sin spread allocation.
+- `.flatMap(it => cond ? [it] : [])` para combinar filter+map en una sola pasada cuando el resultado va al JSX. Listas con cientos de elementos (canales IPTV, items de biblioteca) se benefician notablemente.
+- `.reduce()` o `for...of` cuando el flatMap empeora la legibilidad.
+
+### Tailwind
+
+- `size-N` siempre, NUNCA `w-N h-N` con el mismo N.
+- `p-N` siempre, NUNCA `px-N py-N` con el mismo N.
+- `font-semibold` (600) en headings `<hN>`, NUNCA `font-bold` (700) o `font-extrabold` (800). El compilador del proyecto enforza esto vía React Doctor.
+
+### Keys de React
+
+- NUNCA `key={index}` excepto en arrays REALMENTE estáticos (skeleton placeholders donde N es fijo y el orden nunca cambia). En ese caso usar prefijo descriptivo: `key={`peer-recent-skeleton-${i}`}`.
+- Para listas dinámicas: ID del backend si existe; si el item no tiene ID estable, añadir `localId: crypto.randomUUID()` al type local (ver `LibrariesStep.tsx`).
+- Composite keys (`${item.field1}-${item.field2}`) cuando garantiza unicidad sin índice.
+
+### Framer-motion
+
+- `LazyMotion strict` envolviendo el Router en `App.tsx` con `domAnimation` (subset suficiente para todas nuestras animaciones).
+- `import { m } from "framer-motion"` y `<m.div>`, NUNCA `import { motion }` ni `<motion.div>`.
+- Ahorra ~30 KB del bundle base; el motor completo sólo se carga si algún consumer pide features explícitamente.
+
+### Fechas
+
+- `formatDateTime`, `formatDate`, `formatTime`, `epochOf` desde [`src/utils/dateFormat.ts`](../../web/src/utils/dateFormat.ts).
+- NUNCA `new Date(iso).toLocale*()` directo en JSX o en callbacks alcanzables desde JSX.
+- Los helpers toleran inputs vacíos/inválidos (devuelven `""` en lugar de "Invalid Date").
+
+### Tipografía en JSX
+
+- Em-dash (`—`) NUNCA en JSX text: lee como output AI.
+  - Para "sin valor": en-dash (`–`).
+  - Para separador inline: bullet (`·`).
+
+### Accesibilidad
+
+- `autoFocus` prohibido. Si la UX lo justifica (overlay que aparece y debe confirmar con Enter):
+  - Patrón: `useEffect + ref.current.focus()` (no atributo).
+  - Si DE VERDAD necesitas el atributo: `// eslint-disable-next-line jsx-a11y/no-autofocus` con justificación inline + test que cubre el orden de foco.
+
+### React Compiler
+
+- Plugin `eslint-plugin-react-compiler` activo con regla `react-compiler/react-compiler: 'error'`. Las regresiones de compatibilidad rompen el CI.
+- `react-compiler-healthcheck` hard gate en CI: el job FALLA si la tasa de compatibilidad baja de 100%.
+- Patrón "Adjusting state when a prop changes" (render-time guarded setState con `useState` de tracking) en lugar de `useState + useEffect` que sincroniza state derivado.
+
+### Quality gates en CI
+
+- `typecheck` (`tsc -b`) — hard gate.
+- `react-compiler-healthcheck` — hard gate, 100% requerido.
+- `react-doctor` — visibility-only, comenta inline en cada PR con regresiones/mejoras del score.
+- `knip` — info-only, `--no-exit-code` (cuando lleguemos a 0 unused, elevar a hard).

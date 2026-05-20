@@ -6,24 +6,72 @@
 
 ---
 
-## 🔭 Estado actual (2026-05-20, final del día)
+## 🔭 Estado actual (2026-05-20, tras la tarde de React Doctor)
 
 - Branch principal: `main`, working tree limpio.
 - Última release pública: `nightly` rolling tag (workflow `release.yml`).
-- Tests: backend `go test -race ./...` verde en CI (incluyendo dos flakes del transmux ya parcheados); frontend 616/622 vitest verdes (el delta vs sesión anterior viene de los refactors del compiler, no de tests caídos); `tsc -b` limpio; production build limpio con React Compiler activado.
-- **React Compiler activado** en `vite.config.ts` + plugin `eslint-plugin-react-compiler` como hard gate en cada PR. `react-compiler-healthcheck`: 542/542 componentes compatibles.
+- Tests: `go test -race ./...` verde en CI (incluyendo los dos flakes del transmux ya parcheados); frontend **616/616** vitest verdes; `tsc -b` limpio; production build limpio (24.83 s con React Compiler + LazyMotion activados).
+- **React Compiler activado** + `eslint-plugin-react-compiler` como hard gate. `react-compiler-healthcheck`: 542/542 componentes compatibles. Quality gates en CI: `typecheck`, `react-compiler-healthcheck` (hard), `knip` (info-only), `react-doctor` (visibility-only con comentarios inline en PRs).
+- **Score React Doctor: 71/100 ("Needs work" en 50-74, cerca del umbral 75 = "Great")**. 9 reglas únicas eliminadas, 196 issues totales.
 - HubPlay distribuible "descargar y usar" en los tres targets (desktop / Linux server / NAS-via-Docker) — flujo cerrado en la sesión 2026-05-19/20.
 
-### PRs abiertas tras la sesión maratón 2026-05-20
+---
+
+## 🩺 Sesión 2026-05-20 (noche) — React Doctor onboarding + 9 reglas eliminadas
+
+**[React Doctor](https://github.com/millionco/react-doctor)** (de millionco, MIT, basado en Oxlint) audita 60+ reglas en performance, correctness, accessibility, architecture, security y bundle size, y resume todo en un score 0-100. Integrado en CI como visibility-only (PR #358) — la GitHub Action comenta inline en cada PR con las regresiones/mejoras del score. Fórmula: `score = 100 - (errores únicos × 1.5) - (warnings únicos × 0.75)`. Bandas: 75+ "Great" / 50-74 "Needs work" / <50 "Critical".
+
+**Baseline al integrar**: 67/100, 645 issues, 47 reglas únicas.
+**Final tras dos PRs de quick wins**: **71/100, 196 issues, 39 reglas únicas**.
+
+### PRs cerradas
+
+| PR | Reglas eliminadas | Casos resueltos |
+|---|---|---|
+| [#358](https://github.com/Alexzafra13/HubPlay_demo/pull/358) | — | Integración CI (job nuevo `react-doctor`, visibility-only con `continue-on-error`) |
+| [#359](https://github.com/Alexzafra13/HubPlay_demo/pull/359) | `js-tosorted-immutable`, `js-combine-iterations`, `design-no-redundant-size-axes` | ~430 reemplazos en ~140 archivos |
+| [#360](https://github.com/Alexzafra13/HubPlay_demo/pull/360) | `design-no-redundant-padding-axes`, `design-no-bold-heading`, `no-autofocus`, `design-no-em-dash-in-jsx-text`, `use-lazy-motion`, `rendering-hydration-mismatch-time` | 6 reglas mecánicas, −30 KB bundle, helper `dateFormat` nuevo |
+
+### Patrones nuevos en el proyecto
+
+- **`[arr].toSorted()` en lugar de `[...arr].sort()`** (ES2023): ya el patrón canónico en el repo, evita el spread allocation.
+- **`.flatMap()` para combinar filter+map**: en JSX o reductores rápidos. Evita el doble recorrido sobre listas grandes (cientos de canales).
+- **Tailwind `size-N` y `p-N` consolidados**: nunca `w-4 h-4` o `px-2 py-2`. Convención del proyecto a partir de ahora.
+- **`<m.*>` de framer-motion** en lugar de `<motion.*>`. `LazyMotion strict` en `App.tsx` carga sólo `domAnimation` por defecto (~30 KB menos en el bundle base).
+- **`react-compiler/react-compiler: 'error'`** en ESLint. Las regresiones de compatibilidad con el compiler rompen el CI.
+- **Helper centralizado [`src/utils/dateFormat.ts`](../../web/src/utils/dateFormat.ts)**: `formatDateTime`, `formatDate`, `formatTime`, `epochOf`. Nunca `new Date(...).toLocale*()` directo en JSX.
+- **`localId: crypto.randomUUID()`** en entradas de listas dinámicas (LibrariesStep del setup wizard) para que React keys no usen índices (evita perder foco al reordenar).
+- **`font-semibold` (no `font-bold`)** en headings `<hN>`: peso 700+ aplasta las contraformas a display sizes.
+- **Em-dash (—) en JSX text NUNCA**: usar en-dash (–) para "sin valor" o bullet (·) para separadores inline. Em-dash lee como output AI.
+- **`autoFocus` evitado**: interfere con lectores de pantalla. Cuando es UX-crítico (UpNextOverlay, WhoIsWatching PIN), patrón `useEffect + ref.current.focus()`.
+
+### Reglas no eliminadas (decisiones documentadas como deuda técnica)
+
+| Regla | Casos | Por qué se deja |
+|---|---|---|
+| `no-pure-black-background` | 7 | `bg-black` en contenedores de video. Cambiar a `bg-bg-base` dejaría borde gris alrededor. |
+| `query-mutation-missing-invalidation` | 12 | Falsos positivos: mutations read-only (probe peer, test DB, preflight M3U, deviceAuth tres) o invalidación vía helper indirecto que el lint no detecta (images.ts). |
+
+### Reglas pendientes para próxima(s) sesión(es)
+
+Requieren refactor caso a caso (no auto-fix):
+
+1. **`rerender-state-only-in-handlers`** (23): `useState`→`useRef` cuando el valor sólo se actualiza en handlers y NUNCA se lee en JSX. Cada caso requiere verificar que el valor efectivamente no se renderiza.
+2. **`prefer-useReducer`** (22): consolidar grupos de `useState` relacionados en un `useReducer`. Refactor mayor por componente.
+3. **`click-events-have-key-events`** (17) + **`no-static-element-interactions`** (13): accesibilidad real — convertir `<div onClick>` a `<button>` semántico, o añadir `onKeyDown` + `role`.
+4. **`no-giant-component`** (16): split de componentes grandes (UsersAdmin, VideoPlayer, etc.) en sub-componentes.
+5. **`no-array-index-as-key`** (15 restantes): los más complejos donde añadir un ID estable requiere refactor del data source.
+6. **`prefer-use-effect-event`** (7): reemplazar el patrón `useRef + assign` con `useEffectEvent` (React 19 experimental).
+7. **`no-derived-useState`** (8): derivar el state del prop en render en vez de duplicarlo en state local.
+8. **`no-cascading-set-state`** (7): refactor con `useReducer` o derivación.
+
+### PRs dependabot abiertas (estado)
+
+Las que sobrevivieron a la limpieza de tarde (#247, #289, #352 ya mergeadas, #330 cerrada por redundancia):
 
 | PR | Tema | Estado |
 |---|---|---|
-| [#354](https://github.com/Alexzafra13/HubPlay_demo/pull/354) | Activar React Compiler + refactor 15 anti-patterns + 5 fixes extra | CI en validación tras el último push |
-| [#355](https://github.com/Alexzafra13/HubPlay_demo/pull/355) | CI: `typecheck` + `react-compiler-healthcheck` + `knip` (info-only) | CI en validación |
-| [#247](https://github.com/Alexzafra13/HubPlay_demo/pull/247) | dependabot: docker/setup-buildx-action 3→4 | esperando rebase tras fix del flake |
-| [#289](https://github.com/Alexzafra13/HubPlay_demo/pull/289) | dependabot: picomatch 4.0.3→4.0.4 | esperando rebase |
-| [#330](https://github.com/Alexzafra13/HubPlay_demo/pull/330) | dependabot: web-deps bulk con 18 updates (incluye react-hooks 7.1.1) | redundante tras #354 — cerrar/dejar caducar |
-| [#352](https://github.com/Alexzafra13/HubPlay_demo/pull/352) | dependabot: softprops/action-gh-release 2→3 | esperando rebase |
+| Nuevas dependabot semanales | — | A revisar la próxima vez que se abran (lunes) |
 
 ---
 
