@@ -54,6 +54,11 @@ var userScopedEventTypes = []event.Type{
 	event.ProgressUpdated,
 	event.PlayedToggled,
 	event.FavoriteToggled,
+	// Channel overlay edits — the iptv personalisation handlers stamp
+	// user_id in Data when the caller reorders or hides channels, so
+	// the per-user filter delivers the refresh signal only to the
+	// originating user's other devices.
+	event.ChannelOrderUpdated,
 	// Auth session lifecycle — drives the "Tus dispositivos" panel.
 	// Both events already carry user_id in Data (see auth.Service.Login
 	// and Logout / RevokeSession), so the per-user filter below treats

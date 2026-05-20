@@ -66,6 +66,7 @@ func (h *IPTVHandler) ReplaceChannelOrder(w http.ResponseWriter, r *http.Request
 		handleServiceError(w, r, err)
 		return
 	}
+	h.publishOrderUpdated(claims.UserID)
 	respondJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"status": "ok"}})
 }
 
@@ -110,6 +111,7 @@ func (h *IPTVHandler) SetChannelVisibility(w http.ResponseWriter, r *http.Reques
 		handleServiceError(w, r, err)
 		return
 	}
+	h.publishOrderUpdated(claims.UserID)
 	respondJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"status": "ok"}})
 }
 
@@ -125,6 +127,7 @@ func (h *IPTVHandler) ResetChannelOrder(w http.ResponseWriter, r *http.Request) 
 		handleServiceError(w, r, err)
 		return
 	}
+	h.publishOrderUpdated(claims.UserID)
 	respondJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"status": "ok"}})
 }
 
