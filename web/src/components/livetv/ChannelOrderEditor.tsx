@@ -381,7 +381,7 @@ export function ChannelOrderEditor({
           changes, so the panel stays calm at rest. */}
       <div
         className={[
-          "sticky bottom-0 -mx-3 mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-border bg-bg-card/95 px-3 py-3 backdrop-blur transition-opacity",
+          "sticky bottom-0 -mx-3 mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-border bg-bg-card/95 p-3 backdrop-blur transition-opacity",
           dirty ? "opacity-100" : "pointer-events-none opacity-0",
         ].join(" ")}
       >

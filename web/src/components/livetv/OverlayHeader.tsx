@@ -30,7 +30,7 @@ export function OverlayHeader({
 }: OverlayHeaderProps) {
   const { t } = useTranslation();
   return (
-    <header className="flex items-center gap-3 border-b border-tv-line bg-tv-bg-0/90 px-3 py-3 md:px-5">
+    <header className="flex items-center gap-3 border-b border-tv-line bg-tv-bg-0/90 p-3 md:px-5">
       <button
         type="button"
         onClick={onClose}

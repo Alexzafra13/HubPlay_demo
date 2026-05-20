@@ -163,7 +163,7 @@ export function LiveTvTopBar({
     <header className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
       {headerCopy && (
         <div>
-          <h1 className="flex items-center gap-2 text-xl font-bold text-tv-fg-0 md:text-2xl">
+          <h1 className="flex items-center gap-2 text-xl font-semibold text-tv-fg-0 md:text-2xl">
             <span className="inline-flex size-2.5 animate-pulse rounded-full bg-tv-live shadow-[0_0_8px_var(--tv-live)]" />
             {headerCopy.title}
           </h1>

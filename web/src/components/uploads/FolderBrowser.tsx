@@ -352,7 +352,7 @@ export function FolderBrowser({
         )}
 
         {data && data.directories.length === 0 && !isLoading && !dragSupported && (
-          <p className="px-3 py-3 text-xs text-text-muted italic">
+          <p className="p-3 text-xs text-text-muted italic">
             {t("uploads.folder.empty", {
               defaultValue: "Esta carpeta no tiene subcarpetas. Sube aquí o crea una nueva.",
             })}

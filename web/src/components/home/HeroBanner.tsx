@@ -422,7 +422,7 @@ function TitleBlock({
         </div>
       ) : (
         <div className="flex flex-col gap-1">
-          <h1 className="text-4xl font-extrabold tracking-tight text-white sm:text-5xl lg:text-6xl drop-shadow-[0_2px_20px_rgba(0,0,0,0.8)]">
+          <h1 className="text-4xl font-semibold tracking-tight text-white sm:text-5xl lg:text-6xl drop-shadow-[0_2px_20px_rgba(0,0,0,0.8)]">
             {headline}
           </h1>
           {smallTitle && (

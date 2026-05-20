@@ -174,7 +174,7 @@ function UpcomingList({ items }: { items: EPGProgram[] }) {
         return (
           <li
             key={p.id || p.start_time}
-            className="flex items-center gap-3 rounded-tv-sm px-2 py-2 hover:bg-tv-bg-2/60"
+            className="flex items-center gap-3 rounded-tv-sm p-2 hover:bg-tv-bg-2/60"
           >
             <span className="w-12 shrink-0 font-mono text-xs tabular-nums text-tv-fg-2">
               {formatTime(p.start_time)}

@@ -107,7 +107,7 @@ const WatchTonightTile: FC<WatchTonightTileProps> = ({ pick }) => {
         <p className="mb-1 text-xs font-bold uppercase tracking-[0.18em] text-accent">
           {t(reason === "resume" ? "watchTonight.resume" : "watchTonight.tonight")}
         </p>
-        <h2 className="text-2xl font-bold text-white drop-shadow-lg sm:text-3xl md:text-4xl">
+        <h2 className="text-2xl font-semibold text-white drop-shadow-lg sm:text-3xl md:text-4xl">
           {item.title}
         </h2>
         {reason === "resume" && resumeSeconds != null && (

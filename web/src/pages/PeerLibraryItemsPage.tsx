@@ -83,7 +83,7 @@ export default function PeerLibraryItemsPage() {
       <header className="mt-3 flex flex-wrap items-end justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-bold text-text-primary sm:text-3xl">
+            <h1 className="text-2xl font-semibold text-text-primary sm:text-3xl">
               {library?.name ?? t("peers.unknownLibrary")}
             </h1>
             {library?.content_type && (

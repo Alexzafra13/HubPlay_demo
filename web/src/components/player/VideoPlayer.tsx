@@ -976,7 +976,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
               className="max-h-24 sm:max-h-32 w-auto object-contain drop-shadow-[0_4px_12px_rgba(0,0,0,0.7)]"
             />
           ) : title ? (
-            <h1 className="text-3xl sm:text-5xl font-bold text-white drop-shadow-[0_4px_12px_rgba(0,0,0,0.8)]">
+            <h1 className="text-3xl sm:text-5xl font-semibold text-white drop-shadow-[0_4px_12px_rgba(0,0,0,0.8)]">
               {title}
             </h1>
           ) : null}

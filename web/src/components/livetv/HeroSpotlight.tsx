@@ -244,7 +244,7 @@ export function HeroSpotlight({
           </span>
         </div>
 
-        <h2 className="text-2xl font-bold leading-tight text-tv-fg-0 md:text-3xl">
+        <h2 className="text-2xl font-semibold leading-tight text-tv-fg-0 md:text-3xl">
           {channel.name}
         </h2>
 
