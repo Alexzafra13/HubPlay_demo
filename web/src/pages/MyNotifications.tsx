@@ -162,7 +162,7 @@ function NotificationRow({ notif }: { notif: AppNotification }) {
   const navigate = useNavigate();
   const markRead = useMarkNotificationRead();
 
-  function handleClick() {
+  function openNotification() {
     if (!notif.read_at) {
       markRead.mutate(notif.id);
     }
@@ -182,7 +182,7 @@ function NotificationRow({ notif }: { notif: AppNotification }) {
     <li>
       <button
         type="button"
-        onClick={handleClick}
+        onClick={openNotification}
         className={[
           "flex w-full items-start gap-3 rounded-md border px-4 py-3 text-left transition-colors",
           notif.read_at

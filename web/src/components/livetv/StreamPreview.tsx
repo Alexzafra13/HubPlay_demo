@@ -36,6 +36,13 @@ export function StreamPreview({
     if (!video) return;
 
     let hls: Hls | null = null;
+    const onManifestParsed = () => {
+      video.play().catch(() => {});
+    };
+    const onHlsError = (_event: unknown, data: { fatal: boolean }) => {
+      if (data.fatal) hls?.destroy();
+    };
+
     if (Hls.isSupported()) {
       hls = new Hls({
         enableWorker: true,
@@ -52,19 +59,19 @@ export function StreamPreview({
       });
       hls.loadSource(streamUrl);
       hls.attachMedia(video);
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        video.play().catch(() => {});
-      });
-      hls.on(Hls.Events.ERROR, (_event, data) => {
-        if (data.fatal) hls?.destroy();
-      });
+      hls.on(Hls.Events.MANIFEST_PARSED, onManifestParsed);
+      hls.on(Hls.Events.ERROR, onHlsError);
     } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
       video.src = streamUrl;
       video.play().catch(() => {});
     }
 
     return () => {
-      if (hls) hls.destroy();
+      if (hls) {
+        hls.off(Hls.Events.MANIFEST_PARSED, onManifestParsed);
+        hls.off(Hls.Events.ERROR, onHlsError);
+        hls.destroy();
+      }
       video.removeAttribute("src");
       video.load();
     };

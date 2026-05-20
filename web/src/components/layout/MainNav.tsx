@@ -113,18 +113,24 @@ export function MainNav() {
     }
   }
 
-  // Escape closes from anywhere.
+  // Escape closes from anywhere. Patrón "latest value via ref" sobre
+  // `closeNow` para no re-suscribir el listener cada vez que su
+  // identidad cambia (depende de clearTimers que depende de refs).
+  const closeNowRef = useRef(closeNow);
+  useEffect(() => {
+    closeNowRef.current = closeNow;
+  }, [closeNow]);
   useEffect(() => {
     if (openId === null) return;
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
         e.preventDefault();
-        closeNow();
+        closeNowRef.current();
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [openId, closeNow]);
+  }, [openId]);
 
   useEffect(() => () => clearTimers(), [clearTimers]);
 

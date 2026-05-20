@@ -57,7 +57,7 @@ export function ScheduledJobsPanel({ libraryId }: { libraryId: string }) {
           })}
         </p>
       </header>
-      <ul className="space-y-2" role="list">
+      <ul className="space-y-2">
         {jobs.map((job) => (
           <ScheduledJobRow key={job.kind} libraryId={libraryId} job={job} />
         ))}

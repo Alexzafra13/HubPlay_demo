@@ -87,13 +87,14 @@ function groupSettings(settings: SystemSetting[]): SettingGroup[] {
     other: [],
   };
   for (const s of settings) {
-    if (s.key.startsWith("server.")) buckets.connection.push(s);
+    const { key } = s;
+    if (key.startsWith("server.")) buckets.connection.push(s);
     else if (
-      s.key.startsWith("hardware_acceleration.") ||
-      s.key.startsWith("streaming.")
+      key.startsWith("hardware_acceleration.") ||
+      key.startsWith("streaming.")
     )
       buckets.streaming.push(s);
-    else if (s.key.startsWith("playback.")) buckets.playback.push(s);
+    else if (key.startsWith("playback.")) buckets.playback.push(s);
     else buckets.other.push(s);
   }
   const groups: SettingGroup[] = [];

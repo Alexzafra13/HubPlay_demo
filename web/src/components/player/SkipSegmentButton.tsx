@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import type { EpisodeSegment } from "@/api/types";
 import { pickActiveSegment } from "./segmentLogic";
@@ -48,8 +48,19 @@ export function SkipSegmentButton({
   // Keyboard shortcut. Listener is mounted only while a segment is
   // active so it doesn't intercept 'S' (or 'Shift') presses for the
   // rest of the player session. Ignored when focus is on a text
-  // input — the player has none today, but covers the future case
-  // of a comments/notes overlay.
+  // input — el player no tiene hoy pero cubre el caso futuro de un
+  // overlay de comentarios/notas.
+  //
+  // Patrón "latest value via ref" para `onSkip`: el listener no debe
+  // re-suscribirse cada vez que el padre re-renderiza y pasa una
+  // identidad nueva de la callback (sería un add/remove por frame
+  // mientras corre el player). Guardamos la última referencia en un
+  // ref y la leemos dentro del handler.
+  const onSkipRef = useRef(onSkip);
+  useEffect(() => {
+    onSkipRef.current = onSkip;
+  }, [onSkip]);
+
   useEffect(() => {
     if (!active) return;
     const onKey = (e: KeyboardEvent) => {
@@ -57,11 +68,11 @@ export function SkipSegmentButton({
       const tag = (e.target as HTMLElement | null)?.tagName ?? "";
       if (tag === "INPUT" || tag === "TEXTAREA") return;
       e.preventDefault();
-      onSkip(active.end_seconds);
+      onSkipRef.current(active.end_seconds);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [active, onSkip]);
+  }, [active]);
 
   if (!active) return null;
 

@@ -48,7 +48,7 @@ export function EPGSourcesPanel({ libraryId }: { libraryId: string }) {
   // try to add davidmuma twice (backend would 4xx anyway, but the UX
   // is cleaner if the option just disappears).
   const attachedCatalogIDs = new Set(
-    sources.map((s) => s.catalog_id).filter(Boolean),
+    sources.flatMap((s) => (s.catalog_id ? [s.catalog_id] : [])),
   );
   const availableCatalog = catalog.filter(
     (c) => !attachedCatalogIDs.has(c.id),
