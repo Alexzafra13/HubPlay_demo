@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
-import { motion, AnimatePresence } from "framer-motion";
+import { m, AnimatePresence } from "framer-motion";
 import {
   Search as SearchIcon,
   X,
@@ -212,7 +212,7 @@ export function SearchBar() {
           reposo y glow del color accent cuando el input tiene foco,
           para que enseñar el campo no sea una caja gris cualquiera. */}
       <div ref={wrapRef} className="relative size-9 flex-shrink-0">
-        <motion.div
+        <m.div
           layout
           initial={false}
           animate={{ width: open ? 320 : 36 }}
@@ -281,7 +281,7 @@ export function SearchBar() {
               )}
             </form>
           )}
-        </motion.div>
+        </m.div>
       </div>
 
       {/* Full-width drop-down panel anchored to the bottom of the
@@ -294,7 +294,7 @@ export function SearchBar() {
                 enough to focus the eye on the panel without making
                 the rest of the UI look offline. Starts below the
                 topbar so the bar stays clickable. */}
-            <motion.div
+            <m.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -304,7 +304,7 @@ export function SearchBar() {
               aria-hidden
             />
 
-            <motion.div
+            <m.div
               ref={dropdownRef}
               initial={{ opacity: 0, y: -8 }}
               animate={{ opacity: 1, y: 0 }}
@@ -360,7 +360,7 @@ export function SearchBar() {
                   />
                 )}
               </div>
-            </motion.div>
+            </m.div>
           </>
         )}
       </AnimatePresence>
