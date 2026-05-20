@@ -29,7 +29,16 @@ type Config struct {
 	Observability  ObservabilityConfig `yaml:"observability"`
 	Retention      RetentionConfig     `yaml:"retention"`
 	Upload         UploadConfig        `yaml:"upload"`
+	MDNS           MDNSConfig          `yaml:"mdns"`
 	SetupCompleted bool                `yaml:"setup_completed"`
+}
+
+// MDNSConfig: auto-anuncio del servidor en la LAN. Cuando enabled,
+// cualquier dispositivo de la red resuelve "<hostname>.local" sin
+// configurar router ni DNS.
+type MDNSConfig struct {
+	Enabled  bool   `yaml:"enabled"`
+	Hostname string `yaml:"hostname"`
 }
 
 // UploadConfig: knobs runtime para subidas de media (PR2 feature upload).
@@ -343,6 +352,10 @@ func defaults() *Config {
 			StagingDir:        "", // resolved relative to config dir in Load
 			MaxBytesPerUpload: 50 * 1024 * 1024 * 1024, // 50 GiB
 			MinDurationMs:     1000,
+		},
+		MDNS: MDNSConfig{
+			Enabled:  true,
+			Hostname: "hubplay",
 		},
 	}
 }

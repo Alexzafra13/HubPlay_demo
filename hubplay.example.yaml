@@ -66,3 +66,10 @@ upload:
   staging_dir: ""
   max_bytes_per_upload: 53687091200  # 50 GiB. 0 = sin tope (no recomendado).
   min_duration_ms: 1000              # rechaza < 1s, defensa anti-payload trivial.
+
+mdns:
+  # Anuncia el servidor en la LAN como "<hostname>.local". Permite
+  # acceder desde móviles/otros PCs sin saber la IP. Requiere UDP/5353
+  # abierto entre el server y los clientes.
+  enabled: true
+  hostname: "hubplay"  # accederás en http://hubplay.local:8096
