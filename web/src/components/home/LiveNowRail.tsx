@@ -36,7 +36,7 @@ export function LiveNowRail() {
     return (
       <HomeRail title={t("home.liveNow", { defaultValue: "En directo ahora" })}>
         {Array.from({ length: 5 }, (_, i) => (
-          <div key={i} className="w-[320px] md:w-[360px] lg:w-[400px] xl:w-[440px] shrink-0">
+          <div key={`live-skeleton-${i}`} className="w-[320px] md:w-[360px] lg:w-[400px] xl:w-[440px] shrink-0">
             <Skeleton variant="rectangular" className="aspect-video w-full rounded-md" />
             <Skeleton variant="text" width="70%" className="mt-2" />
           </div>
@@ -101,7 +101,7 @@ function LiveNowCard({ channel }: LiveNowCardProps) {
 
         {/* Live pill */}
         <div className="absolute top-2 left-2 flex items-center gap-1 rounded-full bg-live/90 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
-          <span className="h-1.5 w-1.5 rounded-full bg-white animate-pulse" />
+          <span className="size-1.5 rounded-full bg-white animate-pulse" />
           {t("home.live", { defaultValue: "En directo" })}
         </div>
 

@@ -634,12 +634,12 @@ export default function UsersAdmin() {
                         defaultValue: "Mostrar miembros",
                       })
                 }
-                className="mt-1.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-text-muted hover:bg-bg-elevated hover:text-text-primary transition-colors"
+                className="mt-1.5 inline-flex size-5 shrink-0 items-center justify-center rounded text-text-muted hover:bg-bg-elevated hover:text-text-primary transition-colors"
               >
                 {opts.expanded ? (
-                  <ChevronDown className="h-3.5 w-3.5" />
+                  <ChevronDown className="size-3.5" />
                 ) : (
-                  <ChevronRight className="h-3.5 w-3.5" />
+                  <ChevronRight className="size-3.5" />
                 )}
               </button>
             )}
@@ -650,12 +650,12 @@ export default function UsersAdmin() {
               />
               {user.has_pin && (
                 <span
-                  className="absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-black/70 text-white shadow ring-1 ring-bg-card"
+                  className="absolute -bottom-0.5 -right-0.5 flex size-4 items-center justify-center rounded-full bg-black/70 text-white shadow ring-1 ring-bg-card"
                   aria-label={t("admin.users.pinSet", {
                     defaultValue: "PIN configurado",
                   })}
                 >
-                  <Lock className="h-2.5 w-2.5" />
+                  <Lock className="size-2.5" />
                 </span>
               )}
             </div>
@@ -909,7 +909,7 @@ export default function UsersAdmin() {
             </thead>
             <tbody className="divide-y divide-border">
               {Array.from({ length: 4 }, (_, i) => (
-                <tr key={i} className="bg-bg-card">
+                <tr key={`users-skeleton-${i}`} className="bg-bg-card">
                   <td className="px-4 py-3"><Skeleton variant="text" width="60%" /></td>
                   <td className="px-4 py-3"><Skeleton variant="text" width="75%" /></td>
                   <td className="px-4 py-3"><Skeleton variant="rectangular" width={56} height={20} /></td>
@@ -1031,12 +1031,12 @@ export default function UsersAdmin() {
                                     defaultValue: 'Mostrar miembros',
                                   })
                             }
-                            className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-text-muted hover:bg-bg-elevated hover:text-text-primary transition-colors"
+                            className="inline-flex size-5 shrink-0 items-center justify-center rounded text-text-muted hover:bg-bg-elevated hover:text-text-primary transition-colors"
                           >
                             {opts.expanded ? (
-                              <ChevronDown className="h-3.5 w-3.5" />
+                              <ChevronDown className="size-3.5" />
                             ) : (
-                              <ChevronRight className="h-3.5 w-3.5" />
+                              <ChevronRight className="size-3.5" />
                             )}
                           </button>
                         ) : (
@@ -1055,11 +1055,11 @@ export default function UsersAdmin() {
                         )}
                         {user.has_pin && (
                           <span
-                            className="inline-flex h-4 w-4 shrink-0 items-center justify-center text-text-muted"
+                            className="inline-flex size-4 shrink-0 items-center justify-center text-text-muted"
                             aria-label={t('admin.users.pinSet', { defaultValue: 'PIN configurado' })}
                             title={t('admin.users.pinSet', { defaultValue: 'PIN configurado' })}
                           >
-                            <Lock className="h-3 w-3" />
+                            <Lock className="size-3" />
                           </span>
                         )}
                         {isSelf && (
@@ -1081,7 +1081,7 @@ export default function UsersAdmin() {
                         {opts.memberCount !== undefined && opts.memberCount > 0 && (
                           <span className="inline-flex items-center gap-1 rounded-full border border-border-subtle bg-bg-elevated px-2 py-0.5 text-[10px] font-medium text-text-secondary shrink-0">
                             <svg
-                              className="h-3 w-3"
+                              className="size-3"
                               viewBox="0 0 24 24"
                               fill="none"
                               stroke="currentColor"
@@ -1254,20 +1254,23 @@ export default function UsersAdmin() {
                           ignored here — the strip stays text-only to
                           keep table rows compact. */}
                       <div className="flex justify-end gap-2 flex-wrap">
-                        {getUserActions(user)
-                          .filter((action) => !action.hidden)
-                          .map((action) => (
-                            <Button
-                              key={action.label}
-                              variant={action.danger ? 'danger' : 'secondary'}
-                              size="sm"
-                              disabled={action.disabled}
-                              onClick={action.onClick}
-                              title={action.hint}
-                            >
-                              {action.label}
-                            </Button>
-                          ))}
+                        {/* flatMap = filter + map en una sola pasada. */}
+                        {getUserActions(user).flatMap((action) =>
+                          action.hidden
+                            ? []
+                            : [
+                                <Button
+                                  key={action.label}
+                                  variant={action.danger ? 'danger' : 'secondary'}
+                                  size="sm"
+                                  disabled={action.disabled}
+                                  onClick={action.onClick}
+                                  title={action.hint}
+                                >
+                                  {action.label}
+                                </Button>,
+                              ],
+                        )}
                       </div>
                     </td>
                   </tr>

@@ -18,7 +18,7 @@ export function NextUpRail() {
     return (
       <HomeRail title={t("home.nextUp")}>
         {Array.from({ length: 4 }, (_, i) => (
-          <div key={i} className="w-[300px] md:w-[340px] lg:w-[380px] xl:w-[420px] shrink-0">
+          <div key={`nextup-skeleton-${i}`} className="w-[300px] md:w-[340px] lg:w-[380px] xl:w-[420px] shrink-0">
             <Skeleton
               variant="rectangular"
               className="aspect-video w-full rounded-md"

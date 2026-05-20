@@ -30,7 +30,7 @@ export function PeerRecentRail() {
     return (
       <HomeRail title={t("home.peerRecent", { defaultValue: "Recently added on peers" })}>
         {Array.from({ length: 7 }, (_, i) => (
-          <div key={i} className="w-[180px] md:w-[200px] lg:w-[220px] xl:w-[240px] shrink-0">
+          <div key={`peer-recent-skeleton-${i}`} className="w-[180px] md:w-[200px] lg:w-[220px] xl:w-[240px] shrink-0">
             <Skeleton
               variant="rectangular"
               className="aspect-[2/3] w-full rounded-lg"
@@ -63,7 +63,7 @@ export function PeerRecentRail() {
                 className="inline-flex items-center gap-1 rounded-full bg-black/65 px-2 py-0.5 text-[10px] font-medium text-white shadow-sm backdrop-blur-sm"
                 title={t("peers.sharedBy", { name: hit.peer_name })}
               >
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" aria-hidden />
+                <span className="size-1.5 rounded-full bg-emerald-400" aria-hidden />
                 <span className="max-w-[100px] truncate">{hit.peer_name}</span>
               </span>
             }

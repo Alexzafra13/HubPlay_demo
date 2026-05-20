@@ -75,7 +75,7 @@ export function NotificationsDropdown({
             disabled={markAllRead.isPending}
             className="inline-flex items-center gap-1 text-xs text-text-muted hover:text-text-primary transition-colors disabled:opacity-50"
           >
-            <CheckCheck className="h-3.5 w-3.5" />
+            <CheckCheck className="size-3.5" />
             {t("notifications.markAllRead", {
               defaultValue: "Marcar todas leídas",
             })}
@@ -86,7 +86,7 @@ export function NotificationsDropdown({
       <div className="flex-1 overflow-y-auto">
         {visible.length === 0 ? (
           <div className="flex flex-col items-center gap-2 px-6 py-10 text-center text-text-muted">
-            <Inbox className="h-8 w-8" />
+            <Inbox className="size-8" />
             <p className="text-sm">
               {t("notifications.empty", {
                 defaultValue: "No tienes notificaciones",
@@ -129,11 +129,11 @@ export function NotificationsDropdown({
                             })}
                             className="flex-none p-1 rounded text-text-muted hover:text-text-primary hover:bg-bg-hover transition-colors"
                           >
-                            <X className="h-3 w-3" />
+                            <X className="size-3" />
                           </button>
                         )}
                         {n.read_at && (
-                          <Check className="flex-none h-3 w-3 text-text-muted/60 mt-1" />
+                          <Check className="flex-none size-3 text-text-muted/60 mt-1" />
                         )}
                       </div>
                       {n.body && (
@@ -202,11 +202,11 @@ function NotificationIcon({
   return (
     <div
       className={[
-        "flex-none flex items-center justify-center w-8 h-8 rounded-full bg-bg-base",
+        "flex-none flex items-center justify-center size-8 rounded-full bg-bg-base",
         color,
       ].join(" ")}
     >
-      <Icon className="h-4 w-4" />
+      <Icon className="size-4" />
     </div>
   );
 }

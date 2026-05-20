@@ -125,7 +125,7 @@ function RailNavButton({
       type="button"
       onClick={onClick}
       aria-label={direction === "left" ? "Anterior" : "Siguiente"}
-      className="flex h-8 w-8 items-center justify-center rounded-full border border-tv-line bg-tv-bg-1 text-tv-fg-1 transition-colors hover:bg-tv-bg-2 hover:text-tv-fg-0"
+      className="flex size-8 items-center justify-center rounded-full border border-tv-line bg-tv-bg-1 text-tv-fg-1 transition-colors hover:bg-tv-bg-2 hover:text-tv-fg-0"
     >
       <svg
         width="14"

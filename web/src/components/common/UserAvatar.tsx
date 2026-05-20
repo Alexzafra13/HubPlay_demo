@@ -24,15 +24,15 @@ export interface UserAvatarProps {
 }
 
 // Tamaños en px del círculo y de la tipografía. Mantengo la escala
-// alineada con la que ya usaban TopBar (h-9 w-9 = 36) y los chips
+// alineada con la que ya usaban TopBar (size-9 = 36) y los chips
 // de cabecera de WhoIsWatching (h-12 = 48), para no introducir un
 // tercer set.
 const SIZE_CLASS: Record<UserAvatarSize, string> = {
-  xs: "h-6 w-6 text-[9px]",
-  sm: "h-7 w-7 text-[10px]",
-  md: "h-9 w-9 text-[12px]",
-  lg: "h-12 w-12 text-sm",
-  xl: "h-16 w-16 text-base",
+  xs: "size-6 text-[9px]",
+  sm: "size-7 text-[10px]",
+  md: "size-9 text-[12px]",
+  lg: "size-12 text-sm",
+  xl: "size-16 text-base",
 };
 
 // Componente único para todos los avatares. Cadena de fallback:
@@ -87,7 +87,7 @@ export function UserAvatar({
         <img
           src={imageSrc}
           alt=""
-          className="h-full w-full object-cover"
+          className="size-full object-cover"
           draggable={false}
           onError={() => setBroken(true)}
         />

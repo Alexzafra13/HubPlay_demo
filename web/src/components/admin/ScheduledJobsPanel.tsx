@@ -144,7 +144,7 @@ function ScheduledJobRow({
                 enabled: e.target.checked,
               })
             }
-            className="h-4 w-4 rounded border-border text-accent focus:ring-accent"
+            className="size-4 rounded border-border text-accent focus:ring-accent"
             aria-label={t("admin.schedule.toggle", {
               defaultValue: "Activar {{kind}}",
               kind: kindLabel,

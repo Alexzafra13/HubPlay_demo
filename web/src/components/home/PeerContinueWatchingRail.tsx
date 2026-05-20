@@ -41,7 +41,7 @@ export function PeerContinueWatchingRail() {
         })}
       >
         {Array.from({ length: 5 }, (_, i) => (
-          <div key={i} className="w-[180px] md:w-[200px] lg:w-[220px] xl:w-[240px] shrink-0">
+          <div key={`peer-continue-skeleton-${i}`} className="w-[180px] md:w-[200px] lg:w-[220px] xl:w-[240px] shrink-0">
             <Skeleton
               variant="rectangular"
               className="aspect-[2/3] w-full rounded-lg"
@@ -75,7 +75,7 @@ export function PeerContinueWatchingRail() {
                 className="inline-flex items-center gap-1 rounded-full bg-black/65 px-2 py-0.5 text-[10px] font-medium text-white shadow-sm backdrop-blur-sm"
                 title={t("peers.sharedBy", { name: it.peer_name })}
               >
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" aria-hidden />
+                <span className="size-1.5 rounded-full bg-emerald-400" aria-hidden />
                 <span className="max-w-[100px] truncate">{it.peer_name}</span>
               </span>
             }

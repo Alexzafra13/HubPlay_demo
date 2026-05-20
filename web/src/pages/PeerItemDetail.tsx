@@ -320,7 +320,7 @@ export default function PeerItemDetail() {
           {peer && (
             <span className="inline-flex items-center gap-2 rounded-full border border-border bg-bg-card/60 px-3 py-1.5 backdrop-blur-sm">
               <span
-                className="h-2 w-2 rounded-full bg-emerald-500"
+                className="size-2 rounded-full bg-emerald-500"
                 aria-hidden
               />
               {t("peers.sharedBy", { name: peer.name })}
@@ -351,7 +351,7 @@ function formatHms(totalSeconds: number): string {
 
 function PlayFromStartIcon() {
   return (
-    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+    <svg className="size-4" viewBox="0 0 24 24" fill="currentColor">
       <path d="M6 6h2v12H6zM10 12l9-6v12z" />
     </svg>
   );
@@ -360,7 +360,7 @@ function PlayFromStartIcon() {
 function BackIcon() {
   return (
     <svg
-      className="h-4 w-4"
+      className="size-4"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"

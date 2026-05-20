@@ -211,7 +211,7 @@ export function SearchBar() {
           Estilo expandido: pill (rounded-full) con ring sutil en
           reposo y glow del color accent cuando el input tiene foco,
           para que enseñar el campo no sea una caja gris cualquiera. */}
-      <div ref={wrapRef} className="relative w-9 h-9 flex-shrink-0">
+      <div ref={wrapRef} className="relative size-9 flex-shrink-0">
         <motion.div
           layout
           initial={false}
@@ -227,11 +227,11 @@ export function SearchBar() {
           <button
             type="button"
             onClick={() => (open ? inputRef.current?.focus() : openSearch())}
-            className="flex items-center justify-center w-9 h-9 flex-shrink-0 text-text-secondary hover:text-text-primary transition-colors"
+            className="flex items-center justify-center size-9 flex-shrink-0 text-text-secondary hover:text-text-primary transition-colors"
             aria-label={t("nav.search")}
             aria-expanded={open}
           >
-            <SearchIcon className="h-[17px] w-[17px]" strokeWidth={1.8} />
+            <SearchIcon className="size-[17px]" strokeWidth={1.8} />
           </button>
 
           {open && (
@@ -256,16 +256,16 @@ export function SearchBar() {
                 spellCheck={false}
               />
               {dropdownLoading && dropdownActive && (
-                <Loader2 className="h-3.5 w-3.5 mx-1.5 text-text-muted animate-spin flex-shrink-0" strokeWidth={1.8} />
+                <Loader2 className="size-3.5 mx-1.5 text-text-muted animate-spin flex-shrink-0" strokeWidth={1.8} />
               )}
               {query.length > 0 ? (
                 <button
                   type="button"
                   onClick={() => setQuery("")}
-                  className="flex items-center justify-center w-6 h-6 rounded-full text-text-muted hover:text-text-primary hover:bg-white/8 transition-colors flex-shrink-0"
+                  className="flex items-center justify-center size-6 rounded-full text-text-muted hover:text-text-primary hover:bg-white/8 transition-colors flex-shrink-0"
                   aria-label={t("common.cancel")}
                 >
-                  <X className="h-3.5 w-3.5" strokeWidth={2} />
+                  <X className="size-3.5" strokeWidth={2} />
                 </button>
               ) : (
                 <button
@@ -347,7 +347,7 @@ export function SearchBar() {
                         <kbd className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-bg-base/60 border border-border-subtle">
                           Enter
                         </kbd>
-                        <ArrowRight className="h-3.5 w-3.5" strokeWidth={1.7} />
+                        <ArrowRight className="size-3.5" strokeWidth={1.7} />
                       </button>
                     </>
                   )
@@ -502,7 +502,7 @@ function SuggestionRail({
                   alt={it.title}
                   loading="lazy"
                   decoding="async"
-                  className="absolute inset-0 h-full w-full object-cover"
+                  className="absolute inset-0 size-full object-cover"
                 />
               )}
             </div>

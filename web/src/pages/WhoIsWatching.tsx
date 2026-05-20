@@ -70,10 +70,14 @@ export default function WhoIsWatching() {
   );
   const posters = useMemo(() => {
     const items = (itemsData?.items ?? []) as MediaItem[];
+    // flatMap = map + filter en una pasada. Mantiene el slice(0, 6) al
+    // final para no construir más entradas de las necesarias en
+    // librerías grandes.
     return items
-      .map((it) => ({ id: it.id, src: it.poster_url, title: it.title }))
-      .filter((p): p is { id: string; src: string; title: string } =>
-        Boolean(p.src),
+      .flatMap((it) =>
+        it.poster_url
+          ? [{ id: it.id, src: it.poster_url, title: it.title }]
+          : [],
       )
       .slice(0, 6);
   }, [itemsData]);
@@ -140,7 +144,7 @@ export default function WhoIsWatching() {
               onClick={() => void handleSignOut()}
               className="inline-flex items-center gap-1.5 rounded-full border border-red-500/20 bg-red-500/5 px-4 py-2 text-xs text-red-400/85 backdrop-blur-md transition-all hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-400"
             >
-              <LogOut className="h-3.5 w-3.5" />
+              <LogOut className="size-3.5" />
               {t("whoIsWatching.signOut", {
                 defaultValue: "Cerrar sesión",
               })}
@@ -270,7 +274,7 @@ export default function WhoIsWatching() {
             onClick={() => navigate("/admin/users")}
             className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-text-secondary backdrop-blur-md transition-all hover:border-white/20 hover:bg-white/10 hover:text-text-primary"
           >
-            <Pencil className="h-3.5 w-3.5" />
+            <Pencil className="size-3.5" />
             {t("whoIsWatching.manageProfiles", {
               defaultValue: "Gestionar perfiles",
             })}
@@ -281,7 +285,7 @@ export default function WhoIsWatching() {
           onClick={() => void handleSignOut()}
           className="inline-flex items-center gap-1.5 rounded-full border border-red-500/20 bg-red-500/5 px-4 py-2 text-red-400/85 backdrop-blur-md transition-all hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-400"
         >
-          <LogOut className="h-3.5 w-3.5" />
+          <LogOut className="size-3.5" />
           {t("whoIsWatching.signOut", {
             defaultValue: "Cerrar sesión",
           })}
@@ -315,7 +319,7 @@ export default function WhoIsWatching() {
         className="absolute left-4 top-4 z-20 inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-text-secondary backdrop-blur-md transition-all hover:border-white/20 hover:bg-white/10 hover:text-text-primary sm:left-6 sm:top-6"
         aria-label={t("whoIsWatching.back", { defaultValue: "Volver" })}
       >
-        <ArrowLeft className="h-3.5 w-3.5" />
+        <ArrowLeft className="size-3.5" />
         {t("whoIsWatching.back", { defaultValue: "Volver" })}
       </motion.button>
 
@@ -397,12 +401,11 @@ function CinematicBackdrop({
     { staleTime: 5 * 60 * 1000, retry: false },
   );
   const backdrops = useMemo(() => {
-    if (hasWall) return []; // wall replaces mosaic as the catalogue signal
+    if (hasWall) return []; // el wall reemplaza al mosaico como señal del catálogo
     const items = (data?.items ?? []) as MediaItem[];
-    return items
-      .map((it) => it.backdrop_url)
-      .filter((u): u is string => !!u)
-      .slice(0, 12);
+    // flatMap = map + filter en una pasada (descarta entradas sin
+    // backdrop_url y se queda con los 12 primeros).
+    return items.flatMap((it) => (it.backdrop_url ? [it.backdrop_url] : [])).slice(0, 12);
   }, [data, hasWall]);
 
   return (
@@ -424,11 +427,12 @@ function CinematicBackdrop({
           className="pointer-events-none absolute inset-0 overflow-hidden opacity-[0.07]"
           style={{ filter: "blur(28px) saturate(1.4)" }}
         >
-          <div className="grid h-full w-full grid-cols-2 gap-0 sm:grid-cols-3 md:grid-cols-4">
-            {backdrops.map((url, i) => (
+          <div className="grid size-full grid-cols-2 gap-0 sm:grid-cols-3 md:grid-cols-4">
+            {backdrops.map((url) => (
+              // La URL ya es única por backdrop (la API no devuelve duplicados).
               <div
-                key={i}
-                className="h-full w-full bg-cover bg-center"
+                key={url}
+                className="size-full bg-cover bg-center"
                 style={{ backgroundImage: `url(${url})` }}
               />
             ))}
@@ -499,7 +503,7 @@ function PosterWall({
               src={p.src}
               alt=""
               loading="lazy"
-              className="h-full w-full object-cover"
+              className="size-full object-cover"
             />
           </motion.div>
         );
@@ -562,13 +566,13 @@ function ProfileCard({
             consistent across both layouts. */}
         <span
           aria-hidden
-          className="absolute left-2 top-1/2 -z-10 h-20 w-20 -translate-y-1/2 rounded-full opacity-0 blur-2xl transition-opacity duration-300 group-hover:opacity-70 group-focus-visible:opacity-70"
+          className="absolute left-2 top-1/2 -z-10 size-20 -translate-y-1/2 rounded-full opacity-0 blur-2xl transition-opacity duration-300 group-hover:opacity-70 group-focus-visible:opacity-70"
           style={{
             background: `radial-gradient(closest-side, ${palette.background}, transparent 70%)`,
           }}
         />
         <div
-          className="relative flex h-16 w-16 flex-none items-center justify-center overflow-hidden rounded-full text-2xl font-extralight text-white shadow-lg ring-2 ring-transparent transition-all duration-300 group-hover:ring-white/30 group-focus-visible:ring-accent"
+          className="relative flex size-16 flex-none items-center justify-center overflow-hidden rounded-full text-2xl font-extralight text-white shadow-lg ring-2 ring-transparent transition-all duration-300 group-hover:ring-white/30 group-focus-visible:ring-accent"
           style={{
             background: `linear-gradient(160deg, ${lighten(palette.background, 0.12)}, ${palette.background} 45%, ${darken(palette.background, 0.18)})`,
           }}
@@ -580,11 +584,11 @@ function ProfileCard({
           <span className="relative">{initials}</span>
           {profile.has_pin && (
             <span
-              className="absolute bottom-0 right-0 flex h-5 w-5 items-center justify-center rounded-full bg-black/70 text-white shadow-md backdrop-blur-sm"
+              className="absolute bottom-0 right-0 flex size-5 items-center justify-center rounded-full bg-black/70 text-white shadow-md backdrop-blur-sm"
               aria-hidden
             >
               <svg
-                className="h-2.5 w-2.5"
+                className="size-2.5"
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
@@ -643,7 +647,7 @@ function ProfileCard({
       />
 
       <div
-        className="relative flex h-36 w-36 items-center justify-center overflow-hidden rounded-full text-5xl font-extralight tracking-tight text-white shadow-2xl ring-2 ring-transparent transition-all duration-300 group-hover:ring-white/30 group-focus-visible:ring-accent group-focus-visible:ring-offset-4 group-focus-visible:ring-offset-transparent sm:h-40 sm:w-40 sm:text-6xl"
+        className="relative flex size-36 items-center justify-center overflow-hidden rounded-full text-5xl font-extralight tracking-tight text-white shadow-2xl ring-2 ring-transparent transition-all duration-300 group-hover:ring-white/30 group-focus-visible:ring-accent group-focus-visible:ring-offset-4 group-focus-visible:ring-offset-transparent sm:h-40 sm:w-40 sm:text-6xl"
         style={{
           background: `linear-gradient(160deg, ${lighten(palette.background, 0.12)}, ${palette.background} 45%, ${darken(palette.background, 0.18)})`,
         }}
@@ -655,11 +659,11 @@ function ProfileCard({
         <span className="relative">{initials}</span>
         {profile.has_pin && (
           <span
-            className="absolute bottom-2.5 right-2.5 flex h-7 w-7 items-center justify-center rounded-full bg-black/70 text-white shadow-md backdrop-blur-sm"
+            className="absolute bottom-2.5 right-2.5 flex size-7 items-center justify-center rounded-full bg-black/70 text-white shadow-md backdrop-blur-sm"
             aria-hidden
           >
             <svg
-              className="h-3.5 w-3.5"
+              className="size-3.5"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -719,7 +723,7 @@ function PinPad({
       className="flex w-full max-w-sm flex-col items-center gap-6"
     >
       <motion.div
-        className="relative flex h-28 w-28 items-center justify-center overflow-hidden rounded-full text-3xl font-extralight text-white shadow-2xl"
+        className="relative flex size-28 items-center justify-center overflow-hidden rounded-full text-3xl font-extralight text-white shadow-2xl"
         style={{
           background: `linear-gradient(160deg, ${lighten(palette.background, 0.12)}, ${palette.background} 45%, ${darken(palette.background, 0.18)})`,
         }}
@@ -749,8 +753,11 @@ function PinPad({
             const filled = i < pin.length;
             const active = i === pin.length && !isLoading;
             return (
+              // El PIN tiene siempre 4 dígitos en posiciones fijas;
+              // un prefijo descriptivo deja claro el propósito de la
+              // key en el árbol.
               <div
-                key={i}
+                key={`pin-digit-${i}`}
                 className={[
                   "flex h-14 w-12 items-center justify-center rounded-lg border-2 transition-all",
                   filled
@@ -765,7 +772,7 @@ function PinPad({
                     initial={{ scale: 0 }}
                     animate={{ scale: 1 }}
                     transition={{ type: "spring", stiffness: 500, damping: 25 }}
-                    className="block h-3 w-3 rounded-full bg-text-primary"
+                    className="block size-3 rounded-full bg-text-primary"
                   />
                 )}
               </div>
@@ -786,7 +793,7 @@ function PinPad({
             onPinChange(e.target.value.replace(/[^0-9]/g, "").slice(0, 4))
           }
           aria-label={t("whoIsWatching.pinInputLabel")}
-          className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+          className="absolute inset-0 size-full cursor-pointer opacity-0"
           disabled={isLoading}
         />
       </div>

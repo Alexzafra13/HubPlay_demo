@@ -78,13 +78,13 @@ export function NotificationsBell() {
         aria-expanded={open}
         aria-haspopup="menu"
         className={[
-          "relative flex items-center justify-center w-10 h-10 rounded-lg",
+          "relative flex items-center justify-center size-10 rounded-lg",
           "text-text-secondary hover:text-text-primary hover:bg-bg-hover",
           "transition-colors",
           open ? "bg-bg-hover text-text-primary" : "",
         ].join(" ")}
       >
-        <Bell className="h-[19px] w-[19px]" strokeWidth={1.7} />
+        <Bell className="size-[19px]" strokeWidth={1.7} />
         {unread > 0 && (
           <span
             aria-hidden

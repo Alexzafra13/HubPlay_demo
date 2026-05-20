@@ -193,7 +193,7 @@ export function HeroSpotlight({
           <StreamPreview
             key={channel.id}
             streamUrl={channel.stream_url}
-            className="absolute inset-0 h-full w-full object-cover"
+            className="absolute inset-0 size-full object-cover"
           />
         ) : null}
 
@@ -215,7 +215,7 @@ export function HeroSpotlight({
             interaction so the click target feels alive. The button
             itself is the parent <button>, this is just the visual. */}
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-          <span className="flex h-16 w-16 items-center justify-center rounded-full bg-black/45 ring-1 ring-white/30 backdrop-blur transition group-hover:scale-110 group-hover:bg-tv-accent/85 group-focus-visible:scale-110 group-focus-visible:bg-tv-accent/85">
+          <span className="flex size-16 items-center justify-center rounded-full bg-black/45 ring-1 ring-white/30 backdrop-blur transition group-hover:scale-110 group-hover:bg-tv-accent/85 group-focus-visible:scale-110 group-focus-visible:bg-tv-accent/85">
             <PlayGlyph />
           </span>
         </div>

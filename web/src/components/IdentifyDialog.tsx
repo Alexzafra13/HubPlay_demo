@@ -137,7 +137,7 @@ export function IdentifyDialog({ isOpen, onClose, item }: IdentifyDialogProps) {
             />
           </div>
           <Button type="submit" variant="primary" disabled={!query.trim()}>
-            <Search className="h-4 w-4" />
+            <Search className="size-4" />
             {t("identify.search", { defaultValue: "Buscar" })}
           </Button>
         </form>
@@ -161,7 +161,7 @@ export function IdentifyDialog({ isOpen, onClose, item }: IdentifyDialogProps) {
 
           {hasSearched && candidatesQ.isError && (
             <div className="flex items-start gap-2 rounded-[--radius-md] border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
-              <AlertCircle className="h-4 w-4 shrink-0" />
+              <AlertCircle className="size-4 shrink-0" />
               <span>
                 {t("identify.errorSearch", {
                   defaultValue:
@@ -202,7 +202,7 @@ export function IdentifyDialog({ isOpen, onClose, item }: IdentifyDialogProps) {
 
         {apply.isError && (
           <div className="flex items-start gap-2 rounded-[--radius-md] border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
-            <AlertCircle className="h-4 w-4 shrink-0" />
+            <AlertCircle className="size-4 shrink-0" />
             <span>
               {t("identify.errorApply", {
                 defaultValue:
@@ -221,7 +221,7 @@ export function IdentifyDialog({ isOpen, onClose, item }: IdentifyDialogProps) {
             onClick={handleApply}
             disabled={!selectedID || apply.isPending}
           >
-            {apply.isPending ? <Spinner size="sm" /> : <Check className="h-4 w-4" />}
+            {apply.isPending ? <Spinner size="sm" /> : <Check className="size-4" />}
             {t("identify.apply", { defaultValue: "Aplicar match" })}
           </Button>
         </div>
@@ -257,11 +257,11 @@ function CandidateCard({ candidate, selected, onSelect }: CandidateCardProps) {
             <img
               src={candidate.poster_url}
               alt=""
-              className="h-full w-full object-cover"
+              className="size-full object-cover"
               loading="lazy"
             />
           ) : (
-            <div className="flex h-full w-full items-center justify-center text-xs text-text-muted">
+            <div className="flex size-full items-center justify-center text-xs text-text-muted">
               —
             </div>
           )}

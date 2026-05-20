@@ -23,7 +23,7 @@ const baseProps = {
   strokeWidth: 2,
 } as const;
 
-export function ImageIcon({ className = "h-4 w-4", ...rest }: IconProps) {
+export function ImageIcon({ className = "size-4", ...rest }: IconProps) {
   return (
     <svg {...baseProps} className={className} {...rest}>
       <path
@@ -35,7 +35,7 @@ export function ImageIcon({ className = "h-4 w-4", ...rest }: IconProps) {
   );
 }
 
-export function RefreshIcon({ className = "h-4 w-4", ...rest }: IconProps) {
+export function RefreshIcon({ className = "size-4", ...rest }: IconProps) {
   return (
     <svg {...baseProps} className={className} {...rest}>
       <path
@@ -47,7 +47,7 @@ export function RefreshIcon({ className = "h-4 w-4", ...rest }: IconProps) {
   );
 }
 
-export function InfoIcon({ className = "h-4 w-4", ...rest }: IconProps) {
+export function InfoIcon({ className = "size-4", ...rest }: IconProps) {
   return (
     <svg {...baseProps} className={className} {...rest}>
       <path
@@ -59,7 +59,7 @@ export function InfoIcon({ className = "h-4 w-4", ...rest }: IconProps) {
   );
 }
 
-export function ExternalLinkIcon({ className = "h-4 w-4", ...rest }: IconProps) {
+export function ExternalLinkIcon({ className = "size-4", ...rest }: IconProps) {
   return (
     <svg {...baseProps} className={className} {...rest}>
       <path

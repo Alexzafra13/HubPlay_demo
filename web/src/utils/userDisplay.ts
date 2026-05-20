@@ -18,10 +18,11 @@ import type { User } from "@/api/types";
 export function getInitials(user: Pick<User, "display_name" | "username"> | null | undefined): string {
   if (!user) return "?";
   if (user.display_name) {
+    // flatMap = filter (descarta tokens vacíos) + map (toma primera
+    // letra) en una sola pasada.
     const fromName = user.display_name
       .split(/\s+/)
-      .filter(Boolean)
-      .map((token) => token[0])
+      .flatMap((token) => (token ? [token[0]] : []))
       .join("")
       .toUpperCase()
       .slice(0, 2);

@@ -26,11 +26,11 @@ function CollectionTile({ entry }: { entry: CollectionListEntry }) {
             alt={entry.name}
             loading="lazy"
             decoding="async"
-            className="h-full w-full object-cover"
+            className="size-full object-cover"
             onError={() => setImageFailed(true)}
           />
         ) : (
-          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-bg-elevated to-bg-card">
+          <div className="flex size-full items-center justify-center bg-gradient-to-br from-bg-elevated to-bg-card">
             <span className="text-4xl font-bold text-text-muted">
               {entry.name.charAt(0).toUpperCase()}
             </span>

@@ -72,7 +72,7 @@ const MediaGrid: FC<MediaGridProps> = ({
     return (
       <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] sm:grid-cols-[repeat(auto-fill,minmax(200px,1fr))] lg:grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">
         {Array.from({ length: SKELETON_COUNT }, (_, i) => (
-          <div key={i} className="flex flex-col gap-2">
+          <div key={`grid-skeleton-${i}`} className="flex flex-col gap-2">
             <Skeleton
               variant="rectangular"
               className="aspect-[2/3] w-full rounded-[--radius-lg]"

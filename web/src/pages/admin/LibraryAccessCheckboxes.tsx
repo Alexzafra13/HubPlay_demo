@@ -41,11 +41,11 @@ export function LibraryAccessCheckboxes({
     const next = new Set(selected);
     if (next.has(id)) next.delete(id);
     else next.add(id);
-    // Stable order: emit ids in the order they appear in `libraries`
-    // so the array shape never depends on click order — keeps the
-    // network payload deterministic for tests + diff-noise-free for
-    // operators reading it in a debugger.
-    onChange(libraries.filter((l) => next.has(l.id)).map((l) => l.id));
+    // Orden estable: emite los ids en el mismo orden en que aparecen
+    // en `libraries`, así el payload no depende del orden de clicks
+    // (importante para tests y para mantener el diff limpio).
+    // flatMap = filter + map en una sola pasada.
+    onChange(libraries.flatMap((l) => (next.has(l.id) ? [l.id] : [])));
   }
 
   if (libraries.length === 0) {

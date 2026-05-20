@@ -105,7 +105,7 @@ const ExternalSubsModal: FC<ExternalSubsModalProps> = ({
             className="p-1 rounded text-text-secondary hover:text-text-primary hover:bg-bg-elevated cursor-pointer"
             aria-label={t("common.close")}
           >
-            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>

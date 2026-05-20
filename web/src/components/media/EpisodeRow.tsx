@@ -92,10 +92,10 @@ const EpisodeRow: FC<EpisodeRowProps> = ({ item, onPlay }) => {
             src={thumb(stillUrl, ROW_THUMB_WIDTH) ?? stillUrl}
             alt=""
             loading="lazy"
-            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+            className="size-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
           />
         ) : (
-          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-bg-card to-bg-elevated">
+          <div className="flex size-full items-center justify-center bg-gradient-to-br from-bg-card to-bg-elevated">
             <span className="text-xl font-bold text-text-muted">{code ?? item.title}</span>
           </div>
         )}
@@ -104,8 +104,8 @@ const EpisodeRow: FC<EpisodeRowProps> = ({ item, onPlay }) => {
             EpisodeCard so the interaction reads consistently across
             surfaces. */}
         <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
-          <div className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-white bg-white/10 backdrop-blur-sm">
-            <svg className="h-5 w-5 text-white" viewBox="0 0 24 24" fill="currentColor">
+          <div className="flex size-12 items-center justify-center rounded-full border-2 border-white bg-white/10 backdrop-blur-sm">
+            <svg className="size-5 text-white" viewBox="0 0 24 24" fill="currentColor">
               <path d="M8 5v14l11-7z" />
             </svg>
           </div>
@@ -139,7 +139,7 @@ const EpisodeRow: FC<EpisodeRowProps> = ({ item, onPlay }) => {
           {runtime && <span>{runtime}</span>}
           {item.community_rating != null && (
             <span className="inline-flex items-center gap-0.5 text-warning">
-              <svg className="h-3 w-3" viewBox="0 0 24 24" fill="currentColor">
+              <svg className="size-3" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
               </svg>
               {item.community_rating.toFixed(1)}

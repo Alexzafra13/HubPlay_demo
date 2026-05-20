@@ -139,7 +139,7 @@ export default function LinkDevice() {
             disabled={approve.isPending || success}
             className="flex items-center justify-center gap-2 rounded-lg border border-border bg-bg-elevated px-4 py-3 text-sm font-medium text-text-primary transition-colors hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <QrCode className="h-4 w-4" aria-hidden />
+            <QrCode className="size-4" aria-hidden />
             {t("link.scanQR", { defaultValue: "Escanear código QR" })}
           </button>
         )}

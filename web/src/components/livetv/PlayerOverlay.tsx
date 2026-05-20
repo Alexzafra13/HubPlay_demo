@@ -229,7 +229,7 @@ function SimilarGrid({
             bg={ch.logo_bg}
             fg={ch.logo_fg}
             name={ch.name}
-            className="h-9 w-9 shrink-0 rounded-tv-xs"
+            className="size-9 shrink-0 rounded-tv-xs"
             textClassName="text-[10px] font-bold"
           />
           <div className="min-w-0 flex-1">

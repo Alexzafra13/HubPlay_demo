@@ -74,7 +74,7 @@ export function MiniPlayer() {
         <button
           type="button"
           onClick={stop}
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-tv-fg-2 transition-colors hover:bg-tv-bg-2 hover:text-tv-fg-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          className="flex size-7 shrink-0 items-center justify-center rounded-full text-tv-fg-2 transition-colors hover:bg-tv-bg-2 hover:text-tv-fg-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           aria-label={t("liveTV.miniStop", {
             defaultValue: "Detener reproductor",
           })}

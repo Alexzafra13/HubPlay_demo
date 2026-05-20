@@ -235,7 +235,7 @@ export function AccountPanel() {
               onClick={() => fileInputRef.current?.click()}
               disabled={uploading || deleting}
             >
-              <ImagePlus className="h-4 w-4 mr-1.5" aria-hidden />
+              <ImagePlus className="size-4 mr-1.5" aria-hidden />
               {hasUploadedAvatar
                 ? t("settings.accountPanel.changePhoto", {
                     defaultValue: "Cambiar foto",
@@ -275,9 +275,9 @@ export function AccountPanel() {
               disabled={uploading || deleting}
             >
               {deleting ? (
-                <Loader2 className="h-4 w-4 mr-1.5 animate-spin" aria-hidden />
+                <Loader2 className="size-4 mr-1.5 animate-spin" aria-hidden />
               ) : (
-                <Trash2 className="h-4 w-4 mr-1.5" aria-hidden />
+                <Trash2 className="size-4 mr-1.5" aria-hidden />
               )}
               {t("settings.accountPanel.removePhoto", {
                 defaultValue: "Quitar foto",
@@ -324,7 +324,7 @@ export function AccountPanel() {
                 key={p.background}
                 onClick={() => setColor(p.background)}
                 className={[
-                  "relative flex h-10 w-10 items-center justify-center rounded-full transition-all",
+                  "relative flex size-10 items-center justify-center rounded-full transition-all",
                   selected
                     ? "ring-2 ring-white ring-offset-2 ring-offset-bg-card scale-110"
                     : "ring-1 ring-white/10 hover:scale-105 hover:ring-white/30",
@@ -334,7 +334,7 @@ export function AccountPanel() {
                 aria-label={p.label}
                 aria-pressed={selected}
               >
-                {selected && <Check className="h-5 w-5 text-white" strokeWidth={3} />}
+                {selected && <Check className="size-5 text-white" strokeWidth={3} />}
               </button>
             );
           })}

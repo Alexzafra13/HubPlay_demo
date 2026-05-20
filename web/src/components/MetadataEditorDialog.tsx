@@ -95,7 +95,7 @@ export function MetadataEditorDialog({ isOpen, onClose, item }: Props) {
     >
       <div className="flex flex-col gap-3">
         <div className="flex items-start gap-2 rounded-[--radius-md] border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
-          <Lock className="h-3.5 w-3.5 shrink-0" />
+          <Lock className="size-3.5 shrink-0" />
           <span>
             {t("metadataEditor.lockHint", {
               defaultValue:
@@ -120,7 +120,7 @@ export function MetadataEditorDialog({ isOpen, onClose, item }: Props) {
             size="sm"
             onClick={() => setIdentifyOpen(true)}
           >
-            <Search className="h-3.5 w-3.5" />
+            <Search className="size-3.5" />
             {t("identify.menuLabel", { defaultValue: "Identificar…" })}
           </Button>
         </div>
@@ -171,7 +171,7 @@ export function MetadataEditorDialog({ isOpen, onClose, item }: Props) {
 
         {update.isError && (
           <div className="flex items-start gap-2 rounded-[--radius-md] border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
-            <AlertCircle className="h-4 w-4 shrink-0" />
+            <AlertCircle className="size-4 shrink-0" />
             <span>
               {t("metadataEditor.errorGeneric", {
                 defaultValue: "No se ha podido guardar. Inténtalo de nuevo.",
@@ -185,7 +185,7 @@ export function MetadataEditorDialog({ isOpen, onClose, item }: Props) {
             {t("common.cancel", { defaultValue: "Cancelar" })}
           </Button>
           <Button variant="primary" onClick={handleSave} disabled={update.isPending}>
-            {update.isPending ? <Spinner size="sm" /> : <Check className="h-4 w-4" />}
+            {update.isPending ? <Spinner size="sm" /> : <Check className="size-4" />}
             {t("metadataEditor.save", { defaultValue: "Guardar" })}
           </Button>
         </div>

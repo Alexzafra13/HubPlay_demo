@@ -128,7 +128,7 @@ function PeersStrip({
             title={peer.fingerprint}
           >
             <span
-              className="h-2 w-2 rounded-full bg-emerald-500"
+              className="size-2 rounded-full bg-emerald-500"
               aria-hidden
             />
             <span className="font-medium">{peer.name}</span>

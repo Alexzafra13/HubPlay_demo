@@ -40,7 +40,7 @@ export default function FederationAdmin() {
     <div className="flex flex-col gap-8">
       <header className="flex items-start gap-3">
         <div className="rounded-lg bg-accent/10 p-2.5 text-accent">
-          <Shield className="h-5 w-5" />
+          <Shield className="size-5" />
         </div>
         <div className="flex-1">
           <h2 className="text-xl font-semibold text-text-primary">
@@ -156,19 +156,19 @@ function ConnectTabs() {
     >
       <Tabs.List className="flex border-b border-border bg-bg-card/40">
         <Tabs.Trigger value="send" className={triggerCls}>
-          <Handshake className="h-4 w-4" />
+          <Handshake className="size-4" />
           {t("admin.federation.sendRequest.tab", {
             defaultValue: "Petición directa",
           })}
         </Tabs.Trigger>
         <Tabs.Trigger value="invite" className={triggerCls}>
-          <Send className="h-4 w-4" />
+          <Send className="size-4" />
           {t("admin.federation.invite.tab", {
             defaultValue: "Generar invite",
           })}
         </Tabs.Trigger>
         <Tabs.Trigger value="accept" className={triggerCls}>
-          <Inbox className="h-4 w-4" />
+          <Inbox className="size-4" />
           {t("admin.federation.accept.tab", {
             defaultValue: "Aceptar invite",
           })}

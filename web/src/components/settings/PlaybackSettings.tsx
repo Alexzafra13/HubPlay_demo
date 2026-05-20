@@ -150,7 +150,7 @@ function ToggleRow({ title, description, checked, onChange }: ToggleRowProps) {
       >
         <span
           className={[
-            "inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform",
+            "inline-block size-4 transform rounded-full bg-white shadow-sm transition-transform",
             checked ? "translate-x-[18px]" : "translate-x-[2px]",
           ].join(" ")}
         />

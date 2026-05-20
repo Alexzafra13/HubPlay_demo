@@ -96,7 +96,7 @@ const BottomSheet: FC<BottomSheetProps> = ({ open, title, onClose, children }) =
             aria-label={t("playerControls.sheet.close")}
             className="p-2 -mr-2 rounded-[--radius-sm] text-text-muted hover:text-text-primary hover:bg-white/10 transition-colors cursor-pointer"
           >
-            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
               <path d="M6 6l12 12M18 6L6 18" strokeLinecap="round" />
             </svg>
           </button>
@@ -143,7 +143,7 @@ const SheetRow: FC<SheetRowProps> = ({ selected, label, sublabel, onClick, leadi
       )}
     </span>
     {selected && (
-      <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+      <svg className="size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
         <path d="M5 12l5 5L20 7" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
     )}

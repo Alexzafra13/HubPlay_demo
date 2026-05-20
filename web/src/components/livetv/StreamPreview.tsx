@@ -27,7 +27,7 @@ interface StreamPreviewProps {
  */
 export function StreamPreview({
   streamUrl,
-  className = "absolute inset-0 h-full w-full object-cover",
+  className = "absolute inset-0 size-full object-cover",
 }: StreamPreviewProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
 

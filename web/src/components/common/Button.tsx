@@ -62,7 +62,7 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       >
         {isLoading && (
           <svg
-            className="animate-spin h-4 w-4 shrink-0"
+            className="animate-spin size-4 shrink-0"
             viewBox="0 0 24 24"
             fill="none"
           >

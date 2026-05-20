@@ -29,7 +29,7 @@ export function SectionHeader({
   return (
     <header className="flex items-start gap-3">
       <div className="rounded-md bg-bg-elevated p-2 text-text-secondary">
-        <Icon className="h-4 w-4" />
+        <Icon className="size-4" />
       </div>
       <div className="flex-1 min-w-0">
         <h2 className="text-sm font-semibold text-text-primary">{title}</h2>

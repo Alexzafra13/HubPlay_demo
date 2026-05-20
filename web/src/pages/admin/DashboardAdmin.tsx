@@ -153,7 +153,7 @@ export default function DashboardAdmin() {
       <header className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
         <span
           aria-hidden
-          className="h-2 w-2 rounded-full"
+          className="size-2 rounded-full"
           style={{
             background: allHealthy ? "var(--color-success)" : "var(--color-error)",
           }}
@@ -404,11 +404,11 @@ function RecentlyAddedStrip({ items }: { items: AdminRecentlyAddedItem[] }) {
                       src={it.poster_url}
                       alt=""
                       loading="lazy"
-                      className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                      className="size-full object-cover transition-transform duration-300 group-hover:scale-105"
                     />
                   ) : (
-                    <div className="flex h-full w-full items-center justify-center text-text-muted">
-                      <Film className="h-6 w-6" />
+                    <div className="flex size-full items-center justify-center text-text-muted">
+                      <Film className="size-6" />
                     </div>
                   )}
                   {/* Badge "+N nuevos" en la esquina sup-der del
@@ -570,7 +570,7 @@ function CatalogueBlock({
           <>
             <span>·</span>
             <span className="inline-flex items-center gap-1.5">
-              <HardDrive className="h-3 w-3" />
+              <HardDrive className="size-3" />
               {t("admin.summary.diskUsage", {
                 defaultValue: "{{used}} de {{total}} ({{pct}}%)",
                 used: formatBytesCompact(diskUsed),
@@ -616,7 +616,7 @@ function ContentTypeCard({
     >
       <div className="flex items-center gap-2">
         <div className="rounded-md bg-bg-elevated p-1.5 text-text-secondary group-hover:text-accent transition-colors">
-          <Icon className="h-3.5 w-3.5" />
+          <Icon className="size-3.5" />
         </div>
         <span className="text-xs font-medium uppercase tracking-wider text-text-muted">
           {meta.label}

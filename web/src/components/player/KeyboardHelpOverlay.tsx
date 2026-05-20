@@ -149,8 +149,11 @@ export function KeyboardHelpOverlay({ onClose }: KeyboardHelpOverlayProps) {
                     <span className="text-text-secondary">{row.label}</span>
                     <span className="flex flex-wrap items-center gap-1">
                       {row.keys.map((k, i) => (
+                        // El label de la fila + la tecla + posición
+                        // mantiene la key única aunque haya teclas
+                        // repetidas en la misma combinación.
                         <span
-                          key={i}
+                          key={`${row.label}-${k}-${i}`}
                           className={
                             k === "…"
                               ? "text-text-muted"

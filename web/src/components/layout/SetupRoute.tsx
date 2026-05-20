@@ -10,7 +10,7 @@ export function SetupRoute() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-bg-base">
         <svg
-          className="animate-spin h-8 w-8 text-accent"
+          className="animate-spin size-8 text-accent"
           viewBox="0 0 24 24"
           fill="none"
         >
