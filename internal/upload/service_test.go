@@ -253,7 +253,6 @@ func TestService_PreCreate_RejectsBadExtension(t *testing.T) {
 }
 
 func TestService_PreCreate_RejectsOversize(t *testing.T) {
-	svc, _, _, _, _, _ := newServiceFixture(t)
 	cfg := upload.DefaultConfig()
 	// Re-create the service with a tighter cap.
 	st, _ := upload.NewStagingDir(filepath.Join(t.TempDir(), "staging"))
@@ -262,7 +261,7 @@ func TestService_PreCreate_RejectsOversize(t *testing.T) {
 		maxRes: 1 << 40,
 	}
 	cfg.MaxUploadBytes = 1024
-	svc = upload.NewService(cfg, st, users, &fakeAuditStore{}, &captureBus{},
+	svc := upload.NewService(cfg, st, users, &fakeAuditStore{}, &captureBus{},
 		upload.NewLibraryPicker(&fakeLibraryStore{}), &fakeProber{durationMs: 60000}, slog.Default())
 
 	_, err := svc.PreCreate(context.Background(), upload.PreCreateInput{

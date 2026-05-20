@@ -174,10 +174,7 @@ func newBenchHomeRepoLiveTV(b *testing.B, n int) (*db.HomeRepository, string) {
 	// Seed EPG: program currently airing for every channel via raw
 	// SQL — there's no test helper for EPGProgram and the schema
 	// (`epg_programs`) is plenty stable.
-	if _, err := database.ExecContext(ctx, `
-		CREATE TEMPORARY TABLE IF NOT EXISTS epg_seed_marker (x INT)`); err == nil {
-		// noop — just exercise the connection
-	}
+	//
 	// One favourite so the favourite-first sort exercises.
 	if _, err := database.ExecContext(ctx,
 		db.RewritePlaceholders(testutil.Driver(),
