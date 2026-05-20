@@ -282,20 +282,20 @@ export function AuditLogPanel() {
             <table className="w-full min-w-[760px] text-sm">
               <thead>
                 <tr className="text-left border-b border-border text-text-muted">
-                  <th className="px-2 py-2 font-medium w-9"></th>
-                  <th className="px-2 py-2 font-medium">
+                  <th className="p-2 font-medium w-9"></th>
+                  <th className="p-2 font-medium">
                     {t("admin.audit.colEvent", { defaultValue: "Evento" })}
                   </th>
-                  <th className="px-2 py-2 font-medium">
+                  <th className="p-2 font-medium">
                     {t("admin.audit.colActor", { defaultValue: "Actor" })}
                   </th>
-                  <th className="px-2 py-2 font-medium">
+                  <th className="p-2 font-medium">
                     {t("admin.audit.colTarget", { defaultValue: "Sobre" })}
                   </th>
-                  <th className="px-2 py-2 font-medium">
+                  <th className="p-2 font-medium">
                     {t("admin.audit.colWhen", { defaultValue: "Cuándo" })}
                   </th>
-                  <th className="px-2 py-2 font-medium">IP</th>
+                  <th className="p-2 font-medium">IP</th>
                 </tr>
               </thead>
               <tbody>
@@ -305,22 +305,22 @@ export function AuditLogPanel() {
                     onClick={() => setOpenRow(row)}
                     className="border-b border-border/50 hover:bg-bg-hover cursor-pointer"
                   >
-                    <td className="px-2 py-2 text-text-muted">
+                    <td className="p-2 text-text-muted">
                       <EventIcon type={row.event_type} />
                     </td>
-                    <td className="px-2 py-2 font-mono text-xs">
+                    <td className="p-2 font-mono text-xs">
                       {row.event_type}
                     </td>
-                    <td className="px-2 py-2 text-xs">
+                    <td className="p-2 text-xs">
                       <ActorCell row={row} />
                     </td>
-                    <td className="px-2 py-2 text-xs">
+                    <td className="p-2 text-xs">
                       <TargetCell row={row} />
                     </td>
-                    <td className="px-2 py-2 text-xs text-text-muted">
+                    <td className="p-2 text-xs text-text-muted">
                       {new Date(row.created_at).toLocaleString()}
                     </td>
-                    <td className="px-2 py-2 text-xs font-mono text-text-muted">
+                    <td className="p-2 text-xs font-mono text-text-muted">
                       {row.ip_address}
                     </td>
                   </tr>
@@ -492,10 +492,10 @@ function RowDetail({
                 )}
               </div>
             ) : (
-              <span className="text-text-muted italic">—</span>
+              <span className="text-text-muted italic">–</span>
             )}
           </DLine>
-          <DLine label="IP">{row.ip_address || "—"}</DLine>
+          <DLine label="IP">{row.ip_address || "–"}</DLine>
           <DLine label={t("admin.audit.detailUA", { defaultValue: "Navegador" })} wide>
             <span className="text-xs">{row.user_agent || "—"}</span>
           </DLine>
@@ -568,7 +568,7 @@ function ActorCell({ row }: { row: AuditLogEntry }) {
 
 function TargetCell({ row }: { row: AuditLogEntry }) {
   if (!row.target_type && !row.target_id) {
-    return <span className="text-text-muted">—</span>;
+    return <span className="text-text-muted">–</span>;
   }
   const name =
     row.target_type === "user" && row.target_username

@@ -194,7 +194,7 @@ export function PeersTable({ peers }: { peers: FederationPeer[] }) {
                   </div>
                 </div>
                 {isPaired && isExpanded && (
-                  <div className="border-t border-border bg-bg-base px-4 py-4">
+                  <div className="border-t border-border bg-bg-base p-4">
                     <SharesPanel peer={peer} />
                   </div>
                 )}

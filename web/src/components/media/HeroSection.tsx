@@ -384,7 +384,7 @@ const HeroSection: FC<HeroSectionProps> = ({
                   className="max-h-[60px] sm:max-h-[80px] w-auto max-w-full object-contain object-left drop-shadow-lg"
                 />
               ) : (
-                <h1 className="text-3xl font-bold text-text-primary drop-shadow-lg sm:text-4xl">
+                <h1 className="text-3xl font-semibold text-text-primary drop-shadow-lg sm:text-4xl">
                   {episodeCode ? (
                     <>
                       <span className="text-text-secondary">{episodeCode}</span>

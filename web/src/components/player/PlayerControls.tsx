@@ -955,7 +955,7 @@ const PlayerControls: FC<PlayerControlsProps> = ({
       onClick={() => {
         onSearchExternalSubs();
       }}
-      className="w-full flex items-center gap-3 px-3 py-3 mt-1 rounded-[--radius-md] text-left text-sm text-accent hover:bg-accent/10 transition-colors cursor-pointer"
+      className="w-full flex items-center gap-3 p-3 mt-1 rounded-[--radius-md] text-left text-sm text-accent hover:bg-accent/10 transition-colors cursor-pointer"
     >
       <svg className="size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
         <circle cx="11" cy="11" r="7" />

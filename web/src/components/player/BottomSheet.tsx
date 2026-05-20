@@ -128,7 +128,7 @@ const SheetRow: FC<SheetRowProps> = ({ selected, label, sublabel, onClick, leadi
     type="button"
     onClick={onClick}
     className={[
-      "w-full flex items-center gap-3 px-3 py-3 rounded-[--radius-md] text-left transition-colors cursor-pointer",
+      "w-full flex items-center gap-3 p-3 rounded-[--radius-md] text-left transition-colors cursor-pointer",
       selected
         ? "bg-accent/15 text-accent"
         : "text-text-primary hover:bg-white/5",

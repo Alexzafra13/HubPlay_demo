@@ -251,7 +251,7 @@ export function SearchBar() {
                   }
                 }}
                 placeholder={placeholder}
-                className="flex-1 min-w-0 bg-transparent border-none outline-none text-[13px] text-text-primary placeholder:text-text-muted/80 px-0 py-0"
+                className="flex-1 min-w-0 bg-transparent border-none outline-none text-[13px] text-text-primary placeholder:text-text-muted/80 p-0"
                 autoComplete="off"
                 spellCheck={false}
               />
@@ -315,7 +315,7 @@ export function SearchBar() {
               role="region"
               aria-label={t("nav.search")}
             >
-              <div className="max-w-[1400px] mx-auto px-6 py-6 max-h-[calc(100dvh-var(--topbar-height)-24px)] overflow-y-auto">
+              <div className="max-w-[1400px] mx-auto p-6 max-h-[calc(100dvh-var(--topbar-height)-24px)] overflow-y-auto">
                 {dropdownActive ? (
                   dropdownEmpty ? (
                     <SearchNoResults query={debounced} />

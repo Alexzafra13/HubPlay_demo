@@ -185,7 +185,7 @@ export default function CollectionDetail() {
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-accent/90">
               {t("collectionDetail.kind", { defaultValue: "Saga" })}
             </p>
-            <h1 className="text-3xl font-bold leading-tight tracking-tight text-text-primary drop-shadow-md sm:text-5xl">
+            <h1 className="text-3xl font-semibold leading-tight tracking-tight text-text-primary drop-shadow-md sm:text-5xl">
               {collection.name}
             </h1>
             {(totalCount > 0 || yearRange) && (

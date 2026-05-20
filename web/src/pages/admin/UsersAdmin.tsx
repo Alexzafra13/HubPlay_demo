@@ -711,7 +711,7 @@ export default function UsersAdmin() {
               <dt className="text-text-muted">{t("admin.users.role")}</dt>
               <dd>
                 {isProfile ? (
-                  <span className="text-text-muted">—</span>
+                  <span className="text-text-muted">–</span>
                 ) : (
                   <select
                     value={user.role}
@@ -738,7 +738,7 @@ export default function UsersAdmin() {
               </dt>
               <dd>
                 {user.role === "admin" ? (
-                  <span className="text-text-muted">—</span>
+                  <span className="text-text-muted">–</span>
                 ) : (
                   <select
                     value={ratingDropdownValue(user.max_content_rating)}
@@ -817,7 +817,7 @@ export default function UsersAdmin() {
               </dt>
               <dd>
                 {isProfile || user.is_primary ? (
-                  <span className="text-text-muted">—</span>
+                  <span className="text-text-muted">–</span>
                 ) : (
                   <select
                     value={user.access_expires_at ? -1 : 0}
@@ -1745,7 +1745,6 @@ export default function UsersAdmin() {
               placeholder={t('admin.users.profileNamePlaceholder', { defaultValue: 'Pedro' })}
               value={profileName}
               onChange={(e) => setProfileName(e.target.value)}
-              autoFocus
               required
             />
             {createProfile.error && (
@@ -1794,7 +1793,6 @@ export default function UsersAdmin() {
               inputMode="numeric"
               pattern="[0-9]*"
               maxLength={4}
-              autoFocus
               value={pinValue}
               onChange={(e) => setPinValue(e.target.value.replace(/[^0-9]/g, '').slice(0, 4))}
               placeholder="••••"

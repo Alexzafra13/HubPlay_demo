@@ -92,7 +92,7 @@ export default function LinkDevice() {
   return (
     <div className="mx-auto flex max-w-md flex-col gap-6 p-6 sm:p-10">
       <header>
-        <h1 className="text-2xl font-bold text-text-primary sm:text-3xl">
+        <h1 className="text-2xl font-semibold text-text-primary sm:text-3xl">
           {t("link.title")}
         </h1>
         <p className="mt-2 text-sm text-text-muted">{t("link.subtitle")}</p>
@@ -108,7 +108,6 @@ export default function LinkDevice() {
             value={code}
             onChange={(e) => setCode(e.target.value)}
             placeholder="ABCD-EFGH"
-            autoFocus
             spellCheck={false}
             autoComplete="off"
             inputMode="text"

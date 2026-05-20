@@ -709,6 +709,13 @@ function PinPad({
 
   const focusInput = () => inputRef.current?.focus();
 
+  // Foco inicial gestionado con effect en lugar de autoFocus: evita
+  // que el lector de pantalla anuncie el campo dos veces y mantiene
+  // el control en el componente.
+  useEffect(() => {
+    focusInput();
+  }, []);
+
   useEffect(() => {
     if (errorMessage) {
       focusInput();
@@ -785,7 +792,6 @@ function PinPad({
           type="tel"
           inputMode="numeric"
           pattern="[0-9]*"
-          autoFocus
           autoComplete="off"
           maxLength={4}
           value={pin}

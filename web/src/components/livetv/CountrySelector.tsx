@@ -82,7 +82,7 @@ export function CountrySelector({ hasLibrary }: CountrySelectorProps) {
               <path d="M7 22h10M12 18v4" />
             </svg>
           </div>
-          <h2 className="text-2xl font-bold text-text-primary">
+          <h2 className="text-2xl font-semibold text-text-primary">
             {hasLibrary ? t("liveTV.noChannelsLoaded") : t("liveTV.setupLiveTV")}
           </h2>
           <p className="mt-2 text-sm text-text-muted max-w-sm mx-auto">

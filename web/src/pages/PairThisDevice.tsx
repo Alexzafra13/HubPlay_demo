@@ -161,7 +161,7 @@ export default function PairThisDevice() {
     <main className="mx-auto flex min-h-screen max-w-2xl flex-col items-center gap-6 p-6 sm:p-10">
       <BrandWordmark />
       <header className="text-center">
-        <h1 className="text-2xl font-bold text-text-primary sm:text-3xl">
+        <h1 className="text-2xl font-semibold text-text-primary sm:text-3xl">
           {t("pair.title", { defaultValue: "Vincular este dispositivo" })}
         </h1>
         <p className="mt-2 text-sm text-text-muted">

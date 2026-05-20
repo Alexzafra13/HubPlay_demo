@@ -39,7 +39,7 @@ export default function PeerLibrariesPage() {
       <Link to="/peers" className="text-sm text-text-secondary hover:text-text-primary transition-colors">
         ← {t("peers.backToList")}
       </Link>
-      <h1 className="mt-2 text-2xl font-bold text-text-primary">
+      <h1 className="mt-2 text-2xl font-semibold text-text-primary">
         {peer?.name ?? t("peers.unknownPeer")}
       </h1>
       <p className="mb-6 text-sm text-text-muted">

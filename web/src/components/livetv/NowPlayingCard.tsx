@@ -38,7 +38,7 @@ export function NowPlayingCard({
           {t("liveTV.nowOnAir", { defaultValue: "Ahora en antena" })}
         </div>
         <div className="mt-2 text-sm text-tv-fg-2">
-          {t("liveTV.noEPG", { defaultValue: "Sin guía disponible" })} — {channel.name}
+          {t("liveTV.noEPG", { defaultValue: "Sin guía disponible" })} · {channel.name}
         </div>
       </div>
     );
