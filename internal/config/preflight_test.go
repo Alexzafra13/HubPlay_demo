@@ -13,11 +13,20 @@ import (
 // ffprobe executables so Preflight's exec.LookPath succeeds without relying
 // on whatever is installed on the test machine. Returns the PATH value to
 // feed to t.Setenv.
+//
+// En Windows exec.LookPath sólo considera ficheros con una extensión de
+// PATHEXT (.exe, .bat, ...); en POSIX el bit de ejecución basta. Sin
+// ajustar el nombre del fichero por OS este helper sólo "stubeaba"
+// ejecutables válidos en Linux/macOS y rompía los tests cross-platform.
 func stubPathWith(t *testing.T, bins ...string) string {
 	t.Helper()
 	dir := t.TempDir()
 	for _, name := range bins {
-		path := filepath.Join(dir, name)
+		filename := name
+		if runtime.GOOS == "windows" {
+			filename += ".exe"
+		}
+		path := filepath.Join(dir, filename)
 		if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 			t.Fatalf("write fake %s: %v", name, err)
 		}
