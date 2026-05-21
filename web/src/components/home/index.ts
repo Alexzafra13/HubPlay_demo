@@ -1,6 +1,4 @@
 export { HeroBanner } from "./HeroBanner";
-export { HomeRail, ScrollRow } from "./HomeRail";
-export { LandscapeCard } from "./LandscapeCard";
 export { ContinueWatchingRail } from "./ContinueWatchingRail";
 export { NextUpRail } from "./NextUpRail";
 export { LatestInLibraryRail } from "./LatestInLibraryRail";

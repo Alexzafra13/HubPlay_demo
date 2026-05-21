@@ -11,7 +11,7 @@ import {
 } from "@/components/media/MediaBrowseFilters";
 import { SORT_OPTIONS, type SortOption } from "@/utils/sort";
 
-export type BrowseType = "movie" | "series";
+type BrowseType = "movie" | "series";
 
 interface MediaBrowseProps {
   type: BrowseType;

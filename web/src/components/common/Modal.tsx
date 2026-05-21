@@ -230,4 +230,3 @@ const Modal: FC<ModalProps> = ({
 };
 
 export { Modal };
-export type { ModalProps, ModalSize };

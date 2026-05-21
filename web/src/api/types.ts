@@ -24,7 +24,7 @@ export interface FederationServerInfo {
   avatar_image_url?: string;
 }
 
-export type FederationPeerStatus = "pending" | "paired" | "revoked";
+type FederationPeerStatus = "pending" | "paired" | "revoked";
 
 export interface FederationPeer {
   id: string;
@@ -56,8 +56,8 @@ export interface FederationInvite {
 // requests (flow Steam-style, sin codigo). incoming = alguien
 // nos quiere emparejar; outgoing = nosotros le enviamos peticion
 // a alguien y esperamos respuesta.
-export type FederationPendingRequestDirection = "incoming" | "outgoing";
-export type FederationPendingRequestStatus =
+type FederationPendingRequestDirection = "incoming" | "outgoing";
+type FederationPendingRequestStatus =
   | "pending"
   | "accepted"
   | "declined"
@@ -404,7 +404,7 @@ export type UploadPhase = "validating" | "probing" | "moving" | "indexing";
  * Los `statics` del YAML no llevan metadata — son strings; los
  * `dynamics` añadidos via panel sí.
  */
-export interface CorsOriginEntry {
+interface CorsOriginEntry {
   origin: string;
   created_by: string;
   created_at: string;
@@ -479,7 +479,7 @@ export interface UpdateStatus {
  * librería (sin leading slash, separador "/"), no la ruta absoluta
  * en disco.
  */
-export interface LibraryFolder {
+interface LibraryFolder {
   name: string;
   path: string;
 }
@@ -489,7 +489,7 @@ export interface LibraryFolder {
  * devuelve junto a las subdirs para que el operador vea de un
  * vistazo qué hay ya antes de subir un duplicado.
  */
-export interface LibraryFile {
+interface LibraryFile {
   name: string;
   size: number;
 }
@@ -576,17 +576,6 @@ export interface AuthResponse {
   profiles?: ProfileSummary[];
 }
 
-export interface LoginRequest {
-  username: string;
-  password: string;
-}
-
-export interface RegisterRequest {
-  username: string;
-  password: string;
-  display_name?: string;
-}
-
 // ─── Libraries ──────────────────────────────────────────────────────────────
 
 /**
@@ -600,9 +589,9 @@ export interface RegisterRequest {
  */
 export type ContentType = "movies" | "shows" | "livetv";
 
-export type ScanStatus = "idle" | "scanning" | "error";
+type ScanStatus = "idle" | "scanning" | "error";
 
-export interface PathStatus {
+interface PathStatus {
   path: string;
   accessible: boolean;
 }
@@ -854,7 +843,7 @@ export interface MediaItem {
   user_data?: UserData;
 }
 
-export type StreamType = "video" | "audio" | "subtitle";
+type StreamType = "video" | "audio" | "subtitle";
 
 export interface MediaStream {
   index: number;
@@ -905,14 +894,6 @@ export interface PersonDetail {
 // {id, type, title, year, poster_url} shape the recommendations
 // rail and filmography use, so the Tile component can render any
 // of them with no special-casing.
-export interface StudioListEntry {
-  id: string;
-  name: string;
-  slug: string;
-  logo_url?: string;
-  item_count: number;
-}
-
 export interface StudioItem {
   id: string;
   type: "movie" | "series";
@@ -954,7 +935,7 @@ export interface CollectionDetail {
 // Slim {id, name} pair surfaced on a movie's detail wire so the
 // frontend can render "Part of: X" with a click-through to
 // /collections/{id}. Absent on movies without a TMDb collection match.
-export interface CollectionRef {
+interface CollectionRef {
   id: string;
   name: string;
 }
@@ -988,7 +969,7 @@ export interface UserData {
   last_played_at: string | null;
 }
 
-export interface Chapter {
+interface Chapter {
   start_ticks: number;
   end_ticks: number;
   title: string;
@@ -1011,7 +992,7 @@ export interface Chapter {
 // button automatically"; lower values exist only because future
 // fingerprint-derived rows may be uncertain — chapter-derived rows
 // always sit at 0.95.
-export type EpisodeSegmentKind = "intro" | "outro" | "recap";
+type EpisodeSegmentKind = "intro" | "outro" | "recap";
 
 export interface EpisodeSegment {
   kind: EpisodeSegmentKind;
@@ -1391,7 +1372,7 @@ export interface SystemStats {
 // probe couldn't fingerprint that field on this host (e.g. no
 // nvidia-smi for GPU; gopsutil failure for CPU model). The panel
 // renders dashes for empty rows rather than hiding them.
-export interface SystemHostStats {
+interface SystemHostStats {
   /** Human-readable CPU model (e.g. "AMD Ryzen 5 5600 6-Core Processor"). */
   cpu_model: string;
   /** Physical cores. Hyper-threaded CPUs have half the logical count. */
@@ -1409,7 +1390,7 @@ export interface SystemHostStats {
   gpu_driver_version: string;
 }
 
-export interface SystemServerStats {
+interface SystemServerStats {
   version: string;
   /** Short git SHA inyectado en build. "none" en dev builds. */
   commit?: string;
@@ -1431,14 +1412,14 @@ export interface SystemServerStats {
   timezone: string;
 }
 
-export interface SystemDatabaseStats {
+interface SystemDatabaseStats {
   ok: boolean;
   error?: string;
   path?: string;
   size_bytes: number;
 }
 
-export interface SystemFFmpegStats {
+interface SystemFFmpegStats {
   found: boolean;
   path: string;
   /**
@@ -1453,13 +1434,13 @@ export interface SystemFFmpegStats {
   hw_accel_encoder: string;
 }
 
-export interface SystemLibraryStats {
+interface SystemLibraryStats {
   total: number;
   items_total: number;
   by_type: SystemLibraryTypeStats[];
 }
 
-export interface SystemLibraryTypeStats {
+interface SystemLibraryTypeStats {
   /** "movies" | "shows" | "livetv" — same vocabulary as Library.content_type. */
   content_type: string;
   /** Number of libraries of this content type. */
@@ -1468,7 +1449,7 @@ export interface SystemLibraryTypeStats {
   items: number;
 }
 
-export interface SystemRuntimeStats {
+interface SystemRuntimeStats {
   goroutines: number;
   memory_alloc_mb: number;
   memory_sys_mb: number;
@@ -1479,12 +1460,12 @@ export interface SystemRuntimeStats {
   arch: string;
 }
 
-export interface SystemStreamingStats {
+interface SystemStreamingStats {
   transcode_sessions_active: number;
   transcode_sessions_max: number;
 }
 
-export interface SystemStorageStats {
+interface SystemStorageStats {
   image_dir_path?: string;
   image_dir_bytes: number;
   transcode_cache_path?: string;
@@ -1631,7 +1612,7 @@ export interface SetupStatus {
   current_step: "account" | "libraries" | "settings" | "complete" | "";
 }
 
-export interface BrowseDirectory {
+interface BrowseDirectory {
   name: string;
   path: string;
 }
@@ -1773,7 +1754,7 @@ export interface HomeRecommendedItem {
  * no completed watches yet (cold-start) — the rail hides itself in
  * that case.
  */
-export interface HomeBecauseSeed {
+interface HomeBecauseSeed {
   id: string;
   type: "movie" | "series";
   title: string;
@@ -1795,7 +1776,7 @@ export interface HomeBecauseResponse {
  * no plays) so the frontend can pass `buckets.map(b => b.watch_minutes)`
  * straight into `<Sparkline />` without reshaping.
  */
-export interface AdminStreamActivityBucket {
+interface AdminStreamActivityBucket {
   date: string; // YYYY-MM-DD UTC
   watch_minutes: number;
   session_count: number;
@@ -1861,7 +1842,7 @@ export interface ApiErrorBody {
 
 // AdminLibraryDisk — una biblioteca dentro de un mount fisico, con
 // su peso (sum de items.size) y file_count.
-export interface AdminLibraryDisk {
+interface AdminLibraryDisk {
   id: string;
   name: string;
   content_type: string;

@@ -459,4 +459,3 @@ const SeriesHeroKebab: FC<{ items: HeroMenuItem[] }> = ({ items }) => {
 // drifting between the two surfaces.
 
 export { SeriesHero };
-export type { SeriesHeroProps };

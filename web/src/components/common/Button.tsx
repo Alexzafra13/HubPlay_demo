@@ -88,4 +88,3 @@ function Button({
 }
 
 export { Button };
-export type { ButtonProps, ButtonVariant, ButtonSize };

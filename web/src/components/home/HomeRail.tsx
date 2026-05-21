@@ -59,7 +59,7 @@ export function HomeRail({ title, linkTo, children }: HomeRailProps) {
   );
 }
 
-export function ScrollRow({ children }: { children: ReactNode }) {
+function ScrollRow({ children }: { children: ReactNode }) {
   // Hidden scrollbar everywhere — desktop gets the chevron arrows
   // on hover (HorizontalScroller), mobile keeps native swipe-to-
   // scroll. The Plex playbook: never advertise the scrollbar.

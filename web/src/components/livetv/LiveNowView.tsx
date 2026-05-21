@@ -13,7 +13,7 @@ import { getNowPlaying, getUpNext } from "./epgHelpers";
  * either jump on the tail or skip to a fresher option, which is the
  * exact decision they came to the page to make.
  */
-export type LiveNowSort = "favorites" | "ending" | "starting" | "name";
+type LiveNowSort = "favorites" | "ending" | "starting" | "name";
 
 interface LiveNowViewProps {
   /** Channels currently broadcasting an EPG-confirmed programme. */

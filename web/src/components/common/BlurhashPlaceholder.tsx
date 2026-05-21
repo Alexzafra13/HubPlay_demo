@@ -20,7 +20,7 @@ import { decode, isBlurhashValid } from "blurhash";
 // should not render this component at all — silent fallback to the
 // existing dominant_color flat tint is the right behaviour.
 
-export interface BlurhashPlaceholderProps {
+interface BlurhashPlaceholderProps {
   hash: string;
   // Resolution to decode at. 32×32 is the sweet spot: small enough to
   // decode in <1 ms, big enough that CSS upscaling keeps the gradient

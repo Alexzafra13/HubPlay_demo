@@ -1164,4 +1164,3 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
 };
 
 export { VideoPlayer };
-export type { VideoPlayerProps };

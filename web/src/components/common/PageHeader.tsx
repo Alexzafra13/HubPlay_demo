@@ -1,10 +1,10 @@
-// HMR caveat: this file exports a component AND helper / type
-// utilities consumed by other modules. Splitting them into a
-// separate file would gain Fast Refresh but cost a per-page edit
-// shape that's worse than the (mild) HMR limitation.
+// HMR caveat: this file exports a component AND a type consumed by
+// other modules. Splitting them into a separate file would gain
+// Fast Refresh but cost a per-page edit shape that's worse than
+// the (mild) HMR limitation.
 /* eslint-disable react-refresh/only-export-components */
 import type { ReactNode } from "react";
-import { Link, useLocation } from "react-router";
+import { Link } from "react-router";
 import { ChevronRight } from "lucide-react";
 
 // PageHeader — single source of truth for the visual rhythm at the top
@@ -13,7 +13,7 @@ import { ChevronRight } from "lucide-react";
 // trailing thin border is what makes admin pages feel "anchored" to a
 // section instead of floating in a content blob.
 
-export interface BreadcrumbItem {
+interface BreadcrumbItem {
   label: string;
   to?: string;
 }
@@ -108,25 +108,3 @@ function Breadcrumbs({ items }: { items: BreadcrumbItem[] }) {
   );
 }
 
-// Helper: build breadcrumbs by parsing the current pathname segments.
-// Useful for admin pages that don't want to thread breadcrumbs by hand.
-export function useDefaultBreadcrumbs(
-  labels: Record<string, string>,
-  rootLabel = "Admin",
-): BreadcrumbItem[] {
-  const { pathname } = useLocation();
-  const segments = pathname.split("/").filter(Boolean);
-  const items: BreadcrumbItem[] = [];
-
-  let acc = "";
-  for (let i = 0; i < segments.length; i++) {
-    acc += `/${segments[i]}`;
-    const label =
-      labels[segments[i]] ??
-      labels[acc] ??
-      (i === 0 && rootLabel ? rootLabel : segments[i]);
-    items.push({ label, to: i < segments.length - 1 ? acc : undefined });
-  }
-
-  return items;
-}

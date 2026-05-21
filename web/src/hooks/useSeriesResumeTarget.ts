@@ -154,10 +154,3 @@ export function useResumeTarget(scope: ResumeScope, id: string | null): SeriesRe
   }, [scope, id, continueWatching, nextUp, children]);
 }
 
-/**
- * Back-compat alias so existing callers keep working unchanged.
- * @deprecated Prefer `useResumeTarget("series", id)`.
- */
-export function useSeriesResumeTarget(seriesId: string | null): SeriesResumeTarget {
-  return useResumeTarget("series", seriesId);
-}

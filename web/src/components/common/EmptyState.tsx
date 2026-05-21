@@ -67,4 +67,3 @@ const EmptyState: FC<EmptyStateProps> = ({
 };
 
 export { EmptyState };
-export type { EmptyStateProps };

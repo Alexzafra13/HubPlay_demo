@@ -123,7 +123,7 @@ interface UsePlaybackArgs {
    *  call site, the hook accepts the seconds-shape directly. */
 }
 
-export interface PlayerOverlayState {
+interface PlayerOverlayState {
   showPlayer: boolean;
   playerInfo: PlayerSourceInfo | null;
   /** The item currently playing in the overlay. Diverges from
@@ -133,7 +133,7 @@ export interface PlayerOverlayState {
   playError: string | null;
 }
 
-export interface NextUpInfo {
+interface NextUpInfo {
   title: string;
   seasonNumber: number | null | undefined;
   episodeNumber: number | null | undefined;

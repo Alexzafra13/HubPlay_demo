@@ -52,4 +52,3 @@ const Badge: FC<BadgeProps> = ({
 };
 
 export { Badge };
-export type { BadgeProps, BadgeVariant };

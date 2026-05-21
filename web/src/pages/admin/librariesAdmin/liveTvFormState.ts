@@ -32,7 +32,7 @@ export function makeInitialLiveTvFormState(): LiveTvFormState {
   };
 }
 
-export type LiveTvFormPayload = {
+type LiveTvFormPayload = {
   m3u_url: string;
   epg_url?: string;
   language_filter?: string[];

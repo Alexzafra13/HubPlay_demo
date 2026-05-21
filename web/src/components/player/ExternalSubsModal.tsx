@@ -193,4 +193,3 @@ const ExternalSubsModal: FC<ExternalSubsModalProps> = ({
 };
 
 export { ExternalSubsModal };
-export type { ExternalSubsModalProps };
