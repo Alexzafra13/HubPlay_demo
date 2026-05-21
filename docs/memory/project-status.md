@@ -6,17 +6,126 @@
 
 ---
 
-## 🔭 Estado actual (2026-05-21, post-cierre — CC fase 2 + scanner W)
+## 🔭 Estado actual (2026-05-21, Iter6 medio — composition root V+JJ+LL+G)
 
-- Branch principal: `main`, working tree limpio. PR única abierta: **#376** (web-deps group, 17 updates, CI mayoritariamente verde — Test Backend/Postgres/Build pendientes en el momento del cierre).
+- Branch principal: `main`, V+JJ+LL ya mergeados via **PR #395** (commit `61396a3`). Branch de trabajo `claude/review-project-9YJxG` rebaseada sobre el nuevo main — aporta solo G parcial (`8b746fc`) + memoria (`e899169`) en hacia el PR siguiente.
+- Working tree limpio. PR única abierta en GitHub: **#376** (web-deps group, 17 updates — CI pendiente del último estado).
 - Última release pública: `nightly` rolling tag (workflow `release.yml`).
-- Tests: `go test -race ./...` verde en CI (#392 + #393 confirmaron full matrix verde — Linux/macOS amd64+arm64, Postgres incluido); frontend **646/646** vitest verdes; `tsc -b` limpio; production build limpio.
+- Tests: `go test -race ./...` verde end-to-end con todo Iter 6 V+JJ+LL+G aplicado; frontend **646/646** vitest verdes; `tsc -b` limpio; production build limpio.
 - **React Compiler activado** + `eslint-plugin-react-compiler` como hard gate. `react-compiler-healthcheck`: 542/542 componentes compatibles. Quality gates en CI: `typecheck` (hard), `react-compiler-healthcheck` (hard), **`knip` (hard)**, `react-doctor` (visibility-only con comentarios inline en PRs).
 - **Score React Doctor: ≥75/100 ("Great")** post-VideoPlayer-split (PR #381 mergeada). El offender principal de las reglas estructurales (`no-cascading-set-state`) eliminado; `no-giant-component` reducido de 1003 a 663 lines; `prefer-useReducer` de 12 useState a 5.
 - **knip: 0 unused files / 0 unused deps / 0 unused exports / 0 unused types**. Hard gate en CI.
-- **Audit 2026-05-14 — olor CC cerrado al 100 %** (PR #392 — CC fase 2 ChannelOrderOps), **olor W cerrado** (PR #393 — scanner.go split 1491 → 332 LoC). De los **6 olores altos** del audit (A+M, B+J, CC, P, W, F14-2-a), 5 están cerrados — sólo queda F14-2-a (function-level quality).
+- **Audit 2026-05-14 — Iteración 6 al 80 % cerrada esta sesión** (V + JJ + LL + G parcial). Queda **H** (router split + interfaces en Dependencies) para sesión propia. De los **6 olores altos** del audit original (A+M, B+J, CC, P, W, F14-2-a), 5 están cerrados — sólo queda F14-2-a (function-level quality).
 - **Dependabot alerts**: 8 → 1 (1 critical eliminada). PRs #385 (to-ico→png-to-ico, 5 vulns), #289 (picomatch alert #18) mergeadas. Queda 1 medium (file-type transitive de node-vibrant — bloqueada hasta upstream).
 - HubPlay distribuible "descargar y usar" en los tres targets (desktop / Linux server / NAS-via-Docker) — flujo cerrado en la sesión 2026-05-19/20.
+
+---
+
+## 🏗️ Sesión 2026-05-21 (noche) — Iteración 6 composition root: V + JJ + LL + G parcial
+
+Sesión continuación que ataca el grueso de Iter 6 del audit 2026-05-14 (composition root). De los 5 olores listados (G, H, V, LL, JJ) **4 se cierran** total o parcialmente en 2 commits sobre `claude/review-project-9YJxG`. H queda para sesión propia (router.go es el fichero de mayor blast-radius — 1460 LoC en un solo `r.Route("/api/v1", ...)`).
+
+### Commits en `claude/review-project-9YJxG` (pusheada, sin PR)
+
+| Commit | Tema | Olores | Estado |
+|---|---|---|---|
+| [`61396a3`](https://github.com/Alexzafra13/HubPlay_demo/commit/61396a3) (PR #395) | Primitivos de Config en Dependencies + stream.NewManager(Deps) + docs LL | V + JJ + LL | ✅ mergeado a main |
+| [`8b746fc`](https://github.com/Alexzafra13/HubPlay_demo/commit/8b746fc) | Drop `runtime` god-struct → `lifecycle` con 3 fases | G parcial | 🟡 en `claude/review-project-9YJxG` pendiente de PR |
+
+### Olor V — `router.go` lee `deps.Config.*` directo (media)
+
+Las 17 lecturas dispersas de `deps.Config.X.Y` desde el cuerpo del router (handler construction sites: AuthHandler, HealthHandler, SystemHandler, SettingsHandler, AdminBackupHandler, ImageHandler federation, trickplayDir, etc.) se reemplazan por **13 campos primitivos** en `Dependencies`, materializados una sola vez en `main.go` desde `cfg`:
+
+```
+MetricsEnabled, MetricsPath, AuthConfig, DataDir, DatabasePath,
+DatabaseDriver, ServerAddr, ServerBaseURL, ServerPort, MDNSEnabled,
+MDNSHostname, HWAccelDefault, AllowedOrigins.
+```
+
+El campo `Config *config.Config` se mantiene únicamente para los dos handlers que MUTAN el fichero on-the-fly (setup wizard + `AdminDBHandler`, ambos llaman a `config.Save`). Docstring del campo actualizado para narrow del uso permitido.
+
+**Retro-compat**: helper privado `Dependencies.fillFromConfig()` al top de `NewRouter` rellena primitivos a-zero desde `Config`. Los dos integration tests (`integration_test.go`, `stream_integration_test.go`) que sólo pasan `Config: cfg` siguen funcionando sin tocarse; el "path idiomático" es pasar primitivos explícitos (main.go).
+
+### Olor JJ — 3 setters post-construcción en `stream.Manager` (baja)
+
+`SetMetrics + SetEventBus + SetForceDirectPlayLookup` eran un Builder Pattern accidental: 4 llamadas encadenadas en `main.go` para dejar el Manager en estado "listo". Sustituidas por un único call con `stream.Deps{Items, Streams, Config, Logger, Metrics, EventBus, ForceDirectPlayLookup}` pasado a `NewManager`.
+
+Los setters **siguen existiendo** en la API pública porque tests del paquete los usan para swap de stub→real mid-test (`TestManager_SetMetrics_*`) y el comentario de `SetForceDirectPlayLookup` documenta el contrato runtime-swap. Producción wires todo atómico vía `NewManager(Deps{...})`.
+
+`NewManager` ahora seedea el gauge `SetActiveSessions(0)` en el wiring inicial cuando `Deps.Metrics != nil`, igual que el contrato documentado de `SetMetrics`.
+
+### Olor LL — Manager + Transcoder con doble session tracking (media)
+
+**Cerrado por documentación**. El grounding del audit confirmó que las dos maps (`Manager.sessions` keyed por `sessionKey(user,item,profile,audio,sub)` y `Transcoder.sessions` keyed por sessionID bare) NO son duplicado — apuntan al mismo `*Session` por debajo (`ManagedSession` embed un `*Session`) pero con propósitos distintos:
+
+- `Manager.sessions`: sesión LÓGICA del usuario (decisión de playback, user context, `restartMu` por-sesión, `LastAccessed`). API pública.
+- `Transcoder.sessions`: proceso ffmpeg físico (`cmd`, `cancel`, `done`). Interno al paquete.
+
+Docstrings struct-level en `Manager` y `Transcoder` hacen explícita la separación de responsabilidades. El refactor "Transcoder stateless" que el audit sugería (mover cmd/cancel/done a ManagedSession) implica reescribir Start + RestartSessionAt + StopSession y se difiere como sesión propia — la documentación inline marca el camino.
+
+### Olor G — `Dependencies`+`runtime`+`main.run` god-trio (media-alta) · **parcial**
+
+Antes:
+
+```
+runtime { server, streamManager, iptvService, iptvProxy, iptvTransmux,
+          iptvScheduler, iptvProber, scanScheduler, imageRefreshScheduler,
+          libraryService, authService, retention, database, dbDriver,
+          logger }  // 16 campos
+waitForShutdown(ctx, cancel, rt *runtime) → 98 LoC desempaquetando los
+                14 punteros + 14 .Stop()/.Shutdown() encadenados con orden
+                explícito en el cuerpo.
+```
+
+El comentario del repo lo admitía como el síntoma + workaround ("adding a new bg service is now a one-line struct-field append plus a Stop call inside waitForShutdown" = ES el smell, no la fix).
+
+Después:
+
+Nuevo fichero `cmd/hubplay/lifecycle.go` (93 LoC) con un `lifecycle` struct que agrupa componentes long-lived en **dos slices según fase**:
+
+- **`workers`** — bg jobs independientes de HTTP (iptv scheduler, iptv prober, scan scheduler, image refresh scheduler, session cleaner, retention runner). Se paran PRIMERO en add-order — dejan de generar actividad antes de tirar el resto.
+- **`services`** — componentes HTTP-coupled (stream manager, iptv service/proxy/transmux, library service). Se paran ÚLTIMO en **LIFO** (reverse-of-add) — el último wirings depende de los anteriores, así que tirarlo primero respeta el grafo.
+
+Entre las dos fases va el `server.Shutdown(ctx)`. El root ctx se cancela tras services, antes de `db.Optimize` + `database.Close`.
+
+main.run wirea cada componente y lo registra con una sola llamada:
+
+```go
+lc.AddWorker("iptv scheduler", func(ctx context.Context) error {
+    iptvScheduler.Stop(ctx); return nil
+})
+```
+
+Sin god-struct intermedio, sin desempaquetado posicional, sin "olvidé añadirlo a `runtime`". `waitForShutdown` pasó de 98 LoC a ~70. main.go neto: +13 LoC.
+
+**Lo que NO se cierra en este commit**: el olor G del audit pide también extraer **feature modules** (`library.New(ctx, deps) *Module`, `iptv.New(ctx, deps) *Module`) que devuelvan service + workers + cleanup como una unidad. Cada módulo wraparía 3-9 sub-componentes (library: scnr + scheduler + refresher + segmentDetector + fingerprinter + fsWatcher; iptv: service + proxy + transmux + scheduler + prober + logo). Eso requiere un commit per-paquete porque toca seams entre paquetes (scanner shared library/iptv, libraryService passed a iptv proxy via interface, etc.). **Diferido como sesiones futuras**. Esta tanda cierra el síntoma del audit (god-struct + workaround comment) sin tocar la API pública de los paquetes feature.
+
+### Olor H — `Dependencies` (57 campos, 22 `*db.X` concretos) — **pendiente, sesión propia**
+
+Dos paths posibles según el audit:
+
+1. **mountXxx helpers** (más simple) — split `r.Route("/api/v1", ...)` callback monolítico (~1100 LoC dentro del callback) en `mountAdmin(r, deps)`, `mountIPTV(r, deps)`, `mountFederation(r, deps)`, `mountItems(r, deps)`, etc. Cada helper recibe `Dependencies` + chi.Router. NewRouter pasa a ser una serie de calls a mountXxx.
+2. **Interfaces en Dependencies** — los 22 `*db.X` concretos en Dependencies → interfaces. Los handlers ya consumen interfaces locales (consumer-side, bien); el contrato queda doblemente expresado. Más limpio arquitectónicamente pero más blast-radius.
+
+router.go es **el fichero de mayor blast-radius del repo** (TODA el tráfico HTTP pasa por él). Hacer ambos (1+2) es la fix completa al 100% del olor. Mínimo viable: 3-4 mount helpers grandes (admin/system, iptv, federation) como proof-of-pattern, dejando el resto en NewRouter por ahora.
+
+### Aprendizajes operativos
+
+- **El audit's "LIFO slice" para teardown es too-simple en la práctica**: la ordenación de shutdown de HubPlay tiene 3 fases por **dominio** (workers independientes → HTTP drain → services HTTP-coupled), no LIFO de init order. Ejemplo: el `iptv scheduler` se wirea TARDÍSIMO pero hay que pararlo PRONTO (antes de HTTP) porque genera DB load durante shutdown. Strict LIFO lo haría al revés. La `lifecycle` con phased AddWorker/AddService captura el dominio.
+
+- **Setters como API de tests es legítimo**: el audit JJ pide eliminar los 3 setters de `stream.Manager`, pero los tests usan `SetMetrics`/`SetEventBus` mid-test para swap de stubs. Decisión: setters se quedan (API pública para tests), producción usa Deps. El "Builder Pattern accidental" smell se refiere a producción, no a tests.
+
+- **fillFromConfig() como retro-compat para tests minimalistas**: los dos integration tests sólo pasan `Config: cfg` y nunca lo tocarían. En vez de obligarles a llenar 13 primitivos nuevos, un helper privado al top de NewRouter rellena a-zero desde Config. Tests no se tocan, main.go usa el path idiomático, ambos caminos coexisten.
+
+- **El comentario que admite el síntoma ES el smell**: el comentario de `runtime` en main.go ("adding a new bg service is now a one-line struct-field append…") presentaba el workaround como solución; el audit lo flaggea correctamente. Al cerrar G hay que sustituir tanto el código como el comentario — si dejara la justificación intacta, el lector futuro reintroducirí­a el smell pensando que es deliberado.
+
+### Métricas globales de esta sesión
+
+- **2 commits** sobre `claude/review-project-9YJxG`, pusheados.
+- **4 olores cerrados** (V + JJ + LL completos + G parcial) de Iteración 6.
+- **1 olor pendiente** (H) — para sesión propia.
+- Tests: `go test -race ./...` verde en 2 corridas independientes (V+JJ luego con G), `golangci-lint`: 0 issues, `go vet`: limpio.
+- LoC: `runtime` (16 campos) + `waitForShutdown` (98 LoC) eliminados; `lifecycle.go` (93 LoC) nuevo. main.go neto +13. router.go +115 (campos primitivos + docs + helper).
 
 ---
 
@@ -516,8 +625,17 @@ Ver [audit-2026-05-14-go-backend-review.md](audit-2026-05-14-go-backend-review.m
 - ~~CC fase 1~~ ✅ Favorites + WatchHistory + Health (PR #390, sesión tarde-noche)
 - ~~CC fase 2~~ ✅ ChannelOrderOps (PR #392, esta sesión)
 
-**Iteración 6 — composition root**:
-- G, H, V, LL, JJ — limpiar `cmd/hubplay/main.go` + `router.go` (acceso a `deps.Config.*` directo, fanout de dependencias, etc.). Q ya se cerró en sweep M.5. **Próxima cola natural.**
+**Iteración 6 — composition root** (4 de 5 cerrados esta sesión 2026-05-21 noche):
+- ~~V~~ ✅ primitivos de Config a `Dependencies` (PR #395, `61396a3`)
+- ~~JJ~~ ✅ `stream.NewManager(Deps{...})` wiring atómico (PR #395, `61396a3`)
+- ~~LL~~ ✅ docs `Manager`/`Transcoder` (cerrado por diseño, PR #395, `61396a3`)
+- ~~G~~ ⚠️ parcial — `runtime` god-struct sustituido por `lifecycle` con 3 fases (commit `8b746fc` en `claude/review-project-9YJxG`, pendiente PR). Feature modules (`library.Module`, `iptv.Module`) **diferidos** — cierra el síntoma del audit pero no al 100 %.
+- **H** ⏳ pendiente — split `router.go` (1460 LoC, `r.Route("/api/v1", ...)` monolítico de ~1100 LoC) en `mountXxx` helpers per-feature + opcionalmente interfaces en `Dependencies` para los 22 `*db.X` concretos. **Sesión propia** — router.go es el fichero de mayor blast-radius del repo. Branch `claude/review-project-9YJxG` pendiente de PR.
+
+**Iteración 6 fase 2 (post-H)** — feature modules:
+- `library.New(ctx, deps) (*Module, error)` que devuelva Service + scnr + scanScheduler + imageRefresher + imageRefreshScheduler + segmentDetector + segmentFingerprinter + fsWatcher + `Shutdown(ctx)`. Cerraría G al 100%.
+- `iptv.New(ctx, deps) (*Module, error)` análogo: service + proxy + transmux + scheduler + prober + logoCache + Shutdown. Toca el seam `scanner` (compartido con library para IPTV-as-channel-source).
+- Auth, federation, retention también admiten feature modules pero ROI menor.
 
 **Iteración 7 — cosmética + schema** (parcialmente cerrada):
 - ~~W~~ ✅ `scanner.go` split en 6 ficheros (PR #393, esta sesión).
