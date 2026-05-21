@@ -84,6 +84,15 @@ func run(configPath string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// lifecycle dirige el shutdown ordenado por dominio (workers
+	// independientes → HTTP drain → services HTTP-coupled). Reemplaza
+	// el `runtime` god-struct del flujo pre-refactor (olor G del audit
+	// 2026-05-14). Cada componente long-lived se registra con
+	// `lc.AddWorker(name, stopFn)` o `lc.AddService(name, stopFn)`
+	// junto al wiring — sin god-struct intermedio, sin desempaquetado
+	// posicional en waitForShutdown.
+	lc := &lifecycle{}
+
 	// ═══ Phase 1: Foundation ═══
 	cfg, err := config.Load(configPath)
 	if err != nil {
@@ -187,6 +196,10 @@ func run(configPath string) error {
 	authService := auth.NewService(repos.Users, repos.Sessions, keyStore, cfg.Auth, clk, logger, cfg.RateLimit)
 	authService.SetEventBus(eventBus)
 	authService.StartSessionCleaner(ctx)
+	lc.AddWorker("session cleaner", func(context.Context) error {
+		authService.StopSessionCleaner()
+		return nil
+	})
 	deviceCodeService := auth.NewDeviceCodeService(authService, repos.DeviceCodes, repos.Users, logger)
 	// avatarsDir vive junto a la DB para compartir volumen docker.
 	// Si el operador no tiene la DB en disco (modo :memory: en
@@ -223,6 +236,12 @@ func run(configPath string) error {
 
 	scnr := scanner.New(repos.Items, repos.MediaStreams, repos.Metadata, repos.ExternalIDs, repos.Images, repos.Chapters, repos.People, repos.ItemValues, repos.Studios, repos.Collections, repos.ItemMetadataLocks, providerManager, prober, eventBus, imageDir, scannerPathmap, logger)
 	libraryService := library.NewService(repos.Libraries, repos.Items, repos.MediaStreams, repos.Images, repos.Channels, repos.ItemValues, scnr, logger)
+	// Drain librería en LIFO de la fase services — sus goroutines de
+	// auto-scan tocan DB y deben terminar ANTES del database.Close().
+	lc.AddService("library service", func(context.Context) error {
+		libraryService.Shutdown()
+		return nil
+	})
 
 	// Periodic SQLite query-planner refresh + FTS5 merge. Fires every
 	// 6h once started; first tick is on the interval, not immediately,
@@ -234,6 +253,10 @@ func run(configPath string) error {
 	// ═══ Phase 4a: Library Scan Scheduler ═══
 	scanScheduler := library.NewScheduler(libraryService, logger)
 	scanScheduler.Start(ctx)
+	lc.AddWorker("scan scheduler", func(context.Context) error {
+		scanScheduler.Stop()
+		return nil
+	})
 
 	// ═══ Phase 4a-bis: Image Refresh Scheduler ═══
 	//
@@ -250,6 +273,10 @@ func run(configPath string) error {
 	)
 	imageRefreshScheduler := library.NewImageRefreshScheduler(repos.Libraries, imageRefresher, logger)
 	imageRefreshScheduler.Start(ctx)
+	lc.AddWorker("image refresh scheduler", func(context.Context) error {
+		imageRefreshScheduler.Stop()
+		return nil
+	})
 
 	// ═══ Phase 4a-ter: Episode Segment Detector (skip-intro) ═══
 	//
@@ -352,11 +379,25 @@ func run(configPath string) error {
 			return v == "true"
 		},
 	})
+	lc.AddService("stream manager", func(context.Context) error {
+		streamManager.Shutdown()
+		return nil
+	})
 
 	// ═══ Phase 4c: IPTV ═══
 	iptvService := iptv.NewService(repos.Channels, repos.EPGPrograms, repos.Libraries, repos.ChannelFavorites, repos.ChannelOrder, repos.LibraryChannelOrder, repos.LibraryEPGSources, repos.ChannelOverrides, repos.ChannelLogoOverrides, repos.ChannelWatchHistory, logger)
 	iptvService.SetEventBus(eventBus)
+	lc.AddService("iptv service", func(context.Context) error {
+		iptvService.Shutdown()
+		return nil
+	})
 	iptvProxy := iptv.NewStreamProxy(logger)
+	// iptvProxy.ClearRelays sólo vacía contabilidad — el drain real
+	// viene del http.Server.Shutdown previo (audit olor EE).
+	lc.AddService("iptv proxy", func(context.Context) error {
+		iptvProxy.ClearRelays()
+		return nil
+	})
 	// Wire health reporting now that both pieces exist. The proxy
 	// records probe outcomes against the channel repo through the
 	// service so dead upstreams drop out of the user view.
@@ -405,6 +446,16 @@ func run(configPath string) error {
 			"max_reencode_sessions", iptvTransmux.MaxReencodeSessions(),
 			"reencode_encoder", hwInfo.Encoder,
 			"hwaccel", hwInfo.Selected)
+		// Capturado por valor del puntero — `iptvTransmux` está vivo
+		// en el cierre de Add aunque después la variable salga de
+		// scope. AddService ejecuta en LIFO, así que transmux se
+		// para ANTES que iptv service (que es lo correcto: el
+		// transmux le devuelve health al service en cleanup).
+		tm := iptvTransmux
+		lc.AddService("iptv transmux", func(context.Context) error {
+			tm.Shutdown()
+			return nil
+		})
 	}
 
 	// Channel logo cache. Mirrors upstream `tvg-logo` URLs to disk
@@ -435,6 +486,13 @@ func run(configPath string) error {
 	// morning. Sequential — see scheduler.go for why.
 	iptvScheduler := iptv.NewScheduler(repos.IPTVSchedules, iptvService, logger)
 	iptvScheduler.Start(ctx)
+	// Stop scheduler antes que iptv service en la fase de workers
+	// — el comentario de audit lo justifica: una refresh en vuelo
+	// tiene que grabar su outcome contra un DB handle abierto.
+	lc.AddWorker("iptv scheduler", func(ctx context.Context) error {
+		iptvScheduler.Stop(ctx)
+		return nil
+	})
 
 	// Active stream prober: walks every livetv library every few hours
 	// and records a probe outcome against each channel via the same
@@ -445,6 +503,9 @@ func run(configPath string) error {
 	iptvProberWorker := iptv.NewProberWorker(iptvProber, repos.Libraries, repos.Channels, logger)
 	iptvProberWorker.Start(ctx)
 	iptvService.SetProberWorker(iptvProberWorker)
+	lc.AddWorker("iptv prober", func(ctx context.Context) error {
+		return iptvProberWorker.Stop(ctx)
+	})
 
 	// ═══ Phase 4e: Setup Service ═══
 	setupService := setup.NewService(cfg, configPath, logger)
@@ -530,6 +591,10 @@ func run(configPath string) error {
 	// IPTV or federation still get a no-op runner that costs nothing.
 	retentionRunner := retention.New(cfg.Retention, iptvService, federationRepo, logger)
 	retentionRunner.Start(ctx)
+	lc.AddWorker("retention runner", func(context.Context) error {
+		retentionRunner.Stop()
+		return nil
+	})
 
 	// Host metrics sampler: CPU%, RAM, CPU/GPU model strings.
 	// Background goroutine ticks every 5 s and stores the latest
@@ -752,70 +817,22 @@ func run(configPath string) error {
 	}()
 
 	// ═══ Phase 7: Wait for shutdown ═══
-	// runtime bundles every long-lived component the shutdown path
-	// needs to stop or close. Adding a new background service is now
-	// a one-line struct-field append plus a Stop call inside
-	// waitForShutdown — instead of editing the positional argument
-	// list and risking a "forgot to wire it through" leak. The class
-	// of bug that fix is intended to prevent is "I added IPTV prober
-	// last quarter and only spotted that we never closed it during
-	// SIGTERM when CI flaked on a leaked goroutine."
-	return waitForShutdown(ctx, cancel, &runtime{
-		server:                server,
-		streamManager:         streamManager,
-		iptvService:           iptvService,
-		iptvProxy:             iptvProxy,
-		iptvTransmux:          iptvTransmux,
-		iptvScheduler:         iptvScheduler,
-		iptvProber:            iptvProberWorker,
-		scanScheduler:         scanScheduler,
-		imageRefreshScheduler: imageRefreshScheduler,
-		libraryService:        libraryService,
-		authService:           authService,
-		retention:             retentionRunner,
-		database:              database,
-		dbDriver:              cfg.Database.Driver,
-		logger:                logger,
-	})
+	return waitForShutdown(ctx, cancel, server, lc, database, cfg.Database.Driver, logger)
 }
 
-// runtime is the bag of long-lived components the shutdown path drives.
-// Every field here must be safe to call its Stop / Shutdown / Close
-// method even when the corresponding feature is disabled (see nil-checks
-// in waitForShutdown).
-type runtime struct {
-	server                *http.Server
-	streamManager         *stream.Manager
-	iptvService           *iptv.Service
-	iptvProxy             *iptv.StreamProxy
-	iptvTransmux          *iptv.TransmuxManager
-	iptvScheduler         *iptv.Scheduler
-	iptvProber            *iptv.ProberWorker
-	scanScheduler         *library.Scheduler
-	imageRefreshScheduler *library.ImageRefreshScheduler
-	libraryService        *library.Service
-	authService           *auth.Service
-	retention             *retention.Runner
-	database              *sql.DB
-	dbDriver              string
-	logger                *slog.Logger
-}
-
-func waitForShutdown(ctx context.Context, cancel context.CancelFunc, rt *runtime) error {
-	server := rt.server
-	sm := rt.streamManager
-	iptvSvc := rt.iptvService
-	iptvProxy := rt.iptvProxy
-	iptvTransmux := rt.iptvTransmux
-	iptvSched := rt.iptvScheduler
-	iptvProber := rt.iptvProber
-	scheduler := rt.scanScheduler
-	imageRefreshSched := rt.imageRefreshScheduler
-	librarySvc := rt.libraryService
-	authSvc := rt.authService
-	retentionRunner := rt.retention
-	database := rt.database
-	logger := rt.logger
+// waitForShutdown bloquea hasta SIGINT/SIGTERM o ctx-cancel, luego
+// dirige el teardown en tres fases (ver docstring de `lifecycle`).
+// shutdownCtx bounds el budget total a 30s — tareas que excedan se
+// cancelan en lugar de bloquear el binario indefinidamente.
+func waitForShutdown(
+	ctx context.Context,
+	cancel context.CancelFunc,
+	server *http.Server,
+	lc *lifecycle,
+	database *sql.DB,
+	dbDriver string,
+	logger *slog.Logger,
+) error {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
@@ -831,65 +848,37 @@ func waitForShutdown(ctx context.Context, cancel context.CancelFunc, rt *runtime
 
 	logger.Info("starting graceful shutdown...")
 
-	// Stop background services. Stop the IPTV scheduler before the
-	// IPTV service itself so an in-flight refresh has a chance to
-	// finish recording its outcome against an open DB handle. The
-	// shutdownCtx bounds the wait — if a run is stuck past the
-	// supervisor deadline the scheduler cancels its in-flight ctx
-	// rather than block the whole shutdown.
-	iptvSched.Stop(shutdownCtx)
-	logger.Info("iptv scheduler stopped")
-	if err := iptvProber.Stop(shutdownCtx); err != nil {
-		logger.Warn("iptv prober stop", "error", err)
-	}
-	logger.Info("iptv prober stopped")
-	scheduler.Stop()
-	logger.Info("scan scheduler stopped")
-	imageRefreshSched.Stop()
-	logger.Info("image refresh scheduler stopped")
-	authSvc.StopSessionCleaner()
-	logger.Info("session cleaner stopped")
-	retentionRunner.Stop()
-	logger.Info("retention runner stopped")
+	// Fase 1 — workers en add-order. Independientes de HTTP; los
+	// paramos primero para que no generen actividad nueva mientras
+	// los services se van bajando.
+	lc.stopWorkers(shutdownCtx, logger)
 
-	// Stop HTTP server
+	// Fase 2 — HTTP drain. Espera a que los requests in-flight
+	// terminen; bounded por shutdownCtx (los handlers streaming
+	// llaman a DisableWriteDeadline pero el ctx del request se
+	// cancela igual al expirar el shutdown budget).
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		logger.Error("HTTP server shutdown error", "error", err)
 	}
 	logger.Info("HTTP server stopped")
 
-	// Stop all streaming sessions
-	sm.Shutdown()
-	logger.Info("stream manager stopped")
+	// Fase 3 — services HTTP-coupled en LIFO. El último registrado es
+	// el primero parado; los que dependen de otros suelen registrarse
+	// más tarde, así que LIFO respeta el grafo natural.
+	lc.stopServices(shutdownCtx, logger)
 
-	// Stop IPTV. El proxy NO drena goroutines aquí: el drain real
-	// viene del http.Server.Shutdown previo, que cancela los ctx
-	// de los requests en vuelo. ClearRelays solo vacía la
-	// contabilidad (audit olor EE).
-	iptvProxy.ClearRelays()
-	if iptvTransmux != nil {
-		iptvTransmux.Shutdown()
-	}
-	iptvSvc.Shutdown()
-	logger.Info("IPTV services stopped")
-
-	// Drain in-flight auto-scan goroutines BEFORE closing the DB so they
-	// don't race on "sql: database is closed".
-	librarySvc.Shutdown()
-	logger.Info("library service stopped")
-
-	// Cancel root context
+	// Cancel root context AFTER services drained — algunos services
+	// usan el ctx interno para señalar shutdown de sub-goroutines.
 	cancel()
 
 	// Refresh sqlite query-planner stats before closing so the next
 	// process starts with up-to-date analysis. PRAGMA optimize is a
-	// no-op for tables that haven't changed; this is best-effort and
-	// never blocks shutdown. No-op on Postgres.
+	// no-op for tables que no han cambiado; best-effort y nunca
+	// bloquea shutdown. No-op en Postgres.
 	optimizeCtx, optimizeCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	db.Optimize(optimizeCtx, rt.dbDriver, database, logger)
+	db.Optimize(optimizeCtx, dbDriver, database, logger)
 	optimizeCancel()
 
-	// Close database
 	if err := database.Close(); err != nil {
 		logger.Error("database close error", "error", err)
 	}
