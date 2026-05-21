@@ -19,11 +19,11 @@ en este doc (no se edita el audit original).
 | 1 | ✅ cerrada | Fixes urgentes seguridad + correctness | FFF, F16-1, RRR-mig, RR, Y, DD, GGGG, AAA, EE, HHH, F16-6, F16-7 | 12 olores cerrados, suite verde |
 | 2 | ✅ cerrada | Sub-paquetes de `db/` | B, J, K, T, L | Sesión M.2 (B+J) + sesión M.3 (L) + sesión M.4 (K+T) |
 | 3 | ✅ cerrada | Migración Opción B incremental | M (iptv ✅ + auth ✅ + library ✅) | Cerrada en sesiones M.6 (auth) + M.7 (iptv) + M.8 (library) |
-| 4 | ⏳ pendiente | Split de god-handlers/services | P, Z, QQ | — |
-| 5 | ⏳ pendiente | Refactor estructural `iptv/` | CC | — |
-| 6 | ⏳ pendiente | Composition root | G, H, V, Q, LL, JJ | — |
-| 7 | ⏳ pendiente | Cosmética + schema | D, X, W, BB, UUU-mig, etc. | — |
-| 8 | ⏳ pendiente | Polish de calidad de código | F14-X, F15-X, F16-X | — |
+| 4 | ✅ cerrada | Split de god-handlers/services | P, Z, QQ | Sesión 2026-05-21 tarde (PRs #384, #386+#388, #389) |
+| 5 | ✅ cerrada | Refactor estructural `iptv/` | CC (fase 1 + 2) | Fase 1 sesión tarde-noche (PR #390); fase 2 sesión post-cierre (PR #392) |
+| 6 | ⏳ pendiente | Composition root | G, H, V, Q, LL, JJ | Q ya cerrada en sweep M.5; resto en cola |
+| 7 | 🔄 en curso | Cosmética + schema | D, X, ~~W~~, BB, ~~UUU-mig~~ | W cerrada sesión post-cierre (PR #393, scanner.go 1491 → 332 LoC); D/X/BB pendientes |
+| 8 | ⏳ pendiente | Polish de calidad de código | F14-X (queda F14-2-a único alto pendiente), F15-X, F16-X | — |
 | 9 | ⏳ pendiente | Verificación empírica | `-race`, `goleak`, `govulncheck` | post-merge |
 | — | ✅ cerrada | Sweep de perf oportunista | UUU-mig, Q | Sesión M.5 — fuera del orden 0-9, ataque dirigido a las dos palancas de perf más claras del audit |
 
