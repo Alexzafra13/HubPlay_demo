@@ -557,7 +557,17 @@ func (m *Manager) startSessionSlow(ctx context.Context, userID, itemID, profileN
 	if startTime > 0 {
 		startSegment = int(startTime / 6) // matches -hls_time 6
 	}
-	session, err := m.transcoder.Start(key, itemID, item.Path, decision.Profile, startTime, decision.CopyVideo, decision.CopyAudio, decision.ToneMap, startSegment, audioStreamIndex, burnSub)
+	session, err := m.transcoder.Start(key, itemID, TranscodeRequest{
+		Input:              item.Path,
+		Profile:            decision.Profile,
+		StartTime:          startTime,
+		CopyVideo:          decision.CopyVideo,
+		CopyAudio:          decision.CopyAudio,
+		ToneMap:            decision.ToneMap,
+		StartSegmentNumber: startSegment,
+		AudioStreamIndex:   audioStreamIndex,
+		BurnSub:            burnSub,
+	})
 	if err != nil {
 		m.metrics.TranscodeFailed()
 		return nil, fmt.Errorf("start transcode: %w", err)
@@ -739,19 +749,17 @@ func (m *Manager) RestartSessionAt(key string, segmentIndex int, segmentDuration
 	}
 
 	startTime := float64(segmentIndex) * segmentDuration
-	newSession, err := m.transcoder.RestartAt(
-		key,
-		ms.ItemID,
-		ms.InputPath,
-		ms.Decision.Profile,
-		startTime,
-		ms.Decision.CopyVideo,
-		ms.Decision.CopyAudio,
-		ms.Decision.ToneMap,
-		segmentIndex,
-		ms.AudioStreamIndex,
-		ms.BurnSubtitle,
-	)
+	newSession, err := m.transcoder.RestartAt(key, ms.ItemID, TranscodeRequest{
+		Input:              ms.InputPath,
+		Profile:            ms.Decision.Profile,
+		StartTime:          startTime,
+		CopyVideo:          ms.Decision.CopyVideo,
+		CopyAudio:          ms.Decision.CopyAudio,
+		ToneMap:            ms.Decision.ToneMap,
+		StartSegmentNumber: segmentIndex,
+		AudioStreamIndex:   ms.AudioStreamIndex,
+		BurnSub:            ms.BurnSubtitle,
+	})
 	if err != nil {
 		return fmt.Errorf("restart transcode at segment %d: %w", segmentIndex, err)
 	}
