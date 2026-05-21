@@ -6,19 +6,112 @@
 
 ---
 
-## 🔭 Estado actual (2026-05-21, cierre)
+## 🔭 Estado actual (2026-05-21, cierre tarde-noche)
 
-- Branch principal: `main`, working tree limpio.
+- Branch principal: `main`, working tree limpio. PRs abiertas pendiente review: **#388, #389, #390** (todas de la sesión de tarde — refactors estructurales del audit con CI verde).
 - Última release pública: `nightly` rolling tag (workflow `release.yml`).
-- Tests: `go test -race ./...` verde en CI; frontend **616/616** vitest verdes; `tsc -b` limpio; production build limpio (~25 s con React Compiler + LazyMotion activados).
-- **React Compiler activado** + `eslint-plugin-react-compiler` como hard gate. `react-compiler-healthcheck`: 542/542 componentes compatibles. Quality gates en CI: `typecheck` (hard), `react-compiler-healthcheck` (hard), **`knip` (hard desde 2026-05-21)**, `react-doctor` (visibility-only con comentarios inline en PRs).
-- **Score React Doctor: 75/100 ("Great")**. 16 reglas únicas eliminadas (13 + 3 mecánicas hoy: `no-array-index-as-key`, `no-long-transition-duration`, `rendering-hydration-mismatch-time`). 6 issues estructurales pendientes — todos en `VideoPlayer.tsx` (sesión dedicada).
-- **knip: 0 unused files / 0 unused deps / 0 unused exports / 0 unused types** tras #375 + #377 (cleanup −1131 líneas en 59 ficheros). Hard gate en CI.
+- Tests: `go test -race ./...` verde en CI; frontend **646/646** vitest verdes (+30 hoy); `tsc -b` limpio; production build limpio (~25 s con React Compiler + LazyMotion activados).
+- **React Compiler activado** + `eslint-plugin-react-compiler` como hard gate. `react-compiler-healthcheck`: 542/542 componentes compatibles. Quality gates en CI: `typecheck` (hard), `react-compiler-healthcheck` (hard), **`knip` (hard)**, `react-doctor` (visibility-only con comentarios inline en PRs).
+- **Score React Doctor: ≥75/100 ("Great")** post-VideoPlayer-split (PR #381 mergeada). El offender principal de las reglas estructurales (`no-cascading-set-state`) eliminado; `no-giant-component` reducido de 1003 a 663 lines; `prefer-useReducer` de 12 useState a 5.
+- **knip: 0 unused files / 0 unused deps / 0 unused exports / 0 unused types**. Hard gate en CI.
+- **Audit 2026-05-14 — Iteración 4 cerrada al 100 %**: olores **QQ** (auth.Service), **P** (ItemHandler), **Z** (library.Service) split via embedding facade. Olor **CC** (iptv.Service) en fase 1 — falta ChannelOrderOps (646 LoC) en una sesión siguiente.
+- **Dependabot alerts**: 8 → 2 (1 critical eliminada). PR #385 reemplazó `to-ico` por `png-to-ico` cerrando 5 vulns; queda picomatch (dependabot abierto) + file-type (transitive de node-vibrant — esperar upstream).
 - HubPlay distribuible "descargar y usar" en los tres targets (desktop / Linux server / NAS-via-Docker) — flujo cerrado en la sesión 2026-05-19/20.
 
 ---
 
-## 🧹 Sesión 2026-05-21 — Cleanup knip a 0 + React Doctor quick wins + hard gate
+## 🔧 Sesión 2026-05-21 (tarde-noche) — Audit Iter 4 cerrada + seguridad Dependabot
+
+Sesión larga (10 PRs en una tarde). Tres olores estructurales del audit 2026-05-14 cerrados al 100 % (QQ + P + Z) + uno en fase parcial (CC). Dos PRs de seguridad cerraron 6 de 8 alertas Dependabot (1 critical). Tests vitest de páginas grandes cubiertos. Memoria del repo limpiada (un spec obsoleto identificado y archivado).
+
+### PRs cerradas y abiertas
+
+| PR | Tema | Estado | Cambio principal |
+|---|---|---|---|
+| [#381](https://github.com/Alexzafra13/HubPlay_demo/pull/381) | VideoPlayer split en 4 hooks + 2 overlays | ✅ merged | VideoPlayer.tsx 1166 → 817 LoC (−30 %) |
+| [#382](https://github.com/Alexzafra13/HubPlay_demo/pull/382) | Tests vitest Home / LiveTV / Search / Movies / Series | ✅ merged | +30 tests (616 → 646), 90 test files |
+| [#383](https://github.com/Alexzafra13/HubPlay_demo/pull/383) | Archivar `per-user-channel-order-pending.md` (shipped) | ✅ merged | memoria limpia |
+| [#384](https://github.com/Alexzafra13/HubPlay_demo/pull/384) | **Olor QQ** — auth.Service split en 4 sub-services | ✅ merged | service.go 764 → 180 LoC (−76 %) |
+| [#385](https://github.com/Alexzafra13/HubPlay_demo/pull/385) | to-ico → png-to-ico (seguridad) | ✅ merged | **5 CVEs cerradas (1 critical)**, −87 paquetes pnpm |
+| [#386](https://github.com/Alexzafra13/HubPlay_demo/pull/386) | **Olor P** — ItemHandler split fases 1-2 (3 sub-handlers) | ✅ merged | items.go 1211 → 444 LoC |
+| [#388](https://github.com/Alexzafra13/HubPlay_demo/pull/388) | Olor P fases 3-4 (MetadataHandler + ItemDetailHandler) — cierre completo | 🟡 open | items.go 444 → 266 LoC (−78 % total) |
+| [#389](https://github.com/Alexzafra13/HubPlay_demo/pull/389) | **Olor Z** — library.Service split (AccessControl + ItemQueries) | 🟡 open | service.go 593 → 498 LoC |
+| [#390](https://github.com/Alexzafra13/HubPlay_demo/pull/390) | **Olor CC fase 1** — iptv.Service Favorites + WatchHistory + Health | 🟡 open | 3 sub-services extraídos |
+
+### Patrón refactor: embedding facade + shared publisher
+
+Mismo patrón aplicado para los 4 olores estructurales (QQ + P + Z + CC fase 1) — establecido una vez en QQ (auth.Service) y replicado mecánicamente en los otros tres:
+
+```go
+type Service struct {
+    *SubServiceA   // 5 methods (promoted via embedding)
+    *SubServiceB   // 3 methods
+    *SubServiceC   // 7 methods
+    // ... core state que se queda en el facade
+
+    pub *publisher // compartido por puntero con sub-services que publican
+}
+
+func (s *Service) SetEventBus(bus *event.Bus) {
+    s.pub.setBus(bus) // muta el publisher → ambos sub-services ven el cambio
+}
+```
+
+**Características del patrón:**
+
+1. Sub-services son structs propios con sus deps mínimas — la audit nota "cada constructor toma 3-4 deps en vez de 13".
+2. Facade Service embed punteros — method promotion intra-paquete preserva el surface externo. Handlers + tests + router siguen llamando `svc.Method(...)` exactamente como antes.
+3. Constructor distribuye args del `NewXxx` pre-split a sub-constructors. La firma pública del constructor se preserva para minimum-blast-radius.
+4. Estado compartido (rate-limiter, event bus, issuer de sesiones) via struct dedicado compartido por puntero — un solo `SetEventBus` muta el campo en todos los sub-services a la vez.
+5. **Tests pre-existentes pasan SIN CAMBIOS**. Cero churn en ningún caller externo.
+
+**Aplicado en orden de tamaño creciente:**
+
+| Olor | God-service / handler | Sub-units | LoC delta |
+|---|---|---|---|
+| **QQ** | auth.Service (18 métodos, 6 responsabilidades) | LoginService + AccountService + SessionService + ProfileService | 764 → 180 (−76 %) |
+| **P** | ItemHandler (19 métodos, 14 fields, 4 responsabilidades) | ItemDetailHandler + TrickplayHandler + SearchHandler + RecommendationsHandler + MetadataHandler | 1211 → 266 (−78 %) |
+| **Z** | library.Service (27 métodos, 6 responsabilidades) | AccessControl + ItemQueries + facade (CRUD/scan/lifecycle) | 593 → 498 (−16 %, menos drástico porque el core CRUD+scan se queda) |
+| **CC fase 1** | iptv.Service (45 métodos, 11 sub-features) | FavoritesOps + WatchHistoryOps + HealthOps + facade (M3U/EPG/...) | 343 → 379 (+36, overhead doc — saca 12 métodos del facade) |
+
+### Seguridad: Dependabot alerts (8 → 2)
+
+De 8 alerts (2 critical, 6 medium) bajamos a 2 medium con una PR + un dependabot pendiente:
+
+- **#385** reemplazó `to-ico@1.1.5` (devDep con cadena `jimp@0.2.28 → resize-img → request 2.88.2 → form-data 2.3.3 / qs / tough-cookie / minimist 0.0.8`) por `png-to-ico@3.0.1` (3 deps directas, todas current). Cierra **5 alertas**:
+  - #34 critical: `form-data` unsafe random for boundary
+  - #35 medium: `qs` arrayLimit bypass → DoS
+  - #33 medium: `tough-cookie` Prototype Pollution
+  - #32 medium: `request` SSRF (paquete EOL)
+  - #27 medium: `minimist` Prototype Pollution
+- PR de dependabot **#289** (picomatch 4.0.3 → 4.0.4) cuando se mergee cerrará la 6ª (medium).
+- Quedan **2 medium**: `file-type` (transitive de `node-vibrant@4.0.4` que ya está en latest — bloqueada hasta que upstream actualice jimp interno) + otro. No bloqueable sin breaks.
+
+### Aprendizajes para futuras sesiones
+
+- **Squash merge puede dropear commits posteriores al título del PR**. PR #386 fue mergeada con título "fases 1-2" cuando el branch ya tenía fases 3-4 commiteadas encima. El squash sólo aplicó lo que el título describía; los commits posteriores se quedaron en el branch sin llegar a main. Recovery: nueva PR (#388) desde origin/main fresh con sólo el diff de las fases pendientes. **Lección para PRs incrementales con título "fase X"**: actualizar el título antes del merge si se añaden fases, O crear PRs nuevas por incremento.
+
+- **El patrón embedding facade se establece una vez (auth) y se reaplica mecánicamente** a P/Z/CC. Las 4 PRs estructurales salieron en ~6 horas combinadas. El audit estructura los olores P/Z/CC como god-services todos del mismo flavor, así un patrón único cierra los tres.
+
+- **Frontend tests masivos (+30) usaron `vi.hoisted` + stub agresivo de subcomponentes pesados** (rails de Home, EPGGrid de LiveTV, MediaGrid de MediaBrowse, etc.). Plantilla en `MediaBrowse.test.tsx` ya existía — el copy/paste/customize fue rápido.
+
+- **Spec docs en `docs/memory/` pueden quedarse stale sin que nadie lo note**. El `per-user-channel-order-pending.md` decía "NOT IMPLEMENTED" pero la feature llevaba meses en main (migraciones 042 + 043, `LiveTvCustomize.tsx`, etc.). Al arrancar a trabajarla descubrí la duplicación accidental potencial. **Convención**: cuando una feature ship, mover el spec a `archive/` con header "SHIPPED" + diferencias respecto al spec original. Lo hace PR #383.
+
+- **`png-to-ico` es el reemplazo moderno de `to-ico`** (~10 años sin actualizar). API compatible (acepta array de PNG buffers), 3 deps en vez de 50+, mantenido 2024.
+
+- **El field promotion intra-paquete funciona para fields no exportados**. En P fase 4, `ItemDetailHandler.identifier` (lowercase) sigue accesible vía `itemHandler.identifier` desde otros métodos del mismo paquete `handlers` porque `*ItemHandler` embed `*ItemDetailHandler`. Cross-paquete sería distinto pero no aplica aquí.
+
+### Métricas globales
+
+- **10 PRs abiertas en la sesión** (7 mergeadas, 3 abiertas esperando review)
+- **3 olores del audit cerrados** (QQ + P + Z) + 1 en fase parcial (CC fase 1)
+- **8 → 2 vulnerabilidades Dependabot** (75 % reducción, 1 critical eliminada)
+- **+30 tests vitest** (616 → 646, 5 nuevas páginas cubiertas)
+- LoC shrunk: VideoPlayer −349, auth.Service −584, ItemHandler −945 (78 %), library.Service −95
+
+---
+
+## 🧹 Sesión 2026-05-21 (mañana) — Cleanup knip a 0 + React Doctor quick wins + hard gate
 
 Sesión corta y limpia. Tres PRs encadenadas para cerrar la deuda de dead code que arrastraba desde la integración inicial de knip (PR #355) y atacar los 3 issues mecánicos de React Doctor que aparecieron tras el cleanup.
 
@@ -326,19 +419,51 @@ Cerramos el flujo "descargar y usar" para tres públicos: PC desktop, servidor L
 
 ## 🎯 Cola priorizada para la próxima sesión
 
-### Cerrar React Doctor: split de VideoPlayer
-- VideoPlayer.tsx (1003 LoC, 12 useState, useEffect con 9 setState) tiene 4-5 reglas react-doctor pendientes que sólo se resuelven dividiendo el componente. Spec en la sesión de hoy (arriba). **Requiere preview con backend corriendo** para verificar playback / seek / quality switching / next-up tras el split. Plan tentativo: extraer `<PlaybackControls />`, `<TrickPlayBar />`, `<NextUpOverlay />`; consolidar state con `useReducer` agrupado por dominio (playback, network, ui). HeroSection y SeriesHero comparten reglas pero son más manejables — atacar después.
+### Audit 2026-05-14 — lo que queda
 
-### Medianos (vale la pena cuando arranque la siguiente sesión)
+Ver [audit-2026-05-14-go-backend-review.md](audit-2026-05-14-go-backend-review.md) + [intervention-2026-05-14.md](intervention-2026-05-14.md).
 
-1. ~~**Tests frontend de páginas grandes**~~. ✅ **HECHO** sesión 2026-05-21 — PR [#382](https://github.com/Alexzafra13/HubPlay_demo/pull/382). Home / LiveTV / Search / Movies / Series con tests propios (+30 vitest, 90 test files total).
-2. **Refactor estructural pendiente** del audit 2026-05-14 ([audit-2026-05-14-go-backend-review.md](audit-2026-05-14-go-backend-review.md) + [intervention-2026-05-14.md](intervention-2026-05-14.md)). Iteraciones 4-7 abiertas: split de god-handlers/services (P, Z, QQ), refactor estructural de `iptv/` (CC), composition root (G, H, V, Q, LL, JJ), schema + cosmética (D, X, W, BB, UUU-mig).
-3. ~~**Per-user channel order + hide en Live TV**~~. ✅ **SHIPPED** — verificado en main 2026-05-21. Migraciones `042_user_channel_order.sql` + `043_library_channel_order.sql`, handlers en `iptv_personalisation.go`, página user-side `LiveTvCustomize.tsx`, panel admin `AdminChannelOrderPanel.tsx`, SSE `publishOrderUpdated` para sync entre dispositivos. Spec arqueológico en [archive/per-user-channel-order-spec-shipped.md](archive/per-user-channel-order-spec-shipped.md).
+**Iteración 4 — cerrada al 100 %** en sesión 2026-05-21 tarde:
+- ~~QQ~~ ✅ auth.Service split (PR #384, mergeada)
+- ~~P~~ ✅ ItemHandler split (PRs #386 mergeada + #388 abierta)
+- ~~Z~~ ✅ library.Service split (PR #389 abierta)
+
+**Iteración 5 — en curso**:
+- **CC fase 2** — `ChannelOrderOps` extraído de `service_channel_order.go` (646 LoC, 16 métodos, 5 repos + `iptvOrgLogos` post-construction setter). Mismo patrón embedding que CC fase 1 (PR #390). ~1-2 horas.
+
+**Iteración 6 — composition root**:
+- G, H, V, LL, JJ — limpiar `cmd/hubplay/main.go` + `router.go` (acceso a `deps.Config.*` directo, fanout de dependencias, etc.). Q ya se cerró en sweep M.5.
+
+**Iteración 7 — cosmética + schema**:
+- **W** — `scanner.go` 1270 LoC en un fichero, split por responsabilidad.
+- **X** — frontera `library/` vs `scanner/` artificial (promover scanner a sub-paquete).
+- **D** — cosmética (no leído el detalle).
+- **BB** — comentarios en inglés masivos en `internal/library/` y otros → traducir al español (convención del repo). Mecánico pero grande.
+
+**Iteración 8 — polish**:
+- F14-X, F15-X, F16-X (varios) — calidad de código residual.
+
+**Iteración 9 — verificación empírica**:
+- `go test -race` + `goleak` + `govulncheck` post-merge.
+
+### Frontend
+
+**Segunda ola VideoPlayer** (opcional):
+- React Doctor residuales tras PR #381: `no-giant-component` (663 LoC residuales en VideoPlayer), `prefer-useReducer` (5 useState residuales), `no-derived-state-effect:496`. Requiere más extracciones de JSX + `useReducer` para UI flags + `key={itemId}` para reset.
+
+**file-type vuln** (medium):
+- Transitive de `node-vibrant@4.0.4` (que ya está en latest). Bloqueada hasta que node-vibrant actualice su jimp interno.
+
+### Dependabot abierto
+
+- **#376** — web-deps group (17 updates), todo verde — 1 click pendiente.
+- **#289** — picomatch 4.0.3→4.0.4 (cierra alert #18 cuando se mergee). Necesita rebase tras los recientes merges.
+- **#247** — docker/setup-buildx-action 3→4. Necesita rebase.
 
 ### Grandes (requieren ventana dedicada)
 
-4. **Firma del installer Windows con SignPath Foundation**. **Es gratis para OSS** (verificado en signpath.org el 2026-05-20). Apply via `apply.signpath.io` — la verificación tarda días/semanas pero la integración con el workflow es directa (action `signpath/github-action-submit-signing-request`). Mientras llega el approval, SmartScreen sigue avisando — no urgente.
-5. **Auto-update one-click + cert TLS en LAN**. Estilo `*.plex.direct`: el server obtiene un cert real para `<hash>.hubplay.direct` o similar, lo sirve en LAN sin warnings, y el client comprueba el feed de updates y aplica binarios firmados in-place. Feature grande, sin presión de calendario.
+- **Firma del installer Windows con SignPath Foundation**. **Es gratis para OSS** (verificado en signpath.org el 2026-05-20). Apply via `apply.signpath.io` — la verificación tarda días/semanas pero la integración con el workflow es directa (action `signpath/github-action-submit-signing-request`). Mientras llega el approval, SmartScreen sigue avisando — no urgente.
+- **Auto-update one-click + cert TLS en LAN**. Estilo `*.plex.direct`: el server obtiene un cert real para `<hash>.hubplay.direct` o similar, lo sirve en LAN sin warnings, y el client comprueba el feed de updates y aplica binarios firmados in-place. Feature grande, sin presión de calendario.
 
 ---
 
