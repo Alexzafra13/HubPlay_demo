@@ -6,11 +6,11 @@
 
 ---
 
-## 🔭 Estado actual (2026-05-21 noche tardía — Iter6 cerrada + F14-2-a (último alto) cerrado)
+## 🔭 Estado actual (2026-05-21 noche tardía III — F14-2-b: Transcoder API a `TranscodeRequest`)
 
-- Branch actual: `claude/f14-2-a-transcode-request`. **F14-2-a cerrado**: `stream.BuildFFmpegArgs` 13 params posicionales → `TranscodeRequest` struct. Era el último olor *alto* (severidad alta) restante de los 6 originales del audit 2026-05-14.
-- Branch previa `claude/project-review-1Zrtv` ya con PR abierta (**PR #397**): olor H cerrado, `router.go` 1549 → 465 LoC (−70 %) en 7 ficheros `mount_*.go` per-feature.
-- Branch previa `claude/review-project-9YJxG` mergeada via **PR #396** (commit `894db91`): olor G parcial (lifecycle refactor).
+- Branch actual: `claude/f14-2-b-transcoder-startsession`. Extiende F14-2-a a `Transcoder.Start` y `Transcoder.RestartAt`: dos firmas de 11 params posicionales → `(sessionID, itemID string, req TranscodeRequest)`. Cierra el "patrón replicado tres veces" que el audit marca bajo F14-2-a/b.
+- PRs abiertas: **#397** (olor H — router split), **#398** (F14-2-a — BuildFFmpegArgs). Ambas pendientes review.
+- PR **#396** ya mergeada: olor G parcial (lifecycle refactor).
 - Branch principal `main` arrastra: V+JJ+LL (PR #395), G parcial (PR #396).
 - Working tree limpio. PR única abierta en GitHub: **#376** (web-deps group, 17 updates — CI pendiente del último estado).
 - Última release pública: `nightly` rolling tag (workflow `release.yml`).
@@ -21,6 +21,47 @@
 - **Audit 2026-05-14 — Iteración 6 al 80 % cerrada esta sesión** (V + JJ + LL + G parcial). Queda **H** (router split + interfaces en Dependencies) para sesión propia. De los **6 olores altos** del audit original (A+M, B+J, CC, P, W, F14-2-a), 5 están cerrados — sólo queda F14-2-a (function-level quality).
 - **Dependabot alerts**: 8 → 1 (1 critical eliminada). PRs #385 (to-ico→png-to-ico, 5 vulns), #289 (picomatch alert #18) mergeadas. Queda 1 medium (file-type transitive de node-vibrant — bloqueada hasta upstream).
 - HubPlay distribuible "descargar y usar" en los tres targets (desktop / Linux server / NAS-via-Docker) — flujo cerrado en la sesión 2026-05-19/20.
+
+---
+
+## 🔁 Sesión 2026-05-21 (noche tardía III) — F14-2-b: Transcoder.Start/RestartAt a `TranscodeRequest`
+
+Sesión continuación natural de F14-2-a. El audit indicaba ese olor como "patrón replicado tres veces" — `BuildFFmpegArgs` (13 params, cerrado en PR #398), `Transcoder.Start` (11 params), y `Transcoder.RestartAt` (11 params). Esta PR cierra los dos restantes.
+
+### Cambio
+
+```go
+// Antes
+func (t *Transcoder) Start(sessionID, itemID, inputPath string, profile Profile,
+    startTime float64, copyVideo, copyAudio, toneMap bool,
+    startSegmentNumber, audioStreamIndex int, burnSub *BurnSubtitleSpec) (*Session, error)
+
+// Después
+func (t *Transcoder) Start(sessionID, itemID string, req TranscodeRequest) (*Session, error)
+```
+
+Reutiliza el `TranscodeRequest` introducido en F14-2-a. **Contrato split-de-llenado**: el caller llena los campos *caller-side* (`Input`, `Profile`, `StartTime`, `CopyVideo`, `CopyAudio`, `ToneMap`, `StartSegmentNumber`, `AudioStreamIndex`, `BurnSub`); el Transcoder sobrescribe los 4 *transcoder-side* (`OutputDir`, `HWAccel`, `Encoder`, `Libx264Preset`) desde su propio estado interno. Documentado en el doc-comment.
+
+`sessionID` y `itemID` siguen como params separados — son session identity (no ffmpeg args) y el handler de sesión los usa para keying en `t.sessions`. Pasarlos al struct sería leaking de concerns.
+
+### Call sites
+
+- **2 producción** (`manager.go:560` y `manager.go:742` — Start + RestartAt en `startSessionSlow` + `RestartSessionAt`).
+- **1 test** (`TestTranscoder_Start_InvalidFFmpeg`).
+
+Todos updateados a struct literal.
+
+### Aprendizajes
+
+- **`sessionID` + `itemID` se quedan fuera del struct**. Son identidad de sesión y la `Transcoder.sessions` map usa `sessionID` como key. Forzarlos dentro de `TranscodeRequest` mezclaría dos concerns. La firma `(sessionID, itemID string, req TranscodeRequest)` es clara: "identifica la sesión y dame la receta de transcoding".
+
+- **Split-de-llenado** (caller llena algunos campos, callee sobrescribe otros) es un patrón válido cuando los conjuntos están claramente delimitados. Documentado in-line es suficiente — alternativa "dos structs" introduciría duplicación.
+
+### Métricas
+
+- **3 ficheros tocados** (transcode.go, manager.go, transcode_test.go).
+- Diff neto: el body de Start/RestartAt sin cambios (sólo se sustituye la construcción manual del `TranscodeRequest{...}` por reuso del param + 4 overrides); las firmas pasan de 11 a 3 params (sessionID + itemID + req).
+- 2 callers actualizados (producción) + 1 caller (test).
 
 ---
 

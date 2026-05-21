@@ -89,17 +89,27 @@ func NewTranscoder(baseDir, ffmpegPath string, transcodeTimeout time.Duration, h
 
 // Start begins a new HLS transcoding session.
 //
-// `copyVideo` / `copyAudio` request stream-copy on the corresponding
-// track. Pass false on both for the historical full-transcode path.
-// The DirectStream decision sets copyVideo=true (always) and
-// copyAudio=true when the audio codec also matches the client.
+// El caller llena los campos *caller-side* de `req`: Input, Profile,
+// StartTime, CopyVideo, CopyAudio, ToneMap, StartSegmentNumber,
+// AudioStreamIndex, BurnSub. Los 4 campos *transcoder-side*
+// (OutputDir, HWAccel, Encoder, Libx264Preset) los sobrescribe el
+// Transcoder desde su propio estado interno — cualquier valor que
+// el caller pase en esos 4 será ignorado.
 //
-// `startSegmentNumber` controls ffmpeg's `-start_number` flag. The
-// canonical first-play call passes 0; restart-on-seek passes the
-// segment index that corresponds to the new offset so the produced
-// segment files (segmentNNNNN.ts) line up with what the synthesized
-// VOD manifest already advertised to the client.
-func (t *Transcoder) Start(sessionID, itemID, inputPath string, profile Profile, startTime float64, copyVideo, copyAudio, toneMap bool, startSegmentNumber, audioStreamIndex int, burnSub *BurnSubtitleSpec) (*Session, error) {
+// `req.CopyVideo` / `req.CopyAudio` piden stream-copy del track
+// correspondiente. Pasar false en ambos da el path full-transcode
+// histórico. La decisión DirectStream pone CopyVideo=true (siempre)
+// y CopyAudio=true cuando el audio codec también matchea al cliente.
+//
+// `req.StartSegmentNumber` controla `-start_number` de HLS. El
+// canonical first-play pasa 0; restart-on-seek pasa el segment
+// index correspondiente al nuevo offset para que los `.ts`
+// producidos alineen con lo que la sintetizada VOD manifest ya
+// anunció al cliente.
+//
+// Cierra olor F14-2-b del audit 2026-05-14 ("patrón replicado tres
+// veces" en BuildFFmpegArgs + Start + RestartAt).
+func (t *Transcoder) Start(sessionID, itemID string, req TranscodeRequest) (*Session, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -116,28 +126,21 @@ func (t *Transcoder) Start(sessionID, itemID, inputPath string, profile Profile,
 
 	ctx, cancel := context.WithTimeout(context.Background(), t.transcodeTimeout)
 
-	args := BuildFFmpegArgs(TranscodeRequest{
-		Input:              inputPath,
-		OutputDir:          outputDir,
-		Profile:            profile,
-		StartTime:          startTime,
-		HWAccel:            t.hwAccel,
-		Encoder:            t.encoder,
-		Libx264Preset:      t.libx264Preset,
-		CopyVideo:          copyVideo,
-		CopyAudio:          copyAudio,
-		ToneMap:            toneMap,
-		StartSegmentNumber: startSegmentNumber,
-		AudioStreamIndex:   audioStreamIndex,
-		BurnSub:            burnSub,
-	})
+	// Sobrescribe los 4 campos transcoder-side del struct. Documentado
+	// en el doc-comment; cualquier valor caller-pasado aquí se ignora.
+	req.OutputDir = outputDir
+	req.HWAccel = t.hwAccel
+	req.Encoder = t.encoder
+	req.Libx264Preset = t.libx264Preset
+
+	args := BuildFFmpegArgs(req)
 	cmd := exec.CommandContext(ctx, t.ffmpeg, args...)
 	cmd.Dir = outputDir
 
 	session := &Session{
 		ID:        sessionID,
 		ItemID:    itemID,
-		Profile:   profile,
+		Profile:   req.Profile,
 		OutputDir: outputDir,
 		StartedAt: time.Now(),
 		cmd:       cmd,
@@ -162,8 +165,8 @@ func (t *Transcoder) Start(sessionID, itemID, inputPath string, profile Profile,
 	t.logger.Info("transcoding started",
 		"session", sessionID,
 		"item", itemID,
-		"profile", profile.Name,
-		"start_time", startTime,
+		"profile", req.Profile.Name,
+		"start_time", req.StartTime,
 	)
 
 	return session, nil
@@ -178,11 +181,15 @@ func (t *Transcoder) Start(sessionID, itemID, inputPath string, profile Profile,
 // stay on disk so backwards seeks within the encoded prefix continue
 // to work.
 //
-// Unlike Start(), this method does NOT mkdir the outputDir and does
-// NOT call existing.Stop() (which would RemoveAll the directory).
-// The caller passes the *same* sessionID it used for the original
-// Start; ownership stays with this Transcoder.
-func (t *Transcoder) RestartAt(sessionID, itemID, inputPath string, profile Profile, startTime float64, copyVideo, copyAudio, toneMap bool, startSegmentNumber, audioStreamIndex int, burnSub *BurnSubtitleSpec) (*Session, error) {
+// Unlike Start(), this method does NOT call existing.Stop() (which
+// would RemoveAll the directory). El caller pasa el *mismo*
+// sessionID que usó en el Start original; ownership stays con este
+// Transcoder. El struct `req` sigue la misma contrato que en
+// `Start`: caller llena los campos caller-side, Transcoder
+// sobrescribe los 4 transcoder-side.
+//
+// Cierra olor F14-2-b del audit 2026-05-14.
+func (t *Transcoder) RestartAt(sessionID, itemID string, req TranscodeRequest) (*Session, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -195,28 +202,21 @@ func (t *Transcoder) RestartAt(sessionID, itemID, inputPath string, profile Prof
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), t.transcodeTimeout)
-	args := BuildFFmpegArgs(TranscodeRequest{
-		Input:              inputPath,
-		OutputDir:          outputDir,
-		Profile:            profile,
-		StartTime:          startTime,
-		HWAccel:            t.hwAccel,
-		Encoder:            t.encoder,
-		Libx264Preset:      t.libx264Preset,
-		CopyVideo:          copyVideo,
-		CopyAudio:          copyAudio,
-		ToneMap:            toneMap,
-		StartSegmentNumber: startSegmentNumber,
-		AudioStreamIndex:   audioStreamIndex,
-		BurnSub:            burnSub,
-	})
+
+	// Sobrescribe los 4 campos transcoder-side. Igual que en Start.
+	req.OutputDir = outputDir
+	req.HWAccel = t.hwAccel
+	req.Encoder = t.encoder
+	req.Libx264Preset = t.libx264Preset
+
+	args := BuildFFmpegArgs(req)
 	cmd := exec.CommandContext(ctx, t.ffmpeg, args...)
 	cmd.Dir = outputDir
 
 	session := &Session{
 		ID:        sessionID,
 		ItemID:    itemID,
-		Profile:   profile,
+		Profile:   req.Profile,
 		OutputDir: outputDir,
 		StartedAt: time.Now(),
 		cmd:       cmd,
@@ -240,8 +240,8 @@ func (t *Transcoder) RestartAt(sessionID, itemID, inputPath string, profile Prof
 	t.logger.Info("transcoding restarted",
 		"session", sessionID,
 		"item", itemID,
-		"start_time", startTime,
-		"start_segment", startSegmentNumber,
+		"start_time", req.StartTime,
+		"start_segment", req.StartSegmentNumber,
 	)
 	return session, nil
 }

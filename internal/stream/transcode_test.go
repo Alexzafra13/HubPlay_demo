@@ -82,7 +82,11 @@ func TestTranscoder_Start_InvalidFFmpeg(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	tc := stream.NewTranscoder(dir, "/nonexistent/ffmpeg", 4*time.Hour, stream.HWAccelNone, "libx264", "", logger)
 
-	_, err := tc.Start("sess-1", "item-1", "/some/video.mkv", stream.DefaultProfile(), 0, false, false, false, 0, -1, nil)
+	_, err := tc.Start("sess-1", "item-1", stream.TranscodeRequest{
+		Input:            "/some/video.mkv",
+		Profile:          stream.DefaultProfile(),
+		AudioStreamIndex: -1,
+	})
 	if err == nil {
 		t.Fatal("expected error for invalid ffmpeg path")
 	}
