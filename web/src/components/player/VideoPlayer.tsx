@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import type { FC } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "@/api/client";
@@ -9,12 +9,17 @@ import { useIsMobile } from "@/hooks/useIsMobile";
 import { usePlayerKeyboard } from "@/hooks/usePlayerKeyboard";
 import { useProgressReporter } from "@/hooks/useProgressReporter";
 import { useTrickplay } from "@/hooks/useTrickplay";
+import { useVideoPlaybackEvents } from "@/hooks/useVideoPlaybackEvents";
+import { useFederatedSubs } from "@/hooks/useFederatedSubs";
 import { PlayerControls } from "./PlayerControls";
 import { UpNextOverlay, type UpNextInfo } from "./UpNextOverlay";
 import { ExternalSubsModal } from "./ExternalSubsModal";
 import { KeyboardHelpOverlay } from "./KeyboardHelpOverlay";
 import { SkipSegmentButton } from "./SkipSegmentButton";
-import { buildPickerTracksFromDB, type AudioTrack } from "./audioTracks";
+import { BackdropLoadingOverlay } from "./BackdropLoadingOverlay";
+import { ErrorOverlay } from "./ErrorOverlay";
+import { useSubtitleSelection } from "@/hooks/useSubtitleSelection";
+import { useAudioSelection } from "@/hooks/useAudioSelection";
 import type { ExternalSubtitleResult } from "@/api/types";
 
 // ─── Props ───────────────────────────────────────────────────────────────────
@@ -143,20 +148,6 @@ interface VideoPlayerProps {
   onEnded?: () => void;
 }
 
-// Codecs the browser can't decode natively — listed here are the ones
-// we burn into the video via ffmpeg on the transcoder side. SRT/WebVTT
-// ride as HLS sub tracks and are deliberately NOT included to avoid
-// duplicate entries in the subtitle picker. Module-scope so the Set
-// identity stays stable across renders for the burnInSubtitleEntries
-// useMemo deps.
-const BURNABLE_CODECS = new Set([
-  "hdmv_pgs_subtitle", "pgs",
-  "dvd_subtitle", "dvdsub",
-  "dvb_subtitle", "dvbsub",
-  "xsub",
-  "ass", "ssa",
-]);
-
 // ─── Component ───────────────────────────────────────────────────────────────
 
 const VideoPlayer: FC<VideoPlayerProps> = ({
@@ -188,13 +179,6 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const seekedToStartRef = useRef(false);
-  // Tracks the most recent reliable currentTime (timeupdate while
-  // not seeking). Used by the `play` event handler to recover from
-  // the "Play after pause restarts from frame 0" edge case where a
-  // recoverMediaError or transient hls.js reattach zeroed out the
-  // <video> element's currentTime even though the user expected it
-  // to resume where they were.
-  const lastGoodTimeRef = useRef(0);
 
   // Zustand as single source of truth for volume/mute/fullscreen
   const volume = usePlayerStore((s) => s.volume);
@@ -205,23 +189,10 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
   const setFullscreen = usePlayerStore((s) => s.setFullscreen);
   const updateTime = usePlayerStore((s) => s.updateTime);
 
-  // Local state: playback status and time (high-frequency updates, not needed globally)
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [buffered, setBuffered] = useState(0);
-  // True once the first frame has painted (we listen to the
-  // `playing` event, which fires when the browser actually
-  // starts decoding+rendering, NOT when play() resolves). Drives
-  // the backdrop loading overlay's fade-out: while false, the
-  // overlay covers the (still-black) <video> with the item's
-  // artwork; on flip, a CSS transition fades it out so the video
-  // reveal feels cinematic instead of abrupt.
-  const [firstFrameReady, setFirstFrameReady] = useState(false);
   // Up-next overlay visibility. Set on `ended` when nextUp is wired,
-  // cleared by play-now / cancel / next-load. Decoupled from
-  // onEndedCallback so the parent only sees the auto-advance signal
-  // when the user actually consents (or the timer runs out).
+  // cleared by play-now / cancel / next-load. Decoupled del callback
+  // del padre para que `onEndedCallback` sólo dispare cuando el usuario
+  // acepta (o se agota el contador del overlay).
   const [upNextActive, setUpNextActive] = useState(false);
   // External subs picker (OpenSubtitles, ...). Modal is opened from
   // the PlayerControls subtitle dropdown; the picked result becomes
@@ -231,35 +202,15 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
   const [externalSubsModalOpen, setExternalSubsModalOpen] = useState(false);
   const [activeExternalSub, setActiveExternalSub] = useState<ExternalSubtitleResult | null>(null);
 
-  // Federated subtitles. Populated once at mount when both peerId +
-  // peerStreamSessionId are set; the master.m3u8 we receive from the
-  // peer is variant-only (no EXT-X-MEDIA SUBTITLES), so the player
-  // surfaces these through the same `<track>` plumbing the external
-  // subs use. IDs above FEDERATED_TRACK_ID_BASE distinguish them
-  // from HLS-native track IDs in the unified `subtitleTracks` array
-  // passed to the controls dropdown.
-  const [federatedSubs, setFederatedSubs] = useState<
-    Array<{ index: number; language: string; title: string; default: boolean; forced: boolean }>
-  >([]);
-  const [activeFederatedSubIndex, setActiveFederatedSubIndex] = useState<number | null>(null);
-  useEffect(() => {
-    if (!peerId || !peerStreamSessionId) return;
-    let cancelled = false;
-    api
-      .listFederatedSubtitles(peerId, peerStreamSessionId)
-      .then((tracks) => {
-        if (!cancelled) setFederatedSubs(tracks);
-      })
-      .catch(() => {
-        // Silent: a failure to fetch the federated sub list shouldn't
-        // break playback — the dropdown will just show the HLS tracks
-        // (typically empty for federated streams) and the user keeps
-        // the option of external/OpenSubtitles.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [peerId, peerStreamSessionId]);
+  // Subtítulos federados: el fetch, estado del track activo y el effect
+  // que fuerza `track.mode = "showing"` viven en useFederatedSubs. IDs
+  // ≥ FEDERATED_TRACK_ID_BASE en `mergedSubtitleTracks` discriminan los
+  // federados de los HLS-native al despachar en handleSubtitleTrackChange.
+  const {
+    federatedSubs,
+    activeFederatedSubIndex,
+    setActiveFederatedSubIndex,
+  } = useFederatedSubs({ videoRef, peerId, peerStreamSessionId });
 
   // ─── Hooks ─────────────────────────────────────────────────────────────────
 
@@ -283,6 +234,44 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
     startPosition,
   });
 
+  // Forward ref para romper la dependencia circular entre
+  // useVideoPlaybackEvents (necesita onActivity/onSettled) y
+  // useControlsVisibility (necesita isPlaying). Se rellena en un
+  // useEffect post-commit con las funciones reales; los listeners de
+  // <video> leen `controlsRef.current.*` en cada disparo, así que para
+  // cuando el usuario interactúa siempre apuntan a las versiones
+  // reales (no a los noops del bootstrap inicial).
+  const controlsRef = useRef<{
+    showControls: () => void;
+    keepControlsVisible: () => void;
+  }>({ showControls: () => {}, keepControlsVisible: () => {} });
+
+  const {
+    isPlaying,
+    currentTime,
+    duration,
+    buffered,
+    firstFrameReady,
+  } = useVideoPlaybackEvents({
+    videoRef,
+    itemId,
+    knownDuration,
+    onProgress: updateTime,
+    onEnded: () => {
+      // Dos rutas: con next-item conocido, ocultar el auto-advance
+      // tras el contador del overlay para que el usuario pueda
+      // cancelar; sin él, disparar el callback inmediatamente como
+      // el flujo legacy.
+      if (nextUp && onEndedCallback) {
+        setUpNextActive(true);
+      } else {
+        onEndedCallback?.();
+      }
+    },
+    onActivity: () => controlsRef.current.showControls(),
+    onSettled: () => controlsRef.current.keepControlsVisible(),
+  });
+
   const {
     controlsVisible,
     showControls,
@@ -291,6 +280,11 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
     handleMouseLeave,
     keepControlsVisible,
   } = useControlsVisibility(isPlaying);
+
+  useEffect(() => {
+    controlsRef.current.showControls = showControls;
+    controlsRef.current.keepControlsVisible = keepControlsVisible;
+  }, [showControls, keepControlsVisible]);
 
   // Mobile-aware tap pattern: on touch a tap on the video surface
   // toggles control visibility (Plex/Netflix), instead of toggling
@@ -495,139 +489,12 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
     seekedToStartRef.current = false;
   }, [masterPlaylistUrl, directUrl]);
 
-  // ─── Video event listeners ───────────────────────────────────────────────
-
-  // Patrón "latest onEnded vía ref": el listener se monta una vez por
-  // sesión de playback (deps abajo). Si añadiéramos `onEndedCallback`
-  // a las deps, cada re-render del padre re-suscribiría todos los
-  // listeners del <video>, perdiendo eventos durante el churn.
-  const onEndedCallbackRef = useRef(onEndedCallback);
-  useEffect(() => {
-    onEndedCallbackRef.current = onEndedCallback;
-  }, [onEndedCallback]);
-
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-
-    const onPlay = () => {
-      setIsPlaying(true);
-      showControls();
-      // Defensive: if we somehow ended up at frame 0 even though we
-      // had a remembered good position, jump back. This catches the
-      // user-reported "Play after pause restarts from the beginning"
-      // edge case where a recoverMediaError or detach/reattach
-      // sequence zeroed out the <video> element's currentTime mid
-      // session. lastGoodTimeRef is updated below in `onTimeUpdate`.
-      if (video.currentTime < 1 && lastGoodTimeRef.current > 1) {
-        video.currentTime = lastGoodTimeRef.current;
-      }
-    };
-
-    // First-frame painted: this is what we wait for before fading
-    // the backdrop overlay out. `playing` is the right event (not
-    // `play`, which fires on the play() call before any frame has
-    // rendered, and not `loadeddata`, which can fire before HLS
-    // has wired the first segment into MSE).
-    const onPlaying = () => {
-      setFirstFrameReady(true);
-    };
-
-    const onPause = () => {
-      setIsPlaying(false);
-      keepControlsVisible();
-    };
-
-    // After a seek lands, force one resync so the React state catches
-    // up immediately — without it the next `timeupdate` may be delayed
-    // by hls.js wiring fresh buffer events after a transcode restart.
-    const onSeeked = () => {
-      setCurrentTime(video.currentTime);
-    };
-
-    const onTimeUpdate = () => {
-      // Source of truth for "is a seek in flight" is the DOM property
-      // `video.seeking`, NOT a React ref tracking `seeking`/`seeked`
-      // events. The events can drop on the floor (most commonly when
-      // the new segment never lands and hls.js gives up) and a ref
-      // would then stay stuck `true` forever, freezing the seek bar
-      // even though the video is actually playing again. Reading the
-      // property each tick self-recovers on the next event boundary.
-      if (!video.seeking) {
-        setCurrentTime(video.currentTime);
-        // Remember the most recent settled position so the `play`
-        // handler above can recover from a zeroed-out currentTime
-        // after recoverMediaError. Only update when we're past the
-        // intro buffer (>0.5 s) so legitimate fresh-start sessions
-        // don't accidentally save 0.
-        if (video.currentTime > 0.5) {
-          lastGoodTimeRef.current = video.currentTime;
-        }
-      }
-      const videoDur = video.duration;
-      const effectiveDuration =
-        knownDuration && knownDuration > 0
-          ? knownDuration
-          : videoDur && isFinite(videoDur) && videoDur > 0
-            ? videoDur
-            : 0;
-      setDuration(effectiveDuration);
-
-      if (video.buffered.length > 0) {
-        setBuffered(video.buffered.end(video.buffered.length - 1));
-      }
-
-      updateTime(
-        video.currentTime,
-        effectiveDuration,
-        video.buffered.length > 0
-          ? video.buffered.end(video.buffered.length - 1)
-          : 0,
-      );
-    };
-
-    const onEnded = () => {
-      setIsPlaying(false);
-      keepControlsVisible();
-      api.markPlayed(itemId).catch(() => {});
-      // Two paths: with a known next item, gate the auto-advance
-      // behind the countdown overlay so the user can cancel; without
-      // one, fire the callback immediately like the legacy flow.
-      const cb = onEndedCallbackRef.current;
-      if (nextUp && cb) {
-        setUpNextActive(true);
-      } else {
-        cb?.();
-      }
-    };
-
-    video.addEventListener("play", onPlay);
-    video.addEventListener("playing", onPlaying);
-    video.addEventListener("pause", onPause);
-    video.addEventListener("seeked", onSeeked);
-    video.addEventListener("timeupdate", onTimeUpdate);
-    video.addEventListener("ended", onEnded);
-
-    return () => {
-      video.removeEventListener("play", onPlay);
-      video.removeEventListener("playing", onPlaying);
-      video.removeEventListener("pause", onPause);
-      video.removeEventListener("seeked", onSeeked);
-      video.removeEventListener("timeupdate", onTimeUpdate);
-      video.removeEventListener("ended", onEnded);
-    };
-  }, [itemId, knownDuration, showControls, keepControlsVisible, updateTime, nextUp]);
-
-  // Reset upNextActive + firstFrameReady whenever the source changes
-  // — the parent's auto-advance switches `itemId`, and the new
-  // episode shouldn't inherit the previous one's overlay state. The
-  // canonical "key={itemId}" alternative would re-mount the whole
-  // VideoPlayer and tear down the hls.js instance on every advance,
-  // which is the opposite of what auto-advance is for.
+  // Reset del overlay up-next al cambiar de item (auto-advance entre
+  // episodios). `firstFrameReady` ya se resetea dentro de
+  // useVideoPlaybackEvents al detectar el cambio de `itemId`.
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     setUpNextActive(false);
-    setFirstFrameReady(false);
   }, [itemId]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
@@ -655,7 +522,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
       // the two rAF effects raced for which one ended in `showing`.
       setActiveFederatedSubIndex(null);
     },
-    [setSubtitleTrack],
+    [setSubtitleTrack, setActiveFederatedSubIndex],
   );
 
   // After a new external <track> mounts the browser keeps its mode
@@ -684,179 +551,41 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
     return () => window.cancelAnimationFrame(rafID);
   }, [activeExternalSub]);
 
-  // Force the federated `<track>` into `showing` once mounted —
-  // identical reasoning to the external-subs effect above. Keying on
-  // the active index re-runs the effect when the user picks a
-  // different federated track.
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video || activeFederatedSubIndex === null) return;
-    const rafID = window.requestAnimationFrame(() => {
-      const tracks = Array.from(video.textTracks);
-      const target = tracks.find((t) => t.label.startsWith("Federated:"));
-      if (target) target.mode = "showing";
-      for (const t of tracks) {
-        if (t !== target && t.mode === "showing") {
-          t.mode = "disabled";
-        }
-      }
-    });
-    return () => window.cancelAnimationFrame(rafID);
-  }, [activeFederatedSubIndex]);
+  const {
+    mergedSubtitleTracks,
+    effectiveCurrentSubtitleTrack,
+    handleSubtitleTrackChange,
+  } = useSubtitleSelection({
+    videoRef,
+    hlsTracks: subtitleTracks,
+    currentHlsTrack: currentSubtitleTrack,
+    setHlsTrack: setSubtitleTrack,
+    peerId,
+    peerStreamSessionId,
+    federatedSubs,
+    activeFederatedSubIndex,
+    setActiveFederatedSubIndex,
+    subtitleStreams,
+    burnSubtitleIndex,
+    onBurnSubtitleSelected,
+    clearActiveExternalSub: () => setActiveExternalSub(null),
+  });
 
-  // Merge federated tracks into the dropdown's track list. IDs from
-  // FEDERATED_TRACK_ID_BASE up are reserved for federated subs so the
-  // routing logic in handleSubtitleTrackChange can tell them apart
-  // from hls.js-native track ids (which are 0..N-1).
-  const FEDERATED_TRACK_ID_BASE = 10000;
-  // Burn-in subtitle id space sits ABOVE federation (20000+) so the
-  // dispatch in handleSubtitleTrackChange stays a single if-ladder.
-  // The id is BURN_SUB_TRACK_ID_BASE + perTypeSubtitleIndex so the
-  // parent's onBurnSubtitleSelected receives the index the manager
-  // expects directly, no extra lookup table.
-  const BURN_SUB_TRACK_ID_BASE = 20000;
-
-  // Build burn-in subtitle picker entries from the item's
-  // MediaStream rows. Each row gets a stable per-type index (the
-  // 0-based position among subtitle streams) so the URL param
-  // ?subtitle=N matches the index ffmpeg's 0:s:N reference uses.
-  // BURNABLE_CODECS lives at module scope (top of file) so the Set
-  // identity is stable and the useMemo deps stay correct.
-  const burnInSubtitleEntries = useMemo(() => {
-    if (!subtitleStreams || !onBurnSubtitleSelected) return [];
-    const out: { id: number; name: string; lang: string; burnIn: true }[] = [];
-    let subOrd = -1;
-    for (const s of subtitleStreams) {
-      if (s.type !== "subtitle") continue;
-      subOrd++;
-      if (!BURNABLE_CODECS.has((s.codec || "").toLowerCase())) continue;
-      out.push({
-        id: BURN_SUB_TRACK_ID_BASE + subOrd,
-        name: s.title || s.language || `Track ${subOrd + 1}`,
-        lang: s.language || "",
-        burnIn: true,
-      });
-    }
-    return out;
-  }, [subtitleStreams, onBurnSubtitleSelected]);
-
-  const showFederatedTracks = !!peerId && !!peerStreamSessionId && federatedSubs.length > 0;
-  const mergedSubtitleTracks = [
-    ...subtitleTracks,
-    ...(showFederatedTracks
-      ? federatedSubs.map((s, i) => ({
-          id: FEDERATED_TRACK_ID_BASE + i,
-          name: s.title || s.language || `Track ${s.index}`,
-          lang: s.language || "",
-        }))
-      : []),
-    ...burnInSubtitleEntries,
-  ];
-  const effectiveCurrentSubtitleTrack =
-    activeFederatedSubIndex !== null
-      ? FEDERATED_TRACK_ID_BASE + activeFederatedSubIndex
-      : burnSubtitleIndex >= 0
-        ? BURN_SUB_TRACK_ID_BASE + burnSubtitleIndex
-        : currentSubtitleTrack;
-
-  const handleSubtitleTrackChange = useCallback(
-    (id: number) => {
-      if (id >= BURN_SUB_TRACK_ID_BASE) {
-        // Burn-in pick: clear every other sub surface so only the
-        // burned-in stream is shown after the remount completes,
-        // then ask the parent to re-resolve the master with the
-        // new ?subtitle=N param. The current playhead is captured
-        // so the new manifest seeks back to where the user was.
-        if (!onBurnSubtitleSelected) return;
-        setActiveFederatedSubIndex(null);
-        setActiveExternalSub(null);
-        setSubtitleTrack(-1);
-        const subIdx = id - BURN_SUB_TRACK_ID_BASE;
-        onBurnSubtitleSelected(subIdx, videoRef.current?.currentTime ?? 0);
-        return;
-      }
-      if (id >= FEDERATED_TRACK_ID_BASE) {
-        // Pick a federated track. Suppress HLS subs + external subs
-        // so only one set of cues renders at a time.
-        setActiveFederatedSubIndex(id - FEDERATED_TRACK_ID_BASE);
-        setActiveExternalSub(null);
-        setSubtitleTrack(-1);
-        return;
-      }
-      // HLS path (or "off" with id=-1). Clear federated sub state so
-      // its `<track>` element unmounts. Also clear the burn-in if
-      // one is active — the user is explicitly switching to no-sub
-      // or to a native HLS track, neither of which co-exists with
-      // burn-in. -1 triggers the manager to spin down the transcode
-      // session and start a fresh non-burn one on next play.
-      setActiveFederatedSubIndex(null);
-      if (burnSubtitleIndex >= 0 && onBurnSubtitleSelected) {
-        onBurnSubtitleSelected(-1, videoRef.current?.currentTime ?? 0);
-      }
-      setSubtitleTrack(id);
-    },
-    [setSubtitleTrack, onBurnSubtitleSelected, burnSubtitleIndex],
-  );
-
-  // Audio picker entries. When the parent provides DB MediaStream
-  // rows AND a switch callback, build the picker straight from the
-  // file's audio inventory with rich labels ("Castellano · DD+ 5.1
-  // · Predeterminado") that mirror what Plex / Jellyfin show. This
-  // path is the normal HubPlay route — the master.m3u8 transcodes a
-  // single track per session, so hls.js's audio-track list only
-  // sees that one entry; without the DB-driven picker the user
-  // can't see the other languages exist. Falls back to the bare
-  // hls.js list when the callback isn't wired (legacy callers /
-  // sessions without DB metadata).
-  const audioLocale: "es" | "en" = i18n.language?.startsWith("en") ? "en" : "es";
-  const dbDrivenAudioTracks = useMemo<AudioTrack[]>(() => {
-    if (!audioStreams || !onAudioStreamSelected) return [];
-    return buildPickerTracksFromDB(
-      audioStreams,
-      audioLocale,
-      audioLocale === "es" ? "Predeterminado" : "Default",
-    );
-  }, [audioStreams, onAudioStreamSelected, audioLocale]);
-
-  const useDbAudioPicker = dbDrivenAudioTracks.length > 1;
-
-  // Resolve which entry shows the check. -1 from the parent means
-  // "use the file's default audio" — we map that to the row whose
-  // is_default flag is set so the picker still shows a checkmark
-  // (matches Jellyfin's UX). Falls back to the first row if no
-  // stream is flagged default.
-  const defaultStreamPerTypeIndex = useMemo<number>(() => {
-    if (!audioStreams) return 0;
-    let idx = -1;
-    let firstAudio = -1;
-    for (const s of audioStreams) {
-      if (s.type !== "audio") continue;
-      idx++;
-      if (firstAudio === -1) firstAudio = idx;
-      if (s.is_default) return idx;
-    }
-    return firstAudio === -1 ? 0 : firstAudio;
-  }, [audioStreams]);
-
-  const displayAudioTracks = useDbAudioPicker ? dbDrivenAudioTracks : audioTracks;
-  const displayCurrentAudioTrack = useDbAudioPicker
-    ? (audioStreamIndex >= 0 ? audioStreamIndex : defaultStreamPerTypeIndex)
-    : currentAudioTrack;
-  const handleAudioTrackChange = useCallback(
-    (id: number) => {
-      if (useDbAudioPicker && onAudioStreamSelected) {
-        // Capture the playhead so the parent can resume at the
-        // same spot after the master reloads with the new ?audio=N.
-        // currentTime is already the live value from the <video>
-        // element, no need to round-trip through state.
-        const at = videoRef.current?.currentTime ?? 0;
-        onAudioStreamSelected(id, at);
-        return;
-      }
-      setAudioTrack(id);
-    },
-    [useDbAudioPicker, onAudioStreamSelected, setAudioTrack],
-  );
+  const {
+    displayAudioTracks,
+    displayCurrentAudioTrack,
+    useDbAudioPicker,
+    handleAudioTrackChange,
+  } = useAudioSelection({
+    videoRef,
+    i18n,
+    hlsAudioTracks: audioTracks,
+    currentHlsAudioTrack: currentAudioTrack,
+    setHlsAudioTrack: setAudioTrack,
+    audioStreams,
+    audioStreamIndex,
+    onAudioStreamSelected,
+  });
 
   // ─── Fullscreen change listener ──────────────────────────────────────────
 
@@ -937,97 +666,19 @@ const VideoPlayer: FC<VideoPlayerProps> = ({
         )}
       </video>
 
-      {/* Backdrop loading overlay. Sits ABOVE the <video> until the
-          first frame paints (`playing` event), then fades out via the
-          opacity transition. Renders the item's backdrop full-bleed
-          with a soft dark gradient so the title/logo stays legible
-          on bright artwork (Avengers / Doctor Strange / etc. have
-          near-white skies). `pointer-events-none` once faded so it
-          never intercepts clicks. Subtle pulsing thin bar at top
-          telegraphs "preparing" without a Windows-95 spinner. */}
-      <div
-        className={[
-          "absolute inset-0 transition-opacity duration-500 ease-out",
-          firstFrameReady ? "opacity-0 pointer-events-none" : "opacity-100",
-        ].join(" ")}
-        aria-hidden={firstFrameReady}
-      >
-        {/* Top progress bar (thin, indeterminate). 0.5 px tall so the
-            artwork dominates; the slide animation travels a 25%-wide
-            highlight left → right via transform-only animation so it
-            composites on the GPU and doesn't perturb the rest of the
-            overlay. */}
-        <div className="absolute top-0 left-0 right-0 h-0.5 bg-white/10 overflow-hidden">
-          <div
-            className="h-full w-1/4 bg-white/70"
-            style={{ animation: "loading-slide 900ms ease-in-out infinite" }}
-          />
-        </div>
+      <BackdropLoadingOverlay
+        firstFrameReady={firstFrameReady}
+        backdropUrl={backdropUrl}
+        logoUrl={logoUrl}
+        title={title}
+      />
 
-        {/* Backdrop image, scaled to cover. Falls back to a flat
-            black surface when no backdrop was passed (federated
-            items, scan-in-progress items, etc.) — still better than
-            the bare-black <video> because the title/logo is on
-            screen. */}
-        <div
-          className="absolute inset-0 bg-black"
-          style={
-            backdropUrl
-              ? {
-                  backgroundImage: `url(${backdropUrl})`,
-                  backgroundSize: "cover",
-                  backgroundPosition: "center",
-                }
-              : undefined
-          }
-        />
-        {/* Dark gradient: ensures the title/logo at the bottom-left
-            reads cleanly regardless of the underlying frame. Plex /
-            Jellyfin both rely on this same vignette pattern. */}
-        <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-black/30" />
-
-        {/* Title treatment in the bottom-left, mirroring the hero
-            page the user came from. Logo wins when present (matches
-            Plex / Apple TV); plain text falls back so we never end
-            up with an empty corner. */}
-        <div className="absolute left-6 right-6 bottom-12 sm:left-12 sm:bottom-20 max-w-[60%]">
-          {logoUrl ? (
-            <img
-              src={logoUrl}
-              alt={title ?? ""}
-              className="max-h-24 sm:max-h-32 w-auto object-contain drop-shadow-[0_4px_12px_rgba(0,0,0,0.7)]"
-            />
-          ) : title ? (
-            <h1 className="text-3xl sm:text-5xl font-semibold text-white drop-shadow-[0_4px_12px_rgba(0,0,0,0.8)]">
-              {title}
-            </h1>
-          ) : null}
-        </div>
-      </div>
-
-      {/* Error overlay */}
       {error && (
-        <div className="absolute inset-0 flex items-center justify-center z-30 bg-black/80">
-          <div className="flex flex-col items-center gap-4 max-w-md px-6 text-center">
-            <svg
-              className="size-12 text-error"
-              viewBox="0 0 24 24"
-              fill="currentColor"
-            >
-              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z" />
-            </svg>
-            <p className="text-sm text-text-secondary">{error}</p>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                handleClose();
-              }}
-              className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-[--radius-md] text-sm text-white transition-colors cursor-pointer"
-            >
-              {t("playerControls.closePlayer")}
-            </button>
-          </div>
-        </div>
+        <ErrorOverlay
+          message={error}
+          closeLabel={t("playerControls.closePlayer")}
+          onClose={handleClose}
+        />
       )}
 
       {/* Capa de controles. Sólo intercepta clicks/teclas para que no
