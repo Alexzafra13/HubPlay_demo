@@ -1,5 +1,115 @@
 package iptv
 
+// ChannelOrderOps aísla el surface "orden / visibilidad / logo" del olor
+// CC del audit 2026-05-14 (god-service de 45 métodos). Agrupa tres
+// sub-features tightly-coupled por compartir overlay-at-read-time sobre
+// la lista de canales:
+//
+//  1. Overlay por-usuario (`user_channel_order`): cada user puede
+//     reordenar/ocultar canales para su cuenta sin tocar el snapshot
+//     compartido. Métodos `*ChannelOrder` + `ChannelVisibility`.
+//  2. Overlay admin de library (`library_channel_order`): curación
+//     dura — admin reordena, oculta o suprime canales para TODOS los
+//     usuarios. Métodos `*LibraryChannelOrder` + `LibraryChannelVisibility`.
+//  3. Overrides de logo (`channel_logo_overrides`): admin reemplaza el
+//     logo del M3U con URL externa o archivo subido. Indexado por
+//     (library_id, stream_url) para sobrevivir re-imports. Incluye el
+//     refresh masivo `RefreshLogosFromIPTVOrg`.
+//
+// Toma 5 repos en construcción + `iptvOrgLogos` post-construction
+// (nil-safe: sin él el endpoint /iptv-org/refresh-logos devuelve 503).
+// El `channels` repo se comparte por puntero con el Service core porque
+// los tres overlays parten de `channels.ListByLibrary` (o
+// `ListHealthyByLibrary`) antes de aplicar overlay-at-read-time. Sigue
+// el mismo pattern embedding facade que [FavoritesOps], [WatchHistoryOps]
+// y [HealthOps] (CC fase 1).
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"sort"
+	"strings"
+
+	"hubplay/internal/db"
+	iptvmodel "hubplay/internal/iptv/model"
+)
+
+// LocalLogoSentinel is the prefix the logo overlay tags onto
+// Channel.LogoURL when the admin uploaded a file. The channel-logo
+// proxy detects this prefix and serves the file directly from
+// <imageDir>/channel-logos/ instead of going through the remote cache.
+// Exported so the handler that serves /channels/{id}/logo can switch
+// on it without re-deriving the convention.
+const LocalLogoSentinel = "hubplay-local:channel-logos/"
+
+// IPTVOrgRefreshSummary cuenta lo que pasó en una corrida de
+// RefreshLogosFromIPTVOrg. Sirve para que la UI explique por qué un
+// run no actualizó nada (caso muy común: el M3U ya trae todos los
+// logos, o los tvg-id del proveedor no son del estándar iptv-org y
+// no matchean).
+type IPTVOrgRefreshSummary struct {
+	Total              int `json:"total"`
+	AlreadyHaveLogo    int `json:"already_have_logo"`
+	WithoutTvgID       int `json:"without_tvg_id"`
+	SkippedHasOverride int `json:"skipped_has_override"`
+	NotInDatabase      int `json:"not_in_database"`
+	Updated            int `json:"updated"`
+}
+
+// ChannelOrderOps lleva los 4 repos del bloque order/visibility/logo +
+// el lookup iptv-org post-construction. Sin estado mutable propio (a
+// diferencia de HealthOps que lleva `healthMu` + `lastKnownBucket`):
+// el overlay-at-read-time es stateless por construcción.
+type ChannelOrderOps struct {
+	channels            *db.ChannelRepository
+	channelOrder        *db.UserChannelOrderRepository
+	libraryChannelOrder *db.LibraryChannelOrderRepository
+	logoOverrides       *db.ChannelLogoOverrideRepository
+
+	// iptvOrgLogos resuelve tvg-ids contra la base pública iptv-org
+	// para rellenar logos faltantes en bulk. nil-safe: si no se cablea,
+	// el endpoint /iptv-org/refresh-logos devuelve 503.
+	iptvOrgLogos *IPTVOrgLogoLookup
+
+	logger *slog.Logger
+}
+
+func newChannelOrderOps(
+	channels *db.ChannelRepository,
+	channelOrder *db.UserChannelOrderRepository,
+	libraryChannelOrder *db.LibraryChannelOrderRepository,
+	logoOverrides *db.ChannelLogoOverrideRepository,
+	logger *slog.Logger,
+) *ChannelOrderOps {
+	return &ChannelOrderOps{
+		channels:            channels,
+		channelOrder:        channelOrder,
+		libraryChannelOrder: libraryChannelOrder,
+		logoOverrides:       logoOverrides,
+		logger:              logger,
+	}
+}
+
+// SetIPTVOrgLogos wires the iptv-org logo lookup post-construction —
+// nil-safe, sin él el endpoint de auto-discovery devuelve 503. La
+// method promotion en el Service preserva la firma pública
+// `Service.SetIPTVOrgLogos(...)`.
+func (c *ChannelOrderOps) SetIPTVOrgLogos(l *IPTVOrgLogoLookup) { c.iptvOrgLogos = l }
+
+// listChannels reproduce la lógica de `Service.GetChannels` sin
+// depender del Service — los métodos del sub-service no pueden llamar
+// a la facade vía embedding (el `c` aquí es *ChannelOrderOps, no
+// *Service). Mismo behaviour: activeOnly filtra unhealthy en la query.
+func (c *ChannelOrderOps) listChannels(ctx context.Context, libraryID string, activeOnly bool) ([]*iptvmodel.Channel, error) {
+	if activeOnly {
+		return c.channels.ListHealthyByLibrary(ctx, libraryID)
+	}
+	return c.channels.ListByLibrary(ctx, libraryID, false)
+}
+
+// ── Pure overlay helpers ──────────────────────────────────────────
+//
 // Per-user channel order + visibility overlay. The admin uploads
 // M3U lists and the resulting Channel.Number is the initial order
 // every viewer sees; this file lets each user override that for
@@ -9,15 +119,6 @@ package iptv
 // no per-user snapshot of the channel list. A user with no override
 // rows sees the admin's order verbatim — moving one channel writes
 // one row, everything else still inherits from the admin defaults.
-
-import (
-	"context"
-	"fmt"
-	"sort"
-	"strings"
-
-	iptvmodel "hubplay/internal/iptv/model"
-)
 
 // applyLogoOverlay swaps Channel.LogoURL with the admin's custom logo
 // when there's a matching row in `channel_logo_overrides`. Two cases:
@@ -64,14 +165,6 @@ func applyLogoOverlay(channels []*iptvmodel.Channel, overrides []iptvmodel.Chann
 	}
 	return out
 }
-
-// LocalLogoSentinel is the prefix the logo overlay tags onto
-// Channel.LogoURL when the admin uploaded a file. The channel-logo
-// proxy detects this prefix and serves the file directly from
-// <imageDir>/channel-logos/ instead of going through the remote cache.
-// Exported so the handler that serves /channels/{id}/logo can switch
-// on it without re-deriving the convention.
-const LocalLogoSentinel = "hubplay-local:channel-logos/"
 
 // applyAdminOverlay applies the library's admin curation
 // (`library_channel_order`) on top of the raw M3U import. Channels
@@ -156,6 +249,8 @@ func applyOrderOverlay(channels []*iptvmodel.Channel, overrides []iptvmodel.User
 	return out
 }
 
+// ── User-facing reads (overlay cascade) ───────────────────────────
+
 // GetChannelsForUser returns the channel list the given user should
 // see: admin defaults overlaid with the user's per-channel
 // overrides. activeOnly behaves the same as GetChannels (filters
@@ -164,8 +259,8 @@ func applyOrderOverlay(channels []*iptvmodel.Channel, overrides []iptvmodel.User
 //
 // When userID is empty (no authenticated user, admin contexts) the
 // overlay step is skipped and this returns the admin view.
-func (s *Service) GetChannelsForUser(ctx context.Context, libraryID, userID string, activeOnly bool) ([]*iptvmodel.Channel, error) {
-	channels, err := s.GetChannels(ctx, libraryID, activeOnly)
+func (c *ChannelOrderOps) GetChannelsForUser(ctx context.Context, libraryID, userID string, activeOnly bool) ([]*iptvmodel.Channel, error) {
+	channels, err := c.listChannels(ctx, libraryID, activeOnly)
 	if err != nil {
 		return nil, err
 	}
@@ -174,8 +269,8 @@ func (s *Service) GetChannelsForUser(ctx context.Context, libraryID, userID stri
 	// visibilidad para que el LogoURL final lo vean todas las capas
 	// (incluido el continue-watching que clona Channel sin volver a
 	// pasar por aquí).
-	if s.logoOverrides != nil {
-		logoRows, err := s.logoOverrides.ListByLibrary(ctx, libraryID)
+	if c.logoOverrides != nil {
+		logoRows, err := c.logoOverrides.ListByLibrary(ctx, libraryID)
 		if err != nil {
 			return nil, fmt.Errorf("load channel logo overrides: %w", err)
 		}
@@ -185,18 +280,18 @@ func (s *Service) GetChannelsForUser(ctx context.Context, libraryID, userID stri
 	// Admin overlay — applies the library's curated order and removes
 	// admin-hidden channels (hard constraint, the user cannot surface
 	// them again via their own overlay).
-	if s.libraryChannelOrder != nil {
-		adminRows, err := s.libraryChannelOrder.List(ctx, libraryID)
+	if c.libraryChannelOrder != nil {
+		adminRows, err := c.libraryChannelOrder.List(ctx, libraryID)
 		if err != nil {
 			return nil, fmt.Errorf("load library channel order: %w", err)
 		}
 		channels = applyAdminOverlay(channels, adminRows)
 	}
 
-	if userID == "" || s.channelOrder == nil {
+	if userID == "" || c.channelOrder == nil {
 		return channels, nil
 	}
-	overrides, err := s.channelOrder.List(ctx, userID)
+	overrides, err := c.channelOrder.List(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("load user channel order: %w", err)
 	}
@@ -214,13 +309,13 @@ func (s *Service) GetChannelsForUser(ctx context.Context, libraryID, userID stri
 // Las channels admin-hidden SÍ se filtran (regla dura: el usuario no
 // puede surfear lo que el admin ocultó para todos). Esa es la única
 // diferencia frente a "el usuario podría meter mano en todo".
-func (s *Service) GetChannelsForUserPersonalisation(ctx context.Context, libraryID, userID string) ([]*iptvmodel.Channel, error) {
-	channels, err := s.GetChannels(ctx, libraryID, false)
+func (c *ChannelOrderOps) GetChannelsForUserPersonalisation(ctx context.Context, libraryID, userID string) ([]*iptvmodel.Channel, error) {
+	channels, err := c.listChannels(ctx, libraryID, false)
 	if err != nil {
 		return nil, err
 	}
-	if s.logoOverrides != nil {
-		logoRows, lErr := s.logoOverrides.ListByLibrary(ctx, libraryID)
+	if c.logoOverrides != nil {
+		logoRows, lErr := c.logoOverrides.ListByLibrary(ctx, libraryID)
 		if lErr != nil {
 			return nil, fmt.Errorf("load channel logo overrides: %w", lErr)
 		}
@@ -229,17 +324,17 @@ func (s *Service) GetChannelsForUserPersonalisation(ctx context.Context, library
 	// Admin overlay aplica orden + remueve admin-hidden (hard
 	// constraint). El usuario sigue sin poder mostrar lo que el
 	// admin ocultó — eso es propiedad del admin, no negociable.
-	if s.libraryChannelOrder != nil {
-		adminRows, aErr := s.libraryChannelOrder.List(ctx, libraryID)
+	if c.libraryChannelOrder != nil {
+		adminRows, aErr := c.libraryChannelOrder.List(ctx, libraryID)
 		if aErr != nil {
 			return nil, fmt.Errorf("load library channel order: %w", aErr)
 		}
 		channels = applyAdminOverlay(channels, adminRows)
 	}
-	if userID == "" || s.channelOrder == nil {
+	if userID == "" || c.channelOrder == nil {
 		return channels, nil
 	}
-	overrides, err := s.channelOrder.List(ctx, userID)
+	overrides, err := c.channelOrder.List(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("load user channel order: %w", err)
 	}
@@ -251,9 +346,9 @@ func (s *Service) GetChannelsForUserPersonalisation(ctx context.Context, library
 		byID[o.ChannelID] = o
 	}
 	out := make([]*iptvmodel.Channel, 0, len(channels))
-	for _, c := range channels {
-		cp := *c
-		if o, has := byID[c.ID]; has {
+	for _, ch := range channels {
+		cp := *ch
+		if o, has := byID[ch.ID]; has {
 			cp.Number = o.Position
 		}
 		out = append(out, &cp)
@@ -270,24 +365,24 @@ func (s *Service) GetChannelsForUserPersonalisation(ctx context.Context, library
 //
 // `includeHidden=false` is equivalent to "what every non-admin user
 // sees before their own overlay" — useful for previews.
-func (s *Service) GetChannelsForLibraryAdmin(ctx context.Context, libraryID string, includeHidden bool) ([]*iptvmodel.Channel, []iptvmodel.LibraryChannelOrderEntry, error) {
-	channels, err := s.GetChannels(ctx, libraryID, false)
+func (c *ChannelOrderOps) GetChannelsForLibraryAdmin(ctx context.Context, libraryID string, includeHidden bool) ([]*iptvmodel.Channel, []iptvmodel.LibraryChannelOrderEntry, error) {
+	channels, err := c.listChannels(ctx, libraryID, false)
 	if err != nil {
 		return nil, nil, err
 	}
 	// Logo overlay también para el admin: el panel de curación muestra
 	// el logo efectivo (con override aplicado) para que el operador vea
 	// el estado real, no el M3U bruto.
-	if s.logoOverrides != nil {
-		logoRows, lErr := s.logoOverrides.ListByLibrary(ctx, libraryID)
+	if c.logoOverrides != nil {
+		logoRows, lErr := c.logoOverrides.ListByLibrary(ctx, libraryID)
 		if lErr != nil {
 			return nil, nil, fmt.Errorf("load channel logo overrides: %w", lErr)
 		}
 		channels = applyLogoOverlay(channels, logoRows)
 	}
 	var rows []iptvmodel.LibraryChannelOrderEntry
-	if s.libraryChannelOrder != nil {
-		rows, err = s.libraryChannelOrder.List(ctx, libraryID)
+	if c.libraryChannelOrder != nil {
+		rows, err = c.libraryChannelOrder.List(ctx, libraryID)
 		if err != nil {
 			return nil, nil, fmt.Errorf("load library channel order: %w", err)
 		}
@@ -315,14 +410,16 @@ func (s *Service) GetChannelsForLibraryAdmin(ctx context.Context, libraryID stri
 	return applyAdminOverlay(channels, rows), rows, nil
 }
 
+// ── Library admin curation writes ─────────────────────────────────
+
 // ListLibraryChannelOverrides returns the admin override rows for a
 // library. Used by the curation panel to compute which channels
 // have been touched vs. which still inherit the M3U order.
-func (s *Service) ListLibraryChannelOverrides(ctx context.Context, libraryID string) ([]iptvmodel.LibraryChannelOrderEntry, error) {
-	if s.libraryChannelOrder == nil {
+func (c *ChannelOrderOps) ListLibraryChannelOverrides(ctx context.Context, libraryID string) ([]iptvmodel.LibraryChannelOrderEntry, error) {
+	if c.libraryChannelOrder == nil {
 		return nil, nil
 	}
-	return s.libraryChannelOrder.List(ctx, libraryID)
+	return c.libraryChannelOrder.List(ctx, libraryID)
 }
 
 // ReplaceLibraryChannelOrder is the admin panel's "Save order"
@@ -334,8 +431,8 @@ func (s *Service) ListLibraryChannelOverrides(ctx context.Context, libraryID str
 //
 // Channels NOT present in `orderedIDs` lose their override row and
 // fall back to channels.number from the M3U import.
-func (s *Service) ReplaceLibraryChannelOrder(ctx context.Context, libraryID string, orderedIDs []string, hiddenIDs map[string]bool) error {
-	if s.libraryChannelOrder == nil {
+func (c *ChannelOrderOps) ReplaceLibraryChannelOrder(ctx context.Context, libraryID string, orderedIDs []string, hiddenIDs map[string]bool) error {
+	if c.libraryChannelOrder == nil {
 		return fmt.Errorf("library channel order repo not wired")
 	}
 	entries := make([]iptvmodel.LibraryChannelOrderEntry, 0, len(orderedIDs))
@@ -345,25 +442,25 @@ func (s *Service) ReplaceLibraryChannelOrder(ctx context.Context, libraryID stri
 			Hidden:    hiddenIDs[id],
 		})
 	}
-	return s.libraryChannelOrder.ReplaceAll(ctx, libraryID, entries)
+	return c.libraryChannelOrder.ReplaceAll(ctx, libraryID, entries)
 }
 
 // SetLibraryChannelVisibility flips a single channel's hidden state
 // at the admin level (hard constraint). Same surgical-edit pattern
 // as the per-user counterpart: avoids re-uploading the full
 // reordered list when the admin just wants to hide one channel.
-func (s *Service) SetLibraryChannelVisibility(ctx context.Context, libraryID, channelID string, hidden bool) error {
-	if s.libraryChannelOrder == nil {
+func (c *ChannelOrderOps) SetLibraryChannelVisibility(ctx context.Context, libraryID, channelID string, hidden bool) error {
+	if c.libraryChannelOrder == nil {
 		return fmt.Errorf("library channel order repo not wired")
 	}
-	ch, err := s.channels.GetByID(ctx, channelID)
+	ch, err := c.channels.GetByID(ctx, channelID)
 	if err != nil {
 		return fmt.Errorf("get channel: %w", err)
 	}
 	if ch.LibraryID != libraryID {
 		return fmt.Errorf("channel %s does not belong to library %s", channelID, libraryID)
 	}
-	rows, err := s.libraryChannelOrder.List(ctx, libraryID)
+	rows, err := c.libraryChannelOrder.List(ctx, libraryID)
 	if err != nil {
 		return fmt.Errorf("list library channel order: %w", err)
 	}
@@ -374,27 +471,29 @@ func (s *Service) SetLibraryChannelVisibility(ctx context.Context, libraryID, ch
 			break
 		}
 	}
-	return s.libraryChannelOrder.Upsert(ctx, libraryID, channelID, position, hidden)
+	return c.libraryChannelOrder.Upsert(ctx, libraryID, channelID, position, hidden)
 }
 
 // ResetLibraryChannelOrder wipes every admin override for a library
 // — channels fall back to channels.number from the M3U import.
-func (s *Service) ResetLibraryChannelOrder(ctx context.Context, libraryID string) error {
-	if s.libraryChannelOrder == nil {
+func (c *ChannelOrderOps) ResetLibraryChannelOrder(ctx context.Context, libraryID string) error {
+	if c.libraryChannelOrder == nil {
 		return nil
 	}
-	return s.libraryChannelOrder.Reset(ctx, libraryID)
+	return c.libraryChannelOrder.Reset(ctx, libraryID)
 }
+
+// ── User-facing writes ────────────────────────────────────────────
 
 // ListChannelOverrides returns the user's raw override rows for the
 // personalisation panel. The panel renders these alongside the
 // channel list so the user can see which channels they've touched
 // (highlighted) vs. which still inherit the admin defaults.
-func (s *Service) ListChannelOverrides(ctx context.Context, userID string) ([]iptvmodel.UserChannelOrderEntry, error) {
-	if s.channelOrder == nil {
+func (c *ChannelOrderOps) ListChannelOverrides(ctx context.Context, userID string) ([]iptvmodel.UserChannelOrderEntry, error) {
+	if c.channelOrder == nil {
 		return nil, nil
 	}
-	return s.channelOrder.List(ctx, userID)
+	return c.channelOrder.List(ctx, userID)
 }
 
 // ReplaceChannelOrder is the panel's "Save order" entry point: it
@@ -406,8 +505,8 @@ func (s *Service) ListChannelOverrides(ctx context.Context, userID string) ([]ip
 // once even if it's also in `orderedIDs`). Channels not present
 // in `orderedIDs` lose their override row and fall back to admin
 // defaults — that's how "opt out for a subset" works.
-func (s *Service) ReplaceChannelOrder(ctx context.Context, userID string, orderedIDs []string, hiddenIDs map[string]bool) error {
-	if s.channelOrder == nil {
+func (c *ChannelOrderOps) ReplaceChannelOrder(ctx context.Context, userID string, orderedIDs []string, hiddenIDs map[string]bool) error {
+	if c.channelOrder == nil {
 		return fmt.Errorf("channel order repo not wired")
 	}
 	entries := make([]iptvmodel.UserChannelOrderEntry, 0, len(orderedIDs))
@@ -417,7 +516,7 @@ func (s *Service) ReplaceChannelOrder(ctx context.Context, userID string, ordere
 			Hidden:    hiddenIDs[id],
 		})
 	}
-	return s.channelOrder.ReplaceAll(ctx, userID, entries)
+	return c.channelOrder.ReplaceAll(ctx, userID, entries)
 }
 
 // SetChannelVisibility flips a single channel's hidden state for
@@ -429,15 +528,15 @@ func (s *Service) ReplaceChannelOrder(ctx context.Context, userID string, ordere
 // an override yet, we insert with position = current admin Number
 // so the visible order is unchanged. When they un-hide an existing
 // override, we keep their position and just flip the flag.
-func (s *Service) SetChannelVisibility(ctx context.Context, userID, channelID string, hidden bool) error {
-	if s.channelOrder == nil {
+func (c *ChannelOrderOps) SetChannelVisibility(ctx context.Context, userID, channelID string, hidden bool) error {
+	if c.channelOrder == nil {
 		return fmt.Errorf("channel order repo not wired")
 	}
-	ch, err := s.channels.GetByID(ctx, channelID)
+	ch, err := c.channels.GetByID(ctx, channelID)
 	if err != nil {
 		return fmt.Errorf("get channel: %w", err)
 	}
-	overrides, err := s.channelOrder.List(ctx, userID)
+	overrides, err := c.channelOrder.List(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("list overrides: %w", err)
 	}
@@ -448,17 +547,17 @@ func (s *Service) SetChannelVisibility(ctx context.Context, userID, channelID st
 			break
 		}
 	}
-	return s.channelOrder.Upsert(ctx, userID, channelID, position, hidden)
+	return c.channelOrder.Upsert(ctx, userID, channelID, position, hidden)
 }
 
 // ResetChannelOrder wipes every override the user has, restoring
 // the admin's default order and visibility. The personalisation
 // panel's "Restore admin order" button calls this.
-func (s *Service) ResetChannelOrder(ctx context.Context, userID string) error {
-	if s.channelOrder == nil {
+func (c *ChannelOrderOps) ResetChannelOrder(ctx context.Context, userID string) error {
+	if c.channelOrder == nil {
 		return nil
 	}
-	return s.channelOrder.Reset(ctx, userID)
+	return c.channelOrder.Reset(ctx, userID)
 }
 
 // ── Channel logo overrides ─────────────────────────────────────────
@@ -472,18 +571,18 @@ func (s *Service) ResetChannelOrder(ctx context.Context, userID string) error {
 // para el canal. El stream_url se resuelve desde la row de channels en
 // el momento de la escritura — si el M3U se ha refrescado entre dos
 // llamadas el nuevo stream_url cuenta a partir de ese instante.
-func (s *Service) SetChannelLogoURL(ctx context.Context, channelID, logoURL string) error {
-	if s.logoOverrides == nil {
+func (c *ChannelOrderOps) SetChannelLogoURL(ctx context.Context, channelID, logoURL string) error {
+	if c.logoOverrides == nil {
 		return fmt.Errorf("iptv: channel logo overrides repository not wired")
 	}
 	if logoURL == "" {
 		return fmt.Errorf("iptv: logo_url required (use ClearChannelLogo to remove)")
 	}
-	ch, err := s.GetChannel(ctx, channelID)
+	ch, err := c.channels.GetByID(ctx, channelID)
 	if err != nil {
 		return err
 	}
-	return s.logoOverrides.UpsertURL(ctx, ch.LibraryID, ch.StreamURL, logoURL)
+	return c.logoOverrides.UpsertURL(ctx, ch.LibraryID, ch.StreamURL, logoURL)
 }
 
 // SetChannelLogoFile guarda un override de archivo subido para el
@@ -491,18 +590,18 @@ func (s *Service) SetChannelLogoURL(ctx context.Context, channelID, logoURL stri
 // handler que orquesta la subida puede borrar el archivo viejo del
 // disco sin tener que hacer un Get aparte. Devuelve "" cuando no había
 // override previo o el previo era una URL.
-func (s *Service) SetChannelLogoFile(ctx context.Context, channelID, basename string) (previousFile string, err error) {
-	if s.logoOverrides == nil {
+func (c *ChannelOrderOps) SetChannelLogoFile(ctx context.Context, channelID, basename string) (previousFile string, err error) {
+	if c.logoOverrides == nil {
 		return "", fmt.Errorf("iptv: channel logo overrides repository not wired")
 	}
 	if basename == "" {
 		return "", fmt.Errorf("iptv: file basename required")
 	}
-	ch, err := s.GetChannel(ctx, channelID)
+	ch, err := c.channels.GetByID(ctx, channelID)
 	if err != nil {
 		return "", err
 	}
-	prev, err := s.logoOverrides.Get(ctx, ch.LibraryID, ch.StreamURL)
+	prev, err := c.logoOverrides.Get(ctx, ch.LibraryID, ch.StreamURL)
 	if err != nil {
 		return "", err
 	}
@@ -510,7 +609,7 @@ func (s *Service) SetChannelLogoFile(ctx context.Context, channelID, basename st
 	if prev != nil {
 		previousFile = prev.LogoFile
 	}
-	if err := s.logoOverrides.UpsertFile(ctx, ch.LibraryID, ch.StreamURL, basename); err != nil {
+	if err := c.logoOverrides.UpsertFile(ctx, ch.LibraryID, ch.StreamURL, basename); err != nil {
 		return "", err
 	}
 	return previousFile, nil
@@ -520,15 +619,15 @@ func (s *Service) SetChannelLogoFile(ctx context.Context, channelID, basename st
 // listado vuelve a usar el tvg-logo del M3U a partir del siguiente
 // fetch. Devuelve el basename del archivo previo (si lo había) para
 // que el handler borre el archivo huérfano del disco.
-func (s *Service) ClearChannelLogo(ctx context.Context, channelID string) (previousFile string, err error) {
-	if s.logoOverrides == nil {
+func (c *ChannelOrderOps) ClearChannelLogo(ctx context.Context, channelID string) (previousFile string, err error) {
+	if c.logoOverrides == nil {
 		return "", fmt.Errorf("iptv: channel logo overrides repository not wired")
 	}
-	ch, err := s.GetChannel(ctx, channelID)
+	ch, err := c.channels.GetByID(ctx, channelID)
 	if err != nil {
 		return "", err
 	}
-	prev, err := s.logoOverrides.Get(ctx, ch.LibraryID, ch.StreamURL)
+	prev, err := c.logoOverrides.Get(ctx, ch.LibraryID, ch.StreamURL)
 	if err != nil {
 		return "", err
 	}
@@ -536,7 +635,7 @@ func (s *Service) ClearChannelLogo(ctx context.Context, channelID string) (previ
 	if prev != nil {
 		previousFile = prev.LogoFile
 	}
-	if err := s.logoOverrides.Delete(ctx, ch.LibraryID, ch.StreamURL); err != nil {
+	if err := c.logoOverrides.Delete(ctx, ch.LibraryID, ch.StreamURL); err != nil {
 		return "", err
 	}
 	return previousFile, nil
@@ -546,29 +645,15 @@ func (s *Service) ClearChannelLogo(ctx context.Context, channelID string) (previ
 // archivo, o nil si no hay). El handler GET /channels/{id}/logo lo
 // consulta para decidir entre servir desde disco (file) o pasar por el
 // cache remoto (url o M3U).
-func (s *Service) GetChannelLogoOverride(ctx context.Context, channelID string) (*iptvmodel.ChannelLogoOverride, error) {
-	if s.logoOverrides == nil {
+func (c *ChannelOrderOps) GetChannelLogoOverride(ctx context.Context, channelID string) (*iptvmodel.ChannelLogoOverride, error) {
+	if c.logoOverrides == nil {
 		return nil, nil
 	}
-	ch, err := s.GetChannel(ctx, channelID)
+	ch, err := c.channels.GetByID(ctx, channelID)
 	if err != nil {
 		return nil, err
 	}
-	return s.logoOverrides.Get(ctx, ch.LibraryID, ch.StreamURL)
-}
-
-// IPTVOrgRefreshSummary cuenta lo que pasó en una corrida de
-// RefreshLogosFromIPTVOrg. Sirve para que la UI explique por qué un
-// run no actualizó nada (caso muy común: el M3U ya trae todos los
-// logos, o los tvg-id del proveedor no son del estándar iptv-org y
-// no matchean).
-type IPTVOrgRefreshSummary struct {
-	Total            int `json:"total"`
-	AlreadyHaveLogo  int `json:"already_have_logo"`
-	WithoutTvgID     int `json:"without_tvg_id"`
-	SkippedHasOverride int `json:"skipped_has_override"`
-	NotInDatabase    int `json:"not_in_database"`
-	Updated          int `json:"updated"`
+	return c.logoOverrides.Get(ctx, ch.LibraryID, ch.StreamURL)
 }
 
 // RefreshLogosFromIPTVOrg busca logos en la base pública de iptv-org
@@ -586,21 +671,21 @@ type IPTVOrgRefreshSummary struct {
 // "47 canales actualizados", o "0 actualizados porque tus 120 canales
 // ya tienen logo del M3U", o "0 actualizados porque tus tvg-ids no
 // coinciden con los de iptv-org".
-func (s *Service) RefreshLogosFromIPTVOrg(ctx context.Context, libraryID string) (IPTVOrgRefreshSummary, error) {
+func (c *ChannelOrderOps) RefreshLogosFromIPTVOrg(ctx context.Context, libraryID string) (IPTVOrgRefreshSummary, error) {
 	var sum IPTVOrgRefreshSummary
-	if s.iptvOrgLogos == nil {
+	if c.iptvOrgLogos == nil {
 		return sum, fmt.Errorf("iptv: iptv-org lookup not configured")
 	}
-	if s.logoOverrides == nil {
+	if c.logoOverrides == nil {
 		return sum, fmt.Errorf("iptv: logo overrides repository not wired")
 	}
 
-	lookup, err := s.iptvOrgLogos.Load(ctx)
+	lookup, err := c.iptvOrgLogos.Load(ctx)
 	if err != nil {
 		return sum, fmt.Errorf("load iptv-org lookup: %w", err)
 	}
 
-	channels, err := s.GetChannels(ctx, libraryID, false)
+	channels, err := c.listChannels(ctx, libraryID, false)
 	if err != nil {
 		return sum, err
 	}
@@ -608,7 +693,7 @@ func (s *Service) RefreshLogosFromIPTVOrg(ctx context.Context, libraryID string)
 
 	// Bulk-load overrides previos para no tener que consultarlos uno
 	// a uno (sería N+1 contra DB para libraries grandes).
-	existing, err := s.logoOverrides.ListByLibrary(ctx, libraryID)
+	existing, err := c.logoOverrides.ListByLibrary(ctx, libraryID)
 	if err != nil {
 		return sum, fmt.Errorf("load existing logo overrides: %w", err)
 	}
@@ -635,8 +720,8 @@ func (s *Service) RefreshLogosFromIPTVOrg(ctx context.Context, libraryID string)
 			sum.NotInDatabase++
 			continue
 		}
-		if err := s.logoOverrides.UpsertURL(ctx, libraryID, ch.StreamURL, logo); err != nil {
-			s.logger.Warn("iptv-org logo upsert failed",
+		if err := c.logoOverrides.UpsertURL(ctx, libraryID, ch.StreamURL, logo); err != nil {
+			c.logger.Warn("iptv-org logo upsert failed",
 				"library", libraryID, "tvg_id", ch.TvgID, "error", err)
 			continue
 		}
