@@ -30,32 +30,26 @@ var ErrRefreshInProgress = errors.New("refresh already in progress")
 // Service manages IPTV libraries: M3U import, EPG sync, channel
 // operations.
 //
-// Cierre parcial del olor CC del audit 2026-05-14 (god-service de 45
-// métodos en 11 sub-features): Favorites, WatchHistory y Health
-// extraídos como sub-services con su propio estado, embedded por
-// puntero para que method promotion intra-paquete preserve la
-// interfaz `IPTVService` consumer-side. El core (M3U + EPG +
-// Channels + EPGSources + Overrides + ChannelOrder) se queda aquí
-// porque comparte httpClient + mu + refreshes map + bgCtx — son
-// tightly-coupled por el lifecycle de M3U refresh.
+// Cierre del olor CC del audit 2026-05-14 (god-service de 45 métodos
+// en 11 sub-features). En CC fase 1 (PR #390) se extrajeron Favorites,
+// WatchHistory y Health. En CC fase 2 (esta sesión) se extrae
+// ChannelOrderOps — los 16 métodos del bloque "orden / visibilidad /
+// logo" (per-user overlay + library admin curation + logo overrides +
+// iptv-org refresh). Lo que queda en el core son M3U import + EPG
+// sync + EPG sources + channel overrides + el lifecycle de refresh
+// (httpClient + mu + refreshes map + bgCtx) — tightly-coupled.
 type Service struct {
 	*FavoritesOps
 	*WatchHistoryOps
 	*HealthOps
+	*ChannelOrderOps
 
-	channels            *db.ChannelRepository
-	epgPrograms         *db.EPGProgramRepository
-	libraries           *db.LibraryRepository
-	channelOrder        *db.UserChannelOrderRepository
-	libraryChannelOrder *db.LibraryChannelOrderRepository
-	epgSources          *db.LibraryEPGSourceRepository
-	overrides           *db.ChannelOverrideRepository
-	logoOverrides       *db.ChannelLogoOverrideRepository
-	// iptvOrgLogos resuelve tvg-ids contra la base pública iptv-org
-	// para rellenar logos faltantes en bulk. nil-safe: si no se cablea,
-	// el endpoint /iptv-org/refresh-logos devuelve 503.
-	iptvOrgLogos *IPTVOrgLogoLookup
-	logger       *slog.Logger
+	channels    *db.ChannelRepository
+	epgPrograms *db.EPGProgramRepository
+	libraries   *db.LibraryRepository
+	epgSources  *db.LibraryEPGSourceRepository
+	overrides   *db.ChannelOverrideRepository
+	logger      *slog.Logger
 
 	mu        sync.Mutex
 	refreshes map[string]bool // tracks ongoing refreshes by library ID
@@ -132,9 +126,10 @@ func (s *Service) SetEventBus(bus *event.Bus) {
 	s.pub.setBus(bus)
 }
 
-// SetIPTVOrgLogos wires the iptv-org logo lookup post-construction —
-// nil-safe, sin él el endpoint de auto-discovery devuelve 503.
-func (s *Service) SetIPTVOrgLogos(l *IPTVOrgLogoLookup) { s.iptvOrgLogos = l }
+// SetIPTVOrgLogos lo expone ChannelOrderOps vía method promotion —
+// el setter externo `service.SetIPTVOrgLogos(l)` resuelve a
+// `service.ChannelOrderOps.SetIPTVOrgLogos(l)` sin que el facade lo
+// declare.
 
 // SetProberWorker wires the active prober worker. Optional: a service
 // without one still works, it just won't auto-probe channels after an
@@ -169,23 +164,24 @@ func NewService(
 	return &Service{
 		// Sub-services con sus deps específicas. HealthOps comparte el
 		// `pub` con Service así un único SetEventBus muta ambos.
+		// ChannelOrderOps lleva los 4 repos del bloque order/visibility/
+		// logo + el lookup iptv-org (post-construction setter via
+		// method promotion).
 		FavoritesOps:    newFavoritesOps(favorites),
 		WatchHistoryOps: newWatchHistoryOps(channels, watchHistory),
 		HealthOps:       newHealthOps(channels, pub, iptvLogger),
+		ChannelOrderOps: newChannelOrderOps(channels, channelOrder, libraryChannelOrder, logoOverrides, iptvLogger),
 
-		channels:            channels,
-		epgPrograms:         epgPrograms,
-		libraries:           libraries,
-		channelOrder:        channelOrder,
-		libraryChannelOrder: libraryChannelOrder,
-		epgSources:          epgSources,
-		overrides:           overrides,
-		logoOverrides:       logoOverrides,
-		logger:              iptvLogger,
-		refreshes:           make(map[string]bool),
-		pub:                 pub,
-		bgCtx:               bgCtx,
-		bgCancel:            bgCancel,
+		channels:    channels,
+		epgPrograms: epgPrograms,
+		libraries:   libraries,
+		epgSources:  epgSources,
+		overrides:   overrides,
+		logger:      iptvLogger,
+		refreshes:   make(map[string]bool),
+		pub:         pub,
+		bgCtx:       bgCtx,
+		bgCancel:    bgCancel,
 		httpClient: &http.Client{
 			// 5 min ceiling: large M3U providers (e.g. MEGAOTT,
 			// 8k+ channels) can take 1–2 min to stream the full
