@@ -11,23 +11,37 @@ import (
 	"fmt"
 )
 
+// ProgressUpdate agrupa los parámetros de `RecordProgress`. Cierra el
+// olor F14-2-b del audit 2026-05-14 (función de 7 params posicionales,
+// 3 de ellos `string` consecutivos y 2 `int64` consecutivos — fácil
+// de confundir orden en review).
+//
+// `DurationTicks` puede ser 0 en la primera llamada; el upsert
+// preserva un valor previo no-zero, así que una vez que el player
+// aprende la duración del manifest, queda pinned para la vida de la
+// fila.
+//
+// `Completed=true` borra la fila del rail Continue Watching (mismo
+// gate que `user_data.completed=1` local).
+type ProgressUpdate struct {
+	UserID        string
+	PeerID        string
+	RemoteItemID  string
+	PositionTicks int64
+	DurationTicks int64
+	Completed     bool
+}
+
 // RecordProgress writes the user's playback position for a federated
-// item. Validates that (peerID, remoteItemID) names a peer that's
-// actually paired and that the user has at least browsed the
-// catalog -- otherwise we'd accept progress for items the user can't
-// reach, which would surface as ghost rows in Continue Watching.
-//
-// duration_ticks may be 0 on the first call; the upsert preserves a
-// previously-stored non-zero value, so once the player learns
-// duration from the manifest it's pinned for the life of the row.
-//
-// completed=true clears the row from the Continue Watching rail
-// (same gate as local user_data.completed=1).
-func (m *Manager) RecordProgress(ctx context.Context, userID, peerID, remoteItemID string, positionTicks, durationTicks int64, completed bool) error {
-	if userID == "" || peerID == "" || remoteItemID == "" {
+// item. Validates that (PeerID, RemoteItemID) names a peer que está
+// actualmente paired -- de lo contrario aceptaríamos progress para
+// items que el user no puede alcanzar, lo cual aparecería como ghost
+// rows en Continue Watching.
+func (m *Manager) RecordProgress(ctx context.Context, update ProgressUpdate) error {
+	if update.UserID == "" || update.PeerID == "" || update.RemoteItemID == "" {
 		return fmt.Errorf("federation: record progress: missing identifier")
 	}
-	peer, err := m.repo.GetPeerByID(ctx, peerID)
+	peer, err := m.repo.GetPeerByID(ctx, update.PeerID)
 	if err != nil {
 		return fmt.Errorf("federation: record progress: lookup peer: %w", err)
 	}
@@ -41,12 +55,12 @@ func (m *Manager) RecordProgress(ctx context.Context, userID, peerID, remoteItem
 	}
 	now := m.clock.Now()
 	return m.repo.UpsertProgress(ctx, &Progress{
-		UserID:        userID,
-		PeerID:        peerID,
-		RemoteItemID:  remoteItemID,
-		PositionTicks: positionTicks,
-		DurationTicks: durationTicks,
-		Completed:     completed,
+		UserID:        update.UserID,
+		PeerID:        update.PeerID,
+		RemoteItemID:  update.RemoteItemID,
+		PositionTicks: update.PositionTicks,
+		DurationTicks: update.DurationTicks,
+		Completed:     update.Completed,
 		LastPlayedAt:  now,
 		UpdatedAt:     now,
 	})

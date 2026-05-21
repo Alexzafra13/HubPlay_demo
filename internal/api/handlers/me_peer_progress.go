@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"hubplay/internal/auth"
+	"hubplay/internal/federation"
 )
 
 type peerProgressWire struct {
@@ -105,8 +106,14 @@ func (h *MePeersHandler) UpdatePeerItemProgress(w http.ResponseWriter, r *http.R
 		completed = *req.Completed
 	}
 
-	if err := h.mgr.RecordProgress(r.Context(), claims.UserID, peerID, itemID,
-		req.PositionTicks, req.DurationTicks, completed); err != nil {
+	if err := h.mgr.RecordProgress(r.Context(), federation.ProgressUpdate{
+		UserID:        claims.UserID,
+		PeerID:        peerID,
+		RemoteItemID:  itemID,
+		PositionTicks: req.PositionTicks,
+		DurationTicks: req.DurationTicks,
+		Completed:     completed,
+	}); err != nil {
 		h.logger.Error("federation: update peer item progress",
 			"peer_id", peerID, "item_id", itemID, "err", err)
 		respondError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to update progress")
